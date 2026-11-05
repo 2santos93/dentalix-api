@@ -184,13 +184,16 @@ export class ReceivablesController {
   @ApiOperation({
     summary: 'Pacientes con saldo a favor, por sede y moneda',
     description:
-      'Una fila por paciente y moneda, con el saldo a favor que dice su estado de ' +
+      'Una fila por paciente, sede y moneda, con el saldo a favor que dice su estado de ' +
       'cuenta (mismo cálculo: lo abonado de más o en un plan cancelado o rechazado, ' +
-      'ya descontados traspasos y devoluciones; un plan con deuda no lo compensa) y ' +
-      'la antigüedad del abono más antiguo que lo origina, en días civiles de la ' +
-      'sede. La sede de la fila es la de la cartera (la de su deuda). Orden: moneda ' +
-      '(código ISO), luego importe descendente, luego paciente. Paginada como la ' +
-      'cartera por antigüedad. Sin datos clínicos. Solo administración y recepción.',
+      'ya descontados traspasos y devoluciones; un plan con deuda no lo compensa; la ' +
+      'suma de las filas de un paciente en una moneda es la del estado de cuenta). La ' +
+      'sede es donde está el dinero: la del plan que lo originó o, sin ella, la del ' +
+      'abono que lo creó, no la de la última cita. `locationId` y las sedes del ' +
+      'miembro filtran por esa sede. Antigüedad: día civil del abono que originó el ' +
+      'saldo, en la zona de su sede. Orden: moneda (código ISO), importe descendente, ' +
+      'paciente. Paginada por desplazamiento como la cartera por antigüedad. Sin ' +
+      'datos clínicos. Solo administración y recepción.',
   })
   @ApiHeader(LOCATION_HEADER)
   @ApiOkResponse({ type: CreditBalancesPageDto })

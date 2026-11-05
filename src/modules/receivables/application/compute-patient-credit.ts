@@ -5,7 +5,7 @@ import {
 } from '../../account-statement/application/compute-account-statement';
 import { roundToDigits } from '../../../shared/money/line-rounding';
 import { fromCents, toCents } from '../domain/aging';
-import type { PatientCreditCurrency } from '../domain/entities/credit-balances.entity';
+import type { PlanCredit } from '../domain/entities/credit-balances.entity';
 import type { PatientLedger } from '../domain/entities/receivables.entity';
 
 export interface ComputePatientCreditOptions {
@@ -25,13 +25,13 @@ export interface ComputePatientCreditOptions {
  * `-balance` cuando es negativo (abonado de más, o plan cancelado/rechazado
  * con abonos, descontados traspasos y devoluciones). Es la misma cifra que
  * `planCreditCents` (DX-253) pone como tope de un traspaso o una devolución.
- * Por moneda del plan es la suma de sus planes; un plan con deuda NO lo
- * compensa (el traspaso a ese plan es justo para lo que sirve el saldo).
+ * Devuelve una línea por plan (la sede se atribuye por plan); por moneda es la
+ * suma de sus líneas. Un plan con deuda NO lo compensa (el traspaso a ese plan es justo para lo que sirve el saldo).
  */
 export function computePatientCredit(
   ledger: PatientLedger,
   options: ComputePatientCreditOptions,
-): PatientCreditCurrency[] {
+): PlanCredit[] {
   const balances = computeBalances(
     {
       plans: ledger.plans,
@@ -43,26 +43,24 @@ export function computePatientCredit(
     options.planBalances,
     options.roundingDigitsOf,
   );
-  const byCurrency = new Map<string, PatientCreditCurrency>();
+  const credits: PlanCredit[] = [];
   for (const line of balances.plans) {
     const balanceCents = toCents(line.balance);
     if (balanceCents >= 0) continue;
-    const entry = byCurrency.get(line.currency) ?? {
+    // B4: lo que la moneda no tiene (¥0,13 tras convertir) no es saldo.
+    if (
+      roundToDigits(
+        fromCents(-balanceCents),
+        options.roundingDigitsOf?.(line.currency) ?? 2,
+      ) <= 0
+    ) {
+      continue;
+    }
+    credits.push({
+      planId: line.id,
       currency: line.currency,
-      creditCents: 0,
-      planIds: [],
-    };
-    entry.creditCents -= balanceCents;
-    entry.planIds.push(line.id);
-    byCurrency.set(line.currency, entry);
+      creditCents: -balanceCents,
+    });
   }
-  return [...byCurrency.values()]
-    .filter(
-      (c) =>
-        roundToDigits(
-          fromCents(c.creditCents),
-          options.roundingDigitsOf?.(c.currency) ?? 2,
-        ) > 0,
-    )
-    .sort((a, b) => a.currency.localeCompare(b.currency));
+  return credits;
 }

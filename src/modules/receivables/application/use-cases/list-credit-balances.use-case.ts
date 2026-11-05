@@ -22,6 +22,10 @@ import {
 } from '../../../../shared/money/currency-digits';
 import { ledgerPlanBalanceInputs } from '../ledger-plan-balances';
 import { computePatientCredit } from '../compute-patient-credit';
+import { originOfPlanCredit } from '../credit-origin';
+import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
+import { toCents } from '../../../../shared/money/money';
+import type { PatientLedger } from '../../domain/entities/receivables.entity';
 import {
   RECEIVABLES_CLOCK,
   UNKNOWN_LOCATION_MESSAGE,
@@ -57,10 +61,12 @@ export interface CreditBalancesPage {
 
 interface ScopedRow {
   patientId: string;
+  /** Sede a la que se atribuye este saldo (la de sus planes); `null` = sin sede. */
   locationId: string | null;
   currency: string;
   cents: number;
-  planIds: string[];
+  /** El abono más antiguo (entre los orígenes de los planes de la fila) y su sede. */
+  since: { paidAt: Date; locationId: string } | null;
 }
 
 function wholeOrDefault(
@@ -72,23 +78,27 @@ function wholeOrDefault(
   return Math.max(min, Math.floor(value));
 }
 
-/** Moneda; luego más importe primero; luego el paciente (orden total y estable). */
+/** Moneda; luego más importe primero; luego paciente y sede (orden total y estable). */
 function byCurrencyThenAmount(a: ScopedRow, b: ScopedRow): number {
   return (
     a.currency.localeCompare(b.currency) ||
     b.cents - a.cents ||
-    a.patientId.localeCompare(b.patientId)
+    a.patientId.localeCompare(b.patientId) ||
+    (a.locationId ?? '').localeCompare(b.locationId ?? '')
   );
 }
 
 /**
- * Saldo a favor por paciente (DX-430), la segunda mitad de DX-253: a quién
- * le debe dinero la clínica, para aplicárselo a un plan o devolvérselo. Lee el
- * resumen de la cartera (`patient_ledgers`) de quienes pueden tenerlo, calcula
- * cada saldo con el MISMO núcleo que el estado de cuenta (`computeBalances`, ver
- * `computePatientCredit`: ninguna fórmula propia) y solo pide nombres y fechas
- * de la página. Filtra, ordena y pagina en memoria (los totales necesitan todas
- * las filas), como la cartera por antigüedad.
+ * Saldo a favor por paciente, sede y moneda (DX-430), la segunda mitad de
+ * DX-253: a quién le debe dinero la clínica y dónde está ese dinero, para
+ * aplicárselo a un plan o devolvérselo. Lee el resumen de la cartera
+ * (`patient_ledgers`) de quienes pueden tenerlo, calcula cada saldo por plan
+ * con el MISMO núcleo que el estado de cuenta (`computeBalances`, ver
+ * `computePatientCredit`: ninguna fórmula propia) y lo atribuye a la sede de
+ * su plan o, sin ella, a la del abono que lo originó (`originOfPlanCredit`).
+ * Un paciente con saldo en dos sedes sale en dos filas; la suma de sus filas
+ * por moneda es la del estado de cuenta. Filtra, ordena y pagina en memoria
+ * (los totales necesitan todas las filas), como la cartera por antigüedad.
  */
 @Injectable()
 export class ListCreditBalancesUseCase {
@@ -111,7 +121,7 @@ export class ListCreditBalancesUseCase {
       throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);
     }
     const [ledgers, zoneOf, locationNames] = await Promise.all([
-      this.repo.loadCreditLedgers({ locationId: location?.id }),
+      this.repo.loadCreditLedgers(),
       this.repo.locationTimeZones(),
       this.repo.locationNames(),
     ]);
@@ -125,24 +135,62 @@ export class ListCreditBalancesUseCase {
     ]);
     const now = this.now();
 
-    const rows: ScopedRow[] = [];
-    for (const ledger of ledgers) {
-      for (const credit of computePatientCredit(ledger, {
-        now,
-        planBalances,
-        roundingDigitsOf,
-      })) {
-        if (input.currency && credit.currency !== input.currency) continue;
-        rows.push({
+    // 1. El saldo de cada plan, con el mismo cálculo del estado de cuenta.
+    const planCredits = ledgers.flatMap((ledger) =>
+      computePatientCredit(ledger, { now, planBalances, roundingDigitsOf })
+        .filter((c) => !input.currency || c.currency === input.currency)
+        .map((credit) => ({
+          ...credit,
           patientId: ledger.patientId,
-          locationId: ledger.locationId,
-          currency: credit.currency,
-          cents: credit.creditCents,
-          planIds: credit.planIds,
-        });
+          billableCents: billableOf(ledger, credit.planId),
+        })),
+    );
+    // 2. De qué sede y de qué abono viene cada uno.
+    const facts = await this.repo.planCreditFacts(
+      planCredits.map((c) => c.planId),
+    );
+    const grouped = new Map<string, ScopedRow>();
+    for (const credit of planCredits) {
+      const origin = originOfPlanCredit(
+        facts.get(credit.planId) ?? {
+          planLocationId: null,
+          ownPayments: [],
+          transferredPayments: [],
+        },
+        credit.billableCents,
+      );
+      const key = `${credit.patientId}|${origin.locationId ?? ''}|${credit.currency}`;
+      const row = grouped.get(key) ?? {
+        patientId: credit.patientId,
+        locationId: origin.locationId,
+        currency: credit.currency,
+        cents: 0,
+        since: null,
+      };
+      row.cents += credit.creditCents;
+      if (
+        origin.payment &&
+        (row.since === null ||
+          origin.payment.paidAt.getTime() < row.since.paidAt.getTime())
+      ) {
+        row.since = {
+          paidAt: origin.payment.paidAt,
+          locationId: origin.payment.locationId,
+        };
       }
+      grouped.set(key, row);
     }
-    rows.sort(byCurrencyThenAmount);
+
+    // 3. Solo las sedes pedidas o permitidas al miembro (DX-089).
+    const allowed = this.repo.allowedLocationIds();
+    const rows = [...grouped.values()]
+      .filter((r) =>
+        location
+          ? r.locationId === location.id
+          : allowed === undefined ||
+            (r.locationId !== null && allowed.includes(r.locationId)),
+      )
+      .sort(byCurrencyThenAmount);
 
     const page = wholeOrDefault(input.page, 1, 1);
     const pageSize = Math.min(
@@ -164,11 +212,7 @@ export class ListCreditBalancesUseCase {
       scope: {
         location: location ? { id: location.id, name: location.name } : null,
       },
-      items: await this.withDetails(pageRows, {
-        now,
-        zoneOf,
-        locationNames,
-      }),
+      items: await this.withDetails(pageRows, { now, zoneOf, locationNames }),
       total: rows.length,
       page,
       pageSize,
@@ -187,25 +231,19 @@ export class ListCreditBalancesUseCase {
     },
   ): Promise<CreditBalanceRow[]> {
     if (rows.length === 0) return [];
-    const [names, oldest] = await Promise.all([
-      this.repo.patientNames([...new Set(rows.map((r) => r.patientId))]),
-      this.repo.oldestCreditPayments([
-        ...new Set(rows.flatMap((r) => r.planIds)),
-      ]),
+    const names = await this.repo.patientNames([
+      ...new Set(rows.map((r) => r.patientId)),
     ]);
     return rows.flatMap((row) => {
       const fullName = names.get(row.patientId);
       // Retirado entre las dos lecturas: no se muestra a medias.
       if (fullName === undefined) return [];
-      const zone = ctx.zoneOf(row.locationId);
-      let first: Date | null = null;
-      for (const planId of row.planIds) {
-        const at = oldest.get(planId);
-        if (at && (first === null || at.getTime() < first.getTime())) {
-          first = at;
-        }
-      }
-      const since = first ? civilDateIn(first, zone) : null;
+      // Fecha en el día civil de la sede DEL ABONO (como el estado de cuenta,
+      // DX-097); los días hasta hoy, contados en la sede de la fila.
+      const since = row.since
+        ? civilDateIn(row.since.paidAt, ctx.zoneOf(row.since.locationId))
+        : null;
+      const today = civilDateIn(ctx.now, ctx.zoneOf(row.locationId));
       return [
         {
           patient: { id: row.patientId, fullName },
@@ -219,20 +257,30 @@ export class ListCreditBalancesUseCase {
           currency: row.currency,
           amount: fromCents(row.cents),
           since,
-          ageDays: since
-            ? Math.max(0, ageInDays(since, civilDateIn(ctx.now, zone)))
-            : null,
+          ageDays: since ? Math.max(0, ageInDays(since, today)) : null,
         },
       ];
     });
   }
 }
 
+/** Lo facturable que cuenta del plan (0 si está cancelado o rechazado). */
+function billableOf(ledger: PatientLedger, planId: string): number {
+  const plan = ledger.plans.find((p) => p.id === planId);
+  return plan && isPlanBillable(plan.status) ? toCents(plan.billable) : 0;
+}
+
 function totalsOf(rows: ScopedRow[]): CreditBalanceTotal[] {
-  const byCurrency = new Map<string, { patients: number; cents: number }>();
+  const byCurrency = new Map<
+    string,
+    { patients: Set<string>; cents: number }
+  >();
   for (const row of rows) {
-    const acc = byCurrency.get(row.currency) ?? { patients: 0, cents: 0 };
-    acc.patients += 1;
+    const acc = byCurrency.get(row.currency) ?? {
+      patients: new Set<string>(),
+      cents: 0,
+    };
+    acc.patients.add(row.patientId);
     acc.cents += row.cents;
     byCurrency.set(row.currency, acc);
   }
@@ -240,7 +288,7 @@ function totalsOf(rows: ScopedRow[]): CreditBalanceTotal[] {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([currency, acc]) => ({
       currency,
-      patients: acc.patients,
+      patients: acc.patients.size,
       amount: fromCents(acc.cents),
     }));
 }

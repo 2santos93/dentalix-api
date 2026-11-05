@@ -9,6 +9,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { NON_BILLABLE_PLAN_STATUSES } from '../../treatment-plans/domain/plan-status-machine';
+import { toCents } from '../../../shared/money/money';
 import { phoneRegionOrNull } from '../../../shared/phone/phone-number';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -20,6 +21,7 @@ import type {
   LedgerPendingPayment,
   PatientLedger,
 } from '../domain/entities/receivables.entity';
+import type { PlanCreditFacts } from '../domain/entities/credit-balances.entity';
 import type { CreditBalancesRepository } from '../domain/ports/credit-balances-repository.port';
 import type {
   LedgersQuery,
@@ -564,18 +566,13 @@ export class PrismaReceivablesRepository
    * o si tiene abonos en otra moneda aún sin base (posición 9): la API los
    * convierte y solo puede SUBIR lo abonado. Es un superconjunto exacto de
    * quien tiene saldo a favor en `computeBalances`; no decide ninguna cifra,
-   * solo evita traer a quien seguro no tiene. Sin índice propio: recorre las
-   * filas de la clínica (o de la sede) por la clave primaria; ver el informe de
-   * DX-430 para el EXPLAIN.
+   * solo evita traer a quien seguro no tiene. Sin filtro de sede (la sede de
+   * un saldo es la de su plan, no la de la cartera del paciente) ni índice
+   * propio: recorre las filas de la clínica por la clave primaria; ver el
+   * informe de DX-430 para el EXPLAIN.
    */
-  async loadCreditLedgers(query: LedgersQuery): Promise<PatientLedger[]> {
+  async loadCreditLedgers(): Promise<PatientLedger[]> {
     const tenantId = this.tenantId();
-    const scopeIds = query.locationId
-      ? [query.locationId]
-      : this.tenantContext.scopeLocationIds();
-    const locationFilter = scopeIds
-      ? Prisma.sql`AND l."locationId" = ANY(${scopeIds}::uuid[])`
-      : Prisma.empty;
     const nonBillable: string[] = [...NON_BILLABLE_PLAN_STATUSES];
 
     const rows = await this.prisma.runWithTenant(
@@ -587,7 +584,6 @@ export class PrismaReceivablesRepository
               ON pa."tenantId" = l."tenantId" AND pa."id" = l."patientId"
              AND pa."deletedAt" IS NULL
            WHERE l."tenantId" = ${tenantId}::uuid
-             ${locationFilter}
              AND EXISTS (
                SELECT 1
                  FROM jsonb_array_elements(l."ledger" -> 'plans') AS p("plan")
@@ -600,6 +596,10 @@ export class PrismaReceivablesRepository
                       ) > 0)`,
     );
     return rows.map(toLedger);
+  }
+
+  allowedLocationIds(): string[] | undefined {
+    return this.tenantContext.scopeLocationIds();
   }
 
   async patientNames(
@@ -631,36 +631,89 @@ export class PrismaReceivablesRepository
   }
 
   /**
-   * DX-430: el abono vivo más antiguo del árbol de cada plan: sus abonos y los
-   * de los planes que le traspasaron saldo (recursivo; `UNION` descarta los
-   * ciclos). Por el índice de abonos por plan.
+   * DX-430: los hechos de cada plan para atribuir su saldo a una sede y
+   * fecharlo (ver `originOfPlanCredit`). Los abonos propios del plan y, solo
+   * si no tiene, los de los planes que le traspasaron saldo (CTE recursivo;
+   * `UNION` descarta los ciclos). Por el índice de abonos por plan. Lo
+   * abonado en otra moneda cuenta por su base en la moneda del plan (DX-051);
+   * sin base, `planCents` es null.
    */
-  async oldestCreditPayments(
+  async planCreditFacts(
     planIds: readonly string[],
-  ): Promise<Map<string, Date>> {
+  ): Promise<Map<string, PlanCreditFacts>> {
     const tenantId = this.tenantId();
     const ids = [...new Set(planIds)];
-    if (ids.length === 0) return new Map();
-    const rows = await this.prisma.runWithTenant(
-      (tx) =>
-        tx.$queryRaw<{ planId: string; paidAt: Date }[]>`
-          WITH RECURSIVE src("planId", "rootId") AS (
-            SELECT x, x FROM unnest(${ids}::uuid[]) AS u(x)
-            UNION
-            SELECT t."sourcePlanId", s."rootId"
-              FROM src s
-              JOIN "patient_credit_transfers" t
-                ON t."tenantId" = ${tenantId}::uuid
-               AND t."targetPlanId" = s."planId"
-          )
-          SELECT s."rootId" AS "planId", pg_catalog.min(p."paidAt") AS "paidAt"
+    const out = new Map<string, PlanCreditFacts>();
+    if (ids.length === 0) return out;
+    const { plans, payments } = await this.prisma.runWithTenant(async (tx) => {
+      const plans = await tx.$queryRaw<
+        { id: string; locationId: string | null }[]
+      >`
+        SELECT tp."id",
+               COALESCE(tp."acceptedLocationId", tp."presentedLocationId")
+                 AS "locationId"
+          FROM "treatment_plans" tp
+         WHERE tp."tenantId" = ${tenantId}::uuid
+           AND tp."id" = ANY(${ids}::uuid[])`;
+      const payments = await tx.$queryRaw<
+        {
+          planId: string;
+          depth: number;
+          paidAt: Date;
+          locationId: string;
+          planAmount: number | null;
+        }[]
+      >`
+        WITH RECURSIVE src("planId", "rootId", "depth") AS (
+          SELECT x, x, 0 FROM unnest(${ids}::uuid[]) AS u(x)
+          UNION
+          SELECT t."sourcePlanId", s."rootId", s."depth" + 1
             FROM src s
-            JOIN "payments" p
-              ON p."tenantId" = ${tenantId}::uuid
-             AND p."treatmentPlanId" = s."planId"
-             AND p."deletedAt" IS NULL
-           GROUP BY s."rootId"`,
-    );
-    return new Map(rows.map((r) => [r.planId, r.paidAt]));
+            JOIN "patient_credit_transfers" t
+              ON t."tenantId" = ${tenantId}::uuid
+             AND t."targetPlanId" = s."planId"
+        )
+        SELECT s."rootId" AS "planId", s."depth", p."paidAt", p."locationId",
+               (CASE WHEN p."currency" = rp."currency" THEN p."amount"
+                     ELSE b."amount" END)::float8 AS "planAmount"
+          FROM src s
+          JOIN "treatment_plans" rp
+            ON rp."tenantId" = ${tenantId}::uuid AND rp."id" = s."rootId"
+          JOIN "payments" p
+            ON p."tenantId" = ${tenantId}::uuid
+           AND p."treatmentPlanId" = s."planId"
+           AND p."deletedAt" IS NULL
+          LEFT JOIN "payment_plan_amounts" b
+            ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+           AND b."currency" = rp."currency"
+         ORDER BY s."rootId", s."depth", p."paidAt", p."id"`;
+      return { plans, payments };
+    });
+    for (const p of plans) {
+      out.set(p.id, {
+        planLocationId: p.locationId,
+        ownPayments: [],
+        transferredPayments: [],
+      });
+    }
+    for (const row of payments) {
+      const facts = out.get(row.planId);
+      if (!facts) continue;
+      const payment = {
+        paidAt: row.paidAt,
+        locationId: row.locationId,
+        planCents: row.planAmount === null ? null : toCents(row.planAmount),
+      };
+      (row.depth === 0 ? facts.ownPayments : facts.transferredPayments).push(
+        payment,
+      );
+    }
+    // Sin abonos propios, el más antiguo de los traspasados primero.
+    for (const facts of out.values()) {
+      facts.transferredPayments.sort(
+        (a, b) => a.paidAt.getTime() - b.paidAt.getTime(),
+      );
+    }
+    return out;
   }
 }

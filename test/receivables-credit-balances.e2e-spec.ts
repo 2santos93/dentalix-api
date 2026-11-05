@@ -70,6 +70,7 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
   let dentistToken: string;
   let assistantToken: string;
   let norteOnlyToken: string;
+  let principalOnlyToken: string;
   const names = new Map<string, string>();
   const patients: Record<string, string> = {};
   let appointmentSeq = 0;
@@ -166,6 +167,7 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
     paidAt: string,
     locationId = principal,
     currency = 'VES',
+    extra: Partial<Prisma.PaymentUncheckedCreateInput> = {},
   ): Promise<string> {
     const at = new Date(paidAt);
     return (
@@ -179,6 +181,7 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
           currency,
           paidAt: at,
           method: 'CASH',
+          ...extra,
         },
         select: { id: true },
       })
@@ -222,7 +225,8 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
     headers: Record<string, string> = {},
   ): Promise<Row[]> =>
     (await list(clinic, token, '?pageSize=100', headers)).items;
-  const keyOf = (r: Row) => `${r.patient.id}:${r.currency}`;
+  const keyOf = (r: Row) =>
+    `${r.patient.id}:${r.currency}:${r.location?.id ?? ''}`;
 
   beforeAll(async () => {
     app = await createE2eApp({
@@ -272,30 +276,37 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
       if (role === ClinicRole.DENTIST) dentistToken = token;
       if (role === ClinicRole.ASSISTANT) assistantToken = token;
     }
-    // DX-089: una recepcionista restringida a Sede Norte.
-    const restricted = await raw.user.create({
-      data: {
-        email: 'norte@dx430-a.test',
-        passwordHash: await new PasswordService().hash(SEEDED_PASSWORD),
-        fullName: 'Recepción Norte',
-        emailVerifiedAt: new Date(),
-      },
-      select: { id: true },
-    });
-    await raw.clinicMembership.create({
-      data: {
-        tenantId: a.tenantId,
-        userId: restricted.id,
-        role: ClinicRole.RECEPTION,
-      },
-    });
-    await request(server())
-      .put(`/api/v1/staff/${restricted.id}/locations`)
-      .set('X-Tenant-Host', a.host)
-      .set('Authorization', `Bearer ${a.adminToken}`)
-      .send({ locationIds: [norte] })
-      .expect(200);
-    norteOnlyToken = await loginAs(app, a.host, 'norte@dx430-a.test');
+    // DX-089: dos recepcionistas, cada una restringida a UNA sede.
+    const restrictedTo = async (email: string, locationId: string) => {
+      const user = await raw.user.create({
+        data: {
+          email,
+          passwordHash: await new PasswordService().hash(SEEDED_PASSWORD),
+          fullName: email,
+          emailVerifiedAt: new Date(),
+        },
+        select: { id: true },
+      });
+      await raw.clinicMembership.create({
+        data: {
+          tenantId: a.tenantId,
+          userId: user.id,
+          role: ClinicRole.RECEPTION,
+        },
+      });
+      await request(server())
+        .put(`/api/v1/staff/${user.id}/locations`)
+        .set('X-Tenant-Host', a.host)
+        .set('Authorization', `Bearer ${a.adminToken}`)
+        .send({ locationIds: [locationId] })
+        .expect(200);
+      return loginAs(app, a.host, email);
+    };
+    norteOnlyToken = await restrictedTo('norte@dx430-a.test', norte);
+    principalOnlyToken = await restrictedTo(
+      'principal@dx430-a.test',
+      principal,
+    );
 
     // 1. Plan vivo pagado de más: VES 30 a favor.
     patients.viva = await patient(a, 'Viva', { locationId: principal });
@@ -472,6 +483,228 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
     );
     await pay(a, nPlan, patients.norte, 60, '2026-10-26T20:00:00.000Z', norte);
 
+    // 12. Cobrado en la Sede A (principal) y última cita en la Sede B (Norte):
+    // el saldo está donde se cobró.
+    patients.cobradoEnA = await patient(a, 'CobradoEnA', { locationId: norte });
+    const ceaPlan = await plan(
+      a,
+      patients.cobradoEnA,
+      500,
+      TreatmentPlanStatus.CANCELLED,
+    );
+    await pay(
+      a,
+      ceaPlan,
+      patients.cobradoEnA,
+      80,
+      '2026-10-02T15:00:00.000Z',
+      principal,
+    );
+
+    // 13. Dos planes cancelados en dos sedes: dos filas (principal 50, Norte 20).
+    patients.dosSedes = await patient(a, 'DosSedes', { locationId: principal });
+    const dsA = await plan(
+      a,
+      patients.dosSedes,
+      100,
+      TreatmentPlanStatus.CANCELLED,
+    );
+    const dsB = await plan(
+      a,
+      patients.dosSedes,
+      100,
+      TreatmentPlanStatus.CANCELLED,
+    );
+    await pay(
+      a,
+      dsA,
+      patients.dosSedes,
+      50,
+      '2026-09-10T15:00:00.000Z',
+      principal,
+    );
+    await pay(a, dsB, patients.dosSedes, 20, '2026-09-11T15:00:00.000Z', norte);
+
+    // 14. Plan USD 100 pagado con VES 5.400 cuya BASE es USD 120 (DX-051): USD 20 a favor.
+    patients.conBase = await patient(a, 'ConBase', { locationId: principal });
+    const cbPlan = await plan(
+      a,
+      patients.conBase,
+      100,
+      TreatmentPlanStatus.ACCEPTED,
+      'USD',
+    );
+    const cbPay = await pay(
+      a,
+      cbPlan,
+      patients.conBase,
+      5400,
+      '2026-10-03T15:00:00.000Z',
+      principal,
+      'VES',
+    );
+    await raw.paymentPlanAmount.create({
+      data: {
+        tenantId: a.tenantId,
+        paymentId: cbPay,
+        treatmentPlanId: cbPlan,
+        currency: 'USD',
+        amount: 120,
+        rateDate: new Date('2026-10-03'),
+      },
+    });
+
+    // 15. Plan USD 100 pagado con VES 5.400 con la tasa CONGELADA (36 Bs por USD)
+    // y sin base: 5.400 / 36 = USD 150, USD 50 a favor.
+    patients.tasaCongelada = await patient(a, 'TasaCongelada', {
+      locationId: principal,
+    });
+    const tcPlan = await plan(
+      a,
+      patients.tasaCongelada,
+      100,
+      TreatmentPlanStatus.ACCEPTED,
+      'USD',
+    );
+    await pay(
+      a,
+      tcPlan,
+      patients.tasaCongelada,
+      5400,
+      '2026-10-04T15:00:00.000Z',
+      principal,
+      'VES',
+      {
+        exchangeRateCurrency: 'USD',
+        exchangeRateFrom: 36,
+        exchangeRateTo: 1,
+        exchangeRateSource: 'MANUAL',
+        exchangeRateDate: new Date('2026-10-04'),
+      },
+    );
+
+    // 16. Un abono en VES «sin tasa» (sin base ni tasa) NO cuenta, ni en la lista
+    // ni en el estado de cuenta: USD 130 pagados en USD sobre USD 100 = USD 30.
+    patients.sinTasa = await patient(a, 'SinTasa', { locationId: principal });
+    const stPlan = await plan(
+      a,
+      patients.sinTasa,
+      100,
+      TreatmentPlanStatus.ACCEPTED,
+      'USD',
+    );
+    await pay(
+      a,
+      stPlan,
+      patients.sinTasa,
+      130,
+      '2026-10-05T15:00:00.000Z',
+      principal,
+      'USD',
+    );
+    await pay(
+      a,
+      stPlan,
+      patients.sinTasa,
+      5400,
+      '2026-10-06T15:00:00.000Z',
+      principal,
+      'VES',
+      {
+        exchangeRateCurrency: 'USD',
+      },
+    );
+
+    // 17. Traspaso que deja el DESTINO a favor: origen cancelado con 300 pagados,
+    // destino de 50 que recibe 200 (150 a favor) y origen con 100: 250 en total.
+    patients.traspasoDestino = await patient(a, 'TraspasoDestino', {
+      locationId: principal,
+    });
+    const tdOrigen = await plan(
+      a,
+      patients.traspasoDestino,
+      300,
+      TreatmentPlanStatus.CANCELLED,
+    );
+    const tdDestino = await plan(
+      a,
+      patients.traspasoDestino,
+      50,
+      TreatmentPlanStatus.ACCEPTED,
+    );
+    await pay(
+      a,
+      tdOrigen,
+      patients.traspasoDestino,
+      300,
+      '2026-09-15T15:00:00.000Z',
+      principal,
+    );
+    await transfer(tdOrigen, tdDestino, 200);
+
+    // 18. Un abono ANULADO no cuenta: 200 anulado + 30 vivo = 30 a favor.
+    patients.anulado = await patient(a, 'Anulado', { locationId: principal });
+    const anPlan = await plan(
+      a,
+      patients.anulado,
+      100,
+      TreatmentPlanStatus.CANCELLED,
+    );
+    await pay(
+      a,
+      anPlan,
+      patients.anulado,
+      200,
+      '2026-09-20T15:00:00.000Z',
+      principal,
+      'VES',
+      {
+        deletedAt: new Date('2026-09-21T15:00:00.000Z'),
+        voidedAt: new Date('2026-09-21T15:00:00.000Z'),
+        voidedById: a.adminUserId,
+        voidReason: 'Error de captura',
+      },
+    );
+    await pay(a, anPlan, patients.anulado, 30, '2026-09-22T15:00:00.000Z');
+
+    // 19. Plan vivo pagado en cuotas que acaba pagado de más: la antigüedad es la
+    // del abono que supera lo facturable (el último), no la del primero.
+    patients.cuotas = await patient(a, 'Cuotas', { locationId: principal });
+    const cuPlan = await plan(
+      a,
+      patients.cuotas,
+      100,
+      TreatmentPlanStatus.ACCEPTED,
+      'USD',
+    );
+    await pay(
+      a,
+      cuPlan,
+      patients.cuotas,
+      50,
+      '2026-01-10T15:00:00.000Z',
+      principal,
+      'USD',
+    );
+    await pay(
+      a,
+      cuPlan,
+      patients.cuotas,
+      50,
+      '2026-05-10T15:00:00.000Z',
+      principal,
+      'USD',
+    );
+    await pay(
+      a,
+      cuPlan,
+      patients.cuotas,
+      20,
+      '2026-10-10T15:00:00.000Z',
+      principal,
+      'USD',
+    );
+
     // 11. Clínica B: un paciente con saldo a favor que A nunca ve.
     const sedeB = (
       (await get(b, '/locations').expect(200)).body as { id: string }[]
@@ -523,6 +756,15 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
         'Monedas:VES:360',
         'FavorYDeuda:VES:40',
         'Norteño:VES:60',
+        'CobradoEnA:VES:80',
+        'DosSedes:VES:50',
+        'DosSedes:VES:20',
+        'ConBase:USD:20',
+        'TasaCongelada:USD:50',
+        'SinTasa:USD:30',
+        'TraspasoDestino:VES:250',
+        'Anulado:VES:30',
+        'Cuotas:USD:20',
       ].sort(),
     );
   });
@@ -533,17 +775,27 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
       (x, y) =>
         x.currency.localeCompare(y.currency) ||
         y.amount - x.amount ||
-        x.patient.id.localeCompare(y.patient.id),
+        x.patient.id.localeCompare(y.patient.id) ||
+        (x.location?.id ?? '').localeCompare(y.location?.id ?? ''),
     );
     expect(rows.map(keyOf)).toEqual(sorted.map(keyOf));
-    expect(rows[0]).toMatchObject({ currency: 'USD', amount: 10 });
-    expect(rows[1]).toMatchObject({ currency: 'VES', amount: 360 });
+    expect(rows[0]).toMatchObject({ currency: 'USD', amount: 50 });
+    expect(rows.find((r) => r.currency === 'VES')).toMatchObject({
+      amount: 360,
+    });
   });
 
   it('REGLA DE ORO: cada fila coincide con el saldo a favor del estado de cuenta del mismo paciente', async () => {
     const rows = await allRows(a);
+    // El total por paciente y moneda es la suma de sus filas (una por sede).
     const listed = new Map<string, number>();
-    for (const r of rows) listed.set(keyOf(r), r.amount);
+    for (const r of rows) {
+      const key = `${r.patient.id}:${r.currency}`;
+      listed.set(
+        key,
+        Math.round(((listed.get(key) ?? 0) + r.amount) * 100) / 100,
+      );
+    }
     for (const [key, id] of Object.entries(patients)) {
       if (key === 'ajeno') continue;
       const statement = (
@@ -617,6 +869,59 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
     );
   });
 
+  it('la cartera del paciente no decide la sede: cobrado en A y última cita en B, el saldo es de A', async () => {
+    const rows = await allRows(a);
+    const row = rows.find((r) => r.patient.id === patients.cobradoEnA)!;
+    expect(row.location).toEqual({
+      id: principal,
+      name: expect.any(String) as unknown,
+    });
+    // Una recepcionista solo de A lo ve; una solo de B, no.
+    const inPrincipal = await allRows(a, principalOnlyToken);
+    expect(inPrincipal.map((r) => r.patient.id)).toContain(patients.cobradoEnA);
+    const inNorte = await allRows(a, norteOnlyToken);
+    expect(inNorte.map((r) => r.patient.id)).not.toContain(patients.cobradoEnA);
+  });
+
+  it('un paciente con saldo en dos sedes sale en dos filas, una por sede, y el estado de cuenta suma las dos', async () => {
+    const rows = (await allRows(a)).filter(
+      (r) => r.patient.id === patients.dosSedes,
+    );
+    expect(rows.map((r) => [r.location?.id, r.amount]).sort()).toEqual(
+      [
+        [principal, 50],
+        [norte, 20],
+      ].sort(),
+    );
+    const mine = await allRows(a, norteOnlyToken);
+    expect(
+      mine
+        .filter((r) => r.patient.id === patients.dosSedes)
+        .map((r) => r.amount),
+    ).toEqual([20]);
+  });
+
+  it('un traspaso que deja el destino a favor suma origen y destino (250), fechado con el abono del origen', async () => {
+    const rows = (await allRows(a)).filter(
+      (r) => r.patient.id === patients.traspasoDestino,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amount).toBe(250);
+    expect(rows[0].since).toBe(
+      civilDateIn(new Date('2026-09-15T15:00:00.000Z'), principalZone),
+    );
+  });
+
+  it('un plan vivo pagado en cuotas se fecha con el abono que lo dejó a favor, no con el primero', async () => {
+    const row = (await allRows(a)).find(
+      (r) => r.patient.id === patients.cuotas,
+    )!;
+    expect(row.amount).toBe(20);
+    expect(row.since).toBe(
+      civilDateIn(new Date('2026-10-10T15:00:00.000Z'), principalZone),
+    );
+  });
+
   it('pagina como la cartera: páginas sin repetidos que suman la lista completa, y total', async () => {
     const full = await allRows(a);
     const seen: string[] = [];
@@ -629,19 +934,27 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
     expect(seen).toEqual(full.map(keyOf));
     const totals = (await list(a)).totals;
     expect(totals).toEqual([
-      { currency: 'USD', patients: 1, amount: 10 },
-      { currency: 'VES', patients: 8, amount: 1015 },
+      { currency: 'USD', patients: 5, amount: 130 },
+      { currency: 'VES', patients: 12, amount: 1445 },
     ]);
   });
 
   it('filtra por moneda', async () => {
     const res = await list(a, a.adminToken, '?currency=USD');
-    expect(res.items.map(label)).toEqual(['Monedas:USD:10']);
+    expect(res.items.map(label).sort()).toEqual(
+      [
+        'Monedas:USD:10',
+        'ConBase:USD:20',
+        'TasaCongelada:USD:50',
+        'SinTasa:USD:30',
+        'Cuotas:USD:20',
+      ].sort(),
+    );
     await get(a, '/receivables/credit-balances?currency=dólar').expect(400);
   });
 
   it('RECEPTION lo ve; DENTIST y ASSISTANT, 403 en español', async () => {
-    expect((await list(a, receptionToken)).total).toBe(9);
+    expect((await list(a, receptionToken)).total).toBe(18);
     for (const token of [dentistToken, assistantToken]) {
       const res = await get(a, '/receivables/credit-balances', token).expect(
         403,
@@ -654,14 +967,16 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
     const byHeader = await list(a, a.adminToken, '', {
       'X-Location-Id': norte,
     });
-    expect(byHeader.items.map(label)).toEqual(['Norteño:VES:60']);
+    expect(byHeader.items.map(label).sort()).toEqual(
+      ['Norteño:VES:60', 'DosSedes:VES:20'].sort(),
+    );
     expect(byHeader.scope.location).toEqual({ id: norte, name: 'Sede Norte' });
 
     const byParam = await list(a, a.adminToken, `?locationId=${principal}`);
     expect(byParam.items.map((r) => r.patient.id)).not.toContain(
       patients.norte,
     );
-    expect(byParam.total).toBe(8);
+    expect(byParam.total).toBe(16);
 
     await get(
       a,
@@ -671,7 +986,9 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
 
   it('DX-089: un miembro restringido a Sede Norte solo ve la suya y no puede pedir otra', async () => {
     const mine = await list(a, norteOnlyToken);
-    expect(mine.items.map(label)).toEqual(['Norteño:VES:60']);
+    expect(mine.items.map(label).sort()).toEqual(
+      ['Norteño:VES:60', 'DosSedes:VES:20'].sort(),
+    );
     const res = await get(
       a,
       `/receivables/credit-balances?locationId=${principal}`,

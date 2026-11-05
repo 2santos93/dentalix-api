@@ -28,7 +28,7 @@ export class CreditBalanceRowDto {
     type: CreditBalanceLocationDto,
     nullable: true,
     description:
-      'Sede del paciente en la cartera (la de su deuda, igual que la cartera por antigüedad); null = sin sede',
+      'Sede donde está el dinero: la del plan que lo originó (aceptación, si no presentación) o, si el plan no tiene, la del abono que lo creó; no la de la última cita del paciente. null = sin sede',
   })
   location!: CreditBalanceLocationDto | null;
 
@@ -46,7 +46,7 @@ export class CreditBalanceRowDto {
     nullable: true,
     example: '2026-10-19',
     description:
-      'Día civil (zona de la sede) del abono más antiguo que origina el saldo; null si no hay abono fechable',
+      'Día civil, en la zona de la sede del abono, del abono que originó el saldo: el que dejó el plan por encima de lo facturable (en un plan cancelado o rechazado, el primero); con varios planes en la fila, el más antiguo. null si no hay abono fechable',
   })
   since!: string | null;
 
@@ -87,11 +87,14 @@ export class CreditBalancesPageDto {
   @ApiProperty({
     type: [CreditBalanceRowDto],
     description:
-      'Una fila por paciente y moneda, ordenadas por moneda (código ISO) y luego por importe descendente; a igual importe, por paciente',
+      'Una fila por paciente, sede y moneda, ordenadas por moneda (código ISO) y luego por importe descendente; a igual importe, por paciente. La suma de las filas de un paciente en una moneda es su saldo a favor del estado de cuenta',
   })
   items!: CreditBalanceRowDto[];
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'Filas de la lista completa. La paginación es por desplazamiento (page/pageSize) sobre una lista que se recalcula en cada petición: si un saldo cambia entre dos páginas, una fila puede repetirse o saltarse',
+  })
   total!: number;
 
   @ApiProperty()

@@ -10,6 +10,9 @@ import type {
 import type { GetPlanBalanceResult } from '../../payments/application/use-cases/get-plan-balance.use-case';
 import { toCents, fromCents } from '../domain/aging';
 import type { PatientLedger } from '../domain/entities/receivables.entity';
+import { planBalanceWithoutLiveRates } from '../../payments/application/__fixtures__/plan-balance-without-live-rates';
+import type { PlanBalanceInput } from '../../payments/application/use-cases/get-plan-balance.use-case';
+import { ledgerPlanBalanceInputs } from './ledger-plan-balances';
 import { computePatientCredit } from './compute-patient-credit';
 
 const NOW = new Date('2026-11-03T15:00:00.000Z');
@@ -139,7 +142,7 @@ function creditInList(world: World): Record<string, number> {
     now: NOW,
     planBalances: world.planBalances,
   })) {
-    out[c.currency] = fromCents(c.creditCents);
+    out[c.currency] = fromCents(toCents(out[c.currency] ?? 0) + c.creditCents);
   }
   return out;
 }
@@ -235,14 +238,6 @@ describe('computePatientCredit (DX-430)', () => {
       ],
       entries: [],
     },
-    'abono en otra moneda convertido a la del plan': {
-      plans: [plan('a', 'ACCEPTED', 100, 'USD')],
-      payments: [pay('1', 'a', 5400, 'VES')],
-      entries: [],
-      planBalances: new Map([
-        ['a', known({ planCurrency: 'USD', billable: 100, paid: 120 })],
-      ]),
-    },
     'sin planes ni abonos': { plans: [], payments: [], entries: [] },
   };
 
@@ -258,7 +253,7 @@ describe('computePatientCredit (DX-430)', () => {
       worlds['plan vivo justo pagado y otro con deuda: no se compensan'];
     const credit = computePatientCredit(ledgerOf(world), { now: NOW });
     expect(credit).toEqual([
-      { currency: 'USD', creditCents: 6000, planIds: ['a'] },
+      { planId: 'a', currency: 'USD', creditCents: 6000 },
     ]);
   });
 
@@ -297,5 +292,171 @@ describe('computePatientCredit (DX-430)', () => {
         roundingDigitsOf: () => 0,
       }),
     ).toEqual([]);
+  });
+
+  /*
+   * Abonos en otra moneda con el calculador REAL (PlanBalanceCalculator) en los
+   * dos lados: el estado de cuenta le da los abonos vivos con su base o su tasa
+   * congelada; la lista, lo que guarda patient_ledgers (`paidBased`, `pending`).
+   * Las dos cuentas deben dar el mismo saldo a favor.
+   */
+  describe('abonos en otra moneda: la cuenta de la lista = la del estado de cuenta', () => {
+    const calculator = planBalanceWithoutLiveRates();
+    const frozen = {
+      currency: 'USD',
+      fromPerBase: 36,
+      toPerBase: 1,
+      source: 'MANUAL' as const,
+      date: '2026-10-01',
+    };
+    const payment = (id: string, rate: typeof frozen | null) => ({
+      id,
+      amount: 5400,
+      currency: 'VES',
+      paidOn: '2026-10-01',
+      exchangeRateCurrency: 'USD',
+      frozenRate: rate,
+    });
+
+    async function bothSides(opts: {
+      billable: number;
+      ownPaid: number;
+      based: number;
+      statementPayments: ReturnType<typeof payment>[];
+      baseOf: Map<string, number>;
+      pending: ReturnType<typeof payment>[];
+      entries?: number;
+    }) {
+      const entries = opts.entries ?? 0;
+      const planRow = plan('a', 'ACCEPTED', opts.billable, 'USD');
+      // Estado de cuenta: abonos vivos de otra moneda, con base si la hay.
+      const statementInput: PlanBalanceInput = {
+        plan: { id: 'a', status: 'ACCEPTED', currency: 'USD' },
+        items: [],
+        billable: opts.billable,
+        paidKnown: opts.ownPaid,
+        payments: opts.statementPayments,
+        baseOf: opts.baseOf,
+        creditMovements: entries,
+      };
+      const statementBalances = await calculator.computeMany([statementInput]);
+      const statement = computeAccountStatement(
+        {
+          plans: [planRow],
+          payments: [],
+          paymentPlans: [],
+          creditEntries: [],
+        },
+        { today: NOW, planBalances: statementBalances },
+      );
+      const fromStatement = statement.plans.find((p) => p.id === 'a')!.balance;
+
+      // Lista: lo que guarda el resumen.
+      const ledger: PatientLedger = {
+        patientId: 'pat-1',
+        locationId: 'loc-1',
+        plans: [
+          {
+            ...planRow,
+            agingFrom: planRow.createdAt,
+            otherCurrency: {
+              based: opts.based,
+              pending: opts.pending.map((p) => ({
+                id: p.id,
+                currency: p.currency,
+                amount: p.amount,
+                paidAt: new Date('2026-10-01T15:00:00.000Z'),
+                locationId: 'loc-1',
+                exchangeRateCurrency: p.exchangeRateCurrency,
+                frozenRate: p.frozenRate,
+              })),
+            },
+          },
+        ],
+        paid:
+          opts.ownPaid + entries !== 0
+            ? [
+                {
+                  treatmentPlanId: 'a',
+                  currency: 'USD',
+                  amount: fromCents(toCents(opts.ownPaid) - toCents(entries)),
+                },
+              ]
+            : [],
+        paymentPlans: [],
+      };
+      const ledgerBalances = await calculator.computeMany(
+        ledgerPlanBalanceInputs([ledger], () => 'America/Caracas'),
+      );
+      const credit = computePatientCredit(ledger, {
+        now: NOW,
+        planBalances: ledgerBalances,
+      });
+      return { fromStatement, credit };
+    }
+
+    it('abono en VES con base: USD 100 pagados con 5.400 VES cuya base es USD 120 dejan USD 20 a favor en los dos lados', async () => {
+      const p = payment('p1', null);
+      const { fromStatement, credit } = await bothSides({
+        billable: 100,
+        ownPaid: 0,
+        based: 120,
+        statementPayments: [p],
+        baseOf: new Map([['p1', 120]]),
+        pending: [],
+      });
+      expect(fromStatement).toBe(-20);
+      expect(credit).toEqual([
+        { planId: 'a', currency: 'USD', creditCents: 2000 },
+      ]);
+    });
+
+    it('abono en VES sin base y con tasa congelada (5.400 / 36 = USD 150): USD 50 a favor en los dos lados', async () => {
+      const p = payment('p2', frozen);
+      const { fromStatement, credit } = await bothSides({
+        billable: 100,
+        ownPaid: 0,
+        based: 0,
+        statementPayments: [p],
+        baseOf: new Map(),
+        pending: [p],
+      });
+      expect(fromStatement).toBe(-50);
+      expect(credit).toEqual([
+        { planId: 'a', currency: 'USD', creditCents: 5000 },
+      ]);
+    });
+
+    it('abono en VES sin base ni tasa («sin tasa»): no suma, ni a favor en la lista ni en el estado de cuenta', async () => {
+      const p = {
+        ...payment('p3', null),
+        exchangeRateCurrency: 'USD',
+      };
+      const { fromStatement, credit } = await bothSides({
+        billable: 100,
+        ownPaid: 0,
+        based: 0,
+        statementPayments: [p],
+        baseOf: new Map(),
+        pending: [p],
+      });
+      expect(fromStatement).toBe(100);
+      expect(credit).toEqual([]);
+    });
+
+    it('abonado en USD más una base: se suman, igual que el estado de cuenta', async () => {
+      const { fromStatement, credit } = await bothSides({
+        billable: 100,
+        ownPaid: 90,
+        based: 30,
+        statementPayments: [payment('p4', null)],
+        baseOf: new Map([['p4', 30]]),
+        pending: [],
+      });
+      expect(fromStatement).toBe(-20);
+      expect(credit).toEqual([
+        { planId: 'a', currency: 'USD', creditCents: 2000 },
+      ]);
+    });
   });
 });
