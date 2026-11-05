@@ -1,4 +1,8 @@
-import { formatReceiptNumber, legacyReceiptReference } from './receipt-number';
+import {
+  formatReceiptNumber,
+  legacyReceiptReference,
+  receiptNumberOf,
+} from './receipt-number';
 
 describe('número de recibo (DX-136)', () => {
   it('serie de la sede, guion y el número con 6 cifras', () => {
@@ -25,5 +29,14 @@ describe('número de recibo (DX-136)', () => {
     expect(legacyReceiptReference('3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60')).toBe(
       'REC-3f1c2b9e',
     );
+  });
+});
+
+describe('receiptNumberOf (DX-414)', () => {
+  it('da el número visible, o null sin recibo (anterior a la numeración)', () => {
+    expect(receiptNumberOf({ seriesPrefix: 'PRI', number: 7 })).toBe(
+      'PRI-000007',
+    );
+    expect(receiptNumberOf(null)).toBeNull();
   });
 });

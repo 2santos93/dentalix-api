@@ -51,6 +51,12 @@ export interface CashPayment {
   splitId: string | null;
   splitLines: number | null;
   /**
+   * DX-414: número del recibo del abono (el de la línea 1 en un cobro
+   * dividido: todas sus líneas lo comparten); `null` si es anterior a la
+   * numeración.
+   */
+  receiptNumber: string | null;
+  /**
    * DX-516: los ajustes por medio de pago congelados en el abono (vacío sin
    * ajustes) y lo cobrado: importe + impuestos + recargos − descuentos. Sin
    * ajustes, lo cobrado es el importe.

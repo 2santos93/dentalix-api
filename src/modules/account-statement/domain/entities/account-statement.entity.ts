@@ -53,6 +53,8 @@ export interface StatementPaymentRow {
   externalInvoiceNumber?: string | null;
   /** DX-390: el cobro dividido del abono (id de su línea 1), o `null`. */
   splitId?: string | null;
+  /** DX-414: nº del recibo del abono (el de su cobro dividido), o `null`. */
+  receiptNumber?: string | null;
   location: { id: string; name: string };
   /** Quién registró el abono (`null` en abonos antiguos sin autor). */
   createdById: string | null;
@@ -254,6 +256,8 @@ export interface StatementMovement {
    */
   splitId: string | null;
   splitLines: number | null;
+  /** DX-414: nº del recibo del abono; el cobro dividido comparte uno. */
+  receiptNumber: string | null;
   location: { id: string; name: string };
   /** `null` si el abono es contra un saldo migrado (DX-262). */
   treatmentPlanId: string | null;

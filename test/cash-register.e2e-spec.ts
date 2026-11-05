@@ -439,6 +439,8 @@ describe('Caja — GET /payments (e2e)', () => {
       // DX-390: un abono suelto no es de ningún cobro dividido.
       splitId: null,
       splitLines: null,
+      // DX-414: sembrado sin recibo numerado.
+      receiptNumber: null,
       // DX-516: sin ajustes por medio de pago, lo cobrado es el importe.
       adjustments: [],
       collectedAmount: 100000,

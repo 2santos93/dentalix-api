@@ -26,3 +26,12 @@ export function formatReceiptNumber(prefix: string, number: number): string {
 export function legacyReceiptReference(paymentId: string): string {
   return `REC-${paymentId.slice(0, 8)}`;
 }
+
+/** Número visible de un recibo leído de la BD (serie + consecutivo), o `null` sin recibo (anterior a la numeración). */
+export function receiptNumberOf(
+  receipt: { seriesPrefix: string; number: number } | null,
+): string | null {
+  return receipt
+    ? formatReceiptNumber(receipt.seriesPrefix, receipt.number)
+    : null;
+}

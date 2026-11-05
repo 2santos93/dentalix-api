@@ -59,6 +59,7 @@ function fakeRow(
     openingBalance: null,
     splitId: null,
     splitLines: null,
+    receiptNumber: null,
     adjustments: [],
     collectedAmount: overrides.amount ?? 100,
     ...overrides,
