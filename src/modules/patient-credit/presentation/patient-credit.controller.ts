@@ -26,6 +26,7 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
+import { DrainAllocationRebalancesInterceptor } from '../../payments/presentation/drain-allocation-rebalances.interceptor';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import {
   Roles,
@@ -162,6 +163,10 @@ export class PatientCreditController {
     reason: 'CREDIT_TRANSFER',
   })
   @Post('treatment-plans/:id/credit-transfers')
+  // DX-399-ter (N1): tras el COMMIT drena el reparto que el traspaso encola (el
+  // origen de la ruta primero y después el destino), como las rutas de abonos.
+  // Va detrás del `TenantContextInterceptor` de la clase.
+  @UseInterceptors(DrainAllocationRebalancesInterceptor)
   @ApiOperation({
     summary: 'Traspasar saldo a favor de este plan a otro plan vivo',
     description:
