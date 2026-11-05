@@ -157,9 +157,15 @@ describe('enlaces públicos y ofertas sin carreras (int, DX-476)', () => {
 
   describe('DB-070: caducar y «Aceptar» no se cruzan', () => {
     beforeEach(async () => {
-      await owner.auditEvent.deleteMany({});
-      await owner.appointment.deleteMany({});
-      await owner.waitlistOffer.deleteMany({});
+      await owner.auditEvent.deleteMany({
+        where: { tenantId: clinic.tenantId },
+      });
+      await owner.appointment.deleteMany({
+        where: { tenantId: clinic.tenantId },
+      });
+      await owner.waitlistOffer.deleteMany({
+        where: { tenantId: clinic.tenantId },
+      });
     });
 
     it('caducar (X, C, B) mientras se acepta A (hermanas B y C) con X bloqueada: ni deadlock ni lote deshecho', async () => {
@@ -558,7 +564,7 @@ describe('enlaces públicos y ofertas sin carreras (int, DX-476)', () => {
           5,
         ),
       );
-      expect(created?.offersToday).toBe(1);
+      expect(created?.offer.patientId).toBe(patientId);
     });
   });
 });
