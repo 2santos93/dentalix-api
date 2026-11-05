@@ -78,7 +78,11 @@ export class PaymentBaseRetries {
     // DX-413: el convertidor memoiza las tasas leídas al empezar; si un
     // `wake()` ocurre en plena pasada deja de valer y se recarga.
     let convert = this.convertAmount.memoized({ manualBackup: true });
-    for (const candidate of await this.retries.due(limit)) {
+    const candidates = await this.retries.due(limit);
+    // Generación de despertares de la que parte el convertidor: se recarga
+    // una vez por wake, no una por abono fallido.
+    let generation = Math.max(0, ...candidates.map((c) => c.wakeCount));
+    for (const candidate of candidates) {
       let outcome: AttemptOutcome;
       try {
         outcome = await this.attempt(convert, candidate);
@@ -103,12 +107,16 @@ export class PaymentBaseRetries {
         reason: outcome,
         delayMs: paymentBaseRetryDelayMs(attempts),
       });
-      if (!postponed) {
-        // La fila cambió durante el intento (se registró o corrigió una tasa,
-        // o se resolvió por otra vía): no se aplaza, el reintento queda
-        // adelantado para la pasada siguiente, y los siguientes abonos de
-        // esta pasada se cotizan con las tasas actuales.
-        convert = this.convertAmount.memoized({ manualBackup: true });
+      if (!postponed.postponed) {
+        // Se registró o corrigió una tasa durante el intento: no se aplaza,
+        // el reintento queda adelantado para la pasada siguiente. Si el wake
+        // es nuevo respecto al convertidor, se recarga (los siguientes abonos
+        // se cotizan con las tasas actuales); si la fila ya no existe
+        // (`null`) no hay nada que recargar.
+        if (postponed.wakeCount !== null && postponed.wakeCount > generation) {
+          generation = postponed.wakeCount;
+          convert = this.convertAmount.memoized({ manualBackup: true });
+        }
         continue;
       }
       if (outcome === 'NO_RATE') result.withoutRate += 1;

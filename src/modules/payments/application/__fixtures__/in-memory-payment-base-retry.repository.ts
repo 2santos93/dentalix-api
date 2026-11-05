@@ -5,6 +5,7 @@ import type {
   PaymentBaseRetryFailure,
   PaymentBaseRetryRepository,
   PaymentRatePendingDay,
+  PostponeResult,
 } from '../../domain/ports/payment-base-retry-repository.port';
 import { pendingOnDayOf } from '../../domain/payment-rate-pending-day';
 
@@ -84,16 +85,20 @@ export class InMemoryPaymentBaseRetryRepository implements PaymentBaseRetryRepos
   postpone(
     paymentId: string,
     failure: PaymentBaseRetryFailure,
-  ): Promise<boolean> {
+  ): Promise<PostponeResult> {
     const row = this.rows.get(paymentId);
     // DX-413: condicional, como el real.
-    if (!row || row.candidate.wakeCount !== failure.wakeCount) {
-      return Promise.resolve(false);
+    if (!row) return Promise.resolve({ postponed: false, wakeCount: null });
+    if (row.candidate.wakeCount !== failure.wakeCount) {
+      return Promise.resolve({
+        postponed: false,
+        wakeCount: row.candidate.wakeCount,
+      });
     }
     row.candidate.attempts = failure.attempts;
     row.lastReason = failure.reason;
     row.nextAttemptAt = new Date(this.now.getTime() + failure.delayMs);
-    return Promise.resolve(true);
+    return Promise.resolve({ postponed: true, wakeCount: null });
   }
 
   wake(): Promise<number> {

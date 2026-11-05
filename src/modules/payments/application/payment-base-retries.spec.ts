@@ -419,12 +419,48 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
     expect(
       retries.rows.get('first')?.nextAttemptAt.getTime(),
     ).toBeLessThanOrEqual(retries.now.getTime());
-    // Uno al empezar y otro por cada intento que vio el cambio: el memoizado
-    // de la pasada ya no valía.
-    expect(memoizedWith).toHaveLength(3);
+    // Uno al empezar y uno por el wake (no uno por abono).
+    expect(memoizedWith).toHaveLength(2);
     // El segundo se leyó antes del wake: tampoco se aplaza.
     expect(retries.rows.get('second')?.candidate.attempts).toBe(0);
     expect(pass).toEqual({ resolved: 0, withoutRate: 0, failed: 0 });
+  });
+
+  it('DX-413: 50 abonos fallidos tras un solo wake recargan el convertidor una vez', async () => {
+    const { retries, allocations, service, memoizedWith } = setup();
+    for (let i = 0; i < 50; i += 1)
+      retries.add(stuck(`p${String(i).padStart(2, '0')}`));
+    const freezeRate = allocations.freezeRate.bind(allocations);
+    let woke = false;
+    jest
+      .spyOn(allocations, 'freezeRate')
+      .mockImplementation(async (...args) => {
+        if (!woke) {
+          woke = true;
+          await service.wake();
+        }
+        return freezeRate(...args);
+      });
+
+    await service.retryDue(50);
+
+    expect(memoizedWith).toHaveLength(2);
+  });
+
+  it('DX-413: si la fila desapareció durante el intento no se recarga el convertidor', async () => {
+    const { retries, allocations, service, memoizedWith } = setup();
+    retries.add(stuck('gone'));
+    const freezeRate = allocations.freezeRate.bind(allocations);
+    jest
+      .spyOn(allocations, 'freezeRate')
+      .mockImplementation(async (...args) => {
+        retries.rows.delete('gone');
+        return freezeRate(...args);
+      });
+
+    await service.retryDue(50);
+
+    expect(memoizedWith).toHaveLength(1);
   });
 
   it('DX-413: postpone solo aplaza si la fila sigue como se leyó', async () => {
@@ -437,11 +473,17 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
       delayMs: MIN,
     };
     await retries.wake();
-    await expect(retries.postpone('a', failure)).resolves.toBe(false);
+    await expect(retries.postpone('a', failure)).resolves.toEqual({
+      postponed: false,
+      wakeCount: 1,
+    });
     await expect(
       retries.postpone('a', { ...failure, wakeCount: 1 }),
-    ).resolves.toBe(true);
-    await expect(retries.postpone('gone', failure)).resolves.toBe(false);
+    ).resolves.toMatchObject({ postponed: true });
+    await expect(retries.postpone('gone', failure)).resolves.toEqual({
+      postponed: false,
+      wakeCount: null,
+    });
     expect(retries.rows.get('a')?.nextAttemptAt.getTime()).toBe(
       retries.now.getTime() + MIN,
     );

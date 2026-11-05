@@ -14,6 +14,7 @@ import type {
   PaymentBaseRetryFailure,
   PaymentBaseRetryRepository,
   PaymentRatePendingDay,
+  PostponeResult,
 } from '../../domain/ports/payment-base-retry-repository.port';
 import { pendingOnDayOf } from '../../domain/payment-rate-pending-day';
 
@@ -129,14 +130,14 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
   async postpone(
     paymentId: string,
     failure: PaymentBaseRetryFailure,
-  ): Promise<boolean> {
+  ): Promise<PostponeResult> {
     const tenantId = this.requireTenantId();
     // DX-413: condicional. Si `wake()` despertó la fila durante el intento
     // ("wakeCount" cambió), no se pisa: el reintento queda adelantado. Con la
     // fila bloqueada por un wake en curso, Postgres reevalúa el WHERE al
     // soltarse (READ COMMITTED) y tampoco aplaza.
-    const updated = await this.prisma.runWithTenant(
-      (tx) => tx.$executeRaw`
+    return this.prisma.runWithTenant(async (tx) => {
+      const updated = await tx.$executeRaw`
         UPDATE "payment_base_retries"
            SET "attempts" = ${failure.attempts}::int,
                "lastReason" = ${failure.reason}::"PaymentBaseRetryReason",
@@ -144,9 +145,15 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
                "updatedAt" = ${NOW}
          WHERE "tenantId" = ${tenantId}::uuid
            AND "paymentId" = ${paymentId}::uuid
-           AND "wakeCount" = ${failure.wakeCount}::int`,
-    );
-    return updated > 0;
+           AND "wakeCount" = ${failure.wakeCount}::int`;
+      if (updated > 0) return { postponed: true, wakeCount: null };
+      // Otra sentencia (otra instantánea): ve el wake que acaba de confirmarse.
+      const [row] = await tx.$queryRaw<{ wakeCount: number }[]>`
+        SELECT "wakeCount" FROM "payment_base_retries"
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "paymentId" = ${paymentId}::uuid`;
+      return { postponed: false, wakeCount: row?.wakeCount ?? null };
+    });
   }
 
   async wake(): Promise<number> {

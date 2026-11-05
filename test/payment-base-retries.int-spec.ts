@@ -28,6 +28,12 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
+import {
+  gate,
+  settle,
+  transactionId,
+  waitForTransactionWaiters,
+} from './support/postgres-concurrency';
 
 // DX-380 (OPS-045, DB-056), contra Postgres: la lista de reintentos
 // `payment_base_retries` (alta por el trigger diferido, RLS FORCE entre dos
@@ -447,6 +453,51 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
         failed: 0,
       });
       expect(await retryOf(first)).toBeNull();
+    });
+
+    it('un postpone que espera a un wake sin confirmar reevalúa la fila al soltarse y no aplaza (READ COMMITTED)', async () => {
+      const clinic = await manualClinic('blocking');
+      const id = await pay(clinic, 'EUR', DAYS[3]);
+      const [candidate] = await inClinic(clinic, () => retryRepo.due(50));
+      expect(candidate).toMatchObject({ paymentId: id, wakeCount: 0 });
+
+      // El wake de otra conexión: la fila queda bloqueada, sin confirmar.
+      const locked = gate<string>();
+      const commit = gate();
+      const holder = raw.$transaction(async (tx) => {
+        await tx.$executeRaw`
+          UPDATE "payment_base_retries"
+             SET "wakeCount" = "wakeCount" + 1
+           WHERE "paymentId" = ${id}::uuid`;
+        locked.open(await transactionId(tx));
+        await commit.wait;
+      });
+      const xid = await locked.wait;
+
+      const postponing = settle(
+        inClinic(clinic, () =>
+          retryRepo.postpone(id, {
+            attempts: 1,
+            wakeCount: candidate.wakeCount,
+            reason: 'NO_RATE',
+            delayMs: 3_600_000,
+          }),
+        ),
+      );
+      // Avanza solo cuando Postgres dice que el postpone espera el bloqueo.
+      await waitForTransactionWaiters(raw, xid);
+      commit.open();
+      await holder;
+
+      expect(await postponing).toEqual({
+        status: 'fulfilled',
+        value: { postponed: false, wakeCount: 1 },
+      });
+      expect(await retryOf(id)).toMatchObject({
+        attempts: 0,
+        wakeCount: 1,
+        lastReason: null,
+      });
     });
 
     it('sin solapamiento, la espera escalonada sigue igual: aplaza con su backoff y el wake posterior lo adelanta', async () => {

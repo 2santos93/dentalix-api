@@ -40,6 +40,13 @@ export interface PaymentBaseRetryFailure {
   delayMs: number;
 }
 
+/** Resultado de `postpone`: ver el método. */
+export interface PostponeResult {
+  postponed: boolean;
+  /** Despertares actuales de la fila si no se aplazó; `null` si ya no existe. */
+  wakeCount: number | null;
+}
+
 /** Abonos sin base de la clínica desde hace más del umbral. */
 export interface PaymentBaseBacklog {
   count: number;
@@ -98,14 +105,15 @@ export interface PaymentBaseRetryRepository {
   resolve(paymentId: string): Promise<void>;
   /**
    * Intento fallido: lo apunta y lo aplaza `delayMs` desde la hora de la BD,
-   * SOLO si la fila sigue como se leyó (`failure.wakeCount`). Devuelve
-   * `false` si no se aplazó (hubo un `wake()` durante el intento, o la fila ya
-   * no existe): el reintento queda como está, adelantado.
+   * SOLO si la fila sigue como se leyó (`failure.wakeCount`). Si no se
+   * aplazó, el reintento queda como está, adelantado, y `wakeCount` es el
+   * valor ACTUAL de la fila (hubo un `wake()` durante el intento), o `null`
+   * si la fila ya no existe (resuelta o anulada por otra vía).
    */
   postpone(
     paymentId: string,
     failure: PaymentBaseRetryFailure,
-  ): Promise<boolean>;
+  ): Promise<PostponeResult>;
   /**
    * La clínica registró o corrigió una tasa, o cambió de fuente: adelanta a
    * ya los reintentos aplazados y anota el despertar en TODOS los de la
