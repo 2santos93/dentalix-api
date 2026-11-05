@@ -637,6 +637,80 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       ]);
     });
 
+    it('DX-267: una excepción o un horario que dejan citas fuera piden confirmar; la cita no se toca', async () => {
+      const FAR_THU = addDays(THU, 21);
+      const created = await book(sedeB, FAR_THU, '15:00').expect(201);
+      const id = (created.body as Body).id;
+      const override = (body: object) =>
+        as(
+          api().post(`/api/v1/providers/${draX.userId}/schedule-overrides`),
+          clinic.adminToken,
+        ).send({ locationId: sedeB, date: FAR_THU, ...body });
+
+      const denied = await override({ ranges: [] }).expect(409);
+      expect(denied.body).toMatchObject({
+        code: 'SCHEDULE_AFFECTS_APPOINTMENTS',
+        message: expect.stringContaining(
+          'Hay 1 cita fuera de ese horario',
+        ) as string,
+        affectedAppointments: {
+          total: 1,
+          sample: [{ id, locationId: sedeB }],
+        },
+      });
+      // Otra franja que deja la cita dentro no pide nada.
+      await override({
+        ranges: [{ startMinute: H(14), endMinute: H(16) }],
+      }).expect(201);
+      const confirmed = await override({
+        ranges: [],
+        confirmAffected: true,
+      }).expect(201);
+      expect(confirmed.body).toMatchObject({
+        affectedAppointments: { total: 1 },
+      });
+      const after = await as(
+        api().get(`/api/v1/appointments/${id}`),
+        reception.token,
+      ).expect(200);
+      expect(after.body).toMatchObject({
+        status: 'SCHEDULED',
+        start: local(FAR_THU, '15:00'),
+      });
+
+      // El semanal, igual: sin jueves en la sede B la cita de otro jueves queda fuera.
+      const OTHER_THU = addDays(THU, 28);
+      const other = await book(sedeB, OTHER_THU, '15:00').expect(201);
+      const weekly = await as(
+        api().put(`/api/v1/providers/${draX.userId}/schedule`),
+        clinic.adminToken,
+      )
+        .send({
+          locations: [
+            {
+              locationId: sedeB,
+              ranges: [{ weekday: 5, startMinute: H(14), endMinute: H(19) }],
+            },
+          ],
+        })
+        .expect(409);
+      expect(weekly.body).toMatchObject({
+        code: 'SCHEDULE_AFFECTS_APPOINTMENTS',
+      });
+      for (const appointment of [id, (other.body as Body).id]) {
+        await as(
+          api().patch(`/api/v1/appointments/${appointment}`),
+          reception.token,
+        )
+          .send({
+            status: 'CANCELLED',
+            cancelledByKind: 'STAFF_FOR_PATIENT',
+            cancelReasonCode: 'ILLNESS',
+          })
+          .expect(200);
+      }
+    });
+
     it('con «no trabaja» el jueves no devuelve nada; con otro horario, el de la excepción', async () => {
       const off = await as(
         api().post(`/api/v1/providers/${draX.userId}/schedule-overrides`),

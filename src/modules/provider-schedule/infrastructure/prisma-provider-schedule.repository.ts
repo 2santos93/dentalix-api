@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { isLocationAllowed } from '../../../shared/tenancy/location-access';
 import type {
   MinuteRange,
   ProviderOverride,
@@ -9,6 +10,7 @@ import type {
   WeeklyProviderRange,
 } from '../domain/provider-availability';
 import type {
+  AppointmentCheck,
   CivilPeriod,
   OverrideChange,
   ProviderScheduleRepository,
@@ -72,6 +74,45 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
    * (sin solape entre sedes, contra las excepciones) mira lo guardado y
    * escribe en la misma transacción, sin que otro guardado se cuele en medio.
    */
+  /** DX-267: las citas por venir del profesional; lo agendado no cambia. */
+  private async runAppointmentCheck(
+    tx: Prisma.TransactionClient,
+    providerId: string,
+    check: AppointmentCheck | undefined,
+    current: ProviderScheduleSnapshot,
+  ): Promise<void> {
+    if (!check) return;
+    const rows = await tx.appointment.findMany({
+      where: {
+        providerId,
+        deletedAt: null,
+        status: { in: ['SCHEDULED', 'CONFIRMED'] },
+        start: { gte: check.from, ...(check.to ? { lt: check.to } : {}) },
+        ...(check.locationId ? { locationId: check.locationId } : {}),
+      },
+      orderBy: [{ start: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        locationId: true,
+        start: true,
+        end: true,
+        patient: { select: { firstName: true, lastName: true } },
+      },
+    });
+    const allowed = this.tenantContext.getAllowedLocationIds();
+    check.check(
+      rows.map((a) => ({
+        id: a.id,
+        locationId: a.locationId,
+        start: a.start,
+        end: a.end,
+        patientName: `${a.patient.firstName} ${a.patient.lastName}`.trim(),
+        visible: isLocationAllowed(allowed, a.locationId),
+      })),
+      current,
+    );
+  }
+
   private async lockProvider(
     tx: Prisma.TransactionClient,
     providerId: string,
@@ -157,6 +198,12 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
         })
       ).get(input.providerId)!;
       input.validate(current);
+      await this.runAppointmentCheck(
+        tx,
+        input.providerId,
+        input.checkAppointments,
+        current,
+      );
 
       const now = new Date();
       const live = await tx.providerSchedule.findMany({
@@ -234,6 +281,12 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
         })
       ).get(input.providerId)!;
       input.validate(current);
+      await this.runAppointmentCheck(
+        tx,
+        input.providerId,
+        input.checkAppointments,
+        current,
+      );
 
       const date = toDate(input.date);
       const before =
