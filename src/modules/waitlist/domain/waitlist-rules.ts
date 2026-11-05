@@ -2,6 +2,11 @@
 
 export const WAITLIST_DEFAULT_PAGE_SIZE = 20;
 export const WAITLIST_MAX_PAGE_SIZE = 50;
+/** DX-149: tope de página del panel (25.000 entradas con la página máxima). */
+export const WAITLIST_MAX_PAGE = 500;
+export const WAITLIST_PAGE_TOO_HIGH_MESSAGE = `La página no puede pasar de ${WAITLIST_MAX_PAGE}.`;
+/** DX-149: motivo con que se cierran las entradas abiertas al archivar al paciente. */
+export const WAITLIST_PATIENT_ARCHIVED_REASON = 'Paciente archivado';
 export const WAITLIST_PREFERRED_WINDOW_MAX = 80;
 export const WAITLIST_NOTE_MAX = 500;
 export const WAITLIST_DISMISS_REASON_MAX = 200;

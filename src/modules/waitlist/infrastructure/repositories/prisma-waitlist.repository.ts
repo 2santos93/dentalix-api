@@ -74,7 +74,11 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
     const where: Prisma.AppointmentWaitlistEntryWhereInput = {
       status: params.status,
       // Un paciente archivado no se llama: sale de la lista (su entrada queda).
-      patient: { deletedAt: null },
+      // DX-149: al archivarlo se cierran sus OPEN, así que el panel (OPEN, lo
+      // que se consulta a diario) no une con `patients` y usa su índice.
+      ...(params.status === WaitlistStatus.OPEN
+        ? {}
+        : { patient: { deletedAt: null } }),
       ...(params.locationId
         ? { locationId: params.locationId }
         : this.tenantContext.locationScope()),

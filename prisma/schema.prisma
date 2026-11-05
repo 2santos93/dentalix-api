@@ -1617,6 +1617,8 @@ model AppointmentWaitlistEntry {
   // Solo en la migración: Prisma no expresa el WHERE.
   // El panel: OPEN de una sede, por antigüedad. También lado hijo de la FK a la sede.
   @@index([tenantId, locationId, status, createdAt], map: "appointment_waitlist_tenant_location_status_idx")
+  // DX-149: el panel en su orden (prioridad DESC, antigüedad, id), sin ordenar.
+  @@index([tenantId, locationId, status, priority(sort: Desc), createdAt, id], map: "appointment_waitlist_panel_idx")
   @@index([tenantId, patientId])
   @@index([tenantId, resolvedAppointmentId])
   @@index([tenantId, appointmentTypeId])

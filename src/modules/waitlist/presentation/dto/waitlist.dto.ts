@@ -21,8 +21,10 @@ import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentati
 import { CHAIR_ID_INVALID_MESSAGE } from '../../../chairs/domain/chair-rules';
 import {
   WAITLIST_DISMISS_REASON_MAX,
+  WAITLIST_MAX_PAGE,
   WAITLIST_MAX_PAGE_SIZE,
   WAITLIST_NOTE_MAX,
+  WAITLIST_PAGE_TOO_HIGH_MESSAGE,
   WAITLIST_PREFERRED_WINDOW_MAX,
 } from '../../domain/waitlist-rules';
 
@@ -171,6 +173,8 @@ export class ListWaitlistQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  // DX-149: sin tope, una página enorme obliga a saltar miles de filas.
+  @Max(WAITLIST_MAX_PAGE, { message: WAITLIST_PAGE_TOO_HIGH_MESSAGE })
   page?: number;
 
   @ApiPropertyOptional({
