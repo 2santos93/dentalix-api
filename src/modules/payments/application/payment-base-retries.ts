@@ -75,7 +75,9 @@ export class PaymentBaseRetries {
   /** Hasta `limit` reintentos vencidos de la clínica del contexto. */
   async retryDue(limit: number): Promise<RetryPassResult> {
     const result: RetryPassResult = { resolved: 0, withoutRate: 0, failed: 0 };
-    const convert = this.convertAmount.memoized({ manualBackup: true });
+    // DX-413: el convertidor memoiza las tasas leídas al empezar; si un
+    // `wake()` ocurre en plena pasada deja de valer y se recarga.
+    let convert = this.convertAmount.memoized({ manualBackup: true });
     for (const candidate of await this.retries.due(limit)) {
       let outcome: AttemptOutcome;
       try {
@@ -95,11 +97,20 @@ export class PaymentBaseRetries {
         continue;
       }
       const attempts = candidate.attempts + 1;
-      await this.retries.postpone(candidate.paymentId, {
+      const postponed = await this.retries.postpone(candidate.paymentId, {
         attempts,
+        wakeCount: candidate.wakeCount,
         reason: outcome,
         delayMs: paymentBaseRetryDelayMs(attempts),
       });
+      if (!postponed) {
+        // La fila cambió durante el intento (se registró o corrigió una tasa,
+        // o se resolvió por otra vía): no se aplaza, el reintento queda
+        // adelantado para la pasada siguiente, y los siguientes abonos de
+        // esta pasada se cotizan con las tasas actuales.
+        convert = this.convertAmount.memoized({ manualBackup: true });
+        continue;
+      }
       if (outcome === 'NO_RATE') result.withoutRate += 1;
       else result.failed += 1;
     }

@@ -5828,13 +5828,16 @@ enum PaymentBaseRetryReason {
 /// del barrido de cada minuto (selección por "nextAttemptAt"). Una fila por
 /// abono pendiente; la crea el trigger diferido `payments_base_retry_enroll`
 /// al confirmar el alta y la borra el barrido al resolverlo. RLS FORCE por
-/// tenant. Solo SQL: CHECK `payment_base_retries_attempts_check`, funciones
+/// tenant. Solo SQL: CHECK `payment_base_retries_attempts_check` y `payment_base_retries_wake_count_check`, funciones
 /// `dx_payment_base_retry_enroll` y `dx_payment_allocation_sweep_tenants`.
 model PaymentBaseRetry {
   tenantId      String                  @db.Uuid
   paymentId     String                  @db.Uuid
   /// Intentos fallidos del barrido (0 = aún no intentado).
   attempts      Int                     @default(0)
+  /// DX-413: despertares (`wake()`) desde el alta. El barrido aplaza un
+  /// intento solo si la fila sigue con el valor que leyó. CHECK >= 0 solo SQL.
+  wakeCount     Int                     @default(0)
   nextAttemptAt DateTime                @default(dbgenerated("timezone('UTC'::text, now())"))
   lastReason    PaymentBaseRetryReason?
   /// Desde cuándo está pendiente (el alta del abono): el aviso al ADMIN.

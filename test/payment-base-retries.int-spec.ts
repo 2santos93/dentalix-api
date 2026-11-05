@@ -381,6 +381,102 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
     expect(await retryOf(id)).toBeNull();
   });
 
+  describe('DX-413 · una tasa registrada durante la pasada', () => {
+    const manualClinic = async (name: string): Promise<Clinic> => {
+      const clinic = await seedClinic(`${PREFIX}-${name}`);
+      await raw.tenant.update({
+        where: { id: clinic.tenantId },
+        data: {
+          exchangeRateSource: 'MANUAL',
+          manualExchangeRatesSince: new Date(`${DAYS[3]}T00:00:00Z`),
+        },
+      });
+      return clinic;
+    };
+    const registerRate = (clinic: Clinic) =>
+      inClinic(clinic, async () => {
+        await manualRepo.create({
+          date: DAYS[3],
+          currency: 'EUR',
+          rate: 4000,
+          createdById: clinic.userId,
+        });
+        return retries.wake();
+      });
+    /** Hace que el abono `first` se intente antes que el resto. */
+    const makeFirst = (first: string) =>
+      raw.paymentBaseRetry.updateMany({
+        where: { paymentId: first },
+        data: { nextAttemptAt: new Date('2000-01-01T00:00:00Z') },
+      });
+
+    it('el ADMIN registra la tasa en pleno intento: el reintento queda adelantado, el convertidor se recarga y todo se resuelve', async () => {
+      const clinic = await manualClinic('race');
+      const first = await pay(clinic, 'EUR', DAYS[3]);
+      const second = await pay(clinic, 'EUR', DAYS[3]);
+      await makeFirst(first);
+      // Punto de solapamiento exacto, sin esperas: la cotización del primero
+      // ya salió sin tasa y, antes de que el intento termine, la clínica
+      // registra la tasa y despierta los reintentos (otra conexión).
+      const freezeRate = allocationRepo.freezeRate.bind(allocationRepo);
+      const spy = jest
+        .spyOn(allocationRepo, 'freezeRate')
+        .mockImplementationOnce(async (...args) => {
+          await registerRate(clinic);
+          return freezeRate(...args);
+        });
+
+      const pass = await inClinic(clinic, () => retries.retryDue(50));
+      spy.mockRestore();
+
+      // El segundo ya se cotiza con las tasas nuevas (memo invalidada).
+      expect(pass).toEqual({ resolved: 1, withoutRate: 0, failed: 0 });
+      expect(await retryOf(second)).toBeNull();
+      // El primero no se aplazó: sigue vencido, sin intento contado.
+      const row = await raw.paymentBaseRetry.findFirstOrThrow({
+        where: { paymentId: first },
+      });
+      const [{ now }] = await raw.$queryRaw<{ now: Date }[]>`
+        SELECT timezone('UTC', now()) AS "now"`;
+      expect(row.nextAttemptAt.getTime()).toBeLessThanOrEqual(now.getTime());
+      expect(row.attempts).toBe(0);
+      // La pasada siguiente lo resuelve.
+      expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
+        resolved: 1,
+        withoutRate: 0,
+        failed: 0,
+      });
+      expect(await retryOf(first)).toBeNull();
+    });
+
+    it('sin solapamiento, la espera escalonada sigue igual: aplaza con su backoff y el wake posterior lo adelanta', async () => {
+      const clinic = await manualClinic('stagger');
+      const id = await pay(clinic, 'EUR', DAYS[3]);
+
+      expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
+        resolved: 0,
+        withoutRate: 1,
+        failed: 0,
+      });
+      const [{ now }] = await raw.$queryRaw<{ now: Date }[]>`
+        SELECT timezone('UTC', now()) AS "now"`;
+      const waiting = await raw.paymentBaseRetry.findFirstOrThrow({
+        where: { paymentId: id },
+      });
+      expect(waiting).toMatchObject({ attempts: 1, lastReason: 'NO_RATE' });
+      const waitMs = waiting.nextAttemptAt.getTime() - now.getTime();
+      expect(waitMs).toBeGreaterThan(50_000);
+      expect(waitMs).toBeLessThanOrEqual(60_000);
+
+      expect(await registerRate(clinic)).toBe(1);
+      expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
+        resolved: 1,
+        withoutRate: 0,
+        failed: 0,
+      });
+    });
+  });
+
   it('el barrido solo abre transacción en las clínicas con pendientes (100 clínicas, 1 pendiente)', async () => {
     const many = await raw.tenant.createManyAndReturn({
       data: Array.from({ length: 100 }, (_, i) => ({

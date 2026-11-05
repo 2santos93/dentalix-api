@@ -34,6 +34,7 @@ export class InMemoryPaymentBaseRetryRepository implements PaymentBaseRetryRepos
     this.rows.set(candidate.paymentId, {
       candidate: {
         attempts: 0,
+        wakeCount: 0,
         live: true,
         amount: 100,
         currency: 'USD',
@@ -80,19 +81,25 @@ export class InMemoryPaymentBaseRetryRepository implements PaymentBaseRetryRepos
     return Promise.resolve();
   }
 
-  postpone(paymentId: string, failure: PaymentBaseRetryFailure): Promise<void> {
+  postpone(
+    paymentId: string,
+    failure: PaymentBaseRetryFailure,
+  ): Promise<boolean> {
     const row = this.rows.get(paymentId);
-    if (row) {
-      row.candidate.attempts = failure.attempts;
-      row.lastReason = failure.reason;
-      row.nextAttemptAt = new Date(this.now.getTime() + failure.delayMs);
+    // DX-413: condicional, como el real.
+    if (!row || row.candidate.wakeCount !== failure.wakeCount) {
+      return Promise.resolve(false);
     }
-    return Promise.resolve();
+    row.candidate.attempts = failure.attempts;
+    row.lastReason = failure.reason;
+    row.nextAttemptAt = new Date(this.now.getTime() + failure.delayMs);
+    return Promise.resolve(true);
   }
 
   wake(): Promise<number> {
     let woken = 0;
     for (const row of this.rows.values()) {
+      row.candidate.wakeCount += 1;
       if (row.nextAttemptAt.getTime() > this.now.getTime()) {
         row.nextAttemptAt = this.now;
         woken += 1;
