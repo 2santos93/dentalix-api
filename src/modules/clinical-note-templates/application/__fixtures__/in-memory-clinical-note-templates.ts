@@ -19,8 +19,6 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
   readonly rows: ClinicalNoteTemplate[] = [];
   private nextId = 1;
 
-  private nextPromptId = 1;
-
   /** Como el repositorio real: conserva el id de las preguntas que ya eran de la plantilla. */
   private toPrompts(
     templateId: string,
@@ -28,17 +26,25 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
     existing: ClinicalNoteTemplate['prompts'] = [],
   ) {
     const own = new Set(existing.map((p) => p.id));
-    return prompts.map((p, position) => ({
-      id:
-        p.id !== undefined && own.has(p.id)
-          ? p.id
-          : `${templateId}-p${this.nextPromptId++}`,
-      label: p.label,
-      type: p.type,
-      options: [...p.options],
-      defaultValue: p.defaultValue,
-      position,
-    }));
+    const taken = new Set(own);
+    return prompts.map((p, position) => {
+      let id = p.id;
+      if (id === undefined || !own.has(id)) {
+        id = `${templateId}-p${position}`;
+        for (let n = 1; taken.has(id); n++) {
+          id = `${templateId}-p${position}-${n}`;
+        }
+        taken.add(id);
+      }
+      return {
+        id,
+        label: p.label,
+        type: p.type,
+        options: [...p.options],
+        defaultValue: p.defaultValue,
+        position,
+      };
+    });
   }
 
   seed(
