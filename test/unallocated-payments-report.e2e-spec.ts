@@ -910,6 +910,90 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
         ),
       ).toBe(3000);
     });
+    it('DX-399-ter: own surplus, a transfer in, a refund of 30 and a new item: the item is covered, nothing pending, and the statement says the same as the report and Cartera', async () => {
+      const mia = await patient(a, 'Mia');
+      // Plan P: ítem de 70 y abono de 100 -> 30 propios a cuenta.
+      const p = await plan(a, mia, catalogA, [70]);
+      const own = await pay(a, p.planId, 100, '2026-09-10');
+      // Plan Q del mismo paciente con 30 a cuenta, que se traspasan a P.
+      const q = await plan(a, mia, catalogA, [20]);
+      await pay(a, q.planId, 50, '2026-09-10');
+      await call(
+        'post',
+        a,
+        `/treatment-plans/${q.planId}/credit-transfers`,
+        a.adminToken,
+        principal,
+      )
+        .send({ targetPlanId: p.planId, amount: 30, currency: 'USD' })
+        .expect(201);
+      // Se devuelven 30 de P: salen de lo recibido por traspaso.
+      await refund(p.planId, [own], 30);
+      const item = await call('post', a, `/treatment-plans/${p.planId}/items`)
+        .send({ toothNumber: '32', catalogItemId: catalogA, price: 30 })
+        .expect(201);
+      const itemId = (item.body as { id: string }).id;
+      await call('patch', a, `/treatment-plans/${p.planId}/items/${itemId}`)
+        .send({ status: 'ACCEPTED' })
+        .expect(200);
+
+      // Estado de cuenta / pestaña Plan: saldo 0, ningún ítem pendiente, nada sin imputar.
+      const balance = (
+        await call('get', a, `/treatment-plans/${p.planId}/balance`).expect(200)
+      ).body as {
+        balance: number;
+        unallocated: number;
+        items: { itemId: string; balance: number; paid: number }[];
+      };
+      expect(balance.balance).toBe(0);
+      expect(balance.unallocated).toBe(0);
+      expect(balance.items.map((i) => i.balance)).toEqual([0, 0]);
+      expect(balance.items.find((i) => i.itemId === itemId)?.paid).toBe(30);
+      // Ventana «Ver imputación»: el abono no tiene nada atribuido ni a cuenta.
+      const detail = (
+        await call('get', a, `/payments/${own}/allocations`).expect(200)
+      ).body as { unallocated: number; creditOut: number; onAccount: number };
+      expect(detail).toMatchObject({
+        unallocated: 0,
+        creditOut: 0,
+        onAccount: 0,
+      });
+      // Informe y Cartera: 0.
+      const sept = await report(a, 'from=2026-09-01&to=2026-09-30');
+      expect(idsOf(sept)).not.toContain(own);
+      const credit = (
+        await call(
+          'get',
+          a,
+          '/receivables/credit-balances?pageSize=100',
+        ).expect(200)
+      ).body as { items: { patient: { id: string } }[] };
+      expect(credit.items.map((r) => r.patient.id)).not.toContain(mia);
+    });
+
+    it('DX-399-ter: the statement «Sin imputar» is net of the refund, like the report and the payment window', async () => {
+      const nora = await patient(a, 'Nora');
+      const p = await plan(a, nora, catalogA, [100]);
+      const over = await pay(a, p.planId, 130, '2026-09-12');
+      await refund(p.planId, [over], 10);
+      const balance = (
+        await call('get', a, `/treatment-plans/${p.planId}/balance`).expect(200)
+      ).body as { paid: number; allocated: number; unallocated: number };
+      // Cobrado 130 = imputado 100 + a cuenta 20 + devuelto 10.
+      expect(balance).toMatchObject({
+        paid: 130,
+        allocated: 100,
+        unallocated: 20,
+      });
+      const row = (await report(a, 'from=2026-09-01&to=2026-09-30')).items.find(
+        (r) => r.paymentId === over,
+      );
+      expect(row?.unallocated).toBe(20);
+      const detail = (
+        await call('get', a, `/payments/${over}/allocations`).expect(200)
+      ).body as { onAccount: number };
+      expect(detail.onAccount).toBe(20);
+    });
   });
 
   describe('roles, sedes and isolation', () => {

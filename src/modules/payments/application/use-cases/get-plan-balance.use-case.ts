@@ -122,7 +122,12 @@ export interface PlanItemBalance {
 export interface GetPlanBalanceWithItemsResult extends GetPlanBalanceResult {
   /** Σ de las imputaciones de los abonos vivos del plan. */
   allocated: number;
-  /** Σ de los sobrantes de los abonos con base: lo cobrado sin ítem. */
+  /**
+   * Σ de los sobrantes de los abonos con base, NETO de lo devuelto o
+   * traspasado que se les atribuye (DX-399-ter, la regla de `credit-netting`):
+   * lo cobrado sin ítem que sigue a cuenta. La misma cifra que el informe
+   * «Cobrado sin imputar» y la ventana «Ver imputación».
+   */
   unallocated: number;
   /** Abonos vivos sin base (sin tasa o de moneda no soportada). */
   unconvertedPaymentsCount: number;
@@ -214,7 +219,9 @@ export class GetPlanBalanceUseCase {
       };
     });
 
-    let unallocatedCents = 0;
+    // DX-399-ter: neto de lo que ya salió del saldo a favor, por la MISMA
+    // cascada del informe y de la ventana (calculada en la foto del repositorio).
+    let unallocatedCents = -snapshot.creditOutCents;
     for (const base of snapshot.bases) {
       unallocatedCents +=
         toCents(base.amount) - (allocatedByPayment.get(base.paymentId) ?? 0);

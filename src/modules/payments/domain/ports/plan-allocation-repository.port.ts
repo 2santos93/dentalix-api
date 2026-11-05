@@ -83,6 +83,16 @@ export interface PlanBalanceSnapshot {
 }
 
 /**
+ * La foto del saldo con ítems (estado de cuenta y pestaña Plan): la del plan
+ * más lo devuelto o traspasado que la cascada de `credit-netting` atribuye a
+ * sus abonos (DX-399-ter), leído en la MISMA transacción.
+ */
+export interface PlanBalanceItemsSnapshot extends PlanBalanceSnapshot {
+  /** Σ `creditOutCents` de los abonos del plan (céntimos, ≥ 0). */
+  creditOutCents: number;
+}
+
+/**
  * El abono que se va a imputar a mano (spec R10, §5.2): vivo y de esta
  * clínica. `treatmentPlanId` `null` = abono a un saldo migrado (DX-262), sin
  * plan ni base. `base` `null` = aún sin convertir (sin tasa, R15).
@@ -219,7 +229,9 @@ export interface PlanAllocationRepository {
   ): Promise<void>;
 
   /** La foto del plan, o `null` si no existe, está retirado o es de otra clínica. */
-  readPlanBalanceSnapshot(planId: string): Promise<PlanBalanceSnapshot | null>;
+  readPlanBalanceSnapshot(
+    planId: string,
+  ): Promise<PlanBalanceItemsSnapshot | null>;
 
   /**
    * El abono vivo de esta clínica con su plan y su base, o `null` si no

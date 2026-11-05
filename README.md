@@ -5731,7 +5731,7 @@ automática). Ahora:
   qué abonos se aplicará, qué otra tasa falta o que no se usará.
 - **Fuera**: la tasa de respaldo de N días (DX-384).
 
-### Devoluciones y traspasos del saldo a favor en la imputación (DX-399-bis)
+### Devoluciones y traspasos del saldo a favor en la imputación (DX-399-bis, DX-399-ter)
 
 - El disponible de un abono para imputar es su base menos lo imputado y menos lo
   que `payments/domain/credit-netting.ts` (la regla del informe «Cobrado sin
@@ -5755,11 +5755,17 @@ npm run credit-netting:report                      # todas las clínicas
 npm run credit-netting:report -- --tenant <uuid>   # una clínica
 ```
 
-- Limitaciones conocidas (ticket aparte): un traspaso de ENTRADA no absorbe
-  devoluciones (la cascada solo conoce abonos), y el estado de cuenta y la
-  pestaña del plan siguen mostrando «Sin imputar» en bruto (sin descontar lo
-  devuelto). Un plan con traspaso de entrada y luego salida también aparece en
-  el diagnóstico.
+- **Orden de consumo (DX-399-ter).** Cada devolución o traspaso de salida, en
+  orden cronológico, consume solo fuentes registradas antes que él: primero lo
+  que el plan recibió por traspaso (TRANSFER_IN, del más reciente al más
+  antiguo), que no se puede imputar a ítems, y después el excedente de los
+  abonos (del `paidAt` más reciente al más antiguo, el LIFO de DX-399). Así un
+  ítem nuevo no queda pendiente con el saldo del plan en 0. Un plan sin
+  traspasos recibidos da lo de siempre. El diagnóstico tampoco lista lo que
+  absorbió un traspaso recibido.
+- El estado de cuenta y la pestaña del plan (`GET /treatment-plans/:id/balance`,
+  `unallocated`) dan «Sin imputar» NETO, la misma cifra que el informe y la
+  ventana «Ver imputación» (mismo contrato, solo cambia el valor).
 
 ## Despliegue: roles de la BD (DX-113)
 

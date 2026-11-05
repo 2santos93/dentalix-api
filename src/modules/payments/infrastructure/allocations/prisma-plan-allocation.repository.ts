@@ -53,6 +53,7 @@ import type {
   ReplaceAllocationsInput,
   PaymentPendingRate,
   PaymentWithoutBase,
+  PlanBalanceItemsSnapshot,
   PlanBalanceSnapshot,
   PlanAllocationRepository,
   PlanAllocationSnapshot,
@@ -379,10 +380,18 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
 
   async readPlanBalanceSnapshot(
     planId: string,
-  ): Promise<PlanBalanceSnapshot | null> {
+  ): Promise<PlanBalanceItemsSnapshot | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(
-      (tx) => readPlanBalanceSnapshotIn(tx, tenantId, planId),
+      async (tx) => {
+        const snapshot = await readPlanBalanceSnapshotIn(tx, tenantId, planId);
+        if (!snapshot) return null;
+        // DX-399-ter: «Sin imputar» neto. La MISMA cascada del informe y de la
+        // ventana, en la misma foto (RepeatableRead). Un plan que no se cobra
+        // no tiene abonos candidatos: 0, igual que en la ventana.
+        const { totalCents } = await this.planCreditOut(tx, tenantId, planId);
+        return { ...snapshot, creditOutCents: totalCents };
+      },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
   }
@@ -688,14 +697,14 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     tenantId: string,
     planId: string,
   ): Promise<{ byPayment: Map<string, number>; totalCents: number }> {
-    const { facts, entries } = await loadNettingFacts(
+    const netting = await loadNettingFacts(
       tx,
       tenantId,
       Prisma.sql`tp."id" = ${planId}::uuid`,
     );
     const byPayment = new Map<string, number>();
     let totalCents = 0;
-    for (const n of nettedFacts(facts, entries)) {
+    for (const n of nettedFacts(netting)) {
       byPayment.set(n.fact.id, n.net.creditOutCents);
       totalCents += n.net.creditOutCents;
     }

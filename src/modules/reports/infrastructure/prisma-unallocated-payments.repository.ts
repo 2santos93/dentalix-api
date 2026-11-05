@@ -99,7 +99,7 @@ export class PrismaUnallocatedPaymentsRepository implements UnallocatedPaymentsR
   /**
    * El informe en UNA foto (RepeatableRead) y UNA cascada de salidas por
    * petición: se leen los abonos de los planes que tienen algún abono en el
-   * período y las sedes pedidas, se netean con `netUnallocated` (la misma regla
+   * período y las sedes pedidas, se netean con `netCredit` (la misma regla
    * del detalle de un abono) y de ahí salen filas, total y totales.
    */
   async report(
@@ -133,11 +133,7 @@ export class PrismaUnallocatedPaymentsRepository implements UnallocatedPaymentsR
              AND q."deletedAt" IS NULL
              AND q."treatmentPlanId" IS NOT NULL
              AND ${inScope})`;
-        const { facts, entries } = await loadNettingFacts(
-          tx,
-          tenantId,
-          planScope,
-        );
+        const netting = await loadNettingFacts(tx, tenantId, planScope);
         const inRange = (f: NettingFact) =>
           branches.some(
             (b) =>
@@ -145,7 +141,7 @@ export class PrismaUnallocatedPaymentsRepository implements UnallocatedPaymentsR
               f.paidAt >= b.start &&
               f.paidAt < b.end,
           );
-        const listed = nettedFacts(facts, entries)
+        const listed = nettedFacts(netting)
           .filter(({ fact, net }) => net.netCents > 0 && inRange(fact))
           .sort(
             (x, y) =>
