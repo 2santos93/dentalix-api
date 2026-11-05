@@ -770,6 +770,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-316: calendario de la sede (días hábiles y festivos), solo ADMIN, también
   // para leer (spec G1.5 §6, R9).
   'GET /locations/:id/calendar': ADMIN_ONLY,
+  // DX-358: si un día es festivo, para avisar a quien agenda.
+  'GET /locations/:id/holiday': EVERY_ROLE,
   'PUT /locations/:id/calendar/working-weekdays': ADMIN_ONLY,
   'POST /locations/:id/holidays': ADMIN_ONLY,
   'PATCH /locations/:id/holidays/:holidayId': ADMIN_ONLY,
