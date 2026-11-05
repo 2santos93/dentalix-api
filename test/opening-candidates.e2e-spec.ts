@@ -15,6 +15,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { civilDateIn } from '../src/shared/time/civil-day';
 
 // DX-210 en HTTP real: «Ocupar este hueco». Cancelar una cita de 30 min →
 // candidatos del hueco (URGENT antes que NORMAL; ni el de 60 min, ni el de
@@ -28,10 +29,11 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const CARACAS_MS = 5 * 60 * 60 * 1000;
 
 function nextTuesday(): string {
-  let t = Date.now() - CARACAS_MS + 7 * DAY_MS;
+  let t =
+    Date.parse(`${civilDateIn(new Date(), 'America/Caracas')}T00:00:00Z`) +
+    7 * DAY_MS;
   while (new Date(t).getUTCDay() !== 2) t += DAY_MS;
   return new Date(t).toISOString().slice(0, 10);
 }
