@@ -513,10 +513,11 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
       }),
     );
     expect((await rowOf(a, ana))?.ledger.plans[0][6]).toBe(50000);
-    // Un cambio que no toca las entradas (notas) no las descuadra.
+    // Un cambio que no toca las entradas (notas) no las descuadra. SEC-042: el
+    // abono anulado es inmutable en la BD, así que se edita solo a los vigentes.
     await as(a, (tx) =>
       tx.payment.updateMany({
-        where: { treatmentPlanId: planId },
+        where: { treatmentPlanId: planId, deletedAt: null },
         data: { notes: 'revisado' },
       }),
     );
