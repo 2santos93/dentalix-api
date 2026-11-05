@@ -52,6 +52,10 @@ import {
   ResponsiblePartyDto,
   UpdateResponsiblePartyDto,
 } from './dto/responsible-party.dto';
+import {
+  canSeeResponsibleDocNumber,
+  responsiblePartyForRole,
+} from './responsible-party-doc-number.presenter';
 import type { ResponsiblePartyView } from '../domain/ports/responsible-party-repository.port';
 
 const uuidPipe = (what: string) =>
@@ -117,14 +121,29 @@ export class PatientResponsiblePartiesController {
     return (await this.presenter())(party);
   }
 
+  // SEC-044: la lectura devuelve documento, email y teléfono de terceros: queda
+  // en la traza de la ficha (VIEW con el motivo, sin el contenido).
+  @Audit({
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: { param: 'patientId' },
+    patient: { param: 'patientId' },
+    reason: 'RESPONSIBLE_PARTIES',
+  })
   @Get()
   @ApiOperation({
     summary: 'Responsables del paciente y de quién es responsable (DX-203)',
+    description:
+      'SEC-044: DENTIST y ASSISTANT reciben `docNumber` del responsable en ' +
+      'null (contacto y paciente responsable); ADMIN y RECEPTION, completo. ' +
+      'Cada lectura deja un evento de auditoría VIEW (motivo ' +
+      'RESPONSIBLE_PARTIES) en la ficha del paciente.',
   })
   @ApiOkResponse({ type: PatientResponsiblesDto })
   @ApiNotFoundResponse({ description: 'Paciente no encontrado' })
   async list(
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
+    @Req() req: { user: TenantJwtPayload },
   ): Promise<
     Omit<PatientResponsiblesView, 'parties'> & {
       parties: ResponsiblePartyWithPhoneOutput[];
@@ -132,7 +151,12 @@ export class PatientResponsiblePartiesController {
   > {
     const view = await this.listParties.execute(patientId);
     const present = await this.presenter();
-    return { ...view, parties: view.parties.map(present) };
+    return {
+      ...view,
+      parties: view.parties.map((party) =>
+        responsiblePartyForRole(present(party), req.user.role),
+      ),
+    };
   }
 
   @Audit(audit('RESPONSIBLE_PARTY_ADDED'))
@@ -157,8 +181,11 @@ export class PatientResponsiblePartiesController {
     @Body() dto: CreateResponsiblePartyDto,
     @Req() req: { user: TenantJwtPayload },
   ): Promise<ResponsiblePartyWithPhoneOutput> {
-    return this.present(
-      await this.createParty.execute(patientId, dto, req.user.sub),
+    return responsiblePartyForRole(
+      await this.present(
+        await this.createParty.execute(patientId, dto, req.user.sub),
+      ),
+      req.user.role,
     );
   }
 
@@ -173,9 +200,20 @@ export class PatientResponsiblePartiesController {
     @Param('patientId', uuidPipe('del paciente')) patientId: string,
     @Param('partyId', uuidPipe('del responsable')) partyId: string,
     @Body() dto: UpdateResponsiblePartyDto,
+    @Req() req: { user: TenantJwtPayload },
   ): Promise<ResponsiblePartyWithPhoneOutput> {
-    return this.present(
-      await this.updateParty.execute(patientId, partyId, dto),
+    // SEC-044: quien no ve el documento recibe null al leer y lo reenvía al
+    // editar: ese null no es un borrado, se ignora (un valor nuevo sí vale).
+    const input =
+      !canSeeResponsibleDocNumber(req.user.role) && !dto.docNumber
+        ? { ...dto, docNumber: undefined }
+        : dto;
+    // También la respuesta: editar no es un modo de leer el documento.
+    return responsiblePartyForRole(
+      await this.present(
+        await this.updateParty.execute(patientId, partyId, input),
+      ),
+      req.user.role,
     );
   }
 

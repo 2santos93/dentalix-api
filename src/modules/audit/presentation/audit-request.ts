@@ -299,6 +299,23 @@ export function buildAuditDraft(
 }
 
 /**
+ * SEC-044: ids (sin repetir) del pagador y de cada miembro del estado de
+ * cuenta familiar de la respuesta.
+ */
+function familyMemberIds(body: unknown): string[] {
+  if (typeof body !== 'object' || body === null) return [];
+  const b = body as {
+    payer?: { id?: unknown };
+    members?: { patient?: { id?: unknown } }[];
+  };
+  const members = Array.isArray(b.members) ? b.members : [];
+  const ids = [b.payer?.id, ...members.map((m) => m?.patient?.id)].flatMap(
+    (id) => uuidOrNull(id) ?? [],
+  );
+  return [...new Set(ids)];
+}
+
+/**
  * Los eventos de una petición que terminó bien: el de `buildAuditDraft` o,
  * en un cobro dividido (DX-390, `splitPayment`), uno por línea de la
  * respuesta (`payments`), cada uno con su abono y su referencia.
@@ -310,6 +327,20 @@ export function buildAuditDrafts(
   scope: AuditScope,
   resultCount: number | null = null,
 ): AuditEventDraft[] {
+  if (options.familyStatement) {
+    const base = buildAuditDraft(
+      options,
+      req,
+      responseBody,
+      scope,
+      resultCount,
+    );
+    if (!base) return [];
+    const ids = familyMemberIds(responseBody);
+    return ids.length === 0
+      ? [base]
+      : ids.map((id) => ({ ...base, patient: { kind: 'patient', id } }));
+  }
   if (!options.splitPayment) {
     const draft = buildAuditDraft(
       options,

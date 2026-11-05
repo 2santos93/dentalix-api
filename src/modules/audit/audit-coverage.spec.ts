@@ -165,6 +165,14 @@ const EXPECTED: Record<string, AuditOptions> = {
   },
   // DX-203: responsables de pago y avisos, con el motivo y los nombres de los
   // campos (nunca los datos del tercero).
+  // SEC-044: la lectura (documento, email y teléfono de terceros) también.
+  'GET /patients/:patientId/responsible-parties': {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'RESPONSIBLE_PARTIES',
+  },
   'POST /patients/:patientId/responsible-parties': {
     action: 'UPDATE',
     resource: 'PATIENT',
@@ -1000,6 +1008,8 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     patient: P,
     reason: 'FAMILY_ACCOUNT_STATEMENT',
+    // SEC-044: un VIEW por miembro de la familia (pagador y dependientes).
+    familyStatement: true,
   },
   'GET /patients/:patientId/billable-plans': {
     action: 'VIEW',

@@ -511,6 +511,71 @@ describe('buildAuditDrafts (DX-390)', () => {
   });
 });
 
+describe('buildAuditDrafts: estado de cuenta familiar (SEC-044)', () => {
+  const DEP_B = '66666666-6666-4666-8666-666666666666';
+  const DEP_C = '77777777-7777-4777-8777-777777777777';
+  const family: AuditOptions = {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    patient: { param: 'patientId' },
+    reason: 'FAMILY_ACCOUNT_STATEMENT',
+    familyStatement: true,
+  };
+  const body = {
+    payer: { id: PATIENT, firstName: 'Marta' },
+    members: [
+      { patient: { id: PATIENT, firstName: 'Marta' }, self: true },
+      { patient: { id: DEP_B, firstName: 'Iván' }, self: false },
+      { patient: { id: DEP_C, firstName: 'Lucía' }, self: false },
+    ],
+  };
+
+  it('deja un VIEW por miembro (pagador y dependientes), con el mismo contexto y sin nombres ni importes', () => {
+    const drafts = buildAuditDrafts(
+      family,
+      req({ params: { patientId: PATIENT } }),
+      body,
+      scope,
+    );
+    expect(drafts.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: PATIENT },
+      { kind: 'patient', id: DEP_B },
+      { kind: 'patient', id: DEP_C },
+    ]);
+    for (const d of drafts) {
+      expect(d.action).toBe('VIEW');
+      expect(d.resourceType).toBe('ACCOUNT_STATEMENT');
+      expect(d.requestId).toBe(scope.requestId);
+      expect(d.metadata.reason).toBe('FAMILY_ACCOUNT_STATEMENT');
+    }
+    expect(JSON.stringify(drafts)).not.toContain('Iván');
+  });
+
+  it('un pagador sin dependientes deja el evento del pagador; sin repetir ids', () => {
+    const alone = buildAuditDrafts(
+      family,
+      req({ params: { patientId: PATIENT } }),
+      { payer: { id: PATIENT }, members: [{ patient: { id: PATIENT } }] },
+      scope,
+    );
+    expect(alone.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: PATIENT },
+    ]);
+  });
+
+  it('si la respuesta no trae miembros, cae al paciente de la ruta', () => {
+    const drafts = buildAuditDrafts(
+      family,
+      req({ params: { patientId: PATIENT } }),
+      {},
+      scope,
+    );
+    expect(drafts.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: PATIENT },
+    ]);
+  });
+});
+
 describe('loginActor (DX-009)', () => {
   const token = (payload: object) =>
     `h.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.s`;

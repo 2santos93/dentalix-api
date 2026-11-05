@@ -45,6 +45,13 @@ interface Responsibles {
   noticeRecipient: { kind: string; email: string | null };
 }
 
+interface DocView {
+  parties: {
+    docNumber: string | null;
+    responsiblePatient: { docNumber: string | null; email: string } | null;
+  }[];
+}
+
 describe('Responsables de pago y avisos (e2e, DX-203)', () => {
   let app: INestApplication<App>;
   let clinic: Clinic;
@@ -380,7 +387,12 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     expect((await list(mother)).responsibleFor).toHaveLength(1);
 
     const events = await raw.auditEvent.findMany({
-      where: { tenantId: clinic.tenantId, patientId: daughter },
+      // SEC-044: las lecturas (VIEW) tienen su propio motivo; aquí, las escrituras.
+      where: {
+        tenantId: clinic.tenantId,
+        patientId: daughter,
+        action: 'UPDATE',
+      },
       orderBy: { occurredAt: 'asc' },
       select: { action: true, resourceType: true, metadata: true },
     });
@@ -488,6 +500,145 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
         .send({ majorityAge: 18 })
         .expect(200);
     }
+  });
+
+  describe('SEC-044: la lectura de responsables deja traza y recorta el documento', () => {
+    let kid: string;
+    beforeAll(async () => {
+      kid = await createPatient(clinic, {
+        firstName: 'Mateo',
+        lastName: 'Rojas',
+        docNumber: '1011000777',
+        birthDate: '2018-05-05',
+      });
+      await as(api().post(parties(kid)), tokens.RECEPTION)
+        .send({
+          responsiblePatientId: mother,
+          relationship: 'MOTHER',
+          isPayer: true,
+        })
+        .expect(201);
+      await as(api().post(parties(kid)), tokens.RECEPTION)
+        .send({
+          fullName: 'Pedro Rojas',
+          docType: 'NATIONAL_ID',
+          docNumber: '79345999',
+          email: 'pedro@example.com',
+          relationship: 'FATHER',
+        })
+        .expect(201);
+    });
+
+    const viewEvents = (patientId: string) =>
+      raw.auditEvent.findMany({
+        where: {
+          tenantId: clinic.tenantId,
+          patientId,
+          action: 'VIEW',
+          resourceType: 'PATIENT',
+        },
+        select: {
+          actorRole: true,
+          locationId: true,
+          resourceId: true,
+          metadata: true,
+        },
+      });
+
+    it('cada GET deja un VIEW con el motivo RESPONSIBLE_PARTIES, sin el contenido, y lo encuentra el filtro por paciente', async () => {
+      const before = (await viewEvents(kid)).length;
+      await list(kid, tokens.ADMIN);
+      await list(kid, tokens.DENTIST);
+      const events = await viewEvents(kid);
+      expect(events).toHaveLength(before + 2);
+      for (const e of events) {
+        expect(e.resourceId).toBe(kid);
+        expect((e.metadata as { reason?: string }).reason).toBe(
+          'RESPONSIBLE_PARTIES',
+        );
+      }
+      expect(events.map((e) => e.actorRole).sort()).toEqual(
+        ['ADMIN', 'DENTIST'].sort(),
+      );
+      const json = JSON.stringify(events);
+      for (const secret of [
+        '79345999',
+        'pedro@example.com',
+        '52987654',
+        'claudia@example.com',
+        'Pedro',
+      ]) {
+        expect(json).not.toContain(secret);
+      }
+      const res = await as(
+        api().get(`/api/v1/audit-events?patientId=${kid}&action=VIEW`),
+        tokens.ADMIN,
+      ).expect(200);
+      expect(JSON.stringify(res.body)).toContain('RESPONSIBLE_PARTIES');
+    });
+
+    it('una lectura fallida (404 de otra clínica) no deja evento', async () => {
+      const before = (await viewEvents(foreign)).length;
+      await as(api().get(parties(foreign)), tokens.ADMIN).expect(404);
+      expect(await viewEvents(foreign)).toHaveLength(before);
+    });
+
+    it.each([ClinicRole.ADMIN, ClinicRole.RECEPTION])(
+      '%s ve el documento del contacto y del paciente responsable',
+      async (role) => {
+        const view = await as(api().get(parties(kid)), tokens[role]).expect(
+          200,
+        );
+        const json = JSON.stringify(view.body);
+        expect(json).toContain('79345999');
+        expect(json).toContain('52987654');
+      },
+    );
+
+    it.each([ClinicRole.DENTIST, ClinicRole.ASSISTANT])(
+      '%s recibe docNumber null; el resto de la respuesta no cambia',
+      async (role) => {
+        const full = (
+          await as(api().get(parties(kid)), tokens.ADMIN).expect(200)
+        ).body as DocView;
+        const cut = (
+          await as(api().get(parties(kid)), tokens[role]).expect(200)
+        ).body as DocView;
+        expect(JSON.stringify(cut)).not.toMatch(/79345999|52987654/);
+        expect(cut.parties).toHaveLength(2);
+        expect(cut.parties.every((p) => p.docNumber === null)).toBe(true);
+        const strip = (v: DocView) =>
+          JSON.parse(
+            JSON.stringify(v, (k, x: unknown) =>
+              k === 'docNumber' ? null : x,
+            ),
+          ) as unknown;
+        expect(strip(cut)).toEqual(strip(full));
+        const patientParty = cut.parties.find((p) => p.responsiblePatient);
+        expect(patientParty?.responsiblePatient?.docNumber).toBeNull();
+        expect(patientParty?.responsiblePatient?.email).toBe(
+          'claudia@example.com',
+        );
+      },
+    );
+
+    it('editar un contacto sin ver su documento no lo borra, ni lo devuelve', async () => {
+      const contact = (await list(kid, tokens.ADMIN)).parties.find(
+        (p) => p.kind === 'CONTACT',
+      ) as Party;
+      const res = await as(
+        api().patch(`${parties(kid)}/${contact.id}`),
+        tokens.DENTIST,
+      )
+        .send({ fullName: 'Pedro J. Rojas', docNumber: null })
+        .expect(200);
+      expect(JSON.stringify(res.body)).not.toContain('79345999');
+      const after = (await list(kid, tokens.ADMIN)).parties.find(
+        (p) => p.id === contact.id,
+      ) as Party & { docNumber: string | null };
+      expect(after.docNumber).toBe('79345999');
+      expect(after.fullName).toBe('Pedro J. Rojas');
+    });
   });
 
   describe('estado de cuenta familiar del pagador', () => {
@@ -661,6 +812,39 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
       const json = JSON.stringify(body);
       expect(json).not.toContain('1011000101');
       expect(json).not.toContain('Nota clínica');
+    });
+
+    it('SEC-044: la lectura deja un VIEW FAMILY_ACCOUNT_STATEMENT por miembro, visible por paciente', async () => {
+      const marker = new Date();
+      await as(
+        api().get(`/api/v1/patients/${payer}/family-account-statement`),
+        tokens.RECEPTION,
+      ).expect(200);
+      const events = await raw.auditEvent.findMany({
+        where: {
+          tenantId: clinic.tenantId,
+          resourceType: 'ACCOUNT_STATEMENT',
+          occurredAt: { gte: marker },
+        },
+        select: { patientId: true, requestId: true, metadata: true },
+      });
+      const family = events.filter(
+        (e) =>
+          (e.metadata as { reason?: string }).reason ===
+          'FAMILY_ACCOUNT_STATEMENT',
+      );
+      expect(family.map((e) => e.patientId).sort()).toEqual(
+        [payer, brother, sister].sort(),
+      );
+      expect(new Set(family.map((e) => e.requestId)).size).toBe(1);
+      expect(JSON.stringify(family)).not.toMatch(/Iv[aá]n|Luc[ií]a|1730000/);
+      for (const dependent of [brother, sister]) {
+        const res = await as(
+          api().get(`/api/v1/audit-events?patientId=${dependent}&action=VIEW`),
+          tokens.ADMIN,
+        ).expect(200);
+        expect(JSON.stringify(res.body)).toContain('FAMILY_ACCOUNT_STATEMENT');
+      }
     });
 
     it('el estado de cuenta individual de un menor sale a nombre de su responsable', async () => {

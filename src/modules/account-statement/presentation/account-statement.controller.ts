@@ -93,12 +93,15 @@ export class AccountStatementController {
   }
 
   // DX-203: estado de cuenta FAMILIAR del pagador. Mismos roles que el
-  // individual; un evento VIEW del pagador con el motivo.
+  // individual. SEC-044: un evento VIEW con el motivo por cada miembro (el
+  // pagador y cada dependiente cuyo saldo se muestra), para que el filtro por
+  // paciente de la auditoría encuentre la lectura.
   @Audit({
     action: 'VIEW',
     resource: 'ACCOUNT_STATEMENT',
     patient: { param: 'patientId' },
     reason: 'FAMILY_ACCOUNT_STATEMENT',
+    familyStatement: true,
   })
   @Get('patients/:patientId/family-account-statement')
   @ApiOperation({

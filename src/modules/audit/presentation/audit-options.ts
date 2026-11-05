@@ -77,4 +77,11 @@ export interface AuditOptions {
    * con `paymentReference`, la confirmación de SU referencia repetida.
    */
   splitPayment?: true;
+  /**
+   * SEC-044: estado de cuenta familiar. La respuesta trae al pagador y a cada
+   * dependiente (`members[].patient.id`): se registra UN evento por miembro
+   * (mismo request id y motivo), así el filtro por paciente de la auditoría
+   * encuentra la lectura. Sin importes ni nombres.
+   */
+  familyStatement?: true;
 }
