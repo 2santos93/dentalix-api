@@ -262,4 +262,18 @@ describe('Crear un enlace a la vez que se archiva (e2e, DX-476)', () => {
     // remoteSigned firma con ana@example.com como destino de la copia.
     expect(mailer.sent.filter((m) => m.to === 'ana@example.com')).toEqual([]);
   });
+
+  it('formulario de anamnesis: 409 y ningún formulario vivo', async () => {
+    const patientId = await newPatient('Rita', 'rita.carrera@example.com');
+    const res = await duringArchive(patientId, () =>
+      post(`/patients/${patientId}/medical-history/requests`, {}),
+    );
+    expect(res.status).toBe(409);
+    expect((res.body as { message: string }).message).toBe(ARCHIVED);
+    expect(
+      await raw.medicalHistorySubmission.count({
+        where: { patientId, status: 'PENDING_PATIENT' },
+      }),
+    ).toBe(0);
+  });
 });

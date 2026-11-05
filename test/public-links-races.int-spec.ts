@@ -13,6 +13,14 @@ import {
 import { PrismaSignatureRequestRepository } from '../src/modules/signature-requests/infrastructure/prisma-signature-request.repository';
 import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
 import { PrismaSignedPdfCopyRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-pdf-copy.repository';
+import { PrismaPatientRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient.repository';
+import { PrismaMedicalHistorySubmissionRepository } from '../src/modules/medical-history-submissions/infrastructure/prisma-medical-history-submission.repository';
+import { PrismaEmailOutboxRepository } from '../src/modules/notifications/email/infrastructure/repositories/prisma-email-outbox.repository';
+import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
+import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
+import type { Mailer } from '../src/modules/notifications/email/domain/ports/mailer.port';
+import type { MailConfig } from '../src/modules/notifications/email/infrastructure/mail-config';
+import { randomBytes } from 'node:crypto';
 import { revokeLivePublicLinks } from '../src/modules/patients/infrastructure/patient-public-links';
 import {
   generateSignatureToken,
@@ -50,6 +58,34 @@ const candidates = new PrismaOpeningCandidatesRepository(prisma, tenantContext);
 const requests = new PrismaSignatureRequestRepository(prisma, tenantContext);
 const consents = new PrismaPatientConsentRepository(prisma, tenantContext);
 const pdfCopies = new PrismaSignedPdfCopyRepository(prisma, tenantContext);
+const patients = new PrismaPatientRepository(prisma, tenantContext, {
+  platformMinYears: 15,
+});
+const anamnesis = new PrismaMedicalHistorySubmissionRepository(
+  prisma,
+  tenantContext,
+);
+const outboxRepo = new PrismaEmailOutboxRepository(prisma);
+const cipher = new EmailPayloadCipher(randomBytes(32));
+const mailConfig: MailConfig = {
+  transport: 'console',
+  smtpUrl: null,
+  fileDir: null,
+  from: 'no-reply@x.co',
+  dispatchIntervalMs: 0,
+  retryBaseMs: 60_000,
+  leaseSeconds: 300,
+  batchSize: 20,
+  encryptionKey: randomBytes(32),
+  ephemeralKey: false,
+  production: false,
+  quotas: {
+    tenantDaily: 1000,
+    recipientDaily: 1000,
+    recipientCooldownSeconds: 0,
+  },
+  platformQuotas: { recipientDaily: 1000, recipientCooldownSeconds: 0 },
+};
 const { seedClinic, asClinic, remoteSigned } = signedConsentFixtures({
   owner,
   tenantContext,
@@ -295,8 +331,6 @@ describe('enlaces públicos y ofertas sin carreras (int, DX-476)', () => {
       expect(finishedWhileHeld).toBe(true);
       expect(await outcomeOf(free)).toBe('EXPIRED');
       expect(await outcomeOf(busy)).toBe('PENDING');
-      holder.release();
-      await holder.done;
       await sweep();
       expect(await outcomeOf(busy)).toBe('EXPIRED');
     });
@@ -328,11 +362,23 @@ describe('enlaces públicos y ofertas sin carreras (int, DX-476)', () => {
         ),
       );
       await waitForTransactionWaiters(owner, holder.xid);
-      // Con B (de «Aceptar») y C (del holder) ocupadas, el barrido no espera.
-      await expect(sweep()).resolves.toEqual({ expired: 0 });
-      expect(await outcomeOf(b)).toBe('PENDING');
+      // Con B (de «Aceptar») y C (del holder) ocupadas, el barrido no espera:
+      // o termina solo, o (diseño antiguo) se queda esperando a B.
+      const sweeping = settle(sweep());
+      let sweepDone = false;
+      void sweeping.then(() => (sweepDone = true));
+      await waitFor(
+        async () => sweepDone || (await blockedBackends()) >= 2,
+        'el barrido termina o espera a una fila que tiene «Aceptar»',
+      );
+      const finishedWhileHeld = sweepDone;
       holder.release();
       await holder.done;
+      expect(await sweeping).toMatchObject({
+        status: 'fulfilled',
+        value: { expired: 0 },
+      });
+      expect(finishedWhileHeld).toBe(true);
       expect(await accepting).toMatchObject({
         status: 'fulfilled',
         value: { state: 'ACCEPTED' },
@@ -542,6 +588,95 @@ describe('enlaces públicos y ofertas sin carreras (int, DX-476)', () => {
       ).toBe(0);
     });
 
+    it('anamnesis: 409 y ningún formulario vivo', async () => {
+      const patientId = await newPatient('Lucy');
+      const outcome = await createDuringArchive(patientId, () =>
+        asClinic(clinic.tenantId, () =>
+          anamnesis.issue({
+            patientId,
+            appointmentId: null,
+            locationId: clinic.locationId,
+            tokenHash: hashSignatureToken(generateSignatureToken()),
+            expiresAt: new Date(Date.now() + 72 * HOUR),
+            questionnaireVersion: 'v1',
+            createdById: clinic.userId,
+          }),
+        ),
+      );
+      expectArchived409(outcome);
+      expect(
+        await owner.medicalHistorySubmission.count({
+          where: { patientId, status: 'PENDING_PATIENT' },
+        }),
+      ).toBe(0);
+    });
+
+    it('con el archivar REAL (patients.archive) detenido tras bloquear al paciente, la creación espera y responde 409', async () => {
+      const patientId = await newPatient('Mabel');
+      // Una oferta viva de la paciente, sostenida por otra tx: archivar bloquea
+      // al paciente (FOR UPDATE de lockRetentionContext), escribe deletedAt y se
+      // queda esperando a anular esa oferta. Aquí llega la creación.
+      const live = await offer(patientId, {
+        expiresAt: new Date(Date.now() + 6 * HOUR),
+      });
+      const holder = await holdOffer(live);
+      const archiving = settle(
+        asClinic(clinic.tenantId, () =>
+          patients.archive(patientId, () => undefined, {
+            now: new Date(),
+            ctx: {
+              tenantId: clinic.tenantId,
+              locationId: null,
+              actor: { userId: clinic.userId, role: 'ADMIN' },
+              requestId: 'int-dx476',
+              ip: '203.0.113.76',
+              userAgent: 'int',
+            },
+          }),
+        ),
+      );
+      await waitForTransactionWaiters(owner, holder.xid);
+      const creating = settle(
+        asClinic(clinic.tenantId, () =>
+          candidates.createOffer(
+            {
+              locationId: clinic.locationId,
+              slotStart: at('16:00'),
+              slotEnd: at('16:30'),
+              providerId: DOCTOR,
+              patientId,
+              waitlistEntryId: null,
+              appointmentId: null,
+              channel: 'LINK_EMAIL',
+              outcome: 'PENDING',
+              offerDay: DAY,
+              createdById: clinic.userId,
+              tokenHash: hashSlotOfferToken(generateSlotOfferToken()),
+              expiresAt: new Date(Date.now() + 6 * HOUR),
+            },
+            5,
+          ),
+        ),
+      );
+      let creatingDone = false;
+      void creating.then(() => (creatingDone = true));
+      // La creación espera al patient FOR UPDATE de archivar (2 esperas: archivar
+      // y ella), o (sin el candado) termina y deja un enlace vivo.
+      await waitFor(
+        async () => creatingDone || (await blockedBackends()) >= 2,
+        'la creación espera al archivar real o termina',
+      );
+      holder.release();
+      await holder.done;
+      expect(await archiving).toMatchObject({ status: 'fulfilled' });
+      expectArchived409(await creating);
+      expect(
+        await owner.waitlistOffer.count({
+          where: { patientId, outcome: 'PENDING' },
+        }),
+      ).toBe(0);
+    });
+
     it('sin carrera, un paciente vivo sigue recibiendo su enlace', async () => {
       const patientId = await newPatient('Karla');
       const created = await asClinic(clinic.tenantId, () =>
@@ -565,6 +700,137 @@ describe('enlaces públicos y ofertas sin carreras (int, DX-476)', () => {
         ),
       );
       expect(created?.offer.patientId).toBe(patientId);
+    });
+  });
+  describe('DX-476 L2: el email no sale si el paciente se archivó tras encolarlo', () => {
+    class CountingMailer implements Mailer {
+      sent = 0;
+      send(): Promise<void> {
+        this.sent += 1;
+        return Promise.resolve();
+      }
+    }
+
+    /** Encola a mano (ya confirmado) el email del enlace `referenceId`. */
+    async function enqueued(
+      template: 'slot-offer' | 'signature-request' | 'signed-consent-copy',
+      referenceId: string,
+    ): Promise<string> {
+      const { id } = await outboxRepo.insert({
+        tenantId: clinic.tenantId,
+        template,
+        toHash: cipher.hashRecipient('paciente@example.com'),
+        toMasked: 'pa***@example.com',
+        referenceId,
+        payload: cipher.encrypt({
+          to: 'paciente@example.com',
+          subject: 'Tu enlace',
+          html: '<p>enlace</p>',
+          text: 'enlace',
+        }),
+      });
+      return id;
+    }
+
+    const dispatcherWith = (mailer: Mailer) =>
+      new EmailDispatcher(outboxRepo, mailer, cipher, mailConfig);
+
+    async function archiveNow(patientId: string) {
+      await asClinic(clinic.tenantId, () =>
+        patients.archive(patientId, () => undefined, {
+          now: new Date(),
+          ctx: {
+            tenantId: clinic.tenantId,
+            locationId: null,
+            actor: { userId: clinic.userId, role: 'ADMIN' },
+            requestId: 'int-dx476',
+            ip: '203.0.113.76',
+            userAgent: 'int',
+          },
+        }),
+      );
+    }
+
+    /** Un enlace por plantilla, con el email ya encolado. */
+    async function links(patientId: string) {
+      const offerId = await offer(patientId, {
+        expiresAt: new Date(Date.now() + 6 * HOUR),
+      });
+      const request = await asClinic(clinic.tenantId, () =>
+        requests.create({
+          locationId: clinic.locationId,
+          patientId,
+          type: 'CONSENT',
+          channel: 'EMAIL',
+          templateId: clinic.templateId,
+          templateVersion: 1,
+          treatmentPlanId: null,
+          title: 'Consentimiento',
+          body: 'Texto',
+          professionalUserId: clinic.userId,
+          professionalName: 'Dra. Int',
+          signerType: 'PATIENT',
+          signerName: 'Paciente L2',
+          signerDocument: null,
+          destination: 'paciente@example.com',
+          destinationMasked: 'pa***@example.com',
+          tokenHash: hashSignatureToken(generateSignatureToken()),
+          expiresAt: new Date(Date.now() + 72 * HOUR),
+          createdById: clinic.userId,
+          createdAt: new Date(),
+        }),
+      );
+      const consentId = await remoteSigned({ ...clinic, patientId });
+      await owner.signedConsentPdf.create({
+        data: { tenantId: clinic.tenantId, patientId, consentId },
+      });
+      const copy = await asClinic(clinic.tenantId, () =>
+        pdfCopies.issueLink({
+          consentId,
+          patientId,
+          tokenHash: hashSignatureToken(generateSignatureToken()),
+          expiresAt: new Date(Date.now() + 72 * HOUR),
+          createdById: clinic.userId,
+          now: new Date(),
+        }),
+      );
+      return {
+        'slot-offer': await enqueued('slot-offer', offerId),
+        // remoteSigned también envió una solicitud: la de arriba es otra.
+        'signature-request': await enqueued('signature-request', request.id),
+        'signed-consent-copy': await enqueued('signed-consent-copy', copy.id),
+      };
+    }
+
+    it('creación confirmada, archivado confirmado, y solo después el envío: nada sale y las filas quedan FAILED «PatientArchived» sin mensaje', async () => {
+      const patientId = await newPatient('Nilda');
+      const rows = await links(patientId);
+      await archiveNow(patientId);
+      const mailer = new CountingMailer();
+      await dispatcherWith(mailer).dispatchBatch();
+      expect(mailer.sent).toBe(0);
+      for (const id of Object.values(rows)) {
+        expect(
+          await owner.emailOutbox.findUniqueOrThrow({ where: { id } }),
+        ).toMatchObject({
+          status: 'FAILED',
+          lastError: 'PatientArchived',
+          payload: null,
+        });
+      }
+    });
+
+    it('con el paciente vivo los tres emails salen igual', async () => {
+      const patientId = await newPatient('Olga');
+      const rows = await links(patientId);
+      const mailer = new CountingMailer();
+      await dispatcherWith(mailer).dispatchBatch();
+      expect(mailer.sent).toBe(3);
+      for (const id of Object.values(rows)) {
+        expect(
+          await owner.emailOutbox.findUniqueOrThrow({ where: { id } }),
+        ).toMatchObject({ status: 'SENT' });
+      }
     });
   });
 });

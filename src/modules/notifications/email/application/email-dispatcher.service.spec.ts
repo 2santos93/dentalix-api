@@ -91,6 +91,21 @@ describe('EmailOutbox + EmailDispatcher', () => {
     jest.useRealTimers();
   });
 
+  it('DX-476: si el paciente se archivó entre encolar y enviar, no sale el email: FAILED «PatientArchived», sin payload', async () => {
+    const mailer = new RecordingMailer();
+    const { repo, outbox, dispatcher } = setup(mailer);
+    repo.patientsArchived = true;
+    await outbox.enqueue(invitationInput);
+    await dispatcher.whenIdle();
+    await dispatcher.dispatchBatch();
+    expect(mailer.sent).toEqual([]);
+    expect(repo.rows[0]).toMatchObject({
+      status: 'FAILED',
+      lastError: 'PatientArchived',
+    });
+    expect(repo.rows[0].storedPayload).toBeNull();
+  });
+
   it('encolar guarda UNA fila sin el email ni el token en claro y el despachador la envía', async () => {
     const mailer = new RecordingMailer();
     const { repo, outbox, dispatcher, cipher } = setup(mailer);
@@ -121,10 +136,13 @@ describe('EmailOutbox + EmailDispatcher', () => {
 
   it('enqueue no espera al proveedor (un mailer de 3 s no frena la respuesta)', async () => {
     let release: () => void = () => undefined;
+    let reached: () => void = () => undefined;
+    const sendReached = new Promise<void>((resolve) => (reached = resolve));
     const slow: Mailer = {
       send: () =>
         new Promise<void>((resolve) => {
           release = resolve;
+          reached();
         }),
     };
     const { outbox, dispatcher, repo } = setup(slow);
@@ -132,6 +150,7 @@ describe('EmailOutbox + EmailDispatcher', () => {
     await outbox.enqueue(invitationInput);
     expect(Date.now() - started).toBeLessThan(300);
     expect(repo.rows[0].status).not.toBe('SENT');
+    await sendReached;
     release();
     await dispatcher.whenIdle();
     expect(repo.rows[0].status).toBe('SENT');

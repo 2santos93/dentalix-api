@@ -387,8 +387,11 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     afterId: string | null,
   ): Promise<ExpiredBatch> {
     return this.prisma.runWithTenant(tenantId, async (tx) => {
-      // Lo sirve waitlist_offers_tenant_provider_slot_pending_idx (parcial
-      // PENDING); las filas del lote quedan bloqueadas hasta el COMMIT.
+      // EXPLAIN (DX-476, 200.000 ofertas de una clínica): con muchas vencidas
+      // recorre la PK en orden de id y filtra (1 ms por lote); con pocas, un
+      // Seq Scan que ordena solo las vencidas (47 ms, una vez por pasada). No
+      // hay índice que sirva `ORDER BY id` con este filtro y no hace falta uno.
+      // Las filas del lote quedan bloqueadas hasta el COMMIT.
       const due = await tx.$queryRaw<
         { id: string; locationId: string; patientId: string }[]
       >`SELECT "id", "locationId", "patientId" FROM "waitlist_offers"

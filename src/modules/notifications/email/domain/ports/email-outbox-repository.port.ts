@@ -118,6 +118,15 @@ export interface EmailOutboxRepository {
   }>;
 
   /**
+   * DX-476: ¿el email `outboxId` es el enlace público de un paciente que ya
+   * está archivado? Se pregunta justo antes de enviar, con la fila de la
+   * clínica `tenantId` bajo RLS. Solo mira las plantillas que llevan un enlace
+   * a un paciente (oferta de hueco, firma/presupuesto a distancia, copia del
+   * PDF firmado); el resto, `false`.
+   */
+  patientArchivedFor(tenantId: string, outboxId: string): Promise<boolean>;
+
+  /**
    * Cancela (FAILED, sin mensaje) los envíos aún PENDING de esa referencia en
    * la clínica `tenantId`: p. ej. el email con el enlace viejo al reenviar o
    * revocar una invitación. Devuelve cuántos canceló.
