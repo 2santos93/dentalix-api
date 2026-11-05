@@ -423,6 +423,17 @@ export function computeAccountStatement(
     if (p.splitId)
       splitLines.set(p.splitId, (splitLines.get(p.splitId) ?? 0) + 1);
   }
+  // DX-432: anular un cobro dividido anula TODAS sus líneas y la API da 409 si
+  // alguna respalda una devolución; todas llevan, pues, el mismo motivo (la
+  // devolución de menor número entre las líneas vivas).
+  const splitRefund = new Map<string, string>();
+  for (const p of snapshot.payments) {
+    if (!p.splitId || p.voidedAt !== null || !p.refundNumber) continue;
+    const known = splitRefund.get(p.splitId);
+    if (known === undefined || p.refundNumber < known) {
+      splitRefund.set(p.splitId, p.refundNumber);
+    }
+  }
   const movements: StatementMovement[] = snapshot.payments
     .map((p) => ({ p, paidOn: civilDateIn(p.paidAt, p.timeZone) }))
     .filter(({ paidOn }) =>
@@ -450,8 +461,11 @@ export function computeAccountStatement(
         options.voidActor !== undefined &&
         canVoidPayment(p, options.voidActor, options.today),
       voidBlockedReason:
-        p.voidedAt === null && p.refundNumber
-          ? voidRefundReferenceMessage(p.refundNumber)
+        p.voidedAt === null &&
+        (p.splitId ? splitRefund.get(p.splitId) : p.refundNumber)
+          ? voidRefundReferenceMessage(
+              (p.splitId ? splitRefund.get(p.splitId) : p.refundNumber)!,
+            )
           : null,
       voided: p.voidedAt !== null,
       voidedAt: p.voidedAt,

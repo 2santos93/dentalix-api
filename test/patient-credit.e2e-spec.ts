@@ -283,8 +283,21 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       .body as TransferBody;
     expect(again.id).toBe(first.id);
     // DX-432: la huella de idempotencia es interna; ni el alta ni la repetición.
-    expect(first).not.toHaveProperty('idempotencyFingerprint');
-    expect(again).not.toHaveProperty('idempotencyFingerprint');
+    const dtoKeys = [
+      'amount',
+      'createdAt',
+      'createdById',
+      'currency',
+      'id',
+      'locationId',
+      'patientId',
+      'reason',
+      'sourceCreditAfter',
+      'sourcePlanId',
+      'targetPlanId',
+    ];
+    expect(Object.keys(first).sort()).toEqual(dtoKeys);
+    expect(Object.keys(again).sort()).toEqual(dtoKeys);
     await transfer({ ...body, amount: 1 }, { key }).expect(422);
     expect(await counts()).toEqual({ transfers: 1, refunds: 0, entries: 2 });
 

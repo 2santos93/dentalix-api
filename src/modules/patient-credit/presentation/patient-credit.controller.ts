@@ -50,7 +50,6 @@ import {
   RefundCreditUseCase,
   TransferCreditUseCase,
   type CreditPolicyView,
-  type TransferResult,
 } from '../application/patient-credit.use-cases';
 import type {
   CreditRefundRecord,
@@ -62,6 +61,8 @@ import { CREDIT_ROLE_FORBIDDEN_MESSAGE } from '../domain/patient-credit';
 import {
   CreditPolicyDto,
   CreditRefundDto,
+  CreditTransferDto,
+  CreditTransferMovementDto,
   CreditTransferResultDto,
   PatientCreditMovementsDto,
   RefundCreditDto,
@@ -81,23 +82,49 @@ const IDEMPOTENCY_HEADER = {
 };
 
 /**
- * DX-432: la huella de idempotencia es de uso interno (compara repeticiones);
- * ninguna respuesta la expone, ni el alta, ni la repetición, ni el listado.
+ * DX-432: cada respuesta se construye campo a campo con la forma del DTO (lista
+ * blanca): lo interno (la huella de idempotencia, lo que se añada mañana a los
+ * `select` del repositorio) no sale por omisión.
  */
-function publicTransfer<T extends CreditTransferRecord>(
-  record: T,
-): Omit<T, 'idempotencyFingerprint'> {
-  const { idempotencyFingerprint: _internal, ...rest } = record;
-  void _internal;
-  return rest;
+function publicTransfer(record: CreditTransferRecord): CreditTransferDto {
+  return {
+    id: record.id,
+    patientId: record.patientId,
+    locationId: record.locationId,
+    sourcePlanId: record.sourcePlanId,
+    targetPlanId: record.targetPlanId,
+    currency: record.currency,
+    amount: record.amount,
+    reason: record.reason,
+    createdById: record.createdById,
+    createdAt: record.createdAt,
+  };
 }
 
-function publicRefund(
-  record: CreditRefundRecord,
-): Omit<CreditRefundRecord, 'idempotencyFingerprint'> {
-  const { idempotencyFingerprint: _internal, ...rest } = record;
-  void _internal;
-  return rest;
+function publicTransferMovement(
+  record: CreditTransferMovement,
+): CreditTransferMovementDto {
+  return { ...publicTransfer(record), createdByName: record.createdByName };
+}
+
+function publicRefund(record: CreditRefundRecord): CreditRefundDto {
+  return {
+    id: record.id,
+    number: record.number,
+    patientId: record.patientId,
+    locationId: record.locationId,
+    treatmentPlanId: record.treatmentPlanId,
+    currency: record.currency,
+    amount: record.amount,
+    method: record.method,
+    reason: record.reason,
+    cashSessionId: record.cashSessionId,
+    paymentIds: record.paymentIds,
+    createdById: record.createdById,
+    createdAt: record.createdAt,
+    snapshot: record.snapshot,
+    regional: record.regional,
+  };
 }
 
 const POLICY_WRITE_FORBIDDEN_MESSAGE =
@@ -162,15 +189,17 @@ export class PatientCreditController {
     @Body() dto: TransferCreditDto,
     @Headers('idempotency-key') key: string | undefined,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Omit<TransferResult, 'idempotencyFingerprint'>> {
-    return publicTransfer(
-      await this.transferCredit.execute(
-        id,
-        dto,
-        { userId: req.user.sub, role: req.user.role },
-        key,
-      ),
+  ): Promise<CreditTransferResultDto> {
+    const result = await this.transferCredit.execute(
+      id,
+      dto,
+      { userId: req.user.sub, role: req.user.role },
+      key,
     );
+    return {
+      ...publicTransfer(result),
+      sourceCreditAfter: result.sourceCreditAfter,
+    };
   }
 
   @Audit({
@@ -208,7 +237,7 @@ export class PatientCreditController {
     @Body() dto: RefundCreditDto,
     @Headers('idempotency-key') key: string | undefined,
     @Req() req: AuthenticatedRequest,
-  ): Promise<Omit<CreditRefundRecord, 'idempotencyFingerprint'>> {
+  ): Promise<CreditRefundDto> {
     return publicRefund(
       await this.refundCredit.execute(
         id,
@@ -230,9 +259,7 @@ export class PatientCreditController {
   @ApiOperation({ summary: 'Comprobante de una devolución (para imprimir)' })
   @ApiOkResponse({ type: CreditRefundDto })
   @ApiNotFoundResponse({ description: 'Inexistente o de otra clínica.' })
-  async get(
-    @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<Omit<CreditRefundRecord, 'idempotencyFingerprint'>> {
+  async get(@Param('id', ParseUUIDPipe) id: string): Promise<CreditRefundDto> {
     return publicRefund(await this.getRefund.execute(id));
   }
 
@@ -250,12 +277,12 @@ export class PatientCreditController {
     description: 'Paciente inexistente o de otra clínica.',
   })
   async list(@Param('id', ParseUUIDPipe) id: string): Promise<{
-    transfers: Omit<CreditTransferMovement, 'idempotencyFingerprint'>[];
-    refunds: Omit<CreditRefundRecord, 'idempotencyFingerprint'>[];
+    transfers: CreditTransferMovementDto[];
+    refunds: CreditRefundDto[];
   }> {
     const movements: PatientCreditMovements = await this.listCredit.execute(id);
     return {
-      transfers: movements.transfers.map(publicTransfer),
+      transfers: movements.transfers.map(publicTransferMovement),
       refunds: movements.refunds.map(publicRefund),
     };
   }

@@ -336,7 +336,7 @@ export class ListPatientCreditUseCase {
 }
 
 export interface CreditPolicyView {
-  /** Tope de RECEPTION por operación (0 = no puede). ADMIN no tiene tope. */
+  /** Tope de RECEPTION (0 = no puede): por operación y, en devoluciones, también por día (DX-462). ADMIN no tiene tope. */
   receptionMaxAmount: number;
 }
 
