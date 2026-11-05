@@ -6,6 +6,7 @@ import { StorageModule } from '../../shared/storage/storage.module';
 import { ImportHolidaysUseCase } from './application/import-holidays.use-case';
 import {
   CreateHolidayUseCase,
+  FindHolidayOnDayUseCase,
   GetLocationCalendarUseCase,
   RetireHolidayUseCase,
   SetWorkingWeekdaysUseCase,
@@ -21,6 +22,7 @@ import { LocationCalendarController } from './presentation/location-calendar.con
   controllers: [LocationCalendarController],
   providers: [
     GetLocationCalendarUseCase,
+    FindHolidayOnDayUseCase,
     SetWorkingWeekdaysUseCase,
     CreateHolidayUseCase,
     UpdateHolidayUseCase,

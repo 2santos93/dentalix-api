@@ -1268,6 +1268,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       message: 'No encontramos esa sede.',
     },
     {
+      name: 'GET /locations/:id/holiday',
+      verb: 'get',
+      path: () => `/locations/${a.locationId}/holiday?date=2030-12-24`,
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    {
       name: 'PUT /locations/:id/calendar/working-weekdays',
       verb: 'put',
       path: () => `/locations/${a.locationId}/calendar/working-weekdays`,

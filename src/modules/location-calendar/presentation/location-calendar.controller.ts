@@ -7,6 +7,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Query,
   ParseUUIDPipe,
   Patch,
   Post,
@@ -42,6 +43,7 @@ import {
   Roles,
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
+import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { UPLOAD_TEMP_DIR } from '../../../shared/storage/local-file';
 import {
@@ -54,6 +56,7 @@ import type { AuditedRequest } from '../../audit/presentation/audit-request';
 import type { AuditHolidaySide } from '../../audit/domain/audit-metadata';
 import {
   CreateHolidayUseCase,
+  FindHolidayOnDayUseCase,
   GetLocationCalendarUseCase,
   RetireHolidayUseCase,
   SetWorkingWeekdaysUseCase,
@@ -71,6 +74,8 @@ import type {
 import {
   CreateLocationHolidayDto,
   HolidayImportResultDto,
+  HolidayOnDayDto,
+  HolidayOnDayQueryDto,
   LocationCalendarDto,
   LocationHolidayDto,
   SetWorkingWeekdaysDto,
@@ -158,6 +163,7 @@ const IMPORT_400 = `${HOLIDAY_MESSAGES.missingFile} / ${HOLIDAY_MESSAGES.wrongEx
 export class LocationCalendarController {
   constructor(
     private readonly getCalendar: GetLocationCalendarUseCase,
+    private readonly findHolidayOnDay: FindHolidayOnDayUseCase,
     private readonly setWeekdays: SetWorkingWeekdaysUseCase,
     private readonly createHoliday: CreateHolidayUseCase,
     private readonly updateHoliday: UpdateHolidayUseCase,
@@ -173,6 +179,22 @@ export class LocationCalendarController {
   @ApiNotFoundResponse({ description: LOCATION_404 })
   get(@Param('id', locationIdPipe) id: string): Promise<LocationCalendarView> {
     return this.getCalendar.execute(id);
+  }
+
+  @Get('holiday')
+  @Roles(...PATIENT_ROLES)
+  @ApiOperation({
+    summary:
+      'DX-358: ¿es festivo ese día en la sede? Solo para avisar al agendar',
+  })
+  @ApiOkResponse({ type: HolidayOnDayDto })
+  @ApiBadRequestResponse({ description: HOLIDAY_MESSAGES.invalidLocationId })
+  @ApiNotFoundResponse({ description: LOCATION_404 })
+  holidayOnDay(
+    @Param('id', locationIdPipe) id: string,
+    @Query() query: HolidayOnDayQueryDto,
+  ): Promise<{ date: string; name: string | null }> {
+    return this.findHolidayOnDay.execute(id, query.date);
   }
 
   @Audit({
