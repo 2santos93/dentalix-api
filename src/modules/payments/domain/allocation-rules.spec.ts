@@ -1,6 +1,7 @@
 import { TreatmentPlanItemStatus } from '@prisma/client';
 import {
   allocationVersion,
+  donorAvailableCents,
   hasFixedPointViolation,
   itemBillableCents,
   orderDonors,
@@ -328,5 +329,71 @@ describe('itemBillableCents', () => {
     ).toBe(0);
     expect(itemBillableCents({ ...base, deletedAt: d(1) }, true)).toBe(0);
     expect(itemBillableCents(base, false)).toBe(0);
+  });
+});
+
+describe('donantes netos de lo devuelto o traspasado (DX-399-bis)', () => {
+  it('el disponible es base - imputado - devuelto, sin bajar de 0', () => {
+    expect(
+      respreadSurplus(
+        [
+          donor({
+            paymentId: 'A',
+            baseCents: 13_000,
+            allocatedCents: 10_000,
+            creditOutCents: 3_000,
+          }),
+        ],
+        [item({ id: 'I', billableCents: 3_000 })],
+      ),
+    ).toEqual([]);
+    expect(
+      respreadSurplus(
+        [
+          donor({
+            paymentId: 'A',
+            baseCents: 13_000,
+            allocatedCents: 10_000,
+            creditOutCents: 1_000,
+          }),
+        ],
+        [item({ id: 'I', billableCents: 3_000 })],
+      ),
+    ).toEqual([{ paymentId: 'A', itemId: 'I', cents: 2_000 }]);
+  });
+
+  it('un abono con todo devuelto cede el turno al siguiente, aunque sea más antiguo', () => {
+    const donors = [
+      donor({
+        paymentId: 'OLD',
+        paidAt: d(1),
+        baseCents: 3_000,
+        creditOutCents: 3_000,
+      }),
+      donor({ paymentId: 'NEW', paidAt: d(2), baseCents: 3_000 }),
+    ];
+    expect(
+      respreadSurplus(donors, [item({ id: 'I', billableCents: 3_000 })]),
+    ).toEqual([{ paymentId: 'NEW', itemId: 'I', cents: 3_000 }]);
+  });
+
+  it('el punto fijo ignora lo devuelto: sin disponible real no hay violación', () => {
+    const donors = [
+      donor({ paymentId: 'A', baseCents: 3_000, creditOutCents: 3_000 }),
+    ];
+    const items = [item({ id: 'I', billableCents: 3_000 })];
+    expect(hasFixedPointViolation(donors, items)).toBe(false);
+    expect(donorAvailableCents(donors[0])).toBe(0);
+    expect(
+      hasFixedPointViolation([{ ...donors[0], creditOutCents: 0 }], items),
+    ).toBe(true);
+  });
+
+  it('sin creditOutCents se comporta como antes (compatibilidad)', () => {
+    expect(
+      donorAvailableCents(
+        donor({ paymentId: 'A', baseCents: 500, allocatedCents: 200 }),
+      ),
+    ).toBe(300);
   });
 });

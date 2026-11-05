@@ -809,6 +809,58 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
       expect(june.has(first)).toBe(false);
       expect(july.get(second)).toBe(50);
     });
+
+    it('DX-399-bis: overpay, refund, a new item and its payment leave nothing on account (report = Cartera = 0)', async () => {
+      const lola = await patient(a, 'Lola');
+      const lolaPlan = await plan(a, lola, catalogA, [100]);
+      const old = await pay(a, lolaPlan.planId, 130, '2026-09-05');
+      await refund(lolaPlan.planId, [old], 30);
+      // Un ítem nuevo de 30: la imputación automática NO puede cubrirlo con los
+      // 30 del abono antiguo, que ya se devolvieron.
+      const item = await call(
+        'post',
+        a,
+        `/treatment-plans/${lolaPlan.planId}/items`,
+      )
+        .send({ toothNumber: '31', catalogItemId: catalogA, price: 30 })
+        .expect(201);
+      const itemId = (item.body as { id: string }).id;
+      await call(
+        'patch',
+        a,
+        `/treatment-plans/${lolaPlan.planId}/items/${itemId}`,
+      )
+        .send({ status: 'ACCEPTED' })
+        .expect(200);
+      const fresh = await pay(a, lolaPlan.planId, 30, '2026-09-06');
+
+      const SEPT = 'from=2026-09-01&to=2026-09-30';
+      const sept = await report(a, SEPT);
+      expect(idsOf(sept)).not.toContain(old);
+      expect(idsOf(sept)).not.toContain(fresh);
+      // Cartera › Saldo a favor: Lola no tiene saldo.
+      const credit = (
+        await call(
+          'get',
+          a,
+          '/receivables/credit-balances?pageSize=100',
+        ).expect(200)
+      ).body as { items: { patient: { id: string } }[] };
+      expect(credit.items.map((r) => r.patient.id)).not.toContain(lola);
+      // El abono nuevo cubre el ítem nuevo; el antiguo sigue en sus 100.
+      const sumOf = (rows: { amount: unknown }[]) =>
+        rows.reduce((n, l) => n + Math.round(Number(l.amount) * 100), 0);
+      expect(
+        sumOf(
+          await raw.paymentAllocation.findMany({ where: { paymentId: old } }),
+        ),
+      ).toBe(10000);
+      expect(
+        sumOf(
+          await raw.paymentAllocation.findMany({ where: { paymentId: fresh } }),
+        ),
+      ).toBe(3000);
+    });
   });
 
   describe('roles, sedes and isolation', () => {

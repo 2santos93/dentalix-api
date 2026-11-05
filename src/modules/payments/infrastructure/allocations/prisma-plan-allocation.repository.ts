@@ -213,6 +213,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     const donors = await this.readDonors(
       tx,
       tenantId,
+      planId,
       plan.currency,
       bases.map((b) => b.paymentId),
     );
@@ -235,6 +236,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
   private async readDonors(
     tx: Prisma.TransactionClient,
     tenantId: string,
+    planId: string,
     planCurrency: string,
     paymentIds: string[],
   ): Promise<Donor[]> {
@@ -259,12 +261,26 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
          AND b."manual" = false
          AND b."currency" = ${planCurrency}
          AND p."deletedAt" IS NULL`;
+    // DX-399-bis: lo devuelto o traspasado sale del disponible de cada abono por
+    // la MISMA regla que el informe (`credit-netting`, la cascada del plan
+    // entero). Se lee tras los bloqueos: la devolución y el traspaso toman el
+    // plan FOR NO KEY UPDATE, que choca con nuestro FOR SHARE, así que sus
+    // asientos confirmados no cambian durante este reparto.
+    const { facts, entries } = await loadNettingFacts(
+      tx,
+      tenantId,
+      Prisma.sql`tp."id" = ${planId}::uuid`,
+    );
+    const creditOut = new Map(
+      nettedFacts(facts, entries).map((n) => [n.fact.id, n.net.creditOutCents]),
+    );
     return rows.map((r) => ({
       paymentId: r.paymentId,
       paidAt: r.paidAt,
       createdAt: r.createdAt,
       baseCents: decimalCents(r.amount),
       allocatedCents: decimalCents(r.allocated),
+      creditOutCents: creditOut.get(r.paymentId) ?? 0,
     }));
   }
 

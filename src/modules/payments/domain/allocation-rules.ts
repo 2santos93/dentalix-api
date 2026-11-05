@@ -12,6 +12,20 @@ export interface Donor {
   createdAt: Date;
   baseCents: number;
   allocatedCents: number;
+  /**
+   * Lo devuelto o traspasado del saldo a favor que `credit-netting` atribuye a
+   * este abono (DX-399-bis): ese dinero ya no está a cuenta y no se reparte.
+   * Sin él (0), el disponible es la base menos lo imputado.
+   */
+  creditOutCents?: number;
+}
+
+/** Lo que un donante puede dar: su base menos lo imputado y lo devuelto o traspasado. */
+export function donorAvailableCents(donor: Donor): number {
+  return Math.max(
+    0,
+    donor.baseCents - donor.allocatedCents - (donor.creditOutCents ?? 0),
+  );
 }
 
 export interface AllocatableItem {
@@ -73,7 +87,7 @@ export function respreadSurplus(
   const orderedItems = orderItems(items);
   const out: AllocationIncrement[] = [];
   for (const donor of orderDonors(donors)) {
-    let surplus = Math.max(0, donor.baseCents - donor.allocatedCents);
+    let surplus = donorAvailableCents(donor);
     for (const item of orderedItems) {
       if (surplus === 0) break;
       const take = Math.min(surplus, free.get(item.id) ?? 0);
@@ -92,7 +106,7 @@ export function hasFixedPointViolation(
   items: AllocatableItem[],
 ): boolean {
   return (
-    donors.some((d) => d.baseCents - d.allocatedCents > 0) &&
+    donors.some((d) => donorAvailableCents(d) > 0) &&
     items.some((i) => i.billableCents - i.allocatedCents > 0)
   );
 }
