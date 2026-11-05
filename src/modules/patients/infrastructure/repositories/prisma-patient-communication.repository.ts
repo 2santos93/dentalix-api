@@ -19,6 +19,7 @@ import {
   loadNoticeSettings,
   loadNoticeResponsibles,
 } from '../notices/notice-context';
+import { defaultPhoneRegionIn, reconcilePatientPhoneE164 } from '../phone-e164';
 
 const SELECT = {
   id: true,
@@ -168,6 +169,14 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
           select: SELECT,
         });
         state = await this.toState(tx, saved);
+        if (changedFields.includes('phone')) {
+          // DX-224: el trigger anuló el E.164 viejo; se escribe el nuevo.
+          await reconcilePatientPhoneE164(
+            tx,
+            [patientId],
+            await defaultPhoneRegionIn(tx, this.tenantContext.getLocationId()),
+          );
+        }
       }
       // Se invalida incluso con preferencias iguales; no crea una falsa escritura de paciente.
       if (invalidateOptOutLinksAt) {

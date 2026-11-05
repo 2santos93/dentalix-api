@@ -32,6 +32,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'direct-upload': { limit: 2, ttlMs: 60_000 },
   'patient-import': { limit: 2, ttlMs: 60_000 },
   'exchange-rates': { limit: 2, ttlMs: 60_000 },
+  'caller-lookup': { limit: 2, ttlMs: 60_000 },
   anamnesis: { limit: 4, ttlMs: 60_000 },
   'anamnesis-token': { limit: 2, ttlMs: 60_000 },
   signature: { limit: 4, ttlMs: 60_000 },
@@ -360,6 +361,26 @@ describe('Rate limiting (e2e)', () => {
       expectTooMany(await rates('rx-1', 'clinica-1'));
       expectTooMany(await convert('rx-1', 'clinica-1'));
       expect((await rates('rx-2', 'clinica-1')).status).toBe(401);
+    });
+
+    it('DX-224: «¿Quién llama?», un balde por clínica+usuario', async () => {
+      const bearer = (sub: string, tenantId: string): string =>
+        'Bearer ' +
+        [
+          Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+          Buffer.from(JSON.stringify({ sub, tenantId })).toString('base64url'),
+          'firma-invalida',
+        ].join('.');
+      const ask = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .post('/api/v1/patients/lookup-by-phone')
+          .set('Authorization', bearer(sub, tenantId))
+          .send({ phone: '0412 1234567' });
+      for (let i = 0; i < LOW_LIMITS['caller-lookup'].limit; i++) {
+        expect((await ask('cl-1', 'clinica-1')).status).toBe(401);
+      }
+      expectTooMany(await ask('cl-1', 'clinica-1'));
+      expect((await ask('cl-2', 'clinica-1')).status).toBe(401);
     });
 
     it('health nunca se limita (@SkipThrottle)', async () => {

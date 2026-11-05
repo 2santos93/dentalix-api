@@ -3812,6 +3812,29 @@ país.
   de teléfonos (unit, `test:int` y los e2e de teléfono). Los metadatos
   atrasados son el principal riesgo de rechazar un móvil nuevo: **subirla al
   menos una vez por trimestre**.
+- **«¿Quién llama?» y `phoneE164` (DX-224).** `POST /patients/lookup-by-phone`
+  compara el E.164 COMPLETO guardado en `patients.phoneE164` y
+  `patient_responsible_parties.phoneE164` (índices parciales, nunca un sufijo).
+  El trigger `dx_phone_e164_stale` lo pone a NULL cuando `phone` cambia y todo
+  escritor de la app lo vuelve a rellenar en su transacción (la guarda
+  `src/architecture/phone-e164-writers.spec.ts` falla si aparece un escritor
+  nuevo sin hacerlo). **El relleno de las filas anteriores es automático**:
+  el trabajo `patients.phone-e164-backfill` se encola al arrancar (una vez por
+  hora y clave de idempotencia) y corre cada hora (minuto 41 UTC), por lotes de
+  1 000, clínica a clínica, solo sobre filas con teléfono y sin E.164 (lo que
+  no es un número válido queda NULL). Cada paciente importado se lee con el
+  prefijo de la sede de SU lote; el resto, con el de la sede principal. No
+  hace falta ningún paso tras `prisma migrate deploy`; hasta que corra (como
+  mucho una hora), un paciente antiguo puede no aparecer en la búsqueda.
+  Lo que ninguna región entiende se marca (`phoneE164CheckedAt`) y NO se relee
+  cada hora; cambiar el teléfono quita la marca. Un índice parcial deja el
+  barrido en el residuo. Una clínica que falla se registra (id y clase del
+  error) y no frena a las demás; el trabajo para entre lotes si pierde el
+  arriendo. Tras corregir el prefijo de una sede:
+  `npm run phones:e164-backfill -- --recheck` (vuelve a leer lo marcado).
+  Para forzarlo: `npm run phones:e164-backfill` (mismo código, idempotente; con
+  una clínica enorme y `57014`, `statement_timeout=0` solo para esa
+  ejecución, como más abajo). Benchmark: `docs/perf/DX-224.md`.
 - **Informe de teléfonos guardados** (`npm run phones:report`, `-- --detail`
   para el CSV): solo lectura, con el rol de la app, clínica a clínica y por
   lotes de 1 000 filas, cada uno en una transacción `READ ONLY`. Clasifica
@@ -6207,7 +6230,7 @@ Para que una petición o una transacción colgada no agote el pool:
   `... 'SHOW idle_in_transaction_session_timeout'` → `150s`.
 - **Scripts de mantenimiento largos** que corren como `dentalix_app`
   (`npm run allocations:backfill`, `npm run phones:report`,
-  `npm run g1:backfill-locations`): trabajan por lotes, pero si una sentencia
+  `npm run phones:e164-backfill`, `npm run g1:backfill-locations`): trabajan por lotes, pero si una sentencia
   no cabe en 15 s (una clínica enorme, sale `57014` en el log), quita el tope
   SOLO para esa ejecución, nunca en el rol:
   - Con Prisma (estos scripts), en la URL de esa ejecución:

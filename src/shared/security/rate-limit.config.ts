@@ -74,6 +74,11 @@
  *                  dos rutas. Primera barrera; lo que de verdad protege la
  *                  cuota del proveedor es el presupuesto de fallos de caché
  *                  de `ProviderRatesGate` (`EXCHANGE_PROVIDER_*`).
+ * - caller-lookup: «¿Quién llama?» (`POST /patients/lookup-by-phone`, DX-224),
+ *                  por clínica + usuario. Cada petición lee datos de
+ *                  pacientes por un teléfono: frena a quien pruebe números
+ *                  en bloque, y deja sobrado a una recepción que atiende
+ *                  una llamada por minuto.
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -89,6 +94,7 @@ export type RateLimitPolicy =
   | 'direct-upload'
   | 'patient-import'
   | 'exchange-rates'
+  | 'caller-lookup'
   | 'anamnesis'
   | 'anamnesis-token'
   | 'signature'
@@ -124,6 +130,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'direct-upload': { limit: 60, ttlMs: MINUTE },
   'patient-import': { limit: 10, ttlMs: MINUTE },
   'exchange-rates': { limit: 120, ttlMs: MINUTE },
+  'caller-lookup': { limit: 60, ttlMs: MINUTE },
   anamnesis: { limit: 20, ttlMs: MINUTE },
   'anamnesis-token': { limit: 10, ttlMs: MINUTE },
   signature: { limit: 20, ttlMs: MINUTE },
@@ -171,6 +178,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'direct-upload': rule('direct-upload'),
     'patient-import': rule('patient-import'),
     'exchange-rates': rule('exchange-rates'),
+    'caller-lookup': rule('caller-lookup'),
     anamnesis: rule('anamnesis'),
     'anamnesis-token': rule('anamnesis-token'),
     signature: rule('signature'),

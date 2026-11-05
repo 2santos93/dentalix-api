@@ -217,7 +217,7 @@ export function phoneInternational(
 
 /**
  * Los E.164 posibles del texto: uno si es válido, los dos si es ambiguo y
- * ninguno si no vale. Solo para la baja por mensaje (R8).
+ * ninguno si no vale. La baja por mensaje (R8) y «¿Quién llama?» (DX-224).
  */
 export function phoneReadings(
   text: string | null | undefined,

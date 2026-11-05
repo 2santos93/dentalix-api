@@ -31,6 +31,8 @@ import {
 import { Patient } from '../../domain/entities/patient.entity';
 import { livePatientWithDoc, lockPatientDocs } from '../patient-doc-lock';
 import { revokeLivePublicLinks } from '../patient-public-links';
+import { defaultPhoneRegionIn, reconcilePatientPhoneE164 } from '../phone-e164';
+import { storedPhoneE164 } from '../../domain/caller-lookup/caller-phone';
 import {
   PATIENT_ARCHIVED_LINKS_REVOKED_REASON,
   totalLivePublicLinks,
@@ -220,6 +222,8 @@ export async function insertPatientRowInTx(
   tenantId: string,
   input: PatientRowInput,
   onDocTaken?: (existingId: string) => Error,
+  /** DX-224: la sede cuyo prefijo lee el teléfono; sin ella, la principal. */
+  phoneLocationId?: string | null,
 ): Promise<PrismaPatient> {
   await assertDocFree(tx, tenantId, input.docNumber, undefined, onDocTaken);
   // `tenants` no tiene RLS: se lee por el id del contexto.
@@ -227,9 +231,18 @@ export async function insertPatientRowInTx(
     where: { id: tenantId },
     select: { defaultContactChannel: true },
   });
-  return tx.patient.create({
+  // DX-224: el E.164 va en el MISMO INSERT (no un UPDATE después): cada UPDATE
+  // deja una versión muerta de la fila y fragmenta el montón.
+  const phoneE164 = input.phone
+    ? storedPhoneE164(
+        input.phone,
+        await defaultPhoneRegionIn(tx, phoneLocationId),
+      )
+    : null;
+  const created = await tx.patient.create({
     data: {
       tenantId,
+      phoneE164,
       contactChannel: clinic.defaultContactChannel,
       firstName: input.firstName,
       lastName: input.lastName,
@@ -253,6 +266,7 @@ export async function insertPatientRowInTx(
       createdById: input.createdById,
     } satisfies Prisma.PatientUncheckedCreateInput & DocTypeColumn,
   });
+  return created;
 }
 
 export function mapToEntity(
@@ -368,7 +382,13 @@ export class PrismaPatientRepository implements PatientRepository {
     const tenantId = this.requireTenantId();
     const { patient, term } = await this.prisma.runWithTenant(async (tx) => {
       // DX-128: el paciente nace con el canal por defecto de su clínica.
-      const created = await insertPatientRowInTx(tx, tenantId, input);
+      const created = await insertPatientRowInTx(
+        tx,
+        tenantId,
+        input,
+        undefined,
+        this.tenantContext.getLocationId(),
+      );
       const term = await this.termInTx(tx);
 
       if (input.medicalHistory) {
@@ -554,6 +574,14 @@ export class PrismaPatientRepository implements PatientRepository {
         where: { id },
         data: patientUpdateData(patch, existing.documentType),
       });
+      if (patch.phone) {
+        // DX-224: el trigger anuló el E.164 viejo; se escribe el nuevo.
+        await reconcilePatientPhoneE164(
+          tx,
+          [id],
+          await defaultPhoneRegionIn(tx, this.tenantContext.getLocationId()),
+        );
+      }
       return mapToEntity(patient, await this.termInTx(tx));
     });
   }
