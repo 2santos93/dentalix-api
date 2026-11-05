@@ -245,6 +245,65 @@ describe('abono anulado inmutable en la BD (int, SEC-042)', () => {
       ).rejects.toThrow(VOID_IMMUTABLE);
     });
 
+    it.each([
+      ['amount', { amount: 1 }],
+      ['currency', { currency: 'USD' }],
+      ['paidAt', { paidAt: new Date('2020-01-01T12:00:00.000Z') }],
+      ['notes', { notes: 'cambiado al anular' }],
+    ])(
+      'la anulación que también cambia %s: rechazada (L1)',
+      async (_c, extra) => {
+        const id = await pay(await debtor('Reescribe'));
+        const now = new Date();
+        await expect(
+          asApp((tx) =>
+            tx.payment.update({
+              where: { id },
+              data: { deletedAt: now, voidedAt: now, ...extra },
+            }),
+          ),
+        ).rejects.toThrow(/solo se escribe la anulación/);
+        expect(
+          (await raw.payment.findUniqueOrThrow({ where: { id } })).voidedAt,
+        ).toBeNull();
+      },
+    );
+
+    it('un abono con solo deletedAt (fila antigua) también queda congelado, y no nace así (L2)', async () => {
+      const d = await debtor('Solo');
+      const id = await pay(d);
+      await raw.payment.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      });
+      await expect(
+        asApp((tx) =>
+          tx.payment.update({ where: { id }, data: { notes: 'x' } }),
+        ),
+      ).rejects.toThrow(VOID_IMMUTABLE);
+      await expect(
+        asApp((tx) =>
+          tx.payment.update({ where: { id }, data: { voidedAt: new Date() } }),
+        ),
+      ).rejects.toThrow(VOID_IMMUTABLE);
+      await expect(
+        asApp((tx) =>
+          tx.payment.create({
+            data: {
+              tenantId,
+              locationId,
+              treatmentPlanId: d.planId,
+              patientId: d.patientId,
+              amount: 1,
+              currency: 'VES',
+              paidAt: new Date(),
+              deletedAt: new Date(),
+            },
+          }),
+        ),
+      ).rejects.toThrow(VOID_IMMUTABLE);
+    });
+
     it('el error no lleva importes, notas ni nombres', async () => {
       const d = await debtor('Privado');
       const id = await pay(d, 123_456);
@@ -322,8 +381,50 @@ describe('abono anulado inmutable en la BD (int, SEC-042)', () => {
             data: { status: 'OPEN', settledAt: null },
           });
         }),
-      ).rejects.toThrow();
+      ).rejects.toThrow(VOID_IMMUTABLE);
       expect(await statusOf(promiseId)).toBe('KEPT');
+    });
+
+    it('un abono insertado y anulado en la MISMA transacción NO reabre el compromiso (M1)', async () => {
+      const d = await debtor('Fantasma');
+      const promiseId = await keptPromise(d);
+      await expect(
+        asApp(async (tx) => {
+          const now = new Date();
+          const phantom = await tx.payment.create({
+            data: {
+              tenantId,
+              locationId,
+              treatmentPlanId: d.planId,
+              patientId: d.patientId,
+              amount: 0.01,
+              currency: 'VES',
+              paidAt: now,
+            },
+          });
+          await tx.payment.update({
+            where: { id: phantom.id },
+            data: { deletedAt: now, voidedAt: now },
+          });
+          await tx.paymentPromise.update({
+            where: { id: promiseId },
+            data: { status: 'OPEN', settledAt: null },
+          });
+        }),
+      ).rejects.toThrow(PROMISE_IMMUTABLE);
+      expect(await statusOf(promiseId)).toBe('KEPT');
+    });
+
+    it('el alta de un abono vigente no se puede retrasar para colarlo (M1)', async () => {
+      const id = await pay(await debtor('Alta'));
+      await expect(
+        asApp((tx) =>
+          tx.payment.update({
+            where: { id },
+            data: { createdAt: new Date('2000-01-01T00:00:00.000Z') },
+          }),
+        ),
+      ).rejects.toThrow(/fecha de alta/);
     });
 
     it('anular de verdad en la misma transacción sigue reabriendo (DX-215)', async () => {
