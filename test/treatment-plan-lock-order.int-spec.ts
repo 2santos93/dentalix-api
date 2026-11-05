@@ -8,6 +8,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { backendPid, waitForLockWaiters } from './support/postgres-concurrency';
 
 // DX-012 (revisión): orden de bloqueos plan → ítem. La aceptación bloquea el
 // plan (FOR UPDATE) y luego los ítems; editar o retirar un ítem tiene que
@@ -107,18 +108,6 @@ function acceptanceRow(locationId: string): NewPlanAcceptance {
   };
 }
 
-/** Espera a que haya `n` sesiones de esta base esperando un bloqueo. */
-async function waitForLockWaiters(n: number): Promise<void> {
-  for (let i = 0; i < 100; i++) {
-    const [{ waiting }] = await raw.$queryRaw<{ waiting: number }[]>`
-      SELECT count(*)::int AS waiting FROM pg_stat_activity
-       WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-    if (waiting >= n) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`no llegaron ${n} esperas de bloqueo`);
-}
-
 /** 'ok' o el mensaje del error. */
 type Settled = string;
 
@@ -150,21 +139,23 @@ async function raceWithItemHeld(
   const isLocked = new Promise<void>((resolve) => {
     locked = resolve;
   });
+  let holderPid!: number;
   const holder = prisma.runWithTenant(s.tenantId, async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "treatment_plan_items" WHERE "id" = ${itemId}::uuid FOR UPDATE`;
+    holderPid = await backendPid(tx);
     locked();
     await released;
   });
   await isLocked;
 
   const edit = settle(inTenant(() => run(planId, itemId)));
-  await waitForLockWaiters(1);
+  await waitForLockWaiters(raw, [holderPid], 1);
   const accept = settle(
     inTenant(() =>
       quotes.accept(s.patientId, planId, () => acceptanceRow(location.id)),
     ),
   );
-  await waitForLockWaiters(2);
+  await waitForLockWaiters(raw, [holderPid], 2);
   release();
   await holder;
   return { edit: await edit, accept: await accept };

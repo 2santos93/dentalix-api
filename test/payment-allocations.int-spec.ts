@@ -4,6 +4,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { backendPid, waitForLockWaiters } from './support/postgres-concurrency';
 
 // DX-051, capa DB: bases de los abonos, imputaciones, cola de repartos e
 // historial. RLS FORCE en las cuatro tablas, FK compuestas (el ítem es del
@@ -259,18 +260,6 @@ function updatePlan(planId: string, set: string, clinic: Clinic = a) {
       planId,
     ),
   );
-}
-
-/** Espera a que haya `n` sesiones de esta base esperando un bloqueo. */
-async function waitForLockWaiters(n: number): Promise<void> {
-  for (let i = 0; i < 100; i++) {
-    const [{ waiting }] = await raw.$queryRaw<{ waiting: number }[]>`
-      SELECT count(*)::int AS waiting FROM pg_stat_activity
-       WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-    if (waiting >= n) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`no llegaron ${n} esperas de bloqueo`);
 }
 
 describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, DX-051)', () => {
@@ -731,16 +720,18 @@ describe('imputación de abonos: tablas, RLS, guardas, liberación y cola (int, 
         deleted = resolve;
       });
       // A: anulación (R12) con el DELETE hecho y la transacción abierta.
+      let voidingPid!: number;
       const voiding = asApp(a.tenantId, async (tx) => {
         await tx.$executeRaw`SET LOCAL app.allocation_cause = 'VOID'`;
         await tx.paymentAllocation.deleteMany({ where: { paymentId: voided } });
+        voidingPid = await backendPid(tx);
         deleted();
         await held;
       });
       await deletedOpen;
       // B: descuento de 30 (facturable 70); espera a la fila que A borró.
       const discount = updateItem(done, `"discount" = 30`);
-      await waitForLockWaiters(1);
+      await waitForLockWaiters(raw, [voidingPid], 1);
       release();
       await Promise.all([voiding, discount]);
 

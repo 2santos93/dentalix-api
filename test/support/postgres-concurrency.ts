@@ -61,7 +61,7 @@ export async function backendPid(
 
 /**
  * Espera a que haya `count` sesiones esperando un bloqueo que tienen los
- * `holderPids` del test (`pg_blocking_pids`): no cuenta las esperas de otra
+ * `holderPids` del test, directa o detrás de otra espera (`pg_blocking_pids`): no cuenta las esperas de otra
  * suite, de otra clínica ni de un barrido que corra a la vez en la misma BD.
  */
 export async function waitForLockWaiters(
@@ -71,11 +71,21 @@ export async function waitForLockWaiters(
 ): Promise<void> {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) {
+    // Transitivo: una espera detrás de otra espera del mismo bloqueo (p. ej.
+    // la que pide el plan que tiene otra que ya espera el ítem) también cuenta.
     const [row] = await observer.$queryRaw<{ waiting: number }[]>`
-      SELECT count(*)::int AS waiting FROM pg_catalog.pg_stat_activity a
-       WHERE a.datname = current_database()
-         AND a.wait_event_type = 'Lock'
-         AND pg_blocking_pids(a.pid) && ${holderPids}::int[]`;
+      WITH RECURSIVE chain(pid) AS (
+        SELECT a.pid FROM pg_catalog.pg_stat_activity a
+         WHERE a.datname = current_database()
+           AND a.wait_event_type = 'Lock'
+           AND pg_blocking_pids(a.pid) && ${holderPids}::int[]
+        UNION
+        SELECT a.pid FROM pg_catalog.pg_stat_activity a
+          JOIN chain c ON c.pid = ANY (pg_blocking_pids(a.pid))
+         WHERE a.datname = current_database()
+           AND a.wait_event_type = 'Lock'
+      )
+      SELECT count(*)::int AS waiting FROM chain`;
     if (row.waiting >= count) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
