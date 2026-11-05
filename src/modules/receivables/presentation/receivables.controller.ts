@@ -31,7 +31,10 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { GetReceivablesAgingUseCase } from '../application/use-cases/get-receivables-aging.use-case';
+import { ListCreditBalancesUseCase } from '../application/use-cases/list-credit-balances.use-case';
 import { toReceivablesCsv } from '../application/receivables-csv';
+import { CreditBalancesQueryDto } from './dto/credit-balances-query.dto';
+import { CreditBalancesPageDto } from './dto/credit-balances.dto';
 import {
   ReceivablesAgingFiltersDto,
   ReceivablesAgingQueryDto,
@@ -68,6 +71,7 @@ const LOCATION_HEADER = {
 export class ReceivablesController {
   constructor(
     private readonly getAging: GetReceivablesAgingUseCase,
+    private readonly listCredit: ListCreditBalancesUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -75,7 +79,7 @@ export class ReceivablesController {
    * Sede explícita (DX-089: tiene que ser permitida, si no 403) o la del
    * request. Sin ninguna, el repositorio acota a las sedes permitidas.
    */
-  private locationOf(query: ReceivablesAgingFiltersDto): string | undefined {
+  private locationOf(query: { locationId?: string }): string | undefined {
     if (query.locationId) {
       this.tenantContext.assertLocationAllowed(query.locationId);
     }
@@ -163,6 +167,43 @@ export class ReceivablesController {
       minAgeDays: query.minAgeDays,
       providerId: query.providerId,
       hasPromise: query.hasPromise,
+      page: query.page,
+      pageSize: query.pageSize,
+    });
+  }
+
+  // Saldo a favor por paciente (DX-430): dinero de varios pacientes que la
+  // clínica debe aplicar o devolver. Mismos roles, sede y auditoría que la
+  // lista de la cartera; el evento no lleva paciente (es una lista).
+  @Audit({
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_CREDIT_BALANCES',
+  })
+  @Get('credit-balances')
+  @ApiOperation({
+    summary: 'Pacientes con saldo a favor, por sede y moneda',
+    description:
+      'Una fila por paciente y moneda, con el saldo a favor que dice su estado de ' +
+      'cuenta (mismo cálculo: lo abonado de más o en un plan cancelado o rechazado, ' +
+      'ya descontados traspasos y devoluciones; un plan con deuda no lo compensa) y ' +
+      'la antigüedad del abono más antiguo que lo origina, en días civiles de la ' +
+      'sede. La sede de la fila es la de la cartera (la de su deuda). Orden: moneda ' +
+      '(código ISO), luego importe descendente, luego paciente. Paginada como la ' +
+      'cartera por antigüedad. Sin datos clínicos. Solo administración y recepción.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: CreditBalancesPageDto })
+  @ApiBadRequestResponse({
+    description: 'Filtro inválido o sede que no es de esta clínica',
+  })
+  @ApiForbiddenResponse({ description: RECEIVABLES_FORBIDDEN_MESSAGE })
+  creditBalances(
+    @Query() query: CreditBalancesQueryDto,
+  ): Promise<CreditBalancesPageDto> {
+    return this.listCredit.execute({
+      locationId: this.locationOf(query),
+      currency: query.currency,
       page: query.page,
       pageSize: query.pageSize,
     });

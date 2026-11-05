@@ -1032,6 +1032,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     reason: 'RECEIVABLES_AGING_SUMMARY',
   },
+  // DX-430: la lista de saldo a favor (dinero de muchos pacientes).
+  'GET /receivables/credit-balances': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_CREDIT_BALANCES',
+  },
   // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
   // de muchos pacientes, sin paciente en el evento) y su CSV.
   'PUT /discount-policy': { action: 'UPDATE', resource: 'DISCOUNT_POLICY' },

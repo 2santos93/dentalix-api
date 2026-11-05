@@ -125,6 +125,7 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /receivables/aging/summary ?providerId',
   'GET /receivables/aging.csv ?locationId',
   'GET /receivables/aging.csv ?providerId',
+  'GET /receivables/credit-balances ?locationId',
   'GET /cash-sessions/current ?locationId',
   'POST /cash-sessions/open body.locationId',
   'GET /cash-sessions ?locationId',

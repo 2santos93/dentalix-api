@@ -8,6 +8,7 @@ import {
   Prisma,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import { NON_BILLABLE_PLAN_STATUSES } from '../../treatment-plans/domain/plan-status-machine';
 import { phoneRegionOrNull } from '../../../shared/phone/phone-number';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -19,6 +20,7 @@ import type {
   LedgerPendingPayment,
   PatientLedger,
 } from '../domain/entities/receivables.entity';
+import type { CreditBalancesRepository } from '../domain/ports/credit-balances-repository.port';
 import type {
   LedgersQuery,
   ReceivablesLocation,
@@ -276,7 +278,9 @@ interface DebtorSqlRow {
  * un double y el cálculo redondea a centavos.
  */
 @Injectable()
-export class PrismaReceivablesRepository implements ReceivablesRepository {
+export class PrismaReceivablesRepository
+  implements ReceivablesRepository, CreditBalancesRepository
+{
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
@@ -548,5 +552,115 @@ export class PrismaReceivablesRepository implements ReceivablesRepository {
       }
       return out;
     });
+  }
+
+  /**
+   * DX-430: los pacientes vivos que PUEDEN tener saldo a favor, leídos del
+   * mismo resumen `patient_ledgers` (DX-155) que la cartera, con la misma
+   * regla de sede. El resumen ya trae los asientos del saldo a favor dentro de
+   * lo abonado del plan (posición 6) y las bases de lo abonado en otra moneda
+   * (posición 8). Un plan puede tener saldo a favor si
+   *    abonado + bases > facturable        (0 si está cancelado o rechazado),
+   * o si tiene abonos en otra moneda aún sin base (posición 9): la API los
+   * convierte y solo puede SUBIR lo abonado. Es un superconjunto exacto de
+   * quien tiene saldo a favor en `computeBalances`; no decide ninguna cifra,
+   * solo evita traer a quien seguro no tiene. Sin índice propio: recorre las
+   * filas de la clínica (o de la sede) por la clave primaria; ver el informe de
+   * DX-430 para el EXPLAIN.
+   */
+  async loadCreditLedgers(query: LedgersQuery): Promise<PatientLedger[]> {
+    const tenantId = this.tenantId();
+    const scopeIds = query.locationId
+      ? [query.locationId]
+      : this.tenantContext.scopeLocationIds();
+    const locationFilter = scopeIds
+      ? Prisma.sql`AND l."locationId" = ANY(${scopeIds}::uuid[])`
+      : Prisma.empty;
+    const nonBillable: string[] = [...NON_BILLABLE_PLAN_STATUSES];
+
+    const rows = await this.prisma.runWithTenant(
+      (tx) =>
+        tx.$queryRaw<LedgerSqlRow[]>`
+          SELECT l."patientId", l."locationId", l."ledger"::text AS "ledger"
+            FROM "patient_ledgers" l
+            JOIN "patients" pa
+              ON pa."tenantId" = l."tenantId" AND pa."id" = l."patientId"
+             AND pa."deletedAt" IS NULL
+           WHERE l."tenantId" = ${tenantId}::uuid
+             ${locationFilter}
+             AND EXISTS (
+               SELECT 1
+                 FROM jsonb_array_elements(l."ledger" -> 'plans') AS p("plan")
+                WHERE COALESCE((p."plan" ->> 6)::numeric, 0)
+                      + COALESCE((p."plan" ->> 8)::numeric, 0)
+                      > CASE WHEN (p."plan" ->> 1) = ANY(${nonBillable}::text[])
+                             THEN 0 ELSE (p."plan" ->> 5)::numeric END
+                   OR jsonb_array_length(
+                        COALESCE(NULLIF(p."plan" -> 9, 'null'::jsonb), '[]'::jsonb)
+                      ) > 0)`,
+    );
+    return rows.map(toLedger);
+  }
+
+  async patientNames(
+    patientIds: readonly string[],
+  ): Promise<Map<string, string>> {
+    const tenantId = this.tenantId();
+    const ids = [...new Set(patientIds)];
+    if (ids.length === 0) return new Map();
+    const patients = await this.prisma.runWithTenant((tx) =>
+      tx.patient.findMany({
+        where: { tenantId, id: { in: ids }, deletedAt: null },
+        select: { id: true, firstName: true, lastName: true },
+      }),
+    );
+    return new Map(
+      patients.map((p) => [p.id, `${p.firstName} ${p.lastName}`.trim()]),
+    );
+  }
+
+  async locationNames(): Promise<Map<string, string>> {
+    const tenantId = this.tenantId();
+    const locations = await this.prisma.runWithTenant((tx) =>
+      tx.location.findMany({
+        where: { tenantId },
+        select: { id: true, name: true },
+      }),
+    );
+    return new Map(locations.map((l) => [l.id, l.name]));
+  }
+
+  /**
+   * DX-430: el abono vivo más antiguo del árbol de cada plan: sus abonos y los
+   * de los planes que le traspasaron saldo (recursivo; `UNION` descarta los
+   * ciclos). Por el índice de abonos por plan.
+   */
+  async oldestCreditPayments(
+    planIds: readonly string[],
+  ): Promise<Map<string, Date>> {
+    const tenantId = this.tenantId();
+    const ids = [...new Set(planIds)];
+    if (ids.length === 0) return new Map();
+    const rows = await this.prisma.runWithTenant(
+      (tx) =>
+        tx.$queryRaw<{ planId: string; paidAt: Date }[]>`
+          WITH RECURSIVE src("planId", "rootId") AS (
+            SELECT x, x FROM unnest(${ids}::uuid[]) AS u(x)
+            UNION
+            SELECT t."sourcePlanId", s."rootId"
+              FROM src s
+              JOIN "patient_credit_transfers" t
+                ON t."tenantId" = ${tenantId}::uuid
+               AND t."targetPlanId" = s."planId"
+          )
+          SELECT s."rootId" AS "planId", pg_catalog.min(p."paidAt") AS "paidAt"
+            FROM src s
+            JOIN "payments" p
+              ON p."tenantId" = ${tenantId}::uuid
+             AND p."treatmentPlanId" = s."planId"
+             AND p."deletedAt" IS NULL
+           GROUP BY s."rootId"`,
+    );
+    return new Map(rows.map((r) => [r.planId, r.paidAt]));
   }
 }
