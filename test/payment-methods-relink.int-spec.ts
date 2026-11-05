@@ -72,9 +72,14 @@ async function seedClinic(
     ['Otro', 'OTHER', 'OTHER'],
     ['Pago móvil', 'DIGITAL', null],
   ] as const) {
-    const row = await db.clinicPaymentMethod.create({
-      data: { tenantId: tenant.id, name, kind, legacyMethod },
-    });
+    // SQL: la BD desechable llega solo hasta DX-395 y el cliente insertaría
+    // columnas posteriores (p. ej. `proofPolicy`, DX-389).
+    const [row] = await db.$queryRaw<{ id: string }[]>`
+      INSERT INTO "payment_methods"
+        ("id", "tenantId", "name", "kind", "legacyMethod", "updatedAt")
+      VALUES (gen_random_uuid(), ${tenant.id}::uuid, ${name},
+              ${kind}::"PaymentMethodKind", ${legacyMethod}::"PaymentMethod", now())
+      RETURNING "id"`;
     methods[name] = row.id;
   }
   return {

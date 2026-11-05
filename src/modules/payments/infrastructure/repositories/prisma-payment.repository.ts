@@ -47,6 +47,7 @@ import {
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   OpeningBalanceTarget,
+  PaymentProofRecord,
   PaymentRepository,
   PaymentVoidAudit,
   PaymentVoidTarget,
@@ -94,6 +95,10 @@ import {
   ADJUSTMENT_LINE_SELECT,
   insertPaymentAdjustments,
 } from './payment-adjustments.persistence';
+import {
+  PROOF_ALREADY_USED_MESSAGE,
+  type PaymentProofAttachment,
+} from '../../domain/payment-proof';
 import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
 import { toCents } from '../../../../shared/money/money';
 
@@ -111,6 +116,8 @@ const PAYMENT_INCLUDE = {
   paymentMethod: { select: { name: true } },
   // DX-516: sus ajustes por medio de pago, en orden.
   methodAdjustments: ADJUSTMENT_LINE_SELECT,
+  // DX-389: solo si tiene comprobante (la clave del almacén no se lee).
+  proof: { select: { id: true } },
 } satisfies Prisma.PaymentInclude;
 
 type PrismaPayment = Prisma.PaymentGetPayload<{
@@ -150,6 +157,20 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/**
+ * DX-389: la violación del único de la subida (`payment_proofs_tenant_upload_key`).
+ * Se reconoce por el índice (su nombre, o sus campos `tenantId, uploadId` según
+ * lo que dé el motor), no por «cualquier único de la tabla»: otro índice futuro
+ * no se contaría como «ya está adjunto».
+ */
+export function isProofUploadReuse(error: unknown): boolean {
+  if (!isUniqueViolation(error)) return false;
+  const meta = (error as Prisma.PrismaClientKnownRequestError).meta ?? {};
+  const target = (meta as { target?: unknown }).target;
+  if (Array.isArray(target)) return target.includes('uploadId');
+  return JSON.stringify(meta).includes('payment_proofs_tenant_upload_key');
+}
+
 function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
   const adjustments = adjustmentLinesOf(payment.methodAdjustments);
   return {
@@ -186,6 +207,7 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     }),
     adjustments,
     collectedAmount: collectedAmount(payment.amount.toNumber(), adjustments),
+    hasProof: payment.proof !== null,
   };
 }
 
@@ -235,6 +257,8 @@ const CASH_PAYMENT_SELECT = {
   },
   // DX-414: el recibo del abono (o el de la línea 1 de su cobro dividido).
   receipt: RECEIPT_NUMBER_SELECT,
+  // DX-389: ¿tiene comprobante del cobro? (la clave no se lee).
+  proof: { select: { id: true } },
   // DX-516: sus ajustes por medio de pago, en orden.
   methodAdjustments: ADJUSTMENT_LINE_SELECT,
 } satisfies Prisma.PaymentSelect;
@@ -319,6 +343,7 @@ function mapToCashPayment(
     ),
     adjustments,
     collectedAmount: collectedAmount(row.amount.toNumber(), adjustments),
+    hasProof: row.proof !== null,
   };
 }
 
@@ -715,8 +740,40 @@ export class PrismaPaymentRepository implements PaymentRepository {
       { tenantId, paymentId: created.id },
       input.adjustments ?? [],
     );
+    // DX-389: el comprobante nace con el abono, en la misma transacción.
+    const proof = input.proof
+      ? await tx.paymentProof
+          .create({
+            data: {
+              tenantId,
+              paymentId: created.id,
+              uploadId: input.proof.uploadId,
+              key: input.proof.key,
+              mime: input.proof.mime,
+              size: input.proof.size,
+              sha256: input.proof.sha256,
+              name: input.proof.name,
+              createdById: input.createdById ?? null,
+            },
+            select: { id: true },
+          })
+          // La subida ya respalda otro abono (único por clínica): 400 en
+          // español, y la transacción entera se deshace.
+          .catch((error: unknown) => {
+            if (isProofUploadReuse(error)) {
+              throw new BadRequestException(PROOF_ALREADY_USED_MESSAGE);
+            }
+            throw error;
+          })
+      : null;
     const entity = mapToEntity(
-      { ...created, receipt: null, splitHead: null, methodAdjustments },
+      {
+        ...created,
+        receipt: null,
+        splitHead: null,
+        methodAdjustments,
+        proof: input.proof ? { id: proof?.id ?? '' } : null,
+      },
       timeZone,
     );
     // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
@@ -933,6 +990,43 @@ export class PrismaPaymentRepository implements PaymentRepository {
         }),
       ),
     );
+  }
+
+  async findProof(paymentId: string): Promise<PaymentProofRecord | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // RLS acota a la clínica: el abono de otra no existe aquí. Un abono
+      // anulado conserva su comprobante (es evidencia para conciliar).
+      const row = await tx.paymentProof.findFirst({
+        where: { tenantId, paymentId },
+        include: {
+          payment: { select: { patientId: true, locationId: true } },
+        },
+      });
+      if (!row) return null;
+      return {
+        paymentId: row.paymentId,
+        patientId: row.payment.patientId,
+        locationId: row.payment.locationId,
+        attachment: {
+          uploadId: row.uploadId,
+          key: row.key,
+          mime: row.mime as PaymentProofAttachment['mime'],
+          size: row.size,
+          sha256: row.sha256,
+          name: row.name,
+        },
+      };
+    });
+  }
+
+  async proofKeyInUse(key: string): Promise<boolean> {
+    const count = await this.prisma.runWithTenant((tx) =>
+      tx.paymentProof.count({
+        where: { tenantId: this.requireTenantId(), key },
+      }),
+    );
+    return count > 0;
   }
 
   async findByIdempotencyKey(

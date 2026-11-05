@@ -1,3 +1,4 @@
+import { buildPaymentProofKit } from '../__fixtures__/payment-proof-kit';
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   BadRequestException,
@@ -46,6 +47,7 @@ function medium(
     kind: 'CASH',
     active: true,
     requiresReference: false,
+    proofPolicy: 'NONE',
     adjustments: [],
     legacyMethod: 'CASH',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -158,6 +160,7 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     } as unknown as ReceiptPlanBalanceCalculator,
     convert as unknown as ConvertAmountUseCase,
     gate,
+    buildPaymentProofKit(repo).proofs,
     () => now,
   );
   const uc = new RecordSplitPaymentUseCase(
@@ -165,6 +168,7 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     getPlan as unknown as GetTreatmentPlanUseCase,
     recordPayment,
     getPlanBalance as unknown as GetPlanBalanceUseCase,
+    buildPaymentProofKit(repo).proofs,
   );
   return {
     repo,

@@ -39,6 +39,7 @@ import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/co
 import { errorName } from '../payment-in-plan-currency';
 import { freezePaymentRate, paymentBaseAmount } from '../payment-exchange-rate';
 import type { FrozenExchangeRate } from '../../domain/payment-exchange-rate';
+import { PaymentProofs, attachmentOf } from '../payment-proofs';
 import {
   PaymentMethodGate,
   type PaymentMethodRequest,
@@ -64,6 +65,8 @@ export interface RecordPaymentInput {
   reference?: string;
   /** DX-377: motivo para confirmar una referencia repetida (409 sin él). */
   duplicateReferenceReason?: string;
+  /** DX-389: subida del comprobante (`POST /payments/proofs/upload-url`). */
+  proofUploadId?: string;
   notes?: string;
 }
 
@@ -179,6 +182,8 @@ export class RecordPaymentUseCase {
     private readonly convertAmount: ConvertAmountUseCase,
     // DX-377: medio del catálogo, referencia y aviso de referencia repetida.
     private readonly paymentMethodGate: PaymentMethodGate,
+    // DX-389: el comprobante del cobro (subida directa ya hecha).
+    private readonly proofs: PaymentProofs,
     // DX-054: la fecha del abono no puede ir más de 24 h por delante.
     @Inject(PAYMENT_CLOCK)
     private readonly now: PaymentClock,
@@ -258,6 +263,11 @@ export class RecordPaymentUseCase {
         ? null
         : { planCurrency: plan.currency, amount: converted, rateDate: paidOn };
 
+    // DX-389: lo último antes de la transacción (copia el objeto subido).
+    const proof = await this.proofs.complete(
+      payMethod.proofUploadId,
+      createdById,
+    );
     const repoInput: CreatePaymentRepoInput = {
       treatmentPlanId,
       openingBalanceId: null,
@@ -271,6 +281,7 @@ export class RecordPaymentUseCase {
       referenceNormalized: payMethod.referenceNormalized,
       duplicateReferenceReason: payMethod.duplicateReferenceReason,
       adjustments: payMethod.adjustments,
+      proof: attachmentOf(proof),
       notes: input.notes,
       createdById,
       idempotencyKey: key,
@@ -280,7 +291,14 @@ export class RecordPaymentUseCase {
       frozenRate,
     };
 
-    const payment = await this.repo.create(repoInput);
+    let payment: Payment;
+    try {
+      payment = await this.repo.create(repoInput);
+    } catch (error) {
+      await this.proofs.settle([proof], false);
+      throw error;
+    }
+    await this.proofs.settle([proof], true);
     return { ...payment, duplicateReferenceOf: payMethod.duplicateReferenceOf };
   }
 

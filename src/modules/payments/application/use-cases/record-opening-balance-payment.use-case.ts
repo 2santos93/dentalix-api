@@ -31,6 +31,7 @@ import {
   type RecordPaymentInput,
 } from './record-payment.use-case';
 import { PaymentMethodGate } from '../payment-method-gate';
+import { PaymentProofs, attachmentOf } from '../payment-proofs';
 import { toCents } from '../../../../shared/money/money';
 
 /**
@@ -50,6 +51,8 @@ export class RecordOpeningBalancePaymentUseCase {
     private readonly whitelist: CurrencyWhitelist,
     // DX-377: medio del catálogo, referencia y aviso de referencia repetida.
     private readonly paymentMethodGate: PaymentMethodGate,
+    // DX-389: el comprobante del cobro (subida directa ya hecha).
+    private readonly proofs: PaymentProofs,
     // DX-054: la fecha del abono no puede ir más de 24 h por delante.
     @Inject(PAYMENT_CLOCK)
     private readonly now: PaymentClock,
@@ -123,30 +126,42 @@ export class RecordOpeningBalancePaymentUseCase {
       amount: input.amount,
       currency,
     });
-    const payment = await this.repo.create({
-      treatmentPlanId: null,
-      openingBalanceId,
-      patientId: balance.patientId,
-      amount: input.amount,
-      currency,
-      paidAt,
-      method: payMethod.method,
-      paymentMethodId: payMethod.paymentMethodId,
-      reference: payMethod.reference,
-      referenceNormalized: payMethod.referenceNormalized,
-      duplicateReferenceReason: payMethod.duplicateReferenceReason,
-      adjustments: payMethod.adjustments,
-      notes: input.notes,
+    const proof = await this.proofs.complete(
+      payMethod.proofUploadId,
       createdById,
-      idempotencyKey: key,
-      requestFingerprint: key === undefined ? undefined : requestFingerprint,
-      // El saldo del recibo lo calcula el repositorio con el saldo bloqueado.
-      receiptPlanBalance: null,
-      // DX-051 (R1): un abono a un saldo migrado no se imputa a ítems.
-      planAmount: null,
-      // Un saldo migrado se abona en su moneda: no hay tasa que congelar.
-      frozenRate: null,
-    });
+    );
+    let payment: Payment;
+    try {
+      payment = await this.repo.create({
+        treatmentPlanId: null,
+        openingBalanceId,
+        patientId: balance.patientId,
+        amount: input.amount,
+        currency,
+        paidAt,
+        method: payMethod.method,
+        paymentMethodId: payMethod.paymentMethodId,
+        reference: payMethod.reference,
+        referenceNormalized: payMethod.referenceNormalized,
+        duplicateReferenceReason: payMethod.duplicateReferenceReason,
+        adjustments: payMethod.adjustments,
+        proof: attachmentOf(proof),
+        notes: input.notes,
+        createdById,
+        idempotencyKey: key,
+        requestFingerprint: key === undefined ? undefined : requestFingerprint,
+        // El saldo del recibo lo calcula el repositorio con el saldo bloqueado.
+        receiptPlanBalance: null,
+        // DX-051 (R1): un abono a un saldo migrado no se imputa a ítems.
+        planAmount: null,
+        // Un saldo migrado se abona en su moneda: no hay tasa que congelar.
+        frozenRate: null,
+      });
+    } catch (error) {
+      await this.proofs.settle([proof], false);
+      throw error;
+    }
+    await this.proofs.settle([proof], true);
     return { ...payment, duplicateReferenceOf: payMethod.duplicateReferenceOf };
   }
 }

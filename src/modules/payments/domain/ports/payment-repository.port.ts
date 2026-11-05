@@ -10,6 +10,7 @@ import { CashPayment } from '../entities/cash-payment.entity';
 import type { VoidSubject } from '../void-window';
 import type { ReceiptPlanBalance } from '../receipt-snapshot';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import type { PaymentProofAttachment } from '../payment-proof';
 import type { ComputedAdjustment } from '../../../payment-methods/domain/payment-adjustments';
 
 // NOTE: deliberately NO `tenantId`/`id` field — the tenant comes from the
@@ -52,6 +53,11 @@ export interface CreatePaymentRepoInput {
    */
   adjustments?: ComputedAdjustment[];
   notes?: string;
+  /**
+   * DX-389: el comprobante ya comprobado y copiado a su clave definitiva: la
+   * fila nace en la MISMA transacción que el abono.
+   */
+  proof?: PaymentProofAttachment | null;
   createdById?: string;
   /**
    * Idempotency-Key (UUID) for dedup. When set, persisted and covered by the
@@ -287,6 +293,15 @@ export interface PaymentVoidAudit {
 
 export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
 
+/** DX-389: el comprobante de un abono y el paciente de éste (para la auditoría). */
+export interface PaymentProofRecord {
+  paymentId: string;
+  patientId: string;
+  /** La sede del abono: manda para quién puede verlo (DX-089). */
+  locationId: string;
+  attachment: PaymentProofAttachment;
+}
+
 export interface PaymentRepository {
   /**
    * Inserta el abono. Dentro de la MISMA transacción vuelve a comprobar que el
@@ -368,6 +383,16 @@ export interface PaymentRepository {
    * "absent").
    */
   findById(id: string): Promise<Payment | null>;
+
+  /**
+   * DX-389: el comprobante de un abono VIVO o anulado de esta clínica (RLS),
+   * o `null` si el abono no existe (otra clínica incluida) o no tiene. La
+   * clave del almacén solo la usa quien firma la URL.
+   */
+  findProof(paymentId: string): Promise<PaymentProofRecord | null>;
+
+  /** DX-389: ¿alguna fila usa ya esa clave de almacén? (limpieza de huérfanos). */
+  proofKeyInUse(key: string): Promise<boolean>;
 
   /**
    * The payment carrying this Idempotency-Key in the current tenant (RLS-

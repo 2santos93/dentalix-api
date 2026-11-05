@@ -1,4 +1,7 @@
 import { referenceCurrencyDigitsCatalog } from '../src/shared/money/__fixtures__/reference-currency-digits';
+import { PaymentProofs } from '../src/modules/payments/application/payment-proofs';
+import { PaymentProofUploads } from '../src/modules/payments/application/payment-proof-uploads';
+import { InMemoryFileStorage } from '../src/shared/storage/__fixtures__/in-memory-file-storage';
 import { PaymentMethodGate } from '../src/modules/payments/application/payment-method-gate';
 import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/infrastructure/prisma-payment-method.repository';
 import {
@@ -125,6 +128,10 @@ const recordPayment = new RecordPaymentUseCase(
     new PrismaPaymentMethodRepository(prisma, tenantContext),
     paymentRepo,
     referenceCurrencyDigitsCatalog(),
+  ),
+  new PaymentProofs(
+    new PaymentProofUploads(new InMemoryFileStorage(), tenantContext, 900),
+    paymentRepo,
   ),
   () => NOW,
 );

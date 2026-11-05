@@ -181,6 +181,8 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                   receipt: { select: { seriesPrefix: true, number: true } },
                 },
               },
+              // DX-389: ¿tiene comprobante del cobro? (la clave no se lee).
+              proof: { select: { id: true } },
               createdById: true,
               createdAt: true,
               deletedAt: true,
@@ -383,6 +385,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 p.receipt ?? p.splitHead?.receipt ?? null,
               ),
               location: p.location,
+              hasProof: p.proof !== null,
               createdById: p.createdById,
               createdAt: p.createdAt,
               timeZone: timeZoneOf(p.location.id),

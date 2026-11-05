@@ -1,4 +1,5 @@
 import type {
+  PaymentProofPolicy,
   PaymentAdjustmentCalculation,
   PaymentAdjustmentType,
   PaymentMethod,
@@ -31,6 +32,8 @@ export interface ClinicPaymentMethodEntity {
   kind: PaymentMethodKind;
   active: boolean;
   requiresReference: boolean;
+  /** DX-389: «Pide comprobante» del cobro: NONE (defecto), OPTIONAL o REQUIRED. */
+  proofPolicy: PaymentProofPolicy;
   /** Medio inicial equivalente a este método antiguo; `null` si es propio. */
   legacyMethod: PaymentMethod | null;
   /**

@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type {
+  PaymentProofPolicy,
   PaymentAdjustmentCalculation,
   PaymentAdjustmentType,
   PaymentMethodKind,
@@ -50,6 +51,8 @@ export interface PaymentMethodInput {
   kind: PaymentMethodKind;
   active?: boolean;
   requiresReference?: boolean;
+  /** DX-389: «Pide comprobante»; sin indicarlo, NONE. */
+  proofPolicy?: PaymentProofPolicy;
 }
 
 function normalizedName(name: string): string {
@@ -94,6 +97,7 @@ export class CreatePaymentMethodUseCase {
         kind: input.kind,
         active: input.active ?? true,
         requiresReference: input.requiresReference ?? false,
+        proofPolicy: input.proofPolicy ?? 'NONE',
       },
       userId,
     );
@@ -126,6 +130,7 @@ export class UpdatePaymentMethodUseCase {
       kind: input.kind,
       active: input.active,
       requiresReference: input.requiresReference,
+      proofPolicy: input.proofPolicy,
     };
     if (input.name !== undefined) {
       data.name = normalizedName(input.name);

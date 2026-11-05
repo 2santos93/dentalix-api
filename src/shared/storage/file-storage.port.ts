@@ -56,6 +56,19 @@ export interface StoredObjectInfo {
  * SHA-256 es obligatorio y los metadatos quedan fijados; el cliente no puede
  * cambiar nada de eso sin invalidar la firma.
  */
+/** DX-389: un objeto de un listado (para los barridos de pendientes). */
+export interface StoredObjectSummary {
+  key: string;
+  lastModified: Date;
+  size: number;
+}
+
+export interface StoredObjectPage {
+  objects: StoredObjectSummary[];
+  /** Entrégalo en la llamada siguiente; `null` en la última página. */
+  nextToken: string | null;
+}
+
 export interface DirectUploadPolicy {
   /** Tamaño máximo en bytes (el mínimo es 1). */
   maxBytes: number;
@@ -156,6 +169,16 @@ export interface FileStoragePort {
 
   /** Borra `key`. Idempotente: no falla si no existe. */
   delete(key: string): Promise<void>;
+
+  /**
+   * DX-389: lista los objetos bajo `prefix` (termina en `/`), por páginas de
+   * hasta `maxKeys` (por defecto 200), en orden de clave. Solo para los
+   * barridos de objetos pendientes (`payment-proofs/pending/`).
+   */
+  listObjects(
+    prefix: string,
+    options?: { token?: string | null; maxKeys?: number },
+  ): Promise<StoredObjectPage>;
 
   /**
    * URL estable para lo PÚBLICO (avatares, logos): la API lo sirve en

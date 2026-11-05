@@ -210,6 +210,12 @@ export class CashPaymentDto {
   receiptNumber!: string | null;
 
   @ApiProperty({
+    description:
+      'DX-389: el abono tiene comprobante del cobro. Se ve con `GET /payments/:id/proof/url`.',
+  })
+  hasProof!: boolean;
+
+  @ApiProperty({
     type: [PaymentAdjustmentLineDto],
     description:
       'DX-516: ajustes por medio de pago congelados en el abono (vacío sin ajustes).',

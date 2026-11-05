@@ -231,6 +231,14 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // «una subida de otra clínica no sirve de soporte de una salida (404)».
   'POST /cash-sessions/current/outflows body.attachmentUploadId':
     'expense-cash-outflows.e2e-spec.ts',
+  // DX-389: «la subida del comprobante de otra clínica es 404» (abono a un
+  // plan, a un saldo migrado y en cada línea de un cobro dividido).
+  'POST /treatment-plans/:id/payments body.proofUploadId':
+    'payment-proofs.e2e-spec.ts',
+  'POST /opening-balances/:id/payments body.proofUploadId':
+    'payment-proofs.e2e-spec.ts',
+  'POST /treatment-plans/:id/split-payments body.lines[].proofUploadId':
+    'payment-proofs.e2e-spec.ts',
   // Una sede ajena en la lista, el resumen y sus CSV no devuelve nada.
   'GET /expenses ?locationId': 'expenses-reports.e2e-spec.ts',
   'GET /expenses.csv ?locationId': 'expenses-reports.e2e-spec.ts',

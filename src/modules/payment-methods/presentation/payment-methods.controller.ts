@@ -115,6 +115,7 @@ export class PaymentMethodsController {
         kind: dto.kind,
         active: dto.active,
         requiresReference: dto.requiresReference,
+        proofPolicy: dto.proofPolicy,
       },
       req.user.sub,
     );
@@ -148,6 +149,7 @@ export class PaymentMethodsController {
         kind: dto.kind,
         active: dto.active,
         requiresReference: dto.requiresReference,
+        proofPolicy: dto.proofPolicy,
       },
       req.user.sub,
     );

@@ -21,6 +21,7 @@ import {
   normalizeReference,
   referenceError,
 } from '../../payment-methods/domain/payment-method-rules';
+import { proofPolicyError } from '../domain/payment-proof';
 import {
   PAYMENT_REPOSITORY,
   type CivilPaidDay,
@@ -41,6 +42,11 @@ export interface PaymentMethodRequest {
   method?: PaymentMethod;
   reference?: string;
   duplicateReferenceReason?: string;
+  /**
+   * DX-389: la subida del comprobante (`upload-url`); obligatoria si el medio
+   * es REQUIRED y no admitida si es NONE.
+   */
+  proofUploadId?: string;
 }
 
 export interface ResolvedPaymentMethod {
@@ -50,6 +56,8 @@ export interface ResolvedPaymentMethod {
   referenceNormalized: string | null;
   duplicateReferenceReason: string | null;
   duplicateReferenceOf: string[];
+  /** DX-389: la subida del comprobante ya validada contra «Pide comprobante». */
+  proofUploadId: string | null;
   /**
    * DX-516: los ajustes del medio calculados sobre el importe del abono (lo
    * que se congela en él). Vacío sin ajustes, sin medio o sin `charge`.
@@ -112,6 +120,14 @@ export class PaymentMethodGate {
     const requiresReference = medium?.requiresReference ?? false;
     const error = referenceError(input.reference, requiresReference);
     if (error !== null) throw new BadRequestException(error);
+    const proofUploadId = input.proofUploadId?.trim() || null;
+    const proofError = proofPolicyError(
+      // Sin medio resuelto (abono sin método) no hay política que aplicar: el
+      // comprobante se admite como OPTIONAL, nunca se exige (DX-389, L5).
+      medium?.proofPolicy ?? 'OPTIONAL',
+      proofUploadId !== null,
+    );
+    if (proofError !== null) throw new BadRequestException(proofError);
     const referenceNormalized = normalizeReference(input.reference);
     const reference =
       referenceNormalized === null ? null : (input.reference?.trim() ?? null);
@@ -154,6 +170,7 @@ export class PaymentMethodGate {
       referenceNormalized,
       duplicateReferenceReason: matches.length > 0 ? reason : null,
       duplicateReferenceOf: matches.map((m) => m.id),
+      proofUploadId,
       adjustments: await this.adjustmentsOf(medium, charge),
     };
   }

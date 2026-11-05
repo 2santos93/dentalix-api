@@ -80,4 +80,9 @@ export interface Payment {
    */
   adjustments: PaymentAdjustmentLine[];
   collectedAmount: number;
+  /**
+   * DX-389: el abono tiene comprobante del cobro adjunto. Solo un indicador:
+   * la clave del almacén no sale nunca; se ve con `GET /payments/:id/proof/url`.
+   */
+  hasProof: boolean;
 }

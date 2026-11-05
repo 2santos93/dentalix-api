@@ -2,7 +2,10 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { ClinicPaymentMethodEntity } from '../domain/payment-method.entity';
 import type { PaymentMethodRepository } from '../domain/ports/payment-method-repository.port';
 import { INITIAL_KIND_LOCKED_MESSAGE } from '../domain/payment-method-rules';
-import { UpdatePaymentMethodUseCase } from './payment-methods.use-cases';
+import {
+  CreatePaymentMethodUseCase,
+  UpdatePaymentMethodUseCase,
+} from './payment-methods.use-cases';
 
 function method(
   overrides: Partial<ClinicPaymentMethodEntity>,
@@ -14,6 +17,7 @@ function method(
     kind: 'CASH',
     active: true,
     requiresReference: false,
+    proofPolicy: 'NONE',
     adjustments: [],
     legacyMethod: 'CASH',
     createdAt: new Date(0),
@@ -93,5 +97,45 @@ describe('UpdatePaymentMethodUseCase (DX-377)', () => {
     await expect(
       useCase.execute('pm-1', { kind: 'CARD' }, 'u-1'),
     ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('«Pide comprobante» (DX-389)', () => {
+  it('un medio nuevo nace en NONE y admite elegir OPTIONAL o REQUIRED', async () => {
+    const { repo } = repoWith(null);
+    const create = jest.fn().mockResolvedValue(method({}));
+    repo.create = create;
+    const useCase = new CreatePaymentMethodUseCase(repo);
+
+    await useCase.execute({ name: 'Zelle', kind: 'DIGITAL' }, 'u-1');
+    expect(create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ proofPolicy: 'NONE' }),
+      'u-1',
+    );
+    await useCase.execute(
+      { name: 'Pago móvil', kind: 'TRANSFER', proofPolicy: 'REQUIRED' },
+      'u-1',
+    );
+    expect(create).toHaveBeenLastCalledWith(
+      expect.objectContaining({ proofPolicy: 'REQUIRED' }),
+      'u-1',
+    );
+  });
+
+  it('se cambia con el resto de los ajustes del medio, también en uno inicial', async () => {
+    const { repo, update } = repoWith(method({ legacyMethod: 'TRANSFER' }));
+    const useCase = new UpdatePaymentMethodUseCase(repo);
+
+    const updated = await useCase.execute(
+      'pm-1',
+      { proofPolicy: 'OPTIONAL' },
+      'u-1',
+    );
+    expect(update).toHaveBeenCalledWith(
+      'pm-1',
+      expect.objectContaining({ proofPolicy: 'OPTIONAL' }),
+      'u-1',
+    );
+    expect(updated.proofPolicy).toBe('OPTIONAL');
   });
 });

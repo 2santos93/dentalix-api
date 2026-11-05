@@ -1,5 +1,6 @@
 import { collectedAmount } from '../../../../payment-methods/domain/payment-adjustments';
 import { Payment } from '../../../domain/entities/payment.entity';
+import type { PaymentProofAttachment } from '../../../domain/payment-proof';
 import { exchangeRateStatus } from '../../../domain/payment-exchange-rate';
 import type { IdempotentPayment } from '../../../domain/idempotency';
 import {
@@ -16,6 +17,7 @@ import {
   ReceivedPayment,
   ReferenceMatch,
   SplitPaymentRecord,
+  PaymentProofRecord,
 } from '../../../domain/ports/payment-repository.port';
 import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 import type { RegionalFormat } from '../../../../../shared/format/regional-format';
@@ -102,6 +104,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       frozenRate: overrides.frozenRate ?? null,
       adjustments: overrides.adjustments ?? [],
       collectedAmount: overrides.collectedAmount ?? overrides.amount ?? 0,
+      hasProof: overrides.hasProof ?? false,
     };
     this.payments.push(row);
     return this.toEntity(row);
@@ -139,7 +142,32 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       exchangeRateStatus: exchangeRateStatus(row),
       adjustments: row.adjustments,
       collectedAmount: row.collectedAmount,
+      hasProof: row.hasProof,
     };
+  }
+
+  /** Test helper: el comprobante guardado por abono (DX-389). */
+  readonly proofs = new Map<string, PaymentProofAttachment>();
+
+  findProof(paymentId: string): Promise<PaymentProofRecord | null> {
+    const row = this.payments.find((p) => p.id === paymentId);
+    const attachment = this.proofs.get(paymentId);
+    return Promise.resolve(
+      row && attachment
+        ? {
+            paymentId,
+            patientId: row.patientId,
+            locationId: row.locationId,
+            attachment,
+          }
+        : null,
+    );
+  }
+
+  proofKeyInUse(key: string): Promise<boolean> {
+    return Promise.resolve(
+      [...this.proofs.values()].some((a) => a.key === key),
+    );
   }
 
   resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string> {
@@ -255,8 +283,10 @@ export class InMemoryPaymentRepository implements PaymentRepository {
         currency: a.currency,
       })),
       collectedAmount: collectedAmount(input.amount, input.adjustments ?? []),
+      hasProof: Boolean(input.proof),
     };
     this.payments.push(row);
+    if (input.proof) this.proofs.set(row.id, input.proof);
     return row;
   }
 

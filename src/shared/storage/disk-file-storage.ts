@@ -1,8 +1,14 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { createReadStream, promises as fs } from 'fs';
+import type { Dirent } from 'fs';
 import * as path from 'path';
 import { contentTypeOf } from './content-type';
-import { assertFileKey, isFileKey, publicFileUrl } from './file-key';
+import {
+  assertFileKey,
+  assertListPrefix,
+  isFileKey,
+  publicFileUrl,
+} from './file-key';
 import {
   DirectUploadPolicy,
   DirectUploadTarget,
@@ -11,6 +17,8 @@ import {
   StoredFile,
   StoredFileStream,
   StoredObjectInfo,
+  StoredObjectPage,
+  StoredObjectSummary,
   assertSignedUrlOptions,
   assertSignedUrlTtl,
 } from './file-storage.port';
@@ -353,6 +361,49 @@ export class DiskFileStorage implements FileStoragePort {
     await this.time('delete', async () => {
       await fs.rm(file, { force: true });
       await fs.rm(this.metaPathOf(key), { force: true });
+    });
+  }
+
+  async listObjects(
+    prefix: string,
+    options: { token?: string | null; maxKeys?: number } = {},
+  ): Promise<StoredObjectPage> {
+    assertListPrefix(prefix);
+    const maxKeys = options.maxKeys ?? 200;
+    return this.time('list', async () => {
+      const base = path.join(
+        this.cfg.root,
+        ...prefix.split('/').filter(Boolean),
+      );
+      const all: StoredObjectSummary[] = [];
+      const walk = async (dir: string, keyPrefix: string): Promise<void> => {
+        let entries: Dirent[];
+        try {
+          entries = await fs.readdir(dir, { withFileTypes: true });
+        } catch {
+          return; // el directorio aún no existe: nada que listar
+        }
+        for (const entry of entries) {
+          const key = `${keyPrefix}${entry.name}`;
+          if (entry.isDirectory())
+            await walk(path.join(dir, entry.name), `${key}/`);
+          else if (entry.isFile()) {
+            const stats = await fs.stat(path.join(dir, entry.name));
+            all.push({ key, lastModified: stats.mtime, size: stats.size });
+          }
+        }
+      };
+      await walk(base, prefix);
+      all.sort((a, b) => (a.key < b.key ? -1 : 1));
+      const after = options.token
+        ? all.filter((o) => o.key > options.token!)
+        : all;
+      const objects = after.slice(0, maxKeys);
+      return {
+        objects,
+        nextToken:
+          after.length > maxKeys ? objects[objects.length - 1].key : null,
+      };
     });
   }
 

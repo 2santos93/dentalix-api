@@ -24,6 +24,16 @@ export function assertFileKey(key: string): void {
   }
 }
 
+/**
+ * DX-389: el prefijo de un listado (`payment-proofs/pending/`): segmentos
+ * seguros que terminan en `/`, sin `..` ni el segmento `.meta`.
+ */
+export function assertListPrefix(prefix: string): void {
+  if (!/^([A-Za-z0-9_-]+\/)+$/.test(prefix) || prefix.startsWith('.meta/')) {
+    throw new Error(`Prefijo de listado inválido: "${prefix}"`);
+  }
+}
+
 /** `${base}/${key}`, sin barras dobles aunque la base termine en `/`. */
 export function publicFileUrl(base: string, key: string): string {
   return `${base.replace(/\/+$/, '')}/${key}`;

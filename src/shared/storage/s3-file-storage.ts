@@ -7,6 +7,7 @@ import {
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   NoSuchKey,
   PutObjectCommand,
   S3Client,
@@ -18,7 +19,7 @@ import {
   NodeHttpHandler,
   type NodeHttpHandlerOptions,
 } from '@smithy/node-http-handler';
-import { assertFileKey, publicFileUrl } from './file-key';
+import { assertFileKey, assertListPrefix, publicFileUrl } from './file-key';
 import {
   DirectUploadPolicy,
   DirectUploadTarget,
@@ -28,6 +29,7 @@ import {
   StoredFile,
   StoredFileStream,
   StoredObjectInfo,
+  StoredObjectPage,
   assertSignedUrlOptions,
   assertSignedUrlTtl,
   contentDispositionHeader,
@@ -485,6 +487,32 @@ export class S3FileStorage implements FileStoragePort {
         { abortSignal },
       ),
     );
+  }
+
+  async listObjects(
+    prefix: string,
+    options: { token?: string | null; maxKeys?: number } = {},
+  ): Promise<StoredObjectPage> {
+    assertListPrefix(prefix);
+    const res = await this.run('list', (abortSignal) =>
+      this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.cfg.bucket,
+          Prefix: prefix,
+          MaxKeys: options.maxKeys ?? 200,
+          ...(options.token ? { ContinuationToken: options.token } : {}),
+        }),
+        { abortSignal },
+      ),
+    );
+    return {
+      objects: (res.Contents ?? []).flatMap((o) =>
+        o.Key && o.LastModified
+          ? [{ key: o.Key, lastModified: o.LastModified, size: o.Size ?? 0 }]
+          : [],
+      ),
+      nextToken: res.IsTruncated ? (res.NextContinuationToken ?? null) : null,
+    };
   }
 
   publicUrl(key: string): string {

@@ -1,3 +1,4 @@
+import { buildPaymentProofKit } from '../__fixtures__/payment-proof-kit';
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../payment-method-gate';
 import {
@@ -38,6 +39,7 @@ function setup(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
       repo,
       referenceCurrencyDigitsCatalog(),
     ),
+    buildPaymentProofKit(repo).proofs,
     () => now,
   );
   return { repo, uc };

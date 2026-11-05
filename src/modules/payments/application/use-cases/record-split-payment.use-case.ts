@@ -47,6 +47,9 @@ import {
   normalizePaidAt,
   type PreparedPaymentLine,
 } from './record-payment.use-case';
+import { PROOF_DUPLICATE_LINES_MESSAGE } from '../../domain/payment-proof';
+import { PaymentProofs, attachmentOf } from '../payment-proofs';
+import type { CompletedProof } from '../payment-proof-uploads';
 import { round2 } from '../../../../shared/money/money';
 
 /** Una forma de pago del cobro: su medio, su moneda, su importe, su referencia. */
@@ -58,6 +61,8 @@ export interface SplitPaymentLineInput {
   reference?: string;
   /** Motivo para confirmar la referencia repetida de ESTA línea (DX-377). */
   duplicateReferenceReason?: string;
+  /** DX-389: subida del comprobante de ESTA línea (cada línea, el suyo). */
+  proofUploadId?: string;
 }
 
 // Sin `patientId`/`treatmentPlanId`/`createdById`, como RecordPaymentInput.
@@ -100,6 +105,8 @@ export class RecordSplitPaymentUseCase {
     private readonly getTreatmentPlan: GetTreatmentPlanUseCase,
     private readonly recordPayment: RecordPaymentUseCase,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
+    // DX-389: el comprobante de cada línea (subida directa ya hecha).
+    private readonly proofs: PaymentProofs,
   ) {}
 
   async execute(
@@ -131,6 +138,13 @@ export class RecordSplitPaymentUseCase {
       input.lines.length > SPLIT_MAX_LINES
     ) {
       throw new BadRequestException(SPLIT_LINES_COUNT_MESSAGE);
+    }
+    // DX-389: cada forma de pago lleva su propia subida (400 antes de tocar nada).
+    const uploads = input.lines.flatMap((l) =>
+      l.proofUploadId ? [l.proofUploadId.toLowerCase()] : [],
+    );
+    if (new Set(uploads).size !== uploads.length) {
+      throw new BadRequestException(PROOF_DUPLICATE_LINES_MESSAGE);
     }
     const currencies: string[] = [];
     for (const line of input.lines) {
@@ -169,6 +183,20 @@ export class RecordSplitPaymentUseCase {
       confirmCreditBalance,
     );
 
+    // DX-389: lo último antes de la transacción; si una línea falla, se
+    // limpian las copias de las anteriores.
+    const completed: (CompletedProof | null)[] = [];
+    try {
+      for (const { method } of prepared) {
+        completed.push(
+          await this.proofs.complete(method.proofUploadId, createdById),
+        );
+      }
+    } catch (error) {
+      await this.proofs.settle(completed, false);
+      throw error;
+    }
+
     const lines: CreatePaymentRepoInput[] = input.lines.map((line, index) => {
       const { method, paidOn, frozenRate } = prepared[index];
       const amount = converted[index];
@@ -186,6 +214,7 @@ export class RecordSplitPaymentUseCase {
         duplicateReferenceReason: method.duplicateReferenceReason,
         // DX-516: cada parte, con los ajustes de su propio medio.
         adjustments: method.adjustments,
+        proof: attachmentOf(completed[index]),
         notes: input.notes,
         createdById,
         receiptPlanBalance: null,
@@ -197,15 +226,22 @@ export class RecordSplitPaymentUseCase {
       };
     });
 
-    const record = await this.repo.createSplit({
-      lines,
-      idempotencyKey: key,
-      requestFingerprint: key === undefined ? undefined : requestFingerprint,
-      receiptPlanBalance,
-      ...(planPaymentsSeen === undefined
-        ? {}
-        : { balanceGuard: { planPaymentsSeen } }),
-    });
+    let record: SplitPaymentRecord;
+    try {
+      record = await this.repo.createSplit({
+        lines,
+        idempotencyKey: key,
+        requestFingerprint: key === undefined ? undefined : requestFingerprint,
+        receiptPlanBalance,
+        ...(planPaymentsSeen === undefined
+          ? {}
+          : { balanceGuard: { planPaymentsSeen } }),
+      });
+    } catch (error) {
+      await this.proofs.settle(completed, false);
+      throw error;
+    }
+    await this.proofs.settle(completed, true);
     const result = this.toResult(record, plan.currency);
     return {
       ...result,
@@ -259,6 +295,7 @@ export class RecordSplitPaymentUseCase {
           paymentMethodId: line.paymentMethodId,
           reference: line.reference,
           duplicateReferenceReason: line.duplicateReferenceReason,
+          proofUploadId: line.proofUploadId,
         },
         currency,
         paidAt,

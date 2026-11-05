@@ -1,4 +1,5 @@
 import type {
+  PaymentProofPolicy,
   PaymentAdjustmentCalculation,
   PaymentAdjustmentType,
   PaymentMethod,
@@ -17,6 +18,8 @@ export interface PaymentMethodWriteInput {
   kind?: PaymentMethodKind;
   active?: boolean;
   requiresReference?: boolean;
+  /** DX-389 */
+  proofPolicy?: PaymentProofPolicy;
 }
 
 /** DX-516: un ajuste ya validado por el caso de uso (la forma completa). */

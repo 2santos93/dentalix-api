@@ -18,6 +18,7 @@ function method(
     kind: 'OTHER',
     active: true,
     requiresReference: false,
+    proofPolicy: 'NONE',
     adjustments: [],
     legacyMethod: null,
     createdAt: NOW,

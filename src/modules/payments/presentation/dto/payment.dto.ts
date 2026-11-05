@@ -190,4 +190,10 @@ export class PaymentDto {
       'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe). El saldo del plan se mueve por `amount`.',
   })
   collectedAmount!: number;
+
+  @ApiProperty({
+    description:
+      'DX-389: el abono tiene comprobante del cobro. La clave del almacén no sale nunca: se ve con `GET /payments/:id/proof/url`.',
+  })
+  hasProof!: boolean;
 }

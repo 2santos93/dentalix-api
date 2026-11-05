@@ -97,7 +97,11 @@ import {
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
-import { CreatePaymentMethodUseCase } from '../src/modules/payment-methods/application/payment-methods.use-cases';
+import {
+  CreatePaymentMethodUseCase,
+  ListPaymentMethodsUseCase,
+  UpdatePaymentMethodUseCase,
+} from '../src/modules/payment-methods/application/payment-methods.use-cases';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { RegisterManualExchangeRateUseCase } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
 import {
@@ -671,12 +675,29 @@ class DemoSeeder {
     ownerId: string,
   ): Promise<string> {
     if (this.mobileMethodId) return this.mobileMethodId;
-    const created = await this.inTenant(tenantId, undefined, () =>
-      this.use(CreatePaymentMethodUseCase).execute(
-        { name: 'Pago móvil', kind: 'DIGITAL', requiresReference: true },
+    // DX-389: «Pago móvil» y «Transferencia» admiten el comprobante (OPTIONAL).
+    const created = await this.inTenant(tenantId, undefined, async () => {
+      const method = await this.use(CreatePaymentMethodUseCase).execute(
+        {
+          name: 'Pago móvil',
+          kind: 'DIGITAL',
+          requiresReference: true,
+          proofPolicy: 'OPTIONAL',
+        },
         ownerId,
-      ),
-    );
+      );
+      const transfer = (
+        await this.use(ListPaymentMethodsUseCase).execute({})
+      ).find((m) => m.legacyMethod === 'TRANSFER');
+      if (transfer) {
+        await this.use(UpdatePaymentMethodUseCase).execute(
+          transfer.id,
+          { proofPolicy: 'OPTIONAL' },
+          ownerId,
+        );
+      }
+      return method;
+    });
     this.mobileMethodId = created.id;
     return created.id;
   }

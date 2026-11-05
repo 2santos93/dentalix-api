@@ -1604,6 +1604,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // depende de la query, que el decorador no lee).
   'GET /expenses/:id/attachment/url':
     'expense-receipts.use-cases.spec.ts y expenses.e2e-spec.ts',
+  // DX-389: VIEW si se abre en el navegador, EXPORT si se descarga (como el
+  // soporte del gasto); la metadata no lleva datos del paciente.
+  'GET /payments/:id/proof/url':
+    'payment-proofs.use-cases.spec.ts y payment-proofs.e2e-spec.ts',
   // DX-359: personal y accesos. Cada repositorio escribe el evento en la
   // MISMA transacción que el cambio (writeAuditEvent); ninguno guarda el
   // token, su hash, el email ni el nombre.
@@ -1739,6 +1743,8 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'URL prefirmada; el alta del documento es la ruta auditada',
   'POST /expenses/attachments/upload-url':
     'URL prefirmada; el gasto que la usa es la ruta auditada',
+  'POST /payments/proofs/upload-url':
+    'URL prefirmada; el abono que la usa es la ruta auditada',
   'POST /files/uploads':
     'subida directa del adaptador de disco (desarrollo y tests)',
   'PATCH /patients/:patientId/clinical-entries/:entryId':

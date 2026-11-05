@@ -4375,6 +4375,45 @@ migrate deploy`). `…150300` crea un índice no concurrente sobre
   cerrada de la mañana no se toca, así que su arqueo (diferencia de −2.000)
   sigue igual.
 
+## Comprobante del cobro (DX-389)
+
+- **Qué es**: la captura del pago móvil o de la transferencia que se guarda con
+  el abono, para conciliar con el banco. JPG, PNG, WebP o PDF de hasta 10 MB,
+  validado por CONTENIDO (el mismo detector y la misma subida prefirmada que
+  los documentos del paciente y el soporte de gastos). Almacén privado:
+  `payment-proofs/<tenantId>/<uuid>-<sha16>.<ext>` (sin datos del paciente).
+- **Medio de pago**: «Pide comprobante» = `NONE` (defecto) | `OPTIONAL` |
+  `REQUIRED` (`proofPolicy`, solo ADMIN, auditado como el resto del medio).
+  Un abono sin medio resuelto no tiene política: admite el comprobante como
+  OPTIONAL y nunca lo exige.
+- **Flujo**: `POST /payments/proofs/upload-url` → el navegador sube al bucket →
+  `proofUploadId` en `POST /treatment-plans/:id/payments`, `POST
+  /opening-balances/:id/payments` o en cada línea de `…/split-payments`. La
+  fila `payment_proofs` nace en la MISMA transacción que el abono (con
+  REQUIRED, el abono no queda sin comprobante). Una subida respalda un solo
+  abono (único por clínica; repetirla es 404 o 400).
+- **Ver**: `GET /payments/:id/proof/url?disposition=inline|attachment` (ADMIN y
+  RECEPTION, y solo si la sede del abono está entre las del miembro, como su
+  recibo): URL firmada de 5 min, auditada (VIEW / EXPORT) sin datos del
+  paciente.
+- **Despliegue**:
+  1. Aplicar la migración `20261118090000_dx389_payment_proofs` (aditiva).
+  2. **Antes o junto al despliegue**, añadir al bucket la regla de ciclo de
+     vida de `payment-proofs/pending/` (24 h), igual que
+     `expense-receipts/pending/`: ver
+     [Ficheros en un bucket S3 (DX-084)](#ficheros-en-un-bucket-s3-dx-084)
+     (en R2, una regla por prefijo).
+  3. Red de la aplicación: la tarea `payments.proof-pending-sweep.daily` (04:17
+     UTC, singleton, en la cola de DX-085) borra de `payment-proofs/pending/`
+     lo de más de 24 h que ninguna fila use (hasta 1000 por pasada). No
+     sustituye a la regla del bucket: se cubren mutuamente. **Permiso**: el
+     usuario o rol de la API necesita `s3:ListBucket` sobre
+     `arn:aws:s3:::<bucket>` con la condición `s3:prefix` =
+     `payment-proofs/pending/*` (ver «Credenciales mínimas»). Si falta, el
+     barrido registra UN aviso (`desactivado … AccessDenied`) y el trabajo
+     termina bien; la regla de ciclo de vida sigue limpiando. Sin variables de
+     entorno nuevas.
+
 ## Integridad entre gasto y pagos (DX-393)
 
 Auditoría DB-058 y DB-059. La BD hace de red de las reglas de los pagos de un
@@ -4953,7 +4992,11 @@ el que se sirve sale de la extensión de la clave, con `nosniff`.
 5. **Credenciales mínimas**: un usuario o rol solo para la API con
    `s3:GetObject`, `s3:PutObject` y `s3:DeleteObject` sobre
    `arn:aws:s3:::<bucket>/*` y nada más (sin `s3:ListAllMyBuckets`, sin
-   permisos de bucket ni de otros buckets). En R2, un token de API «Object
+   permisos de bucket ni de otros buckets). Excepción acotada (DX-389): el
+   barrido de `payment-proofs/pending/` necesita `s3:ListBucket` sobre
+   `arn:aws:s3:::<bucket>` SOLO con el prefijo `payment-proofs/pending/*`
+   (condición `s3:prefix`); sin él el barrido se desactiva con un aviso y
+   manda la regla de ciclo de vida del bucket. En R2, un token de API «Object
    Read & Write» limitado a ese bucket. Ejemplo de política de AWS:
 
    ```json
@@ -4964,6 +5007,14 @@ el que se sirve sale de la extensión de la clave, con `nosniff`.
          "Effect": "Allow",
          "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
          "Resource": "arn:aws:s3:::dentalix-files/*"
+       },
+       {
+         "Effect": "Allow",
+         "Action": "s3:ListBucket",
+         "Resource": "arn:aws:s3:::dentalix-files",
+         "Condition": {
+           "StringLike": { "s3:prefix": ["payment-proofs/pending/*"] }
+         }
        }
      ]
    }
@@ -5160,8 +5211,9 @@ file://cors.json` con `{"CORSRules": [...]}`; GET no hace falta: el visor
 
 - **Ciclo de vida** de los pendientes: los objetos de
   `patient-documents/pending/` (documentos del paciente) y de
-  `expense-receipts/pending/` (soporte de gastos, DX-274) que no llegaron a
-  `complete` o al alta del gasto se borran a las 24 h. AWS (junto a las
+  `expense-receipts/pending/` (soporte de gastos, DX-274) y de
+  `payment-proofs/pending/` (comprobante del cobro, DX-389) que no llegaron a
+  `complete` o al alta del gasto o del abono se borran a las 24 h. AWS (junto a las
   reglas de DX-084); es UNA configuración con una regla por prefijo, porque
   `put-bucket-lifecycle-configuration` reemplaza las reglas existentes:
 
@@ -5183,15 +5235,24 @@ file://cors.json` con `{"CORSRules": [...]}`; GET no hace falta: el visor
         "Expiration": { "Days": 1 },
         "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
         "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+      },
+      {
+        "ID": "payment-proofs-pending-24h",
+        "Status": "Enabled",
+        "Filter": { "Prefix": "payment-proofs/pending/" },
+        "Expiration": { "Days": 1 },
+        "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
+        "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
       }
     ]
   }
   ```
 
   En R2, una regla de ciclo de vida por cada prefijo
-  (`patient-documents/pending/` y `expense-receipts/pending/`) y «Delete
-  after 1 day». En local, `minio_init` aplica las dos a `dentalix-local` y
-  `dentalix-test` (`mc ilm import`, un solo JSON con las dos reglas).
+  (`patient-documents/pending/`, `expense-receipts/pending/` y
+  `payment-proofs/pending/`) y «Delete after 1 day». En local, `minio_init`
+  aplica las tres a `dentalix-local` y `dentalix-test` (`mc ilm import`, un
+  solo JSON con las tres reglas).
 
 - **Decisión: Cloudflare R2 no está soportado para la subida directa.** R2 no
   implementa el POST de formulario (PostObject), así que con R2 la web no
