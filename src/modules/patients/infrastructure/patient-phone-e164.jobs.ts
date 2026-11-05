@@ -112,20 +112,25 @@ export class PatientPhoneE164Jobs
     });
   }
 
-  async onApplicationBootstrap(): Promise<void> {
+  /**
+   * Encola el relleno al arrancar SIN esperarlo: el arranque de la app no puede
+   * depender de la cola (con la BD de la cola colgada, `await` dejaba el
+   * bootstrap sin terminar: test/jobs-worker-health). Un fallo o una cola que
+   * no contesta solo pierde este encolado; el barrido horario lo cubre.
+   */
+  onApplicationBootstrap(): void {
     const hour = new Date().toISOString().slice(0, 13);
-    try {
-      await this.queue.enqueue(
+    void this.queue
+      .enqueue(
         PHONE_E164_BACKFILL_JOB,
         {},
         { idempotencyKey: `${PHONE_E164_BACKFILL_JOB}:boot:${hour}` },
-      );
-    } catch (error) {
-      // Encolar al arrancar es una comodidad: el barrido horario lo cubre.
-      this.logger.warn({
-        event: 'patients.phone_e164_backfill_enqueue_failed',
-        error: error instanceof Error ? error.name : 'unknown',
+      )
+      .catch((error: unknown) => {
+        this.logger.warn({
+          event: 'patients.phone_e164_backfill_enqueue_failed',
+          error: error instanceof Error ? error.name : 'unknown',
+        });
       });
-    }
   }
 }
