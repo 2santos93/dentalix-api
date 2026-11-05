@@ -28,6 +28,12 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
+import {
+  gate,
+  settle,
+  transactionId,
+  waitForTransactionWaiters,
+} from './support/postgres-concurrency';
 
 // DX-380 (OPS-045, DB-056), contra Postgres: la lista de reintentos
 // `payment_base_retries` (alta por el trigger diferido, RLS FORCE entre dos
@@ -379,6 +385,147 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
     });
     expect(provider.calls).toEqual([]);
     expect(await retryOf(id)).toBeNull();
+  });
+
+  describe('DX-413 · una tasa registrada durante la pasada', () => {
+    const manualClinic = async (name: string): Promise<Clinic> => {
+      const clinic = await seedClinic(`${PREFIX}-${name}`);
+      await raw.tenant.update({
+        where: { id: clinic.tenantId },
+        data: {
+          exchangeRateSource: 'MANUAL',
+          manualExchangeRatesSince: new Date(`${DAYS[3]}T00:00:00Z`),
+        },
+      });
+      return clinic;
+    };
+    const registerRate = (clinic: Clinic) =>
+      inClinic(clinic, async () => {
+        await manualRepo.create({
+          date: DAYS[3],
+          currency: 'EUR',
+          rate: 4000,
+          createdById: clinic.userId,
+        });
+        return retries.wake();
+      });
+    /** Hace que el abono `first` se intente antes que el resto. */
+    const makeFirst = (first: string) =>
+      raw.paymentBaseRetry.updateMany({
+        where: { paymentId: first },
+        data: { nextAttemptAt: new Date('2000-01-01T00:00:00Z') },
+      });
+
+    it('el ADMIN registra la tasa en pleno intento: el reintento queda adelantado, el convertidor se recarga y todo se resuelve', async () => {
+      const clinic = await manualClinic('race');
+      const first = await pay(clinic, 'EUR', DAYS[3]);
+      const second = await pay(clinic, 'EUR', DAYS[3]);
+      await makeFirst(first);
+      // Punto de solapamiento exacto, sin esperas: la cotización del primero
+      // ya salió sin tasa y, antes de que el intento termine, la clínica
+      // registra la tasa y despierta los reintentos (otra conexión).
+      const freezeRate = allocationRepo.freezeRate.bind(allocationRepo);
+      const spy = jest
+        .spyOn(allocationRepo, 'freezeRate')
+        .mockImplementationOnce(async (...args) => {
+          await registerRate(clinic);
+          return freezeRate(...args);
+        });
+
+      const pass = await inClinic(clinic, () => retries.retryDue(50));
+      spy.mockRestore();
+
+      // El segundo ya se cotiza con las tasas nuevas (memo invalidada).
+      expect(pass).toEqual({ resolved: 1, withoutRate: 0, failed: 0 });
+      expect(await retryOf(second)).toBeNull();
+      // El primero no se aplazó: sigue vencido, sin intento contado.
+      const row = await raw.paymentBaseRetry.findFirstOrThrow({
+        where: { paymentId: first },
+      });
+      const [{ now }] = await raw.$queryRaw<{ now: Date }[]>`
+        SELECT timezone('UTC', now()) AS "now"`;
+      expect(row.nextAttemptAt.getTime()).toBeLessThanOrEqual(now.getTime());
+      expect(row.attempts).toBe(0);
+      // La pasada siguiente lo resuelve.
+      expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
+        resolved: 1,
+        withoutRate: 0,
+        failed: 0,
+      });
+      expect(await retryOf(first)).toBeNull();
+    });
+
+    it('un postpone que espera a un wake sin confirmar reevalúa la fila al soltarse y no aplaza (READ COMMITTED)', async () => {
+      const clinic = await manualClinic('blocking');
+      const id = await pay(clinic, 'EUR', DAYS[3]);
+      const [candidate] = await inClinic(clinic, () => retryRepo.due(50));
+      expect(candidate).toMatchObject({ paymentId: id, wakeCount: 0 });
+
+      // El wake de otra conexión: la fila queda bloqueada, sin confirmar.
+      const locked = gate<string>();
+      const commit = gate();
+      const holder = raw.$transaction(async (tx) => {
+        await tx.$executeRaw`
+          UPDATE "payment_base_retries"
+             SET "wakeCount" = "wakeCount" + 1
+           WHERE "paymentId" = ${id}::uuid`;
+        locked.open(await transactionId(tx));
+        await commit.wait;
+      });
+      const xid = await locked.wait;
+
+      const postponing = settle(
+        inClinic(clinic, () =>
+          retryRepo.postpone(id, {
+            attempts: 1,
+            wakeCount: candidate.wakeCount,
+            reason: 'NO_RATE',
+            delayMs: 3_600_000,
+          }),
+        ),
+      );
+      // Avanza solo cuando Postgres dice que el postpone espera el bloqueo.
+      await waitForTransactionWaiters(raw, xid);
+      commit.open();
+      await holder;
+
+      expect(await postponing).toEqual({
+        status: 'fulfilled',
+        value: { postponed: false, wakeCount: 1 },
+      });
+      expect(await retryOf(id)).toMatchObject({
+        attempts: 0,
+        wakeCount: 1,
+        lastReason: null,
+      });
+    });
+
+    it('sin solapamiento, la espera escalonada sigue igual: aplaza con su backoff y el wake posterior lo adelanta', async () => {
+      const clinic = await manualClinic('stagger');
+      const id = await pay(clinic, 'EUR', DAYS[3]);
+
+      expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
+        resolved: 0,
+        withoutRate: 1,
+        failed: 0,
+      });
+      const [{ now }] = await raw.$queryRaw<{ now: Date }[]>`
+        SELECT timezone('UTC', now()) AS "now"`;
+      const waiting = await raw.paymentBaseRetry.findFirstOrThrow({
+        where: { paymentId: id },
+      });
+      expect(waiting).toMatchObject({ attempts: 1, lastReason: 'NO_RATE' });
+      const waitMs = waiting.nextAttemptAt.getTime() - now.getTime();
+      expect(waitMs).toBeGreaterThan(50_000);
+      expect(waitMs).toBeLessThanOrEqual(60_000);
+
+      expect(await registerRate(clinic)).toBe(1);
+      expect(await inClinic(clinic, () => retries.retryDue(50))).toEqual({
+        resolved: 1,
+        withoutRate: 0,
+        failed: 0,
+      });
+    });
   });
 
   it('el barrido solo abre transacción en las clínicas con pendientes (100 clínicas, 1 pendiente)', async () => {

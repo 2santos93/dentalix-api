@@ -5,6 +5,7 @@ import type {
   PaymentBaseRetryFailure,
   PaymentBaseRetryRepository,
   PaymentRatePendingDay,
+  PostponeResult,
 } from '../../domain/ports/payment-base-retry-repository.port';
 import { pendingOnDayOf } from '../../domain/payment-rate-pending-day';
 
@@ -34,6 +35,7 @@ export class InMemoryPaymentBaseRetryRepository implements PaymentBaseRetryRepos
     this.rows.set(candidate.paymentId, {
       candidate: {
         attempts: 0,
+        wakeCount: 0,
         live: true,
         amount: 100,
         currency: 'USD',
@@ -80,19 +82,29 @@ export class InMemoryPaymentBaseRetryRepository implements PaymentBaseRetryRepos
     return Promise.resolve();
   }
 
-  postpone(paymentId: string, failure: PaymentBaseRetryFailure): Promise<void> {
+  postpone(
+    paymentId: string,
+    failure: PaymentBaseRetryFailure,
+  ): Promise<PostponeResult> {
     const row = this.rows.get(paymentId);
-    if (row) {
-      row.candidate.attempts = failure.attempts;
-      row.lastReason = failure.reason;
-      row.nextAttemptAt = new Date(this.now.getTime() + failure.delayMs);
+    // DX-413: condicional, como el real.
+    if (!row) return Promise.resolve({ postponed: false, wakeCount: null });
+    if (row.candidate.wakeCount !== failure.wakeCount) {
+      return Promise.resolve({
+        postponed: false,
+        wakeCount: row.candidate.wakeCount,
+      });
     }
-    return Promise.resolve();
+    row.candidate.attempts = failure.attempts;
+    row.lastReason = failure.reason;
+    row.nextAttemptAt = new Date(this.now.getTime() + failure.delayMs);
+    return Promise.resolve({ postponed: true, wakeCount: null });
   }
 
   wake(): Promise<number> {
     let woken = 0;
     for (const row of this.rows.values()) {
+      row.candidate.wakeCount += 1;
       if (row.nextAttemptAt.getTime() > this.now.getTime()) {
         row.nextAttemptAt = this.now;
         woken += 1;
