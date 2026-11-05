@@ -601,7 +601,7 @@ describe('revisión DX-389 (ronda 1)', () => {
   });
 
   // --- L2: la limpieza no tapa el error original ---
-  it('si falla el alta Y la limpieza, el error es el del alta y la copia se intenta borrar igual', async () => {
+  it('R2: si falla el alta Y la BD no responde al comprobarlo, el error es el del alta y la copia se CONSERVA', async () => {
     const { repo, kit, uc } = build();
     const uploadId = await kit.upload(pngFixture());
     jest.spyOn(repo, 'create').mockRejectedValueOnce(new Error('alta rota'));
@@ -611,9 +611,40 @@ describe('revisión DX-389 (ronda 1)', () => {
     await expect(
       pay(uc, kit, { paymentMethodId: 'm-opt', proofUploadId: uploadId }),
     ).rejects.toThrow('alta rota');
+    // Un corte tras el COMMIT dejaría una fila apuntando a la copia: no se borra.
+    const copies = [...kit.storage.files.keys()].filter(
+      (k) => !k.includes('/pending/'),
+    );
+    expect(copies).toHaveLength(1);
+    expect(kit.storage.deleted).not.toContain(copies[0]);
+  });
+
+  it('R2: si falla el alta y se comprueba que ninguna fila usa la copia, se borra', async () => {
+    const { repo, kit, uc } = build();
+    const uploadId = await kit.upload(pngFixture());
+    jest.spyOn(repo, 'create').mockRejectedValueOnce(new Error('alta rota'));
+    await expect(
+      pay(uc, kit, { paymentMethodId: 'm-opt', proofUploadId: uploadId }),
+    ).rejects.toThrow('alta rota');
     expect(
       [...kit.storage.files.keys()].filter((k) => !k.includes('/pending/')),
     ).toEqual([]);
+  });
+
+  it('R2: si el abono se registró, la copia se conserva aunque la limpieza del pendiente falle', async () => {
+    const { repo, kit, uc } = build();
+    const uploadId = await kit.upload(pngFixture());
+    jest
+      .spyOn(repo, 'proofKeyInUse')
+      .mockRejectedValueOnce(new Error('BD caída'));
+    const payment = await pay(uc, kit, {
+      paymentMethodId: 'm-opt',
+      proofUploadId: uploadId,
+    });
+    expect(payment.hasProof).toBe(true);
+    expect(
+      [...kit.storage.files.keys()].filter((k) => !k.includes('/pending/')),
+    ).toHaveLength(1);
   });
 
   it('si el borrado del pendiente falla tras registrar, el abono sigue siendo correcto', async () => {

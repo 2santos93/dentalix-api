@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { InMemoryFileStorage } from '../../../shared/storage/__fixtures__/in-memory-file-storage';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { JobRegistry } from '../../jobs/application/job-registry';
@@ -110,6 +111,48 @@ describe('PaymentProofPendingSweep', () => {
     controller.abort();
     expect((await sweep.run(NOW, controller.signal)).deleted).toBe(0);
     expect(storage.files.size).toBe(1);
+  });
+
+  it('R1: AccessDenied al listar desactiva el barrido: un aviso con el tipo del error, sin traza, y termina bien', async () => {
+    const { storage, sweep, put } = setup();
+    await put(pendingKey(1), 48);
+    const denied = Object.assign(new Error('Access Denied'), {
+      name: 'AccessDenied',
+      $metadata: { httpStatusCode: 403 },
+    });
+    jest.spyOn(storage, 'listObjects').mockRejectedValue(denied);
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const result = await sweep.run(NOW);
+    expect(result).toEqual({
+      scanned: 0,
+      deleted: 0,
+      skipped: 0,
+      disabled: true,
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/desactivado.*AccessDenied/);
+    expect(String(warn.mock.calls[0][0])).not.toContain('at ');
+    expect(storage.files.size).toBe(1);
+    warn.mockRestore();
+  });
+
+  it('R1: un 403 sin nombre también cuenta; otros errores siguen propagándose', async () => {
+    const { storage, sweep } = setup();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest
+      .spyOn(storage, 'listObjects')
+      .mockRejectedValueOnce(
+        Object.assign(new Error('x'), { $metadata: { httpStatusCode: 403 } }),
+      );
+    expect((await sweep.run(NOW)).disabled).toBe(true);
+    jest
+      .spyOn(storage, 'listObjects')
+      .mockRejectedValueOnce(
+        Object.assign(new Error('x'), { $metadata: { httpStatusCode: 500 } }),
+      );
+    await expect(sweep.run(NOW)).rejects.toThrow('x');
   });
 
   it('un fallo del almacén al listar se propaga (la cola reintenta)', async () => {

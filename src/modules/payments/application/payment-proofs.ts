@@ -39,8 +39,8 @@ export class PaymentProofs {
   /**
    * Tras el intento de alta: `created` dice si el abono se registró. Nunca
    * lanza: en la ruta de fallo no puede tapar el error original (revisión L2),
-   * y un fallo de limpieza se avisa (sin claves) para que el barrido de
-   * pendientes y el aviso lo recojan.
+   * y un fallo de limpieza se avisa (sin claves). Si no se puede comprobar en
+   * la BD que ninguna fila usa la copia, se CONSERVA (revisión R2).
    */
   async settle(
     proofs: readonly (CompletedProof | null)[],
@@ -56,12 +56,13 @@ export class PaymentProofs {
           await this.uploads.discard(proof.attachment.key);
         }
       } catch (error) {
+        // R2: si la BD no responde no sabemos si el abono se confirmó (un corte
+        // tras el COMMIT): la copia se CONSERVA. Una copia huérfana cuesta
+        // poco; un comprobante perdido con su fila ya confirmada, no. Solo se
+        // borra cuando se sabe que ninguna fila la usa (arriba).
         this.logger.warn(
-          `No se pudo limpiar un comprobante (requestId=${currentRequestId() ?? '-'}, created=${created}, error=${error instanceof Error ? error.name : 'NonError'})`,
+          `No se pudo limpiar un comprobante; la copia se conserva (requestId=${currentRequestId() ?? '-'}, created=${created}, error=${error instanceof Error ? error.name : 'NonError'})`,
         );
-        // La copia sin fila queda fuera de `pending/`: se intenta borrar sin
-        // consultar la BD (si el abono falló, nadie la usa).
-        if (!created) await this.uploads.discard(proof.attachment.key);
       }
     }
   }

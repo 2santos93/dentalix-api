@@ -30,6 +30,18 @@ export interface ProofSweepResult {
   deleted: number;
   /** Con fila (no debería ocurrir: una clave pendiente nunca es la de una fila) o malformados. */
   skipped: number;
+  /** El almacén no deja listar (AccessDenied): barrido desactivado, la regla del bucket cubre. */
+  disabled?: boolean;
+}
+
+/** AccessDenied de S3/R2/MinIO (403) sin `s3:ListBucket`. */
+export function isAccessDenied(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const e = error as {
+    name?: unknown;
+    $metadata?: { httpStatusCode?: number };
+  };
+  return e.name === 'AccessDenied' || e.$metadata?.httpStatusCode === 403;
 }
 
 /**
@@ -55,10 +67,23 @@ export class PaymentProofPendingSweep {
     const result: ProofSweepResult = { scanned: 0, deleted: 0, skipped: 0 };
     let token: string | null = null;
     do {
-      const page = await this.storage.listObjects(PENDING_PROOF_PREFIX, {
-        token,
-        maxKeys: PAGE_SIZE,
-      });
+      let page;
+      try {
+        page = await this.storage.listObjects(PENDING_PROOF_PREFIX, {
+          token,
+          maxKeys: PAGE_SIZE,
+        });
+      } catch (error) {
+        if (!isAccessDenied(error)) throw error;
+        // Sin `s3:ListBucket` (la política mínima de DX-084 no lo trae): el
+        // barrido queda desactivado, UN aviso con el tipo del error (sin
+        // traza) y el trabajo termina bien. La regla de ciclo de vida del
+        // bucket sigue siendo la que limpia.
+        this.logger.warn(
+          `Barrido de comprobantes pendientes desactivado: el almacén no deja listar (${error instanceof Error ? error.name : 'AccessDenied'}). Concede s3:ListBucket sobre payment-proofs/pending/ o confía en la regla de ciclo de vida.`,
+        );
+        return { ...result, disabled: true };
+      }
       for (const object of page.objects) {
         if (signal?.aborted || result.deleted >= PROOF_SWEEP_MAX_DELETES) {
           return result;

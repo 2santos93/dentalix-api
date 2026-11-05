@@ -4406,7 +4406,12 @@ migrate deploy`). `…150300` crea un índice no concurrente sobre
   3. Red de la aplicación: la tarea `payments.proof-pending-sweep.daily` (04:17
      UTC, singleton, en la cola de DX-085) borra de `payment-proofs/pending/`
      lo de más de 24 h que ninguna fila use (hasta 1000 por pasada). No
-     sustituye a la regla del bucket: se cubren mutuamente. Sin variables de
+     sustituye a la regla del bucket: se cubren mutuamente. **Permiso**: el
+     usuario o rol de la API necesita `s3:ListBucket` sobre
+     `arn:aws:s3:::<bucket>` con la condición `s3:prefix` =
+     `payment-proofs/pending/*` (ver «Credenciales mínimas»). Si falta, el
+     barrido registra UN aviso (`desactivado … AccessDenied`) y el trabajo
+     termina bien; la regla de ciclo de vida sigue limpiando. Sin variables de
      entorno nuevas.
 
 ## Integridad entre gasto y pagos (DX-393)
@@ -4987,7 +4992,11 @@ el que se sirve sale de la extensión de la clave, con `nosniff`.
 5. **Credenciales mínimas**: un usuario o rol solo para la API con
    `s3:GetObject`, `s3:PutObject` y `s3:DeleteObject` sobre
    `arn:aws:s3:::<bucket>/*` y nada más (sin `s3:ListAllMyBuckets`, sin
-   permisos de bucket ni de otros buckets). En R2, un token de API «Object
+   permisos de bucket ni de otros buckets). Excepción acotada (DX-389): el
+   barrido de `payment-proofs/pending/` necesita `s3:ListBucket` sobre
+   `arn:aws:s3:::<bucket>` SOLO con el prefijo `payment-proofs/pending/*`
+   (condición `s3:prefix`); sin él el barrido se desactiva con un aviso y
+   manda la regla de ciclo de vida del bucket. En R2, un token de API «Object
    Read & Write» limitado a ese bucket. Ejemplo de política de AWS:
 
    ```json
@@ -4998,6 +5007,14 @@ el que se sirve sale de la extensión de la clave, con `nosniff`.
          "Effect": "Allow",
          "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
          "Resource": "arn:aws:s3:::dentalix-files/*"
+       },
+       {
+         "Effect": "Allow",
+         "Action": "s3:ListBucket",
+         "Resource": "arn:aws:s3:::dentalix-files",
+         "Condition": {
+           "StringLike": { "s3:prefix": ["payment-proofs/pending/*"] }
+         }
        }
      ]
    }

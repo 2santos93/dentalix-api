@@ -157,6 +157,20 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/**
+ * DX-389: la violación del único de la subida (`payment_proofs_tenant_upload_key`).
+ * Se reconoce por el índice (su nombre, o sus campos `tenantId, uploadId` según
+ * lo que dé el motor), no por «cualquier único de la tabla»: otro índice futuro
+ * no se contaría como «ya está adjunto».
+ */
+export function isProofUploadReuse(error: unknown): boolean {
+  if (!isUniqueViolation(error)) return false;
+  const meta = (error as Prisma.PrismaClientKnownRequestError).meta ?? {};
+  const target = (meta as { target?: unknown }).target;
+  if (Array.isArray(target)) return target.includes('uploadId');
+  return JSON.stringify(meta).includes('payment_proofs_tenant_upload_key');
+}
+
 function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
   const adjustments = adjustmentLinesOf(payment.methodAdjustments);
   return {
@@ -746,7 +760,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
           // La subida ya respalda otro abono (único por clínica): 400 en
           // español, y la transacción entera se deshace.
           .catch((error: unknown) => {
-            if (isUniqueViolation(error)) {
+            if (isProofUploadReuse(error)) {
               throw new BadRequestException(PROOF_ALREADY_USED_MESSAGE);
             }
             throw error;
