@@ -1,5 +1,5 @@
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
-import type { ContactChannel } from '@prisma/client';
+import type { AppointmentStatus, ContactChannel } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
 import type {
   PostOpDelivery,
@@ -17,6 +17,8 @@ export interface PostOpAppointmentContext {
     locationId: string;
     appointmentTypeId: string | null;
     start: Date;
+    /** DX-250: solo se entrega tras una cita que se atendió (o se atiende hoy). */
+    status: AppointmentStatus;
     /** Nombre del profesional de la cita (`{{profesional}}`). */
     providerName: string;
   };
@@ -50,8 +52,17 @@ export interface PostOpAppointmentContext {
   majorityAge: number;
 }
 
+/** DX-250: ya hay una entrega con ese id (la misma `Idempotency-Key`). */
+export class PostOpDeliveryAlreadyExistsError extends Error {
+  constructor() {
+    super('post-op delivery already exists');
+  }
+}
+
 // Sin `tenantId` (sale del contexto) ni `deliveredAt` (lo pone la BD).
 export interface CreatePostOpDeliveryRepoInput {
+  /** DX-250: id derivado de la `Idempotency-Key`; sin él lo genera la BD. */
+  id?: string;
   patientId: string;
   appointmentId: string;
   locationId: string;
@@ -86,6 +97,13 @@ export interface PostOpPublicDeliveryView extends PostOpDelivery {
   locationPhone: string | null;
 }
 
+/**
+ * DX-250: qué pasó con el email de una entrega EMAIL. `QUEUED`: en el outbox,
+ * aún sin salir; `SENT`: el proveedor lo aceptó; `NOT_SENT`: nunca se encoló o
+ * el outbox se rindió (FAILED).
+ */
+export type PostOpEmailStatus = 'QUEUED' | 'SENT' | 'NOT_SENT';
+
 export const POST_OP_DELIVERY_REPOSITORY = Symbol(
   'POST_OP_DELIVERY_REPOSITORY',
 );
@@ -111,7 +129,15 @@ export interface PostOpDeliveryRepository {
   }): Promise<string[]>;
   /** Nombre completo del usuario que entrega. */
   userName(userId: string): Promise<string | null>;
+  /** @throws PostOpDeliveryAlreadyExistsError si `input.id` ya existe. */
   create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery>;
+  /** Una entrega de la clínica por su id; `null` si no existe. */
+  findById(id: string): Promise<PostOpDelivery | null>;
+  /**
+   * Estado del email de las entregas dadas (el outbox, por `referenceId`).
+   * Solo trae las que tienen una fila; sin fila, el email no se encoló.
+   */
+  emailStatuses(deliveryIds: string[]): Promise<Map<string, PostOpEmailStatus>>;
   /** Entregas de la cita, más recientes primero. */
   listByAppointment(appointmentId: string): Promise<PostOpDelivery[]>;
   /** Entregas del paciente, más recientes primero. */

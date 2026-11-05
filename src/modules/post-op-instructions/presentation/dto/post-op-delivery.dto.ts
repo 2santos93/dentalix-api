@@ -74,6 +74,14 @@ export class PostOpDeliverySummaryDto {
     description: 'Caducidad del enlace público; null en PRINT',
   })
   linkExpiresAt!: Date | null;
+  @ApiProperty({
+    enum: ['QUEUED', 'SENT', 'NOT_SENT'],
+    enumName: 'PostOpEmailStatus',
+    nullable: true,
+    description:
+      'DX-250: estado del email de una entrega EMAIL, leído del outbox. `QUEUED`: en cola; `SENT`: el proveedor lo aceptó; `NOT_SENT`: nunca se encoló o se agotaron los reintentos (la historia clínica debe decir «no enviado»). null: PRINT y WHATSAPP_LINK, y también una entrega EMAIL anterior a la retención del outbox (MAIL_OUTBOX_RETENTION_DAYS) sin fila: desconocido, no se afirma nada. Si se alarga la retención, las filas ya purgadas dentro de la nueva ventana se leen `NOT_SENT`.',
+  })
+  emailStatus!: 'QUEUED' | 'SENT' | 'NOT_SENT' | null;
 }
 
 export class PostOpEmailChannelDto {

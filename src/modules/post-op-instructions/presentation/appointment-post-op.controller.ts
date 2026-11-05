@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   ParseUUIDPipe,
   Post,
@@ -10,9 +12,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isUUID } from 'class-validator';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
+  ApiHeader,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -101,20 +106,36 @@ export class AppointmentPostOpController {
   @ApiCreatedResponse({ type: PostOpDeliveryCreatedDto })
   @ApiBadRequestResponse({
     description:
-      'La plantilla está inactiva, o el host de la petición no sirve para armar el enlace (EMAIL y WHATSAPP_LINK)',
+      'La plantilla está inactiva, el host de la petición no sirve para armar el enlace (EMAIL y WHATSAPP_LINK), o la Idempotency-Key no es un UUID',
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'Sin email ni responsable que reciba avisos, sin un teléfono que sirva para WhatsApp, o el paciente dio de baja los envíos',
+      'Sin email ni responsable que reciba avisos, sin un teléfono que sirva para WhatsApp, o el paciente dio de baja los envíos; o la cita está cancelada, fue un no-show o es de un día que aún no llega (DX-250); o la Idempotency-Key ya se usó con otra plantilla u otro canal (`code: IDEMPOTENCY_KEY_REUSED`)',
   })
   @ApiTooManyRequestsResponse({
     description: 'Tope de emails de la clínica o del destinatario',
+  })
+  @ApiConflictResponse({
+    description:
+      'Repetición (misma Idempotency-Key) de un EMAIL que aún se está registrando (`code: POSTOP_DELIVERY_IN_PROGRESS`): vuelve a consultar en unos segundos.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'DX-250: UUID generado una vez por clic y reutilizado en los reintentos. Repetir la petición con la misma clave en la misma cita devuelve la entrega ya registrada (sin `publicUrl` ni `whatsapp`: el token solo sale en la primera respuesta) en vez de crear otra, y no vuelve a encolar el email. La repetición responde igual 201 (no 200). Con otra plantilla u otro canal: 422 `IDEMPOTENCY_KEY_REUSED`.',
   })
   async create(
     @Param('appointmentId', ParseUUIDPipe) appointmentId: string,
     @Body() dto: DeliverPostOpDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<PostOpDeliveryCreatedDto> {
+    if (idempotencyKey !== undefined && !isUUID(idempotencyKey)) {
+      throw new BadRequestException(
+        'La Idempotency-Key debe ser un UUID: genera uno nuevo por cada clic.',
+      );
+    }
     // Como el enlace de confirmación (DX-005): el host entero se valida
     // antes de registrar nada; uno manipulado no arma un enlace hacia otro
     // sitio. Solo lo usan EMAIL y WHATSAPP_LINK (el caso de uso da 400).
@@ -123,7 +144,11 @@ export class AppointmentPostOpController {
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
     return this.deliver.execute(
       appointmentId,
-      { templateId: dto.templateId, channel: dto.channel },
+      {
+        templateId: dto.templateId,
+        channel: dto.channel,
+        idempotencyKey,
+      },
       ctx,
       { protocol: this.protocol, host },
     );

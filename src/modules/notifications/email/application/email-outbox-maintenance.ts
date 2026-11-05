@@ -8,6 +8,18 @@ export const PURGE_EMAIL_OUTBOX_SCHEDULE = 'email.purge-outbox.daily';
 export const DEFAULT_OUTBOX_RETENTION_DAYS = 90;
 
 /**
+ * Días que se conserva un envío terminado en el outbox: el valor crudo de
+ * MAIL_OUTBOX_RETENTION_DAYS (default 90, mínimo 7). DX-250: lo lee también
+ * quien necesita saber hasta cuándo el outbox puede dar fe de un envío.
+ */
+export function outboxRetentionDays(raw: string | undefined): number {
+  const value = raw?.trim();
+  return value && /^\d{1,4}$/.test(value)
+    ? Math.max(7, Number(value))
+    : DEFAULT_OUTBOX_RETENTION_DAYS;
+}
+
+/**
  * DX-085: cada día borra de `email_outbox` los envíos terminados (SENT o
  * FAILED) de hace más de MAIL_OUTBOX_RETENTION_DAYS (default 90, mínimo 7:
  * los topes anti-abuso miran 24 h y una invitación caduca a los 7 días, así
@@ -27,10 +39,9 @@ export class EmailOutboxMaintenance implements OnModuleInit {
   ) {}
 
   private retentionDays(): number {
-    const raw = this.config.get<string>('MAIL_OUTBOX_RETENTION_DAYS')?.trim();
-    return raw && /^\d{1,4}$/.test(raw)
-      ? Math.max(7, Number(raw))
-      : DEFAULT_OUTBOX_RETENTION_DAYS;
+    return outboxRetentionDays(
+      this.config.get<string>('MAIL_OUTBOX_RETENTION_DAYS'),
+    );
   }
 
   onModuleInit(): void {

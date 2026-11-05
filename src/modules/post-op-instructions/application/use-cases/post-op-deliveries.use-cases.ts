@@ -1,6 +1,7 @@
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -32,6 +33,8 @@ import {
   type PostOpAppointmentContext,
   type PostOpDeliveryDocumentView,
   type PostOpDeliveryRepository,
+  type PostOpEmailStatus,
+  PostOpDeliveryAlreadyExistsError,
 } from '../../domain/ports/post-op-delivery-repository.port';
 import {
   POST_OP_TEMPLATE_REPOSITORY,
@@ -51,7 +54,13 @@ import {
 } from '../../domain/render-instructions';
 import { suggestTemplates } from '../../domain/template-rules';
 import { POSTOP_CLOCK, type PostOpClock } from '../post-op-clock';
-import { POSTOP_EMAIL_SENDER, type PostOpEmailSender } from '../postop-email';
+import {
+  POSTOP_EMAIL_EVIDENCE_CUTOFF,
+  POSTOP_EMAIL_SENDER,
+  type PostOpEmailEvidenceCutoff,
+  type PostOpEmailSender,
+} from '../postop-email';
+import { idempotentDeliveryId } from '../../domain/idempotent-delivery-id';
 import { POSTOP_TEMPLATE_NOT_FOUND_MESSAGE } from './post-op-templates.use-cases';
 
 export const POSTOP_APPOINTMENT_NOT_FOUND_MESSAGE = 'Cita no encontrada';
@@ -62,6 +71,16 @@ export const POSTOP_OPTED_OUT_MESSAGE = 'El paciente dio de baja los envíos';
 export const POSTOP_NO_WHATSAPP_MESSAGE =
   'El paciente no tiene un teléfono que sirva para WhatsApp: escríbelo con + y su prefijo';
 export const POSTOP_INVALID_HOST_MESSAGE = 'Host no válido';
+export const POSTOP_APPOINTMENT_NOT_ATTENDED_MESSAGE =
+  'No se pueden entregar indicaciones de una cita cancelada o en la que el paciente no asistió';
+export const POSTOP_APPOINTMENT_FUTURE_MESSAGE =
+  'No se pueden entregar indicaciones de una cita que aún no ha llegado';
+export const POSTOP_IDEMPOTENCY_KEY_REUSED_MESSAGE =
+  'Esta clave de idempotencia ya se usó para otra entrega (otra plantilla u otro canal). Vuelve a entregar para generar una clave nueva.';
+export const POSTOP_DELIVERY_IN_PROGRESS_MESSAGE =
+  'La entrega se está registrando; espera unos segundos y vuelve a consultar';
+/** Una entrega EMAIL tan reciente aún puede estar encolando su email. */
+const IN_PROGRESS_GRACE_MS = 30_000;
 export const POSTOP_DELIVERY_NOT_FOUND_MESSAGE =
   'Entrega de indicaciones no encontrada';
 
@@ -82,6 +101,11 @@ export interface PostOpDeliverySummary {
   firstOpenedAt: Date | null;
   /** Caducidad del enlace público; null en una entrega impresa. */
   linkExpiresAt: Date | null;
+  /**
+   * DX-250: qué pasó con el email (solo en una entrega EMAIL; null en las
+   * demás). `NOT_SENT`: nunca se encoló o el outbox se rindió.
+   */
+  emailStatus: PostOpEmailStatus | null;
 }
 
 export type PostOpDeliveryDocument = PostOpDeliverySummary & {
@@ -118,6 +142,11 @@ export interface PostOpSuggestions {
 export interface DeliverPostOpInput {
   templateId: string;
   channel: PostOpDeliveryChannel;
+  /**
+   * DX-250: `Idempotency-Key` del clic (UUID). La misma clave en la misma cita
+   * devuelve la entrega ya registrada en vez de crear otra.
+   */
+  idempotencyKey?: string | null;
 }
 
 export interface PostOpDeliveryCreated {
@@ -138,6 +167,7 @@ export interface PostOpDeliveryCreated {
 
 export function toPostOpDeliverySummary(
   delivery: PostOpDelivery,
+  emailStatus: PostOpEmailStatus | null,
 ): PostOpDeliverySummary {
   return {
     id: delivery.id,
@@ -154,7 +184,33 @@ export function toPostOpDeliverySummary(
     sentToResponsible: delivery.sentToResponsible,
     firstOpenedAt: delivery.firstOpenedAt,
     linkExpiresAt: delivery.tokenExpiresAt,
+    emailStatus: delivery.channel === 'EMAIL' ? emailStatus : null,
   };
+}
+
+/**
+ * Resúmenes de varias entregas con el estado de su email, leído del outbox
+ * (una sola consulta). Una entrega EMAIL reciente sin fila en el outbox no se
+ * encoló (`NOT_SENT`); una anterior a `evidenceCutoff` pudo salir y haber sido
+ * purgada: no se sabe (`null`), nunca se afirma «no enviado».
+ */
+async function summarize(
+  repo: PostOpDeliveryRepository,
+  rows: PostOpDelivery[],
+  evidenceCutoff: Date,
+): Promise<PostOpDeliverySummary[]> {
+  const statuses = await repo.emailStatuses(
+    rows.filter((r) => r.channel === 'EMAIL').map((r) => r.id),
+  );
+  return rows.map((r) =>
+    toPostOpDeliverySummary(
+      r,
+      statuses.get(r.id) ??
+        (r.deliveredAt.getTime() < evidenceCutoff.getTime()
+          ? null
+          : 'NOT_SENT'),
+    ),
+  );
 }
 
 function templateSummary(t: PostOpTemplateView): PostOpTemplateSummary {
@@ -219,6 +275,36 @@ async function loadAppointment(
   return ctx;
 }
 
+/**
+ * DX-250: las indicaciones se entregan tras una cita que se atendió (o que es
+ * de hoy). Una cancelada, un no-show o una de un día aún por llegar (en la
+ * zona de la sede) no: la historia clínica no registra lo que no pasó.
+ */
+const ATTENDED_STATUSES: ReadonlySet<string> = new Set([
+  'COMPLETED',
+  'ARRIVED',
+  'IN_CHAIR',
+  'READY_FOR_CHECKOUT',
+]);
+
+function assertAttendable(ctx: PostOpAppointmentContext, now: Date): void {
+  const { appointment, location } = ctx;
+  if (appointment.status === 'CANCELLED' || appointment.status === 'NO_SHOW') {
+    throw new UnprocessableEntityException(
+      POSTOP_APPOINTMENT_NOT_ATTENDED_MESSAGE,
+    );
+  }
+  // Una cita que ya se atiende (o se atendió) no es «futura» aunque su fecha
+  // lo parezca (reagendada, reloj mal puesto): la HC debe poder registrarlo.
+  if (ATTENDED_STATUSES.has(appointment.status)) return;
+  if (
+    civilDateIn(appointment.start, location.timeZone) >
+    civilDateIn(now, location.timeZone)
+  ) {
+    throw new UnprocessableEntityException(POSTOP_APPOINTMENT_FUTURE_MESSAGE);
+  }
+}
+
 @Injectable()
 export class GetPostOpSuggestionsUseCase {
   constructor(
@@ -228,6 +314,8 @@ export class GetPostOpSuggestionsUseCase {
     private readonly templates: PostOpTemplateRepository,
     @Inject(POSTOP_CLOCK) private readonly now: PostOpClock,
     private readonly tenantContext: TenantContextService,
+    @Inject(POSTOP_EMAIL_EVIDENCE_CUTOFF)
+    private readonly evidenceCutoff: PostOpEmailEvidenceCutoff,
   ) {}
 
   /**
@@ -268,7 +356,11 @@ export class GetPostOpSuggestionsUseCase {
       email: this.emailChannel(ctx),
       whatsapp: this.whatsAppChannel(ctx),
       locationPhone: location.phone,
-      deliveries: delivered.map(toPostOpDeliverySummary),
+      deliveries: await summarize(
+        this.deliveries,
+        delivered,
+        this.evidenceCutoff(),
+      ),
     };
   }
 
@@ -326,6 +418,8 @@ export class DeliverPostOpInstructionsUseCase {
     private readonly audit: RecordAuditEventUseCase,
     @Inject(POSTOP_CLOCK) private readonly now: PostOpClock,
     private readonly tenantContext: TenantContextService,
+    @Inject(POSTOP_EMAIL_EVIDENCE_CUTOFF)
+    private readonly evidenceCutoff: PostOpEmailEvidenceCutoff,
   ) {}
 
   /**
@@ -348,6 +442,19 @@ export class DeliverPostOpInstructionsUseCase {
       this.tenantContext,
       appointmentId,
     );
+    // DX-250: la misma `Idempotency-Key` (reintento tras un 502 o un tiempo
+    // agotado, doble clic, otra pestaña) devuelve la entrega ya registrada.
+    const deliveryId = input.idempotencyKey
+      ? idempotentDeliveryId(
+          request.tenantId,
+          appointmentId,
+          input.idempotencyKey,
+        )
+      : undefined;
+    if (deliveryId) {
+      const existing = await this.deliveries.findById(deliveryId);
+      if (existing) return this.replayed(existing, input);
+    }
     const template = await this.templates.findById(input.templateId);
     if (!template) {
       throw new NotFoundException(POSTOP_TEMPLATE_NOT_FOUND_MESSAGE);
@@ -355,6 +462,7 @@ export class DeliverPostOpInstructionsUseCase {
     if (!template.active) {
       throw new BadRequestException(POSTOP_TEMPLATE_INACTIVE_MESSAGE);
     }
+    assertAttendable(ctx, this.now());
     // Solo los canales con enlace dependen del host (lo impreso no).
     const linkHost = input.channel === 'PRINT' ? null : link.host;
     if (input.channel !== 'PRINT' && !linkHost) {
@@ -383,23 +491,35 @@ export class DeliverPostOpInstructionsUseCase {
     const deliveredByName =
       (await this.deliveries.userName(request.actor.userId)) ?? 'Equipo';
 
-    const delivery = await this.deliveries.create({
-      patientId: appointment.patientId,
-      appointmentId: appointment.id,
-      locationId: appointment.locationId,
-      templateId: template.id,
-      templateCode: template.code,
-      templateTitle: template.title,
-      templateVersion: template.version,
-      channel: input.channel,
-      renderedText,
-      deliveredById: request.actor.userId,
-      deliveredByName,
-      recipientMasked: plan.recipientMasked,
-      sentToResponsible: plan.sentToResponsible,
-      tokenHash: token ? hashPostOpToken(token) : null,
-      tokenExpiresAt: token ? postOpLinkExpiry(this.now()) : null,
-    });
+    let delivery: PostOpDelivery;
+    try {
+      delivery = await this.deliveries.create({
+        ...(deliveryId ? { id: deliveryId } : {}),
+        patientId: appointment.patientId,
+        appointmentId: appointment.id,
+        locationId: appointment.locationId,
+        templateId: template.id,
+        templateCode: template.code,
+        templateTitle: template.title,
+        templateVersion: template.version,
+        channel: input.channel,
+        renderedText,
+        deliveredById: request.actor.userId,
+        deliveredByName,
+        recipientMasked: plan.recipientMasked,
+        sentToResponsible: plan.sentToResponsible,
+        tokenHash: token ? hashPostOpToken(token) : null,
+        tokenExpiresAt: token ? postOpLinkExpiry(this.now()) : null,
+      });
+    } catch (err) {
+      // Otra petición con la misma clave ganó la carrera entre la lectura y la
+      // inserción: es esa entrega.
+      if (deliveryId && err instanceof PostOpDeliveryAlreadyExistsError) {
+        const existing = await this.deliveries.findById(deliveryId);
+        if (existing) return this.replayed(existing, input);
+      }
+      throw err;
+    }
 
     const firstName = firstNameOnly(patient.firstName) ?? patient.firstName;
     await this.audit.record({
@@ -444,7 +564,10 @@ export class DeliverPostOpInstructionsUseCase {
     }
 
     return {
-      delivery: toPostOpDeliverySummary(delivery),
+      delivery: toPostOpDeliverySummary(
+        delivery,
+        emailQueued ? 'QUEUED' : 'NOT_SENT',
+      ),
       publicUrl,
       whatsapp:
         plan.whatsappPhone && publicUrl
@@ -459,6 +582,60 @@ export class DeliverPostOpInstructionsUseCase {
           : null,
       sentTo: plan.email && emailQueued ? maskEmail(plan.email.to) : null,
       sentToResponsible: plan.sentToResponsible,
+      emailQueued,
+    };
+  }
+
+  /**
+   * La entrega que ya existía para esta `Idempotency-Key`. El enlace público
+   * no se puede recuperar (solo se guarda su hash): `publicUrl` y `whatsapp`
+   * van a null. El email no se vuelve a encolar (el outbox deduplica por
+   * `referenceId`): `emailQueued` sale del estado real del outbox.
+   */
+  private async replayed(
+    existing: PostOpDelivery,
+    input: DeliverPostOpInput,
+  ): Promise<PostOpDeliveryCreated> {
+    // La misma clave solo repite LA MISMA petición (como en los abonos, DX-109).
+    if (
+      existing.templateId !== input.templateId ||
+      existing.channel !== input.channel
+    ) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        error: 'Unprocessable Entity',
+        message: POSTOP_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      });
+    }
+    const [summary] = await summarize(
+      this.deliveries,
+      [existing],
+      this.evidenceCutoff(),
+    );
+    // La primera petición puede estar entre el INSERT y el encolado del email:
+    // un EMAIL tan reciente sin fila en el outbox no se da por «no enviado».
+    if (
+      existing.channel === 'EMAIL' &&
+      summary.emailStatus === 'NOT_SENT' &&
+      this.now().getTime() - existing.deliveredAt.getTime() <
+        IN_PROGRESS_GRACE_MS
+    ) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        message: POSTOP_DELIVERY_IN_PROGRESS_MESSAGE,
+        code: 'POSTOP_DELIVERY_IN_PROGRESS',
+      });
+    }
+    const emailQueued =
+      summary.emailStatus === 'QUEUED' || summary.emailStatus === 'SENT';
+    return {
+      delivery: summary,
+      publicUrl: null,
+      whatsapp: null,
+      sentTo: emailQueued ? existing.recipientMasked : null,
+      sentToResponsible: existing.sentToResponsible,
       emailQueued,
     };
   }
@@ -517,13 +694,15 @@ export class ListPatientPostOpDeliveriesUseCase {
     @Inject(POST_OP_DELIVERY_REPOSITORY)
     private readonly deliveries: PostOpDeliveryRepository,
     @Inject(PATIENT_REPOSITORY) private readonly patients: PatientRepository,
+    @Inject(POSTOP_EMAIL_EVIDENCE_CUTOFF)
+    private readonly evidenceCutoff: PostOpEmailEvidenceCutoff,
   ) {}
 
   /** Entregas del paciente, las más recientes primero. */
   async execute(patientId: string): Promise<PostOpDeliverySummary[]> {
     await assertPatientInClinic(this.patients, patientId);
     const rows = await this.deliveries.listByPatient(patientId);
-    return rows.map(toPostOpDeliverySummary);
+    return summarize(this.deliveries, rows, this.evidenceCutoff());
   }
 }
 
@@ -533,6 +712,8 @@ export class GetPatientPostOpDeliveryUseCase {
     @Inject(POST_OP_DELIVERY_REPOSITORY)
     private readonly deliveries: PostOpDeliveryRepository,
     @Inject(PATIENT_REPOSITORY) private readonly patients: PatientRepository,
+    @Inject(POSTOP_EMAIL_EVIDENCE_CUTOFF)
+    private readonly evidenceCutoff: PostOpEmailEvidenceCutoff,
   ) {}
 
   /** La entrega con su texto congelado, para verla o reimprimirla. */
@@ -543,8 +724,13 @@ export class GetPatientPostOpDeliveryUseCase {
     await assertPatientInClinic(this.patients, patientId);
     const view = await this.deliveries.findForPatient(patientId, id);
     if (!view) throw new NotFoundException(POSTOP_DELIVERY_NOT_FOUND_MESSAGE);
+    const [summary] = await summarize(
+      this.deliveries,
+      [view],
+      this.evidenceCutoff(),
+    );
     return {
-      ...toPostOpDeliverySummary(view),
+      ...summary,
       renderedText: view.renderedText,
       clinic: view.clinic,
       locationName: view.locationName,
