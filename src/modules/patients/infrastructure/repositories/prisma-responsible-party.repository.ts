@@ -12,6 +12,7 @@ import {
   type ResponsiblePatientSummary,
   type UpdateResponsiblePartyData,
 } from '../../domain/ports/responsible-party-repository.port';
+import { storedPhoneE164 } from '../../domain/caller-lookup/caller-phone';
 import {
   defaultPhoneRegionIn,
   reconcileResponsiblePhoneE164,
@@ -233,9 +234,20 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
     const tenantId = this.requireTenantId();
     try {
       return await this.prisma.runWithTenant(async (tx) => {
+        // DX-224: el E.164 en el mismo INSERT (sin UPDATE posterior).
+        const phoneE164 = data.contact?.phone
+          ? storedPhoneE164(
+              data.contact.phone,
+              await defaultPhoneRegionIn(
+                tx,
+                this.tenantContext.getLocationId(),
+              ),
+            )
+          : null;
         const created = await tx.patientResponsibleParty.create({
           data: {
             tenantId,
+            phoneE164,
             patientId,
             responsiblePatientId: data.responsiblePatientId,
             ...(data.contact ? contactCreateData(data.contact) : {}),
@@ -246,7 +258,6 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
           },
           select: PARTY_SELECT,
         });
-        await this.reconcilePhone(tx, created.id, data.contact?.phone);
         return toView(created);
       });
     } catch (err) {

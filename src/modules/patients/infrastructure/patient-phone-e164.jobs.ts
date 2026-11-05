@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   Logger,
   OnApplicationBootstrap,
@@ -6,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { JobRegistry } from '../../jobs/application/job-registry';
 import { JobQueue } from '../../jobs/application/job-queue.service';
+import { JOBS_CONFIG } from '../../jobs/infrastructure/jobs-config';
+import type { JobsConfig } from '../../jobs/infrastructure/jobs-config';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { backfillTenantPhoneE164 } from './phone-e164-backfill';
 
@@ -73,6 +76,7 @@ export class PatientPhoneE164Jobs
     private readonly registry: JobRegistry,
     private readonly queue: JobQueue,
     private readonly prisma: PrismaService,
+    @Inject(JOBS_CONFIG) private readonly config: JobsConfig,
   ) {}
 
   onModuleInit(): void {
@@ -119,6 +123,11 @@ export class PatientPhoneE164Jobs
    * no contesta solo pierde este encolado; el barrido horario lo cubre.
    */
   onApplicationBootstrap(): void {
+    // Solo el proceso que ejecuta trabajos lo encola (como el resto de la cola:
+    // el worker está apagado con NODE_ENV=test). Un INSERT suelto al arrancar
+    // cada app de los tests rompería los recuentos de `jobs` de otras suites
+    // (seed-demo: «no escribe nada fuera del tenant demo»).
+    if (!this.config.workerEnabled) return;
     const hour = new Date().toISOString().slice(0, 13);
     void this.queue
       .enqueue(
