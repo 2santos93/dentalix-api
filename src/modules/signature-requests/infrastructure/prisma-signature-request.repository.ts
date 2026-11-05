@@ -150,19 +150,26 @@ function toListRow(row: ListRow): SignatureRequestListRow {
 export const SIGNATURE_ALREADY_SENDING_MESSAGE =
   'Este documento ya se está enviando a firma. Actualiza la lista de envíos y, si hace falta, vuelve a enviarlo.';
 
+const LIVE_LINK_INDEX = /signature_requests_live_(consent|budget)_key/;
+
 /**
  * P2002 de los índices únicos parciales «un enlace vivo por documento»
- * (`signature_requests_live_consent_key` y `_live_budget_key`, DX-425). Prisma
- * no los conoce (no se declaran en el schema), así que los informa con
- * `meta.target` nulo; el único declarado que podría chocar al crear, el de
- * `tokenHash`, trae su campo y se deja pasar como el error que es.
+ * (`signature_requests_live_consent_key` y `_live_budget_key`, DX-425). Se
+ * reconoce por el nombre del índice si Prisma lo informa (`meta.target` o el
+ * mensaje) y, como Prisma 6 no declara estos índices y deja `meta.target`
+ * nulo, también con el target nulo. El único declarado que podría chocar al
+ * crear, el de `tokenHash`, trae su campo y se deja pasar como el error que es.
  */
 function isLiveLinkViolation(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === 'P2002' &&
-    !(error.meta as { target?: unknown } | undefined)?.target
-  );
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+    error.code !== 'P2002'
+  ) {
+    return false;
+  }
+  const target = (error.meta as { target?: unknown } | undefined)?.target;
+  if (!target) return true;
+  return LIVE_LINK_INDEX.test(JSON.stringify(target) + error.message);
 }
 
 /**

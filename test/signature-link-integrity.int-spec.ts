@@ -664,6 +664,38 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
       );
     };
 
+    it('corre con el owner de producción: NO FORCE antes de la deduplicación y FORCE otra vez antes del COMMIT, ACCESS EXCLUSIVE al inicio', () => {
+      const sql = readFileSync(
+        join(
+          __dirname,
+          '../prisma/migrations/20261121090000_dx425_signature_link_integrity/migration.sql',
+        ),
+        'utf8',
+      );
+      const lock = sql.indexOf(
+        'LOCK TABLE "signature_requests" IN ACCESS EXCLUSIVE MODE',
+      );
+      const noForce = sql.indexOf('NO FORCE ROW LEVEL SECURITY;');
+      const dedupe = sql.indexOf('-- BEGIN dedupe');
+      const force = sql.lastIndexOf(
+        'ALTER TABLE "signature_requests" FORCE ROW LEVEL SECURITY;',
+      );
+      expect(lock).toBeGreaterThan(-1);
+      expect(lock).toBeLessThan(noForce);
+      expect(noForce).toBeLessThan(dedupe);
+      expect(dedupe).toBeLessThan(force);
+      // Nada que suba de bloqueo después del ACCESS EXCLUSIVE.
+      expect(sql).not.toMatch(/IN (SHARE|SHARE ROW EXCLUSIVE) MODE/);
+      const validate = readFileSync(
+        join(
+          __dirname,
+          '../prisma/migrations/20261121090100_dx425_signed_before_expiry_validate/migration.sql',
+        ),
+        'utf8',
+      );
+      expect(validate).not.toMatch(/row_security/);
+    });
+
     it('revoca los más antiguos con el autor del más reciente y no borra nada', async () => {
       class Rollback extends Error {}
       const seen: {

@@ -723,6 +723,34 @@ describe('enlace público, código y firma (DX-243)', () => {
     });
   });
 
+  it('DX-425: si la hora de la BD ya pasó la caducidad, firmar es «Enlace no válido» (no un error del CHECK); en el instante exacto, firma', async () => {
+    const signWith = async (dbOffsetMs: number) => {
+      const ctx = setup();
+      const { token, session } = await verified(ctx);
+      ctx.advance(5 * 60_000);
+      const expiresAt = ctx.repo.rows[0].expiresAt;
+      ctx.repo.dbClock = () => new Date(expiresAt.getTime() + dbOffsetMs);
+      return {
+        ctx,
+        result: ctx.inTenant(() =>
+          ctx.sign.execute(
+            token,
+            session,
+            { signature: `data:image/png;base64,${PNG}`, accepted: true },
+            EVIDENCE,
+          ),
+        ),
+      };
+    };
+    const late = await signWith(1);
+    await expect(late.result).rejects.toThrow(SIGNATURE_LINK_INVALID_MESSAGE);
+    expect(late.ctx.repo.consents).toHaveLength(0);
+    const exact = await signWith(0);
+    await expect(exact.result).resolves.toMatchObject({
+      signedAt: exact.ctx.repo.rows[0].expiresAt,
+    });
+  });
+
   it('caducado (72 h), anulado o con un token inventado: «Enlace no válido» sin datos', async () => {
     const ctx = setup();
     const created = await send(ctx);

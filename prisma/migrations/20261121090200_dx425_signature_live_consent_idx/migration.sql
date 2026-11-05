@@ -3,6 +3,9 @@
 -- índice es la red cuando dos envíos corren a la vez (el segundo recibe 409).
 -- Parcial: solo los vivos, así que es pequeño. Los duplicados que hubiera ya
 -- los anuló la migración 20261121090000 (los más antiguos, sin borrar).
+-- IF NOT EXISTS: un reintento tras un fallo se SALTARÍA si quedó un índice INVALID
+-- con este nombre (y los duplicados seguirían ahí): por eso la receta de abajo
+-- empieza por el DROP INDEX CONCURRENTLY, que no se puede omitir.
 -- CONCURRENTLY (DB-025): no bloquea las escrituras; por eso es la ÚNICA
 -- sentencia del fichero (Prisma la ejecuta fuera de transacción). Si falla
 -- (p. ej. un duplicado vivo nacido entre las dos migraciones) deja un índice

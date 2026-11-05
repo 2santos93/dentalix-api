@@ -40,6 +40,7 @@ import {
   SIGNATURE_CODE_MAX_SENDS,
   SIGNATURE_CODE_TTL_MINUTES,
   codeResendWaitSeconds,
+  SIGNATURE_CODE_RESEND_SECONDS,
   generateSignatureCode,
   hmacSignatureCode,
   signatureCodeExpiry,
@@ -180,7 +181,14 @@ export interface PublicSignatureView {
 
 function viewOf(ctx: PublicSignatureContext, now: Date): PublicSignatureView {
   const { request } = ctx;
-  const wait = codeResendWaitSeconds(request.codeSentAt, now);
+  // DX-425: `codeSentAt` es hora de la BD; el «puede reenviar a las…» se da
+  // como instante absoluto sobre ese mismo reloj (la comprobación real usa
+  // `dbNow` dentro de la transacción).
+  const resendAt = request.codeSentAt
+    ? new Date(
+        request.codeSentAt.getTime() + SIGNATURE_CODE_RESEND_SECONDS * 1000,
+      )
+    : null;
   return {
     type: request.type,
     clinic: ctx.clinic,
@@ -191,7 +199,8 @@ function viewOf(ctx: PublicSignatureContext, now: Date): PublicSignatureView {
       request.codeHash !== null &&
       request.codeExpiresAt !== null &&
       request.codeExpiresAt.getTime() > now.getTime(),
-    resendAvailableAt: wait > 0 ? new Date(now.getTime() + wait * 1000) : null,
+    resendAvailableAt:
+      resendAt && resendAt.getTime() > now.getTime() ? resendAt : null,
     codeSendsLeft: Math.max(
       0,
       SIGNATURE_CODE_MAX_SENDS - request.codeSendCount,
@@ -271,7 +280,7 @@ export class RequestSignatureCodeUseCase {
         if (request.codeSendCount >= SIGNATURE_CODE_MAX_SENDS) {
           return { write: null, result: { kind: 'MAX' } };
         }
-        const seconds = codeResendWaitSeconds(request.codeSentAt, now);
+        const seconds = codeResendWaitSeconds(request.codeSentAt, dbNow);
         if (seconds > 0) {
           return { write: null, result: { kind: 'WAIT', seconds } };
         }
@@ -694,7 +703,13 @@ export class SignPublicSignatureUseCase {
       ctx.request.id,
       evidence,
       (request, dbNow) => {
-        if (!isLinkUsable(request, now)) {
+        // El CHECK `signedAt <= expiresAt` compara la hora de la BD con la
+        // caducidad que fijó el reloj de la app: si la BD ya la pasó, es un
+        // enlace caducado, no un error de regla (DX-425).
+        if (
+          !isLinkUsable(request, now) ||
+          dbNow.getTime() > request.expiresAt.getTime()
+        ) {
           return { write: null, result: { kind: 'INVALID' } };
         }
         if (
@@ -803,7 +818,12 @@ export class SignPublicSignatureUseCase {
         ctx.request.id,
         evidence,
         (request, dbNow) => {
-          if (!isLinkUsable(request, now)) {
+          // Ver la nota del CHECK `signedAt <= expiresAt` en la firma del
+          // consentimiento.
+          if (
+            !isLinkUsable(request, now) ||
+            dbNow.getTime() > request.expiresAt.getTime()
+          ) {
             return { write: null, result: { kind: 'INVALID' } };
           }
           const content = sentBudget(request);

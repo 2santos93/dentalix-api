@@ -22,37 +22,49 @@
 --      `remoteSentAt`) las pone la BD con `now()` (inicio de la transacción) en el
 --      momento en que pasan de NULL a un valor (el envío del código, cada vez
 --      que cambia). Lo que mande la app (`dentalix_app`) se ignora; un
---      superusuario (semillas, importaciones, migraciones) conserva las suyas. La API lee esa hora de la
+--      superusuario (solo local y CI; el owner de producción no lo es, así que
+--      recibe las de la BD) conserva las suyas. La API lee esa hora de la
 --      BD antes de decidir (`withLockedRequest`) para que los hashes que
 --      sellan el consentimiento y la aceptación lleven la misma hora.
 --   4. CHECK `signature_requests_signed_before_expiry_check`: `signedAt` no
---      puede ser posterior a `expiresAt`. Nace NOT VALID (rápido, solo
---      comprueba filas nuevas o cambiadas) y se valida en la migración
+--      puede ser posterior a `expiresAt` (la hora de la BD frente a la
+--      caducidad que fijó el reloj de la app). Nace NOT VALID (no recorre la
+--      tabla; solo comprueba filas nuevas o cambiadas) y se valida en la migración
 --      siguiente, que no bloquea lecturas ni escrituras.
 --   5. REVOKE DELETE a `dentalix_app` (DB-065): la app ya no tenía ningún
 --      camino de borrado (el trigger `signature_requests_no_delete` lo
 --      impedía y `guardHardDeletes` quita `delete` del cliente de tenant); ahora
---      tampoco tiene el privilegio. La purga de retención o supresión (DX-039)
---      corre como superusuario, que sigue pudiendo borrar (el trigger lo
---      permite y un REVOKE no le afecta).
+--      tampoco tiene el privilegio (create-app-role.sql lo repite y
+--      `db:check-force` lo vigila). Hoy nadie borra en producción: el trigger
+--      solo deja a un superusuario y el owner no lo es; una purga futura
+--      (DX-039) tendrá que correr con un rol que pueda.
 --
 -- Compatible hacia atrás: el código anterior no hace nada que el trigger o el
 -- CHECK rechacen (nunca baja un contador, las horas que manda se sustituyen por
 -- las de la BD y no firma tras caducar: `isLinkUsable`).
 --
--- Bloqueo: SHARE ROW EXCLUSIVE sobre signature_requests (las escrituras
--- esperan, las lecturas no) durante la deduplicación y los CREATE TRIGGER; el
--- ADD CONSTRAINT ... NOT VALID toma un ACCESS EXCLUSIVE de milisegundos (solo
--- catálogo, sin recorrer la tabla). lock_timeout evita quedar encolado detrás de
--- una transacción larga: si salta, se reintenta.
+-- Bloqueo: ACCESS EXCLUSIVE sobre signature_requests desde el principio y sin
+-- subir de bloqueo después (patrón DX-316): lo piden el NO FORCE/FORCE de la
+-- RLS y el ADD CONSTRAINT, y tomarlo al inicio evita el interbloqueo con una
+-- transacción de la app que ya leyó la tabla y quiere escribir. Se mantiene
+-- hasta el COMMIT (dedupe + triggers + CHECK NOT VALID: la tabla es pequeña,
+-- una fila por envío; el CHECK no recorre la tabla). lock_timeout evita quedar
+-- encolado detrás de una transacción larga: si salta, se reintenta.
+--
+-- RLS: signature_requests está en FORCE. En producción el owner no es
+-- superusuario ni BYPASSRLS (job «Migraciones con owner sin superusuario»):
+-- con row_security = off y FORCE, la deduplicación FALLARÍA aun con la tabla
+-- vacía. Por eso NO FORCE durante la deduplicación y FORCE otra vez antes del
+-- COMMIT (DX-113/DX-134/DX-316).
 
 SET LOCAL lock_timeout = '5s';
--- Las tablas tienen RLS FORCE: con un owner sin BYPASSRLS la deduplicación
--- vería 0 filas en silencio. Con row_security = off, una consulta a la que se
--- aplicaría una política FALLA en vez de filtrar (ver 20261015130000).
+-- Con row_security = off, una consulta a la que se aplicaría una política
+-- FALLA en vez de filtrar en silencio (ver 20261015130000); junto con el NO
+-- FORCE de abajo, o se ven todas las filas o la migración se detiene.
 SET LOCAL row_security = off;
 
-LOCK TABLE "signature_requests" IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE "signature_requests" IN ACCESS EXCLUSIVE MODE;
+ALTER TABLE "signature_requests" NO FORCE ROW LEVEL SECURITY;
 
 -- ---------------------------------------------------------------------------
 -- 1. Duplicados vivos -> anular los más antiguos (sin borrar).
@@ -129,9 +141,10 @@ DECLARE
   -- con las funciones de hora: esa prueba mira el texto de la función.
   db_now timestamp(3) := (pg_catalog.now() AT TIME ZONE 'UTC');
 BEGIN
-  -- Un superusuario (migraciones, importaciones, semillas y pruebas que
-  -- siembran historia) conserva las horas que escribe, igual que la purga de
-  -- dx_forbid_clinical_record_mutation; la app (dentalix_app) no puede.
+  -- Un superusuario (local, CI, semillas y pruebas que siembran historia)
+  -- conserva las horas que escribe, igual que la purga de
+  -- dx_forbid_clinical_record_mutation; la app (dentalix_app) y el owner de
+  -- producción (sin superusuario) reciben las de la BD.
   IF EXISTS (
     SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = current_user AND rolsuper
   ) THEN
@@ -184,3 +197,6 @@ ALTER TABLE "signature_requests"
 -- 5. La app no borra solicitudes de firma.
 -- ---------------------------------------------------------------------------
 REVOKE DELETE ON "signature_requests" FROM dentalix_app;
+
+-- Vuelve el FORCE (antes del COMMIT, ver arriba).
+ALTER TABLE "signature_requests" FORCE ROW LEVEL SECURITY;
