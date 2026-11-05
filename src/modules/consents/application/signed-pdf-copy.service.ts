@@ -9,6 +9,7 @@ import {
   NotFoundException,
   type OnModuleInit,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import {
   FILE_STORAGE,
@@ -21,7 +22,10 @@ import type { AuditRequestMeta } from '../../audit/domain/audit-request-context'
 import { JobQueue } from '../../jobs/application/job-queue.service';
 import { JobRegistry } from '../../jobs/application/job-registry';
 import type { JobPayload } from '../../jobs/domain/job';
-import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
+import {
+  EmailOutbox,
+  type PreparedEmail,
+} from '../../notifications/email/application/email-outbox.service';
 import type { SignedConsentCopyEmailVars } from '../../notifications/email/domain/email-message';
 import { EmailQuotaExceededError } from '../../notifications/email/domain/email-quota-exceeded.error';
 import {
@@ -89,11 +93,16 @@ export const SIGNED_PDF_COPY_EMAIL_SENDER = Symbol(
 export interface SignedPdfCopyEmailSender {
   /** Topes del outbox por destinatario y clínica (solo el reenvío manual). */
   assertCanSend(to: string): Promise<void>;
-  send(input: {
+  /**
+   * DX-463: deja el email listo para encolarlo DENTRO de la transacción que
+   * crea el enlace (outbox transaccional): `insert(tx)` dentro, `kick()`
+   * después del COMMIT.
+   */
+  prepare(input: {
     to: string;
     referenceId: string;
     vars: SignedConsentCopyEmailVars;
-  }): Promise<void>;
+  }): Promise<PreparedEmail>;
 }
 
 function tenantIdOf(tenantContext: Pick<TenantContextService, 'getTenantId'>) {
@@ -129,12 +138,12 @@ export class OutboxSignedPdfCopyEmailSender implements SignedPdfCopyEmailSender 
     }
   }
 
-  async send(input: {
+  prepare(input: {
     to: string;
     referenceId: string;
     vars: SignedConsentCopyEmailVars;
-  }): Promise<void> {
-    await this.outbox.enqueue({
+  }): Promise<PreparedEmail> {
+    return this.outbox.prepareInTx({
       tenantId: tenantIdOf(this.tenantContext),
       to: input.to,
       template: 'signed-consent-copy',
@@ -160,7 +169,7 @@ export class SignedPdfCopySender {
     @Inject(SIGNED_PDF_COPY_REPOSITORY)
     private readonly repo: Pick<SignedPdfCopyRepository, 'issueLink'>,
     @Inject(SIGNED_PDF_COPY_EMAIL_SENDER)
-    private readonly email: Pick<SignedPdfCopyEmailSender, 'send'>,
+    private readonly email: Pick<SignedPdfCopyEmailSender, 'prepare'>,
     @Inject(TenantLinkBaseService)
     private readonly linkBase: Pick<TenantLinkBaseService, 'forTenant'>,
     @Inject(TenantContextService)
@@ -184,17 +193,14 @@ export class SignedPdfCopySender {
     const now = this.clock();
     const expiresAt = signedPdfCopyExpiresAt(now, this.config.ttlHours);
     const token = generateSignedPdfCopyToken();
-    const link = await this.repo.issueLink({
-      consentId: target.consentId,
-      patientId: target.patientId,
-      tokenHash: hashSignedPdfCopyToken(token),
-      expiresAt,
-      createdById,
-      now,
-    });
-    await this.email.send({
+    // DX-463: el enlace nuevo, la revocación del anterior y el email entran en
+    // UNA transacción. Si encolar falla, el enlace anterior sigue válido (el
+    // paciente nunca se queda sin enlace); el despachador se despierta tras el
+    // COMMIT.
+    const linkId = randomUUID();
+    const mail = await this.email.prepare({
       to: target.destination,
-      referenceId: link.id,
+      referenceId: linkId,
       vars: {
         recipientFirstName: firstName(target.signerName),
         patientFirstName:
@@ -206,6 +212,19 @@ export class SignedPdfCopySender {
         expiresAtLabel: format.longDateTime(expiresAt, timeZone),
       },
     });
+    await this.repo.issueLink({
+      id: linkId,
+      consentId: target.consentId,
+      patientId: target.patientId,
+      tokenHash: hashSignedPdfCopyToken(token),
+      expiresAt,
+      createdById,
+      now,
+      enqueue: async (tx) => {
+        await mail.insert(tx);
+      },
+    });
+    mail.kick();
     return { sentAt: now, expiresAt };
   }
 }
@@ -405,21 +424,30 @@ export class DownloadSignedPdfCopyUseCase {
       now,
     );
     if (state === 'USED') throw linkUsed();
-    const outcome = await this.repo.consumeLink(link.id, now, meta);
+    // DX-463: la URL firmada se genera ANTES del COMMIT del gasto: si falla,
+    // el enlace no se gasta (ni se audita la descarga) y se puede reintentar.
+    let url = '';
+    const outcome = await this.repo.consumeLink(
+      link.id,
+      now,
+      meta,
+      async (pdf) => {
+        url = await this.storage.getSignedUrl(
+          pdf.storageKey,
+          SIGNED_PDF_COPY_DOWNLOAD_TTL_SECONDS,
+          {
+            disposition: 'attachment',
+            filename: pdf.originalName,
+            contentType: pdf.mimeType,
+          },
+        );
+      },
+    );
     if (outcome.kind === 'USED') throw linkUsed();
     if (outcome.kind === 'GONE') {
       throw new NotFoundException(SIGNED_PDF_COPY_NOT_FOUND_MESSAGE);
     }
     const { download } = outcome;
-    const url = await this.storage.getSignedUrl(
-      download.storageKey,
-      SIGNED_PDF_COPY_DOWNLOAD_TTL_SECONDS,
-      {
-        disposition: 'attachment',
-        filename: download.originalName,
-        contentType: download.mimeType,
-      },
-    );
     return {
       url,
       expiresAt: new Date(

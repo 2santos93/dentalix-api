@@ -102,6 +102,8 @@ async function cleanup(): Promise<void> {
   });
   const ids = tenants.map((t) => t.id);
   const tenantId = { in: ids };
+  await raw.patientCreditEntry.deleteMany({ where: { tenantId } });
+  await raw.patientCreditTransfer.deleteMany({ where: { tenantId } });
   await raw.paymentReceipt.deleteMany({ where: { tenantId } });
   await raw.paymentReceiptCounter.deleteMany({ where: { tenantId } });
   await raw.paymentAllocation.deleteMany({ where: { tenantId } });
@@ -404,7 +406,7 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
   // no dejan saldo a favor sin confirmarlo).
   it('saldo a favor sin confirmar: si otro abono llegó al plan tras leer lo pendiente, 409 y no queda ninguna línea', async () => {
     const seen = await tenantContext.run(a.tenantId, a.locationId, () =>
-      payments.countPlanPayments(a.planId),
+      payments.countPlanMovements(a.planId),
     );
     // Otro cobro entra entre la lectura de lo pendiente y la transacción.
     await split(a, { lines: [line(a, { amount: 8 }), line(a, { amount: 9 })] });
@@ -416,7 +418,7 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
     await expect(
       split(a, {
         lines: [line(a, { amount: 10 }), line(a, { amount: 11 })],
-        balanceGuard: { planPaymentsSeen: seen },
+        balanceGuard: { planMovementsSeen: seen },
       }),
     ).rejects.toMatchObject({
       response: { code: 'SPLIT_PAYMENT_BALANCE_CHANGED' },
@@ -428,33 +430,149 @@ describe('DX-390 · cobro dividido con un solo recibo (int)', () => {
 
     // Con la cuenta al día, el cobro entra.
     const fresh = await tenantContext.run(a.tenantId, a.locationId, () =>
-      payments.countPlanPayments(a.planId),
+      payments.countPlanMovements(a.planId),
     );
     const record = await split(a, {
       lines: [line(a, { amount: 10 }), line(a, { amount: 11 })],
-      balanceGuard: { planPaymentsSeen: fresh },
+      balanceGuard: { planMovementsSeen: fresh },
     });
     expect(record.payments).toHaveLength(2);
   });
 
   it('dos cobros simultáneos sin confirmar con la misma lectura de lo pendiente: entra uno y el otro es 409', async () => {
     const seen = await tenantContext.run(a.tenantId, a.locationId, () =>
-      payments.countPlanPayments(a.planId),
+      payments.countPlanMovements(a.planId),
     );
     const results = await Promise.allSettled([
       split(a, {
         lines: [line(a, { amount: 12 }), line(a, { amount: 13 })],
-        balanceGuard: { planPaymentsSeen: seen },
+        balanceGuard: { planMovementsSeen: seen },
       }),
       split(a, {
         lines: [line(a, { amount: 14 }), line(a, { amount: 15 })],
-        balanceGuard: { planPaymentsSeen: seen },
+        balanceGuard: { planMovementsSeen: seen },
       }),
     ]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const [rejected] = results.filter((r) => r.status === 'rejected');
     expect(rejected).toMatchObject({
       reason: { response: { code: 'SPLIT_PAYMENT_BALANCE_CHANGED' } },
+    });
+  });
+  // DX-463 (BE-058): un traspaso de saldo a favor al plan (DX-253) también
+  // cambia lo pendiente, aunque no sea un abono: la guarda lo cuenta.
+  describe('DX-463 · traspaso de saldo a favor a la vez que un cobro dividido', () => {
+    const waitForLockWaiter = async (): Promise<void> => {
+      for (let i = 0; i < 400; i++) {
+        const [{ waiting }] = await raw.$queryRaw<{ waiting: number }[]>`
+          SELECT count(*)::int AS waiting FROM pg_stat_activity
+           WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+        if (waiting >= 1) return;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error('el cobro no llegó a esperar el bloqueo del plan');
+    };
+    const settled = <T>(p: Promise<T>) =>
+      p.then(
+        (value) => ({ status: 'fulfilled', value }) as const,
+        (reason: unknown) => ({ status: 'rejected', reason }) as const,
+      );
+    /**
+     * Otra conexión con el plan bloqueado (como un traspaso en curso): el
+     * cobro llega, espera el bloqueo, y solo entonces el traspaso confirma.
+     */
+    const transferWhileSplitWaits = async (
+      clinic: Clinic,
+      sourcePlanId: string,
+      startSplit: () => Promise<unknown>,
+    ) => {
+      let locked!: () => void;
+      const isLocked = new Promise<void>((resolve) => {
+        locked = resolve;
+      });
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const holder = raw.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM "treatment_plans" WHERE "id" = ${clinic.planId}::uuid FOR NO KEY UPDATE`;
+          locked();
+          await released;
+          const transfer = await tx.patientCreditTransfer.create({
+            data: {
+              tenantId: clinic.tenantId,
+              locationId: clinic.locationId,
+              patientId: clinic.patientId,
+              sourcePlanId,
+              targetPlanId: clinic.planId,
+              currency: 'USD',
+              amount: new Prisma.Decimal('25.00'),
+              reason: 'Traspaso de prueba DX-463',
+              createdById: clinic.userId,
+            },
+          });
+          await tx.patientCreditEntry.createMany({
+            data: [
+              {
+                tenantId: clinic.tenantId,
+                patientId: clinic.patientId,
+                treatmentPlanId: sourcePlanId,
+                currency: 'USD',
+                amount: new Prisma.Decimal('-25.00'),
+                kind: 'TRANSFER_OUT',
+                transferId: transfer.id,
+              },
+              {
+                tenantId: clinic.tenantId,
+                patientId: clinic.patientId,
+                treatmentPlanId: clinic.planId,
+                currency: 'USD',
+                amount: new Prisma.Decimal('25.00'),
+                kind: 'TRANSFER_IN',
+                transferId: transfer.id,
+              },
+            ],
+          });
+        },
+        { timeout: 30_000 },
+      );
+      await isLocked;
+      const attempt = settled(startSplit());
+      await waitForLockWaiter();
+      release();
+      await holder;
+      return attempt;
+    };
+
+    it('el traspaso entra entre la lectura de lo pendiente y el cobro: 409 y no queda ninguna línea', async () => {
+      const source = await raw.treatmentPlan.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId: a.patientId,
+          currency: 'USD',
+          status: TreatmentPlanStatus.ACCEPTED,
+        },
+      });
+      const seen = await tenantContext.run(a.tenantId, a.locationId, () =>
+        payments.countPlanMovements(a.planId),
+      );
+      const rowsBefore = await raw.payment.count({
+        where: { tenantId: a.tenantId },
+      });
+      const outcome = await transferWhileSplitWaits(a, source.id, () =>
+        split(a, {
+          lines: [line(a, { amount: 30 }), line(a, { amount: 31 })],
+          balanceGuard: { planMovementsSeen: seen },
+        }),
+      );
+      expect(outcome).toMatchObject({
+        status: 'rejected',
+        reason: { response: { code: 'SPLIT_PAYMENT_BALANCE_CHANGED' } },
+      });
+      expect(await raw.payment.count({ where: { tenantId: a.tenantId } })).toBe(
+        rowsBefore,
+      );
     });
   });
 });

@@ -5,6 +5,7 @@ import {
   OVERRIDE_REASON_MIN,
 } from '../../schedule-blocks/domain/reserved-slot';
 import { FRONT_DESK_ROLES } from './patient-flow';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../shared/validation/idempotency-key';
 
 /**
  * «Atender sin cita» (DX-470, porción 2 de DX-446): el paciente con dolor que
@@ -74,7 +75,7 @@ export const WALK_IN_MESSAGES = {
     'Otra persona acaba de ocupar ese hueco. Vuelve a intentarlo para buscar el siguiente.',
   overbookSlotTaken:
     'Esta urgencia se atendió en sobrecupo y su hora ya la ocupa otra cita del profesional. Muévela a otra hora o mantenla como sobrecupo.',
-  idempotencyKeyInvalid: 'La clave de idempotencia debe ser un UUID.',
+  idempotencyKeyInvalid: IDEMPOTENCY_KEY_INVALID_MESSAGE,
   idempotencyKeyReused:
     'Esta atención sin cita ya se registró con otros datos. Revisa «En clínica» antes de volver a intentarlo.',
 } as const;

@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { EmailTemplateName } from '../../domain/email-message';
 import {
   ClaimedOutboxEmail,
@@ -38,6 +39,13 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   >();
 
   insert(row: NewOutboxEmail): Promise<{ id: string }> {
+    return Promise.resolve(this.store(row));
+  }
+
+  insertInTx(
+    _tx: Prisma.TransactionClient,
+    row: NewOutboxEmail,
+  ): Promise<{ id: string }> {
     return Promise.resolve(this.store(row));
   }
 

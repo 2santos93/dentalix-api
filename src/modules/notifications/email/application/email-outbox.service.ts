@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import {
   EmailBrand,
   EmailLocale,
@@ -31,6 +32,13 @@ export interface EnqueueEmailInput<
 > extends EnqueuePlatformEmailInput<T> {
   /** Clínica que envía (marca y RLS). Sin clínica: `enqueuePlatform`. */
   tenantId: string;
+}
+
+/** Un email listo para encolar dentro de una transacción ajena (DX-463). */
+export interface PreparedEmail {
+  insert(tx: Prisma.TransactionClient): Promise<{ id: string }>;
+  /** Despierta al despachador: llamar solo tras el COMMIT de la transacción. */
+  kick(): void;
 }
 
 /**
@@ -99,6 +107,35 @@ export class EmailOutbox {
     const { id } = await this.repo.insert({ ...row, tenantId: input.tenantId });
     this.enqueued(id, input.tenantId, input.template, row.toMasked);
     return { id };
+  }
+
+  /**
+   * DX-463: encolar DENTRO de la transacción de quien llama (p. ej. revocar
+   * un enlace y encolar el email del nuevo): si la transacción se deshace, el
+   * email no existe; si confirma, ya está encolado. Se hace en dos pasos para
+   * no pedir otra conexión (la marca de la clínica) con la transacción
+   * abierta: `prepareInTx` antes de abrirla, `insert(tx)` dentro y `kick()`
+   * DESPUÉS del commit.
+   */
+  async prepareInTx<T extends EmailTemplateName>(
+    input: EnqueueEmailInput<T>,
+  ): Promise<PreparedEmail> {
+    const brand = await this.brandOf(input.tenantId);
+    const row = { ...this.prepare(input, brand), tenantId: input.tenantId };
+    return {
+      insert: async (tx) => {
+        const { id } = await this.repo.insertInTx(tx, row);
+        this.logger.log({
+          event: 'email.enqueued',
+          outboxId: id,
+          tenantId: input.tenantId,
+          template: input.template,
+          to: row.toMasked,
+        });
+        return { id };
+      },
+      kick: () => this.dispatcher.kick(),
+    };
   }
 
   /**

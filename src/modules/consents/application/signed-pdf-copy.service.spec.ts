@@ -13,6 +13,7 @@ import type {
   ConsumeSignedPdfCopyOutcome,
   IssueSignedPdfCopyLinkInput,
   SignedConsentPdfBackfillRepository,
+  SignedPdfCopyDownload,
   SignedPdfCopyLinkRow,
   SignedPdfCopyRepository,
   SignedPdfCopyTarget,
@@ -82,17 +83,28 @@ class FakeRepo implements SignedPdfCopyRepository {
     this.loadArgs.push([consentId, patientId]);
     return Promise.resolve(this.target);
   }
-  issueLink(input: IssueSignedPdfCopyLinkInput) {
-    const id = `link-${this.issued.length + 1}`;
+  /** Como la BD: `enqueue` va en la misma «transacción»; si falla, no queda nada. */
+  async issueLink(input: IssueSignedPdfCopyLinkInput) {
+    const id = input.id ?? `link-${this.issued.length + 1}`;
+    await input.enqueue?.({} as Prisma.TransactionClient);
     this.issued.push({ ...input, id });
-    return Promise.resolve({ id });
+    return { id };
   }
   findLinkByTokenHash(hash: string) {
     return Promise.resolve(this.links.get(hash) ?? null);
   }
-  consumeLink(linkId: string, _now: Date, meta: AuditRequestMeta) {
+  async consumeLink(
+    linkId: string,
+    _now: Date,
+    meta: AuditRequestMeta,
+    beforeCommit?: (download: SignedPdfCopyDownload) => Promise<void>,
+  ) {
+    // Como la BD: si `beforeCommit` falla, el enlace no queda gastado.
+    if (this.consumeOutcome.kind === 'CONSUMED') {
+      await beforeCommit?.(this.consumeOutcome.download);
+    }
     this.consumed.push({ linkId, meta });
-    return Promise.resolve(this.consumeOutcome);
+    return this.consumeOutcome;
   }
   findClinicBranding(): Promise<ClinicBranding | null> {
     return Promise.resolve({
@@ -117,6 +129,7 @@ function setup(
     vars: SignedConsentCopyEmailVars;
   }[] = [];
   const quotaChecks: string[] = [];
+  const kicks: string[] = [];
   const email: SignedPdfCopyEmailSender & { quotaError: Error | null } = {
     quotaError: null,
     assertCanSend(to) {
@@ -125,9 +138,16 @@ function setup(
         ? Promise.reject(this.quotaError)
         : Promise.resolve();
     },
-    send(input) {
-      emails.push(input);
-      return Promise.resolve();
+    prepare(input) {
+      return Promise.resolve({
+        insert: () => {
+          emails.push(input);
+          return Promise.resolve({ id: 'outbox-1' });
+        },
+        kick: () => {
+          kicks.push(input.referenceId);
+        },
+      });
     },
   };
   const linkBaseCalls: (string | undefined)[][] = [];
@@ -169,6 +189,7 @@ function setup(
   return {
     repo,
     emails,
+    kicks,
     quotaChecks,
     email,
     linkBaseCalls,
@@ -203,7 +224,9 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(ctx.emails).toHaveLength(1);
       const sent = ctx.emails[0];
       expect(sent.to).toBe('marta@example.com');
-      expect(sent.referenceId).toBe('link-1');
+      expect(sent.referenceId).toBe(link.id);
+      // El despachador se despierta tras el commit.
+      expect(ctx.kicks).toEqual([link.id]);
       const token = sent.vars.url.split('/copia/')[1];
       expect(sent.vars.url).toBe(`https://demo.dentalix.app/copia/${token}`);
       expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -328,6 +351,19 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(ctx.repo.issued).toEqual([]);
     });
 
+    it('DX-463: si encolar el email falla, no se crea ni se invalida nada y no se despierta al despachador', async () => {
+      const ctx = setup();
+      jest.spyOn(ctx.email, 'prepare').mockResolvedValue({
+        insert: () => Promise.reject(new Error('outbox caído')),
+        kick: () => ctx.kicks.push('kick'),
+      });
+      await expect(ctx.resend.execute('p1', 'c1', 'u1')).rejects.toThrow(
+        'outbox caído',
+      );
+      expect(ctx.repo.issued).toEqual([]);
+      expect(ctx.kicks).toEqual([]);
+    });
+
     it('el tope de emails frena ANTES de invalidar el enlace anterior', async () => {
       const ctx = setup();
       ctx.email.quotaError = new HttpException('Espera', 429);
@@ -436,6 +472,24 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
         expiresAt: new Date(NOW.getTime() + 60_000),
         fileName: 'Consentimiento firmado - Exodoncia.pdf',
       });
+    });
+
+    it('DX-463: si generar la URL firmada falla, el enlace no se gasta', async () => {
+      const ctx = setup();
+      ctx.repo.links.set(hash, live);
+      const storage = {
+        getSignedUrl: () => Promise.reject(new Error('storage caído')),
+      };
+      const download = new DownloadSignedPdfCopyUseCase(
+        ctx.repo,
+        { getTenantId: () => 't1' },
+        () => NOW,
+        storage,
+      );
+      await expect(download.execute(TOKEN, META)).rejects.toThrow(
+        'storage caído',
+      );
+      expect(ctx.repo.consumed).toEqual([]);
     });
 
     it('la segunda descarga responde «enlace usado» (410) sin URL', async () => {

@@ -148,11 +148,12 @@ export interface CreateSplitPaymentRepoInput {
    * Revisión DX-390: sin `confirmCreditBalance`, lo pendiente se leyó fuera
    * de la transacción. Con esto, la transacción bloquea el plan (FOR NO KEY
    * UPDATE: espera a los abonos en curso al plan y los pone en fila) y, si el
-   * plan tiene más abonos (vivos o anulados) que `planPaymentsSeen`, contados
-   * ANTES de leer lo pendiente, es 409 `SPLIT_PAYMENT_BALANCE_CHANGED` y no
+   * plan tiene más movimientos (abonos vivos o anulados y asientos de saldo a
+   * favor, DX-463) que `planMovementsSeen`, contados ANTES de leer lo
+   * pendiente, es 409 `SPLIT_PAYMENT_BALANCE_CHANGED` y no
    * se registra nada.
    */
-  balanceGuard?: { planPaymentsSeen: number };
+  balanceGuard?: { planMovementsSeen: number };
 }
 
 /** DX-390: un cobro dividido registrado, con sus líneas en orden. */
@@ -358,11 +359,13 @@ export interface PaymentRepository {
   findSplit(splitId: string): Promise<SplitPaymentRecord | null>;
 
   /**
-   * Revisión DX-390: cuántos abonos tiene el plan, vivos o anulados (solo
-   * crece: un abono nunca se borra). La guarda del saldo a favor del cobro
+   * Revisión DX-390 / DX-463: cuántos movimientos tiene el plan que cambian
+   * lo pendiente: abonos, vivos o anulados (un abono nunca se borra), y
+   * asientos de saldo a favor (traspasos y devoluciones, DX-253), que
+   * tampoco se borran: la cuenta solo crece. La guarda del saldo a favor del cobro
    * dividido (`CreateSplitPaymentRepoInput.balanceGuard`).
    */
-  countPlanPayments(treatmentPlanId: string): Promise<number>;
+  countPlanMovements(treatmentPlanId: string): Promise<number>;
 
   /**
    * DX-262: el saldo migrado vivo (no retirado) de esta clínica con lo abonado

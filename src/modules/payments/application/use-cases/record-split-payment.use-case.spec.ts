@@ -1,9 +1,11 @@
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../../shared/validation/idempotency-key';
 import { buildPaymentProofKit } from '../__fixtures__/payment-proof-kit';
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
@@ -128,18 +130,26 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
         : Promise.reject(new NotFoundException('Treatment plan not found')),
   };
   const convert = new FakeConvertAmount();
-  const balance = { billable: 500_000, paid: 100_000 };
+  const balance = {
+    billable: 500_000,
+    paid: 100_000,
+    unreadable: false,
+    timedOut: false,
+  };
   const getPlanBalance = {
     execute: () =>
-      Promise.resolve({
-        planCurrency: 'VES',
-        billable: balance.billable,
-        paid: balance.paid,
-        balance: balance.billable - balance.paid,
-        creditMovements: 0,
-        paymentsCount: 1,
-        paymentsWithoutRate: [],
-      }),
+      balance.unreadable
+        ? Promise.reject(new Error('db down'))
+        : Promise.resolve({
+            planCurrency: 'VES',
+            billable: balance.billable,
+            paid: balance.paid,
+            balance: balance.billable - balance.paid,
+            creditMovements: 0,
+            paymentsCount: 1,
+            paymentsWithoutRate: [],
+            rateProviderTimedOut: balance.timedOut,
+          }),
   };
   const methods = {
     findById: (id: string) =>
@@ -423,6 +433,42 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     });
   });
 
+  // DX-463 (BE-058): sin leer lo pendiente no hay con qué comparar el total;
+  // saltarse la comprobación dejaría pasar un excedente sin confirmar.
+  it.each([
+    ['el saldo no se puede leer', 'unreadable'],
+    ['el proveedor de tasas tardó demasiado', 'timedOut'],
+  ] as const)(
+    'DX-463: %s y sin confirmar → 503 SPLIT_PAYMENT_BALANCE_UNAVAILABLE en español y no se registra nada',
+    async (_label, failure) => {
+      const { uc, repo, balance } = makeUseCase();
+      balance[failure] = true;
+      const error: unknown = await uc
+        .execute('plan-1', twoLines(), 'user-1')
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect(
+        (error as ServiceUnavailableException).getResponse(),
+      ).toMatchObject({
+        statusCode: 503,
+        code: 'SPLIT_PAYMENT_BALANCE_UNAVAILABLE',
+        message: expect.stringContaining('No se pudo leer') as string,
+      });
+      expect(repo.lastSplitInput).toBeNull();
+    },
+  );
+
+  it('DX-463: con el excedente ya confirmado, el saldo ilegible no frena el cobro (no hay comprobación que saltar) y el recibo sale sin saldo', async () => {
+    const { uc, repo, balance } = makeUseCase();
+    balance.unreadable = true;
+    await uc.execute(
+      'plan-1',
+      twoLines({ confirmCreditBalance: true }),
+      'user-1',
+    );
+    expect(repo.lastSplitInput?.receiptPlanBalance).toBeNull();
+  });
+
   it('justo lo pendiente no pide confirmación', async () => {
     const { uc, balance } = makeUseCase();
     balance.paid = 200_000; // pendiente 300 000 = el cobro
@@ -437,7 +483,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
   it('sin confirmar, pasa al repositorio cuántos abonos tenía el plan ANTES de leer lo pendiente; confirmado, no', async () => {
     const { uc, repo } = makeUseCase();
     await uc.execute('plan-1', twoLines());
-    const seen = repo.lastSplitInput?.balanceGuard?.planPaymentsSeen;
+    const seen = repo.lastSplitInput?.balanceGuard?.planMovementsSeen;
     expect(seen).toEqual(expect.any(Number));
 
     // Cuenta también los anulados (solo crece).
@@ -451,7 +497,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
         ),
       }),
     );
-    expect(repo.lastSplitInput?.balanceGuard?.planPaymentsSeen).toBe(
+    expect(repo.lastSplitInput?.balanceGuard?.planMovementsSeen).toBe(
       (seen ?? 0) + 4,
     );
 
@@ -544,7 +590,9 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       const { uc } = makeUseCase();
       await expect(
         uc.execute('plan-1', twoLines(), 'user-1', 'no-es-uuid'),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toThrow(
+        new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE),
+      );
     });
   });
 });

@@ -40,6 +40,18 @@ export const SPLIT_PAYMENT_BALANCE_CHANGED_MESSAGE =
   'Lo pendiente del plan cambió mientras se registraba el cobro (entró otro abono). No se registró nada: revisa el total y vuelve a intentarlo.';
 
 /**
+ * 503 con código estable (DX-463, BE-058): sin `confirmCreditBalance` no se
+ * puede comparar el total con lo pendiente porque el saldo del plan no se
+ * pudo leer (BD o proveedor de tasas). Registrar igual se saltaría el 409 del
+ * excedente y dejaría un saldo a favor sin confirmar: no se registra nada.
+ */
+export const SPLIT_PAYMENT_BALANCE_UNAVAILABLE =
+  'SPLIT_PAYMENT_BALANCE_UNAVAILABLE';
+
+export const SPLIT_PAYMENT_BALANCE_UNAVAILABLE_MESSAGE =
+  'No se pudo leer lo pendiente del plan, así que no se puede comprobar el total del cobro. No se registró nada: vuelve a intentarlo en un momento (con la misma Idempotency-Key).';
+
+/**
  * El total del cobro en la moneda del plan: la suma de las líneas ya
  * convertidas con su tasa congelada, al céntimo. `null` si alguna línea quedó
  * «sin tasa» (su equivalente no se conoce todavía).
