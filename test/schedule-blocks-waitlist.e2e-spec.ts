@@ -233,6 +233,8 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     patients.push(await createPatient(clinic, '122001', 'Ana'));
     patients.push(await createPatient(clinic, '122002', 'Berta'));
     patients.push(await createPatient(clinic, '122003', 'Carla'));
+    // DX-161: sin entradas en pendientes: cada cancelación suya crea la suya.
+    patients.push(await createPatient(clinic, '122004', 'Diana'));
     otherPatientId = await createPatient(other, '122901', 'Otra');
   });
 
@@ -673,7 +675,8 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     });
 
     it('reactivar una cita cancelada la saca de pendientes (queda SCHEDULED con la propia cita)', async () => {
-      const appt = await book(dentist2.userId, THU, '17:00', 0).expect(201);
+      // Diana no tiene otra entrada abierta (DX-161: una OPEN por paciente).
+      const appt = await book(dentist2.userId, THU, '17:00', 3).expect(201);
       const id = (appt.body as Body).id;
       const patch = (status: string) =>
         as(api().patch(`/api/v1/appointments/${id}`), reception.token)
