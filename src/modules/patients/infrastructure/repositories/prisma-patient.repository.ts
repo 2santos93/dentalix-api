@@ -147,6 +147,11 @@ async function lockRetentionContext(
     FROM "patients"
     WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
     FOR UPDATE`;
+  // DX-476: tiene que ser FOR UPDATE (no FOR NO KEY UPDATE): es lo que choca
+  // con el FOR KEY SHARE con que las rutas que crean un enlace público
+  // comprueban que el paciente sigue vivo (shared/patients/lock-live-patient).
+  // Con otro modo, crear un enlace y archivar a la vez dejaría un enlace vivo;
+  // lo vigila la prueba «archivar REAL» de test/public-links-races.int-spec.
   if (rows.length === 0) throw new NotFoundException(PATIENT_NOT_FOUND);
   // DX-354: la fecha del mensaje de retención se escribe con el formato de la
   // sede principal (R6, la activa más antigua).

@@ -4,6 +4,7 @@ import {
   WaitlistStatus,
   type WaitlistOfferOutcome,
 } from '@prisma/client';
+import { lockLivePatientOrConflict } from '../../../../shared/patients/lock-live-patient';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { MOVABLE_STATUSES } from '../../domain/opening-candidates';
@@ -282,6 +283,9 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
   ): Promise<{ offer: WaitlistOffer; offersToday: number } | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
+      // está archivado: nunca un enlace vivo ni un mensaje a un archivado.
+      await lockLivePatientOrConflict(tx, input.patientId);
       // Candado de la transacción por paciente: dos ofertas simultáneas al
       // mismo paciente se cuentan una detrás de otra, así el tope no se cuela.
       const lockKey = `waitlist_offer:${tenantId}:${input.patientId}`;

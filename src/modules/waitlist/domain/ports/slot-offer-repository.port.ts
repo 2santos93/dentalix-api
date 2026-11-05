@@ -55,6 +55,13 @@ export interface SlotOfferResolution {
   appointmentId: string | null;
 }
 
+/** Lo que hizo un lote del barrido: `scanned` < tamaño pedido = no queda más. */
+export interface ExpiredBatch {
+  scanned: number;
+  expired: number;
+  lastId: string | null;
+}
+
 export interface SlotOfferRepository {
   findByTokenHash(tokenHash: string): Promise<PublicSlotOffer | null>;
   findClinicBranding(): Promise<ClinicBrandingRow | null>;
@@ -81,11 +88,18 @@ export interface SlotOfferRepository {
   /** Clínicas vivas (el barrido de caducadas las recorre todas). */
   tenantIds(): Promise<string[]>;
   /**
-   * Barrido: pasa a EXPIRED (auditado, SLOT_OFFER_EXPIRED) hasta `limit`
-   * ofertas con enlace PENDING de la clínica cuyo `expiresAt` ya pasó.
-   * Devuelve cuántas cambió.
+   * Barrido (DX-476): un lote, en su propia transacción, de hasta `size`
+   * ofertas con enlace PENDING de la clínica cuyo `expiresAt` ya pasó, por id
+   * ascendente a partir de `afterId`; pasan a EXPIRED (auditado,
+   * SLOT_OFFER_EXPIRED). Salta las filas que otra transacción tiene
+   * bloqueadas: las recoge la siguiente pasada.
    */
-  expireDue(tenantId: string, now: Date, limit: number): Promise<number>;
+  expireDueBatch(
+    tenantId: string,
+    now: Date,
+    size: number,
+    afterId: string | null,
+  ): Promise<ExpiredBatch>;
   /**
    * Rechaza si sigue pendiente y vigente (si caducó, la marca EXPIRED). Con
    * el paciente archivado (DX-461), EXPIRED sin escribir nada.

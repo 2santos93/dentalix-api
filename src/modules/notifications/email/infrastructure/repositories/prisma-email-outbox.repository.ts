@@ -161,6 +161,27 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     return result.settled;
   }
 
+  async patientArchivedFor(
+    tenantId: string,
+    outboxId: string,
+  ): Promise<boolean> {
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const rows = await tx.$queryRaw<{ archived: boolean }[]>`
+        SELECT true AS archived
+          FROM "email_outbox" o
+          LEFT JOIN "signature_requests" sr
+            ON o."template" = 'signature-request' AND sr."id" = o."referenceId"
+          LEFT JOIN "waitlist_offers" wo
+            ON o."template" = 'slot-offer' AND wo."id" = o."referenceId"
+          LEFT JOIN "signed_consent_pdf_links" cl
+            ON o."template" = 'signed-consent-copy' AND cl."id" = o."referenceId"
+          JOIN "patients" p
+            ON p."id" = COALESCE(sr."patientId", wo."patientId", cl."patientId")
+         WHERE o."id" = ${outboxId}::uuid AND p."deletedAt" IS NOT NULL`;
+      return rows.length > 0;
+    });
+  }
+
   async supersedePending(
     tenantId: string,
     referenceId: string,

@@ -190,6 +190,29 @@ export class EmailDispatcher
       return;
     }
 
+    // DX-476: el enlace de un paciente que se archivó después de encolarlo no
+    // sale. Cancelado (FAILED, sin payload) con un motivo técnico, sin PII.
+    if (email.tenantId) {
+      let archived: boolean;
+      try {
+        archived = await this.repo.patientArchivedFor(email.tenantId, email.id);
+      } catch (err) {
+        await this.finish(email, {
+          status: 'PENDING',
+          lastError: describeDeliveryError(err),
+          retryDelayMs: retryDelayMs(email.attempts, this.config.retryBaseMs),
+        });
+        return;
+      }
+      if (archived) {
+        await this.finish(email, {
+          status: 'FAILED',
+          lastError: 'PatientArchived',
+        });
+        return;
+      }
+    }
+
     try {
       await this.mailer.send(message);
     } catch (err) {

@@ -151,6 +151,13 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     return Promise.resolve(true);
   }
 
+  /** DX-476: todos los pacientes de los enlaces se dan por archivados. */
+  patientsArchived = false;
+
+  patientArchivedFor(): Promise<boolean> {
+    return Promise.resolve(this.patientsArchived);
+  }
+
   supersedePending(
     tenantId: string,
     referenceId: string,

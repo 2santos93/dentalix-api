@@ -1,6 +1,7 @@
 import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { lockLivePatientOrConflict } from '../../../../shared/patients/lock-live-patient';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
@@ -98,6 +99,9 @@ export class PrismaSignedPdfCopyRepository
   async issueLink(input: IssueSignedPdfCopyLinkInput): Promise<{ id: string }> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
+      // está archivado: nunca un enlace vivo ni un mensaje a un archivado.
+      await lockLivePatientOrConflict(tx, input.patientId);
       // Serializa los envíos del mismo consentimiento (dos «Reenviar copia»
       // a la vez, o uno con el envío automático): sin este bloqueo, los dos
       // invalidan el mismo enlace y el segundo INSERT choca con el índice

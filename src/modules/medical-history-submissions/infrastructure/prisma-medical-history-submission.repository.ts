@@ -7,6 +7,7 @@ import {
   MedicalHistorySubmissionStatus,
   Prisma,
 } from '@prisma/client';
+import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
@@ -185,6 +186,9 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
   issue(input: IssueRequestInput): Promise<IssuedRequest> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
+      // está archivado: nunca un enlace vivo de un paciente archivado.
+      await lockLivePatientOrConflict(tx, input.patientId);
       const locationId =
         input.locationId ?? (await this.tenantContext.writeLocationId(tx));
       // Un solo enlace vivo por paciente: emitir otro anula los que aún
