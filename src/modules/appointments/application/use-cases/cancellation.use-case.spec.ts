@@ -40,7 +40,8 @@ function setup() {
       findByLocation: () => Promise.resolve(null),
     } as unknown as LocationScheduleRepository,
     {
-      findById: (userId: string) => Promise.resolve({ userId }),
+      findById: (userId: string) =>
+        Promise.resolve({ userId, role: 'DENTIST' }),
     } as unknown as StaffRepository,
     {
       record: (draft: AuditEventDraft) => {

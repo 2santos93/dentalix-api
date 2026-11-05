@@ -56,6 +56,7 @@ import type { LocationRepository } from '../../../locations/domain/ports/locatio
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
+import { assertAttendingRole } from '../../../staff/domain/attending';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { ChairAssignmentService } from '../chair-assignment';
 import {
@@ -468,6 +469,8 @@ export class UpdateAppointmentUseCase {
         }
         // DX-121d: el profesional destino atiende en la sede de la cita.
         assertAttendsAt(provider, existing.locationId);
+        // DX-161: y atiende pacientes (no recepción ni asistencia).
+        assertAttendingRole(provider);
       }
 
       // Horario de atención de la SEDE DE LA CITA (no la del request: mover una

@@ -42,6 +42,7 @@ import {
   STAFF_REPOSITORY,
   type StaffRepository,
 } from '../../../staff/domain/ports/staff-repository.port';
+import { assertAttendingRole } from '../../../staff/domain/attending';
 import {
   APPOINTMENT_TYPE_REPOSITORY,
   type AppointmentTypeRepository,
@@ -171,9 +172,9 @@ export class CreateWaitlistEntryUseCase {
     if (!(await this.patients.findById(input.patientId))) {
       throw new NotFoundException('Paciente no encontrado');
     }
-    // Ya está en la lista (p. ej. canceló hace poco): no se duplica. Dos altas
-    // manuales simultáneas podrían colar dos; el panel las enseña y se
-    // descarta una (las automáticas son una por cita).
+    // Ya está en la lista (p. ej. canceló hace poco): no se duplica. Es la vía
+    // rápida; el árbitro de dos altas simultáneas es el repositorio (candado por
+    // paciente y único parcial de OPEN, DX-161).
     if (await this.repo.hasOpenForPatient(input.patientId)) {
       throw new ConflictException(WAITLIST_DUPLICATE_MESSAGE);
     }
@@ -186,8 +187,11 @@ export class CreateWaitlistEntryUseCase {
     ) {
       throw new NotFoundException('Sede no encontrada');
     }
-    if (input.providerId && !(await this.staff.findById(input.providerId))) {
-      throw new NotFoundException('Profesional no encontrado');
+    if (input.providerId) {
+      const provider = await this.staff.findById(input.providerId);
+      if (!provider) throw new NotFoundException('Profesional no encontrado');
+      // DX-161: el profesional preferido tiene que atender pacientes.
+      assertAttendingRole(provider);
     }
     let typeDuration: number | undefined;
     if (input.appointmentTypeId) {
@@ -212,6 +216,8 @@ export class CreateWaitlistEntryUseCase {
       note: input.note?.trim() ?? null,
       createdById: ctx.actor.userId,
     });
+    // DX-161: otra alta del mismo paciente ganó la carrera.
+    if (!entry) throw new ConflictException(WAITLIST_DUPLICATE_MESSAGE);
     await recordEntryEvent(this.audit, ctx, entry, 'CREATE', 'WAITLIST_MANUAL');
     return entry;
   }

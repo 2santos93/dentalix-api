@@ -98,7 +98,7 @@ const noSchedule = {
   findForCurrentLocation: () => Promise.resolve(null),
 } as unknown as LocationScheduleRepository;
 const anyStaff = {
-  findById: (userId: string) => Promise.resolve({ userId }),
+  findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),
 } as unknown as StaffRepository;
 const anyPatient = {
   findById: (id: string) => Promise.resolve({ id }),
@@ -113,6 +113,15 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
   const appointments = new PrismaAppointmentRepository(prisma, tenantContext);
   const blocks = new PrismaScheduleBlockRepository(prisma, tenantContext);
   const waitlist = new PrismaWaitlistRepository(prisma, tenantContext);
+
+  // DX-161: `create` da `null` si el paciente ya tiene una OPEN; aquí no debe pasar.
+  const createEntry = async (
+    input: Parameters<typeof waitlist.create>[0],
+  ): Promise<NonNullable<Awaited<ReturnType<typeof waitlist.create>>>> => {
+    const entry = await waitlist.create(input);
+    if (!entry) throw new Error('El paciente ya tenía una entrada OPEN');
+    return entry;
+  };
   const types = new PrismaAppointmentTypeRepository(prisma, tenantContext);
   const offers = new PrismaOpeningCandidatesRepository(prisma, tenantContext);
   const create = new CreateAppointmentUseCase(
@@ -366,7 +375,7 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
       const entries = await Promise.all(
         [0, 1].map((i) =>
           inA(() =>
-            waitlist.create({
+            createEntry({
               patientId: a.patientIds[i],
               providerId: null,
               appointmentTypeId: null,
@@ -428,7 +437,7 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
       const entries = await Promise.all(
         [0, 1].map((i) =>
           inA(() =>
-            waitlist.create({
+            createEntry({
               patientId: a.patientIds[i],
               providerId: null,
               appointmentTypeId: null,
@@ -467,7 +476,7 @@ describe('huecos libres → candidatos y ofertas (int, DX-210)', () => {
 
     it('un pendiente y una cita marcada al mismo hueco a la vez: gana uno, la cita perdedora conserva hora y marca', async () => {
       const entry = await inA(() =>
-        waitlist.create({
+        createEntry({
           patientId: a.patientIds[0],
           providerId: null,
           appointmentTypeId: null,

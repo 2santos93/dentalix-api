@@ -42,7 +42,7 @@ const schedule = {
   findByLocation: () => Promise.resolve(null),
 } as unknown as LocationScheduleRepository;
 const staff = {
-  findById: (userId: string) => Promise.resolve({ userId }),
+  findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),
 } as unknown as StaffRepository;
 const locations = {
   findById: (id: string) =>

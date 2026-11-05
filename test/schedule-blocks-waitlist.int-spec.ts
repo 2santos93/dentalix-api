@@ -104,7 +104,7 @@ const noSchedule = {
   findForCurrentLocation: () => Promise.resolve(null),
 } as unknown as LocationScheduleRepository;
 const anyStaff = {
-  findById: (userId: string) => Promise.resolve({ userId }),
+  findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),
 } as unknown as StaffRepository;
 const anyPatient = {
   findById: (id: string) => Promise.resolve({ id }),
@@ -119,6 +119,15 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
   const appointments = new PrismaAppointmentRepository(prisma, tenantContext);
   const blocks = new PrismaScheduleBlockRepository(prisma, tenantContext);
   const waitlist = new PrismaWaitlistRepository(prisma, tenantContext);
+
+  // DX-161: `create` da `null` si el paciente ya tiene una OPEN; aquí no debe pasar.
+  const createEntry = async (
+    input: Parameters<typeof waitlist.create>[0],
+  ): Promise<NonNullable<Awaited<ReturnType<typeof waitlist.create>>>> => {
+    const entry = await waitlist.create(input);
+    if (!entry) throw new Error('El paciente ya tenía una entrada OPEN');
+    return entry;
+  };
   const types = new PrismaAppointmentTypeRepository(prisma, tenantContext);
   const create = new CreateAppointmentUseCase(
     appointments,
@@ -398,6 +407,68 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
       await raw.appointment.deleteMany({ where: { tenantId: a.tenantId } });
     });
 
+    it('DX-161: cancelar dos citas del mismo paciente deja una sola OPEN', async () => {
+      const first = await newAppointment('08:00', '08:30');
+      const second = await newAppointment('09:00', '09:30');
+      await Promise.all(
+        [first, second].map((appt) =>
+          inA(() =>
+            update.execute(appt.id, {
+              status: AppointmentStatus.CANCELLED,
+              cancellation: FOR_PATIENT,
+            }),
+          ),
+        ),
+      );
+      const open = await raw.appointmentWaitlistEntry.findMany({
+        where: { tenantId: a.tenantId, status: 'OPEN' },
+      });
+      expect(open).toHaveLength(1);
+      expect(open[0].patientId).toBe(a.patientIds[0]);
+    });
+
+    it('DX-161: dos altas manuales simultáneas del mismo paciente: una entrada', async () => {
+      const results = await Promise.all(
+        [0, 1].map(() =>
+          inA(() =>
+            waitlist.create({
+              locationId: a.locationId,
+              patientId: a.patientIds[1],
+              providerId: null,
+              appointmentTypeId: null,
+              durationMinutes: 30,
+              priority: 'NORMAL',
+              preferredWindow: null,
+              note: null,
+              createdById: DOCTOR,
+            }),
+          ),
+        ),
+      );
+      expect(results.filter((r) => r !== null)).toHaveLength(1);
+      await expect(
+        raw.appointmentWaitlistEntry.count({
+          where: {
+            tenantId: a.tenantId,
+            patientId: a.patientIds[1],
+            status: 'OPEN',
+          },
+        }),
+      ).resolves.toBe(1);
+    });
+
+    it('DX-161: el índice único impide una segunda OPEN aunque se salte la aplicación', async () => {
+      const row = {
+        tenantId: a.tenantId,
+        locationId: a.locationId,
+        patientId: a.patientIds[2] ?? a.patientIds[1],
+      };
+      await raw.appointmentWaitlistEntry.create({ data: row });
+      await expect(
+        raw.appointmentWaitlistEntry.create({ data: row }),
+      ).rejects.toMatchObject({ code: 'P2002' });
+    });
+
     it('cancelar y luego no-show: una sola entrada OPEN con los datos de la cita', async () => {
       const appt = await newAppointment('10:00', '10:45');
       await inA(() =>
@@ -546,7 +617,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
 
     it('dos «Agendar aquí» a la vez sobre la misma entrada: una cita y una 409', async () => {
       const entry = await inA(() =>
-        waitlist.create({
+        createEntry({
           patientId: a.patientIds[2],
           providerId: null,
           appointmentTypeId: null,

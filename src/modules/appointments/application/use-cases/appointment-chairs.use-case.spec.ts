@@ -36,7 +36,11 @@ const patients = {
 } as unknown as PatientRepository;
 const staff = {
   findById: (userId: string) =>
-    Promise.resolve(userId === 'ajeno' ? null : { userId, locationIds: null }),
+    Promise.resolve(
+      userId === 'ajeno'
+        ? null
+        : { userId, role: 'DENTIST', locationIds: null },
+    ),
   listActive: () =>
     Promise.resolve([
       { userId: 'dra', locationIds: null },

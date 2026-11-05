@@ -5,20 +5,14 @@ import {
   WaitlistOfferOutcome,
   WaitlistPriority,
 } from '@prisma/client';
-import {
-  IsDateString,
-  IsEnum,
-  IsIn,
-  IsOptional,
-  IsUUID,
-} from 'class-validator';
+import { IsEnum, IsISO8601, IsIn, IsOptional, IsUUID } from 'class-validator';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
 import { OPENING_CANDIDATES_LIMIT } from '../../domain/opening-candidates';
 
 /** Un hueco libre: `[start, end)` de una sede y, si es una columna, su profesional. */
 export class OpeningCandidatesQueryDto {
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   start!: string;
 
   @ApiProperty({
@@ -26,7 +20,7 @@ export class OpeningCandidatesQueryDto {
     format: 'date-time',
     description: 'Fin del hueco: posterior a `start`, como mucho 8 h.',
   })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   end!: string;
 
   @ApiPropertyOptional({
@@ -266,11 +260,11 @@ type ResolvedOutcome = (typeof RESOLVED_OUTCOMES)[number];
 
 export class CreateWaitlistOfferDto {
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   slotStart!: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   slotEnd!: string;
 
   @ApiProperty({ format: 'uuid' })

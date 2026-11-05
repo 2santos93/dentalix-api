@@ -107,7 +107,15 @@ export class InMemoryWaitlistRepository implements WaitlistRepository {
     );
   }
 
-  create(input: CreateWaitlistEntryRepoInput): Promise<WaitlistEntry> {
+  create(input: CreateWaitlistEntryRepoInput): Promise<WaitlistEntry | null> {
+    // DX-161: como el repositorio real, una sola OPEN por paciente.
+    if (
+      this.rows.some(
+        (r) => r.patientId === input.patientId && r.status === 'OPEN',
+      )
+    ) {
+      return Promise.resolve(null);
+    }
     return Promise.resolve(
       this.seed({
         locationId: input.locationId ?? this.currentLocationId,

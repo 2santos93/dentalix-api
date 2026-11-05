@@ -62,7 +62,7 @@ const staff = {
       ['drx', 'dry'].includes(userId)
         ? { userId }
         : userId === 'drz'
-          ? { userId, locationIds: ['loc2'] }
+          ? { userId, role: 'DENTIST', locationIds: ['loc2'] }
           : null,
     ),
 } as unknown as StaffRepository;

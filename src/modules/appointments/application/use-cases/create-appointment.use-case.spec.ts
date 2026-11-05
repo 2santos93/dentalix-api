@@ -1,3 +1,4 @@
+import { NOT_ATTENDING_MESSAGE } from '../../../staff/domain/attending';
 import {
   BadRequestException,
   ConflictException,
@@ -166,7 +167,9 @@ function makeBlocks(
   return repo;
 }
 
-function makeStaff(found: unknown = { userId: 'prov1' }): StaffRepository {
+function makeStaff(
+  found: unknown = { userId: 'prov1', role: 'DENTIST' },
+): StaffRepository {
   return {
     findById: (): Promise<never> => Promise.resolve(found) as Promise<never>,
   } as unknown as StaffRepository;
@@ -580,6 +583,25 @@ describe('CreateAppointmentUseCase', () => {
           end,
         }),
       ).rejects.toThrow('Paciente no encontrado');
+    });
+
+    it('DX-161: recepción o asistencia como profesional es 400', async () => {
+      const uc = new CreateAppointmentUseCase(
+        makeRepo({
+          create: (): Promise<Appointment> =>
+            Promise.reject(new Error('create should not be called')),
+        }),
+        makePatients(),
+        makeStaff({ userId: 'rec', role: 'RECEPTION', locationIds: null }),
+        makeSchedule(),
+        makeTypes(),
+        makeBlocks(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'rec', start, end }),
+      ).rejects.toThrow(NOT_ATTENDING_MESSAGE);
     });
 
     it('rechaza un providerId que no es staff activo de la clínica (antes pasaba cualquier UUID)', async () => {
@@ -1464,7 +1486,13 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
   const tenantContext = new TenantContextService();
   const start = at('10:00');
   const end = at('10:30');
-  const uc = (provider: unknown = { userId: 'prov1', locationIds: ['loc1'] }) =>
+  const uc = (
+    provider: unknown = {
+      userId: 'prov1',
+      role: 'DENTIST',
+      locationIds: ['loc1'],
+    },
+  ) =>
     new CreateAppointmentUseCase(
       // Como el repositorio real: la sede del request o, sin ella, 'loc1'.
       makeRepo({
@@ -1506,7 +1534,7 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
 
   it('sin restricción el profesional atiende en todas', async () => {
     await expect(
-      uc({ userId: 'prov1', locationIds: null }).execute({
+      uc({ userId: 'prov1', role: 'DENTIST', locationIds: null }).execute({
         ...input,
         locationId: 'loc2',
       }),
@@ -1518,7 +1546,9 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
       providerId: 'prov1',
     });
     await expect(
-      uc({ userId: 'prov1', locationIds: ['loc2'] }).execute(input),
+      uc({ userId: 'prov1', role: 'DENTIST', locationIds: ['loc2'] }).execute(
+        input,
+      ),
     ).rejects.toThrow(PROVIDER_NOT_AT_LOCATION_MESSAGE);
   });
 });

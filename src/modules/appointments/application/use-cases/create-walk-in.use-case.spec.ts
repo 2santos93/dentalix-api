@@ -130,7 +130,7 @@ function setup(
   } as unknown as PatientRepository;
   const provider =
     options.provider === undefined
-      ? { userId: 'prov1', locationIds: null }
+      ? { userId: 'prov1', role: 'DENTIST', locationIds: null }
       : options.provider;
   const staff = {
     findById: () => Promise.resolve(provider),

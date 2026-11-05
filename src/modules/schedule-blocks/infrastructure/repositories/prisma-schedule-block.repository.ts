@@ -166,14 +166,17 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
     return mapToEntity(row);
   }
 
-  /** Por `id` bajo RLS; el use-case ya comprobó que existe y está vivo. */
+  /**
+   * Por `id` bajo RLS, solo si sigue vivo (DX-161): si otra petición lo retiró
+   * entre la lectura del use-case y aquí, `null` y no se toca.
+   */
   async update(
     id: string,
     patch: UpdateScheduleBlockRepoInput,
-  ): Promise<ScheduleBlock> {
-    const row = await this.prisma.runWithTenant((tx) =>
-      tx.scheduleBlock.update({
-        where: { id },
+  ): Promise<ScheduleBlock | null> {
+    const row = await this.prisma.runWithTenant(async (tx) => {
+      const { count } = await tx.scheduleBlock.updateMany({
+        where: { id, deletedAt: null },
         data: {
           start: patch.start,
           end: patch.end,
@@ -184,18 +187,27 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
           releaseAtMinute: patch.releaseAtMinute,
           updatedById: patch.updatedById,
         },
-      }),
-    );
-    return mapToEntity(row);
+      });
+      return count === 0
+        ? null
+        : tx.scheduleBlock.findUnique({ where: { id } });
+    });
+    return row ? mapToEntity(row) : null;
   }
 
-  async softDelete(id: string, deletedById: string): Promise<void> {
-    await this.prisma.runWithTenant((tx) =>
-      tx.scheduleBlock.update({
-        where: { id },
+  /**
+   * Borrado lógico, solo si sigue vivo (DX-161): de dos borrados a la vez, el
+   * segundo no pisa `updatedById` (la auditoría conserva al primer autor). `false`
+   * si ya estaba retirado.
+   */
+  async softDelete(id: string, deletedById: string): Promise<boolean> {
+    const { count } = await this.prisma.runWithTenant((tx) =>
+      tx.scheduleBlock.updateMany({
+        where: { id, deletedAt: null },
         data: { deletedAt: new Date(), updatedById: deletedById },
       }),
     );
+    return count > 0;
   }
 
   findAffecting(query: AffectingBlocksQuery): Promise<AffectingBlocks> {
