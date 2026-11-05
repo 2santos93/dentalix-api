@@ -1,5 +1,5 @@
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
-import type { ContactChannel } from '@prisma/client';
+import type { AppointmentStatus, ContactChannel } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
 import type {
   PostOpDelivery,
@@ -17,6 +17,8 @@ export interface PostOpAppointmentContext {
     locationId: string;
     appointmentTypeId: string | null;
     start: Date;
+    /** DX-250: solo se entrega tras una cita que se atendió (o se atiende hoy). */
+    status: AppointmentStatus;
     /** Nombre del profesional de la cita (`{{profesional}}`). */
     providerName: string;
   };
@@ -86,6 +88,13 @@ export interface PostOpPublicDeliveryView extends PostOpDelivery {
   locationPhone: string | null;
 }
 
+/**
+ * DX-250: qué pasó con el email de una entrega EMAIL. `QUEUED`: en el outbox,
+ * aún sin salir; `SENT`: el proveedor lo aceptó; `NOT_SENT`: nunca se encoló o
+ * el outbox se rindió (FAILED).
+ */
+export type PostOpEmailStatus = 'QUEUED' | 'SENT' | 'NOT_SENT';
+
 export const POST_OP_DELIVERY_REPOSITORY = Symbol(
   'POST_OP_DELIVERY_REPOSITORY',
 );
@@ -112,6 +121,11 @@ export interface PostOpDeliveryRepository {
   /** Nombre completo del usuario que entrega. */
   userName(userId: string): Promise<string | null>;
   create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery>;
+  /**
+   * Estado del email de las entregas dadas (el outbox, por `referenceId`).
+   * Solo trae las que tienen una fila; sin fila, el email no se encoló.
+   */
+  emailStatuses(deliveryIds: string[]): Promise<Map<string, PostOpEmailStatus>>;
   /** Entregas de la cita, más recientes primero. */
   listByAppointment(appointmentId: string): Promise<PostOpDelivery[]>;
   /** Entregas del paciente, más recientes primero. */

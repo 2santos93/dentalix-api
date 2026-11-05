@@ -6,6 +6,7 @@ import type {
   PostOpAppointmentContext,
   PostOpDeliveryDocumentView,
   PostOpDeliveryRepository,
+  PostOpEmailStatus,
   PostOpPublicDeliveryView,
 } from '../../domain/ports/post-op-delivery-repository.port';
 import type { PostOpEmailSender, PostOpEmailSendInput } from '../postop-email';
@@ -32,6 +33,7 @@ export function appointmentContext(
       appointmentTypeId: 'type-cx',
       // 20/10/2026 a las 21:30 en la zona de la sede (ya 21/10 en UTC).
       start: new Date('2026-10-21T02:30:00.000Z'),
+      status: 'COMPLETED',
       providerName: 'Dra. Laura Gómez',
       ...overrides.appointment,
     },
@@ -73,6 +75,8 @@ export class InMemoryPostOpDeliveryRepository implements PostOpDeliveryRepositor
   readonly performed = new Map<string, string[]>();
   readonly performedQueries: Array<{ day: string; timeZone: string }> = [];
   readonly users = new Map<string, string>([['user-1', 'Recepción Demo']]);
+  /** Estado del email por entrega (el outbox); sin entrada, no se encoló. */
+  readonly emailOutcomes = new Map<string, PostOpEmailStatus>();
   /** Búsquedas por token y aperturas marcadas, para afirmar qué se tocó. */
   tokenLookups = 0;
   openedMarks = 0;
@@ -111,6 +115,17 @@ export class InMemoryPostOpDeliveryRepository implements PostOpDeliveryRepositor
     };
     this.rows.push(row);
     return Promise.resolve({ ...row });
+  }
+
+  emailStatuses(
+    deliveryIds: string[],
+  ): Promise<Map<string, PostOpEmailStatus>> {
+    const found = new Map<string, PostOpEmailStatus>();
+    for (const id of deliveryIds) {
+      const status = this.emailOutcomes.get(id);
+      if (status) found.set(id, status);
+    }
+    return Promise.resolve(found);
   }
 
   listByAppointment(appointmentId: string): Promise<PostOpDelivery[]> {

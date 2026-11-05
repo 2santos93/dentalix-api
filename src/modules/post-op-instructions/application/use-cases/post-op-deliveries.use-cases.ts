@@ -32,6 +32,7 @@ import {
   type PostOpAppointmentContext,
   type PostOpDeliveryDocumentView,
   type PostOpDeliveryRepository,
+  type PostOpEmailStatus,
 } from '../../domain/ports/post-op-delivery-repository.port';
 import {
   POST_OP_TEMPLATE_REPOSITORY,
@@ -62,6 +63,10 @@ export const POSTOP_OPTED_OUT_MESSAGE = 'El paciente dio de baja los envíos';
 export const POSTOP_NO_WHATSAPP_MESSAGE =
   'El paciente no tiene un teléfono que sirva para WhatsApp: escríbelo con + y su prefijo';
 export const POSTOP_INVALID_HOST_MESSAGE = 'Host no válido';
+export const POSTOP_APPOINTMENT_NOT_ATTENDED_MESSAGE =
+  'No se pueden entregar indicaciones de una cita cancelada o en la que el paciente no asistió';
+export const POSTOP_APPOINTMENT_FUTURE_MESSAGE =
+  'No se pueden entregar indicaciones de una cita que aún no ha llegado';
 export const POSTOP_DELIVERY_NOT_FOUND_MESSAGE =
   'Entrega de indicaciones no encontrada';
 
@@ -82,6 +87,11 @@ export interface PostOpDeliverySummary {
   firstOpenedAt: Date | null;
   /** Caducidad del enlace público; null en una entrega impresa. */
   linkExpiresAt: Date | null;
+  /**
+   * DX-250: qué pasó con el email (solo en una entrega EMAIL; null en las
+   * demás). `NOT_SENT`: nunca se encoló o el outbox se rindió.
+   */
+  emailStatus: PostOpEmailStatus | null;
 }
 
 export type PostOpDeliveryDocument = PostOpDeliverySummary & {
@@ -138,6 +148,7 @@ export interface PostOpDeliveryCreated {
 
 export function toPostOpDeliverySummary(
   delivery: PostOpDelivery,
+  emailStatus: PostOpEmailStatus | null,
 ): PostOpDeliverySummary {
   return {
     id: delivery.id,
@@ -154,7 +165,24 @@ export function toPostOpDeliverySummary(
     sentToResponsible: delivery.sentToResponsible,
     firstOpenedAt: delivery.firstOpenedAt,
     linkExpiresAt: delivery.tokenExpiresAt,
+    emailStatus: delivery.channel === 'EMAIL' ? emailStatus : null,
   };
+}
+
+/**
+ * Resúmenes de varias entregas con el estado de su email, leído del outbox
+ * (una sola consulta). Una entrega EMAIL sin fila en el outbox no se encoló.
+ */
+async function summarize(
+  repo: PostOpDeliveryRepository,
+  rows: PostOpDelivery[],
+): Promise<PostOpDeliverySummary[]> {
+  const statuses = await repo.emailStatuses(
+    rows.filter((r) => r.channel === 'EMAIL').map((r) => r.id),
+  );
+  return rows.map((r) =>
+    toPostOpDeliverySummary(r, statuses.get(r.id) ?? 'NOT_SENT'),
+  );
 }
 
 function templateSummary(t: PostOpTemplateView): PostOpTemplateSummary {
@@ -219,6 +247,26 @@ async function loadAppointment(
   return ctx;
 }
 
+/**
+ * DX-250: las indicaciones se entregan tras una cita que se atendió (o que es
+ * de hoy). Una cancelada, un no-show o una de un día aún por llegar (en la
+ * zona de la sede) no: la historia clínica no registra lo que no pasó.
+ */
+function assertAttendable(ctx: PostOpAppointmentContext, now: Date): void {
+  const { appointment, location } = ctx;
+  if (appointment.status === 'CANCELLED' || appointment.status === 'NO_SHOW') {
+    throw new UnprocessableEntityException(
+      POSTOP_APPOINTMENT_NOT_ATTENDED_MESSAGE,
+    );
+  }
+  if (
+    civilDateIn(appointment.start, location.timeZone) >
+    civilDateIn(now, location.timeZone)
+  ) {
+    throw new UnprocessableEntityException(POSTOP_APPOINTMENT_FUTURE_MESSAGE);
+  }
+}
+
 @Injectable()
 export class GetPostOpSuggestionsUseCase {
   constructor(
@@ -268,7 +316,7 @@ export class GetPostOpSuggestionsUseCase {
       email: this.emailChannel(ctx),
       whatsapp: this.whatsAppChannel(ctx),
       locationPhone: location.phone,
-      deliveries: delivered.map(toPostOpDeliverySummary),
+      deliveries: await summarize(this.deliveries, delivered),
     };
   }
 
@@ -355,6 +403,7 @@ export class DeliverPostOpInstructionsUseCase {
     if (!template.active) {
       throw new BadRequestException(POSTOP_TEMPLATE_INACTIVE_MESSAGE);
     }
+    assertAttendable(ctx, this.now());
     // Solo los canales con enlace dependen del host (lo impreso no).
     const linkHost = input.channel === 'PRINT' ? null : link.host;
     if (input.channel !== 'PRINT' && !linkHost) {
@@ -444,7 +493,10 @@ export class DeliverPostOpInstructionsUseCase {
     }
 
     return {
-      delivery: toPostOpDeliverySummary(delivery),
+      delivery: toPostOpDeliverySummary(
+        delivery,
+        emailQueued ? 'QUEUED' : 'NOT_SENT',
+      ),
       publicUrl,
       whatsapp:
         plan.whatsappPhone && publicUrl
@@ -523,7 +575,7 @@ export class ListPatientPostOpDeliveriesUseCase {
   async execute(patientId: string): Promise<PostOpDeliverySummary[]> {
     await assertPatientInClinic(this.patients, patientId);
     const rows = await this.deliveries.listByPatient(patientId);
-    return rows.map(toPostOpDeliverySummary);
+    return summarize(this.deliveries, rows);
   }
 }
 
@@ -543,8 +595,9 @@ export class GetPatientPostOpDeliveryUseCase {
     await assertPatientInClinic(this.patients, patientId);
     const view = await this.deliveries.findForPatient(patientId, id);
     if (!view) throw new NotFoundException(POSTOP_DELIVERY_NOT_FOUND_MESSAGE);
+    const [summary] = await summarize(this.deliveries, [view]);
     return {
-      ...toPostOpDeliverySummary(view),
+      ...summary,
       renderedText: view.renderedText,
       clinic: view.clinic,
       locationName: view.locationName,

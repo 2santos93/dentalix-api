@@ -640,6 +640,17 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     body: 'Hola {{paciente}}, cuídate.',
     appointmentTypeIds: [appointmentType.id],
   });
+  // DX-250: solo se entrega tras una cita atendida (o de hoy): la cita de A se
+  // pasa un instante al pasado para entregar y vuelve a su hora enseguida.
+  const original = await raw.appointment.findUniqueOrThrow({
+    where: { id: appointment.id },
+    select: { start: true, end: true },
+  });
+  const pastStart = new Date(Date.now() - 9 * 24 * 3600 * 1000);
+  await raw.appointment.update({
+    where: { id: appointment.id },
+    data: { start: pastStart, end: new Date(pastStart.getTime() + 3600_000) },
+  });
   const postOpDelivery = await api(
     app,
     a,
@@ -647,6 +658,10 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     `/appointments/${appointment.id}/post-op-instructions/deliveries`,
     { templateId: postOpTemplate.id, channel: 'PRINT' },
   ).expect(201);
+  await raw.appointment.update({
+    where: { id: appointment.id },
+    data: original,
+  });
 
   // DX-151: un documento del paciente de A, subido por la API (multipart).
   await request(app.getHttpServer())

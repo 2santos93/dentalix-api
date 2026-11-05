@@ -28,6 +28,8 @@ import {
   GetPostOpSuggestionsUseCase,
   ListPatientPostOpDeliveriesUseCase,
   POSTOP_APPOINTMENT_NOT_FOUND_MESSAGE,
+  POSTOP_APPOINTMENT_NOT_ATTENDED_MESSAGE,
+  POSTOP_APPOINTMENT_FUTURE_MESSAGE,
   POSTOP_DELIVERY_NOT_FOUND_MESSAGE,
   POSTOP_INVALID_HOST_MESSAGE,
   POSTOP_NO_EMAIL_MESSAGE,
@@ -880,5 +882,151 @@ describe('Indicaciones de una cita y sede permitida (SEC-045)', () => {
       ),
     );
     expect(deliveries.rows).toHaveLength(2);
+  });
+});
+
+describe('Entrega solo tras una cita atendida (DX-250)', () => {
+  const rejected = ['CANCELLED', 'NO_SHOW'] as const;
+
+  it.each(rejected)(
+    'cita %s: 422 en español sin registrar, encolar ni auditar',
+    async (status) => {
+      const { deliver, exo, deliveries, email, audits } = setup();
+      deliveries.contexts.set(
+        APPOINTMENT_ID,
+        appointmentContext({ appointment: { status } }),
+      );
+      for (const channel of ['PRINT', 'EMAIL', 'WHATSAPP_LINK'] as const) {
+        const attempt = deliver.execute(
+          APPOINTMENT_ID,
+          { templateId: exo.id, channel },
+          CTX,
+          LINK,
+        );
+        await expect(attempt).rejects.toBeInstanceOf(
+          UnprocessableEntityException,
+        );
+        await expect(attempt).rejects.toThrow(
+          POSTOP_APPOINTMENT_NOT_ATTENDED_MESSAGE,
+        );
+      }
+      expect(deliveries.rows).toHaveLength(0);
+      expect(email.sent).toHaveLength(0);
+      expect(audits).toHaveLength(0);
+    },
+  );
+
+  it('cita de un día posterior (en la zona de la sede): 422 en español', async () => {
+    const { deliver, exo, deliveries } = setup();
+    // 21/10 en Caracas; "ahora" es 20/10 11:00 en Caracas.
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({
+        appointment: { start: new Date('2026-10-21T14:00:00.000Z') },
+      }),
+    );
+    const attempt = deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'PRINT' },
+      CTX,
+      LINK,
+    );
+    await expect(attempt).rejects.toBeInstanceOf(UnprocessableEntityException);
+    await expect(attempt).rejects.toThrow(POSTOP_APPOINTMENT_FUTURE_MESSAGE);
+    expect(deliveries.rows).toHaveLength(0);
+  });
+
+  it('una cita de hoy más tarde, o en curso, sí se entrega', async () => {
+    const { deliver, exo, deliveries } = setup();
+    deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({
+        appointment: {
+          status: 'IN_CHAIR',
+          // 20/10 a las 13:00 en Caracas: más tarde que "ahora" (11:00) el mismo día.
+          start: new Date('2026-10-20T17:00:00.000Z'),
+        },
+      }),
+    );
+    await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'PRINT' },
+      CTX,
+      LINK,
+    );
+    expect(deliveries.rows).toHaveLength(1);
+  });
+});
+
+describe('Estado del email de la entrega (DX-250)', () => {
+  it('EMAIL encolado: el resumen creado dice QUEUED; si el outbox cae, NOT_SENT; en PRINT es null', async () => {
+    const { deliver, exo, email } = setup();
+    const queued = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+    expect(queued.delivery.emailStatus).toBe('QUEUED');
+
+    const printed = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'PRINT' },
+      CTX,
+      LINK,
+    );
+    expect(printed.delivery.emailStatus).toBeNull();
+
+    email.send = () => Promise.reject(new Error('outbox caído'));
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const failed = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+    warn.mockRestore();
+    expect(failed.delivery.emailStatus).toBe('NOT_SENT');
+  });
+
+  it('la cita y la ficha leen el estado real del outbox; sin fila, «no enviado»', async () => {
+    const { deliver, exo, deliveries, suggestions, list, get } = setup();
+    const sent = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+    const lost = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+    const whatsapp = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'WHATSAPP_LINK' },
+      CTX,
+      LINK,
+    );
+    deliveries.emailOutcomes.set(sent.delivery.id, 'SENT');
+    // `lost` no tiene fila en el outbox: el email nunca se encoló.
+
+    const byId = (rows: { id: string; emailStatus: string | null }[]) =>
+      Object.fromEntries(rows.map((r) => [r.id, r.emailStatus]));
+    const expected = {
+      [sent.delivery.id]: 'SENT',
+      [lost.delivery.id]: 'NOT_SENT',
+      [whatsapp.delivery.id]: null,
+    };
+    expect(
+      byId((await suggestions.execute(APPOINTMENT_ID)).deliveries),
+    ).toEqual(expected);
+    expect(byId(await list.execute(PATIENT_ID))).toEqual(expected);
+    expect((await get.execute(PATIENT_ID, lost.delivery.id)).emailStatus).toBe(
+      'NOT_SENT',
+    );
   });
 });

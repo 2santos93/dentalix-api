@@ -356,7 +356,12 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
     it.each(MATRIX)(
       '%s · %s · cita de %s → %s',
       async (route, who, site, outcome) => {
-        const res = await ROUTES[route](members[who].token, appt[site]);
+        // DX-250: las indicaciones solo se entregan tras una cita atendida.
+        const target =
+          route === 'POST post-op-instructions/deliveries'
+            ? pastAppt[site]
+            : appt[site];
+        const res = await ROUTES[route](members[who].token, target);
         if (outcome === 'forbidden') {
           expectNotAllowed(res);
         } else {
@@ -366,15 +371,18 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
     );
 
     it('acotado sobre su sede: la entrega por EMAIL se registra y encola el email', async () => {
-      const before = await effectsOn(appt.norte);
+      const before = await effectsOn(pastAppt.norte);
       const res = await api(members.restricted.token)
-        .post(`/appointments/${appt.norte}/post-op-instructions/deliveries`, {
-          templateId,
-          channel: 'EMAIL',
-        })
+        .post(
+          `/appointments/${pastAppt.norte}/post-op-instructions/deliveries`,
+          {
+            templateId,
+            channel: 'EMAIL',
+          },
+        )
         .expect(201);
       expect(res.body).toMatchObject({ emailQueued: true });
-      const after = await effectsOn(appt.norte);
+      const after = await effectsOn(pastAppt.norte);
       expect(after.deliveries).toBe(before.deliveries + 1);
       expect(after.outbox).toBe(before.outbox + 1);
     });

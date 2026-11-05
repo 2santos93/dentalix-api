@@ -47,6 +47,7 @@ interface Summary {
   sentToResponsible: boolean;
   firstOpenedAt: string | null;
   linkExpiresAt: string | null;
+  emailStatus: 'QUEUED' | 'SENT' | 'NOT_SENT' | null;
 }
 
 interface Created {
@@ -143,7 +144,17 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
         ...(appointmentTypeId ? { appointmentTypeId } : {}),
       })
       .expect(201);
-    return (res.body as { id: string }).id;
+    const id = (res.body as { id: string }).id;
+    // DX-250: solo se entrega tras una cita atendida o de hoy. La API no agenda
+    // en el pasado y una cita a futuro cae mañana si el spec corre al final del
+    // día en la zona de la sede: se pasa a unas horas antes (un día pasado
+    // también vale), sin solaparse con las demás ni con la de las evoluciones.
+    const past = new Date(Date.now() - (120 + 10 * slot) * 60 * 1000);
+    await raw.appointment.update({
+      where: { id },
+      data: { start: past, end: new Date(past.getTime() + 5 * 60 * 1000) },
+    });
+    return id;
   }
 
   const deliver = (
@@ -600,6 +611,100 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       where: { id: deliveryId },
     });
     expect(row.renderedText).not.toBe('x');
+  });
+
+  describe('DX-250: citas que no se atendieron', () => {
+    const NOT_ATTENDED =
+      'No se pueden entregar indicaciones de una cita cancelada o en la que el paciente no asistió';
+    const FUTURE =
+      'No se pueden entregar indicaciones de una cita que aún no ha llegado';
+
+    it.each(['CANCELLED', 'NO_SHOW'] as const)(
+      'cita %s: 422 en español por los tres canales, sin entrega ni email',
+      async (status) => {
+        const appt = await appointment(patientId, typeId);
+        await raw.appointment.update({
+          where: { id: appt },
+          data: { status },
+        });
+        const outboxBefore = await raw.emailOutbox.count({
+          where: { tenantId: clinicA.tenantId },
+        });
+        for (const channel of ['PRINT', 'EMAIL', 'WHATSAPP_LINK'] as const) {
+          const res = await deliver(reception, appt, channel).expect(422);
+          expect((res.body as { message: string }).message).toBe(NOT_ATTENDED);
+        }
+        expect(
+          await raw.postOpInstructionDelivery.count({
+            where: { appointmentId: appt },
+          }),
+        ).toBe(0);
+        expect(
+          await raw.emailOutbox.count({
+            where: { tenantId: clinicA.tenantId },
+          }),
+        ).toBe(outboxBefore);
+      },
+    );
+
+    it('cita de un día posterior: 422 en español, sin entrega', async () => {
+      const appt = await appointment(patientId, typeId);
+      const later = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      await raw.appointment.update({
+        where: { id: appt },
+        data: { start: later, end: new Date(later.getTime() + 30 * 60 * 1000) },
+      });
+      const res = await deliver(reception, appt, 'PRINT').expect(422);
+      expect((res.body as { message: string }).message).toBe(FUTURE);
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(0);
+    });
+  });
+
+  it('DX-250: el resumen de una entrega EMAIL dice el estado del email, también desde la ficha', async () => {
+    const appt = await appointment(patientId, typeId);
+    const created = (await deliver(reception, appt, 'EMAIL').expect(201))
+      .body as Created;
+    expect(created.delivery.emailStatus).toBe('QUEUED');
+    await dispatcher.whenIdle();
+    const printed = (await deliver(reception, appt, 'PRINT').expect(201))
+      .body as Created;
+    expect(printed.delivery.emailStatus).toBeNull();
+
+    const fromAppointment = (
+      (
+        await as(clinicA, reception)
+          .get(`/appointments/${appt}/post-op-instructions`)
+          .expect(200)
+      ).body as Suggestions
+    ).deliveries.find((d) => d.id === created.delivery.id);
+    // El despachador ya lo entregó al proveedor (el correo de prueba).
+    expect(fromAppointment?.emailStatus).toBe('SENT');
+
+    // El outbox se rindió (FAILED): la ficha lo dice como no enviado.
+    await raw.emailOutbox.updateMany({
+      where: { referenceId: created.delivery.id },
+      data: { status: 'FAILED' },
+    });
+    // Y una entrega EMAIL cuya fila del outbox no existe tampoco salió.
+    const lost = (await deliver(reception, appt, 'EMAIL').expect(201))
+      .body as Created;
+    await raw.emailOutbox.deleteMany({
+      where: { referenceId: lost.delivery.id },
+    });
+    const history = (
+      await as(clinicA, reception)
+        .get(`/patients/${patientId}/post-op-deliveries`)
+        .expect(200)
+    ).body as Summary[];
+    const status = (id: string) =>
+      history.find((d) => d.id === id)?.emailStatus;
+    expect(status(created.delivery.id)).toBe('NOT_SENT');
+    expect(status(lost.delivery.id)).toBe('NOT_SENT');
+    expect(status(printed.delivery.id)).toBeNull();
   });
 
   it('una plantilla inactiva no se entrega (400) y una inexistente da 404', async () => {

@@ -4,7 +4,12 @@ import {
 } from '../../../../shared/locations/document-regional';
 import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
-import type { PostOpInstructionDelivery, Prisma } from '@prisma/client';
+import {
+  EmailOutboxStatus,
+  EmailTemplate,
+  type PostOpInstructionDelivery,
+  type Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
@@ -19,6 +24,7 @@ import type {
   PostOpAppointmentContext,
   PostOpDeliveryDocumentView,
   PostOpDeliveryRepository,
+  PostOpEmailStatus,
   PostOpPublicDeliveryView,
 } from '../../domain/ports/post-op-delivery-repository.port';
 
@@ -85,6 +91,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           locationId: true,
           appointmentTypeId: true,
           start: true,
+          status: true,
           providerId: true,
           patient: {
             select: {
@@ -136,6 +143,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           locationId: appointment.locationId,
           appointmentTypeId: appointment.appointmentTypeId,
           start: appointment.start,
+          status: appointment.status,
           providerName: provider?.user.fullName ?? '',
         },
         patient: {
@@ -210,6 +218,35 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
         }),
       ),
     );
+  }
+
+  emailStatuses(
+    deliveryIds: string[],
+  ): Promise<Map<string, PostOpEmailStatus>> {
+    const statuses = new Map<string, PostOpEmailStatus>();
+    if (deliveryIds.length === 0) return Promise.resolve(statuses);
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.emailOutbox.findMany({
+        where: {
+          template: EmailTemplate.POST_OP_INSTRUCTIONS,
+          referenceId: { in: deliveryIds },
+        },
+        select: { referenceId: true, status: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      for (const row of rows) {
+        if (!row.referenceId) continue;
+        statuses.set(
+          row.referenceId,
+          row.status === EmailOutboxStatus.SENT
+            ? 'SENT'
+            : row.status === EmailOutboxStatus.FAILED
+              ? 'NOT_SENT'
+              : 'QUEUED',
+        );
+      }
+      return statuses;
+    });
   }
 
   listByAppointment(appointmentId: string): Promise<PostOpDelivery[]> {
