@@ -1639,9 +1639,9 @@ describe('UpdateAppointmentUseCase', () => {
           );
       };
       expect(await messageWith('h12', 'en-US')).toMatch(
-        /\(\w+: 8:00 a\. m\.–9:00 a\. m\.\)/,
+        /\(\p{L}+: 8:00 a\. m\.–9:00 a\. m\.\)/u,
       );
-      expect(await messageWith('h23', 'de-DE')).toMatch(/\(\w+: 08:00–09:00\)/);
+      expect(await messageWith('h23', 'de-DE')).toMatch(/\(\p{L}+: 08:00–09:00\)/u);
     });
   });
 });
