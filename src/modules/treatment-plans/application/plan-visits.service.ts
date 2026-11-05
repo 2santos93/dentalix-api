@@ -14,7 +14,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ToothSurface } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
@@ -27,6 +27,33 @@ import {
   validateVisits,
   VisitAssignment,
 } from '../domain/plan-visits';
+
+/**
+ * DX-283: diente, superficies y nombre del procedimiento de cada ítem, para que
+ * «Agendar visita» diga qué entra. El ítem no tiene relación con el catálogo, así
+ * que el nombre se lee aparte; recepción no puede leer `/catalog/items`.
+ */
+async function visitItemDetails(
+  tx: Prisma.TransactionClient,
+  items: { catalogItemId: string }[],
+) {
+  const catalog = await tx.dentalCatalogItem.findMany({
+    where: { id: { in: [...new Set(items.map((i) => i.catalogItemId))] } },
+    select: { id: true, labelEs: true },
+  });
+  const nameOf = new Map(catalog.map((c) => [c.id, c.labelEs]));
+  return (item: {
+    id: string;
+    toothNumber: string;
+    surfaces: ToothSurface[];
+    catalogItemId: string;
+  }) => ({
+    id: item.id,
+    toothNumber: item.toothNumber,
+    surfaces: item.surfaces,
+    procedureName: nameOf.get(item.catalogItemId) ?? '',
+  });
+}
 
 function futureAppointment(now: Date): Prisma.AppointmentWhereInput {
   return {
@@ -136,6 +163,7 @@ export class PlanVisitsService {
         );
         const timeZone = zoneOf(locationId);
         const intervals = plan.visitIntervals as Record<string, number>;
+        const detailOf = await visitItemDetails(tx, plan.items);
         const visits = [...new Set(plan.items.map((i) => i.visit))]
           .sort((a, b) => a - b)
           .map((number) => {
@@ -194,6 +222,9 @@ export class PlanVisitsService {
                 timeZone,
               ),
               planItemIds,
+              planItems: items
+                .filter((i) => planItemIds.includes(i.id))
+                .map(detailOf),
             };
           });
         return {
@@ -327,6 +358,10 @@ export class PlanVisitsService {
             })
           ).map((l) => [l.id, phoneRegionOrNull(l.defaultPhoneRegion)]),
         );
+        const detailOf = await visitItemDetails(
+          tx,
+          page.flatMap((p) => p.items),
+        );
         const items = page.map((plan) => {
           const nextVisit = plan.items[0].visit;
           const completed = previous.filter(
@@ -390,6 +425,9 @@ export class PlanVisitsService {
             planItemIds: plan.items
               .filter((i) => i.visit === nextVisit)
               .map((i) => i.id),
+            planItems: plan.items
+              .filter((i) => i.visit === nextVisit)
+              .map(detailOf),
           };
         });
         return {

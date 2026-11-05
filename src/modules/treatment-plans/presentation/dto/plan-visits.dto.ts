@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
+import { ToothSurface } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -70,6 +71,13 @@ export class PlanVisitItemViewDto {
   @ApiProperty() visit!: number;
   @ApiProperty({ type: String, nullable: true }) visitLabel!: string | null;
 }
+/** DX-283: qué entra en la visita, para nombrarlo al agendarla. */
+export class PlanVisitItemDetailDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() toothNumber!: string;
+  @ApiProperty({ enum: ToothSurface, isArray: true }) surfaces!: ToothSurface[];
+  @ApiProperty() procedureName!: string;
+}
 export class PlanVisitSummaryDto {
   @ApiProperty() number!: number;
   @ApiProperty({ type: String, nullable: true }) label!: string | null;
@@ -82,6 +90,8 @@ export class PlanVisitSummaryDto {
   })
   minimumDay!: string;
   @ApiProperty({ type: [String], format: 'uuid' }) planItemIds!: string[];
+  @ApiProperty({ type: [PlanVisitItemDetailDto] })
+  planItems!: PlanVisitItemDetailDto[];
 }
 export class PlanVisitsDto {
   @ApiProperty({ format: 'uuid' }) planId!: string;
@@ -110,6 +120,8 @@ export class UnscheduledPlanDto {
   @ApiProperty({ type: String, format: 'date-time' }) minimumDate!: Date;
   @ApiProperty() minimumDay!: string;
   @ApiProperty({ type: [String], format: 'uuid' }) planItemIds!: string[];
+  @ApiProperty({ type: [PlanVisitItemDetailDto] })
+  planItems!: PlanVisitItemDetailDto[];
 }
 export class UnscheduledPlansPageDto {
   @ApiProperty({ type: [UnscheduledPlanDto] }) items!: UnscheduledPlanDto[];

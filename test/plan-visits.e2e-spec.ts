@@ -196,6 +196,28 @@ describe('DX-256 visitas y agenda', () => {
         expect.objectContaining({ planId, currency: 'VES', total: 270 }),
       ]),
     );
+    // DX-283: la lista dice qué tratamientos entran, también a recepción, que no lee el catálogo.
+    const row = (
+      page.body as {
+        items: {
+          planId: string;
+          planItemIds: string[];
+          planItems: {
+            id: string;
+            toothNumber: string;
+            procedureName: string;
+          }[];
+        }[];
+      }
+    ).items.find((p) => p.planId === planId)!;
+    expect(row.planItems.map((i) => i.id).sort()).toEqual(
+      [...row.planItemIds].sort(),
+    );
+    expect(row.planItems.length).toBeGreaterThan(0);
+    for (const item of row.planItems) {
+      expect(item.procedureName).toBe('Corona');
+      expect(item.toothNumber).toBeTruthy();
+    }
     const north = await call(
       'get',
       `/treatment-plans/unscheduled?locationId=${otherLocation}`,
