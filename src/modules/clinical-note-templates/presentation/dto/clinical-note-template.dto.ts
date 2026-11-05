@@ -248,7 +248,7 @@ export class UpdateClinicalNoteTemplateDto {
       'Versión que el cliente leyó (la `version` de la plantilla). Si la plantilla ya cambió: 409 «La plantilla cambió, recárgala». Obligatoria.',
   })
   @IsInt({ message: 'Falta la versión de la plantilla: recárgala' })
-  @Min(1)
+  @Min(1, { message: 'Falta la versión de la plantilla: recárgala' })
   version!: number;
 }
 

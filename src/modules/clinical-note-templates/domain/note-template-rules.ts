@@ -84,7 +84,8 @@ export function normalizeNoteTemplate(
     category: trimOrNull(draft.category),
     body: draft.body.trim(),
     prompts: draft.prompts.map((p) => ({
-      ...(p.id !== undefined ? { id: p.id } : {}),
+      // Los ids de la BD van en minúsculas; un UUID en mayúsculas es el mismo.
+      ...(p.id !== undefined ? { id: p.id.toLowerCase() } : {}),
       label: p.label.trim(),
       type: p.type,
       options: p.options.map((o) => o.trim()),

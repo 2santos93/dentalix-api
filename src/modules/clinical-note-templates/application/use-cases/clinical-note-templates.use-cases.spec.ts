@@ -214,6 +214,21 @@ describe('UpdateNoteTemplateUseCase', () => {
       expect(repo.rows[0].name).toBe('Primera');
     });
 
+    it('un id en mayúsculas es el mismo id: se conserva y cuenta como repetido', async () => {
+      const repo = new InMemoryClinicalNoteTemplateRepository();
+      const t = repo.seed(base);
+      const [first] = t.prompts;
+      const uc = new UpdateNoteTemplateUseCase(repo);
+      const dup = uc.execute(t.id, {
+        body: 'En {{Cara}} con {{Material}}.',
+        prompts: [
+          { id: first.id, label: 'Cara', type: 'TEXT' },
+          { id: first.id.toUpperCase(), label: 'Material', type: 'TEXT' },
+        ],
+      });
+      await expect(dup).rejects.toThrow(/mismo id/);
+    });
+
     it('400 si dos preguntas llevan el mismo id (no se funden en una)', async () => {
       const repo = new InMemoryClinicalNoteTemplateRepository();
       const t = repo.seed(base);
@@ -233,7 +248,7 @@ describe('UpdateNoteTemplateUseCase', () => {
       ]);
     });
 
-    it('sin version en el PATCH no hay comprobación (clientes anteriores)', async () => {
+    it('el caso de uso, llamado por dentro sin version, no comprueba (el DTO la exige en HTTP)', async () => {
       const repo = new InMemoryClinicalNoteTemplateRepository();
       const t = repo.seed(base);
       const uc = new UpdateNoteTemplateUseCase(repo);
