@@ -20,6 +20,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { civilDateIn } from '../src/shared/time/civil-day';
 
 // SEC-047 en HTTP real: la rebaja de convenio queda en el informe de
 // descuentos (DX-204). Un ítem resuelto por convenio sale con su rebaja (precio
@@ -33,9 +34,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const DAY = 24 * 60 * 60 * 1000;
 /** Día civil de la sede (UTC−4 fijo) `offset` días desde hoy. */
 const caracasDay = (offset = 0) =>
-  new Date(Date.now() - 5 * 60 * 60 * 1000 + offset * DAY)
-    .toISOString()
-    .slice(0, 10);
+  civilDateIn(new Date(Date.now() + offset * DAY), 'America/Caracas');
 
 interface ReportItem {
   itemId: string;

@@ -334,13 +334,22 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
         ).body as { id: string }
       ).id;
       const patient = await createPatient(a, 'Sofía', '52000009');
-      await call(a, dentist.token, 'post', `/patients/${patient}/implants`, {
-        ...IMPLANT,
-        lot: 'LOT-REGIONAL-01',
-      })
+      const created = await call(
+        a,
+        dentist.token,
+        'post',
+        `/patients/${patient}/implants`,
+        {
+          ...IMPLANT,
+          lot: 'LOT-REGIONAL-01',
+        },
+      )
         .set('X-Location-Id', east)
         .expect(201);
-      const path = `/patients/${patient}/implant-card?date=${today}`;
+      // El día de colocación es el de ESA sede: cerca de la medianoche no es
+      // el `today` de la sede del fixture y la tarjeta daba 404 (DX-460).
+      const { placedOn } = created.body as { placedOn: string };
+      const path = `/patients/${patient}/implant-card?date=${placedOn}`;
 
       // Se abre sin sede activa (o con otra): sale la sede del implante.
       const card = await call(a, reception, 'get', path).expect(200);

@@ -24,6 +24,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import { minutesIntoDay } from './support/sede-clock';
 import { regionalFormat } from '../src/shared/format/regional-format';
 
 /**
@@ -58,12 +59,6 @@ function wall(instant: Date): string {
       .map((x) => [x.type, x.value]),
   );
   return `${p.day}/${p.month}/${p.year} a las ${p.hour}:${p.minute}`;
-}
-
-/** Minutos que lleva el día en la zona de la sede (UTC-4 fijo). */
-function minutesIntoCaracasDay(now: Date): number {
-  const local = new Date(now.getTime() - 5 * 60 * MIN);
-  return local.getUTCHours() * 60 + local.getUTCMinutes();
 }
 
 describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
@@ -200,8 +195,8 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     await accept(planId);
     // Cita A de hoy (en la zona de la sede) que empezó hace un rato; el paciente no llega.
     const lateBy = Math.max(
-      1,
-      Math.min(20, minutesIntoCaracasDay(new Date()) - 1),
+      0,
+      Math.min(20, minutesIntoDay(new Date(), ZONE) - 1),
     );
     const late = await rawAppointment(new Date(Date.now() - lateBy * MIN));
     await rawLink(late.id, itemId);
@@ -510,8 +505,8 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
    */
   const arrivedLateWith = async (itemIds: string[]) => {
     const lateBy = Math.max(
-      1,
-      Math.min(20, minutesIntoCaracasDay(new Date()) - 1),
+      0,
+      Math.min(20, minutesIntoDay(new Date(), ZONE) - 1),
     );
     const start = new Date(Date.now() - lateBy * MIN);
     const late = await raw.appointment.create({
@@ -764,8 +759,8 @@ describe('DX-271 llegada tarde y vínculos de citas cerradas', () => {
     );
     await holderAt(g1, itemId, new Date(Date.now() + 50 * DAY), 'SCHEDULED');
     const lateBy = Math.max(
-      1,
-      Math.min(20, minutesIntoCaracasDay(new Date()) - 1),
+      0,
+      Math.min(20, minutesIntoDay(new Date(), ZONE) - 1),
     );
     const lateStart = new Date(Date.now() - lateBy * MIN);
     const late = await raw.appointment.create({

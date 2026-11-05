@@ -52,7 +52,6 @@ const LEGACY_REAL_CLOCK_TODAY: ReadonlySet<string> = new Set([
   'test/payment-method-statement.e2e-spec.ts',
   'test/payment-rate-backup.e2e-spec.ts',
   'test/payment-receipt-exchange-rate.e2e-spec.ts',
-  'test/plan-items-arrival.e2e-spec.ts',
   'test/receivables.e2e-spec.ts',
   'test/split-payments.e2e-spec.ts',
   'test/collections.int-spec.ts',

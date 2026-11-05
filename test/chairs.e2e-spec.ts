@@ -14,6 +14,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { minutesIntoDay } from './support/sede-clock';
 
 // DX-211 en HTTP real: sillones por sede (CRUD solo ADMIN, desactivar en vez
 // de borrar, auditado), el sillón como recurso de la cita (409 por sillón con
@@ -631,8 +632,16 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
           end: at('13:30'),
         }).expect(201)
       ).body as AppointmentBody & { start: string; end: string };
-      // Se trae a HOY (empezó hace 5 min) por `raw`: agendar en el pasado no se puede.
-      const start = new Date(Date.now() - 5 * 60_000);
+      // Se trae a HOY (empezó hace un rato) por `raw`: agendar en el pasado no se
+      // puede. Nunca antes de la medianoche de la sede: sería de ayer (DX-460).
+      const start = new Date(
+        Date.now() -
+          Math.min(
+            5,
+            minutesIntoDay(new Date(), REGIONAL_CARACAS_FIXTURE.timeZone),
+          ) *
+            60_000,
+      );
       const end = new Date(start.getTime() + 30 * 60_000);
       await raw.appointment.update({
         where: { id: appt.id },
