@@ -558,8 +558,8 @@ export class PrismaReceivablesRepository
 
   /**
    * DX-430: los pacientes vivos que PUEDEN tener saldo a favor, leídos del
-   * mismo resumen `patient_ledgers` (DX-155) que la cartera, con la misma
-   * regla de sede. El resumen ya trae los asientos del saldo a favor dentro de
+   * mismo resumen `patient_ledgers` (DX-155) que la cartera, sin filtrar por
+   * su sede (la de un saldo se atribuye por plan, ver `originOfPlanCredit`). El resumen ya trae los asientos del saldo a favor dentro de
    * lo abonado del plan (posición 6) y las bases de lo abonado en otra moneda
    * (posición 8). Un plan puede tener saldo a favor si
    *    abonado + bases > facturable        (0 si está cancelado o rechazado),

@@ -53,6 +53,7 @@ interface Page {
   page: number;
   pageSize: number;
   totals: { currency: string; patients: number; amount: number }[];
+  paymentsWithoutRateCount: number;
 }
 interface Statement {
   plans: { currency: string; balance: number }[];
@@ -986,6 +987,13 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
 
   it('DX-089: un miembro restringido a Sede Norte solo ve la suya y no puede pedir otra', async () => {
     const mine = await list(a, norteOnlyToken);
+    // El aviso de «abonos sin tasa» cuenta solo lo de sus sedes: el abono sin
+    // tasa de SinTasa es de la sede principal (la clínica entera lo cuenta).
+    expect(mine.paymentsWithoutRateCount).toBe(0);
+    expect((await list(a)).paymentsWithoutRateCount).toBe(1);
+    expect((await list(a, principalOnlyToken)).paymentsWithoutRateCount).toBe(
+      1,
+    );
     expect(mine.items.map(label).sort()).toEqual(
       ['Norteño:VES:60', 'DosSedes:VES:20'].sort(),
     );

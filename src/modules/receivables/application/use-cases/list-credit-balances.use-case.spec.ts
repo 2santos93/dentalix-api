@@ -323,6 +323,62 @@ describe('ListCreditBalancesUseCase (DX-430)', () => {
     });
   });
 
+  describe('aviso de abonos sin tasa: respeta el mismo filtro de sede que las filas', () => {
+    /** Plan USD con un abono en VES «sin tasa» (no suma) cobrado en `locationId`. */
+    const withMissingRate = (id: string, locationId: string) => {
+      repo.ledgers.push(
+        ledger(id, [{ amount: 130 }], {
+          plans: [
+            planRow(`plan-${id}`, {
+              status: 'ACCEPTED',
+              billable: 100,
+              otherCurrency: {
+                based: 0,
+                pending: [
+                  {
+                    id: `pay-${id}`,
+                    currency: 'VES',
+                    amount: 5400,
+                    paidAt: new Date('2026-10-06T15:00:00.000Z'),
+                    locationId,
+                    exchangeRateCurrency: 'USD',
+                    frozenRate: null,
+                  },
+                ],
+              },
+            }),
+          ],
+        }),
+      );
+      repo.names.set(id, id);
+      repo.paidAt(id, '2026-10-05T15:00:00.000Z', locationId);
+    };
+
+    it('un miembro de Norte no cuenta los abonos sin tasa de Sur; sin restricción, los dos', async () => {
+      withMissingRate('p-norte', NORTE.id);
+      withMissingRate('p-sur', SUR.id);
+
+      expect((await useCase.execute({})).paymentsWithoutRateCount).toBe(2);
+
+      repo.allowed = [NORTE.id];
+      expect((await useCase.execute({})).paymentsWithoutRateCount).toBe(1);
+      repo.allowed = undefined;
+      expect(
+        (await useCase.execute({ locationId: SUR.id }))
+          .paymentsWithoutRateCount,
+      ).toBe(1);
+    });
+
+    it('un plan con deuda (sin fila) y un abono sin tasa se cuenta en la sede de su abono', async () => {
+      withMissingRate('p-sur', SUR.id);
+      repo.ledgers[0].paid = [];
+      repo.allowed = [NORTE.id];
+      expect((await useCase.execute({})).paymentsWithoutRateCount).toBe(0);
+      repo.allowed = [SUR.id];
+      expect((await useCase.execute({})).paymentsWithoutRateCount).toBe(1);
+    });
+  });
+
   it('filtra por moneda', async () => {
     seed('p-1', 10);
     expect((await useCase.execute({ currency: 'VES' })).items).toEqual([]);

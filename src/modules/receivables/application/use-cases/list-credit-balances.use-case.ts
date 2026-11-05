@@ -25,6 +25,7 @@ import { computePatientCredit } from '../compute-patient-credit';
 import { originOfPlanCredit } from '../credit-origin';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
 import { toCents } from '../../../../shared/money/money';
+import type { PlanCreditFacts } from '../../domain/entities/credit-balances.entity';
 import type { PatientLedger } from '../../domain/entities/receivables.entity';
 import {
   RECEIVABLES_CLOCK,
@@ -146,17 +147,30 @@ export class ListCreditBalancesUseCase {
         })),
     );
     // 2. De qué sede y de qué abono viene cada uno.
-    const facts = await this.repo.planCreditFacts(
-      planCredits.map((c) => c.planId),
+    // Los planes con abonos sin contar (aviso de tasas) también se atribuyen a
+    // una sede, para que el aviso respete el mismo filtro que las filas.
+    const flagged = [...planBalances.entries()].filter(
+      ([, known]) =>
+        known.paymentsWithoutRate.length > 0 || known.rateProviderTimedOut,
     );
+    const facts = await this.repo.planCreditFacts([
+      ...new Set([
+        ...planCredits.map((c) => c.planId),
+        ...flagged.map(([planId]) => planId),
+      ]),
+    ]);
+    const ledgerOfPlan = new Map(
+      ledgers.flatMap((l) => l.plans.map((p) => [p.id, l] as const)),
+    );
+    const emptyFacts: PlanCreditFacts = {
+      planLocationId: null,
+      ownPayments: [],
+      transferredPayments: [],
+    };
     const grouped = new Map<string, ScopedRow>();
     for (const credit of planCredits) {
       const origin = originOfPlanCredit(
-        facts.get(credit.planId) ?? {
-          planLocationId: null,
-          ownPayments: [],
-          transferredPayments: [],
-        },
+        facts.get(credit.planId) ?? emptyFacts,
         credit.billableCents,
       );
       const key = `${credit.patientId}|${origin.locationId ?? ''}|${credit.currency}`;
@@ -183,13 +197,13 @@ export class ListCreditBalancesUseCase {
 
     // 3. Solo las sedes pedidas o permitidas al miembro (DX-089).
     const allowed = this.repo.allowedLocationIds();
+    const visible = (locationId: string | null): boolean =>
+      location
+        ? locationId === location.id
+        : allowed === undefined ||
+          (locationId !== null && allowed.includes(locationId));
     const rows = [...grouped.values()]
-      .filter((r) =>
-        location
-          ? r.locationId === location.id
-          : allowed === undefined ||
-            (r.locationId !== null && allowed.includes(r.locationId)),
-      )
+      .filter((r) => visible(r.locationId))
       .sort(byCurrencyThenAmount);
 
     const page = wholeOrDefault(input.page, 1, 1);
@@ -199,10 +213,17 @@ export class ListCreditBalancesUseCase {
     );
     const pageRows = rows.slice((page - 1) * pageSize, page * pageSize);
 
+    // El aviso de tasas cuenta solo los planes de las sedes que se ven.
     let withoutRate = 0;
     let timedOut = false;
-    for (const known of planBalances.values()) {
+    for (const [planId, known] of flagged) {
       if (input.currency && known.planCurrency !== input.currency) continue;
+      const ledger = ledgerOfPlan.get(planId);
+      const sede = originOfPlanCredit(
+        facts.get(planId) ?? emptyFacts,
+        ledger ? billableOf(ledger, planId) : 0,
+      ).locationId;
+      if (!visible(sede)) continue;
       withoutRate += known.paymentsWithoutRate.length;
       timedOut ||= known.rateProviderTimedOut;
     }
