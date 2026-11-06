@@ -1,3 +1,4 @@
+import { nextMaintenanceOn } from '../../domain/equipment-rules';
 import type {
   EquipmentMaintenance,
   EquipmentRecord,
@@ -7,6 +8,7 @@ import type {
   CreateMaintenanceRepoInput,
   EquipmentRepository,
   ListEquipmentRepoParams,
+  MaintenanceCandidatesRepoParams,
   RetireEquipmentRepoInput,
   UpdateEquipmentRepoInput,
 } from '../../domain/ports/equipment-repository.port';
@@ -120,6 +122,25 @@ export class InMemoryEquipmentRepository implements EquipmentRepository {
         .map((r) => this.decorate(r)),
       total: all.length,
     });
+  }
+
+  /** Lo que filtra la consulta de Prisma, con la regla del dominio. */
+  listMaintenanceCandidates(
+    params: MaintenanceCandidatesRepoParams,
+  ): Promise<EquipmentRecord[]> {
+    return Promise.resolve(
+      this.rows
+        .filter((r) => r.status === 'ACTIVE')
+        .filter(
+          (r) =>
+            !params.locationIds || params.locationIds.includes(r.locationId),
+        )
+        .map((r) => this.decorate(r))
+        .filter((r) => {
+          const next = nextMaintenanceOn(r);
+          return next !== null && next <= params.dueOnOrBefore;
+        }),
+    );
   }
 
   findById(id: string): Promise<EquipmentRecord | null> {

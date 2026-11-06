@@ -1467,6 +1467,10 @@ model Appointment {
   //   appointments_tenant_location_chair_start_idx ("tenantId", "locationId",
   //     "chairId", start) WHERE "chairId" IS NOT NULL
   //     -> DX-211: lado hijo de la FK compuesta al sillón y filtro `chairIds`.
+  //   appointments_tenant_patient_upcoming_idx ("tenantId", "patientId",
+  //     start) INCLUDE (status) WHERE "deletedAt" IS NULL AND status IN
+  //     ('SCHEDULED', 'CONFIRMED', 'ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+  //     -> DX-547: «tiene cita futura o está en la clínica» de la lista de recall.
   @@map("appointments")
 }
 
@@ -3095,6 +3099,10 @@ model Equipment {
   @@index([tenantId, name, id], map: "equipment_tenant_name_idx")
   /// Lado hijo de la FK al sillón.
   @@index([tenantId, locationId, chairId], map: "equipment_chair_idx")
+  // DX-543: avisos de «Mi día». Parcial (WHERE "status" = 'ACTIVE'): el WHERE
+  // vive solo en 20261125090000_dx543_equipment_active_idx. NO aceptes un
+  // diff de migrate dev que lo vuelva completo.
+  @@index([tenantId, locationId], map: "equipment_tenant_active_location_idx")
   @@index([retiredById], map: "equipment_retired_by_idx")
   @@map("equipment")
 }

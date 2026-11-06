@@ -76,11 +76,31 @@ export interface CreateMaintenanceRepoInput {
   createdById: string;
 }
 
+/**
+ * DX-543: preselección de los avisos de «Mi día». Sin `tenantId`: lo pone el
+ * contexto del request (y la RLS).
+ */
+export interface MaintenanceCandidatesRepoParams {
+  /** `undefined` = todas las sedes de la clínica (vista consolidada). */
+  locationIds?: readonly string[];
+  /** Día civil: el próximo preventivo cae en él o antes. */
+  dueOnOrBefore: string;
+}
+
 export interface EquipmentRepository {
   /** Página de equipos bajo RLS, por nombre (y id para desempatar). */
   list(
     params: ListEquipmentRepoParams,
   ): Promise<{ rows: EquipmentRecord[]; total: number }>;
+  /**
+   * DX-543: los equipos ACTIVOS de esas sedes cuyo próximo preventivo (la
+   * misma regla que `nextMaintenanceOn`) cae en `dueOnOrBefore` o antes, con
+   * lo mismo que la lista. Es un superconjunto: el estado exacto lo decide el
+   * caso de uso con el día de cada sede.
+   */
+  listMaintenanceCandidates(
+    params: MaintenanceCandidatesRepoParams,
+  ): Promise<EquipmentRecord[]>;
   /** Por id; uno de otra clínica da `null` (RLS). */
   findById(id: string): Promise<EquipmentRecord | null>;
   create(input: CreateEquipmentRepoInput): Promise<EquipmentRecord>;

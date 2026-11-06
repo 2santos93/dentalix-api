@@ -2218,7 +2218,7 @@ módulo `src/modules/equipment`, tablas `equipment` y `equipment_maintenances`.
   adquisición + la periodicidad; si no, «sin programar». `maintenanceStatus`
   se cuenta en el día de la sede del equipo: `OVERDUE` (antes de hoy),
   `DUE_SOON` (hoy a +30 días), `UP_TO_DATE`, `UNSCHEDULED`; `null` si está dado
-  de baja. Los avisos en «Mi día» son DX-543.
+  de baja. Los avisos en «Mi día» son DX-543 (abajo).
 - **Carreras**: editar es un UPDATE condicional a `ACTIVE` y registrar un
   mantenimiento bloquea el equipo activo (`FOR UPDATE`): si otra petición lo
   dio de baja en medio, 409 «El equipo está dado de baja…», nunca 500. Un
@@ -2232,6 +2232,37 @@ módulo `src/modules/equipment`, tablas `equipment` y `equipment_maintenances`.
   un servicio de ficheros de clínica que se reutilice sin más).
 - **Demo**: autoclave al día y rayos X próximo en la principal, la unidad del
   Sillón 1 de la Sede Norte vencida y un compresor sin programar en São Paulo.
+
+### Avisos de mantenimiento en «Mi día» (DX-543)
+
+`GET /equipment/maintenance-due?limit=1..50` (10 por defecto), solo ADMIN como
+el resto del módulo: los equipos ACTIVOS con el preventivo **vencido**
+(`OVERDUE`) o que **vence hoy o en ≤30 días** (`DUE_SOON`), con la MISMA regla
+del próximo y del estado que la lista (`nextMaintenanceOn` +
+`maintenanceStatus`, en el día de la sede de cada equipo). Al día, sin
+programar y dados de baja no salen. Respuesta `{ generatedAt, items, total }`;
+cada item lleva equipo, tipo, sede, sillón, `nextMaintenanceOn`,
+`maintenanceStatus` y `daysUntilDue` (0 = hoy, negativo = días de retraso),
+de lo más urgente a lo menos (fecha, sede, nombre, id). `total` los cuenta
+todos.
+
+- **Alcance**: la sede activa de `X-Location-Id` (el selector global de la
+  web); sin ella, las sedes permitidas del token (`loc`) o toda la clínica.
+  Un ADMIN acotado que pide otra sede recibe 403 `LOCATION_NOT_ALLOWED`.
+- **No es una lista de `work-queues`**: esas son recuentos de pantallas que ya
+  existen; este bloque lista filas, tiene su propio endpoint y la web lo pide
+  aparte, así un fallo suyo no tumba el resto de «Mi día».
+- **Consulta** (`maintenanceCandidatesSql`): la BD preselecciona los activos
+  cuyo próximo, calculado en SQL como el dominio (`date + interval` recorta a
+  fin de mes como `addCivilMonths`), cae en el día UTC + 31 o antes (ninguna
+  zona va más de un día por delante de UTC); el dominio
+  (`selectMaintenanceDue`) decide con el «hoy» de cada sede. Filtra
+  `tenantId` además de la RLS FORCE.
+- **Índice**: `equipment_tenant_active_location_idx` (`tenantId, locationId`
+  WHERE `status = 'ACTIVE'`), migración `20261125090000_dx543_equipment_active_idx`
+  con `lock_timeout` 5 s, aditiva. El WHERE vive solo en la migración.
+- **Demo**: el ADMIN ve la unidad del Sillón 1 (Sede Norte, vencida) y los
+  rayos X periapical (principal, vence pronto) con «Todas las sedes».
 
 ## Personal restringido a sedes (DX-089)
 

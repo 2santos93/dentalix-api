@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -12,9 +13,11 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { CreateInventoryItemDto } from './dto/create-inventory-item.dto';
@@ -110,14 +113,18 @@ export class InventoryController {
 
   @Get(':id')
   @ApiOkResponse({ type: InventoryItemDto })
-  get(@Param('id') id: string): Promise<InventoryItemDetail> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  get(@Param('id', ParseUUIDPipe) id: string): Promise<InventoryItemDetail> {
     return this.getInventoryItem.execute(id);
   }
 
   @Patch(':id')
   @ApiOkResponse({ type: InventoryItemDto })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateInventoryItemDto,
     @Req() req: AuditableRequest,
   ): Promise<InventoryItem> {
@@ -136,14 +143,21 @@ export class InventoryController {
 
   @Delete(':id')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
-  remove(@Param('id') id: string, @Req() req: AuditableRequest): Promise<void> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuditableRequest,
+  ): Promise<void> {
     return this.deleteInventoryItem.execute(id, this.audit(req));
   }
 
   @Post(':id/movements')
   @ApiCreatedResponse({ type: InventoryMovementDto })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   createMovement(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RecordInventoryMovementDto,
     @Req() req: AuditableRequest,
   ): Promise<InventoryMovement> {
@@ -163,7 +177,11 @@ export class InventoryController {
 
   @Get(':id/movements')
   @ApiOkResponse({ type: [InventoryMovementDto] })
-  async listMovements(@Param('id') id: string): Promise<InventoryMovement[]> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  async listMovements(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<InventoryMovement[]> {
     // Reuses GetInventoryItemUseCase (the only use case that already loads
     // an item's movements) instead of reaching into the repository
     // directly from the controller -- keeps the DTO -> Resolver/Controller
