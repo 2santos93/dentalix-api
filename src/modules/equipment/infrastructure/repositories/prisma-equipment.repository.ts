@@ -13,6 +13,7 @@ import type {
   CreateMaintenanceRepoInput,
   EquipmentRepository,
   ListEquipmentRepoParams,
+  MaintenanceCandidatesRepoParams,
   RetireEquipmentRepoInput,
   UpdateEquipmentRepoInput,
 } from '../../domain/ports/equipment-repository.port';
@@ -112,6 +113,48 @@ function mapMaintenance(row: MaintenanceRow): EquipmentMaintenance {
     voidedById: row.voidedById,
     voidReason: row.voidReason,
   };
+}
+
+/**
+ * DX-543: ids de los equipos ACTIVOS cuyo próximo preventivo cae en
+ * `dueOnOrBefore` o antes. Repite en SQL `nextMaintenanceOn`: la fecha que
+ * dejó fijada el último preventivo vivo; si no fijó ninguna, su fecha + la
+ * periodicidad; sin preventivos, la adquisición + la periodicidad (NULL = sin
+ * programar, nunca sale). `date + interval 'n months'` recorta a fin de mes
+ * igual que `addCivilMonths`. Compara `tenantId` con `=` para que, bajo RLS
+ * FORCE, use `equipment_tenant_active_location_idx` y el índice de la hoja de
+ * vida (lo comprueba `test/equipment-maintenance-due.int-spec.ts`).
+ */
+export function maintenanceCandidatesSql(
+  tenantId: string,
+  params: MaintenanceCandidatesRepoParams,
+): Prisma.Sql {
+  const byLocation = params.locationIds
+    ? Prisma.sql`AND e."locationId" IN (${Prisma.join(
+        params.locationIds.map((id) => Prisma.sql`${id}::uuid`),
+      )})`
+    : Prisma.empty;
+  return Prisma.sql`
+    SELECT e."id"
+    FROM "equipment" e
+    LEFT JOIN LATERAL (
+      SELECT m."performedOn", m."nextDueOn"
+      FROM "equipment_maintenances" m
+      WHERE m."tenantId" = ${tenantId}::uuid
+        AND m."equipmentId" = e."id"
+        AND m."voidedAt" IS NULL
+        AND m."kind" = 'PREVENTIVE'
+      ORDER BY m."performedOn" DESC, m."createdAt" DESC
+      LIMIT 1
+    ) lp ON true
+    WHERE e."tenantId" = ${tenantId}::uuid
+      AND e."status" = 'ACTIVE'
+      ${byLocation}
+      AND COALESCE(
+            lp."nextDueOn",
+            (COALESCE(lp."performedOn", e."acquiredOn")
+              + make_interval(months => e."maintenanceIntervalMonths"))::date
+          ) <= ${params.dueOnOrBefore}::date`;
 }
 
 /**
@@ -234,6 +277,28 @@ export class PrismaEquipmentRepository implements EquipmentRepository {
         rows: rows.map((r) => mapEquipment(r, facts.get(r.id))),
         total,
       };
+    });
+  }
+
+  listMaintenanceCandidates(
+    params: MaintenanceCandidatesRepoParams,
+  ): Promise<EquipmentRecord[]> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const ids = await tx.$queryRaw<{ id: string }[]>(
+        maintenanceCandidatesSql(tenantId, params),
+      );
+      if (ids.length === 0) return [];
+      const rows = await tx.equipment.findMany({
+        where: { tenantId, id: { in: ids.map((r) => r.id) } },
+        include: EQUIPMENT_INCLUDE,
+        orderBy: ORDER,
+      });
+      const facts = await this.factsOf(
+        tx,
+        rows.map((r) => r.id),
+      );
+      return rows.map((r) => mapEquipment(r, facts.get(r.id)));
     });
   }
 

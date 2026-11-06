@@ -520,6 +520,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-542: equipos biomédicos por sede y su hoja de vida, solo ADMIN.
   'GET /equipment': ADMIN_ONLY,
   'POST /equipment': ADMIN_ONLY,
+  'GET /equipment/maintenance-due': ADMIN_ONLY,
   'GET /equipment/:id': ADMIN_ONLY,
   'PATCH /equipment/:id': ADMIN_ONLY,
   'POST /equipment/:id/retire': ADMIN_ONLY,

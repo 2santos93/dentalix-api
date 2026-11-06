@@ -812,6 +812,47 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(equipment.every((e) => e.maintenances.length > 0)).toBe(true);
   });
 
+  it('el ADMIN demo ve en «Mi día» la unidad vencida y los rayos X por vencer, y no los al día ni sin programar (DX-543)', async () => {
+    const admin = DEMO_USERS.find((u) => u.role === ClinicRole.ADMIN);
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({ email: admin?.email, password: DEMO_PASSWORD })
+      .expect(201);
+    const token = (login.body as { accessToken: string }).accessToken;
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/equipment/maintenance-due')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const body = res.body as {
+      items: {
+        name: string;
+        locationName: string;
+        chairName: string | null;
+        maintenanceStatus: string;
+      }[];
+      total: number;
+    };
+    expect(body.total).toBe(2);
+    expect(
+      body.items.map((i) => [
+        i.name,
+        i.locationName,
+        i.chairName,
+        i.maintenanceStatus,
+      ]),
+    ).toEqual([
+      [
+        'Unidad dental Sillón 1',
+        DEMO_LOCATIONS.norte.name,
+        'Sillón 1',
+        'OVERDUE',
+      ],
+      ['Rayos X periapical', DEMO_LOCATIONS.principal.name, null, 'DUE_SOON'],
+    ]);
+  });
+
   it('DX-407: la hoja de sedación de ejemplo va en orden (valoración < checklist < fármaco < tomas intraoperatorias < egreso)', async () => {
     const tenantId = await liveDemoTenantId();
     const sheet = await raw.sedationRecord.findFirstOrThrow({
