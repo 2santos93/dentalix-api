@@ -194,6 +194,8 @@ model Tenant {
   // DX-542: equipos biomédicos de las sedes y sus mantenimientos.
   equipment                               Equipment[]
   equipmentMaintenances                   EquipmentMaintenance[]
+  // DX-544: expediente de rayos X de las sedes (licencias y control de calidad).
+  radiologyRecords                        RadiologyRecord[]
   providerSchedules                       ProviderSchedule[]
   providerScheduleOverrides               ProviderScheduleOverride[]
   // DX-247: confirmaciones «Sin cambios hoy» de la anamnesis.
@@ -285,6 +287,8 @@ model User {
   equipmentRetired                  Equipment[]                      @relation("EquipmentRetiredBy")
   equipmentMaintenancesCreated      EquipmentMaintenance[]           @relation("EquipmentMaintenanceCreatedBy")
   equipmentMaintenancesVoided       EquipmentMaintenance[]           @relation("EquipmentMaintenanceVoidedBy")
+  // DX-544: documentos de rayos X anulados.
+  radiologyRecordsVoided            RadiologyRecord[]                @relation("RadiologyRecordVoidedBy")
   implantCardsDelivered             PatientImplant[]                 @relation("PatientImplantCardDeliveredBy")
   // DX-151: documentos del paciente subidos y anulados.
   uploadedPatientDocuments          PatientDocument[]                @relation("PatientDocumentUploadedBy")
@@ -489,6 +493,8 @@ model Location {
   chairs                     Chair[]
   // DX-542: equipos biomédicos de la sede.
   equipment                  Equipment[]
+  // DX-544: expediente de rayos X de la sede.
+  radiologyRecords           RadiologyRecord[]
   providerSchedules          ProviderSchedule[]
   providerScheduleOverrides  ProviderScheduleOverride[]
   // DX-279: versiones de la política de cancelación de la sede.
@@ -519,27 +525,29 @@ model Location {
 }
 
 model ClinicMembership {
-  id                    String               @id @default(uuid()) @db.Uuid
-  tenantId              String               @db.Uuid
-  userId                String               @db.Uuid
-  role                  ClinicRole
+  id                      String               @id @default(uuid()) @db.Uuid
+  tenantId                String               @db.Uuid
+  userId                  String               @db.Uuid
+  role                    ClinicRole
   /// Nº de registro profesional del miembro en esta clínica. Lo exige la receta.
-  professionalLicense   String?
+  professionalLicense     String?
   /// DX-324: especialidad del miembro; la receta la imprime si existe. CHECK 1..80.
-  professionalSpecialty String?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  deletedAt             DateTime?
-  tenant                Tenant               @relation(fields: [tenantId], references: [id])
-  user                  User                 @relation(fields: [userId], references: [id])
+  professionalSpecialty   String?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  deletedAt               DateTime?
+  tenant                  Tenant               @relation(fields: [tenantId], references: [id])
+  user                    User                 @relation(fields: [userId], references: [id])
   // DX-089: sedes a las que se restringe el miembro (sin filas = todas).
-  locations             MembershipLocation[]
+  locations               MembershipLocation[]
   // DX-050: procedimientos del plan que realizó.
-  performedPlanItems    TreatmentPlanItem[]
+  performedPlanItems      TreatmentPlanItem[]
   // DX-374: tasas de cambio manuales que registró.
-  manualExchangeRates   ManualExchangeRate[]
+  manualExchangeRates     ManualExchangeRate[]
   // DX-211: sillones de los que es el profesional por defecto.
-  defaultChairs         Chair[]
+  defaultChairs           Chair[]
+  // DX-544: documentos de rayos X de los que es el encargado u oficial.
+  radiologyRecordsOfficer RadiologyRecord[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -3084,15 +3092,19 @@ model Equipment {
   createdAt                 DateTime            @default(now())
   updatedAt                 DateTime            @updatedAt
 
-  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  location     Location               @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "equipment_location_fkey")
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location         Location               @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "equipment_location_fkey")
   // FK COMPUESTA: el sillón es de la MISMA clínica y de la MISMA sede.
-  chair        Chair?                 @relation(fields: [tenantId, locationId, chairId], references: [tenantId, locationId, id], onDelete: Restrict, map: "equipment_chair_fkey")
-  retiredBy    User?                  @relation("EquipmentRetiredBy", fields: [retiredById], references: [id], onDelete: Restrict, map: "equipment_retired_by_fkey")
-  maintenances EquipmentMaintenance[]
+  chair            Chair?                 @relation(fields: [tenantId, locationId, chairId], references: [tenantId, locationId, id], onDelete: Restrict, map: "equipment_chair_fkey")
+  retiredBy        User?                  @relation("EquipmentRetiredBy", fields: [retiredById], references: [id], onDelete: Restrict, map: "equipment_retired_by_fkey")
+  maintenances     EquipmentMaintenance[]
+  // DX-544: licencias y controles de calidad del equipo (de la MISMA sede).
+  radiologyRecords RadiologyRecord[]
 
   /// Destino de la FK compuesta de `equipment_maintenances`.
   @@unique([tenantId, id], map: "equipment_tenant_id_key")
+  /// DX-544: destino de la FK compuesta de `radiology_records` (misma sede).
+  @@unique([tenantId, locationId, id], map: "equipment_tenant_location_id_key")
   /// Lista por sede (y lado hijo de la FK a la sede), por nombre.
   @@index([tenantId, locationId, name, id], map: "equipment_tenant_location_name_idx")
   /// Lista consolidada de la clínica, por nombre.
@@ -3143,6 +3155,69 @@ model EquipmentMaintenance {
   @@index([createdById], map: "equipment_maintenances_created_by_idx")
   @@index([voidedById], map: "equipment_maintenances_voided_by_idx")
   @@map("equipment_maintenances")
+}
+
+/// DX-544: tipo de documento del expediente de rayos X de una sede.
+enum RadiologyRecordKind {
+  LICENSE
+  QUALITY_CONTROL
+}
+
+/// DX-544: categoría de la licencia (I periapical; II panorámica/tomografía).
+enum RadiologyLicenseCategory {
+  I
+  II
+}
+
+/// DX-544: documento regulatorio de rayos X de una sede (licencia o control
+/// de calidad) con su vencimiento. RLS FORCE por tenant. No se borra (sin
+/// DELETE para dentalix_app): se anula con motivo y anulado ya no cambia
+/// (trigger dx_radiology_records_voided_final). Solo SQL: CHECK de la
+/// categoría (solo en LICENSE), del número, del vencimiento y del encargado.
+model RadiologyRecord {
+  id                  String                    @id @default(uuid()) @db.Uuid
+  tenantId            String                    @db.Uuid
+  locationId          String                    @db.Uuid
+  /// Equipo de rayos X de la MISMA sede (FK compuesta con locationId) o null.
+  equipmentId         String?                   @db.Uuid
+  kind                RadiologyRecordKind
+  /// Solo en una licencia (CHECK radiology_records_category_check).
+  category            RadiologyLicenseCategory?
+  /// Nº de la licencia o resolución, o del informe (obligatorio en LICENSE).
+  reference           String?                   @db.VarChar(80)
+  issuer              String                    @db.VarChar(120)
+  issuedOn            DateTime                  @db.Date
+  expiresOn           DateTime                  @db.Date
+  /// Encargado del personal (usuario y su membresía, juntos) o escrito.
+  officerUserId       String?                   @db.Uuid
+  officerMembershipId String?                   @db.Uuid
+  officerName         String?                   @db.VarChar(120)
+  notes               String?
+  /// Punteros suaves a User, como los de `equipment`.
+  createdById         String?                   @db.Uuid
+  updatedById         String?                   @db.Uuid
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  voidedAt            DateTime?
+  voidedById          String?                   @db.Uuid
+  voidReason          String?
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location          Location          @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "radiology_records_location_fkey")
+  // FK COMPUESTA: el equipo es de la MISMA clínica y de la MISMA sede. ON
+  // UPDATE RESTRICT: un equipo con documentos no cambia de sede.
+  equipment         Equipment?        @relation(fields: [tenantId, locationId, equipmentId], references: [tenantId, locationId, id], onDelete: Restrict, onUpdate: Restrict, map: "radiology_records_equipment_fkey")
+  // FK COMPUESTA (patrón DX-050): el encargado es miembro de la MISMA clínica.
+  officerMembership ClinicMembership? @relation(fields: [tenantId, officerMembershipId, officerUserId], references: [tenantId, id, userId], onDelete: Restrict, map: "radiology_records_officer_fkey")
+  voidedBy          User?             @relation("RadiologyRecordVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict, map: "radiology_records_voided_by_fkey")
+
+  /// Lista por sede por vencimiento y avisos (y lado hijo de la FK a la sede).
+  @@index([tenantId, locationId, expiresOn, id], map: "radiology_records_tenant_location_expires_idx")
+  /// Lado hijo de las FK al equipo, al encargado y a users.
+  @@index([tenantId, locationId, equipmentId], map: "radiology_records_equipment_idx")
+  @@index([tenantId, officerMembershipId, officerUserId], map: "radiology_records_officer_idx")
+  @@index([voidedById], map: "radiology_records_voided_by_idx")
+  @@map("radiology_records")
 }
 
 model ProviderSchedule {
@@ -3905,6 +3980,8 @@ enum AuditResourceType {
   // mantenimientos (registro y anulación).
   EQUIPMENT
   EQUIPMENT_MAINTENANCE
+  // DX-544: expediente de rayos X de la sede (alta, edición y anulación).
+  RADIOLOGY_RECORD
   // DX-015: recall del paciente (intervalo, desactivación) y sus contactos.
   PATIENT_RECALL
   RECALL_CONTACT
