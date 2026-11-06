@@ -643,6 +643,54 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).not.toMatch(/\$|\bCO[P]\b|implante|tratamiento/i);
     });
 
+    it('DX-514: sin copia en PDF no manda a la página en la que firmó; la copia la facilita la clínica (HTML y texto)', () => {
+      const email = renderEmail(
+        'signature-budget-accepted',
+        {
+          recipientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          acceptedAtLabel: '31/10/2026 9:30 a. m.',
+          signedCopy: null,
+        },
+        brand,
+      );
+      for (const body of [email.text, email.html]) {
+        expect(body).not.toMatch(/desde la página en la que firmaste/);
+        expect(body).not.toMatch(/\/firmar\//);
+        expect(body).toContain(
+          'El enlace con el que firmaste ya no se puede volver a usar.',
+        );
+        expect(body).toContain(
+          'Si quieres una copia del presupuesto firmado, pídesela a Sonrisas del Norte: te la puede facilitar.',
+        );
+      }
+      expect(email.html).not.toContain('href=');
+      expect(email.text).not.toMatch(/https?:\/\//);
+    });
+
+    it('DX-514: con copia en PDF enlaza a su descarga, con su caducidad, y no a la página de firma', () => {
+      const url = 'https://demo.dentalix.app/copia/abc';
+      const email = renderEmail(
+        'signature-budget-accepted',
+        {
+          recipientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          acceptedAtLabel: '31/10/2026 9:30 a. m.',
+          signedCopy: { url, expiresAtLabel: '07/11/2026 9:30 a. m.' },
+        },
+        brand,
+      );
+      expect(email.html).toContain(`href="${url}"`);
+      expect(email.html.match(/href="/g)).toHaveLength(1);
+      expect(email.text).toContain(url);
+      expect(email.text).toContain('Descargar mi copia');
+      expect(email.text).toContain(
+        'El enlace caduca el 07/11/2026 9:30 a. m. y solo sirve una vez',
+      );
+      expect(email.text).not.toMatch(/desde la página en la que firmaste/);
+      expect(email.text).not.toMatch(/\$|implante|tratamiento/i);
+    });
+
     it('la oferta de hueco por enlace (DX-435): cuándo, dónde y con quién; sin nada clínico', () => {
       const email = renderEmail(
         'slot-offer',

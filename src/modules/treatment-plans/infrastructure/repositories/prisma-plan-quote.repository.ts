@@ -4,7 +4,11 @@ import {
   clinicFiscalOf,
 } from '../../../../shared/clinic/clinic-fiscal';
 import { Injectable } from '@nestjs/common';
-import { Prisma, type SignatureRequestChannel } from '@prisma/client';
+import {
+  Prisma,
+  type ConsentSignerType,
+  type SignatureRequestChannel,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -221,6 +225,8 @@ export async function readPlanQuoteSource(
           remoteSentAt: true,
           remoteOpenedAt: true,
           remoteVerifiedAt: true,
+          // DX-514: el impreso dice si firmó el paciente o su representante.
+          signatureRequest: { select: { signerType: true } },
         },
       },
     },
@@ -346,6 +352,7 @@ function remoteEvidenceOf(acceptance: {
   remoteSentAt: Date | null;
   remoteOpenedAt: Date | null;
   remoteVerifiedAt: Date | null;
+  signatureRequest: { signerType: ConsentSignerType } | null;
 }): PlanAcceptanceRemoteEvidence | null {
   // Todas o ninguna (CHECK treatment_plan_acceptances_remote_check).
   if (
@@ -354,7 +361,8 @@ function remoteEvidenceOf(acceptance: {
     !acceptance.remoteDestinationMasked ||
     !acceptance.remoteSentAt ||
     !acceptance.remoteOpenedAt ||
-    !acceptance.remoteVerifiedAt
+    !acceptance.remoteVerifiedAt ||
+    !acceptance.signatureRequest
   ) {
     return null;
   }
@@ -365,6 +373,7 @@ function remoteEvidenceOf(acceptance: {
     sentAt: acceptance.remoteSentAt,
     openedAt: acceptance.remoteOpenedAt,
     verifiedAt: acceptance.remoteVerifiedAt,
+    signerType: acceptance.signatureRequest.signerType,
   };
 }
 

@@ -266,6 +266,13 @@ export interface SignatureBudgetAcceptedEmailVars {
   clinicName: string;
   /** Hora de la aceptación, ya formateada en la zona y el formato de la sede. */
   acceptedAtLabel: string;
+  /**
+   * DX-514: la copia en PDF del presupuesto firmado, si hay un enlace de
+   * descarga válido para el paciente (como el de DX-443 para los
+   * consentimientos). Sin ella el email no lleva enlace: nunca el de la
+   * página de firma, que ya está usado.
+   */
+  signedCopy?: { url: string; expiresAtLabel: string } | null;
 }
 
 /**

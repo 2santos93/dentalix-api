@@ -930,6 +930,10 @@ export class SignPublicSignatureUseCase {
             acceptedAt,
             ctx.location.timeZone,
           ),
+          // DX-514: el presupuesto aceptado no tiene copia en PDF descargable
+          // (la de DX-443 es solo de consentimientos): sin enlace, y nunca el
+          // de la página de firma, que ya está usado.
+          signedCopy: null,
         },
       });
     } catch (err) {
