@@ -6,11 +6,11 @@
 --    appointment_waitlist tiene RLS con FORCE.
 -- 2. Índice en el orden del panel (sede, estado, prioridad DESC, antigüedad,
 --    id): la página sale del índice sin ordenar y el total cuenta solo las
---    OPEN de la sede. NO es parcial a propósito: Prisma manda el estado como
---    parámetro y, con el plan genérico de una sentencia preparada, Postgres no
---    puede usar un índice `WHERE "status" = 'OPEN'`. Sin CONCURRENTLY: `prisma
---    migrate deploy` ejecuta cada migración en una transacción (mismo criterio
---    que 20261015120000_payments_tenant_location_paidat_index).
+--    OPEN de la sede. Lleva el estado como columna en vez de ser parcial: el
+--    mismo orden sirve también a los listados de entradas cerradas. Sin
+--    CONCURRENTLY: `prisma migrate deploy` ejecuta cada migración en una
+--    transacción (mismo criterio que
+--    20261015120000_payments_tenant_location_paidat_index).
 SET lock_timeout = '5s';
 
 DO $$

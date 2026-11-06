@@ -9,10 +9,10 @@ import {
 // DX-149 (auditoría DB-030): el panel de «Pendientes por agendar» de una clínica
 // con 60.000 pacientes y 40.000 entradas, 400 de ellas abiertas en la sede.
 // EXPLAIN ANALYZE como dentalix_app (runWithTenant, RLS) de la página y del
-// total tal como los pide el repositorio: estado y sede como PARÁMETROS, y con
-// `plan_cache_mode = force_generic_plan`, que es el plan que Postgres acaba
-// usando en una sentencia preparada repetida. `raw` (DIRECT_URL, owner)
-// siembra y limpia.
+// total tal como los pide el repositorio, con estado y sede como PARÁMETROS.
+// Es el plan con valores que Postgres usa: no pasa al genérico mientras este
+// salga más caro, y el genérico no sabe que «OPEN» es el 1 % de las filas.
+// `raw` (DIRECT_URL, owner) siembra y limpia.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -47,14 +47,11 @@ let tenantId: string;
 let locationId: string;
 
 async function explain(sql: Prisma.Sql): Promise<Explained> {
-  const rows = await prisma.runWithTenant(tenantId, async (tx) => {
-    await tx.$executeRawUnsafe(
-      `SET LOCAL plan_cache_mode = force_generic_plan`,
-    );
-    return tx.$queryRaw<
+  const rows = await prisma.runWithTenant(tenantId, (tx) =>
+    tx.$queryRaw<
       { 'QUERY PLAN': { Plan: PlanNode; 'Execution Time': number }[] }[]
-    >(Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${sql}`);
-  });
+    >(Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${sql}`),
+  );
   const [result] = rows[0]['QUERY PLAN'];
   return { nodes: flatten(result.Plan), executionMs: result['Execution Time'] };
 }
