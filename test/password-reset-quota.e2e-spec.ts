@@ -135,7 +135,9 @@ describe('Restablecer contraseña con el tope alcanzado (e2e, DX-149-ter)', () =
     const missing = await forgot(`nadie${DOMAIN}`);
     await pollUntil(() => Promise.resolve(outcomes().length >= 3));
 
-    expect(outcomes()).toEqual(['SENT', 'THROTTLED', 'NO_MEMBER']);
+    // Las dos de segundo plano pueden terminar en cualquier orden.
+    expect(outcomes()[0]).toBe('SENT');
+    expect([...outcomes().slice(1)].sort()).toEqual(['NO_MEMBER', 'THROTTLED']);
     for (const res of [free, capped, missing]) {
       expect(res.status).toBe(202);
       expect(res.body).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
