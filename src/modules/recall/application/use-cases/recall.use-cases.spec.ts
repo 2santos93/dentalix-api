@@ -1,0 +1,1161 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import type { RecallKind } from '@prisma/client';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
+import type { RecallRepository } from '../../domain/ports/recall-repository.port';
+import type {
+  NewRecallContact,
+  PatientRecallRow,
+  RecallContactView,
+  RecallDueQuery,
+  RecallDueRow,
+  RecallRef,
+  SetPatientRecallData,
+  StaffRef,
+} from '../../domain/recall.entity';
+import {
+  APPOINTMENT_NOT_OF_PATIENT_MESSAGE,
+  BOOKED_NEEDS_APPOINTMENT_MESSAGE,
+  CreateRecallContactUseCase,
+  DISABLED_REASON_TOO_LONG_MESSAGE,
+  DISABLED_UNTIL_INVALID_MESSAGE,
+  DISABLED_UNTIL_PAST_MESSAGE,
+  GetPatientRecallsUseCase,
+  INTERVAL_RANGE_MESSAGE,
+  LAST_DONE_FUTURE_MESSAGE,
+  LAST_DONE_INVALID_MESSAGE,
+  ListDueRecallsUseCase,
+  NOTE_TOO_LONG_MESSAGE,
+  PATIENT_NOT_FOUND_MESSAGE,
+  RECALL_NOT_FOUND_MESSAGE,
+  SetPatientRecallUseCase,
+} from './recall.use-cases';
+
+// DX-551 (TST-065): los casos de uso del recall con un doble del repositorio
+// en memoria. El reloj va fijo: 12:00 en Caracas del 6 de noviembre de 2026.
+const NOW = new Date('2026-11-06T16:00:00.000Z');
+const SEDE_DAY = '2026-11-06';
+const clock = () => NOW;
+
+const NORTE = 'sede-norte';
+const SUR = 'sede-sur';
+
+interface FakeRecall {
+  id: string;
+  patientId: string;
+  kind: RecallKind;
+  intervalMonths: number;
+  lastDoneAt: string;
+  active: boolean;
+  disabledUntil: string | null;
+  disabledReason: string | null;
+  /** Sede donde se fijó. */
+  locationId: string;
+  updatedById: string;
+}
+
+interface FakeAppointment {
+  id: string;
+  patientId: string;
+  locationId: string;
+  /** Día civil (en la sede) de la cita. */
+  day: string;
+  status: 'COMPLETED' | 'SCHEDULED' | 'CANCELLED';
+}
+
+/**
+ * Doble del puerto: las mismas reglas que el repositorio Prisma (la sede del
+ * recall es la de la última cita atendida o, sin ella, la del recall), sin BD.
+ * Guarda cada llamada para poder comprobar qué recibió.
+ */
+class InMemoryRecallRepository implements RecallRepository {
+  readonly patients = new Set<string>();
+  readonly recalls: FakeRecall[] = [];
+  readonly appointments: FakeAppointment[] = [];
+  readonly contacts: RecallContactView[] = [];
+  readonly staffNames = new Map<string, string>();
+  dueRows: RecallDueRow[] = [];
+  dueTotal = 0;
+  sedeDay = SEDE_DAY;
+
+  readonly dueQueries: RecallDueQuery[] = [];
+  readonly upserts: SetPatientRecallData[] = [];
+  readonly writeTodayCalls: Date[] = [];
+  readonly patientRecallsCalls: { patientId: string; now: Date }[] = [];
+  readonly calls: string[] = [];
+
+  listDue(
+    query: RecallDueQuery,
+  ): Promise<{ rows: RecallDueRow[]; total: number }> {
+    this.calls.push('listDue');
+    this.dueQueries.push(query);
+    return Promise.resolve({ rows: this.dueRows, total: this.dueTotal });
+  }
+
+  patientExists(patientId: string): Promise<boolean> {
+    this.calls.push('patientExists');
+    return Promise.resolve(this.patients.has(patientId));
+  }
+
+  patientRecalls(
+    patientId: string,
+    now: Date,
+  ): Promise<{ rows: PatientRecallRow[]; contacts: RecallContactView[] }> {
+    this.calls.push('patientRecalls');
+    this.patientRecallsCalls.push({ patientId, now });
+    const rows = this.recalls
+      .filter((r) => r.patientId === patientId)
+      .map((r): PatientRecallRow => {
+        const visit = this.lastCompletedVisit(patientId);
+        return {
+          id: r.id,
+          kind: r.kind,
+          intervalMonths: r.intervalMonths,
+          lastDoneAt: r.lastDoneAt,
+          active: r.active,
+          disabledUntil: r.disabledUntil,
+          disabledReason: r.disabledReason,
+          locationId: visit?.locationId ?? r.locationId,
+          lastCompletedVisit: visit?.day ?? null,
+          hasUpcomingAppointment: this.appointments.some(
+            (a) =>
+              a.patientId === patientId &&
+              a.status === 'SCHEDULED' &&
+              a.day > this.sedeDay,
+          ),
+          today: this.sedeDay,
+          updatedAt: NOW,
+          updatedById: r.updatedById,
+        };
+      });
+    return Promise.resolve({
+      rows,
+      contacts: this.contacts.filter((c) => c.patientId === patientId),
+    });
+  }
+
+  writeToday(now: Date): Promise<string> {
+    this.calls.push('writeToday');
+    this.writeTodayCalls.push(now);
+    return Promise.resolve(this.sedeDay);
+  }
+
+  upsertRecall(data: SetPatientRecallData): Promise<{ id: string }> {
+    this.calls.push('upsertRecall');
+    this.upserts.push(data);
+    const existing = this.recalls.find(
+      (r) => r.patientId === data.patientId && r.kind === data.kind,
+    );
+    const fields = {
+      intervalMonths: data.intervalMonths,
+      lastDoneAt: data.lastDoneAt,
+      active: data.active,
+      disabledUntil: data.disabledUntil,
+      disabledReason: data.disabledReason,
+      updatedById: data.actorId,
+    };
+    if (existing) {
+      Object.assign(existing, fields);
+      return Promise.resolve({ id: existing.id });
+    }
+    const id = `recall-${this.recalls.length + 1}`;
+    this.recalls.push({
+      id,
+      patientId: data.patientId,
+      kind: data.kind,
+      locationId: NORTE,
+      ...fields,
+    });
+    return Promise.resolve({ id });
+  }
+
+  findRecall(recallId: string): Promise<RecallRef | null> {
+    this.calls.push('findRecall');
+    const r = this.recalls.find((x) => x.id === recallId);
+    if (!r) return Promise.resolve(null);
+    const visit = this.lastCompletedVisit(r.patientId);
+    return Promise.resolve({
+      id: r.id,
+      patientId: r.patientId,
+      kind: r.kind,
+      locationId: visit?.locationId ?? r.locationId,
+    });
+  }
+
+  appointmentOfPatient(
+    appointmentId: string,
+    patientId: string,
+  ): Promise<boolean> {
+    this.calls.push('appointmentOfPatient');
+    return Promise.resolve(
+      this.appointments.some(
+        (a) => a.id === appointmentId && a.patientId === patientId,
+      ),
+    );
+  }
+
+  createContact(data: NewRecallContact): Promise<RecallContactView> {
+    this.calls.push('createContact');
+    const recall = this.recalls.find((r) => r.id === data.recallId);
+    if (!recall) throw new Error(`recall inexistente: ${data.recallId}`);
+    const view: RecallContactView = {
+      id: `contact-${this.contacts.length + 1}`,
+      recallId: data.recallId,
+      kind: recall.kind,
+      patientId: data.patientId,
+      locationId: data.locationId,
+      channel: data.channel,
+      outcome: data.outcome,
+      note: data.note,
+      appointmentId: data.appointmentId,
+      author: {
+        id: data.authorId,
+        fullName: this.staffNames.get(data.authorId) ?? null,
+      },
+      createdAt: NOW,
+    };
+    this.contacts.push(view);
+    return Promise.resolve(view);
+  }
+
+  staff(ids: readonly string[]): Promise<Map<string, StaffRef>> {
+    this.calls.push('staff');
+    return Promise.resolve(
+      new Map(
+        ids
+          .filter((id) => this.staffNames.has(id))
+          .map((id) => [id, { id, fullName: this.staffNames.get(id) ?? null }]),
+      ),
+    );
+  }
+
+  private lastCompletedVisit(patientId: string): FakeAppointment | undefined {
+    return this.appointments
+      .filter((a) => a.patientId === patientId && a.status === 'COMPLETED')
+      .sort((x, y) => (x.day < y.day ? 1 : -1))[0];
+  }
+
+  seedRecall(data: Partial<FakeRecall> & { patientId: string }): FakeRecall {
+    this.patients.add(data.patientId);
+    const recall: FakeRecall = {
+      id: `recall-${this.recalls.length + 1}`,
+      kind: 'CHECKUP',
+      intervalMonths: 6,
+      lastDoneAt: '2026-01-10',
+      active: true,
+      disabledUntil: null,
+      disabledReason: null,
+      locationId: NORTE,
+      updatedById: 'dra-lopez',
+      ...data,
+    };
+    this.recalls.push(recall);
+    return recall;
+  }
+}
+
+/** Contexto real del request: clínica, sede activa y sedes permitidas. */
+function requestContext(allowed?: readonly string[]) {
+  const ctx = new TenantContextService();
+  const inRequest = <T>(fn: () => Promise<T>) =>
+    ctx.run('clinica-a', undefined, fn, allowed);
+  return { ctx, inRequest };
+}
+
+function dueRow(data: Partial<RecallDueRow> = {}): RecallDueRow {
+  return {
+    recallId: 'recall-1',
+    patientId: 'pac-1',
+    patientFirstName: 'Ana',
+    patientLastName: 'Pérez',
+    patientPhone: '+58 412 555 0101',
+    phoneRegion: 'VE',
+    reminderOptedOut: false,
+    kind: 'CHECKUP',
+    intervalMonths: 6,
+    baseDate: '2026-04-01',
+    dueAt: '2026-10-01',
+    daysOverdue: 36,
+    locationId: NORTE,
+    lastContact: null,
+    ...data,
+  };
+}
+
+describe('ListDueRecallsUseCase (DX-015)', () => {
+  let repo: InMemoryRecallRepository;
+  let list: ListDueRecallsUseCase;
+
+  beforeEach(() => {
+    repo = new InMemoryRecallRepository();
+    list = new ListDueRecallsUseCase(repo, clock);
+  });
+
+  it('sin parámetros: página 1 de 20, solo vencidos, los más vencidos primero y el reloj inyectado', async () => {
+    const page = await list.execute({});
+    expect(repo.dueQueries).toEqual([
+      {
+        kind: undefined,
+        withinDays: 0,
+        sort: 'MOST_OVERDUE',
+        page: 1,
+        pageSize: 20,
+        now: NOW,
+      },
+    ]);
+    expect(page).toEqual({ items: [], total: 0, page: 1, pageSize: 20 });
+  });
+
+  it('pasa tipo, orden y ventana al repositorio', async () => {
+    await list.execute({
+      kind: 'HYGIENE',
+      sort: 'LEAST_OVERDUE',
+      withinDays: 15,
+      page: 3,
+      pageSize: 50,
+    });
+    expect(repo.dueQueries[0]).toMatchObject({
+      kind: 'HYGIENE',
+      sort: 'LEAST_OVERDUE',
+      withinDays: 15,
+      page: 3,
+      pageSize: 50,
+    });
+  });
+
+  it.each<
+    [
+      string,
+      { page?: number; pageSize?: number; withinDays?: number },
+      { page: number; pageSize: number; withinDays: number },
+    ]
+  >([
+    [
+      'tope de 100 por página',
+      { pageSize: 500 },
+      { page: 1, pageSize: 100, withinDays: 0 },
+    ],
+    [
+      'página y tamaño mínimos de 1',
+      { page: 0, pageSize: 0 },
+      { page: 1, pageSize: 1, withinDays: 0 },
+    ],
+    [
+      'negativos al mínimo',
+      { page: -4, pageSize: -1, withinDays: -5 },
+      { page: 1, pageSize: 1, withinDays: 0 },
+    ],
+    [
+      'decimales hacia abajo',
+      { page: 2.7, pageSize: 10.9, withinDays: 7.5 },
+      { page: 2, pageSize: 10, withinDays: 7 },
+    ],
+    [
+      'ventana de hasta 60 días',
+      { withinDays: 90 },
+      { page: 1, pageSize: 20, withinDays: 60 },
+    ],
+    [
+      'NaN e Infinity = por defecto',
+      {
+        page: Number.NaN,
+        pageSize: Number.POSITIVE_INFINITY,
+        withinDays: Number.NaN,
+      },
+      { page: 1, pageSize: 20, withinDays: 0 },
+    ],
+  ])(
+    'acota la paginación y la ventana: %s',
+    async (_label, input, expected) => {
+      const page = await list.execute(input);
+      expect(repo.dueQueries[0]).toMatchObject(expected);
+      expect(page).toMatchObject({
+        page: expected.page,
+        pageSize: expected.pageSize,
+      });
+    },
+  );
+
+  it('arma el nombre, el teléfono y el enlace de WhatsApp con la región de la sede del paciente', async () => {
+    repo.dueRows = [
+      dueRow(),
+      dueRow({
+        recallId: 'recall-2',
+        patientId: 'pac-2',
+        patientFirstName: 'Luis',
+        patientLastName: '',
+        patientPhone: '0412 555 0202',
+        phoneRegion: 've',
+        locationId: SUR,
+        lastContact: {
+          channel: 'CALL',
+          outcome: 'NO_ANSWER',
+          createdAt: NOW,
+        },
+      }),
+      dueRow({
+        recallId: 'recall-3',
+        patientId: 'pac-3',
+        patientPhone: '0412 555 0303',
+        phoneRegion: null,
+      }),
+      dueRow({ recallId: 'recall-4', patientId: 'pac-4', patientPhone: null }),
+    ];
+    repo.dueTotal = 41;
+    const page = await list.execute({ pageSize: 4 });
+    expect(page.total).toBe(41);
+    expect(page.items[0]).toEqual({
+      recallId: 'recall-1',
+      patientId: 'pac-1',
+      patientName: 'Ana Pérez',
+      patientPhone: '+58 412 555 0101',
+      patientWhatsApp: '584125550101',
+      reminderOptedOut: false,
+      kind: 'CHECKUP',
+      intervalMonths: 6,
+      baseDate: '2026-04-01',
+      dueAt: '2026-10-01',
+      daysOverdue: 36,
+      locationId: NORTE,
+      lastContact: null,
+    });
+    // Sin apellido no queda un espacio colgando; el número local se lee con la
+    // región de la sede (en minúsculas también) y la sede es la del paciente.
+    expect(page.items[1]).toMatchObject({
+      patientName: 'Luis',
+      patientWhatsApp: '584125550202',
+      locationId: SUR,
+      lastContact: { channel: 'CALL', outcome: 'NO_ANSWER', createdAt: NOW },
+    });
+    // Un número local sin región de la sede no da un enlace inventado.
+    expect(page.items[2]).toMatchObject({
+      patientPhone: '0412 555 0303',
+      patientWhatsApp: null,
+    });
+    expect(page.items[3]).toMatchObject({
+      patientPhone: null,
+      patientWhatsApp: null,
+    });
+  });
+
+  it('baja de avisos (DX-128): sigue en la lista, pero sin teléfono ni WhatsApp', async () => {
+    repo.dueRows = [dueRow({ reminderOptedOut: true })];
+    repo.dueTotal = 1;
+    const [item] = (await list.execute({})).items;
+    expect(item).toMatchObject({
+      recallId: 'recall-1',
+      reminderOptedOut: true,
+      patientPhone: null,
+      patientWhatsApp: null,
+    });
+  });
+});
+
+describe('GetPatientRecallsUseCase (DX-015)', () => {
+  let repo: InMemoryRecallRepository;
+  let get: GetPatientRecallsUseCase;
+
+  beforeEach(() => {
+    repo = new InMemoryRecallRepository();
+    repo.staffNames.set('dra-lopez', 'Dra. López');
+    get = new GetPatientRecallsUseCase(repo, clock);
+  });
+
+  it('404 si el paciente no existe (o está archivado), sin leer sus recalls', async () => {
+    await expect(get.execute('nadie')).rejects.toThrow(
+      new NotFoundException(PATIENT_NOT_FOUND_MESSAGE),
+    );
+    expect(repo.calls).toEqual(['patientExists']);
+  });
+
+  it('sin recalls: listas vacías', async () => {
+    repo.patients.add('pac-1');
+    await expect(get.execute('pac-1')).resolves.toEqual({
+      recalls: [],
+      contacts: [],
+    });
+    expect(repo.patientRecallsCalls).toEqual([
+      { patientId: 'pac-1', now: NOW },
+    ]);
+  });
+
+  it.each<
+    [
+      string,
+      Partial<FakeRecall>,
+      FakeAppointment[],
+      { status: string; dueAt: string; daysOverdue: number },
+    ]
+  >([
+    // Fijado el 06/05 cada 6 meses: vence justo hoy.
+    [
+      'vencido hoy',
+      { lastDoneAt: '2026-05-06' },
+      [],
+      { status: 'DUE', dueAt: '2026-11-06', daysOverdue: 0 },
+    ],
+    [
+      'vencido hace días',
+      { lastDoneAt: '2026-04-01' },
+      [],
+      { status: 'DUE', dueAt: '2026-10-01', daysOverdue: 36 },
+    ],
+    [
+      'vence mañana',
+      { lastDoneAt: '2026-05-07' },
+      [],
+      { status: 'UPCOMING', dueAt: '2026-11-07', daysOverdue: -1 },
+    ],
+    [
+      'pausado hasta una fecha futura',
+      {
+        lastDoneAt: '2026-04-01',
+        disabledUntil: '2026-11-07',
+        disabledReason: 'Ortodoncia',
+      },
+      [],
+      { status: 'PAUSED', dueAt: '2026-10-01', daysOverdue: 36 },
+    ],
+    [
+      'pausa que ya venció',
+      {
+        lastDoneAt: '2026-04-01',
+        disabledUntil: SEDE_DAY,
+        disabledReason: 'Viaje',
+      },
+      [],
+      { status: 'DUE', dueAt: '2026-10-01', daysOverdue: 36 },
+    ],
+    [
+      'retirado',
+      { lastDoneAt: '2026-04-01', active: false },
+      [],
+      { status: 'INACTIVE', dueAt: '2026-10-01', daysOverdue: 36 },
+    ],
+    [
+      'retirado gana a la pausa',
+      {
+        lastDoneAt: '2026-04-01',
+        active: false,
+        disabledUntil: '2026-12-01',
+        disabledReason: 'Viaje',
+      },
+      [],
+      { status: 'INACTIVE', dueAt: '2026-10-01', daysOverdue: 36 },
+    ],
+    [
+      'vencido con cita futura',
+      { lastDoneAt: '2026-04-01' },
+      [
+        {
+          id: 'cita-f',
+          patientId: 'pac-1',
+          locationId: NORTE,
+          day: '2026-11-20',
+          status: 'SCHEDULED',
+        },
+      ],
+      { status: 'SCHEDULED', dueAt: '2026-10-01', daysOverdue: 36 },
+    ],
+    [
+      'una cita cancelada no lo agenda',
+      { lastDoneAt: '2026-04-01' },
+      [
+        {
+          id: 'cita-c',
+          patientId: 'pac-1',
+          locationId: NORTE,
+          day: '2026-11-20',
+          status: 'CANCELLED',
+        },
+      ],
+      { status: 'DUE', dueAt: '2026-10-01', daysOverdue: 36 },
+    ],
+  ])('estado: %s', async (_label, recall, appointments, expected) => {
+    repo.seedRecall({ patientId: 'pac-1', ...recall });
+    repo.appointments.push(...appointments);
+    const { recalls } = await get.execute('pac-1');
+    expect(recalls).toHaveLength(1);
+    expect(recalls[0]).toMatchObject(expected);
+  });
+
+  it.each<[string, string, number, string]>([
+    ['31/08 + 6 meses recorta a 28/02', '2026-08-31', 6, '2027-02-28'],
+    [
+      '31/08 + 6 meses en año bisiesto llega a 29/02',
+      '2023-08-31',
+      6,
+      '2024-02-29',
+    ],
+    ['29/02 + 12 meses = 28/02', '2024-02-29', 12, '2025-02-28'],
+    ['29/02 + 36 meses = 28/02', '2024-02-29', 36, '2027-02-28'],
+    ['31/01 + 1 mes = 28/02', '2026-01-31', 1, '2026-02-28'],
+    ['31/10 + 1 mes = 30/11', '2026-10-31', 1, '2026-11-30'],
+    ['30/11 + 3 meses = 28/02', '2026-11-30', 3, '2027-02-28'],
+    ['31/12 + 2 meses en bisiesto = 29/02', '2027-12-31', 2, '2028-02-29'],
+  ])(
+    'próxima fecha a fin de mes: %s',
+    async (_label, lastDoneAt, intervalMonths, dueAt) => {
+      repo.seedRecall({ patientId: 'pac-1', lastDoneAt, intervalMonths });
+      const [recall] = (await get.execute('pac-1')).recalls;
+      expect(recall.baseDate).toBe(lastDoneAt);
+      expect(recall.dueAt).toBe(dueAt);
+    },
+  );
+
+  it('la última cita atendida, posterior a lo fijado, reinicia el reloj y da la sede del recall', async () => {
+    repo.seedRecall({
+      patientId: 'pac-1',
+      lastDoneAt: '2026-01-10',
+      locationId: NORTE,
+    });
+    repo.appointments.push(
+      {
+        id: 'v1',
+        patientId: 'pac-1',
+        locationId: NORTE,
+        day: '2026-02-01',
+        status: 'COMPLETED',
+      },
+      {
+        id: 'v2',
+        patientId: 'pac-1',
+        locationId: SUR,
+        day: '2026-08-31',
+        status: 'COMPLETED',
+      },
+    );
+    const [recall] = (await get.execute('pac-1')).recalls;
+    expect(recall).toMatchObject({
+      lastDoneAt: '2026-01-10',
+      baseDate: '2026-08-31',
+      dueAt: '2027-02-28',
+      status: 'UPCOMING',
+      locationId: SUR,
+    });
+  });
+
+  it('una visita anterior a lo fijado no mueve la base', async () => {
+    repo.seedRecall({ patientId: 'pac-1', lastDoneAt: '2026-05-06' });
+    repo.appointments.push({
+      id: 'v1',
+      patientId: 'pac-1',
+      locationId: SUR,
+      day: '2026-03-01',
+      status: 'COMPLETED',
+    });
+    const [recall] = (await get.execute('pac-1')).recalls;
+    expect(recall).toMatchObject({
+      baseDate: '2026-05-06',
+      dueAt: '2026-11-06',
+      status: 'DUE',
+    });
+  });
+
+  it('devuelve cada recall con su autor y el historial de contactos; un autor fuera de la clínica sale sin nombre', async () => {
+    repo.seedRecall({ patientId: 'pac-1', kind: 'CHECKUP' });
+    repo.seedRecall({
+      patientId: 'pac-1',
+      kind: 'HYGIENE',
+      updatedById: 'ex-empleado',
+      disabledUntil: '2027-01-01',
+      disabledReason: 'Embarazo',
+    });
+    repo.seedRecall({ patientId: 'otro' });
+    const contact: RecallContactView = {
+      id: 'c1',
+      recallId: 'recall-1',
+      kind: 'CHECKUP',
+      patientId: 'pac-1',
+      locationId: NORTE,
+      channel: 'CALL',
+      outcome: 'NO_ANSWER',
+      note: null,
+      appointmentId: null,
+      author: { id: 'recepcion', fullName: 'Recepción' },
+      createdAt: NOW,
+    };
+    repo.contacts.push(contact);
+    const out = await get.execute('pac-1');
+    expect(out.contacts).toEqual([contact]);
+    expect(out.recalls.map((r) => [r.kind, r.updatedBy])).toEqual([
+      ['CHECKUP', { id: 'dra-lopez', fullName: 'Dra. López' }],
+      ['HYGIENE', { id: 'ex-empleado', fullName: null }],
+    ]);
+    expect(out.recalls[1]).toMatchObject({
+      disabledUntil: '2027-01-01',
+      disabledReason: 'Embarazo',
+      status: 'PAUSED',
+      updatedAt: NOW,
+    });
+  });
+});
+
+describe('SetPatientRecallUseCase (DX-015)', () => {
+  let repo: InMemoryRecallRepository;
+  let set: SetPatientRecallUseCase;
+
+  beforeEach(() => {
+    repo = new InMemoryRecallRepository();
+    repo.patients.add('pac-1');
+    set = new SetPatientRecallUseCase(
+      repo,
+      clock,
+      new GetPatientRecallsUseCase(repo, clock),
+    );
+  });
+
+  it('crea el recall con la fecha de hoy en la sede y activo por defecto, y devuelve la ficha', async () => {
+    const out = await set.execute(
+      'pac-1',
+      'CHECKUP',
+      { intervalMonths: 6 },
+      'dra-lopez',
+    );
+    expect(repo.writeTodayCalls).toEqual([NOW]);
+    expect(repo.upserts).toEqual([
+      {
+        patientId: 'pac-1',
+        kind: 'CHECKUP',
+        intervalMonths: 6,
+        lastDoneAt: SEDE_DAY,
+        active: true,
+        disabledUntil: null,
+        disabledReason: null,
+        actorId: 'dra-lopez',
+      },
+    ]);
+    expect(out.recalls).toEqual([
+      expect.objectContaining({
+        kind: 'CHECKUP',
+        lastDoneAt: SEDE_DAY,
+        dueAt: '2027-05-06',
+        status: 'UPCOMING',
+      }),
+    ]);
+  });
+
+  it('cambia el mismo recall del tipo (no lo duplica) y puede retirarlo', async () => {
+    await set.execute('pac-1', 'CHECKUP', { intervalMonths: 6 }, 'dra-lopez');
+    const out = await set.execute(
+      'pac-1',
+      'CHECKUP',
+      { intervalMonths: 12, lastDoneAt: '2026-02-28', active: false },
+      'dr-ruiz',
+    );
+    expect(repo.recalls).toHaveLength(1);
+    expect(out.recalls[0]).toMatchObject({
+      intervalMonths: 12,
+      lastDoneAt: '2026-02-28',
+      dueAt: '2027-02-28',
+      active: false,
+      status: 'INACTIVE',
+      updatedBy: { id: 'dr-ruiz', fullName: null },
+    });
+  });
+
+  it.each([0, 37, -6, 6.5, Number.NaN])(
+    '400 con el intervalo %p, antes de tocar la BD',
+    async (intervalMonths) => {
+      await expect(
+        set.execute('pac-1', 'CHECKUP', { intervalMonths }, 'dra-lopez'),
+      ).rejects.toThrow(new BadRequestException(INTERVAL_RANGE_MESSAGE));
+      expect(repo.calls).toEqual([]);
+    },
+  );
+
+  it.each([1, 36])('acepta los extremos del intervalo (%p)', async (n) => {
+    await set.execute('pac-1', 'HYGIENE', { intervalMonths: n }, 'dra-lopez');
+    expect(repo.upserts[0].intervalMonths).toBe(n);
+  });
+
+  it('404 si el paciente no existe, sin escribir', async () => {
+    await expect(
+      set.execute('nadie', 'CHECKUP', { intervalMonths: 6 }, 'dra-lopez'),
+    ).rejects.toThrow(new NotFoundException(PATIENT_NOT_FOUND_MESSAGE));
+    expect(repo.calls).toEqual(['patientExists']);
+  });
+
+  it.each(['2026-02-30', '06/11/2026', '2026-13-01', '', '1899-12-31'])(
+    '400 con un último control inválido (%p)',
+    async (lastDoneAt) => {
+      await expect(
+        set.execute(
+          'pac-1',
+          'CHECKUP',
+          { intervalMonths: 6, lastDoneAt },
+          'dra-lopez',
+        ),
+      ).rejects.toThrow(new BadRequestException(LAST_DONE_INVALID_MESSAGE));
+      expect(repo.upserts).toEqual([]);
+    },
+  );
+
+  it('400 con un último control posterior a hoy en la sede; hoy y 1900-01-01 valen', async () => {
+    await expect(
+      set.execute(
+        'pac-1',
+        'CHECKUP',
+        { intervalMonths: 6, lastDoneAt: '2026-11-07' },
+        'dra-lopez',
+      ),
+    ).rejects.toThrow(new BadRequestException(LAST_DONE_FUTURE_MESSAGE));
+    await set.execute(
+      'pac-1',
+      'CHECKUP',
+      { intervalMonths: 6, lastDoneAt: SEDE_DAY },
+      'dra-lopez',
+    );
+    await set.execute(
+      'pac-1',
+      'HYGIENE',
+      { intervalMonths: 6, lastDoneAt: '1900-01-01' },
+      'dra-lopez',
+    );
+    expect(repo.upserts.map((u) => u.lastDoneAt)).toEqual([
+      SEDE_DAY,
+      '1900-01-01',
+    ]);
+  });
+
+  it('«hoy» es el de la sede donde se escribe, no el UTC', async () => {
+    // A las 22:30 del 6 en Caracas ya es 7 en UTC: el 7 sigue siendo futuro.
+    repo.sedeDay = '2026-11-06';
+    const late = new SetPatientRecallUseCase(
+      repo,
+      () => new Date('2026-11-07T02:30:00.000Z'),
+      new GetPatientRecallsUseCase(repo, clock),
+    );
+    await expect(
+      late.execute(
+        'pac-1',
+        'CHECKUP',
+        { intervalMonths: 6, lastDoneAt: '2026-11-07' },
+        'dra-lopez',
+      ),
+    ).rejects.toThrow(LAST_DONE_FUTURE_MESSAGE);
+    expect(repo.writeTodayCalls).toEqual([
+      new Date('2026-11-07T02:30:00.000Z'),
+    ]);
+  });
+
+  it('pausa hasta una fecha posterior a hoy con su motivo recortado', async () => {
+    await set.execute(
+      'pac-1',
+      'CHECKUP',
+      {
+        intervalMonths: 6,
+        disabledUntil: '2026-11-07',
+        disabledReason: '  Tratamiento de ortodoncia  ',
+      },
+      'dra-lopez',
+    );
+    expect(repo.upserts[0]).toMatchObject({
+      disabledUntil: '2026-11-07',
+      disabledReason: 'Tratamiento de ortodoncia',
+    });
+  });
+
+  it.each(['2026-02-30', 'mañana'])(
+    '400 con una fecha de reactivación inválida (%p)',
+    async (disabledUntil) => {
+      await expect(
+        set.execute(
+          'pac-1',
+          'CHECKUP',
+          { intervalMonths: 6, disabledUntil },
+          'dra-lopez',
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(DISABLED_UNTIL_INVALID_MESSAGE),
+      );
+    },
+  );
+
+  it.each([SEDE_DAY, '2026-01-01'])(
+    '400 si la reactivación no es posterior a hoy (%p)',
+    async (disabledUntil) => {
+      await expect(
+        set.execute(
+          'pac-1',
+          'CHECKUP',
+          { intervalMonths: 6, disabledUntil },
+          'dra-lopez',
+        ),
+      ).rejects.toThrow(new BadRequestException(DISABLED_UNTIL_PAST_MESSAGE));
+      expect(repo.upserts).toEqual([]);
+    },
+  );
+
+  it('sin fecha (null o vacía) quita la pausa y descarta el motivo; un motivo en blanco es null', async () => {
+    for (const input of [
+      { disabledUntil: null, disabledReason: 'Viaje' },
+      { disabledUntil: '', disabledReason: 'Viaje' },
+      { disabledUntil: '2026-12-01', disabledReason: '   ' },
+      { disabledUntil: '2026-12-01', disabledReason: null },
+    ]) {
+      await set.execute(
+        'pac-1',
+        'CHECKUP',
+        { intervalMonths: 6, ...input },
+        'dra-lopez',
+      );
+    }
+    expect(
+      repo.upserts.map((u) => [u.disabledUntil, u.disabledReason]),
+    ).toEqual([
+      [null, null],
+      [null, null],
+      ['2026-12-01', null],
+      ['2026-12-01', null],
+    ]);
+  });
+
+  it('el motivo admite 120 caracteres (tras recortar) y 121 da 400', async () => {
+    await set.execute(
+      'pac-1',
+      'CHECKUP',
+      {
+        intervalMonths: 6,
+        disabledUntil: '2026-12-01',
+        disabledReason: ` ${'m'.repeat(120)} `,
+      },
+      'dra-lopez',
+    );
+    expect(repo.upserts[0].disabledReason).toHaveLength(120);
+    await expect(
+      set.execute(
+        'pac-1',
+        'CHECKUP',
+        {
+          intervalMonths: 6,
+          disabledUntil: '2026-12-01',
+          disabledReason: 'm'.repeat(121),
+        },
+        'dra-lopez',
+      ),
+    ).rejects.toThrow(
+      new BadRequestException(DISABLED_REASON_TOO_LONG_MESSAGE),
+    );
+    expect(repo.upserts).toHaveLength(1);
+  });
+});
+
+describe('CreateRecallContactUseCase (DX-015)', () => {
+  let repo: InMemoryRecallRepository;
+  let recallId: string;
+
+  beforeEach(() => {
+    repo = new InMemoryRecallRepository();
+    repo.staffNames.set('recepcion', 'Recepción');
+    // Recall fijado en Norte; la última visita atendida fue en Sur.
+    recallId = repo.seedRecall({ patientId: 'pac-1', locationId: NORTE }).id;
+    repo.seedRecall({ patientId: 'pac-2', kind: 'HYGIENE' });
+    repo.appointments.push(
+      {
+        id: 'visita-sur',
+        patientId: 'pac-1',
+        locationId: SUR,
+        day: '2026-03-01',
+        status: 'COMPLETED',
+      },
+      {
+        id: 'cita-pac-1',
+        patientId: 'pac-1',
+        locationId: SUR,
+        day: '2026-11-20',
+        status: 'SCHEDULED',
+      },
+      {
+        id: 'cita-pac-2',
+        patientId: 'pac-2',
+        locationId: NORTE,
+        day: '2026-11-21',
+        status: 'SCHEDULED',
+      },
+    );
+  });
+
+  function build(allowed?: readonly string[]) {
+    const { ctx, inRequest } = requestContext(allowed);
+    const create = new CreateRecallContactUseCase(repo, ctx);
+    return {
+      create: (
+        id: string,
+        input: Parameters<CreateRecallContactUseCase['execute']>[1],
+      ) => inRequest(() => create.execute(id, input, 'recepcion')),
+    };
+  }
+
+  it('registra el contacto con el paciente y la sede del recall (la de su última visita) y la nota recortada', async () => {
+    const { create } = build();
+    const contact = await create(recallId, {
+      channel: 'CALL',
+      outcome: 'CALL_BACK',
+      note: '  Llamar después de las 5  ',
+    });
+    expect(contact).toEqual({
+      id: 'contact-1',
+      recallId,
+      kind: 'CHECKUP',
+      patientId: 'pac-1',
+      locationId: SUR,
+      channel: 'CALL',
+      outcome: 'CALL_BACK',
+      note: 'Llamar después de las 5',
+      appointmentId: null,
+      author: { id: 'recepcion', fullName: 'Recepción' },
+      createdAt: NOW,
+    });
+  });
+
+  it('una nota en blanco o ausente se guarda como null', async () => {
+    const { create } = build();
+    await create(recallId, {
+      channel: 'WHATSAPP_LINK',
+      outcome: 'LEFT_MESSAGE',
+      note: '   ',
+    });
+    await create(recallId, {
+      channel: 'EMAIL',
+      outcome: 'NO_ANSWER',
+      note: null,
+    });
+    await create(recallId, { channel: 'IN_PERSON', outcome: 'WILL_BOOK' });
+    expect(repo.contacts.map((c) => c.note)).toEqual([null, null, null]);
+  });
+
+  it('la nota admite 280 caracteres (tras recortar) y 281 da 400 sin leer el recall', async () => {
+    const { create } = build();
+    await expect(
+      create(recallId, {
+        channel: 'CALL',
+        outcome: 'NO_ANSWER',
+        note: ` ${'n'.repeat(280)} `,
+      }),
+    ).resolves.toMatchObject({ note: 'n'.repeat(280) });
+    repo.calls.length = 0;
+    await expect(
+      create(recallId, {
+        channel: 'CALL',
+        outcome: 'NO_ANSWER',
+        note: 'n'.repeat(281),
+      }),
+    ).rejects.toThrow(new BadRequestException(NOTE_TOO_LONG_MESSAGE));
+    expect(repo.calls).toEqual([]);
+  });
+
+  it.each([undefined, null])(
+    '«Agendó» sin cita (%p) da 400 sin leer el recall',
+    async (appointmentId) => {
+      const { create } = build();
+      await expect(
+        create(recallId, { channel: 'CALL', outcome: 'BOOKED', appointmentId }),
+      ).rejects.toThrow(
+        new BadRequestException(BOOKED_NEEDS_APPOINTMENT_MESSAGE),
+      );
+      expect(repo.calls).toEqual([]);
+    },
+  );
+
+  it('«Agendó» con una cita del MISMO paciente se registra con esa cita', async () => {
+    const { create } = build();
+    await expect(
+      create(recallId, {
+        channel: 'CALL',
+        outcome: 'BOOKED',
+        appointmentId: 'cita-pac-1',
+      }),
+    ).resolves.toMatchObject({
+      outcome: 'BOOKED',
+      appointmentId: 'cita-pac-1',
+      patientId: 'pac-1',
+    });
+  });
+
+  it('«Agendó» con la cita de OTRO paciente de la clínica da 400 y no escribe', async () => {
+    const { create } = build();
+    await expect(
+      create(recallId, {
+        channel: 'CALL',
+        outcome: 'BOOKED',
+        appointmentId: 'cita-pac-2',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(APPOINTMENT_NOT_OF_PATIENT_MESSAGE),
+    );
+    await expect(
+      create(recallId, {
+        channel: 'CALL',
+        outcome: 'BOOKED',
+        appointmentId: 'no-existe',
+      }),
+    ).rejects.toThrow(APPOINTMENT_NOT_OF_PATIENT_MESSAGE);
+    expect(repo.contacts).toEqual([]);
+  });
+
+  it('otro desenlace con cita también exige que sea del paciente', async () => {
+    const { create } = build();
+    await expect(
+      create(recallId, {
+        channel: 'CALL',
+        outcome: 'WILL_BOOK',
+        appointmentId: 'cita-pac-2',
+      }),
+    ).rejects.toThrow(APPOINTMENT_NOT_OF_PATIENT_MESSAGE);
+    await expect(
+      create(recallId, {
+        channel: 'CALL',
+        outcome: 'WILL_BOOK',
+        appointmentId: 'cita-pac-1',
+      }),
+    ).resolves.toMatchObject({ appointmentId: 'cita-pac-1' });
+  });
+
+  it('404 si el recall no existe', async () => {
+    const { create } = build();
+    await expect(
+      create('no-existe', { channel: 'CALL', outcome: 'NO_ANSWER' }),
+    ).rejects.toThrow(new NotFoundException(RECALL_NOT_FOUND_MESSAGE));
+    expect(repo.calls).toEqual(['findRecall']);
+  });
+
+  it('403 por la sede de la última visita (Sur), aunque el recall se fijara en Norte, antes de mirar la cita', async () => {
+    const { create } = build([NORTE]);
+    const error = await create(recallId, {
+      channel: 'CALL',
+      outcome: 'BOOKED',
+      appointmentId: 'cita-pac-1',
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ForbiddenException);
+    expect((error as ForbiddenException).message).toBe(
+      LOCATION_NOT_ALLOWED_MESSAGE,
+    );
+    expect(repo.calls).toEqual(['findRecall']);
+    expect(repo.contacts).toEqual([]);
+  });
+
+  it('un miembro de Sur sí puede; sin sedes permitidas, nadie', async () => {
+    await expect(
+      build([SUR]).create(recallId, { channel: 'CALL', outcome: 'NO_ANSWER' }),
+    ).resolves.toMatchObject({ locationId: SUR });
+    await expect(
+      build([]).create(recallId, { channel: 'CALL', outcome: 'NO_ANSWER' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('sin visita atendida, manda la sede del recall', async () => {
+    const pac2 = repo.recalls.find((r) => r.patientId === 'pac-2');
+    if (!pac2) throw new Error('falta el recall de pac-2');
+    await expect(
+      build([SUR]).create(pac2.id, { channel: 'CALL', outcome: 'NO_ANSWER' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      build([NORTE]).create(pac2.id, { channel: 'CALL', outcome: 'NO_ANSWER' }),
+    ).resolves.toMatchObject({ kind: 'HYGIENE', locationId: NORTE });
+  });
+});
