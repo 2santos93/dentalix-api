@@ -35,6 +35,11 @@ export interface TreatmentPlanItem {
    * ítems anteriores a DX-105 («sin convenio»).
    */
   basePrice: number | null;
+  /**
+   * DX-502: moneda de `basePrice` (la del catálogo, común a las sedes activas,
+   * al dar de alta el ítem); null si no se supo. No es la del plan por fuerza.
+   */
+  catalogCurrency: string | null;
   priceSource: PriceSource | null;
   agreementId: string | null;
   agreementName: string | null;

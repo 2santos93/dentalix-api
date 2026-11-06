@@ -52,6 +52,14 @@ export class TreatmentPlanItemDto {
   basePrice!: number | null;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502: moneda de `basePrice`, la del catálogo (común a las sedes activas) al dar de alta el ítem, congelada. Null si no había una común o no hay precio de catálogo. Puede no ser la del plan: no se convierte.',
+  })
+  catalogCurrency!: string | null;
+
+  @ApiProperty({
     enum: PriceSource,
     nullable: true,
     description:

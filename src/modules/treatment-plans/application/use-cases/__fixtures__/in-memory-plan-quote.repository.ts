@@ -30,6 +30,7 @@ export function quoteSource(
         referencePrice: null,
         agreementName: null,
         agreementPayerName: null,
+        listPriceCurrency: null,
       },
       {
         id: 'item-2',
@@ -42,6 +43,7 @@ export function quoteSource(
         referencePrice: null,
         agreementName: null,
         agreementPayerName: null,
+        listPriceCurrency: null,
       },
     ],
     patient: {

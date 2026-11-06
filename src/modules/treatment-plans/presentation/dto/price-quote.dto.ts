@@ -33,6 +33,14 @@ export class PriceQuoteDto {
   basePrice!: number | null;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502: moneda de `basePrice`: la del catálogo, común a todas las sedes activas de la clínica (no solo las del usuario). Null si no hay una común. Puede no ser la del plan (`currency`): no se convierte.',
+  })
+  catalogCurrency!: string | null;
+
+  @ApiProperty({
     type: Number,
     nullable: true,
     description:

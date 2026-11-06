@@ -17,6 +17,8 @@ export const PRICE_QUOTE_CATALOG_ITEM_NOT_FOUND_MESSAGE =
 /** Precio que tendría el ítem si se añadiera ahora (DX-105 §4.2). */
 export interface PriceQuote {
   basePrice: number | null;
+  /** DX-502: moneda de `basePrice` (la del catálogo); null si no se sabe. */
+  catalogCurrency: string | null;
   price: number | null;
   source: PriceSource;
   agreementId: string | null;

@@ -969,6 +969,60 @@ la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
 - **Pendiente** (DX-422): el PDF del presupuesto firmado generado en el
   servidor; hoy el paciente imprime o guarda la copia desde la página.
 
+### Moneda del precio de lista (DX-502)
+
+El precio de lista del presupuesto es el `defaultPrice` del catálogo, que no
+lleva moneda. Al dar de alta un ítem, la API congela en
+`treatment_plan_items."catalogCurrency"` la moneda del catálogo: la común de
+TODAS las sedes activas de la clínica (no solo las del usuario), o `NULL` si
+no hay una común. No cambia después (trigger
+`treatment_plan_items_catalog_currency_frozen`) y las alternativas la copian.
+
+- El presupuesto se compone como **v4**: cada ítem lleva `listPriceCurrency`
+  (sellado en el hash) y el «Ahorro por convenio» solo suma los ítems cuyo
+  precio de lista está en la moneda del plan (nunca resta monedas distintas).
+  La v4 sella también los datos fiscales de la clínica (DX-019) o `null` si
+  no los tiene; la v3 de DX-019 ya no se compone.
+- Las fotos v1/v2/v3 ya firmadas conservan su hash; al leerlas, la API
+  completa `listPriceCurrency` con la del ítem. Un enlace a distancia v2/v3
+  enviado antes del despliegue se recompone con la regla de entonces (v3 con
+  datos fiscales, v2 sin ellos) y sigue valiendo; la página pública lo
+  muestra sin cifra de precio de lista (`listPriceCurrency: null`).
+- Se expone en `TreatmentPlanItemDto.catalogCurrency`,
+  `PriceQuoteDto.catalogCurrency`, `PlanQuoteItemDto.listPriceCurrency` y
+  `PublicBudgetItemDto.listPriceCurrency`.
+- Relleno: `20261128090100_dx502_plan_item_catalog_currency_backfill`
+  (moneda común de las sedes activas de cada clínica; sin común, `NULL`).
+  Solo el relleno puede poner la moneda a un ítem que no la tenía: fija
+  `app.dx502_backfill = 'on'` en cada lote y los triggers lo exigen.
+- **Despliegue (sin réplicas mixtas).** Una réplica sin DX-502 no sabe leer
+  las fotos v4: `parseQuoteContent` lanza un `Error` genérico y la ruta
+  responde 500 (presupuesto imprimible, aceptación en la clínica, enlace
+  público y su firma). Hay que desplegar sin dejar a la vez réplicas viejas y
+  nuevas sirviendo tráfico (parar las viejas antes de abrir las nuevas, o
+  cambiar todas de golpe), y no volver atrás la API una vez emitido algún
+  presupuesto v4. Orden: `prisma migrate deploy` (aditiva: las réplicas
+  viejas siguen funcionando con la columna nueva) → cambiar todas las réplicas
+  a DX-502.
+- **Ítems creados por réplicas viejas tras el relleno.** Los ítems que dé de
+  alta una réplica sin DX-502 entre el relleno y el cambio de réplicas quedan
+  con `catalogCurrency` NULL (la web oculta su precio de lista con la nota).
+  El relleno es idempotente (solo toca ítems sin moneda) y, cuando ya no
+  queda ninguna réplica vieja, se repite ejecutando su `migration.sql` con el
+  owner de las migraciones (fuera de una transacción: hace COMMIT por lote):
+  ```bash
+  psql "$DIRECT_URL_SIN_SCHEMA" -X -v ON_ERROR_STOP=1 \
+    -f prisma/migrations/20261128090100_dx502_plan_item_catalog_currency_backfill/migration.sql
+  ```
+  `$DIRECT_URL_SIN_SCHEMA` es `DIRECT_URL` sin `?schema=public` (psql no lo
+  acepta). Si el relleno de la migración se cortó a medias (migración
+  fallida), basta `npx prisma migrate resolve --rolled-back
+  20261128090100_dx502_plan_item_catalog_currency_backfill` y
+  `npx prisma migrate deploy`.
+- Pendiente (DX-513): el control de descuentos (tope, motivo e informe,
+  SEC-041) sigue contando como rebaja un precio por debajo de un catálogo en
+  otra moneda.
+
 ### PDF firmado generado en el servidor (DX-422)
 
 - Cuando el profesional firma en la app un consentimiento firmado a distancia

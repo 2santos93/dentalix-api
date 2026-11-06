@@ -60,7 +60,15 @@ export function budgetStillMatches(
   ) {
     return false;
   }
-  const live = composeQuoteContent(quote, sent.issuedOn, names);
+  // DX-502: un enlace v2/v3 (anterior a DX-502) se recompone con la regla de
+  // entonces; una foto v1 nunca se envió por enlace (DX-415 es posterior).
+  if (sent.version === 1) return false;
+  const live = composeQuoteContent(
+    quote,
+    sent.issuedOn,
+    names,
+    sent.version === 4 ? 'current' : 'legacy',
+  );
   return computeQuoteHash(live) === request.budgetContentHash;
 }
 

@@ -12,6 +12,8 @@ import {
   computeAcceptanceHash,
   computeQuoteHash,
   parseQuoteContent,
+  withListPriceCurrencies,
+  type QuoteComposition,
   type QuoteContent,
 } from '../../domain/plan-quote';
 import { acceptPlanError } from '../../domain/plan-status-machine';
@@ -114,14 +116,16 @@ function liveContent(
 
 /**
  * El presupuesto del plan tal como está AHORA, emitido el día `issuedOn`.
- * DX-415: con el `issuedOn` de la foto enviada, su hash es el de la foto si y
- * solo si nada del presupuesto cambió (ítems, precios, convenio, paciente,
- * sede, profesional).
+ * DX-415: con el `issuedOn` y la composición de la foto enviada, su hash es
+ * el de la foto si y solo si nada del presupuesto cambió (ítems, precios,
+ * convenio, paciente, sede, profesional). DX-502: un enlace v2/v3 enviado
+ * antes del despliegue se recompone con la regla de entonces y sigue valiendo.
  */
 export function composeQuoteContent(
   source: PlanQuoteSource,
   issuedOn: string,
   names: ClinicDocumentTypeNames,
+  composition: QuoteComposition = 'current',
 ): QuoteContent {
   const { patient } = source;
   return buildQuoteContent(
@@ -147,12 +151,15 @@ export function composeQuoteContent(
       items: source.items,
     },
     issuedOn,
+    composition,
   );
 }
 
 /**
  * Un plan aceptado se imprime con la FOTO firmada (lo que vio y firmó el
  * paciente), nunca con el plan vivo; `integrityOk` recalcula los dos hashes.
+ * DX-502: una foto v4 lleva la moneda de cada precio de lista; a una v1/v2/v3
+ * se le completa con la congelada en sus ítems, sin tocar lo sellado.
  */
 function toDocument(
   source: PlanQuoteSource,
@@ -182,7 +189,10 @@ function toDocument(
       acceptance: null,
     };
   }
-  const content = parseQuoteContent(stored.content);
+  const content = withListPriceCurrencies(
+    parseQuoteContent(stored.content),
+    source.items,
+  );
   const integrityOk =
     computeQuoteHash(content) === stored.contentHash &&
     computeAcceptanceHash({
