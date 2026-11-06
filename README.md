@@ -2181,8 +2181,9 @@ módulo `src/modules/equipment`, tablas `equipment` y `equipment_maintenances`.
   y `POST /equipment/:id/maintenances/:maintenanceId/void` (`{ reason }`, 409 la
   segunda vez). No hay DELETE.
 - **Mantenimiento**: `PREVENTIVE|CORRECTIVE|CALIBRATION`, fecha (no futura en la
-  sede), técnico, empresa, descripción, costo opcional SIEMPRE con su moneda
-  (ISO 4217 del catálogo), próximo explícito (posterior a la fecha) y quién lo
+  sede ni anterior a la adquisición del equipo), técnico, empresa, descripción, costo opcional SIEMPRE con su moneda
+  (ISO 4217 del catálogo), próximo explícito (posterior a la fecha y a 10 años
+  como mucho) y quién lo
   registró. Inalterable (trigger `dx_equipment_maintenances_immutable`): solo
   se anula, una vez. Un preventivo sin próximo explícito deja la fecha + la
   periodicidad del equipo.
@@ -2192,6 +2193,10 @@ módulo `src/modules/equipment`, tablas `equipment` y `equipment_maintenances`.
   se cuenta en el día de la sede del equipo: `OVERDUE` (antes de hoy),
   `DUE_SOON` (hoy a +30 días), `UP_TO_DATE`, `UNSCHEDULED`; `null` si está dado
   de baja. Los avisos en «Mi día» son DX-543.
+- **Carreras**: editar es un UPDATE condicional a `ACTIVE` y registrar un
+  mantenimiento bloquea el equipo activo (`FOR UPDATE`): si otra petición lo
+  dio de baja en medio, 409 «El equipo está dado de baja…», nunca 500. Un
+  `null` en `locationId`, `name` o `category` del PATCH es 400.
 - **BD**: RLS FORCE con `tenant_isolation` (NULLIF) en las dos tablas, FK
   compuestas a la sede, al sillón (`(tenantId, locationId, chairId)` → misma
   sede) y al equipo, sin DELETE para `dentalix_app`, un equipo dado de baja no
