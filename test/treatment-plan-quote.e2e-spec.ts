@@ -17,6 +17,7 @@ import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import { createLegacyQuoteApp } from './support/legacy-quote-app';
 import {
   computeAcceptanceHash,
   computeQuoteHash,
@@ -896,6 +897,37 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         },
       ]);
       agreementShownHash = quote.contentHash;
+    });
+
+    it('DX-502: con PLAN_QUOTE_COMPOSE_V4=false un plan de una clínica sin datos fiscales se compone como v2, sin moneda sellada', async () => {
+      // Un plan sin firmar (planA ya se aceptó antes en este fichero).
+      const plan = await createPlan(clinicA, patientA, dentistA);
+      await addItem(clinicA, plan, {
+        toothNumber: '11',
+        catalogItemId: catalogA,
+      });
+      await addItem(clinicA, plan, {
+        toothNumber: '12',
+        catalogItemId: catalogA,
+      });
+      const legacy = await createLegacyQuoteApp();
+      try {
+        const res = await request(legacy.getHttpServer())
+          .get(`/api/v1${quotePath(patientA, plan)}`)
+          .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+          .set('Authorization', `Bearer ${clinicA.accessToken}`)
+          .expect(200);
+        const quote = res.body as QuoteBody;
+        expect(quote.version).toBe(2);
+        expect(quote.items.map((i) => i.listPrice)).toEqual([1000, 1000]);
+        // La moneda se completa para mostrarla; no está sellada en la v2.
+        expect(quote.items.map((i) => i.listPriceCurrency)).toEqual([
+          'VES',
+          'VES',
+        ]);
+      } finally {
+        await legacy.close();
+      }
     });
 
     it('un plan sin convenio sale con agreement null y ahorro 0', async () => {
