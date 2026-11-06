@@ -1,3 +1,4 @@
+import { testDiscountPolicy } from './__fixtures__/discount-fixtures';
 import {
   BadRequestException,
   ConflictException,
@@ -30,7 +31,12 @@ function makeWhitelist(allowed: string[] = ['USD', 'VES']): CurrencyWhitelist {
 
 function setup(whitelist: CurrencyWhitelist = makeWhitelist()) {
   const repo = new InMemoryTreatmentPlanRepository();
-  const uc = new UpdateTreatmentPlanUseCase(repo, whitelist, () => NOW);
+  const uc = new UpdateTreatmentPlanUseCase(
+    repo,
+    whitelist,
+    () => NOW,
+    testDiscountPolicy(),
+  );
   return { repo, uc };
 }
 

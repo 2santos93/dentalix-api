@@ -103,6 +103,7 @@ function setup(acceptance: typeof SIGNED | null, status?: TreatmentPlanStatus) {
       repo,
       whitelist,
       () => new Date('2026-10-16T15:00:00.000Z'),
+      testDiscountPolicy(),
     ),
     get: new GetTreatmentPlanUseCase(repo),
   };

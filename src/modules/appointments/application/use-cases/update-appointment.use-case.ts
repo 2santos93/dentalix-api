@@ -8,6 +8,10 @@ import {
   Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import {
+  SCHEDULE_BLOCKED_RACE_MESSAGE,
+  ScheduleBlockedRaceError,
+} from '../../../schedule-blocks/domain/schedule-block-rules';
 import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
@@ -656,6 +660,11 @@ export class UpdateAppointmentUseCase {
         completedExit: exitResult,
       } = await this.repo.update(id, effectivePatch));
     } catch (error) {
+      // DX-149: un bloqueo que no deja agendar se creó a la vez (visto dentro
+      // de la transacción, con el candado de la agenda).
+      if (error instanceof ScheduleBlockedRaceError) {
+        throw new ConflictException(SCHEDULE_BLOCKED_RACE_MESSAGE);
+      }
       const scope = overlapExclusionScope(error);
       // DX-211: también al reactivar una cancelada cuyo sillón se ocupó.
       if (scope === 'chair' && nextChairId !== null) {

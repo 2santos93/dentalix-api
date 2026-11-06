@@ -221,10 +221,14 @@ export class TreatmentPlansController {
   })
   @ApiForbiddenResponse({
     description:
-      'status ACCEPTED: solo DENTIST y ADMIN (la asistente no acepta en nombre del doctor)',
+      'status ACCEPTED: solo DENTIST y ADMIN (la asistente no acepta en nombre del doctor). DX-513: al cambiar la moneda, un ítem cuya rebaja frente al catálogo pasaría a contar como descuento supera el tope del rol de quien la cambia (mismo mensaje que el alta)',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'DX-513: al cambiar la moneda, un ítem cuya rebaja frente al catálogo pasaría a contar como descuento supera el umbral del motivo y no lo tiene (mismo mensaje que el alta)',
   })
   @ApiConflictResponse({
-    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109), ni si tiene asientos de saldo a favor (traspaso dado o recibido, o devolución), aunque no tenga abonos: code PLAN_CURRENCY_LOCKED_BY_CREDIT (DX-438). SEC-050: el plan que lleva un cargo vigente por inasistencia no se cancela ni cambia de moneda (completarlo sí). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada, y cancela el plan de cuotas activo de las hermanas que rechaza; cancelar cancela también el plan de cuotas activo`,
+    description: `${TRANSITION_CONFLICT}; DX-513: la moneda no cambia si con ella un ítem pasaría a contar como descuento sin firmar, o si una rebaja frente al catálogo que cuenta hoy dejaría de verse en el informe de descuentos (nada cambia: ni el plan ni sus ítems); plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109), ni si tiene asientos de saldo a favor (traspaso dado o recibido, o devolución), aunque no tenga abonos: code PLAN_CURRENCY_LOCKED_BY_CREDIT (DX-438). SEC-050: el plan que lleva un cargo vigente por inasistencia no se cancela ni cambia de moneda (completarlo sí). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada, y cancela el plan de cuotas activo de las hermanas que rechaza; cancelar cancela también el plan de cuotas activo`,
   })
   update(
     @Param('id', ParseUUIDPipe) id: string,

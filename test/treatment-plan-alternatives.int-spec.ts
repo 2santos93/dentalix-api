@@ -1,3 +1,4 @@
+import { testDiscountPolicy } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/discount-fixtures';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaDocumentTypeNamesRepository } from '../src/modules/patients/infrastructure/repositories/prisma-document-type-names.repository';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -245,6 +246,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         plans,
         whitelist,
         () => new Date('2026-10-16T15:00:00.000Z'),
+        testDiscountPolicy(),
       );
 
       await inClinic(a, () =>
@@ -277,6 +279,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         plans,
         whitelist,
         () => new Date(),
+        testDiscountPolicy(),
       );
 
       await expect(
@@ -332,6 +335,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         plans,
         whitelist,
         () => new Date(),
+        testDiscountPolicy(),
       );
       const results = await Promise.allSettled(
         [g.a, g.b].map((id) =>
@@ -414,6 +418,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         plans,
         whitelist,
         () => new Date(),
+        testDiscountPolicy(),
       );
       await expect(
         inClinic(a, () => update.execute(g.a, { status: 'ACCEPTED' }, DENTIST)),

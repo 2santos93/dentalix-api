@@ -1047,9 +1047,13 @@ no hay una común. No cambia después (trigger
   fallida), basta `npx prisma migrate resolve --rolled-back
   20261128090100_dx502_plan_item_catalog_currency_backfill` y
   `npx prisma migrate deploy`.
-- Pendiente (DX-513): el control de descuentos (tope, motivo e informe,
-  SEC-041) sigue contando como rebaja un precio por debajo de un catálogo en
-  otra moneda.
+- DX-513: un precio por debajo de un catálogo en otra moneda CONOCIDA (y que
+  no sale de una lista) ya no es un descuento: ni tope, ni motivo, ni informe.
+  Con la moneda desconocida (NULL) cuenta como antes. Cambiar la moneda de un
+  plan con ítems los vuelve a medir (403/422/409 si una rebaja aparece o se
+  escondería). Nota de despliegue: los ítems antiguos cuya moneda rellenada
+  por DX-502 difiere de la del plan salen como rebaja de los informes de
+  periodos pasados (su `discount` propio sigue contando).
 
 ### PDF firmado generado en el servidor (DX-422)
 

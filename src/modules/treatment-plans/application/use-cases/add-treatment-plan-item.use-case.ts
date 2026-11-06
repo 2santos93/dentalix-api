@@ -5,7 +5,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { effectiveDiscount } from '../../../discounts/domain/effective-discount';
+import {
+  discountReference,
+  effectiveDiscount,
+} from '../../../discounts/domain/effective-discount';
 import { DiscountReason, ToothSurface } from '@prisma/client';
 import { TREATMENT_PLAN_REPOSITORY } from '../../domain/ports/treatment-plan-repository.port';
 import type { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-repository.port';
@@ -104,8 +107,20 @@ export class AddTreatmentPlanItemUseCase {
     // SEC-041 + DX-105 (R1): la referencia resuelta queda en el ítem como
     // `catalogPrice`; un precio por debajo cuenta como descuento discrecional
     // (tope del rol y motivo). Ítem libre: null.
+    // DX-502: sin precio de catálogo no hay moneda que guardar.
+    const catalogCurrency =
+      resolved.basePrice === null ? null : resolved.catalogCurrency;
+    // DX-513: solo frente a una referencia en la moneda del plan; en otra (o
+    // sin saberla) no hay rebaja que medir.
     const discountInput = {
-      catalogPrice: resolved.price,
+      catalogPrice: discountReference(
+        {
+          catalogPrice: resolved.price,
+          catalogCurrency,
+          priceSource: resolved.source,
+        },
+        current.currency,
+      ),
       price,
       discount,
       reason: input.discountReason ?? null,
@@ -136,9 +151,7 @@ export class AddTreatmentPlanItemUseCase {
         catalogPrice: resolved.price,
         pricing: {
           basePrice: resolved.basePrice,
-          // DX-502: sin precio de catálogo no hay moneda que guardar.
-          catalogCurrency:
-            resolved.basePrice === null ? null : resolved.catalogCurrency,
+          catalogCurrency,
           priceSource: resolved.source,
           agreementId: resolved.agreementId,
           agreementName: resolved.agreementName,
