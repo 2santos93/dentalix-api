@@ -41,7 +41,10 @@ import {
   isAttributionCorrection,
 } from '../../domain/plan-item-attribution';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
-import { effectiveDiscountRises } from '../../../discounts/domain/effective-discount';
+import {
+  discountReference,
+  effectiveDiscountRises,
+} from '../../../discounts/domain/effective-discount';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 import { FEE_ITEM_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
@@ -230,8 +233,10 @@ export class UpdateTreatmentPlanItemUseCase {
           ...rest
         } = patch;
         const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;
+        // DX-513: la rebaja solo se mide frente a una referencia en la moneda
+        // del plan.
         const before = {
-          catalogPrice: item.catalogPrice,
+          catalogPrice: discountReference(item, plan.currency),
           price: item.price,
           discount: item.discount,
         };

@@ -304,6 +304,8 @@ describe('Precio resuelto y foto en el alta del ítem (DX-105)', () => {
         planId: 'plan1',
         catalogItemId: 'xray',
         catalogPrice: 100_000,
+        // DX-513: referencia en la moneda del plan (VES).
+        catalogCurrency: 'VES',
         price: 100_000,
       });
       await expect(

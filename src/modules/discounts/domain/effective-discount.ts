@@ -1,4 +1,4 @@
-import { ClinicRole, DiscountReason } from '@prisma/client';
+import { ClinicRole, DiscountReason, PriceSource } from '@prisma/client';
 import {
   checkItemDiscount,
   roleDiscountCapMessage,
@@ -20,10 +20,64 @@ import { fromCents, toCents } from '../../../shared/money/money';
  * su `discount`. Todo en céntimos enteros (BigInt), como DX-204.
  */
 export interface PricedItem {
-  /** Precio de catálogo al dar de alta el ítem; null = ítem libre. */
+  /**
+   * Referencia en la moneda del plan (`discountReference`, DX-513); null =
+   * ítem libre o referencia en otra moneda.
+   */
   catalogPrice: number | null;
   price: number;
   discount: number;
+}
+
+/**
+ * DX-513: de dónde sale la moneda de la referencia (`catalogPrice`) de un ítem.
+ * `catalogCurrency` (DX-502) es la de `basePrice`, el `defaultPrice` del
+ * catálogo; la referencia no siempre lo es:
+ *
+ * - `PRICE_LIST` y `AGREEMENT_PRICE_LIST`: la resolución (DX-105) solo toma
+ *   una lista en la moneda del plan, así que la referencia está en ella.
+ * - `CATALOG`, `AGREEMENT_PERCENT` (un % sobre el `defaultPrice`) y los ítems
+ *   anteriores a DX-105 (`priceSource` null): la del catálogo.
+ */
+export interface ItemReference {
+  catalogPrice: number | null;
+  catalogCurrency: string | null;
+  priceSource: PriceSource | null;
+}
+
+const PLAN_CURRENCY_SOURCES: ReadonlySet<PriceSource> = new Set([
+  PriceSource.PRICE_LIST,
+  PriceSource.AGREEMENT_PRICE_LIST,
+]);
+
+/** Moneda de `catalogPrice`; `null` si no se sabe. */
+export function referenceCurrency(
+  item: Pick<ItemReference, 'catalogCurrency' | 'priceSource'>,
+  planCurrency: string,
+): string | null {
+  if (
+    item.priceSource !== null &&
+    PLAN_CURRENCY_SOURCES.has(item.priceSource)
+  ) {
+    return planCurrency;
+  }
+  return item.catalogCurrency;
+}
+
+/**
+ * DX-513: la referencia con la que se mide la rebaja de precio, o `null`. Un
+ * precio por debajo de una referencia en OTRA moneda, o en una que no se sabe,
+ * no es un descuento (no se resta ni se convierte): el ítem cuenta como libre
+ * y solo su `discount` (en la moneda del plan) consume el tope o pide motivo.
+ * En la misma moneda, la referencia de siempre (SEC-041).
+ */
+export function discountReference(
+  item: ItemReference,
+  planCurrency: string,
+): number | null {
+  return referenceCurrency(item, planCurrency) === planCurrency
+    ? item.catalogPrice
+    : null;
 }
 
 export interface EffectiveDiscount {

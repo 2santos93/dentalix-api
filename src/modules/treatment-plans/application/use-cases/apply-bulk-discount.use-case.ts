@@ -7,6 +7,7 @@ import {
 } from '../../domain/ports/treatment-plan-repository.port';
 import type { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
+import { discountReference } from '../../../discounts/domain/effective-discount';
 import {
   discountForPercent,
   roleDiscountCapMessage,
@@ -115,7 +116,8 @@ export class ApplyBulkDiscountUseCase {
             cap,
           );
           const before = {
-            catalogPrice: item.catalogPrice,
+            // DX-513: sin rebaja frente a una referencia en otra moneda.
+            catalogPrice: discountReference(item, plan.currency),
             price: item.price,
             discount: item.discount,
           };

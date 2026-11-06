@@ -19,6 +19,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   legacyLocationInsert,
   locationBody,
 } from './support/location-fixtures';
@@ -797,6 +798,9 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
   // SEC-041: bajar el precio por debajo del de catálogo cuenta como descuento
   // (tope del rol y motivo de DX-204) en el alta, la edición y el bloque, y
   // sale en el informe con su importe, autor y sede.
+  // DX-513: las sedes (y el catálogo) de la clínica están en VES; los planes
+  // de SEC-041 van en VES, la misma moneda, como antes. En otra moneda, el
+  // bloque de DX-513 al final.
   describe('precio por debajo del de catálogo = descuento (SEC-041)', () => {
     const CAP_0 =
       'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 0 % de descuento por ítem.';
@@ -826,7 +830,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     }
 
     it('alta: DENTIST (10 %) con el precio al 50 % del catálogo → 403 en español; al 95 % → 201 a su nombre', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const denied = await addCrown(
         planId,
         { price: 500000 },
@@ -858,7 +862,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('edición: ASSISTANT baja el precio → 403 y no cambia; lo sube → 200 sin firma de descuento', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       // Sin precio: el de catálogo.
       const item = (await addCrown(planId, {}).expect(201)).body as Item;
       expect(item).toMatchObject({ price: 1000000, discountById: null });
@@ -883,7 +887,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('rebaja por encima del umbral: 422 «Indica el motivo del descuento» sin motivo; con motivo, 201 y sale en el informe con importe, autor y sede', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const missing = await addCrown(planId, { price: 800000 }).expect(422);
       expect((missing.body as { message: string }).message).toBe(REASON);
       // También en la edición.
@@ -935,12 +939,12 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         .get(`/reports/discounts.csv?${period()}`)
         .expect(200);
       expect(csv.text).toContain(
-        'USD,1000000.00,800000.00,200000.00,0.00,200000.00,20.00,"Promoción o campaña"',
+        'VES,1000000.00,800000.00,200000.00,0.00,200000.00,20.00,"Promoción o campaña"',
       );
     });
 
     it('ADMIN puede fijar cualquier precio (con motivo) y queda en el informe a su nombre', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const item = (await addCrown(planId, {}).expect(201)).body as Item;
       const res = await as(clinicA)
         .patch(`/treatment-plans/${planId}/items/${item.id}`, {
@@ -964,7 +968,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('un ítem libre (sin precio de catálogo) no se trata como descuento', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const res = await as(clinicA, tokens.ASSISTANT)
         .post(`/treatment-plans/${planId}/items`, {
           toothNumber: '17',
@@ -987,7 +991,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('«Descuento %» en bloque suma la rebaja de precio al tope del rol', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const item = (
         await addCrown(planId, { price: 950000 }, tokens.DENTIST).expect(201)
       ).body as Item;
@@ -1021,7 +1025,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('el cliente no puede mover la referencia: `catalogPrice` en el alta y `catalogItemId` en la edición se ignoran', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       // Un `catalogPrice` falso en el body no rebaja la referencia.
       const denied = await addCrown(
         planId,
@@ -1049,7 +1053,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('un plan aceptado no admite bajar el precio de catálogo (409)', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const item = (await addCrown(planId, {}).expect(201)).body as Item;
       await as(clinicA)
         .patch(`/treatment-plans/${planId}`, { status: 'ACCEPTED' })
@@ -1060,6 +1064,107 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         })
         .expect(409);
       await addCrown(planId, { price: 990000 }).expect(409);
+    });
+  });
+  // DX-513: el catálogo de la clínica A está en VES (la moneda de sus sedes).
+  // Una rebaja frente a él en un plan en USD, o con la moneda del catálogo
+  // desconocida (NULL), no es un descuento: ni tope, ni motivo, ni informe.
+  describe('rebaja frente a un catálogo en otra moneda (DX-513)', () => {
+    const CAP_0 =
+      'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 0 % de descuento por ítem.';
+    const REASON =
+      'Precio por debajo del de catálogo: cuenta como descuento y supera el 10 %. Indica el motivo del descuento.';
+
+    async function reportItemIds(): Promise<{ ids: string[]; body: Report }> {
+      const res = await as(clinicA)
+        .get(
+          `/reports/discounts?from=${caracasDay(-1)}&to=${caracasDay(1)}&pageSize=200`,
+        )
+        .expect(200);
+      const body = res.body as Report;
+      return { ids: body.items.map((i) => i.itemId), body };
+    }
+
+    const addCrown = (planId: string, body: object, token = tokens.ADMIN) =>
+      as(clinicA, token).post(`/treatment-plans/${planId}/items`, {
+        toothNumber: '16',
+        catalogItemId: crownA,
+        ...body,
+      });
+
+    it('plan en USD con el catálogo en VES: la asistente (0 %) da de alta a 80 y lo baja a 50 sin 403 ni motivo; no sale en el informe', async () => {
+      const usdBefore = (await reportItemIds()).body.totals.find(
+        (t) => t.currency === 'USD',
+      );
+      const planId = await newPlan('USD');
+      const created = (
+        await addCrown(planId, { price: 80 }, tokens.ASSISTANT).expect(201)
+      ).body as Item & { catalogCurrency: string | null };
+      expect(created).toMatchObject({
+        price: 80,
+        catalogPrice: 1000000,
+        catalogCurrency: 'VES',
+        discountReason: null,
+        discountById: null,
+      });
+      await as(clinicA, tokens.ASSISTANT)
+        .patch(`/treatment-plans/${planId}/items/${created.id}`, { price: 50 })
+        .expect(200);
+      // El ADMIN pone el precio a 1 sin motivo: tampoco es un descuento.
+      const admin = await as(clinicA)
+        .patch(`/treatment-plans/${planId}/items/${created.id}`, { price: 1 })
+        .expect(200);
+      expect(admin.body).toMatchObject({ price: 1, discountReason: null });
+      const { ids, body } = await reportItemIds();
+      expect(ids).not.toContain(created.id);
+      // Los totales en USD (de otros descuentos de la clínica) no cambian.
+      expect(body.totals.find((t) => t.currency === 'USD')).toEqual(usdBefore);
+    });
+
+    it('plan en VES con el catálogo en VES: igual que hoy (403, 422 y en el informe)', async () => {
+      const planId = await newPlan('VES');
+      const denied = await addCrown(
+        planId,
+        { price: 80 },
+        tokens.ASSISTANT,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_0);
+      const unreasoned = await addCrown(planId, { price: 800000 }).expect(422);
+      expect((unreasoned.body as { message: string }).message).toBe(REASON);
+      const created = (
+        await addCrown(planId, {
+          price: 800000,
+          discountReason: 'PROMOTION',
+        }).expect(201)
+      ).body as Item;
+      const { body } = await reportItemIds();
+      expect(body.items.find((i) => i.itemId === created.id)).toMatchObject({
+        catalogPrice: 1000000,
+        price: 800000,
+        priceReduction: 200000,
+        discount: 200000,
+      });
+    });
+
+    it('con una sede activa en USD la moneda del catálogo es NULL: como moneda distinta', async () => {
+      await as(clinicA)
+        .post(
+          '/locations',
+          locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Miami' }),
+        )
+        .expect(201);
+      const planId = await newPlan('VES');
+      const created = (
+        await addCrown(planId, { price: 1 }, tokens.ASSISTANT).expect(201)
+      ).body as Item & { catalogCurrency: string | null };
+      expect(created).toMatchObject({
+        price: 1,
+        catalogPrice: 1000000,
+        catalogCurrency: null,
+        discountById: null,
+      });
+      const { ids } = await reportItemIds();
+      expect(ids).not.toContain(created.id);
     });
   });
 });

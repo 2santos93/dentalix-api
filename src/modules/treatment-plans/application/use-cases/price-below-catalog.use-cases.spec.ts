@@ -226,6 +226,8 @@ describe('Precio por debajo del de catálogo = descuento (SEC-041)', () => {
         planId: 'plan1',
         catalogItemId: 'crown',
         catalogPrice: 1_000_000,
+        // DX-513: referencia en la moneda del plan (USD).
+        catalogCurrency: 'USD',
         price: 1_000_000,
         ...over,
       });
@@ -368,6 +370,8 @@ describe('Precio por debajo del de catálogo = descuento (SEC-041)', () => {
         id: 'item1',
         planId: 'plan1',
         catalogPrice: 1_000_000,
+        // DX-513: referencia en la moneda del plan (USD).
+        catalogCurrency: 'USD',
         price: 950_000,
       });
       await expect(
@@ -388,6 +392,8 @@ describe('Precio por debajo del de catálogo = descuento (SEC-041)', () => {
         id: 'item1',
         planId: 'plan1',
         catalogPrice: 1_000_000,
+        // DX-513: referencia en la moneda del plan (USD).
+        catalogCurrency: 'USD',
         price: 900_000,
         discount: 10_000,
         discountReason: DiscountReason.LOYALTY,
@@ -434,6 +440,8 @@ describe('Precio por debajo del de catálogo = descuento (SEC-041)', () => {
         id: 'item1',
         planId: 'plan1',
         catalogPrice: 1_000_000,
+        // DX-513: referencia en la moneda del plan (USD).
+        catalogCurrency: 'USD',
         price: 1_000_000,
       });
       staleRead(repo);

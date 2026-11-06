@@ -26,7 +26,8 @@ import { civilDateIn } from '../src/shared/time/civil-day';
 // descuentos (DX-204). Un ítem resuelto por convenio sale con su rebaja (precio
 // de catálogo − precio del convenio), quién asignó el convenio y quién creó el
 // ítem, aparte del descuento discrecional; con los filtros, en el CSV y sin
-// cruzar de clínica.
+// cruzar de clínica. DX-513: los planes van en VES, la moneda de las sedes (y
+// del catálogo) de la clínica: en otra moneda no hay rebaja de convenio.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -116,7 +117,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
   async function itemFor(patientId: string): Promise<string> {
     const plan = await create(
       `/patients/${patientId}/treatment-plans`,
-      { currency: 'USD' },
+      { currency: 'VES' },
       dentist.token,
     );
     return create(
@@ -260,7 +261,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     expect(out.total).toBe(2);
     expect(out.totals).toEqual([]);
     expect(out.agreementTotals).toEqual([
-      { currency: 'USD', items: 2, reduction: 2500000 },
+      { currency: 'VES', items: 2, reduction: 2500000 },
     ]);
   });
 
@@ -337,7 +338,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     // Un descuento discrecional del ADMIN en un paciente sin convenio.
     const patient = await createPatient('Descuento');
     const plan = await create(`/patients/${patient}/treatment-plans`, {
-      currency: 'USD',
+      currency: 'VES',
     });
     await create(`/treatment-plans/${plan}/items`, {
       toothNumber: '11',
@@ -349,7 +350,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     const before = await report(clinicA);
     expect(before.totals).toEqual([
       {
-        currency: 'USD',
+        currency: 'VES',
         items: 1,
         gross: 2000000,
         discount: 200000,
@@ -368,7 +369,7 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
     expect(after.total).toBe(before.total + 1);
     expect(after.agreementTotals).toEqual([
       {
-        currency: 'USD',
+        currency: 'VES',
         items: before.agreementTotals[0].items + 1,
         reduction: before.agreementTotals[0].reduction + 500000,
       },
