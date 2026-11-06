@@ -44,7 +44,7 @@ interface Verification {
     timeZone: string | null;
     locale: string | null;
     hourCycle: 'h12' | 'h23' | null;
-  };
+  } | null;
 }
 
 describe('Verificación pública de la receta (e2e, DX-467)', () => {
@@ -237,7 +237,7 @@ describe('Verificación pública de la receta (e2e, DX-467)', () => {
       ),
     ]);
     const res = await verify(clinicA.host, rx.verificationCode).expect(200);
-    expect(res.body).toMatchObject({
+    expect(res.body).toEqual({
       state: 'UNVERIFIABLE',
       issuedAt: null,
       voidedAt: null,
@@ -245,6 +245,7 @@ describe('Verificación pública de la receta (e2e, DX-467)', () => {
       professionalLicense: null,
       clinicName: null,
       patientInitials: null,
+      regional: null,
     });
     const events = await audits(rx.id);
     expect(events.map((e) => e.metadata)).toEqual([

@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { Logger, NotFoundException } from '@nestjs/common';
 import { PrescriptionStatus } from '@prisma/client';
 import type { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
@@ -147,6 +147,7 @@ describe('VerifyPrescriptionUseCase (DX-467)', () => {
     const rx = await issue();
     repo.rows[0].items[0].totalQuantity = 99;
     const view = await verify.execute(rx.verificationCode, META);
+    // Sin fecha que pintar, tampoco el formato de la sede.
     expect(view).toEqual({
       state: 'UNVERIFIABLE',
       issuedAt: null,
@@ -155,11 +156,7 @@ describe('VerifyPrescriptionUseCase (DX-467)', () => {
       professionalLicense: null,
       clinicName: null,
       patientInitials: null,
-      regional: {
-        timeZone: 'America/Caracas',
-        locale: 'es-VE',
-        hourCycle: 'h23',
-      },
+      regional: null,
     });
     expect(repo.publicVerifications).toEqual([
       {
@@ -229,6 +226,62 @@ describe('VerifyPrescriptionUseCase (DX-467)', () => {
     }
     expect(repo.publicVerifications).toEqual([]);
     expect(noTenant.repo.publicVerifications).toEqual([]);
+  });
+});
+
+describe('VerifyPrescriptionUseCase · rastro de los 404 en el log (DX-467)', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('cada 404 deja un evento de log con el motivo, la clínica y un hash de la IP; nunca el código ni la IP', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const { issue, verify, repo } = setup();
+    const rx = await issue();
+    const noTenant = setup({ withTenant: false });
+    noTenant.repo.rows = repo.rows;
+    const fail = (p: Promise<unknown>) =>
+      p.then(
+        () => null,
+        (e: unknown) => e,
+      );
+    await fail(verify.execute('ZZZZZZZZZZZZ', META));
+    await fail(verify.execute('no-es-un-codigo', META));
+    await fail(noTenant.verify.execute(rx.verificationCode, META));
+    await verify.execute(rx.verificationCode, META);
+    const events = warn.mock.calls.map(([e]) => e as Record<string, unknown>);
+    expect(events.map((e) => [e.event, e.reason, e.tenantId])).toEqual([
+      ['prescription_verification.not_found', 'UNKNOWN', 't1'],
+      ['prescription_verification.not_found', 'MALFORMED', 't1'],
+      ['prescription_verification.not_found', 'NO_TENANT', null],
+    ]);
+    for (const e of events) {
+      expect(e.ipHash).toMatch(/^[0-9a-f]{16}$/);
+      expect(e.requestId).toBe('req-1');
+    }
+    // La misma IP da el mismo hash (se puede seguir un barrido)...
+    expect(new Set(events.map((e) => e.ipHash)).size).toBe(1);
+    // ...sin el código probado ni la IP en claro.
+    const text = JSON.stringify(events);
+    for (const leak of [
+      'ZZZZZZZZZZZZ',
+      'no-es-un-codigo',
+      rx.verificationCode,
+      META.ip as string,
+    ]) {
+      expect(text).not.toContain(leak);
+    }
+  });
+
+  it('sin IP conocida, ipHash null', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const { verify } = setup();
+    await verify
+      .execute('ZZZZZZZZZZZZ', { ...META, ip: null })
+      .catch(() => undefined);
+    expect(warn.mock.calls[0][0]).toMatchObject({ ipHash: null });
   });
 });
 

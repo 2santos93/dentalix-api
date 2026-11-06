@@ -1,4 +1,5 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrescriptionStatus } from '@prisma/client';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { TenantLinkBaseService } from '../../../../shared/tenancy/tenant-link-base.service';
@@ -31,7 +32,8 @@ export const PRESCRIPTION_VERIFICATION_NOT_FOUND_MESSAGE =
  * - VOIDED: solo cuándo se anuló (sin motivo ni quién);
  * - UNVERIFIABLE: nada (el hash guardado no casa con el recalculado).
  * `regional`: el formato ACTUAL de la sede de la receta, para pintar la fecha
- * como en la receta impresa (nunca el del navegador).
+ * como en la receta impresa (nunca el del navegador). Solo cuando hay fecha
+ * que pintar (VALID y VOIDED); en UNVERIFIABLE, `null`.
  */
 export interface PublicPrescriptionVerification {
   state: PublicVerificationState;
@@ -41,7 +43,24 @@ export interface PublicPrescriptionVerification {
   professionalLicense: string | null;
   clinicName: string | null;
   patientInitials: string | null;
-  regional: PrescriptionLocationFormat;
+  regional: PrescriptionLocationFormat | null;
+}
+
+/** Por qué un 404 de la verificación pública (solo para el log). */
+type NotFoundReason = 'NO_TENANT' | 'MALFORMED' | 'UNKNOWN';
+
+/**
+ * Seudónimo estable de la IP para el log: correlaciona un barrido de códigos
+ * desde una misma IP sin escribirla en claro. No es anonimización (una IPv4 se
+ * puede recuperar por fuerza bruta): el log es de acceso restringido, como la
+ * auditoría.
+ */
+export function verificationIpHash(ip: string | null): string | null {
+  if (!ip) return null;
+  return createHash('sha256')
+    .update(`dentalix:prescription-verify-ip:${ip}`)
+    .digest('hex')
+    .slice(0, 16);
 }
 
 const EMPTY = {
@@ -62,6 +81,8 @@ const EMPTY = {
  */
 @Injectable()
 export class VerifyPrescriptionUseCase {
+  private readonly logger = new Logger('PrescriptionVerification');
+
   constructor(
     private readonly tenantContext: TenantContextService,
     @Inject(PRESCRIPTION_REPOSITORY)
@@ -72,15 +93,13 @@ export class VerifyPrescriptionUseCase {
     rawCode: string,
     meta: AuditRequestMeta,
   ): Promise<PublicPrescriptionVerification> {
+    const tenantId = this.tenantContext.getTenantId() ?? null;
     const code = normalizePrescriptionVerificationCode(rawCode);
     // Sin clínica en el host o sin forma de código: 404 sin tocar la base.
-    if (!this.tenantContext.getTenantId() || code === null) {
-      throw new NotFoundException(PRESCRIPTION_VERIFICATION_NOT_FOUND_MESSAGE);
-    }
+    if (!tenantId) throw this.notFound('NO_TENANT', null, meta);
+    if (code === null) throw this.notFound('MALFORMED', tenantId, meta);
     const rx = await this.repo.findByVerificationCode(code);
-    if (!rx) {
-      throw new NotFoundException(PRESCRIPTION_VERIFICATION_NOT_FOUND_MESSAGE);
-    }
+    if (!rx) throw this.notFound('UNKNOWN', tenantId, meta);
     // La integridad va primero: una receta alterada no se da por válida ni
     // por anulada. Una fila que no se puede sellar con su formato tampoco.
     const state: PublicVerificationState =
@@ -112,8 +131,28 @@ export class VerifyPrescriptionUseCase {
       case 'VOIDED':
         return { ...EMPTY, state, voidedAt: rx.voidedAt, regional };
       case 'UNVERIFIABLE':
-        return { ...EMPTY, state, regional };
+        return { ...EMPTY, state, regional: null };
     }
+  }
+
+  /**
+   * El 404 genérico, y un evento de log para detectar barridos de códigos:
+   * motivo, clínica del host, request id y un hash de la IP; nunca el código
+   * probado ni la IP. No va a la auditoría de la BD (README, DX-467).
+   */
+  private notFound(
+    reason: NotFoundReason,
+    tenantId: string | null,
+    meta: AuditRequestMeta,
+  ): NotFoundException {
+    this.logger.warn({
+      event: 'prescription_verification.not_found',
+      reason,
+      tenantId,
+      requestId: meta.requestId,
+      ipHash: verificationIpHash(meta.ip),
+    });
+    return new NotFoundException(PRESCRIPTION_VERIFICATION_NOT_FOUND_MESSAGE);
   }
 }
 

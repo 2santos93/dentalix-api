@@ -56,8 +56,9 @@ export class PublicPrescriptionVerificationDto {
   patientInitials!: string | null;
   @ApiProperty({
     type: PrescriptionLocationFormatDto,
+    nullable: true,
     description:
-      'Formato regional y zona actuales de la sede de la receta, para pintar las fechas como en la receta impresa.',
+      'Formato regional y zona actuales de la sede de la receta, para pintar la fecha como en la receta impresa. Solo con fecha que pintar (VALID y VOIDED); null en UNVERIFIABLE.',
   })
-  regional!: PrescriptionLocationFormatDto;
+  regional!: PrescriptionLocationFormatDto | null;
 }
