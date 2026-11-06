@@ -37,8 +37,8 @@ export interface DiscountReportRow {
   /** Precio pactado del ítem. */
   price: number;
   /**
-   * Rebaja de precio frente al catálogo: max(0, catálogo − precio), solo con la
-   * referencia en la moneda del plan (DX-513); si no, 0.
+   * Rebaja de precio frente al catálogo: max(0, catálogo − precio), 0 con la
+   * referencia en otra moneda conocida (DX-513).
    */
   priceReduction: number;
   /** El `discount` del ítem. */
@@ -63,8 +63,8 @@ export interface DiscountReportRow {
   basePrice: number | null;
   /**
    * SEC-047: rebaja de convenio, max(0, basePrice − catalogPrice) en un ítem
-   * resuelto por convenio con el catálogo en la moneda del plan (DX-513); 0 en
-   * el resto.
+   * resuelto por convenio, salvo con el catálogo en otra moneda conocida
+   * (DX-513); 0 en el resto.
    */
   agreementReduction: number;
   /**

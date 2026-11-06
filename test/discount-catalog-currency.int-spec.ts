@@ -28,10 +28,11 @@ import {
 } from './support/location-fixtures';
 import { civilDaysSince } from './support/sede-clock';
 
-// DX-513 contra Postgres: una rebaja frente a un catálogo en OTRA moneda (o en
-// una que no se sabe: "catalogCurrency" NULL) no es un descuento. No pide
-// motivo, no consume el tope del rol y no sale en el informe de descuentos
-// (ni en sus totales). En la misma moneda, todo igual que antes (SEC-041).
+// DX-513 contra Postgres: una rebaja frente a un catálogo en OTRA moneda
+// CONOCIDA no es un descuento. No pide motivo, no consume el tope del rol y no
+// sale en el informe de descuentos (ni en sus totales). En la misma moneda, o
+// con la moneda del catálogo desconocida ("catalogCurrency" NULL, decisión de
+// producto), todo igual que antes (SEC-041).
 // El catálogo de la clínica está en VES (3.600,00); los planes, en USD o VES.
 // Repositorios y casos de uso reales; `raw` (DIRECT_URL, owner) siembra y
 // comprueba.
@@ -264,27 +265,40 @@ describe('descuento frente a un catálogo en otra moneda (DX-513, Postgres)', ()
     ]);
   });
 
-  it('catalogCurrency NULL (sedes en monedas distintas): como moneda distinta', async () => {
+  it('catalogCurrency NULL (sedes en monedas distintas): cuenta como hoy (tope, motivo e informe)', async () => {
     catalogCurrency = null;
-    const planId = await plan('VES');
+    const planId = await plan('USD');
+    await expect(
+      inTenant(() =>
+        add.execute(planId, { ...CROWN(), price: 80 }, ASSISTANT()),
+      ),
+    ).rejects.toThrow(new ForbiddenException(priceBelowCatalogCapMessage(0)));
+    await expect(
+      inTenant(() => add.execute(planId, { ...CROWN(), price: 3000 }, ADMIN())),
+    ).rejects.toThrow(
+      new UnprocessableEntityException(priceBelowCatalogReasonMessage(10)),
+    );
     const created = await inTenant(() =>
-      add.execute(planId, { ...CROWN(), price: 1 }, ASSISTANT()),
+      add.execute(
+        planId,
+        { ...CROWN(), price: 3000, discountReason: 'LOYALTY' },
+        ADMIN(),
+      ),
     );
     expect(created).toMatchObject({
-      catalogPrice: 3600,
       catalogCurrency: null,
-      discountById: null,
+      discountReason: 'LOYALTY',
+      discountById: s.userId,
     });
-    await inTenant(() =>
-      update.execute(created.id, { price: 0.5 }, ASSISTANT()),
-    );
-    expect(await reportFor([planId])).toEqual({
-      rows: [],
-      summary: { totals: [], agreementTotals: [], rows: 0 },
-    });
+    const { rows, summary } = await reportFor([planId]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ priceReduction: 600, discount: 600 });
+    expect(summary.totals).toEqual([
+      { currency: 'USD', items: 1, gross: 3600, discount: 600 },
+    ]);
   });
 
-  it('el informe mezcla bien las tres: solo el ítem en la misma moneda cuenta, y ningún importe guardado cambia', async () => {
+  it('el informe mezcla bien las tres: solo el ítem en otra moneda conocida queda fuera, y ningún importe guardado cambia', async () => {
     const usd = await plan('USD');
     const ves = await plan('VES');
     const items = [
@@ -292,7 +306,7 @@ describe('descuento frente a un catálogo en otra moneda (DX-513, Postgres)', ()
       { planId: usd, catalogCurrency: 'VES', price: 80 },
       // VES con catálogo VES: rebaja de 360.
       { planId: ves, catalogCurrency: 'VES', price: 3240 },
-      // VES con la moneda del catálogo desconocida.
+      // VES con la moneda del catálogo desconocida: cuenta (rebaja de 3.500).
       { planId: ves, catalogCurrency: null, price: 100 },
     ];
     for (const it of items) {
@@ -315,13 +329,18 @@ describe('descuento frente a un catálogo en otra moneda (DX-513, Postgres)', ()
                  "catalogPrice", "basePrice", "catalogCurrency"), ',' ORDER BY "id")) AS sig
         FROM "treatment_plan_items" WHERE "tenantId" = ${s.tenantId}::uuid`;
     const { rows, summary } = await reportFor([usd, ves]);
-    expect(rows.map((r) => [r.currency, r.price, r.discount])).toEqual([
+    expect(
+      rows
+        .map((r) => [r.currency, r.price, r.discount])
+        .sort((a, b) => Number(a[1]) - Number(b[1])),
+    ).toEqual([
+      ['VES', 100, 3500],
       ['VES', 3240, 360],
     ]);
     expect(summary).toEqual({
-      totals: [{ currency: 'VES', items: 1, gross: 3600, discount: 360 }],
+      totals: [{ currency: 'VES', items: 2, gross: 7200, discount: 3860 }],
       agreementTotals: [],
-      rows: 1,
+      rows: 2,
     });
     const after = await raw.$queryRaw<{ sig: string }[]>`
       SELECT md5(string_agg(concat_ws('|', "id", "price", "discount",
@@ -368,9 +387,15 @@ describe('descuento frente a un catálogo en otra moneda (DX-513, Postgres)', ()
     });
     const usd = await plan('USD');
     const ves = await plan('VES');
+    const unknown = await plan('USD');
     // El 10 % sobre 3.600 VES: 3.240 en los dos planes; en el de USD, esa
-    // «rebaja» de 360 es de VES y no se suma a los USD.
-    for (const planId of [usd, ves]) {
+    // «rebaja» de 360 es de VES y no se suma a los USD. Con la moneda del
+    // catálogo desconocida (NULL) cuenta como hoy.
+    for (const [planId, catalogCurrency] of [
+      [usd, 'VES'],
+      [ves, 'VES'],
+      [unknown, null],
+    ] as const) {
       await raw.treatmentPlanItem.create({
         data: {
           tenantId: s.tenantId,
@@ -379,7 +404,7 @@ describe('descuento frente a un catálogo en otra moneda (DX-513, Postgres)', ()
           catalogItemId: s.catalogItemId,
           catalogPrice: 3240,
           basePrice: 3600,
-          catalogCurrency: 'VES',
+          catalogCurrency,
           priceSource: 'AGREEMENT_PERCENT',
           agreementId: agreement.id,
           agreementName: agreement.name,
@@ -387,11 +412,17 @@ describe('descuento frente a un catálogo en otra moneda (DX-513, Postgres)', ()
         },
       });
     }
-    const { rows, summary } = await reportFor([usd, ves]);
-    expect(rows.map((r) => [r.currency, r.agreementReduction])).toEqual([
-      ['VES', 360],
-    ]);
+    const { rows, summary } = await reportFor([usd, ves, unknown]);
+    expect(
+      rows.map((r) => [r.planId, r.currency, r.agreementReduction]).sort(),
+    ).toEqual(
+      [
+        [ves, 'VES', 360],
+        [unknown, 'USD', 360],
+      ].sort(),
+    );
     expect(summary.agreementTotals).toEqual([
+      { currency: 'USD', items: 1, reduction: 360 },
       { currency: 'VES', items: 1, reduction: 360 },
     ]);
   });

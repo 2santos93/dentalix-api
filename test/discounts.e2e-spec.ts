@@ -1067,8 +1067,9 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
   });
   // DX-513: el catálogo de la clínica A está en VES (la moneda de sus sedes).
-  // Una rebaja frente a él en un plan en USD, o con la moneda del catálogo
-  // desconocida (NULL), no es un descuento: ni tope, ni motivo, ni informe.
+  // Una rebaja frente a él en un plan en USD no es un descuento: ni tope, ni
+  // motivo, ni informe. Con la moneda del catálogo desconocida (NULL), cuenta
+  // como hoy (decisión de producto).
   describe('rebaja frente a un catálogo en otra moneda (DX-513)', () => {
     const CAP_0 =
       'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 0 % de descuento por ítem.';
@@ -1146,25 +1147,34 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       });
     });
 
-    it('con una sede activa en USD la moneda del catálogo es NULL: como moneda distinta', async () => {
+    it('con una sede activa en USD la moneda del catálogo es NULL: cuenta como hoy (403, 422 y en el informe)', async () => {
       await as(clinicA)
         .post(
           '/locations',
           locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Miami' }),
         )
         .expect(201);
-      const planId = await newPlan('VES');
+      const planId = await newPlan('USD');
+      const denied = await addCrown(
+        planId,
+        { price: 80 },
+        tokens.ASSISTANT,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_0);
+      const unreasoned = await addCrown(planId, { price: 800000 }).expect(422);
+      expect((unreasoned.body as { message: string }).message).toBe(REASON);
       const created = (
-        await addCrown(planId, { price: 1 }, tokens.ASSISTANT).expect(201)
+        await addCrown(planId, {
+          price: 800000,
+          discountReason: 'PROMOTION',
+        }).expect(201)
       ).body as Item & { catalogCurrency: string | null };
-      expect(created).toMatchObject({
-        price: 1,
-        catalogPrice: 1000000,
-        catalogCurrency: null,
-        discountById: null,
+      expect(created).toMatchObject({ catalogCurrency: null });
+      const { body } = await reportItemIds();
+      expect(body.items.find((i) => i.itemId === created.id)).toMatchObject({
+        priceReduction: 200000,
+        discount: 200000,
       });
-      const { ids } = await reportItemIds();
-      expect(ids).not.toContain(created.id);
     });
   });
 });

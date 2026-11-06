@@ -26,7 +26,8 @@ import type { DentalCatalogItem } from '../../../dental-catalog/domain/entities/
 import type { PricingContext } from '../../domain/pricing/resolve-item-price';
 
 // DX-513: el catálogo de la clínica está en VES (3.600,00). Una rebaja frente
-// a él en un plan en USD no es un descuento; en un plan en VES, sí (SEC-041).
+// a él en un plan en USD no es un descuento; en un plan en VES, sí (SEC-041),
+// y con la moneda del catálogo desconocida (NULL), también: cuenta como hoy.
 const CROWN = {
   id: 'crown',
   kind: CatalogKind.PROCEDURE,
@@ -113,17 +114,11 @@ describe('rebaja frente a un catálogo en otra moneda (DX-513)', () => {
       );
     });
 
-    it('catalogCurrency NULL (sedes en monedas distintas): como moneda distinta', async () => {
-      const { add } = setup('VES', { catalogCurrency: null });
-      const item = await add.execute(
-        'plan1',
-        { ...CROWN_ITEM, price: 1 },
-        ASSISTANT_ACTOR,
-      );
-      expect(item).toMatchObject({
-        catalogCurrency: null,
-        discountById: null,
-      });
+    it('catalogCurrency NULL (sedes en monedas distintas): cuenta como hoy (403 de la asistente)', async () => {
+      const { add } = setup('USD', { catalogCurrency: null });
+      await expect(
+        add.execute('plan1', { ...CROWN_ITEM, price: 80 }, ASSISTANT_ACTOR),
+      ).rejects.toThrow(new ForbiddenException(priceBelowCatalogCapMessage(0)));
     });
 
     it('en otra moneda, el descuento propio sigue contando (en la moneda del plan)', async () => {
@@ -204,18 +199,19 @@ describe('rebaja frente a un catálogo en otra moneda (DX-513)', () => {
       expect((await repo.findItemById('item1'))!.price).toBe(3600);
     });
 
-    it('catalogCurrency NULL: como moneda distinta', async () => {
-      const { update } = withItem('VES', null);
+    it('catalogCurrency NULL: cuenta como hoy (403)', async () => {
+      const { update, repo } = withItem('USD', null);
       await expect(
         update.execute('item1', { price: 80 }, ASSISTANT_ACTOR),
-      ).resolves.toMatchObject({ price: 80, discountById: null });
+      ).rejects.toThrow(new ForbiddenException(priceBelowCatalogCapMessage(0)));
+      expect((await repo.findItemById('item1'))!.price).toBe(3600);
     });
 
-    it('ítem anterior a DX-105 con catalogCurrency NULL: como moneda distinta', async () => {
-      const { update } = withItem('VES', null, null);
+    it('ítem anterior a DX-105 con catalogCurrency NULL: cuenta como hoy (403)', async () => {
+      const { update } = withItem('USD', null, null);
       await expect(
         update.execute('item1', { price: 80 }, ASSISTANT_ACTOR),
-      ).resolves.toMatchObject({ price: 80 });
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 

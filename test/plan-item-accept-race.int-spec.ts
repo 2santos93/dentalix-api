@@ -131,8 +131,6 @@ async function draftPlanWithItem(): Promise<{
       toothNumber: '11',
       catalogItemId: s.catalogItemId,
       catalogPrice: 1000000,
-      // DX-513: el catálogo en la moneda del plan (USD): la rebaja cuenta.
-      catalogCurrency: 'USD',
       price: 1000000,
     },
   });

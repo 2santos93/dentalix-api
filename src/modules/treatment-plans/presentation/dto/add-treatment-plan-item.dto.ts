@@ -56,7 +56,7 @@ export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
 
   @ApiPropertyOptional({
     description:
-      'Precio explícito (máx. 2 decimales). Si se omite, la API lo resuelve (DX-105): convenio vigente del paciente → lista de precios activa de la sede → precio de catálogo; sin ninguno, 400. El resuelto queda como referencia (`catalogPrice`): un precio por debajo cuenta como descuento (tope del rol y motivo de la política) y, si la prestación no admite descuentos, 400',
+      'Precio explícito (máx. 2 decimales). Si se omite, la API lo resuelve (DX-105): convenio vigente del paciente → lista de precios activa de la sede → precio de catálogo; sin ninguno, 400. El resuelto queda como referencia (`catalogPrice`): un precio por debajo cuenta como descuento (tope del rol y motivo de la política) y, si la prestación no admite descuentos, 400. DX-513: no cuenta si la referencia es el precio de catálogo en otra moneda conocida (`catalogCurrency` distinta de la del plan, sin convertir); con la moneda del catálogo desconocida, sí',
     maximum: MONEY_MAX,
   })
   @IsOptional()

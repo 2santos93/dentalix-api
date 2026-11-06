@@ -5,13 +5,15 @@ import {
   discountReference,
   effectiveDiscount,
   referenceCurrency,
+  referenceInOtherCurrency,
   type ItemReference,
 } from './effective-discount';
 
 /**
- * DX-513: una rebaja frente a una referencia en otra moneda (o en una que no
- * se sabe) no es un descuento. Plan en USD con el catálogo en VES; plan en VES
- * con el catálogo en VES; `catalogCurrency` NULL.
+ * DX-513: una rebaja frente a una referencia en otra moneda CONOCIDA no es un
+ * descuento. Plan en USD con el catálogo en VES (no cuenta); plan en VES con
+ * el catálogo en VES (cuenta); `catalogCurrency` NULL (moneda desconocida:
+ * cuenta como hoy, decisión de producto).
  */
 describe('referencia del descuento según la moneda (DX-513)', () => {
   const catalog = (
@@ -32,18 +34,22 @@ describe('referencia del descuento según la moneda (DX-513)', () => {
       expect(discountReference(catalog('VES'), 'USD')).toBeNull();
     });
 
-    it('catalogCurrency NULL: como moneda distinta', () => {
-      expect(discountReference(catalog(null), 'VES')).toBeNull();
-      expect(discountReference(catalog(null), 'USD')).toBeNull();
+    it('catalogCurrency NULL (moneda desconocida): cuenta como hoy', () => {
+      expect(discountReference(catalog(null), 'VES')).toBe(3600);
+      expect(discountReference(catalog(null), 'USD')).toBe(3600);
+      expect(referenceInOtherCurrency(catalog(null), 'USD')).toBe(false);
+      expect(referenceInOtherCurrency(catalog('VES'), 'USD')).toBe(true);
+      expect(referenceInOtherCurrency(catalog('VES'), 'VES')).toBe(false);
     });
 
     it('ítem anterior a DX-105 (priceSource null): manda la moneda del catálogo', () => {
       const legacy = { ...catalog('VES'), priceSource: null };
       expect(discountReference(legacy, 'VES')).toBe(3600);
       expect(discountReference(legacy, 'USD')).toBeNull();
+      // Sin moneda (el relleno de DX-502 no la puso): sigue contando.
       expect(
-        discountReference({ ...legacy, catalogCurrency: null }, 'VES'),
-      ).toBeNull();
+        discountReference({ ...legacy, catalogCurrency: null }, 'USD'),
+      ).toBe(3600);
     });
 
     it('lista de la sede o del convenio: siempre en la moneda del plan (DX-105), aunque el catálogo sea de otra o no se sepa', () => {
@@ -124,9 +130,11 @@ describe('referencia del descuento según la moneda (DX-513)', () => {
       });
     });
 
-    it('catalogCurrency NULL: como moneda distinta', () => {
-      expect(check(ClinicRole.ASSISTANT, catalog(null), 'VES', 1)).toEqual({
-        kind: 'ok',
+    it('catalogCurrency NULL: cuenta como hoy (la asistente no puede bajarlo)', () => {
+      expect(check(ClinicRole.ASSISTANT, catalog(null), 'USD', 1)).toEqual({
+        kind: 'over-cap',
+        maxPercent: 0,
+        priceReduction: true,
       });
     });
 

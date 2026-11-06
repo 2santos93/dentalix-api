@@ -21,8 +21,8 @@ import { fromCents, toCents } from '../../../shared/money/money';
  */
 export interface PricedItem {
   /**
-   * Referencia en la moneda del plan (`discountReference`, DX-513); null =
-   * ítem libre o referencia en otra moneda.
+   * Referencia de la rebaja (`discountReference`, DX-513); null = ítem libre o
+   * referencia en OTRA moneda conocida.
    */
   catalogPrice: number | null;
   price: number;
@@ -65,19 +65,35 @@ export function referenceCurrency(
 }
 
 /**
+ * DX-513: ¿la referencia está en una moneda CONOCIDA distinta de la del plan?
+ * Solo entonces bajar de ella no es un descuento. Decisión de producto (fix
+ * round 1): con la moneda desconocida (`catalogCurrency` NULL: sedes en
+ * monedas distintas, o ítems anteriores al relleno de DX-502) no se puede
+ * probar que no lo sea, así que cuenta como hoy (SEC-041): el control no se
+ * salta en una clínica de varias monedas ni salen ítems de informes pasados.
+ */
+export function referenceInOtherCurrency(
+  item: Pick<ItemReference, 'catalogCurrency' | 'priceSource'>,
+  planCurrency: string,
+): boolean {
+  const currency = referenceCurrency(item, planCurrency);
+  return currency !== null && currency !== planCurrency;
+}
+
+/**
  * DX-513: la referencia con la que se mide la rebaja de precio, o `null`. Un
- * precio por debajo de una referencia en OTRA moneda, o en una que no se sabe,
- * no es un descuento (no se resta ni se convierte): el ítem cuenta como libre
- * y solo su `discount` (en la moneda del plan) consume el tope o pide motivo.
- * En la misma moneda, la referencia de siempre (SEC-041).
+ * precio por debajo de una referencia en OTRA moneda conocida no es un
+ * descuento (no se resta ni se convierte): el ítem cuenta como libre y solo
+ * su `discount` (en la moneda del plan) consume el tope o pide motivo. En la
+ * misma moneda, o en una que no se sabe, la referencia de siempre (SEC-041).
  */
 export function discountReference(
   item: ItemReference,
   planCurrency: string,
 ): number | null {
-  return referenceCurrency(item, planCurrency) === planCurrency
-    ? item.catalogPrice
-    : null;
+  return referenceInOtherCurrency(item, planCurrency)
+    ? null
+    : item.catalogPrice;
 }
 
 export interface EffectiveDiscount {
