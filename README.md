@@ -561,6 +561,9 @@ base>` (`TenantLinkBaseService` / `tenantLinkHost`). El enlace de
   cambio de contraseña). Errores en español: 404 (inexistente, reemplazado o de
   otra clínica) y 410 (caducado o usado). Deja un evento `PASSWORD_RESET` en la
   auditoría, sin datos sensibles.
+  **SEC-067:** no borra el contador de códigos MFA fallidos (solo lo borra un
+  código correcto): quien controla el buzón pero no el móvil no gana intentos
+  restableciendo la contraseña.
 - Token: 32 bytes aleatorios (base64url); en `user_tokens` solo su SHA-256,
   caduca a los 30 min y pedir otro invalida los anteriores. Tabla global de
   usuario (sin `tenantId` ni RLS, como `users`): el enlace solo vale en el host
