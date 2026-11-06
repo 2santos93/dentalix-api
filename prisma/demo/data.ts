@@ -2899,6 +2899,54 @@ export const DEMO_EQUIPMENT: readonly DemoEquipment[] = [
   },
 ];
 
+/**
+ * DX-544: expediente de rayos X de la demo. Una licencia que vence pronto
+ * (≤90 días) del periapical de la Sede principal y un control de calidad
+ * VENCIDO de la Sede Norte. Sin `expiresOn`: el vencimiento lo calcula la API
+ * (licencia Cat. I 5 años, control de calidad 2), así que la expedición se
+ * cuenta hacia atrás desde el vencimiento que se quiere ver
+ * (`expiresInDays`, negativo = vencido), en la zona de cada sede.
+ * `equipmentSerial` enlaza con un equipo de `DEMO_EQUIPMENT`.
+ */
+export interface DemoRadiologyRecord {
+  location: DemoLocationKey;
+  equipmentSerial?: string;
+  kind: 'LICENSE' | 'QUALITY_CONTROL';
+  category?: 'I' | 'II';
+  reference?: string;
+  issuer: string;
+  /** Vigencia por defecto de su tipo, para contar la expedición. */
+  validityMonths: number;
+  expiresInDays: number;
+  officerName?: string;
+  notes?: string;
+}
+
+export const DEMO_RADIOLOGY_RECORDS: readonly DemoRadiologyRecord[] = [
+  {
+    // Vence pronto: en 45 días.
+    location: 'principal',
+    equipmentSerial: 'DEMO-RX-0042',
+    kind: 'LICENSE',
+    category: 'I',
+    reference: 'DEMO-LIC-2021-0042',
+    issuer: 'Autoridad sanitaria demo',
+    validityMonths: 60,
+    expiresInDays: 45,
+    officerName: 'Dra. Encargada Demo',
+    notes: 'Pedir la renovación con margen: el trámite tarda semanas.',
+  },
+  {
+    // VENCIDO hace 12 días.
+    location: 'norte',
+    kind: 'QUALITY_CONTROL',
+    reference: 'DEMO-QC-0917',
+    issuer: 'Física Médica Demo',
+    validityMonths: 24,
+    expiresInDays: -12,
+  },
+];
+
 export const DEMO_APPOINTMENT_TYPES: readonly DemoAppointmentType[] = [
   {
     name: 'Valoración',

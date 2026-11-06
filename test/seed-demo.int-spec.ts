@@ -853,6 +853,51 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ]);
   });
 
+  it('el ADMIN demo ve en «Mi día» el control de calidad vencido de la Norte y la licencia por vencer del periapical (DX-544)', async () => {
+    const admin = DEMO_USERS.find((u) => u.role === ClinicRole.ADMIN);
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({ email: admin?.email, password: DEMO_PASSWORD })
+      .expect(201);
+    const token = (login.body as { accessToken: string }).accessToken;
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/radiology-records/due')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const body = res.body as {
+      items: {
+        kind: string;
+        locationName: string;
+        equipmentName: string | null;
+        status: string;
+        daysUntilExpiry: number;
+      }[];
+      total: number;
+    };
+    expect(body.total).toBe(2);
+    expect(
+      body.items.map((i) => [
+        i.kind,
+        i.locationName,
+        i.equipmentName,
+        i.status,
+      ]),
+    ).toEqual([
+      ['QUALITY_CONTROL', DEMO_LOCATIONS.norte.name, null, 'OVERDUE'],
+      [
+        'LICENSE',
+        DEMO_LOCATIONS.principal.name,
+        'Rayos X periapical',
+        'DUE_SOON',
+      ],
+    ]);
+    expect(body.items[0].daysUntilExpiry).toBeLessThan(0);
+    expect(body.items[1].daysUntilExpiry).toBeGreaterThan(30);
+    expect(body.items[1].daysUntilExpiry).toBeLessThanOrEqual(90);
+  });
+
   it('DX-407: la hoja de sedación de ejemplo va en orden (valoración < checklist < fármaco < tomas intraoperatorias < egreso)', async () => {
     const tenantId = await liveDemoTenantId();
     const sheet = await raw.sedationRecord.findFirstOrThrow({

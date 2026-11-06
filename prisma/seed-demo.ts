@@ -77,6 +77,7 @@ import {
   RecordMaintenanceUseCase,
 } from '../src/modules/equipment/application/use-cases/equipment.use-cases';
 import { addCivilMonths } from '../src/modules/recall/domain/recall-rules';
+import { CreateRadiologyRecordUseCase } from '../src/modules/radiology/application/use-cases/radiology.use-cases';
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import { AnestheticCatalogUseCases } from '../src/modules/anesthesia/application/use-cases/anesthetic-catalog.use-cases';
 import { AnesthesiaUseCases } from '../src/modules/anesthesia/application/use-cases/anesthesia.use-cases';
@@ -237,6 +238,7 @@ import {
   DEMO_COLLECTION_NOTES,
   DEMO_EXPENSES,
   DEMO_EQUIPMENT,
+  DEMO_RADIOLOGY_RECORDS,
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
   DEMO_CANCELLATION,
@@ -814,8 +816,13 @@ class DemoSeeder {
     );
 
     // DX-542: equipos biomédicos de las sedes con su hoja de vida.
-    await this.inTenant(tenantId, undefined, () =>
+    const equipmentBySerial = await this.inTenant(tenantId, undefined, () =>
       this.createEquipment(locations, norteChairs, ownerId),
+    );
+
+    // DX-544: licencia y control de calidad de rayos X de las sedes.
+    await this.inTenant(tenantId, undefined, () =>
+      this.createRadiologyRecords(locations, equipmentBySerial, ownerId),
     );
 
     const attended = await this.createAppointments(
@@ -1675,7 +1682,8 @@ class DemoSeeder {
     locations: Record<DemoLocationKey, string>,
     norteChairs: DemoSeededChair[],
     ownerId: string,
-  ): Promise<void> {
+  ): Promise<Map<string, string>> {
+    const bySerial = new Map<string, string>();
     for (const spec of DEMO_EQUIPMENT) {
       const site = DEMO_LOCATIONS[spec.location];
       const today = civilDateIn(this.now, site.timeZone);
@@ -1697,6 +1705,7 @@ class DemoSeeder {
         },
         ownerId,
       );
+      bySerial.set(spec.serialNumber, equipment.id);
       for (const m of spec.maintenances) {
         await this.use(RecordMaintenanceUseCase).execute(
           equipment.id,
@@ -1715,6 +1724,44 @@ class DemoSeeder {
           ownerId,
         );
       }
+    }
+    return bySerial;
+  }
+
+  /**
+   * DX-544: el expediente de rayos X de `DEMO_RADIOLOGY_RECORDS`, por el mismo
+   * caso de uso que Ajustes › Rayos X (el ADMIN). Sin vencimiento: lo calcula
+   * la API; la expedición se cuenta hacia atrás en la zona de cada sede.
+   */
+  private async createRadiologyRecords(
+    locations: Record<DemoLocationKey, string>,
+    equipmentBySerial: Map<string, string>,
+    ownerId: string,
+  ): Promise<void> {
+    for (const spec of DEMO_RADIOLOGY_RECORDS) {
+      const today = civilDateIn(
+        this.now,
+        DEMO_LOCATIONS[spec.location].timeZone,
+      );
+      await this.use(CreateRadiologyRecordUseCase).execute(
+        {
+          kind: spec.kind,
+          locationId: locations[spec.location],
+          equipmentId: spec.equipmentSerial
+            ? equipmentBySerial.get(spec.equipmentSerial)
+            : undefined,
+          category: spec.category,
+          reference: spec.reference,
+          issuer: spec.issuer,
+          issuedOn: addCivilMonths(
+            addCivilDays(today, spec.expiresInDays),
+            -spec.validityMonths,
+          ),
+          officerName: spec.officerName,
+          notes: spec.notes,
+        },
+        ownerId,
+      );
     }
   }
 
