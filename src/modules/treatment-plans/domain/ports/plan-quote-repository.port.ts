@@ -35,9 +35,10 @@ export interface PlanAcceptanceRemoteEvidence {
   verifiedAt: Date;
   /**
    * DX-514: quién firmó por el enlace, el paciente o su representante (el de
-   * la solicitud). `acceptedByName` es quien la envió, no quien firmó.
+   * la solicitud). `acceptedByName` es quien la envió, no quien firmó. Sin
+   * ella la aceptación sigue siendo a distancia: nunca «Registró la firma».
    */
-  signerType: ConsentSignerType;
+  signerType?: ConsentSignerType;
 }
 
 /**

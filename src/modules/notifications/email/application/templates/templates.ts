@@ -426,42 +426,20 @@ function signatureBudgetAccepted(
   vars: SignatureBudgetAcceptedEmailVars,
   brand: EmailBrand | null,
 ): RenderedEmail {
-  const accepted = {
-    kind: 'paragraph' as const,
-    text: `El ${vars.acceptedAtLabel} registramos tu aceptación del presupuesto que te envió ${vars.clinicName}.`,
-  };
-  // DX-514: nunca se enlaza a la página en la que firmó (ese enlace ya está
-  // usado y dice «Enlace no válido»). Con una copia en PDF descargable, se
-  // enlaza a ella; sin ella, la copia la facilita la clínica.
-  const copy = vars.signedCopy ?? null;
-  if (copy) {
-    return renderLayout({
-      brand,
-      subject: `${vars.clinicName} recibió tu aceptación`,
-      heading: `Hola, ${vars.recipientFirstName}`,
-      blocks: [
-        accepted,
-        {
-          kind: 'paragraph',
-          text: 'Puedes descargar la copia firmada en PDF desde el enlace.',
-        },
-        {
-          kind: 'note',
-          text: `El enlace caduca el ${copy.expiresAtLabel} y solo sirve una vez: guarda el PDF al descargarlo. Si no fuiste tú, avisa a la clínica cuanto antes.`,
-        },
-      ],
-      action: { label: 'Descargar mi copia', url: copy.url },
-    });
-  }
   return renderLayout({
     brand,
     subject: `${vars.clinicName} recibió tu aceptación`,
     heading: `Hola, ${vars.recipientFirstName}`,
     blocks: [
-      accepted,
       {
         kind: 'paragraph',
-        text: `El enlace con el que firmaste ya no se puede volver a usar. Si quieres una copia del presupuesto firmado, pídesela a ${vars.clinicName}: te la puede facilitar.`,
+        text: `El ${vars.acceptedAtLabel} registramos tu aceptación del presupuesto que te envió ${vars.clinicName}.`,
+      },
+      {
+        // DX-514: nunca se manda a la página en la que firmó (ese enlace ya
+        // está usado y dice «Enlace no válido»); la copia la da la clínica.
+        kind: 'paragraph',
+        text: `El enlace con el que firmaste ya no se puede volver a usar. Si necesitas una copia del presupuesto firmado, pídesela a ${vars.clinicName}.`,
       },
       {
         kind: 'note',

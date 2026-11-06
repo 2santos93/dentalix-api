@@ -321,7 +321,7 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
     expect(confirmation.input).not.toMatch(
       /desde la página en la que firmaste/,
     );
-    expect(confirmation.input).toMatch(/te la puede facilitar/);
+    expect(confirmation.input).toMatch(/pídesela a /);
 
     // El enlace ya está usado.
     await pub(clinicA.host).get(token).expect(404);

@@ -210,6 +210,7 @@ export async function readPlanQuoteSource(
       },
       acceptance: {
         select: {
+          locationId: true,
           content: true,
           contentHash: true,
           signerName: true,
@@ -277,6 +278,18 @@ export async function readPlanQuoteSource(
         });
   const payerNames = new Map(agreements.map((a) => [a.id, a.payer.name]));
   const { patient, acceptance } = plan;
+  // DX-514: aceptado, las horas del impreso (firma, envío) son las de la sede
+  // donde se aceptó, como en la ficha, aunque se imprima desde otra sede; la
+  // de la firma aunque luego se archivara. Sin aceptar, la del request.
+  const regional =
+    acceptance && acceptance.locationId !== location.id
+      ? documentRegional(
+          await tx.location.findFirst({
+            where: { id: acceptance.locationId, tenantId },
+            select: DOCUMENT_REGIONAL_SELECT,
+          }),
+        )
+      : documentRegional(location);
 
   return {
     visitOrganization: plan.items.map((i) => ({
@@ -324,7 +337,7 @@ export async function readPlanQuoteSource(
       address: location.address,
       timeZone: zoneOf(location.id),
     },
-    regional: documentRegional(location),
+    regional,
     professionalName: plan.createdById
       ? (professional?.fullName ?? UNKNOWN_PROFESSIONAL)
       : null,
@@ -345,7 +358,11 @@ export async function readPlanQuoteSource(
   };
 }
 
-function remoteEvidenceOf(acceptance: {
+/**
+ * Evidencias congeladas de una aceptación a distancia, o `null` si se firmó
+ * en la clínica. Exportada para sus pruebas (DX-514).
+ */
+export function remoteEvidenceOf(acceptance: {
   signatureRequestId: string | null;
   remoteChannel: SignatureRequestChannel | null;
   remoteDestinationMasked: string | null;
@@ -361,8 +378,7 @@ function remoteEvidenceOf(acceptance: {
     !acceptance.remoteDestinationMasked ||
     !acceptance.remoteSentAt ||
     !acceptance.remoteOpenedAt ||
-    !acceptance.remoteVerifiedAt ||
-    !acceptance.signatureRequest
+    !acceptance.remoteVerifiedAt
   ) {
     return null;
   }
@@ -373,7 +389,11 @@ function remoteEvidenceOf(acceptance: {
     sentAt: acceptance.remoteSentAt,
     openedAt: acceptance.remoteOpenedAt,
     verifiedAt: acceptance.remoteVerifiedAt,
-    signerType: acceptance.signatureRequest.signerType,
+    // Sin la solicitud (no debería pasar: FK con Restrict), sigue siendo a
+    // distancia; solo falta decir si firmó el paciente o su representante.
+    ...(acceptance.signatureRequest
+      ? { signerType: acceptance.signatureRequest.signerType }
+      : {}),
   };
 }
 

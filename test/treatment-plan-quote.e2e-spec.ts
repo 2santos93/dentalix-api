@@ -681,6 +681,45 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         .expect(409);
     });
 
+    it('DX-514: aceptado, el regional es el de la sede donde se aceptó aunque se imprima desde otra con otra zona', async () => {
+      const accepted = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+        where: { planId: planA },
+        select: { locationId: true },
+      });
+      expect(accepted.locationId).not.toBe(northLocationA);
+      const acceptedAt = await raw.location.findUniqueOrThrow({
+        where: { id: accepted.locationId },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
+      const north = await raw.location.findUniqueOrThrow({
+        where: { id: northLocationA },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
+      try {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: {
+            timeZone: 'America/New_York',
+            locale: 'en-US',
+            hourCycle: 'h12',
+          },
+        });
+        const res = await as(clinicA)
+          .get(quotePath(patientA, planA))
+          .set('X-Location-Id', northLocationA)
+          .expect(200);
+        const body = res.body as { regional: unknown; planStatus: string };
+        expect(body.planStatus).toBe('ACCEPTED');
+        expect(body.regional).toEqual(acceptedAt);
+        expect(acceptedAt.timeZone).not.toBe('America/New_York');
+      } finally {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: north,
+        });
+      }
+    });
+
     it('el detalle del plan dice quién firmó y cuándo', async () => {
       const res = await as(clinicA)
         .get(`/treatment-plans/${planA}`)

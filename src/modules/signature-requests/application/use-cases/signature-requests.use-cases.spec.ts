@@ -1071,8 +1071,7 @@ describe('presupuesto a distancia (DX-415)', () => {
     expect(JSON.stringify(ctx.confirmations[0].vars)).not.toMatch(
       /implante|resina|3330000/i,
     );
-    // DX-514: ni el token ni la página de firma; sin copia en PDF, sin enlace.
-    expect(ctx.confirmations[0].vars.signedCopy).toBeNull();
+    // DX-514: ni el token ni la página de firma.
     expect(JSON.stringify(ctx.confirmations[0].vars)).not.toContain(token);
     // El enlace ya está usado.
     await expect(ctx.inTenant(() => ctx.view.execute(token))).rejects.toThrow(
