@@ -29,6 +29,12 @@ import type {
   ReceivablesRepository,
 } from '../domain/ports/receivables-repository.port';
 
+/**
+ * DB-076: tope defensivo de saltos al seguir los traspasos de saldo hacia
+ * atrás (`planCreditFacts`). Un paciente real encadena muy pocos planes.
+ */
+const MAX_TRANSFER_DEPTH = 32;
+
 /*
  * Entradas de la cartera de un paciente tal como las guarda `patient_ledgers`
  * (DX-155; formato en la migración 20261017233000_dx155_patient_ledgers).
@@ -633,8 +639,11 @@ export class PrismaReceivablesRepository
   /**
    * DX-430: los hechos de cada plan para atribuir su saldo a una sede y
    * fecharlo (ver `originOfPlanCredit`). Los abonos propios del plan y, solo
-   * si no tiene, los de los planes que le traspasaron saldo (CTE recursivo;
-   * `UNION` descarta los ciclos). Por el índice de abonos por plan. Lo
+   * si no tiene, los de los planes que le traspasaron saldo (CTE recursivo).
+   * Los traspasos pueden formar ciclos (P→Q y Q→P): `CYCLE` corta cada camino
+   * al repetir un plan, `MAX_TRANSFER_DEPTH` acota la recursión y cada plan
+   * cuenta una sola vez por raíz, con su menor profundidad, así que la raíz
+   * nunca es origen de sí misma (DB-076). Por el índice de abonos por plan. Lo
    * abonado en otra moneda cuenta por su base en la moneda del plan (DX-051);
    * sin base, `planCents` es null.
    */
@@ -672,11 +681,19 @@ export class PrismaReceivablesRepository
             JOIN "patient_credit_transfers" t
               ON t."tenantId" = ${tenantId}::uuid
              AND t."targetPlanId" = s."planId"
+           WHERE s."depth" < ${MAX_TRANSFER_DEPTH}::int
+        ) CYCLE "planId" SET "isCycle" USING "path",
+        reached AS (
+          SELECT DISTINCT ON (s."rootId", s."planId")
+                 s."rootId", s."planId", s."depth"
+            FROM src s
+           WHERE NOT s."isCycle"
+           ORDER BY s."rootId", s."planId", s."depth"
         )
         SELECT s."rootId" AS "planId", s."depth", p."paidAt", p."locationId",
                (CASE WHEN p."currency" = rp."currency" THEN p."amount"
                      ELSE b."amount" END)::float8 AS "planAmount"
-          FROM src s
+          FROM reached s
           JOIN "treatment_plans" rp
             ON rp."tenantId" = ${tenantId}::uuid AND rp."id" = s."rootId"
           JOIN "payments" p

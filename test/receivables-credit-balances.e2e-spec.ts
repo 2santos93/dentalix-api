@@ -1043,4 +1043,62 @@ describe('Cartera › Saldo a favor — GET /receivables/credit-balances (e2e, D
     );
     expect(after.length).toBe(before.length - 1);
   });
+
+  // DB-076: los traspasos de ida y vuelta (P→Q→P) y en ciclo de tres
+  // (P→Q→R→P) son flujos admitidos; la lista responde enseguida y con los
+  // importes del estado de cuenta.
+  it('DB-076: con traspasos en ciclo responde enseguida y con los importes correctos', async () => {
+    const statementOf = async (patientId: string) =>
+      (
+        (await get(a, `/patients/${patientId}/account-statement`).expect(200))
+          .body as Statement
+      ).plans.reduce((sum, p) => sum + Math.max(-p.balance, 0), 0);
+
+    const dos = await patient(a, 'CicloDos', { locationId: principal });
+    const p2 = await plan(a, dos, 10, TreatmentPlanStatus.ACCEPTED);
+    await pay(a, p2, dos, 110, '2026-08-01T15:00:00.000Z');
+    const q2 = await plan(a, dos, 10, TreatmentPlanStatus.ACCEPTED);
+    await transfer(p2, q2, 100);
+    await transfer(q2, p2, 40);
+
+    const tres = await patient(a, 'CicloTres', { locationId: principal });
+    const p3 = await plan(a, tres, 10, TreatmentPlanStatus.ACCEPTED);
+    await pay(a, p3, tres, 110, '2026-08-02T15:00:00.000Z');
+    const q3 = await plan(a, tres, 10, TreatmentPlanStatus.ACCEPTED);
+    const r3 = await plan(a, tres, 10, TreatmentPlanStatus.ACCEPTED);
+    await transfer(p3, q3, 100);
+    await transfer(q3, r3, 60);
+    await transfer(r3, p3, 20);
+
+    const started = Date.now();
+    const res = await get(a, '/receivables/credit-balances?pageSize=100')
+      .timeout(4_000)
+      .expect(200);
+    expect(Date.now() - started).toBeLessThan(2_000);
+
+    const rows = (res.body as Page).items.filter((r) =>
+      [dos, tres].includes(r.patient.id),
+    );
+    expect(
+      rows.map((r) => [r.patient.id, r.location?.id, r.amount, r.since]),
+    ).toEqual(
+      expect.arrayContaining([
+        [
+          dos,
+          principal,
+          90,
+          civilDateIn(new Date('2026-08-01T15:00:00.000Z'), principalZone),
+        ],
+        [
+          tres,
+          principal,
+          80,
+          civilDateIn(new Date('2026-08-02T15:00:00.000Z'), principalZone),
+        ],
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+    expect(await statementOf(dos)).toBe(90);
+    expect(await statementOf(tres)).toBe(80);
+  }, 15_000);
 });
