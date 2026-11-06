@@ -90,6 +90,20 @@ export interface PlanBalanceSnapshot {
 export interface PlanBalanceItemsSnapshot extends PlanBalanceSnapshot {
   /** Σ `creditOutCents` de los abonos del plan (céntimos, ≥ 0). */
   creditOutCents: number;
+  /**
+   * DX-399-quater: lo recibido por traspaso que ninguna salida gastó
+   * (`leftCents`) y lo que cubre de cada ítem después de los abonos
+   * (`byItem`, solo ítems con algo cubierto), en la MISMA foto.
+   */
+  transfersIn: PlanTransfersInCoverage;
+}
+
+/** DX-399-quater: el saldo recibido por traspaso de un plan y los ítems que cubre. */
+export interface PlanTransfersInCoverage {
+  /** Lo recibido que ninguna salida gastó (céntimos, ≥ 0). */
+  leftCents: number;
+  /** Lo que cubre de cada ítem, después de los abonos (Σ ≤ `leftCents`). */
+  byItem: ReadonlyMap<string, number>;
 }
 
 /**
@@ -122,6 +136,11 @@ export interface AllocationItemOption {
   billableCents: number;
   /** Lo que le imputan los OTROS abonos del plan. */
   paidByOthersCents: number;
+  /**
+   * DX-399-quater: lo que le cubre el saldo recibido por traspaso, después de
+   * TODOS los abonos (también este). Ausente o 0 si nada.
+   */
+  paidByTransfersInCents?: number;
 }
 
 /**

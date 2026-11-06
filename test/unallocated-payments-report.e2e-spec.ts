@@ -1117,6 +1117,102 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
       expect(credit.items.map((r) => r.patient.id)).not.toContain(pia);
     });
 
+    it('DX-399-quater: own surplus 30, 30 received by transfer and a new item of 60: the item is paid (30 + 30) with no manual step, and Cartera, the Plan and the statement agree on 0', async () => {
+      const rita = await patient(a, 'Rita');
+      // P: ítem de 70 y abono de 100 -> 30 propios a cuenta.
+      const p = await plan(a, rita, catalogA, [70]);
+      const own = await pay(a, p.planId, 100, '2026-09-18');
+      // Q, del mismo paciente, con 30 a cuenta que traspasa a P.
+      const q = await plan(a, rita, catalogA, [20]);
+      await pay(a, q.planId, 50, '2026-09-18');
+      await call(
+        'post',
+        a,
+        `/treatment-plans/${q.planId}/credit-transfers`,
+        a.adminToken,
+        principal,
+      )
+        .send({ targetPlanId: p.planId, amount: 30, currency: 'USD' })
+        .expect(201);
+      // Ítem nuevo de 60 en P, aceptado.
+      const item = await call('post', a, `/treatment-plans/${p.planId}/items`)
+        .send({ toothNumber: '34', catalogItemId: catalogA, price: 60 })
+        .expect(201);
+      const itemId = (item.body as { id: string }).id;
+      await call('patch', a, `/treatment-plans/${p.planId}/items/${itemId}`)
+        .send({ status: 'ACCEPTED' })
+        .expect(200);
+
+      type Balance = {
+        balance: number;
+        allocated: number;
+        unallocated: number;
+        transfersInOnAccount?: number;
+        items: {
+          itemId: string;
+          paid: number;
+          balance: number;
+          paidByTransfersIn?: number;
+        }[];
+      };
+      const balance = (
+        await call('get', a, `/treatment-plans/${p.planId}/balance`).expect(200)
+      ).body as Balance;
+      expect(balance.balance).toBe(0);
+      expect(balance.items.map((i) => i.balance)).toEqual([0, 0]);
+      expect(balance.items.find((i) => i.itemId === itemId)).toMatchObject({
+        paid: 60,
+        balance: 0,
+        paidByTransfersIn: 30,
+      });
+      expect(balance).toMatchObject({ allocated: 100, unallocated: 0 });
+      expect(balance.transfersInOnAccount ?? 0).toBe(0);
+      // «Ver imputación»: el abono dio 30 al ítem y lo recibido los otros 30.
+      const detail = (
+        await call('get', a, `/payments/${own}/allocations`).expect(200)
+      ).body as {
+        onAccount: number;
+        allocations: { treatmentPlanItemId: string; amount: number }[];
+        items: { itemId: string; paidByTransfersIn?: number; free: number }[];
+      };
+      expect(detail.onAccount).toBe(0);
+      expect(
+        detail.allocations.find((l) => l.treatmentPlanItemId === itemId)
+          ?.amount,
+      ).toBe(30);
+      expect(
+        detail.items.find((i) => i.itemId === itemId)?.paidByTransfersIn,
+      ).toBe(30);
+      // Cartera: ni deuda ni saldo a favor.
+      const aging = (
+        await call('get', a, '/receivables/aging?pageSize=100').expect(200)
+      ).body as { items: { patient: { id: string } }[] };
+      expect(aging.items.map((r) => r.patient.id)).not.toContain(rita);
+      const credit = (
+        await call(
+          'get',
+          a,
+          '/receivables/credit-balances?pageSize=100',
+        ).expect(200)
+      ).body as { items: { patient: { id: string } }[] };
+      expect(credit.items.map((r) => r.patient.id)).not.toContain(rita);
+      // El informe no lista el abono (nada a cuenta).
+      const sept = await report(a, 'from=2026-09-01&to=2026-09-30');
+      expect(idsOf(sept)).not.toContain(own);
+
+      // El ítem vuelve a propuesto: lo recibido se libera y queda a cuenta del plan.
+      await call('patch', a, `/treatment-plans/${p.planId}/items/${itemId}`)
+        .send({ status: 'PROPOSED' })
+        .expect(200);
+      const freed = (
+        await call('get', a, `/treatment-plans/${p.planId}/balance`).expect(200)
+      ).body as Balance;
+      expect(freed.balance).toBe(-60);
+      expect(freed.items.map((i) => i.balance)).toEqual([0, 0]);
+      expect(freed.unallocated).toBe(30);
+      expect(freed.transfersInOnAccount).toBe(30);
+    });
+
     it('F4: the equivalence still holds at the end, after every chronology and transfer scenario above', async () => {
       await expectEquivalence();
     });

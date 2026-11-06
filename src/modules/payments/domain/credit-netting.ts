@@ -21,9 +21,10 @@
  * Lo que no encuentre fuente se descarta (no es dinero a cuenta de ninguna).
  *
  * Por qué el traspaso recibido va primero y no un FIFO común: el saldo recibido
- * por traspaso no se puede imputar a ningún ítem, el excedente de un abono sí.
- * Gastar primero lo que no se imputa deja a los abonos todo lo que el plan aún
- * tiene, así que un ítem nuevo no queda «pendiente» con el saldo del plan en 0
+ * por traspaso no se guarda como imputación (solo cubre ítems después de los
+ * abonos, DX-399-quater), el excedente de un abono sí. Gastar primero lo
+ * recibido deja a los abonos todo lo que el plan aún tiene, así que un ítem
+ * nuevo no queda «pendiente» con el saldo del plan en 0
  * (secuencia del ticket: excedente propio, traspaso recibido, devolución de 30,
  * ítem nuevo de 30). Con un FIFO por fecha la devolución saldría del abono, que
  * es más antiguo, y el ítem quedaría pendiente. Nunca se reparte dinero que ya
@@ -39,6 +40,23 @@
  * y su excedente no estaba cuando salió el dinero.
  * Un plan sin traspasos recibidos da exactamente lo de DX-399. Todo en
  * céntimos enteros.
+ *
+ * Lo recibido que ninguna salida gastó (`transfersInLeft`, DX-399-quater) es
+ * dinero del paciente que sigue en el plan: cubre los ítems que los abonos no
+ * cubren (`coverWithTransfersIn` en `allocation-rules.ts`). Las dos
+ * direcciones no gastan dos veces el mismo dinero: una salida solo gasta lo
+ * recibido que aún queda (`inLeft`), y a los ítems solo llega lo que queda
+ * después de TODAS las salidas. Como lo recibido no mira la fecha, lo que
+ * queda es max(0, Σ recibido − Σ salidas) del plan y no depende de las
+ * imputaciones: con abonos primero y lo recibido después, las cifras son
+ * estables y el reparto sigue siendo idempotente.
+ *
+ * Caso límite del modo manual (R5): un abono MANUAL con 50 sin imputar (el
+ * reparto no lo toca) y un ítem de 50 cubierto por 50 recibidos. Una
+ * devolución de 50 gasta primero lo recibido, así que el ítem pasa a
+ * «pendiente 50» y el «Sin imputar» del abono sigue en 50. Cartera da 0 y
+ * cuadra (no hay doble gasto): es la semántica de siempre del modo manual, y
+ * el ADMIN tiene que reimputar ese abono al ítem.
  */
 export interface NettingPayment {
   id: string;
@@ -89,6 +107,11 @@ export interface CreditNetting {
   byPayment: Map<string, NettedPayment>;
   /** Solo los planes con alguna salida. */
   byPlan: Map<string, NettedPlan>;
+  /**
+   * DX-399-quater: lo recibido por traspaso que ninguna salida gastó, por plan
+   * (solo los planes que recibieron alguno; ≥ 0). Puede cubrir ítems.
+   */
+  transfersInLeft: Map<string, number>;
 }
 
 const byIdDesc = (a: { id: string }, b: { id: string }) =>
@@ -165,7 +188,14 @@ export function netCredit(
     }
     plan.discardedCents += remaining;
   }
-  return { byPayment, byPlan };
+  const transfersInLeft = new Map<string, number>();
+  for (const t of transfersIn) {
+    transfersInLeft.set(
+      t.planId,
+      (transfersInLeft.get(t.planId) ?? 0) + (inLeft.get(t.id) as number),
+    );
+  }
+  return { byPayment, byPlan, transfersInLeft };
 }
 
 /** El resultado por abono de `netCredit`. */

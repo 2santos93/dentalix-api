@@ -61,6 +61,13 @@ export class AllocationItemOptionDto {
   @ApiProperty({ example: 30, description: 'Lo que le imputan otros abonos' })
   paidByOthers!: number;
 
+  @ApiPropertyOptional({
+    example: 30,
+    description:
+      'DX-399-quater: lo que le cubre el saldo que el plan recibió por traspaso, después de todos los abonos (también este). No resta de `free`: los abonos van primero, así que imputar este abono al ítem lo desplaza y lo recibido vuelve a quedar a cuenta del plan. Ausente si es 0',
+  })
+  paidByTransfersIn?: number;
+
   @ApiProperty({
     example: 70,
     description: 'Lo que este abono puede imputarle: billable − paidByOthers',

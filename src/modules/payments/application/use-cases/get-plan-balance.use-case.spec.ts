@@ -837,6 +837,7 @@ describe('GetPlanBalanceUseCase', () => {
         allocations: [],
         bases: [],
         creditOutCents: 0,
+        transfersIn: { leftCents: 0, byItem: new Map() },
         ...over,
       };
     }
@@ -980,6 +981,58 @@ describe('GetPlanBalanceUseCase', () => {
       expect(await uc.executeWithItems('plan-1')).toMatchObject({
         unallocated: 20,
       });
+    });
+
+    it('DX-399-quater: lo recibido por traspaso cubre lo que el abono no cubre del ítem nuevo (paid y balance del ítem, y de dónde salió)', async () => {
+      const { allocations, uc } = makeUseCase();
+      // Excedente propio 30 (abono 100, ítem 70), 30 recibidos, ítem nuevo de 60:
+      // el abono le da 30 y lo recibido los otros 30.
+      seed(allocations, {
+        items: [
+          item('i1', TreatmentPlanItemStatus.ACCEPTED, 70),
+          item('i2', TreatmentPlanItemStatus.ACCEPTED, 60),
+        ],
+        payments: [pay('a', 100)],
+        bases: [{ paymentId: 'a', amount: 100, manual: false }],
+        allocations: [
+          { paymentId: 'a', itemId: 'i1', amount: 70 },
+          { paymentId: 'a', itemId: 'i2', amount: 30 },
+        ],
+        transfersIn: { leftCents: 3_000, byItem: new Map([['i2', 3_000]]) },
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.items.map((i) => [i.itemId, i.paid, i.balance])).toEqual([
+        ['i1', 70, 0],
+        ['i2', 60, 0],
+      ]);
+      expect(result.items[1].paidByTransfersIn).toBe(30);
+      // Sin traspaso en el ítem, el campo no aparece (igual que antes).
+      expect(result.items[0]).not.toHaveProperty('paidByTransfersIn');
+      // Lo imputado sigue siendo de los abonos; nada queda a cuenta.
+      expect(result).toMatchObject({ allocated: 100, unallocated: 0 });
+      expect(result).not.toHaveProperty('transfersInOnAccount');
+    });
+
+    it('DX-399-quater: lo recibido que no cubre ningún ítem queda a cuenta del plan (transfersInOnAccount)', async () => {
+      const { allocations, uc } = makeUseCase();
+      seed(allocations, {
+        items: [item('i1', TreatmentPlanItemStatus.ACCEPTED, 50)],
+        payments: [pay('a', 30)],
+        bases: [{ paymentId: 'a', amount: 30, manual: false }],
+        allocations: [{ paymentId: 'a', itemId: 'i1', amount: 30 }],
+        transfersIn: { leftCents: 5_000, byItem: new Map([['i1', 2_000]]) },
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result.items[0]).toMatchObject({
+        paid: 50,
+        balance: 0,
+        paidByTransfersIn: 20,
+      });
+      expect(result.transfersInOnAccount).toBe(30);
     });
 
     it('invariant: sum of item paid plus unallocated equals paid', async () => {

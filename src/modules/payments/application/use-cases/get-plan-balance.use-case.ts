@@ -115,12 +115,21 @@ export interface PlanItemBalance {
   procedureName: string;
   status: TreatmentPlanItemStatus;
   billable: number;
+  /** Lo imputado por los abonos más lo que cubre lo recibido por traspaso. */
   paid: number;
   balance: number;
+  /**
+   * DX-399-quater: de `paid`, lo que cubre el saldo que el plan recibió por
+   * traspaso (después de los abonos). Solo si es > 0.
+   */
+  paidByTransfersIn?: number;
 }
 
 export interface GetPlanBalanceWithItemsResult extends GetPlanBalanceResult {
-  /** Σ de las imputaciones de los abonos vivos del plan. */
+  /**
+   * Σ de las imputaciones de los abonos vivos del plan, sin lo que cubre lo
+   * recibido por traspaso: Σ `items[].paid` = `allocated` + Σ `paidByTransfersIn`.
+   */
   allocated: number;
   /**
    * Σ de los sobrantes de los abonos con base, NETO de lo devuelto o
@@ -129,6 +138,11 @@ export interface GetPlanBalanceWithItemsResult extends GetPlanBalanceResult {
    * «Cobrado sin imputar» y la ventana «Ver imputación».
    */
   unallocated: number;
+  /**
+   * DX-399-quater: lo recibido por traspaso que ni las salidas ni los ítems
+   * gastaron: sigue a cuenta del plan. Solo si es > 0.
+   */
+  transfersInOnAccount?: number;
   /** Abonos vivos sin base (sin tasa o de moneda no soportada). */
   unconvertedPaymentsCount: number;
   /** Abonos cuya imputación fijó un ADMIN a mano. */
@@ -202,12 +216,17 @@ export class GetPlanBalanceUseCase {
       allocatedCents += cents;
     }
 
+    // DX-399-quater: lo recibido por traspaso cubre lo que los abonos no
+    // cubren (regla `coverWithTransfersIn`, calculada en la foto).
+    let coveredByTransfersInCents = 0;
     const items: PlanItemBalance[] = snapshot.items.map((item) => {
       const billableCents = itemBillableCents(
         { ...item, deletedAt: null },
         billablePlan,
       );
-      const paidCents = paidByItem.get(item.id) ?? 0;
+      const fromTransfersIn = snapshot.transfersIn.byItem.get(item.id) ?? 0;
+      coveredByTransfersInCents += fromTransfersIn;
+      const paidCents = (paidByItem.get(item.id) ?? 0) + fromTransfersIn;
       return {
         itemId: item.id,
         toothNumber: item.toothNumber,
@@ -216,8 +235,13 @@ export class GetPlanBalanceUseCase {
         billable: billableCents / 100,
         paid: paidCents / 100,
         balance: (billableCents - paidCents) / 100,
+        ...(fromTransfersIn > 0
+          ? { paidByTransfersIn: fromTransfersIn / 100 }
+          : {}),
       };
     });
+    const transfersInOnAccountCents =
+      snapshot.transfersIn.leftCents - coveredByTransfersInCents;
 
     // DX-399-ter: neto de lo que ya salió del saldo a favor, por la MISMA
     // cascada del informe y de la ventana (calculada en la foto del repositorio).
@@ -235,6 +259,9 @@ export class GetPlanBalanceUseCase {
       ...result,
       allocated: allocatedCents / 100,
       unallocated: unallocatedCents / 100,
+      ...(transfersInOnAccountCents > 0
+        ? { transfersInOnAccount: transfersInOnAccountCents / 100 }
+        : {}),
       unconvertedPaymentsCount,
       manualPaymentIds: snapshot.bases
         .filter((b) => b.manual)

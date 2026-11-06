@@ -1,6 +1,7 @@
 import { TreatmentPlanItemStatus } from '@prisma/client';
 import {
   allocationVersion,
+  coverWithTransfersIn,
   donorAvailableCents,
   hasFixedPointViolation,
   itemBillableCents,
@@ -416,5 +417,66 @@ describe('donantes netos de lo devuelto o traspasado (DX-399-bis)', () => {
       creditOutCents: 3_000,
     });
     expect(run(13_001)).toEqual({ code: 'OVER_PAYMENT', sumCents: 13_001 });
+  });
+});
+
+// DX-399-quater: lo recibido por traspaso que queda cubre lo que los abonos no
+// cubren, en el orden de reparto de los ítems (DONE y luego ACCEPTED).
+describe('coverWithTransfersIn (DX-399-quater)', () => {
+  it('la secuencia del ticket: 30 recibidos cubren lo que falta de un ítem de 60 al que el abono dio 30', () => {
+    const covered = coverWithTransfersIn(
+      [
+        item({ id: 'old', billableCents: 7000, allocatedCents: 7000 }),
+        item({
+          id: 'new',
+          createdAt: d(5),
+          billableCents: 6000,
+          allocatedCents: 3000,
+        }),
+      ],
+      3000,
+    );
+    expect([...covered]).toEqual([['new', 3000]]);
+  });
+
+  it('un ítem mayor que todo lo disponible queda cubierto solo en parte', () => {
+    const covered = coverWithTransfersIn(
+      [item({ id: 'big', billableCents: 10000, allocatedCents: 3000 })],
+      3000,
+    );
+    expect(covered.get('big')).toBe(3000);
+  });
+
+  it('nunca cubre más de lo que le falta a cada ítem, y sigue el orden de reparto', () => {
+    const covered = coverWithTransfersIn(
+      [
+        item({ id: 'accepted', createdAt: d(1), billableCents: 5000 }),
+        item({
+          id: 'done',
+          status: 'DONE',
+          createdAt: d(9),
+          completedAt: d(10),
+          billableCents: 2000,
+          allocatedCents: 500,
+        }),
+      ],
+      3000,
+    );
+    // Primero el DONE (le faltan 15), luego el ACCEPTED con lo que queda.
+    expect([...covered]).toEqual([
+      ['done', 1500],
+      ['accepted', 1500],
+    ]);
+  });
+
+  it('sin nada recibido, o con todo cubierto por abonos, no cubre nada', () => {
+    const items = [item({ id: 'x', billableCents: 5000, allocatedCents: 0 })];
+    expect(coverWithTransfersIn(items, 0).size).toBe(0);
+    expect(
+      coverWithTransfersIn(
+        [item({ id: 'x', billableCents: 5000, allocatedCents: 5000 })],
+        3000,
+      ).size,
+    ).toBe(0);
   });
 });
