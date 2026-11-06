@@ -510,7 +510,8 @@ export class AppointmentsController {
 
   @Get(':id')
   @ApiOkResponse({ type: AppointmentDto })
-  get(@Param('id') id: string): Promise<Appointment> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  get(@Param('id', ParseUUIDPipe) id: string): Promise<Appointment> {
     return this.getAppointment.execute(id);
   }
 
@@ -520,9 +521,13 @@ export class AppointmentsController {
     description:
       'DX-202: lo que recepción comprueba al despedir al paciente. El saldo solo para los roles de cobro.',
   })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiForbiddenResponse({
+    description: 'La cita es de una sede no permitida al usuario (DX-089)',
+  })
   @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
   async getCheckoutChecklist(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() req: { user: JwtPayload },
   ): Promise<CheckoutChecklistDto> {
     const checklist = await this.checkoutChecklist.execute(id);
@@ -554,7 +559,7 @@ export class AppointmentsController {
   })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos o al pasado, salida de COMPLETED sin `statusReason` válido (DX-273), o cancelar sin `cancelledByKind` o sin `cancelReasonCode` (DX-279), con el mensaje en español',
+      'Id que no es UUID, datos inválidos o al pasado, salida de COMPLETED sin `statusReason` válido (DX-273), o cancelar sin `cancelledByKind` o sin `cancelReasonCode` (DX-279), con el mensaje en español',
   })
   @ApiForbiddenResponse({
     description:
@@ -571,7 +576,7 @@ export class AppointmentsController {
     description: 'Fuera del horario de atención de la sede de la cita',
   })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAppointmentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<AppointmentWriteResult> {
