@@ -536,7 +536,15 @@ describe('DX-472-bis: mismas cifras convertidas en estado de cuenta, cartera, ch
     let legacyId: string;
     let settledId: string;
     // La agenda del día de su cita, en la zona de la sede.
-    const visitDay = fixedSedeDay(-2);
+    // Cita de dentro de 2+ días en un día laborable (lunes a viernes): la API
+    // rechaza con 422 las citas fuera del horario de la sede y un domingo (o
+    // sábado) según el día en que corra la suite la dejaba fuera.
+    const visitDay = [-2, -3, -4]
+      .map((daysAgo) => fixedSedeDay(daysAgo))
+      .find((d) => {
+        const weekday = new Date(`${d.day}T12:00:00Z`).getUTCDay();
+        return weekday >= 1 && weekday <= 5;
+      })!;
 
     beforeAll(async () => {
       settledId = await newPatient('Congelada');

@@ -32,7 +32,6 @@ const REPO_ROOT = join(__dirname, '..', '..');
  */
 const LEGACY_REAL_CLOCK_TODAY: ReadonlySet<string> = new Set([
   'test/appointments-medical-alerts.e2e-spec.ts',
-  'test/cancellation-fee-protected.e2e-spec.ts',
   'test/cash-register.e2e-spec.ts',
   'test/cash-sessions-concurrency.e2e-spec.ts',
   'test/cash-sessions.e2e-spec.ts',
