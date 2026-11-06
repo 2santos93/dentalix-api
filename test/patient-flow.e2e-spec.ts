@@ -452,7 +452,9 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
         where: { id: appt.id },
         select: { patientId: true },
       });
-      const start = new Date(Date.now() + 30 * 24 * 60 * MIN);
+      // Mediodía de la sede dentro de 30 días: con `Date.now()` la cita cruzaba la
+      // medianoche de Caracas a las 23:30 y daba 422 (como DX-460).
+      const start = new Date(caracasAt('12:00').getTime() + 30 * 24 * 60 * MIN);
       const future = await as(
         api().post('/api/v1/appointments'),
         reception.token,
