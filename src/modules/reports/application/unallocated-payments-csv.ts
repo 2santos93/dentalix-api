@@ -1,5 +1,6 @@
 import type { UnallocatedPayments } from './use-cases/get-unallocated-payments.use-case';
 import { CLDR_ZERO_FORMAT_DIGITS } from '../../../shared/format/cldr-format-digits';
+import { amountText } from '../../../shared/money/money';
 
 /*
  * CSV de «Cobrado sin imputar / a cuenta» (DX-399): las MISMAS filas que la
@@ -38,7 +39,7 @@ function money(value: number, currency: string): string {
   const zero =
     CLDR_ZERO_FORMAT_DIGITS.has(currency.toUpperCase()) &&
     Number.isInteger(value);
-  return value.toFixed(zero ? 0 : 2);
+  return amountText(value, zero ? 0 : 2);
 }
 
 export function toUnallocatedPaymentsCsv(report: UnallocatedPayments): string {

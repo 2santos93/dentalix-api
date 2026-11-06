@@ -1867,6 +1867,22 @@ rechaza), la CHECK `currencies_minor_units_check` rechaza `minor_units > 2` y
 Las cuotas de un plan de pagos se siguen repartiendo al céntimo (también en
 JPY): repartirlas en unidades de la moneda es otra decisión pendiente.
 
+**Sin redondeos sueltos (DX-488).** Fuera de `src/shared/money` ya no queda
+ningún `Math.round(x * k)` ni `.toFixed(` de importes: se redondea con `round2`,
+`roundToDigits` o `roundCents`, y se escribe un importe (claves de
+idempotencia, SQL `numeric`, CSV, presupuestos) con `amountText`. Lo vigila
+`src/architecture/no-loose-money-rounding.spec.ts` (usa `git ls-files`: se
+ejecuta tras commitear); lo que no es dinero (porcentajes, dosis, pesos, tasas
+de cambio, minutos) está en su lista blanca con la razón de cada entrada, y
+una entrada que ya no coincide con nada también falla. Se migró sin cambiar
+ningún resultado. `round2WithEpsilon` conserva el redondeo con `Number.EPSILON`
+del informe de producción por procedimiento, que difiere de `round2` solo en
+empates de coma flotante (1,005 → 1,01 frente a 1): unificarlo es una
+decisión pendiente. **Decisiones pendientes del dueño:** (1) pasar RSD y las demás monedas de la lista de arriba a sus 2
+decimales ISO (hoy `rounding_digits` 0); (2) repartir
+las cuotas del plan de pagos en unidades de la moneda (hoy, al céntimo, también
+en JPY).
+
 **Paridad API/web.** `src/shared/money/rounding-vectors.json` (copia byte a
 byte en la web, `src/lib/money/rounding-vectors.json`, vigilada por
 `scripts/check-api-reference-sync.mjs` de la web) fija RSD, JPY, EUR y ALL con

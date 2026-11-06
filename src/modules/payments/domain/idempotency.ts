@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Payment } from './entities/payment.entity';
+import { amountText } from '../../../shared/money/money';
 
 /** 422 al repetir una Idempotency-Key con otro plan u otro cuerpo (DX-109). */
 export const IDEMPOTENCY_KEY_REUSED_MESSAGE =
@@ -21,7 +22,7 @@ const CIVIL_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 
 function normalizeAmount(amount: unknown): unknown {
   return typeof amount === 'number' && Number.isFinite(amount)
-    ? amount.toFixed(2)
+    ? amountText(amount, 2)
     : (amount ?? null);
 }
 

@@ -60,7 +60,7 @@ import {
   type ConfirmResult,
   type ImportedBalanceTotal,
 } from '../infrastructure/prisma-patient-import.repository';
-import { fromCents } from '../../../shared/money/money';
+import { fromCents, roundCents } from '../../../shared/money/money';
 
 export const PROCESS_IMPORT_JOB = 'patient-imports.process';
 /** Horas que vale un dry-run sin confirmar; después hay que volver a subirlo. */
@@ -252,7 +252,7 @@ function toAmounts(raw: unknown): BalanceCurrencyTotal[] {
   return ((raw ?? []) as CurrencyTotal[]).map((t) => ({
     currency: t.currency,
     rows: t.rows,
-    amount: fromCents(Math.round(t.cents)),
+    amount: fromCents(roundCents(t.cents)),
   }));
 }
 
@@ -833,7 +833,7 @@ export class PatientImportsService {
       imported: (imported.get(batch.id) ?? []).map((t) => ({
         currency: t.currency,
         count: t.count,
-        amount: fromCents(Math.round(t.cents)),
+        amount: fromCents(roundCents(t.cents)),
       })),
       progress: {
         processed: batch.balanceProcessedRows,

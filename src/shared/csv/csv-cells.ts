@@ -1,3 +1,4 @@
+import { amountText } from '../money/money';
 /*
  * Celdas de los CSV de exportación (descuentos y gastos): texto entre
  * comillas, sin saltos de línea, y con el prefijo «'» cuando empieza (tras
@@ -14,7 +15,7 @@ export function csvText(value: string | null): string {
 
 /** Importe con los decimales de su moneda (JPY sin decimales, EUR a céntimos). */
 export function csvAmount(value: number, decimals: 0 | 1 | 2): string {
-  return value.toFixed(decimals);
+  return amountText(value, decimals);
 }
 
 export const CSV_BOM = '\uFEFF';

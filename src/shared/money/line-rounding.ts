@@ -81,6 +81,19 @@ export function unitsToAmount(units: bigint, digits: RoundingDigits): number {
   return Number(units * unitCents(digits)) / 100;
 }
 
+/**
+ * ¿Un importe con los decimales de redondeo de su moneda? (DX-488; antes en
+ * `payment-adjustments`.)
+ */
+export function fitsRoundingDigits(
+  amount: number,
+  digits: RoundingDigits,
+): boolean {
+  const cents = amount * 100;
+  if (Math.abs(cents - Math.round(cents)) > 1e-6) return false;
+  return BigInt(Math.round(cents)) % unitCents(digits) === 0n;
+}
+
 /** Una línea de un documento: precio y descuento guardados. */
 export interface MoneyLine {
   price: number;

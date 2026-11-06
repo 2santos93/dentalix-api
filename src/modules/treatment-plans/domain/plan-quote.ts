@@ -6,7 +6,7 @@ import {
   type ClinicFiscalData,
 } from '../../../shared/clinic/clinic-fiscal';
 import { ToothSurface } from '@prisma/client';
-import { fromCents, toCents } from '../../../shared/money/money';
+import { amountText, fromCents, toCents } from '../../../shared/money/money';
 import {
   lineCents,
   linesTotalCents,
@@ -280,7 +280,7 @@ export function buildQuoteContent(
   };
 }
 
-const money = (value: number): string => (toCents(value) / 100).toFixed(2);
+const money = (value: number): string => amountText(toCents(value) / 100, 2);
 
 /**
  * SHA-256 (hex) del presupuesto. Se serializa como un ARRAY JSON de orden fijo

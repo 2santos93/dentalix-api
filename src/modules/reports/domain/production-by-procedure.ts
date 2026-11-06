@@ -1,3 +1,4 @@
+import { round2WithEpsilon } from '../../../shared/money/money';
 /*
  * «Producción por procedimiento» (DX-423). La base de datos suma, por
  * procedimiento del catálogo y moneda del plan, los ítems REALIZADOS del
@@ -74,7 +75,7 @@ function round(value: number, decimals: number): number {
   return Math.round((value + Number.EPSILON) * factor) / factor;
 }
 
-const money = (value: number) => round(value, 2);
+const money = round2WithEpsilon;
 
 function compareText(a: string, b: string): number {
   return a.localeCompare(b, 'es', { sensitivity: 'base', numeric: true });

@@ -1,3 +1,4 @@
+import { round2 } from '../../../shared/money/money';
 /*
  * Indicadores de «Comparar sedes» (DX-014). ÚNICA definición de cada KPI: qué
  * mide, cómo se calcula a partir de las sumas que hace la base de datos, si es
@@ -223,7 +224,7 @@ export function computeKpis(
   const money = (map: ReadonlyMap<string, number>): CurrencyValue[] =>
     currencies.map((currency) => ({
       currency,
-      value: round(map.get(currency) ?? 0, 2),
+      value: round2(map.get(currency) ?? 0),
     }));
   return {
     production: money(a.production),
@@ -242,7 +243,7 @@ export function computeKpis(
       currency,
       value:
         a.attendedPatients > 0
-          ? round((a.collected.get(currency) ?? 0) / a.attendedPatients, 2)
+          ? round2((a.collected.get(currency) ?? 0) / a.attendedPatients)
           : null,
     })),
     occupancy:

@@ -62,7 +62,7 @@ import type {
   PlanAllocationSnapshot,
   RebalanceOptions,
 } from '../../domain/ports/plan-allocation-repository.port';
-import { toCents } from '../../../../shared/money/money';
+import { amountText, toCents } from '../../../../shared/money/money';
 
 /** Centavos de una columna Decimal (o de un número). */
 const decimalCents = (value: Prisma.Decimal | number): number =>
@@ -618,7 +618,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         INSERT INTO "payment_plan_amounts"
                ("paymentId", "tenantId", "treatmentPlanId", "amount", "currency", "rateDate")
         SELECT ${paymentId}::uuid, ${tenantId}::uuid, t."id",
-               ${amount.toFixed(2)}::numeric, ${currency}, ${rateDate}::date
+               ${amountText(amount, 2)}::numeric, ${currency}, ${rateDate}::date
           FROM "treatment_plans" t
          WHERE t."tenantId" = ${tenantId}::uuid
            AND t."id" = ${payment.treatmentPlanId}::uuid
