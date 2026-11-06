@@ -113,7 +113,7 @@ export class EmailInvitationNotifier implements InvitationNotifier {
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) return;
     try {
-      await this.outbox.assertWithinQuota(tenantId, email);
+      await this.outbox.assertWithinQuota(tenantId, email, 'invitation');
     } catch (err) {
       if (err instanceof EmailQuotaExceededError) throw tooManyRequests(err);
       throw err;

@@ -554,6 +554,31 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
 
+    it.each([
+      [
+        'PASSWORD_RESET_MAX_CONCURRENCY',
+        ['0', '101', 'x', '2.5', '-1'],
+        ['1', '4', '100'],
+      ],
+      [
+        'PASSWORD_RESET_MAX_QUEUE',
+        ['0', '10001', 'x', '1e3', '-1'],
+        ['1', '1000', '10000'],
+      ],
+      [
+        'PASSWORD_RESET_USER_DAILY_LIMIT',
+        ['0', '21', 'x', '2.5', '-1'],
+        ['1', '5', '20'],
+      ],
+    ])('DX-149-quater: %s fuera de rango no arranca', (key, bad, ok) => {
+      for (const value of bad) {
+        expect(errorOf(baseEnv({ [key]: value }))).toContain(key);
+      }
+      for (const value of ok) {
+        expect(() => validateEnv(baseEnv({ [key]: value }))).not.toThrow();
+      }
+    });
+
     it('tope de los emails de plataforma (DX-144): enfriamiento 0..86400 s y 1..1000 al día', () => {
       expect(() =>
         validateEnv(

@@ -1,5 +1,8 @@
 import type { Prisma } from '@prisma/client';
-import { EmailTemplateName } from '../../domain/email-message';
+import {
+  EmailTemplateName,
+  TENANT_DAILY_BUDGET,
+} from '../../domain/email-message';
 import {
   ClaimedOutboxEmail,
   EmailDeliveryStatus,
@@ -228,7 +231,11 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
       null,
     );
     return Promise.resolve({
-      tenant: ofTenant.filter((r) => r.createdAt >= since).length,
+      // DX-149-quater: como el SQL, sin las que no gastan el tope de la clínica.
+      tenant: ofTenant.filter(
+        (r) =>
+          r.createdAt >= since && TENANT_DAILY_BUDGET[r.template] === 'clinic',
+      ).length,
       recipient: toRecipient.filter((r) => r.createdAt >= since).length,
       secondsSinceLastToRecipient: last ? (now - last.getTime()) / 1000 : null,
     });

@@ -53,7 +53,11 @@ export class OutboxPostOpEmailSender implements PostOpEmailSender {
 
   assertCanSend(to: string): Promise<void> {
     return withEmailQuotaAs429(() =>
-      this.outbox.assertWithinQuota(tenantIdOf(this.tenantContext), to),
+      this.outbox.assertWithinQuota(
+        tenantIdOf(this.tenantContext),
+        to,
+        'post-op-instructions',
+      ),
     );
   }
 

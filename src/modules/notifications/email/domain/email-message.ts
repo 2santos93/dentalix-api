@@ -28,6 +28,45 @@ export const EMAIL_TEMPLATES = [
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
+/**
+ * DX-149-quater: si un correo de clínica gasta su tope diario
+ * (`MAIL_TENANT_DAILY_LIMIT`, DX-088) y si lo respeta.
+ * - `clinic`: lo dispara la clínica (su personal o sus trabajos): cuenta en
+ *   el tope y, si encola con tope, se frena al pasarlo.
+ * - `self-service`: lo pide la propia persona desde un endpoint PÚBLICO
+ *   (restablecer la contraseña). Ni cuenta ni se frena: si contara, un
+ *   tercero agotaría el cupo de la clínica pidiendo restablecimientos para su
+ *   personal y la dejaría 24 h sin correos (ni del personal ni
+ *   restablecimientos legítimos). Lo acotan el tope por destinatario y el
+ *   suyo propio (el restablecimiento: por usuario, en `user_tokens`).
+ * Los de plataforma (sin clínica) no entran en ningún recuento de clínica;
+ * se clasifican igual para que la tabla sea exhaustiva.
+ */
+export type TenantDailyBudget = 'clinic' | 'self-service';
+
+export const TENANT_DAILY_BUDGET: Readonly<
+  Record<EmailTemplateName, TenantDailyBudget>
+> = {
+  invitation: 'clinic',
+  'password-reset': 'self-service',
+  'email-verify': 'clinic',
+  'appointment-reminder': 'clinic',
+  'registration-notice': 'clinic',
+  'payment-receipt': 'clinic',
+  'post-op-instructions': 'clinic',
+  'signature-request': 'clinic',
+  'signature-code': 'clinic',
+  'signature-budget-accepted': 'clinic',
+  'slot-offer': 'clinic',
+  'signed-consent-copy': 'clinic',
+  'mfa-notice': 'clinic',
+  'mfa-enrollment-code': 'clinic',
+};
+
+/** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
+export const TENANT_DAILY_EXEMPT_TEMPLATES: readonly EmailTemplateName[] =
+  EMAIL_TEMPLATES.filter((t) => TENANT_DAILY_BUDGET[t] === 'self-service');
+
 /** Idioma de la plantilla (la app está en español). Los formatos son los de la sede (G1-B). */
 export type EmailLocale = 'es';
 

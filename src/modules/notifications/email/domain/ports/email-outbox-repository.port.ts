@@ -67,8 +67,9 @@ export type OutboxQuotaGuard = (sends: RecentSends) => void;
  *   clínica; ninguno de los topes se salta con peticiones a la vez.
  * - `recipient`: solo el del destinatario. Para un endpoint PÚBLICO (el
  *   restablecimiento de contraseña): una inundación contra una clínica no
- *   pone en cola conexiones del pool detrás de su candado. El tope diario de
- *   la clínica se sigue contando, sin candado (aviso, no garantía).
+ *   pone en cola conexiones del pool detrás de su candado. DX-149-quater: esa
+ *   plantilla ya no gasta ni respeta el tope diario de la clínica
+ *   (`TENANT_DAILY_BUDGET`), así que no le hace falta su candado.
  */
 export type QuotaLockScope = 'recipient-and-tenant' | 'recipient';
 

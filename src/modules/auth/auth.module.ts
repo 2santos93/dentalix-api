@@ -23,6 +23,10 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { EmailModule } from '../notifications/email/email.module';
 import { PasswordResetController } from './presentation/password-reset.controller';
 import { RequestPasswordResetUseCase } from './application/use-cases/request-password-reset.use-case';
+import {
+  PASSWORD_RESET_LIMITS,
+  loadPasswordResetLimits,
+} from './application/password-reset-limits';
 import { ResetPasswordUseCase } from './application/use-cases/reset-password.use-case';
 import { PASSWORD_RESET_REPOSITORY } from './domain/ports/password-reset-repository.port';
 import { PASSWORD_RESET_NOTIFIER } from './domain/ports/password-reset-notifier.port';
@@ -124,6 +128,13 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     { provide: COUNTRY_WHITELIST, useClass: PrismaCountryWhitelist },
     // Recuperar la contraseña por email (DX-010).
     RequestPasswordResetUseCase,
+    // DX-149-quater: concurrencia, cola y tope por usuario.
+    {
+      provide: PASSWORD_RESET_LIMITS,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadPasswordResetLimits((key) => config.get<string>(key)),
+    },
     ResetPasswordUseCase,
     {
       provide: PASSWORD_RESET_REPOSITORY,

@@ -2,7 +2,10 @@ import { withClinicLogoUrl } from '../../../../../shared/storage/clinic-logo-url
 import { Injectable } from '@nestjs/common';
 import { EmailOutboxStatus, EmailTemplate, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../../shared/prisma/prisma.service';
-import { EmailTemplateName } from '../../domain/email-message';
+import {
+  EmailTemplateName,
+  TENANT_DAILY_EXEMPT_TEMPLATES,
+} from '../../domain/email-message';
 import {
   ClaimedOutboxEmail,
   EmailOutboxRepository,
@@ -47,6 +50,10 @@ const NOW = Prisma.sql`timezone('utc', now())`;
  * reloj que puso "createdAt". Índices (tenantId, createdAt DESC) y
  * (tenantId, toHash, createdAt DESC). Una sentencia propia: tras esperar un
  * candado, su foto (READ COMMITTED) ya ve lo que confirmó quien lo tenía.
+ *
+ * DX-149-quater: `tenant` (el tope diario de la clínica) no cuenta las
+ * plantillas que no lo gastan (`TENANT_DAILY_BUDGET`: el restablecimiento de
+ * contraseña). `recipient` y el enfriamiento siguen contándolas todas.
  */
 async function countRecentSends(
   tx: Prisma.TransactionClient,
@@ -57,7 +64,8 @@ async function countRecentSends(
     SELECT
       (SELECT count(*)::int FROM "email_outbox"
         WHERE "tenantId" = ${tenantId}
-          AND "createdAt" >= ${NOW} - interval '24 hours') AS "tenant",
+          AND "createdAt" >= ${NOW} - interval '24 hours'
+          AND "template" <> ALL (${TENANT_DAILY_EXEMPT_TEMPLATES}::"EmailTemplate"[])) AS "tenant",
       (SELECT count(*)::int FROM "email_outbox"
         WHERE "tenantId" = ${tenantId} AND "toHash" = ${toHash}
           AND "createdAt" >= ${NOW} - interval '24 hours') AS "recipient",

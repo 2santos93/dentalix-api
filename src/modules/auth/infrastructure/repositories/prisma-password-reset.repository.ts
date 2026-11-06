@@ -10,6 +10,7 @@ import type {
 } from '../../domain/ports/password-reset-repository.port';
 
 const PURPOSE = UserTokenPurpose.PASSWORD_RESET;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * DX-149-ter: `lock_timeout` de la transacción que emite el enlace. El
@@ -112,6 +113,7 @@ export class PrismaPasswordResetRepository implements PasswordResetRepository {
     tokenHash: string;
     expiresAt: Date;
     now: Date;
+    userDailyLimit: number;
     enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
   }): Promise<void> {
     try {
@@ -125,6 +127,20 @@ export class PrismaPasswordResetRepository implements PasswordResetRepository {
         // Orden: fila del usuario, tokens, y el email AL FINAL (sus candados
         // consultivos son lo último que se toma: ningún ciclo con nadie).
         await lockUser(tx, input.userId);
+        // DX-149-quater: el tope POR USUARIO, sumando todas sus clínicas
+        // (`user_tokens` es global). Contado DESPUÉS de tomar su fila: una
+        // sentencia nueva (READ COMMITTED) que ya ve lo que confirmó quien la
+        // tenía. Alcanzado, no se rota nada ni se encola nada.
+        const issuedToday = await tx.userToken.count({
+          where: {
+            userId: input.userId,
+            purpose: PURPOSE,
+            createdAt: { gt: new Date(input.now.getTime() - DAY_MS) },
+          },
+        });
+        if (issuedToday >= input.userDailyLimit) {
+          throw new PasswordResetThrottledError('USER_QUOTA');
+        }
         await tx.userToken.updateMany({
           where: {
             userId: input.userId,
@@ -151,6 +167,12 @@ export class PrismaPasswordResetRepository implements PasswordResetRepository {
       }
       throw err;
     }
+  }
+
+  countIssuedSince(userId: string, since: Date): Promise<number> {
+    return this.prisma.userToken.count({
+      where: { userId, purpose: PURPOSE, createdAt: { gt: since } },
+    });
   }
 
   findByHash(tokenHash: string): Promise<ResetTokenRecord | null> {

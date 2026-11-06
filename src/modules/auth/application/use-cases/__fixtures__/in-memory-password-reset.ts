@@ -23,7 +23,7 @@ interface Member {
 /** Repositorio en memoria con la semántica del de Prisma. */
 export class InMemoryPasswordResetRepository implements PasswordResetRepository {
   members: Member[] = [];
-  tokens: (ResetTokenRecord & { tokenHash: string })[] = [];
+  tokens: (ResetTokenRecord & { tokenHash: string; createdAt: Date })[] = [];
   passwords = new Map<string, string>();
   tokenVersions = new Map<string, number>();
 
@@ -63,6 +63,15 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
     return Promise.resolve(m?.role ?? null);
   }
 
+  /** DX-149-quater: el aviso temprano del tope por usuario (sin candado). */
+  countIssuedSince(userId: string, since: Date): Promise<number> {
+    return Promise.resolve(
+      this.tokens.filter(
+        (t) => t.userId === userId && t.createdAt.getTime() > since.getTime(),
+      ).length,
+    );
+  }
+
   /** Clínicas de las transacciones que encolaron su email (DX-149-ter). */
   issuedWithEmail: string[] = [];
   /** Hace fallar la próxima `issue` antes de cambiar nada. */
@@ -78,12 +87,21 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
     tokenHash: string;
     expiresAt: Date;
     now: Date;
+    userDailyLimit: number;
     enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
   }): Promise<void> {
     if (this.failNextIssue) {
       const error = this.failNextIssue;
       this.failNextIssue = null;
       throw error;
+    }
+    // DX-149-quater: el tope por usuario (todas sus clínicas) en 24 h.
+    const since = input.now.getTime() - 24 * 60 * 60 * 1000;
+    const issuedToday = this.tokens.filter(
+      (t) => t.userId === input.userId && t.createdAt.getTime() > since,
+    ).length;
+    if (issuedToday >= input.userDailyLimit) {
+      throw new PasswordResetThrottledError('USER_QUOTA');
     }
     if (input.enqueue) {
       await input.enqueue({} as Prisma.TransactionClient);
@@ -101,6 +119,7 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
       expiresAt: input.expiresAt,
       usedAt: null,
       invalidatedAt: null,
+      createdAt: input.now,
     });
   }
 

@@ -407,21 +407,78 @@ describe('EmailOutbox + EmailDispatcher', () => {
       },
     });
     await dispatcher.onModuleDestroy();
-    await outbox.assertWithinQuota(TENANT, invitationInput.to);
+    await outbox.assertWithinQuota(TENANT, invitationInput.to, 'invitation');
     await outbox.enqueue(invitationInput);
     await expect(
-      outbox.assertWithinQuota(TENANT, ' ANA.perez@clinica.co '),
+      outbox.assertWithinQuota(TENANT, ' ANA.perez@clinica.co ', 'invitation'),
     ).rejects.toBeInstanceOf(EmailQuotaExceededError);
     for (const r of repo.rows) r.createdAt = new Date(Date.now() - 120_000);
     await outbox.enqueue(invitationInput);
     for (const r of repo.rows) r.createdAt = new Date(Date.now() - 120_000);
     await expect(
-      outbox.assertWithinQuota(TENANT, invitationInput.to),
+      outbox.assertWithinQuota(TENANT, invitationInput.to, 'invitation'),
     ).rejects.toThrow('2 correos a esta persona');
     await outbox.enqueue({ ...invitationInput, to: 'otra@clinica.co' });
     await expect(
-      outbox.assertWithinQuota(TENANT, 'tercera@clinica.co'),
+      outbox.assertWithinQuota(TENANT, 'tercera@clinica.co', 'invitation'),
     ).rejects.toThrow('máximo de 3 correos');
+  });
+
+  it('DX-149-quater: el restablecimiento de contraseña ni gasta ni respeta el tope diario de la clínica; el del destinatario, sí', async () => {
+    const { outbox, dispatcher } = setup(new RecordingMailer(), {
+      quotas: {
+        tenantDaily: 2,
+        recipientDaily: 2,
+        recipientCooldownSeconds: 0,
+      },
+    });
+    await dispatcher.onModuleDestroy();
+    const reset = (to: string) => ({
+      tenantId: TENANT,
+      to,
+      template: 'password-reset' as const,
+      vars: {
+        userName: 'Luisa',
+        resetUrl: 'https://demo.dentalix.app/restablecer/TOKEN',
+        expiresInMinutes: 30,
+      },
+      referenceId: '33333333-3333-4333-8333-333333333333',
+      enforceQuota: 'recipient' as const,
+    });
+    // Tres restablecimientos (más que el tope de la clínica) no lo gastan…
+    for (const to of ['a@clinica.co', 'b@clinica.co', 'c@clinica.co']) {
+      await outbox.enqueue(reset(to));
+    }
+    await outbox.assertWithinQuota(TENANT, 'paciente@correo.co', 'invitation');
+    await outbox.enqueue({ ...invitationInput, enforceQuota: true });
+    await outbox.enqueue({
+      ...invitationInput,
+      to: 'otra@clinica.co',
+      enforceQuota: true,
+    });
+    // …el personal agota el suyo…
+    await expect(
+      outbox.assertWithinQuota(TENANT, 'tercera@clinica.co', 'invitation'),
+    ).rejects.toThrow('máximo de 2 correos');
+    // …y aun así se puede restablecer; solo lo frena su propio destinatario.
+    await outbox.assertWithinQuota(TENANT, 'd@clinica.co', 'password-reset');
+    await outbox.enqueue(reset('d@clinica.co'));
+    await outbox.enqueue(reset('d@clinica.co'));
+    await expect(outbox.enqueue(reset('d@clinica.co'))).rejects.toThrow(
+      '2 correos a esta persona',
+    );
+  });
+
+  it("DX-149-quater (I2): enforceQuota 'recipient' con una plantilla de clínica lanza y no encola nada", async () => {
+    const { outbox, dispatcher, repo } = setup(new RecordingMailer());
+    await dispatcher.onModuleDestroy();
+    await expect(
+      outbox.enqueue({ ...invitationInput, enforceQuota: 'recipient' }),
+    ).rejects.toThrow(/solo para plantillas fuera del tope/);
+    await expect(
+      outbox.prepareInTx({ ...invitationInput, enforceQuota: 'recipient' }),
+    ).rejects.toThrow(/solo para plantillas fuera del tope/);
+    expect(repo.rows).toHaveLength(0);
   });
 
   it('el cierre tardío de un intento ya re-reclamado no pisa el estado (fencing)', async () => {
