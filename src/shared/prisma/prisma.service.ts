@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { TenantContextService } from '../tenancy/tenant-context.service';
 import { guardHardDeletes } from './no-hard-delete';
+import { withinTransactionBudget } from './transaction-budget';
 import { transactionConfigFor } from './transaction-config';
 
 export interface RunWithTenantOptions {
@@ -111,11 +112,15 @@ export class PrismaService
       options = maybeOptions;
     }
 
-    return this.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
-      // `guardHardDeletes`: dentro de una transacción de tenant no se borra
-      // nada de verdad, se retira con `deletedAt`. Ver no-hard-delete.ts.
-      return fn(guardHardDeletes(tx));
-    }, options);
+    // OPS-056: dentro de un presupuesto de transacciones (`withTransactionBudget`)
+    // espera plaza antes de pedir la conexión; fuera de él, igual que siempre.
+    return withinTransactionBudget(() =>
+      this.$transaction(async (tx: Prisma.TransactionClient) => {
+        await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenantId}, true)`;
+        // `guardHardDeletes`: dentro de una transacción de tenant no se borra
+        // nada de verdad, se retira con `deletedAt`. Ver no-hard-delete.ts.
+        return fn(guardHardDeletes(tx));
+      }, options),
+    );
   }
 }
