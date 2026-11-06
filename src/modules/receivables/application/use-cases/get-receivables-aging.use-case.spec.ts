@@ -272,6 +272,65 @@ describe('GetReceivablesAgingUseCase', () => {
     expect(capped.pageSize).toBe(RECEIVABLES_MAX_PAGE_SIZE);
   });
 
+  describe('summary: solo los totales («Mi día», OPS-056)', () => {
+    beforeEach(() => {
+      // Otra moneda y un deudor que en USD solo tiene saldo a favor: cuenta
+      // en los pacientes de USD, como en la cartera.
+      repo.ledgers.push(
+        ledger('p-dolares', 50, '2026-07-01T17:00:00.000Z', {
+          plans: [
+            {
+              id: 'plan-usd',
+              status: 'ACCEPTED',
+              currency: 'USD',
+              createdAt: new Date('2026-07-01T17:00:00.000Z'),
+              billable: 50,
+              agingFrom: new Date('2026-07-01T17:00:00.000Z'),
+            },
+            {
+              id: 'plan-ves-favor',
+              status: 'ACCEPTED',
+              currency: 'VES',
+              createdAt: new Date('2026-07-01T17:00:00.000Z'),
+              billable: 10,
+              agingFrom: new Date('2026-07-01T17:00:00.000Z'),
+            },
+          ],
+          paid: [
+            { treatmentPlanId: 'plan-ves-favor', currency: 'VES', amount: 25 },
+          ],
+        }),
+      );
+    });
+
+    it.each([{}, { locationId: NORTE.id }])(
+      'los mismos totales que la cartera (%p)',
+      async (filters) => {
+        const page = await useCase.execute({
+          ...filters,
+          page: 1,
+          pageSize: 1,
+        });
+        await expect(useCase.summary(filters)).resolves.toEqual({
+          totals: page.totals,
+        });
+      },
+    );
+
+    it('no pide contactos ni cobranza de nadie', async () => {
+      await useCase.summary({ locationId: NORTE.id });
+      expect(repo.debtorQueries).toEqual([]);
+      expect(repo.collectionQueries).toEqual([]);
+      expect(repo.ledgerQueries).toEqual([{ locationId: NORTE.id }]);
+    });
+
+    it('una sede que no es de la clínica es el mismo 400', async () => {
+      await expect(useCase.summary({ locationId: 'otra' })).rejects.toThrow(
+        new BadRequestException('La sede no es de esta clínica.'),
+      );
+    });
+  });
+
   it('una sede que no es de la clínica es un 400 en español', async () => {
     await expect(useCase.execute({ locationId: 'otra' })).rejects.toThrow(
       new BadRequestException('La sede no es de esta clínica.'),

@@ -1552,6 +1552,9 @@ patient_ledgers_refresh(ARRAY['<tenant>']::uuid[], ARRAY['<paciente>']::uuid[])`
   del estado de cuenta, que crece con los deudores.
 - **Sin datos clínicos**: ni ítems, ni dientes, ni procedimientos; solo
   importes, fechas y el contacto (con `whatsApp` en E.164 para `wa.me`).
+- **«Mi día» (OPS-056)** solo pide los totales (`summary`): las mismas filas y
+  el mismo cálculo, sin página, orden, contactos ni cobranza, y con una lectura
+  tras otra (ver «Conexiones por petición: «Mi día»»).
 
 ## Compromiso de pago que se reabre al anular su abono (DX-215)
 
@@ -6258,6 +6261,46 @@ Para que una petición o una transacción colgada no agote el pool:
     transacción, lo de sentencias anteriores ya quedó guardado.
 - `validateEnv` no deja arrancar con un valor fuera de rango ni con las
   relaciones rotas, y dice cuál.
+
+### Conexiones por petición: «Mi día» (OPS-056)
+
+El runbook dimensiona `connection_limit` con **2 transacciones a la vez por
+petición** (la del caso de uso y la de la auditoría; ver `.env.example`).
+`GET /work-queues/summary` («Mi día», DX-503), que la web pide cada 60 s en
+cada pestaña visible, reúne hasta 8 listas y cada una abre varias
+transacciones en paralelo: antes llegaba a **12 abiertas a la vez** con un
+ADMIN (medido en `test/work-queues.e2e-spec.ts`), más que todo el pool de
+ejemplo (`connection_limit=10`). Ahora:
+
+- **Como mucho 2 conexiones a la vez por petición del resumen**
+  (`WORK_QUEUES_MAX_CONNECTIONS`): corren 2 listas a la vez
+  (`settleWithLimit`) y toda la petición va dentro de un presupuesto de 2
+  transacciones (`withTransactionBudget`, `src/shared/prisma/transaction-budget.ts`):
+  cada `runWithTenant` espera plaza antes de pedir su conexión, también los
+  `Promise.all` de dentro de cada lista. La espera por la plaza no cuenta para
+  `TENANT_TX_MAX_WAIT_MS`. Una transacción abierta desde dentro de otra no
+  espera plaza (sería un interbloqueo) y sí suma una conexión; la e2e mide el
+  pico con todas las listas de ADMIN y exige ≤ 2. Fuera de un presupuesto, `runWithTenant` no cambia. Las
+  lecturas de tablas de referencia fuera de transacción (`currencies`, con su
+  caché de 5 min) no pasan por el presupuesto.
+- **Caché corta**: cada réplica guarda el resumen 30 s
+  (`WORK_QUEUES_CACHE_TTL_MS`, como mucho 5.000 entradas) por clínica, sede
+  activa, sedes permitidas, rol, usuario y listas pedidas; nunca se comparte
+  entre ellos. Las pestañas de un mismo usuario comparten el cálculo y un
+  número puede llegar con hasta 30 s de retraso (`generatedAt` es el instante
+  del cálculo). Una respuesta con alguna lista en `ERROR` no se guarda.
+- **Cartera, solo los totales**: la lista de cartera usa
+  `GetReceivablesAgingUseCase.summary`: las mismas filas y el mismo cálculo que
+  `GET /receivables/aging/summary` (mismo número, lo comprueba
+  `test/receivables-summary.int-spec.ts`), con las lecturas una tras otra y sin
+  ordenar ni pedir contactos ni cobranza.
+- Una lista que falla deja en el log un evento estructurado
+  (`work_queues.source_failed` con `key`, `error` —el tipo— y `code`), nunca el
+  mensaje, que puede llevar valores.
+
+Para dimensionar: una pestaña de «Mi día» abierta cuenta como una petición de
+2 transacciones cada 60 s (o menos, si otra pestaña del mismo usuario acaba de
+pedirlo).
 - `create-app-role.sql` fija los dos topes de `dentalix_app` en cada ejecución
   (idempotente). Si el owner no tiene ADMIN OPTION sobre el rol (lo creó otro),
   avisa con un `WARNING` con los `ALTER ROLE` que tiene que ejecutar un admin.
