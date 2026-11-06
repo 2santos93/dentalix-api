@@ -423,6 +423,38 @@ const SIN_COLOMBIA = '20261110130000_sin_colombia_identificadores';
  * relleno. Sin fixture propio: usa las clínicas y los pacientes P_A y P_B.
  */
 const DX330 = '20261113110000_dx330_tenant_clinical_record_retention';
+/** DX-467: código de verificación de la receta (columna, índice y barrido). */
+const DX467 = '20261127090000_dx467_prescription_verification_code';
+const RX_CODE = /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/;
+
+/**
+ * Esquema de 20261127090000 (DX-467): recetas únicas ya emitidas en las dos
+ * clínicas (tres en A, una de ellas anulada; dos en B), sin código. El
+ * barrido corre con el owner sin superusuario: con FORCE solo ve las recetas
+ * de la clínica que fija en `app.current_tenant`, lote a lote.
+ */
+const rxRow = (tenant: string, patient: string, user: string, n: number) =>
+  `(gen_random_uuid(),'${tenant}',
+    (SELECT "id" FROM "locations" WHERE "tenantId" = '${tenant}' ORDER BY "createdAt", "id" LIMIT 1),
+    '${patient}','${user}',true,false,now(),'2026-11-01','2026-11-30',
+    'Paciente ${n}','Dr. ${n}','RM-${n}','Clínica','Sede','2026-10-24','[]'::jsonb,
+    '${String(n).repeat(64).slice(0, 64)}')`;
+const FIXTURE_DX467 = [
+  `INSERT INTO "prescriptions" ("id","tenantId","locationId","patientId","professionalId",
+     "singleFormat","printQuantityInWords","issuedAt","dispensationDate","validUntil",
+     "patientName","professionalName","professionalLicense","clinicName","locationName",
+     "safetyRulesVersion","safetyAlerts","contentHash")
+   VALUES ${[
+     rxRow(T_A, P_A, U_A, 1),
+     rxRow(T_A, P_A, U_A, 2),
+     rxRow(T_A, P_A, U_A, 3),
+     rxRow(T_B, P_B, U_B, 4),
+     rxRow(T_B, P_B, U_B, 5),
+   ].join(',\n')}`,
+  `UPDATE "prescriptions" SET "status" = 'VOIDED', "voidedAt" = now(),
+          "voidedById" = '${U_A}', "voidReason" = 'Error'
+    WHERE "patientName" = 'Paciente 2'`,
+];
 
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
@@ -519,8 +551,11 @@ const STEPS: Step[] = [
   // sin_colombia_identificadores: tipos de pagador y código de documento
   // anteriores traducidos o renombrados; y las siguientes hasta DX-330.
   { until: DX330 },
-  // dx330: plazo de la HC en la clínica y suelo por paciente; y las siguientes.
-  { until: '99999999999999' },
+  // dx330: plazo de la HC en la clínica y suelo por paciente; y las
+  // siguientes hasta DX-467.
+  { until: DX467 },
+  // dx467: código de verificación de las recetas ya emitidas; y las siguientes.
+  { until: '99999999999999', fixture: FIXTURE_DX467 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -1663,6 +1698,58 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
       await scalar<boolean>(
         `SELECT relforcerowsecurity AS v FROM pg_class
           WHERE oid = 'public.patients'::regclass`,
+      ),
+    ).toBe(true);
+  }, 180_000);
+
+  it('DX-467: el barrido da código a las recetas de CADA clínica con FORCE y un owner sin superusuario', async () => {
+    // Estado y hash de cada receta antes del tramo (con el fixture cargado).
+    const snapshot = () =>
+      scalar<string>(
+        `SELECT string_agg("tenantId" || ':' || "contentHash" || ':' || "status", ','
+              ORDER BY "patientName") AS v FROM "prescriptions"`,
+      );
+    let hashesBefore = '';
+    await run(STEPS[30], async () => {
+      hashesBefore = await snapshot();
+    });
+    expect(hashesBefore).toContain(T_B);
+    const rows = await target.$queryRaw<
+      { tenantId: string; code: string | null; status: string }[]
+    >`SELECT "tenantId"::text AS "tenantId", "verificationCode" AS "code",
+             "status"::text AS "status"
+        FROM "prescriptions" ORDER BY "patientName"`;
+    // Ninguna se queda sin código (el barrido no "pasó" sin hacer nada) y
+    // cada una sigue en su clínica, con su estado y su hash.
+    expect(rows.map((r) => r.tenantId)).toEqual([T_A, T_A, T_A, T_B, T_B]);
+    for (const r of rows) expect(r.code).toMatch(RX_CODE);
+    expect(new Set(rows.map((r) => r.code)).size).toBe(5);
+    expect(await snapshot()).toBe(hashesBefore);
+    // Con la RLS de una clínica (como la ruta pública), solo sus códigos.
+    const visible = async (tenant: string): Promise<number> => {
+      const [row] = await target.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          `SELECT set_config('app.current_tenant', '${tenant}', true)`,
+        );
+        await tx.$executeRawUnsafe(`SET LOCAL ROLE "${env.owner}"`);
+        return tx.$queryRaw<{ n: number }[]>`
+          SELECT count(*)::int AS n FROM "prescriptions"
+           WHERE "verificationCode" IS NOT NULL`;
+      });
+      return row.n;
+    };
+    expect(await visible(T_A)).toBe(3);
+    expect(await visible(T_B)).toBe(2);
+    expect(
+      await scalar<string>(
+        `SELECT is_nullable AS v FROM information_schema.columns
+          WHERE table_name = 'prescriptions' AND column_name = 'verificationCode'`,
+      ),
+    ).toBe('NO');
+    expect(
+      await scalar<boolean>(
+        `SELECT relforcerowsecurity AS v FROM pg_class
+          WHERE oid = 'public.prescriptions'::regclass`,
       ),
     ).toBe(true);
   }, 180_000);
