@@ -191,6 +191,9 @@ model Tenant {
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
   // DX-211: sillones de las sedes.
   chairs                                  Chair[]
+  // DX-542: equipos biomédicos de las sedes y sus mantenimientos.
+  equipment                               Equipment[]
+  equipmentMaintenances                   EquipmentMaintenance[]
   providerSchedules                       ProviderSchedule[]
   providerScheduleOverrides               ProviderScheduleOverride[]
   // DX-247: confirmaciones «Sin cambios hoy» de la anamnesis.
@@ -278,6 +281,10 @@ model User {
   // DX-191: implantes colocados, anulados y tarjetas entregadas.
   implantsPlaced                    PatientImplant[]                 @relation("PatientImplantProfessional")
   implantsVoided                    PatientImplant[]                 @relation("PatientImplantVoidedBy")
+  // DX-542: bajas de equipos y mantenimientos registrados o anulados.
+  equipmentRetired                  Equipment[]                      @relation("EquipmentRetiredBy")
+  equipmentMaintenancesCreated      EquipmentMaintenance[]           @relation("EquipmentMaintenanceCreatedBy")
+  equipmentMaintenancesVoided       EquipmentMaintenance[]           @relation("EquipmentMaintenanceVoidedBy")
   implantCardsDelivered             PatientImplant[]                 @relation("PatientImplantCardDeliveredBy")
   // DX-151: documentos del paciente subidos y anulados.
   uploadedPatientDocuments          PatientDocument[]                @relation("PatientDocumentUploadedBy")
@@ -480,6 +487,8 @@ model Location {
   // DX-233: horario de los profesionales en la sede y sus excepciones.
   // DX-211: sillones de la sede.
   chairs                     Chair[]
+  // DX-542: equipos biomédicos de la sede.
+  equipment                  Equipment[]
   providerSchedules          ProviderSchedule[]
   providerScheduleOverrides  ProviderScheduleOverride[]
   // DX-279: versiones de la política de cancelación de la sede.
@@ -2244,6 +2253,8 @@ model Currency {
   cashAdjustments            CashSessionAdjustment[]
   // DX-274: gastos y sus pagos en esa moneda.
   expenses                   Expense[]
+  // DX-542: costo de los mantenimientos de equipos en esa moneda.
+  equipmentMaintenances      EquipmentMaintenance[]
   // DX-105: listas de precios en esa moneda.
   priceLists                 PriceList[]
   // DX-262: saldos migrados en esa moneda.
@@ -2992,6 +3003,8 @@ model Chair {
   // MISMA clínica, y la membresía es la de ese usuario.
   defaultProviderMembership ClinicMembership? @relation(fields: [tenantId, defaultProviderMembershipId, defaultProviderId], references: [tenantId, id, userId], onDelete: Restrict, map: "chairs_default_provider_fkey")
   appointments              Appointment[]
+  // DX-542: equipos asignados al sillón (de la MISMA sede).
+  equipment                 Equipment[]
 
   // Destino de la FK compuesta de appointments: el sillón de la MISMA sede.
   @@unique([tenantId, locationId, id], map: "chairs_tenant_location_id_key")
@@ -3001,6 +3014,127 @@ model Chair {
   // NO aceptar un diff de migrate dev que lo recree sobre `name` a secas.
   @@index([tenantId, defaultProviderMembershipId, defaultProviderId], map: "chairs_default_provider_idx")
   @@map("chairs")
+}
+
+/// DX-542: tipo de equipo biomédico (dotación de la sede).
+enum EquipmentCategory {
+  AUTOCLAVE
+  DENTAL_UNIT
+  XRAY
+  COMPRESSOR
+  CURING_LIGHT
+  ULTRASONIC_SCALER
+  OTHER
+}
+
+/// DX-542: clasificación por riesgo del dispositivo (opcional).
+enum EquipmentRiskClass {
+  I
+  IIA
+  IIB
+  III
+}
+
+/// DX-542: activo o dado de baja (con fecha y motivo; no se deshace).
+enum EquipmentStatus {
+  ACTIVE
+  RETIRED
+}
+
+/// DX-542: tipo de mantenimiento de un equipo.
+enum EquipmentMaintenanceKind {
+  PREVENTIVE
+  CORRECTIVE
+  CALIBRATION
+}
+
+/// DX-542: equipo biomédico de una sede, con su hoja de vida. RLS FORCE por
+/// tenant. No se borra (sin DELETE para dentalix_app): se da de baja.
+/// Solo SQL: CHECK de longitudes, de la periodicidad (1–120) y de la baja
+/// (RETIRED <=> fecha, motivo y quién).
+model Equipment {
+  id                        String              @id @default(uuid()) @db.Uuid
+  tenantId                  String              @db.Uuid
+  locationId                String              @db.Uuid
+  /// Sillón de la MISMA sede (FK compuesta con locationId) o null.
+  chairId                   String?             @db.Uuid
+  name                      String              @db.VarChar(120)
+  category                  EquipmentCategory
+  brand                     String?             @db.VarChar(80)
+  model                     String?             @db.VarChar(80)
+  serialNumber              String?             @db.VarChar(80)
+  /// Texto libre: el registro del producto ante la autoridad que toque.
+  sanitaryRegistration      String?             @db.VarChar(80)
+  riskClass                 EquipmentRiskClass?
+  acquiredOn                DateTime?           @db.Date
+  /// Periodicidad del mantenimiento preventivo en meses (1–120) o null.
+  maintenanceIntervalMonths Int?                @db.SmallInt
+  status                    EquipmentStatus     @default(ACTIVE)
+  retiredOn                 DateTime?           @db.Date
+  retiredReason             String?
+  retiredById               String?             @db.Uuid
+  notes                     String?
+  /// Punteros suaves a User, como los de `chairs`.
+  createdById               String?             @db.Uuid
+  updatedById               String?             @db.Uuid
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location     Location               @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "equipment_location_fkey")
+  // FK COMPUESTA: el sillón es de la MISMA clínica y de la MISMA sede.
+  chair        Chair?                 @relation(fields: [tenantId, locationId, chairId], references: [tenantId, locationId, id], onDelete: Restrict, map: "equipment_chair_fkey")
+  retiredBy    User?                  @relation("EquipmentRetiredBy", fields: [retiredById], references: [id], onDelete: Restrict, map: "equipment_retired_by_fkey")
+  maintenances EquipmentMaintenance[]
+
+  /// Destino de la FK compuesta de `equipment_maintenances`.
+  @@unique([tenantId, id], map: "equipment_tenant_id_key")
+  /// Lista por sede (y lado hijo de la FK a la sede), por nombre.
+  @@index([tenantId, locationId, name, id], map: "equipment_tenant_location_name_idx")
+  /// Lista consolidada de la clínica, por nombre.
+  @@index([tenantId, name, id], map: "equipment_tenant_name_idx")
+  /// Lado hijo de la FK al sillón.
+  @@index([tenantId, locationId, chairId], map: "equipment_chair_idx")
+  @@index([retiredById], map: "equipment_retired_by_idx")
+  @@map("equipment")
+}
+
+/// DX-542: mantenimiento de un equipo (hoja de vida). INALTERABLE: solo se
+/// anula una vez, con motivo (trigger dx_equipment_maintenances_immutable);
+/// DELETE/TRUNCATE solo un superusuario. RLS FORCE por tenant.
+model EquipmentMaintenance {
+  id          String                   @id @default(uuid()) @db.Uuid
+  tenantId    String                   @db.Uuid
+  equipmentId String                   @db.Uuid
+  kind        EquipmentMaintenanceKind
+  performedOn DateTime                 @db.Date
+  technician  String?                  @db.VarChar(120)
+  company     String?                  @db.VarChar(120)
+  description String
+  /// Costo opcional, SIEMPRE con su moneda (CHECK).
+  cost        Decimal?                 @db.Decimal(14, 2)
+  currency    String?
+  /// Próximo mantenimiento que dejó fijado (explícito o por la periodicidad).
+  nextDueOn   DateTime?                @db.Date
+  createdById String                   @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt   DateTime                 @default(now())
+  voidedAt    DateTime?
+  voidedById  String?                  @db.Uuid
+  voidReason  String?
+
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  equipment   Equipment @relation(fields: [tenantId, equipmentId], references: [tenantId, id], onDelete: Restrict, map: "equipment_maintenances_equipment_fkey")
+  currencyRef Currency? @relation(fields: [currency], references: [code], onDelete: Restrict, map: "equipment_maintenances_currency_fkey")
+  createdBy   User      @relation("EquipmentMaintenanceCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "equipment_maintenances_created_by_fkey")
+  voidedBy    User?     @relation("EquipmentMaintenanceVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict, map: "equipment_maintenances_voided_by_fkey")
+
+  /// Hoja de vida en orden cronológico y último preventivo vivo.
+  @@index([tenantId, equipmentId, performedOn, createdAt], map: "equipment_maintenances_equipment_performed_idx")
+  @@index([currency], map: "equipment_maintenances_currency_idx")
+  @@index([createdById], map: "equipment_maintenances_created_by_idx")
+  @@index([voidedById], map: "equipment_maintenances_voided_by_idx")
+  @@map("equipment_maintenances")
 }
 
 model ProviderSchedule {
@@ -3759,6 +3893,10 @@ enum AuditResourceType {
   INVENTORY_MOVEMENT
   // DX-211: sillones de cada sede (alta, edición, orden, desactivación).
   CHAIR
+  // DX-542: equipos biomédicos de la sede (alta, edición, baja) y sus
+  // mantenimientos (registro y anulación).
+  EQUIPMENT
+  EQUIPMENT_MAINTENANCE
   // DX-015: recall del paciente (intervalo, desactivación) y sus contactos.
   PATIENT_RECALL
   RECALL_CONTACT
