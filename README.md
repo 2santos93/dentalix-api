@@ -2264,6 +2264,55 @@ todos.
 - **Demo**: el ADMIN ve la unidad del Sillón 1 (Sede Norte, vencida) y los
   rayos X periapical (principal, vence pronto) con «Todas las sedes».
 
+## Expediente de rayos X por sede (DX-544)
+
+Módulo `src/modules/radiology`, tabla `radiology_records`: los documentos
+regulatorios con vencimiento de cada sede, la **licencia** de práctica
+(`LICENSE`, categoría `I` o `II`) y el **control de calidad** de un tercero
+(`QUALITY_CONTROL`, sin categoría). Cada uno es de una sede y, si se quiere,
+de un equipo de rayos X (`category = 'XRAY'`) ACTIVO de ESA sede (DX-542).
+Dosimetría, certificados y capacitación del personal y el PDF adjunto quedan
+para la porción 2.
+
+| Método | Ruta | Roles |
+|---|---|---|
+| GET | `/radiology-records?locationId&kind&status=LIVE\|VOIDED\|ALL&page&pageSize` | DENTIST, ADMIN |
+| GET | `/radiology-records/due?limit=1..50` | DENTIST, ADMIN |
+| GET | `/radiology-records/:id` | DENTIST, ADMIN |
+| POST | `/radiology-records` | ADMIN (201) |
+| PATCH | `/radiology-records/:id` | ADMIN (409 si está anulado) |
+| POST | `/radiology-records/:id/void` | ADMIN, `{ reason }` (200; 409 la segunda vez) |
+
+- **Vencimiento**: el que dice el papel o, si no se escribe, la expedición +
+  60 meses (licencia I), + 48 (licencia II) o + 24 (control de calidad),
+  recortando a fin de mes. En la edición: `expiresOn` manda; `null` lo
+  recalcula; sin él, se recalcula solo si cambian la expedición o la
+  categoría. Posterior a la expedición y a 10 años como mucho. La expedición
+  no es futura en el día de la sede.
+- **Estado** (`status`, en el día de la sede): `OVERDUE`, `DUE_SOON` (hoy a
+  +90 días; la renovación de la licencia se pide unos 60 días hábiles antes),
+  `UP_TO_DATE` o `RENEWED` (otro documento vivo del mismo tipo, sede y equipo
+  vence después: ya se renovó y no avisa). `null` si está anulado.
+- **Encargado u oficial de protección radiológica**: un miembro ACTIVO del
+  personal (`officerUserId`, guardado con su membresía por FK compuesta) O un
+  nombre escrito (`officerName`), nunca los dos.
+- **Avisos en «Mi día»** (`/due`): vivos, sin renovar, vencidos o ≤90 días, de
+  lo más urgente a lo menos, en la sede de `X-Location-Id` o las permitidas.
+  La BD preselecciona hasta el día UTC + 91 (`radiologyDueCandidatesSql`) y el
+  dominio (`selectRadiologyDue`) decide con el «hoy» de cada sede.
+- **Red en la BD** (`20261127090100_dx544_radiology_records`): RLS ENABLE +
+  FORCE con `tenant_isolation` (NULLIF), sin DELETE/TRUNCATE para
+  `dentalix_app`; FK compuestas a la sede, al equipo de la MISMA sede
+  (`equipment_tenant_location_id_key`, ON UPDATE RESTRICT: un equipo con
+  documentos no se traslada de sede, `PATCH /equipment/:id` da 409) y a la
+  membresía del encargado; CHECK de la categoría solo en LICENSE, del número
+  obligatorio en LICENSE, del vencimiento y del encargado; trigger
+  `dx_radiology_records_voided_final` (anulado ya no cambia). Índice
+  `(tenantId, locationId, expiresOn, id)`.
+- **Auditoría**: `RADIOLOGY_RECORD` (CREATE, UPDATE, VOID).
+- **Demo**: una licencia Cat. I del periapical de la Sede principal que vence
+  en 45 días y un control de calidad de la Sede Norte vencido hace 12.
+
 ## Personal restringido a sedes (DX-089)
 
 Un miembro puede atender solo en algunas sedes de la clínica (la recepción de
