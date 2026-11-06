@@ -5,6 +5,12 @@ import {
   CreateClinicalEntryRepoInput,
   ListClinicalEntriesParams,
 } from '../../domain/ports/clinical-entry-repository.port';
+import {
+  PLATFORM_DEFAULT_CLINICAL_ENTRY_SETTINGS,
+  type ClinicalEntrySettings,
+  type ClinicalEntrySettingsRepository,
+} from '../../domain/ports/clinical-entry-settings-repository.port';
+import { licenseSnapshot } from '../../domain/author-license';
 
 /**
  * Repositorio de evoluciones en memoria con estado (append-only): `rows` es lo
@@ -16,6 +22,8 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
   readonly appointments: ClinicalEntryAppointmentRef[] = [];
   /** DX-212: la tabla CIE-10 de los tests. */
   readonly icd10 = new Set(['K02.1', 'K05.1', 'K04.0', 'Z01.2']);
+  /** DX-540: registro profesional de cada usuario en la clínica (sin fila = sin registro). */
+  readonly licenses = new Map<string, string>();
   /** DX-231: zona de la sede de escritura de los tests (Caracas, UTC−4). */
   writeTimeZone = 'America/Caracas';
   private nextId = 1;
@@ -33,6 +41,10 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
       reason: input.reason ?? null,
       notes: input.notes,
       performedById: input.performedById ?? null,
+      // DX-540: foto del registro al firmar, como el repositorio real.
+      authorProfessionalLicense: licenseSnapshot(
+        this.licenses.get(input.performedById),
+      ),
       appointmentId: input.appointmentId ?? null,
       templateId: input.templateId ?? null,
       appointment: null,
@@ -50,6 +62,10 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
     // Append-only: push a NEW row, never mutate/replace an existing one.
     this.rows.push(row);
     return Promise.resolve(structuredClone(row));
+  }
+
+  authorLicense(userId: string): Promise<string | null> {
+    return Promise.resolve(licenseSnapshot(this.licenses.get(userId)));
   }
 
   findAppointment(id: string): Promise<ClinicalEntryAppointmentRef | null> {
@@ -73,5 +89,24 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
 
   existingIcd10Codes(codes: string[]): Promise<Set<string>> {
     return Promise.resolve(new Set(codes.filter((c) => this.icd10.has(c))));
+  }
+}
+
+/** DX-540: ajustes de las evoluciones en memoria (de fábrica: sin aviso). */
+export class InMemoryClinicalEntrySettingsRepository implements ClinicalEntrySettingsRepository {
+  value: ClinicalEntrySettings = {
+    ...PLATFORM_DEFAULT_CLINICAL_ENTRY_SETTINGS,
+  };
+
+  get(): Promise<ClinicalEntrySettings> {
+    return Promise.resolve({ ...this.value });
+  }
+
+  set(
+    next: ClinicalEntrySettings,
+  ): Promise<{ before: ClinicalEntrySettings; after: ClinicalEntrySettings }> {
+    const before = this.value;
+    this.value = { ...next };
+    return Promise.resolve({ before, after: { ...next } });
   }
 }

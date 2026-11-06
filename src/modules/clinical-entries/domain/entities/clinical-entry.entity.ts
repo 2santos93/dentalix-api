@@ -44,6 +44,12 @@ export interface ClinicalEntry {
   reason: string | null;
   notes: string;
   performedById: string | null;
+  /**
+   * DX-540: registro profesional del autor congelado al firmar (el de su
+   * membresía en esta clínica en ese momento). null si no lo tenía o en las
+   * evoluciones anteriores. Cambiar el registro después no lo toca.
+   */
+  authorProfessionalLicense: string | null;
   /** DX-170: cita ligada (null en las evoluciones sueltas y anteriores). */
   appointmentId: string | null;
   /**

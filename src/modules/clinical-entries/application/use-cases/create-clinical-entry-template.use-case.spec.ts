@@ -7,7 +7,10 @@ import { patientsInClinic } from '../../../patients/application/__fixtures__/pat
 import { InMemoryClinicalNoteTemplateRepository } from '../../../clinical-note-templates/application/__fixtures__/in-memory-clinical-note-templates';
 import { UpdateNoteTemplateUseCase } from '../../../clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import type { NoteTemplateDraft } from '../../../clinical-note-templates/domain/note-template-rules';
-import { InMemoryClinicalEntryRepository } from '../__fixtures__/in-memory-clinical-entries';
+import {
+  InMemoryClinicalEntryRepository,
+  InMemoryClinicalEntrySettingsRepository,
+} from '../__fixtures__/in-memory-clinical-entries';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
 
@@ -42,6 +45,7 @@ function setup() {
     patientsInClinic('p1', 'p2'),
     templates,
     tenantContext,
+    new InMemoryClinicalEntrySettingsRepository(),
   );
   const [surface, material, remarks] = resin.prompts;
   return {

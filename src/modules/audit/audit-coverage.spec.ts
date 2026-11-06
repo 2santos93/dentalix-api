@@ -20,6 +20,7 @@ import { PatientAnamnesisRequestsController } from '../medical-history-submissio
 import { PatientSignatureRequestsController } from '../signature-requests/presentation/patient-signature-requests.controller';
 import { MedicalHistorySubmissionsController } from '../medical-history-submissions/presentation/medical-history-submissions.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
+import { ClinicalEntrySettingsController } from '../clinical-entries/presentation/clinical-entry-settings.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
 import { PriceListsController } from '../price-lists/presentation/price-lists.controller';
 import { AgreementsController } from '../agreements/presentation/agreements.controller';
@@ -1536,6 +1537,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // Vigencia de la anamnesis: CLINIC_SETTINGS con ANAMNESIS_VALIDITY_SETTINGS.
   'PUT /medical-history/settings':
     'medical-alerts.spec.ts y appointments-medical-alerts.e2e-spec.ts',
+  // DX-540: CLINIC_SETTINGS con CLINICAL_ENTRY_LICENSE_WARNING (OFF/ON); sin evento si no cambia.
+  'PUT /clinical-entries/settings':
+    'clinical-entry-license.use-cases.spec.ts y clinical-entry-license.e2e-spec.ts',
   // APPOINTMENT_PLAN_ITEMS en cada cita, en la transacción del traspaso.
   'POST /appointments/:id/plan-items/:planItemId/claim':
     'plan-items-arrival.e2e-spec.ts',
@@ -1812,6 +1816,7 @@ const CONTROLLERS: Type[] = [
   PatientAgreementsController,
   MedicalHistoryController,
   ClinicalEntriesController,
+  ClinicalEntrySettingsController,
   AnesthesiaController,
   AnestheticsController,
   SedationController,

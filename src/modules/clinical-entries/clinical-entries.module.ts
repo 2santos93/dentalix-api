@@ -1,6 +1,14 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ClinicalEntriesController } from './presentation/clinical-entries.controller';
+import { ClinicalEntrySettingsController } from './presentation/clinical-entry-settings.controller';
+import {
+  GetClinicalEntrySettingsUseCase,
+  GetClinicalEntrySigningUseCase,
+  UpdateClinicalEntrySettingsUseCase,
+} from './application/use-cases/clinical-entry-settings.use-cases';
+import { CLINICAL_ENTRY_SETTINGS_REPOSITORY } from './domain/ports/clinical-entry-settings-repository.port';
+import { PrismaClinicalEntrySettingsRepository } from './infrastructure/repositories/prisma-clinical-entry-settings.repository';
 import { CreateClinicalEntryUseCase } from './application/use-cases/create-clinical-entry.use-case';
 import { ListClinicalEntriesUseCase } from './application/use-cases/list-clinical-entries.use-case';
 import { CLINICAL_ENTRY_REPOSITORY } from './domain/ports/clinical-entry-repository.port';
@@ -27,12 +35,16 @@ import { ClinicalNoteTemplatesModule } from '../clinical-note-templates/clinical
     PatientsModule,
     ClinicalNoteTemplatesModule,
   ],
-  controllers: [ClinicalEntriesController],
+  // DX-540: ClinicalEntrySettingsController (aviso de registro profesional).
+  controllers: [ClinicalEntriesController, ClinicalEntrySettingsController],
   providers: [
     CreateClinicalEntryUseCase,
     ListClinicalEntriesUseCase,
     CreateClinicalEntryAddendumUseCase,
     ListClinicalEntryAddendaUseCase,
+    GetClinicalEntrySigningUseCase,
+    GetClinicalEntrySettingsUseCase,
+    UpdateClinicalEntrySettingsUseCase,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on ClinicalEntriesController.
@@ -40,6 +52,10 @@ import { ClinicalNoteTemplatesModule } from '../clinical-note-templates/clinical
     {
       provide: CLINICAL_ENTRY_REPOSITORY,
       useClass: PrismaClinicalEntryRepository,
+    },
+    {
+      provide: CLINICAL_ENTRY_SETTINGS_REPOSITORY,
+      useClass: PrismaClinicalEntrySettingsRepository,
     },
     {
       provide: CLINICAL_ENTRY_ADDENDUM_REPOSITORY,

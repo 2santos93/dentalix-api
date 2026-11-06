@@ -63,6 +63,8 @@ model Tenant {
   prescriptionRequireClinicalRecordNumber Boolean                          @default(false)
   /// DX-324: días que vale la receta desde la fecha de inicio. CHECK 1..365. 30 de plataforma.
   prescriptionValidityDays                Int                              @default(30)
+  /// DX-540: avisar al firmar una evolución si el autor no tiene registro profesional (no bloquea). false al crear la clínica; ninguna regla lo deduce del país. Solo ADMIN (PUT /clinical-entries/settings, auditado).
+  clinicalEntryLicenseWarning             Boolean                          @default(false)
   /// DX-374: de dónde sale la tasa de cambio del día de la clínica: el
   /// proveedor (AUTOMATIC, lo de siempre) o las tasas manuales que registra
   /// el ADMIN (MANUAL). Lo cambia el ADMIN (PUT /exchange/settings, auditado).
@@ -957,22 +959,24 @@ model MedicalHistorySubmission {
 }
 
 model ClinicalEntry {
-  id            String    @id @default(uuid()) @db.Uuid
-  tenantId      String    @db.Uuid
-  patientId     String    @db.Uuid
-  entryDate     DateTime
-  reason        String?
-  notes         String
-  performedById String?   @db.Uuid
+  id                        String    @id @default(uuid()) @db.Uuid
+  tenantId                  String    @db.Uuid
+  patientId                 String    @db.Uuid
+  entryDate                 DateTime
+  reason                    String?
+  notes                     String
+  performedById             String?   @db.Uuid
+  /// DX-540: registro profesional del autor congelado al firmar (inalterable como la evolución). NULL = no lo tenía o evolución anterior. CHECK 1..60 sin espacios en los extremos.
+  authorProfessionalLicense String?
   // DX-170: la cita en la que se documentó (NULL = evolución suelta, como todas
   // las anteriores) y la plantilla con la que se redactó. El texto compuesto
   // vive en `notes`: cambiar o desactivar la plantilla no toca la evolución.
-  appointmentId String?   @db.Uuid
+  appointmentId             String?   @db.Uuid
   // DX-232: sede de la atención; null solo para registros legacy.
-  locationId    String?   @db.Uuid
-  templateId    String?   @db.Uuid
-  createdAt     DateTime  @default(now())
-  deletedAt     DateTime?
+  locationId                String?   @db.Uuid
+  templateId                String?   @db.Uuid
+  createdAt                 DateTime  @default(now())
+  deletedAt                 DateTime?
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;

@@ -247,6 +247,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'PUT /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'DELETE /patients/:patientId/clinical-entries/:entryId': CLINICAL,
+  // DX-540: aviso de registro profesional; lo lee quien firma, lo cambia el ADMIN.
+  'GET /clinical-entries/signing': CLINICAL,
+  'GET /clinical-entries/settings': CLINICAL,
+  'PUT /clinical-entries/settings': ADMIN_ONLY,
   // DX-307: anestesia local en la evolución y catálogo de anestésicos.
   'GET /patients/:patientId/anesthesia': CLINICAL,
   'GET /patients/:patientId/clinical-entries/:entryId/anesthesia': CLINICAL,

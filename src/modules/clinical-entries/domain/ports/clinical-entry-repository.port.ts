@@ -48,8 +48,18 @@ export interface ClinicalEntryRepository {
    * delete an existing row — there is no update/delete method on this port
    * at all (immutability enforced at the interface level, not just by
    * convention).
+   *
+   * DX-540: en la MISMA transacción del INSERT congela en la evolución el
+   * registro profesional que el autor (`performedById`) tiene en esta clínica
+   * (`licenseSnapshot`), y lo devuelve en `authorProfessionalLicense`.
    */
   create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry>;
+
+  /**
+   * DX-540: registro profesional vigente del usuario en esta clínica
+   * (recortado), o null si no lo tiene o no es miembro.
+   */
+  authorLicense(userId: string): Promise<string | null>;
 
   /**
    * DX-170: cita viva por id, de cualquier paciente de la clínica. Bajo RLS,
