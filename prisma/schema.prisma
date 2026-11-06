@@ -1467,6 +1467,10 @@ model Appointment {
   //   appointments_tenant_location_chair_start_idx ("tenantId", "locationId",
   //     "chairId", start) WHERE "chairId" IS NOT NULL
   //     -> DX-211: lado hijo de la FK compuesta al sillón y filtro `chairIds`.
+  //   appointments_tenant_patient_upcoming_idx ("tenantId", "patientId",
+  //     start) INCLUDE (status) WHERE "deletedAt" IS NULL AND status IN
+  //     ('SCHEDULED', 'CONFIRMED', 'ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+  //     -> DX-547: «tiene cita futura o está en la clínica» de la lista de recall.
   @@map("appointments")
 }
 

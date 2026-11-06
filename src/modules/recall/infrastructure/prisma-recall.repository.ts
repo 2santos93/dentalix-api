@@ -43,7 +43,8 @@ type ContactRow = Prisma.RecallContactGetPayload<{
   select: typeof CONTACT_SELECT;
 }>;
 
-interface DueSqlRow {
+/** Columnas de una fila de la página de `recallDueSql`. */
+interface DuePageColumns {
   recallId: string;
   patientId: string;
   patientFirstName: string;
@@ -60,6 +61,158 @@ interface DueSqlRow {
   lastContactChannel: RecallContactChannel | null;
   lastContactOutcome: RecallContactOutcome | null;
   lastContactAt: Date | null;
+}
+
+/**
+ * Lo que devuelve `recallDueSql`: el total en cada fila y, en la fila única de
+ * una página vacía (fuera de rango o sin recall), TODAS las columnas de la
+ * página a NULL. `recallId === null` distingue los dos casos.
+ */
+type DueSqlRow = { total: number } & (
+  DuePageColumns | { [K in keyof DuePageColumns]: null }
+);
+
+export interface RecallDueSqlParams extends RecallDueQuery {
+  tenantId: string;
+  /** Sedes del request (activa o permitidas); `undefined` = sin restricción. */
+  locationIds?: readonly string[];
+}
+
+/**
+ * DX-547 (DB-079) · La lista de llamada en UNA sentencia: el total y la
+ * página salen de la misma evaluación de `d` (MATERIALIZED), y siempre vuelve
+ * al menos una fila con el total (en una página fuera de rango, sin recall).
+ *
+ * Misma cuenta que DX-015 (`recallState`), en este orden:
+ * 1. `c`: los recall ACTIVOS de pacientes vivos de la clínica que pueden
+ *    salir, antes de las LATERAL. Sin cita futura ni en la clínica
+ *    (`appointments_tenant_patient_upcoming_idx`; no depende de la sede) y
+ *    con dos cotas que solo descartan lo que tampoco saldría después: «hoy» en
+ *    la sede del paciente nunca pasa del «hoy» más adelantado de las sedes de
+ *    la clínica (`maxToday`, un InitPlan: la cota va en el propio recorrido
+ *    de patient_recalls), y el vencimiento nunca es anterior a lastDoneAt
+ *    + intervalo (la base es el MAX con la última visita y sumar meses no
+ *    retrocede).
+ * 2. `d`: la última cita atendida (appointments_tenant_patient_completed_idx)
+ *    da la sede del paciente, su «hoy», la base y el vencimiento; ahí se
+ *    aplican el filtro exacto y el de sede, que depende de esa cita.
+ * 3. El último contacto solo de la página.
+ */
+export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
+  const kindFilter = p.kind
+    ? Prisma.sql`AND pr."kind" = ${p.kind}::"RecallKind"`
+    : Prisma.empty;
+  const locationFilter = p.locationIds
+    ? Prisma.sql`AND k."homeLocationId" = ANY(${p.locationIds}::uuid[])`
+    : Prisma.empty;
+  const order = (alias: Prisma.Sql) =>
+    p.sort === 'MOST_OVERDUE'
+      ? Prisma.sql`${alias}."dueIn" ASC, ${alias}."lastName" ASC, ${alias}."firstName" ASC, ${alias}."id" ASC`
+      : Prisma.sql`${alias}."dueIn" DESC, ${alias}."lastName" ASC, ${alias}."firstName" ASC, ${alias}."id" ASC`;
+  const offset = (p.page - 1) * p.pageSize;
+  return Prisma.sql`
+    WITH bound AS (
+      SELECT max(((${p.now}::timestamptz) AT TIME ZONE coalesce(l."timeZone", 'UTC'))::date) AS "maxToday"
+        FROM "locations" l
+       WHERE l."tenantId" = ${p.tenantId}::uuid
+    ),
+    c AS (
+      SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."intervalMonths",
+             pr."lastDoneAt", pr."disabledUntil", pr."locationId",
+             pa."firstName", pa."lastName", pa."phone",
+             (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut"
+        FROM "patient_recalls" pr
+        JOIN "patients" pa
+          ON pa."tenantId" = pr."tenantId" AND pa."id" = pr."patientId"
+       WHERE pr."tenantId" = ${p.tenantId}::uuid
+         AND pr."active"
+         AND pa."deletedAt" IS NULL
+         ${kindFilter}
+         AND (pr."disabledUntil" IS NULL OR pr."disabledUntil" <= (SELECT "maxToday" FROM bound))
+         AND (pr."lastDoneAt" + make_interval(months => pr."intervalMonths"))::date
+               <= (SELECT "maxToday" FROM bound) + ${p.withinDays}::int
+         AND NOT EXISTS (
+           SELECT 1 FROM "appointments" a
+            WHERE a."tenantId" = pr."tenantId"
+              AND a."patientId" = pr."patientId"
+              AND a."deletedAt" IS NULL
+              -- El predicado del índice parcial, literal: Postgres no lo
+              -- deduce del OR de abajo y sin él no usa el índice.
+              AND a."status" IN ('SCHEDULED', 'CONFIRMED', 'ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+              AND (
+                (a."status" IN ('SCHEDULED', 'CONFIRMED') AND a."start" > ${p.now})
+                OR a."status" IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+              )
+         )
+    ),
+    d AS MATERIALIZED (
+      SELECT c."id", c."tenantId", c."patientId", c."kind", c."intervalMonths",
+             c."firstName", c."lastName", c."phone", c."reminderOptedOut",
+             k."homeLocationId", k."phoneRegion", k."today",
+             k."baseDate", k."dueAt", k."dueAt" - k."today" AS "dueIn"
+        FROM c
+        LEFT JOIN LATERAL (
+          SELECT a."start", a."locationId"
+            FROM "appointments" a
+           WHERE a."tenantId" = c."tenantId"
+             AND a."patientId" = c."patientId"
+             AND a."status" = 'COMPLETED'
+             AND a."deletedAt" IS NULL
+           ORDER BY a."start" DESC, a."id" DESC
+           LIMIT 1
+        ) lc ON true
+        JOIN "locations" lo
+          ON lo."tenantId" = c."tenantId"
+         AND lo."id" = coalesce(lc."locationId", c."locationId")
+       CROSS JOIN LATERAL (
+         SELECT lo."id" AS "homeLocationId",
+                lo."defaultPhoneRegion" AS "phoneRegion",
+                v."today",
+                greatest(c."lastDoneAt", v."lastCompletedVisit") AS "baseDate",
+                (greatest(c."lastDoneAt", v."lastCompletedVisit")
+                  + make_interval(months => c."intervalMonths"))::date AS "dueAt"
+           FROM (
+             SELECT ((${p.now}::timestamptz) AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "today",
+                    ((lc."start" AT TIME ZONE 'UTC') AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "lastCompletedVisit"
+           ) v
+       ) k
+       WHERE k."dueAt" <= k."today" + ${p.withinDays}::int
+         AND (c."disabledUntil" IS NULL OR c."disabledUntil" <= k."today")
+         ${locationFilter}
+    ),
+    page AS (
+      SELECT d.* FROM d
+       ORDER BY ${order(Prisma.raw('d'))}
+       LIMIT ${p.pageSize} OFFSET ${offset}
+    )
+    SELECT t."total",
+           pg."id" AS "recallId",
+           pg."patientId",
+           pg."firstName" AS "patientFirstName",
+           pg."lastName" AS "patientLastName",
+           pg."phone" AS "patientPhone",
+           pg."phoneRegion",
+           pg."reminderOptedOut",
+           pg."kind",
+           pg."intervalMonths",
+           pg."baseDate",
+           pg."dueAt",
+           (pg."today" - pg."dueAt")::int AS "daysOverdue",
+           pg."homeLocationId" AS "locationId",
+           rc."channel" AS "lastContactChannel",
+           rc."outcome" AS "lastContactOutcome",
+           rc."createdAt" AS "lastContactAt"
+      FROM (SELECT count(*)::int AS "total" FROM d) t
+      LEFT JOIN page pg ON true
+      LEFT JOIN LATERAL (
+        SELECT x."channel", x."outcome", x."createdAt"
+          FROM "recall_contacts" x
+         WHERE x."tenantId" = pg."tenantId"
+           AND x."recallId" = pg."id"
+         ORDER BY x."createdAt" DESC, x."id" DESC
+         LIMIT 1
+      ) rc ON true
+     ORDER BY ${order(Prisma.raw('pg'))}`;
 }
 
 /**
@@ -125,101 +278,48 @@ export class PrismaRecallRepository implements RecallRepository {
     query: RecallDueQuery,
   ): Promise<{ rows: RecallDueRow[]; total: number }> {
     // La sede del request o, sin ella, las permitidas al miembro (DX-089).
-    const scopeIds = this.tenantContext.scopeLocationIds();
-    const locationFilter = scopeIds
-      ? Prisma.sql`AND d."homeLocationId" = ANY(${scopeIds}::uuid[])`
-      : Prisma.empty;
-    const kindFilter = query.kind
-      ? Prisma.sql`AND pr."kind" = ${query.kind}::"RecallKind"`
-      : Prisma.empty;
-    const facts = this.recallFacts(
-      query.now,
-      Prisma.sql`AND pr."active" AND pa."deletedAt" IS NULL ${kindFilter}`,
-    );
-    const due = Prisma.sql`
-      WITH f AS (${facts}),
-      d AS (
-        SELECT f.*,
-               greatest(f."lastDoneAt", f."lastCompletedVisit") AS "baseDate",
-               (greatest(f."lastDoneAt", f."lastCompletedVisit")
-                 + make_interval(months => f."intervalMonths"))::date AS "dueAt"
-          FROM f
-      )`;
-    const where = Prisma.sql`
-      NOT d."hasUpcomingAppointment"
-      AND d."dueAt" <= d."today" + ${query.withinDays}::int
-      AND (d."disabledUntil" IS NULL OR d."disabledUntil" <= d."today")
-      ${locationFilter}`;
-    const order =
-      query.sort === 'MOST_OVERDUE'
-        ? Prisma.sql`d."dueAt" - d."today" ASC`
-        : Prisma.sql`d."dueAt" - d."today" DESC`;
-    const offset = (query.page - 1) * query.pageSize;
-
-    return this.prisma.runWithTenant(
-      async (tx) => {
-        const [{ total }] = await tx.$queryRaw<{ total: number }[]>`
-          ${due}
-          SELECT count(*)::int AS "total" FROM d WHERE ${where}`;
-        const rows = await tx.$queryRaw<DueSqlRow[]>`
-          ${due}
-          SELECT d."id" AS "recallId",
-                 d."patientId",
-                 d."firstName" AS "patientFirstName",
-                 d."lastName" AS "patientLastName",
-                 d."phone" AS "patientPhone",
-                 d."phoneRegion",
-                 d."reminderOptedOut",
-                 d."kind",
-                 d."intervalMonths",
-                 d."baseDate",
-                 d."dueAt",
-                 (d."today" - d."dueAt")::int AS "daysOverdue",
-                 d."homeLocationId" AS "locationId",
-                 c."channel" AS "lastContactChannel",
-                 c."outcome" AS "lastContactOutcome",
-                 c."createdAt" AS "lastContactAt"
-            FROM d
-            LEFT JOIN LATERAL (
-              SELECT rc."channel", rc."outcome", rc."createdAt"
-                FROM "recall_contacts" rc
-               WHERE rc."tenantId" = d."tenantId"
-                 AND rc."recallId" = d."id"
-               ORDER BY rc."createdAt" DESC, rc."id" DESC
-               LIMIT 1
-            ) c ON true
-           WHERE ${where}
-           ORDER BY ${order}, d."lastName" ASC, d."firstName" ASC, d."id" ASC
-           LIMIT ${query.pageSize} OFFSET ${offset}`;
-        return {
-          total,
-          rows: rows.map((r) => ({
-            recallId: r.recallId,
-            patientId: r.patientId,
-            patientFirstName: r.patientFirstName,
-            patientLastName: r.patientLastName,
-            patientPhone: r.patientPhone,
-            phoneRegion: r.phoneRegion,
-            reminderOptedOut: r.reminderOptedOut,
-            kind: r.kind,
-            intervalMonths: r.intervalMonths,
-            baseDate: civilOf(r.baseDate),
-            dueAt: civilOf(r.dueAt),
-            daysOverdue: r.daysOverdue,
-            locationId: r.locationId,
-            lastContact:
-              r.lastContactChannel && r.lastContactOutcome && r.lastContactAt
-                ? {
-                    channel: r.lastContactChannel,
-                    outcome: r.lastContactOutcome,
-                    createdAt: r.lastContactAt,
-                  }
-                : null,
-          })),
-        };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-    );
+    const sql = recallDueSql({
+      ...query,
+      tenantId: this.tenantId(),
+      locationIds: this.tenantContext.scopeLocationIds(),
+    });
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.$queryRaw<DueSqlRow[]>(sql);
+      return {
+        total: rows[0]?.total ?? 0,
+        rows: rows.flatMap((r) =>
+          r.recallId === null
+            ? []
+            : [
+                {
+                  recallId: r.recallId,
+                  patientId: r.patientId,
+                  patientFirstName: r.patientFirstName,
+                  patientLastName: r.patientLastName,
+                  patientPhone: r.patientPhone,
+                  phoneRegion: r.phoneRegion,
+                  reminderOptedOut: r.reminderOptedOut,
+                  kind: r.kind,
+                  intervalMonths: r.intervalMonths,
+                  baseDate: civilOf(r.baseDate),
+                  dueAt: civilOf(r.dueAt),
+                  daysOverdue: r.daysOverdue,
+                  locationId: r.locationId,
+                  lastContact:
+                    r.lastContactChannel &&
+                    r.lastContactOutcome &&
+                    r.lastContactAt
+                      ? {
+                          channel: r.lastContactChannel,
+                          outcome: r.lastContactOutcome,
+                          createdAt: r.lastContactAt,
+                        }
+                      : null,
+                },
+              ],
+        ),
+      };
+    });
   }
 
   patientExists(patientId: string): Promise<boolean> {
