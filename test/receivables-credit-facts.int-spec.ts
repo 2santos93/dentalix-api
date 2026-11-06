@@ -3,6 +3,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPatientCreditRepository } from '../src/modules/patient-credit/infrastructure/prisma-patient-credit.repository';
 import { PrismaReceivablesRepository } from '../src/modules/receivables/infrastructure/prisma-receivables.repository';
+import type { PlanCreditFacts } from '../src/modules/receivables/domain/entities/credit-balances.entity';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
@@ -235,6 +236,74 @@ describe('DX-430 · hechos del saldo a favor contra la BD (int)', () => {
       null,
     ]);
   });
+
+  const transfer = (source: string, target: string, amountCents: number) =>
+    inContext(() =>
+      credit.createTransfer({
+        sourcePlanId: source,
+        targetPlanId: target,
+        amountCents,
+        currency: 'VES',
+        reason: null,
+        userId,
+        fingerprint: `${source}>${target}>${amountCents}`,
+      }),
+    );
+  const summary = (facts: PlanCreditFacts) => ({
+    own: facts.ownPayments.map((p) => p.planCents),
+    transferred: facts.transferredPayments.map((p) => p.planCents),
+  });
+
+  // DB-076: un traspaso de ida y vuelta (P→Q y Q→P) es un flujo admitido. La
+  // recursión debe terminar, y la raíz no cuenta como origen de sí misma.
+  it('DB-076: un ciclo de dos planes (P→Q y Q→P) termina y cada plan sale una vez', async () => {
+    const p = await plan('ACCEPTED');
+    await pay(p, 100, '2026-06-01T15:00:00.000Z', sedeA);
+    const q = await plan('ACCEPTED');
+    await transfer(p, q, 10_000);
+    await transfer(q, p, 4_000);
+
+    const facts = await inContext(() => receivables.planCreditFacts([p, q]));
+
+    expect(summary(facts.get(p)!)).toEqual({ own: [10_000], transferred: [] });
+    expect(summary(facts.get(q)!)).toEqual({ own: [], transferred: [10_000] });
+  }, 10_000);
+
+  it('DB-076: un ciclo de tres planes (P→Q→R→P) termina y cada plan sale una vez', async () => {
+    const p = await plan('ACCEPTED');
+    await pay(p, 100, '2026-06-02T15:00:00.000Z', sedeA);
+    const q = await plan('ACCEPTED');
+    const r = await plan('ACCEPTED');
+    await transfer(p, q, 10_000);
+    await transfer(q, r, 6_000);
+    await transfer(r, p, 2_000);
+
+    const facts = await inContext(() => receivables.planCreditFacts([p, q, r]));
+
+    expect(summary(facts.get(p)!)).toEqual({ own: [10_000], transferred: [] });
+    expect(summary(facts.get(q)!)).toEqual({ own: [], transferred: [10_000] });
+    expect(summary(facts.get(r)!)).toEqual({ own: [], transferred: [10_000] });
+  }, 10_000);
+
+  it('DB-076: un plan al que se llega por varios caminos de traspasos aporta sus abonos una sola vez', async () => {
+    const d = await plan('ACCEPTED');
+    await pay(d, 300, '2026-06-03T15:00:00.000Z', sedeB);
+    const b = await plan('ACCEPTED');
+    const c = await plan('ACCEPTED');
+    const root = await plan('ACCEPTED');
+    await transfer(d, b, 10_000);
+    await transfer(d, c, 10_000);
+    await transfer(d, root, 5_000);
+    await transfer(b, root, 10_000);
+    await transfer(c, root, 10_000);
+
+    const facts = await inContext(() => receivables.planCreditFacts([root]));
+
+    expect(summary(facts.get(root)!)).toEqual({
+      own: [],
+      transferred: [30_000],
+    });
+  }, 10_000);
 
   it('otra clínica no ve estos hechos (RLS)', async () => {
     const other = await raw.tenant.create({
