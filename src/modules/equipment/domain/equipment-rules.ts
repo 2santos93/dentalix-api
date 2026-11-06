@@ -43,6 +43,9 @@ export const EQUIPMENT_RETIRED_MESSAGE =
   'El equipo está dado de baja: ya no se edita ni se le registran mantenimientos.';
 export const EQUIPMENT_ALREADY_RETIRED_MESSAGE =
   'El equipo ya está dado de baja.';
+/** DX-544: la licencia y el control de calidad son de la instalación en su sede. */
+export const EQUIPMENT_HAS_RADIOLOGY_RECORDS_MESSAGE =
+  'El equipo tiene licencias o controles de calidad de rayos X en su sede: no se traslada. Da de alta el equipo en la sede nueva con su propia licencia.';
 export const MAINTENANCE_ALREADY_VOIDED_MESSAGE =
   'El mantenimiento ya está anulado.';
 export const EQUIPMENT_LOCATION_NO_ZONE_MESSAGE =
@@ -66,8 +69,11 @@ function codePoints(value: string): number {
   return [...value].length;
 }
 
-/** Junta todos los errores en UN 400 (como el registro de implantes). */
-class Problems {
+/**
+ * Junta todos los errores en UN 400 (como el registro de implantes). También
+ * lo usan las reglas del expediente de rayos X (DX-544).
+ */
+export class Problems {
   private readonly list: string[] = [];
   add(message: string): void {
     this.list.push(message);
@@ -79,7 +85,7 @@ class Problems {
   }
 }
 
-interface TextSpec {
+export interface TextSpec {
   /** «El nombre del equipo», «La marca»… */
   label: string;
   max: number;
@@ -92,7 +98,7 @@ interface TextSpec {
  * Un texto: una línea con los blancos colapsados (o varias, recortadas en
  * los extremos). Vacío → null, salvo los obligatorios.
  */
-function text(
+export function text(
   raw: string | null | undefined,
   spec: TextSpec,
   problems: Problems,
@@ -122,7 +128,7 @@ function text(
 }
 
 /** Un día civil válido y, si `notAfter`, no posterior a él. */
-function civilDay(
+export function civilDay(
   raw: string | null | undefined,
   what: string,
   problems: Problems,

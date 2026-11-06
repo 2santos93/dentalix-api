@@ -145,6 +145,19 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-544: «B manda la sede, el equipo o el miembro del personal de A al
+  // listar, crear o editar un documento de rayos X → 404 en español y nada de
+  // A cambia».
+  'GET /radiology-records ?locationId': 'radiology-records.e2e-spec.ts',
+  'POST /radiology-records body.locationId': 'radiology-records.e2e-spec.ts',
+  'POST /radiology-records body.equipmentId': 'radiology-records.e2e-spec.ts',
+  'POST /radiology-records body.officerUserId': 'radiology-records.e2e-spec.ts',
+  'PATCH /radiology-records/:id body.locationId':
+    'radiology-records.e2e-spec.ts',
+  'PATCH /radiology-records/:id body.equipmentId':
+    'radiology-records.e2e-spec.ts',
+  'PATCH /radiology-records/:id body.officerUserId':
+    'radiology-records.e2e-spec.ts',
   // DX-542: «B manda la sede o el sillón de A al listar, crear o editar un
   // equipo → 404 en español y nada de A cambia».
   'GET /equipment ?locationId': 'equipment.e2e-spec.ts',

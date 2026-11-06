@@ -64,6 +64,16 @@ export const CHAIR_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // un rol de gestión de sede; el ADMIN siempre tiene todas las sedes.
 export const EQUIPMENT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Expediente de rayos X de cada sede (DX-544): licencias y controles de
+// calidad con vencimiento. Leer: odontología y administración (el doctor sabe
+// cuándo renovar). Crear, editar y anular: solo ADMIN. Recepción y auxiliares
+// no lo ven.
+export const RADIOLOGY_READ_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const RADIOLOGY_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Pagadores (DX-153) — leer (selectores de cobertura): los 4 roles. Crear:
 // ADMIN y recepción, que da de alta al paciente en mostrador y no puede
 // esperar al administrador. Editar, desactivar y retirar: solo gestión.

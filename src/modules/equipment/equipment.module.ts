@@ -26,7 +26,9 @@ import { EquipmentController } from './presentation/equipment.controller';
 /**
  * Equipos biomédicos por sede con hoja de vida y mantenimientos (DX-542).
  * Usa el repositorio de sillones (DX-211) para «¿este sillón es de la sede
- * del equipo?» y el de sedes para su zona («hoy» de la sede).
+ * del equipo?» y el de sedes para su zona («hoy» de la sede). Exporta su
+ * repositorio para que el expediente de rayos X (DX-544) compruebe «¿este
+ * equipo es de rayos X de la sede?» sin re-implementarlo.
  */
 @Module({
   imports: [JwtModule.register({}), LocationsModule, ChairsModule],
@@ -46,5 +48,6 @@ import { EquipmentController } from './presentation/equipment.controller';
     { provide: EQUIPMENT_CLOCK, useValue: () => new Date() },
     { provide: CURRENCY_WHITELIST, useClass: PrismaCurrencyWhitelist },
   ],
+  exports: [EQUIPMENT_REPOSITORY],
 })
 export class EquipmentModule {}

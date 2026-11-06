@@ -63,6 +63,7 @@ import { CashSessionsController } from '../cash-sessions/presentation/cash-sessi
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { ChairsController } from '../chairs/presentation/chairs.controller';
 import { EquipmentController } from '../equipment/presentation/equipment.controller';
+import { RadiologyController } from '../radiology/presentation/radiology.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
@@ -1431,6 +1432,24 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'maintenanceId' },
   },
 
+  // DX-544: expediente de rayos X por sede (sin paciente). No se borra: se
+  // anula con motivo.
+  'POST /radiology-records': {
+    action: 'CREATE',
+    resource: 'RADIOLOGY_RECORD',
+    resourceId: RES,
+  },
+  'PATCH /radiology-records/:id': {
+    action: 'UPDATE',
+    resource: 'RADIOLOGY_RECORD',
+    resourceId: { param: 'id' },
+  },
+  'POST /radiology-records/:id/void': {
+    action: 'VOID',
+    resource: 'RADIOLOGY_RECORD',
+    resourceId: { param: 'id' },
+  },
+
   // DX-048: un ADMIN desbloquea el inicio de sesión de un miembro.
   'POST /staff/:userId/login-unlock': {
     action: 'UPDATE',
@@ -1898,6 +1917,7 @@ const CONTROLLERS: Type[] = [
   ScheduleBlocksController,
   ChairsController,
   EquipmentController,
+  RadiologyController,
   StaffController,
   ClinicalNoteTemplatesController,
   DomainsController,

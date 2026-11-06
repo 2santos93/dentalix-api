@@ -7,7 +7,10 @@ import type {
   EquipmentRecord,
   LastPreventive,
 } from '../../domain/entities/equipment.entity';
-import { EQUIPMENT_RETIRED_MESSAGE } from '../../domain/equipment-rules';
+import {
+  EQUIPMENT_HAS_RADIOLOGY_RECORDS_MESSAGE,
+  EQUIPMENT_RETIRED_MESSAGE,
+} from '../../domain/equipment-rules';
 import type {
   CreateEquipmentRepoInput,
   CreateMaintenanceRepoInput,
@@ -166,6 +169,11 @@ function rethrowRetired(error: unknown): never {
   const text = error instanceof Error ? error.message : '';
   if (/42501|un equipo dado de baja no se modifica/.test(text)) {
     throw new ConflictException(EQUIPMENT_RETIRED_MESSAGE);
+  }
+  // DX-544: la FK compuesta de `radiology_records` (ON UPDATE RESTRICT) no
+  // deja trasladar de sede un equipo con licencias o controles de calidad.
+  if (/radiology_records_equipment_fkey/.test(text)) {
+    throw new ConflictException(EQUIPMENT_HAS_RADIOLOGY_RECORDS_MESSAGE);
   }
   throw error;
 }

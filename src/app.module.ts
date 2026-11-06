@@ -22,6 +22,7 @@ import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
 import { ChairsModule } from './modules/chairs/chairs.module';
 import { EquipmentModule } from './modules/equipment/equipment.module';
+import { RadiologyModule } from './modules/radiology/radiology.module';
 import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
 import { PayersModule } from './modules/payers/payers.module';
 import { PriceListsModule } from './modules/price-lists/price-lists.module';
@@ -112,6 +113,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     // DX-211: sillones de cada sede.
     ChairsModule,
     EquipmentModule,
+    // DX-544: expediente de rayos X por sede.
+    RadiologyModule,
     PaymentMethodsModule,
     PayersModule,
     PriceListsModule,

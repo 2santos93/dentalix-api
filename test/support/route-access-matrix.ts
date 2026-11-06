@@ -521,6 +521,15 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /equipment': ADMIN_ONLY,
   'POST /equipment': ADMIN_ONLY,
   'GET /equipment/maintenance-due': ADMIN_ONLY,
+  // DX-544: expediente de rayos X por sede (licencias y control de calidad).
+  // Leen odontología y administración; escribe solo ADMIN:
+  // loop/informes/DX-544.md.
+  'GET /radiology-records': PRESCRIBERS,
+  'GET /radiology-records/due': PRESCRIBERS,
+  'GET /radiology-records/:id': PRESCRIBERS,
+  'POST /radiology-records': ADMIN_ONLY,
+  'PATCH /radiology-records/:id': ADMIN_ONLY,
+  'POST /radiology-records/:id/void': ADMIN_ONLY,
   'GET /equipment/:id': ADMIN_ONLY,
   'PATCH /equipment/:id': ADMIN_ONLY,
   'POST /equipment/:id/retire': ADMIN_ONLY,
