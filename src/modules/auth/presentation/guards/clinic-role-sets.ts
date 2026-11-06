@@ -59,6 +59,11 @@ export const APPOINTMENT_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // desactivar: solo ADMIN.
 export const CHAIR_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Equipos biomédicos de cada sede y su hoja de vida (DX-542) — leer y
+// escribir: solo ADMIN (el dueño prepara la visita de habilitación). No hay
+// un rol de gestión de sede; el ADMIN siempre tiene todas las sedes.
+export const EQUIPMENT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Pagadores (DX-153) — leer (selectores de cobertura): los 4 roles. Crear:
 // ADMIN y recepción, que da de alta al paciente en mostrador y no puede
 // esperar al administrador. Editar, desactivar y retirar: solo gestión.

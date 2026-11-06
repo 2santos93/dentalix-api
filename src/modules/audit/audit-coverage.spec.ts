@@ -62,6 +62,7 @@ import {
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { ChairsController } from '../chairs/presentation/chairs.controller';
+import { EquipmentController } from '../equipment/presentation/equipment.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
@@ -1401,6 +1402,35 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'CHAIR_REACTIVATED',
   },
 
+  // DX-542: equipos biomédicos (sin paciente). No se borran: se dan de baja;
+  // los mantenimientos se anulan con motivo.
+  'POST /equipment': {
+    action: 'CREATE',
+    resource: 'EQUIPMENT',
+    resourceId: RES,
+  },
+  'PATCH /equipment/:id': {
+    action: 'UPDATE',
+    resource: 'EQUIPMENT',
+    resourceId: { param: 'id' },
+  },
+  'POST /equipment/:id/retire': {
+    action: 'UPDATE',
+    resource: 'EQUIPMENT',
+    resourceId: { param: 'id' },
+    reason: 'EQUIPMENT_RETIRED',
+  },
+  'POST /equipment/:id/maintenances': {
+    action: 'CREATE',
+    resource: 'EQUIPMENT_MAINTENANCE',
+    resourceId: RES,
+  },
+  'POST /equipment/:id/maintenances/:maintenanceId/void': {
+    action: 'VOID',
+    resource: 'EQUIPMENT_MAINTENANCE',
+    resourceId: { param: 'maintenanceId' },
+  },
+
   // DX-048: un ADMIN desbloquea el inicio de sesión de un miembro.
   'POST /staff/:userId/login-unlock': {
     action: 'UPDATE',
@@ -1867,6 +1897,7 @@ const CONTROLLERS: Type[] = [
   CashOutflowsController,
   ScheduleBlocksController,
   ChairsController,
+  EquipmentController,
   StaffController,
   ClinicalNoteTemplatesController,
   DomainsController,

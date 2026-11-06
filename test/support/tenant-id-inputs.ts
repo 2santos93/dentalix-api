@@ -145,6 +145,13 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-542: «B manda la sede o el sillón de A al listar, crear o editar un
+  // equipo → 404 en español y nada de A cambia».
+  'GET /equipment ?locationId': 'equipment.e2e-spec.ts',
+  'POST /equipment body.locationId': 'equipment.e2e-spec.ts',
+  'POST /equipment body.chairId': 'equipment.e2e-spec.ts',
+  'PATCH /equipment/:id body.locationId': 'equipment.e2e-spec.ts',
+  'PATCH /equipment/:id body.chairId': 'equipment.e2e-spec.ts',
   // DX-231: el id de pregunta de otra clínica en un PATCH de plantilla no se
   // adopta (es una pregunta nueva) y la ajena queda intacta.
   'PATCH /clinical-note-templates/:id body.prompts[].id':
