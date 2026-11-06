@@ -147,3 +147,26 @@ export function blockWarningMessage(
   const kind = SCHEDULE_BLOCK_KIND_LABELS[block.kind];
   return `La cita cae en un bloqueo que permite agendar: ${kind} (${describeRange(block, timeZone, fmt, true)}).`;
 }
+
+/**
+ * DX-149: dentro de la transacción de la cita apareció un bloqueo que no deja
+ * agendar (otra petición lo creó a la vez). El caso de uso responde el 409.
+ */
+export const SCHEDULE_BLOCKED_RACE_MESSAGE =
+  'Mientras agendabas se bloqueó ese horario. Elige otra hora.';
+
+export class ScheduleBlockedRaceError extends Error {
+  constructor() {
+    super('Un bloqueo que no deja agendar se creó a la vez que la cita');
+  }
+}
+
+/**
+ * DX-149: dentro de la transacción del bloqueo aparecieron citas debajo (otra
+ * petición las creó a la vez). El caso de uso pide confirmar (409).
+ */
+export class AffectedAppointmentsRaceError extends Error {
+  constructor(readonly total: number) {
+    super(`El bloqueo tiene ${total} citas debajo creadas a la vez`);
+  }
+}

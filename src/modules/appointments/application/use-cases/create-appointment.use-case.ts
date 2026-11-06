@@ -7,6 +7,10 @@ import {
   Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import {
+  SCHEDULE_BLOCKED_RACE_MESSAGE,
+  ScheduleBlockedRaceError,
+} from '../../../schedule-blocks/domain/schedule-block-rules';
 import type { ClinicRole } from '@prisma/client';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
@@ -371,6 +375,11 @@ export class CreateAppointmentUseCase {
           : {}),
       };
     } catch (error) {
+      // DX-149: un bloqueo que no deja agendar se creó a la vez (visto dentro
+      // de la transacción, con el candado de la agenda).
+      if (error instanceof ScheduleBlockedRaceError) {
+        throw new ConflictException(SCHEDULE_BLOCKED_RACE_MESSAGE);
+      }
       const scope = overlapExclusionScope(error);
       if (scope === 'chair' && chair) {
         throw await this.requireChairs().raceConflict(chair.id, input);
