@@ -69,6 +69,7 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
   }
 
   list(params: ListWaitlistParams): Promise<WaitlistPage> {
+    if (params.status === WaitlistStatus.OPEN) return this.listOpen(params);
     // Como la agenda: sede explícita (ya permitida) > sede del request > sedes
     // permitidas (DX-089) > vista consolidada.
     const where: Prisma.AppointmentWaitlistEntryWhereInput = {
@@ -100,6 +101,59 @@ export class PrismaWaitlistRepository implements WaitlistRepository {
         ]);
         return {
           items: rows.map(mapToEntity),
+          total,
+          page: params.page,
+          pageSize: params.pageSize,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  /**
+   * DX-149: el panel (entradas OPEN, lo que se consulta a diario) sale del
+   * índice parcial `appointment_waitlist_open_panel_idx` en su orden. SQL a
+   * mano y con 'OPEN' LITERAL: bajo RLS, la igualdad de un enum no es
+   * LEAKPROOF y, con el estado como parámetro (lo que hace Prisma), Postgres no
+   * la usa para elegir índice y recorre toda la tabla. Sin unir con
+   * `patients`: al archivar a un paciente se cierran sus OPEN. Página y total
+   * en la misma foto; las filas, con su vista, por id y en el orden de la página.
+   */
+  private listOpen(params: ListWaitlistParams): Promise<WaitlistPage> {
+    const ids = params.locationId
+      ? [params.locationId]
+      : this.tenantContext.scopeLocationIds();
+    // Una sede (lo normal en el panel): `=`, y la página sale ya ordenada del
+    // índice. Varias: ANY, con un orden de pocas filas.
+    const inScope =
+      ids === undefined
+        ? Prisma.empty
+        : ids.length === 1
+          ? Prisma.sql`AND "locationId" = ${ids[0]}::uuid`
+          : Prisma.sql`AND "locationId" = ANY(${ids}::uuid[])`;
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        const [page, [{ total }]] = await Promise.all([
+          tx.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "appointment_waitlist"
+             WHERE "status" = 'OPEN' ${inScope}
+             ORDER BY "priority" DESC, "createdAt" ASC, "id" ASC
+             LIMIT ${params.pageSize}::int
+            OFFSET ${(params.page - 1) * params.pageSize}::int`,
+          tx.$queryRaw<{ total: number }[]>`
+            SELECT count(*)::int AS "total" FROM "appointment_waitlist"
+             WHERE "status" = 'OPEN' ${inScope}`,
+        ]);
+        const rows = await tx.appointmentWaitlistEntry.findMany({
+          where: { id: { in: page.map((r) => r.id) } },
+          include: INCLUDE_VIEW,
+        });
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        return {
+          items: page.flatMap((r) => {
+            const row = byId.get(r.id);
+            return row ? [mapToEntity(row)] : [];
+          }),
           total,
           page: params.page,
           pageSize: params.pageSize,

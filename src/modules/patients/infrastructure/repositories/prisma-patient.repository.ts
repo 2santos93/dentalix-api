@@ -4,7 +4,13 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DocumentType, Prisma, RetentionExtension } from '@prisma/client';
+import {
+  DocumentType,
+  Prisma,
+  RetentionExtension,
+  WaitlistStatus,
+} from '@prisma/client';
+import { WAITLIST_PATIENT_ARCHIVED_REASON } from '../../../waitlist/domain/waitlist-rules';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -619,6 +625,45 @@ export class PrismaPatientRepository implements PatientRepository {
       // transacción (con el paciente bloqueado): o se archiva y se anulan, o
       // nada. Las rutas públicas que respondan después ya lo ven archivado.
       const { ctx, now } = revocation;
+      // DX-149: sus entradas de «Pendientes por agendar» se cierran en la misma
+      // transacción (ya no se le llama), auditadas una a una como un descarte.
+      const open = await tx.appointmentWaitlistEntry.findMany({
+        where: { patientId: id, status: WaitlistStatus.OPEN },
+        select: { id: true },
+      });
+      if (open.length > 0) {
+        await tx.appointmentWaitlistEntry.updateMany({
+          where: {
+            id: { in: open.map((e) => e.id) },
+            status: WaitlistStatus.OPEN,
+          },
+          data: {
+            status: WaitlistStatus.DISMISSED,
+            dismissReason: WAITLIST_PATIENT_ARCHIVED_REASON,
+            resolvedAt: now,
+            resolvedById: ctx.actor.userId,
+          },
+        });
+        for (const entry of open) {
+          await writeAuditEvent(tx, {
+            tenantId,
+            locationId: ctx.locationId,
+            actor: {
+              kind: 'user',
+              userId: ctx.actor.userId,
+              role: ctx.actor.role,
+            },
+            action: 'UPDATE',
+            resourceType: 'WAITLIST_ENTRY',
+            resourceId: entry.id,
+            patient: { kind: 'patient', id },
+            requestId: ctx.requestId,
+            ip: ctx.ip,
+            userAgent: ctx.userAgent,
+            metadata: { reason: 'WAITLIST_DISMISSED' },
+          });
+        }
+      }
       const revoked = await revokeLivePublicLinks(tx, {
         tenantId,
         patientId: id,

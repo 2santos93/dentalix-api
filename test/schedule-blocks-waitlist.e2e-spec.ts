@@ -652,6 +652,41 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
   });
 
   describe('cambios tras revisión y QA', () => {
+    it('DX-149: archivar a la paciente cierra su pendiente (auditado) y la página tiene tope', async () => {
+      const elena = await createPatient(clinic, '122149', 'Elena');
+      const entry = await as(api().post('/api/v1/waitlist'), reception.token)
+        .send({ patientId: elena })
+        .expect(201);
+      const entryId = (entry.body as Body).id;
+      await as(api().delete(`/api/v1/patients/${elena}`), clinic.adminToken)
+        .send({})
+        .expect(204);
+      expect((await waitlist()).items.map((e) => e.id)).not.toContain(entryId);
+      const row = await raw.appointmentWaitlistEntry.findUniqueOrThrow({
+        where: { id: entryId },
+        select: { status: true, dismissReason: true, resolvedAt: true },
+      });
+      expect(row).toMatchObject({
+        status: 'DISMISSED',
+        dismissReason: 'Paciente archivado',
+      });
+      expect(row.resolvedAt).not.toBeNull();
+      await expect(
+        auditCount('WAITLIST_ENTRY', 'UPDATE', entryId),
+      ).resolves.toBe(1);
+
+      const tooFar = await as(
+        api().get('/api/v1/waitlist?page=501'),
+        reception.token,
+      ).expect(400);
+      expect(JSON.stringify(tooFar.body)).toMatch(
+        /La página no puede pasar de 500/,
+      );
+      await as(api().get('/api/v1/waitlist?page=500'), reception.token).expect(
+        200,
+      );
+    });
+
     it('DX-161: recepción como profesional es 400 y una fecha que no existe también', async () => {
       const asProvider = await book(reception.userId, THU, '09:00', 1).expect(
         400,
