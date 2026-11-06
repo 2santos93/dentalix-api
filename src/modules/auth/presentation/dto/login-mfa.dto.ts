@@ -34,7 +34,7 @@ export class MfaChallengeDto {
   @ApiPropertyOptional({
     enum: [true],
     description:
-      'DX-021-bis: alta de un superadmin: se le envió un código al correo que exige POST /auth/login/mfa/enrollment.',
+      'DX-021-bis, SEC-066: alta forzada (de un superadmin o de un miembro de clínica): se envió un código al correo de la cuenta que exigen POST /auth/login/mfa/enrollment y /enrollment/confirm. Viene siempre con `mfa: MFA_ENROLLMENT_REQUIRED`.',
   })
   emailCodeRequired?: true;
 
@@ -94,7 +94,7 @@ export class StartLoginMfaEnrollmentDto {
   @ApiPropertyOptional({
     example: '12345678',
     description:
-      'DX-021-bis: alta de un superadmin (`emailCodeRequired`): el código de 8 dígitos de ESTE token. 10 intentos fallidos en total; agotados, el token queda inservible y hay que volver a entrar.',
+      'DX-021-bis, SEC-066: obligatorio en el alta forzada (`emailCodeRequired`): el código de 8 dígitos de ESTE token, enviado al correo de la cuenta. 10 intentos fallidos en total; agotados, el token queda inservible y hay que volver a entrar.',
   })
   @IsOptional()
   @Transform(stripSpaces)

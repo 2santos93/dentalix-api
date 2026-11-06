@@ -61,10 +61,15 @@ export class GetCheckoutChecklistUseCase {
       if (!appointment) throw new NotFoundException('Cita no encontrada');
       this.tenantContext.assertLocationAllowed(appointment.locationId);
       const { patient } = appointment;
+      // SEC-069: la próxima cita solo cuenta en las sedes permitidas al
+      // usuario (DX-089), como el resumen de asistencia del paciente: es del
+      // paciente, no de la sede activa de la cabecera. Sin restricción, todas.
+      const allowed = this.tenantContext.getAllowedLocationIds();
       const next = await tx.appointment.findFirst({
         where: {
           patientId: patient.id,
           deletedAt: null,
+          ...(allowed === 'ALL' ? {} : { locationId: { in: [...allowed] } }),
           id: { not: appointment.id },
           start: { gt: now },
           status: { in: RESERVED_APPOINTMENT_STATUSES as AppointmentStatus[] },

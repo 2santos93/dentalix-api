@@ -104,6 +104,9 @@ function setup() {
   const links: { to: string; vars: SignatureRequestEmailVars }[] = [];
   const codes: { to: string; vars: SignatureCodeEmailVars }[] = [];
   const cancelled: string[] = [];
+  // DX-149-ter: el email del enlace se encola DENTRO de la transacción que
+  // guarda la solicitud; `throttleLink` simula el tope contado bajo candado.
+  const linkState = { throttle: false, kicks: 0 };
   const confirmations: {
     to: string;
     vars: SignatureBudgetAcceptedEmailVars;
@@ -114,10 +117,31 @@ function setup() {
       return Promise.resolve();
     },
     assertCanSend: () => Promise.resolve(),
-    sendLink: (input) => {
-      links.push(input);
-      return Promise.resolve();
-    },
+    prepareLink: (input) =>
+      Promise.resolve({
+        insert: (_tx, supersededIds) => {
+          if (linkState.throttle) {
+            return Promise.reject(
+              new HttpException(
+                {
+                  statusCode: 429,
+                  error: 'Too Many Requests',
+                  message:
+                    'Ya enviamos un correo a esta persona hace un momento. Espera 60 segundos antes de volver a enviarlo.',
+                  retryAfterSeconds: 60,
+                },
+                429,
+              ),
+            );
+          }
+          cancelled.push(...supersededIds);
+          links.push(input);
+          return Promise.resolve();
+        },
+        kick: () => {
+          linkState.kicks += 1;
+        },
+      }),
     sendCode: (input) => {
       codes.push(input);
       return Promise.resolve();
@@ -142,6 +166,7 @@ function setup() {
     links,
     codes,
     cancelled,
+    linkState,
     advance: (ms: number) => {
       now = new Date(now.getTime() + ms);
     },
@@ -337,6 +362,35 @@ describe('enviar a firmar a distancia (DX-243)', () => {
     await expect(send(ctx)).rejects.toThrow('El paciente está archivado');
     expect(ctx.links).toHaveLength(0);
     expect(ctx.codes).toHaveLength(0);
+  });
+
+  it('DX-149-ter: si el tope salta al encolar (otro envío al mismo paciente ganó la carrera), 429 en español y no queda nada: ni solicitud nueva, ni la anterior anulada, ni su email cancelado', async () => {
+    const ctx = setup();
+    const first = await send(ctx);
+    expect(ctx.linkState.kicks).toBe(1);
+    ctx.linkState.throttle = true;
+
+    const error = await send(ctx).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(429);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      message: expect.stringMatching(/^Ya enviamos un correo/) as string,
+    });
+    expect(ctx.repo.rows).toHaveLength(1);
+    expect(ctx.repo.rows[0]).toMatchObject({ id: first.id, revokedAt: null });
+    expect(ctx.cancelled).toEqual([]);
+    expect(ctx.links).toHaveLength(1);
+    expect(ctx.linkState.kicks).toBe(1);
+  });
+
+  it('DX-149-ter: la solicitud y su email se guardan en la MISMA transacción; el despachador se despierta tras el COMMIT', async () => {
+    const ctx = setup();
+    const created = await send(ctx);
+    expect(ctx.repo.createdWithEmail).toEqual([created.id]);
+    // El email lleva el id de la solicitud (su estado de envío en el outbox).
+    expect(ctx.links).toHaveLength(1);
+    expect(ctx.linkState.kicks).toBe(1);
   });
 
   it('un segundo envío del mismo documento anula el anterior y cancela su email pendiente', async () => {

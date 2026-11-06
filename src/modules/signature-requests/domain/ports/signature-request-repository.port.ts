@@ -3,6 +3,7 @@ import type {
   ConsentSignerType,
   ContactChannel,
   DocumentType,
+  Prisma,
   SignatureRequestChannel,
   SignatureRequestType,
   TreatmentPlanStatus,
@@ -56,6 +57,11 @@ export interface SignaturePlanOption {
 }
 
 export interface CreateSignatureRequestRepoInput {
+  /**
+   * DX-149-ter: id elegido por quien llama, para que el email del enlace
+   * (preparado antes de abrir la transacción) lleve ya su referencia.
+   */
+  id?: string;
   locationId: string;
   patientId: string;
   type: SignatureRequestType;
@@ -229,9 +235,17 @@ export interface SignatureRequestRepository {
    * paciente y plantilla (o, BUDGET, del mismo plan) que aún esperaban al
    * paciente. Devuelve el id y los
    * ids anulados (para cancelar sus emails pendientes).
+   *
+   * DX-149-ter: `enqueue` corre AL FINAL de esa misma transacción con los
+   * ids anulados (cancela sus emails pendientes y encola el del enlace). Si
+   * lanza, nada queda: ni la solicitud nueva ni la anulación de la anterior.
    */
   create(
     input: CreateSignatureRequestRepoInput,
+    enqueue?: (
+      tx: Prisma.TransactionClient,
+      supersededIds: string[],
+    ) => Promise<void>,
   ): Promise<{ id: string; supersededIds: string[] }>;
 
   /** Del paciente, las más recientes primero. */

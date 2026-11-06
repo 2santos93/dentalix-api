@@ -39,6 +39,11 @@ import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastru
 import { loadSecuritySettings } from '../src/shared/security/security-settings';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { TokenService } from '../src/shared/crypto/token.service';
+import {
+  generatePasswordResetToken,
+  hashPasswordResetToken,
+  passwordResetExpiresAt,
+} from '../src/modules/auth/application/password-reset-token';
 
 /**
  * DX-021-bis contra Postgres, con el bloqueo REAL (5 fallos → espera): segundo
@@ -865,7 +870,8 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       );
       const forced = await login(site.host, member.email).expect(201);
       expect((forced.body as Body).mfa).toBe('MFA_ENROLLMENT_REQUIRED');
-      expect((forced.body as Body).emailCodeRequired).toBeUndefined();
+      // SEC-066: el alta forzada de un miembro también lleva código al correo.
+      expect((forced.body as Body).emailCodeRequired).toBe(true);
       // Otra clínica: nada cambia.
       await refresh(away.host, (outside.body as Body).refreshToken!).expect(
         201,
@@ -1200,6 +1206,67 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
   });
 
   describe('quien conoce la contraseña y falla códigos', () => {
+    it('SEC-067: restablecer la contraseña no reinicia el contador de códigos MFA fallidos; solo un código correcto lo borra', async () => {
+      const site = await registerClinic(app, 'clinica-bis-sec067', VENEZUELA);
+      const { host } = site;
+      const member = await seedMember(raw, site, ClinicRole.RECEPTION);
+      const own = await enrollMember(
+        host,
+        await loginAs(app, host, member.email),
+      );
+      await forgetLastStep(member.userId);
+
+      // Quien controla el buzón (no el móvil) agota los 5 intentos libres.
+      const first = await login(host, member.email).expect(201);
+      for (let i = 0; i < DEFAULT_LOGIN_LOCKOUT.freeFailures; i += 1) {
+        await verify(host, {
+          mfaToken: (first.body as Body).mfaToken,
+          code: totpAt(own.secret, -4),
+        }).expect(401);
+      }
+      const counter = () =>
+        raw.loginThrottle.findFirst({
+          where: { keyHash: mfaKeyHash(member.userId) },
+          select: { failures: true, blockedUntil: true },
+        });
+      const lockedBefore = await counter();
+      expect(lockedBefore?.failures).toBe(DEFAULT_LOGIN_LOCKOUT.freeFailures);
+
+      // Restablece la contraseña con el enlace del correo.
+      const token = generatePasswordResetToken();
+      await raw.userToken.create({
+        data: {
+          userId: member.userId,
+          purpose: 'PASSWORD_RESET',
+          tokenHash: hashPasswordResetToken(token),
+          expiresAt: passwordResetExpiresAt(new Date()),
+        },
+      });
+      await http()
+        .post('/api/v1/auth/reset-password')
+        .set('X-Tenant-Host', host)
+        .send({ token, password: 'Maracaibo2026!' })
+        .expect(204);
+
+      // El contador sigue ahí: ni con la contraseña nueva hay intentos extra.
+      expect(await counter()).toEqual(lockedBefore);
+      const again = await login(host, member.email, 'Maracaibo2026!').expect(
+        201,
+      );
+      const mfaToken = (again.body as Body).mfaToken;
+      await verify(host, { mfaToken, code: totpAt(own.secret, -4) }).expect(
+        429,
+      );
+
+      // Pasada la espera, un código correcto sí lo borra.
+      await raw.loginThrottle.updateMany({
+        where: { keyHash: mfaKeyHash(member.userId) },
+        data: { blockedUntil: new Date(Date.now() - 1000) },
+      });
+      await verify(host, { mfaToken, code: totpAt(own.secret) }).expect(200);
+      expect(await counter()).toBeNull();
+    });
+
     it('5 fallos: espera y un solo aviso; un dispositivo de confianza entra igual y cambiar la contraseña corta la espera', async () => {
       const site = await registerClinic(app, 'clinica-bis-fallos', VENEZUELA);
       const { host } = site;

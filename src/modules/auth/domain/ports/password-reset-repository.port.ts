@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import type { StoredResetToken } from '../../application/password-reset-token';
 
 export const PASSWORD_RESET_REPOSITORY = Symbol('PASSWORD_RESET_REPOSITORY');
@@ -34,12 +34,21 @@ export interface PasswordResetRepository {
   /**
    * Guarda un token nuevo (solo su hash) e invalida en la MISMA transacción
    * los anteriores aún vivos del usuario: solo vale el último enlace.
+   *
+   * DX-149-ter: la transacción es de la clínica del host (`tenantId`, bajo su
+   * RLS) y `enqueue` encola en ella el email del enlace: token y email
+   * confirman o se deshacen juntos. Lleva un `lock_timeout` corto (endpoint
+   * público: nadie retiene una conexión del pool esperando un candado); si se
+   * agota, lanza PasswordResetThrottledError('LOCK_TIMEOUT') sin cambiar
+   * nada. Lo que lance `enqueue` deshace también el token.
    */
   issue(input: {
+    tenantId: string;
     userId: string;
     tokenHash: string;
     expiresAt: Date;
     now: Date;
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
   }): Promise<void>;
 
   findByHash(tokenHash: string): Promise<ResetTokenRecord | null>;

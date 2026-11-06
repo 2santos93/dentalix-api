@@ -5,6 +5,7 @@ import {
   InMemoryPasswordResetRepository,
 } from './__fixtures__/in-memory-password-reset';
 import { hashPasswordResetToken } from '../password-reset-token';
+import { PasswordResetThrottledError } from '../../domain/password-reset-throttled.error';
 
 const TENANT = 'tenant-a';
 const LINK_BASE = 'https://demo.dentalix.app';
@@ -108,6 +109,67 @@ describe('RequestPasswordResetUseCase', () => {
     ).toBe('THROTTLED');
     expect(repo.tokens).toHaveLength(0);
     expect(notifier.sent).toHaveLength(0);
+  });
+
+  it('DX-149-ter: el tope que salta DENTRO de la transacción (otra petición ganó la carrera): THROTTLED, el token anterior sigue vigente y no hay email nuevo', async () => {
+    const { repo, notifier, useCase } = setup();
+    const input = {
+      tenantId: TENANT,
+      email: 'ana@clinica.co',
+      linkBase: LINK_BASE,
+    };
+    await useCase.execute(input);
+    const before = repo.tokens.map((t) => ({ ...t }));
+    // El aviso temprano pasa (aún no veía el email del ganador), pero el
+    // recuento bajo candado, en la transacción del token, ya lo ve.
+    notifier.throttleInTx = true;
+
+    expect(await useCase.execute(input)).toBe('THROTTLED');
+
+    expect(repo.tokens).toEqual(before);
+    expect(notifier.sent).toHaveLength(1);
+    expect(notifier.kicks).toBe(1);
+  });
+
+  it('DX-149-ter: el candado ocupado más allá del lock_timeout cuenta como tope (THROTTLED, nada cambia)', async () => {
+    const { repo, notifier, useCase } = setup();
+    repo.failNextIssue = new PasswordResetThrottledError('LOCK_TIMEOUT');
+
+    expect(
+      await useCase.execute({
+        tenantId: TENANT,
+        email: 'ana@clinica.co',
+        linkBase: LINK_BASE,
+      }),
+    ).toBe('THROTTLED');
+
+    expect(repo.tokens).toHaveLength(0);
+    expect(notifier.sent).toHaveLength(0);
+    expect(notifier.kicks).toBe(0);
+  });
+
+  it('DX-149-ter: el email entra en la MISMA transacción que el token y el despachador se despierta tras el COMMIT', async () => {
+    const { repo, notifier, useCase } = setup();
+    await useCase.execute({
+      tenantId: TENANT,
+      email: 'ana@clinica.co',
+      linkBase: LINK_BASE,
+    });
+    expect(repo.issuedWithEmail).toEqual([TENANT]);
+    expect(notifier.sent).toHaveLength(1);
+    expect(notifier.kicks).toBe(1);
+  });
+
+  it('otro fallo de la transacción no es un tope: se propaga (accept lo deja en el log)', async () => {
+    const { repo, useCase } = setup();
+    repo.failNextIssue = new Error('db down');
+    await expect(
+      useCase.execute({
+        tenantId: TENANT,
+        email: 'ana@clinica.co',
+        linkBase: LINK_BASE,
+      }),
+    ).rejects.toThrow('db down');
   });
 
   it('el log no lleva ni el email ni el token', async () => {

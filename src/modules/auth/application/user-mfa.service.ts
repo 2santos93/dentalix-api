@@ -246,8 +246,9 @@ export class UserMfaService {
    * Paso 1 del alta: secreto nuevo, guardado CIFRADO como pendiente. Desde
    * «Mi perfil» exige la contraseña actual (`currentPassword`): un access
    * token robado no basta para enrolar otro móvil. En el alta forzada del
-   * login la contraseña ya se verificó (`null`). Un superadmin solo se enrola
-   * ahí, con el código de su correo (DX-021-bis).
+   * login la contraseña ya se verificó (`null`) y `CompleteMfaLoginUseCase`
+   * exige antes el código del correo (DX-021-bis; SEC-066 para los miembros).
+   * Un superadmin solo se enrola ahí.
    */
   async startEnrollment(
     userId: string,

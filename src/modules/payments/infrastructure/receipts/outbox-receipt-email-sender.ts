@@ -1,6 +1,6 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { EmailOutbox } from '../../../notifications/email/application/email-outbox.service';
-import { EmailQuotaExceededError } from '../../../notifications/email/domain/email-quota-exceeded.error';
+import { withEmailQuotaAs429 } from '../../../notifications/email/application/email-quota-http';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
@@ -35,33 +35,26 @@ export class OutboxReceiptEmailSender implements ReceiptEmailSender {
     if (!tenantId) {
       throw new Error('No tenant in context');
     }
-    try {
-      await this.outbox.assertWithinQuota(tenantId, to);
-    } catch (err) {
-      if (err instanceof EmailQuotaExceededError) {
-        throw new HttpException(
-          {
-            statusCode: HttpStatus.TOO_MANY_REQUESTS,
-            error: 'Too Many Requests',
-            message: err.message,
-            retryAfterSeconds: err.retryAfterSeconds,
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      throw err;
-    }
+    await withEmailQuotaAs429(() =>
+      this.outbox.assertWithinQuota(tenantId, to),
+    );
     const { timeZone, fmt } = await this.regionalOf(tenantId, receipt);
-    await this.outbox.enqueue({
-      tenantId,
-      to,
-      template: 'payment-receipt',
-      vars: {
-        ...receiptEmailVars(receipt, timeZone, fmt),
-        responsibleName,
-      },
-      referenceId: receipt.paymentId,
-    });
+    // DX-149-ter: el tope se vuelve a contar al encolar, bajo el candado de
+    // la clínica y del destinatario: dos «Enviar recibo» a la vez no salen
+    // los dos. El que pierde, el mismo 429.
+    await withEmailQuotaAs429(() =>
+      this.outbox.enqueue({
+        tenantId,
+        to,
+        template: 'payment-receipt',
+        vars: {
+          ...receiptEmailVars(receipt, timeZone, fmt),
+          responsibleName,
+        },
+        referenceId: receipt.paymentId,
+        enforceQuota: true,
+      }),
+    );
   }
 
   /**

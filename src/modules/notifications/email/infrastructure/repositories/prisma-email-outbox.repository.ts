@@ -11,6 +11,7 @@ import {
   OutboxQuotaGuard,
   OutboxSettlement,
   PlatformRecipientQuota,
+  QuotaLockScope,
   RecentSends,
 } from '../../domain/ports/email-outbox-repository.port';
 import { lockEmailQuota } from '../email-quota-lock';
@@ -124,9 +125,10 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
   async insert(
     row: NewOutboxEmail,
     guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
   ): Promise<{ id: string }> {
     return this.prisma.runWithTenant(row.tenantId, (tx) =>
-      this.insertInTx(tx, row, guard),
+      this.insertInTx(tx, row, guard, scope),
     );
   }
 
@@ -134,14 +136,16 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     tx: Prisma.TransactionClient,
     row: NewOutboxEmail,
     guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
   ): Promise<{ id: string }> {
     const tenantId = row.tenantId;
     if (guard) {
       // DX-149-bis: contar e insertar en ESTA transacción, con el candado de
       // la clínica del contexto y del destinatario: N peticiones a la vez ya
       // no cuentan todas lo mismo. La RLS (WITH CHECK) obliga a que
-      // `row.tenantId` sea esa misma clínica.
-      await lockEmailQuota(tx, row.toHash);
+      // `row.tenantId` sea esa misma clínica. DX-149-ter: `scope` puede
+      // dejarlo en el del destinatario (endpoint público).
+      await lockEmailQuota(tx, row.toHash, scope);
       guard(await countRecentSends(tx, CONTEXT_TENANT, row.toHash));
     }
     // SQL crudo para que las horas las ponga la BD (ver NOW); sigue bajo la

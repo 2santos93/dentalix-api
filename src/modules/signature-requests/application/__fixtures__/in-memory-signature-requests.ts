@@ -4,6 +4,7 @@ import type {
   SignatureRequestRecord,
 } from '../../domain/entities/signature-request.entity';
 import {
+  type Prisma,
   type SignedConsentPdfStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
@@ -106,29 +107,43 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     );
   }
 
-  create(
+  /** Ids de las solicitudes que se guardaron con su email (DX-149-ter). */
+  createdWithEmail: string[] = [];
+
+  /**
+   * Como la transacción de Prisma: si `enqueue` lanza, nada queda (ni la
+   * solicitud nueva ni la anulación de las anteriores).
+   */
+  async create(
     input: CreateSignatureRequestRepoInput,
+    enqueue?: (
+      tx: Prisma.TransactionClient,
+      supersededIds: string[],
+    ) => Promise<void>,
   ): Promise<{ id: string; supersededIds: string[] }> {
-    const supersededIds: string[] = [];
-    for (const row of this.rows) {
-      if (
+    const superseded = this.rows.filter(
+      (row) =>
         row.patientId === input.patientId &&
         row.type === input.type &&
         (input.type === 'BUDGET'
           ? row.treatmentPlanId === input.treatmentPlanId
           : row.templateId === input.templateId) &&
         !row.signedAt &&
-        !row.revokedAt
-      ) {
-        row.revokedAt = input.createdAt;
-        supersededIds.push(row.id);
-      }
+        !row.revokedAt,
+    );
+    const supersededIds = superseded.map((row) => row.id);
+    const id =
+      input.id ??
+      `00000000-0000-4000-8000-${String(this.nextId++).padStart(12, '0')}`;
+    if (enqueue) {
+      await enqueue({} as Prisma.TransactionClient, supersededIds);
+      this.createdWithEmail.push(id);
     }
-    const id = `00000000-0000-4000-8000-${String(this.nextId++).padStart(12, '0')}`;
+    for (const row of superseded) row.revokedAt = input.createdAt;
     this.rows.push({
-      id,
       tenantId: 't1',
       ...input,
+      id,
       budgetContent: input.budgetContent ?? null,
       budgetContentHash: input.budgetContentHash ?? null,
       codeHash: null,
@@ -144,7 +159,7 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
       signedAt: null,
       revokedAt: null,
     });
-    return Promise.resolve({ id, supersededIds });
+    return { id, supersededIds };
   }
 
   private listRow(request: SignatureRequestRecord): SignatureRequestListRow {

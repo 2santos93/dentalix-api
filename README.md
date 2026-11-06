@@ -561,6 +561,9 @@ base>` (`TenantLinkBaseService` / `tenantLinkHost`). El enlace de
   cambio de contraseña). Errores en español: 404 (inexistente, reemplazado o de
   otra clínica) y 410 (caducado o usado). Deja un evento `PASSWORD_RESET` en la
   auditoría, sin datos sensibles.
+  **SEC-067:** no borra el contador de códigos MFA fallidos (solo lo borra un
+  código correcto): quien controla el buzón pero no el móvil no gana intentos
+  restableciendo la contraseña.
 - Token: 32 bytes aleatorios (base64url); en `user_tokens` solo su SHA-256,
   caduca a los 30 min y pedir otro invalida los anteriores. Tabla global de
   usuario (sin `tenantId` ni RLS, como `users`): el enlace solo vale en el host
@@ -4981,6 +4984,31 @@ de la demo (`UPDATE users SET "isPlatformAdmin" = true WHERE email = '…'`),
 enrola el MFA en http://localhost:3001/admin y entra en
 http://demo.localhost:3001/login con su email: la web pide el código y el
 motivo. Luego, como `admin@demo.dentalix.app`, Ajustes → «Accesos de soporte».
+
+### Alta forzada del MFA de un miembro de clínica (SEC-066)
+
+Con la política de la clínica (`requireAdminMfa` para los ADMIN,
+`requireAllMfa` para todos) quien aún no tiene el MFA no recibe sesión: el
+login responde `mfa: "MFA_ENROLLMENT_REQUIRED"`. Igual que en el alta del
+superadmin (DX-021-bis), la contraseña sola no enrola un móvil:
+
+- el login envía un código de 8 dígitos al correo de la **cuenta** y lo dice
+  con `emailCodeRequired: true` y `emailCodeRef` (la referencia del correo de
+  ese intento). El correo es de seguridad de plataforma (firma Dentalix, fuera
+  de los topes de la clínica); sale como mucho uno por cuenta y cliente cada
+  minuto y, si no sale, el login responde 429 con `Retry-After`;
+- `POST /auth/login/mfa/enrollment` y `/enrollment/confirm` exigen ese
+  `emailCode`. Sin él (o con uno malo) responden 400 con el mismo mensaje, no
+  hay secreto, ni activación, ni sesión, ni códigos de recuperación, y queda
+  `LOGIN_FAILED` `INVALID_EMAIL_CODE` en la auditoría de la clínica;
+- el código sale del `jti` del `mfaToken`, que es de esa cuenta y de esa
+  clínica: no vale para otra, caduca con el token (10 min), es de un solo uso
+  (el token entra en la denylist al canjearlo) y admite 10 intentos. Los
+  fallos cuentan además para la espera por cuenta y cliente
+  (`MFA_ENROLL_CLIENT_BACKOFF`: 5 libres, tope 10 min).
+
+La web ya muestra el paso del código (`MfaEnrollStep` con `emailCodeRequired`)
+en el login de la clínica y en el del apex.
 
 ## Ficheros en un bucket S3 (DX-084)
 
