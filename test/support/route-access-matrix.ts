@@ -136,6 +136,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-443: la copia del PDF firmado por enlace de un solo uso.
   'GET /public/signed-consent-copies/:token': PUBLIC_TENANT,
   'POST /public/signed-consent-copies/:token/download': PUBLIC_TENANT,
+  // DX-467: verificación pública de una receta con su código.
+  'GET /public/prescription-verifications/:code': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y

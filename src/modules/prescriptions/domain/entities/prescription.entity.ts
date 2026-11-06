@@ -74,6 +74,11 @@ export interface Prescription {
   /** DX-300: motivo de la confirmación de los avisos bloqueantes. */
   safetyOverrideReason: string | null;
   contentHash: string;
+  /**
+   * DX-467: código con el que un tercero comprueba la receta en la página
+   * pública (`prescription-verification.ts`). Fuera del hash; inmutable.
+   */
+  verificationCode: string;
   voidedAt: Date | null;
   voidedById: string | null;
   voidedByName: string | null;

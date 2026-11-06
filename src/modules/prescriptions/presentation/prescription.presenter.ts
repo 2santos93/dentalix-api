@@ -38,14 +38,17 @@ export function presentPrescription(rx: Prescription): PrescriptionDto {
   };
 }
 
+/** DX-467: `verificationUrl` = la del QR (PrescriptionVerificationLinks). */
 export function presentPrescriptionDocument(
   doc: PrescriptionDocument,
+  verificationUrl: string | null,
 ): PrescriptionDocumentDto {
   return {
     ...presentPrescription(doc),
     clinicLogoUrl: doc.clinicLogoUrl,
     locationFormat: doc.locationFormat,
     integrityOk: doc.integrityOk,
+    verificationUrl,
   };
 }
 

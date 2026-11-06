@@ -36,13 +36,17 @@ export type AuditPatientRef = {
  * sin actor y la BD solo lo admite para esa escritura (audit_events_actor_check).
  * `system`: un trabajo programado (DX-150, el barrido de cobranza que cierra
  * compromisos de pago); tampoco lleva usuario y la BD solo lo admite para ese
- * cambio de estado con origen JOB.
+ * cambio de estado con origen JOB. `anonymous`: un tercero sin cuenta ni
+ * enlace propio (DX-467: quien verifica una receta con su código en la página
+ * pública, p. ej. la farmacia); tampoco lleva usuario y la BD solo lo admite
+ * para esa lectura.
  */
 export type AuditActorRef =
   | { kind: 'user'; userId: string; role: ClinicRole | null }
   | { kind: 'email'; email: string }
   | { kind: 'patient' }
-  | { kind: 'system' };
+  | { kind: 'system' }
+  | { kind: 'anonymous' };
 
 /** Tope del user agent guardado en un evento. */
 export const MAX_AUDIT_USER_AGENT = 512;

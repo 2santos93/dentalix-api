@@ -126,6 +126,8 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-467: la verificación pública de una receta, por IP.
+    strict('prescription-verify'),
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>

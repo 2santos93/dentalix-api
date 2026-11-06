@@ -57,6 +57,8 @@ import {
   VoidPrescriptionUseCase,
   type PrescriptionSafetyPreview,
 } from '../application/use-cases/prescriptions.use-cases';
+import { PrescriptionVerificationLinks } from '../application/use-cases/public-prescription-verification.use-cases';
+import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import {
   IssuePrescriptionDto,
   PrescriptionSafetyCheckDto,
@@ -223,6 +225,7 @@ export class PrescriptionsController {
     private readonly getSettings: GetPrescriptionSettingsUseCase,
     private readonly updateSettings: UpdatePrescriptionSettingsUseCase,
     private readonly tenantContext: TenantContextService,
+    private readonly verificationLinks: PrescriptionVerificationLinks,
   ) {}
 
   // Declarada ANTES de `:id`: Express casa las rutas en orden.
@@ -294,8 +297,16 @@ export class PrescriptionsController {
   @ApiNotFoundResponse({ description: 'Receta no encontrada en esta clínica' })
   async get(
     @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: TenantHostRequest,
   ): Promise<PrescriptionDocumentDto> {
-    return presentPrescriptionDocument(await this.getPrescription.execute(id));
+    const doc = await this.getPrescription.execute(id);
+    return presentPrescriptionDocument(
+      doc,
+      await this.verificationLinks.urlFor(
+        doc.verificationCode,
+        req.tenantHost?.host,
+      ),
+    );
   }
 
   @Audit({

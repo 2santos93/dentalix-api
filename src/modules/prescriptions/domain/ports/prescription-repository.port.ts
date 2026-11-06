@@ -2,6 +2,8 @@ import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import type { AllergyMatch } from '../allergy-match';
 import type { PrescriptionItemContent } from '../prescription-hash';
 import type { SafetyAlert } from '../prescription-safety';
+import type { PublicVerificationState } from '../prescription-verification';
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import type {
   Prescription,
   PrescriptionIssuer,
@@ -65,6 +67,15 @@ export type StoredPrescription = Prescription & {
   locationFormat: PrescriptionLocationFormat;
 };
 
+/** DX-467: una verificación pública, para su evento de auditoría (solo ids). */
+export interface PublicVerificationAuditInput {
+  prescriptionId: string;
+  patientId: string;
+  locationId: string;
+  state: PublicVerificationState;
+  meta: AuditRequestMeta;
+}
+
 export const PRESCRIPTION_REPOSITORY = Symbol('PRESCRIPTION_REPOSITORY');
 
 export interface PrescriptionRepository {
@@ -95,6 +106,19 @@ export interface PrescriptionRepository {
    * sede, también si está retirada.
    */
   findById(id: string): Promise<StoredPrescription | null>;
+
+  /**
+   * DX-467: la receta de la clínica en contexto (la del host, bajo RLS) con
+   * ese código de verificación, o `null` (inexistente o de otra clínica: la
+   * RLS la hace invisible).
+   */
+  findByVerificationCode(code: string): Promise<StoredPrescription | null>;
+
+  /**
+   * DX-467: deja el evento de auditoría de una verificación pública (VIEW de
+   * PRESCRIPTION, origen PUBLIC_LINK, sin actor ni nada clínico).
+   */
+  recordPublicVerification(input: PublicVerificationAuditInput): Promise<void>;
 
   /** ISSUED → VOIDED, atómico: dos anulaciones a la vez, solo gana una. */
   void(

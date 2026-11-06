@@ -8,9 +8,11 @@ import type {
 } from '../../domain/entities/prescription.entity';
 import type { LegacyPrescriptionCountry } from '../../domain/legacy-prescription';
 import type { PrescriptionSettings } from '../../domain/prescription-settings';
+import { generatePrescriptionVerificationCode } from '../../domain/prescription-verification';
 import type {
   CreatePrescriptionRepoInput,
   PrescriptionRepository,
+  PublicVerificationAuditInput,
   StoredPrescription,
   VoidPrescriptionOutcome,
   VoidPrescriptionRepoInput,
@@ -126,6 +128,7 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
       country: this.locationCountry,
       id,
       tenantId: TENANT_ID,
+      verificationCode: generatePrescriptionVerificationCode(),
       status: PrescriptionStatus.ISSUED,
       voidedAt: null,
       voidedById: null,
@@ -149,7 +152,24 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
   locationFormats = new Map<string, PrescriptionLocationFormat>();
 
   findById(id: string): Promise<StoredPrescription | null> {
-    const row = this.rows.find((r) => r.id === id);
+    return this.stored(this.rows.find((r) => r.id === id));
+  }
+
+  findByVerificationCode(code: string): Promise<StoredPrescription | null> {
+    return this.stored(this.rows.find((r) => r.verificationCode === code));
+  }
+
+  /** Las verificaciones públicas auditadas, en orden. */
+  publicVerifications: PublicVerificationAuditInput[] = [];
+
+  recordPublicVerification(input: PublicVerificationAuditInput): Promise<void> {
+    this.publicVerifications.push(structuredClone(input));
+    return Promise.resolve();
+  }
+
+  private stored(
+    row: Prescription | undefined,
+  ): Promise<StoredPrescription | null> {
     return Promise.resolve(
       row
         ? {

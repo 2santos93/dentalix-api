@@ -523,6 +523,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         DEMO_PROFESSIONAL_SPECIALTIES[DEMO_PRESCRIPTION.dentistIndex],
     });
     expect(rx.clinicalRecordNumber).toMatch(/\S/);
+    // DX-467: emitida por el caso de uso, con su código de verificación.
+    expect(rx.verificationCode).toMatch(
+      /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$/,
+    );
     expect(rx.items.map((item) => item.quantityInWords)).toEqual([
       'veintiuno',
       'nueve',

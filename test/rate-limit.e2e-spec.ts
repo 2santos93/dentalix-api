@@ -41,6 +41,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'slot-token': { limit: 2, ttlMs: 60_000 },
   'copy-link': { limit: 4, ttlMs: 60_000 },
   'copy-token': { limit: 2, ttlMs: 60_000 },
+  'prescription-verify': { limit: 4, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el

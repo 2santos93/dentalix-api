@@ -28,9 +28,15 @@ import type {
   PrescriptionIssuer,
   PrescriptionPatient,
 } from '../../domain/entities/prescription.entity';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import {
+  generatePrescriptionVerificationCode,
+  publicVerificationAuditReason,
+} from '../../domain/prescription-verification';
 import type {
   CreatePrescriptionRepoInput,
   PrescriptionRepository,
+  PublicVerificationAuditInput,
   StoredPrescription,
   VoidPrescriptionOutcome,
   VoidPrescriptionRepoInput,
@@ -44,6 +50,18 @@ const INCLUDE = {
 type Row = Prisma.PrescriptionGetPayload<{ include: typeof INCLUDE }>;
 
 const UNKNOWN_PROFESSIONAL = 'Profesional';
+
+/**
+ * Intentos de emitir con un código nuevo si choca con otro de la clínica
+ * (31^12 combinaciones: en la práctica, nunca pasa del primero).
+ */
+const VERIFICATION_CODE_ATTEMPTS = 3;
+
+function isUniqueViolation(err: unknown): boolean {
+  return (
+    err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'
+  );
+}
 
 function toDateOnly(value: Date): string {
   return value.toISOString().slice(0, 10);
@@ -189,6 +207,7 @@ function mapRow(row: Row): Prescription {
     safetyAlerts: readSafetyAlerts(row.safetyAlerts),
     safetyOverrideReason: row.safetyOverrideReason,
     contentHash: row.contentHash,
+    verificationCode: row.verificationCode,
     voidedAt: row.voidedAt,
     voidedById: row.voidedById,
     voidedByName: row.voidedBy?.fullName ?? null,
@@ -346,6 +365,40 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
 
   async create(input: CreatePrescriptionRepoInput): Promise<Prescription> {
     const tenantId = this.requireTenantId();
+    // DX-467: el código de verificación sale de aquí (CSPRNG); si choca con
+    // otro de la clínica, la transacción entera se repite con otro código.
+    for (let attempt = 1; ; attempt += 1) {
+      const verificationCode = generatePrescriptionVerificationCode();
+      try {
+        return mapRow(
+          await this.insert(tenantId, { ...input, verificationCode }),
+        );
+      } catch (err) {
+        // Bajo el rol de la app Prisma no nombra el índice del P2002 (`target`
+        // "(not available)"): se mira si el código ya era de otra receta de la
+        // clínica (índice prescriptions_tenant_verification_code_key).
+        if (
+          attempt >= VERIFICATION_CODE_ATTEMPTS ||
+          !isUniqueViolation(err) ||
+          !(await this.verificationCodeTaken(verificationCode))
+        ) {
+          throw err;
+        }
+      }
+    }
+  }
+
+  private async verificationCodeTaken(code: string): Promise<boolean> {
+    const taken = await this.prisma.runWithTenant((tx) =>
+      tx.prescription.count({ where: { verificationCode: code } }),
+    );
+    return taken > 0;
+  }
+
+  private insert(
+    tenantId: string,
+    input: CreatePrescriptionRepoInput & { verificationCode: string },
+  ): Promise<Row> {
     const {
       items,
       allergyMatches,
@@ -356,7 +409,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
     } = input;
     // Receta y medicamentos en la MISMA transacción: el trigger de la base solo
     // admite medicamentos insertados por la transacción que creó la receta.
-    const row = await this.prisma.runWithTenant(async (tx) => {
+    return this.prisma.runWithTenant(async (tx) => {
       // Fase 1 (spec D1, pre-flight I5): las réplicas anteriores leen
       // `country` como no nulo, así que la receta única sigue llevando el país
       // ACTUAL de su sede, leído en esta transacción. Es solo un dato: no
@@ -384,7 +437,6 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
         include: INCLUDE,
       });
     });
-    return mapRow(row);
   }
 
   async listByPatient(patientId: string): Promise<Prescription[]> {
@@ -403,11 +455,55 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
    * está retirada (sin filtrar `deletedAt`). Tolerante: lo que falte o no sea
    * válido llega como `null`, nunca un 409; la web pinta «—».
    */
-  async findById(id: string): Promise<StoredPrescription | null> {
+  findById(id: string): Promise<StoredPrescription | null> {
+    return this.findStored({ id });
+  }
+
+  /**
+   * DX-467: bajo la RLS de la clínica del contexto (la del host en la ruta
+   * pública): el código de otra clínica no existe. Usa el índice único
+   * (tenantId, verificationCode).
+   */
+  findByVerificationCode(code: string): Promise<StoredPrescription | null> {
+    return this.findStored({ verificationCode: code });
+  }
+
+  /**
+   * DX-467: VIEW de PRESCRIPTION sin actor, origen PUBLIC_LINK y el motivo del
+   * resultado; solo ids (receta, paciente, sede) y los datos de la petición.
+   * Lo admite el CHECK audit_events_actor_check (20261126090000).
+   */
+  async recordPublicVerification(
+    input: PublicVerificationAuditInput,
+  ): Promise<void> {
+    const tenantId = this.requireTenantId();
+    await this.prisma.runWithTenant((tx) =>
+      writeAuditEvent(tx, {
+        tenantId,
+        locationId: input.locationId,
+        actor: { kind: 'anonymous' },
+        action: 'VIEW',
+        resourceType: 'PRESCRIPTION',
+        resourceId: input.prescriptionId,
+        patient: { kind: 'patient', id: input.patientId },
+        requestId: input.meta.requestId,
+        ip: input.meta.ip,
+        userAgent: input.meta.userAgent,
+        metadata: {
+          origin: 'PUBLIC_LINK',
+          reason: publicVerificationAuditReason(input.state),
+        },
+      }),
+    );
+  }
+
+  private findStored(
+    where: Prisma.PrescriptionWhereInput,
+  ): Promise<StoredPrescription | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.prescription.findFirst({
-        where: { id },
+        where,
         include: INCLUDE,
       });
       if (!row) return null;

@@ -60,6 +60,11 @@
  * - copy-link:     las rutas públicas de la copia del PDF firmado (DX-443:
  *                  ver el enlace y descargar), por IP (enumeración de tokens).
  * - copy-token:    las mismas rutas, por TOKEN (sin IP), como slot-token.
+ * - prescription-verify: la verificación pública de una receta con su código
+ *                  (DX-467, `GET /public/prescription-verifications/:code`),
+ *                  por IP: frena a quien pruebe códigos al azar. Sin balde por
+ *                  código: no hay un enlace que martillear, y quien verifica
+ *                  una receta legítima lo hace un par de veces.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -102,7 +107,8 @@ export type RateLimitPolicy =
   | 'slot-offer'
   | 'slot-token'
   | 'copy-link'
-  | 'copy-token';
+  | 'copy-token'
+  | 'prescription-verify';
 
 export interface RateLimitRule {
   limit: number;
@@ -139,6 +145,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'slot-token': { limit: 10, ttlMs: MINUTE },
   'copy-link': { limit: 20, ttlMs: MINUTE },
   'copy-token': { limit: 10, ttlMs: MINUTE },
+  'prescription-verify': { limit: 20, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -187,5 +194,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'slot-token': rule('slot-token'),
     'copy-link': rule('copy-link'),
     'copy-token': rule('copy-token'),
+    'prescription-verify': rule('prescription-verify'),
   };
 }

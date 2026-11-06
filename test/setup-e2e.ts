@@ -30,6 +30,7 @@ for (const policy of [
   'ANAMNESIS_TOKEN',
   'SIGNATURE',
   'SIGNATURE_TOKEN',
+  'PRESCRIPTION_VERIFY',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

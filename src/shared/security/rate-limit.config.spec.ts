@@ -46,6 +46,8 @@ describe('loadRateLimitConfig', () => {
     // DX-443: la copia pública del PDF firmado, por IP y por token.
     expect(cfg['copy-link']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['copy-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-467: la verificación pública de una receta, por IP.
+    expect(cfg['prescription-verify']).toEqual({ limit: 20, ttlMs: 60_000 });
   });
 
   it('SEC-046: lee RATE_LIMIT_PATIENT_IMPORT_LIMIT/_TTL_MS', () => {

@@ -5452,6 +5452,49 @@ true` (o el `allergyOverride` de clientes anteriores) y `safetyOverrideReason`
   con NULL y su hash se sigue calculando con el formato v1 (test de regresión
   con el valor de DX-013 en `prescription-hash.spec.ts`).
 
+## Receta verificable: código y QR (DX-467)
+
+Quien tiene la receta impresa (la farmacia) comprueba si es auténtica y sigue
+vigente en la página pública de la web `/receta/<código>` del host de la
+clínica. Dominio en `src/modules/prescriptions/domain/prescription-verification.ts`.
+
+- **Código**: 12 símbolos del alfabeto `23456789ABCDEFGHJKMNPQRSTUVWXYZ` (sin
+  0/O, 1/I/L; ≈ 59 bits) generados con `crypto.randomInt` (CSPRNG uniforme) al
+  emitir, en `prescriptions."verificationCode"`. Único POR CLÍNICA (índice
+  `prescriptions_tenant_verification_code_key`, el de la búsqueda pública bajo
+  la RLS del host); si choca con otro de la clínica, la emisión se repite con
+  otro código. Fuera del hash (identifica el documento; los hashes guardados
+  siguen validando) e inmutable (trigger `prescriptions_immutable`). Se
+  imprime en grupos de 4 (`K7M2-P9QR-T4XW`); la página acepta minúsculas y
+  guiones.
+- **Recetas anteriores**: barrido en la migración (no perezoso), así la
+  columna es NOT NULL y la app nunca escribe en una receta emitida al leerla.
+  Cinco migraciones `20261126090000…090400_dx467_*`: columna nullable con
+  DEFAULT `prescription_verification_code()` (función SQL con
+  `gen_random_uuid()`, mismo alfabeto; cubre a una réplica anterior que inserte
+  sin el código), índice único CONCURRENTLY, barrido por clínica en lotes de
+  500 con `app.current_tenant` (vale con un owner sin BYPASSRLS), VALIDATE de
+  los CHECK + SET NOT NULL, y VALIDATE del CHECK de actor de `audit_events`.
+- **QR**: `GET /prescriptions/:id` trae `verificationUrl` (host de
+  plataforma de la clínica, `TenantLinkBaseService`; `null` sin host seguro: la
+  receta imprime solo el código).
+- **Ruta pública** `GET /public/prescription-verifications/:code` (sin sesión,
+  clínica solo por el host, `Cache-Control: no-store`, límite por IP
+  `prescription-verify`, `RATE_LIMIT_PRESCRIPTION_VERIFY_*`, 20/min). Siempre la
+  misma forma: `state` `VALID` (fecha de emisión, profesional y su registro,
+  clínica e iniciales del paciente), `VOIDED` (solo `voidedAt`, sin motivo) o
+  `UNVERIFIABLE` (el hash guardado no casa con el recalculado; nada más), y
+  `regional` (formato de la sede para pintar la fecha). Malformado,
+  inexistente, de otra clínica o host sin clínica: el mismo 404 genérico.
+- **Auditoría**: cada verificación de una receta encontrada deja un VIEW de
+  PRESCRIPTION sin actor, origen `PUBLIC_LINK`, con el paciente, la IP y el
+  user agent, y reason `PRESCRIPTION_VERIFIED`, `PRESCRIPTION_VERIFIED_VOIDED`
+  o `PRESCRIPTION_INTEGRITY_MISMATCH` (lo admite `audit_events_actor_check`).
+  Un 404 no deja evento.
+- **Demo**: la receta que siembra `npm run seed:demo` lleva su código; ábrela
+  desde la ficha («Ver e imprimir») y escanea el QR, o entra en
+  `http://demo.localhost:3001/receta/<código>`.
+
 ## Anestesia local en la evolución (DX-307)
 
 Módulo `anesthesia`; regla en `src/modules/anesthesia/domain/anesthesia-dose.ts`

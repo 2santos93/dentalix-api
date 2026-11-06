@@ -33,13 +33,19 @@ import {
   PrescriptionsController,
 } from './presentation/prescriptions.controller';
 import { PrescriptionTemplatesController } from './presentation/prescription-templates.controller';
+import { PublicPrescriptionVerificationsController } from './presentation/public-prescription-verifications.controller';
+import {
+  PrescriptionVerificationLinks,
+  VerifyPrescriptionUseCase,
+} from './application/use-cases/public-prescription-verification.use-cases';
 
 /**
  * Recetas (DX-013): emisión inmutable de una receta única (DX-324: sin reglas
  * por país; lo que exige e imprime lo deciden los ajustes de la clínica),
  * avisos de seguridad contra la anamnesis (DX-300: alergias, interacciones,
  * embarazo, antirresortivos, dosis infantil), anulación con motivo,
- * plantillas y ajustes de la receta por clínica.
+ * plantillas y ajustes de la receta por clínica, y verificación pública con
+ * el código o el QR impreso (DX-467).
  */
 @Module({
   imports: [JwtModule.register({}), DocumentTypeNamesModule],
@@ -47,6 +53,7 @@ import { PrescriptionTemplatesController } from './presentation/prescription-tem
     PatientPrescriptionsController,
     PrescriptionsController,
     PrescriptionTemplatesController,
+    PublicPrescriptionVerificationsController,
   ],
   providers: [
     GetPrescriptionIssuerUseCase,
@@ -55,6 +62,8 @@ import { PrescriptionTemplatesController } from './presentation/prescription-tem
     ListPatientPrescriptionsUseCase,
     GetPrescriptionUseCase,
     VoidPrescriptionUseCase,
+    VerifyPrescriptionUseCase,
+    PrescriptionVerificationLinks,
     ListPrescriptionTemplatesUseCase,
     CreatePrescriptionTemplateUseCase,
     UpdatePrescriptionTemplateUseCase,

@@ -223,6 +223,13 @@ export class PrescriptionDto {
   safetyOverrideReason!: string | null;
   @ApiProperty({ description: 'SHA-256 (hex) del contenido emitido' })
   contentHash!: string;
+  @ApiProperty({
+    example: 'K7M2P9QRT4XW',
+    pattern: '^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{12}$',
+    description:
+      'DX-467: código de verificación (12 símbolos sin 0/O, 1/I/L; se imprime en grupos de 4). Quien tenga la receta la comprueba en la página pública /receta/<código>. Fuera del hash; inmutable.',
+  })
+  verificationCode!: string;
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   voidedAt!: Date | null;
   @ApiProperty({ type: String, format: 'uuid', nullable: true }) voidedById!:
@@ -261,6 +268,14 @@ export class PrescriptionDocumentDto extends PrescriptionDto {
     description: 'true si el hash guardado coincide con el recalculado al leer',
   })
   integrityOk!: boolean;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'https://demo.dentalix.app/receta/K7M2P9QRT4XW',
+    description:
+      'DX-467: URL de la página pública de verificación, en el host de plataforma de la clínica, para el QR de la receta impresa. null si no hay host seguro: se imprime solo el código.',
+  })
+  verificationUrl!: string | null;
 }
 
 export class PrescriptionIssuerDto {
