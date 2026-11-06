@@ -1,4 +1,8 @@
 import { readFileSync, readdirSync } from 'node:fs';
+import {
+  maintenanceStatus,
+  nextMaintenanceOn,
+} from '../src/modules/equipment/domain/equipment-rules';
 import { join } from 'node:path';
 import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -764,6 +768,48 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(withChair.every((a) => a.locationId === chairs[0].locationId)).toBe(
       true,
     );
+  });
+
+  it('deja 4 equipos biomédicos con su hoja de vida: al día, próximo, vencido y sin programar (DX-542)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const equipment = await raw.equipment.findMany({
+      where: { tenantId },
+      include: {
+        location: { select: { timeZone: true } },
+        chair: { select: { name: true } },
+        maintenances: { where: { voidedAt: null } },
+      },
+      orderBy: { name: 'asc' },
+    });
+    expect(equipment).toHaveLength(4);
+    expect(equipment.find((e) => e.chair)?.chair?.name).toBe('Sillón 1');
+    const statusByName = Object.fromEntries(
+      equipment.map((e) => {
+        const preventives = e.maintenances
+          .filter((m) => m.kind === 'PREVENTIVE')
+          .sort((a, b) => b.performedOn.getTime() - a.performedOn.getTime());
+        const last = preventives[0];
+        const next = nextMaintenanceOn({
+          acquiredOn: e.acquiredOn?.toISOString().slice(0, 10) ?? null,
+          maintenanceIntervalMonths: e.maintenanceIntervalMonths,
+          lastPreventive: last
+            ? {
+                performedOn: last.performedOn.toISOString().slice(0, 10),
+                nextDueOn: last.nextDueOn?.toISOString().slice(0, 10) ?? null,
+              }
+            : null,
+        });
+        const sedeDay = civilDateIn(new Date(), e.location.timeZone!);
+        return [e.name, maintenanceStatus(next, sedeDay)];
+      }),
+    );
+    expect(statusByName).toEqual({
+      'Autoclave clase B': 'UP_TO_DATE',
+      'Compresor odontológico': 'UNSCHEDULED',
+      'Rayos X periapical': 'DUE_SOON',
+      'Unidad dental Sillón 1': 'OVERDUE',
+    });
+    expect(equipment.every((e) => e.maintenances.length > 0)).toBe(true);
   });
 
   it('DX-407: la hoja de sedación de ejemplo va en orden (valoración < checklist < fármaco < tomas intraoperatorias < egreso)', async () => {

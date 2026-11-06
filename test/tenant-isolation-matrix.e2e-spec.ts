@@ -3395,6 +3395,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    */
   const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
     {
+      spec: 'equipment.e2e-spec.ts',
+      checks:
+        'B → 404 al leer, editar, dar de baja y registrar o anular mantenimientos del equipo de A, y la hoja de vida de A no cambia (DX-542)',
+      routes: [
+        'GET /equipment/:id',
+        'PATCH /equipment/:id',
+        'POST /equipment/:id/retire',
+        'POST /equipment/:id/maintenances',
+        'POST /equipment/:id/maintenances/:maintenanceId/void',
+      ],
+    },
+    {
       spec: 'recall.e2e-spec.ts',
       checks:
         'B → 404 al leer y al fijar el recall del paciente de A y al registrar un contacto en el recall de A; ni el recall de A ni los contactos cambian (DX-015)',

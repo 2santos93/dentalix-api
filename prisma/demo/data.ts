@@ -2739,6 +2739,166 @@ export const DEMO_CHAIRS: readonly DemoChair[] = [
   { name: 'Sillón 3' },
 ];
 
+/**
+ * DX-542: equipos biomédicos de la demo, con su hoja de vida. Fechas en
+ * meses/días antes de hoy (en la zona de la sede). Cubren los cuatro estados
+ * del programa: al día, próximo (≤30 días), VENCIDO y sin programar. Ningún
+ * texto nombra la norma de un país. `chair` es el índice en `DEMO_CHAIRS`
+ * (solo la Sede Norte tiene sillones).
+ */
+export interface DemoEquipmentMaintenance {
+  kind: 'PREVENTIVE' | 'CORRECTIVE' | 'CALIBRATION';
+  monthsAgo: number;
+  daysAgo?: number;
+  technician?: string;
+  company?: string;
+  description: string;
+  /** En la moneda de la sede. */
+  cost?: number;
+}
+
+export interface DemoEquipment {
+  location: DemoLocationKey;
+  chair?: number;
+  name: string;
+  category:
+    | 'AUTOCLAVE'
+    | 'DENTAL_UNIT'
+    | 'XRAY'
+    | 'COMPRESSOR'
+    | 'CURING_LIGHT'
+    | 'ULTRASONIC_SCALER'
+    | 'OTHER';
+  brand: string;
+  model: string;
+  serialNumber: string;
+  sanitaryRegistration?: string;
+  riskClass?: 'I' | 'IIA' | 'IIB' | 'III';
+  acquiredMonthsAgo: number;
+  maintenanceIntervalMonths?: number;
+  notes?: string;
+  maintenances: readonly DemoEquipmentMaintenance[];
+}
+
+export const DEMO_EQUIPMENT: readonly DemoEquipment[] = [
+  {
+    // Al día: preventivo hace 2 meses, cada 6.
+    location: 'principal',
+    name: 'Autoclave clase B',
+    category: 'AUTOCLAVE',
+    brand: 'Esterimed',
+    model: 'EB-23',
+    serialNumber: 'DEMO-AC-0001',
+    sanitaryRegistration: 'DEMO-RS-1001',
+    riskClass: 'IIB',
+    acquiredMonthsAgo: 26,
+    maintenanceIntervalMonths: 6,
+    notes: 'Sala de esterilización. Prueba de Bowie-Dick cada lunes.',
+    maintenances: [
+      {
+        kind: 'PREVENTIVE',
+        monthsAgo: 8,
+        technician: 'Luis Pérez',
+        company: 'Servitec Demo',
+        description: 'Limpieza de cámara, cambio de filtro y prueba de vacío.',
+        cost: 80,
+      },
+      {
+        kind: 'CORRECTIVE',
+        monthsAgo: 5,
+        technician: 'Luis Pérez',
+        company: 'Servitec Demo',
+        description: 'Cambio del empaque de la puerta por fuga de vapor.',
+        cost: 45,
+      },
+      {
+        kind: 'PREVENTIVE',
+        monthsAgo: 2,
+        technician: 'Luis Pérez',
+        company: 'Servitec Demo',
+        description:
+          'Limpieza de cámara, prueba de vacío y validación del ciclo.',
+        cost: 80,
+      },
+    ],
+  },
+  {
+    // VENCIDO: el último preventivo fue hace 7 meses y toca cada 6.
+    location: 'norte',
+    chair: 0,
+    name: 'Unidad dental Sillón 1',
+    category: 'DENTAL_UNIT',
+    brand: 'Odontomed',
+    model: 'U-500',
+    serialNumber: 'DEMO-UD-0101',
+    riskClass: 'IIA',
+    acquiredMonthsAgo: 30,
+    maintenanceIntervalMonths: 6,
+    maintenances: [
+      {
+        kind: 'PREVENTIVE',
+        monthsAgo: 7,
+        technician: 'Ana Gómez',
+        company: 'Dental Service Demo',
+        description:
+          'Lubricación de la turbina, revisión de mangueras y del pedal.',
+        cost: 60,
+      },
+    ],
+  },
+  {
+    // Próximo: preventivo hace 11 meses y 20 días, cada 12.
+    location: 'principal',
+    name: 'Rayos X periapical',
+    category: 'XRAY',
+    brand: 'Radiodemo',
+    model: 'RX-70',
+    serialNumber: 'DEMO-RX-0042',
+    sanitaryRegistration: 'DEMO-RS-2042',
+    riskClass: 'IIB',
+    acquiredMonthsAgo: 40,
+    maintenanceIntervalMonths: 12,
+    maintenances: [
+      {
+        kind: 'PREVENTIVE',
+        monthsAgo: 11,
+        daysAgo: 20,
+        technician: 'Carlos Ruiz',
+        company: 'Física Médica Demo',
+        description: 'Control de calidad del tubo y revisión del cabezal.',
+        cost: 120,
+      },
+      {
+        kind: 'CALIBRATION',
+        monthsAgo: 11,
+        daysAgo: 20,
+        technician: 'Carlos Ruiz',
+        company: 'Física Médica Demo',
+        description: 'Calibración del temporizador de exposición.',
+      },
+    ],
+  },
+  {
+    // Sin programar: sin periodicidad, solo un correctivo.
+    location: 'saoPaulo',
+    name: 'Compresor odontológico',
+    category: 'COMPRESSOR',
+    brand: 'Compridemo',
+    model: 'CS-40',
+    serialNumber: 'DEMO-CP-0300',
+    acquiredMonthsAgo: 18,
+    maintenances: [
+      {
+        kind: 'CORRECTIVE',
+        monthsAgo: 3,
+        technician: 'João Lima',
+        description: 'Cambio de la válvula de retención y purga del tanque.',
+        cost: 350,
+      },
+    ],
+  },
+];
+
 export const DEMO_APPOINTMENT_TYPES: readonly DemoAppointmentType[] = [
   {
     name: 'Valoración',

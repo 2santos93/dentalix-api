@@ -2155,6 +2155,58 @@ módulo `src/modules/implants`, tabla `patient_implants`.
 - **Demo**: implante y pilar del 36 del paciente del plan de implante y otro
   paciente con el mismo lote `DEMO-LOT-2026A`.
 
+## Equipos biomédicos por sede (DX-542)
+
+Inventario de dotación de cada sede con la hoja de vida de cada equipo y su
+programa de mantenimiento preventivo (sin citar la norma de ningún país),
+módulo `src/modules/equipment`, tablas `equipment` y `equipment_maintenances`.
+
+- **Solo ADMIN** lee y escribe (`EQUIPMENT_ROLES`); el resto recibe 403
+  «Solo administración gestiona los equipos biomédicos.». No hay un rol de
+  gestión de sede: el ADMIN siempre tiene todas las sedes.
+- **Equipo**: sede obligatoria, sillón opcional de ESA sede (activo; otra sede
+  → 400 «El sillón no es de la sede del equipo.», otra clínica → 404), nombre,
+  tipo (`AUTOCLAVE|DENTAL_UNIT|XRAY|COMPRESSOR|CURING_LIGHT|ULTRASONIC_SCALER|OTHER`),
+  marca, modelo, nº de serie, registro sanitario (texto libre), clase de
+  riesgo (`I|IIA|IIB|III`), fecha de adquisición (no futura en la sede),
+  periodicidad del preventivo en meses (1–120) y notas. Trasladarlo a otra
+  sede quita el sillón salvo que venga uno de la sede nueva.
+- **Endpoints**: `GET /equipment?locationId&status=ACTIVE|RETIRED|ALL&query&page&pageSize`
+  (por nombre; sin `locationId`, la sede de `X-Location-Id` o todas),
+  `POST /equipment`, `GET /equipment/:id` (hoja de vida: el equipo y TODOS sus
+  mantenimientos en orden cronológico, también los anulados),
+  `PATCH /equipment/:id`, `POST /equipment/:id/retire` (`{ retiredOn?, reason }`;
+  por defecto hoy en la sede; no se deshace: 409 la segunda vez y el equipo dado
+  de baja ya no se edita ni recibe mantenimientos), `POST /equipment/:id/maintenances`
+  y `POST /equipment/:id/maintenances/:maintenanceId/void` (`{ reason }`, 409 la
+  segunda vez). No hay DELETE.
+- **Mantenimiento**: `PREVENTIVE|CORRECTIVE|CALIBRATION`, fecha (no futura en la
+  sede ni anterior a la adquisición del equipo), técnico, empresa, descripción, costo opcional SIEMPRE con su moneda
+  (ISO 4217 del catálogo), próximo explícito (posterior a la fecha y a 10 años
+  como mucho) y quién lo
+  registró. Inalterable (trigger `dx_equipment_maintenances_immutable`): solo
+  se anula, una vez. Un preventivo sin próximo explícito deja la fecha + la
+  periodicidad del equipo.
+- **Próximo y estado**: el próximo preventivo es el que fijó el último
+  preventivo vivo (o su fecha + la periodicidad actual); sin preventivos, la
+  adquisición + la periodicidad; si no, «sin programar». `maintenanceStatus`
+  se cuenta en el día de la sede del equipo: `OVERDUE` (antes de hoy),
+  `DUE_SOON` (hoy a +30 días), `UP_TO_DATE`, `UNSCHEDULED`; `null` si está dado
+  de baja. Los avisos en «Mi día» son DX-543.
+- **Carreras**: editar es un UPDATE condicional a `ACTIVE` y registrar un
+  mantenimiento bloquea el equipo activo (`FOR UPDATE`): si otra petición lo
+  dio de baja en medio, 409 «El equipo está dado de baja…», nunca 500. Un
+  `null` en `locationId`, `name` o `category` del PATCH es 400.
+- **BD**: RLS FORCE con `tenant_isolation` (NULLIF) en las dos tablas, FK
+  compuestas a la sede, al sillón (`(tenantId, locationId, chairId)` → misma
+  sede) y al equipo, sin DELETE para `dentalix_app`, un equipo dado de baja no
+  cambia (`dx_equipment_retired_final`). Auditoría `EQUIPMENT` (alta, edición,
+  baja con `EQUIPMENT_RETIRED`) y `EQUIPMENT_MAINTENANCE` (alta y `VOID`).
+- **Fuera de esta porción**: el PDF del informe de cada mantenimiento (no hay
+  un servicio de ficheros de clínica que se reutilice sin más).
+- **Demo**: autoclave al día y rayos X próximo en la principal, la unidad del
+  Sillón 1 de la Sede Norte vencida y un compresor sin programar en São Paulo.
+
 ## Personal restringido a sedes (DX-089)
 
 Un miembro puede atender solo en algunas sedes de la clínica (la recepción de
