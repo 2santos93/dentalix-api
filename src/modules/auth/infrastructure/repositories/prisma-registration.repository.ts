@@ -154,12 +154,16 @@ export class PrismaRegistrationRepository implements RegistrationRepository {
     return row ? toRecord(row) : null;
   }
 
-  async consumePending(id: string): Promise<boolean> {
+  async consumePending(
+    id: string,
+    tokenHash: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<boolean> {
     // Borrado duro legítimo: el pendiente es transitorio (guarda un hash de
     // contraseña) y consumirlo ES borrarlo; no hay nada que conservar.
     // eslint-disable-next-line no-restricted-syntax
-    const { count } = await this.prisma.pendingRegistration.deleteMany({
-      where: { id },
+    const { count } = await (tx ?? this.prisma).pendingRegistration.deleteMany({
+      where: { id, tokenHash },
     });
     return count === 1;
   }

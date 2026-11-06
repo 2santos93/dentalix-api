@@ -6,7 +6,8 @@ import {
   Inject,
   Injectable,
 } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { ClinicRole, Prisma } from '@prisma/client';
 import { INVITATION_REPOSITORY } from '../../domain/ports/invitation-repository.port';
 import type { InvitationRepository } from '../../domain/ports/invitation-repository.port';
 import { INVITATION_NOTIFIER } from '../../domain/ports/invitation-notifier.port';
@@ -32,6 +33,10 @@ export interface InvitationLimits {
 export const DEFAULT_INVITATION_TENANT_DAILY = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const INVITATION_TTL_MS = INVITATION_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+/** DX-149-bis: otra alta del mismo correo confirmó mientras se creaba esta. */
+export const INVITATION_RACE =
+  'Ya hay una invitación pendiente para este correo (se acaba de enviar). Revisa la lista de invitaciones.';
 
 export interface CreateInvitationInput {
   fullName: string;
@@ -115,38 +120,61 @@ export class CreateInvitationUseCase {
       await this.notifier.assertCanSend(email);
     }
 
-    const revokedIds = await this.repo.revokePendingByEmail(email, ctx);
-    // Su email, si seguía pendiente, llevaría un enlace que ya no sirve.
-    for (const id of revokedIds) {
-      await this.notifier.cancelPending(id);
-    }
-
+    const id = randomUUID();
     const token = generateInvitationToken();
     const tokenHash = hashInvitationToken(token);
     const expiresAt = new Date(Date.now() + INVITATION_TTL_MS);
-
-    const invitation = await this.repo.create(
-      {
-        email,
-        fullName,
-        role: input.role,
-        tokenHash,
-        expiresAt,
-        invitedById: input.invitedById,
-      },
-      ctx,
-    );
-
-    // Después del commit de la invitación y sin esperar al proveedor: el
-    // despachador envía el email en segundo plano (DX-088).
-    const emailDelivery = input.linkBase
-      ? await this.notifier.sendInvitation({
-          invitation,
+    // El email se prepara (marca, cifrado) ANTES de abrir la transacción.
+    const mail = input.linkBase
+      ? await this.notifier.prepareInvitation({
+          invitation: {
+            id,
+            tenantId: ctx.tenantId,
+            email,
+            fullName,
+            role: input.role,
+          },
           token,
           linkBase: input.linkBase,
         })
       : null;
 
-    return { invitation, token, emailDelivery };
+    // DX-149-bis: revocar la anterior, crear esta y encolar su email en UNA
+    // transacción, con el tope contado bajo candado. De dos altas a la vez, la
+    // segunda recibe un 409 (índice único de pendientes) o el 429 del tope y
+    // no toca nada: queda una sola invitación viva, con su email.
+    let invitation: ClinicInvitation;
+    try {
+      invitation = await this.repo.createReplacingPending(
+        {
+          id,
+          email,
+          fullName,
+          role: input.role,
+          tokenHash,
+          expiresAt,
+          invitedById: input.invitedById,
+        },
+        ctx,
+        async (tx, revokedIds) => {
+          // Su email, si seguía pendiente, llevaría un enlace que ya no sirve.
+          await this.notifier.cancelPendingInTx(tx, revokedIds);
+          if (mail) await mail.insert(tx);
+        },
+      );
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(INVITATION_RACE);
+      }
+      throw error;
+    }
+    // Tras el COMMIT y sin esperar al proveedor: el despachador envía el
+    // email en segundo plano (DX-088).
+    mail?.kick();
+
+    return { invitation, token, emailDelivery: mail ? 'PENDING' : null };
   }
 }

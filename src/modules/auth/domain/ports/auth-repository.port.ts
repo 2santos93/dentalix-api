@@ -1,5 +1,5 @@
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import type { HourCycle } from '../../../locations/domain/regional-settings';
 import type { RefreshRotationDecision } from '../refresh-rotation';
 
@@ -35,6 +35,13 @@ export interface CreateClinicWithOwnerInput {
    * que se escribe en la MISMA transacción del alta (`null` en el seed).
    */
   request: AuditRequestMeta | null;
+  /**
+   * DX-149-bis: corre PRIMERO dentro de la transacción del alta (p. ej.
+   * consumir el registro pendiente). Si lanza, no se crea nada y lo que hizo
+   * se deshace con la transacción: un alta que falla a medias no gasta el
+   * enlace.
+   */
+  claimPending?: (tx: Prisma.TransactionClient) => Promise<void>;
 }
 
 export interface MembershipRecord {

@@ -53,13 +53,76 @@ describe('ResendInvitationUseCase', () => {
       (await repo.findByTokenHash(hashInvitationToken(result.token)))?.id,
     ).toBe(original.id);
     expect(result.emailDelivery).toBe('PENDING');
+    // El email sale con la MISMA invitación (id, correo, nombre, rol) y el
+    // token que queda guardado.
     expect(notifier.sent).toEqual([
       {
-        invitation: result.invitation,
+        invitation: expect.objectContaining({
+          id: original.id,
+          email: result.invitation.email,
+          fullName: result.invitation.fullName,
+          role: result.invitation.role,
+        }) as unknown,
         token: result.token,
         linkBase: LINK_BASE,
       },
     ]);
+    expect(notifier.kicked).toBe(1);
+  });
+
+  it('DX-149-bis: si el tope contado en la transacción lo agotó otra petición, el error sale y el token NO cambia', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const original = repo.seedInvitation({ token: 'token-vigente' });
+    const notifier = new FakeInvitationNotifier();
+    notifier.insertError = new Error('429 en la transacción');
+
+    await expect(
+      new ResendInvitationUseCase(repo, notifier).execute(
+        { id: original.id, linkBase: LINK_BASE },
+        CTX,
+      ),
+    ).rejects.toThrow('429 en la transacción');
+
+    expect(
+      (await repo.findByTokenHash(hashInvitationToken('token-vigente')))?.id,
+    ).toBe(original.id);
+    expect(repo.auditEvents).toHaveLength(0);
+    expect(notifier.sent).toHaveLength(0);
+    expect(notifier.kicked).toBe(0);
+  });
+
+  it('DX-149-bis: si el email no se pudo preparar, se reemite igual sin email (emailDelivery null, nunca 500)', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const original = repo.seedInvitation({ token: 'token-viejo' });
+    const notifier = new FakeInvitationNotifier();
+    notifier.failNext = true;
+
+    const result = await new ResendInvitationUseCase(repo, notifier).execute(
+      { id: original.id, linkBase: LINK_BASE },
+      CTX,
+    );
+
+    expect(result.emailDelivery).toBeNull();
+    expect(
+      (await repo.findByTokenHash(hashInvitationToken(result.token)))?.id,
+    ).toBe(original.id);
+    expect(notifier.kicked).toBe(0);
+    // El email pendiente anterior lleva el token sobrescrito: se cancela
+    // igual, en la misma transacción (nunca sale un enlace muerto).
+    expect(notifier.cancelled).toEqual([original.id]);
+  });
+
+  it('DX-149-bis: con email, el pendiente anterior se cancela en la transacción del reenvío', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const original = repo.seedInvitation({ token: 'token-viejo' });
+    const notifier = new FakeInvitationNotifier();
+
+    await new ResendInvitationUseCase(repo, notifier).execute(
+      { id: original.id, linkBase: LINK_BASE },
+      CTX,
+    );
+
+    expect(notifier.cancelled).toEqual([original.id]);
   });
 
   it('DX-359: reenviar deja su evento, sin el token nuevo ni su hash', async () => {

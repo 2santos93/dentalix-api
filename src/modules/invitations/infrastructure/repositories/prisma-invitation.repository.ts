@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   ClinicRole,
   ClinicInvitation as PrismaClinicInvitation,
+  Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -133,36 +134,36 @@ export class PrismaInvitationRepository implements InvitationRepository {
     );
   }
 
-  async revokePendingByEmail(
+  /** La pendiente del mismo correo, revocada en `tx` (INVITATION_REPLACED). */
+  private async revokePendingInTx(
+    tx: Prisma.TransactionClient,
     email: string,
     audit: AuditRequestContext,
   ): Promise<string[]> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const where = {
-        email,
-        acceptedAt: null,
-        revokedAt: null,
-        deletedAt: null,
-      };
-      // Por el único parcial (tenantId, email) de pendientes hay a lo sumo una.
-      const pending = await tx.clinicInvitation.findMany({
-        where,
-        select: { id: true },
-      });
-      if (pending.length === 0) return [];
-      await tx.clinicInvitation.updateMany({
-        where: { ...where, id: { in: pending.map((p) => p.id) } },
-        data: { revokedAt: new Date() },
-      });
-      // DX-359: la sustituida queda anulada en la auditoría, en esta tx.
-      for (const { id } of pending) {
-        await writeAuditEvent(
-          tx,
-          invitationRevokedAuditEvent(audit, id, 'REPLACED'),
-        );
-      }
-      return pending.map((p) => p.id);
+    const where = {
+      email,
+      acceptedAt: null,
+      revokedAt: null,
+      deletedAt: null,
+    };
+    // Por el único parcial (tenantId, email) de pendientes hay a lo sumo una.
+    const pending = await tx.clinicInvitation.findMany({
+      where,
+      select: { id: true },
     });
+    if (pending.length === 0) return [];
+    await tx.clinicInvitation.updateMany({
+      where: { ...where, id: { in: pending.map((p) => p.id) } },
+      data: { revokedAt: new Date() },
+    });
+    // DX-359: la sustituida queda anulada en la auditoría, en esta tx.
+    for (const { id } of pending) {
+      await writeAuditEvent(
+        tx,
+        invitationRevokedAuditEvent(audit, id, 'REPLACED'),
+      );
+    }
+    return pending.map((p) => p.id);
   }
 
   async findPendingById(id: string): Promise<ClinicInvitation | null> {
@@ -178,6 +179,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
     id: string,
     input: { tokenHash: string; expiresAt: Date },
     audit: AuditRequestContext,
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<ClinicInvitation | null> {
     return this.prisma.runWithTenant(async (tx) => {
       // Check-and-set atómico: solo una invitación pendiente (no aceptada ni
@@ -192,6 +194,8 @@ export class PrismaInvitationRepository implements InvitationRepository {
       });
       // DX-359: sin el token ni su hash.
       await writeAuditEvent(tx, invitationResentAuditEvent(audit, id));
+      // DX-149-bis: el email con el enlace nuevo, en esta transacción.
+      if (enqueue) await enqueue(tx);
       return mapToEntity(row);
     });
   }
@@ -222,8 +226,9 @@ export class PrismaInvitationRepository implements InvitationRepository {
     return tenant?.name ?? null;
   }
 
-  async create(
+  async createReplacingPending(
     input: {
+      id: string;
       email: string;
       fullName: string;
       role: ClinicRole;
@@ -232,11 +237,21 @@ export class PrismaInvitationRepository implements InvitationRepository {
       invitedById?: string;
     },
     audit: AuditRequestContext,
+    inTx?: (
+      tx: Prisma.TransactionClient,
+      revokedIds: string[],
+    ) => Promise<void>,
   ): Promise<ClinicInvitation> {
     const tenantId = this.requireTenantId();
     const row = await this.prisma.runWithTenant(async (tx) => {
+      // DX-149-bis: revocar la anterior, crear la nueva y encolar su email en
+      // UNA transacción. Con dos altas a la vez, el INSERT de la segunda
+      // espera a la primera en el índice único de pendientes y, tras su
+      // COMMIT, falla (P2002): se deshace entera, también su revocación.
+      const revokedIds = await this.revokePendingInTx(tx, input.email, audit);
       const created = await tx.clinicInvitation.create({
         data: {
+          id: input.id,
           tenantId,
           email: input.email,
           fullName: input.fullName,
@@ -251,6 +266,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
         tx,
         invitationCreatedAuditEvent(audit, created.id, created.role),
       );
+      if (inTx) await inTx(tx, revokedIds);
       return created;
     });
     return mapToEntity(row);

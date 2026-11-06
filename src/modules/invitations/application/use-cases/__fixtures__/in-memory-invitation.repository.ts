@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import { ClinicInvitation } from '../../../domain/entities/clinic-invitation.entity';
 import {
   AcceptUserResolution,
@@ -236,22 +236,6 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     );
   }
 
-  revokePendingByEmail(
-    email: string,
-    audit: AuditRequestContext,
-  ): Promise<string[]> {
-    const pending = this.invitations.filter(
-      (i) => i.email === email && i.acceptedAt === null && i.revokedAt === null,
-    );
-    pending.forEach((i) => {
-      i.revokedAt = NOW;
-      this.auditEvents.push(
-        invitationRevokedAuditEvent(audit, i.id, 'REPLACED'),
-      );
-    });
-    return Promise.resolve(pending.map((i) => i.id));
-  }
-
   findPendingById(id: string): Promise<ClinicInvitation | null> {
     const row = this.invitations.find(
       (i) => i.id === id && i.acceptedAt === null && i.revokedAt === null,
@@ -259,19 +243,23 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     return Promise.resolve(row ? this.toEntity(row) : null);
   }
 
-  reissue(
+  async reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },
     audit: AuditRequestContext,
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<ClinicInvitation | null> {
     const row = this.invitations.find(
       (i) => i.id === id && i.acceptedAt === null && i.revokedAt === null,
     );
-    if (!row) return Promise.resolve(null);
+    if (!row) return null;
+    // DX-149-bis: misma transacción; si `enqueue` lanza no cambia nada
+    // (aquí se ejecuta antes de tocar la fila, que es lo que da el rollback).
+    if (enqueue) await enqueue({} as Prisma.TransactionClient);
     row.tokenHash = input.tokenHash;
     row.expiresAt = input.expiresAt;
     this.auditEvents.push(invitationResentAuditEvent(audit, id));
-    return Promise.resolve(this.toEntity(row));
+    return this.toEntity(row);
   }
 
   revokeById(id: string, audit: AuditRequestContext): Promise<boolean> {
@@ -286,8 +274,9 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     return Promise.resolve(true);
   }
 
-  create(
+  async createReplacingPending(
     input: {
+      id: string;
       email: string;
       fullName: string;
       role: ClinicRole;
@@ -296,9 +285,33 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       invitedById?: string;
     },
     audit: AuditRequestContext,
+    inTx?: (
+      tx: Prisma.TransactionClient,
+      revokedIds: string[],
+    ) => Promise<void>,
   ): Promise<ClinicInvitation> {
+    const pending = this.invitations.filter(
+      (i) =>
+        i.email === input.email &&
+        i.acceptedAt === null &&
+        i.revokedAt === null,
+    );
+    // DX-149-bis: una transacción; `inTx` corre antes de tocar nada para que,
+    // si lanza, todo quede como estaba (el rollback).
+    if (inTx) {
+      await inTx(
+        {} as Prisma.TransactionClient,
+        pending.map((i) => i.id),
+      );
+    }
+    pending.forEach((i) => {
+      i.revokedAt = NOW;
+      this.auditEvents.push(
+        invitationRevokedAuditEvent(audit, i.id, 'REPLACED'),
+      );
+    });
     const row: StoredInvitation = {
-      id: `inv-${++seq}`,
+      id: input.id,
       tenantId: TENANT_ID,
       email: input.email,
       fullName: input.fullName,
@@ -314,7 +327,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     this.auditEvents.push(
       invitationCreatedAuditEvent(audit, row.id, input.role),
     );
-    return Promise.resolve(this.toEntity(row));
+    return this.toEntity(row);
   }
 
   /** Test helper: el usuario tal como quedó guardado. */

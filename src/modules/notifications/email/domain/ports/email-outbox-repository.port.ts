@@ -47,17 +47,43 @@ export type OutboxSettlement =
   | { status: 'PENDING'; retryDelayMs: number; lastError: string }
   | { status: 'FAILED'; lastError: string };
 
+/** Envíos recientes de una clínica, para sus topes anti-abuso (DX-088). */
+export interface RecentSends {
+  tenant: number;
+  recipient: number;
+  secondsSinceLastToRecipient: number | null;
+}
+
+/**
+ * DX-149-bis: decide sobre el recuento hecho DENTRO de la transacción del
+ * insert, con el candado de la clínica y del destinatario ya tomado. Lanza
+ * para no insertar (la transacción se deshace).
+ */
+export type OutboxQuotaGuard = (sends: RecentSends) => void;
+
 export interface EmailOutboxRepository {
-  insert(row: NewOutboxEmail): Promise<{ id: string }>;
+  /**
+   * Con `guard` (DX-149-bis), en la misma transacción: toma el candado de los
+   * topes de la clínica del contexto y del destinatario, cuenta y, si `guard`
+   * no lanza, inserta. Sin `guard`, inserta sin contar ni esperar.
+   */
+  insert(
+    row: NewOutboxEmail,
+    guard?: OutboxQuotaGuard,
+  ): Promise<{ id: string }>;
 
   /**
    * DX-463: como `insert`, pero dentro de la transacción de quien llama (ya
    * bajo la RLS de la clínica): el email y lo que lo motiva confirman o se
-   * deshacen juntos.
+   * deshacen juntos. `guard` como en `insert`: el candado dura hasta el
+   * COMMIT de esa transacción. Con `guard`: UN insert así por transacción
+   * (dos podrían esperarse en ciclo) y solo en READ COMMITTED (con otra
+   * isolation lanza; ver email-quota-lock.ts).
    */
   insertInTx(
     tx: Prisma.TransactionClient,
     row: NewOutboxEmail,
+    guard?: OutboxQuotaGuard,
   ): Promise<{ id: string }>;
 
   /**
@@ -109,14 +135,7 @@ export interface EmailOutboxRepository {
    * destinatario. Para los topes anti-abuso. Las 24 h y los segundos se
    * cuentan con el reloj de la BD, el mismo que fija "createdAt" (DX-355).
    */
-  recentSends(
-    tenantId: string,
-    toHash: string,
-  ): Promise<{
-    tenant: number;
-    recipient: number;
-    secondsSinceLastToRecipient: number | null;
-  }>;
+  recentSends(tenantId: string, toHash: string): Promise<RecentSends>;
 
   /**
    * ¿Puede el despachador trabajar? Las funciones existen, este rol puede
@@ -144,6 +163,16 @@ export interface EmailOutboxRepository {
    */
   supersedePending(
     tenantId: string,
+    referenceId: string,
+    template: EmailTemplateName,
+  ): Promise<number>;
+
+  /**
+   * DX-149-bis: `supersedePending` dentro de la transacción de quien llama (la
+   * del reenvío de una invitación), bajo la RLS de su clínica.
+   */
+  supersedePendingInTx(
+    tx: Prisma.TransactionClient,
     referenceId: string,
     template: EmailTemplateName,
   ): Promise<number>;

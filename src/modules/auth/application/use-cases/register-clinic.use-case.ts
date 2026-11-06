@@ -282,16 +282,16 @@ export class RegisterClinicUseCase {
     if (subdomainRuleVerdict(record.subdomain) !== 'ok') {
       throw subdomainReserved();
     }
+    const tokenHash = hashRegistrationToken(token);
     if (await this.repo.findTenantBySubdomain(record.subdomain)) {
+      await this.assertStillPending(tokenHash);
       throw new ConflictException(
         'Mientras confirmabas, otra clínica tomó ese subdominio. Vuelve a registrarte con otro.',
       );
     }
     if (await this.repo.findUserByEmail(record.email)) {
+      await this.assertStillPending(tokenHash);
       throw new ConflictException(REGISTRATION_EMAIL_TAKEN);
-    }
-    if (!(await this.pending.consumePending(record.id))) {
-      throw new NotFoundException(REGISTRATION_LINK_INVALID);
     }
 
     try {
@@ -305,6 +305,14 @@ export class RegisterClinicUseCase {
         location: record.location,
         // DX-359: CLINIC_REGISTERED en la transacción del alta.
         request,
+        // DX-149-bis: el pendiente se consume en ESA transacción: si el alta
+        // falla, sigue ahí y el mismo enlace vuelve a servir. De dos usos a la
+        // vez, el segundo espera aquí al primero y recibe el 404 genérico.
+        claimPending: async (tx) => {
+          if (!(await this.pending.consumePending(record.id, tokenHash, tx))) {
+            throw new NotFoundException(REGISTRATION_LINK_INVALID);
+          }
+        },
       });
       this.logger.log({
         event: 'registration.completed',
@@ -324,6 +332,18 @@ export class RegisterClinicUseCase {
         );
       }
       throw error;
+    }
+  }
+
+  /**
+   * DX-149-bis: la clínica y el borrado de su pendiente llegan en el mismo
+   * COMMIT. Si el subdominio o el email ya están dados de alta y el pendiente
+   * ya no existe, quien llega es el segundo uso del MISMO enlace: 404 de
+   * enlace usado, no un conflicto con «otra clínica».
+   */
+  private async assertStillPending(tokenHash: string): Promise<void> {
+    if (!(await this.pending.findPendingByTokenHash(tokenHash))) {
+      throw new NotFoundException(REGISTRATION_LINK_INVALID);
     }
   }
 
