@@ -2,6 +2,7 @@ import { DocumentRegionalDto } from '../../../../shared/locations/document-regio
 import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ConsentSignerType,
   SignatureRequestChannel,
   ToothSurface,
   TreatmentPlanStatus,
@@ -153,7 +154,8 @@ export class PlanQuoteAcceptanceDto {
   acceptedAt!: Date;
 
   @ApiProperty({
-    description: 'Quien registró la firma (usuario de la clínica)',
+    description:
+      'Quien registró la firma (usuario de la clínica). A distancia (DX-514): quien envió el enlace; el firmante es `signerName`.',
   })
   acceptedByName!: string;
 
@@ -200,6 +202,14 @@ export class PlanQuoteRemoteAcceptanceDto {
   @ApiProperty({ format: 'date-time' }) sentAt!: Date;
   @ApiProperty({ format: 'date-time' }) openedAt!: Date;
   @ApiProperty({ format: 'date-time' }) verifiedAt!: Date;
+  // DX-514: quién firmó por el enlace, el paciente o su representante
+  // (`signerName`). Sin `description`: con `enumName` se la pondría al enum
+  // compartido del contrato.
+  @ApiPropertyOptional({
+    enum: ConsentSignerType,
+    enumName: 'ConsentSignerType',
+  })
+  signerType?: ConsentSignerType;
 }
 
 /**

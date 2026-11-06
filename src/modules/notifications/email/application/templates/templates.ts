@@ -436,8 +436,10 @@ function signatureBudgetAccepted(
         text: `El ${vars.acceptedAtLabel} registramos tu aceptación del presupuesto que te envió ${vars.clinicName}.`,
       },
       {
+        // DX-514: nunca se manda a la página en la que firmó (ese enlace ya
+        // está usado y dice «Enlace no válido»); la copia la da la clínica.
         kind: 'paragraph',
-        text: 'La copia firmada la puedes guardar o imprimir desde la página en la que firmaste; la clínica también la tiene.',
+        text: `El enlace con el que firmaste ya no se puede volver a usar. Si necesitas una copia del presupuesto firmado, pídesela a ${vars.clinicName}.`,
       },
       {
         kind: 'note',

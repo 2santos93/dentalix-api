@@ -1,6 +1,7 @@
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import type {
+  ConsentSignerType,
   DocumentType,
   SignatureRequestChannel,
   TreatmentPlanStatus,
@@ -32,6 +33,12 @@ export interface PlanAcceptanceRemoteEvidence {
   sentAt: Date;
   openedAt: Date;
   verifiedAt: Date;
+  /**
+   * DX-514: quién firmó por el enlace, el paciente o su representante (el de
+   * la solicitud). `acceptedByName` es quien la envió, no quien firmó. Sin
+   * ella la aceptación sigue siendo a distancia: nunca «Registró la firma».
+   */
+  signerType?: ConsentSignerType;
 }
 
 /**

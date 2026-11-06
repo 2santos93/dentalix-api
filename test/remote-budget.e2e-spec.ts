@@ -273,9 +273,19 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
           signatureRequestId: id,
           channel: 'EMAIL',
           destinationMasked: 'ma***@example.com',
+          // DX-514: firmó la paciente; quien registró es quien lo envió.
+          signerType: 'PATIENT',
         },
       },
     });
+    const sender = await raw.signatureRequest.findUniqueOrThrow({
+      where: { id },
+      select: { createdBy: { select: { fullName: true } } },
+    });
+    expect(
+      (quote.body as { acceptance: { acceptedByName: string } }).acceptance
+        .acceptedByName,
+    ).toBe(sender.createdBy.fullName);
 
     const detail = await as(clinicA)
       .get(`/treatment-plans/${planId}`)
@@ -306,6 +316,12 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
       /registramos tu aceptación/,
     );
     expect(confirmation.input).not.toMatch(/zirconio|390\.000|390000/i);
+    // DX-514: no manda a la página en la que firmó (el enlace ya está usado).
+    expect(confirmation.input).not.toContain(token);
+    expect(confirmation.input).not.toMatch(
+      /desde la página en la que firmaste/,
+    );
+    expect(confirmation.input).toMatch(/pídesela a /);
 
     // El enlace ya está usado.
     await pub(clinicA.host).get(token).expect(404);

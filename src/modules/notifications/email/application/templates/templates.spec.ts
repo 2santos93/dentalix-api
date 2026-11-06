@@ -643,6 +643,31 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).not.toMatch(/\$|\bCO[P]\b|implante|tratamiento/i);
     });
 
+    it('DX-514: no manda a la página en la que firmó (ya usada); la copia se pide a la clínica (HTML y texto)', () => {
+      const email = renderEmail(
+        'signature-budget-accepted',
+        {
+          recipientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          acceptedAtLabel: '31/10/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      for (const body of [email.text, email.html]) {
+        expect(body).not.toMatch(/desde la página en la que firmaste/);
+        expect(body).not.toMatch(/\/firmar\//);
+        expect(body).toContain(
+          'El enlace con el que firmaste ya no se puede volver a usar.',
+        );
+        expect(body).toContain(
+          'Si necesitas una copia del presupuesto firmado, pídesela a Sonrisas del Norte.',
+        );
+        expect(body).not.toMatch(/facilitar/);
+      }
+      expect(email.html).not.toContain('href=');
+      expect(email.text).not.toMatch(/https?:\/\//);
+    });
+
     it('la oferta de hueco por enlace (DX-435): cuándo, dónde y con quién; sin nada clínico', () => {
       const email = renderEmail(
         'slot-offer',
