@@ -30,6 +30,11 @@ import {
   markWaitlistEntryScheduled,
   resolveWaitlistForReactivated,
 } from '../../../waitlist/infrastructure/waitlist-transitions';
+import {
+  hardBlockOver,
+  lockAgenda,
+} from '../../../schedule-blocks/infrastructure/agenda-lock';
+import { ScheduleBlockedRaceError } from '../../../schedule-blocks/domain/schedule-block-rules';
 import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../waitlist/domain/waitlist-rules';
 import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../domain/wants-earlier';
@@ -197,15 +202,30 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           hashtext(${input.providerId})
         )`;
         }
+        // Sede explícita del caso de uso (DX-122: la de la entrada de
+        // pendientes, ya permitida); si no, la del request o, sin cabecera,
+        // la de escritura de la sesión (DX-089: la primera permitida del
+        // restringido, la principal para los demás).
+        const locationId =
+          input.locationId ?? (await this.tenantContext.writeLocationId(tx));
+        // DX-149: un bloqueo creado a la vez ya se ve con el candado de la agenda.
+        await lockAgenda(tx, tenantId, {
+          providerId: input.providerId,
+          locationId,
+        });
+        if (
+          await hardBlockOver(tx, {
+            providerId: input.providerId,
+            locationId,
+            start: input.start,
+            end: input.end,
+          })
+        ) {
+          throw new ScheduleBlockedRaceError();
+        }
         const created = await tx.appointment.create({
           data: {
-            // Sede explícita del caso de uso (DX-122: la de la entrada de
-            // pendientes, ya permitida); si no, la del request o, sin cabecera,
-            // la de escritura de la sesión (DX-089: la primera permitida del
-            // restringido, la principal para los demás).
-            locationId:
-              input.locationId ??
-              (await this.tenantContext.writeLocationId(tx)),
+            locationId,
             tenantId,
             patientId: input.patientId,
             providerId: input.providerId,
@@ -414,6 +434,34 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         );
         if (!existing) {
           throw new NotFoundException('Appointment not found');
+        }
+
+        // DX-149: mover (hora o profesional) con el candado de la agenda y
+        // volviendo a mirar los bloqueos dentro de esta transacción.
+        if (
+          patch.start !== undefined ||
+          patch.end !== undefined ||
+          patch.providerId !== undefined
+        ) {
+          const slot = await tx.appointment.findUniqueOrThrow({
+            where: { id },
+            select: {
+              providerId: true,
+              locationId: true,
+              start: true,
+              end: true,
+            },
+          });
+          const moved = {
+            providerId: patch.providerId ?? slot.providerId,
+            locationId: slot.locationId,
+            start: patch.start ?? slot.start,
+            end: patch.end ?? slot.end,
+          };
+          await lockAgenda(tx, this.requireTenantId(), moved);
+          if (await hardBlockOver(tx, moved)) {
+            throw new ScheduleBlockedRaceError();
+          }
         }
 
         const {

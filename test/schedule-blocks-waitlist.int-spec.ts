@@ -22,6 +22,8 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { backendPid, waitForLockWaiters } from './support/postgres-concurrency';
+import { AffectedAppointmentsRaceError } from '../src/modules/schedule-blocks/domain/schedule-block-rules';
 
 /** DX-279: cancelar desde la agenda exige origen y motivo. */
 const FOR_PATIENT = {
@@ -344,6 +346,64 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
         where: { tenantId: a.tenantId },
       });
       await raw.appointment.deleteMany({ where: { tenantId: a.tenantId } });
+    });
+
+    it('DX-149: una cita y un bloqueo a la vez nunca acaban los dos confirmados', async () => {
+      // Se retiene el candado de la agenda de la doctora: la cita y el bloqueo
+      // llegan los dos a esperarlo y, al soltarlo, uno entra primero. El segundo
+      // ve al primero dentro de su transacción. Sin pausas: avanza por pg_locks.
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      let holding!: (pid: number) => void;
+      const held = new Promise<number>((resolve) => (holding = resolve));
+      const holder = raw.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+            hashtext(${'dx_agenda_provider:' + a.tenantId}),
+            hashtext(${DOCTOR})
+          )`;
+          holding(await backendPid(tx));
+          await released;
+        },
+        { timeout: 20_000 },
+      );
+      const pid = await held;
+      const racing = Promise.allSettled([
+        newAppointment('10:00', '10:30'),
+        inA(() =>
+          blocks.create({
+            providerId: DOCTOR,
+            locationId: null,
+            start: at('09:00'),
+            end: at('12:00'),
+            kind: 'MEETING',
+            allowsBooking: false,
+            note: null,
+            createdById: DOCTOR,
+            recheckAffected: true,
+          }),
+        ),
+      ]);
+      await waitForLockWaiters(raw, [pid], 2);
+      release();
+      await holder;
+      const [appointment, block] = await racing;
+      expect(
+        [appointment, block].filter((r) => r.status === 'fulfilled'),
+      ).toHaveLength(1);
+      if (appointment.status === 'rejected') {
+        expect(appointment.reason).toBeInstanceOf(ConflictException);
+      }
+      if (block.status === 'rejected') {
+        expect(block.reason).toBeInstanceOf(AffectedAppointmentsRaceError);
+      }
+      const [appointments, liveBlocks] = await Promise.all([
+        raw.appointment.count({ where: { tenantId: a.tenantId } }),
+        raw.scheduleBlock.count({
+          where: { tenantId: a.tenantId, deletedAt: null },
+        }),
+      ]);
+      expect(appointments + liveBlocks).toBe(1);
     });
 
     it('vacaciones de la doctora en todas las sedes: crear y mover a ese rango dan 409', async () => {
