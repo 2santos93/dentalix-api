@@ -203,7 +203,7 @@ export interface MfaNoticeEmailVars {
   recoveryCodesRemaining?: number;
 }
 
-/** DX-021-bis: código del correo para el alta del superadmin. */
+/** DX-021-bis, SEC-066: código del correo para el alta forzada del MFA. */
 export interface MfaEnrollmentCodeEmailVars {
   code: string;
   /** Dice cuál de varios correos es el del intento que está en pantalla. */

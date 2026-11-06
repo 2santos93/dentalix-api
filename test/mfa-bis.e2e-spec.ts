@@ -870,7 +870,8 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       );
       const forced = await login(site.host, member.email).expect(201);
       expect((forced.body as Body).mfa).toBe('MFA_ENROLLMENT_REQUIRED');
-      expect((forced.body as Body).emailCodeRequired).toBeUndefined();
+      // SEC-066: el alta forzada de un miembro también lleva código al correo.
+      expect((forced.body as Body).emailCodeRequired).toBe(true);
       // Otra clínica: nada cambia.
       await refresh(away.host, (outside.body as Body).refreshToken!).expect(
         201,

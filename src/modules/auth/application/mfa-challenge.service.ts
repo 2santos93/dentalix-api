@@ -74,8 +74,8 @@ export class MfaChallengeService {
   }
 
   /**
-   * DX-021-bis: código de 8 dígitos que se envía al correo de un superadmin para
-   * empezar su alta. Sale del `jti` con la clave derivada: es de ESE token, no se
+   * DX-021-bis, SEC-066: código de 8 dígitos que se envía al correo de la cuenta
+   * (superadmin o miembro de clínica) para su alta forzada. Sale del `jti` con la clave derivada: es de ESE token, no se
    * guarda en ningún sitio y muere con él. Así quien conoce la contraseña solo
    * puede gastar sus propios intentos, nunca los del titular.
    */

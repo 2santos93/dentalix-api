@@ -111,8 +111,8 @@ export function ipBucket(ip: string): string {
 }
 
 /**
- * DX-021-bis: clave del contador del código del CORREO en el alta de un
- * superadmin, por cuenta y cliente. Con la del MFA, quien conoce la contraseña
+ * DX-021-bis: clave del contador del código del CORREO en el alta forzada (de
+ * un superadmin o, SEC-066, de un miembro de clínica), por cuenta y cliente. Con la del MFA, quien conoce la contraseña
  * bloquearía al titular fallando a propósito, justo cuando este no tiene otra
  * salida.
  */

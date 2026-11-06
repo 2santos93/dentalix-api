@@ -46,9 +46,9 @@ export interface MfaChallenge {
   mfaToken: string;
   expiresAt: Date;
   /**
-   * DX-021-bis: alta de un superadmin. Empezarla exige además el código de este
-   * token, que se le acaba de enviar al correo: la contraseña sola no enrola un
-   * móvil.
+   * DX-021-bis, SEC-066: alta forzada (superadmin o miembro de clínica).
+   * Empezarla y confirmarla exige además el código de este token, que se acaba
+   * de enviar al correo de la cuenta: la contraseña sola no enrola un móvil.
    */
   emailCodeRequired?: true;
   /** Referencia que lleva el correo de ESTE intento (puede haber otros). */

@@ -58,8 +58,10 @@ interface ChallengeSession {
  * (un cambio de contraseña o de MFA entremedias lo invalida).
  *
  * DX-021-bis: el login del apex (superadmin) pasa por aquí con `tenantId` nulo:
- * emite una sesión de PLATAFORMA y audita en `platform_audit_events`. El alta
- * de un superadmin exige además el código enviado a su correo.
+ * emite una sesión de PLATAFORMA y audita en `platform_audit_events`.
+ *
+ * Toda alta forzada (superadmin, DX-021-bis; miembro de clínica, SEC-066) exige
+ * además el código enviado al correo de la cuenta, atado al `jti` del token.
  */
 @Injectable()
 export class CompleteMfaLoginUseCase {
@@ -204,14 +206,17 @@ export class CompleteMfaLoginUseCase {
     };
   }
 
-  /** DX-021-bis: el alta de un superadmin exige el código de su correo. */
+  /**
+   * DX-021-bis, SEC-066: el alta forzada exige el código del correo, sea un
+   * superadmin o un miembro de clínica. El código sale del `jti` del token, que
+   * es de esa cuenta y de esa clínica (o del apex): no vale para otra.
+   */
   private async assertEmailCode(
     session: ChallengeSession,
     emailCode: string | undefined,
     request: AuditRequestMeta,
   ): Promise<void> {
     const userId = session.claims.sub;
-    if (!(await this.mfa.state(userId)).isPlatformAdmin) return;
     const { jti } = session.claims;
     await this.lockout.claimMfaEnrollAttempt(userId, request.ip);
     if (!(await this.lockout.claimEnrollCodeAttempt(jti))) throw expired();

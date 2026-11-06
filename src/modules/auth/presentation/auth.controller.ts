@@ -217,7 +217,7 @@ export class AuthController {
     summary:
       'Inicia sesión en la clínica del host (o en plataforma desde el apex)',
     description:
-      'DX-021-bis: en el apex la contraseña no basta: responde siempre `MfaChallengeDto`; sin MFA, el alta exige además el código enviado al correo (`emailCodeRequired`). ' +
+      'DX-021-bis: en el apex la contraseña no basta: responde siempre `MfaChallengeDto`. SEC-066: toda alta forzada (superadmin en el apex o miembro de una clínica con el MFA obligatorio) exige además el código enviado al correo de la cuenta (`emailCodeRequired`, `emailCodeRef`); si no se pudo enviar (ya salió uno a esta cuenta desde este cliente hace menos de 1 min), 429 con `Retry-After`. ' +
       'SEC-008: un superadmin SIN membresía en la clínica solo entra como acceso de soporte (break-glass): ' +
       'necesita el MFA enrolado (`/platform/mfa`), `mfaCode` y `breakGlassReason`. Recibe solo un access token ' +
       'ADMIN de vida corta (`breakGlass: true`, `expiresAt`), sin refresh, y el acceso queda en ' +

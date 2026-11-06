@@ -126,7 +126,6 @@ export class LoginUseCase {
         {
           userId: membership.userId,
           email: mfa.email,
-          isPlatformAdmin: mfa.isPlatformAdmin,
           tokenVersion: membership.tokenVersion,
         },
         input.tenantId,
@@ -144,15 +143,16 @@ export class LoginUseCase {
   }
 
   /**
-   * El paso del segundo factor. El alta de un superadmin exige además un
-   * código enviado a su correo (DX-021-bis): quien solo tiene la contraseña no
-   * puede enrolar su móvil, y el dueño se entera del intento.
+   * El paso del segundo factor. Toda alta forzada (la de un superadmin,
+   * DX-021-bis, y la de un miembro de clínica obligado por la política,
+   * SEC-066) exige además un código enviado al correo de la cuenta: quien solo
+   * tiene la contraseña no puede enrolar su móvil, y el dueño se entera del
+   * intento.
    */
   private async challenge(
     user: {
       userId: string;
       email: string;
-      isPlatformAdmin: boolean;
       tokenVersion: number;
     },
     tenantId: string | null,
@@ -166,9 +166,7 @@ export class LoginUseCase {
       purpose,
     });
     const emailCodeRef =
-      purpose === 'MFA_ENROLL' && user.isPlatformAdmin
-        ? this.challenges.emailCodeRef(jti)
-        : null;
+      purpose === 'MFA_ENROLL' ? this.challenges.emailCodeRef(jti) : null;
     if (emailCodeRef) {
       const sent = await this.notifier.sendEnrollmentCode({
         userId: user.userId,
@@ -244,7 +242,6 @@ export class LoginUseCase {
       {
         userId: user.id,
         email: mfa.email,
-        isPlatformAdmin: true,
         tokenVersion: mfa.tokenVersion,
       },
       null,

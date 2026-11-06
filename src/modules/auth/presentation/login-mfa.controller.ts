@@ -119,12 +119,17 @@ export class LoginMfaController {
   @RateLimit('auth')
   @ApiOperation({
     summary: 'Alta forzada: genera el secreto (pendiente) y el otpauth URI',
+    description:
+      'DX-021-bis, SEC-066: exige `emailCode`, el código de 8 dígitos que el login envió al correo de la cuenta (superadmin o miembro de clínica; el login lo indica con `emailCodeRequired`). Es de ESE `mfaToken`: no vale para otra cuenta ni otra clínica, caduca con él (10 min) y admite 10 intentos. Un código erróneo queda en la auditoría (LOGIN_FAILED `INVALID_EMAIL_CODE`, en la clínica o en plataforma) y cuenta para la espera por cuenta y cliente.',
   })
   @ApiOkResponse({ type: MfaEnrollmentDto })
-  @ApiUnauthorizedResponse({ description: '`code: "MFA_CHALLENGE_EXPIRED"`' })
+  @ApiUnauthorizedResponse({
+    description:
+      '`code: "MFA_CHALLENGE_EXPIRED"` (token caducado, usado, de otra clínica o con su código del correo agotado: volver a iniciar sesión)',
+  })
   @ApiBadRequestResponse({
     description:
-      'Alta de un superadmin: falta el código enviado a su correo o no es correcto',
+      'Falta el código enviado al correo o no es correcto (mismo mensaje en los dos casos)',
   })
   @ApiConflictResponse({ description: 'La verificación ya está activa' })
   @ApiTooManyRequestsResponse(TOO_MANY)
@@ -152,10 +157,13 @@ export class LoginMfaController {
     summary:
       'Alta forzada: confirma con un código, activa la verificación y abre la sesión',
     description:
-      'Devuelve los 10 códigos de recuperación (una sola vez). Queda auditado (UPDATE STAFF_MEMBER `MFA_ENABLED` y LOGIN `MFA_ENROLLED`).',
+      'Exige otra vez el `emailCode` del correo (sin él no se activa, no hay sesión ni códigos de recuperación). Devuelve los 10 códigos de recuperación (una sola vez). Queda auditado (UPDATE STAFF_MEMBER `MFA_ENABLED` y LOGIN `MFA_ENROLLED`).',
   })
   @ApiOkResponse({ type: MfaEnrolledSessionDto })
-  @ApiBadRequestResponse({ description: 'Código erróneo o sin alta pendiente' })
+  @ApiBadRequestResponse({
+    description:
+      'Falta el código del correo o no es correcto, código de la app erróneo o sin alta pendiente',
+  })
   @ApiUnauthorizedResponse({ description: '`code: "MFA_CHALLENGE_EXPIRED"`' })
   @ApiTooManyRequestsResponse(TOO_MANY)
   async confirmEnrollment(
