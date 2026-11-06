@@ -1,0 +1,24 @@
+-- DX-547 (DB-079): «¿tiene cita futura o está en la clínica?» de la lista de
+-- recall, por paciente. La consulta (`recallDueSql`) busca, para cada recall
+-- candidato, una cita viva del paciente agendada o confirmada con `start` >
+-- ahora, o en llegó / en sillón / listo para cobrar. Sin este índice lo
+-- resolvía ("tenantId", "patientId") leyendo del heap TODAS las citas del
+-- paciente (también las atendidas y canceladas) para filtrar por estado.
+-- Parcial: solo las citas vivas en esos cinco estados (las atendidas y
+-- canceladas, la gran mayoría, no entran), y con `start` y `status` dentro el
+-- recorrido es solo de índice. Los estados van LITERALES en la consulta, que
+-- es como Postgres casa el predicado bajo RLS (ver DX-149).
+--
+-- CONCURRENTLY (DB-025): `appointments` es la tabla más escrita de la agenda;
+-- no se bloquean sus escrituras mientras se construye. Por eso es la ÚNICA
+-- sentencia del fichero (Prisma la ejecuta fuera de transacción) y no lleva
+-- `SET lock_timeout`: CONCURRENTLY espera a las transacciones abiertas y un
+-- tope la haría fallar a medias (DB-078).
+-- Aditiva, sin cambios de datos; ninguna consulta anterior deja de funcionar.
+-- IF NOT EXISTS: un reintento tras un fallo se SALTARÍA si quedó un índice
+-- INVALID con este nombre, así que la receta empieza por el DROP: si falla,
+-- DROP INDEX CONCURRENTLY IF EXISTS "appointments_tenant_patient_upcoming_idx",
+-- `npx prisma migrate resolve --rolled-back
+-- 20261126090000_dx547_appointments_patient_upcoming_idx` y repetir
+-- `migrate deploy`. Vuelta atrás: el mismo DROP INDEX CONCURRENTLY.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "appointments_tenant_patient_upcoming_idx" ON "appointments" ("tenantId", "patientId", "start") INCLUDE ("status") WHERE "deletedAt" IS NULL AND "status" IN ('SCHEDULED', 'CONFIRMED', 'ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT');
