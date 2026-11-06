@@ -14,6 +14,7 @@ import {
   hashPasswordResetToken,
   passwordResetExpiresAt,
 } from '../password-reset-token';
+import { PasswordResetThrottledError } from '../../domain/password-reset-throttled.error';
 
 export interface RequestPasswordResetInput {
   /** Clínica del HOST de la petición (la resuelve el servidor). */
@@ -35,6 +36,11 @@ export type RequestPasswordResetOutcome = 'SENT' | 'NO_MEMBER' | 'THROTTLED';
  * Solo se envía a un MIEMBRO ACTIVO de la clínica del host: el email lleva su
  * marca y el enlace a su host. Pedir otro invalida los anteriores. Nada cambia
  * en la cuenta (ni contraseña ni bloqueo) hasta que llega un token válido.
+ *
+ * DX-149-ter: el token y su email se emiten en UNA transacción con el tope
+ * del destinatario contado bajo su candado (y un `lock_timeout` corto). Una
+ * ráfaga a la misma persona, aunque venga de muchas IP, no pasa del tope ni
+ * deja el enlace del email que salió sin valor.
  */
 @Injectable()
 export class RequestPasswordResetUseCase {
@@ -72,13 +78,9 @@ export class RequestPasswordResetUseCase {
     }
     const token = generatePasswordResetToken();
     const now = new Date();
-    await this.repo.issue({
-      userId: member.userId,
-      tokenHash: hashPasswordResetToken(token),
-      expiresAt: passwordResetExpiresAt(now),
-      now,
-    });
-    await this.notifier.send({
+    // Renderizar y cifrar (y leer la marca de la clínica) ANTES de abrir la
+    // transacción: dentro no se pide otra conexión.
+    const mail = await this.notifier.prepare({
       tenantId: input.tenantId,
       userId: member.userId,
       to: member.email,
@@ -86,6 +88,26 @@ export class RequestPasswordResetUseCase {
       resetUrl: `${input.linkBase}${PASSWORD_RESET_PATH}/${token}`,
       expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
     });
+    try {
+      // DX-149-ter: token y email en UNA transacción, con el tope del
+      // destinatario contado bajo su candado. Si no cabe (otra petición ganó
+      // la carrera) o el candado no se libera a tiempo, no cambia nada: el
+      // enlace vigente sigue siendo el anterior.
+      await this.repo.issue({
+        tenantId: input.tenantId,
+        userId: member.userId,
+        tokenHash: hashPasswordResetToken(token),
+        expiresAt: passwordResetExpiresAt(now),
+        now,
+        enqueue: (tx) => mail.insert(tx),
+      });
+    } catch (err) {
+      if (err instanceof PasswordResetThrottledError) {
+        return this.done(input.tenantId, 'THROTTLED');
+      }
+      throw err;
+    }
+    mail.kick();
     return this.done(input.tenantId, 'SENT');
   }
 

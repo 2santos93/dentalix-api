@@ -1,14 +1,31 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
+import { withEmailQuotaAs429 } from '../../notifications/email/application/email-quota-http';
 import type {
   SignatureBudgetAcceptedEmailVars,
   SignatureCodeEmailVars,
   SignatureRequestEmailVars,
 } from '../../notifications/email/domain/email-message';
-import { EmailQuotaExceededError } from '../../notifications/email/domain/email-quota-exceeded.error';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 
 export const SIGNATURE_EMAIL_SENDER = Symbol('SIGNATURE_EMAIL_SENDER');
+
+/**
+ * DX-149-ter: el email del enlace, listo para encolarlo DENTRO de la
+ * transacción que guarda la solicitud (DX-463): `insert` dentro, `kick()`
+ * después del COMMIT.
+ */
+export interface PreparedSignatureLinkEmail {
+  /**
+   * Cancela los emails aún pendientes de las solicitudes que esta anula
+   * (`supersededIds`) y encola el del enlace nuevo con el tope contado bajo
+   * el candado de la clínica y del destinatario. Si no cabe, lanza el 429 en
+   * español y la transacción se deshace entera.
+   */
+  insert(tx: Prisma.TransactionClient, supersededIds: string[]): Promise<void>;
+  kick(): void;
+}
 
 /**
  * Emails de la firma a distancia (DX-243) por el outbox (DX-088): el del
@@ -19,11 +36,12 @@ export const SIGNATURE_EMAIL_SENDER = Symbol('SIGNATURE_EMAIL_SENDER');
 export interface SignatureEmailSender {
   /** Topes del outbox por destinatario y clínica: pasarlos es un 429 en español. */
   assertCanSend(to: string): Promise<void>;
-  sendLink(input: {
+  /** DX-149-ter: el email del enlace, para la transacción de la solicitud. */
+  prepareLink(input: {
     to: string;
     referenceId: string;
     vars: SignatureRequestEmailVars;
-  }): Promise<void>;
+  }): Promise<PreparedSignatureLinkEmail>;
   sendCode(input: {
     to: string;
     referenceId: string;
@@ -53,37 +71,35 @@ export class OutboxSignatureEmailSender implements SignatureEmailSender {
     private readonly tenantContext: TenantContextService,
   ) {}
 
-  async assertCanSend(to: string): Promise<void> {
-    try {
-      await this.outbox.assertWithinQuota(tenantIdOf(this.tenantContext), to);
-    } catch (err) {
-      if (err instanceof EmailQuotaExceededError) {
-        throw new HttpException(
-          {
-            statusCode: HttpStatus.TOO_MANY_REQUESTS,
-            error: 'Too Many Requests',
-            message: err.message,
-            retryAfterSeconds: err.retryAfterSeconds,
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      throw err;
-    }
+  assertCanSend(to: string): Promise<void> {
+    return withEmailQuotaAs429(() =>
+      this.outbox.assertWithinQuota(tenantIdOf(this.tenantContext), to),
+    );
   }
 
-  async sendLink(input: {
+  async prepareLink(input: {
     to: string;
     referenceId: string;
     vars: SignatureRequestEmailVars;
-  }): Promise<void> {
-    await this.outbox.enqueue({
+  }): Promise<PreparedSignatureLinkEmail> {
+    // Marca, plantilla y cifrado ANTES de abrir la transacción.
+    const mail = await this.outbox.prepareInTx({
       tenantId: tenantIdOf(this.tenantContext),
       to: input.to,
       template: 'signature-request',
       vars: input.vars,
       referenceId: input.referenceId,
+      enforceQuota: true,
     });
+    return {
+      insert: async (tx, supersededIds) => {
+        for (const id of supersededIds) {
+          await this.outbox.supersedePendingInTx(tx, id, 'signature-request');
+        }
+        await withEmailQuotaAs429(() => mail.insert(tx));
+      },
+      kick: () => mail.kick(),
+    };
   }
 
   async sendCode(input: {

@@ -1,3 +1,5 @@
+import type { Prisma } from '@prisma/client';
+
 export const PASSWORD_RESET_NOTIFIER = Symbol('PASSWORD_RESET_NOTIFIER');
 
 export interface PasswordResetEmail {
@@ -9,17 +11,32 @@ export interface PasswordResetEmail {
   expiresInMinutes: number;
 }
 
+/**
+ * DX-149-ter: el email del enlace, listo para encolarlo DENTRO de la
+ * transacción que emite el token (DX-463): `insert(tx)` dentro, `kick()`
+ * después del COMMIT.
+ */
+export interface PreparedPasswordResetEmail {
+  /**
+   * Cancela el email aún pendiente con un enlace anterior y encola el nuevo,
+   * con el tope del destinatario contado bajo su candado (solo ese, no el de
+   * la clínica). Si el tope no deja, lanza PasswordResetThrottledError y la
+   * transacción se deshace.
+   */
+  insert(tx: Prisma.TransactionClient): Promise<void>;
+  /** Despierta al despachador: solo tras el COMMIT. */
+  kick(): void;
+}
+
 export interface PasswordResetNotifier {
   /**
    * ¿Se puede mandar otro email a `to` desde la clínica sin pasar los topes
    * anti-abuso de DX-088 (enfriamiento y máximos diarios)? Nunca lanza por el
-   * tope: quien pide no debe saber si se envió.
+   * tope: quien pide no debe saber si se envió. Es el aviso temprano, sin
+   * candado; el que manda es el de `insert`.
    */
   withinQuota(tenantId: string, to: string): Promise<boolean>;
 
-  /**
-   * Cancela el email aún pendiente con un enlace anterior y encola el nuevo
-   * en el outbox (con la marca de la clínica). No espera al proveedor.
-   */
-  send(email: PasswordResetEmail): Promise<void>;
+  /** Renderiza y cifra el email (con la marca de la clínica), sin encolarlo. */
+  prepare(email: PasswordResetEmail): Promise<PreparedPasswordResetEmail>;
 }

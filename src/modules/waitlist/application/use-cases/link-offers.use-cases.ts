@@ -1,5 +1,7 @@
 import {
   ConflictException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
@@ -158,11 +160,20 @@ export class CreateLinkOfferUseCase {
             expiresAtLabel: format.longDateTime(expiresAt, timeZone),
           },
         });
-      } catch {
+      } catch (err) {
         // Sin email no hay enlace que aceptar: la oferta no puede quedar
         // PENDING («Oferta enviada») sin haberse enviado. Queda sin efecto
         // (EXPIRED, anotada por quien la envió y auditada) y se avisa.
         await this.markUndelivered(created.id, created.patientId, ctx);
+        // DX-149-ter: el tope contado bajo candado al encolar (otra oferta al
+        // mismo paciente ganó la carrera) es el 429 en español de siempre;
+        // cualquier otro fallo, el 503.
+        if (
+          err instanceof HttpException &&
+          err.getStatus() === Number(HttpStatus.TOO_MANY_REQUESTS)
+        ) {
+          throw err;
+        }
         throw new ServiceUnavailableException(LINK_OFFER_EMAIL_FAILED_MESSAGE);
       }
       return { ...created, url: null, whatsappPhone: null };

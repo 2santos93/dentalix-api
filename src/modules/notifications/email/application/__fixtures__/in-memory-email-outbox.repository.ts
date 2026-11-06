@@ -9,6 +9,7 @@ import {
   OutboxQuotaGuard,
   OutboxSettlement,
   PlatformRecipientQuota,
+  QuotaLockScope,
   RecentSends,
 } from '../../domain/ports/email-outbox-repository.port';
 
@@ -35,6 +36,8 @@ let seq = 0;
  */
 export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   readonly rows: StoredOutboxEmail[] = [];
+  /** Los `scope` de candado que pidió cada insert con tope (DX-149-ter). */
+  readonly guardScopes: QuotaLockScope[] = [];
   brands = new Map<
     string,
     { name: string; logoUrl: string | null; primaryColor: string | null }
@@ -44,7 +47,9 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   async insert(
     row: NewOutboxEmail,
     guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
   ): Promise<{ id: string }> {
+    if (guard) this.guardScopes.push(scope ?? 'recipient-and-tenant');
     if (guard) guard(await this.recentSends(row.tenantId, row.toHash));
     return this.store(row);
   }
@@ -53,8 +58,9 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     _tx: Prisma.TransactionClient,
     row: NewOutboxEmail,
     guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
   ): Promise<{ id: string }> {
-    return this.insert(row, guard);
+    return this.insert(row, guard, scope);
   }
 
   /** Misma regla que email_outbox_enqueue_platform_security (DX-021-bis). */

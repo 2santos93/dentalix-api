@@ -11,6 +11,7 @@ import { EMAIL_OUTBOX_REPOSITORY } from '../domain/ports/email-outbox-repository
 import type {
   EmailOutboxRepository,
   OutboxQuotaGuard,
+  QuotaLockScope,
   RecentSends,
 } from '../domain/ports/email-outbox-repository.port';
 import { EmailPayloadCipher } from '../infrastructure/email-payload-cipher';
@@ -42,8 +43,12 @@ export interface EnqueueEmailInput<
    * y del destinatario (lo que de verdad frena N peticiones a la vez). Si se
    * superan, lanza EmailQuotaExceededError y no encola nada. Lo piden quienes
    * comprueban el tope antes; sin él (p. ej. recordatorios) no se cuenta.
+   *
+   * DX-149-ter: `'recipient'` aplica los mismos topes pero toma SOLO el
+   * candado del destinatario (endpoint público: restablecer la contraseña;
+   * ver `QuotaLockScope`).
    */
-  enforceQuota?: boolean;
+  enforceQuota?: boolean | 'recipient';
 }
 
 /** Un email listo para encolar dentro de una transacción ajena (DX-463). */
@@ -118,8 +123,18 @@ export class EmailOutbox {
     }
   };
 
-  private guardOf(input: { enforceQuota?: boolean }) {
-    return input.enforceQuota ? this.quotaGuard : undefined;
+  private guardOf(input: { enforceQuota?: boolean | 'recipient' }): {
+    guard?: OutboxQuotaGuard;
+    scope?: QuotaLockScope;
+  } {
+    if (!input.enforceQuota) return {};
+    return {
+      guard: this.quotaGuard,
+      scope:
+        input.enforceQuota === 'recipient'
+          ? 'recipient'
+          : 'recipient-and-tenant',
+    };
   }
 
   async enqueue<T extends EmailTemplateName>(
@@ -127,9 +142,11 @@ export class EmailOutbox {
   ): Promise<{ id: string }> {
     const brand = await this.brandOf(input.tenantId);
     const row = this.prepare(input, brand);
+    const { guard, scope } = this.guardOf(input);
     const { id } = await this.repo.insert(
       { ...row, tenantId: input.tenantId },
-      this.guardOf(input),
+      guard,
+      scope,
     );
     this.enqueued(id, input.tenantId, input.template, row.toMasked);
     return { id };
@@ -148,11 +165,11 @@ export class EmailOutbox {
   ): Promise<PreparedEmail> {
     const brand = await this.brandOf(input.tenantId);
     const row = { ...this.prepare(input, brand), tenantId: input.tenantId };
-    const guard = this.guardOf(input);
+    const { guard, scope } = this.guardOf(input);
     let outboxId: string | null = null;
     return {
       insert: async (tx) => {
-        const { id } = await this.repo.insertInTx(tx, row, guard);
+        const { id } = await this.repo.insertInTx(tx, row, guard, scope);
         outboxId = id;
         return { id };
       },
