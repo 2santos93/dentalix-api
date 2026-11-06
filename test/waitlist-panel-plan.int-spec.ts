@@ -148,11 +148,20 @@ describe('DX-149 · panel de pendientes con 60.000 pacientes (int, rendimiento)'
     expect(plan.executionMs).toBeLessThan(BUDGET_MS);
   });
 
-  it('el total cuenta sobre el índice, sin recorrer los pacientes de la clínica', async () => {
+  it('el total cuenta sobre un índice de abiertas, sin recorrer la tabla ni los pacientes', async () => {
     const plan = await bestOf(
       Prisma.sql`SELECT count(*) FROM "appointment_waitlist" WHERE ${where()}`,
     );
-    expect(indexes(plan)).toContain(PANEL_INDEX);
+    // Cualquiera de los dos parciales de OPEN le vale: el del panel o el único
+    // por paciente (DX-161). Lo que no puede es recorrer la tabla.
+    expect(indexes(plan)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /^appointment_waitlist_open_(panel_idx|patient_key)$/,
+        ),
+      ]),
+    );
+    expect(plan.nodes.map((n) => n['Node Type'])).not.toContain('Seq Scan');
     expect(relations(plan)).not.toContain('patients');
     expect(plan.executionMs).toBeLessThan(BUDGET_MS);
   });
