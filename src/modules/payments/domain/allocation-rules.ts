@@ -100,6 +100,36 @@ export function respreadSurplus(
   return out;
 }
 
+/**
+ * DX-399-quater: lo que cubre de cada ítem el saldo que el plan recibió por
+ * traspaso y que ninguna salida gastó (`transfersInLeft` de `credit-netting`).
+ * Va DESPUÉS de los abonos: `allocatedCents` es lo que ya imputan los abonos y
+ * aquí solo se llena lo que falta, en el orden de reparto de los ítems
+ * (`orderItems`). No es una imputación guardada: se deriva en cada lectura del
+ * libro de asientos (inmutable) y de las imputaciones, así que un abono que
+ * después cubre el ítem lo desplaza y lo recibido vuelve a quedar a cuenta.
+ * Nunca cubre más de `transfersInLeftCents` ni más de lo que le falta a un
+ * ítem. Solo los ítems con algo cubierto; vacío sin nada recibido.
+ */
+export function coverWithTransfersIn(
+  items: AllocatableItem[],
+  transfersInLeftCents: number,
+): Map<string, number> {
+  const covered = new Map<string, number>();
+  let left = Math.max(0, transfersInLeftCents);
+  for (const item of orderItems(items)) {
+    if (left === 0) break;
+    const take = Math.min(
+      left,
+      Math.max(0, item.billableCents - item.allocatedCents),
+    );
+    if (take <= 0) continue;
+    covered.set(item.id, take);
+    left -= take;
+  }
+  return covered;
+}
+
 /** Punto fijo roto: algún donante con sobrante y algún ítem con libre. */
 export function hasFixedPointViolation(
   donors: Donor[],

@@ -55,6 +55,13 @@ export interface NettingInput {
 /**
  * Los asientos del saldo a favor de `planIds` (en la moneda del plan, en
  * positivo): las salidas y lo recibido por traspaso. Una consulta.
+ *
+ * DX-399-quater (F6): solo los asientos en la moneda ACTUAL del plan, como el
+ * saldo del plan (`netCreditIn`), la cartera y la guarda de anulación
+ * (DX-438). Un asiento en otra moneda no debería existir (el trigger de
+ * DX-438 bloquea cambiar la moneda de un plan con asientos), pero si existe,
+ * el saldo no lo suma y ahora lo recibido cubre ítems: si la cascada lo
+ * contara, cubriría ítems con dinero que el saldo del plan no tiene.
  */
 export async function loadCreditEntries(
   tx: Prisma.TransactionClient,
@@ -75,8 +82,11 @@ export async function loadCreditEntries(
            e."createdAt",
            CASE WHEN e."kind" = 'TRANSFER_IN' THEN e."amount" ELSE -e."amount" END AS "amount"
       FROM "patient_credit_entries" e
+      JOIN "treatment_plans" tp
+        ON tp."tenantId" = e."tenantId" AND tp."id" = e."treatmentPlanId"
      WHERE e."tenantId" = ${tenantId}::uuid
        AND e."kind" IN ('REFUND', 'TRANSFER_OUT', 'TRANSFER_IN')
+       AND e."currency" = tp."currency"
        AND e."treatmentPlanId" = ANY(${[...planIds]}::uuid[])`;
   const entries: CreditOutEntry[] = [];
   const transfersIn: CreditInEntry[] = [];
@@ -135,8 +145,11 @@ export async function loadNettingFacts(
         ON pt."tenantId" = p."tenantId" AND pt."id" = p."patientId"
       JOIN "locations" l
         ON l."tenantId" = p."tenantId" AND l."id" = p."locationId"
+      -- F6 (DX-399-quater): la base en la moneda del plan, como el saldo
+      -- (\`readPlanBalanceSnapshotIn\`) y el reparto (\`readDonors\`).
       JOIN "payment_plan_amounts" b
         ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+       AND b."currency" = tp."currency"
       LEFT JOIN LATERAL (
         SELECT COALESCE(sum(a."amount"), 0) AS "allocated"
           FROM "payment_allocations" a
@@ -229,6 +242,8 @@ export async function findAffectedPlans(
         ON pt."tenantId" = e."tenantId" AND pt."id" = e."patientId"
      WHERE e."tenantId" = ${tenantId}::uuid
        AND e."kind" IN ('REFUND', 'TRANSFER_OUT')
+       -- F6 (DX-399-quater): en la moneda del plan, como \`loadCreditEntries\`.
+       AND e."currency" = tp."currency"
        -- Las MISMAS condiciones de \`loadNettingFacts\`: un plan cancelado,
        -- rechazado o borrado, o un paciente borrado, no tiene imputaciones que
        -- el fallo pudiera tocar (devolver desde un plan cancelado es normal).
