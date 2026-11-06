@@ -21,6 +21,7 @@ import { configAuditEvent } from '../../audit/domain/config-audit';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import { lockDailyRefundDay } from './daily-refund-cap-lock';
 import { lockOpenSessionOf } from '../../cash-sessions/infrastructure/payment-cash-session';
+import { enqueuePlanRebalance } from '../../payments/infrastructure/allocations/prisma-plan-allocation.repository';
 import {
   formatReceiptNumber,
   legacyReceiptReference,
@@ -411,6 +412,13 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
             },
           ],
         });
+        // DX-399-ter (N1): lo recibido por traspaso absorbe las salidas del
+        // destino aunque llegue después (`credit-netting`), así que puede
+        // devolver excedente a un abono anterior: el destino se encola para el
+        // reparto en ESTA transacción, como el alta o la anulación de un abono.
+        // El origen también (inocuo: una salida nunca da más que repartir).
+        await enqueuePlanRebalance(tx, tenantId, input.targetPlanId);
+        await enqueuePlanRebalance(tx, tenantId, input.sourcePlanId);
         return toTransfer(transfer);
       });
     } catch (error) {

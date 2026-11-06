@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import type {
+  PlanBalanceItemsSnapshot,
   PlanBalanceSnapshot,
   PlanAllocationRepository,
 } from '../../domain/ports/plan-allocation-repository.port';
@@ -140,7 +141,7 @@ class FakeConvertAmountUseCase {
 }
 
 class FakeAllocationRepository {
-  public snapshot: PlanBalanceSnapshot | null = null;
+  public snapshot: PlanBalanceItemsSnapshot | null = null;
   public readonly readPlanBalanceSnapshot = jest.fn(() =>
     Promise.resolve(this.snapshot),
   );
@@ -796,7 +797,7 @@ describe('GetPlanBalanceUseCase', () => {
   });
 
   describe('executeWithItems (DX-051)', () => {
-    type Snap = Partial<PlanBalanceSnapshot>;
+    type Snap = Partial<PlanBalanceItemsSnapshot>;
     const item = (
       id: string,
       status: TreatmentPlanItemStatus,
@@ -835,6 +836,7 @@ describe('GetPlanBalanceUseCase', () => {
         payments: [],
         allocations: [],
         bases: [],
+        creditOutCents: 0,
         ...over,
       };
     }
@@ -938,6 +940,45 @@ describe('GetPlanBalanceUseCase', () => {
       expect(await uc.executeWithItems('plan-1')).toMatchObject({
         allocated: 130,
         unallocated: 30,
+      });
+    });
+
+    it('DX-399-ter: «Sin imputar» va neto de lo devuelto o traspasado que la cascada atribuye a los abonos', async () => {
+      const { allocations, uc } = makeUseCase();
+      // Abono de 130 a un plan de 100 (i1) y 30 devueltos: queda 0 a cuenta.
+      seed(allocations, {
+        items: [item('i1', TreatmentPlanItemStatus.ACCEPTED, 100)],
+        payments: [pay('a', 130)],
+        bases: [{ paymentId: 'a', amount: 130, manual: false }],
+        allocations: [{ paymentId: 'a', itemId: 'i1', amount: 100 }],
+        creditOutCents: 3_000,
+      });
+
+      const result = await uc.executeWithItems('plan-1');
+
+      expect(result).toMatchObject({
+        paid: 130,
+        allocated: 100,
+        unallocated: 0,
+      });
+      // Lo cobrado = lo imputado + lo que queda a cuenta + lo que salió.
+      expect(
+        toCents(result.allocated) + toCents(result.unallocated) + 3_000,
+      ).toBe(toCents(result.paid));
+    });
+
+    it('DX-399-ter: una devolución parcial deja a cuenta solo lo que queda', async () => {
+      const { allocations, uc } = makeUseCase();
+      seed(allocations, {
+        items: [item('i1', TreatmentPlanItemStatus.ACCEPTED, 100)],
+        payments: [pay('a', 130)],
+        bases: [{ paymentId: 'a', amount: 130, manual: false }],
+        allocations: [{ paymentId: 'a', itemId: 'i1', amount: 100 }],
+        creditOutCents: 1_000,
+      });
+
+      expect(await uc.executeWithItems('plan-1')).toMatchObject({
+        unallocated: 20,
       });
     });
 

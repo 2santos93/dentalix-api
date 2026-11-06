@@ -8,7 +8,7 @@ import type {
   PaymentAllocationsSnapshot,
   PaymentPendingRate,
   PaymentWithoutBase,
-  PlanBalanceSnapshot,
+  PlanBalanceItemsSnapshot,
   PlanAllocationRepository,
   PlanAllocationSnapshot,
   RebalanceOptions,
@@ -218,7 +218,7 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
     return Promise.resolve();
   }
 
-  readPlanBalanceSnapshot(): Promise<PlanBalanceSnapshot | null> {
+  readPlanBalanceSnapshot(): Promise<PlanBalanceItemsSnapshot | null> {
     return Promise.resolve(null);
   }
 

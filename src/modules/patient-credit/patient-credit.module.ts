@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
+import { PaymentAllocationsModule } from '../payments/payment-allocations.module';
 import {
   CreditPolicyUseCases,
   GetCreditRefundUseCase,
@@ -18,7 +19,8 @@ import { PatientCreditController } from './presentation/patient-credit.controlle
 
 /** Saldo a favor del paciente (DX-253): traspaso y devolución. */
 @Module({
-  imports: [JwtModule.register({})],
+  // DX-399-ter (N1): el traspaso drena el reparto que encola (interceptor).
+  imports: [JwtModule.register({}), PaymentAllocationsModule],
   controllers: [PatientCreditController],
   providers: [
     TransferCreditUseCase,

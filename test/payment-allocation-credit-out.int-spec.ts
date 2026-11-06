@@ -6,6 +6,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaPlanAllocationRepository } from '../src/modules/payments/infrastructure/allocations/prisma-plan-allocation.repository';
 import { findAffectedPlans } from '../src/modules/payments/infrastructure/allocations/credit-netting-facts';
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
+import { PrismaPatientCreditRepository } from '../src/modules/patient-credit/infrastructure/prisma-patient-credit.repository';
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import {
   gate,
@@ -204,6 +205,103 @@ async function payAfterCredit(planId: string, amount: number) {
   return id;
 }
 
+/**
+ * DX-399-ter: traspaso RECIBIDO por el plan desde otro plan del paciente: el
+ * par de asientos (sale del origen, entra en el destino). `createdAt` lo pone
+ * la BD (ahora).
+ */
+async function creditIn(
+  planId: string,
+  amount: number,
+  from?: string,
+): Promise<void> {
+  const common = { tenantId, patientId, currency: 'EUR' };
+  // Sin origen dado, uno con su propio abono sin imputar: de ahí sale el traspaso.
+  let sourcePlanId = from;
+  if (!sourcePlanId) {
+    sourcePlanId = await plan();
+    await pay(sourcePlanId, amount, at(0));
+  }
+  const transfer = await raw.patientCreditTransfer.create({
+    data: {
+      ...common,
+      amount,
+      locationId,
+      sourcePlanId,
+      targetPlanId: planId,
+      createdById: randomUUID(),
+    },
+  });
+  await raw.patientCreditEntry.create({
+    data: {
+      ...common,
+      amount: -amount,
+      treatmentPlanId: sourcePlanId,
+      kind: 'TRANSFER_OUT',
+      transferId: transfer.id,
+    },
+  });
+  await raw.patientCreditEntry.create({
+    data: {
+      ...common,
+      amount,
+      treatmentPlanId: planId,
+      kind: 'TRANSFER_IN',
+      transferId: transfer.id,
+    },
+  });
+}
+
+/**
+ * El saldo del plan como lo da Cartera (DX-253/DX-430): lo cobrado con base −
+ * lo facturable (ítems vivos ACCEPTED|DONE) + los asientos del saldo a favor.
+ */
+async function planBalanceCents(planId: string): Promise<number> {
+  const [row] = await raw.$queryRaw<{ cents: bigint }[]>`
+    SELECT round((
+      COALESCE((SELECT sum(b."amount") FROM "payment_plan_amounts" b
+                  JOIN "payments" p ON p."id" = b."paymentId"
+                 WHERE b."treatmentPlanId" = ${planId}::uuid AND p."deletedAt" IS NULL), 0)
+      - COALESCE((SELECT sum(i."price" - i."discount") FROM "treatment_plan_items" i
+                    JOIN "treatment_plans" tp ON tp."id" = i."planId"
+                   WHERE i."planId" = ${planId}::uuid AND i."deletedAt" IS NULL
+                     AND i."status" IN ('ACCEPTED', 'DONE')
+                     AND tp."status" NOT IN ('CANCELLED', 'REJECTED')), 0)
+      + COALESCE((SELECT sum(e."amount") FROM "patient_credit_entries" e
+                   WHERE e."treatmentPlanId" = ${planId}::uuid), 0)
+    ) * 100)::bigint AS "cents"`;
+  return Number(row.cents);
+}
+
+const creditRepo = new PrismaPatientCreditRepository(prisma, tenantContext);
+
+/** Traspaso por el repositorio real (DX-253), como la ruta. */
+const transfer = (sourcePlanId: string, targetPlanId: string, amount: number) =>
+  tenantContext.run(tenantId, locationId, () =>
+    creditRepo.createTransfer({
+      sourcePlanId,
+      targetPlanId,
+      amountCents: amount * 100,
+      currency: 'EUR',
+      reason: null,
+      userId: randomUUID(),
+      fingerprint: randomUUID(),
+    }),
+  );
+
+/** El drenado de la cola tras una escritura (lo que hace el interceptor), con el plan de la ruta primero. */
+const drain = (preferPlanId: string) =>
+  inTenant(() =>
+    rebalancer.drainPending({ actorId: null, preferPlanId, limit: 100 }),
+  );
+
+async function queued(planId: string): Promise<boolean> {
+  const rows = await raw.$queryRaw<{ n: bigint }[]>`
+    SELECT count(*) AS "n" FROM "plan_allocation_rebalance_requests"
+     WHERE "treatmentPlanId" = ${planId}::uuid`;
+  return Number(rows[0].n) > 0;
+}
+
 const rebalance = (planId: string) =>
   inTenant(() => rebalancer.rebalancePlan(planId, null));
 
@@ -384,6 +482,117 @@ describe('La imputación automática descuenta lo devuelto o traspasado (DX-399-
     expect(await allocatedTo(extra)).toBe(0);
     expect(await allocatedBy(old)).toBe(10_000);
   });
+  it('DX-399-ter, la secuencia del ticket: excedente propio, traspaso recibido, devolución de 30 e ítem nuevo -> el abono cubre el ítem y nada queda pendiente con el saldo en 0', async () => {
+    const planId = await plan();
+    const first = await item(planId, 70);
+    const own = await pay(planId, 100, at(0));
+    await rebalance(planId);
+    expect(await allocatedBy(own)).toBe(7_000);
+
+    // Recibe 30 por traspaso y luego se le devuelven 30: la devolución sale
+    // del saldo recibido, que no se puede imputar; el abono conserva sus 30.
+    await creditIn(planId, 30);
+    await creditOut(planId, 30);
+    const second = await item(planId, 30);
+    expect(await rebalance(planId)).toEqual({ allocatedCents: 3_000 });
+    expect(await allocatedTo(second)).toBe(3_000);
+    expect(await allocatedTo(first)).toBe(7_000);
+    expect(await allocatedBy(own)).toBe(10_000);
+    // Cartera: 100 − 100 + 30 − 30 = 0, y ningún ítem pendiente.
+    expect(await planBalanceCents(planId)).toBe(0);
+
+    // La cascada (informe, ventana, diagnóstico) no descarta nada.
+    const affected = await inTenant(() =>
+      prisma.runWithTenant((tx) => findAffectedPlans(tx, tenantId)),
+    );
+    expect(affected.map((p) => p.planId)).not.toContain(planId);
+
+    // Reimputar no mueve nada (invariantes DX-054).
+    expect(await rebalance(planId)).toEqual({ allocatedCents: 0 });
+    expect(await planTotal(planId)).toBe(10_000);
+  });
+
+  it('DX-399-ter: una devolución mayor que lo recibido por traspaso sale del abono por lo que falta', async () => {
+    const planId = await plan();
+    await item(planId, 50);
+    const own = await pay(planId, 100, at(0));
+    await rebalance(planId);
+    await creditIn(planId, 20);
+    // Saldo 70: se devuelven 50 -> 20 del traspaso y 30 del abono.
+    await creditOut(planId, 50);
+    const extra = await item(planId, 50);
+    expect(await rebalance(planId)).toEqual({ allocatedCents: 2_000 });
+    expect(await allocatedTo(extra)).toBe(2_000);
+    expect(await allocatedBy(own)).toBe(7_000);
+    // Lo que queda pendiente (30) es exactamente lo que dice Cartera (−30).
+    expect(await planBalanceCents(planId)).toBe(-3_000);
+  });
+
+  it('DX-399-ter, diagnóstico: una devolución que absorbe un traspaso recibido no es dinero descartado', async () => {
+    const planId = await plan();
+    await item(planId, 100);
+    await pay(planId, 100, at(0));
+    await rebalance(planId);
+    await creditIn(planId, 30);
+    await creditOut(planId, 30);
+    const affected = await inTenant(() =>
+      prisma.runWithTenant((tx) => findAffectedPlans(tx, tenantId)),
+    );
+    expect(affected.map((p) => p.planId)).not.toContain(planId);
+  });
+  it('DX-399-ter (F2/N1), ida y vuelta por el repositorio real: P traspasa 30 a Q, un ítem nuevo de P queda pendiente, Q los devuelve y el traspaso encola P; el drenado (el del interceptor) lo cubre', async () => {
+    const p = await plan();
+    const first = await item(p, 70);
+    const own = await pay(p, 100, at(0));
+    const q = await plan();
+    await item(q, 20);
+    await pay(q, 20, at(0));
+    await drain(p);
+    expect(await allocatedBy(own)).toBe(7_000);
+    await transfer(p, q, 30);
+    const second = await item(p, 30);
+    await drain(p);
+    expect(await allocatedTo(second)).toBe(0);
+    await transfer(q, p, 30);
+    // El traspaso encola el plan que recibe (y el que envía), en su transacción.
+    expect(await queued(p)).toBe(true);
+    expect(await queued(q)).toBe(true);
+    await drain(q);
+    expect(await allocatedTo(second)).toBe(3_000);
+    expect(await allocatedTo(first)).toBe(7_000);
+    expect(await allocatedBy(own)).toBe(10_000);
+    expect(await planBalanceCents(p)).toBe(0);
+    expect(await planBalanceCents(q)).toBe(0);
+    const affected = await inTenant(() =>
+      prisma.runWithTenant((tx) => findAffectedPlans(tx, tenantId)),
+    );
+    expect(affected.map((x) => x.planId)).not.toContain(p);
+    expect(affected.map((x) => x.planId)).not.toContain(q);
+  });
+
+  it('DX-399-ter (F1): plan cancelado y devuelto entero -> el estado de cuenta y la ventana dan 0 a cuenta, como Cartera', async () => {
+    const planId = await plan();
+    await item(planId, 100);
+    const paid = await pay(planId, 100, at(0));
+    await rebalance(planId);
+    // Cancelar libera las imputaciones (DX-109); luego se devuelve todo.
+    await raw.treatmentPlan.update({
+      where: { id: planId },
+      data: { status: 'CANCELLED' },
+    });
+    await raw.paymentAllocation.deleteMany({ where: { paymentId: paid } });
+    await creditOut(planId, 100);
+    const snapshot = await inTenant(() =>
+      allocationRepo.readPlanBalanceSnapshot(planId),
+    );
+    expect(snapshot?.creditOutCents).toBe(10_000);
+    const window = await inTenant(() =>
+      allocationRepo.readPaymentAllocations(paid),
+    );
+    expect(window?.creditOutCents).toBe(10_000);
+    expect(await planBalanceCents(planId)).toBe(0);
+  });
+
   it('diagnóstico (solo lectura): lista el plan que dejó el fallo y no el sano; reparar no es automático', async () => {
     const healthy = await plan();
     await item(healthy, 100);
