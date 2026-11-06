@@ -1,4 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
+import { PrismaService } from '../src/shared/prisma/prisma.service';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaEquipmentRepository } from '../src/modules/equipment/infrastructure/repositories/prisma-equipment.repository';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
@@ -14,6 +17,10 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const appDb = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
+
+const tenantContext = new TenantContextService();
+const prisma = new PrismaService(tenantContext);
+const repository = new PrismaEquipmentRepository(prisma, tenantContext);
 
 const SUBDOMAINS = ['dx542-int-a', 'dx542-int-b'];
 const DAY = (d: string) => new Date(`${d}T00:00:00.000Z`);
@@ -134,7 +141,11 @@ describe('equipos biomédicos en la BD (int, DX-542)', () => {
 
   afterAll(async () => {
     await cleanup();
-    await Promise.all([raw.$disconnect(), appDb.$disconnect()]);
+    await Promise.all([
+      raw.$disconnect(),
+      appDb.$disconnect(),
+      prisma.$disconnect(),
+    ]);
   });
 
   describe('RLS FORCE, política y permisos', () => {
@@ -366,5 +377,86 @@ describe('equipos biomédicos en la BD (int, DX-542)', () => {
       });
       expect(mt.createdAt.getUTCFullYear()).toBeGreaterThan(2000);
     });
+  });
+
+  describe('baja en carrera (repositorio Prisma)', () => {
+    it('editar o registrar tras una baja que ganó la carrera devuelve null (409), no choca con el trigger', async () => {
+      const eq = await raw.equipment.create({ data: equipmentRow(a) });
+      // La otra petición da de baja entre la lectura y la escritura.
+      await raw.equipment.update({
+        where: { id: eq.id },
+        data: {
+          status: 'RETIRED',
+          retiredOn: DAY('2026-11-01'),
+          retiredReason: 'Reemplazado',
+          retiredById: a.userId,
+        },
+      });
+      const inTenant = <T>(fn: () => Promise<T>) =>
+        tenantContext.run(a.tenantId, fn);
+      await expect(
+        inTenant(() =>
+          repository.update(eq.id, { name: 'Nuevo', updatedById: a.userId }),
+        ),
+      ).resolves.toBeNull();
+      await expect(
+        inTenant(() =>
+          repository.addMaintenance({
+            equipmentId: eq.id,
+            kind: 'CORRECTIVE',
+            performedOn: '2026-11-02',
+            technician: null,
+            company: null,
+            description: 'x',
+            cost: null,
+            currency: null,
+            nextDueOn: null,
+            createdById: a.userId,
+          }),
+        ),
+      ).resolves.toBeNull();
+      await expect(
+        raw.equipmentMaintenance.count({ where: { equipmentId: eq.id } }),
+      ).resolves.toBe(0);
+    });
+
+    it('si el trigger salta igualmente, el repositorio lo traduce a 409', async () => {
+      const eq = await raw.equipment.create({
+        data: equipmentRow(a, {
+          status: 'RETIRED',
+          retiredOn: DAY('2026-11-01'),
+          retiredReason: 'Reemplazado',
+          retiredById: a.userId,
+        }),
+      });
+      // Simula una escritura que no pasó por el UPDATE condicional.
+      const updateMany = jest
+        .spyOn(PrismaService.prototype, 'runWithTenant')
+        .mockImplementationOnce(() =>
+          appDb.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+            await tx.equipment.update({
+              where: { id: eq.id },
+              data: { name: 'X' },
+            });
+            return null;
+          }),
+        );
+      await expect(
+        tenantContext.run(a.tenantId, () =>
+          repository.update(eq.id, { name: 'X', updatedById: a.userId }),
+        ),
+      ).rejects.toMatchObject({ status: 409 });
+      updateMany.mockRestore();
+    });
+  });
+
+  it('el próximo explícito no va a más de 10 años (CHECK)', async () => {
+    const eq = await raw.equipment.create({ data: equipmentRow(a) });
+    await expect(
+      raw.equipmentMaintenance.create({
+        data: maintenanceRow(a, eq.id, { nextDueOn: DAY('2036-10-02') }),
+      }),
+    ).rejects.toThrow(/equipment_maintenances_next_due_check/);
   });
 });

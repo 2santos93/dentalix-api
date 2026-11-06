@@ -135,8 +135,9 @@ export class InMemoryEquipmentRepository implements EquipmentRepository {
   update(
     id: string,
     input: UpdateEquipmentRepoInput,
-  ): Promise<EquipmentRecord> {
+  ): Promise<EquipmentRecord | null> {
     const row = this.rows.find((r) => r.id === id)!;
+    if (row.status !== 'ACTIVE') return Promise.resolve(null);
     const { updatedById: _updatedById, ...patch } = input;
     for (const [key, value] of Object.entries(patch)) {
       if (value !== undefined)
@@ -182,7 +183,9 @@ export class InMemoryEquipmentRepository implements EquipmentRepository {
 
   addMaintenance(
     input: CreateMaintenanceRepoInput,
-  ): Promise<EquipmentMaintenance> {
+  ): Promise<EquipmentMaintenance | null> {
+    const equipment = this.rows.find((r) => r.id === input.equipmentId);
+    if (equipment?.status !== 'ACTIVE') return Promise.resolve(null);
     const row: EquipmentMaintenance = {
       id: `mt-${this.nextId++}`,
       ...input,

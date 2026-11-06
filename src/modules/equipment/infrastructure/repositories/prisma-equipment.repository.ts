@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -7,6 +7,7 @@ import type {
   EquipmentRecord,
   LastPreventive,
 } from '../../domain/entities/equipment.entity';
+import { EQUIPMENT_RETIRED_MESSAGE } from '../../domain/equipment-rules';
 import type {
   CreateEquipmentRepoInput,
   CreateMaintenanceRepoInput,
@@ -111,6 +112,19 @@ function mapMaintenance(row: MaintenanceRow): EquipmentMaintenance {
     voidedById: row.voidedById,
     voidReason: row.voidReason,
   };
+}
+
+/**
+ * Red por si el trigger `dx_equipment_retired_final` aún saltara (una
+ * escritura que no pasó por el UPDATE condicional): su `insufficient_privilege`
+ * (42501) es «está dado de baja», un 409 en español, no un 500.
+ */
+function rethrowRetired(error: unknown): never {
+  const text = error instanceof Error ? error.message : '';
+  if (/42501|un equipo dado de baja no se modifica/.test(text)) {
+    throw new ConflictException(EQUIPMENT_RETIRED_MESSAGE);
+  }
+  throw error;
 }
 
 @Injectable()
@@ -260,33 +274,43 @@ export class PrismaEquipmentRepository implements EquipmentRepository {
     });
   }
 
-  /** Por `id` bajo RLS; el caso de uso ya comprobó que existe y está activo. */
+  /**
+   * Por `id` bajo RLS y SOLO si sigue activo: el UPDATE condicional no choca
+   * con el trigger `dx_equipment_retired_final` cuando otra petición lo dio de
+   * baja entre la lectura del caso de uso y esta escritura (`null` → 409).
+   */
   update(
     id: string,
     input: UpdateEquipmentRepoInput,
-  ): Promise<EquipmentRecord> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const row = await tx.equipment.update({
-        where: { id },
-        data: {
-          locationId: input.locationId,
-          chairId: input.chairId,
-          name: input.name,
-          category: input.category,
-          brand: input.brand,
-          model: input.model,
-          serialNumber: input.serialNumber,
-          sanitaryRegistration: input.sanitaryRegistration,
-          riskClass: input.riskClass,
-          acquiredOn: maybeDate(input.acquiredOn),
-          maintenanceIntervalMonths: input.maintenanceIntervalMonths,
-          notes: input.notes,
-          updatedById: input.updatedById,
-        },
-        include: EQUIPMENT_INCLUDE,
-      });
-      return this.record(tx, row);
-    });
+  ): Promise<EquipmentRecord | null> {
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        const { count } = await tx.equipment.updateMany({
+          where: { id, status: 'ACTIVE' },
+          data: {
+            locationId: input.locationId,
+            chairId: input.chairId,
+            name: input.name,
+            category: input.category,
+            brand: input.brand,
+            model: input.model,
+            serialNumber: input.serialNumber,
+            sanitaryRegistration: input.sanitaryRegistration,
+            riskClass: input.riskClass,
+            acquiredOn: maybeDate(input.acquiredOn),
+            maintenanceIntervalMonths: input.maintenanceIntervalMonths,
+            notes: input.notes,
+            updatedById: input.updatedById,
+          },
+        });
+        if (count === 0) return null;
+        const row = await tx.equipment.findFirstOrThrow({
+          where: { id },
+          include: EQUIPMENT_INCLUDE,
+        });
+        return this.record(tx, row);
+      })
+      .catch(rethrowRetired);
   }
 
   retire(
@@ -338,29 +362,42 @@ export class PrismaEquipmentRepository implements EquipmentRepository {
     });
   }
 
+  /**
+   * Bloquea el equipo (`FOR UPDATE`) y registra solo si sigue activo: una baja
+   * simultánea espera a este alta o la deja sin equipo activo (`null` → 409).
+   */
   addMaintenance(
     input: CreateMaintenanceRepoInput,
-  ): Promise<EquipmentMaintenance> {
+  ): Promise<EquipmentMaintenance | null> {
     const tenantId = this.requireTenantId();
-    return this.prisma.runWithTenant(async (tx) => {
-      const row = await tx.equipmentMaintenance.create({
-        data: {
-          tenantId,
-          equipmentId: input.equipmentId,
-          kind: input.kind,
-          performedOn: asDate(input.performedOn),
-          technician: input.technician,
-          company: input.company,
-          description: input.description,
-          cost: input.cost === null ? null : new Prisma.Decimal(input.cost),
-          currency: input.currency,
-          nextDueOn: asDate(input.nextDueOn),
-          createdById: input.createdById,
-        },
-        include: MAINTENANCE_INCLUDE,
-      });
-      return mapMaintenance(row);
-    });
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        const active = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "equipment"
+          WHERE "tenantId" = ${tenantId}::uuid
+            AND "id" = ${input.equipmentId}::uuid
+            AND "status" = 'ACTIVE'
+          FOR UPDATE`;
+        if (active.length === 0) return null;
+        const row = await tx.equipmentMaintenance.create({
+          data: {
+            tenantId,
+            equipmentId: input.equipmentId,
+            kind: input.kind,
+            performedOn: asDate(input.performedOn),
+            technician: input.technician,
+            company: input.company,
+            description: input.description,
+            cost: input.cost === null ? null : new Prisma.Decimal(input.cost),
+            currency: input.currency,
+            nextDueOn: asDate(input.nextDueOn),
+            createdById: input.createdById,
+          },
+          include: MAINTENANCE_INCLUDE,
+        });
+        return mapMaintenance(row);
+      })
+      .catch(rethrowRetired);
   }
 
   voidMaintenance(

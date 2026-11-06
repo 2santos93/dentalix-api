@@ -84,7 +84,14 @@ export interface EquipmentRepository {
   /** Por id; uno de otra clínica da `null` (RLS). */
   findById(id: string): Promise<EquipmentRecord | null>;
   create(input: CreateEquipmentRepoInput): Promise<EquipmentRecord>;
-  update(id: string, input: UpdateEquipmentRepoInput): Promise<EquipmentRecord>;
+  /**
+   * Edita SOLO si sigue activo (condicional en la BD): `null` si otra
+   * petición lo dio de baja entre la lectura y la escritura.
+   */
+  update(
+    id: string,
+    input: UpdateEquipmentRepoInput,
+  ): Promise<EquipmentRecord | null>;
   /**
    * Da de baja SOLO si sigue activo (la carrera de dos bajas la gana una):
    * `null` si ya estaba dado de baja.
@@ -99,9 +106,13 @@ export interface EquipmentRepository {
     equipmentId: string,
     maintenanceId: string,
   ): Promise<EquipmentMaintenance | null>;
+  /**
+   * Registra SOLO si el equipo sigue activo (lo bloquea en la transacción, así
+   * una baja simultánea espera o gana): `null` si ya está dado de baja.
+   */
   addMaintenance(
     input: CreateMaintenanceRepoInput,
-  ): Promise<EquipmentMaintenance>;
+  ): Promise<EquipmentMaintenance | null>;
   /** Anula SOLO si sigue vivo: `null` si ya estaba anulado. */
   voidMaintenance(
     maintenanceId: string,
