@@ -29,7 +29,8 @@ export function overdueOf(buckets: {
 /**
  * Cada fuente llama al MISMO caso de uso que el `/count` de su lista, con los
  * mismos argumentos que su controlador cuando el cliente no manda filtros
- * (`page: 1, pageSize: 1` o `limit: 1` donde el recuento sale de la página).
+ * (`page: 1, pageSize: 1` o `limit: 1` donde el recuento sale de la página;
+ * la cartera, a sus totales sin página, OPS-056).
  * Así el número es, por construcción, el de la lista (lo comprueba
  * `test/work-queues.e2e-spec.ts` contra cada endpoint).
  */
@@ -79,18 +80,17 @@ export function workQueueSources(deps: {
     // GET /receivables/aging/summary → totals. Las monedas no se suman: un
     // paciente puede deber en dos, así que el recuento es el mayor de cada
     // moneda (nunca una suma que lo cuente dos veces), y lo vencido va por
-    // moneda.
+    // moneda. OPS-056: solo los totales (`summary`: el mismo cálculo y las
+    // mismas filas que la cartera, sin la página, el orden ni los contactos).
     RECEIVABLES: async () => {
-      const page = await deps.receivables.execute({
+      const { totals } = await deps.receivables.summary({
         locationId: tenantContext.getLocationId(),
-        page: 1,
-        pageSize: 1,
       });
-      const overdue: OverdueAmount[] = page.totals
+      const overdue: OverdueAmount[] = totals
         .map((t) => ({ currency: t.currency, amount: overdueOf(t.buckets) }))
         .filter((t) => t.amount > 0);
       return {
-        count: page.totals.reduce((max, t) => Math.max(max, t.patients), 0),
+        count: totals.reduce((max, t) => Math.max(max, t.patients), 0),
         overdue,
       };
     },
