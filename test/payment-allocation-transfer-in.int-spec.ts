@@ -359,6 +359,29 @@ describe('El saldo recibido por traspaso cubre ítems (DX-399-quater)', () => {
     expect(await planBalanceCents(p)).toBe(2_000);
   });
 
+  it('R1: un abono anulado no cuenta como cubierto: lo recibido cubre el ítem entero', async () => {
+    const p = await plan();
+    const only = await item(p, 60);
+    const paid = await pay(p, 30);
+    await receive(p, 60);
+    await drain(p);
+    // El abono imputa 30 y lo recibido cubre los otros 30.
+    expect(await allocatedTo(only)).toBe(3_000);
+    expect((await snapshotOf(p)).transfersIn.byItem.get(only)).toBe(3_000);
+    // Se anula el abono (como una réplica anterior a DX-051: sus
+    // imputaciones siguen en la tabla, pero ya no son dinero del plan).
+    await raw.payment.update({
+      where: { id: paid },
+      data: { deletedAt: new Date() },
+    });
+    expect(await allocatedTo(only)).toBe(3_000);
+    const snapshot = await snapshotOf(p);
+    expect(snapshot.transfersIn.leftCents).toBe(6_000);
+    expect(snapshot.transfersIn.byItem.get(only)).toBe(6_000);
+    expect((await pendingOf(p)).get(only)).toBe(0);
+    expect(await planBalanceCents(p)).toBe(0);
+  });
+
   it('un plan sin traspasos queda exactamente igual: nada cubierto por lo recibido', async () => {
     const p = await plan();
     await item(p, 70);

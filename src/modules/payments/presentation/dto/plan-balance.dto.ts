@@ -132,7 +132,11 @@ export class PlanItemBalanceDto {
 }
 
 export class PlanBalanceWithItemsDto extends PlanBalanceDto {
-  @ApiProperty({ example: 150, description: 'Σ de lo imputado a los ítems' })
+  @ApiProperty({
+    example: 150,
+    description:
+      'Σ de lo imputado a los ítems por los abonos (sin `paidByTransfersIn`): Σ `items[].paid` = `allocated` + Σ `items[].paidByTransfersIn` (DX-399-quater)',
+  })
   allocated!: number;
 
   @ApiProperty({

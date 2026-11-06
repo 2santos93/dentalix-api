@@ -5791,6 +5791,14 @@ npm run credit-netting:report -- --tenant <uuid>   # una clínica
     una devolución de 30, no cubre nada.
   - Un plan sin traspasos recibidos queda igual.
   - Cartera no cambia: ya sumaba los asientos.
+  - `allocated` es solo de los abonos: Σ `items[].paid` = `allocated` +
+    Σ `paidByTransfersIn`.
+  - **Caso límite del modo manual.** Datos: un abono MANUAL con 50 sin imputar
+    (el reparto no lo toca) y un ítem de 50 cubierto por 50 recibidos. Una
+    devolución de 50 gasta primero lo recibido. El ítem pasa a «pendiente 50»
+    y el «Sin imputar» del abono sigue en 50. Cartera da 0, así que no hay
+    doble gasto. Es lo de siempre en el modo manual: el ADMIN tiene que
+    reimputar ese abono al ítem.
 - F6 (DX-399-quater): la cascada, el informe y el diagnóstico solo cuentan los
   asientos y las bases en la moneda actual del plan, como el saldo del plan.
 

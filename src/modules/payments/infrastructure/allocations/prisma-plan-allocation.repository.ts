@@ -396,6 +396,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
           tx,
           tenantId,
           planId,
+          { transfersIn: true },
         );
         // DX-399-quater: y lo que cubre de cada ítem lo recibido por traspaso.
         const transfersIn = await this.transfersInCoverage(
@@ -674,20 +675,25 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
                 paymentId,
               )
             : [];
+        // UNA cascada por transacción (R4): la necesitan «a cuenta» (con base)
+        // y lo que cubre lo recibido (con ítems). Sin ninguno de los dos, nada.
+        const planId = target.treatmentPlanId;
+        const needsCredit =
+          planId !== null && (target.base !== null || items.length > 0);
+        const credit = needsCredit
+          ? await this.planCreditOut(tx, tenantId, planId, {
+              transfersIn: items.length > 0,
+            })
+          : null;
         // DX-399-quater: de dónde sale lo que cubre cada ítem: lo que el plan
         // recibió por traspaso cubre después de todos los abonos.
-        if (items.length > 0 && target.treatmentPlanId) {
-          const { transfersInLeftCents } = await this.planCreditOut(
-            tx,
-            tenantId,
-            target.treatmentPlanId,
-          );
+        if (credit && planId && items.length > 0) {
           const { byItem } = await this.transfersInCoverage(
             tx,
             tenantId,
-            target.treatmentPlanId,
+            planId,
             true,
-            transfersInLeftCents,
+            credit.transfersInLeftCents,
           );
           for (const option of items) {
             const cents = byItem.get(option.id);
@@ -697,29 +703,11 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         // DX-399-ter (F1): también en un plan cancelado o rechazado, para que
         // «a cuenta» diga lo mismo que el estado de cuenta.
         const creditOutCents =
-          target.treatmentPlanId && target.base
-            ? await this.creditOutOf(
-                tx,
-                tenantId,
-                target.treatmentPlanId,
-                paymentId,
-              )
-            : 0;
+          credit && target.base ? (credit.byPayment.get(paymentId) ?? 0) : 0;
         return { target, lines, items, creditOutCents };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
-  }
-
-  /** Lo devuelto o traspasado que se atribuye a este abono (DX-399): la cascada del plan entero. */
-  private async creditOutOf(
-    tx: Prisma.TransactionClient,
-    tenantId: string,
-    planId: string,
-    paymentId: string,
-  ): Promise<number> {
-    const { byPayment } = await this.planCreditOut(tx, tenantId, planId);
-    return byPayment.get(paymentId) ?? 0;
   }
 
   /**
@@ -733,6 +721,12 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     tx: Prisma.TransactionClient,
     tenantId: string,
     planId: string,
+    /**
+     * `transfersIn`: también lo recibido que queda (`transfersInLeftCents`).
+     * Sin él, un plan sin abonos con algo sin imputar no lee sus asientos: el
+     * reparto y la imputación manual solo usan `byPayment`, vacío en ese caso.
+     */
+    options: { transfersIn?: boolean } = {},
   ): Promise<{
     byPayment: Map<string, number>;
     totalCents: number;
@@ -747,7 +741,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     );
     // Sin abonos con algo sin imputar, `loadNettingFacts` no lee los asientos;
     // lo recibido por traspaso cuenta igual (DX-399-quater).
-    if (netting.facts.length === 0) {
+    if (netting.facts.length === 0 && options.transfersIn) {
       Object.assign(netting, await loadCreditEntries(tx, tenantId, [planId]));
     }
     const netted = netCredit(

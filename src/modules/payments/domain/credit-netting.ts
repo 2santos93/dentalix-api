@@ -50,6 +50,13 @@
  * queda es max(0, Σ recibido − Σ salidas) del plan y no depende de las
  * imputaciones: con abonos primero y lo recibido después, las cifras son
  * estables y el reparto sigue siendo idempotente.
+ *
+ * Caso límite del modo manual (R5): un abono MANUAL con 50 sin imputar (el
+ * reparto no lo toca) y un ítem de 50 cubierto por 50 recibidos. Una
+ * devolución de 50 gasta primero lo recibido, así que el ítem pasa a
+ * «pendiente 50» y el «Sin imputar» del abono sigue en 50. Cartera da 0 y
+ * cuadra (no hay doble gasto): es la semántica de siempre del modo manual, y
+ * el ADMIN tiene que reimputar ese abono al ítem.
  */
 export interface NettingPayment {
   id: string;

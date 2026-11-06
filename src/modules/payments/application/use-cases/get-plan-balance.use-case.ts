@@ -126,7 +126,10 @@ export interface PlanItemBalance {
 }
 
 export interface GetPlanBalanceWithItemsResult extends GetPlanBalanceResult {
-  /** Σ de las imputaciones de los abonos vivos del plan. */
+  /**
+   * Σ de las imputaciones de los abonos vivos del plan, sin lo que cubre lo
+   * recibido por traspaso: Σ `items[].paid` = `allocated` + Σ `paidByTransfersIn`.
+   */
   allocated: number;
   /**
    * Σ de los sobrantes de los abonos con base, NETO de lo devuelto o
