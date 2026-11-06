@@ -66,6 +66,42 @@ function context(allowed: string[] | null = null): TenantContextService {
   return ctx;
 }
 
+describe('reloj cerca de medianoche (DX-542)', () => {
+  // 02:30 UTC del 7 de noviembre = 22:30 del 6 de noviembre en Caracas.
+  const LATE = new Date('2026-11-07T02:30:00.000Z');
+
+  it('cuenta «hoy» con el día de la sede, no con el UTC', async () => {
+    const repo = new InMemoryEquipmentRepository(LOCATIONS, CHAIRS);
+    const ctx = context();
+    const clock = () => LATE;
+    const record = new RecordMaintenanceUseCase(repo, currencies, ctx, clock);
+    const get = new GetEquipmentUseCase(repo, ctx, clock);
+    const eq = repo.seed({
+      locationId: 'norte',
+      maintenanceIntervalMonths: 1,
+      acquiredOn: '2026-10-06',
+    });
+    // El 7 ya es hoy en UTC, pero en la sede todavía es futuro.
+    await expect(
+      record.execute(
+        eq.id,
+        { kind: 'CORRECTIVE', performedOn: '2026-11-07', description: 'x' },
+        'admin',
+      ),
+    ).rejects.toThrow('La fecha del mantenimiento no puede ser futura.');
+    // Adquirido el 06/10 cada mes: vence el 06/11, que en la sede es hoy
+    // («vence pronto»), no ayer («vencido») como diría el día UTC.
+    expect((await get.execute(eq.id)).maintenanceStatus).toBe('DUE_SOON');
+    await expect(
+      record.execute(
+        eq.id,
+        { kind: 'CORRECTIVE', performedOn: '2026-11-06', description: 'x' },
+        'admin',
+      ),
+    ).resolves.toMatchObject({ performedOn: '2026-11-06' });
+  });
+});
+
 describe('equipos biomédicos (DX-542)', () => {
   let repo: InMemoryEquipmentRepository;
   let list: ListEquipmentUseCase;
@@ -330,6 +366,23 @@ describe('equipos biomédicos (DX-542)', () => {
       ).rejects.toThrow('La fecha de la baja no puede ser futura.');
     });
 
+    it('null en la sede, el tipo o el nombre es un 400, no una escritura', async () => {
+      const eq = repo.seed({ locationId: 'norte', name: 'Lámpara' });
+      for (const body of [
+        { locationId: null },
+        { category: null },
+        { name: null },
+      ]) {
+        await expect(
+          update.execute(eq.id, body as never, 'admin'),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      }
+      expect(repo.rows[0]).toMatchObject({
+        locationId: 'norte',
+        name: 'Lámpara',
+      });
+    });
+
     it('un equipo de otra clínica da 404', async () => {
       await expect(update.execute('nope', { name: 'x' }, 'a')).rejects.toThrow(
         new NotFoundException('Equipo no encontrado'),
@@ -461,6 +514,49 @@ describe('equipos biomédicos (DX-542)', () => {
       await expect(
         voidMaintenance.execute(eq.id, 'nope', 'Motivo', 'admin'),
       ).rejects.toThrow(new NotFoundException('Mantenimiento no encontrado'));
+    });
+
+    it('la fecha del mantenimiento no es anterior a la adquisición', async () => {
+      const eq = repo.seed({ locationId: 'norte', acquiredOn: '2026-06-01' });
+      await expect(
+        record.execute(
+          eq.id,
+          { kind: 'CORRECTIVE', performedOn: '2026-05-31', description: 'x' },
+          'admin',
+        ),
+      ).rejects.toThrow(
+        'La fecha del mantenimiento no puede ser anterior a la adquisición del equipo.',
+      );
+    });
+
+    it('si otra petición da de baja el equipo en medio (carrera), editar y registrar dan 409, no 500', async () => {
+      const eq = repo.seed({ locationId: 'norte' });
+      const retireBehind = () => {
+        repo.rows.find((r) => r.id === eq.id)!.status = 'RETIRED';
+      };
+      jest.spyOn(repo, 'update').mockImplementationOnce(() => {
+        retireBehind();
+        return Promise.resolve(null);
+      });
+      await expect(
+        update.execute(eq.id, { name: 'Nuevo' }, 'admin'),
+      ).rejects.toThrow(
+        new ConflictException(
+          'El equipo está dado de baja: ya no se edita ni se le registran mantenimientos.',
+        ),
+      );
+      repo.rows.find((r) => r.id === eq.id)!.status = 'ACTIVE';
+      jest.spyOn(repo, 'addMaintenance').mockImplementationOnce(() => {
+        retireBehind();
+        return Promise.resolve(null);
+      });
+      await expect(
+        record.execute(
+          eq.id,
+          { kind: 'CORRECTIVE', performedOn: '2026-11-01', description: 'x' },
+          'admin',
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('un restringido no toca equipos de otra sede (403)', async () => {

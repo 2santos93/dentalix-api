@@ -14,6 +14,7 @@ import {
 } from './support/e2e-fixtures';
 import { locationBody } from './support/location-fixtures';
 import { sedeTodayFixture } from './support/sede-clock';
+import { TokenService } from '../src/shared/crypto/token.service';
 
 // DX-542 en HTTP real: equipos biomédicos por sede con su hoja de vida.
 // Solo ADMIN (403 en español al resto), sillón de la MISMA sede (400/404),
@@ -249,6 +250,68 @@ describe('Equipos biomédicos por sede y hoja de vida (e2e, DX-542)', () => {
         .expect(400);
     });
 
+    it('PATCH con null en un campo obligatorio (sede, nombre, tipo) da 400 en español, no 500, y no cambia nada', async () => {
+      const before = await raw.equipment.findUniqueOrThrow({
+        where: { id: autoclave.id },
+      });
+      for (const body of [
+        { locationId: null },
+        { name: null },
+        { category: null },
+      ]) {
+        const res = await admin(
+          api().patch(`/api/v1/equipment/${autoclave.id}`),
+        )
+          .send(body)
+          .expect(400);
+        expect(
+          JSON.stringify((res.body as { message: unknown }).message),
+        ).toMatch(/sede|nombre|tipo/i);
+      }
+      await expect(
+        raw.equipment.findUniqueOrThrow({ where: { id: autoclave.id } }),
+      ).resolves.toEqual(before);
+    });
+
+    it('un ADMIN con el token acotado a otra sede recibe 403 LOCATION_NOT_ALLOWED en el equipo de la Sede Norte', async () => {
+      const token = (
+        await app.get(TokenService).issue({
+          sub: clinic.adminUserId,
+          tenantId: clinic.tenantId,
+          role: ClinicRole.ADMIN,
+          loc: [sur],
+          tv: 0,
+        })
+      ).accessToken;
+      const before = await snapshotOfA();
+      const attacks = [
+        as(api().get(`/api/v1/equipment/${autoclave.id}`), token),
+        as(api().patch(`/api/v1/equipment/${autoclave.id}`), token).send({
+          name: 'Otro',
+        }),
+        as(api().post(`/api/v1/equipment/${autoclave.id}/retire`), token).send({
+          reason: 'No es su sede',
+        }),
+        as(
+          api().post(`/api/v1/equipment/${autoclave.id}/maintenances`),
+          token,
+        ).send({
+          kind: 'CORRECTIVE',
+          performedOn: sedeDay,
+          description: 'No es su sede',
+        }),
+      ];
+      for (const attack of attacks) {
+        const res = await attack.expect(403);
+        expect(res.body).toMatchObject({ code: 'LOCATION_NOT_ALLOWED' });
+      }
+      // Su lista es la de su sede, sin la Norte.
+      const list = (await as(api().get('/api/v1/equipment'), token).expect(200))
+        .body as ListBody;
+      expect(list.items.every((i) => i.locationId === sur)).toBe(true);
+      expect(await snapshotOfA()).toEqual(before);
+    });
+
     it('un rol no ADMIN recibe 403 en español al leer y al escribir', async () => {
       for (const token of [dentistToken, receptionToken]) {
         const write = await as(api().post('/api/v1/equipment'), token)
@@ -323,6 +386,31 @@ describe('Equipos biomédicos por sede y hoja de vida (e2e, DX-542)', () => {
     });
 
     it('valida la fecha, el costo con su moneda y la moneda conocida', async () => {
+      const beforeAcquired = await admin(
+        api().post(`/api/v1/equipment/${autoclave.id}/maintenances`),
+      )
+        .send({
+          kind: 'CORRECTIVE',
+          performedOn: addCivilMonths(sedeDay, -15),
+          description: 'x',
+        })
+        .expect(400);
+      expect((beforeAcquired.body as { message: string }).message).toBe(
+        'La fecha del mantenimiento no puede ser anterior a la adquisición del equipo.',
+      );
+      const tooFar = await admin(
+        api().post(`/api/v1/equipment/${autoclave.id}/maintenances`),
+      )
+        .send({
+          kind: 'PREVENTIVE',
+          performedOn: sedeDay,
+          description: 'x',
+          nextDueOn: addCivilDays(addCivilMonths(sedeDay, 120), 1),
+        })
+        .expect(400);
+      expect((tooFar.body as { message: string }).message).toBe(
+        'El próximo mantenimiento no puede ser a más de 10 años de este.',
+      );
       const future = await admin(
         api().post(`/api/v1/equipment/${autoclave.id}/maintenances`),
       )

@@ -310,6 +310,15 @@ export class UpdateEquipmentUseCase {
     input: EquipmentInput,
     actorId: string,
   ): Promise<EquipmentView> {
+    // Red bajo el DTO: un obligatorio no se borra con null.
+    const nulls = input as Record<string, unknown>;
+    if (nulls.locationId === null || nulls.category === null) {
+      throw new BadRequestException(
+        nulls.locationId === null
+          ? 'La sede no es válida.'
+          : 'El tipo de equipo no es válido.',
+      );
+    }
     const equipment = await loadEquipment(this.repo, this.tenantContext, id);
     assertActive(equipment);
     const moves =
@@ -356,6 +365,8 @@ export class UpdateEquipmentUseCase {
       notes: fields.notes,
       updatedById: actorId,
     });
+    // Otra petición lo dio de baja entre la lectura y la escritura.
+    if (!saved) throw new ConflictException(EQUIPMENT_RETIRED_MESSAGE);
     return viewOf(saved, this.clock);
   }
 }
@@ -420,11 +431,15 @@ export class RecordMaintenanceUseCase {
     );
     assertActive(equipment);
     const today = todayIn(this.clock, equipment.locationTimeZone);
-    const fields = validateMaintenanceFields(input, today);
+    const fields = validateMaintenanceFields(
+      input,
+      today,
+      equipment.acquiredOn,
+    );
     if (fields.currency && !(await this.currencies.has(fields.currency))) {
       throw new BadRequestException(UNKNOWN_CURRENCY_MESSAGE);
     }
-    return this.repo.addMaintenance({
+    const saved = await this.repo.addMaintenance({
       equipmentId,
       kind: input.kind,
       ...fields,
@@ -436,6 +451,9 @@ export class RecordMaintenanceUseCase {
       ),
       createdById: actorId,
     });
+    // Otra petición lo dio de baja entre la lectura y el alta.
+    if (!saved) throw new ConflictException(EQUIPMENT_RETIRED_MESSAGE);
+    return saved;
   }
 }
 

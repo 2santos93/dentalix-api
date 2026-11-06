@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsIn,
   IsInt,
+  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
@@ -10,6 +11,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import {
   EQUIPMENT_CATEGORIES,
@@ -43,6 +45,7 @@ const LOCATION_MESSAGE = 'La sede no es válida.';
 const CHAIR_MESSAGE = 'El sillón no es válido: elige uno de la sede o ninguno.';
 const DATE_MESSAGE = 'La fecha no es válida (AAAA-MM-DD).';
 const TEXT_MESSAGE = 'El texto no es válido.';
+const NAME_REQUIRED_MESSAGE = `Escribe el nombre del equipo (hasta ${EQUIPMENT_NAME_MAX} caracteres).`;
 const INTERVAL_MESSAGE = `La periodicidad del mantenimiento va de ${MAINTENANCE_INTERVAL_MIN} a ${MAINTENANCE_INTERVAL_MAX} meses.`;
 const COST_MESSAGE =
   'El costo tiene que ser mayor que 0 y con 2 decimales como mucho.';
@@ -404,27 +407,38 @@ export class CreateEquipmentDto extends EquipmentFieldsDto {
   category!: (typeof EQUIPMENT_CATEGORIES)[number];
 }
 
+/**
+ * Un obligatorio que LLEGA no puede ser `null` (borrarlo): `ValidateIf` en vez
+ * de `IsOptional`, que dejaría pasar el `null` hasta la BD (500).
+ */
+const present = (_: object, value: unknown) => value !== undefined;
+
 export class UpdateEquipmentDto extends EquipmentFieldsDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      'Trasladar a otra sede: quita el sillón, salvo que venga uno de la sede nueva.',
+      'Trasladar a otra sede: quita el sillón, salvo que venga uno de la sede nueva. No admite null.',
   })
-  @IsOptional()
+  @ValidateIf(present)
   @IsUUID('all', { message: LOCATION_MESSAGE })
   locationId?: string;
 
-  @ApiPropertyOptional({ maxLength: EQUIPMENT_NAME_MAX })
-  @IsOptional()
-  @IsString({ message: TEXT_MESSAGE })
-  @MaxLength(EQUIPMENT_NAME_MAX + SLACK)
+  @ApiPropertyOptional({
+    maxLength: EQUIPMENT_NAME_MAX,
+    description: 'No admite null ni vacío.',
+  })
+  @ValidateIf(present)
+  @IsString({ message: NAME_REQUIRED_MESSAGE })
+  @IsNotEmpty({ message: NAME_REQUIRED_MESSAGE })
+  @MaxLength(EQUIPMENT_NAME_MAX + SLACK, { message: NAME_REQUIRED_MESSAGE })
   name?: string;
 
   @ApiPropertyOptional({
     enum: EQUIPMENT_CATEGORIES,
     enumName: 'EquipmentCategory',
+    description: 'No admite null.',
   })
-  @IsOptional()
+  @ValidateIf(present)
   @IsIn(EQUIPMENT_CATEGORIES, { message: CATEGORY_MESSAGE })
   category?: (typeof EQUIPMENT_CATEGORIES)[number];
 }
