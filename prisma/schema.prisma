@@ -3095,6 +3095,10 @@ model Equipment {
   @@index([tenantId, name, id], map: "equipment_tenant_name_idx")
   /// Lado hijo de la FK al sillón.
   @@index([tenantId, locationId, chairId], map: "equipment_chair_idx")
+  // DX-543: avisos de «Mi día». Parcial (WHERE "status" = 'ACTIVE'): el WHERE
+  // vive solo en 20261125090000_dx543_equipment_active_idx. NO aceptes un
+  // diff de migrate dev que lo vuelva completo.
+  @@index([tenantId, locationId], map: "equipment_tenant_active_location_idx")
   @@index([retiredById], map: "equipment_retired_by_idx")
   @@map("equipment")
 }
