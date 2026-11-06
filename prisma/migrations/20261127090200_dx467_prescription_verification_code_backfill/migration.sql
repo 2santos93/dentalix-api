@@ -21,7 +21,7 @@
 -- 20261126090100): se reintenta esa receta con otro código, en su propio
 -- subbloque. Idempotente: solo toca las que siguen sin código. Si se corta,
 -- `prisma migrate resolve --rolled-back
--- 20261126090200_dx467_prescription_verification_code_backfill` y `deploy`.
+-- 20261127090200_dx467_prescription_verification_code_backfill` y `deploy`.
 DO $$
 DECLARE
   t uuid;

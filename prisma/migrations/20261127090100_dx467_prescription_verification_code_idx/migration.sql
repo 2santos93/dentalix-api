@@ -12,6 +12,6 @@
 -- 20261118090100_dx224_phone_e164_idx). IF NOT EXISTS: si se corta, un índice
 -- INVALID queda con el mismo nombre; se borra (DROP INDEX CONCURRENTLY
 -- "prescriptions_tenant_verification_code_key"), `prisma migrate resolve
--- --rolled-back 20261126090100_dx467_prescription_verification_code_idx` y se
+-- --rolled-back 20261127090100_dx467_prescription_verification_code_idx` y se
 -- repite `deploy`.
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "prescriptions_tenant_verification_code_key" ON "prescriptions" ("tenantId", "verificationCode");

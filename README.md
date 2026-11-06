@@ -5469,7 +5469,7 @@ clínica. Dominio en `src/modules/prescriptions/domain/prescription-verification
   guiones.
 - **Recetas anteriores**: barrido en la migración (no perezoso), así la
   columna es NOT NULL y la app nunca escribe en una receta emitida al leerla.
-  Cinco migraciones `20261126090000…090400_dx467_*`: columna nullable con
+  Cinco migraciones `20261127090000…090400_dx467_*`: columna nullable con
   DEFAULT `prescription_verification_code()` (función SQL con
   `gen_random_uuid()`, mismo alfabeto; cubre a una réplica anterior que inserte
   sin el código), índice único CONCURRENTLY, barrido por clínica en lotes de

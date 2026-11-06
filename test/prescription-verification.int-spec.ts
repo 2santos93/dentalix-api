@@ -373,7 +373,7 @@ describe('prescriptions.verificationCode: RLS, unicidad, inmutabilidad y auditor
 // La migración sobre recetas ya emitidas: una BD desechable recibe todas las
 // migraciones ANTERIORES a DX-467, dos clínicas con recetas (una anulada),
 // y después las de DX-467.
-const DX467 = '20261126090000_dx467_prescription_verification_code';
+const DX467 = '20261127090000_dx467_prescription_verification_code';
 const ROOT = join(__dirname, '..');
 
 function urlFor(db: string): string {
