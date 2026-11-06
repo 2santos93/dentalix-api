@@ -61,15 +61,28 @@ export interface RecentSends {
  */
 export type OutboxQuotaGuard = (sends: RecentSends) => void;
 
+/**
+ * DX-149-ter: qué candados toma un insert con `guard` (ver email-quota-lock.ts).
+ * - `recipient-and-tenant` (por defecto): el del destinatario y el de la
+ *   clínica; ninguno de los topes se salta con peticiones a la vez.
+ * - `recipient`: solo el del destinatario. Para un endpoint PÚBLICO (el
+ *   restablecimiento de contraseña): una inundación contra una clínica no
+ *   pone en cola conexiones del pool detrás de su candado. El tope diario de
+ *   la clínica se sigue contando, sin candado (aviso, no garantía).
+ */
+export type QuotaLockScope = 'recipient-and-tenant' | 'recipient';
+
 export interface EmailOutboxRepository {
   /**
    * Con `guard` (DX-149-bis), en la misma transacción: toma el candado de los
    * topes de la clínica del contexto y del destinatario, cuenta y, si `guard`
-   * no lanza, inserta. Sin `guard`, inserta sin contar ni esperar.
+   * no lanza, inserta. Sin `guard`, inserta sin contar ni esperar. `scope`:
+   * qué candados (DX-149-ter); sin él, los dos.
    */
   insert(
     row: NewOutboxEmail,
     guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
   ): Promise<{ id: string }>;
 
   /**
@@ -84,6 +97,7 @@ export interface EmailOutboxRepository {
     tx: Prisma.TransactionClient,
     row: NewOutboxEmail,
     guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
   ): Promise<{ id: string }>;
 
   /**

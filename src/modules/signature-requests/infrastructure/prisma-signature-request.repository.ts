@@ -335,9 +335,13 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
 
   async create(
     input: CreateSignatureRequestRepoInput,
+    enqueue?: (
+      tx: Prisma.TransactionClient,
+      supersededIds: string[],
+    ) => Promise<void>,
   ): Promise<{ id: string; supersededIds: string[] }> {
     try {
-      return await this.createLive(input);
+      return await this.createLive(input, enqueue);
     } catch (error) {
       // DX-425 (DB-061): dos envíos a la vez del mismo documento. Ambos
       // vieron «nada pendiente» e insertaron; el índice único parcial deja
@@ -351,6 +355,10 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
 
   private createLive(
     input: CreateSignatureRequestRepoInput,
+    enqueue?: (
+      tx: Prisma.TransactionClient,
+      supersededIds: string[],
+    ) => Promise<void>,
   ): Promise<{ id: string; supersededIds: string[] }> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -383,6 +391,10 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         data: { tenantId, ...input },
         select: { id: true },
       });
+      // DX-149-ter: el email del enlace (y la cancelación de los de las
+      // anuladas) AL FINAL de esta transacción: sus candados del tope son lo
+      // último que se toma. Si el tope no deja, se deshace todo.
+      await enqueue?.(tx, supersededIds);
       return { id: created.id, supersededIds };
     });
   }

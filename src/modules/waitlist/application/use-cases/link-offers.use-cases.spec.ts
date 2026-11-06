@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { CreateWaitlistOfferUseCase } from './opening-candidates.use-cases';
@@ -74,6 +75,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
   let useCase: CreateLinkOfferUseCase;
   let leadMinutes: number;
   let sendFails: boolean;
+  let sendCapped: boolean;
 
   const base = {
     locationId: 'loc1',
@@ -87,6 +89,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
     now = local('2026-10-19', '08:00');
     leadMinutes = 0;
     sendFails = false;
+    sendCapped = false;
     repo = new InMemoryOpeningCandidatesRepository();
     repo.addPatient({ id: 'p1', firstName: 'Ana María', lastName: 'Pérez' });
     drafts = [];
@@ -95,6 +98,22 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       assertCanSend: () => Promise.resolve(),
       send: (input) => {
         if (sendFails) return Promise.reject(new Error('outbox caído'));
+        // DX-149-ter: el tope contado bajo candado al encolar (el adaptador
+        // ya lo da como el 429 en español).
+        if (sendCapped) {
+          return Promise.reject(
+            new HttpException(
+              {
+                statusCode: 429,
+                error: 'Too Many Requests',
+                message:
+                  'Ya enviamos un correo a esta persona hace un momento. Espera 60 segundos antes de volver a enviarlo.',
+                retryAfterSeconds: 60,
+              },
+              429,
+            ),
+          );
+        }
         sent.push(input);
         return Promise.resolve();
       },
@@ -245,6 +264,24 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       outcome: 'EXPIRED',
       outcomeById: 'u-rec',
     });
+    expect(drafts.map((d) => d.metadata)).toEqual([
+      { reason: 'OFFER_LINK_EMAIL' },
+      { reason: 'OFFER_LINK_EMAIL_FAILED' },
+    ]);
+  });
+
+  it('DX-149-ter: si el tope salta al encolar (otra oferta al mismo paciente ganó la carrera), 429 en español —no 503— y la oferta queda sin efecto', async () => {
+    sendCapped = true;
+    const error = await useCase
+      .execute({ ...base, channel: 'LINK_EMAIL' }, LINK, CTX)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(429);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      message: expect.stringMatching(/^Ya enviamos un correo/) as string,
+      retryAfterSeconds: 60,
+    });
+    expect(repo.offers[0]).toMatchObject({ outcome: 'EXPIRED' });
     expect(drafts.map((d) => d.metadata)).toEqual([
       { reason: 'OFFER_LINK_EMAIL' },
       { reason: 'OFFER_LINK_EMAIL_FAILED' },

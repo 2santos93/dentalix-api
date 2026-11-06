@@ -446,6 +446,38 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
     expect(email.sent).toEqual([]);
   });
 
+  it('DX-149-ter: el tope que salta al encolar (otra entrega al mismo paciente ganó la carrera) no es un 500: la entrega queda, 201 con el enlace y emailQueued false', async () => {
+    const { deliver, exo, deliveries, email } = setup();
+    email.send = () =>
+      Promise.reject(
+        new HttpException(
+          {
+            statusCode: 429,
+            error: 'Too Many Requests',
+            message:
+              'Ya enviamos un correo a esta persona hace un momento. Espera 60 segundos antes de volver a enviarlo.',
+            retryAfterSeconds: 60,
+          },
+          429,
+        ),
+      );
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const result = await deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+    expect(result.emailQueued).toBe(false);
+    expect(result.sentTo).toBeNull();
+    expect(result.delivery.emailStatus).toBe('NOT_SENT');
+    expect(result.publicUrl).toMatch(/\/indicaciones\//);
+    expect(deliveries.rows).toHaveLength(1);
+    warn.mockRestore();
+  });
+
   it('EMAIL con el outbox caído: la entrega queda registrada y auditada, 201 con el enlace y emailQueued false', async () => {
     const { deliver, exo, deliveries, email, audits } = setup();
     email.send = () => Promise.reject(new Error('outbox caído'));

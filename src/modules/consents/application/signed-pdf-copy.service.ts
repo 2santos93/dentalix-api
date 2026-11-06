@@ -1,7 +1,6 @@
 import {
   ConflictException,
   GoneException,
-  HttpException,
   HttpStatus,
   Inject,
   Injectable,
@@ -27,7 +26,7 @@ import {
   type PreparedEmail,
 } from '../../notifications/email/application/email-outbox.service';
 import type { SignedConsentCopyEmailVars } from '../../notifications/email/domain/email-message';
-import { EmailQuotaExceededError } from '../../notifications/email/domain/email-quota-exceeded.error';
+import { withEmailQuotaAs429 } from '../../notifications/email/application/email-quota-http';
 import {
   SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY,
   SIGNED_PDF_COPY_REPOSITORY,
@@ -98,11 +97,22 @@ export interface SignedPdfCopyEmailSender {
    * crea el enlace (outbox transaccional): `insert(tx)` dentro, `kick()`
    * después del COMMIT.
    */
-  prepare(input: {
-    to: string;
-    referenceId: string;
-    vars: SignedConsentCopyEmailVars;
-  }): Promise<PreparedEmail>;
+  prepare(
+    input: {
+      to: string;
+      referenceId: string;
+      vars: SignedConsentCopyEmailVars;
+    },
+    options?: {
+      /**
+       * DX-149-ter: el tope se cuenta al insertar, bajo el candado de la
+       * clínica y del destinatario (solo el reenvío manual; el envío
+       * automático tras archivar no lo lleva). Si no cabe, `insert` lanza el
+       * 429 en español y la transacción se deshace: el enlace anterior sigue.
+       */
+      enforceQuota?: boolean;
+    },
+  ): Promise<PreparedEmail>;
 }
 
 function tenantIdOf(tenantContext: Pick<TenantContextService, 'getTenantId'>) {
@@ -119,37 +129,32 @@ export class OutboxSignedPdfCopyEmailSender implements SignedPdfCopyEmailSender 
     private readonly tenantContext: TenantContextService,
   ) {}
 
-  async assertCanSend(to: string): Promise<void> {
-    try {
-      await this.outbox.assertWithinQuota(tenantIdOf(this.tenantContext), to);
-    } catch (err) {
-      if (err instanceof EmailQuotaExceededError) {
-        throw new HttpException(
-          {
-            statusCode: HttpStatus.TOO_MANY_REQUESTS,
-            error: 'Too Many Requests',
-            message: err.message,
-            retryAfterSeconds: err.retryAfterSeconds,
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      throw err;
-    }
+  assertCanSend(to: string): Promise<void> {
+    return withEmailQuotaAs429(() =>
+      this.outbox.assertWithinQuota(tenantIdOf(this.tenantContext), to),
+    );
   }
 
-  prepare(input: {
-    to: string;
-    referenceId: string;
-    vars: SignedConsentCopyEmailVars;
-  }): Promise<PreparedEmail> {
-    return this.outbox.prepareInTx({
+  async prepare(
+    input: {
+      to: string;
+      referenceId: string;
+      vars: SignedConsentCopyEmailVars;
+    },
+    options: { enforceQuota?: boolean } = {},
+  ): Promise<PreparedEmail> {
+    const mail = await this.outbox.prepareInTx({
       tenantId: tenantIdOf(this.tenantContext),
       to: input.to,
       template: 'signed-consent-copy',
       vars: input.vars,
       referenceId: input.referenceId,
+      enforceQuota: options.enforceQuota === true,
     });
+    return {
+      insert: (tx) => withEmailQuotaAs429(() => mail.insert(tx)),
+      kick: () => mail.kick(),
+    };
   }
 }
 
@@ -183,6 +188,8 @@ export class SignedPdfCopySender {
     target: SignedPdfCopyTarget,
     createdById: string | null,
     requestHost?: string,
+    /** DX-149-ter: el reenvío manual cuenta el tope bajo candado. */
+    options: { enforceQuota?: boolean } = {},
   ): Promise<{ sentAt: Date; expiresAt: Date } | null> {
     const tenantId = tenantIdOf(this.tenantContext);
     const base = await this.linkBase.forTenant(tenantId, requestHost);
@@ -198,20 +205,23 @@ export class SignedPdfCopySender {
     // paciente nunca se queda sin enlace); el despachador se despierta tras el
     // COMMIT.
     const linkId = randomUUID();
-    const mail = await this.email.prepare({
-      to: target.destination,
-      referenceId: linkId,
-      vars: {
-        recipientFirstName: firstName(target.signerName),
-        patientFirstName:
-          target.signerType === 'GUARDIAN'
-            ? firstName(target.patientFirstName)
-            : null,
-        clinicName: target.clinicName,
-        url: buildSignedPdfCopyUrl(base, token),
-        expiresAtLabel: format.longDateTime(expiresAt, timeZone),
+    const mail = await this.email.prepare(
+      {
+        to: target.destination,
+        referenceId: linkId,
+        vars: {
+          recipientFirstName: firstName(target.signerName),
+          patientFirstName:
+            target.signerType === 'GUARDIAN'
+              ? firstName(target.patientFirstName)
+              : null,
+          clinicName: target.clinicName,
+          url: buildSignedPdfCopyUrl(base, token),
+          expiresAtLabel: format.longDateTime(expiresAt, timeZone),
+        },
       },
-    });
+      { enforceQuota: options.enforceQuota === true },
+    );
     await this.repo.issueLink({
       id: linkId,
       consentId: target.consentId,
@@ -276,7 +286,8 @@ export interface SignedPdfCopyResent {
  * en la misma transacción) y email. 404 si el consentimiento no es de este
  * paciente en esta clínica; 403 si su envío es de una sede no permitida al
  * usuario; 409 si el PDF no está archivado; 429 con el tope
- * del outbox ANTES de tocar nada.
+ * del outbox ANTES de tocar nada (y, DX-149-ter, también si otro reenvío a la
+ * vez lo alcanza: contado bajo candado al encolar, sin dejar nada a medias).
  */
 @Injectable()
 export class ResendSignedPdfCopyUseCase {
@@ -309,7 +320,11 @@ export class ResendSignedPdfCopyUseCase {
       throw new ConflictException(SIGNED_PDF_COPY_NOT_READY_MESSAGE);
     }
     await this.email.assertCanSend(target.destination);
-    const sent = await this.sender.send(target, userId, requestHost);
+    // DX-149-ter: el aviso temprano no frena dos reenvíos a la vez; el tope
+    // contado bajo candado al encolar, sí (429 y el enlace anterior sigue).
+    const sent = await this.sender.send(target, userId, requestHost, {
+      enforceQuota: true,
+    });
     if (!sent)
       throw new ConflictException(SIGNED_PDF_COPY_NO_LINK_HOST_MESSAGE);
     return { ...sent, destinationMasked: target.destinationMasked };

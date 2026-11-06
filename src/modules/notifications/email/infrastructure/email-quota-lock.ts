@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import type { QuotaLockScope } from '../domain/ports/email-outbox-repository.port';
 
 /**
  * DX-149-bis: candados consultivos (hasta el COMMIT) de los topes de email de
@@ -25,10 +26,18 @@ import type { Prisma } from '@prisma/client';
  *    foto nueva por sentencia. En REPEATABLE READ / SERIALIZABLE contaría con
  *    la foto del principio de la transacción y la carrera volvería. Se
  *    comprueba aquí y, si no, falla sin insertar.
+ *
+ * DX-149-ter: `scope = 'recipient'` toma SOLO el del destinatario (endpoint
+ * público: restablecer la contraseña). El orden sigue siendo un prefijo del
+ * de siempre (destinatario, luego clínica), así que no abre ningún ciclo con
+ * quien toma los dos. Quien lo usa desde una petición pública fija antes un
+ * `lock_timeout` corto en su transacción (SET LOCAL): la espera de este
+ * candado no retiene una conexión del pool más que eso.
  */
 export async function lockEmailQuota(
   tx: Prisma.TransactionClient,
   toHash: string,
+  scope: QuotaLockScope = 'recipient-and-tenant',
 ): Promise<void> {
   const [{ isolation }] = await tx.$queryRaw<{ isolation: string }[]>`
     SELECT current_setting('transaction_isolation') AS isolation`;
@@ -41,6 +50,7 @@ export async function lockEmailQuota(
     hashtext('dx149_email_recipient:' || current_setting('app.current_tenant')),
     hashtext(${toHash})
   )`;
+  if (scope === 'recipient') return;
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(
     hashtext('dx149_email_tenant:' || current_setting('app.current_tenant')),
     0

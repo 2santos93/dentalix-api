@@ -130,6 +130,8 @@ function setup(
   }[] = [];
   const quotaChecks: string[] = [];
   const kicks: string[] = [];
+  /** DX-149-ter: el `enforceQuota` con el que se preparó cada email. */
+  const enforced: boolean[] = [];
   const email: SignedPdfCopyEmailSender & { quotaError: Error | null } = {
     quotaError: null,
     assertCanSend(to) {
@@ -138,7 +140,8 @@ function setup(
         ? Promise.reject(this.quotaError)
         : Promise.resolve();
     },
-    prepare(input) {
+    prepare(input, options) {
+      enforced.push(options?.enforceQuota === true);
       return Promise.resolve({
         insert: () => {
           emails.push(input);
@@ -190,6 +193,7 @@ function setup(
     repo,
     emails,
     kicks,
+    enforced,
     quotaChecks,
     email,
     linkBaseCalls,
@@ -227,6 +231,8 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(sent.referenceId).toBe(link.id);
       // El despachador se despierta tras el commit.
       expect(ctx.kicks).toEqual([link.id]);
+      // DX-149-ter: el envío automático no cuenta el tope (no lo pide nadie).
+      expect(ctx.enforced).toEqual([false]);
       const token = sent.vars.url.split('/copia/')[1];
       expect(sent.vars.url).toBe(`https://demo.dentalix.app/copia/${token}`);
       expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -315,6 +321,8 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(ctx.repo.issued).toHaveLength(1);
       expect(ctx.repo.issued[0]).toMatchObject({ createdById: 'u1' });
       expect(ctx.emails).toHaveLength(1);
+      // DX-149-ter: el reenvío cuenta el tope bajo candado al encolar.
+      expect(ctx.enforced).toEqual([true]);
       expect(ctx.linkBaseCalls).toEqual([['t1', 'demo.localhost:3000']]);
       expect(result).toEqual({
         sentAt: NOW,
@@ -360,6 +368,27 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       await expect(ctx.resend.execute('p1', 'c1', 'u1')).rejects.toThrow(
         'outbox caído',
       );
+      expect(ctx.repo.issued).toEqual([]);
+      expect(ctx.kicks).toEqual([]);
+    });
+
+    it('DX-149-ter: si el tope salta al encolar (otro reenvío a la vez ganó), 429 y el enlace anterior sigue: no se crea ni invalida nada', async () => {
+      const ctx = setup();
+      const capped = new HttpException(
+        {
+          statusCode: 429,
+          error: 'Too Many Requests',
+          message:
+            'Ya enviamos un correo a esta persona hace un momento. Espera 60 segundos antes de volver a enviarlo.',
+          retryAfterSeconds: 60,
+        },
+        429,
+      );
+      jest.spyOn(ctx.email, 'prepare').mockResolvedValue({
+        insert: () => Promise.reject(capped),
+        kick: () => ctx.kicks.push('kick'),
+      });
+      await expect(ctx.resend.execute('p1', uuid, 'u1')).rejects.toBe(capped);
       expect(ctx.repo.issued).toEqual([]);
       expect(ctx.kicks).toEqual([]);
     });

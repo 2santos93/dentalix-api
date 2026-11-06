@@ -83,6 +83,7 @@ describe('PrismaPasswordResetRepository (int)', () => {
   async function issue(now = new Date(), ttlMs = 30 * 60_000) {
     const token = generatePasswordResetToken();
     await repo.issue({
+      tenantId: tenantA,
       userId,
       tokenHash: hashPasswordResetToken(token),
       expiresAt: new Date(now.getTime() + ttlMs),

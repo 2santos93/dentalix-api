@@ -1,6 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ClinicRole, Prisma, UserTokenPurpose } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { sqlStateOf } from '../../../../shared/prisma/prisma-exception.filter';
+import { PasswordResetThrottledError } from '../../domain/password-reset-throttled.error';
 import type {
   PasswordResetRepository,
   ResetRecipient,
@@ -8,6 +10,28 @@ import type {
 } from '../../domain/ports/password-reset-repository.port';
 
 const PURPOSE = UserTokenPurpose.PASSWORD_RESET;
+
+/**
+ * DX-149-ter: `lock_timeout` de la transacción que emite el enlace. El
+ * endpoint es público: una ráfaga contra la misma persona espera, como mucho
+ * esto, al candado de su fila o al del tope de su email, y luego cuenta como
+ * tope (nada cambia). Así una inundación no deja el pool sin conexiones para
+ * las demás clínicas.
+ */
+export const PASSWORD_RESET_LOCK_TIMEOUT_MS = 1000;
+/** Para los tests: otro `lock_timeout` (ms) que el de producción. */
+export const PASSWORD_RESET_LOCK_TIMEOUT = Symbol(
+  'PASSWORD_RESET_LOCK_TIMEOUT',
+);
+
+/** 55P03 lock_not_available: se agotó el `lock_timeout` esperando un candado. */
+function isLockTimeout(error: unknown): boolean {
+  return (
+    (error instanceof Prisma.PrismaClientKnownRequestError ||
+      error instanceof Prisma.PrismaClientUnknownRequestError) &&
+    sqlStateOf(error) === '55P03'
+  );
+}
 
 /**
  * Bloquea la fila del usuario hasta el final de la transacción. `issue` y
@@ -36,7 +60,16 @@ class UserGoneError extends Error {
  */
 @Injectable()
 export class PrismaPasswordResetRepository implements PasswordResetRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly lockTimeoutMs: number;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    @Inject(PASSWORD_RESET_LOCK_TIMEOUT)
+    lockTimeoutMs?: number,
+  ) {
+    this.lockTimeoutMs = lockTimeoutMs ?? PASSWORD_RESET_LOCK_TIMEOUT_MS;
+  }
 
   async findActiveMember(
     tenantId: string,
@@ -74,28 +107,50 @@ export class PrismaPasswordResetRepository implements PasswordResetRepository {
   }
 
   async issue(input: {
+    tenantId: string;
     userId: string;
     tokenHash: string;
     expiresAt: Date;
     now: Date;
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
   }): Promise<void> {
-    await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await lockUser(tx, input.userId);
-      await tx.userToken.updateMany({
-        where: { userId: input.userId, purpose: PURPOSE, invalidatedAt: null },
-        data: { invalidatedAt: input.now },
+    try {
+      // DX-149-ter: la transacción de la clínica del host (RLS del outbox):
+      // token y email confirman o se deshacen juntos. `users`/`user_tokens`
+      // son globales y se escriben igual que antes.
+      await this.prisma.runWithTenant(input.tenantId, async (tx) => {
+        // Primero el tope de espera (SET LOCAL parametrizado): cubre la fila
+        // del usuario y el candado del email.
+        await tx.$executeRaw`SELECT set_config('lock_timeout', ${`${this.lockTimeoutMs}ms`}, true)`;
+        // Orden: fila del usuario, tokens, y el email AL FINAL (sus candados
+        // consultivos son lo último que se toma: ningún ciclo con nadie).
+        await lockUser(tx, input.userId);
+        await tx.userToken.updateMany({
+          where: {
+            userId: input.userId,
+            purpose: PURPOSE,
+            invalidatedAt: null,
+          },
+          data: { invalidatedAt: input.now },
+        });
+        await tx.userToken.create({
+          data: {
+            userId: input.userId,
+            purpose: PURPOSE,
+            tokenHash: input.tokenHash,
+            expiresAt: input.expiresAt,
+            createdAt: input.now,
+          },
+          select: { id: true },
+        });
+        await input.enqueue?.(tx);
       });
-      await tx.userToken.create({
-        data: {
-          userId: input.userId,
-          purpose: PURPOSE,
-          tokenHash: input.tokenHash,
-          expiresAt: input.expiresAt,
-          createdAt: input.now,
-        },
-        select: { id: true },
-      });
-    });
+    } catch (err) {
+      if (isLockTimeout(err)) {
+        throw new PasswordResetThrottledError('LOCK_TIMEOUT');
+      }
+      throw err;
+    }
   }
 
   findByHash(tokenHash: string): Promise<ResetTokenRecord | null> {
