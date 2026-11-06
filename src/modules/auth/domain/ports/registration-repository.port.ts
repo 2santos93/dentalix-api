@@ -44,8 +44,15 @@ export interface RegistrationRepository {
   /**
    * Borra el pendiente si sigue existiendo. Devuelve `true` solo a quien lo
    * borró: dos clics simultáneos en el enlace crean una sola clínica. DX-149-bis:
-   * con `tx`, dentro de esa transacción (la del alta): si se deshace, el
-   * pendiente vuelve a estar ahí; el segundo clic espera a su candado de fila.
+   * solo si sigue siendo la MISMA fila verificada (`tokenHash`): un registro
+   * nuevo reemplaza el pendiente en su sitio (mismo id, otro token), y el
+   * enlace viejo ya no puede gastarlo. Con `tx`, dentro de esa transacción
+   * (la del alta): si se deshace, el pendiente vuelve a estar ahí; el segundo
+   * clic espera a su candado de fila.
    */
-  consumePending(id: string, tx?: Prisma.TransactionClient): Promise<boolean>;
+  consumePending(
+    id: string,
+    tokenHash: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<boolean>;
 }

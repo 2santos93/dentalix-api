@@ -252,14 +252,39 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     const row = await repo.findPendingByTokenHash(hashRegistrationToken(token));
 
     const results = await Promise.all([
-      repo.consumePending(row!.id),
-      repo.consumePending(row!.id),
+      repo.consumePending(row!.id, hashRegistrationToken(token)),
+      repo.consumePending(row!.id, hashRegistrationToken(token)),
     ]);
 
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(
       await repo.findPendingByTokenHash(hashRegistrationToken(token)),
     ).toBeNull();
+  });
+
+  it('DX-149-bis: un registro que reemplaza al pendiente en su sitio (mismo id) deja al enlace viejo sin poder consumirlo', async () => {
+    const oldToken = generateRegistrationToken();
+    await save(oldToken);
+    const old = await repo.findPendingByTokenHash(
+      hashRegistrationToken(oldToken),
+    );
+    const newToken = generateRegistrationToken();
+    // Pasado el enfriamiento: reemplaza la fila (mismo id, otro token).
+    expect(await save(newToken, 'reg-int-nuevo')).toBe(true);
+    const replaced = await repo.findPendingByTokenHash(
+      hashRegistrationToken(newToken),
+    );
+    expect(replaced?.id).toBe(old!.id);
+
+    expect(
+      await repo.consumePending(old!.id, hashRegistrationToken(oldToken)),
+    ).toBe(false);
+    expect(
+      await repo.findPendingByTokenHash(hashRegistrationToken(newToken)),
+    ).not.toBeNull();
+    expect(
+      await repo.consumePending(old!.id, hashRegistrationToken(newToken)),
+    ).toBe(true);
   });
 
   it('guardar uno nuevo purga los caducados (guardan email y hash de contraseña)', async () => {

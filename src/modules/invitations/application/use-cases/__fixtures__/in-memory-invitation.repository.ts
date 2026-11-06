@@ -236,22 +236,6 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     );
   }
 
-  revokePendingByEmail(
-    email: string,
-    audit: AuditRequestContext,
-  ): Promise<string[]> {
-    const pending = this.invitations.filter(
-      (i) => i.email === email && i.acceptedAt === null && i.revokedAt === null,
-    );
-    pending.forEach((i) => {
-      i.revokedAt = NOW;
-      this.auditEvents.push(
-        invitationRevokedAuditEvent(audit, i.id, 'REPLACED'),
-      );
-    });
-    return Promise.resolve(pending.map((i) => i.id));
-  }
-
   findPendingById(id: string): Promise<ClinicInvitation | null> {
     const row = this.invitations.find(
       (i) => i.id === id && i.acceptedAt === null && i.revokedAt === null,
@@ -290,8 +274,9 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     return Promise.resolve(true);
   }
 
-  create(
+  async createReplacingPending(
     input: {
+      id: string;
       email: string;
       fullName: string;
       role: ClinicRole;
@@ -300,9 +285,33 @@ export class InMemoryInvitationRepository implements InvitationRepository {
       invitedById?: string;
     },
     audit: AuditRequestContext,
+    inTx?: (
+      tx: Prisma.TransactionClient,
+      revokedIds: string[],
+    ) => Promise<void>,
   ): Promise<ClinicInvitation> {
+    const pending = this.invitations.filter(
+      (i) =>
+        i.email === input.email &&
+        i.acceptedAt === null &&
+        i.revokedAt === null,
+    );
+    // DX-149-bis: una transacción; `inTx` corre antes de tocar nada para que,
+    // si lanza, todo quede como estaba (el rollback).
+    if (inTx) {
+      await inTx(
+        {} as Prisma.TransactionClient,
+        pending.map((i) => i.id),
+      );
+    }
+    pending.forEach((i) => {
+      i.revokedAt = NOW;
+      this.auditEvents.push(
+        invitationRevokedAuditEvent(audit, i.id, 'REPLACED'),
+      );
+    });
     const row: StoredInvitation = {
-      id: `inv-${++seq}`,
+      id: input.id,
       tenantId: TENANT_ID,
       email: input.email,
       fullName: input.fullName,
@@ -318,7 +327,7 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     this.auditEvents.push(
       invitationCreatedAuditEvent(audit, row.id, input.role),
     );
-    return Promise.resolve(this.toEntity(row));
+    return this.toEntity(row);
   }
 
   /** Test helper: el usuario tal como quedó guardado. */

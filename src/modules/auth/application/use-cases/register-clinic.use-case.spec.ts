@@ -97,9 +97,15 @@ class InMemoryPending implements RegistrationRepository {
 
   readonly consumedIn: (Prisma.TransactionClient | undefined)[] = [];
 
-  consumePending(id: string, tx?: Prisma.TransactionClient): Promise<boolean> {
+  consumePending(
+    id: string,
+    tokenHash: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<boolean> {
     this.consumedIn.push(tx);
-    const i = this.rows.findIndex((r) => r.id === id);
+    const i = this.rows.findIndex(
+      (r) => r.id === id && r.tokenHash === tokenHash,
+    );
     if (i < 0) return Promise.resolve(false);
     this.rows.splice(i, 1);
     return Promise.resolve(true);

@@ -309,7 +309,7 @@ export class RegisterClinicUseCase {
         // falla, sigue ahí y el mismo enlace vuelve a servir. De dos usos a la
         // vez, el segundo espera aquí al primero y recibe el 404 genérico.
         claimPending: async (tx) => {
-          if (!(await this.pending.consumePending(record.id, tx))) {
+          if (!(await this.pending.consumePending(record.id, tokenHash, tx))) {
             throw new NotFoundException(REGISTRATION_LINK_INVALID);
           }
         },

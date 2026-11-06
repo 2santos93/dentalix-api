@@ -9,28 +9,22 @@ export type InvitationEmailDelivery = 'PENDING' | 'SENT' | 'FAILED';
 /** DX-149-bis: el email de una invitación, listo para la transacción de quien la reemite. */
 export interface PreparedInvitationEmail {
   /**
-   * En la transacción `tx`: cancela el email pendiente del enlace anterior y
-   * encola el nuevo con los topes contados bajo candado. Si se superan, lanza
-   * el mismo 429 que `assertCanSend` y la transacción se deshace entera.
+   * En la transacción `tx`: encola el email con los topes contados bajo
+   * candado. Si se superan, lanza el mismo 429 que `assertCanSend` y la
+   * transacción se deshace entera. Uno por transacción (email-quota-lock).
    */
   insert(tx: Prisma.TransactionClient): Promise<void>;
   /** Despierta al despachador: solo tras el COMMIT. */
   kick(): void;
 }
 
-export interface InvitationNotifier {
-  /**
-   * Encola el email con el enlace de aceptación `${linkBase}/invitacion/<token>`
-   * y cancela el que quedara pendiente con un enlace anterior. NUNCA lanza:
-   * si no se pudo encolar devuelve `null` (la invitación sigue valiendo y el
-   * ADMIN tiene el enlace para compartirlo o puede reenviarla).
-   */
-  sendInvitation(input: {
-    invitation: ClinicInvitation;
-    token: string;
-    linkBase: string;
-  }): Promise<InvitationEmailDelivery | null>;
+/** Lo que el email necesita de la invitación (aún sin crear, en el alta). */
+export type InvitationEmailTarget = Pick<
+  ClinicInvitation,
+  'id' | 'tenantId' | 'email' | 'fullName' | 'role'
+>;
 
+export interface InvitationNotifier {
   /**
    * Topes anti-abuso del email (DX-088, revisión B1) para `email` en la
    * clínica en contexto. Se llama ANTES de crear o regenerar nada; si se
@@ -44,10 +38,20 @@ export interface InvitationNotifier {
    * NUNCA lanza: `null` si no se pudo preparar (se reemite sin email).
    */
   prepareInvitation(input: {
-    invitation: ClinicInvitation;
+    invitation: InvitationEmailTarget;
     token: string;
     linkBase: string;
   }): Promise<PreparedInvitationEmail | null>;
+
+  /**
+   * DX-149-bis: cancela, en la transacción `tx`, los emails aún pendientes de
+   * esas invitaciones (revocadas o con el token sobrescrito): su enlace ya no
+   * sirve y nunca debe salir.
+   */
+  cancelPendingInTx(
+    tx: Prisma.TransactionClient,
+    invitationIds: string[],
+  ): Promise<void>;
 
   /** Cancela los emails aún pendientes de la invitación (revocada o reemplazada). */
   cancelPending(invitationId: string): Promise<void>;

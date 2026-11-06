@@ -1,13 +1,12 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { EmailQuotaExceededError } from '../../notifications/email/domain/email-quota-exceeded.error';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
 import { describeDeliveryError } from '../../notifications/email/application/retry-policy';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { ClinicInvitation } from '../domain/entities/clinic-invitation.entity';
 import {
-  InvitationEmailDelivery,
   InvitationNotifier,
+  InvitationEmailTarget,
   PreparedInvitationEmail,
 } from '../domain/ports/invitation-notifier.port';
 import { INVITATION_TTL_DAYS } from '../application/use-cases/create-invitation.use-case';
@@ -45,36 +44,8 @@ export class EmailInvitationNotifier implements InvitationNotifier {
     private readonly tenantContext: TenantContextService,
   ) {}
 
-  async sendInvitation(input: {
-    invitation: ClinicInvitation;
-    token: string;
-    linkBase: string;
-  }): Promise<InvitationEmailDelivery | null> {
-    const { invitation } = input;
-    try {
-      await this.outbox.supersedePending(
-        invitation.tenantId,
-        invitation.id,
-        'invitation',
-      );
-      // DX-149-bis: el tope se vuelve a contar al insertar, bajo candado; si
-      // otra petición a la vez lo agotó, aquí no sale (y no es un 500).
-      await this.outbox.enqueue(this.emailOf(input));
-      return 'PENDING';
-    } catch (err) {
-      // La invitación ya está creada y el ADMIN tiene el enlace: no se
-      // convierte en un 500 (puede reenviarla).
-      this.logger.warn({
-        event: 'invitation.email_not_enqueued',
-        invitationId: invitation.id,
-        error: describeDeliveryError(err),
-      });
-      return null;
-    }
-  }
-
   async prepareInvitation(input: {
-    invitation: ClinicInvitation;
+    invitation: InvitationEmailTarget;
     token: string;
     linkBase: string;
   }): Promise<PreparedInvitationEmail | null> {
@@ -83,8 +54,8 @@ export class EmailInvitationNotifier implements InvitationNotifier {
     try {
       mail = await this.outbox.prepareInTx(this.emailOf(input));
     } catch (err) {
-      // Como sendInvitation: sin email la invitación se reemite igual y el
-      // ADMIN tiene el enlace.
+      // Sin email la invitación se crea o se reemite igual y el ADMIN tiene
+      // el enlace para compartirlo o reenviarla (nunca un 500).
       this.logger.warn({
         event: 'invitation.email_not_enqueued',
         invitationId: invitation.id,
@@ -94,7 +65,6 @@ export class EmailInvitationNotifier implements InvitationNotifier {
     }
     return {
       insert: async (tx) => {
-        await this.outbox.supersedePendingInTx(tx, invitation.id, 'invitation');
         try {
           await mail.insert(tx);
         } catch (err) {
@@ -108,8 +78,17 @@ export class EmailInvitationNotifier implements InvitationNotifier {
     };
   }
 
+  async cancelPendingInTx(
+    tx: Prisma.TransactionClient,
+    invitationIds: string[],
+  ): Promise<void> {
+    for (const id of invitationIds) {
+      await this.outbox.supersedePendingInTx(tx, id, 'invitation');
+    }
+  }
+
   private emailOf(input: {
-    invitation: ClinicInvitation;
+    invitation: InvitationEmailTarget;
     token: string;
     linkBase: string;
   }) {

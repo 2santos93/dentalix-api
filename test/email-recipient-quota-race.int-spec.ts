@@ -12,6 +12,7 @@ import { EmailQuotaExceededError } from '../src/modules/notifications/email/doma
 import { PrismaInvitationRepository } from '../src/modules/invitations/infrastructure/repositories/prisma-invitation.repository';
 import { EmailInvitationNotifier } from '../src/modules/invitations/infrastructure/email-invitation-notifier';
 import { ResendInvitationUseCase } from '../src/modules/invitations/application/use-cases/resend-invitation.use-case';
+import { CreateInvitationUseCase } from '../src/modules/invitations/application/use-cases/create-invitation.use-case';
 import {
   generateInvitationToken,
   hashInvitationToken,
@@ -39,13 +40,28 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const tenantContext = new TenantContextService();
+const N = 10;
+// Pool explícito de PRUEBA (como payment-receipt-balance): con el de Prisma
+// por defecto (núcleos × 2 + 1) un runner de CI pequeño no abre las N
+// transacciones a la vez y las que esperan conexión no llegan al candado.
+const ORIGINAL_DATABASE_URL = process.env.DATABASE_URL;
+process.env.DATABASE_URL = withConnectionLimit(
+  ORIGINAL_DATABASE_URL ?? '',
+  N * 2,
+);
+// Prisma lee la variable al conectar, no al construir: se restaura en afterAll.
 const prisma = new PrismaService(tenantContext);
+
+function withConnectionLimit(url: string, limit: number): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set('connection_limit', String(limit));
+  return parsed.toString();
+}
 const repo = new PrismaEmailOutboxRepository(prisma);
 const cipher = new EmailPayloadCipher(randomBytes(32));
 const SUFFIX = `${process.pid}-${Date.now()}`;
 const tenants: string[] = [];
 const INSERT_OUTBOX = /INSERT INTO "email_outbox"/;
-const N = 10;
 
 const noKick = { kick: () => undefined } as unknown as EmailDispatcher;
 
@@ -136,6 +152,7 @@ describe('DX-149-bis · topes de email sin carrera (int)', () => {
     await purgeTenants(raw, tenants);
     await raw.$disconnect();
     await prisma.$disconnect();
+    process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
   });
 
   it(`${N} reenvíos a la vez de una invitación: un solo email (enfriamiento), los demás 429 y el enlace del email es el vigente`, async () => {
@@ -160,8 +177,9 @@ describe('DX-149-bis · topes de email sin carrera (int)', () => {
       userAgent: null,
     };
     const invitation = await tenantContext.run(tenantId, () =>
-      invitations.create(
+      invitations.createReplacingPending(
         {
+          id: randomUUID(),
           email: to,
           fullName: 'María Rodríguez',
           role: ClinicRole.ASSISTANT,
@@ -203,6 +221,72 @@ describe('DX-149-bis · topes de email sin carrera (int)', () => {
       select: { tokenHash: true },
     });
     expect(stored.tokenHash).toBe(hashInvitationToken(winner.token));
+  });
+
+  it('dos altas a la vez de la misma invitación: queda UNA viva con su email encolado y el otro alta es un error de negocio', async () => {
+    const tenantId = await newTenant('alta-doble');
+    const outbox = outboxWith({
+      tenantDaily: 50,
+      recipientDaily: 5,
+      recipientCooldownSeconds: 60,
+    });
+    const invitations = new PrismaInvitationRepository(prisma, tenantContext);
+    const create = new CreateInvitationUseCase(
+      invitations,
+      new EmailInvitationNotifier(outbox, tenantContext),
+      { tenantDaily: 30 },
+    );
+    const to = recipient('alta-doble');
+    const audit: AuditRequestContext = {
+      tenantId,
+      locationId: null,
+      actor: { userId: randomUUID(), role: ClinicRole.ADMIN },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    };
+
+    const outcomes = await raceBehindFirstInsert(2, () =>
+      tenantContext.run(tenantId, () =>
+        create.execute(
+          {
+            fullName: 'María Rodríguez',
+            email: to,
+            role: ClinicRole.ASSISTANT,
+            linkBase: 'https://altamira.dentalix.app',
+          },
+          audit,
+        ),
+      ),
+    );
+
+    const won = outcomes.filter((o) => o.status === 'fulfilled');
+    expect(won).toHaveLength(1);
+    const winner = (
+      won[0] as {
+        value: { invitation: { id: string }; emailDelivery: unknown };
+      }
+    ).value;
+    expect(winner.emailDelivery).toBe('PENDING');
+    const [error] = rejected(outcomes);
+    expect(error).toBeInstanceOf(HttpException);
+    expect([HttpStatus.CONFLICT, HttpStatus.TOO_MANY_REQUESTS]).toContain(
+      (error as HttpException).getStatus(),
+    );
+    const live = await raw.clinicInvitation.findMany({
+      where: { tenantId, email: to, revokedAt: null, acceptedAt: null },
+      select: { id: true },
+    });
+    expect(live).toEqual([{ id: winner.invitation.id }]);
+    // Su email está encolado (no cancelado) y ningún otro email de esta
+    // dirección sigue vivo con un enlace muerto.
+    const mails = await raw.emailOutbox.findMany({
+      where: { tenantId, toHash: cipher.hashRecipient(to) },
+      select: { referenceId: true, status: true },
+    });
+    expect(mails).toEqual([
+      { referenceId: winner.invitation.id, status: 'PENDING' },
+    ]);
   });
 
   it(`${N} envíos a la vez al mismo destinatario no superan su tope diario`, async () => {
@@ -272,6 +356,34 @@ describe('DX-149-bis · topes de email sin carrera (int)', () => {
     }
     expect(await rowsTo(tenantA, to)).toBe(1);
     expect(await rowsTo(tenantB, to)).toBe(1);
+  });
+
+  it('con tope, fuera de READ COMMITTED no inserta: contaría con una foto vieja', async () => {
+    const tenantId = await newTenant('aislamiento');
+    const to = recipient('aislamiento');
+    const guard = jest.fn();
+
+    await expect(
+      prisma.runWithTenant(
+        tenantId,
+        (tx) =>
+          repo.insertInTx(
+            tx,
+            {
+              tenantId,
+              template: 'invitation',
+              toHash: cipher.hashRecipient(to),
+              toMasked: 'pa***@clinica-caracas.test',
+              referenceId: null,
+              payload: Buffer.from('x'),
+            },
+            guard,
+          ),
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
+    ).rejects.toThrow(/READ COMMITTED/);
+    expect(guard).not.toHaveBeenCalled();
+    expect(await rowsTo(tenantId, to)).toBe(0);
   });
 
   it('sin enforceQuota (p. ej. recordatorios) el envío no se frena por el tope ni toma el candado', async () => {

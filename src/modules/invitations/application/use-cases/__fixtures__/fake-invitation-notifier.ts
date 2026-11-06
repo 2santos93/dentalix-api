@@ -1,6 +1,6 @@
-import { ClinicInvitation } from '../../../domain/entities/clinic-invitation.entity';
+import type { Prisma } from '@prisma/client';
 import {
-  InvitationEmailDelivery,
+  InvitationEmailTarget,
   InvitationNotifier,
   PreparedInvitationEmail,
 } from '../../../domain/ports/invitation-notifier.port';
@@ -8,7 +8,7 @@ import {
 /** Registra lo que se le pide; `failNext` simula que no se pudo encolar. */
 export class FakeInvitationNotifier implements InvitationNotifier {
   readonly sent: Array<{
-    invitation: ClinicInvitation;
+    invitation: InvitationEmailTarget;
     token: string;
     linkBase: string;
   }> = [];
@@ -32,22 +32,17 @@ export class FakeInvitationNotifier implements InvitationNotifier {
       : Promise.resolve();
   }
 
-  sendInvitation(input: {
-    invitation: ClinicInvitation;
-    token: string;
-    linkBase: string;
-  }): Promise<InvitationEmailDelivery | null> {
-    if (this.failNext) {
-      this.failNext = false;
-      return Promise.resolve(null);
-    }
-    this.sent.push(input);
-    return Promise.resolve('PENDING');
+  cancelPendingInTx(
+    _tx: Prisma.TransactionClient,
+    invitationIds: string[],
+  ): Promise<void> {
+    this.cancelled.push(...invitationIds);
+    return Promise.resolve();
   }
 
   /** `failNext` también hace que no se pueda preparar (devuelve `null`). */
   prepareInvitation(input: {
-    invitation: ClinicInvitation;
+    invitation: InvitationEmailTarget;
     token: string;
     linkBase: string;
   }): Promise<PreparedInvitationEmail | null> {

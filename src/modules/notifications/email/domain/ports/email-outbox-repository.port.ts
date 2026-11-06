@@ -76,7 +76,9 @@ export interface EmailOutboxRepository {
    * DX-463: como `insert`, pero dentro de la transacción de quien llama (ya
    * bajo la RLS de la clínica): el email y lo que lo motiva confirman o se
    * deshacen juntos. `guard` como en `insert`: el candado dura hasta el
-   * COMMIT de esa transacción.
+   * COMMIT de esa transacción. Con `guard`: UN insert así por transacción
+   * (dos podrían esperarse en ciclo) y solo en READ COMMITTED (con otra
+   * isolation lanza; ver email-quota-lock.ts).
    */
   insertInTx(
     tx: Prisma.TransactionClient,

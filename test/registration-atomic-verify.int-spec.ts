@@ -189,6 +189,35 @@ describe('DX-149-bis · verify del registro en una sola transacción (int)', () 
     expect(await pendingWith(link.token)).toBe(0);
   });
 
+  it('si el primer uso se deshace mientras el segundo espera, el segundo crea la clínica', async () => {
+    const ctx = wire();
+    const link = await pendingLink('rollback', ctx);
+    const held = gate<number>();
+    const release = gate();
+    jest
+      .spyOn(ctx.auth as unknown as MainLocationStep, 'createMainLocation')
+      .mockImplementationOnce(async (tx) => {
+        held.open(await backendPid(tx));
+        await release.wait;
+        throw new Error('fallo inyectado en el primer uso');
+      });
+
+    const first = settle(ctx.uc.verify(link.token, PASSWORD, REQ));
+    const holder = await held.wait;
+    const second = settle(ctx.uc.verify(link.token, PASSWORD, REQ));
+    await waitForLockWaiters(raw, [holder], 1);
+    release.open();
+
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.status).toBe('rejected');
+    expect(String((a as { reason: unknown }).reason)).toContain(
+      'fallo inyectado en el primer uso',
+    );
+    expect(b.status).toBe('fulfilled');
+    expect(await tenantsWith(link.subdomain)).toBe(1);
+    expect(await pendingWith(link.token)).toBe(0);
+  });
+
   it('dos usos a la vez sin pausas: exactamente una clínica y el otro es un 404, nunca un 500', async () => {
     const ctx = wire();
     const link = await pendingLink('par', ctx);

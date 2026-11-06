@@ -212,10 +212,10 @@ describe('CreateInvitationUseCase', () => {
   it('persiste solo el HASH del token y devuelve el token en claro (única vez)', async () => {
     const repo = new InMemoryInvitationRepository();
     let captured: unknown;
-    const originalCreate = repo.create.bind(repo);
-    repo.create = (input, audit) => {
+    const originalCreate = repo.createReplacingPending.bind(repo);
+    repo.createReplacingPending = (input, audit, inTx) => {
       captured = input;
-      return originalCreate(input, audit);
+      return originalCreate(input, audit, inTx);
     };
     const uc = new CreateInvitationUseCase(
       repo,
@@ -318,10 +318,39 @@ describe('CreateInvitationUseCase', () => {
       expect(result.emailDelivery).toBe('PENDING');
       expect(notifier.sent).toHaveLength(1);
       expect(notifier.sent[0]).toEqual({
-        invitation: result.invitation,
+        invitation: expect.objectContaining({
+          id: result.invitation.id,
+          tenantId: result.invitation.tenantId,
+          email: result.invitation.email,
+          fullName: result.invitation.fullName,
+          role: result.invitation.role,
+        }) as unknown,
         token: result.token,
         linkBase: 'https://demo.dentalix.app',
       });
+      expect(notifier.kicked).toBe(1);
+    });
+
+    it('DX-149-bis: si el email falla en la transacción (tope), no se revoca la anterior ni se crea otra', async () => {
+      const repo = new InMemoryInvitationRepository();
+      const notifier = new FakeInvitationNotifier();
+      const uc = new CreateInvitationUseCase(repo, notifier, LIMITS);
+      const input = {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+        linkBase: 'https://demo.dentalix.app',
+      };
+      const first = await uc.execute(input, CTX);
+      notifier.insertError = new Error('429 en la transacción');
+
+      await expect(uc.execute(input, CTX)).rejects.toThrow(
+        '429 en la transacción',
+      );
+      const pending = await repo.listPending();
+      expect(pending.map((i) => i.id)).toEqual([first.invitation.id]);
+      expect(notifier.sent).toHaveLength(1);
+      expect(notifier.kicked).toBe(1);
     });
 
     it('con el tope de envío alcanzado no revoca ni crea nada (B1)', async () => {
@@ -383,6 +412,28 @@ describe('CreateInvitationUseCase', () => {
       );
       expect(result.emailDelivery).toBeNull();
       expect(await repo.listPending()).toHaveLength(1);
+    });
+
+    it('DX-149-bis: sin email preparado, la anterior se revoca igual y su email pendiente se cancela', async () => {
+      const repo = new InMemoryInvitationRepository();
+      const notifier = new FakeInvitationNotifier();
+      const uc = new CreateInvitationUseCase(repo, notifier, LIMITS);
+      const input = {
+        fullName: 'Ana Ruiz',
+        email: 'ana@clinic.com',
+        role: ClinicRole.DENTIST,
+        linkBase: 'https://demo.dentalix.app',
+      };
+      const first = await uc.execute(input, CTX);
+      notifier.failNext = true;
+
+      const second = await uc.execute(input, CTX);
+
+      expect(second.emailDelivery).toBeNull();
+      expect((await repo.listPending()).map((i) => i.id)).toEqual([
+        second.invitation.id,
+      ]);
+      expect(notifier.cancelled).toEqual([first.invitation.id]);
     });
 
     it('invitar de nuevo al mismo correo cancela el email de la anterior', async () => {

@@ -107,6 +107,22 @@ describe('ResendInvitationUseCase', () => {
       (await repo.findByTokenHash(hashInvitationToken(result.token)))?.id,
     ).toBe(original.id);
     expect(notifier.kicked).toBe(0);
+    // El email pendiente anterior lleva el token sobrescrito: se cancela
+    // igual, en la misma transacción (nunca sale un enlace muerto).
+    expect(notifier.cancelled).toEqual([original.id]);
+  });
+
+  it('DX-149-bis: con email, el pendiente anterior se cancela en la transacción del reenvío', async () => {
+    const repo = new InMemoryInvitationRepository();
+    const original = repo.seedInvitation({ token: 'token-viejo' });
+    const notifier = new FakeInvitationNotifier();
+
+    await new ResendInvitationUseCase(repo, notifier).execute(
+      { id: original.id, linkBase: LINK_BASE },
+      CTX,
+    );
+
+    expect(notifier.cancelled).toEqual([original.id]);
   });
 
   it('DX-359: reenviar deja su evento, sin el token nuevo ni su hash', async () => {

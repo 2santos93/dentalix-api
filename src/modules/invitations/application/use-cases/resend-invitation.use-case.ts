@@ -67,7 +67,12 @@ export class ResendInvitationUseCase {
         expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
       },
       ctx,
-      email ? (tx) => email.insert(tx) : undefined,
+      async (tx) => {
+        // El email pendiente anterior lleva el token que se sobrescribe: se
+        // cancela siempre, también si el nuevo no se pudo preparar.
+        await this.notifier.cancelPendingInTx(tx, [input.id]);
+        if (email) await email.insert(tx);
+      },
     );
     if (!invitation) {
       // Otra clínica (RLS), aceptada, revocada o inexistente: nada que reenviar.
