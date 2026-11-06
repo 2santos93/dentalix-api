@@ -93,6 +93,16 @@ describe('CreateClinicalEntryUseCase · registro profesional del autor (DX-540)'
     );
     expect(repo.rows).toHaveLength(0);
   });
+
+  it('si no se puede leer el ajuste, falla ANTES de guardar (un reintento no duplica la evolución)', async () => {
+    const { repo, settings, uc } = setup();
+    jest.spyOn(settings, 'get').mockRejectedValueOnce(new Error('bd caída'));
+
+    await expect(
+      uc.execute('p1', { notes: 'Control' }, 'u-sin'),
+    ).rejects.toThrow('bd caída');
+    expect(repo.rows).toHaveLength(0);
+  });
 });
 
 describe('GetClinicalEntrySigningUseCase (DX-540)', () => {

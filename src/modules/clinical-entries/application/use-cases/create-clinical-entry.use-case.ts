@@ -168,6 +168,11 @@ export class CreateClinicalEntryUseCase {
     if (notes.trim() === '') throw new BadRequestException(BLANK_NOTES_MESSAGE);
     const diagnoses = await this.diagnosesFor(input.diagnoses);
 
+    // DX-540: el ajuste se lee ANTES del INSERT: si esta lectura fallara después,
+    // el POST daría 500 con la evolución (inalterable) ya guardada y un
+    // reintento la duplicaría.
+    const { warnMissingProfessionalLicense } = await this.settings.get();
+
     // Rebuild the payload from only the known fields — same defensive
     // convention as SaveMedicalHistoryUseCase / CreateCatalogItemUseCase:
     // anything sneaked into `input` beyond this shape (e.g. a client-supplied
@@ -186,7 +191,6 @@ export class CreateClinicalEntryUseCase {
       templateId: input.templateId,
       diagnoses,
     });
-    const { warnMissingProfessionalLicense } = await this.settings.get();
     return {
       ...created,
       warnings: signingWarnings({
