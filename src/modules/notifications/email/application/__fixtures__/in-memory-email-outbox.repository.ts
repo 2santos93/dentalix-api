@@ -6,8 +6,10 @@ import {
   EmailOutboxRepository,
   NewOutboxEmail,
   NewPlatformOutboxEmail,
+  OutboxQuotaGuard,
   OutboxSettlement,
   PlatformRecipientQuota,
+  RecentSends,
 } from '../../domain/ports/email-outbox-repository.port';
 
 export interface StoredOutboxEmail extends NewPlatformOutboxEmail {
@@ -38,15 +40,21 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     { name: string; logoUrl: string | null; primaryColor: string | null }
   >();
 
-  insert(row: NewOutboxEmail): Promise<{ id: string }> {
-    return Promise.resolve(this.store(row));
+  /** Con `guard`, cuenta y decide antes de guardar (como bajo el candado). */
+  async insert(
+    row: NewOutboxEmail,
+    guard?: OutboxQuotaGuard,
+  ): Promise<{ id: string }> {
+    if (guard) guard(await this.recentSends(row.tenantId, row.toHash));
+    return this.store(row);
   }
 
   insertInTx(
     _tx: Prisma.TransactionClient,
     row: NewOutboxEmail,
+    guard?: OutboxQuotaGuard,
   ): Promise<{ id: string }> {
-    return Promise.resolve(this.store(row));
+    return this.insert(row, guard);
   }
 
   /** Misma regla que email_outbox_enqueue_platform_security (DX-021-bis). */
@@ -186,16 +194,25 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     return Promise.resolve(pending.length);
   }
 
+  /** El fake no tiene RLS: los `referenceId` son únicos entre clínicas. */
+  supersedePendingInTx(
+    _tx: Prisma.TransactionClient,
+    referenceId: string,
+    template: EmailTemplateName,
+  ): Promise<number> {
+    const tenants = new Set(
+      this.rows
+        .filter((r) => r.referenceId === referenceId && r.tenantId !== null)
+        .map((r) => r.tenantId as string),
+    );
+    return Promise.all(
+      [...tenants].map((t) => this.supersedePending(t, referenceId, template)),
+    ).then((counts) => counts.reduce((a, b) => a + b, 0));
+  }
+
   access = { executable: true, ownerSeesAllRows: true };
 
-  recentSends(
-    tenantId: string,
-    toHash: string,
-  ): Promise<{
-    tenant: number;
-    recipient: number;
-    secondsSinceLastToRecipient: number | null;
-  }> {
+  recentSends(tenantId: string, toHash: string): Promise<RecentSends> {
     const now = Date.now();
     const since = new Date(now - 24 * 60 * 60 * 1000);
     const ofTenant = this.rows.filter((r) => r.tenantId === tenantId);

@@ -87,6 +87,9 @@ export class PrismaAuthRepository implements AuthRepository {
     // (SET LOCAL via set_config(..., true)) inside the SAME tx before inserting it
     // so the RLS WITH CHECK passes for the freshly created tenant.
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // DX-149-bis: lo primero, para que el segundo uso del mismo enlace
+      // espere aquí al COMMIT (o al ROLLBACK) del primero y no haga nada más.
+      await input.claimPending?.(tx);
       const tenant = await tx.tenant.create({
         data: {
           name: input.clinicName,

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   ClinicRole,
   ClinicInvitation as PrismaClinicInvitation,
+  Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -178,6 +179,7 @@ export class PrismaInvitationRepository implements InvitationRepository {
     id: string,
     input: { tokenHash: string; expiresAt: Date },
     audit: AuditRequestContext,
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<ClinicInvitation | null> {
     return this.prisma.runWithTenant(async (tx) => {
       // Check-and-set atómico: solo una invitación pendiente (no aceptada ni
@@ -192,6 +194,8 @@ export class PrismaInvitationRepository implements InvitationRepository {
       });
       // DX-359: sin el token ni su hash.
       await writeAuditEvent(tx, invitationResentAuditEvent(audit, id));
+      // DX-149-bis: el email con el enlace nuevo, en esta transacción.
+      if (enqueue) await enqueue(tx);
       return mapToEntity(row);
     });
   }

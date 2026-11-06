@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import { ClinicInvitation } from '../entities/clinic-invitation.entity';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
@@ -117,11 +117,15 @@ export interface InvitationRepository {
    * revocada (caducada o no) le pone un token y una caducidad nuevos. El hash
    * anterior se sobrescribe, así que el enlace viejo deja de existir. `null`
    * si no hay ninguna invitación así con ese id en el tenant en contexto.
+   * DX-149-bis: `enqueue` (el email con el enlace nuevo) corre en la MISMA
+   * transacción, tras el cambio de token: si lanza (p. ej. el tope del
+   * email), no cambia nada y el enlace vigente sigue valiendo.
    */
   reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },
     audit: AuditRequestContext,
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<ClinicInvitation | null>;
 
   /**

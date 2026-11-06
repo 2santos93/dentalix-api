@@ -8,7 +8,11 @@ import {
   RenderedEmail,
 } from '../domain/email-message';
 import { EMAIL_OUTBOX_REPOSITORY } from '../domain/ports/email-outbox-repository.port';
-import type { EmailOutboxRepository } from '../domain/ports/email-outbox-repository.port';
+import type {
+  EmailOutboxRepository,
+  OutboxQuotaGuard,
+  RecentSends,
+} from '../domain/ports/email-outbox-repository.port';
 import { EmailPayloadCipher } from '../infrastructure/email-payload-cipher';
 import { MAIL_CONFIG } from '../infrastructure/mail-config';
 import type { MailConfig } from '../infrastructure/mail-config';
@@ -32,6 +36,14 @@ export interface EnqueueEmailInput<
 > extends EnqueuePlatformEmailInput<T> {
   /** Clínica que envía (marca y RLS). Sin clínica: `enqueuePlatform`. */
   tenantId: string;
+  /**
+   * DX-149-bis: vuelve a aplicar los topes de `assertWithinQuota` al
+   * insertar, contados en la MISMA transacción bajo el candado de la clínica
+   * y del destinatario (lo que de verdad frena N peticiones a la vez). Si se
+   * superan, lanza EmailQuotaExceededError y no encola nada. Lo piden quienes
+   * comprueban el tope antes; sin él (p. ej. recordatorios) no se cuenta.
+   */
+  enforceQuota?: boolean;
 }
 
 /** Un email listo para encolar dentro de una transacción ajena (DX-463). */
@@ -67,11 +79,18 @@ export class EmailOutbox {
    * (crear la invitación, regenerar el token). Lanza EmailQuotaExceededError.
    */
   async assertWithinQuota(tenantId: string, to: string): Promise<void> {
-    const { quotas } = this.config;
-    const sends = await this.repo.recentSends(
-      tenantId,
-      this.cipher.hashRecipient(to),
+    this.quotaGuard(
+      await this.repo.recentSends(tenantId, this.cipher.hashRecipient(to)),
     );
+  }
+
+  /**
+   * Los topes sobre un recuento (DX-088). `assertWithinQuota` lo usa como
+   * aviso temprano, antes de cambiar nada; con `enforceQuota`, el insert lo
+   * vuelve a aplicar bajo candado (DX-149-bis) y ese es el que manda.
+   */
+  private readonly quotaGuard: OutboxQuotaGuard = (sends: RecentSends) => {
+    const { quotas } = this.config;
     if (
       sends.secondsSinceLastToRecipient !== null &&
       quotas.recipientCooldownSeconds > 0
@@ -97,6 +116,10 @@ export class EmailOutbox {
         60 * 60,
       );
     }
+  };
+
+  private guardOf(input: { enforceQuota?: boolean }) {
+    return input.enforceQuota ? this.quotaGuard : undefined;
   }
 
   async enqueue<T extends EmailTemplateName>(
@@ -104,7 +127,10 @@ export class EmailOutbox {
   ): Promise<{ id: string }> {
     const brand = await this.brandOf(input.tenantId);
     const row = this.prepare(input, brand);
-    const { id } = await this.repo.insert({ ...row, tenantId: input.tenantId });
+    const { id } = await this.repo.insert(
+      { ...row, tenantId: input.tenantId },
+      this.guardOf(input),
+    );
     this.enqueued(id, input.tenantId, input.template, row.toMasked);
     return { id };
   }
@@ -122,10 +148,11 @@ export class EmailOutbox {
   ): Promise<PreparedEmail> {
     const brand = await this.brandOf(input.tenantId);
     const row = { ...this.prepare(input, brand), tenantId: input.tenantId };
+    const guard = this.guardOf(input);
     let outboxId: string | null = null;
     return {
       insert: async (tx) => {
-        const { id } = await this.repo.insertInTx(tx, row);
+        const { id } = await this.repo.insertInTx(tx, row, guard);
         outboxId = id;
         return { id };
       },
@@ -268,6 +295,15 @@ export class EmailOutbox {
     template: EmailTemplateName,
   ): Promise<number> {
     return this.repo.supersedePending(tenantId, referenceId, template);
+  }
+
+  /** DX-149-bis: `supersedePending` dentro de la transacción de quien llama. */
+  supersedePendingInTx(
+    tx: Prisma.TransactionClient,
+    referenceId: string,
+    template: EmailTemplateName,
+  ): Promise<number> {
+    return this.repo.supersedePendingInTx(tx, referenceId, template);
   }
 
   private async brandOf(tenantId: string): Promise<EmailBrand | null> {

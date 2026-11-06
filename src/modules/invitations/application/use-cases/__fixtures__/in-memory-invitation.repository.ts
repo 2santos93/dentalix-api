@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import { ClinicInvitation } from '../../../domain/entities/clinic-invitation.entity';
 import {
   AcceptUserResolution,
@@ -259,19 +259,23 @@ export class InMemoryInvitationRepository implements InvitationRepository {
     return Promise.resolve(row ? this.toEntity(row) : null);
   }
 
-  reissue(
+  async reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },
     audit: AuditRequestContext,
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<ClinicInvitation | null> {
     const row = this.invitations.find(
       (i) => i.id === id && i.acceptedAt === null && i.revokedAt === null,
     );
-    if (!row) return Promise.resolve(null);
+    if (!row) return null;
+    // DX-149-bis: misma transacción; si `enqueue` lanza no cambia nada
+    // (aquí se ejecuta antes de tocar la fila, que es lo que da el rollback).
+    if (enqueue) await enqueue({} as Prisma.TransactionClient);
     row.tokenHash = input.tokenHash;
     row.expiresAt = input.expiresAt;
     this.auditEvents.push(invitationResentAuditEvent(audit, id));
-    return Promise.resolve(this.toEntity(row));
+    return this.toEntity(row);
   }
 
   revokeById(id: string, audit: AuditRequestContext): Promise<boolean> {

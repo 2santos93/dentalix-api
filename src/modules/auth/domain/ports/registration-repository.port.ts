@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import type { ClinicLocationSettings } from './auth-repository.port';
 
 export const REGISTRATION_REPOSITORY = Symbol('REGISTRATION_REPOSITORY');
@@ -42,7 +43,9 @@ export interface RegistrationRepository {
 
   /**
    * Borra el pendiente si sigue existiendo. Devuelve `true` solo a quien lo
-   * borró: dos clics simultáneos en el enlace crean una sola clínica.
+   * borró: dos clics simultáneos en el enlace crean una sola clínica. DX-149-bis:
+   * con `tx`, dentro de esa transacción (la del alta): si se deshace, el
+   * pendiente vuelve a estar ahí; el segundo clic espera a su candado de fila.
    */
-  consumePending(id: string): Promise<boolean>;
+  consumePending(id: string, tx?: Prisma.TransactionClient): Promise<boolean>;
 }
