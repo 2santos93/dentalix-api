@@ -9,10 +9,9 @@ import {
 // DX-149 (auditoría DB-030): el panel de «Pendientes por agendar» de una clínica
 // con 60.000 pacientes y 40.000 entradas, 400 de ellas abiertas en la sede.
 // EXPLAIN ANALYZE como dentalix_app (runWithTenant, RLS) de la página y del
-// total tal como los pide el repositorio, con estado y sede como PARÁMETROS.
-// Es el plan con valores que Postgres usa: no pasa al genérico mientras este
-// salga más caro, y el genérico no sabe que «OPEN» es el 1 % de las filas.
-// `raw` (DIRECT_URL, owner) siembra y limpia.
+// total de PrismaWaitlistRepository.listOpen. Con el estado como parámetro
+// (lo que haría Prisma) era un Seq Scan de 12-15 ms. `raw` (DIRECT_URL,
+// owner) siembra y limpia.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -25,7 +24,7 @@ const ENTRIES = 40_000;
 const OPEN = 400;
 const PAGE_SIZE = 20;
 const BUDGET_MS = 2;
-const PANEL_INDEX = 'appointment_waitlist_panel_idx';
+const PANEL_INDEX = 'appointment_waitlist_open_panel_idx';
 
 interface PlanNode {
   'Node Type': string;
@@ -71,9 +70,10 @@ const relations = (plan: Explained) =>
 const indexes = (plan: Explained) =>
   plan.nodes.map((n) => n['Index Name']).filter(Boolean);
 
-// La consulta del repositorio con el estado OPEN: sin unir con `patients`.
+// La consulta de PrismaWaitlistRepository.listOpen: 'OPEN' literal (bajo RLS
+// la igualdad del enum no es LEAKPROOF) y la sede como parámetro.
 const where = () =>
-  Prisma.sql`"status" = ${'OPEN'}::"WaitlistStatus" AND "locationId" = ${locationId}::uuid`;
+  Prisma.sql`"status" = 'OPEN' AND "locationId" = ${locationId}::uuid`;
 
 async function cleanup(): Promise<void> {
   const tenants = await raw.tenant.findMany({
