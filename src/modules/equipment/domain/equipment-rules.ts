@@ -26,6 +26,8 @@ export const REASON_MIN = 3;
 export const REASON_MAX = 500;
 export const MAINTENANCE_INTERVAL_MIN = 1;
 export const MAINTENANCE_INTERVAL_MAX = 120;
+/** Tope del próximo explícito: 10 años después del mantenimiento. */
+export const MAINTENANCE_NEXT_DUE_MAX_MONTHS = 120;
 /** «Próximo»: vence hoy o en los próximos 30 días de la sede. */
 export const EQUIPMENT_DUE_SOON_DAYS = 30;
 
@@ -247,13 +249,16 @@ export interface MaintenanceFields {
 }
 
 /**
- * Valida un mantenimiento: fecha no futura en la sede, descripción
+ * Valida un mantenimiento: fecha no futura en la sede ni anterior a la
+ * adquisición del equipo, descripción
  * obligatoria, costo > 0 con 2 decimales y SIEMPRE con su moneda (y la
- * moneda solo con costo), próximo explícito posterior a la fecha.
+ * moneda solo con costo), próximo explícito posterior a la fecha y a 10
+ * años como mucho.
  */
 export function validateMaintenanceFields(
   input: MaintenanceFieldsInput,
   today: string,
+  acquiredOn: string | null = null,
 ): MaintenanceFields {
   const problems = new Problems();
   const performedOn = civilDay(
@@ -262,6 +267,11 @@ export function validateMaintenanceFields(
     problems,
     today,
   );
+  if (performedOn !== null && acquiredOn !== null && performedOn < acquiredOn) {
+    problems.add(
+      'La fecha del mantenimiento no puede ser anterior a la adquisición del equipo.',
+    );
+  }
   const technician = text(
     input.technician,
     { label: 'El técnico', max: MAINTENANCE_PARTY_MAX },
@@ -311,6 +321,14 @@ export function validateMaintenanceFields(
   );
   if (nextDueOn !== null && performedOn !== null && nextDueOn <= performedOn) {
     problems.add('El próximo mantenimiento tiene que ser posterior a este.');
+  } else if (
+    nextDueOn !== null &&
+    performedOn !== null &&
+    nextDueOn > addCivilMonths(performedOn, MAINTENANCE_NEXT_DUE_MAX_MONTHS)
+  ) {
+    problems.add(
+      'El próximo mantenimiento no puede ser a más de 10 años de este.',
+    );
   }
   problems.throwIfAny();
   return {

@@ -126,6 +126,52 @@ describe('reglas de los equipos (DX-542)', () => {
       ).toBe('El próximo mantenimiento tiene que ser posterior a este.');
     });
 
+    it('el próximo explícito no va a más de 10 años', () => {
+      expect(
+        message(() =>
+          validateMaintenanceFields(
+            {
+              performedOn: '2026-10-01',
+              description: 'Revisión',
+              nextDueOn: '2036-10-02',
+            },
+            TODAY,
+          ),
+        ),
+      ).toBe('El próximo mantenimiento no puede ser a más de 10 años de este.');
+      expect(
+        validateMaintenanceFields(
+          {
+            performedOn: '2026-10-01',
+            description: 'Revisión',
+            nextDueOn: '2036-10-01',
+          },
+          TODAY,
+        ).nextDueOn,
+      ).toBe('2036-10-01');
+    });
+
+    it('la fecha no es anterior a la adquisición del equipo', () => {
+      expect(
+        message(() =>
+          validateMaintenanceFields(
+            { performedOn: '2025-12-31', description: 'Revisión' },
+            TODAY,
+            '2026-01-01',
+          ),
+        ),
+      ).toBe(
+        'La fecha del mantenimiento no puede ser anterior a la adquisición del equipo.',
+      );
+      expect(
+        validateMaintenanceFields(
+          { performedOn: '2026-01-01', description: 'Revisión' },
+          TODAY,
+          '2026-01-01',
+        ).performedOn,
+      ).toBe('2026-01-01');
+    });
+
     it('acepta un costo con hasta 2 decimales y normaliza la moneda', () => {
       expect(
         validateMaintenanceFields(

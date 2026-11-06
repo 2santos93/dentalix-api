@@ -220,8 +220,11 @@ CREATE TABLE "equipment_maintenances" (
       ("cost" IS NULL AND "currency" IS NULL)
       OR ("cost" IS NOT NULL AND "cost" > 0 AND "currency" IS NOT NULL)
     ),
+    -- Posterior al mantenimiento y a 10 años como mucho (la API da el 400).
     CONSTRAINT "equipment_maintenances_next_due_check" CHECK (
-      "nextDueOn" IS NULL OR "nextDueOn" > "performedOn"
+      "nextDueOn" IS NULL
+      OR ("nextDueOn" > "performedOn"
+          AND "nextDueOn" <= ("performedOn" + interval '10 years')::date)
     ),
     -- ANULADO <=> fecha, autor y motivo (como patient_implants_void_check).
     CONSTRAINT "equipment_maintenances_void_check" CHECK (
