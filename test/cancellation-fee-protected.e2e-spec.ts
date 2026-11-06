@@ -20,7 +20,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
-import { civilDateIn } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 
 // SEC-050: el cargo por inasistencia o cancelación tardía (DX-291) ya no se
 // rebaja ni se anula desde el plan. Matriz rol × acción sobre el ítem del
@@ -439,7 +439,12 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
     // de importes en monedas mezcladas. Tasa del día: 1 USD = 4.000 VES (sin
     // EUR: un abono en EUR se guarda «sin tasa» y sin base).
     describe('en la moneda del plan (DX-382)', () => {
-      const today = civilDateIn(new Date(), 'America/Caracas');
+      // DX-209: día FIJO (ayer, a mediodía en la sede) para la tasa y para el
+      // abono. Con «hoy» al cargar el módulo y el abono a `Date.now()`, una
+      // corrida que cruzaba la medianoche de Caracas (04:00 UTC) dejaba el
+      // abono sin tasa: «Hay abonos todavía sin convertir» en vez de 409.
+      const rateDay = fixedSedeDay(1);
+      const today = rateDay.day;
 
       /** Cargos de un paciente nuevo (comparten el plan VES) y un abono. */
       async function feesPaidWith(
@@ -465,7 +470,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
         await admin()
           .post(`/treatment-plans/${charged[0].planId}/payments`, {
             ...payment,
-            paidAt: new Date(Date.now() - 60_000).toISOString(),
+            paidAt: rateDay.at.toISOString(),
             method: 'CASH',
           })
           .expect(201);
