@@ -25,6 +25,8 @@ import { normalizeOptionLabel } from '../../domain/plan-options';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 import { SIGNED_PLAN_HEADER_LOCKED_MESSAGE } from './signed-plan-lock';
 import { FEE_PLAN_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
+import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
+import { assertCurrencyChangeKeepsDiscounts } from './item-discount';
 
 /** Lo que admite el PATCH del plan. */
 export interface UpdateTreatmentPlanInput {
@@ -76,6 +78,7 @@ export class UpdateTreatmentPlanUseCase {
     private readonly whitelist: CurrencyWhitelist,
     @Inject(TREATMENT_PLAN_CLOCK)
     private readonly now: PlanClock,
+    private readonly discountPolicy: GetDiscountPolicyUseCase,
   ) {}
 
   /**
@@ -109,6 +112,10 @@ export class UpdateTreatmentPlanUseCase {
       }
     }
     const at = this.now();
+    // DX-513: la política de descuentos, para volver a medir los ítems si la
+    // moneda cambia (se lee antes de la transacción, como en el alta).
+    const policy =
+      currency !== undefined ? await this.discountPolicy.execute() : null;
 
     // Missing row and another tenant's row are indistinguishable under RLS:
     // the repository answers both with 404.
@@ -188,6 +195,19 @@ export class UpdateTreatmentPlanUseCase {
           if (facts.hasActivePaymentPlan) {
             throw new ConflictException(
               CURRENCY_LOCKED_BY_PAYMENT_PLAN_MESSAGE,
+            );
+          }
+          // DX-513 (revisión H1): la moneda decide si una rebaja frente al
+          // catálogo es un descuento; cada ítem se vuelve a medir con la
+          // nueva (tope, motivo y firma), con el plan bloqueado.
+          if (policy) {
+            assertCurrencyChangeKeepsDiscounts(
+              policy,
+              { role: actor.role, userId: actor.userId ?? '' },
+              existing.items,
+              existing.currency,
+              currency,
+              at,
             );
           }
         }

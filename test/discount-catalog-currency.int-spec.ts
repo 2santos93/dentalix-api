@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -11,6 +12,8 @@ import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/in
 import { AddTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/add-treatment-plan-item.use-case';
 import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
 import { ApplyBulkDiscountUseCase } from '../src/modules/treatment-plans/application/use-cases/apply-bulk-discount.use-case';
+import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan.use-case';
+import { CURRENCY_CHANGE_HIDES_DISCOUNT_MESSAGE } from '../src/modules/treatment-plans/application/use-cases/item-discount';
 import { testDiscountPolicy } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/discount-fixtures';
 import { catalogPricing } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/catalog-pricing-source';
 import { PrismaDiscountReportRepository } from '../src/modules/discounts/infrastructure/prisma-discount-report.repository';
@@ -62,6 +65,12 @@ const pricing: PricingSource = {
 };
 const add = new AddTreatmentPlanItemUseCase(plans, pricing, policy, now);
 const update = new UpdateTreatmentPlanItemUseCase(plans, catalog, policy, now);
+const updatePlan = new UpdateTreatmentPlanUseCase(
+  plans,
+  { has: (code) => Promise.resolve(['USD', 'VES'].includes(code)) },
+  now,
+  policy,
+);
 const bulk = new ApplyBulkDiscountUseCase(
   plans,
   policy,
@@ -425,5 +434,129 @@ describe('descuento frente a un catálogo en otra moneda (DX-513, Postgres)', ()
       { currency: 'USD', items: 1, reduction: 360 },
       { currency: 'VES', items: 1, reduction: 360 },
     ]);
+  });
+
+  // Revisión H4: con una lista del convenio en USD y el catálogo en VES, la
+  // rebaja frente a la lista cuenta (misma moneda), pero la «rebaja de
+  // convenio» (basePrice − catalogPrice) mezclaría VES con USD: 0.
+  it('lista del convenio en USD con el catálogo en VES: la rebaja frente a la lista cuenta; la de convenio no', async () => {
+    const payer = await raw.payer.create({
+      data: { tenantId: s.tenantId, name: 'Seguros Caracas', type: 'INSURER' },
+    });
+    const agreement = await raw.agreement.create({
+      data: {
+        tenantId: s.tenantId,
+        name: 'Seguros Caracas 10 %',
+        payerId: payer.id,
+        kind: 'PERCENT_DISCOUNT',
+        percent: 10,
+      },
+    });
+    const planId = await plan('USD');
+    await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: s.tenantId,
+        planId,
+        toothNumber: '11',
+        catalogItemId: s.catalogItemId,
+        catalogPrice: 100,
+        basePrice: 3600,
+        catalogCurrency: 'VES',
+        priceSource: 'AGREEMENT_PRICE_LIST',
+        agreementId: agreement.id,
+        agreementName: agreement.name,
+        price: 80,
+      },
+    });
+    const { rows, summary } = await reportFor([planId]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      currency: 'USD',
+      priceReduction: 20,
+      discount: 20,
+      agreementReduction: 0,
+    });
+    expect(summary.totals).toEqual([
+      { currency: 'USD', items: 1, gross: 100, discount: 20 },
+    ]);
+    expect(summary.agreementTotals).toEqual([]);
+  });
+
+  // Revisión H1: la moneda del plan decide si la rebaja cuenta. Cambiarla en
+  // un borrador con ítems los vuelve a medir con la nueva, con el plan
+  // bloqueado; si algo falla, ni el plan ni sus ítems cambian.
+  describe('cambiar la moneda del plan con ítems (revisión H1)', () => {
+    const planRow = (planId: string) =>
+      raw.treatmentPlan.findUniqueOrThrow({
+        where: { id: planId },
+        select: { currency: true },
+      });
+
+    it('la explotación: la ASSISTANT, en una clínica solo en VES, con un plan en USD y un ítem a 1, no puede pasarlo a VES', async () => {
+      const planId = await plan('USD');
+      const created = await inTenant(() =>
+        add.execute(planId, { ...CROWN(), price: 1 }, ASSISTANT()),
+      );
+      expect(created).toMatchObject({
+        catalogCurrency: 'VES',
+        discountById: null,
+      });
+      await expect(
+        inTenant(() =>
+          updatePlan.execute(planId, { currency: 'VES' }, ASSISTANT()),
+        ),
+      ).rejects.toThrow(new ForbiddenException(priceBelowCatalogCapMessage(0)));
+      expect(await planRow(planId)).toEqual({ currency: 'USD' });
+      expect(
+        await raw.treatmentPlanItem.findUniqueOrThrow({
+          where: { id: created.id },
+          select: { price: true, discountById: true },
+        }),
+      ).toEqual({ price: new Prisma.Decimal(1), discountById: null });
+      // Y el ADMIN tampoco, sin motivo.
+      await expect(
+        inTenant(() =>
+          updatePlan.execute(planId, { currency: 'VES' }, ADMIN()),
+        ),
+      ).rejects.toThrow(
+        new UnprocessableEntityException(priceBelowCatalogReasonMessage(10)),
+      );
+      expect(await planRow(planId)).toEqual({ currency: 'USD' });
+      expect((await reportFor([planId])).rows).toHaveLength(0);
+    });
+
+    it('en sentido contrario: una rebaja firmada en VES no se esconde pasando el plan a USD (409) y sigue en el informe', async () => {
+      const planId = await plan('VES');
+      const created = await inTenant(() =>
+        add.execute(
+          planId,
+          { ...CROWN(), price: 2880, discountReason: 'LOYALTY' },
+          ADMIN(),
+        ),
+      );
+      expect(created).toMatchObject({ discountById: s.userId });
+      await expect(
+        inTenant(() =>
+          updatePlan.execute(planId, { currency: 'USD' }, ADMIN()),
+        ),
+      ).rejects.toThrow(
+        new ConflictException(CURRENCY_CHANGE_HIDES_DISCOUNT_MESSAGE),
+      );
+      expect(await planRow(planId)).toEqual({ currency: 'VES' });
+      const { rows } = await reportFor([planId]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ currency: 'VES', priceReduction: 720 });
+    });
+
+    it('sin rebajas que cambien de clasificación, la moneda cambia como siempre', async () => {
+      const planId = await plan('USD');
+      await inTenant(() =>
+        add.execute(planId, { ...CROWN(), price: 3600 }, ASSISTANT()),
+      );
+      await inTenant(() =>
+        updatePlan.execute(planId, { currency: 'VES' }, ASSISTANT()),
+      );
+      expect(await planRow(planId)).toEqual({ currency: 'VES' });
+    });
   });
 });

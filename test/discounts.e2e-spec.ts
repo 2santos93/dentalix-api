@@ -1147,6 +1147,38 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       });
     });
 
+    // Revisión H1: cambiar la moneda de un plan con ítems los vuelve a medir.
+    it('la ASSISTANT no convierte en VES un plan en USD con un ítem a 80: 403 y el plan sigue en USD', async () => {
+      const planId = await newPlan('USD');
+      await addCrown(planId, { price: 80 }, tokens.ASSISTANT).expect(201);
+      const denied = await as(clinicA, tokens.ASSISTANT)
+        .patch(`/treatment-plans/${planId}`, { currency: 'VES' })
+        .expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_0);
+      const plan = await as(clinicA)
+        .get(`/treatment-plans/${planId}`)
+        .expect(200);
+      expect((plan.body as { currency: string }).currency).toBe('USD');
+    });
+
+    it('una rebaja firmada en VES no se esconde pasando el plan a USD: 409 y sigue en el informe', async () => {
+      const planId = await newPlan('VES');
+      const created = (
+        await addCrown(planId, {
+          price: 800000,
+          discountReason: 'PROMOTION',
+        }).expect(201)
+      ).body as Item;
+      const res = await as(clinicA)
+        .patch(`/treatment-plans/${planId}`, { currency: 'USD' })
+        .expect(409);
+      expect((res.body as { message: string }).message).toBe(
+        'Hay ítems con el precio por debajo del de catálogo que cuentan como descuento en la moneda actual: con la nueva dejarían de verse en el informe de descuentos. Sube su precio al de catálogo antes de cambiar la moneda.',
+      );
+      const { ids } = await reportItemIds();
+      expect(ids).toContain(created.id);
+    });
+
     it('con una sede activa en USD la moneda del catálogo es NULL: cuenta como hoy (403, 422 y en el informe)', async () => {
       await as(clinicA)
         .post(

@@ -1,3 +1,4 @@
+import { testDiscountPolicy } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/discount-fixtures';
 import { referenceCurrencyDigitsCatalog } from '../src/shared/money/__fixtures__/reference-currency-digits';
 import { PaymentProofs } from '../src/modules/payments/application/payment-proofs';
 import { PaymentProofUploads } from '../src/modules/payments/application/payment-proof-uploads';
@@ -70,6 +71,7 @@ const updatePlan = new UpdateTreatmentPlanUseCase(
   planRepo,
   whitelist,
   () => NOW,
+  testDiscountPolicy(),
 );
 const rejectPlan = new RejectTreatmentPlanUseCase(planRepo, () => NOW);
 const noCatalog = {
