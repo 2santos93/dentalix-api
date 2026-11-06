@@ -180,6 +180,7 @@ function mapItemToEntity(item: PrismaItemWithAttribution): TreatmentPlanItem {
     catalogItemId: item.catalogItemId,
     catalogPrice: item.catalogPrice?.toNumber() ?? null,
     basePrice: item.basePrice?.toNumber() ?? null,
+    catalogCurrency: item.catalogCurrency,
     priceSource: item.priceSource,
     agreementId: item.agreementId,
     agreementName: item.agreementName,
@@ -408,6 +409,8 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           catalogPrice: input.catalogPrice,
           // DX-105: foto del precio, resuelta por el caso de uso.
           basePrice: input.pricing.basePrice,
+          // DX-502: la moneda del catálogo, congelada con su precio.
+          catalogCurrency: input.pricing.catalogCurrency,
           priceSource: input.pricing.priceSource,
           agreementId: input.pricing.agreementId,
           agreementName: input.pricing.agreementName,

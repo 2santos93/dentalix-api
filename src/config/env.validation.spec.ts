@@ -61,6 +61,19 @@ const errorOf = (env: Record<string, unknown>): string => {
 };
 
 describe('validateEnv', () => {
+  it('DX-502: PLAN_QUOTE_COMPOSE_V4 solo admite «true» o «false» (sin definir vale)', () => {
+    for (const value of [undefined, '', 'true', 'false']) {
+      expect(() =>
+        validateEnv(baseEnv({ PLAN_QUOTE_COMPOSE_V4: value })),
+      ).not.toThrow();
+    }
+    for (const value of ['si', '1', 'TRUE']) {
+      expect(errorOf(baseEnv({ PLAN_QUOTE_COMPOSE_V4: value }))).toContain(
+        'PLAN_QUOTE_COMPOSE_V4 debe ser "true" o "false".',
+      );
+    }
+  });
+
   describe('MFA de plataforma y break-glass (SEC-008)', () => {
     it('producción exige MFA_ENCRYPTION_KEY; fuera de producción es opcional', () => {
       expect(errorOf(prodEnv({ MFA_ENCRYPTION_KEY: undefined }))).toContain(

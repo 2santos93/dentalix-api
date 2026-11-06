@@ -136,6 +136,7 @@ function quoteNet(currency: string, lines: Line[]): number {
         referencePrice: null,
         agreementName: null,
         agreementPayerName: null,
+        listPriceCurrency: null,
       })),
     },
     '2026-10-31',

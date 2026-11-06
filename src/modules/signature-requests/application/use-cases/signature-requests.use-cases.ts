@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -24,9 +25,13 @@ import { usesVariable } from '../../../consents/domain/render-consent';
 import {
   composeQuoteContent,
   PLAN_NOT_FOUND_MESSAGE,
+  PLAN_QUOTE_COMPOSITION,
   quoteIssuedOn,
 } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
-import { computeQuoteHash } from '../../../treatment-plans/domain/plan-quote';
+import {
+  computeQuoteHash,
+  type QuoteComposition,
+} from '../../../treatment-plans/domain/plan-quote';
 import { PLAN_STATUS_LABELS } from '../../../treatment-plans/domain/plan-status-machine';
 import {
   documentText,
@@ -337,6 +342,10 @@ export class CreateSignatureRequestUseCase {
     private readonly email: SignatureEmailSender,
     private readonly tenantContext: TenantContextService,
     @Inject(SIGNATURE_CLOCK) private readonly clock: SignatureClock,
+    // DX-502: v4, o como antes de DX-502 con PLAN_QUOTE_COMPOSE_V4=false.
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
   ) {}
 
   async execute(
@@ -485,6 +494,7 @@ export class CreateSignatureRequestUseCase {
       quote,
       quoteIssuedOn(quote, now),
       names,
+      this.composition,
     );
     const recipient = decideRecipient(
       ctx,

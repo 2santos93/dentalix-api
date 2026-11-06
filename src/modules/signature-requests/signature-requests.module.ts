@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PLAN_QUOTE_COMPOSITION } from '../treatment-plans/application/use-cases/plan-quote.use-cases';
+import { loadPlanQuoteComposition } from '../treatment-plans/application/plan-quote-composition.config';
 import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tenant-context.interceptor';
@@ -62,6 +64,13 @@ import { PublicSignatureController } from './presentation/public-signature.contr
     SignPublicSignatureUseCase,
     RemoteBudgetCheck,
     { provide: SIGNATURE_CLOCK, useValue: () => new Date() },
+    // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).
+    {
+      provide: PLAN_QUOTE_COMPOSITION,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadPlanQuoteComposition((key) => config.get<string>(key)),
+    },
     {
       // HMAC del código con una clave derivada de un secreto del servidor
       // (JWT_ACCESS_SECRET, validado al arrancar): nunca vive en la base.

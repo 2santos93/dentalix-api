@@ -55,6 +55,7 @@ function ctx(overrides: Partial<PricingContext> = {}): PricingContext {
     },
     planCurrency: 'VES',
     planRoundingDigits: 0,
+    catalogCurrency: 'VES',
     today: TODAY,
     locationId: SEDE,
     agreement: null,
@@ -66,6 +67,7 @@ function ctx(overrides: Partial<PricingContext> = {}): PricingContext {
 
 const CATALOG = {
   basePrice: 100000,
+  catalogCurrency: 'VES',
   price: 100000,
   source: PriceSource.CATALOG,
   agreementId: null,
@@ -95,6 +97,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
   it('convenio % general: base × (1 − p/100), con nombre y id del convenio', () => {
     expect(resolveItemPrice(ctx({ agreement: percentAgreement() }))).toEqual({
       basePrice: 100000,
+      catalogCurrency: 'VES',
       price: 85000,
       source: PriceSource.AGREEMENT_PERCENT,
       agreementId: 'agr-1',
@@ -196,6 +199,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
     );
     expect(result).toEqual({
       basePrice: 100000,
+      catalogCurrency: 'VES',
       price: 72000,
       source: PriceSource.AGREEMENT_PRICE_LIST,
       agreementId: 'agr-2',
@@ -357,6 +361,28 @@ describe('resolveItemPrice (DX-105 §3)', () => {
           }),
         ).price,
       ).toBe(28333);
+    });
+  });
+
+  describe('moneda del catálogo (DX-502)', () => {
+    it('acompaña al precio de catálogo en cualquier origen del precio', () => {
+      const sede = ctx({
+        planCurrency: 'EUR',
+        catalogCurrency: 'VES',
+        locationList: { price: 100.55, currency: 'EUR' },
+      });
+      expect(resolveItemPrice(sede)).toMatchObject({
+        basePrice: 100000,
+        catalogCurrency: 'VES',
+        price: 100.55,
+        source: PriceSource.PRICE_LIST,
+      });
+    });
+
+    it('null si no se sabe (sedes sin moneda común)', () => {
+      expect(
+        resolveItemPrice(ctx({ catalogCurrency: null })).catalogCurrency,
+      ).toBeNull();
     });
   });
 });

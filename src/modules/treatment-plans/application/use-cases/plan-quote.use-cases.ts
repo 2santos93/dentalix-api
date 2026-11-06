@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import {
@@ -12,6 +13,8 @@ import {
   computeAcceptanceHash,
   computeQuoteHash,
   parseQuoteContent,
+  withListPriceCurrencies,
+  type QuoteComposition,
   type QuoteContent,
 } from '../../domain/plan-quote';
 import { acceptPlanError } from '../../domain/plan-status-machine';
@@ -35,6 +38,12 @@ import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document
 
 export type PlanQuoteClock = () => Date;
 export const PLAN_QUOTE_CLOCK = Symbol('PLAN_QUOTE_CLOCK');
+/**
+ * DX-502: cómo se componen los presupuestos nuevos (`PLAN_QUOTE_COMPOSE_V4`):
+ * `current` (v4, por defecto) o `legacy` (v2/v3, como antes de DX-502). Leer y
+ * verificar fotos v1–v4 no depende de esto.
+ */
+export const PLAN_QUOTE_COMPOSITION = Symbol('PLAN_QUOTE_COMPOSITION');
 
 export const PLAN_NOT_FOUND_MESSAGE = 'Plan de tratamiento no encontrado';
 export const PLAN_ACCEPTED_CONFLICT_MESSAGE =
@@ -108,20 +117,28 @@ function liveContent(
   source: PlanQuoteSource,
   now: Date,
   names: ClinicDocumentTypeNames,
+  composition: QuoteComposition,
 ): QuoteContent {
-  return composeQuoteContent(source, quoteIssuedOn(source, now), names);
+  return composeQuoteContent(
+    source,
+    quoteIssuedOn(source, now),
+    names,
+    composition,
+  );
 }
 
 /**
  * El presupuesto del plan tal como está AHORA, emitido el día `issuedOn`.
- * DX-415: con el `issuedOn` de la foto enviada, su hash es el de la foto si y
- * solo si nada del presupuesto cambió (ítems, precios, convenio, paciente,
- * sede, profesional).
+ * DX-415: con el `issuedOn` y la composición de la foto enviada, su hash es
+ * el de la foto si y solo si nada del presupuesto cambió (ítems, precios,
+ * convenio, paciente, sede, profesional). DX-502: un enlace v2/v3 enviado
+ * antes del despliegue se recompone con la regla de entonces y sigue valiendo.
  */
 export function composeQuoteContent(
   source: PlanQuoteSource,
   issuedOn: string,
   names: ClinicDocumentTypeNames,
+  composition: QuoteComposition = 'current',
 ): QuoteContent {
   const { patient } = source;
   return buildQuoteContent(
@@ -147,17 +164,21 @@ export function composeQuoteContent(
       items: source.items,
     },
     issuedOn,
+    composition,
   );
 }
 
 /**
  * Un plan aceptado se imprime con la FOTO firmada (lo que vio y firmó el
  * paciente), nunca con el plan vivo; `integrityOk` recalcula los dos hashes.
+ * DX-502: una foto v4 lleva la moneda de cada precio de lista; a una v1/v2/v3
+ * se le completa con la congelada en sus ítems, sin tocar lo sellado.
  */
 function toDocument(
   source: PlanQuoteSource,
   now: Date,
   names: ClinicDocumentTypeNames,
+  composition: QuoteComposition,
 ): PlanQuoteDocument {
   const base = {
     visitOrganization:
@@ -174,7 +195,13 @@ function toDocument(
   };
   const stored = source.acceptance;
   if (!stored) {
-    const content = liveContent(source, now, names);
+    // Compuesto como v2/v3 (`legacy`), la moneda de cada precio de lista se
+    // completa para mostrarla con la congelada en el ítem: no está sellada en
+    // esas versiones, así que el hash no cambia.
+    const content = withListPriceCurrencies(
+      liveContent(source, now, names, composition),
+      source.items,
+    );
     return {
       ...content,
       ...base,
@@ -182,7 +209,10 @@ function toDocument(
       acceptance: null,
     };
   }
-  const content = parseQuoteContent(stored.content);
+  const content = withListPriceCurrencies(
+    parseQuoteContent(stored.content),
+    source.items,
+  );
   const integrityOk =
     computeQuoteHash(content) === stored.contentHash &&
     computeAcceptanceHash({
@@ -217,6 +247,9 @@ export class GetPlanQuoteUseCase {
     @Inject(PLAN_QUOTE_CLOCK)
     private readonly now: PlanQuoteClock,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
   ) {}
 
   /** El presupuesto imprimible; 404 si el plan no es de este paciente/clínica. */
@@ -231,7 +264,7 @@ export class GetPlanQuoteUseCase {
     const names = source.acceptance
       ? {}
       : await this.documentTypeNames.get(source.location.id);
-    return toDocument(source, this.now(), names);
+    return toDocument(source, this.now(), names, this.composition);
   }
 }
 
@@ -254,6 +287,9 @@ export class AcceptTreatmentPlanUseCase {
     @Inject(PLAN_QUOTE_CLOCK)
     private readonly now: PlanQuoteClock,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
   ) {}
 
   /**
@@ -316,6 +352,7 @@ export class AcceptTreatmentPlanUseCase {
           source,
           acceptedAt,
           book.forLocation(source.location.id),
+          this.composition,
         );
         const contentHash = computeQuoteHash(content);
         if (contentHash !== input.contentHash) {
@@ -350,6 +387,7 @@ export class AcceptTreatmentPlanUseCase {
       outcome.source,
       acceptedAt,
       book.forLocation(outcome.source.location.id),
+      this.composition,
     );
   }
 }

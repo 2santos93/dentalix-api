@@ -17,6 +17,7 @@ import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import { createLegacyQuoteApp } from './support/legacy-quote-app';
 import {
   computeAcceptanceHash,
   computeQuoteHash,
@@ -76,8 +77,9 @@ interface QuoteBody {
     subtotal: number;
     listPrice: number | null;
     agreementName: string | null;
+    listPriceCurrency: string | null;
   }[];
-  version: 1 | 2;
+  version: 1 | 2 | 3 | 4;
   agreement: { name: string; payerName: string } | null;
   totals: {
     currency: string;
@@ -863,12 +865,14 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       });
     });
 
-    it('muestra el convenio, el precio de lista y el ahorro', async () => {
+    // DX-502: el plan está en USD y el catálogo en VES (la moneda de las sedes):
+    // el precio de lista sale con su moneda y no hay «ahorro» entre monedas.
+    it('muestra el convenio y el precio de lista en la moneda del catálogo, sin ahorro entre monedas', async () => {
       const res = await as(clinicA)
         .get(quotePath(agreementPatient, agreementPlan))
         .expect(200);
       const quote = res.body as QuoteBody;
-      expect(quote.version).toBe(2);
+      expect(quote.version).toBe(4);
       expect(quote.agreement).toEqual({
         name: 'Surco Salud −15 %',
         payerName: 'Surco Salud',
@@ -880,6 +884,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
           subtotal: 850,
           listPrice: 1000,
           agreementName: 'Surco Salud −15 %',
+          listPriceCurrency: 'VES',
         }),
       ]);
       expect(quote.totals).toEqual([
@@ -888,22 +893,53 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
           gross: 850,
           discount: 0,
           net: 850,
-          agreementSaving: 150,
+          agreementSaving: 0,
         },
       ]);
       agreementShownHash = quote.contentHash;
     });
 
+    it('DX-502: con PLAN_QUOTE_COMPOSE_V4=false un plan de una clínica sin datos fiscales se compone como v2, sin moneda sellada', async () => {
+      // Un plan sin firmar (planA ya se aceptó antes en este fichero).
+      const plan = await createPlan(clinicA, patientA, dentistA);
+      await addItem(clinicA, plan, {
+        toothNumber: '11',
+        catalogItemId: catalogA,
+      });
+      await addItem(clinicA, plan, {
+        toothNumber: '12',
+        catalogItemId: catalogA,
+      });
+      const legacy = await createLegacyQuoteApp();
+      try {
+        const res = await request(legacy.getHttpServer())
+          .get(`/api/v1${quotePath(patientA, plan)}`)
+          .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+          .set('Authorization', `Bearer ${clinicA.accessToken}`)
+          .expect(200);
+        const quote = res.body as QuoteBody;
+        expect(quote.version).toBe(2);
+        expect(quote.items.map((i) => i.listPrice)).toEqual([1000, 1000]);
+        // La moneda se completa para mostrarla; no está sellada en la v2.
+        expect(quote.items.map((i) => i.listPriceCurrency)).toEqual([
+          'VES',
+          'VES',
+        ]);
+      } finally {
+        await legacy.close();
+      }
+    });
+
     it('un plan sin convenio sale con agreement null y ahorro 0', async () => {
       const res = await as(clinicA).get(quotePath(patientA, planA)).expect(200);
       const quote = res.body as QuoteBody;
-      expect(quote.version).toBe(2);
+      expect(quote.version).toBe(4);
       expect(quote.agreement).toBeNull();
       expect(quote.totals[0].agreementSaving).toBe(0);
       expect(quote.items.map((i) => i.listPrice)).toEqual([1000, 1000]);
     });
 
-    it('la aceptación firmada v2 guarda la foto con convenio y sigue íntegra', async () => {
+    it('la aceptación firmada (v4) guarda la foto con convenio y la moneda del catálogo, y sigue íntegra', async () => {
       const res = await as(clinicA, dentistA)
         .post(acceptPath(agreementPatient, agreementPlan), {
           signerName: 'Dora Presupuesto',
@@ -920,9 +956,10 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         where: { planId: agreementPlan },
       });
       expect(row.content).toMatchObject({
-        version: 2,
+        version: 4,
         agreement: { name: 'Surco Salud −15 %', payerName: 'Surco Salud' },
-        totals: [expect.objectContaining({ agreementSaving: 150 })],
+        items: [expect.objectContaining({ listPriceCurrency: 'VES' })],
+        totals: [expect.objectContaining({ agreementSaving: 0 })],
       });
 
       // Cambiar el convenio después no toca la foto firmada.

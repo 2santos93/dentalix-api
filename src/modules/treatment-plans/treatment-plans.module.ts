@@ -16,7 +16,10 @@ import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
   PLAN_QUOTE_CLOCK,
+  PLAN_QUOTE_COMPOSITION,
 } from './application/use-cases/plan-quote.use-cases';
+import { loadPlanQuoteComposition } from './application/plan-quote-composition.config';
+import { ConfigService } from '@nestjs/config';
 import { PLAN_QUOTE_REPOSITORY } from './domain/ports/plan-quote-repository.port';
 import { PrismaPlanQuoteRepository } from './infrastructure/repositories/prisma-plan-quote.repository';
 import { CreateTreatmentPlanUseCase } from './application/use-cases/create-treatment-plan.use-case';
@@ -111,6 +114,13 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     GetPlanQuoteUseCase,
     AcceptTreatmentPlanUseCase,
     { provide: PLAN_QUOTE_CLOCK, useValue: () => new Date() },
+    // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).
+    {
+      provide: PLAN_QUOTE_COMPOSITION,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadPlanQuoteComposition((key) => config.get<string>(key)),
+    },
     { provide: PLAN_QUOTE_REPOSITORY, useClass: PrismaPlanQuoteRepository },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;

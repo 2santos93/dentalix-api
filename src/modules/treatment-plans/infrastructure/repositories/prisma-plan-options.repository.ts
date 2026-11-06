@@ -125,6 +125,8 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
             catalogPrice: item.catalogPrice,
             // DX-105: la foto del precio viaja tal cual; no se re-resuelve.
             basePrice: item.basePrice,
+            // DX-502: con la moneda del catálogo de su alta.
+            catalogCurrency: item.catalogCurrency,
             priceSource: item.priceSource,
             agreementId: item.agreementId,
             agreementName: item.agreementName,

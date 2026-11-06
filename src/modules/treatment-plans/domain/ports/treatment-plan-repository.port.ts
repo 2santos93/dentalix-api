@@ -135,6 +135,8 @@ export interface AddTreatmentPlanItemRepoInput {
  */
 export interface PricingSnapshot {
   basePrice: number | null;
+  /** DX-502: moneda de `basePrice`; null si no se supo o no hay precio de catálogo. */
+  catalogCurrency: string | null;
   priceSource: PriceSource;
   agreementId: string | null;
   agreementName: string | null;

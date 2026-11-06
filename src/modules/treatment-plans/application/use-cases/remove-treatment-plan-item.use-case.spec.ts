@@ -22,6 +22,7 @@ function fakeItem(
     catalogItemId: 'cat1',
     catalogPrice: null,
     basePrice: null,
+    catalogCurrency: null,
     priceSource: null,
     agreementId: null,
     agreementName: null,

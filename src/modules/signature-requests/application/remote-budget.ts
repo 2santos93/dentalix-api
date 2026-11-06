@@ -60,7 +60,15 @@ export function budgetStillMatches(
   ) {
     return false;
   }
-  const live = composeQuoteContent(quote, sent.issuedOn, names);
+  // DX-502: un enlace v2/v3 (anterior a DX-502) se recompone con la regla de
+  // entonces; una foto v1 nunca se envió por enlace (DX-415 es posterior).
+  if (sent.version === 1) return false;
+  const live = composeQuoteContent(
+    quote,
+    sent.issuedOn,
+    names,
+    sent.version === 4 ? 'current' : 'legacy',
+  );
   return computeQuoteHash(live) === request.budgetContentHash;
 }
 
@@ -90,6 +98,29 @@ export class RemoteBudgetCheck {
       this.documentTypeNames.get(request.locationId),
     ]);
     return budget !== null && budgetStillMatches(request, budget.quote, names);
+  }
+
+  /**
+   * DX-502: la moneda del catálogo de cada ítem del plan vivo, para mostrar
+   * la de un enlace v2/v3 (que no la guardó). Vacío si no es un presupuesto
+   * anterior a DX-502: una foto v4 ya la lleva y no se lee nada.
+   */
+  async listPriceCurrencies(
+    request: SignatureRequestRecord,
+  ): Promise<{ id: string; listPriceCurrency: string | null }[]> {
+    const sent = sentBudget(request);
+    if (!sent || sent.version === 4 || !request.treatmentPlanId) return [];
+    const budget = await this.repo.loadBudget(
+      request.patientId,
+      request.treatmentPlanId,
+      request.locationId,
+    );
+    return (
+      budget?.quote.items.map((i) => ({
+        id: i.id,
+        listPriceCurrency: i.listPriceCurrency,
+      })) ?? []
+    );
   }
 
   /**

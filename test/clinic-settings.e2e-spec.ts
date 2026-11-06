@@ -3,6 +3,7 @@ import { CatalogKind, ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
+import { createLegacyQuoteApp } from './support/legacy-quote-app';
 import {
   type Clinic,
   loginAs,
@@ -577,6 +578,25 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       .expect(200);
   });
 
+  it('DX-502: con PLAN_QUOTE_COMPOSE_V4=false el presupuesto sin aceptar se compone como v3 (DX-019), con los datos de hoy', async () => {
+    const legacy = await createLegacyQuoteApp();
+    try {
+      const quote = await request(legacy.getHttpServer())
+        .get(`/api/v1/patients/${patientA}/treatment-plans/${planA}/quote`)
+        .set('X-Tenant-Host', a.host)
+        .set('Authorization', `Bearer ${a.adminToken}`)
+        .expect(200);
+      expect(
+        quote.body as { clinicFiscal: unknown; version: number },
+      ).toMatchObject({
+        version: 3,
+        clinicFiscal: { legalName: FISCAL.legalName, taxId: FISCAL.taxId },
+      });
+    } finally {
+      await legacy.close();
+    }
+  });
+
   it('el estado de cuenta y el presupuesto sin aceptar llevan los datos de hoy', async () => {
     const quote = await as(a)
       .get(`/patients/${patientA}/treatment-plans/${planA}/quote`)
@@ -584,7 +604,8 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     expect(
       quote.body as { clinicFiscal: unknown; version: number },
     ).toMatchObject({
-      version: 3,
+      // DX-502: la v4 lleva también los datos fiscales (y los sella).
+      version: 4,
       clinicFiscal: {
         legalName: FISCAL.legalName,
         taxIdLabel: FISCAL.taxIdLabel,
@@ -728,7 +749,8 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
         })
         .expect(200);
       const quote = await getQuote(plan);
-      expect(quote.version).toBe(3);
+      // DX-502: firmado como v4, que sella los datos fiscales como la v3.
+      expect(quote.version).toBe(4);
       expect(quote.clinicFiscal).toMatchObject({
         legalName: FISCAL.legalName,
         taxId: FISCAL.taxId,

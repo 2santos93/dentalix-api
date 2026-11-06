@@ -6,6 +6,7 @@ import {
 import { TreatmentPlanStatus } from '@prisma/client';
 import {
   AcceptTreatmentPlanUseCase,
+  composeQuoteContent,
   GetPlanQuoteUseCase,
   PLAN_ACCEPTED_CONFLICT_MESSAGE,
   QUOTE_CHANGED_MESSAGE,
@@ -128,7 +129,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       ),
     );
     expect(doc.acceptance).toBeNull();
-    expect(doc.version).toBe(2);
+    expect(doc.version).toBe(4);
     expect(doc.agreement).toBeNull();
 
     expect((await late.execute('patient-1', 'plan-1')).issuedOn).toBe(
@@ -245,7 +246,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     });
   });
 
-  it('con convenio: muestra convenio, precio de lista y ahorro, y la firma v2 sigue íntegra', async () => {
+  it('con convenio: muestra convenio, precio de lista y ahorro, y la firma v4 sigue íntegra', async () => {
     const { repo, get, accept } = setup();
     const base = quoteSource();
     repo.add(
@@ -259,12 +260,13 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
             referencePrice: 850,
             agreementName: 'Surco Salud −15 %',
             agreementPayerName: 'Surco Salud',
+            listPriceCurrency: 'USD',
           },
         ],
       }),
     );
     const shown = await get.execute('patient-1', 'plan-1');
-    expect(shown.version).toBe(2);
+    expect(shown.version).toBe(4);
     expect(shown.agreement).toEqual({
       name: 'Surco Salud −15 %',
       payerName: 'Surco Salud',
@@ -282,13 +284,13 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       },
       META,
     );
-    expect(signed.version).toBe(2);
+    expect(signed.version).toBe(4);
     expect(signed.acceptance?.integrityOk).toBe(true);
     expect(signed.agreement?.name).toBe('Surco Salud −15 %');
     expect(
       (repo.sources.get('plan-1')!.acceptance!.content as { version: number })
         .version,
-    ).toBe(2);
+    ).toBe(4);
   });
 
   it('una aceptación v1 ya guardada sigue íntegra y se muestra sin convenio', async () => {
@@ -425,6 +427,123 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     expect(
       (await get.execute('patient-1', 'plan-1')).acceptance?.integrityOk,
     ).toBe(false);
+  });
+});
+
+describe('DX-502: plan en EUR con el catálogo en VES', () => {
+  /** Un ítem a precio de la lista de la sede (EUR) con el catálogo en VES. */
+  function eurPlan(status: TreatmentPlanStatus = TreatmentPlanStatus.DRAFT) {
+    const base = quoteSource();
+    return quoteSource({
+      plan: { ...base.plan, currency: 'EUR', status },
+      items: [
+        {
+          ...base.items[0],
+          price: 100.55,
+          discount: 0,
+          basePrice: 80000,
+          referencePrice: 100.55,
+          agreementName: 'Lista Euro',
+          agreementPayerName: 'Aseguradora',
+          listPriceCurrency: 'VES',
+        },
+      ],
+    });
+  }
+
+  it('el presupuesto lleva el precio de lista en VES y no calcula ahorro entre monedas', async () => {
+    const { repo, get } = setup();
+    repo.add(eurPlan());
+    const shown = await get.execute('patient-1', 'plan-1');
+    expect(shown.currency).toBe('EUR');
+    expect(shown.items[0]).toMatchObject({
+      unitPrice: 100.55,
+      listPrice: 80000,
+      listPriceCurrency: 'VES',
+    });
+    expect(shown.totals[0]).toMatchObject({
+      currency: 'EUR',
+      net: 100.55,
+      agreementSaving: 0,
+    });
+  });
+
+  it('el firmado conserva la moneda del catálogo aunque luego cambie la del ítem', async () => {
+    const { repo, get, accept } = setup();
+    repo.add(eurPlan());
+    const shown = await get.execute('patient-1', 'plan-1');
+    await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    // Las sedes pasan a USD: el ítem vivo diría otra cosa; la foto, no.
+    const signed = repo.sources.get('plan-1')!;
+    repo.add({
+      ...signed,
+      items: signed.items.map((i) => ({ ...i, listPriceCurrency: 'USD' })),
+    });
+    const printed = await get.execute('patient-1', 'plan-1');
+    expect(printed.items[0].listPriceCurrency).toBe('VES');
+    expect(printed.acceptance?.integrityOk).toBe(true);
+  });
+
+  it('una aceptación v2 guardada se completa con la moneda del ítem y sigue íntegra', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    const source = eurPlan(TreatmentPlanStatus.ACCEPTED);
+    const v2 = JSON.parse(
+      JSON.stringify(
+        buildQuoteContent(
+          {
+            planId: 'plan-1',
+            patientId: 'patient-1',
+            currency: 'EUR',
+            clinicName: 'Clínica Sonrisa',
+            location: { id: 'loc-1', name: 'Sede principal', address: null },
+            patient: { name: 'Ana Pérez', document: null },
+            professionalName: null,
+            items: source.items,
+          },
+          '2026-10-01',
+          'legacy',
+        ),
+      ),
+    ) as unknown;
+    const contentHash = computeQuoteHash(parseQuoteContent(v2));
+    const acceptedAt = new Date('2026-10-02T15:00:00.000Z');
+    repo.add({
+      ...source,
+      acceptance: {
+        content: v2,
+        contentHash,
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        acceptedAt,
+        acceptedByName: 'Dra. Gómez',
+        ipAddress: null,
+        userAgent: null,
+        remote: null,
+        acceptanceHash: computeAcceptanceHash({
+          contentHash,
+          signerName: 'Ana Pérez',
+          signature: PNG,
+          acceptedAt,
+        }),
+      },
+    });
+    const doc = await new GetPlanQuoteUseCase(repo, () => NOW, names).execute(
+      'patient-1',
+      'plan-1',
+    );
+    expect(doc.version).toBe(2);
+    expect(doc.items[0].listPriceCurrency).toBe('VES');
+    expect(doc.contentHash).toBe(contentHash);
+    expect(doc.acceptance?.integrityOk).toBe(true);
   });
 });
 
@@ -627,5 +746,121 @@ describe('AcceptTreatmentPlanUseCase (DX-012)', () => {
         META,
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('DX-502: PLAN_QUOTE_COMPOSE_V4 (con qué versión se componen los nuevos)', () => {
+  const FISCAL = {
+    legalName: 'Sonrisas S.A.',
+    taxIdLabel: 'ID fiscal',
+    taxId: 'J-1',
+    address: null,
+    email: null,
+    phone: null,
+  };
+  /** Plan en USD con un ítem de convenio cuyo catálogo está en VES. */
+  function source(fiscal = false) {
+    const base = quoteSource();
+    return quoteSource({
+      clinic: fiscal ? { ...base.clinic, fiscal: FISCAL } : base.clinic,
+      items: [
+        {
+          ...base.items[0],
+          price: 850,
+          discount: 0,
+          basePrice: 1000,
+          referencePrice: 850,
+          agreementName: 'Surco Salud −15 %',
+          agreementPayerName: 'Surco Salud',
+          listPriceCurrency: 'VES',
+        },
+      ],
+    });
+  }
+  function useCases(composition?: 'current' | 'legacy') {
+    const repo = new InMemoryPlanQuoteRepository();
+    const clock = () => NOW;
+    return {
+      repo,
+      get: new GetPlanQuoteUseCase(repo, clock, names, composition),
+      accept: new AcceptTreatmentPlanUseCase(repo, clock, names, composition),
+    };
+  }
+
+  it('en false compone como antes de DX-502: v2 (v3 con datos fiscales) con el hash de entonces', async () => {
+    for (const [fiscal, version] of [
+      [false, 2],
+      [true, 3],
+    ] as const) {
+      const { repo, get } = useCases('legacy');
+      repo.add(source(fiscal));
+      const doc = await get.execute('patient-1', 'plan-1');
+      expect(doc.version).toBe(version);
+      expect(doc.contentHash).toBe(
+        computeQuoteHash(
+          composeQuoteContent(source(fiscal), '2026-10-16', {}, 'legacy'),
+        ),
+      );
+      // Ahorro como antes (lo sella la v2/v3) y la moneda del precio de lista
+      // completada solo para mostrarla: no entra en el hash.
+      expect(doc.totals[0].agreementSaving).toBe(150);
+      expect(doc.items[0].listPriceCurrency).toBe('VES');
+      expect(computeQuoteHash(doc)).toBe(doc.contentHash);
+    }
+  });
+
+  it('en true (y por defecto) compone la v4', async () => {
+    for (const composition of ['current', undefined] as const) {
+      const { repo, get } = useCases(composition);
+      repo.add(source());
+      const doc = await get.execute('patient-1', 'plan-1');
+      expect(doc.version).toBe(4);
+      expect(doc.totals[0].agreementSaving).toBe(0);
+    }
+  });
+
+  it('en false se firma la v2 que se mostró, y sigue íntegra', async () => {
+    const { repo, get, accept } = useCases('legacy');
+    repo.add(source());
+    const shown = await get.execute('patient-1', 'plan-1');
+    const signed = await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    expect(signed.version).toBe(2);
+    expect(signed.acceptance?.integrityOk).toBe(true);
+  });
+
+  it('en false se sigue leyendo y verificando una aceptación v4 ya firmada', async () => {
+    const current = useCases('current');
+    current.repo.add(source());
+    const shown = await current.get.execute('patient-1', 'plan-1');
+    await current.accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    const legacyGet = new GetPlanQuoteUseCase(
+      current.repo,
+      () => NOW,
+      names,
+      'legacy',
+    );
+    const printed = await legacyGet.execute('patient-1', 'plan-1');
+    expect(printed.version).toBe(4);
+    expect(printed.contentHash).toBe(shown.contentHash);
+    expect(printed.items[0].listPriceCurrency).toBe('VES');
+    expect(printed.acceptance?.integrityOk).toBe(true);
   });
 });
