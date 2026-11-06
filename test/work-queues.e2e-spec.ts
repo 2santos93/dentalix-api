@@ -25,6 +25,7 @@ import {
   type WorkQueueKey,
   type WorkQueuesSummary,
 } from '../src/modules/work-queues/domain/work-queues';
+import { WorkQueuesSummaryCache } from '../src/modules/work-queues/application/work-queues-summary.cache';
 
 /**
  * DX-503 · «Mi día» por HTTP real con Postgres. Clínica A con dos sedes
@@ -71,6 +72,16 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
   let app: INestApplication<App>;
   let a: Seeded;
   let b: Seeded;
+  // OPS-056: las pruebas comparan cada número con su lista justo después de
+  // sembrar o de romper una fuente: sin la caché, salvo en la suya.
+  let cacheSpies: jest.SpyInstance[] = [];
+  const bypassCache = () => {
+    const cache = app.get(WorkQueuesSummaryCache);
+    cacheSpies = [
+      jest.spyOn(cache, 'get').mockReturnValue(undefined),
+      jest.spyOn(cache, 'set').mockReturnValue(undefined),
+    ];
+  };
 
   const get = (
     s: Seeded,
@@ -289,6 +300,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
 
   beforeAll(async () => {
     app = await createE2eApp();
+    bypassCache();
     await resetDatabase(raw);
     a = await setup('midia-a', true, { principal: 2, norte: 1 });
     b = await setup('midia-b', false, { principal: 4, norte: 0 });
@@ -460,6 +472,67 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
       }
       // El detalle del error no viaja al cliente.
       expect(JSON.stringify(body)).not.toContain('consulta caída');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('caché corta (OPS-056): la misma consulta no vuelve a contar; otra sede, rol o clínica, sí', async () => {
+    for (const spy of cacheSpies) spy.mockRestore();
+    // Lo que cuenta es si las FUENTES vuelven a correr (la autenticación de
+    // cada petición abre su propia transacción).
+    const followUp = jest.spyOn(app.get(ListPendingFollowUpUseCase), 'execute');
+    const opened = () => followUp.mock.calls.length;
+    try {
+      const first = await summary(a, ClinicRole.RECEPTION, a.principal);
+      const afterFirst = opened();
+      expect(afterFirst).toBeGreaterThan(0);
+      expect(await summary(a, ClinicRole.RECEPTION, a.principal)).toEqual(
+        first,
+      );
+      expect(opened()).toBe(afterFirst);
+      // Otra sede, otro rol, otra clínica: cada una cuenta lo suyo.
+      const norte = await summary(a, ClinicRole.RECEPTION, a.norte!);
+      expect(countOf(first, 'WAITLIST')).toBe(2);
+      expect(countOf(norte, 'WAITLIST')).toBe(1);
+      const afterNorte = opened();
+      expect(afterNorte).toBeGreaterThan(afterFirst);
+      const admin = await summary(a, ClinicRole.ADMIN, a.principal);
+      expect(admin.items.map((i) => i.key)).toEqual([...WORK_QUEUE_KEYS]);
+      expect(opened()).toBeGreaterThan(afterNorte);
+      const afterAdmin = opened();
+      const other = await summary(b, ClinicRole.RECEPTION);
+      expect(countOf(other, 'WAITLIST')).toBe(4);
+      expect(opened()).toBeGreaterThan(afterAdmin);
+    } finally {
+      followUp.mockRestore();
+      bypassCache();
+    }
+  });
+
+  it('una consulta de ADMIN nunca tiene más de 2 transacciones abiertas a la vez (OPS-056)', async () => {
+    const prisma = app.get(PrismaService);
+    const original = prisma.$transaction.bind(prisma) as (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+    let open = 0;
+    let peak = 0;
+    let opened = 0;
+    const spy = jest
+      .spyOn(prisma, '$transaction')
+      .mockImplementation((...args: unknown[]) => {
+        open++;
+        opened++;
+        peak = Math.max(peak, open);
+        return original(...args).finally(() => {
+          open--;
+        });
+      });
+    try {
+      const body = await summary(a, ClinicRole.ADMIN);
+      expect(body.items.every((i) => i.status === 'OK')).toBe(true);
+      expect(opened).toBeGreaterThan(WORK_QUEUE_KEYS.length);
+      expect(peak).toBeLessThanOrEqual(2);
     } finally {
       spy.mockRestore();
     }
