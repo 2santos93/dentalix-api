@@ -36,9 +36,7 @@ async function setup() {
   } as unknown as PasswordService;
   const record = jest.fn().mockResolvedValue(undefined);
   const audit = { record } as unknown as RecordAuditEventUseCase;
-  const useCase = new ResetPasswordUseCase(repo, password, audit, {
-    clearMfa: jest.fn().mockResolvedValue(undefined),
-  } as never);
+  const useCase = new ResetPasswordUseCase(repo, password, audit);
   await new RequestPasswordResetUseCase(repo, notifier).execute({
     tenantId: TENANT,
     email: 'ana@clinica.co',

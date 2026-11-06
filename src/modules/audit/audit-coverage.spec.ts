@@ -1681,7 +1681,7 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /auth/login/mfa':
     'complete-mfa-login.use-case (LOGIN MFA_TOTP / MFA_RECOVERY_CODE, LOGIN_FAILED INVALID_MFA_CODE) y user-mfa.e2e-spec.ts',
   'POST /auth/login/mfa/enrollment':
-    'user-mfa.service (UPDATE STAFF_MEMBER MFA_ENROLLMENT_STARTED) y user-mfa.e2e-spec.ts',
+    'user-mfa.service (UPDATE STAFF_MEMBER MFA_ENROLLMENT_STARTED), complete-mfa-login.use-case.spec.ts (LOGIN_FAILED INVALID_EMAIL_CODE, SEC-066) y user-mfa.e2e-spec.ts',
   'POST /auth/login/mfa/enrollment/confirm':
     'user-mfa.service (MFA_ENABLED, misma transacción) + LOGIN MFA_ENROLLED; user-mfa.e2e-spec.ts',
   'POST /me/mfa/enrollment':

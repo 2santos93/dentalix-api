@@ -14,7 +14,6 @@ import {
 } from '../../domain/ports/password-reset-repository.port';
 import { PasswordService } from '../../../../shared/crypto/password.service';
 import { passwordPolicyViolation } from '../../../../shared/security/password-policy';
-import { LoginLockoutService } from '../login-lockout.service';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import {
   PasswordResetTokenStatus,
@@ -65,7 +64,6 @@ export class ResetPasswordUseCase {
     private readonly repo: PasswordResetRepository,
     private readonly password: PasswordService,
     private readonly audit: RecordAuditEventUseCase,
-    private readonly lockout: LoginLockoutService,
   ) {}
 
   /** Estado del enlace para la pantalla «Restablecer contraseña». */
@@ -109,8 +107,10 @@ export class ResetPasswordUseCase {
       throw tokenError(again.status === 'VALID' ? 'USED' : again.status);
     }
 
-    // DX-021-bis: la contraseña vieja ya no llega al paso del código.
-    await this.lockout.clearMfa(record.userId);
+    // SEC-067: el contador de códigos MFA fallidos NO se borra aquí: solo lo
+    // borra un código correcto. Si no, quien controla el buzón (y no el móvil)
+    // ganaría 5 intentos libres por cada restablecimiento. La contraseña vieja
+    // ya no llega al paso del código: `tokenVersion` mata sus `mfaToken`.
     this.logger.log({
       event: 'password_reset.completed',
       tenantId: input.tenantId,

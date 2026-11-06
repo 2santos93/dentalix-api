@@ -221,22 +221,48 @@ describe('LoginUseCase', () => {
       });
     });
 
-    it('obligatorio y sin activar: alta forzada, sin tokens de sesión', async () => {
+    /** SEC-066: el alta forzada de un miembro también lleva código al correo. */
+    function enrollingUseCase(repo: AuthRepository, delivered = true) {
+      const sent: unknown[] = [];
       const mfa = {
         state: () =>
-          Promise.resolve({ enabledAt: null, isPlatformAdmin: false }),
+          Promise.resolve({
+            enabledAt: null,
+            isPlatformAdmin: false,
+            email: 'ana@clinica.co',
+          }),
         isRequired: () => Promise.resolve(true),
         isTrustedDevice: () => Promise.resolve(false),
       };
+      const enrollChallenges = {
+        issue: jest.fn().mockResolvedValue({
+          token: 'mfa-token',
+          expiresAt: new Date('2026-11-01T10:10:00Z'),
+          jti: 'jti-1',
+        }),
+        emailCode: (jti: string) => (jti === 'jti-1' ? '12345678' : 'otro'),
+        emailCodeRef: (jti: string) => (jti === 'jti-1' ? 'A1F3' : 'otro'),
+      };
+      const notifier = {
+        sendEnrollmentCode: (input: unknown) => {
+          sent.push(input);
+          return Promise.resolve(delivered);
+        },
+      };
       const uc = new LoginUseCase(
-        await memberRepo(),
+        repo,
         password,
         { issue } as never,
         unusedBreakGlass,
         mfa as never,
-        challenges as never,
-        {} as never,
+        enrollChallenges as never,
+        notifier as never,
       );
+      return { uc, sent, enrollChallenges };
+    }
+
+    it('obligatorio y sin activar: alta forzada, sin tokens de sesión', async () => {
+      const { uc, enrollChallenges } = enrollingUseCase(await memberRepo());
       const result = await uc.execute({
         tenantId: 't1',
         email: 'a@b.com',
@@ -244,9 +270,80 @@ describe('LoginUseCase', () => {
       });
       expect(result).toMatchObject({ mfa: 'MFA_ENROLLMENT_REQUIRED' });
       expect(issue).not.toHaveBeenCalled();
-      expect(challenges.issue).toHaveBeenCalledWith(
-        expect.objectContaining({ purpose: 'MFA_ENROLL' }),
+      expect(enrollChallenges.issue).toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'MFA_ENROLL', tenantId: 't1' }),
       );
+    });
+
+    it('SEC-066: el alta forzada de un miembro (no superadmin) envía el código a su correo, como la del superadmin', async () => {
+      const { uc, sent } = enrollingUseCase(
+        await memberRepo(ClinicRole.RECEPTION),
+      );
+      const result = await uc.execute({
+        tenantId: 't1',
+        email: 'a@b.com',
+        password: 'S3cret!',
+        ip: '10.0.0.1',
+      });
+      expect(result).toEqual({
+        mfa: 'MFA_ENROLLMENT_REQUIRED',
+        mfaToken: 'mfa-token',
+        expiresAt: new Date('2026-11-01T10:10:00Z'),
+        emailCodeRequired: true,
+        emailCodeRef: 'A1F3',
+      });
+      // Al correo de la CUENTA, no al que se escribió en el formulario.
+      expect(sent).toEqual([
+        {
+          userId: 'u1',
+          ip: '10.0.0.1',
+          to: 'ana@clinica.co',
+          code: '12345678',
+          ref: 'A1F3',
+          expiresInMinutes: 10,
+        },
+      ]);
+    });
+
+    it('SEC-066: si el correo del miembro no sale, no dice que salió: 429 con la espera', async () => {
+      const { uc } = enrollingUseCase(
+        await memberRepo(ClinicRole.RECEPTION),
+        false,
+      );
+      await expect(
+        uc.execute({
+          tenantId: 't1',
+          email: 'a@b.com',
+          password: 'S3cret!',
+          ip: '10.0.0.1',
+        }),
+      ).rejects.toMatchObject({ retryAfterSeconds: 60 });
+    });
+
+    it('con el MFA activo no se envía ningún correo', async () => {
+      const sendEnrollmentCode = jest.fn();
+      const mfa = {
+        state: () =>
+          Promise.resolve({ enabledAt: new Date(), isPlatformAdmin: false }),
+        isRequired: () => Promise.resolve(true),
+        isTrustedDevice: () => Promise.resolve(false),
+      };
+      const uc = new LoginUseCase(
+        await memberRepo(ClinicRole.RECEPTION),
+        password,
+        { issue } as never,
+        unusedBreakGlass,
+        mfa as never,
+        challenges as never,
+        { sendEnrollmentCode } as never,
+      );
+      const result = await uc.execute({
+        tenantId: 't1',
+        email: 'a@b.com',
+        password: 'S3cret!',
+      });
+      expect(result).not.toHaveProperty('emailCodeRequired');
+      expect(sendEnrollmentCode).not.toHaveBeenCalled();
     });
 
     it('con la contraseña mala ni siquiera se mira el MFA', async () => {

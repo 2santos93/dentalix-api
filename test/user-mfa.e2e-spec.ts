@@ -16,6 +16,9 @@ import {
 } from '../src/modules/auth/domain/login-lockout';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import { decodeBase32, totpCode } from '../src/shared/crypto/totp';
+import { MFA_MESSAGES } from '../src/modules/auth/domain/user-mfa';
+import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
+import { enrollmentEmailCode } from './support/platform-mfa';
 
 /**
  * DX-021: verificación en dos pasos (TOTP) de los miembros de una clínica,
@@ -37,6 +40,8 @@ interface Body {
   mfa?: string;
   mfaToken?: string;
   expiresAt?: string;
+  emailCodeRequired?: boolean;
+  emailCodeRef?: string;
   code?: string;
   message?: string;
   secret?: string;
@@ -566,16 +571,23 @@ describe('Verificación en dos pasos de los miembros (e2e, DX-021)', () => {
         mfaToken: body.mfaToken,
         code: '123456',
       }).expect(401);
+      // SEC-066: la contraseña sola no enrola: hace falta el código del correo.
+      expect(body.emailCodeRequired).toBe(true);
+      const emailCode = enrollmentEmailCode(app, body.mfaToken!);
       const st = await http()
         .post('/api/v1/auth/login/mfa/enrollment')
         .set('X-Tenant-Host', clinic.host)
-        .send({ mfaToken: body.mfaToken })
+        .send({ mfaToken: body.mfaToken, emailCode })
         .expect(200);
       const secondSecret = (st.body as Body).secret!;
       const done = await http()
         .post('/api/v1/auth/login/mfa/enrollment/confirm')
         .set('X-Tenant-Host', clinic.host)
-        .send({ mfaToken: body.mfaToken, code: codeAt(secondSecret) })
+        .send({
+          mfaToken: body.mfaToken,
+          emailCode,
+          code: codeAt(secondSecret),
+        })
         .expect(200);
       const doneBody = done.body as Body;
       expect(doneBody.recoveryCodes).toHaveLength(10);
@@ -607,6 +619,181 @@ describe('Verificación en dos pasos de los miembros (e2e, DX-021)', () => {
       const assistant = await seedMember(raw, clinic, ClinicRole.ASSISTANT);
       const res = await login(clinic.host, assistant.email).expect(201);
       expect((res.body as Body).accessToken).toBeDefined();
+    });
+  });
+
+  describe('alta forzada de un miembro con código por correo (SEC-066)', () => {
+    let site: Clinic;
+    let reception: { userId: string; email: string };
+    let dentist: { userId: string; email: string };
+    const enroll = (host: string, body: Record<string, unknown>) =>
+      http()
+        .post('/api/v1/auth/login/mfa/enrollment')
+        .set('X-Tenant-Host', host)
+        .send(body);
+    const confirm = (host: string, body: Record<string, unknown>) =>
+      http()
+        .post('/api/v1/auth/login/mfa/enrollment/confirm')
+        .set('X-Tenant-Host', host)
+        .send(body);
+    const failedEmailCodes = () =>
+      raw.auditEvent.count({
+        where: {
+          tenantId: site.tenantId,
+          actorUserId: reception.userId,
+          action: 'LOGIN_FAILED',
+          metadata: { path: ['reason'], equals: 'INVALID_EMAIL_CODE' },
+        },
+      });
+
+    beforeAll(async () => {
+      site = await registerClinic(app, 'clinica-mfa-sec066');
+      // La dueña activa su MFA y exige la verificación a TODA la plantilla.
+      const start = await http()
+        .post('/api/v1/me/mfa/enrollment')
+        .set('X-Tenant-Host', site.host)
+        .set('Authorization', `Bearer ${site.adminToken}`)
+        .send({ currentPassword: SEEDED_PASSWORD })
+        .expect(200);
+      const enabled = await http()
+        .post('/api/v1/me/mfa/enrollment/confirm')
+        .set('X-Tenant-Host', site.host)
+        .set('Authorization', `Bearer ${site.adminToken}`)
+        .send({ code: codeAt((start.body as Body).secret!) })
+        .expect(200);
+      await http()
+        .put('/api/v1/security-policy')
+        .set('X-Tenant-Host', site.host)
+        .set('Authorization', `Bearer ${(enabled.body as Body).accessToken}`)
+        .send({ requireAdminMfa: true, requireAllMfa: true })
+        .expect(200);
+      reception = await seedMember(raw, site, ClinicRole.RECEPTION);
+      dentist = await seedMember(raw, site, ClinicRole.DENTIST);
+    });
+
+    // Un correo por cuenta y cliente cada minuto (DX-021-bis): cada caso entra
+    // de nuevo desde la misma IP, así que se olvidan los enviados.
+    beforeEach(async () => {
+      await raw.emailOutbox.deleteMany({
+        where: { template: 'MFA_ENROLLMENT_CODE' },
+      });
+    });
+
+    it('la contraseña da el paso del alta y envía un código al correo de la cuenta (sin enumeración: solo tras la contraseña correcta)', async () => {
+      const toHash = app
+        .get(EmailPayloadCipher, { strict: false })
+        .hashRecipient(reception.email);
+      const before = await raw.emailOutbox.count({
+        where: { toHash, template: 'MFA_ENROLLMENT_CODE' },
+      });
+      // Contraseña mala: el 401 genérico de siempre y ningún correo.
+      const bad = await login(site.host, reception.email, 'otra-clave-mala');
+      expect(bad.status).toBe(401);
+      expect(JSON.stringify(bad.body)).not.toContain(reception.email);
+      const res = await login(site.host, reception.email).expect(201);
+      const body = res.body as Body;
+      expect(body).toMatchObject({
+        mfa: 'MFA_ENROLLMENT_REQUIRED',
+        emailCodeRequired: true,
+      });
+      expect(body.emailCodeRef).toMatch(/^[0-9A-F]{4}$/);
+      expect(body.accessToken).toBeUndefined();
+      expect(
+        await raw.emailOutbox.count({
+          where: { toHash, template: 'MFA_ENROLLMENT_CODE' },
+        }),
+      ).toBe(before + 1);
+    });
+
+    it('sin el código del correo, con uno malo o con el de otra cuenta: 400, ni secreto ni sesión ni códigos; queda auditado', async () => {
+      const step = await login(site.host, reception.email).expect(201);
+      const mfaToken = (step.body as Body).mfaToken!;
+      const mine = enrollmentEmailCode(app, mfaToken);
+      const otherStep = await login(site.host, dentist.email).expect(201);
+      const theirs = enrollmentEmailCode(
+        app,
+        (otherStep.body as Body).mfaToken!,
+      );
+      const failed = await failedEmailCodes();
+
+      const missing = await enroll(site.host, { mfaToken }).expect(400);
+      expect((missing.body as Body).message).toBe(
+        MFA_MESSAGES.emailCodeInvalid,
+      );
+      expect((missing.body as Body).secret).toBeUndefined();
+      const wrongCode = mine === '00000000' ? '11111111' : '00000000';
+      await enroll(site.host, { mfaToken, emailCode: wrongCode }).expect(400);
+      if (theirs !== mine) {
+        await enroll(site.host, { mfaToken, emailCode: theirs }).expect(400);
+      }
+      // Confirmar sin el código tampoco abre sesión ni da códigos.
+      const noCode = await confirm(site.host, {
+        mfaToken,
+        code: '123456',
+      }).expect(400);
+      expect((noCode.body as Body).accessToken).toBeUndefined();
+      expect((noCode.body as Body).recoveryCodes).toBeUndefined();
+
+      expect(await failedEmailCodes()).toBe(failed + (theirs !== mine ? 4 : 3));
+      const row = await raw.user.findUniqueOrThrow({
+        where: { id: reception.userId },
+        select: { mfaEnabledAt: true, mfaTotpPendingSecretEnc: true },
+      });
+      expect(row).toEqual({
+        mfaEnabledAt: null,
+        mfaTotpPendingSecretEnc: null,
+      });
+    });
+
+    it('el token del alta y su código no valen en otra clínica (401)', async () => {
+      const step = await login(site.host, reception.email).expect(201);
+      const mfaToken = (step.body as Body).mfaToken!;
+      const res = await enroll(other.host, {
+        mfaToken,
+        emailCode: enrollmentEmailCode(app, mfaToken),
+      }).expect(401);
+      expect((res.body as Body).code).toBe('MFA_CHALLENGE_EXPIRED');
+    });
+
+    it('con el código del correo: secreto, activación, sesión y 10 códigos; el token y su código no se reutilizan', async () => {
+      const step = await login(site.host, reception.email).expect(201);
+      const mfaToken = (step.body as Body).mfaToken!;
+      const emailCode = enrollmentEmailCode(app, mfaToken);
+      const st = await enroll(site.host, { mfaToken, emailCode }).expect(200);
+      const ownSecret = (st.body as Body).secret!;
+      const done = await confirm(site.host, {
+        mfaToken,
+        emailCode,
+        code: codeAt(ownSecret),
+      }).expect(200);
+      const doneBody = done.body as Body;
+      expect(doneBody.recoveryCodes).toHaveLength(10);
+      await me(site.host, doneBody.accessToken!).expect(200);
+      await confirm(site.host, {
+        mfaToken,
+        emailCode,
+        code: codeAt(ownSecret),
+      }).expect(401);
+
+      const events = await raw.auditEvent.findMany({
+        where: { tenantId: site.tenantId, actorUserId: reception.userId },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+        select: { action: true, metadata: true },
+      });
+      const reasons = events.map((e) => [
+        e.action,
+        (e.metadata as { reason?: string } | null)?.reason,
+      ]);
+      expect(reasons).toEqual(
+        expect.arrayContaining([
+          ['UPDATE', 'MFA_ENROLLMENT_STARTED'],
+          ['UPDATE', 'MFA_ENABLED'],
+          ['LOGIN', 'MFA_ENROLLED'],
+        ]),
+      );
+      const dump = JSON.stringify(events);
+      expect(dump).not.toContain(emailCode);
+      expect(dump).not.toContain(ownSecret);
     });
   });
 
