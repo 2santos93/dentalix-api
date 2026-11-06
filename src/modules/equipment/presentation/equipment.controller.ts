@@ -18,8 +18,10 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
@@ -42,6 +44,10 @@ import {
   VoidMaintenanceUseCase,
   type ListEquipmentOutput,
 } from '../application/use-cases/equipment.use-cases';
+import {
+  ListMaintenanceDueUseCase,
+  type ListMaintenanceDueOutput,
+} from '../application/use-cases/list-maintenance-due.use-case';
 import type {
   EquipmentDetailView,
   EquipmentView,
@@ -52,6 +58,8 @@ import {
   EquipmentDetailDto,
   EquipmentDto,
   EquipmentMaintenanceDto,
+  EquipmentMaintenanceDueQueryDto,
+  EquipmentMaintenanceDueResponseDto,
   ListEquipmentQueryDto,
   ListEquipmentResponseDto,
   RecordMaintenanceDto,
@@ -92,6 +100,7 @@ export class EquipmentController {
     private readonly retireEquipment: RetireEquipmentUseCase,
     private readonly recordMaintenance: RecordMaintenanceUseCase,
     private readonly voidMaintenance: VoidMaintenanceUseCase,
+    private readonly maintenanceDue: ListMaintenanceDueUseCase,
   ) {}
 
   @Get()
@@ -111,6 +120,29 @@ export class EquipmentController {
       page: query.page,
       pageSize: query.pageSize,
     });
+  }
+
+  // Antes de `:id`: si no, «maintenance-due» llegaría como id (400 del UUID).
+  @Get('maintenance-due')
+  @ApiOperation({
+    summary: 'Mantenimientos de equipos vencidos o por vencer («Mi día»)',
+    description:
+      'DX-543: equipos ACTIVOS con el próximo preventivo vencido (OVERDUE) o que vence hoy o en los próximos 30 días (DUE_SOON), contados en el día de la sede de cada equipo, con la misma regla que `nextMaintenanceOn`/`maintenanceStatus` de la lista. ' +
+      'Fuera: al día, sin programar y dados de baja. En la sede activa (`X-Location-Id`); sin ella, las sedes permitidas al usuario (vista consolidada). De lo más urgente a lo menos. Solo ADMIN.',
+  })
+  @ApiHeader({
+    name: 'X-Location-Id',
+    required: false,
+    description:
+      'Sede activa; sin ella, las sedes permitidas al usuario (vista consolidada)',
+  })
+  @ApiOkResponse({ type: EquipmentMaintenanceDueResponseDto })
+  @ApiBadRequestResponse({ description: 'Límite inválido' })
+  @ApiForbiddenResponse({ description: FORBIDDEN })
+  listMaintenanceDue(
+    @Query() query: EquipmentMaintenanceDueQueryDto,
+  ): Promise<ListMaintenanceDueOutput> {
+    return this.maintenanceDue.execute({ limit: query.limit });
   }
 
   @Get(':id')

@@ -15,6 +15,7 @@ import {
   UpdateEquipmentUseCase,
   VoidMaintenanceUseCase,
 } from './application/use-cases/equipment.use-cases';
+import { ListMaintenanceDueUseCase } from './application/use-cases/list-maintenance-due.use-case';
 import {
   EQUIPMENT_CLOCK,
   EQUIPMENT_REPOSITORY,
@@ -38,6 +39,7 @@ import { EquipmentController } from './presentation/equipment.controller';
     RetireEquipmentUseCase,
     RecordMaintenanceUseCase,
     VoidMaintenanceUseCase,
+    ListMaintenanceDueUseCase,
     TokenService,
     TenantContextInterceptor,
     { provide: EQUIPMENT_REPOSITORY, useClass: PrismaEquipmentRepository },

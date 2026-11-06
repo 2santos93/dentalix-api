@@ -29,6 +29,11 @@ import {
   MAINTENANCE_PARTY_MAX,
   REASON_MAX,
 } from '../../domain/equipment-rules';
+import { MAINTENANCE_DUE_STATUSES } from '../../domain/maintenance-due';
+import {
+  MAINTENANCE_DUE_LIMIT_DEFAULT,
+  MAINTENANCE_DUE_LIMIT_MAX,
+} from '../../application/use-cases/list-maintenance-due.use-case';
 
 const MAINTENANCE_STATUSES = [
   'OVERDUE',
@@ -249,6 +254,74 @@ export class ListEquipmentResponseDto {
 
   @ApiProperty()
   pageSize!: number;
+}
+
+/** DX-543: un aviso de «Mi día» (un equipo con el preventivo vencido o por vencer). */
+export class EquipmentMaintenanceDueItemDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({
+    maxLength: EQUIPMENT_NAME_MAX,
+    example: 'Unidad dental Sillón 1',
+  })
+  name!: string;
+
+  @ApiProperty({ enum: EQUIPMENT_CATEGORIES, enumName: 'EquipmentCategory' })
+  category!: (typeof EQUIPMENT_CATEGORIES)[number];
+
+  @ApiProperty({ format: 'uuid' })
+  locationId!: string;
+
+  @ApiProperty()
+  locationName!: string;
+
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  chairId!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  chairName!: string | null;
+
+  @ApiProperty({
+    ...DATE_DOC,
+    description:
+      'Día del próximo preventivo en la sede del equipo (la misma regla que `nextMaintenanceOn` de la lista).',
+  })
+  nextMaintenanceOn!: string;
+
+  @ApiProperty({
+    enum: MAINTENANCE_DUE_STATUSES,
+    enumName: 'EquipmentMaintenanceDueStatus',
+    description:
+      'OVERDUE: la fecha ya pasó en el día de la sede. DUE_SOON: es hoy o en los próximos 30 días.',
+  })
+  maintenanceStatus!: (typeof MAINTENANCE_DUE_STATUSES)[number];
+
+  @ApiProperty({
+    type: 'integer',
+    example: -31,
+    description:
+      'Días de la sede hasta esa fecha: 0 = hoy, negativo = días de retraso.',
+  })
+  daysUntilDue!: number;
+}
+
+export class EquipmentMaintenanceDueResponseDto {
+  @ApiProperty({ format: 'date-time', description: 'Instante del cálculo.' })
+  generatedAt!: string;
+
+  @ApiProperty({
+    type: [EquipmentMaintenanceDueItemDto],
+    description:
+      'Los primeros `limit` avisos, de lo más urgente a lo menos (fecha más antigua primero; a igual fecha, sede, nombre e id).',
+  })
+  items!: EquipmentMaintenanceDueItemDto[];
+
+  @ApiProperty({
+    type: 'integer',
+    description: 'Todos los avisos del alcance (vencidos + vencen pronto).',
+  })
+  total!: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -541,4 +614,20 @@ export class VoidMaintenanceDto {
   })
   @MaxLength(REASON_MAX + SLACK)
   reason!: string;
+}
+
+/** DX-543: `GET /equipment/maintenance-due`. */
+export class EquipmentMaintenanceDueQueryDto {
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: MAINTENANCE_DUE_LIMIT_MAX,
+    default: MAINTENANCE_DUE_LIMIT_DEFAULT,
+    description: 'Cuántos avisos devolver (el total los cuenta todos).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'El límite no es válido.' })
+  @Min(1, { message: 'El límite no es válido.' })
+  @Max(MAINTENANCE_DUE_LIMIT_MAX, { message: 'El límite no es válido.' })
+  limit?: number;
 }
