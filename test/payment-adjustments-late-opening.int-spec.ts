@@ -385,13 +385,9 @@ describe('Ajustes por medio de pago: abonos tardíos y de saldo inicial (int, DX
         adjustments: 103,
         expected: 123,
       });
-      expect(open.adjustments).toEqual([
-        expect.objectContaining({
-          kind: 'LATE_PAYMENT',
-          amount: 103,
-          originalSession: expect.objectContaining({ id: late.closedD1 }),
-        }),
-      ]);
+      expect(
+        open.adjustments.map((a) => [a.kind, a.amount, a.originalSession?.id]),
+      ).toEqual([['LATE_PAYMENT', 103, late.closedD1]]);
       // La caja cerrada del D1 no cambia: lo tardío figura aparte.
       // (es la caja del ADMIN: recepción solo ve las suyas)
       const closed = (
