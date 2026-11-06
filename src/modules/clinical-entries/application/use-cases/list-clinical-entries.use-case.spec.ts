@@ -18,6 +18,7 @@ function fakeEntry(
     reason: null,
     notes: 'Nota',
     performedById: null,
+    authorProfessionalLicense: null,
     appointmentId: null,
     templateId: null,
     appointment: null,
@@ -35,6 +36,7 @@ function makeRepo(
     create: (): Promise<ClinicalEntry> =>
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ClinicalEntry[]> => Promise.resolve([]),
+    authorLicense: () => Promise.resolve(null),
     findAppointment: () => Promise.resolve(null),
     writeLocationTimeZone: () => Promise.resolve('America/Caracas'),
     existingIcd10Codes: () => Promise.resolve(new Set<string>()),
@@ -64,6 +66,10 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
 
   writeLocationTimeZone(): Promise<string> {
     return Promise.resolve('America/Caracas');
+  }
+
+  authorLicense(): Promise<null> {
+    return Promise.resolve(null);
   }
 
   findAppointment(): Promise<null> {

@@ -40,6 +40,14 @@ import {
   isFutureEntryDate,
 } from '../../domain/entry-date-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import {
+  CLINICAL_ENTRY_SETTINGS_REPOSITORY,
+  type ClinicalEntrySettingsRepository,
+} from '../../domain/ports/clinical-entry-settings-repository.port';
+import {
+  signingWarnings,
+  type ClinicalEntryWarning,
+} from '../../domain/author-license';
 
 export const ENTRY_APPOINTMENT_NOT_FOUND_MESSAGE =
   'Cita no encontrada en esta clínica';
@@ -84,6 +92,15 @@ export interface CreateClinicalEntryInput {
   diagnoses?: DiagnosisInput[];
 }
 
+/**
+ * DX-540: la evolución recién firmada con los avisos de la firma (p. ej.
+ * firmada sin registro profesional). Los avisos no se guardan: solo viajan en
+ * la respuesta del alta.
+ */
+export interface CreatedClinicalEntry extends ClinicalEntry {
+  warnings: ClinicalEntryWarning[];
+}
+
 const NOT_ATTENDED = new Set(['CANCELLED', 'NO_SHOW']);
 
 @Injectable()
@@ -100,6 +117,9 @@ export class CreateClinicalEntryUseCase {
     @Inject(CLINICAL_NOTE_TEMPLATE_REPOSITORY)
     private readonly templates: ClinicalNoteTemplateRepository,
     private readonly tenantContext: TenantContextService,
+    // DX-540: el aviso de registro profesional es un ajuste de la clínica.
+    @Inject(CLINICAL_ENTRY_SETTINGS_REPOSITORY)
+    private readonly settings: ClinicalEntrySettingsRepository,
   ) {}
 
   /**
@@ -111,12 +131,16 @@ export class CreateClinicalEntryUseCase {
    * guarda es TEXTO: editar o desactivar la plantilla después no lo cambia).
    * Con cita, la evolución queda ligada a ella y, si no trae fecha de
    * atención, toma el día de la cita en la zona de su sede.
+   *
+   * DX-540: el repositorio congela el registro profesional del autor en el
+   * INSERT; si la clínica tiene el aviso activo y no lo había, la respuesta
+   * lo dice (`warnings`). Nunca bloquea la firma.
    */
   async execute(
     patientId: string,
     input: CreateClinicalEntryInput,
     performedById: string,
-  ): Promise<ClinicalEntry> {
+  ): Promise<CreatedClinicalEntry> {
     // DX-038: autoría obligatoria (la BD además exige performedById NOT NULL).
     const author = assertAuthor(performedById);
     if (input.answers !== undefined && input.templateId === undefined) {
@@ -144,12 +168,17 @@ export class CreateClinicalEntryUseCase {
     if (notes.trim() === '') throw new BadRequestException(BLANK_NOTES_MESSAGE);
     const diagnoses = await this.diagnosesFor(input.diagnoses);
 
+    // DX-540: el ajuste se lee ANTES del INSERT: si esta lectura fallara después,
+    // el POST daría 500 con la evolución (inalterable) ya guardada y un
+    // reintento la duplicaría.
+    const { warnMissingProfessionalLicense } = await this.settings.get();
+
     // Rebuild the payload from only the known fields — same defensive
     // convention as SaveMedicalHistoryUseCase / CreateCatalogItemUseCase:
     // anything sneaked into `input` beyond this shape (e.g. a client-supplied
     // `tenantId`/`performedById`) is dropped here, never forwarded to the
     // repository.
-    return this.repo.create({
+    const created = await this.repo.create({
       patientId,
       // Fecha de atención: la indicada, el día de la cita o "ahora".
       entryDate:
@@ -162,6 +191,13 @@ export class CreateClinicalEntryUseCase {
       templateId: input.templateId,
       diagnoses,
     });
+    return {
+      ...created,
+      warnings: signingWarnings({
+        warnMissingProfessionalLicense,
+        professionalLicense: created.authorProfessionalLicense,
+      }),
+    };
   }
 
   /**
