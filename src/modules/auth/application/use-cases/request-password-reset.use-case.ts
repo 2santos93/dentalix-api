@@ -1,5 +1,4 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { Semaphore } from '../../../../shared/prisma/transaction-budget';
 import {
   PASSWORD_RESET_REPOSITORY,
   type PasswordResetRepository,
@@ -16,6 +15,13 @@ import {
   passwordResetExpiresAt,
 } from '../password-reset-token';
 import { PasswordResetThrottledError } from '../../domain/password-reset-throttled.error';
+import {
+  DEFAULT_PASSWORD_RESET_LIMITS,
+  PASSWORD_RESET_CLOCK,
+  PASSWORD_RESET_LIMITS,
+  type PasswordResetLimits,
+} from '../password-reset-limits';
+import { ResetTurns, type TurnRefusal } from '../reset-turns';
 
 export interface RequestPasswordResetInput {
   /** Clínica del HOST de la petición (la resuelve el servidor). */
@@ -25,26 +31,10 @@ export interface RequestPasswordResetInput {
   linkBase: string;
 }
 
-/**
- * DX-149-quater: cuántos restablecimientos pueden tener su trabajo en curso
- * (y, con él, su transacción abierta) a la vez en un proceso
- * (`PASSWORD_RESET_MAX_CONCURRENCY`). El endpoint es público y responde 202
- * sin esperar: sin este límite, una inundación desde muchas IP (el rate limit
- * es por IP) abre tantas transacciones como peticiones y agota el pool de las
- * clínicas. 4 de las conexiones del pool como mucho; cada una dura unos ms
- * (`PASSWORD_RESET_LOCK_TIMEOUT_MS` como techo), así que el turno llega rápido.
- */
-export const DEFAULT_PASSWORD_RESET_CONCURRENCY = 4;
-export const PASSWORD_RESET_CONCURRENCY = Symbol('PASSWORD_RESET_CONCURRENCY');
+/** Como mucho una línea `password_reset.dropped` cada esto (ms). */
+export const PASSWORD_RESET_DROP_LOG_INTERVAL_MS = 10_000;
 
-/**
- * `PASSWORD_RESET_MAX_CONCURRENCY` (ya validado por `validateEnv`: entero
- * 1..100), o el default si viene vacío.
- */
-export function passwordResetConcurrency(raw: string | undefined): number {
-  const value = raw?.trim();
-  return value ? Number(value) : DEFAULT_PASSWORD_RESET_CONCURRENCY;
-}
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Qué pasó, solo para el log y los tests: NUNCA llega a la respuesta. */
 export type RequestPasswordResetOutcome = 'SENT' | 'NO_MEMBER' | 'THROTTLED';
@@ -66,13 +56,23 @@ export type RequestPasswordResetOutcome = 'SENT' | 'NO_MEMBER' | 'THROTTLED';
  *
  * DX-149-quater: además, un tope POR USUARIO sumando todas sus clínicas
  * (contado en la misma transacción, bajo el bloqueo de su fila), y como mucho
- * `PASSWORD_RESET_CONCURRENCY` en curso a la vez en el proceso: el resto
- * espera turno en orden de llegada (la respuesta pública ya salió).
+ * `concurrency` en curso a la vez en el proceso: el resto espera turno en
+ * orden de llegada, en una cola acotada (`maxQueue`, `queueMaxWaitMs`); lo
+ * que no cabe o caduca se descarta en silencio. La respuesta pública ya salió
+ * y no depende de nada de esto (ver `PasswordResetLimits`).
  */
 @Injectable()
 export class RequestPasswordResetUseCase {
   private readonly logger = new Logger('Auth');
-  private readonly turns: Semaphore;
+  private readonly limits: PasswordResetLimits;
+  private readonly turns: ResetTurns;
+  private readonly clock: () => number;
+  /** Descartes aún sin contar en el log (ver `noteDrop`). */
+  private readonly dropped: Record<TurnRefusal, number> = {
+    QUEUE_FULL: 0,
+    QUEUE_EXPIRED: 0,
+  };
+  private lastDropLogAt = Number.NEGATIVE_INFINITY;
 
   constructor(
     @Inject(PASSWORD_RESET_REPOSITORY)
@@ -80,11 +80,19 @@ export class RequestPasswordResetUseCase {
     @Inject(PASSWORD_RESET_NOTIFIER)
     private readonly notifier: PasswordResetNotifier,
     @Optional()
-    @Inject(PASSWORD_RESET_CONCURRENCY)
-    concurrency?: number,
+    @Inject(PASSWORD_RESET_LIMITS)
+    limits?: Partial<PasswordResetLimits>,
+    @Optional()
+    @Inject(PASSWORD_RESET_CLOCK)
+    clock?: () => number,
   ) {
-    this.turns = new Semaphore(
-      concurrency ?? DEFAULT_PASSWORD_RESET_CONCURRENCY,
+    this.limits = { ...DEFAULT_PASSWORD_RESET_LIMITS, ...limits };
+    this.clock = clock ?? Date.now;
+    this.turns = new ResetTurns(
+      this.limits.concurrency,
+      this.limits.maxQueue,
+      this.limits.queueMaxWaitMs,
+      this.clock,
     );
   }
 
@@ -102,12 +110,17 @@ export class RequestPasswordResetUseCase {
 
   /**
    * Espera turno (DX-149-quater) y hace el trabajo. Todas sus transacciones
-   * corren con el turno tomado, una detrás de otra.
+   * corren con el turno tomado, una detrás de otra. Sin turno (cola llena o
+   * caducada): THROTTLED sin tocar la BD.
    */
   async execute(
     input: RequestPasswordResetInput,
   ): Promise<RequestPasswordResetOutcome> {
-    await this.turns.acquire();
+    const refusal = await this.turns.acquire();
+    if (refusal) {
+      this.noteDrop(refusal);
+      return 'THROTTLED';
+    }
     try {
       return await this.run(input);
     } finally {
@@ -126,8 +139,18 @@ export class RequestPasswordResetUseCase {
     if (!(await this.notifier.withinQuota(input.tenantId, member.email))) {
       return this.done(input.tenantId, 'THROTTLED');
     }
-    const token = generatePasswordResetToken();
     const now = new Date();
+    // DX-149-quater: aviso temprano del tope por usuario, sin candado (como
+    // `withinQuota`): ahorra renderizar y cifrar cuando ya no cabe. El que
+    // manda es el de `issue`, bajo el bloqueo de su fila.
+    const issuedToday = await this.repo.countIssuedSince(
+      member.userId,
+      new Date(now.getTime() - DAY_MS),
+    );
+    if (issuedToday >= this.limits.userDailyLimit) {
+      return this.done(input.tenantId, 'THROTTLED', 'USER_QUOTA');
+    }
+    const token = generatePasswordResetToken();
     // Renderizar y cifrar (y leer la marca de la clínica) ANTES de abrir la
     // transacción: dentro no se pide otra conexión.
     const mail = await this.notifier.prepare({
@@ -150,7 +173,7 @@ export class RequestPasswordResetUseCase {
         tokenHash: hashPasswordResetToken(token),
         expiresAt: passwordResetExpiresAt(now),
         now,
-        userDailyLimit: this.notifier.userDailyLimit(),
+        userDailyLimit: this.limits.userDailyLimit,
         enqueue: (tx) => mail.insert(tx),
       });
     } catch (err) {
@@ -161,6 +184,28 @@ export class RequestPasswordResetUseCase {
     }
     mail.kick();
     return this.done(input.tenantId, 'SENT');
+  }
+
+  /**
+   * Un descarte por cola (DX-149-quater). Sin una línea por petición (quien
+   * inunda decidiría el volumen del log): como mucho una cada
+   * `PASSWORD_RESET_DROP_LOG_INTERVAL_MS`, con los recuentos acumulados y
+   * nada de la petición (ni email ni clínica).
+   */
+  private noteDrop(refusal: TurnRefusal): void {
+    this.dropped[refusal]++;
+    const now = this.clock();
+    if (now - this.lastDropLogAt < PASSWORD_RESET_DROP_LOG_INTERVAL_MS) return;
+    this.lastDropLogAt = now;
+    this.logger.warn({
+      event: 'password_reset.dropped',
+      queueFull: this.dropped.QUEUE_FULL,
+      queueExpired: this.dropped.QUEUE_EXPIRED,
+      queued: this.turns.waiting,
+      concurrency: this.limits.concurrency,
+    });
+    this.dropped.QUEUE_FULL = 0;
+    this.dropped.QUEUE_EXPIRED = 0;
   }
 
   // Sin email ni token: el resultado y la clínica bastan para operar.

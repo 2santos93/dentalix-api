@@ -80,16 +80,20 @@ function outboxWith(quotas: MailConfig['quotas']): EmailOutbox {
   return new EmailOutbox(outboxRepo, cipher, noKick, cfg);
 }
 
-/** El caso de uso real sobre Postgres, con su límite de concurrencia. */
+/**
+ * El caso de uso real sobre Postgres, con su límite de concurrencia y su tope
+ * por usuario (5 si no se dice otro).
+ */
 function useCase(
   outbox: EmailOutbox,
   concurrency: number,
   repo = new PrismaPasswordResetRepository(prisma, 10_000),
+  userDailyLimit = 5,
 ) {
   return new RequestPasswordResetUseCase(
     repo,
     new EmailPasswordResetNotifier(outbox),
-    concurrency,
+    { concurrency, userDailyLimit },
   );
 }
 
@@ -170,17 +174,18 @@ describe('DX-149-quater · restablecer contraseña: tope por usuario, fuera del 
     process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
   });
 
-  it(`L1: ${N} peticiones a la vez desde 3 clínicas para la misma persona no pasan del tope por usuario (5)`, async () => {
+  it(`L1: ${N} peticiones a la vez desde 3 clínicas para la misma persona no pasan del tope por usuario (PASSWORD_RESET_USER_DAILY_LIMIT = 5)`, async () => {
     const hosts = [
       await clinic('chacao'),
       await clinic('baruta'),
       await clinic('el-hatillo'),
     ];
     const member = await staff('luisa.tres-sedes', hosts);
-    // Cada clínica, por sí sola, dejaría 5 (su tope por destinatario).
+    // Cada clínica, por sí sola, dejaría 10 (su tope por destinatario); el
+    // tope por usuario es 5.
     const quotas = {
       tenantDaily: 1000,
-      recipientDaily: 5,
+      recipientDaily: 10,
       recipientCooldownSeconds: 0,
     };
     const reset = useCase(outboxWith(quotas), N);
@@ -227,12 +232,18 @@ describe('DX-149-quater · restablecer contraseña: tope por usuario, fuera del 
   it('L1: con el tope por usuario alcanzado, una clínica nueva para esa persona tampoco emite (ni token ni correo)', async () => {
     const [first, second] = [await clinic('los-palos'), await clinic('chuao')];
     const member = await staff('carmen.dos-sedes', [first, second]);
+    // Cada clínica dejaría 5; el tope por usuario es 2.
     const quotas = {
       tenantDaily: 1000,
-      recipientDaily: 2,
+      recipientDaily: 5,
       recipientCooldownSeconds: 0,
     };
-    const reset = useCase(outboxWith(quotas), 4);
+    const reset = useCase(
+      outboxWith(quotas),
+      4,
+      new PrismaPasswordResetRepository(prisma, 10_000),
+      2,
+    );
     const from = (tenantId: string) =>
       reset.execute({ tenantId, email: member.email, linkBase: LINK_BASE });
 
@@ -241,7 +252,7 @@ describe('DX-149-quater · restablecer contraseña: tope por usuario, fuera del 
     const before = await tokensOf(member.userId);
 
     // La segunda clínica no le ha mandado nada: su tope por destinatario lo
-    // dejaría, el del usuario (2 en 24 h) no.
+    // dejaría, el del usuario (2 en 24 h) no: ni siquiera lo prepara.
     await expect(from(second)).resolves.toBe('THROTTLED');
 
     expect(await tokensOf(member.userId)).toEqual(before);

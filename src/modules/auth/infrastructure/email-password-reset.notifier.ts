@@ -23,10 +23,6 @@ export class EmailPasswordResetNotifier implements PasswordResetNotifier {
     }
   }
 
-  userDailyLimit(): number {
-    return this.outbox.recipientDailyLimit;
-  }
-
   async prepare(
     email: PasswordResetEmail,
   ): Promise<PreparedPasswordResetEmail> {

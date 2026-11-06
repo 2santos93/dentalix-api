@@ -469,6 +469,18 @@ describe('EmailOutbox + EmailDispatcher', () => {
     );
   });
 
+  it("DX-149-quater (I2): enforceQuota 'recipient' con una plantilla de clínica lanza y no encola nada", async () => {
+    const { outbox, dispatcher, repo } = setup(new RecordingMailer());
+    await dispatcher.onModuleDestroy();
+    await expect(
+      outbox.enqueue({ ...invitationInput, enforceQuota: 'recipient' }),
+    ).rejects.toThrow(/solo para plantillas fuera del tope/);
+    await expect(
+      outbox.prepareInTx({ ...invitationInput, enforceQuota: 'recipient' }),
+    ).rejects.toThrow(/solo para plantillas fuera del tope/);
+    expect(repo.rows).toHaveLength(0);
+  });
+
   it('el cierre tardío de un intento ya re-reclamado no pisa el estado (fencing)', async () => {
     const { repo, outbox, dispatcher } = setup(new RecordingMailer());
     await dispatcher.onModuleDestroy();

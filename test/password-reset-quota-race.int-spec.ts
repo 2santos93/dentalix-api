@@ -86,7 +86,7 @@ function useCase(quotas: MailConfig['quotas'], lockTimeoutMs = 10_000) {
   return new RequestPasswordResetUseCase(
     new PrismaPasswordResetRepository(prisma, lockTimeoutMs),
     new EmailPasswordResetNotifier(outboxWith(quotas)),
-    N,
+    { concurrency: N },
   );
 }
 

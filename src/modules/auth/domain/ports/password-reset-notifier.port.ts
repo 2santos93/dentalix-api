@@ -37,14 +37,6 @@ export interface PasswordResetNotifier {
    */
   withinQuota(tenantId: string, to: string): Promise<boolean>;
 
-  /**
-   * DX-149-quater: máximo de restablecimientos al día POR USUARIO, sumando
-   * todas sus clínicas. Es el mismo número que el tope diario por
-   * destinatario de una clínica (`MAIL_RECIPIENT_DAILY_LIMIT`, 5): una
-   * persona en varias clínicas no recibe más que si estuviera en una sola.
-   */
-  userDailyLimit(): number;
-
   /** Renderiza y cifra el email (con la marca de la clínica), sin encolarlo. */
   prepare(email: PasswordResetEmail): Promise<PreparedPasswordResetEmail>;
 }

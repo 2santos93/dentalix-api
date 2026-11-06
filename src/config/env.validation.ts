@@ -381,18 +381,20 @@ function mailProblems(env: Env, isProd: boolean): string[] {
     }
   }
 
-  // DX-149-quater: restablecimientos de contraseña en curso a la vez por
-  // proceso (cada uno, una conexión del pool).
-  const resetConcurrency = str(env, 'PASSWORD_RESET_MAX_CONCURRENCY');
-  if (
-    resetConcurrency != null &&
-    (!/^\d{1,3}$/.test(resetConcurrency.trim()) ||
-      Number(resetConcurrency) < 1 ||
-      Number(resetConcurrency) > 100)
-  ) {
-    problems.push(
-      'PASSWORD_RESET_MAX_CONCURRENCY debe ser un entero entre 1 y 100.',
-    );
+  // DX-149-quater: límites del restablecimiento de contraseña (endpoint
+  // público): en curso a la vez por proceso (cada uno, una conexión del
+  // pool), cuántos esperan turno y el tope por usuario al día.
+  for (const [key, min, max] of [
+    ['PASSWORD_RESET_MAX_CONCURRENCY', 1, 100],
+    ['PASSWORD_RESET_MAX_QUEUE', 1, 10_000],
+    ['PASSWORD_RESET_USER_DAILY_LIMIT', 1, 20],
+  ] as const) {
+    const raw = str(env, key);
+    if (raw == null) continue;
+    const value = Number(raw.trim());
+    if (!/^\d{1,5}$/.test(raw.trim()) || value < min || value > max) {
+      problems.push(`${key} debe ser un entero entre ${min} y ${max}.`);
+    }
   }
 
   return problems;

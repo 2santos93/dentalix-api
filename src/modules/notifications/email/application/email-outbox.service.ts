@@ -99,15 +99,6 @@ export class EmailOutbox {
   }
 
   /**
-   * DX-149-quater: el máximo de correos al día al mismo destinatario de una
-   * clínica (`MAIL_RECIPIENT_DAILY_LIMIT`). El restablecimiento de contraseña
-   * usa el mismo número como su tope por usuario, sumando clínicas.
-   */
-  get recipientDailyLimit(): number {
-    return this.config.quotas.recipientDaily;
-  }
-
-  /**
    * Los topes sobre un recuento (DX-088). `assertWithinQuota` lo usa como
    * aviso temprano, antes de cambiar nada; con `enforceQuota`, el insert lo
    * vuelve a aplicar bajo candado (DX-149-bis) y ese es el que manda. El tope
@@ -154,6 +145,17 @@ export class EmailOutbox {
     scope?: QuotaLockScope;
   } {
     if (!input.enforceQuota) return {};
+    // DX-149-quater (I2): `'recipient'` no toma el candado de la clínica, así
+    // que solo vale para plantillas que no cuentan en su tope diario; con una
+    // de clínica, ese tope se podría saltar con envíos a la vez.
+    if (
+      input.enforceQuota === 'recipient' &&
+      TENANT_DAILY_BUDGET[input.template] !== 'self-service'
+    ) {
+      throw new Error(
+        `enforceQuota 'recipient' solo para plantillas fuera del tope de la clínica (${input.template})`,
+      );
+    }
     return {
       guard: this.quotaGuardFor(input.template),
       scope:

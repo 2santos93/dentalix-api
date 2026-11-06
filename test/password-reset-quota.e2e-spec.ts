@@ -13,6 +13,10 @@ import {
 } from '../src/modules/notifications/email/infrastructure/mail-config';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { FORGOT_PASSWORD_MESSAGE } from '../src/modules/auth/presentation/password-reset.controller';
+import {
+  DEFAULT_PASSWORD_RESET_LIMITS,
+  PASSWORD_RESET_LIMITS,
+} from '../src/modules/auth/application/password-reset-limits';
 import { hashPasswordResetToken } from '../src/modules/auth/application/password-reset-token';
 import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
@@ -102,6 +106,11 @@ describe('Restablecer contraseña con el tope alcanzado (e2e, DX-149-ter)', () =
             recipientCooldownSeconds: 3600,
           },
         });
+        // DX-149-quater: el tope por usuario de producción (5), no el
+        // holgado de setup-e2e.ts.
+        builder
+          .overrideProvider(PASSWORD_RESET_LIMITS)
+          .useValue(DEFAULT_PASSWORD_RESET_LIMITS);
       },
     });
     dispatcher = app.get(EmailDispatcher, { strict: false });
@@ -193,8 +202,8 @@ describe('Restablecer contraseña con el tope alcanzado (e2e, DX-149-ter)', () =
     const free = await forgot(carmenEmail, HOST_B);
     await pollUntil(() => Promise.resolve(requested().length >= seen + 1));
     expect(requested()[seen]).toMatchObject({ outcome: 'SENT' });
-    // Hoy ya lleva 5 (el tope del destinatario, que es el del usuario): 4 más
-    // emitidos antes desde otras clínicas.
+    // Hoy ya lleva 5 (PASSWORD_RESET_USER_DAILY_LIMIT): 4 más emitidos antes
+    // desde otras clínicas.
     const now = Date.now();
     await raw.userToken.createMany({
       data: [1, 2, 3, 4].map((i) => ({

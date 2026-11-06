@@ -554,16 +554,28 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
 
-    it('DX-149-quater: PASSWORD_RESET_MAX_CONCURRENCY es un entero entre 1 y 100', () => {
-      for (const bad of ['0', '101', 'x', '2.5', '-1']) {
-        expect(
-          errorOf(baseEnv({ PASSWORD_RESET_MAX_CONCURRENCY: bad })),
-        ).toContain('PASSWORD_RESET_MAX_CONCURRENCY');
+    it.each([
+      [
+        'PASSWORD_RESET_MAX_CONCURRENCY',
+        ['0', '101', 'x', '2.5', '-1'],
+        ['1', '4', '100'],
+      ],
+      [
+        'PASSWORD_RESET_MAX_QUEUE',
+        ['0', '10001', 'x', '1e3', '-1'],
+        ['1', '1000', '10000'],
+      ],
+      [
+        'PASSWORD_RESET_USER_DAILY_LIMIT',
+        ['0', '21', 'x', '2.5', '-1'],
+        ['1', '5', '20'],
+      ],
+    ])('DX-149-quater: %s fuera de rango no arranca', (key, bad, ok) => {
+      for (const value of bad) {
+        expect(errorOf(baseEnv({ [key]: value }))).toContain(key);
       }
-      for (const ok of ['1', '4', '100']) {
-        expect(() =>
-          validateEnv(baseEnv({ PASSWORD_RESET_MAX_CONCURRENCY: ok })),
-        ).not.toThrow();
+      for (const value of ok) {
+        expect(() => validateEnv(baseEnv({ [key]: value }))).not.toThrow();
       }
     });
 

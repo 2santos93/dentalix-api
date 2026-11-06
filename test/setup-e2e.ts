@@ -59,6 +59,10 @@ process.env.LOG_LEVEL ??= 'silent';
 process.env.MAIL_RECIPIENT_COOLDOWN_SECONDS ??= '0';
 process.env.MAIL_RECIPIENT_DAILY_LIMIT ??= '1000';
 process.env.MAIL_TENANT_DAILY_LIMIT ??= '1000';
+// DX-149-quater: tope de restablecimientos por usuario (todas sus clínicas):
+// el máximo permitido, porque los e2e piden muchos para el mismo usuario. El
+// real (5) se prueba en test/password-reset-quota.e2e-spec.ts.
+process.env.PASSWORD_RESET_USER_DAILY_LIMIT ??= '20';
 
 // Tope por destinatario de los emails de PLATAFORMA (DX-144): los e2e se
 // registran una y otra vez con los mismos correos, y las filas de

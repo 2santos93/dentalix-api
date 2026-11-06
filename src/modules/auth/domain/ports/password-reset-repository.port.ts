@@ -57,6 +57,13 @@ export interface PasswordResetRepository {
     enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
   }): Promise<void>;
 
+  /**
+   * DX-149-quater: enlaces de restablecimiento emitidos a `userId` después de
+   * `since`, en todas sus clínicas. Lectura sin candado (aviso temprano): el
+   * tope que manda lo cuenta `issue` bajo el bloqueo de la fila.
+   */
+  countIssuedSince(userId: string, since: Date): Promise<number>;
+
   findByHash(tokenHash: string): Promise<ResetTokenRecord | null>;
 
   /**

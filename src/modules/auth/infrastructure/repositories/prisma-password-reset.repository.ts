@@ -169,6 +169,12 @@ export class PrismaPasswordResetRepository implements PasswordResetRepository {
     }
   }
 
+  countIssuedSince(userId: string, since: Date): Promise<number> {
+    return this.prisma.userToken.count({
+      where: { userId, purpose: PURPOSE, createdAt: { gt: since } },
+    });
+  }
+
   findByHash(tokenHash: string): Promise<ResetTokenRecord | null> {
     return this.prisma.userToken.findFirst({
       where: { tokenHash, purpose: PURPOSE },

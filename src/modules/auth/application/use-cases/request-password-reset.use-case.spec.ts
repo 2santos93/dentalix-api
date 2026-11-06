@@ -1,9 +1,12 @@
 import { Logger } from '@nestjs/common';
 import {
-  DEFAULT_PASSWORD_RESET_CONCURRENCY,
+  PASSWORD_RESET_DROP_LOG_INTERVAL_MS,
   RequestPasswordResetUseCase,
-  passwordResetConcurrency,
 } from './request-password-reset.use-case';
+import {
+  DEFAULT_PASSWORD_RESET_LIMITS,
+  loadPasswordResetLimits,
+} from '../password-reset-limits';
 import {
   FakePasswordResetNotifier,
   InMemoryPasswordResetRepository,
@@ -212,14 +215,17 @@ describe('RequestPasswordResetUseCase', () => {
     warn.mockRestore();
   });
 
-  it('DX-149-quater: el tope es POR USUARIO sumando sus clínicas: alcanzado en una, otra no emite (ni token ni email) y el log dice por qué', async () => {
-    const { repo, notifier, useCase } = setup();
+  it('DX-149-quater: el tope es POR USUARIO sumando sus clínicas: alcanzado en una, otra no emite (ni token ni email, ni siquiera lo prepara) y el log dice por qué', async () => {
+    const { repo, notifier } = setup();
     repo.addMember({
       tenantId: 'tenant-b',
       userId: 'u1',
       email: 'ana@clinica.co',
     });
-    notifier.dailyLimit = 2;
+    const useCase = new RequestPasswordResetUseCase(repo, notifier, {
+      userDailyLimit: 2,
+    });
+    const prepare = jest.spyOn(notifier, 'prepare');
     const from = (tenantId: string) =>
       useCase.execute({
         tenantId,
@@ -232,6 +238,8 @@ describe('RequestPasswordResetUseCase', () => {
 
     expect(await from('tenant-b')).toBe('THROTTLED');
 
+    // El aviso temprano ya lo frena: sin renderizar ni cifrar nada.
+    expect(prepare).toHaveBeenCalledTimes(2);
     expect(repo.tokens).toEqual(before);
     expect(notifier.sent).toHaveLength(2);
     expect(notifier.kicks).toBe(2);
@@ -243,7 +251,31 @@ describe('RequestPasswordResetUseCase', () => {
     });
   });
 
-  it('DX-149-quater: como mucho `concurrency` en curso a la vez; el resto espera turno en orden y sale, sin error', async () => {
+  it('DX-149-quater: el tope por usuario que salta bajo el bloqueo de la fila (otra petición ganó) también es THROTTLED USER_QUOTA', async () => {
+    const { repo, notifier, useCase } = setup();
+    repo.failNextIssue = new PasswordResetThrottledError('USER_QUOTA');
+    expect(
+      await useCase.execute({
+        tenantId: TENANT,
+        email: 'ana@clinica.co',
+        linkBase: LINK_BASE,
+      }),
+    ).toBe('THROTTLED');
+    expect(repo.tokens).toHaveLength(0);
+    expect(notifier.kicks).toBe(0);
+    expect(logSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ outcome: 'THROTTLED', reason: 'USER_QUOTA' }),
+    );
+  });
+
+  /**
+   * `prepare` no termina hasta que el test lo suelta: así se ve quién tiene
+   * turno. Cinco personas de la clínica.
+   */
+  function parked(
+    limits: ConstructorParameters<typeof RequestPasswordResetUseCase>[2],
+    now?: () => number,
+  ) {
     const repo = new InMemoryPasswordResetRepository();
     const notifier = new FakePasswordResetNotifier();
     for (let i = 0; i < 5; i++) {
@@ -253,8 +285,6 @@ describe('RequestPasswordResetUseCase', () => {
         email: `persona${i}@clinica.co`,
       });
     }
-    // `prepare` no termina hasta que el test lo suelta: así se ve cuántos
-    // hay dentro a la vez.
     const releases: (() => void)[] = [];
     const inside: string[] = [];
     const prepare = notifier.prepare.bind(notifier);
@@ -267,16 +297,27 @@ describe('RequestPasswordResetUseCase', () => {
           return prepare(email);
         },
       );
-    const useCase = new RequestPasswordResetUseCase(repo, notifier, 2);
-    const flush = () => new Promise((r) => setImmediate(r));
-
-    const all = [0, 1, 2, 3, 4].map((i) =>
+    const lookups = jest.spyOn(repo, 'findActiveMember');
+    const useCase = new RequestPasswordResetUseCase(
+      repo,
+      notifier,
+      limits,
+      now,
+    );
+    const fire = (i: number) =>
       useCase.execute({
         tenantId: TENANT,
         email: `persona${i}@clinica.co`,
         linkBase: LINK_BASE,
-      }),
-    );
+      });
+    return { repo, notifier, useCase, releases, inside, lookups, fire };
+  }
+  const flush = () => new Promise((r) => setImmediate(r));
+
+  it('DX-149-quater: como mucho `concurrency` en curso a la vez; el resto espera turno en orden y sale, sin error', async () => {
+    const { releases, inside, fire } = parked({ concurrency: 2 });
+
+    const all = [0, 1, 2, 3, 4].map(fire);
     await flush();
     expect(inside).toEqual(['u0', 'u1']);
 
@@ -297,12 +338,111 @@ describe('RequestPasswordResetUseCase', () => {
     ]);
   });
 
+  it('DX-149-quater: cola acotada: con concurrencia 1 y cola 2, de 5 a la vez uno trabaja, 2 esperan y 2 se descartan al momento (sin tocar la BD)', async () => {
+    const { releases, inside, lookups, fire } = parked({
+      concurrency: 1,
+      maxQueue: 2,
+    });
+    const results: (string | undefined)[] = [];
+    const all = [0, 1, 2, 3, 4].map((i) =>
+      fire(i).then((outcome) => (results[i] = outcome)),
+    );
+    await flush();
+
+    // El turno sigue ocupado y aun así los dos de más ya terminaron.
+    expect(inside).toEqual(['u0']);
+    expect(lookups).toHaveBeenCalledTimes(1);
+    expect(results).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      'THROTTLED',
+      'THROTTLED',
+    ]);
+
+    while (inside.length < 3 || releases.length > 0) {
+      releases.shift()?.();
+      await flush();
+    }
+    await Promise.all(all);
+    expect(results).toEqual(['SENT', 'SENT', 'SENT', 'THROTTLED', 'THROTTLED']);
+    expect(lookups).toHaveBeenCalledTimes(3);
+  });
+
+  it('DX-149-quater: quien esperó más de `queueMaxWaitMs` se descarta al llegarle el turno, y el turno pasa al siguiente', async () => {
+    let now = 1_000_000;
+    const { releases, inside, lookups, fire } = parked(
+      { concurrency: 1, maxQueue: 5, queueMaxWaitMs: 30_000 },
+      () => now,
+    );
+    const results: (string | undefined)[] = [];
+    const track = (i: number) =>
+      fire(i).then((outcome) => (results[i] = outcome));
+    const first = [track(0), track(1)];
+    await flush();
+    now += 30_001; // u1 ya lleva más de 30 s esperando
+    const late = track(2); // u2 acaba de llegar
+    await flush();
+
+    releases.shift()!();
+    await flush();
+    expect(results[1]).toBe('THROTTLED');
+    expect(inside).toEqual(['u0', 'u2']);
+
+    releases.shift()!();
+    await Promise.all([...first, late]);
+    expect(results).toEqual(['SENT', 'THROTTLED', 'SENT']);
+    expect(lookups).toHaveBeenCalledTimes(2);
+  });
+
+  it('DX-149-quater: los descartes no dejan una línea por petición: como mucho una cada 10 s, solo con recuentos', async () => {
+    let now = 5_000_000;
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    try {
+      const { releases, inside, fire } = parked(
+        { concurrency: 1, maxQueue: 1 },
+        () => now,
+      );
+      const held = [fire(0), fire(1)];
+      await flush();
+      // Tres descartes seguidos: una sola línea, la primera.
+      await Promise.all([fire(2), fire(3), fire(4)]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenLastCalledWith({
+        event: 'password_reset.dropped',
+        queueFull: 1,
+        queueExpired: 0,
+        queued: 1,
+        concurrency: 1,
+      });
+      // Pasados 10 s, el siguiente descarte cuenta también los callados.
+      now += PASSWORD_RESET_DROP_LOG_INTERVAL_MS;
+      await fire(2);
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenLastCalledWith(
+        expect.objectContaining({ queueFull: 3, queueExpired: 0 }),
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(
+        /persona|clinica|tenant-a/,
+      );
+      while (inside.length < 2 || releases.length > 0) {
+        releases.shift()?.();
+        await flush();
+      }
+      await Promise.all(held);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('DX-149-quater: un fallo no se queda con el turno', async () => {
     const { repo } = setup();
     const one = new RequestPasswordResetUseCase(
       repo,
       new FakePasswordResetNotifier(),
-      1,
+      { concurrency: 1 },
     );
     repo.failNextIssue = new Error('db down');
     const input = {
@@ -314,10 +454,28 @@ describe('RequestPasswordResetUseCase', () => {
     await expect(one.execute(input)).resolves.toBe('SENT');
   });
 
-  it('DX-149-quater: PASSWORD_RESET_MAX_CONCURRENCY vacío = 4; si no, su valor', () => {
-    expect(DEFAULT_PASSWORD_RESET_CONCURRENCY).toBe(4);
-    expect(passwordResetConcurrency(undefined)).toBe(4);
-    expect(passwordResetConcurrency('  ')).toBe(4);
-    expect(passwordResetConcurrency(' 8 ')).toBe(8);
+  it('DX-149-quater: límites del entorno; vacíos = 4 en curso, 1000 en cola, 30 s de espera y 5 por usuario', () => {
+    expect(DEFAULT_PASSWORD_RESET_LIMITS).toEqual({
+      concurrency: 4,
+      maxQueue: 1000,
+      queueMaxWaitMs: 30_000,
+      userDailyLimit: 5,
+    });
+    expect(loadPasswordResetLimits(() => undefined)).toEqual(
+      DEFAULT_PASSWORD_RESET_LIMITS,
+    );
+    const env: Record<string, string> = {
+      PASSWORD_RESET_MAX_CONCURRENCY: ' 8 ',
+      PASSWORD_RESET_MAX_QUEUE: '200',
+      PASSWORD_RESET_USER_DAILY_LIMIT: '3',
+      // Subir el tope de correos por destinatario no mueve el de usuario.
+      MAIL_RECIPIENT_DAILY_LIMIT: '15',
+    };
+    expect(loadPasswordResetLimits((k) => env[k])).toEqual({
+      concurrency: 8,
+      maxQueue: 200,
+      queueMaxWaitMs: 30_000,
+      userDailyLimit: 3,
+    });
   });
 });

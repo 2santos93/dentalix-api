@@ -63,6 +63,15 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
     return Promise.resolve(m?.role ?? null);
   }
 
+  /** DX-149-quater: el aviso temprano del tope por usuario (sin candado). */
+  countIssuedSince(userId: string, since: Date): Promise<number> {
+    return Promise.resolve(
+      this.tokens.filter(
+        (t) => t.userId === userId && t.createdAt.getTime() > since.getTime(),
+      ).length,
+    );
+  }
+
   /** Clínicas de las transacciones que encolaron su email (DX-149-ter). */
   issuedWithEmail: string[] = [];
   /** Hace fallar la próxima `issue` antes de cambiar nada. */
@@ -143,18 +152,12 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
 export class FakePasswordResetNotifier implements PasswordResetNotifier {
   sent: PasswordResetEmail[] = [];
   quotaOk = true;
-  /** DX-149-quater: el tope por usuario (el del destinatario, 5). */
-  dailyLimit = 5;
   /** El recuento bajo candado (en la transacción) ya no deja enviar. */
   throttleInTx = false;
   kicks = 0;
 
   withinQuota(): Promise<boolean> {
     return Promise.resolve(this.quotaOk);
-  }
-
-  userDailyLimit(): number {
-    return this.dailyLimit;
   }
 
   prepare(email: PasswordResetEmail): Promise<PreparedPasswordResetEmail> {
