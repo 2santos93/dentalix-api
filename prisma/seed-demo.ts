@@ -57,6 +57,7 @@ import { PublishPrivacyPolicyUseCase } from '../src/modules/data-consents/applic
 import { RecordDataConsentsUseCase } from '../src/modules/data-consents/application/use-cases/record-data-consents.use-case';
 import type { ConsentDecision } from '../src/modules/data-consents/domain/entities/data-consent.entity';
 import { CreateClinicalEntryUseCase } from '../src/modules/clinical-entries/application/use-cases/create-clinical-entry.use-case';
+import { UpdateClinicalEntrySettingsUseCase } from '../src/modules/clinical-entries/application/use-cases/clinical-entry-settings.use-cases';
 import { CreateClinicalEntryAddendumUseCase } from '../src/modules/clinical-entries/application/use-cases/create-clinical-entry-addendum.use-case';
 import { AddToothRecordUseCase } from '../src/modules/odontogram/application/use-cases/add-tooth-record.use-case';
 import { RecordDentitionEventsUseCase } from '../src/modules/odontogram/application/use-cases/dentition.use-cases';
@@ -756,6 +757,11 @@ class DemoSeeder {
     await this.inTenant(tenantId, undefined, () =>
       this.restrictStaffLocations(ownerId, userIds, locations),
     );
+    // DX-540: antes de la primera evolución, para que cada una congele el
+    // registro de su autor al firmar (como en una clínica real).
+    await this.inTenant(tenantId, undefined, () =>
+      this.setUpProfessionalLicenses(ownerId, dentists, siteDentists),
+    );
     await this.setUpExchangeRates(tenantId, ownerId, locations);
     const hours = await this.readBusinessHours(tenantId, locations);
 
@@ -934,7 +940,7 @@ class DemoSeeder {
     );
 
     await this.inTenant(tenantId, undefined, () =>
-      this.createPrescriptions(ownerId, patientIds, dentists, siteDentists),
+      this.createPrescriptions(ownerId, patientIds, dentists),
     );
 
     await this.inTenant(tenantId, undefined, () =>
@@ -3526,25 +3532,17 @@ class DemoSeeder {
   }
 
   /**
-   * DX-013: registro profesional y especialidad de los odontólogos, los
-   * ajustes de la receta (los fija el ADMIN, auditado), las plantillas
-   * típicas (las crea el ADMIN) y una receta post-exodoncia emitida, todo por
-   * los mismos casos de uso que la API. Sin X-Location-Id: la sede principal.
+   * Registro y especialidad de los cuatro dentistas (DX-324) y el aviso de
+   * registro profesional de las evoluciones activo (DX-540), como los fijaría
+   * el ADMIN (auditado). El ADMIN y la asistente quedan sin registro: al
+   * entrar con ellos, «Nueva evolución» enseña el aviso.
    */
-  private async createPrescriptions(
+  private async setUpProfessionalLicenses(
     ownerId: string,
-    patientIds: string[],
     dentists: string[],
     siteDentists: Record<SoloSiteKey, string>,
   ): Promise<void> {
-    const ownerCtx: AuditRequestContext = {
-      tenantId: this.tenantContext.getTenantId() as string,
-      locationId: null,
-      actor: { userId: ownerId, role: ClinicRole.ADMIN },
-      requestId: null,
-      ip: null,
-      userAgent: null,
-    };
+    const ownerCtx = this.auditAs(ownerId, ClinicRole.ADMIN);
     // DX-359: auditado como el PATCH del ADMIN. Las licencias siguen el orden
     // de los dentistas de la rotación y después los de las sedes propias.
     const licensed = [...dentists, siteDentists.saoPaulo, siteDentists.londres];
@@ -3558,6 +3556,32 @@ class DemoSeeder {
         ownerCtx,
       );
     }
+    await this.use(UpdateClinicalEntrySettingsUseCase).execute(
+      { warnMissingProfessionalLicense: true },
+      ownerCtx,
+    );
+  }
+
+  /**
+   * DX-013: los ajustes de la receta (los fija el ADMIN, auditado), las
+   * plantillas típicas (las crea el ADMIN) y una receta post-exodoncia
+   * emitida, todo por los mismos casos de uso que la API (el registro de los
+   * odontólogos ya lo cargó `setUpProfessionalLicenses`). Sin X-Location-Id:
+   * la sede principal.
+   */
+  private async createPrescriptions(
+    ownerId: string,
+    patientIds: string[],
+    dentists: string[],
+  ): Promise<void> {
+    const ownerCtx: AuditRequestContext = {
+      tenantId: this.tenantContext.getTenantId() as string,
+      locationId: null,
+      actor: { userId: ownerId, role: ClinicRole.ADMIN },
+      requestId: null,
+      ip: null,
+      userAgent: null,
+    };
     // DX-324: antes de emitir, como lo haría el ADMIN en Ajustes › Recetas.
     await this.use(UpdatePrescriptionSettingsUseCase).execute(
       { ...DEMO_PRESCRIPTION_SETTINGS },

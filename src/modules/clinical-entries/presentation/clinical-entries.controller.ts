@@ -28,10 +28,16 @@ import {
 } from '@nestjs/swagger';
 import { CreateClinicalEntryDto } from './dto/create-clinical-entry.dto';
 import { ListClinicalEntriesQueryDto } from './dto/list-clinical-entries-query.dto';
-import { CreateClinicalEntryUseCase } from '../application/use-cases/create-clinical-entry.use-case';
+import {
+  CreateClinicalEntryUseCase,
+  type CreatedClinicalEntry,
+} from '../application/use-cases/create-clinical-entry.use-case';
 import { ListClinicalEntriesUseCase } from '../application/use-cases/list-clinical-entries.use-case';
 import { ClinicalEntry } from '../domain/entities/clinical-entry.entity';
-import { ClinicalEntryDto } from './dto/clinical-entry.dto';
+import {
+  ClinicalEntryDto,
+  CreatedClinicalEntryDto,
+} from './dto/clinical-entry.dto';
 import { ClinicalEntryAddendumDto } from './dto/clinical-entry-addendum.dto';
 import { CreateClinicalEntryAddendumDto } from './dto/create-clinical-entry-addendum.dto';
 import { CreateClinicalEntryAddendumUseCase } from '../application/use-cases/create-clinical-entry-addendum.use-case';
@@ -82,9 +88,9 @@ export class ClinicalEntriesController {
   @ApiOperation({
     summary: 'Registra una evolución (inalterable, DX-038)',
     description:
-      'DX-170: con `templateId`, el texto compuesto se guarda en `notes` (enviado ya revisado, o compuesto por el servidor con `answers`). Con `appointmentId`, la evolución queda ligada a la cita.',
+      'DX-170: con `templateId`, el texto compuesto se guarda en `notes` (enviado ya revisado, o compuesto por el servidor con `answers`). Con `appointmentId`, la evolución queda ligada a la cita. DX-540: congela el registro profesional del autor (`authorProfessionalLicense`) y, si la clínica tiene el aviso activo y el autor no lo tiene, responde `warnings: [{ code: PROFESSIONAL_LICENSE_MISSING }]` sin bloquear la firma.',
   })
-  @ApiCreatedResponse({ type: ClinicalEntryDto })
+  @ApiCreatedResponse({ type: CreatedClinicalEntryDto })
   @ApiBadRequestResponse({
     description:
       'Texto vacío, respuesta inválida, plantilla desactivada, cita de otro paciente, cita cancelada / no-show, cita de un día futuro o diagnósticos inválidos (DX-212: código CIE-10 inexistente, segundo principal, más de 3 relacionados, diente no FDI).',
@@ -97,7 +103,7 @@ export class ClinicalEntriesController {
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateClinicalEntryDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<ClinicalEntry> {
+  ): Promise<CreatedClinicalEntry> {
     return this.createClinicalEntry.execute(
       patientId,
       {

@@ -20,16 +20,22 @@ import { ListWaitlistUseCase } from '../waitlist/application/use-cases/waitlist.
 import { WaitlistModule } from '../waitlist/waitlist.module';
 import { workQueueSources } from './application/work-queue-sources';
 import {
+  WORK_QUEUES_CACHE_TTL_MS,
+  WorkQueuesSummaryCache,
+} from './application/work-queues-summary.cache';
+import {
   GetWorkQueuesSummaryUseCase,
   WORK_QUEUE_SOURCES,
   WORK_QUEUES_CLOCK,
+  type WorkQueuesClock,
 } from './application/work-queues-summary.use-case';
 import { WorkQueuesController } from './presentation/work-queues.controller';
 
 /**
  * «Mi día» (DX-503): agrega los recuentos de las listas que ya existen. No
  * tiene tablas ni repositorio propios: cada módulo exporta el caso de uso de
- * su `/count` y aquí solo se reparten por rol y se ejecutan a la vez.
+ * su `/count` y aquí solo se reparten por rol y se ejecutan, de dos en dos y
+ * con una caché corta (OPS-056).
  */
 @Module({
   imports: [
@@ -48,6 +54,15 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
     TokenService,
     TenantContextInterceptor,
     { provide: WORK_QUEUES_CLOCK, useValue: () => new Date() },
+    // OPS-056: una por réplica (proveedor único del módulo).
+    {
+      provide: WorkQueuesSummaryCache,
+      inject: [WORK_QUEUES_CLOCK],
+      useFactory: (clock: WorkQueuesClock) =>
+        new WorkQueuesSummaryCache(WORK_QUEUES_CACHE_TTL_MS, () =>
+          clock().getTime(),
+        ),
+    },
     {
       provide: WORK_QUEUE_SOURCES,
       inject: [

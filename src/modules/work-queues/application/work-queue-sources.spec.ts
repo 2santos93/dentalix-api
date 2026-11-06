@@ -15,7 +15,7 @@ describe('workQueueSources (DX-503)', () => {
     waitlist: { execute: jest.fn().mockResolvedValue({ total: 6 }) },
     recall: { execute: jest.fn().mockResolvedValue({ total: 8 }) },
     receivables: {
-      execute: jest.fn().mockResolvedValue({
+      summary: jest.fn().mockResolvedValue({
         totals: [
           {
             currency: 'USD',
@@ -87,10 +87,17 @@ describe('workQueueSources (DX-503)', () => {
       count: 3,
       overdue: [{ currency: 'USD', amount: 15 }],
     });
-    expect(deps.receivables.execute).toHaveBeenCalledWith({
+    // OPS-056: los totales sin la página (sin contactos ni orden).
+    expect(deps.receivables.summary).toHaveBeenCalledWith({
       locationId: 'loc-1',
-      page: 1,
-      pageSize: 1,
+    });
+  });
+
+  it('cartera sin sede activa: la de las sedes permitidas (la lee el repositorio)', async () => {
+    tenantContext.getLocationId.mockReturnValueOnce(undefined);
+    await sources.RECEIVABLES(actor);
+    expect(deps.receivables.summary).toHaveBeenLastCalledWith({
+      locationId: undefined,
     });
   });
 });

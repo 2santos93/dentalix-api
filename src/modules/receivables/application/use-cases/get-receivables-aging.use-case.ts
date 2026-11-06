@@ -5,12 +5,16 @@ import {
   Optional,
 } from '@nestjs/common';
 import { RECEIVABLES_REPOSITORY } from '../../domain/ports/receivables-repository.port';
-import type { ReceivablesRepository } from '../../domain/ports/receivables-repository.port';
+import type {
+  ReceivablesLocation,
+  ReceivablesRepository,
+} from '../../domain/ports/receivables-repository.port';
 import type {
   DebtorLastNote,
   DebtorPromise,
   PatientAging,
   PatientAgingCurrency,
+  PatientLedger,
 } from '../../domain/entities/receivables.entity';
 import {
   addToBuckets,
@@ -117,6 +121,14 @@ export interface ReceivablesAgingPage {
    * filtrada; volver a pedir la cartera la completa cuando responda.
    */
   rateProviderTimedOut: boolean;
+}
+
+/**
+ * OPS-056: lo que «Mi día» necesita de la cartera: los `totals` de
+ * `ReceivablesAgingPage`, idénticos, sin la página.
+ */
+export interface ReceivablesAgingTotals {
+  totals: AgingTotal[];
 }
 
 interface ScopedRow {
@@ -267,17 +279,54 @@ export class GetReceivablesAgingUseCase {
     }));
   }
 
+  /**
+   * OPS-056: los `totals` de `execute` (las MISMAS filas con el MISMO cálculo,
+   * así que el mismo número) sin lo que solo pide la página: ni orden, ni
+   * contactos, ni cobranza. Las lecturas van una tras otra: una sola conexión
+   * a la vez. Es lo que cuenta «Mi día» cada minuto.
+   */
+  async summary(
+    filters: Pick<ReceivablesAgingFilters, 'locationId'>,
+  ): Promise<ReceivablesAgingTotals> {
+    const location = await this.locationOf(filters);
+    const ledgers = await this.repo.loadLedgers({ locationId: location?.id });
+    const zoneOf = await this.repo.locationTimeZones();
+    const { rows } = await this.debtorRows(ledgers, zoneOf, filters);
+    return { totals: totalsOf(rows) };
+  }
+
   private async scopedRows(filters: ReceivablesAgingFilters) {
-    const location = filters.locationId
-      ? await this.repo.findLocation(filters.locationId)
-      : null;
-    if (filters.locationId && !location) {
-      throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);
-    }
+    const location = await this.locationOf(filters);
     const [ledgers, zoneOf] = await Promise.all([
       this.repo.loadLedgers({ locationId: location?.id }),
       this.repo.locationTimeZones(),
     ]);
+    const { rows, now } = await this.debtorRows(ledgers, zoneOf, filters);
+    rows.sort(byAge);
+    return {
+      rows: await this.byCollections(rows, filters),
+      location,
+      now,
+      zoneOf,
+    };
+  }
+
+  /** La sede pedida, o 400 si no es de esta clínica; sin ella, `null`. */
+  private async locationOf(
+    filters: Pick<ReceivablesAgingFilters, 'locationId'>,
+  ): Promise<ReceivablesLocation | null> {
+    if (!filters.locationId) return null;
+    const location = await this.repo.findLocation(filters.locationId);
+    if (!location) throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);
+    return location;
+  }
+
+  /** Los deudores de estas fichas que pasan los filtros de saldo, sin ordenar. */
+  private async debtorRows(
+    ledgers: PatientLedger[],
+    zoneOf: (locationId: string | null) => string,
+    filters: ReceivablesAgingFilters,
+  ): Promise<{ rows: ScopedRow[]; now: Date }> {
     // DX-472-bis: lo abonado en otra moneda, convertido como en `/balance`,
     // con UN plazo para toda la cartera; casi siempre sin red (tasa congelada).
     const [planBalances, roundingDigitsOf] = await Promise.all([
@@ -329,13 +378,7 @@ export class GetReceivablesAgingUseCase {
         debtCents: debtCents(aging),
       });
     }
-    rows.sort(byAge);
-    return {
-      rows: await this.byCollections(rows, filters),
-      location,
-      now,
-      zoneOf,
-    };
+    return { rows, now };
   }
 
   /**
