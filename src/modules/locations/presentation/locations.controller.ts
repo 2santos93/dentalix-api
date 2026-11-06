@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -10,10 +11,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { ClinicRole } from '@prisma/client';
@@ -112,8 +115,10 @@ export class LocationsController {
   @Patch(':id')
   @Roles(ClinicRole.ADMIN)
   @ApiOkResponse({ type: LocationDto })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateLocationDto,
     @Req() req: AuditedRequest,
   ): Promise<LocationOutput> {

@@ -31,9 +31,10 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiProduces,
-  ApiTags,
   ApiServiceUnavailableResponse,
+  ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
@@ -321,6 +322,7 @@ export class PaymentsController {
   })
   @ApiBadRequestResponse({
     description:
+      'Id que no es UUID. ' +
       'DX-377: el medio pide referencia y no llegó, o el medio no es de la clínica o está desactivado. ' +
       'DX-075: `paidAt` como día civil posterior a hoy en la sede («La fecha del abono no puede ser posterior a hoy en la sede.»). ' +
       'DX-054: `paidAt` como instante a más de 24 h en el futuro («La fecha del abono no puede estar más de 24 horas en el futuro.»).',
@@ -329,8 +331,9 @@ export class PaymentsController {
     description:
       'La Idempotency-Key ya se usó con otro plan u otro cuerpo (DX-109): genera una clave nueva.',
   })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async create(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RecordPaymentDto,
     // Idempotency-Key (UUID) dedup header. Optional: absent → today's behavior
     // (no dedup, idempotencyKey stays NULL). Read from the header (never the
@@ -527,7 +530,9 @@ export class PaymentsController {
   })
   @Get('treatment-plans/:id/payments')
   @ApiOkResponse({ type: [PaymentDto] })
-  list(@Param('id') id: string): Promise<Payment[]> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  list(@Param('id', ParseUUIDPipe) id: string): Promise<Payment[]> {
     return this.listPayments.execute(id);
   }
 
@@ -542,7 +547,11 @@ export class PaymentsController {
     description:
       'Saldo del plan. Un plan rechazado o cancelado tiene `billable` 0 (misma regla que el estado de cuenta, DX-109); sus abonos siguen en `paid`. Añade, por ítem, lo cobrado y lo pendiente (DX-051), y en el plan lo imputado y lo sin imputar. Solo ADMIN y recepción.',
   })
-  balance(@Param('id') id: string): Promise<GetPlanBalanceWithItemsResult> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  balance(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<GetPlanBalanceWithItemsResult> {
     return this.getPlanBalance.executeWithItems(id);
   }
 
@@ -605,7 +614,8 @@ export class PaymentsController {
   })
   @ApiOkResponse({ description: 'Abono anulado (cuerpo vacío)' })
   @ApiBadRequestResponse({
-    description: 'Falta `reason` o no tiene 3–300 caracteres',
+    description:
+      'Id que no es UUID, o falta `reason` o no tiene 3–300 caracteres',
   })
   @ApiForbiddenResponse({
     description:
@@ -622,8 +632,9 @@ export class PaymentsController {
       'una devolución de saldo a favor, o del plan ya se traspasó o devolvió ' +
       'saldo a favor y sin este abono quedaría al descubierto',
   })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: VoidPaymentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {

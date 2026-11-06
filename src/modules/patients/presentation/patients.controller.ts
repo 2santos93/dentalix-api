@@ -20,11 +20,12 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiExtraModels,
-  ApiNoContentResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
@@ -474,8 +475,10 @@ export class PatientsController {
     description:
       'La ficha con `balance` (DX-150): marca «Saldo vencido» y días para todos los roles; el importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal. Y con `agreement` (DX-105): resumen del convenio vigente.',
   })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async get(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<
     PatientOutput & {
@@ -502,8 +505,10 @@ export class PatientsController {
   })
   @Patch(':id')
   @ApiOkResponse({ type: PatientDto })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdatePatientDto,
   ): Promise<PatientOutput> {
     const patient = await this.updatePatient.execute(id, {

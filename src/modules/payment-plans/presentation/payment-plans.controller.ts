@@ -5,16 +5,19 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Post,
   Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { CreatePaymentPlanDto } from './dto/create-payment-plan.dto';
@@ -64,8 +67,10 @@ export class PaymentPlansController {
     description:
       'El plan ya tiene un plan de cuotas activo, o está rechazado o cancelado y no se financia (DX-109).',
   })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async create(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreatePaymentPlanDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<GetPaymentPlanResult> {
@@ -94,7 +99,9 @@ export class PaymentPlansController {
   })
   @Get('treatment-plans/:id/payment-plan')
   @ApiOkResponse({ type: PaymentPlanDto })
-  get(@Param('id') id: string): Promise<GetPaymentPlanResult> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  get(@Param('id', ParseUUIDPipe) id: string): Promise<GetPaymentPlanResult> {
     return this.getPaymentPlan.execute(id);
   }
 
@@ -106,7 +113,9 @@ export class PaymentPlansController {
   @Delete('treatment-plans/:id/payment-plan')
   @HttpCode(204)
   @ApiOkResponse({ description: 'Payment plan cancelled' })
-  remove(@Param('id') id: string): Promise<void> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.cancelPaymentPlan.execute(id);
   }
 }
