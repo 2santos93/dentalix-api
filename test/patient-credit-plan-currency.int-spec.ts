@@ -1,3 +1,4 @@
+import { testDiscountPolicy } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/discount-fixtures';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConflictException } from '@nestjs/common';
@@ -42,6 +43,7 @@ const updatePlan = new UpdateTreatmentPlanUseCase(
   plans,
   { has: (code) => Promise.resolve(['VES', 'USD'].includes(code)) },
   () => new Date(),
+  testDiscountPolicy(),
 );
 const DIAGNOSTIC_SQL = readFileSync(
   join(__dirname, '../prisma/scripts/credit-currency-report.sql'),

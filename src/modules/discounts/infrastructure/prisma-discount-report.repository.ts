@@ -123,6 +123,16 @@ async function firstDiscountLocation(
  * descuento. Una línea solo de convenio sin sede de descuento ni de
  * presentación toma la sede con la que se resolvió el precio.
  *
+ * DX-513: la rebaja de precio y la de convenio no cuentan frente a una
+ * referencia en otra moneda CONOCIDA (`referenceInOtherCurrency` del
+ * dominio): ese ítem no es un descuento y no entra en las filas ni en los
+ * totales (si además tiene `discount`, entra solo por él). Con
+ * "catalogCurrency" NULL (moneda desconocida) cuenta como hasta ahora. No se enseña
+ * aparte como «moneda distinta»: no es un descuento, y sumarlo mezclaría
+ * monedas. El WHERE sigue siendo el predicado (solo de columnas del ítem) de
+ * los dos índices parciales, que quedan como superconjunto; la moneda se
+ * filtra en `flagged`/`d`.
+ *
  * Rechazados y cancelados no cuentan: ese descuento nunca se cobró, y una
  * alternativa (DX-040) copia los descuentos de su opción de origen, así que al
  * aceptar una opción la hermana rechazada lo duplicaría.
@@ -210,24 +220,39 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
             OR r."createdById" = ${prof}::uuid
             OR r."agreementAssignedById" = ${prof}::uuid)`
       : Prisma.sql`TRUE`;
+    // DX-513: la referencia (`catalogPrice`) cuenta si salió de una lista
+    // (DX-105 solo toma listas en la moneda del plan) o si la moneda del
+    // catálogo congelada en el ítem (DX-502) es la del plan o NO SE SABE
+    // (NULL: cuenta como hoy, decisión de producto). Solo con una moneda
+    // conocida y distinta, bajar de ella no es un descuento ni una rebaja de
+    // convenio: no se resta entre monedas. Es `referenceInOtherCurrency` del
+    // dominio, negado.
+    const referenceInPlanCurrency = Prisma.sql`COALESCE(i."priceSource" IN ('PRICE_LIST', 'AGREEMENT_PRICE_LIST'), FALSE)
+                 OR i."catalogCurrency" IS NULL
+                 OR i."catalogCurrency" = p."currency"`;
+    const priceBelowReference = Prisma.sql`(i."price" < i."catalogPrice" AND (${referenceInPlanCurrency}))`;
     const cte = Prisma.sql`
       WITH raw AS (
         SELECT i."id", i."planId", i."toothNumber", i."catalogItemId",
                i."catalogPrice", i."price",
-               GREATEST(COALESCE(i."catalogPrice" - i."price", 0), 0) AS "priceReduction",
+               CASE WHEN (${referenceInPlanCurrency})
+                    THEN GREATEST(COALESCE(i."catalogPrice" - i."price", 0), 0)
+                    ELSE 0 END AS "priceReduction",
                i."discount" AS "itemDiscount",
                i."discountReason", i."discountReasonNote",
                i."discountById",
                i."priceSource", i."agreementName", i."basePrice",
                CASE WHEN i."agreementId" IS NOT NULL
+                         AND (i."catalogCurrency" IS NULL
+                              OR i."catalogCurrency" = p."currency")
                     THEN GREATEST(COALESCE(i."basePrice" - i."catalogPrice", 0), 0)
                     ELSE 0 END AS "agreementReduction",
                asg."createdById" AS "agreementAssignedById",
                i."createdById",
                COALESCE(i."discountAt", i."createdAt") AS "at",
-               (i."discount" > 0 OR i."price" < i."catalogPrice") AS "isDiscount",
+               (i."discount" > 0 OR ${priceBelowReference}) AS "isDiscount",
                COALESCE(i."discountLocationId", p."presentedLocationId",
-                        CASE WHEN NOT (i."discount" > 0 OR i."price" < i."catalogPrice")
+                        CASE WHEN NOT COALESCE(i."discount" > 0 OR ${priceBelowReference}, FALSE)
                              THEN i."pricingLocationId" END) AS "locationId",
                p."currency", p."patientId", p."status" AS "planStatus",
                p."optionLabel" AS "planOptionLabel", p."createdAt" AS "planCreatedAt"

@@ -160,7 +160,7 @@ export class DiscountReportItemDto {
 
   @ApiProperty({
     description:
-      'SEC-041: rebaja del precio frente al de catálogo (0 si no la hay)',
+      'SEC-041: rebaja del precio frente al de catálogo (0 si no la hay). DX-513: 0 también si la referencia está en otra moneda conocida (el catálogo en una moneda distinta de la del plan, sin convertir); con la moneda del catálogo desconocida cuenta',
   })
   priceReduction!: number;
 

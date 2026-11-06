@@ -17,10 +17,12 @@ import {
 } from '../../../discounts/domain/discount-policy';
 import {
   checkEffectiveDiscount,
+  discountReference,
   effectiveDiscount,
   effectiveDiscountRises,
   priceBelowCatalogCapMessage,
   priceBelowCatalogReasonMessage,
+  type ItemReference,
   type PricedItem,
 } from '../../../discounts/domain/effective-discount';
 import type { TreatmentPlanWithItems } from '../../domain/entities/treatment-plan.entity';
@@ -58,6 +60,20 @@ export interface DiscountActor {
   userId: string;
   role: ClinicRole;
 }
+
+/**
+ * DX-513 (revisión H1): con la moneda nueva, un ítem con el precio por debajo
+ * del catálogo pasaría a contar como descuento, dentro del tope y con motivo,
+ * pero sin firma de quién lo dio.
+ */
+export const CURRENCY_CHANGE_UNSIGNED_DISCOUNT_MESSAGE =
+  'Con la nueva moneda, un ítem con el precio por debajo del de catálogo pasaría a contar como descuento sin firmar. Sube su precio al de catálogo antes de cambiar la moneda y, si hace falta, vuelve a rebajarlo después.';
+/**
+ * DX-513 (revisión H1): con la moneda nueva, una rebaja frente al catálogo
+ * firmada en la moneda actual dejaría de verse en el informe de descuentos.
+ */
+export const CURRENCY_CHANGE_HIDES_DISCOUNT_MESSAGE =
+  'Hay ítems con el precio por debajo del de catálogo que cuentan como descuento en la moneda actual: con la nueva dejarían de verse en el informe de descuentos. Sube su precio al de catálogo antes de cambiar la moneda.';
 
 export const ACCEPTED_PLAN_DISCOUNT_LOCKED_MESSAGE =
   'El presupuesto ya está aceptado: sus descuentos no se pueden cambiar.';
@@ -187,4 +203,64 @@ export function touchesDiscount(
       (effectiveDiscount(before).total > 0 ||
         effectiveDiscount(after).total > 0))
   );
+}
+
+/** Un ítem vivo del plan, con lo que decide si su rebaja cuenta (DX-513). */
+export interface CurrencyChangeItem extends ItemReference {
+  price: number;
+  discount: number;
+  discountReason: DiscountReason | null;
+  discountReasonNote: string | null;
+  discountById: string | null;
+}
+
+/**
+ * DX-513 (revisión H1): la moneda del plan decide si la rebaja frente al
+ * catálogo cuenta como descuento (`discountReference`). Al cambiarla, cada
+ * ítem vivo se vuelve a medir con la moneda nueva, dentro de la transacción
+ * del cambio (el plan bloqueado); cualquier error para todo el cambio:
+ *
+ * - Si su rebaja APARECE o crece: la regla del alta con el rol de quien
+ *   cambia la moneda (403 por encima del tope, 422 sin motivo) y, aunque la
+ *   pasara, 409: esa rebaja nunca se firmó.
+ * - Si DESAPARECE o baja: 409. El informe de descuentos se calcula con la
+ *   moneda actual del plan, así que una rebaja que cuenta hoy (firmada)
+ *   dejaría de verse; se bloquea en vez de esconderla.
+ *
+ * Los ítems no cambian: o el plan cambia de moneda sin tocar ningún
+ * descuento, o no cambia.
+ */
+export function assertCurrencyChangeKeepsDiscounts(
+  policy: DiscountPolicyRules,
+  actor: DiscountActor,
+  items: readonly CurrencyChangeItem[],
+  from: string,
+  to: string,
+  at: Date,
+): void {
+  for (const item of items) {
+    const measured = (currency: string): PricedItem => ({
+      catalogPrice: discountReference(item, currency),
+      price: item.price,
+      discount: item.discount,
+    });
+    const before = effectiveDiscount(measured(from)).priceReduction;
+    const after = effectiveDiscount(measured(to)).priceReduction;
+    if (after > before) {
+      decideDiscount(
+        policy,
+        actor,
+        {
+          ...measured(to),
+          reason: item.discountReason,
+          reasonNote: item.discountReasonNote,
+        },
+        at,
+      );
+      throw new ConflictException(CURRENCY_CHANGE_UNSIGNED_DISCOUNT_MESSAGE);
+    }
+    if (after < before) {
+      throw new ConflictException(CURRENCY_CHANGE_HIDES_DISCOUNT_MESSAGE);
+    }
+  }
 }
