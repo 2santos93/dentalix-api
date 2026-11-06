@@ -258,3 +258,57 @@ describe('netCredit: el saldo recibido por traspaso absorbe primero (DX-399-ter)
     });
   });
 });
+
+// DX-399-quater: lo recibido por traspaso que ninguna salida gastó sigue en el
+// plan y cubre ítems. `transfersInLeft` es esa cifra, por plan.
+describe('netCredit: lo recibido por traspaso que queda (DX-399-quater)', () => {
+  it('sin salidas, queda todo lo recibido, aunque el plan no tenga abonos con excedente', () => {
+    const result = netCredit([], [], [tin('t', '2026-10-05', 3000)]);
+    expect(result.transfersInLeft.get('plan-1')).toBe(3000);
+  });
+
+  it('una salida gasta primero lo recibido: queda solo el resto', () => {
+    const result = netCredit(
+      [pay('a', '2026-10-01', 3000)],
+      [out('2026-10-10', 1000)],
+      [tin('t', '2026-10-05', 3000)],
+    );
+    expect(result.transfersInLeft.get('plan-1')).toBe(2000);
+    // El abono no se tocó: lo recibido pagó la salida.
+    expect(result.byPayment.get('a')).toEqual({
+      netCents: 3000,
+      creditOutCents: 0,
+    });
+  });
+
+  it('traspaso y luego devolución de lo mismo: no queda nada recibido (no se gasta dos veces)', () => {
+    const result = netCredit(
+      [pay('a', '2026-10-01', 3000)],
+      [out('2026-10-10', 3000)],
+      [tin('t', '2026-10-05', 3000)],
+    );
+    expect(result.transfersInLeft.get('plan-1')).toBe(0);
+  });
+
+  it('una salida mayor que lo recibido lo deja en 0, nunca en negativo', () => {
+    const result = netCredit(
+      [pay('a', '2026-10-01', 1000)],
+      [out('2026-10-10', 5000)],
+      [tin('t', '2026-10-05', 3000)],
+    );
+    expect(result.transfersInLeft.get('plan-1')).toBe(0);
+  });
+
+  it('cada plan con lo suyo; un plan sin traspasos no aparece', () => {
+    const result = netCredit(
+      [pay('a', '2026-10-01', 3000, 'p1'), pay('b', '2026-10-01', 3000, 'p2')],
+      [out('2026-10-10', 500, 'p1'), out('2026-10-10', 1000, 'p2')],
+      [
+        tin('t1', '2026-10-03', 2000, 'p1'),
+        tin('t2', '2026-10-04', 1000, 'p1'),
+      ],
+    );
+    expect(result.transfersInLeft.get('p1')).toBe(2500);
+    expect(result.transfersInLeft.has('p2')).toBe(false);
+  });
+});

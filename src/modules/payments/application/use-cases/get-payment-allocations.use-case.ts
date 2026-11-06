@@ -54,6 +54,12 @@ export interface PaymentAllocationsView {
     status: 'ACCEPTED' | 'DONE';
     billable: number;
     paidByOthers: number;
+    /**
+     * DX-399-quater: lo que le cubre el saldo recibido por traspaso (después
+     * de todos los abonos). Solo si es > 0. No resta de `free`: un abono
+     * imputado al ítem lo desplaza y lo recibido vuelve a quedar a cuenta.
+     */
+    paidByTransfersIn?: number;
     free: number;
   }[];
 }
@@ -127,6 +133,9 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
       status: item.status,
       billable: fromCents(item.billableCents),
       paidByOthers: fromCents(item.paidByOthersCents),
+      ...(item.paidByTransfersInCents
+        ? { paidByTransfersIn: fromCents(item.paidByTransfersInCents) }
+        : {}),
       free: fromCents(Math.max(0, item.billableCents - item.paidByOthersCents)),
     })),
   };

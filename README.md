@@ -5734,7 +5734,7 @@ automática). Ahora:
   qué abonos se aplicará, qué otra tasa falta o que no se usará.
 - **Fuera**: la tasa de respaldo de N días (DX-384).
 
-### Devoluciones y traspasos del saldo a favor en la imputación (DX-399-bis, DX-399-ter)
+### Devoluciones y traspasos del saldo a favor en la imputación (DX-399-bis, DX-399-ter, DX-399-quater)
 
 - El disponible de un abono para imputar es su base menos lo imputado y menos lo
   que `payments/domain/credit-netting.ts` (la regla del informe «Cobrado sin
@@ -5771,8 +5771,28 @@ npm run credit-netting:report -- --tenant <uuid>   # una clínica
   `unallocated`) dan «Sin imputar» NETO, la misma cifra que el informe y que
   `onAccount` de la ventana «Ver imputación», también en un plan cancelado o
   rechazado (cancelar y devolver).
-- Límite conocido: lo recibido por traspaso no cubre ítems; con un ítem mayor
-  que el excedente de los abonos queda pendiente aunque Cartera dé 0.
+- **Lo recibido por traspaso cubre ítems (DX-399-quater).** Lo que el plan
+  recibió por traspaso y ninguna salida gastó (`transfersInLeft` de
+  `credit-netting`, = máx(0, Σ recibido − Σ salidas) del plan) es dinero del
+  paciente que ya está en el plan. Cubre lo que los abonos no cubren, después de
+  ellos y en el orden de reparto de los ítems (`coverWithTransfersIn`). No se
+  guarda como imputación: se deriva en cada lectura del libro de asientos
+  (inmutable) y de las imputaciones de los abonos, sin migración. Por eso un
+  abono que después se imputa al ítem lo desplaza, y lo recibido vuelve a quedar
+  a cuenta del plan. El reparto y la imputación manual no cambian: los abonos
+  van primero.
+  - `GET /treatment-plans/:id/balance`: el `paid` del ítem lo incluye y
+    `paidByTransfersIn` dice cuánto. `transfersInOnAccount` es lo recibido que
+    sigue a cuenta. Los dos campos son opcionales y no aparecen si valen 0.
+  - En «Ver imputación» (`GET /payments/:id/allocations`), `items[].paidByTransfersIn`
+    dice cuánto cubre lo recibido.
+  - No hay doble gasto. Una salida gasta primero lo recibido que queda, y a los
+    ítems solo llega lo que dejan todas las salidas. Ejemplo: con 30 recibidos y
+    una devolución de 30, no cubre nada.
+  - Un plan sin traspasos recibidos queda igual.
+  - Cartera no cambia: ya sumaba los asientos.
+- F6 (DX-399-quater): la cascada, el informe y el diagnóstico solo cuentan los
+  asientos y las bases en la moneda actual del plan, como el saldo del plan.
 
 ## Despliegue: roles de la BD (DX-113)
 
