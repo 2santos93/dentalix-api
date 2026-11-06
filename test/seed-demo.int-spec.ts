@@ -486,8 +486,13 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       validityDays: tenant.prescriptionValidityDays,
     }).toEqual(DEMO_PRESCRIPTION_SETTINGS);
     // DX-324: los ajustes los fija el ADMIN por su caso de uso, auditado.
+    // DX-540: el aviso de registro de las evoluciones es otro evento de ajustes.
     const settingsEvents = await raw.auditEvent.findMany({
-      where: { tenantId, resourceType: 'CLINIC_SETTINGS' },
+      where: {
+        tenantId,
+        resourceType: 'CLINIC_SETTINGS',
+        metadata: { path: ['reason'], equals: 'PRESCRIPTION_SETTINGS' },
+      },
       select: { action: true, actorRole: true, metadata: true },
     });
     expect(settingsEvents).toHaveLength(1);
@@ -819,6 +824,50 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     }
     const resin = entries.find((e) => e.template?.name === 'Resina');
     expect(resin?.notes).toContain('Diente 36, superficie O');
+  });
+
+  it('DX-540: aviso de registro activo y cada evolución con el registro de su autor al firmar', async () => {
+    const tenantId = await liveDemoTenantId();
+    const tenant = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { clinicalEntryLicenseWarning: true },
+    });
+    expect(tenant.clinicalEntryLicenseWarning).toBe(true);
+    const memberships = await raw.clinicMembership.findMany({
+      where: { tenantId, deletedAt: null },
+      select: {
+        userId: true,
+        role: true,
+        professionalLicense: true,
+        user: { select: { email: true } },
+      },
+    });
+    const licenseOf = new Map(
+      memberships.map((m) => [m.userId, m.professionalLicense]),
+    );
+    const entries = await raw.clinicalEntry.findMany({
+      where: { tenantId },
+      select: { performedById: true, authorProfessionalLicense: true },
+    });
+    expect(entries.length).toBeGreaterThan(0);
+    // Las licencias se cargan antes de la primera evolución: cada una lleva
+    // el registro que su autor tenía al firmar (los dentistas, todos).
+    for (const e of entries) {
+      expect(e.authorProfessionalLicense).toBe(
+        licenseOf.get(e.performedById as string) ?? null,
+      );
+    }
+    expect(entries.some((e) => e.authorProfessionalLicense !== null)).toBe(
+      true,
+    );
+    // Para ver el aviso: el ADMIN demo no tiene registro (README).
+    const admin = memberships.find(
+      (m) => m.user.email === 'admin@demo.dentalix.app',
+    );
+    expect(admin).toMatchObject({
+      role: ClinicRole.ADMIN,
+      professionalLicense: null,
+    });
   });
 
   it('deja las 5 indicaciones postoperatorias de ejemplo, POI-EXO ligada a la exodoncia simple y una entrega impresa de ayer (DX-222)', async () => {
