@@ -22,6 +22,11 @@
 -- lote y dura lo que su transacción (ver
 -- 20261128090000_dx502_plan_item_catalog_currency).
 --
+-- Al repetirlo (README) se salta los planes con un enlace a distancia v4 aún
+-- pendiente: su foto selló el ítem sin moneda y rellenarlo invalidaría el
+-- enlace. Esos ítems se rellenan al repetirlo cuando el enlace ya se firmó,
+-- se anuló o caducó. En el primer despliegue no hay ninguna foto v4.
+--
 -- Idempotente: solo toca los ítems aún sin moneda. Si se corta a mitad (los
 -- lotes hechos quedan), basta con repetirla (`prisma migrate resolve
 -- --rolled-back 20261128090100_dx502_plan_item_catalog_currency_backfill` y
@@ -67,7 +72,20 @@ BEGIN
        WHERE i."tenantId" = t
          AND i."id" = ANY (batch)
          AND i."basePrice" IS NOT NULL
-         AND i."catalogCurrency" IS NULL;
+         AND i."catalogCurrency" IS NULL
+         -- Al repetirlo: no se toca un plan con un enlace v4 pendiente, cuya
+         -- foto selló `listPriceCurrency: null`; rellenarlo cambiaría el
+         -- presupuesto vivo y el enlace dejaría de valer.
+         AND NOT EXISTS (
+           SELECT 1 FROM public."signature_requests" r
+            WHERE r."tenantId" = t
+              AND r."treatmentPlanId" = i."planId"
+              AND r."type" = 'BUDGET'
+              AND r."signedAt" IS NULL
+              AND r."revokedAt" IS NULL
+              AND r."expiresAt" > pg_catalog.now()
+              AND r."budgetContent" ->> 'version' = '4'
+         );
       COMMIT;
     END LOOP;
   END LOOP;

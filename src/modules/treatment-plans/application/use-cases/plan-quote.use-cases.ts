@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import {
@@ -37,6 +38,12 @@ import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document
 
 export type PlanQuoteClock = () => Date;
 export const PLAN_QUOTE_CLOCK = Symbol('PLAN_QUOTE_CLOCK');
+/**
+ * DX-502: cómo se componen los presupuestos nuevos (`PLAN_QUOTE_COMPOSE_V4`):
+ * `current` (v4, por defecto) o `legacy` (v2/v3, como antes de DX-502). Leer y
+ * verificar fotos v1–v4 no depende de esto.
+ */
+export const PLAN_QUOTE_COMPOSITION = Symbol('PLAN_QUOTE_COMPOSITION');
 
 export const PLAN_NOT_FOUND_MESSAGE = 'Plan de tratamiento no encontrado';
 export const PLAN_ACCEPTED_CONFLICT_MESSAGE =
@@ -110,8 +117,14 @@ function liveContent(
   source: PlanQuoteSource,
   now: Date,
   names: ClinicDocumentTypeNames,
+  composition: QuoteComposition,
 ): QuoteContent {
-  return composeQuoteContent(source, quoteIssuedOn(source, now), names);
+  return composeQuoteContent(
+    source,
+    quoteIssuedOn(source, now),
+    names,
+    composition,
+  );
 }
 
 /**
@@ -165,6 +178,7 @@ function toDocument(
   source: PlanQuoteSource,
   now: Date,
   names: ClinicDocumentTypeNames,
+  composition: QuoteComposition,
 ): PlanQuoteDocument {
   const base = {
     visitOrganization:
@@ -181,7 +195,13 @@ function toDocument(
   };
   const stored = source.acceptance;
   if (!stored) {
-    const content = liveContent(source, now, names);
+    // Compuesto como v2/v3 (`legacy`), la moneda de cada precio de lista se
+    // completa para mostrarla con la congelada en el ítem: no está sellada en
+    // esas versiones, así que el hash no cambia.
+    const content = withListPriceCurrencies(
+      liveContent(source, now, names, composition),
+      source.items,
+    );
     return {
       ...content,
       ...base,
@@ -227,6 +247,9 @@ export class GetPlanQuoteUseCase {
     @Inject(PLAN_QUOTE_CLOCK)
     private readonly now: PlanQuoteClock,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
   ) {}
 
   /** El presupuesto imprimible; 404 si el plan no es de este paciente/clínica. */
@@ -241,7 +264,7 @@ export class GetPlanQuoteUseCase {
     const names = source.acceptance
       ? {}
       : await this.documentTypeNames.get(source.location.id);
-    return toDocument(source, this.now(), names);
+    return toDocument(source, this.now(), names, this.composition);
   }
 }
 
@@ -264,6 +287,9 @@ export class AcceptTreatmentPlanUseCase {
     @Inject(PLAN_QUOTE_CLOCK)
     private readonly now: PlanQuoteClock,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
   ) {}
 
   /**
@@ -326,6 +352,7 @@ export class AcceptTreatmentPlanUseCase {
           source,
           acceptedAt,
           book.forLocation(source.location.id),
+          this.composition,
         );
         const contentHash = computeQuoteHash(content);
         if (contentHash !== input.contentHash) {
@@ -360,6 +387,7 @@ export class AcceptTreatmentPlanUseCase {
       outcome.source,
       acceptedAt,
       book.forLocation(outcome.source.location.id),
+      this.composition,
     );
   }
 }

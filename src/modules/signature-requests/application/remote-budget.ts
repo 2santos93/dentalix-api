@@ -101,6 +101,29 @@ export class RemoteBudgetCheck {
   }
 
   /**
+   * DX-502: la moneda del catálogo de cada ítem del plan vivo, para mostrar
+   * la de un enlace v2/v3 (que no la guardó). Vacío si no es un presupuesto
+   * anterior a DX-502: una foto v4 ya la lleva y no se lee nada.
+   */
+  async listPriceCurrencies(
+    request: SignatureRequestRecord,
+  ): Promise<{ id: string; listPriceCurrency: string | null }[]> {
+    const sent = sentBudget(request);
+    if (!sent || sent.version === 4 || !request.treatmentPlanId) return [];
+    const budget = await this.repo.loadBudget(
+      request.patientId,
+      request.treatmentPlanId,
+      request.locationId,
+    );
+    return (
+      budget?.quote.items.map((i) => ({
+        id: i.id,
+        listPriceCurrency: i.listPriceCurrency,
+      })) ?? []
+    );
+  }
+
+  /**
    * La comprobación para repetirla dentro de la transacción de la firma, con
    * el plan bloqueado (los nombres de documento se leen antes: son de la
    * clínica, no del plan).

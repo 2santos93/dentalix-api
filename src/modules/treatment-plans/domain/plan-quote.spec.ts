@@ -552,9 +552,9 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
   });
 
   it('sin moneda del catálogo conocida, tampoco hay ahorro', () => {
-    const [cop] = eurPlan().items;
+    const [ves] = eurPlan().items;
     const content = buildQuoteContent(
-      source({ currency: 'EUR', items: [{ ...cop, listPriceCurrency: null }] }),
+      source({ currency: 'EUR', items: [{ ...ves, listPriceCurrency: null }] }),
       '2026-11-01',
     );
     expect(content.items[0].listPriceCurrency).toBeNull();

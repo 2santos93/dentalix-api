@@ -145,14 +145,14 @@ describe('Moneda del catálogo: aislamiento por clínica y por sede (e2e, DX-502
   });
 
   it('cada clínica con la moneda de SUS sedes: VES en una, EUR en la otra', async () => {
-    const cop = await catalogAndPatient(vesClinic, 'DX502-A');
+    const ves = await catalogAndPatient(vesClinic, 'DX502-A');
     const eur = await catalogAndPatient(eurClinic, 'DX502-B');
 
     expect(
-      await quoteCurrency(vesClinic, cop.patientId, cop.catalogItemId),
+      await quoteCurrency(vesClinic, ves.patientId, ves.catalogItemId),
     ).toBe('VES');
     expect(
-      await addedItem(vesClinic, cop.patientId, cop.catalogItemId),
+      await addedItem(vesClinic, ves.patientId, ves.catalogItemId),
     ).toMatchObject({ basePrice: 80000, catalogCurrency: 'VES' });
 
     expect(

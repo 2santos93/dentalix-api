@@ -17,7 +17,11 @@ import type {
   SignatureRequestEmailVars,
 } from '../../../notifications/email/domain/email-message';
 import { quoteSource } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-plan-quote.repository';
-import { computeQuoteHash } from '../../../treatment-plans/domain/plan-quote';
+import {
+  computeQuoteHash,
+  parseQuoteContent,
+  type QuoteComposition,
+} from '../../../treatment-plans/domain/plan-quote';
 import { composeQuoteContent } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
 import { RemoteBudgetCheck } from '../remote-budget';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -87,7 +91,7 @@ function recipient(
   };
 }
 
-function setup() {
+function setup(composition?: QuoteComposition) {
   let now = SENT_AT;
   const clock = () => now;
   const templates = new InMemoryConsentTemplateRepository();
@@ -184,6 +188,7 @@ function setup() {
       email,
       tenantContext,
       clock,
+      composition,
     ),
     list: new ListPatientSignatureRequestsUseCase(repo, clock),
     revoke: new RevokeSignatureRequestUseCase(
@@ -1076,8 +1081,98 @@ describe('presupuesto a distancia (DX-415)', () => {
       const doc = await ctx.inTenant(() =>
         ctx.document.execute(token, sessionToken),
       );
-      // La foto v2 no guardó la moneda: la web oculta la cifra con la nota.
-      expect(doc.budget?.items[0].listPriceCurrency).toBeNull();
+      // L2: la foto v2 no guardó la moneda; para mostrarla se completa con
+      // la congelada en el ítem vivo (el enlace vale: el plan es la foto),
+      // sin tocar lo sellado.
+      expect(doc.budget?.items[0].listPriceCurrency).toBe('VES');
+      expect(doc.budget?.totals).toEqual(v2.totals);
+      expect(row.budgetContentHash).toBe(computeQuoteHash(v2));
+      expect(computeQuoteHash(parseQuoteContent(row.budgetContent))).toBe(
+        row.budgetContentHash,
+      );
+    });
+
+    it('L2: un enlace v2 de una clínica con una sola moneda enseña el precio de lista en ella', async () => {
+      const ctx = setup();
+      const budget = presentedBudget(ctx);
+      budget.quote = {
+        ...budget.quote,
+        items: [
+          {
+            ...budget.quote.items[0],
+            price: 850,
+            discount: 0,
+            basePrice: 1000,
+            referencePrice: 850,
+            agreementName: 'Surco Salud',
+            agreementPayerName: 'Surco Salud',
+            listPriceCurrency: 'USD',
+          },
+        ],
+      };
+      await sendBudget(ctx);
+      const [row] = ctx.repo.rows;
+      const sent = row.budgetContent as { issuedOn: string };
+      const v2 = composeQuoteContent(budget.quote, sent.issuedOn, {}, 'legacy');
+      row.budgetContent = JSON.parse(JSON.stringify(v2)) as never;
+      row.budgetContentHash = computeQuoteHash(v2);
+      const token = tokenOf(ctx);
+      await ctx.inTenant(() => ctx.code.execute(token, EVIDENCE));
+      const code = ctx.codes.at(-1)!.vars.code;
+      const { sessionToken } = await ctx.inTenant(() =>
+        ctx.verify.execute(token, code, EVIDENCE),
+      );
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, sessionToken),
+      );
+      expect(doc.budget?.items[0]).toMatchObject({
+        listPrice: 1000,
+        listPriceCurrency: 'USD',
+      });
+      expect(doc.budget?.totals[0].agreementSaving).toBe(150);
+      expect(row.budgetContentHash).toBe(computeQuoteHash(v2));
+    });
+
+    it('con PLAN_QUOTE_COMPOSE_V4=false el enlace se envía como antes (v2) y sigue valiendo', async () => {
+      const ctx = setup('legacy');
+      const budget = eurBudget(ctx);
+      await sendBudget(ctx);
+      const [row] = ctx.repo.rows;
+      const sent = parseQuoteContent(row.budgetContent);
+      expect(sent.version).toBe(2);
+      expect(row.budgetContentHash).toBe(
+        computeQuoteHash(
+          composeQuoteContent(budget.quote, sent.issuedOn, {}, 'legacy'),
+        ),
+      );
+      const token = tokenOf(ctx);
+      await expect(
+        ctx.inTenant(() => ctx.view.execute(token)),
+      ).resolves.toBeDefined();
+    });
+
+    it('con el flag en false, un enlace v4 ya enviado se sigue verificando y leyendo', async () => {
+      const ctx = setup('legacy');
+      const budget = eurBudget(ctx);
+      await sendBudget(ctx);
+      const [row] = ctx.repo.rows;
+      const sent = row.budgetContent as { issuedOn: string };
+      // La foto que envió una réplica con el flag en true.
+      const v4 = composeQuoteContent(budget.quote, sent.issuedOn, {});
+      expect(v4.version).toBe(4);
+      row.budgetContent = JSON.parse(JSON.stringify(v4)) as never;
+      row.budgetContentHash = computeQuoteHash(v4);
+      const token = tokenOf(ctx);
+      await ctx.inTenant(() => ctx.code.execute(token, EVIDENCE));
+      const code = ctx.codes.at(-1)!.vars.code;
+      const { sessionToken } = await ctx.inTenant(() =>
+        ctx.verify.execute(token, code, EVIDENCE),
+      );
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, sessionToken),
+      );
+      expect(doc.budget?.items[0].listPriceCurrency).toBe('VES');
+      expect(doc.budget?.totals[0].agreementSaving).toBe(0);
     });
   });
 

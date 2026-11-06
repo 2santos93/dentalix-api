@@ -97,7 +97,7 @@ class PublicBudgetItemDto {
     type: String,
     nullable: true,
     description:
-      'DX-502: moneda ISO 4217 de `listPrice` (la del catálogo, congelada en la foto enviada). Puede no ser la del plan: no se convierte. Null si no se sabe (foto anterior a DX-502 o sedes sin moneda común): no se muestra la cifra.',
+      'DX-502: moneda ISO 4217 de `listPrice`: la del catálogo, congelada en la foto enviada (en un enlace anterior a DX-502, v2/v3, la congelada en los ítems del plan). Puede no ser la del plan: no se convierte. Null si no se sabe (sedes sin moneda común): no se muestra la cifra.',
   })
   listPriceCurrency!: string | null;
 }

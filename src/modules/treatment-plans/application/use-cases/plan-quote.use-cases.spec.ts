@@ -6,6 +6,7 @@ import {
 import { TreatmentPlanStatus } from '@prisma/client';
 import {
   AcceptTreatmentPlanUseCase,
+  composeQuoteContent,
   GetPlanQuoteUseCase,
   PLAN_ACCEPTED_CONFLICT_MESSAGE,
   QUOTE_CHANGED_MESSAGE,
@@ -745,5 +746,121 @@ describe('AcceptTreatmentPlanUseCase (DX-012)', () => {
         META,
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('DX-502: PLAN_QUOTE_COMPOSE_V4 (con qué versión se componen los nuevos)', () => {
+  const FISCAL = {
+    legalName: 'Sonrisas S.A.',
+    taxIdLabel: 'ID fiscal',
+    taxId: 'J-1',
+    address: null,
+    email: null,
+    phone: null,
+  };
+  /** Plan en USD con un ítem de convenio cuyo catálogo está en VES. */
+  function source(fiscal = false) {
+    const base = quoteSource();
+    return quoteSource({
+      clinic: fiscal ? { ...base.clinic, fiscal: FISCAL } : base.clinic,
+      items: [
+        {
+          ...base.items[0],
+          price: 850,
+          discount: 0,
+          basePrice: 1000,
+          referencePrice: 850,
+          agreementName: 'Surco Salud −15 %',
+          agreementPayerName: 'Surco Salud',
+          listPriceCurrency: 'VES',
+        },
+      ],
+    });
+  }
+  function useCases(composition?: 'current' | 'legacy') {
+    const repo = new InMemoryPlanQuoteRepository();
+    const clock = () => NOW;
+    return {
+      repo,
+      get: new GetPlanQuoteUseCase(repo, clock, names, composition),
+      accept: new AcceptTreatmentPlanUseCase(repo, clock, names, composition),
+    };
+  }
+
+  it('en false compone como antes de DX-502: v2 (v3 con datos fiscales) con el hash de entonces', async () => {
+    for (const [fiscal, version] of [
+      [false, 2],
+      [true, 3],
+    ] as const) {
+      const { repo, get } = useCases('legacy');
+      repo.add(source(fiscal));
+      const doc = await get.execute('patient-1', 'plan-1');
+      expect(doc.version).toBe(version);
+      expect(doc.contentHash).toBe(
+        computeQuoteHash(
+          composeQuoteContent(source(fiscal), '2026-10-16', {}, 'legacy'),
+        ),
+      );
+      // Ahorro como antes (lo sella la v2/v3) y la moneda del precio de lista
+      // completada solo para mostrarla: no entra en el hash.
+      expect(doc.totals[0].agreementSaving).toBe(150);
+      expect(doc.items[0].listPriceCurrency).toBe('VES');
+      expect(computeQuoteHash(doc)).toBe(doc.contentHash);
+    }
+  });
+
+  it('en true (y por defecto) compone la v4', async () => {
+    for (const composition of ['current', undefined] as const) {
+      const { repo, get } = useCases(composition);
+      repo.add(source());
+      const doc = await get.execute('patient-1', 'plan-1');
+      expect(doc.version).toBe(4);
+      expect(doc.totals[0].agreementSaving).toBe(0);
+    }
+  });
+
+  it('en false se firma la v2 que se mostró, y sigue íntegra', async () => {
+    const { repo, get, accept } = useCases('legacy');
+    repo.add(source());
+    const shown = await get.execute('patient-1', 'plan-1');
+    const signed = await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    expect(signed.version).toBe(2);
+    expect(signed.acceptance?.integrityOk).toBe(true);
+  });
+
+  it('en false se sigue leyendo y verificando una aceptación v4 ya firmada', async () => {
+    const current = useCases('current');
+    current.repo.add(source());
+    const shown = await current.get.execute('patient-1', 'plan-1');
+    await current.accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    const legacyGet = new GetPlanQuoteUseCase(
+      current.repo,
+      () => NOW,
+      names,
+      'legacy',
+    );
+    const printed = await legacyGet.execute('patient-1', 'plan-1');
+    expect(printed.version).toBe(4);
+    expect(printed.contentHash).toBe(shown.contentHash);
+    expect(printed.items[0].listPriceCurrency).toBe('VES');
+    expect(printed.acceptance?.integrityOk).toBe(true);
   });
 });

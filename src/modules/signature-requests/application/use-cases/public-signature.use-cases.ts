@@ -21,7 +21,11 @@ import {
 import { describeDeliveryError } from '../../../notifications/email/application/retry-policy';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
-import { computeAcceptanceHash } from '../../../treatment-plans/domain/plan-quote';
+import {
+  computeAcceptanceHash,
+  withListPriceCurrencies,
+  type QuoteSourceItem,
+} from '../../../treatment-plans/domain/plan-quote';
 import type { QuoteContent } from '../../../treatment-plans/domain/plan-quote';
 import { RemoteBudgetCheck, sentBudget } from '../remote-budget';
 import type {
@@ -544,9 +548,22 @@ export interface PublicSignatureDocument {
   budget: PublicBudgetView | null;
 }
 
-function documentOf(ctx: PublicSignatureContext): PublicSignatureDocument {
+/**
+ * `liveItems` (DX-502): la moneda del catálogo congelada en los ítems del plan
+ * vivo, para completar la de un enlace v2/v3 enviado antes de DX-502. Solo se
+ * pasa cuando el enlace sigue valiendo (el plan vivo es la foto enviada), y no
+ * toca nada de lo sellado: una foto v4 se devuelve tal cual.
+ */
+function documentOf(
+  ctx: PublicSignatureContext,
+  liveItems: readonly Pick<QuoteSourceItem, 'id' | 'listPriceCurrency'>[] = [],
+): PublicSignatureDocument {
   const { request } = ctx;
-  const budget = sentBudget(request);
+  const sent = sentBudget(request);
+  const budget =
+    sent && liveItems.length > 0
+      ? withListPriceCurrencies(sent, liveItems)
+      : sent;
   return {
     type: request.type,
     title: request.title,
@@ -606,7 +623,8 @@ export class GetPublicSignatureDocumentUseCase {
       now,
     );
     if (!sessionMatches(ctx.request, session, now)) throw sessionRequired();
-    return documentOf(ctx);
+    // `findLive` ya comprobó que el enlace sigue valiendo (DX-415).
+    return documentOf(ctx, await this.budgets.listPriceCurrencies(ctx.request));
   }
 }
 

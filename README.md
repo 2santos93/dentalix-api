@@ -978,7 +978,8 @@ TODAS las sedes activas de la clínica (no solo las del usuario), o `NULL` si
 no hay una común. No cambia después (trigger
 `treatment_plan_items_catalog_currency_frozen`) y las alternativas la copian.
 
-- El presupuesto se compone como **v4**: cada ítem lleva `listPriceCurrency`
+- El presupuesto se compone como **v4** (con `PLAN_QUOTE_COMPOSE_V4`, por
+  defecto `true`; ver «Despliegue» más abajo): cada ítem lleva `listPriceCurrency`
   (sellado en el hash) y el «Ahorro por convenio» solo suma los ítems cuyo
   precio de lista está en la moneda del plan (nunca resta monedas distintas).
   La v4 sella también los datos fiscales de la clínica (DX-019) o `null` si
@@ -986,8 +987,9 @@ no hay una común. No cambia después (trigger
 - Las fotos v1/v2/v3 ya firmadas conservan su hash; al leerlas, la API
   completa `listPriceCurrency` con la del ítem. Un enlace a distancia v2/v3
   enviado antes del despliegue se recompone con la regla de entonces (v3 con
-  datos fiscales, v2 sin ellos) y sigue valiendo; la página pública lo
-  muestra sin cifra de precio de lista (`listPriceCurrency: null`).
+  datos fiscales, v2 sin ellos) y sigue valiendo; la página pública le
+  completa `listPriceCurrency` con la de los ítems del plan vivo (solo para
+  mostrarla: el enlace vale si el plan es la foto, y no está sellada en v2/v3).
 - Se expone en `TreatmentPlanItemDto.catalogCurrency`,
   `PriceQuoteDto.catalogCurrency`, `PlanQuoteItemDto.listPriceCurrency` y
   `PublicBudgetItemDto.listPriceCurrency`.
@@ -995,15 +997,32 @@ no hay una común. No cambia después (trigger
   (moneda común de las sedes activas de cada clínica; sin común, `NULL`).
   Solo el relleno puede poner la moneda a un ítem que no la tenía: fija
   `app.dx502_backfill = 'on'` en cada lote y los triggers lo exigen.
-- **Despliegue (sin réplicas mixtas).** Una réplica sin DX-502 no sabe leer
-  las fotos v4: `parseQuoteContent` lanza un `Error` genérico y la ruta
-  responde 500 (presupuesto imprimible, aceptación en la clínica, enlace
-  público y su firma). Hay que desplegar sin dejar a la vez réplicas viejas y
-  nuevas sirviendo tráfico (parar las viejas antes de abrir las nuevas, o
-  cambiar todas de golpe), y no volver atrás la API una vez emitido algún
-  presupuesto v4. Orden: `prisma migrate deploy` (aditiva: las réplicas
-  viejas siguen funcionando con la columna nueva) → cambiar todas las réplicas
-  a DX-502.
+- **Despliegue y vuelta atrás: `PLAN_QUOTE_COMPOSE_V4`.** Una réplica sin
+  DX-502 no sabe leer una foto v4 (`parseQuoteContent` lanza y la ruta
+  responde 500: presupuesto imprimible, aceptación en la clínica, enlace
+  público y su firma). Con `PLAN_QUOTE_COMPOSE_V4=false` la API compone los
+  presupuestos nuevos exactamente como antes de DX-502 (v2, o v3 con datos
+  fiscales, con los mismos hashes), y sigue LEYENDO y verificando las v4. La
+  variable solo admite `true` o `false` (`validateEnv`); sin definir, `true`.
+  - **Despliegue _rolling_ desde una versión anterior a DX-502:**
+    1. `prisma migrate deploy` (aditiva: las réplicas viejas siguen
+       funcionando con la columna nueva).
+    2. Desplegar DX-502 con `PLAN_QUOTE_COMPOSE_V4=false`: réplicas viejas y
+       nuevas conviven, porque ninguna emite v4.
+    3. Con TODAS las réplicas en DX-502, repetir el relleno (ítems que dieron
+       de alta las réplicas viejas; ver el punto siguiente).
+    4. Poner `PLAN_QUOTE_COMPOSE_V4=true` (o quitarla) y reiniciar en
+       _rolling_: desde ahí se emiten v4.
+  - **Vuelta atrás:** primero `PLAN_QUOTE_COMPOSE_V4=false` en todas las
+    réplicas (dejan de emitirse v4); después se puede volver a una versión
+    anterior a DX-502. Las v4 ya emitidas (firmadas o enlaces enviados)
+    siguen necesitando una réplica con DX-502 para leerse: mientras existan,
+    la versión anterior da 500 en ellas. Con DX-502 desplegado y el flag en
+    `false`, todo sigue funcionando.
+  - Cambiar el flag no invalida nada firmado ni enviado (cada foto se
+    verifica con su versión). Un presupuesto que se MOSTRÓ en la clínica con
+    un valor y se acepta con el otro da 409 («el presupuesto cambió»): se
+    vuelve a mostrar.
 - **Ítems creados por réplicas viejas tras el relleno.** Los ítems que dé de
   alta una réplica sin DX-502 entre el relleno y el cambio de réplicas quedan
   con `catalogCurrency` NULL (la web oculta su precio de lista con la nota).
@@ -1015,7 +1034,13 @@ no hay una común. No cambia después (trigger
     -f prisma/migrations/20261128090100_dx502_plan_item_catalog_currency_backfill/migration.sql
   ```
   `$DIRECT_URL_SIN_SCHEMA` es `DIRECT_URL` sin `?schema=public` (psql no lo
-  acepta). Si el relleno de la migración se cortó a medias (migración
+  acepta). **Repetirlo no invalida enlaces v4 pendientes:** se salta los
+  planes con un enlace a distancia v4 sin firmar, anular ni caducar (su foto
+  selló esos ítems sin moneda, y rellenarlos cambiaría el presupuesto vivo);
+  esos ítems se rellenan en una pasada posterior, cuando el enlace ya no
+  está pendiente. Un presupuesto v4 que solo se MOSTRÓ en la clínica (sin
+  enlace) sí cambia: aceptarlo da 409 y se vuelve a mostrar. Siguiendo el
+  despliegue de arriba (relleno antes de activar la v4) no hay ninguno. Si el relleno de la migración se cortó a medias (migración
   fallida), basta `npx prisma migrate resolve --rolled-back
   20261128090100_dx502_plan_item_catalog_currency_backfill` y
   `npx prisma migrate deploy`.

@@ -159,8 +159,8 @@ async function planWithItem(
 const asClinic = <T>(tenantId: string, fn: () => Promise<T>) =>
   tenantContext.run(tenantId, fn);
 
-/** Envía el presupuesto como la app (foto v4 + hash) y lo firma el paciente. */
-async function sendAndSign(c: Clinic, planId: string): Promise<void> {
+/** Envía el presupuesto como la app (foto v4 + hash); devuelve la solicitud. */
+async function sendBudget(c: Clinic, planId: string): Promise<string> {
   const budget = await asClinic(c.tenantId, () =>
     signatures.loadBudget(c.patientId, planId, c.locationId),
   );
@@ -197,6 +197,13 @@ async function sendAndSign(c: Clinic, planId: string): Promise<void> {
       createdAt: now,
     }),
   );
+  return id;
+}
+
+/** Envía el presupuesto como la app (foto v4 + hash) y lo firma el paciente. */
+async function sendAndSign(c: Clinic, planId: string): Promise<void> {
+  const id = await sendBudget(c, planId);
+  const now = new Date();
   await asClinic(c.tenantId, () =>
     signatures.withLockedRequest(
       id,
@@ -336,6 +343,36 @@ describe('moneda del catálogo en el ítem del plan (DX-502, Postgres)', () => {
       expect(after).toEqual(amountsBefore);
       expect(await catalogCurrencyOf(items.open)).toBe('VES');
     });
+  });
+
+  it('repetir el relleno se salta un plan con un enlace v4 pendiente (su hash sigue valiendo) y lo rellena cuando ya no lo está', async () => {
+    const c = await seedClinic('dx502-enlace-v4', [{ currency: 'VES' }]);
+    // Un ítem que dio de alta una réplica sin DX-502 (sin moneda) y un enlace
+    // v4 enviado después: su foto selló `listPriceCurrency: null`.
+    const { planId, itemId } = await planWithItem(c);
+    const requestId = await sendBudget(c, planId);
+    const stillMatches = async () => {
+      const request = await owner.signatureRequest.findUniqueOrThrow({
+        where: { id: requestId },
+      });
+      const budget = await asClinic(c.tenantId, () =>
+        signatures.loadBudget(c.patientId, planId, c.locationId),
+      );
+      return budgetStillMatches(request, budget!.quote, {});
+    };
+    expect(await stillMatches()).toBe(true);
+
+    runBackfill();
+    expect(await catalogCurrencyOf(itemId)).toBeNull();
+    expect(await stillMatches()).toBe(true);
+
+    // Anulado el enlace, la siguiente pasada sí lo rellena.
+    await owner.signatureRequest.update({
+      where: { id: requestId },
+      data: { revokedAt: new Date(), revokedById: c.userId },
+    });
+    runBackfill();
+    expect(await catalogCurrencyOf(itemId)).toBe('VES');
   });
 
   it('una vez escrita, la moneda del catálogo no cambia ni se borra (trigger)', async () => {

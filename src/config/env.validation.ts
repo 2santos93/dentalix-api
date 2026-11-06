@@ -62,6 +62,7 @@ import {
 import { RECHECK_MAX_FAILURES_LIMIT } from '../modules/domains/domain/rules/tenant-domain-rules';
 import { parseMfaEncryptionKey } from '../shared/crypto/mfa-secret-cipher';
 import { loadShutdownConfig, shutdownConfigProblems } from './shutdown-config';
+import { planQuoteComposeV4Problems } from '../modules/treatment-plans/application/plan-quote-composition.config';
 import { httpServerTimeoutProblems } from './http-server-timeouts';
 import { transactionConfigProblems } from '../shared/prisma/transaction-config';
 import { providerRatesLimitsProblems } from '../modules/exchange/application/provider-rates-limits';
@@ -766,6 +767,8 @@ export function validateEnv(env: Env): Env {
   );
   // SEC-054/SEC-058: topes del proveedor de tasas (y que cuadren entre sí).
   problems.push(...providerRatesLimitsProblems(get));
+  // DX-502: versión con que se componen los presupuestos nuevos.
+  problems.push(...planQuoteComposeV4Problems(get));
 
   if (problems.length > 0) {
     throw new Error(
