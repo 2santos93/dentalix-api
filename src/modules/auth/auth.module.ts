@@ -22,7 +22,11 @@ import { PasswordService } from '../../shared/crypto/password.service';
 import { TokenService } from '../../shared/crypto/token.service';
 import { EmailModule } from '../notifications/email/email.module';
 import { PasswordResetController } from './presentation/password-reset.controller';
-import { RequestPasswordResetUseCase } from './application/use-cases/request-password-reset.use-case';
+import {
+  PASSWORD_RESET_CONCURRENCY,
+  RequestPasswordResetUseCase,
+  passwordResetConcurrency,
+} from './application/use-cases/request-password-reset.use-case';
 import { ResetPasswordUseCase } from './application/use-cases/reset-password.use-case';
 import { PASSWORD_RESET_REPOSITORY } from './domain/ports/password-reset-repository.port';
 import { PASSWORD_RESET_NOTIFIER } from './domain/ports/password-reset-notifier.port';
@@ -124,6 +128,15 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     { provide: COUNTRY_WHITELIST, useClass: PrismaCountryWhitelist },
     // Recuperar la contraseña por email (DX-010).
     RequestPasswordResetUseCase,
+    // DX-149-quater: cuántos restablecimientos en curso a la vez.
+    {
+      provide: PASSWORD_RESET_CONCURRENCY,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        passwordResetConcurrency(
+          config.get<string>('PASSWORD_RESET_MAX_CONCURRENCY'),
+        ),
+    },
     ResetPasswordUseCase,
     {
       provide: PASSWORD_RESET_REPOSITORY,

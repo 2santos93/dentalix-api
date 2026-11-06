@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -27,6 +28,8 @@ import { purgeTenantsBySubdomain } from './support/tenant-purge';
 // sin tope y que para un email sin cuenta, sin esperar al trabajo; y por
 // detrás no rota el token ni encola otro email: el enlace que ya salió sigue
 // valiendo.
+// DX-149-quater: lo mismo cuando quien frena es el tope POR USUARIO (sumando
+// sus clínicas) y no el de la clínica del host.
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -34,6 +37,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 
 const SUB = 'dx149ter-reset-tope';
 const HOST = hostFor(SUB);
+const SUB_B = 'dx149q-reset-usuario';
+const HOST_B = hostFor(SUB_B);
 const DOMAIN = '@dx149ter-reset.test';
 const USER_EMAIL = `luisa${DOMAIN}`;
 const PASSWORD = 'Clave-Caracas-2026!';
@@ -53,7 +58,7 @@ async function cleanup(): Promise<void> {
   await raw.clinicMembership.deleteMany({
     where: { user: { email: { endsWith: DOMAIN } } },
   });
-  await purgeTenantsBySubdomain(raw, [SUB]);
+  await purgeTenantsBySubdomain(raw, [SUB, SUB_B]);
   await raw.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
 }
 
@@ -64,20 +69,19 @@ describe('Restablecer contraseña con el tope alcanzado (e2e, DX-149-ter)', () =
   const mailer = new RecordingMailer();
   const lines: LogLine[] = [];
 
-  const forgot = (email: string) =>
+  const forgot = (email: string, host = HOST) =>
     request(app.getHttpServer())
       .post('/api/v1/auth/forgot-password')
-      .set('X-Tenant-Host', HOST)
+      .set('X-Tenant-Host', host)
       .send({ email });
 
   const RESET_LINK = /\/restablecer\/([A-Za-z0-9_-]{43})/;
   /** Los correos de restablecimiento (el alta también manda el suyo). */
   const resets = () => mailer.sent.filter((m) => RESET_LINK.test(m.text));
 
-  const outcomes = () =>
-    lines
-      .filter((l) => l.event === 'password_reset.requested')
-      .map((l) => l.outcome);
+  const requested = () =>
+    lines.filter((l) => l.event === 'password_reset.requested');
+  const outcomes = () => requested().map((l) => l.outcome);
 
   beforeAll(async () => {
     await cleanup();
@@ -160,5 +164,97 @@ describe('Restablecer contraseña con el tope alcanzado (e2e, DX-149-ter)', () =
         where: { template: 'PASSWORD_RESET', referenceId: userId },
       }),
     ).toBe(1);
+  });
+
+  it('DX-149-quater: con el tope POR USUARIO alcanzado (sumando clínicas) la respuesta es idéntica, y no se rota el token ni sale correo', async () => {
+    // Carmen administra la clínica B y también trabaja en la A.
+    const carmenEmail = `carmen${DOMAIN}`;
+    const registered = await registerVerified(
+      app,
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
+        clinicName: 'Clínica Dental Chuao',
+        subdomain: SUB_B,
+        email: carmenEmail,
+        password: PASSWORD,
+        fullName: 'Carmen Rojas',
+      }),
+    );
+    const carmen = (registered.body as { userId: string }).userId;
+    const { id: clinicA } = await raw.tenant.findUniqueOrThrow({
+      where: { subdomain: SUB },
+      select: { id: true },
+    });
+    await raw.clinicMembership.create({
+      data: { tenantId: clinicA, userId: carmen, role: 'RECEPTION' },
+    });
+    const seen = requested().length;
+
+    // Desde B, libre: sale el suyo.
+    const free = await forgot(carmenEmail, HOST_B);
+    await pollUntil(() => Promise.resolve(requested().length >= seen + 1));
+    expect(requested()[seen]).toMatchObject({ outcome: 'SENT' });
+    // Hoy ya lleva 5 (el tope del destinatario, que es el del usuario): 4 más
+    // emitidos antes desde otras clínicas.
+    const now = Date.now();
+    await raw.userToken.createMany({
+      data: [1, 2, 3, 4].map((i) => ({
+        userId: carmen,
+        purpose: 'PASSWORD_RESET' as const,
+        tokenHash: randomBytes(32).toString('hex'),
+        expiresAt: new Date(now - i * 60_000 + 30 * 60_000),
+        invalidatedAt: new Date(now - i * 60_000 + 1000),
+        createdAt: new Date(now - i * 60_000),
+      })),
+    });
+    const tokensBefore = await raw.userToken.findMany({
+      where: { userId: carmen },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    // Desde A, cuyo tope por destinatario está intacto para ella: lo frena
+    // el del usuario. Y un email sin cuenta, para comparar.
+    const capped = await forgot(carmenEmail, HOST);
+    const missing = await forgot(`nadie.b${DOMAIN}`, HOST);
+    await pollUntil(() => Promise.resolve(requested().length >= seen + 3));
+
+    const after = requested().slice(seen + 1);
+    expect(after).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tenantId: clinicA,
+          outcome: 'THROTTLED',
+          reason: 'USER_QUOTA',
+        }),
+        expect.objectContaining({ outcome: 'NO_MEMBER' }),
+      ]),
+    );
+    for (const res of [free, capped, missing]) {
+      expect(res.status).toBe(202);
+      expect(res.body).toEqual({ message: FORGOT_PASSWORD_MESSAGE });
+      expect(res.headers['content-type']).toBe(free.headers['content-type']);
+      expect(res.headers['content-length']).toBe(
+        free.headers['content-length'],
+      );
+      expect(res.headers['cache-control']).toBe(free.headers['cache-control']);
+      expect(res.headers['set-cookie']).toBeUndefined();
+      expect(res.headers['retry-after']).toBeUndefined();
+    }
+    // Ni token nuevo ni correo desde A.
+    await dispatcher.whenIdle();
+    expect(
+      await raw.userToken.findMany({
+        where: { userId: carmen },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ).toEqual(tokensBefore);
+    expect(
+      await raw.emailOutbox.count({
+        where: {
+          tenantId: clinicA,
+          template: 'PASSWORD_RESET',
+          referenceId: carmen,
+        },
+      }),
+    ).toBe(0);
   });
 });

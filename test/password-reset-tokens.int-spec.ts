@@ -88,6 +88,7 @@ describe('PrismaPasswordResetRepository (int)', () => {
       tokenHash: hashPasswordResetToken(token),
       expiresAt: new Date(now.getTime() + ttlMs),
       now,
+      userDailyLimit: 1000,
     });
     return token;
   }

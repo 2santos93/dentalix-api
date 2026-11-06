@@ -12,7 +12,17 @@ import { OutboxSignatureEmailSender } from '../src/modules/signature-requests/ap
 import { OutboxPostOpEmailSender } from '../src/modules/post-op-instructions/application/postop-email';
 import { OutboxSlotOfferEmailSender } from '../src/modules/waitlist/application/slot-offer-email';
 import { OutboxReceiptEmailSender } from '../src/modules/payments/infrastructure/receipts/outbox-receipt-email-sender';
-import { OutboxSignedPdfCopyEmailSender } from '../src/modules/consents/application/signed-pdf-copy.service';
+import {
+  OutboxSignedPdfCopyEmailSender,
+  SignedPdfCopySender,
+} from '../src/modules/consents/application/signed-pdf-copy.service';
+import { PrismaSignatureRequestRepository } from '../src/modules/signature-requests/infrastructure/prisma-signature-request.repository';
+import {
+  generateSignatureToken,
+  hashSignatureToken,
+} from '../src/modules/signature-requests/domain/signature-token';
+import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
+import { PrismaSignedPdfCopyRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-pdf-copy.repository';
 import {
   buildReceiptSnapshot,
   receiptPatientView,
@@ -27,6 +37,7 @@ import {
   waitForLockWaiters,
 } from './support/postgres-concurrency';
 import { purgeTenants } from './support/tenant-purge';
+import { signedConsentFixtures } from './support/signed-consent-fixtures';
 
 /**
  * DX-149-ter: las cinco rutas de email que dispara el personal (firma a
@@ -34,8 +45,13 @@ import { purgeTenants } from './support/tenant-purge';
  * copia del PDF firmado) encolan con `enforceQuota`: el tope del destinatario
  * se cuenta e inserta bajo el candado de la clínica y del destinatario. N
  * envíos a la vez al mismo paciente: uno sale (enfriamiento) y los demás son
- * el 429 en español de cada ruta, nunca un 500. Comparten mecanismo (el
- * adaptador de cada una sobre EmailOutbox), así que el caso es parametrizado.
+ * el 429 en español de cada ruta, nunca un 500. Las tres que encolan fuera
+ * de otra transacción comparten mecanismo (el adaptador de cada una sobre
+ * EmailOutbox) y el caso es parametrizado. DX-149-quater (L5): la firma a
+ * distancia y la copia del PDF firmado encolan DENTRO de su transacción
+ * (`repo.create`, `issueLink`), así que van por ese camino real, con todos
+ * sus candados en orden: paciente → documento → outbox → destinatario →
+ * clínica.
  * Paralelo real: el primero se para con su fila insertada (sin confirmar) y
  * el resto TIENE que estar esperando su candado (pg_locks), sin reloj.
  */
@@ -141,26 +157,6 @@ const URL_BASE = 'https://altamira.dentalix.app';
 /** Un envío de cada ruta, tal como lo hace su caso de uso. */
 const PATHS: { name: string; send: (to: string) => Promise<unknown> }[] = [
   {
-    name: 'solicitud de firma a distancia',
-    send: async (to) => {
-      const mail = await new OutboxSignatureEmailSender(
-        outbox,
-        tenantContext,
-      ).prepareLink({
-        to,
-        referenceId: randomUUID(),
-        vars: {
-          recipientFirstName: 'María',
-          patientFirstName: null,
-          clinicName: 'Clínica Dental Altamira',
-          url: `${URL_BASE}/firmar/abc`,
-          expiresAtLabel: '6 de noviembre de 2026, 5:00 p. m.',
-        },
-      });
-      await prisma.runWithTenant((tx) => mail.insert(tx, []));
-    },
-  },
-  {
     name: 'instrucciones postoperatorias',
     send: (to) =>
       new OutboxPostOpEmailSender(outbox, tenantContext).send({
@@ -200,29 +196,6 @@ const PATHS: { name: string; send: (to: string) => Promise<unknown> }[] = [
         receipt,
       ),
   },
-  {
-    name: 'copia del PDF firmado (reenvío)',
-    send: async (to) => {
-      const mail = await new OutboxSignedPdfCopyEmailSender(
-        outbox,
-        tenantContext,
-      ).prepare(
-        {
-          to,
-          referenceId: randomUUID(),
-          vars: {
-            recipientFirstName: 'María',
-            patientFirstName: null,
-            clinicName: 'Clínica Dental Altamira',
-            url: `${URL_BASE}/copia/abc`,
-            expiresAtLabel: '8 de noviembre de 2026, 5:00 p. m.',
-          },
-        },
-        { enforceQuota: true },
-      );
-      await prisma.runWithTenant((tx) => mail.insert(tx));
-    },
-  },
 ];
 
 async function newTenant(label: string): Promise<string> {
@@ -253,6 +226,45 @@ async function raceBehindFirstInsert<T>(
   }
 }
 
+/** Uno sale; los demás son el 429 en español del enfriamiento, nunca un 500. */
+function expectOneSentRestAre429(outcomes: Outcome<unknown>[]): void {
+  expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+  const errors = outcomes
+    .filter((o) => o.status === 'rejected')
+    .map((o) => (o as { reason: unknown }).reason);
+  expect(errors).toHaveLength(outcomes.length - 1);
+  for (const error of errors) {
+    expect(error).toBeInstanceOf(HttpException);
+    const http = error as HttpException;
+    expect(http.getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
+    expect(http.getResponse()).toMatchObject({
+      message: expect.stringMatching(
+        /^Ya enviamos un correo a esta persona/,
+      ) as string,
+      retryAfterSeconds: expect.any(Number) as number,
+    });
+  }
+}
+
+// DX-149-quater (L5): la firma a distancia y el PDF firmado, por su
+// repositorio real (`create`, `issueLink`) con los datos que piden.
+const signatures = new PrismaSignatureRequestRepository(prisma, tenantContext);
+const copies = new PrismaSignedPdfCopyRepository(prisma, tenantContext);
+const { seedClinic, remoteSigned } = signedConsentFixtures({
+  owner: raw,
+  tenantContext,
+  requests: signatures,
+  consents: new PrismaPatientConsentRepository(prisma, tenantContext),
+});
+const seededUsers: string[] = [];
+
+async function seededClinic(label: string) {
+  const seeded = await seedClinic(`dx149q-${label}-${SUFFIX}`.slice(0, 63));
+  tenants.push(seeded.tenantId);
+  seededUsers.push(seeded.userId);
+  return seeded;
+}
+
 describe('DX-149-ter · topes con candado en las rutas del personal (int)', () => {
   beforeAll(async () => {
     await prisma.onModuleInit();
@@ -260,6 +272,7 @@ describe('DX-149-ter · topes con candado en las rutas del personal (int)', () =
 
   afterAll(async () => {
     await purgeTenants(raw, tenants);
+    await raw.user.deleteMany({ where: { id: { in: seededUsers } } });
     await raw.$disconnect();
     await prisma.$disconnect();
     process.env.DATABASE_URL = ORIGINAL_DATABASE_URL;
@@ -275,22 +288,7 @@ describe('DX-149-ter · topes con candado en las rutas del personal (int)', () =
         tenantContext.run(tenantId, () => PATHS[index].send(to)),
       );
 
-      expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
-      const errors = outcomes
-        .filter((o) => o.status === 'rejected')
-        .map((o) => (o as { reason: unknown }).reason);
-      expect(errors).toHaveLength(N - 1);
-      for (const error of errors) {
-        expect(error).toBeInstanceOf(HttpException);
-        const http = error as HttpException;
-        expect(http.getStatus()).toBe(HttpStatus.TOO_MANY_REQUESTS);
-        expect(http.getResponse()).toMatchObject({
-          message: expect.stringMatching(
-            /^Ya enviamos un correo a esta persona/,
-          ) as string,
-          retryAfterSeconds: expect.any(Number) as number,
-        });
-      }
+      expectOneSentRestAre429(outcomes);
       expect(
         await raw.emailOutbox.count({
           where: { tenantId, toHash: cipher.hashRecipient(to) },
@@ -298,4 +296,130 @@ describe('DX-149-ter · topes con candado en las rutas del personal (int)', () =
       ).toBe(1);
     },
   );
+
+  it(`solicitud de firma a distancia por repo.create: ${N} documentos a la vez al mismo paciente, uno sale, 429 en los demás y ninguna solicitud de más`, async () => {
+    const s = await seededClinic('firma');
+    // Un documento distinto por envío: el índice de «un enlace vivo por
+    // documento» no interviene y quien los ordena es el tope del destinatario.
+    const templates = [s.templateId];
+    for (let i = 1; i < N; i++) {
+      const { id } = await raw.consentTemplate.create({
+        data: {
+          tenantId: s.tenantId,
+          title: `Consentimiento ${i}`,
+          body: 'Texto',
+        },
+      });
+      templates.push(id);
+    }
+    const to = `maria.gonzalez.firma.${SUFFIX}@correo-caracas.test`;
+    const sender = new OutboxSignatureEmailSender(outbox, tenantContext);
+    let next = 0;
+    // Como el caso de uso: email preparado antes y encolado al final de la
+    // transacción de `create` (paciente → solicitudes → outbox → candados).
+    const send = async () => {
+      const templateId = templates[next++];
+      const id = randomUUID();
+      const mail = await sender.prepareLink({
+        to,
+        referenceId: id,
+        vars: {
+          recipientFirstName: 'María',
+          patientFirstName: null,
+          clinicName: 'Clínica Dental Altamira',
+          url: `${URL_BASE}/firmar/abc`,
+          expiresAtLabel: '6 de noviembre de 2026, 5:00 p. m.',
+        },
+      });
+      const now = new Date();
+      await signatures.create(
+        {
+          id,
+          locationId: s.locationId,
+          patientId: s.patientId,
+          type: 'CONSENT',
+          channel: 'EMAIL',
+          templateId,
+          templateVersion: 1,
+          treatmentPlanId: null,
+          title: 'Consentimiento — Exodoncia',
+          body: 'Yo, María González, autorizo la exodoncia.',
+          professionalUserId: s.userId,
+          professionalName: 'Dra. Carmen Rojas',
+          signerType: 'PATIENT',
+          signerName: 'María González',
+          signerDocument: null,
+          destination: to,
+          destinationMasked: 'ma***@correo-caracas.test',
+          tokenHash: hashSignatureToken(generateSignatureToken()),
+          expiresAt: new Date(now.getTime() + 72 * 3600_000),
+          createdById: s.userId,
+          createdAt: now,
+        },
+        (tx, superseded) => mail.insert(tx, superseded),
+      );
+    };
+
+    const outcomes = await raceBehindFirstInsert(N, () =>
+      tenantContext.run(s.tenantId, send),
+    );
+
+    expectOneSentRestAre429(outcomes);
+    expect(
+      await raw.emailOutbox.count({
+        where: { tenantId: s.tenantId, toHash: cipher.hashRecipient(to) },
+      }),
+    ).toBe(1);
+    // Los 429 se deshicieron enteros: queda la solicitud del que salió.
+    expect(
+      await raw.signatureRequest.count({ where: { patientId: s.patientId } }),
+    ).toBe(1);
+  });
+
+  it(`copia del PDF firmado por issueLink (reenvío): ${N} a la vez de dos consentimientos al mismo firmante, uno sale y un solo enlace vivo`, async () => {
+    const s = await seededClinic('pdf');
+    const consentIds = [await remoteSigned(s), await remoteSigned(s)];
+    for (const consentId of consentIds) {
+      await raw.signedConsentPdf.create({
+        data: { tenantId: s.tenantId, patientId: s.patientId, consentId },
+      });
+    }
+    const targets = await tenantContext.run(s.tenantId, () =>
+      Promise.all(consentIds.map((id) => copies.loadTarget(id))),
+    );
+    const pdfSender = new SignedPdfCopySender(
+      copies,
+      new OutboxSignedPdfCopyEmailSender(outbox, tenantContext),
+      { forTenant: () => Promise.resolve(URL_BASE) },
+      tenantContext,
+      { ttlHours: 168 },
+      () => new Date(),
+    );
+    let next = 0;
+    // Como «Reenviar copia»: enlace nuevo, revocación del anterior y email en
+    // la transacción de `issueLink` (paciente → PDF → enlaces → candados).
+    const send = () =>
+      pdfSender.send(targets[next++ % targets.length]!, s.userId, undefined, {
+        enforceQuota: true,
+      });
+
+    const outcomes = await raceBehindFirstInsert(N, () =>
+      tenantContext.run(s.tenantId, send),
+    );
+
+    expectOneSentRestAre429(outcomes);
+    expect(
+      await raw.emailOutbox.count({
+        where: {
+          tenantId: s.tenantId,
+          template: 'SIGNED_CONSENT_COPY',
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await raw.signedConsentPdfLink.count({
+        where: { consentId: { in: consentIds }, revokedAt: null },
+      }),
+    ).toBe(1);
+  });
 });

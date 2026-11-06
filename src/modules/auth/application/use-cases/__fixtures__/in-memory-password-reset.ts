@@ -23,7 +23,7 @@ interface Member {
 /** Repositorio en memoria con la semántica del de Prisma. */
 export class InMemoryPasswordResetRepository implements PasswordResetRepository {
   members: Member[] = [];
-  tokens: (ResetTokenRecord & { tokenHash: string })[] = [];
+  tokens: (ResetTokenRecord & { tokenHash: string; createdAt: Date })[] = [];
   passwords = new Map<string, string>();
   tokenVersions = new Map<string, number>();
 
@@ -78,12 +78,21 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
     tokenHash: string;
     expiresAt: Date;
     now: Date;
+    userDailyLimit: number;
     enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
   }): Promise<void> {
     if (this.failNextIssue) {
       const error = this.failNextIssue;
       this.failNextIssue = null;
       throw error;
+    }
+    // DX-149-quater: el tope por usuario (todas sus clínicas) en 24 h.
+    const since = input.now.getTime() - 24 * 60 * 60 * 1000;
+    const issuedToday = this.tokens.filter(
+      (t) => t.userId === input.userId && t.createdAt.getTime() > since,
+    ).length;
+    if (issuedToday >= input.userDailyLimit) {
+      throw new PasswordResetThrottledError('USER_QUOTA');
     }
     if (input.enqueue) {
       await input.enqueue({} as Prisma.TransactionClient);
@@ -101,6 +110,7 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
       expiresAt: input.expiresAt,
       usedAt: null,
       invalidatedAt: null,
+      createdAt: input.now,
     });
   }
 
@@ -133,12 +143,18 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
 export class FakePasswordResetNotifier implements PasswordResetNotifier {
   sent: PasswordResetEmail[] = [];
   quotaOk = true;
+  /** DX-149-quater: el tope por usuario (el del destinatario, 5). */
+  dailyLimit = 5;
   /** El recuento bajo candado (en la transacción) ya no deja enviar. */
   throttleInTx = false;
   kicks = 0;
 
   withinQuota(): Promise<boolean> {
     return Promise.resolve(this.quotaOk);
+  }
+
+  userDailyLimit(): number {
+    return this.dailyLimit;
   }
 
   prepare(email: PasswordResetEmail): Promise<PreparedPasswordResetEmail> {

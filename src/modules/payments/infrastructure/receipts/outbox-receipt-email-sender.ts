@@ -36,7 +36,7 @@ export class OutboxReceiptEmailSender implements ReceiptEmailSender {
       throw new Error('No tenant in context');
     }
     await withEmailQuotaAs429(() =>
-      this.outbox.assertWithinQuota(tenantId, to),
+      this.outbox.assertWithinQuota(tenantId, to, 'payment-receipt'),
     );
     const { timeZone, fmt } = await this.regionalOf(tenantId, receipt);
     // DX-149-ter: el tope se vuelve a contar al encolar, bajo el candado de

@@ -457,10 +457,10 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     await strict.dispatcher.onModuleDestroy();
     await owner.emailOutbox.deleteMany({ where: { tenantId: tenantB } });
 
-    await strict.outbox.assertWithinQuota(tenantB, EMAIL);
+    await strict.outbox.assertWithinQuota(tenantB, EMAIL, 'invitation');
     await strict.outbox.enqueue(invitation(tenantB));
     await expect(
-      strict.outbox.assertWithinQuota(tenantB, EMAIL),
+      strict.outbox.assertWithinQuota(tenantB, EMAIL, 'invitation'),
     ).rejects.toThrow(/hace un momento/);
     // Pasado el enfriamiento, el 2.º vale; el 3.º supera el diario del destinatario.
     await owner.emailOutbox.updateMany({
@@ -473,7 +473,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       data: { createdAt: new Date(Date.now() - 120_000) },
     });
     await expect(
-      strict.outbox.assertWithinQuota(tenantB, EMAIL),
+      strict.outbox.assertWithinQuota(tenantB, EMAIL, 'invitation'),
     ).rejects.toThrow(/últimas 24 horas/);
     // Otro destinatario sí, hasta el tope de la clínica (3).
     await strict.outbox.enqueue({
@@ -481,12 +481,20 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       to: 'otra@clinica-outbox.co',
     });
     await expect(
-      strict.outbox.assertWithinQuota(tenantB, 'tercera@clinica-outbox.co'),
+      strict.outbox.assertWithinQuota(
+        tenantB,
+        'tercera@clinica-outbox.co',
+        'invitation',
+      ),
     ).rejects.toThrow(/máximo de 3 correos/);
     // La clínica A no comparte cuenta con B (A sin envíos propios).
     await owner.emailOutbox.deleteMany({ where: { tenantId: tenantA } });
     await expect(
-      strict.outbox.assertWithinQuota(tenantA, 'nadie@clinica-outbox.co'),
+      strict.outbox.assertWithinQuota(
+        tenantA,
+        'nadie@clinica-outbox.co',
+        'invitation',
+      ),
     ).resolves.toBeUndefined();
   });
 
@@ -627,7 +635,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
         await strict.outbox.enqueue(invitation(tenantB));
 
         const error = await strict.outbox
-          .assertWithinQuota(tenantB, EMAIL)
+          .assertWithinQuota(tenantB, EMAIL, 'invitation')
           .then(
             () => null,
             (e: unknown) => e,

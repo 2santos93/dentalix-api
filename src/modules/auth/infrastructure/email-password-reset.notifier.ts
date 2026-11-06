@@ -15,12 +15,16 @@ export class EmailPasswordResetNotifier implements PasswordResetNotifier {
 
   async withinQuota(tenantId: string, to: string): Promise<boolean> {
     try {
-      await this.outbox.assertWithinQuota(tenantId, to);
+      await this.outbox.assertWithinQuota(tenantId, to, 'password-reset');
       return true;
     } catch (err) {
       if (err instanceof EmailQuotaExceededError) return false;
       throw err;
     }
+  }
+
+  userDailyLimit(): number {
+    return this.outbox.recipientDailyLimit;
   }
 
   async prepare(

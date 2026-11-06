@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Semaphore } from '../../../../shared/prisma/transaction-budget';
 import {
   PASSWORD_RESET_REPOSITORY,
   type PasswordResetRepository,
@@ -24,6 +25,27 @@ export interface RequestPasswordResetInput {
   linkBase: string;
 }
 
+/**
+ * DX-149-quater: cuántos restablecimientos pueden tener su trabajo en curso
+ * (y, con él, su transacción abierta) a la vez en un proceso
+ * (`PASSWORD_RESET_MAX_CONCURRENCY`). El endpoint es público y responde 202
+ * sin esperar: sin este límite, una inundación desde muchas IP (el rate limit
+ * es por IP) abre tantas transacciones como peticiones y agota el pool de las
+ * clínicas. 4 de las conexiones del pool como mucho; cada una dura unos ms
+ * (`PASSWORD_RESET_LOCK_TIMEOUT_MS` como techo), así que el turno llega rápido.
+ */
+export const DEFAULT_PASSWORD_RESET_CONCURRENCY = 4;
+export const PASSWORD_RESET_CONCURRENCY = Symbol('PASSWORD_RESET_CONCURRENCY');
+
+/**
+ * `PASSWORD_RESET_MAX_CONCURRENCY` (ya validado por `validateEnv`: entero
+ * 1..100), o el default si viene vacío.
+ */
+export function passwordResetConcurrency(raw: string | undefined): number {
+  const value = raw?.trim();
+  return value ? Number(value) : DEFAULT_PASSWORD_RESET_CONCURRENCY;
+}
+
 /** Qué pasó, solo para el log y los tests: NUNCA llega a la respuesta. */
 export type RequestPasswordResetOutcome = 'SENT' | 'NO_MEMBER' | 'THROTTLED';
 
@@ -41,17 +63,30 @@ export type RequestPasswordResetOutcome = 'SENT' | 'NO_MEMBER' | 'THROTTLED';
  * del destinatario contado bajo su candado (y un `lock_timeout` corto). Una
  * ráfaga a la misma persona, aunque venga de muchas IP, no pasa del tope ni
  * deja el enlace del email que salió sin valor.
+ *
+ * DX-149-quater: además, un tope POR USUARIO sumando todas sus clínicas
+ * (contado en la misma transacción, bajo el bloqueo de su fila), y como mucho
+ * `PASSWORD_RESET_CONCURRENCY` en curso a la vez en el proceso: el resto
+ * espera turno en orden de llegada (la respuesta pública ya salió).
  */
 @Injectable()
 export class RequestPasswordResetUseCase {
   private readonly logger = new Logger('Auth');
+  private readonly turns: Semaphore;
 
   constructor(
     @Inject(PASSWORD_RESET_REPOSITORY)
     private readonly repo: PasswordResetRepository,
     @Inject(PASSWORD_RESET_NOTIFIER)
     private readonly notifier: PasswordResetNotifier,
-  ) {}
+    @Optional()
+    @Inject(PASSWORD_RESET_CONCURRENCY)
+    concurrency?: number,
+  ) {
+    this.turns = new Semaphore(
+      concurrency ?? DEFAULT_PASSWORD_RESET_CONCURRENCY,
+    );
+  }
 
   /** Lanza el trabajo sin esperarlo. Nunca lanza ni rechaza. */
   accept(input: RequestPasswordResetInput): void {
@@ -65,7 +100,22 @@ export class RequestPasswordResetUseCase {
     });
   }
 
+  /**
+   * Espera turno (DX-149-quater) y hace el trabajo. Todas sus transacciones
+   * corren con el turno tomado, una detrás de otra.
+   */
   async execute(
+    input: RequestPasswordResetInput,
+  ): Promise<RequestPasswordResetOutcome> {
+    await this.turns.acquire();
+    try {
+      return await this.run(input);
+    } finally {
+      this.turns.release();
+    }
+  }
+
+  private async run(
     input: RequestPasswordResetInput,
   ): Promise<RequestPasswordResetOutcome> {
     const email = input.email.trim().toLowerCase();
@@ -92,18 +142,20 @@ export class RequestPasswordResetUseCase {
       // DX-149-ter: token y email en UNA transacción, con el tope del
       // destinatario contado bajo su candado. Si no cabe (otra petición ganó
       // la carrera) o el candado no se libera a tiempo, no cambia nada: el
-      // enlace vigente sigue siendo el anterior.
+      // enlace vigente sigue siendo el anterior. DX-149-quater: también el
+      // tope por usuario de todas sus clínicas.
       await this.repo.issue({
         tenantId: input.tenantId,
         userId: member.userId,
         tokenHash: hashPasswordResetToken(token),
         expiresAt: passwordResetExpiresAt(now),
         now,
+        userDailyLimit: this.notifier.userDailyLimit(),
         enqueue: (tx) => mail.insert(tx),
       });
     } catch (err) {
       if (err instanceof PasswordResetThrottledError) {
-        return this.done(input.tenantId, 'THROTTLED');
+        return this.done(input.tenantId, 'THROTTLED', err.reason);
       }
       throw err;
     }
@@ -115,8 +167,14 @@ export class RequestPasswordResetUseCase {
   private done(
     tenantId: string,
     outcome: RequestPasswordResetOutcome,
+    reason?: PasswordResetThrottledError['reason'],
   ): RequestPasswordResetOutcome {
-    this.logger.log({ event: 'password_reset.requested', tenantId, outcome });
+    this.logger.log({
+      event: 'password_reset.requested',
+      tenantId,
+      outcome,
+      ...(reason ? { reason } : {}),
+    });
     return outcome;
   }
 }

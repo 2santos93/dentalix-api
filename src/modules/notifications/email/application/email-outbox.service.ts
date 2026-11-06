@@ -6,6 +6,7 @@ import {
   EmailTemplateName,
   EmailVarsByTemplate,
   RenderedEmail,
+  TENANT_DAILY_BUDGET,
 } from '../domain/email-message';
 import { EMAIL_OUTBOX_REPOSITORY } from '../domain/ports/email-outbox-repository.port';
 import type {
@@ -46,7 +47,8 @@ export interface EnqueueEmailInput<
    *
    * DX-149-ter: `'recipient'` aplica los mismos topes pero toma SOLO el
    * candado del destinatario (endpoint público: restablecer la contraseña;
-   * ver `QuotaLockScope`).
+   * ver `QuotaLockScope`). DX-149-quater: el tope diario de la clínica solo
+   * cuenta y frena las plantillas que lo gastan (`TENANT_DAILY_BUDGET`).
    */
   enforceQuota?: boolean | 'recipient';
 }
@@ -82,54 +84,78 @@ export class EmailOutbox {
    * destinatario de la clínica (cubre reenviar e invitar otra vez al mismo
    * correo), y un máximo diario por clínica. Se llama ANTES de cambiar nada
    * (crear la invitación, regenerar el token). Lanza EmailQuotaExceededError.
+   *
+   * DX-149-quater: `template` dice si el tope diario de la clínica aplica
+   * (`TENANT_DAILY_BUDGET`); el del destinatario aplica siempre.
    */
-  async assertWithinQuota(tenantId: string, to: string): Promise<void> {
-    this.quotaGuard(
+  async assertWithinQuota(
+    tenantId: string,
+    to: string,
+    template: EmailTemplateName,
+  ): Promise<void> {
+    this.quotaGuardFor(template)(
       await this.repo.recentSends(tenantId, this.cipher.hashRecipient(to)),
     );
   }
 
   /**
+   * DX-149-quater: el máximo de correos al día al mismo destinatario de una
+   * clínica (`MAIL_RECIPIENT_DAILY_LIMIT`). El restablecimiento de contraseña
+   * usa el mismo número como su tope por usuario, sumando clínicas.
+   */
+  get recipientDailyLimit(): number {
+    return this.config.quotas.recipientDaily;
+  }
+
+  /**
    * Los topes sobre un recuento (DX-088). `assertWithinQuota` lo usa como
    * aviso temprano, antes de cambiar nada; con `enforceQuota`, el insert lo
-   * vuelve a aplicar bajo candado (DX-149-bis) y ese es el que manda.
+   * vuelve a aplicar bajo candado (DX-149-bis) y ese es el que manda. El tope
+   * diario de la clínica, solo para las plantillas que lo gastan
+   * (DX-149-quater, `TENANT_DAILY_BUDGET`).
    */
-  private readonly quotaGuard: OutboxQuotaGuard = (sends: RecentSends) => {
-    const { quotas } = this.config;
-    if (
-      sends.secondsSinceLastToRecipient !== null &&
-      quotas.recipientCooldownSeconds > 0
-    ) {
-      const elapsed = Math.floor(sends.secondsSinceLastToRecipient);
-      if (elapsed < quotas.recipientCooldownSeconds) {
-        const wait = quotas.recipientCooldownSeconds - elapsed;
+  private quotaGuardFor(template: EmailTemplateName): OutboxQuotaGuard {
+    const tenantDaily = TENANT_DAILY_BUDGET[template] === 'clinic';
+    return (sends: RecentSends) => {
+      const { quotas } = this.config;
+      if (
+        sends.secondsSinceLastToRecipient !== null &&
+        quotas.recipientCooldownSeconds > 0
+      ) {
+        const elapsed = Math.floor(sends.secondsSinceLastToRecipient);
+        if (elapsed < quotas.recipientCooldownSeconds) {
+          const wait = quotas.recipientCooldownSeconds - elapsed;
+          throw new EmailQuotaExceededError(
+            `Ya enviamos un correo a esta persona hace un momento. Espera ${wait} ${wait === 1 ? 'segundo' : 'segundos'} antes de volver a enviarlo.`,
+            wait,
+          );
+        }
+      }
+      if (sends.recipient >= quotas.recipientDaily) {
         throw new EmailQuotaExceededError(
-          `Ya enviamos un correo a esta persona hace un momento. Espera ${wait} ${wait === 1 ? 'segundo' : 'segundos'} antes de volver a enviarlo.`,
-          wait,
+          `Ya enviamos ${quotas.recipientDaily} correos a esta persona en las últimas 24 horas. Vuelve a intentarlo mañana.`,
+          60 * 60,
         );
       }
-    }
-    if (sends.recipient >= quotas.recipientDaily) {
-      throw new EmailQuotaExceededError(
-        `Ya enviamos ${quotas.recipientDaily} correos a esta persona en las últimas 24 horas. Vuelve a intentarlo mañana.`,
-        60 * 60,
-      );
-    }
-    if (sends.tenant >= quotas.tenantDaily) {
-      throw new EmailQuotaExceededError(
-        `La clínica alcanzó el máximo de ${quotas.tenantDaily} correos en 24 horas. Vuelve a intentarlo más tarde o escribe a soporte si necesitas más.`,
-        60 * 60,
-      );
-    }
-  };
+      if (tenantDaily && sends.tenant >= quotas.tenantDaily) {
+        throw new EmailQuotaExceededError(
+          `La clínica alcanzó el máximo de ${quotas.tenantDaily} correos en 24 horas. Vuelve a intentarlo más tarde o escribe a soporte si necesitas más.`,
+          60 * 60,
+        );
+      }
+    };
+  }
 
-  private guardOf(input: { enforceQuota?: boolean | 'recipient' }): {
+  private guardOf(input: {
+    template: EmailTemplateName;
+    enforceQuota?: boolean | 'recipient';
+  }): {
     guard?: OutboxQuotaGuard;
     scope?: QuotaLockScope;
   } {
     if (!input.enforceQuota) return {};
     return {
-      guard: this.quotaGuard,
+      guard: this.quotaGuardFor(input.template),
       scope:
         input.enforceQuota === 'recipient'
           ? 'recipient'

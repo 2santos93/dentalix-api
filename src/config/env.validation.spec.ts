@@ -554,6 +554,19 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
 
+    it('DX-149-quater: PASSWORD_RESET_MAX_CONCURRENCY es un entero entre 1 y 100', () => {
+      for (const bad of ['0', '101', 'x', '2.5', '-1']) {
+        expect(
+          errorOf(baseEnv({ PASSWORD_RESET_MAX_CONCURRENCY: bad })),
+        ).toContain('PASSWORD_RESET_MAX_CONCURRENCY');
+      }
+      for (const ok of ['1', '4', '100']) {
+        expect(() =>
+          validateEnv(baseEnv({ PASSWORD_RESET_MAX_CONCURRENCY: ok })),
+        ).not.toThrow();
+      }
+    });
+
     it('tope de los emails de plataforma (DX-144): enfriamiento 0..86400 s y 1..1000 al día', () => {
       expect(() =>
         validateEnv(

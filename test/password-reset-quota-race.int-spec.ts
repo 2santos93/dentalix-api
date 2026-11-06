@@ -78,11 +78,15 @@ function outboxWith(quotas: MailConfig['quotas']): EmailOutbox {
   return new EmailOutbox(outboxRepo, cipher, noKick, cfg);
 }
 
-/** El caso de uso real sobre Postgres, con el `lock_timeout` del caso. */
+/**
+ * El caso de uso real sobre Postgres, con el `lock_timeout` del caso. Turnos
+ * para las N a la vez (DX-149-quater): aquí se prueba la carrera, no la cola.
+ */
 function useCase(quotas: MailConfig['quotas'], lockTimeoutMs = 10_000) {
   return new RequestPasswordResetUseCase(
     new PrismaPasswordResetRepository(prisma, lockTimeoutMs),
     new EmailPasswordResetNotifier(outboxWith(quotas)),
+    N,
   );
 }
 

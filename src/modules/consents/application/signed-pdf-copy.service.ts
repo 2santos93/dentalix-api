@@ -131,7 +131,11 @@ export class OutboxSignedPdfCopyEmailSender implements SignedPdfCopyEmailSender 
 
   assertCanSend(to: string): Promise<void> {
     return withEmailQuotaAs429(() =>
-      this.outbox.assertWithinQuota(tenantIdOf(this.tenantContext), to),
+      this.outbox.assertWithinQuota(
+        tenantIdOf(this.tenantContext),
+        to,
+        'signed-consent-copy',
+      ),
     );
   }
 

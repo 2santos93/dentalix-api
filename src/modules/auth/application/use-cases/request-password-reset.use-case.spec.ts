@@ -1,11 +1,16 @@
 import { Logger } from '@nestjs/common';
-import { RequestPasswordResetUseCase } from './request-password-reset.use-case';
+import {
+  DEFAULT_PASSWORD_RESET_CONCURRENCY,
+  RequestPasswordResetUseCase,
+  passwordResetConcurrency,
+} from './request-password-reset.use-case';
 import {
   FakePasswordResetNotifier,
   InMemoryPasswordResetRepository,
 } from './__fixtures__/in-memory-password-reset';
 import { hashPasswordResetToken } from '../password-reset-token';
 import { PasswordResetThrottledError } from '../../domain/password-reset-throttled.error';
+import type { PreparedPasswordResetEmail } from '../../domain/ports/password-reset-notifier.port';
 
 const TENANT = 'tenant-a';
 const LINK_BASE = 'https://demo.dentalix.app';
@@ -205,5 +210,114 @@ describe('RequestPasswordResetUseCase', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(warn.mock.calls)).not.toContain('ana@clinica.co');
     warn.mockRestore();
+  });
+
+  it('DX-149-quater: el tope es POR USUARIO sumando sus clínicas: alcanzado en una, otra no emite (ni token ni email) y el log dice por qué', async () => {
+    const { repo, notifier, useCase } = setup();
+    repo.addMember({
+      tenantId: 'tenant-b',
+      userId: 'u1',
+      email: 'ana@clinica.co',
+    });
+    notifier.dailyLimit = 2;
+    const from = (tenantId: string) =>
+      useCase.execute({
+        tenantId,
+        email: 'ana@clinica.co',
+        linkBase: LINK_BASE,
+      });
+    expect(await from(TENANT)).toBe('SENT');
+    expect(await from(TENANT)).toBe('SENT');
+    const before = repo.tokens.map((t) => ({ ...t }));
+
+    expect(await from('tenant-b')).toBe('THROTTLED');
+
+    expect(repo.tokens).toEqual(before);
+    expect(notifier.sent).toHaveLength(2);
+    expect(notifier.kicks).toBe(2);
+    expect(logSpy).toHaveBeenLastCalledWith({
+      event: 'password_reset.requested',
+      tenantId: 'tenant-b',
+      outcome: 'THROTTLED',
+      reason: 'USER_QUOTA',
+    });
+  });
+
+  it('DX-149-quater: como mucho `concurrency` en curso a la vez; el resto espera turno en orden y sale, sin error', async () => {
+    const repo = new InMemoryPasswordResetRepository();
+    const notifier = new FakePasswordResetNotifier();
+    for (let i = 0; i < 5; i++) {
+      repo.addMember({
+        tenantId: TENANT,
+        userId: `u${i}`,
+        email: `persona${i}@clinica.co`,
+      });
+    }
+    // `prepare` no termina hasta que el test lo suelta: así se ve cuántos
+    // hay dentro a la vez.
+    const releases: (() => void)[] = [];
+    const inside: string[] = [];
+    const prepare = notifier.prepare.bind(notifier);
+    jest
+      .spyOn(notifier, 'prepare')
+      .mockImplementation(
+        async (email): Promise<PreparedPasswordResetEmail> => {
+          inside.push(email.userId);
+          await new Promise<void>((resolve) => releases.push(resolve));
+          return prepare(email);
+        },
+      );
+    const useCase = new RequestPasswordResetUseCase(repo, notifier, 2);
+    const flush = () => new Promise((r) => setImmediate(r));
+
+    const all = [0, 1, 2, 3, 4].map((i) =>
+      useCase.execute({
+        tenantId: TENANT,
+        email: `persona${i}@clinica.co`,
+        linkBase: LINK_BASE,
+      }),
+    );
+    await flush();
+    expect(inside).toEqual(['u0', 'u1']);
+
+    releases.shift()!();
+    await flush();
+    expect(inside).toEqual(['u0', 'u1', 'u2']);
+
+    while (inside.length < 5 || releases.length > 0) {
+      releases.shift()?.();
+      await flush();
+    }
+    await expect(Promise.all(all)).resolves.toEqual([
+      'SENT',
+      'SENT',
+      'SENT',
+      'SENT',
+      'SENT',
+    ]);
+  });
+
+  it('DX-149-quater: un fallo no se queda con el turno', async () => {
+    const { repo } = setup();
+    const one = new RequestPasswordResetUseCase(
+      repo,
+      new FakePasswordResetNotifier(),
+      1,
+    );
+    repo.failNextIssue = new Error('db down');
+    const input = {
+      tenantId: TENANT,
+      email: 'ana@clinica.co',
+      linkBase: LINK_BASE,
+    };
+    await expect(one.execute(input)).rejects.toThrow('db down');
+    await expect(one.execute(input)).resolves.toBe('SENT');
+  });
+
+  it('DX-149-quater: PASSWORD_RESET_MAX_CONCURRENCY vacío = 4; si no, su valor', () => {
+    expect(DEFAULT_PASSWORD_RESET_CONCURRENCY).toBe(4);
+    expect(passwordResetConcurrency(undefined)).toBe(4);
+    expect(passwordResetConcurrency('  ')).toBe(4);
+    expect(passwordResetConcurrency(' 8 ')).toBe(8);
   });
 });

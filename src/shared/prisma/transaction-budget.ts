@@ -1,7 +1,11 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-/** Plazas libres y quién espera una, en orden de llegada. */
-class Semaphore {
+/**
+ * Plazas libres y quién espera una, en orden de llegada. DX-149-quater: lo
+ * usa también, a nivel de proceso, el restablecimiento de contraseña (su
+ * trabajo en segundo plano no es una petición con su presupuesto).
+ */
+export class Semaphore {
   private readonly waiting: (() => void)[] = [];
 
   constructor(private free: number) {}

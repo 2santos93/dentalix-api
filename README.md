@@ -554,6 +554,23 @@ base>` (`TenantLinkBaseService` / `tenantLinkHost`). El enlace de
   confirma esa cita. Además (DX-143), aceptar una invitación no reclama una
   cuenta sin verificar con acceso a otra clínica (ver DX-029 arriba).
   Si se superan los topes `MAIL_*` no se envía (y tampoco se dice).
+  **DX-149-quater:**
+  - **Tope por usuario:** como mucho `MAIL_RECIPIENT_DAILY_LIMIT` (5)
+    enlaces en 24 h a la misma persona, **sumando todas sus clínicas**.
+    Se cuentan en `user_tokens`, en la transacción que emite el token y
+    después de bloquear la fila del usuario. Sin él, alguien en K clínicas
+    recibiría K × 5 pidiéndolo desde cada host. Alcanzado, no se rota el
+    token ni se encola nada, y la respuesta es el mismo 202.
+  - **Fuera del tope de la clínica:** el restablecimiento ni gasta ni
+    respeta `MAIL_TENANT_DAILY_LIMIT` (`TENANT_DAILY_BUDGET` en
+    `email-message.ts`). Así, un tercero que pide restablecimientos para el
+    personal no deja a la clínica 24 h sin correos. Siguen valiendo el tope
+    por destinatario y el de usuario.
+  - **Concurrencia acotada:** como mucho `PASSWORD_RESET_MAX_CONCURRENCY`
+    (4, de 1 a 100) restablecimientos con su trabajo en curso a la vez por
+    proceso, y por tanto con su transacción abierta. Los demás esperan turno
+    en orden de llegada, sin error, y la respuesta ya salió. Una inundación
+    desde muchas IP no agota el pool de las clínicas.
 - `POST /auth/reset-password/check` `{ token }` → `{ status: VALID | EXPIRED | USED | INVALID }`.
 - `POST /auth/reset-password` `{ token, password }` → 204. Exige la política de
   contraseña (8–200), consume el token (un solo uso, check-and-set), invalida

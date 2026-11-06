@@ -41,6 +41,11 @@ export interface PasswordResetRepository {
    * público: nadie retiene una conexión del pool esperando un candado); si se
    * agota, lanza PasswordResetThrottledError('LOCK_TIMEOUT') sin cambiar
    * nada. Lo que lance `enqueue` deshace también el token.
+   *
+   * DX-149-quater: con la fila del usuario ya bloqueada, cuenta los enlaces
+   * que se le emitieron en las 24 h anteriores a `now` (en `user_tokens`,
+   * global: suma TODAS sus clínicas). Si ya son `userDailyLimit`, lanza
+   * PasswordResetThrottledError('USER_QUOTA') sin cambiar nada.
    */
   issue(input: {
     tenantId: string;
@@ -48,6 +53,7 @@ export interface PasswordResetRepository {
     tokenHash: string;
     expiresAt: Date;
     now: Date;
+    userDailyLimit: number;
     enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
   }): Promise<void>;
 
