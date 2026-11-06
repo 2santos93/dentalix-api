@@ -41,7 +41,7 @@ const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const repository = new PrismaRecallRepository(prisma, tenantContext);
 
-const SUBDOMAINS = ['dx547-int-a', 'dx547-int-b'];
+const SUBDOMAINS = ['dx547-int-a', 'dx547-int-b', 'dx547-int-frontera'];
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 /** 11:30 UTC: ya es mañana en Kiritimati (UTC+14); 00:30 en Pago Pago. */
@@ -303,6 +303,9 @@ const both = (c: Clinic, scope: Scope, query: RecallDueQuery) =>
 
 interface PlanNode {
   'Index Name'?: string;
+  'Actual Loops'?: number;
+  'Actual Rows'?: number;
+  Filter?: string;
   'Relation Name'?: string;
   'Node Type': string;
   Plans?: PlanNode[];
@@ -312,9 +315,138 @@ const nodes = (plan: PlanNode): PlanNode[] => [
   ...(plan.Plans ?? []).flatMap(nodes),
 ];
 
+/**
+ * Casos FIJOS en la frontera de las cotas de `recallDueSql` (revisión de
+ * DX-547). Con NOW (11:30Z) «hoy» es el 07/11 en Kiritimati (UTC+14) y el
+ * 06/11 en Pago Pago (UTC−11): `maxToday` = 2026-11-07. Cada recall es de un
+ * paciente distinto (nombre = caso) sin citas salvo las indicadas.
+ */
+interface FixedCase {
+  name: string;
+  sede: 'K' | 'P';
+  lastDoneAt: string;
+  intervalMonths: number;
+  disabledUntil?: string;
+  /** Visita atendida (UTC), en la sede indicada. */
+  completed?: { start: string; sede: 'K' | 'P' };
+}
+const FIXED: FixedCase[] = [
+  // a) vencimiento justo en maxToday + withinDays.
+  { name: 'A1', sede: 'K', lastDoneAt: '2026-05-07', intervalMonths: 6 }, // 11-07 = hoy K
+  { name: 'A2', sede: 'P', lastDoneAt: '2026-05-07', intervalMonths: 6 }, // 11-07 = maxToday, pero hoy P + 1
+  { name: 'A3', sede: 'K', lastDoneAt: '2026-05-22', intervalMonths: 6 }, // 11-22 = maxToday + 15
+  { name: 'A4', sede: 'K', lastDoneAt: '2026-05-23', intervalMonths: 6 }, // 11-23 = maxToday + 16
+  { name: 'A5', sede: 'P', lastDoneAt: '2026-05-21', intervalMonths: 6 }, // 11-21 = hoy P + 15
+  { name: 'A6', sede: 'P', lastDoneAt: '2026-05-22', intervalMonths: 6 }, // 11-22: pasa la cota, no el filtro exacto
+  // b) disabledUntil = hoy en Kiritimati: en Pago Pago aún no ha llegado.
+  {
+    name: 'B1',
+    sede: 'P',
+    lastDoneAt: '2026-01-01',
+    intervalMonths: 6,
+    disabledUntil: '2026-11-07',
+  },
+  {
+    name: 'B2',
+    sede: 'K',
+    lastDoneAt: '2026-01-01',
+    intervalMonths: 6,
+    disabledUntil: '2026-11-07',
+  },
+  // c) una visita atendida posterior a lastDoneAt + intervalo.
+  {
+    name: 'C1',
+    sede: 'K',
+    lastDoneAt: '2025-01-10',
+    intervalMonths: 12,
+    completed: { start: '2026-03-15T20:00:00.000Z', sede: 'P' }, // vence 2027-03-15: fuera
+  },
+  {
+    name: 'C2',
+    sede: 'K',
+    lastDoneAt: '2025-01-10',
+    intervalMonths: 12,
+    completed: { start: '2025-11-10T20:00:00.000Z', sede: 'P' }, // vence 2026-11-10 en Pago Pago
+  },
+  // d) lastDoneAt de fin de mes + 1 mes (recorte a fin de mes).
+  { name: 'D1', sede: 'K', lastDoneAt: '2026-08-31', intervalMonths: 1 }, // 2026-09-30
+  { name: 'D2', sede: 'K', lastDoneAt: '2026-10-31', intervalMonths: 1 }, // 2026-11-30
+];
+
+async function seedFixed(
+  subdomain: string,
+): Promise<Clinic & { k: string; p: string }> {
+  const tenant = await raw.tenant.create({
+    data: { name: subdomain, subdomain },
+  });
+  const sede = async (name: string, timeZone: string) =>
+    (
+      await raw.location.create({
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+          tenantId: tenant.id,
+          name,
+          timeZone,
+        }),
+      })
+    ).id;
+  const k = await sede('Sede Kiritimati', 'Pacific/Kiritimati');
+  const p = await sede('Sede Pago Pago', 'Pacific/Pago_Pago');
+  const author = await raw.user.create({
+    data: {
+      email: `recepcion@${subdomain}.test`,
+      passwordHash: 'x',
+      fullName: 'Recepción',
+    },
+  });
+  const ids = new Set<string>();
+  for (const c of FIXED) {
+    const patient = await raw.patient.create({
+      data: { tenantId: tenant.id, firstName: c.name, lastName: 'Frontera' },
+    });
+    const recall = await raw.patientRecall.create({
+      data: {
+        tenantId: tenant.id,
+        patientId: patient.id,
+        kind: RecallKind.CHECKUP,
+        intervalMonths: c.intervalMonths,
+        lastDoneAt: DAY(c.lastDoneAt),
+        locationId: c.sede === 'K' ? k : p,
+        disabledUntil: c.disabledUntil ? DAY(c.disabledUntil) : null,
+        disabledReason: c.disabledUntil ? 'Tratamiento en curso' : null,
+        createdById: author.id,
+        updatedById: author.id,
+      },
+    });
+    ids.add(recall.id);
+    if (c.completed) {
+      const start = new Date(c.completed.start);
+      await raw.appointment.create({
+        data: {
+          tenantId: tenant.id,
+          locationId: c.completed.sede === 'K' ? k : p,
+          patientId: patient.id,
+          providerId: author.id,
+          start,
+          end: new Date(start.getTime() + 30 * 60_000),
+          status: AppointmentStatus.COMPLETED,
+        },
+      });
+    }
+  }
+  return {
+    tenantId: tenant.id,
+    sedes: [k, p],
+    authorId: author.id,
+    recallIds: ids,
+    k,
+    p,
+  };
+}
+
 describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', () => {
   let a: Clinic;
   let b: Clinic;
+  let f: Clinic & { k: string; p: string };
 
   beforeAll(async () => {
     await prisma.onModuleInit();
@@ -324,6 +456,7 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
     });
     a = await seedClinic(SUBDOMAINS[0], 450, 547);
     b = await seedClinic(SUBDOMAINS[1], 120, 79);
+    f = await seedFixed(SUBDOMAINS[2]);
     await raw.$executeRawUnsafe('ANALYZE "appointments"');
     await raw.$executeRawUnsafe('ANALYZE "patient_recalls"');
     await raw.$executeRawUnsafe('ANALYZE "patients"');
@@ -332,7 +465,9 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
   afterAll(async () => {
     await purgeTenantsBySubdomain(raw, SUBDOMAINS);
     await raw.user.deleteMany({
-      where: { id: { in: [a?.authorId, b?.authorId].filter(Boolean) } },
+      where: {
+        id: { in: [a?.authorId, b?.authorId, f?.authorId].filter(Boolean) },
+      },
     });
     await Promise.all([raw.$disconnect(), prisma.$disconnect()]);
   });
@@ -511,7 +646,12 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
   it('una sola evaluación: recorre patient_recalls una vez y la cita futura usa el índice parcial', async () => {
     const plan = await prisma.runWithTenant(a.tenantId, async (tx) => {
       // Como la auditoría (DB-079): sin Seq Scan, se ve qué índice elegiría.
+      // Y sondas por recall (sin hash ni merge): con los pocos datos del test
+      // Postgres prefiere a veces un hash de todas las citas; con volumen
+      // elige solo la sonda (ver el EXPLAIN ANALYZE del informe de DX-547).
       await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      await tx.$executeRaw`SET LOCAL enable_hashjoin = off`;
+      await tx.$executeRaw`SET LOCAL enable_mergejoin = off`;
       const rows = await tx.$queryRaw<{ 'QUERY PLAN': { Plan: PlanNode }[] }[]>(
         Prisma.sql`EXPLAIN (FORMAT JSON) ${recallDueSql({
           tenantId: a.tenantId,
@@ -537,5 +677,113 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
     expect(plan.map((n) => n['Index Name'])).not.toContain(
       'appointments_tenant_start_live_idx',
     );
+  });
+  describe('casos fijos en la frontera de las cotas', () => {
+    type Expected = [
+      name: string,
+      sede: 'K' | 'P',
+      baseDate: string,
+      dueAt: string,
+      daysOverdue: number,
+    ];
+    const run = async (
+      withinDays: number,
+      scope: Scope = { label: 'todas' },
+    ) => {
+      const query: RecallDueQuery = {
+        withinDays,
+        sort: 'MOST_OVERDUE',
+        page: 1,
+        pageSize: 100,
+        now: NOW,
+      };
+      const { actual, expected } = await both(f, scope, query);
+      expect(actual).toEqual(expected);
+      return actual.rows.map((r): Expected => [
+        r.patientFirstName,
+        r.locationId === f.k ? 'K' : 'P',
+        r.baseDate,
+        r.dueAt,
+        r.daysOverdue,
+      ]);
+    };
+
+    it('withinDays = 0: vence justo hoy en Kiritimati (A1); en Pago Pago aún no (A2); B1 sigue pausado', async () => {
+      expect(await run(0)).toEqual<Expected[]>([
+        ['B2', 'K', '2026-01-01', '2026-07-01', 129],
+        ['D1', 'K', '2026-08-31', '2026-09-30', 38],
+        ['A1', 'K', '2026-05-07', '2026-11-07', 0],
+      ]);
+    });
+
+    it('withinDays = 15: entra lo que vence en maxToday + 15 (A3) y hoy de Pago Pago + 15 (A5); A4 y A6 no', async () => {
+      expect(await run(15)).toEqual<Expected[]>([
+        ['B2', 'K', '2026-01-01', '2026-07-01', 129],
+        ['D1', 'K', '2026-08-31', '2026-09-30', 38],
+        ['A1', 'K', '2026-05-07', '2026-11-07', 0],
+        ['A2', 'P', '2026-05-07', '2026-11-07', -1],
+        ['C2', 'P', '2025-11-10', '2026-11-10', -4],
+        ['A3', 'K', '2026-05-22', '2026-11-22', -15],
+        ['A5', 'P', '2026-05-21', '2026-11-21', -15],
+      ]);
+    });
+
+    it('withinDays = 60: fin de mes + 1 mes recorta a 30/11 (D2); la visita posterior saca a C1 de la ventana', async () => {
+      expect(await run(60)).toEqual<Expected[]>([
+        ['B2', 'K', '2026-01-01', '2026-07-01', 129],
+        ['D1', 'K', '2026-08-31', '2026-09-30', 38],
+        ['A1', 'K', '2026-05-07', '2026-11-07', 0],
+        ['A2', 'P', '2026-05-07', '2026-11-07', -1],
+        ['C2', 'P', '2025-11-10', '2026-11-10', -4],
+        ['A3', 'K', '2026-05-22', '2026-11-22', -15],
+        ['A5', 'P', '2026-05-21', '2026-11-21', -15],
+        ['A4', 'K', '2026-05-23', '2026-11-23', -16],
+        ['A6', 'P', '2026-05-22', '2026-11-22', -16],
+        ['D2', 'K', '2026-10-31', '2026-11-30', -23],
+      ]);
+    });
+
+    it('sede de Pago Pago: la visita atendida allí trae a C2 aunque el recall se fijó en Kiritimati', async () => {
+      expect(await run(15, { label: 'Pago Pago', locationId: f.p })).toEqual<
+        Expected[]
+      >([
+        ['A2', 'P', '2026-05-07', '2026-11-07', -1],
+        ['C2', 'P', '2025-11-10', '2026-11-10', -4],
+        ['A5', 'P', '2026-05-21', '2026-11-21', -15],
+      ]);
+    });
+  });
+
+  it('la cota descarta antes de la LATERAL: del recorrido de patient_recalls salen menos recall que los activos', async () => {
+    const [{ n: active }] = await prisma.runWithTenant(
+      a.tenantId,
+      (tx) =>
+        tx.$queryRaw<{ n: number }[]>`
+        SELECT count(*)::int AS n FROM "patient_recalls" WHERE "active"`,
+    );
+    const plan = await prisma.runWithTenant(a.tenantId, async (tx) => {
+      const rows = await tx.$queryRaw<{ 'QUERY PLAN': { Plan: PlanNode }[] }[]>(
+        Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${recallDueSql({
+          tenantId: a.tenantId,
+          withinDays: 0,
+          sort: 'MOST_OVERDUE',
+          page: 1,
+          pageSize: 20,
+          now: NOW,
+        })}`,
+      );
+      return nodes(rows[0]['QUERY PLAN'][0].Plan);
+    });
+    // Un solo recorrido, con la cota en su filtro: lo que sale de él (lo único
+    // que puede llegar a la LATERAL de la última visita) ya viene recortado.
+    const scans = plan.filter((n) => n['Relation Name'] === 'patient_recalls');
+    expect(scans).toHaveLength(1);
+    const [scan] = scans;
+    expect(scan.Filter ?? '').toContain('"disabledUntil" <=');
+    expect(scan.Filter ?? '').toContain('"lastDoneAt" + make_interval');
+    // Holgura: la cota sola (sin contar la cita futura) quita más de un 20 %.
+    expect(
+      (scan['Actual Rows'] ?? 0) * (scan['Actual Loops'] ?? 1),
+    ).toBeLessThan(active * 0.8);
   });
 });

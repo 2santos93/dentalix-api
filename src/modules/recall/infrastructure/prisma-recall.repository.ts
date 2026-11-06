@@ -43,10 +43,9 @@ type ContactRow = Prisma.RecallContactGetPayload<{
   select: typeof CONTACT_SELECT;
 }>;
 
-interface DueSqlRow {
-  total: number;
-  /** NULL en la fila única de una página vacía (solo trae el total). */
-  recallId: string | null;
+/** Columnas de una fila de la página de `recallDueSql`. */
+interface DuePageColumns {
+  recallId: string;
   patientId: string;
   patientFirstName: string;
   patientLastName: string;
@@ -63,6 +62,15 @@ interface DueSqlRow {
   lastContactOutcome: RecallContactOutcome | null;
   lastContactAt: Date | null;
 }
+
+/**
+ * Lo que devuelve `recallDueSql`: el total en cada fila y, en la fila única de
+ * una página vacía (fuera de rango o sin recall), TODAS las columnas de la
+ * página a NULL. `recallId === null` distingue los dos casos.
+ */
+type DueSqlRow = { total: number } & (
+  DuePageColumns | { [K in keyof DuePageColumns]: null }
+);
 
 export interface RecallDueSqlParams extends RecallDueQuery {
   tenantId: string;
@@ -81,7 +89,8 @@ export interface RecallDueSqlParams extends RecallDueQuery {
  *    (`appointments_tenant_patient_upcoming_idx`; no depende de la sede) y
  *    con dos cotas que solo descartan lo que tampoco saldría después: «hoy» en
  *    la sede del paciente nunca pasa del «hoy» más adelantado de las sedes de
- *    la clínica (`maxToday`), y el vencimiento nunca es anterior a lastDoneAt
+ *    la clínica (`maxToday`, un InitPlan: la cota va en el propio recorrido
+ *    de patient_recalls), y el vencimiento nunca es anterior a lastDoneAt
  *    + intervalo (la base es el MAX con la última visita y sumar meses no
  *    retrocede).
  * 2. `d`: la última cita atendida (appointments_tenant_patient_completed_idx)
@@ -115,14 +124,13 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
         FROM "patient_recalls" pr
         JOIN "patients" pa
           ON pa."tenantId" = pr."tenantId" AND pa."id" = pr."patientId"
-       CROSS JOIN bound b
        WHERE pr."tenantId" = ${p.tenantId}::uuid
          AND pr."active"
          AND pa."deletedAt" IS NULL
          ${kindFilter}
-         AND (pr."disabledUntil" IS NULL OR pr."disabledUntil" <= b."maxToday")
+         AND (pr."disabledUntil" IS NULL OR pr."disabledUntil" <= (SELECT "maxToday" FROM bound))
          AND (pr."lastDoneAt" + make_interval(months => pr."intervalMonths"))::date
-               <= b."maxToday" + ${p.withinDays}::int
+               <= (SELECT "maxToday" FROM bound) + ${p.withinDays}::int
          AND NOT EXISTS (
            SELECT 1 FROM "appointments" a
             WHERE a."tenantId" = pr."tenantId"
