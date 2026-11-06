@@ -1010,7 +1010,10 @@ no hay una común. No cambia después (trigger
     2. Desplegar DX-502 con `PLAN_QUOTE_COMPOSE_V4=false`: réplicas viejas y
        nuevas conviven, porque ninguna emite v4.
     3. Con TODAS las réplicas en DX-502, repetir el relleno (ítems que dieron
-       de alta las réplicas viejas; ver el punto siguiente).
+       de alta las réplicas viejas; ver el punto siguiente). Repetirlo SOLO
+       con `PLAN_QUOTE_COMPOSE_V4=false`: enviar un enlace no toma bloqueo, y
+       con el flag en `true` un enlace v4 enviado a la vez que el relleno
+       cambiaría de hash («el presupuesto cambió» para el paciente).
     4. Poner `PLAN_QUOTE_COMPOSE_V4=true` (o quitarla) y reiniciar en
        _rolling_: desde ahí se emiten v4.
   - **Vuelta atrás:** primero `PLAN_QUOTE_COMPOSE_V4=false` en todas las
