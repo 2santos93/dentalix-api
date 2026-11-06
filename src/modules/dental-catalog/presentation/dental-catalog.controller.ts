@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -10,9 +11,11 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
+  ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
 import { CreateCatalogItemDto } from './dto/create-catalog-item.dto';
@@ -107,8 +110,10 @@ export class DentalCatalogController {
   @Patch(':id')
   @Roles(...CATALOG_WRITE_ROLES)
   @ApiOkResponse({ type: DentalCatalogItemDto })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCatalogItemDto,
   ): Promise<DentalCatalogItem> {
     return this.updateCatalogItem.execute(id, dto);
