@@ -1,0 +1,17 @@
+-- DX-467: índice único del código de verificación por clínica (2 de 5).
+--
+-- Va ANTES del barrido (20261126090200): así cada código que escriba el
+-- barrido, la API o el DEFAULT de una réplica anterior ya choca con uno
+-- repetido de la misma clínica. Los NULL (recetas aún sin código) no chocan.
+-- Es también el índice de la búsqueda pública: WHERE "verificationCode" = $1
+-- bajo la RLS de la clínica del host ("tenantId" = …). Por qué por clínica y
+-- no global: ver 20261126090000.
+--
+-- CONCURRENTLY: no bloquea las escrituras de recetas mientras se construye.
+-- Una única sentencia, fuera de transacción (molde de
+-- 20261118090100_dx224_phone_e164_idx). IF NOT EXISTS: si se corta, un índice
+-- INVALID queda con el mismo nombre; se borra (DROP INDEX CONCURRENTLY
+-- "prescriptions_tenant_verification_code_key"), `prisma migrate resolve
+-- --rolled-back 20261126090100_dx467_prescription_verification_code_idx` y se
+-- repite `deploy`.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "prescriptions_tenant_verification_code_key" ON "prescriptions" ("tenantId", "verificationCode");

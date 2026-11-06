@@ -3722,6 +3722,11 @@ model Prescription {
   safetyOverrideReason  String?
   // SHA-256 (hex) del contenido emitido (prescription-hash.ts).
   contentHash           String
+  /// DX-467: código de verificación (12 símbolos sin ambiguos) de la página
+  /// pública `/receta/<código>`. Lo escribe la API al emitir; el DEFAULT
+  /// (función de la BD, mismo alfabeto) cubre a una réplica anterior que
+  /// inserte sin él. Único por clínica, fuera del hash, inmutable.
+  verificationCode      String             @default(dbgenerated("prescription_verification_code()"))
   voidedAt              DateTime?
   voidedById            String?            @db.Uuid
   voidReason            String?
@@ -3735,6 +3740,8 @@ model Prescription {
   items        PrescriptionItem[]
 
   @@unique([tenantId, id], map: "prescriptions_tenant_id_key")
+  // DX-467: la búsqueda pública por código, bajo la RLS de la clínica del host.
+  @@unique([tenantId, verificationCode], map: "prescriptions_tenant_verification_code_key")
   // Lista del paciente, más reciente primero.
   @@index([tenantId, patientId, issuedAt(sort: Desc)])
   @@index([tenantId, locationId])
