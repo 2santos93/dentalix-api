@@ -72,6 +72,11 @@ import { OVERLAP_MESSAGES } from '../src/modules/appointments/application/appoin
 import { ListAppointmentsUseCase } from '../src/modules/appointments/application/use-cases/list-appointments.use-case';
 import { CreateAppointmentTypeUseCase } from '../src/modules/appointment-types/application/use-cases/appointment-types.use-cases';
 import { CreateChairUseCase } from '../src/modules/chairs/application/use-cases/chairs.use-cases';
+import {
+  CreateEquipmentUseCase,
+  RecordMaintenanceUseCase,
+} from '../src/modules/equipment/application/use-cases/equipment.use-cases';
+import { addCivilMonths } from '../src/modules/recall/domain/recall-rules';
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import { AnestheticCatalogUseCases } from '../src/modules/anesthesia/application/use-cases/anesthetic-catalog.use-cases';
 import { AnesthesiaUseCases } from '../src/modules/anesthesia/application/use-cases/anesthesia.use-cases';
@@ -231,6 +236,7 @@ import {
   type DemoPlanItem,
   DEMO_COLLECTION_NOTES,
   DEMO_EXPENSES,
+  DEMO_EQUIPMENT,
   DEMO_PAYMENT_PROMISE,
   DEMO_PLAN_OPTIONS,
   DEMO_CANCELLATION,
@@ -805,6 +811,11 @@ class DemoSeeder {
     // DX-211: sillones de la Sede Norte (como en Ajustes → Sillones).
     const norteChairs = await this.inTenant(tenantId, locations.norte, () =>
       this.createChairs(locations.norte, dentists, ownerId),
+    );
+
+    // DX-542: equipos biomédicos de las sedes con su hoja de vida.
+    await this.inTenant(tenantId, undefined, () =>
+      this.createEquipment(locations, norteChairs, ownerId),
     );
 
     const attended = await this.createAppointments(
@@ -1652,6 +1663,59 @@ class DemoSeeder {
       chairs.push({ id: chair.id, defaultProviderId, busy: [] });
     }
     return chairs;
+  }
+
+  /**
+   * DX-542: los equipos de `DEMO_EQUIPMENT` y sus mantenimientos, por los
+   * mismos casos de uso que Ajustes › Equipos biomédicos (el ADMIN), con las
+   * fechas contadas en la zona de cada sede. Los mantenimientos van en orden
+   * cronológico: cada preventivo deja su próximo por la periodicidad.
+   */
+  private async createEquipment(
+    locations: Record<DemoLocationKey, string>,
+    norteChairs: DemoSeededChair[],
+    ownerId: string,
+  ): Promise<void> {
+    for (const spec of DEMO_EQUIPMENT) {
+      const site = DEMO_LOCATIONS[spec.location];
+      const today = civilDateIn(this.now, site.timeZone);
+      const equipment = await this.use(CreateEquipmentUseCase).execute(
+        {
+          locationId: locations[spec.location],
+          chairId:
+            spec.chair !== undefined ? norteChairs[spec.chair].id : undefined,
+          name: spec.name,
+          category: spec.category,
+          brand: spec.brand,
+          model: spec.model,
+          serialNumber: spec.serialNumber,
+          sanitaryRegistration: spec.sanitaryRegistration,
+          riskClass: spec.riskClass,
+          acquiredOn: addCivilMonths(today, -spec.acquiredMonthsAgo),
+          maintenanceIntervalMonths: spec.maintenanceIntervalMonths,
+          notes: spec.notes,
+        },
+        ownerId,
+      );
+      for (const m of spec.maintenances) {
+        await this.use(RecordMaintenanceUseCase).execute(
+          equipment.id,
+          {
+            kind: m.kind,
+            performedOn: addCivilDays(
+              addCivilMonths(today, -m.monthsAgo),
+              -(m.daysAgo ?? 0),
+            ),
+            technician: m.technician,
+            company: m.company,
+            description: m.description,
+            cost: m.cost,
+            currency: m.cost !== undefined ? site.currency : undefined,
+          },
+          ownerId,
+        );
+      }
+    }
   }
 
   /**
