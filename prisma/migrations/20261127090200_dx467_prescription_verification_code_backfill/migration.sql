@@ -2,7 +2,7 @@
 --
 -- Decisión: barrido en la migración, no perezoso. Así toda receta (también
 -- las emitidas antes de DX-467) tiene su código desde el despliegue, la
--- columna pasa a NOT NULL en 20261126090300 y la API nunca escribe en una
+-- columna pasa a NOT NULL en 20261127090300 y la API nunca escribe en una
 -- receta emitida al leerla (la receta sigue siendo inmutable para la app).
 -- Una receta impresa antes de DX-467 no lleva el código en el papel; al
 -- reimprimirla, sí.
@@ -15,10 +15,10 @@
 -- clínicas (también las retiradas: sus recetas siguen siendo documentos) y
 -- fija `app.current_tenant` en cada lote. El trigger prescriptions_immutable
 -- admite exactamente este cambio (NULL → código, nada más) desde
--- 20261126090000.
+-- 20261127090000.
 --
 -- Colisión con un código de la misma clínica (índice único de
--- 20261126090100): se reintenta esa receta con otro código, en su propio
+-- 20261127090100): se reintenta esa receta con otro código, en su propio
 -- subbloque. Idempotente: solo toca las que siguen sin código. Si se corta,
 -- `prisma migrate resolve --rolled-back
 -- 20261127090200_dx467_prescription_verification_code_backfill` y `deploy`.

@@ -9,7 +9,7 @@
 --       Es el mismo alfabeto y largo que genera la API
 --       (src/modules/prescriptions/domain/prescription-verification.ts).
 --   prescriptions."verificationCode"  TEXT, NULL hasta el barrido
---       (20261126090200) y NOT NULL después (20261126090300). DEFAULT la
+--       (20261127090200) y NOT NULL después (20261127090300). DEFAULT la
 --       función: la API nueva escribe el suyo, pero una réplica anterior que
 --       inserte sin nombrar la columna (despliegue escalonado) también deja
 --       la receta con código. Cambiar el DEFAULT solo toca el catálogo.
@@ -17,7 +17,7 @@
 --   prescriptions_verification_code_present_check  sin NULL; tras el
 --       barrido se valida y da paso al SET NOT NULL sin recorrer la tabla.
 --       Los dos CHECK, NOT VALID aquí (no recorren la tabla) y validados en
---       20261126090300 (DB-029).
+--       20261127090300 (DB-029).
 --   prescriptions_immutable  la receta sigue sin poder cambiar nada salvo
 --       anularla, con UNA excepción: poner el código a una receta que aún no
 --       lo tiene (NULL → código, nada más cambia). Es lo que hace el barrido;
@@ -25,13 +25,13 @@
 --   audit_events_actor_check  la UNIÓN del de main (20261107160100, DX-443)
 --       y la verificación pública de la receta (VIEW de PRESCRIPTION, origen
 --       PUBLIC_LINK, sin actor, con uno de los tres motivos). NOT VALID; su
---       VALIDATE va en 20261126090400, en su propia transacción.
+--       VALIDATE va en 20261127090400, en su propia transacción.
 --
 -- El código NO entra en el hash de la receta (identifica el documento, no es
 -- lo prescrito): los hashes guardados siguen validando.
 --
 -- Índice único (tenantId, verificationCode), CONCURRENTLY en
--- 20261126090100: la búsqueda pública es por el código BAJO la RLS de la
+-- 20261127090100: la búsqueda pública es por el código BAJO la RLS de la
 -- clínica del host, y el índice por clínica es el que sirve a esa consulta.
 -- Por clínica y no global: una colisión con otra clínica no puede ocurrir ni
 -- servir de oráculo (un INSERT que fallase delataría que el código existe en

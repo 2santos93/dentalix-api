@@ -1,11 +1,11 @@
 -- DX-467: índice único del código de verificación por clínica (2 de 5).
 --
--- Va ANTES del barrido (20261126090200): así cada código que escriba el
+-- Va ANTES del barrido (20261127090200): así cada código que escriba el
 -- barrido, la API o el DEFAULT de una réplica anterior ya choca con uno
 -- repetido de la misma clínica. Los NULL (recetas aún sin código) no chocan.
 -- Es también el índice de la búsqueda pública: WHERE "verificationCode" = $1
 -- bajo la RLS de la clínica del host ("tenantId" = …). Por qué por clínica y
--- no global: ver 20261126090000.
+-- no global: ver 20261127090000.
 --
 -- CONCURRENTLY: no bloquea las escrituras de recetas mientras se construye.
 -- Una única sentencia, fuera de transacción (molde de

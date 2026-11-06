@@ -471,7 +471,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
   /**
    * DX-467: VIEW de PRESCRIPTION sin actor, origen PUBLIC_LINK y el motivo del
    * resultado; solo ids (receta, paciente, sede) y los datos de la petición.
-   * Lo admite el CHECK audit_events_actor_check (20261126090000).
+   * Lo admite el CHECK audit_events_actor_check (20261127090000).
    */
   async recordPublicVerification(
     input: PublicVerificationAuditInput,

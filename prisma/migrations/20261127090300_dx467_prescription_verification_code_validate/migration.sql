@@ -1,7 +1,7 @@
 -- DX-467: el código de verificación pasa a obligatorio (4 de 5).
 --
--- Tras el barrido (20261126090200) ninguna receta queda sin código:
---   1. VALIDATE de los dos CHECK de 20261126090000 (SHARE UPDATE EXCLUSIVE:
+-- Tras el barrido (20261127090200) ninguna receta queda sin código:
+--   1. VALIDATE de los dos CHECK de 20261127090000 (SHARE UPDATE EXCLUSIVE:
 --      recorre la tabla sin bloquear las escrituras).
 --   2. SET NOT NULL: con prescriptions_verification_code_present_check ya
 --      validado, Postgres (≥ 12) no vuelve a recorrer la tabla; ACCESS
