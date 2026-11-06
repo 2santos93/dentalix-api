@@ -1842,7 +1842,8 @@ reescribe ni recalcula ningún documento histórico (la migración solo toca la
 tabla de referencia), y `rounding_digits` **congela** la regla anterior: 0 para
 las monedas sin decimales en CLDR 47 y para el conjunto anterior a G1
 (CLP, JPY, KRW, PYG); el resto, sus minor units. Así ningún descuento ni precio
-nuevo cambia. Donde ISO y la regla difieren (minor units 2, redondeo 0): AFN,
+nuevo cambia. Donde ISO y la regla difieren (minor units 2, redondeo 0; son 13 en
+`prisma/reference/currency-digits.ts`), entre otras: AFN,
 ALL, IRR, KPW, LAK, LBP, MGA, MMK, RSD, SOS, SYP, YER. Caso de referencia:
 **123,45 RSD × 7,5 % = 9,25875 → 9 RSD** (vigente, redondeo 0) frente a
 **9,26 RSD** si se redondeara a sus 2 minor units ISO (CLDR 48.1 separa
@@ -1871,15 +1872,16 @@ JPY): repartirlas en unidades de la moneda es otra decisión pendiente.
 ningún `Math.round(x * k)` ni `.toFixed(` de importes: se redondea con `round2`,
 `roundToDigits` o `roundCents`, y se escribe un importe (claves de
 idempotencia, SQL `numeric`, CSV, presupuestos) con `amountText`. Lo vigila
-`src/architecture/no-loose-money-rounding.spec.ts` (usa `git ls-files`: se
+`src/architecture/no-loose-money-rounding.spec.ts` (mira `src` y `prisma/demo`; usa `git ls-files`: se
 ejecuta tras commitear); lo que no es dinero (porcentajes, dosis, pesos, tasas
 de cambio, minutos) está en su lista blanca con la razón de cada entrada, y
 una entrada que ya no coincide con nada también falla. Se migró sin cambiar
 ningún resultado. `round2WithEpsilon` conserva el redondeo con `Number.EPSILON`
 del informe de producción por procedimiento, que difiere de `round2` solo en
 empates de coma flotante (1,005 → 1,01 frente a 1): unificarlo es una
-decisión pendiente. **Decisiones pendientes del dueño:** (1) pasar RSD y las demás monedas de la lista de arriba a sus 2
-decimales ISO (hoy `rounding_digits` 0); (2) repartir
+decisión pendiente. **Decisiones pendientes del dueño:** (1) pasar las 13 monedas con `minorUnits` 2 y
+`roundingDigits` 0 de `prisma/reference/currency-digits.ts` (hoy redondean a 0)
+a sus 2 decimales ISO; (2) repartir
 las cuotas del plan de pagos en unidades de la moneda (hoy, al céntimo, también
 en JPY).
 

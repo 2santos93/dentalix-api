@@ -1,9 +1,11 @@
+import { amountText } from '../../../shared/money/money';
 import {
   KPI_DEFINITIONS,
   KPI_KEYS,
   type KpiChangeUnit,
   type KpiKey,
   type KpiTrend,
+  type KpiUnit,
 } from '../domain/kpi-definitions';
 import type {
   ComparisonRow,
@@ -68,6 +70,13 @@ function num(value: number | null, decimals: number): string {
   return value === null ? '' : value.toFixed(decimals);
 }
 
+/** Un valor de KPI: los importes (`MONEY`) con `amountText`, el resto con `num`. */
+function metric(value: number | null, unit: KpiUnit, decimals: number): string {
+  return value !== null && unit === 'MONEY'
+    ? amountText(value, 2)
+    : num(value, decimals);
+}
+
 function metricsOf(
   row: ComparisonRow,
   key: KpiKey,
@@ -95,8 +104,8 @@ export function toLocationsComparisonCsv(report: LocationsComparison): string {
             text(row.name),
             text(def.label),
             m.currency ?? '',
-            num(m.value, decimals),
-            num(m.previous, decimals),
+            metric(m.value, def.unit, decimals),
+            metric(m.previous, def.unit, decimals),
             num(m.change, 1),
             m.change === null ? '' : CHANGE_UNIT_LABELS[def.changeUnit],
             m.trend ? TREND_LABELS[m.trend] : '',

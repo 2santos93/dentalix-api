@@ -1,4 +1,3 @@
-import { round2 } from '../../../shared/money/money';
 /*
  * Indicadores de «Comparar sedes» (DX-014). ÚNICA definición de cada KPI: qué
  * mide, cómo se calcula a partir de las sumas que hace la base de datos, si es
@@ -9,6 +8,8 @@ import { round2 } from '../../../shared/money/money';
  * Los importes NUNCA se suman entre monedas: cada indicador de dinero es una
  * lista por moneda, y el «Total clínica» suma solo dentro de la misma moneda.
  */
+
+import { round2 } from '../../../shared/money/money';
 
 export const KPI_KEYS = [
   'production',
@@ -199,17 +200,18 @@ export interface KpiValues {
   occupancy: number | null;
 }
 
-function round(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
+/** Tasas y variaciones (%, p.p.), no importes: los importes usan `round2`. */
+const roundPercent = (value: number, decimals: number): number =>
+  Math.round(value * 10 ** decimals) / 10 ** decimals;
 
 /** Tope de la ocupación: una cita fuera de horario no la lleva más allá. */
 const MAX_OCCUPANCY = 100;
 
 /** `numerator ÷ denominator` en % con 2 decimales; null si no hay base. */
 function percent(numerator: number, denominator: number): number | null {
-  return denominator > 0 ? round((numerator / denominator) * 100, 2) : null;
+  return denominator > 0
+    ? roundPercent((numerator / denominator) * 100, 2)
+    : null;
 }
 
 /**
@@ -315,7 +317,7 @@ export function changePercent(
   previous: number | null,
 ): number | null {
   if (current === null || previous === null || previous === 0) return null;
-  return round(((current - previous) / Math.abs(previous)) * 100, 1);
+  return roundPercent(((current - previous) / Math.abs(previous)) * 100, 1);
 }
 
 /**
@@ -327,7 +329,7 @@ export function changePoints(
   previous: number | null,
 ): number | null {
   if (current === null || previous === null) return null;
-  return round(current - previous, 1);
+  return roundPercent(current - previous, 1);
 }
 
 /** La variación del indicador en su unidad (`changeUnit`). */

@@ -1,4 +1,3 @@
-import { round2WithEpsilon } from '../../../shared/money/money';
 /*
  * «Producción por procedimiento» (DX-423). La base de datos suma, por
  * procedimiento del catálogo y moneda del plan, los ítems REALIZADOS del
@@ -15,6 +14,8 @@ import { round2WithEpsilon } from '../../../shared/money/money';
  * Los importes NUNCA se suman entre monedas: los subtotales de categoría y los
  * totales van por moneda.
  */
+
+import { round2WithEpsilon } from '../../../shared/money/money';
 
 export const UNCATEGORIZED_LABEL = 'Sin categoría';
 
@@ -69,11 +70,9 @@ export interface ProcedureProduction {
   totals: AmountTotals[];
 }
 
-/** Redondeo a `decimals` decimales, a la mitad hacia arriba. */
-function round(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round((value + Number.EPSILON) * factor) / factor;
-}
+/** Diferencia % frente al catálogo, a la mitad hacia arriba (no un importe). */
+const roundPercent = (value: number, decimals: number): number =>
+  Math.round((value + Number.EPSILON) * 10 ** decimals) / 10 ** decimals;
 
 const money = round2WithEpsilon;
 
@@ -113,7 +112,10 @@ function rowOf(s: ProcedureSums): ProcedureRow {
   const differencePercent =
     s.catalogCount === 0 || s.catalogSum <= 0
       ? null
-      : round(((s.catalogPricedNet - s.catalogSum) / s.catalogSum) * 100, 1);
+      : roundPercent(
+          ((s.catalogPricedNet - s.catalogSum) / s.catalogSum) * 100,
+          1,
+        );
   return {
     catalogItemId: s.catalogItemId,
     code: s.code,

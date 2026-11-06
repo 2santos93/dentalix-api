@@ -7,9 +7,9 @@ import {
   bigCents,
   percentOfCentsInUnits,
   unitCents,
+  fitsRoundingDigits,
   unitsToAmount,
   type RoundingDigits,
-  fitsRoundingDigits,
 } from '../../../shared/money/line-rounding';
 import { fromCents, toCents } from '../../../shared/money/money';
 

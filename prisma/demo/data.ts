@@ -17,6 +17,7 @@ import {
 } from '@prisma/client';
 import type { MedicalHistoryVersionData } from '../../src/modules/medical-history/domain/ports/medical-history-repository.port';
 import type { ScheduleRange } from '../../src/modules/location-schedule/application/business-hours';
+import { round2 } from '../../src/shared/money/money';
 import { addCivilDays, civilDateIn } from '../../src/shared/time/civil-day';
 import {
   ANAMNESIS_CONDITIONS,
@@ -69,7 +70,7 @@ export function demoAmountIn(
   usd: number,
   daysAgo: number,
 ): number {
-  return Math.round(usd * DEMO_MANUAL_RATES[currency](daysAgo) * 100) / 100;
+  return round2(usd * DEMO_MANUAL_RATES[currency](daysAgo));
 }
 /** Sedes de la rotación de los dos dentistas compartidos (DX-233). */
 export type RotationSiteKey = 'principal' | 'norte';

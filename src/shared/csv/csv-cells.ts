@@ -1,10 +1,11 @@
-import { amountText } from '../money/money';
 /*
  * Celdas de los CSV de exportación (descuentos y gastos): texto entre
  * comillas, sin saltos de línea, y con el prefijo «'» cuando empieza (tras
  * blancos) por = + - @ (o tabulador/CR) para que la hoja de cálculo no lo
  * ejecute como fórmula (inyección CSV).
  */
+
+import { amountText } from '../money/money';
 const FORMULA_START = /^[\s]*[=+\-@]|^[\t\r]/;
 
 export function csvText(value: string | null): string {

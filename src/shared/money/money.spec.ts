@@ -45,7 +45,9 @@ describe('helpers de DX-488 (mismos resultados que el código en línea)', () =>
     expect(amountText(36.5, 2)).toBe('36.50'); // VES
     expect(amountText(1500, 0)).toBe('1500'); // JPY
     expect(amountText(0.1 + 0.2, 2)).toBe('0.30');
-    expect(amountText(1.005, 2)).toBe((1.005).toFixed(2));
+    // toFixed escribe el valor binario exacto: 1.005 es 1.00499999…
+    expect(amountText(1.005, 2)).toBe('1.00');
+    expect(amountText(2.675, 2)).toBe('2.67');
   });
 
   it('round2WithEpsilon conserva el redondeo del informe de producción', () => {
@@ -54,8 +56,10 @@ describe('helpers de DX-488 (mismos resultados que el código en línea)', () =>
         Math.round((v + Number.EPSILON) * 100) / 100,
       );
     }
+    // Donde difieren de `round2` (empates de coma flotante):
     expect(round2WithEpsilon(1.005)).toBe(1.01);
     expect(round2(1.005)).toBe(1);
+    expect(round2WithEpsilon(1.005)).not.toBe(round2(1.005));
   });
 });
 

@@ -16,13 +16,23 @@ import { join } from 'node:path';
 const API_ROOT = join(__dirname, '..', '..');
 const MONEY_DIR = 'src/shared/money/';
 
-/** `.toFixed(` o un `Math.round(` cuyo argumento multiplica (en varias líneas). */
-const LOOSE = /\.toFixed\(|Math\.round\([^;]*?\*/g;
+/**
+ * `.toFixed(` / `["toFixed"]` / `.toPrecision(` (con o sin espacio), un
+ * `Math.round(` cuyo argumento multiplica, o un `Math.floor/trunc(` que
+ * multiplica por 100 (en varias líneas). Sencilla a propósito: NO cubre alias
+ * (`const r = Math.round`, `const { round } = Math`) ni `Intl.NumberFormat`.
+ */
+const LOOSE =
+  /\.toFixed\s*\(|\["toFixed"\]|\.toPrecision\s*\(|Math\.round\s*\([^;]*?\*|Math\.(?:floor|trunc)\s*\([^;]*?(?:\*\s*100\b|\b100\s*\*)/g;
 
 export interface Allowed {
   file: string;
   /** Fragmento de la línea marcada (estable aunque cambien los números de línea). */
   text: string;
+  /** Si va, la función cuyo cuerpo es (aparece en las 2 líneas anteriores). */
+  fn?: string;
+  /** Cuántas líneas con ese fragmento hay en el fichero: una más, falla. */
+  count?: number;
   reason: string;
 }
 
@@ -40,13 +50,15 @@ export const ALLOWED: readonly Allowed[] = [
   },
   {
     file: 'src/modules/reports/domain/kpi-definitions.ts',
-    text: 'Math.round(value * factor) / factor',
+    text: 'Math.round(value * 10 ** decimals) / 10 ** decimals',
+    fn: 'const roundPercent',
     reason:
       'redondeo de tasas y variaciones (%, p.p.); los importes usan round2',
   },
   {
     file: 'src/modules/reports/domain/production-by-procedure.ts',
-    text: 'Math.round((value + Number.EPSILON) * factor) / factor',
+    text: 'Math.round((value + Number.EPSILON) * 10 ** decimals)',
+    fn: 'const roundPercent',
     reason:
       'diferencia % frente al catálogo (1 decimal); los importes usan round2WithEpsilon',
   },
@@ -59,7 +71,7 @@ export const ALLOWED: readonly Allowed[] = [
     file: 'src/modules/reports/application/locations-comparison-csv.ts',
     text: 'value.toFixed(decimals)',
     reason:
-      'valores de KPI de varias unidades (conteo, %, p.p.); los importes ya vienen redondeados a 2 decimales por computeKpis',
+      'num(): solo conteos, % y variaciones; los importes (unit MONEY) van por amountText',
   },
   {
     file: 'src/modules/periodontal/domain/perio-measures.ts',
@@ -120,8 +132,29 @@ export const ALLOWED: readonly Allowed[] = [
   },
   {
     file: 'src/modules/sedation/domain/sedation-rules.ts',
-    text: 'Math.round(value * f) / f',
-    reason: 'constantes clínicas de sedación',
+    text: 'Math.round(value * 10 ** decimals) / 10 ** decimals',
+    fn: 'const roundDose',
+    reason: 'dosis e IMC de sedación (función roundDose)',
+  },
+  {
+    file: 'src/modules/patient-imports/application/patient-imports.use-cases.ts',
+    text: 'Math.floor((processed / toProcess) * 100)',
+    reason: '% de progreso de una importación',
+  },
+  {
+    file: 'prisma/demo/data.ts',
+    text: 'const r4 = (x: number) => Math.round(x * 1e4) / 1e4',
+    reason: 'tasa de cambio demo (4 decimales), no un importe',
+  },
+  {
+    file: 'prisma/demo/data.ts',
+    text: 'Math.round((usd * 3) / 10) * 10',
+    reason: 'precio demo redondeado a decenas (cifra «bonita» de la demo)',
+  },
+  {
+    file: 'prisma/demo/data.ts',
+    text: 'Math.round((usd * 0.8) / 5) * 5',
+    reason: 'precio demo redondeado a cincos (cifra «bonita» de la demo)',
   },
   // Tiempo y otros
   {
@@ -137,7 +170,9 @@ export const ALLOWED: readonly Allowed[] = [
 ];
 
 const isScanned = (file: string): boolean =>
-  file.startsWith('src/') &&
+  (file.startsWith('src/') ||
+    file.startsWith('prisma/demo/') ||
+    file === 'prisma/seed-demo.ts') &&
   file.endsWith('.ts') &&
   !file.endsWith('.spec.ts') &&
   !file.includes('/__fixtures__/') &&
@@ -148,55 +183,78 @@ const isComment = (line: string): boolean => /^\s*(\*|\/\/|\/\*)/.test(line);
 /** Las líneas con un redondeo o `toFixed` en línea (no comentarios). */
 export function looseRoundings(
   source: string,
-): { line: number; text: string }[] {
+): { line: number; text: string; context: string }[] {
   const lines = source.split('\n');
   return [...source.matchAll(LOOSE)].flatMap((m) => {
     const line = source.slice(0, m.index).split('\n').length;
     const text = lines[line - 1];
-    return isComment(text) ? [] : [{ line, text: text.trim() }];
+    const context = lines.slice(Math.max(0, line - 3), line).join('\n');
+    return isComment(text) ? [] : [{ line, text: text.trim(), context }];
   });
 }
 
-function trackedFiles(): string[] {
-  return execFileSync('git', ['ls-files', 'src'], {
+const tracked = (): string[] =>
+  execFileSync('git', ['ls-files', 'src', 'prisma'], {
     cwd: API_ROOT,
     encoding: 'utf8',
   })
     .split('\n')
-    .filter(isScanned);
-}
+    .filter((f) => f.endsWith('.ts'));
+
+const matches = (
+  a: Allowed,
+  { text, context }: { text: string; context: string },
+): boolean =>
+  text.includes(a.text) && (a.fn === undefined || context.includes(a.fn));
+
+/** Quién puede usar `round2WithEpsilon` (N1): solo el informe de producción. */
+const EPSILON_USERS = ['src/modules/reports/domain/production-by-procedure.ts'];
 
 describe('sin redondeos sueltos de importes (DX-488)', () => {
-  const files = trackedFiles();
+  const all = tracked();
+  const files = all.filter(isScanned);
+  const read = (file: string): string =>
+    readFileSync(join(API_ROOT, file), 'utf8');
 
   it('la guarda mira los ficheros de producción', () => {
     expect(files.length).toBeGreaterThan(500);
     expect(files).toContain('src/modules/payments/domain/idempotency.ts');
+    expect(files).toContain('prisma/demo/data.ts');
     expect(files).not.toContain('src/shared/money/money.ts');
   });
 
   it('ningún Math.round(x * k) ni toFixed de importes fuera de src/shared/money', () => {
     const offenders = files.flatMap((file) =>
-      looseRoundings(readFileSync(join(API_ROOT, file), 'utf8'))
+      looseRoundings(read(file))
         .filter(
-          ({ text }) =>
-            !ALLOWED.some((a) => a.file === file && text.includes(a.text)),
+          (hit) => !ALLOWED.some((a) => a.file === file && matches(a, hit)),
         )
         .map(({ line, text }) => `${file}:${line}  ${text}`),
     );
     expect(offenders).toEqual([]);
   });
 
-  it('cada entrada de la lista blanca sigue coincidiendo con algo y tiene razón', () => {
-    const stale = ALLOWED.filter(
-      (a) =>
-        !a.reason.trim() ||
-        !files.includes(a.file) ||
-        !looseRoundings(readFileSync(join(API_ROOT, a.file), 'utf8')).some(
-          ({ text }) => text.includes(a.text),
-        ),
+  it('cada entrada de la lista blanca coincide con EXACTAMENTE `count` líneas y tiene razón', () => {
+    const wrong = ALLOWED.flatMap((a) => {
+      const found = files.includes(a.file)
+        ? looseRoundings(read(a.file)).filter((hit) => matches(a, hit)).length
+        : 0;
+      const expected = a.count ?? 1;
+      return a.reason.trim() && found === expected
+        ? []
+        : [`${a.file} «${a.text}»: ${found} de ${expected}`];
+    });
+    expect(wrong).toEqual([]);
+  });
+
+  it('round2WithEpsilon solo lo usa el informe de producción por procedimiento', () => {
+    const users = all.filter(
+      (f) =>
+        !f.startsWith(MONEY_DIR) &&
+        !f.endsWith('.spec.ts') &&
+        read(f).includes('round2WithEpsilon'),
     );
-    expect(stale).toEqual([]);
+    expect(users).toEqual(EPSILON_USERS);
   });
 
   it('autoprueba: detecta las formas de un redondeo a mano', () => {
@@ -206,9 +264,15 @@ describe('sin redondeos sueltos de importes (DX-488)', () => {
     expect(n('Math.round(\n  (a + b) *\n    100,\n)')).toBe(1);
     expect(n('Math.round(value * factor) / factor')).toBe(1);
     expect(n('return amount.toFixed(2);')).toBe(1);
+    expect(n('return amount.toFixed (2);')).toBe(1);
+    expect(n('amount["toFixed"](2)')).toBe(1);
+    expect(n('Number(x.toPrecision(4))')).toBe(1);
+    expect(n('Math.floor(x * 100 + 0.5)')).toBe(1);
+    expect(n('Math.trunc(x * 100)')).toBe(1);
     expect(n('Number(rate.toFixed(8))')).toBe(1);
     // No son importes ni multiplican:
     expect(n('Math.round(ms / 1000)')).toBe(0);
+    expect(n('Math.floor(page)')).toBe(0);
     expect(n('Math.round(t.cents)')).toBe(0);
     expect(n(' * `Math.round(kg * 10)` daría 72,6')).toBe(0);
     expect(n('// Math.round(x * 100)')).toBe(0);
