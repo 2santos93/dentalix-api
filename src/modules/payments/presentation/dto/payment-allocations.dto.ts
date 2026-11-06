@@ -134,7 +134,7 @@ export class PaymentAllocationsDto {
   @ApiProperty({
     example: 20,
     description:
-      'De lo sin imputar a ítems, lo que el plan ya devolvió o traspasó de su saldo a favor (DX-253) y se atribuye a este abono: las salidas solo restan de abonos registrados antes que ellas, empezando por el más reciente. 0 si no hay',
+      'De lo sin imputar a ítems, lo que el plan ya devolvió o traspasó de su saldo a favor (DX-253) y se atribuye a este abono. Cada salida gasta primero lo que el plan recibió por traspaso (DX-399-ter, llegara antes o después) y solo el resto resta de abonos registrados antes que ella, empezando por el más reciente. 0 si no hay',
   })
   creditOut!: number;
 

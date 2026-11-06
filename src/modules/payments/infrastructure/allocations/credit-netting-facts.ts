@@ -2,9 +2,11 @@ import { Prisma } from '@prisma/client';
 import { toCents } from '../../../../shared/money/money';
 import { NON_BILLABLE_PLAN_STATUSES } from '../../../treatment-plans/domain/plan-status-machine';
 import {
-  netUnallocated,
+  netCredit,
+  type CreditInEntry,
   type CreditOutEntry,
   type NettedPayment,
+  type NettedPlan,
   type NettingPayment,
 } from '../../domain/credit-netting';
 
@@ -41,19 +43,84 @@ interface FactRow {
 
 const cents = (value: Prisma.Decimal): number => toCents(value.toNumber());
 
+/** Lo que la cascada necesita: los abonos candidatos y los asientos de sus planes. */
+export interface NettingInput {
+  facts: NettingFact[];
+  /** Devoluciones y traspasos de salida (REFUND, TRANSFER_OUT). */
+  entries: CreditOutEntry[];
+  /** DX-399-ter: lo recibido por traspaso (TRANSFER_IN), que absorbe primero. */
+  transfersIn: CreditInEntry[];
+}
+
+/**
+ * Los asientos del saldo a favor de `planIds` (en la moneda del plan, en
+ * positivo): las salidas y lo recibido por traspaso. Una consulta.
+ */
+export async function loadCreditEntries(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  planIds: readonly string[],
+): Promise<{ entries: CreditOutEntry[]; transfersIn: CreditInEntry[] }> {
+  if (planIds.length === 0) return { entries: [], transfersIn: [] };
+  const rows = await tx.$queryRaw<
+    {
+      id: string;
+      planId: string;
+      kind: string;
+      createdAt: Date;
+      amount: Prisma.Decimal;
+    }[]
+  >`
+    SELECT e."id", e."treatmentPlanId" AS "planId", e."kind"::text AS "kind",
+           e."createdAt",
+           CASE WHEN e."kind" = 'TRANSFER_IN' THEN e."amount" ELSE -e."amount" END AS "amount"
+      FROM "patient_credit_entries" e
+     WHERE e."tenantId" = ${tenantId}::uuid
+       AND e."kind" IN ('REFUND', 'TRANSFER_OUT', 'TRANSFER_IN')
+       AND e."treatmentPlanId" = ANY(${[...planIds]}::uuid[])`;
+  const entries: CreditOutEntry[] = [];
+  const transfersIn: CreditInEntry[] = [];
+  for (const r of rows) {
+    if (r.kind === 'TRANSFER_IN') {
+      transfersIn.push({
+        id: r.id,
+        planId: r.planId,
+        createdAt: r.createdAt,
+        cents: cents(r.amount),
+      });
+    } else {
+      entries.push({
+        planId: r.planId,
+        createdAt: r.createdAt,
+        cents: cents(r.amount),
+      });
+    }
+  }
+  return { entries, transfersIn };
+}
+
 /**
  * Los abonos candidatos (vivos, de un plan que se cobra —no cancelado ni
  * rechazado—, de un paciente vivo, con base y algo sin imputar) de los planes
- * que cumplan `planScope` (condición sobre `tp`), y sus salidas de saldo a
- * favor (devoluciones y traspasos de salida, asientos con signo en la moneda
- * del plan). Una consulta por tabla; la cascada la hace `netUnallocated`.
- * Lo comparten el informe «Cobrado sin imputar» y `GET /payments/:id/allocations`.
+ * que cumplan `planScope` (condición sobre `tp`), y los asientos del saldo a
+ * favor de esos planes (`loadCreditEntries`). Una consulta por tabla; la
+ * cascada la hace `netCredit`. Lo comparten el informe «Cobrado sin imputar»,
+ * `GET /payments/:id/allocations`, la imputación y el saldo con ítems.
  */
 export async function loadNettingFacts(
   tx: Prisma.TransactionClient,
   tenantId: string,
   planScope: Prisma.Sql,
-): Promise<{ facts: NettingFact[]; entries: CreditOutEntry[] }> {
+  options: { anyPlanStatus?: boolean } = {},
+): Promise<NettingInput> {
+  // DX-399-ter (F1): el saldo de UN plan (estado de cuenta, pestaña Plan y
+  // ventana «Ver imputación») netea también un plan cancelado o rechazado:
+  // cancelar y devolver es el camino normal de una devolución. Ese plan no
+  // tiene imputaciones ni reparto, así que netearlo no mueve nada; el informe y
+  // el diagnóstico siguen solo con planes que se cobran.
+  const statusFilter = options.anyPlanStatus
+    ? Prisma.sql`TRUE`
+    : Prisma.sql`tp."status"::text NOT IN (${Prisma.join([...NON_BILLABLE_PLAN_STATUSES])})`;
   const rows = await tx.$queryRaw<FactRow[]>`
     SELECT p."id", tp."id" AS "planId", p."paidAt", p."createdAt", pt."id" AS "patientId",
            btrim(pt."firstName" || ' ' || pt."lastName") AS "patientName",
@@ -79,7 +146,7 @@ export async function loadNettingFacts(
        AND p."deletedAt" IS NULL
        AND p."treatmentPlanId" IS NOT NULL
        AND tp."deletedAt" IS NULL
-       AND tp."status"::text NOT IN (${Prisma.join([...NON_BILLABLE_PLAN_STATUSES])})
+       AND ${statusFilter}
        AND pt."deletedAt" IS NULL
        AND b."amount" - al."allocated" > 0
        AND ${planScope}`;
@@ -105,37 +172,29 @@ export async function loadNettingFacts(
     };
   });
   const planIds = [...new Set(facts.map((f) => f.planId))];
-  const entryRows =
-    planIds.length === 0
-      ? []
-      : await tx.$queryRaw<
-          { planId: string; createdAt: Date; amount: Prisma.Decimal }[]
-        >`
-          SELECT e."treatmentPlanId" AS "planId", e."createdAt", -e."amount" AS "amount"
-            FROM "patient_credit_entries" e
-           WHERE e."tenantId" = ${tenantId}::uuid
-             AND e."kind" IN ('REFUND', 'TRANSFER_OUT')
-             AND e."treatmentPlanId" = ANY(${planIds}::uuid[])`;
-  return {
-    facts,
-    entries: entryRows.map((e) => ({
-      planId: e.planId,
-      createdAt: e.createdAt,
-      cents: cents(e.amount),
-    })),
-  };
+  return { facts, ...(await loadCreditEntries(tx, tenantId, planIds)) };
 }
 
 /** Los hechos ya netos: el resultado por abono junto a su hecho. */
-export function nettedFacts(
-  facts: readonly NettingFact[],
-  entries: readonly CreditOutEntry[],
-): { fact: NettingFact; net: NettedPayment }[] {
-  const net = netUnallocated(facts, entries);
+export function nettedFacts({
+  facts,
+  entries,
+  transfersIn,
+}: NettingInput): { fact: NettingFact; net: NettedPayment }[] {
+  const net = netCredit(facts, entries, transfersIn).byPayment;
   return facts.map((fact) => ({
     fact,
     net: net.get(fact.id) as NettedPayment,
   }));
+}
+
+/** El reparto de las salidas por plan (solo planes con alguna salida). */
+export function nettedPlans({
+  facts,
+  entries,
+  transfersIn,
+}: NettingInput): Map<string, NettedPlan> {
+  return netCredit(facts, entries, transfersIn).byPlan;
 }
 
 interface AffectedPlan {
@@ -144,7 +203,7 @@ interface AffectedPlan {
   patientId: string;
   /** Σ devoluciones y traspasos de salida del plan (céntimos). */
   creditOutCents: number;
-  /** Lo que la cascada atribuye a abonos del plan. */
+  /** Lo que la cascada atribuye a abonos del plan o absorbe lo recibido por traspaso. */
   attributedCents: number;
   /** creditOutCents - attributedCents (> 0 = afectado). */
   discardedCents: number;
@@ -179,21 +238,25 @@ export async function findAffectedPlans(
      GROUP BY e."treatmentPlanId", e."patientId"`;
   if (outs.length === 0) return [];
   const planIds = outs.map((o) => o.planId);
-  const { facts, entries } = await loadNettingFacts(
+  const { facts } = await loadNettingFacts(
     tx,
     tenantId,
     Prisma.sql`tp."id" = ANY(${planIds}::uuid[])`,
   );
-  const planOf = new Map(facts.map((f) => [f.id, f.planId]));
-  const attributed = new Map<string, number>();
-  for (const { fact, net } of nettedFacts(facts, entries)) {
-    const planId = planOf.get(fact.id) as string;
-    attributed.set(planId, (attributed.get(planId) ?? 0) + net.creditOutCents);
-  }
+  // Los asientos de TODOS los planes con salidas, también los que ya no tienen
+  // abonos con algo sin imputar: lo recibido por traspaso absorbe igual
+  // (DX-399-ter) y eso no es dinero descartado.
+  const plans = nettedPlans({
+    facts,
+    ...(await loadCreditEntries(tx, tenantId, planIds)),
+  });
   return outs
     .map((o) => {
       const creditOutCents = Number(o.cents);
-      const attributedCents = attributed.get(o.planId) ?? 0;
+      const netted = plans.get(o.planId);
+      const attributedCents = netted
+        ? netted.absorbedByPaymentsCents + netted.absorbedByTransfersInCents
+        : 0;
       return {
         tenantId,
         planId: o.planId,

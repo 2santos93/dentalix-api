@@ -1,15 +1,44 @@
 /**
- * «A cuenta» neto de lo devuelto o traspasado (DX-399, DX-253). Regla ÚNICA que
- * comparten el informe «Cobrado sin imputar» y el detalle de un abono
- * (`GET /payments/:id/allocations`), para que cuadren por construcción.
+ * «A cuenta» neto de lo devuelto o traspasado (DX-399, DX-253, DX-399-ter).
+ * Regla ÚNICA del saldo a favor de un plan: la usan el informe «Cobrado sin
+ * imputar», el detalle de un abono (`GET /payments/:id/allocations`), la
+ * imputación automática y la manual (DX-399-bis), el «Sin imputar» del estado
+ * de cuenta y de la pestaña Plan (`executeWithItems`) y el diagnóstico
+ * `credit-netting:report`, para que cuadren por construcción.
  *
- * Un asiento de salida del saldo a favor del plan (devolución o traspaso de
- * salida) solo puede absorber abonos REGISTRADOS antes que él (`payment.createdAt
- * <= entry.createdAt`, instantes del servidor: `paidAt` es un día y puede ser
- * anterior), empezando por el de `paidAt` más reciente de esos (LIFO) y sin bajar de 0
- * lo que a cada abono le queda a cuenta. Los asientos se aplican en orden
- * cronológico. Lo que no encuentre abono al que restar se descarta (no es
- * dinero a cuenta de ningún abono). Todo en céntimos enteros.
+ * Fuentes del saldo a favor de un plan: lo que sus abonos tienen sin imputar a
+ * ítems y lo que recibió por traspaso (asientos TRANSFER_IN). Salidas: las
+ * devoluciones y los traspasos de salida (REFUND, TRANSFER_OUT).
+ *
+ * Orden de consumo (DX-399-ter). Los asientos de salida se aplican en orden
+ * cronológico (`createdAt`), sin bajar ninguna fuente de 0, en este orden:
+ *   1. lo recibido por traspaso, del más reciente al más antiguo (`createdAt`
+ *      y luego id), SIN mirar si llegó antes o después de la salida;
+ *   2. los abonos REGISTRADOS antes que la salida (`createdAt <= el del
+ *      asiento`, instantes del servidor: `paidAt` es un día y puede ser
+ *      anterior), del de `paidAt` más reciente al más antiguo (`createdAt` y
+ *      luego id): el LIFO de DX-399, sin cambios.
+ * Lo que no encuentre fuente se descarta (no es dinero a cuenta de ninguna).
+ *
+ * Por qué el traspaso recibido va primero y no un FIFO común: el saldo recibido
+ * por traspaso no se puede imputar a ningún ítem, el excedente de un abono sí.
+ * Gastar primero lo que no se imputa deja a los abonos todo lo que el plan aún
+ * tiene, así que un ítem nuevo no queda «pendiente» con el saldo del plan en 0
+ * (secuencia del ticket: excedente propio, traspaso recibido, devolución de 30,
+ * ítem nuevo de 30). Con un FIFO por fecha la devolución saldría del abono, que
+ * es más antiguo, y el ítem quedaría pendiente. Nunca se reparte dinero que ya
+ * salió: lo que la regla deja a los abonos es como mucho Σ sin imputar −
+ * (salidas − recibido por traspaso), que no pasa de lo que el plan tiene.
+ *
+ * Por qué lo recibido no mira la fecha (F2): un traspaso de ida y vuelta (P
+ * traspasa 30 a Q y Q se los devuelve) dejaría la salida de P cargada al
+ * abono y el ítem siguiente «pendiente» con el saldo en 0. Que un traspaso
+ * posterior la absorba no reparte dinero que no esté: la cota de arriba usa
+ * todo lo recibido, y los asientos son inmutables (ni se anulan ni se borran).
+ * Los abonos sí miran la fecha: un abono posterior es dinero nuevo para ítems
+ * y su excedente no estaba cuando salió el dinero.
+ * Un plan sin traspasos recibidos da exactamente lo de DX-399. Todo en
+ * céntimos enteros.
  */
 export interface NettingPayment {
   id: string;
@@ -28,6 +57,15 @@ export interface CreditOutEntry {
   cents: number;
 }
 
+/** Saldo a favor que el plan recibió por traspaso (asiento TRANSFER_IN). */
+export interface CreditInEntry {
+  id: string;
+  planId: string;
+  createdAt: Date;
+  /** Lo que entró al saldo del plan, en positivo. */
+  cents: number;
+}
+
 export interface NettedPayment {
   /** A cuenta tras las salidas (0 = ya no queda nada). */
   netCents: number;
@@ -35,41 +73,106 @@ export interface NettedPayment {
   creditOutCents: number;
 }
 
-export function netUnallocated(
+/** Cómo se repartieron las salidas de un plan entre sus fuentes. */
+export interface NettedPlan {
+  /** Σ salidas (devoluciones y traspasos de salida). */
+  outCents: number;
+  /** Lo que absorbió el saldo recibido por traspaso. */
+  absorbedByTransfersInCents: number;
+  /** Lo que se atribuye a abonos (Σ `creditOutCents` del plan). */
+  absorbedByPaymentsCents: number;
+  /** Lo que no encontró fuente (outCents − lo absorbido). */
+  discardedCents: number;
+}
+
+export interface CreditNetting {
+  byPayment: Map<string, NettedPayment>;
+  /** Solo los planes con alguna salida. */
+  byPlan: Map<string, NettedPlan>;
+}
+
+const byIdDesc = (a: { id: string }, b: { id: string }) =>
+  a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+
+export function netCredit(
   payments: readonly NettingPayment[],
   entries: readonly CreditOutEntry[],
-): Map<string, NettedPayment> {
-  const result = new Map<string, NettedPayment>(
+  transfersIn: readonly CreditInEntry[],
+): CreditNetting {
+  const byPayment = new Map<string, NettedPayment>(
     payments.map((p) => [
       p.id,
       { netCents: p.unallocatedCents, creditOutCents: 0 },
     ]),
   );
-  const byPlan = new Map<string, NettingPayment[]>();
+  const paymentsOf = new Map<string, NettingPayment[]>();
   for (const p of payments) {
-    byPlan.set(p.planId, [...(byPlan.get(p.planId) ?? []), p]);
+    paymentsOf.set(p.planId, [...(paymentsOf.get(p.planId) ?? []), p]);
   }
+  const inLeft = new Map<string, number>(
+    transfersIn.map((t) => [t.id, t.cents]),
+  );
+  const transfersOf = new Map<string, CreditInEntry[]>();
+  for (const t of transfersIn) {
+    transfersOf.set(t.planId, [...(transfersOf.get(t.planId) ?? []), t]);
+  }
+  const byPlan = new Map<string, NettedPlan>();
   const sortedEntries = [...entries].sort(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
   );
   for (const entry of sortedEntries) {
-    const candidates = (byPlan.get(entry.planId) ?? [])
-      .filter((p) => p.createdAt.getTime() <= entry.createdAt.getTime())
+    const plan = byPlan.get(entry.planId) ?? {
+      outCents: 0,
+      absorbedByTransfersInCents: 0,
+      absorbedByPaymentsCents: 0,
+      discardedCents: 0,
+    };
+    byPlan.set(entry.planId, plan);
+    plan.outCents += entry.cents;
+    const before = (x: { createdAt: Date }) =>
+      x.createdAt.getTime() <= entry.createdAt.getTime();
+    let remaining = entry.cents;
+    // 1. Lo recibido por traspaso, del más reciente al más antiguo, aunque
+    //    llegara DESPUÉS de la salida (F2, ver la cabecera).
+    const transfers = [...(transfersOf.get(entry.planId) ?? [])].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime() || byIdDesc(a, b),
+    );
+    for (const t of transfers) {
+      if (remaining <= 0) break;
+      const left = inLeft.get(t.id) as number;
+      const take = Math.min(left, remaining);
+      inLeft.set(t.id, left - take);
+      plan.absorbedByTransfersInCents += take;
+      remaining -= take;
+    }
+    // 2. Los abonos, del de `paidAt` más reciente al más antiguo (DX-399).
+    const candidates = (paymentsOf.get(entry.planId) ?? [])
+      .filter(before)
       .sort(
         (a, b) =>
           b.paidAt.getTime() - a.paidAt.getTime() ||
           b.createdAt.getTime() - a.createdAt.getTime() ||
-          (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+          byIdDesc(a, b),
       );
-    let remaining = entry.cents;
     for (const p of candidates) {
       if (remaining <= 0) break;
-      const state = result.get(p.id) as NettedPayment;
+      const state = byPayment.get(p.id) as NettedPayment;
       const take = Math.min(state.netCents, remaining);
       state.netCents -= take;
       state.creditOutCents += take;
+      plan.absorbedByPaymentsCents += take;
       remaining -= take;
     }
+    plan.discardedCents += remaining;
   }
-  return result;
+  return { byPayment, byPlan };
+}
+
+/** El resultado por abono de `netCredit`. */
+export function netUnallocated(
+  payments: readonly NettingPayment[],
+  entries: readonly CreditOutEntry[],
+  transfersIn: readonly CreditInEntry[],
+): Map<string, NettedPayment> {
+  return netCredit(payments, entries, transfersIn).byPayment;
 }
