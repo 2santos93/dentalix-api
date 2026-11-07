@@ -1,5 +1,5 @@
 {
-  "about": "DX-340: vectores de redondeo compartidos por la API (src/shared/money/rounding-vectors.json) y la web (src/lib/money/rounding-vectors.json, copia byte a byte). Fijan la regla vigente: cada línea se redondea a roundingDigits de su moneda (la mitad hacia arriba) y el total es la suma de líneas. No dependen de Intl.",
+  "about": "DX-340: vectores de redondeo compartidos por la API (src/shared/money/rounding-vectors.json) y la web (src/lib/money/rounding-vectors.json, copia byte a byte). Fijan la regla vigente: cada línea se redondea a roundingDigits de su moneda (la mitad hacia arriba) y el total es la suma de líneas. No dependen de Intl. DX-488: installmentSplit fija el reparto de las cuotas de un plan de pagos en unidades de roundingDigits (el resto a la última); en 2 decimales es el reparto al céntimo de siempre.",
   "currencies": {
     "ALL": {
       "minorUnits": 2,
@@ -16,6 +16,14 @@
     "RSD": {
       "minorUnits": 2,
       "roundingDigits": 0
+    },
+    "USD": {
+      "minorUnits": 2,
+      "roundingDigits": 2
+    },
+    "VES": {
+      "minorUnits": 2,
+      "roundingDigits": 2
     }
   },
   "discountForPercent": [
@@ -470,6 +478,59 @@
         }
       ],
       "total": 211490.5
+    }
+  ],
+  "installmentSplit": [
+    {
+      "currency": "JPY",
+      "financed": 10000,
+      "count": 3,
+      "installments": [3333, 3333, 3334]
+    },
+    {
+      "currency": "JPY",
+      "financed": 100000,
+      "count": 7,
+      "installments": [14285, 14285, 14285, 14285, 14285, 14285, 14290]
+    },
+    {
+      "currency": "JPY",
+      "financed": 10000.5,
+      "count": 3,
+      "installments": [3333, 3333, 3334.5]
+    },
+    {
+      "currency": "JPY",
+      "financed": 2,
+      "count": 3,
+      "installments": [0, 0, 2]
+    },
+    {
+      "currency": "RSD",
+      "financed": 150000.5,
+      "count": 4,
+      "installments": [37500, 37500, 37500, 37500.5]
+    },
+    {
+      "currency": "USD",
+      "financed": 100,
+      "count": 3,
+      "installments": [33.33, 33.33, 33.34]
+    },
+    {
+      "currency": "VES",
+      "financed": 200,
+      "count": 3,
+      "installments": [66.66, 66.66, 66.68]
+    },
+    {
+      "currency": "VES",
+      "financed": 1200000,
+      "count": 12,
+      "installments": [
+        100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000,
+        100000, 100000, 100000
+      ]
     }
   ]
 }
