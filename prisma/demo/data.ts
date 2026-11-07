@@ -38,6 +38,14 @@ import {
 export const DEMO_SUBDOMAIN = 'demo';
 export const DEMO_CLINIC_NAME = 'Clínica Demo';
 export const DEMO_PRIMARY_COLOR = '#0E7C86';
+/**
+ * DX-502-bis: moneda del catálogo de precios de la demo (Ajustes › Monedas).
+ * `DEMO_PRICES` está en USD, la moneda de la sede principal. Con sedes en USD,
+ * BRL y GBP no hay una moneda común: sin fijarla, los ítems quedarían sin
+ * moneda del catálogo y el presupuesto ocultaría el precio de lista y el
+ * ahorro por convenio.
+ */
+export const DEMO_CATALOG_CURRENCY = 'USD';
 export const DEMO_EMAIL_DOMAIN = 'demo.dentalix.app';
 /** Contraseña común de todos los usuarios demo (se imprime al terminar). */
 export const DEMO_PASSWORD = 'DemoDentalix2026!';

@@ -249,6 +249,7 @@ import {
   DEMO_AGREEMENTS,
   DEMO_PATIENT_AGREEMENTS,
   DEMO_POSTOP,
+  DEMO_CATALOG_CURRENCY,
   DEMO_PRIMARY_COLOR,
   DEMO_PRIVACY_POLICY,
   DEMO_SIGNED_CONSENT,
@@ -740,7 +741,11 @@ class DemoSeeder {
     // Branding (no hay caso de uso de edición; `tenants` no tiene RLS).
     await this.prisma.tenant.update({
       where: { id: tenantId },
-      data: { primaryColor: DEMO_PRIMARY_COLOR },
+      // DX-502-bis: antes de crear planes, para que sus ítems congelen USD.
+      data: {
+        primaryColor: DEMO_PRIMARY_COLOR,
+        catalogCurrency: DEMO_CATALOG_CURRENCY,
+      },
     });
 
     const userIds = await this.inTenant(tenantId, undefined, () =>

@@ -31,6 +31,7 @@ interface PriceQuoteBody {
 }
 
 interface ItemBody {
+  id: string;
   basePrice: number | null;
   catalogCurrency: string | null;
 }
@@ -58,6 +59,8 @@ describe('Moneda del catálogo: aislamiento por clínica y por sede (e2e, DX-502
         set(server().post(`/api/v1${path}`)).send(body),
       put: (path: string, body: object) =>
         set(server().put(`/api/v1${path}`)).send(body),
+      patch: (path: string, body: object) =>
+        set(server().patch(`/api/v1${path}`)).send(body),
     };
   };
 
@@ -228,5 +231,68 @@ describe('Moneda del catálogo: aislamiento por clínica y por sede (e2e, DX-502
         secondId,
       ),
     ).toMatchObject({ basePrice: 80000, catalogCurrency: null });
+  });
+
+  it('DX-502-bis: con la moneda del catálogo fijada en Ajustes, los ítems nuevos la llevan para todos; lo ya congelado no cambia y la otra clínica sigue con la suya', async () => {
+    const { catalogItemId, patientId } = await catalogAndPatient(
+      vesClinic,
+      'DX502B-A',
+    );
+    // vesClinic tiene ya sedes en VES y EUR (test anterior): sin moneda común.
+    const frozenNull = await addedItem(vesClinic, patientId, catalogItemId);
+    expect(frozenNull).toMatchObject({ catalogCurrency: null });
+
+    await as(vesClinic)
+      .patch('/clinic/settings', { catalogCurrency: 'USD' })
+      .expect(200);
+    expect(await quoteCurrency(vesClinic, patientId, catalogItemId)).toBe(
+      'USD',
+    );
+    const frozenUsd = await addedItem(vesClinic, patientId, catalogItemId);
+    expect(frozenUsd).toMatchObject({
+      basePrice: 80000,
+      catalogCurrency: 'USD',
+    });
+    // El miembro restringido a la sede Norte (en VES, test anterior) también
+    // recibe la de la clínica.
+    const vesOnly = (
+      await raw.location.findFirstOrThrow({
+        where: { tenantId: vesClinic.tenantId, name: 'Sede Norte DX502' },
+        select: { id: true },
+      })
+    ).id;
+    const restricted = await loginAs(
+      app,
+      vesClinic.host,
+      `${ClinicRole.DENTIST.toLowerCase()}@${vesClinic.subdomain}.test`,
+    );
+    expect(
+      await quoteCurrency(
+        vesClinic,
+        patientId,
+        catalogItemId,
+        restricted,
+        vesOnly,
+      ),
+    ).toBe('USD');
+
+    // La otra clínica no se entera.
+    const eur = await catalogAndPatient(eurClinic, 'DX502B-B');
+    expect(
+      await quoteCurrency(eurClinic, eur.patientId, eur.catalogItemId),
+    ).toBe('EUR');
+
+    // Quitarla vuelve a la regla de las sedes; lo congelado sigue igual.
+    await as(vesClinic)
+      .patch('/clinic/settings', { catalogCurrency: null })
+      .expect(200);
+    expect(await quoteCurrency(vesClinic, patientId, catalogItemId)).toBeNull();
+    const stored = await raw.treatmentPlanItem.findMany({
+      where: { id: { in: [frozenNull.id, frozenUsd.id] } },
+      select: { id: true, catalogCurrency: true },
+    });
+    expect(
+      Object.fromEntries(stored.map((i) => [i.id, i.catalogCurrency])),
+    ).toEqual({ [frozenNull.id]: null, [frozenUsd.id]: 'USD' });
   });
 });

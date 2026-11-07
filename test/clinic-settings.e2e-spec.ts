@@ -45,6 +45,7 @@ interface SettingsBody {
   primaryColor: string;
   logoUrl: string | null;
   fiscalDataPending: boolean;
+  catalogCurrency: string | null;
 }
 
 const HEX_COLOR: unknown = expect.stringMatching(/^#[0-9A-Fa-f]{6}$/);
@@ -224,6 +225,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       primaryColor: HEX_COLOR,
       logoUrl: null,
       fiscalDataPending: true,
+      catalogCurrency: null,
     });
   });
 
@@ -232,6 +234,9 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       for (const res of [
         await as(a, token).get('/clinic/settings'),
         await as(a, token).patch('/clinic/settings', { taxId: 'X' }),
+        await as(a, token).patch('/clinic/settings', {
+          catalogCurrency: 'USD',
+        }),
         await as(a, token).upload(makePng(), 'logo.png', 'image/png'),
         await as(a, token).delete('/clinic/settings/logo'),
       ]) {
@@ -246,6 +251,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     });
     expect(tenant.taxId).toBeNull();
     expect(tenant.logoKey).toBeNull();
+    expect(tenant.catalogCurrency).toBeNull();
   });
 
   it('recibo emitido SIN datos fiscales: «pendientes» y la foto de siempre (sin nombre del identificador)', async () => {
@@ -281,6 +287,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       primaryColor: '#C2410C',
       logoUrl: null,
       fiscalDataPending: false,
+      catalogCurrency: null,
     });
     const events = await auditOf('CLINIC_PROFILE');
     expect(events).toHaveLength(1);
@@ -343,6 +350,71 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     const res = await as(a).get('/clinic/settings').expect(200);
     expect((res.body as SettingsBody).name).toBe('Clínica Sonrisas');
     expect((res.body as SettingsBody).taxId).toBe('J-12345678-9');
+  });
+
+  it('DX-502-bis: el ADMIN fija la moneda del catálogo (de la referencia de monedas), queda auditada y se puede quitar', async () => {
+    const before = await auditOf('CLINIC_PROFILE');
+    const res = await as(a)
+      .patch('/clinic/settings', { catalogCurrency: ' usd ' })
+      .expect(200);
+    expect((res.body as SettingsBody).catalogCurrency).toBe('USD');
+    expect(
+      ((await as(a).get('/clinic/settings').expect(200)).body as SettingsBody)
+        .catalogCurrency,
+    ).toBe('USD');
+
+    const events = await auditOf('CLINIC_PROFILE');
+    expect(events).toHaveLength(before.length + 1);
+    const metadata = events[events.length - 1].metadata as {
+      changedFields: string[];
+      configChange: {
+        before: Record<string, unknown>;
+        after: Record<string, unknown>;
+      };
+    };
+    expect(metadata.changedFields).toEqual(['catalogCurrency']);
+    expect(metadata.configChange.before).toMatchObject({
+      catalogCurrency: null,
+    });
+    expect(metadata.configChange.after).toMatchObject({
+      catalogCurrency: 'USD',
+    });
+
+    // Una moneda que no está en la referencia, o sin forma de código: 400 en
+    // español y nada cambia.
+    for (const catalogCurrency of ['XYZ', 'US', 'U$D']) {
+      const bad = await as(a)
+        .patch('/clinic/settings', { catalogCurrency })
+        .expect(400);
+      expect((bad.body as { message: string }).message).toBe(
+        CLINIC_SETTINGS_MESSAGES.catalogCurrency,
+      );
+    }
+    expect(
+      (
+        await raw.tenant.findUniqueOrThrow({
+          where: { id: a.tenantId },
+          select: { catalogCurrency: true },
+        })
+      ).catalogCurrency,
+    ).toBe('USD');
+
+    // La otra clínica no la ve.
+    expect(
+      ((await as(b).get('/clinic/settings').expect(200)).body as SettingsBody)
+        .catalogCurrency,
+    ).toBeNull();
+
+    // null la quita: vuelve la moneda común de las sedes. También auditado.
+    const cleared = await as(a)
+      .patch('/clinic/settings', { catalogCurrency: null })
+      .expect(200);
+    expect((cleared.body as SettingsBody).catalogCurrency).toBeNull();
+    const last = (await auditOf('CLINIC_PROFILE')).at(-1)?.metadata as {
+      changedFields: string[];
+    };
+    expect(last.changedFields).toEqual(['catalogCurrency']);
+    expect(await auditOf('CLINIC_PROFILE')).toHaveLength(before.length + 2);
   });
 
   it('solo toca la clínica propia: la otra clínica sigue igual y un token ajeno no entra', async () => {

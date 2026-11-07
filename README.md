@@ -1054,6 +1054,19 @@ no hay una común. No cambia después (trigger
   escondería). Nota de despliegue: los ítems antiguos cuya moneda rellenada
   por DX-502 difiere de la del plan salen como rebaja de los informes de
   periodos pasados (su `discount` propio sigue contando).
+- **Moneda del catálogo fijada por la clínica (DX-502-bis).** Una clínica con
+  sedes en varias monedas no tiene una común y sus ítems quedarían sin moneda
+  del catálogo (sin precio de lista ni «Ahorro por convenio»). El ADMIN la
+  fija en Ajustes › Monedas: `tenants."catalogCurrency"` (opcional, ISO 4217
+  validado contra `currencies`, FK; `PATCH /clinic/settings`
+  `{ catalogCurrency }`, auditado en `CLINIC_PROFILE`; `null` la quita). Si
+  está, es la que se congela en los ítems NUEVOS (`clinicCatalogCurrency`);
+  si no, la regla de arriba. No convierte nada, no toca lo ya congelado ni
+  ningún importe, y con ella la regla de descuentos de DX-513 se aplica sola
+  (misma moneda que el plan: tope y motivo; otra: libre). La demo la fija en
+  USD. El relleno de DX-502 no la mira: es para ítems anteriores a DX-502.
+  Migraciones `20261129090000_dx502b_tenant_catalog_currency` (columna NULL y
+  FK NOT VALID; `tenants` y `currencies` no tienen RLS) y `…090100_…_fk_validate`.
 
 ### PDF firmado generado en el servidor (DX-422)
 

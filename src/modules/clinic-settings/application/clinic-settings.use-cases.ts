@@ -19,6 +19,11 @@ import {
 } from '../../../shared/storage/storage-budget';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../shared/money/currency-digits';
+import {
+  CLINIC_SETTINGS_MESSAGES,
   isFiscalDataPending,
   parseClinicProfilePatch,
   type ClinicProfileInput,
@@ -63,12 +68,18 @@ export class GetClinicSettingsUseCase {
  * campo ausente no cambia; vacío o `null` lo borra (salvo nombre y color).
  * Aplica desde ya a la marca y a los documentos; los recibos emitidos
  * conservan su foto.
+ *
+ * DX-502-bis: la moneda del catálogo tiene que estar en `currencies` (la
+ * referencia de monedas). Solo cambia la de los ítems nuevos: lo ya congelado
+ * en cada ítem sigue igual.
  */
 @Injectable()
 export class UpdateClinicSettingsUseCase {
   constructor(
     @Inject(CLINIC_SETTINGS_REPOSITORY)
     private readonly repo: ClinicSettingsRepository,
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencies: CurrencyDigitsCatalog,
   ) {}
 
   async execute(
@@ -77,6 +88,10 @@ export class UpdateClinicSettingsUseCase {
   ): Promise<ClinicSettingsView> {
     const parsed = parseClinicProfilePatch(input);
     if (!parsed.ok) throw new BadRequestException(parsed.message);
+    const code = parsed.patch.catalogCurrency;
+    if (code && !(await this.currencies.table([code])).has(code)) {
+      throw new BadRequestException(CLINIC_SETTINGS_MESSAGES.catalogCurrency);
+    }
     return clinicSettingsView(await this.repo.updateProfile(parsed.patch, ctx));
   }
 }

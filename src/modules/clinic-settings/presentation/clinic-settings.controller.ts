@@ -100,12 +100,14 @@ export class ClinicSettingsController {
       'DX-019. Solo cambian los campos enviados; vacío o null borra un dato ' +
       '(salvo el nombre y el color). El identificador fiscal es texto libre, ' +
       'sin validar el formato de ningún país. Queda en la auditoría con el ' +
-      'antes y el después. Los recibos ya emitidos conservan su foto.',
+      'antes y el después. Los recibos ya emitidos conservan su foto. ' +
+      'DX-502-bis: la moneda del catálogo (ISO 4217 de la referencia de ' +
+      'monedas) solo cambia la de los ítems nuevos del plan.',
   })
   @ApiOkResponse({ type: ClinicSettingsDto })
   @ApiBadRequestResponse({
     description:
-      'Un texto vacío donde es obligatorio, con saltos de línea o más largo que su tope, un email sin forma nombre@dominio o un color que no es #RRGGBB',
+      'Un texto vacío donde es obligatorio, con saltos de línea o más largo que su tope, un email sin forma nombre@dominio, un color que no es #RRGGBB o una moneda del catálogo que no es una moneda admitida',
   })
   update(
     @Body() dto: UpdateClinicSettingsDto,
