@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PAYMENT_PLAN_REPOSITORY } from '../../domain/ports/payment-plan-repository.port';
@@ -35,6 +36,13 @@ export interface CreatePaymentPlanInput {
   totalToFinance?: number;
   notes?: string;
 }
+
+/**
+ * DX-488: las cuotas se reparten en unidades de la moneda del plan; sin sus
+ * decimales en `currencies` no hay reparto (422, no un 500).
+ */
+export const PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE = (code: string): string =>
+  `La moneda ${code} del plan no está en el catálogo de monedas: no se pueden repartir las cuotas.`;
 
 function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -129,15 +137,19 @@ export class CreatePaymentPlanUseCase {
       throw new BadRequestException('downPayment cannot exceed totalToFinance');
     }
 
+    const digits = await this.currencyDigits.table([plan.currency]);
+    if (!digits.has(plan.currency)) {
+      throw new UnprocessableEntityException(
+        PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE(plan.currency),
+      );
+    }
     const installments = generateSchedule({
       totalToFinance,
       downPayment,
       installmentsCount: input.installmentsCount,
       periodicity: input.periodicity,
       startDate,
-      roundingDigits: (
-        await this.currencyDigits.table([plan.currency])
-      ).roundingDigits(plan.currency),
+      roundingDigits: digits.roundingDigits(plan.currency),
     });
 
     try {

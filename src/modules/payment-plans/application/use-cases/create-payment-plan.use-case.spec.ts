@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma, TreatmentPlanStatus } from '@prisma/client';
 import { CreatePaymentPlanUseCase } from './create-payment-plan.use-case';
@@ -9,6 +10,8 @@ import { InMemoryPaymentPlanRepository } from './__fixtures__/in-memory-payment-
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
+import { CurrencyDigitsTable } from '../../../../shared/money/currency-digits';
+import { PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE } from './create-payment-plan.use-case';
 
 function makeDeps(
   overrides: {
@@ -193,6 +196,31 @@ describe('CreatePaymentPlanUseCase', () => {
         33.33, 33.33, 33.34,
       ]);
     }
+  });
+
+  it('DX-488: una moneda del plan que no está en el catálogo es un 422 en español, sin escribir', async () => {
+    const { repo, getTreatmentPlan, getPlanBalance } = makeDeps({
+      planCurrency: 'VES',
+    });
+    const useCase = new CreatePaymentPlanUseCase(
+      repo,
+      getTreatmentPlan,
+      getPlanBalance,
+      {
+        table: () =>
+          Promise.resolve(
+            new CurrencyDigitsTable([
+              { code: 'USD', minorUnits: 2, roundingDigits: 2 },
+            ]),
+          ),
+      },
+    );
+    const attempt = useCase.execute('tp-1', baseInput, 'u1');
+    await expect(attempt).rejects.toBeInstanceOf(UnprocessableEntityException);
+    await expect(attempt).rejects.toThrow(
+      PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE('VES'),
+    );
+    expect(await repo.findActiveByPlan('tp-1')).toBeNull();
   });
 
   it('rejects installmentsCount > 600', async () => {

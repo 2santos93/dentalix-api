@@ -44,4 +44,14 @@ describe('dígitos de redondeo 0 en monedas con 2 minor units ISO (DX-488, decis
     expect(zeroRounded).not.toContain('VES');
     expect(zeroRounded).not.toContain('USD');
   });
+
+  it('toda moneda sin minor units ISO redondea a 0, y ninguna a 1 decimal', () => {
+    const wrong = CURRENCY_DIGITS.filter(
+      (c) =>
+        (c.minorUnits === 0 && c.roundingDigits !== 0) ||
+        c.roundingDigits === 1,
+    );
+    expect(wrong).toEqual([]);
+    expect(CURRENCY_DIGITS.some((c) => c.minorUnits === 0)).toBe(true);
+  });
 });
