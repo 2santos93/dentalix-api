@@ -15,6 +15,7 @@ import {
   civilPeriodByZone,
   civilRangeInZone,
 } from '../../../shared/time/civil-day';
+import { itemRates } from '../domain/reference-in-plan';
 import type {
   DiscountReportQuery,
   DiscountReportRepository,
@@ -56,6 +57,7 @@ interface RawRow {
   agreementName: string | null;
   basePrice: Prisma.Decimal | null;
   agreementReduction: Prisma.Decimal;
+  agreementUnmeasured: boolean;
   agreementAssignedById: string | null;
   agreementAssignedByName: string | null;
   createdById: string | null;
@@ -69,6 +71,7 @@ interface RawTotal {
   discount: Prisma.Decimal;
   agreementItems: bigint;
   agreementReduction: Prisma.Decimal;
+  unmeasuredItems: bigint;
   rows: bigint;
 }
 
@@ -119,7 +122,8 @@ async function firstDiscountLocation(
  *
  * SEC-047: entran también los ítems resueltos por convenio con rebaja
  * (`basePrice` > `catalogPrice`), aunque no tengan descuento propio; esa rama
- * del OR la sirve `treatment_plan_items_tenant_agreement_reduction_at_idx`.
+ * del OR la sirve `treatment_plan_items_tenant_agreement_ref_reduction_at_idx`
+ * (DX-513-ter; antes `treatment_plan_items_tenant_agreement_reduction_at_idx`).
  * La rebaja de convenio va en su columna y en sus propios totales: los de
  * DX-204 (ítems, bruto, descuento y %) se agregan con `FILTER` solo sobre las
  * líneas que cuentan como descuento, exactamente las mismas que antes de
@@ -142,6 +146,17 @@ async function firstDiscountLocation(
  * `price < referencePriceInPlan` (migración 20261201090300).
  *
  * Ítems SIN foto (anteriores): como en DX-513, que sigue.
+ *
+ * DX-513-ter: un ítem de lista de convenio con el catálogo en otra moneda
+ * congela al darlo de alta la base convertida con la tasa del día
+ * (`basePriceInPlan`), y su rebaja de convenio se mide con la misma
+ * expresión de la foto. Un ítem de convenio con el catálogo en otra moneda
+ * conocida y SIN base congelada (no había tasa, o es anterior) no se puede
+ * medir sin convertir al consultar: entra como `agreementUnmeasured`, sin
+ * importe, con su propio recuento por moneda, y no suma en los totales de
+ * convenio. Las dos ramas nuevas del WHERE las sirve el índice parcial
+ * `treatment_plan_items_tenant_agreement_ref_reduction_at_idx` (migración
+ * 20261202090000, que sustituye al de SEC-047).
  *
  * DX-513: la rebaja de precio y la de convenio no cuentan frente a una
  * referencia en otra moneda CONOCIDA (`referenceInOtherCurrency` del
@@ -284,6 +299,12 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                           OR i."catalogCurrency" = p."currency")
                     THEN GREATEST(COALESCE(i."basePrice" - i."catalogPrice", 0), 0)
                     ELSE 0 END AS "agreementReduction",
+               -- DX-513-ter: convenio con el catálogo en otra moneda conocida y
+               -- sin la base congelada en la del plan: no se puede medir.
+               (i."agreementId" IS NOT NULL AND i."basePrice" IS NOT NULL
+                  AND i."basePriceInPlan" IS NULL
+                  AND i."catalogCurrency" IS NOT NULL
+                  AND i."catalogCurrency" <> p."currency") AS "agreementUnmeasured",
                asg."createdById" AS "agreementAssignedById",
                i."createdById",
                COALESCE(i."discountAt", i."createdAt") AS "at",
@@ -309,7 +330,12 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
          WHERE i."tenantId" = ${tenantId}::uuid
            AND (i."discount" > 0 OR i."price" < i."catalogPrice"
                 OR i."price" < i."referencePriceInPlan"
-                OR (i."agreementId" IS NOT NULL AND i."basePrice" > i."catalogPrice"))
+                OR (i."agreementId" IS NOT NULL
+                    AND (i."basePrice" > i."catalogPrice"
+                         OR i."basePriceInPlan" > i."referencePriceInPlan"
+                         OR (i."basePriceInPlan" IS NULL AND i."basePrice" IS NOT NULL
+                             AND i."catalogCurrency" IS NOT NULL
+                             AND i."referenceCurrency" IS DISTINCT FROM i."catalogCurrency"))))
            AND i."deletedAt" IS NULL
            AND p."deletedAt" IS NULL
            AND p."status" NOT IN ('REJECTED', 'CANCELLED')
@@ -319,13 +345,14 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
       flagged AS (
         SELECT r.*,
                (COALESCE(r."isDiscount", FALSE) AND ${discountByMatch}) AS "countsAsDiscount",
-               (r."agreementReduction" > 0 AND ${agreementByMatch}) AS "countsAsAgreement"
+               (r."agreementReduction" > 0 AND ${agreementByMatch}) AS "countsAsAgreement",
+               (r."agreementUnmeasured" AND ${agreementByMatch}) AS "countsAsUnmeasured"
           FROM raw r
       ),
       d AS (
         SELECT * FROM flagged d
          WHERE (${inPeriod}) ${byLocation}
-           AND (d."countsAsDiscount" OR d."countsAsAgreement")
+           AND (d."countsAsDiscount" OR d."countsAsAgreement" OR d."countsAsUnmeasured")
       )`;
     return { cte, zoneOf };
   }
@@ -342,6 +369,7 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                COALESCE(sum(d."priceReduction" + d."itemDiscount") FILTER (WHERE d."countsAsDiscount"), 0) AS "discount",
                count(*) FILTER (WHERE d."countsAsAgreement") AS "agreementItems",
                COALESCE(sum(d."agreementReduction") FILTER (WHERE d."countsAsAgreement"), 0) AS "agreementReduction",
+               count(*) FILTER (WHERE d."countsAsUnmeasured") AS "unmeasuredItems",
                count(*) AS "rows"
           FROM d
          GROUP BY d."currency"
@@ -361,6 +389,12 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
             currency: r.currency,
             items: Number(r.agreementItems),
             reduction: r.agreementReduction.toNumber(),
+          })),
+        agreementUnmeasuredTotals: rows
+          .filter((r) => r.unmeasuredItems > 0n)
+          .map((r) => ({
+            currency: r.currency,
+            items: Number(r.unmeasuredItems),
           })),
         rows: rows.reduce((sum, r) => sum + Number(r.rows), 0),
       };
@@ -392,7 +426,7 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                u."fullName" AS "discountByName", d."at" AS "discountAt",
                d."locationId", l."name" AS "locationName",
                d."priceSource", d."agreementName", d."basePrice",
-               d."agreementReduction", d."agreementAssignedById",
+               d."agreementReduction", d."agreementUnmeasured", d."agreementAssignedById",
                ua."fullName" AS "agreementAssignedByName",
                d."createdById", uc."fullName" AS "createdByName"
           FROM d
@@ -413,15 +447,8 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
           referenceRateSource,
           referenceRateDate,
           ...r
-        }) => ({
-          ...r,
-          planCreatedOn: civilDateIn(r.planCreatedAt, zoneOf(r.locationId)),
-          discountOn: civilDateIn(r.discountAt, zoneOf(r.locationId)),
-          procedure: r.procedure ?? '',
-          catalogPrice: r.catalogPrice?.toNumber() ?? null,
-          referencePriceInPlan: r.referencePriceInPlan?.toNumber() ?? null,
-          basePriceInPlan: r.basePriceInPlan?.toNumber() ?? null,
-          rate:
+        }) => {
+          const frozen =
             referenceRateFrom &&
             referenceRateTo &&
             referenceRateSource &&
@@ -432,14 +459,27 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                   source: referenceRateSource,
                   rateDate: referenceRateDate.toISOString().slice(0, 10),
                 }
-              : null,
-          price: r.price.toNumber(),
-          priceReduction: r.priceReduction.toNumber(),
-          itemDiscount: r.itemDiscount.toNumber(),
-          discount: r.priceReduction.plus(r.itemDiscount).toNumber(),
-          basePrice: r.basePrice?.toNumber() ?? null,
-          agreementReduction: r.agreementReduction.toNumber(),
-        }),
+              : null;
+          // DX-513-ter: la tasa de una lista es la de la base (`baseRate`).
+          const { referenceRate, baseRate } = itemRates(r.priceSource, frozen);
+          return {
+            ...r,
+            planCreatedOn: civilDateIn(r.planCreatedAt, zoneOf(r.locationId)),
+            discountOn: civilDateIn(r.discountAt, zoneOf(r.locationId)),
+            procedure: r.procedure ?? '',
+            catalogPrice: r.catalogPrice?.toNumber() ?? null,
+            referencePriceInPlan: r.referencePriceInPlan?.toNumber() ?? null,
+            basePriceInPlan: r.basePriceInPlan?.toNumber() ?? null,
+            rate: referenceRate,
+            baseRate,
+            price: r.price.toNumber(),
+            priceReduction: r.priceReduction.toNumber(),
+            itemDiscount: r.itemDiscount.toNumber(),
+            discount: r.priceReduction.plus(r.itemDiscount).toNumber(),
+            basePrice: r.basePrice?.toNumber() ?? null,
+            agreementReduction: r.agreementReduction.toNumber(),
+          };
+        },
       );
     });
   }

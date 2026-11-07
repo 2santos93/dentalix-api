@@ -101,7 +101,9 @@ describe('DX-513-bis: migraciones aditivas', () => {
       .filter((d) => /^\d{14}_/.test(d))
       .sort();
     const mine = [ADD, VALIDATE, CREATE_IDX, DROP_IDX];
-    expect(all.slice(-4)).toEqual(mine);
+    // Seguidas (DX-513-ter añadió las suyas detrás).
+    const at = all.indexOf(ADD);
+    expect(all.slice(at, at + 4)).toEqual(mine);
     expect(ADD > '20261130090000_dx133b_appointment_type_name_ci').toBe(true);
   });
 });

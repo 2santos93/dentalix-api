@@ -1,4 +1,4 @@
-import type { ExchangeRateSource } from '@prisma/client';
+import { PriceSource, type ExchangeRateSource } from '@prisma/client';
 import {
   discountReference,
   referenceCurrency,
@@ -33,7 +33,11 @@ export interface FrozenReferenceRate {
  *   catálogo. NULL si no se puede expresar sin otra tasa (referencia de una
  *   lista en la moneda del plan con el catálogo en otra: la rebaja de
  *   convenio no se resta entre monedas, H4 de DX-513).
- * - `referenceRate`: la tasa, solo si se convirtió.
+ * - `referenceRate`: la tasa, solo si se convirtió. Siempre de la moneda del
+ *   CATÁLOGO a la del plan (DX-513-ter §6.1): se aplicó a `catalogPrice` si
+ *   `referenceCurrency` es la del catálogo, y a `basePrice` siempre que
+ *   `basePriceInPlan` venga de una conversión (en una lista de convenio,
+ *   `freezeAgreementBase`).
  */
 export interface ReferenceSnapshot {
   referenceCurrency: string | null;
@@ -133,4 +137,65 @@ export function freezeReference(
     basePriceInPlan: item.basePrice === null ? null : convert(item.basePrice),
     referenceRate: rate,
   };
+}
+
+/**
+ * DX-513-ter §6.1: la moneda de la que pedir la tasa para expresar la BASE
+ * (`basePrice`, en la moneda del catálogo) de un ítem de lista de CONVENIO en
+ * la moneda del plan, o `null` si no hace falta: solo `AGREEMENT_PRICE_LIST`
+ * con precio de catálogo y su moneda conocida y distinta de la del plan. La
+ * lista de la sede no lleva rebaja de convenio (DX-105) y no la pide.
+ */
+export function agreementBaseRateCurrency(
+  item: Pick<SnapshotItem, 'priceSource' | 'basePrice' | 'catalogCurrency'>,
+  planCurrency: string,
+): string | null {
+  return item.priceSource === PriceSource.AGREEMENT_PRICE_LIST &&
+    item.basePrice !== null &&
+    item.catalogCurrency !== null &&
+    item.catalogCurrency !== planCurrency
+    ? item.catalogCurrency
+    : null;
+}
+
+/**
+ * DX-513-ter §6.1: la foto de un ítem de lista de convenio con la base
+ * convertida a la moneda del plan con la tasa del día (`rate`, del catálogo
+ * a la del plan), redondeada UNA vez a `planDigits`. Solo sirve al informe:
+ * la referencia (el precio de lista, ya en la moneda del plan) no cambia, y
+ * el tope sigue midiéndose contra ella.
+ */
+export function freezeAgreementBase(
+  snapshot: ReferenceSnapshot,
+  basePrice: number,
+  rate: FrozenReferenceRate,
+  planDigits: RoundingDigits,
+): ReferenceSnapshot {
+  return {
+    ...snapshot,
+    basePriceInPlan: convertAtRate(basePrice, rate, planDigits),
+    referenceRate: rate,
+  };
+}
+
+/**
+ * DX-513-ter §6.3: la tasa congelada, separada en el contrato según a qué se
+ * aplicó. En una lista (de convenio o de la sede) la referencia ya está en la
+ * moneda del plan, así que la tasa es la de la base: `baseRate`. En el resto,
+ * la de la referencia: `referenceRate` (como en DX-513-bis). Así nadie
+ * empareja la tasa con `referenceCurrency` de una lista («1 USD = 880 USD»).
+ */
+export function itemRates(
+  priceSource: PriceSource | null,
+  rate: FrozenReferenceRate | null,
+): {
+  referenceRate: FrozenReferenceRate | null;
+  baseRate: FrozenReferenceRate | null;
+} {
+  const isList =
+    priceSource === PriceSource.PRICE_LIST ||
+    priceSource === PriceSource.AGREEMENT_PRICE_LIST;
+  return isList
+    ? { referenceRate: null, baseRate: rate }
+    : { referenceRate: rate, baseRate: null };
 }

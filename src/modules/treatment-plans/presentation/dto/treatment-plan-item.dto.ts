@@ -88,7 +88,7 @@ export class TreatmentPlanItemDto {
     type: Number,
     nullable: true,
     description:
-      'DX-513-bis: `basePrice` en la moneda del plan, congelado con la referencia. Null si no hay o no se puede expresar sin otra tasa.',
+      'DX-513-bis: `basePrice` en la moneda del plan, congelado con la referencia. DX-513-ter: en una lista de convenio con el catálogo en otra moneda, convertido con `baseRate`. Null si no hay o no había tasa para expresarlo.',
   })
   basePriceInPlan!: number | null;
 
@@ -96,9 +96,17 @@ export class TreatmentPlanItemDto {
     type: () => ReferenceRateDto,
     nullable: true,
     description:
-      'DX-513-bis: la tasa con que se convirtió la referencia; null si no hizo falta.',
+      'DX-513-bis: la tasa (de la moneda del catálogo a la del plan) con que se convirtió la referencia (`catalogPrice` en `referenceCurrency`); null si no hizo falta. DX-513-ter: siempre null en las listas (`PRICE_LIST`, `AGREEMENT_PRICE_LIST`), cuya referencia ya está en la moneda del plan: su tasa va en `baseRate`.',
   })
   referenceRate!: ReferenceRateDto | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-ter: en un ítem de lista de convenio con el catálogo en otra moneda, la tasa del día (de `catalogCurrency` a la del plan) con que se convirtió `basePrice` a `basePriceInPlan`, congelada al darlo de alta. Null si no hizo falta, si no había tasa ese día o si el ítem no es de lista.',
+  })
+  baseRate!: ReferenceRateDto | null;
 
   @ApiProperty({
     type: String,

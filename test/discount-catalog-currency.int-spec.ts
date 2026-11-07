@@ -397,7 +397,9 @@ describe('referencia convertida y congelada en el ítem (DX-513-bis, Postgres)',
     for (const arm of [
       'AND (i."discount" > 0 OR i."price" < i."catalogPrice"',
       'OR i."price" < i."referencePriceInPlan"',
-      'OR (i."agreementId" IS NOT NULL AND i."basePrice" > i."catalogPrice"))',
+      // DX-513-ter: la rama de convenio, con sus dos ramas nuevas (la cubre
+      // su propio test en discount-agreement-cross-currency.int-spec.ts).
+      'OR (i."agreementId" IS NOT NULL\n                    AND (i."basePrice" > i."catalogPrice"',
       'AND i."deletedAt" IS NULL',
       'AND COALESCE(i."discountAt", i."createdAt") >= ${minStart}',
     ]) {
@@ -425,7 +427,12 @@ describe('referencia convertida y congelada en el ítem (DX-513-bis, Postgres)',
          WHERE i."tenantId" = ${s.tenantId}::uuid
            AND (i."discount" > 0 OR i."price" < i."catalogPrice"
                 OR i."price" < i."referencePriceInPlan"
-                OR (i."agreementId" IS NOT NULL AND i."basePrice" > i."catalogPrice"))
+                OR (i."agreementId" IS NOT NULL
+                    AND (i."basePrice" > i."catalogPrice"
+                         OR i."basePriceInPlan" > i."referencePriceInPlan"
+                         OR (i."basePriceInPlan" IS NULL AND i."basePrice" IS NOT NULL
+                             AND i."catalogCurrency" IS NOT NULL
+                             AND i."referenceCurrency" IS DISTINCT FROM i."catalogCurrency"))))
            AND i."deletedAt" IS NULL
            AND p."deletedAt" IS NULL
            AND p."status" NOT IN ('REJECTED', 'CANCELLED')
@@ -434,12 +441,12 @@ describe('referencia convertida y congelada en el ítem (DX-513-bis, Postgres)',
     });
     const planText = explain.map((r) => r['QUERY PLAN']).join('\n');
     // Las tres primeras ramas, por el índice rehecho; la de convenio, por el
-    // suyo (SEC-047).
+    // suyo (SEC-047, rehecho en DX-513-ter).
     expect(planText).toContain(
       'treatment_plan_items_tenant_effective_ref_discount_at_idx',
     );
     expect(planText).toContain(
-      'treatment_plan_items_tenant_agreement_reduction_at_idx',
+      'treatment_plan_items_tenant_agreement_ref_reduction_at_idx',
     );
     expect(planText).not.toMatch(/Seq Scan on treatment_plan_items/);
   });

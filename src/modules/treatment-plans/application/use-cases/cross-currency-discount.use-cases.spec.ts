@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Logger,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
@@ -767,5 +768,195 @@ describe('referencia convertida a la moneda del plan (DX-513-bis)', () => {
       missingRateCurrency: null,
     });
     expect((await repo.findPlanById('plan1'))!.items).toHaveLength(0);
+  });
+});
+
+// DX-513-ter: lista de CONVENIO en USD (corona a 3,50) con el catálogo en VES
+// (3.600 Bs.). Al dar de alta el ítem se pide la tasa del día SIN exigirla:
+// con ella se congela la base convertida (4,09 USD) y su tasa, solo para el
+// informe; sin ella (o con cualquier error) el ítem se crea igual, sin base.
+// La referencia del tope sigue siendo el precio de lista.
+describe('base convertida en las listas de convenio entre monedas (DX-513-ter)', () => {
+  const LIST_AGREEMENT: Partial<PricingContext> = {
+    agreement: {
+      id: 'ag-list',
+      name: 'Empresa',
+      kind: AgreementKind.PRICE_LIST,
+      percent: null,
+      percentByCategory: null,
+      priceListId: 'list-1',
+      locationId: null,
+      active: true,
+      validFrom: null,
+      validTo: null,
+      assignmentValidFrom: null,
+      assignmentValidTo: null,
+    },
+    agreementListPrice: { price: 3.5, currency: 'USD', active: true },
+  };
+  const listSetup = (rateSource?: ReferenceRateSource) =>
+    setup('USD', { pricing: LIST_AGREEMENT, rateSource });
+
+  let warn: jest.SpyInstance;
+  beforeEach(() => {
+    warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => warn.mockRestore());
+
+  describe('alta (test 3)', () => {
+    it('con tasa: 201 con la base 4,09 USD y la tasa congeladas en `baseRate`; la referencia es la lista', async () => {
+      const { add, rateSource } = listSetup();
+      const item = await add.execute('plan1', CROWN_ITEM, ASSISTANT_ACTOR);
+      expect(item).toMatchObject({
+        priceSource: PriceSource.AGREEMENT_PRICE_LIST,
+        agreementId: 'ag-list',
+        price: 3.5,
+        catalogPrice: 3.5,
+        basePrice: 3600,
+        catalogCurrency: 'VES',
+        referenceCurrency: 'USD',
+        referencePriceInPlan: 3.5,
+        basePriceInPlan: 4.09,
+        referenceRate: null,
+        baseRate: RATE_880,
+        discount: 0,
+        discountById: null,
+      });
+      expect((rateSource as ReturnType<typeof rates>).calls).toEqual([
+        ['VES', 'USD'],
+      ]);
+    });
+
+    it('sin tasa: 201 igual, sin base ni tasa (nunca 422)', async () => {
+      const { add, repo } = listSetup(rates({}));
+      await expect(
+        add.execute('plan1', CROWN_ITEM, ASSISTANT_ACTOR),
+      ).resolves.toMatchObject({
+        price: 3.5,
+        referencePriceInPlan: 3.5,
+        basePriceInPlan: null,
+        referenceRate: null,
+        baseRate: null,
+      });
+      expect((await repo.findPlanById('plan1'))!.items).toHaveLength(1);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('el proveedor no contesta: 201 sin base', async () => {
+      const { add } = listSetup(
+        convertingRates(() =>
+          Promise.reject(new ExchangeRateProviderNotRespondingError('timeout')),
+        ),
+      );
+      await expect(
+        add.execute('plan1', CROWN_ITEM, ASSISTANT_ACTOR),
+      ).resolves.toMatchObject({ basePriceInPlan: null, baseRate: null });
+    });
+
+    it('cualquier otro error: 201 sin base y un aviso con el NOMBRE del error, nunca su mensaje', async () => {
+      const { add } = listSetup({
+        rateFor: () => Promise.reject(new TypeError('secreto 10.0.0.7')),
+      });
+      await expect(
+        add.execute('plan1', CROWN_ITEM, ASSISTANT_ACTOR),
+      ).resolves.toMatchObject({ basePriceInPlan: null, baseRate: null });
+      expect(warn).toHaveBeenCalledTimes(1);
+      const logged = JSON.stringify(warn.mock.calls[0]);
+      expect(logged).toContain('TypeError');
+      expect(logged).not.toContain('secreto');
+    });
+  });
+
+  describe('el tope no cambia: se mide contra la lista (test 4)', () => {
+    it.each([
+      ['con tasa', undefined],
+      ['sin tasa', rates({})],
+    ])(
+      '%s: la asistente a 3,40 frente a 3,50 → 403',
+      async (_label, source) => {
+        const { add } = listSetup(source);
+        await expect(
+          add.execute('plan1', { ...CROWN_ITEM, price: 3.4 }, ASSISTANT_ACTOR),
+        ).rejects.toThrow(
+          new ForbiddenException(priceBelowCatalogCapMessage(0)),
+        );
+      },
+    );
+
+    it('a 3,50 no hay descuento aunque la base convertida sea 4,09', async () => {
+      const { add } = listSetup();
+      await expect(
+        add.execute('plan1', { ...CROWN_ITEM, price: 3.5 }, ASSISTANT_ACTOR),
+      ).resolves.toMatchObject({
+        price: 3.5,
+        discount: 0,
+        discountById: null,
+        discountReason: null,
+        basePriceInPlan: 4.09,
+      });
+    });
+  });
+
+  it('la vista previa de una lista de convenio no pide tasa (test 5)', async () => {
+    const { quote, rateSource } = listSetup();
+    await expect(quote.execute('p1', 'crown', 'USD')).resolves.toMatchObject({
+      price: 3.5,
+      rate: null,
+    });
+    expect((rateSource as ReturnType<typeof rates>).calls).toEqual([]);
+  });
+
+  describe('edición y «Descuento %» de un ítem de lista con base (test 6)', () => {
+    function withBase() {
+      const ctx = listSetup(rates({ VES: 1000 }));
+      ctx.repo.seedItem({
+        id: 'item1',
+        planId: 'plan1',
+        catalogItemId: 'crown',
+        catalogPrice: 3.5,
+        basePrice: 3600,
+        catalogCurrency: 'VES',
+        priceSource: PriceSource.AGREEMENT_PRICE_LIST,
+        agreementId: 'ag-list',
+        agreementName: 'Empresa',
+        referenceCurrency: 'USD',
+        referencePriceInPlan: 3.5,
+        basePriceInPlan: 4.09,
+        referenceRate: RATE_880,
+        price: 3.5,
+      });
+      return ctx;
+    }
+
+    it('editar el precio no pide tasa ni toca la base', async () => {
+      const { update, rateSource } = withBase();
+      await expect(
+        update.execute('item1', { price: 5 }, ASSISTANT_ACTOR),
+      ).resolves.toMatchObject({
+        price: 5,
+        referencePriceInPlan: 3.5,
+        basePriceInPlan: 4.09,
+        baseRate: RATE_880,
+        referenceRate: null,
+      });
+      expect((rateSource as ReturnType<typeof rates>).calls).toEqual([]);
+    });
+
+    it('«Descuento %» tampoco', async () => {
+      const { bulk, rateSource } = withBase();
+      const {
+        items: [item],
+      } = await bulk.execute(
+        'plan1',
+        { itemIds: ['item1'], percent: 5 },
+        DENTIST_ACTOR,
+      );
+      expect(item).toMatchObject({
+        discount: 0.18,
+        basePriceInPlan: 4.09,
+        baseRate: RATE_880,
+      });
+      expect((rateSource as ReturnType<typeof rates>).calls).toEqual([]);
+    });
   });
 });

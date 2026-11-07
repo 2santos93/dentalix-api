@@ -1207,7 +1207,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         'Moneda del catálogo',
         'Precio de catálogo',
         'Precio de catálogo en la moneda del plan',
-        'Tasa (por 1 USD: origen / plan)',
+        'Tasa (por 1 USD: catálogo / plan)',
         'Fuente de la tasa',
         'Fecha de la tasa',
       ]);

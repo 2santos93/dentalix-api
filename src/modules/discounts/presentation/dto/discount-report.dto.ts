@@ -96,6 +96,18 @@ export class DiscountReportTotalDto {
   percentOfGross!: number;
 }
 
+/** DX-513-ter: líneas de convenio sin medir de una moneda, sin importe. */
+export class AgreementUnmeasuredTotalDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({
+    description:
+      'Líneas de convenio «sin referencia comparable» en esta moneda (no se suman en `agreementTotals`)',
+  })
+  items!: number;
+}
+
 /** SEC-047: rebajas de convenio de una moneda, aparte de los totales de DX-204. */
 export class AgreementReductionTotalDto {
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
@@ -192,9 +204,23 @@ export class DiscountReportItemDto {
     type: () => ReferenceRateDto,
     nullable: true,
     description:
-      'DX-513-bis: la tasa congelada con que se convirtió la referencia; null si no hizo falta. El informe nunca convierte al consultar',
+      'DX-513-bis: la tasa congelada (de la moneda del catálogo a la del plan) con que se convirtió la referencia; null si no hizo falta. El informe nunca convierte al consultar. DX-513-ter: siempre null en las listas, cuya referencia ya está en la moneda del plan: su tasa va en `baseRate`',
   })
   rate!: ReferenceRateDto | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-ter: en una lista de convenio con el catálogo en otra moneda, la tasa del día (de `catalogCurrency` a la del plan) con que se convirtió `basePrice` a `basePriceInPlan` al dar de alta el ítem; null si no',
+  })
+  baseRate!: ReferenceRateDto | null;
+
+  @ApiProperty({
+    description:
+      'DX-513-ter: ítem de convenio con el catálogo en otra moneda conocida y sin la base congelada en la moneda del plan (no había tasa al darlo de alta, o es anterior): su rebaja de convenio no se puede medir sin convertir al consultar. Se señala «sin referencia comparable»: `agreementReduction` es 0 y no suma en `agreementTotals`',
+  })
+  agreementUnmeasured!: boolean;
 
   @ApiProperty({ description: 'Precio pactado del ítem' })
   price!: number;
@@ -354,6 +380,13 @@ export class DiscountReportDto {
       'SEC-047: rebajas de convenio por moneda. Van aparte: `totals` solo cuenta los descuentos (como en DX-204)',
   })
   agreementTotals!: AgreementReductionTotalDto[];
+
+  @ApiProperty({
+    type: [AgreementUnmeasuredTotalDto],
+    description:
+      'DX-513-ter: líneas de convenio sin medir por moneda (catálogo en otra moneda sin la base congelada), sin importe. Aparte de `agreementTotals`',
+  })
+  agreementUnmeasuredTotals!: AgreementUnmeasuredTotalDto[];
 
   @ApiProperty({
     type: [DiscountReportItemDto],

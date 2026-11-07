@@ -1,0 +1,32 @@
+-- DX-513-ter (1/2): índice parcial de la rama «rebaja de convenio» del
+-- informe de descuentos (SEC-047), con las dos ramas nuevas de la consulta:
+-- - la rebaja medida con la base congelada en la moneda del plan
+--   ("basePriceInPlan" > "referencePriceInPlan"): con el catálogo en USD y la
+--   lista del convenio en VES, "basePrice" > "catalogPrice" compara 4,50 con
+--   3.500 Bs. y la fila no estaría en el índice anterior;
+-- - el convenio con el catálogo en otra moneda conocida y sin la base
+--   congelada, que el informe señala «sin referencia comparable».
+-- Mismo predicado que la consulta del informe
+-- (prisma-discount-report.repository.ts). PARCIAL y de expresión: no
+-- declarable en Prisma (ver schema.prisma). Es un superconjunto (incluye
+-- convenios anteriores en la misma moneda sin rebaja): la consulta los filtra.
+--
+-- Se CREA con un nombre nuevo ANTES de quitar el anterior
+-- (treatment_plan_items_tenant_agreement_reduction_at_idx, lo quita
+-- 20261202090100_dx513t_agreement_reduction_idx_drop_old): el informe nunca se
+-- queda sin índice parcial.
+--
+-- CONCURRENTLY (DB-025): no bloquea las escrituras de los ítems del plan. Por
+-- eso es la ÚNICA sentencia del fichero (Prisma la ejecuta fuera de
+-- transacción) y no lleva `SET lock_timeout`: CONCURRENTLY espera a las
+-- transacciones abiertas y un tope la haría fallar a medias (DB-078).
+-- Aditiva, sin cambios de datos.
+-- IF NOT EXISTS: un reintento tras un fallo se SALTARÍA si quedó un índice
+-- INVALID con este nombre, así que la receta empieza por el DROP: si falla,
+-- DROP INDEX CONCURRENTLY IF EXISTS "treatment_plan_items_tenant_agreement_ref_reduction_at_idx",
+-- `npx prisma migrate resolve --rolled-back
+-- 20261202090000_dx513t_agreement_ref_reduction_idx` y repetir
+-- `migrate deploy`. Vuelta atrás: el mismo DROP INDEX CONCURRENTLY (antes,
+-- recrear el anterior con el predicado de
+-- 20261024120100_sec047_plan_item_agreement_reduction_idx si ya se quitó).
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "treatment_plan_items_tenant_agreement_ref_reduction_at_idx" ON "treatment_plan_items" ("tenantId", (COALESCE("discountAt", "createdAt"))) WHERE "agreementId" IS NOT NULL AND ("basePrice" > "catalogPrice" OR "basePriceInPlan" > "referencePriceInPlan" OR ("basePriceInPlan" IS NULL AND "basePrice" IS NOT NULL AND "catalogCurrency" IS NOT NULL AND "referenceCurrency" IS DISTINCT FROM "catalogCurrency")) AND "deletedAt" IS NULL;

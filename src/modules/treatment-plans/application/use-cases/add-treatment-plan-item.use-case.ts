@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -35,7 +36,11 @@ import {
   REFERENCE_RATE_SOURCE,
   type ReferenceRateSource,
 } from '../../domain/ports/reference-rate-source.port';
-import { freezeWithRate, referenceRateFor } from './reference-rate';
+import {
+  freezeWithRate,
+  referenceRateFor,
+  withAgreementBase,
+} from './reference-rate';
 
 /** 409 si la moneda del plan cambió entre la resolución del precio y el alta. */
 export const PLAN_CURRENCY_CHANGED_MESSAGE =
@@ -60,6 +65,8 @@ export interface AddTreatmentPlanItemInput {
 
 @Injectable()
 export class AddTreatmentPlanItemUseCase {
+  private readonly logger = new Logger(AddTreatmentPlanItemUseCase.name);
+
   constructor(
     @Inject(TREATMENT_PLAN_REPOSITORY)
     private readonly repo: TreatmentPlanRepository,
@@ -121,11 +128,15 @@ export class AddTreatmentPlanItemUseCase {
     // Un plan firmado o cerrado responde su 409 antes que «sin tasa» (422): el
     // problema es el plan, no la tasa. Se repite con la fila bloqueada.
     if (asked?.lookup.kind === 'missing') assertItemsEditable(current);
-    const reference = freezeWithRate(
+    // DX-513-ter: en una lista de convenio con el catálogo en otra moneda, la
+    // base convertida con la tasa de hoy, solo para el informe. Sin tasa (o
+    // con cualquier error) el ítem se crea igual, sin ella: nunca bloquea.
+    const reference = await withAgreementBase(
+      this.rates,
       priced,
       current.currency,
-      asked,
-      actor.role,
+      freezeWithRate(priced, current.currency, asked, actor.role),
+      (message) => this.logger.warn(message),
     );
 
     // Explicit price wins; otherwise the reference in the plan's currency
