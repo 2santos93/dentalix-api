@@ -83,6 +83,16 @@ export class UpdateClinicSettingsDto {
   @IsString()
   @MaxLength(COARSE_MAX)
   primaryColor?: string | null;
+
+  @ApiPropertyOptional({
+    ...NULLABLE_TEXT,
+    description:
+      'DX-502-bis. Moneda del catálogo de precios: código ISO 4217 de una moneda admitida (GET /currencies). Es la que se congela en los ítems NUEVOS del plan, para mostrar el precio de lista y el ahorro por convenio; los ítems ya creados no cambian. Vacío o null = sin fijar: la moneda común de las sedes activas, o ninguna.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(COARSE_MAX)
+  catalogCurrency?: string | null;
 }
 
 /** Respuesta de GET/PATCH /clinic/settings y de la subida del logo. */
@@ -125,4 +135,11 @@ export class ClinicSettingsDto {
       'Falta la razón social o el identificador fiscal: los recibos dicen «Datos fiscales pendientes».',
   })
   fiscalDataPending!: boolean;
+
+  @ApiProperty({
+    ...NULLABLE_TEXT,
+    description:
+      'DX-502-bis. Moneda del catálogo de precios fijada por la clínica (ISO 4217): la de los ítems nuevos del plan. Null = sin fijar: la común de las sedes activas, o ninguna.',
+  })
+  catalogCurrency!: string | null;
 }

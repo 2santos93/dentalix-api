@@ -24,6 +24,7 @@ const SELECT = {
   contactEmail: true,
   contactPhone: true,
   primaryColor: true,
+  catalogCurrency: true,
   logoKey: true,
 } satisfies Prisma.TenantSelect;
 
@@ -39,6 +40,7 @@ function toStored(row: Row): StoredClinicSettings {
     contactEmail: row.contactEmail,
     contactPhone: row.contactPhone,
     primaryColor: row.primaryColor,
+    catalogCurrency: row.catalogCurrency,
   };
   return { profile, logoKey: row.logoKey };
 }

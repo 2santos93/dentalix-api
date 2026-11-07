@@ -23,7 +23,7 @@ import {
 } from '../../../patient-agreements/domain/ports/patient-agreement-repository.port';
 import type { PricingSource } from '../../domain/ports/pricing-source.port';
 import type { PricingContext } from '../../domain/pricing/resolve-item-price';
-import { catalogCurrencyOf } from '../../domain/pricing/catalog-currency';
+import { clinicCatalogCurrency } from '../../domain/pricing/catalog-currency';
 import {
   TREATMENT_PLAN_CLOCK,
   type PlanClock,
@@ -114,8 +114,9 @@ export class PrismaPricingSource implements PricingSource {
 
   /**
    * Sede de escritura del request, su día civil de hoy (R8) y la moneda del
-   * catálogo (DX-502): la común de TODAS las sedes activas de la clínica (la
-   * RLS es por clínica), no solo las del miembro.
+   * catálogo: la que fijó la clínica (DX-502-bis) o, sin ella, la común de
+   * TODAS las sedes activas de la clínica (DX-502; la RLS es por clínica), no
+   * solo las del miembro.
    */
   private writeLocationAndToday(): Promise<{
     locationId: string;
@@ -131,10 +132,15 @@ export class PrismaPricingSource implements PricingSource {
         where: { tenantId, isActive: true, deletedAt: null },
         select: { currency: true },
       });
+      // `tenants` es global (sin RLS): por el id del contexto.
+      const tenant = await tx.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { catalogCurrency: true },
+      });
       return {
         locationId,
         today: civilDateIn(this.now(), zoneOf(locationId)),
-        catalogCurrency: catalogCurrencyOf(active),
+        catalogCurrency: clinicCatalogCurrency(tenant.catalogCurrency, active),
       };
     });
   }

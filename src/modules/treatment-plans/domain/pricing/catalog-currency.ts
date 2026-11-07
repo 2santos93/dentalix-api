@@ -15,3 +15,16 @@ export function catalogCurrencyOf(
   const [only] = currencies;
   return only ?? null;
 }
+
+/**
+ * DX-502-bis: la moneda del catálogo que se congela en un ítem nuevo. La que
+ * fijó la clínica en Ajustes (`tenants.catalogCurrency`) manda; sin ella, la
+ * regla de DX-502 (`catalogCurrencyOf`). Nunca se deduce de la moneda del
+ * plan ni se convierte nada.
+ */
+export function clinicCatalogCurrency(
+  explicit: string | null,
+  activeLocations: readonly { currency: string | null }[],
+): string | null {
+  return explicit ?? catalogCurrencyOf(activeLocations);
+}

@@ -1,6 +1,7 @@
 /**
  * DX-019: los datos de la clínica que edita el ADMIN en Ajustes › Datos de la
- * clínica — nombre comercial, datos fiscales, contacto, color y logo.
+ * clínica — nombre comercial, datos fiscales, contacto, color y logo. Y
+ * DX-502-bis: la moneda del catálogo de precios (Ajustes › Monedas).
  *
  * Producto mundial: el identificador fiscal es TEXTO LIBRE (sin validar el
  * formato de ningún país) y la clínica decide cómo se llama («ID fiscal»,
@@ -28,6 +29,12 @@ export interface ClinicProfile {
   contactPhone: string | null;
   /** `#RRGGBB` en mayúsculas (lo que lee la web para derivar el acento). */
   primaryColor: string;
+  /**
+   * DX-502-bis: moneda del catálogo de precios (ISO 4217, de `currencies`).
+   * Es la que se congela en los ítems NUEVOS del plan; `null` = la común de
+   * las sedes activas o ninguna (DX-502).
+   */
+  catalogCurrency: string | null;
 }
 
 /** Lo que devuelve GET /clinic/settings. */
@@ -50,6 +57,7 @@ export interface ClinicProfileInput {
   contactEmail?: string | null;
   contactPhone?: string | null;
   primaryColor?: string | null;
+  catalogCurrency?: string | null;
 }
 
 export const CLINIC_SETTINGS_MESSAGES = {
@@ -63,11 +71,14 @@ export const CLINIC_SETTINGS_MESSAGES = {
   contactPhone: `El teléfono de contacto admite hasta ${CONTACT_PHONE_MAX} caracteres en una línea.`,
   primaryColor:
     'El color debe ser un hexadecimal de seis cifras, p. ej. #0E7490.',
+  catalogCurrency:
+    'La moneda del catálogo debe ser una moneda admitida, con su código ISO 4217 de tres letras.',
 } as const;
 
 // Controles, separadores de línea y de párrafo: el texto va en UNA línea.
 const NOT_ONE_LINE = /[\p{Cc}\u2028\u2029]/u;
 const HEX6 = /^#[0-9a-f]{6}$/i;
+const ISO_CODE = /^[A-Z]{3}$/;
 // Deliberadamente laxo: la clínica puede tener un dominio interno o con
 // caracteres no ASCII; lo que se pide es la forma `algo@algo` sin espacios.
 const EMAIL = /^[^\s@]+@[^\s@]+$/u;
@@ -97,7 +108,8 @@ const TEXT_FIELDS = [
 
 /**
  * Valida y normaliza un PATCH. Solo entran los campos presentes (`in`): uno
- * ausente no cambia. El nombre y el color no se pueden borrar.
+ * ausente no cambia. El nombre y el color no se pueden borrar; la moneda del
+ * catálogo sí (vacío o `null`: vuelve la regla de las sedes).
  */
 export function parseClinicProfilePatch(
   input: ClinicProfileInput,
@@ -131,6 +143,13 @@ export function parseClinicProfilePatch(
       return { ok: false, message: CLINIC_SETTINGS_MESSAGES.primaryColor };
     patch.primaryColor = color.toUpperCase();
   }
+  if ('catalogCurrency' in input && input.catalogCurrency !== undefined) {
+    // Solo la forma: si la moneda está en `currencies` lo mira el caso de uso.
+    const code = input.catalogCurrency?.trim().toUpperCase() ?? '';
+    if (code !== '' && !ISO_CODE.test(code))
+      return { ok: false, message: CLINIC_SETTINGS_MESSAGES.catalogCurrency };
+    patch.catalogCurrency = code === '' ? null : code;
+  }
   return { ok: true, patch };
 }
 
@@ -154,5 +173,6 @@ export function clinicProfileForAudit(
     contactEmail: profile.contactEmail,
     contactPhone: profile.contactPhone,
     primaryColor: profile.primaryColor,
+    catalogCurrency: profile.catalogCurrency,
   };
 }

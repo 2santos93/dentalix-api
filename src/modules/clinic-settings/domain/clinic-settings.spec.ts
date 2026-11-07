@@ -1,5 +1,6 @@
 import {
   CLINIC_SETTINGS_MESSAGES as M,
+  clinicProfileForAudit,
   isFiscalDataPending,
   parseClinicProfilePatch,
 } from './clinic-settings';
@@ -130,5 +131,58 @@ describe('datos de la clínica (DX-019)', () => {
     expect(isFiscalDataPending({ legalName: 'S.A.', taxId: null })).toBe(true);
     expect(isFiscalDataPending({ legalName: null, taxId: '1' })).toBe(true);
     expect(isFiscalDataPending({ legalName: 'S.A.', taxId: '1' })).toBe(false);
+  });
+
+  describe('moneda del catálogo (DX-502-bis)', () => {
+    it('un código ISO de tres letras, recortado y en mayúsculas', () => {
+      expect(parseClinicProfilePatch({ catalogCurrency: ' usd ' })).toEqual({
+        ok: true,
+        patch: { catalogCurrency: 'USD' },
+      });
+      expect(parseClinicProfilePatch({ catalogCurrency: 'VES' })).toEqual({
+        ok: true,
+        patch: { catalogCurrency: 'VES' },
+      });
+    });
+
+    it('vacío o null la quita (vuelve la moneda común de las sedes); ausente no cambia', () => {
+      expect(parseClinicProfilePatch({ catalogCurrency: '' })).toEqual({
+        ok: true,
+        patch: { catalogCurrency: null },
+      });
+      expect(parseClinicProfilePatch({ catalogCurrency: null })).toEqual({
+        ok: true,
+        patch: { catalogCurrency: null },
+      });
+      expect(parseClinicProfilePatch({ name: 'Sonrisas' })).toEqual({
+        ok: true,
+        patch: { name: 'Sonrisas' },
+      });
+    });
+
+    it('lo que no tiene forma de código ISO se rechaza con un mensaje en español', () => {
+      for (const catalogCurrency of ['US', 'USDT', 'U$D', '840', 'US D']) {
+        expect(parseClinicProfilePatch({ catalogCurrency })).toEqual({
+          ok: false,
+          message: M.catalogCurrency,
+        });
+      }
+    });
+
+    it('entra en la auditoría con su antes y su después', () => {
+      expect(
+        clinicProfileForAudit({
+          name: 'Sonrisas',
+          legalName: null,
+          taxId: null,
+          taxIdLabel: null,
+          fiscalAddress: null,
+          contactEmail: null,
+          contactPhone: null,
+          primaryColor: '#0E7490',
+          catalogCurrency: 'USD',
+        }),
+      ).toMatchObject({ catalogCurrency: 'USD' });
+    });
   });
 });

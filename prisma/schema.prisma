@@ -90,6 +90,13 @@ model Tenant {
   /// Sustituye al código en la posición que da el formato de la sede. Se
   /// congela en la foto del recibo. CHECK: objeto jsonb (la API valida el resto).
   currencyTexts                           Json                             @default("{}")
+  /// DX-502-bis: moneda del catálogo de precios de la clínica (ISO 4217, FK a
+  /// currencies). Si está, es la que se congela en los ítems NUEVOS del plan
+  /// (`TreatmentPlanItem.catalogCurrency`); NULL = la común de las sedes
+  /// activas o ninguna (DX-502). Cambiarla no toca lo ya congelado ni ningún
+  /// importe. Solo ADMIN (PATCH /clinic/settings, auditado).
+  catalogCurrency                         String?                          @db.Char(3)
+  catalogCurrencyRef                      Currency?                        @relation("TenantCatalogCurrency", fields: [catalogCurrency], references: [code], onDelete: Restrict, map: "tenants_catalog_currency_fkey")
   /// DX-019: datos fiscales y de contacto de la clínica (Ajustes › Datos de
   /// la clínica, solo ADMIN, PATCH /clinic/settings, auditado). Texto libre,
   /// sin formato por país; NULL = sin dato. CHECK de longitud y una línea.
@@ -2273,6 +2280,8 @@ model Currency {
   priceLists                 PriceList[]
   // DX-502: ítems de plan cuyo precio de catálogo está en esa moneda.
   treatmentPlanItemCatalogs  TreatmentPlanItem[]         @relation("TreatmentPlanItemCatalogCurrency")
+  // DX-502-bis: clínicas con el catálogo de precios en esa moneda.
+  tenantCatalogs             Tenant[]                    @relation("TenantCatalogCurrency")
   // DX-262: saldos migrados en esa moneda.
   openingBalances            OpeningBalance[]
   // DX-279: importe sugerido de la política de cancelación en esa moneda.

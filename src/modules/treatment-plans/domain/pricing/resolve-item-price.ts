@@ -51,8 +51,9 @@ export interface PricingContext {
   /** Dígitos de redondeo por línea de esa moneda (`currencies.rounding_digits`). */
   planRoundingDigits: RoundingDigits;
   /**
-   * DX-502: moneda del catálogo (`catalogCurrencyOf`, la común de las sedes
-   * activas); `null` si no se sabe. No interviene en la resolución: viaja con
+   * DX-502: moneda del catálogo (`clinicCatalogCurrency`: la que fijó la
+   * clínica, DX-502-bis, o la común de las sedes activas); `null` si no se
+   * sabe. No interviene en la resolución: viaja con
    * `basePrice` para congelarla en el ítem.
    */
   catalogCurrency: string | null;

@@ -40,6 +40,7 @@ import {
   DEMO_PAYERS,
   DEMO_PRESCRIPTION_SETTINGS,
   DEMO_PRICE_LISTS,
+  DEMO_CATALOG_CURRENCY,
   DEMO_PRICES,
   DEMO_PROFESSIONAL_LICENSES,
   DEMO_PROFESSIONAL_SPECIALTIES,
@@ -1810,6 +1811,40 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         price: Number(o.price),
       })),
     ).toEqual([]);
+  });
+
+  it('DX-502-bis: the demo catalog is in USD, so every new plan item with a catalog price freezes USD and the quote can show its list price', async () => {
+    const tenantId = await liveDemoTenantId();
+    // El catálogo de la demo (DEMO_PRICES) está en la moneda de la principal.
+    expect(DEMO_CATALOG_CURRENCY).toBe('USD');
+    expect(DEMO_CATALOG_CURRENCY).toBe(DEMO_LOCATIONS.principal.currency);
+    const tenant = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { catalogCurrency: true },
+    });
+    expect(tenant.catalogCurrency).toBe('USD');
+
+    const items = await raw.treatmentPlanItem.findMany({
+      where: { tenantId, deletedAt: null },
+      select: {
+        basePrice: true,
+        catalogCurrency: true,
+        plan: { select: { currency: true } },
+      },
+    });
+    const priced = items.filter((i) => i.basePrice !== null);
+    expect(priced.length).toBeGreaterThan(0);
+    // Con sedes en USD, BRL y GBP no hay moneda común: sin la moneda fijada
+    // quedarían todos sin ella y el presupuesto ocultaría el precio de lista.
+    expect(priced.filter((i) => i.catalogCurrency !== 'USD')).toEqual([]);
+    // Sin precio de catálogo, sin moneda del catálogo (DX-502).
+    expect(
+      items.filter((i) => i.basePrice === null && i.catalogCurrency !== null),
+    ).toEqual([]);
+    // Los planes en USD tienen el precio de lista en su moneda.
+    expect(
+      priced.filter((i) => i.plan.currency === 'USD').length,
+    ).toBeGreaterThan(0);
   });
 
   it('every payment of a solo site is dated on a day its location is open, never a holiday', async () => {
