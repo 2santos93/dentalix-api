@@ -200,6 +200,41 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
         .expect(409);
     });
 
+    // DX-133-bis: el único es sobre lower(btrim(name)) entre los vivos.
+    it('nombre repetido con otras mayúsculas o espacios: 409 en español, al crear y al renombrar', async () => {
+      await createType({ name: 'Blanqueamiento' });
+      const res = await as(
+        api().post('/api/v1/appointment-types'),
+        clinic.adminToken,
+      )
+        .send({
+          name: '  BLANQUEAMIENTO ',
+          durationMinutes: 30,
+          color: '#0E7490',
+        })
+        .expect(409);
+      expect(JSON.stringify(res.body)).toContain(
+        'Ya existe un tipo de cita con ese nombre.',
+      );
+
+      const other = await createType({ name: 'Profilaxis' });
+      await as(
+        api().patch(`/api/v1/appointment-types/${other.id}`),
+        clinic.adminToken,
+      )
+        .send({ name: 'blanqueamiento' })
+        .expect(409);
+    });
+
+    it('un nombre retirado (DELETE) se puede volver a usar con otras mayúsculas', async () => {
+      const retired = await createType({ name: 'Sellantes' });
+      await as(
+        api().delete(`/api/v1/appointment-types/${retired.id}`),
+        clinic.adminToken,
+      ).expect(204);
+      await createType({ name: 'SELLANTES' });
+    });
+
     it('un tipo de otra clínica no existe aquí (404)', async () => {
       const foreign = await as(
         api().post('/api/v1/appointment-types'),
