@@ -47,17 +47,21 @@ function makeRepo(page: CatalogDirectoryPage = { items: [], total: 0 }) {
   return { repo, calls };
 }
 
+const reader = (currency: string | null = null) => ({
+  current: () => Promise.resolve(currency),
+});
+
 describe('ListCatalogDirectoryUseCase', () => {
   it('sin parámetros pide la primera página con el tamaño por defecto', async () => {
     const { repo, calls } = makeRepo();
-    await new ListCatalogDirectoryUseCase(repo).execute();
+    await new ListCatalogDirectoryUseCase(repo, reader()).execute();
 
     expect(calls[0]).toMatchObject({ skip: 0, take: 20 });
   });
 
   it('traduce la página a skip/take', async () => {
     const { repo, calls } = makeRepo();
-    await new ListCatalogDirectoryUseCase(repo).execute({
+    await new ListCatalogDirectoryUseCase(repo, reader()).execute({
       page: 3,
       pageSize: 10,
     });
@@ -67,14 +71,16 @@ describe('ListCatalogDirectoryUseCase', () => {
 
   it('acota pageSize al máximo: nadie se lleva la tabla entera pidiendo 5000', async () => {
     const { repo, calls } = makeRepo();
-    await new ListCatalogDirectoryUseCase(repo).execute({ pageSize: 5000 });
+    await new ListCatalogDirectoryUseCase(repo, reader()).execute({
+      pageSize: 5000,
+    });
 
     expect(calls[0].take).toBe(100);
   });
 
   it('normaliza página y tamaño inválidos en vez de propagar un skip negativo', async () => {
     const { repo, calls } = makeRepo();
-    await new ListCatalogDirectoryUseCase(repo).execute({
+    await new ListCatalogDirectoryUseCase(repo, reader()).execute({
       page: 0,
       pageSize: -4,
     });
@@ -84,7 +90,7 @@ describe('ListCatalogDirectoryUseCase', () => {
 
   it('recorta la búsqueda y trata el texto en blanco como "sin búsqueda"', async () => {
     const { repo, calls } = makeRepo();
-    const useCase = new ListCatalogDirectoryUseCase(repo);
+    const useCase = new ListCatalogDirectoryUseCase(repo, reader());
 
     await useCase.execute({ query: '  endodoncia  ' });
     await useCase.execute({ query: '   ' });
@@ -97,7 +103,7 @@ describe('ListCatalogDirectoryUseCase', () => {
 
   it('pasa los filtros de tipo y activos tal cual', async () => {
     const { repo, calls } = makeRepo();
-    await new ListCatalogDirectoryUseCase(repo).execute({
+    await new ListCatalogDirectoryUseCase(repo, reader()).execute({
       kind: CatalogKind.DIAGNOSIS,
       activeOnly: true,
     });
@@ -110,7 +116,7 @@ describe('ListCatalogDirectoryUseCase', () => {
 
   it('devuelve el total del repositorio junto a la página efectiva', async () => {
     const { repo } = makeRepo({ items: [fakeItem('P-01')], total: 137 });
-    const out = await new ListCatalogDirectoryUseCase(repo).execute({
+    const out = await new ListCatalogDirectoryUseCase(repo, reader()).execute({
       page: 2,
       pageSize: 25,
     });
@@ -120,6 +126,17 @@ describe('ListCatalogDirectoryUseCase', () => {
       total: 137,
       page: 2,
       pageSize: 25,
+      catalogCurrency: null,
     });
+  });
+
+  it('DX-502-ter: devuelve la moneda del catálogo de la clínica', async () => {
+    const { repo } = makeRepo({ items: [fakeItem('P-01')], total: 1 });
+    const out = await new ListCatalogDirectoryUseCase(
+      repo,
+      reader('USD'),
+    ).execute();
+
+    expect(out.catalogCurrency).toBe('USD');
   });
 });
