@@ -41,11 +41,14 @@ describe('DX-513-ter: el índice de convenio rehecho', () => {
     },
   );
 
-  it('van las últimas, en orden, después de las de DX-513-bis', () => {
+  it('existen, van seguidas y en orden, después de las de DX-513-bis', () => {
     const all = readdirSync(DIR)
       .filter((d) => /^\d{14}_/.test(d))
       .sort();
-    expect(all.slice(-2)).toEqual([CREATE_IDX, DROP_IDX]);
+    // Por nombre, no por posición: migraciones posteriores no lo rompen.
+    const at = all.indexOf(CREATE_IDX);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(all.slice(at, at + 2)).toEqual([CREATE_IDX, DROP_IDX]);
     expect(
       CREATE_IDX > '20261201090300_dx513b_effective_discount_idx_drop_old',
     ).toBe(true);
