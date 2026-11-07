@@ -1,5 +1,4 @@
 import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
-import type { CurrencyDigitsTable } from '../../../shared/money/currency-digits';
 import type { ExpenseStatus } from '../domain/entities/expense.entity';
 import type { ExpenseView } from './expense-view';
 
@@ -7,7 +6,7 @@ import type { ExpenseView } from './expense-view';
  * CSV de gastos (DX-274): una línea por gasto con los mismos filtros que la
  * pantalla. Proveedor, descripción y categorías propias son texto libre: van
  * entre comillas, sin saltos de línea y protegidos contra fórmulas. Importes
- * con los decimales de su moneda. Solo ADMIN y la descarga queda auditada.
+ * con los decimales de la pantalla (`csvAmount`, DX-488). Solo ADMIN y la descarga queda auditada.
  */
 export const EXPENSES_CSV_HEADER = [
   'Fecha de factura',
@@ -35,12 +34,10 @@ export const EXPENSE_STATUS_LABELS: Record<ExpenseStatus, string> = {
 export function toExpensesCsv(
   rows: readonly ExpenseView[],
   locationNames: ReadonlyMap<string, string>,
-  digits: CurrencyDigitsTable,
 ): string {
   const lines: string[] = [EXPENSES_CSV_HEADER.join(',')];
   for (const row of rows) {
-    const money = (value: number) =>
-      csvAmount(value, digits.roundingDigits(row.currency));
+    const money = (value: number) => csvAmount(value, row.currency);
     lines.push(
       [
         row.invoiceDate,

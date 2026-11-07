@@ -1,6 +1,4 @@
 import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
-import type { CurrencyDigitsTable } from '../../../shared/money/currency-digits';
-import type { RoundingDigits } from '../../../shared/money/line-rounding';
 import { fromCents, toCents } from '../../../shared/money/money';
 import type { PaymentAdjustmentType } from '@prisma/client';
 import type { CashPaymentView } from '../domain/entities/cash-payment.entity';
@@ -11,7 +9,7 @@ import type { CashPaymentView } from '../domain/entities/cash-payment.entity';
  * externa). Lleva el medio de pago de la clínica, la referencia del pago y el
  * nº de la factura fiscal externa, que solo descargan los roles de cobro.
  * Texto libre entre comillas, sin saltos de línea y protegido contra
- * fórmulas; importes con los decimales de su moneda. Las notas del abono no
+ * fórmulas; importes con los decimales de la pantalla (`csvAmount`, DX-488). Las notas del abono no
  * viajan: son internas y la caja no las muestra.
  */
 export const CASH_PAYMENTS_CSV_HEADER = [
@@ -48,23 +46,20 @@ export const CSV_HIDDEN_AMOUNT = 'Oculto durante el arqueo';
 function adjustmentCell(
   row: CashPaymentView,
   type: PaymentAdjustmentType,
-  digits: RoundingDigits,
+  currency: string,
 ): string {
   const lines = row.adjustments.filter((a) => a.type === type);
   if (lines.length === 0) return '';
   const cents = lines.reduce((sum, a) => sum + toCents(a.amount), 0);
-  return csvAmount(fromCents(cents), digits);
+  return csvAmount(fromCents(cents), currency);
 }
 
-/** DX-516: «Etiqueta +3.00; Otra −2.50», con los decimales de su moneda. */
-function adjustmentDetail(
-  row: CashPaymentView,
-  digits: RoundingDigits,
-): string {
+/** DX-516: «Etiqueta +3.00; Otra −2.50», con los decimales de la pantalla. */
+function adjustmentDetail(row: CashPaymentView, currency: string): string {
   return row.adjustments
     .map(
       (a) =>
-        `${a.label} ${a.type === 'DISCOUNT' ? '-' : '+'}${csvAmount(a.amount, digits)}`,
+        `${a.label} ${a.type === 'DISCOUNT' ? '-' : '+'}${csvAmount(a.amount, currency)}`,
     )
     .join('; ');
 }
@@ -79,10 +74,7 @@ function destinationOf(row: CashPaymentView): string {
     : 'Saldo migrado';
 }
 
-export function toCashPaymentsCsv(
-  rows: readonly CashPaymentView[],
-  digits: CurrencyDigitsTable,
-): string {
+export function toCashPaymentsCsv(rows: readonly CashPaymentView[]): string {
   const lines: string[] = [CASH_PAYMENTS_CSV_HEADER.join(',')];
   for (const row of rows) {
     if (row.amountHidden || row.currency === null) {
@@ -116,15 +108,12 @@ export function toCashPaymentsCsv(
         csvText(row.reference),
         csvText(row.externalInvoiceNumber),
         row.currency,
-        csvAmount(row.amount ?? 0, digits.roundingDigits(row.currency)),
-        adjustmentCell(row, 'TAX', digits.roundingDigits(row.currency)),
-        adjustmentCell(row, 'SURCHARGE', digits.roundingDigits(row.currency)),
-        adjustmentCell(row, 'DISCOUNT', digits.roundingDigits(row.currency)),
-        csvAmount(
-          row.collectedAmount ?? 0,
-          digits.roundingDigits(row.currency),
-        ),
-        csvText(adjustmentDetail(row, digits.roundingDigits(row.currency))),
+        csvAmount(row.amount ?? 0, row.currency),
+        adjustmentCell(row, 'TAX', row.currency),
+        adjustmentCell(row, 'SURCHARGE', row.currency),
+        adjustmentCell(row, 'DISCOUNT', row.currency),
+        csvAmount(row.collectedAmount ?? 0, row.currency),
+        csvText(adjustmentDetail(row, row.currency)),
       ].join(','),
     );
   }

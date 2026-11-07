@@ -1,4 +1,3 @@
-import { REFERENCE_CURRENCY_DIGITS } from '../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   EXPENSES_SUMMARY_CSV_HEADER,
   toExpensesSummaryCsv,
@@ -21,7 +20,7 @@ const ves: ExpenseSummaryRowView = {
 
 describe('CSV del resumen de gastos (DX-274)', () => {
   it('BOM, CRLF y por cada fila: ingresos, categorías, total y neto', () => {
-    const csv = toExpensesSummaryCsv([ves], REFERENCE_CURRENCY_DIGITS);
+    const csv = toExpensesSummaryCsv([ves]);
     expect(csv.startsWith('﻿')).toBe(true);
     expect(csv.slice(1).split('\r\n')).toEqual([
       EXPENSES_SUMMARY_CSV_HEADER.join(','),
@@ -44,10 +43,28 @@ describe('CSV del resumen de gastos (DX-274)', () => {
       expensesTotal: 10.5,
       net: -10.5,
     };
-    const lines = toExpensesSummaryCsv([usd], REFERENCE_CURRENCY_DIGITS)
-      .slice(1)
-      .split('\r\n');
+    const lines = toExpensesSummaryCsv([usd]).slice(1).split('\r\n');
     expect(lines[1].endsWith(',0.00')).toBe(true);
     expect(lines[4]).toBe('2026-10,"Sur",USD,Neto,"",-10.50');
+  });
+
+  it('DX-488: céntimos guardados en una moneda de redondeo 0 no se pierden (RSD 150000.50)', () => {
+    const lines = toExpensesSummaryCsv([
+      {
+        ...ves,
+        income: 150000.5,
+        categories: [{ category: 'Arriendo', amount: 0.45 }],
+        expensesTotal: 0.45,
+        net: 150000.05,
+      },
+    ])
+      .slice(1)
+      .split('\r\n');
+    expect(lines.slice(1, 5).map((l) => l.split(',').at(-1))).toEqual([
+      '150000.50',
+      '0.45',
+      '0.45',
+      '150000.05',
+    ]);
   });
 });

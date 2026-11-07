@@ -1,4 +1,4 @@
-import { amountText } from '../../../shared/money/money';
+import { csvAmount } from '../../../shared/csv/csv-cells';
 import {
   KPI_DEFINITIONS,
   KPI_KEYS,
@@ -70,10 +70,18 @@ function num(value: number | null, decimals: number): string {
   return value === null ? '' : value.toFixed(decimals);
 }
 
-/** Un valor de KPI: los importes (`MONEY`) con `amountText`, el resto con `num`. */
-function metric(value: number | null, unit: KpiUnit, decimals: number): string {
-  return value !== null && unit === 'MONEY'
-    ? amountText(value, 2)
+/**
+ * Un valor de KPI: los importes (`MONEY`) con los decimales de la pantalla
+ * (`csvAmount`, DX-488: JPY 1500 → «1500»), el resto con `num`.
+ */
+function metric(
+  value: number | null,
+  unit: KpiUnit,
+  decimals: number,
+  currency: string | undefined,
+): string {
+  return value !== null && unit === 'MONEY' && currency !== undefined
+    ? csvAmount(value, currency)
     : num(value, decimals);
 }
 
@@ -104,8 +112,8 @@ export function toLocationsComparisonCsv(report: LocationsComparison): string {
             text(row.name),
             text(def.label),
             m.currency ?? '',
-            metric(m.value, def.unit, decimals),
-            metric(m.previous, def.unit, decimals),
+            metric(m.value, def.unit, decimals, m.currency),
+            metric(m.previous, def.unit, decimals, m.currency),
             num(m.change, 1),
             m.change === null ? '' : CHANGE_UNIT_LABELS[def.changeUnit],
             m.trend ? TREND_LABELS[m.trend] : '',

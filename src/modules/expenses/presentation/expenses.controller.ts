@@ -5,7 +5,6 @@ import {
   Header,
   Headers,
   HttpCode,
-  Inject,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -16,10 +15,6 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import {
-  CURRENCY_DIGITS_CATALOG,
-  type CurrencyDigitsCatalog,
-} from '../../../shared/money/currency-digits';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -132,9 +127,6 @@ export class ExpensesController {
     private readonly suggestSuppliers: SuggestSuppliersUseCase,
     private readonly summary: GetExpenseSummaryUseCase,
     private readonly tenantContext: TenantContextService,
-    // DX-340: decimales de cada moneda (currencies.rounding_digits).
-    @Inject(CURRENCY_DIGITS_CATALOG)
-    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   @Post('attachments/upload-url')
@@ -209,10 +201,7 @@ export class ExpensesController {
   ): Promise<string> {
     const summary = await this.summary.execute(query);
     sendCsv(res, `gastos-resumen-${summary.from}-${summary.to}.csv`);
-    return toExpensesSummaryCsv(
-      summary.rows,
-      await this.currencyDigits.table(summary.rows.map((r) => r.currency)),
-    );
+    return toExpensesSummaryCsv(summary.rows);
   }
 
   @Audit({ action: 'VIEW', resource: 'EXPENSE' })

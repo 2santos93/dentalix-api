@@ -1852,34 +1852,52 @@ CLDR (DX-313); el campo se renombró a `cldrDigits` porque no son los de ISO.
 
 **Decisión de producto (vigente).** Los importes ya guardados no cambian: no se
 reescribe ni recalcula ningún documento histórico (la migración solo toca la
-tabla de referencia), y `rounding_digits` **congela** la regla anterior: 0 para
-las monedas sin decimales en CLDR 47 y para el conjunto anterior a G1
-(CLP, JPY, KRW, PYG); el resto, sus minor units. Así ningún descuento ni precio
-nuevo cambia. Donde ISO y la regla difieren (minor units 2, redondeo 0; son 13 en
-`prisma/reference/currency-digits.ts`), entre otras: AFN,
-ALL, IRR, KPW, LAK, LBP, MGA, MMK, RSD, SOS, SYP, YER. Caso de referencia:
-**123,45 RSD × 7,5 % = 9,25875 → 9 RSD** (vigente, redondeo 0) frente a
-**9,26 RSD** si se redondeara a sus 2 minor units ISO (CLDR 48.1 separa
-`digits` 2 y `cashDigits` 0). Se mantiene 0 porque cambiarlo alteraría
-resultados actuales; pasar RSD/ALL (u otra) a 2 es una **decisión pendiente
-del dueño**, compatible con los contratos (el campo ya existe) y sin tocar
-documentos guardados. Cómo se aplica, en este orden: (1) cambiar la regla en
-`prisma/scripts/generate-currency-digits.ts` y regenerar
-`prisma/reference/currency-digits.ts`; (2) una migración de datos
+tabla de referencia). `rounding_digits` sigue la regla: **la unidad de
+redondeo de una línea es la unidad más pequeña EN USO de la moneda**. Es 0
+decimales en toda moneda sin minor units ISO y en las monedas cuya fracción no
+se usa (ni monedas ni billetes; precios y cobros en unidades enteras), y sus
+minor units ISO en el resto (USD y VES, a céntimos). Donde ISO y la regla
+difieren (minor units 2, redondeo 0) son **13 monedas** de
+`prisma/reference/currency-digits.ts`: AFN, ALL, IRR, KPW, LAK, LBP, MGA, MMK,
+RSD, SOS, SYP, YER y una más de la referencia. **DX-488 decidió dejarlas en
+0**: ninguna tiene la fracción en uso y el CLDR actual (48.1) da 0 decimales a
+12 de ellas, así que redondear un descuento a céntimos que nadie paga no aporta
+nada y haría visibles como deuda o saldo a favor residuos de menos de una
+unidad. Caso de referencia: **123,45 RSD × 7,5 % = 9,25875 → 9 RSD** (vigente)
+frente a 9,26 RSD si se redondeara a sus 2 minor units ISO. Lo fija
+`src/shared/money/rounding-digits-decision.spec.ts`, que enumera las 13 y falla
+si una regeneración las cambia. Solo se redondean a esta unidad los
+descuentos, los precios por convenio y los ajustes por medio de pago; precios,
+abonos y gastos conservan los céntimos con que se registraron. El generador
+(`prisma/scripts/generate-currency-digits.ts`) se niega a regenerar si cambia
+la versión de CLDR: es el momento de revisar esta lista. Si un día se cambia la
+de una moneda, en este orden: (1) cambiar la regla en el generador y
+regenerar `prisma/reference/currency-digits.ts`; (2) una migración de datos
 `UPDATE "currencies" SET "rounding_digits" = … WHERE "code" IN (…)`; (3)
-desplegar. Las réplicas leen el valor nuevo en ≤ 5 minutos (caché con TTL)
-o al reiniciar. El seed **no** pisa los decimales de una moneda que ya existe
-(solo los escribe al crearla), así que volver a sembrar no deshace el cambio;
-el oráculo congelado de los tests fallará a propósito para esa moneda y hay
-que actualizar el test con la decisión.
+actualizar la prueba de la decisión y el oráculo congelado (fallarán a
+propósito para esa moneda); (4) desplegar. Las réplicas leen el valor nuevo
+en ≤ 5 minutos (caché con TTL) o al reiniciar, y el seed **no** pisa los
+decimales de una moneda que ya existe.
 
 **Límite de precisión.** Los importes son `Decimal(14,2)` (`Decimal(12,2)` en
 algunas tablas): ninguna moneda puede tener más de 2 decimales. Las de 3 de
 ISO (BHD, IQD, JOD, KWD, LYD, OMR, TND) no están en el catálogo (la FK las
 rechaza), la CHECK `currencies_minor_units_check` rechaza `minor_units > 2` y
 `roundingDigits()` lanza un error explícito: nunca se truncan en silencio.
-Las cuotas de un plan de pagos se siguen repartiendo al céntimo (también en
-JPY): repartirlas en unidades de la moneda es otra decisión pendiente.
+
+**Cuotas en unidades de la moneda (DX-488).** Un plan de pagos nuevo reparte
+lo financiado en unidades de los `roundingDigits` de su moneda
+(`generateSchedule`, `src/modules/payment-plans/application/schedule/`): con
+`unit = 10^(2 − roundingDigits)` céntimos, las cuotas 1…n−1 valen
+`floor(financiadoCéntimos / unit / n) · unit` y la última el resto (también los
+céntimos sueltos si lo financiado los tiene). La suma es exacta. JPY 10 000 en
+3 cuotas = 3 333, 3 333 y 3 334 (antes 3 333,33, 3 333,33 y 3 333,34, y dos
+pagos de ¥3 333 dejaban la 2.ª vencida por ¥0,66); JPY 10 000,50 en 3 = 3 333,
+3 333 y 3 334,50. En USD y VES (2 dígitos) la unidad es el céntimo y el
+resultado es idéntico al de antes (prueba de propiedades en
+`generate-schedule.spec.ts`). Las cuotas ya guardadas no cambian: nada vuelve a
+repartir un plan existente y no hay migración. La vista previa del modal
+«Crear plan de pagos» de la web aplica la misma regla.
 
 **Sin redondeos sueltos (DX-488).** Fuera de `src/shared/money` ya no queda
 ningún `Math.round(x * k)` ni `.toFixed(` de importes: se redondea con `round2`,
@@ -1889,14 +1907,31 @@ idempotencia, SQL `numeric`, CSV, presupuestos) con `amountText`. Lo vigila
 ejecuta tras commitear); lo que no es dinero (porcentajes, dosis, pesos, tasas
 de cambio, minutos) está en su lista blanca con la razón de cada entrada, y
 una entrada que ya no coincide con nada también falla. Se migró sin cambiar
-ningún resultado. `round2WithEpsilon` conserva el redondeo con `Number.EPSILON`
-del informe de producción por procedimiento, que difiere de `round2` solo en
-empates de coma flotante (1,005 → 1,01 frente a 1): unificarlo es una
-decisión pendiente. **Decisiones pendientes del dueño:** (1) pasar las 13 monedas con `minorUnits` 2 y
-`roundingDigits` 0 de `prisma/reference/currency-digits.ts` (hoy redondean a 0)
-a sus 2 decimales ISO; (2) repartir
-las cuotas del plan de pagos en unidades de la moneda (hoy, al céntimo, también
-en JPY).
+ningún resultado.
+
+**Promedios de importes exactos (DX-488).** Un promedio de dinero se calcula
+en céntimos enteros: `averageCents(totalCéntimos, n) = floor((2·totalCéntimos
++ n) / (2·n))`, la mitad hacia arriba exacta, y `averageAmount(total, n)` en
+unidades (`src/shared/money/money.ts`). Lo usan el honorario medio y el medio
+de catálogo de «Producción por procedimiento» y el ticket medio de «Comparar
+sedes». Las sumas (bruto, descuentos, neto y totales) son céntimos exactos con
+`round2`. Se borró `round2WithEpsilon`: sumar `Number.EPSILON` solo acertaba
+algunos empates pequeños (1,005 → 1,01) y fallaba el resto (2,135 → 2,13;
+4,015 → 4,01), y `round2` sobre el cociente en coma flotante también falla
+empates. Ahora 2,135 → 2,14 y 4,015 → 4,02; ningún promedio sin empate ni
+ninguna suma cambia. La guarda rechaza un `Math.round(… Number.EPSILON …)`.
+
+**Importes en los CSV (DX-488).** Todos los CSV escriben los importes con los
+decimales de la **pantalla**, con un solo helper (`csvAmount` de
+`src/shared/csv/csv-cells.ts`, la regla de `moneyWithCode` de la web): 0
+decimales solo si el importe es entero y la moneda se pinta sin decimales
+(CLDR, `CLDR_ZERO_FORMAT_DIGITS`); si no, 2. Nunca con `roundingDigits`, que
+redondea descuentos y no debe comerse céntimos guardados: un gasto de
+150 000,50 RSD con 0,45 pagado sale `150000.50,0.45,150000.05` (importe =
+pagado + pendiente; antes `150001,0,150000`), JPY 1 000 sale `1000` y JPY
+1 000,50 `1000.50`. Lo usan gastos, resumen de gastos, descuentos, caja,
+cartera, «Comparar sedes», «Producción por procedimiento» y «Cobrado sin
+imputar».
 
 **Paridad API/web.** `src/shared/money/rounding-vectors.json` (copia byte a
 byte en la web, `src/lib/money/rounding-vectors.json`, vigilada por
@@ -2012,7 +2047,8 @@ dice qué sedes existen),
 - **Columnas** por procedimiento (categoría y código) y moneda del plan:
   cantidad, bruto (Σ precio), descuentos (Σ descuento), neto, honorario medio
   (neto ÷ cantidad), medio de catálogo (Σ `basePrice`, el precio de catálogo
-  congelado en el ítem por DX-105, ÷ los ítems que lo tienen) y diferencia %
+  congelado en el ítem por DX-105, ÷ los ítems que lo tienen; los dos medios,
+  exactos en céntimos con la mitad hacia arriba: `averageAmount`) y diferencia %
   ((Σ neto − Σ catálogo) ÷ Σ catálogo, solo sobre los ítems con catálogo).
   Subtotal por categoría y total **por moneda**; nunca se mezclan monedas.
 - **«Sin atribuir»** (como DX-305), en dos partes:
@@ -4592,7 +4628,7 @@ salidas`, puede quedar negativo). Anular una salida con la caja abierta la
 - **CSV** (ADMIN, `@Audit` EXPORT con `reason` `EXPENSE_LIST` o
   `EXPENSE_SUMMARY`, `Cache-Control: no-store`, UTF-8 con BOM y CRLF, celdas
   de texto entre comillas, sin saltos de línea y con prefijo `'` si empiezan
-  por `= + - @`, importes con los decimales de su moneda):
+  por `= + - @`, importes con los decimales de la pantalla, `csvAmount`):
   `GET /expenses.csv` (mismos filtros que la lista, una línea por gasto, hasta
   10 000: más es 400 «acota el periodo») y `GET /expenses/summary.csv` (por
   mes, sede y moneda: `Ingresos`, un `Gasto` por categoría, `Total gastos` y

@@ -12,10 +12,12 @@
  *    anteriores a DX-105 (sin precio congelado) no la sesgan.
  *
  * Los importes NUNCA se suman entre monedas: los subtotales de categoría y los
- * totales van por moneda.
+ * totales van por moneda. Las sumas son céntimos exactos (`round2`); los dos
+ * medios, el promedio exacto en céntimos con la mitad hacia arriba
+ * (`averageAmount`, DX-488).
  */
 
-import { round2WithEpsilon } from '../../../shared/money/money';
+import { averageAmount, round2 } from '../../../shared/money/money';
 
 export const UNCATEGORIZED_LABEL = 'Sin categoría';
 
@@ -74,7 +76,7 @@ export interface ProcedureProduction {
 const roundPercent = (value: number, decimals: number): number =>
   Math.round((value + Number.EPSILON) * 10 ** decimals) / 10 ** decimals;
 
-const money = round2WithEpsilon;
+const money = round2;
 
 function compareText(a: string, b: string): number {
   return a.localeCompare(b, 'es', { sensitivity: 'base', numeric: true });
@@ -101,14 +103,14 @@ function totalsOf(
     gross: money(gross),
     discounts: money(discounts),
     net,
-    averageNet: count === 0 ? 0 : money(net / count),
+    averageNet: count === 0 ? 0 : averageAmount(net, count),
   };
 }
 
 function rowOf(s: ProcedureSums): ProcedureRow {
   const base = totalsOf(s.currency, s.count, s.gross, s.discounts);
   const catalogAverage =
-    s.catalogCount === 0 ? null : money(s.catalogSum / s.catalogCount);
+    s.catalogCount === 0 ? null : averageAmount(s.catalogSum, s.catalogCount);
   const differencePercent =
     s.catalogCount === 0 || s.catalogSum <= 0
       ? null

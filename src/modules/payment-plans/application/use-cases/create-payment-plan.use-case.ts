@@ -16,6 +16,10 @@ import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/us
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import { generateSchedule, Periodicity } from '../schedule/generate-schedule';
 import { round2 } from '../../../../shared/money/money';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 
 const PERIODICITIES: ReadonlySet<Periodicity> = new Set([
   'WEEKLY',
@@ -47,6 +51,9 @@ export class CreatePaymentPlanUseCase {
     // Reused so the default totalToFinance uses the SAME balance math
     // (accepted+done items − paid, multi-currency) as everywhere else.
     private readonly getPlanBalance: GetPlanBalanceUseCase,
+    // DX-488: las cuotas se reparten en unidades de la moneda del plan.
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   async execute(
@@ -128,6 +135,9 @@ export class CreatePaymentPlanUseCase {
       installmentsCount: input.installmentsCount,
       periodicity: input.periodicity,
       startDate,
+      roundingDigits: (
+        await this.currencyDigits.table([plan.currency])
+      ).roundingDigits(plan.currency),
     });
 
     try {

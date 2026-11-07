@@ -1,13 +1,16 @@
+import fc from 'fast-check';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
   amountText,
+  averageAmount,
+  averageCents,
   fromCents,
   round2,
-  round2WithEpsilon,
   roundCents,
   toCents,
 } from './money';
+import * as money from './money';
 
 describe('dinero en centavos (src/shared/money, DX-054)', () => {
   it('toCents redondea al centavo entero (0.1 + 0.2 suma exacto)', () => {
@@ -49,17 +52,100 @@ describe('helpers de DX-488 (mismos resultados que el código en línea)', () =>
     expect(amountText(1.005, 2)).toBe('1.00');
     expect(amountText(2.675, 2)).toBe('2.67');
   });
+});
 
-  it('round2WithEpsilon conserva el redondeo del informe de producción', () => {
-    for (const v of [0, 1.005, 100.314999, 2.675, 1234.565, 400000 / 4000]) {
-      expect(round2WithEpsilon(v)).toBe(
-        Math.round((v + Number.EPSILON) * 100) / 100,
-      );
+describe('promedios de importes exactos en céntimos (DX-488)', () => {
+  it('los empates suben a la mitad hacia arriba, también donde fallaban los dos redondeos de coma flotante', () => {
+    expect(averageCents(201, 2)).toBe(101); // 1.005 → 1.01
+    expect(averageCents(427, 2)).toBe(214); // 2.135 → 2.14 (el épsilon daba 2.13)
+    expect(averageCents(803, 2)).toBe(402); // 4.015 → 4.02 (el épsilon daba 4.01)
+    expect(averageCents(29, 2)).toBe(15); // 0.145 → 0.15 (round2 daba 0.14)
+    expect(averageCents(26000, 3)).toBe(8667); // 86.67, sin empate
+    expect(averageCents(1, 3)).toBe(0);
+    expect(averageCents(2, 3)).toBe(1);
+  });
+
+  it('cero entre n es cero', () => {
+    expect(averageCents(0, 5)).toBe(0);
+    expect(averageAmount(0, 5)).toBe(0);
+  });
+
+  it('negativos: la mitad hacia arriba, como Math.round (−1.005 → −1.00)', () => {
+    expect(averageCents(-201, 2)).toBe(-100);
+    expect(averageCents(-427, 2)).toBe(-213);
+    expect(averageCents(-26000, 3)).toBe(-8667);
+    expect(averageCents(-1, 3)).toBe(0);
+  });
+
+  it('n = 0 (o no entero) no es un promedio: error explícito', () => {
+    expect(() => averageCents(100, 0)).toThrow(RangeError);
+    expect(() => averageCents(100, -1)).toThrow(RangeError);
+    expect(() => averageCents(100, 1.5)).toThrow(RangeError);
+    expect(() => averageCents(100.5, 2)).toThrow(RangeError);
+  });
+
+  it('averageAmount: importes en USD/VES de 2 decimales', () => {
+    expect(averageAmount(2.01, 2)).toBe(1.01);
+    expect(averageAmount(4.27, 2)).toBe(2.14);
+    expect(averageAmount(8.03, 2)).toBe(4.02);
+    expect(averageAmount(260, 3)).toBe(86.67);
+    expect(averageAmount(36.5, 1)).toBe(36.5);
+  });
+
+  /** Oráculo independiente: cociente y resto enteros, empate hacia arriba. */
+  function halfUpByRemainder(total: number, n: number): number {
+    const q = Math.floor(total / n);
+    const r = total - q * n;
+    return 2 * r >= n ? q + 1 : q;
+  }
+
+  it('propiedad: igual al cociente exacto redondeado (céntimos en ±300000, n en 1..60)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -300_000, max: 300_000 }),
+        fc.integer({ min: 1, max: 60 }),
+        (total, n) => {
+          expect(averageCents(total, n)).toBe(halfUpByRemainder(total, n));
+        },
+      ),
+      { numRuns: 20_000 },
+    );
+  });
+
+  it('exhaustivo: todos los netos de 0.00 a 300.00 entre 1..60', () => {
+    let bad = 0;
+    for (let total = 0; total <= 30_000; total++) {
+      for (let n = 1; n <= 60; n++) {
+        if (averageCents(total, n) !== halfUpByRemainder(total, n)) bad++;
+      }
     }
-    // Donde difieren de `round2` (empates de coma flotante):
-    expect(round2WithEpsilon(1.005)).toBe(1.01);
-    expect(round2(1.005)).toBe(1);
-    expect(round2WithEpsilon(1.005)).not.toBe(round2(1.005));
+    expect(bad).toBe(0);
+  });
+
+  /** El redondeo con épsilon que tenía el informe de producción (borrado). */
+  const oldEpsilon = (x: number) =>
+    Math.round((x + Number.EPSILON) * 100) / 100;
+
+  it('propiedad: en sumas y restas de importes de 2 decimales, round2 da lo mismo que el épsilon de antes', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 10_000_000 }),
+        fc.integer({ min: 0, max: 10_000_000 }),
+        (a, b) => {
+          const x = a / 100 - b / 100;
+          expect(round2(x)).toBe(oldEpsilon(x));
+          expect(round2(a / 100 + b / 100)).toBe(oldEpsilon(a / 100 + b / 100));
+        },
+      ),
+      { numRuns: 20_000 },
+    );
+  });
+
+  it('round2WithEpsilon ya no existe: el dinero nunca usa Number.EPSILON', () => {
+    expect('round2WithEpsilon' in money).toBe(false);
+    expect(readFileSync(join(__dirname, 'money.ts'), 'utf8')).not.toMatch(
+      /EPSILON/,
+    );
   });
 });
 

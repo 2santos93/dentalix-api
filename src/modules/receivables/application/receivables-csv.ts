@@ -4,7 +4,7 @@ import type {
   PaymentPromiseStatus,
 } from '@prisma/client';
 import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
-import { amountText } from '../../../shared/money/money';
+import { csvAmount } from '../../../shared/csv/csv-cells';
 
 /*
  * CSV de la cartera (DX-145): una línea por paciente y moneda, con los mismos
@@ -12,7 +12,9 @@ import { amountText } from '../../../shared/money/money';
  * descarga ADMIN y la descarga queda auditada (ver el controlador).
  *
  * - UTF-8 con BOM y CRLF (RFC 4180): Excel lo abre con tildes bien.
- * - Importes con punto decimal y dos decimales, sin separador de miles.
+ * - Importes con punto decimal, sin separador de miles y con los decimales
+ *   de la pantalla (`csvAmount`, DX-488: 2, o 0 en JPY y demás monedas que se
+ *   pintan sin decimales si el importe es entero).
  * - Texto entre comillas; una celda que empieza por = + - @ (o tabulador/CR)
  *   se antepone con «'» para que la hoja no la ejecute como fórmula (inyección
  *   CSV). El nombre y el teléfono son texto libre.
@@ -105,10 +107,6 @@ function text(value: string | null): string {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-function money(value: number): string {
-  return amountText(value, 2);
-}
-
 export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
   const lines: string[] = [RECEIVABLES_CSV_HEADER.join(',')];
   for (const row of rows) {
@@ -118,23 +116,27 @@ export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
           text(row.patient.fullName),
           text(row.patient.phone),
           c.currency,
-          money(c.debt),
-          money(c.buckets.current),
-          money(c.buckets.days0to30),
-          money(c.buckets.days31to60),
-          money(c.buckets.days61to90),
-          money(c.buckets.over90),
-          money(c.credit),
-          money(c.balance),
+          csvAmount(c.debt, c.currency),
+          csvAmount(c.buckets.current, c.currency),
+          csvAmount(c.buckets.days0to30, c.currency),
+          csvAmount(c.buckets.days31to60, c.currency),
+          csvAmount(c.buckets.days61to90, c.currency),
+          csvAmount(c.buckets.over90, c.currency),
+          csvAmount(c.credit, c.currency),
+          csvAmount(c.balance, c.currency),
           c.oldestAgeDays === null ? '' : String(c.oldestAgeDays),
           c.debt > 0 && c.ageApproximate ? 'Sí' : 'No',
           row.lastPayment?.paidOn ?? '',
-          row.lastPayment ? money(row.lastPayment.amount) : '',
+          row.lastPayment
+            ? csvAmount(row.lastPayment.amount, row.lastPayment.currency)
+            : '',
           row.lastPayment?.currency ?? '',
           c.nextInstallment
             ? c.nextInstallment.dueDate.toISOString().slice(0, 10)
             : '',
-          c.nextInstallment ? money(c.nextInstallment.amount) : '',
+          c.nextInstallment
+            ? csvAmount(c.nextInstallment.amount, c.currency)
+            : '',
           row.lastNote
             ? text(
                 `${CHANNEL_LABELS[row.lastNote.channel]} · ${OUTCOME_LABELS[row.lastNote.outcome]}`,
@@ -142,7 +144,9 @@ export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
             : '',
           row.lastNoteOn ?? '',
           row.promise ? text(PROMISE_STATUS_LABELS[row.promise.status]) : '',
-          row.promise ? money(row.promise.amount) : '',
+          row.promise
+            ? csvAmount(row.promise.amount, row.promise.currency)
+            : '',
           row.promise?.currency ?? '',
           row.promise?.dueDate ?? '',
           incomplete(c),

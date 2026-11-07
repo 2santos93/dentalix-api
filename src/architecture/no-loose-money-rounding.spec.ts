@@ -18,12 +18,13 @@ const MONEY_DIR = 'src/shared/money/';
 
 /**
  * `.toFixed(` / `["toFixed"]` / `.toPrecision(` (con o sin espacio), un
- * `Math.round(` cuyo argumento multiplica, o un `Math.floor/trunc(` que
- * multiplica por 100 (en varias líneas). Sencilla a propósito: NO cubre alias
+ * `Math.round(` cuyo argumento multiplica o suma `Number.EPSILON` (DX-488: un
+ * épsilon no arregla los empates; los promedios usan `averageAmount`), o un
+ * `Math.floor/trunc(` que multiplica por 100 (en varias líneas). Sencilla a propósito: NO cubre alias
  * (`const r = Math.round`, `const { round } = Math`) ni `Intl.NumberFormat`.
  */
 const LOOSE =
-  /\.toFixed\s*\(|\["toFixed"\]|\.toPrecision\s*\(|Math\.round\s*\([^;]*?\*|Math\.(?:floor|trunc)\s*\([^;]*?(?:\*\s*100\b|\b100\s*\*)/g;
+  /\.toFixed\s*\(|\["toFixed"\]|\.toPrecision\s*\(|Math\.round\s*\([^;]*?(?:\*|Number\.EPSILON)|Math\.(?:floor|trunc)\s*\([^;]*?(?:\*\s*100\b|\b100\s*\*)/g;
 
 export interface Allowed {
   file: string;
@@ -60,7 +61,7 @@ export const ALLOWED: readonly Allowed[] = [
     text: 'Math.round((value + Number.EPSILON) * 10 ** decimals)',
     fn: 'const roundPercent',
     reason:
-      'diferencia % frente al catálogo (1 decimal); los importes usan round2WithEpsilon',
+      'diferencia % frente al catálogo (1 decimal); los importes usan round2 y averageAmount',
   },
   {
     file: 'src/modules/reports/application/production-by-procedure-csv.ts',
@@ -71,7 +72,7 @@ export const ALLOWED: readonly Allowed[] = [
     file: 'src/modules/reports/application/locations-comparison-csv.ts',
     text: 'value.toFixed(decimals)',
     reason:
-      'num(): solo conteos, % y variaciones; los importes (unit MONEY) van por amountText',
+      'num(): solo conteos, % y variaciones; los importes (unit MONEY) van por csvAmount',
   },
   {
     file: 'src/modules/periodontal/domain/perio-measures.ts',
@@ -207,9 +208,6 @@ const matches = (
 ): boolean =>
   text.includes(a.text) && (a.fn === undefined || context.includes(a.fn));
 
-/** Quién puede usar `round2WithEpsilon` (N1): solo el informe de producción. */
-const EPSILON_USERS = ['src/modules/reports/domain/production-by-procedure.ts'];
-
 describe('sin redondeos sueltos de importes (DX-488)', () => {
   const all = tracked();
   const files = all.filter(isScanned);
@@ -247,14 +245,11 @@ describe('sin redondeos sueltos de importes (DX-488)', () => {
     expect(wrong).toEqual([]);
   });
 
-  it('round2WithEpsilon solo lo usa el informe de producción por procedimiento', () => {
+  it('round2WithEpsilon ya no existe (DX-488): ningún fichero lo usa', () => {
     const users = all.filter(
-      (f) =>
-        !f.startsWith(MONEY_DIR) &&
-        !f.endsWith('.spec.ts') &&
-        read(f).includes('round2WithEpsilon'),
+      (f) => !f.endsWith('.spec.ts') && read(f).includes('round2WithEpsilon'),
     );
-    expect(users).toEqual(EPSILON_USERS);
+    expect(users).toEqual([]);
   });
 
   it('autoprueba: detecta las formas de un redondeo a mano', () => {
@@ -270,6 +265,7 @@ describe('sin redondeos sueltos de importes (DX-488)', () => {
     expect(n('Math.floor(x * 100 + 0.5)')).toBe(1);
     expect(n('Math.trunc(x * 100)')).toBe(1);
     expect(n('Number(rate.toFixed(8))')).toBe(1);
+    expect(n('Math.round(x + Number.EPSILON)')).toBe(1);
     // No son importes ni multiplican:
     expect(n('Math.round(ms / 1000)')).toBe(0);
     expect(n('Math.floor(page)')).toBe(0);

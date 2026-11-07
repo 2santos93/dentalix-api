@@ -8,6 +8,7 @@ import { CreatePaymentPlanUseCase } from './create-payment-plan.use-case';
 import { InMemoryPaymentPlanRepository } from './__fixtures__/in-memory-payment-plan.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 
 function makeDeps(
   overrides: {
@@ -50,6 +51,7 @@ function makeDeps(
     repo,
     getTreatmentPlan,
     getPlanBalance,
+    referenceCurrencyDigitsCatalog(),
   );
   return { repo, getTreatmentPlan, getPlanBalance, useCase };
 }
@@ -154,6 +156,7 @@ describe('CreatePaymentPlanUseCase', () => {
       repo,
       getTreatmentPlan,
       getPlanBalance,
+      referenceCurrencyDigitsCatalog(),
     );
     const plan = await useCase.execute(
       'tp-1',
@@ -166,6 +169,30 @@ describe('CreatePaymentPlanUseCase', () => {
       'u1',
     );
     expect(plan.totalToFinance).toBe(1200); // gross billable, NOT the 1000 net balance
+  });
+
+  it('DX-488: en JPY (0 dígitos de redondeo) reparte en yenes enteros: 10000 en 3 = 3333, 3333, 3334', async () => {
+    const { useCase } = makeDeps({ planCurrency: 'JPY', balance: 10000 });
+    const plan = await useCase.execute(
+      'tp-1',
+      { ...baseInput, installmentsCount: 3 },
+      'u1',
+    );
+    expect(plan.installments.map((i) => i.amount)).toEqual([3333, 3333, 3334]);
+  });
+
+  it('DX-488: en USD y VES (2 dígitos) sigue al céntimo: 100 en 3 = 33.33, 33.33, 33.34', async () => {
+    for (const planCurrency of ['USD', 'VES']) {
+      const { useCase } = makeDeps({ planCurrency, balance: 100 });
+      const plan = await useCase.execute(
+        'tp-1',
+        { ...baseInput, installmentsCount: 3 },
+        'u1',
+      );
+      expect(plan.installments.map((i) => i.amount)).toEqual([
+        33.33, 33.33, 33.34,
+      ]);
+    }
   });
 
   it('rejects installmentsCount > 600', async () => {
@@ -209,6 +236,7 @@ describe('CreatePaymentPlanUseCase', () => {
       repo,
       getTreatmentPlan,
       getPlanBalance,
+      referenceCurrencyDigitsCatalog(),
     );
     await expect(
       useCase.execute('tp-1', baseInput, 'u1'),

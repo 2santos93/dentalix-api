@@ -99,6 +99,25 @@ describe('kpi-definitions (DX-014)', () => {
       ]);
     });
 
+    it('DX-488: ticket medio exacto en céntimos, empates hacia arriba (4.27 USD ÷ 2 = 2.14; 2.01 VES ÷ 2 = 1.01)', () => {
+      const kpis = computeKpis(
+        aggregates({
+          collected: new Map([
+            ['USD', 4.27],
+            ['VES', 2.01],
+            ['JPY', 0],
+          ]),
+          attendedPatients: 2,
+        }),
+        ['USD', 'VES', 'JPY'],
+      );
+      expect(kpis.averageTicket).toEqual([
+        { currency: 'USD', value: 2.14 },
+        { currency: 'VES', value: 1.01 },
+        { currency: 'JPY', value: 0 },
+      ]);
+    });
+
     it('citas atendidas, no-show % sobre atendidas + no-show, nuevos y ocupación', () => {
       const kpis = computeKpis(fixed, ['VES', 'USD']);
       expect(kpis.completedAppointments).toBe(46);
