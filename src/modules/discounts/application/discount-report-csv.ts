@@ -5,7 +5,6 @@ import {
   csvDocument,
   csvText as text,
 } from '../../../shared/csv/csv-cells';
-import type { CurrencyDigitsTable } from '../../../shared/money/currency-digits';
 
 /*
  * CSV del informe de descuentos (DX-204): una línea por ítem, mismos filtros
@@ -63,14 +62,6 @@ const PLAN_STATUS_LABELS: Record<TreatmentPlanStatus, string> = {
   CANCELLED: 'Cancelado',
 };
 
-function money(
-  value: number,
-  currency: string,
-  digits: CurrencyDigitsTable,
-): string {
-  return csvAmount(value, digits.roundingDigits(currency));
-}
-
 function planLabel(row: DiscountReportRowView): string {
   const created = row.planCreatedOn;
   return row.planOptionLabel
@@ -99,7 +90,6 @@ function authorText(row: DiscountReportRowView): string {
 
 export function toDiscountReportCsv(
   rows: readonly DiscountReportRowView[],
-  digits: CurrencyDigitsTable,
 ): string {
   const lines: string[] = [DISCOUNT_REPORT_CSV_HEADER.join(',')];
   for (const row of rows) {
@@ -114,11 +104,11 @@ export function toDiscountReportCsv(
         row.currency,
         row.catalogPrice === null
           ? ''
-          : money(row.catalogPrice, row.currency, digits),
-        money(row.price, row.currency, digits),
-        money(row.priceReduction, row.currency, digits),
-        money(row.itemDiscount, row.currency, digits),
-        money(row.discount, row.currency, digits),
+          : csvAmount(row.catalogPrice, row.currency),
+        csvAmount(row.price, row.currency),
+        csvAmount(row.priceReduction, row.currency),
+        csvAmount(row.itemDiscount, row.currency),
+        csvAmount(row.discount, row.currency),
         row.percent.toFixed(2),
         reasonText(row),
         text(row.reasonNote),
@@ -127,8 +117,8 @@ export function toDiscountReportCsv(
         text(row.agreementName),
         row.agreementName === null || row.basePrice === null
           ? ''
-          : money(row.basePrice, row.currency, digits),
-        money(row.agreementReduction, row.currency, digits),
+          : csvAmount(row.basePrice, row.currency),
+        csvAmount(row.agreementReduction, row.currency),
         text(row.agreementAssignedByName),
         text(row.createdByName),
       ].join(','),

@@ -3,8 +3,7 @@ import {
   type AmountTotals,
 } from '../domain/production-by-procedure';
 import type { ProductionByProcedure } from './use-cases/get-production-by-procedure.use-case';
-import { CLDR_ZERO_FORMAT_DIGITS } from '../../../shared/format/cldr-format-digits';
-import { amountText } from '../../../shared/money/money';
+import { csvAmount } from '../../../shared/csv/csv-cells';
 
 /*
  * CSV de «Producción por procedimiento» (DX-423): las MISMAS filas y en el
@@ -45,17 +44,9 @@ function num(value: number | null, decimals: number): string {
   return value === null ? '' : value.toFixed(decimals);
 }
 
-/**
- * Un importe con los decimales que pinta la pantalla (`moneyWithCode` de la
- * web): 0 en una moneda sin unidad menor (ISO 4217) si el importe es entero;
- * si no, 2.
- */
+/** Un importe con los decimales de la pantalla (`csvAmount`, DX-488). */
 function money(value: number | null, currency: string): string {
-  if (value === null) return '';
-  const zero =
-    CLDR_ZERO_FORMAT_DIGITS.has(currency.toUpperCase()) &&
-    Number.isInteger(value);
-  return amountText(value, zero ? 0 : 2);
+  return value === null ? '' : csvAmount(value, currency);
 }
 
 const categoryName = (category: string | null) =>

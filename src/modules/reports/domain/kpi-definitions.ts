@@ -9,7 +9,7 @@
  * lista por moneda, y el «Total clínica» suma solo dentro de la misma moneda.
  */
 
-import { round2 } from '../../../shared/money/money';
+import { averageAmount, round2 } from '../../../shared/money/money';
 
 export const KPI_KEYS = [
   'production',
@@ -245,7 +245,7 @@ export function computeKpis(
       currency,
       value:
         a.attendedPatients > 0
-          ? round2((a.collected.get(currency) ?? 0) / a.attendedPatients)
+          ? averageAmount(a.collected.get(currency) ?? 0, a.attendedPatients)
           : null,
     })),
     occupancy:

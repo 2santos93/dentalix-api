@@ -1,6 +1,5 @@
 import type { UnallocatedPayments } from './use-cases/get-unallocated-payments.use-case';
-import { CLDR_ZERO_FORMAT_DIGITS } from '../../../shared/format/cldr-format-digits';
-import { amountText } from '../../../shared/money/money';
+import { csvAmount } from '../../../shared/csv/csv-cells';
 
 /*
  * CSV de «Cobrado sin imputar / a cuenta» (DX-399): las MISMAS filas que la
@@ -34,13 +33,8 @@ function text(value: string): string {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-/** Los decimales de la pantalla: 0 en una moneda sin unidad menor si es entero. */
-function money(value: number, currency: string): string {
-  const zero =
-    CLDR_ZERO_FORMAT_DIGITS.has(currency.toUpperCase()) &&
-    Number.isInteger(value);
-  return amountText(value, zero ? 0 : 2);
-}
+/** Los decimales de la pantalla (`csvAmount`, DX-488). */
+const money = csvAmount;
 
 export function toUnallocatedPaymentsCsv(report: UnallocatedPayments): string {
   const header = [

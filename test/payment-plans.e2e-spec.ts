@@ -411,4 +411,99 @@ describe('Payment plans / cuotas (e2e)', () => {
       expect(recreatedPlan.totalToFinance).toBe(1200);
     },
   );
+
+  it('DX-488: en JPY las cuotas son yenes enteros (3333/3333/3334) y dos pagos de ¥3333 dejan las cuotas 1 y 2 pagadas', async () => {
+    const subdomain = 'clinica-cuotas-jpy';
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Cuotas JPY',
+      subdomain,
+      email: 'owner@clinica-cuotas-jpy.com',
+    });
+    const patient = await createPatient(
+      app,
+      clinic.accessToken,
+      subdomain,
+      'CUOTAS-JPY-001',
+    );
+    const as = (r: request.Test) =>
+      r
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`);
+    const api = () => request(app.getHttpServer());
+
+    const catalogItem = (
+      await as(api().post('/api/v1/catalog/items'))
+        .send({
+          code: 'RESINA-CUOTAS-JPY',
+          kind: CatalogKind.PROCEDURE,
+          labelEs: 'Resina',
+          color: '#2A2B3C',
+          defaultPrice: 100,
+        })
+        .expect(201)
+    ).body as CatalogItemResponseBody;
+    const plan = (
+      await as(api().post(`/api/v1/patients/${patient.id}/treatment-plans`))
+        .send({ currency: 'JPY' })
+        .expect(201)
+    ).body as TreatmentPlanResponseBody;
+    expect(plan.currency).toBe('JPY');
+    const item = (
+      await as(api().post(`/api/v1/treatment-plans/${plan.id}/items`))
+        .send({
+          toothNumber: '11',
+          catalogItemId: catalogItem.id,
+          price: 10000,
+        })
+        .expect(201)
+    ).body as TreatmentPlanItemResponseBody;
+    await as(api().patch(`/api/v1/treatment-plans/${plan.id}/items/${item.id}`))
+      .send({ status: 'ACCEPTED' })
+      .expect(200);
+
+    const created = (
+      await as(api().post(`/api/v1/treatment-plans/${plan.id}/payment-plan`))
+        .send({
+          installmentsCount: 3,
+          periodicity: 'MONTHLY',
+          startDate: START_DATE,
+        })
+        .expect(201)
+    ).body as PaymentPlanResponseBody;
+    expect(created.totalToFinance).toBe(10000);
+    expect(created.installments.map((i) => i.amount)).toEqual([
+      3333, 3333, 3334,
+    ]);
+
+    for (let i = 0; i < 2; i++) {
+      await as(api().post(`/api/v1/treatment-plans/${plan.id}/payments`))
+        .send({
+          amount: 3333,
+          currency: 'JPY',
+          paidAt: PAID_AT,
+          method: 'CASH',
+        })
+        .expect(201);
+    }
+
+    const read = (
+      await as(
+        api().get(`/api/v1/treatment-plans/${plan.id}/payment-plan`),
+      ).expect(200)
+    ).body as PaymentPlanResponseBody;
+    expect(read.installments.map((i) => i.amount)).toEqual([3333, 3333, 3334]);
+    expect(read.installments.reduce((sum, i) => sum + i.amount, 0)).toBe(
+      read.financedAmount,
+    );
+    expect(read.financedAmount).toBe(10000);
+    expect(read.paidTotal).toBe(6666);
+    expect(
+      read.installments.map((i) => [i.sequence, i.covered, i.status]),
+    ).toEqual([
+      [1, 3333, 'PAID'],
+      [2, 3333, 'PAID'],
+      [3, 0, 'PENDING'],
+    ]);
+    expect(read.remaining).toBe(3334);
+  });
 });

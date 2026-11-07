@@ -231,4 +231,62 @@ describe('buildProcedureProduction (DX-423)', () => {
     expect(report.totals[0].gross).toBe(0.3);
     expect(report.totals[0].averageNet).toBe(0.15);
   });
+
+  describe('DX-488: honorario medio y medio de catálogo exactos en céntimos', () => {
+    it('neto 2.01 en 2 da 1.01 y neto 4.27 en 2 da 2.14 (empates hacia arriba)', () => {
+      const report = buildProcedureProduction([
+        sums({ catalogItemId: 'a', code: 'A', count: 2, gross: 2.01 }),
+        sums({
+          catalogItemId: 'b',
+          code: 'B',
+          count: 2,
+          gross: 5,
+          discounts: 0.73,
+        }),
+      ]);
+      expect(report.rows.map((r) => [r.code, r.net, r.averageNet])).toEqual([
+        ['A', 2.01, 1.01],
+        ['B', 4.27, 2.14],
+      ]);
+      // El total suma los netos exactos (6.28) y su medio es 6.28 ÷ 4 = 1.57.
+      expect(report.totals).toEqual([
+        expect.objectContaining({
+          currency: 'VES',
+          count: 4,
+          gross: 7.01,
+          discounts: 0.73,
+          net: 6.28,
+          averageNet: 1.57,
+        }),
+      ]);
+    });
+
+    it('medio de catálogo 8.03 ÷ 2 = 4.02 (el épsilon daba 4.01); sin precio de catálogo, null', () => {
+      const report = buildProcedureProduction([
+        sums({
+          catalogItemId: 'a',
+          code: 'A',
+          count: 2,
+          gross: 8,
+          catalogCount: 2,
+          catalogSum: 8.03,
+          catalogPricedNet: 8,
+        }),
+        sums({ catalogItemId: 'b', code: 'B', count: 1, gross: 10 }),
+      ]);
+      expect(
+        report.rows.map((r) => [r.code, r.catalogAverage, r.catalogCount]),
+      ).toEqual([
+        ['A', 4.02, 2],
+        ['B', null, 0],
+      ]);
+    });
+
+    it('USD: 4.27 de neto en 2 ítems da 2.14, no 2.13', () => {
+      const [row] = buildProcedureProduction([
+        sums({ currency: 'USD', count: 2, gross: 4.27 }),
+      ]).rows;
+      expect(row.averageNet).toBe(2.14);
+    });
+  });
 });

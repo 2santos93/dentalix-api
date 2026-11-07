@@ -7,6 +7,7 @@ import {
   discountForPercent,
 } from '../../modules/discounts/domain/discount-policy';
 import { percentPrice } from '../../modules/treatment-plans/domain/pricing/resolve-item-price';
+import { generateSchedule } from '../../modules/payment-plans/application/schedule/generate-schedule';
 import { linesTotal, roundingDigits } from './line-rounding';
 
 // DX-340: los mismos vectores (copia byte a byte en la web,
@@ -48,6 +49,12 @@ interface Vectors {
     currency: string;
     lines: { price: number; discount: number }[];
     total: number;
+  }[];
+  installmentSplit: {
+    currency: string;
+    financed: number;
+    count: number;
+    installments: number[];
   }[];
 }
 
@@ -130,6 +137,21 @@ describe('vectores de redondeo compartidos con la web (DX-340)', () => {
     'total de líneas en $currency = $total',
     ({ lines, total }) => {
       expect(linesTotal(lines)).toBe(total);
+    },
+  );
+
+  it.each(vectors.installmentSplit)(
+    'DX-488: cuotas de $financed $currency en $count',
+    ({ currency, financed, count, installments }) => {
+      const rows = generateSchedule({
+        totalToFinance: financed,
+        downPayment: 0,
+        installmentsCount: count,
+        periodicity: 'MONTHLY',
+        startDate: new Date('2026-01-15T00:00:00.000Z'),
+        roundingDigits: digitsOf(currency),
+      });
+      expect(rows.map((r) => r.amount)).toEqual(installments);
     },
   );
 });

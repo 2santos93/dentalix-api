@@ -42,12 +42,29 @@ export function amountText(amount: number, digits: number): string {
 }
 
 /**
- * Redondeo a 2 decimales con `Number.EPSILON` de ventaja, mitad hacia arriba
- * (DX-488). Solo lo usa el informe de producción por procedimiento. Difiere de
- * `round2` en los empates de coma flotante (1.005 → 1.01 aquí, 1 en `round2`):
- * se conserva tal cual por no cambiar importes ya informados; unificarlo con
- * `round2` es una decisión pendiente (ver README «Redondeo de importes»).
+ * Promedio de un importe en céntimos enteros, exacto (DX-488): la mitad hacia
+ * arriba de `totalCents ÷ count`, `floor((2·totalCents + count) / (2·count))`,
+ * en enteros (BigInt), así un empate (1.005, 2.135, 4.015) nunca se pierde
+ * por coma flotante. En negativos la mitad sube hacia +∞, como `Math.round`.
+ * `count` es un entero ≥ 1: sin elementos no hay promedio (lo decide quien
+ * llama: 0 o `null`). El dinero nunca suma un épsilon para redondear.
  */
-export function round2WithEpsilon(amount: number): number {
-  return Math.round((amount + Number.EPSILON) * 100) / 100;
+export function averageCents(totalCents: number, count: number): number {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new RangeError(`Promedio sin elementos: count = ${count}.`);
+  }
+  if (!Number.isInteger(totalCents)) {
+    throw new RangeError(`Céntimos no enteros: ${totalCents}.`);
+  }
+  const numerator = 2n * BigInt(totalCents) + BigInt(count);
+  const denominator = 2n * BigInt(count);
+  // BigInt trunca hacia 0: `floor` exacto también con numerador negativo.
+  const quotient = numerator / denominator;
+  const floored = numerator % denominator < 0n ? quotient - 1n : quotient;
+  return Number(floored);
+}
+
+/** Promedio de un importe (`total ÷ count`) con `averageCents`, en unidades. */
+export function averageAmount(total: number, count: number): number {
+  return fromCents(averageCents(toCents(total), count));
 }

@@ -1,16 +1,11 @@
 import {
   Controller,
   Get,
-  Inject,
   Query,
   Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import {
-  CURRENCY_DIGITS_CATALOG,
-  type CurrencyDigitsCatalog,
-} from '../../../shared/money/currency-digits';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -75,9 +70,6 @@ export class DiscountReportController {
   constructor(
     private readonly report: GetDiscountReportUseCase,
     private readonly tenantContext: TenantContextService,
-    // DX-340: decimales de cada moneda (currencies.rounding_digits).
-    @Inject(CURRENCY_DIGITS_CATALOG)
-    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   private filtersOf(query: DiscountReportFiltersDto) {
@@ -147,9 +139,6 @@ export class DiscountReportController {
     );
     // Dato personal: ni el navegador ni un proxy lo guardan.
     res.setHeader('Cache-Control', 'no-store');
-    return toDiscountReportCsv(
-      rows,
-      await this.currencyDigits.table(rows.map((r) => r.currency)),
-    );
+    return toDiscountReportCsv(rows);
   }
 }

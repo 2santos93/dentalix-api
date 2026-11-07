@@ -154,4 +154,61 @@ describe('CSV de «Comparar sedes» (DX-014)', () => {
     });
     expect(lines(csv)[1].startsWith('2026-10-01 a 2026-10-31,,')).toBe(true);
   });
+
+  it('DX-488: los importes con los decimales de la pantalla: JPY entero sin decimales, USD con 2', async () => {
+    const useCase = new GetLocationsComparisonUseCase({
+      productionAttribution: () =>
+        Promise.resolve({
+          attributedSince: new Date('2026-09-01T00:00:00Z'),
+          hasUnattributed: false,
+        }),
+      listLocations: () =>
+        Promise.resolve([
+          {
+            id: 'l1',
+            name: 'Sede',
+            isActive: true,
+            timeZone: 'America/Caracas',
+          },
+        ]),
+      aggregate: () =>
+        Promise.resolve({
+          byLocation: new Map([
+            [
+              'l1',
+              {
+                ...EMPTY_AGGREGATES,
+                production: new Map([
+                  ['JPY', 1500],
+                  ['USD', 1500],
+                ]),
+                collected: new Map([['JPY', 1000.5]]),
+                completed: 2,
+                attendedPatients: 2,
+              },
+            ],
+          ]),
+          attendedPatients: 2,
+        }),
+    });
+    const rows = lines(
+      toLocationsComparisonCsv(
+        await useCase.execute({
+          from: '2026-10-01',
+          to: '2026-10-31',
+          compare: 'none',
+          allowedLocationIds: 'ALL',
+        }),
+      ),
+    );
+    const cell = (label: string, currency: string) =>
+      rows
+        .find((l) => l.includes(`"Sede","${label}",${currency},`))
+        ?.split(',')[5];
+    expect(cell('Producción', 'JPY')).toBe('1500');
+    expect(cell('Producción', 'USD')).toBe('1500.00');
+    expect(cell('Cobrado', 'JPY')).toBe('1000.50');
+    // Ticket medio exacto: 1000.50 ÷ 2 = 500.25.
+    expect(cell('Ticket medio', 'JPY')).toBe('500.25');
+  });
 });

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PAYMENT_PLAN_REPOSITORY } from '../../domain/ports/payment-plan-repository.port';
@@ -16,6 +17,10 @@ import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/us
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import { generateSchedule, Periodicity } from '../schedule/generate-schedule';
 import { round2 } from '../../../../shared/money/money';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 
 const PERIODICITIES: ReadonlySet<Periodicity> = new Set([
   'WEEKLY',
@@ -32,6 +37,13 @@ export interface CreatePaymentPlanInput {
   notes?: string;
 }
 
+/**
+ * DX-488: las cuotas se reparten en unidades de la moneda del plan; sin sus
+ * decimales en `currencies` no hay reparto (422, no un 500).
+ */
+export const PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE = (code: string): string =>
+  `La moneda ${code} del plan no está en el catálogo de monedas: no se pueden repartir las cuotas.`;
+
 function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
@@ -47,6 +59,9 @@ export class CreatePaymentPlanUseCase {
     // Reused so the default totalToFinance uses the SAME balance math
     // (accepted+done items − paid, multi-currency) as everywhere else.
     private readonly getPlanBalance: GetPlanBalanceUseCase,
+    // DX-488: las cuotas se reparten en unidades de la moneda del plan.
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   async execute(
@@ -122,12 +137,19 @@ export class CreatePaymentPlanUseCase {
       throw new BadRequestException('downPayment cannot exceed totalToFinance');
     }
 
+    const digits = await this.currencyDigits.table([plan.currency]);
+    if (!digits.has(plan.currency)) {
+      throw new UnprocessableEntityException(
+        PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE(plan.currency),
+      );
+    }
     const installments = generateSchedule({
       totalToFinance,
       downPayment,
       installmentsCount: input.installmentsCount,
       periodicity: input.periodicity,
       startDate,
+      roundingDigits: digits.roundingDigits(plan.currency),
     });
 
     try {

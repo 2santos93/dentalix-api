@@ -204,4 +204,57 @@ describe('toReceivablesCsv', () => {
       `\uFEFF${RECEIVABLES_CSV_HEADER.join(',')}\r\n`,
     );
   });
+
+  it('DX-488: importes con los decimales de la pantalla (csvAmount): JPY entero sin decimales, con céntimos con 2; USD siempre con 2', () => {
+    const csv = toReceivablesCsv([
+      row({
+        lastPayment: { paidOn: '2026-09-30', amount: 3333, currency: 'JPY' },
+        promise: {
+          id: 'pp1',
+          amount: 10.5,
+          currency: 'USD',
+          dueDate: '2026-11-15',
+          status: 'OPEN',
+          reopenedAt: null,
+        },
+        currencies: [
+          {
+            currency: 'JPY',
+            balance: 6666.5,
+            debt: 6666.5,
+            credit: 0,
+            buckets: { ...emptyBuckets(), current: 3334, days0to30: 3332.5 },
+            oldestAgeDays: 10,
+            ageApproximate: false,
+            nextInstallment: {
+              dueDate: new Date('2026-11-07T00:00:00.000Z'),
+              amount: 3334,
+            },
+            paymentsWithoutRateCount: 0,
+            rateProviderTimedOut: false,
+          },
+        ],
+      }),
+    ]);
+    const cells = csv.slice(1).split('\r\n')[1].split(',');
+    expect(cells.slice(2, 11)).toEqual([
+      'JPY',
+      '6666.50',
+      '3334',
+      '3332.50',
+      '0',
+      '0',
+      '0',
+      '0',
+      '6666.50',
+    ]);
+    expect(cells.slice(13, 18)).toEqual([
+      '2026-09-30',
+      '3333',
+      'JPY',
+      '2026-11-07',
+      '3334',
+    ]);
+    expect(cells.slice(20, 23)).toEqual(['"Abierto"', '10.50', 'USD']);
+  });
 });
