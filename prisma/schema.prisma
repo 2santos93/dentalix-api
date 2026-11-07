@@ -1511,9 +1511,11 @@ model AppointmentType {
 
   // Destino de la FK compuesta de appointments.appointmentTypeId.
   @@unique([tenantId, id], map: "appointment_types_tenant_id_key")
-  // Único PARCIAL (solo vivos): el WHERE vive en la migración; Prisma no lo
-  // expresa. NO aceptar un diff de migrate dev que lo recree sin el WHERE.
-  @@unique([tenantId, name], map: "appointment_types_tenant_name_key")
+  // Nombre único SIN distinguir mayúsculas ni espacios de los extremos, solo
+  // entre vivos: índice de EXPRESIÓN ("tenantId", lower(btrim(name))) WHERE
+  // "deletedAt" IS NULL en 20261130090000_dx133b_appointment_type_name_ci
+  // (DX-133-bis). Prisma no lo expresa ni lo introspecciona, así que no se
+  // declara. NO aceptar un diff de migrate dev que lo recree sobre `name`.
   @@map("appointment_types")
 }
 
