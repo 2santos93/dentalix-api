@@ -39,6 +39,11 @@ export interface DiscountReportRow {
    */
   catalogPrice: number | null;
   /**
+   * DX-502: moneda de `basePrice` (la del catálogo al dar de alta el ítem);
+   * null si no se supo. No es la de `catalogPrice` en un ítem de lista.
+   */
+  catalogCurrency: string | null;
+  /**
    * DX-513-bis: moneda de `catalogPrice` (la congelada o, en un ítem
    * anterior, la de DX-513); null si no se sabe o el ítem es libre.
    */

@@ -3,14 +3,19 @@
 -- columnas son nuevas y sin relleno: todas las filas existentes las tienen
 -- NULL y cumplen.
 --
--- VALIDATE CONSTRAINT solo toma SHARE UPDATE EXCLUSIVE sobre
--- `treatment_plan_items` (no bloquea lecturas ni escrituras) y la recorre una
--- vez.
+-- FK bajo FORCE (DX-134): validar una FK lee la hija con la RLS del owner (un
+-- owner sin SUPERUSER ni BYPASSRLS no vería ninguna fila y la validación
+-- pasaría sin mirar nada), así que se quita FORCE a la hija en esta misma
+-- transacción y se devuelve al final (`currencies` es un catálogo global sin
+-- RLS), como 20261128090200_dx502_plan_item_catalog_currency_fk_validate.
 --
--- FK bajo FORCE (DX-134): validar una FK lee la hija con la RLS del owner,
--- así que se quita FORCE a la hija en esta misma transacción y se devuelve al
--- final (`currencies` es un catálogo global sin RLS), como
--- 20261128090200_dx502_plan_item_catalog_currency_fk_validate.
+-- BLOQUEO: `ALTER TABLE … NO FORCE ROW LEVEL SECURITY` toma un ACCESS
+-- EXCLUSIVE sobre `treatment_plan_items` que dura HASTA EL COMMIT, así que
+-- lecturas y escrituras de los ítems esperan mientras los tres VALIDATE
+-- recorren la tabla (cada VALIDATE solo pediría SHARE UPDATE EXCLUSIVE, pero
+-- aquí va dentro de ese bloqueo). Con una tabla grande, desplegar en una hora
+-- de poco tráfico. Las columnas son nuevas y NULL: el recorrido no encuentra
+-- nada que comprobar, pero lee la tabla entera.
 --
 -- lock_timeout 5 s; para reintentar, `npx prisma migrate resolve
 -- --rolled-back 20261201090100_dx513b_plan_item_reference_validate` y

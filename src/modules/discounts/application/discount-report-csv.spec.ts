@@ -18,6 +18,7 @@ const row: DiscountReportRowView = {
   procedure: 'Corona "zirconio"',
   currency: 'EUR',
   catalogPrice: null,
+  catalogCurrency: null,
   referenceCurrency: null,
   referencePriceInPlan: null,
   basePriceInPlan: null,
@@ -320,5 +321,54 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       '',
       '',
     ]);
+  });
+
+  describe('L1: «Precio sin convenio» con su moneda real', () => {
+    const agreed: DiscountReportRowView = {
+      ...row,
+      currency: 'USD',
+      priceSource: 'AGREEMENT_PERCENT',
+      agreementName: 'Seguros Caracas',
+      catalogCurrency: 'VES',
+      referenceCurrency: 'VES',
+      catalogPrice: 3240,
+      basePrice: 3600,
+      price: 3.68,
+      priceReduction: 0,
+      itemDiscount: 0,
+      discount: 0,
+      percent: 0,
+      reason: null,
+      reasonNote: null,
+    };
+    const baseCell = (r: DiscountReportRowView) =>
+      toDiscountReportCsv([r]).slice(1).split('\r\n')[1].split(',')[23];
+
+    it('con foto entre monedas: la base convertida, en la moneda del plan', () => {
+      expect(DISCOUNT_REPORT_CSV_HEADER[23]).toBe('Precio sin convenio');
+      expect(
+        baseCell({
+          ...agreed,
+          basePriceInPlan: 4.09,
+          referencePriceInPlan: 3.68,
+          agreementReduction: 0.41,
+        }),
+      ).toBe('4.09');
+    });
+
+    it('sin foto, la base del catálogo en VES va con «VES», nunca como USD', () => {
+      expect(baseCell({ ...agreed, basePriceInPlan: null })).toBe(
+        '3600.00 VES',
+      );
+    });
+
+    it('misma moneda (o moneda desconocida): el importe tal cual', () => {
+      expect(
+        baseCell({ ...agreed, basePriceInPlan: null, catalogCurrency: 'USD' }),
+      ).toBe('3600.00');
+      expect(
+        baseCell({ ...agreed, basePriceInPlan: null, catalogCurrency: null }),
+      ).toBe('3600.00');
+    });
   });
 });

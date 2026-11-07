@@ -162,10 +162,12 @@ export class ApplyBulkDiscountUseCase {
             if (!lookup || current?.currency !== plan.currency) {
               throw new ConflictException(PLAN_CURRENCY_CHANGED_MESSAGE);
             }
-            reference = freezeWithRate(item, plan.currency, {
-              currency,
-              lookup,
-            });
+            reference = freezeWithRate(
+              item,
+              plan.currency,
+              { currency, lookup },
+              actor.role,
+            );
           }
           const before = {
             catalogPrice: reference

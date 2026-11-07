@@ -96,7 +96,7 @@ const DISCOUNT_LOCKED_CONFLICT = `${ITEMS_LOCKED_CONFLICT}; o el descuento (tamb
 const DISCOUNT_FORBIDDEN =
   'DX-204: el descuento EFECTIVO (SEC-041: rebaja del precio frente al de catálogo + descuento) supera el tope del rol de quien lo da («Tu rol permite hasta un X % de descuento por ítem.»; con rebaja de precio, precedido de «Precio por debajo del de catálogo: cuenta como descuento.»). Subir el precio es libre';
 const DISCOUNT_UNPROCESSABLE =
-  'DX-204: por encima del umbral de la política falta el motivo (con rebaja de precio: «… Indica el motivo del descuento.»), o «Otro» sin nota, o nota sin motivo. DX-513-bis: `code` DISCOUNT_REFERENCE_RATE_MISSING si el precio de catálogo está en otra moneda y la clínica no tiene la tasa de hoy (el mensaje nombra la moneda y remite a Ajustes › Tasa de cambio); no se guarda nada';
+  'DX-204: por encima del umbral de la política falta el motivo (con rebaja de precio: «… Indica el motivo del descuento.»), o «Otro» sin nota, o nota sin motivo. DX-513-bis: `code` DISCOUNT_REFERENCE_RATE_MISSING si el precio de catálogo está en otra moneda y la clínica no tiene la tasa de hoy (el mensaje nombra la moneda y el día con el formato de la sede; a quien gestiona las tasas lo remite a Ajustes › Tasa de cambio y al resto le pide que avise a un administrador); no se guarda nada';
 
 interface AuthenticatedRequest extends AuditableRequest {
   user: JwtPayload;

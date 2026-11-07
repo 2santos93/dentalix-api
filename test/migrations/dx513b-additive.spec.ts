@@ -15,8 +15,8 @@ const code = (migration: string): string =>
 
 const ADD = '20261201090000_dx513b_plan_item_reference_snapshot';
 const VALIDATE = '20261201090100_dx513b_plan_item_reference_validate';
-const DROP_IDX = '20261201090200_dx513b_effective_discount_idx_drop';
-const CREATE_IDX = '20261201090300_dx513b_effective_discount_idx';
+const CREATE_IDX = '20261201090200_dx513b_effective_ref_discount_idx';
+const DROP_IDX = '20261201090300_dx513b_effective_discount_idx_drop_old';
 
 describe('DX-513-bis: migraciones aditivas', () => {
   it.each([ADD, VALIDATE])(
@@ -64,25 +64,43 @@ describe('DX-513-bis: migraciones aditivas', () => {
     ]);
   });
 
-  it('el índice se rehace CONCURRENTLY, una sentencia por migración, con la referencia convertida en el predicado', () => {
-    expect(code(DROP_IDX)).toBe(
-      'DROP INDEX CONCURRENTLY IF EXISTS "treatment_plan_items_tenant_effective_discount_at_idx";',
-    );
+  it('el índice se rehace CONCURRENTLY: primero el nuevo y luego se quita el anterior (nunca sin índice), una sentencia por migración', () => {
+    expect(CREATE_IDX < DROP_IDX).toBe(true);
     const create = code(CREATE_IDX);
     expect(create.split(';').filter((st) => st.trim())).toHaveLength(1);
     expect(create).toMatch(
-      /^CREATE INDEX CONCURRENTLY IF NOT EXISTS "treatment_plan_items_tenant_effective_discount_at_idx"/,
+      /^CREATE INDEX CONCURRENTLY IF NOT EXISTS "treatment_plan_items_tenant_effective_ref_discount_at_idx"/,
     );
     expect(create).toContain(
       'WHERE ("discount" > 0 OR "price" < "catalogPrice" OR "price" < "referencePriceInPlan") AND "deletedAt" IS NULL',
     );
+    expect(code(DROP_IDX)).toBe(
+      'DROP INDEX CONCURRENTLY IF EXISTS "treatment_plan_items_tenant_effective_discount_at_idx";',
+    );
+  });
+
+  it.each([CREATE_IDX, DROP_IDX])(
+    '%s: sin lock_timeout (DB-078) y con la receta de recuperación (migrate resolve --rolled-back)',
+    (m) => {
+      const raw = readFileSync(join(DIR, m, 'migration.sql'), 'utf8');
+      expect(code(m)).not.toMatch(/lock_timeout/);
+      expect(raw.replace(/\n--\s*/g, ' ')).toContain(
+        `npx prisma migrate resolve --rolled-back ${m}`,
+      );
+    },
+  );
+
+  it('la validación avisa del ACCESS EXCLUSIVE de NO FORCE hasta el COMMIT', () => {
+    const raw = readFileSync(join(DIR, VALIDATE, 'migration.sql'), 'utf8');
+    expect(raw).toMatch(/ACCESS\s+(--\s*)?EXCLUSIVE/);
+    expect(raw).not.toMatch(/no bloquea lecturas ni escrituras/);
   });
 
   it('van después de la última migración anterior de main y en orden', () => {
     const all = readdirSync(DIR)
       .filter((d) => /^\d{14}_/.test(d))
       .sort();
-    const mine = [ADD, VALIDATE, DROP_IDX, CREATE_IDX];
+    const mine = [ADD, VALIDATE, CREATE_IDX, DROP_IDX];
     expect(all.slice(-4)).toEqual(mine);
     expect(ADD > '20261130090000_dx133b_appointment_type_name_ci').toBe(true);
   });

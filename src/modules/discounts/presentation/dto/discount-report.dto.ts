@@ -160,6 +160,14 @@ export class DiscountReportItemDto {
     type: String,
     nullable: true,
     description:
+      'DX-502: moneda de `basePrice` (la del catálogo al dar de alta el ítem); null si no se supo. En un ítem de lista no es la de `catalogPrice`',
+  })
+  catalogCurrency!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
       'DX-513-bis: moneda de `catalogPrice` (la del plan para las listas, la del catálogo para el resto); null si no se sabe o el ítem es libre',
   })
   referenceCurrency!: string | null;

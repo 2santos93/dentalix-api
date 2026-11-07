@@ -2078,7 +2078,8 @@ model TreatmentPlanItem {
   //     INCLUDE (price, discount, status)
   //     -> DX-145: facturable de todos los planes de la clínica (cartera).
   // PARCIAL y de EXPRESIÓN, no declarable en Prisma:
-  //   treatment_plan_items_tenant_effective_discount_at_idx
+  //   treatment_plan_items_tenant_effective_ref_discount_at_idx (DX-513-bis;
+  //     sustituye a treatment_plan_items_tenant_effective_discount_at_idx)
   //     ("tenantId", COALESCE("discountAt", "createdAt"))
   //     WHERE ("discount" > 0 OR "price" < "catalogPrice"
   //            OR "price" < "referencePriceInPlan") AND "deletedAt" IS NULL

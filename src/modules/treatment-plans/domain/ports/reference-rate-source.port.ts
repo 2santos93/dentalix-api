@@ -16,6 +16,11 @@ export type ReferenceRateLookup =
       currency: string;
       /** Día civil para el que se pidió (null si no llegó a pedirse). */
       date: string | null;
+      /**
+       * Ese día con el formato de la sede (su locale, DX-315), para el
+       * mensaje; null si no hay día o la sede no tiene formato.
+       */
+      dateLabel: string | null;
     };
 
 /**
@@ -35,5 +40,10 @@ export interface ReferenceRateSource {
  */
 export const NO_REFERENCE_RATES: ReferenceRateSource = {
   rateFor: (from) =>
-    Promise.resolve({ kind: 'missing', currency: from, date: null }),
+    Promise.resolve({
+      kind: 'missing',
+      currency: from,
+      date: null,
+      dateLabel: null,
+    }),
 };

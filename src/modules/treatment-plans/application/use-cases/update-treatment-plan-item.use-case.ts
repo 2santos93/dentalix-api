@@ -260,7 +260,12 @@ export class UpdateTreatmentPlanItemUseCase {
           if (plan.currency !== snapshotRate.planCurrency) {
             throw new ConflictException(PLAN_CURRENCY_CHANGED_MESSAGE);
           }
-          reference = freezeWithRate(item, plan.currency, snapshotRate.asked);
+          reference = freezeWithRate(
+            item,
+            plan.currency,
+            snapshotRate.asked,
+            actor.role,
+          );
           repoPatch.reference = reference;
         }
         const before = {

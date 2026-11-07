@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -381,20 +383,65 @@ describe('referencia convertida y congelada en el ítem (DX-513-bis, Postgres)',
        WHERE "id" = ${item.id}::uuid
          AND ("discount" > 0 OR "price" < "catalogPrice") AND "deletedAt" IS NULL`;
     expect(old).toBe(0n);
+    // L4: el WHERE del informe (las cuatro ramas, el plan vivo y no anulado y
+    // el periodo), que es lo que tiene que servir el índice. Se fija que la
+    // consulta real siga teniendo estas ramas, para que un cambio del WHERE no
+    // pierda el índice sin que este test lo note.
+    const repoSource = readFileSync(
+      join(
+        __dirname,
+        '../src/modules/discounts/infrastructure/prisma-discount-report.repository.ts',
+      ),
+      'utf8',
+    );
+    for (const arm of [
+      'AND (i."discount" > 0 OR i."price" < i."catalogPrice"',
+      'OR i."price" < i."referencePriceInPlan"',
+      'OR (i."agreementId" IS NOT NULL AND i."basePrice" > i."catalogPrice"))',
+      'AND i."deletedAt" IS NULL',
+      'AND COALESCE(i."discountAt", i."createdAt") >= ${minStart}',
+    ]) {
+      expect(repoSource).toContain(arm);
+    }
+    // Volumen para que el plan sea el de verdad: 3.000 ítems sin descuento
+    // del mismo plan (fuera del predicado parcial) y estadísticas al día.
+    await raw.$executeRaw`
+      INSERT INTO "treatment_plan_items"
+        ("id", "tenantId", "planId", "toothNumber", "surfaces", "catalogItemId",
+         "catalogPrice", "price", "discount", "updatedAt")
+      SELECT gen_random_uuid(), ${s.tenantId}::uuid, ${ves}::uuid, '18', '{}',
+             ${s.catalogItemId}::uuid, 100, 100, 0, now()
+        FROM generate_series(1, 3000)`;
+    await raw.$executeRawUnsafe('ANALYZE "treatment_plan_items"');
+    const from = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    const to = new Date(Date.now() + 24 * 3600 * 1000);
     const explain = await raw.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
       return tx.$queryRaw<{ 'QUERY PLAN': string }[]>`
-        EXPLAIN SELECT "id" FROM "treatment_plan_items"
-         WHERE "tenantId" = ${s.tenantId}::uuid
-           AND ("discount" > 0 OR "price" < "catalogPrice" OR "price" < "referencePriceInPlan")
-           AND "deletedAt" IS NULL
-           AND COALESCE("discountAt", "createdAt") >= now() - interval '7 days'
-         ORDER BY COALESCE("discountAt", "createdAt") DESC
-         LIMIT 1`;
+        EXPLAIN SELECT i."id"
+          FROM "treatment_plan_items" i
+          JOIN "treatment_plans" p
+            ON p."tenantId" = i."tenantId" AND p."id" = i."planId"
+         WHERE i."tenantId" = ${s.tenantId}::uuid
+           AND (i."discount" > 0 OR i."price" < i."catalogPrice"
+                OR i."price" < i."referencePriceInPlan"
+                OR (i."agreementId" IS NOT NULL AND i."basePrice" > i."catalogPrice"))
+           AND i."deletedAt" IS NULL
+           AND p."deletedAt" IS NULL
+           AND p."status" NOT IN ('REJECTED', 'CANCELLED')
+           AND COALESCE(i."discountAt", i."createdAt") >= ${from}
+           AND COALESCE(i."discountAt", i."createdAt") < ${to}`;
     });
-    expect(explain.map((r) => r['QUERY PLAN']).join('\n')).toContain(
-      'treatment_plan_items_tenant_effective_discount_at_idx',
+    const planText = explain.map((r) => r['QUERY PLAN']).join('\n');
+    // Las tres primeras ramas, por el índice rehecho; la de convenio, por el
+    // suyo (SEC-047).
+    expect(planText).toContain(
+      'treatment_plan_items_tenant_effective_ref_discount_at_idx',
     );
+    expect(planText).toContain(
+      'treatment_plan_items_tenant_agreement_reduction_at_idx',
+    );
+    expect(planText).not.toMatch(/Seq Scan on treatment_plan_items/);
   });
 
   it('test 18: ningún importe guardado de los ítems anteriores cambia (md5)', async () => {

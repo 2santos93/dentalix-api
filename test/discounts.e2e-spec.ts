@@ -1230,6 +1230,10 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       expect((res.body as { message: string }).message).toMatch(
         /^No hay tasa de EUR para el .*Ajustes › Tasa de cambio/,
       );
+      // L7: el día con el formato de la sede, nunca ISO.
+      expect((res.body as { message: string }).message).not.toMatch(
+        /\d{4}-\d{2}-\d{2}/,
+      );
       expect(await planItems(planId)).toHaveLength(0);
     });
 

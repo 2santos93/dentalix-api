@@ -1,12 +1,14 @@
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   AgreementKind,
   CatalogKind,
+  ClinicRole,
   DiscountReason,
   PriceSource,
   TreatmentPlanStatus,
@@ -103,6 +105,8 @@ function rates(
           kind: 'missing',
           currency: missing,
           date: PRICING_TODAY,
+          // El día con el formato de la sede (es-VE), nunca ISO.
+          dateLabel: '17/10/2026',
         });
       }
       return Promise.resolve({
@@ -297,12 +301,21 @@ describe('referencia convertida a la moneda del plan (DX-513-bis)', () => {
   });
 
   describe('sin tasa (test 6)', () => {
-    const missing422 = (currency: string, date: string | null) =>
+    const missing422 = (
+      currency: string,
+      dateLabel: string | null,
+      role: ClinicRole = ClinicRole.ADMIN,
+    ) =>
       new UnprocessableEntityException({
         statusCode: 422,
         error: 'Unprocessable Entity',
         code: DISCOUNT_REFERENCE_RATE_MISSING_CODE,
-        message: referenceRateMissingMessage({ currency, date }, 'VES', 'USD'),
+        message: referenceRateMissingMessage(
+          { currency, dateLabel },
+          'VES',
+          'USD',
+          role,
+        ),
         currency,
       });
 
@@ -311,16 +324,53 @@ describe('referencia convertida a la moneda del plan (DX-513-bis)', () => {
       const error = await add
         .execute('plan1', { ...CROWN_ITEM, price: 4.09 }, ADMIN_ACTOR)
         .catch((e: unknown) => e);
-      expect(error).toEqual(missing422('VES', PRICING_TODAY));
+      expect(error).toEqual(missing422('VES', '17/10/2026'));
       expect((error as UnprocessableEntityException).getResponse()).toEqual(
         expect.objectContaining({
           code: DISCOUNT_REFERENCE_RATE_MISSING_CODE,
-          message: expect.stringContaining(
-            'Regístrala en Ajustes › Tasa de cambio o usa una lista de precios en USD',
-          ) as unknown,
+          message:
+            'No hay tasa de VES para el 17/10/2026: el precio de catálogo está en VES y el plan en USD, y sin la tasa no se puede saber si el precio es un descuento. Regístrala en Ajustes › Tasa de cambio o usa una lista de precios en USD.',
         }),
       );
       expect((await repo.findPlanById('plan1'))!.items).toHaveLength(0);
+    });
+
+    it('L7: quien no gestiona las tasas recibe «pide a un administrador…», con el día de la sede', async () => {
+      const { add } = setup('USD', { rateSource: rates({}) });
+      const error = (await add
+        .execute('plan1', { ...CROWN_ITEM, price: 4.09 }, DENTIST_ACTOR)
+        .catch((e: unknown) => e)) as UnprocessableEntityException;
+      expect(error.getResponse()).toMatchObject({
+        message:
+          'No hay tasa de VES para el 17/10/2026: el precio de catálogo está en VES y el plan en USD, y sin la tasa no se puede saber si el precio es un descuento. Pide a un administrador que registre la tasa del día o una lista de precios en USD.',
+      });
+      expect(JSON.stringify(error.getResponse())).not.toContain(PRICING_TODAY);
+    });
+
+    it('L6: un plan firmado responde su 409 antes que «sin tasa»', async () => {
+      const { add, repo } = setup('USD', { rateSource: rates({}) });
+      repo.seedPlan({
+        id: 'signed',
+        currency: 'USD',
+        status: TreatmentPlanStatus.ACCEPTED,
+        acceptance: {
+          signerName: 'Ana Pérez',
+          acceptedAt: new Date('2026-10-16T15:00:00.000Z'),
+          remote: null,
+        },
+      });
+      await expect(
+        add.execute('signed', { ...CROWN_ITEM, price: 4.09 }, ADMIN_ACTOR),
+      ).rejects.toBeInstanceOf(ConflictException);
+      // Un plan cerrado, igual.
+      repo.seedPlan({
+        id: 'closed',
+        currency: 'USD',
+        status: TreatmentPlanStatus.COMPLETED,
+      });
+      await expect(
+        add.execute('closed', { ...CROWN_ITEM, price: 4.09 }, ADMIN_ACTOR),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it.each([
@@ -339,7 +389,7 @@ describe('referencia convertida a la moneda del plan (DX-513-bis)', () => {
       });
       await expect(
         add.execute('plan1', { ...CROWN_ITEM, price: 4.09 }, ADMIN_ACTOR),
-      ).rejects.toThrow(missing422('VES', PRICING_TODAY));
+      ).rejects.toThrow(missing422('VES', null));
       expect((await repo.findPlanById('plan1'))!.items).toHaveLength(0);
     });
 
@@ -394,6 +444,31 @@ describe('referencia convertida a la moneda del plan (DX-513-bis)', () => {
     expect(item.referenceRate).toEqual({ ...RATE_880, rateDate: friday });
   });
 
+  it('L7: la fuente da el día de «sin tasa» con el formato de la sede, nunca ISO', async () => {
+    const convert = new ConvertAmountUseCase({
+      execute: (date: string) =>
+        Promise.resolve({
+          base: 'USD' as const,
+          source: 'MANUAL' as const,
+          rates: {},
+          rateDate: date,
+        }),
+    } as unknown as GetRatesForDateUseCase);
+    await expect(
+      lookupReferenceRate(
+        convert,
+        { from: 'VES', to: 'USD', date: '2026-11-07' },
+        2,
+        (day) => day.split('-').reverse().join('/'),
+      ),
+    ).resolves.toEqual({
+      kind: 'missing',
+      currency: 'VES',
+      date: '2026-11-07',
+      dateLabel: '07/11/2026',
+    });
+  });
+
   it('el día de la tasa: la sede con MANUAL; con el proveedor, nunca posterior al día UTC (§4.11)', () => {
     expect(referenceRateDay('MANUAL', '2026-11-08', '2026-11-07')).toBe(
       '2026-11-08',
@@ -427,7 +502,7 @@ describe('referencia convertida a la moneda del plan (DX-513-bis)', () => {
         code: DISCOUNT_REFERENCE_RATE_MISSING_CODE,
         currency: 'EUR',
         message: expect.stringMatching(
-          /^No hay tasa de EUR para el /,
+          /^No hay tasa de EUR para hoy: /,
         ) as unknown,
       },
     });

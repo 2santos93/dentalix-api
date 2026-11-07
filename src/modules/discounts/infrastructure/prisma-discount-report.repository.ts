@@ -34,6 +34,7 @@ interface RawRow {
   procedure: string | null;
   currency: string;
   catalogPrice: Prisma.Decimal | null;
+  catalogCurrency: string | null;
   referenceCurrency: string | null;
   referencePriceInPlan: Prisma.Decimal | null;
   basePriceInPlan: Prisma.Decimal | null;
@@ -113,7 +114,7 @@ async function firstDiscountLocation(
  * no la tiene, la de presentación del plan). El periodo son días civiles de la
  * zona de CADA sede, como la caja (DX-097); sin sede, la de la sede
  * principal (R6).
- * Sirve el índice parcial `treatment_plan_items_tenant_effective_discount_at_idx`
+ * Sirve el índice parcial `treatment_plan_items_tenant_effective_ref_discount_at_idx`
  * (mismo predicado).
  *
  * SEC-047: entran también los ítems resueltos por convenio con rebaja
@@ -258,7 +259,7 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
     const cte = Prisma.sql`
       WITH raw AS (
         SELECT i."id", i."planId", i."toothNumber", i."catalogItemId",
-               i."catalogPrice", i."price",
+               i."catalogPrice", i."catalogCurrency", i."price",
                CASE WHEN i."catalogPrice" IS NULL THEN NULL
                     ELSE COALESCE(i."referenceCurrency",
                                   CASE WHEN i."priceSource" IN ('PRICE_LIST', 'AGREEMENT_PRICE_LIST')
@@ -382,7 +383,7 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                d."planCreatedAt", d."patientId",
                concat_ws(' ', pa."firstName", pa."lastName") AS "patientName",
                d."toothNumber", c."labelEs" AS "procedure", d."currency",
-               d."catalogPrice", d."referenceCurrency", d."referencePriceInPlan",
+               d."catalogPrice", d."catalogCurrency", d."referenceCurrency", d."referencePriceInPlan",
                d."basePriceInPlan", d."referenceRateFrom", d."referenceRateTo",
                d."referenceRateSource", d."referenceRateDate",
                d."price", d."priceReduction", d."itemDiscount",

@@ -33,13 +33,20 @@ export async function lookupReferenceRate(
   convert: Pick<AmountConverter, 'quote'>,
   input: { from: string; to: string; date: string },
   toDigits: RoundingDigits,
+  /** El día con el formato de la sede (para el mensaje de «sin tasa»). */
+  dayLabel: (day: string) => string | null = () => null,
 ): Promise<ReferenceRateLookup> {
   try {
     const quote = await convert.quote(input);
     const fromPerBase = toRateColumn(quote.fromPerBase);
     const toPerBase = toRateColumn(quote.toPerBase);
     if (fromPerBase <= 0 || toPerBase <= 0) {
-      return { kind: 'missing', currency: input.from, date: input.date };
+      return {
+        kind: 'missing',
+        currency: input.from,
+        date: input.date,
+        dateLabel: dayLabel(input.date),
+      };
     }
     return {
       kind: 'rate',
@@ -62,6 +69,7 @@ export async function lookupReferenceRate(
             ? input.to
             : input.from,
       date: input.date,
+      dateLabel: dayLabel(input.date),
     };
   }
 }

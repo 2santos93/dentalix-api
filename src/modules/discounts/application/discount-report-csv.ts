@@ -67,6 +67,23 @@ const RATE_SOURCE_LABELS: Record<'AUTOMATIC' | 'MANUAL', string> = {
   MANUAL: 'Manual',
 };
 
+/**
+ * «Precio sin convenio» (DX-513-bis): la base en la moneda del plan si se
+ * congeló (`basePriceInPlan`); si no, `basePrice` con SU moneda (la del
+ * catálogo), nunca con la del plan. Su moneda va escrita junto al importe
+ * cuando no es la del plan.
+ */
+function baseWithoutAgreementText(row: DiscountReportRowView): string {
+  if (row.agreementName === null) return '';
+  if (row.basePriceInPlan !== null) {
+    return csvAmount(row.basePriceInPlan, row.currency);
+  }
+  if (row.basePrice === null) return '';
+  const currency = row.catalogCurrency ?? row.currency;
+  const amount = csvAmount(row.basePrice, currency);
+  return currency === row.currency ? amount : `${amount} ${currency}`;
+}
+
 /** La referencia con la que se midió la rebaja, en la moneda del plan. */
 function referenceInPlanText(row: DiscountReportRowView): string {
   if (row.referencePriceInPlan !== null) {
@@ -150,9 +167,7 @@ export function toDiscountReportCsv(
         authorText(row),
         text(row.locationName),
         text(row.agreementName),
-        row.agreementName === null || row.basePrice === null
-          ? ''
-          : csvAmount(row.basePriceInPlan ?? row.basePrice, row.currency),
+        baseWithoutAgreementText(row),
         csvAmount(row.agreementReduction, row.currency),
         text(row.agreementAssignedByName),
         text(row.createdByName),

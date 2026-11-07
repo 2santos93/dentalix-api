@@ -26,6 +26,7 @@ const row = (over: Partial<DiscountReportRow> = {}): DiscountReportRow => ({
   procedure: 'Resina',
   currency: 'USD',
   catalogPrice: null,
+  catalogCurrency: null,
   referenceCurrency: null,
   referencePriceInPlan: null,
   basePriceInPlan: null,

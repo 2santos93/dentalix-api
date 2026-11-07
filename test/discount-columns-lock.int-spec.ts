@@ -559,7 +559,8 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
        WHERE tablename = 'treatment_plan_items'
          AND indexname LIKE 'treatment_plan_items_tenant_%discount%at_idx'`;
     expect(indexes.map((i) => i.indexname)).toEqual([
-      'treatment_plan_items_tenant_effective_discount_at_idx',
+      // DX-513-bis: el índice rehecho con la referencia convertida.
+      'treatment_plan_items_tenant_effective_ref_discount_at_idx',
     ]);
     expect(indexes[0].indexdef).toMatch(
       // DX-513-bis: también la rebaja frente a la referencia convertida.

@@ -117,10 +117,15 @@ export class AddTreatmentPlanItemUseCase {
       catalogCurrency,
       priceSource: resolved.source,
     };
+    const asked = await referenceRateFor(this.rates, priced, current.currency);
+    // Un plan firmado o cerrado responde su 409 antes que «sin tasa» (422): el
+    // problema es el plan, no la tasa. Se repite con la fila bloqueada.
+    if (asked?.lookup.kind === 'missing') assertItemsEditable(current);
     const reference = freezeWithRate(
       priced,
       current.currency,
-      await referenceRateFor(this.rates, priced, current.currency),
+      asked,
+      actor.role,
     );
 
     // Explicit price wins; otherwise the reference in the plan's currency
