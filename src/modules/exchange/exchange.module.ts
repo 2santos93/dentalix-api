@@ -122,10 +122,13 @@ import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-
   // de sus abonos pendientes antes de un cambio de fuente.
   // SEC-058: ProviderRatesCallerScope, para que el barrido de pagos gaste de
   // su cupo reservado.
+  // DX-513-bis: GetExchangeRateSettingsUseCase, para que el alta de ítems
+  // sepa la fuente de la tasa (el día de la del proveedor es el UTC).
   exports: [
     ConvertAmountUseCase,
     ExchangeSourceChangeHooks,
     ProviderRatesCallerScope,
+    GetExchangeRateSettingsUseCase,
   ],
 })
 export class ExchangeModule {}

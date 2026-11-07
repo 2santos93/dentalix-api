@@ -1946,20 +1946,20 @@ model TreatmentPlan {
 }
 
 model TreatmentPlanItem {
-  visit             Int                     @default(1)
-  visitLabel        String?                 @db.VarChar(60)
-  patientId         String                  @default(dbgenerated()) @db.Uuid
-  appointmentLinks  AppointmentPlanItem[]
+  visit                Int                     @default(1)
+  visitLabel           String?                 @db.VarChar(60)
+  patientId            String                  @default(dbgenerated()) @db.Uuid
+  appointmentLinks     AppointmentPlanItem[]
   // DX-291: el cargo por inasistencia que creó este ítem (si lo es).
-  cancellationFees  CancellationFee[]
+  cancellationFees     CancellationFee[]
   // DX-439: «sin marcar como hecho» descartado de «Pendiente de cerrar».
-  closingDismissals ClosingQueueDismissal[]
-  id                String                  @id @default(uuid()) @db.Uuid
-  tenantId          String                  @db.Uuid
-  planId            String                  @db.Uuid
-  toothNumber       String
-  surfaces          ToothSurface[]
-  catalogItemId     String                  @db.Uuid
+  closingDismissals    ClosingQueueDismissal[]
+  id                   String                  @id @default(uuid()) @db.Uuid
+  tenantId             String                  @db.Uuid
+  planId               String                  @db.Uuid
+  toothNumber          String
+  surfaces             ToothSurface[]
+  catalogItemId        String                  @db.Uuid
   // Precio de REFERENCIA del ítem al darlo de alta (NULL = ítem libre: sin
   // precio de catálogo). DX-105 (ruling R1) lo resuelve en orden convenio →
   // lista de precios → catálogo; `basePrice` guarda siempre el de catálogo. Un
@@ -1970,34 +1970,54 @@ model TreatmentPlanItem {
   // distinta de la del plan, y no salió de una lista): entonces no es un
   // descuento (el índice parcial queda como superconjunto). NULL cuenta. CHECK
   // treatment_plan_items_catalog_price_nonneg (>= 0).
-  catalogPrice      Decimal?                @db.Decimal(12, 2)
+  catalogPrice         Decimal?                @db.Decimal(12, 2)
   // DX-105: foto del precio al dar de alta el ítem. NULL = «sin convenio»
   // (ítems anteriores, sin backfill). CHECK treatment_plan_items_base_price_nonneg.
-  basePrice         Decimal?                @db.Decimal(12, 2)
-  priceSource       PriceSource?
+  basePrice            Decimal?                @db.Decimal(12, 2)
+  priceSource          PriceSource?
   // DX-502: moneda del catálogo (la común de las sedes activas) al dar de alta
   // el ítem: la de `basePrice`, el precio de lista del presupuesto. NULL si no
   // había una común o no hay precio de catálogo; no se convierte a la del
   // plan. Escrita una vez (trigger treatment_plan_items_catalog_currency_frozen).
-  catalogCurrency   String?                 @db.Char(3)
-  agreementId       String?                 @db.Uuid
-  agreementName     String?
+  catalogCurrency      String?                 @db.Char(3)
+  // DX-513-bis: foto de la referencia en la moneda del plan, escrita una vez
+  // (alta del ítem o, en uno anterior, su primera rebaja; trigger
+  // treatment_plan_items_reference_frozen). "referenceCurrency" es la moneda
+  // de "catalogPrice" (la del plan para las listas, la del catálogo para el
+  // resto; NULL si no se supo); "referencePriceInPlan" y "basePriceInPlan",
+  // "catalogPrice" y "basePrice" en la moneda del plan (convertidos con la
+  // tasa de la clínica del día de la sede si la referencia estaba en otra
+  // moneda conocida; tal cual si no). La tasa (unidades por 1 USD de las dos
+  // monedas, fuente y día civil de la tasa usada) va solo si se convirtió:
+  // las cuatro juntas (CHECK treatment_plan_items_reference_rate_check). El
+  // tope, el motivo y el informe de descuentos miden la rebaja frente a
+  // "referencePriceInPlan"; el informe nunca convierte. NULL en los ítems
+  // anteriores (sin relleno) y en los libres.
+  referenceCurrency    String?                 @db.Char(3)
+  referencePriceInPlan Decimal?                @db.Decimal(12, 2)
+  basePriceInPlan      Decimal?                @db.Decimal(12, 2)
+  referenceRateFrom    Decimal?                @db.Decimal(18, 8)
+  referenceRateTo      Decimal?                @db.Decimal(18, 8)
+  referenceRateSource  ExchangeRateSource?
+  referenceRateDate    DateTime?               @db.Date
+  agreementId          String?                 @db.Uuid
+  agreementName        String?
   // Sede con la que se resolvió el precio.
-  pricingLocationId String?                 @db.Uuid
+  pricingLocationId    String?                 @db.Uuid
   // SEC-047: quién dio de alta el ítem (puntero suave a User, como
   // `TreatmentPlan.createdById`). Una alternativa lo copia de su origen. NULL
   // en los ítems anteriores a SEC-047. El informe de descuentos lo muestra
   // junto a la rebaja de convenio.
-  createdById       String?                 @db.Uuid
-  price             Decimal                 @db.Decimal(12, 2)
+  createdById          String?                 @db.Uuid
+  price                Decimal                 @db.Decimal(12, 2)
   // Descuento del ítem en la moneda del plan (DX-012). CHECK 0 <= discount <= price
   // (treatment_plan_items_discount_nonneg / _subtotal_nonneg).
-  discount          Decimal                 @default(0) @db.Decimal(12, 2)
-  status            TreatmentPlanItemStatus @default(PROPOSED)
-  notes             String?
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
-  deletedAt         DateTime?
+  discount             Decimal                 @default(0) @db.Decimal(12, 2)
+  status               TreatmentPlanItemStatus @default(PROPOSED)
+  notes                String?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  deletedAt            DateTime?
 
   // DX-204: quién dio el descuento vigente, cuándo (hora del servidor), en qué
   // sede (la del request o la principal) y por qué. NULL en los ítems sin
@@ -2036,6 +2056,8 @@ model TreatmentPlanItem {
   pricingLocation       Location?                   @relation("TreatmentPlanItemPricingLocation", fields: [tenantId, pricingLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_items_pricing_location_fkey")
   // DX-502: la moneda del catálogo existe en `currencies`.
   catalogCurrencyRef    Currency?                   @relation("TreatmentPlanItemCatalogCurrency", fields: [catalogCurrency], references: [code], onDelete: Restrict, map: "treatment_plan_items_catalog_currency_fkey")
+  // DX-513-bis: la moneda de la referencia existe en `currencies`.
+  referenceCurrencyRef  Currency?                   @relation("TreatmentPlanItemReferenceCurrency", fields: [referenceCurrency], references: [code], onDelete: Restrict, map: "treatment_plan_items_reference_currency_fkey")
   // DX-051: imputaciones de abonos a este ítem y su historial.
   allocations           PaymentAllocation[]
   allocationMovements   PaymentAllocationMovement[]
@@ -2056,11 +2078,14 @@ model TreatmentPlanItem {
   //     INCLUDE (price, discount, status)
   //     -> DX-145: facturable de todos los planes de la clínica (cartera).
   // PARCIAL y de EXPRESIÓN, no declarable en Prisma:
-  //   treatment_plan_items_tenant_effective_discount_at_idx
+  //   treatment_plan_items_tenant_effective_ref_discount_at_idx (DX-513-bis;
+  //     sustituye a treatment_plan_items_tenant_effective_discount_at_idx)
   //     ("tenantId", COALESCE("discountAt", "createdAt"))
-  //     WHERE ("discount" > 0 OR "price" < "catalogPrice") AND "deletedAt" IS NULL
+  //     WHERE ("discount" > 0 OR "price" < "catalogPrice"
+  //            OR "price" < "referencePriceInPlan") AND "deletedAt" IS NULL
   //     -> DX-204/SEC-041: informe de descuentos por periodo (descuento o
-  //        rebaja de precio).
+  //        rebaja de precio); DX-513-bis: también la rebaja frente a la
+  //        referencia convertida a la moneda del plan.
   //   treatment_plan_items_tenant_agreement_reduction_at_idx
   //     ("tenantId", COALESCE("discountAt", "createdAt"))
   //     WHERE "agreementId" IS NOT NULL AND "basePrice" > "catalogPrice" AND "deletedAt" IS NULL
@@ -2260,41 +2285,42 @@ model Currency {
   roundingDigits Int    @default(2) @map("rounding_digits") @db.SmallInt
 
   // FK de `currency` (DX-042, 20261016131000_currency_fks).
-  treatmentPlans             TreatmentPlan[]
-  payments                   Payment[]
+  treatmentPlans              TreatmentPlan[]
+  payments                    Payment[]
   // DX-375: abonos cuya tasa congelada convierte a esta moneda.
-  paymentsExchangeRate       Payment[]                   @relation("PaymentExchangeRateCurrency")
+  paymentsExchangeRate        Payment[]                   @relation("PaymentExchangeRateCurrency")
   // DX-516: ajustes por medio de pago fijos en esa moneda, y los congelados.
-  paymentMethodAdjustments   PaymentMethodAdjustment[]   @relation("PaymentMethodAdjustmentCurrency")
-  paymentAdjustments         PaymentAdjustment[]         @relation("PaymentAdjustmentCurrency")
-  paymentPlans               PaymentPlan[]
+  paymentMethodAdjustments    PaymentMethodAdjustment[]   @relation("PaymentMethodAdjustmentCurrency")
+  paymentAdjustments          PaymentAdjustment[]         @relation("PaymentAdjustmentCurrency")
+  paymentPlans                PaymentPlan[]
   // DX-150: compromisos de pago en esa moneda.
-  paymentPromises            PaymentPromise[]
+  paymentPromises             PaymentPromise[]
   // DX-027: fondos, arqueos y ajustes de caja en esa moneda.
-  cashFloats                 CashSessionFloat[]
-  cashClosingLines           CashSessionClosingLine[]
-  cashAdjustments            CashSessionAdjustment[]
+  cashFloats                  CashSessionFloat[]
+  cashClosingLines            CashSessionClosingLine[]
+  cashAdjustments             CashSessionAdjustment[]
   // DX-274: gastos y sus pagos en esa moneda.
-  expenses                   Expense[]
+  expenses                    Expense[]
   // DX-542: costo de los mantenimientos de equipos en esa moneda.
-  equipmentMaintenances      EquipmentMaintenance[]
+  equipmentMaintenances       EquipmentMaintenance[]
   // DX-105: listas de precios en esa moneda.
-  priceLists                 PriceList[]
+  priceLists                  PriceList[]
   // DX-502: ítems de plan cuyo precio de catálogo está en esa moneda.
-  treatmentPlanItemCatalogs  TreatmentPlanItem[]         @relation("TreatmentPlanItemCatalogCurrency")
+  treatmentPlanItemCatalogs   TreatmentPlanItem[]         @relation("TreatmentPlanItemCatalogCurrency")
+  treatmentPlanItemReferences TreatmentPlanItem[]         @relation("TreatmentPlanItemReferenceCurrency")
   // DX-502-bis: clínicas con el catálogo de precios en esa moneda.
-  tenantCatalogs             Tenant[]                    @relation("TenantCatalogCurrency")
+  tenantCatalogs              Tenant[]                    @relation("TenantCatalogCurrency")
   // DX-262: saldos migrados en esa moneda.
-  openingBalances            OpeningBalance[]
+  openingBalances             OpeningBalance[]
   // DX-279: importe sugerido de la política de cancelación en esa moneda.
-  cancellationPolicyVersions CancellationPolicyVersion[]
-  cancellationFees           CancellationFee[]
+  cancellationPolicyVersions  CancellationPolicyVersion[]
+  cancellationFees            CancellationFee[]
   // DX-051: bases de los abonos en la moneda del plan.
-  paymentPlanAmounts         PaymentPlanAmount[]
+  paymentPlanAmounts          PaymentPlanAmount[]
   // GLOBAL-G1 (DX-313): sedes con esa moneda.
-  locations                  Location[]
+  locations                   Location[]
   // DX-374: tasas manuales de las clínicas en esa moneda.
-  manualExchangeRates        ManualExchangeRate[]
+  manualExchangeRates         ManualExchangeRate[]
 
   creditTransfers PatientCreditTransfer[] @relation("CreditTransferCurrency")
   creditRefunds   PatientCreditRefund[]   @relation("CreditRefundCurrency")

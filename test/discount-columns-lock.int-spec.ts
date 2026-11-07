@@ -559,10 +559,12 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
        WHERE tablename = 'treatment_plan_items'
          AND indexname LIKE 'treatment_plan_items_tenant_%discount%at_idx'`;
     expect(indexes.map((i) => i.indexname)).toEqual([
-      'treatment_plan_items_tenant_effective_discount_at_idx',
+      // DX-513-bis: el índice rehecho con la referencia convertida.
+      'treatment_plan_items_tenant_effective_ref_discount_at_idx',
     ]);
     expect(indexes[0].indexdef).toMatch(
-      /COALESCE\("discountAt", "createdAt"\).*WHERE \(\(\(discount > \(0\)::numeric\) OR \(price < "catalogPrice"\)\) AND \("deletedAt" IS NULL\)\)/,
+      // DX-513-bis: también la rebaja frente a la referencia convertida.
+      /COALESCE\("discountAt", "createdAt"\).*WHERE \(\(\(discount > \(0\)::numeric\) OR \(price < "catalogPrice"\) OR \(price < "referencePriceInPlan"\)\) AND \("deletedAt" IS NULL\)\)/,
     );
   });
 });

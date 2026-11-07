@@ -39,6 +39,7 @@ import {
 } from '../src/modules/medical-history-submissions/domain/anamnesis-token';
 import { ANAMNESIS_LINK_GONE_MESSAGE } from '../src/modules/medical-history-submissions/application/use-cases/public-anamnesis.use-cases';
 import { PATIENT_ARCHIVED_LINKS_REVOKED_REASON } from '../src/modules/patients/domain/live-public-links';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-461 en HTTP real: archivar a un paciente anula sus enlaces públicos vivos
 // y cada ruta pública por token responde como a un enlace caducado: la oferta
@@ -318,6 +319,9 @@ describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)',
       })
       .expect(201);
     templateId = (template.body as { id: string }).id;
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinicA.tenantId, 'USD');
     const catalog = await as(clinicA)
       .post('/catalog/items', {
         code: 'DX461-COR',

@@ -15,6 +15,7 @@ import {
   REGIONAL_NEW_YORK_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-191 · Registro de implantes, tarjeta imprimible y búsqueda por lote.
 // Todo por la API; `raw` (DIRECT_URL) solo lee la auditoría y limpia.
@@ -613,6 +614,9 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
       patientId: string,
       code: string,
     ): Promise<string> {
+      // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+      // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+      await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
       const catalog = await call(
         clinic,
         clinic.adminToken,

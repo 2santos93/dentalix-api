@@ -454,6 +454,12 @@ describe('GetPriceQuoteUseCase (DX-105)', () => {
       agreementName: 'Surco Salud',
       allowDiscount: true,
       currency: 'VES',
+      // DX-513-bis: en la moneda del plan, sin tasa.
+      referenceCurrency: 'VES',
+      referencePriceInPlan: 85_000,
+      rate: null,
+      rateMissing: false,
+      missingRateCurrency: null,
     });
   });
 

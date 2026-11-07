@@ -175,7 +175,7 @@ describe('Descuento por ítem (DX-012)', () => {
 describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
   it('sin firma, todo sigue editable como antes', async () => {
     const { add, update, remove, updatePlan } = setup(null);
-    await add.execute(
+    const added = await add.execute(
       'plan1',
       { toothNumber: '21', catalogItemId: 'cat1' },
       ADMIN_ACTOR,
@@ -186,6 +186,8 @@ describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
       ADMIN_ACTOR,
     );
     await remove.execute('item1');
+    // DX-513-bis: un ítem vivo con precio de referencia bloquearía la moneda.
+    await remove.execute(added.id);
     await updatePlan.execute(
       'plan1',
       { currency: 'EUR', status: TreatmentPlanStatus.DRAFT },

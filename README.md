@@ -1775,7 +1775,9 @@ discount`, en % del precio de referencia (el de catálogo si el precio está
   y conserva la firma de la rebaja. En un plan aceptado el precio no baja (409).
   El informe y su CSV muestran precio de catálogo, rebaja de precio, descuento
   del ítem y el total (bruto = precio de referencia); el índice parcial pasa a
-  `treatment_plan_items_tenant_effective_discount_at_idx`.
+  `treatment_plan_items_tenant_effective_discount_at_idx`, que DX-513-bis
+  sustituyó por `treatment_plan_items_tenant_effective_ref_discount_at_idx`
+  (incluye la referencia convertida a la moneda del plan).
 - **Rebaja de convenio en el informe (SEC-047)**. El informe y su CSV
   incluyen también los ítems resueltos por convenio con rebaja (`basePrice` >
   `catalogPrice`), aunque no tengan descuento propio, con `agreementName`,

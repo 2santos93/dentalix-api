@@ -4,11 +4,9 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
-import {
-  discountReference,
-  effectiveDiscount,
-} from '../../../discounts/domain/effective-discount';
+import { effectiveDiscount } from '../../../discounts/domain/effective-discount';
 import { DiscountReason, ToothSurface } from '@prisma/client';
 import { TREATMENT_PLAN_REPOSITORY } from '../../domain/ports/treatment-plan-repository.port';
 import type { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-repository.port';
@@ -32,6 +30,12 @@ import {
 } from './item-discount';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
+import {
+  NO_REFERENCE_RATES,
+  REFERENCE_RATE_SOURCE,
+  type ReferenceRateSource,
+} from '../../domain/ports/reference-rate-source.port';
+import { freezeWithRate, referenceRateFor } from './reference-rate';
 
 /** 409 si la moneda del plan cambió entre la resolución del precio y el alta. */
 export const PLAN_CURRENCY_CHANGED_MESSAGE =
@@ -64,6 +68,10 @@ export class AddTreatmentPlanItemUseCase {
     private readonly discountPolicy: GetDiscountPolicyUseCase,
     @Inject(TREATMENT_PLAN_CLOCK)
     private readonly now: PlanClock,
+    // DX-513-bis: sin fuente (specs que no la necesitan), «sin tasa».
+    @Optional()
+    @Inject(REFERENCE_RATE_SOURCE)
+    private readonly rates: ReferenceRateSource = NO_REFERENCE_RATES,
   ) {}
 
   /**
@@ -95,10 +103,35 @@ export class AddTreatmentPlanItemUseCase {
       );
     }
     const resolved = resolveItemPrice(context);
+    // DX-502: sin precio de catálogo no hay moneda que guardar.
+    const catalogCurrency =
+      resolved.basePrice === null ? null : resolved.catalogCurrency;
+    // DX-513-bis: la referencia en la moneda del plan. En otra moneda conocida
+    // se convierte con la tasa de la clínica de hoy en la sede de escritura
+    // (pedida ANTES de la transacción, como la política) y se congela con el
+    // ítem; sin tasa, 422 y no se escribe nada. En la del plan (o en una que
+    // no se sabe) es la de siempre, sin pedir tasa.
+    const priced = {
+      catalogPrice: resolved.price,
+      basePrice: resolved.basePrice,
+      catalogCurrency,
+      priceSource: resolved.source,
+    };
+    const asked = await referenceRateFor(this.rates, priced, current.currency);
+    // Un plan firmado o cerrado responde su 409 antes que «sin tasa» (422): el
+    // problema es el plan, no la tasa. Se repite con la fila bloqueada.
+    if (asked?.lookup.kind === 'missing') assertItemsEditable(current);
+    const reference = freezeWithRate(
+      priced,
+      current.currency,
+      asked,
+      actor.role,
+    );
 
-    // Explicit price wins; otherwise the resolved reference. If neither is
-    // available, the item has no price at all — a client error (400).
-    const price = input.price ?? resolved.price ?? undefined;
+    // Explicit price wins; otherwise the reference in the plan's currency
+    // (DX-513-bis: nunca el `defaultPrice` crudo de otra moneda). If neither
+    // is available, the item has no price at all — a client error (400).
+    const price = input.price ?? reference.referencePriceInPlan ?? undefined;
     if (price === undefined) {
       throw new BadRequestException(PRICE_REQUIRED_MESSAGE);
     }
@@ -106,21 +139,10 @@ export class AddTreatmentPlanItemUseCase {
     assertDiscountWithinPrice(price, discount);
     // SEC-041 + DX-105 (R1): la referencia resuelta queda en el ítem como
     // `catalogPrice`; un precio por debajo cuenta como descuento discrecional
-    // (tope del rol y motivo). Ítem libre: null.
-    // DX-502: sin precio de catálogo no hay moneda que guardar.
-    const catalogCurrency =
-      resolved.basePrice === null ? null : resolved.catalogCurrency;
-    // DX-513: solo frente a una referencia en la moneda del plan; en otra (o
-    // sin saberla) no hay rebaja que medir.
+    // (tope del rol y motivo). Ítem libre: null. DX-513-bis: se mide frente a
+    // la referencia en la moneda del plan (tope, motivo y `allowDiscount`).
     const discountInput = {
-      catalogPrice: discountReference(
-        {
-          catalogPrice: resolved.price,
-          catalogCurrency,
-          priceSource: resolved.source,
-        },
-        current.currency,
-      ),
+      catalogPrice: reference.referencePriceInPlan,
       price,
       discount,
       reason: input.discountReason ?? null,
@@ -156,6 +178,7 @@ export class AddTreatmentPlanItemUseCase {
           agreementId: resolved.agreementId,
           agreementName: resolved.agreementName,
           pricingLocationId: context.locationId,
+          reference,
         },
         price,
         discount,

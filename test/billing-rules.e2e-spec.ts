@@ -11,6 +11,10 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-109 · reglas de cobro por HTTP: un solo «aceptar», nada cobrable en
 // planes cerrados, saldo coherente con el estado de cuenta, idempotencia con
@@ -60,6 +64,7 @@ interface ErrorBody {
 
 async function cleanup(): Promise<void> {
   await resetDatabase(raw);
+  dropParRates ??= await seedParProviderRates(raw);
 }
 
 describe('Reglas de cobro (e2e, DX-109)', () => {
@@ -201,6 +206,7 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await cleanup();
     await app.close();
     await raw.$disconnect();
@@ -313,10 +319,22 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
       .patch(`/treatment-plans/${cancelled}`, { currency: 'VES' })
       .expect(409);
 
-    // Sin abonos ni cuotas, un borrador sí cambia de moneda.
+    // DX-513-bis: un borrador con ítems con precio de referencia no cambia
+    // de moneda; uno sin ellos (ni abonos ni cuotas), sí.
     const { planId: draft } = await createPlan();
-    await as(clinic)
+    const locked = await as(clinic)
       .patch(`/treatment-plans/${draft}`, { currency: 'VES' })
+      .expect(409);
+    expect(locked.body).toMatchObject({
+      code: 'PLAN_CURRENCY_LOCKED_BY_PRICED_ITEMS',
+    });
+    const bare = await as(clinic)
+      .post(`/patients/${patientId}/treatment-plans`, { currency: 'USD' })
+      .expect(201);
+    await as(clinic)
+      .patch(`/treatment-plans/${(bare.body as { id: string }).id}`, {
+        currency: 'VES',
+      })
       .expect(200);
   });
 

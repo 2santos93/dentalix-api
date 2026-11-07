@@ -17,6 +17,7 @@ import {
   locationBody,
   REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-399 · «Cobrado sin imputar / a cuenta» (GET /reports/unallocated-payments
 // y su CSV). Todo se siembra por la API real (planes, ítems, abonos, anulación,
@@ -105,6 +106,9 @@ describe('Cobrado sin imputar / a cuenta (e2e, DX-399)', () => {
   }
 
   async function catalog(clinic: Clinic): Promise<string> {
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const res = await call('post', clinic, '/catalog/items')
       .send({
         code: 'DX399-RESINA',

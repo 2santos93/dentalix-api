@@ -16,7 +16,11 @@ import {
  * para que la hoja no las ejecute como fórmula (inyección CSV). La nota del
  * motivo es texto libre. SEC-047: al final, el convenio, el precio sin
  * convenio, la rebaja por convenio (aparte del descuento total), quién asignó
- * el convenio y quién creó el ítem.
+ * el convenio y quién creó el ítem. DX-513-bis: el precio de catálogo va en
+ * SU moneda («Moneda del catálogo»; antes se etiquetaba con la del plan), con
+ * la referencia en la moneda del plan con la que se midió la rebaja y la tasa
+ * congelada (unidades por 1 USD de las dos monedas, fuente y día). El CSV
+ * nunca convierte.
  */
 export const DISCOUNT_REPORT_CSV_HEADER = [
   'Fecha',
@@ -26,7 +30,12 @@ export const DISCOUNT_REPORT_CSV_HEADER = [
   'Diente',
   'Procedimiento',
   'Moneda',
+  'Moneda del catálogo',
   'Precio de catálogo',
+  'Precio de catálogo en la moneda del plan',
+  'Tasa (por 1 USD: origen / plan)',
+  'Fuente de la tasa',
+  'Fecha de la tasa',
   'Precio',
   'Rebaja de precio',
   'Descuento del ítem',
@@ -52,6 +61,44 @@ export const DISCOUNT_REASON_LABELS: Record<DiscountReason, string> = {
   SERVICE_RECOVERY: 'Compensación por una incidencia',
   OTHER: 'Otro',
 };
+
+const RATE_SOURCE_LABELS: Record<'AUTOMATIC' | 'MANUAL', string> = {
+  AUTOMATIC: 'Automática',
+  MANUAL: 'Manual',
+};
+
+/**
+ * «Precio sin convenio» (DX-513-bis): la base en la moneda del plan si se
+ * congeló (`basePriceInPlan`); si no, `basePrice` con SU moneda (la del
+ * catálogo), nunca con la del plan. Su moneda va escrita junto al importe
+ * cuando no es la del plan.
+ */
+function baseWithoutAgreementText(row: DiscountReportRowView): string {
+  if (row.agreementName === null) return '';
+  if (row.basePriceInPlan !== null) {
+    return csvAmount(row.basePriceInPlan, row.currency);
+  }
+  if (row.basePrice === null) return '';
+  const currency = row.catalogCurrency ?? row.currency;
+  const amount = csvAmount(row.basePrice, currency);
+  return currency === row.currency ? amount : `${amount} ${currency}`;
+}
+
+/** La referencia con la que se midió la rebaja, en la moneda del plan. */
+function referenceInPlanText(row: DiscountReportRowView): string {
+  if (row.referencePriceInPlan !== null) {
+    return csvAmount(row.referencePriceInPlan, row.currency);
+  }
+  // Ítem anterior sin foto: la referencia cuenta solo en la moneda del plan
+  // (o si no se sabe la suya), como en DX-513.
+  if (
+    row.catalogPrice !== null &&
+    (row.referenceCurrency === null || row.referenceCurrency === row.currency)
+  ) {
+    return csvAmount(row.catalogPrice, row.currency);
+  }
+  return '';
+}
 
 const PLAN_STATUS_LABELS: Record<TreatmentPlanStatus, string> = {
   DRAFT: 'Borrador',
@@ -102,9 +149,14 @@ export function toDiscountReportCsv(
         text(row.toothNumber),
         text(row.procedure),
         row.currency,
+        row.referenceCurrency ?? '',
         row.catalogPrice === null
           ? ''
-          : csvAmount(row.catalogPrice, row.currency),
+          : csvAmount(row.catalogPrice, row.referenceCurrency ?? row.currency),
+        referenceInPlanText(row),
+        row.rate ? `${row.rate.fromPerBase} / ${row.rate.toPerBase}` : '',
+        row.rate ? RATE_SOURCE_LABELS[row.rate.source] : '',
+        row.rate?.rateDate ?? '',
         csvAmount(row.price, row.currency),
         csvAmount(row.priceReduction, row.currency),
         csvAmount(row.itemDiscount, row.currency),
@@ -115,9 +167,7 @@ export function toDiscountReportCsv(
         authorText(row),
         text(row.locationName),
         text(row.agreementName),
-        row.agreementName === null || row.basePrice === null
-          ? ''
-          : csvAmount(row.basePrice, row.currency),
+        baseWithoutAgreementText(row),
         csvAmount(row.agreementReduction, row.currency),
         text(row.agreementAssignedByName),
         text(row.createdByName),

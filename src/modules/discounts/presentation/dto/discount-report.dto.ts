@@ -1,3 +1,4 @@
+import { ReferenceRateDto } from './reference-rate.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsUUID, Matches, Max, Min } from 'class-validator';
@@ -151,16 +152,56 @@ export class DiscountReportItemDto {
     type: Number,
     nullable: true,
     description:
-      'SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre)',
+      'SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre). DX-513-bis: en SU moneda (`referenceCurrency`), que puede no ser la del plan',
   })
   catalogPrice!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502: moneda de `basePrice` (la del catálogo al dar de alta el ítem); null si no se supo. En un ítem de lista no es la de `catalogPrice`',
+  })
+  catalogCurrency!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-513-bis: moneda de `catalogPrice` (la del plan para las listas, la del catálogo para el resto); null si no se sabe o el ítem es libre',
+  })
+  referenceCurrency!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `catalogPrice` en la moneda del plan, congelado al escribir el ítem (convertido con `rate` si estaba en otra moneda): la rebaja se mide frente a él. Null en los ítems anteriores sin foto (se miden como en DX-513)',
+  })
+  referencePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `basePrice` en la moneda del plan, congelado con la referencia (la rebaja de convenio se mide con él)',
+  })
+  basePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-bis: la tasa congelada con que se convirtió la referencia; null si no hizo falta. El informe nunca convierte al consultar',
+  })
+  rate!: ReferenceRateDto | null;
 
   @ApiProperty({ description: 'Precio pactado del ítem' })
   price!: number;
 
   @ApiProperty({
     description:
-      'SEC-041: rebaja del precio frente al de catálogo (0 si no la hay). DX-513: 0 también si la referencia está en otra moneda conocida (el catálogo en una moneda distinta de la del plan, sin convertir); con la moneda del catálogo desconocida cuenta',
+      'SEC-041: rebaja del precio frente al de catálogo (0 si no la hay), en la moneda del plan. DX-513-bis: frente a `referencePriceInPlan` (la referencia convertida y congelada) si el ítem la tiene; en un ítem anterior sin ella, DX-513: 0 si la referencia está en otra moneda conocida; con la moneda del catálogo desconocida cuenta',
   })
   priceReduction!: number;
 

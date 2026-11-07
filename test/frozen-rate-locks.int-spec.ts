@@ -16,6 +16,7 @@ import {
   waitForLockWaiters,
   waitingQueries,
 } from './support/postgres-concurrency';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-397 (TST-048) contra Postgres: los dos candados de la tasa manual
 // congelada (DX-375), con el solapamiento FORZADO, sin carreras de reloj.
@@ -112,6 +113,9 @@ describe('tasa manual congelada: alta de abono frente a corrección (DX-397, int
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const catalogItem = (
       await as(api().post('/api/v1/catalog/items'))
         .send({

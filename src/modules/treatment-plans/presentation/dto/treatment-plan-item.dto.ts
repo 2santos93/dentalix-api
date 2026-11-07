@@ -1,3 +1,4 @@
+import { ReferenceRateDto } from '../../../discounts/presentation/dto/reference-rate.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   DiscountReason,
@@ -66,6 +67,38 @@ export class TreatmentPlanItemDto {
       'DX-105: de dónde salió `catalogPrice` (convenio por %, lista del convenio, lista de la sede o catálogo). Null en ítems anteriores a DX-105.',
   })
   priceSource!: PriceSource | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-513-bis: moneda de `catalogPrice` al escribir el ítem (la del plan para las listas, la del catálogo para el resto). Null si no se supo, en los libres y en los anteriores sin foto.',
+  })
+  referenceCurrency!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `catalogPrice` en la moneda del plan, congelado al escribir el ítem (convertido con `referenceRate` si su moneda era otra). Es la referencia del descuento: un precio por debajo cuenta (tope por rol y motivo). Null en los libres y en los anteriores sin foto (se miden como en DX-513).',
+  })
+  referencePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `basePrice` en la moneda del plan, congelado con la referencia. Null si no hay o no se puede expresar sin otra tasa.',
+  })
+  basePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-bis: la tasa con que se convirtió la referencia; null si no hizo falta.',
+  })
+  referenceRate!: ReferenceRateDto | null;
 
   @ApiProperty({
     type: String,

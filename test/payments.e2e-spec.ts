@@ -18,6 +18,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para seed/cleanup -- usa
 // DIRECT_URL (rol owner `dentalix`, superuser) porque, con RLS aplicado, una
@@ -244,6 +245,9 @@ describe('Payments (e2e)', () => {
         'PAY-A-001',
       );
 
+      // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+      // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+      await pinCatalogCurrency(raw, clinicA.tenantId, 'USD');
       // --- 0. Seed a PROCEDURE catalog item with a known defaultPrice.
       const createCatalogItem = await request(app.getHttpServer())
         .post('/api/v1/catalog/items')

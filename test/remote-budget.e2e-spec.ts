@@ -19,6 +19,10 @@ import {
 } from '../src/modules/notifications/email/infrastructure/mail-config';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { SIGNATURE_LINK_INVALID_MESSAGE } from '../src/modules/signature-requests/application/use-cases/public-signature.use-cases';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-415 en HTTP real: recepción envía a aceptar el presupuesto «Presentado»
 // (opción A de un grupo con B) → el paciente abre el enlace sin sesión, pide
@@ -155,6 +159,7 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
 
   beforeAll(async () => {
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     app = await createE2eApp({
       override: (builder) => {
         builder.overrideProvider(MAILER).useValue(mailer);
@@ -198,6 +203,7 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await app.close();
     await resetDatabase(raw);
     await raw.$disconnect();

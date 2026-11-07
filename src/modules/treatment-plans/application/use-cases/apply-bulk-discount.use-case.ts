@@ -1,4 +1,10 @@
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
 import { DiscountReason } from '@prisma/client';
 import {
   TREATMENT_PLAN_REPOSITORY,
@@ -7,7 +13,20 @@ import {
 } from '../../domain/ports/treatment-plan-repository.port';
 import type { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
-import { discountReference } from '../../../discounts/domain/effective-discount';
+import {
+  needsReferenceSnapshot,
+  referenceInPlan,
+  referenceRateCurrency,
+  type ReferenceSnapshot,
+} from '../../../discounts/domain/reference-in-plan';
+import {
+  NO_REFERENCE_RATES,
+  REFERENCE_RATE_SOURCE,
+  type ReferenceRateLookup,
+  type ReferenceRateSource,
+} from '../../domain/ports/reference-rate-source.port';
+import { freezeWithRate } from './reference-rate';
+import { PLAN_CURRENCY_CHANGED_MESSAGE } from './add-treatment-plan-item.use-case';
 import {
   discountForPercent,
   roleDiscountCapMessage,
@@ -66,6 +85,10 @@ export class ApplyBulkDiscountUseCase {
     private readonly catalog: DentalCatalogRepository,
     @Inject(CURRENCY_DIGITS_CATALOG)
     private readonly currencyDigits: CurrencyDigitsCatalog,
+    // DX-513-bis: sin fuente (specs que no la necesitan), «sin tasa».
+    @Optional()
+    @Inject(REFERENCE_RATE_SOURCE)
+    private readonly rates: ReferenceRateSource = NO_REFERENCE_RATES,
   ) {}
 
   async execute(
@@ -92,6 +115,17 @@ export class ApplyBulkDiscountUseCase {
     const digits = await this.currencyDigits.table(
       current ? [current.currency] : [],
     );
+    // DX-513-bis §5.8: los ítems anteriores sin foto con la referencia en
+    // otra moneda conocida la toman al recibir el %: una tasa por moneda,
+    // pedida antes de la transacción. Al 0 % solo se quita descuento.
+    const snapshotRates =
+      current && input.percent > 0
+        ? await this.legacySnapshotRates(
+            current.items,
+            input.itemIds,
+            current.currency,
+          )
+        : new Map<string, ReferenceRateLookup>();
     let skippedNoDiscount = 0;
     // BE-036: el estado del plan se valida con su fila bloqueada, dentro de
     // la transacción, junto a los ítems.
@@ -115,9 +149,30 @@ export class ApplyBulkDiscountUseCase {
             digits.roundingDigits(plan.currency),
             cap,
           );
+          // DX-513-bis: la rebaja se mide frente a la referencia en la moneda
+          // del plan (la foto; en un ítem anterior, la que se toma hoy).
+          let reference: ReferenceSnapshot | undefined;
+          const currency = referenceRateCurrency(item, plan.currency);
+          if (
+            input.percent > 0 &&
+            currency !== null &&
+            needsReferenceSnapshot(item, plan.currency)
+          ) {
+            const lookup = snapshotRates.get(currency);
+            if (!lookup || current?.currency !== plan.currency) {
+              throw new ConflictException(PLAN_CURRENCY_CHANGED_MESSAGE);
+            }
+            reference = freezeWithRate(
+              item,
+              plan.currency,
+              { currency, lookup },
+              actor.role,
+            );
+          }
           const before = {
-            // DX-513: sin rebaja frente a una referencia en otra moneda.
-            catalogPrice: discountReference(item, plan.currency),
+            catalogPrice: reference
+              ? reference.referencePriceInPlan
+              : referenceInPlan(item, plan.currency),
             price: item.price,
             discount: item.discount,
           };
@@ -136,11 +191,42 @@ export class ApplyBulkDiscountUseCase {
             { discountSet: true, reasonChanged },
             at,
           );
-          return { itemId: item.id, discount, ...decision };
+          return {
+            itemId: item.id,
+            discount,
+            ...decision,
+            ...(reference ? { reference } : {}),
+          };
         });
       },
     );
     return { items: updated, skippedNoDiscount };
+  }
+
+  /**
+   * DX-513-bis §5.8: la tasa de hoy de cada moneda de referencia de los ítems
+   * pedidos que aún no tienen foto (anteriores) y la necesitan.
+   */
+  private async legacySnapshotRates(
+    items: readonly TreatmentPlanItem[],
+    itemIds: readonly string[],
+    planCurrency: string,
+  ): Promise<Map<string, ReferenceRateLookup>> {
+    const wanted = new Set(itemIds);
+    const currencies = new Set(
+      items
+        .filter(
+          (item) =>
+            wanted.has(item.id) && needsReferenceSnapshot(item, planCurrency),
+        )
+        .map((item) => referenceRateCurrency(item, planCurrency))
+        .filter((currency): currency is string => currency !== null),
+    );
+    const lookups = new Map<string, ReferenceRateLookup>();
+    for (const currency of currencies) {
+      lookups.set(currency, await this.rates.rateFor(currency, planCurrency));
+    }
+    return lookups;
   }
 
   /**

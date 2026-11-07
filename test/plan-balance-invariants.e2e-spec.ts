@@ -14,6 +14,7 @@ import {
   registerClinic,
   resetDatabase,
 } from './support/e2e-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-054: invariantes del saldo y del plan que faltaban en main. Reloj de los
 // abonos inyectado (PAYMENT_CLOCK): nada depende de la hora de la CI.
@@ -52,6 +53,9 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
       })
       .expect(201);
     patientId = (patient.body as { id: string }).id;
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const catalog = await as(api().post('/api/v1/catalog/items'))
       .send({
         code: 'DX054-RES',

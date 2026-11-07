@@ -24,6 +24,7 @@ import { PaymentAllocationJobs } from '../src/modules/payments/application/payme
 import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
 import { PAYMENT_RATE_BACKLOG_FORBIDDEN_MESSAGE } from '../src/modules/payments/presentation/payment-rate-backlog.controller';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-380 en HTTP real, con un doble del proveedor de tasas CAÍDO que cuenta
 // sus llamadas (nunca sale a la red): N clínicas cobran en VES a un plan en
@@ -81,6 +82,9 @@ describe('Abonos sin tasa con el proveedor caído (e2e, DX-380)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({

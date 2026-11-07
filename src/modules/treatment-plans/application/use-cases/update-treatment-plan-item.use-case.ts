@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   CatalogKind,
@@ -41,10 +42,19 @@ import {
   isAttributionCorrection,
 } from '../../domain/plan-item-attribution';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { effectiveDiscountRises } from '../../../discounts/domain/effective-discount';
 import {
-  discountReference,
-  effectiveDiscountRises,
-} from '../../../discounts/domain/effective-discount';
+  needsReferenceSnapshot,
+  referenceInPlan,
+  type ReferenceSnapshot,
+} from '../../../discounts/domain/reference-in-plan';
+import {
+  NO_REFERENCE_RATES,
+  REFERENCE_RATE_SOURCE,
+  type ReferenceRateSource,
+} from '../../domain/ports/reference-rate-source.port';
+import { freezeWithRate, referenceRateFor } from './reference-rate';
+import { PLAN_CURRENCY_CHANGED_MESSAGE } from './add-treatment-plan-item.use-case';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 import { FEE_ITEM_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
@@ -121,6 +131,10 @@ export class UpdateTreatmentPlanItemUseCase {
     private readonly discountPolicy: GetDiscountPolicyUseCase,
     @Inject(TREATMENT_PLAN_CLOCK)
     private readonly now: PlanClock,
+    // DX-513-bis: sin fuente (specs que no la necesitan), «sin tasa».
+    @Optional()
+    @Inject(REFERENCE_RATE_SOURCE)
+    private readonly rates: ReferenceRateSource = NO_REFERENCE_RATES,
   ) {}
 
   /**
@@ -160,6 +174,11 @@ export class UpdateTreatmentPlanItemUseCase {
         ? await this.allowsDiscount(existing.catalogItemId)
         : true;
     const at = this.now();
+    // DX-513-bis §5.8: un ítem anterior sin foto, con la referencia en otra
+    // moneda conocida, la toma en la primera escritura que puede dar más
+    // descuento (bajar el precio o subir el `discount`), con la tasa de hoy
+    // pedida ANTES de la transacción. Un ítem con foto nunca la vuelve a pedir.
+    const snapshotRate = await this.legacySnapshotRate(existing, patch);
 
     // BE-036: el estado del plan y del ítem se comprueban con sus filas
     // bloqueadas, dentro de la transacción: una aceptación que entre entre
@@ -233,10 +252,26 @@ export class UpdateTreatmentPlanItemUseCase {
           ...rest
         } = patch;
         const repoPatch: UpdateTreatmentPlanItemRepoInput = rest;
-        // DX-513: la rebaja solo se mide frente a una referencia en la moneda
-        // del plan.
+        // DX-513-bis: la rebaja se mide frente a la referencia en la moneda del
+        // plan: la foto del ítem o, si es anterior y ahora se rebaja, la que
+        // se toma hoy (422 sin tasa) y se escribe con el cambio.
+        let reference: ReferenceSnapshot | undefined;
+        if (snapshotRate && needsReferenceSnapshot(item, plan.currency)) {
+          if (plan.currency !== snapshotRate.planCurrency) {
+            throw new ConflictException(PLAN_CURRENCY_CHANGED_MESSAGE);
+          }
+          reference = freezeWithRate(
+            item,
+            plan.currency,
+            snapshotRate.asked,
+            actor.role,
+          );
+          repoPatch.reference = reference;
+        }
         const before = {
-          catalogPrice: discountReference(item, plan.currency),
+          catalogPrice: reference
+            ? reference.referencePriceInPlan
+            : referenceInPlan(item, plan.currency),
           price: item.price,
           discount: item.discount,
         };
@@ -292,6 +327,31 @@ export class UpdateTreatmentPlanItemUseCase {
       },
       audit,
     );
+  }
+
+  /**
+   * DX-513-bis §5.8: la tasa para la foto de un ítem anterior que se rebaja
+   * (baja el precio o sube el `discount`), o `null` si no hace falta: ya tiene
+   * foto, su referencia está en la moneda del plan (o no se sabe) o el cambio
+   * no puede dar más descuento.
+   */
+  private async legacySnapshotRate(
+    existing: TreatmentPlanItem,
+    patch: UpdateTreatmentPlanItemInput,
+  ): Promise<{
+    planCurrency: string;
+    asked: Awaited<ReturnType<typeof referenceRateFor>>;
+  } | null> {
+    const rebaja =
+      (patch.price !== undefined && patch.price < existing.price) ||
+      (patch.discount !== undefined && patch.discount > existing.discount);
+    if (!rebaja || existing.referencePriceInPlan !== null) return null;
+    const plan = await this.repo.findPlanById(existing.planId);
+    if (!plan || !needsReferenceSnapshot(existing, plan.currency)) return null;
+    return {
+      planCurrency: plan.currency,
+      asked: await referenceRateFor(this.rates, existing, plan.currency),
+    };
   }
 
   /** DX-105: `allowDiscount` del procedimiento (false si no se encuentra: cierra por defecto, como el descuento en bloque). */

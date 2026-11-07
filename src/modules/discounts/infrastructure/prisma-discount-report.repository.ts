@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   DiscountReason,
+  ExchangeRateSource,
   Prisma,
   PriceSource,
   TreatmentPlanStatus,
@@ -33,6 +34,14 @@ interface RawRow {
   procedure: string | null;
   currency: string;
   catalogPrice: Prisma.Decimal | null;
+  catalogCurrency: string | null;
+  referenceCurrency: string | null;
+  referencePriceInPlan: Prisma.Decimal | null;
+  basePriceInPlan: Prisma.Decimal | null;
+  referenceRateFrom: Prisma.Decimal | null;
+  referenceRateTo: Prisma.Decimal | null;
+  referenceRateSource: ExchangeRateSource | null;
+  referenceRateDate: Date | null;
   price: Prisma.Decimal;
   priceReduction: Prisma.Decimal;
   itemDiscount: Prisma.Decimal;
@@ -105,7 +114,7 @@ async function firstDiscountLocation(
  * no la tiene, la de presentación del plan). El periodo son días civiles de la
  * zona de CADA sede, como la caja (DX-097); sin sede, la de la sede
  * principal (R6).
- * Sirve el índice parcial `treatment_plan_items_tenant_effective_discount_at_idx`
+ * Sirve el índice parcial `treatment_plan_items_tenant_effective_ref_discount_at_idx`
  * (mismo predicado).
  *
  * SEC-047: entran también los ítems resueltos por convenio con rebaja
@@ -122,6 +131,17 @@ async function firstDiscountLocation(
  * como rebaja de convenio si creó el ítem, asignó el convenio o dio su
  * descuento. Una línea solo de convenio sin sede de descuento ni de
  * presentación toma la sede con la que se resolvió el precio.
+ *
+ * DX-513-bis: un ítem con FOTO de la referencia (`referencePriceInPlan`,
+ * congelada al escribirlo en la moneda del plan, con su tasa) se mide frente a
+ * ella: rebaja de precio = max(0, referencePriceInPlan − price) y de convenio
+ * = max(0, basePriceInPlan − referencePriceInPlan). El informe NUNCA convierte:
+ * lee lo congelado, así que no cambia aunque cambien las tasas. La fila lleva
+ * la moneda de la referencia, la cifra original y la tasa. Los totales
+ * siguen por moneda del plan. Los índices parciales incluyen
+ * `price < referencePriceInPlan` (migración 20261201090300).
+ *
+ * Ítems SIN foto (anteriores): como en DX-513, que sigue.
  *
  * DX-513: la rebaja de precio y la de convenio no cuentan frente a una
  * referencia en otra moneda CONOCIDA (`referenceInOtherCurrency` del
@@ -230,21 +250,38 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
     const referenceInPlanCurrency = Prisma.sql`COALESCE(i."priceSource" IN ('PRICE_LIST', 'AGREEMENT_PRICE_LIST'), FALSE)
                  OR i."catalogCurrency" IS NULL
                  OR i."catalogCurrency" = p."currency"`;
-    const priceBelowReference = Prisma.sql`(i."price" < i."catalogPrice" AND (${referenceInPlanCurrency}))`;
+    // DX-513-bis: con foto, frente a la referencia congelada en la moneda del
+    // plan; sin ella, la regla de DX-513.
+    const hasSnapshot = Prisma.sql`i."referencePriceInPlan" IS NOT NULL`;
+    const priceBelowReference = Prisma.sql`(CASE WHEN ${hasSnapshot}
+                 THEN i."price" < i."referencePriceInPlan"
+                 ELSE (i."price" < i."catalogPrice" AND (${referenceInPlanCurrency})) END)`;
     const cte = Prisma.sql`
       WITH raw AS (
         SELECT i."id", i."planId", i."toothNumber", i."catalogItemId",
-               i."catalogPrice", i."price",
-               CASE WHEN (${referenceInPlanCurrency})
+               i."catalogPrice", i."catalogCurrency", i."price",
+               CASE WHEN i."catalogPrice" IS NULL THEN NULL
+                    ELSE COALESCE(i."referenceCurrency",
+                                  CASE WHEN i."priceSource" IN ('PRICE_LIST', 'AGREEMENT_PRICE_LIST')
+                                       THEN p."currency"
+                                       ELSE i."catalogCurrency" END) END AS "referenceCurrency",
+               i."referencePriceInPlan", i."basePriceInPlan",
+               i."referenceRateFrom", i."referenceRateTo",
+               i."referenceRateSource", i."referenceRateDate",
+               CASE WHEN ${hasSnapshot}
+                    THEN GREATEST(i."referencePriceInPlan" - i."price", 0)
+                    WHEN (${referenceInPlanCurrency})
                     THEN GREATEST(COALESCE(i."catalogPrice" - i."price", 0), 0)
                     ELSE 0 END AS "priceReduction",
                i."discount" AS "itemDiscount",
                i."discountReason", i."discountReasonNote",
                i."discountById",
                i."priceSource", i."agreementName", i."basePrice",
-               CASE WHEN i."agreementId" IS NOT NULL
-                         AND (i."catalogCurrency" IS NULL
-                              OR i."catalogCurrency" = p."currency")
+               CASE WHEN i."agreementId" IS NULL THEN 0
+                    WHEN ${hasSnapshot}
+                    THEN GREATEST(COALESCE(i."basePriceInPlan" - i."referencePriceInPlan", 0), 0)
+                    WHEN (i."catalogCurrency" IS NULL
+                          OR i."catalogCurrency" = p."currency")
                     THEN GREATEST(COALESCE(i."basePrice" - i."catalogPrice", 0), 0)
                     ELSE 0 END AS "agreementReduction",
                asg."createdById" AS "agreementAssignedById",
@@ -271,6 +308,7 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
           ) asg ON i."agreementId" IS NOT NULL
          WHERE i."tenantId" = ${tenantId}::uuid
            AND (i."discount" > 0 OR i."price" < i."catalogPrice"
+                OR i."price" < i."referencePriceInPlan"
                 OR (i."agreementId" IS NOT NULL AND i."basePrice" > i."catalogPrice"))
            AND i."deletedAt" IS NULL
            AND p."deletedAt" IS NULL
@@ -345,7 +383,10 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                d."planCreatedAt", d."patientId",
                concat_ws(' ', pa."firstName", pa."lastName") AS "patientName",
                d."toothNumber", c."labelEs" AS "procedure", d."currency",
-               d."catalogPrice", d."price", d."priceReduction", d."itemDiscount",
+               d."catalogPrice", d."catalogCurrency", d."referenceCurrency", d."referencePriceInPlan",
+               d."basePriceInPlan", d."referenceRateFrom", d."referenceRateTo",
+               d."referenceRateSource", d."referenceRateDate",
+               d."price", d."priceReduction", d."itemDiscount",
                d."discountReason" AS "reason",
                d."discountReasonNote" AS "reasonNote", d."discountById",
                u."fullName" AS "discountByName", d."at" AS "discountAt",
@@ -365,19 +406,41 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
             ON l."tenantId" = ${tenantId}::uuid AND l."id" = d."locationId"
          ORDER BY d."at" DESC, d."id" DESC
          ${paging}`;
-      return rows.map((r) => ({
-        ...r,
-        planCreatedOn: civilDateIn(r.planCreatedAt, zoneOf(r.locationId)),
-        discountOn: civilDateIn(r.discountAt, zoneOf(r.locationId)),
-        procedure: r.procedure ?? '',
-        catalogPrice: r.catalogPrice?.toNumber() ?? null,
-        price: r.price.toNumber(),
-        priceReduction: r.priceReduction.toNumber(),
-        itemDiscount: r.itemDiscount.toNumber(),
-        discount: r.priceReduction.plus(r.itemDiscount).toNumber(),
-        basePrice: r.basePrice?.toNumber() ?? null,
-        agreementReduction: r.agreementReduction.toNumber(),
-      }));
+      return rows.map(
+        ({
+          referenceRateFrom,
+          referenceRateTo,
+          referenceRateSource,
+          referenceRateDate,
+          ...r
+        }) => ({
+          ...r,
+          planCreatedOn: civilDateIn(r.planCreatedAt, zoneOf(r.locationId)),
+          discountOn: civilDateIn(r.discountAt, zoneOf(r.locationId)),
+          procedure: r.procedure ?? '',
+          catalogPrice: r.catalogPrice?.toNumber() ?? null,
+          referencePriceInPlan: r.referencePriceInPlan?.toNumber() ?? null,
+          basePriceInPlan: r.basePriceInPlan?.toNumber() ?? null,
+          rate:
+            referenceRateFrom &&
+            referenceRateTo &&
+            referenceRateSource &&
+            referenceRateDate
+              ? {
+                  fromPerBase: referenceRateFrom.toNumber(),
+                  toPerBase: referenceRateTo.toNumber(),
+                  source: referenceRateSource,
+                  rateDate: referenceRateDate.toISOString().slice(0, 10),
+                }
+              : null,
+          price: r.price.toNumber(),
+          priceReduction: r.priceReduction.toNumber(),
+          itemDiscount: r.itemDiscount.toNumber(),
+          discount: r.priceReduction.plus(r.itemDiscount).toNumber(),
+          basePrice: r.basePrice?.toNumber() ?? null,
+          agreementReduction: r.agreementReduction.toNumber(),
+        }),
+      );
     });
   }
 }

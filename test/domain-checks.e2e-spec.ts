@@ -19,6 +19,7 @@ import {
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-042, por HTTP: topes de importes y cantidades en las DTO (400, nunca 500
 // ni redondeo), insumo único por sede y sin mayúsculas, y las tres carreras
@@ -125,6 +126,9 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
       .send({ currency: 'USD' })
       .expect(201);
     planId = (plan.body as IdBody).id;
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, tenantId, 'USD');
     const catalog = await authed(api().post('/api/v1/catalog/items'))
       .send({
         code: 'DX042-RES',

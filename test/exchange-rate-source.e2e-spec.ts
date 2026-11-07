@@ -29,6 +29,7 @@ import { addCivilDays } from '../src/shared/time/civil-day';
 import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
 import { fixedSedeDay } from './support/sede-clock';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-374 en HTTP real: la fuente de la tasa es por clínica (AUTOMATIC por
 // defecto) y solo el ADMIN la cambia y registra tasas manuales; cada cambio
@@ -238,6 +239,9 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, manual.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), token, host)
         .send({

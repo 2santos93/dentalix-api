@@ -14,6 +14,7 @@ import {
 import { TreatmentPlanItem } from '../entities/treatment-plan-item.entity';
 import type { ItemAttributionChange } from '../plan-item-attribution';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { ReferenceSnapshot } from '../../../discounts/domain/reference-in-plan';
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — the tenant comes
 // from the guarded request context (never the client, same convention as
@@ -141,6 +142,8 @@ export interface PricingSnapshot {
   agreementId: string | null;
   agreementName: string | null;
   pricingLocationId: string;
+  /** DX-513-bis: la referencia en la moneda del plan (y su tasa), congelada. */
+  reference: ReferenceSnapshot;
 }
 
 /**
@@ -173,6 +176,11 @@ export interface UpdateTreatmentPlanItemRepoInput {
   discountReasonNote?: string | null;
   /** Solo cuando el descuento cambia (DX-204); ver `DiscountStamp`. */
   discountStamp?: DiscountStamp | null;
+  /**
+   * DX-513-bis §5.8: la foto de la referencia de un ítem anterior que aún no
+   * la tenía, tomada en su primera rebaja. Nunca reescribe una foto.
+   */
+  reference?: ReferenceSnapshot;
 }
 
 /**
@@ -207,6 +215,8 @@ export interface BulkItemDiscount {
   discountReason?: DiscountReason | null;
   discountReasonNote?: string | null;
   discountStamp?: DiscountStamp | null;
+  /** DX-513-bis §5.8: la foto de un ítem anterior, en su primera rebaja. */
+  reference?: ReferenceSnapshot;
 }
 
 /**

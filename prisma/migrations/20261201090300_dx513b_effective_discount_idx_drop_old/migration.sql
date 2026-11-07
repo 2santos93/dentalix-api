@@ -1,0 +1,16 @@
+-- DX-513-bis (2/2): quita el índice parcial anterior del informe de
+-- descuentos (predicado sin la referencia convertida), ya sustituido por
+-- treatment_plan_items_tenant_effective_ref_discount_at_idx
+-- (20261201090200_dx513b_effective_ref_discount_idx), que lo cubre: su
+-- predicado es un superconjunto. El informe nunca se queda sin índice.
+--
+-- CONCURRENTLY (DB-025): no bloquea las lecturas ni las escrituras de los
+-- ítems. ÚNICA sentencia del fichero (Prisma la ejecuta fuera de
+-- transacción), sin `SET lock_timeout` (DB-078). IF EXISTS: idempotente. Si
+-- falla a medias, el índice puede quedar INVALID (sin uso): repetir el mismo
+-- DROP INDEX CONCURRENTLY IF EXISTS
+-- "treatment_plan_items_tenant_effective_discount_at_idx", `npx prisma migrate
+-- resolve --rolled-back 20261201090300_dx513b_effective_discount_idx_drop_old`
+-- y repetir `migrate deploy`. Vuelta atrás: crear de nuevo el índice con el
+-- predicado de 20261019194000_sec041_plan_item_catalog_price, CONCURRENTLY.
+DROP INDEX CONCURRENTLY IF EXISTS "treatment_plan_items_tenant_effective_discount_at_idx";

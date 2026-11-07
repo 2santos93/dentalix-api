@@ -18,6 +18,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { fixedSedeDay } from './support/sede-clock';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-377 en HTTP real: cada clínica nace con sus 4 medios iniciales; solo el
 // ADMIN gestiona el catálogo (403 en español para recepción); un medio que
@@ -89,6 +90,9 @@ describe('Medios de pago y referencia repetida (e2e, DX-377)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({

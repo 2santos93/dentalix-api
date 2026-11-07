@@ -179,7 +179,11 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
           kind: CatalogKind.PROCEDURE,
           labelEs: 'Corona',
           color: '#2A2B3C',
-          defaultPrice: 100_000,
+          // DX-513-bis: sin precio de catálogo (ítem libre, precio explícito).
+          // Este spec comprueba que la moneda del catálogo de la clínica sigue
+          // sin fijar, así que no se fija; con un precio de catálogo en VES (la
+          // sede) un plan en USD pediría una tasa (422). El importe del ítem es
+          // el de siempre: 100.000.
         })
         .expect(201)
     ).body as { id: string };
@@ -196,6 +200,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
         .post(`/treatment-plans/${planA}/items`, {
           toothNumber: '11',
           catalogItemId: item.id,
+          price: 100_000,
         })
         .expect(201)
     ).body as { id: string };
@@ -736,6 +741,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
         .post(`/treatment-plans/${plan}/items`, {
           toothNumber: '12',
           catalogItemId,
+          price: 100_000,
         })
         .expect(201);
       const quote = (

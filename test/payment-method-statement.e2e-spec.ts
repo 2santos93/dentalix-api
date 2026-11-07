@@ -17,6 +17,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-395 en HTTP real: el estado de cuenta nombra el medio de la clínica y la
 // referencia de cada abono (también el de una réplica anterior sin medio); la
@@ -111,6 +112,9 @@ describe('Medio y referencia en estado de cuenta y caja (e2e, DX-395)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({

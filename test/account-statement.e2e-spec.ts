@@ -20,6 +20,10 @@ import {
   locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y para
 // limpiar entre tenants — mismo criterio que payment-plans.e2e-spec.ts.
@@ -92,6 +96,7 @@ interface StatementBody {
 
 async function cleanup(): Promise<void> {
   await resetDatabase(raw);
+  dropParRates ??= await seedParProviderRates(raw);
 }
 
 describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)', () => {
@@ -328,6 +333,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await cleanup();
     await app.close();
     await raw.$disconnect();
