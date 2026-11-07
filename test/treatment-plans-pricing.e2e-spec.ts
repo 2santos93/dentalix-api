@@ -20,6 +20,10 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-105 en HTTP real: el precio de un ítem nuevo se resuelve en el servidor
 // (convenio vigente del paciente → lista activa de la sede del request →
@@ -31,6 +35,9 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 interface Item {
+  referenceCurrency: string | null;
+  referencePriceInPlan: number | null;
+  referenceRate: object | null;
   id: string;
   catalogItemId: string;
   catalogPrice: number | null;
@@ -190,6 +197,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     clinic = await registerClinic(app, 'dx105-pricing');
     const dentist = await seedMember(raw, clinic, ClinicRole.DENTIST);
     dentistToken = await loginAs(app, clinic.host, dentist.email);
@@ -259,6 +267,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
@@ -359,6 +368,12 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
         agreementName: item.agreementName,
         allowDiscount: true,
         currency: 'VES',
+        // DX-513-bis: la misma foto de la referencia que el alta.
+        referenceCurrency: item.referenceCurrency,
+        referencePriceInPlan: item.referencePriceInPlan,
+        rate: item.referenceRate,
+        rateMissing: false,
+        missingRateCurrency: null,
       });
     });
 

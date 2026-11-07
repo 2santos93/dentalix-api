@@ -18,6 +18,10 @@ const row: DiscountReportRowView = {
   procedure: 'Corona "zirconio"',
   currency: 'EUR',
   catalogPrice: null,
+  referenceCurrency: null,
+  referencePriceInPlan: null,
+  basePriceInPlan: null,
+  rate: null,
   price: 450,
   priceReduction: 0,
   itemDiscount: 67.5,
@@ -42,6 +46,9 @@ const row: DiscountReportRowView = {
   createdByName: '=creador',
 };
 
+/** Precio de catálogo y las cinco columnas de importes y % (sin las de DX-513-bis). */
+const amounts = (cells: string[]) => [cells[8], ...cells.slice(13, 18)];
+
 describe('CSV del informe de descuentos (DX-204)', () => {
   it('UTF-8 con BOM, CRLF, cabecera y una línea por ítem', () => {
     const csv = toDiscountReportCsv([row]);
@@ -63,6 +70,11 @@ describe('CSV del informe de descuentos (DX-204)', () => {
         '"36"',
         '"Corona ""zirconio"""',
         'EUR',
+        '',
+        '',
+        '',
+        '',
+        '',
         '',
         '450.00',
         '0.00',
@@ -94,7 +106,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
     const [, eurLine, usdLine] = toDiscountReportCsv([row, usd])
       .slice(1)
       .split('\r\n');
-    expect(eurLine.split(',').slice(7, 13)).toEqual([
+    expect(amounts(eurLine.split(','))).toEqual([
       '',
       '450.00',
       '0.00',
@@ -102,7 +114,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       '67.50',
       '15.00',
     ]);
-    expect(usdLine.split(',').slice(7, 13)).toEqual([
+    expect(amounts(usdLine.split(','))).toEqual([
       '',
       '123457',
       '0',
@@ -124,7 +136,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       percent: 50,
     };
     const line = toDiscountReportCsv([reduced]).slice(1).split('\r\n')[1];
-    expect(line.split(',').slice(7, 13)).toEqual([
+    expect(amounts(line.split(','))).toEqual([
       '1000000',
       '500000',
       '500000',
@@ -132,7 +144,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       '500000',
       '50.00',
     ]);
-    expect(DISCOUNT_REPORT_CSV_HEADER.slice(7, 13)).toEqual([
+    expect(amounts([...DISCOUNT_REPORT_CSV_HEADER])).toEqual([
       'Precio de catálogo',
       'Precio',
       'Rebaja de precio',
@@ -178,16 +190,16 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       .split(',');
     // B5: una línea solo de convenio dice «Convenio …» como motivo y lleva el
     // autor real (quien asignó el convenio), no un descuento sin autor.
-    expect(cells[13]).toBe('"Convenio Cortesía socios"');
-    expect(cells[15]).toBe('"Admin Clínica"');
-    expect(cells.slice(17)).toEqual([
+    expect(cells[18]).toBe('"Convenio Cortesía socios"');
+    expect(cells[20]).toBe('"Admin Clínica"');
+    expect(cells.slice(22)).toEqual([
       '"Cortesía socios"',
       '2000000',
       '2000000',
       '"Admin Clínica"',
       '"Dr. Pérez"',
     ]);
-    expect(DISCOUNT_REPORT_CSV_HEADER.slice(17)).toEqual([
+    expect(DISCOUNT_REPORT_CSV_HEADER.slice(22)).toEqual([
       'Convenio',
       'Precio sin convenio',
       'Rebaja por convenio',
@@ -214,7 +226,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       .slice(1)
       .split('\r\n')[1]
       .split(',');
-    expect(cells[15]).toBe('"Dr. Pérez"');
+    expect(cells[20]).toBe('"Dr. Pérez"');
   });
 
   it('DX-488: con los decimales de la pantalla, no los del redondeo: RSD con céntimos guardados los conserva', () => {
@@ -227,13 +239,86 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       percent: 7.29,
     };
     const line = toDiscountReportCsv([cents]).slice(1).split('\r\n')[1];
-    expect(line.split(',').slice(7, 13)).toEqual([
+    expect(amounts(line.split(','))).toEqual([
       '',
       '123.45',
       '0',
       '9',
       '9',
       '7.29',
+    ]);
+  });
+
+  it('DX-513-bis: el precio de catálogo va en SU moneda, con la referencia en la del plan y la tasa congelada (C2)', () => {
+    const converted: DiscountReportRowView = {
+      ...row,
+      currency: 'VES',
+      catalogPrice: 4.5,
+      referenceCurrency: 'USD',
+      referencePriceInPlan: 3960,
+      basePriceInPlan: 3960,
+      rate: {
+        fromPerBase: 1,
+        toPerBase: 880,
+        source: 'MANUAL',
+        rateDate: '2026-11-06',
+      },
+      price: 3900,
+      priceReduction: 60,
+      itemDiscount: 0,
+      discount: 60,
+      percent: 1.52,
+    };
+    const cells = toDiscountReportCsv([converted])
+      .slice(1)
+      .split('\r\n')[1]
+      .split(',');
+    expect(DISCOUNT_REPORT_CSV_HEADER.slice(6, 14)).toEqual([
+      'Moneda',
+      'Moneda del catálogo',
+      'Precio de catálogo',
+      'Precio de catálogo en la moneda del plan',
+      'Tasa (por 1 USD: origen / plan)',
+      'Fuente de la tasa',
+      'Fecha de la tasa',
+      'Precio',
+    ]);
+    expect(cells.slice(6, 16)).toEqual([
+      'VES',
+      'USD',
+      '4.50',
+      '3960.00',
+      '1 / 880',
+      'Manual',
+      '2026-11-06',
+      '3900.00',
+      '60.00',
+      '0.00',
+    ]);
+  });
+
+  it('DX-513-bis: un ítem anterior entre monedas no inventa la referencia en la moneda del plan', () => {
+    const legacy: DiscountReportRowView = {
+      ...row,
+      currency: 'USD',
+      catalogPrice: 3600,
+      referenceCurrency: 'VES',
+      price: 80,
+      itemDiscount: 8,
+      discount: 8,
+    };
+    const cells = toDiscountReportCsv([legacy])
+      .slice(1)
+      .split('\r\n')[1]
+      .split(',');
+    expect(cells.slice(6, 13)).toEqual([
+      'USD',
+      'VES',
+      '3600.00',
+      '',
+      '',
+      '',
+      '',
     ]);
   });
 });

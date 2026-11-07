@@ -128,6 +128,15 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
             // DX-502: con la moneda del catálogo de su alta.
             catalogCurrency: item.catalogCurrency,
             priceSource: item.priceSource,
+            // DX-513-bis: la foto de la referencia (y su tasa) viaja tal cual:
+            // la moneda del plan es la misma.
+            referenceCurrency: item.referenceCurrency,
+            referencePriceInPlan: item.referencePriceInPlan,
+            basePriceInPlan: item.basePriceInPlan,
+            referenceRateFrom: item.referenceRateFrom,
+            referenceRateTo: item.referenceRateTo,
+            referenceRateSource: item.referenceRateSource,
+            referenceRateDate: item.referenceRateDate,
             agreementId: item.agreementId,
             agreementName: item.agreementName,
             pricingLocationId: item.pricingLocationId,

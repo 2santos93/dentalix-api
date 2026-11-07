@@ -28,6 +28,10 @@ import {
   locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol,
 // inspeccionar y limpiar. Borrar treatment_plan_acceptances está permitido aquí
@@ -102,6 +106,7 @@ interface QuoteBody {
 async function cleanup(): Promise<void> {
   // TRUNCATE ... CASCADE: no depende del orden de las FK (convenios incluidos).
   await resetDatabase(raw);
+  dropParRates ??= await seedParProviderRates(raw);
 }
 
 describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatment-plans/:planId/{quote,acceptance} (e2e, DX-012)', () => {
@@ -317,6 +322,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await cleanup();
     await raw.$disconnect();
     await app.close();

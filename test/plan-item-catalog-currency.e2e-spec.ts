@@ -15,6 +15,10 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-502 en HTTP real, aislamiento de la moneda del catálogo: es la común de
 // las sedes activas de SU clínica (la de otra clínica no cuenta) y de TODAS
@@ -132,6 +136,7 @@ describe('Moneda del catálogo: aislamiento por clínica y por sede (e2e, DX-502
 
   beforeAll(async () => {
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     app = await createE2eApp();
     vesClinic = await registerClinic(
       app,
@@ -142,6 +147,7 @@ describe('Moneda del catálogo: aislamiento por clínica y por sede (e2e, DX-502
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await app.close();
     await resetDatabase(raw);
     await raw.$disconnect();

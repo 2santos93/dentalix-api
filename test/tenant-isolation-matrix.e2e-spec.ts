@@ -46,6 +46,10 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 /**
  * DX-068 (TST-002): matriz de aislamiento entre clínicas en las rutas por id.
@@ -898,6 +902,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       builder.overrideProvider(MAILER).useValue(mailer),
     );
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     clinicA = await registerClinic(app, 'clinica-aislada-a');
     clinicB = await registerClinic(app, 'clinica-aislada-b');
     a = await seedA(app, clinicA);
@@ -974,6 +979,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     // El documento de A (DX-151) quedó en el almacén de disco de los e2e.
     await fs.rm(
       path.join(

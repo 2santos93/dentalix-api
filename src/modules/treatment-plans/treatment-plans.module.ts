@@ -50,6 +50,9 @@ import { PRICING_SOURCE } from './domain/ports/pricing-source.port';
 import { PrismaPricingSource } from './infrastructure/pricing/prisma-pricing-source';
 import { GetPriceQuoteUseCase } from './application/use-cases/get-price-quote.use-case';
 import { PriceQuoteController } from './presentation/price-quote.controller';
+import { ExchangeModule } from '../exchange/exchange.module';
+import { REFERENCE_RATE_SOURCE } from './domain/ports/reference-rate-source.port';
+import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-reference-rate-source';
 
 @Module({
   // JwtModule.register({}) mirrors AppointmentsModule/OdontogramModule:
@@ -78,6 +81,9 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     PatientAgreementsModule,
     // DX-051: las escrituras de ítems y planes drenan el reparto de abonos.
     PaymentAllocationsModule,
+    // DX-513-bis: la tasa de la clínica para congelar la referencia de un
+    // ítem en otra moneda (la misma lectura que los abonos).
+    ExchangeModule,
   ],
   // PlanFollowUpController va PRIMERO: su `GET treatment-plans/pending-follow-up`
   // quedaría tapado por `GET treatment-plans/:id` si se registrara después.
@@ -102,6 +108,8 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     ApplyBulkDiscountUseCase,
     // Resolución del precio por convenio o lista (DX-105).
     { provide: PRICING_SOURCE, useClass: PrismaPricingSource },
+    // DX-513-bis: tasa de hoy en la sede de escritura para la referencia.
+    { provide: REFERENCE_RATE_SOURCE, useClass: ClinicReferenceRateSource },
     GetPriceQuoteUseCase,
     // Alternativas, presentación, rechazo y seguimiento (DX-040).
     PresentTreatmentPlanUseCase,

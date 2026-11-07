@@ -82,6 +82,9 @@ interface Report {
     discountById: string | null;
     discountByName: string | null;
     locationId: string | null;
+    referenceCurrency?: string | null;
+    referencePriceInPlan?: number | null;
+    rate?: object | null;
   }[];
   total: number;
 }
@@ -939,7 +942,9 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         .get(`/reports/discounts.csv?${period()}`)
         .expect(200);
       expect(csv.text).toContain(
-        'VES,1000000.00,800000.00,200000.00,0.00,200000.00,20.00,"Promoción o campaña"',
+        // DX-513-bis: moneda del catálogo, catálogo en su moneda, referencia
+        // en la del plan y la tasa (vacía: misma moneda).
+        'VES,VES,1000000.00,1000000.00,,,,800000.00,200000.00,0.00,200000.00,20.00,"Promoción o campaña"',
       );
     });
 
@@ -1070,20 +1075,37 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
   // Una rebaja frente a él en un plan en USD no es un descuento: ni tope, ni
   // motivo, ni informe. Con la moneda del catálogo desconocida (NULL), cuenta
   // como hoy (decisión de producto).
-  describe('rebaja frente a un catálogo en otra moneda (DX-513)', () => {
+  describe('rebaja frente a un catálogo en otra moneda: referencia convertida (DX-513-bis)', () => {
     const CAP_0 =
       'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 0 % de descuento por ítem.';
     const REASON =
       'Precio por debajo del de catálogo: cuenta como descuento y supera el 10 %. Indica el motivo del descuento.';
+    // Tasa MANUAL de la clínica: 400 Bs./USD. Corona de 1.000.000 Bs. →
+    // 2.500,00 USD (la CI no tiene EXCHANGE_APP_ID: la tasa se siembra).
+    const RATE = 400;
 
-    async function reportItemIds(): Promise<{ ids: string[]; body: Report }> {
+    beforeAll(async () => {
+      await as(clinicA)
+        .put('/exchange/settings', { source: 'MANUAL' })
+        .expect(200);
+      for (const offset of [-1, 0]) {
+        await as(clinicA)
+          .post('/exchange/manual-rates', {
+            date: caracasDay(offset),
+            currency: 'VES',
+            rate: RATE,
+          })
+          .expect(201);
+      }
+    });
+
+    async function report(): Promise<Report> {
       const res = await as(clinicA)
         .get(
           `/reports/discounts?from=${caracasDay(-1)}&to=${caracasDay(1)}&pageSize=200`,
         )
         .expect(200);
-      const body = res.body as Report;
-      return { ids: body.items.map((i) => i.itemId), body };
+      return res.body as Report;
     }
 
     const addCrown = (planId: string, body: object, token = tokens.ADMIN) =>
@@ -1093,36 +1115,125 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         ...body,
       });
 
-    it('plan en USD con el catálogo en VES: la asistente (0 %) da de alta a 80 y lo baja a 50 sin 403 ni motivo; no sale en el informe', async () => {
-      const usdBefore = (await reportItemIds()).body.totals.find(
-        (t) => t.currency === 'USD',
-      );
+    type Converted = Item & {
+      catalogCurrency: string | null;
+      referenceCurrency: string | null;
+      referencePriceInPlan: number | null;
+      referenceRate: {
+        fromPerBase: number;
+        toPerBase: number;
+        source: string;
+        rateDate: string;
+      } | null;
+    };
+
+    it('la vista previa propone la referencia convertida con la tasa', async () => {
+      const res = await as(clinicA, tokens.ASSISTANT)
+        .get(
+          `/patients/${patientA}/price-quote?catalogItemId=${crownA}&currency=USD`,
+        )
+        .expect(200);
+      expect(res.body).toMatchObject({
+        price: 1000000,
+        currency: 'USD',
+        referenceCurrency: 'VES',
+        referencePriceInPlan: 2500,
+        rate: { fromPerBase: RATE, toPerBase: 1, source: 'MANUAL' },
+        rateMissing: false,
+      });
+    });
+
+    it('plan en USD con el catálogo en VES: la asistente (0 %) recibe 403 al bajar de 2.500 (antes 201); sin precio se propone 2.500', async () => {
       const planId = await newPlan('USD');
-      const created = (
-        await addCrown(planId, { price: 80 }, tokens.ASSISTANT).expect(201)
-      ).body as Item & { catalogCurrency: string | null };
+      const denied = await addCrown(
+        planId,
+        { price: 2400 },
+        tokens.ASSISTANT,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_0);
+      const created = (await addCrown(planId, {}, tokens.ASSISTANT).expect(201))
+        .body as Converted;
       expect(created).toMatchObject({
-        price: 80,
+        price: 2500,
         catalogPrice: 1000000,
         catalogCurrency: 'VES',
-        discountReason: null,
+        referenceCurrency: 'VES',
+        referencePriceInPlan: 2500,
+        referenceRate: { fromPerBase: RATE, toPerBase: 1, source: 'MANUAL' },
         discountById: null,
       });
       await as(clinicA, tokens.ASSISTANT)
         .patch(`/treatment-plans/${planId}/items/${created.id}`, { price: 50 })
-        .expect(200);
-      // El ADMIN pone el precio a 1 sin motivo: tampoco es un descuento.
-      const admin = await as(clinicA)
-        .patch(`/treatment-plans/${planId}/items/${created.id}`, { price: 1 })
-        .expect(200);
-      expect(admin.body).toMatchObject({ price: 1, discountReason: null });
-      const { ids, body } = await reportItemIds();
-      expect(ids).not.toContain(created.id);
-      // Los totales en USD (de otros descuentos de la clínica) no cambian.
-      expect(body.totals.find((t) => t.currency === 'USD')).toEqual(usdBefore);
+        .expect(403);
+      // El plan ya no cambia de moneda (PLAN_CURRENCY_LOCKED_BY_PRICED_ITEMS).
+      const locked = await as(clinicA)
+        .patch(`/treatment-plans/${planId}`, { currency: 'VES' })
+        .expect(409);
+      expect(locked.body).toMatchObject({
+        code: 'PLAN_CURRENCY_LOCKED_BY_PRICED_ITEMS',
+      });
     });
 
-    it('plan en VES con el catálogo en VES: igual que hoy (403, 422 y en el informe)', async () => {
+    it('el ADMIN a 2.000 USD: 422 sin motivo; con motivo, 201 y en el informe con la tasa; el CSV pone el catálogo en VES', async () => {
+      const planId = await newPlan('USD');
+      const unreasoned = await addCrown(planId, { price: 2000 }).expect(422);
+      expect((unreasoned.body as { message: string }).message).toBe(REASON);
+      const created = (
+        await addCrown(planId, {
+          price: 2000,
+          discountReason: 'PROMOTION',
+        }).expect(201)
+      ).body as Converted;
+      const body = await report();
+      const row = body.items.find((i) => i.itemId === created.id);
+      expect(row).toMatchObject({
+        catalogPrice: 1000000,
+        referenceCurrency: 'VES',
+        referencePriceInPlan: 2500,
+        price: 2000,
+        priceReduction: 500,
+        discount: 500,
+        rate: { fromPerBase: RATE, toPerBase: 1, source: 'MANUAL' },
+      });
+      const rateDate = created.referenceRate!.rateDate;
+      const csv = await as(clinicA)
+        .get(
+          `/reports/discounts.csv?from=${caracasDay(-1)}&to=${caracasDay(1)}`,
+        )
+        .expect(200);
+      const [header, ...lines] = csv.text.slice(1).split('\r\n');
+      expect(header.split(',').slice(6, 13)).toEqual([
+        'Moneda',
+        'Moneda del catálogo',
+        'Precio de catálogo',
+        'Precio de catálogo en la moneda del plan',
+        'Tasa (por 1 USD: origen / plan)',
+        'Fuente de la tasa',
+        'Fecha de la tasa',
+      ]);
+      expect(
+        lines.some(
+          (l) =>
+            l.split(',').slice(6, 14).join(',') ===
+            `USD,VES,1000000.00,2500.00,${RATE} / 1,Manual,${rateDate},2000.00`,
+        ),
+      ).toBe(true);
+    });
+
+    it('sin tasa de la otra moneda (plan EUR, solo VES registrada): 422 DISCOUNT_REFERENCE_RATE_MISSING que nombra EUR y no se crea', async () => {
+      const planId = await newPlan('EUR');
+      const res = await addCrown(planId, { price: 1 }).expect(422);
+      expect(res.body).toMatchObject({
+        code: 'DISCOUNT_REFERENCE_RATE_MISSING',
+        currency: 'EUR',
+      });
+      expect((res.body as { message: string }).message).toMatch(
+        /^No hay tasa de EUR para el .*Ajustes › Tasa de cambio/,
+      );
+      expect(await planItems(planId)).toHaveLength(0);
+    });
+
+    it('plan en VES con el catálogo en VES: igual que hoy (403, 422 y en el informe), sin tasa', async () => {
       const planId = await newPlan('VES');
       const denied = await addCrown(
         planId,
@@ -1137,8 +1248,13 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           price: 800000,
           discountReason: 'PROMOTION',
         }).expect(201)
-      ).body as Item;
-      const { body } = await reportItemIds();
+      ).body as Converted;
+      expect(created).toMatchObject({
+        referenceCurrency: 'VES',
+        referencePriceInPlan: 1000000,
+        referenceRate: null,
+      });
+      const body = await report();
       expect(body.items.find((i) => i.itemId === created.id)).toMatchObject({
         catalogPrice: 1000000,
         price: 800000,
@@ -1147,39 +1263,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       });
     });
 
-    // Revisión H1: cambiar la moneda de un plan con ítems los vuelve a medir.
-    it('la ASSISTANT no convierte en VES un plan en USD con un ítem a 80: 403 y el plan sigue en USD', async () => {
-      const planId = await newPlan('USD');
-      await addCrown(planId, { price: 80 }, tokens.ASSISTANT).expect(201);
-      const denied = await as(clinicA, tokens.ASSISTANT)
-        .patch(`/treatment-plans/${planId}`, { currency: 'VES' })
-        .expect(403);
-      expect((denied.body as { message: string }).message).toBe(CAP_0);
-      const plan = await as(clinicA)
-        .get(`/treatment-plans/${planId}`)
-        .expect(200);
-      expect((plan.body as { currency: string }).currency).toBe('USD');
-    });
-
-    it('una rebaja firmada en VES no se esconde pasando el plan a USD: 409 y sigue en el informe', async () => {
-      const planId = await newPlan('VES');
-      const created = (
-        await addCrown(planId, {
-          price: 800000,
-          discountReason: 'PROMOTION',
-        }).expect(201)
-      ).body as Item;
-      const res = await as(clinicA)
-        .patch(`/treatment-plans/${planId}`, { currency: 'USD' })
-        .expect(409);
-      expect((res.body as { message: string }).message).toBe(
-        'Hay ítems con el precio por debajo del de catálogo que cuentan como descuento en la moneda actual: con la nueva dejarían de verse en el informe de descuentos. Sube su precio al de catálogo antes de cambiar la moneda.',
-      );
-      const { ids } = await reportItemIds();
-      expect(ids).toContain(created.id);
-    });
-
-    it('con una sede activa en USD la moneda del catálogo es NULL: cuenta como hoy (403, 422 y en el informe)', async () => {
+    it('con una sede activa en USD la moneda del catálogo es NULL: cuenta como hoy (403, 422 y en el informe), sin tasa', async () => {
       await as(clinicA)
         .post(
           '/locations',
@@ -1200,9 +1284,12 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           price: 800000,
           discountReason: 'PROMOTION',
         }).expect(201)
-      ).body as Item & { catalogCurrency: string | null };
-      expect(created).toMatchObject({ catalogCurrency: null });
-      const { body } = await reportItemIds();
+      ).body as Converted;
+      expect(created).toMatchObject({
+        catalogCurrency: null,
+        referenceRate: null,
+      });
+      const body = await report();
       expect(body.items.find((i) => i.itemId === created.id)).toMatchObject({
         priceReduction: 200000,
         discount: 200000,

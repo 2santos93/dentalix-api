@@ -38,6 +38,7 @@ import type {
   PlanCurrencySource,
 } from '../../../domain/ports/plan-currency-source.port';
 import type { ItemAttributionChange } from '../../../domain/plan-item-attribution';
+import type { ReferenceSnapshot } from '../../../../discounts/domain/reference-in-plan';
 
 // `TreatmentPlan`/`TreatmentPlanItem` (the API-facing entities) deliberately
 // have no `deletedAt` field — same convention as Appointment. The fake still
@@ -132,6 +133,10 @@ export class InMemoryTreatmentPlanRepository
       basePrice: overrides.basePrice ?? null,
       catalogCurrency: overrides.catalogCurrency ?? null,
       priceSource: overrides.priceSource ?? null,
+      referenceCurrency: overrides.referenceCurrency ?? null,
+      referencePriceInPlan: overrides.referencePriceInPlan ?? null,
+      basePriceInPlan: overrides.basePriceInPlan ?? null,
+      referenceRate: overrides.referenceRate ?? null,
       agreementId: overrides.agreementId ?? null,
       agreementName: overrides.agreementName ?? null,
       pricingLocationId: overrides.pricingLocationId ?? null,
@@ -195,6 +200,10 @@ export class InMemoryTreatmentPlanRepository
       basePrice: row.basePrice,
       catalogCurrency: row.catalogCurrency,
       priceSource: row.priceSource,
+      referenceCurrency: row.referenceCurrency,
+      referencePriceInPlan: row.referencePriceInPlan,
+      basePriceInPlan: row.basePriceInPlan,
+      referenceRate: row.referenceRate,
       agreementId: row.agreementId,
       agreementName: row.agreementName,
       pricingLocationId: row.pricingLocationId,
@@ -466,6 +475,7 @@ export class InMemoryTreatmentPlanRepository
       catalogItemId: input.catalogItemId,
       catalogPrice: input.catalogPrice,
       ...input.pricing,
+      ...input.pricing.reference,
       price: input.price,
       discount: input.discount ?? 0,
       discountReason: input.discountReason ?? null,
@@ -504,7 +514,8 @@ export class InMemoryTreatmentPlanRepository
       decide({ plan, item: this.toItemEntity(row) }),
     );
     this.lastMirror = mirror;
-    const { discountStamp, ...fields } = patch;
+    const { discountStamp, reference, ...fields } = patch;
+    if (reference) this.writeReference(row, reference);
     const definedPatch = Object.fromEntries(
       Object.entries(fields).filter(([, value]) => value !== undefined),
     );
@@ -535,6 +546,24 @@ export class InMemoryTreatmentPlanRepository
         performedLocationId: change.performedLocationId,
       }).filter(([, value]) => value !== undefined),
     );
+  }
+
+  /**
+   * DX-513-bis: igual que el trigger `treatment_plan_items_reference_frozen`:
+   * una foto escrita no cambia; solo se pasa de NULL a un valor.
+   */
+  private writeReference(row: StoredItem, reference: ReferenceSnapshot): void {
+    const written =
+      row.referenceCurrency !== null ||
+      row.referencePriceInPlan !== null ||
+      row.basePriceInPlan !== null ||
+      row.referenceRate !== null;
+    if (written) {
+      throw new Error(
+        'la referencia del ítem en la moneda del plan queda fijada al escribirla: no cambia',
+      );
+    }
+    Object.assign(row, reference);
   }
 
   /** Igual que el repositorio real: la sede es la del request (o la principal). */
@@ -570,8 +599,9 @@ export class InMemoryTreatmentPlanRepository
       decide({ plan, items: rows.map((r) => this.toItemEntity(r)) }),
     );
     return changes.map((change) => {
-      const { itemId, discountStamp, ...fields } = change;
+      const { itemId, discountStamp, reference, ...fields } = change;
       const row = rows.find((r) => r.id === itemId)!;
+      if (reference) this.writeReference(row, reference);
       const definedFields = Object.fromEntries(
         Object.entries(fields).filter(([, value]) => value !== undefined),
       );

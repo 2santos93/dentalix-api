@@ -1,3 +1,4 @@
+import type { FrozenReferenceRate } from '../reference-in-plan';
 import type {
   DiscountReason,
   PriceSource,
@@ -32,13 +33,31 @@ export interface DiscountReportRow {
   toothNumber: string;
   procedure: string;
   currency: string;
-  /** Precio de catálogo al dar de alta el ítem (null = ítem libre). */
+  /**
+   * Precio de catálogo al dar de alta el ítem (null = ítem libre), en SU
+   * moneda (`referenceCurrency`), que puede no ser la del plan.
+   */
   catalogPrice: number | null;
+  /**
+   * DX-513-bis: moneda de `catalogPrice` (la congelada o, en un ítem
+   * anterior, la de DX-513); null si no se sabe o el ítem es libre.
+   */
+  referenceCurrency: string | null;
+  /**
+   * DX-513-bis: `catalogPrice` en la moneda del plan, congelado al escribir
+   * el ítem; null en los anteriores sin foto.
+   */
+  referencePriceInPlan: number | null;
+  /** DX-513-bis: `basePrice` en la moneda del plan (con la foto). */
+  basePriceInPlan: number | null;
+  /** DX-513-bis: la tasa con que se convirtió la referencia; null si no. */
+  rate: FrozenReferenceRate | null;
   /** Precio pactado del ítem. */
   price: number;
   /**
-   * Rebaja de precio frente al catálogo: max(0, catálogo − precio), 0 con la
-   * referencia en otra moneda conocida (DX-513).
+   * Rebaja de precio frente a la referencia en la moneda del plan (la foto,
+   * DX-513-bis); en un ítem anterior sin foto, max(0, catálogo − precio), 0
+   * con la referencia en otra moneda conocida (DX-513).
    */
   priceReduction: number;
   /** El `discount` del ítem. */

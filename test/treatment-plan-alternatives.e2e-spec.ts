@@ -20,6 +20,10 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-040 en HTTP real: alternativas A/B, presentar, rechazar, la máquina de
 // estados (409), los permisos por rol y la lista de presupuestos por seguir
@@ -151,6 +155,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     clinicA = await registerClinic(app, 'alternativas-a');
     clinicB = await registerClinic(app, 'alternativas-b');
     tokens.ADMIN = clinicA.adminToken;
@@ -179,6 +184,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();

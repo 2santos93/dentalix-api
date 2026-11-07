@@ -28,6 +28,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { civilDaysSince } from './support/sede-clock';
+import type { ReferenceRateSource } from '../src/modules/treatment-plans/domain/ports/reference-rate-source.port';
 
 // DX-502-bis contra Postgres, con la fuente de precios REAL: la moneda del
 // catálogo fijada por la clínica (`tenants.catalogCurrency`) es la que se
@@ -56,12 +57,38 @@ const pricing = new PrismaPricingSource(
 );
 const policy = testDiscountPolicy();
 const now = () => new Date();
-const add = new AddTreatmentPlanItemUseCase(plans, pricing, policy, now);
+/**
+ * DX-513-bis: la tasa de hoy (unidades por 1 USD; USD vale 1). A la par por
+ * defecto, para que los importes de estos casos (DX-502-bis) no cambien.
+ */
+const ratesAt = (ves: number, eur = 1): ReferenceRateSource => ({
+  rateFor: (from, to) => {
+    const of = (c: string) => (c === 'VES' ? ves : c === 'EUR' ? eur : 1);
+    return Promise.resolve({
+      kind: 'rate',
+      rate: {
+        fromPerBase: of(from),
+        toPerBase: of(to),
+        source: 'MANUAL',
+        rateDate: '2026-11-07',
+      },
+      toDigits: 2,
+    });
+  },
+});
+const add = new AddTreatmentPlanItemUseCase(
+  plans,
+  pricing,
+  policy,
+  now,
+  ratesAt(1),
+);
 const update = new UpdateTreatmentPlanItemUseCase(
   plans,
   catalogRepo,
   policy,
   now,
+  ratesAt(1),
 );
 const report = new PrismaDiscountReportRepository(prisma, tenantContext);
 
@@ -306,15 +333,31 @@ describe('moneda del catálogo fijada por la clínica (DX-502-bis, Postgres)', (
     ]);
   });
 
-  it('DX-513: con el catálogo en USD, un plan en VES por debajo NO es un descuento (otra moneda conocida)', async () => {
+  it('DX-513-bis: con el catálogo en USD (100) y un plan en VES a 400 Bs./USD, la referencia es 40.000 Bs. y 32.000 es una rebaja', async () => {
     await setCatalogCurrency('USD');
     const planId = await plan('VES');
+    const addAt400 = new AddTreatmentPlanItemUseCase(
+      plans,
+      pricing,
+      policy,
+      now,
+      ratesAt(400),
+    );
+    await expect(
+      inTenant(() =>
+        addAt400.execute(planId, { ...CROWN(), price: 32000 }, ASSISTANT()),
+      ),
+    ).rejects.toThrow(new ForbiddenException(priceBelowCatalogCapMessage(0)));
     const created = await inTenant(() =>
-      add.execute(planId, { ...CROWN(), price: 80 }, ASSISTANT()),
+      addAt400.execute(planId, CROWN(), ASSISTANT()),
     );
     expect(created).toMatchObject({
       catalogCurrency: 'USD',
-      discountReason: null,
+      catalogPrice: 100,
+      referenceCurrency: 'USD',
+      referencePriceInPlan: 40000,
+      price: 40000,
+      referenceRate: { fromPerBase: 1, toPerBase: 400 },
       discountById: null,
     });
   });

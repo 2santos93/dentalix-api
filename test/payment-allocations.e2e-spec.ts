@@ -11,6 +11,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-051 Task 3 por HTTP: el alta de un abono crea su base y el interceptor
 // reparte tras el COMMIT, en la misma petición; la anulación borra sus
@@ -202,6 +206,7 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: RATE_DATE } });
     await raw.exchangeRateSnapshot.create({
       data: { date: RATE_DATE, currency: 'EUR', rate: RATE_EUR },
@@ -238,6 +243,7 @@ describe('Imputación automática de abonos (DX-051, e2e)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: RATE_DATE } });
     await app.close();

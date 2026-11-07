@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { ReferenceRateDto } from '../../../discounts/presentation/dto/reference-rate.dto';
 import { Transform } from 'class-transformer';
 import { IsUUID, Matches } from 'class-validator';
 import { PriceSource } from '@prisma/client';
@@ -65,4 +66,42 @@ export class PriceQuoteDto {
 
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   currency!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-513-bis: moneda de `price` (la del plan para las listas, la del catálogo para el resto). Null si no se sabe o no hay precio.',
+  })
+  referenceCurrency!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `price` en la moneda del plan (convertido con `rate` si está en otra): el precio que se propone y la referencia del descuento. Null sin precio o sin tasa (`rateMissing`).',
+  })
+  referencePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-bis: la tasa de hoy en la sede con la que se convertiría; null si no hace falta.',
+  })
+  rate!: ReferenceRateDto | null;
+
+  @ApiProperty({
+    description:
+      'DX-513-bis: hace falta una tasa (referencia en otra moneda) y no la hay hoy: el alta respondería 422 `DISCOUNT_REFERENCE_RATE_MISSING`.',
+  })
+  rateMissing!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-513-bis: con `rateMissing`, la moneda sin tasa (la que falta registrar); null si no falta.',
+  })
+  missingRateCurrency!: string | null;
 }

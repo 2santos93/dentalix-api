@@ -4,6 +4,7 @@ import {
   ToothSurface,
   TreatmentPlanItemStatus,
 } from '@prisma/client';
+import type { FrozenReferenceRate } from '../../../discounts/domain/reference-in-plan';
 
 /**
  * API-facing shape of a TreatmentPlanItem. Deliberately NOT the raw Prisma
@@ -41,6 +42,18 @@ export interface TreatmentPlanItem {
    */
   catalogCurrency: string | null;
   priceSource: PriceSource | null;
+  /**
+   * DX-513-bis: foto de la referencia en la moneda del plan, escrita una vez
+   * (al dar de alta el ítem o, en uno anterior, en su primera rebaja). La
+   * moneda de `catalogPrice` (null si no se supo), `catalogPrice` y
+   * `basePrice` en la moneda del plan y, si se convirtió, la tasa. Todo null
+   * en los ítems anteriores sin foto y en los libres. El tope, el motivo y el
+   * informe miden la rebaja frente a `referencePriceInPlan`.
+   */
+  referenceCurrency: string | null;
+  referencePriceInPlan: number | null;
+  basePriceInPlan: number | null;
+  referenceRate: FrozenReferenceRate | null;
   agreementId: string | null;
   agreementName: string | null;
   pricingLocationId: string | null;

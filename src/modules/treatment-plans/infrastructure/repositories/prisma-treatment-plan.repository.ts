@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   ClinicRole,
+  ExchangeRateSource,
   Prisma,
   ToothRecordStatus,
   TreatmentPlanItemStatus,
@@ -43,6 +44,7 @@ import {
   isAttendingRole,
 } from '../../domain/plan-item-attribution';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { ReferenceSnapshot } from '../../../discounts/domain/reference-in-plan';
 import type { AuditAttributionSide } from '../../../audit/domain/audit-metadata';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 
@@ -182,6 +184,7 @@ function mapItemToEntity(item: PrismaItemWithAttribution): TreatmentPlanItem {
     basePrice: item.basePrice?.toNumber() ?? null,
     catalogCurrency: item.catalogCurrency,
     priceSource: item.priceSource,
+    ...referenceFromRow(item),
     agreementId: item.agreementId,
     agreementName: item.agreementName,
     pricingLocationId: item.pricingLocationId,
@@ -203,6 +206,60 @@ function mapItemToEntity(item: PrismaItemWithAttribution): TreatmentPlanItem {
     notes: item.notes,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+  };
+}
+
+/**
+ * DX-513-bis: la foto de la referencia tal como la guarda la fila. La tasa
+ * solo si se convirtió (el CHECK exige las cuatro columnas juntas).
+ */
+export function referenceFromRow(item: {
+  referenceCurrency: string | null;
+  referencePriceInPlan: Prisma.Decimal | null;
+  basePriceInPlan: Prisma.Decimal | null;
+  referenceRateFrom: Prisma.Decimal | null;
+  referenceRateTo: Prisma.Decimal | null;
+  referenceRateSource: ExchangeRateSource | null;
+  referenceRateDate: Date | null;
+}): ReferenceSnapshot {
+  return {
+    referenceCurrency: item.referenceCurrency,
+    referencePriceInPlan: item.referencePriceInPlan?.toNumber() ?? null,
+    basePriceInPlan: item.basePriceInPlan?.toNumber() ?? null,
+    referenceRate:
+      item.referenceRateFrom &&
+      item.referenceRateTo &&
+      item.referenceRateSource &&
+      item.referenceRateDate
+        ? {
+            fromPerBase: item.referenceRateFrom.toNumber(),
+            toPerBase: item.referenceRateTo.toNumber(),
+            source: item.referenceRateSource,
+            rateDate: item.referenceRateDate.toISOString().slice(0, 10),
+          }
+        : null,
+  };
+}
+
+/** DX-513-bis: las columnas de la foto de la referencia. */
+export function referenceColumns(snapshot: ReferenceSnapshot): {
+  referenceCurrency: string | null;
+  referencePriceInPlan: number | null;
+  basePriceInPlan: number | null;
+  referenceRateFrom: number | null;
+  referenceRateTo: number | null;
+  referenceRateSource: ExchangeRateSource | null;
+  referenceRateDate: Date | null;
+} {
+  const rate = snapshot.referenceRate;
+  return {
+    referenceCurrency: snapshot.referenceCurrency,
+    referencePriceInPlan: snapshot.referencePriceInPlan,
+    basePriceInPlan: snapshot.basePriceInPlan,
+    referenceRateFrom: rate?.fromPerBase ?? null,
+    referenceRateTo: rate?.toPerBase ?? null,
+    referenceRateSource: rate?.source ?? null,
+    referenceRateDate: rate ? new Date(`${rate.rateDate}T00:00:00.000Z`) : null,
   };
 }
 
@@ -412,6 +469,8 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           // DX-502: la moneda del catálogo, congelada con su precio.
           catalogCurrency: input.pricing.catalogCurrency,
           priceSource: input.pricing.priceSource,
+          // DX-513-bis: la referencia en la moneda del plan y su tasa.
+          ...referenceColumns(input.pricing.reference),
           agreementId: input.pricing.agreementId,
           agreementName: input.pricing.agreementName,
           pricingLocationId: input.pricing.pricingLocationId,
@@ -475,11 +534,12 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         plan,
         item: mapItemToEntity(previous),
       });
-      const { discountStamp, ...fields } = patch;
+      const { discountStamp, reference, ...fields } = patch;
       const item = await tx.treatmentPlanItem.update({
         where: { id },
         data: {
           ...fields,
+          ...(reference ? referenceColumns(reference) : {}),
           ...(await discountStampData(tx, discountStamp, this.tenantContext)),
           ...(attribution
             ? await this.attributionData(tx, attribution, previous)
@@ -695,6 +755,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
             discount: change.discount,
             discountReason: change.discountReason,
             discountReasonNote: change.discountReasonNote,
+            ...(change.reference ? referenceColumns(change.reference) : {}),
             ...(await discountStampData(
               tx,
               change.discountStamp,

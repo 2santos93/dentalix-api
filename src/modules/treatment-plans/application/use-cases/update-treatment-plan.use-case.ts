@@ -56,6 +56,16 @@ export const CURRENCY_LOCKED_BY_PAYMENTS_MESSAGE =
 export const CURRENCY_LOCKED_BY_CREDIT_CODE = 'PLAN_CURRENCY_LOCKED_BY_CREDIT';
 export const CURRENCY_LOCKED_BY_CREDIT_MESSAGE =
   'El plan tiene saldo a favor traspasado o devuelto: su moneda ya no cambia, porque ese saldo está en la moneda actual del plan.';
+/**
+ * DX-513-bis §5.6: la referencia de cada ítem (y su foto convertida) está en
+ * la moneda del plan de cuando se escribió: un plan con algún ítem vivo con
+ * precio de referencia ya no cambia de moneda (cierra H1, R1 y R2 de DX-513).
+ * Los ítems libres no bloquean.
+ */
+export const CURRENCY_LOCKED_BY_PRICED_ITEMS_CODE =
+  'PLAN_CURRENCY_LOCKED_BY_PRICED_ITEMS';
+export const CURRENCY_LOCKED_BY_PRICED_ITEMS_MESSAGE =
+  'El plan ya tiene ítems con precio de referencia: su moneda no cambia. Crea el plan en la otra moneda o quita esos ítems.';
 export const CURRENCY_LOCKED_BY_PAYMENT_PLAN_MESSAGE =
   'El plan tiene un plan de cuotas activo: cancélalo antes de cambiar la moneda.';
 /** Motivo que queda en el plan de cuotas cancelado junto a su plan (DX-109). */
@@ -197,9 +207,18 @@ export class UpdateTreatmentPlanUseCase {
               CURRENCY_LOCKED_BY_PAYMENT_PLAN_MESSAGE,
             );
           }
-          // DX-513 (revisión H1): la moneda decide si una rebaja frente al
-          // catálogo es un descuento; cada ítem se vuelve a medir con la
-          // nueva (tope, motivo y firma), con el plan bloqueado.
+          // DX-513-bis §5.6: con algún ítem vivo con referencia, la moneda
+          // ya no cambia (su referencia y su foto están en esta moneda).
+          if (existing.items.some((item) => item.catalogPrice !== null)) {
+            throw new ConflictException({
+              statusCode: 409,
+              error: 'Conflict',
+              code: CURRENCY_LOCKED_BY_PRICED_ITEMS_CODE,
+              message: CURRENCY_LOCKED_BY_PRICED_ITEMS_MESSAGE,
+            });
+          }
+          // DX-513 (revisión H1): sin ítems con referencia no hay rebaja que
+          // pueda aparecer o desaparecer; la comprobación queda como red.
           if (policy) {
             assertCurrencyChangeKeepsDiscounts(
               policy,

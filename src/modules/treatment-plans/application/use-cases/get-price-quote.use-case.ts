@@ -1,4 +1,9 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import type { PriceSource } from '@prisma/client';
 import {
   PRICING_SOURCE,
@@ -10,6 +15,16 @@ import {
   type PatientAgreementRepository,
 } from '../../../patient-agreements/domain/ports/patient-agreement-repository.port';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patient-coverages/domain/coverage-rules';
+import {
+  freezeReference,
+  type FrozenReferenceRate,
+} from '../../../discounts/domain/reference-in-plan';
+import {
+  NO_REFERENCE_RATES,
+  REFERENCE_RATE_SOURCE,
+  type ReferenceRateSource,
+} from '../../domain/ports/reference-rate-source.port';
+import { referenceRateFor } from './reference-rate';
 
 export const PRICE_QUOTE_CATALOG_ITEM_NOT_FOUND_MESSAGE =
   'Procedimiento no encontrado.';
@@ -25,6 +40,26 @@ export interface PriceQuote {
   agreementName: string | null;
   allowDiscount: boolean;
   currency: string;
+  /**
+   * DX-513-bis: moneda de `price` (la del plan para las listas, la del
+   * catálogo para el resto); null si no se sabe o no hay precio.
+   */
+  referenceCurrency: string | null;
+  /**
+   * DX-513-bis: `price` en la moneda del plan (convertido con la tasa de hoy
+   * si está en otra moneda): el precio que se propone y la referencia del
+   * descuento. Null sin precio o sin tasa (`rateMissing`).
+   */
+  referencePriceInPlan: number | null;
+  /** DX-513-bis: la tasa con que se convirtió; null si no hizo falta. */
+  rate: FrozenReferenceRate | null;
+  /**
+   * DX-513-bis: hacía falta una tasa y no hay: el alta respondería 422
+   * `DISCOUNT_REFERENCE_RATE_MISSING`.
+   */
+  rateMissing: boolean;
+  /** DX-513-bis: la moneda sin tasa (con `rateMissing`); null si no falta. */
+  missingRateCurrency: string | null;
 }
 
 /**
@@ -42,6 +77,10 @@ export class GetPriceQuoteUseCase {
       PatientAgreementRepository,
       'patientExists'
     >,
+    // DX-513-bis: sin fuente (specs que no la necesitan), «sin tasa».
+    @Optional()
+    @Inject(REFERENCE_RATE_SOURCE)
+    private readonly rates: ReferenceRateSource = NO_REFERENCE_RATES,
   ) {}
 
   async execute(
@@ -60,6 +99,42 @@ export class GetPriceQuoteUseCase {
     if (!context) {
       throw new NotFoundException(PRICE_QUOTE_CATALOG_ITEM_NOT_FOUND_MESSAGE);
     }
-    return { ...resolveItemPrice(context), currency };
+    const resolved = resolveItemPrice(context);
+    // La misma foto que tomaría el alta (DX-513-bis §5.3), sin escribir nada:
+    // sin tasa no lanza, lo dice (`rateMissing`).
+    const priced = {
+      catalogPrice: resolved.price,
+      basePrice: resolved.basePrice,
+      catalogCurrency:
+        resolved.basePrice === null ? null : resolved.catalogCurrency,
+      priceSource: resolved.source,
+    };
+    const asked = await referenceRateFor(this.rates, priced, currency);
+    if (asked?.lookup.kind === 'missing') {
+      return {
+        ...resolved,
+        currency,
+        referenceCurrency: asked.currency,
+        referencePriceInPlan: null,
+        rate: null,
+        rateMissing: true,
+        missingRateCurrency: asked.lookup.currency,
+      };
+    }
+    const reference = freezeReference(
+      priced,
+      currency,
+      asked?.lookup.toDigits ?? 2,
+      asked?.lookup.rate ?? null,
+    );
+    return {
+      ...resolved,
+      currency,
+      referenceCurrency: reference.referenceCurrency,
+      referencePriceInPlan: reference.referencePriceInPlan,
+      rate: reference.referenceRate,
+      rateMissing: false,
+      missingRateCurrency: null,
+    };
   }
 }

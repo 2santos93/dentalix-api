@@ -147,9 +147,13 @@ function withPercent(row: DiscountReportRow): DiscountReportRowView {
   return {
     ...row,
     percent: discountPercent(row.price + row.priceReduction, row.discount),
+    // DX-513-bis: con foto, sobre la base en la moneda del plan.
     agreementPercent:
-      row.basePrice === null
+      (row.basePriceInPlan ?? row.basePrice) === null
         ? 0
-        : discountPercent(row.basePrice, row.agreementReduction),
+        : discountPercent(
+            row.basePriceInPlan ?? row.basePrice ?? 0,
+            row.agreementReduction,
+          ),
   };
 }
