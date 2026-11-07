@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CatalogKind } from '@prisma/client';
 
 // Response shape for DentalCatalogItem endpoints — documents the
@@ -43,6 +43,14 @@ export class DentalCatalogItemDto {
       'DX-105: false = la prestación no admite descuentos (ni % de convenio ni discrecionales).',
   })
   allowDiscount!: boolean;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502-ter: moneda del `defaultPrice`, la del catálogo de la clínica; null si no se sabe. Solo la traen las lecturas (`GET /catalog/items`); es la misma en todos los ítems.',
+  })
+  catalogCurrency?: string | null;
 
   @ApiProperty()
   active!: boolean;

@@ -3,6 +3,10 @@ import { CatalogKind } from '@prisma/client';
 import { DENTAL_CATALOG_REPOSITORY } from '../../domain/ports/dental-catalog-repository.port';
 import type { DentalCatalogRepository } from '../../domain/ports/dental-catalog-repository.port';
 import { DentalCatalogItem } from '../../domain/entities/dental-catalog-item.entity';
+import {
+  CATALOG_CURRENCY_READER,
+  type CatalogCurrencyReader,
+} from '../../domain/ports/catalog-currency-reader.port';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_PAGE_SIZE = 20;
@@ -21,6 +25,8 @@ export interface ListCatalogDirectoryOutput {
   total: number;
   page: number;
   pageSize: number;
+  /** DX-502-ter: la moneda del `defaultPrice` de los ítems; `null` si no se sabe. */
+  catalogCurrency: string | null;
 }
 
 // Misma normalización que `ListInventoryItemsUseCase` y `ListPatientsUseCase`:
@@ -47,6 +53,8 @@ export class ListCatalogDirectoryUseCase {
   constructor(
     @Inject(DENTAL_CATALOG_REPOSITORY)
     private readonly repo: DentalCatalogRepository,
+    @Inject(CATALOG_CURRENCY_READER)
+    private readonly currency: CatalogCurrencyReader,
   ) {}
 
   /**
@@ -68,14 +76,17 @@ export class ListCatalogDirectoryUseCase {
     const pageSize = normalizePageSize(input.pageSize);
     const query = input.query?.trim() || undefined;
 
-    const { items, total } = await this.repo.listDirectory({
-      query,
-      kind: input.kind,
-      activeOnly: input.activeOnly,
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    });
+    const [{ items, total }, catalogCurrency] = await Promise.all([
+      this.repo.listDirectory({
+        query,
+        kind: input.kind,
+        activeOnly: input.activeOnly,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.currency.current(),
+    ]);
 
-    return { items, total, page, pageSize };
+    return { items, total, page, pageSize, catalogCurrency };
   }
 }

@@ -51,6 +51,10 @@ function makeRepo(
   };
 }
 
+const reader = (currency: string | null = null) => ({
+  current: () => Promise.resolve(currency),
+});
+
 describe('ListCatalogItemsUseCase', () => {
   it('passes the kind filter through to the repository unchanged', async () => {
     let captured: ListDentalCatalogItemsParams | undefined;
@@ -60,7 +64,7 @@ describe('ListCatalogItemsUseCase', () => {
         return Promise.resolve([]);
       },
     });
-    const uc = new ListCatalogItemsUseCase(repo);
+    const uc = new ListCatalogItemsUseCase(repo, reader());
 
     await uc.execute({ kind: CatalogKind.PROCEDURE });
 
@@ -76,7 +80,7 @@ describe('ListCatalogItemsUseCase', () => {
         return Promise.resolve([]);
       },
     });
-    const uc = new ListCatalogItemsUseCase(repo);
+    const uc = new ListCatalogItemsUseCase(repo, reader());
 
     await uc.execute({ activeOnly: true });
 
@@ -92,7 +96,7 @@ describe('ListCatalogItemsUseCase', () => {
         return Promise.resolve([]);
       },
     });
-    const uc = new ListCatalogItemsUseCase(repo);
+    const uc = new ListCatalogItemsUseCase(repo, reader());
 
     await uc.execute({ kind: CatalogKind.DIAGNOSIS, activeOnly: false });
 
@@ -110,12 +114,35 @@ describe('ListCatalogItemsUseCase', () => {
         return Promise.resolve([]);
       },
     });
-    const uc = new ListCatalogItemsUseCase(repo);
+    const uc = new ListCatalogItemsUseCase(repo, reader());
 
     await uc.execute({});
 
     expect(captured?.kind).toBeUndefined();
     expect(captured?.activeOnly).toBeUndefined();
+  });
+
+  it('DX-502-ter: stamps each item with the clinic catalog currency', async () => {
+    const items = [fakeItem('1'), fakeItem('2')];
+    const repo = makeRepo({
+      list: (): Promise<DentalCatalogItem[]> => Promise.resolve(items),
+    });
+
+    const result = await new ListCatalogItemsUseCase(
+      repo,
+      reader('USD'),
+    ).execute({});
+
+    expect(result.map((i) => i.catalogCurrency)).toEqual(['USD', 'USD']);
+    expect(result[0]).toMatchObject({ id: '1', labelEs: 'Caries' });
+  });
+
+  it('DX-502-ter: null currency when the clinic has none', async () => {
+    const repo = makeRepo({ list: () => Promise.resolve([fakeItem('1')]) });
+    const [item] = await new ListCatalogItemsUseCase(repo, reader()).execute(
+      {},
+    );
+    expect(item.catalogCurrency).toBeNull();
   });
 
   it('returns the items from the repository unchanged', async () => {
@@ -126,10 +153,12 @@ describe('ListCatalogItemsUseCase', () => {
     const repo = makeRepo({
       list: (): Promise<DentalCatalogItem[]> => Promise.resolve(items),
     });
-    const uc = new ListCatalogItemsUseCase(repo);
+    const uc = new ListCatalogItemsUseCase(repo, reader());
 
     const result = await uc.execute({});
 
-    expect(result).toBe(items);
+    expect(result).toEqual(
+      items.map((item) => ({ ...item, catalogCurrency: null })),
+    );
   });
 });

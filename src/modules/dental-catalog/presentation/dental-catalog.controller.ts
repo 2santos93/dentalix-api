@@ -24,7 +24,10 @@ import { ListCatalogItemsQueryDto } from './dto/list-catalog-items-query.dto';
 import { ListCatalogDirectoryQueryDto } from './dto/list-catalog-directory-query.dto';
 import { CatalogDirectoryResponseDto } from './dto/catalog-directory-response.dto';
 import { CreateCatalogItemUseCase } from '../application/use-cases/create-catalog-item.use-case';
-import { ListCatalogItemsUseCase } from '../application/use-cases/list-catalog-items.use-case';
+import {
+  ListCatalogItemsUseCase,
+  type CatalogItemWithCurrency,
+} from '../application/use-cases/list-catalog-items.use-case';
 import {
   ListCatalogDirectoryUseCase,
   type ListCatalogDirectoryOutput,
@@ -72,7 +75,9 @@ export class DentalCatalogController {
 
   @Get()
   @ApiOkResponse({ type: [DentalCatalogItemDto] })
-  list(@Query() query: ListCatalogItemsQueryDto): Promise<DentalCatalogItem[]> {
+  list(
+    @Query() query: ListCatalogItemsQueryDto,
+  ): Promise<CatalogItemWithCurrency[]> {
     return this.listCatalogItems.execute({
       kind: query.kind,
       activeOnly: query.activeOnly,
