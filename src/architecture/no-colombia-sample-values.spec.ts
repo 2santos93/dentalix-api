@@ -25,9 +25,6 @@ const EXCLUDED: readonly RegExp[] = [
   /^src\/shared\/time\/iana-zone-names\.ts$/,
   // Foto literal de la regla de redondeo anterior a DX-340.
   /^src\/shared\/money\/__fixtures__\/pre-dx340-oracle\.ts$/,
-  // DX-488: fija la lista de referencia de las 13 monedas ISO con redondeo 0
-  // (un catálogo mundial, no un valor de ejemplo).
-  /^src\/shared\/money\/rounding-digits-decision\.spec\.ts$/,
   // Pruebas de migraciones ya aplicadas: el SQL impone sus literales.
   /^test\/location-country-code-migration\.int-spec\.ts$/,
   /^test\/location-regional-settings-migration\.int-spec\.ts$/,
