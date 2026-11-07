@@ -15,6 +15,8 @@
  * totales van por moneda.
  */
 
+import { round2WithEpsilon } from '../../../shared/money/money';
+
 export const UNCATEGORIZED_LABEL = 'Sin categoría';
 
 /** Lo que suma la base de datos por procedimiento y moneda. */
@@ -68,13 +70,11 @@ export interface ProcedureProduction {
   totals: AmountTotals[];
 }
 
-/** Redondeo a `decimals` decimales, a la mitad hacia arriba. */
-function round(value: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round((value + Number.EPSILON) * factor) / factor;
-}
+/** Diferencia % frente al catálogo, a la mitad hacia arriba (no un importe). */
+const roundPercent = (value: number, decimals: number): number =>
+  Math.round((value + Number.EPSILON) * 10 ** decimals) / 10 ** decimals;
 
-const money = (value: number) => round(value, 2);
+const money = round2WithEpsilon;
 
 function compareText(a: string, b: string): number {
   return a.localeCompare(b, 'es', { sensitivity: 'base', numeric: true });
@@ -112,7 +112,10 @@ function rowOf(s: ProcedureSums): ProcedureRow {
   const differencePercent =
     s.catalogCount === 0 || s.catalogSum <= 0
       ? null
-      : round(((s.catalogPricedNet - s.catalogSum) / s.catalogSum) * 100, 1);
+      : roundPercent(
+          ((s.catalogPricedNet - s.catalogSum) / s.catalogSum) * 100,
+          1,
+        );
   return {
     catalogItemId: s.catalogItemId,
     code: s.code,

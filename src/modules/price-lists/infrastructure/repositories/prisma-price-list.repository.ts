@@ -26,6 +26,7 @@ import {
   PRICE_LIST_LOCATION_TAKEN_MESSAGE,
   PRICE_LIST_NOT_FOUND_MESSAGE,
 } from '../../domain/price-list-rules';
+import { amountText } from '../../../../shared/money/money';
 
 type PrismaPriceList = Prisma.PriceListGetPayload<{
   include: { _count: { select: { items: true } } };
@@ -372,7 +373,7 @@ export class PrismaPriceListRepository implements PriceListRepository {
             SELECT gen_random_uuid(), ${tenantId}::uuid, ${id}::uuid, x.catalog_item_id, x.price, now(), now()
             FROM unnest(
               ${toSet.map((r) => r.catalogItemId)}::uuid[],
-              ${toSet.map((r) => r.price.toFixed(2))}::text[]::numeric[]
+              ${toSet.map((r) => amountText(r.price, 2))}::text[]::numeric[]
             ) AS x(catalog_item_id, price)
             ON CONFLICT ("tenantId", "priceListId", "catalogItemId")
             DO UPDATE SET "price" = EXCLUDED."price", "updatedAt" = now()`;

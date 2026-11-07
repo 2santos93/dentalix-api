@@ -7,6 +7,7 @@ import {
   bigCents,
   percentOfCentsInUnits,
   unitCents,
+  fitsRoundingDigits,
   unitsToAmount,
   type RoundingDigits,
 } from '../../../shared/money/line-rounding';
@@ -113,9 +114,7 @@ export function fitsCurrencyDigits(
   amount: number,
   digits: RoundingDigits,
 ): boolean {
-  const cents = amount * 100;
-  if (Math.abs(cents - Math.round(cents)) > 1e-6) return false;
-  return BigInt(Math.round(cents)) % unitCents(digits) === 0n;
+  return fitsRoundingDigits(amount, digits);
 }
 
 /** ¿Este ajuste se aplica a un abono en `currency`? */

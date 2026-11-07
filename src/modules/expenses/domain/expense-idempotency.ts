@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { amountText } from '../../../shared/money/money';
 
 /**
  * Idempotencia de `POST /expenses` y `POST /expenses/:id/payments` (DX-274),
@@ -23,7 +24,7 @@ const text = (value: unknown): unknown =>
 
 const money = (value: unknown): unknown =>
   typeof value === 'number' && Number.isFinite(value)
-    ? value.toFixed(2)
+    ? amountText(value, 2)
     : (value ?? null);
 
 /** Espacios colapsados (categoría, proveedor). */

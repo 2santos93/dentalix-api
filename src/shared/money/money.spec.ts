@@ -1,6 +1,13 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import { fromCents, round2, toCents } from './money';
+import {
+  amountText,
+  fromCents,
+  round2,
+  round2WithEpsilon,
+  roundCents,
+  toCents,
+} from './money';
 
 describe('dinero en centavos (src/shared/money, DX-054)', () => {
   it('toCents redondea al centavo entero (0.1 + 0.2 suma exacto)', () => {
@@ -22,6 +29,37 @@ describe('dinero en centavos (src/shared/money, DX-054)', () => {
     expect(round2(100.314999)).toBe(100.31);
     expect(round2(400000 / 4000)).toBe(100);
     expect(round2(-1.234)).toBe(-1.23);
+  });
+});
+
+describe('helpers de DX-488 (mismos resultados que el código en línea)', () => {
+  it('roundCents es Math.round', () => {
+    expect(roundCents(12_345)).toBe(12_345);
+    expect(roundCents(12_345.4)).toBe(12_345);
+    expect(roundCents(12_345.5)).toBe(12_346);
+    expect(roundCents(0)).toBe(0);
+  });
+
+  it('amountText es toFixed, en USD, VES y JPY', () => {
+    expect(amountText(1234.5, 2)).toBe('1234.50');
+    expect(amountText(36.5, 2)).toBe('36.50'); // VES
+    expect(amountText(1500, 0)).toBe('1500'); // JPY
+    expect(amountText(0.1 + 0.2, 2)).toBe('0.30');
+    // toFixed escribe el valor binario exacto: 1.005 es 1.00499999…
+    expect(amountText(1.005, 2)).toBe('1.00');
+    expect(amountText(2.675, 2)).toBe('2.67');
+  });
+
+  it('round2WithEpsilon conserva el redondeo del informe de producción', () => {
+    for (const v of [0, 1.005, 100.314999, 2.675, 1234.565, 400000 / 4000]) {
+      expect(round2WithEpsilon(v)).toBe(
+        Math.round((v + Number.EPSILON) * 100) / 100,
+      );
+    }
+    // Donde difieren de `round2` (empates de coma flotante):
+    expect(round2WithEpsilon(1.005)).toBe(1.01);
+    expect(round2(1.005)).toBe(1);
+    expect(round2WithEpsilon(1.005)).not.toBe(round2(1.005));
   });
 });
 

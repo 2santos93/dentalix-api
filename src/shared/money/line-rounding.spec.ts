@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import {
+  fitsRoundingDigits,
   lineCents,
   linesTotal,
   linesTotalCents,
@@ -88,5 +89,17 @@ describe('redondeo por línea (DX-340)', () => {
       ),
       { numRuns: 3000 },
     );
+  });
+});
+
+describe('fitsRoundingDigits (DX-488, antes en payment-adjustments)', () => {
+  it('USD/VES a 2 decimales, JPY a 0, y rechaza el resto', () => {
+    expect(fitsRoundingDigits(12.34, 2)).toBe(true);
+    expect(fitsRoundingDigits(12.345, 2)).toBe(false);
+    expect(fitsRoundingDigits(1500, 0)).toBe(true);
+    expect(fitsRoundingDigits(1500.5, 0)).toBe(false);
+    expect(fitsRoundingDigits(12.3, 1)).toBe(true);
+    expect(fitsRoundingDigits(12.34, 1)).toBe(false);
+    expect(fitsRoundingDigits(0.1 + 0.2, 2)).toBe(true);
   });
 });

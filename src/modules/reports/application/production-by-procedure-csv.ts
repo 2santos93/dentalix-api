@@ -4,6 +4,7 @@ import {
 } from '../domain/production-by-procedure';
 import type { ProductionByProcedure } from './use-cases/get-production-by-procedure.use-case';
 import { CLDR_ZERO_FORMAT_DIGITS } from '../../../shared/format/cldr-format-digits';
+import { amountText } from '../../../shared/money/money';
 
 /*
  * CSV de «Producción por procedimiento» (DX-423): las MISMAS filas y en el
@@ -54,7 +55,7 @@ function money(value: number | null, currency: string): string {
   const zero =
     CLDR_ZERO_FORMAT_DIGITS.has(currency.toUpperCase()) &&
     Number.isInteger(value);
-  return value.toFixed(zero ? 0 : 2);
+  return amountText(value, zero ? 0 : 2);
 }
 
 const categoryName = (category: string | null) =>

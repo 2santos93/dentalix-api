@@ -4,6 +4,7 @@ import type {
   PaymentPromiseStatus,
 } from '@prisma/client';
 import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
+import { amountText } from '../../../shared/money/money';
 
 /*
  * CSV de la cartera (DX-145): una línea por paciente y moneda, con los mismos
@@ -105,7 +106,7 @@ function text(value: string | null): string {
 }
 
 function money(value: number): string {
-  return value.toFixed(2);
+  return amountText(value, 2);
 }
 
 export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {

@@ -4,6 +4,8 @@
  * blancos) por = + - @ (o tabulador/CR) para que la hoja de cálculo no lo
  * ejecute como fórmula (inyección CSV).
  */
+
+import { amountText } from '../money/money';
 const FORMULA_START = /^[\s]*[=+\-@]|^[\t\r]/;
 
 export function csvText(value: string | null): string {
@@ -14,7 +16,7 @@ export function csvText(value: string | null): string {
 
 /** Importe con los decimales de su moneda (JPY sin decimales, EUR a céntimos). */
 export function csvAmount(value: number, decimals: 0 | 1 | 2): string {
-  return value.toFixed(decimals);
+  return amountText(value, decimals);
 }
 
 export const CSV_BOM = '\uFEFF';

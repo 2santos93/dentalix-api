@@ -23,3 +23,31 @@ export function fromCents(cents: number): number {
 export function round2(amount: number): number {
   return fromCents(toCents(amount));
 }
+
+/**
+ * Céntimos que llegan como número (suma de una consulta SQL) → céntimos
+ * enteros (DX-488). Es el mismo `Math.round` de siempre, ahora en un solo sitio.
+ */
+export function roundCents(cents: number): number {
+  return Math.round(cents);
+}
+
+/**
+ * Un importe como texto con `digits` decimales (`toFixed`), para claves de
+ * idempotencia, SQL `numeric`, CSV y presupuestos (DX-488). No redondea por
+ * línea: el importe ya está redondeado; esto solo lo escribe.
+ */
+export function amountText(amount: number, digits: number): string {
+  return amount.toFixed(digits);
+}
+
+/**
+ * Redondeo a 2 decimales con `Number.EPSILON` de ventaja, mitad hacia arriba
+ * (DX-488). Solo lo usa el informe de producción por procedimiento. Difiere de
+ * `round2` en los empates de coma flotante (1.005 → 1.01 aquí, 1 en `round2`):
+ * se conserva tal cual por no cambiar importes ya informados; unificarlo con
+ * `round2` es una decisión pendiente (ver README «Redondeo de importes»).
+ */
+export function round2WithEpsilon(amount: number): number {
+  return Math.round((amount + Number.EPSILON) * 100) / 100;
+}
