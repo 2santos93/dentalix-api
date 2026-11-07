@@ -18,6 +18,7 @@ import {
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
 import { sedeTodayFixture } from './support/sede-clock';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-516 en HTTP real: ajustes por medio de pago (impuesto, recargo o
 // descuento). Sin ajustes nada cambia; solo el ADMIN los configura, con su
@@ -144,6 +145,9 @@ describe('Ajustes por medio de pago (e2e, DX-516)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({

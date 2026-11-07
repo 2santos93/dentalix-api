@@ -12,6 +12,7 @@ import {
 } from './support/e2e-fixtures';
 import { REGIONAL_TOKYO_FIXTURE } from './support/location-fixtures';
 import { DocumentTypeNamesReader } from '../src/modules/patients/domain/ports/document-type-names-repository.port';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-203 en HTTP real: CRUD de responsables (paciente de la clínica o
 // contacto sin ficha), «Responsable de» en la ficha del responsable, 404 de un
@@ -759,6 +760,9 @@ describe('Responsables de pago y avisos (e2e, DX-203)', () => {
     }
 
     beforeAll(async () => {
+      // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+      // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+      await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
       const catalog = await as(
         api().post('/api/v1/catalog/items'),
         clinic.adminToken,

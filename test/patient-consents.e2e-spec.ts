@@ -24,6 +24,7 @@ import {
   locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y
 // limpiar — mismo criterio que account-statement.e2e-spec.ts. El borrado de
@@ -263,6 +264,9 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
     otherPatientA = await createPatient(clinicA, 'Beatriz', 'CONS-A-2');
     patientB = await createPatient(clinicB, 'Carla', 'CONS-B-1');
 
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinicA.tenantId, 'USD');
     const catalog = await as(clinicA)
       .post('/catalog/items', {
         code: 'CONS-EXO',

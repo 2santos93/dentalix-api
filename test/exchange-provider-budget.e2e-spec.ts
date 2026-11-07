@@ -16,6 +16,7 @@ import { DEFAULT_PROVIDER_RATES_LIMITS } from '../src/modules/exchange/applicati
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { REGIONAL_CARACAS_FIXTURE } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // SEC-058 en HTTP real, con los topes por defecto y un doble del proveedor
 // que cuenta sus llamadas (nunca sale a la red). Una clínica recién dada de
@@ -86,6 +87,9 @@ describe('Cupo por clínica del proveedor de tasas (e2e, SEC-058)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({

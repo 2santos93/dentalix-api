@@ -17,6 +17,7 @@ import {
 import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
 import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../src/modules/patients/domain/document-type-names';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-327 (R16) en HTTP real: el nombre local de cada tipo de documento lo
 // leen todos los roles y solo el ADMIN lo cambia; toda clínica empieza sin
@@ -513,6 +514,9 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
         where: { tenantId: clinic.tenantId, userId: dentist.id },
         data: { professionalLicense: 'RM-0001' },
       });
+      // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+      // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+      await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
       catalogItemId = (
         await post<{ id: string }>('/catalog/items', {
           code: 'DX327-PROC',

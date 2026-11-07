@@ -18,6 +18,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // Same admin/superuser connection convention as payments.e2e-spec.ts /
 // dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts: DIRECT_URL bypasses RLS
@@ -241,6 +242,9 @@ describe('Payment plans / cuotas (e2e)', () => {
 
       // --- 0. Seed a PROCEDURE catalog item priced so a single ACCEPTED item
       // makes the plan's balance exactly 1200.
+      // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+      // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+      await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
       const createCatalogItem = await request(app.getHttpServer())
         .post('/api/v1/catalog/items')
         .set('X-Tenant-Host', hostFor(clinic.subdomain))
@@ -431,6 +435,9 @@ describe('Payment plans / cuotas (e2e)', () => {
         .set('Authorization', `Bearer ${clinic.accessToken}`);
     const api = () => request(app.getHttpServer());
 
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (JPY): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'JPY');
     const catalogItem = (
       await as(api().post('/api/v1/catalog/items'))
         .send({

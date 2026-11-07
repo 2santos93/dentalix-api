@@ -12,6 +12,7 @@ import {
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
 import { sedeTodayFixture } from './support/sede-clock';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // «Hoy» de la sede lejos de su medianoche (DX-449): la caja y el CSV del día
 // ven los abonos recién registrados.
@@ -188,6 +189,9 @@ describe('Recibo no fiscal: título, leyenda y nº de factura externa (e2e, DX-5
           .expect(201)
       ).body as { id: string }
     ).id;
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, a.tenantId, 'USD');
     const item = (
       await as(a)
         .post('/catalog/items', {

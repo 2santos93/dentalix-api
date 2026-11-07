@@ -18,6 +18,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { fixedSedeDay } from './support/sede-clock';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-516-bis contra Postgres y por HTTP real: los ajustes por medio de pago
 // (IGTF del 3 % sobre el efectivo en divisa, un impuesto porcentual) en los
@@ -197,6 +198,9 @@ describe('Ajustes por medio de pago: abonos tardíos y de saldo inicial (int, DX
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({

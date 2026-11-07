@@ -22,6 +22,7 @@ import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cas
 import { addCivilDays } from '../src/shared/time/civil-day';
 import { fixedSedeDay } from './support/sede-clock';
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-384 en HTTP real: con fuente MANUAL, el abono de un día sin tasa congela
 // la última tasa registrada dentro del plazo de la clínica (N días; 3 por
@@ -138,6 +139,9 @@ describe('Tasa manual de respaldo hasta N días (e2e, DX-384)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({

@@ -9,6 +9,7 @@ import { PaymentAllocationJobs } from '../src/modules/payments/application/payme
 import { addCivilDays } from '../src/shared/time/civil-day';
 import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
 import { fixedSedeDay } from './support/sede-clock';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-375 en HTTP real: cada abono congela la tasa que usó y su fuente. Dos
 // clínicas el MISMO día, una automática y otra manual, congelan cada una la
@@ -132,6 +133,9 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({
