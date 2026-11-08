@@ -76,7 +76,12 @@ export async function untilStepMargin(
     throw new Error(`untilStepMargin: margen ${marginMs} ms ≥ un paso`);
   }
   let now = clock.now();
-  while (msLeftInStep(now) < marginMs) {
+  // Como mucho 3 vueltas: un paso basta; las demás cubren un temporizador que
+  // despierte antes que el reloj de pared. Más sería un reloj roto.
+  for (let turn = 0; msLeftInStep(now) < marginMs; turn++) {
+    if (turn === 3) {
+      throw new Error('untilStepMargin: el reloj no avanzó al paso siguiente');
+    }
     await clock.sleep(msLeftInStep(now));
     now = clock.now();
   }
