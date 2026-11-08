@@ -44,7 +44,10 @@ import {
   isAttendingRole,
 } from '../../domain/plan-item-attribution';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
-import type { ReferenceSnapshot } from '../../../discounts/domain/reference-in-plan';
+import {
+  itemRates,
+  type ReferenceSnapshot,
+} from '../../../discounts/domain/reference-in-plan';
 import type { AuditAttributionSide } from '../../../audit/domain/audit-metadata';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 
@@ -171,6 +174,7 @@ export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
 // exposes it as a plain `number` — same convention as
 // `PrismaDentalCatalogRepository.mapToEntity` for `defaultPrice`.
 function mapItemToEntity(item: PrismaItemWithAttribution): TreatmentPlanItem {
+  const reference = referenceFromRow(item);
   return {
     visit: item.visit,
     visitLabel: item.visitLabel,
@@ -184,7 +188,9 @@ function mapItemToEntity(item: PrismaItemWithAttribution): TreatmentPlanItem {
     basePrice: item.basePrice?.toNumber() ?? null,
     catalogCurrency: item.catalogCurrency,
     priceSource: item.priceSource,
-    ...referenceFromRow(item),
+    ...reference,
+    // DX-513-ter: la tasa de la foto, en `referenceRate` o en `baseRate`.
+    ...itemRates(item.priceSource, reference.referenceRate),
     agreementId: item.agreementId,
     agreementName: item.agreementName,
     pricingLocationId: item.pricingLocationId,

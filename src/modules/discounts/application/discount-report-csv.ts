@@ -20,7 +20,11 @@ import {
  * SU moneda («Moneda del catálogo»; antes se etiquetaba con la del plan), con
  * la referencia en la moneda del plan con la que se midió la rebaja y la tasa
  * congelada (unidades por 1 USD de las dos monedas, fuente y día). El CSV
- * nunca convierte.
+ * nunca convierte. DX-513-ter: la tasa es siempre la del CATÁLOGO a la del
+ * plan (en las listas de convenio, la de la base); la rebaja por convenio va
+ * VACÍA (nunca 0.00) en las líneas de convenio que no se pudieron medir, y al
+ * final, sin mover las demás columnas, el precio sin convenio en la moneda
+ * del catálogo y si la rebaja por convenio se midió.
  */
 export const DISCOUNT_REPORT_CSV_HEADER = [
   'Fecha',
@@ -33,7 +37,7 @@ export const DISCOUNT_REPORT_CSV_HEADER = [
   'Moneda del catálogo',
   'Precio de catálogo',
   'Precio de catálogo en la moneda del plan',
-  'Tasa (por 1 USD: origen / plan)',
+  'Tasa (por 1 USD: catálogo / plan)',
   'Fuente de la tasa',
   'Fecha de la tasa',
   'Precio',
@@ -50,6 +54,8 @@ export const DISCOUNT_REPORT_CSV_HEADER = [
   'Rebaja por convenio',
   'Convenio asignado por',
   'Ítem creado por',
+  'Precio sin convenio en la moneda del catálogo',
+  'Rebaja por convenio medida',
 ] as const;
 
 // Mismas etiquetas que la web.
@@ -116,9 +122,29 @@ function planLabel(row: DiscountReportRowView): string {
     : `Plan del ${created}`;
 }
 
-/** SEC-047: línea que solo tiene rebaja de convenio (sin descuento propio). */
+/**
+ * SEC-047: línea que solo tiene rebaja de convenio (sin descuento propio).
+ * DX-513-ter: también la de convenio sin medir.
+ */
 function agreementOnly(row: DiscountReportRowView): boolean {
-  return row.discount === 0 && row.agreementReduction > 0;
+  return (
+    row.discount === 0 &&
+    (row.agreementReduction > 0 || row.agreementUnmeasured)
+  );
+}
+
+/** DX-513-ter: `basePrice` en SU moneda (la del catálogo), con el código. */
+function baseInCatalogCurrencyText(row: DiscountReportRowView): string {
+  if (row.agreementName === null || row.basePrice === null) return '';
+  if (row.catalogCurrency === null)
+    return csvAmount(row.basePrice, row.currency);
+  return `${csvAmount(row.basePrice, row.catalogCurrency)} ${row.catalogCurrency}`;
+}
+
+/** DX-513-ter: si la rebaja por convenio se midió; vacío sin convenio. */
+function agreementMeasuredText(row: DiscountReportRowView): string {
+  if (row.agreementName === null) return '';
+  return row.agreementUnmeasured ? 'Sin referencia comparable' : 'Sí';
 }
 
 function reasonText(row: DiscountReportRowView): string {
@@ -140,6 +166,9 @@ export function toDiscountReportCsv(
 ): string {
   const lines: string[] = [DISCOUNT_REPORT_CSV_HEADER.join(',')];
   for (const row of rows) {
+    // DX-513-ter: la tasa del catálogo a la del plan, sea de la referencia o
+    // de la base de una lista de convenio.
+    const rate = row.rate ?? row.baseRate;
     lines.push(
       [
         row.discountOn,
@@ -154,9 +183,9 @@ export function toDiscountReportCsv(
           ? ''
           : csvAmount(row.catalogPrice, row.referenceCurrency ?? row.currency),
         referenceInPlanText(row),
-        row.rate ? `${row.rate.fromPerBase} / ${row.rate.toPerBase}` : '',
-        row.rate ? RATE_SOURCE_LABELS[row.rate.source] : '',
-        row.rate?.rateDate ?? '',
+        rate ? `${rate.fromPerBase} / ${rate.toPerBase}` : '',
+        rate ? RATE_SOURCE_LABELS[rate.source] : '',
+        rate?.rateDate ?? '',
         csvAmount(row.price, row.currency),
         csvAmount(row.priceReduction, row.currency),
         csvAmount(row.itemDiscount, row.currency),
@@ -168,9 +197,14 @@ export function toDiscountReportCsv(
         text(row.locationName),
         text(row.agreementName),
         baseWithoutAgreementText(row),
-        csvAmount(row.agreementReduction, row.currency),
+        // DX-513-ter: sin medir, vacía; nunca «0.00» (no se midió).
+        row.agreementUnmeasured
+          ? ''
+          : csvAmount(row.agreementReduction, row.currency),
         text(row.agreementAssignedByName),
         text(row.createdByName),
+        baseInCatalogCurrencyText(row),
+        agreementMeasuredText(row),
       ].join(','),
     );
   }

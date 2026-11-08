@@ -23,6 +23,8 @@ const row: DiscountReportRowView = {
   referencePriceInPlan: null,
   basePriceInPlan: null,
   rate: null,
+  baseRate: null,
+  agreementUnmeasured: false,
   price: 450,
   priceReduction: 0,
   itemDiscount: 67.5,
@@ -91,6 +93,9 @@ describe('CSV del informe de descuentos (DX-204)', () => {
         '0.00',
         '""',
         `"'=creador"`,
+        // DX-513-ter: sin convenio, las dos columnas nuevas vacías.
+        '',
+        '',
       ].join(','),
     );
   });
@@ -193,14 +198,14 @@ describe('CSV del informe de descuentos (DX-204)', () => {
     // autor real (quien asignó el convenio), no un descuento sin autor.
     expect(cells[18]).toBe('"Convenio Cortesía socios"');
     expect(cells[20]).toBe('"Admin Clínica"');
-    expect(cells.slice(22)).toEqual([
+    expect(cells.slice(22, 27)).toEqual([
       '"Cortesía socios"',
       '2000000',
       '2000000',
       '"Admin Clínica"',
       '"Dr. Pérez"',
     ]);
-    expect(DISCOUNT_REPORT_CSV_HEADER.slice(22)).toEqual([
+    expect(DISCOUNT_REPORT_CSV_HEADER.slice(22, 27)).toEqual([
       'Convenio',
       'Precio sin convenio',
       'Rebaja por convenio',
@@ -279,7 +284,7 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       'Moneda del catálogo',
       'Precio de catálogo',
       'Precio de catálogo en la moneda del plan',
-      'Tasa (por 1 USD: origen / plan)',
+      'Tasa (por 1 USD: catálogo / plan)',
       'Fuente de la tasa',
       'Fecha de la tasa',
       'Precio',
@@ -369,6 +374,96 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       expect(
         baseCell({ ...agreed, basePriceInPlan: null, catalogCurrency: null }),
       ).toBe('3600.00');
+    });
+  });
+
+  // DX-513-ter: lista de convenio en USD (3,50) con el catálogo en VES
+  // (3.600 Bs.). Medida: la base convertida (4,09) y la tasa congeladas;
+  // sin medir: la rebaja por convenio VACÍA (nunca 0.00) y señalada.
+  describe('DX-513-ter: listas de convenio entre monedas (test 13)', () => {
+    const RATE = {
+      fromPerBase: 880,
+      toPerBase: 1,
+      source: 'MANUAL' as const,
+      rateDate: '2026-11-07',
+    };
+    const list: DiscountReportRowView = {
+      ...row,
+      currency: 'USD',
+      priceSource: 'AGREEMENT_PRICE_LIST',
+      agreementName: 'Empresa',
+      catalogCurrency: 'VES',
+      referenceCurrency: 'USD',
+      catalogPrice: 3.5,
+      referencePriceInPlan: 3.5,
+      basePrice: 3600,
+      price: 3.5,
+      priceReduction: 0,
+      itemDiscount: 0,
+      discount: 0,
+      percent: 0,
+      reason: null,
+      reasonNote: null,
+      discountById: null,
+      discountByName: null,
+      agreementAssignedByName: 'Admin Clínica',
+    };
+    const cellsOf = (r: DiscountReportRowView) =>
+      toDiscountReportCsv([r]).slice(1).split('\r\n')[1].split(',');
+
+    it('las columnas de antes no se mueven; dos nuevas al final', () => {
+      expect(DISCOUNT_REPORT_CSV_HEADER).toHaveLength(29);
+      expect(DISCOUNT_REPORT_CSV_HEADER[10]).toBe(
+        'Tasa (por 1 USD: catálogo / plan)',
+      );
+      expect(DISCOUNT_REPORT_CSV_HEADER[24]).toBe('Rebaja por convenio');
+      expect(DISCOUNT_REPORT_CSV_HEADER.slice(27)).toEqual([
+        'Precio sin convenio en la moneda del catálogo',
+        'Rebaja por convenio medida',
+      ]);
+    });
+
+    it('medida: la rebaja, la base convertida y la tasa de la base', () => {
+      const cells = cellsOf({
+        ...list,
+        basePriceInPlan: 4.09,
+        baseRate: RATE,
+        agreementReduction: 0.59,
+        agreementPercent: 14.43,
+      });
+      expect(cells.slice(10, 13)).toEqual(['880 / 1', 'Manual', '2026-11-07']);
+      expect(cells[18]).toBe('"Convenio Empresa"');
+      expect(cells.slice(23, 25)).toEqual(['4.09', '0.59']);
+      expect(cells.slice(27)).toEqual(['3600.00 VES', 'Sí']);
+    });
+
+    it('sin medir: la rebaja por convenio vacía (no 0.00), señalada y sin tasa', () => {
+      const cells = cellsOf({ ...list, agreementUnmeasured: true });
+      expect(cells.slice(10, 13)).toEqual(['', '', '']);
+      expect(cells[18]).toBe('"Convenio Empresa"');
+      expect(cells[20]).toBe('"Admin Clínica"');
+      expect(cells[24]).toBe('');
+      expect(cells.slice(27)).toEqual([
+        '3600.00 VES',
+        'Sin referencia comparable',
+      ]);
+    });
+
+    it('con descuento propio y sin medir: el descuento sale y la rebaja por convenio sigue vacía', () => {
+      const cells = cellsOf({
+        ...list,
+        agreementUnmeasured: true,
+        itemDiscount: 0.5,
+        discount: 0.5,
+        reason: DiscountReason.LOYALTY,
+      });
+      expect(cells[16]).toBe('0.50');
+      expect(cells[24]).toBe('');
+      expect(cells[28]).toBe('Sin referencia comparable');
+    });
+
+    it('sin convenio: las dos columnas nuevas vacías', () => {
+      expect(cellsOf(row).slice(27)).toEqual(['', '']);
     });
   });
 });

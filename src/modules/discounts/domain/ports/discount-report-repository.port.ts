@@ -55,8 +55,25 @@ export interface DiscountReportRow {
   referencePriceInPlan: number | null;
   /** DX-513-bis: `basePrice` en la moneda del plan (con la foto). */
   basePriceInPlan: number | null;
-  /** DX-513-bis: la tasa con que se convirtió la referencia; null si no. */
+  /**
+   * DX-513-bis: la tasa con que se convirtió la referencia; null si no.
+   * DX-513-ter: siempre null en las listas (su referencia ya está en la moneda
+   * del plan): su tasa, la de la base, va en `baseRate`.
+   */
   rate: FrozenReferenceRate | null;
+  /**
+   * DX-513-ter: en una lista de convenio con el catálogo en otra moneda, la
+   * tasa con que se convirtió `basePrice` a `basePriceInPlan` al dar de alta
+   * el ítem; null si no.
+   */
+  baseRate: FrozenReferenceRate | null;
+  /**
+   * DX-513-ter: ítem de convenio con el catálogo en otra moneda conocida y sin
+   * la base congelada en la moneda del plan (no había tasa al darlo de alta,
+   * o es anterior): su rebaja de convenio no se puede medir sin convertir al
+   * consultar, así que se señala «sin referencia comparable», sin importe.
+   */
+  agreementUnmeasured: boolean;
   /** Precio pactado del ítem. */
   price: number;
   /**
@@ -88,7 +105,9 @@ export interface DiscountReportRow {
   /**
    * SEC-047: rebaja de convenio, max(0, basePrice − catalogPrice) en un ítem
    * resuelto por convenio, salvo con el catálogo en otra moneda conocida
-   * (DX-513); 0 en el resto.
+   * (DX-513); 0 en el resto. Con foto, max(0, basePriceInPlan −
+   * referencePriceInPlan) (DX-513-bis; en las listas de convenio, con la base
+   * convertida al darlo de alta, DX-513-ter). 0 si `agreementUnmeasured`.
    */
   agreementReduction: number;
   /**
@@ -132,7 +151,18 @@ export interface AgreementReductionTotal {
 export interface DiscountReportSummary {
   totals: DiscountReportTotal[];
   agreementTotals: AgreementReductionTotal[];
+  /** DX-513-ter: líneas de convenio sin medir, por moneda del plan. */
+  agreementUnmeasuredTotals: AgreementUnmeasuredTotal[];
   rows: number;
+}
+
+/**
+ * DX-513-ter: cuántas líneas de convenio de una moneda no se pudieron medir
+ * («sin referencia comparable»). Sin importe: no se convierte al consultar.
+ */
+export interface AgreementUnmeasuredTotal {
+  currency: string;
+  items: number;
 }
 
 export const DISCOUNT_REPORT_REPOSITORY = Symbol('DISCOUNT_REPORT_REPOSITORY');

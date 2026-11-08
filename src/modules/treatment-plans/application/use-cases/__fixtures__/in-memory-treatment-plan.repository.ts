@@ -38,7 +38,10 @@ import type {
   PlanCurrencySource,
 } from '../../../domain/ports/plan-currency-source.port';
 import type { ItemAttributionChange } from '../../../domain/plan-item-attribution';
-import type { ReferenceSnapshot } from '../../../../discounts/domain/reference-in-plan';
+import {
+  itemRates,
+  type ReferenceSnapshot,
+} from '../../../../discounts/domain/reference-in-plan';
 
 // `TreatmentPlan`/`TreatmentPlanItem` (the API-facing entities) deliberately
 // have no `deletedAt` field — same convention as Appointment. The fake still
@@ -49,7 +52,11 @@ type StoredPlan = TreatmentPlan & {
   deletedAt: Date | null;
   acceptance: TreatmentPlanAcceptanceSummary | null;
 };
-type StoredItem = TreatmentPlanItem & { deletedAt: Date | null };
+// `referenceRate` guarda la columna (la tasa de la foto, sea de la referencia
+// o de la base); la entidad la separa en `referenceRate`/`baseRate` (DX-513-ter).
+type StoredItem = Omit<TreatmentPlanItem, 'baseRate'> & {
+  deletedAt: Date | null;
+};
 
 let seq = 0;
 
@@ -203,7 +210,7 @@ export class InMemoryTreatmentPlanRepository
       referenceCurrency: row.referenceCurrency,
       referencePriceInPlan: row.referencePriceInPlan,
       basePriceInPlan: row.basePriceInPlan,
-      referenceRate: row.referenceRate,
+      ...itemRates(row.priceSource, row.referenceRate),
       agreementId: row.agreementId,
       agreementName: row.agreementName,
       pricingLocationId: row.pricingLocationId,

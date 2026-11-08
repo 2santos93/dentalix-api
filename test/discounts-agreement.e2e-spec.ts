@@ -37,8 +37,20 @@ const DAY = 24 * 60 * 60 * 1000;
 const caracasDay = (offset = 0) =>
   civilDateIn(new Date(Date.now() + offset * DAY), 'America/Caracas');
 
+interface FrozenRate {
+  fromPerBase: number;
+  toPerBase: number;
+  source: string;
+  rateDate: string;
+}
+
 interface ReportItem {
   itemId: string;
+  currency: string;
+  basePriceInPlan: number | null;
+  rate: FrozenRate | null;
+  baseRate: FrozenRate | null;
+  agreementUnmeasured: boolean;
   patientName: string;
   catalogPrice: number | null;
   price: number;
@@ -68,6 +80,7 @@ interface Report {
     percentOfGross: number;
   }[];
   agreementTotals: { currency: string; items: number; reduction: number }[];
+  agreementUnmeasuredTotals: { currency: string; items: number }[];
   items: ReportItem[];
   total: number;
 }
@@ -384,5 +397,162 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       professionalId: clinicA.adminUserId,
     });
     expect(byAdmin.totals).toEqual(before.totals);
+  });
+
+  // DX-513-ter: convenio de LISTA en USD (corona a 3,50) con el catálogo de la
+  // clínica en VES (3.600 Bs.). Sin tasa del día el ítem se crea igual y el
+  // informe lo señala «sin referencia comparable»; con la tasa (880 Bs./USD,
+  // MANUAL, sembrada: la CI no tiene EXCHANGE_APP_ID) la base convertida
+  // (4,09 USD) queda congelada y la rebaja se mide (0,59 USD).
+  describe('lista de convenio en USD con el catálogo en VES (DX-513-ter, test 13)', () => {
+    const RATE = 880;
+    let patient: string;
+    let unmeasuredItem: string;
+    let measuredItem: string;
+
+    async function listItem(): Promise<{ id: string; body: object }> {
+      const plan = await create(`/patients/${patient}/treatment-plans`, {
+        currency: 'USD',
+      });
+      const res = await as(clinicA)
+        .post(`/treatment-plans/${plan}/items`, {
+          toothNumber: '21',
+          catalogItemId: veneer,
+        })
+        .expect(201);
+      return { id: (res.body as { id: string }).id, body: res.body as object };
+    }
+
+    let veneer: string;
+    beforeAll(async () => {
+      veneer = await create('/catalog/items', {
+        code: 'DX513T-CAR',
+        kind: CatalogKind.PROCEDURE,
+        labelEs: 'Carilla',
+        color: '#2A2B3C',
+        defaultPrice: 3600,
+      });
+      const list = await create('/price-lists', {
+        name: 'Lista Empresa USD',
+        currency: 'USD',
+      });
+      await as(clinicA)
+        .put(`/price-lists/${list}/items`, {
+          items: [{ catalogItemId: veneer, price: 3.5 }],
+        })
+        .expect(200);
+      const payer = await create('/payers', {
+        name: 'Empresa Andina',
+        type: 'OTHER',
+      });
+      const agreement = await create('/agreements', {
+        name: 'Empresa Andina lista',
+        payerId: payer,
+        kind: 'PRICE_LIST',
+        priceListId: list,
+      });
+      patient = await createPatient('Lista');
+      await as(clinicA)
+        .put(`/patients/${patient}/agreement`, { agreementId: agreement })
+        .expect(200);
+      await as(clinicA)
+        .put('/exchange/settings', { source: 'MANUAL' })
+        .expect(200);
+      // Sin tasa: 201 igual, sin base.
+      const first = await listItem();
+      unmeasuredItem = first.id;
+      expect(first.body).toMatchObject({
+        priceSource: 'AGREEMENT_PRICE_LIST',
+        price: 3.5,
+        basePriceInPlan: null,
+        referenceRate: null,
+        baseRate: null,
+      });
+      for (const offset of [-1, 0]) {
+        await as(clinicA)
+          .post('/exchange/manual-rates', {
+            date: caracasDay(offset),
+            currency: 'VES',
+            rate: RATE,
+          })
+          .expect(201);
+      }
+      const second = await listItem();
+      measuredItem = second.id;
+      expect(second.body).toMatchObject({
+        price: 3.5,
+        referencePriceInPlan: 3.5,
+        basePriceInPlan: 4.09,
+        referenceRate: null,
+        baseRate: { fromPerBase: RATE, toPerBase: 1, source: 'MANUAL' },
+      });
+    });
+
+    it('la fila medida lleva la rebaja, la base convertida y `baseRate`; la señalada, sin importe y contada aparte', async () => {
+      const out = await report(clinicA);
+      const measured = out.items.find((i) => i.itemId === measuredItem);
+      expect(measured).toMatchObject({
+        currency: 'USD',
+        agreementName: 'Empresa Andina lista',
+        basePrice: 3600,
+        basePriceInPlan: 4.09,
+        agreementReduction: 0.59,
+        agreementPercent: 14.43,
+        agreementUnmeasured: false,
+        rate: null,
+        baseRate: { fromPerBase: RATE, toPerBase: 1, source: 'MANUAL' },
+      });
+      const unmeasured = out.items.find((i) => i.itemId === unmeasuredItem);
+      expect(unmeasured).toMatchObject({
+        agreementReduction: 0,
+        agreementPercent: 0,
+        agreementUnmeasured: true,
+        rate: null,
+        baseRate: null,
+      });
+      expect(out.agreementTotals).toContainEqual({
+        currency: 'USD',
+        items: 1,
+        reduction: 0.59,
+      });
+      expect(out.agreementUnmeasuredTotals).toEqual([
+        { currency: 'USD', items: 1 },
+      ]);
+    });
+
+    it('el CSV: rebaja vacía (no 0.00) en la señalada, tasa de la base en la medida y las dos columnas nuevas al final', async () => {
+      const res = await as(clinicA)
+        .get('/reports/discounts.csv')
+        .query({ from: caracasDay(-1), to: caracasDay(1) })
+        .expect(200);
+      const [header, ...lines] = res.text.slice(1).split('\r\n');
+      const columns = header.split(',');
+      expect(columns).toHaveLength(29);
+      expect(columns[10]).toBe('Tasa (por 1 USD: catálogo / plan)');
+      expect(columns.slice(27)).toEqual([
+        'Precio sin convenio en la moneda del catálogo',
+        'Rebaja por convenio medida',
+      ]);
+      const rows = lines
+        .filter((l) => l.includes('"Lista Convenio"'))
+        .map((l) => l.split(','));
+      expect(rows).toHaveLength(2);
+      const measured = rows.find((c) => c[28] === 'Sí')!;
+      const unmeasured = rows.find(
+        (c) => c[28] === 'Sin referencia comparable',
+      )!;
+      expect(measured.slice(10, 12)).toEqual([`${RATE} / 1`, 'Manual']);
+      expect(measured.slice(23, 25)).toEqual(['4.09', '0.59']);
+      expect(measured[27]).toBe('3600.00 VES');
+      expect(unmeasured.slice(10, 13)).toEqual(['', '', '']);
+      expect(unmeasured[24]).toBe('');
+      expect(unmeasured[27]).toBe('3600.00 VES');
+    });
+
+    it('otra clínica no ve esas filas ni su recuento', async () => {
+      const out = await report(clinicB);
+      expect(out.items).toEqual([]);
+      expect(out.agreementUnmeasuredTotals).toEqual([]);
+    });
   });
 });

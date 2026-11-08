@@ -2,6 +2,8 @@ import { UnprocessableEntityException } from '@nestjs/common';
 import type { ClinicRole } from '@prisma/client';
 import { EXCHANGE_RATE_SETTINGS_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
 import {
+  agreementBaseRateCurrency,
+  freezeAgreementBase,
   freezeReference,
   referenceRateCurrency,
   type ReferenceSnapshot,
@@ -103,5 +105,56 @@ export function freezeWithRate(
     planCurrency,
     asked.lookup.toDigits,
     asked.lookup.rate,
+  );
+}
+
+/**
+ * El tipo del error (`TypeError`, `ExchangeRateProviderNotRespondingError`…),
+ * nunca su mensaje (puede llevar datos de la conexión o del proveedor).
+ */
+function errorName(error: unknown): string {
+  const name =
+    typeof error === 'object' && error !== null
+      ? (error as { name?: unknown }).name
+      : undefined;
+  return typeof name === 'string' ? name : typeof error;
+}
+
+/**
+ * DX-513-ter §6.1: en el alta de un ítem de lista de CONVENIO con el catálogo
+ * en otra moneda conocida, la base convertida a la moneda del plan con la
+ * tasa del día (la misma fuente, día y redondeo que DX-513-bis), congelada en
+ * la foto para que el informe mida la rebaja de convenio sin convertir nunca.
+ *
+ * Nunca bloquea el alta: sin tasa, o con CUALQUIER error al pedirla, la foto
+ * queda como estaba (sin base) y el informe señala la fila «sin referencia
+ * comparable». Un error que no es «sin tasa» se avisa con su nombre, nunca su
+ * mensaje. En otro ítem (lista de la sede, catálogo, %, misma moneda) no se
+ * pide tasa y la foto no cambia. Se llama ANTES de la transacción.
+ */
+export async function withAgreementBase(
+  rates: ReferenceRateSource,
+  item: Pick<SnapshotItem, 'priceSource' | 'basePrice' | 'catalogCurrency'>,
+  planCurrency: string,
+  reference: ReferenceSnapshot,
+  warn: (message: string) => void,
+): Promise<ReferenceSnapshot> {
+  const currency = agreementBaseRateCurrency(item, planCurrency);
+  if (currency === null || item.basePrice === null) return reference;
+  let lookup: ReferenceRateLookup;
+  try {
+    lookup = await rates.rateFor(currency, planCurrency);
+  } catch (error) {
+    warn(
+      `Sin tasa de ${currency} a ${planCurrency} para la base de un ítem de convenio (${errorName(error)}): se crea sin ella.`,
+    );
+    return reference;
+  }
+  if (lookup.kind === 'missing') return reference;
+  return freezeAgreementBase(
+    reference,
+    item.basePrice,
+    lookup.rate,
+    lookup.toDigits,
   );
 }

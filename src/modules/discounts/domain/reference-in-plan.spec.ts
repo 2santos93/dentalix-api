@@ -1,6 +1,9 @@
 import { PriceSource } from '@prisma/client';
 import {
+  agreementBaseRateCurrency,
+  freezeAgreementBase,
   freezeReference,
+  itemRates,
   referenceInPlan,
   referenceRateCurrency,
   type FrozenReferenceRate,
@@ -185,5 +188,126 @@ describe('freezeReference (DX-513-bis §5.3, test 2)', () => {
 
   it('otra moneda conocida sin tasa: error de programación (el caso de uso responde 422 antes)', () => {
     expect(() => freezeReference(crown(), 'USD', 2, null)).toThrow(/sin tasa/);
+  });
+});
+
+// DX-513-ter §6.1: en un ítem de lista de CONVENIO con el catálogo en otra
+// moneda conocida, la base (`basePrice`, en la moneda del catálogo) se
+// convierte con la tasa del día al escribirlo, solo para medir la rebaja de
+// convenio en el informe. La referencia (el precio de lista) no cambia.
+describe('agreementBaseRateCurrency (DX-513-ter, test 1)', () => {
+  const list = (over: Partial<SnapshotItem> = {}) =>
+    crown({
+      priceSource: PriceSource.AGREEMENT_PRICE_LIST,
+      catalogPrice: 3.5,
+      ...over,
+    });
+
+  it('lista de convenio con el catálogo en otra moneda conocida: la del catálogo', () => {
+    expect(agreementBaseRateCurrency(list(), 'USD')).toBe('VES');
+    expect(
+      agreementBaseRateCurrency(
+        list({ catalogCurrency: 'USD', basePrice: 4.5, catalogPrice: 3500 }),
+        'VES',
+      ),
+    ).toBe('USD');
+  });
+
+  it('misma moneda, moneda NULL, sin basePrice, lista de la sede, CATALOG o % de convenio: null', () => {
+    expect(agreementBaseRateCurrency(list(), 'VES')).toBeNull();
+    expect(
+      agreementBaseRateCurrency(list({ catalogCurrency: null }), 'USD'),
+    ).toBeNull();
+    expect(
+      agreementBaseRateCurrency(list({ basePrice: null }), 'USD'),
+    ).toBeNull();
+    for (const priceSource of [
+      PriceSource.PRICE_LIST,
+      PriceSource.CATALOG,
+      PriceSource.AGREEMENT_PERCENT,
+      null,
+    ]) {
+      expect(
+        agreementBaseRateCurrency(list({ priceSource }), 'USD'),
+      ).toBeNull();
+    }
+  });
+});
+
+describe('freezeAgreementBase (DX-513-ter, test 2)', () => {
+  const listSnapshot = (referencePriceInPlan: number) => ({
+    referenceCurrency: 'USD',
+    referencePriceInPlan,
+    basePriceInPlan: null,
+    referenceRate: null,
+  });
+
+  it('lista 3,50 USD, base 3.600 Bs. a 880: base 4,09 USD y la tasa; la referencia no cambia', () => {
+    expect(freezeAgreementBase(listSnapshot(3.5), 3600, RATE_880, 2)).toEqual({
+      referenceCurrency: 'USD',
+      referencePriceInPlan: 3.5,
+      basePriceInPlan: 4.09,
+      referenceRate: RATE_880,
+    });
+  });
+
+  it('a los dígitos de la moneda del plan (0): 4,50 USD a 880 son 3960 Bs.', () => {
+    const usdToVes: FrozenReferenceRate = {
+      fromPerBase: 1,
+      toPerBase: 880,
+      source: 'MANUAL',
+      rateDate: '2026-11-06',
+    };
+    expect(
+      freezeAgreementBase(
+        { ...listSnapshot(3500), referenceCurrency: 'VES' },
+        4.5,
+        usdToVes,
+        0,
+      ),
+    ).toMatchObject({ basePriceInPlan: 3960, referenceRate: usdToVes });
+    // Un solo redondeo, a los dígitos del plan: 4,51 USD son 3.968,80 Bs.,
+    // que con 0 dígitos se congelan en 3969 (nunca con el 2 fijo).
+    expect(
+      freezeAgreementBase(listSnapshot(3500), 4.51, usdToVes, 0)
+        .basePriceInPlan,
+    ).toBe(3969);
+  });
+
+  it('una base diminuta se congela en 0 (1,40 Bs. a 880)', () => {
+    expect(
+      freezeAgreementBase(listSnapshot(3.5), 1.4, RATE_880, 2).basePriceInPlan,
+    ).toBe(0);
+  });
+});
+
+describe('itemRates (DX-513-ter §6.3): qué tasa va en `referenceRate` y cuál en `baseRate`', () => {
+  it('en una lista (de convenio o de la sede) la tasa es la de la base: `baseRate`', () => {
+    for (const source of [
+      PriceSource.AGREEMENT_PRICE_LIST,
+      PriceSource.PRICE_LIST,
+    ]) {
+      expect(itemRates(source, RATE_880)).toEqual({
+        referenceRate: null,
+        baseRate: RATE_880,
+      });
+    }
+  });
+
+  it('en el resto, la de la referencia: `referenceRate`', () => {
+    for (const source of [
+      PriceSource.CATALOG,
+      PriceSource.AGREEMENT_PERCENT,
+      null,
+    ]) {
+      expect(itemRates(source, RATE_880)).toEqual({
+        referenceRate: RATE_880,
+        baseRate: null,
+      });
+    }
+    expect(itemRates(PriceSource.CATALOG, null)).toEqual({
+      referenceRate: null,
+      baseRate: null,
+    });
   });
 });

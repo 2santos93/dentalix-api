@@ -1799,6 +1799,33 @@ discount`, en % del precio de referencia (el de catálogo si el precio está
   `20261024120100_sec047_plan_item_agreement_reduction_idx` (parcial
   `treatment_plan_items_tenant_agreement_reduction_at_idx`, CONCURRENTLY).
   e2e: `test/discounts-agreement.e2e-spec.ts`.
+- **Rebaja de convenio entre monedas en las listas (DX-513-ter)**. Al dar
+  de alta un ítem de lista de CONVENIO (`AGREEMENT_PRICE_LIST`) con el
+  catálogo en otra moneda conocida, la API pide la tasa del día (la misma
+  fuente, día y redondeo único que DX-513-bis) sin exigirla: con ella congela
+  `basePriceInPlan` (el catálogo convertido) y la tasa en la fila; sin ella, o
+  con cualquier error al pedirla (se avisa con el nombre del error), el ítem
+  se crea igual, sin base. El tope sigue midiéndose contra el precio de lista.
+  El informe mide la rebaja de convenio con lo congelado (`basePriceInPlan` −
+  `referencePriceInPlan`) y nunca convierte al consultar; un ítem de convenio
+  con el catálogo en otra moneda conocida y sin base congelada (sin tasa, o
+  anterior) sale con `agreementUnmeasured: true`, sin importe, y se cuenta
+  aparte en `agreementUnmeasuredTotals` por moneda («sin referencia
+  comparable»; no suma en `agreementTotals`). Contrato aditivo: la tasa de la
+  base va en `baseRate` (ítem del plan y fila del informe); `referenceRate`
+  / `rate` siguen siendo null en las listas. CSV: las columnas no se mueven,
+  «Rebaja por convenio» va vacía (no `0.00`) en las filas sin medir, la tasa
+  de la base rellena las de tasa (cabecera «Tasa (por 1 USD: catálogo /
+  plan)») y al final van «Precio sin convenio en la moneda del catálogo» y
+  «Rebaja por convenio medida». Nota de despliegue: los informes de periodos
+  pasados GANAN filas señaladas (ítems de convenio entre monedas que antes no
+  salían); sus importes y totales no cambian. Migraciones
+  `20261202090000_dx513t_agreement_ref_reduction_idx` (crea
+  `treatment_plan_items_tenant_agreement_ref_reduction_at_idx` CONCURRENTLY)
+  y `20261202090100_dx513t_agreement_reduction_idx_drop_old` (quita el de
+  SEC-047). Si alguna falla: `DROP INDEX CONCURRENTLY IF EXISTS` del índice
+  que creaba, `npx prisma migrate resolve --rolled-back <migración>` y repetir
+  `migrate deploy`.
 - **Estado del plan en la transacción (BE-036)**: alta, edición y bloque
   bloquean la fila del plan (FOR SHARE; el ítem, FOR UPDATE), la releen y solo
   entonces validan si está aceptado, firmado o cerrado. Una aceptación sin

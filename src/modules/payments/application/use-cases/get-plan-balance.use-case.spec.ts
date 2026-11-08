@@ -165,6 +165,7 @@ function makeItem(
     referencePriceInPlan: null,
     basePriceInPlan: null,
     referenceRate: null,
+    baseRate: null,
     agreementId: null,
     agreementName: null,
     pricingLocationId: null,

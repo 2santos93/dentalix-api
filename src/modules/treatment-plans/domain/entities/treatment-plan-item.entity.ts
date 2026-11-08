@@ -49,11 +49,16 @@ export interface TreatmentPlanItem {
    * `basePrice` en la moneda del plan y, si se convirtió, la tasa. Todo null
    * en los ítems anteriores sin foto y en los libres. El tope, el motivo y el
    * informe miden la rebaja frente a `referencePriceInPlan`.
+   *
+   * DX-513-ter: la tasa va en `referenceRate` si se aplicó a la referencia
+   * (catálogo o % de convenio) y en `baseRate` si es la de la base de una
+   * lista de convenio (la referencia ya estaba en la moneda del plan).
    */
   referenceCurrency: string | null;
   referencePriceInPlan: number | null;
   basePriceInPlan: number | null;
   referenceRate: FrozenReferenceRate | null;
+  baseRate: FrozenReferenceRate | null;
   agreementId: string | null;
   agreementName: string | null;
   pricingLocationId: string | null;

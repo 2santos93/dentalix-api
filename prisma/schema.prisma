@@ -1993,6 +1993,13 @@ model TreatmentPlanItem {
   // tope, el motivo y el informe de descuentos miden la rebaja frente a
   // "referencePriceInPlan"; el informe nunca convierte. NULL en los ítems
   // anteriores (sin relleno) y en los libres.
+  // DX-513-ter: la tasa es SIEMPRE de la moneda del catálogo a la del plan.
+  // Se aplicó a "catalogPrice" si "referenceCurrency" es la del catálogo, y a
+  // "basePrice" siempre que "basePriceInPlan" venga de una conversión: en un
+  // ítem de lista de convenio con el catálogo en otra moneda, el alta pide la
+  // tasa del día sin exigirla y, si la hay, congela la base convertida (solo
+  // para medir la rebaja de convenio en el informe; el tope sigue con la
+  // lista). Sin tasa, el ítem se crea igual sin ella.
   referenceCurrency    String?                 @db.Char(3)
   referencePriceInPlan Decimal?                @db.Decimal(12, 2)
   basePriceInPlan      Decimal?                @db.Decimal(12, 2)
@@ -2086,10 +2093,19 @@ model TreatmentPlanItem {
   //     -> DX-204/SEC-041: informe de descuentos por periodo (descuento o
   //        rebaja de precio); DX-513-bis: también la rebaja frente a la
   //        referencia convertida a la moneda del plan.
-  //   treatment_plan_items_tenant_agreement_reduction_at_idx
+  //   treatment_plan_items_tenant_agreement_ref_reduction_at_idx (DX-513-ter;
+  //     sustituye a treatment_plan_items_tenant_agreement_reduction_at_idx)
   //     ("tenantId", COALESCE("discountAt", "createdAt"))
-  //     WHERE "agreementId" IS NOT NULL AND "basePrice" > "catalogPrice" AND "deletedAt" IS NULL
-  //     -> SEC-047: la rama «rebaja de convenio» del mismo informe.
+  //     WHERE "agreementId" IS NOT NULL
+  //       AND ("basePrice" > "catalogPrice"
+  //            OR "basePriceInPlan" > "referencePriceInPlan"
+  //            OR ("basePriceInPlan" IS NULL AND "basePrice" IS NOT NULL
+  //                AND "catalogCurrency" IS NOT NULL
+  //                AND "referenceCurrency" IS DISTINCT FROM "catalogCurrency"))
+  //       AND "deletedAt" IS NULL
+  //     -> SEC-047: la rama «rebaja de convenio» del mismo informe; DX-513-ter:
+  //        también la medida con la base congelada en la moneda del plan y
+  //        la de convenio «sin referencia comparable».
   //   treatment_plan_items_tenant_done_completed_idx ("tenantId",
   //     "completedAt") INCLUDE ("performedLocationId", "planId", price,
   //     discount) WHERE status = 'DONE' AND "deletedAt" IS NULL
