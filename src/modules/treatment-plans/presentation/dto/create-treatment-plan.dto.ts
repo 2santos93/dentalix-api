@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 // NOTE: deliberately NO `tenantId`/`patientId`/`status`/`createdById` field —
 // tenant comes from the guarded request context, `patientId` from the route
@@ -16,7 +17,7 @@ export class CreateTreatmentPlanDto {
       'ISO 4217 (si se omite, la moneda de la sede activa o la común de la clínica)',
   })
   @IsOptional()
-  @IsString()
+  @IsString({ message: CURRENCY_CODE_MESSAGE })
   currency?: string;
 
   @ApiPropertyOptional()

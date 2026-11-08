@@ -22,6 +22,7 @@ import {
   IsMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 // Uppercase-normalizes ISO 4217 codes, same convention as ConvertQueryDto
 // (exchange module) / the deleted CreateSaleDto -- snapshots/rates are always
@@ -51,7 +52,7 @@ export class RecordPaymentDto {
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Transform(toUpperCase)
   @IsISO4217CurrencyCode({
-    message: 'currency must be a real ISO 4217 currency code',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency!: string;
 

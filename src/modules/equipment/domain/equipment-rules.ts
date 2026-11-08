@@ -10,6 +10,10 @@ import type {
   MaintenanceKind,
   MaintenanceStatus,
 } from './entities/equipment.entity';
+import {
+  CURRENCY_CODE_MESSAGE,
+  UNKNOWN_CURRENCY_MESSAGE,
+} from '../../../shared/money/currency-messages';
 
 /**
  * DX-542 · Reglas de los equipos biomédicos y de sus mantenimientos. Es la
@@ -47,7 +51,7 @@ export const MAINTENANCE_ALREADY_VOIDED_MESSAGE =
   'El mantenimiento ya está anulado.';
 export const EQUIPMENT_LOCATION_NO_ZONE_MESSAGE =
   'La sede no tiene zona horaria configurada: configúrala antes de registrar equipos.';
-export const UNKNOWN_CURRENCY_MESSAGE = 'Moneda no soportada.';
+export { UNKNOWN_CURRENCY_MESSAGE };
 
 /**
  * Controles C0/C1: ninguno en los textos de una línea; en los largos se
@@ -308,7 +312,7 @@ export function validateMaintenanceFields(
   const rawCurrency = (input.currency ?? '').trim().toUpperCase();
   const currency = rawCurrency === '' ? null : rawCurrency;
   if (currency !== null && !CURRENCY_RE.test(currency)) {
-    problems.add('La moneda no es válida (código ISO 4217 de 3 letras).');
+    problems.add(CURRENCY_CODE_MESSAGE);
   } else if (cost !== null && currency === null) {
     problems.add('Indica la moneda del costo.');
   } else if (cost === null && currency !== null) {

@@ -36,8 +36,9 @@ import {
   SUPPLIER_MESSAGE,
 } from '../../domain/expense-rules';
 import { SUMMARY_PERIOD_INVALID_MESSAGE } from '../../application/use-cases/get-expense-summary.use-case';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
-const CURRENCY_MESSAGE = 'La moneda no es válida.';
+const CURRENCY_MESSAGE = CURRENCY_CODE_MESSAGE;
 const FROM_CASH_SESSION_MESSAGE = 'fromCashSession debe ser verdadero o falso.';
 const METHOD_MESSAGE = `El medio de pago debe ser uno de: ${Object.values(PaymentMethod).join(', ')}.`;
 const STATUSES = ['PENDING', 'PARTIAL', 'PAID', 'VOIDED', 'OPEN'] as const;

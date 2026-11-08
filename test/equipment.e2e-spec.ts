@@ -448,7 +448,7 @@ describe('Equipos biomédicos por sede y hoja de vida (e2e, DX-542)', () => {
         })
         .expect(400);
       expect((unknown.body as { message: string }).message).toBe(
-        'Moneda no soportada.',
+        'Esa moneda no está en la lista de monedas admitidas.',
       );
     });
 

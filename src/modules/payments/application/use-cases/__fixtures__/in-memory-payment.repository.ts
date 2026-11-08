@@ -21,6 +21,7 @@ import {
 } from '../../../domain/ports/payment-repository.port';
 import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 import type { RegionalFormat } from '../../../../../shared/format/regional-format';
+import type { CurrencyTexts } from '../../../../../shared/format/currency-text';
 import { requireLocationFormat } from '../../../../../shared/locations/location-regional';
 import { toCents } from '../../../../../shared/money/money';
 
@@ -336,6 +337,13 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     string,
     { locale: string | null; hourCycle: string | null }
   >([['loc-1', { locale: 'es-VE', hourCycle: 'h23' }]]);
+
+  /** DX-517-bis: el texto propio de cada moneda de la clínica. */
+  currencyTexts: CurrencyTexts = {};
+
+  clinicCurrencyTexts(): Promise<CurrencyTexts> {
+    return Promise.resolve(this.currencyTexts);
+  }
 
   locationFormat(locationId: string): Promise<RegionalFormat> {
     return Promise.resolve().then(() =>

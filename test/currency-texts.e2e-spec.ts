@@ -34,8 +34,6 @@ const SEDE = {
 };
 const PATIENT_EMAIL = 'paciente.dx517@example.com';
 const FMT = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
-/** El texto plano del email junta los espacios (`escape.ts`): también el duro. */
-const plain = (text: string) => text.replace(/\s+/g, ' ');
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -221,7 +219,7 @@ describe('Texto propio de cada moneda (e2e, DX-517) y email del recibo no fiscal
     // El importe con el formato de la sede y el código ISO (DX-378, DX-521),
     // sin el texto propio que aún no hay.
     expect(email.text).toContain(
-      plain(`Valor: ${moneyWithCode(BEFORE_AMOUNT, 'VES', FMT, undefined)} ·`),
+      `Valor: ${moneyWithCode(BEFORE_AMOUNT, 'VES', FMT, undefined)} ·`,
     );
     // DX-515-bis: sin título ni leyenda, el email de siempre.
     expect(email.subject).toMatch(/^Recibo de caja /);
@@ -322,15 +320,16 @@ describe('Texto propio de cada moneda (e2e, DX-517) y email del recibo no fiscal
     expect(snapshot.currencyTexts).toEqual({ VES: 'Bs.' });
     const email = await emailOf(after);
     expect(FMT.money(1234.5, 'VES', { VES: 'Bs.' })).toBe('Bs.\u00a01.234,50');
-    expect(email.text).toContain('Valor: Bs. 1.234,50 ·');
+    expect(email.text).toContain('Valor: Bs.\u00a01.234,50 ·');
 
+    // DX-517-bis: el texto del email conserva el espacio duro, como el papel.
     // El recibo anterior: foto intacta y su email con su importe sin texto propio.
     expect(await storedSnapshot(before)).toEqual(beforeSnapshot);
     const old = await emailOf(before);
     expect(old.text).toContain(
-      plain(`Valor: ${moneyWithCode(BEFORE_AMOUNT, 'VES', FMT, undefined)} ·`),
+      `Valor: ${moneyWithCode(BEFORE_AMOUNT, 'VES', FMT, undefined)} ·`,
     );
-    expect(old.text).not.toContain('Bs. 1.234,50');
+    expect(old.text).not.toContain('Bs.');
   });
 
   it('DX-515-bis: el email del recibo lleva el título y la leyenda congelados; el anterior no', async () => {

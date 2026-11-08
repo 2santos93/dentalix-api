@@ -16,6 +16,7 @@ import {
   Min,
 } from 'class-validator';
 import { COLLECTION_NOTE_TEXT_MAX } from '../../domain/collections.entity';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const MAX_AMOUNT = 999_999_999_999.99;
 
@@ -75,7 +76,7 @@ export class CreatePaymentPromiseDto {
 
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Matches(/^[A-Za-z]{3}$/, {
-    message: 'currency debe ser un código ISO 4217 de 3 letras.',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency!: string;
 

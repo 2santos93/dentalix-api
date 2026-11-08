@@ -326,7 +326,10 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         [{ category: undefined }, CATEGORY_INVALID_MESSAGE],
         [{ amount: 0 }, /importe/],
         [{ amount: 10.005 }, /importe/],
-        [{ currency: 'ZZZ' }, 'La moneda no es válida.'],
+        [
+          { currency: 'ZZZ' },
+          'La moneda tiene que ser un código ISO 4217 de tres letras en mayúsculas.',
+        ],
         [{ supplier: 'x'.repeat(201) }, /proveedor/],
         [{ invoiceDate: '2099-01-01' }, /no puede ser futura/],
         [{ invoiceDate: '2026-02-30' }, /fecha de la factura no es válida/],

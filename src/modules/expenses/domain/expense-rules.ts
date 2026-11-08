@@ -5,6 +5,7 @@ import {
 import type { ExpenseStatus } from './entities/expense.entity';
 import type { ExpenseMoneyText } from './expense-money';
 import { fromCents, toCents } from '../../../shared/money/money';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../shared/money/currency-messages';
 
 /**
  * Reglas puras de un gasto (DX-274). Sin Nest ni Prisma: fallan con
@@ -31,7 +32,7 @@ const conflict = (message: string) => new ExpenseRuleError(message, 'CONFLICT');
 export const EXPENSE_NOT_FOUND_MESSAGE = 'Gasto no encontrado.';
 export const PAYMENT_NOT_FOUND_MESSAGE = 'Pago no encontrado.';
 export const LOCATION_INVALID_MESSAGE = 'La sede no es válida.';
-export const UNKNOWN_CURRENCY_MESSAGE = 'La moneda no es válida.';
+export { UNKNOWN_CURRENCY_MESSAGE };
 export const CATEGORY_INVALID_MESSAGE = 'Elige una categoría válida.';
 export const CATEGORY_DUPLICATE_MESSAGE =
   'Ya existe una categoría con ese nombre.';

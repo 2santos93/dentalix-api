@@ -25,10 +25,11 @@ import {
 } from '../../domain/collections.entity';
 import { evaluatePromise } from '../../domain/payment-promise-rule';
 import { COLLECTIONS_CLOCK, type CollectionsClock } from '../collections-clock';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
 
 export const PATIENT_NOT_FOUND_MESSAGE = 'Paciente no encontrado.';
 export const NOTE_TEXT_TOO_LONG_MESSAGE = `La nota admite hasta ${COLLECTION_NOTE_TEXT_MAX} caracteres.`;
-export const UNKNOWN_CURRENCY_MESSAGE = 'La moneda no existe.';
+export { UNKNOWN_CURRENCY_MESSAGE };
 export const UNKNOWN_LOCATION_MESSAGE = 'La sede no es de esta clínica.';
 export const PROMISE_IN_PAST_MESSAGE =
   'La fecha del compromiso no puede ser anterior a hoy.';

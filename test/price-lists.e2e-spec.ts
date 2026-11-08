@@ -216,7 +216,9 @@ describe('Listas de precios (e2e, DX-105)', () => {
       const unknown = await admin(api().post('/api/v1/price-lists'))
         .send({ name: 'Moneda rara', currency: 'ZZZ' })
         .expect(400);
-      expect((unknown.body as MessageBody).message).toBe('Moneda no válida.');
+      expect((unknown.body as MessageBody).message).toBe(
+        'Esa moneda no está en la lista de monedas admitidas.',
+      );
       await admin(api().post('/api/v1/price-lists'))
         .send({ name: 'A', currency: 'VES' })
         .expect(400);

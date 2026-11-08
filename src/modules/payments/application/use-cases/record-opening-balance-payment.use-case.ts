@@ -34,6 +34,11 @@ import {
 import { PaymentMethodGate } from '../payment-method-gate';
 import { PaymentProofs, attachmentOf } from '../payment-proofs';
 import { toCents } from '../../../../shared/money/money';
+import {
+  CURRENCY_REQUIRED_MESSAGE,
+  PAYMENT_AMOUNT_MESSAGE,
+  UNKNOWN_CURRENCY_MESSAGE,
+} from '../../../../shared/money/currency-messages';
 
 /**
  * Abono contra el saldo migrado de un paciente (DX-262, revisión C1): el
@@ -87,14 +92,14 @@ export class RecordOpeningBalancePaymentUseCase {
     }
 
     if (!isFinitePositive(input.amount)) {
-      throw new BadRequestException('amount must be a finite number > 0');
+      throw new BadRequestException(PAYMENT_AMOUNT_MESSAGE);
     }
     if (!input.currency || input.currency.trim() === '') {
-      throw new BadRequestException('currency is required');
+      throw new BadRequestException(CURRENCY_REQUIRED_MESSAGE);
     }
     const currency = input.currency.trim().toUpperCase();
     if (!(await this.whitelist.has(currency))) {
-      throw new BadRequestException(`Unknown currency: ${currency}`);
+      throw new BadRequestException(UNKNOWN_CURRENCY_MESSAGE);
     }
     const paidAt = normalizePaidAt(input.paidAt);
     await assertPaidAtWindow(this.repo, paidAt, this.now());
@@ -119,6 +124,7 @@ export class RecordOpeningBalancePaymentUseCase {
               pendingCents / 100,
               currency,
               await this.repo.locationFormat(balance.locationId),
+              await this.repo.clinicCurrencyTexts(),
             ),
       );
     }

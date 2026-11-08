@@ -20,6 +20,7 @@ import {
 import { Appointment } from '../../../appointments/domain/entities/appointment.entity';
 import { CountPatientsUseCase } from '../../../patients/application/use-cases/count-patients.use-case';
 import { AppointmentStatus } from '@prisma/client';
+import { CURRENCY_REQUIRED_MESSAGE } from '../../../../shared/money/currency-messages';
 
 /**
  * Fakes for the 4 reused use cases -- same pattern as
@@ -487,7 +488,7 @@ describe('GetDoctorDashboardUseCase', () => {
     const { uc } = makeUseCase();
 
     await expect(uc.execute({ ...baseInput, currency: '  ' })).rejects.toThrow(
-      /currency/i,
+      CURRENCY_REQUIRED_MESSAGE,
     );
   });
 

@@ -15,6 +15,7 @@ import {
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { RecordOpeningBalancePaymentUseCase } from './record-opening-balance-payment.use-case';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
+import { PAYMENT_AMOUNT_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const whitelist: CurrencyWhitelist = {
   has: (code) => Promise.resolve(['VES', 'USD'].includes(code)),
@@ -168,6 +169,21 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     );
   });
 
+  it('DX-517-bis: el 400 de lo pendiente escribe la moneda con el texto propio de la clínica', async () => {
+    const { repo, uc } = setup();
+    repo.locations.set('loc-1', { locale: 'en-US', hourCycle: 'h12' });
+    repo.currencyTexts = { VES: 'Bs.' };
+    await expect(
+      uc.execute('ob-1', {
+        amount: 150001,
+        currency: 'VES',
+        paidAt: '2026-10-20',
+      }),
+    ).rejects.toThrow(
+      'El abono supera lo pendiente del saldo migrado: quedan Bs.\u00a0150,000.00.',
+    );
+  });
+
   it('the overpaid 400 uses the format of the balance location; without clock, 409 only there', async () => {
     const { repo, uc } = setup();
     repo.locations.set('loc-1', { locale: 'en-US', hourCycle: 'h12' });
@@ -200,6 +216,15 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
         paidAt: '2026-10-20',
       }),
     ).resolves.toMatchObject({ amount: 1000 });
+  });
+
+  it('DX-517-bis: un importe no positivo o no finito es 400 en español', async () => {
+    const { uc } = setup();
+    for (const amount of [0, -10, Number.POSITIVE_INFINITY]) {
+      await expect(
+        uc.execute('ob-1', { amount, currency: 'VES', paidAt: '2026-10-20' }),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_AMOUNT_MESSAGE));
+    }
   });
 
   it('otra moneda que la del saldo: 400; saldo inexistente o retirado: 404', async () => {

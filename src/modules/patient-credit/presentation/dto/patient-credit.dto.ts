@@ -26,10 +26,11 @@ import {
   CREDIT_REASON_MAX,
   CREDIT_REASON_REQUIRED_MESSAGE,
 } from '../../domain/patient-credit';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const AMOUNT_MESSAGE =
   'El importe tiene que ser un número mayor que 0 con 2 decimales como máximo.';
-const CURRENCY_MESSAGE = 'La moneda tiene que ser un código ISO 4217 válido.';
+const CURRENCY_MESSAGE = CURRENCY_CODE_MESSAGE;
 const METHOD_MESSAGE =
   'El método de la devolución tiene que ser CASH, CARD, TRANSFER u OTHER.';
 const TARGET_MESSAGE = 'Elige el plan de destino.';

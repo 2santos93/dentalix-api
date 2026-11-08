@@ -305,7 +305,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         column: 'numero_documento',
         kind: 'ERROR',
         message:
-          'Con esta fila, el saldo de este paciente en VES pasaría de 999.999.999.999,99: revisa los importes.',
+          'Con esta fila, el saldo de este paciente pasaría de VES\u00a0999.999.999.999,99: revisa los importes.',
         value: '111',
       },
     ]);
@@ -384,7 +384,7 @@ describe('agregado por paciente y moneda (DX-262)', () => {
           column: 'numero_documento',
           kind: 'ERROR',
           message: expect.stringMatching(
-            /^Este paciente ya tiene 2 saldos migrados vivos en VES por VES\s3\.000,00 \(el último, VES\s1\.000,00 del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
+            /^Este paciente ya tiene 2 saldos migrados vivos por un total de VES\s3\.000,00 \(el último, VES\s1\.000,00 del lote «otra\.csv» del 21\/10\/2026, corte 01\/09\/2026\): no se crea otro\./,
           ) as string,
           value: '222',
         },
@@ -407,11 +407,47 @@ describe('agregado por paciente y moneda (DX-262)', () => {
         /^Este paciente ya tiene un saldo migrado vivo de VES\s1,500,000\.00 \(lote/,
       );
       expect(result.issues[2].message).toMatch(
-        /por VES\s3,000\.00 \(el último, VES\s1,000\.00 del lote/,
+        /por un total de VES\s3,000\.00 \(el último, VES\s1,000\.00 del lote/,
       );
       // DX-354: las fechas del lote con el orden del locale (en-US: mes/día/año).
       expect(result.issues[0].message).toContain(
         'del 10/22/2026, corte 08/09/2026',
+      );
+    });
+
+    it('DX-517-bis: los importes con el texto propio de la moneda de la clínica, nunca el código crudo', () => {
+      const result = aggregateBalances(
+        rows,
+        docs,
+        'numero_documento',
+        () => regionalFormat({ locale: 'en-US', hourCycle: 'h12' }),
+        existing,
+        false,
+        { VES: 'Bs.' },
+      );
+      expect(result.issues[0].message).toMatch(
+        /^Este paciente ya tiene un saldo migrado vivo de Bs\.\u00a01,500,000\.00 \(lote/,
+      );
+      expect(result.issues[2].message).toMatch(
+        /^Este paciente ya tiene 2 saldos migrados vivos por un total de Bs\.\u00a03,000\.00 \(el último, Bs\.\u00a01,000\.00 del lote/,
+      );
+      for (const issue of result.issues)
+        expect(issue.message).not.toContain('VES');
+    });
+
+    it('DX-517-bis: el tope de la suma, con el formato de la sede y el texto de la moneda', () => {
+      const big = 99_999_999_999_999;
+      const result = aggregateBalances(
+        [c(2, '111', big - 100, 'VES'), c(3, '111', 200, 'VES')],
+        new Map([['111', 'FOUND']]),
+        'numero_documento',
+        () => regionalFormat({ locale: 'en-US', hourCycle: 'h12' }),
+        new Map(),
+        false,
+        { VES: 'Bs.' },
+      );
+      expect(result.issues[0].message).toBe(
+        'Con esta fila, el saldo de este paciente pasaría de Bs.\u00a0999,999,999,999.99: revisa los importes.',
       );
     });
 

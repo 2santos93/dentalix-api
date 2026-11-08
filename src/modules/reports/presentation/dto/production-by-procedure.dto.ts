@@ -15,6 +15,7 @@ import {
   PERIOD_DAY_MIN,
 } from '../../../../shared/time/civil-day';
 import { PRODUCTION_ITEMS_PAGE_SIZE } from '../../application/use-cases/get-production-by-procedure.use-case';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const CURRENCY_CODE = /^[A-Z]{3}$/;
@@ -79,7 +80,7 @@ export class ProductionItemsQueryDto extends ProductionByProcedureQueryDto {
   })
   @IsOptional()
   @Matches(CURRENCY_CODE, {
-    message: 'currency debe ser un código ISO 4217 de 3 letras.',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency?: string;
 

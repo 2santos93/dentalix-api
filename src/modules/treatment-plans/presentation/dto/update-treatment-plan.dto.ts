@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { TreatmentPlanStatus } from '@prisma/client';
 import { OPTION_LABEL_MAX } from '../../domain/plan-options';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 // All fields optional (partial update: change status and/or notes and/or
 // currency). NO `tenantId` field — same rationale as UpdateAppointmentDto.
@@ -20,7 +21,7 @@ export class UpdateTreatmentPlanDto {
 
   @ApiPropertyOptional({ description: 'Código ISO 4217 de 3 letras.' })
   @IsOptional()
-  @IsString()
+  @IsString({ message: CURRENCY_CODE_MESSAGE })
   currency?: string;
 
   @ApiPropertyOptional()
