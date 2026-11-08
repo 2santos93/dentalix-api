@@ -1448,7 +1448,8 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       expect(text).toContain(
         'Fecha y hora: miércoles 10 de marzo de 2027 a las 3:05 p. m. (hora de la sede)',
       );
-      expect(text).toContain('un cargo de JPY 3,000.');
+      // DX-517-bis: el texto del email conserva el espacio duro del importe.
+      expect(text).toContain('un cargo de JPY\u00a03,000.');
     });
 
     it('reminder for a location without hourCycle is not sent', async () => {
