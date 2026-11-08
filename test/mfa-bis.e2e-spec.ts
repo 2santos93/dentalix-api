@@ -22,8 +22,8 @@ import {
   apexPassword,
   enrollmentEmailCode,
   enrollPlatformAdmin,
-  totpAt,
 } from './support/platform-mfa';
+import { currentTotpStep, totpAt } from './support/totp';
 import { registerVerified } from './support/register-verified';
 import {
   DEFAULT_LOGIN_LOCKOUT,
@@ -114,7 +114,7 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
   const forgetLastStep = (userId: string) =>
     raw.user.update({
       where: { id: userId },
-      data: { mfaLastUsedStep: Math.floor(Date.now() / 30_000) - 5 },
+      data: { mfaLastUsedStep: currentTotpStep() - 5 },
     });
   /** Superadmin nuevo, sembrado como los que ya existen al desplegar. */
   const seedSuper = (email: string) =>
