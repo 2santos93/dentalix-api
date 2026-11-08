@@ -28,6 +28,8 @@ const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 // 16 oct 2026, 10:00 en la zona de la sede (UTC-4).
 const NOW = new Date('2026-10-16T14:00:00.000Z');
+const LOGO_A = 'https://api.example/api/v1/files/logos/a-0123456789abcdef.png';
+const LOGO_B = 'https://api.example/api/v1/files/logos/a-fedcba9876543210.png';
 const META = {
   acceptedById: 'user-1',
   ipAddress: '10.0.0.1',
@@ -197,6 +199,64 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     expect(without.contentHash).toBe(withRegional.contentHash);
   });
 
+  it('DX-019-bis (B): sin firmar, el logo de hoy; firmado, el congelado al firmar (aunque luego cambie o se quite)', async () => {
+    const { repo, get, accept } = setup();
+    const withLogo = (url: string | null) => {
+      const current = repo.sources.get('plan-1')!;
+      repo.add({
+        ...current,
+        clinic: { ...current.clinic, logoUrl: url, logoKey: url && 'logos/x' },
+      });
+    };
+    withLogo(LOGO_A);
+    expect((await get.execute('patient-1', 'plan-1')).clinicLogoUrl).toBe(
+      LOGO_A,
+    );
+    withLogo(LOGO_B);
+    const shown = await get.execute('patient-1', 'plan-1');
+    expect(shown.clinicLogoUrl).toBe(LOGO_B);
+    await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: `data:image/png;base64,${PNG}`,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    withLogo(LOGO_A);
+    const signed = await get.execute('patient-1', 'plan-1');
+    expect(signed.clinicLogoUrl).toBe(LOGO_B);
+    // Fuera del hash (D6): el logo no toca la integridad.
+    expect(signed.acceptance?.integrityOk).toBe(true);
+    withLogo(null);
+    expect((await get.execute('patient-1', 'plan-1')).clinicLogoUrl).toBe(
+      LOGO_B,
+    );
+  });
+
+  it('DX-019-bis (B): firmado sin logo, se imprime sin logo aunque hoy la clínica tenga uno', async () => {
+    const { repo, get, accept } = setup();
+    const shown = await get.execute('patient-1', 'plan-1');
+    await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: `data:image/png;base64,${PNG}`,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    const current = repo.sources.get('plan-1')!;
+    repo.add({
+      ...current,
+      clinic: { ...current.clinic, logoUrl: LOGO_A, logoKey: 'logos/a' },
+    });
+    expect((await get.execute('patient-1', 'plan-1')).clinicLogoUrl).toBeNull();
+  });
+
   it('un plan aceptado devuelve la foto firmada (no el plan vivo) y verifica su integridad', async () => {
     const { repo, get, accept } = setup();
     const shown = await get.execute('patient-1', 'plan-1');
@@ -341,6 +401,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           ipAddress: null,
           userAgent: null,
           remote: null,
+          clinicLogoUrl: null,
           acceptanceHash: computeAcceptanceHash({
             contentHash,
             signerName: 'Ana Pérez',
@@ -528,6 +589,7 @@ describe('DX-502: plan en EUR con el catálogo en VES', () => {
         ipAddress: null,
         userAgent: null,
         remote: null,
+        clinicLogoUrl: null,
         acceptanceHash: computeAcceptanceHash({
           contentHash,
           signerName: 'Ana Pérez',

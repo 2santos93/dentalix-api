@@ -173,6 +173,8 @@ export function composeQuoteContent(
  * paciente), nunca con el plan vivo; `integrityOk` recalcula los dos hashes.
  * DX-502: una foto v4 lleva la moneda de cada precio de lista; a una v1/v2/v3
  * se le completa con la congelada en sus ítems, sin tocar lo sellado.
+ * DX-019-bis (B): el logo, el congelado al firmar (fuera de la foto y de sus
+ * hashes); sin firmar, el de hoy, como los datos fiscales.
  */
 function toDocument(
   source: PlanQuoteSource,
@@ -190,7 +192,6 @@ function toDocument(
         minDaysAfterPrevious: 0,
       })),
     planStatus: source.plan.status,
-    clinicLogoUrl: source.clinic.logoUrl,
     regional: source.regional,
   };
   const stored = source.acceptance;
@@ -205,6 +206,7 @@ function toDocument(
     return {
       ...content,
       ...base,
+      clinicLogoUrl: source.clinic.logoUrl,
       contentHash: computeQuoteHash(content),
       acceptance: null,
     };
@@ -224,6 +226,8 @@ function toDocument(
   return {
     ...content,
     ...base,
+    // DX-019-bis (B): el logo congelado al firmar; `null`, sin logo.
+    clinicLogoUrl: stored.clinicLogoUrl,
     contentHash: stored.contentHash,
     acceptance: {
       signerName: stored.signerName,

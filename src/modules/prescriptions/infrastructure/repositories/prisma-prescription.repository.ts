@@ -3,7 +3,10 @@
  * lee el `country` legado de cada fila y, en fase 1, copia en la receta única
  * el de su sede como dato (spec D1, R12). Ninguna regla lo usa.
  */
-import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
+import {
+  clinicLogoKeyToFreeze,
+  clinicLogoPublicUrl,
+} from '../../../../shared/storage/clinic-logo-url';
 import {
   CLINIC_FISCAL_SELECT,
   clinicFiscalOf,
@@ -367,9 +370,17 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
         where: { id: rest.locationId },
         select: { country: true },
       });
+      // DX-019-bis (B): la receta congela la clave del logo de este instante,
+      // leída en la transacción que la emite (fuera del hash: la protege el
+      // trigger, que compara la fila entera). NULL = se emitió sin logo.
+      const tenant = await tx.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { logoKey: true },
+      });
       return tx.prescription.create({
         data: {
           ...rest,
+          clinicLogoKey: clinicLogoKeyToFreeze(tenant.logoKey),
           clinicFiscal:
             (rest.clinicFiscal as unknown as Prisma.InputJsonValue | null) ??
             Prisma.DbNull,
@@ -401,29 +412,26 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
   /**
    * Con el formato ACTUAL de la sede de la receta (spec §4.6), también si
    * está retirada (sin filtrar `deletedAt`). Tolerante: lo que falte o no sea
-   * válido llega como `null`, nunca un 409; la web pinta «—».
+   * válido llega como `null`, nunca un 409; la web pinta «—». El logo, el
+   * congelado al emitir (DX-019-bis B).
    */
   async findById(id: string): Promise<StoredPrescription | null> {
-    const tenantId = this.requireTenantId();
+    this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.prescription.findFirst({
         where: { id },
         include: INCLUDE,
       });
       if (!row) return null;
-      const [tenant, location] = await Promise.all([
-        tx.tenant.findFirst({
-          where: { id: tenantId },
-          select: { logoKey: true },
-        }),
-        tx.location.findFirst({
-          where: { id: row.locationId },
-          select: { timeZone: true, locale: true, hourCycle: true },
-        }),
-      ]);
+      const location = await tx.location.findFirst({
+        where: { id: row.locationId },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
       return {
         ...mapRow(row),
-        clinicLogoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
+        // DX-019-bis (B): el logo congelado al emitir, nunca el de hoy; NULL
+        // = se emitió sin logo y se reimprime sin él.
+        clinicLogoUrl: clinicLogoPublicUrl(row.clinicLogoKey),
         locationFormat: {
           timeZone: location?.timeZone ?? null,
           locale: location?.locale ?? null,

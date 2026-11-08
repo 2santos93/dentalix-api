@@ -1,4 +1,7 @@
-import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
+import {
+  clinicLogoKeyToFreeze,
+  clinicLogoPublicUrl,
+} from '../../../../shared/storage/clinic-logo-url';
 import {
   CLINIC_FISCAL_SELECT,
   clinicFiscalOf,
@@ -120,6 +123,9 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
               acceptedById: row.acceptedById,
               ipAddress: row.ipAddress,
               userAgent: row.userAgent,
+              // DX-019-bis (B): el logo de este instante, leído en esta
+              // transacción con el plan bloqueado.
+              clinicLogoKey: source.clinic.logoKey,
             },
           });
         } catch (error) {
@@ -227,6 +233,7 @@ export async function readPlanQuoteSource(
           remoteSentAt: true,
           remoteOpenedAt: true,
           remoteVerifiedAt: true,
+          clinicLogoKey: true,
           // DX-514: el impreso dice si firmó el paciente o su representante.
           signatureRequest: { select: { signerType: true } },
         },
@@ -331,6 +338,7 @@ export async function readPlanQuoteSource(
     clinic: {
       name: tenant?.name ?? '',
       logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
+      logoKey: clinicLogoKeyToFreeze(tenant?.logoKey ?? null),
       fiscal: clinicFiscalOf(tenant),
     },
     location: {
@@ -355,6 +363,8 @@ export async function readPlanQuoteSource(
           ipAddress: acceptance.ipAddress,
           userAgent: acceptance.userAgent,
           remote: remoteEvidenceOf(acceptance),
+          // DX-019-bis (B): el congelado al firmar, nunca el de hoy.
+          clinicLogoUrl: clinicLogoPublicUrl(acceptance.clinicLogoKey),
         }
       : null,
   };

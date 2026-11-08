@@ -61,6 +61,7 @@ export type VoidPrescriptionOutcome =
 
 /** La receta guardada con lo que la vista imprimible lee de la clínica y la sede. */
 export type StoredPrescription = Prescription & {
+  /** DX-019-bis (B): el logo congelado al emitir; `null` = emitida sin logo. */
   clinicLogoUrl: string | null;
   locationFormat: PrescriptionLocationFormat;
 };

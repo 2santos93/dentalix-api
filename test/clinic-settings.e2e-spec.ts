@@ -783,6 +783,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     const getRx = async (id: string) =>
       (await as(a, dentistA).get(`/prescriptions/${id}`).expect(200)).body as {
         clinicFiscal: Record<string, unknown> | null;
+        clinicLogoUrl: string | null;
         integrityOk: boolean;
       };
     const signedPlan = async (): Promise<string> => {
@@ -824,7 +825,8 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       ).body as {
         version: number;
         clinicFiscal: Record<string, unknown> | null;
-        acceptance: { integrityOk: boolean };
+        clinicLogoUrl: string | null;
+        acceptance: { integrityOk: boolean } | null;
       };
 
     afterEach(async () => {
@@ -889,7 +891,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
         legalName: FISCAL.legalName,
         taxId: FISCAL.taxId,
       });
-      expect(quote.acceptance.integrityOk).toBe(true);
+      expect(quote.acceptance?.integrityOk).toBe(true);
     });
 
     it('presupuesto firmado antiguo (v2, sin foto): sin datos fiscales, nunca con los de hoy', async () => {
@@ -910,6 +912,76 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       const quote = await getQuote(plan);
       expect(quote.version).toBe(2);
       expect(quote.clinicFiscal).toBeNull();
+    });
+
+    // DX-019-bis (B): el logo se congela al emitir (receta) o al firmar
+    // (presupuesto), fuera del hash; sin firmar, el de hoy.
+    const uploadLogo = async (size: number): Promise<string> =>
+      (
+        (await as(a).upload(makePng(size, size), 'logo.png', 'image/png'))
+          .body as SettingsBody
+      ).logoUrl!;
+
+    it('DX-019-bis: receta y presupuesto firmado reimprimen el logo de la emisión aunque luego cambie o se quite; sin firmar, el de hoy', async () => {
+      const logoA = await uploadLogo(20);
+      const rx = await issueRx();
+      const plan = await signedPlan();
+      const logoB = await uploadLogo(24);
+      expect(logoB).not.toBe(logoA);
+
+      const rxDoc = await getRx(rx);
+      expect(rxDoc.clinicLogoUrl).toBe(logoA);
+      expect(rxDoc.integrityOk).toBe(true);
+      const quote = await getQuote(plan);
+      expect(quote.clinicLogoUrl).toBe(logoA);
+      expect(quote.acceptance?.integrityOk).toBe(true);
+      expect((await getQuote(planA)).clinicLogoUrl).toBe(logoB);
+      // El objeto del logo anterior se sigue sirviendo (nunca se borra).
+      await request(server()).get(logoPath(logoA)).expect(200);
+      expect(
+        (
+          await raw.prescription.findUniqueOrThrow({
+            where: { id: rx },
+            select: { clinicLogoKey: true },
+          })
+        ).clinicLogoKey,
+      ).toBe(`logos/${logoA.split('/files/logos/')[1]}`);
+
+      await as(a).delete('/clinic/settings/logo').expect(200);
+      expect((await getRx(rx)).clinicLogoUrl).toBe(logoA);
+      expect((await getQuote(plan)).clinicLogoUrl).toBe(logoA);
+      expect((await getQuote(planA)).clinicLogoUrl).toBeNull();
+    });
+
+    it('DX-019-bis: emitidos sin logo, se reimprimen sin logo aunque luego la clínica suba uno', async () => {
+      await as(a).delete('/clinic/settings/logo').expect(200);
+      const rx = await issueRx();
+      const plan = await signedPlan();
+      const logo = await uploadLogo(28);
+      expect((await getRx(rx)).clinicLogoUrl).toBeNull();
+      expect((await getQuote(plan)).clinicLogoUrl).toBeNull();
+      expect((await getQuote(planA)).clinicLogoUrl).toBe(logo);
+    });
+
+    it('DX-019-bis: el logo congelado no se puede cambiar (trigger), ni en la receta ni en la aceptación', async () => {
+      const rx = await issueRx();
+      const plan = await signedPlan();
+      await expect(
+        raw.prescription.update({
+          where: { id: rx },
+          data: { clinicLogoKey: 'logos/otro-0123456789abcdef.png' },
+        }),
+      ).rejects.toThrow(/inmutable/);
+      const acceptance = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+        where: { planId: plan },
+        select: { id: true },
+      });
+      await expect(
+        raw.treatmentPlanAcceptance.update({
+          where: { id: acceptance.id },
+          data: { clinicLogoKey: null },
+        }),
+      ).rejects.toThrow(/inmutable/);
     });
   });
 

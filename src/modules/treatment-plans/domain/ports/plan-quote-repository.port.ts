@@ -23,6 +23,11 @@ export interface StoredPlanAcceptance {
   userAgent: string | null;
   /** DX-415: aceptado por el paciente a distancia; `null` en la clínica. */
   remote: PlanAcceptanceRemoteEvidence | null;
+  /**
+   * DX-019-bis (B): el logo congelado al firmar (columna propia, fuera del
+   * contenido y de sus hashes); `null` = se firmó sin logo y se imprime sin él.
+   */
+  clinicLogoUrl: string | null;
 }
 
 /** Evidencias de la aceptación a distancia, congeladas al firmar (DX-415). */
@@ -69,8 +74,17 @@ export interface PlanQuoteSource {
     docTypeLabel: string | null;
     docNumber: string | null;
   };
-  /** DX-019: `fiscal`, los de hoy: entran en el contenido que se presenta y se firma. */
-  clinic: { name: string; logoUrl: string | null; fiscal: ClinicFiscalData };
+  /**
+   * DX-019: `fiscal`, los de hoy: entran en el contenido que se presenta y se
+   * firma. DX-019-bis (B): `logoKey`, la clave de hoy que congela la
+   * aceptación (`clinicLogoKeyToFreeze`); el logo NO entra en el contenido.
+   */
+  clinic: {
+    name: string;
+    logoUrl: string | null;
+    logoKey: string | null;
+    fiscal: ClinicFiscalData;
+  };
   location: QuoteLocation & { timeZone: string };
   /** DX-354: región de la sede del presupuesto; `null` si le falta algo. No entra en el contenido firmado ni en su hash. */
   regional: DocumentRegionalDto | null;

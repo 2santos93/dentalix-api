@@ -56,6 +56,7 @@ export function quoteSource(
     clinic: {
       name: 'Clínica Sonrisa',
       logoUrl: null,
+      logoKey: null,
       fiscal: EMPTY_CLINIC_FISCAL,
     },
     location: {
@@ -133,6 +134,8 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
         ipAddress: row.ipAddress,
         userAgent: row.userAgent,
         remote: null,
+        // Como el de Prisma: el logo del instante de la firma.
+        clinicLogoUrl: source.clinic.logoUrl,
       },
     };
     this.sources.set(planId, accepted);
