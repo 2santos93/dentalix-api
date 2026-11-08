@@ -72,6 +72,8 @@ export interface DiscountReportRow {
    * la base congelada en la moneda del plan (no había tasa al darlo de alta,
    * o es anterior): su rebaja de convenio no se puede medir sin convertir al
    * consultar, así que se señala «sin referencia comparable», sin importe.
+   * DX-513-quater: también la lista de convenio con la moneda del catálogo
+   * desconocida (NULL); el convenio por % con NULL se sigue midiendo.
    */
   agreementUnmeasured: boolean;
   /** Precio pactado del ítem. */

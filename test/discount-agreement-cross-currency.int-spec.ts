@@ -237,7 +237,7 @@ interface Case {
   plan: 'USD' | 'VES';
   src: 'CATALOG' | 'PRICE_LIST' | 'AGREEMENT_PRICE_LIST' | 'AGREEMENT_PERCENT';
   cat: number;
-  base: number;
+  base: number | null;
   cc: string | null;
   price: number;
   disc?: number;
@@ -429,8 +429,9 @@ const MATRIX: Record<string, Case> = {
     bip: 3960,
     rate: [1, 880],
   },
-  // Convenios anteriores a DX-513-bis (sin foto) en la misma moneda (F0) y
-  // con la moneda del catálogo NULL (L0): se miden como hoy, nunca se señalan.
+  // Convenios anteriores a DX-513-bis (sin foto) en la misma moneda (F0): se
+  // miden como hoy. DX-513-quater: una lista de convenio con la moneda del
+  // catálogo NULL (L0, sin foto) es «sin referencia comparable».
   F0: {
     plan: 'VES',
     src: 'AGREEMENT_PRICE_LIST',
@@ -449,6 +450,78 @@ const MATRIX: Record<string, Case> = {
     base: 3600,
     cc: null,
     price: 3.5,
+    rc: null,
+    rip: null,
+    bip: null,
+  },
+  // DX-513-quater: moneda del catálogo NULL. L1 (plan en VES) ni entra en el
+  // informe; L2 tiene la misma forma que L (el catálogo podría ser USD):
+  // tampoco se mide; L3 lleva además un descuento propio; L4 no tiene base
+  // (nada que comparar); P0 y P1 (convenio por %) se siguen midiendo.
+  L1: {
+    plan: 'VES',
+    src: 'AGREEMENT_PRICE_LIST',
+    cat: 40000,
+    base: 50,
+    cc: null,
+    price: 40000,
+    rc: 'VES',
+    rip: 40000,
+    bip: 50,
+  },
+  L2: {
+    plan: 'USD',
+    src: 'AGREEMENT_PRICE_LIST',
+    cat: 40,
+    base: 50,
+    cc: null,
+    price: 40,
+    rc: 'USD',
+    rip: 40,
+    bip: 50,
+  },
+  L3: {
+    plan: 'USD',
+    src: 'AGREEMENT_PRICE_LIST',
+    cat: 3.5,
+    base: 3600,
+    cc: null,
+    price: 3.5,
+    disc: 0.5,
+    rc: 'USD',
+    rip: 3.5,
+    bip: 3600,
+  },
+  L4: {
+    plan: 'USD',
+    src: 'AGREEMENT_PRICE_LIST',
+    cat: 3.5,
+    base: null,
+    cc: null,
+    price: 3.5,
+    disc: 0.5,
+    rc: 'USD',
+    rip: 3.5,
+    bip: null,
+  },
+  P0: {
+    plan: 'USD',
+    src: 'AGREEMENT_PERCENT',
+    cat: 3240,
+    base: 3600,
+    cc: null,
+    price: 3240,
+    rc: null,
+    rip: 3240,
+    bip: 3600,
+  },
+  P1: {
+    plan: 'USD',
+    src: 'AGREEMENT_PERCENT',
+    cat: 3240,
+    base: 3600,
+    cc: null,
+    price: 3240,
     rc: null,
     rip: null,
     bip: null,
@@ -669,15 +742,22 @@ describe('rebaja de convenio entre monedas en las listas (DX-513-ter, Postgres)'
       I: [0, 0, true],
       J: [0, 0.41, false],
       K: [0, 0, true],
-      L: [0, 3596.5, false],
-      L0: [0, 3596.5, false],
+      L: [0, 0, true],
+      L0: [0, 0, true],
+      L2: [0, 0, true],
+      L3: [0.5, 0, true],
+      L4: [0.5, 0, false],
       N: [0, 0.59, false],
       O: [0, 460, false],
+      P0: [0, 360, false],
+      P1: [0, 360, false],
     });
     // C (sin foto, otra moneda) y M (lista por encima del catálogo
     // convertido) no salen: ni descuento ni rebaja de convenio.
     expect(Object.keys(shown)).not.toContain('C');
     expect(Object.keys(shown)).not.toContain('M');
+    // L1 (plan en VES, catálogo NULL): ni entra, como antes.
+    expect(Object.keys(shown)).not.toContain('L1');
     // Las tasas: la de la referencia (B, J) en `rate`; la de la base de una
     // lista de convenio (N, O) en `baseRate`; nunca las dos.
     const byCode = (code: string) =>
@@ -698,21 +778,22 @@ describe('rebaja de convenio entre monedas en las listas (DX-513-ter, Postgres)'
       rate: null,
       baseRate: { fromPerBase: 1, toPerBase: 880 },
     });
-    // Totales: los de descuento (A–E y G2) y los de convenio, como antes de
-    // DX-513-ter salvo O (que antes ni entraba); las señaladas, aparte.
+    // Totales: los de descuento (A–E y G2, más L3 y L4 con su 0,50 propio) y
+    // los de convenio (J, N y los dos por %; L, L0, L2 y L3 ya NO suman,
+    // DX-513-quater); las señaladas, aparte. El tope de D no se toca.
     expect(summary.totals).toEqual([
-      { currency: 'USD', items: 4, gross: 3612.09, discount: 3597.09 },
+      { currency: 'USD', items: 6, gross: 3619.09, discount: 3598.09 },
       { currency: 'VES', items: 1, gross: 3600, discount: 100 },
     ]);
     expect(summary.agreementTotals).toEqual([
-      { currency: 'USD', items: 4, reduction: 7194 },
+      { currency: 'USD', items: 4, reduction: 721 },
       { currency: 'VES', items: 3, reduction: 1660 },
     ]);
     expect(summary.agreementUnmeasuredTotals).toEqual([
-      { currency: 'USD', items: 4 },
+      { currency: 'USD', items: 8 },
       { currency: 'VES', items: 1 },
     ]);
-    expect(summary.rows).toBe(16);
+    expect(summary.rows).toBe(21);
   });
 
   it('test 8: con `professionalId`, una señalada cuenta si esa persona creó el ítem', async () => {
@@ -734,6 +815,101 @@ describe('rebaja de convenio entre monedas en las listas (DX-513-ter, Postgres)'
     );
     expect(other.agreementUnmeasuredTotals).toEqual([]);
     expect(other.rows).toBe(0);
+  });
+
+  it('DX-513-quater: una lista con la moneda del catálogo NULL queda sin referencia aunque después se fije; la nueva se mide', async () => {
+    const usd = await plan('USD');
+    const old = await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: s.tenantId,
+        planId: usd,
+        toothNumber: '11',
+        catalogItemId: s.catalogItemId,
+        catalogPrice: 3.5,
+        basePrice: 3600,
+        catalogCurrency: null,
+        priceSource: 'AGREEMENT_PRICE_LIST',
+        agreementId: s.agreementId,
+        agreementName: 'Empresa',
+        price: 3.5,
+        referenceCurrency: 'USD',
+        referencePriceInPlan: 3.5,
+        basePriceInPlan: 3600,
+      },
+    });
+    // La clínica fija ahora la moneda del catálogo (DX-502-bis) y un ítem
+    // nuevo, con el catálogo en USD y la lista en USD, sí se mide.
+    await raw.tenant.update({
+      where: { id: s.tenantId },
+      data: { catalogCurrency: 'USD' },
+    });
+    const fresh = await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: s.tenantId,
+        planId: usd,
+        toothNumber: '12',
+        catalogItemId: s.catalogItemId,
+        catalogPrice: 40,
+        basePrice: 50,
+        catalogCurrency: 'USD',
+        priceSource: 'AGREEMENT_PRICE_LIST',
+        agreementId: s.agreementId,
+        agreementName: 'Empresa',
+        price: 40,
+        referenceCurrency: 'USD',
+        referencePriceInPlan: 40,
+        basePriceInPlan: 50,
+      },
+    });
+    const { rows } = await reportFor([usd]);
+    const by = new Map(rows.map((r) => [r.itemId, r]));
+    expect(by.get(old.id)).toMatchObject({
+      agreementReduction: 0,
+      agreementUnmeasured: true,
+      catalogCurrency: null,
+    });
+    expect(by.get(fresh.id)).toMatchObject({
+      agreementReduction: 10,
+      agreementUnmeasured: false,
+    });
+  });
+
+  it('DX-513-quater: con `professionalId`, la lista sin referencia cuenta solo para quien creó el ítem', async () => {
+    const usd = await plan('USD');
+    await raw.treatmentPlanItem.create({
+      data: {
+        tenantId: s.tenantId,
+        planId: usd,
+        toothNumber: '11',
+        catalogItemId: s.catalogItemId,
+        catalogPrice: 3.5,
+        basePrice: 3600,
+        catalogCurrency: null,
+        priceSource: 'AGREEMENT_PRICE_LIST',
+        agreementId: s.agreementId,
+        agreementName: 'Empresa',
+        price: 3.5,
+        referenceCurrency: 'USD',
+        referencePriceInPlan: 3.5,
+        basePriceInPlan: 3600,
+        createdById: s.userId,
+      },
+    });
+    const q = period();
+    const mine = await inTenant(() =>
+      report.summary({ ...q, professionalId: s.userId }),
+    );
+    expect(mine.agreementUnmeasuredTotals).toEqual([
+      { currency: 'USD', items: 1 },
+    ]);
+    expect(mine.agreementTotals).toEqual([]);
+    const other = await inTenant(() =>
+      report.summary({
+        ...q,
+        professionalId: '00000000-0000-4000-8000-000000000000',
+      }),
+    );
+    expect(other.agreementUnmeasuredTotals).toEqual([]);
   });
 
   it('tests 10 y 12: la migración rehace el índice CONCURRENTLY sin tocar importes; la consulta lo usa y no recorre la tabla', async () => {
