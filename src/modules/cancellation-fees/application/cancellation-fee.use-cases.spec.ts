@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import type { ClinicCurrencyTextsReader } from '../../../shared/money/clinic-currency-texts.reader';
 import {
   ChargeCancellationFeeUseCase,
   GetCancellationFeeUseCase,
@@ -133,14 +134,29 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
   let ctx: TenantContextService;
   const run = <T>(fn: () => Promise<T>, allowed?: string[]) =>
     ctx.run(TENANT, undefined, fn, allowed);
+  /** DX-517-bis: el texto propio de cada moneda de la clínica y quién lo pidió. */
+  let texts: Record<string, string>;
+  let textReads: string[];
+  const currencyTexts = {
+    forTenant: (tenantId: string) => {
+      textReads.push(tenantId);
+      return Promise.resolve(texts);
+    },
+  } as unknown as ClinicCurrencyTextsReader;
   const charge = (amount?: number, actor = ADMIN) =>
     run(() =>
-      new ChargeCancellationFeeUseCase(repo, ctx).execute(APPT, amount, actor),
+      new ChargeCancellationFeeUseCase(repo, ctx, currencyTexts).execute(
+        APPT,
+        amount,
+        actor,
+      ),
     );
 
   beforeEach(() => {
     repo = new FakeFeeRepo();
     ctx = new TenantContextService();
+    texts = {};
+    textReads = [];
   });
 
   it('genera el cargo con el importe sugerido de la versión comunicada', async () => {
@@ -198,6 +214,25 @@ describe('casos de uso del cargo por inasistencia (DX-291)', () => {
     expect(repo.charges).toHaveLength(0);
     await charge(20000);
     expect(repo.charges[0].amount).toBe(20000);
+  });
+
+  it('DX-517-bis: el 400 del tope escribe la moneda con el texto propio de la clínica', async () => {
+    repo.ctx!.locationLocale = 'en-US';
+    repo.ctx!.locationHourCycle = 'h12';
+    repo.ctx!.communicated!.currency = 'VES';
+    texts = { VES: 'Bs.' };
+    await expect(charge(60000)).rejects.toThrow(
+      new BadRequestException(
+        'El importe no puede superar el sugerido por la política comunicada (Bs.\u00a050,000.00).',
+      ),
+    );
+    expect(textReads).toEqual([TENANT]);
+    expect(repo.charges).toHaveLength(0);
+  });
+
+  it('DX-517-bis: sin importe propio (el sugerido) no se leen los textos', async () => {
+    await charge();
+    expect(textReads).toEqual([]);
   });
 
   it('sin política comunicada: 409 «No consta…»', async () => {

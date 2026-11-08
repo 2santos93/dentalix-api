@@ -37,6 +37,11 @@ import {
 } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../../shared/format/currency-text';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import {
   CashRegisterPage,
@@ -1000,6 +1005,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
               pendingCents / 100,
               balance.currency,
               await this.locationFormatIn(tx, balance.locationId),
+              await this.currencyTextsIn(tx),
             ),
       );
     }
@@ -1015,6 +1021,21 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant((tx) =>
       this.locationFormatIn(tx, locationId),
     );
+  }
+
+  clinicCurrencyTexts(): Promise<CurrencyTexts> {
+    return this.prisma.runWithTenant((tx) => this.currencyTextsIn(tx));
+  }
+
+  /** DX-517-bis: el texto propio de cada moneda de la clínica, solo para pintar. */
+  private async currencyTextsIn(
+    tx: Prisma.TransactionClient,
+  ): Promise<CurrencyTexts> {
+    const tenant = await tx.tenant.findUnique({
+      where: { id: this.requireTenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
   }
 
   /** G1-B: formato de una sede (la del dato, R12), solo para pintar (I4). */

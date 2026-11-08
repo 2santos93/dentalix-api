@@ -30,8 +30,7 @@ export const MANUAL_RATE_MESSAGE =
   'La tasa tiene que ser un número mayor que 0, con hasta 8 decimales y menos de 10.000.000.';
 export const MANUAL_RATE_CURRENCY_MESSAGE =
   'Elige una moneda de la lista de monedas.';
-export const MANUAL_RATE_BASE_CURRENCY_MESSAGE =
-  'USD es la moneda base de las tasas: su tasa siempre es 1 y no se registra.';
+export const MANUAL_RATE_BASE_CURRENCY_MESSAGE = `${BASE_CURRENCY} es la moneda base de las tasas: su tasa siempre es 1 y no se registra.`;
 export const MANUAL_RATE_DATE_MESSAGE =
   'La fecha de la tasa tiene que ser un día válido con el formato AAAA-MM-DD.';
 export const MANUAL_RATE_FUTURE_DATE_MESSAGE =

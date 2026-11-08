@@ -11,13 +11,14 @@ import {
   CURRENCY_TEXTS_MAX_ENTRIES,
 } from '../../../../shared/format/currency-text';
 import { CURRENCY_TEXTS_TOO_MANY_MESSAGE } from '../../domain/clinic-currency-texts';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 /** DX-517: una moneda y el texto con el que la clínica la escribe. */
 export class CurrencyTextEntryDto {
   @ApiProperty({
     description: 'Código ISO 4217 de una moneda del catálogo.',
   })
-  @IsString({ message: 'La moneda debe ser un código ISO de tres letras.' })
+  @IsString({ message: CURRENCY_CODE_MESSAGE })
   currency!: string;
 
   @ApiProperty({

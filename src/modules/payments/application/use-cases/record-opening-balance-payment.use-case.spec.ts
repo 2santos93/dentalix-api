@@ -168,6 +168,21 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     );
   });
 
+  it('DX-517-bis: el 400 de lo pendiente escribe la moneda con el texto propio de la clínica', async () => {
+    const { repo, uc } = setup();
+    repo.locations.set('loc-1', { locale: 'en-US', hourCycle: 'h12' });
+    repo.currencyTexts = { VES: 'Bs.' };
+    await expect(
+      uc.execute('ob-1', {
+        amount: 150001,
+        currency: 'VES',
+        paidAt: '2026-10-20',
+      }),
+    ).rejects.toThrow(
+      'El abono supera lo pendiente del saldo migrado: quedan Bs.\u00a0150,000.00.',
+    );
+  });
+
   it('the overpaid 400 uses the format of the balance location; without clock, 409 only there', async () => {
     const { repo, uc } = setup();
     repo.locations.set('loc-1', { locale: 'en-US', hourCycle: 'h12' });

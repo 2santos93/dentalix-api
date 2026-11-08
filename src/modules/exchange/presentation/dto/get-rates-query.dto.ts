@@ -2,9 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsOptional, Matches } from 'class-validator';
 import { IsRateDate, RATE_DATE_API_PROPERTY } from './rate-date.validator';
+import { currencyListMessage } from '../../../../shared/money/currency-messages';
 
 export const RATE_CURRENCIES_MAX = 6;
-export const RATE_CURRENCIES_MESSAGE = `currencies tiene que ser una lista de hasta ${RATE_CURRENCIES_MAX} códigos ISO 4217 de 3 letras separados por comas.`;
+export const RATE_CURRENCIES_MESSAGE = currencyListMessage(RATE_CURRENCIES_MAX);
 
 /** `VES,eur` → `['VES', 'EUR']`; lo que no es texto pasa para que lo rechace el validador. */
 function toCurrencyList({ value }: { value: unknown }): unknown {

@@ -3,6 +3,7 @@ import { ReferenceRateDto } from '../../../discounts/presentation/dto/reference-
 import { Transform } from 'class-transformer';
 import { IsUUID, Matches } from 'class-validator';
 import { PriceSource } from '@prisma/client';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 // Sin `tenantId` ni `patientId`: salen del contexto y de la ruta.
 export class PriceQuoteQueryDto {
@@ -19,7 +20,7 @@ export class PriceQuoteQueryDto {
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
   @Matches(/^[A-Z]{3}$/, {
-    message: 'La moneda debe ser un código ISO de 3 letras.',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency!: string;
 }

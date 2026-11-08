@@ -32,6 +32,7 @@ import {
   SPLIT_MIN_LINES,
 } from '../../domain/split-payment';
 import { PaymentDto } from './payment.dto';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 function toUpperCase({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.toUpperCase() : value;
@@ -51,7 +52,7 @@ export class SplitPaymentLineDto {
   })
   @Transform(toUpperCase)
   @IsISO4217CurrencyCode({
-    message: 'currency must be a real ISO 4217 currency code',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency!: string;
 

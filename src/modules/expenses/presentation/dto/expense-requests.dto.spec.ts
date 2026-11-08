@@ -95,7 +95,9 @@ describe('DTOs de gastos (DX-274)', () => {
     it('rechaza una moneda inexistente, un medio fuera del enum y un pago sin importe', async () => {
       expect(
         await messages(CreateExpenseDto, { ...valid, currency: 'ZZZZ' }),
-      ).toEqual(['La moneda no es válida.']);
+      ).toEqual([
+        'La moneda tiene que ser un código ISO 4217 de tres letras en mayúsculas.',
+      ]);
       expect(
         await messages(CreateExpenseDto, {
           ...valid,

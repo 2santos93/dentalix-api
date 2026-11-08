@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Matches } from 'class-validator';
 import { IsRateDate } from '../../../exchange/presentation/dto/rate-date.validator';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 /**
  * DX-380: aviso al ADMIN de abonos sin tasa (sin base de imputación o sin su
@@ -43,7 +44,7 @@ export class PaymentRateBacklogDayQueryDto {
     description: 'Moneda de la tasa (ISO 4217, tres letras mayúsculas).',
   })
   @Matches(/^[A-Z]{3}$/, {
-    message: 'currency debe ser un código de moneda de tres letras mayúsculas.',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency!: string;
 }

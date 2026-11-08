@@ -27,6 +27,7 @@ import { SIGNED_PLAN_HEADER_LOCKED_MESSAGE } from './signed-plan-lock';
 import { FEE_PLAN_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
 import { assertCurrencyChangeKeepsDiscounts } from './item-discount';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
 
 /** Lo que admite el PATCH del plan. */
 export interface UpdateTreatmentPlanInput {
@@ -118,7 +119,7 @@ export class UpdateTreatmentPlanUseCase {
     if (input.currency !== undefined) {
       currency = input.currency.toUpperCase();
       if (!(await this.whitelist.has(currency))) {
-        throw new BadRequestException(`Moneda desconocida: ${currency}`);
+        throw new BadRequestException(UNKNOWN_CURRENCY_MESSAGE);
       }
     }
     const at = this.now();

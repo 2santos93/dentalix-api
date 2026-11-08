@@ -1,4 +1,5 @@
 import type { IdempotentPayment } from '../idempotency';
+import type { CurrencyTexts } from '../../../../shared/format/currency-text';
 import type { FrozenExchangeRate } from '../payment-exchange-rate';
 import {
   ClinicRole,
@@ -425,6 +426,12 @@ export interface PaymentRepository {
    * `LOCATION_LOCALE_REQUIRED`: se pide solo al pintar (I4).
    */
   locationFormat(locationId: string): Promise<RegionalFormat>;
+
+  /**
+   * DX-517-bis: el texto propio de cada moneda de la clínica (vacío = el
+   * código), para pintar un importe en un mensaje. Se pide solo al pintar.
+   */
+  clinicCurrencyTexts(): Promise<CurrencyTexts>;
 
   /**
    * The payment, or `null` if it is absent, soft-deleted (voided), or

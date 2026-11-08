@@ -20,6 +20,7 @@ import {
   PLAN_WITHOUT_OPTIONS,
   planCurrencySource,
 } from './__fixtures__/in-memory-treatment-plan.repository';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
 
 function fakePlan(overrides: Partial<TreatmentPlan> = {}): TreatmentPlan {
   return {
@@ -320,7 +321,7 @@ describe('CreateTreatmentPlanUseCase', () => {
 
     await expect(
       uc.execute({ patientId: 'p1', currency: 'XXX' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toThrow(new BadRequestException(UNKNOWN_CURRENCY_MESSAGE));
   });
 });
 

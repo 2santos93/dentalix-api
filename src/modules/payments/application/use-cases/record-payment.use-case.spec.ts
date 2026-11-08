@@ -24,6 +24,7 @@ import type { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-bala
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
 import type { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { Logger } from '@nestjs/common';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
 
 /** Fake del saldo del recibo (DX-136): devuelve lo que se le diga y anota las llamadas. */
 class FakeReceiptPlanBalance {
@@ -472,7 +473,7 @@ describe('RecordPaymentUseCase', () => {
         currency: 'XXX',
         paidAt: '2026-03-05T00:00:00.000Z',
       }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toThrow(new BadRequestException(UNKNOWN_CURRENCY_MESSAGE));
   });
 
   it('rejects an invalid paidAt with BadRequestException', async () => {

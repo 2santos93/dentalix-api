@@ -53,6 +53,11 @@ import {
   type PreparedBalance,
 } from '../domain/opening-balance-sheet';
 import { docKey, type RowIssue } from '../domain/row-validation';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../shared/format/currency-text';
 
 type Tx = Prisma.TransactionClient;
 
@@ -1072,6 +1077,15 @@ export class PrismaPatientImportRepository {
    * Monedas admitidas: el catálogo `currencies` (global, sin RLS), el mismo
    * que valida planes y abonos (DX-042).
    */
+  /** DX-517-bis: el texto propio de cada moneda de la clínica (vacío = el código). */
+  async currencyTexts(): Promise<CurrencyTexts> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: this.tenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
+  }
+
   async currencyCodes(): Promise<string[]> {
     const rows = await this.prisma.currency.findMany({
       select: { code: true },

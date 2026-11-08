@@ -34,6 +34,7 @@ import {
   MAINTENANCE_DUE_LIMIT_DEFAULT,
   MAINTENANCE_DUE_LIMIT_MAX,
 } from '../../application/use-cases/list-maintenance-due.use-case';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const MAINTENANCE_STATUSES = [
   'OVERDUE',
@@ -591,7 +592,7 @@ export class RecordMaintenanceDto {
     typeof value === 'string' ? value.toUpperCase() : value,
   )
   @IsString({
-    message: 'La moneda no es válida (código ISO 4217 de 3 letras).',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency?: string | null;
 

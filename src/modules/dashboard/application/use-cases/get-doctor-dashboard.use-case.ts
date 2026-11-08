@@ -12,6 +12,7 @@ import {
 import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { ListUpcomingAppointmentsUseCase } from '../../../appointments/application/use-cases/list-upcoming-appointments.use-case';
 import { CountPatientsUseCase } from '../../../patients/application/use-cases/count-patients.use-case';
+import { CURRENCY_REQUIRED_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const DEFAULT_UPCOMING_LIMIT = 5;
 /**
@@ -133,7 +134,7 @@ export class GetDoctorDashboardUseCase {
       throw new BadRequestException('from must be <= to');
     }
     if (!input.currency || !input.currency.trim()) {
-      throw new BadRequestException('currency is required');
+      throw new BadRequestException(CURRENCY_REQUIRED_MESSAGE);
     }
     const upcomingLimit = input.upcomingLimit ?? DEFAULT_UPCOMING_LIMIT;
     if (

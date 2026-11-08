@@ -14,6 +14,7 @@ import {
   RECEIVABLES_DEFAULT_PAGE_SIZE,
   RECEIVABLES_MAX_PAGE_SIZE,
 } from '../../application/use-cases/get-receivables-aging.use-case';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const MAX_AGE_DAYS = 36500;
 const MAX_BALANCE = 999_999_999_999.99;
@@ -36,7 +37,7 @@ export class ReceivablesAgingFiltersDto {
   })
   @IsOptional()
   @Matches(/^[A-Z]{3}$/, {
-    message: 'currency debe ser un código ISO 4217 de 3 letras.',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency?: string;
 

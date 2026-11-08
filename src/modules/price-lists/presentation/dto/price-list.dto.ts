@@ -24,8 +24,9 @@ import {
   PRICE_LIST_NAME_MESSAGE,
   PRICE_LIST_NAME_MIN,
 } from '../../domain/price-list-rules';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
-const CURRENCY_MESSAGE = 'La moneda debe ser un código de 3 letras.';
+const CURRENCY_MESSAGE = CURRENCY_CODE_MESSAGE;
 const LOCATION_MESSAGE = 'La sede debe ser un identificador válido.';
 
 /**

@@ -10,6 +10,7 @@ import {
 import { ImportFileError, type TableRow } from './tabular-file';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { moneyWithCode } from '../../../shared/format/money-with-code';
+import type { CurrencyTexts } from '../../../shared/format/currency-text';
 import { toCents } from '../../../shared/money/money';
 
 /*
@@ -465,15 +466,17 @@ function existingDescription(
   e: ExistingBalance,
   currency: string,
   fmt: RegionalFormat,
+  texts: CurrencyTexts | null,
 ): string {
   // DX-354: importes con el código ISO y fechas con el orden del locale de la
-  // sede, nunca «$» ni DD/MM/AAAA fijos.
+  // sede, nunca «$» ni DD/MM/AAAA fijos. DX-517-bis: con el texto propio de
+  // la moneda de la clínica, como la pantalla; la moneda va en el importe.
   const money = (cents: number) =>
-    moneyWithCode(cents / 100, currency, fmt, null);
+    moneyWithCode(cents / 100, currency, fmt, texts);
   const where = `lote «${e.latest.fileName}» del ${fmt.civilDate(e.latest.importedOn)}, corte ${fmt.civilDate(e.latest.asOfDate)}`;
   return e.count === 1
     ? `Este paciente ya tiene un saldo migrado vivo de ${money(e.cents)} (${where})`
-    : `Este paciente ya tiene ${e.count} saldos migrados vivos en ${currency} por ${money(e.cents)} (el último, ${money(e.latest.cents)} del ${where})`;
+    : `Este paciente ya tiene ${e.count} saldos migrados vivos por un total de ${money(e.cents)} (el último, ${money(e.latest.cents)} del ${where})`;
 }
 
 export interface AggregatedBalances {
@@ -514,7 +517,8 @@ export function totalsByCurrency(
  * ya tiene un saldo migrado vivo en esa moneda de otro lote, cada fila es un
  * error que dice cuál, salvo que la administradora marque «Añadir aunque ya
  * tenga saldo migrado» (`addToExisting`); entonces se crea y se avisa.
- * `fmt` (la sede del lote, G1-B) se pide solo para describir ese saldo (I4).
+ * `fmt` (la sede del lote, G1-B) se pide solo para escribir un importe en un
+ * mensaje (I4).
  */
 export function aggregateBalances(
   candidates: readonly BalanceCandidate[],
@@ -523,6 +527,8 @@ export function aggregateBalances(
   fmt: () => RegionalFormat,
   existing: ExistingBalanceLookup = new Map(),
   addToExisting = false,
+  /** DX-517-bis: el texto propio de cada moneda de la clínica (vacío = el código). */
+  texts: CurrencyTexts | null = null,
 ): AggregatedBalances {
   const issues: RowIssue[] = [];
   const byKey = new Map<string, PreparedBalance>();
@@ -553,7 +559,7 @@ export function aggregateBalances(
         row: c.rowNumber,
         column: docColumn,
         kind: 'ERROR',
-        message: `${existingDescription(already, c.currency, fmt())}: no se crea otro. Si es otra deuda, marca «${ADD_TO_EXISTING_LABEL}» y vuelve a subir la hoja.`,
+        message: `${existingDescription(already, c.currency, fmt(), texts)}: no se crea otro. Si es otra deuda, marca «${ADD_TO_EXISTING_LABEL}» y vuelve a subir la hoja.`,
         value: clip(c.docNumber),
       });
       continue;
@@ -564,7 +570,7 @@ export function aggregateBalances(
         row: c.rowNumber,
         column: docColumn,
         kind: 'EXISTING_BALANCE',
-        message: `${existingDescription(already, c.currency, fmt())}: se añadirá otro porque marcaste «${ADD_TO_EXISTING_LABEL}».`,
+        message: `${existingDescription(already, c.currency, fmt(), texts)}: se añadirá otro porque marcaste «${ADD_TO_EXISTING_LABEL}».`,
         value: clip(c.docNumber),
       });
     }
@@ -587,7 +593,7 @@ export function aggregateBalances(
         row: c.rowNumber,
         column: docColumn,
         kind: 'ERROR',
-        message: `Con esta fila, el saldo de este paciente en ${c.currency} pasaría de 999.999.999.999,99: revisa los importes.`,
+        message: `Con esta fila, el saldo de este paciente pasaría de ${moneyWithCode(MAX_CENTS / 100, c.currency, fmt(), texts)}: revisa los importes.`,
         value: clip(c.docNumber),
       });
       continue;

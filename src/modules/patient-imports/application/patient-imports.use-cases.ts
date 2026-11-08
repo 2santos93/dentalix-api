@@ -634,6 +634,8 @@ export class PatientImportsService {
       () => requireLocationFormat(location),
       existing,
       addToExisting,
+      // DX-517-bis: los importes de los avisos con el texto de la clínica.
+      await this.repo.currencyTexts(),
     );
     issues.push(...aggregated.issues);
     issues.sort((x, y) => x.row - y.row);

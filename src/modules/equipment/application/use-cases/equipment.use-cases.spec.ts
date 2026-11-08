@@ -459,7 +459,7 @@ describe('equipos biomédicos (DX-542)', () => {
           },
           'admin',
         ),
-      ).rejects.toThrow('Moneda no soportada.');
+      ).rejects.toThrow('Esa moneda no está en la lista de monedas admitidas.');
       await expect(
         record.execute(
           eq.id,

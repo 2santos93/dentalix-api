@@ -31,13 +31,14 @@ import {
   CASH_REASON_MAX,
   CASH_REASON_MIN,
 } from '../../domain/cash-session.entity';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 function trim({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.trim() : value;
 }
 
 const CURRENCY_PATTERN = /^[A-Za-z]{3}$/;
-const CURRENCY_MESSAGE = 'currency debe ser un código ISO 4217 de 3 letras.';
+const CURRENCY_MESSAGE = CURRENCY_CODE_MESSAGE;
 const METHOD_MESSAGE = 'method debe ser CASH, CARD, TRANSFER u OTHER.';
 const AMOUNT_OPTIONS = {
   maxDecimalPlaces: 2,

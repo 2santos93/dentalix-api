@@ -45,6 +45,7 @@ import {
   PAYMENT_METHOD_NOT_FOUND_MESSAGE,
   paymentMethodNameError,
 } from '../domain/payment-method-rules';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../shared/money/currency-messages';
 
 export interface PaymentMethodInput {
   name: string;
@@ -202,7 +203,7 @@ async function validAdjustment(
   }
   const table = await digits.table([currency]);
   if (!table.has(currency)) {
-    throw new BadRequestException(`Moneda desconocida: ${currency}`);
+    throw new BadRequestException(UNKNOWN_CURRENCY_MESSAGE);
   }
   const rounding = table.roundingDigits(currency);
   if (!fitsCurrencyDigits(amount, rounding)) {

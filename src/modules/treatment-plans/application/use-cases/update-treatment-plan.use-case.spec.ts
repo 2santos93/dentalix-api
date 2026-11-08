@@ -13,6 +13,7 @@ import {
 import { UpdateTreatmentPlanUseCase } from './update-treatment-plan.use-case';
 import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
 import { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const NOW = new Date('2026-10-16T15:00:00.000Z');
 const { DRAFT, PRESENTED, ACCEPTED, REJECTED, COMPLETED, CANCELLED } =
@@ -218,7 +219,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
     const plan = repo.seedPlan();
     await expect(
       uc.execute(plan.id, { currency: 'XXX' }, DENTIST),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toThrow(new BadRequestException(UNKNOWN_CURRENCY_MESSAGE));
     expect(repo.stored(plan.id).currency).toBe('USD');
   });
 

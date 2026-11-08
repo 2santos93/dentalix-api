@@ -31,6 +31,14 @@ describe('escape', () => {
     expect(singleLine('Hola\r\nBcc: x@y.co\t ')).toBe('Hola Bcc: x@y.co');
     expect(singleLine('A\u2028B\u2029C\u0085D\u009bE\u007f')).toBe('A B C D E');
   });
+
+  it('DX-517-bis: singleLine conserva el espacio duro de un importe (\u00abBs.\u00a01,234.50\u00bb), como el papel', () => {
+    expect(singleLine('Valor: Bs.\u00a01,234.50 \u00b7  Efectivo')).toBe(
+      'Valor: Bs.\u00a01,234.50 \u00b7 Efectivo',
+    );
+    expect(singleLine('1\u202f234,50\u00a0VES')).toBe('1\u202f234,50\u00a0VES');
+    expect(singleLine('\u00a0Hola\u00a0')).toBe('Hola');
+  });
 });
 
 describe('plantilla invitation', () => {
