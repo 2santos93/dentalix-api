@@ -48,6 +48,7 @@ import {
 } from '../payment-method-gate';
 import {
   CURRENCY_REQUIRED_MESSAGE,
+  PAYMENT_AMOUNT_MESSAGE,
   UNKNOWN_CURRENCY_MESSAGE,
 } from '../../../../shared/money/currency-messages';
 
@@ -317,7 +318,7 @@ export class RecordPaymentUseCase {
     currency: string;
   }): Promise<string> {
     if (!isFinitePositive(input.amount)) {
-      throw new BadRequestException('amount must be a finite number > 0');
+      throw new BadRequestException(PAYMENT_AMOUNT_MESSAGE);
     }
     if (!input.currency || input.currency.trim() === '') {
       throw new BadRequestException(CURRENCY_REQUIRED_MESSAGE);

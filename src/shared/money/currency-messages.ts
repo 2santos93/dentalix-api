@@ -9,6 +9,10 @@
 export const CURRENCY_CODE_MESSAGE =
   'La moneda tiene que ser un código ISO 4217 de tres letras en mayúsculas.';
 
+/** El importe de un abono no es un número finito mayor que 0. */
+export const PAYMENT_AMOUNT_MESSAGE =
+  'El importe tiene que ser un número mayor que 0.';
+
 /** Falta la moneda. */
 export const CURRENCY_REQUIRED_MESSAGE = 'Indica la moneda.';
 

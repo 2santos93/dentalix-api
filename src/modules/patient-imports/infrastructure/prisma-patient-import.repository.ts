@@ -1073,10 +1073,6 @@ export class PrismaPatientImportRepository {
     return out;
   }
 
-  /**
-   * Monedas admitidas: el catálogo `currencies` (global, sin RLS), el mismo
-   * que valida planes y abonos (DX-042).
-   */
   /** DX-517-bis: el texto propio de cada moneda de la clínica (vacío = el código). */
   async currencyTexts(): Promise<CurrencyTexts> {
     const tenant = await this.prisma.tenant.findUnique({
@@ -1086,6 +1082,10 @@ export class PrismaPatientImportRepository {
     return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
   }
 
+  /**
+   * Monedas admitidas: el catálogo `currencies` (global, sin RLS), el mismo
+   * que valida planes y abonos (DX-042).
+   */
   async currencyCodes(): Promise<string[]> {
     const rows = await this.prisma.currency.findMany({
       select: { code: true },
