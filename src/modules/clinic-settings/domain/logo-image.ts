@@ -53,6 +53,10 @@ export const LOGO_MESSAGES = {
   damaged:
     'El logo no es una imagen válida o está dañado. Expórtalo de nuevo y vuelve a subirlo.',
   dimensions: `El logo es demasiado grande: como mucho ${LOGO_MAX_SIDE} × ${LOGO_MAX_SIDE} píxeles.`,
+  // La re-codificación (PNG sin pérdida) puede pesar más que el original: una
+  // foto como logo. El mensaje dice qué hacer en vez de culpar al fichero subido.
+  tooHeavyAfterEncode:
+    'El logo pesa más de 1 MB una vez procesado. Usa una imagen más sencilla (pocos colores) o más pequeña.',
 } as const;
 
 export type SanitizedLogo =
@@ -103,7 +107,7 @@ export async function sanitizeLogo(
     const result = await codec.reencode(bytes, { input: type, output });
     if (!result.ok) return { ok: false, message: LOGO_MESSAGES[result.reason] };
     if (result.bytes.length > LOGO_MAX_BYTES)
-      return { ok: false, message: LOGO_MESSAGES.tooLarge };
+      return { ok: false, message: LOGO_MESSAGES.tooHeavyAfterEncode };
     return { ok: true, contentType: output, bytes: result.bytes };
   } catch {
     return { ok: false, message: LOGO_MESSAGES.damaged };

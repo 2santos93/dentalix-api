@@ -135,14 +135,14 @@ describe('logo de la clínica (DX-019, DX-019-bis)', () => {
       });
     });
 
-    it('una salida de más de 1 MB se rechaza por tamaño', async () => {
+    it('una salida de más de 1 MB se rechaza con su propio mensaje', async () => {
       const { codec } = fakeCodec({
         ok: true,
         bytes: Buffer.alloc(LOGO_MAX_BYTES + 1),
       });
       expect(await sanitizeLogo(makePng(), codec)).toEqual({
         ok: false,
-        message: LOGO_MESSAGES.tooLarge,
+        message: LOGO_MESSAGES.tooHeavyAfterEncode,
       });
     });
   });

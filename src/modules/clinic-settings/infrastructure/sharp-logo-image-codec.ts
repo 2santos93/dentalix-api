@@ -32,6 +32,8 @@ const DECODE: SharpOptions = {
   autoOrient: true,
 };
 
+const LOGO_PROCESSING_TIMEOUT_SECONDS = 10;
+
 const DAMAGED: LogoReencodeResult = { ok: false, reason: 'damaged' };
 const DIMENSIONS: LogoReencodeResult = { ok: false, reason: 'dimensions' };
 
@@ -78,12 +80,17 @@ export class SharpLogoImageCodec implements LogoImageCodec {
     }
 
     try {
-      const image = sharp(bytes, DECODE).toColourspace('srgb').resize({
-        width: LOGO_OUTPUT_MAX_SIDE,
-        height: LOGO_OUTPUT_MAX_SIDE,
-        fit: 'inside',
-        withoutEnlargement: true,
-      });
+      // Tope de tiempo de libvips (el presupuesto de 25 s del almacenamiento no
+      // lo para): un logo tarda ~100 ms; si no acaba en 10 s, se da por dañado.
+      const image = sharp(bytes, DECODE)
+        .timeout({ seconds: LOGO_PROCESSING_TIMEOUT_SECONDS })
+        .toColourspace('srgb')
+        .resize({
+          width: LOGO_OUTPUT_MAX_SIDE,
+          height: LOGO_OUTPUT_MAX_SIDE,
+          fit: 'inside',
+          withoutEnlargement: true,
+        });
       const encoded =
         types.output === 'image/png'
           ? image.png({ compressionLevel: 9, adaptiveFiltering: true })
