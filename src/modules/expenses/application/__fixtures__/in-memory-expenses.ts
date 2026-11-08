@@ -91,6 +91,8 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
     locale: 'es-VE',
     hourCycle: 'h12',
   };
+  /** Texto propio de cada moneda de la clínica (DX-517-quater); vacío = el código. */
+  currencyTexts: Record<string, string> = {};
   /** Sedes que `resolveLocation` rechaza (400). */
   invalidLocations = new Set<string>();
   /** El efectivo exige caja abierta en esta clínica. */
@@ -176,6 +178,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       locationId,
       today: this.today,
       format: { id: locationId, ...this.format },
+      currencyTexts: this.currencyTexts,
     });
   }
 
@@ -444,6 +447,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       moneyText: expenseMoneyText(
         { id: row.locationId, ...this.format },
         row.currency,
+        this.currencyTexts,
       ),
     });
     if (denial) return Promise.reject(denial);
@@ -524,6 +528,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       moneyText: expenseMoneyText(
         { id: row.locationId, ...this.format },
         row.currency,
+        this.currencyTexts,
       ),
     });
     if (denial) throw denial;

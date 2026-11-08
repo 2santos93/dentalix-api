@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { ClinicRole, type PaymentMethod } from '@prisma/client';
 import { RECEIPT_PREFIX_PATTERN } from '../../payments/domain/receipt-number';
 import { moneyWithCode } from '../../../shared/format/money-with-code';
+import type { CurrencyTexts } from '../../../shared/format/currency-text';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { fromCents, toCents } from '../../../shared/money/money';
 import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../shared/validation/idempotency-key';
@@ -93,16 +94,18 @@ export const CREDIT_CASH_LOCATION_REQUIRED_MESSAGE =
 /**
  * 403 de RECEPTION por encima del tope de la clínica (mismo patrón que DX-204).
  * El tope sale con el formato de la sede de referencia y el código ISO de su
- * moneda («USD 10,000.50», «JPY 5,000», «VES 10.000,00») (DX-354b).
+ * moneda («USD 10,000.50», «JPY 5,000», «VES 10.000,00») (DX-354b), o con el
+ * texto propio que la clínica da a esa moneda («Bs. 10.000,00») (DX-517-quater).
  */
 export function receptionCapMessage(
   capCents: number,
   currency: string,
   fmt: RegionalFormat,
+  texts: CurrencyTexts | null = null,
 ): string {
   return capCents === 0
     ? 'Recepción no puede traspasar ni devolver saldo a favor en esta clínica: pídeselo a administración.'
-    : `Recepción puede mover hasta ${moneyWithCode(capCents / 100, currency, fmt, null)} por operación: pídeselo a administración.`;
+    : `Recepción puede mover hasta ${moneyWithCode(capCents / 100, currency, fmt, texts)} por operación: pídeselo a administración.`;
 }
 
 /**
@@ -138,8 +141,9 @@ export function dailyRefundCapMessage(
   remainingCents: number,
   currency: string,
   fmt: RegionalFormat,
+  texts: CurrencyTexts | null = null,
 ): string {
-  return `Supera tu tope diario de devoluciones en esta sede. Te quedan ${moneyWithCode(remainingCents / 100, currency, fmt, null)} hoy; pide a un administrador que la registre.`;
+  return `Supera tu tope diario de devoluciones en esta sede. Te quedan ${moneyWithCode(remainingCents / 100, currency, fmt, texts)} hoy; pide a un administrador que la registre.`;
 }
 
 /** Lo lanza el repositorio (dentro del bloqueo) cuando la suma pasa del tope. */

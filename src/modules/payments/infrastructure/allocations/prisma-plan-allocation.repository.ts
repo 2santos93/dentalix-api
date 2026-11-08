@@ -18,6 +18,11 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../../shared/format/currency-text';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
@@ -958,6 +963,22 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     });
   }
 
+  /**
+   * DX-517-quater: el texto propio de cada moneda de la clínica, solo para
+   * pintar el mensaje. Lectura simple de `tenants` (global, sin RLS) con la
+   * transacción ya abierta: sin `FOR UPDATE`, así que no toma ningún bloqueo
+   * de fila ni cambia el orden de los de la imputación (sin riesgo de deadlock).
+   */
+  private async currencyTextsIn(
+    tx: Prisma.TransactionClient,
+  ): Promise<CurrencyTexts> {
+    const tenant = await tx.tenant.findUnique({
+      where: { id: this.requireTenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
+  }
+
   async replaceAllocations(
     input: ReplaceAllocationsInput,
   ): Promise<{ previous: { itemId: string; cents: number }[] }> {
@@ -1100,6 +1121,9 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
               baseCents,
               // Perezoso (I4): solo al haber violación; la sede del abono (R12).
               await this.locationFormatIn(tx, payment.locationId),
+              // DX-517-quater: el texto propio de la moneda, también solo
+              // al haber violación y justo antes de lanzar el 400.
+              await this.currencyTextsIn(tx),
             ),
           );
         }

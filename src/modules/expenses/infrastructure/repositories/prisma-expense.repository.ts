@@ -9,6 +9,11 @@ import {
   resolveLocationTimeZones,
 } from '../../../../shared/locations/location-time-zone';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../../shared/format/currency-text';
 import type {
   ExpenseAttachment,
   ExpenseDetail,
@@ -112,6 +117,8 @@ interface LockedExpense {
   /** DX-354: formato y reloj de la sede del gasto (null: sede sin barrer). */
   locale?: string | null;
   hourCycle?: string | null;
+  /** DX-517-quater: texto propio de cada moneda (JSON de `tenants`), sin bloqueo. */
+  currencyTexts?: unknown;
 }
 
 @Injectable()
@@ -158,8 +165,22 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         locationId,
         today: civilDateIn(now, zoneOf(locationId)),
         format: format ?? { id: locationId, locale: null, hourCycle: null },
+        // DX-517-quater: lectura simple de `tenants` (sin bloqueo) para los
+        // importes del mensaje de tope de un gasto nuevo.
+        currencyTexts: await this.currencyTextsIn(tx),
       };
     });
+  }
+
+  /** DX-517-quater: el texto propio de cada moneda de la clínica (`tenants`, sin RLS ni bloqueo). */
+  private async currencyTextsIn(
+    tx: Prisma.TransactionClient,
+  ): Promise<CurrencyTexts> {
+    const tenant = await tx.tenant.findUnique({
+      where: { id: this.requireTenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
   }
 
   locationToday(locationId: string, now: Date): Promise<string> {
@@ -422,7 +443,9 @@ export class PrismaExpenseRepository implements ExpenseRepository {
                  AND l."tenantId" = ${tenantId}::uuid) AS "locale",
              (SELECT l."hourCycle" FROM "locations" l
                WHERE l."id" = "expenses"."locationId"
-                 AND l."tenantId" = ${tenantId}::uuid) AS "hourCycle"
+                 AND l."tenantId" = ${tenantId}::uuid) AS "hourCycle",
+             (SELECT t."currencyTexts" FROM "tenants" t
+               WHERE t."id" = ${tenantId}::uuid) AS "currencyTexts"
         FROM "expenses"
        WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${id}::uuid ${scopeSql}
        FOR UPDATE`;
@@ -432,9 +455,11 @@ export class PrismaExpenseRepository implements ExpenseRepository {
 
   /**
    * DX-354: los importes de los mensajes del gasto bloqueado, con el formato
-   * de SU sede (leído con el bloqueo) y el código de su moneda. Perezoso: el
-   * formato se exige al escribir el primer importe (409
-   * `LOCATION_LOCALE_REQUIRED`).
+   * de SU sede (leído con el bloqueo) y el código de su moneda o el texto
+   * propio que la clínica le dio (DX-517-quater: viaja en la MISMA consulta
+   * del bloqueo, como subconsulta de `tenants` sin `FOR UPDATE`: no toma ningún
+   * bloqueo más ni cambia el orden de los existentes). Perezoso: el formato se
+   * exige al escribir el primer importe (409 `LOCATION_LOCALE_REQUIRED`).
    */
   private moneyTextOf(locked: LockedExpense): ExpenseMoneyText {
     return expenseMoneyText(
@@ -444,6 +469,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         hourCycle: locked.hourCycle ?? null,
       },
       locked.currency,
+      readCurrencyTexts(locked.currencyTexts),
     );
   }
 

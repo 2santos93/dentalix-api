@@ -108,6 +108,18 @@ describe('pagos de un gasto (DX-274)', () => {
       );
     });
 
+    it('DX-517-quater: el tope dice el importe con el texto propio de la moneda de la clínica', async () => {
+      kit.repo.currencyTexts = { VES: 'Bs.' };
+      const e = kit.repo.seed({ amount: 100 });
+      await expect(
+        pay(e.id, { amount: 100.01, method: 'CARD' }),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'El pago supera lo pendiente del gasto (Bs.\u00a0100,00).',
+        ),
+      );
+    });
+
     it('DX-354: una sede sin formato da 409 LOCATION_LOCALE_REQUIRED solo al rechazar el tope', async () => {
       kit.repo.format = { locale: null, hourCycle: null };
       const e = kit.repo.seed({ amount: 10 });

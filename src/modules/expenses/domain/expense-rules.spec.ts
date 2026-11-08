@@ -253,6 +253,45 @@ describe('reglas de un gasto (DX-274)', () => {
       expect(message).not.toContain('$');
     });
 
+    // DX-517-quater: el texto propio de la moneda de la clínica en vez del código.
+    it('con texto propio de la moneda: «Bs. 1.234,50», sin el código', () => {
+      const money = expenseMoneyText(
+        { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' },
+        'VES',
+        { VES: 'Bs.' },
+      );
+      expect(
+        paymentCapDenial({
+          amountCents: 123450,
+          liveCents: 0,
+          paymentCents: 123451,
+          moneyText: money,
+        })?.message,
+      ).toBe('El pago supera lo pendiente del gasto (Bs.\u00a01.234,50).');
+      expect(
+        expenseEditDenial({
+          current: {
+            amountCents: 10000,
+            locationId: 'loc-1',
+            currency: 'VES',
+            voided: false,
+          },
+          patch: { amountCents: 100 },
+          liveCents: 5000,
+          paymentCount: 1,
+          moneyText: money,
+        })?.message,
+      ).toBe('El importe no puede ser menor a lo ya pagado (Bs.\u00a050,00).');
+      // Una moneda sin texto sigue con el código.
+      expect(
+        expenseMoneyText(
+          { id: 'loc-1', locale: 'en-US', hourCycle: 'h12' },
+          'USD',
+          { VES: 'Bs.' },
+        )(5000),
+      ).toBe('USD\u00a050.00');
+    });
+
     it('sede sin formato: 409 LOCATION_LOCALE_REQUIRED solo al escribir el importe', () => {
       const money = expenseMoneyText(
         { id: 'loc-1', locale: null, hourCycle: null },

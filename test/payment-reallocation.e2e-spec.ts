@@ -725,6 +725,29 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
       }
     });
 
+    it('DX-517-quater: los importes llevan el texto propio de la moneda de la clínica, no el código', async () => {
+      await raw.tenant.update({
+        where: { id: clinic.tenantId },
+        data: { currencyTexts: { EUR: 'Eur.' } },
+      });
+      try {
+        const res = await put(
+          paymentId,
+          { mode: 'MANUAL', allocations: [line(accepted, 30.01)] },
+          400,
+        );
+        expect(message(res)).toBe(
+          'Un ítem admite como máximo Eur.\u00a030,00: es lo que le queda por cubrir.',
+        );
+        expect(message(res)).not.toContain('EUR');
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinic.tenantId },
+          data: { currencyTexts: {} },
+        });
+      }
+    });
+
     it('over the converted payment amount (USD payment)', async () => {
       const usdPlan = await createPlan();
       const first = await addItem(usdPlan, 100, 'DONE');

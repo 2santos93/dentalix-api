@@ -866,4 +866,44 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       a.adminToken,
     ).expect(409);
   });
+
+  it('DX-517-quater: el tope del importe de una celda usa el formato de la sede y el texto propio de la moneda', async () => {
+    // Lote propio: no pisa la hoja del lote compartido de las pruebas de arriba.
+    const own = (
+      await attach(
+        '',
+        csv(PATIENTS_HEADER, ['NATIONAL_ID;444444;Rosa;Tope']),
+        'p3.csv',
+      ).expect(201)
+    ).body as Batch;
+    const send = async () => {
+      const res = await attach(
+        `/${own.id}/balances`,
+        csv(BALANCES_HEADER, ['444444;10000000000000;VES;;']),
+        'saldos.csv',
+      ).expect(201);
+      return (res.body as Batch).balanceIssues.map((i) => i.message);
+    };
+    expect(await send()).toEqual([
+      'El importe es demasiado grande (máximo VES\u00a0999.999.999.999,99): revisa la celda.',
+    ]);
+    await raw.tenant.update({
+      where: { id: a.tenantId },
+      data: { currencyTexts: { VES: 'Bs.' } },
+    });
+    try {
+      expect(await send()).toEqual([
+        'El importe es demasiado grande (máximo Bs.\u00a0999.999.999.999,99): revisa la celda.',
+      ]);
+    } finally {
+      await raw.tenant.update({
+        where: { id: a.tenantId },
+        data: { currencyTexts: {} },
+      });
+      await as(
+        api().delete(`/api/v1/patient-imports/${own.id}/balances`),
+        a.adminToken,
+      ).expect(200);
+    }
+  });
 });

@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { AMOUNT_NON_NEGATIVE_MESSAGE } from '../../../../shared/money/currency-messages';
 import {
   ConvertAmountUseCase,
   convertWithQuote,
@@ -154,6 +155,10 @@ describe('ConvertAmountUseCase', () => {
       await expect(
         uc.execute({ amount, from: 'USD', to: 'GBP', date: DATE }),
       ).rejects.toBeInstanceOf(BadRequestException);
+      // DX-517-quater: en español neutro, con el texto común de importes.
+      await expect(
+        uc.execute({ amount, from: 'USD', to: 'GBP', date: DATE }),
+      ).rejects.toThrow(AMOUNT_NON_NEGATIVE_MESSAGE);
     },
   );
 

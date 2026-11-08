@@ -1,3 +1,4 @@
+import { unknownCurrencyNamedMessage } from '../../../shared/money/currency-messages';
 import {
   CURRENCY_TEXT_MAX,
   CURRENCY_TEXTS_MAX_ENTRIES,
@@ -16,8 +17,6 @@ export interface CurrencyTextEntry {
 }
 
 export const CURRENCY_TEXTS_TOO_MANY_MESSAGE = `Puedes dar texto propio a ${CURRENCY_TEXTS_MAX_ENTRIES} monedas como mucho.`;
-export const currencyTextUnknownMessage = (code: string): string =>
-  `«${code}» no es una moneda del catálogo (código ISO 4217 de tres letras).`;
 export const currencyTextInvalidMessage = (code: string): string =>
   `El texto de ${code} admite de 1 a ${CURRENCY_TEXT_MAX} caracteres en una línea.`;
 export const currencyTextDuplicateMessage = (code: string): string =>
@@ -43,7 +42,10 @@ export function parseCurrencyTextEntries(
   for (const entry of entries) {
     const code = entry.currency.trim().toUpperCase();
     if (!/^[A-Z]{3}$/.test(code) || !isKnownCurrency(code)) {
-      return { ok: false, message: currencyTextUnknownMessage(entry.currency) };
+      return {
+        ok: false,
+        message: unknownCurrencyNamedMessage(entry.currency),
+      };
     }
     if (code in texts) {
       return { ok: false, message: currencyTextDuplicateMessage(code) };

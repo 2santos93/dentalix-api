@@ -200,6 +200,15 @@ describe('alta de un gasto (DX-274)', () => {
       expect(paid.payments[0].paidOn).toBe('2026-10-21');
     });
 
+    it('DX-517-quater: el tope del pago inicial dice el importe con el texto propio de la moneda', async () => {
+      kit.repo.currencyTexts = { VES: 'Bs.' };
+      await expect(
+        run(input({ payment: { amount: 120001, method: 'CARD' } })),
+      ).rejects.toThrow(
+        'El pago supera lo pendiente del gasto (Bs.\u00a0120.000,00).',
+      );
+    });
+
     it('no admite un pago mayor que el gasto ni con día futuro', async () => {
       await expect(
         run(input({ payment: { amount: 120001, method: 'CARD' } })),

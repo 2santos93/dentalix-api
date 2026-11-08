@@ -103,8 +103,11 @@ async function checkAmount(
     // Perezoso (I4): el formato de la sede de referencia (R6) solo al
     // rechazar; sin formato, 409 LOCATION_LOCALE_REQUIRED (DX-354b).
     const fmt = await repo.referenceLocationFormat();
+    // DX-517-quater: el texto propio de la moneda, leído aquí (fuera de todo
+    // bloqueo) y solo al rechazar.
+    const texts = await repo.currencyTexts();
     throw new ForbiddenException(
-      receptionCapMessage(cap, source.currency, fmt),
+      receptionCapMessage(cap, source.currency, fmt, texts),
     );
   }
   if (amountCents > source.creditCents) {
@@ -298,8 +301,16 @@ export class RefundCreditUseCase {
     } catch (error) {
       if (error instanceof DailyRefundCapExceededError) {
         const fmt = await this.repo.locationFormat(error.locationId);
+        // DX-517-quater: el bloqueo del repositorio ya se soltó (la
+        // transacción terminó con este error): lectura simple de `tenants`.
+        const texts = await this.repo.currencyTexts();
         throw new ForbiddenException(
-          dailyRefundCapMessage(error.remainingCents, error.currency, fmt),
+          dailyRefundCapMessage(
+            error.remainingCents,
+            error.currency,
+            fmt,
+            texts,
+          ),
         );
       }
       throw error;

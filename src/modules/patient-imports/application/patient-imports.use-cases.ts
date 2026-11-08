@@ -598,10 +598,15 @@ export class PatientImportsService {
       throw fileErrorOf(err, location);
     }
     const timeZone = await this.repo.locationTimeZone(current.locationId);
+    const currencyTexts = await this.repo.currencyTexts();
     const ctx = {
       today: civilDateIn(new Date(), timeZone),
       currencies: new Set(await this.repo.currencyCodes()),
       format: parsed.format,
+      // DX-517-quater: el tope de una celda con el formato de la sede y el
+      // texto propio de la moneda de la fila.
+      regional: () => requireLocationFormat(location),
+      texts: currencyTexts,
     };
 
     const issues: RowIssue[] = [];
@@ -635,7 +640,7 @@ export class PatientImportsService {
       existing,
       addToExisting,
       // DX-517-bis: los importes de los avisos con el texto de la clínica.
-      await this.repo.currencyTexts(),
+      currencyTexts,
     );
     issues.push(...aggregated.issues);
     issues.sort((x, y) => x.row - y.row);

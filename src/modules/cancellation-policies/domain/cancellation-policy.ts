@@ -1,3 +1,4 @@
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../shared/money/currency-messages';
 import type {
   CancellationByKind,
   CancellationReasonCode,
@@ -19,7 +20,7 @@ export const CANCELLATION_POLICY_MESSAGES = {
   fee: 'El importe sugerido no puede ser negativo y admite como mucho 2 decimales.',
   currencyRequired: 'Indica la moneda del importe sugerido.',
   feeRequired: 'Indica el importe sugerido o quita la moneda.',
-  currency: 'La moneda no es un código ISO 4217 disponible.',
+  currency: UNKNOWN_CURRENCY_MESSAGE,
   patientText: `El texto para el paciente admite como mucho ${PATIENT_TEXT_MAX} caracteres.`,
   receptionCanCharge: 'Indica si recepción puede generar el cargo (sí o no).',
   forbidden:
