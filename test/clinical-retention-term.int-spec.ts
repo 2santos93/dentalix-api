@@ -1314,14 +1314,14 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
         })),
       });
       const before = await storedIn(b);
-      const holders = [
-        { id: ids[0], ...(await holdPatientRow(ids[0])) },
-        {
-          id: ids[ids.length - 1],
-          ...(await holdPatientRow(ids[ids.length - 1])),
-        },
-      ];
+      // Se crean dentro del `try`: si el segundo falla, el primero se suelta.
+      const holders: ({ id: string } & Awaited<
+        ReturnType<typeof holdPatientRow>
+      >)[] = [];
       try {
+        for (const id of [ids[0], ids[ids.length - 1]]) {
+          holders.push({ id, ...(await holdPatientRow(id)) });
+        }
         const reducing = settle(put(b, 15, T));
         const firstXid = await waitedHolder(holders.map((h) => h.xid));
         const [first, second] =
