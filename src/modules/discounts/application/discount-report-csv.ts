@@ -5,6 +5,7 @@ import {
   csvDocument,
   csvText as text,
 } from '../../../shared/csv/csv-cells';
+import { amountText } from '../../../shared/money/money';
 
 /*
  * CSV del informe de descuentos (DX-204): una línea por ítem, mismos filtros
@@ -77,7 +78,7 @@ const UNKNOWN_CATALOG_CURRENCY = '(moneda del catálogo desconocida)';
 
 /** DX-513-quater: importe con 2 decimales y sin código: no hay moneda que decir. */
 function unknownCatalogCurrencyAmount(amount: number): string {
-  return `${amount.toFixed(2)} ${UNKNOWN_CATALOG_CURRENCY}`;
+  return `${amountText(amount, 2)} ${UNKNOWN_CATALOG_CURRENCY}`;
 }
 
 /**
