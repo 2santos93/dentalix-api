@@ -446,6 +446,19 @@ describe('Rate limiting (e2e)', () => {
       expectTooMany(await branding());
     });
 
+    it('DX-517-ter: la marca por host (pública, la pide el servidor web) también tiene límite, con su propio balde', async () => {
+      const byHost = (host: string) =>
+        request(app.getHttpServer())
+          .get('/api/v1/public/tenant/branding/by-host')
+          .query({ host });
+      // Hosts distintos (válidos, inválidos o desconocidos) no evaden el
+      // balde: es por IP y ruta, no por el `host` que se pregunta.
+      for (const host of ['a.localhost', 'a..b', 'b.localhost']) {
+        expect((await byHost(host)).status).not.toBe(429);
+      }
+      expectTooMany(await byHost('c.localhost'));
+    });
+
     it('health y health/ready quedan fuera incluso del límite global (DX-023)', async () => {
       for (let i = 0; i < 5; i++) {
         await request(app.getHttpServer()).get('/api/v1/health').expect(200);
