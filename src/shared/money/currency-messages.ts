@@ -55,19 +55,18 @@ export function unknownCurrencyNamedMessage(code: string): string {
 
 /**
  * DX-517-quater: un número con tope de decimales y de valor absoluto (importes,
- * tasas, porcentajes). El máximo sale formateado en español neutro (`es`, sin
- * región), sin nombrar ningún país ni moneda.
+ * tasas, porcentajes). El máximo sale formateado en español neutro (miles con
+ * punto, decimales con coma, sin región), sin nombrar ningún país ni moneda.
  */
 export function boundedDecimalMessage(
   maxDecimals: number,
   maxAbs: number,
   subject = 'El valor',
 ): string {
-  const max = new Intl.NumberFormat('es', {
-    minimumFractionDigits: maxDecimals,
-    maximumFractionDigits: maxDecimals,
-    useGrouping: true,
-  }).format(maxAbs);
+  // A mano (miles con punto, decimales con coma): sin locale literal.
+  const [whole, fraction = ''] = maxAbs.toFixed(maxDecimals).split('.');
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  const max = fraction === '' ? grouped : `${grouped},${fraction}`;
   const decimals = maxDecimals === 1 ? '1 decimal' : `${maxDecimals} decimales`;
   return `${subject} tiene que ser un número con hasta ${decimals} y no mayor que ${max}.`;
 }
