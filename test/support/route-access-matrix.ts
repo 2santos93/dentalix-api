@@ -110,6 +110,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Invitaciones: dentalix-docs/docs/plans/2026-08-01-invitaciones-backend.md;
   // confirmación de cita: loop/informes/DX-005.md.
   'GET /public/tenant/branding': PUBLIC_TENANT,
+  // DX-517-ter: la clínica sale del parámetro `host`, nunca del contexto.
+  'GET /public/tenant/branding/by-host': PUBLIC,
   'GET /public/invitations/:token': PUBLIC_TENANT,
   'POST /public/invitations/:token/accept': PUBLIC_TENANT,
   'GET /public/appointment-confirmations/:token': PUBLIC_TENANT,
