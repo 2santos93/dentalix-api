@@ -1167,6 +1167,20 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
       throw new Error('el segundo cambio no llegó a la cola de la clínica');
     }
 
+    /** Cuál de los `xids` espera ya alguien (pg_locks), sin suponer el orden. */
+    async function waitedHolder(xids: string[]): Promise<string> {
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        const [row] = await raw.$queryRaw<{ xid: string | null }[]>`
+          SELECT min(transactionid::text) AS xid FROM pg_catalog.pg_locks
+           WHERE locktype = 'transactionid' AND NOT granted
+             AND transactionid::text = ANY(${xids}::text[])`;
+        if (row.xid) return row.xid;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error(`nadie llegó a esperar a ${xids.join(' ni a ')}`);
+    }
+
     it('archive waits for a raise and sees it', async () => {
       const started = Date.now();
       const a = await clinicAt(15);
@@ -1283,11 +1297,12 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
 
     it('a busy reduction writes nothing', async () => {
       const b = await clinicAt(25);
-      // El `UPDATE` de la reducción recorre `patients` en ORDEN FÍSICO, que no
-      // tiene por qué ser el de `id` (los huecos que dejan otras suites hacen
-      // que las altas caigan en páginas anteriores). Se detiene la fila que el
-      // `UPDATE` alcanza la ÚLTIMA, la de mayor `ctid` de la clínica: llega a
-      // ella con todas las demás ya escritas y bloqueadas.
+      // El orden en que el `UPDATE` de la reducción recorre `patients` depende
+      // del plan (físico con un seq/bitmap scan; por `id` con un index scan de
+      // `patients_tenant_id_key`, DX-553). Se detienen DOS filas: la que alcance
+      // primero se suelta, la escribe y la deja bloqueada, y se queda esperando
+      // a la otra. Así llega a la espera con una escritura hecha en cualquier
+      // orden.
       const ids = Array.from({ length: 12 }, () => randomUUID());
       await raw.patient.createMany({
         data: ids.map((id) => ({
@@ -1298,20 +1313,31 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
           lastAttentionAt: new Date('2010-06-15T10:00:00Z'),
         })),
       });
-      const [last] = await raw.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "patients" WHERE "tenantId" = ${b}::uuid
-         ORDER BY "ctid" DESC LIMIT 1`;
       const before = await storedIn(b);
-      const held = await holdPatientRow(last.id);
+      // Se crean dentro del `try`: si el segundo falla, el primero se suelta.
+      const holders: ({ id: string } & Awaited<
+        ReturnType<typeof holdPatientRow>
+      >)[] = [];
       try {
+        for (const id of [ids[0], ids[ids.length - 1]]) {
+          holders.push({ id, ...(await holdPatientRow(id)) });
+        }
         const reducing = settle(put(b, 15, T));
-        await waitForTransactionWaiters(raw, held.xid);
-        const free = await raw.$queryRaw<{ id: string }[]>`
-          SELECT "id" FROM "patients" WHERE "tenantId" = ${b}::uuid
-             FOR NO KEY UPDATE SKIP LOCKED`;
-        expect(free.length).toBeLessThan(ids.length - 1);
+        const firstXid = await waitedHolder(holders.map((h) => h.xid));
+        const [first, second] =
+          firstXid === holders[0].xid ? holders : [holders[1], holders[0]];
+        await first.release();
+        await waitForTransactionWaiters(raw, second.xid);
+        const free = (
+          await raw.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "patients" WHERE "tenantId" = ${b}::uuid
+               FOR NO KEY UPDATE SKIP LOCKED`
+        ).map((row) => row.id);
+        // La reducción ya escribió la primera fila y espera a la segunda.
+        expect(free).not.toContain(first.id);
+        expect(free).not.toContain(second.id);
 
-        // La fila sigue detenida hasta que `lock_timeout` (5 s) corta el `set`.
+        // La segunda sigue detenida hasta que `lock_timeout` (5 s) corta el `set`.
         expect(await reducing).toEqual({
           status: 'fulfilled',
           value: { outcome: 'BUSY', reason: 'CONTENTION' },
@@ -1320,7 +1346,7 @@ describe('cambiar el plazo: suelos, ventana y evento (DX-330, int)', () => {
         expect(await floorsIn(b)).toBe(0);
         expect(await eventsIn(b)).toHaveLength(0);
       } finally {
-        await held.release();
+        for (const holder of holders) await holder.release();
       }
       await expect(put(b, 15, T)).resolves.toMatchObject({
         outcome: 'APPLIED',
