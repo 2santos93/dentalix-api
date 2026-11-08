@@ -4,9 +4,7 @@ import {
   IsDateString,
   IsEnum,
   IsISO4217CurrencyCode,
-  IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   IsUUID,
   MaxLength,
@@ -19,7 +17,7 @@ import {
 } from '../../../payment-methods/domain/payment-method-rules';
 import { PaymentMethod } from '@prisma/client';
 import {
-  IsMoney,
+  IsPositiveMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
 import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
@@ -41,12 +39,10 @@ function toUpperCase({ value }: { value: unknown }): unknown {
 export class RecordPaymentDto {
   @ApiProperty({
     example: 100,
-    description: 'Must be a finite number > 0, with at most 2 decimal places',
+    description: 'Número finito mayor que 0, con como mucho 2 decimales.',
     maximum: MONEY_MAX,
   })
-  @IsNumber()
-  @IsPositive()
-  @IsMoney()
+  @IsPositiveMoney()
   amount!: number;
 
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })

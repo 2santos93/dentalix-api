@@ -12,6 +12,13 @@ import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/g
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { CurrencyDigitsTable } from '../../../../shared/money/currency-digits';
 import { PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE } from './create-payment-plan.use-case';
+import {
+  AMOUNT_NON_NEGATIVE_MESSAGE,
+  DOWN_PAYMENT_EXCEEDS_MESSAGE,
+  DOWN_PAYMENT_MESSAGE,
+  TOTAL_TO_FINANCE_MESSAGE,
+  TOTAL_TO_FINANCE_POSITIVE_MESSAGE,
+} from '../../../../shared/money/currency-messages';
 
 function makeDeps(
   overrides: {
@@ -108,6 +115,9 @@ describe('CreatePaymentPlanUseCase', () => {
     await expect(
       useCase.execute('tp-1', { ...baseInput, downPayment: 600 }, 'u1'),
     ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      useCase.execute('tp-1', { ...baseInput, downPayment: 600 }, 'u1'),
+    ).rejects.toThrow(DOWN_PAYMENT_EXCEEDS_MESSAGE);
   });
 
   it('rejects a non-positive resolved totalToFinance', async () => {
@@ -115,6 +125,48 @@ describe('CreatePaymentPlanUseCase', () => {
     await expect(
       useCase.execute('tp-1', baseInput, 'u1'),
     ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(useCase.execute('tp-1', baseInput, 'u1')).rejects.toThrow(
+      TOTAL_TO_FINANCE_POSITIVE_MESSAGE,
+    );
+  });
+
+  // DX-517-quater: los importes inválidos, en español neutro (texto exacto).
+  it.each([-1, NaN, Infinity])(
+    'downPayment %s: 400 con el texto en español',
+    async (downPayment) => {
+      const { useCase } = makeDeps({ balance: 500 });
+      await expect(
+        useCase.execute('tp-1', { ...baseInput, downPayment }, 'u1'),
+      ).rejects.toThrow(DOWN_PAYMENT_MESSAGE);
+    },
+  );
+
+  it.each([-1, NaN, Infinity])(
+    'totalToFinance %s: 400 con el texto en español',
+    async (totalToFinance) => {
+      const { useCase } = makeDeps({ balance: 500 });
+      await expect(
+        useCase.execute('tp-1', { ...baseInput, totalToFinance }, 'u1'),
+      ).rejects.toThrow(TOTAL_TO_FINANCE_MESSAGE);
+    },
+  );
+
+  it('los textos exactos', () => {
+    expect(DOWN_PAYMENT_MESSAGE).toBe(
+      'El pago inicial tiene que ser un número mayor o igual que 0.',
+    );
+    expect(TOTAL_TO_FINANCE_MESSAGE).toBe(
+      'El total a financiar tiene que ser un número mayor o igual que 0.',
+    );
+    expect(TOTAL_TO_FINANCE_POSITIVE_MESSAGE).toBe(
+      'El total a financiar tiene que ser mayor que 0.',
+    );
+    expect(DOWN_PAYMENT_EXCEEDS_MESSAGE).toBe(
+      'El pago inicial no puede superar el total a financiar.',
+    );
+    expect(AMOUNT_NON_NEGATIVE_MESSAGE).toBe(
+      'El importe tiene que ser un número mayor o igual que 0.',
+    );
   });
 
   it('rejects an invalid startDate', async () => {

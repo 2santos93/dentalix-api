@@ -19,7 +19,12 @@ const CTX: BalanceRowContext = {
   today: '2026-10-23',
   currencies: new Set(['VES', 'USD', 'EUR']),
   format: 'CSV',
+  regional: FMT,
+  texts: null,
 };
+
+/** El tope de una celda ya escrito (la prueba de `parseAmountCents` no mira la moneda). */
+const CAP = () => 'TOPE';
 
 const errorOf = (r: { cents: number } | { error: string }): string =>
   'error' in r ? r.error : '';
@@ -41,71 +46,121 @@ describe('importe del saldo migrado (DX-262)', () => {
     ['  99  ', 9_900],
     ['€12,30', 1_230],
   ])('«%s» → %i céntimos', (raw, cents) => {
-    expect(parseAmountCents(raw, 'CSV')).toEqual({ cents });
+    expect(parseAmountCents(raw, 'CSV', CAP)).toEqual({ cents });
   });
 
   it('en XLSX un número con punto es siempre decimal (celda numérica)', () => {
-    expect(parseAmountCents('1234.5', 'XLSX')).toEqual({ cents: 123_450 });
-    expect(parseAmountCents('1500000', 'XLSX')).toEqual({ cents: 150_000_000 });
+    expect(parseAmountCents('1234.5', 'XLSX', CAP)).toEqual({ cents: 123_450 });
+    expect(parseAmountCents('1500000', 'XLSX', CAP)).toEqual({
+      cents: 150_000_000,
+    });
     // Texto escrito a mano en la hoja: mismas reglas que el CSV.
-    expect(parseAmountCents('1.500.000', 'XLSX')).toEqual({
+    expect(parseAmountCents('1.500.000', 'XLSX', CAP)).toEqual({
       cents: 150_000_000,
     });
   });
 
   it('XLSX con fórmula: el ruido de coma flotante se redondea a 2 decimales (revisión M6)', () => {
-    expect(parseAmountCents('178500.00000000003', 'XLSX')).toEqual({
+    expect(parseAmountCents('178500.00000000003', 'XLSX', CAP)).toEqual({
       cents: 17_850_000,
     });
-    expect(parseAmountCents('0.30000000000000004', 'XLSX')).toEqual({
+    expect(parseAmountCents('0.30000000000000004', 'XLSX', CAP)).toEqual({
       cents: 30,
     });
     // Importes grandes en VES: el ruido crece con el valor (QA N2,
     // `=0,1*3*1000000000`), y la tolerancia es relativa.
-    expect(parseAmountCents('300000000.00000006', 'XLSX')).toEqual({
+    expect(parseAmountCents('300000000.00000006', 'XLSX', CAP)).toEqual({
       cents: 30_000_000_000,
     });
-    expect(parseAmountCents('999999999.9900001', 'XLSX')).toEqual({
+    expect(parseAmountCents('999999999.9900001', 'XLSX', CAP)).toEqual({
       cents: 99_999_999_999,
     });
     // Un tercer decimal de verdad sigue siendo error, también en grande.
-    expect(parseAmountCents('300000000.001', 'XLSX')).toEqual({
+    expect(parseAmountCents('300000000.001', 'XLSX', CAP)).toEqual({
       error: 'El importe tiene más de 2 decimales.',
     });
-    expect(parseAmountCents('2000000000.001', 'XLSX')).toEqual({
+    expect(parseAmountCents('2000000000.001', 'XLSX', CAP)).toEqual({
       error: 'El importe tiene más de 2 decimales.',
     });
-    expect(parseAmountCents('10.555', 'XLSX')).toEqual({
+    expect(parseAmountCents('10.555', 'XLSX', CAP)).toEqual({
       error: 'El importe tiene más de 2 decimales.',
     });
   });
 
   it('rechaza importes no positivos, con letras, con 3 decimales o enormes', () => {
-    expect(errorOf(parseAmountCents('0', 'CSV'))).toBe(
+    expect(errorOf(parseAmountCents('0', 'CSV', CAP))).toBe(
       'El importe debe ser mayor que 0.',
     );
-    expect(errorOf(parseAmountCents('-5000', 'CSV'))).toBe(
+    expect(errorOf(parseAmountCents('-5000', 'CSV', CAP))).toBe(
       'El importe debe ser mayor que 0.',
     );
-    expect(errorOf(parseAmountCents('(5.000)', 'CSV'))).toBe(
+    expect(errorOf(parseAmountCents('(5.000)', 'CSV', CAP))).toBe(
       'El importe debe ser mayor que 0.',
     );
-    expect(errorOf(parseAmountCents('cien mil', 'CSV'))).toMatch(
+    expect(errorOf(parseAmountCents('cien mil', 'CSV', CAP))).toMatch(
       /no es un número/,
     );
-    expect(errorOf(parseAmountCents('12.5.3,1,2', 'CSV'))).toMatch(
+    expect(errorOf(parseAmountCents('12.5.3,1,2', 'CSV', CAP))).toMatch(
       /no es un número/,
     );
-    expect(errorOf(parseAmountCents('10,555', 'XLSX'))).toBe('');
-    expect(errorOf(parseAmountCents('10.5551', 'XLSX'))).toBe(
+    expect(errorOf(parseAmountCents('10,555', 'XLSX', CAP))).toBe('');
+    expect(errorOf(parseAmountCents('10.5551', 'XLSX', CAP))).toBe(
       'El importe tiene más de 2 decimales.',
     );
-    expect(errorOf(parseAmountCents('1e6', 'CSV'))).toMatch(
+    expect(errorOf(parseAmountCents('1e6', 'CSV', CAP))).toMatch(
       /notación científica/,
     );
-    expect(errorOf(parseAmountCents('10000000000000', 'CSV'))).toMatch(
-      /demasiado grande/,
+    expect(errorOf(parseAmountCents('10000000000000', 'CSV', CAP))).toBe(
+      'El importe es demasiado grande (máximo TOPE): revisa la celda.',
     );
+  });
+});
+
+describe('tope del importe de una celda, con el texto y el formato de la moneda (DX-517-quater)', () => {
+  const big = (currency: string, ctx: Partial<BalanceRowContext> = {}) => {
+    const t = table([
+      ['numero_documento', 'importe', 'moneda'],
+      ['55', '10000000000000', currency],
+    ]);
+    const cols = resolveBalanceColumns(t.headers);
+    const r = validateBalanceRow(
+      t.rows[0],
+      cols,
+      { ...CTX, ...ctx },
+      t.headers,
+    );
+    return r.issues.map((i) => i.message);
+  };
+
+  it('es-VE con el texto propio: «Bs. 999.999.999.999,99», sin el código', () => {
+    expect(big('VES', { texts: { VES: 'Bs.' } })).toEqual([
+      'El importe es demasiado grande (máximo Bs.\u00a0999.999.999.999,99): revisa la celda.',
+    ]);
+  });
+
+  it('sin texto propio: el código ISO de la moneda de la fila', () => {
+    expect(big('VES')).toEqual([
+      'El importe es demasiado grande (máximo VES\u00a0999.999.999.999,99): revisa la celda.',
+    ]);
+  });
+
+  it('en-US / USD: el formato de la sede, no el es fijo', () => {
+    expect(
+      big('usd', {
+        regional: () => regionalFormat({ locale: 'en-US', hourCycle: 'h12' }),
+      }),
+    ).toEqual([
+      'El importe es demasiado grande (máximo USD\u00a0999,999,999,999.99): revisa la celda.',
+    ]);
+  });
+
+  it('moneda desconocida o ausente: solo la cifra con el formato de la sede (más el error de la moneda)', () => {
+    const unknown = big('XYZ', { texts: { VES: 'Bs.' } });
+    expect(unknown[0]).toBe(
+      'El importe es demasiado grande (máximo 999.999.999.999,99): revisa la celda.',
+    );
+    expect(unknown).toHaveLength(2);
+    expect(big('')[0]).toBe(unknown[0]);
   });
 });
 

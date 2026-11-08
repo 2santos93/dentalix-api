@@ -4,6 +4,7 @@ import {
   CURRENCY_CODE_MESSAGE,
   UNKNOWN_CURRENCY_MESSAGE,
   currencyListMessage,
+  unknownCurrencyNamedMessage,
 } from './currency-messages';
 import { RecordPaymentDto } from '../../modules/payments/presentation/dto/record-payment.dto';
 import { SplitPaymentLineDto } from '../../modules/payments/presentation/dto/record-split-payment.dto';
@@ -37,6 +38,10 @@ import {
 import { CreateTreatmentPlanDto } from '../../modules/treatment-plans/presentation/dto/create-treatment-plan.dto';
 import { UpdateTreatmentPlanDto } from '../../modules/treatment-plans/presentation/dto/update-treatment-plan.dto';
 import { PRICE_LIST_CURRENCY_UNKNOWN_MESSAGE } from '../../modules/price-lists/domain/price-list-rules';
+import { CANCELLATION_POLICY_MESSAGES } from '../../modules/cancellation-policies/domain/cancellation-policy';
+import { MANUAL_RATE_CURRENCY_MESSAGE } from '../../modules/exchange/domain/exchange-rate-source';
+import { REGIONAL_MESSAGES } from '../../modules/locations/domain/regional-settings';
+import { parseCurrencyTextEntries } from '../../modules/exchange/domain/clinic-currency-texts';
 import { UNKNOWN_CURRENCY_MESSAGE as EQUIPMENT_UNKNOWN } from '../../modules/equipment/domain/equipment-rules';
 import { UNKNOWN_CURRENCY_MESSAGE as COLLECTIONS_UNKNOWN } from '../../modules/collections/application/use-cases/collections.use-cases';
 import { UNKNOWN_CURRENCY_MESSAGE as EXPENSES_UNKNOWN } from '../../modules/expenses/domain/expense-rules';
@@ -124,6 +129,23 @@ describe('mensajes 400 de moneda (DX-517-bis)', () => {
     expect(new Set(messages)).toEqual(
       new Set([currencyListMessage(RATE_CURRENCIES_MAX)]),
     );
+  });
+
+  // DX-517-quater: las validaciones de moneda que quedaban sueltas.
+  it('cancelación, tasa manual, sede y textos de moneda usan el juego común', () => {
+    expect(CANCELLATION_POLICY_MESSAGES.currency).toBe(
+      UNKNOWN_CURRENCY_MESSAGE,
+    );
+    expect(MANUAL_RATE_CURRENCY_MESSAGE).toBe(UNKNOWN_CURRENCY_MESSAGE);
+    expect(REGIONAL_MESSAGES.currencyUnknown('ZZZ')).toBe(
+      unknownCurrencyNamedMessage('ZZZ'),
+    );
+    expect(unknownCurrencyNamedMessage('ZZZ')).toBe(
+      'La moneda ZZZ no está en la lista de monedas admitidas.',
+    );
+    expect(
+      parseCurrencyTextEntries([{ currency: 'ZZZ', text: 'Z' }], () => false),
+    ).toEqual({ ok: false, message: unknownCurrencyNamedMessage('ZZZ') });
   });
 
   it('una moneda fuera de la lista admitida da el mismo texto en todos los módulos', () => {

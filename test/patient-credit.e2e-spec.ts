@@ -671,6 +671,33 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     }
   });
 
+  it('DX-517-quater: los 403 de tope dicen el importe con el texto propio de la moneda de la clínica', async () => {
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 100 })
+      .expect(200);
+    await raw.tenant.update({
+      where: { id: a.tenantId },
+      data: { currencyTexts: { VES: 'Bs.' } },
+    });
+    try {
+      const denied = await refund(
+        { amount: 100.01, method: 'TRANSFER' },
+        { token: receptionA },
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(
+        'Recepción puede mover hasta Bs.\u00a0100,00 por operación: pídeselo a administración.',
+      );
+    } finally {
+      await raw.tenant.update({
+        where: { id: a.tenantId },
+        data: { currencyTexts: {} },
+      });
+      await as(api().put('/api/v1/patient-credit/policy'), a)
+        .send({ receptionMaxAmount: 10_000 })
+        .expect(200);
+    }
+  });
+
   it('el 403 del tope de RECEPCIÓN dice el importe con el formato de la sede (DX-354b); sin formato, 409', async () => {
     await as(api().put('/api/v1/patient-credit/policy'), a)
       .send({ receptionMaxAmount: 100 })
@@ -767,6 +794,22 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
         'Supera tu tope diario de devoluciones en esta sede. Te quedan VES\u00a040,00 hoy; pide a un administrador que la registre.',
       );
       expect(await counts()).toEqual(before);
+      // DX-517-quater: con el texto propio de la moneda de la clínica.
+      await raw.tenant.update({
+        where: { id: a.tenantId },
+        data: { currencyTexts: { VES: 'Bs.' } },
+      });
+      try {
+        const withText = await refundOwn(60, receptionA).expect(403);
+        expect((withText.body as { message: string }).message).toBe(
+          'Supera tu tope diario de devoluciones en esta sede. Te quedan Bs.\u00a040,00 hoy; pide a un administrador que la registre.',
+        );
+      } finally {
+        await raw.tenant.update({
+          where: { id: a.tenantId },
+          data: { currencyTexts: {} },
+        });
+      }
       // Lo que queda sí se puede devolver.
       await refundOwn(40, receptionA).expect(201);
       // ADMIN no tiene tope diario.

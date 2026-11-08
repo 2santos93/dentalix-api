@@ -1,4 +1,16 @@
-import { ValidateBy, ValidationOptions, buildMessage } from 'class-validator';
+import {
+  IsNumber,
+  IsPositive,
+  Min,
+  ValidateBy,
+  ValidationOptions,
+  buildMessage,
+} from 'class-validator';
+import {
+  AMOUNT_NON_NEGATIVE_MESSAGE,
+  PAYMENT_AMOUNT_MESSAGE,
+  boundedDecimalMessage,
+} from '../money/currency-messages';
 
 /**
  * Tope de importes que acepta la API (DX-042, DB-010): 10 dígitos enteros y 2
@@ -34,6 +46,8 @@ export function decimalPlaces(value: number): number {
 interface BoundedDecimalOptions {
   maxDecimals: number;
   maxAbs: number;
+  /** Sujeto del mensaje por defecto («El importe», «El valor»). */
+  subject?: string;
 }
 
 /**
@@ -41,7 +55,7 @@ interface BoundedDecimalOptions {
  * No fija el signo: cada DTO lo sigue diciendo con `@Min`/`@IsPositive`.
  */
 export function IsBoundedDecimal(
-  { maxDecimals, maxAbs }: BoundedDecimalOptions,
+  { maxDecimals, maxAbs, subject }: BoundedDecimalOptions,
   validationOptions?: ValidationOptions,
 ): PropertyDecorator {
   return ValidateBy(
@@ -54,9 +68,10 @@ export function IsBoundedDecimal(
           Number.isFinite(value) &&
           Math.abs(value) <= maxAbs &&
           decimalPlaces(value) <= maxDecimals,
+        // DX-517-quater: en español neutro, con el máximo formateado.
         defaultMessage: buildMessage(
           (eachPrefix) =>
-            `${eachPrefix}$property must be a number with at most $constraint1 decimal places and an absolute value <= $constraint2`,
+            `${eachPrefix}${boundedDecimalMessage(maxDecimals, maxAbs, subject)}`,
           validationOptions,
         ),
       },
@@ -68,9 +83,39 @@ export function IsBoundedDecimal(
 /** Importe: 2 decimales como mucho y hasta `MONEY_MAX`. */
 export function IsMoney(validationOptions?: ValidationOptions) {
   return IsBoundedDecimal(
-    { maxDecimals: 2, maxAbs: MONEY_MAX },
+    { maxDecimals: 2, maxAbs: MONEY_MAX, subject: 'El importe' },
     validationOptions,
   );
+}
+
+/**
+ * Importe mayor que 0 (cobros): número, positivo y `IsMoney`, los tres en
+ * español. `message` sustituye al texto de «número / mayor que 0».
+ */
+export function IsPositiveMoney(
+  message: string = PAYMENT_AMOUNT_MESSAGE,
+): PropertyDecorator {
+  const decorators = [
+    IsNumber({}, { message }),
+    IsPositive({ message }),
+    IsMoney(),
+  ];
+  return (target, key) => decorators.forEach((d) => d(target, key));
+}
+
+/**
+ * Importe mayor o igual que 0 (precios, pie, total a financiar): número, no
+ * negativo y `IsMoney`, en español. `message` sustituye al de número / signo.
+ */
+export function IsNonNegativeMoney(
+  message: string = AMOUNT_NON_NEGATIVE_MESSAGE,
+): PropertyDecorator {
+  const decorators = [
+    IsNumber({}, { message }),
+    Min(0, { message }),
+    IsMoney(),
+  ];
+  return (target, key) => decorators.forEach((d) => d(target, key));
 }
 
 /** Cantidad de inventario: 3 decimales como mucho y hasta `QUANTITY_MAX`. */

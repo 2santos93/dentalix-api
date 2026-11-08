@@ -8,6 +8,7 @@ import {
 } from './get-rates-for-date.use-case';
 import { MissingExchangeRateError } from '../../domain/missing-exchange-rate.error';
 import { BASE_CURRENCY } from '../../domain/exchange-rate-source';
+import { AMOUNT_NON_NEGATIVE_MESSAGE } from '../../../../shared/money/currency-messages';
 import {
   convertWithQuote,
   type ExchangeRateQuote,
@@ -153,7 +154,7 @@ export class ConvertAmountUseCase implements AmountConverter {
   ): Promise<ConvertAmountResult> {
     if (!isValidRateDate(input.date)) throw invalidRateDate();
     if (!isFiniteNonNegativeAmount(input.amount)) {
-      throw new BadRequestException('amount must be a finite number >= 0');
+      throw new BadRequestException(AMOUNT_NON_NEGATIVE_MESSAGE);
     }
 
     const { amount, from, to, date } = input;

@@ -1,3 +1,4 @@
+import type { CurrencyTexts } from '../../../../shared/format/currency-text';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
@@ -150,6 +151,12 @@ export interface PatientCreditRepository {
   referenceLocationFormat(): Promise<RegionalFormat>;
   /** Formato de una sede concreta (DX-462: la de la devolución rechazada). */
   locationFormat(locationId: string): Promise<RegionalFormat>;
+  /**
+   * DX-517-quater: el texto propio de cada moneda de la clínica para pintar los
+   * importes de los 403 de tope (vacío = el código ISO). Lectura simple de
+   * `tenants`, sin bloqueo: se llama fuera de toda transacción con bloqueo.
+   */
+  currencyTexts(): Promise<CurrencyTexts>;
   /**
    * Cambia el tope con la fila del tenant bloqueada y escribe el evento con el
    * antes y el después en la MISMA transacción (DX-432); sin evento si no

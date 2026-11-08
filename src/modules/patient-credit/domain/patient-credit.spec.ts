@@ -179,6 +179,10 @@ describe('saldo a favor (DX-253)', () => {
       expect(receptionCapMessage(1_000_050, 'USD', enUS)).toContain(
         'USD\u00a010,000.50',
       );
+      // DX-517-quater: con el texto propio de la moneda de la clínica.
+      expect(receptionCapMessage(1_000_000, 'VES', esVE, { VES: 'Bs.' })).toBe(
+        'Recepción puede mover hasta Bs.\u00a010.000,00 por operación: pídeselo a administración.',
+      );
       // JPY no tiene unidad menor: 0 decimales.
       expect(receptionCapMessage(500_000, 'JPY', enUS)).toContain(
         'JPY\u00a05,000 por',
@@ -261,6 +265,9 @@ describe('creditExceedsMessage (DX-472-bis, revisión B3)', () => {
     it('el mensaje dice lo que queda con el formato de la sede y el código ISO', () => {
       expect(dailyRefundCapMessage(4_000, 'USD', enUS)).toBe(
         'Supera tu tope diario de devoluciones en esta sede. Te quedan USD\u00a040.00 hoy; pide a un administrador que la registre.',
+      );
+      expect(dailyRefundCapMessage(4_000, 'VES', enUS, { VES: 'Bs.' })).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan Bs.\u00a040.00 hoy; pide a un administrador que la registre.',
       );
       expect(dailyRefundCapMessage(0, 'VES', esVE)).toContain(
         'Te quedan VES\u00a00,00 hoy',

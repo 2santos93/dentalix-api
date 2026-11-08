@@ -1,3 +1,4 @@
+import type { CurrencyTexts } from '../../../../shared/format/currency-text';
 import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import type { PaymentMethod } from '@prisma/client';
 import type {
@@ -99,6 +100,8 @@ export interface ResolvedExpenseLocation {
   today: string;
   /** DX-354: para escribir los importes de los mensajes con el formato de la sede. */
   format: LocationFormatSource;
+  /** DX-517-quater: el texto propio de cada moneda de la clínica para esos importes. */
+  currencyTexts: CurrencyTexts;
 }
 
 export interface ExpenseRepository {

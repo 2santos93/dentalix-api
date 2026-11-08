@@ -8,6 +8,7 @@ import {
   allocationViolationMessage,
   allocationNoRate,
   allocationOverItem,
+  allocationOverNet,
   allocationOverPayment,
   allocationPlanNotBillable,
 } from './allocation-messages';
@@ -58,6 +59,67 @@ describe('allocation messages (spec §5.3)', () => {
     expect(allocationOverPayment(123450, 120000, 'VES', esVE)).toContain(
       'VES\u00a01.234,50',
     );
+  });
+
+  // DX-517-quater: con el texto propio de la moneda de la clínica, no el código.
+  describe('con el texto propio de la moneda', () => {
+    const texts = { VES: 'Bs.' };
+
+    it('over item', () => {
+      expect(allocationOverItem(123450, 'VES', esVE, texts)).toBe(
+        'Un ítem admite como máximo Bs.\u00a01.234,50: es lo que le queda por cubrir.',
+      );
+      // Otra moneda sin texto sigue con el código.
+      expect(allocationOverItem(5000, 'USD', enUS, texts)).toContain(
+        'USD\u00a050.00',
+      );
+    });
+
+    it('over payment', () => {
+      expect(allocationOverPayment(12100, 12000, 'VES', enUS, texts)).toBe(
+        'La suma imputada (Bs.\u00a0121.00) supera el abono convertido a la moneda del plan (Bs.\u00a0120.00).',
+      );
+    });
+
+    it('over net', () => {
+      expect(allocationOverNet(9000, 8000, 3000, 'VES', esVE, texts)).toBe(
+        'La suma imputada (Bs.\u00a090,00) supera lo que queda a cuenta de este abono: de Bs.\u00a080,00, Bs.\u00a030,00 ya se devolvieron o traspasaron del saldo a favor (máximo Bs.\u00a050,00).',
+      );
+      const text = allocationOverNet(9000, 8000, 3000, 'VES', esVE, texts);
+      expect(text).not.toContain('VES');
+    });
+
+    it('allocationViolationMessage lo pasa a cada importe', () => {
+      expect(
+        allocationViolationMessage(
+          { code: 'OVER_ITEM', freeCents: 2500 },
+          'VES',
+          9000,
+          esVE,
+          texts,
+        ),
+      ).toBe(
+        'Un ítem admite como máximo Bs.\u00a025,00: es lo que le queda por cubrir.',
+      );
+      expect(
+        allocationViolationMessage(
+          { code: 'OVER_PAYMENT', sumCents: 9500 },
+          'VES',
+          9000,
+          esVE,
+          texts,
+        ),
+      ).toContain('Bs.\u00a095,00');
+      expect(
+        allocationViolationMessage(
+          { code: 'OVER_NET', sumCents: 9500, creditOutCents: 1000 },
+          'VES',
+          9000,
+          esVE,
+          texts,
+        ),
+      ).not.toContain('VES');
+    });
   });
 
   it('mode mismatch', () => {

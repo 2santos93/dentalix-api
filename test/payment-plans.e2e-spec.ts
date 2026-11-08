@@ -513,4 +513,41 @@ describe('Payment plans / cuotas (e2e)', () => {
     ]);
     expect(read.remaining).toBe(3334);
   });
+
+  // DX-517-quater: ningún 400 de importe responde en inglés.
+  it('pie o total con 3 decimales, sobre el máximo o negativo: 400 en español', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Cuotas Importes',
+      subdomain: 'clinica-cuotas-importes',
+      email: 'owner@clinica-cuotas-importes.com',
+    });
+    const post = async (body: Record<string, unknown>) =>
+      (
+        (
+          await request(app.getHttpServer())
+            .post(
+              '/api/v1/treatment-plans/00000000-0000-4000-8000-000000000001/payment-plan',
+            )
+            .set('X-Tenant-Host', hostFor(clinic.subdomain))
+            .set('Authorization', `Bearer ${clinic.accessToken}`)
+            .send({
+              installmentsCount: 3,
+              periodicity: 'MONTHLY',
+              startDate: START_DATE,
+              ...body,
+            })
+            .expect(400)
+        ).body as { message: string[] }
+      ).message;
+    const decimals =
+      'El importe tiene que ser un número con hasta 2 decimales y no mayor que 9.999.999.999,99.';
+    expect(await post({ downPayment: 10.005 })).toContain(decimals);
+    expect(await post({ totalToFinance: 10_000_000_000 })).toContain(decimals);
+    expect(await post({ downPayment: -1 })).toContain(
+      'El pago inicial tiene que ser un número mayor o igual que 0.',
+    );
+    expect(await post({ totalToFinance: -1 })).toContain(
+      'El total a financiar tiene que ser un número mayor o igual que 0.',
+    );
+  });
 });

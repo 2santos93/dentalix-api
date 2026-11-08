@@ -247,7 +247,7 @@ describe('Texto propio de cada moneda (e2e, DX-517) y email del recibo no fiscal
   it.each([
     [
       { entries: [{ currency: 'XYZ', text: 'X' }] },
-      '«XYZ» no es una moneda del catálogo',
+      'La moneda XYZ no está en la lista de monedas admitidas.',
     ],
     [
       { entries: [{ currency: 'VES', text: 'Bolívares' }] },

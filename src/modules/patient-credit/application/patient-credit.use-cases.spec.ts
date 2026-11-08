@@ -46,6 +46,7 @@ function repo(
   plans: PlanCreditState[],
   capCents = 0,
   format: () => Promise<RegionalFormat> = () => Promise.resolve(esVE),
+  texts: Record<string, string> = {},
 ) {
   const byId = new Map(plans.map((p) => [p.planId, p]));
   const createTransfer = jest.fn((input: { sourcePlanId: string }) =>
@@ -56,11 +57,13 @@ function repo(
   );
   const findTransferByKey = jest.fn(() => Promise.resolve(null));
   const referenceLocationFormat = jest.fn(format);
+  const currencyTexts = jest.fn(() => Promise.resolve(texts));
   const mock = {
     readPlanCredit: (id: string) => Promise.resolve(byId.get(id) ?? null),
     receptionCapCents: () => Promise.resolve(capCents),
     referenceLocationFormat,
     locationFormat: referenceLocationFormat,
+    currencyTexts,
     updateReceptionCap: jest.fn(),
     findTransferByKey,
     findRefundByKey: () => Promise.resolve(null),
@@ -75,6 +78,7 @@ function repo(
     createRefund,
     findTransferByKey,
     referenceLocationFormat,
+    currencyTexts,
   };
 }
 
@@ -222,6 +226,42 @@ describe('RefundCreditUseCase (DX-253)', () => {
     expect(allowed.referenceLocationFormat).not.toHaveBeenCalled();
   });
 
+  // DX-517-quater: el texto propio de la moneda de la clínica, leído solo al rechazar.
+  it('el 403 del tope pinta el importe con el texto propio de la moneda, solo al rechazar', async () => {
+    const denied = repo([origin], 10_000, undefined, { VES: 'Bs.' });
+    const error = await new RefundCreditUseCase(denied.mock)
+      .execute('origen', body, RECEPTION)
+      .catch((e: unknown) => e);
+    expect((error as ForbiddenException).message).toBe(
+      'Recepción puede mover hasta Bs.\u00a0100,00 por operación: pídeselo a administración.',
+    );
+    expect(denied.currencyTexts).toHaveBeenCalledTimes(1);
+
+    const allowed = repo([origin], 5_000_000);
+    await new RefundCreditUseCase(allowed.mock).execute(
+      'origen',
+      body,
+      RECEPTION,
+    );
+    expect(allowed.currencyTexts).not.toHaveBeenCalled();
+  });
+
+  it('el 403 del traspaso también lleva el texto propio de la moneda', async () => {
+    const denied = repo([origin, plan('destino')], 10_000, undefined, {
+      VES: 'Bs.',
+    });
+    const error = await new TransferCreditUseCase(denied.mock)
+      .execute(
+        'origen',
+        { targetPlanId: 'destino', amount: 200_000, currency: 'VES' },
+        RECEPTION,
+        KEY,
+      )
+      .catch((e: unknown) => e);
+    expect((error as ForbiddenException).message).toContain('Bs.\u00a0100,00');
+    expect((error as ForbiddenException).message).not.toContain('VES');
+  });
+
   describe('tope diario acumulado (DX-462)', () => {
     const NOW = new Date('2026-11-04T15:00:00Z');
 
@@ -248,6 +288,22 @@ describe('RefundCreditUseCase (DX-253)', () => {
         ADMIN,
       );
       expect(r.createRefund.mock.calls[0][0]).not.toHaveProperty('dailyCap');
+    });
+
+    it('el 403 del tope diario lleva el texto propio, leído después de que el bloqueo se soltó', async () => {
+      const r = repo([origin], 10_000, undefined, { VES: 'Bs.' });
+      r.createRefund.mockRejectedValueOnce(
+        new DailyRefundCapExceededError(4_000, 'VES', 'sede-1'),
+      );
+      const error = await new RefundCreditUseCase(r.mock, () => NOW)
+        .execute('origen', { ...body, amount: 60 }, RECEPTION)
+        .catch((e: unknown) => e);
+      expect((error as ForbiddenException).message).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan Bs.\u00a040,00 hoy; pide a un administrador que la registre.',
+      );
+      expect(r.currencyTexts.mock.invocationCallOrder[0]).toBeGreaterThan(
+        r.createRefund.mock.invocationCallOrder[0],
+      );
     });
 
     it('si el repositorio dice que la suma pasa del tope: 403 con lo que queda', async () => {

@@ -545,6 +545,37 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
       ).toBe(1);
     });
 
+    it('DX-517-quater: el tope (dentro del bloqueo del gasto) y el del pago inicial dicen el importe con el texto propio de la moneda', async () => {
+      await raw.tenant.update({
+        where: { id: clinic.tenantId },
+        data: { currencyTexts: { VES: 'Bs.' } },
+      });
+      try {
+        const e = await createExpense({ amount: 100000 });
+        await pay(e.id, { amount: 99999.5, method: 'CARD' }).expect(201);
+        const res = await pay(e.id, { amount: 0.51, method: 'CARD' }).expect(
+          400,
+        );
+        expect(messageOf(res)).toBe(
+          'El pago supera lo pendiente del gasto (Bs.\u00a00,50).',
+        );
+        // El pago inicial del alta (tope en el caso de uso, antes del INSERT).
+        const initial = await call('post', '/expenses')
+          .send(
+            body({ amount: 100, payment: { amount: 100.01, method: 'CARD' } }),
+          )
+          .expect(400);
+        expect(messageOf(initial)).toBe(
+          'El pago supera lo pendiente del gasto (Bs.\u00a0100,00).',
+        );
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinic.tenantId },
+          data: { currencyTexts: {} },
+        });
+      }
+    });
+
     it('DX-354: el tope dice el importe con el formato de la sede del gasto y el código ISO, y 409 si la sede no tiene formato', async () => {
       const berlin = (
         (

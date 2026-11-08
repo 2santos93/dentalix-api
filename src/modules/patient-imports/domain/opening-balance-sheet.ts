@@ -187,10 +187,14 @@ const grouped = (text: string, sep: '.' | ',') =>
  * - en un XLSX, «1234.5» (así escribe el lector una celda numérica) es
  *   siempre decimal.
  * Negativo, entre paréntesis (contable) o 0: «debe ser mayor que 0».
+ *
+ * `capText` escribe el tope de la celda (DX-517-quater): con el formato de la
+ * sede y el texto propio de la moneda de la fila, pero solo si hace falta.
  */
 export function parseAmountCents(
   raw: string,
   format: PatientImportFileFormat,
+  capText: () => string,
 ): { cents: number } | { error: string } {
   const notNumber = {
     error: `El importe «${raw.trim().slice(0, 30)}» no es un número: escríbelo sin letras, p. ej. 150000 o 150.000,50.`,
@@ -273,8 +277,7 @@ export function parseAmountCents(
   }
   if (cents > MAX_CENTS) {
     return {
-      error:
-        'El importe es demasiado grande (máximo 999.999.999.999,99): revisa la celda.',
+      error: `El importe es demasiado grande (máximo ${capText()}): revisa la celda.`,
     };
   }
   return { cents };
@@ -286,6 +289,10 @@ export interface BalanceRowContext {
   /** Monedas admitidas (las del catálogo de la clínica, en mayúsculas). */
   currencies: ReadonlySet<string>;
   format: PatientImportFileFormat;
+  /** Formato regional de la sede del lote (perezoso: solo al escribir un importe). */
+  regional: () => RegionalFormat;
+  /** Texto propio de cada moneda de la clínica (DX-517-quater). */
+  texts: CurrencyTexts | null;
 }
 
 /** Una fila válida de la hoja (antes de buscar al paciente). */
@@ -343,17 +350,25 @@ export function validateBalanceRow(
     );
   }
 
+  const currencyRaw = cell('currency');
+  const currency = currencyRaw.toUpperCase();
+
   const amountRaw = cell('amount');
   let cents: number | null = null;
   if (amountRaw === '') issue('amount', 'Falta el importe.', amountRaw);
   else {
-    const parsed = parseAmountCents(amountRaw, ctx.format);
+    const parsed = parseAmountCents(amountRaw, ctx.format, () => {
+      // DX-517-quater: el tope con la moneda de la fila si es admitida (su
+      // texto propio o su código); si no, solo la cifra con el formato de la sede.
+      const fmt = ctx.regional();
+      return ctx.currencies.has(currency)
+        ? moneyWithCode(MAX_CENTS / 100, currency, fmt, ctx.texts)
+        : fmt.number(MAX_CENTS / 100, { min: 2, max: 2 });
+    });
     if ('error' in parsed) issue('amount', parsed.error, amountRaw);
     else cents = parsed.cents;
   }
 
-  const currencyRaw = cell('currency');
-  const currency = currencyRaw.toUpperCase();
   let currencyOk = false;
   if (currencyRaw === '') {
     issue(

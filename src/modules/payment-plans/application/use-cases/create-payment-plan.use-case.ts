@@ -18,6 +18,12 @@ import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/g
 import { generateSchedule, Periodicity } from '../schedule/generate-schedule';
 import { round2 } from '../../../../shared/money/money';
 import {
+  DOWN_PAYMENT_EXCEEDS_MESSAGE,
+  DOWN_PAYMENT_MESSAGE,
+  TOTAL_TO_FINANCE_MESSAGE,
+  TOTAL_TO_FINANCE_POSITIVE_MESSAGE,
+} from '../../../../shared/money/currency-messages';
+import {
   CURRENCY_DIGITS_CATALOG,
   type CurrencyDigitsCatalog,
 } from '../../../../shared/money/currency-digits';
@@ -79,7 +85,7 @@ export class CreatePaymentPlanUseCase {
       );
     }
     if (!isFiniteNonNegative(input.downPayment)) {
-      throw new BadRequestException('downPayment must be a finite number >= 0');
+      throw new BadRequestException(DOWN_PAYMENT_MESSAGE);
     }
     if (!PERIODICITIES.has(input.periodicity)) {
       throw new BadRequestException(
@@ -97,9 +103,7 @@ export class CreatePaymentPlanUseCase {
       input.totalToFinance !== undefined &&
       !isFiniteNonNegative(input.totalToFinance)
     ) {
-      throw new BadRequestException(
-        'totalToFinance must be a finite number >= 0',
-      );
+      throw new BadRequestException(TOTAL_TO_FINANCE_MESSAGE);
     }
 
     // Throws NotFound if absent/soft-deleted/cross-tenant — never re-derived.
@@ -130,11 +134,11 @@ export class CreatePaymentPlanUseCase {
     }
 
     if (totalToFinance <= 0) {
-      throw new BadRequestException('totalToFinance must be greater than 0');
+      throw new BadRequestException(TOTAL_TO_FINANCE_POSITIVE_MESSAGE);
     }
     const downPayment = round2(input.downPayment);
     if (downPayment > totalToFinance) {
-      throw new BadRequestException('downPayment cannot exceed totalToFinance');
+      throw new BadRequestException(DOWN_PAYMENT_EXCEEDS_MESSAGE);
     }
 
     const digits = await this.currencyDigits.table([plan.currency]);

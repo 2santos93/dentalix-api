@@ -12,6 +12,11 @@ import { Prisma, type TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { prismaRuleCode } from '../../../shared/prisma/prisma-exception.filter';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../shared/format/currency-text';
 import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
@@ -266,6 +271,14 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
       resolveReferenceLocation(tx, tenantId, locationId),
     );
     return requireLocationFormat(reference);
+  }
+
+  async currencyTexts(): Promise<CurrencyTexts> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: this.tenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
   }
 
   async locationFormat(locationId: string): Promise<RegionalFormat> {

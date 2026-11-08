@@ -27,11 +27,11 @@ describe('textos de moneda de la clínica (DX-517)', () => {
   it.each([
     [
       [{ currency: 'XYZ', text: 'X' }],
-      '«XYZ» no es una moneda del catálogo (código ISO 4217 de tres letras).',
+      'La moneda XYZ no está en la lista de monedas admitidas.',
     ],
     [
       [{ currency: 'VE', text: 'X' }],
-      '«VE» no es una moneda del catálogo (código ISO 4217 de tres letras).',
+      'La moneda VE no está en la lista de monedas admitidas.',
     ],
     [
       [{ currency: 'VES', text: '' }],
