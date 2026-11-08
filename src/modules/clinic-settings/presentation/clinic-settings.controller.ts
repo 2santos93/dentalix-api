@@ -125,8 +125,10 @@ export class ClinicSettingsController {
     summary: 'Sube el logo de la clínica',
     description:
       'DX-019. PNG, JPG o WebP de hasta 1 MB. El tipo se comprueba por los ' +
-      'bytes y el fichero se re-escribe antes de guardarlo (sin metadatos). ' +
-      'SVG no se admite. Es público por diseño (marca).',
+      'bytes y la imagen se re-codifica antes de guardarla: sin metadatos, ' +
+      'estática (primer fotograma), con ≤ 1024 px de lado; un WebP se guarda ' +
+      'como PNG. Lo que no decodifica se rechaza. SVG no se admite. Es ' +
+      'público por diseño (marca).',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
