@@ -20,6 +20,8 @@ import {
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
 import { pinCatalogCurrency } from './support/catalog-currency';
+import { boundedDecimalMessage } from '../src/shared/money/currency-messages';
+import { MONEY_MAX } from '../src/shared/validation/bounded-decimal';
 
 // DX-042, por HTTP: topes de importes y cantidades en las DTO (400, nunca 500
 // ni redondeo), insumo único por sede y sin mayúsculas, y las tres carreras
@@ -170,7 +172,10 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
         )
           .send({ amount, currency: 'USD', paidAt })
           .expect(400);
-        expect(JSON.stringify(res.body)).toContain('amount');
+        // DX-517-quater: el 400 del importe sale en español (IsMoney).
+        expect((res.body as { message: string[] }).message).toContain(
+          boundedDecimalMessage(2, MONEY_MAX, 'El importe'),
+        );
         expect(await raw.payment.count({ where: { tenantId } })).toBe(0);
       },
     );
