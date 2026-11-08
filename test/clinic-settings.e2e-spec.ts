@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { CatalogKind, ClinicRole, Prisma, PrismaClient } from '@prisma/client';
+import sharp from 'sharp';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
@@ -20,13 +21,12 @@ import {
   makePng,
   makeWebp,
   pngChunk,
-  webpChunk,
 } from '../src/modules/clinic-settings/__fixtures__/logo-fixtures';
 
 // DX-019 en HTTP real: Ajustes › Datos de la clínica. Solo ADMIN edita; cada
 // cambio queda en la auditoría con el antes y el después (sin cambio, sin
 // evento); solo toca la clínica propia; la marca pública cambia al momento;
-// el logo se valida por sus bytes y se re-escribe; el recibo congela los
+// el logo se valida por sus bytes y se re-codifica (DX-019-bis); el recibo congela los
 // datos fiscales (con el nombre propio del identificador) y, sin ellos, dice
 // «Datos fiscales pendientes»; presupuesto y estado de cuenta los imprimen.
 
@@ -463,7 +463,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     );
   });
 
-  it('logo PNG: se valida por los bytes, se re-escribe sin metadatos ni cola, se sirve público y se audita', async () => {
+  it('logo PNG: se valida por los bytes, se re-codifica sin metadatos ni cola, se sirve público y se audita', async () => {
     const dirty = makePng(8, 8, {
       before: [
         pngChunk('tEXt', Buffer.from('Comment\0<script>alert(1)</script>')),
@@ -489,7 +489,16 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     expect(file.headers['content-type']).toBe('image/png');
     expect(file.headers['cross-origin-resource-policy']).toBe('cross-origin');
     expect(file.headers['cache-control']).toContain('immutable');
-    expect(Buffer.from(file.body as Buffer).equals(makePng(8, 8))).toBe(true);
+    // DX-019-bis: re-codificado (no son los mismos bytes): decodifica, 8×8,
+    // y sin el texto ni la cola.
+    const served = Buffer.from(file.body as Buffer);
+    expect(await sharp(served).metadata()).toMatchObject({
+      format: 'png',
+      width: 8,
+      height: 8,
+    });
+    expect(served.includes(Buffer.from('script'))).toBe(false);
+    expect(served.includes(Buffer.from('tEXt'))).toBe(false);
 
     expect((await branding(a).expect(200)).body).toMatchObject({
       logoUrl: body.logoUrl,
@@ -501,7 +510,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     });
   });
 
-  it('logo JPEG (sin EXIF) y WebP: re-escritos y servidos con su tipo real; la etiqueta del navegador no manda', async () => {
+  it('logo JPEG (sin EXIF) y WebP (guardado como PNG): re-codificados y servidos con su tipo real; la etiqueta del navegador no manda', async () => {
     const jpg = (
       await as(a).upload(JPEG_WITH_EXIF, 'logo.png', 'image/png').expect(200)
     ).body as SettingsBody;
@@ -511,26 +520,73 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       .buffer(true)
       .expect(200);
     expect(jpgFile.headers['content-type']).toBe('image/jpeg');
-    expect(
-      Buffer.from(jpgFile.body as Buffer).includes(Buffer.from('Exif')),
-    ).toBe(false);
+    const jpgServed = Buffer.from(jpgFile.body as Buffer);
+    expect(jpgServed.includes(Buffer.from('Exif'))).toBe(false);
+    expect(await sharp(jpgServed).metadata()).toMatchObject({
+      format: 'jpeg',
+      width: 4,
+      height: 4,
+    });
 
     const webp = (
       await as(a)
         .upload(
-          makeWebp([webpChunk('EXIF', Buffer.from('GPS'))]),
+          await makeWebp(12, 6, { exif: 'GPS Caracas', alpha: 0.5 }),
           'logo.webp',
           'image/webp',
         )
         .expect(200)
     ).body as SettingsBody;
-    expect(webp.logoUrl).toMatch(/\.webp$/);
+    // D2: un WebP se guarda PNG (los emails y los PDF de servidor no leen WebP).
+    expect(webp.logoUrl).toMatch(/\.png$/);
     const webpFile = await request(server())
       .get(logoPath(webp.logoUrl!))
       .buffer(true)
       .expect(200);
-    expect(webpFile.headers['content-type']).toBe('image/webp');
-    expect(Buffer.from(webpFile.body as Buffer).equals(makeWebp())).toBe(true);
+    expect(webpFile.headers['content-type']).toBe('image/png');
+    const webpServed = Buffer.from(webpFile.body as Buffer);
+    expect(webpServed.includes(Buffer.from('GPS'))).toBe(false);
+    expect(await sharp(webpServed).metadata()).toMatchObject({
+      format: 'png',
+      width: 12,
+      height: 6,
+      hasAlpha: true,
+    });
+  });
+
+  it('un logo que no decodifica o pasa de 4096 px de lado se rechaza (DX-019-bis) y no cambia el que había', async () => {
+    const before = (await as(a).get('/clinic/settings').expect(200))
+      .body as SettingsBody;
+    const events = (await auditOf('CLINIC_LOGO')).length;
+    // Contenedor WebP correcto con un bitstream VP8L de relleno: antes pasaba.
+    const fakeWebp = Buffer.concat([
+      Buffer.from('RIFF'),
+      Buffer.from([18, 0, 0, 0]),
+      Buffer.from('WEBPVP8L'),
+      Buffer.from([5, 0, 0, 0, 0x2f, 0, 0, 0, 0x10, 0]),
+    ]);
+    const damaged = await as(a)
+      .upload(fakeWebp, 'logo.webp', 'image/webp')
+      .expect(400);
+    expect((damaged.body as { message: string }).message).toBe(
+      LOGO_MESSAGES.damaged,
+    );
+    const wide = await sharp({
+      create: { width: 5000, height: 10, channels: 3, background: '#0e7490' },
+    })
+      .png()
+      .toBuffer();
+    const tooWide = await as(a)
+      .upload(wide, 'logo.png', 'image/png')
+      .expect(400);
+    expect((tooWide.body as { message: string }).message).toBe(
+      LOGO_MESSAGES.dimensions,
+    );
+    expect(
+      ((await as(a).get('/clinic/settings').expect(200)).body as SettingsBody)
+        .logoUrl,
+    ).toBe(before.logoUrl);
+    expect(await auditOf('CLINIC_LOGO')).toHaveLength(events);
   });
 
   it('SVG: rechazado con script, disfrazado de .png y con Content-Type de imagen; no se guarda nada', async () => {

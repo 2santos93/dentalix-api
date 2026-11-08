@@ -1,6 +1,11 @@
 import { deflateSync, crc32 } from 'node:zlib';
+import sharp from 'sharp';
 
-/** DX-019: imágenes mínimas de prueba para el logo (generadas, sin datos reales). */
+/**
+ * DX-019: imágenes mínimas de prueba para el logo (generadas, sin datos
+ * reales). DX-019-bis: todas DECODIFICAN de verdad (la API re-codifica con
+ * libvips), salvo las que se rompen a propósito en cada prueba.
+ */
 
 function chunk(type: string, data: Buffer): Buffer {
   const head = Buffer.alloc(8);
@@ -42,27 +47,85 @@ export const JPEG_WITH_EXIF = Buffer.from(
   'base64',
 );
 
-function riffChunk(type: string, data: Buffer): Buffer {
-  const head = Buffer.alloc(8);
-  head.write(type, 0, 'latin1');
-  head.writeUInt32LE(data.length, 4);
-  return Buffer.concat([head, data, Buffer.alloc(data.length % 2)]);
+/**
+ * WebP real (sin pérdida) de `width` × `height` en un color, con alfa. Con
+ * `exif`, lleva un bloque EXIF de verdad (contenedor VP8X), como el que deja
+ * una cámara o un editor.
+ */
+export function makeWebp(
+  width = 4,
+  height = 4,
+  opts: { exif?: string; alpha?: number } = {},
+): Promise<Buffer> {
+  const img = sharp({
+    create: {
+      width,
+      height,
+      channels: 4,
+      background: { r: 0x0e, g: 0x74, b: 0x90, alpha: opts.alpha ?? 1 },
+    },
+  }).webp({ lossless: true });
+  return (
+    opts.exif ? img.withExif({ IFD0: { Copyright: opts.exif } }) : img
+  ).toBuffer();
 }
 
-/** Contenedor WebP válido (el cuerpo VP8L es de relleno: la API no decodifica). */
-export function makeWebp(extra: Buffer[] = []): Buffer {
-  const body = Buffer.concat([
-    riffChunk('VP8L', Buffer.from([0x2f, 0, 0, 0, 0x10])),
-    ...extra,
+/**
+ * APNG de dos fotogramas: la imagen por defecto (IDAT) en rojo y un segundo
+ * fotograma (fdAT) en azul. Quien no entiende APNG ve solo el primero.
+ */
+export function makeApng(width = 4, height = 4): Buffer {
+  const frame = (rgb: [number, number, number]) => {
+    const row = Buffer.concat([
+      Buffer.from([0]),
+      Buffer.concat(Array.from({ length: width }, () => Buffer.from(rgb))),
+    ]);
+    return deflateSync(
+      Buffer.concat(Array.from({ length: height }, () => row)),
+    );
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const actl = Buffer.alloc(8);
+  actl.writeUInt32BE(2, 0);
+  const fctl = (seq: number) => {
+    const b = Buffer.alloc(26);
+    b.writeUInt32BE(seq, 0);
+    b.writeUInt32BE(width, 4);
+    b.writeUInt32BE(height, 8);
+    b.writeUInt16BE(1, 20);
+    b.writeUInt16BE(1, 22);
+    return b;
+  };
+  const fdatSeq = Buffer.alloc(4);
+  fdatSeq.writeUInt32BE(2, 0);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('acTL', actl),
+    chunk('fcTL', fctl(0)),
+    chunk('IDAT', frame([0xff, 0, 0])),
+    chunk('fcTL', fctl(1)),
+    chunk('fdAT', Buffer.concat([fdatSeq, frame([0, 0, 0xff])])),
+    chunk('IEND', Buffer.alloc(0)),
   ]);
-  const riff = Buffer.alloc(12);
-  riff.write('RIFF', 0, 'latin1');
-  riff.writeUInt32LE(body.length + 4, 4);
-  riff.write('WEBP', 8, 'latin1');
-  return Buffer.concat([riff, body]);
 }
 
-export const webpChunk = riffChunk;
+/** PNG cuya cabecera dice `width` × `height` (CRC correcto) con un IDAT mínimo: una «bomba». */
+export function makePngHeader(width: number, height: number): Buffer {
+  const png = makePng(1, 1);
+  const ihdr = Buffer.from(png.subarray(16, 29));
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  return Buffer.concat([
+    png.subarray(0, 8),
+    chunk('IHDR', ihdr),
+    png.subarray(33),
+  ]);
+}
 
 export const SVG_WITH_SCRIPT = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><rect width="1" height="1"/></svg>',

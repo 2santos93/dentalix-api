@@ -544,6 +544,17 @@ jobs:
             test ! -e node_modules/country-state-city &&
             test ! -e node_modules/@nestjs/cli &&
             test -f dist/main.js && test -f dist/scripts/prisma/seed.js'
+      # DX-019-bis: el logo se re-codifica con sharp (binarios nativos de
+      # libvips por plataforma); que carguen y codifiquen en la imagen runtime.
+      - name: sharp (libvips) carga y codifica en la imagen
+        run: |
+          docker run --rm dentalix-api:ci node -e "
+            const sharp = require('sharp');
+            sharp({ create: { width: 2, height: 2, channels: 4, background: '#0e7490' } })
+              .png().toBuffer()
+              .then((b) => sharp(b).metadata())
+              .then((m) => { if (m.format !== 'png') process.exit(1); console.log('sharp', sharp.versions.sharp, 'libvips', sharp.versions.vips); })
+              .catch((e) => { console.error(e); process.exit(1); });"
       - name: Prueba de humo de la imagen
         env:
           PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres

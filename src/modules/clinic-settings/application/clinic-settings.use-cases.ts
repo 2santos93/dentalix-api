@@ -36,6 +36,10 @@ import {
   sanitizeLogo,
 } from '../domain/logo-image';
 import {
+  LOGO_IMAGE_CODEC,
+  type LogoImageCodec,
+} from '../domain/ports/logo-image-codec.port';
+import {
   CLINIC_SETTINGS_REPOSITORY,
   type ClinicSettingsRepository,
   type StoredClinicSettings,
@@ -97,8 +101,10 @@ export class UpdateClinicSettingsUseCase {
 }
 
 /**
- * DX-019: sube el logo. Se valida por sus bytes y se RE-ESCRIBE
- * (`sanitizeLogo`) antes de guardarlo; se guarda con una clave nueva por
+ * DX-019: sube el logo. Se valida por sus bytes y se RE-CODIFICA
+ * (`sanitizeLogo` con el `LogoImageCodec`, DX-019-bis) antes de guardarlo; la
+ * extensión y el tipo son los de la salida (un WebP se guarda PNG). Los logos
+ * ya subidos no se re-procesan. Se guarda con una clave nueva por
  * contenido (`logos/<clínica>-<16 hex>.<ext>`), así que la URL de un logo no
  * cambia nunca de contenido y se cachea un año. El anterior NO se borra: los
  * emails ya enviados y los documentos impresos lo siguen enlazando (es
@@ -111,6 +117,7 @@ export class SetClinicLogoUseCase {
     private readonly repo: ClinicSettingsRepository,
     @Inject(FILE_STORAGE) private readonly storage: FileStoragePort,
     private readonly tenantContext: TenantContextService,
+    @Inject(LOGO_IMAGE_CODEC) private readonly codec: LogoImageCodec,
   ) {}
 
   execute(
@@ -131,7 +138,7 @@ export class SetClinicLogoUseCase {
     const stat = await fs.stat(filePath);
     if (stat.size > LOGO_MAX_BYTES)
       throw new BadRequestException(LOGO_MESSAGES.tooLarge);
-    const logo = sanitizeLogo(await fs.readFile(filePath));
+    const logo = await sanitizeLogo(await fs.readFile(filePath), this.codec);
     if (!logo.ok) throw new BadRequestException(logo.message);
 
     const hash = createHash('sha256')
@@ -139,7 +146,7 @@ export class SetClinicLogoUseCase {
       .digest('hex')
       .slice(0, 16);
     const key = `logos/${tenantId}-${hash}.${LOGO_EXTENSION[logo.contentType]}`;
-    // Lo re-escrito va a un temporal propio (no al que dejó multer).
+    // Lo re-codificado va a un temporal propio (no al que dejó multer).
     await fs.mkdir(UPLOAD_TEMP_DIR, { recursive: true });
     const clean = path.join(UPLOAD_TEMP_DIR, `logo-${randomUUID()}`);
     try {
