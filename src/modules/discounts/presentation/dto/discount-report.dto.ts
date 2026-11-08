@@ -218,7 +218,7 @@ export class DiscountReportItemDto {
 
   @ApiProperty({
     description:
-      'DX-513-ter: ítem de convenio con el catálogo en otra moneda conocida y sin la base congelada en la moneda del plan (no había tasa al darlo de alta, o es anterior): su rebaja de convenio no se puede medir sin convertir al consultar. Se señala «sin referencia comparable»: `agreementReduction` es 0 y no suma en `agreementTotals`',
+      'DX-513-ter: ítem de convenio con el catálogo en otra moneda conocida y sin la base congelada en la moneda del plan (no había tasa al darlo de alta, o es anterior), o lista de convenio con la moneda del catálogo desconocida (NULL; DX-513-quater): su rebaja de convenio no se puede medir sin convertir al consultar. Se señala «sin referencia comparable»: `agreementReduction` es 0 y no suma en `agreementTotals`',
   })
   agreementUnmeasured!: boolean;
 
@@ -306,7 +306,7 @@ export class DiscountReportItemDto {
 
   @ApiProperty({
     description:
-      'SEC-047: rebaja de convenio (precio de catálogo − precio del convenio; 0 sin convenio). Aparte del descuento total',
+      'SEC-047: rebaja de convenio (precio de catálogo − precio del convenio; 0 sin convenio ni si `agreementUnmeasured`). Aparte del descuento total',
   })
   agreementReduction!: number;
 
@@ -384,7 +384,7 @@ export class DiscountReportDto {
   @ApiProperty({
     type: [AgreementUnmeasuredTotalDto],
     description:
-      'DX-513-ter: líneas de convenio sin medir por moneda (catálogo en otra moneda sin la base congelada), sin importe. Aparte de `agreementTotals`',
+      'DX-513-ter: líneas de convenio sin medir por moneda (catálogo en otra moneda sin la base congelada, o lista de convenio con la moneda del catálogo desconocida), sin importe. Aparte de `agreementTotals`',
   })
   agreementUnmeasuredTotals!: AgreementUnmeasuredTotalDto[];
 

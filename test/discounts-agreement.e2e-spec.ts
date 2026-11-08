@@ -18,6 +18,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
@@ -553,6 +554,116 @@ describe('Rebaja de convenio en el informe de descuentos (e2e, SEC-047)', () => 
       const out = await report(clinicB);
       expect(out.items).toEqual([]);
       expect(out.agreementUnmeasuredTotals).toEqual([]);
+    });
+  });
+
+  // DX-513-quater: clínica con sedes en VES y USD y SIN moneda de catálogo
+  // fijada: sus ítems nacen con la moneda del catálogo NULL. Una lista de
+  // convenio en USD (corona a 3,50) con el catálogo a 3.600 no tiene
+  // referencia comparable: sin rebaja, contada aparte y sin sumar.
+  describe('lista de convenio con la moneda del catálogo desconocida (DX-513-quater, test 7)', () => {
+    let clinicC: Clinic;
+    let itemId: string;
+
+    const asC = (verb: 'get' | 'post' | 'put', path: string, body?: object) => {
+      const req = request(app.getHttpServer())
+        [verb](`/api/v1${path}`)
+        .set('X-Tenant-Host', clinicC.host)
+        .set('Authorization', `Bearer ${clinicC.adminToken}`);
+      return body === undefined ? req : req.send(body);
+    };
+    const createC = async (path: string, body: object): Promise<string> =>
+      ((await asC('post', path, body).expect(201)).body as { id: string }).id;
+
+    beforeAll(async () => {
+      clinicC = await registerClinic(app, 'dx513q-informe-c');
+      await asC(
+        'post',
+        '/locations',
+        locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Este' }),
+      ).expect(201);
+      const veneer = await createC('/catalog/items', {
+        code: 'DX513Q-CAR',
+        kind: CatalogKind.PROCEDURE,
+        labelEs: 'Carilla',
+        color: '#2A2B3C',
+        defaultPrice: 3600,
+      });
+      const list = await createC('/price-lists', {
+        name: 'Lista Empresa USD',
+        currency: 'USD',
+      });
+      await asC('put', `/price-lists/${list}/items`, {
+        items: [{ catalogItemId: veneer, price: 3.5 }],
+      }).expect(200);
+      const payer = await createC('/payers', {
+        name: 'Empresa Andina',
+        type: 'OTHER',
+      });
+      const agreement = await createC('/agreements', {
+        name: 'Empresa Andina lista',
+        payerId: payer,
+        kind: 'PRICE_LIST',
+        priceListId: list,
+      });
+      const patient = await createC('/patients', {
+        firstName: 'Lista',
+        lastName: 'Sin moneda',
+        docType: 'NATIONAL_ID',
+        docNumber: String(Math.floor(Math.random() * 1e9)),
+        sex: Sex.F,
+      });
+      await asC('put', `/patients/${patient}/agreement`, {
+        agreementId: agreement,
+      }).expect(200);
+      const plan = await createC(`/patients/${patient}/treatment-plans`, {
+        currency: 'USD',
+      });
+      const res = await asC('post', `/treatment-plans/${plan}/items`, {
+        toothNumber: '21',
+        catalogItemId: veneer,
+      }).expect(201);
+      itemId = (res.body as { id: string }).id;
+      expect(res.body).toMatchObject({
+        priceSource: 'AGREEMENT_PRICE_LIST',
+        price: 3.5,
+      });
+    });
+
+    it('el informe: la fila sin referencia comparable, su recuento y ninguna cifra en `agreementTotals`', async () => {
+      const res = await asC('get', '/reports/discounts')
+        .query({ from: caracasDay(-1), to: caracasDay(1) })
+        .expect(200);
+      const out = res.body as Report;
+      const row = out.items.find((i) => i.itemId === itemId);
+      expect(row).toMatchObject({
+        currency: 'USD',
+        basePrice: 3600,
+        agreementReduction: 0,
+        agreementPercent: 0,
+        agreementUnmeasured: true,
+      });
+      expect(out.agreementTotals).toEqual([]);
+      expect(out.agreementUnmeasuredTotals).toEqual([
+        { currency: 'USD', items: 1 },
+      ]);
+    });
+
+    it('el CSV: rebaja vacía, «Sin referencia comparable» y la base marcada en las dos columnas', async () => {
+      const res = await asC('get', '/reports/discounts.csv')
+        .query({ from: caracasDay(-1), to: caracasDay(1) })
+        .expect(200);
+      const cells = res.text
+        .slice(1)
+        .split('\r\n')
+        .filter((l) => l.includes('"Empresa Andina lista"'))
+        .map((l) => l.split(','));
+      expect(cells).toHaveLength(1);
+      const unknown = '3600.00 (moneda del catálogo desconocida)';
+      expect(cells[0][23]).toBe(unknown);
+      expect(cells[0][24]).toBe('');
+      expect(cells[0][27]).toBe(unknown);
+      expect(cells[0][28]).toBe('Sin referencia comparable');
     });
   });
 });

@@ -73,6 +73,13 @@ const RATE_SOURCE_LABELS: Record<'AUTOMATIC' | 'MANUAL', string> = {
   MANUAL: 'Manual',
 };
 
+const UNKNOWN_CATALOG_CURRENCY = '(moneda del catálogo desconocida)';
+
+/** DX-513-quater: importe con 2 decimales y sin código: no hay moneda que decir. */
+function unknownCatalogCurrencyAmount(amount: number): string {
+  return `${amount.toFixed(2)} ${UNKNOWN_CATALOG_CURRENCY}`;
+}
+
 /**
  * «Precio sin convenio» (DX-513-bis): la base en la moneda del plan si se
  * congeló (`basePriceInPlan`); si no, `basePrice` con SU moneda (la del
@@ -81,6 +88,15 @@ const RATE_SOURCE_LABELS: Record<'AUTOMATIC' | 'MANUAL', string> = {
  */
 function baseWithoutAgreementText(row: DiscountReportRowView): string {
   if (row.agreementName === null) return '';
+  // DX-513-quater: lista de convenio con la moneda del catálogo desconocida:
+  // la cifra es de una moneda que no se sabe, no la del plan.
+  if (
+    row.agreementUnmeasured &&
+    row.catalogCurrency === null &&
+    row.basePrice !== null
+  ) {
+    return unknownCatalogCurrencyAmount(row.basePrice);
+  }
   if (row.basePriceInPlan !== null) {
     return csvAmount(row.basePriceInPlan, row.currency);
   }
@@ -137,7 +153,7 @@ function agreementOnly(row: DiscountReportRowView): boolean {
 function baseInCatalogCurrencyText(row: DiscountReportRowView): string {
   if (row.agreementName === null || row.basePrice === null) return '';
   if (row.catalogCurrency === null)
-    return csvAmount(row.basePrice, row.currency);
+    return unknownCatalogCurrencyAmount(row.basePrice);
   return `${csvAmount(row.basePrice, row.catalogCurrency)} ${row.catalogCurrency}`;
 }
 

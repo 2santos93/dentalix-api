@@ -158,6 +158,12 @@ async function firstDiscountLocation(
  * `treatment_plan_items_tenant_agreement_ref_reduction_at_idx` (migración
  * 20261202090000, que sustituye al de SEC-047).
  *
+ * DX-513-quater: una lista de convenio con la moneda del catálogo NULL
+ * (desconocida) tampoco se puede medir: la base es del catálogo y la lista de
+ * la moneda del plan. Entra como `agreementUnmeasured`, sin importe y sin
+ * sumar en los totales de convenio; el WHERE, el tope, `priceReduction` e
+ * `isDiscount` no cambian. El convenio por % con NULL se sigue midiendo.
+ *
  * DX-513: la rebaja de precio y la de convenio no cuentan frente a una
  * referencia en otra moneda CONOCIDA (`referenceInOtherCurrency` del
  * dominio): ese ítem no es un descuento y no entra en las filas ni en los
@@ -271,6 +277,14 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
     const priceBelowReference = Prisma.sql`(CASE WHEN ${hasSnapshot}
                  THEN i."price" < i."referencePriceInPlan"
                  ELSE (i."price" < i."catalogPrice" AND (${referenceInPlanCurrency})) END)`;
+    // DX-513-quater: lista de convenio con la moneda del catálogo
+    // desconocida (NULL): la base (catálogo) y la lista (moneda del plan) no
+    // son comparables, así que no hay rebaja que medir. El convenio por % con
+    // NULL sí se mide: base y precio salen del mismo importe.
+    const agreementBaseUnknown = Prisma.sql`(i."agreementId" IS NOT NULL
+                  AND i."priceSource" = 'AGREEMENT_PRICE_LIST'
+                  AND i."basePrice" IS NOT NULL
+                  AND i."catalogCurrency" IS NULL)`;
     const cte = Prisma.sql`
       WITH raw AS (
         SELECT i."id", i."planId", i."toothNumber", i."catalogItemId",
@@ -293,6 +307,7 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                i."discountById",
                i."priceSource", i."agreementName", i."basePrice",
                CASE WHEN i."agreementId" IS NULL THEN 0
+                    WHEN ${agreementBaseUnknown} THEN 0
                     WHEN ${hasSnapshot}
                     THEN GREATEST(COALESCE(i."basePriceInPlan" - i."referencePriceInPlan", 0), 0)
                     WHEN (i."catalogCurrency" IS NULL
@@ -304,7 +319,9 @@ export class PrismaDiscountReportRepository implements DiscountReportRepository 
                (i."agreementId" IS NOT NULL AND i."basePrice" IS NOT NULL
                   AND i."basePriceInPlan" IS NULL
                   AND i."catalogCurrency" IS NOT NULL
-                  AND i."catalogCurrency" <> p."currency") AS "agreementUnmeasured",
+                  AND i."catalogCurrency" <> p."currency")
+                 -- DX-513-quater: y la lista de convenio con la moneda NULL.
+                 OR ${agreementBaseUnknown} AS "agreementUnmeasured",
                asg."createdById" AS "agreementAssignedById",
                i."createdById",
                COALESCE(i."discountAt", i."createdAt") AS "at",

@@ -462,6 +462,57 @@ describe('CSV del informe de descuentos (DX-204)', () => {
       expect(cells[28]).toBe('Sin referencia comparable');
     });
 
+    // DX-513-quater: lista de convenio con la moneda del catálogo NULL.
+    describe('moneda del catálogo desconocida', () => {
+      const UNKNOWN = '3600.00 (moneda del catálogo desconocida)';
+      const unknownList = {
+        ...list,
+        catalogCurrency: null,
+        referenceCurrency: 'USD',
+        basePriceInPlan: 3600,
+        referencePriceInPlan: 3.5,
+        agreementUnmeasured: true,
+        agreementReduction: 0,
+      };
+
+      it('lista: rebaja vacía, «Sin referencia comparable» y la base marcada (N1, N2)', () => {
+        const cells = cellsOf(unknownList);
+        expect(cells[23]).toBe(UNKNOWN);
+        expect(cells[24]).toBe('');
+        expect(cells[27]).toBe(UNKNOWN);
+        expect(cells[28]).toBe('Sin referencia comparable');
+      });
+
+      it('lista sin foto: la misma marca', () => {
+        const cells = cellsOf({
+          ...unknownList,
+          basePriceInPlan: null,
+          referencePriceInPlan: null,
+        });
+        expect(cells[23]).toBe(UNKNOWN);
+        expect(cells[27]).toBe(UNKNOWN);
+        expect(cells[28]).toBe('Sin referencia comparable');
+      });
+
+      it('convenio por %: se sigue midiendo; solo la columna de la moneda del catálogo lleva la marca', () => {
+        const cells = cellsOf({
+          ...list,
+          priceSource: 'AGREEMENT_PERCENT',
+          catalogCurrency: null,
+          basePriceInPlan: 3600,
+          catalogPrice: 3240,
+          referencePriceInPlan: 3240,
+          price: 3240,
+          agreementUnmeasured: false,
+          agreementReduction: 360,
+        });
+        expect(cells[23]).toBe('3600.00');
+        expect(cells[24]).toBe('360.00');
+        expect(cells[27]).toBe(UNKNOWN);
+        expect(cells[28]).toBe('Sí');
+      });
+    });
+
     it('sin convenio: las dos columnas nuevas vacías', () => {
       expect(cellsOf(row).slice(27)).toEqual(['', '']);
     });
