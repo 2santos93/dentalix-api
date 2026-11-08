@@ -2184,6 +2184,9 @@ model TreatmentPlanAcceptance {
   remoteSentAt            DateTime?
   remoteOpenedAt          DateTime?
   remoteVerifiedAt        DateTime?
+  /// DX-019-bis (B): clave del logo congelada al firmar (fuera del contenido y
+  /// de sus hashes; el trigger impide cambiarla). NULL = firmada sin logo.
+  clinicLogoKey           String?
 
   // FK COMPUESTAS (SEC-004): plan del MISMO tenant y del MISMO paciente; sede
   // del MISMO tenant.
@@ -3769,6 +3772,9 @@ model Prescription {
   clinicName            String
   /// DX-019: datos fiscales congelados al emitir; NULL = se reimprime sin ellos.
   clinicFiscal          Json?
+  /// DX-019-bis (B): clave del logo congelada al emitir (fuera del hash; la
+  /// protege el trigger). NULL = emitida sin logo: se reimprime sin él.
+  clinicLogoKey         String?
   locationName          String
   locationAddress       String?
   notes                 String?

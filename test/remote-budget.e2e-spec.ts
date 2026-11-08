@@ -20,6 +20,7 @@ import {
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { SIGNATURE_LINK_INVALID_MESSAGE } from '../src/modules/signature-requests/application/use-cases/public-signature.use-cases';
 import { seedParProviderRates } from './support/par-provider-rates';
+import { makePng } from '../src/modules/clinic-settings/__fixtures__/logo-fixtures';
 
 // DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
 let dropParRates: (() => Promise<void>) | undefined;
@@ -402,6 +403,53 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
       select: { status: true },
     });
     expect(plan.status).toBe('PRESENTED');
+  });
+
+  it('DX-019-bis: cambiar el logo tras el envío no anula el enlace; la aceptación congela el del instante de la firma', async () => {
+    const uploadLogo = async (size: number): Promise<string> =>
+      (
+        (
+          await server()
+            .post('/api/v1/clinic/settings/logo')
+            .set('X-Tenant-Host', clinicA.host)
+            .set('Authorization', `Bearer ${clinicA.adminToken}`)
+            .attach('file', makePng(size, size), {
+              filename: 'logo.png',
+              contentType: 'image/png',
+            })
+            .expect(200)
+        ).body as { logoUrl: string }
+      ).logoUrl;
+    await uploadLogo(20);
+    const planId = await presentedPlan();
+    const { token } = await send(planId);
+    // El logo no está en la foto enviada (D6): el enlace sigue valiendo.
+    const atSigning = await uploadLogo(24);
+    const session = await verified(token);
+    await pub(clinicA.host)
+      .post(`${token}/sign`, { signature: SIGNATURE, accepted: true }, session)
+      .expect(200);
+    const later = await uploadLogo(28);
+    expect(later).not.toBe(atSigning);
+
+    const quote = await as(clinicA)
+      .get(`/patients/${patientId}/treatment-plans/${planId}/quote`)
+      .expect(200);
+    expect(quote.body).toMatchObject({
+      clinicLogoUrl: atSigning,
+      acceptance: { integrityOk: true, remote: { channel: 'EMAIL' } },
+    });
+    await server()
+      .delete('/api/v1/clinic/settings/logo')
+      .set('X-Tenant-Host', clinicA.host)
+      .set('Authorization', `Bearer ${clinicA.adminToken}`)
+      .expect(200);
+    const reprint = await as(clinicA)
+      .get(`/patients/${patientId}/treatment-plans/${planId}/quote`)
+      .expect(200);
+    expect((reprint.body as { clinicLogoUrl: string }).clinicLogoUrl).toBe(
+      atSigning,
+    );
   });
 
   it('DX-502: plan en EUR con el catálogo en VES: el ítem, el presupuesto y el enlace llevan el precio de lista en VES, sin ahorro entre monedas', async () => {

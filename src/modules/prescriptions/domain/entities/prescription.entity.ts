@@ -93,6 +93,7 @@ export interface PrescriptionLocationFormat {
 
 /** La receta con lo que necesita la vista imprimible. */
 export interface PrescriptionDocument extends Prescription {
+  /** DX-019-bis (B): el logo congelado al emitir; `null` = emitida sin logo. */
   clinicLogoUrl: string | null;
   locationFormat: PrescriptionLocationFormat;
   /** `true` si el hash guardado coincide con el recalculado al leer. */

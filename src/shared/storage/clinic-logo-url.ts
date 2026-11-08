@@ -23,6 +23,18 @@ export function clinicLogoPublicUrl(stored: string | null): string | null {
   return /^https?:\/\//i.test(stored) ? stored : null;
 }
 
+/**
+ * DX-019-bis (B): lo que una receta o una aceptación firmada congela del logo
+ * al emitirse: la clave (o la URL http(s) anterior) si hoy se puede pintar; si
+ * no, `null`, que es «emitido sin logo» (nunca se cae al logo de hoy). Mismo
+ * criterio que el CHECK de `prescriptions."clinicLogoKey"` y
+ * `treatment_plan_acceptances."clinicLogoKey"` (20261203090000_dx019b_clinic_logo_key),
+ * así que congelar nunca hace fallar una emisión.
+ */
+export function clinicLogoKeyToFreeze(stored: string | null): string | null {
+  return clinicLogoPublicUrl(stored) === null ? null : stored;
+}
+
 type WithLogoUrl<T> = Omit<T, 'logoKey'> & { logoUrl: string | null };
 
 /** La fila de `tenants` con `logoKey` convertida en `logoUrl`. */

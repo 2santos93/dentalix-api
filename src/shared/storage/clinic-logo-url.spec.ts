@@ -1,4 +1,8 @@
-import { clinicLogoPublicUrl, withClinicLogoUrl } from './clinic-logo-url';
+import {
+  clinicLogoKeyToFreeze,
+  clinicLogoPublicUrl,
+  withClinicLogoUrl,
+} from './clinic-logo-url';
 
 describe('URL del logo de la clínica (DX-019, DX-084)', () => {
   const previous = process.env.FILES_PUBLIC_BASE_URL;
@@ -35,5 +39,20 @@ describe('URL del logo de la clínica (DX-019, DX-084)', () => {
       logoUrl: null,
     });
     expect(withClinicLogoUrl(null)).toBeNull();
+  });
+
+  it('DX-019-bis (B): un documento emitido congela la clave o la URL anterior; lo que no se pinta, null', () => {
+    expect(clinicLogoKeyToFreeze('logos/a-0123456789abcdef.png')).toBe(
+      'logos/a-0123456789abcdef.png',
+    );
+    expect(clinicLogoKeyToFreeze('HTTPS://cdn.example/l.png')).toBe(
+      'HTTPS://cdn.example/l.png',
+    );
+    expect(clinicLogoKeyToFreeze('logos/../x.png')).toBeNull();
+    expect(clinicLogoKeyToFreeze('logos/a/b.png')).toBeNull();
+    expect(clinicLogoKeyToFreeze('avatars/u1.png')).toBeNull();
+    expect(clinicLogoKeyToFreeze('ftp://cdn.example/l.png')).toBeNull();
+    expect(clinicLogoKeyToFreeze('')).toBeNull();
+    expect(clinicLogoKeyToFreeze(null)).toBeNull();
   });
 });

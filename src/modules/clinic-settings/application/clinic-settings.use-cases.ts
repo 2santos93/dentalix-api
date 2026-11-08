@@ -108,7 +108,12 @@ export class UpdateClinicSettingsUseCase {
  * contenido (`logos/<clínica>-<16 hex>.<ext>`), así que la URL de un logo no
  * cambia nunca de contenido y se cachea un año. El anterior NO se borra: los
  * emails ya enviados y los documentos impresos lo siguen enlazando (es
- * público por diseño, sin datos personales).
+ * público por diseño, sin datos personales). DX-019-bis (B): las recetas y
+ * los presupuestos firmados congelan esta CLAVE al emitirse
+ * (`prescriptions."clinicLogoKey"`, `treatment_plan_acceptances."clinicLogoKey"`)
+ * y la reimpresión la pinta, así que un objeto `logos/` no se borra NUNCA,
+ * tampoco en una limpieza de huérfanos (tendría que mirar esas dos tablas y
+ * `tenants`). Lo vigila `src/architecture/no-logo-deletion.spec.ts`.
  */
 @Injectable()
 export class SetClinicLogoUseCase {

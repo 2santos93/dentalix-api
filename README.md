@@ -6121,6 +6121,41 @@ npm run credit-netting:report -- --tenant <uuid>   # una clínica
 - F6 (DX-399-quater): la cascada, el informe y el diagnóstico solo cuentan los
   asientos y las bases en la moneda actual del plan, como el saldo del plan.
 
+## Logo congelado en documentos emitidos (DX-019-bis)
+
+La receta (`prescriptions`) y el presupuesto firmado
+(`treatment_plan_acceptances`, en la clínica o a distancia) guardan en
+`"clinicLogoKey"` la clave del logo vigente al emitir o firmar, en la misma
+transacción, fuera de los hashes y protegida por sus triggers de
+inmutabilidad. Al reimprimir se usa esa clave; NULL es «emitido sin logo»
+(nunca se cae al logo de hoy). El presupuesto sin firmar sigue con el logo
+actual. Los objetos `logos/` no se borran nunca (guarda
+`src/architecture/no-logo-deletion.spec.ts`): las claves congeladas apuntan
+a ellos.
+
+- **Relleno de lo ya emitido** (`20261203090100_dx019b_clinic_logo_key_backfill`):
+  el logo de cada documento en su fecha, reconstruido con la auditoría
+  `CLINIC_LOGO` de su clínica (sin eventos: el logo actual). Corre en UNA
+  transacción con los triggers `*_immutable` suspendidos solo alrededor del
+  UPDATE: mientras dura, emitir, anular y firmar esperan (≈16 s con 100 000
+  recetas y 1 M de eventos de auditoría); una firma a distancia que espere más
+  que el `statement_timeout` de la app (15 s) falla y se reintenta. Conviene
+  desplegarlo fuera del horario de la clínica.
+- **Despliegue escalonado:** una réplica sin DX-019-bis que emita o firme
+  después del relleno guarda NULL y ese documento se reimprimiría sin logo
+  para siempre (la fila es inmutable). Despliega con parada única o, cuando
+  ya no quede ninguna réplica vieja, repite el relleno con el owner de las
+  migraciones. Es idempotente (solo toca filas con la clave NULL) y exacto
+  (sale de la auditoría, así que una receta emitida sin logo sigue sin él):
+  ```bash
+  psql "$DIRECT_URL_SIN_SCHEMA" -X -v ON_ERROR_STOP=1 \
+    -f prisma/migrations/20261203090100_dx019b_clinic_logo_key_backfill/migration.sql
+  ```
+  `$DIRECT_URL_SIN_SCHEMA` es `DIRECT_URL` sin `?schema=public`.
+- La auditoría recorta los valores a 255 caracteres: un logo antiguo guardado
+  como URL http(s) más larga quedaría rellenado con la URL recortada. Las
+  claves `logos/…` nunca llegan a ese largo.
+
 ## Despliegue: roles de la BD (DX-113)
 
 Requiere **PostgreSQL ≥ 16** (las migraciones usan `GRANT … WITH SET`, y

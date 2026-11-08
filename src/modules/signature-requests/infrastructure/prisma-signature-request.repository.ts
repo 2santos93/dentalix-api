@@ -631,6 +631,9 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           remoteSentAt: budget.remoteSentAt,
           remoteOpenedAt: budget.remoteOpenedAt,
           remoteVerifiedAt: budget.remoteVerifiedAt,
+          // DX-019-bis (B): el logo del instante de la firma (no el del envío:
+          // no está en la foto enviada, así que cambiarlo no anula el enlace).
+          clinicLogoKey: source.clinic.logoKey,
         },
       });
     } catch (error) {
