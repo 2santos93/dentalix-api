@@ -36,7 +36,9 @@
 --
 -- Despliegue escalonado: una réplica anterior que emita después de este
 -- relleno deja NULL (se reimprimirá sin logo). Para evitarlo, despliega con
--- las réplicas anteriores ya paradas o repite el relleno de esas filas a mano.
+-- parada única o, sin réplicas viejas, repite este fichero con psql y el owner
+-- (idempotente: solo filas con la clave NULL). Pasos en el README, «Logo
+-- congelado en documentos emitidos (DX-019-bis)».
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
