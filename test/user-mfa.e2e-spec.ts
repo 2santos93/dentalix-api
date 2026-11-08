@@ -15,10 +15,10 @@ import {
   LOGIN_LOCKOUT_CONFIG,
 } from '../src/modules/auth/domain/login-lockout';
 import { PasswordService } from '../src/shared/crypto/password.service';
-import { decodeBase32, totpCode } from '../src/shared/crypto/totp';
 import { MFA_MESSAGES } from '../src/modules/auth/domain/user-mfa';
 import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
 import { enrollmentEmailCode } from './support/platform-mfa';
+import { currentTotpStep, totpAt as codeAt } from './support/totp';
 
 /**
  * DX-021: verificación en dos pasos (TOTP) de los miembros de una clínica,
@@ -53,13 +53,6 @@ interface Body {
   requireAdminMfa?: boolean;
 }
 
-function codeAt(secret: string, offsetSteps = 0): string {
-  return totpCode(
-    decodeBase32(secret),
-    Math.floor(Date.now() / 30_000) + offsetSteps,
-  );
-}
-
 describe('Verificación en dos pasos de los miembros (e2e, DX-021)', () => {
   let app: INestApplication<App>;
   let clinic: Clinic;
@@ -85,7 +78,7 @@ describe('Verificación en dos pasos de los miembros (e2e, DX-021)', () => {
   const forgetLastStep = (userId: string) =>
     raw.user.update({
       where: { id: userId },
-      data: { mfaLastUsedStep: Math.floor(Date.now() / 30_000) - 5 },
+      data: { mfaLastUsedStep: currentTotpStep() - 5 },
     });
 
   beforeAll(async () => {

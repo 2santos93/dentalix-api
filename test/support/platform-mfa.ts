@@ -2,13 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { MfaChallengeService } from '../../src/modules/auth/application/mfa-challenge.service';
-import { decodeBase32, totpCode } from '../../src/shared/crypto/totp';
 import { SEEDED_PASSWORD } from './e2e-fixtures';
-
-export function totpAt(secret: string, offsetSteps = 0): string {
-  const step = Math.floor(Date.now() / 30_000) + offsetSteps;
-  return totpCode(decodeBase32(secret), step);
-}
+import { previousStepCode } from './totp';
 
 export interface PlatformChallenge {
   mfa: 'MFA_REQUIRED' | 'MFA_ENROLLMENT_REQUIRED';
@@ -52,7 +47,11 @@ export interface EnrolledPlatformAdmin {
   recoveryCodes: string[];
 }
 
-/** Alta completa en el login del apex; el código de la app es el de hace 30 s. */
+/**
+ * Alta completa en el login del apex. El código de la app es el del paso
+ * anterior (deja libres el actual y el siguiente al test), calculado cuando aún
+ * le queda margen a la ventana (DX-552).
+ */
 export async function enrollPlatformAdmin(
   app: INestApplication<App>,
   user: { id: string; email: string },
@@ -69,11 +68,12 @@ export async function enrollPlatformAdmin(
     .send({ mfaToken, emailCode })
     .expect(200);
   const { secret } = start.body as { secret: string };
+  const code = await previousStepCode(secret);
   const confirm = await http()
     .post('/api/v1/auth/login/mfa/enrollment/confirm')
     .set('X-Tenant-Host', 'localhost')
     .set('User-Agent', userAgent)
-    .send({ mfaToken, emailCode, code: totpAt(secret, -1) })
+    .send({ mfaToken, emailCode, code })
     .expect(200);
   return { ...(confirm.body as Omit<EnrolledPlatformAdmin, 'secret'>), secret };
 }

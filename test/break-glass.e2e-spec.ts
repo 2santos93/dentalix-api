@@ -14,12 +14,12 @@ import {
 } from './support/e2e-fixtures';
 import { createE2eApp as createAppWith } from './support/create-e2e-app';
 import { apexPassword, enrollPlatformAdmin } from './support/platform-mfa';
+import { currentTotpStep, totpAt as codeAt } from './support/totp';
 import {
   DEFAULT_LOGIN_LOCKOUT,
   LOGIN_LOCKOUT_CONFIG,
 } from '../src/modules/auth/domain/login-lockout';
 import { PasswordService } from '../src/shared/crypto/password.service';
-import { decodeBase32, totpCode } from '../src/shared/crypto/totp';
 
 /**
  * SEC-008: acceso break-glass del superadmin a una clínica donde no es
@@ -54,12 +54,6 @@ function claimsOf(jwt: string): Record<string, unknown> {
     string,
     unknown
   >;
-}
-
-/** Código TOTP para un paso concreto (30 s) del secreto en base32. */
-function codeAt(secret: string, offsetSteps = 0): string {
-  const step = Math.floor(Date.now() / 30_000) + offsetSteps;
-  return totpCode(decodeBase32(secret), step);
 }
 
 describe('Break-glass del superadmin (e2e, SEC-008)', () => {
@@ -215,7 +209,8 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
     });
 
     it('código incorrecto → 401 genérico y sin fila de auditoría', async () => {
-      const valid = new Set([-1, 0, 1].map((o) => codeAt(secret, o)));
+      // Los que la API aceptaría ahora o tras cruzar al paso siguiente (DX-552).
+      const valid = new Set([-1, 0, 1, 2].map((o) => codeAt(secret, o)));
       const wrong = ['123456', '654321', '000001'].find((c) => !valid.has(c));
       const res = await tenantLogin(clinic.host, {
         email: SUPER_EMAIL,
@@ -428,12 +423,14 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
     });
 
     it('pagina por cursor', async () => {
-      // Dos accesos más (pasos TOTP distintos: el actual ya se usó).
+      // Dos accesos más, con pasos TOTP distintos y crecientes (anti-reuso):
+      // el actual y el siguiente, que aguantan aunque la petición cruce al
+      // paso siguiente (el anterior, −1, caducaba en ese cruce: DX-552).
       await raw.user.update({
         where: { id: superId },
         data: { mfaLastUsedStep: null },
       });
-      for (const offset of [-1, 1]) {
+      for (const offset of [0, 1]) {
         await tenantLogin(clinic.host, {
           email: SUPER_EMAIL,
           password: SEEDED_PASSWORD,
@@ -523,7 +520,8 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         data: { mfaLastUsedStep: null },
       });
       const before = await raw.platformAccessAudit.count();
-      const valid = new Set([-1, 0, 1].map((o) => codeAt(secret, o)));
+      // Los que la API aceptaría ahora o tras cruzar al paso siguiente (DX-552).
+      const valid = new Set([-1, 0, 1, 2].map((o) => codeAt(secret, o)));
       const wrongs = [
         '123456',
         '654321',
@@ -595,7 +593,7 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
       // El paso usado vuelve atrás: el código vigente ya se gastó en otro caso.
       await raw.user.update({
         where: { id: superId },
-        data: { mfaLastUsedStep: Math.floor(Date.now() / 30_000) - 5 },
+        data: { mfaLastUsedStep: currentTotpStep() - 5 },
       });
       const done = await http()
         .post('/api/v1/auth/login/mfa')
