@@ -7,9 +7,7 @@ import {
   IsBoolean,
   IsDateString,
   IsISO4217CurrencyCode,
-  IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   IsUUID,
   MaxLength,
@@ -22,7 +20,7 @@ import {
   REFERENCE_TOO_LONG_MESSAGE,
 } from '../../../payment-methods/domain/payment-method-rules';
 import {
-  IsMoney,
+  IsPositiveMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
 import {
@@ -41,9 +39,7 @@ function toUpperCase({ value }: { value: unknown }): unknown {
 /** DX-390: una forma de pago del cobro dividido. */
 export class SplitPaymentLineDto {
   @ApiProperty({ example: 50, maximum: MONEY_MAX })
-  @IsNumber()
-  @IsPositive()
-  @IsMoney()
+  @IsPositiveMoney()
   amount!: number;
 
   @ApiProperty({

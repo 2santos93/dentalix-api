@@ -3,15 +3,13 @@ import {
   IsArray,
   IsEnum,
   IsISO8601,
-  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
-  Min,
 } from 'class-validator';
 import { ToothSurface, TreatmentPlanItemStatus } from '@prisma/client';
 import {
-  IsMoney,
+  IsNonNegativeMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
 import { DiscountReasonFieldsDto } from './discount-reason.dto';
@@ -26,9 +24,7 @@ export class UpdateTreatmentPlanItemDto extends DiscountReasonFieldsDto {
     maximum: MONEY_MAX,
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @IsMoney()
+  @IsNonNegativeMoney()
   price?: number;
 
   @ApiPropertyOptional({
@@ -37,9 +33,7 @@ export class UpdateTreatmentPlanItemDto extends DiscountReasonFieldsDto {
     maximum: MONEY_MAX,
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @IsMoney()
+  @IsNonNegativeMoney()
   discount?: number;
 
   @ApiPropertyOptional({

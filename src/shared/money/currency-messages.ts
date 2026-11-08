@@ -52,3 +52,22 @@ export function currencyListMessage(max: number): string {
 export function unknownCurrencyNamedMessage(code: string): string {
   return `La moneda ${code} no está en la lista de monedas admitidas.`;
 }
+
+/**
+ * DX-517-quater: un número con tope de decimales y de valor absoluto (importes,
+ * tasas, porcentajes). El máximo sale formateado en español neutro (`es`, sin
+ * región), sin nombrar ningún país ni moneda.
+ */
+export function boundedDecimalMessage(
+  maxDecimals: number,
+  maxAbs: number,
+  subject = 'El valor',
+): string {
+  const max = new Intl.NumberFormat('es', {
+    minimumFractionDigits: maxDecimals,
+    maximumFractionDigits: maxDecimals,
+    useGrouping: true,
+  }).format(maxAbs);
+  const decimals = maxDecimals === 1 ? '1 decimal' : `${maxDecimals} decimales`;
+  return `${subject} tiene que ser un número con hasta ${decimals} y no mayor que ${max}.`;
+}

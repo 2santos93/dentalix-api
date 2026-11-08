@@ -514,4 +514,36 @@ describe('Payments (e2e)', () => {
         .expect(200);
     },
   );
+
+  // DX-517-quater: ningún 400 de importe responde en inglés.
+  it('un importe con 3 decimales o por encima del máximo da 400 en español', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Importes',
+      subdomain: 'clinica-pay-importes',
+      email: 'owner@clinica-pay-importes.com',
+    });
+    const post = (amount: unknown) =>
+      request(app.getHttpServer())
+        .post(
+          '/api/v1/treatment-plans/00000000-0000-4000-8000-000000000001/payments',
+        )
+        .set('X-Tenant-Host', hostFor(clinic.subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({
+          amount,
+          currency: 'USD',
+          method: 'CASH',
+          paidAt: `${RATE_DATE}T09:00:00.000Z`,
+        })
+        .expect(400);
+    const messages = async (amount: unknown) =>
+      ((await post(amount)).body as { message: string[] }).message;
+    const text =
+      'El importe tiene que ser un número con hasta 2 decimales y no mayor que 9.999.999.999,99.';
+    expect(await messages(10.005)).toContain(text);
+    expect(await messages(10_000_000_000)).toContain(text);
+    expect(await messages(0)).toContain(
+      'El importe tiene que ser un número mayor que 0.',
+    );
+  });
 });

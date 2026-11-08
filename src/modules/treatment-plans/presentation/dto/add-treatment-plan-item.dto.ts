@@ -2,17 +2,15 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
   IsEnum,
-  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
-  Min,
 } from 'class-validator';
 import { ToothSurface } from '@prisma/client';
 import { FDI_TOOTH_NUMBER_PATTERN } from '../../../odontogram/application/use-cases/add-tooth-record.use-case';
 import {
-  IsMoney,
+  IsNonNegativeMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
 import { DiscountReasonFieldsDto } from './discount-reason.dto';
@@ -60,9 +58,7 @@ export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
     maximum: MONEY_MAX,
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @IsMoney()
+  @IsNonNegativeMoney()
   price?: number;
 
   @ApiPropertyOptional({
@@ -71,9 +67,7 @@ export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
     maximum: MONEY_MAX,
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @IsMoney()
+  @IsNonNegativeMoney()
   discount?: number;
 
   @ApiPropertyOptional()
