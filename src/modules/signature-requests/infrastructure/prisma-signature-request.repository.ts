@@ -704,6 +704,11 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           // DX-019-bis (B): el logo del instante de la firma (no el del envío:
           // no está en la foto enviada, así que cambiarlo no anula el enlace).
           clinicLogoKey: source.clinic.logoKey,
+          // DX-379 (C): copia del último día válido del presupuesto (nunca
+          // vencido: `stillMatches` lo comprobó con el plan bloqueado).
+          quoteValidUntil: source.plan.quoteValidUntil
+            ? new Date(`${source.plan.quoteValidUntil}T00:00:00.000Z`)
+            : null,
         },
       });
     } catch (error) {

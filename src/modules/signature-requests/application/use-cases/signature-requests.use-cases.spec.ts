@@ -23,7 +23,7 @@ import {
   type QuoteComposition,
 } from '../../../treatment-plans/domain/plan-quote';
 import { composeQuoteContent } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
-import { RemoteBudgetCheck } from '../remote-budget';
+import { RemoteBudgetCheck, budgetStillMatches } from '../remote-budget';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { SignatureRecipientContext } from '../../domain/ports/signature-request-repository.port';
 import { deriveSignatureCodeKey } from '../../domain/signature-code';
@@ -999,6 +999,79 @@ describe('presupuesto a distancia (DX-415)', () => {
     await expect(
       ctx.inTenant(() => ctx.view.execute(token)),
     ).resolves.toBeDefined();
+  });
+
+  it('DX-379 (C): un presupuesto vencido no se envía a firmar a distancia: 409 QUOTE_EXPIRED en español; nada se crea', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    // Hoy es el 30/10 en Caracas: venció el 29/10.
+    budget.quote = {
+      ...budget.quote,
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-09-29',
+        quoteValidUntil: '2026-10-29',
+        presentedLocationId: 'loc-1',
+      },
+    };
+    let error: unknown;
+    try {
+      await sendBudget(ctx);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'QUOTE_EXPIRED',
+      message:
+        'El presupuesto venció el 29/10/2026: actualiza sus precios antes de enviarlo a firmar a distancia.',
+      quoteValidUntil: '2026-10-29',
+    });
+    expect(ctx.repo.rows).toHaveLength(0);
+    expect(ctx.links).toHaveLength(0);
+  });
+
+  it('DX-379 (C): si vence entre el envío y la firma, el enlace deja de valer («Enlace no válido»)', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-10-01',
+        quoteValidUntil: '2026-10-31',
+        presentedLocationId: 'loc-1',
+      },
+    };
+    const { token, session } = await verifiedBudget(ctx);
+    const [row] = ctx.repo.rows;
+    // El 31/10 23:30 en Caracas todavía vale.
+    expect(
+      budgetStillMatches(
+        row,
+        budget.quote,
+        {},
+        new Date('2026-11-01T03:30:00.000Z'),
+      ),
+    ).toBe(true);
+    // 1/11 02:00 en Caracas: venció (el enlace de 72 h seguiría vivo).
+    expect(
+      budgetStillMatches(
+        row,
+        budget.quote,
+        {},
+        new Date('2026-11-01T06:00:00.000Z'),
+      ),
+    ).toBe(false);
+    ctx.advance(40 * 3600_000);
+    await expect(ctx.inTenant(() => ctx.view.execute(token))).rejects.toThrow(
+      new NotFoundException(SIGNATURE_LINK_INVALID_MESSAGE),
+    );
+    await expect(
+      ctx.inTenant(() => ctx.document.execute(token, session)),
+    ).rejects.toThrow(SIGNATURE_LINK_INVALID_MESSAGE);
   });
 
   it('solo quien decide el plan (odontólogo o ADMIN) lo envía: recepción y asistente, 403 en español; nada se crea', async () => {

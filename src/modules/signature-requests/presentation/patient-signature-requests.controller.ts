@@ -151,7 +151,7 @@ export class PatientSignatureRequestsController {
   })
   @ApiConflictResponse({
     description:
-      'La sede no tiene formato regional, o BUDGET de un plan que no está «Presentado» (o ya aceptado)',
+      'La sede no tiene formato regional, o BUDGET de un plan que no está «Presentado» (o ya aceptado). DX-379 (C): BUDGET de un presupuesto vencido: code QUOTE_EXPIRED («El presupuesto venció el {fecha}: actualiza sus precios antes de enviarlo a firmar a distancia.», con quoteValidUntil)',
   })
   create(
     @Param('patientId', ParseUUIDPipe) patientId: string,

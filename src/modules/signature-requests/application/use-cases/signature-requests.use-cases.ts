@@ -27,8 +27,11 @@ import {
   PLAN_NOT_FOUND_MESSAGE,
   PLAN_QUOTE_COMPOSITION,
   firstIssueValidity,
+  quoteSourceExpiry,
   quoteValidityOf,
 } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
+import { quoteExpiredConflict } from '../../../treatment-plans/application/quote-expiry';
+import { quoteExpiredRemoteMessage } from '../../../treatment-plans/domain/expired-quote-acceptance';
 import {
   computeQuoteHash,
   type QuoteComposition,
@@ -488,6 +491,18 @@ export class CreateSignatureRequestUseCase {
     }
 
     const now = this.clock();
+    // DX-379 (C): un presupuesto vencido no se envía a firmar a distancia (el
+    // paciente no puede elegir cómo aceptarlo): primero se actualizan sus
+    // precios («Actualizar precios» renueva la validez).
+    const expiry = quoteSourceExpiry(quote, now);
+    if (expiry.expired && expiry.validUntil !== null) {
+      throw quoteExpiredConflict(
+        expiry.validUntil,
+        quoteExpiredRemoteMessage(
+          requireLocationFormat(budget.location).civilDate(expiry.validUntil),
+        ),
+      );
+    }
     // DX-524: el nombre de la sede del plan, como en el presupuesto.
     const names = await this.documentTypeNames.get(quote.location.id);
     // DX-379: la validez guardada del plan (fijada al presentarlo). Un plan

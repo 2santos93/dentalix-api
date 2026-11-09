@@ -226,7 +226,7 @@ function signBudget(
           budget: {
             planId,
             locationId: r.locationId,
-            stillMatches: (quote) => budgetStillMatches(r, quote, NAMES),
+            stillMatches: (quote) => budgetStillMatches(r, quote, NAMES, at),
             signerName: r.signerName,
             signature: PNG,
             content: r.budgetContent as object,
@@ -333,7 +333,9 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
     );
     expect(budget?.quote.plan.quoteValidUntil).toBe('2026-01-12');
     expect(budget?.quote.clinic.quoteValidityDays).toBe(7);
-    expect(budgetStillMatches(request, budget!.quote, NAMES)).toBe(true);
+    expect(budgetStillMatches(request, budget!.quote, NAMES, new Date())).toBe(
+      true,
+    );
     await expect(signBudget(a, id, planId)).resolves.toBe('SIGNED');
   });
 
