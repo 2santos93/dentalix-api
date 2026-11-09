@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   NotFoundException,
@@ -10,6 +11,11 @@ import {
   type PricingSource,
 } from '../../domain/ports/pricing-source.port';
 import { resolveCurrentReference } from '../current-reference';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 import {
   PATIENT_AGREEMENT_REPOSITORY,
   type PatientAgreementRepository,
@@ -80,6 +86,11 @@ export class GetPriceQuoteUseCase {
     @Optional()
     @Inject(REFERENCE_RATE_SOURCE)
     private readonly rates: ReferenceRateSource = NO_REFERENCE_RATES,
+    // DX-105-bis: la moneda pedida tiene que existir en `currencies` (el DTO
+    // solo mira la forma). Sin catálogo (specs unitarios), no se comprueba.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencies: CurrencyDigitsCatalog | null = null,
   ) {}
 
   async execute(
@@ -89,6 +100,12 @@ export class GetPriceQuoteUseCase {
   ): Promise<PriceQuote> {
     if (!(await this.patients.patientExists(patientId))) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    }
+    if (
+      this.currencies &&
+      !(await this.currencies.table([currency])).has(currency)
+    ) {
+      throw new BadRequestException(CURRENCY_CODE_MESSAGE);
     }
     // DX-379 (D.1): la misma resolución que el alta y la recotización: la
     // misma foto que tomaría el alta (DX-513-bis §5.3), sin escribir nada.

@@ -363,6 +363,9 @@ export class PrismaPriceListRepository implements PriceListRepository {
         if (locked.length === 0) {
           throw new NotFoundException(PRICE_LIST_NOT_FOUND_MESSAGE);
         }
+        // DX-105-bis: cambiar sus precios es cambiar la lista: `updatedAt` lo dice.
+        await tx.$executeRaw`
+          UPDATE "price_lists" SET "updatedAt" = now() WHERE id = ${id}::uuid`;
 
         let upserted = 0;
         if (toSet.length > 0) {
@@ -403,8 +406,14 @@ export class PrismaPriceListRepository implements PriceListRepository {
 
   priceFor(listId: string, catalogItemId: string): Promise<number | null> {
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-105-bis: una lista retirada no fija precios aunque conserve sus
+      // filas (un convenio o una sede que todavía la señalen caen al catálogo).
       const row = await tx.priceListItem.findFirst({
-        where: { priceListId: listId, catalogItemId },
+        where: {
+          priceListId: listId,
+          catalogItemId,
+          priceList: { deletedAt: null },
+        },
         select: { price: true },
       });
       return row ? row.price.toNumber() : null;
