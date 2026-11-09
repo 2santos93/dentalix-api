@@ -56,6 +56,14 @@ export const REPRICE_STALE_MESSAGE =
 export const REPRICE_NOTHING_CODE = 'REPRICE_NOTHING_TO_APPLY';
 export const REPRICE_NOTHING_MESSAGE =
   'Ningún ítem propuesto del plan tiene un precio vigente que aplicar.';
+/**
+ * DX-379 (C): al aceptar un presupuesto vencido actualizando los precios,
+ * TODOS los ítems propuestos tienen que tener precio vigente: si no, la
+ * validez no se renueva y el presupuesto seguiría vencido.
+ */
+export const REPRICE_INCOMPLETE_CODE = 'REPRICE_INCOMPLETE';
+export const REPRICE_INCOMPLETE_MESSAGE =
+  'Algún ítem propuesto no tiene precio vigente (o falta la tasa de cambio de hoy): no se pueden actualizar todos los precios. Corrígelo o acepta con los precios originales indicando el motivo.';
 export const REPRICE_SIGNED_MESSAGE =
   'El presupuesto ya está aceptado y firmado: sus precios no se actualizan.';
 export const REPRICE_PAYMENTS_MESSAGE =

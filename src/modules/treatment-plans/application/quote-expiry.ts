@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import { QUOTE_EXPIRED_CODE } from '../domain/expired-quote-acceptance';
 import type { TreatmentPlanStatus } from '@prisma/client';
 import { isQuoteExpired, quoteCanExpire } from '../domain/quote-validity';
 import {
@@ -71,4 +72,22 @@ export class QuoteExpiry {
     const [stamped] = await this.stamp([plan]);
     return stamped;
   }
+}
+
+/**
+ * DX-379 (C): 409 `QUOTE_EXPIRED` con el texto (fecha ya en el formato de la
+ * sede) y el último día válido (`YYYY-MM-DD`), para que la web abra la
+ * elección sin leer el texto.
+ */
+export function quoteExpiredConflict(
+  validUntil: string,
+  message: string,
+): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: QUOTE_EXPIRED_CODE,
+    message,
+    quoteValidUntil: validUntil,
+  });
 }

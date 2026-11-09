@@ -213,6 +213,8 @@ function signBudget(
   id: string,
   planId: string,
   extra: Partial<RemoteBudgetAcceptanceInsert> = {},
+  /** DX-379 (C): el instante con que se mira si el presupuesto venció. */
+  checkedAt?: Date,
 ) {
   const at = new Date();
   return asClinic(s.tenantId, () =>
@@ -226,7 +228,8 @@ function signBudget(
           budget: {
             planId,
             locationId: r.locationId,
-            stillMatches: (quote) => budgetStillMatches(r, quote, NAMES),
+            stillMatches: (quote) =>
+              budgetStillMatches(r, quote, NAMES, checkedAt ?? at),
             signerName: r.signerName,
             signature: PNG,
             content: r.budgetContent as object,
@@ -333,7 +336,9 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
     );
     expect(budget?.quote.plan.quoteValidUntil).toBe('2026-01-12');
     expect(budget?.quote.clinic.quoteValidityDays).toBe(7);
-    expect(budgetStillMatches(request, budget!.quote, NAMES)).toBe(true);
+    expect(budgetStillMatches(request, budget!.quote, NAMES, new Date())).toBe(
+      true,
+    );
     await expect(signBudget(a, id, planId)).resolves.toBe('SIGNED');
   });
 
@@ -446,6 +451,37 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
       (await owner.treatmentPlan.findUniqueOrThrow({ where: { id: planId } }))
         .status,
     ).toBe('PRESENTED');
+  });
+
+  it('DX-379 (C): si el presupuesto venció entre el envío y la firma, no se escribe nada', async () => {
+    const planId = await presentedPlan(a);
+    const { id, request } = await sendBudget(a, planId, { fixValidity: true });
+    const sent = request.budgetContent as { validUntil: string };
+    // El día siguiente al último válido, a mediodía en Caracas.
+    const after = new Date(`${sent.validUntil}T12:00:00-04:00`);
+    after.setUTCDate(after.getUTCDate() + 1);
+    await expect(signBudget(a, id, planId, {}, after)).rejects.toBeInstanceOf(
+      RemoteBudgetChangedError,
+    );
+    expect(
+      (await owner.signatureRequest.findUniqueOrThrow({ where: { id } }))
+        .signedAt,
+    ).toBeNull();
+    expect(
+      await owner.treatmentPlanAcceptance.count({ where: { planId } }),
+    ).toBe(0);
+    // El último día todavía vale (a las 23:00 en Caracas).
+    const lastDay = new Date(`${sent.validUntil}T23:00:00-04:00`);
+    await expect(signBudget(a, id, planId, {}, lastDay)).resolves.toBe(
+      'SIGNED',
+    );
+    // La aceptación a distancia guarda la copia de la validez.
+    const accepted = await owner.treatmentPlanAcceptance.findFirstOrThrow({
+      where: { planId },
+    });
+    expect(accepted.quoteValidUntil?.toISOString().slice(0, 10)).toBe(
+      sent.validUntil,
+    );
   });
 
   it('carrera: la clínica acepta con firma mientras el paciente firma a distancia; queda UNA aceptación, la de la clínica, y el enlace no se usa', async () => {

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   Param,
@@ -31,22 +32,40 @@ import {
   TREATMENT_PLAN_DECISION_ROLES,
   TREATMENT_PLAN_QUOTE_READ_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
-import type { JwtPayload } from '../../../shared/crypto/token.service';
+import {
+  isTenantPayload,
+  type JwtPayload,
+} from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { DrainAllocationRebalancesInterceptor } from '../../payments/presentation/drain-allocation-rebalances.interceptor';
 import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
   IssuePlanQuoteUseCase,
+  PreviewAcceptanceRepricingUseCase,
   type PlanQuoteDocument,
 } from '../application/use-cases/plan-quote.use-cases';
 import {
+  AcceptanceRepricePreviewDto,
   AcceptTreatmentPlanDto,
   PlanQuoteDocumentDto,
 } from './dto/plan-quote.dto';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { expiredAcceptanceAuditReason } from '../domain/expired-quote-acceptance';
+import { toPreviewDto } from './plan-repricing.controller';
 
-type AuthenticatedRequest = Request & { user: JwtPayload };
+type AuthenticatedRequest = Request & {
+  user: JwtPayload;
+  auditMetadata?: Record<string, unknown>;
+};
+
+/** Usuario y rol del token de clínica (el rol cuenta para los topes de descuento). */
+function actorOf(req: AuthenticatedRequest) {
+  if (!isTenantPayload(req.user)) {
+    throw new ForbiddenException('Insufficient role');
+  }
+  return { userId: req.user.sub, role: req.user.role };
+}
 
 const USER_AGENT_MAX = 512;
 
@@ -87,6 +106,7 @@ export class PlanQuoteController {
     private readonly getQuote: GetPlanQuoteUseCase,
     private readonly issueQuote: IssuePlanQuoteUseCase,
     private readonly acceptPlan: AcceptTreatmentPlanUseCase,
+    private readonly previewAcceptanceRepricing: PreviewAcceptanceRepricingUseCase,
   ) {}
 
   @Audit({
@@ -154,14 +174,14 @@ export class PlanQuoteController {
   })
   @ApiBadRequestResponse({
     description:
-      'Sin firma, firma no PNG o de más de 200 KB, sin nombre de quien firma, o plan sin ítems',
+      'Sin firma, firma no PNG o de más de 200 KB, sin nombre de quien firma, o plan sin ítems. DX-379 (C): `expired` con un presupuesto no vencido; ORIGINAL_PRICES sin motivo, OTHER sin nota, nota de más de 200; REPRICE sin `repricePreviewHash` o con motivo',
   })
   @ApiNotFoundResponse({
     description: 'Paciente o plan no encontrados en esta clínica',
   })
   @ApiConflictResponse({
     description:
-      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash)',
+      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash). DX-379 (C): la sede de la presentación del plan sin zona válida → `LOCATION_TIMEZONE_REQUIRED` (también con un presupuesto no vencido si tiene validez guardada); `code: QUOTE_EXPIRED` («El presupuesto venció el {fecha}. Actualiza los precios o acepta con los precios originales indicando el motivo.», con `quoteValidUntil`) si está vencido y no llega `expired`; con REPRICE, `REPRICE_PREVIEW_STALE` (los precios vigentes cambiaron desde la vista previa), `REPRICE_INCOMPLETE` (algún propuesto sin precio vigente o sin tasa), `REPRICE_NOTHING_TO_APPLY` o el plan no se recotiza (abonos, plan de cuotas, saldo a favor); nada se escribe',
   })
   @ApiForbiddenResponse({
     description:
@@ -174,6 +194,7 @@ export class PlanQuoteController {
     @Req() req: AuthenticatedRequest,
   ): Promise<PlanQuoteDocumentDto> {
     const userAgent = req.get('user-agent');
+    const actor = actorOf(req);
     const doc = await this.acceptPlan.execute(
       patientId,
       planId,
@@ -181,13 +202,74 @@ export class PlanQuoteController {
         signerName: dto.signerName,
         signature: dto.signature,
         contentHash: dto.contentHash,
+        expired: dto.expired,
       },
       {
-        acceptedById: req.user.sub,
+        acceptedById: actor.userId,
+        role: actor.role,
         ipAddress: req.ip ?? null,
         userAgent: userAgent ? userAgent.slice(0, USER_AGENT_MAX) : null,
       },
     );
+    // DX-379 (C): la firma de un presupuesto vencido dice cómo (sin importes:
+    // la recotización está en su fila, `params.repricingId`).
+    const expiredMode = doc.acceptance?.expiredMode;
+    if (expiredMode) {
+      req.auditMetadata = {
+        reason: expiredAcceptanceAuditReason(expiredMode),
+        ...(doc.acceptance?.repricingId
+          ? { params: { repricingId: doc.acceptance.repricingId } }
+          : {}),
+      };
+    }
     return toDto(doc);
+  }
+
+  // DX-379 (C): la vista previa de «actualizar los precios» al aceptar un
+  // presupuesto vencido. Lee el plan (VIEW) y no escribe nada.
+  @Audit({
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: { param: 'patientId' },
+    reason: 'ACCEPT_REPRICE_PREVIEW',
+  })
+  @Post('acceptance/reprice-preview')
+  @HttpCode(200)
+  @Roles(...TREATMENT_PLAN_DECISION_ROLES)
+  @ApiOperation({
+    summary:
+      'Vista previa del presupuesto con los precios actualizados para aceptarlo vencido (DX-379)',
+    description:
+      'Recotiza TODOS los ítems propuestos con el precio vigente (la misma función que …/reprice/preview) y compone el presupuesto como se firmaría (precios y validez nuevos), sin escribir nada. Para aceptar con `expired.mode = REPRICE` se envían `repricing.previewHash` (como `expired.repricePreviewHash`) y `quote.contentHash` (como `contentHash`).',
+  })
+  @ApiOkResponse({ type: AcceptanceRepricePreviewDto })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente o plan no encontrados en esta clínica (o el plan es de otro paciente)',
+  })
+  @ApiConflictResponse({
+    description:
+      'Ya firmado, el plan no admite aceptarse o no se recotiza (aceptado, cerrado, con abonos, plan de cuotas o saldo a favor); `REPRICE_INCOMPLETE`: algún propuesto sin precio vigente o sin tasa de hoy (la validez no se renovaría); `REPRICE_NOTHING_TO_APPLY`; `LOCATION_TIMEZONE_REQUIRED`',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'El plan no tiene ítems, o el presupuesto no está vencido («El presupuesto no está vencido: acéptalo sin elegir cómo.», como la firma)',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo odontólogo y ADMIN aceptan (DX-040); SEC-041: el redondeo sube el % efectivo por encima del tope de quien firma',
+  })
+  async acceptanceRepricePreview(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<AcceptanceRepricePreviewDto> {
+    const { repricing, quote } = await this.previewAcceptanceRepricing.execute(
+      patientId,
+      planId,
+      actorOf(req),
+    );
+    return { repricing: toPreviewDto(repricing), quote: toDto(quote) };
   }
 }

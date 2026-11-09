@@ -8,6 +8,9 @@ import type {
 } from '@prisma/client';
 import type { QuoteLocation, QuoteSourceItem } from '../plan-quote';
 import type { QuoteValidity } from '../quote-validity';
+import type { ExpiredAcceptanceRecord } from '../expired-quote-acceptance';
+import type { Repricing } from '../../application/repricing';
+import type { RepricingSubject } from './plan-repricing-repository.port';
 
 /** La aceptación firmada tal como está guardada (DX-012). */
 export interface StoredPlanAcceptance {
@@ -29,6 +32,11 @@ export interface StoredPlanAcceptance {
    * contenido y de sus hashes); `null` = se firmó sin logo y se imprime sin él.
    */
   clinicLogoUrl: string | null;
+  /**
+   * DX-379 (C): cómo se aceptó (columnas fuera del contenido y de sus
+   * hashes). Sin `mode`, el presupuesto no estaba vencido.
+   */
+  expiry: ExpiredAcceptanceRecord;
 }
 
 /** Evidencias de la aceptación a distancia, congeladas al firmar (DX-415). */
@@ -70,6 +78,21 @@ export interface PlanQuoteSource {
      */
     quoteIssuedOn: string | null;
     quoteValidUntil: string | null;
+    /** Sede de la presentación (DX-040); null sin presentar. */
+    presentedLocationId: string | null;
+    /**
+     * DX-379 (C): la sede con la que se decide si el presupuesto venció y se
+     * escribe su fecha (D-13): la de la presentación o, sin presentar, la de
+     * este presupuesto. `timeZone` null si la sede de la presentación no
+     * tiene una zona válida (quien decide da el 409 de zona); `locale` y
+     * `hourCycle` crudos (pueden faltar).
+     */
+    quoteRegional: {
+      locationId: string;
+      timeZone: string | null;
+      locale: string | null;
+      hourCycle: string | null;
+    };
   };
   /** Ítems vivos, en orden de alta. */
   items: QuoteSourceItem[];
@@ -114,6 +137,32 @@ export interface NewPlanAcceptance {
   acceptedById: string;
   ipAddress: string | null;
   userAgent: string | null;
+  /**
+   * DX-379 (C): cómo se aceptó un presupuesto vencido. Sin ella, se guarda
+   * solo la copia de la validez del plan leído (sin modo).
+   */
+  expiry?: ExpiredAcceptanceRecord;
+}
+
+/**
+ * DX-379 (C): recotizar en la MISMA transacción de la firma, antes de firmar
+ * (aceptar un presupuesto vencido «actualizando los precios»).
+ */
+export interface AcceptReprice {
+  /** Autor de la recotización (quien firma en la clínica). */
+  actorUserId: string;
+  /**
+   * Con el plan bloqueado: valida el presupuesto leído y calcula la
+   * recotización de TODOS los ítems propuestos. Si lanza, nada se escribe.
+   */
+  decide(source: PlanQuoteSource, subject: RepricingSubject): Repricing;
+}
+
+/** La recotización hecha en la firma, para quien decide la aceptación. */
+export interface AcceptRepriced {
+  repricingId: string;
+  /** El presupuesto leído ANTES de recotizar (con la validez vencida). */
+  before: PlanQuoteSource;
 }
 
 export type AcceptPlanOutcome =
@@ -140,12 +189,33 @@ export interface PlanQuoteRepository {
    * (si lanza, no se escribe nada), la inserta, pasa el plan a ACCEPTED y sus
    * ítems PROPOSED a ACCEPTED. Dos firmas simultáneas: la segunda choca con el
    * índice único y sale como `ALREADY_ACCEPTED`.
+   *
+   * DX-379 (C): con `reprice`, antes de `decide` y en la misma transacción,
+   * recotiza (ítems con la marca, validez renovada y fila de la recotización
+   * con source ACCEPT) y relee el presupuesto: `decide` recibe el recotizado
+   * y la recotización. Si algo lanza después, la recotización se deshace.
    */
   accept(
     patientId: string,
     planId: string,
-    decide: (source: PlanQuoteSource) => NewPlanAcceptance,
+    decide: (
+      source: PlanQuoteSource,
+      repriced: AcceptRepriced | null,
+    ) => NewPlanAcceptance,
+    reprice?: AcceptReprice,
   ): Promise<AcceptPlanOutcome>;
+
+  /**
+   * DX-379 (C): el presupuesto como quedaría tras recotizar en la firma: hace
+   * lo mismo que `accept` con `reprice` hasta releer el presupuesto y lo
+   * DESHACE todo (no queda nada escrito). `null` si el plan no existe para
+   * este paciente (404).
+   */
+  previewRepriced(
+    patientId: string,
+    planId: string,
+    reprice: AcceptReprice,
+  ): Promise<{ source: PlanQuoteSource; repricing: Repricing } | null>;
 
   /**
    * DX-379: emite el presupuesto (primera impresión). Lee el presupuesto sin

@@ -3,15 +3,81 @@ import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ConsentSignerType,
+  ExpiredQuoteAcceptanceMode,
+  ExpiredQuoteAcceptanceReason,
   SignatureRequestChannel,
   ToothSurface,
   TreatmentPlanStatus,
 } from '@prisma/client';
-import { IsString, Matches, MaxLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  ValidateNested,
+} from 'class-validator';
+import { RepricingPreviewDto } from './plan-repricing.dto';
 
 // Margen sobre el base64 de 200 KB (273068) para el prefijo `data:`; el tope
 // exacto y el formato PNG los valida el caso de uso (parseSignaturePng).
 const SIGNATURE_MAX_CHARS = 273200;
+
+/**
+ * DX-379 (C): cómo aceptar un presupuesto VENCIDO. Solo se envía si el plan
+ * tiene `quoteExpired: true` (si no, 400).
+ */
+export class ExpiredAcceptanceDto {
+  @ApiProperty({
+    enum: ExpiredQuoteAcceptanceMode,
+    enumName: 'ExpiredQuoteAcceptanceMode',
+    description:
+      'REPRICE: actualizar los precios de TODOS los ítems propuestos antes de firmar (exige `repricePreviewHash`; `contentHash` es el del presupuesto recotizado de POST …/acceptance/reprice-preview). ORIGINAL_PRICES: aceptar con los precios del presupuesto vencido (exige `reason`).',
+  })
+  @IsEnum(ExpiredQuoteAcceptanceMode, {
+    message:
+      'Elige cómo aceptar el presupuesto vencido: actualizar los precios o mantener los originales.',
+  })
+  mode!: ExpiredQuoteAcceptanceMode;
+
+  @ApiPropertyOptional({
+    enum: ExpiredQuoteAcceptanceReason,
+    enumName: 'ExpiredQuoteAcceptanceReason',
+    description:
+      'Motivo de ORIGINAL_PRICES (obligatorio). OTHER exige `note`. Con REPRICE no se envía.',
+  })
+  @IsOptional()
+  @IsEnum(ExpiredQuoteAcceptanceReason, {
+    message:
+      'Elige el motivo: la clínica tardó en cerrarlo, se mantuvo el precio pactado, paciente habitual, situación económica u otro.',
+  })
+  reason?: ExpiredQuoteAcceptanceReason;
+
+  @ApiPropertyOptional({
+    maxLength: 200,
+    example: 'Se respetó el precio acordado en la primera consulta',
+    description: 'Obligatoria con OTHER. Con REPRICE no se envía.',
+  })
+  @IsOptional()
+  @IsString({ message: 'La nota del motivo debe ser un texto.' })
+  @MaxLength(200, {
+    message: 'La nota del motivo admite hasta 200 caracteres.',
+  })
+  note?: string;
+
+  @ApiPropertyOptional({
+    pattern: '^[0-9a-f]{64}$',
+    description:
+      'REPRICE: el `repricing.previewHash` de POST …/acceptance/reprice-preview. Si los precios vigentes cambiaron desde entonces: 409 `REPRICE_PREVIEW_STALE`.',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[0-9a-fA-F]{64}$/, {
+    message: 'repricePreviewHash debe ser un SHA-256 en hexadecimal',
+  })
+  repricePreviewHash?: string;
+}
 
 // Sin `acceptedAt`, autor, sede, IP ni UA: los pone el servidor.
 export class AcceptTreatmentPlanDto {
@@ -41,6 +107,16 @@ export class AcceptTreatmentPlanDto {
     message: 'contentHash debe ser un SHA-256 en hexadecimal',
   })
   contentHash!: string;
+
+  @ApiPropertyOptional({
+    type: ExpiredAcceptanceDto,
+    description:
+      'DX-379 (C): obligatorio si el presupuesto está vencido (sin él: 409 `QUOTE_EXPIRED`); con un presupuesto no vencido: 400.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ExpiredAcceptanceDto)
+  expired?: ExpiredAcceptanceDto;
 }
 
 export class PlanQuoteLocationDto {
@@ -195,6 +271,45 @@ export class PlanQuoteAcceptanceDto {
       'DX-415: «Aceptado a distancia» por el paciente con enlace y código; null si se firmó en la clínica.',
   })
   remote!: PlanQuoteRemoteAcceptanceDto | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2026-11-03',
+    description:
+      'DX-379 (C): último día válido del presupuesto al firmar (antes de actualizar precios). Null en aceptaciones anteriores o sin validez guardada. Fuera del contenido firmado.',
+  })
+  quoteValidUntil!: string | null;
+
+  @ApiProperty({
+    enum: ExpiredQuoteAcceptanceMode,
+    enumName: 'ExpiredQuoteAcceptanceMode',
+    nullable: true,
+    description:
+      'DX-379 (C): null si el presupuesto no estaba vencido. ORIGINAL_PRICES: «Aceptado con los precios del presupuesto vencido el {quoteValidUntil}. Motivo: {expiredReason}[: {expiredNote}]». REPRICE: «Precios actualizados el {acceptedAt} antes de aceptar».',
+  })
+  expiredMode!: ExpiredQuoteAcceptanceMode | null;
+
+  @ApiProperty({
+    enum: ExpiredQuoteAcceptanceReason,
+    enumName: 'ExpiredQuoteAcceptanceReason',
+    nullable: true,
+    description: 'Motivo de ORIGINAL_PRICES; null en el resto.',
+  })
+  expiredReason!: ExpiredQuoteAcceptanceReason | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  expiredNote!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'REPRICE: la recotización hecha en la firma (treatment_plan_repricings, source ACCEPT).',
+  })
+  repricingId!: string | null;
 }
 
 /** Evidencias de la aceptación a distancia (DX-415), congeladas al firmar. */
@@ -324,4 +439,24 @@ export class PlanQuoteDocumentDto {
 
   @ApiProperty({ type: PlanQuoteAcceptanceDto, nullable: true })
   acceptance!: PlanQuoteAcceptanceDto | null;
+}
+
+/**
+ * DX-379 (C): vista previa de «actualizar los precios» al aceptar un
+ * presupuesto vencido. No escribe nada.
+ */
+export class AcceptanceRepricePreviewDto {
+  @ApiProperty({
+    type: RepricingPreviewDto,
+    description:
+      'La recotización de todos los ítems propuestos. Su `previewHash` va en `expired.repricePreviewHash` de la aceptación.',
+  })
+  repricing!: RepricingPreviewDto;
+
+  @ApiProperty({
+    type: PlanQuoteDocumentDto,
+    description:
+      'El presupuesto como se firmaría, con los precios y la validez nuevos. Su `contentHash` va en `contentHash` de la aceptación.',
+  })
+  quote!: PlanQuoteDocumentDto;
 }

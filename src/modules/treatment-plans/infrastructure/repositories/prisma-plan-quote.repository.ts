@@ -9,6 +9,7 @@ import {
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
+  TreatmentPlanRepricingSource,
   type ConsentSignerType,
   type SignatureRequestChannel,
 } from '@prisma/client';
@@ -19,18 +20,28 @@ import {
   documentRegional,
 } from '../../../../shared/locations/document-regional';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { isValidTimeZone } from '../../../../shared/time/civil-day';
 import type {
   AcceptPlanOutcome,
+  AcceptReprice,
+  AcceptRepriced,
   PlanAcceptanceRemoteEvidence,
   NewPlanAcceptance,
   PlanQuoteRepository,
   PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
+import type { Repricing } from '../../application/repricing';
+import type { RepricingRecord } from '../../domain/ports/plan-repricing-repository.port';
 import { acceptPlanInTx, lockPlanGroup } from './plan-option-group';
+import {
+  loadRepricingSubjectInTx,
+  writeRepricingInTx,
+} from './prisma-plan-repricing.repository';
 import {
   PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
   type QuoteValidity,
 } from '../../domain/quote-validity';
+import { NO_EXPIRED_ACCEPTANCE } from '../../domain/expired-quote-acceptance';
 
 const PROCEDURE_FALLBACK = 'Procedimiento';
 
@@ -41,6 +52,25 @@ export function civilDayOf(value: Date | null): string | null {
 const UNKNOWN_PROFESSIONAL = 'Profesional';
 
 class AlreadyAccepted extends Error {}
+
+/**
+ * El plan desapareció DESPUÉS de escribir algo (recotización o aceptación):
+ * se lanza para que la transacción se deshaga y se responde 404.
+ */
+class VanishedAfterWrite extends Error {}
+
+/** Deshace la transacción de la vista previa llevándose su resultado. */
+class DryRun extends Error {
+  constructor(
+    readonly result: { source: PlanQuoteSource; repricing: Repricing } | null,
+  ) {
+    super('dry run');
+  }
+}
+
+/** Una fecha `YYYY-MM-DD` como columna DATE. */
+const dateColumn = (day: string | null): Date | null =>
+  day === null ? null : new Date(`${day}T00:00:00.000Z`);
 
 /**
  * Presupuesto y aceptación firmada (DX-012). Todo bajo `runWithTenant` (RLS):
@@ -87,7 +117,11 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
   async accept(
     patientId: string,
     planId: string,
-    decide: (source: PlanQuoteSource) => NewPlanAcceptance,
+    decide: (
+      source: PlanQuoteSource,
+      repriced: AcceptRepriced | null,
+    ) => NewPlanAcceptance,
+    reprice?: AcceptReprice,
   ): Promise<AcceptPlanOutcome> {
     const tenantId = this.requireTenantId();
     try {
@@ -115,7 +149,29 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         );
         if (!source) return { kind: 'NOT_FOUND' } as const;
 
-        const row = decide(source);
+        // DX-379 (C): «actualizar los precios» de un presupuesto vencido, en
+        // esta misma transacción y antes de firmar el presupuesto recotizado.
+        let signing = source;
+        let repriced: AcceptRepriced | null = null;
+        if (reprice) {
+          const done = await repriceInTx(tx, {
+            tenantId,
+            patientId,
+            planId,
+            locationId,
+            source,
+            reprice,
+          });
+          if (!done) throw new VanishedAfterWrite();
+          signing = done.source;
+          repriced = { repricingId: done.record.id, before: source };
+        }
+
+        const row = decide(signing, repriced);
+        const expiry = row.expiry ?? {
+          ...NO_EXPIRED_ACCEPTANCE,
+          quoteValidUntil: signing.plan.quoteValidUntil,
+        };
         try {
           await tx.treatmentPlanAcceptance.create({
             data: {
@@ -134,7 +190,13 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
               userAgent: row.userAgent,
               // DX-019-bis (B): el logo de este instante, leído en esta
               // transacción con el plan bloqueado.
-              clinicLogoKey: source.clinic.logoKey,
+              clinicLogoKey: signing.clinic.logoKey,
+              // DX-379 (C): cómo se aceptó, fuera del contenido firmado.
+              quoteValidUntil: dateColumn(expiry.quoteValidUntil),
+              expiredMode: expiry.mode,
+              expiredReason: expiry.reason,
+              expiredNote: expiry.note,
+              repricingId: expiry.repricingId,
             },
           });
         } catch (error) {
@@ -163,13 +225,59 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           planId,
           locationId,
         );
-        if (!accepted) return { kind: 'NOT_FOUND' } as const;
+        if (!accepted) throw new VanishedAfterWrite();
         return { kind: 'ACCEPTED', source: accepted } as const;
       });
     } catch (error) {
       if (error instanceof AlreadyAccepted) return { kind: 'ALREADY_ACCEPTED' };
+      if (error instanceof VanishedAfterWrite) return { kind: 'NOT_FOUND' };
       throw error;
     }
+  }
+
+  async previewRepriced(
+    patientId: string,
+    planId: string,
+    reprice: AcceptReprice,
+  ): Promise<{ source: PlanQuoteSource; repricing: Repricing } | null> {
+    const tenantId = this.requireTenantId();
+    try {
+      await this.prisma.runWithTenant(async (tx) => {
+        // Lo mismo que `accept` con `reprice`, hasta releer el presupuesto
+        // recotizado; después se deshace todo (DryRun). Así la vista previa
+        // es exactamente lo que firmaría la aceptación.
+        const owned = await tx.treatmentPlan.findFirst({
+          where: { id: planId, patientId, deletedAt: null },
+          select: { id: true },
+        });
+        const locked = owned ? await lockPlanGroup(tx, planId) : null;
+        if (!locked) throw new DryRun(null);
+        const locationId = await this.tenantContext.writeLocationId(tx);
+        const source = await readPlanQuoteSource(
+          tx,
+          tenantId,
+          patientId,
+          planId,
+          locationId,
+        );
+        if (!source) throw new DryRun(null);
+        const done = await repriceInTx(tx, {
+          tenantId,
+          patientId,
+          planId,
+          locationId,
+          source,
+          reprice,
+        });
+        throw new DryRun(
+          done ? { source: done.source, repricing: done.repricing } : null,
+        );
+      });
+    } catch (error) {
+      if (error instanceof DryRun) return error.result;
+      throw error;
+    }
+    throw new Error('previewRepriced: la transacción no se deshizo');
   }
 
   async issue(
@@ -218,6 +326,57 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
 }
 
 /**
+ * DX-379 (C): recotiza en la transacción de la firma (el plan ya está
+ * bloqueado): relee el plan como lo ve la recotización, deja que `decide`
+ * valide y calcule, escribe (source ACCEPT, sin clave de idempotencia: la
+ * firma ya es única por plan) y relee el presupuesto recotizado. `null` si el
+ * plan ya no existe para este paciente.
+ */
+async function repriceInTx(
+  tx: Prisma.TransactionClient,
+  args: {
+    tenantId: string;
+    patientId: string;
+    planId: string;
+    locationId: string;
+    source: PlanQuoteSource;
+    reprice: AcceptReprice;
+  },
+): Promise<{
+  source: PlanQuoteSource;
+  repricing: Repricing;
+  record: RepricingRecord;
+} | null> {
+  const { tenantId, patientId, planId, locationId } = args;
+  const subject = await loadRepricingSubjectInTx(
+    tx,
+    tenantId,
+    patientId,
+    planId,
+  );
+  if (!subject) return null;
+  const repricing = args.reprice.decide(args.source, subject);
+  const record = await writeRepricingInTx(tx, {
+    tenantId,
+    planId,
+    patientId,
+    locationId,
+    actorUserId: args.reprice.actorUserId,
+    source: TreatmentPlanRepricingSource.ACCEPT,
+    idempotency: null,
+    repricing,
+  });
+  const source = await readPlanQuoteSource(
+    tx,
+    tenantId,
+    patientId,
+    planId,
+    locationId,
+  );
+  return source ? { source, repricing, record } : null;
+}
+
+/**
  * El presupuesto del plan `planId` del paciente `patientId` emitido en la sede
  * `locationId`, dentro de la transacción del llamador (bajo la RLS de la
  * clínica). DX-415 lo usa con la sede de la solicitud a distancia, que no
@@ -239,6 +398,7 @@ export async function readPlanQuoteSource(
       currency: true,
       quoteIssuedOn: true,
       quoteValidUntil: true,
+      presentedLocationId: true,
       visitIntervals: true,
       createdById: true,
       patient: {
@@ -289,6 +449,11 @@ export async function readPlanQuoteSource(
           remoteOpenedAt: true,
           remoteVerifiedAt: true,
           clinicLogoKey: true,
+          quoteValidUntil: true,
+          expiredMode: true,
+          expiredReason: true,
+          expiredNote: true,
+          repricingId: true,
           // DX-514: el impreso dice si firmó el paciente o su representante.
           signatureRequest: { select: { signerType: true } },
         },
@@ -329,6 +494,20 @@ export async function readPlanQuoteSource(
     resolveLocationTimeZones(tx, tenantId, [locationId]),
   ]);
   const labels = new Map(catalog.map((c) => [c.id, c.labelEs]));
+  // DX-379 (C): el vencimiento se decide con el día de la sede de la
+  // presentación (como `quoteExpired`, D-13) y su fecha se escribe con el
+  // formato de esa misma sede; sin presentar, con los de esta. Tolerante: una
+  // sede de presentación sin zona válida da zona null.
+  const presented = plan.presentedLocationId;
+  const quoteLocation =
+    presented === null || presented === locationId
+      ? {
+          id: locationId,
+          timeZone: zoneOf(locationId),
+          locale: location.locale,
+          hourCycle: location.hourCycle,
+        }
+      : await presentationRegional(tx, tenantId, presented);
   // DX-105: el pagador de cada convenio, una consulta por los ids distintos
   // (no una por ítem). El nombre del convenio es el de la foto del ítem; el
   // pagador se lee vivo porque la foto no lo guarda.
@@ -374,6 +553,13 @@ export async function readPlanQuoteSource(
       currency: plan.currency,
       quoteIssuedOn: civilDayOf(plan.quoteIssuedOn),
       quoteValidUntil: civilDayOf(plan.quoteValidUntil),
+      presentedLocationId: plan.presentedLocationId,
+      quoteRegional: {
+        locationId: quoteLocation.id,
+        timeZone: quoteLocation.timeZone,
+        locale: quoteLocation.locale,
+        hourCycle: quoteLocation.hourCycle,
+      },
     },
     items: plan.items.map((item) => ({
       id: item.id,
@@ -429,8 +615,42 @@ export async function readPlanQuoteSource(
           remote: remoteEvidenceOf(acceptance),
           // DX-019-bis (B): el congelado al firmar, nunca el de hoy.
           clinicLogoUrl: clinicLogoPublicUrl(acceptance.clinicLogoKey),
+          expiry: {
+            quoteValidUntil: civilDayOf(acceptance.quoteValidUntil),
+            mode: acceptance.expiredMode,
+            reason: acceptance.expiredReason,
+            note: acceptance.expiredNote,
+            repricingId: acceptance.repricingId,
+          },
         }
       : null,
+  };
+}
+
+/**
+ * DX-379 (C): zona (válida o null), formato y reloj de la sede de la
+ * presentación de un plan, bajo la RLS de la clínica.
+ */
+async function presentationRegional(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  locationId: string,
+): Promise<{
+  id: string;
+  timeZone: string | null;
+  locale: string | null;
+  hourCycle: string | null;
+}> {
+  const row = await tx.location.findFirst({
+    where: { id: locationId, tenantId },
+    select: { timeZone: true, locale: true, hourCycle: true },
+  });
+  const zone = row?.timeZone ?? null;
+  return {
+    id: locationId,
+    timeZone: zone && isValidTimeZone(zone) ? zone : null,
+    locale: row?.locale ?? null,
+    hourCycle: row?.hourCycle ?? null,
   };
 }
 

@@ -77,11 +77,11 @@ function priceDto(state: ItemPriceState): RepricingPriceDto {
   };
 }
 
-type RepricingView = Omit<Repricing, 'lines'> & {
+export type RepricingView = Omit<Repricing, 'lines'> & {
   lines: Omit<Repricing['lines'][number], 'discountDecision'>[];
 };
 
-function toPreviewDto(r: RepricingView): RepricingPreviewDto {
+export function toPreviewDto(r: RepricingView): RepricingPreviewDto {
   return {
     planId: r.planId,
     currency: r.currency,

@@ -3,6 +3,7 @@ import { TreatmentPlanStatus } from '@prisma/client';
 import { DocumentTypeNamesReader } from '../../patients/domain/ports/document-type-names-repository.port';
 import type { ClinicDocumentTypeNames } from '../../patients/domain/document-type';
 import { composeQuoteContent } from '../../treatment-plans/application/use-cases/plan-quote.use-cases';
+import { isQuoteExpired } from '../../treatment-plans/domain/quote-validity';
 import {
   computeQuoteHash,
   parseQuoteContent,
@@ -46,11 +47,16 @@ export function sentBudget(request: BudgetRequest): QuoteContent | null {
  * presupuesto muestra (ítems, precios, descuentos, convenio, paciente, sede o
  * profesional). Además el plan tiene que seguir «Presentado» y sin aceptar:
  * aceptado, rechazado o cancelado en la clínica, el enlace ya no sirve.
+ *
+ * DX-379 (C): y el presupuesto enviado no puede haber vencido entre el envío
+ * y la firma (`now` posterior a su último día válido en el día de la sede
+ * del plan): el paciente ve «Enlace no válido» como en el resto de casos.
  */
 export function budgetStillMatches(
   request: BudgetRequest,
   quote: PlanQuoteSource,
   names: ClinicDocumentTypeNames,
+  now: Date,
 ): boolean {
   const sent = sentBudget(request);
   if (
@@ -59,6 +65,17 @@ export function budgetStillMatches(
     quote.plan.status !== TreatmentPlanStatus.PRESENTED ||
     quote.acceptance !== null ||
     computeQuoteHash(sent) !== request.budgetContentHash
+  ) {
+    return false;
+  }
+  // La zona de la sede de la presentación o, si no tiene una válida, la de
+  // la sede desde la que se envió (la ruta pública nunca da 409 de zona).
+  if (
+    isQuoteExpired(
+      sent.validUntil,
+      now,
+      quote.plan.quoteRegional.timeZone ?? quote.location.timeZone,
+    )
   ) {
     return false;
   }
@@ -87,7 +104,10 @@ export class RemoteBudgetCheck {
     private readonly documentTypeNames: DocumentTypeNamesReader,
   ) {}
 
-  async isStillValid(request: SignatureRequestRecord): Promise<boolean> {
+  async isStillValid(
+    request: SignatureRequestRecord,
+    now: Date,
+  ): Promise<boolean> {
     if (request.type !== 'BUDGET') return true;
     if (!request.treatmentPlanId) return false;
     const [budget, names] = await Promise.all([
@@ -99,7 +119,9 @@ export class RemoteBudgetCheck {
       // DX-524: la sede desde la que se envió.
       this.documentTypeNames.get(request.locationId),
     ]);
-    return budget !== null && budgetStillMatches(request, budget.quote, names);
+    return (
+      budget !== null && budgetStillMatches(request, budget.quote, names, now)
+    );
   }
 
   /**
@@ -132,8 +154,9 @@ export class RemoteBudgetCheck {
    */
   async matcher(
     request: BudgetRequest,
+    now: Date,
   ): Promise<(quote: PlanQuoteSource) => boolean> {
     const names = await this.documentTypeNames.get(request.locationId);
-    return (quote) => budgetStillMatches(request, quote, names);
+    return (quote) => budgetStillMatches(request, quote, names, now);
   }
 }

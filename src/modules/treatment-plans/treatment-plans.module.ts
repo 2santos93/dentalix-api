@@ -1,4 +1,5 @@
 import {
+  AcceptanceRepricer,
   ApplyPlanRepricingUseCase,
   PreviewPlanRepricingUseCase,
   RepricingContextReader,
@@ -15,6 +16,8 @@ import { QUOTE_SETTINGS_REPOSITORY } from './domain/ports/quote-settings-reposit
 import { PrismaQuoteSettingsRepository } from './infrastructure/repositories/prisma-quote-settings.repository';
 import { QuoteSettingsController } from './presentation/quote-settings.controller';
 import { PLAN_QUOTE_ZONES } from './domain/ports/plan-quote-zones.port';
+import { QUOTE_EXPIRY_REGIONAL } from './domain/ports/quote-expiry-regional.port';
+import { PrismaQuoteExpiryRegional } from './infrastructure/adapters/prisma-quote-expiry-regional';
 import { PrismaPlanQuoteZones } from './infrastructure/adapters/prisma-plan-quote-zones';
 import { PlanVisitsService } from './application/plan-visits.service';
 import { PlanVisitsController } from './presentation/plan-visits.controller';
@@ -32,6 +35,7 @@ import { PrismaPlanOptionsRepository } from './infrastructure/repositories/prism
 import { PlanQuoteController } from './presentation/plan-quote.controller';
 import {
   AcceptTreatmentPlanUseCase,
+  PreviewAcceptanceRepricingUseCase,
   GetPlanQuoteUseCase,
   IssuePlanQuoteUseCase,
   PLAN_QUOTE_CLOCK,
@@ -143,10 +147,12 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     // DX-379: `quoteExpired` de los planes, con la zona de su sede.
     QuoteExpiry,
     { provide: PLAN_QUOTE_ZONES, useClass: PrismaPlanQuoteZones },
+    { provide: QUOTE_EXPIRY_REGIONAL, useClass: PrismaQuoteExpiryRegional },
     GetQuoteSettingsUseCase,
     UpdateQuoteSettingsUseCase,
     // DX-379 (B): recotizar con el precio vigente.
     RepricingContextReader,
+    AcceptanceRepricer,
     PreviewPlanRepricingUseCase,
     ApplyPlanRepricingUseCase,
     {
@@ -162,6 +168,7 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     GetPlanQuoteUseCase,
     IssuePlanQuoteUseCase,
     AcceptTreatmentPlanUseCase,
+    PreviewAcceptanceRepricingUseCase,
     { provide: PLAN_QUOTE_CLOCK, useValue: () => new Date() },
     // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).
     {

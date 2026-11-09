@@ -3,7 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { TreatmentPlanStatus } from '@prisma/client';
+import { ClinicRole, TreatmentPlanStatus } from '@prisma/client';
 import {
   AcceptTreatmentPlanUseCase,
   composeQuoteContent,
@@ -16,6 +16,7 @@ import {
   InMemoryPlanQuoteRepository,
   quoteSource,
 } from './__fixtures__/in-memory-plan-quote.repository';
+import { NO_EXPIRED_ACCEPTANCE } from '../../domain/expired-quote-acceptance';
 import {
   buildQuoteContent,
   computeAcceptanceHash,
@@ -33,6 +34,7 @@ const LOGO_A = 'https://api.example/api/v1/files/logos/a-0123456789abcdef.png';
 const LOGO_B = 'https://api.example/api/v1/files/logos/a-fedcba9876543210.png';
 const META = {
   acceptedById: 'user-1',
+  role: ClinicRole.DENTIST,
   ipAddress: '10.0.0.1',
   userAgent: 'jest',
 };
@@ -304,6 +306,12 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       remote: null,
       ipAddress: '10.0.0.1',
       userAgent: 'jest',
+      // DX-379 (C): sin validez guardada ni vencimiento.
+      quoteValidUntil: null,
+      expiredMode: null,
+      expiredReason: null,
+      expiredNote: null,
+      repricingId: null,
     });
   });
 
@@ -393,6 +401,13 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           currency: 'USD',
           quoteIssuedOn: null,
           quoteValidUntil: null,
+          presentedLocationId: null,
+          quoteRegional: {
+            locationId: 'loc-1',
+            timeZone: 'America/Caracas',
+            locale: 'es-VE',
+            hourCycle: 'h12',
+          },
         },
         acceptance: {
           content: v1,
@@ -405,6 +420,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           userAgent: null,
           remote: null,
           clinicLogoUrl: null,
+          expiry: NO_EXPIRED_ACCEPTANCE,
           acceptanceHash: computeAcceptanceHash({
             contentHash,
             signerName: 'Ana Pérez',
@@ -593,6 +609,7 @@ describe('DX-502: plan en EUR con el catálogo en VES', () => {
         userAgent: null,
         remote: null,
         clinicLogoUrl: null,
+        expiry: NO_EXPIRED_ACCEPTANCE,
         acceptanceHash: computeAcceptanceHash({
           contentHash,
           signerName: 'Ana Pérez',
@@ -1016,28 +1033,6 @@ describe('DX-379: validez guardada del presupuesto', () => {
       validUntil: '2026-10-17',
       validityDays: 15,
     });
-  });
-
-  it('esta porción no bloquea aceptar un presupuesto vencido (llega en la porción C)', async () => {
-    const repo = new InMemoryPlanQuoteRepository();
-    repo.add(
-      presented({ quoteIssuedOn: '2026-09-01', quoteValidUntil: '2026-10-01' }),
-    );
-    const get = new GetPlanQuoteUseCase(repo, () => NOW, names);
-    const shown = await get.execute('patient-1', 'plan-1');
-    const accept = new AcceptTreatmentPlanUseCase(repo, () => NOW, names);
-    await expect(
-      accept.execute(
-        'patient-1',
-        'plan-1',
-        {
-          signerName: 'Ana Pérez',
-          signature: PNG,
-          contentHash: shown.contentHash,
-        },
-        META,
-      ),
-    ).resolves.toMatchObject({ planStatus: TreatmentPlanStatus.ACCEPTED });
   });
 });
 

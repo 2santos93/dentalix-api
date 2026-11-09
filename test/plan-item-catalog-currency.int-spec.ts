@@ -215,7 +215,7 @@ async function sendAndSign(c: Clinic, planId: string): Promise<void> {
           budget: {
             planId,
             locationId: r.locationId,
-            stillMatches: (quote) => budgetStillMatches(r, quote, {}),
+            stillMatches: (quote) => budgetStillMatches(r, quote, {}, now),
             signerName: r.signerName,
             signature: PNG,
             content: r.budgetContent as object,
@@ -358,7 +358,7 @@ describe('moneda del catálogo en el ítem del plan (DX-502, Postgres)', () => {
       const budget = await asClinic(c.tenantId, () =>
         signatures.loadBudget(c.patientId, planId, c.locationId),
       );
-      return budgetStillMatches(request, budget!.quote, {});
+      return budgetStillMatches(request, budget!.quote, {}, new Date());
     };
     expect(await stillMatches()).toBe(true);
 

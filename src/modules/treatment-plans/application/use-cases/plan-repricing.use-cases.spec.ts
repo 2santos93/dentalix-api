@@ -22,6 +22,7 @@ import type {
 } from '../../domain/ports/reference-rate-source.port';
 import type { QuoteSettingsRepository } from '../../domain/ports/quote-settings-repository.port';
 import {
+  REPRICE_INCOMPLETE_CODE,
   REPRICE_NOTHING_CODE,
   REPRICE_PAYMENTS_MESSAGE,
   REPRICE_STALE_CODE,
@@ -36,6 +37,7 @@ import { InMemoryPlanRepricingRepository } from './__fixtures__/in-memory-plan-r
 import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
 import { AddTreatmentPlanItemUseCase } from './add-treatment-plan-item.use-case';
 import {
+  AcceptanceRepricer,
   ApplyPlanRepricingUseCase,
   PreviewPlanRepricingUseCase,
   REPRICE_IDEMPOTENCY_KEY_REQUIRED_MESSAGE,
@@ -160,6 +162,7 @@ function setup(opts: { zone?: string | null; rate?: number | null } = {}) {
     },
     preview: new PreviewPlanRepricingUseCase(repo, reader),
     apply: new ApplyPlanRepricingUseCase(repo, reader),
+    acceptance: new AcceptanceRepricer(repo, reader),
   };
 }
 
@@ -621,5 +624,110 @@ describe('Recotizar un plan (DX-379 porción B)', () => {
       ),
     ).rejects.toMatchObject({ response: { code: REPRICE_STALE_CODE } });
     expect(ctx.repo.records).toHaveLength(1);
+  });
+});
+
+describe('AcceptanceRepricer: recotizar en la firma de un vencido (DX-379 C)', () => {
+  const subject = async (ctx: ReturnType<typeof setup>) =>
+    (await ctx.repo.load('p1', 'plan-1'))!;
+
+  it('recotiza TODOS los propuestos, al instante de la firma, igual que la vista previa', async () => {
+    const ctx = setup();
+    await seededPlan(ctx);
+    ctx.rateSource.set(40);
+    const preview = await ctx.preview.execute(
+      'p1',
+      'plan-1',
+      {},
+      DENTIST_ACTOR,
+    );
+    const context = await ctx.acceptance.read(
+      'p1',
+      'plan-1',
+      DENTIST_ACTOR,
+      NOW,
+    );
+    const r = ctx.acceptance.decide(
+      context,
+      await subject(ctx),
+      preview.previewHash,
+    );
+    expect(r.previewHash).toBe(preview.previewHash);
+    expect(r.validityRenewed).toBe(true);
+    expect(r.validity).toEqual({
+      issuedOn: '2026-11-09',
+      validUntil: '2026-12-09',
+    });
+    // Sin huella (la vista previa de la firma), la misma recotización.
+    expect(
+      ctx.acceptance.decide(context, await subject(ctx), null).previewHash,
+    ).toBe(preview.previewHash);
+  });
+
+  it('huella de la vista previa obsoleta (cambió la tasa) → 409 REPRICE_PREVIEW_STALE', async () => {
+    const ctx = setup();
+    await seededPlan(ctx);
+    ctx.rateSource.set(40);
+    const preview = await ctx.preview.execute(
+      'p1',
+      'plan-1',
+      {},
+      DENTIST_ACTOR,
+    );
+    ctx.rateSource.set(41);
+    const context = await ctx.acceptance.read(
+      'p1',
+      'plan-1',
+      DENTIST_ACTOR,
+      NOW,
+    );
+    let error: unknown;
+    try {
+      ctx.acceptance.decide(context, await subject(ctx), preview.previewHash);
+    } catch (e) {
+      error = e;
+    }
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: REPRICE_STALE_CODE,
+    });
+  });
+
+  it('algún propuesto sin precio vigente (la validez no se renovaría) → 409 REPRICE_INCOMPLETE', async () => {
+    const ctx = setup();
+    await seededPlan(ctx);
+    ctx.items.set('xray', catalogItem('xray', { defaultPrice: null }));
+    ctx.rateSource.set(40);
+    const context = await ctx.acceptance.read(
+      'p1',
+      'plan-1',
+      DENTIST_ACTOR,
+      NOW,
+    );
+    let error: unknown;
+    try {
+      ctx.acceptance.decide(context, await subject(ctx), null);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: REPRICE_INCOMPLETE_CODE,
+    });
+  });
+
+  it('plan con abonos → 409 (no se recotiza)', async () => {
+    const ctx = setup();
+    await seededPlan(ctx);
+    ctx.repo.facts = { ...ctx.repo.facts, hasLivePayments: true };
+    const context = await ctx.acceptance.read(
+      'p1',
+      'plan-1',
+      DENTIST_ACTOR,
+      NOW,
+    );
+    const locked = await subject(ctx);
+    expect(() => ctx.acceptance.decide(context, locked, null)).toThrow(
+      REPRICE_PAYMENTS_MESSAGE,
+    );
   });
 });

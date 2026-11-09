@@ -165,7 +165,7 @@ async function findLive(
   }
   const ctx = await repo.findByTokenHash(hashSignatureToken(token));
   if (!ctx || !isLinkUsable(ctx.request, now)) throw invalidLink();
-  if (!(await budgets.isStillValid(ctx.request))) throw invalidLink();
+  if (!(await budgets.isStillValid(ctx.request, now))) throw invalidLink();
   return ctx;
 }
 
@@ -829,7 +829,7 @@ export class SignPublicSignatureUseCase {
     evidence: PublicRequestEvidence,
     now: Date,
   ): Promise<PublicSignedCopy> {
-    const stillMatches = await this.budgets.matcher(ctx.request);
+    const stillMatches = await this.budgets.matcher(ctx.request, now);
     let outcome: SignOutcome | null;
     try {
       outcome = await this.repo.withLockedRequest<SignOutcome>(

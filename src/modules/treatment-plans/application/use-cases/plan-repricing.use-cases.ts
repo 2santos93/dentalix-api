@@ -45,6 +45,8 @@ import type { TreatmentPlanWithItems } from '../../domain/entities/treatment-pla
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 import { memoizedRates, resolveCurrentReference } from '../current-reference';
 import {
+  REPRICE_INCOMPLETE_CODE,
+  REPRICE_INCOMPLETE_MESSAGE,
   REPRICE_NOTHING_CODE,
   REPRICE_NOTHING_MESSAGE,
   REPRICE_STALE_CODE,
@@ -146,6 +148,8 @@ export class RepricingContextReader {
     plan: TreatmentPlanWithItems,
     request: RepricingRequest,
     actor: DiscountActor,
+    /** El instante de la petición; sin él, el reloj (DX-379 C: el de la firma). */
+    at: Date = this.now(),
   ): Promise<Omit<RepricingInput, 'plan' | 'itemIds'>> {
     const rates = memoizedRates(this.rates);
     const references = new Map<string, RepricingReference>();
@@ -164,7 +168,6 @@ export class RepricingContextReader {
       this.quoteSettings.get(),
       this.validityZone(plan),
     ]);
-    const at = this.now();
     return {
       references,
       digits: digits.roundingDigits(plan.currency),
@@ -371,5 +374,71 @@ function settled(
       return { record: outcome.record, replayed: true };
     case 'applied':
       return { record: outcome.record, replayed: false };
+  }
+}
+
+/** Lo leído antes de la transacción para recotizar en la firma. */
+export type AcceptanceRepricingContext = Omit<
+  RepricingInput,
+  'plan' | 'itemIds'
+>;
+
+/**
+ * DX-379 (C): recotizar al aceptar un presupuesto vencido («Actualizar los
+ * precios» dentro de la firma): TODOS los ítems propuestos, con la misma
+ * función que la vista previa y que aplicar (D-8). Los precios vigentes se
+ * leen antes de la transacción; con el plan bloqueado se recalcula.
+ */
+@Injectable()
+export class AcceptanceRepricer {
+  constructor(
+    @Inject(PLAN_REPRICING_REPOSITORY)
+    private readonly repo: PlanRepricingRepository,
+    private readonly context: RepricingContextReader,
+  ) {}
+
+  /** Los precios vigentes de todos los propuestos, al instante `at`. 404 sin plan. */
+  async read(
+    patientId: string,
+    planId: string,
+    actor: DiscountActor,
+    at: Date,
+  ): Promise<AcceptanceRepricingContext> {
+    const { plan } = await loadSubject(this.repo, patientId, planId);
+    return this.context.read(plan, {}, actor, at);
+  }
+
+  /**
+   * Con el plan bloqueado: la recotización de todos los propuestos, o 409 si
+   * el plan no se recotiza (aceptado, con abonos…), si un precio vigente
+   * cambió desde que se leyó o desde la vista previa (`previewHash`; null en
+   * la propia vista previa), si no hay nada que aplicar o si no se renueva la
+   * validez (algún propuesto sin precio vigente o sin tasa).
+   */
+  decide(
+    context: AcceptanceRepricingContext,
+    { plan, facts }: RepricingSubject,
+    previewHash: string | null,
+  ): Repricing {
+    assertPlanRepriceable(plan, facts);
+    if (
+      repricingCatalogItemIds(plan).some((id) => !context.references.has(id))
+    ) {
+      throw repricingConflict(REPRICE_STALE_CODE, REPRICE_STALE_MESSAGE);
+    }
+    const repricing = computeRepricing({ plan, ...context });
+    if (previewHash !== null && repricing.previewHash !== previewHash) {
+      throw repricingConflict(REPRICE_STALE_CODE, REPRICE_STALE_MESSAGE);
+    }
+    if (repricing.lines.length === 0) {
+      throw repricingConflict(REPRICE_NOTHING_CODE, REPRICE_NOTHING_MESSAGE);
+    }
+    if (!repricing.validityRenewed) {
+      throw repricingConflict(
+        REPRICE_INCOMPLETE_CODE,
+        REPRICE_INCOMPLETE_MESSAGE,
+      );
+    }
+    return repricing;
   }
 }
