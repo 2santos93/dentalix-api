@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
@@ -18,6 +19,7 @@ import {
   ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
@@ -35,6 +37,7 @@ import { DrainAllocationRebalancesInterceptor } from '../../payments/presentatio
 import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
+  IssuePlanQuoteUseCase,
   type PlanQuoteDocument,
 } from '../application/use-cases/plan-quote.use-cases';
 import {
@@ -82,6 +85,7 @@ function toDto(doc: PlanQuoteDocument): PlanQuoteDocumentDto {
 export class PlanQuoteController {
   constructor(
     private readonly getQuote: GetPlanQuoteUseCase,
+    private readonly issueQuote: IssuePlanQuoteUseCase,
     private readonly acceptPlan: AcceptTreatmentPlanUseCase,
   ) {}
 
@@ -103,6 +107,36 @@ export class PlanQuoteController {
     @Param('planId', ParseUUIDPipe) planId: string,
   ): Promise<PlanQuoteDocumentDto> {
     return toDto(await this.getQuote.execute(patientId, planId));
+  }
+
+  // DX-379 (D-2): imprimir. La primera impresión fija la validez del
+  // presupuesto si el plan aún no la tiene; el GET de arriba sigue siendo de
+  // solo lectura (el modal de aceptar lo usa para ver).
+  @Audit({
+    action: 'PRINT',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: { param: 'patientId' },
+  })
+  @Post('quote/issue')
+  @HttpCode(200)
+  @Roles(...TREATMENT_PLAN_QUOTE_READ_ROLES)
+  @ApiOperation({
+    summary:
+      'Imprime el presupuesto: la primera impresión fija su validez (DX-379)',
+    description:
+      'Devuelve lo mismo que GET quote. Si el plan está en borrador o presentado, sin firmar y sin validez guardada, la fija: emitido hoy (día de la sede) y válido los días del ajuste de la clínica (GET /treatment-plan-settings). Presentar el plan también la fija. Reimprimir otro día, o tras cambiar el ajuste, devuelve las mismas fechas. Idempotente; queda en la auditoría como PRINT.',
+  })
+  @ApiOkResponse({ type: PlanQuoteDocumentDto })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente o plan no encontrados en esta clínica (o el plan es de otro paciente)',
+  })
+  async issue(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('planId', ParseUUIDPipe) planId: string,
+  ): Promise<PlanQuoteDocumentDto> {
+    return toDto(await this.issueQuote.execute(patientId, planId));
   }
 
   @Audit({

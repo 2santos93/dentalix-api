@@ -459,7 +459,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Aceptarlo con firma: desde DX-040 solo quien decide el plan (ADMIN y
   // DENTIST); la asistente lo ve pero no lo acepta en nombre del doctor.
   'GET /patients/:patientId/treatment-plans/:planId/quote': EVERY_ROLE,
+  // DX-379: imprimir (la primera impresión fija la validez): quien lo lee.
+  'POST /patients/:patientId/treatment-plans/:planId/quote/issue': EVERY_ROLE,
   'POST /patients/:patientId/treatment-plans/:planId/acceptance': PLAN_DECIDERS,
+  // DX-379: días de validez del presupuesto. Lo leen los que leen
+  // presupuestos; lo cambia solo ADMIN.
+  'GET /treatment-plan-settings': EVERY_ROLE,
+  'PUT /treatment-plan-settings': ADMIN_ONLY,
   // Alternativas A/B, presentar, rechazar y presupuestos por seguir:
   // loop/informes/DX-040.md. Crear una alternativa es preparar el plan
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,

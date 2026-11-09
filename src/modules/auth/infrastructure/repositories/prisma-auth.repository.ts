@@ -19,6 +19,7 @@ import {
 } from '../../../patients/domain/retention/clinical-retention-config';
 import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../../../patients/domain/responsible-parties/majority-age';
 import { PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS } from '../../../prescriptions/domain/prescription-settings';
+import { PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS } from '../../../treatment-plans/domain/quote-validity';
 import {
   AuthRepository,
   AuthUserRecord,
@@ -107,6 +108,8 @@ export class PrismaAuthRepository implements AuthRepository {
             PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.requireClinicalRecordNumber,
           prescriptionValidityDays:
             PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.validityDays,
+          // DX-379: y con los días de validez del presupuesto.
+          quoteValidityDays: PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
         },
         select: { id: true },
       });

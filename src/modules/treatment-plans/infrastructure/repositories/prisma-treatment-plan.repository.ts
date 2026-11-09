@@ -12,6 +12,9 @@ import {
   TreatmentPlanItemStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { issueQuoteValidity } from '../../domain/quote-validity';
+import { civilDayOf } from './prisma-plan-quote.repository';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   DecideBulkDiscount,
@@ -162,6 +165,8 @@ export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
     optionLabel: plan.optionLabel,
     presentedAt: plan.presentedAt,
     presentedLocationId: plan.presentedLocationId,
+    quoteIssuedOn: civilDayOf(plan.quoteIssuedOn),
+    quoteValidUntil: civilDayOf(plan.quoteValidUntil),
     rejectedAt: plan.rejectedAt,
     rejectionReason: plan.rejectionReason,
     rejectionNote: plan.rejectionNote,
@@ -420,8 +425,26 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         // La sede del request o, en la vista consolidada, la de escritura de
         // la sesión (la principal, o la primera permitida — DX-089): la lista
         // de presupuestos por seguir filtra por ella.
+        const locationId = await this.tenantContext.writeLocationId(tx);
         data.presentedAt = change.presentation.at;
-        data.presentedLocationId = await this.tenantContext.writeLocationId(tx);
+        data.presentedLocationId = locationId;
+        // DX-379 (D-3): presentar fija SIEMPRE la validez del presupuesto
+        // (también sobre la de un borrador ya impreso): emitido hoy en la
+        // zona de la sede de la presentación, con los días del ajuste de hoy.
+        const [zones, tenant] = await Promise.all([
+          resolveLocationTimeZones(tx, current.tenantId, [locationId]),
+          tx.tenant.findUniqueOrThrow({
+            where: { id: current.tenantId },
+            select: { quoteValidityDays: true },
+          }),
+        ]);
+        const validity = issueQuoteValidity(
+          change.presentation.at,
+          zones(locationId),
+          tenant.quoteValidityDays,
+        );
+        data.quoteIssuedOn = new Date(`${validity.issuedOn}T00:00:00.000Z`);
+        data.quoteValidUntil = new Date(`${validity.validUntil}T00:00:00.000Z`);
       }
       if (change.rejection) {
         data.rejectedAt = change.rejection.at;
