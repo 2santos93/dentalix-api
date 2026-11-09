@@ -101,6 +101,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
     hoursFromNow: number,
     locationId = principal,
     patientId = patient,
+    providerId: string = randomUUID(),
   ): Promise<string> {
     // Un profesional por cita (sin solapes del profesional); las del mismo
     // paciente van a horas distintas.
@@ -110,7 +111,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
         tenantId: a.tenantId,
         locationId,
         patientId,
-        providerId: randomUUID(),
+        providerId,
         start,
         end: new Date(start.getTime() + 30 * 60_000),
       },
@@ -433,7 +434,9 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
     });
 
     it('marcar NO_SHOW guarda la hora; reactivar limpia todo', async () => {
-      const id = await appointment(-30);
+      // DX-267-bis: reactivar aplica las reglas de mover (no al pasado, con
+      // un profesional de verdad de la clínica): cita futura del titular.
+      const id = await appointment(30, principal, patient, a.adminUserId);
       const noShow = await api(a, tokens.RECEPTION!)
         .patch(`/appointments/${id}`, { status: 'NO_SHOW' })
         .expect(200);
