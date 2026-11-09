@@ -1483,6 +1483,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({}),
       status: 404,
     },
+    // DX-379 (C): vista previa del presupuesto recotizado para firmarlo
+    // vencido (no escribe nada).
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance/reprice-preview',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/acceptance/reprice-preview`,
+      body: () => ({}),
+      status: 404,
+    },
     {
       name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance',
       verb: 'post',

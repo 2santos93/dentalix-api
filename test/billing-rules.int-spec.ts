@@ -396,7 +396,12 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
             signature: `data:image/png;base64,${PNG}`,
             contentHash: quote.contentHash,
           },
-          { acceptedById: userId, ipAddress: null, userAgent: null },
+          {
+            acceptedById: userId,
+            role: ClinicRole.DENTIST,
+            ipAddress: null,
+            userAgent: null,
+          },
         ),
       );
 

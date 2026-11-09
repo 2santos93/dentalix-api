@@ -313,7 +313,12 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
               signature: PNG,
               contentHash: quote.contentHash,
             },
-            { acceptedById: a.userId, ipAddress: null, userAgent: null },
+            {
+              acceptedById: a.userId,
+              role: ClinicRole.DENTIST,
+              ipAddress: null,
+              userAgent: null,
+            },
           );
         },
         a.mainLocationId,

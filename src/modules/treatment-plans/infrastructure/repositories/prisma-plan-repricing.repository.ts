@@ -22,6 +22,7 @@ import type {
 import {
   REPRICE_VALIDITY_NOT_RENEWED_MESSAGE,
   type ItemPriceState,
+  type Repricing,
   type RepricingLine,
   type RepricingSkip,
 } from '../../application/repricing';
@@ -137,20 +138,9 @@ export class PrismaPlanRepricingRepository implements PlanRepricingRepository {
 
   load(patientId: string, planId: string): Promise<RepricingSubject | null> {
     const tenantId = this.requireTenantId();
-    return this.prisma.runWithTenant(async (tx) => {
-      const plan = await tx.treatmentPlan.findFirst({
-        where: { id: planId, patientId, deletedAt: null },
-        include: {
-          items: ITEMS_WITH_ATTRIBUTION,
-          acceptance: ACCEPTANCE_SUMMARY,
-        },
-      });
-      if (!plan) return null;
-      return {
-        plan: mapToEntityWithItems(plan),
-        facts: await readPlanFacts(tx, tenantId, planId),
-      };
-    });
+    return this.prisma.runWithTenant((tx) =>
+      loadRepricingSubjectInTx(tx, tenantId, patientId, planId),
+    );
   }
 
   findApplied(
@@ -192,87 +182,139 @@ export class PrismaPlanRepricingRepository implements PlanRepricingRepository {
 
       // Como aceptar o imprimir: el plan y su grupo FOR UPDATE, y se relee.
       const locked = await lockPlanGroup(tx, planId);
-      const current = locked
-        ? await tx.treatmentPlan.findFirst({
-            where: { id: planId, patientId, deletedAt: null },
-            include: {
-              items: ITEMS_WITH_ATTRIBUTION,
-              acceptance: ACCEPTANCE_SUMMARY,
-            },
-          })
+      const subject = locked
+        ? await loadRepricingSubjectInTx(tx, tenantId, patientId, planId)
         : null;
-      if (!current) throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
-      const repricing = decide({
-        plan: mapToEntityWithItems(current),
-        facts: await readPlanFacts(tx, tenantId, planId),
+      if (!subject) throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
+      const repricing = decide(subject);
+      const record = await writeRepricingInTx(tx, {
+        tenantId,
+        planId,
+        patientId,
+        locationId: await this.tenantContext.writeLocationId(tx),
+        actorUserId,
+        source: TreatmentPlanRepricingSource.MANUAL,
+        idempotency,
+        repricing,
       });
-
-      const locationId = await this.tenantContext.writeLocationId(tx);
-      const stored = repricing.lines.map((line) =>
-        storedLine(line, locationId),
-      );
-      await tx.$executeRaw`SELECT set_config('app.plan_item_reprice', 'on', true)`;
-      // Todas las líneas: también las que solo cambian la firma del descuento
-      // (o la borran) y las que conservan el precio (la validez se reinicia).
-      for (const line of stored) {
-        await tx.treatmentPlanItem.update({
-          where: { id: line.itemId },
-          data: itemPriceColumns(line.after),
-        });
-      }
-      await tx.$executeRaw`SELECT set_config('app.plan_item_reprice', '', true)`;
-
-      // I-1: la validez solo se renueva si se recotizaron todos los propuestos.
-      const renewed = repricing.validityRenewed ? repricing.validity : null;
-      if (renewed) {
-        await tx.treatmentPlan.update({
-          where: { id: planId },
-          data: {
-            quoteIssuedOn: dateColumn(renewed.issuedOn),
-            quoteValidUntil: dateColumn(renewed.validUntil),
-          },
-        });
-      }
-      const rate = repricing.rate;
-      const row = await tx.treatmentPlanRepricing.create({
-        data: {
-          tenantId,
-          planId,
-          patientId,
-          locationId,
-          actorUserId,
-          source: TreatmentPlanRepricingSource.MANUAL,
-          idempotencyKey: idempotency.key,
-          requestFingerprint: idempotency.fingerprint,
-          previewHash: repricing.previewHash,
-          currency: repricing.currency,
-          rateCurrency: rate?.currency ?? null,
-          rateFromPerBase: rate?.fromPerBase ?? null,
-          rateToPerBase: rate?.toPerBase ?? null,
-          rateSource: rate?.source ?? null,
-          rateDate: rate ? dateColumn(rate.rateDate) : null,
-          previousQuoteIssuedOn: repricing.previousValidity
-            ? dateColumn(repricing.previousValidity.issuedOn)
-            : null,
-          previousQuoteValidUntil: repricing.previousValidity
-            ? dateColumn(repricing.previousValidity.validUntil)
-            : null,
-          validityRenewed: repricing.validityRenewed,
-          quoteIssuedOn: repricing.validity
-            ? dateColumn(repricing.validity.issuedOn)
-            : null,
-          quoteValidUntil: repricing.validity
-            ? dateColumn(repricing.validity.validUntil)
-            : null,
-          lines: stored as unknown as Prisma.InputJsonValue,
-          skipped: repricing.skipped as unknown as Prisma.InputJsonValue,
-          totalBefore: repricing.totals.before,
-          totalAfter: repricing.totals.after,
-        },
-      });
-      return { kind: 'applied', record: toRecord(row) };
+      return { kind: 'applied', record };
     });
   }
+}
+
+/**
+ * El plan (ítems vivos y aceptación) y sus hechos, dentro de la transacción
+ * del llamador; `null` si no existe, está retirado o es de otro paciente.
+ */
+export async function loadRepricingSubjectInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  patientId: string,
+  planId: string,
+): Promise<RepricingSubject | null> {
+  const plan = await tx.treatmentPlan.findFirst({
+    where: { id: planId, patientId, deletedAt: null },
+    include: {
+      items: ITEMS_WITH_ATTRIBUTION,
+      acceptance: ACCEPTANCE_SUMMARY,
+    },
+  });
+  if (!plan) return null;
+  return {
+    plan: mapToEntityWithItems(plan),
+    facts: await readPlanFacts(tx, tenantId, planId),
+  };
+}
+
+/** Lo que escribe una recotización ya decidida (con el plan bloqueado). */
+export interface RepricingWrite {
+  tenantId: string;
+  planId: string;
+  patientId: string;
+  /** Sede de escritura: la de la fila y la de un descuento que se firma. */
+  locationId: string;
+  actorUserId: string;
+  source: TreatmentPlanRepricingSource;
+  /** MANUAL siempre la lleva; ACCEPT (la firma, DX-379 C) no. */
+  idempotency: RepricingIdempotency | null;
+  repricing: Repricing;
+}
+
+/**
+ * Escribe la recotización en la transacción del llamador, que ya bloqueó el
+ * plan y su grupo: los ítems (con la marca `app.plan_item_reprice`, que se
+ * pone justo antes de sus UPDATE y se quita después), la validez nueva del
+ * plan si se renueva y la fila de `treatment_plan_repricings`. La usan
+ * «Actualizar precios» (MANUAL) y la firma de un presupuesto vencido (ACCEPT).
+ */
+export async function writeRepricingInTx(
+  tx: Prisma.TransactionClient,
+  write: RepricingWrite,
+): Promise<RepricingRecord> {
+  const { repricing, planId } = write;
+  const stored = repricing.lines.map((line) =>
+    storedLine(line, write.locationId),
+  );
+  await tx.$executeRaw`SELECT set_config('app.plan_item_reprice', 'on', true)`;
+  // Todas las líneas: también las que solo cambian la firma del descuento
+  // (o la borran) y las que conservan el precio (la validez se reinicia).
+  for (const line of stored) {
+    await tx.treatmentPlanItem.update({
+      where: { id: line.itemId },
+      data: itemPriceColumns(line.after),
+    });
+  }
+  await tx.$executeRaw`SELECT set_config('app.plan_item_reprice', '', true)`;
+
+  // I-1: la validez solo se renueva si se recotizaron todos los propuestos.
+  const renewed = repricing.validityRenewed ? repricing.validity : null;
+  if (renewed) {
+    await tx.treatmentPlan.update({
+      where: { id: planId },
+      data: {
+        quoteIssuedOn: dateColumn(renewed.issuedOn),
+        quoteValidUntil: dateColumn(renewed.validUntil),
+      },
+    });
+  }
+  const rate = repricing.rate;
+  const row = await tx.treatmentPlanRepricing.create({
+    data: {
+      tenantId: write.tenantId,
+      planId,
+      patientId: write.patientId,
+      locationId: write.locationId,
+      actorUserId: write.actorUserId,
+      source: write.source,
+      idempotencyKey: write.idempotency?.key ?? null,
+      requestFingerprint: write.idempotency?.fingerprint ?? null,
+      previewHash: repricing.previewHash,
+      currency: repricing.currency,
+      rateCurrency: rate?.currency ?? null,
+      rateFromPerBase: rate?.fromPerBase ?? null,
+      rateToPerBase: rate?.toPerBase ?? null,
+      rateSource: rate?.source ?? null,
+      rateDate: rate ? dateColumn(rate.rateDate) : null,
+      previousQuoteIssuedOn: repricing.previousValidity
+        ? dateColumn(repricing.previousValidity.issuedOn)
+        : null,
+      previousQuoteValidUntil: repricing.previousValidity
+        ? dateColumn(repricing.previousValidity.validUntil)
+        : null,
+      validityRenewed: repricing.validityRenewed,
+      quoteIssuedOn: repricing.validity
+        ? dateColumn(repricing.validity.issuedOn)
+        : null,
+      quoteValidUntil: repricing.validity
+        ? dateColumn(repricing.validity.validUntil)
+        : null,
+      lines: stored as unknown as Prisma.InputJsonValue,
+      skipped: repricing.skipped as unknown as Prisma.InputJsonValue,
+      totalBefore: repricing.totals.before,
+      totalAfter: repricing.totals.after,
+    },
+  });
+  return toRecord(row);
 }
 
 /**

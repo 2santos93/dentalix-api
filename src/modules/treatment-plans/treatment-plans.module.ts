@@ -1,4 +1,5 @@
 import {
+  AcceptanceRepricer,
   ApplyPlanRepricingUseCase,
   PreviewPlanRepricingUseCase,
   RepricingContextReader,
@@ -32,6 +33,7 @@ import { PrismaPlanOptionsRepository } from './infrastructure/repositories/prism
 import { PlanQuoteController } from './presentation/plan-quote.controller';
 import {
   AcceptTreatmentPlanUseCase,
+  PreviewAcceptanceRepricingUseCase,
   GetPlanQuoteUseCase,
   IssuePlanQuoteUseCase,
   PLAN_QUOTE_CLOCK,
@@ -147,6 +149,7 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     UpdateQuoteSettingsUseCase,
     // DX-379 (B): recotizar con el precio vigente.
     RepricingContextReader,
+    AcceptanceRepricer,
     PreviewPlanRepricingUseCase,
     ApplyPlanRepricingUseCase,
     {
@@ -162,6 +165,7 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     GetPlanQuoteUseCase,
     IssuePlanQuoteUseCase,
     AcceptTreatmentPlanUseCase,
+    PreviewAcceptanceRepricingUseCase,
     { provide: PLAN_QUOTE_CLOCK, useValue: () => new Date() },
     // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).
     {

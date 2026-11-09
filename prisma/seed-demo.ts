@@ -3515,7 +3515,12 @@ class DemoSeeder {
           signature: DEMO_PATIENT_SIGNATURE_PNG,
           contentHash: shown.contentHash,
         },
-        { acceptedById: dentistId, ipAddress: null, userAgent: 'seed:demo' },
+        {
+          acceptedById: dentistId,
+          role: ClinicRole.DENTIST,
+          ipAddress: null,
+          userAgent: 'seed:demo',
+        },
       );
     });
   }

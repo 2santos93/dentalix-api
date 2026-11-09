@@ -328,6 +328,49 @@ describe('buildAuditDraft (DX-009)', () => {
     });
   });
 
+  it('DX-379 (C): la firma de un presupuesto vencido lleva el motivo y la recotización que pone el handler, nunca importes ni la nota', () => {
+    const REPRICING = '77777777-7777-4777-8777-777777777777';
+    const sign = {
+      action: 'SIGN',
+      resource: 'TREATMENT_PLAN',
+      resourceId: { param: 'planId' },
+      patient: { param: 'patientId' },
+    } as const;
+    const repriced = buildAuditDraft(
+      sign,
+      req({
+        params: { patientId: PATIENT, planId: PLAN },
+        auditMetadata: {
+          reason: 'QUOTE_EXPIRED_REPRICED',
+          params: { repricingId: REPRICING },
+        },
+      }),
+      {},
+      scope,
+    );
+    expect(repriced?.metadata).toEqual({
+      params: { patientId: PATIENT, planId: PLAN, repricingId: REPRICING },
+      reason: 'QUOTE_EXPIRED_REPRICED',
+    });
+    const original = buildAuditDraft(
+      sign,
+      req({
+        params: { patientId: PATIENT, planId: PLAN },
+        auditMetadata: {
+          reason: 'QUOTE_EXPIRED_ORIGINAL_PRICES',
+          note: 'Promesa de la directora',
+          total: '450,00 USD',
+        },
+      }),
+      {},
+      scope,
+    );
+    expect(original?.metadata).toEqual({
+      params: { patientId: PATIENT, planId: PLAN },
+      reason: 'QUOTE_EXPIRED_ORIGINAL_PRICES',
+    });
+  });
+
   it('DX-379 (B, M-3): los de la ruta van primero; diez ids del handler no los cortan', () => {
     const extra = Object.fromEntries(
       Array.from({ length: 10 }, (_, n) => [

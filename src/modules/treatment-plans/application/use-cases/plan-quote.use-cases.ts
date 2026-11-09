@@ -7,7 +7,26 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
-import { TreatmentPlanStatus } from '@prisma/client';
+import {
+  ClinicRole,
+  ExpiredQuoteAcceptanceMode,
+  TreatmentPlanStatus,
+} from '@prisma/client';
+import {
+  EXPIRED_NOT_EXPIRED_MESSAGE,
+  ExpiredAcceptanceInputError,
+  NO_EXPIRED_ACCEPTANCE,
+  QUOTE_EXPIRED_CODE,
+  parseExpiredAcceptance,
+  quoteExpiredAcceptMessage,
+  type ExpiredAcceptanceChoice,
+  type ExpiredAcceptanceInput,
+  type ExpiredAcceptanceRecord,
+} from '../../domain/expired-quote-acceptance';
+import { locationTimeZoneRequired } from '../../../../shared/locations/location-time-zone';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
+import type { Repricing } from '../repricing';
+import { AcceptanceRepricer } from './plan-repricing.use-cases';
 import {
   buildQuoteContent,
   computeAcceptanceHash,
@@ -19,13 +38,16 @@ import {
 } from '../../domain/plan-quote';
 import { acceptPlanError } from '../../domain/plan-status-machine';
 import {
+  isQuoteExpired,
   issueQuoteValidity,
+  quoteCanExpire,
   storedQuoteValidity,
   validityOnFirstIssue,
   type QuoteValidity,
 } from '../../domain/quote-validity';
 import {
   PLAN_QUOTE_REPOSITORY,
+  type AcceptReprice,
   type NewPlanAcceptance,
   type PlanQuoteRepository,
   type PlanAcceptanceRemoteEvidence,
@@ -72,6 +94,17 @@ export interface PlanQuoteAcceptanceView {
   remote: PlanAcceptanceRemoteEvidence | null;
   ipAddress: string | null;
   userAgent: string | null;
+  /**
+   * DX-379 (C): copia del último día válido del presupuesto al firmar (antes
+   * de recotizar); null en aceptaciones anteriores o sin validez guardada.
+   */
+  quoteValidUntil: string | null;
+  /** Cómo se aceptó un presupuesto vencido; null si no lo estaba. */
+  expiredMode: ExpiredAcceptanceRecord['mode'];
+  expiredReason: ExpiredAcceptanceRecord['reason'];
+  expiredNote: string | null;
+  /** La recotización hecha en la firma (REPRICE). */
+  repricingId: string | null;
 }
 
 /** El presupuesto para verlo o imprimirlo. */
@@ -89,13 +122,20 @@ export interface AcceptTreatmentPlanInput {
   signerName: string;
   /** `data:image/png;base64,…` o base64 pelado. */
   signature: string;
-  /** El `contentHash` del presupuesto que se mostró al paciente. */
+  /**
+   * El `contentHash` del presupuesto que se mostró al paciente. DX-379 (C):
+   * con REPRICE, el del presupuesto recotizado de la vista previa.
+   */
   contentHash: string;
+  /** DX-379 (C): cómo aceptar un presupuesto vencido (solo si lo está). */
+  expired?: ExpiredAcceptanceInput;
 }
 
 /** Lo que pone el servidor, nunca el cliente. */
 export interface AcceptTreatmentPlanMeta {
   acceptedById: string;
+  /** Rol de quien firma (del token): topes de descuento al recotizar. */
+  role: ClinicRole;
   ipAddress: string | null;
   userAgent: string | null;
 }
@@ -141,6 +181,64 @@ export function firstIssueValidity(
     source.location.timeZone,
     source.clinic.quoteValidityDays,
   );
+}
+
+/** ¿Venció el presupuesto del plan leído? Y su último día válido. */
+export interface QuoteSourceExpiry {
+  expired: boolean;
+  validUntil: string | null;
+}
+
+/**
+ * DX-379 (C): ¿venció el presupuesto? Con el día civil de la sede del plan
+ * (`quoteTimeZone`: la de la presentación o, sin presentar, la del
+ * presupuesto), la misma regla que `quoteExpired` de la API (D-13). Solo un
+ * borrador o un plan presentado, sin firmar y con validez guardada puede
+ * estar vencido. Si la sede de la presentación no tiene zona válida, 409
+ * `LOCATION_TIMEZONE_REQUIRED` (nunca se decide con otra zona).
+ */
+export function quoteSourceExpiry(
+  source: PlanQuoteSource,
+  now: Date,
+): QuoteSourceExpiry {
+  const validUntil = source.plan.quoteValidUntil;
+  if (
+    validUntil === null ||
+    source.acceptance !== null ||
+    !quoteCanExpire(source.plan.status)
+  ) {
+    return { expired: false, validUntil };
+  }
+  const zone = source.plan.quoteTimeZone;
+  if (zone === null) {
+    throw locationTimeZoneRequired(
+      source.plan.presentedLocationId ?? source.location.id,
+    );
+  }
+  return { expired: isQuoteExpired(validUntil, now, zone), validUntil };
+}
+
+/** Un día `YYYY-MM-DD` con el formato de la sede del presupuesto. */
+export function quoteDayText(source: PlanQuoteSource, day: string): string {
+  return requireLocationFormat({
+    id: source.location.id,
+    locale: source.regional?.locale ?? null,
+    hourCycle: source.regional?.hourCycle ?? null,
+  }).civilDate(day);
+}
+
+/** 409 `QUOTE_EXPIRED` con el texto y el último día válido. */
+export function quoteExpiredConflict(
+  validUntil: string,
+  message: string,
+): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: QUOTE_EXPIRED_CODE,
+    message,
+    quoteValidUntil: validUntil,
+  });
 }
 
 /**
@@ -273,6 +371,11 @@ function toDocument(
       remote: stored.remote,
       ipAddress: stored.ipAddress,
       userAgent: stored.userAgent,
+      quoteValidUntil: stored.expiry.quoteValidUntil,
+      expiredMode: stored.expiry.mode,
+      expiredReason: stored.expiry.reason,
+      expiredNote: stored.expiry.note,
+      repricingId: stored.expiry.repricingId,
     },
   };
 }
@@ -354,6 +457,43 @@ function parseSignature(value: string): string {
   }
 }
 
+/** 400 con el texto de una elección incoherente (motivo, nota, huella). */
+function parseExpiredChoice(
+  input: ExpiredAcceptanceInput | undefined,
+): ExpiredAcceptanceChoice | null {
+  if (!input) return null;
+  try {
+    return parseExpiredAcceptance(input);
+  } catch (error) {
+    if (error instanceof ExpiredAcceptanceInputError) {
+      throw new BadRequestException(error.message);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Se puede firmar el presupuesto leído (con el plan bloqueado): sin firmar,
+ * en un estado que admite aceptar y con ítems.
+ */
+function assertSignable(source: PlanQuoteSource): void {
+  if (source.acceptance) {
+    throw new ConflictException(PLAN_ACCEPTED_CONFLICT_MESSAGE);
+  }
+  // Máquina de estados (DX-040): se firma un borrador o un plan presentado, y
+  // también uno ya aceptado sin firma (DX-012). Rechazado, completado o
+  // cancelado: 409.
+  const transitionError = acceptPlanError(source.plan.status, {
+    allowAlreadyAccepted: true,
+  });
+  if (transitionError) throw new ConflictException(transitionError);
+  if (source.items.length === 0) {
+    throw new BadRequestException(
+      'El plan no tiene ítems: agrega al menos un procedimiento antes de aceptarlo.',
+    );
+  }
+}
+
 @Injectable()
 export class AcceptTreatmentPlanUseCase {
   constructor(
@@ -365,18 +505,26 @@ export class AcceptTreatmentPlanUseCase {
     @Optional()
     @Inject(PLAN_QUOTE_COMPOSITION)
     private readonly composition: QuoteComposition = 'current',
+    @Optional()
+    private readonly repricer?: AcceptanceRepricer,
   ) {}
 
   /**
    * Aceptar = firmar la foto del presupuesto. Se recompone el presupuesto con
    * el plan bloqueado y su hash tiene que ser el que se mostró: si algo cambió
    * entre medias (un ítem, un precio o, sin validez guardada, el día), 409 y
-   * no se firma. DX-379: con la validez guardada se firman sus fechas; esta
-   * porción todavía no bloquea un presupuesto vencido (porción C). Firma, hora
-   * (del servidor) y autor (del token) quedan sellados con un segundo hash. El
-   * plan pasa a ACCEPTED y sus ítems propuestos, a aceptados; las demás
-   * opciones abiertas de su grupo, a REJECTED (DX-040), todo en la misma
-   * transacción.
+   * no se firma. DX-379: con la validez guardada se firman sus fechas. Firma,
+   * hora (del servidor) y autor (del token) quedan sellados con un segundo
+   * hash. El plan pasa a ACCEPTED y sus ítems propuestos, a aceptados; las
+   * demás opciones abiertas de su grupo, a REJECTED (DX-040), todo en la
+   * misma transacción.
+   *
+   * DX-379 (C): un presupuesto VENCIDO (día de la sede del plan posterior a
+   * su último día válido) no se firma sin elegir cómo (409 `QUOTE_EXPIRED`):
+   * con los precios originales y un motivo, o actualizando los precios en la
+   * misma transacción (la recotización de todos los propuestos, con la huella
+   * de su vista previa; el `contentHash` es entonces el del presupuesto
+   * recotizado). Elegir cómo con un presupuesto no vencido: 400.
    */
   async execute(
     patientId: string,
@@ -400,30 +548,41 @@ export class AcceptTreatmentPlanUseCase {
         `El nombre de quien firma admite hasta ${SIGNER_NAME_MAX} caracteres.`,
       );
     }
+    const choice = parseExpiredChoice(input.expired);
     const acceptedAt = this.now();
     // Fuera de la transacción del plan (spec §4.6): si el ADMIN cambia un
     // nombre entre el GET y la firma, el hash vivo cambia → 409 (R18).
     // DX-524: con los de cada sede; se elige la del plan al leerlo.
     const book = await this.documentTypeNames.book();
+    // DX-379 (C): «actualizar los precios»: los vigentes se leen antes de la
+    // transacción (como en la recotización); dentro se recalcula.
+    const reprice =
+      choice?.mode === ExpiredQuoteAcceptanceMode.REPRICE
+        ? await this.repriceStep(
+            patientId,
+            planId,
+            meta,
+            acceptedAt,
+            choice.repricePreviewHash,
+          )
+        : undefined;
 
     const outcome = await this.repo.accept(
       patientId,
       planId,
-      (source): NewPlanAcceptance => {
-        if (source.acceptance) {
-          throw new ConflictException(PLAN_ACCEPTED_CONFLICT_MESSAGE);
-        }
-        // Máquina de estados (DX-040): se firma un borrador o un plan
-        // presentado, y también uno ya aceptado sin firma (DX-012). Rechazado,
-        // completado o cancelado: 409.
-        const transitionError = acceptPlanError(source.plan.status, {
-          allowAlreadyAccepted: true,
-        });
-        if (transitionError) throw new ConflictException(transitionError);
-        if (source.items.length === 0) {
-          throw new BadRequestException(
-            'El plan no tiene ítems: agrega al menos un procedimiento antes de aceptarlo.',
-          );
+      (source, repriced): NewPlanAcceptance => {
+        let expiry: ExpiredAcceptanceRecord;
+        if (repriced) {
+          // Ya comprobado sobre el presupuesto vencido, antes de recotizar.
+          expiry = {
+            ...NO_EXPIRED_ACCEPTANCE,
+            quoteValidUntil: repriced.before.plan.quoteValidUntil,
+            mode: ExpiredQuoteAcceptanceMode.REPRICE,
+            repricingId: repriced.repricingId,
+          };
+        } else {
+          assertSignable(source);
+          expiry = expiryOf(source, acceptedAt, choice);
         }
         const content = liveContent(
           source,
@@ -451,8 +610,10 @@ export class AcceptTreatmentPlanUseCase {
           acceptedById: meta.acceptedById,
           ipAddress: meta.ipAddress,
           userAgent: meta.userAgent,
+          expiry,
         };
       },
+      reprice,
     );
     if (outcome.kind === 'NOT_FOUND') {
       throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
@@ -466,5 +627,120 @@ export class AcceptTreatmentPlanUseCase {
       book.forLocation(outcome.source.location.id),
       this.composition,
     );
+  }
+
+  /** La recotización de la firma: precios vigentes leídos y su decisión. */
+  private async repriceStep(
+    patientId: string,
+    planId: string,
+    meta: AcceptTreatmentPlanMeta,
+    at: Date,
+    previewHash: string,
+  ): Promise<AcceptReprice> {
+    const repricer = this.requireRepricer();
+    const actor = { userId: meta.acceptedById, role: meta.role };
+    const context = await repricer.read(patientId, planId, actor, at);
+    return {
+      actorUserId: meta.acceptedById,
+      decide: (source, subject) => {
+        assertSignable(source);
+        if (!quoteSourceExpiry(source, at).expired) {
+          throw new BadRequestException(EXPIRED_NOT_EXPIRED_MESSAGE);
+        }
+        return repricer.decide(context, subject, previewHash);
+      },
+    };
+  }
+
+  private requireRepricer(): AcceptanceRepricer {
+    if (!this.repricer) {
+      throw new Error('AcceptanceRepricer no está configurado');
+    }
+    return this.repricer;
+  }
+}
+
+/**
+ * Lo que la aceptación guarda del vencimiento (sin recotizar): vencido sin
+ * elegir cómo, 409 `QUOTE_EXPIRED`; con elección y sin vencer, 400; con los
+ * precios originales, su motivo. Sin vencer, la copia de la validez.
+ */
+function expiryOf(
+  source: PlanQuoteSource,
+  at: Date,
+  choice: ExpiredAcceptanceChoice | null,
+): ExpiredAcceptanceRecord {
+  const { expired, validUntil } = quoteSourceExpiry(source, at);
+  if (!expired || validUntil === null) {
+    if (choice) throw new BadRequestException(EXPIRED_NOT_EXPIRED_MESSAGE);
+    return { ...NO_EXPIRED_ACCEPTANCE, quoteValidUntil: validUntil };
+  }
+  if (!choice) {
+    throw quoteExpiredConflict(
+      validUntil,
+      quoteExpiredAcceptMessage(quoteDayText(source, validUntil)),
+    );
+  }
+  if (choice.mode !== ExpiredQuoteAcceptanceMode.ORIGINAL_PRICES) {
+    // REPRICE recotiza antes (repriceStep); aquí no puede llegar.
+    throw new Error('REPRICE sin recotización');
+  }
+  return {
+    quoteValidUntil: validUntil,
+    mode: choice.mode,
+    reason: choice.reason,
+    note: choice.note,
+    repricingId: null,
+  };
+}
+
+/** Lo que devuelve la vista previa del presupuesto recotizado en la firma. */
+export interface AcceptanceRepricePreview {
+  repricing: Repricing;
+  /** El presupuesto como se firmaría (su `contentHash` es el que se envía). */
+  quote: PlanQuoteDocument;
+}
+
+/**
+ * DX-379 (C): la vista previa de «actualizar los precios» al aceptar un
+ * presupuesto vencido. Hace lo mismo que la firma con REPRICE hasta releer el
+ * presupuesto recotizado y lo deshace: devuelve la recotización (su
+ * `previewHash` es el `repricePreviewHash` de la firma) y el presupuesto que
+ * se firmaría (su `contentHash`). No escribe nada.
+ */
+@Injectable()
+export class PreviewAcceptanceRepricingUseCase {
+  constructor(
+    @Inject(PLAN_QUOTE_REPOSITORY)
+    private readonly repo: PlanQuoteRepository,
+    @Inject(PLAN_QUOTE_CLOCK)
+    private readonly now: PlanQuoteClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
+    private readonly repricer: AcceptanceRepricer,
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
+  ) {}
+
+  async execute(
+    patientId: string,
+    planId: string,
+    actor: { userId: string; role: ClinicRole },
+  ): Promise<AcceptanceRepricePreview> {
+    const at = this.now();
+    const context = await this.repricer.read(patientId, planId, actor, at);
+    const result = await this.repo.previewRepriced(patientId, planId, {
+      actorUserId: actor.userId,
+      decide: (source, subject) => {
+        assertSignable(source);
+        return this.repricer.decide(context, subject, null);
+      },
+    });
+    if (!result) throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
+    const names = await this.documentTypeNames.get(result.source.location.id);
+    return {
+      repricing: result.repricing,
+      quote: toDocument(result.source, at, names, this.composition),
+    };
   }
 }

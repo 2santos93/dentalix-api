@@ -61,6 +61,19 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     expect(sanitizeAuditMetadata({ reason: 'clave errónea' })).toEqual({});
   });
 
+  it('DX-379 (C): los motivos de la firma de un presupuesto vencido y su recotización pasan', () => {
+    const repricingId = '77777777-7777-4777-8777-777777777777';
+    for (const reason of [
+      'QUOTE_EXPIRED_ORIGINAL_PRICES',
+      'QUOTE_EXPIRED_REPRICED',
+      'ACCEPT_REPRICE_PREVIEW',
+    ]) {
+      expect(
+        sanitizeAuditMetadata({ reason, params: { repricingId } }),
+      ).toEqual({ reason, params: { repricingId } });
+    }
+  });
+
   it('acota el número de campos y quita los repetidos', () => {
     const many = Array.from({ length: 80 }, (_, i) => `field${i}`);
     const out = sanitizeAuditMetadata({

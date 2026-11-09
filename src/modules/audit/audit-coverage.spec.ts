@@ -931,12 +931,25 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: P,
     reason: 'PLAN_REPRICED',
   },
+  // DX-379 (C): firmar un presupuesto vencido pone además, desde el handler,
+  // `reason` QUOTE_EXPIRED_ORIGINAL_PRICES | QUOTE_EXPIRED_REPRICED y, al
+  // recotizar, `params.repricingId` (sin importes; ver audit-request.spec).
   'POST /patients/:patientId/treatment-plans/:planId/acceptance': {
     action: 'SIGN',
     resource: 'TREATMENT_PLAN',
     resourceId: { param: 'planId' },
     patient: P,
   },
+  // La vista previa del presupuesto recotizado para firmarlo vencido: lee
+  // el plan (VIEW) y no escribe nada (deshace su transacción).
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/reprice-preview':
+    {
+      action: 'VIEW',
+      resource: 'TREATMENT_PLAN',
+      resourceId: { param: 'planId' },
+      patient: P,
+      reason: 'ACCEPT_REPRICE_PREVIEW',
+    },
   // DX-040: presentar y rechazar cambian el plan; una alternativa es un plan
   // nuevo del mismo paciente. La lista de presupuestos por seguir es de
   // muchos pacientes (sin paciente en el evento), pero se audita porque
