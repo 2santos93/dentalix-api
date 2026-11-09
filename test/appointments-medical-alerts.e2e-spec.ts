@@ -14,6 +14,8 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { fixedSedeDay } from './support/sede-clock';
+import { MEDICAL_ALERTS_CLOCK } from '../src/modules/medical-history/application/patient-medical-alert-flags';
 
 // DX-247 en HTTP real: la agenda y el panel «En clínica» traen SOLO las
 // banderas médicas del paciente (alerta, premedicación, anamnesis al día /
@@ -63,6 +65,12 @@ const CLINICAL_KEYS = [
   'surgeries',
   'semanasEmbarazo',
 ];
+
+// DX-460: el «hoy» de las alertas (MEDICAL_ALERTS_CLOCK) es un día fijo de la
+// sede. La anamnesis «pronto» se siembra en beforeAll para que caduque mañana
+// y se comprueba CURRENT tests después: con el reloj real, si la suite cruzaba
+// la medianoche de la sede, ya estaba EXPIRED.
+const SEDE_DAY = fixedSedeDay();
 
 function dayFromNow(days: number): string {
   const d = new Date();
@@ -157,7 +165,12 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
     ).expect(200);
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder
+          .overrideProvider(MEDICAL_ALERTS_CLOCK)
+          .useValue(() => SEDE_DAY.at),
+    });
     await resetDatabase(raw);
     clinic = await registerClinic(app, 'dx247-e2e');
     other = await registerClinic(app, 'dx247-e2e-otra');
@@ -238,7 +251,8 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
       },
     });
     await saveHistory(patients.clean, {});
-    // «Pronto»: revisada hace un año menos un día → hoy al día, caduca mañana.
+    // «Pronto»: revisada hace un año menos un día (del «hoy» de la API) → hoy
+    // al día, caduca mañana.
     await raw.medicalHistoryVersion.create({
       data: {
         tenantId: clinic.tenantId,
@@ -247,7 +261,7 @@ describe('Alertas médicas en la agenda (e2e, DX-247)', () => {
         safetyFlags: {},
         hasCriticalAlert: false,
         createdById: clinic.adminUserId,
-        createdAt: new Date(Date.now() - 364 * 86_400_000),
+        createdAt: new Date(SEDE_DAY.at.getTime() - 364 * 86_400_000),
       },
     });
     await saveHistory(patients.north, {
