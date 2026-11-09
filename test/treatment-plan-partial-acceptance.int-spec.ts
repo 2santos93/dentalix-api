@@ -16,6 +16,11 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import {
+  backendPid,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
 
 // DX-417 sobre Postgres: la aceptación parcial mueve los ítems pendientes a
 // un plan nuevo sin disparar los triggers de foto congelada ni de
@@ -208,6 +213,7 @@ describe('aceptación parcial del presupuesto (DX-417, int)', () => {
     await raw.appointment.deleteMany({ where });
     await raw.payment.deleteMany({ where });
     await raw.paymentPlan.deleteMany({ where });
+    await raw.planAllocationRebalanceRequest.deleteMany({ where });
     await raw.treatmentPlanItem.deleteMany({ where });
     await raw.treatmentPlan.deleteMany({ where });
     await raw.dentalCatalogItem.deleteMany({ where });
@@ -311,7 +317,13 @@ describe('aceptación parcial del presupuesto (DX-417, int)', () => {
         }),
       ),
     ).rejects.toThrow(/sus ítems no pasan a otro plan/);
-    // Tampoco el owner sin contexto.
+    // Tampoco el owner sin contexto. OJO (ronda 1, M-8): pasa porque el
+    // DIRECT_URL local es superusuario y ve la aceptación pese a la RLS FORCE;
+    // con un owner sin superusuario ni BYPASSRLS (producción) el EXISTS del
+    // trigger no vería la fila sin `app.current_tenant`. Es la misma
+    // limitación que la rama de destino anterior a DX-417; la app escribe
+    // siempre con su clínica en contexto (caso de arriba). No se duplica en
+    // test/owner-nosu: exigiría crear roles en el clúster compartido.
     await expect(
       raw.treatmentPlanItem.update({
         where: { id: itemIds[0] },
@@ -415,22 +427,142 @@ describe('aceptación parcial del presupuesto (DX-417, int)', () => {
     }
   });
 
-  it('dos firmas parciales a la vez: una sola aceptación y un solo pendiente', async () => {
+  it('dos firmas parciales a la vez con selecciones distintas: una sola aceptación y un solo pendiente coherente', async () => {
     const p = await patient(a, 'Carrera');
     const { planId, itemIds } = await presentedPlan(a, p, [100, 50, 25]);
-    const results = await Promise.allSettled([
-      acceptPartially(a, p, planId, [itemIds[0]]),
-      acceptPartially(a, p, planId, [itemIds[0], itemIds[1]]),
-    ]);
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-    const rejected = results.find((r) => r.status === 'rejected');
-    expect(rejected).toMatchObject({ reason: { status: 409 } });
-    expect(await raw.treatmentPlanAcceptance.count({ where: { planId } })).toBe(
-      1,
+    const selections = [[itemIds[0]], [itemIds[0], itemIds[1]]];
+    // Las dos vistas previas, antes: cada firma lleva su propio hash.
+    const hashes = await inClinic(a, () =>
+      Promise.all(
+        selections.map(async (ids) => {
+          const shown = await preview.execute(
+            p,
+            planId,
+            { itemIds: ids },
+            { userId: a.userId, role: ClinicRole.DENTIST },
+          );
+          return shown.accepted.contentHash;
+        }),
+      ),
     );
+    // M-9: otra transacción tiene el plan; las dos firmas esperan detrás de
+    // ella (comprobado en pg_locks) y salen a la vez al soltarlo.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let locked!: () => void;
+    const isLocked = new Promise<void>((resolve) => (locked = resolve));
+    let holderPid!: number;
+    const holder = prisma.runWithTenant(a.tenantId, async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR UPDATE`;
+      holderPid = await backendPid(tx);
+      locked();
+      await released;
+    });
+    await isLocked;
+    const signs = selections.map((ids, i) =>
+      settle(
+        inClinic(a, () =>
+          accept.execute(
+            p,
+            planId,
+            {
+              signerName: 'Ana Prueba',
+              signature: PNG,
+              contentHash: hashes[i],
+              partial: { itemIds: ids },
+            },
+            META(a),
+          ),
+        ),
+      ),
+    );
+    await waitForLockWaiters(raw, [holderPid], 2);
+    release();
+    await holder;
+    const results = await Promise.all(signs);
+
+    const won = results.findIndex((r) => r.status === 'fulfilled');
+    expect(won).toBeGreaterThanOrEqual(0);
+    expect(results[1 - won]).toMatchObject({
+      status: 'rejected',
+      reason: { status: 409 },
+    });
+    const acceptances = await raw.treatmentPlanAcceptance.findMany({
+      where: { planId },
+    });
+    expect(acceptances).toHaveLength(1);
+    const pendings = await raw.treatmentPlan.findMany({
+      where: { splitFromPlanId: planId },
+      include: { items: true },
+    });
+    expect(pendings).toHaveLength(1);
+    // Coherente con la que ganó: lo pendiente es justo lo que no eligió.
+    const left = itemIds.filter((id) => !selections[won].includes(id));
+    expect(pendings[0].items.map((i) => i.id).sort()).toEqual([...left].sort());
+    expect([...acceptances[0].pendingItemIds].sort()).toEqual([...left].sort());
+    expect(acceptances[0].pendingPlanId).toBe(pendings[0].id);
     expect(
-      await raw.treatmentPlan.count({ where: { splitFromPlanId: planId } }),
-    ).toBe(1);
+      await raw.treatmentPlanItem.count({
+        where: { planId, status: 'ACCEPTED' },
+      }),
+    ).toBe(selections[won].length);
+  });
+
+  it('mover los pendientes no encola un reparto de imputaciones para el pendiente', async () => {
+    const p = await patient(a, 'Reparto');
+    const { planId, itemIds } = await presentedPlan(a, p, [100, 50]);
+    const { doc } = await acceptPartially(a, p, planId, [itemIds[0]]);
+    expect(
+      await raw.planAllocationRebalanceRequest.count({
+        where: { treatmentPlanId: doc.acceptance!.pendingPlanId! },
+      }),
+    ).toBe(0);
+  });
+
+  it('M-4: la base no admite una aceptación que nombre un pendiente que no sale de su plan', async () => {
+    const p = await patient(a, 'Enlace cruzado');
+    // Un pendiente de OTRO plan (enlazado a mano: aún sin aceptación que lo
+    // nombre) y un plan suelto.
+    const third = await presentedPlan(a, p, [90]);
+    const foreignPending = await raw.treatmentPlan.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: p,
+        currency: 'VES',
+        splitFromPlanId: third.planId,
+      },
+    });
+    const second = await presentedPlan(a, p, [70, 30]);
+    const lonely = await presentedPlan(a, p, [40]);
+    for (const pendingPlanId of [foreignPending.id, lonely.planId]) {
+      await expect(
+        prisma.runWithTenant(a.tenantId, (tx) =>
+          tx.treatmentPlanAcceptance.create({
+            data: {
+              tenantId: a.tenantId,
+              planId: second.planId,
+              patientId: p,
+              locationId: a.locationId,
+              signerName: 'Ana',
+              signature: PNG.split(',')[1],
+              content: { version: 4 },
+              contentHash: 'a'.repeat(64),
+              acceptanceHash: 'a'.repeat(64),
+              acceptedAt: NOW,
+              acceptedById: a.userId,
+              pendingPlanId,
+              pendingItemIds: [second.itemIds[1]],
+              pendingTotal: 30,
+            },
+          }),
+        ),
+      ).rejects.toThrow(/tiene que venir del plan aceptado/);
+    }
+    expect(
+      await raw.treatmentPlanAcceptance.count({
+        where: { planId: second.planId },
+      }),
+    ).toBe(0);
   });
 
   it('con abonos vivos, plan de cuotas o saldo a favor: 409 y no se escribe nada', async () => {
