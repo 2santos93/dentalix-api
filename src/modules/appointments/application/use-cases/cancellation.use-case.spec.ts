@@ -51,8 +51,9 @@ function setup() {
     } as unknown as RecordAuditEventUseCase,
     new InMemoryScheduleBlockRepository(),
     {
+      // DX-267-bis: reactivar mira que la sede siga activa (SEC-014).
       findById: (id: string) =>
-        Promise.resolve({ id, timeZone: 'America/Caracas' }),
+        Promise.resolve({ id, timeZone: 'America/Caracas', isActive: true }),
     } as unknown as LocationRepository,
     tenantContext,
     inMemoryAvailability(),

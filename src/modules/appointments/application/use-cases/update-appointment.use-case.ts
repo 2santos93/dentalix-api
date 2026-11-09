@@ -6,7 +6,6 @@ import {
   Injectable,
   NotFoundException,
   Optional,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   SCHEDULE_BLOCKED_RACE_MESSAGE,
@@ -24,10 +23,12 @@ import {
   AppointmentWriteResult,
   PlanItemReservedElsewhere,
 } from '../../domain/entities/appointment.entity';
+import type { ReservedOverride } from '../schedule-block-check';
 import {
-  checkScheduleBlocks,
-  type ReservedOverride,
-} from '../schedule-block-check';
+  checkSlotRules,
+  sameCivilDay,
+  type SlotRulesDeps,
+} from '../slot-rules';
 import {
   SCHEDULE_BLOCK_CLOCK,
   systemScheduleBlockClock,
@@ -37,10 +38,6 @@ import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports
 import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import { LOCATION_SCHEDULE_REPOSITORY } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
-import {
-  businessHoursErrorMessage,
-  fitsBusinessHours,
-} from '../../../location-schedule/application/business-hours';
 import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
@@ -57,17 +54,10 @@ import {
 import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
 import { LOCATION_REPOSITORY } from '../../../locations/domain/ports/location-repository.port';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
-import { civilDateIn } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { assertAttendsAt } from '../../../staff/domain/provider-location';
-import { assertAttendingRole } from '../../../staff/domain/attending';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { ChairAssignmentService } from '../chair-assignment';
-import {
-  NO_WARNINGS,
-  collectWarnings,
-  type Warnings,
-} from '../appointment-warnings';
+import { NO_WARNINGS, type Warnings } from '../appointment-warnings';
 import {
   FLOW_TIMESTAMP_FIELD,
   FRONT_DESK_ROLES,
@@ -92,9 +82,6 @@ import {
   planItemsClosedMessage,
   planItemsEditable,
 } from '../../domain/plan-item-reservation';
-import { requireLocationFormat } from '../../../../shared/locations/location-regional';
-import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
-import { assertLocationWritable } from '../../../../shared/tenancy/active-location';
 import {
   OVERBOOK_AUDIT_REASONS,
   OVERBOOK_SLOT_TAKEN_CODE,
@@ -122,6 +109,7 @@ export type UpdateAppointmentInput = Omit<
   | 'clearCancellation'
   | 'noShowMarkedAt'
   | 'overbooked'
+  | 'recheckSlot'
 > & {
   /**
    * DX-273: motivo para sacar la cita de COMPLETED (obligatorio entonces,
@@ -432,123 +420,29 @@ export class UpdateAppointmentUseCase {
     const nextChairId =
       patch.chairId !== undefined ? patch.chairId : existing.chairId;
     const isReschedule = moves;
-    if (isReschedule) {
-      // SEC-014: una sede desactivada no recibe horas nuevas. Solo al
-      // reagendar: cancelar, completar o editar notas siguen abiertos para
-      // poder cerrar la agenda de la sede.
-      const site = await this.locations.findById(existing.locationId);
-      if (site) assertLocationWritable(site);
-      const nextStart = patch.start ?? existing.start;
-      const nextEnd = patch.end ?? existing.end;
-      const nextProviderId = patch.providerId ?? existing.providerId;
-
-      if (nextEnd <= nextStart) {
-        throw new BadRequestException('End must be after start');
-      }
-
-      // DX-200: con el paciente en la clínica la cita sigue siendo de HOY:
-      // moverla a otro día la dejaría «en curso» fuera de cualquier panel.
-      // Cambiar de profesional o de hora dentro del día sí se puede.
-      if (
-        isInClinic(existing.status) &&
-        !(await this.sameCivilDay(existing, nextStart))
-      ) {
-        throw new ConflictException(PATIENT_FLOW_MESSAGES.moveInClinic);
-      }
-
-      // No re-agendar hacia el pasado. Deliberadamente SOLO dentro de la rama
-      // de reschedule: una cita que ya pasó se sigue pudiendo completar,
-      // cancelar o editarle notas/motivo (patch sin start/end) — bloquear eso
-      // haría imposible cerrar la agenda del día.
-      if (nextStart.getTime() < Date.now()) {
-        throw new BadRequestException(
-          'No se puede reagendar una cita al pasado',
-        );
-      }
-
-      if (nextProviderId !== existing.providerId) {
-        const provider = await this.staff.findById(nextProviderId);
-        if (!provider) {
-          throw new NotFoundException('Profesional no encontrado');
-        }
-        // DX-121d: el profesional destino atiende en la sede de la cita.
-        assertAttendsAt(provider, existing.locationId);
-        // DX-161: y atiende pacientes (no recepción ni asistencia).
-        assertAttendingRole(provider);
-      }
-
-      // Horario de atención de la SEDE DE LA CITA (no la del request: mover una
-      // cita no la cambia de sede) — y también SOLO en la rama de reagendar:
-      // una cita que quedó fuera de horario (p. ej. porque la clínica cambió su
-      // horario después) se sigue pudiendo completar o cancelar. 422: la
-      // petición es válida, pero el hueco no existe (DX-121).
-      const hours = await this.schedule.findByLocation(existing.locationId);
-      if (!fitsBusinessHours(nextStart, nextEnd, hours)) {
-        // DX-354: formato y reloj de la sede de la cita, pedido solo si el
-        // mensaje lleva horas.
-        const source = await this.schedule.formatSourceOf(existing.locationId);
-        throw new UnprocessableEntityException(
-          businessHoursErrorMessage(nextStart, nextEnd, hours!, () =>
-            requireLocationFormat(source),
-          ),
-        );
-      }
-
-      // DX-233: horario del profesional DESTINO en la sede de la cita; solo
-      // al reagendar, como el de la sede.
-      const offSchedule = await this.availability.warnOrReject({
-        providerId: nextProviderId,
-        locationId: existing.locationId,
-        start: nextStart,
-        end: nextEnd,
-      });
-
-      // DX-122: bloqueos del profesional DESTINO en la sede de la cita. Solo al
-      // reagendar, como el horario: cancelar o completar una cita que quedó
-      // dentro de un bloqueo creado después tiene que seguir siendo posible.
-      // DX-446: con el tipo de la cita, el reloj y el rol de quien mueve.
-      const blockCheck = await checkScheduleBlocks(
-        this.blocks,
+    // DX-267-bis (BE-039): reactivar = una cita cancelada o no-show vuelve a
+    // agendada o confirmada en su misma hora y con su mismo profesional. Es
+    // «moverla a donde estaba»: pasa por las MISMAS reglas que mover (más
+    // «ya pasó»). Si además se mueve, ya va por mover con la hora nueva.
+    // `→ COMPLETED` (corregir el registro) y CANCELLED ↔ NO_SHOW no.
+    const reactivatesSlot =
+      !isReschedule &&
+      WAITLIST_STATUSES.has(existing.status) &&
+      (nextStatus === AppointmentStatus.SCHEDULED ||
+        nextStatus === AppointmentStatus.CONFIRMED);
+    if (isReschedule || reactivatesSlot) {
+      ({ reservedOverride, ...warnings } = await checkSlotRules(
+        this.slotRulesDeps(),
         {
-          providerId: nextProviderId,
-          start: nextStart,
-          end: nextEnd,
-          locationId: existing.locationId,
-        },
-        {
-          appointmentTypeId: existing.appointmentTypeId,
-          now: this.clock(),
+          mode: isReschedule ? 'move' : 'reactivate',
+          appointment: existing,
+          providerId: patch.providerId ?? existing.providerId,
+          start: patch.start ?? existing.start,
+          end: patch.end ?? existing.end,
           actorRole: auditContext?.actor.role ?? null,
           overrideReason,
         },
-      );
-      warnings = collectWarnings(blockCheck.warnings, offSchedule);
-      reservedOverride = blockCheck.override;
-
-      // Re-check overlap EXCLUDING this appointment's own id — otherwise an
-      // unchanged appointment would always "collide" with itself. Contra el
-      // profesional DESTINO.
-      const overlapping = await this.repo.findOverlapping(
-        nextProviderId,
-        nextStart,
-        nextEnd,
-        existing.id,
-      );
-      if (overlapping.length > 0) {
-        throw overlapConflict('provider');
-      }
-
-      // Mismo criterio, otro eje: el paciente tampoco puede quedar con dos
-      // citas solapadas al reagendar.
-      const patientOverlapping = await this.repo.findOverlappingForPatient(
-        existing.patientId,
-        nextStart,
-        nextEnd,
-        existing.id,
-      );
-      if (patientOverlapping.length > 0) {
-        throw overlapConflict('patient');
-      }
+      ));
     }
 
     // DX-211: el sillón de la cita al cambiarlo, al reagendarla o al
@@ -626,6 +520,9 @@ export class UpdateAppointmentUseCase {
         ? { confirmationSentAt: null, callbackRequestedAt: null }
         : {}),
       ...(isReschedule ? { revokeConfirmations: true } : {}),
+      // DX-267-bis: reactivar también toma el candado de la agenda y vuelve a
+      // mirar los bloqueos dentro de la transacción (DX-149), como mover.
+      ...(reactivatesSlot ? { recheckSlot: true as const } : {}),
       ...(overbook === 'clear' ? { overbooked: false as const } : {}),
       ...(fromOpening ? { requireWantsEarlier: true } : {}),
       ...(completedExit ? { completedExit } : {}),
@@ -979,17 +876,24 @@ export class UpdateAppointmentUseCase {
   }
 
   /** ¿`instant` cae en el mismo día civil que la cita, en la zona de su sede? */
-  private async sameCivilDay(
+  private sameCivilDay(
     appointment: Appointment,
     instant: Date,
   ): Promise<boolean> {
-    const location = await this.locations.findById(appointment.locationId);
-    if (!location) throw new NotFoundException('Sede no encontrada');
-    const timeZone = requireLocationTimeZone(location);
-    return (
-      civilDateIn(appointment.start, timeZone) ===
-      civilDateIn(instant, timeZone)
-    );
+    return sameCivilDay(this.locations, appointment, instant);
+  }
+
+  /** Lo que necesitan las reglas del hueco (mover y reactivar, DX-267-bis). */
+  private slotRulesDeps(): SlotRulesDeps {
+    return {
+      locations: this.locations,
+      schedule: this.schedule,
+      staff: this.staff,
+      availability: this.availability,
+      blocks: this.blocks,
+      repo: this.repo,
+      clock: this.clock,
+    };
   }
 
   /** `audit_event` de un paso del flujo en la clínica (DX-200). */

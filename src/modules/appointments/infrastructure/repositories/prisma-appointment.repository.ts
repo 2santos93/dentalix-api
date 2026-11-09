@@ -438,10 +438,12 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
 
         // DX-149: mover (hora o profesional) con el candado de la agenda y
         // volviendo a mirar los bloqueos dentro de esta transacción.
+        // DX-267-bis: reactivar en su hora (`recheckSlot`), igual.
         if (
           patch.start !== undefined ||
           patch.end !== undefined ||
-          patch.providerId !== undefined
+          patch.providerId !== undefined ||
+          patch.recheckSlot
         ) {
           const slot = await tx.appointment.findUniqueOrThrow({
             where: { id },
@@ -475,6 +477,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           audit,
           cancel,
           clearCancellation,
+          recheckSlot: _recheckSlot,
           ...rest
         } = patch;
         // DX-279: los datos de la cancelación van en la MISMA sentencia que el

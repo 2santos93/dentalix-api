@@ -560,14 +560,18 @@ describe('UpdateAppointmentUseCase', () => {
       );
     });
 
-    it('maps an UN-CANCEL into a taken slot to 409 (no pre-check runs on a status-only patch)', async () => {
+    it('maps an UN-CANCEL into a slot taken meanwhile to 409 (the pre-check passed, the EXCLUDE decides)', async () => {
+      // DX-267-bis: reactivar ya corre el pre-check de solape (libre aquí);
+      // si otra cita entra entre el pre-check y la escritura, el backstop
+      // 23P01 sigue dando el 409 con su código.
       const existing = fakeAppointment({ status: AppointmentStatus.CANCELLED });
+      let overlapChecked = false;
       const repo = makeRepo({
         findById: (): Promise<Appointment | null> => Promise.resolve(existing),
-        findOverlapping: (): Promise<Appointment[]> =>
-          Promise.reject(
-            new Error('findOverlapping should not run for a status-only patch'),
-          ),
+        findOverlapping: (): Promise<Appointment[]> => {
+          overlapChecked = true;
+          return Promise.resolve([]);
+        },
         update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
       const uc = new UpdateAppointmentUseCase(
@@ -581,9 +585,14 @@ describe('UpdateAppointmentUseCase', () => {
         inMemoryAvailability(),
       );
 
-      await expect(
-        uc.execute('a1', { status: AppointmentStatus.SCHEDULED }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      const error = await uc
+        .execute('a1', { status: AppointmentStatus.SCHEDULED })
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toEqual(
+        expect.objectContaining({ code: 'APPOINTMENT_OVERLAP' }),
+      );
+      expect(overlapChecked).toBe(true);
     });
 
     it('does NOT swallow unrelated update errors (rethrows as-is)', async () => {
