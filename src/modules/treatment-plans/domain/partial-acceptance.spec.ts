@@ -265,6 +265,36 @@ describe('splitTotals: aceptado + pendiente = original', () => {
     { code: 'JPY', integral: true },
   );
 
+  it('M-9: con la referencia por encima del precio (convenio), el ahorro también se reparte', () => {
+    const items = [
+      item(A, {
+        price: 80,
+        basePrice: 150,
+        referencePrice: 100,
+        agreementName: 'Seguros Ávila',
+        agreementPayerName: 'Seguros Ávila',
+        listPriceCurrency: 'USD',
+      }),
+      item(B, {
+        price: 50,
+        basePrice: 70,
+        referencePrice: 60,
+        agreementName: 'Seguros Ávila',
+        agreementPayerName: 'Seguros Ávila',
+        listPriceCurrency: 'USD',
+      }),
+    ];
+    const totals = splitTotals(
+      items,
+      { acceptedItemIds: [A], pendingItemIds: [B] },
+      'USD',
+    );
+    // max(precio, referencia): 150 − 100 y 70 − 60.
+    expect(totals.accepted.agreementSaving).toBe(50);
+    expect(totals.pending.agreementSaving).toBe(10);
+    expect(totals.original.agreementSaving).toBe(60);
+  });
+
   it('para cualquier plan y cualquier partición (propiedad)', () => {
     fc.assert(
       fc.property(
@@ -279,6 +309,9 @@ describe('splitTotals: aceptado + pendiente = original', () => {
                   agreement: fc.boolean(),
                   listCurrency: fc.constantFrom(currency.code, 'USD', 'EUR'),
                   listExtraCents: fc.integer({ min: 0, max: 1_000_000 }),
+                  // M-9: la referencia, aparte, entre el precio y la lista
+                  // (rebaja bajo convenio: referencia > precio).
+                  referenceShare: fc.double({ min: 0, max: 1, noNaN: true }),
                   accepted: fc.boolean(),
                 })
                 .map((r) => {
@@ -296,7 +329,12 @@ describe('splitTotals: aceptado + pendiente = original', () => {
                             agreementName: 'Convenio',
                             agreementPayerName: 'Pagador',
                             basePrice: (priceCents + r.listExtraCents) / 100,
-                            referencePrice: priceCents / 100,
+                            referencePrice:
+                              (priceCents +
+                                Math.floor(
+                                  r.listExtraCents * r.referenceShare,
+                                )) /
+                              100,
                             listPriceCurrency: r.listCurrency,
                           }
                         : {}),
