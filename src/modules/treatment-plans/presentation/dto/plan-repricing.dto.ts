@@ -138,7 +138,6 @@ export class RepricingSkipDto {
 
 export class RepricingRateDto extends ReferenceRateDto {
   @ApiProperty({
-    example: 'USD',
     description:
       'Moneda del catálogo (de la que se convirtió) en ISO 4217; `fromPerBase` es de esta moneda.',
   })
