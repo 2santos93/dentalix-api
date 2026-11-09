@@ -1,5 +1,6 @@
 import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
 import { ConflictException, Injectable } from '@nestjs/common';
+import type { QuoteValidity } from '../../treatment-plans/domain/quote-validity';
 import {
   ClinicRole,
   Prisma,
@@ -30,7 +31,9 @@ import type {
 import {
   RemoteBudgetChangedError,
   type BudgetSource,
+  type CreateSignatureRequestOptions,
   type CreateSignatureRequestRepoInput,
+  SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE,
   type LockedWrite,
   type PublicRequestEvidence,
   type RemoteBudgetAcceptanceInsert,
@@ -147,6 +150,36 @@ function toListRow(row: ListRow): SignatureRequestListRow {
 }
 
 /** DX-425: otro envío del mismo documento ganó la carrera. */
+/**
+ * DX-379 (M-3): guarda en el plan la validez de la foto enviada si aún no
+ * tiene ninguna (la primera emisión manda, como al imprimir). Si otro la
+ * guardó entre medias con otras fechas, la foto ya no sería la del plan: 409
+ * y no se crea nada.
+ */
+async function fixPlanQuoteValidity(
+  tx: Prisma.TransactionClient,
+  planId: string,
+  validity: QuoteValidity,
+): Promise<void> {
+  const issuedOn = new Date(`${validity.issuedOn}T00:00:00.000Z`);
+  const validUntil = new Date(`${validity.validUntil}T00:00:00.000Z`);
+  const { count } = await tx.treatmentPlan.updateMany({
+    where: { id: planId, quoteIssuedOn: null, quoteValidUntil: null },
+    data: { quoteIssuedOn: issuedOn, quoteValidUntil: validUntil },
+  });
+  if (count > 0) return;
+  const plan = await tx.treatmentPlan.findFirst({
+    where: { id: planId },
+    select: { quoteIssuedOn: true, quoteValidUntil: true },
+  });
+  if (
+    plan?.quoteIssuedOn?.getTime() !== issuedOn.getTime() ||
+    plan.quoteValidUntil?.getTime() !== validUntil.getTime()
+  ) {
+    throw new ConflictException(SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE);
+  }
+}
+
 export const SIGNATURE_ALREADY_SENDING_MESSAGE =
   'Este documento ya se está enviando a firma. Actualiza la lista de envíos y, si hace falta, vuelve a enviarlo.';
 
@@ -339,9 +372,10 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
       tx: Prisma.TransactionClient,
       supersededIds: string[],
     ) => Promise<void>,
+    options: CreateSignatureRequestOptions = {},
   ): Promise<{ id: string; supersededIds: string[] }> {
     try {
-      return await this.createLive(input, enqueue);
+      return await this.createLive(input, enqueue, options);
     } catch (error) {
       // DX-425 (DB-061): dos envíos a la vez del mismo documento. Ambos
       // vieron «nada pendiente» e insertaron; el índice único parcial deja
@@ -355,16 +389,26 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
 
   private createLive(
     input: CreateSignatureRequestRepoInput,
-    enqueue?: (
-      tx: Prisma.TransactionClient,
-      supersededIds: string[],
-    ) => Promise<void>,
+    enqueue:
+      | ((
+          tx: Prisma.TransactionClient,
+          supersededIds: string[],
+        ) => Promise<void>)
+      | undefined,
+    options: CreateSignatureRequestOptions,
   ): Promise<{ id: string; supersededIds: string[] }> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
       // está archivado: nunca un enlace vivo ni un mensaje a un archivado.
       await lockLivePatientOrConflict(tx, input.patientId);
+      if (options.planQuoteValidity && input.treatmentPlanId) {
+        await fixPlanQuoteValidity(
+          tx,
+          input.treatmentPlanId,
+          options.planQuoteValidity,
+        );
+      }
       // La anterior del mismo paciente y plantilla (o, BUDGET, del mismo
       // plan) que aún esperaba deja de servir: un solo enlace vivo por
       // documento.

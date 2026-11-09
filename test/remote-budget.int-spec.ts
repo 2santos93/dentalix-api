@@ -4,6 +4,8 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaSignatureRequestRepository } from '../src/modules/signature-requests/infrastructure/prisma-signature-request.repository';
 import {
   RemoteBudgetChangedError,
+  SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE,
+  type CreateSignatureRequestOptions,
   type RemoteBudgetAcceptanceInsert,
 } from '../src/modules/signature-requests/domain/ports/signature-request-repository.port';
 import { budgetStillMatches } from '../src/modules/signature-requests/application/remote-budget';
@@ -135,7 +137,11 @@ const asClinic = <T>(tenantId: string, fn: () => Promise<T>) =>
   tenantContext.run(tenantId, fn);
 
 /** Envía el presupuesto del plan como lo hace la app (foto + hash). */
-async function sendBudget(s: Seeded, planId: string) {
+async function sendBudget(
+  s: Seeded,
+  planId: string,
+  options: CreateSignatureRequestOptions = {},
+) {
   const budget = await asClinic(s.tenantId, () =>
     repo.loadBudget(s.patientId, planId, s.locationId),
   );
@@ -170,7 +176,9 @@ async function sendBudget(s: Seeded, planId: string) {
     createdById: s.userId,
     createdAt: now,
   };
-  const { id } = await asClinic(s.tenantId, () => repo.create(request));
+  const { id } = await asClinic(s.tenantId, () =>
+    repo.create(request, undefined, options),
+  );
   return { id, request };
 }
 
@@ -225,6 +233,14 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
     await resetDatabase(owner);
     a = await seedClinic('dx415-int-a');
     b = await seedClinic('dx415-int-b');
+  });
+
+  // M-7: un caso que cambia el ajuste de días no lo deja cambiado aunque falle.
+  afterEach(async () => {
+    await owner.tenant.updateMany({
+      where: { id: { in: [a.tenantId, b.tenantId] } },
+      data: { quoteValidityDays: 30 },
+    });
   });
 
   afterAll(async () => {
@@ -294,10 +310,52 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
     expect(budget?.quote.clinic.quoteValidityDays).toBe(7);
     expect(budgetStillMatches(request, budget!.quote, NAMES)).toBe(true);
     await expect(signBudget(a, id, planId)).resolves.toBe('SIGNED');
-    await owner.tenant.update({
-      where: { id: a.tenantId },
-      data: { quoteValidityDays: 30 },
+  });
+
+  it('DX-379 (M-3): enviar un plan sin validez la guarda en el plan en la misma transacción, con las fechas de la foto', async () => {
+    const planId = await presentedPlan(a);
+    // La validez que calcula el caso de uso (hoy en la sede + ajuste); aquí,
+    // la misma que lleva la foto que compone el helper.
+    const budget = await asClinic(a.tenantId, () =>
+      repo.loadBudget(a.patientId, planId, a.locationId),
+    );
+    const validity = quoteValidityOf(budget!.quote, new Date());
+    const { request } = await sendBudget(a, planId, {
+      planQuoteValidity: validity,
     });
+    expect(request.budgetContent).toMatchObject(validity);
+    const plan = await owner.treatmentPlan.findUniqueOrThrow({
+      where: { id: planId },
+      select: { quoteIssuedOn: true, quoteValidUntil: true },
+    });
+    expect({
+      issuedOn: plan.quoteIssuedOn?.toISOString().slice(0, 10),
+      validUntil: plan.quoteValidUntil?.toISOString().slice(0, 10),
+    }).toEqual(validity);
+  });
+
+  it('DX-379 (M-3): si entre medias el plan recibió otra validez, 409 y no se crea la solicitud', async () => {
+    const planId = await presentedPlan(a);
+    await owner.treatmentPlan.update({
+      where: { id: planId },
+      data: {
+        quoteIssuedOn: new Date('2026-03-01T00:00:00.000Z'),
+        quoteValidUntil: new Date('2026-03-31T00:00:00.000Z'),
+      },
+    });
+    await expect(
+      sendBudget(a, planId, {
+        planQuoteValidity: {
+          issuedOn: '2026-03-02',
+          validUntil: '2026-04-01',
+        },
+      }),
+    ).rejects.toThrow(SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE);
+    expect(
+      await owner.signatureRequest.count({
+        where: { treatmentPlanId: planId },
+      }),
+    ).toBe(0);
   });
 
   it('DX-379: con validez guardada, la foto enviada lleva esas fechas', async () => {

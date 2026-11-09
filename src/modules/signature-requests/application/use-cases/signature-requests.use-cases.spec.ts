@@ -940,6 +940,43 @@ describe('presupuesto a distancia (DX-415)', () => {
     });
   });
 
+  it('DX-379 (M-3): enviar un plan sin validez guardada la fija en el plan con las mismas fechas que la foto', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      clinic: { ...budget.quote.clinic, quoteValidityDays: 10 },
+    };
+    await sendBudget(ctx);
+    expect(ctx.repo.rows[0].budgetContent).toMatchObject({
+      issuedOn: '2026-10-30',
+      validUntil: '2026-11-09',
+      validityDays: 10,
+    });
+    expect(ctx.repo.budgets.get('plan-1')?.quote.plan).toMatchObject({
+      quoteIssuedOn: '2026-10-30',
+      quoteValidUntil: '2026-11-09',
+    });
+  });
+
+  it('DX-379 (M-3): con validez guardada no la toca', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-10-20',
+        quoteValidUntil: '2026-11-04',
+      },
+    };
+    await sendBudget(ctx);
+    expect(ctx.repo.budgets.get('plan-1')?.quote.plan).toMatchObject({
+      quoteIssuedOn: '2026-10-20',
+      quoteValidUntil: '2026-11-04',
+    });
+  });
+
   it('DX-379 (G.5): un enlace enviado sin validez guardada sigue valiendo aunque luego cambie el ajuste o se guarden fechas', async () => {
     const ctx = setup();
     const budget = presentedBudget(ctx);
