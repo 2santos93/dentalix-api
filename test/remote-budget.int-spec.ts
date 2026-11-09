@@ -267,6 +267,56 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
     expect(row?.budgetAcceptance?.id).toBe(acceptance.id);
   });
 
+  it('DX-379 (G.5): un enlace enviado sin validez guardada sigue valiendo y se firma aunque después se guarden fechas y cambie el ajuste', async () => {
+    // Plan presentado antes de DX-379: sin fechas. Se envía con hoy + 30.
+    const planId = await presentedPlan(a);
+    const { id, request } = await sendBudget(a, planId);
+    const sent = request.budgetContent;
+    expect(sent.validityDays).toBe(30);
+    // Tras el despliegue: la clínica cambia el ajuste y el plan guarda otra
+    // validez (p. ej. una impresión). El enlace pendiente se recompone con
+    // las fechas de SU foto, así que sigue valiendo.
+    await owner.tenant.update({
+      where: { id: a.tenantId },
+      data: { quoteValidityDays: 7 },
+    });
+    await owner.treatmentPlan.update({
+      where: { id: planId },
+      data: {
+        quoteIssuedOn: new Date('2026-01-05T00:00:00.000Z'),
+        quoteValidUntil: new Date('2026-01-12T00:00:00.000Z'),
+      },
+    });
+    const budget = await asClinic(a.tenantId, () =>
+      repo.loadBudget(a.patientId, planId, a.locationId),
+    );
+    expect(budget?.quote.plan.quoteValidUntil).toBe('2026-01-12');
+    expect(budget?.quote.clinic.quoteValidityDays).toBe(7);
+    expect(budgetStillMatches(request, budget!.quote, NAMES)).toBe(true);
+    await expect(signBudget(a, id, planId)).resolves.toBe('SIGNED');
+    await owner.tenant.update({
+      where: { id: a.tenantId },
+      data: { quoteValidityDays: 30 },
+    });
+  });
+
+  it('DX-379: con validez guardada, la foto enviada lleva esas fechas', async () => {
+    const planId = await presentedPlan(a);
+    await owner.treatmentPlan.update({
+      where: { id: planId },
+      data: {
+        quoteIssuedOn: new Date('2026-02-01T00:00:00.000Z'),
+        quoteValidUntil: new Date('2026-02-16T00:00:00.000Z'),
+      },
+    });
+    const { request } = await sendBudget(a, planId);
+    expect(request.budgetContent).toMatchObject({
+      issuedOn: '2026-02-01',
+      validUntil: '2026-02-16',
+      validityDays: 15,
+    });
+  });
+
   it('si el plan cambió, no se escribe nada (ni la firma ni la aceptación)', async () => {
     const planId = await presentedPlan(a);
     const { id } = await sendBudget(a, planId);

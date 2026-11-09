@@ -1464,6 +1464,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         `/patients/${a.patientId}/treatment-plans/${a.signedPlanId}/quote`,
       status: 404,
     },
+    // DX-379: imprimir el presupuesto (la primera impresión fija la validez).
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/quote/issue',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/quote/issue`,
+      body: () => ({}),
+      status: 404,
+    },
     {
       name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance',
       verb: 'post',
