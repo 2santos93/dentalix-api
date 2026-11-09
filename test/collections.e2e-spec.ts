@@ -18,7 +18,9 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { COLLECTIONS_CLOCK } from '../src/modules/collections/application/collections-clock';
+import { fixedSedeDay } from './support/sede-clock';
 import { COLLECTIONS_REPOSITORY } from '../src/modules/collections/domain/ports/collections-repository.port';
 import type { CollectionsRepository } from '../src/modules/collections/domain/ports/collections-repository.port';
 import { SettlePaymentPromises } from '../src/modules/collections/application/settle-payment-promises';
@@ -32,8 +34,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const CARACAS = 'America/Caracas';
-const today = (): string => civilDateIn(new Date(), CARACAS);
+// DX-460: «hoy» fijo de la sede, el mismo que ve la API por su
+// COLLECTIONS_CLOCK (antigüedad de la deuda, promesas vencidas). El plan de
+// hace 40 días se siembra en beforeAll y overdueDays: 40 se comprueba tests
+// después: con el reloj real daba 41 si la suite cruzaba la medianoche.
+const SEDE_DAY = fixedSedeDay();
+const today = (): string => SEDE_DAY.day;
 const noonDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T17:00:00.000Z`);
 
@@ -136,7 +142,10 @@ describe('Cobranza — notas, compromisos y saldo vencido (e2e, DX-150)', () => 
   }
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder.overrideProvider(COLLECTIONS_CLOCK).useValue(() => SEDE_DAY.at),
+    });
     await resetDatabase(raw);
     clinicA = await registerClinic(app, 'cobranza-a');
     clinicB = await registerClinic(app, 'cobranza-b');

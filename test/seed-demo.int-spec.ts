@@ -55,6 +55,7 @@ import {
   civilDateIn,
   civilWeekday,
 } from '../src/shared/time/civil-day';
+import { civilDaysSince } from './support/sede-clock';
 import { tenantTablesInDeleteOrder } from './support/tenant-purge';
 import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
@@ -1575,7 +1576,26 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // Las tasas son de la clínica: se cuentan desde el «hoy» de la principal,
     // y el día de cada abono es el de su sede.
     const zones = await demoZonesById(tenantId);
-    const today = civilDateIn(new Date(), DEMO_LOCATIONS.principal.timeZone);
+    // DX-460: el «hoy» es el de la SIEMBRA, no el de este test: la siembra
+    // puede haber cruzado la medianoche de la principal (uno o dos días
+    // civiles, sede-clock) y este test corre después. Lo da manualSince
+    // (= hoy − 60) y tiene que ser uno de esos días.
+    const settings = await raw.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { exchangeRateSource: true, manualExchangeRatesSince: true },
+    });
+    expect(settings.exchangeRateSource).toBe('MANUAL');
+    const today = addCivilDays(
+      settings.manualExchangeRatesSince!.toISOString().slice(0, 10),
+      60,
+    );
+    expect(
+      civilDaysSince(
+        (seededBetween.end - seededBetween.start) / 60_000,
+        DEMO_LOCATIONS.principal.timeZone,
+        new Date(seededBetween.end),
+      ),
+    ).toContain(today);
     for (const p of foreign) {
       expect(p).toMatchObject({
         currency: 'VES',
@@ -1600,14 +1620,6 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         .map((p) => Math.round(Number(p.amount) / Number(p.exchangeRateFrom)))
         .sort((a, b) => a - b),
     ).toEqual([10, 45, 130, 300]);
-    const settings = await raw.tenant.findUniqueOrThrow({
-      where: { id: tenantId },
-      select: { exchangeRateSource: true, manualExchangeRatesSince: true },
-    });
-    expect(settings.exchangeRateSource).toBe('MANUAL');
-    expect(settings.manualExchangeRatesSince!.toISOString().slice(0, 10)).toBe(
-      addCivilDays(today, -60),
-    );
     // Por moneda: la tasa VES del «hoy» de la principal es 250 (el resto de
     // la cobertura, en «manual rates cover every non-USD currency…»).
     const rates = await raw.manualExchangeRate.findMany({

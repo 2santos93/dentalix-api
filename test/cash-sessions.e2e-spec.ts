@@ -15,6 +15,7 @@ import {
   civilDateIn,
   zonedStartOfDay,
 } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
@@ -374,7 +375,9 @@ describe('Caja por turno (e2e, DX-027)', () => {
     const norteOnly = await api(
       clinicA,
       'get',
-      `/cash-sessions?locationId=${sedeNorte}&from=${today()}&to=${today()}`,
+      // DX-460: la caja se abrió unas líneas más arriba; si la suite cruzó
+      // la medianoche de la sede entre medias, su día es el anterior.
+      `/cash-sessions?locationId=${sedeNorte}&from=${addCivilDays(today(), -1)}&to=${today()}`,
       clinicA.adminToken,
     ).expect(200);
     expect(
@@ -541,7 +544,10 @@ describe('Caja por turno (e2e, DX-027)', () => {
   });
 
   it('un abono con fecha de un día cuya caja ya cerró es un ajuste de la caja abierta, con enlace a la cerrada', async () => {
-    const yesterday = addCivilDays(today(), -1);
+    // DX-460: el día anterior al de la carga del módulo (sede-clock), no al
+    // de este test: ninguna caja abierta durante la suite cubre ese día, aunque
+    // la suite cruce la medianoche de la sede.
+    const yesterday = fixedSedeDay(1).day;
     const start = zonedStartOfDay(yesterday, CARACAS).getTime();
     const hour = 60 * 60 * 1000;
     const closedYesterday = await raw.$transaction(async (tx) => {

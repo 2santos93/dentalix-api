@@ -23,7 +23,9 @@ import {
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
 import { PAYMENT_RATE_BACKLOG_FORBIDDEN_MESSAGE } from '../src/modules/payments/presentation/payment-rate-backlog.controller';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 
 // DX-402: el caso de la QA de DX-380 (punto 7, caso A) en HTTP real. La
 // clínica está en la fuente automática, el proveedor no responde (doble
@@ -39,8 +41,11 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const PREFIX = `dx402-e2e-${Date.now().toString(36)}`;
-const ZONE = 'America/Caracas';
-const TODAY = civilDateIn(new Date(), ZONE);
+// DX-460: «hoy» fijo de la sede, el mismo que ve la API por su
+// EXCHANGE_RATE_CLOCK (manualSince al pasar a MANUAL), corra la suite a la
+// hora que corra; antes TODAY salía del reloj real al cargar el módulo.
+const SEDE_DAY = fixedSedeDay();
+const TODAY = SEDE_DAY.day;
 const DAY = addCivilDays(TODAY, -2);
 const BACKLOG = '/api/v1/payments/rate-backlog';
 const dayPreview = (date: string, currency: string) =>
@@ -112,7 +117,9 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
       override: (builder) =>
         builder
           .overrideProvider(EXCHANGE_RATE_PROVIDER)
-          .useValue({ fetchRates }),
+          .useValue({ fetchRates })
+          .overrideProvider(EXCHANGE_RATE_CLOCK)
+          .useValue(() => SEDE_DAY.at),
     });
     await purgeDay();
     clinic = await registerClinic(app, `${PREFIX}-a`);

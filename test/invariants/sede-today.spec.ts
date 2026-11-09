@@ -24,20 +24,22 @@ const REPO_ROOT = join(__dirname, '..', '..');
 
 /**
  * Lista blanca: specs anteriores a DX-449 que nombran «hoy» y leen el reloj
- * real sin sede-clock. Justificación: ninguno aparece en las runs rojas de la
- * franja 03:40–05:00 UTC que cita TST-053 y su «hoy» no exige citas ya
- * empezadas en la sede; quedan para migrar (ver informe de DX-449). Solo puede
- * bajar: cada entrada tiene que seguir cumpliendo el patrón (un spec migrado
- * sale de aquí) y un spec nuevo no entra.
+ * real sin sede-clock. DX-460 revisó uno por uno los 27 que quedaban: en 8 el
+ * «hoy» se fijaba en beforeAll, al cargar el módulo o en un test anterior y se
+ * comparaba tests después con el que calcula la API con su reloj real (fallo
+ * real al cruzar la medianoche de la sede); esos 8 ya usan sede-clock y
+ * salieron de aquí. En los 19 que siguen, «hoy» es un campo de la respuesta
+ * (offersToday, registeredToday), un literal, un día UTC, un reloj ya
+ * inyectado o un cálculo y su comprobación dentro del mismo test (carrera de
+ * milisegundos, la misma que aceptan los specs migrados). El patrón es léxico
+ * y los sigue marcando: se quedan aquí, documentados, y no se tocan por
+ * maquillaje. Solo puede bajar: cada entrada tiene que seguir cumpliendo el
+ * patrón (un spec migrado sale de aquí) y un spec nuevo no entra.
  */
 const LEGACY_REAL_CLOCK_TODAY: ReadonlySet<string> = new Set([
-  'test/appointments-medical-alerts.e2e-spec.ts',
-  'test/cash-register.e2e-spec.ts',
   'test/cash-sessions-concurrency.e2e-spec.ts',
-  'test/cash-sessions.e2e-spec.ts',
   'test/clinical-codes.e2e-spec.ts',
   'test/collections-reopen.e2e-spec.ts',
-  'test/collections.e2e-spec.ts',
   'test/exchange-provider-budget.e2e-spec.ts',
   'test/exchange-provider-quota.e2e-spec.ts',
   'test/exchange-rate-dates.e2e-spec.ts',
@@ -49,14 +51,10 @@ const LEGACY_REAL_CLOCK_TODAY: ReadonlySet<string> = new Set([
   'test/patient-flow.e2e-spec.ts',
   'test/payment-can-void.e2e-spec.ts',
   'test/payment-method-statement.e2e-spec.ts',
-  'test/payment-rate-backup.e2e-spec.ts',
-  'test/payment-receipt-exchange-rate.e2e-spec.ts',
   'test/receivables.e2e-spec.ts',
-  'test/split-payments.e2e-spec.ts',
   'test/collections.int-spec.ts',
   'test/opening-balances.int-spec.ts',
   'test/payment-promise-reopen.int-spec.ts',
-  'test/seed-demo.int-spec.ts',
   'test/waitlist-offers.int-spec.ts',
 ]);
 

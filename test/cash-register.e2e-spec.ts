@@ -14,6 +14,8 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import { fixedSedeDay } from './support/sede-clock';
+import { PAYMENT_CLOCK } from '../src/modules/payments/application/use-cases/void-payment.use-case';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
@@ -28,6 +30,11 @@ import {
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
+
+// DX-460: el «hoy» de la API (PAYMENT_CLOCK) es un día fijo de la sede: la
+// fila sembrada «hoy» en beforeAll se comprueba (registeredToday) tests después
+// y con el reloj real fallaba si la suite cruzaba la medianoche de la sede.
+const SEDE_DAY = fixedSedeDay();
 
 const passwordService = new PasswordService();
 const PASSWORD = 'S3cret!!';
@@ -154,7 +161,10 @@ describe('Caja — GET /payments (e2e)', () => {
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(PAYMENT_CLOCK)
+      .useValue(() => SEDE_DAY.at)
+      .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(
@@ -240,15 +250,26 @@ describe('Caja — GET /payments (e2e)', () => {
         paidAt: string;
         method?: PaymentMethod;
         deletedAt?: Date;
+        createdAt?: Date;
       },
     ) => {
+      const { createdAt, ...payment } = data;
       const row = await raw.payment.create({
         // Mediodía de la sede (17:00 UTC): como guarda la API un abono
         // registrado solo con fecha (DX-097). El día de caja se corta en la
         // zona de la sede; los cortes de medianoche se prueban en
         // civil-day-cash.int-spec.ts y en el caso nocturno de abajo.
-        data: { ...data, paidAt: new Date(`${data.paidAt}T17:00:00.000Z`) },
+        data: {
+          ...payment,
+          paidAt: new Date(`${payment.paidAt}T17:00:00.000Z`),
+        },
       });
+      // El trigger payments_server_created_at pone la hora del servidor al
+      // insertar y el guard SEC-042 solo deja cambiarla al superusuario (el
+      // rol de DIRECT_URL): la fecha de alta se fija después.
+      if (createdAt) {
+        await raw.$executeRaw`UPDATE payments SET "createdAt" = ${createdAt} WHERE id = ${row.id}::uuid`;
+      }
       ids[key] = row.id;
     };
 
@@ -264,6 +285,8 @@ describe('Caja — GET /payments (e2e)', () => {
       currency: 'VES',
       paidAt: '2026-10-01',
       method: PaymentMethod.CASH,
+      // «Registrado hoy» para la API: su hoy es SEDE_DAY (PAYMENT_CLOCK).
+      createdAt: SEDE_DAY.before(60),
     });
     await seedPayment('oct10Card', {
       ...a,
@@ -407,7 +430,7 @@ describe('Caja — GET /payments (e2e)', () => {
 
     // Sin `createdAt` interno ni zona de la sede: solo `createdById`, el
     // `canVoid` de quien consulta (ADMIN: siempre; DX-057) y el día de
-    // registro en la sede (DX-067; la fila se sembró hoy).
+    // registro en la sede (DX-067; la fila se sembró el «hoy» de la API).
     expect(row).toEqual({
       id: ids.oct01Cash,
       createdById: null,
