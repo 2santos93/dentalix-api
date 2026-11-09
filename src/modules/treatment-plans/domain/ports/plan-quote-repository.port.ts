@@ -11,6 +11,7 @@ import type { QuoteValidity } from '../quote-validity';
 import type { ExpiredAcceptanceRecord } from '../expired-quote-acceptance';
 import type { Repricing } from '../../application/repricing';
 import type { RepricingSubject } from './plan-repricing-repository.port';
+import type { PartialPlanState, PartialSplit } from '../partial-acceptance';
 
 /** La aceptación firmada tal como está guardada (DX-012). */
 export interface StoredPlanAcceptance {
@@ -37,6 +38,20 @@ export interface StoredPlanAcceptance {
    * hashes). Sin `mode`, el presupuesto no estaba vencido.
    */
   expiry: ExpiredAcceptanceRecord;
+  /**
+   * DX-417: aceptación PARCIAL (columnas fuera del contenido y de sus
+   * hashes): el plan pendiente, los ítems que se dejaron fuera y su total al
+   * firmar. `null` (o ausente) si se aceptó entero.
+   */
+  partial?: PlanAcceptancePartial | null;
+}
+
+/** DX-417: lo que quedó pendiente al aceptar en parte. */
+export interface PlanAcceptancePartial {
+  pendingPlanId: string;
+  pendingItemIds: string[];
+  /** En la moneda del plan. */
+  pendingTotal: number;
 }
 
 /** Evidencias de la aceptación a distancia, congeladas al firmar (DX-415). */
@@ -142,6 +157,28 @@ export interface NewPlanAcceptance {
    * solo la copia de la validez del plan leído (sin modo).
    */
   expiry?: ExpiredAcceptanceRecord;
+  /**
+   * DX-417: con aceptación parcial, los ítems que pasan al plan pendiente y
+   * su total (el id del pendiente lo pone el repositorio al crearlo).
+   */
+  partial?: { pendingItemIds: string[]; pendingTotal: number };
+}
+
+/**
+ * DX-417: aceptar solo una parte del presupuesto, en la MISMA transacción de
+ * la firma (y después de recotizar, si se recotiza).
+ */
+export interface AcceptPartial {
+  /**
+   * Con el plan bloqueado: decide qué se acepta y qué queda pendiente. Si
+   * lanza, nada se escribe.
+   */
+  decide(source: PlanQuoteSource, state: PartialPlanState): PartialSplit;
+  /**
+   * El `contentHash` del presupuesto releído tras mover los pendientes (red
+   * de seguridad: tiene que ser el que se firma).
+   */
+  contentHashOf(source: PlanQuoteSource): string;
 }
 
 /**
@@ -170,6 +207,12 @@ export type AcceptPlanOutcome =
   | { kind: 'ALREADY_ACCEPTED' }
   | { kind: 'ACCEPTED'; source: PlanQuoteSource };
 
+/** DX-417: el presupuesto y lo que la partición necesita saber del plan. */
+export interface PartialAcceptanceRead {
+  source: PlanQuoteSource;
+  state: PartialPlanState;
+}
+
 export const PLAN_QUOTE_REPOSITORY = Symbol('PLAN_QUOTE_REPOSITORY');
 
 export interface PlanQuoteRepository {
@@ -194,6 +237,14 @@ export interface PlanQuoteRepository {
    * recotiza (ítems con la marca, validez renovada y fila de la recotización
    * con source ACCEPT) y relee el presupuesto: `decide` recibe el recotizado
    * y la recotización. Si algo lanza después, la recotización se deshace.
+   *
+   * DX-417: con `partial`, tras recotizar (si toca) `partial.decide` parte el
+   * plan y `decide` recibe la partición (compone y compara el presupuesto de
+   * lo aceptado ANTES de escribir). Después crea el plan pendiente
+   * (PRESENTED, fuera del grupo de opciones, enlazado al original), le MUEVE
+   * los ítems pendientes (mismo id), relee y exige el mismo `contentHash`
+   * (si no, lanza y se deshace todo), y solo entonces inserta la aceptación
+   * y acepta el original.
    */
   accept(
     patientId: string,
@@ -201,21 +252,38 @@ export interface PlanQuoteRepository {
     decide: (
       source: PlanQuoteSource,
       repriced: AcceptRepriced | null,
+      split: PartialSplit | null,
     ) => NewPlanAcceptance,
     reprice?: AcceptReprice,
+    partial?: AcceptPartial,
   ): Promise<AcceptPlanOutcome>;
+
+  /**
+   * DX-417: el presupuesto y el estado del plan para la vista previa de una
+   * aceptación parcial, leídos sin bloquear. `null` si el plan no existe para
+   * este paciente (404).
+   */
+  loadPartial(
+    patientId: string,
+    planId: string,
+  ): Promise<PartialAcceptanceRead | null>;
 
   /**
    * DX-379 (C): el presupuesto como quedaría tras recotizar en la firma: hace
    * lo mismo que `accept` con `reprice` hasta releer el presupuesto y lo
    * DESHACE todo (no queda nada escrito). `null` si el plan no existe para
-   * este paciente (404).
+   * este paciente (404). DX-417: con el estado del plan recotizado, para
+   * partir la vista previa.
    */
   previewRepriced(
     patientId: string,
     planId: string,
     reprice: AcceptReprice,
-  ): Promise<{ source: PlanQuoteSource; repricing: Repricing } | null>;
+  ): Promise<{
+    source: PlanQuoteSource;
+    repricing: Repricing;
+    state: PartialPlanState;
+  } | null>;
 
   /**
    * DX-379: emite el presupuesto (primera impresión). Lee el presupuesto sin

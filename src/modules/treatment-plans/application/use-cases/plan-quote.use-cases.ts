@@ -2,6 +2,7 @@ import type { DocumentRegionalDto } from '../../../../shared/locations/document-
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   NotFoundException,
@@ -35,8 +36,17 @@ import {
   withListPriceCurrencies,
   type QuoteComposition,
   type QuoteContent,
+  type QuoteItem,
+  type QuoteTotal,
 } from '../../domain/plan-quote';
 import { acceptPlanError } from '../../domain/plan-status-machine';
+import {
+  PartialAcceptanceError,
+  decidePartial,
+  splitTotals,
+  type PartialPlanState,
+  type PartialSplit,
+} from '../../domain/partial-acceptance';
 import {
   isQuoteExpired,
   issueQuoteValidity,
@@ -47,6 +57,7 @@ import {
 } from '../../domain/quote-validity';
 import {
   PLAN_QUOTE_REPOSITORY,
+  type AcceptPartial,
   type AcceptReprice,
   type NewPlanAcceptance,
   type PlanQuoteRepository,
@@ -105,6 +116,13 @@ export interface PlanQuoteAcceptanceView {
   expiredNote: string | null;
   /** La recotización hecha en la firma (REPRICE). */
   repricingId: string | null;
+  /**
+   * DX-417: aceptación PARCIAL. El plan pendiente con los ítems no
+   * aceptados, sus ids y su total al firmar; null si se aceptó entero.
+   */
+  pendingPlanId: string | null;
+  pendingItemIds: string[] | null;
+  pendingTotal: number | null;
 }
 
 /** El presupuesto para verlo o imprimirlo. */
@@ -129,6 +147,12 @@ export interface AcceptTreatmentPlanInput {
   contentHash: string;
   /** DX-379 (C): cómo aceptar un presupuesto vencido (solo si lo está). */
   expired?: ExpiredAcceptanceInput;
+  /**
+   * DX-417: aceptar solo estos ítems; los demás pasan a un plan pendiente.
+   * El `contentHash` es entonces el del presupuesto de lo aceptado (vista
+   * previa de la aceptación parcial).
+   */
+  partial?: { itemIds: string[] };
 }
 
 /** Lo que pone el servidor, nunca el cliente. */
@@ -360,8 +384,59 @@ function toDocument(
       expiredReason: stored.expiry.reason,
       expiredNote: stored.expiry.note,
       repricingId: stored.expiry.repricingId,
+      pendingPlanId: stored.partial?.pendingPlanId ?? null,
+      pendingItemIds: stored.partial?.pendingItemIds ?? null,
+      pendingTotal: stored.partial?.pendingTotal ?? null,
     },
   };
+}
+
+/** DX-417: el presupuesto con solo los ítems `itemIds` (en su orden). */
+function sourceWithItems(
+  source: PlanQuoteSource,
+  itemIds: readonly string[],
+): PlanQuoteSource {
+  const keep = new Set(itemIds);
+  return {
+    ...source,
+    items: source.items.filter((i) => keep.has(i.id)),
+    visitOrganization: source.visitOrganization?.filter((v) =>
+      keep.has(v.itemId),
+    ),
+  };
+}
+
+/** DX-417: la regla de la partición como error HTTP (con `code` si lo tiene). */
+function partialHttpError(error: PartialAcceptanceError): HttpException {
+  if (error.kind === 'NOT_FOUND') return new NotFoundException(error.message);
+  if (error.kind === 'BAD_REQUEST') {
+    return new BadRequestException(error.message);
+  }
+  return new ConflictException(
+    error.code
+      ? {
+          statusCode: 409,
+          error: 'Conflict',
+          code: error.code,
+          message: error.message,
+        }
+      : error.message,
+  );
+}
+
+/** DX-417: `decidePartial` con sus errores en HTTP. */
+function decidePartialOrThrow(
+  state: PartialPlanState,
+  itemIds: readonly string[],
+): PartialSplit {
+  try {
+    return decidePartial(state, itemIds);
+  } catch (error) {
+    if (error instanceof PartialAcceptanceError) {
+      throw partialHttpError(error);
+    }
+    throw error;
+  }
 }
 
 @Injectable()
@@ -551,10 +626,29 @@ export class AcceptTreatmentPlanUseCase {
           )
         : undefined;
 
+    // DX-417: aceptar en parte. La partición se decide con el plan bloqueado
+    // (y recotizado, si se recotiza); lo firmado es solo lo aceptado.
+    const partialItemIds = input.partial?.itemIds;
+    const partial: AcceptPartial | undefined = partialItemIds
+      ? {
+          decide: (_source, state) =>
+            decidePartialOrThrow(state, partialItemIds),
+          contentHashOf: (kept) =>
+            computeQuoteHash(
+              liveContent(
+                kept,
+                acceptedAt,
+                book.forLocation(kept.location.id),
+                this.composition,
+              ),
+            ),
+        }
+      : undefined;
+
     const outcome = await this.repo.accept(
       patientId,
       planId,
-      (source, repriced): NewPlanAcceptance => {
+      (source, repriced, split): NewPlanAcceptance => {
         let expiry: ExpiredAcceptanceRecord;
         if (repriced) {
           // Ya comprobado sobre el presupuesto vencido, antes de recotizar.
@@ -568,8 +662,11 @@ export class AcceptTreatmentPlanUseCase {
           assertSignable(source);
           expiry = expiryOf(source, acceptedAt, choice);
         }
+        const signed = split
+          ? sourceWithItems(source, split.acceptedItemIds)
+          : source;
         const content = liveContent(
-          source,
+          signed,
           acceptedAt,
           book.forLocation(source.location.id),
           this.composition,
@@ -595,9 +692,23 @@ export class AcceptTreatmentPlanUseCase {
           ipAddress: meta.ipAddress,
           userAgent: meta.userAgent,
           expiry,
+          ...(split
+            ? {
+                partial: {
+                  pendingItemIds: split.pendingItemIds,
+                  pendingTotal: splitTotals(
+                    source.items,
+                    split,
+                    source.plan.currency,
+                    this.composition,
+                  ).pending.net,
+                },
+              }
+            : {}),
         };
       },
       reprice,
+      partial,
     );
     if (outcome.kind === 'NOT_FOUND') {
       throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
@@ -730,5 +841,112 @@ export class PreviewAcceptanceRepricingUseCase {
       repricing: result.repricing,
       quote: toDocument(result.source, at, names, this.composition),
     };
+  }
+}
+
+/** DX-417: lo que queda pendiente en la vista previa de una aceptación parcial. */
+export interface PartialAcceptancePending {
+  items: QuoteItem[];
+  totals: QuoteTotal[];
+}
+
+/** DX-417: la vista previa de una aceptación parcial. */
+export interface PartialAcceptancePreview {
+  /** El presupuesto de lo aceptado, como se firmaría (su `contentHash`). */
+  accepted: PlanQuoteDocument;
+  /** Lo que pasaría al plan pendiente. */
+  pending: PartialAcceptancePending;
+  /** Los totales del presupuesto entero (aceptado + pendiente). */
+  original: { totals: QuoteTotal[] };
+  /**
+   * Con `reprice`: la recotización de TODO el plan (su `previewHash` es el
+   * `expired.repricePreviewHash` de la firma); si no, null.
+   */
+  repricing: Repricing | null;
+}
+
+/**
+ * DX-417: la vista previa de aceptar solo una parte del presupuesto. Compone
+ * el presupuesto de lo aceptado (su `contentHash` es el que se firma), lo que
+ * quedaría pendiente y los totales del plan entero, todos del servidor. No
+ * escribe ni bloquea. Con `reprice` (un presupuesto vencido que se acepta
+ * actualizando los precios), recotiza TODO el plan como
+ * …/acceptance/reprice-preview, sin dejar nada escrito, y parte el resultado.
+ */
+@Injectable()
+export class PreviewPartialAcceptanceUseCase {
+  constructor(
+    @Inject(PLAN_QUOTE_REPOSITORY)
+    private readonly repo: PlanQuoteRepository,
+    @Inject(PLAN_QUOTE_CLOCK)
+    private readonly now: PlanQuoteClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
+    private readonly repricer: AcceptanceRepricer,
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
+  ) {}
+
+  async execute(
+    patientId: string,
+    planId: string,
+    input: { itemIds: string[]; reprice?: boolean },
+    actor: { userId: string; role: ClinicRole },
+  ): Promise<PartialAcceptancePreview> {
+    const at = this.now();
+    const repriced = input.reprice
+      ? await this.readRepriced(patientId, planId, actor, at)
+      : null;
+    const read = input.reprice
+      ? repriced
+      : await this.repo.loadPartial(patientId, planId);
+    if (!read) throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
+    const { source, state } = read;
+    const split = decidePartialOrThrow(state, input.itemIds);
+    const names = await this.documentTypeNames.get(source.location.id);
+    const validity = quoteValidityOf(source, at);
+    const pending = composeQuoteContent(
+      sourceWithItems(source, split.pendingItemIds),
+      validity,
+      names,
+      this.composition,
+    );
+    const { original } = splitTotals(
+      source.items,
+      split,
+      source.plan.currency,
+      this.composition,
+    );
+    return {
+      accepted: toDocument(
+        sourceWithItems(source, split.acceptedItemIds),
+        at,
+        names,
+        this.composition,
+      ),
+      pending: { items: pending.items, totals: pending.totals },
+      original: { totals: [original] },
+      repricing: repriced?.repricing ?? null,
+    };
+  }
+
+  /** Como …/acceptance/reprice-preview: recotiza todo y lo deshace. */
+  private async readRepriced(
+    patientId: string,
+    planId: string,
+    actor: { userId: string; role: ClinicRole },
+    at: Date,
+  ) {
+    const context = await this.repricer.read(patientId, planId, actor, at);
+    return this.repo.previewRepriced(patientId, planId, {
+      actorUserId: actor.userId,
+      decide: (source, subject) => {
+        assertSignable(source);
+        if (!quoteSourceExpiry(source, at).expired) {
+          throw new BadRequestException(EXPIRED_NOT_EXPIRED_MESSAGE);
+        }
+        return this.repricer.decide(context, subject, null);
+      },
+    });
   }
 }
