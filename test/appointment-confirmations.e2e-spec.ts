@@ -9,6 +9,7 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase, STAFF_CANCELLATION } from './support/e2e-fixtures';
+import { minutesIntoDay, SEDE_FIXTURE_ZONE } from './support/sede-clock';
 import {
   REGIONAL_CARACAS_FIXTURE,
   registerBody,
@@ -932,7 +933,13 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       // valiendo porque su foto de la cita se actualiza a la par).
       const today = await createAppointment(clinicA, patientA);
       const todayLink = await newLink(clinicA, today.id);
-      const soon = new Date(Date.now() + 60 * 60_000);
+      // «De hoy» en la sede (Caracas): dentro de una hora, salvo que el día
+      // esté a punto de acabar (DX-449: nunca cruzar la medianoche de la sede).
+      const now = new Date();
+      const minutesLeft = 24 * 60 - minutesIntoDay(now, SEDE_FIXTURE_ZONE);
+      const soon = new Date(
+        now.getTime() + (minutesLeft > 90 ? 60 : 2) * 60_000,
+      );
       await raw.appointment.update({
         where: { id: today.id },
         data: { start: soon, end: new Date(soon.getTime() + 30 * 60_000) },
