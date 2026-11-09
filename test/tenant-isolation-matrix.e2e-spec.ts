@@ -1473,6 +1473,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({}),
       status: 404,
     },
+    // DX-379 (B): vista previa de «Actualizar precios» de un plan de A. El
+    // aplicar (lleva Idempotency-Key) está en treatment-plan-repricing.
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/reprice/preview',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/reprice/preview`,
+      body: () => ({}),
+      status: 404,
+    },
     {
       name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance',
       verb: 'post',
@@ -3409,6 +3419,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * Una PR que sube el número de exenciones lo justifica en su descripción.
    */
   const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'treatment-plan-repricing.e2e-spec.ts',
+      checks:
+        'B → 404 al aplicar «Actualizar precios» al plan de A con una Idempotency-Key válida, y los precios de A no cambian (DX-379 B)',
+      routes: [
+        'POST /patients/:patientId/treatment-plans/:planId/reprice/apply',
+      ],
+    },
     {
       spec: 'equipment.e2e-spec.ts',
       checks:
