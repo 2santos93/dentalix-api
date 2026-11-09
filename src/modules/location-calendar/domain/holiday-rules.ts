@@ -66,6 +66,10 @@ export const HOLIDAY_MESSAGES = {
   // CSV (§5.2)
   csvHeader:
     'La primera fila tiene que tener las columnas «fecha» y «nombre» (y, si quieres, «recurrente»).',
+  // DX-316-bis: un CSV en UTF-16 BE o sin BOM daba el mensaje común («guárdalo
+  // como .xlsx»), que aquí no vale: la importación de festivos no lee .xlsx.
+  csvNotUtf8:
+    'El archivo no está en UTF-8. Guárdalo desde Excel como «CSV UTF-8».',
   // ICS (§5.3)
   icsNotUtf8: 'El calendario no está en UTF-8.',
   icsNoEvents: 'El calendario no tiene eventos.',

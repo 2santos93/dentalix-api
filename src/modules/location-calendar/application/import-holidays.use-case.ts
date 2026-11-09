@@ -45,6 +45,11 @@ const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 /** Un ICS empieza (tras BOM y blancos) por `BEGIN:VCALENDAR` (§5.1). */
 const ICS_START = /^[ \t\r\n]*BEGIN:VCALENDAR/i;
 
+/** BOM de UTF-16 LE (FF FE): la única variante de UTF-16 que lee `decodeCsv`. */
+function isUtf16LeBom(bytes: Buffer): boolean {
+  return bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe;
+}
+
 /** Sin contenido: 0 bytes, o solo BOM y blancos. */
 function isBlank(bytes: Buffer): boolean {
   const body = bytes.subarray(bytes.subarray(0, 3).equals(UTF8_BOM) ? 3 : 0);
@@ -133,6 +138,11 @@ async function readHolidayFile(
   // `decodeCsv`.
   if (format === 'ICS' && looksLikeUtf16(bytes)) {
     throw new BadRequestException(HOLIDAY_MESSAGES.icsNotUtf8);
+  }
+  // DX-316-bis: `decodeCsv` lee UTF-16 LE con BOM («Texto Unicode» de Excel);
+  // UTF-16 BE o sin BOM es un CSV que no está en UTF-8, no un binario.
+  if (format === 'CSV' && looksLikeUtf16(bytes) && !isUtf16LeBom(bytes)) {
+    throw new BadRequestException(HOLIDAY_MESSAGES.csvNotUtf8);
   }
   if (looksLikeIcs(bytes) !== (format === 'ICS')) {
     throw new BadRequestException(
