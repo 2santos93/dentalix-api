@@ -1493,6 +1493,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({}),
       status: 404,
     },
+    // DX-417: vista previa de aceptar en parte un plan de A (no escribe).
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/acceptance/partial-preview`,
+      body: () => ({ itemIds: [a.planItemId] }),
+      status: 404,
+    },
     {
       name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance',
       verb: 'post',
@@ -3231,6 +3240,33 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         `/patients/${b.patientId}/treatment-plans/${b.planId}/reprice/preview`,
       body: () => ({ itemIds: [a.planItemId] }),
       bodyIds: ['itemIds[]'],
+      status: 404,
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    },
+    // DX-417: B acepta en parte su plan con un ítem de A (vista previa y
+    // firma): el id ajeno es 404 antes que cualquier otra regla.
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview body.itemIds[] de A',
+      verb: 'post',
+      path: () =>
+        `/patients/${b.patientId}/treatment-plans/${b.planId}/acceptance/partial-preview`,
+      body: () => ({ itemIds: [a.planItemId] }),
+      bodyIds: ['itemIds[]'],
+      status: 404,
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    },
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance body.partial.itemIds[] de A',
+      verb: 'post',
+      path: () =>
+        `/patients/${b.patientId}/treatment-plans/${b.planId}/acceptance`,
+      body: () => ({
+        signerName: 'Hackeado',
+        signature: SIGNATURE_PNG,
+        contentHash: 'a'.repeat(64),
+        partial: { itemIds: [a.planItemId] },
+      }),
+      bodyIds: ['partial.itemIds[]'],
       status: 404,
       message: 'Algún ítem no existe o no es de este plan de tratamiento.',
     },

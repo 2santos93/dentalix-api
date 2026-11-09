@@ -92,6 +92,24 @@ export class TreatmentPlanDto {
   })
   optionLabel!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-417: este plan es el presupuesto pendiente que dejó la aceptación parcial de ese plan (con los procedimientos no aceptados); null si no. «Resto del plan aceptado el …»',
+  })
+  splitFromPlanId!: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-417: este plan se aceptó en parte («Aceptado parcialmente») y lo no aceptado está en ese plan pendiente; null si no. En la lista y en GET by id',
+  })
+  partialPendingPlanId?: string | null;
+
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   presentedAt!: Date | null;
 

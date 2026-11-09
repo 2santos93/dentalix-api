@@ -107,6 +107,9 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'POST /treatment-plans/:id/items/bulk-discount body.itemIds[]',
   // DX-379 (B): los ítems de la vista previa de «Actualizar precios».
   'POST /patients/:patientId/treatment-plans/:planId/reprice/preview body.itemIds[]',
+  // DX-417: los ítems que se aceptan en parte (vista previa y firma).
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview body.itemIds[]',
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance body.partial.itemIds[]',
   'PATCH /treatment-plans/:id/items/:itemId body.performedById',
   'PATCH /treatment-plans/:id/items/:itemId body.performedLocationId',
   // --- reportes, cartera y caja (DX-027, DX-204) ---

@@ -74,6 +74,23 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     }
   });
 
+  it('DX-417: la firma parcial y su vista previa pasan con el pendiente (y la recotización)', () => {
+    const pendingPlanId = '88888888-8888-4888-8888-888888888888';
+    const repricingId = '77777777-7777-4777-8777-777777777777';
+    for (const reason of [
+      'PLAN_PARTIALLY_ACCEPTED',
+      'ACCEPT_PARTIAL_PREVIEW',
+      'QUOTE_EXPIRED_REPRICED',
+    ]) {
+      expect(
+        sanitizeAuditMetadata({
+          reason,
+          params: { repricingId, pendingPlanId },
+        }),
+      ).toEqual({ reason, params: { repricingId, pendingPlanId } });
+    }
+  });
+
   it('acota el número de campos y quita los repetidos', () => {
     const many = Array.from({ length: 80 }, (_, i) => `field${i}`);
     const out = sanitizeAuditMetadata({

@@ -71,6 +71,8 @@ export const ACCEPTANCE_SUMMARY = {
     remoteSentAt: true,
     remoteOpenedAt: true,
     remoteVerifiedAt: true,
+    // DX-417: el pendiente de una aceptación parcial.
+    pendingPlanId: true,
   },
 } satisfies Prisma.TreatmentPlanAcceptanceDefaultArgs;
 
@@ -164,6 +166,7 @@ export function mapToEntity(plan: PrismaTreatmentPlan): TreatmentPlan {
     createdById: plan.createdById,
     optionGroupId: plan.optionGroupId,
     optionLabel: plan.optionLabel,
+    splitFromPlanId: plan.splitFromPlanId,
     presentedAt: plan.presentedAt,
     presentedLocationId: plan.presentedLocationId,
     quoteIssuedOn: civilDayOf(plan.quoteIssuedOn),
@@ -305,6 +308,7 @@ export function mapToEntityWithItems(
 ): TreatmentPlanWithItems {
   return {
     ...mapToEntity(plan),
+    partialPendingPlanId: plan.acceptance?.pendingPlanId ?? null,
     items: plan.items.map(mapItemToEntity),
     acceptance: plan.acceptance ? toAcceptanceSummary(plan.acceptance) : null,
   };
@@ -403,8 +407,13 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       const plans = await tx.treatmentPlan.findMany({
         where: { patientId, deletedAt: null },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        // DX-417: para enlazar el aceptado en parte con su pendiente.
+        include: { acceptance: { select: { pendingPlanId: true } } },
       });
-      return plans.map(mapToEntity);
+      return plans.map(({ acceptance, ...plan }) => ({
+        ...mapToEntity(plan),
+        partialPendingPlanId: acceptance?.pendingPlanId ?? null,
+      }));
     });
   }
 

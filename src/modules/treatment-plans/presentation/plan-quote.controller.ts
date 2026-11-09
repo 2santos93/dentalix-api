@@ -43,11 +43,14 @@ import {
   GetPlanQuoteUseCase,
   IssuePlanQuoteUseCase,
   PreviewAcceptanceRepricingUseCase,
+  PreviewPartialAcceptanceUseCase,
   type PlanQuoteDocument,
 } from '../application/use-cases/plan-quote.use-cases';
 import {
   AcceptanceRepricePreviewDto,
   AcceptTreatmentPlanDto,
+  PartialAcceptancePreviewDto,
+  PartialAcceptancePreviewRequestDto,
   PlanQuoteDocumentDto,
 } from './dto/plan-quote.dto';
 import { Audit } from '../../audit/presentation/audit.decorator';
@@ -75,6 +78,33 @@ const LOCATION_HEADER = {
   description:
     'Sede cuyos datos encabezan el presupuesto (y en la que se firma). Sin ella, la sede principal. Un plan ya aceptado muestra la sede en la que se firmó.',
 };
+
+/**
+ * Lo que la firma añade a su evento (sin importes: están en la fila de la
+ * aceptación). DX-379 (C): un presupuesto vencido dice cómo se aceptó y, al
+ * recotizar, `params.repricingId`. DX-417: una aceptación parcial lleva
+ * `params.pendingPlanId` y, si no estaba vencido, `reason`
+ * PLAN_PARTIALLY_ACCEPTED (con vencido manda el `reason` de DX-379 C).
+ */
+export function acceptanceAuditMetadata(
+  doc: PlanQuoteDocument,
+): Record<string, unknown> | undefined {
+  const acceptance = doc.acceptance;
+  if (!acceptance) return undefined;
+  const params: Record<string, string> = {};
+  if (acceptance.repricingId) params.repricingId = acceptance.repricingId;
+  if (acceptance.pendingPlanId) params.pendingPlanId = acceptance.pendingPlanId;
+  const reason = acceptance.expiredMode
+    ? expiredAcceptanceAuditReason(acceptance.expiredMode)
+    : acceptance.pendingPlanId
+      ? 'PLAN_PARTIALLY_ACCEPTED'
+      : undefined;
+  if (!reason) return undefined;
+  return {
+    reason,
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+  };
+}
 
 /** La firma sale como data URL, lista para un `<img>`; nunca IP ni UA. */
 function toDto(doc: PlanQuoteDocument): PlanQuoteDocumentDto {
@@ -107,6 +137,7 @@ export class PlanQuoteController {
     private readonly issueQuote: IssuePlanQuoteUseCase,
     private readonly acceptPlan: AcceptTreatmentPlanUseCase,
     private readonly previewAcceptanceRepricing: PreviewAcceptanceRepricingUseCase,
+    private readonly previewPartialAcceptance: PreviewPartialAcceptanceUseCase,
   ) {}
 
   @Audit({
@@ -170,18 +201,19 @@ export class PlanQuoteController {
   @ApiCreatedResponse({
     type: PlanQuoteDocumentDto,
     description:
-      'Plan aceptado: ACCEPTED, sus ítems propuestos pasan a aceptados y quedan congelados; las demás opciones abiertas de su grupo pasan a REJECTED (otra opción aceptada) en la misma transacción',
+      'Plan aceptado: ACCEPTED, sus ítems propuestos pasan a aceptados y quedan congelados; las demás opciones abiertas de su grupo pasan a REJECTED (otra opción aceptada) en la misma transacción. DX-417: con `partial`, el plan queda ACCEPTED solo con los elegidos (lo firmado es su presupuesto) y los demás pasan a un plan nuevo PRESENTED, fuera del grupo de opciones, enlazado (`splitFromPlanId`) y con la misma presentación, validez, moneda y profesional; `acceptance.pendingPlanId`, `pendingItemIds` y `pendingTotal` lo dicen',
   })
   @ApiBadRequestResponse({
     description:
-      'Sin firma, firma no PNG o de más de 200 KB, sin nombre de quien firma, o plan sin ítems. DX-379 (C): `expired` con un presupuesto no vencido; ORIGINAL_PRICES sin motivo, OTHER sin nota, nota de más de 200; REPRICE sin `repricePreviewHash` o con motivo',
+      'Sin firma, firma no PNG o de más de 200 KB, sin nombre de quien firma, o plan sin ítems. DX-379 (C): `expired` con un presupuesto no vencido; ORIGINAL_PRICES sin motivo, OTHER sin nota, nota de más de 200; REPRICE sin `repricePreviewHash` o con motivo. DX-417: `partial` sin elegir ninguno, eligiendo todos («Has elegido todos los procedimientos: acéptalo entero.»), más de 100, o dejando fuera uno ya aceptado o realizado',
   })
   @ApiNotFoundResponse({
-    description: 'Paciente o plan no encontrados en esta clínica',
+    description:
+      'Paciente o plan no encontrados en esta clínica. DX-417: algún ítem de `partial` no es de este plan',
   })
   @ApiConflictResponse({
     description:
-      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash). DX-379 (C): la sede de la presentación del plan sin zona válida → `LOCATION_TIMEZONE_REQUIRED` (también con un presupuesto no vencido si tiene validez guardada); `code: QUOTE_EXPIRED` («El presupuesto venció el {fecha}. Actualiza los precios o acepta con los precios originales indicando el motivo.», con `quoteValidUntil`) si está vencido y no llega `expired`; con REPRICE, `REPRICE_PREVIEW_STALE` (los precios vigentes cambiaron desde la vista previa), `REPRICE_INCOMPLETE` (algún propuesto sin precio vigente o sin tasa), `REPRICE_NOTHING_TO_APPLY` o el plan no se recotiza (abonos, plan de cuotas, saldo a favor); nada se escribe',
+      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash). DX-379 (C): la sede de la presentación del plan sin zona válida → `LOCATION_TIMEZONE_REQUIRED` (también con un presupuesto no vencido si tiene validez guardada); `code: QUOTE_EXPIRED` («El presupuesto venció el {fecha}. Actualiza los precios o acepta con los precios originales indicando el motivo.», con `quoteValidUntil`) si está vencido y no llega `expired`; con REPRICE, `REPRICE_PREVIEW_STALE` (los precios vigentes cambiaron desde la vista previa), `REPRICE_INCOMPLETE` (algún propuesto sin precio vigente o sin tasa), `REPRICE_NOTHING_TO_APPLY` o el plan no se recotiza (abonos, plan de cuotas, saldo a favor); nada se escribe. DX-417 con `partial`: `PARTIAL_PLAN_NOT_PRESENTED` (solo un presupuesto presentado se acepta en parte), `PARTIAL_PLAN_ALREADY_ACCEPTED`, o el plan tiene abonos, plan de cuotas activo o saldo a favor',
   })
   @ApiForbiddenResponse({
     description:
@@ -203,6 +235,7 @@ export class PlanQuoteController {
         signature: dto.signature,
         contentHash: dto.contentHash,
         expired: dto.expired,
+        partial: dto.partial ? { itemIds: dto.partial.itemIds } : undefined,
       },
       {
         acceptedById: actor.userId,
@@ -211,17 +244,8 @@ export class PlanQuoteController {
         userAgent: userAgent ? userAgent.slice(0, USER_AGENT_MAX) : null,
       },
     );
-    // DX-379 (C): la firma de un presupuesto vencido dice cómo (sin importes:
-    // la recotización está en su fila, `params.repricingId`).
-    const expiredMode = doc.acceptance?.expiredMode;
-    if (expiredMode) {
-      req.auditMetadata = {
-        reason: expiredAcceptanceAuditReason(expiredMode),
-        ...(doc.acceptance?.repricingId
-          ? { params: { repricingId: doc.acceptance.repricingId } }
-          : {}),
-      };
-    }
+    const audit = acceptanceAuditMetadata(doc);
+    if (audit) req.auditMetadata = audit;
     return toDto(doc);
   }
 
@@ -271,5 +295,60 @@ export class PlanQuoteController {
       actorOf(req),
     );
     return { repricing: toPreviewDto(repricing), quote: toDto(quote) };
+  }
+
+  // DX-417: la vista previa de aceptar solo una parte del presupuesto. Lee el
+  // plan (VIEW) y no escribe nada.
+  @Audit({
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: { param: 'patientId' },
+    reason: 'ACCEPT_PARTIAL_PREVIEW',
+  })
+  @Post('acceptance/partial-preview')
+  @HttpCode(200)
+  @Roles(...TREATMENT_PLAN_DECISION_ROLES)
+  @ApiOperation({
+    summary:
+      'Vista previa de aceptar solo algunos procedimientos del presupuesto (DX-417)',
+    description:
+      'Compone el presupuesto de lo aceptado como se firmaría (`accepted`, con su `contentHash`), lo que pasaría al presupuesto pendiente (`pending`) y los totales del plan entero (`original`); aceptado + pendiente = original, ítem a ítem. No escribe ni bloquea. Para firmar: POST …/acceptance con `partial.itemIds` (los mismos) y `contentHash` = `accepted.contentHash`. Con un presupuesto vencido que se acepta actualizando los precios, `reprice: true` recotiza TODO el plan (sin escribir) y parte el resultado: `repricing.previewHash` va en `expired.repricePreviewHash`.',
+  })
+  @ApiOkResponse({ type: PartialAcceptancePreviewDto })
+  @ApiBadRequestResponse({
+    description:
+      'Sin elegir ninguno, eligiendo todos («Has elegido todos los procedimientos: acéptalo entero.»), más de 100, ids que no son UUID, o dejando fuera uno ya aceptado o realizado («Los procedimientos ya aceptados o realizados forman parte de lo aceptado.»). `reprice: true` con un presupuesto no vencido',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Paciente o plan no encontrados en esta clínica (o el plan es de otro paciente), o algún ítem no es de este plan',
+  })
+  @ApiConflictResponse({
+    description:
+      '`PARTIAL_PLAN_NOT_PRESENTED` (solo un presupuesto presentado se acepta en parte), `PARTIAL_PLAN_ALREADY_ACCEPTED` (aceptado o firmado), o el plan tiene abonos, plan de cuotas activo o saldo a favor. Con `reprice: true`, los 409 de …/acceptance/reprice-preview (`REPRICE_INCOMPLETE`, `REPRICE_NOTHING_TO_APPLY`, `LOCATION_TIMEZONE_REQUIRED`)',
+  })
+  @ApiForbiddenResponse({
+    description:
+      'Solo odontólogo y ADMIN aceptan (DX-040): la asistente y recepción no',
+  })
+  async partialAcceptancePreview(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Body() dto: PartialAcceptancePreviewRequestDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PartialAcceptancePreviewDto> {
+    const preview = await this.previewPartialAcceptance.execute(
+      patientId,
+      planId,
+      { itemIds: dto.itemIds, reprice: dto.reprice },
+      actorOf(req),
+    );
+    return {
+      accepted: toDto(preview.accepted),
+      pending: preview.pending,
+      original: preview.original,
+      repricing: preview.repricing ? toPreviewDto(preview.repricing) : null,
+    };
   }
 }

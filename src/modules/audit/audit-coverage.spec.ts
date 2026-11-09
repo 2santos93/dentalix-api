@@ -950,6 +950,17 @@ const EXPECTED: Record<string, AuditOptions> = {
       patient: P,
       reason: 'ACCEPT_REPRICE_PREVIEW',
     },
+  // DX-417: la vista previa de aceptar en parte lee el plan (VIEW). La firma
+  // parcial pone desde el handler `reason` PLAN_PARTIALLY_ACCEPTED (o el del
+  // vencido) y `params.pendingPlanId`.
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview':
+    {
+      action: 'VIEW',
+      resource: 'TREATMENT_PLAN',
+      resourceId: { param: 'planId' },
+      patient: P,
+      reason: 'ACCEPT_PARTIAL_PREVIEW',
+    },
   // DX-040: presentar y rechazar cambian el plan; una alternativa es un plan
   // nuevo del mismo paciente. La lista de presupuestos por seguir es de
   // muchos pacientes (sin paciente en el evento), pero se audita porque
