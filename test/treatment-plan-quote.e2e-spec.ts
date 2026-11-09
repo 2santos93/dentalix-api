@@ -656,6 +656,12 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         remote: null,
         ipAddress: expect.any(String) as string,
         userAgent: 'tableta-recepcion',
+        // DX-379 (C): sin validez guardada ni vencimiento.
+        quoteValidUntil: null,
+        expiredMode: null,
+        expiredReason: null,
+        expiredNote: null,
+        repricingId: null,
       });
       expect(
         new Date(quote.acceptance!.acceptedAt).getTime(),
