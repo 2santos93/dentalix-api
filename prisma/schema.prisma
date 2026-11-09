@@ -2289,6 +2289,9 @@ model TreatmentPlanAcceptance {
   expiredReason           ExpiredQuoteAcceptanceReason?
   expiredNote             String?
   /// La recotización (source ACCEPT) hecha en la firma con REPRICE.
+  /// No declarable en Prisma (solo SQL): índice parcial
+  /// treatment_plan_acceptances_repricing_idx ("tenantId", "repricingId")
+  /// WHERE "repricingId" IS NOT NULL (lado hijo de la FK).
   repricingId             String?                       @db.Uuid
 
   // FK COMPUESTAS (SEC-004): plan del MISMO tenant y del MISMO paciente; sede

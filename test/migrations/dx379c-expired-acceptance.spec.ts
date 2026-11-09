@@ -50,21 +50,25 @@ describe('DX-379 (C): migración de la aceptación de un presupuesto vencido', (
     );
   });
 
-  it('el VALIDATE quita FORCE a las dos tablas antes y lo devuelve al final', () => {
+  it('el VALIDATE: los CHECK primero con FORCE; solo la FK dentro del NO FORCE/FORCE de las dos tablas', () => {
     const lines = code(VALIDATE)
       .split(';')
       .map((st) => st.trim())
       .filter(Boolean);
-    expect(lines.slice(1, 3)).toEqual([
+    expect(lines.slice(1)).toEqual([
+      'ALTER TABLE "treatment_plan_acceptances" VALIDATE CONSTRAINT "treatment_plan_acceptances_expired_check"',
+      'ALTER TABLE "treatment_plan_acceptances" VALIDATE CONSTRAINT "treatment_plan_acceptances_expired_note_check"',
       'ALTER TABLE "treatment_plan_acceptances" NO FORCE ROW LEVEL SECURITY',
       'ALTER TABLE "treatment_plan_repricings" NO FORCE ROW LEVEL SECURITY',
-    ]);
-    expect(lines.slice(-2)).toEqual([
+      'ALTER TABLE "treatment_plan_acceptances" VALIDATE CONSTRAINT "treatment_plan_acceptances_repricing_fkey"',
       'ALTER TABLE "treatment_plan_repricings" FORCE ROW LEVEL SECURITY',
       'ALTER TABLE "treatment_plan_acceptances" FORCE ROW LEVEL SECURITY',
     ]);
-    expect(lines.filter((l) => l.includes('VALIDATE CONSTRAINT'))).toHaveLength(
-      3,
+  });
+
+  it('la FK tiene su índice parcial en el lado hijo', () => {
+    expect(code(ADD)).toContain(
+      'CREATE INDEX "treatment_plan_acceptances_repricing_idx"\n  ON "treatment_plan_acceptances"("tenantId", "repricingId")\n  WHERE "repricingId" IS NOT NULL;',
     );
   });
 

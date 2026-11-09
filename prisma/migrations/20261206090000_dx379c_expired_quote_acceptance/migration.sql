@@ -38,6 +38,12 @@
 -- sus escrituras lo que tarda (no CONCURRENTLY: va en la transacción de la
 -- migración).
 --
+-- Índice parcial del lado hijo de la FK (solo las aceptaciones con
+-- recotización): el RI check del VALIDATE y de un ON DELETE RESTRICT no
+-- recorren la tabla. Se crea vacío de entradas (todas las filas tienen
+-- `repricingId` NULL), pero CREATE INDEX lee la tabla una vez con SHARE (no
+-- bloquea lecturas; las firmas esperan lo que tarde).
+--
 -- CHECK y FK NOT VALID aquí (las filas existentes tienen todo a NULL) y
 -- VALIDATE aparte (20261206090100_dx379c_expired_quote_acceptance_validate),
 -- como DX-019-bis y la porción A: el ACCESS EXCLUSIVE dura lo que el ALTER.
@@ -57,6 +63,7 @@
 --          DROP COLUMN "repricingId", DROP COLUMN "expiredNote",
 --          DROP COLUMN "expiredReason", DROP COLUMN "expiredMode",
 --          DROP COLUMN "quoteValidUntil";
+--        DROP INDEX "treatment_plan_acceptances_repricing_idx";
 --        DROP INDEX "treatment_plan_repricings_tenant_id_plan_patient_key";
 --        DROP TYPE "ExpiredQuoteAcceptanceReason";
 --        DROP TYPE "ExpiredQuoteAcceptanceMode";
@@ -129,3 +136,7 @@ ALTER TABLE "treatment_plan_acceptances"
     REFERENCES "treatment_plan_repricings"("tenantId", "id", "planId", "patientId")
     ON DELETE RESTRICT ON UPDATE CASCADE
     NOT VALID;
+
+CREATE INDEX "treatment_plan_acceptances_repricing_idx"
+  ON "treatment_plan_acceptances"("tenantId", "repricingId")
+  WHERE "repricingId" IS NOT NULL;
