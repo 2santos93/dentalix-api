@@ -11,7 +11,10 @@ const DIR = join(__dirname, '../../prisma/migrations');
 const ADD = '20261206090000_dx379c_expired_quote_acceptance';
 const VALIDATE = '20261206090100_dx379c_expired_quote_acceptance_validate';
 const raw = (m: string) => readFileSync(join(DIR, m, 'migration.sql'), 'utf8');
-const code = (m: string) => raw(m).replace(/--[^\n]*/g, '').trim();
+const code = (m: string) =>
+  raw(m)
+    .replace(/--[^\n]*/g, '')
+    .trim();
 
 describe('DX-379 (C): migración de la aceptación de un presupuesto vencido', () => {
   it.each([ADD, VALIDATE])('%s fija lock_timeout antes que nada', (m) => {
