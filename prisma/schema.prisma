@@ -299,6 +299,7 @@ model User {
   uploadedPatientDocuments          PatientDocument[]                @relation("PatientDocumentUploadedBy")
   voidedPatientDocuments            PatientDocument[]                @relation("PatientDocumentVoidedBy")
   planAcceptancesRecorded           TreatmentPlanAcceptance[]
+  planRepricings                    TreatmentPlanRepricing[]         @relation("TreatmentPlanRepricingActor")
   tokens                            UserToken[]
   clinicalEntryAddenda              ClinicalEntryAddendum[]
   anesthesiaAdministrations         AnesthesiaAdministration[]
@@ -461,6 +462,7 @@ model Location {
   // DX-262: saldos migrados registrados en la sede.
   openingBalances            OpeningBalance[]
   planAcceptances            TreatmentPlanAcceptance[]
+  planRepricings             TreatmentPlanRepricing[]
   presentedPlans             TreatmentPlan[]
   // DX-122: bloqueos de agenda y pendientes por agendar de la sede.
   scheduleBlocks             ScheduleBlock[]
@@ -1932,6 +1934,8 @@ model TreatmentPlan {
   // DX-051: imputaciones a sus ítems y cola de repartos pendientes.
   allocations                 PaymentAllocation[]
   allocationRebalanceRequests PlanAllocationRebalanceRequest[]
+  // DX-379 (B): recotizaciones («Actualizar precios»), de solo alta.
+  repricings                  TreatmentPlanRepricing[]
 
   // Destinos de FK compuestas (SEC-004): (tenantId, id) para los ítems del
   // plan; (tenantId, id, patientId) para pagos y planes de pago, que además
@@ -2156,6 +2160,61 @@ model DiscountPolicy {
 
   @@index([updatedById])
   @@map("discount_policies")
+}
+
+/// DX-379 (B): de dónde sale una recotización: «Actualizar precios» a mano
+/// (con Idempotency-Key) o, en la porción C, al aceptar un presupuesto vencido.
+enum TreatmentPlanRepricingSource {
+  MANUAL
+  ACCEPT
+}
+
+/// DX-379 (B): una recotización de un plan abierto («Actualizar precios»):
+/// quién, cuándo, en qué sede, la tasa usada, la validez anterior y la nueva,
+/// cada línea antes y después (JSON) y los totales. De solo alta (trigger
+/// `treatment_plan_repricings_append_only`, grants SELECT/INSERT), RLS FORCE.
+/// La auditoría la enlaza por `params.repricingId` (sin importes, DX-009).
+model TreatmentPlanRepricing {
+  id                      String                       @id @default(uuid(7)) @db.Uuid
+  tenantId                String                       @db.Uuid
+  planId                  String                       @db.Uuid
+  patientId               String                       @db.Uuid
+  locationId              String                       @db.Uuid
+  actorUserId             String                       @db.Uuid
+  source                  TreatmentPlanRepricingSource
+  /// Cabecera Idempotency-Key de /reprice/apply (única por clínica) y la
+  /// huella de la petición (SHA-256 de plan + vista previa + ítems).
+  idempotencyKey          String?                      @db.Uuid
+  requestFingerprint      String?                      @db.Char(64)
+  previewHash             String                       @db.Char(64)
+  currency                String                       @db.Char(3)
+  /// La tasa usada (moneda del catálogo → la del plan); todo NULL sin conversión.
+  rateCurrency            String?                      @db.Char(3)
+  rateFromPerBase         Decimal?                     @db.Decimal(18, 8)
+  rateToPerBase           Decimal?                     @db.Decimal(18, 8)
+  rateSource              ExchangeRateSource?
+  rateDate                DateTime?                    @db.Date
+  previousQuoteIssuedOn   DateTime?                    @db.Date
+  previousQuoteValidUntil DateTime?                    @db.Date
+  quoteIssuedOn           DateTime                     @db.Date
+  quoteValidUntil         DateTime                     @db.Date
+  /// Cada ítem recotizado: su precio y su foto antes y después.
+  lines                   Json
+  /// Los ítems que no se tocaron y por qué.
+  skipped                 Json
+  totalBefore             Decimal                      @db.Decimal(14, 2)
+  totalAfter              Decimal                      @db.Decimal(14, 2)
+  createdAt               DateTime                     @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  // FK COMPUESTAS (SEC-004): plan del MISMO tenant y paciente; sede del MISMO tenant.
+  plan     TreatmentPlan @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, map: "treatment_plan_repricings_plan_fkey")
+  location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_repricings_location_fkey")
+  actor    User          @relation("TreatmentPlanRepricingActor", fields: [actorUserId], references: [id], onDelete: Restrict, map: "treatment_plan_repricings_actor_fkey")
+
+  @@index([tenantId, planId, patientId, createdAt], map: "treatment_plan_repricings_plan_idx")
+  @@index([tenantId, locationId], map: "treatment_plan_repricings_location_idx")
+  @@index([actorUserId], map: "treatment_plan_repricings_actor_idx")
+  @@map("treatment_plan_repricings")
 }
 
 // ---------------------------------------------------------------------------
