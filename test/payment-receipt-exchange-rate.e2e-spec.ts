@@ -4,7 +4,10 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
+import { TREATMENT_PLAN_CLOCK } from '../src/modules/treatment-plans/application/plan-clock';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 
 // DX-376 en HTTP real: el recibo de un abono en otra moneda trae la tasa que
 // congeló el abono (DX-375), su fuente, su día y el equivalente en la moneda
@@ -16,8 +19,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Caracas';
-const TODAY = civilDateIn(new Date(), ZONE);
+// DX-460: «hoy» fijo de la sede, el mismo que ve la API por su
+// EXCHANGE_RATE_CLOCK (manualSince al pasar a MANUAL) y por el del plan (la
+// tasa de referencia del ítem, DX-513-bis): el abono de TODAY no cae en
+// «ayer» si la suite cruza la medianoche de la sede.
+const SEDE_DAY = fixedSedeDay();
+const TODAY = SEDE_DAY.day;
 const YESTERDAY = addCivilDays(TODAY, -1);
 
 interface ReceiptBody {
@@ -134,7 +141,14 @@ describe('Recibo con la tasa congelada del abono (e2e, DX-376)', () => {
   }
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder
+          .overrideProvider(EXCHANGE_RATE_CLOCK)
+          .useValue(() => SEDE_DAY.at)
+          .overrideProvider(TREATMENT_PLAN_CLOCK)
+          .useValue(() => SEDE_DAY.at),
+    });
     await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({
       where: { date: { in: [YESTERDAY, TODAY] } },
