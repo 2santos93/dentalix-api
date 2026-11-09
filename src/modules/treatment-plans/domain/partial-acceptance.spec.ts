@@ -172,7 +172,17 @@ describe('decidePartial (DX-417)', () => {
     expect(failure(() => decidePartial(plan(), many)).kind).toBe('BAD_REQUEST');
   });
 
-  it('un id ajeno es 404 antes que el estado del plan (no filtra nada)', () => {
+  it('ya aceptado va antes que los ids (firma concurrente: 409, no 404)', () => {
+    expect(
+      failure(() =>
+        decidePartial(plan({ status: TreatmentPlanStatus.ACCEPTED }), [
+          FOREIGN,
+        ]),
+      ).kind,
+    ).toBe('CONFLICT');
+  });
+
+  it('un id ajeno es 404 antes que el resto del estado del plan (no filtra nada)', () => {
     expect(
       failure(() =>
         decidePartial(plan({ status: TreatmentPlanStatus.DRAFT }), [FOREIGN]),

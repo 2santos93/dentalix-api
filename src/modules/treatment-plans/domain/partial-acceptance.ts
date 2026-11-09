@@ -82,8 +82,17 @@ export function decidePartial(
   plan: PartialPlanState,
   requested: readonly string[],
 ): PartialSplit {
-  // Primero los ids: uno ajeno (de otro plan, paciente o clínica) es 404
-  // sea cual sea el estado del plan.
+  // Ya aceptado primero: tras una firma parcial concurrente, la segunda ve
+  // el plan aceptado (409), no «algún ítem no existe» por los ya movidos.
+  if (plan.signed || plan.status === TreatmentPlanStatus.ACCEPTED) {
+    throw new PartialAcceptanceError(
+      'CONFLICT',
+      PARTIAL_PLAN_ACCEPTED_MESSAGE,
+      PARTIAL_PLAN_ACCEPTED_CODE,
+    );
+  }
+  // Después los ids: uno ajeno (de otro plan, paciente o clínica) es 404
+  // sea cual sea el resto del estado del plan.
   const chosen = new Set(requested.map((id) => id.toLowerCase()));
   if (chosen.size > PARTIAL_ITEMS_MAX) {
     throw new PartialAcceptanceError('BAD_REQUEST', PARTIAL_TOO_MANY_MESSAGE);
@@ -93,13 +102,6 @@ export function decidePartial(
     throw new PartialAcceptanceError(
       'NOT_FOUND',
       PARTIAL_ITEM_NOT_FOUND_MESSAGE,
-    );
-  }
-  if (plan.signed || plan.status === TreatmentPlanStatus.ACCEPTED) {
-    throw new PartialAcceptanceError(
-      'CONFLICT',
-      PARTIAL_PLAN_ACCEPTED_MESSAGE,
-      PARTIAL_PLAN_ACCEPTED_CODE,
     );
   }
   if (plan.status !== TreatmentPlanStatus.PRESENTED) {
