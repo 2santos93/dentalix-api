@@ -12,7 +12,6 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { pinCatalogCurrency } from './support/catalog-currency';
-import { REGIONAL_CARACAS_FIXTURE } from './support/location-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import {
   MAIL_CONFIG,
@@ -21,7 +20,10 @@ import {
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { SIGNATURE_LINK_INVALID_MESSAGE } from '../src/modules/signature-requests/application/use-cases/public-signature.use-cases';
 import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../src/shared/validation/idempotency-key';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
+import { TREATMENT_PLAN_CLOCK } from '../src/modules/treatment-plans/application/plan-clock';
+import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
 import {
   REPRICE_ITEM_NOT_PROPOSED_MESSAGE,
   REPRICE_STALE_MESSAGE,
@@ -41,11 +43,11 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 
 const EMAIL = 'luisa.mendez@example.com';
 const TOKEN_IN_TEXT = /\/firmar\/([A-Za-z0-9_-]{43})/;
-const caracasDay = (offset = 0) =>
-  addCivilDays(
-    civilDateIn(new Date(), REGIONAL_CARACAS_FIXTURE.timeZone),
-    offset,
-  );
+// «Hoy» FIJO de la sede (DX-460): el mediodía de ayer en Caracas, inyectado
+// en los relojes del plan (precio vigente, tasa del día, validez) y de las
+// tasas, lejos de cualquier medianoche corra la suite a la hora que corra.
+const SEDE = fixedSedeDay();
+const sedeDay = (offset = 0) => addCivilDays(SEDE.day, offset);
 
 let keySeq = 0;
 const newKey = () =>
@@ -159,6 +161,8 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
     await resetDatabase(raw);
     app = await createE2eApp({
       override: (builder) => {
+        builder.overrideProvider(TREATMENT_PLAN_CLOCK).useValue(() => SEDE.at);
+        builder.overrideProvider(EXCHANGE_RATE_CLOCK).useValue(() => SEDE.at);
         builder.overrideProvider(MAILER).useValue(mailer);
         builder.overrideProvider(MAIL_CONFIG).useValue({
           ...loadMailConfig((key) => process.env[key]),
@@ -191,7 +195,7 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
     for (const offset of [-1, 0]) {
       await as(clinicA)
         .post('/exchange/manual-rates', {
-          date: caracasDay(offset),
+          date: sedeDay(offset),
           currency: 'VES',
           rate: 36,
         })
@@ -246,8 +250,8 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
       validUntil: '2026-10-01',
     });
     expect(p.validity).toEqual({
-      issuedOn: caracasDay(0),
-      validUntil: caracasDay(30),
+      issuedOn: sedeDay(0),
+      validUntil: sedeDay(30),
     });
     expect(p.totals).toEqual({ before: 7200, after: 8000, difference: 800 });
     // La vista previa no escribe.
@@ -285,8 +289,8 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
       quoteExpired: boolean;
     };
     expect(plan).toMatchObject({
-      quoteIssuedOn: caracasDay(0),
-      quoteValidUntil: caracasDay(30),
+      quoteIssuedOn: sedeDay(0),
+      quoteValidUntil: sedeDay(30),
       quoteExpired: false,
     });
 
@@ -461,11 +465,9 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
       select: { status: true, quoteIssuedOn: true, quoteValidUntil: true },
     });
     expect(stored.status).toBe('DRAFT');
-    expect(stored.quoteIssuedOn?.toISOString().slice(0, 10)).toBe(
-      caracasDay(0),
-    );
+    expect(stored.quoteIssuedOn?.toISOString().slice(0, 10)).toBe(sedeDay(0));
     expect(stored.quoteValidUntil?.toISOString().slice(0, 10)).toBe(
-      caracasDay(30),
+      sedeDay(30),
     );
   });
 
