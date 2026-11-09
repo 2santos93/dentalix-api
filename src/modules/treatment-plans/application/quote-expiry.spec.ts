@@ -1,3 +1,4 @@
+import { TreatmentPlanStatus } from '@prisma/client';
 import { QuoteExpiry } from './quote-expiry';
 import type { PlanQuoteZones } from '../domain/ports/plan-quote-zones.port';
 
@@ -21,8 +22,9 @@ const NOW = new Date('2026-12-10T03:30:00.000Z');
 function plan(
   quoteValidUntil: string | null,
   presentedLocationId: string | null,
+  status: TreatmentPlanStatus = TreatmentPlanStatus.PRESENTED,
 ) {
-  return { id: 'p', quoteValidUntil, presentedLocationId };
+  return { id: 'p', status, quoteValidUntil, presentedLocationId };
 }
 
 describe('QuoteExpiry (DX-379, D-13)', () => {
@@ -60,5 +62,34 @@ describe('QuoteExpiry (DX-379, D-13)', () => {
     await expect(
       expiry.one(plan('2026-12-01', 'caracas')),
     ).resolves.toMatchObject({ quoteExpired: true });
+  });
+
+  it('I-1: solo un borrador o un plan presentado sale vencido; aceptado, completado, rechazado o cancelado, nunca', async () => {
+    const zones = new FakeZones();
+    const expiry = new QuoteExpiry(zones, () => NOW);
+    const stamped = await expiry.stamp(
+      Object.values(TreatmentPlanStatus).map((status) =>
+        plan('2026-12-01', 'caracas', status),
+      ),
+    );
+    expect(
+      Object.fromEntries(stamped.map((p) => [p.status, p.quoteExpired])),
+    ).toEqual({
+      DRAFT: true,
+      PRESENTED: true,
+      ACCEPTED: false,
+      REJECTED: false,
+      COMPLETED: false,
+      CANCELLED: false,
+    });
+  });
+
+  it('I-1: un plan aceptado con fecha pasada no hace leer zonas', async () => {
+    const zones = new FakeZones();
+    const expiry = new QuoteExpiry(zones, () => NOW);
+    await expiry.stamp([
+      plan('2026-12-01', 'caracas', TreatmentPlanStatus.ACCEPTED),
+    ]);
+    expect(zones.calls).toBe(0);
   });
 });

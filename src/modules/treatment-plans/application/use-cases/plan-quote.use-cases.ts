@@ -21,6 +21,7 @@ import { acceptPlanError } from '../../domain/plan-status-machine';
 import {
   issueQuoteValidity,
   storedQuoteValidity,
+  validityOnFirstIssue,
   type QuoteValidity,
 } from '../../domain/quote-validity';
 import {
@@ -116,6 +117,29 @@ export function quoteValidityOf(
       source.location.timeZone,
       source.clinic.quoteValidityDays,
     )
+  );
+}
+
+/**
+ * DX-379 (D-2): la validez que fija emitir el presupuesto por primera vez
+ * (imprimirlo o enviarlo a firmar a distancia), o `null` si no se guarda
+ * nada. La regla es la del dominio (`validityOnFirstIssue`).
+ */
+export function firstIssueValidity(
+  source: PlanQuoteSource,
+  now: Date,
+): QuoteValidity | null {
+  return validityOnFirstIssue(
+    {
+      status: source.plan.status,
+      signed: source.acceptance !== null,
+      itemCount: source.items.length,
+      quoteIssuedOn: source.plan.quoteIssuedOn,
+      quoteValidUntil: source.plan.quoteValidUntil,
+    },
+    now,
+    source.location.timeZone,
+    source.clinic.quoteValidityDays,
   );
 }
 
@@ -282,15 +306,10 @@ export class GetPlanQuoteUseCase {
   }
 }
 
-/** DX-379 (D-2): estados en los que imprimir por primera vez fija la validez. */
-const ISSUABLE_STATUSES: readonly TreatmentPlanStatus[] = [
-  TreatmentPlanStatus.DRAFT,
-  TreatmentPlanStatus.PRESENTED,
-];
-
 /**
  * DX-379 (D-2): imprimir el presupuesto. La primera impresión de un plan en
- * borrador o presentado, sin firmar y sin fechas guardadas, fija su validez
+ * borrador o presentado, sin firmar, con ítems y sin fechas guardadas, fija
+ * su validez
  * (hoy en la zona de la sede + los días del ajuste); las siguientes, otro día
  * o con otro ajuste, imprimen las mismas fechas. Idempotente: devuelve lo
  * mismo que el GET, que sigue siendo de solo lectura (lo usa también el modal
@@ -312,15 +331,7 @@ export class IssuePlanQuoteUseCase {
   async execute(patientId: string, planId: string): Promise<PlanQuoteDocument> {
     const now = this.now();
     const source = await this.repo.issue(patientId, planId, (current) =>
-      current.acceptance === null &&
-      ISSUABLE_STATUSES.includes(current.plan.status) &&
-      storedQuoteValidity(current.plan) === null
-        ? issueQuoteValidity(
-            now,
-            current.location.timeZone,
-            current.clinic.quoteValidityDays,
-          )
-        : null,
+      firstIssueValidity(current, now),
     );
     if (!source) {
       throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);

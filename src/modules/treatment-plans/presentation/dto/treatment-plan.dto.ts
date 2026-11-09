@@ -125,7 +125,7 @@ export class TreatmentPlanDto {
 
   @ApiProperty({
     description:
-      'DX-379: el presupuesto venció — hoy, en la zona de la sede del plan (la de su presentación o, sin presentar, la del request), es posterior a quoteValidUntil. false si quoteValidUntil es null. Lo calcula el servidor: la web no lo recalcula con la fecha del navegador',
+      'DX-379: el presupuesto venció — hoy, en la zona de la sede del plan (la de su presentación o, sin presentar, la del request), es posterior a quoteValidUntil. Solo puede ser true en borrador (DRAFT) o presentado (PRESENTED): aceptado (con o sin firma), completado, rechazado o cancelado es siempre false. También false si quoteValidUntil es null. Lo calcula el servidor: la web no lo recalcula con la fecha del navegador',
   })
   quoteExpired!: boolean;
 

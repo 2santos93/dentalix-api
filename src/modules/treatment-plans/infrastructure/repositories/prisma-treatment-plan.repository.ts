@@ -13,7 +13,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
-import { issueQuoteValidity } from '../../domain/quote-validity';
+import { validityOnPresentation } from '../../domain/quote-validity';
 import { civilDayOf } from './prisma-plan-quote.repository';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
@@ -438,7 +438,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
             select: { quoteValidityDays: true },
           }),
         ]);
-        const validity = issueQuoteValidity(
+        const validity = validityOnPresentation(
           change.presentation.at,
           zones(locationId),
           tenant.quoteValidityDays,

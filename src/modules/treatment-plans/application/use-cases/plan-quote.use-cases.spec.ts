@@ -1140,6 +1140,14 @@ describe('IssuePlanQuoteUseCase (DX-379, D-2: imprimir por primera vez)', () => 
     expect(doc.acceptance).not.toBeNull();
   });
 
+  it('M-5: un borrador sin ítems se imprime (en cero) sin guardar fechas', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(quoteSource({ items: [] }));
+    const doc = await issueAt(repo, NOW).execute('patient-1', 'plan-1');
+    expect(doc.totals[0].net).toBe(0);
+    expect(repo.sources.get('plan-1')?.plan.quoteIssuedOn).toBeNull();
+  });
+
   it('404 si el plan no es de este paciente', async () => {
     const repo = new InMemoryPlanQuoteRepository();
     repo.add(quoteSource());

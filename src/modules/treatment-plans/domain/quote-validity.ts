@@ -1,3 +1,4 @@
+import { TreatmentPlanStatus } from '@prisma/client';
 import {
   addCivilDays,
   civilDateIn,
@@ -90,4 +91,67 @@ export function isQuoteExpired(
   timeZone: string,
 ): boolean {
   return validUntil !== null && civilDateIn(now, timeZone) > validUntil;
+}
+
+/**
+ * D-3: presentar el plan fija SIEMPRE la validez del presupuesto (también
+ * sobre la de un borrador ya impreso): emitido hoy en la zona de la sede de
+ * la presentación, con los días del ajuste de hoy. La usan el repositorio de
+ * Prisma y el falso de los tests: una sola regla.
+ */
+export function validityOnPresentation(
+  at: Date,
+  timeZone: string,
+  days: number,
+): QuoteValidity {
+  return issueQuoteValidity(at, timeZone, days);
+}
+
+/** Lo que mira la primera emisión del presupuesto. */
+export interface QuoteIssueSubject {
+  status: TreatmentPlanStatus;
+  /** Tiene aceptación firmada (en la clínica o a distancia). */
+  signed: boolean;
+  /** Ítems vivos del plan. */
+  itemCount: number;
+  quoteIssuedOn: string | null;
+  quoteValidUntil: string | null;
+}
+
+/** Estados en los que emitir por primera vez fija la validez (D-2). */
+const ISSUABLE_STATUSES: readonly TreatmentPlanStatus[] = [
+  TreatmentPlanStatus.DRAFT,
+  TreatmentPlanStatus.PRESENTED,
+];
+
+/**
+ * D-2: la validez que fija emitir el presupuesto por primera vez (imprimirlo
+ * o enviarlo a firmar a distancia, DX-415), o `null` si no se guarda nada:
+ * el plan ya tiene fechas, está firmado, no está en borrador ni presentado,
+ * o no tiene ítems (un presupuesto vacío no se emite).
+ */
+export function validityOnFirstIssue(
+  plan: QuoteIssueSubject,
+  now: Date,
+  timeZone: string,
+  days: number,
+): QuoteValidity | null {
+  if (
+    plan.signed ||
+    plan.itemCount === 0 ||
+    !ISSUABLE_STATUSES.includes(plan.status) ||
+    storedQuoteValidity(plan) !== null
+  ) {
+    return null;
+  }
+  return issueQuoteValidity(now, timeZone, days);
+}
+
+/**
+ * ¿Puede verse vencido el presupuesto de un plan en este estado? Solo en
+ * borrador o presentado: aceptado (con o sin firma), completado, rechazado o
+ * cancelado, su validez ya no cuenta.
+ */
+export function quoteCanExpire(status: TreatmentPlanStatus): boolean {
+  return ISSUABLE_STATUSES.includes(status);
 }

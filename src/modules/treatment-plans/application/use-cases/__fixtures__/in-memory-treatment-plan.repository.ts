@@ -4,7 +4,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { issueQuoteValidity } from '../../../domain/quote-validity';
+import { validityOnPresentation } from '../../../domain/quote-validity';
 import {
   TreatmentPlan,
   TreatmentPlanAcceptanceSummary,
@@ -413,7 +413,7 @@ export class InMemoryTreatmentPlanRepository
       row.presentedAt = change.presentation.at;
       row.presentedLocationId = this.locationId;
       // Como el de Prisma (DX-379): presentar fija siempre la validez.
-      const validity = issueQuoteValidity(
+      const validity = validityOnPresentation(
         change.presentation.at,
         this.timeZone,
         this.quoteValidityDays,

@@ -290,7 +290,7 @@ export class TreatmentPlansController {
   @ApiForbiddenResponse({ description: 'Solo DENTIST y ADMIN presentan' })
   @ApiNotFoundResponse({ description: 'Plan no encontrado en esta clínica' })
   @ApiConflictResponse({
-    description: `${TRANSITION_CONFLICT}: solo se presenta un borrador`,
+    description: `${TRANSITION_CONFLICT}: solo se presenta un borrador. DX-379: code LOCATION_TIMEZONE_REQUIRED si la sede de la presentación no tiene una zona horaria válida (hace falta para fijar el día de emisión del presupuesto); el plan no cambia`,
   })
   async present(
     @Param('id', ParseUUIDPipe) id: string,

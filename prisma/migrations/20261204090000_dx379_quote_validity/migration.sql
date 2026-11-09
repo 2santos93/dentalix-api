@@ -30,6 +30,26 @@
 --   - Una réplica anterior no nombra las columnas: crea clínicas con 30 y
 --     presenta planes sin fechas (quedan como un plan anterior a DX-379).
 --
+-- Vuelta atrás (solo si hay que retirar DX-379):
+--   1. Primero se despliega la versión anterior de la API, que no lee estas
+--      columnas (el código nuevo sí: quitarlas con él en marcha rompe los
+--      planes y el alta de clínica).
+--   2. Después, en una transacción con el mismo lock_timeout:
+--        ALTER TABLE "treatment_plans"
+--          DROP CONSTRAINT "treatment_plans_quote_validity_order_check",
+--          DROP CONSTRAINT "treatment_plans_quote_validity_pair_check",
+--          DROP COLUMN "quoteIssuedOn",
+--          DROP COLUMN "quoteValidUntil";
+--        ALTER TABLE "tenants"
+--          DROP CONSTRAINT "tenants_quote_validity_days_check",
+--          DROP COLUMN "quoteValidityDays";
+--      y se borran de `_prisma_migrations` las filas de esta migración y de
+--      20261204090100_dx379_quote_validity_validate.
+--   Se PIERDEN las fechas de emisión y vencimiento guardadas en los planes y
+--   los días elegidos por cada clínica (los presupuestos vuelven a «válido 30
+--   días desde hoy»). Las aceptaciones firmadas y las fotos de los enlaces
+--   (DX-415) no se tocan: llevan sus fechas dentro del contenido sellado.
+--
 -- lock_timeout 5 s, como el resto de ALTER de `tenants` (toda petición la lee
 -- al resolver la clínica) y de `treatment_plans`. Si falla, se reintenta el
 -- deploy. Grants y RLS: las columnas heredan los de su tabla.

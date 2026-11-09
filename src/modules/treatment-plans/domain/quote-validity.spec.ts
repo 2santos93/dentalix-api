@@ -1,5 +1,9 @@
+import { TreatmentPlanStatus } from '@prisma/client';
 import {
   isQuoteExpired,
+  quoteCanExpire,
+  validityOnFirstIssue,
+  validityOnPresentation,
   isValidQuoteValidityDays,
   issueQuoteValidity,
   PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
@@ -116,5 +120,60 @@ describe('isQuoteExpired (DX-379, D-13)', () => {
     expect(
       isQuoteExpired('2026-12-09', new Date('2026-12-10T04:00:00Z'), CARACAS),
     ).toBe(true);
+  });
+});
+
+describe('validityOnPresentation (D-3)', () => {
+  it('hoy en la sede + días, siempre', () => {
+    expect(
+      validityOnPresentation(new Date('2026-11-10T03:30:00Z'), CARACAS, 15),
+    ).toEqual({ issuedOn: '2026-11-09', validUntil: '2026-11-24' });
+  });
+});
+
+describe('validityOnFirstIssue (D-2)', () => {
+  const NOW = new Date('2026-11-09T15:00:00Z');
+  const draft = {
+    status: TreatmentPlanStatus.DRAFT,
+    signed: false,
+    itemCount: 2,
+    quoteIssuedOn: null,
+    quoteValidUntil: null,
+  };
+
+  it('borrador o presentado, sin firma, con ítems y sin fechas: hoy + días', () => {
+    for (const status of [
+      TreatmentPlanStatus.DRAFT,
+      TreatmentPlanStatus.PRESENTED,
+    ]) {
+      expect(
+        validityOnFirstIssue({ ...draft, status }, NOW, CARACAS, 20),
+      ).toEqual({ issuedOn: '2026-11-09', validUntil: '2026-11-29' });
+    }
+  });
+
+  it.each([
+    [
+      'con fechas guardadas',
+      { quoteIssuedOn: '2026-11-01', quoteValidUntil: '2026-12-01' },
+    ],
+    ['firmado', { signed: true }],
+    ['sin ítems (M-5)', { itemCount: 0 }],
+    ['aceptado sin firma', { status: TreatmentPlanStatus.ACCEPTED }],
+    ['rechazado', { status: TreatmentPlanStatus.REJECTED }],
+    ['cancelado', { status: TreatmentPlanStatus.CANCELLED }],
+    ['completado', { status: TreatmentPlanStatus.COMPLETED }],
+  ])('%s: no fija nada', (_label, overrides) => {
+    expect(
+      validityOnFirstIssue({ ...draft, ...overrides }, NOW, CARACAS, 20),
+    ).toBeNull();
+  });
+});
+
+describe('quoteCanExpire (I-1)', () => {
+  it('solo un borrador o un plan presentado puede verse vencido', () => {
+    expect(
+      Object.values(TreatmentPlanStatus).filter((s) => quoteCanExpire(s)),
+    ).toEqual([TreatmentPlanStatus.DRAFT, TreatmentPlanStatus.PRESENTED]);
   });
 });
