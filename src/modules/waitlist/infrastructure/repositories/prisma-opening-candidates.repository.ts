@@ -154,6 +154,7 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
         end: r.end,
         status: r.status,
         wantsEarlier: r.wantsEarlier,
+        earlierWindow: r.earlierWindow,
         createdAt: r.createdAt,
         patient: r.patient,
         appointmentType: r.appointmentType,

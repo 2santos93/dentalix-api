@@ -1,5 +1,6 @@
 import type {
   AppointmentStatus,
+  EarlierWindow,
   WaitlistPriority,
   WaitlistStatus,
 } from '@prisma/client';
@@ -54,7 +55,37 @@ export interface AppointmentCandidateSource {
   end: Date;
   status: AppointmentStatus;
   wantsEarlier: boolean;
+  /** DX-437: la franja pedida por el paciente (null o ANY = cualquiera). */
+  earlierWindow?: EarlierWindow | null;
   createdAt: Date;
+}
+
+/** DX-437: la mañana acaba a las 12:00 de la sede; la tarde empieza ahí. */
+export const AFTERNOON_STARTS_AT_HOUR = 12;
+
+/** Hora (0–23) del instante en la zona de la sede. */
+function hourIn(instant: Date, timeZone: string): number {
+  const text = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    hourCycle: 'h23',
+  }).format(instant);
+  return Number.parseInt(text, 10) % 24;
+}
+
+/**
+ * DX-437: el hueco cae en la franja que pidió el paciente. Sin franja (lo
+ * marcó el personal) o ANY, cualquier hora vale.
+ */
+export function slotInWindow(
+  slot: Pick<CandidateSlot, 'start' | 'timeZone'>,
+  window: EarlierWindow | null | undefined,
+): boolean {
+  if (!window || window === 'ANY') return true;
+  const hour = hourIn(slot.start, slot.timeZone);
+  return window === 'MORNING'
+    ? hour < AFTERNOON_STARTS_AT_HOUR
+    : hour >= AFTERNOON_STARTS_AT_HOUR;
 }
 
 export type RankedCandidate<
@@ -112,7 +143,10 @@ export function appointmentFits(
     a.locationId === slot.locationId &&
     (slot.providerId === null || a.providerId === slot.providerId) &&
     a.end.getTime() - a.start.getTime() <= slotMs &&
-    civilDateIn(a.start, slot.timeZone) > civilDateIn(slot.start, slot.timeZone)
+    civilDateIn(a.start, slot.timeZone) >
+      civilDateIn(slot.start, slot.timeZone) &&
+    // DX-437: un hueco de mañana no se ofrece a quien pidió tardes.
+    slotInWindow(slot, a.earlierWindow)
   );
 }
 

@@ -58,6 +58,9 @@ describe('CreateConfirmationLinkUseCase', () => {
       timeZone: 'America/Caracas',
       locale: 'es-VE',
       hourCycle: 'h12',
+      wantsEarlier: false,
+      earlierWindow: null,
+      earlierAllowed: true,
     });
   });
 

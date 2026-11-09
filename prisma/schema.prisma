@@ -1321,6 +1321,14 @@ enum AppointmentStatus {
   READY_FOR_CHECKOUT
 }
 
+/// DX-437: franja en la que el paciente quiere adelantar su cita («Avisarme si
+/// se libera un hueco antes» desde el enlace de confirmación). ANY = cualquiera.
+enum EarlierWindow {
+  MORNING
+  AFTERNOON
+  ANY
+}
+
 model Appointment {
   id                     String                  @id @default(uuid()) @db.Uuid
   tenantId               String                  @db.Uuid
@@ -1345,6 +1353,11 @@ model Appointment {
   // DX-210: «Adelantar si hay hueco». La cita es candidata para ocupar un
   // hueco libre anterior; al moverla a uno se apaga.
   wantsEarlier           Boolean                 @default(false)
+  // DX-437: la franja pedida (solo con wantsEarlier) y cuándo lo pidió EL
+  // PACIENTE desde el enlace de confirmación (null = lo marcó el personal).
+  // Se limpian con la marca.
+  earlierWindow          EarlierWindow?
+  earlierRequestedAt     DateTime?
   // DX-200: horas del flujo en la clínica (UTC, reloj del servidor). null en
   // las citas anteriores y mientras no se marca el paso. CHECK en la
   // migración: cada estado del flujo lleva su hora y en orden.

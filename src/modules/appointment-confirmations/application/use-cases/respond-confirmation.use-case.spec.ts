@@ -58,6 +58,9 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
           timeZone: 'America/Caracas',
           locale: 'es-VE',
           hourCycle: 'h12',
+          wantsEarlier: false,
+          earlierWindow: null,
+          earlierAllowed: true,
         },
         response: null,
         respondedAt: null,
@@ -356,6 +359,8 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       const { token } = await issue(fiveHours());
       const view = await inTenant(() => get.execute(token));
       expect(Object.keys(view.appointment ?? {}).sort()).toEqual([
+        'earlierAllowed',
+        'earlierWindow',
         'end',
         'hourCycle',
         'locale',
@@ -365,6 +370,7 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
         'providerName',
         'start',
         'timeZone',
+        'wantsEarlier',
       ]);
     });
   });

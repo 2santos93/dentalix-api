@@ -1,4 +1,5 @@
 import { isHourCycle } from '../../../../shared/locations/location-regional';
+import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
 import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
@@ -15,6 +16,7 @@ import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-even
 import {
   confirmationLinkAuditEvent,
   confirmationResponseAuditEvent,
+  earlierRequestAuditEvent,
 } from '../../domain/confirmation-audit';
 import {
   linkResponseBlock,
@@ -29,6 +31,8 @@ import {
   IssueConfirmationInput,
   RespondConfirmationInput,
   RespondOutcome,
+  SetWantsEarlierInput,
+  SetWantsEarlierOutcome,
 } from '../../domain/ports/appointment-confirmation-repository.port';
 import {
   AppointmentConfirmation,
@@ -42,6 +46,8 @@ const APPOINTMENT_SELECT = {
   start: true,
   end: true,
   status: true,
+  wantsEarlier: true,
+  earlierWindow: true,
   providerId: true,
   locationId: true,
   patient: { select: { firstName: true, phone: true } },
@@ -165,6 +171,8 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       start: a.start,
       end: a.end,
       status: a.status,
+      wantsEarlier: a.wantsEarlier,
+      earlierWindow: a.earlierWindow,
       patientFirstName: a.patient.firstName,
       patientPhone: a.patient.phone,
       providerName: membership?.user.fullName ?? null,
@@ -348,6 +356,58 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       locationId: appointment.locationId,
       notice: cancelling ? notice : null,
     };
+  }
+
+  async setWantsEarlier(
+    input: SetWantsEarlierInput,
+  ): Promise<SetWantsEarlierOutcome> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Misma serialización que `respond`: la fila de la cita, FOR UPDATE.
+      const [locked] = await tx.$queryRaw<
+        {
+          tenantId: string;
+          locationId: string;
+          status: AppointmentStatus;
+          start: Date;
+          deletedAt: Date | null;
+        }[]
+      >`SELECT "tenantId", "locationId", "status", "start", "deletedAt"
+          FROM "appointments" WHERE "id" = ${input.appointmentId}::uuid FOR UPDATE`;
+      if (
+        !locked ||
+        locked.deletedAt !== null ||
+        !MOVABLE_STATUSES.includes(locked.status) ||
+        locked.start.getTime() <= input.now.getTime()
+      ) {
+        return 'STALE';
+      }
+      await tx.appointment.update({
+        where: { id: input.appointmentId },
+        data: input.wantsEarlier
+          ? {
+              wantsEarlier: true,
+              earlierWindow: input.window ?? 'ANY',
+              earlierRequestedAt: input.now,
+            }
+          : {
+              wantsEarlier: false,
+              earlierWindow: null,
+              earlierRequestedAt: null,
+            },
+      });
+      // DX-437: el paciente lo pidió desde el enlace (origen PUBLIC_LINK), en
+      // el tenant de la cita leída bajo RLS; sin token ni URL.
+      await writeAuditEvent(
+        tx,
+        earlierRequestAuditEvent(input.request ?? null, {
+          tenantId: locked.tenantId,
+          appointmentId: input.appointmentId,
+          locationId: locked.locationId,
+          wantsEarlier: input.wantsEarlier,
+        }),
+      );
+      return 'OK';
+    });
   }
 
   async respond(input: RespondConfirmationInput): Promise<RespondOutcome> {

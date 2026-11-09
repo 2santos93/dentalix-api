@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import type { EarlierWindow } from '@prisma/client';
 import {
   AppointmentConfirmationRepository,
   ConfirmationLookup,
   IssueConfirmationInput,
   RespondConfirmationInput,
   RespondOutcome,
+  SetWantsEarlierInput,
+  SetWantsEarlierOutcome,
 } from '../../../domain/ports/appointment-confirmation-repository.port';
 import {
   AppointmentConfirmation,
@@ -19,6 +22,7 @@ import {
 import {
   confirmationLinkAuditEvent,
   confirmationResponseAuditEvent,
+  earlierRequestAuditEvent,
 } from '../../../domain/confirmation-audit';
 import { computeCancellationNotice } from '../../../../cancellation-policies/domain/cancellation-policy';
 import type { AuditEventDraft } from '../../../../audit/domain/audit-event';
@@ -64,6 +68,8 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       start,
       end: new Date(start.getTime() + 30 * 60_000),
       status: 'SCHEDULED' as const,
+      wantsEarlier: false,
+      earlierWindow: null as EarlierWindow | null,
       patientFirstName: 'Ana María',
       patientPhone: '+58 414 555 0101',
       providerName: 'Dra. Pérez',
@@ -147,6 +153,30 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
 
   findClinicBranding(): Promise<ClinicBranding | null> {
     return Promise.resolve(this.branding);
+  }
+
+  setWantsEarlier(
+    input: SetWantsEarlierInput,
+  ): Promise<SetWantsEarlierOutcome> {
+    const a = this.appointments.get(input.appointmentId);
+    if (
+      !a ||
+      !['SCHEDULED', 'CONFIRMED'].includes(a.status) ||
+      a.start.getTime() <= input.now.getTime()
+    ) {
+      return Promise.resolve('STALE');
+    }
+    a.wantsEarlier = input.wantsEarlier;
+    a.earlierWindow = input.wantsEarlier ? (input.window ?? 'ANY') : null;
+    this.auditEvents.push(
+      earlierRequestAuditEvent(input.request ?? null, {
+        tenantId: this.tenantContext?.getTenantId() ?? 'tenant-sentinel',
+        appointmentId: a.id,
+        locationId: a.locationId,
+        wantsEarlier: input.wantsEarlier,
+      }),
+    );
+    return Promise.resolve('OK');
   }
 
   respond(input: RespondConfirmationInput): Promise<RespondOutcome> {

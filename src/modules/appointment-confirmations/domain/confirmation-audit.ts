@@ -23,7 +23,46 @@ export const CONFIRMATION_LINK_REASONS = {
   CONFIRM: 'CONFIRMATION_LINK_CONFIRMED',
   CANCEL: 'CONFIRMATION_LINK_CANCELLED',
   CALL_ME: 'CONFIRMATION_LINK_CALL_REQUESTED',
+  // DX-437: «Avisarme si se libera un hueco antes» desde el enlace.
+  EARLIER_ON: 'CONFIRMATION_LINK_EARLIER_REQUESTED',
+  EARLIER_OFF: 'CONFIRMATION_LINK_EARLIER_CLEARED',
 } as const;
+
+/**
+ * DX-437: el paciente pide (o quita) «Adelantar si hay hueco» desde el enlace:
+ * UPDATE de la cita, sin usuario, origen PUBLIC_LINK. Sin token ni URL.
+ */
+export function earlierRequestAuditEvent(
+  request: AuditRequestMeta | null,
+  input: {
+    tenantId: string;
+    appointmentId: string;
+    locationId: string;
+    wantsEarlier: boolean;
+  },
+): AuditEventDraft {
+  return {
+    tenantId: input.tenantId,
+    locationId: input.locationId,
+    actor: { kind: 'patient' },
+    action: 'UPDATE',
+    resourceType: 'APPOINTMENT',
+    resourceId: input.appointmentId,
+    patient: { kind: 'appointment', id: input.appointmentId },
+    requestId: request?.requestId ?? null,
+    ip: request?.ip ?? null,
+    userAgent: request?.userAgent ?? null,
+    metadata: {
+      origin: 'PUBLIC_LINK',
+      reason: input.wantsEarlier
+        ? CONFIRMATION_LINK_REASONS.EARLIER_ON
+        : CONFIRMATION_LINK_REASONS.EARLIER_OFF,
+      changedFields: input.wantsEarlier
+        ? ['wantsEarlier', 'earlierWindow']
+        : ['wantsEarlier'],
+    },
+  };
+}
 
 /** Estado al que lleva cada respuesta (CALL_ME no lo cambia). */
 const STATUS_AFTER: Record<

@@ -1,5 +1,10 @@
 import type { HourCycle } from '../../../shared/format/regional-format';
-import { AppointmentConfirmationResponse } from '@prisma/client';
+import {
+  AppointmentConfirmationResponse,
+  type EarlierWindow,
+} from '@prisma/client';
+import { civilDateIn } from '../../../shared/time/civil-day';
+import { MOVABLE_STATUSES } from '../../waitlist/domain/opening-candidates';
 import {
   AppointmentConfirmation,
   ClinicBranding,
@@ -46,6 +51,41 @@ export interface PublicAppointmentView {
   timeZone: string | null;
   locale: string | null;
   hourCycle: HourCycle | null;
+  /** DX-437: «Avisarme si se libera un hueco antes» y la franja pedida. */
+  wantsEarlier: boolean;
+  earlierWindow: EarlierWindow | null;
+  /**
+   * DX-437: el paciente puede pedirlo (o quitarlo) ahora: cita agendada o
+   * confirmada, en el futuro y de un día posterior a hoy en la sede (hoy ya no
+   * hay huecos anteriores). Sin zona de la sede, no.
+   */
+  earlierAllowed: boolean;
+}
+
+/** DX-437: por qué no se puede pedir adelantar la cita (400 de la ruta pública). */
+export const EARLIER_MESSAGES = {
+  notMovable: 'Esta cita ya no se puede adelantar.',
+  past: 'La cita ya pasó.',
+  today: 'La cita es hoy: ya no hay huecos anteriores.',
+  noZone:
+    'No podemos gestionar esta petición en línea. Llama a la clínica si quieres venir antes.',
+} as const;
+
+/** DX-437: la regla de «se puede pedir adelantar», compartida por la vista y la ruta. */
+export function earlierBlock(
+  appointment: Pick<
+    ConfirmationAppointment,
+    'start' | 'status' | 'locationTimeZone'
+  >,
+  now: Date,
+): keyof typeof EARLIER_MESSAGES | null {
+  if (!MOVABLE_STATUSES.includes(appointment.status)) return 'notMovable';
+  if (appointment.start.getTime() <= now.getTime()) return 'past';
+  if (!appointment.locationTimeZone) return 'noZone';
+  const zone = appointment.locationTimeZone;
+  if (civilDateIn(appointment.start, zone) <= civilDateIn(now, zone))
+    return 'today';
+  return null;
 }
 
 /** DX-291: la política que lee el paciente antes de responder. */
@@ -77,8 +117,12 @@ export interface PublicConfirmationView {
 
 export function toPublicAppointmentView(
   appointment: ConfirmationAppointment,
+  now: Date = new Date(),
 ): PublicAppointmentView {
   return {
+    wantsEarlier: appointment.wantsEarlier,
+    earlierWindow: appointment.wantsEarlier ? appointment.earlierWindow : null,
+    earlierAllowed: earlierBlock(appointment, now) === null,
     patientFirstName: firstNameOnly(appointment.patientFirstName),
     start: appointment.start,
     end: appointment.end,
@@ -105,7 +149,7 @@ export function toPublicConfirmationView(
     clinic,
     appointment:
       status !== 'EXPIRED' && appointment
-        ? toPublicAppointmentView(appointment)
+        ? toPublicAppointmentView(appointment, now)
         : null,
     response:
       status === 'RESPONDED' && confirmation.response

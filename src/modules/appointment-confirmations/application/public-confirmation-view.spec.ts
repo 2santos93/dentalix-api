@@ -9,6 +9,8 @@ function appointment(
     start: new Date('2027-03-01T14:00:00.000Z'),
     end: new Date('2027-03-01T14:30:00.000Z'),
     status: 'SCHEDULED',
+    wantsEarlier: false,
+    earlierWindow: null,
     patientFirstName: 'Ana María',
     patientPhone: '+58 414 555 0101',
     providerName: 'Dra. Pérez',
@@ -49,6 +51,8 @@ describe('toPublicAppointmentView (DX-354)', () => {
   it('no incluye datos que no sean los permitidos', () => {
     const view = toPublicAppointmentView(appointment());
     expect(Object.keys(view).sort()).toEqual([
+      'earlierAllowed',
+      'earlierWindow',
       'end',
       'hourCycle',
       'locale',
@@ -58,6 +62,7 @@ describe('toPublicAppointmentView (DX-354)', () => {
       'providerName',
       'start',
       'timeZone',
+      'wantsEarlier',
     ]);
     expect(JSON.stringify(view)).not.toMatch(
       /location-sentinel-1|appointment-sentinel-1|414 555 0101/,

@@ -2,6 +2,7 @@ import {
   AppointmentStatus,
   CancellationByKind,
   CancellationReasonCode,
+  EarlierWindow,
   TriageFlag,
 } from '@prisma/client';
 import type { AppointmentTypeSummary } from '../../../appointment-types/domain/entities/appointment-type.entity';
@@ -57,6 +58,13 @@ export interface Appointment {
    * huecos libres de días anteriores; al moverla a uno se apaga.
    */
   wantsEarlier: boolean;
+  /**
+   * DX-437: la franja en la que el paciente quiere el hueco (solo con
+   * `wantsEarlier`) y cuándo lo pidió él desde el enlace de confirmación
+   * (null = lo marcó el personal). Se limpian con la marca.
+   */
+  earlierWindow: EarlierWindow | null;
+  earlierRequestedAt: Date | null;
   /**
    * DX-200: horas del flujo en la clínica (reloj del servidor): llegó, pasó al
    * sillón y quedó listo para cobrar. null en las citas antiguas y mientras no
