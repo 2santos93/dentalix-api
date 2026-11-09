@@ -3215,6 +3215,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         'Evolución no encontrada en la historia clínica de este paciente',
     },
     {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/reprice/preview body.itemIds[] de A',
+      verb: 'post',
+      path: () =>
+        `/patients/${b.patientId}/treatment-plans/${b.planId}/reprice/preview`,
+      body: () => ({ itemIds: [a.planItemId] }),
+      bodyIds: ['itemIds[]'],
+      status: 404,
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    },
+    {
       name: 'POST /treatment-plans/:id/items/bulk-discount body.itemIds[] de A',
       verb: 'post',
       path: () => `/treatment-plans/${b.planId}/items/bulk-discount`,

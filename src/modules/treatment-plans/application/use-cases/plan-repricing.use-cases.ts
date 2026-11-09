@@ -259,6 +259,9 @@ export class PreviewPlanRepricingUseCase {
     actor: DiscountActor,
   ): Promise<Repricing> {
     const { plan, facts } = await loadSubject(this.repo, patientId, planId);
+    // Primero los ítems pedidos (404 si alguno no es del plan), como
+    // «Descuento %»; después el estado del plan.
+    repricingCatalogItemIds(plan, request.itemIds);
     assertPlanRepriceable(plan, facts);
     const context = await this.context.read(plan, request, actor);
     return computeRepricing({ plan, itemIds: request.itemIds, ...context });
@@ -305,8 +308,8 @@ export class ApplyPlanRepricingUseCase {
       { key: key.toLowerCase(), fingerprint },
       actor.userId,
       ({ plan: locked, facts }) => {
-        assertPlanRepriceable(locked, facts);
         const needed = repricingCatalogItemIds(locked, request.itemIds);
+        assertPlanRepriceable(locked, facts);
         if (needed.some((id) => !context.references.has(id))) {
           throw repricingConflict(REPRICE_STALE_CODE, REPRICE_STALE_MESSAGE);
         }

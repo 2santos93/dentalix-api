@@ -321,10 +321,12 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
     expect(repriced[0].metadata).toMatchObject({
       params: { patientId, planId, repricingId: applied.repricingId },
     });
-    // Ni importes ni la huella en la auditoría.
-    expect(JSON.stringify(repriced[0].metadata)).not.toMatch(
-      /4000|3600|8000|7200|[0-9a-f]{64}/,
-    );
+    // Solo nombres de campo, ids y el código: ni importes ni la huella.
+    expect(repriced[0].metadata).toEqual({
+      changedFields: ['previewHash'],
+      params: { patientId, planId, repricingId: applied.repricingId },
+      reason: 'PLAN_REPRICED',
+    });
 
     // Repetir con la misma clave: lo mismo, sin escribir otra vez.
     const again = await as(clinicA, tokens.DENTIST)
@@ -544,6 +546,41 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
         newKey(),
       )
       .expect(200);
+  });
+
+  it('B aplica a SU plan con un ítem de A en body.itemIds → 404 en español y nada cambia', async () => {
+    const { items } = await presentedPlan();
+    const patientB = await as(clinicB)
+      .post('/patients', {
+        docType: 'NATIONAL_ID',
+        sex: 'F',
+        firstName: 'Rosa',
+        lastName: 'Otra',
+        docNumber: 'DX379B-B1',
+      })
+      .expect(201);
+    const patientBId = (patientB.body as { id: string }).id;
+    const planB = await as(clinicB)
+      .post(`/patients/${patientBId}/treatment-plans`, { currency: 'VES' })
+      .expect(201);
+    const planBId = (planB.body as { id: string }).id;
+    const res = await as(clinicB)
+      .post(
+        `${repricePath(planBId, patientBId)}/apply`,
+        { previewHash: 'a'.repeat(64), itemIds: [items[0]] },
+        newKey(),
+      )
+      .expect(404);
+    expect(res.body).toMatchObject({
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    });
+    const stored = await raw.treatmentPlanItem.findUniqueOrThrow({
+      where: { id: items[0] },
+    });
+    expect(stored.price.toNumber()).toBe(3600);
+    expect(
+      await raw.treatmentPlanRepricing.count({ where: { planId: planBId } }),
+    ).toBe(0);
   });
 
   // ISOLATION_COVERS: POST /patients/:patientId/treatment-plans/:planId/reprice/apply

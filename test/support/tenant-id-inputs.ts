@@ -105,6 +105,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'PUT /payments/:id/allocations body.allocations[].treatmentPlanItemId',
   'POST /treatment-plans/:id/items body.catalogItemId',
   'POST /treatment-plans/:id/items/bulk-discount body.itemIds[]',
+  // DX-379 (B): los ítems de la vista previa de «Actualizar precios».
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/preview body.itemIds[]',
   'PATCH /treatment-plans/:id/items/:itemId body.performedById',
   'PATCH /treatment-plans/:id/items/:itemId body.performedLocationId',
   // --- reportes, cartera y caja (DX-027, DX-204) ---
@@ -145,6 +147,10 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-379 (B): «B aplica "Actualizar precios" a su plan con un ítem de A →
+  // 404 en español y nada cambia» (lleva Idempotency-Key: fuera de la matriz).
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/apply body.itemIds[]':
+    'treatment-plan-repricing.e2e-spec.ts',
   // DX-542: «B manda la sede o el sillón de A al listar, crear o editar un
   // equipo → 404 en español y nada de A cambia».
   'GET /equipment ?locationId': 'equipment.e2e-spec.ts',
