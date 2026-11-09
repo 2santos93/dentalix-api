@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { isLocationAllowed } from '../../../shared/tenancy/location-access';
+import { lockAgenda } from '../../schedule-blocks/infrastructure/agenda-lock';
 import type {
   MinuteRange,
   ProviderOverride,
@@ -69,11 +70,6 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
     return tenantId;
   }
 
-  /**
-   * Candado por profesional para toda escritura de su horario: la validación
-   * (sin solape entre sedes, contra las excepciones) mira lo guardado y
-   * escribe en la misma transacción, sin que otro guardado se cuele en medio.
-   */
   /** DX-267: las citas por venir del profesional; lo agendado no cambia. */
   private async runAppointmentCheck(
     tx: Prisma.TransactionClient,
@@ -113,12 +109,46 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
     );
   }
 
+  /**
+   * Candado por profesional para toda escritura de su horario: la validación
+   * (sin solape entre sedes, contra las excepciones) mira lo guardado y
+   * escribe en la misma transacción, sin que otro guardado se cuele en medio.
+   */
   private async lockProvider(
     tx: Prisma.TransactionClient,
     providerId: string,
   ): Promise<void> {
     const key = `dx233:provider-schedule:${this.tenantId()}:${providerId}`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+  }
+
+  /**
+   * DX-267-bis: guardar el horario (semanal o excepción) toma, después del
+   * candado dx233, el de la AGENDA del profesional (DX-149). Lo toman
+   * también, en `PrismaAppointmentRepository`, agendar una cita (también
+   * desde «Pendientes»), moverla (hora o profesional, también «Ocupar este
+   * hueco») y reactivarla desde CANCELLED/NO_SHOW (`recheckSlot`): esas no
+   * entran entre el recuento de las citas afectadas y el COMMIT del horario;
+   * o se cuentan, o esperan a que se guarde.
+   *
+   * Quedan FUERA (no toman este candado, pueden colarse sin contarse):
+   * - aceptar una oferta de hueco por el enlace público
+   *   (`PrismaSlotOfferRepository`: crea o mueve la cita);
+   * - otros cambios de estado que dejan la cita en SCHEDULED/CONFIRMED sin
+   *   moverla: «Deshacer llegada», volver del flujo en la clínica o salir de
+   *   COMPLETED;
+   * - y la cita que espera este candado validó el horario del profesional
+   *   ANTES, fuera de la transacción: en modo estricto puede entrar con el
+   *   horario viejo (DX-149/DX-161, fuera de alcance).
+   * Las urgencias nacen ARRIVED y no cuentan. Orden sin ciclos: dx233 →
+   * agenda del profesional; ninguna escritura de citas toma dx233.
+   */
+  private async lockForSave(
+    tx: Prisma.TransactionClient,
+    providerId: string,
+  ): Promise<void> {
+    await this.lockProvider(tx, providerId);
+    await lockAgenda(tx, this.tenantId(), { providerId, locationId: null });
   }
 
   private async weeklyOf(
@@ -191,7 +221,7 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
   replaceWeekly(input: ReplaceWeeklyInput): Promise<WeeklyChange> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      await this.lockProvider(tx, input.providerId);
+      await this.lockForSave(tx, input.providerId);
       const current = (
         await this.snapshots(tx, [input.providerId], {
           from: input.overridesFrom,
@@ -273,7 +303,7 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
   upsertOverride(input: UpsertOverrideInput): Promise<OverrideChange> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      await this.lockProvider(tx, input.providerId);
+      await this.lockForSave(tx, input.providerId);
       const current = (
         await this.snapshots(tx, [input.providerId], {
           from: input.date,

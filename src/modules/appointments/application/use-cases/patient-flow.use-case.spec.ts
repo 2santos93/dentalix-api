@@ -54,7 +54,7 @@ function ctx(role: ClinicRole): AppointmentAuditContext {
   };
 }
 
-function setup() {
+function setup(clock?: () => Date) {
   const repo = new InMemoryAppointmentRepository();
   const drafts: AuditEventDraft[] = [];
   const audit = {
@@ -72,6 +72,7 @@ function setup() {
     locations,
     new TenantContextService(),
     inMemoryAvailability(),
+    clock,
   );
   return { repo, uc, drafts };
 }
@@ -292,8 +293,13 @@ describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
   });
 
   it('se fue sin pasar al sillón: se cancela, y al reactivarla no quedan horas', async () => {
-    const { repo, uc } = setup();
+    // DX-267-bis: reactivar exige que la cita no haya terminado (reloj
+    // inyectado); `todayAppointment` puede quedar ya terminada si la suite
+    // corre en la última media hora del día de la sede.
+    let start = new Date();
+    const { repo, uc } = setup(() => new Date(start.getTime() - 60_000));
     const a = todayAppointment(repo);
+    start = a.start;
     await uc.execute(
       a.id,
       { status: AppointmentStatus.ARRIVED },

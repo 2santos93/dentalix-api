@@ -8,12 +8,19 @@ import { PrismaProviderScheduleRepository } from '../src/modules/provider-schedu
 import {
   crossLocationConflictOn,
   weeklyScheduleError,
+  type LiveAppointment,
   type ProviderScheduleSnapshot,
 } from '../src/modules/provider-schedule/domain/provider-availability';
+import { PrismaAppointmentRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment.repository';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import {
+  holdLock,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
 
 // DX-233: el repositorio del horario contra Postgres (rol de la app, RLS):
 // reemplazo en blando, excepciones que se reemplazan, y el candado por
@@ -25,6 +32,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const repo = new PrismaProviderScheduleRepository(prisma, tenantContext);
+const appointments = new PrismaAppointmentRepository(prisma, tenantContext);
 
 describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
   let tenantId: string;
@@ -58,6 +66,8 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
 
   afterAll(async () => {
     const where = { tenantId: { in: [tenantId, otherTenantId] } };
+    await raw.appointment.deleteMany({ where });
+    await raw.patient.deleteMany({ where });
     await raw.providerScheduleOverrideRange.deleteMany({ where });
     await raw.providerScheduleOverride.deleteMany({ where });
     await raw.providerScheduleRange.deleteMany({ where });
@@ -247,5 +257,236 @@ describe('Repositorio del horario de los profesionales (DX-233, int)', () => {
       where: { tenantId, providerId: other, deletedAt: null },
     });
     expect(live).toHaveLength(1);
+  });
+  // DX-267-bis: el recuento de las citas que el horario nuevo deja fuera se
+  // hace DENTRO de la transacción del guardado, después de sus candados.
+  describe('recuento de citas afectadas bajo candado (DX-267-bis)', () => {
+    /** Día futuro fijo (jueves) en la zona de la sede: 15:00–15:30 en Caracas. */
+    const DAY = '2031-01-16';
+    const START = new Date(`${DAY}T19:00:00.000Z`);
+    const END = new Date(`${DAY}T19:30:00.000Z`);
+    const FROM = new Date(`${DAY}T04:00:00.000Z`);
+    const TO = new Date('2031-01-17T04:00:00.000Z');
+    /** Un paciente por cita: el solape del paciente no entra en juego. */
+    const newPatient = async () =>
+      (
+        await raw.patient.create({
+          data: { tenantId, firstName: 'Ana', lastName: 'Rondón' },
+          select: { id: true },
+        })
+      ).id;
+
+    /** Inserta y confirma (fuera de la transacción del guardado) una cita. */
+    const insertAppointment = async (providerId: string) =>
+      raw.appointment.create({
+        data: {
+          tenantId,
+          locationId: locationA,
+          patientId: await newPatient(),
+          providerId,
+          start: START,
+          end: END,
+        },
+        select: { id: true },
+      });
+
+    const holdScheduleLock = (providerId: string) =>
+      holdLock(raw, (tx) => {
+        const key = `dx233:provider-schedule:${tenantId}:${providerId}`;
+        return tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+      });
+
+    const holdAgendaLock = (providerId: string) =>
+      holdLock(
+        raw,
+        (tx) => tx.$executeRaw`SELECT pg_advisory_xact_lock(
+          hashtext(${'dx_agenda_provider:' + tenantId}),
+          hashtext(${providerId})
+        )`,
+      );
+
+    /** Excepción «no trabaja» ese día en la sede A, contando sus citas. */
+    const dayOff = (providerId: string, seen: LiveAppointment[][]) =>
+      asClinic(() =>
+        repo.upsertOverride({
+          providerId,
+          locationId: locationA,
+          date: DAY,
+          ranges: [],
+          note: null,
+          actorId: actor,
+          validate: () => undefined,
+          checkAppointments: {
+            from: FROM,
+            to: TO,
+            locationId: locationA,
+            check: (rows) => {
+              seen.push(rows);
+            },
+          },
+        }),
+      );
+
+    /** Semanal sin los jueves, contando sus citas desde FROM. */
+    const weeklyWithoutThursday = (
+      providerId: string,
+      seen: { rows: LiveAppointment[]; current: ProviderScheduleSnapshot }[],
+    ) =>
+      asClinic(() =>
+        repo.replaceWeekly({
+          providerId,
+          actorId: actor,
+          overridesFrom: DAY,
+          locations: [
+            {
+              locationId: locationA,
+              timezone: 'America/Caracas',
+              ranges: [{ weekday: 5, startMinute: 840, endMinute: 1140 }],
+            },
+          ],
+          validate: () => undefined,
+          checkAppointments: {
+            from: FROM,
+            check: (rows, current) => {
+              seen.push({ rows, current });
+            },
+          },
+        }),
+      );
+
+    it('excepción: una cita confirmada mientras el guardado espera el candado se cuenta', async () => {
+      const providerId = randomUUID();
+      const held = await holdScheduleLock(providerId);
+      const seen: LiveAppointment[][] = [];
+      const saving = settle(dayOff(providerId, seen));
+      await waitForLockWaiters(raw, [held.pid]);
+      const appt = await insertAppointment(providerId);
+      held.release();
+      await held.done;
+      const outcome = await saving;
+      expect(outcome.status).toBe('fulfilled');
+      expect(seen).toHaveLength(1);
+      expect(seen[0].map((a) => a.id)).toEqual([appt.id]);
+      expect(seen[0][0]).toMatchObject({
+        patientName: 'Ana Rondón',
+        visible: true,
+      });
+    });
+
+    it('semanal: una cita confirmada mientras el guardado espera el candado se cuenta', async () => {
+      const providerId = randomUUID();
+      const held = await holdScheduleLock(providerId);
+      const seen: {
+        rows: LiveAppointment[];
+        current: ProviderScheduleSnapshot;
+      }[] = [];
+      const saving = settle(weeklyWithoutThursday(providerId, seen));
+      await waitForLockWaiters(raw, [held.pid]);
+      const appt = await insertAppointment(providerId);
+      held.release();
+      await held.done;
+      expect((await saving).status).toBe('fulfilled');
+      expect(seen.map((s) => s.rows.map((a) => a.id))).toEqual([[appt.id]]);
+    });
+
+    it('excepción y semanal a la vez: el segundo cuenta sobre lo que escribió el primero', async () => {
+      const providerId = randomUUID();
+      const held = await holdScheduleLock(providerId);
+      const order: string[] = [];
+      const currents: Record<string, ProviderScheduleSnapshot> = {};
+      const overrideSeen: LiveAppointment[][] = [];
+      const saving = Promise.all([
+        settle(
+          asClinic(() =>
+            repo.upsertOverride({
+              providerId,
+              locationId: locationA,
+              date: DAY,
+              ranges: [],
+              note: null,
+              actorId: actor,
+              validate: () => undefined,
+              checkAppointments: {
+                from: FROM,
+                to: TO,
+                locationId: locationA,
+                check: (rows, current) => {
+                  overrideSeen.push(rows);
+                  order.push('override');
+                  currents.override = current;
+                },
+              },
+            }),
+          ),
+        ),
+        settle(
+          weeklyWithoutThursday(providerId, {
+            push: ({ current }: { current: ProviderScheduleSnapshot }) => {
+              order.push('weekly');
+              currents.weekly = current;
+              return 0;
+            },
+          } as unknown as {
+            rows: LiveAppointment[];
+            current: ProviderScheduleSnapshot;
+          }[]),
+        ),
+      ]);
+      await waitForLockWaiters(raw, [held.pid], 2);
+      held.release();
+      await held.done;
+      const outcomes = await saving;
+      expect(outcomes.map((o) => o.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(order).toHaveLength(2);
+      if (order[0] === 'override') {
+        // El semanal vio la excepción recién guardada.
+        expect(currents.weekly.overrides).toEqual([
+          expect.objectContaining({ date: DAY, locationId: locationA }),
+        ]);
+      } else {
+        // La excepción vio el semanal recién guardado (viernes).
+        expect(currents.override.weekly).toEqual([
+          {
+            locationId: locationA,
+            weekday: 5,
+            startMinute: 840,
+            endMinute: 1140,
+          },
+        ]);
+      }
+    });
+
+    it('opción A: el guardado espera el candado de la agenda; una cita que llega antes se cuenta', async () => {
+      const providerId = randomUUID();
+      // Se retiene la agenda del profesional. Primero llega la cita (se pone
+      // en cola), después el guardado; al soltar, la cita entra y el
+      // recuento, que espera detrás, la ve.
+      const createPatientId = await newPatient();
+      const held = await holdAgendaLock(providerId);
+      const creating = settle(
+        asClinic(() =>
+          appointments.create({
+            patientId: createPatientId,
+            providerId,
+            start: START,
+            end: END,
+            locationId: locationA,
+          }),
+        ),
+      );
+      await waitForLockWaiters(raw, [held.pid], 1);
+      const seen: LiveAppointment[][] = [];
+      const saving = settle(dayOff(providerId, seen));
+      // Sin la opción A el guardado no esperaría aquí: solo hay 1 espera.
+      await waitForLockWaiters(raw, [held.pid], 2);
+      held.release();
+      await held.done;
+      const created = await creating;
+      expect(created.status).toBe('fulfilled');
+      expect((await saving).status).toBe('fulfilled');
+      expect(seen).toHaveLength(1);
+      if (created.status !== 'fulfilled') throw created.reason;
+      expect(seen[0].map((a) => a.id)).toEqual([created.value.id]);
+    });
   });
 });

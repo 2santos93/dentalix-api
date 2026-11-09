@@ -22,8 +22,16 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
-import { backendPid, waitForLockWaiters } from './support/postgres-concurrency';
-import { AffectedAppointmentsRaceError } from '../src/modules/schedule-blocks/domain/schedule-block-rules';
+import {
+  backendPid,
+  holdLock,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
+import {
+  AffectedAppointmentsRaceError,
+  SCHEDULE_BLOCKED_RACE_MESSAGE,
+} from '../src/modules/schedule-blocks/domain/schedule-block-rules';
 
 /** DX-279: cancelar desde la agenda exige origen y motivo. */
 const FOR_PATIENT = {
@@ -404,6 +412,56 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
         }),
       ]);
       expect(appointments + liveBlocks).toBe(1);
+    });
+
+    it('DX-267-bis: reactivar con un bloqueo creado a la vez: 409 y la cita sigue cancelada', async () => {
+      const appt = await newAppointment('11:00', '11:30');
+      await inA(() =>
+        update.execute(appt.id, {
+          status: AppointmentStatus.CANCELLED,
+          cancellation: FOR_PATIENT,
+        }),
+      );
+      // La reactivación pasa el pre-check (aún no hay bloqueo) y espera el
+      // candado de la agenda; quien lo retiene crea el bloqueo y confirma.
+      const held = await holdLock(
+        raw,
+        (tx) => tx.$executeRaw`SELECT pg_advisory_xact_lock(
+          hashtext(${'dx_agenda_provider:' + a.tenantId}),
+          hashtext(${DOCTOR})
+        )`,
+        (tx) =>
+          tx.scheduleBlock.create({
+            data: {
+              tenantId: a.tenantId,
+              providerId: DOCTOR,
+              start: at('10:00'),
+              end: at('12:00'),
+              kind: 'MEETING',
+              allowsBooking: false,
+            },
+          }),
+      );
+      const reactivating = settle(
+        inA(() =>
+          update.execute(appt.id, { status: AppointmentStatus.SCHEDULED }),
+        ),
+      );
+      await waitForLockWaiters(raw, [held.pid]);
+      held.release();
+      await held.done;
+      const outcome = await reactivating;
+      expect(outcome.status).toBe('rejected');
+      if (outcome.status === 'rejected') {
+        expect(outcome.reason).toBeInstanceOf(ConflictException);
+        expect((outcome.reason as Error).message).toBe(
+          SCHEDULE_BLOCKED_RACE_MESSAGE,
+        );
+      }
+      const row = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+      });
+      expect(row.status).toBe(AppointmentStatus.CANCELLED);
     });
 
     it('vacaciones de la doctora en todas las sedes: crear y mover a ese rango dan 409', async () => {

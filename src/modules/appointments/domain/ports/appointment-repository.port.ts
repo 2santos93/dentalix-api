@@ -123,6 +123,13 @@ export interface UpdateAppointmentRepoInput {
    * profesional. Solo se apaga: un sobrecupo nace en «Atender sin cita».
    */
   overbooked?: false;
+  /**
+   * DX-267-bis: la cita se reactiva (CANCELLED/NO_SHOW → SCHEDULED/CONFIRMED)
+   * en su hora: con el candado de la agenda y volviendo a mirar los bloqueos
+   * dentro de la transacción, como al mover (DX-149). Lo decide el caso de
+   * uso, nunca el cliente.
+   */
+  recheckSlot?: true;
 }
 
 /** DX-279: lo que el caso de uso decide de una cancelación. */

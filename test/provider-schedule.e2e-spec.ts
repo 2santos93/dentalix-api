@@ -785,6 +785,93 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       });
     });
 
+    describe('DX-267-bis: reactivar una cita aplica las reglas de mover', () => {
+      const cancel = (id: string) =>
+        as(api().patch(`/api/v1/appointments/${id}`), reception.token)
+          .send({
+            status: 'CANCELLED',
+            cancelledByKind: 'STAFF_FOR_PATIENT',
+            cancelReasonCode: 'ILLNESS',
+          })
+          .expect(200);
+      const reactivate = (id: string) =>
+        as(api().patch(`/api/v1/appointments/${id}`), reception.token).send({
+          status: 'SCHEDULED',
+        });
+      const strictMode = (on: boolean) =>
+        as(api().put('/api/v1/schedule/settings'), clinic.adminToken)
+          .send({ strictProviderSchedule: on })
+          .expect(200);
+
+      it('fuera del horario del profesional: aviso; en modo estricto, 409 con el sufijo', async () => {
+        const LATER_THU = addDays(THU, 35);
+        const created = await book(sedeB, LATER_THU, '15:00').expect(201);
+        const id = (created.body as Body).id;
+        await cancel(id);
+        // Tras cancelarla, ese jueves deja de trabajar (sin citas vivas: 201).
+        await as(
+          api().post(`/api/v1/providers/${draX.userId}/schedule-overrides`),
+          clinic.adminToken,
+        )
+          .send({ locationId: sedeB, date: LATER_THU, ranges: [] })
+          .expect(201);
+
+        await strictMode(true);
+        try {
+          const strict = await reactivate(id).expect(409);
+          expect((strict.body as { message: string }).message).toMatch(
+            /^Fuera del horario del profesional: no trabaja en Sede B .*La clínica no permite citar fuera del horario del profesional\.$/,
+          );
+        } finally {
+          await strictMode(false);
+        }
+        const still = await as(
+          api().get(`/api/v1/appointments/${id}`),
+          reception.token,
+        ).expect(200);
+        expect(still.body).toMatchObject({ status: 'CANCELLED' });
+
+        const warned = await reactivate(id).expect(200);
+        expect(warned.body).toMatchObject({
+          status: 'SCHEDULED',
+          warningCodes: ['PROVIDER_OFF_SCHEDULE'],
+          warnings: [
+            expect.stringMatching(
+              /^Fuera del horario del profesional: no trabaja en Sede B el jueves/,
+            ),
+          ],
+        });
+        await cancel(id);
+      });
+
+      it('una cita que ya terminó: 409 APPOINTMENT_PAST y sigue cancelada', async () => {
+        const LATER_MON = addDays(MON, 35);
+        const created = await book(sedeA, LATER_MON, '09:00').expect(201);
+        const id = (created.body as Body).id;
+        await cancel(id);
+        // La cita «ya pasó»: se lleva a hace dos días (misma duración).
+        const twoDaysAgo = Date.now() - 2 * DAY_MS;
+        await raw.appointment.update({
+          where: { id },
+          data: {
+            start: new Date(twoDaysAgo),
+            end: new Date(twoDaysAgo + 30 * 60_000),
+          },
+        });
+        const res = await reactivate(id).expect(409);
+        expect(res.body).toEqual({
+          statusCode: 409,
+          error: 'Conflict',
+          code: 'APPOINTMENT_PAST',
+          message: 'La cita ya pasó: agenda una nueva',
+        });
+        const after = await raw.appointment.findUniqueOrThrow({
+          where: { id },
+        });
+        expect(after.status).toBe('CANCELLED');
+      });
+    });
+
     it('DX-520-bis: con la sede en 12 h el aviso escribe las horas en 12 h, sin barras', async () => {
       const before = await raw.location.findUniqueOrThrow({
         where: { id: sedeB },
