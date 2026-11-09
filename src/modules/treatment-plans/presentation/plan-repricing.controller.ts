@@ -247,7 +247,7 @@ export class PlanRepricingController {
   })
   @ApiUnprocessableEntityResponse({
     description:
-      '`IDEMPOTENCY_KEY_REUSED`: la clave ya se usó para otra petición (otro plan, otra vista previa u otros ítems); o SEC-041: el redondeo sube el % efectivo por encima del umbral y el ítem no tiene motivo',
+      '`IDEMPOTENCY_KEY_REUSED`: la clave ya se usó para otra petición (otro paciente en la ruta, otro plan, otra vista previa u otros ítems); o SEC-041: el redondeo sube el % efectivo por encima del umbral y el ítem no tiene motivo',
   })
   async apply(
     @Param('patientId', ParseUUIDPipe) patientId: string,
