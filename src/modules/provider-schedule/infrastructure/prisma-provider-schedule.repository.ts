@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { isLocationAllowed } from '../../../shared/tenancy/location-access';
+import { lockAgenda } from '../../schedule-blocks/infrastructure/agenda-lock';
 import type {
   MinuteRange,
   ProviderOverride,
@@ -69,11 +70,6 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
     return tenantId;
   }
 
-  /**
-   * Candado por profesional para toda escritura de su horario: la validación
-   * (sin solape entre sedes, contra las excepciones) mira lo guardado y
-   * escribe en la misma transacción, sin que otro guardado se cuele en medio.
-   */
   /** DX-267: las citas por venir del profesional; lo agendado no cambia. */
   private async runAppointmentCheck(
     tx: Prisma.TransactionClient,
@@ -113,12 +109,33 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
     );
   }
 
+  /**
+   * Candado por profesional para toda escritura de su horario: la validación
+   * (sin solape entre sedes, contra las excepciones) mira lo guardado y
+   * escribe en la misma transacción, sin que otro guardado se cuele en medio.
+   */
   private async lockProvider(
     tx: Prisma.TransactionClient,
     providerId: string,
   ): Promise<void> {
     const key = `dx233:provider-schedule:${this.tenantId()}:${providerId}`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+  }
+
+  /**
+   * DX-267-bis: guardar el horario (semanal o excepción) toma, después del
+   * candado dx233, el de la AGENDA del profesional (DX-149): el mismo que
+   * toman crear, mover y reactivar una cita suya. Así ninguna cita entra
+   * entre el recuento de las citas afectadas y el COMMIT del horario: o se
+   * cuenta, o espera a que el horario se guarde. Orden sin ciclos: dx233 →
+   * agenda del profesional; las citas nunca toman dx233.
+   */
+  private async lockForSave(
+    tx: Prisma.TransactionClient,
+    providerId: string,
+  ): Promise<void> {
+    await this.lockProvider(tx, providerId);
+    await lockAgenda(tx, this.tenantId(), { providerId, locationId: null });
   }
 
   private async weeklyOf(
@@ -191,7 +208,7 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
   replaceWeekly(input: ReplaceWeeklyInput): Promise<WeeklyChange> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      await this.lockProvider(tx, input.providerId);
+      await this.lockForSave(tx, input.providerId);
       const current = (
         await this.snapshots(tx, [input.providerId], {
           from: input.overridesFrom,
@@ -273,7 +290,7 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
   upsertOverride(input: UpsertOverrideInput): Promise<OverrideChange> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      await this.lockProvider(tx, input.providerId);
+      await this.lockForSave(tx, input.providerId);
       const current = (
         await this.snapshots(tx, [input.providerId], {
           from: input.date,
