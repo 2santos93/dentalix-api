@@ -48,7 +48,7 @@ describe('DX-379 (B): migración de la recotización', () => {
       );
       expect(body.length).toBeLessThan(code.length);
       expect(body.slice(0, body.indexOf('$$;'))).toContain(
-        'public."treatment_plan_item_reprice_allowed"(OLD."planId", OLD."status"::text)',
+        'public."treatment_plan_item_reprice_allowed"(OLD."planId", OLD."id", OLD."status"::text, OLD."deletedAt")',
       );
     }
     const allowed = code.slice(
@@ -62,6 +62,8 @@ describe('DX-379 (B): migración de la recotización', () => {
     expect(allowed).toMatch(/IN \('DRAFT', 'PRESENTED'\)/);
     expect(allowed).toContain('treatment_plan_acceptances');
     expect(allowed).toContain("item_status = 'PROPOSED'");
+    expect(allowed).toContain('item_deleted_at IS NULL');
+    expect(allowed).toContain('cancellation_fees');
   });
 
   it('documenta que no es solo aditiva y su vuelta atrás', () => {

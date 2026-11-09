@@ -82,7 +82,11 @@ async function plan(
 }
 
 /** Reescribe la foto del ítem como lo hace la recotización. */
-function rewriteSnapshot(itemId: string, withMarker: boolean) {
+function rewriteSnapshot(
+  itemId: string,
+  withMarker: boolean,
+  opts: { price?: boolean } = {},
+) {
   return tenantContext.run(tenantId, () =>
     prisma.runWithTenant(async (tx) => {
       if (withMarker) {
@@ -99,7 +103,7 @@ function rewriteSnapshot(itemId: string, withMarker: boolean) {
           referenceRateTo: null,
           referenceRateSource: null,
           referenceRateDate: null,
-          price: 4000,
+          ...(opts.price === false ? {} : { price: 4000 }),
         },
       });
     }),
@@ -216,8 +220,9 @@ describe('recotizar en Postgres (DX-379 porción B)', () => {
     it('con la marca, en un plan aceptado o cancelado, o en un ítem no propuesto, no', async () => {
       for (const status of ['ACCEPTED', 'CANCELLED'] as const) {
         const { itemId } = await plan(status);
+        // El trigger de la foto falla primero, con su mensaje exacto.
         await expect(rewriteSnapshot(itemId, true)).rejects.toThrow(
-          /queda fijada|no admite|cancelado|cerrado|restrict/i,
+          /la moneda del catálogo del ítem queda fijada al darlo de alta: no cambia/,
         );
       }
       const { itemId } = await plan('PRESENTED');
@@ -228,6 +233,77 @@ describe('recotizar en Postgres (DX-379 porción B)', () => {
       await expect(rewriteSnapshot(itemId, true)).rejects.toThrow(
         /queda fijada/,
       );
+    });
+
+    it('M-1/M-2: con la marca, tampoco en un plan borrado, un ítem borrado ni el cargo vigente por inasistencia', async () => {
+      const deletedPlan = await plan('PRESENTED');
+      await owner.treatmentPlan.update({
+        where: { id: deletedPlan.planId },
+        data: { deletedAt: new Date() },
+      });
+      await expect(
+        rewriteSnapshot(deletedPlan.itemId, true, { price: false }),
+      ).rejects.toThrow(/queda fijada/);
+
+      const deletedItem = await plan('PRESENTED');
+      await owner.treatmentPlanItem.update({
+        where: { id: deletedItem.itemId },
+        data: { deletedAt: new Date() },
+      });
+      await expect(
+        rewriteSnapshot(deletedItem.itemId, true, { price: false }),
+      ).rejects.toThrow(/queda fijada/);
+
+      // Cargo vigente (CHARGED, sin anular) de una cita: solo se toca la foto
+      // (el precio ya lo congela el trigger SEC-050).
+      const feeItem = await plan('PRESENTED');
+      const start = new Date('2026-11-02T14:00:00.000Z');
+      const policy = await owner.cancellationPolicyVersion.create({
+        data: {
+          tenantId,
+          locationId,
+          version: 1,
+          noticeHours: 24,
+          suggestedFee: 10,
+          currency: 'VES',
+          createdById: userId,
+        },
+        select: { id: true },
+      });
+      const appointment = await owner.appointment.create({
+        data: {
+          tenantId,
+          locationId,
+          patientId,
+          providerId: userId,
+          start,
+          end: new Date(start.getTime() + 30 * 60_000),
+          status: 'NO_SHOW',
+          noShowMarkedAt: start,
+          policyVersionId: policy.id,
+        },
+        select: { id: true },
+      });
+      await owner.cancellationFee.create({
+        data: {
+          tenantId,
+          appointmentId: appointment.id,
+          patientId,
+          locationId,
+          status: 'CHARGED',
+          amount: 10,
+          currency: 'VES',
+          planItemId: feeItem.itemId,
+          policyVersionId: policy.id,
+          createdById: userId,
+        },
+      });
+      await expect(
+        rewriteSnapshot(feeItem.itemId, true, { price: false }),
+      ).rejects.toThrow(/queda fijada/);
+      // Control: sin cargo, la misma escritura con la marca pasa.
+      const control = await plan('PRESENTED');
+      await rewriteSnapshot(control.itemId, true, { price: false });
     });
 
     it('la marca de una transacción no vale en la siguiente (SET LOCAL)', async () => {
@@ -283,6 +359,7 @@ describe('recotizar en Postgres (DX-379 porción B)', () => {
         locationId,
         actorUserId: userId,
         source: 'MANUAL',
+        validityRenewed: true,
         idempotencyKey: KEY,
         requestFingerprint: FINGERPRINT,
       });

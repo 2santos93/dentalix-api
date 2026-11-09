@@ -3,7 +3,7 @@
 -- presupuesto reiniciada.
 --
 --   treatment_plan_repricings   una fila por recotización: quién, cuándo, en
---                               qué sede, la clave de idempotencia (cabecera
+--                               qué sede, si renovó la validez, la clave de idempotencia (cabecera
 --                               Idempotency-Key de /reprice/apply), la tasa
 --                               usada, la validez anterior y la nueva, cada
 --                               línea antes y después (JSON) y los totales.
@@ -44,7 +44,7 @@
 --      20261201090000_dx513b_plan_item_reference_snapshot (CREATE OR REPLACE
 --      con su cuerpo de entonces, sin la llamada a
 --      treatment_plan_item_reprice_allowed), y
---        DROP FUNCTION public."treatment_plan_item_reprice_allowed"(uuid, text);
+--        DROP FUNCTION public."treatment_plan_item_reprice_allowed"(uuid, uuid, text, timestamp);
 --        DROP TABLE public."treatment_plan_repricings";
 --        DROP FUNCTION public."treatment_plan_repricings_append_only"();
 --        DROP TYPE public."TreatmentPlanRepricingSource";
@@ -81,8 +81,11 @@ CREATE TABLE "treatment_plan_repricings" (
     "rateDate" DATE,
     "previousQuoteIssuedOn" DATE,
     "previousQuoteValidUntil" DATE,
-    "quoteIssuedOn" DATE NOT NULL,
-    "quoteValidUntil" DATE NOT NULL,
+    -- La validez solo se renueva si se recotizaron TODOS los ítems propuestos
+    -- vivos del plan; si no, se conserva la anterior (que puede ser NULL).
+    "validityRenewed" BOOLEAN NOT NULL,
+    "quoteIssuedOn" DATE,
+    "quoteValidUntil" DATE,
     "lines" JSONB NOT NULL,
     "skipped" JSONB NOT NULL,
     "totalBefore" DECIMAL(14,2) NOT NULL,
@@ -128,7 +131,9 @@ CREATE TABLE "treatment_plan_repricings" (
       )
     ),
     CONSTRAINT "treatment_plan_repricings_validity_check" CHECK (
-      "quoteValidUntil" > "quoteIssuedOn"
+      ("quoteIssuedOn" IS NULL) = ("quoteValidUntil" IS NULL)
+      AND ("quoteValidUntil" IS NULL OR "quoteValidUntil" > "quoteIssuedOn")
+      AND (NOT "validityRenewed" OR "quoteIssuedOn" IS NOT NULL)
       AND ("previousQuoteIssuedOn" IS NULL) = ("previousQuoteValidUntil" IS NULL)
       AND ("previousQuoteValidUntil" IS NULL
            OR "previousQuoteValidUntil" > "previousQuoteIssuedOn")
@@ -188,10 +193,13 @@ CREATE TRIGGER "treatment_plan_repricings_append_only"
   FOR EACH ROW EXECUTE FUNCTION public."treatment_plan_repricings_append_only"();
 
 -- ¿Puede esta transacción reescribir la foto del precio de un ítem? Solo la
--- recotización (marca `app.plan_item_reprice`), solo un ítem PROPUESTO y solo
+-- recotización (marca `app.plan_item_reprice`), solo un ítem PROPUESTO, vivo y
+-- que no sea el cargo vigente por inasistencia de una cita (SEC-050), y solo
 -- en un plan abierto: DRAFT o PRESENTED, vivo y sin aceptación firmada. Lee
--- el plan con la RLS de quien escribe (su misma clínica).
-CREATE FUNCTION public."treatment_plan_item_reprice_allowed"(plan_id uuid, item_status text)
+-- el plan y los cargos con la RLS de quien escribe (su misma clínica).
+CREATE FUNCTION public."treatment_plan_item_reprice_allowed"(
+  plan_id uuid, item_id uuid, item_status text, item_deleted_at timestamp
+)
 RETURNS boolean
 LANGUAGE sql
 STABLE
@@ -199,6 +207,13 @@ SET search_path = pg_catalog, pg_temp
 AS $$
   SELECT coalesce(current_setting('app.plan_item_reprice', true), '') = 'on'
      AND item_status = 'PROPOSED'
+     AND item_deleted_at IS NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM public."cancellation_fees" f
+        WHERE f."planItemId" = item_id
+          AND f."status"::text = 'CHARGED'
+          AND f."voidedAt" IS NULL
+     )
      AND EXISTS (
        SELECT 1 FROM public."treatment_plans" p
         WHERE p."id" = plan_id
@@ -223,7 +238,7 @@ BEGIN
      AND NOT (OLD."catalogCurrency" IS NULL
               AND coalesce(current_setting('app.dx502_backfill', true), '') = 'on')
      AND NOT (NEW."planId" = OLD."planId"
-              AND public."treatment_plan_item_reprice_allowed"(OLD."planId", OLD."status"::text)) THEN
+              AND public."treatment_plan_item_reprice_allowed"(OLD."planId", OLD."id", OLD."status"::text, OLD."deletedAt")) THEN
     RAISE EXCEPTION 'la moneda del catálogo del ítem queda fijada al darlo de alta: no cambia'
       USING ERRCODE = 'restrict_violation';
   END IF;
@@ -253,7 +268,7 @@ BEGIN
           OLD."referenceRateTo", OLD."referenceRateSource",
           OLD."referenceRateDate")
      AND NOT (NEW."planId" = OLD."planId"
-              AND public."treatment_plan_item_reprice_allowed"(OLD."planId", OLD."status"::text)) THEN
+              AND public."treatment_plan_item_reprice_allowed"(OLD."planId", OLD."id", OLD."status"::text, OLD."deletedAt")) THEN
     RAISE EXCEPTION 'la referencia del ítem en la moneda del plan queda fijada al escribirla: no cambia'
       USING ERRCODE = 'restrict_violation';
   END IF;

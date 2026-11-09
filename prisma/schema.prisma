@@ -2196,8 +2196,11 @@ model TreatmentPlanRepricing {
   rateDate                DateTime?                    @db.Date
   previousQuoteIssuedOn   DateTime?                    @db.Date
   previousQuoteValidUntil DateTime?                    @db.Date
-  quoteIssuedOn           DateTime                     @db.Date
-  quoteValidUntil         DateTime                     @db.Date
+  /// ¿Se renovó la validez? Solo si se recotizaron TODOS los ítems propuestos
+  /// vivos; si no, `quoteIssuedOn/ValidUntil` son los que ya tenía (o NULL).
+  validityRenewed         Boolean
+  quoteIssuedOn           DateTime?                    @db.Date
+  quoteValidUntil         DateTime?                    @db.Date
   /// Cada ítem recotizado: su precio y su foto antes y después.
   lines                   Json
   /// Los ítems que no se tocaron y por qué.
