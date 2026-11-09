@@ -106,6 +106,24 @@ export class AppointmentDto {
   wantsEarlier!: boolean;
 
   @ApiProperty({
+    enum: ['MORNING', 'AFTERNOON', 'ANY'],
+    enumName: 'EarlierWindow',
+    nullable: true,
+    description:
+      'DX-437: franja en la que el paciente quiere adelantar la cita (solo con wantsEarlier). null = cualquiera / lo marcó el personal.',
+  })
+  earlierWindow!: 'MORNING' | 'AFTERNOON' | 'ANY' | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'DX-437: cuándo pidió EL PACIENTE adelantar la cita desde el enlace de confirmación. null = lo marcó el personal o no está marcada.',
+  })
+  earlierRequestedAt!: Date | null;
+
+  @ApiProperty({
     type: String,
     format: 'date-time',
     nullable: true,

@@ -136,6 +136,8 @@ export function mapToEntity(
     confirmationSentAt: appointment.confirmationSentAt,
     callbackRequestedAt: appointment.callbackRequestedAt,
     wantsEarlier: appointment.wantsEarlier,
+    earlierWindow: appointment.earlierWindow,
+    earlierRequestedAt: appointment.earlierRequestedAt,
     arrivedAt: appointment.arrivedAt,
     seatedAt: appointment.seatedAt,
     readyForCheckoutAt: appointment.readyForCheckoutAt,
@@ -484,6 +486,10 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         // estado (la CHECK appointments_cancellation_check se mira por fila).
         const data: Prisma.AppointmentUncheckedUpdateManyInput = {
           ...rest,
+          // DX-437: quitar la marca «Adelantar» borra la franja y quién la pidió.
+          ...(rest.wantsEarlier === false
+            ? { earlierWindow: null, earlierRequestedAt: null }
+            : {}),
           ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
           ...(clearCancellation ? CLEARED_CANCELLATION : {}),
         };
@@ -555,7 +561,11 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
               wantsEarlier: true,
               status: { in: [...MOVABLE_STATUSES] },
             },
-            data: { wantsEarlier: false },
+            data: {
+              wantsEarlier: false,
+              earlierWindow: null,
+              earlierRequestedAt: null,
+            },
           });
           if (count === 0) {
             throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);

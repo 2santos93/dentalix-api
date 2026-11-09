@@ -84,6 +84,15 @@ import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 
+/** DX-437: la franja pedida por el paciente, como texto del panel (ANY = sin preferencia). */
+function earlierWindowLabel(
+  window: 'MORNING' | 'AFTERNOON' | 'ANY' | null | undefined,
+): string | null {
+  if (window === 'MORNING') return 'Mañanas';
+  if (window === 'AFTERNOON') return 'Tardes';
+  return null;
+}
+
 /** Reloj de las ofertas (el día de hoy en la zona de la sede); los tests lo fijan. */
 export const OPENING_CLOCK = Symbol('OPENING_CLOCK');
 export type OpeningClock = () => Date;
@@ -412,7 +421,8 @@ export class ListOpeningCandidatesUseCase {
           (a.end.getTime() - a.start.getTime()) / MINUTE,
         ),
         reason: a.reason,
-        preferredWindow: null,
+        // DX-437: la franja que pidió el paciente desde el enlace, en sus palabras.
+        preferredWindow: earlierWindowLabel(a.earlierWindow),
         providerId: a.providerId,
         currentAppointment: {
           id: a.id,

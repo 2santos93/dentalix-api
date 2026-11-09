@@ -3414,13 +3414,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     // ======================================================================
     ...(
       [
-        ['get', undefined],
-        ['post', () => ({ action: 'confirm' })],
+        ['get', undefined, ''],
+        ['post', () => ({ action: 'confirm' }), ''],
+        // DX-437: «Avisarme si se libera un hueco antes» desde el enlace.
+        ['post', () => ({ wantsEarlier: true }), '/wants-earlier'],
       ] as const
-    ).map(([verb, body]): IsolationCase => ({
-      name: `${verb.toUpperCase()} /public/appointment-confirmations/:token (token de A en el host de B)`,
+    ).map(([verb, body, suffix]): IsolationCase => ({
+      name: `${verb.toUpperCase()} /public/appointment-confirmations/:token${suffix} (token de A en el host de B)`,
       verb,
-      path: () => `/public/appointment-confirmations/${a.confirmationToken}`,
+      path: () =>
+        `/public/appointment-confirmations/${a.confirmationToken}${suffix}`,
       body,
       public: true,
       status: 404,

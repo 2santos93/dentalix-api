@@ -1672,6 +1672,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'confirmation-audit.spec.ts, create-confirmation-link.use-case.spec.ts, appointment-confirmations-audit.int-spec.ts y appointment-confirmations.e2e-spec.ts',
   'POST /public/appointment-confirmations/:token':
     'confirmation-audit.spec.ts, respond-confirmation.use-case.spec.ts, appointment-confirmations-audit.int-spec.ts y appointment-confirmations.e2e-spec.ts',
+  // DX-437: el paciente pide (o quita) «Avisarme si se libera un hueco antes»; auditado en el repositorio, origen PUBLIC_LINK.
+  'POST /public/appointment-confirmations/:token/wants-earlier':
+    'confirmation-audit.spec.ts y appointment-confirmations.e2e-spec.ts',
   // ANAMNESIS_SUBMITTED (y el consentimiento) en la transacción del envío.
   'POST /public/medical-history/:token':
     'medical-history-submissions.e2e-spec.ts',

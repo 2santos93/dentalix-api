@@ -2,6 +2,7 @@ import type { HourCycle } from '../../../../shared/format/regional-format';
 import {
   AppointmentConfirmationResponse,
   AppointmentStatus,
+  EarlierWindow,
 } from '@prisma/client';
 
 /**
@@ -35,6 +36,9 @@ export interface ConfirmationAppointment {
   start: Date;
   end: Date;
   status: AppointmentStatus;
+  /** DX-437: «Adelantar si hay hueco» y la franja pedida (null = cualquiera). */
+  wantsEarlier: boolean;
+  earlierWindow: EarlierWindow | null;
   patientFirstName: string | null;
   patientPhone: string | null;
   providerName: string | null;

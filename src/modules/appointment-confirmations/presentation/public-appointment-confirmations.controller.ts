@@ -19,8 +19,10 @@ import {
 } from '@nestjs/swagger';
 import { GetPublicConfirmationUseCase } from '../application/use-cases/get-public-confirmation.use-case';
 import { RespondConfirmationUseCase } from '../application/use-cases/respond-confirmation.use-case';
+import { SetWantsEarlierFromLinkUseCase } from '../application/use-cases/set-wants-earlier-from-link.use-case';
 import {
   PublicAppointmentConfirmationDto,
+  PublicWantsEarlierDto,
   RespondAppointmentConfirmationDto,
 } from './dto/appointment-confirmation.dto';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
@@ -43,6 +45,7 @@ export class PublicAppointmentConfirmationsController {
   constructor(
     private readonly getConfirmation: GetPublicConfirmationUseCase,
     private readonly respondConfirmation: RespondConfirmationUseCase,
+    private readonly setWantsEarlier: SetWantsEarlierFromLinkUseCase,
   ) {}
 
   // SOLO LECTURA: abrir el enlace no cambia nada (los previsualizadores de
@@ -96,5 +99,33 @@ export class PublicAppointmentConfirmationsController {
           (Array.isArray(userAgent) ? userAgent[0] : userAgent) ?? null,
       },
     );
+  }
+
+  @Post(':token/wants-earlier')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'DX-437: el paciente pide (o quita) que le avisen si se libera un hueco antes',
+    description:
+      'Pone o quita «Adelantar si hay hueco» en la cita del enlace, con la franja (MORNING, AFTERNOON o ANY) y la marca de que lo pidió el paciente. Vale con el enlace pendiente o ya respondido; caducado o sin efecto, 410. La cita tiene que estar agendada o confirmada, en el futuro y en un día posterior a hoy en la sede (400 en español si no). Queda en la auditoría como UPDATE de APPOINTMENT, sin usuario, origen PUBLIC_LINK y `reason` CONFIRMATION_LINK_EARLIER_REQUESTED o CONFIRMATION_LINK_EARLIER_CLEARED. Mismo límite de peticiones por IP que el resto del enlace.',
+  })
+  @ApiOkResponse({ type: PublicAppointmentConfirmationDto })
+  @ApiNotFoundResponse({ description: 'Token desconocido o de otra clínica.' })
+  @ApiBadRequestResponse({
+    description:
+      'La cita ya no se puede adelantar (cancelada, atendida…), ya pasó o es hoy.',
+  })
+  @ApiGoneResponse({ description: 'El enlace caducó o la cita cambió.' })
+  wantsEarlier(
+    @Param('token') token: string,
+    @Body() dto: PublicWantsEarlierDto,
+    @Req() req: TenantHostRequest & { ip?: string },
+  ): Promise<PublicAppointmentConfirmationDto> {
+    const userAgent = req.headers['user-agent'];
+    return this.setWantsEarlier.execute(token, dto, {
+      requestId: currentRequestId() ?? null,
+      ip: req.ip ?? null,
+      userAgent: (Array.isArray(userAgent) ? userAgent[0] : userAgent) ?? null,
+    });
   }
 }

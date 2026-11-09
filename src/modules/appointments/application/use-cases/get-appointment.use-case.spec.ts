@@ -28,6 +28,8 @@ function fakeAppointment(id: string): Appointment {
     confirmationSentAt: null,
     callbackRequestedAt: null,
     wantsEarlier: false,
+    earlierWindow: null,
+    earlierRequestedAt: null,
     arrivedAt: null,
     seatedAt: null,
     readyForCheckoutAt: null,

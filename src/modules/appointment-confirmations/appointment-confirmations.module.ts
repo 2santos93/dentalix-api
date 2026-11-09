@@ -5,6 +5,7 @@ import { PublicAppointmentConfirmationsController } from './presentation/public-
 import { CreateConfirmationLinkUseCase } from './application/use-cases/create-confirmation-link.use-case';
 import { GetPublicConfirmationUseCase } from './application/use-cases/get-public-confirmation.use-case';
 import { RespondConfirmationUseCase } from './application/use-cases/respond-confirmation.use-case';
+import { SetWantsEarlierFromLinkUseCase } from './application/use-cases/set-wants-earlier-from-link.use-case';
 import { APPOINTMENT_CONFIRMATION_REPOSITORY } from './domain/ports/appointment-confirmation-repository.port';
 import { PrismaAppointmentConfirmationRepository } from './infrastructure/repositories/prisma-appointment-confirmation.repository';
 import { TokenService } from '../../shared/crypto/token.service';
@@ -27,6 +28,7 @@ import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tena
     CreateConfirmationLinkUseCase,
     GetPublicConfirmationUseCase,
     RespondConfirmationUseCase,
+    SetWantsEarlierFromLinkUseCase,
     TokenService,
     TenantContextInterceptor,
     PublicTenantContextInterceptor,

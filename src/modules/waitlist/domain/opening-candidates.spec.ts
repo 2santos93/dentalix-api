@@ -4,6 +4,7 @@ import {
   type AppointmentCandidateSource,
   type CandidateSlot,
   type EntryCandidateSource,
+  slotInWindow,
 } from './opening-candidates';
 
 // En la zona de la sede (UTC−4 fijo): el hueco es el martes 20/10/2026 de 10:00 a 10:30.
@@ -188,5 +189,57 @@ describe('candidatos para un hueco libre (DX-210)', () => {
     expect(result.items).toHaveLength(OPENING_CANDIDATES_LIMIT);
     expect(result.truncated).toBe(true);
     expect(result.items[0].source.id).toBe('e000');
+  });
+});
+
+describe('DX-437: la franja que pidió el paciente', () => {
+  const morning = {
+    ...SLOT,
+    start: local('2026-10-20', '10:00'),
+    end: local('2026-10-20', '10:30'),
+  };
+  const afternoon = {
+    ...SLOT,
+    start: local('2026-10-20', '15:00'),
+    end: local('2026-10-20', '15:30'),
+  };
+
+  it('slotInWindow: mañana < 12:00 de la sede; tarde ≥ 12:00; sin franja o ANY, siempre', () => {
+    expect(slotInWindow(morning, 'MORNING')).toBe(true);
+    expect(slotInWindow(morning, 'AFTERNOON')).toBe(false);
+    expect(slotInWindow(afternoon, 'AFTERNOON')).toBe(true);
+    expect(slotInWindow(afternoon, 'MORNING')).toBe(false);
+    // El mediodía en punto ya es tarde.
+    expect(
+      slotInWindow({ ...SLOT, start: local('2026-10-20', '12:00') }, 'MORNING'),
+    ).toBe(false);
+    expect(slotInWindow(morning, 'ANY')).toBe(true);
+    expect(slotInWindow(morning, null)).toBe(true);
+    expect(slotInWindow(morning, undefined)).toBe(true);
+    // La hora es la de la SEDE: las 10:00 de Caracas son las 15:00 en Madrid.
+    expect(
+      slotInWindow({ ...morning, timeZone: 'Europe/Madrid' }, 'MORNING'),
+    ).toBe(false);
+  });
+
+  it('un hueco de mañana no se ofrece a quien pidió tardes, y al revés; quien no eligió sale en ambos', () => {
+    const tardes = appointment('tardes', { earlierWindow: 'AFTERNOON' });
+    const mananas = appointment('mananas', { earlierWindow: 'MORNING' });
+    const cualquiera = appointment('cualquiera', { earlierWindow: 'ANY' });
+    const personal = appointment('personal');
+    const all = {
+      entries: [],
+      appointments: [tardes, mananas, cualquiera, personal],
+    };
+    expect(ids(rankOpeningCandidates(morning, all)).sort()).toEqual([
+      'cualquiera',
+      'mananas',
+      'personal',
+    ]);
+    expect(ids(rankOpeningCandidates(afternoon, all)).sort()).toEqual([
+      'cualquiera',
+      'personal',
+      'tardes',
+    ]);
   });
 });

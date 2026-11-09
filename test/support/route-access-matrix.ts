@@ -116,6 +116,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/invitations/:token/accept': PUBLIC_TENANT,
   'GET /public/appointment-confirmations/:token': PUBLIC_TENANT,
   'POST /public/appointment-confirmations/:token': PUBLIC_TENANT,
+  // DX-437: el paciente pide (o quita) «Avisarme si se libera un hueco antes» desde el enlace.
+  'POST /public/appointment-confirmations/:token/wants-earlier': PUBLIC_TENANT,
   // DX-128: baja de los recordatorios desde el enlace del email (el paciente).
   'GET /public/reminder-opt-outs/:token': PUBLIC_TENANT,
   'POST /public/reminder-opt-outs/:token': PUBLIC_TENANT,
