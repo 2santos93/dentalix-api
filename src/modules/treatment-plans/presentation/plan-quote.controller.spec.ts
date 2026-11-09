@@ -204,4 +204,21 @@ describe('DTO de la aceptación parcial', () => {
       }),
     ).toEqual(['Elige al menos un procedimiento para aceptar.']);
   });
+
+  it('M-1: `partial` como lista (vacía o con objetos) no pasa: 400, nunca aceptación entera', async () => {
+    const base = {
+      signerName: 'Ana Pérez',
+      signature: 'iVBORw0KGgo=',
+      contentHash: 'a'.repeat(64),
+    };
+    for (const partial of [[], [{ itemIds: [ITEM] }], [{}], 'x']) {
+      const errors = await validate(
+        plainToInstance(AcceptTreatmentPlanDto, { ...base, partial }),
+      );
+      expect(errors.map((e) => e.property)).toEqual(['partial']);
+      expect(Object.values(errors[0].constraints ?? {})).toContain(
+        'partial debe ser un objeto con los procedimientos que se aceptan (itemIds).',
+      );
+    }
+  });
 });

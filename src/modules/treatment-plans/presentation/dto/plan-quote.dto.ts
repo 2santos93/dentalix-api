@@ -16,6 +16,7 @@ import {
   IsArray,
   IsBoolean,
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -168,6 +169,12 @@ export class AcceptTreatmentPlanDto {
       'DX-417: aceptar solo estos procedimientos (presupuesto PRESENTED, sin abonos, plan de cuotas ni saldo a favor). Los demás pasan, con su mismo id, a un plan nuevo PRESENTED enlazado al original (`splitFromPlanId`). `contentHash` es entonces el de `accepted` en POST …/acceptance/partial-preview. Con `expired.mode = REPRICE` se recotiza TODO el plan y después se parte (la vista previa, con `reprice: true`).',
   })
   @IsOptional()
+  // M-1: una lista (`[]`, `[{…}]`) no es una selección: 400, nunca una
+  // aceptación entera por descuido.
+  @IsObject({
+    message:
+      'partial debe ser un objeto con los procedimientos que se aceptan (itemIds).',
+  })
   @ValidateNested()
   @Type(() => PartialAcceptanceItemsDto)
   partial?: PartialAcceptanceItemsDto;

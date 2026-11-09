@@ -432,6 +432,16 @@ describe('Aceptación parcial del presupuesto (e2e, DX-417)', () => {
       partial: { itemIds: [items[0]] },
     }).expect(409);
     expect(changed.body).toMatchObject({ message: QUOTE_CHANGED_MESSAGE });
+    // M-1: una lista en `partial` es 400, no una aceptación entera.
+    for (const partial of [[], [{}]]) {
+      const bad = await accept(planId, {
+        contentHash: whole.contentHash,
+        partial,
+      }).expect(400);
+      expect(JSON.stringify(bad.body)).toContain(
+        'partial debe ser un objeto con los procedimientos que se aceptan (itemIds).',
+      );
+    }
     const allSign = await accept(planId, {
       contentHash: whole.contentHash,
       partial: { itemIds: items },
