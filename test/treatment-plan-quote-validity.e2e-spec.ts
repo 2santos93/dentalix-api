@@ -69,6 +69,7 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
   const tokens: Partial<Record<ClinicRole, string>> = {};
   let patientA: string;
   let catalogA: string;
+  let createdDays: number[] = [];
 
   const server = () => app.getHttpServer();
 
@@ -83,6 +84,8 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
         withAuth(request(server()).post(`/api/v1${path}`)).send(body),
       put: (path: string, body: object) =>
         withAuth(request(server()).put(`/api/v1${path}`)).send(body),
+      patch: (path: string, body: object) =>
+        withAuth(request(server()).patch(`/api/v1${path}`)).send(body),
     };
   }
 
@@ -187,6 +190,13 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
 
     clinicA = await register('validez-a');
     clinicB = await register('validez-b');
+    // Lo que deja el alta de clínica, antes de que ningún caso lo toque.
+    createdDays = (
+      await raw.tenant.findMany({
+        where: { id: { in: [clinicA.tenantId, clinicB.tenantId] } },
+        select: { quoteValidityDays: true },
+      })
+    ).map((t) => t.quoteValidityDays);
     tokens.ADMIN = clinicA.accessToken;
     for (const role of [
       ClinicRole.DENTIST,
@@ -217,8 +227,14 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
     catalogA = (catalog.body as { id: string }).id;
   });
 
-  beforeEach(() => {
+  // M-7: cada caso empieza con el reloj y el ajuste de plataforma (30) en
+  // las dos clínicas, sin depender del orden. Por SQL: no deja auditoría.
+  beforeEach(async () => {
     now = new Date('2026-11-09T15:00:00.000Z');
+    await raw.tenant.updateMany({
+      where: { id: { in: [clinicA.tenantId, clinicB.tenantId] } },
+      data: { quoteValidityDays: 30 },
+    });
   });
 
   afterAll(async () => {
@@ -241,6 +257,7 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
           select: { quoteValidityDays: true },
         }),
       ).toEqual({ quoteValidityDays: 30 });
+      expect(createdDays).toEqual([30, 30]);
     });
 
     it('solo ADMIN lo cambia: los demás roles reciben 403 en español y no cambia nada', async () => {
@@ -267,19 +284,25 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
     );
 
     it('ADMIN lo cambia, queda auditado (QUOTE_SETTINGS, QT_V30 → QT_V15) y no toca otra clínica', async () => {
+      const quoteEvents = async () =>
+        (
+          await raw.auditEvent.findMany({
+            where: {
+              tenantId: clinicA.tenantId,
+              resourceType: 'CLINIC_SETTINGS',
+            },
+            orderBy: { occurredAt: 'desc' },
+          })
+        ).filter(
+          (e) =>
+            (e.metadata as { reason?: string }).reason === 'QUOTE_SETTINGS',
+        );
+      const before = (await quoteEvents()).length;
       await setDays(15).expect(200).expect({ validityDays: 15 });
       // Mismo valor: 200 sin otro evento.
       await setDays(15).expect(200);
-      const events = await raw.auditEvent.findMany({
-        where: {
-          tenantId: clinicA.tenantId,
-          resourceType: 'CLINIC_SETTINGS',
-        },
-      });
-      const quote = events.filter(
-        (e) => (e.metadata as { reason?: string }).reason === 'QUOTE_SETTINGS',
-      );
-      expect(quote).toHaveLength(1);
+      const quote = await quoteEvents();
+      expect(quote).toHaveLength(before + 1);
       expect(quote[0]).toMatchObject({
         action: 'UPDATE',
         metadata: {
@@ -370,6 +393,72 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
       });
     });
 
+    it('M-5: imprimir un borrador sin ítems no fija la validez', async () => {
+      const plan = await as(clinicA)
+        .post(`/patients/${patientA}/treatment-plans`, { currency: 'VES' })
+        .expect(201);
+      const planId = (plan.body as { id: string }).id;
+      await issue(planId);
+      expect((await getPlan(planId)).quoteIssuedOn).toBeNull();
+    });
+
+    it('M-7: imprimir un plan cancelado, rechazado o aceptado sin firma no fija la validez', async () => {
+      const cancelled = await draftPlan();
+      await as(clinicA)
+        .patch(`/treatment-plans/${cancelled}`, { status: 'CANCELLED' })
+        .expect(200);
+      const accepted = await draftPlan();
+      await as(clinicA)
+        .patch(`/treatment-plans/${accepted}`, { status: 'ACCEPTED' })
+        .expect(200);
+      const rejected = await draftPlan();
+      await present(rejected);
+      await as(clinicA)
+        .post(`/treatment-plans/${rejected}/reject`, { reason: 'PRICE' })
+        .expect(200);
+      // Sin fechas, como un plan anterior a DX-379.
+      await raw.treatmentPlan.update({
+        where: { id: rejected },
+        data: { quoteIssuedOn: null, quoteValidUntil: null },
+      });
+      for (const planId of [cancelled, accepted, rejected]) {
+        await issue(planId);
+        expect(await getPlan(planId)).toMatchObject({
+          quoteIssuedOn: null,
+          quoteValidUntil: null,
+          quoteExpired: false,
+        });
+      }
+    });
+
+    it('M-1: presentar desde una sede sin zona horaria da 409 LOCATION_TIMEZONE_REQUIRED y el plan no cambia', async () => {
+      const planId = await draftPlan();
+      const location = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId, deletedAt: null },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, timeZone: true },
+      });
+      await raw.location.update({
+        where: { id: location.id },
+        data: { timeZone: null },
+      });
+      try {
+        const res = await as(clinicA)
+          .post(`/treatment-plans/${planId}/present`)
+          .expect(409);
+        expect(res.body).toMatchObject({ code: 'LOCATION_TIMEZONE_REQUIRED' });
+      } finally {
+        await raw.location.update({
+          where: { id: location.id },
+          data: { timeZone: location.timeZone },
+        });
+      }
+      expect(await getPlan(planId)).toMatchObject({
+        status: 'DRAFT',
+        quoteIssuedOn: null,
+      });
+    });
+
     it('añadir un ítem después de presentar no mueve la validez', async () => {
       await setDays(15).expect(200);
       const planId = await draftPlan();
@@ -440,6 +529,12 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
         issuedOn: '2026-11-09',
         validUntil: '2026-11-24',
         planStatus: 'ACCEPTED',
+      });
+      // I-1: aceptado, su validez ya no cuenta: nunca sale vencido.
+      expect(await getPlan(planId)).toMatchObject({
+        status: 'ACCEPTED',
+        quoteValidUntil: '2026-11-24',
+        quoteExpired: false,
       });
     });
 
