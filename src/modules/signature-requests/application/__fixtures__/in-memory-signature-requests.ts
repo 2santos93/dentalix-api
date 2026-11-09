@@ -15,6 +15,7 @@ import {
   type CreateSignatureRequestOptions,
   type CreateSignatureRequestRepoInput,
   SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE,
+  budgetNotPresentedMessage,
   type LockedWrite,
   type PublicRequestEvidence,
   type PublicSignatureAuditEvent,
@@ -126,13 +127,21 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     options: CreateSignatureRequestOptions = {},
   ): Promise<{ id: string; supersededIds: string[] }> {
     // DX-379 (M-3): como el de Prisma, guarda la validez de la foto en el
-    // plan si aún no tenía (409 si otro guardó otra entre medias).
+    // plan si aún no tenía y sigue «Presentado» sin aceptar (409 si no, o si
+    // otro guardó otra validez entre medias).
     const validity = options.planQuoteValidity;
     const budget = input.treatmentPlanId
       ? this.budgets.get(input.treatmentPlanId)
       : undefined;
     if (validity && budget) {
       const { plan } = budget.quote;
+      if (plan.status !== 'PRESENTED' || budget.quote.acceptance) {
+        throw new ConflictException(
+          budgetNotPresentedMessage(
+            budget.quote.acceptance ? 'ACCEPTED' : plan.status,
+          ),
+        );
+      }
       if (plan.quoteIssuedOn === null) {
         budget.quote = {
           ...budget.quote,

@@ -34,6 +34,7 @@ import {
   type CreateSignatureRequestOptions,
   type CreateSignatureRequestRepoInput,
   SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE,
+  budgetNotPresentedMessage,
   type LockedWrite,
   type PublicRequestEvidence,
   type RemoteBudgetAcceptanceInsert,
@@ -149,12 +150,14 @@ function toListRow(row: ListRow): SignatureRequestListRow {
   };
 }
 
-/** DX-425: otro envío del mismo documento ganó la carrera. */
 /**
  * DX-379 (M-3): guarda en el plan la validez de la foto enviada si aún no
- * tiene ninguna (la primera emisión manda, como al imprimir). Si otro la
- * guardó entre medias con otras fechas, la foto ya no sería la del plan: 409
- * y no se crea nada.
+ * tiene ninguna (la primera emisión manda, como al imprimir), y solo si el
+ * plan sigue «Presentado» y sin aceptar: si entre la lectura y esta
+ * transacción se aceptó, se rechazó o se canceló, el 409 de «no presentado»
+ * (la regla `validityOnFirstIssue`: nunca se emite un plan cerrado). Si otro
+ * guardó entre medias otras fechas, la foto ya no sería la del plan: 409. En
+ * los dos casos no se crea nada.
  */
 async function fixPlanQuoteValidity(
   tx: Prisma.TransactionClient,
@@ -164,22 +167,45 @@ async function fixPlanQuoteValidity(
   const issuedOn = new Date(`${validity.issuedOn}T00:00:00.000Z`);
   const validUntil = new Date(`${validity.validUntil}T00:00:00.000Z`);
   const { count } = await tx.treatmentPlan.updateMany({
-    where: { id: planId, quoteIssuedOn: null, quoteValidUntil: null },
+    where: {
+      id: planId,
+      status: TreatmentPlanStatus.PRESENTED,
+      acceptance: { is: null },
+      quoteIssuedOn: null,
+      quoteValidUntil: null,
+    },
     data: { quoteIssuedOn: issuedOn, quoteValidUntil: validUntil },
   });
   if (count > 0) return;
   const plan = await tx.treatmentPlan.findFirst({
     where: { id: planId },
-    select: { quoteIssuedOn: true, quoteValidUntil: true },
+    select: {
+      status: true,
+      quoteIssuedOn: true,
+      quoteValidUntil: true,
+      acceptance: { select: { id: true } },
+    },
   });
   if (
-    plan?.quoteIssuedOn?.getTime() !== issuedOn.getTime() ||
+    !plan ||
+    plan.acceptance ||
+    plan.status !== TreatmentPlanStatus.PRESENTED
+  ) {
+    throw new ConflictException(
+      budgetNotPresentedMessage(
+        plan?.acceptance || !plan ? TreatmentPlanStatus.ACCEPTED : plan.status,
+      ),
+    );
+  }
+  if (
+    plan.quoteIssuedOn?.getTime() !== issuedOn.getTime() ||
     plan.quoteValidUntil?.getTime() !== validUntil.getTime()
   ) {
     throw new ConflictException(SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE);
   }
 }
 
+/** DX-425: otro envío del mismo documento ganó la carrera. */
 export const SIGNATURE_ALREADY_SENDING_MESSAGE =
   'Este documento ya se está enviando a firma. Actualiza la lista de envíos y, si hace falta, vuelve a enviarlo.';
 

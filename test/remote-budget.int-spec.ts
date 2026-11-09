@@ -5,6 +5,7 @@ import { PrismaSignatureRequestRepository } from '../src/modules/signature-reque
 import {
   RemoteBudgetChangedError,
   SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE,
+  budgetNotPresentedMessage,
   type CreateSignatureRequestOptions,
   type RemoteBudgetAcceptanceInsert,
 } from '../src/modules/signature-requests/domain/ports/signature-request-repository.port';
@@ -133,25 +134,49 @@ async function presentedPlan(s: Seeded, groupId?: string): Promise<string> {
   return plan.id;
 }
 
+// DX-379: instante fijo de los casos que comparan fechas (9 nov 2026, 11:00
+// en Caracas).
+const NOW = new Date('2026-11-09T15:00:00.000Z');
+
+async function storedValidity(planId: string) {
+  const plan = await owner.treatmentPlan.findUniqueOrThrow({
+    where: { id: planId },
+    select: { quoteIssuedOn: true, quoteValidUntil: true },
+  });
+  return {
+    issuedOn: plan.quoteIssuedOn?.toISOString().slice(0, 10) ?? null,
+    validUntil: plan.quoteValidUntil?.toISOString().slice(0, 10) ?? null,
+  };
+}
+
 const asClinic = <T>(tenantId: string, fn: () => Promise<T>) =>
   tenantContext.run(tenantId, fn);
 
-/** Envía el presupuesto del plan como lo hace la app (foto + hash). */
+/**
+ * Envía el presupuesto del plan como lo hace la app (foto + hash), con UN
+ * instante para la foto y la solicitud. `now` fijo en los casos que comparan
+ * fechas (DX-379); los que firman usan el de ahora, porque el enlace tiene
+ * que estar vivo frente al reloj de la BD. `fixValidity`: como el caso de uso
+ * con un plan sin fechas, guarda en el plan la validez de la foto.
+ */
 async function sendBudget(
   s: Seeded,
   planId: string,
-  options: CreateSignatureRequestOptions = {},
+  opts: {
+    now?: Date;
+    fixValidity?: boolean;
+    options?: CreateSignatureRequestOptions;
+  } = {},
 ) {
+  const now = opts.now ?? new Date();
   const budget = await asClinic(s.tenantId, () =>
     repo.loadBudget(s.patientId, planId, s.locationId),
   );
   if (!budget) throw new Error('sin presupuesto');
-  const content = composeQuoteContent(
-    budget.quote,
-    quoteValidityOf(budget.quote, new Date()),
-    NAMES,
-  );
-  const now = new Date();
+  const validity = quoteValidityOf(budget.quote, now);
+  const content = composeQuoteContent(budget.quote, validity, NAMES);
+  const options: CreateSignatureRequestOptions =
+    opts.options ?? (opts.fixValidity ? { planQuoteValidity: validity } : {});
   const request = {
     locationId: s.locationId,
     patientId: s.patientId,
@@ -314,25 +339,48 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
 
   it('DX-379 (M-3): enviar un plan sin validez la guarda en el plan en la misma transacción, con las fechas de la foto', async () => {
     const planId = await presentedPlan(a);
-    // La validez que calcula el caso de uso (hoy en la sede + ajuste); aquí,
-    // la misma que lleva la foto que compone el helper.
-    const budget = await asClinic(a.tenantId, () =>
-      repo.loadBudget(a.patientId, planId, a.locationId),
-    );
-    const validity = quoteValidityOf(budget!.quote, new Date());
+    // 9 nov 2026, 11:00 en Caracas: la foto dice 9/11 → 9/12 (30 días).
     const { request } = await sendBudget(a, planId, {
-      planQuoteValidity: validity,
+      now: NOW,
+      fixValidity: true,
     });
-    expect(request.budgetContent).toMatchObject(validity);
-    const plan = await owner.treatmentPlan.findUniqueOrThrow({
-      where: { id: planId },
-      select: { quoteIssuedOn: true, quoteValidUntil: true },
+    expect(request.budgetContent).toMatchObject({
+      issuedOn: '2026-11-09',
+      validUntil: '2026-12-09',
     });
-    expect({
-      issuedOn: plan.quoteIssuedOn?.toISOString().slice(0, 10),
-      validUntil: plan.quoteValidUntil?.toISOString().slice(0, 10),
-    }).toEqual(validity);
+    expect(await storedValidity(planId)).toEqual({
+      issuedOn: '2026-11-09',
+      validUntil: '2026-12-09',
+    });
   });
+
+  it.each(['REJECTED', 'ACCEPTED', 'CANCELLED'] as const)(
+    'DX-379 (N-1): si el plan pasó a %s antes de enviar, 409 «no presentado», sin fechas ni solicitud',
+    async (status) => {
+      const planId = await presentedPlan(a);
+      // Leído «Presentado» por el caso de uso; cerrado antes de la
+      // transacción que crea la solicitud.
+      await owner.treatmentPlan.update({
+        where: { id: planId },
+        data:
+          status === 'REJECTED'
+            ? { status, rejectedAt: NOW, rejectionReason: 'PRICE' }
+            : { status },
+      });
+      await expect(
+        sendBudget(a, planId, { now: NOW, fixValidity: true }),
+      ).rejects.toThrow(budgetNotPresentedMessage(status));
+      expect(await storedValidity(planId)).toEqual({
+        issuedOn: null,
+        validUntil: null,
+      });
+      expect(
+        await owner.signatureRequest.count({
+          where: { treatmentPlanId: planId },
+        }),
+      ).toBe(0);
+    },
+  );
 
   it('DX-379 (M-3): si entre medias el plan recibió otra validez, 409 y no se crea la solicitud', async () => {
     const planId = await presentedPlan(a);
@@ -345,9 +393,11 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
     });
     await expect(
       sendBudget(a, planId, {
-        planQuoteValidity: {
-          issuedOn: '2026-03-02',
-          validUntil: '2026-04-01',
+        options: {
+          planQuoteValidity: {
+            issuedOn: '2026-03-02',
+            validUntil: '2026-04-01',
+          },
         },
       }),
     ).rejects.toThrow(SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE);

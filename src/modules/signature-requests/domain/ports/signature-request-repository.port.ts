@@ -1,3 +1,4 @@
+import { PLAN_STATUS_LABELS } from '../../../treatment-plans/domain/plan-status-machine';
 import type { QuoteValidity } from '../../../treatment-plans/domain/quote-validity';
 import type {
   ClinicRole,
@@ -62,10 +63,17 @@ export interface CreateSignatureRequestOptions {
   /**
    * DX-379 (M-3): enviar a firmar un presupuesto (BUDGET) es emitirlo. Si el
    * plan aún no tiene validez guardada, se guarda esta (la de la foto) en la
-   * MISMA transacción; si otro la guardó entre medias y es otra, 409
-   * `SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE` y no se crea nada.
+   * MISMA transacción, solo si sigue «Presentado» y sin aceptar (si no, 409
+   * `budgetNotPresentedMessage`); si otro la guardó entre medias y es otra,
+   * 409 `SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE`. En los dos casos no se
+   * crea nada.
    */
   planQuoteValidity?: QuoteValidity;
+}
+
+/** 409: solo un presupuesto «Presentado» (y sin aceptar) se envía a aceptar. */
+export function budgetNotPresentedMessage(status: TreatmentPlanStatus): string {
+  return `Solo se envía a aceptar un presupuesto «Presentado»: este está «${PLAN_STATUS_LABELS[status]}».`;
 }
 
 export const SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE =

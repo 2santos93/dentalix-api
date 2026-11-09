@@ -33,7 +33,6 @@ import {
   computeQuoteHash,
   type QuoteComposition,
 } from '../../../treatment-plans/domain/plan-quote';
-import { PLAN_STATUS_LABELS } from '../../../treatment-plans/domain/plan-status-machine';
 import {
   documentText,
   documentTypeName,
@@ -51,6 +50,7 @@ import type {
 } from '../../domain/entities/signature-request.entity';
 import {
   SIGNATURE_REQUEST_REPOSITORY,
+  budgetNotPresentedMessage,
   type CreateSignatureRequestOptions,
   type CreateSignatureRequestRepoInput,
   type SignaturePlanOption,
@@ -83,9 +83,7 @@ export const SIGNATURE_BUDGET_ROLE_MESSAGE =
 export const SIGNATURE_BUDGET_EMPTY_MESSAGE =
   'El presupuesto no tiene ítems: agrega al menos un procedimiento antes de enviarlo.';
 /** 409: solo un presupuesto «Presentado» (y sin aceptar) se envía a aceptar. */
-export function budgetNotPresentedMessage(status: TreatmentPlanStatus): string {
-  return `Solo se envía a aceptar un presupuesto «Presentado»: este está «${PLAN_STATUS_LABELS[status]}».`;
-}
+export { budgetNotPresentedMessage };
 /** Título de la solicitud BUDGET (la ficha y la página pública). */
 export const BUDGET_REQUEST_TITLE = 'Presupuesto de tratamiento';
 /**
