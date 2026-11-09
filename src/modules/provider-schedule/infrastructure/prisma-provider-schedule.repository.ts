@@ -124,11 +124,24 @@ export class PrismaProviderScheduleRepository implements ProviderScheduleReposit
 
   /**
    * DX-267-bis: guardar el horario (semanal o excepción) toma, después del
-   * candado dx233, el de la AGENDA del profesional (DX-149): el mismo que
-   * toman crear, mover y reactivar una cita suya. Así ninguna cita entra
-   * entre el recuento de las citas afectadas y el COMMIT del horario: o se
-   * cuenta, o espera a que el horario se guarde. Orden sin ciclos: dx233 →
-   * agenda del profesional; las citas nunca toman dx233.
+   * candado dx233, el de la AGENDA del profesional (DX-149). Lo toman
+   * también, en `PrismaAppointmentRepository`, agendar una cita (también
+   * desde «Pendientes»), moverla (hora o profesional, también «Ocupar este
+   * hueco») y reactivarla desde CANCELLED/NO_SHOW (`recheckSlot`): esas no
+   * entran entre el recuento de las citas afectadas y el COMMIT del horario;
+   * o se cuentan, o esperan a que se guarde.
+   *
+   * Quedan FUERA (no toman este candado, pueden colarse sin contarse):
+   * - aceptar una oferta de hueco por el enlace público
+   *   (`PrismaSlotOfferRepository`: crea o mueve la cita);
+   * - otros cambios de estado que dejan la cita en SCHEDULED/CONFIRMED sin
+   *   moverla: «Deshacer llegada», volver del flujo en la clínica o salir de
+   *   COMPLETED;
+   * - y la cita que espera este candado validó el horario del profesional
+   *   ANTES, fuera de la transacción: en modo estricto puede entrar con el
+   *   horario viejo (DX-149/DX-161, fuera de alcance).
+   * Las urgencias nacen ARRIVED y no cuentan. Orden sin ciclos: dx233 →
+   * agenda del profesional; ninguna escritura de citas toma dx233.
    */
   private async lockForSave(
     tx: Prisma.TransactionClient,
