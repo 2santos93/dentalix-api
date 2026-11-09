@@ -511,18 +511,25 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
       ).toMatchObject({ quoteValidUntil: '2026-11-24', quoteExpired: true });
     });
 
-    it('esta porción no bloquea aceptar un presupuesto vencido, y mostrarlo un día y firmar otro no da 409', async () => {
+    it('vencido: sin elegir cómo, 409 (porción C); con los precios originales, mostrarlo un día y firmar otro no da 409 por el hash', async () => {
       await setDays(15).expect(200);
       const planId = await draftPlan();
       await present(planId);
       const shown = await getQuote(planId);
       now = new Date('2026-12-01T15:00:00.000Z');
       expect((await getPlan(planId)).quoteExpired).toBe(true);
+      const body = {
+        signerName: 'Ana Validez',
+        signature: `data:image/png;base64,${PNG}`,
+        contentHash: shown.contentHash,
+      };
+      const path = `/patients/${patientA}/treatment-plans/${planId}/acceptance`;
+      const expired = await as(clinicA).post(path, body).expect(409);
+      expect(expired.body).toMatchObject({ code: 'QUOTE_EXPIRED' });
       const res = await as(clinicA)
-        .post(`/patients/${patientA}/treatment-plans/${planId}/acceptance`, {
-          signerName: 'Ana Validez',
-          signature: `data:image/png;base64,${PNG}`,
-          contentHash: shown.contentHash,
+        .post(path, {
+          ...body,
+          expired: { mode: 'ORIGINAL_PRICES', reason: 'CLINIC_DELAY' },
         })
         .expect(201);
       expect(res.body).toMatchObject({

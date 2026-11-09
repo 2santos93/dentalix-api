@@ -458,6 +458,12 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
 
   it('un enlace de firma a distancia pendiente deja de valer al recotizar', async () => {
     const { planId } = await presentedPlan();
+    // DX-379 (C): un presupuesto vencido no se envía a distancia; este aún
+    // vale (su validez vence dentro de cinco días).
+    await raw.treatmentPlan.update({
+      where: { id: planId },
+      data: { quoteValidUntil: new Date(`${sedeDay(5)}T00:00:00.000Z`) },
+    });
     mailer.clear();
     await as(clinicA)
       .post(`/patients/${patientId}/signature-requests`, {
@@ -560,6 +566,11 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
 
   it('plan aceptado → 409; un ítem pedido no propuesto → 409; sin cambios', async () => {
     const accepted = await presentedPlan();
+    // DX-379 (C): un vencido no se acepta por PATCH; este aún vale.
+    await raw.treatmentPlan.update({
+      where: { id: accepted.planId },
+      data: { quoteValidUntil: new Date(`${sedeDay(5)}T00:00:00.000Z`) },
+    });
     await as(clinicA)
       .patch(`/treatment-plans/${accepted.planId}`, { status: 'ACCEPTED' })
       .expect(200);
