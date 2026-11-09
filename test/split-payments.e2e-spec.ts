@@ -19,10 +19,8 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
-import {
-  REGIONAL_CARACAS_FIXTURE,
-  locationBody,
-} from './support/location-fixtures';
+import { safeTodayZone, sedeTodayFixture } from './support/sede-clock';
+import { locationBody } from './support/location-fixtures';
 import { LOCATION_NOT_ALLOWED_CODE } from '../src/shared/tenancy/location-access';
 
 // DX-390 en HTTP real: un cobro de 2–5 formas de pago crea un abono por línea
@@ -36,7 +34,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Caracas';
+// DX-460: la sede en una zona lejos de su medianoche (sede-clock). La regla
+// «recepción solo anula sus cobros registrados hoy» usa el reloj real de la
+// API y el día de la sede: el cobro se crea en un test y se anula tests
+// después, y con la sede en Caracas la suite fallaba si cruzaba su medianoche.
+const FIXTURE = sedeTodayFixture();
+const ZONE = safeTodayZone();
 const TODAY = civilDateIn(new Date(), ZONE);
 const PROVIDER = { VES: 4000 };
 
@@ -203,8 +206,8 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
         rate,
       })),
     });
-    a = await registerClinic(app, 'dx390-a');
-    b = await registerClinic(app, 'dx390-b');
+    a = await registerClinic(app, 'dx390-a', FIXTURE);
+    b = await registerClinic(app, 'dx390-b', FIXTURE);
     const member = await seedMember(raw, a, ClinicRole.RECEPTION);
     receptionA = await loginAs(app, a.host, member.email);
     planA = await seedPlan(a, 'A');
@@ -629,7 +632,7 @@ describe('Cobro dividido con un solo recibo (e2e, DX-390)', () => {
     for (const name of ['Norte DX089', 'Sur DX089']) {
       const location = (
         await as(api().post('/api/v1/locations'), a)
-          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name }))
+          .send(locationBody(FIXTURE, { name }))
           .expect(201)
       ).body as { id: string };
       allowed.push(location.id);
