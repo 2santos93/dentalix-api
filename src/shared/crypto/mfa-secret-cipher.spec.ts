@@ -34,7 +34,13 @@ describe('MfaSecretCipher (SEC-008)', () => {
     expect(() =>
       new MfaSecretCipher(randomBytes(32)).decrypt(stored, USER),
     ).toThrow();
-    const tampered = stored.slice(0, -2) + (stored.endsWith('A') ? 'BB' : 'AA');
+    // Se altera un byte del tag (en medio del blob), no la cola del base64url:
+    // los bits sobrantes del último carácter se ignoran al decodificar y, si
+    // el último byte vale 0x00, «AA» no cambiaba nada (1 de cada 256 veces).
+    const [version, payload] = stored.split('.');
+    const blob = Buffer.from(payload, 'base64url');
+    blob[12] ^= 0x01;
+    const tampered = `${version}.${blob.toString('base64url')}`;
     expect(() => cipher.decrypt(tampered, USER)).toThrow();
     expect(() => cipher.decrypt('v2.xxx', USER)).toThrow();
   });
