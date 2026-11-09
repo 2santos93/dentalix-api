@@ -371,6 +371,23 @@ describe('Aceptación parcial del presupuesto (e2e, DX-417)', () => {
       params: { patientId, planId, pendingPlanId },
       reason: 'PLAN_PARTIALLY_ACCEPTED',
     });
+    // M-7: el pendiente tiene su propio evento de alta, con quién y el enlace.
+    const created = await raw.auditEvent.findMany({
+      where: {
+        tenantId: clinicA.tenantId,
+        resourceType: 'TREATMENT_PLAN',
+        resourceId: pendingPlanId,
+        action: 'CREATE',
+      },
+    });
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({
+      patientId,
+      metadata: {
+        reason: 'PLAN_SPLIT_PENDING',
+        params: { splitFromPlanId: planId },
+      },
+    });
 
     // El pendiente sale en «Presupuestos por seguir» con su antigüedad.
     await raw.treatmentPlan.updateMany({
@@ -432,16 +449,19 @@ describe('Aceptación parcial del presupuesto (e2e, DX-417)', () => {
       partial: { itemIds: [items[0]] },
     }).expect(409);
     expect(changed.body).toMatchObject({ message: QUOTE_CHANGED_MESSAGE });
-    // M-1: una lista en `partial` es 400, no una aceptación entera.
-    for (const partial of [[], [{}]]) {
-      const bad = await accept(planId, {
-        contentHash: whole.contentHash,
-        partial,
-      }).expect(400);
-      expect(JSON.stringify(bad.body)).toContain(
-        'partial debe ser un objeto con los procedimientos que se aceptan (itemIds).',
-      );
-    }
+    // M-1: una lista en `partial` es 400, nunca una aceptación entera (con
+    // objetos dentro, el 400 lleva además sus errores anidados).
+    const emptyList = await accept(planId, {
+      contentHash: whole.contentHash,
+      partial: [],
+    }).expect(400);
+    expect(JSON.stringify(emptyList.body)).toContain(
+      'partial debe ser un objeto con los procedimientos que se aceptan (itemIds).',
+    );
+    await accept(planId, {
+      contentHash: whole.contentHash,
+      partial: [{}],
+    }).expect(400);
     const allSign = await accept(planId, {
       contentHash: whole.contentHash,
       partial: { itemIds: items },

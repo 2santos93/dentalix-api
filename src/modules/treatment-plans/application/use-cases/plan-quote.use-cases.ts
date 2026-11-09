@@ -74,6 +74,8 @@ import {
   type ClinicDocumentTypeNames,
 } from '../../../patients/domain/document-type';
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
+import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 export type PlanQuoteClock = () => Date;
 export const PLAN_QUOTE_CLOCK = Symbol('PLAN_QUOTE_CLOCK');
@@ -162,6 +164,11 @@ export interface AcceptTreatmentPlanMeta {
   role: ClinicRole;
   ipAddress: string | null;
   userAgent: string | null;
+  /**
+   * DX-417 (ronda 1, M-7): quién y desde dónde, para el evento propio del
+   * alta del plan pendiente de una aceptación parcial.
+   */
+  audit?: AuditRequestContext;
 }
 
 /**
@@ -566,6 +573,8 @@ export class AcceptTreatmentPlanUseCase {
     private readonly composition: QuoteComposition = 'current',
     @Optional()
     private readonly repricer?: AcceptanceRepricer,
+    @Optional()
+    private readonly audit?: RecordAuditEventUseCase,
   ) {}
 
   /**
@@ -716,12 +725,49 @@ export class AcceptTreatmentPlanUseCase {
     if (outcome.kind === 'ALREADY_ACCEPTED') {
       throw new ConflictException(PLAN_ACCEPTED_CONFLICT_MESSAGE);
     }
+    await this.recordPendingCreated(
+      patientId,
+      planId,
+      outcome.source.acceptance?.partial?.pendingPlanId ?? null,
+      meta.audit,
+    );
     return toDocument(
       outcome.source,
       acceptedAt,
       book.forLocation(outcome.source.location.id),
       this.composition,
     );
+  }
+
+  /**
+   * DX-417 (ronda 1, M-7): el plan pendiente tiene su propio evento de alta
+   * (CREATE TREATMENT_PLAN con `params.splitFromPlanId`, sin importes), para
+   * que la auditoría filtrada por él diga quién lo creó y cuándo. El SIGN del
+   * original lo escribe el @Audit de la ruta.
+   */
+  private async recordPendingCreated(
+    patientId: string,
+    planId: string,
+    pendingPlanId: string | null,
+    ctx: AuditRequestContext | undefined,
+  ): Promise<void> {
+    if (!pendingPlanId || !ctx || !this.audit) return;
+    await this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'CREATE',
+      resourceType: 'TREATMENT_PLAN',
+      resourceId: pendingPlanId,
+      patient: { kind: 'patient', id: patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: 'PLAN_SPLIT_PENDING',
+        params: { splitFromPlanId: planId },
+      },
+    });
   }
 
   /** La recotización de la firma: precios vigentes leídos y su decisión. */

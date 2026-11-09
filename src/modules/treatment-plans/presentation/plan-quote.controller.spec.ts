@@ -124,6 +124,7 @@ describe('PlanQuoteController: vista previa parcial (DX-417)', () => {
       {} as never,
       {} as never,
       useCase,
+      {} as never,
     );
     const req = {
       user: {

@@ -80,6 +80,7 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     for (const reason of [
       'PLAN_PARTIALLY_ACCEPTED',
       'ACCEPT_PARTIAL_PREVIEW',
+      'PLAN_SPLIT_PENDING',
       'QUOTE_EXPIRED_REPRICED',
     ]) {
       expect(
@@ -89,6 +90,15 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
         }),
       ).toEqual({ reason, params: { repricingId, pendingPlanId } });
     }
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'PLAN_SPLIT_PENDING',
+        params: { splitFromPlanId: pendingPlanId },
+      }),
+    ).toEqual({
+      reason: 'PLAN_SPLIT_PENDING',
+      params: { splitFromPlanId: pendingPlanId },
+    });
   });
 
   it('acota el número de campos y quita los repetidos', () => {

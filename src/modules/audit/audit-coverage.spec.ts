@@ -952,7 +952,9 @@ const EXPECTED: Record<string, AuditOptions> = {
     },
   // DX-417: la vista previa de aceptar en parte lee el plan (VIEW). La firma
   // parcial pone desde el handler `reason` PLAN_PARTIALLY_ACCEPTED (o el del
-  // vencido) y `params.pendingPlanId`.
+  // vencido) y `params.pendingPlanId`; además el caso de uso escribe el alta
+  // del plan pendiente: CREATE TREATMENT_PLAN, `reason` PLAN_SPLIT_PENDING y
+  // `params.splitFromPlanId` (sin importes; partial-acceptance.use-cases.spec).
   'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview':
     {
       action: 'VIEW',

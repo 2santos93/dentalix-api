@@ -17,6 +17,7 @@ import {
   PARTIAL_PLAN_NOT_PRESENTED_CODE,
 } from '../../domain/partial-acceptance';
 import { computeQuoteHash } from '../../domain/plan-quote';
+import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { RepricingSubject } from '../../domain/ports/plan-repricing-repository.port';
 import type { PlanQuoteSource } from '../../domain/ports/plan-quote-repository.port';
 import type { ItemPriceState, Repricing } from '../repricing';
@@ -317,6 +318,80 @@ describe('AcceptTreatmentPlanUseCase con `partial` (DX-417)', () => {
     expect(pending.plan.status).toBe(TreatmentPlanStatus.PRESENTED);
     expect(pending.plan.quoteValidUntil).toBe('2026-10-20');
     expect(pending.items.map((i) => i.id)).toEqual(['item-2']);
+  });
+
+  it('M-7: el alta del plan pendiente deja su propio evento CREATE (sin importes); aceptar entero, no', async () => {
+    const ctx = setup();
+    const events: unknown[] = [];
+    const audit = {
+      record: (draft: unknown) => {
+        events.push(draft);
+        return Promise.resolve();
+      },
+    } as unknown as RecordAuditEventUseCase;
+    const accept = new AcceptTreatmentPlanUseCase(
+      ctx.repo,
+      () => NOW,
+      names,
+      'current',
+      undefined,
+      audit,
+    );
+    const auditCtx = {
+      tenantId: 'tenant-1',
+      locationId: 'loc-1',
+      actor: { userId: 'user-1', role: ClinicRole.DENTIST },
+      requestId: 'req-1',
+      ip: '10.0.0.1',
+      userAgent: 'jest',
+    };
+    const preview = await ctx.preview.execute(
+      'patient-1',
+      'plan-1',
+      { itemIds: ['item-1'] },
+      { userId: 'user-1', role: ClinicRole.DENTIST },
+    );
+    await accept.execute(
+      'patient-1',
+      'plan-1',
+      signing(preview.accepted.contentHash, {
+        partial: { itemIds: ['item-1'] },
+      }),
+      { ...META, audit: auditCtx },
+    );
+    expect(events).toEqual([
+      {
+        tenantId: 'tenant-1',
+        locationId: 'loc-1',
+        actor: { kind: 'user', userId: 'user-1', role: ClinicRole.DENTIST },
+        action: 'CREATE',
+        resourceType: 'TREATMENT_PLAN',
+        resourceId: 'pending-1',
+        patient: { kind: 'patient', id: 'patient-1' },
+        requestId: 'req-1',
+        ip: '10.0.0.1',
+        userAgent: 'jest',
+        metadata: {
+          reason: 'PLAN_SPLIT_PENDING',
+          params: { splitFromPlanId: 'plan-1' },
+        },
+      },
+    ]);
+
+    const whole = setup();
+    const shown = await whole.get.execute('patient-1', 'plan-1');
+    await new AcceptTreatmentPlanUseCase(
+      whole.repo,
+      () => NOW,
+      names,
+      'current',
+      undefined,
+      audit,
+    ).execute('patient-1', 'plan-1', signing(shown.contentHash), {
+      ...META,
+      audit: auditCtx,
+    });
+    expect(events).toHaveLength(1);
   });
 
   it('con el hash del presupuesto ENTERO: 409 QUOTE_CHANGED y nada se escribe', async () => {

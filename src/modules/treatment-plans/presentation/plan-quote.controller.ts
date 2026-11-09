@@ -37,6 +37,8 @@ import {
   type JwtPayload,
 } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { auditRequestContext } from '../../audit/presentation/audit-request-context';
 import { DrainAllocationRebalancesInterceptor } from '../../payments/presentation/drain-allocation-rebalances.interceptor';
 import {
   AcceptTreatmentPlanUseCase,
@@ -138,6 +140,7 @@ export class PlanQuoteController {
     private readonly acceptPlan: AcceptTreatmentPlanUseCase,
     private readonly previewAcceptanceRepricing: PreviewAcceptanceRepricingUseCase,
     private readonly previewPartialAcceptance: PreviewPartialAcceptanceUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Audit({
@@ -242,6 +245,8 @@ export class PlanQuoteController {
         role: actor.role,
         ipAddress: req.ip ?? null,
         userAgent: userAgent ? userAgent.slice(0, USER_AGENT_MAX) : null,
+        // DX-417 (M-7): el alta del plan pendiente deja su propio evento.
+        audit: auditRequestContext(req, this.tenantContext),
       },
     );
     const audit = acceptanceAuditMetadata(doc);
