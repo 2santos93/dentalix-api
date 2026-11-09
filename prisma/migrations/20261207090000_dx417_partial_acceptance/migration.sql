@@ -36,6 +36,16 @@
 -- Escritura única de "splitFromPlanId": trigger BEFORE UPDATE OF que rechaza
 -- cambiarla (también ponerla a NULL o ponérsela a un plan que no la tenía).
 --
+-- Coherencia de los dos enlaces (ronda 1, M-4): una aceptación con
+-- "pendingPlanId" exige que ese plan tenga "splitFromPlanId" = su "planId"
+-- (constraint trigger AFTER INSERT; la aceptación ya no admite UPDATE y el
+-- enlace del pendiente no cambia, así que basta con el alta). El pendiente
+-- nace antes que la aceptación (se le mueven los ítems antes de firmar), así
+-- que la otra dirección (un plan con "splitFromPlanId" cuya aceptación de
+-- origen lo nombre) no se exige en la base: la garantiza la transacción de la
+-- firma. Como el resto de triggers de la tabla, lee con la RLS de quien
+-- escribe (la app, con su clínica en contexto).
+--
 -- `treatment_plan_items_locked_when_accepted` se REEMPLAZA (versión vigente:
 -- 20261020230300_dx105_plan_item_pricing_snapshot) para mirar también el plan
 -- de ORIGEN al cambiar "planId": hasta ahora solo miraba el de destino, así
@@ -47,14 +57,20 @@
 -- VALIDATE aparte (20261207090100_dx417_partial_acceptance_validate), como
 -- DX-379 (C). Columnas NULL sin default (PG 16 solo toca el catálogo); una
 -- réplica anterior inserta sin nombrarlas y recibe NULL, que cumple los CHECK.
--- Los índices se crean vacíos de entradas, pero CREATE INDEX lee la tabla una
--- vez con SHARE (no bloquea lecturas; las escrituras esperan lo que tarde).
+-- Los índices se crean vacíos de entradas, pero CREATE INDEX recorre la
+-- tabla una vez. OJO: va en la misma transacción que el ALTER TABLE … ADD
+-- COLUMN de esa tabla, que ya tomó ACCESS EXCLUSIVE hasta el COMMIT, así que
+-- durante ese recorrido también esperan las LECTURAS de treatment_plans y de
+-- treatment_plan_acceptances (milisegundos con el volumen de hoy;
+-- lock_timeout acota la espera a por el bloqueo).
 -- Las columnas heredan el grant de la tabla a dentalix_app y su RLS.
 --
 -- Vuelta atrás (solo si hay que retirar esta porción):
 --   1. Primero se despliega la versión anterior de la API (no lee ni escribe
 --      estas columnas).
 --   2. Después, en una transacción con el mismo lock_timeout:
+--        DROP TRIGGER "treatment_plan_acceptances_pending_link" ON "treatment_plan_acceptances";
+--        DROP FUNCTION public."treatment_plan_acceptances_pending_link"();
 --        DROP TRIGGER "treatment_plans_split_from_immutable" ON "treatment_plans";
 --        DROP FUNCTION public."treatment_plans_split_from_immutable"();
 --        ALTER TABLE "treatment_plan_acceptances"
@@ -144,6 +160,31 @@ $$;
 CREATE TRIGGER "treatment_plans_split_from_immutable"
   BEFORE UPDATE OF "splitFromPlanId" ON "treatment_plans"
   FOR EACH ROW EXECUTE FUNCTION public."treatment_plans_split_from_immutable"();
+
+-- ---------------------------------------------------------------------------
+-- El pendiente de una aceptación parcial viene de ESE plan.
+-- ---------------------------------------------------------------------------
+CREATE FUNCTION public."treatment_plan_acceptances_pending_link"() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $$
+BEGIN
+  IF NEW."pendingPlanId" IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public."treatment_plans" p
+     WHERE p."id" = NEW."pendingPlanId"
+       AND p."tenantId" = NEW."tenantId"
+       AND p."splitFromPlanId" = NEW."planId"
+  ) THEN
+    RAISE EXCEPTION 'el presupuesto pendiente de una aceptación parcial tiene que venir del plan aceptado'
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER "treatment_plan_acceptances_pending_link"
+  AFTER INSERT ON "treatment_plan_acceptances"
+  FOR EACH ROW EXECUTE FUNCTION public."treatment_plan_acceptances_pending_link"();
 
 -- ---------------------------------------------------------------------------
 -- Bloqueos: versión vigente (20261020230300_dx105_plan_item_pricing_snapshot)

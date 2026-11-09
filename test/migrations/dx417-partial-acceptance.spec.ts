@@ -84,7 +84,17 @@ describe('DX-417: migración de la aceptación parcial', () => {
     expect(functionBody(add, 'treatment_plans_split_from_immutable')).toContain(
       'IF NEW."splitFromPlanId" IS DISTINCT FROM OLD."splitFromPlanId" THEN',
     );
-    expect(add.match(/SET search_path = pg_catalog, pg_temp/g)).toHaveLength(2);
+    expect(add.match(/SET search_path = pg_catalog, pg_temp/g)).toHaveLength(3);
+  });
+
+  it('M-4: la aceptación solo nombra un pendiente que viene de su plan (constraint trigger al alta)', () => {
+    const add = code(ADD);
+    expect(add).toContain(
+      'CREATE CONSTRAINT TRIGGER "treatment_plan_acceptances_pending_link"\n  AFTER INSERT ON "treatment_plan_acceptances"',
+    );
+    const body = functionBody(add, 'treatment_plan_acceptances_pending_link');
+    expect(body).toContain('p."splitFromPlanId" = NEW."planId"');
+    expect(body).toContain('p."tenantId" = NEW."tenantId"');
   });
 
   it('el bloqueo de un plan firmado mira también el plan de ORIGEN y no cambia nada más', () => {
@@ -118,12 +128,13 @@ describe('DX-417: migración de la aceptación parcial', () => {
     expect(lines.slice(1)).toEqual([
       'ALTER TABLE "treatment_plans" VALIDATE CONSTRAINT "treatment_plans_split_from_check"',
       'ALTER TABLE "treatment_plan_acceptances" VALIDATE CONSTRAINT "treatment_plan_acceptances_pending_check"',
-      'ALTER TABLE "treatment_plan_acceptances" NO FORCE ROW LEVEL SECURITY',
+      // M-2: en el orden en que la app las lee (plan, luego aceptación).
       'ALTER TABLE "treatment_plans" NO FORCE ROW LEVEL SECURITY',
+      'ALTER TABLE "treatment_plan_acceptances" NO FORCE ROW LEVEL SECURITY',
       'ALTER TABLE "treatment_plans" VALIDATE CONSTRAINT "treatment_plans_split_from_fkey"',
       'ALTER TABLE "treatment_plan_acceptances" VALIDATE CONSTRAINT "treatment_plan_acceptances_pending_plan_fkey"',
-      'ALTER TABLE "treatment_plans" FORCE ROW LEVEL SECURITY',
       'ALTER TABLE "treatment_plan_acceptances" FORCE ROW LEVEL SECURITY',
+      'ALTER TABLE "treatment_plans" FORCE ROW LEVEL SECURITY',
     ]);
   });
 

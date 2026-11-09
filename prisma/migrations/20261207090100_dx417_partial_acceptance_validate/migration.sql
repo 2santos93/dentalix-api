@@ -12,7 +12,12 @@
 --      su validación lee las dos con la RLS del owner). `NO FORCE ROW LEVEL
 --      SECURITY` es un ALTER TABLE: toma ACCESS EXCLUSIVE en las dos tablas
 --      hasta el COMMIT (como DX-379 C), así que dentro de ese tramo solo van
---      los VALIDATE de las FK. La de "splitFromPlanId" es de treatment_plans
+--      los VALIDATE de las FK. Se toman en el MISMO orden en que la app las
+--      lee (la firma y el detalle leen el plan y después su aceptación):
+--      primero treatment_plans y luego treatment_plan_acceptances. Al revés,
+--      una petición con el plan ya leído y esperando la aceptación y esta
+--      migración con la aceptación y esperando el plan se bloquearían entre
+--      sí (deadlock: Postgres abortaría una de las dos). La de "splitFromPlanId" es de treatment_plans
 --      consigo misma: recorre la tabla una vez (todas las filas a NULL, sin
 --      búsquedas en el índice). FORCE se devuelve en la misma transacción:
 --      ninguna otra sesión ve las tablas sin FORCE.
@@ -25,9 +30,9 @@ SET LOCAL lock_timeout = '5s';
 ALTER TABLE "treatment_plans" VALIDATE CONSTRAINT "treatment_plans_split_from_check";
 ALTER TABLE "treatment_plan_acceptances" VALIDATE CONSTRAINT "treatment_plan_acceptances_pending_check";
 
-ALTER TABLE "treatment_plan_acceptances" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "treatment_plans" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "treatment_plan_acceptances" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "treatment_plans" VALIDATE CONSTRAINT "treatment_plans_split_from_fkey";
 ALTER TABLE "treatment_plan_acceptances" VALIDATE CONSTRAINT "treatment_plan_acceptances_pending_plan_fkey";
-ALTER TABLE "treatment_plans" FORCE ROW LEVEL SECURITY;
 ALTER TABLE "treatment_plan_acceptances" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "treatment_plans" FORCE ROW LEVEL SECURITY;
