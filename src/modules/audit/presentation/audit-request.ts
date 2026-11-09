@@ -209,12 +209,19 @@ function handlerMetadata(
     : rest;
 }
 
-/** Los `params` que añade el handler (`req.auditMetadata.params`). */
-function handlerParams(req: AuditedRequest): Record<string, unknown> {
-  const params = req.auditMetadata?.params;
-  return typeof params === 'object' && params !== null && !Array.isArray(params)
-    ? (params as Record<string, unknown>)
-    : {};
+/**
+ * Los `params` de la ruta y, detrás, los que añade el handler
+ * (`req.auditMetadata.params`) cuya clave no sea ya de la ruta.
+ */
+function routeThenHandlerParams(req: AuditedRequest): Record<string, unknown> {
+  const route: Record<string, unknown> = { ...(req.params ?? {}) };
+  const extra = req.auditMetadata?.params;
+  if (typeof extra === 'object' && extra !== null && !Array.isArray(extra)) {
+    for (const [key, value] of Object.entries(extra)) {
+      if (!(key in route)) route[key] = value;
+    }
+  }
+  return route;
 }
 
 /** SEC-049: tipo de pagador, 4 últimos del nº y verificación de la cobertura. */
@@ -273,9 +280,9 @@ export function buildAuditDraft(
         ? { changedFields: bodyFields(req.body) }
         : {}),
       // DX-379 (B): el handler puede añadir ids a los de la ruta (p. ej.
-      // `repricingId`, la fila con el antes y el después); los de la ruta
-      // mandan.
-      params: { ...handlerParams(req), ...req.params },
+      // `repricingId`, la fila con el antes y el después). Los de la ruta van
+      // primero y mandan: el tope de claves del saneador nunca los corta.
+      params: routeThenHandlerParams(req),
       ...(options.reason ? { reason: options.reason } : {}),
       ...(options.statusChange ? { statusChange: options.statusChange } : {}),
       ...(options.search && resultCount !== null

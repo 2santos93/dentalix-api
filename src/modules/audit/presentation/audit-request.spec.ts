@@ -328,6 +328,33 @@ describe('buildAuditDraft (DX-009)', () => {
     });
   });
 
+  it('DX-379 (B, M-3): los de la ruta van primero; diez ids del handler no los cortan', () => {
+    const extra = Object.fromEntries(
+      Array.from({ length: 10 }, (_, n) => [
+        `extra${n}`,
+        `77777777-7777-4777-8777-77777777777${n}`,
+      ]),
+    );
+    const draft = buildAuditDraft(
+      {
+        action: 'UPDATE',
+        resource: 'TREATMENT_PLAN',
+        resourceId: { param: 'planId' },
+        patient: { param: 'patientId' },
+      },
+      req({
+        params: { patientId: PATIENT, planId: PLAN },
+        auditMetadata: { params: extra },
+      }),
+      {},
+      scope,
+    );
+    const params = draft?.metadata.params ?? {};
+    expect(params).toMatchObject({ patientId: PATIENT, planId: PLAN });
+    expect(Object.keys(params)).toHaveLength(10);
+    expect(Object.keys(params).slice(0, 2)).toEqual(['patientId', 'planId']);
+  });
+
   it('DX-319: el antes/después del nº de registro solo pasa en un evento de LOCATION', () => {
     const draft = buildAuditDraft(
       { action: 'UPDATE', resource: 'PATIENT', resourceId: { param: 'id' } },
