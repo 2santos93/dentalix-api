@@ -82,6 +82,19 @@ export function decidePartial(
   plan: PartialPlanState,
   requested: readonly string[],
 ): PartialSplit {
+  // Primero los ids: uno ajeno (de otro plan, paciente o clínica) es 404
+  // sea cual sea el estado del plan.
+  const chosen = new Set(requested.map((id) => id.toLowerCase()));
+  if (chosen.size > PARTIAL_ITEMS_MAX) {
+    throw new PartialAcceptanceError('BAD_REQUEST', PARTIAL_TOO_MANY_MESSAGE);
+  }
+  const known = new Set(plan.items.map((i) => i.id.toLowerCase()));
+  if ([...chosen].some((id) => !known.has(id))) {
+    throw new PartialAcceptanceError(
+      'NOT_FOUND',
+      PARTIAL_ITEM_NOT_FOUND_MESSAGE,
+    );
+  }
   if (plan.signed || plan.status === TreatmentPlanStatus.ACCEPTED) {
     throw new PartialAcceptanceError(
       'CONFLICT',
@@ -104,18 +117,6 @@ export function decidePartial(
   }
   if (plan.facts.hasActivePaymentPlan) {
     throw new PartialAcceptanceError('CONFLICT', PARTIAL_PAYMENT_PLAN_MESSAGE);
-  }
-
-  const chosen = new Set(requested.map((id) => id.toLowerCase()));
-  if (chosen.size > PARTIAL_ITEMS_MAX) {
-    throw new PartialAcceptanceError('BAD_REQUEST', PARTIAL_TOO_MANY_MESSAGE);
-  }
-  const known = new Set(plan.items.map((i) => i.id.toLowerCase()));
-  if ([...chosen].some((id) => !known.has(id))) {
-    throw new PartialAcceptanceError(
-      'NOT_FOUND',
-      PARTIAL_ITEM_NOT_FOUND_MESSAGE,
-    );
   }
   if (chosen.size === 0) {
     throw new PartialAcceptanceError(
