@@ -311,7 +311,9 @@ describe('DX-462 · tope diario de devoluciones en la BD (int)', () => {
   });
 
   it('A5: un reintento con la misma Idempotency-Key en vuelo devuelve la devolución original, no 403', async () => {
-    const now = new Date();
+    // Día propio y fijo: con `new Date()`, el 9 nov sumaba sobre la devolución
+    // del test anterior (misma sede, usuario y día) y pasaba el tope.
+    const now = new Date('2026-11-12T15:00:00Z');
     const key = randomUUID();
     // Tope 15, importe 10: la réplica sumaría 20 y daría 403 si no se reconoce.
     const results = await Promise.all([
