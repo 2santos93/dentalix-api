@@ -20,7 +20,9 @@ export interface QuoteExpirySubject {
  * presentación o, sin presentar, la de escritura) para que la web y la API
  * nunca discrepen cerca de medianoche. Un plan sin validez guardada nunca
  * vence, y solo un borrador o un plan presentado puede verse vencido (I-1):
- * aceptado, completado, rechazado o cancelado, su validez ya no cuenta. Una sede sin zona válida no tumba la respuesta: su plan sale como no
+ * aceptado, completado, rechazado o cancelado, su validez ya no cuenta.
+ *
+ * Una sede sin zona válida no tumba la respuesta: su plan sale como no
  * vencido (el presupuesto en sí ya da el 409 de zona al abrirse).
  */
 @Injectable()
