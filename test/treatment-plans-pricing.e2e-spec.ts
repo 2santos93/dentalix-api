@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { CURRENCY_CODE_MESSAGE } from '../src/shared/money/currency-messages';
 import {
   CatalogKind,
   ClinicRole,
@@ -534,6 +535,35 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
       });
     });
 
+    it('DX-105-bis: si la lista del convenio quedó retirada (fuera del flujo normal), el precio no sale de una lista muerta', async () => {
+      const patient = await createPatient('ListaRetirada');
+      const agreement = await createAgreement('Empresa X retirada', {
+        kind: 'PRICE_LIST',
+        priceListId: agreementListId,
+      });
+      await assign(patient, { agreementId: agreement });
+      expect(await quote(patient, endo, 'VES')).toMatchObject({
+        source: 'AGREEMENT_PRICE_LIST',
+        price: 60000,
+      });
+      // El retiro por HTTP lo impide el 409 del convenio vivo: se simula el
+      // estado (una carrera o un arreglo a mano) directamente en la BD.
+      await raw.priceList.update({
+        where: { id: agreementListId },
+        data: { deletedAt: new Date() },
+      });
+      try {
+        const q = await quote(patient, endo, 'VES');
+        expect(q.source).not.toBe('AGREEMENT_PRICE_LIST');
+        expect(q.price).not.toBe(60000);
+      } finally {
+        await raw.priceList.update({
+          where: { id: agreementListId },
+          data: { deletedAt: null },
+        });
+      }
+    });
+
     it('convenio de otra sede: no aplica; en su sede, sí', async () => {
       const patient = await createPatient('Sede');
       const agreement = await createAgreement('Convenio Norte', {
@@ -574,6 +604,18 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
   });
 
   describe('price-quote', () => {
+    it('DX-105-bis: una moneda con forma ISO pero fuera del catálogo da 400 con el mensaje de moneda', async () => {
+      const patient = await createPatient('Moneda');
+      const res = await as(dentistToken)
+        .get(
+          `/patients/${patient}/price-quote?catalogItemId=${endo}&currency=ZZZ`,
+        )
+        .expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        CURRENCY_CODE_MESSAGE,
+      );
+    });
+
     it('valida la consulta y responde 404 si el procedimiento no existe', async () => {
       const patient = await createPatient('Consulta');
       await as(dentistToken)

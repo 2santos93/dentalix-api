@@ -31,6 +31,7 @@ interface ListBody {
   locationId: string | null;
   active: boolean;
   itemCount: number;
+  updatedAt: string;
 }
 interface RowBody {
   catalogItemId: string;
@@ -377,6 +378,7 @@ describe('Listas de precios (e2e, DX-105)', () => {
     });
 
     it('PUT fija 2 precios y quita uno con null; el directorio y el itemCount lo reflejan', async () => {
+      const before = new Date(list.updatedAt).getTime();
       const res = await putItems(list.id, [
         { catalogItemId: catalogIds[0], price: 150000.5 },
         { catalogItemId: catalogIds[1], price: 0 },
@@ -393,6 +395,12 @@ describe('Listas de precios (e2e, DX-105)', () => {
       expect(second.status).toBe(200);
       // Un null sobre un procedimiento sin precio no cuenta como quitado.
       expect(second.body).toEqual({ upserted: 1, removed: 1 });
+      // DX-105-bis: cambiar precios es cambiar la lista: `updatedAt` avanza.
+      const fresh = (
+        (await admin(api().get('/api/v1/price-lists')).expect(200))
+          .body as ListBody[]
+      ).find((l) => l.id === list.id)!;
+      expect(new Date(fresh.updatedAt).getTime()).toBeGreaterThan(before);
 
       expect(await storedPrices(list.id)).toEqual({
         [catalogIds[0]]: '175000.00',
