@@ -66,6 +66,8 @@ export const REPRICE_CREDIT_MESSAGE =
   'El plan tiene saldo a favor traspasado o devuelto: sus precios ya no se actualizan.';
 export const REPRICE_ITEM_NOT_PROPOSED_MESSAGE =
   'Solo se actualizan los precios de los ítems propuestos: alguno de los elegidos ya está aceptado, realizado o descartado.';
+export const REPRICE_VALIDITY_NOT_RENEWED_MESSAGE =
+  'Quedan ítems con precios anteriores: la validez no se renueva.';
 export const REPRICE_ITEM_NOT_FOUND_MESSAGE =
   'Algún ítem no existe o no es de este plan de tratamiento.';
 
@@ -173,7 +175,16 @@ export interface Repricing {
   skipped: RepricingSkip[];
   rate: RepricingRate | null;
   previousValidity: QuoteValidity | null;
-  validity: QuoteValidity;
+  /**
+   * I-1: ¿se renueva la validez? Solo si se recotizan TODOS los ítems
+   * propuestos vivos del plan (sin selección parcial ni saltados por falta de
+   * precio o tasa). Si no, se conserva la anterior.
+   */
+  validityRenewed: boolean;
+  /** Sin renovar, por qué (texto para la pantalla); null si se renueva. */
+  validityNote: string | null;
+  /** La validez con la que queda el plan: la nueva o la que ya tenía. */
+  validity: QuoteValidity | null;
   /** Total del plan (todas sus líneas vivas) antes y después. */
   totals: { before: number; after: number };
   previewHash: string;
@@ -193,7 +204,10 @@ export interface RepricingInput {
   policy: DiscountPolicyRules;
   actor: DiscountActor;
   at: Date;
-  /** La validez nueva: emitido hoy (sede del plan) + días del ajuste. */
+  /**
+   * La validez nueva si se renueva: emitido hoy (sede del plan) + días del
+   * ajuste.
+   */
   validity: QuoteValidity;
 }
 
@@ -261,7 +275,8 @@ function selectItems(
     currency: null,
   });
   if (itemIds && itemIds.length > 0) {
-    const wanted = [...new Set(itemIds)];
+    // M-6: los UUID se comparan en minúsculas (como los guarda la base).
+    const wanted = [...new Set(itemIds.map((id) => id.toLowerCase()))];
     const byId = new Map(items.map((item) => [item.id, item]));
     const picked = wanted.map((id) => byId.get(id));
     if (picked.some((item) => item === undefined)) {
@@ -331,10 +346,19 @@ function newAmounts(
   allowDiscount: boolean,
   digits: RoundingDigits,
 ): { price: number; discount: number; floorDiscount: number } {
+  // M-4: con una rebaja manual (precio < referencia) el precio sube a la
+  // unidad (nunca baja): la rebaja no crece y el % efectivo no sube por el
+  // redondeo. Sin rebaja, la mitad hacia arriba (la regla de línea).
   const price =
     !allowDiscount || oldReference === null || oldReference <= 0
       ? newReference
-      : scaleAmount(newReference, item.price, oldReference, digits, 'half-up');
+      : scaleAmount(
+          newReference,
+          item.price,
+          oldReference,
+          digits,
+          item.price < oldReference ? 'ceil' : 'half-up',
+        );
   if (item.discount <= 0 || item.price <= 0) {
     return { price, discount: 0, floorDiscount: 0 };
   }
@@ -481,14 +505,27 @@ export function computeRepricing(input: RepricingInput): Repricing {
           ...rateLine.after.reference.referenceRate,
         }
       : null;
+  // I-1: la validez solo se renueva si TODOS los propuestos vivos (sin los
+  // cargos por inasistencia) se recotizan.
+  const repriced = new Set(lines.map((line) => line.itemId));
+  const proposed = plan.items.filter(
+    (item) =>
+      item.status === TreatmentPlanItemStatus.PROPOSED &&
+      !item.cancellationFeeAppointmentId,
+  );
+  const validityRenewed =
+    proposed.length > 0 && proposed.every((item) => repriced.has(item.id));
+  const previousValidity = storedQuoteValidity(plan);
   const repricing = {
     planId: plan.id,
     currency: plan.currency,
     lines,
     skipped,
     rate,
-    previousValidity: storedQuoteValidity(plan),
-    validity: input.validity,
+    previousValidity,
+    validityRenewed,
+    validityNote: validityRenewed ? null : REPRICE_VALIDITY_NOT_RENEWED_MESSAGE,
+    validity: validityRenewed ? input.validity : previousValidity,
     totals,
   };
   return { ...repricing, previewHash: repricingHash(repricing) };
@@ -555,7 +592,12 @@ export function repricingHash(
     rate: repricing.rate
       ? [repricing.rate.currency, canonicalRate(repricing.rate)]
       : null,
-    validity: [repricing.validity.issuedOn, repricing.validity.validUntil],
+    validity: [
+      repricing.validityRenewed,
+      repricing.validity
+        ? [repricing.validity.issuedOn, repricing.validity.validUntil]
+        : null,
+    ],
   });
   return createHash('sha256').update(canonical).digest('hex');
 }

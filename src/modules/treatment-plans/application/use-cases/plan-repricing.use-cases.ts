@@ -90,11 +90,12 @@ export interface AppliedRepricing {
 }
 
 /**
- * SHA-256 de lo que identifica una petición de aplicar: el plan, la huella de
- * la vista previa y los ítems pedidos (sin repetir, en orden). La misma clave
+ * SHA-256 de lo que identifica una petición de aplicar: el paciente y el plan
+ * de la ruta (I-2), la huella de la vista previa y los ítems pedidos (sin repetir, en orden). La misma clave
  * con otra huella es otra petición: 422.
  */
 export function repricingRequestFingerprint(
+  patientId: string,
   planId: string,
   request: ApplyRepricingRequest,
 ): string {
@@ -104,6 +105,7 @@ export function repricingRequestFingerprint(
   return createHash('sha256')
     .update(
       JSON.stringify([
+        patientId.toLowerCase(),
         planId.toLowerCase(),
         request.previewHash.toLowerCase(),
         items,
@@ -300,12 +302,12 @@ export class ApplyPlanRepricingUseCase {
     }
     const idempotency = {
       key: key.toLowerCase(),
-      fingerprint: repricingRequestFingerprint(planId, request),
+      fingerprint: repricingRequestFingerprint(patientId, planId, request),
     };
     // Una repetición devuelve lo aplicado aunque el plan o los precios hayan
     // cambiado después (sin leer nada más).
     const replay = await this.repo.findApplied(idempotency);
-    if (replay) return settled(replay);
+    if (replay) return settled(replay, patientId, planId);
     // El precio vigente se lee antes de la transacción (solo lee, como el
     // alta); con el plan bloqueado se recalcula y se compara la huella.
     const { plan } = await loadSubject(this.repo, patientId, planId);
@@ -338,12 +340,25 @@ export class ApplyPlanRepricingUseCase {
         return repricing;
       },
     );
-    return settled(outcome);
+    return settled(outcome, patientId, planId);
   }
 }
 
 /** La respuesta de aplicar según lo que hizo el repositorio. */
-function settled(outcome: ApplyRepricingOutcome): AppliedRepricing {
+function settled(
+  outcome: ApplyRepricingOutcome,
+  patientId: string,
+  planId: string,
+): AppliedRepricing {
+  // I-2: lo aplicado es siempre del plan y del paciente de la ruta (la
+  // huella ya los lleva; esto es la red): si no, como un plan ajeno.
+  if (
+    outcome.kind !== 'key-reused' &&
+    (outcome.record.patientId !== patientId.toLowerCase() ||
+      outcome.record.planId !== planId.toLowerCase())
+  ) {
+    throw new NotFoundException(REPRICE_PLAN_NOT_FOUND_MESSAGE);
+  }
   switch (outcome.kind) {
     case 'key-reused':
       throw new UnprocessableEntityException({

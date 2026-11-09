@@ -31,7 +31,11 @@ export interface RepricingRecord {
   currency: string;
   rate: RepricingRate | null;
   previousValidity: QuoteValidity | null;
-  validity: QuoteValidity;
+  /** I-1: ¿se renovó la validez? (todos los propuestos recotizados). */
+  validityRenewed: boolean;
+  validityNote: string | null;
+  /** La validez con la que quedó el plan: la nueva o la que ya tenía. */
+  validity: QuoteValidity | null;
   lines: StoredRepricingLine[];
   skipped: RepricingSkip[];
   totals: { before: number; after: number };

@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   DiscountReason,
   ExchangeRateSource,
@@ -376,7 +372,7 @@ describe('computeRepricing (DX-379 porción B)', () => {
     expect(r.lines[0].after.price).toBe(140);
   });
 
-  it('moneda sin decimales: redondea a la unidad una sola vez, la mitad hacia arriba', () => {
+  it('moneda sin decimales: redondea a la unidad una sola vez; con rebaja, el precio sube a la unidad (M-4)', () => {
     const old = item({
       catalogPrice: 1000,
       basePrice: 1000,
@@ -414,9 +410,9 @@ describe('computeRepricing (DX-379 porción B)', () => {
         },
       ),
     );
-    // 1501 × 999/1000 = 1499,499 → 1499; 333/999 × 1499 = 499,67 → 500
-    // subiría el %: baja a 499.
-    expect(r.lines[0].after).toMatchObject({ price: 1499, discount: 499 });
+    // 1501 × 999/1000 = 1499,499: hay rebaja (999 < 1000) → sube a 1500;
+    // 333/999 × 1500 = 500 exacto.
+    expect(r.lines[0].after).toMatchObject({ price: 1500, discount: 500 });
   });
 
   it('si el redondeo del descuento sube el %, baja a la unidad que no lo sube y conserva la firma', () => {
@@ -439,38 +435,60 @@ describe('computeRepricing (DX-379 porción B)', () => {
     expect(r.lines[0].discountDecision).toBeUndefined();
   });
 
-  it('% que sube por el redondeo del PRECIO: se valida con el tope del rol de quien recotiza', () => {
-    // Referencia 3, precio 2 (rebaja 33,33 %); referencia nueva 5 → 3,33
-    // (rebaja 33,40 %): sube.
-    const old = () =>
-      item({
-        catalogPrice: 3,
-        basePrice: 3,
-        referencePriceInPlan: 3,
-        basePriceInPlan: 3,
-        price: 2,
-        discountReason: DiscountReason.LOYALTY,
-        discountById: 'admin-9',
-        discountAt: new Date('2026-10-01T10:00:00.000Z'),
-      });
-    expect(() =>
-      computeRepricing(
-        input([old()], { endo: catalogRef(5) }, { actor: ASSISTANT_ACTOR }),
-      ),
-    ).toThrow(ForbiddenException);
+  it('M-4: con rebaja manual el redondeo nunca sube el %: la asistente recotiza sin 403 y la firma se conserva', () => {
+    // Referencia 3, precio 2 (rebaja 33,33 %); referencia nueva 5 → 3,333…:
+    // con la mitad hacia arriba 3,33 (rebaja 33,40 %, subía y daba 403 a la
+    // asistente); hacia arriba 3,34 (rebaja 33,20 %): no sube.
+    const old = item({
+      catalogPrice: 3,
+      basePrice: 3,
+      referencePriceInPlan: 3,
+      basePriceInPlan: 3,
+      price: 2,
+      discountReason: DiscountReason.LOYALTY,
+      discountById: 'admin-9',
+      discountAt: new Date('2026-10-01T10:00:00.000Z'),
+    });
     const r = computeRepricing(
-      input([old()], { endo: catalogRef(5) }, { actor: ADMIN_ACTOR }),
+      input([old], { endo: catalogRef(5) }, { actor: ASSISTANT_ACTOR }),
     );
     expect(r.lines[0].after).toMatchObject({
-      price: 3.33,
+      price: 3.34,
       discountReason: DiscountReason.LOYALTY,
-      discountById: ADMIN_ACTOR.userId,
-      discountAt: AT.toISOString(),
-      discountLocationId: null,
+      discountById: 'admin-9',
     });
-    expect(r.lines[0].discountDecision?.discountStamp?.byId).toBe(
-      ADMIN_ACTOR.userId,
+    expect(r.lines[0].discountDecision).toBeUndefined();
+  });
+
+  it('sin rebaja, el precio sigue la mitad hacia arriba (regla de línea)', () => {
+    // Precio 4 sobre referencia 3 (por encima); nueva 5 → 6,666… → 6,67.
+    const old = item({
+      catalogPrice: 3,
+      basePrice: 3,
+      referencePriceInPlan: 3,
+      basePriceInPlan: 3,
+      price: 4,
+    });
+    const r = computeRepricing(input([old], { endo: catalogRef(5) }));
+    expect(r.lines[0].after.price).toBe(6.67);
+  });
+
+  it('si la mitad hacia arriba subiría el % del descuento, baja al suelo (aunque quede en 0)', () => {
+    // Descuento 0,01 de 0,03 (33,3 %); referencia nueva 0,02: 0,00666… → 0,01
+    // con la mitad hacia arriba (50 %, subiría); el suelo da 0.
+    const old = item({
+      catalogPrice: 0.03,
+      basePrice: 0.03,
+      referencePriceInPlan: 0.03,
+      basePriceInPlan: 0.03,
+      price: 0.03,
+      discount: 0.01,
+      discountReason: DiscountReason.LOYALTY,
+    });
+    const r = computeRepricing(
+      input([old], { endo: catalogRef(0.02) }, { actor: ASSISTANT_ACTOR }),
     );
+    expect(r.lines[0].after).toMatchObject({ price: 0.02, discount: 0 });
   });
 
   it('sin ítems pedidos: solo los propuestos; el resto y el cargo por inasistencia se listan', () => {
@@ -510,6 +528,76 @@ describe('computeRepricing (DX-379 porción B)', () => {
       computeRepricing(input(all, refs, { itemIds: ['otro'] })),
     ).toThrow(NotFoundException);
     expect(repricingCatalogItemIds({ items: all })).toEqual(['endo']);
+  });
+
+  it('I-1: la validez solo se renueva si se recotizan TODOS los propuestos vivos', () => {
+    const a = item({ catalogItemId: 'a' });
+    const b = item({ catalogItemId: 'b' });
+    const done = item({
+      catalogItemId: 'a',
+      status: TreatmentPlanItemStatus.DONE,
+    });
+    const fee = item({ catalogItemId: 'a', cancellationFeeAppointmentId: 'x' });
+    const refs = { a: catalogRef(110), b: catalogRef(120) };
+    const previous = { issuedOn: '2026-09-01', validUntil: '2026-10-01' };
+
+    const all = computeRepricing(input([a, b, done, fee], refs));
+    expect(all).toMatchObject({
+      validityRenewed: true,
+      validityNote: null,
+      validity: VALIDITY,
+    });
+
+    const partial = computeRepricing(
+      input([a, b, done, fee], refs, { itemIds: [a.id] }),
+    );
+    expect(partial).toMatchObject({
+      validityRenewed: false,
+      validityNote:
+        'Quedan ítems con precios anteriores: la validez no se renueva.',
+      validity: previous,
+    });
+
+    const noRate = computeRepricing(
+      input([a, b], {
+        a: catalogRef(110),
+        b: { kind: 'no-rate', currency: 'USD' },
+      }),
+    );
+    expect(noRate.validityRenewed).toBe(false);
+    expect(noRate.validity).toEqual(previous);
+    // Una selección que nombra a todos los propuestos sí renueva.
+    expect(
+      computeRepricing(input([a, b, done], refs, { itemIds: [b.id, a.id] }))
+        .validityRenewed,
+    ).toBe(true);
+    // Un borrador sin fechas que no se renueva sigue sin validez.
+    expect(
+      computeRepricing(
+        input([a, b], refs, {
+          itemIds: [a.id],
+          plan: {
+            id: 'plan-1',
+            currency: 'USD',
+            items: [a, b],
+            quoteIssuedOn: null,
+            quoteValidUntil: null,
+          },
+        }),
+      ).validity,
+    ).toBeNull();
+    // Renovar o no cambia la huella.
+    expect(partial.previewHash).not.toBe(
+      computeRepricing(input([a], refs, { itemIds: [a.id] })).previewHash,
+    );
+  });
+
+  it('M-6: los ítems pedidos en mayúsculas se encuentran', () => {
+    const a = item({ id: 'abcdef01-0000-4000-8000-000000000001' });
+    const r = computeRepricing(
+      input([a], { endo: catalogRef(110) }, { itemIds: [a.id.toUpperCase()] }),
+    );
+    expect(r.lines.map((l) => l.itemId)).toEqual([a.id]);
   });
 
   it('el mismo cálculo da la misma huella aunque cambie la hora; otra validez, otro precio u otra tasa la cambian', () => {

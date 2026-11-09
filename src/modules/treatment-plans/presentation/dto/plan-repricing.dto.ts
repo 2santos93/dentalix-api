@@ -215,11 +215,26 @@ export class RepricingPreviewDto {
   previousValidity!: RepricingValidityDto | null;
 
   @ApiProperty({
-    type: RepricingValidityDto,
     description:
-      'La validez nueva: emitido hoy (día civil de la sede del plan) y válido los días del ajuste de la clínica.',
+      'true = se recotizan TODOS los ítems propuestos vivos del plan y la validez se renueva (emitido hoy en la sede del plan + días del ajuste). false = selección parcial o algún propuesto saltado (sin precio vigente o sin tasa): la validez no cambia.',
   })
-  validity!: RepricingValidityDto;
+  validityRenewed!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Con `validityRenewed: false`, por qué, para la pantalla («Quedan ítems con precios anteriores: la validez no se renueva.»); null si se renueva.',
+  })
+  validityNote!: string | null;
+
+  @ApiProperty({
+    type: RepricingValidityDto,
+    nullable: true,
+    description:
+      'La validez con la que queda el plan: la nueva si `validityRenewed`, si no la que ya tenía (null en un borrador nunca emitido).',
+  })
+  validity!: RepricingValidityDto | null;
 
   @ApiProperty({ type: RepricingTotalsDto })
   totals!: RepricingTotalsDto;

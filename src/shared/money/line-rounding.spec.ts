@@ -116,6 +116,10 @@ describe('scaleAmount (DX-379: recotizar en proporción)', () => {
     // Sin decimales (moneda de 0 dígitos): 1 234,5 → 1 235
     expect(scaleAmount(2469, 1, 2, 0, 'half-up')).toBe(1235);
     expect(scaleAmount(2469, 1, 2, 0, 'floor')).toBe(1234);
+    expect(scaleAmount(2469, 1, 2, 0, 'ceil')).toBe(1235);
+    expect(scaleAmount(100, 1, 3, 2, 'ceil')).toBe(33.34);
+    // Exacto: ceil no sube.
+    expect(scaleAmount(250, 85, 100, 2, 'ceil')).toBe(212.5);
   });
 
   it('sin deriva de coma flotante (10,05 × 1 ÷ 1 = 10,05)', () => {

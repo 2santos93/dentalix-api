@@ -73,7 +73,9 @@ interface Preview {
   skipped: { itemId: string; reason: string; currency: string | null }[];
   rate: { currency: string; toPerBase: number } | null;
   previousValidity: { issuedOn: string; validUntil: string } | null;
-  validity: { issuedOn: string; validUntil: string };
+  validityRenewed: boolean;
+  validityNote: string | null;
+  validity: { issuedOn: string; validUntil: string } | null;
   totals: { before: number; after: number; difference: number };
 }
 interface Applied extends Preview {
@@ -249,6 +251,8 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
       issuedOn: '2026-09-01',
       validUntil: '2026-10-01',
     });
+    expect(p.validityRenewed).toBe(true);
+    expect(p.validityNote).toBeNull();
     expect(p.validity).toEqual({
       issuedOn: sedeDay(0),
       validUntil: sedeDay(30),
@@ -344,6 +348,51 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
     expect(await raw.treatmentPlanRepricing.count({ where: { planId } })).toBe(
       1,
     );
+    // I-2: la repetición no vuelve a auditar.
+    const repricedAfter = (
+      await raw.auditEvent.findMany({
+        where: {
+          tenantId: clinicA.tenantId,
+          resourceType: 'TREATMENT_PLAN',
+          resourceId: planId,
+          action: 'UPDATE',
+        },
+      })
+    ).filter(
+      (e) => (e.metadata as { reason?: string }).reason === 'PLAN_REPRICED',
+    );
+    expect(repricedAfter).toHaveLength(1);
+    // I-2: la misma clave y el mismo cuerpo en la ruta de otro paciente →
+    // 422 (la huella lleva el paciente): ni devuelve lo de este ni audita.
+    const stranger = (
+      (
+        await as(clinicA)
+          .post('/patients', {
+            docType: 'NATIONAL_ID',
+            sex: 'M',
+            firstName: 'Iván',
+            lastName: 'Ajeno',
+            docNumber: 'DX379B-3',
+          })
+          .expect(201)
+      ).body as { id: string }
+    ).id;
+    const crossed = await as(clinicA, tokens.DENTIST)
+      .post(
+        `${repricePath(planId, stranger)}/apply`,
+        { previewHash: p.previewHash },
+        key,
+      )
+      .expect(422);
+    expect(crossed.body).toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+    const strangerEvents = await raw.auditEvent.findMany({
+      where: { tenantId: clinicA.tenantId, patientId: stranger },
+    });
+    expect(
+      strangerEvents.filter(
+        (e) => (e.metadata as { reason?: string }).reason === 'PLAN_REPRICED',
+      ),
+    ).toEqual([]);
     // La misma clave con otra petición: 422.
     const reused = await as(clinicA, tokens.DENTIST)
       .post(
@@ -436,6 +485,44 @@ describe('Actualizar precios de un plan (e2e, DX-379 porción B)', () => {
       .expect(200);
     const res = await pub().expect(404);
     expect(res.body).toMatchObject({ message: SIGNATURE_LINK_INVALID_MESSAGE });
+  });
+
+  it('I-1: recotizar solo un ítem no renueva la validez del plan (lo dice la respuesta)', async () => {
+    const { planId, items } = await presentedPlan();
+    await setRate(40);
+    const p = await preview(planId, undefined, { itemIds: [items[0]] });
+    expect(p).toMatchObject({
+      validityRenewed: false,
+      validityNote:
+        'Quedan ítems con precios anteriores: la validez no se renueva.',
+      validity: { issuedOn: '2026-09-01', validUntil: '2026-10-01' },
+    });
+    const res = await as(clinicA)
+      .post(
+        `${repricePath(planId)}/apply`,
+        { previewHash: p.previewHash, itemIds: [items[0]] },
+        newKey(),
+      )
+      .expect(200);
+    expect(res.body).toMatchObject({ validityRenewed: false });
+    const stored = await raw.treatmentPlan.findUniqueOrThrow({
+      where: { id: planId },
+      select: { quoteIssuedOn: true, quoteValidUntil: true },
+    });
+    expect(stored.quoteIssuedOn?.toISOString().slice(0, 10)).toBe('2026-09-01');
+    expect(stored.quoteValidUntil?.toISOString().slice(0, 10)).toBe(
+      '2026-10-01',
+    );
+    const prices = await raw.treatmentPlanItem.findMany({
+      where: { id: { in: items } },
+      orderBy: { price: 'asc' },
+    });
+    expect(prices.map((i) => i.price.toNumber())).toEqual([3600, 4000]);
+    // El plan sigue vencido (lo calcula la porción A).
+    const plan = (
+      await as(clinicA).get(`/treatment-plans/${planId}`).expect(200)
+    ).body as { quoteExpired: boolean };
+    expect(plan.quoteExpired).toBe(true);
   });
 
   it('un borrador sin fechas queda con la validez de hoy', async () => {

@@ -19,10 +19,11 @@ import type {
   RepricingSubject,
   StoredRepricingLine,
 } from '../../domain/ports/plan-repricing-repository.port';
-import type {
-  ItemPriceState,
-  RepricingLine,
-  RepricingSkip,
+import {
+  REPRICE_VALIDITY_NOT_RENEWED_MESSAGE,
+  type ItemPriceState,
+  type RepricingLine,
+  type RepricingSkip,
 } from '../../application/repricing';
 
 const PLAN_NOT_FOUND_MESSAGE = 'Plan de tratamiento no encontrado';
@@ -66,10 +67,11 @@ function toRecord(row: RepricingRow): RepricingRecord {
       row.previousQuoteIssuedOn,
       row.previousQuoteValidUntil,
     ),
-    validity: {
-      issuedOn: dayOf(row.quoteIssuedOn),
-      validUntil: dayOf(row.quoteValidUntil),
-    },
+    validityRenewed: row.validityRenewed,
+    validityNote: row.validityRenewed
+      ? null
+      : REPRICE_VALIDITY_NOT_RENEWED_MESSAGE,
+    validity: validity(row.quoteIssuedOn, row.quoteValidUntil),
     lines: row.lines as unknown as StoredRepricingLine[],
     skipped: row.skipped as unknown as RepricingSkip[],
     totals: {
@@ -220,13 +222,17 @@ export class PrismaPlanRepricingRepository implements PlanRepricingRepository {
       }
       await tx.$executeRaw`SELECT set_config('app.plan_item_reprice', '', true)`;
 
-      await tx.treatmentPlan.update({
-        where: { id: planId },
-        data: {
-          quoteIssuedOn: dateColumn(repricing.validity.issuedOn),
-          quoteValidUntil: dateColumn(repricing.validity.validUntil),
-        },
-      });
+      // I-1: la validez solo se renueva si se recotizaron todos los propuestos.
+      const renewed = repricing.validityRenewed ? repricing.validity : null;
+      if (renewed) {
+        await tx.treatmentPlan.update({
+          where: { id: planId },
+          data: {
+            quoteIssuedOn: dateColumn(renewed.issuedOn),
+            quoteValidUntil: dateColumn(renewed.validUntil),
+          },
+        });
+      }
       const rate = repricing.rate;
       const row = await tx.treatmentPlanRepricing.create({
         data: {
@@ -251,8 +257,13 @@ export class PrismaPlanRepricingRepository implements PlanRepricingRepository {
           previousQuoteValidUntil: repricing.previousValidity
             ? dateColumn(repricing.previousValidity.validUntil)
             : null,
-          quoteIssuedOn: dateColumn(repricing.validity.issuedOn),
-          quoteValidUntil: dateColumn(repricing.validity.validUntil),
+          validityRenewed: repricing.validityRenewed,
+          quoteIssuedOn: repricing.validity
+            ? dateColumn(repricing.validity.issuedOn)
+            : null,
+          quoteValidUntil: repricing.validity
+            ? dateColumn(repricing.validity.validUntil)
+            : null,
           lines: stored as unknown as Prisma.InputJsonValue,
           skipped: repricing.skipped as unknown as Prisma.InputJsonValue,
           totalBefore: repricing.totals.before,

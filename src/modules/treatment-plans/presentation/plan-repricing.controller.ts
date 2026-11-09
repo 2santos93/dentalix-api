@@ -55,6 +55,7 @@ import {
 interface AuthenticatedRequest extends AuditableRequest {
   user: JwtPayload;
   auditMetadata?: Record<string, unknown>;
+  skipAudit?: boolean;
 }
 
 function actorOf(req: AuthenticatedRequest) {
@@ -97,7 +98,9 @@ function toPreviewDto(r: RepricingView): RepricingPreviewDto {
     skipped: r.skipped.map((skip) => ({ ...skip })),
     rate: r.rate ? { ...r.rate } : null,
     previousValidity: r.previousValidity ? { ...r.previousValidity } : null,
-    validity: { ...r.validity },
+    validityRenewed: r.validityRenewed,
+    validityNote: r.validityNote,
+    validity: r.validity ? { ...r.validity } : null,
     totals: {
       before: r.totals.before,
       after: r.totals.after,
@@ -119,6 +122,8 @@ function toAppliedDto(
       skipped: record.skipped,
       rate: record.rate,
       previousValidity: record.previousValidity,
+      validityRenewed: record.validityRenewed,
+      validityNote: record.validityNote,
       validity: record.validity,
       totals: record.totals,
     }),
@@ -217,13 +222,13 @@ export class PlanRepricingController {
     summary:
       'Aplica «Actualizar precios» (DX-379) con la huella de la vista previa',
     description:
-      'Recalcula la recotización con el plan bloqueado (la misma función que la vista previa) y, si su huella es `previewHash`, escribe en una transacción los precios y la foto de cada ítem, reinicia la validez del presupuesto (emitido hoy en la sede del plan + días del ajuste; un borrador sin fechas queda con fechas) y guarda la recotización con el antes y el después. Un enlace de firma a distancia (DX-415) pendiente deja de valer si el presupuesto cambió.',
+      'Recalcula la recotización con el plan bloqueado (la misma función que la vista previa) y, si su huella es `previewHash`, escribe en una transacción los precios y la foto de cada ítem, reinicia la validez del presupuesto solo si se recotizan TODOS los ítems propuestos vivos (`validityRenewed`; emitido hoy en la sede del plan + días del ajuste; un borrador sin fechas queda con fechas; si no, conserva la que tenía) y guarda la recotización con el antes y el después. Un enlace de firma a distancia (DX-415) pendiente deja de valer si el presupuesto cambió.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
     required: true,
     description:
-      'UUID por intento (uno por apertura de la vista previa). Repetir la MISMA petición con la misma clave devuelve la recotización ya aplicada (`replayed: true`) sin volver a escribir; otra petición con la misma clave es 422 `IDEMPOTENCY_KEY_REUSED`. Por clínica; vive con la recotización.',
+      'UUID por intento (uno por apertura de la vista previa). Repetir la MISMA petición con la misma clave devuelve la recotización ya aplicada (`replayed: true`) sin volver a escribir ni auditar; otra petición con la misma clave es 422 `IDEMPOTENCY_KEY_REUSED`. Por clínica; vive con la recotización.',
   })
   @ApiOkResponse({ type: AppliedRepricingDto })
   @ApiBadRequestResponse({
@@ -258,7 +263,9 @@ export class PlanRepricingController {
       actorOf(req),
       idempotencyKey,
     );
-    req.auditMetadata = { params: { repricingId: record.id } };
+    // Una repetición no vuelve a auditar (como gastos y salidas de caja).
+    if (replayed) req.skipAudit = true;
+    else req.auditMetadata = { params: { repricingId: record.id } };
     return toAppliedDto(record, replayed);
   }
 }

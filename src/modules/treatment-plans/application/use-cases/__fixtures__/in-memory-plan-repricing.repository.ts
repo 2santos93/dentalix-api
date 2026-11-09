@@ -123,8 +123,10 @@ export class InMemoryPlanRepricingRepository implements PlanRepricingRepository 
         discountLocationId: after.discountLocationId,
       });
     }
-    stored.quoteIssuedOn = repricing.validity.issuedOn;
-    stored.quoteValidUntil = repricing.validity.validUntil;
+    if (repricing.validityRenewed && repricing.validity) {
+      stored.quoteIssuedOn = repricing.validity.issuedOn;
+      stored.quoteValidUntil = repricing.validity.validUntil;
+    }
     const record: RepricingRecord = {
       id: `repricing-${++this.seq}`,
       planId,
@@ -136,6 +138,8 @@ export class InMemoryPlanRepricingRepository implements PlanRepricingRepository 
       currency: repricing.currency,
       rate: repricing.rate,
       previousValidity: repricing.previousValidity,
+      validityRenewed: repricing.validityRenewed,
+      validityNote: repricing.validityNote,
       validity: repricing.validity,
       lines,
       skipped: repricing.skipped,

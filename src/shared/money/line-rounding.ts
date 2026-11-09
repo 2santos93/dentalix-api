@@ -78,8 +78,8 @@ export function percentOfCentsInUnits(
 
 /**
  * DX-379: `amount × num ÷ den` (tres importes ≥ 0, `den` > 0) redondeado UNA
- * vez a la unidad de `digits`, la mitad hacia arriba (`'half-up'`) o por
- * debajo (`'floor'`), en enteros de céntimos: sin redondeos intermedios ni
+ * vez a la unidad de `digits`, la mitad hacia arriba (`'half-up'`), por
+ * debajo (`'floor'`) o por encima (`'ceil'`), en enteros de céntimos: sin redondeos intermedios ni
  * deriva de coma flotante. Recotizar lo usa para mantener la proporción
  * precio / referencia y descuento / precio.
  */
@@ -88,7 +88,7 @@ export function scaleAmount(
   num: number,
   den: number,
   digits: RoundingDigits,
-  mode: 'half-up' | 'floor',
+  mode: 'half-up' | 'floor' | 'ceil',
 ): number {
   if (!(amount >= 0) || !(num >= 0) || !(den > 0)) {
     throw new RangeError(
@@ -103,7 +103,9 @@ export function scaleAmount(
   const units =
     mode === 'half-up'
       ? (2n * numerator + denominator) / (2n * denominator)
-      : numerator / denominator;
+      : mode === 'ceil'
+        ? (numerator + denominator - 1n) / denominator
+        : numerator / denominator;
   return unitsToAmount(units, digits);
 }
 

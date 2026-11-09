@@ -439,19 +439,69 @@ describe('Recotizar un plan (DX-379 porción B)', () => {
     expect(again).toEqual({ record: first.record, replayed: true });
   });
 
+  it('I-2: la misma clave y el mismo cuerpo en la ruta de OTRO paciente → 422, nada se devuelve ni escribe', async () => {
+    const ctx = setup();
+    await seededPlan(ctx);
+    ctx.rateSource.set(40);
+    const p = await ctx.preview.execute('p1', 'plan-1', {}, DENTIST_ACTOR);
+    const body = { previewHash: p.previewHash };
+    await ctx.apply.execute('p1', 'plan-1', body, DENTIST_ACTOR, KEY);
+    const err = await ctx.apply
+      .execute('p2', 'plan-1', body, DENTIST_ACTOR, KEY)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UnprocessableEntityException);
+    expect(ctx.repo.records).toHaveLength(1);
+  });
+
+  it('I-1: recotizar solo algunos ítems no renueva la validez del plan', async () => {
+    const ctx = setup();
+    const plan = await seededPlan(ctx);
+    ctx.rateSource.set(40);
+    const itemIds = [plan.items[0].id];
+    const p = await ctx.preview.execute(
+      'p1',
+      'plan-1',
+      { itemIds },
+      DENTIST_ACTOR,
+    );
+    expect(p).toMatchObject({
+      validityRenewed: false,
+      validity: { issuedOn: '2026-09-01', validUntil: '2026-10-01' },
+    });
+    const applied = await ctx.apply.execute(
+      'p1',
+      'plan-1',
+      { previewHash: p.previewHash, itemIds },
+      DENTIST_ACTOR,
+      KEY,
+    );
+    expect(applied.record).toMatchObject({
+      validityRenewed: false,
+      validityNote:
+        'Quedan ítems con precios anteriores: la validez no se renueva.',
+    });
+    expect(ctx.repo.plan('plan-1')).toMatchObject({
+      quoteIssuedOn: '2026-09-01',
+      quoteValidUntil: '2026-10-01',
+    });
+    expect(
+      ctx.repo.plan('plan-1').items.find((i) => i.id === itemIds[0])?.price,
+    ).not.toBe(plan.items[0].price);
+  });
+
   it('la huella de la petición no depende del orden ni de repetir ítems', () => {
-    const a = repricingRequestFingerprint('plan-1', {
+    const a = repricingRequestFingerprint('p1', 'plan-1', {
       previewHash: 'ab',
       itemIds: ['b', 'a', 'a'],
     });
     expect(
-      repricingRequestFingerprint('PLAN-1', {
+      repricingRequestFingerprint('P1', 'PLAN-1', {
         previewHash: 'AB',
         itemIds: ['a', 'b'],
       }),
     ).toBe(a);
     expect(
-      repricingRequestFingerprint('plan-1', { previewHash: 'ab' }),
+      repricingRequestFingerprint('p1', 'plan-1', { previewHash: 'ab' }),
     ).not.toBe(a);
   });
 
