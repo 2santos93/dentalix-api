@@ -191,7 +191,7 @@ export interface QuoteSourceExpiry {
 
 /**
  * DX-379 (C): ¿venció el presupuesto? Con el día civil de la sede del plan
- * (`quoteTimeZone`: la de la presentación o, sin presentar, la del
+ * (`quoteRegional`: la de la presentación o, sin presentar, la del
  * presupuesto), la misma regla que `quoteExpired` de la API (D-13). Solo un
  * borrador o un plan presentado, sin firmar y con validez guardada puede
  * estar vencido. Si la sede de la presentación no tiene zona válida, 409
@@ -209,22 +209,20 @@ export function quoteSourceExpiry(
   ) {
     return { expired: false, validUntil };
   }
-  const zone = source.plan.quoteTimeZone;
-  if (zone === null) {
-    throw locationTimeZoneRequired(
-      source.plan.presentedLocationId ?? source.location.id,
-    );
-  }
-  return { expired: isQuoteExpired(validUntil, now, zone), validUntil };
+  const { timeZone, locationId } = source.plan.quoteRegional;
+  if (timeZone === null) throw locationTimeZoneRequired(locationId);
+  return { expired: isQuoteExpired(validUntil, now, timeZone), validUntil };
 }
 
-/** Un día `YYYY-MM-DD` con el formato de la sede del presupuesto. */
+/**
+ * Un día `YYYY-MM-DD` con el formato de la sede del vencimiento (la de la
+ * presentación del plan), la misma en las tres vías de aceptación.
+ */
 export function quoteDayText(source: PlanQuoteSource, day: string): string {
-  return requireLocationFormat({
-    id: source.location.id,
-    locale: source.regional?.locale ?? null,
-    hourCycle: source.regional?.hourCycle ?? null,
-  }).civilDate(day);
+  const { locationId, locale, hourCycle } = source.plan.quoteRegional;
+  return requireLocationFormat({ id: locationId, locale, hourCycle }).civilDate(
+    day,
+  );
 }
 
 /**
@@ -719,6 +717,10 @@ export class PreviewAcceptanceRepricingUseCase {
       actorUserId: actor.userId,
       decide: (source, subject) => {
         assertSignable(source);
+        // M-2: como la firma con REPRICE, solo un presupuesto vencido.
+        if (!quoteSourceExpiry(source, at).expired) {
+          throw new BadRequestException(EXPIRED_NOT_EXPIRED_MESSAGE);
+        }
         return this.repricer.decide(context, subject, null);
       },
     });

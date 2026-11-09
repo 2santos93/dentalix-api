@@ -863,7 +863,12 @@ function presentedBudget(ctx: Ctx, planId = 'plan-1') {
         quoteIssuedOn: null,
         quoteValidUntil: null,
         presentedLocationId: null,
-        quoteTimeZone: 'America/Caracas',
+        quoteRegional: {
+          locationId: 'loc-1',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h12',
+        },
       },
     }),
     location: { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' },

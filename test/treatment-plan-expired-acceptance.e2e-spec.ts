@@ -436,6 +436,13 @@ describe('Aceptar un presupuesto vencido (e2e, DX-379 porción C)', () => {
       expired: { mode: 'ORIGINAL_PRICES', reason: 'LOYALTY' },
     }).expect(400);
     expect(res.body).toMatchObject({ message: EXPIRED_NOT_EXPIRED_MESSAGE });
+    // M-2: la vista previa de «actualizar los precios» tampoco.
+    const preview = await as(clinicA, tokens.DENTIST)
+      .post(`${planPath(planId)}/acceptance/reprice-preview`)
+      .expect(400);
+    expect(preview.body).toMatchObject({
+      message: EXPIRED_NOT_EXPIRED_MESSAGE,
+    });
     expect(
       await raw.treatmentPlanItem.count({
         where: { id: { in: items }, status: 'PROPOSED' },

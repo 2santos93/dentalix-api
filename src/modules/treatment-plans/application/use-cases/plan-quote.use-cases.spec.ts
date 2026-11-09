@@ -402,7 +402,12 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           quoteIssuedOn: null,
           quoteValidUntil: null,
           presentedLocationId: null,
-          quoteTimeZone: 'America/Caracas',
+          quoteRegional: {
+            locationId: 'loc-1',
+            timeZone: 'America/Caracas',
+            locale: 'es-VE',
+            hourCycle: 'h12',
+          },
         },
         acceptance: {
           content: v1,

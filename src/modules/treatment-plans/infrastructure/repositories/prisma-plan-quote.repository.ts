@@ -19,10 +19,8 @@ import {
   DOCUMENT_REGIONAL_SELECT,
   documentRegional,
 } from '../../../../shared/locations/document-regional';
-import {
-  loadLocationZones,
-  resolveLocationTimeZones,
-} from '../../../../shared/locations/location-time-zone';
+import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { isValidTimeZone } from '../../../../shared/time/civil-day';
 import type {
   AcceptPlanOutcome,
   AcceptReprice,
@@ -54,6 +52,12 @@ export function civilDayOf(value: Date | null): string | null {
 const UNKNOWN_PROFESSIONAL = 'Profesional';
 
 class AlreadyAccepted extends Error {}
+
+/**
+ * El plan desapareció DESPUÉS de escribir algo (recotización o aceptación):
+ * se lanza para que la transacción se deshaga y se responde 404.
+ */
+class VanishedAfterWrite extends Error {}
 
 /** Deshace la transacción de la vista previa llevándose su resultado. */
 class DryRun extends Error {
@@ -158,7 +162,7 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
             source,
             reprice,
           });
-          if (!done) return { kind: 'NOT_FOUND' } as const;
+          if (!done) throw new VanishedAfterWrite();
           signing = done.source;
           repriced = { repricingId: done.record.id, before: source };
         }
@@ -221,11 +225,12 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           planId,
           locationId,
         );
-        if (!accepted) return { kind: 'NOT_FOUND' } as const;
+        if (!accepted) throw new VanishedAfterWrite();
         return { kind: 'ACCEPTED', source: accepted } as const;
       });
     } catch (error) {
       if (error instanceof AlreadyAccepted) return { kind: 'ALREADY_ACCEPTED' };
+      if (error instanceof VanishedAfterWrite) return { kind: 'NOT_FOUND' };
       throw error;
     }
   }
@@ -490,15 +495,19 @@ export async function readPlanQuoteSource(
   ]);
   const labels = new Map(catalog.map((c) => [c.id, c.labelEs]));
   // DX-379 (C): el vencimiento se decide con el día de la sede de la
-  // presentación (como `quoteExpired`, D-13); sin presentar, con el de esta.
-  // Tolerante: una sede de presentación sin zona válida da null.
+  // presentación (como `quoteExpired`, D-13) y su fecha se escribe con el
+  // formato de esa misma sede; sin presentar, con los de esta. Tolerante: una
+  // sede de presentación sin zona válida da zona null.
   const presented = plan.presentedLocationId;
-  const quoteTimeZone =
+  const quoteLocation =
     presented === null || presented === locationId
-      ? zoneOf(locationId)
-      : ((await loadLocationZones(tx, tenantId, [presented])).configured.get(
-          presented,
-        ) ?? null);
+      ? {
+          id: locationId,
+          timeZone: zoneOf(locationId),
+          locale: location.locale,
+          hourCycle: location.hourCycle,
+        }
+      : await presentationRegional(tx, tenantId, presented);
   // DX-105: el pagador de cada convenio, una consulta por los ids distintos
   // (no una por ítem). El nombre del convenio es el de la foto del ítem; el
   // pagador se lee vivo porque la foto no lo guarda.
@@ -545,7 +554,12 @@ export async function readPlanQuoteSource(
       quoteIssuedOn: civilDayOf(plan.quoteIssuedOn),
       quoteValidUntil: civilDayOf(plan.quoteValidUntil),
       presentedLocationId: plan.presentedLocationId,
-      quoteTimeZone,
+      quoteRegional: {
+        locationId: quoteLocation.id,
+        timeZone: quoteLocation.timeZone,
+        locale: quoteLocation.locale,
+        hourCycle: quoteLocation.hourCycle,
+      },
     },
     items: plan.items.map((item) => ({
       id: item.id,
@@ -610,6 +624,33 @@ export async function readPlanQuoteSource(
           },
         }
       : null,
+  };
+}
+
+/**
+ * DX-379 (C): zona (válida o null), formato y reloj de la sede de la
+ * presentación de un plan, bajo la RLS de la clínica.
+ */
+async function presentationRegional(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  locationId: string,
+): Promise<{
+  id: string;
+  timeZone: string | null;
+  locale: string | null;
+  hourCycle: string | null;
+}> {
+  const row = await tx.location.findFirst({
+    where: { id: locationId, tenantId },
+    select: { timeZone: true, locale: true, hourCycle: true },
+  });
+  const zone = row?.timeZone ?? null;
+  return {
+    id: locationId,
+    timeZone: zone && isValidTimeZone(zone) ? zone : null,
+    locale: row?.locale ?? null,
+    hourCycle: row?.hourCycle ?? null,
   };
 }
 

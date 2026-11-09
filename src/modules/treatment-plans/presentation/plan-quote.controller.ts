@@ -181,7 +181,7 @@ export class PlanQuoteController {
   })
   @ApiConflictResponse({
     description:
-      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash). DX-379 (C): `code: QUOTE_EXPIRED` («El presupuesto venció el {fecha}. Actualiza los precios o acepta con los precios originales indicando el motivo.», con `quoteValidUntil`) si está vencido y no llega `expired`; con REPRICE, `REPRICE_PREVIEW_STALE` (los precios vigentes cambiaron desde la vista previa), `REPRICE_INCOMPLETE` (algún propuesto sin precio vigente o sin tasa), `REPRICE_NOTHING_TO_APPLY` o el plan no se recotiza (abonos, plan de cuotas, saldo a favor); nada se escribe',
+      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash). DX-379 (C): la sede de la presentación del plan sin zona válida → `LOCATION_TIMEZONE_REQUIRED` (también con un presupuesto no vencido si tiene validez guardada); `code: QUOTE_EXPIRED` («El presupuesto venció el {fecha}. Actualiza los precios o acepta con los precios originales indicando el motivo.», con `quoteValidUntil`) si está vencido y no llega `expired`; con REPRICE, `REPRICE_PREVIEW_STALE` (los precios vigentes cambiaron desde la vista previa), `REPRICE_INCOMPLETE` (algún propuesto sin precio vigente o sin tasa), `REPRICE_NOTHING_TO_APPLY` o el plan no se recotiza (abonos, plan de cuotas, saldo a favor); nada se escribe',
   })
   @ApiForbiddenResponse({
     description:
@@ -252,7 +252,10 @@ export class PlanQuoteController {
     description:
       'Ya firmado, el plan no admite aceptarse o no se recotiza (aceptado, cerrado, con abonos, plan de cuotas o saldo a favor); `REPRICE_INCOMPLETE`: algún propuesto sin precio vigente o sin tasa de hoy (la validez no se renovaría); `REPRICE_NOTHING_TO_APPLY`; `LOCATION_TIMEZONE_REQUIRED`',
   })
-  @ApiBadRequestResponse({ description: 'El plan no tiene ítems' })
+  @ApiBadRequestResponse({
+    description:
+      'El plan no tiene ítems, o el presupuesto no está vencido («El presupuesto no está vencido: acéptalo sin elegir cómo.», como la firma)',
+  })
   @ApiForbiddenResponse({
     description:
       'Solo odontólogo y ADMIN aceptan (DX-040); SEC-041: el redondeo sube el % efectivo por encima del tope de quien firma',

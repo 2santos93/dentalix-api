@@ -81,12 +81,18 @@ export interface PlanQuoteSource {
     /** Sede de la presentación (DX-040); null sin presentar. */
     presentedLocationId: string | null;
     /**
-     * DX-379 (C): zona con la que se decide si el presupuesto venció (D-13):
-     * la de la sede de la presentación o, sin presentar, la de este
-     * presupuesto. `null` si la sede de la presentación no tiene una zona
-     * válida (quien decide da el 409 de zona).
+     * DX-379 (C): la sede con la que se decide si el presupuesto venció y se
+     * escribe su fecha (D-13): la de la presentación o, sin presentar, la de
+     * este presupuesto. `timeZone` null si la sede de la presentación no
+     * tiene una zona válida (quien decide da el 409 de zona); `locale` y
+     * `hourCycle` crudos (pueden faltar).
      */
-    quoteTimeZone: string | null;
+    quoteRegional: {
+      locationId: string;
+      timeZone: string | null;
+      locale: string | null;
+      hourCycle: string | null;
+    };
   };
   /** Ítems vivos, en orden de alta. */
   items: QuoteSourceItem[];

@@ -251,6 +251,30 @@ describe('AcceptTreatmentPlanUseCase: presupuesto vencido (DX-379 C)', () => {
     );
   });
 
+  it('M-7: la fecha del 409 sale con el formato de la sede de la presentación, no con el de la firma', async () => {
+    const source = presented();
+    const ctx = setup({
+      ...source,
+      plan: {
+        ...source.plan,
+        presentedLocationId: 'loc-2',
+        quoteRegional: {
+          locationId: 'loc-2',
+          timeZone: 'America/Caracas',
+          locale: 'en-US',
+          hourCycle: 'h12',
+        },
+      },
+    });
+    const error = await rejection(
+      ctx.accept.execute('patient-1', 'plan-1', await input(ctx), META),
+    );
+    expect(error.getResponse()).toMatchObject({
+      code: QUOTE_EXPIRED_CODE,
+      message: expect.stringContaining('venció el 10/01/2026.') as string,
+    });
+  });
+
   it('se decide con el día de la sede del plan, no con UTC', async () => {
     // 17/10 01:00 UTC = 16/10 21:00 en Caracas: el 16/10 todavía vale.
     const ctx = setup(presented('2026-10-16'));
@@ -278,7 +302,10 @@ describe('AcceptTreatmentPlanUseCase: presupuesto vencido (DX-379 C)', () => {
     const source = presented();
     const ctx = setup({
       ...source,
-      plan: { ...source.plan, quoteTimeZone: null },
+      plan: {
+        ...source.plan,
+        quoteRegional: { ...source.plan.quoteRegional, timeZone: null },
+      },
     });
     const error = await rejection(
       ctx.accept.execute('patient-1', 'plan-1', await input(ctx), META),
@@ -382,6 +409,18 @@ describe('AcceptTreatmentPlanUseCase: presupuesto vencido (DX-379 C)', () => {
       expect(quote.acceptance).toBeNull();
       expect(ctx.repo.repricings).toHaveLength(0);
       expect(ctx.repo.sources.get('plan-1')!.items[0].price).toBe(3500000);
+    });
+
+    it('M-2: la vista previa de un presupuesto NO vencido → 400 como la firma', async () => {
+      const ctx = setup(presented('2026-10-20'));
+      const error = await rejection(
+        ctx.preview.execute('patient-1', 'plan-1', {
+          userId: 'user-1',
+          role: ClinicRole.DENTIST,
+        }),
+      );
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.message).toBe(EXPIRED_NOT_EXPIRED_MESSAGE);
     });
 
     it('con la huella y el contentHash de la vista previa: recotiza y firma el presupuesto nuevo en una sola operación', async () => {

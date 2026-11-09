@@ -27,6 +27,7 @@ import {
   PLAN_NOT_FOUND_MESSAGE,
   PLAN_QUOTE_COMPOSITION,
   firstIssueValidity,
+  quoteDayText,
   quoteSourceExpiry,
   quoteValidityOf,
 } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
@@ -498,9 +499,7 @@ export class CreateSignatureRequestUseCase {
     if (expiry.expired && expiry.validUntil !== null) {
       throw quoteExpiredConflict(
         expiry.validUntil,
-        quoteExpiredRemoteMessage(
-          requireLocationFormat(budget.location).civilDate(expiry.validUntil),
-        ),
+        quoteExpiredRemoteMessage(quoteDayText(quote, expiry.validUntil)),
       );
     }
     // DX-524: el nombre de la sede del plan, como en el presupuesto.

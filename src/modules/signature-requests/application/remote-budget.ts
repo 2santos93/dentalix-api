@@ -74,7 +74,7 @@ export function budgetStillMatches(
     isQuoteExpired(
       sent.validUntil,
       now,
-      quote.plan.quoteTimeZone ?? quote.location.timeZone,
+      quote.plan.quoteRegional.timeZone ?? quote.location.timeZone,
     )
   ) {
     return false;
