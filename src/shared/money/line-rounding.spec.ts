@@ -7,6 +7,7 @@ import {
   percentOfCentsInUnits,
   roundToDigits,
   roundingDigits,
+  scaleAmount,
   unitCents,
   unitsToAmount,
 } from './line-rounding';
@@ -101,5 +102,45 @@ describe('fitsRoundingDigits (DX-488, antes en payment-adjustments)', () => {
     expect(fitsRoundingDigits(12.3, 1)).toBe(true);
     expect(fitsRoundingDigits(12.34, 1)).toBe(false);
     expect(fitsRoundingDigits(0.1 + 0.2, 2)).toBe(true);
+  });
+});
+
+describe('scaleAmount (DX-379: recotizar en proporción)', () => {
+  it('amount × num ÷ den, redondeado UNA vez a la unidad, la mitad hacia arriba', () => {
+    // 85 de 100 → sobre 250 = 212,50
+    expect(scaleAmount(250, 85, 100, 2, 'half-up')).toBe(212.5);
+    // 1/3 de 100 = 33,333… → 33,33
+    expect(scaleAmount(100, 1, 3, 2, 'half-up')).toBe(33.33);
+    // 2/3 de 100 = 66,666… → 66,67
+    expect(scaleAmount(100, 2, 3, 2, 'half-up')).toBe(66.67);
+    // Sin decimales (moneda de 0 dígitos): 1 234,5 → 1 235
+    expect(scaleAmount(2469, 1, 2, 0, 'half-up')).toBe(1235);
+    expect(scaleAmount(2469, 1, 2, 0, 'floor')).toBe(1234);
+  });
+
+  it('sin deriva de coma flotante (10,05 × 1 ÷ 1 = 10,05)', () => {
+    expect(scaleAmount(10.05, 1, 1, 2, 'half-up')).toBe(10.05);
+    expect(scaleAmount(0.1, 3, 1, 2, 'half-up')).toBe(0.3);
+  });
+
+  it('rechaza un denominador 0 y los negativos', () => {
+    expect(() => scaleAmount(100, 1, 0, 2, 'half-up')).toThrow(RangeError);
+    expect(() => scaleAmount(-1, 1, 1, 2, 'half-up')).toThrow(RangeError);
+    expect(() => scaleAmount(1, -1, 1, 2, 'half-up')).toThrow(RangeError);
+  });
+
+  it('nunca supera amount cuando num ≤ den (floor)', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 10_000_000 }),
+        fc.integer({ min: 0, max: 100_000 }),
+        fc.integer({ min: 1, max: 100_000 }),
+        (cents, a, b) => {
+          const [num, den] = a <= b ? [a, b] : [b, a || 1];
+          const amount = cents / 100;
+          return scaleAmount(amount, num, den, 2, 'floor') <= amount;
+        },
+      ),
+    );
   });
 });
