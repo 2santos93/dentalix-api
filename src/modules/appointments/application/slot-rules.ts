@@ -78,6 +78,14 @@ export interface SlotRulesInput {
   actorRole: ClinicRole | null;
   /** DX-446: «Mover igualmente» a un hueco reservado. */
   overrideReason?: string;
+  /**
+   * Revisar el profesional aunque no cambie: la cita sale de CANCELLED o
+   * NO_SHOW (reactivar y mover a la vez). Mientras estuvo cancelada pudo
+   * dejar la clínica, la sede o su rol; sin esto, moverla 5 minutos al
+   * reactivarla se saltaría esa comprobación. Al reactivar sin mover se
+   * revisa siempre.
+   */
+  revalidateProvider?: boolean;
 }
 
 export interface SlotRulesResult extends Warnings {
@@ -114,11 +122,13 @@ export function appointmentPastConflict(): ConflictException {
  *
  * 1. SEC-014: la sede desactivada no recibe horas.
  * 2. (mover) fin > inicio; con el paciente en la clínica, el mismo día civil.
- * 3. Pasado: mover a una hora que ya empezó → 400; reactivar una cita que ya
- *    terminó (`end <= reloj`) → 409 `APPOINTMENT_PAST`. Reactivar mientras
+ * 3. Pasado (reloj inyectable `deps.clock`): mover a una hora que ya empezó
+ *    → 400; reactivar una cita que ya terminó (`end <= reloj`) → 409
+ *    `APPOINTMENT_PAST`. Reactivar mientras
  *    dura (llegó tarde tras «No asistió», urgencia en curso) sí se puede.
  * 4. Profesional de la clínica, que atiende en la sede y atiende pacientes:
- *    al mover solo si cambia; al reactivar siempre (pudo cambiar desde que se
+ *    al mover solo si cambia (o si la cita sale de CANCELLED/NO_SHOW,
+ *    `revalidateProvider`); al reactivar siempre (pudo cambiar desde que se
  *    canceló).
  * 5. Horario de la sede (422).
  * 6. Horario del profesional: aviso, o 409 en modo estricto.
@@ -162,15 +172,20 @@ export async function checkSlotRules(
     // No re-agendar hacia el pasado. Deliberadamente SOLO al mover o
     // reactivar: una cita que ya pasó se sigue pudiendo completar, cancelar
     // o editarle notas/motivo — bloquear eso haría imposible cerrar la agenda
-    // del día.
-    if (start.getTime() < Date.now()) {
+    // del día. Con el reloj inyectable del caso de uso, el mismo que decide
+    // «ya pasó» al reactivar (en producción, la hora del sistema).
+    if (start.getTime() < deps.clock().getTime()) {
       throw new BadRequestException('No se puede reagendar una cita al pasado');
     }
   } else if (end.getTime() <= deps.clock().getTime()) {
     throw appointmentPastConflict();
   }
 
-  if (reactivating || providerId !== existing.providerId) {
+  if (
+    reactivating ||
+    input.revalidateProvider === true ||
+    providerId !== existing.providerId
+  ) {
     const provider = await deps.staff.findById(providerId);
     if (!provider) {
       throw new NotFoundException('Profesional no encontrado');

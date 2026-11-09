@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -24,6 +25,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { LOCATION_INACTIVE_CODE } from '../../../../shared/tenancy/active-location';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 import { NOT_ATTENDING_MESSAGE } from '../../../staff/domain/attending';
+import { RESERVED_OVERRIDE_FORBIDDEN_MESSAGE } from '../../../schedule-blocks/domain/reserved-slot';
 import { OVERBOOK_SLOT_TAKEN_CODE } from '../../domain/walk-in';
 import { APPOINTMENT_PAST_CODE, APPOINTMENT_PAST_MESSAGE } from '../slot-rules';
 
@@ -495,6 +497,106 @@ describe('UpdateAppointmentUseCase · reactivar con las reglas de mover (DX-267-
           ...SCHEDULED,
           start: new Date('2020-01-01T14:00:00.000Z'),
           end: new Date('2020-01-01T14:30:00.000Z'),
+        },
+        ctx(),
+      ),
+    );
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as Error).message).toBe(
+      'No se puede reagendar una cita al pasado',
+    );
+  });
+  it('orden: una cita pasada con el profesional ya retirado da APPOINTMENT_PAST, no 404', async () => {
+    const { uc, cancelled } = setup({
+      now: new Date(END.getTime() + MIN),
+      members: [],
+    });
+    const a = cancelled();
+    const error = await rejection(uc.execute(a.id, SCHEDULED, ctx()));
+    expect(body(error)).toEqual(
+      expect.objectContaining({ code: APPOINTMENT_PAST_CODE }),
+    );
+  });
+
+  it('orden: con la sede desactivada, SEC-014 va antes que «ya pasó»', async () => {
+    const { uc, cancelled } = setup({
+      now: new Date(END.getTime() + MIN),
+      locationActive: false,
+    });
+    const a = cancelled();
+    const error = await rejection(uc.execute(a.id, SCHEDULED, ctx()));
+    expect(body(error)).toEqual(
+      expect.objectContaining({ code: LOCATION_INACTIVE_CODE }),
+    );
+  });
+
+  it('`overrideReason` de recepción al reactivar: 403, aunque no haya hueco reservado', async () => {
+    const { uc, cancelled, repo } = setup();
+    const a = cancelled();
+    const error = await rejection(
+      uc.execute(
+        a.id,
+        { ...SCHEDULED, overrideReason: 'Paciente prioritario' },
+        ctx(ClinicRole.RECEPTION),
+      ),
+    );
+    expect(error).toBeInstanceOf(ForbiddenException);
+    expect((error as Error).message).toBe(RESERVED_OVERRIDE_FORBIDDEN_MESSAGE);
+    expect((await repo.findById(a.id))!.status).toBe(
+      AppointmentStatus.CANCELLED,
+    );
+  });
+
+  describe('reactivar y mover a la vez revisa el profesional aunque no cambie', () => {
+    const moved = {
+      ...SCHEDULED,
+      start: new Date(START.getTime() + 5 * MIN),
+      end: new Date(END.getTime() + 5 * MIN),
+    };
+
+    it('ya no atiende en la sede: 400', async () => {
+      const { uc, cancelled } = setup({
+        members: [
+          { userId: 'prov1', role: ClinicRole.DENTIST, locationIds: ['loc2'] },
+        ],
+      });
+      const a = cancelled();
+      const error = await rejection(uc.execute(a.id, moved, ctx()));
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toBe(PROVIDER_NOT_AT_LOCATION_MESSAGE);
+    });
+
+    it('ya no es de la clínica (desde NO_SHOW): 404', async () => {
+      const { uc, cancelled } = setup({ members: [] });
+      const a = cancelled({ status: AppointmentStatus.NO_SHOW });
+      const error = await rejection(uc.execute(a.id, moved, ctx()));
+      expect(error).toBeInstanceOf(NotFoundException);
+    });
+
+    it('una cita viva que solo se mueve no vuelve a mirar al profesional (como siempre)', async () => {
+      const { uc, cancelled } = setup({ members: [] });
+      const a = cancelled({ status: AppointmentStatus.SCHEDULED });
+      const result = await uc.execute(
+        a.id,
+        { start: moved.start, end: moved.end },
+        ctx(),
+      );
+      expect(result.start).toEqual(moved.start);
+    });
+  });
+
+  it('mover usa el reloj inyectado para «al pasado»', async () => {
+    // El reloj va un día por delante de la cita: moverla 5 min es «al pasado».
+    const { uc, cancelled } = setup({
+      now: new Date(END.getTime() + 24 * 60 * MIN),
+    });
+    const a = cancelled({ status: AppointmentStatus.SCHEDULED });
+    const error = await rejection(
+      uc.execute(
+        a.id,
+        {
+          start: new Date(START.getTime() + 5 * MIN),
+          end: new Date(END.getTime() + 5 * MIN),
         },
         ctx(),
       ),

@@ -425,11 +425,11 @@ export class UpdateAppointmentUseCase {
     // «moverla a donde estaba»: pasa por las MISMAS reglas que mover (más
     // «ya pasó»). Si además se mueve, ya va por mover con la hora nueva.
     // `→ COMPLETED` (corregir el registro) y CANCELLED ↔ NO_SHOW no.
-    const reactivatesSlot =
-      !isReschedule &&
+    const leavesWaitlistStatus =
       WAITLIST_STATUSES.has(existing.status) &&
       (nextStatus === AppointmentStatus.SCHEDULED ||
         nextStatus === AppointmentStatus.CONFIRMED);
+    const reactivatesSlot = !isReschedule && leavesWaitlistStatus;
     if (isReschedule || reactivatesSlot) {
       ({ reservedOverride, ...warnings } = await checkSlotRules(
         this.slotRulesDeps(),
@@ -441,6 +441,8 @@ export class UpdateAppointmentUseCase {
           end: patch.end ?? existing.end,
           actorRole: auditContext?.actor.role ?? null,
           overrideReason,
+          // Reactivar y mover a la vez: el profesional se revisa igual.
+          revalidateProvider: leavesWaitlistStatus,
         },
       ));
     }
