@@ -662,6 +662,10 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         expiredReason: null,
         expiredNote: null,
         repricingId: null,
+        // DX-417: aceptado entero.
+        pendingPlanId: null,
+        pendingItemIds: null,
+        pendingTotal: null,
       });
       expect(
         new Date(quote.acceptance!.acceptedAt).getTime(),

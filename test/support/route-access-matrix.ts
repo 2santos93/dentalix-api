@@ -466,6 +466,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // vencido: quien lo acepta.
   'POST /patients/:patientId/treatment-plans/:planId/acceptance/reprice-preview':
     PLAN_DECIDERS,
+  // DX-417: la vista previa de aceptar en parte: quien lo acepta.
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview':
+    PLAN_DECIDERS,
   // DX-379 (B): «Actualizar precios» (recotizar): los que editan los ítems
   // del plan (CLINICAL); el tope de descuento por rol lo aplica el caso de uso.
   'POST /patients/:patientId/treatment-plans/:planId/reprice/preview': CLINICAL,

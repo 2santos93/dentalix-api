@@ -312,6 +312,10 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       expiredReason: null,
       expiredNote: null,
       repricingId: null,
+      // DX-417: aceptado entero.
+      pendingPlanId: null,
+      pendingItemIds: null,
+      pendingTotal: null,
     });
   });
 

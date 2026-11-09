@@ -1,15 +1,23 @@
 import { EMPTY_CLINIC_FISCAL } from '../../../../../shared/clinic/clinic-fiscal';
-import { TreatmentPlanStatus } from '@prisma/client';
+import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import type { QuoteValidity } from '../../../domain/quote-validity';
 import { NO_EXPIRED_ACCEPTANCE } from '../../../domain/expired-quote-acceptance';
 import type {
+  AcceptPartial,
   AcceptPlanOutcome,
   AcceptReprice,
   AcceptRepriced,
   NewPlanAcceptance,
+  PartialAcceptanceRead,
   PlanQuoteRepository,
   PlanQuoteSource,
 } from '../../../domain/ports/plan-quote-repository.port';
+import type { PlanFacts } from '../../../domain/ports/treatment-plan-repository.port';
+import {
+  splitItems,
+  type PartialPlanState,
+  type PartialSplit,
+} from '../../../domain/partial-acceptance';
 import type { RepricingSubject } from '../../../domain/ports/plan-repricing-repository.port';
 import type { Repricing } from '../../repricing';
 
@@ -107,6 +115,41 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
     this.sources.set(source.plan.id, source);
   }
 
+  /** DX-417: abonos, cuotas y saldo a favor del plan (por defecto, nada). */
+  facts: PlanFacts = {
+    hasLivePayments: false,
+    hasActivePaymentPlan: false,
+    hasCreditEntries: false,
+  };
+  /** DX-417: estado de cada ítem (por defecto, PROPOSED). */
+  readonly itemStatuses = new Map<string, TreatmentPlanItemStatus>();
+  /** DX-417: los planes pendientes creados al aceptar en parte. */
+  readonly pendingPlans: PlanQuoteSource[] = [];
+  /** Romper la red de `accept` parcial (prueba): cambia el releído. */
+  tamperAfterMove?: (source: PlanQuoteSource) => PlanQuoteSource;
+
+  private stateOf(source: PlanQuoteSource): PartialPlanState {
+    return {
+      status: source.plan.status,
+      signed: source.acceptance !== null,
+      facts: this.facts,
+      items: source.items.map((i) => ({
+        id: i.id,
+        status: this.itemStatuses.get(i.id) ?? TreatmentPlanItemStatus.PROPOSED,
+      })),
+    };
+  }
+
+  loadPartial(
+    patientId: string,
+    planId: string,
+  ): Promise<PartialAcceptanceRead | null> {
+    const source = this.find(patientId, planId);
+    return Promise.resolve(
+      source ? { source, state: this.stateOf(source) } : null,
+    );
+  }
+
   private find(patientId: string, planId: string): PlanQuoteSource | null {
     const source = this.sources.get(planId);
     return source && source.plan.patientId === patientId ? source : null;
@@ -168,8 +211,10 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
     decide: (
       source: PlanQuoteSource,
       repriced: AcceptRepriced | null,
+      split: PartialSplit | null,
     ) => NewPlanAcceptance,
     reprice?: AcceptReprice,
+    partial?: AcceptPartial,
   ): Promise<AcceptPlanOutcome> {
     const found = this.find(patientId, planId);
     if (!found) return Promise.resolve({ kind: 'NOT_FOUND' });
@@ -178,6 +223,8 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
     let repriced: AcceptRepriced | null = null;
     let repricing: Repricing | null = null;
     let row: NewPlanAcceptance;
+    let split: PartialSplit | null = null;
+    let pending: PlanQuoteSource | null = null;
     try {
       if (reprice) {
         if (!this.subjectFor) throw new Error('subjectFor sin configurar');
@@ -188,7 +235,29 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
           before: found,
         };
       }
-      row = decide(source, repriced);
+      if (partial) split = partial.decide(source, this.stateOf(source));
+      row = decide(source, repriced, split);
+      if (split && partial) {
+        // Como el de Prisma: mueve los pendientes a un plan nuevo y exige el
+        // mismo presupuesto al releer lo que queda.
+        const parts = splitItems(source.items, split);
+        pending = {
+          ...source,
+          plan: {
+            ...source.plan,
+            id: `pending-${this.pendingPlans.length + 1}`,
+            status: TreatmentPlanStatus.PRESENTED,
+          },
+          items: parts.pending,
+          visitOrganization: undefined,
+          acceptance: null,
+        };
+        source = { ...source, items: parts.accepted };
+        if (this.tamperAfterMove) source = this.tamperAfterMove(source);
+        if (partial.contentHashOf(source) !== row.contentHash) {
+          throw new Error('el presupuesto releído no es el que se firma');
+        }
+      }
     } catch (error) {
       return Promise.reject(
         error instanceof Error ? error : new Error('decide'),
@@ -196,6 +265,10 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
     }
     if (source.acceptance) return Promise.resolve({ kind: 'ALREADY_ACCEPTED' });
     if (repricing) this.repricings.push(repricing);
+    if (pending) {
+      this.pendingPlans.push(pending);
+      this.sources.set(pending.plan.id, pending);
+    }
     this.inserted.push(row);
     const accepted: PlanQuoteSource = {
       ...source,
@@ -217,6 +290,10 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
           ...NO_EXPIRED_ACCEPTANCE,
           quoteValidUntil: source.plan.quoteValidUntil,
         },
+        partial:
+          pending && row.partial
+            ? { pendingPlanId: pending.plan.id, ...row.partial }
+            : null,
       },
     };
     this.sources.set(planId, accepted);
@@ -228,15 +305,21 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
     patientId: string,
     planId: string,
     reprice: AcceptReprice,
-  ): Promise<{ source: PlanQuoteSource; repricing: Repricing } | null> {
+  ): Promise<{
+    source: PlanQuoteSource;
+    repricing: Repricing;
+    state: PartialPlanState;
+  } | null> {
     const found = this.find(patientId, planId);
     if (!found) return Promise.resolve(null);
     try {
       if (!this.subjectFor) throw new Error('subjectFor sin configurar');
       const repricing = reprice.decide(found, this.subjectFor(found));
+      const source = this.repriced(found, repricing);
       return Promise.resolve({
-        source: this.repriced(found, repricing),
+        source,
         repricing,
+        state: this.stateOf(source),
       });
     } catch (error) {
       return Promise.reject(

@@ -232,20 +232,6 @@ export function buildQuoteContent(
     listPriceCurrency:
       composition === 'current' ? item.listPriceCurrency : null,
   }));
-  const gross = items.reduce((sum, i) => sum + toCents(i.unitPrice), 0);
-  const discount = items.reduce((sum, i) => sum + toCents(i.discount), 0);
-  const saving = source.items.reduce(
-    (sum, i) =>
-      savesByAgreement(i, source.currency, composition)
-        ? sum +
-          Math.max(
-            0,
-            toCents(i.basePrice) -
-              Math.max(toCents(i.price), toCents(i.referencePrice)),
-          )
-        : sum,
-    0,
-  );
   const clinicFiscal = source.clinicFiscal
     ? clinicFiscalToFreeze(source.clinicFiscal)
     : null;
@@ -264,15 +250,41 @@ export function buildQuoteContent(
     validUntil: validity.validUntil,
     validityDays: quoteValidityDays(validity),
     items,
-    totals: [
-      {
-        currency: source.currency,
-        gross: fromCents(gross),
-        discount: fromCents(discount),
-        net: fromCents(linesTotalCents(source.items)),
-        agreementSaving: fromCents(saving),
-      },
-    ],
+    totals: [quoteTotal(source.items, source.currency, composition)],
+  };
+}
+
+/**
+ * La fila de totales de unos ítems (en céntimos enteros, sumados ítem a
+ * ítem): la del presupuesto y, en DX-417, la de cada parte de una aceptación
+ * parcial. Como todo es por ítem, el total de dos partes es la suma de sus
+ * totales (sin descuento, redondeo ni ajuste a nivel de plan).
+ */
+export function quoteTotal(
+  items: readonly QuoteSourceItem[],
+  currency: string,
+  composition: QuoteComposition = 'current',
+): QuoteTotal {
+  const gross = items.reduce((sum, i) => sum + toCents(i.price), 0);
+  const discount = items.reduce((sum, i) => sum + toCents(i.discount), 0);
+  const saving = items.reduce(
+    (sum, i) =>
+      savesByAgreement(i, currency, composition)
+        ? sum +
+          Math.max(
+            0,
+            toCents(i.basePrice) -
+              Math.max(toCents(i.price), toCents(i.referencePrice)),
+          )
+        : sum,
+    0,
+  );
+  return {
+    currency,
+    gross: fromCents(gross),
+    discount: fromCents(discount),
+    net: fromCents(linesTotalCents(items)),
+    agreementSaving: fromCents(saving),
   };
 }
 
