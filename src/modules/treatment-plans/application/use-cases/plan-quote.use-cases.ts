@@ -16,7 +16,6 @@ import {
   EXPIRED_NOT_EXPIRED_MESSAGE,
   ExpiredAcceptanceInputError,
   NO_EXPIRED_ACCEPTANCE,
-  QUOTE_EXPIRED_CODE,
   parseExpiredAcceptance,
   quoteExpiredAcceptMessage,
   type ExpiredAcceptanceChoice,
@@ -27,6 +26,7 @@ import { locationTimeZoneRequired } from '../../../../shared/locations/location-
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import type { Repricing } from '../repricing';
 import { AcceptanceRepricer } from './plan-repricing.use-cases';
+import { quoteExpiredConflict } from '../quote-expiry';
 import {
   buildQuoteContent,
   computeAcceptanceHash,
@@ -225,20 +225,6 @@ export function quoteDayText(source: PlanQuoteSource, day: string): string {
     locale: source.regional?.locale ?? null,
     hourCycle: source.regional?.hourCycle ?? null,
   }).civilDate(day);
-}
-
-/** 409 `QUOTE_EXPIRED` con el texto y el último día válido. */
-export function quoteExpiredConflict(
-  validUntil: string,
-  message: string,
-): ConflictException {
-  return new ConflictException({
-    statusCode: 409,
-    error: 'Conflict',
-    code: QUOTE_EXPIRED_CODE,
-    message,
-    quoteValidUntil: validUntil,
-  });
 }
 
 /**
