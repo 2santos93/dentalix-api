@@ -15,10 +15,8 @@ import {
   PRICING_SOURCE,
   type PricingSource,
 } from '../../domain/ports/pricing-source.port';
-import {
-  PRICE_REQUIRED_MESSAGE,
-  resolveItemPrice,
-} from '../../domain/pricing/resolve-item-price';
+import { PRICE_REQUIRED_MESSAGE } from '../../domain/pricing/resolve-item-price';
+import { resolveCurrentReference } from '../current-reference';
 import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
 import { assertItemsEditable } from './signed-plan-lock';
 import {
@@ -36,11 +34,7 @@ import {
   REFERENCE_RATE_SOURCE,
   type ReferenceRateSource,
 } from '../../domain/ports/reference-rate-source.port';
-import {
-  freezeWithRate,
-  referenceRateFor,
-  withAgreementBase,
-} from './reference-rate';
+import { freezeWithRate, withAgreementBase } from './reference-rate';
 
 /** 409 si la moneda del plan cambió entre la resolución del precio y el alta. */
 export const PLAN_CURRENCY_CHANGED_MESSAGE =
@@ -99,32 +93,26 @@ export class AddTreatmentPlanItemUseCase {
     // `catalogItemId` must resolve to a real, active-tenant catalog item —
     // a cross-tenant or made-up id must never silently succeed (that would
     // let an item reference a procedure the tenant can't see/bill).
-    const context = await this.pricing.contextFor(
+    // DX-379 (D.1): la misma resolución que `price-quote` y la recotización.
+    const currentReference = await resolveCurrentReference(
+      this.pricing,
+      this.rates,
       current.patientId,
       input.catalogItemId,
       current.currency,
     );
-    if (!context) {
+    if (!currentReference) {
       throw new NotFoundException(
         'Prestación no encontrada en el catálogo de esta clínica.',
       );
     }
-    const resolved = resolveItemPrice(context);
-    // DX-502: sin precio de catálogo no hay moneda que guardar.
-    const catalogCurrency =
-      resolved.basePrice === null ? null : resolved.catalogCurrency;
+    const { context, resolved, catalogCurrency, priced, asked } =
+      currentReference;
     // DX-513-bis: la referencia en la moneda del plan. En otra moneda conocida
     // se convierte con la tasa de la clínica de hoy en la sede de escritura
     // (pedida ANTES de la transacción, como la política) y se congela con el
     // ítem; sin tasa, 422 y no se escribe nada. En la del plan (o en una que
     // no se sabe) es la de siempre, sin pedir tasa.
-    const priced = {
-      catalogPrice: resolved.price,
-      basePrice: resolved.basePrice,
-      catalogCurrency,
-      priceSource: resolved.source,
-    };
-    const asked = await referenceRateFor(this.rates, priced, current.currency);
     // Un plan firmado o cerrado responde su 409 antes que «sin tasa» (422): el
     // problema es el plan, no la tasa. Se repite con la fila bloqueada.
     if (asked?.lookup.kind === 'missing') assertItemsEditable(current);

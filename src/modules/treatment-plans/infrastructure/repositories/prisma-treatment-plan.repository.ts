@@ -24,6 +24,7 @@ import {
   DiscountStamp,
   DoneMirrorInput,
   CreateTreatmentPlanRepoInput,
+  PlanFacts,
   TreatmentPlanRepository,
 } from '../../domain/ports/treatment-plan-repository.port';
 import {
@@ -137,7 +138,7 @@ type PrismaItemWithAttribution = PrismaTreatmentPlanItem &
     }>
   >;
 
-const ITEMS_WITH_ATTRIBUTION = {
+export const ITEMS_WITH_ATTRIBUTION = {
   where: { deletedAt: null },
   include: ITEM_ATTRIBUTION_INCLUDE,
 } satisfies Prisma.TreatmentPlan$itemsArgs;
@@ -309,6 +310,38 @@ export function mapToEntityWithItems(
   };
 }
 
+/**
+ * Lo que el plan no lleva en su detalle (abonos vivos, plan de cuotas activo,
+ * asientos de saldo a favor), leído en la transacción del llamador. DX-438:
+ * con el plan bloqueado (FOR UPDATE), un traspaso en curso (FOR NO KEY UPDATE
+ * del plan) ya confirmó su asiento o espera.
+ */
+export async function readPlanFacts(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  planId: string,
+): Promise<PlanFacts> {
+  const [livePayment, activePaymentPlan, creditEntry] = await Promise.all([
+    tx.payment.findFirst({
+      where: { treatmentPlanId: planId, deletedAt: null, voidedAt: null },
+      select: { id: true },
+    }),
+    tx.paymentPlan.findFirst({
+      where: { treatmentPlanId: planId, status: 'ACTIVE', deletedAt: null },
+      select: { id: true },
+    }),
+    tx.patientCreditEntry.findFirst({
+      where: { tenantId, treatmentPlanId: planId },
+      select: { id: true },
+    }),
+  ]);
+  return {
+    hasLivePayments: livePayment !== null,
+    hasActivePaymentPlan: activePaymentPlan !== null,
+    hasCreditEntries: creditEntry !== null,
+  };
+}
+
 @Injectable()
 export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   constructor(
@@ -394,27 +427,10 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         throw new NotFoundException('Plan de tratamiento no encontrado');
       }
 
-      const [livePayment, activePaymentPlan, creditEntry] = await Promise.all([
-        tx.payment.findFirst({
-          where: { treatmentPlanId: id, deletedAt: null, voidedAt: null },
-          select: { id: true },
-        }),
-        tx.paymentPlan.findFirst({
-          where: { treatmentPlanId: id, status: 'ACTIVE', deletedAt: null },
-          select: { id: true },
-        }),
-        // DX-438: con el plan bloqueado (FOR UPDATE), un traspaso en curso
-        // (FOR NO KEY UPDATE del plan) ya confirmó su asiento o espera.
-        tx.patientCreditEntry.findFirst({
-          where: { tenantId: current.tenantId, treatmentPlanId: id },
-          select: { id: true },
-        }),
-      ]);
-      const change = decide(mapToEntityWithItems(current), {
-        hasLivePayments: livePayment !== null,
-        hasActivePaymentPlan: activePaymentPlan !== null,
-        hasCreditEntries: creditEntry !== null,
-      });
+      const change = decide(
+        mapToEntityWithItems(current),
+        await readPlanFacts(tx, current.tenantId, id),
+      );
       const data: Prisma.TreatmentPlanUncheckedUpdateInput = {
         status: change.status,
         currency: change.currency,

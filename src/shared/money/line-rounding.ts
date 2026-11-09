@@ -76,6 +76,39 @@ export function percentOfCentsInUnits(
     : numerator / scale;
 }
 
+/**
+ * DX-379: `amount × num ÷ den` (tres importes ≥ 0, `den` > 0) redondeado UNA
+ * vez a la unidad de `digits`, la mitad hacia arriba (`'half-up'`), por
+ * debajo (`'floor'`) o por encima (`'ceil'`), en enteros de céntimos: sin redondeos intermedios ni
+ * deriva de coma flotante. Recotizar lo usa para mantener la proporción
+ * precio / referencia y descuento / precio.
+ */
+export function scaleAmount(
+  amount: number,
+  num: number,
+  den: number,
+  digits: RoundingDigits,
+  mode: 'half-up' | 'floor' | 'ceil',
+): number {
+  if (!(amount >= 0) || !(num >= 0) || !(den > 0)) {
+    throw new RangeError(
+      `Importes no válidos para escalar: ${amount} × ${num} ÷ ${den}.`,
+    );
+  }
+  const numerator = bigCents(amount) * bigCents(num);
+  const denominator = bigCents(den) * unitCents(digits);
+  if (denominator === 0n) {
+    throw new RangeError(`Denominador no válido para escalar: ${den}.`);
+  }
+  const units =
+    mode === 'half-up'
+      ? (2n * numerator + denominator) / (2n * denominator)
+      : mode === 'ceil'
+        ? (numerator + denominator - 1n) / denominator
+        : numerator / denominator;
+  return unitsToAmount(units, digits);
+}
+
 /** Unidades de la moneda → importe. */
 export function unitsToAmount(units: bigint, digits: RoundingDigits): number {
   return Number(units * unitCents(digits)) / 100;

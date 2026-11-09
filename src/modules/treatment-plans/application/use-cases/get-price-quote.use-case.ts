@@ -9,7 +9,7 @@ import {
   PRICING_SOURCE,
   type PricingSource,
 } from '../../domain/ports/pricing-source.port';
-import { resolveItemPrice } from '../../domain/pricing/resolve-item-price';
+import { resolveCurrentReference } from '../current-reference';
 import {
   PATIENT_AGREEMENT_REPOSITORY,
   type PatientAgreementRepository,
@@ -24,7 +24,6 @@ import {
   REFERENCE_RATE_SOURCE,
   type ReferenceRateSource,
 } from '../../domain/ports/reference-rate-source.port';
-import { referenceRateFor } from './reference-rate';
 
 export const PRICE_QUOTE_CATALOG_ITEM_NOT_FOUND_MESSAGE =
   'Procedimiento no encontrado.';
@@ -91,25 +90,20 @@ export class GetPriceQuoteUseCase {
     if (!(await this.patients.patientExists(patientId))) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     }
-    const context = await this.pricing.contextFor(
+    // DX-379 (D.1): la misma resolución que el alta y la recotización: la
+    // misma foto que tomaría el alta (DX-513-bis §5.3), sin escribir nada.
+    // Sin tasa no lanza, lo dice (`rateMissing`).
+    const current = await resolveCurrentReference(
+      this.pricing,
+      this.rates,
       patientId,
       catalogItemId,
       currency,
     );
-    if (!context) {
+    if (!current) {
       throw new NotFoundException(PRICE_QUOTE_CATALOG_ITEM_NOT_FOUND_MESSAGE);
     }
-    const resolved = resolveItemPrice(context);
-    // La misma foto que tomaría el alta (DX-513-bis §5.3), sin escribir nada:
-    // sin tasa no lanza, lo dice (`rateMissing`).
-    const priced = {
-      catalogPrice: resolved.price,
-      basePrice: resolved.basePrice,
-      catalogCurrency:
-        resolved.basePrice === null ? null : resolved.catalogCurrency,
-      priceSource: resolved.source,
-    };
-    const asked = await referenceRateFor(this.rates, priced, currency);
+    const { resolved, priced, asked } = current;
     if (asked?.lookup.kind === 'missing') {
       return {
         ...resolved,

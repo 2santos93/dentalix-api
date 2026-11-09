@@ -1473,6 +1473,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({}),
       status: 404,
     },
+    // DX-379 (B): vista previa de «Actualizar precios» de un plan de A. El
+    // aplicar (lleva Idempotency-Key) está en treatment-plan-repricing.
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/reprice/preview',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/reprice/preview`,
+      body: () => ({}),
+      status: 404,
+    },
     {
       name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance',
       verb: 'post',
@@ -3205,6 +3215,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         'Evolución no encontrada en la historia clínica de este paciente',
     },
     {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/reprice/preview body.itemIds[] de A',
+      verb: 'post',
+      path: () =>
+        `/patients/${b.patientId}/treatment-plans/${b.planId}/reprice/preview`,
+      body: () => ({ itemIds: [a.planItemId] }),
+      bodyIds: ['itemIds[]'],
+      status: 404,
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    },
+    {
       name: 'POST /treatment-plans/:id/items/bulk-discount body.itemIds[] de A',
       verb: 'post',
       path: () => `/treatment-plans/${b.planId}/items/bulk-discount`,
@@ -3409,6 +3429,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * Una PR que sube el número de exenciones lo justifica en su descripción.
    */
   const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'treatment-plan-repricing.e2e-spec.ts',
+      checks:
+        'B → 404 al aplicar «Actualizar precios» al plan de A con una Idempotency-Key válida, y los precios de A no cambian (DX-379 B)',
+      routes: [
+        'POST /patients/:patientId/treatment-plans/:planId/reprice/apply',
+      ],
+    },
     {
       spec: 'equipment.e2e-spec.ts',
       checks:
