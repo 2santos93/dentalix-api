@@ -4,7 +4,7 @@ import type {
   WaitlistPriority,
   WaitlistStatus,
 } from '@prisma/client';
-import { civilDateIn } from '../../../shared/time/civil-day';
+import { civilDateIn, zonedStartOfDay } from '../../../shared/time/civil-day';
 
 /**
  * «Ocupar este hueco» (DX-210): quién de la clínica podría ocupar un hueco
@@ -63,14 +63,15 @@ export interface AppointmentCandidateSource {
 /** DX-437: la mañana acaba a las 12:00 de la sede; la tarde empieza ahí. */
 export const AFTERNOON_STARTS_AT_HOUR = 12;
 
-/** Hora (0–23) del instante en la zona de la sede. */
+/**
+ * Hora (0–23) del instante en la zona de la sede: minutos desde el inicio
+ * civil de su día (helpers de `civil-day`, sin literales de formato).
+ */
 function hourIn(instant: Date, timeZone: string): number {
-  const text = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour: 'numeric',
-    hourCycle: 'h23',
-  }).format(instant);
-  return Number.parseInt(text, 10) % 24;
+  const day = civilDateIn(instant, timeZone);
+  const minutes =
+    (instant.getTime() - zonedStartOfDay(day, timeZone).getTime()) / MINUTE;
+  return Math.floor(minutes / 60) % 24;
 }
 
 /**

@@ -200,6 +200,8 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
         currency: 'USD',
       });
       expect(Object.keys(body.appointment).sort()).toEqual([
+        'earlierAllowed',
+        'earlierWindow',
         'end',
         'hourCycle',
         'locale',
@@ -209,6 +211,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
         'providerName',
         'start',
         'timeZone',
+        'wantsEarlier',
       ]);
       expect(body.appointment.patientFirstName).toBe('Ana');
     });
