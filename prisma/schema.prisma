@@ -2169,6 +2169,24 @@ enum TreatmentPlanRepricingSource {
   ACCEPT
 }
 
+/// DX-379 (C): cómo se aceptó un presupuesto vencido.
+enum ExpiredQuoteAcceptanceMode {
+  /// Se actualizaron los precios (recotización ACCEPT) antes de firmar.
+  REPRICE
+  /// Se aceptó con los precios del presupuesto vencido, con motivo.
+  ORIGINAL_PRICES
+}
+
+/// DX-379 (C): por qué se aceptó con los precios de un presupuesto vencido.
+/// OTHER exige nota (CHECK). No es `DiscountReason`: no es un descuento.
+enum ExpiredQuoteAcceptanceReason {
+  CLINIC_DELAY
+  PRICE_COMMITMENT
+  LOYALTY
+  FINANCIAL_HARDSHIP
+  OTHER
+}
+
 /// DX-379 (B): una recotización de un plan abierto («Actualizar precios»):
 /// quién, cuándo, en qué sede, la tasa usada, la validez anterior y la nueva,
 /// cada línea antes y después (JSON) y los totales. De solo alta (trigger
@@ -2210,10 +2228,13 @@ model TreatmentPlanRepricing {
   createdAt               DateTime                     @default(dbgenerated("timezone('UTC'::text, now())"))
 
   // FK COMPUESTAS (SEC-004): plan del MISMO tenant y paciente; sede del MISMO tenant.
-  plan     TreatmentPlan @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, map: "treatment_plan_repricings_plan_fkey")
-  location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_repricings_location_fkey")
-  actor    User          @relation("TreatmentPlanRepricingActor", fields: [actorUserId], references: [id], onDelete: Restrict, map: "treatment_plan_repricings_actor_fkey")
+  plan        TreatmentPlan             @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, map: "treatment_plan_repricings_plan_fkey")
+  location    Location                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_repricings_location_fkey")
+  actor       User                      @relation("TreatmentPlanRepricingActor", fields: [actorUserId], references: [id], onDelete: Restrict, map: "treatment_plan_repricings_actor_fkey")
+  /// DX-379 (C): la aceptación firmada que hizo esta recotización (source ACCEPT).
+  acceptances TreatmentPlanAcceptance[]
 
+  @@unique([tenantId, id, planId, patientId], map: "treatment_plan_repricings_tenant_id_plan_patient_key")
   @@index([tenantId, planId, patientId, createdAt], map: "treatment_plan_repricings_plan_idx")
   @@index([tenantId, locationId], map: "treatment_plan_repricings_location_idx")
   @@index([actorUserId], map: "treatment_plan_repricings_actor_idx")
@@ -2228,11 +2249,11 @@ model TreatmentPlanRepricing {
 // moneda del plan aceptado (20261016213000_treatment_plan_acceptances).
 // ---------------------------------------------------------------------------
 model TreatmentPlanAcceptance {
-  id                      String                   @id @default(uuid()) @db.Uuid
-  tenantId                String                   @db.Uuid
-  planId                  String                   @db.Uuid
-  patientId               String                   @db.Uuid
-  locationId              String                   @db.Uuid
+  id                      String                        @id @default(uuid()) @db.Uuid
+  tenantId                String                        @db.Uuid
+  planId                  String                        @db.Uuid
+  patientId               String                        @db.Uuid
+  locationId              String                        @db.Uuid
   signerName              String
   // PNG en base64 (sin prefijo data:). Tope: 200 KB decodificados (CHECK).
   signature               String
@@ -2243,13 +2264,13 @@ model TreatmentPlanAcceptance {
   // SHA-256 (hex) de contentHash + firmante + firma + acceptedAt.
   acceptanceHash          String
   acceptedAt              DateTime
-  acceptedById            String                   @db.Uuid
+  acceptedById            String                        @db.Uuid
   ipAddress               String?
   userAgent               String?
-  createdAt               DateTime                 @default(now())
+  createdAt               DateTime                      @default(now())
   // DX-415: aceptada a distancia por enlace con código. Evidencias congeladas
   // (todas o ninguna, CHECK).
-  signatureRequestId      String?                  @db.Uuid
+  signatureRequestId      String?                       @db.Uuid
   remoteChannel           SignatureRequestChannel?
   remoteDestinationMasked String?
   remoteSentAt            DateTime?
@@ -2258,13 +2279,25 @@ model TreatmentPlanAcceptance {
   /// DX-019-bis (B): clave del logo congelada al firmar (fuera del contenido y
   /// de sus hashes; el trigger impide cambiarla). NULL = firmada sin logo.
   clinicLogoKey           String?
+  /// DX-379 (C): cómo se aceptó un presupuesto vencido, fuera del contenido y
+  /// de sus hashes (como el logo). `quoteValidUntil`: copia del último día
+  /// válido del plan al firmar (antes de recotizar). Sin `expiredMode`, el
+  /// presupuesto no estaba vencido. CHECK
+  /// treatment_plan_acceptances_expired_check / _expired_note_check.
+  quoteValidUntil         DateTime?                     @db.Date
+  expiredMode             ExpiredQuoteAcceptanceMode?
+  expiredReason           ExpiredQuoteAcceptanceReason?
+  expiredNote             String?
+  /// La recotización (source ACCEPT) hecha en la firma con REPRICE.
+  repricingId             String?                       @db.Uuid
 
   // FK COMPUESTAS (SEC-004): plan del MISMO tenant y del MISMO paciente; sede
   // del MISMO tenant.
-  plan             TreatmentPlan     @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
-  signatureRequest SignatureRequest? @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_signature_request_fkey")
-  location         Location          @relation(fields: [tenantId, locationId], references: [tenantId, id])
-  acceptedBy       User              @relation(fields: [acceptedById], references: [id])
+  plan             TreatmentPlan           @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
+  repricing        TreatmentPlanRepricing? @relation(fields: [tenantId, repricingId, planId, patientId], references: [tenantId, id, planId, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_repricing_fkey")
+  signatureRequest SignatureRequest?       @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_signature_request_fkey")
+  location         Location                @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  acceptedBy       User                    @relation(fields: [acceptedById], references: [id])
 
   // Una aceptación por plan (volver a firmar: 409).
   @@unique([tenantId, planId, patientId], map: "treatment_plan_acceptances_plan_key")
