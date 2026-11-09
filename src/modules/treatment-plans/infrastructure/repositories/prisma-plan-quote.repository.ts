@@ -172,21 +172,24 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
     }
   }
 
-  issue(
+  async issue(
     patientId: string,
     planId: string,
     decide: (source: PlanQuoteSource) => QuoteValidity | null,
   ): Promise<PlanQuoteSource | null> {
     const tenantId = this.requireTenantId();
+    // M-2: primero SIN bloquear. La mayoría de impresiones son reimpresiones
+    // (fechas ya guardadas, plan firmado o cerrado) y no escriben nada: no
+    // toman el FOR UPDATE del grupo, que haría esperar a los abonos, ítems y
+    // asientos que insertan con FK al plan.
+    const read = await this.loadSource(patientId, planId);
+    if (!read) return null;
+    if (!decide(read)) return read;
     return this.prisma.runWithTenant(async (tx) => {
-      const owned = await tx.treatmentPlan.findFirst({
-        where: { id: planId, patientId, deletedAt: null },
-        select: { id: true },
-      });
-      if (!owned) return null;
-      // Con el plan bloqueado, como al aceptar: dos primeras impresiones
-      // simultáneas guardan UNA validez, y una firma concurrente espera y
-      // luego ve las fechas (o al revés: la impresión ve el plan firmado).
+      // Hay que guardar fechas: con el plan bloqueado, como al aceptar. Dos
+      // primeras impresiones simultáneas esperan aquí; la segunda relee, ve
+      // las fechas de la primera y no escribe (y una firma concurrente espera
+      // y luego ve las fechas, o al revés: la impresión ve el plan firmado).
       const locked = await lockPlanGroup(tx, planId);
       if (!locked) return null;
       const locationId = await this.tenantContext.writeLocationId(tx);

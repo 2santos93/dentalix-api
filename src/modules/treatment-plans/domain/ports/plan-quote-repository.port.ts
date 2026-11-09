@@ -148,11 +148,13 @@ export interface PlanQuoteRepository {
   ): Promise<AcceptPlanOutcome>;
 
   /**
-   * DX-379: emite el presupuesto (primera impresión) en UNA transacción con
-   * la fila del plan bloqueada: relee el presupuesto, deja que `decide` diga
-   * qué validez guardar (`null` = no se guarda nada) y, si la hay, la escribe
-   * solo si el plan aún no tiene fechas. Devuelve el presupuesto releído, o
-   * `null` si el plan no existe para este paciente (404).
+   * DX-379: emite el presupuesto (primera impresión). Lee el presupuesto sin
+   * bloquear y deja que `decide` diga qué validez guardar (`null` = nada: se
+   * devuelve lo leído sin bloquear). Si hay que guardar, en UNA transacción
+   * con el grupo del plan bloqueado relee, vuelve a llamar a `decide` (puede
+   * llamarse dos veces) y escribe solo si el plan aún no tiene fechas.
+   * Devuelve el presupuesto releído, o `null` si el plan no existe para este
+   * paciente (404).
    */
   issue(
     patientId: string,
