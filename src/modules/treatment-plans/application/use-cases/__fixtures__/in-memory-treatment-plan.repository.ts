@@ -4,6 +4,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { validityOnPresentation } from '../../../domain/quote-validity';
 import {
   TreatmentPlan,
   TreatmentPlanAcceptanceSummary,
@@ -84,6 +85,9 @@ export class InMemoryTreatmentPlanRepository
   private readonly items: StoredItem[] = [];
   /** Sede que el repositorio real tomaría del request (o la principal). */
   locationId = 'loc-1';
+  /** DX-379: zona de la sede de escritura y días del ajuste de la clínica. */
+  timeZone = 'America/Caracas';
+  quoteValidityDays = 30;
   /** Filas que devuelve `listPendingFollowUp` (el filtro SQL se prueba en integración). */
   pendingFollowUp: PendingFollowUpRow[] = [];
   lastFollowUpQuery: PendingFollowUpQuery | null = null;
@@ -115,6 +119,8 @@ export class InMemoryTreatmentPlanRepository
       optionLabel: overrides.optionLabel ?? null,
       presentedAt: overrides.presentedAt ?? null,
       presentedLocationId: overrides.presentedLocationId ?? null,
+      quoteIssuedOn: overrides.quoteIssuedOn ?? null,
+      quoteValidUntil: overrides.quoteValidUntil ?? null,
       rejectedAt: overrides.rejectedAt ?? null,
       rejectionReason: overrides.rejectionReason ?? null,
       rejectionNote: overrides.rejectionNote ?? null,
@@ -187,6 +193,8 @@ export class InMemoryTreatmentPlanRepository
       optionLabel: row.optionLabel,
       presentedAt: row.presentedAt,
       presentedLocationId: row.presentedLocationId,
+      quoteIssuedOn: row.quoteIssuedOn,
+      quoteValidUntil: row.quoteValidUntil,
       rejectedAt: row.rejectedAt,
       rejectionReason: row.rejectionReason,
       rejectionNote: row.rejectionNote,
@@ -247,6 +255,8 @@ export class InMemoryTreatmentPlanRepository
       optionLabel: null,
       presentedAt: null,
       presentedLocationId: null,
+      quoteIssuedOn: null,
+      quoteValidUntil: null,
       rejectedAt: null,
       rejectionReason: null,
       rejectionNote: null,
@@ -402,6 +412,14 @@ export class InMemoryTreatmentPlanRepository
     if (change.presentation) {
       row.presentedAt = change.presentation.at;
       row.presentedLocationId = this.locationId;
+      // Como el de Prisma (DX-379): presentar fija siempre la validez.
+      const validity = validityOnPresentation(
+        change.presentation.at,
+        this.timeZone,
+        this.quoteValidityDays,
+      );
+      row.quoteIssuedOn = validity.issuedOn;
+      row.quoteValidUntil = validity.validUntil;
     }
     if (change.rejection) {
       row.rejectedAt = change.rejection.at;
@@ -435,6 +453,8 @@ export class InMemoryTreatmentPlanRepository
       createdById: decision.createdById ?? null,
       presentedAt: null,
       presentedLocationId: null,
+      quoteIssuedOn: null,
+      quoteValidUntil: null,
       rejectedAt: null,
       rejectionReason: null,
       rejectionNote: null,
@@ -640,6 +660,8 @@ export const PLAN_WITHOUT_OPTIONS = {
   optionLabel: null,
   presentedAt: null,
   presentedLocationId: null,
+  quoteIssuedOn: null,
+  quoteValidUntil: null,
   rejectedAt: null,
   rejectionReason: null,
   rejectionNote: null,

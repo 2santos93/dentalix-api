@@ -4,6 +4,9 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaSignatureRequestRepository } from '../src/modules/signature-requests/infrastructure/prisma-signature-request.repository';
 import {
   RemoteBudgetChangedError,
+  SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE,
+  budgetNotPresentedMessage,
+  type CreateSignatureRequestOptions,
   type RemoteBudgetAcceptanceInsert,
 } from '../src/modules/signature-requests/domain/ports/signature-request-repository.port';
 import { budgetStillMatches } from '../src/modules/signature-requests/application/remote-budget';
@@ -13,7 +16,7 @@ import {
 } from '../src/modules/signature-requests/domain/signature-token';
 import {
   composeQuoteContent,
-  quoteIssuedOn,
+  quoteValidityOf,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import { computeQuoteHash } from '../src/modules/treatment-plans/domain/plan-quote';
 import {
@@ -131,21 +134,49 @@ async function presentedPlan(s: Seeded, groupId?: string): Promise<string> {
   return plan.id;
 }
 
+// DX-379: instante fijo de los casos que comparan fechas (9 nov 2026, 11:00
+// en Caracas).
+const NOW = new Date('2026-11-09T15:00:00.000Z');
+
+async function storedValidity(planId: string) {
+  const plan = await owner.treatmentPlan.findUniqueOrThrow({
+    where: { id: planId },
+    select: { quoteIssuedOn: true, quoteValidUntil: true },
+  });
+  return {
+    issuedOn: plan.quoteIssuedOn?.toISOString().slice(0, 10) ?? null,
+    validUntil: plan.quoteValidUntil?.toISOString().slice(0, 10) ?? null,
+  };
+}
+
 const asClinic = <T>(tenantId: string, fn: () => Promise<T>) =>
   tenantContext.run(tenantId, fn);
 
-/** Envía el presupuesto del plan como lo hace la app (foto + hash). */
-async function sendBudget(s: Seeded, planId: string) {
+/**
+ * Envía el presupuesto del plan como lo hace la app (foto + hash), con UN
+ * instante para la foto y la solicitud. `now` fijo en los casos que comparan
+ * fechas (DX-379); los que firman usan el de ahora, porque el enlace tiene
+ * que estar vivo frente al reloj de la BD. `fixValidity`: como el caso de uso
+ * con un plan sin fechas, guarda en el plan la validez de la foto.
+ */
+async function sendBudget(
+  s: Seeded,
+  planId: string,
+  opts: {
+    now?: Date;
+    fixValidity?: boolean;
+    options?: CreateSignatureRequestOptions;
+  } = {},
+) {
+  const now = opts.now ?? new Date();
   const budget = await asClinic(s.tenantId, () =>
     repo.loadBudget(s.patientId, planId, s.locationId),
   );
   if (!budget) throw new Error('sin presupuesto');
-  const content = composeQuoteContent(
-    budget.quote,
-    quoteIssuedOn(budget.quote, new Date()),
-    NAMES,
-  );
-  const now = new Date();
+  const validity = quoteValidityOf(budget.quote, now);
+  const content = composeQuoteContent(budget.quote, validity, NAMES);
+  const options: CreateSignatureRequestOptions =
+    opts.options ?? (opts.fixValidity ? { planQuoteValidity: validity } : {});
   const request = {
     locationId: s.locationId,
     patientId: s.patientId,
@@ -170,7 +201,9 @@ async function sendBudget(s: Seeded, planId: string) {
     createdById: s.userId,
     createdAt: now,
   };
-  const { id } = await asClinic(s.tenantId, () => repo.create(request));
+  const { id } = await asClinic(s.tenantId, () =>
+    repo.create(request, undefined, options),
+  );
   return { id, request };
 }
 
@@ -227,6 +260,14 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
     b = await seedClinic('dx415-int-b');
   });
 
+  // M-7: un caso que cambia el ajuste de días no lo deja cambiado aunque falle.
+  afterEach(async () => {
+    await owner.tenant.updateMany({
+      where: { id: { in: [a.tenantId, b.tenantId] } },
+      data: { quoteValidityDays: 30 },
+    });
+  });
+
   afterAll(async () => {
     await resetDatabase(owner);
     await owner.$disconnect();
@@ -265,6 +306,123 @@ describe('presupuesto a distancia en Postgres (DX-415)', () => {
     // La ficha la ve con la aceptación.
     const row = await asClinic(a.tenantId, () => repo.findById(id));
     expect(row?.budgetAcceptance?.id).toBe(acceptance.id);
+  });
+
+  it('DX-379 (G.5): un enlace enviado sin validez guardada sigue valiendo y se firma aunque después se guarden fechas y cambie el ajuste', async () => {
+    // Plan presentado antes de DX-379: sin fechas. Se envía con hoy + 30.
+    const planId = await presentedPlan(a);
+    const { id, request } = await sendBudget(a, planId);
+    const sent = request.budgetContent;
+    expect(sent.validityDays).toBe(30);
+    // Tras el despliegue: la clínica cambia el ajuste y el plan guarda otra
+    // validez (p. ej. una impresión). El enlace pendiente se recompone con
+    // las fechas de SU foto, así que sigue valiendo.
+    await owner.tenant.update({
+      where: { id: a.tenantId },
+      data: { quoteValidityDays: 7 },
+    });
+    await owner.treatmentPlan.update({
+      where: { id: planId },
+      data: {
+        quoteIssuedOn: new Date('2026-01-05T00:00:00.000Z'),
+        quoteValidUntil: new Date('2026-01-12T00:00:00.000Z'),
+      },
+    });
+    const budget = await asClinic(a.tenantId, () =>
+      repo.loadBudget(a.patientId, planId, a.locationId),
+    );
+    expect(budget?.quote.plan.quoteValidUntil).toBe('2026-01-12');
+    expect(budget?.quote.clinic.quoteValidityDays).toBe(7);
+    expect(budgetStillMatches(request, budget!.quote, NAMES)).toBe(true);
+    await expect(signBudget(a, id, planId)).resolves.toBe('SIGNED');
+  });
+
+  it('DX-379 (M-3): enviar un plan sin validez la guarda en el plan en la misma transacción, con las fechas de la foto', async () => {
+    const planId = await presentedPlan(a);
+    // 9 nov 2026, 11:00 en Caracas: la foto dice 9/11 → 9/12 (30 días).
+    const { request } = await sendBudget(a, planId, {
+      now: NOW,
+      fixValidity: true,
+    });
+    expect(request.budgetContent).toMatchObject({
+      issuedOn: '2026-11-09',
+      validUntil: '2026-12-09',
+    });
+    expect(await storedValidity(planId)).toEqual({
+      issuedOn: '2026-11-09',
+      validUntil: '2026-12-09',
+    });
+  });
+
+  it.each(['REJECTED', 'ACCEPTED', 'CANCELLED'] as const)(
+    'DX-379 (N-1): si el plan pasó a %s antes de enviar, 409 «no presentado», sin fechas ni solicitud',
+    async (status) => {
+      const planId = await presentedPlan(a);
+      // Leído «Presentado» por el caso de uso; cerrado antes de la
+      // transacción que crea la solicitud.
+      await owner.treatmentPlan.update({
+        where: { id: planId },
+        data:
+          status === 'REJECTED'
+            ? { status, rejectedAt: NOW, rejectionReason: 'PRICE' }
+            : { status },
+      });
+      await expect(
+        sendBudget(a, planId, { now: NOW, fixValidity: true }),
+      ).rejects.toThrow(budgetNotPresentedMessage(status));
+      expect(await storedValidity(planId)).toEqual({
+        issuedOn: null,
+        validUntil: null,
+      });
+      expect(
+        await owner.signatureRequest.count({
+          where: { treatmentPlanId: planId },
+        }),
+      ).toBe(0);
+    },
+  );
+
+  it('DX-379 (M-3): si entre medias el plan recibió otra validez, 409 y no se crea la solicitud', async () => {
+    const planId = await presentedPlan(a);
+    await owner.treatmentPlan.update({
+      where: { id: planId },
+      data: {
+        quoteIssuedOn: new Date('2026-03-01T00:00:00.000Z'),
+        quoteValidUntil: new Date('2026-03-31T00:00:00.000Z'),
+      },
+    });
+    await expect(
+      sendBudget(a, planId, {
+        options: {
+          planQuoteValidity: {
+            issuedOn: '2026-03-02',
+            validUntil: '2026-04-01',
+          },
+        },
+      }),
+    ).rejects.toThrow(SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE);
+    expect(
+      await owner.signatureRequest.count({
+        where: { treatmentPlanId: planId },
+      }),
+    ).toBe(0);
+  });
+
+  it('DX-379: con validez guardada, la foto enviada lleva esas fechas', async () => {
+    const planId = await presentedPlan(a);
+    await owner.treatmentPlan.update({
+      where: { id: planId },
+      data: {
+        quoteIssuedOn: new Date('2026-02-01T00:00:00.000Z'),
+        quoteValidUntil: new Date('2026-02-16T00:00:00.000Z'),
+      },
+    });
+    const { request } = await sendBudget(a, planId);
+    expect(request.budgetContent).toMatchObject({
+      issuedOn: '2026-02-01',
+      validUntil: '2026-02-16',
+      validityDays: 15,
+    });
   });
 
   it('si el plan cambió, no se escribe nada (ni la firma ni la aceptación)', async () => {

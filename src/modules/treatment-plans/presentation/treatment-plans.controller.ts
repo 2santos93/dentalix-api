@@ -83,6 +83,10 @@ import {
   type AuditableRequest,
 } from '../../audit/presentation/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { QuoteExpiry } from '../application/quote-expiry';
+
+/** DX-379: el plan con `quoteExpired` (día civil de su sede). */
+type StampedPlan<T> = T & { quoteExpired: boolean };
 
 const SIGNED_PLAN_CONFLICT =
   'Plan aceptado con firma: sus ítems quedan congelados (DX-012)';
@@ -142,6 +146,8 @@ export class TreatmentPlansController {
     private readonly rejectTreatmentPlan: RejectTreatmentPlanUseCase,
     private readonly createPlanAlternative: CreatePlanAlternativeUseCase,
     private readonly applyBulkDiscount: ApplyBulkDiscountUseCase,
+    // DX-379: `quoteExpired` en cada plan devuelto (día civil de su sede).
+    private readonly quoteExpiry: QuoteExpiry,
     private readonly tenantContext: TenantContextService,
     // DX-340: decimales de la moneda del plan, para la web.
     @Inject(CURRENCY_DIGITS_CATALOG)
@@ -161,20 +167,22 @@ export class TreatmentPlansController {
     description:
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
   })
-  create(
+  async create(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlan> {
+  ): Promise<StampedPlan<TreatmentPlan>> {
     // `createdById` comes from the authenticated user (req.user.sub), never
     // from the client body — same convention as AppointmentsController.create
     // / OdontogramController.create.
-    return this.createTreatmentPlan.execute({
-      patientId,
-      currency: dto.currency,
-      notes: dto.notes,
-      createdById: req.user.sub,
-    });
+    return this.quoteExpiry.one(
+      await this.createTreatmentPlan.execute({
+        patientId,
+        currency: dto.currency,
+        notes: dto.notes,
+        createdById: req.user.sub,
+      }),
+    );
   }
 
   @Audit({
@@ -185,10 +193,12 @@ export class TreatmentPlansController {
   @Get('patients/:patientId/treatment-plans')
   @ApiParam({ name: 'patientId', format: 'uuid' })
   @ApiOkResponse({ type: [TreatmentPlanDto] })
-  list(
+  async list(
     @Param('patientId', ParseUUIDPipe) patientId: string,
-  ): Promise<TreatmentPlan[]> {
-    return this.listTreatmentPlans.execute(patientId);
+  ): Promise<StampedPlan<TreatmentPlan>[]> {
+    return this.quoteExpiry.stamp(
+      await this.listTreatmentPlans.execute(patientId),
+    );
   }
 
   @Audit({
@@ -201,8 +211,12 @@ export class TreatmentPlansController {
   @ApiOkResponse({ type: TreatmentPlanDto })
   async get(
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<TreatmentPlanDetail & { currencyDigits: CurrencyDigits }> {
-    const plan = await this.getTreatmentPlan.execute(id);
+  ): Promise<
+    StampedPlan<TreatmentPlanDetail> & { currencyDigits: CurrencyDigits }
+  > {
+    const plan = await this.quoteExpiry.one(
+      await this.getTreatmentPlan.execute(id),
+    );
     const digits = await this.currencyDigits.table([plan.currency]);
     return { ...plan, currencyDigits: digits.of(plan.currency) };
   }
@@ -230,20 +244,22 @@ export class TreatmentPlansController {
   @ApiConflictResponse({
     description: `${TRANSITION_CONFLICT}; DX-513-bis: la moneda no cambia si el plan tiene algún ítem vivo con precio de referencia (catálogo, lista o convenio): code PLAN_CURRENCY_LOCKED_BY_PRICED_ITEMS (los ítems libres no bloquean); DX-513: la moneda no cambia si con ella un ítem pasaría a contar como descuento sin firmar, o si una rebaja frente al catálogo que cuenta hoy dejaría de verse en el informe de descuentos (nada cambia: ni el plan ni sus ítems); plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109), ni si tiene asientos de saldo a favor (traspaso dado o recibido, o devolución), aunque no tenga abonos: code PLAN_CURRENCY_LOCKED_BY_CREDIT (DX-438). SEC-050: el plan que lleva un cargo vigente por inasistencia no se cancela ni cambia de moneda (completarlo sí). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada, y cancela el plan de cuotas activo de las hermanas que rechaza; cancelar cancela también el plan de cuotas activo`,
   })
-  update(
+  async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlan> {
-    return this.updateTreatmentPlan.execute(
-      id,
-      {
-        status: dto.status,
-        currency: dto.currency,
-        notes: dto.notes,
-        optionLabel: dto.optionLabel,
-      },
-      actorRole(req),
+  ): Promise<StampedPlan<TreatmentPlan>> {
+    return this.quoteExpiry.one(
+      await this.updateTreatmentPlan.execute(
+        id,
+        {
+          status: dto.status,
+          currency: dto.currency,
+          notes: dto.notes,
+          optionLabel: dto.optionLabel,
+        },
+        actorRole(req),
+      ),
     );
   }
 
@@ -267,16 +283,19 @@ export class TreatmentPlansController {
   })
   @ApiOkResponse({
     type: TreatmentPlanDto,
-    description: 'Plan PRESENTED, con presentedAt (servidor) y la sede',
+    description:
+      'Plan PRESENTED, con presentedAt (servidor) y la sede. DX-379: fija también la validez del presupuesto (quoteIssuedOn = hoy en la sede, quoteValidUntil = hoy + los días de GET /treatment-plan-settings), aunque un borrador impreso ya la tuviera',
   })
   @ApiBadRequestResponse({ description: 'El plan no tiene ítems' })
   @ApiForbiddenResponse({ description: 'Solo DENTIST y ADMIN presentan' })
   @ApiNotFoundResponse({ description: 'Plan no encontrado en esta clínica' })
   @ApiConflictResponse({
-    description: `${TRANSITION_CONFLICT}: solo se presenta un borrador`,
+    description: `${TRANSITION_CONFLICT}: solo se presenta un borrador. DX-379: code LOCATION_TIMEZONE_REQUIRED si la sede de la presentación no tiene una zona horaria válida (hace falta para fijar el día de emisión del presupuesto); el plan no cambia`,
   })
-  present(@Param('id', ParseUUIDPipe) id: string): Promise<TreatmentPlan> {
-    return this.presentTreatmentPlan.execute(id);
+  async present(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<StampedPlan<TreatmentPlan>> {
+    return this.quoteExpiry.one(await this.presentTreatmentPlan.execute(id));
   }
 
   @Audit({
@@ -305,15 +324,17 @@ export class TreatmentPlansController {
   @ApiConflictResponse({
     description: `${TRANSITION_CONFLICT}: solo se rechaza un plan presentado`,
   })
-  reject(
+  async reject(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlan> {
-    return this.rejectTreatmentPlan.execute(
-      id,
-      { reason: dto.reason, note: dto.note },
-      actorRole(req).userId,
+  ): Promise<StampedPlan<TreatmentPlan>> {
+    return this.quoteExpiry.one(
+      await this.rejectTreatmentPlan.execute(
+        id,
+        { reason: dto.reason, note: dto.note },
+        actorRole(req).userId,
+      ),
     );
   }
 
@@ -334,15 +355,17 @@ export class TreatmentPlansController {
   @ApiConflictResponse({
     description: 'Una opción del grupo ya está aceptada o completada',
   })
-  createAlternative(
+  async createAlternative(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreatePlanAlternativeDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlan> {
-    return this.createPlanAlternative.execute(id, {
-      optionLabel: dto.optionLabel,
-      createdById: req.user.sub,
-    });
+  ): Promise<StampedPlan<TreatmentPlan>> {
+    return this.quoteExpiry.one(
+      await this.createPlanAlternative.execute(id, {
+        optionLabel: dto.optionLabel,
+        createdById: req.user.sub,
+      }),
+    );
   }
 
   @Audit({

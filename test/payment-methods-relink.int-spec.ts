@@ -55,6 +55,7 @@ async function seedClinic(
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
     select: { id: true },
   });
+  // Solo el id: el cliente leería columnas del plan posteriores (DX-379).
   const plan = await db.treatmentPlan.create({
     data: {
       tenantId: tenant.id,
@@ -62,6 +63,7 @@ async function seedClinic(
       currency: 'USD',
       status: 'ACCEPTED',
     },
+    select: { id: true },
   });
   // Los 4 medios iniciales (como el alta) y uno propio.
   const methods: Record<string, string> = {};

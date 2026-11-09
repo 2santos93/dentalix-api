@@ -32,6 +32,62 @@ describe('PresentTreatmentPlanUseCase (DX-040)', () => {
     });
   });
 
+  it('DX-379: presentar fija la validez del presupuesto: hoy en la sede + los días del ajuste', async () => {
+    const { repo, uc } = setup();
+    repo.quoteValidityDays = 15;
+    const plan = repo.seedPlan({ status: DRAFT });
+    repo.seedItem({ planId: plan.id });
+
+    const result = await uc.execute(plan.id);
+
+    // 16 oct 2026 15:00 UTC = 11:00 en Caracas.
+    expect(result).toMatchObject({
+      quoteIssuedOn: '2026-10-16',
+      quoteValidUntil: '2026-10-31',
+    });
+  });
+
+  it('DX-379: presentar reemplaza la validez de un borrador ya impreso', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({
+      status: DRAFT,
+      quoteIssuedOn: '2026-09-01',
+      quoteValidUntil: '2026-10-01',
+    });
+    repo.seedItem({ planId: plan.id });
+
+    const result = await uc.execute(plan.id);
+
+    expect(result).toMatchObject({
+      quoteIssuedOn: '2026-10-16',
+      quoteValidUntil: '2026-11-15',
+    });
+  });
+
+  it('DX-379: a las 23:30 de Caracas (ya el día siguiente en UTC) la validez cuenta desde el día de la sede', async () => {
+    const repo = new InMemoryTreatmentPlanRepository();
+    const uc = new PresentTreatmentPlanUseCase(
+      repo,
+      () => new Date('2026-10-17T03:30:00.000Z'),
+    );
+    const plan = repo.seedPlan({ status: DRAFT });
+    repo.seedItem({ planId: plan.id });
+
+    expect(await uc.execute(plan.id)).toMatchObject({
+      quoteIssuedOn: '2026-10-16',
+      quoteValidUntil: '2026-11-15',
+    });
+  });
+
+  it('un plan rechazado por no tener ítems no guarda validez', async () => {
+    const { repo, uc } = setup();
+    const plan = repo.seedPlan({ status: DRAFT });
+    await expect(uc.execute(plan.id)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(repo.stored(plan.id).quoteIssuedOn).toBeNull();
+  });
+
   it('un plan sin ítems no se presenta (400)', async () => {
     const { repo, uc } = setup();
     const plan = repo.seedPlan({ status: DRAFT });

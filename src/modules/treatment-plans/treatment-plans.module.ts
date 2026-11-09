@@ -1,3 +1,13 @@
+import { QuoteExpiry } from './application/quote-expiry';
+import {
+  GetQuoteSettingsUseCase,
+  UpdateQuoteSettingsUseCase,
+} from './application/use-cases/quote-settings.use-cases';
+import { QUOTE_SETTINGS_REPOSITORY } from './domain/ports/quote-settings-repository.port';
+import { PrismaQuoteSettingsRepository } from './infrastructure/repositories/prisma-quote-settings.repository';
+import { QuoteSettingsController } from './presentation/quote-settings.controller';
+import { PLAN_QUOTE_ZONES } from './domain/ports/plan-quote-zones.port';
+import { PrismaPlanQuoteZones } from './infrastructure/adapters/prisma-plan-quote-zones';
 import { PlanVisitsService } from './application/plan-visits.service';
 import { PlanVisitsController } from './presentation/plan-visits.controller';
 import { Module } from '@nestjs/common';
@@ -15,6 +25,7 @@ import { PlanQuoteController } from './presentation/plan-quote.controller';
 import {
   AcceptTreatmentPlanUseCase,
   GetPlanQuoteUseCase,
+  IssuePlanQuoteUseCase,
   PLAN_QUOTE_CLOCK,
   PLAN_QUOTE_COMPOSITION,
 } from './application/use-cases/plan-quote.use-cases';
@@ -94,6 +105,8 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     PlanQuoteController,
     // Precio resuelto de un ítem nuevo (DX-105).
     PriceQuoteController,
+    // DX-379: días de validez del presupuesto de la clínica.
+    QuoteSettingsController,
   ],
   providers: [
     PlanVisitsService,
@@ -117,9 +130,19 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     CreatePlanAlternativeUseCase,
     ListPendingFollowUpUseCase,
     { provide: TREATMENT_PLAN_CLOCK, useValue: () => new Date() },
+    // DX-379: `quoteExpired` de los planes, con la zona de su sede.
+    QuoteExpiry,
+    { provide: PLAN_QUOTE_ZONES, useClass: PrismaPlanQuoteZones },
+    GetQuoteSettingsUseCase,
+    UpdateQuoteSettingsUseCase,
+    {
+      provide: QUOTE_SETTINGS_REPOSITORY,
+      useClass: PrismaQuoteSettingsRepository,
+    },
     { provide: PLAN_OPTIONS_REPOSITORY, useClass: PrismaPlanOptionsRepository },
     // Presupuesto imprimible y aceptación firmada (DX-012).
     GetPlanQuoteUseCase,
+    IssuePlanQuoteUseCase,
     AcceptTreatmentPlanUseCase,
     { provide: PLAN_QUOTE_CLOCK, useValue: () => new Date() },
     // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).

@@ -103,6 +103,32 @@ export class TreatmentPlanDto {
   })
   presentedLocationId!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2026-11-09',
+    description:
+      'DX-379: día de emisión del presupuesto (día civil de la sede), fijado al presentarlo o al imprimirlo por primera vez (POST …/quote/issue). null = plan anterior a DX-379 o borrador nunca impreso',
+  })
+  quoteIssuedOn!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2026-12-09',
+    description:
+      'DX-379: último día en que vale el presupuesto (inclusive). Lo fijan presentar (siempre) o la primera impresión; editar ítems o cambiar el ajuste de días no lo mueve. null = sin validez guardada (nunca vence)',
+  })
+  quoteValidUntil!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-379: el presupuesto venció — hoy, en la zona de la sede del plan (la de su presentación o, sin presentar, la del request), es posterior a quoteValidUntil. Solo puede ser true en borrador (DRAFT) o presentado (PRESENTED): aceptado (con o sin firma), completado, rechazado o cancelado es siempre false. También false si quoteValidUntil es null. Lo calcula el servidor: la web no lo recalcula con la fecha del navegador',
+  })
+  quoteExpired!: boolean;
+
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   rejectedAt!: Date | null;
 

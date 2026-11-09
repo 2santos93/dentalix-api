@@ -4,6 +4,7 @@ import {
   type PlanOptionsRepository,
 } from '../../domain/ports/plan-options-repository.port';
 import { daysSince } from '../../domain/plan-options';
+import { isQuoteExpired } from '../../domain/quote-validity';
 import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 
@@ -31,6 +32,10 @@ export interface PendingFollowUpItem {
   presentedAt: Date;
   presentedLocationId: string;
   daysSincePresented: number;
+  /** DX-379: vencimiento guardado del presupuesto; `null` en planes anteriores. */
+  quoteValidUntil: string | null;
+  /** DX-379: hoy, en la zona de la sede de la presentación, es posterior a `quoteValidUntil`. */
+  quoteExpired: boolean;
   currency: string;
   total: number;
   itemCount: number;
@@ -99,6 +104,16 @@ export class ListPendingFollowUpUseCase {
         presentedAt: row.presentedAt,
         presentedLocationId: row.presentedLocationId,
         daysSincePresented: daysSince(row.presentedAt, now),
+        quoteValidUntil: row.quoteValidUntil,
+        // D-13: con el día civil de la sede de la presentación; sin zona
+        // válida no se marca (no tumba la lista).
+        quoteExpired:
+          row.presentedLocationTimeZone !== null &&
+          isQuoteExpired(
+            row.quoteValidUntil,
+            now,
+            row.presentedLocationTimeZone,
+          ),
         currency: row.currency,
         total: row.total,
         itemCount: row.itemCount,

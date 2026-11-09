@@ -26,13 +26,13 @@ import {
   composeQuoteContent,
   PLAN_NOT_FOUND_MESSAGE,
   PLAN_QUOTE_COMPOSITION,
-  quoteIssuedOn,
+  firstIssueValidity,
+  quoteValidityOf,
 } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
 import {
   computeQuoteHash,
   type QuoteComposition,
 } from '../../../treatment-plans/domain/plan-quote';
-import { PLAN_STATUS_LABELS } from '../../../treatment-plans/domain/plan-status-machine';
 import {
   documentText,
   documentTypeName,
@@ -50,6 +50,8 @@ import type {
 } from '../../domain/entities/signature-request.entity';
 import {
   SIGNATURE_REQUEST_REPOSITORY,
+  budgetNotPresentedMessage,
+  type CreateSignatureRequestOptions,
   type CreateSignatureRequestRepoInput,
   type SignaturePlanOption,
   type SignatureProfessional,
@@ -81,9 +83,7 @@ export const SIGNATURE_BUDGET_ROLE_MESSAGE =
 export const SIGNATURE_BUDGET_EMPTY_MESSAGE =
   'El presupuesto no tiene ítems: agrega al menos un procedimiento antes de enviarlo.';
 /** 409: solo un presupuesto «Presentado» (y sin aceptar) se envía a aceptar. */
-export function budgetNotPresentedMessage(status: TreatmentPlanStatus): string {
-  return `Solo se envía a aceptar un presupuesto «Presentado»: este está «${PLAN_STATUS_LABELS[status]}».`;
-}
+export { budgetNotPresentedMessage };
 /** Título de la solicitud BUDGET (la ficha y la página pública). */
 export const BUDGET_REQUEST_TITLE = 'Presupuesto de tratamiento';
 /**
@@ -490,9 +490,14 @@ export class CreateSignatureRequestUseCase {
     const now = this.clock();
     // DX-524: el nombre de la sede del plan, como en el presupuesto.
     const names = await this.documentTypeNames.get(quote.location.id);
+    // DX-379: la validez guardada del plan (fijada al presentarlo). Un plan
+    // sin ella (anterior a DX-379) la recibe ahora: enviarlo a firmar es
+    // emitirlo, con la misma regla que la primera impresión (M-3); se guarda
+    // en la transacción que crea la solicitud y la foto lleva esas fechas.
+    const firstIssue = firstIssueValidity(quote, now);
     const content = composeQuoteContent(
       quote,
-      quoteIssuedOn(quote, now),
+      firstIssue ?? quoteValidityOf(quote, now),
       names,
       this.composition,
     );
@@ -551,6 +556,7 @@ export class CreateSignatureRequestUseCase {
           ),
         },
       },
+      { planQuoteValidity: firstIssue ?? undefined },
     );
   }
 
@@ -568,11 +574,14 @@ export class CreateSignatureRequestUseCase {
     input: CreateSignatureRequestRepoInput,
     now: Date,
     link: { to: string; vars: SignatureRequestEmailVars },
+    options: CreateSignatureRequestOptions = {},
   ): Promise<CreatedSignatureRequest> {
     const id = randomUUID();
     const mail = await this.email.prepareLink({ ...link, referenceId: id });
-    const created = await this.repo.create({ ...input, id }, (tx, superseded) =>
-      mail.insert(tx, superseded),
+    const created = await this.repo.create(
+      { ...input, id },
+      (tx, superseded) => mail.insert(tx, superseded),
+      options,
     );
     mail.kick();
     const row = await this.repo.findById(created.id);

@@ -37,6 +37,7 @@ import {
 import { TreatmentPlansController } from '../treatment-plans/presentation/treatment-plans.controller';
 import { PlanQuoteController } from '../treatment-plans/presentation/plan-quote.controller';
 import { PriceQuoteController } from '../treatment-plans/presentation/price-quote.controller';
+import { QuoteSettingsController } from '../treatment-plans/presentation/quote-settings.controller';
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
@@ -905,6 +906,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'planId' },
     patient: P,
   },
+  // DX-379: imprimir (la primera impresión fija la validez del presupuesto).
+  'POST /patients/:patientId/treatment-plans/:planId/quote/issue': {
+    action: 'PRINT',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: P,
+  },
   'POST /patients/:patientId/treatment-plans/:planId/acceptance': {
     action: 'SIGN',
     resource: 'TREATMENT_PLAN',
@@ -1649,6 +1657,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':
     'prescription-settings.use-cases.spec.ts y prescription-settings.e2e-spec.ts',
+  // DX-379: CLINIC_SETTINGS con QUOTE_SETTINGS, el campo cambiado y el antes
+  // y el después en códigos QT; sin evento si nada cambió.
+  'PUT /treatment-plan-settings':
+    'quote-settings.use-cases.spec.ts y treatment-plan-quote-validity.e2e-spec.ts',
   // DX-374: CLINIC_SETTINGS con EXCHANGE_RATE_SOURCE y el antes y el después;
   // sin evento si no cambia. DX-384: el plazo de la última tasa registrada
   // deja EXCHANGE_RATE_MAX_AGE con configChange antes/después, escrito por el
@@ -1871,6 +1883,7 @@ const CONTROLLERS: Type[] = [
   TreatmentPlansController,
   PlanQuoteController,
   PriceQuoteController,
+  QuoteSettingsController,
   PaymentsController,
   PaymentReceiptsController,
   ReceiptSettingsController,

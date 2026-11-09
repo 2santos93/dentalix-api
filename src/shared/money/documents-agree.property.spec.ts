@@ -139,7 +139,7 @@ function quoteNet(currency: string, lines: Line[]): number {
         listPriceCurrency: null,
       })),
     },
-    '2026-10-31',
+    { issuedOn: '2026-10-31', validUntil: '2026-11-30' },
   ).totals[0].net;
 }
 

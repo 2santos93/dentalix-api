@@ -19,6 +19,12 @@ import {
 } from '../../domain/plan-quote';
 import { acceptPlanError } from '../../domain/plan-status-machine';
 import {
+  issueQuoteValidity,
+  storedQuoteValidity,
+  validityOnFirstIssue,
+  type QuoteValidity,
+} from '../../domain/quote-validity';
+import {
   PLAN_QUOTE_REPOSITORY,
   type NewPlanAcceptance,
   type PlanQuoteRepository,
@@ -94,24 +100,52 @@ export interface AcceptTreatmentPlanMeta {
   userAgent: string | null;
 }
 
-function todayIn(timeZone: string, now: Date): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
-}
-
-/** Hoy (`YYYY-MM-DD`) en la zona de la sede del presupuesto. */
-export function quoteIssuedOn(source: PlanQuoteSource, now: Date): string {
-  return todayIn(source.location.timeZone, now);
+/**
+ * DX-379: la validez del presupuesto del plan. La guardada al presentarlo o
+ * al imprimirlo por primera vez; sin ella (plan anterior a DX-379 o borrador
+ * nunca impreso), emitido hoy en la zona de la sede con los días del ajuste
+ * de la clínica, como hasta ahora.
+ */
+export function quoteValidityOf(
+  source: PlanQuoteSource,
+  now: Date,
+): QuoteValidity {
+  return (
+    storedQuoteValidity(source.plan) ??
+    issueQuoteValidity(
+      now,
+      source.location.timeZone,
+      source.clinic.quoteValidityDays,
+    )
+  );
 }
 
 /**
- * El presupuesto VIVO del plan, emitido hoy en la zona de la sede, con el
- * nombre visible de hoy del documento (DX-327, R17). Al aceptar se congela
- * este texto (R18).
+ * DX-379 (D-2): la validez que fija emitir el presupuesto por primera vez
+ * (imprimirlo o enviarlo a firmar a distancia), o `null` si no se guarda
+ * nada. La regla es la del dominio (`validityOnFirstIssue`).
+ */
+export function firstIssueValidity(
+  source: PlanQuoteSource,
+  now: Date,
+): QuoteValidity | null {
+  return validityOnFirstIssue(
+    {
+      status: source.plan.status,
+      signed: source.acceptance !== null,
+      itemCount: source.items.length,
+      quoteIssuedOn: source.plan.quoteIssuedOn,
+      quoteValidUntil: source.plan.quoteValidUntil,
+    },
+    now,
+    source.location.timeZone,
+    source.clinic.quoteValidityDays,
+  );
+}
+
+/**
+ * El presupuesto VIVO del plan, con su validez (DX-379) y el nombre visible
+ * de hoy del documento (DX-327, R17). Al aceptar se congela este texto (R18).
  */
 function liveContent(
   source: PlanQuoteSource,
@@ -121,22 +155,22 @@ function liveContent(
 ): QuoteContent {
   return composeQuoteContent(
     source,
-    quoteIssuedOn(source, now),
+    quoteValidityOf(source, now),
     names,
     composition,
   );
 }
 
 /**
- * El presupuesto del plan tal como está AHORA, emitido el día `issuedOn`.
- * DX-415: con el `issuedOn` y la composición de la foto enviada, su hash es
- * el de la foto si y solo si nada del presupuesto cambió (ítems, precios,
+ * El presupuesto del plan tal como está AHORA, con la validez `validity`.
+ * DX-415: con las fechas y la composición de la foto enviada, su hash es el
+ * de la foto si y solo si nada del presupuesto cambió (ítems, precios,
  * convenio, paciente, sede, profesional). DX-502: un enlace v2/v3 enviado
  * antes del despliegue se recompone con la regla de entonces y sigue valiendo.
  */
 export function composeQuoteContent(
   source: PlanQuoteSource,
-  issuedOn: string,
+  validity: QuoteValidity,
   names: ClinicDocumentTypeNames,
   composition: QuoteComposition = 'current',
 ): QuoteContent {
@@ -163,7 +197,7 @@ export function composeQuoteContent(
       professionalName: source.professionalName,
       items: source.items,
     },
-    issuedOn,
+    validity,
     composition,
   );
 }
@@ -272,6 +306,43 @@ export class GetPlanQuoteUseCase {
   }
 }
 
+/**
+ * DX-379 (D-2): imprimir el presupuesto. La primera impresión de un plan en
+ * borrador o presentado, sin firmar, con ítems y sin fechas guardadas, fija
+ * su validez
+ * (hoy en la zona de la sede + los días del ajuste); las siguientes, otro día
+ * o con otro ajuste, imprimen las mismas fechas. Idempotente: devuelve lo
+ * mismo que el GET, que sigue siendo de solo lectura (lo usa también el modal
+ * de aceptar para mostrar el resumen).
+ */
+@Injectable()
+export class IssuePlanQuoteUseCase {
+  constructor(
+    @Inject(PLAN_QUOTE_REPOSITORY)
+    private readonly repo: PlanQuoteRepository,
+    @Inject(PLAN_QUOTE_CLOCK)
+    private readonly now: PlanQuoteClock,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
+  ) {}
+
+  async execute(patientId: string, planId: string): Promise<PlanQuoteDocument> {
+    const now = this.now();
+    const source = await this.repo.issue(patientId, planId, (current) =>
+      firstIssueValidity(current, now),
+    );
+    if (!source) {
+      throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
+    }
+    const names = source.acceptance
+      ? {}
+      : await this.documentTypeNames.get(source.location.id);
+    return toDocument(source, now, names, this.composition);
+  }
+}
+
 function parseSignature(value: string): string {
   try {
     return parseSignaturePng(value, 'la firma del paciente');
@@ -299,7 +370,9 @@ export class AcceptTreatmentPlanUseCase {
   /**
    * Aceptar = firmar la foto del presupuesto. Se recompone el presupuesto con
    * el plan bloqueado y su hash tiene que ser el que se mostró: si algo cambió
-   * entre medias (un ítem, un precio, el día), 409 y no se firma. Firma, hora
+   * entre medias (un ítem, un precio o, sin validez guardada, el día), 409 y
+   * no se firma. DX-379: con la validez guardada se firman sus fechas; esta
+   * porción todavía no bloquea un presupuesto vencido (porción C). Firma, hora
    * (del servidor) y autor (del token) quedan sellados con un segundo hash. El
    * plan pasa a ACCEPTED y sus ítems propuestos, a aceptados; las demás
    * opciones abiertas de su grupo, a REJECTED (DX-040), todo en la misma

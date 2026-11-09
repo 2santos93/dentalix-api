@@ -1,5 +1,6 @@
 import { EMPTY_CLINIC_FISCAL } from '../../../../../shared/clinic/clinic-fiscal';
 import { TreatmentPlanStatus } from '@prisma/client';
+import type { QuoteValidity } from '../../../domain/quote-validity';
 import type {
   AcceptPlanOutcome,
   NewPlanAcceptance,
@@ -17,6 +18,8 @@ export function quoteSource(
       patientId: 'patient-1',
       status: TreatmentPlanStatus.DRAFT,
       currency: 'USD',
+      quoteIssuedOn: null,
+      quoteValidUntil: null,
     },
     items: [
       {
@@ -58,6 +61,7 @@ export function quoteSource(
       logoUrl: null,
       logoKey: null,
       fiscal: EMPTY_CLINIC_FISCAL,
+      quoteValidityDays: 30,
     },
     location: {
       id: 'loc-1',
@@ -140,5 +144,29 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
     };
     this.sources.set(planId, accepted);
     return Promise.resolve({ kind: 'ACCEPTED', source: accepted });
+  }
+
+  /** Como el de Prisma: solo escribe si el plan aún no tiene fechas. */
+  issue(
+    patientId: string,
+    planId: string,
+    decide: (source: PlanQuoteSource) => QuoteValidity | null,
+  ): Promise<PlanQuoteSource | null> {
+    const source = this.find(patientId, planId);
+    if (!source) return Promise.resolve(null);
+    const validity = decide(source);
+    if (!validity || source.plan.quoteIssuedOn !== null) {
+      return Promise.resolve(source);
+    }
+    const issued: PlanQuoteSource = {
+      ...source,
+      plan: {
+        ...source.plan,
+        quoteIssuedOn: validity.issuedOn,
+        quoteValidUntil: validity.validUntil,
+      },
+    };
+    this.sources.set(planId, issued);
+    return Promise.resolve(issued);
   }
 }

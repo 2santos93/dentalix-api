@@ -34,6 +34,13 @@ export interface TreatmentPlan {
   /** Presentado al paciente: cuándo y en qué sede. */
   presentedAt: Date | null;
   presentedLocationId: string | null;
+  /**
+   * DX-379: validez del presupuesto (`YYYY-MM-DD`, días de la sede), fijada al
+   * presentarlo o al imprimirlo por primera vez; las dos o ninguna. `null` =
+   * plan anterior a DX-379 o borrador nunca impreso (nunca vencido).
+   */
+  quoteIssuedOn: string | null;
+  quoteValidUntil: string | null;
   /** Rechazado: cuándo, por qué y la nota del personal. */
   rejectedAt: Date | null;
   rejectionReason: TreatmentPlanRejectionReason | null;

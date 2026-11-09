@@ -63,6 +63,7 @@ async function seedClinic(
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
     select: { id: true },
   });
+  // Solo el id: el cliente leería columnas del plan posteriores (DX-379).
   const plan = await db.treatmentPlan.create({
     data: {
       tenantId: tenant.id,
@@ -70,6 +71,7 @@ async function seedClinic(
       currency: 'USD',
       status: 'ACCEPTED',
     },
+    select: { id: true },
   });
   return {
     tenantId: tenant.id,

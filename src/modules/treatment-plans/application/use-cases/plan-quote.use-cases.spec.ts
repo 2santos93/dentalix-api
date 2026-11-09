@@ -8,6 +8,7 @@ import {
   AcceptTreatmentPlanUseCase,
   composeQuoteContent,
   GetPlanQuoteUseCase,
+  IssuePlanQuoteUseCase,
   PLAN_ACCEPTED_CONFLICT_MESSAGE,
   QUOTE_CHANGED_MESSAGE,
 } from './plan-quote.use-cases';
@@ -126,7 +127,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
             professionalName: 'Dra. Gómez',
             items: quoteSource().items,
           },
-          '2026-10-16',
+          { issuedOn: '2026-10-16', validUntil: '2026-11-15' },
         ),
       ),
     );
@@ -390,6 +391,8 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           patientId: 'patient-1',
           status: TreatmentPlanStatus.ACCEPTED,
           currency: 'USD',
+          quoteIssuedOn: null,
+          quoteValidUntil: null,
         },
         acceptance: {
           content: v1,
@@ -570,7 +573,7 @@ describe('DX-502: plan en EUR con el catálogo en VES', () => {
             professionalName: null,
             items: source.items,
           },
-          '2026-10-01',
+          { issuedOn: '2026-10-01', validUntil: '2026-10-31' },
           'legacy',
         ),
       ),
@@ -860,7 +863,12 @@ describe('DX-502: PLAN_QUOTE_COMPOSE_V4 (con qué versión se componen los nuevo
       expect(doc.version).toBe(version);
       expect(doc.contentHash).toBe(
         computeQuoteHash(
-          composeQuoteContent(source(fiscal), '2026-10-16', {}, 'legacy'),
+          composeQuoteContent(
+            source(fiscal),
+            { issuedOn: '2026-10-16', validUntil: '2026-11-15' },
+            {},
+            'legacy',
+          ),
         ),
       );
       // Ahorro como antes (lo sella la v2/v3) y la moneda del precio de lista
@@ -924,5 +932,227 @@ describe('DX-502: PLAN_QUOTE_COMPOSE_V4 (con qué versión se componen los nuevo
     expect(printed.contentHash).toBe(shown.contentHash);
     expect(printed.items[0].listPriceCurrency).toBe('VES');
     expect(printed.acceptance?.integrityOk).toBe(true);
+  });
+});
+
+describe('DX-379: validez guardada del presupuesto', () => {
+  const STORED = { quoteIssuedOn: '2026-10-02', quoteValidUntil: '2026-10-17' };
+  const presented = (overrides: Partial<typeof STORED> = {}) =>
+    quoteSource({
+      plan: {
+        ...quoteSource().plan,
+        status: TreatmentPlanStatus.PRESENTED,
+        ...STORED,
+        ...overrides,
+      },
+    });
+
+  it('con fechas guardadas, el presupuesto vivo las usa aunque se abra otro día', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(presented());
+    const day1 = new GetPlanQuoteUseCase(repo, () => NOW, names);
+    const day9 = new GetPlanQuoteUseCase(
+      repo,
+      () => new Date('2026-10-24T14:00:00.000Z'),
+      names,
+    );
+    const a = await day1.execute('patient-1', 'plan-1');
+    const b = await day9.execute('patient-1', 'plan-1');
+    expect(a.issuedOn).toBe('2026-10-02');
+    expect(a.validUntil).toBe('2026-10-17');
+    expect(a.validityDays).toBe(15);
+    // El hash del presupuesto vivo ya no cambia de un día a otro.
+    expect(b.contentHash).toBe(a.contentHash);
+    expect(b.issuedOn).toBe('2026-10-02');
+  });
+
+  it('sin fechas guardadas (plan anterior), se compone como hoy con los días del ajuste de la clínica', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(
+      quoteSource({
+        clinic: { ...quoteSource().clinic, quoteValidityDays: 10 },
+      }),
+    );
+    const doc = await new GetPlanQuoteUseCase(repo, () => NOW, names).execute(
+      'patient-1',
+      'plan-1',
+    );
+    expect(doc.issuedOn).toBe('2026-10-16');
+    expect(doc.validUntil).toBe('2026-10-26');
+    expect(doc.validityDays).toBe(10);
+  });
+
+  it('el GET es solo lectura: no guarda fechas', async () => {
+    const { repo, get } = setup();
+    await get.execute('patient-1', 'plan-1');
+    expect(repo.sources.get('plan-1')?.plan.quoteIssuedOn).toBeNull();
+  });
+
+  it('se firma la validez guardada: mostrar un día y firmar otro no da 409', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(presented());
+    const shown = await new GetPlanQuoteUseCase(repo, () => NOW, names).execute(
+      'patient-1',
+      'plan-1',
+    );
+    const accept = new AcceptTreatmentPlanUseCase(
+      repo,
+      () => new Date('2026-10-17T03:59:00.000Z'), // 16 oct 23:59 en la sede
+      names,
+    );
+    const doc = await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    expect(doc.acceptance).not.toBeNull();
+    expect(repo.inserted[0].content).toMatchObject({
+      issuedOn: '2026-10-02',
+      validUntil: '2026-10-17',
+      validityDays: 15,
+    });
+  });
+
+  it('esta porción no bloquea aceptar un presupuesto vencido (llega en la porción C)', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(
+      presented({ quoteIssuedOn: '2026-09-01', quoteValidUntil: '2026-10-01' }),
+    );
+    const get = new GetPlanQuoteUseCase(repo, () => NOW, names);
+    const shown = await get.execute('patient-1', 'plan-1');
+    const accept = new AcceptTreatmentPlanUseCase(repo, () => NOW, names);
+    await expect(
+      accept.execute(
+        'patient-1',
+        'plan-1',
+        {
+          signerName: 'Ana Pérez',
+          signature: PNG,
+          contentHash: shown.contentHash,
+        },
+        META,
+      ),
+    ).resolves.toMatchObject({ planStatus: TreatmentPlanStatus.ACCEPTED });
+  });
+});
+
+describe('IssuePlanQuoteUseCase (DX-379, D-2: imprimir por primera vez)', () => {
+  function issueAt(repo: InMemoryPlanQuoteRepository, at: Date) {
+    return new IssuePlanQuoteUseCase(repo, () => at, names);
+  }
+
+  it('un borrador sin fechas las fija con hoy (zona de la sede) + los días del ajuste y devuelve lo mismo que el GET', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(
+      quoteSource({
+        clinic: { ...quoteSource().clinic, quoteValidityDays: 20 },
+      }),
+    );
+    // 23:30 del 15 de octubre en la sede.
+    const at = new Date('2026-10-16T03:30:00.000Z');
+    const doc = await issueAt(repo, at).execute('patient-1', 'plan-1');
+    expect(repo.sources.get('plan-1')?.plan).toMatchObject({
+      quoteIssuedOn: '2026-10-15',
+      quoteValidUntil: '2026-11-04',
+    });
+    expect(doc.issuedOn).toBe('2026-10-15');
+    expect(doc.validUntil).toBe('2026-11-04');
+    const viaGet = await new GetPlanQuoteUseCase(repo, () => at, names).execute(
+      'patient-1',
+      'plan-1',
+    );
+    expect(doc).toEqual(viaGet);
+  });
+
+  it('es idempotente: reimprimir otro día (o con otro ajuste) devuelve las mismas fechas', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(quoteSource());
+    const first = await issueAt(repo, NOW).execute('patient-1', 'plan-1');
+    const source = repo.sources.get('plan-1')!;
+    repo.add({
+      ...source,
+      clinic: { ...source.clinic, quoteValidityDays: 90 },
+    });
+    const again = await issueAt(
+      repo,
+      new Date('2026-11-20T14:00:00.000Z'),
+    ).execute('patient-1', 'plan-1');
+    expect(again.issuedOn).toBe(first.issuedOn);
+    expect(again.validUntil).toBe(first.validUntil);
+    expect(again.contentHash).toBe(first.contentHash);
+  });
+
+  it('un plan presentado con fechas no se toca', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(
+      quoteSource({
+        plan: {
+          ...quoteSource().plan,
+          status: TreatmentPlanStatus.PRESENTED,
+          quoteIssuedOn: '2026-10-01',
+          quoteValidUntil: '2026-10-31',
+        },
+      }),
+    );
+    const doc = await issueAt(repo, NOW).execute('patient-1', 'plan-1');
+    expect(doc.issuedOn).toBe('2026-10-01');
+    expect(repo.sources.get('plan-1')?.plan.quoteIssuedOn).toBe('2026-10-01');
+  });
+
+  it.each([
+    TreatmentPlanStatus.ACCEPTED,
+    TreatmentPlanStatus.REJECTED,
+    TreatmentPlanStatus.CANCELLED,
+    TreatmentPlanStatus.COMPLETED,
+  ])('un plan %s no guarda fechas (solo se imprime)', async (status) => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(quoteSource({ plan: { ...quoteSource().plan, status } }));
+    await issueAt(repo, NOW).execute('patient-1', 'plan-1');
+    expect(repo.sources.get('plan-1')?.plan.quoteIssuedOn).toBeNull();
+  });
+
+  it('un plan firmado no guarda fechas: se imprime su foto', async () => {
+    const { repo, get, accept } = setup();
+    const shown = await get.execute('patient-1', 'plan-1');
+    await accept.execute(
+      'patient-1',
+      'plan-1',
+      {
+        signerName: 'Ana Pérez',
+        signature: PNG,
+        contentHash: shown.contentHash,
+      },
+      META,
+    );
+    // Aunque el estado vuelva a leerse como borrador, la firma manda.
+    const signed = repo.sources.get('plan-1')!;
+    repo.add({
+      ...signed,
+      plan: { ...signed.plan, status: TreatmentPlanStatus.DRAFT },
+    });
+    const doc = await issueAt(repo, NOW).execute('patient-1', 'plan-1');
+    expect(repo.sources.get('plan-1')?.plan.quoteIssuedOn).toBeNull();
+    expect(doc.acceptance).not.toBeNull();
+  });
+
+  it('M-5: un borrador sin ítems se imprime (en cero) sin guardar fechas', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(quoteSource({ items: [] }));
+    const doc = await issueAt(repo, NOW).execute('patient-1', 'plan-1');
+    expect(doc.totals[0].net).toBe(0);
+    expect(repo.sources.get('plan-1')?.plan.quoteIssuedOn).toBeNull();
+  });
+
+  it('404 si el plan no es de este paciente', async () => {
+    const repo = new InMemoryPlanQuoteRepository();
+    repo.add(quoteSource());
+    await expect(
+      issueAt(repo, NOW).execute('patient-2', 'plan-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

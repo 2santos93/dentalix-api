@@ -1,3 +1,5 @@
+import { PLAN_STATUS_LABELS } from '../../../treatment-plans/domain/plan-status-machine';
+import type { QuoteValidity } from '../../../treatment-plans/domain/quote-validity';
 import type {
   ClinicRole,
   ConsentSignerType,
@@ -55,6 +57,27 @@ export interface SignaturePlanOption {
   optionLabel: string | null;
   createdAt: Date;
 }
+
+/** Lo que se hace además en la transacción de `create`. */
+export interface CreateSignatureRequestOptions {
+  /**
+   * DX-379 (M-3): enviar a firmar un presupuesto (BUDGET) es emitirlo. Si el
+   * plan aún no tiene validez guardada, se guarda esta (la de la foto) en la
+   * MISMA transacción, solo si sigue «Presentado» y sin aceptar (si no, 409
+   * `budgetNotPresentedMessage`); si otro la guardó entre medias y es otra,
+   * 409 `SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE`. En los dos casos no se
+   * crea nada.
+   */
+  planQuoteValidity?: QuoteValidity;
+}
+
+/** 409: solo un presupuesto «Presentado» (y sin aceptar) se envía a aceptar. */
+export function budgetNotPresentedMessage(status: TreatmentPlanStatus): string {
+  return `Solo se envía a aceptar un presupuesto «Presentado»: este está «${PLAN_STATUS_LABELS[status]}».`;
+}
+
+export const SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE =
+  'La validez del presupuesto cambió mientras se enviaba: vuelve a enviarlo.';
 
 export interface CreateSignatureRequestRepoInput {
   /**
@@ -246,6 +269,7 @@ export interface SignatureRequestRepository {
       tx: Prisma.TransactionClient,
       supersededIds: string[],
     ) => Promise<void>,
+    options?: CreateSignatureRequestOptions,
   ): Promise<{ id: string; supersededIds: string[] }>;
 
   /** Del paciente, las más recientes primero. */

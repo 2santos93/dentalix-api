@@ -11,9 +11,7 @@ import {
   lineCents,
   linesTotalCents,
 } from '../../../shared/money/line-rounding';
-
-/** «Válido 30 días»: el presupuesto caduca 30 días naturales después de emitirse. */
-export const QUOTE_VALIDITY_DAYS = 30;
+import { quoteValidityDays, type QuoteValidity } from './quote-validity';
 
 const QUOTE_HASH_VERSION = 'dentalix-plan-quote-v1';
 /** DX-105: el hash v2 sella además el convenio, el precio de lista y el ahorro. */
@@ -168,12 +166,6 @@ export interface QuoteContent {
   totals: QuoteTotal[];
 }
 
-function addDays(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 /**
  * El convenio del presupuesto: el del primer ítem que lo tiene. Si hay varios
  * convenios distintos, el nombre junta todos (en orden de aparición) y el
@@ -215,10 +207,14 @@ function savesByAgreement(
  * total nunca arrastra deriva de coma flotante; un plan sin ítems da totales
  * en cero. `composition` es la vigente salvo para recomponer un enlace v2/v3
  * enviado antes de DX-502 (DX-415) y compararlo con su hash.
+ *
+ * DX-379: la validez llega hecha (las fechas guardadas en el plan o, sin
+ * ellas, hoy + el ajuste de la clínica): esta función no decide cuánto vale
+ * un presupuesto. «Válido N días» sale de las dos fechas.
  */
 export function buildQuoteContent(
   source: QuoteContentSource,
-  issuedOn: string,
+  validity: QuoteValidity,
   composition: QuoteComposition = 'current',
 ): QuoteContent {
   const items: QuoteItem[] = source.items.map((item) => ({
@@ -264,9 +260,9 @@ export function buildQuoteContent(
     patient: { ...source.patient },
     professionalName: source.professionalName,
     agreement: agreementOf(source.items),
-    issuedOn,
-    validUntil: addDays(issuedOn, QUOTE_VALIDITY_DAYS),
-    validityDays: QUOTE_VALIDITY_DAYS,
+    issuedOn: validity.issuedOn,
+    validUntil: validity.validUntil,
+    validityDays: quoteValidityDays(validity),
     items,
     totals: [
       {
