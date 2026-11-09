@@ -7,9 +7,16 @@ import {
   parseQuoteContent,
   QUOTE_HASH_VERSION_V2,
   type QuoteContent,
-  QUOTE_VALIDITY_DAYS,
   type QuoteContentSource,
 } from './plan-quote';
+import { PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS } from './quote-validity';
+import { addCivilDays } from '../../../shared/time/civil-day';
+
+/** Emitido `issuedOn`, válido los 30 días de plataforma. */
+const valid30 = (issuedOn: string) => ({
+  issuedOn,
+  validUntil: addCivilDays(issuedOn, PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS),
+});
 
 function source(
   overrides: Partial<QuoteContentSource> = {},
@@ -56,9 +63,9 @@ function source(
 
 describe('buildQuoteContent (DX-012)', () => {
   it('calcula subtotales, totales por moneda y la validez de 30 días', () => {
-    const content = buildQuoteContent(source(), '2026-10-16');
+    const content = buildQuoteContent(source(), valid30('2026-10-16'));
 
-    expect(QUOTE_VALIDITY_DAYS).toBe(30);
+    expect(PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS).toBe(30);
     expect(content.issuedOn).toBe('2026-10-16');
     expect(content.validUntil).toBe('2026-11-15');
     expect(content.validityDays).toBe(30);
@@ -90,8 +97,30 @@ describe('buildQuoteContent (DX-012)', () => {
     ]);
   });
 
+  it('DX-379: la validez es la que recibe (guardada en el plan), y los días salen de las dos fechas', () => {
+    const content = buildQuoteContent(source(), {
+      issuedOn: '2026-11-02',
+      validUntil: '2026-11-17',
+    });
+    expect(content.issuedOn).toBe('2026-11-02');
+    expect(content.validUntil).toBe('2026-11-17');
+    expect(content.validityDays).toBe(15);
+  });
+
+  it('DX-379: el vencimiento sigue sellado en el hash', () => {
+    const stored = { issuedOn: '2026-11-02', validUntil: '2026-12-02' };
+    expect(computeQuoteHash(buildQuoteContent(source(), stored))).not.toBe(
+      computeQuoteHash(
+        buildQuoteContent(source(), { ...stored, validUntil: '2026-12-03' }),
+      ),
+    );
+  });
+
   it('un plan sin ítems da totales en cero (no una lista vacía)', () => {
-    const content = buildQuoteContent(source({ items: [] }), '2026-12-20');
+    const content = buildQuoteContent(
+      source({ items: [] }),
+      valid30('2026-12-20'),
+    );
     expect(content.items).toEqual([]);
     expect(content.totals).toEqual([
       { currency: 'VES', gross: 0, discount: 0, net: 0, agreementSaving: 0 },
@@ -113,20 +142,20 @@ describe('buildQuoteContent (DX-012)', () => {
       agreementPayerName: null,
       listPriceCurrency: null,
     }));
-    const content = buildQuoteContent(source({ items }), '2026-10-16');
+    const content = buildQuoteContent(source({ items }), valid30('2026-10-16'));
     expect(content.totals[0].net).toBe(1);
   });
 });
 
 describe('computeQuoteHash', () => {
-  const base = buildQuoteContent(source(), '2026-10-16');
+  const base = buildQuoteContent(source(), valid30('2026-10-16'));
 
   it('es un SHA-256 hex estable para el mismo contenido', () => {
     const hash = computeQuoteHash(base);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(computeQuoteHash(buildQuoteContent(source(), '2026-10-16'))).toBe(
-      hash,
-    );
+    expect(
+      computeQuoteHash(buildQuoteContent(source(), valid30('2026-10-16'))),
+    ).toBe(hash);
   });
 
   it('cambia si cambia un precio, un descuento, un diente, la fecha o el paciente', () => {
@@ -148,11 +177,11 @@ describe('computeQuoteHash', () => {
     ];
     for (const variant of variants) {
       expect(
-        computeQuoteHash(buildQuoteContent(variant, '2026-10-16')),
+        computeQuoteHash(buildQuoteContent(variant, valid30('2026-10-16'))),
       ).not.toBe(hash);
     }
     expect(
-      computeQuoteHash(buildQuoteContent(source(), '2026-10-17')),
+      computeQuoteHash(buildQuoteContent(source(), valid30('2026-10-17'))),
     ).not.toBe(hash);
   });
 
@@ -303,7 +332,11 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     });
 
   it('compone el convenio, el precio de lista y el ahorro (solo suma si baja)', () => {
-    const content = buildQuoteContent(withAgreement(), '2026-10-16', 'legacy');
+    const content = buildQuoteContent(
+      withAgreement(),
+      valid30('2026-10-16'),
+      'legacy',
+    );
     expect(content.version).toBe(2);
     expect(content.agreement).toEqual({
       name: 'Surco Salud −15 %',
@@ -320,7 +353,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     const typed = (price: number) =>
       buildQuoteContent(
         source({ items: [{ ...items[0], price }] }),
-        '2026-10-16',
+        valid30('2026-10-16'),
         'legacy',
       ).totals[0].agreementSaving;
     // lista 1000, convenio 850: cobrar 1000 no ahorra nada; 900 ahorra 100.
@@ -337,7 +370,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
           { ...source().items[0], basePrice: 3500000, referencePrice: 3500000 },
         ],
       }),
-      '2026-10-16',
+      valid30('2026-10-16'),
       'legacy',
     );
     expect(content.agreement).toBeNull();
@@ -355,7 +388,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
     items[2] = { ...items[2], agreementName: 'Surco Salud −15 %' };
     const content = buildQuoteContent(
       source({ items }),
-      '2026-10-16',
+      valid30('2026-10-16'),
       'legacy',
     );
     expect(content.agreement).toEqual({
@@ -365,7 +398,11 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
   });
 
   it('el hash v2 incluye convenio, precio de lista y ahorro', () => {
-    const base = buildQuoteContent(withAgreement(), '2026-10-16', 'legacy');
+    const base = buildQuoteContent(
+      withAgreement(),
+      valid30('2026-10-16'),
+      'legacy',
+    );
     const hash = computeQuoteHash(base);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
     const variants: QuoteContent[] = [
@@ -394,7 +431,7 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
   });
 
   it('v1 y v2 de los mismos datos no colisionan (versión sellada)', () => {
-    const v2 = buildQuoteContent(source(), '2026-10-16', 'legacy');
+    const v2 = buildQuoteContent(source(), valid30('2026-10-16'), 'legacy');
     expect(computeQuoteHash({ ...v2, version: 1 })).not.toBe(
       computeQuoteHash(v2),
     );
@@ -402,7 +439,11 @@ describe('presupuesto v2 con convenio (DX-105)', () => {
   });
 
   it('sobrevive a un viaje por JSON y se lee como v2', () => {
-    const base = buildQuoteContent(withAgreement(), '2026-10-16', 'legacy');
+    const base = buildQuoteContent(
+      withAgreement(),
+      valid30('2026-10-16'),
+      'legacy',
+    );
     const back = parseQuoteContent(JSON.parse(JSON.stringify(base)));
     expect(back).toEqual(base);
     expect(computeQuoteHash(back)).toBe(computeQuoteHash(base));
@@ -427,10 +468,10 @@ describe('datos fiscales congelados (DX-019)', () => {
   const EMPTY = { ...FISCAL, legalName: null, taxIdLabel: null, taxId: null };
 
   it('recompuesto con la regla de antes de DX-502: sin datos v2 y el hash no cambia; con datos, v3 y los sella', () => {
-    const plain = buildQuoteContent(source(), '2026-10-16', 'legacy');
+    const plain = buildQuoteContent(source(), valid30('2026-10-16'), 'legacy');
     const empty = buildQuoteContent(
       { ...source(), clinicFiscal: EMPTY },
-      '2026-10-16',
+      valid30('2026-10-16'),
       'legacy',
     );
     expect(empty.version).toBe(2);
@@ -439,7 +480,7 @@ describe('datos fiscales congelados (DX-019)', () => {
 
     const frozen = buildQuoteContent(
       { ...source(), clinicFiscal: FISCAL },
-      '2026-10-16',
+      valid30('2026-10-16'),
       'legacy',
     );
     expect(frozen.version).toBe(3);
@@ -451,7 +492,7 @@ describe('datos fiscales congelados (DX-019)', () => {
   it('una foto v3 guardada se lee igual y sigue validando; una v2 da null', () => {
     const frozen = buildQuoteContent(
       { ...source(), clinicFiscal: FISCAL },
-      '2026-10-16',
+      valid30('2026-10-16'),
       'legacy',
     );
     const stored: unknown = JSON.parse(JSON.stringify(frozen));
@@ -461,17 +502,19 @@ describe('datos fiscales congelados (DX-019)', () => {
     expect(
       parseQuoteContent(
         JSON.parse(
-          JSON.stringify(buildQuoteContent(source(), '2026-10-16', 'legacy')),
+          JSON.stringify(
+            buildQuoteContent(source(), valid30('2026-10-16'), 'legacy'),
+          ),
         ),
       ).clinicFiscal,
     ).toBeNull();
   });
 
   it('la v4 (DX-502) sella los datos fiscales si los hay y se lee con ellos', () => {
-    const plain = buildQuoteContent(source(), '2026-10-16');
+    const plain = buildQuoteContent(source(), valid30('2026-10-16'));
     const empty = buildQuoteContent(
       { ...source(), clinicFiscal: EMPTY },
-      '2026-10-16',
+      valid30('2026-10-16'),
     );
     expect(plain.version).toBe(4);
     expect(empty.version).toBe(4);
@@ -479,7 +522,7 @@ describe('datos fiscales congelados (DX-019)', () => {
     expect(computeQuoteHash(empty)).toBe(computeQuoteHash(plain));
     const frozen = buildQuoteContent(
       { ...source(), clinicFiscal: FISCAL },
-      '2026-10-16',
+      valid30('2026-10-16'),
     );
     expect(frozen.version).toBe(4);
     expect(computeQuoteHash(frozen)).not.toBe(computeQuoteHash(plain));
@@ -496,7 +539,7 @@ describe('datos fiscales congelados (DX-019)', () => {
   it('la v4 no colisiona con la v3 de los mismos datos fiscales', () => {
     const v4 = buildQuoteContent(
       { ...source(), clinicFiscal: FISCAL },
-      '2026-10-16',
+      valid30('2026-10-16'),
     );
     expect(computeQuoteHash({ ...v4, version: 3 })).not.toBe(
       computeQuoteHash(v4),
@@ -535,7 +578,7 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
     });
 
   it('se compone como v4 y cada precio de lista lleva la moneda del catálogo', () => {
-    const content = buildQuoteContent(eurPlan(), '2026-11-01');
+    const content = buildQuoteContent(eurPlan(), valid30('2026-11-01'));
     expect(content.version).toBe(4);
     expect(
       content.items.map((i) => [i.listPrice, i.listPriceCurrency]),
@@ -546,7 +589,7 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
   });
 
   it('el ahorro por convenio no resta un precio de lista en otra moneda', () => {
-    const content = buildQuoteContent(eurPlan(), '2026-11-01');
+    const content = buildQuoteContent(eurPlan(), valid30('2026-11-01'));
     // Solo el ítem con el catálogo en EUR: 100 − 85. Nunca 80.000 VES − 100,55 EUR.
     expect(content.totals[0].agreementSaving).toBe(15);
   });
@@ -555,14 +598,14 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
     const [ves] = eurPlan().items;
     const content = buildQuoteContent(
       source({ currency: 'EUR', items: [{ ...ves, listPriceCurrency: null }] }),
-      '2026-11-01',
+      valid30('2026-11-01'),
     );
     expect(content.items[0].listPriceCurrency).toBeNull();
     expect(content.totals[0].agreementSaving).toBe(0);
   });
 
   it('el hash v4 sella la moneda del precio de lista', () => {
-    const base = buildQuoteContent(eurPlan(), '2026-11-01');
+    const base = buildQuoteContent(eurPlan(), valid30('2026-11-01'));
     const changed: QuoteContent = {
       ...base,
       items: [
@@ -575,7 +618,7 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
   });
 
   it('sobrevive a un viaje por JSON y se lee como v4', () => {
-    const base = buildQuoteContent(eurPlan(), '2026-11-01');
+    const base = buildQuoteContent(eurPlan(), valid30('2026-11-01'));
     const back = parseQuoteContent(JSON.parse(JSON.stringify(base)));
     expect(back).toEqual(base);
     expect(computeQuoteHash(back)).toBe(computeQuoteHash(base));
@@ -583,7 +626,7 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
 
   it('un v4 sin la moneda del precio de lista se rechaza', () => {
     const base = JSON.parse(
-      JSON.stringify(buildQuoteContent(eurPlan(), '2026-11-01')),
+      JSON.stringify(buildQuoteContent(eurPlan(), valid30('2026-11-01'))),
     ) as { items: Record<string, unknown>[] };
     delete base.items[0].listPriceCurrency;
     expect(() => parseQuoteContent(base)).toThrow(/campo listPriceCurrency/);
@@ -604,7 +647,7 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
           },
         ],
       }),
-      '2026-10-16',
+      valid30('2026-10-16'),
       'legacy',
     );
     expect(content.items[0].listPriceCurrency).toBeNull();
@@ -638,7 +681,7 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
           },
         ],
       }),
-      '2026-10-16',
+      valid30('2026-10-16'),
       'legacy',
     );
     expect(content.version).toBe(3);
@@ -650,7 +693,7 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
   });
 
   it('un v3, v2 o v1 se lee sin moneda y se completa con la de los ítems del plan', () => {
-    const v2 = buildQuoteContent(eurPlan(), '2026-11-01', 'legacy');
+    const v2 = buildQuoteContent(eurPlan(), valid30('2026-11-01'), 'legacy');
     const stored = parseQuoteContent(JSON.parse(JSON.stringify(v2)));
     expect(stored.items.map((i) => i.listPriceCurrency)).toEqual([null, null]);
     const filled = withListPriceCurrencies(stored, [
@@ -662,7 +705,7 @@ describe('presupuesto v4 con la moneda del catálogo (DX-502)', () => {
   });
 
   it('un v4 no se completa: conserva la moneda con la que se emitió', () => {
-    const v4 = buildQuoteContent(eurPlan(), '2026-11-01');
+    const v4 = buildQuoteContent(eurPlan(), valid30('2026-11-01'));
     const filled = withListPriceCurrencies(v4, [
       { id: 'i1', listPriceCurrency: 'USD' },
     ]);

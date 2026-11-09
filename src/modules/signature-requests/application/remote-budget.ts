@@ -39,7 +39,9 @@ export function sentBudget(request: BudgetRequest): QuoteContent | null {
 
 /**
  * ¿Sigue el plan vivo siendo EXACTAMENTE el presupuesto enviado (DX-415)? Se
- * recompone con el día de emisión de la foto (si no, cambiaría cada día): su
+ * recompone con la validez de la foto, emisión y vencimiento (si no,
+ * cambiaría cada día; DX-379: y un enlace enviado antes de guardar la validez
+ * en el plan, o con otro ajuste de días, sigue valiendo): su
  * hash coincide con el enviado si y solo si no cambió nada de lo que el
  * presupuesto muestra (ítems, precios, descuentos, convenio, paciente, sede o
  * profesional). Además el plan tiene que seguir «Presentado» y sin aceptar:
@@ -65,7 +67,7 @@ export function budgetStillMatches(
   if (sent.version === 1) return false;
   const live = composeQuoteContent(
     quote,
-    sent.issuedOn,
+    { issuedOn: sent.issuedOn, validUntil: sent.validUntil },
     names,
     sent.version === 4 ? 'current' : 'legacy',
   );

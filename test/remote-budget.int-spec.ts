@@ -13,7 +13,7 @@ import {
 } from '../src/modules/signature-requests/domain/signature-token';
 import {
   composeQuoteContent,
-  quoteIssuedOn,
+  quoteValidityOf,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import { computeQuoteHash } from '../src/modules/treatment-plans/domain/plan-quote';
 import {
@@ -142,7 +142,7 @@ async function sendBudget(s: Seeded, planId: string) {
   if (!budget) throw new Error('sin presupuesto');
   const content = composeQuoteContent(
     budget.quote,
-    quoteIssuedOn(budget.quote, new Date()),
+    quoteValidityOf(budget.quote, new Date()),
     NAMES,
   );
   const now = new Date();

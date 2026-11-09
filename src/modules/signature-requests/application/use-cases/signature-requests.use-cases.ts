@@ -26,7 +26,7 @@ import {
   composeQuoteContent,
   PLAN_NOT_FOUND_MESSAGE,
   PLAN_QUOTE_COMPOSITION,
-  quoteIssuedOn,
+  quoteValidityOf,
 } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
 import {
   computeQuoteHash,
@@ -490,9 +490,11 @@ export class CreateSignatureRequestUseCase {
     const now = this.clock();
     // DX-524: el nombre de la sede del plan, como en el presupuesto.
     const names = await this.documentTypeNames.get(quote.location.id);
+    // DX-379: la validez guardada del plan (fijada al presentarlo), o la de
+    // hoy con el ajuste de la clínica si es anterior a DX-379.
     const content = composeQuoteContent(
       quote,
-      quoteIssuedOn(quote, now),
+      quoteValidityOf(quote, now),
       names,
       this.composition,
     );

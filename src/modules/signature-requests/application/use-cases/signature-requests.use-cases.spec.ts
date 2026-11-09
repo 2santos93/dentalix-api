@@ -860,6 +860,8 @@ function presentedBudget(ctx: Ctx, planId = 'plan-1') {
         patientId: 'p1',
         status: 'PRESENTED',
         currency: 'USD',
+        quoteIssuedOn: null,
+        quoteValidUntil: null,
       },
     }),
     location: { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' },
@@ -917,6 +919,47 @@ describe('presupuesto a distancia (DX-415)', () => {
     expect(JSON.stringify(ctx.links[0].vars)).not.toMatch(
       /implante|resina|3500000|presupuesto/i,
     );
+  });
+
+  it('DX-379: la foto enviada lleva la validez guardada en el plan, no hoy + días', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-10-20',
+        quoteValidUntil: '2026-11-04',
+      },
+    };
+    await sendBudget(ctx);
+    expect(ctx.repo.rows[0].budgetContent).toMatchObject({
+      issuedOn: '2026-10-20',
+      validUntil: '2026-11-04',
+      validityDays: 15,
+    });
+  });
+
+  it('DX-379 (G.5): un enlace enviado sin validez guardada sigue valiendo aunque luego cambie el ajuste o se guarden fechas', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    const { token } = await verifiedBudget(ctx);
+    expect(ctx.repo.rows[0].budgetContent).toMatchObject({
+      issuedOn: '2026-10-30',
+      validUntil: '2026-11-29',
+    });
+    budget.quote = {
+      ...budget.quote,
+      clinic: { ...budget.quote.clinic, quoteValidityDays: 10 },
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-10-31',
+        quoteValidUntil: '2026-11-10',
+      },
+    };
+    await expect(
+      ctx.inTenant(() => ctx.view.execute(token)),
+    ).resolves.toBeDefined();
   });
 
   it('solo quien decide el plan (odontólogo o ADMIN) lo envía: recepción y asistente, 403 en español; nada se crea', async () => {
@@ -1068,8 +1111,11 @@ describe('presupuesto a distancia (DX-415)', () => {
       const budget = eurBudget(ctx);
       await sendBudget(ctx);
       const [row] = ctx.repo.rows;
-      const sent = row.budgetContent as { issuedOn: string };
-      const v2 = composeQuoteContent(budget.quote, sent.issuedOn, {}, 'legacy');
+      const sent = row.budgetContent as {
+        issuedOn: string;
+        validUntil: string;
+      };
+      const v2 = composeQuoteContent(budget.quote, sent, {}, 'legacy');
       row.budgetContent = JSON.parse(JSON.stringify(v2)) as never;
       row.budgetContentHash = computeQuoteHash(v2);
       const token = tokenOf(ctx);
@@ -1112,8 +1158,11 @@ describe('presupuesto a distancia (DX-415)', () => {
       };
       await sendBudget(ctx);
       const [row] = ctx.repo.rows;
-      const sent = row.budgetContent as { issuedOn: string };
-      const v2 = composeQuoteContent(budget.quote, sent.issuedOn, {}, 'legacy');
+      const sent = row.budgetContent as {
+        issuedOn: string;
+        validUntil: string;
+      };
+      const v2 = composeQuoteContent(budget.quote, sent, {}, 'legacy');
       row.budgetContent = JSON.parse(JSON.stringify(v2)) as never;
       row.budgetContentHash = computeQuoteHash(v2);
       const token = tokenOf(ctx);
@@ -1141,9 +1190,7 @@ describe('presupuesto a distancia (DX-415)', () => {
       const sent = parseQuoteContent(row.budgetContent);
       expect(sent.version).toBe(2);
       expect(row.budgetContentHash).toBe(
-        computeQuoteHash(
-          composeQuoteContent(budget.quote, sent.issuedOn, {}, 'legacy'),
-        ),
+        computeQuoteHash(composeQuoteContent(budget.quote, sent, {}, 'legacy')),
       );
       const token = tokenOf(ctx);
       await expect(
@@ -1156,9 +1203,12 @@ describe('presupuesto a distancia (DX-415)', () => {
       const budget = eurBudget(ctx);
       await sendBudget(ctx);
       const [row] = ctx.repo.rows;
-      const sent = row.budgetContent as { issuedOn: string };
+      const sent = row.budgetContent as {
+        issuedOn: string;
+        validUntil: string;
+      };
       // La foto que envió una réplica con el flag en true.
-      const v4 = composeQuoteContent(budget.quote, sent.issuedOn, {});
+      const v4 = composeQuoteContent(budget.quote, sent, {});
       expect(v4.version).toBe(4);
       row.budgetContent = JSON.parse(JSON.stringify(v4)) as never;
       row.budgetContentHash = computeQuoteHash(v4);

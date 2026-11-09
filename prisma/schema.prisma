@@ -63,6 +63,8 @@ model Tenant {
   prescriptionRequireClinicalRecordNumber Boolean                          @default(false)
   /// DX-324: días que vale la receta desde la fecha de inicio. CHECK 1..365. 30 de plataforma.
   prescriptionValidityDays                Int                              @default(30)
+  /// DX-379: días que vale un presupuesto desde que se emite (presentar o primera impresión). CHECK 1..365. 30 de plataforma. Solo ADMIN (PUT /treatment-plan-settings, auditado). Cambiarlo no toca los presupuestos ya emitidos.
+  quoteValidityDays                       Int                              @default(30)
   /// DX-540: avisar al firmar una evolución si el autor no tiene registro profesional (no bloquea). false al crear la clínica; ninguna regla lo deduce del país. Solo ADMIN (PUT /clinical-entries/settings, auditado).
   clinicalEntryLicenseWarning             Boolean                          @default(false)
   /// DX-374: de dónde sale la tasa de cambio del día de la clínica: el
@@ -1898,6 +1900,13 @@ model TreatmentPlan {
   rejectedAt          DateTime?
   rejectionReason     TreatmentPlanRejectionReason?
   rejectionNote       String?
+  // DX-379: validez del presupuesto, días civiles de la sede. Se fijan al
+  // presentar (siempre) o al imprimir por primera vez (solo si están vacías);
+  // editar ítems no las mueve. Las dos o ninguna (CHECK) y vence después de
+  // emitirse. NULL = plan anterior a DX-379 o borrador nunca impreso: nunca
+  // vencido, y su presupuesto se compone como hoy (hoy + ajuste).
+  quoteIssuedOn       DateTime?                     @db.Date
+  quoteValidUntil     DateTime?                     @db.Date
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;

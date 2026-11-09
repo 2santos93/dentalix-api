@@ -11,7 +11,7 @@ import {
 } from '../src/modules/signature-requests/domain/signature-token';
 import {
   composeQuoteContent,
-  quoteIssuedOn,
+  quoteValidityOf,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import {
   computeQuoteHash,
@@ -167,7 +167,7 @@ async function sendBudget(c: Clinic, planId: string): Promise<string> {
   if (!budget) throw new Error('sin presupuesto');
   const content = composeQuoteContent(
     budget.quote,
-    quoteIssuedOn(budget.quote, new Date()),
+    quoteValidityOf(budget.quote, new Date()),
     {},
   );
   const now = new Date();

@@ -7,6 +7,7 @@ import type {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import type { QuoteLocation, QuoteSourceItem } from '../plan-quote';
+import type { QuoteValidity } from '../quote-validity';
 
 /** La aceptación firmada tal como está guardada (DX-012). */
 export interface StoredPlanAcceptance {
@@ -63,6 +64,12 @@ export interface PlanQuoteSource {
     patientId: string;
     status: TreatmentPlanStatus;
     currency: string;
+    /**
+     * DX-379: validez guardada (`YYYY-MM-DD`, las dos o ninguna); `null` si el
+     * plan aún no se presentó ni se imprimió (o es anterior a DX-379).
+     */
+    quoteIssuedOn: string | null;
+    quoteValidUntil: string | null;
   };
   /** Ítems vivos, en orden de alta. */
   items: QuoteSourceItem[];
@@ -84,6 +91,8 @@ export interface PlanQuoteSource {
     logoUrl: string | null;
     logoKey: string | null;
     fiscal: ClinicFiscalData;
+    /** DX-379: días de validez del ajuste de hoy (para un plan sin fechas guardadas). */
+    quoteValidityDays: number;
   };
   location: QuoteLocation & { timeZone: string };
   /** DX-354: región de la sede del presupuesto; `null` si le falta algo. No entra en el contenido firmado ni en su hash. */
@@ -137,4 +146,17 @@ export interface PlanQuoteRepository {
     planId: string,
     decide: (source: PlanQuoteSource) => NewPlanAcceptance,
   ): Promise<AcceptPlanOutcome>;
+
+  /**
+   * DX-379: emite el presupuesto (primera impresión) en UNA transacción con
+   * la fila del plan bloqueada: relee el presupuesto, deja que `decide` diga
+   * qué validez guardar (`null` = no se guarda nada) y, si la hay, la escribe
+   * solo si el plan aún no tiene fechas. Devuelve el presupuesto releído, o
+   * `null` si el plan no existe para este paciente (404).
+   */
+  issue(
+    patientId: string,
+    planId: string,
+    decide: (source: PlanQuoteSource) => QuoteValidity | null,
+  ): Promise<PlanQuoteSource | null>;
 }

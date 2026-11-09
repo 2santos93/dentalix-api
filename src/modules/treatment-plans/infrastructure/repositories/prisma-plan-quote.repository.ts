@@ -27,8 +27,17 @@ import type {
   PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
 import { acceptPlanInTx, lockPlanGroup } from './plan-option-group';
+import {
+  PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
+  type QuoteValidity,
+} from '../../domain/quote-validity';
 
 const PROCEDURE_FALLBACK = 'Procedimiento';
+
+/** Una columna DATE (Prisma la lee a medianoche UTC) como `YYYY-MM-DD`. */
+export function civilDayOf(value: Date | null): string | null {
+  return value ? value.toISOString().slice(0, 10) : null;
+}
 const UNKNOWN_PROFESSIONAL = 'Profesional';
 
 class AlreadyAccepted extends Error {}
@@ -162,6 +171,47 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
       throw error;
     }
   }
+
+  issue(
+    patientId: string,
+    planId: string,
+    decide: (source: PlanQuoteSource) => QuoteValidity | null,
+  ): Promise<PlanQuoteSource | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const owned = await tx.treatmentPlan.findFirst({
+        where: { id: planId, patientId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!owned) return null;
+      // Con el plan bloqueado, como al aceptar: dos primeras impresiones
+      // simultáneas guardan UNA validez, y una firma concurrente espera y
+      // luego ve las fechas (o al revés: la impresión ve el plan firmado).
+      const locked = await lockPlanGroup(tx, planId);
+      if (!locked) return null;
+      const locationId = await this.tenantContext.writeLocationId(tx);
+      const source = await readPlanQuoteSource(
+        tx,
+        tenantId,
+        patientId,
+        planId,
+        locationId,
+      );
+      if (!source) return null;
+      const validity = decide(source);
+      if (!validity) return source;
+      // Solo si aún no tiene fechas: la primera impresión manda.
+      const { count } = await tx.treatmentPlan.updateMany({
+        where: { id: planId, quoteIssuedOn: null, quoteValidUntil: null },
+        data: {
+          quoteIssuedOn: new Date(`${validity.issuedOn}T00:00:00.000Z`),
+          quoteValidUntil: new Date(`${validity.validUntil}T00:00:00.000Z`),
+        },
+      });
+      if (count === 0) return source;
+      return readPlanQuoteSource(tx, tenantId, patientId, planId, locationId);
+    });
+  }
 }
 
 /**
@@ -184,6 +234,8 @@ export async function readPlanQuoteSource(
       patientId: true,
       status: true,
       currency: true,
+      quoteIssuedOn: true,
+      quoteValidUntil: true,
       visitIntervals: true,
       createdById: true,
       patient: {
@@ -254,7 +306,12 @@ export async function readPlanQuoteSource(
     }),
     tx.tenant.findFirst({
       where: { id: tenantId },
-      select: { name: true, logoKey: true, ...CLINIC_FISCAL_SELECT },
+      select: {
+        name: true,
+        logoKey: true,
+        quoteValidityDays: true,
+        ...CLINIC_FISCAL_SELECT,
+      },
     }),
     plan.createdById
       ? tx.user.findFirst({
@@ -312,6 +369,8 @@ export async function readPlanQuoteSource(
       patientId: plan.patientId,
       status: plan.status,
       currency: plan.currency,
+      quoteIssuedOn: civilDayOf(plan.quoteIssuedOn),
+      quoteValidUntil: civilDayOf(plan.quoteValidUntil),
     },
     items: plan.items.map((item) => ({
       id: item.id,
@@ -340,6 +399,8 @@ export async function readPlanQuoteSource(
       logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
       logoKey: clinicLogoKeyToFreeze(tenant?.logoKey ?? null),
       fiscal: clinicFiscalOf(tenant),
+      quoteValidityDays:
+        tenant?.quoteValidityDays ?? PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
     },
     location: {
       id: location.id,
