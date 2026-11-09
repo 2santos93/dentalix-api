@@ -402,6 +402,43 @@ describe('Recotizar un plan (DX-379 porción B)', () => {
     expect(ctx.repo.records).toHaveLength(1);
   });
 
+  it('una repetición devuelve lo aplicado aunque después el plan se acepte o cambie la tasa', async () => {
+    const ctx = setup();
+    const plan = await seededPlan(ctx);
+    ctx.rateSource.set(40);
+    const itemIds = [plan.items[0].id];
+    const p = await ctx.preview.execute(
+      'p1',
+      'plan-1',
+      { itemIds },
+      DENTIST_ACTOR,
+    );
+    const body = { previewHash: p.previewHash, itemIds };
+    const first = await ctx.apply.execute(
+      'p1',
+      'plan-1',
+      body,
+      DENTIST_ACTOR,
+      KEY,
+    );
+    ctx.repo.seed({
+      ...ctx.repo.plan('plan-1'),
+      status: TreatmentPlanStatus.ACCEPTED,
+      items: ctx.repo
+        .plan('plan-1')
+        .items.map((i) => ({ ...i, status: TreatmentPlanItemStatus.ACCEPTED })),
+    });
+    ctx.rateSource.set(null);
+    const again = await ctx.apply.execute(
+      'p1',
+      'plan-1',
+      body,
+      DENTIST_ACTOR,
+      KEY,
+    );
+    expect(again).toEqual({ record: first.record, replayed: true });
+  });
+
   it('la huella de la petición no depende del orden ni de repetir ítems', () => {
     const a = repricingRequestFingerprint('plan-1', {
       previewHash: 'ab',

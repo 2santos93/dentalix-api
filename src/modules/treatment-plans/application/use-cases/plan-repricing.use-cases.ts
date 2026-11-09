@@ -35,6 +35,7 @@ import {
 } from '../../domain/ports/quote-settings-repository.port';
 import {
   PLAN_REPRICING_REPOSITORY,
+  type ApplyRepricingOutcome,
   type PlanRepricingRepository,
   type RepricingRecord,
   type RepricingSubject,
@@ -297,7 +298,14 @@ export class ApplyPlanRepricingUseCase {
     if (!UUID_RE.test(key)) {
       throw new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE);
     }
-    const fingerprint = repricingRequestFingerprint(planId, request);
+    const idempotency = {
+      key: key.toLowerCase(),
+      fingerprint: repricingRequestFingerprint(planId, request),
+    };
+    // Una repetición devuelve lo aplicado aunque el plan o los precios hayan
+    // cambiado después (sin leer nada más).
+    const replay = await this.repo.findApplied(idempotency);
+    if (replay) return settled(replay);
     // El precio vigente se lee antes de la transacción (solo lee, como el
     // alta); con el plan bloqueado se recalcula y se compara la huella.
     const { plan } = await loadSubject(this.repo, patientId, planId);
@@ -305,7 +313,7 @@ export class ApplyPlanRepricingUseCase {
     const outcome = await this.repo.apply(
       patientId,
       planId,
-      { key: key.toLowerCase(), fingerprint },
+      idempotency,
       actor.userId,
       ({ plan: locked, facts }) => {
         const needed = repricingCatalogItemIds(locked, request.itemIds);
@@ -330,18 +338,23 @@ export class ApplyPlanRepricingUseCase {
         return repricing;
       },
     );
-    switch (outcome.kind) {
-      case 'key-reused':
-        throw new UnprocessableEntityException({
-          statusCode: 422,
-          error: 'Unprocessable Entity',
-          code: REPRICE_IDEMPOTENCY_KEY_REUSED_CODE,
-          message: REPRICE_IDEMPOTENCY_KEY_REUSED_MESSAGE,
-        });
-      case 'replayed':
-        return { record: outcome.record, replayed: true };
-      case 'applied':
-        return { record: outcome.record, replayed: false };
-    }
+    return settled(outcome);
+  }
+}
+
+/** La respuesta de aplicar según lo que hizo el repositorio. */
+function settled(outcome: ApplyRepricingOutcome): AppliedRepricing {
+  switch (outcome.kind) {
+    case 'key-reused':
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        error: 'Unprocessable Entity',
+        code: REPRICE_IDEMPOTENCY_KEY_REUSED_CODE,
+        message: REPRICE_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+      });
+    case 'replayed':
+      return { record: outcome.record, replayed: true };
+    case 'applied':
+      return { record: outcome.record, replayed: false };
   }
 }

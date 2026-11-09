@@ -66,6 +66,16 @@ export interface PlanRepricingRepository {
   load(patientId: string, planId: string): Promise<RepricingSubject | null>;
 
   /**
+   * La recotización ya aplicada con esta clave (`replayed` si es la misma
+   * petición, `key-reused` si es otra), o `null` si la clave es nueva. Se
+   * mira antes de leer precios: una repetición devuelve lo aplicado aunque el
+   * plan haya cambiado después. `apply` lo vuelve a mirar con el candado.
+   */
+  findApplied(
+    idempotency: RepricingIdempotency,
+  ): Promise<Exclude<ApplyRepricingOutcome, { kind: 'applied' }> | null>;
+
+  /**
    * Aplica en UNA transacción: espera a otra petición con la misma clave
    * (candado por clave), devuelve la ya aplicada si la clave existe (o
    * `key-reused` si era de otra petición), bloquea el plan y su grupo, lo

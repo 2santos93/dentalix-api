@@ -79,6 +79,17 @@ function toRecord(row: RepricingRow): RepricingRecord {
   };
 }
 
+/** La fila de una clave ya usada: la misma petición o otra. */
+function replayOf(
+  previous: RepricingRow | null,
+  idempotency: RepricingIdempotency,
+): Exclude<ApplyRepricingOutcome, { kind: 'applied' }> | null {
+  if (!previous) return null;
+  return previous.requestFingerprint === idempotency.fingerprint
+    ? { kind: 'replayed', record: toRecord(previous) }
+    : { kind: 'key-reused' };
+}
+
 /** Las columnas de precio de un ítem a partir de su estado recotizado. */
 function itemPriceColumns(
   state: ItemPriceState,
@@ -140,6 +151,20 @@ export class PrismaPlanRepricingRepository implements PlanRepricingRepository {
     });
   }
 
+  findApplied(
+    idempotency: RepricingIdempotency,
+  ): Promise<Exclude<ApplyRepricingOutcome, { kind: 'applied' }> | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) =>
+      replayOf(
+        await tx.treatmentPlanRepricing.findFirst({
+          where: { tenantId, idempotencyKey: idempotency.key },
+        }),
+        idempotency,
+      ),
+    );
+  }
+
   async apply(
     patientId: string,
     planId: string,
@@ -155,14 +180,13 @@ export class PrismaPlanRepricingRepository implements PlanRepricingRepository {
         hashtext('dx_plan_repricing_idempotency:' || ${tenantId}),
         hashtext(${idempotency.key})
       )`;
-      const previous = await tx.treatmentPlanRepricing.findFirst({
-        where: { tenantId, idempotencyKey: idempotency.key },
-      });
-      if (previous) {
-        return previous.requestFingerprint === idempotency.fingerprint
-          ? { kind: 'replayed', record: toRecord(previous) }
-          : { kind: 'key-reused' };
-      }
+      const replay = replayOf(
+        await tx.treatmentPlanRepricing.findFirst({
+          where: { tenantId, idempotencyKey: idempotency.key },
+        }),
+        idempotency,
+      );
+      if (replay) return replay;
 
       // Como aceptar o imprimir: el plan y su grupo FOR UPDATE, y se relee.
       const locked = await lockPlanGroup(tx, planId);

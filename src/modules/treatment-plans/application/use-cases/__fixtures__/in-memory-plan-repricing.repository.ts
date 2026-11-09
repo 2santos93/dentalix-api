@@ -49,6 +49,19 @@ export class InMemoryPlanRepricingRepository implements PlanRepricingRepository 
     });
   }
 
+  findApplied(
+    idempotency: RepricingIdempotency,
+  ): Promise<Exclude<ApplyRepricingOutcome, { kind: 'applied' }> | null> {
+    const previous = this.records.find((r) => r.key === idempotency.key);
+    if (!previous) return Promise.resolve(null);
+    const { key: _key, fingerprint, ...record } = previous;
+    return Promise.resolve(
+      fingerprint === idempotency.fingerprint
+        ? { kind: 'replayed', record }
+        : { kind: 'key-reused' },
+    );
+  }
+
   apply(
     patientId: string,
     planId: string,
