@@ -36,6 +36,7 @@ import { PlanQuoteController } from './presentation/plan-quote.controller';
 import {
   AcceptTreatmentPlanUseCase,
   PreviewAcceptanceRepricingUseCase,
+  PreviewPartialAcceptanceUseCase,
   GetPlanQuoteUseCase,
   IssuePlanQuoteUseCase,
   PLAN_QUOTE_CLOCK,
@@ -169,6 +170,7 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     IssuePlanQuoteUseCase,
     AcceptTreatmentPlanUseCase,
     PreviewAcceptanceRepricingUseCase,
+    PreviewPartialAcceptanceUseCase,
     { provide: PLAN_QUOTE_CLOCK, useValue: () => new Date() },
     // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).
     {

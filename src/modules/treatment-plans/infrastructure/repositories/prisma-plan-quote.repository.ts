@@ -22,14 +22,21 @@ import {
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { isValidTimeZone } from '../../../../shared/time/civil-day';
 import type {
+  AcceptPartial,
   AcceptPlanOutcome,
   AcceptReprice,
   AcceptRepriced,
+  PartialAcceptanceRead,
   PlanAcceptanceRemoteEvidence,
   NewPlanAcceptance,
   PlanQuoteRepository,
   PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
+import type {
+  PartialPlanState,
+  PartialSplit,
+} from '../../domain/partial-acceptance';
+import { readPlanFacts } from './prisma-treatment-plan.repository';
 import type { Repricing } from '../../application/repricing';
 import type { RepricingRecord } from '../../domain/ports/plan-repricing-repository.port';
 import { acceptPlanInTx, lockPlanGroup } from './plan-option-group';
@@ -59,11 +66,15 @@ class AlreadyAccepted extends Error {}
  */
 class VanishedAfterWrite extends Error {}
 
+type RepricedPreview = {
+  source: PlanQuoteSource;
+  repricing: Repricing;
+  state: PartialPlanState;
+};
+
 /** Deshace la transacción de la vista previa llevándose su resultado. */
 class DryRun extends Error {
-  constructor(
-    readonly result: { source: PlanQuoteSource; repricing: Repricing } | null,
-  ) {
+  constructor(readonly result: RepricedPreview | null) {
     super('dry run');
   }
 }
@@ -120,8 +131,10 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
     decide: (
       source: PlanQuoteSource,
       repriced: AcceptRepriced | null,
+      split: PartialSplit | null,
     ) => NewPlanAcceptance,
     reprice?: AcceptReprice,
+    partial?: AcceptPartial,
   ): Promise<AcceptPlanOutcome> {
     const tenantId = this.requireTenantId();
     try {
@@ -167,7 +180,39 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           repriced = { repricingId: done.record.id, before: source };
         }
 
-        const row = decide(signing, repriced);
+        // DX-417: la partición, con el plan bloqueado y ya recotizado (si
+        // tocaba). `decide` compone y compara lo aceptado antes de escribir.
+        const split = partial
+          ? partial.decide(
+              signing,
+              await readPartialState(tx, tenantId, planId, signing),
+            )
+          : null;
+        const row = decide(signing, repriced, split);
+        let pendingPlanId: string | null = null;
+        if (split && partial) {
+          if (!row.partial) throw new Error('aceptación parcial sin pendiente');
+          pendingPlanId = await splitPendingInTx(tx, {
+            tenantId,
+            patientId,
+            planId,
+            pendingItemIds: split.pendingItemIds,
+          });
+          // Red: lo que queda en el original es exactamente lo que se firma.
+          const kept = await readPlanQuoteSource(
+            tx,
+            tenantId,
+            patientId,
+            planId,
+            locationId,
+          );
+          if (!kept) throw new VanishedAfterWrite();
+          if (partial.contentHashOf(kept) !== row.contentHash) {
+            throw new Error(
+              `Plan ${planId}: el presupuesto releído tras partirlo no es el que se firma.`,
+            );
+          }
+        }
         const expiry = row.expiry ?? {
           ...NO_EXPIRED_ACCEPTANCE,
           quoteValidUntil: signing.plan.quoteValidUntil,
@@ -197,6 +242,14 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
               expiredReason: expiry.reason,
               expiredNote: expiry.note,
               repricingId: expiry.repricingId,
+              // DX-417: lo que quedó pendiente, fuera del contenido firmado.
+              ...(pendingPlanId && row.partial
+                ? {
+                    pendingPlanId,
+                    pendingItemIds: row.partial.pendingItemIds,
+                    pendingTotal: new Prisma.Decimal(row.partial.pendingTotal),
+                  }
+                : {}),
             },
           });
         } catch (error) {
@@ -235,11 +288,35 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
     }
   }
 
+  loadPartial(
+    patientId: string,
+    planId: string,
+  ): Promise<PartialAcceptanceRead | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        const source = await readPlanQuoteSource(
+          tx,
+          tenantId,
+          patientId,
+          planId,
+          await this.tenantContext.writeLocationId(tx),
+        );
+        if (!source) return null;
+        return {
+          source,
+          state: await readPartialState(tx, tenantId, planId, source),
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
   async previewRepriced(
     patientId: string,
     planId: string,
     reprice: AcceptReprice,
-  ): Promise<{ source: PlanQuoteSource; repricing: Repricing } | null> {
+  ): Promise<RepricedPreview | null> {
     const tenantId = this.requireTenantId();
     try {
       await this.prisma.runWithTenant(async (tx) => {
@@ -270,7 +347,18 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           reprice,
         });
         throw new DryRun(
-          done ? { source: done.source, repricing: done.repricing } : null,
+          done
+            ? {
+                source: done.source,
+                repricing: done.repricing,
+                state: await readPartialState(
+                  tx,
+                  tenantId,
+                  planId,
+                  done.source,
+                ),
+              }
+            : null,
         );
       });
     } catch (error) {
@@ -377,6 +465,103 @@ async function repriceInTx(
 }
 
 /**
+ * DX-417: lo que la partición necesita del plan leído (con el plan bloqueado
+ * en la firma): su estado, si está firmado, abonos, cuotas y saldo a favor, y
+ * el estado de cada ítem vivo en el orden del presupuesto.
+ */
+async function readPartialState(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  planId: string,
+  source: PlanQuoteSource,
+): Promise<PartialPlanState> {
+  const [facts, items] = await Promise.all([
+    readPlanFacts(tx, tenantId, planId),
+    tx.treatmentPlanItem.findMany({
+      where: { planId, deletedAt: null },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, status: true },
+    }),
+  ]);
+  return {
+    status: source.plan.status,
+    signed: source.acceptance !== null,
+    facts,
+    items,
+  };
+}
+
+/**
+ * DX-417: crea el plan pendiente de una aceptación parcial y le MUEVE los
+ * ítems pendientes (mismo id: las reservas de citas, los descartes y el
+ * historial de recotizaciones siguen con ellos). Va antes de insertar la
+ * aceptación del original: el trigger de un plan firmado no deja sacar
+ * ítems. El pendiente nace PRESENTED con la presentación, la validez (la
+ * renovada si se recotizó en la firma), la moneda, las visitas, las notas y
+ * el autor del original, fuera de su grupo de opciones (si no, quedaría
+ * «otra opción ya aceptada» y no se podría aceptar). Mover no toca precios
+ * ni la foto de referencia: no salta ningún trigger de congelado ni el de
+ * imputaciones. Devuelve el id del pendiente.
+ */
+async function splitPendingInTx(
+  tx: Prisma.TransactionClient,
+  args: {
+    tenantId: string;
+    patientId: string;
+    planId: string;
+    pendingItemIds: string[];
+  },
+): Promise<string> {
+  const { tenantId, patientId, planId, pendingItemIds } = args;
+  const original = await tx.treatmentPlan.findFirst({
+    where: { id: planId, patientId, deletedAt: null },
+    select: {
+      currency: true,
+      notes: true,
+      createdById: true,
+      presentedAt: true,
+      presentedLocationId: true,
+      quoteIssuedOn: true,
+      quoteValidUntil: true,
+      visitIntervals: true,
+    },
+  });
+  if (!original) throw new VanishedAfterWrite();
+  const pending = await tx.treatmentPlan.create({
+    data: {
+      tenantId,
+      patientId,
+      status: 'PRESENTED',
+      currency: original.currency,
+      notes: original.notes,
+      createdById: original.createdById,
+      presentedAt: original.presentedAt,
+      presentedLocationId: original.presentedLocationId,
+      quoteIssuedOn: original.quoteIssuedOn,
+      quoteValidUntil: original.quoteValidUntil,
+      visitIntervals: original.visitIntervals ?? {},
+      splitFromPlanId: planId,
+    },
+    select: { id: true },
+  });
+  const { count } = await tx.treatmentPlanItem.updateMany({
+    where: {
+      id: { in: pendingItemIds },
+      planId,
+      deletedAt: null,
+      status: 'PROPOSED',
+    },
+    data: { planId: pending.id },
+  });
+  if (count !== pendingItemIds.length) {
+    throw new Error(
+      `Plan ${planId}: se esperaban ${pendingItemIds.length} ítems pendientes y se movieron ${count}.`,
+    );
+  }
+  return pending.id;
+}
+
+/**
  * El presupuesto del plan `planId` del paciente `patientId` emitido en la sede
  * `locationId`, dentro de la transacción del llamador (bajo la RLS de la
  * clínica). DX-415 lo usa con la sede de la solicitud a distancia, que no
@@ -454,6 +639,9 @@ export async function readPlanQuoteSource(
           expiredReason: true,
           expiredNote: true,
           repricingId: true,
+          pendingPlanId: true,
+          pendingItemIds: true,
+          pendingTotal: true,
           // DX-514: el impreso dice si firmó el paciente o su representante.
           signatureRequest: { select: { signerType: true } },
         },
@@ -622,6 +810,16 @@ export async function readPlanQuoteSource(
             note: acceptance.expiredNote,
             repricingId: acceptance.repricingId,
           },
+          // DX-417: lo que quedó pendiente al aceptar en parte.
+          partial:
+            acceptance.pendingPlanId !== null &&
+            acceptance.pendingTotal !== null
+              ? {
+                  pendingPlanId: acceptance.pendingPlanId,
+                  pendingItemIds: acceptance.pendingItemIds ?? [],
+                  pendingTotal: acceptance.pendingTotal.toNumber(),
+                }
+              : null,
         }
       : null,
   };

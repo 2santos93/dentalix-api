@@ -1922,6 +1922,14 @@ model TreatmentPlan {
   // vencido, y su presupuesto se compone como hoy (hoy + ajuste).
   quoteIssuedOn       DateTime?                     @db.Date
   quoteValidUntil     DateTime?                     @db.Date
+  /// DX-417: el plan cuya aceptación PARCIAL dejó este presupuesto pendiente
+  /// (con los ítems no aceptados, movidos con su mismo id). Se escribe al
+  /// crearlo y no cambia (trigger treatment_plans_split_from_immutable).
+  /// No declarable en Prisma (solo SQL): índice ÚNICO parcial
+  /// treatment_plans_split_from_key ("tenantId", "splitFromPlanId") WHERE
+  /// "splitFromPlanId" IS NOT NULL (lado hijo de la FK) y CHECK
+  /// treatment_plans_split_from_check (no apunta a sí mismo).
+  splitFromPlanId     String?                       @db.Uuid
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
@@ -1932,6 +1940,12 @@ model TreatmentPlan {
   // DELETE que se lleva el grupo entero de una vez (limpieza de tests) pasa.
   optionGroupRoot             TreatmentPlan?                   @relation("TreatmentPlanOptionGroup", fields: [tenantId, optionGroupId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, onUpdate: NoAction, map: "treatment_plans_option_group_fkey")
   optionGroupMembers          TreatmentPlan[]                  @relation("TreatmentPlanOptionGroup")
+  // DX-417: FK COMPUESTA al plan aceptado en parte (MISMO tenant y MISMO
+  // paciente). NO ACTION, como la del grupo de opciones.
+  splitFrom                   TreatmentPlan?                   @relation("TreatmentPlanSplit", fields: [tenantId, splitFromPlanId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, onUpdate: NoAction, map: "treatment_plans_split_from_fkey")
+  splitPending                TreatmentPlan[]                  @relation("TreatmentPlanSplit")
+  // DX-417: aceptaciones parciales cuyo pendiente es este plan (como mucho una).
+  pendingOfAcceptances        TreatmentPlanAcceptance[]        @relation("TreatmentPlanAcceptancePending")
   // Sede donde se presentó, del MISMO tenant.
   presentedLocation           Location?                        @relation(fields: [tenantId, presentedLocationId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plans_presented_location_fkey")
   // La moneda existe en el catálogo `currencies` (DX-042).
@@ -2306,10 +2320,21 @@ model TreatmentPlanAcceptance {
   /// treatment_plan_acceptances_repricing_idx ("tenantId", "repricingId")
   /// WHERE "repricingId" IS NOT NULL (lado hijo de la FK).
   repricingId             String?                       @db.Uuid
+  /// DX-417: aceptación PARCIAL (fuera del contenido y de sus hashes; el
+  /// contenido firmado es el del subconjunto aceptado). El plan nuevo
+  /// PRESENTED con los ítems no aceptados, sus ids y su total al firmar (en
+  /// la moneda del plan). Las tres o ninguna (CHECK
+  /// treatment_plan_acceptances_pending_check). No declarable en Prisma (solo
+  /// SQL): índice ÚNICO parcial treatment_plan_acceptances_pending_plan_key
+  /// ("tenantId", "pendingPlanId") WHERE "pendingPlanId" IS NOT NULL.
+  pendingPlanId           String?                       @db.Uuid
+  pendingItemIds          String[]                      @db.Uuid
+  pendingTotal            Decimal?                      @db.Decimal(14, 2)
 
   // FK COMPUESTAS (SEC-004): plan del MISMO tenant y del MISMO paciente; sede
   // del MISMO tenant.
   plan             TreatmentPlan           @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
+  pendingPlan      TreatmentPlan?          @relation("TreatmentPlanAcceptancePending", fields: [tenantId, pendingPlanId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, onUpdate: NoAction, map: "treatment_plan_acceptances_pending_plan_fkey")
   repricing        TreatmentPlanRepricing? @relation(fields: [tenantId, repricingId, planId, patientId], references: [tenantId, id, planId, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_repricing_fkey")
   signatureRequest SignatureRequest?       @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_signature_request_fkey")
   location         Location                @relation(fields: [tenantId, locationId], references: [tenantId, id])

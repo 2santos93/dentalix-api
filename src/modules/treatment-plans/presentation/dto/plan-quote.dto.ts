@@ -11,14 +11,25 @@ import {
 } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsBoolean,
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { RepricingPreviewDto } from './plan-repricing.dto';
+import {
+  PARTIAL_ITEMS_MAX,
+  PARTIAL_NONE_CHOSEN_MESSAGE,
+  PARTIAL_TOO_MANY_MESSAGE,
+} from '../../domain/partial-acceptance';
 
 // Margen sobre el base64 de 200 KB (273068) para el prefijo `data:`; el tope
 // exacto y el formato PNG los valida el caso de uso (parseSignaturePng).
@@ -79,6 +90,40 @@ export class ExpiredAcceptanceDto {
   repricePreviewHash?: string;
 }
 
+/**
+ * DX-417: los procedimientos que se ACEPTAN (ítems vivos del plan); los
+ * demás pasan a un presupuesto pendiente.
+ */
+export class PartialAcceptanceItemsDto {
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    minItems: 1,
+    maxItems: PARTIAL_ITEMS_MAX,
+    description:
+      'Ítems vivos de ESTE plan que se aceptan (404 si alguno no lo es). Al menos uno y no todos (todos: 400, que se acepte entero). Los ítems ya aceptados o realizados tienen que estar (400).',
+  })
+  @IsArray({ message: 'Los procedimientos tienen que ser una lista.' })
+  @ArrayMinSize(1, { message: PARTIAL_NONE_CHOSEN_MESSAGE })
+  @ArrayMaxSize(PARTIAL_ITEMS_MAX, { message: PARTIAL_TOO_MANY_MESSAGE })
+  @IsUUID('all', {
+    each: true,
+    message: 'Cada procedimiento debe ser un UUID.',
+  })
+  itemIds!: string[];
+}
+
+/** DX-417: cuerpo de `POST …/acceptance/partial-preview`. */
+export class PartialAcceptancePreviewRequestDto extends PartialAcceptanceItemsDto {
+  @ApiPropertyOptional({
+    description:
+      'Solo con un presupuesto vencido que se aceptará actualizando los precios (`expired.mode = REPRICE`): recotiza TODO el plan como …/acceptance/reprice-preview y parte el resultado. Con un presupuesto no vencido: 400.',
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'reprice debe ser true o false.' })
+  reprice?: boolean;
+}
+
 // Sin `acceptedAt`, autor, sede, IP ni UA: los pone el servidor.
 export class AcceptTreatmentPlanDto {
   @ApiProperty({
@@ -117,6 +162,22 @@ export class AcceptTreatmentPlanDto {
   @ValidateNested()
   @Type(() => ExpiredAcceptanceDto)
   expired?: ExpiredAcceptanceDto;
+
+  @ApiPropertyOptional({
+    type: PartialAcceptanceItemsDto,
+    description:
+      'DX-417: aceptar solo estos procedimientos (presupuesto PRESENTED, sin abonos, plan de cuotas ni saldo a favor). Los demás pasan, con su mismo id, a un plan nuevo PRESENTED enlazado al original (`splitFromPlanId`). `contentHash` es entonces el de `accepted` en POST …/acceptance/partial-preview. Con `expired.mode = REPRICE` se recotiza TODO el plan y después se parte (la vista previa, con `reprice: true`).',
+  })
+  @IsOptional()
+  // M-1: una lista (`[]`, `[{…}]`) no es una selección: 400, nunca una
+  // aceptación entera por descuido.
+  @IsObject({
+    message:
+      'partial debe ser un objeto con los procedimientos que se aceptan (itemIds).',
+  })
+  @ValidateNested()
+  @Type(() => PartialAcceptanceItemsDto)
+  partial?: PartialAcceptanceItemsDto;
 }
 
 export class PlanQuoteLocationDto {
@@ -310,6 +371,32 @@ export class PlanQuoteAcceptanceDto {
       'REPRICE: la recotización hecha en la firma (treatment_plan_repricings, source ACCEPT).',
   })
   repricingId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-417: aceptación PARCIAL. El presupuesto pendiente (plan PRESENTED) con los procedimientos no aceptados; null si se aceptó entero. Fuera del contenido firmado.',
+  })
+  pendingPlanId!: string | null;
+
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-417: los procedimientos que quedaron pendientes al firmar (aunque luego se edite el pendiente); null si se aceptó entero.',
+  })
+  pendingItemIds!: string[] | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-417: total de lo pendiente al firmar, en la moneda del plan. Línea del documento: «Aceptación parcial: N procedimientos ({moneda} {pendingTotal}) quedan en un presupuesto pendiente.». null si se aceptó entero.',
+  })
+  pendingTotal!: number | null;
 }
 
 /** Evidencias de la aceptación a distancia (DX-415), congeladas al firmar. */
@@ -459,4 +546,52 @@ export class AcceptanceRepricePreviewDto {
       'El presupuesto como se firmaría, con los precios y la validez nuevos. Su `contentHash` va en `contentHash` de la aceptación.',
   })
   quote!: PlanQuoteDocumentDto;
+}
+
+/** DX-417: lo que pasaría al presupuesto pendiente. */
+export class PartialAcceptancePendingDto {
+  @ApiProperty({ type: [PlanQuoteItemDto] })
+  items!: PlanQuoteItemDto[];
+
+  @ApiProperty({
+    type: [PlanQuoteTotalDto],
+    description: 'Una fila por moneda (la del plan)',
+  })
+  totals!: PlanQuoteTotalDto[];
+}
+
+/** DX-417: los totales del presupuesto entero. */
+export class PartialAcceptanceOriginalDto {
+  @ApiProperty({
+    type: [PlanQuoteTotalDto],
+    description: 'Aceptado + pendiente, ítem a ítem (sin repartos)',
+  })
+  totals!: PlanQuoteTotalDto[];
+}
+
+/**
+ * DX-417: vista previa de una aceptación parcial. No escribe ni bloquea:
+ * todos los totales son del servidor (la web no suma).
+ */
+export class PartialAcceptancePreviewDto {
+  @ApiProperty({
+    type: PlanQuoteDocumentDto,
+    description:
+      'El presupuesto de lo aceptado, como se firmaría. Su `contentHash` va en `contentHash` de la aceptación con `partial`.',
+  })
+  accepted!: PlanQuoteDocumentDto;
+
+  @ApiProperty({ type: PartialAcceptancePendingDto })
+  pending!: PartialAcceptancePendingDto;
+
+  @ApiProperty({ type: PartialAcceptanceOriginalDto })
+  original!: PartialAcceptanceOriginalDto;
+
+  @ApiProperty({
+    type: RepricingPreviewDto,
+    nullable: true,
+    description:
+      'Con `reprice: true`: la recotización de TODO el plan; su `previewHash` va en `expired.repricePreviewHash`. Si no, null.',
+  })
+  repricing!: RepricingPreviewDto | null;
 }
