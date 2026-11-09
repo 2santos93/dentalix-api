@@ -1,3 +1,11 @@
+import {
+  ApplyPlanRepricingUseCase,
+  PreviewPlanRepricingUseCase,
+  RepricingContextReader,
+} from './application/use-cases/plan-repricing.use-cases';
+import { PLAN_REPRICING_REPOSITORY } from './domain/ports/plan-repricing-repository.port';
+import { PrismaPlanRepricingRepository } from './infrastructure/repositories/prisma-plan-repricing.repository';
+import { PlanRepricingController } from './presentation/plan-repricing.controller';
 import { QuoteExpiry } from './application/quote-expiry';
 import {
   GetQuoteSettingsUseCase,
@@ -107,6 +115,8 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     PriceQuoteController,
     // DX-379: días de validez del presupuesto de la clínica.
     QuoteSettingsController,
+    // DX-379 (B): «Actualizar precios» (recotizar).
+    PlanRepricingController,
   ],
   providers: [
     PlanVisitsService,
@@ -135,6 +145,14 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     { provide: PLAN_QUOTE_ZONES, useClass: PrismaPlanQuoteZones },
     GetQuoteSettingsUseCase,
     UpdateQuoteSettingsUseCase,
+    // DX-379 (B): recotizar con el precio vigente.
+    RepricingContextReader,
+    PreviewPlanRepricingUseCase,
+    ApplyPlanRepricingUseCase,
+    {
+      provide: PLAN_REPRICING_REPOSITORY,
+      useClass: PrismaPlanRepricingRepository,
+    },
     {
       provide: QUOTE_SETTINGS_REPOSITORY,
       useClass: PrismaQuoteSettingsRepository,

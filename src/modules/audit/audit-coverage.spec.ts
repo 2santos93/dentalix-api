@@ -38,6 +38,7 @@ import { TreatmentPlansController } from '../treatment-plans/presentation/treatm
 import { PlanQuoteController } from '../treatment-plans/presentation/plan-quote.controller';
 import { PriceQuoteController } from '../treatment-plans/presentation/price-quote.controller';
 import { QuoteSettingsController } from '../treatment-plans/presentation/quote-settings.controller';
+import { PlanRepricingController } from '../treatment-plans/presentation/plan-repricing.controller';
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
@@ -912,6 +913,23 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN',
     resourceId: { param: 'planId' },
     patient: P,
+  },
+  // DX-379 (B): «Actualizar precios». La vista previa lee el plan (VIEW);
+  // aplicar deja UPDATE con PLAN_REPRICED y `params.repricingId` (la fila con
+  // el antes y el después, el autor y la tasa; sin importes en el evento).
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/preview': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: P,
+    reason: 'REPRICE_PREVIEW',
+  },
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/apply': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: P,
+    reason: 'PLAN_REPRICED',
   },
   'POST /patients/:patientId/treatment-plans/:planId/acceptance': {
     action: 'SIGN',
@@ -1884,6 +1902,7 @@ const CONTROLLERS: Type[] = [
   PlanQuoteController,
   PriceQuoteController,
   QuoteSettingsController,
+  PlanRepricingController,
   PaymentsController,
   PaymentReceiptsController,
   ReceiptSettingsController,

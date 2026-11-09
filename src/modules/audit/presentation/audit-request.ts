@@ -209,6 +209,14 @@ function handlerMetadata(
     : rest;
 }
 
+/** Los `params` que añade el handler (`req.auditMetadata.params`). */
+function handlerParams(req: AuditedRequest): Record<string, unknown> {
+  const params = req.auditMetadata?.params;
+  return typeof params === 'object' && params !== null && !Array.isArray(params)
+    ? (params as Record<string, unknown>)
+    : {};
+}
+
 /** SEC-049: tipo de pagador, 4 últimos del nº y verificación de la cobertura. */
 function coverageOf(body: unknown): Record<string, unknown> | null {
   if (typeof body !== 'object' || body === null) return null;
@@ -264,7 +272,10 @@ export function buildAuditDraft(
       ...(options.action === 'UPDATE'
         ? { changedFields: bodyFields(req.body) }
         : {}),
-      params: req.params,
+      // DX-379 (B): el handler puede añadir ids a los de la ruta (p. ej.
+      // `repricingId`, la fila con el antes y el después); los de la ruta
+      // mandan.
+      params: { ...handlerParams(req), ...req.params },
       ...(options.reason ? { reason: options.reason } : {}),
       ...(options.statusChange ? { statusChange: options.statusChange } : {}),
       ...(options.search && resultCount !== null

@@ -297,6 +297,37 @@ describe('buildAuditDraft (DX-009)', () => {
     });
   });
 
+  it('DX-379 (B): los ids que añade el handler van con los de la ruta (mandan los de la ruta); un valor que no es id, no', () => {
+    const REPRICING = '77777777-7777-4777-8777-777777777777';
+    const draft = buildAuditDraft(
+      {
+        action: 'UPDATE',
+        resource: 'TREATMENT_PLAN',
+        resourceId: { param: 'planId' },
+        patient: { param: 'patientId' },
+        reason: 'PLAN_REPRICED',
+      },
+      req({
+        params: { patientId: PATIENT, planId: PLAN },
+        body: { previewHash: 'a'.repeat(64) },
+        auditMetadata: {
+          params: {
+            repricingId: REPRICING,
+            planId: ENTRY,
+            total: '450,00 USD',
+          },
+        },
+      }),
+      {},
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      changedFields: ['previewHash'],
+      params: { patientId: PATIENT, planId: PLAN, repricingId: REPRICING },
+      reason: 'PLAN_REPRICED',
+    });
+  });
+
   it('DX-319: el antes/después del nº de registro solo pasa en un evento de LOCATION', () => {
     const draft = buildAuditDraft(
       { action: 'UPDATE', resource: 'PATIENT', resourceId: { param: 'id' } },

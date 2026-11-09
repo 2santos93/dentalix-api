@@ -462,6 +462,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-379: imprimir (la primera impresión fija la validez): quien lo lee.
   'POST /patients/:patientId/treatment-plans/:planId/quote/issue': EVERY_ROLE,
   'POST /patients/:patientId/treatment-plans/:planId/acceptance': PLAN_DECIDERS,
+  // DX-379 (B): «Actualizar precios» (recotizar): los que editan los ítems
+  // del plan (CLINICAL); el tope de descuento por rol lo aplica el caso de uso.
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/preview': CLINICAL,
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/apply': CLINICAL,
   // DX-379: días de validez del presupuesto. Lo leen los que leen
   // presupuestos; lo cambia solo ADMIN.
   'GET /treatment-plan-settings': EVERY_ROLE,
