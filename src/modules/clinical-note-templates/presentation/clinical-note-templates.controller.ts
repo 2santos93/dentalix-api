@@ -94,7 +94,8 @@ export class ClinicalNoteTemplatesController {
       'Marcador sin pregunta, pregunta sin marcador, ONE/MULTI sin opciones u otro campo inválido (mensaje en español)',
   })
   @ApiConflictResponse({
-    description: 'Ya existe una plantilla con ese nombre',
+    description:
+      'Ya existe una plantilla con ese nombre, o DX-455: el atajo choca con el de otra plantilla (`code` NOTE_SHORTCUT_CONFLICT: «El atajo #resina ya lo usa la plantilla «Resina compuesta».» o «El atajo #re choca con #resina: uno no puede empezar por el otro.»)',
   })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   create(
@@ -108,6 +109,7 @@ export class ClinicalNoteTemplatesController {
         body: dto.body,
         prompts: dto.prompts,
         active: dto.active,
+        shortcut: dto.shortcut,
       },
       req.user.sub,
     );
@@ -150,7 +152,7 @@ export class ClinicalNoteTemplatesController {
   })
   @ApiConflictResponse({
     description:
-      'Ya existe una plantilla con ese nombre, o `version` ya no es la actual (`code` NOTE_TEMPLATE_STALE: «La plantilla cambió, recárgala»)',
+      'Ya existe una plantilla con ese nombre; `version` ya no es la actual (`code` NOTE_TEMPLATE_STALE: «La plantilla cambió, recárgala»); o DX-455: el atajo choca con el de otra plantilla (`code` NOTE_SHORTCUT_CONFLICT)',
   })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
   update(
@@ -166,6 +168,7 @@ export class ClinicalNoteTemplatesController {
         body: dto.body,
         prompts: dto.prompts,
         active: dto.active,
+        shortcut: dto.shortcut,
         version: dto.version,
       },
       req.user.sub,

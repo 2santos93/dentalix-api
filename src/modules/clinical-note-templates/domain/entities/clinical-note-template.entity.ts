@@ -25,6 +25,12 @@ export interface ClinicalNoteTemplate {
   /** Carpeta del selector; null = sin carpeta. */
   category: string | null;
   body: string;
+  /**
+   * DX-455: atajo para insertarla escribiendo en la nota («#resina»), tal como
+   * se escribió; null = sin atajo. Único por clínica sin distinguir
+   * mayúsculas y ninguno empieza por otro. Una desactivada lo conserva.
+   */
+  shortcut: string | null;
   active: boolean;
   /** DX-231: versión optimista; sube en 1 con cada edición. */
   version: number;

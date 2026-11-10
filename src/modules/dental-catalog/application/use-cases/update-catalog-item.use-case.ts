@@ -4,12 +4,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { CatalogKind } from '@prisma/client';
 import { DENTAL_CATALOG_REPOSITORY } from '../../domain/ports/dental-catalog-repository.port';
 import type {
   DentalCatalogRepository,
   UpdateDentalCatalogItemRepoInput,
 } from '../../domain/ports/dental-catalog-repository.port';
 import { DentalCatalogItem } from '../../domain/entities/dental-catalog-item.entity';
+import {
+  CATALOG_NOTE_TEMPLATE_READER,
+  type CatalogNoteTemplateReader,
+} from '../../domain/ports/catalog-note-template-reader.port';
+import {
+  assertLinkableNoteTemplate,
+  LINK_TEMPLATE_DIAGNOSIS_MESSAGE,
+} from '../note-template-link';
 import {
   isValidCatalogKind,
   isValidHexColor,
@@ -22,6 +31,8 @@ export class UpdateCatalogItemUseCase {
   constructor(
     @Inject(DENTAL_CATALOG_REPOSITORY)
     private readonly repo: DentalCatalogRepository,
+    @Inject(CATALOG_NOTE_TEMPLATE_READER)
+    private readonly noteTemplates: CatalogNoteTemplateReader,
   ) {}
 
   async execute(
@@ -47,6 +58,21 @@ export class UpdateCatalogItemUseCase {
       throw new BadRequestException(
         'kind must be one of: DIAGNOSIS, PROCEDURE',
       );
+    }
+
+    // DX-455: el vínculo se comprueba contra el tipo que TENDRÁ el ítem. Un
+    // procedimiento que pasa a diagnóstico con su plantilla ligada: 400.
+    const kind = patch.kind ?? existing.kind;
+    await assertLinkableNoteTemplate(
+      this.noteTemplates,
+      patch.clinicalNoteTemplateId,
+      kind,
+    );
+    const keepsLink =
+      patch.clinicalNoteTemplateId === undefined &&
+      existing.clinicalNoteTemplateId !== null;
+    if (keepsLink && kind !== CatalogKind.PROCEDURE) {
+      throw new BadRequestException(LINK_TEMPLATE_DIAGNOSIS_MESSAGE);
     }
 
     const normalizedPatch: UpdateDentalCatalogItemRepoInput = { ...patch };

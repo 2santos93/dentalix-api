@@ -69,6 +69,8 @@ function catalogItem(
     defaultPrice: 100,
     allowDiscount: true,
     active: true,
+    clinicalNoteTemplateId: null,
+    suggestedClinicalNoteTemplateId: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,

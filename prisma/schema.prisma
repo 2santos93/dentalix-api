@@ -1066,14 +1066,24 @@ model ClinicalNoteTemplate {
   // DX-231: versión optimista. Cada edición la sube en 1; un PATCH con otra
   // versión que la actual da 409 (dos ADMIN no se pisan sin aviso).
   version     Int      @default(1)
+  // DX-455: atajo para insertarla escribiendo en la nota (p. ej. «#resina»).
+  // Se guarda tal cual se escribió; se compara sin distinguir mayúsculas. Único
+  // por clínica con el índice parcial clinical_note_templates_tenant_shortcut_key
+  // sobre ("tenantId", lower("shortcut")) WHERE "shortcut" IS NOT NULL — solo
+  // SQL: Prisma no expresa índices de expresión. Una desactivada conserva el
+  // suyo. La regla de prefijos (#re frente a #resina) la aplica el repositorio
+  // bajo un candado por clínica.
+  shortcut    String?
   createdById String?  @db.Uuid
   updatedById String?  @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant  Tenant                       @relation(fields: [tenantId], references: [id])
-  prompts ClinicalNoteTemplatePrompt[]
-  entries ClinicalEntry[]
+  tenant       Tenant                       @relation(fields: [tenantId], references: [id])
+  prompts      ClinicalNoteTemplatePrompt[]
+  entries      ClinicalEntry[]
+  // DX-455: procedimientos del catálogo que sugieren esta plantilla.
+  catalogItems DentalCatalogItem[]
 
   // Destino de las FK compuestas de las preguntas y de clinical_entries.
   @@unique([tenantId, id], map: "clinical_note_templates_tenant_id_key")
@@ -1182,30 +1192,36 @@ enum CatalogKind {
 }
 
 model DentalCatalogItem {
-  id            String      @id @default(uuid()) @db.Uuid
-  tenantId      String      @db.Uuid
-  code          String
-  category      String?
-  kind          CatalogKind
-  labelEs       String
-  labelEn       String?
-  labelPt       String?
-  color         String
-  defaultPrice  Decimal?    @db.Decimal(12, 2)
+  id                     String      @id @default(uuid()) @db.Uuid
+  tenantId               String      @db.Uuid
+  code                   String
+  category               String?
+  kind                   CatalogKind
+  labelEs                String
+  labelEn                String?
+  labelPt                String?
+  color                  String
+  defaultPrice           Decimal?    @db.Decimal(12, 2)
   // DX-105: false = el procedimiento no recibe convenio ni descuento porcentual.
-  allowDiscount Boolean     @default(true)
-  active        Boolean     @default(true)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  deletedAt     DateTime?
+  allowDiscount          Boolean     @default(true)
+  active                 Boolean     @default(true)
+  // DX-455: plantilla de evolución que se sugiere al marcar hecho este
+  // procedimiento; NULL = ninguna. FK compuesta: de la MISMA clínica (SEC-004).
+  // RESTRICT: las plantillas no se borran (se desactivan).
+  clinicalNoteTemplateId String?     @db.Uuid
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  deletedAt              DateTime?
 
   // DX-105: precios de este procedimiento en las listas.
-  priceListItems PriceListItem[]
+  priceListItems       PriceListItem[]
+  clinicalNoteTemplate ClinicalNoteTemplate? @relation(fields: [tenantId, clinicalNoteTemplateId], references: [tenantId, id], onDelete: Restrict, map: "dental_catalog_items_note_template_fkey")
 
   @@unique([tenantId, code], map: "catalog_tenant_code_key")
   // DX-105: destino de la FK compuesta de `price_list_items`.
   @@unique([tenantId, id], map: "dental_catalog_items_tenant_id_key")
   @@index([tenantId])
+  @@index([tenantId, clinicalNoteTemplateId], map: "dental_catalog_items_tenant_note_template_idx")
   @@map("dental_catalog_items")
 }
 
@@ -4519,17 +4535,17 @@ model OutboundMessage {
 /// = desactivado. `leadHours`: hasta 3 antelaciones en horas (1..168), de
 /// mayor a menor; activo exige al menos una (CHECK).
 model LocationReminderSettings {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @db.Uuid
-  locationId  String   @db.Uuid
-  enabled     Boolean  @default(false)
-  leadHours   Int[]    @default([])
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @db.Uuid
+  locationId         String   @db.Uuid
+  enabled            Boolean  @default(false)
+  leadHours          Int[]    @default([])
   /// DX-469: horas antes de la cita de la alarma del evento «Añadir a mi
   /// calendario» (0 = sin alarma; 0..168, CHECK). Sin fila, 24.
-  calendarAlarmHours Int @default(24)
-  updatedById String?  @db.Uuid
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  calendarAlarmHours Int      @default(24)
+  updatedById        String?  @db.Uuid
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // FK COMPUESTA (SEC-004): la sede tiene que ser del MISMO tenant.

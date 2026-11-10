@@ -8,8 +8,14 @@ import type {
 import type { NoteTemplateDraft } from '../../domain/note-template-rules';
 import {
   DUPLICATE_NOTE_TEMPLATE_MESSAGE,
+  shortcutConflict,
   staleNoteTemplate,
 } from '../note-template-errors';
+import {
+  findShortcutConflict,
+  shortcutConflictMessage,
+  type ShortcutHolder,
+} from '../../domain/note-template-shortcut';
 
 /**
  * Repositorio de plantillas en memoria con estado: los tests afirman sobre
@@ -58,6 +64,7 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
       name: draft.name,
       category: draft.category,
       body: draft.body,
+      shortcut: null,
       active: true,
       version: 1,
       prompts: this.toPrompts(id, draft.prompts),
@@ -67,6 +74,19 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
     };
     this.rows.push(row);
     return structuredClone(row);
+  }
+
+  /** DX-455: como el repositorio real, bajo su candado: 409 si choca. */
+  private assertShortcutFree(shortcut: string, exceptId: string | null) {
+    const holders: ShortcutHolder[] = this.rows.flatMap((r) =>
+      r.shortcut && r.id !== exceptId
+        ? [{ id: r.id, name: r.name, shortcut: r.shortcut }]
+        : [],
+    );
+    const conflict = findShortcutConflict(shortcut, holders);
+    if (conflict) {
+      throw shortcutConflict(shortcutConflictMessage(shortcut, conflict));
+    }
   }
 
   list(params: { includeInactive: boolean }): Promise<ClinicalNoteTemplate[]> {
@@ -92,9 +112,21 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
         new ConflictException(DUPLICATE_NOTE_TEMPLATE_MESSAGE),
       );
     }
-    return Promise.resolve(
-      inputs.map((input) => this.seed(input, { active: input.active })),
-    );
+    try {
+      return Promise.resolve(
+        inputs.map((input) => {
+          if (input.shortcut) this.assertShortcutFree(input.shortcut, null);
+          return this.seed(input, {
+            active: input.active,
+            shortcut: input.shortcut ?? null,
+          });
+        }),
+      );
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
   }
 
   update(
@@ -109,7 +141,9 @@ export class InMemoryClinicalNoteTemplateRepository implements ClinicalNoteTempl
     ) {
       throw staleNoteTemplate();
     }
+    if (input.shortcut) this.assertShortcutFree(input.shortcut, id);
     row.version += 1;
+    if (input.shortcut !== undefined) row.shortcut = input.shortcut;
     if (input.name !== undefined) row.name = input.name;
     if (input.category !== undefined) row.category = input.category;
     if (input.body !== undefined) row.body = input.body;

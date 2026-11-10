@@ -12,6 +12,8 @@ export interface CreateDentalCatalogItemRepoInput {
   defaultPrice?: number;
   allowDiscount?: boolean;
   active?: boolean;
+  /** DX-455: ya comprobada (de esta clínica y activa). */
+  clinicalNoteTemplateId?: string | null;
 }
 
 export interface UpdateDentalCatalogItemRepoInput {
@@ -25,6 +27,8 @@ export interface UpdateDentalCatalogItemRepoInput {
   defaultPrice?: number | null;
   allowDiscount?: boolean;
   active?: boolean;
+  /** DX-455: undefined = no cambia; null = quitar el vínculo. */
+  clinicalNoteTemplateId?: string | null;
 }
 
 export interface ListDentalCatalogItemsParams {

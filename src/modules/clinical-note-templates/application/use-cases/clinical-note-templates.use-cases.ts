@@ -17,6 +17,10 @@ import {
 } from '../../domain/note-template-rules';
 import { SAMPLE_NOTE_TEMPLATES } from '../../domain/sample-templates';
 import {
+  normalizeShortcut,
+  shortcutFormatError,
+} from '../../domain/note-template-shortcut';
+import {
   NOTE_TEMPLATE_NOT_FOUND_MESSAGE,
   staleNoteTemplate,
 } from '../note-template-errors';
@@ -36,6 +40,8 @@ export interface NoteTemplateInput {
   body: string;
   prompts: NotePromptInput[];
   active?: boolean;
+  /** DX-455: atajo («#resina»); null o vacío = sin atajo. */
+  shortcut?: string | null;
   /** DX-231: versión leída; si cambió, 409. Sin ella no se comprueba. */
   version?: number;
 }
@@ -58,6 +64,22 @@ function toDraft(input: {
       defaultValue: p.defaultValue ?? null,
     })),
   };
+}
+
+/**
+ * DX-455: atajo normalizado (recortado, NFC) o null si viene vacío; 400 en
+ * español si el formato no vale. `undefined` = no se toca.
+ */
+export function validShortcut(
+  raw: string | null | undefined,
+): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const shortcut = normalizeShortcut(raw);
+  if (shortcut === '') return null;
+  const error = shortcutFormatError(shortcut);
+  if (error !== null) throw new BadRequestException(error);
+  return shortcut;
 }
 
 /** Valida y normaliza; 400 en español con el primer problema. */
@@ -94,8 +116,9 @@ export class CreateNoteTemplateUseCase {
     createdById?: string,
   ): Promise<ClinicalNoteTemplate> {
     const draft = validDraft(toDraft(input));
+    const shortcut = validShortcut(input.shortcut) ?? null;
     const [created] = await this.repo.createMany([
-      { ...draft, active: input.active ?? true, createdById },
+      { ...draft, shortcut, active: input.active ?? true, createdById },
     ]);
     return created;
   }
@@ -124,6 +147,8 @@ export class UpdateNoteTemplateUseCase {
     if (input.version !== undefined && input.version !== current.version) {
       throw staleNoteTemplate();
     }
+    // DX-455: el atajo no toca el contenido; el choque lo mira el repositorio.
+    const shortcut = validShortcut(input.shortcut);
 
     const touchesContent =
       input.name !== undefined ||
@@ -133,6 +158,7 @@ export class UpdateNoteTemplateUseCase {
     if (!touchesContent) {
       return this.repo.update(id, {
         active: input.active,
+        shortcut,
         updatedById,
         expectedVersion: input.version,
       });
@@ -153,6 +179,7 @@ export class UpdateNoteTemplateUseCase {
       body: draft.body,
       prompts: input.prompts !== undefined ? draft.prompts : undefined,
       active: input.active,
+      shortcut,
       updatedById,
       expectedVersion: input.version,
     });
