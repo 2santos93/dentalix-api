@@ -4,6 +4,7 @@ import {
   chairNameError,
   chairOverlapMessage,
   chairSortOrderError,
+  chooseFreeChair,
   normalizeChairName,
   resolveAppointmentProviderId,
   sameChairName,
@@ -148,6 +149,49 @@ describe('reglas del sillón (DX-211)', () => {
       expect(chairOverlapMessage('Sillón 2', null)).toBe(
         'El sillón «Sillón 2» ya está ocupado en ese horario',
       );
+    });
+  });
+  describe('sillón libre para un enlace público (DX-480)', () => {
+    const chairs = [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }];
+
+    it('el primero libre en el orden recibido', () => {
+      expect(chooseFreeChair(chairs, [])).toEqual({
+        kind: 'CHAIR',
+        chairId: 'c1',
+      });
+    });
+
+    it('salta los ocupados, aunque vengan desordenados o repetidos', () => {
+      expect(chooseFreeChair(chairs, ['c1'])).toEqual({
+        kind: 'CHAIR',
+        chairId: 'c2',
+      });
+      expect(chooseFreeChair(chairs, ['c2', 'c1', 'c1'])).toEqual({
+        kind: 'CHAIR',
+        chairId: 'c3',
+      });
+      expect(chooseFreeChair(chairs, ['c2'])).toEqual({
+        kind: 'CHAIR',
+        chairId: 'c1',
+      });
+    });
+
+    it('todos ocupados: ninguno', () => {
+      expect(chooseFreeChair(chairs, ['c3', 'c1', 'c2'])).toEqual({
+        kind: 'ALL_BUSY',
+      });
+    });
+
+    it('sede sin sillones activos: la cita va sin sillón', () => {
+      expect(chooseFreeChair([], [])).toEqual({ kind: 'NO_CHAIRS' });
+      expect(chooseFreeChair([], ['c1'])).toEqual({ kind: 'NO_CHAIRS' });
+    });
+
+    it('un ocupado que no es de la lista no cuenta', () => {
+      expect(chooseFreeChair([{ id: 'c1' }], ['otro'])).toEqual({
+        kind: 'CHAIR',
+        chairId: 'c1',
+      });
     });
   });
 });

@@ -69,7 +69,9 @@ export interface SlotOfferRepository {
   findClinicBranding(): Promise<ClinicBrandingRow | null>;
   /**
    * ¿Hay ya una cita viva del profesional, o del paciente (otra que la que se
-   * adelantaría), que choca con la cita que crearía la oferta?
+   * adelantaría), que choca con la cita que crearía la oferta? DX-480: en una
+   * sede con sillones activos, también si ninguno está libre en esa franja
+   * (o el de la cita que se adelanta está ocupado o desactivado).
    */
   slotTaken(offer: PublicSlotOffer): Promise<boolean>;
   /**
@@ -79,6 +81,9 @@ export interface SlotOfferRepository {
    * mueve la marcada «Adelantar si hay hueco») con el anti-solape de la BD,
    * marca la oferta ACCEPTED, las demás pendientes del hueco TAKEN_BY_OTHER y
    * lo audita todo con origen PUBLIC_LINK. Exactamente una aceptación gana.
+   * DX-480: en una sede con sillones activos la cita lleva el primero libre
+   * (orden de la agenda); si la EXCLUDE por sillón resuelve una carrera, se
+   * reintenta con el siguiente y, sin ninguno, UNAVAILABLE.
    * DX-461: antes, comparte el candado del paciente (el que toma archivar):
    * con el paciente archivado responde EXPIRED sin escribir nada.
    */

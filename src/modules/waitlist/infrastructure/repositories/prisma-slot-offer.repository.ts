@@ -8,6 +8,12 @@ import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-even
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { overlapExclusionScope } from '../../../appointments/application/appointment-overlap-error';
+import {
+  chooseFreeChair,
+  type FreeChairChoice,
+} from '../../../chairs/domain/chair-rules';
+import { CHAIR_ORDER } from '../../../chairs/infrastructure/repositories/prisma-chair.repository';
+import { sqlStateOf } from '../../../../shared/prisma/prisma-exception.filter';
 import { MOVABLE_STATUSES } from '../../domain/opening-candidates';
 import { markWaitlistEntryScheduled } from '../waitlist-transitions';
 import {
@@ -28,6 +34,40 @@ type Tx = Prisma.TransactionClient;
 
 /** Conflicto que deshace la transacción del aceptar (el hueco ya no está). */
 class SlotGoneError extends Error {}
+
+/**
+ * DX-480: intentos de «Aceptar» cuando la carrera la resuelve la BD en el
+ * sillón (23P01 de appointments_no_overlap_per_chair, o el 40P01 de dos
+ * INSERT cruzados contra la EXCLUDE). Cada intento es una transacción nueva
+ * que ya ve la cita ganadora y elige el siguiente sillón libre; agotados, el
+ * paciente ve «no disponible», nunca un 500.
+ */
+const CHAIR_RACE_ATTEMPTS = 4;
+
+/** Deadlock (40P01): Prisma lo da como P2034 en el ORM o con el SQLSTATE. */
+function isDeadlock(error: unknown): boolean {
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2034'
+  ) {
+    return true;
+  }
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError ||
+    error instanceof Prisma.PrismaClientUnknownRequestError
+  ) {
+    return sqlStateOf(error) === '40P01' || error.message.includes('40P01');
+  }
+  return false;
+}
+
+/**
+ * DX-480: el sillón con que quedaría la cita del enlace. `available: false`:
+ * la sede tiene sillones activos y ninguno está libre (o el de la cita que se
+ * adelanta está ocupado o desactivado): el hueco no se ofrece.
+ */
+type ChairPlan =
+  { available: false } | { available: true; chairId: string | null };
 
 function offerAuditEvent(
   offer: {
@@ -56,11 +96,18 @@ function offerAuditEvent(
   };
 }
 
-type Slot = { start: Date; end: Date; providerId: string };
+type Slot = {
+  start: Date;
+  end: Date;
+  providerId: string;
+  chairId: string | null;
+};
+// DX-480: con el sillón, como el «movida» de recepción (DX-211).
 const slotOf = (s: Slot) => ({
   start: s.start.toISOString(),
   end: s.end.toISOString(),
   providerId: s.providerId,
+  chairId: s.chairId,
 });
 
 /**
@@ -71,12 +118,14 @@ function appointmentAuditEvent(
   offer: PublicSlotOffer,
   appointmentId: string,
   before: Slot | null,
+  chairId: string | null,
   meta: AuditRequestMeta,
 ): AuditEventDraft {
   const after: Slot = {
     start: offer.slotStart,
     end: offer.appointmentEnd,
     providerId: offer.providerId,
+    chairId,
   };
   return {
     tenantId: offer.tenantId,
@@ -204,7 +253,69 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
   }
 
   slotTaken(offer: PublicSlotOffer): Promise<boolean> {
-    return this.prisma.runWithTenant((tx) => this.takenIn(tx, offer));
+    // DX-480: en una sede con sillones, sin uno libre el hueco tampoco está.
+    return this.prisma.runWithTenant(
+      async (tx) =>
+        (await this.takenIn(tx, offer)) ||
+        !(await this.chairPlanIn(tx, offer)).available,
+    );
+  }
+
+  /**
+   * DX-480: el sillón de la cita del enlace, solo de los de SU sede.
+   * - La cita que se adelanta y ya tiene sillón lo conserva (lo eligió
+   *   recepción): si está desactivado u ocupado a la nueva hora, no hay hueco.
+   * - Si no (cita nueva, o la que se adelanta sin sillón): el primer sillón
+   *   activo libre en el orden de la agenda; sin sillones activos, ninguno.
+   * El profesional de la oferta no cambia: el del sillón no cuenta.
+   */
+  private async chairPlanIn(
+    tx: Tx,
+    offer: PublicSlotOffer,
+  ): Promise<ChairPlan> {
+    const window = liveOverlap(offer.slotStart, offer.appointmentEnd);
+    const notItself = offer.appointmentId
+      ? { id: { not: offer.appointmentId } }
+      : {};
+    const current = offer.appointmentId
+      ? await tx.appointment.findFirst({
+          where: { id: offer.appointmentId, deletedAt: null },
+          select: { chairId: true, chair: { select: { active: true } } },
+        })
+      : null;
+    if (current?.chairId) {
+      if (!current.chair?.active) return { available: false };
+      const clash = await tx.appointment.findFirst({
+        where: { ...window, chairId: current.chairId, ...notItself },
+        select: { id: true },
+      });
+      return clash
+        ? { available: false }
+        : { available: true, chairId: current.chairId };
+    }
+    const chairs = await tx.chair.findMany({
+      where: { locationId: offer.locationId, active: true },
+      orderBy: CHAIR_ORDER,
+      select: { id: true },
+    });
+    if (chairs.length === 0) return { available: true, chairId: null };
+    const busy = await tx.appointment.findMany({
+      where: {
+        ...window,
+        chairId: { in: chairs.map((c) => c.id) },
+        ...notItself,
+      },
+      select: { chairId: true },
+    });
+    const choice: FreeChairChoice = chooseFreeChair(
+      chairs,
+      busy.flatMap((b) => (b.chairId ? [b.chairId] : [])),
+    );
+    if (choice.kind === 'ALL_BUSY') return { available: false };
+    return {
+      available: true,
+      chairId: choice.kind === 'CHAIR' ? choice.chairId : null,
+    };
   }
 
   private async takenIn(tx: Tx, offer: PublicSlotOffer): Promise<boolean> {
@@ -225,17 +336,28 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
     now: Date,
     meta: AuditRequestMeta,
   ): Promise<SlotOfferResolution> {
-    try {
-      return await this.prisma.runWithTenant((tx) =>
-        this.acceptIn(tx, offer, now, meta),
-      );
-    } catch (error) {
-      // El EXCLUDE de la BD (23P01) es el respaldo de la carrera contra
-      // recepción, que agenda sin pasar por el candado: el hueco ya no está.
-      if (error instanceof SlotGoneError || overlapExclusionScope(error)) {
-        return { state: 'UNAVAILABLE', appointmentId: null };
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.prisma.runWithTenant((tx) =>
+          this.acceptIn(tx, offer, now, meta),
+        );
+      } catch (error) {
+        if (error instanceof SlotGoneError) {
+          return { state: 'UNAVAILABLE', appointmentId: null };
+        }
+        // DX-480: el sillón elegido lo ganó a la vez otra cita (otra
+        // aceptación de otro profesional o recepción, que no comparten el
+        // candado): se vuelve a intentar con el siguiente sillón libre.
+        const scope = overlapExclusionScope(error);
+        const chairRace = scope === 'chair' || isDeadlock(error);
+        if (chairRace && attempt < CHAIR_RACE_ATTEMPTS) continue;
+        // El EXCLUDE de la BD (23P01) es el respaldo de la carrera contra
+        // recepción, que agenda sin pasar por el candado: el hueco ya no está.
+        if (scope || chairRace) {
+          return { state: 'UNAVAILABLE', appointmentId: null };
+        }
+        throw error;
       }
-      throw error;
     }
   }
 
@@ -289,19 +411,22 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
       await this.resolve(tx, offer, 'TAKEN_BY_OTHER', now, null, false);
       return { state: 'TAKEN', appointmentId: null };
     }
+    // DX-480: sin sillón libre en una sede con sillones, el hueco no está.
+    const chair = await this.chairPlanIn(tx, offer);
+    if (!chair.available) return { state: 'UNAVAILABLE', appointmentId: null };
 
     const before = offer.appointmentId
       ? await tx.appointment.findFirst({
           where: { id: offer.appointmentId, deletedAt: null },
-          select: { start: true, end: true, providerId: true },
+          select: { start: true, end: true, providerId: true, chairId: true },
         })
       : null;
     const appointmentId = offer.appointmentId
-      ? await this.moveAppointment(tx, offer)
-      : await this.createAppointment(tx, offer);
+      ? await this.moveAppointment(tx, offer, chair.chairId)
+      : await this.createAppointment(tx, offer, chair.chairId);
     await writeAuditEvent(
       tx,
-      appointmentAuditEvent(offer, appointmentId, before, meta),
+      appointmentAuditEvent(offer, appointmentId, before, chair.chairId, meta),
     );
 
     await this.resolve(tx, offer, 'ACCEPTED', now, meta, true);
@@ -481,6 +606,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
   private async createAppointment(
     tx: Tx,
     offer: PublicSlotOffer,
+    chairId: string | null,
   ): Promise<string> {
     const created = await tx.appointment.create({
       data: {
@@ -492,6 +618,8 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
         end: offer.appointmentEnd,
         appointmentTypeId: offer.appointmentTypeId,
         createdById: null,
+        // DX-480: el sillón libre elegido (null en una sede sin sillones).
+        chairId,
       },
       select: { id: true },
     });
@@ -520,6 +648,7 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
   private async moveAppointment(
     tx: Tx,
     offer: PublicSlotOffer,
+    chairId: string | null,
   ): Promise<string> {
     const id = offer.appointmentId!;
     const { count } = await tx.appointment.updateMany({
@@ -538,6 +667,8 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
         start: offer.slotStart,
         end: offer.appointmentEnd,
         providerId: offer.providerId,
+        // DX-480: el suyo, o el primero libre si no tenía (ver chairPlanIn).
+        chairId,
         wantsEarlier: false,
         // DX-509: en su hueco nuevo deja de ser sobrecupo (si lo era) y
         // cuenta en la EXCLUDE del profesional.
