@@ -105,7 +105,11 @@ async function seed(): Promise<Seeded> {
       defaultPrice: 1000000,
     },
   });
-  catalogEntity = { ...item, defaultPrice: 1000000 };
+  catalogEntity = {
+    ...item,
+    defaultPrice: 1000000,
+    suggestedClinicalNoteTemplateId: null,
+  };
   return {
     tenantId: tenant.id,
     userId: user.id,

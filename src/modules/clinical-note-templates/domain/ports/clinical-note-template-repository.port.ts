@@ -5,6 +5,11 @@ import type { NoteTemplateDraft } from '../note-template-rules';
 // preguntas llegan ya validadas y en su orden (posición = índice).
 export interface CreateNoteTemplateRepoInput extends NoteTemplateDraft {
   active: boolean;
+  /**
+   * DX-455: ya normalizado y con formato válido. El repositorio comprueba,
+   * bajo un candado por clínica, que no choca con otro (409).
+   */
+  shortcut?: string | null;
   createdById?: string;
 }
 
@@ -13,6 +18,8 @@ export interface UpdateNoteTemplateRepoInput {
   category?: string | null;
   body?: string;
   active?: boolean;
+  /** DX-455: undefined = no cambia; null = quitarlo; texto = ya normalizado. */
+  shortcut?: string | null;
   /** Si viene, sustituye TODAS las preguntas (en este orden). */
   prompts?: NoteTemplateDraft['prompts'];
   updatedById?: string;

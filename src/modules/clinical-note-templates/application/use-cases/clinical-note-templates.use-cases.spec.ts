@@ -285,3 +285,122 @@ describe('LoadSampleNoteTemplatesUseCase', () => {
     expect(repo.rows.filter((r) => r.name === 'Resina')).toHaveLength(1);
   });
 });
+
+describe('Atajos (DX-455)', () => {
+  const create = (repo: InMemoryClinicalNoteTemplateRepository) =>
+    new CreateNoteTemplateUseCase(repo);
+  const update = (repo: InMemoryClinicalNoteTemplateRepository) =>
+    new UpdateNoteTemplateUseCase(repo);
+
+  it('crea con atajo recortado y tal como se escribió', async () => {
+    const repo = new InMemoryClinicalNoteTemplateRepository();
+    const created = await create(repo).execute({
+      ...resin,
+      shortcut: '  #Resina ',
+    });
+    expect(created.shortcut).toBe('#Resina');
+  });
+
+  it('sin atajo, o vacío, queda en null', async () => {
+    const repo = new InMemoryClinicalNoteTemplateRepository();
+    expect((await create(repo).execute(resin)).shortcut).toBeNull();
+    expect(
+      (await create(repo).execute({ ...resin, name: 'Otra', shortcut: '  ' }))
+        .shortcut,
+    ).toBeNull();
+  });
+
+  it('400 en español con un formato inválido', async () => {
+    const repo = new InMemoryClinicalNoteTemplateRepository();
+    await expect(
+      create(repo).execute({ ...resin, shortcut: '#resina compuesta' }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      create(repo).execute({ ...resin, shortcut: 'resina' }),
+    ).rejects.toThrow(/empieza por #/);
+    expect(repo.rows).toHaveLength(0);
+  });
+
+  it('409 por duplicado sin distinguir mayúsculas y por prefijo', async () => {
+    const repo = new InMemoryClinicalNoteTemplateRepository();
+    await create(repo).execute({
+      ...resin,
+      name: 'Resina compuesta',
+      shortcut: '#resina',
+    });
+    await expect(
+      create(repo).execute({ ...resin, name: 'Otra', shortcut: '#RESINA' }),
+    ).rejects.toThrow(
+      'El atajo #RESINA ya lo usa la plantilla «Resina compuesta».',
+    );
+    await expect(
+      create(repo).execute({ ...resin, name: 'Otra', shortcut: '#re' }),
+    ).rejects.toThrow(
+      'El atajo #re choca con #resina: uno no puede empezar por el otro.',
+    );
+    await expect(
+      create(repo).execute({ ...resin, name: 'Otra', shortcut: '#re' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('una desactivada conserva su atajo (sigue reservado)', async () => {
+    const repo = new InMemoryClinicalNoteTemplateRepository();
+    const t = await create(repo).execute({
+      ...resin,
+      name: 'Resina compuesta',
+      shortcut: '#resina',
+      active: false,
+    });
+    expect(t.active).toBe(false);
+    await expect(
+      create(repo).execute({ ...resin, name: 'Otra', shortcut: '#resina' }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('edita, quita (null) y vuelve a poner el atajo sin chocar consigo misma', async () => {
+    const repo = new InMemoryClinicalNoteTemplateRepository();
+    const t = await create(repo).execute({ ...resin, shortcut: '#resina' });
+    const renamed = await update(repo).execute(t.id, {
+      shortcut: '#resina-a2',
+      version: t.version,
+    });
+    expect(renamed).toMatchObject({ shortcut: '#resina-a2', version: 2 });
+    const same = await update(repo).execute(t.id, {
+      shortcut: '#RESINA-A2',
+      version: 2,
+    });
+    expect(same.shortcut).toBe('#RESINA-A2');
+    const cleared = await update(repo).execute(t.id, {
+      shortcut: null,
+      version: 3,
+    });
+    expect(cleared.shortcut).toBeNull();
+    // Sin `shortcut` en el PATCH no se toca.
+    const untouched = await update(repo).execute(t.id, {
+      active: false,
+      version: 4,
+    });
+    expect(untouched.shortcut).toBeNull();
+  });
+
+  it('editar el atajo a uno que choca: 409 y no cambia nada', async () => {
+    const repo = new InMemoryClinicalNoteTemplateRepository();
+    await create(repo).execute({
+      ...resin,
+      name: 'Resina compuesta',
+      shortcut: '#resina',
+    });
+    const other = await create(repo).execute({
+      ...resin,
+      name: 'Otra',
+      shortcut: '#endo',
+    });
+    await expect(
+      update(repo).execute(other.id, { shortcut: '#res', version: 1 }),
+    ).rejects.toThrow(/choca con #resina/);
+    expect(repo.rows.find((r) => r.id === other.id)).toMatchObject({
+      shortcut: '#endo',
+      version: 1,
+    });
+  });
+});

@@ -6,6 +6,7 @@ import {
   CreateDentalCatalogItemRepoInput,
   DentalCatalogRepository,
 } from '../../domain/ports/dental-catalog-repository.port';
+import type { CatalogNoteTemplateReader } from '../../domain/ports/catalog-note-template-reader.port';
 
 function fakeItemFrom(
   id: string,
@@ -25,10 +26,17 @@ function fakeItemFrom(
     defaultPrice: input.defaultPrice ?? null,
     allowDiscount: input.allowDiscount ?? true,
     active: input.active ?? true,
+    clinicalNoteTemplateId: input.clinicalNoteTemplateId ?? null,
+    suggestedClinicalNoteTemplateId: input.clinicalNoteTemplateId ?? null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };
 }
+
+/** DX-455: sin plantillas; los casos del vínculo traen su propio lector. */
+const noTemplates: CatalogNoteTemplateReader = {
+  find: () => Promise.resolve(null),
+};
 
 function makeRepo(
   overrides: Partial<DentalCatalogRepository> = {},
@@ -50,7 +58,7 @@ function makeRepo(
 describe('CreateCatalogItemUseCase', () => {
   it('creates a catalog item and returns the mapped entity', async () => {
     const repo = makeRepo();
-    const uc = new CreateCatalogItemUseCase(repo);
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
 
     const result = await uc.execute({
       code: 'CAR-001',
@@ -73,7 +81,7 @@ describe('CreateCatalogItemUseCase', () => {
         return Promise.resolve(fakeItemFrom('c3', input));
       },
     });
-    const uc = new CreateCatalogItemUseCase(repo);
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
     const base = {
       code: 'PRO-001',
       kind: CatalogKind.PROCEDURE,
@@ -98,7 +106,7 @@ describe('CreateCatalogItemUseCase', () => {
         return Promise.resolve(fakeItemFrom('c2', input));
       },
     });
-    const uc = new CreateCatalogItemUseCase(repo);
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
 
     await uc.execute({
       code: '  CAR-002  ',
@@ -121,7 +129,7 @@ describe('CreateCatalogItemUseCase', () => {
     '#1234567',
   ])('rejects an invalid hex color (%s)', async (color) => {
     const repo = makeRepo();
-    const uc = new CreateCatalogItemUseCase(repo);
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
 
     await expect(
       uc.execute({
@@ -143,7 +151,7 @@ describe('CreateCatalogItemUseCase', () => {
     '#12345678',
   ])('accepts a valid hex color (%s)', async (color) => {
     const repo = makeRepo();
-    const uc = new CreateCatalogItemUseCase(repo);
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
 
     const result = await uc.execute({
       code: 'CAR-004',
@@ -157,7 +165,7 @@ describe('CreateCatalogItemUseCase', () => {
 
   it('rejects a kind that is not a valid CatalogKind enum value', async () => {
     const repo = makeRepo();
-    const uc = new CreateCatalogItemUseCase(repo);
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
 
     // Bypass the type system deliberately: prove the use case validates at
     // runtime even though CreateCatalogItemInput['kind'] is typed as
@@ -183,7 +191,7 @@ describe('CreateCatalogItemUseCase', () => {
         return Promise.resolve(fakeItemFrom('c6', input));
       },
     });
-    const uc = new CreateCatalogItemUseCase(repo);
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
 
     const maliciousInput = {
       code: 'CAR-006',
@@ -207,7 +215,7 @@ describe('CreateCatalogItemUseCase', () => {
         return Promise.resolve(fakeItemFrom('c7', input));
       },
     });
-    const uc = new CreateCatalogItemUseCase(repo);
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
 
     await uc.execute({
       code: 'CAR-007',
@@ -234,7 +242,7 @@ describe('CreateCatalogItemUseCase', () => {
     'rejects a whitespace-only code (%j)',
     async (code) => {
       const repo = makeRepo();
-      const uc = new CreateCatalogItemUseCase(repo);
+      const uc = new CreateCatalogItemUseCase(repo, noTemplates);
 
       await expect(
         uc.execute({
@@ -246,4 +254,42 @@ describe('CreateCatalogItemUseCase', () => {
       ).rejects.toBeInstanceOf(BadRequestException);
     },
   );
+});
+
+describe('CreateCatalogItemUseCase — plantilla de evolución (DX-455)', () => {
+  const input = {
+    code: 'RES-01',
+    kind: CatalogKind.PROCEDURE,
+    labelEs: 'Resina',
+    color: '#123456',
+  };
+  const reader = (active: boolean): CatalogNoteTemplateReader => ({
+    find: (id) =>
+      Promise.resolve(id === 'tpl-1' ? { id, name: 'Resina', active } : null),
+  });
+  const repo = () =>
+    makeRepo({ create: (i) => Promise.resolve(fakeItemFrom('c1', i)) });
+
+  it('da de alta el procedimiento con su plantilla', async () => {
+    const created = await new CreateCatalogItemUseCase(
+      repo(),
+      reader(true),
+    ).execute({ ...input, clinicalNoteTemplateId: 'tpl-1' });
+    expect(created.clinicalNoteTemplateId).toBe('tpl-1');
+  });
+
+  it('404 con una plantilla ajena y 400 con una desactivada', async () => {
+    await expect(
+      new CreateCatalogItemUseCase(repo(), reader(true)).execute({
+        ...input,
+        clinicalNoteTemplateId: 'tpl-otra',
+      }),
+    ).rejects.toThrow(/no encontrada en esta clínica/);
+    await expect(
+      new CreateCatalogItemUseCase(repo(), reader(false)).execute({
+        ...input,
+        clinicalNoteTemplateId: 'tpl-1',
+      }),
+    ).rejects.toThrow(/está desactivada/);
+  });
 });

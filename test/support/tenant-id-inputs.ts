@@ -241,6 +241,12 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // «no se puede vincular a un paciente de otra clínica (404)».
   'POST /patients/:patientId/responsible-parties body.responsiblePatientId':
     'patient-responsible-parties.e2e-spec.ts',
+  // DX-455: «aislamiento: no se liga la plantilla de otra clínica (404)»,
+  // en el alta y en la edición del procedimiento.
+  'POST /catalog/items body.clinicalNoteTemplateId':
+    'note-template-shortcuts.e2e-spec.ts',
+  'PATCH /catalog/items/:id body.clinicalNoteTemplateId':
+    'note-template-shortcuts.e2e-spec.ts',
   // «un ítem … de otra clínica … dan 400» (procedimiento de otra clínica).
   'POST /post-op-templates body.catalogItemIds[]':
     'post-op-templates.e2e-spec.ts',

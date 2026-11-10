@@ -8,6 +8,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { CatalogKind } from '@prisma/client';
+import { NoteTemplateLinkField } from './note-template-link.field';
 import { HEX_COLOR_PATTERN } from '../../application/use-cases/create-catalog-item.use-case';
 import {
   IsNonNegativeMoney,
@@ -78,4 +79,7 @@ export class CreateCatalogItemDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @NoteTemplateLinkField()
+  clinicalNoteTemplateId?: string | null;
 }

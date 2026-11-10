@@ -63,6 +63,8 @@ function fakeCatalogItem(
     defaultPrice: 200,
     allowDiscount: true,
     active: true,
+    clinicalNoteTemplateId: null,
+    suggestedClinicalNoteTemplateId: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,

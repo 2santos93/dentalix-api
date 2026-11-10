@@ -55,6 +55,24 @@ export class DentalCatalogItemDto {
   @ApiProperty()
   active!: boolean;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-455: plantilla de evolución ligada al procedimiento (el vínculo guardado, aunque la plantilla esté desactivada); null = ninguna. Es lo que edita la pantalla del catálogo.',
+  })
+  clinicalNoteTemplateId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-455: plantilla a sugerir al marcar hecho el procedimiento: `clinicalNoteTemplateId` si la plantilla está activa; null si no hay o está desactivada.',
+  })
+  suggestedClinicalNoteTemplateId!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 

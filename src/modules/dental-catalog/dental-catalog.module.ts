@@ -8,6 +8,8 @@ import { UpdateCatalogItemUseCase } from './application/use-cases/update-catalog
 import { DENTAL_CATALOG_REPOSITORY } from './domain/ports/dental-catalog-repository.port';
 import { CATALOG_CURRENCY_READER } from './domain/ports/catalog-currency-reader.port';
 import { PrismaCatalogCurrencyReader } from './infrastructure/prisma-catalog-currency-reader';
+import { CATALOG_NOTE_TEMPLATE_READER } from './domain/ports/catalog-note-template-reader.port';
+import { PrismaCatalogNoteTemplateReader } from './infrastructure/prisma-catalog-note-template-reader';
 import { PrismaDentalCatalogRepository } from './infrastructure/repositories/prisma-dental-catalog.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
@@ -34,6 +36,10 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     {
       provide: CATALOG_CURRENCY_READER,
       useClass: PrismaCatalogCurrencyReader,
+    },
+    {
+      provide: CATALOG_NOTE_TEMPLATE_READER,
+      useClass: PrismaCatalogNoteTemplateReader,
     },
   ],
   // Exported so other modules (TreatmentPlansModule ->

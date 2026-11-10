@@ -22,3 +22,16 @@ export function staleNoteTemplate(): ConflictException {
 
 export const INACTIVE_NOTE_TEMPLATE_MESSAGE =
   'La plantilla está desactivada: actívala en Ajustes → Plantillas de evolución o elige otra.';
+
+/** DX-455: `code` del 409 de un atajo que choca (duplicado o prefijo). */
+export const NOTE_SHORTCUT_CONFLICT_CODE = 'NOTE_SHORTCUT_CONFLICT';
+
+/** 409 de un atajo que choca; el mensaje ya viene en español. */
+export function shortcutConflict(message: string): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: NOTE_SHORTCUT_CONFLICT_CODE,
+    message,
+  });
+}

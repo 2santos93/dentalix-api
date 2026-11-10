@@ -7,6 +7,7 @@ import {
   DentalCatalogRepository,
   UpdateDentalCatalogItemRepoInput,
 } from '../../domain/ports/dental-catalog-repository.port';
+import type { CatalogNoteTemplateReader } from '../../domain/ports/catalog-note-template-reader.port';
 
 function fakeItem(
   overrides: Partial<DentalCatalogItem> = {},
@@ -24,11 +25,18 @@ function fakeItem(
     defaultPrice: null,
     allowDiscount: true,
     active: true,
+    clinicalNoteTemplateId: null,
+    suggestedClinicalNoteTemplateId: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   };
 }
+
+/** DX-455: sin plantillas; los casos del vínculo traen su propio lector. */
+const noTemplates: CatalogNoteTemplateReader = {
+  find: () => Promise.resolve(null),
+};
 
 function makeRepo(
   overrides: Partial<DentalCatalogRepository> = {},
@@ -66,7 +74,7 @@ describe('UpdateCatalogItemUseCase', () => {
         return Promise.resolve(updated);
       },
     });
-    const uc = new UpdateCatalogItemUseCase(repo);
+    const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     const result = await uc.execute(existing.id, {
       labelEs: 'Caries profunda',
@@ -86,7 +94,7 @@ describe('UpdateCatalogItemUseCase', () => {
       findById: () => Promise.resolve(null),
       update: () => Promise.reject(new Error('update should not be called')),
     });
-    const uc = new UpdateCatalogItemUseCase(repo);
+    const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     await expect(
       uc.execute('missing-id', { active: false }),
@@ -100,7 +108,7 @@ describe('UpdateCatalogItemUseCase', () => {
         Promise.resolve(id === existing.id ? existing : null),
       update: () => Promise.reject(new Error('update should not be called')),
     });
-    const uc = new UpdateCatalogItemUseCase(repo);
+    const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     await expect(
       uc.execute(existing.id, { color: 'not-a-color' }),
@@ -114,7 +122,7 @@ describe('UpdateCatalogItemUseCase', () => {
         Promise.resolve(id === existing.id ? existing : null),
       update: () => Promise.reject(new Error('update should not be called')),
     });
-    const uc = new UpdateCatalogItemUseCase(repo);
+    const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     const maliciousPatch = {
       kind: 'NOT_A_KIND',
@@ -136,7 +144,7 @@ describe('UpdateCatalogItemUseCase', () => {
         return Promise.resolve(fakeItem({ category: 'X' }));
       },
     });
-    const uc = new UpdateCatalogItemUseCase(repo);
+    const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     await uc.execute(existing.id, { category: 'X' });
 
@@ -154,7 +162,7 @@ describe('UpdateCatalogItemUseCase', () => {
         return Promise.resolve(fakeItem({ code: 'CAR-002' }));
       },
     });
-    const uc = new UpdateCatalogItemUseCase(repo);
+    const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     await uc.execute(existing.id, { code: '  CAR-002  ' });
 
@@ -174,11 +182,102 @@ describe('UpdateCatalogItemUseCase · allowDiscount (DX-105)', () => {
         );
       },
     });
-    const uc = new UpdateCatalogItemUseCase(repo);
+    const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     const result = await uc.execute('c1', { allowDiscount: false });
 
     expect(received).toEqual({ allowDiscount: false });
     expect(result.allowDiscount).toBe(false);
+  });
+});
+
+describe('UpdateCatalogItemUseCase — plantilla de evolución (DX-455)', () => {
+  const templates = (
+    rows: { id: string; name: string; active: boolean }[],
+  ): CatalogNoteTemplateReader => ({
+    find: (id) => Promise.resolve(rows.find((r) => r.id === id) ?? null),
+  });
+  const procedure = fakeItem({ kind: CatalogKind.PROCEDURE });
+
+  function capture() {
+    const patches: UpdateDentalCatalogItemRepoInput[] = [];
+    const repo = makeRepo({
+      findById: () => Promise.resolve(procedure),
+      update: (_id, patch) => {
+        patches.push(patch);
+        return Promise.resolve(procedure);
+      },
+    });
+    return { repo, patches };
+  }
+
+  it('liga una plantilla activa de la clínica', async () => {
+    const { repo, patches } = capture();
+    const uc = new UpdateCatalogItemUseCase(
+      repo,
+      templates([{ id: 'tpl-1', name: 'Resina', active: true }]),
+    );
+    await uc.execute('c1', { clinicalNoteTemplateId: 'tpl-1' });
+    expect(patches).toEqual([{ clinicalNoteTemplateId: 'tpl-1' }]);
+  });
+
+  it('null quita el vínculo sin leer la plantilla', async () => {
+    const { repo, patches } = capture();
+    const uc = new UpdateCatalogItemUseCase(repo, {
+      find: () => Promise.reject(new Error('no debe leerse')),
+    });
+    await uc.execute('c1', { clinicalNoteTemplateId: null });
+    expect(patches).toEqual([{ clinicalNoteTemplateId: null }]);
+  });
+
+  it('404 si no existe o es de otra clínica', async () => {
+    const { repo, patches } = capture();
+    const uc = new UpdateCatalogItemUseCase(repo, templates([]));
+    await expect(
+      uc.execute('c1', { clinicalNoteTemplateId: 'tpl-x' }),
+    ).rejects.toThrow(
+      new NotFoundException(
+        'Plantilla de evolución no encontrada en esta clínica',
+      ),
+    );
+    expect(patches).toEqual([]);
+  });
+
+  it('400 si la plantilla está desactivada', async () => {
+    const { repo, patches } = capture();
+    const uc = new UpdateCatalogItemUseCase(
+      repo,
+      templates([{ id: 'tpl-1', name: 'Resina', active: false }]),
+    );
+    await expect(
+      uc.execute('c1', { clinicalNoteTemplateId: 'tpl-1' }),
+    ).rejects.toThrow(
+      'La plantilla «Resina» está desactivada: actívala en Ajustes → Plantillas de evolución o elige otra.',
+    );
+    expect(patches).toEqual([]);
+  });
+
+  it('400 en un diagnóstico, o al pasar a diagnóstico con el vínculo puesto', async () => {
+    const diagnosis = fakeItem({ kind: CatalogKind.DIAGNOSIS });
+    const reader = templates([{ id: 'tpl-1', name: 'Resina', active: true }]);
+    const onDiagnosis = new UpdateCatalogItemUseCase(
+      makeRepo({ findById: () => Promise.resolve(diagnosis) }),
+      reader,
+    );
+    await expect(
+      onDiagnosis.execute('c1', { clinicalNoteTemplateId: 'tpl-1' }),
+    ).rejects.toThrow(/Solo un procedimiento/);
+
+    const linked = fakeItem({
+      kind: CatalogKind.PROCEDURE,
+      clinicalNoteTemplateId: 'tpl-1',
+    });
+    const toDiagnosis = new UpdateCatalogItemUseCase(
+      makeRepo({ findById: () => Promise.resolve(linked) }),
+      reader,
+    );
+    await expect(
+      toDiagnosis.execute('c1', { kind: CatalogKind.DIAGNOSIS }),
+    ).rejects.toThrow(BadRequestException);
   });
 });
