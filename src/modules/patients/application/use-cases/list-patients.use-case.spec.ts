@@ -12,6 +12,7 @@ function fakePatient(id: string): Patient {
   return {
     id,
     tenantId: 't1',
+    patientCode: '1',
     firstName: 'Ana',
     lastName: 'Gomez',
     docType: 'NATIONAL_ID',

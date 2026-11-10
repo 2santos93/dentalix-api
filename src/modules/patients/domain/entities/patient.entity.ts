@@ -15,6 +15,12 @@ import {
 export interface Patient {
   id: string;
   tenantId: string;
+  /**
+   * DX-484: código corto del paciente en su clínica, en dígitos decimales sin
+   * ceros a la izquierda («1042»). Lo asigna la BD en el alta y nunca cambia;
+   * es el que se da al software de imagen.
+   */
+  patientCode: string;
   firstName: string;
   lastName: string;
   /** DX-327: tipo genérico (columna `documentType`; nunca el código anterior). */

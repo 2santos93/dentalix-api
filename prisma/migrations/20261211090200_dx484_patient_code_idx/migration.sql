@@ -1,0 +1,11 @@
+-- DX-484: el código del paciente no se repite en la clínica (archivados
+-- incluidos: un código no se reutiliza). Va después del relleno: antes, todas
+-- las filas existentes tenían 0. Es la red de seguridad del contador: si algo
+-- escribiera un código repetido, el INSERT falla en lugar de dar dos
+-- pacientes con el mismo código al software de imagen. Sin consultas que lo
+-- lean todavía (la app lee el código con la ficha, por id).
+-- CONCURRENTLY para no bloquear las escrituras de patients; única sentencia
+-- (no puede ir en transacción). Aditivo. Si se corta, deja un índice
+-- INVALID: el IF NOT EXISTS no lo repara; hay que
+-- `DROP INDEX CONCURRENTLY "patients_tenant_patient_code_key"` y repetirla.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "patients_tenant_patient_code_key" ON "patients" ("tenantId", "patientCode");

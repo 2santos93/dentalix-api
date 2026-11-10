@@ -294,6 +294,8 @@ export function mapToEntity(
   return {
     id: patient.id,
     tenantId: patient.tenantId,
+    // DX-484: entero en la BD (lo asigna el trigger), texto en la API.
+    patientCode: String(patient.patientCode),
     firstName: patient.firstName,
     lastName: patient.lastName,
     // DX-327 (R4): el genérico; la columna anterior es de las réplicas viejas.

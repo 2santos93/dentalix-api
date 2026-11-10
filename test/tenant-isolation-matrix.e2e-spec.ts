@@ -1086,6 +1086,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}`,
       status: 404,
     },
+    // DX-484: ficha de texto para el software de imagen.
+    {
+      name: 'GET /patients/:id/imaging-export.txt',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/imaging-export.txt`,
+      status: 404,
+    },
     {
       name: 'PATCH /patients/:id',
       verb: 'patch',

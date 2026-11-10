@@ -29,6 +29,16 @@ export class PatientDto {
   @ApiProperty({ format: 'uuid' })
   tenantId!: string;
 
+  @ApiProperty({
+    pattern: '^[1-9][0-9]*$',
+    example: '1042',
+    description:
+      'DX-484: código del paciente en su clínica (dígitos, sin ceros a la ' +
+      'izquierda). Lo asigna el sistema en el alta, es único en la clínica y ' +
+      'no cambia nunca, ni al archivar; es el que se da al software de imagen.',
+  })
+  patientCode!: string;
+
   @ApiProperty()
   firstName!: string;
 
