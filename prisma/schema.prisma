@@ -238,6 +238,8 @@ model Tenant {
   creditRefundPayments     PatientCreditRefundPayment[]
   creditEntries            PatientCreditEntry[]
   creditRefundCounters     PatientCreditRefundCounter[]
+  // DX-484: último código de paciente asignado en la clínica.
+  patientCodeCounter       PatientCodeCounter?
 
   @@map("tenants")
 }
@@ -741,6 +743,12 @@ model Patient {
   // mano). «Deshacer lote» retira en blando solo los de su lote. FK compuesta
   // por tenant (patients_import_batch_fkey).
   importBatchId                String?               @map("import_batch_id") @db.Uuid
+  /// DX-484: código del paciente, corto y numérico, único en la clínica y que
+  /// nunca cambia (lo lee el software de imagen). Lo asigna SIEMPRE el trigger
+  /// `patients_code_assign` desde `patient_code_counters`; un valor escrito en
+  /// el alta se ignora y `patients_code_immutable` rechaza cambiarlo. La app
+  /// solo lo lee. El DEFAULT 0 es solo del ADD COLUMN; CHECK en la BD: > 0.
+  patientCode                  Int                   @default(0)
 
   importBatch                 PatientImportBatch?              @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
   // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
@@ -809,6 +817,9 @@ model Patient {
   // nivel DB (las FK de Postgres se chequean saltando la RLS, así que una FK
   // a `id` sola no basta). Ver 20261015130000_tenant_composite_fks (SEC-004).
   @@unique([tenantId, id], map: "patients_tenant_id_key")
+  // DX-484: el código del paciente no se repite en la clínica (tampoco con
+  // los archivados: un código no se reutiliza).
+  @@unique([tenantId, patientCode], map: "patients_tenant_patient_code_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
   // patients_tenant_id_key y se retiró en 20261017114000.
   // Índices PARCIALES (WHERE "deletedAt" IS NULL) de DX-043 que Prisma no
@@ -6833,6 +6844,19 @@ model PatientCreditRefundCounter {
 
   @@id([tenantId, seriesPrefix])
   @@map("patient_credit_refund_counters")
+}
+
+/// DX-484: último código de paciente asignado en la clínica. Lo escriben solo
+/// el trigger de alta de `patients` (UPSERT en la transacción del alta: sin
+/// huecos ni duplicados: un alta deshecha deshace también su número) y el
+/// relleno inicial.
+model PatientCodeCounter {
+  tenantId   String @id @db.Uuid
+  lastNumber Int
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("patient_code_counters")
 }
 
 /// SEC-058: contador GLOBAL del presupuesto de llamadas al proveedor de tasas,

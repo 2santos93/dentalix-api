@@ -2,11 +2,17 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { Prisma, PrismaClient, Sex } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
-import { resetDatabase } from './support/e2e-fixtures';
+import {
+  loginAs,
+  registerClinic,
+  resetDatabase,
+  seedMember,
+  type Clinic,
+} from './support/e2e-fixtures';
 import {
   REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
@@ -922,6 +928,243 @@ describe('Patients (e2e)', () => {
         (events[0].metadata as { changedFields: string[] }).changedFields,
       ).toEqual(['docTypeLabel']);
       expect(JSON.stringify(events)).not.toContain('secreto');
+    });
+  });
+
+  describe('DX-484: código del paciente y exportación para el software de imagen', () => {
+    let clinic: Clinic;
+    let other: Clinic;
+    let dentistToken: string;
+    let receptionToken: string;
+    let patientId: string;
+    let patientCode: string;
+
+    const exportPath = (id: string) =>
+      `/api/v1/patients/${id}/imaging-export.txt`;
+
+    beforeAll(async () => {
+      clinic = await registerClinic(app, 'imagen-a');
+      other = await registerClinic(app, 'imagen-b');
+      const dentist = await seedMember(raw, clinic, ClinicRole.DENTIST);
+      const reception = await seedMember(raw, clinic, ClinicRole.RECEPTION);
+      dentistToken = await loginAs(app, clinic.host, dentist.email);
+      receptionToken = await loginAs(app, clinic.host, reception.email);
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/patients')
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .send({
+          firstName: 'José Ángel',
+          lastName: 'Pérez Núñez',
+          docType: 'NATIONAL_ID',
+          docNumber: 'V-12345678',
+          birthDate: '1990-03-05',
+          sex: Sex.M,
+          phone: '+584121234567',
+          notes: 'Alergia a la penicilina',
+        })
+        .expect(201);
+      const body = created.body as { id: string; patientCode: string };
+      patientId = body.id;
+      patientCode = body.patientCode;
+    });
+
+    it('every patient gets a numeric code, consecutive in the clinic, in create, detail and list', async () => {
+      expect(patientCode).toMatch(/^[1-9][0-9]*$/);
+      const second = await request(app.getHttpServer())
+        .post('/api/v1/patients')
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .send({
+          firstName: 'María',
+          lastName: 'Rondón',
+          docType: 'NATIONAL_ID',
+          docNumber: 'V-87654321',
+          sex: Sex.F,
+          // Un código en el cuerpo no se acepta: lo asigna el sistema.
+          patientCode: '1',
+        })
+        .expect(201);
+      const secondBody = second.body as { id: string; patientCode: string };
+      expect(secondBody.patientCode).toBe(String(Number(patientCode) + 1));
+
+      const detail = await request(app.getHttpServer())
+        .get(`/api/v1/patients/${patientId}`)
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .expect(200);
+      expect((detail.body as { patientCode: string }).patientCode).toBe(
+        patientCode,
+      );
+
+      const list = await request(app.getHttpServer())
+        .get('/api/v1/patients')
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .expect(200);
+      const items = (
+        list.body as { items: { id: string; patientCode: string }[] }
+      ).items;
+      expect(items.find((p) => p.id === patientId)?.patientCode).toBe(
+        patientCode,
+      );
+      expect(items.find((p) => p.id === secondBody.id)?.patientCode).toBe(
+        secondBody.patientCode,
+      );
+    });
+
+    it('the code is stable across an update (and cannot be set through PATCH)', async () => {
+      const patched = await request(app.getHttpServer())
+        .patch(`/api/v1/patients/${patientId}`)
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .send({ occupation: 'Docente', patientCode: '9999' })
+        .expect(200);
+      expect((patched.body as { patientCode: string }).patientCode).toBe(
+        patientCode,
+      );
+      const detail = await request(app.getHttpServer())
+        .get(`/api/v1/patients/${patientId}`)
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .expect(200);
+      expect(detail.body).toMatchObject({ patientCode, occupation: 'Docente' });
+    });
+
+    it('another clinic starts its own codes', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/patients')
+        .set('X-Tenant-Host', other.host)
+        .set('Authorization', `Bearer ${other.adminToken}`)
+        .send({
+          firstName: 'Luis',
+          lastName: 'Castillo',
+          docType: 'NATIONAL_ID',
+          docNumber: 'V-11111111',
+          sex: Sex.M,
+        })
+        .expect(201);
+      expect((created.body as { patientCode: string }).patientCode).toBe('1');
+    });
+
+    it('DENTIST downloads the text file with the right headers and only the identification lines', async () => {
+      const before = await raw.auditEvent.count({
+        where: { tenantId: clinic.tenantId, action: 'EXPORT' },
+      });
+      const res = await request(app.getHttpServer())
+        .get(exportPath(patientId))
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${dentistToken}`)
+        .expect(200);
+      expect(res.headers['content-type']).toBe('text/plain; charset=utf-8');
+      expect(res.headers['content-disposition']).toBe(
+        `attachment; filename="paciente-${patientCode}.txt"`,
+      );
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.text).toBe(
+        `Código del paciente: ${patientCode}\r\n` +
+          'Apellidos: Pérez Núñez\r\n' +
+          'Nombre: José Ángel\r\n' +
+          'Apellidos (sin tildes): Perez Nunez\r\n' +
+          'Nombre (sin tildes): Jose Angel\r\n' +
+          'Fecha de nacimiento: 05.03.1990\r\n' +
+          'Fecha de nacimiento (aaaa-mm-dd): 1990-03-05\r\n' +
+          'Sexo: M\r\n',
+      );
+      // Ni documento, ni contacto, ni datos clínicos.
+      expect(res.text).not.toMatch(/12345678|584121234567|penicilina|Docente/);
+
+      const events = await raw.auditEvent.findMany({
+        where: { tenantId: clinic.tenantId, action: 'EXPORT' },
+        orderBy: { occurredAt: 'asc' },
+      });
+      expect(events).toHaveLength(before + 1);
+      expect(events.at(-1)).toMatchObject({
+        resourceType: 'PATIENT',
+        resourceId: patientId,
+        patientId,
+        actorRole: 'DENTIST',
+        metadata: { reason: 'IMAGING_EXPORT' },
+      });
+      expect(JSON.stringify(events.at(-1))).not.toMatch(/Pérez|Núñez/);
+    });
+
+    it('RECEPTION gets 403 with a Spanish message and no audit event', async () => {
+      const before = await raw.auditEvent.count({
+        where: { tenantId: clinic.tenantId, action: 'EXPORT' },
+      });
+      const res = await request(app.getHttpServer())
+        .get(exportPath(patientId))
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${receptionToken}`)
+        .expect(403);
+      expect((res.body as { message: string }).message).toBe(
+        'Solo el personal clínico puede exportar los datos para el software de imagen.',
+      );
+      expect(
+        await raw.auditEvent.count({
+          where: { tenantId: clinic.tenantId, action: 'EXPORT' },
+        }),
+      ).toBe(before);
+    });
+
+    it('another clinic gets 404, an unknown id 404 and a non-UUID 400', async () => {
+      await request(app.getHttpServer())
+        .get(exportPath(patientId))
+        .set('X-Tenant-Host', other.host)
+        .set('Authorization', `Bearer ${other.adminToken}`)
+        .expect(404);
+      await request(app.getHttpServer())
+        .get(exportPath('00000000-0000-4000-8000-000000000000'))
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${dentistToken}`)
+        .expect(404);
+      await request(app.getHttpServer())
+        .get(exportPath('no-es-un-uuid'))
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${dentistToken}`)
+        .expect(400);
+    });
+
+    it('without birth date nor sex both say «Sin indicar»; an archived patient behaves like GET /patients/:id', async () => {
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/patients')
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .send({
+          firstName: 'Ana',
+          lastName: 'Sin Datos',
+          docType: 'NATIONAL_ID',
+          docNumber: 'V-22222222',
+          sex: Sex.UNSPECIFIED,
+        })
+        .expect(201);
+      const { id } = created.body as { id: string };
+      const res = await request(app.getHttpServer())
+        .get(exportPath(id))
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${dentistToken}`)
+        .expect(200);
+      expect(res.text).toContain('Fecha de nacimiento: Sin indicar\r\n');
+      expect(res.text).toContain(
+        'Fecha de nacimiento (aaaa-mm-dd): Sin indicar\r\n',
+      );
+      expect(res.text).toContain('Sexo: Sin indicar\r\n');
+
+      await request(app.getHttpServer())
+        .delete(`/api/v1/patients/${id}`)
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${clinic.adminToken}`)
+        .expect(204);
+      const detail = await request(app.getHttpServer())
+        .get(`/api/v1/patients/${id}`)
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${dentistToken}`);
+      const exported = await request(app.getHttpServer())
+        .get(exportPath(id))
+        .set('X-Tenant-Host', clinic.host)
+        .set('Authorization', `Bearer ${dentistToken}`);
+      expect(exported.status).toBe(detail.status);
     });
   });
 });

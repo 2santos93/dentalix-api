@@ -19,6 +19,7 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
   return {
     id: 'p1',
     tenantId: 't1',
+    patientCode: 1042,
     firstName: 'Ana',
     lastName: 'Gomez',
     documentType: 'NATIONAL_ID',
@@ -79,6 +80,11 @@ describe('PrismaPatientRepository (DX-327)', () => {
       TERM,
     );
     expect(unlabelled).toMatchObject({ docType: 'TAX_ID', docTypeLabel: null });
+  });
+
+  it('DX-484: the patient code goes out as decimal digits, without padding', () => {
+    expect(mapToEntity(row(), TERM).patientCode).toBe('1042');
+    expect(mapToEntity(row({ patientCode: 7 }), TERM).patientCode).toBe('7');
   });
 
   describe('retention (DX-330)', () => {

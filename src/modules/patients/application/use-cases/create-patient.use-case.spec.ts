@@ -18,6 +18,7 @@ function fakePatientFrom(
   return {
     id,
     tenantId,
+    patientCode: '1',
     firstName: input.firstName,
     lastName: input.lastName,
     docType: input.docType,

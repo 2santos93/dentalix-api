@@ -15,6 +15,7 @@ function fakePatient(overrides: Partial<Patient> = {}): Patient {
   return {
     id: 'p1',
     tenantId: 't1',
+    patientCode: '1',
     firstName: 'Ana',
     lastName: 'Gomez',
     docType: 'NATIONAL_ID',

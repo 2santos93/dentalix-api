@@ -424,6 +424,21 @@ const SIN_COLOMBIA = '20261110130000_sin_colombia_identificadores';
  */
 const DX330 = '20261113110000_dx330_tenant_clinical_record_retention';
 
+/**
+ * DX-484: código del paciente. Antes de la columna, dos pacientes de A con
+ * altas más antiguas que las demás y el MISMO instante (el empate va por id:
+ * …484a1 antes que …484a9), el de …484a1 archivado (también recibe código).
+ * Con los ~4.500 de B (DX-225/DX-287), el relleno pasa por más de un lote.
+ */
+const DX484 = '20261211090000_dx484_patient_code';
+const P_DX484_FIRST = '00000000-0000-4000-8000-0000000484a1';
+const P_DX484_SECOND = '00000000-0000-4000-8000-0000000484a9';
+const FIXTURE_DX484 = [
+  `INSERT INTO "patients" ("id","tenantId","firstName","lastName","createdAt","updatedAt","deletedAt") VALUES
+     ('${P_DX484_SECOND}','${T_A}','Zoe','Antigua','2001-01-01 08:00',now(),NULL),
+     ('${P_DX484_FIRST}','${T_A}','Ana','Archivada','2001-01-01 08:00',now(),'2026-01-01 00:00')`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -519,8 +534,13 @@ const STEPS: Step[] = [
   // sin_colombia_identificadores: tipos de pagador y código de documento
   // anteriores traducidos o renombrados; y las siguientes hasta DX-330.
   { until: DX330 },
-  // dx330: plazo de la HC en la clínica y suelo por paciente; y las siguientes.
-  { until: '99999999999999' },
+  // dx330: plazo de la HC en la clínica y suelo por paciente; y las
+  // siguientes hasta DX-484.
+  { until: DX484 },
+  // dx484: código del paciente, relleno por clínica y por lotes con la
+  // clínica fijada (sin NO FORCE), índice único CONCURRENTLY y CHECK validado;
+  // y las siguientes.
+  { until: '99999999999999', fixture: FIXTURE_DX484 },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -1665,6 +1685,79 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
           WHERE oid = 'public.patients'::regclass`,
       ),
     ).toBe(true);
+  }, 180_000);
+
+  it('código del paciente (DX-484): el relleno numera a los pacientes de cada clínica por orden de alta, sin repetir, y el trigger sigue el contador', async () => {
+    await run(STEPS[30]);
+    // Por clínica: 1…n en orden de alta ("createdAt", id), archivados incluidos.
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM (
+           SELECT "patientCode",
+                  row_number() OVER (PARTITION BY "tenantId" ORDER BY "createdAt", "id") AS rn
+             FROM "patients") s
+          WHERE "patientCode" IS DISTINCT FROM rn`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("patientCode"::text, ',' ORDER BY "id") AS v
+           FROM "patients" WHERE "id" IN ('${P_DX484_FIRST}', '${P_DX484_SECOND}')`,
+      ),
+    ).toBe('1,2');
+    // El contador de cada clínica con pacientes es su total.
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v
+           FROM (SELECT "tenantId", count(*)::int AS n FROM "patients" GROUP BY 1) p
+           FULL JOIN "patient_code_counters" c USING ("tenantId")
+          WHERE c."lastNumber" IS DISTINCT FROM p.n`,
+      ),
+    ).toBe(0);
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "patients" WHERE "tenantId" = '${T_B}'`,
+      ),
+    ).toBeGreaterThan(2000);
+    expect(
+      await scalar<boolean>(
+        `SELECT indisvalid AS v FROM pg_index
+          WHERE indexrelid = 'public.patients_tenant_patient_code_key'::regclass`,
+      ),
+    ).toBe(true);
+    expect(
+      await scalar<boolean>(
+        `SELECT convalidated AS v FROM pg_constraint
+          WHERE conrelid = 'public.patients'::regclass
+            AND conname = 'patients_patient_code_check'`,
+      ),
+    ).toBe(true);
+    // Las altas posteriores siguen el contador; el código no cambia.
+    const next = await scalar<number>(
+      `SELECT "lastNumber" + 1 AS v FROM "patient_code_counters" WHERE "tenantId" = '${T_A}'`,
+    );
+    await target.$executeRawUnsafe(
+      `INSERT INTO "patients" ("id","tenantId","firstName","lastName","updatedAt")
+       VALUES (gen_random_uuid(), '${T_A}', 'Nueva', 'DX484', now())`,
+    );
+    expect(
+      await scalar<number>(
+        `SELECT "patientCode" AS v FROM "patients" WHERE "lastName" = 'DX484'`,
+      ),
+    ).toBe(next);
+    await expect(
+      target.$executeRawUnsafe(
+        `UPDATE "patients" SET "patientCode" = 1 WHERE "lastName" = 'DX484'`,
+      ),
+    ).rejects.toThrow(/El código del paciente no se puede cambiar/);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(relname || '=' || relforcerowsecurity, ',' ORDER BY relname) AS v
+           FROM pg_class
+          WHERE oid IN ('public.patients'::regclass,
+                        'public.patient_code_counters'::regclass)`,
+      ),
+    ).toBe('patient_code_counters=true,patients=true');
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

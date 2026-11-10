@@ -11,6 +11,7 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -26,9 +27,11 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiParam,
+  ApiProduces,
   ApiTags,
   getSchemaPath,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
 import { ListPatientsQueryDto } from './dto/list-patients-query.dto';
@@ -60,6 +63,7 @@ import {
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
 import {
+  CLINICAL_ROLES,
   CLINIC_SETTINGS_WRITE_ROLES,
   PATIENT_RETENTION_ROLES,
   PATIENT_ROLES,
@@ -130,6 +134,10 @@ import {
 } from './doc-type-name.presenter';
 import { DefaultPhoneRegionReader } from '../domain/ports/default-phone-region-reader.port';
 import {
+  imagingExportFileName,
+  imagingExportText,
+} from '../domain/imaging-export';
+import {
   withPhoneInternational,
   type WithPhoneInternational,
 } from '../../../shared/phone/with-phone-international';
@@ -139,6 +147,9 @@ export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
 
 export const RETENTION_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar el plazo de conservación.';
+
+export const IMAGING_EXPORT_FORBIDDEN_MESSAGE =
+  'Solo el personal clínico puede exportar los datos para el software de imagen.';
 
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
   items: WithPhoneInternational<
@@ -495,6 +506,51 @@ export class PatientsController {
     const coverage = await this.coverageFlags.forPatient(patient.id);
     const agreement = await this.agreementFlags.forPatient(patient.id);
     return { ...patient, balance, coverage, agreement };
+  }
+
+  @Audit({
+    action: 'EXPORT',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'IMAGING_EXPORT',
+  })
+  @Get(':id/imaging-export.txt')
+  @Roles(...CLINICAL_ROLES)
+  @RolesDeniedMessage(IMAGING_EXPORT_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary: 'Datos del paciente para el software de imagen (texto)',
+    description:
+      'DX-484. Fichero de texto UTF-8 con fin de línea CRLF y una línea ' +
+      '«Etiqueta: valor» por dato: código del paciente, apellidos y nombre ' +
+      '(también sin tildes), fecha de nacimiento (dd.mm.aaaa y aaaa-mm-dd) y ' +
+      'sexo; «Sin indicar» si falta. Solo identificación: ni documento, ni ' +
+      'contacto, ni datos clínicos. Solo el personal clínico (DENTIST, ' +
+      'ASSISTANT, ADMIN); cada descarga deja un evento EXPORT en la ' +
+      'auditoría. 404 como `GET /patients/:id`.',
+  })
+  @ApiProduces('text/plain')
+  @ApiOkResponse({
+    description: 'Fichero de texto `paciente-<código>.txt`',
+    content: { 'text/plain': { schema: { type: 'string' } } },
+  })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiNotFoundResponse({ description: 'Paciente inexistente en la clínica' })
+  @ApiForbiddenResponse({ description: IMAGING_EXPORT_FORBIDDEN_MESSAGE })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  async imagingExport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const patient = await this.getPatient.execute(id);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${imagingExportFileName(patient.patientCode)}"`,
+    );
+    // Dato personal: ni el navegador ni un proxy lo guardan.
+    res.setHeader('Cache-Control', 'no-store');
+    return imagingExportText(patient);
   }
 
   @Audit({

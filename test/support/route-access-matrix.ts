@@ -188,6 +188,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-224: «¿Quién llama?» (POST: el número va en el cuerpo, no en la URL).
   'POST /patients/lookup-by-phone': EVERY_ROLE,
   'PATCH /patients/:id': EVERY_ROLE,
+  // DX-484: ficha de texto para el software de imagen (radiografía, cámara
+  // intraoral): la usa el personal clínico, recepción no.
+  'GET /patients/:id/imaging-export.txt': CLINICAL,
   // DX-128: bloque «Comunicaciones». Lo ven todos (el profesional en solo
   // lectura); el canal lo cambian recepción y ADMIN.
   'GET /patients/:id/communication': EVERY_ROLE,

@@ -178,6 +178,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { param: 'id' },
   },
+  // DX-484: cada descarga de la ficha para el software de imagen.
+  'GET /patients/:id/imaging-export.txt': {
+    action: 'EXPORT',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'IMAGING_EXPORT',
+  },
   // DX-203: responsables de pago y avisos, con el motivo y los nombres de los
   // campos (nunca los datos del tercero).
   // SEC-044: la lectura (documento, email y teléfono de terceros) también.
