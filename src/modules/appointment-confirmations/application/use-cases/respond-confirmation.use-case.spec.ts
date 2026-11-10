@@ -138,8 +138,13 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
 
     it('cancel -> CANCELLED', async () => {
       const { appointment, token } = await issue();
-      await inTenant(() => respond.execute(token, 'cancel'));
+      const view = await inTenant(() => respond.execute(token, 'cancel'));
       expect(repo.appointments.get(appointment.id)?.status).toBe('CANCELLED');
+      // DX-469: la respuesta ya no ofrece añadir al calendario.
+      expect(view).toMatchObject({
+        calendarAvailable: false,
+        googleCalendarUrl: null,
+      });
     });
 
     it('call_me -> sigue SCHEDULED pero marca "pide llamada"', async () => {
