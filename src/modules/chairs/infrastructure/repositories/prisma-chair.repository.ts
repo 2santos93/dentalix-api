@@ -30,7 +30,11 @@ function mapToEntity(row: PrismaChair): Chair {
   };
 }
 
-const ORDER = [
+/**
+ * Orden de las columnas de la agenda y de la lista de sillones. DX-480: el
+ * mismo con que un enlace público elige el primer sillón libre.
+ */
+export const CHAIR_ORDER = [
   { sortOrder: 'asc' },
   { name: 'asc' },
 ] satisfies Prisma.ChairOrderByWithRelationInput[];
@@ -93,7 +97,7 @@ export class PrismaChairRepository implements ChairRepository {
           locationId: params.locationId,
           ...(params.includeInactive ? {} : { active: true }),
         },
-        orderBy: ORDER,
+        orderBy: CHAIR_ORDER,
       });
       return rows.map(mapToEntity);
     });
@@ -111,7 +115,7 @@ export class PrismaChairRepository implements ChairRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.chair.findMany({
         where: { id: { in: [...ids] } },
-        orderBy: ORDER,
+        orderBy: CHAIR_ORDER,
       });
       return rows.map(mapToEntity);
     });
@@ -189,7 +193,7 @@ export class PrismaChairRepository implements ChairRepository {
       }
       const rows = await tx.chair.findMany({
         where: { locationId },
-        orderBy: ORDER,
+        orderBy: CHAIR_ORDER,
       });
       return rows.map(mapToEntity);
     });

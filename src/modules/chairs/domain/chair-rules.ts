@@ -122,3 +122,30 @@ export function chairOverlapMessage(
   }
   return `El sillón «${chairName}» ya está ocupado de ${occupied.from} a ${occupied.to}`;
 }
+
+/**
+ * DX-480: el sillón de una cita que nace (o se mueve) desde un enlace público.
+ * - `NO_CHAIRS`: la sede no tiene sillones activos; la cita va sin sillón,
+ *   como antes de DX-211.
+ * - `CHAIR`: el primer sillón activo libre en el orden de la agenda.
+ * - `ALL_BUSY`: todos ocupados en esa franja; el hueco no se ofrece.
+ */
+export type FreeChairChoice =
+  | { kind: 'NO_CHAIRS' }
+  | { kind: 'CHAIR'; chairId: string }
+  | { kind: 'ALL_BUSY' };
+
+/**
+ * `activeChairs` llega YA en el orden de las columnas de la agenda (orden y
+ * luego nombre, el de la lista de sillones); `busyChairIds`, los sillones que
+ * otra cita viva y no cancelada ocupa en la franja (un sobrecupo también).
+ */
+export function chooseFreeChair(
+  activeChairs: readonly { id: string }[],
+  busyChairIds: Iterable<string>,
+): FreeChairChoice {
+  if (activeChairs.length === 0) return { kind: 'NO_CHAIRS' };
+  const busy = new Set(busyChairIds);
+  const free = activeChairs.find((chair) => !busy.has(chair.id));
+  return free ? { kind: 'CHAIR', chairId: free.id } : { kind: 'ALL_BUSY' };
+}
