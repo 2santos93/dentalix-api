@@ -792,6 +792,120 @@ describe('Confirmación de cita por enlace (e2e)', () => {
     });
   });
 
+  describe('DX-469: «Añadir a mi calendario» (.ics por el enlace)', () => {
+    const ics = (host: string, token: string) =>
+      request(server)
+        .get(`/api/v1/public/appointment-confirmations/${token}/calendar.ics`)
+        .set('X-Tenant-Host', host);
+    const unfold = (text: string) => text.replace(/\r\n /g, '').split('\r\n');
+
+    it('sirve text/calendar con la cita (UTC), la clínica, el profesional y la sede, sin nada clínico; la vista trae Google Calendar', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const res = await ics(clinicA.host, token).expect(200);
+      expect(res.headers['content-type']).toMatch(/^text\/calendar/);
+      expect(res.headers['content-disposition']).toContain('cita.ics');
+      expect(res.headers['cache-control']).toContain('no-store');
+      const lines = unfold(res.text);
+      expect(lines[0]).toBe('BEGIN:VCALENDAR');
+      const start = new Date(appt.start)
+        .toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/\.\d{3}/, '');
+      expect(lines).toContain(`DTSTART:${start}`);
+      expect(lines.find((l) => l.startsWith('SUMMARY:'))).toBe(
+        'SUMMARY:Cita en Clínica confirma-a con Dra. Dueña',
+      );
+      expect(lines).toContain('STATUS:CONFIRMED');
+      expect(lines).toContain('TRIGGER:-PT24H');
+      // Nada clínico ni el id de la cita ni el token.
+      expect(res.text).not.toMatch(/Endodoncia|penicilina/);
+      expect(res.text).not.toContain(appt.id);
+      expect(res.text).not.toContain(token);
+
+      const v = (await view(clinicA.host, token).expect(200)).body as {
+        calendarAvailable: boolean;
+        googleCalendarUrl: string | null;
+      };
+      expect(v.calendarAvailable).toBe(true);
+      expect(v.googleCalendarUrl).toMatch(
+        /^https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE/,
+      );
+      expect(v.googleCalendarUrl).not.toMatch(/Endodoncia|penicilina/);
+    });
+
+    it('UID estable: el mismo evento al volver a pedirlo; cancelada por el enlace: STATUS:CANCELLED y la página ya no lo ofrece', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const uid = (text: string) =>
+        unfold(text).find((l) => l.startsWith('UID:'));
+      const first = uid((await ics(clinicA.host, token).expect(200)).text);
+      expect(uid((await ics(clinicA.host, token).expect(200)).text)).toBe(
+        first,
+      );
+      await respond(clinicA.host, token, 'cancel').expect(200);
+      const cancelled = await ics(clinicA.host, token).expect(200);
+      expect(uid(cancelled.text)).toBe(first);
+      expect(unfold(cancelled.text)).toContain('STATUS:CANCELLED');
+      expect(cancelled.text).not.toContain('VALARM');
+      const v = (await view(clinicA.host, token).expect(200)).body as {
+        calendarAvailable: boolean;
+        googleCalendarUrl: string | null;
+      };
+      expect(v).toMatchObject({
+        calendarAvailable: false,
+        googleCalendarUrl: null,
+      });
+    });
+
+    it('la alarma sale de los ajustes de la sede (0 la quita)', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const location = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+        select: { locationId: true, tenantId: true },
+      });
+      await raw.locationReminderSettings.upsert({
+        where: {
+          tenantId_locationId: {
+            tenantId: location.tenantId,
+            locationId: location.locationId,
+          },
+        },
+        create: {
+          tenantId: location.tenantId,
+          locationId: location.locationId,
+          calendarAlarmHours: 0,
+        },
+        update: { calendarAlarmHours: 0 },
+      });
+      try {
+        expect((await ics(clinicA.host, token).expect(200)).text).not.toContain(
+          'VALARM',
+        );
+      } finally {
+        await raw.locationReminderSettings.update({
+          where: {
+            tenantId_locationId: {
+              tenantId: location.tenantId,
+              locationId: location.locationId,
+            },
+          },
+          data: { calendarAlarmHours: 24 },
+        });
+      }
+    });
+
+    it('enlace revocado 410, token de otra clínica 404, inventado 404', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      await ics(clinicB.host, token).expect(404);
+      await ics(clinicA.host, 'x'.repeat(43)).expect(404);
+      await newLink(clinicA, appt.id);
+      await ics(clinicA.host, token).expect(410);
+    });
+  });
+
   describe('DX-437: «Avisarme si se libera un hueco antes» desde el enlace', () => {
     interface EarlierView {
       status: string;

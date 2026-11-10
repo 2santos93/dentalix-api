@@ -201,6 +201,46 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(noLink.text).not.toContain('Profesional');
   });
 
+  it('DX-469: appointment-reminder ofrece «Añadir a mi calendario» (.ics y Google) solo con el enlace', () => {
+    const base = {
+      patientName: 'Carolina',
+      startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
+      locationName: 'Sede Norte',
+      locationAddress: 'Av. Francisco de Miranda 93',
+      providerName: 'Dra. Laura Gómez',
+      confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
+      unsubscribeUrl: null,
+    };
+    const ics =
+      'https://demo.dentalix.app/api/v1/public/appointment-confirmations/abc/calendar.ics';
+    const email = renderEmail(
+      'appointment-reminder',
+      {
+        ...base,
+        calendar: {
+          icsUrl: ics,
+          start: '2026-10-20T13:30:00.000Z',
+          end: '2026-10-20T14:00:00.000Z',
+        },
+      },
+      brand,
+    );
+    expect(email.html).toContain('Añadir a mi calendario:');
+    expect(email.html).toContain(`href="${ics}"`);
+    expect(email.html).toContain(
+      'href="https://calendar.google.com/calendar/render?action=TEMPLATE&amp;text=Cita+en+Sonrisas+del+Norte+con+Dra.+Laura+G%C3%B3mez&amp;dates=20261020T133000Z%2F20261020T140000Z',
+    );
+    expect(email.text).toContain(`Archivo .ics (Apple, Outlook): ${ics}`);
+    expect(email.text).toMatch(
+      /Google Calendar: https:\/\/calendar\.google\.com\//,
+    );
+    // Nada clínico en el evento de Google: ni el motivo ni notas.
+    expect(email.html).not.toMatch(/details=[^"]*(motivo|endodoncia)/i);
+
+    const without = renderEmail('appointment-reminder', base, brand);
+    expect(without.html).not.toContain('Añadir a mi calendario');
+  });
+
   it('appointment-reminder lleva la política de cancelación de la sede (DX-291, {politica_cancelacion})', () => {
     const base = {
       patientName: 'Carolina',

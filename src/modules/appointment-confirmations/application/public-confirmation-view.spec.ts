@@ -11,6 +11,8 @@ function appointment(
     status: 'SCHEDULED',
     wantsEarlier: false,
     earlierWindow: null,
+    updatedAt: new Date('2027-02-01T00:00:00.000Z'),
+    calendarAlarmHours: 24,
     patientFirstName: 'Ana María',
     patientPhone: '+58 414 555 0101',
     providerName: 'Dra. Pérez',

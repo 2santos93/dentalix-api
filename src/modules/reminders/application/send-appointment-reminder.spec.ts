@@ -140,6 +140,13 @@ describe('SendAppointmentReminder (DX-026)', () => {
         providerName: 'Dra. Gómez',
         confirmUrl: 'https://demo.dentalix.app/confirmar/tok_123',
         unsubscribeUrl: 'https://demo.dentalix.app/baja/opt_tok',
+        // DX-469: «Añadir a mi calendario» por el mismo host.
+        calendar: {
+          icsUrl:
+            'https://demo.dentalix.app/api/v1/public/appointment-confirmations/tok_123/calendar.ics',
+          start: '2026-10-20T13:00:00.000Z',
+          end: '2026-10-20T14:00:00.000Z',
+        },
         cancellationPolicy: null,
       },
     });

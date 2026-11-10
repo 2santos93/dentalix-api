@@ -23,6 +23,11 @@ export interface EmailLayoutInput {
    * una frase y el enlace, discretos, debajo de la tarjeta.
    */
   footerLink?: { lead: string; label: string; url: string } | null;
+  /**
+   * DX-469: enlaces secundarios bajo el botón (p. ej. «Añadir a mi
+   * calendario»): una frase y varios enlaces en una línea.
+   */
+  links?: { lead: string; items: { label: string; url: string }[] } | null;
 }
 
 /**
@@ -65,6 +70,22 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
 <p style="margin:0 0 12px;font-size:13px;line-height:1.5;color:#5b6472">Si el botón no funciona, copia este enlace en tu navegador:<br /><span style="word-break:break-all">${escapeHtml(actionUrl)}</span></p>`
       : '';
 
+  const links = (input.links?.items ?? []).map((item) => {
+    const url = safeUrl(item.url);
+    if (!url)
+      throw new Error('El enlace del email no es una URL http(s) válida');
+    return { label: item.label, url };
+  });
+  const linksHtml =
+    input.links && links.length > 0
+      ? `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#1f2933">${escapeHtml(input.links.lead)} ${links
+          .map(
+            (l) =>
+              `<a href="${escapeHtml(l.url)}" style="color:${color};font-weight:600">${escapeHtml(l.label)}</a>`,
+          )
+          .join(' · ')}</p>`
+      : '';
+
   const footer = input.brand
     ? `Enviado por ${escapeHtml(senderName)} a través de ${PRODUCT_NAME}.`
     : `Enviado por ${PRODUCT_NAME}.`;
@@ -85,6 +106,7 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
 <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1f2933">${escapeHtml(input.heading)}</h1>
 ${body}
 ${button}
+${linksHtml}
 </td></tr>
 </table>
 <p style="margin:16px 0 0;font-size:12px;color:#7b8794">${footer}</p>
@@ -103,6 +125,10 @@ ${footerLink}
   ];
   if (input.action && actionUrl) {
     textParts.push('', `${singleLine(input.action.label)}: ${actionUrl}`);
+  }
+  if (input.links && links.length > 0) {
+    textParts.push('', singleLine(input.links.lead));
+    for (const l of links) textParts.push(`${singleLine(l.label)}: ${l.url}`);
   }
   textParts.push(
     '',

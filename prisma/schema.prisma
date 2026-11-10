@@ -4513,6 +4513,9 @@ model LocationReminderSettings {
   locationId  String   @db.Uuid
   enabled     Boolean  @default(false)
   leadHours   Int[]    @default([])
+  /// DX-469: horas antes de la cita de la alarma del evento «Añadir a mi
+  /// calendario» (0 = sin alarma; 0..168, CHECK). Sin fila, 24.
+  calendarAlarmHours Int @default(24)
   updatedById String?  @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

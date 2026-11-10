@@ -135,6 +135,12 @@ export interface AppointmentReminderEmailVars {
   /** Enlace de baja de los recordatorios (DX-128), si se emitió uno. */
   unsubscribeUrl: string | null;
   /**
+   * DX-469: «Añadir a mi calendario»: el .ics del enlace de confirmación y
+   * el inicio/fin (ISO) de la cita para el enlace de Google Calendar. null o
+   * ausente = sin enlace de confirmación: el email no lo ofrece.
+   */
+  calendar?: { icsUrl: string; start: string; end: string } | null;
+  /**
    * DX-291: la variable `{politica_cancelacion}` del recordatorio: la política
    * VIGENTE de la sede al enviarlo (horas de aviso, texto de la clínica e
    * importe del cargo ya formateado). null/ausente = la sede no tiene

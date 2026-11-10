@@ -164,6 +164,20 @@ export class PublicCancellationPolicyDto {
 // Respuesta de GET y POST /public/appointment-confirmations/:token.
 export class PublicAppointmentConfirmationDto {
   @ApiProperty({
+    description:
+      'DX-469: se puede añadir la cita al calendario (enlace válido, cita no cancelada y aún no terminada): `GET …/:token/calendar.ics` y `googleCalendarUrl`.',
+  })
+  calendarAvailable!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-469: «Añadir a Google Calendar» (plantilla de evento, sin datos clínicos). null si `calendarAvailable` es false.',
+  })
+  googleCalendarUrl!: string | null;
+
+  @ApiProperty({
     enum: CONFIRMATION_STATES,
     description:
       'PENDING: puede responder. RESPONDED: ya respondió (ver `response`). EXPIRED: caducado o sin efecto.',

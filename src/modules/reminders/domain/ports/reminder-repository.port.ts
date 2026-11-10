@@ -24,6 +24,8 @@ export interface LocationReminderSettingsView {
   locationName: string;
   enabled: boolean;
   leadHours: number[];
+  /** DX-469: horas antes de la alarma de «Añadir a mi calendario» (0 = sin alarma). */
+  calendarAlarmHours: number;
   /** null = la sede nunca se configuró (desactivada por defecto). */
   updatedAt: Date | null;
 }

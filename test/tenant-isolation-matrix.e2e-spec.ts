@@ -3418,6 +3418,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         ['post', () => ({ action: 'confirm' }), ''],
         // DX-437: «Avisarme si se libera un hueco antes» desde el enlace.
         ['post', () => ({ wantsEarlier: true }), '/wants-earlier'],
+        // DX-469: el .ics de la cita.
+        ['get', undefined, '/calendar.ics'],
       ] as const
     ).map(([verb, body, suffix]): IsolationCase => ({
       name: `${verb.toUpperCase()} /public/appointment-confirmations/:token${suffix} (token de A en el host de B)`,

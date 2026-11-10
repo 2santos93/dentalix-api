@@ -97,7 +97,13 @@ export class ReminderSettingsController {
   ): Promise<LocationReminderSettingsDto> {
     return this.update.execute(
       locationId,
-      { enabled: dto.enabled, leadHours: dto.leadHours },
+      {
+        enabled: dto.enabled,
+        leadHours: dto.leadHours,
+        ...(dto.calendarAlarmHours !== undefined
+          ? { calendarAlarmHours: dto.calendarAlarmHours }
+          : {}),
+      },
       requireAuditRequestContext(req, this.tenantContext),
     );
   }

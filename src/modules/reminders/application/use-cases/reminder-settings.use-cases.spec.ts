@@ -27,6 +27,7 @@ describe('ajustes de recordatorio por sede (DX-026)', () => {
       locationName: 'Sede principal',
       enabled: false,
       leadHours: [],
+      calendarAlarmHours: 24,
       updatedAt: null,
     });
   });
@@ -58,6 +59,29 @@ describe('ajustes de recordatorio por sede (DX-026)', () => {
     await expect(
       uc.execute(LOCATION, { enabled: true, leadHours: [200] }, AUDIT),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('DX-469: la alarma del calendario se guarda (0 la quita) y fuera de 0..168 da 400', async () => {
+    const uc = new UpdateReminderSettingsUseCase(repo);
+    const saved = await uc.execute(
+      LOCATION,
+      { enabled: false, leadHours: [], calendarAlarmHours: 0 },
+      AUDIT,
+    );
+    expect(saved).toMatchObject({ calendarAlarmHours: 0 });
+    for (const bad of [-1, 169, 2.5]) {
+      await expect(
+        uc.execute(
+          LOCATION,
+          { enabled: false, leadHours: [], calendarAlarmHours: bad },
+          AUDIT,
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'La alarma del calendario debe ser de 0 a 168 horas antes (0 la quita).',
+        ),
+      );
+    }
   });
 
   it('404 en español si la sede no es de esta clínica (o no existe)', async () => {

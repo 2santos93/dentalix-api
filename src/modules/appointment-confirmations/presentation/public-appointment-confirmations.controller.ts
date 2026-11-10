@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   Param,
   Post,
@@ -15,11 +16,13 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
 } from '@nestjs/swagger';
 import { GetPublicConfirmationUseCase } from '../application/use-cases/get-public-confirmation.use-case';
 import { RespondConfirmationUseCase } from '../application/use-cases/respond-confirmation.use-case';
 import { SetWantsEarlierFromLinkUseCase } from '../application/use-cases/set-wants-earlier-from-link.use-case';
+import { GetConfirmationCalendarUseCase } from '../application/use-cases/get-confirmation-calendar.use-case';
 import {
   PublicAppointmentConfirmationDto,
   PublicWantsEarlierDto,
@@ -46,7 +49,25 @@ export class PublicAppointmentConfirmationsController {
     private readonly getConfirmation: GetPublicConfirmationUseCase,
     private readonly respondConfirmation: RespondConfirmationUseCase,
     private readonly setWantsEarlier: SetWantsEarlierFromLinkUseCase,
+    private readonly calendar: GetConfirmationCalendarUseCase,
   ) {}
+
+  // DX-469: antes que `:token` a secas (otra ruta, sin ambigüedad). Solo lee.
+  @Get(':token/calendar.ics')
+  @Header('Content-Type', 'text/calendar; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="cita.ics"')
+  @ApiProduces('text/calendar')
+  @ApiOperation({
+    summary: 'DX-469: la cita del enlace como evento de calendario (.ics)',
+    description:
+      'RFC 5545: inicio y fin en UTC (el instante de la sede), clínica y profesional en el título, la sede y su dirección; sin motivo ni tratamiento. UID estable por cita (reprogramar actualiza, no duplica); una cancelada lleva STATUS:CANCELLED; VALARM con la antelación de la sede (`calendarAlarmHours` de los ajustes de recordatorio, 24 por defecto, 0 sin alarma). Vale con el enlace pendiente o ya respondido mientras la cita no haya terminado; caducado, revocado o cita pasada, 410. Solo lee: no se audita.',
+  })
+  @ApiOkResponse({ schema: { type: 'string' }, description: 'text/calendar' })
+  @ApiNotFoundResponse({ description: 'Token desconocido o de otra clínica.' })
+  @ApiGoneResponse({ description: 'El enlace caducó o la cita ya pasó.' })
+  calendarIcs(@Param('token') token: string): Promise<string> {
+    return this.calendar.execute(token);
+  }
 
   // SOLO LECTURA: abrir el enlace no cambia nada (los previsualizadores de
   // WhatsApp lo abren solos). Responder exige el POST del segundo clic.

@@ -1,3 +1,4 @@
+import { googleCalendarUrl } from '../../../../../shared/calendar/appointment-calendar';
 import {
   AppointmentReminderEmailVars,
   EmailBrand,
@@ -187,6 +188,29 @@ function appointmentReminder(
     blocks,
     action: vars.confirmUrl
       ? { label: 'Confirmar o cancelar', url: vars.confirmUrl }
+      : null,
+    // DX-469: «Añadir a mi calendario» (.ics y Google Calendar).
+    links: vars.calendar
+      ? {
+          lead: 'Añadir a mi calendario:',
+          items: [
+            {
+              label: 'Archivo .ics (Apple, Outlook)',
+              url: vars.calendar.icsUrl,
+            },
+            {
+              label: 'Google Calendar',
+              url: googleCalendarUrl({
+                start: new Date(vars.calendar.start),
+                end: new Date(vars.calendar.end),
+                clinicName: clinic,
+                providerName: vars.providerName,
+                locationName: vars.locationName,
+                locationAddress: vars.locationAddress,
+              }),
+            },
+          ],
+        }
       : null,
     footerLink: vars.unsubscribeUrl
       ? {

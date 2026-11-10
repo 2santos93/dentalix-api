@@ -42,6 +42,11 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       const view = await inTenant(() => get.execute(token));
 
       expect(view).toEqual({
+        // DX-469: «Añadir a mi calendario».
+        calendarAvailable: true,
+        googleCalendarUrl: expect.stringMatching(
+          /^https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE&text=Cita\+en\+/,
+        ) as string,
         status: 'PENDING',
         clinic: {
           name: 'Clínica Sonrisa',
