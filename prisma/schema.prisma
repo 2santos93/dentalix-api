@@ -748,7 +748,7 @@ model Patient {
   /// `patients_code_assign` desde `patient_code_counters`; un valor escrito en
   /// el alta se ignora y `patients_code_immutable` rechaza cambiarlo. La app
   /// solo lo lee. El DEFAULT 0 es solo del ADD COLUMN; CHECK en la BD: > 0.
-  patientCode                  Int                   @default(0)
+  patientCode                  Int                   @default(dbgenerated("0"))
 
   importBatch                 PatientImportBatch?              @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
   // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
