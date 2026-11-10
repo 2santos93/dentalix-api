@@ -70,6 +70,8 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       status: 'SCHEDULED' as const,
       wantsEarlier: false,
       earlierWindow: null as EarlierWindow | null,
+      updatedAt: new Date(),
+      calendarAlarmHours: 24,
       patientFirstName: 'Ana María',
       patientPhone: '+58 414 555 0101',
       providerName: 'Dra. Pérez',

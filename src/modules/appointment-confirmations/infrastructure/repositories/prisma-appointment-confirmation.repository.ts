@@ -1,4 +1,5 @@
 import { isHourCycle } from '../../../../shared/locations/location-regional';
+import { DEFAULT_CALENDAR_ALARM_HOURS } from '../../../../shared/calendar/appointment-calendar';
 import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
 import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
@@ -48,6 +49,7 @@ const APPOINTMENT_SELECT = {
   status: true,
   wantsEarlier: true,
   earlierWindow: true,
+  updatedAt: true,
   providerId: true,
   locationId: true,
   patient: { select: { firstName: true, phone: true } },
@@ -61,6 +63,8 @@ const APPOINTMENT_SELECT = {
       timeZone: true,
       locale: true,
       hourCycle: true,
+      // DX-469: la alarma del evento «Añadir a mi calendario».
+      reminderSettings: { select: { calendarAlarmHours: true } },
     },
   },
 } as const satisfies Prisma.AppointmentSelect;
@@ -173,6 +177,10 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       status: a.status,
       wantsEarlier: a.wantsEarlier,
       earlierWindow: a.earlierWindow,
+      updatedAt: a.updatedAt,
+      calendarAlarmHours:
+        a.location.reminderSettings[0]?.calendarAlarmHours ??
+        DEFAULT_CALENDAR_ALARM_HOURS,
       patientFirstName: a.patient.firstName,
       patientPhone: a.patient.phone,
       providerName: membership?.user.fullName ?? null,

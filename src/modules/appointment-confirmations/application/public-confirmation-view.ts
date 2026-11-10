@@ -5,6 +5,7 @@ import {
 } from '@prisma/client';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import { MOVABLE_STATUSES } from '../../waitlist/domain/opening-candidates';
+import { googleCalendarUrl } from '../../../shared/calendar/appointment-calendar';
 import {
   AppointmentConfirmation,
   ClinicBranding,
@@ -100,6 +101,13 @@ export interface PublicCancellationPolicyView {
 }
 
 export interface PublicConfirmationView {
+  /**
+   * DX-469: «Añadir a mi calendario»: la cita está viva (no cancelada) y aún
+   * no terminó, y el enlace sigue valiendo. Con ello, el .ics de la ruta
+   * `/calendar.ics` y el enlace de Google Calendar.
+   */
+  calendarAvailable: boolean;
+  googleCalendarUrl: string | null;
   status: ConfirmationState;
   clinic: ClinicBranding | null;
   /** `null` cuando el enlace caducó: un enlace sin efecto no enseña la cita. */
@@ -135,6 +143,46 @@ export function toPublicAppointmentView(
   };
 }
 
+/**
+ * DX-469: el enlace sigue valiendo, la cita no está cancelada y aún no
+ * terminó. Una cita cancelada sigue sirviendo su .ics (STATUS:CANCELLED) por
+ * la ruta, pero la página no ofrece añadirla.
+ */
+export function calendarOpen(
+  status: ConfirmationState,
+  appointment: Pick<ConfirmationAppointment, 'end' | 'status'> | null,
+  now: Date,
+): boolean {
+  return (
+    status !== 'EXPIRED' &&
+    appointment !== null &&
+    appointment.status !== 'CANCELLED' &&
+    appointment.end.getTime() > now.getTime()
+  );
+}
+
+function calendarFields(
+  status: ConfirmationState,
+  appointment: ConfirmationAppointment | null,
+  clinic: ClinicBranding | null,
+  now: Date,
+): Pick<PublicConfirmationView, 'calendarAvailable' | 'googleCalendarUrl'> {
+  if (!appointment || !calendarOpen(status, appointment, now)) {
+    return { calendarAvailable: false, googleCalendarUrl: null };
+  }
+  return {
+    calendarAvailable: true,
+    googleCalendarUrl: googleCalendarUrl({
+      start: appointment.start,
+      end: appointment.end,
+      clinicName: clinic?.name ?? 'la clínica',
+      providerName: appointment.providerName,
+      locationName: appointment.locationName,
+      locationAddress: appointment.locationAddress,
+    }),
+  };
+}
+
 export function toPublicConfirmationView(
   status: ConfirmationState,
   confirmation: AppointmentConfirmation,
@@ -145,6 +193,7 @@ export function toPublicConfirmationView(
 ): PublicConfirmationView {
   const pending = status === 'PENDING' && appointment !== null;
   return {
+    ...calendarFields(status, appointment, clinic, now),
     status,
     clinic,
     appointment:

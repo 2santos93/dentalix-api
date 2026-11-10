@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { DEFAULT_CALENDAR_ALARM_HOURS } from '../domain/reminder-lead-hours';
 import {
   AppointmentReminderSkipReason,
   AppointmentReminderStatus,
@@ -57,6 +58,7 @@ function toContact(
 const SETTINGS_SELECT = {
   enabled: true,
   leadHours: true,
+  calendarAlarmHours: true,
   updatedAt: true,
 } as const satisfies Prisma.LocationReminderSettingsSelect;
 
@@ -147,6 +149,8 @@ export class PrismaReminderRepository implements ReminderRepository {
           locationName: l.name,
           enabled: s?.enabled ?? false,
           leadHours: s?.leadHours ?? [],
+          calendarAlarmHours:
+            s?.calendarAlarmHours ?? DEFAULT_CALENDAR_ALARM_HOURS,
           updatedAt: s?.updatedAt ?? null,
         };
       });
@@ -172,13 +176,23 @@ export class PrismaReminderRepository implements ReminderRepository {
         select: {
           id: true,
           name: true,
-          reminderSettings: { select: { enabled: true, leadHours: true } },
+          reminderSettings: {
+            select: {
+              enabled: true,
+              leadHours: true,
+              calendarAlarmHours: true,
+            },
+          },
         },
       });
       if (!location) return null;
       const data = {
         enabled: input.enabled,
         leadHours: input.leadHours,
+        // DX-469: sin valor en el PUT se conserva (o el por defecto al crear).
+        ...(input.calendarAlarmHours !== undefined
+          ? { calendarAlarmHours: input.calendarAlarmHours }
+          : {}),
         updatedById: audit.actor.userId,
       };
       const saved = await tx.locationReminderSettings.upsert({
@@ -190,7 +204,11 @@ export class PrismaReminderRepository implements ReminderRepository {
       const event = reminderSettingsAuditEvent(
         audit,
         locationId,
-        location.reminderSettings[0] ?? { enabled: false, leadHours: [] },
+        location.reminderSettings[0] ?? {
+          enabled: false,
+          leadHours: [],
+          calendarAlarmHours: DEFAULT_CALENDAR_ALARM_HOURS,
+        },
         saved,
       );
       if (event) await writeAuditEvent(tx, event);

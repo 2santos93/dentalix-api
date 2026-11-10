@@ -5,6 +5,8 @@ import { configAuditEvent } from '../../audit/domain/config-audit';
 export interface ReminderSettingsSnapshot {
   enabled: boolean;
   leadHours: number[];
+  /** DX-469: alarma del calendario (sin fila, 24). */
+  calendarAlarmHours: number;
 }
 
 /**
@@ -25,7 +27,15 @@ export function reminderSettingsAuditEvent(
     resourceId: locationId,
     locationId,
     reason: 'REMINDER_SETTINGS_UPDATED',
-    before: { enabled: before.enabled, leadHours: before.leadHours },
-    after: { enabled: after.enabled, leadHours: after.leadHours },
+    before: {
+      enabled: before.enabled,
+      leadHours: before.leadHours,
+      calendarAlarmHours: before.calendarAlarmHours,
+    },
+    after: {
+      enabled: after.enabled,
+      leadHours: after.leadHours,
+      calendarAlarmHours: after.calendarAlarmHours,
+    },
   });
 }

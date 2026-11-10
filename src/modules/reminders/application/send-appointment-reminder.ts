@@ -13,7 +13,10 @@ import {
 import { decideReminder } from '../domain/reminder-window';
 import { startsAtLabel } from '../domain/starts-at-label';
 import { MAX_LEAD_HOURS, MIN_LEAD_HOURS } from '../domain/reminder-lead-hours';
-import { CONFIRMATION_PATH } from '../../appointment-confirmations/presentation/confirmation-url';
+import {
+  CALENDAR_ICS_PATH,
+  CONFIRMATION_PATH,
+} from '../../appointment-confirmations/presentation/confirmation-url';
 import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
 import { ReminderClock } from './reminder-clock';
 import { OPT_OUT_PATH, ReminderOptOutLinks } from './reminder-opt-out-links';
@@ -249,6 +252,14 @@ export class SendAppointmentReminder {
           linkBase && optOutToken
             ? `${linkBase}${OPT_OUT_PATH}/${optOutToken}`
             : null,
+        // DX-469: el .ics por el MISMO host de la clínica (la web reenvía /api/v1).
+        calendar: linkBase
+          ? {
+              icsUrl: `${linkBase}${CALENDAR_ICS_PATH}/${link.token}/calendar.ics`,
+              start: link.appointment.start.toISOString(),
+              end: link.appointment.end.toISOString(),
+            }
+          : null,
         cancellationPolicy: reminderPolicyVars(
           ctx.cancellationPolicy,
           ctx.locationFormat,

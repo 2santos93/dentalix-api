@@ -54,6 +54,9 @@ export class UpdateReminderSettingsUseCase {
       {
         enabled: input.enabled,
         leadHours: normalizeLeadHours(input.leadHours),
+        ...(input.calendarAlarmHours !== undefined
+          ? { calendarAlarmHours: input.calendarAlarmHours }
+          : {}),
       },
       audit,
     );
