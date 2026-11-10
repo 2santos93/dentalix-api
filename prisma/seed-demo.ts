@@ -2888,25 +2888,53 @@ class DemoSeeder {
         siteDentistId ?? dentists[DEMO_COMPARISON_HISTORY.dentistIndex];
       const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
       const zone = DEMO_LOCATIONS[visit.location].timeZone;
-      const start = daysAgoAt(this.now, visit.daysAgo, visit.startMinute, zone);
-      const end = daysAgoAt(
-        this.now,
-        visit.daysAgo,
-        visit.startMinute + visit.durationMinutes,
-        zone,
-      );
       const patientId = patientIds[visit.patientIndex];
       await this.inTenant(tenantId, locations[visit.location], async () => {
-        const appointment = await this.use(
-          CreateAppointmentUseCase,
-        ).registerHistorical({
-          patientId,
-          providerId: dentistId,
-          start,
-          end,
-          reason: DEMO_COMPARISON_HISTORY.reason,
-          createdById: receptionId,
-        });
+        // La hora de la plantilla, o la siguiente media hora libre del MISMO
+        // día dentro del horario de la sede: según la fecha de hoy, otra
+        // historia (p. ej. las inasistencias de `DEMO_CANCELLATION`, que
+        // buscan su propio hueco) puede haber ocupado ya ese hueco del mismo
+        // profesional. El día no cambia: el informe compara meses.
+        const register = async () => {
+          for (
+            let minute = visit.startMinute;
+            minute + visit.durationMinutes <= 24 * 60;
+            minute += 30
+          ) {
+            const start = daysAgoAt(this.now, visit.daysAgo, minute, zone);
+            const end = daysAgoAt(
+              this.now,
+              visit.daysAgo,
+              minute + visit.durationMinutes,
+              zone,
+            );
+            if (
+              minute !== visit.startMinute &&
+              !fitsBusinessHours(start, end, hours[visit.location])
+            ) {
+              continue;
+            }
+            try {
+              return await this.use(
+                CreateAppointmentUseCase,
+              ).registerHistorical({
+                patientId,
+                providerId: dentistId,
+                start,
+                end,
+                reason: DEMO_COMPARISON_HISTORY.reason,
+                createdById: receptionId,
+              });
+            } catch (error) {
+              if (!(error instanceof ConflictException)) throw error;
+            }
+          }
+          throw new Error(
+            `Sin hueco para la historia de «Comparar sedes» en ${visit.location} hace ${visit.daysAgo} días`,
+          );
+        };
+        const appointment = await register();
+        const { start, end } = appointment;
         await this.use(UpdateAppointmentUseCase).execute(appointment.id, {
           status: AppointmentStatus.COMPLETED,
         });
