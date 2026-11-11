@@ -7109,33 +7109,37 @@ model RecallTypeTrigger {
 /// atendida: `lastDoneAt` = greatest(`manualDoneAt`, día civil del último DONE
 /// de un disparador del tipo), que mantiene `dx_recall_recompute`.
 model PatientRecall {
-  id             String       @id @default(uuid()) @db.Uuid
-  tenantId       String       @db.Uuid
-  patientId      String       @db.Uuid
-  recallTypeId   String       @db.Uuid
+  id                String       @id @default(uuid()) @db.Uuid
+  tenantId          String       @db.Uuid
+  patientId         String       @db.Uuid
+  recallTypeId      String       @db.Uuid
   /// DEPRECADO (D7): la `systemKey` del tipo, o NULL si el tipo no tiene.
-  kind           RecallKind?
+  kind              RecallKind?
   /// 1–36 (CHECK en la BD).
-  intervalMonths Int
+  intervalMonths    Int
   /// Base del vencimiento (derivada; ver arriba).
-  lastDoneAt     DateTime     @db.Date
+  lastDoneAt        DateTime     @db.Date
   /// Día que fijó el clínico (PUT); NULL si nació de un procedimiento.
-  manualDoneAt   DateTime?    @db.Date
+  manualDoneAt      DateTime?    @db.Date
   /// Puntero suave (sin FK) al ítem del plan que da la base, si es un DONE.
-  lastDoneItemId String?      @db.Uuid
-  source         RecallSource @default(MANUAL)
+  lastDoneItemId    String?      @db.Uuid
+  /// Lo que había fijado el clínico antes del relleno del despliegue, solo si
+  /// la base congelada (la última visita atendida) lo movió: entonces
+  /// `manualDoneAt` es el día de esa visita. NULL en cuanto se vuelve a fijar.
+  preBackfillDoneAt DateTime?    @db.Date
+  source            RecallSource @default(MANUAL)
   /// GENERADA: `lastDoneAt` + `intervalMonths` meses. Nunca se escribe.
-  dueAt          DateTime     @default(dbgenerated()) @db.Date
+  dueAt             DateTime     @default(dbgenerated()) @db.Date
   /// Sede donde se fijó: la del recall si el paciente aún no tiene citas atendidas.
-  locationId     String       @db.Uuid
-  active         Boolean      @default(true)
+  locationId        String       @db.Uuid
+  active            Boolean      @default(true)
   /// No sale en la lista hasta ese día (p. ej. «tratamiento en curso»).
-  disabledUntil  DateTime?    @db.Date
-  disabledReason String?
-  createdById    String       @db.Uuid
-  updatedById    String       @db.Uuid
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  disabledUntil     DateTime?    @db.Date
+  disabledReason    String?
+  createdById       String       @db.Uuid
+  updatedById       String       @db.Uuid
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   patient    Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_recalls_patient_fkey")

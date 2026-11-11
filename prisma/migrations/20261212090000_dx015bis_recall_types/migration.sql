@@ -39,8 +39,14 @@
 -- solo los fijados a mano desde DX-015) y nada la escribe en caliente salvo el
 -- PUT del recall; lock_timeout para fallar limpio si algo la retiene.
 --
--- Compatible hacia atrás: ninguna lectura anterior deja de funcionar
--- ("lastDoneAt" sigue ahí; "kind" sigue lleno en los recalls existentes).
+-- Compatible hacia atrás durante el despliegue (la app vieja sigue sirviendo
+-- mientras corren las migraciones): ninguna lectura anterior deja de
+-- funcionar ("lastDoneAt" sigue ahí; "kind" sigue lleno), y las escrituras de
+-- la app vieja las adapta el trigger `patient_recalls_compat_v1`: un alta
+-- solo con "kind" recibe su "recallTypeId" (así no la rompe el NOT NULL de
+-- 20261212090200 ni lo hace fallar) y un cambio de "lastDoneAt" sin tocar
+-- "manualDoneAt" (el PUT viejo) lo copia como lo fijado. Ese trigger se
+-- borra en la release siguiente, cuando ya no quede app vieja.
 --
 -- Grants: ALTER DEFAULT PRIVILEGES cubre a dentalix_app en las tablas nuevas.
 -- Las funciones son SECURITY INVOKER (la RLS de quien llama) y solo se dan a
@@ -128,6 +134,11 @@ ALTER TABLE "patient_recalls"
   ADD COLUMN "recallTypeId" UUID,
   ADD COLUMN "manualDoneAt" DATE,
   ADD COLUMN "lastDoneItemId" UUID,
+  -- Lo que había fijado el clínico ANTES del relleno, solo si la base
+  -- congelada lo movió (la última visita atendida era posterior): entonces
+  -- "manualDoneAt" es el día de esa visita, no algo que tecleó nadie. Se
+  -- borra en cuanto el clínico vuelve a fijar el recall.
+  ADD COLUMN "preBackfillDoneAt" DATE,
   ADD COLUMN "source" "RecallSource" NOT NULL DEFAULT 'MANUAL',
   -- Vencimiento guardado: indexable (20261212090300). Nunca se escribe.
   ADD COLUMN "dueAt" DATE NOT NULL GENERATED ALWAYS AS (("lastDoneAt" + make_interval(months => "intervalMonths"))::date) STORED,
@@ -137,6 +148,40 @@ ALTER TABLE "patient_recalls"
 
 -- Lado hijo de la FK del tipo.
 CREATE INDEX "patient_recalls_tenant_type_idx" ON "patient_recalls"("tenantId", "recallTypeId");
+
+-- ---------------------------------------------------------------------------
+-- Compatibilidad con la app vieja durante el despliegue (ver la cabecera). Con
+-- la RLS de quien escribe: el tipo se busca en su clínica. Ni toca las filas
+-- de la app nueva (siempre escribe "recallTypeId") ni el recálculo, que se
+-- marca con `dentalix.recall_recompute` mientras escribe.
+-- ---------------------------------------------------------------------------
+CREATE FUNCTION public.dx_patient_recalls_compat_v1() RETURNS trigger
+  LANGUAGE plpgsql
+  SECURITY INVOKER
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  IF NEW."recallTypeId" IS NULL AND NEW."kind" IS NOT NULL THEN
+    SELECT rt."id" INTO NEW."recallTypeId"
+      FROM public."recall_types" rt
+     WHERE rt."tenantId" = NEW."tenantId"
+       AND rt."systemKey" = NEW."kind";
+  END IF;
+  IF TG_OP = 'UPDATE'
+     AND NEW."lastDoneAt" IS DISTINCT FROM OLD."lastDoneAt"
+     AND NEW."manualDoneAt" IS NOT DISTINCT FROM OLD."manualDoneAt"
+     AND OLD."manualDoneAt" IS NOT NULL
+     AND coalesce(pg_catalog.current_setting('dentalix.recall_recompute', true), '') <> 'on' THEN
+    NEW."manualDoneAt" := NEW."lastDoneAt";
+    NEW."preBackfillDoneAt" := NULL;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER "patient_recalls_compat_v1"
+  BEFORE INSERT OR UPDATE ON "patient_recalls"
+  FOR EACH ROW EXECUTE FUNCTION public.dx_patient_recalls_compat_v1();
 
 -- ---------------------------------------------------------------------------
 -- RLS FORCE
@@ -217,7 +262,9 @@ COMMENT ON FUNCTION public.dx_recall_seed_default_types(uuid) IS
 -- (plan vivo) con un procedimiento disparador del tipo); "lastDoneItemId" =
 -- ese ítem si es el que da la base. Los DONE sin sede, sin fecha o con una
 -- sede sin zona no se pueden fechar y se ignoran (nunca una zona por defecto).
--- Si no queda ninguna base, se conserva la actual (D5: no se pierde nada).
+-- Si no queda ninguna base, se conserva "lastDoneAt" (D5: no se pierde nada)
+-- y se suelta "lastDoneItemId" (ese ítem ya no da la base). Devuelve si
+-- cambió algo (la app solo audita entonces).
 --
 -- Concurrencia: bloquea primero la fila del recall (FOR UPDATE) y DESPUÉS lee
 -- los ítems: en READ COMMITTED cada sentencia de una función VOLATILE toma su
@@ -226,7 +273,7 @@ COMMENT ON FUNCTION public.dx_recall_seed_default_types(uuid) IS
 -- el máximo.
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION public.dx_recall_recompute(p_tenant uuid, p_patient uuid, p_recall_type uuid)
-  RETURNS void
+  RETURNS boolean
   LANGUAGE plpgsql
   SECURITY INVOKER
   SET search_path = pg_catalog, public, pg_temp
@@ -236,6 +283,7 @@ DECLARE
   v_manual date;
   v_day date;
   v_item uuid;
+  v_changed integer;
 BEGIN
   SELECT pr."id", pr."manualDoneAt" INTO v_recall, v_manual
     FROM public."patient_recalls" pr
@@ -244,7 +292,7 @@ BEGIN
      AND pr."recallTypeId" = p_recall_type
      FOR UPDATE;
   IF v_recall IS NULL THEN
-    RETURN;
+    RETURN false;
   END IF;
 
   SELECT ((i."completedAt" AT TIME ZONE 'UTC') AT TIME ZONE l."timeZone")::date, i."id"
@@ -267,8 +315,17 @@ BEGIN
    ORDER BY 1 DESC, i."completedAt" DESC, i."id" DESC
    LIMIT 1;
 
+  -- El trigger de compatibilidad no toma este cambio por un PUT viejo.
+  PERFORM pg_catalog.set_config('dentalix.recall_recompute', 'on', true);
   IF v_day IS NULL AND v_manual IS NULL THEN
-    RETURN;
+    UPDATE public."patient_recalls" pr
+       SET "lastDoneItemId" = NULL,
+           "updatedAt" = CURRENT_TIMESTAMP
+     WHERE pr."id" = v_recall
+       AND pr."lastDoneItemId" IS NOT NULL;
+    GET DIAGNOSTICS v_changed = ROW_COUNT;
+    PERFORM pg_catalog.set_config('dentalix.recall_recompute', '', true);
+    RETURN v_changed > 0;
   END IF;
 
   UPDATE public."patient_recalls" pr
@@ -284,6 +341,9 @@ BEGIN
             WHEN v_day IS NOT NULL AND (v_manual IS NULL OR v_day >= v_manual) THEN v_item
             ELSE NULL
           END);
+  GET DIAGNOSTICS v_changed = ROW_COUNT;
+  PERFORM pg_catalog.set_config('dentalix.recall_recompute', '', true);
+  RETURN v_changed > 0;
 END;
 $$;
 
@@ -292,21 +352,30 @@ COMMENT ON FUNCTION public.dx_recall_recompute(uuid, uuid, uuid) IS
 
 -- ---------------------------------------------------------------------------
 -- dx_recall_backfill: el relleno de UNA clínica (20261212090100 la llama por
--- cada una; los tests, sobre la suya). NO la llama la app: repetirla sobre una
--- clínica ya migrada volvería a aplicar la regla vieja de la visita atendida.
+-- cada una; los tests, sobre la suya). NO la llama la app. Repetirla es
+-- seguro: cada paso solo toca lo que aún no hizo (recalls sin tipo, recalls
+-- MANUAL sin "manualDoneAt", pacientes sin recall del tipo); el paso 3 es un
+-- recálculo, idempotente.
 --   1. "recallTypeId" desde "kind" (vía "systemKey").
 --   2. Congela la base que se mostraba ayer, para que nadie entre ni salga de
 --      la lista por el cambio de regla: "lastDoneAt" = greatest("lastDoneAt",
---      día civil de la última cita atendida en la zona de SU sede, la misma
---      cuenta que la lista de DX-547). "manualDoneAt" = esa base congelada:
---      así un CLEAR o un CORRECT posteriores no la deshacen (D5).
+--      día civil de la última cita atendida en la zona de SU sede).
+--      Reproduce EXACTAMENTE la cuenta de la lista anterior (DX-015/DX-547),
+--      también su `coalesce(zona, 'UTC')` para una sede sin zona: no es una
+--      zona de reserva nueva, es la regla vieja que se congela (con la zona
+--      a secas, esa visita se ignoraría y el paciente entraría en la lista).
+--      "manualDoneAt" = esa base congelada: así un CLEAR o un CORRECT
+--      posteriores no la deshacen (D5). Si la visita movió la base, lo que
+--      había fijado el clínico queda en "preBackfillDoneAt".
 --   3. Aplica el historial de DONE de los disparadores (dx_recall_recompute:
 --      greatest con lo anterior).
 --   4. Crea los recalls (source BACKFILL) de pacientes vivos con un DONE de un
 --      disparador de un tipo activo en los últimos p_horizon_months meses
 --      (D3: 24) y sin recall de ese tipo, en la sede de ese DONE, con el
---      intervalo por defecto del tipo. Deshacer: DELETE … WHERE source =
---      'BACKFILL' y sin contactos.
+--      intervalo por defecto del tipo. Deshacer solo los que nadie tocó:
+--      DELETE FROM patient_recalls WHERE source = 'BACKFILL' AND
+--      "manualDoneAt" IS NULL (el PUT siempre lo escribe) AND sin
+--      recall_contacts.
 -- Devuelve cuántos recalls creó.
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION public.dx_recall_backfill(p_tenant uuid, p_horizon_months integer, p_now timestamptz DEFAULT now())
@@ -329,12 +398,15 @@ BEGIN
 
   UPDATE public."patient_recalls" pr
      SET "lastDoneAt" = f."base",
-         "manualDoneAt" = f."base"
+         "manualDoneAt" = f."base",
+         "preBackfillDoneAt" = CASE
+           WHEN f."base" IS DISTINCT FROM pr."lastDoneAt" THEN pr."lastDoneAt"
+         END
     FROM (
       SELECT x."id",
              greatest(
                x."lastDoneAt",
-               ((lc."start" AT TIME ZONE 'UTC') AT TIME ZONE lo."timeZone")::date
+               ((lc."start" AT TIME ZONE 'UTC') AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date
              ) AS "base"
         FROM public."patient_recalls" x
         LEFT JOIN LATERAL (
@@ -355,6 +427,7 @@ BEGIN
     ) f
    WHERE pr."id" = f."id";
 
+  -- (El recálculo marca la sesión: el trigger de compatibilidad no lo copia.)
   FOR r IN
     SELECT pr."patientId", pr."recallTypeId"
       FROM public."patient_recalls" pr
@@ -415,6 +488,7 @@ COMMENT ON FUNCTION public.dx_recall_backfill(uuid, integer, timestamptz) IS
 REVOKE ALL ON FUNCTION public.dx_recall_seed_default_types(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.dx_recall_recompute(uuid, uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.dx_recall_backfill(uuid, integer, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.dx_patient_recalls_compat_v1() FROM PUBLIC;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dentalix_app') THEN
