@@ -139,7 +139,7 @@ export class SetPatientRecallDto {
     format: 'date',
     example: '2026-04-10',
     description:
-      'Día del último control o limpieza (AAAA-MM-DD, no futuro). Por defecto, hoy en la sede.',
+      'Día del último control o limpieza (AAAA-MM-DD, no futuro), fijado a mano. Por defecto: hoy en la sede al crear el recall; al editarlo, se conserva lo fijado (y la base que da un procedimiento).',
   })
   @IsOptional()
   @IsString({ message: 'lastDoneAt debe ser una fecha (AAAA-MM-DD).' })

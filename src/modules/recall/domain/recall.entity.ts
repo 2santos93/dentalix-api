@@ -175,8 +175,15 @@ export interface SetPatientRecallData {
   patientId: string;
   recallType: RecallTypeRef;
   intervalMonths: number;
-  /** Lo que fija el clínico (`manualDoneAt`); la base es el máximo con los DONE. */
-  manualDoneAt: string;
+  /**
+   * Lo que fija el clínico (`manualDoneAt`); la base es el máximo con los DONE.
+   * `undefined` = no se fijó fecha: un recall que ya existe conserva lo que
+   * tenía ("manualDoneAt", también null, "preBackfillDoneAt" y la base), y uno
+   * nuevo nace con `newRecallDoneAt`.
+   */
+  manualDoneAt: string | undefined;
+  /** El día de hoy en la sede de trabajo: la fecha de un alta sin fecha. */
+  newRecallDoneAt: string;
   active: boolean;
   disabledUntil: string | null;
   disabledReason: string | null;

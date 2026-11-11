@@ -177,14 +177,20 @@ class InMemoryRecallRepository implements RecallRepository {
     );
     const fields = {
       intervalMonths: data.intervalMonths,
-      lastDoneAt: data.manualDoneAt,
       active: data.active,
       disabledUntil: data.disabledUntil,
       disabledReason: data.disabledReason,
       updatedById: data.actorId,
     };
     if (existing) {
-      Object.assign(existing, fields);
+      // Como la BD: sin fecha, un recall que ya existe conserva su base.
+      Object.assign(
+        existing,
+        fields,
+        data.manualDoneAt === undefined
+          ? {}
+          : { lastDoneAt: data.manualDoneAt },
+      );
       return Promise.resolve({ id: existing.id });
     }
     const id = `recall-${this.recalls.length + 1}`;
@@ -193,6 +199,7 @@ class InMemoryRecallRepository implements RecallRepository {
       patientId: data.patientId,
       kind,
       locationId: NORTE,
+      lastDoneAt: data.manualDoneAt ?? data.newRecallDoneAt,
       ...fields,
     });
     return Promise.resolve({ id });
@@ -758,7 +765,8 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
         patientId: 'pac-1',
         recallType: { id: TYPE_ID.CHECKUP, systemKey: 'CHECKUP' },
         intervalMonths: 6,
-        manualDoneAt: SEDE_DAY,
+        manualDoneAt: undefined,
+        newRecallDoneAt: SEDE_DAY,
         active: true,
         disabledUntil: null,
         disabledReason: null,
@@ -773,6 +781,30 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
         status: 'UPCOMING',
       }),
     ]);
+  });
+
+  it('al editar sin fecha, conserva la base fijada (no la reinicia a hoy)', async () => {
+    await set.execute(
+      'pac-1',
+      byKey('CHECKUP'),
+      { intervalMonths: 6, lastDoneAt: '2026-02-28' },
+      'dra-lopez',
+    );
+    const out = await set.execute(
+      'pac-1',
+      byKey('CHECKUP'),
+      { intervalMonths: 3 },
+      'dr-ruiz',
+    );
+    expect(repo.upserts[1]).toMatchObject({
+      manualDoneAt: undefined,
+      newRecallDoneAt: SEDE_DAY,
+    });
+    expect(out.recalls[0]).toMatchObject({
+      intervalMonths: 3,
+      lastDoneAt: '2026-02-28',
+      dueAt: '2026-05-28',
+    });
   });
 
   it('cambia el mismo recall del tipo (no lo duplica) y puede retirarlo', async () => {

@@ -257,7 +257,9 @@ export class SetPatientRecallUseCase {
     }
     const today = await this.repo.writeToday(this.now());
 
-    let lastDoneAt = today;
+    // Sin fecha: un recall que ya existe conserva lo fijado (y la base que le
+    // da un procedimiento); solo uno nuevo nace con hoy (en el repositorio).
+    let lastDoneAt: string | undefined;
     if (input.lastDoneAt !== undefined) {
       const parsed = parseCivilDate(input.lastDoneAt);
       if (parsed === null || parsed < '1900-01-01') {
@@ -290,6 +292,7 @@ export class SetPatientRecallUseCase {
       recallType,
       intervalMonths: input.intervalMonths,
       manualDoneAt: lastDoneAt,
+      newRecallDoneAt: today,
       active: input.active ?? true,
       disabledUntil,
       disabledReason: disabledUntil ? reason : null,

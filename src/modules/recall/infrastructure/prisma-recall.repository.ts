@@ -448,24 +448,38 @@ export class PrismaRecallRepository implements RecallRepository {
    * recalcula su base en la MISMA transacción: lo fijado va a "manualDoneAt"
    * y "lastDoneAt" queda en el máximo con el último DONE de un disparador
    * (`dx_recall_recompute`). El alta va a la sede de trabajo.
+   *
+   * Sin fecha fijada (`manualDoneAt` undefined), un recall que ya existe no
+   * toca "manualDoneAt" (también null), "lastDoneAt", "preBackfillDoneAt" ni
+   * "lastDoneItemId": cambiar el intervalo o pausarlo no reinicia el reloj. El
+   * trigger de compatibilidad no interviene (no cambia "lastDoneAt"). Un alta
+   * sin fecha nace con `newRecallDoneAt` (hoy).
    */
   upsertRecall(data: SetPatientRecallData): Promise<{ id: string }> {
     return this.prisma.runWithTenant(async (tx) => {
       const tenantId = this.tenantId();
-      const manualDoneAt = dateOf(data.manualDoneAt);
-      const fields = {
+      const base = {
         // Compatibilidad (D7): la clave del tipo, si tiene.
         kind: data.recallType.systemKey,
         intervalMonths: data.intervalMonths,
-        manualDoneAt,
-        lastDoneAt: manualDoneAt,
-        // Lo fijado ahora es de verdad del clínico (ya no la base congelada).
-        preBackfillDoneAt: null,
         active: data.active,
         disabledUntil: data.disabledUntil ? dateOf(data.disabledUntil) : null,
         disabledReason: data.disabledUntil ? data.disabledReason : null,
         updatedById: data.actorId,
       };
+      const doneFields = (day: string) => {
+        const manualDoneAt = dateOf(day);
+        return {
+          manualDoneAt,
+          lastDoneAt: manualDoneAt,
+          // Lo fijado ahora es de verdad del clínico (ya no la base congelada).
+          preBackfillDoneAt: null,
+        };
+      };
+      const fields =
+        data.manualDoneAt === undefined
+          ? base
+          : { ...base, ...doneFields(data.manualDoneAt) };
       const existing = await tx.patientRecall.findFirst({
         where: { patientId: data.patientId, recallTypeId: data.recallType.id },
         select: { id: true },
@@ -484,7 +498,8 @@ export class PrismaRecallRepository implements RecallRepository {
               locationId: await this.tenantContext.writeLocationId(tx),
               createdById: data.actorId,
               source: 'MANUAL',
-              ...fields,
+              ...base,
+              ...doneFields(data.manualDoneAt ?? data.newRecallDoneAt),
             },
             select: { id: true },
           });

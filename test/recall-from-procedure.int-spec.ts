@@ -17,6 +17,12 @@ import {
   type DefaultRecallTypes,
   seedDefaultRecallTypes,
 } from './support/recall-types';
+import { PrismaRecallRepository } from '../src/modules/recall/infrastructure/prisma-recall.repository';
+import {
+  GetPatientRecallsUseCase,
+  SetPatientRecallUseCase,
+  type SetPatientRecallInput,
+} from '../src/modules/recall/application/use-cases/recall.use-cases';
 import {
   backendPid,
   settle,
@@ -155,6 +161,23 @@ async function planItem(patientId: string, code: keyof Seeded['catalog']) {
   });
   return item.id;
 }
+
+/** El PUT …/recalls/:kind real (caso de uso + repositorio Prisma). */
+const recallRepo = new PrismaRecallRepository(prisma, tenantContext);
+/** 11:00 del 07/11/2027 en Caracas: «hoy» del PUT. */
+const PUT_NOW = new Date('2027-11-07T15:00:00.000Z');
+const putRecall = (
+  patientId: string,
+  recallTypeId: string,
+  input: SetPatientRecallInput,
+) =>
+  inSede(() =>
+    new SetPatientRecallUseCase(
+      recallRepo,
+      () => PUT_NOW,
+      new GetPatientRecallsUseCase(recallRepo, () => PUT_NOW),
+    ).execute(patientId, { id: recallTypeId }, input, s.userId),
+  );
 
 const recallsOf = (patientId: string) =>
   raw.patientRecall.findMany({
@@ -534,5 +557,158 @@ describe('DX-015-bis · el DONE de un procedimiento mueve el reloj del recall (i
         lastDoneItemId: later,
       }),
     ]);
+  });
+
+  describe('PUT sin fecha: al editar se conserva lo fijado; solo el alta nace con hoy', () => {
+    it('recall de un procedimiento (sin nada fijado): cambiar el intervalo no fija hoy ni suelta el ítem; sacarlo de DONE sigue D5', async () => {
+      const patientId = await patient('EditaProcedimiento');
+      const itemId = await planItem(patientId, 'PROFILAXIS');
+      await done(itemId);
+      const out = await putRecall(patientId, s.types.HYGIENE, {
+        intervalMonths: 3,
+      });
+      expect(out.recalls).toEqual([
+        expect.objectContaining({
+          intervalMonths: 3,
+          lastDoneAt: '2027-04-10',
+          dueAt: '2027-07-10',
+        }),
+      ]);
+      expect(await recallsOf(patientId)).toEqual([
+        expect.objectContaining({
+          source: 'PROCEDURE',
+          intervalMonths: 3,
+          manualDoneAt: null,
+          preBackfillDoneAt: null,
+          lastDoneAt: DAY('2027-04-10'),
+          dueAt: DAY('2027-07-10'),
+          lastDoneItemId: itemId,
+        }),
+      ]);
+      // Sin nada fijado, sacarlo de DONE deja la base (D5), no la de hoy.
+      await inSede(() =>
+        updateAt(DONE_AT).execute(
+          itemId,
+          { status: 'ACCEPTED' },
+          ADMIN(),
+          audit(),
+        ),
+      );
+      expect(await recallsOf(patientId)).toEqual([
+        expect.objectContaining({
+          manualDoneAt: null,
+          lastDoneAt: DAY('2027-04-10'),
+          dueAt: DAY('2027-07-10'),
+          lastDoneItemId: null,
+        }),
+      ]);
+    });
+
+    it('fijado a mano en enero y procedimiento en junio: editar sin fecha deja lo fijado en enero y la base en junio', async () => {
+      const patientId = await patient('EditaManual');
+      await putRecall(patientId, s.types.HYGIENE, {
+        intervalMonths: 6,
+        lastDoneAt: '2027-01-15',
+      });
+      const itemId = await planItem(patientId, 'PROFILAXIS');
+      await done(itemId, new Date('2027-06-10T15:00:00.000Z'));
+      await putRecall(patientId, s.types.HYGIENE, { intervalMonths: 12 });
+      expect(await recallsOf(patientId)).toEqual([
+        expect.objectContaining({
+          source: 'MANUAL',
+          intervalMonths: 12,
+          manualDoneAt: DAY('2027-01-15'),
+          lastDoneAt: DAY('2027-06-10'),
+          dueAt: DAY('2028-06-10'),
+          lastDoneItemId: itemId,
+        }),
+      ]);
+      // Sacarlo de DONE vuelve a lo fijado en enero (no a hoy).
+      await inSede(() =>
+        updateAt(DONE_AT).execute(
+          itemId,
+          { status: 'ACCEPTED' },
+          ADMIN(),
+          audit(),
+        ),
+      );
+      expect(await recallsOf(patientId)).toEqual([
+        expect.objectContaining({
+          manualDoneAt: DAY('2027-01-15'),
+          lastDoneAt: DAY('2027-01-15'),
+          lastDoneItemId: null,
+        }),
+      ]);
+    });
+
+    it('recall rellenado (preBackfillDoneAt): editar sin fecha conserva preBackfillDoneAt y manualDoneAt; con fecha, se fija y se suelta', async () => {
+      const patientId = await patient('EditaRellenado');
+      await raw.patientRecall.create({
+        data: {
+          tenantId: s.tenantId,
+          patientId,
+          recallTypeId: s.types.CHECKUP,
+          kind: 'CHECKUP',
+          intervalMonths: 12,
+          lastDoneAt: DAY('2026-09-01'),
+          manualDoneAt: DAY('2026-09-01'),
+          preBackfillDoneAt: DAY('2026-05-01'),
+          source: 'BACKFILL',
+          locationId: s.sede,
+          createdById: s.userId,
+          updatedById: s.userId,
+        },
+      });
+      await putRecall(patientId, s.types.CHECKUP, {
+        intervalMonths: 6,
+        active: false,
+      });
+      expect(await recallsOf(patientId)).toEqual([
+        expect.objectContaining({
+          source: 'BACKFILL',
+          intervalMonths: 6,
+          active: false,
+          manualDoneAt: DAY('2026-09-01'),
+          preBackfillDoneAt: DAY('2026-05-01'),
+          lastDoneAt: DAY('2026-09-01'),
+          dueAt: DAY('2027-03-01'),
+        }),
+      ]);
+      // Con fecha sí es lo fijado por el clínico: ya no la base congelada.
+      await putRecall(patientId, s.types.CHECKUP, {
+        intervalMonths: 6,
+        lastDoneAt: '2027-02-01',
+      });
+      expect(await recallsOf(patientId)).toEqual([
+        expect.objectContaining({
+          source: 'BACKFILL',
+          manualDoneAt: DAY('2027-02-01'),
+          preBackfillDoneAt: null,
+          lastDoneAt: DAY('2027-02-01'),
+        }),
+      ]);
+    });
+
+    it('recall nuevo sin fecha: nace con hoy en la sede (sin cambios)', async () => {
+      const patientId = await patient('AltaSinFecha');
+      const out = await putRecall(patientId, s.types.CHECKUP, {
+        intervalMonths: 6,
+      });
+      expect(out.recalls).toEqual([
+        expect.objectContaining({
+          lastDoneAt: '2027-11-07',
+          dueAt: '2028-05-07',
+        }),
+      ]);
+      expect(await recallsOf(patientId)).toEqual([
+        expect.objectContaining({
+          source: 'MANUAL',
+          manualDoneAt: DAY('2027-11-07'),
+          lastDoneAt: DAY('2027-11-07'),
+          preBackfillDoneAt: null,
+          lastDoneItemId: null,
+        }),
+      ]);
+    });
   });
 });

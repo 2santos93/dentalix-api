@@ -878,7 +878,16 @@ describe('Recall: lista de llamada (DX-015, e2e)', () => {
       status: 'UPCOMING',
     });
     // Un recall por tipo: fijarlo de nuevo no duplica.
-    await put({ intervalMonths: 4 }).expect(200);
+    const fixed = addCivilDays(today(), -100);
+    await put({ intervalMonths: 6, lastDoneAt: fixed }).expect(200);
+    // Editar sin fecha conserva lo fijado (no lo reinicia a hoy).
+    const edited = (await put({ intervalMonths: 4 }).expect(200))
+      .body as PatientRecalls;
+    expect(edited.recalls[0]).toMatchObject({
+      intervalMonths: 4,
+      lastDoneAt: fixed,
+      dueAt: addCivilMonths(fixed, 4),
+    });
     expect(
       await raw.patientRecall.count({ where: { patientId, kind: 'CHECKUP' } }),
     ).toBe(1);
