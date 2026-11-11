@@ -228,6 +228,30 @@ async function demoPatientSitesById(
   );
 }
 
+/** DX-015-bis: la lista de recall de la demo, como la ve la administración. */
+async function demoRecallList(app: INestApplication<App>): Promise<{
+  total: number;
+  items: {
+    patientId: string;
+    recallTypeName: string;
+    daysOverdue: number;
+    lastContact: { outcome: string } | null;
+  }[];
+}> {
+  const login = await request(app.getHttpServer())
+    .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+    .send({ email: DEMO_USERS[0].email, password: DEMO_PASSWORD })
+    .expect(201);
+  const token = (login.body as { accessToken: string }).accessToken;
+  const res = await request(app.getHttpServer())
+    .get('/api/v1/recall/due?pageSize=100')
+    .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  return res.body as Awaited<ReturnType<typeof demoRecallList>>;
+}
+
 describe('seed demo (prisma/seed-demo.ts)', () => {
   let app: INestApplication<App>;
   let firstCounts: Counts;
@@ -2424,6 +2448,70 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       .expect(401);
   });
 
+  it('DX-015-bis: la lista de recall no sale vacía: una profilaxis de hace ~7 meses, un Control fijado con «No contesta»; el vencido con cita no sale', async () => {
+    const tenantId = await liveDemoTenantId();
+    const recalls = await raw.patientRecall.findMany({
+      where: { tenantId },
+      include: { recallType: { select: { name: true } } },
+    });
+    // La profilaxis vieja: la creó el procedimiento, con la fecha de la visita.
+    const prophylaxis = recalls.find(
+      (r) =>
+        r.source === 'PROCEDURE' &&
+        r.recallType.name === 'Higiene' &&
+        r.lastDoneAt < new Date(Date.now() - 180 * 86_400_000),
+    );
+    expect(prophylaxis).toBeDefined();
+    const checkup = recalls.find(
+      (r) => r.source === 'MANUAL' && r.kind === 'CHECKUP',
+    );
+    expect(checkup).toBeDefined();
+    // Los realizados de la demo (con fecha retrocedida) dan la base de su
+    // recall: ninguno se queda con la fecha de hoy de cuando se marcaron.
+    const items = await raw.treatmentPlanItem.findMany({
+      where: {
+        id: {
+          in: recalls.flatMap((r) =>
+            r.lastDoneItemId ? [r.lastDoneItemId] : [],
+          ),
+        },
+      },
+      select: { id: true, completedAt: true, performedLocationId: true },
+    });
+    const zones = await demoZonesById(tenantId);
+    for (const r of recalls.filter((x) => x.lastDoneItemId)) {
+      const item = items.find((i) => i.id === r.lastDoneItemId);
+      if (!item?.completedAt || !item.performedLocationId) continue;
+      expect({ recall: r.id, base: civilDateIn(r.lastDoneAt, 'UTC') }).toEqual({
+        recall: r.id,
+        base: civilDateIn(
+          item.completedAt,
+          zones.get(item.performedLocationId)!,
+        ),
+      });
+    }
+
+    const list = await demoRecallList(app);
+    expect(list.total).toBeGreaterThanOrEqual(2);
+    const row = (patientId: string, recallTypeName: string) =>
+      list.items.find(
+        (i) => i.patientId === patientId && i.recallTypeName === recallTypeName,
+      );
+    expect(row(prophylaxis!.patientId, 'Higiene')?.daysOverdue).toBeGreaterThan(
+      0,
+    );
+    expect(row(checkup!.patientId, 'Control')).toMatchObject({
+      lastContact: { outcome: 'NO_ANSWER' },
+    });
+    // La Higiene vencida de quien ya tiene cita no está en la lista.
+    const booked = recalls.find(
+      (r) => r.source === 'MANUAL' && r.kind === 'HYGIENE',
+    );
+    expect(booked).toBeDefined();
+    expect(booked!.dueAt.getTime()).toBeLessThan(Date.now());
+    expect(list.items.map((i) => i.patientId)).not.toContain(booked!.patientId);
+  });
+
   it('--reset aborta sin escribir si un usuario demo es miembro vivo de otra clínica', async () => {
     const demoId = await liveDemoTenantId();
     const dentist = await raw.user.findFirstOrThrow({
@@ -2491,6 +2579,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         })
       )._sum.amount?.toString();
     expect(await allocatedIn(newId)).toBe(await allocatedIn(oldId));
+    // DX-015-bis: la demo reconstruida también trae su lista de recall.
+    expect((await demoRecallList(app)).total).toBeGreaterThanOrEqual(2);
 
     await request(app.getHttpServer())
       .post('/api/v1/auth/login')

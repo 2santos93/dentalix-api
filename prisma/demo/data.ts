@@ -3434,3 +3434,22 @@ export const DEMO_COMPARISON_HISTORY = {
     current: ['OP-RESINA-1', 'PREV-PROFILAXIS'],
   },
 } as const;
+
+/**
+ * DX-015-bis: la lista de recall de la demo (Recall) no sale vacía. Tres
+ * ejemplos con pacientes de la demo elegidos al sembrar entre los que no
+ * tienen recall (ver `createRecallExamples`; los dos primeros pueden ser el
+ * mismo paciente, porque la demo agenda a casi todos):
+ *  - una profilaxis de cortesía realizada hace ~7 meses en la principal, sin
+ *    cita futura: su recall de Higiene (6 meses) lo crea el procedimiento y
+ *    sale vencido;
+ *  - un Control (12 meses) fijado a mano hace 13 meses, con un «No contesta»;
+ *  - una Higiene vencida de alguien que ya tiene cita: no sale en la lista.
+ */
+export const DEMO_RECALL = {
+  prophylaxisDaysAgo: 213,
+  checkupMonthsAgo: 13,
+  scheduledHygieneMonthsAgo: 8,
+  planNotes: 'Profilaxis de cortesía (paciente frecuente).',
+  contactNote: 'Sin respuesta; volver a llamar el jueves',
+} as const;
