@@ -127,6 +127,8 @@ function toView(
       responsibles: state.responsibles,
       majorityAge: state.noticeSettings.majorityAge,
       today: civilDateIn(now, state.noticeSettings.timeZone),
+      timeZone: state.noticeSettings.timeZone,
+      majorityReview: state.majorityReview,
     }),
   };
 }

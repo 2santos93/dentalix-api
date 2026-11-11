@@ -130,6 +130,8 @@ function toView(
       responsibles: snapshot.noticeResponsibles,
       majorityAge,
       today,
+      timeZone,
+      majorityReview: snapshot.majorityReview,
     }),
   };
 }

@@ -132,6 +132,8 @@ export class SendAppointmentReminder {
       responsibles: ctx.responsibles,
       majorityAge: ctx.majorityAge,
       today: civilDateIn(now, ctx.locationTimeZone),
+      timeZone: ctx.locationTimeZone,
+      majorityReview: ctx.majorityReview,
       automatic: true,
     });
     const decision = decideReminder({

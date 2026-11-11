@@ -20,6 +20,8 @@ const adult: SignatureRecipientInput = {
   responsibles: [],
   majorityAge: 18,
   today: '2026-10-30',
+  timeZone: 'America/Caracas',
+  majorityReview: null,
 };
 
 const mother = {
@@ -29,6 +31,7 @@ const mother = {
   isPayer: false,
   receivesNotices: true,
   optedOut: false,
+  createdAt: new Date('2026-10-01T12:00:00.000Z'),
   documentText: 'Cédula C01',
 };
 
@@ -130,5 +133,30 @@ describe('a quién va la firma a distancia (DX-243)', () => {
         patient: { ...adult.patient, contactChannel: 'NONE' },
       }),
     ).toEqual({ ok: false, reason: SIGNATURE_OPTED_OUT_MESSAGE });
+  });
+
+  it('DX-342: came of age with a responsible from childhood: signs as PATIENT; without email, never the responsible', () => {
+    const cameOfAge = {
+      ...adult,
+      patient: {
+        ...adult.patient,
+        birthDate: new Date('2008-10-15T00:00:00.000Z'),
+      },
+      responsibles: [
+        { ...mother, createdAt: new Date('2015-01-01T12:00:00.000Z') },
+      ],
+    };
+    expect(resolveSignatureRecipient(cameOfAge)).toMatchObject({
+      ok: true,
+      signerType: 'PATIENT',
+      email: 'laura@example.com',
+      minor: false,
+    });
+    expect(
+      resolveSignatureRecipient({
+        ...cameOfAge,
+        patient: { ...cameOfAge.patient, email: null },
+      }),
+    ).toEqual({ ok: false, reason: SIGNATURE_NO_EMAIL_MESSAGE });
   });
 });

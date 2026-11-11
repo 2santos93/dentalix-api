@@ -29,6 +29,7 @@ const mother: NoticeResponsible = {
   isPayer: true,
   receivesNotices: true,
   optedOut: false,
+  createdAt: new Date('2026-10-01T12:00:00.000Z'),
 };
 
 const receiptAt = (
@@ -60,6 +61,7 @@ function recipientSource(
         emergencyContactName: null,
       },
       responsibles: over.responsibles ?? [],
+      majorityReview: null,
       settings: { timeZone: 'America/Caracas', majorityAge: 18 },
     },
   };
@@ -163,6 +165,22 @@ describe('SendPaymentReceiptSummaryUseCase (DX-401)', () => {
     await expect(run).rejects.toBeInstanceOf(UnprocessableEntityException);
     await expect(run).rejects.toThrow(RECEIPT_SUMMARY_EMPTY_MESSAGE);
     expect(recipientCalls).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  it('DX-342: came of age unreviewed and without email: 422, never the responsible', async () => {
+    const { uc, sent } = makeUseCase(
+      [receiptAt('loc-1', '2026-10-03T15:00:00.000Z')],
+      recipientSource(null, {
+        // Cumplió 18 el 2026-11-01; la madre, dada de alta de niño.
+        birthDate: new Date('2008-11-01'),
+        responsibles: [
+          { ...mother, createdAt: new Date('2016-01-15T12:00:00.000Z') },
+        ],
+      }),
+    );
+    const run = uc.execute('p-1', PERIOD);
+    await expect(run).rejects.toThrow(PATIENT_WITHOUT_EMAIL_MESSAGE);
     expect(sent).toEqual([]);
   });
 });

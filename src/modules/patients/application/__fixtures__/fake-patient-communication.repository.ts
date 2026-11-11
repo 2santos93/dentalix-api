@@ -28,6 +28,7 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
       birthDate: null,
       emergencyContactName: null,
       responsibles: [],
+      majorityReview: null,
       noticeSettings: { timeZone: 'America/Caracas', majorityAge: 18 },
       countryCode: null,
       phone: null,

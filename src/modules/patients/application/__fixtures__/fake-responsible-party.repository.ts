@@ -1,3 +1,4 @@
+import type { MajorityReviewRecord } from '../../domain/responsible-parties/majority-review';
 import type {
   CreateResponsiblePartyData,
   PatientResponsiblesSnapshot,
@@ -24,6 +25,8 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
     timeZone: 'America/Caracas',
     majorityAge: 18,
   };
+  /** DX-342: última revisión del paso a la mayoría de edad, por paciente. */
+  readonly majorityReviews = new Map<string, MajorityReviewRecord>();
   private seq = 0;
 
   addPatient(
@@ -67,7 +70,9 @@ export class FakeResponsiblePartyRepository implements ResponsiblePartyRepositor
         isPayer: p.isPayer,
         receivesNotices: p.receivesNotices,
         optedOut: false,
+        createdAt: p.createdAt,
       })),
+      majorityReview: this.majorityReviews.get(patientId) ?? null,
       responsibleFor: this.parties
         .filter((p) => !p.deleted && p.responsiblePatient?.id === patientId)
         .map((p) => {

@@ -195,6 +195,7 @@ describe('GetAccountStatementUseCase', () => {
         emergencyContactName: null,
       },
       responsibles: [],
+      majorityReview: null,
       settings: { timeZone: 'America/Caracas', majorityAge: 18 },
     }).useCase.execute('p-1', {});
     expect(adult.addressee).toEqual({
@@ -218,8 +219,10 @@ describe('GetAccountStatementUseCase', () => {
           isPayer: true,
           receivesNotices: true,
           optedOut: false,
+          createdAt: new Date('2026-10-01T12:00:00.000Z'),
         },
       ],
+      majorityReview: null,
       settings: { timeZone: 'America/Caracas', majorityAge: 18 },
     }).useCase.execute('p-1', {});
     // Se imprime y se entrega: aunque el responsable no tenga email.
@@ -227,6 +230,53 @@ describe('GetAccountStatementUseCase', () => {
       kind: 'RESPONSIBLE',
       name: 'Claudia Navarro',
       email: null,
+    });
+  });
+
+  it('DX-342: came of age with a responsible from childhood, unreviewed: in the patient name; KEEP_RESPONSIBLE: the responsible', async () => {
+    // Cumplió 18 el 2026-01-15; la madre se dio de alta en 2015.
+    const notice = (
+      majorityReview: {
+        decision: 'KEEP_RESPONSIBLE';
+        majorityDate: string;
+      } | null,
+    ) => ({
+      patient: {
+        firstName: 'Ana',
+        birthDate: new Date('2008-01-15'),
+        email: null,
+        emergencyContactName: null,
+      },
+      responsibles: [
+        {
+          id: 'r-1',
+          name: 'Claudia Navarro',
+          email: 'claudia@example.com',
+          isPayer: true,
+          receivesNotices: true,
+          optedOut: false,
+          createdAt: new Date('2015-05-01T12:00:00.000Z'),
+        },
+      ],
+      majorityReview,
+      settings: { timeZone: 'America/Caracas', majorityAge: 18 },
+    });
+    const pending = await makeUseCase(data(), notice(null)).useCase.execute(
+      'p-1',
+      {},
+    );
+    expect(pending.addressee).toEqual({
+      kind: 'PATIENT',
+      name: 'Ana Pérez',
+      email: null,
+    });
+    const kept = await makeUseCase(
+      data(),
+      notice({ decision: 'KEEP_RESPONSIBLE', majorityDate: '2026-01-15' }),
+    ).useCase.execute('p-1', {});
+    expect(kept.addressee).toMatchObject({
+      kind: 'RESPONSIBLE',
+      name: 'Claudia Navarro',
     });
   });
 
@@ -247,8 +297,10 @@ describe('GetAccountStatementUseCase', () => {
           isPayer: true,
           receivesNotices: true,
           optedOut: false,
+          createdAt: new Date('2026-10-01T12:00:00.000Z'),
         },
       ],
+      majorityReview: null,
       settings: { timeZone: 'America/Caracas', majorityAge: 16 },
     }).useCase.execute('p-1', {});
     expect(out.addressee).toEqual({

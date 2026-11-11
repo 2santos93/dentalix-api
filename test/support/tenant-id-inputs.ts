@@ -49,6 +49,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'PATCH /price-lists/:id body.locationId',
   'PUT /price-lists/:id/items body.items[].catalogItemId',
   'GET /patients/:patientId/price-quote ?catalogItemId',
+  // DX-342: «Pasan a la mayoría de edad» filtrada por una sede.
+  'GET /patients/coming-of-age ?locationId',
   // --- historia clínica y odontograma ---
   'POST /patients/:patientId/clinical-entries body.answers[].promptId',
   'POST /patients/:patientId/clinical-entries body.appointmentId',

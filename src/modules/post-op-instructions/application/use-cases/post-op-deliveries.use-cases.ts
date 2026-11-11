@@ -251,6 +251,8 @@ function emailRecipient(
     responsibles: ctx.responsibles,
     majorityAge: ctx.majorityAge,
     today: civilDateIn(now, ctx.location.timeZone),
+    timeZone: ctx.location.timeZone,
+    majorityReview: ctx.majorityReview,
     automatic: false,
   });
 }

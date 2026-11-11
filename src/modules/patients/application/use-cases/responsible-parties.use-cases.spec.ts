@@ -252,6 +252,39 @@ describe('responsables de pago y avisos (DX-203)', () => {
     );
   });
 
+  it('DX-342: came of age with a responsible from childhood: the record shows no recipient until a KEEP_RESPONSIBLE review', async () => {
+    // Cumplió 18 el 2026-10-01; sin email propio.
+    repo.addPatient('adult', { birthDate: new Date('2008-10-01') });
+    await create.execute(
+      'adult',
+      { responsiblePatientId: MOTHER, relationship: 'MOTHER' },
+      USER,
+    );
+    // Recién dada de alta (ya adulto): regla general DX-203.
+    expect((await list.execute('adult')).noticeRecipient).toMatchObject({
+      kind: 'RESPONSIBLE',
+    });
+    // Dada de alta de niño: hasta revisarlo, a nadie.
+    repo.parties[repo.parties.length - 1].createdAt = new Date(
+      '2014-06-01T12:00:00.000Z',
+    );
+    expect((await list.execute('adult')).noticeRecipient).toEqual({
+      kind: 'PATIENT',
+      name: 'Paciente',
+      email: null,
+      minor: false,
+      responsiblePartyId: null,
+    });
+    repo.majorityReviews.set('adult', {
+      decision: 'KEEP_RESPONSIBLE',
+      majorityDate: '2026-10-01',
+    });
+    expect((await list.execute('adult')).noticeRecipient).toMatchObject({
+      kind: 'RESPONSIBLE',
+      email: 'claudia@example.com',
+    });
+  });
+
   it('responsibles view takes majorityAge from the clinic and has no country', async () => {
     repo.noticeSettings = { timeZone: 'Asia/Tokyo', majorityAge: 20 };
     // 19 años en el día civil de Tokio: menor con 20.

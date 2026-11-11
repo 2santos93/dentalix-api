@@ -20,6 +20,7 @@ import {
 import {
   loadNoticeSettings,
   loadNoticeResponsibles,
+  loadMajorityReview,
 } from '../notices/notice-context';
 
 const SUMMARY_SELECT = {
@@ -169,45 +170,52 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
         },
       });
       if (!patient) return null;
-      const [rows, responsibleFor, noticeResponsibles, noticeSettings] =
-        await Promise.all([
-          tx.patientResponsibleParty.findMany({
-            // Con el responsable archivado también: sigue ocupando el pagador
-            // (índice único) y recepción tiene que poder quitarlo. Los avisos
-            // no le llegan (loadNoticeResponsibles lo excluye).
-            where: { patientId, deletedAt: null },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-            select: PARTY_SELECT,
-          }),
-          // Índice parcial patient_responsible_parties_responsible_idx.
-          tx.patientResponsibleParty.findMany({
-            where: {
-              responsiblePatientId: patientId,
-              deletedAt: null,
-              patient: { deletedAt: null },
+      const [
+        rows,
+        responsibleFor,
+        noticeResponsibles,
+        majorityReview,
+        noticeSettings,
+      ] = await Promise.all([
+        tx.patientResponsibleParty.findMany({
+          // Con el responsable archivado también: sigue ocupando el pagador
+          // (índice único) y recepción tiene que poder quitarlo. Los avisos
+          // no le llegan (loadNoticeResponsibles lo excluye).
+          where: { patientId, deletedAt: null },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: PARTY_SELECT,
+        }),
+        // Índice parcial patient_responsible_parties_responsible_idx.
+        tx.patientResponsibleParty.findMany({
+          where: {
+            responsiblePatientId: patientId,
+            deletedAt: null,
+            patient: { deletedAt: null },
+          },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            relationship: true,
+            isPayer: true,
+            receivesNotices: true,
+            patient: {
+              select: { id: true, firstName: true, lastName: true },
             },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-            select: {
-              id: true,
-              relationship: true,
-              isPayer: true,
-              receivesNotices: true,
-              patient: {
-                select: { id: true, firstName: true, lastName: true },
-              },
-            },
-          }),
-          loadNoticeResponsibles(tx, patientId),
-          loadNoticeSettings(
-            tx,
-            tenantId,
-            this.tenantContext.getLocationId() ?? null,
-          ),
-        ]);
+          },
+        }),
+        loadNoticeResponsibles(tx, patientId),
+        loadMajorityReview(tx, patientId),
+        loadNoticeSettings(
+          tx,
+          tenantId,
+          this.tenantContext.getLocationId() ?? null,
+        ),
+      ]);
       return {
         patient,
         parties: rows.map(toView),
         noticeResponsibles,
+        majorityReview,
         responsibleFor,
         noticeSettings,
       };

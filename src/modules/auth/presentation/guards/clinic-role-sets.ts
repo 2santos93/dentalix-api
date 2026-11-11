@@ -465,3 +465,12 @@ export const RECALL_LIST_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 export const RECALL_INTERVAL_ROLES: ClinicRole[] = [...CLINICAL_ROLES];
+
+// DX-342: paso a la mayoría de edad. La lista «Pasan a la mayoría de edad» y
+// la revisión (a quién van los avisos del paciente ya adulto) son trabajo de
+// mostrador: ADMIN + RECEPTION. El estado del aviso de la ficha lo leen los 4
+// roles (PATIENT_ROLES), como los responsables.
+export const MAJORITY_REVIEW_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];

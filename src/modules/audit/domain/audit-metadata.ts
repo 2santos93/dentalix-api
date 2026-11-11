@@ -212,6 +212,17 @@ export interface AuditMetadata {
    * recibos que se vio, imprimió o envió. Solo las dos fechas.
    */
   period?: AuditPeriod;
+  /**
+   * DX-342: revisión del paso a la mayoría de edad: la decisión, la fecha de
+   * mayoría de edad revisada y el LARGO de la nota (nunca su texto).
+   */
+  majorityReview?: AuditMajorityReview;
+}
+
+export interface AuditMajorityReview {
+  decision: 'PATIENT_SELF' | 'KEEP_RESPONSIBLE';
+  majorityDate: string;
+  noteLength: number;
 }
 
 export interface AuditPeriod {
@@ -1048,6 +1059,25 @@ function coverageValiditySide(value: unknown): AuditCoverageValidity | null {
   return { validFrom: from, validTo: to };
 }
 
+/** DX-342: decisión conocida, día civil que existe y largo 0..500. */
+function majorityReview(value: unknown): AuditMajorityReview | null {
+  if (!isRecord(value)) return null;
+  const { decision, majorityDate, noteLength, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    (decision !== 'PATIENT_SELF' && decision !== 'KEEP_RESPONSIBLE') ||
+    typeof majorityDate !== 'string' ||
+    civilDateOrNull(majorityDate) !== majorityDate ||
+    typeof noteLength !== 'number' ||
+    !Number.isSafeInteger(noteLength) ||
+    noteLength < 0 ||
+    noteLength > 500
+  ) {
+    return null;
+  }
+  return { decision, majorityDate, noteLength };
+}
+
 /** DX-401: dos días civiles que existen con `from <= to`, o nada. */
 function period(value: unknown): AuditPeriod | null {
   if (!isRecord(value)) return null;
@@ -1465,5 +1495,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (term) out.retentionTermChange = term;
   const range = period(input.period);
   if (range) out.period = range;
+  const reviewed = majorityReview(input.majorityReview);
+  if (reviewed) out.majorityReview = reviewed;
   return out;
 }

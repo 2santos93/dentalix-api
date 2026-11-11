@@ -76,6 +76,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
         isPayer: true,
         receivesNotices: true,
         optedOut: false,
+        createdAt: new Date('2026-10-01T12:00:00.000Z'),
       };
       repo.add(ANA, {
         birthDate: new Date('2015-06-01'),
@@ -105,6 +106,44 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       });
       await expect(get.execute(ANA)).resolves.toMatchObject({
         recipient: { kind: 'CONTACT', name: 'Luis', minor: true },
+      });
+    });
+
+    it('DX-342: came of age with a responsible from childhood, unreviewed: recipient is the patient (null email), never the responsible', async () => {
+      const mother = {
+        id: 'r1',
+        name: 'María José Pérez',
+        email: 'maria@example.com',
+        isPayer: true,
+        receivesNotices: true,
+        optedOut: false,
+        createdAt: new Date('2014-01-10T12:00:00.000Z'),
+      };
+      // Cumplió 18 el 2026-10-01 (hoy, 20/10).
+      repo.add(ANA, {
+        birthDate: new Date('2008-10-01'),
+        email: null,
+        responsibles: [mother],
+      });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        recipient: {
+          kind: 'PATIENT',
+          email: null,
+          minor: false,
+          responsiblePartyId: null,
+        },
+      });
+      repo.add(ANA, {
+        birthDate: new Date('2008-10-01'),
+        email: null,
+        responsibles: [mother],
+        majorityReview: {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-10-01',
+        },
+      });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        recipient: { kind: 'RESPONSIBLE', email: 'maria@example.com' },
       });
     });
 

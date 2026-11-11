@@ -15,6 +15,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import {
   loadNoticeResponsibles,
+  loadMajorityReview,
   loadTenantMajorityAge,
 } from '../../../patients/infrastructure/notices/notice-context';
 import { performedItemsOf } from '../../../clinical-entries/infrastructure/repositories/performed-items';
@@ -123,19 +124,21 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
       if (!appointment || appointment.patient.deletedAt) return null;
       const { patient, location } = appointment;
 
-      const [provider, tenant, responsibles, majorityAge] = await Promise.all([
-        tx.clinicMembership.findFirst({
-          where: { userId: appointment.providerId },
-          orderBy: { createdAt: 'desc' },
-          select: { user: { select: { fullName: true } } },
-        }),
-        tx.tenant.findUniqueOrThrow({
-          where: { id: tenantId },
-          select: { name: true },
-        }),
-        loadNoticeResponsibles(tx, appointment.patientId),
-        loadTenantMajorityAge(tx, tenantId),
-      ]);
+      const [provider, tenant, responsibles, majorityReview, majorityAge] =
+        await Promise.all([
+          tx.clinicMembership.findFirst({
+            where: { userId: appointment.providerId },
+            orderBy: { createdAt: 'desc' },
+            select: { user: { select: { fullName: true } } },
+          }),
+          tx.tenant.findUniqueOrThrow({
+            where: { id: tenantId },
+            select: { name: true },
+          }),
+          loadNoticeResponsibles(tx, appointment.patientId),
+          loadMajorityReview(tx, appointment.patientId),
+          loadTenantMajorityAge(tx, tenantId),
+        ]);
 
       return {
         appointment: {
@@ -158,6 +161,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           contactChannel: patient.contactChannel,
         },
         responsibles,
+        majorityReview,
         location: {
           id: location.id,
           name: location.name,

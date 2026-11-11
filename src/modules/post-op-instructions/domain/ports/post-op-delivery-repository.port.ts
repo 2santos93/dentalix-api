@@ -1,6 +1,7 @@
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { AppointmentStatus, ContactChannel } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
+import type { MajorityReviewRecord } from '../../../patients/domain/responsible-parties/majority-review';
 import type {
   PostOpDelivery,
   PostOpDeliveryChannel,
@@ -35,6 +36,8 @@ export interface PostOpAppointmentContext {
   };
   /** Responsables VIVOS del paciente (DX-203), en orden de alta. */
   responsibles: NoticeResponsible[];
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
   location: {
     id: string;
     name: string;
