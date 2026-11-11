@@ -589,7 +589,7 @@ export class UpdateAppointmentUseCase {
     }
 
     if ((isReschedule || chairChanged) && auditContext) {
-      await this.recordMove(existing, updated, auditContext);
+      await this.recordMove(existing, updated, auditContext, fromOpening);
     }
     if (overbook !== null && auditContext) {
       await this.recordOverbook(updated, overbook, auditContext);
@@ -1036,6 +1036,7 @@ export class UpdateAppointmentUseCase {
     before: Appointment,
     after: Appointment,
     ctx: AppointmentAuditContext,
+    fromOpening = false,
   ): Promise<void> {
     return this.audit.record({
       tenantId: ctx.tenantId,
@@ -1063,6 +1064,8 @@ export class UpdateAppointmentUseCase {
             providerId: after.providerId,
             chairId: after.chairId,
           },
+          // DX-436-bis: el informe «Huecos recuperados» lo cuenta «por la lista».
+          ...(fromOpening ? { via: 'OPENING' as const } : {}),
         },
       },
     });

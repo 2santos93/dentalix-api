@@ -58,6 +58,13 @@ export class AuditAppointmentMoveDto {
 
   @ApiProperty({ type: AuditAppointmentSlotDto })
   to!: AuditAppointmentSlotDto;
+
+  @ApiPropertyOptional({
+    enum: ['OPENING'],
+    description:
+      'DX-436-bis: `OPENING` = «Asignar» desde «Ocupar este hueco»; sin él, un reagendado.',
+  })
+  via?: 'OPENING';
 }
 
 export class AuditSearchDto {

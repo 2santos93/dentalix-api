@@ -154,6 +154,15 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
       expect(sanitizeAuditMetadata({ move: 'x' })).toEqual({});
     });
 
+    it('DX-436-bis: conserva `via: OPENING` y descarta cualquier otro valor', () => {
+      expect(
+        sanitizeAuditMetadata({ move: { from, to, via: 'OPENING' } }),
+      ).toEqual({ move: { from, to, via: 'OPENING' } });
+      expect(
+        sanitizeAuditMetadata({ move: { from, to, via: 'Dra. Pérez' } }),
+      ).toEqual({ move: { from, to } });
+    });
+
     it('no deja pasar claves de más dentro del movimiento', () => {
       expect(
         sanitizeAuditMetadata({
