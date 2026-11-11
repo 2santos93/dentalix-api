@@ -26,6 +26,7 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'appointment-reminder': EmailTemplate.APPOINTMENT_REMINDER,
   'registration-notice': EmailTemplate.REGISTRATION_NOTICE,
   'payment-receipt': EmailTemplate.PAYMENT_RECEIPT,
+  'payment-receipt-summary': EmailTemplate.PAYMENT_RECEIPT_SUMMARY,
   'post-op-instructions': EmailTemplate.POST_OP_INSTRUCTIONS,
   'signature-request': EmailTemplate.SIGNATURE_REQUEST,
   'signature-code': EmailTemplate.SIGNATURE_CODE,

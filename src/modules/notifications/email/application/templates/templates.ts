@@ -11,6 +11,7 @@ import {
   MfaNoticeEmailVars,
   PasswordResetEmailVars,
   PaymentReceiptEmailVars,
+  PaymentReceiptSummaryEmailVars,
   PostOpInstructionsEmailVars,
   RegistrationNoticeEmailVars,
   ReminderCancellationPolicyVars,
@@ -294,6 +295,65 @@ function paymentReceipt(
   });
 }
 
+/**
+ * DX-401: el resumen de abonos de un período. Una línea por forma de pago con
+ * su número de recibo (los anulados, marcados y fuera de los totales) y el
+ * total de cada moneda por separado: USD y VES nunca se suman.
+ */
+function paymentReceiptSummary(
+  vars: PaymentReceiptSummaryEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const clinic = brand?.clinicName ?? PRODUCT_NAME;
+  const responsible = vars.responsibleName?.trim() || null;
+  const blocks: EmailBlock[] = [
+    {
+      kind: 'paragraph',
+      text: responsible
+        ? `Te enviamos el resumen de los abonos de ${vars.patientName} en ${clinic} del ${vars.periodLabel}.`
+        : `Te enviamos el resumen de tus abonos en ${clinic} del ${vars.periodLabel}.`,
+    },
+  ];
+  if (vars.patientDocLabel) {
+    blocks.push({
+      kind: 'paragraph',
+      text: `Documento: ${vars.patientDocLabel}`,
+    });
+  }
+  for (const line of vars.lines) {
+    blocks.push({
+      kind: 'paragraph',
+      text:
+        `Recibo N.º ${line.receiptNumber} · ${line.dateLabel} · ${line.locationName} · ` +
+        `${line.methodLabel} · ${line.amountLabel}${line.voided ? ' (ANULADO)' : ''}`,
+    });
+  }
+  blocks.push({
+    kind: 'paragraph',
+    text:
+      vars.totalLabels.length > 0
+        ? `Total abonado: ${vars.totalLabels.join(' · ')}`
+        : 'Total abonado: sin abonos vigentes en el período',
+  });
+  if (vars.voidedCount > 0) {
+    blocks.push({
+      kind: 'paragraph',
+      text: `${plural(vars.voidedCount, 'recibo anulado', 'recibos anulados')}: no suman en el total.`,
+    });
+  }
+  blocks.push(
+    { kind: 'note', text: vars.fiscalLine ?? 'Datos fiscales pendientes' },
+    { kind: 'note', text: vars.notice },
+  );
+  return renderLayout({
+    brand,
+    subject: `Resumen de abonos del ${vars.periodLabel} · ${clinic}`,
+    heading: `Hola, ${responsible ?? vars.patientName}`,
+    blocks,
+    action: null,
+  });
+}
+
 function postOpInstructions(
   vars: PostOpInstructionsEmailVars,
   brand: EmailBrand | null,
@@ -538,6 +598,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'appointment-reminder': appointmentReminder,
   'registration-notice': registrationNotice,
   'payment-receipt': paymentReceipt,
+  'payment-receipt-summary': paymentReceiptSummary,
   'post-op-instructions': postOpInstructions,
   'signature-request': signatureRequest,
   'signature-code': signatureCode,
