@@ -360,6 +360,20 @@ export class AuditConfigChangeDto {
 }
 
 /** Cambio del plazo de conservación de la historia clínica (DX-330). */
+export class AuditPeriodDto {
+  @ApiProperty({
+    example: '2026-10-01',
+    description: 'Primer día (AAAA-MM-DD), inclusive.',
+  })
+  from!: string;
+
+  @ApiProperty({
+    example: '2026-10-31',
+    description: 'Último día (AAAA-MM-DD), inclusive.',
+  })
+  to!: string;
+}
+
 export class AuditRetentionTermChangeDto {
   @ApiProperty({
     enum: ['UP', 'DOWN'],
@@ -524,6 +538,13 @@ export class AuditMetadataDto {
       'DX-330: cambio del plazo de conservación de la historia clínica (`reason` CLINICAL_RECORD_RETENTION_SETTINGS): dirección, pacientes protegidos, plazos vigentes y si corrigió una subida reciente. Solo códigos y enteros.',
   })
   retentionTermChange?: AuditRetentionTermChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditPeriodDto,
+    description:
+      'DX-401: el período (días civiles, ambos inclusive) del resumen de recibos del paciente que se vio, imprimió o envió. Solo las dos fechas.',
+  })
+  period?: AuditPeriodDto;
 }
 
 export class AuditEventDto {

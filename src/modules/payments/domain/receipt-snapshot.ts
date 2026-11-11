@@ -233,6 +233,26 @@ const blankToNull = (value: string | null): string | null =>
   value?.trim() ? value.trim() : null;
 
 /**
+ * Los datos fiscales de la clínica como salen en el recibo (DX-019): en
+ * blanco = `null`, y `taxIdLabel` solo con identificador y nombre propio.
+ * DX-401: el resumen de abonos los pinta con la misma regla.
+ */
+export function receiptClinicData(
+  input: ReceiptClinicInput,
+): ReceiptClinicData {
+  const taxId = blankToNull(input.taxId);
+  const taxIdLabel = blankToNull(input.taxIdLabel ?? null);
+  return {
+    name: input.name,
+    legalName: blankToNull(input.legalName),
+    taxId,
+    // Clave opcional: sin identificador o sin nombre propio no va en la foto.
+    ...(taxId !== null && taxIdLabel !== null ? { taxIdLabel } : {}),
+    address: blankToNull(input.address),
+  };
+}
+
+/**
  * `clinicNames`: los nombres locales de la clínica al emitir (R16); el
  * nombre visible queda congelado en la foto (R18).
  */
@@ -241,16 +261,7 @@ export function buildReceiptSnapshot(
   clinicNames: ClinicDocumentTypeNames,
 ): ReceiptSnapshot {
   const { docType, docTypeLabel } = input.patient;
-  const taxId = blankToNull(input.clinic.taxId);
-  const taxIdLabel = blankToNull(input.clinic.taxIdLabel ?? null);
-  const clinic: ReceiptClinicData = {
-    name: input.clinic.name,
-    legalName: blankToNull(input.clinic.legalName),
-    taxId,
-    // Clave opcional: sin identificador o sin nombre propio no va en la foto.
-    ...(taxId !== null && taxIdLabel !== null ? { taxIdLabel } : {}),
-    address: blankToNull(input.clinic.address),
-  };
+  const clinic = receiptClinicData(input.clinic);
   return {
     version: 1,
     clinic,

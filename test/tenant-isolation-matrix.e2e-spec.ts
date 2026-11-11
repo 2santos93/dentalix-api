@@ -1654,6 +1654,28 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/payments/${a.paymentId}/receipt/email`,
       status: 404,
     },
+    // DX-401: el resumen de recibos de un período del paciente de A.
+    {
+      name: 'GET /patients/:patientId/payment-receipts/summary',
+      verb: 'get',
+      path: () =>
+        `/patients/${a.patientId}/payment-receipts/summary?from=2026-01-01&to=2026-12-31`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/payment-receipts/summary/print',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/payment-receipts/summary/print?from=2026-01-01&to=2026-12-31`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/payment-receipts/summary/email',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/payment-receipts/summary/email?from=2026-01-01&to=2026-12-31`,
+      status: 404,
+    },
     // --- consents (plantillas) ---
     {
       name: 'PATCH /consent-templates/:id',
