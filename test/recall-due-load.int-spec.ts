@@ -22,7 +22,7 @@ import { seedDefaultRecallTypes } from './support/recall-types';
 // y el mapa de visibilidad de los recorridos solo de índice). EXPLAIN ANALYZE como dentalix_app (runWithTenant, RLS) de
 // `recallDueSql` y, de punta a punta, `PrismaRecallRepository.listDue`: la
 // mediana de 7 corridas tras 2 de calentamiento, por debajo del presupuesto,
-// y el plan recorre `patient_recalls_tenant_due_idx`. `raw` (DIRECT_URL,
+// y el plan recorre `patient_recalls_tenant_due_visit_idx`. `raw` (DIRECT_URL,
 // owner) siembra y limpia. Sin "patientCode" en los INSERT: lo pone el
 // trigger (DX-484). Las cifras medidas se imprimen (informe de DX-015-bis).
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -36,7 +36,7 @@ const SUBDOMAINS = ['dx015bis-load', 'dx015bis-load-ruido'];
 const PATIENTS = 60_000;
 const NOISE_PATIENTS = 10_000;
 const BUDGET_MS = 500;
-const DUE_INDEX = 'patient_recalls_tenant_due_idx';
+const DUE_INDEX = 'patient_recalls_tenant_due_visit_idx';
 const NOW = new Date('2027-04-10T15:00:00.000Z');
 const WARMUP = 2;
 const RUNS = 7;
@@ -206,9 +206,10 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
       nodes = run.nodes;
     }
     const ms = median(times);
-    measured.push(
-      `  ${label}: ${ms.toFixed(1)} ms (min ${Math.min(...times).toFixed(1)}, max ${Math.max(...times).toFixed(1)})`,
-    );
+    const line = `  ${label}: ${ms.toFixed(1)} ms (min ${Math.min(...times).toFixed(1)}, max ${Math.max(...times).toFixed(1)})`;
+    measured.push(line);
+    // También en el momento: el log de CI muestra cada mediana aunque falle.
+    console.log(`DX-015-bis · mediana de ${RUNS} tras ${WARMUP}:${line}`);
     return { ms, nodes };
   }
 
@@ -240,7 +241,7 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
     ['página 1, vista consolidada', {}],
     ['due/count (consolidada, pageSize 1)', { pageSize: 1 }],
   ])(
-    `%s: < ${BUDGET_MS} ms y por patient_recalls_tenant_due_idx`,
+    `%s: < ${BUDGET_MS} ms y por patient_recalls_tenant_due_visit_idx`,
     async (label, over) => {
       const params = query({
         ...over,
@@ -280,9 +281,13 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
     expect(page.total).toBeGreaterThan(1_000);
     const pageMs = await wall(() => list(25, clinic.sedes[0]));
     const countMs = await wall(() => list(1));
-    measured.push(
+    const lines = [
       `  listDue de punta a punta, página 1: ${pageMs.toFixed(1)} ms`,
       `  listDue de punta a punta, recuento: ${countMs.toFixed(1)} ms`,
+    ];
+    measured.push(...lines);
+    console.log(
+      `DX-015-bis · mediana de ${RUNS} tras ${WARMUP}:\n${lines.join('\n')}`,
     );
     expect(pageMs).toBeLessThan(BUDGET_MS);
     expect(countMs).toBeLessThan(BUDGET_MS);

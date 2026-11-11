@@ -7167,6 +7167,9 @@ model PatientRecall {
   dueAt             DateTime     @default(dbgenerated()) @db.Date
   /// Sede donde se fijó: la del recall si el paciente aún no tiene citas atendidas.
   locationId        String       @db.Uuid
+  /// DERIVADA (la mantiene la BD por trigger; nunca se escribe): la sede de la
+  /// última cita COMPLETED viva del paciente, o NULL si no tiene (20261212090400).
+  visitLocationId   String?      @db.Uuid
   active            Boolean      @default(true)
   /// No sale en la lista hasta ese día (p. ej. «tratamiento en curso»).
   disabledUntil     DateTime?    @db.Date
@@ -7188,9 +7191,10 @@ model PatientRecall {
   @@index([tenantId, locationId], map: "patient_recalls_tenant_location_idx")
   @@index([tenantId, recallTypeId], map: "patient_recalls_tenant_type_idx")
   // PARCIAL (WHERE "active"), con INCLUDE, no declarable en Prisma:
-  // patient_recalls_tenant_due_idx ("tenantId", "dueAt") INCLUDE ("id",
+  // patient_recalls_tenant_due_visit_idx ("tenantId", "dueAt") INCLUDE ("id",
   // "patientId", "recallTypeId", "kind", "intervalMonths", "lastDoneAt",
-  // "disabledUntil", "locationId") (20261212090300).
+  // "disabledUntil", "locationId", "visitLocationId") (20261212090600; el
+  // anterior, sin "visitLocationId", se soltó en 20261212090700).
   @@map("patient_recalls")
 }
 

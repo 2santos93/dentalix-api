@@ -41,7 +41,7 @@ import {
 //
 // DX-015-bis: el oráculo es la regla nueva (la base es "lastDoneAt"; la cita
 // atendida solo da la sede) y calcula el vencimiento sin leer la columna
-// generada; la consulta de la app recorre `patient_recalls_tenant_due_idx`.
+// generada; la consulta de la app recorre `patient_recalls_tenant_due_visit_idx`.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });

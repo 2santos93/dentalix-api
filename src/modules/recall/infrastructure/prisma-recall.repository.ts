@@ -97,21 +97,20 @@ export interface RecallDueSqlParams extends RecallDueQuery {
  * DX-015-bis: el vencimiento es el GUARDADO (`dueAt`, columna generada:
  * "lastDoneAt" + intervalo), que ya no depende de la última visita. En orden:
  * 0. `locs`: las sedes de la clínica con su «hoy» (2–20 filas, una vez).
- * 1. `c`: los recall ACTIVOS de la clínica que pueden salir, antes de las
- *    LATERAL: un RANGO SOLO de índice sobre `patient_recalls_tenant_due_idx`
- *    ("dueAt" <= el «hoy» más adelantado de las sedes de la clínica + la
- *    ventana; `maxToday` es un InitPlan, así que la cota va en el propio
- *    recorrido del índice). «Hoy» en la sede del paciente nunca pasa de
- *    `maxToday`, así que la cota solo descarta lo que tampoco saldría después.
- *    Sin cita futura ni en la clínica (`appointments_tenant_patient_upcoming_idx`;
- *    no depende de la sede). Sin columnas del paciente: la fila es estrecha.
- * 2. `d`: la última cita atendida (appointments_tenant_patient_completed_idx)
- *    da SOLO la sede del paciente y su «hoy» (de `locs`, sin ir a la tabla por
- *    fila); ahí se aplican el filtro exacto por ese «hoy» y el de sede, y solo
- *    a lo que queda se le busca el paciente (vivo, nombre y teléfono). Medido
- *    con 60.000 pacientes (withinDays = 60, una sede): unir el paciente
- *    después del filtro de sede y `locs` en vez de `locations` por fila bajan
- *    la mediana ~1/3 (REPORT-1A-R4 de DX-015-bis).
+ * 1. `c`: los recall ACTIVOS de la clínica que pueden salir: un RANGO SOLO de
+ *    índice sobre `patient_recalls_tenant_due_visit_idx` ("dueAt" <= el «hoy»
+ *    más adelantado de las sedes de la clínica + la ventana; `maxToday` es un
+ *    InitPlan, así que la cota va en el propio recorrido del índice). «Hoy»
+ *    en la sede del paciente nunca pasa de `maxToday`, así que la cota solo
+ *    descarta lo que tampoco saldría después. Sin cita futura ni en la
+ *    clínica (`appointments_tenant_patient_upcoming_idx`; no depende de la
+ *    sede). Sin columnas del paciente: la fila es estrecha.
+ * 2. `d`: la sede del paciente es la de su última cita atendida, GUARDADA en
+ *    el recall ("visitLocationId", la mantienen los triggers de
+ *    20261212090400) o, sin ella, la del recall; su «hoy» sale de `locs`. Ahí
+ *    se aplican el filtro exacto por ese «hoy» y el de sede, y solo a lo que
+ *    queda se le busca el paciente (vivo, nombre y teléfono). Sin LATERAL a
+ *    appointments por candidato (REPORT-1A-R5 de DX-015-bis).
  * 3. El nombre del tipo y el último contacto, solo de la página.
  */
 export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
@@ -139,7 +138,7 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
     c AS MATERIALIZED (
       SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."recallTypeId",
              pr."intervalMonths", pr."lastDoneAt", pr."dueAt", pr."disabledUntil",
-             pr."locationId"
+             pr."locationId", pr."visitLocationId"
         FROM "patient_recalls" pr
        WHERE pr."tenantId" = ${p.tenantId}::uuid
          AND pr."active"
@@ -169,17 +168,7 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
              lo."today",
              c."lastDoneAt" AS "baseDate", c."dueAt", c."dueAt" - lo."today" AS "dueIn"
         FROM c
-        LEFT JOIN LATERAL (
-          SELECT a."locationId"
-            FROM "appointments" a
-           WHERE a."tenantId" = c."tenantId"
-             AND a."patientId" = c."patientId"
-             AND a."status" = 'COMPLETED'
-             AND a."deletedAt" IS NULL
-           ORDER BY a."start" DESC, a."id" DESC
-           LIMIT 1
-        ) lc ON true
-        JOIN locs lo ON lo."id" = coalesce(lc."locationId", c."locationId")
+        JOIN locs lo ON lo."id" = coalesce(c."visitLocationId", c."locationId")
         JOIN "patients" pa
           ON pa."tenantId" = c."tenantId" AND pa."id" = c."patientId"
        WHERE c."dueAt" <= lo."today" + ${p.withinDays}::int
