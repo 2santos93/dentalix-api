@@ -5,12 +5,23 @@ import type {
 } from '../../src/modules/recall/domain/recall.entity';
 
 /**
- * DX-547 · ORÁCULO de la lista de recall: la consulta de DX-015 tal cual
- * estaba antes de DB-079 (cuenta y página en dos sentencias, cada una con la
- * CTE completa de todos los recall de la clínica). Solo la usan los tests de
- * equivalencia: la consulta nueva tiene que devolver exactamente lo mismo.
- * No la cambies para que un test pase: es la definición de «lo de antes».
+ * DX-547 · ORÁCULO de la lista de recall: la consulta de DX-015 en su forma
+ * más directa (cuenta y página en dos sentencias, cada una con la CTE completa
+ * de todos los recall de la clínica, sin cotas ni índices). Solo la usan los
+ * tests de equivalencia: la consulta de la app tiene que devolver exactamente
+ * lo mismo. No la cambies para que un test pase: es la definición de la regla.
+ *
+ * DX-015-bis la reescribe con la regla nueva (`rule: 'DX-015-bis'`, la de
+ * siempre): la base es "lastDoneAt" (lo fijado o el último DONE de un
+ * disparador, que mantiene la BD) y el vencimiento se calcula AQUÍ
+ * ("lastDoneAt" + intervalo), sin leer la columna generada: así también
+ * comprueba esa columna. La última cita atendida solo da la sede del paciente.
+ * `rule: 'DX-015'` conserva la regla anterior (la base es el MAX con la última
+ * cita atendida, de cualquier tipo): es la definición de «lo que se veía
+ * antes del despliegue» para el test del relleno.
  */
+
+export type RecallDueRule = 'DX-015' | 'DX-015-bis';
 
 interface ReferenceSqlRow {
   recallId: string;
@@ -21,6 +32,8 @@ interface ReferenceSqlRow {
   phoneRegion: string | null;
   reminderOptedOut: boolean;
   kind: RecallDueRow['kind'];
+  recallTypeId: string;
+  recallTypeName: string;
   intervalMonths: number;
   baseDate: Date;
   dueAt: Date;
@@ -37,7 +50,8 @@ const civilOf = (date: Date): string => date.toISOString().slice(0, 10);
 
 function referenceFacts(now: Date, extra: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`
-      SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."intervalMonths",
+      SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."recallTypeId",
+             rt."name" AS "recallTypeName", pr."intervalMonths",
              pr."lastDoneAt", pr."active", pr."disabledUntil",
              pr."disabledReason", pr."updatedAt", pr."updatedById",
              pa."firstName", pa."lastName", pa."phone",
@@ -59,6 +73,8 @@ function referenceFacts(now: Date, extra: Prisma.Sql): Prisma.Sql {
         FROM "patient_recalls" pr
         JOIN "patients" pa
           ON pa."tenantId" = pr."tenantId" AND pa."id" = pr."patientId"
+        JOIN "recall_types" rt
+          ON rt."tenantId" = pr."tenantId" AND rt."id" = pr."recallTypeId"
         LEFT JOIN LATERAL (
           SELECT a."start", a."locationId"
             FROM "appointments" a
@@ -75,11 +91,12 @@ function referenceFacts(now: Date, extra: Prisma.Sql): Prisma.Sql {
        WHERE TRUE ${extra}`;
 }
 
-/** Cuenta y página como las calculaba DX-015, dentro de `tx` (RLS del tenant). */
+/** Cuenta y página según `rule`, dentro de `tx` (RLS del tenant). */
 export async function referenceListDue(
   tx: Prisma.TransactionClient,
   query: RecallDueQuery,
   scopeIds: string[] | undefined,
+  rule: RecallDueRule = 'DX-015-bis',
 ): Promise<{ rows: RecallDueRow[]; total: number }> {
   const locationFilter = scopeIds
     ? Prisma.sql`AND d."homeLocationId" = ANY(${scopeIds}::uuid[])`
@@ -87,17 +104,23 @@ export async function referenceListDue(
   const kindFilter = query.kind
     ? Prisma.sql`AND pr."kind" = ${query.kind}::"RecallKind"`
     : Prisma.empty;
+  const typeFilter = query.recallTypeId
+    ? Prisma.sql`AND pr."recallTypeId" = ${query.recallTypeId}::uuid`
+    : Prisma.empty;
   const facts = referenceFacts(
     query.now,
-    Prisma.sql`AND pr."active" AND pa."deletedAt" IS NULL ${kindFilter}`,
+    Prisma.sql`AND pr."active" AND pa."deletedAt" IS NULL ${kindFilter} ${typeFilter}`,
   );
+  const base =
+    rule === 'DX-015'
+      ? Prisma.sql`greatest(f."lastDoneAt", f."lastCompletedVisit")`
+      : Prisma.sql`f."lastDoneAt"`;
   const due = Prisma.sql`
       WITH f AS (${facts}),
       d AS (
         SELECT f.*,
-               greatest(f."lastDoneAt", f."lastCompletedVisit") AS "baseDate",
-               (greatest(f."lastDoneAt", f."lastCompletedVisit")
-                 + make_interval(months => f."intervalMonths"))::date AS "dueAt"
+               ${base} AS "baseDate",
+               (${base} + make_interval(months => f."intervalMonths"))::date AS "dueAt"
           FROM f
       )`;
   const where = Prisma.sql`
@@ -124,6 +147,8 @@ export async function referenceListDue(
                  d."phoneRegion",
                  d."reminderOptedOut",
                  d."kind",
+                 d."recallTypeId",
+                 d."recallTypeName",
                  d."intervalMonths",
                  d."baseDate",
                  d."dueAt",
@@ -155,6 +180,8 @@ export async function referenceListDue(
       phoneRegion: r.phoneRegion,
       reminderOptedOut: r.reminderOptedOut,
       kind: r.kind,
+      recallTypeId: r.recallTypeId,
+      recallTypeName: r.recallTypeName,
       intervalMonths: r.intervalMonths,
       baseDate: civilOf(r.baseDate),
       dueAt: civilOf(r.dueAt),

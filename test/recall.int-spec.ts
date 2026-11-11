@@ -16,6 +16,10 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
+import {
+  type DefaultRecallTypes,
+  seedDefaultRecallTypes,
+} from './support/recall-types';
 
 // DX-551 (TST-065), capa BD del recall (DX-015): la red bajo la API. Se
 // escribe como `dentalix_app` (DATABASE_URL, RLS FORCE) para el aislamiento,
@@ -43,6 +47,8 @@ interface Clinic {
   norte: string;
   sur: string;
   authorId: string;
+  /** DX-015-bis: los tipos por defecto de la clínica. */
+  types: DefaultRecallTypes;
   /** Paciente → id. */
   patients: Record<string, string>;
   /** Paciente → su recall (el primero sembrado). */
@@ -63,8 +69,9 @@ interface PatientSeed {
 
 /**
  * Clínica A (ambas sedes en Caracas). Con NOW, MOST_OVERDUE de las vencidas:
- * Fabi (70 días, Sur), Bea (57, Sur por su última visita), Ana (36, Norte),
- * Inés (6, Sur; 31/05 + 5 meses = 31/10). Gala vence en 6 días (ventana).
+ * Bea (158 días, Sur por su última visita, que desde DX-015-bis ya no mueve
+ * la base), Fabi (70, Sur), Ana (36, Norte), Inés (6, Sur; 31/05 + 5 meses =
+ * 31/10). Gala vence en 6 días (ventana).
  * No salen: Carla (cita futura), Dora (pausada), Eva (retirada), Hugo
  * (archivado).
  */
@@ -147,6 +154,7 @@ async function seedClinic(
     ).id;
   const norte = await sede('Norte');
   const sur = await sede('Sur');
+  const types = await seedDefaultRecallTypes(raw, tenant.id);
   const author = await raw.user.create({
     data: {
       email: `recepcion@${subdomain}.test`,
@@ -162,6 +170,7 @@ async function seedClinic(
     norte,
     sur,
     authorId: author.id,
+    types,
     patients: {},
     recalls: {},
     appointments: {},
@@ -185,11 +194,13 @@ async function seedClinic(
     clinic.patients[s.firstName] = patient.id;
     if (!s.recall) continue;
     const { sede: where, ...recall } = s.recall;
+    const kind = recall.kind ?? RecallKind.CHECKUP;
     const row = await raw.patientRecall.create({
       data: {
         tenantId: tenant.id,
         patientId: patient.id,
-        kind: RecallKind.CHECKUP,
+        kind,
+        recallTypeId: types[kind],
         intervalMonths: 6,
         lastDoneAt: DAY('2026-01-01'),
         locationId: where === 'sur' ? sur : norte,
@@ -281,10 +292,12 @@ function recallRow(
   patient: string,
   data: Partial<Prisma.PatientRecallUncheckedCreateInput> = {},
 ): Prisma.PatientRecallUncheckedCreateInput {
+  const kind = data.kind ?? RecallKind.CHECKUP;
   return {
     tenantId: c.tenantId,
     patientId: c.patients[patient],
-    kind: RecallKind.CHECKUP,
+    kind,
+    recallTypeId: c.types[kind],
     intervalMonths: 6,
     lastDoneAt: DAY('2026-01-01'),
     locationId: c.norte,
@@ -315,7 +328,8 @@ describe('recall en la BD (int, DX-551)', () => {
       },
       { firstName: 'Bruno', lastName: 'OtraClinica' },
     ]);
-    // Bea: su última visita atendida fue en Sur y reinicia el reloj.
+    // Bea: su última visita atendida fue en Sur y da la sede del recall (desde
+    // DX-015-bis ya no mueve la base).
     await appointment(
       a,
       'beaVisita',
@@ -379,7 +393,12 @@ describe('recall en la BD (int, DX-551)', () => {
   });
 
   describe('RLS FORCE y aislamiento entre clínicas', () => {
-    it.each(['patient_recalls', 'recall_contacts'])(
+    it.each([
+      'patient_recalls',
+      'recall_contacts',
+      'recall_types',
+      'recall_type_triggers',
+    ])(
       '%s tiene la RLS activada y FORZADA con tenant_isolation (NULLIF)',
       async (table) => {
         const [row] = await raw.$queryRaw<
@@ -418,6 +437,36 @@ describe('recall en la BD (int, DX-551)', () => {
       expect(seen.anaContact).toEqual([]);
       await expect(appDb.patientRecall.count()).resolves.toBe(0);
       await expect(appDb.recallContact.count()).resolves.toBe(0);
+    });
+
+    it('DX-015-bis: B no ve los tipos de A ni sus disparadores; sin clínica, nada', async () => {
+      const seen = await asTenant(b.tenantId, async (tx) => ({
+        types: await tx.recallType.findMany({ select: { tenantId: true } }),
+        foreign: await tx.recallType.findMany({
+          where: { id: a.types.HYGIENE },
+        }),
+        triggers: await tx.recallTypeTrigger.findMany({
+          select: { tenantId: true },
+        }),
+      }));
+      expect(seen.types).toEqual(
+        Array.from({ length: 3 }, () => ({ tenantId: b.tenantId })),
+      );
+      expect(seen.foreign).toEqual([]);
+      expect(seen.triggers.every((t) => t.tenantId === b.tenantId)).toBe(true);
+      await expect(appDb.recallType.count()).resolves.toBe(0);
+      await expect(appDb.recallTypeTrigger.count()).resolves.toBe(0);
+      await expect(
+        asTenant(b.tenantId, (tx) =>
+          tx.recallType.create({
+            data: {
+              tenantId: a.tenantId,
+              name: 'Robado',
+              defaultIntervalMonths: 6,
+            },
+          }),
+        ),
+      ).rejects.toThrow(/row-level security/);
     });
 
     it('B no edita ni borra los de A (0 filas, sin llegar al trigger) ni inserta con el tenant de A', async () => {
@@ -514,6 +563,54 @@ describe('recall en la BD (int, DX-551)', () => {
       );
     });
 
+    it('DX-015-bis: el tipo del recall es de la misma clínica', async () => {
+      await expect(
+        asTenant(a.tenantId, (tx) =>
+          tx.patientRecall.create({
+            data: recallRow(a, 'Juan', { recallTypeId: b.types.HYGIENE }),
+          }),
+        ),
+      ).rejects.toThrow(/patient_recalls_type_fkey/);
+    });
+
+    it('DX-015-bis: el disparador une un tipo y un procedimiento de la MISMA clínica', async () => {
+      const item = (c: Clinic, code: string) =>
+        raw.dentalCatalogItem.create({
+          data: {
+            tenantId: c.tenantId,
+            code,
+            category: 'Preventiva',
+            kind: 'PROCEDURE',
+            labelEs: 'Profilaxis',
+            labelEn: 'Prophylaxis',
+            labelPt: 'Profilaxia',
+            color: '#0E7490',
+          },
+          select: { id: true },
+        });
+      const mine = await item(a, 'DX015BIS-INT-A');
+      const theirs = await item(b, 'DX015BIS-INT-B');
+      const link = (recallTypeId: string, catalogItemId: string) =>
+        rolledBack(appDb, async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+          return tx.recallTypeTrigger.create({
+            data: { tenantId: a.tenantId, recallTypeId, catalogItemId },
+          });
+        });
+      await expect(link(a.types.HYGIENE, theirs.id)).rejects.toThrow(
+        /recall_type_triggers_catalog_item_fkey/,
+      );
+      await expect(link(b.types.HYGIENE, mine.id)).rejects.toThrow(
+        /recall_type_triggers_type_fkey/,
+      );
+      await expect(link(a.types.HYGIENE, mine.id)).resolves.toMatchObject({
+        recallTypeId: a.types.HYGIENE,
+      });
+      await raw.dentalCatalogItem.deleteMany({
+        where: { id: { in: [mine.id, theirs.id] } },
+      });
+    });
+
     it('paciente y sede del recall son de la misma clínica', async () => {
       await expect(
         asTenant(a.tenantId, (tx) =>
@@ -587,6 +684,85 @@ describe('recall en la BD (int, DX-551)', () => {
       await expect(
         createRecall({ disabledUntil: until, disabledReason: null }),
       ).resolves.toMatchObject({ disabledReason: null });
+    });
+
+    it('DX-015-bis: un recall por paciente y TIPO; el vencimiento es generado (no se escribe)', async () => {
+      // Ana ya tiene el de Control.
+      await expect(createRecall({ patientId: a.patients.Ana })).rejects.toThrow(
+        /patient_recalls_tenant_patient_type_key|Unique constraint/,
+      );
+      // Otro tipo para la misma paciente, sí; dueAt lo calcula la BD.
+      await expect(
+        createRecall({
+          patientId: a.patients.Ana,
+          kind: RecallKind.HYGIENE,
+          lastDoneAt: DAY('2027-04-10'),
+        }),
+      ).resolves.toMatchObject({ dueAt: DAY('2027-10-10') });
+      await expect(
+        rolledBack(appDb, async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+          await tx.$executeRaw`
+            UPDATE "patient_recalls" SET "dueAt" = '2030-01-01'
+             WHERE "id" = ${a.recalls.Ana}::uuid`;
+        }),
+      ).rejects.toThrow(/dueAt|generated/i);
+    });
+
+    it('DX-015-bis: el tipo: nombre 1–60 único sin mayúsculas entre vivos, intervalo 1–36, grupo en clave', async () => {
+      const createType = (
+        data: Partial<Prisma.RecallTypeUncheckedCreateInput>,
+      ) =>
+        rolledBack(appDb, async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+          return tx.recallType.create({
+            data: {
+              tenantId: a.tenantId,
+              name: 'Ortodoncia',
+              defaultIntervalMonths: 1,
+              ...data,
+            },
+          });
+        });
+      await expect(createType({ name: '  ' })).rejects.toThrow(
+        /recall_types_name_check/,
+      );
+      await expect(createType({ name: 'n'.repeat(61) })).rejects.toThrow(
+        /recall_types_name_check/,
+      );
+      await expect(createType({ name: ' HIGIENE ' })).rejects.toThrow(
+        /recall_types_tenant_name_ci_key|Unique constraint/,
+      );
+      await expect(createType({ defaultIntervalMonths: 0 })).rejects.toThrow(
+        /recall_types_interval_check/,
+      );
+      await expect(createType({ defaultIntervalMonths: 37 })).rejects.toThrow(
+        /recall_types_interval_check/,
+      );
+      await expect(createType({ exclusionGroup: 'higiene' })).rejects.toThrow(
+        /recall_types_exclusion_group_check/,
+      );
+      await expect(
+        createType({ systemKey: RecallKind.HYGIENE }),
+      ).rejects.toThrow(/recall_types_tenant_system_key_key|Unique constraint/);
+      // Un retirado no ocupa el nombre.
+      await expect(
+        rolledBack(appDb, async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+          await tx.recallType.update({
+            where: { id: a.types.PERIO },
+            data: { deletedAt: NOW },
+          });
+          return tx.recallType.create({
+            data: {
+              tenantId: a.tenantId,
+              name: 'mantenimiento PERIODONTAL',
+              defaultIntervalMonths: 36,
+              exclusionGroup: 'HYGIENE_PERIO',
+            },
+          });
+        }),
+      ).resolves.toMatchObject({ defaultIntervalMonths: 36 });
     });
 
     it('la nota del contacto: no en blanco y ≤ 280', async () => {
@@ -751,7 +927,7 @@ describe('recall en la BD (int, DX-551)', () => {
       const out = await listDue(a);
       expect(names(out)).toEqual({
         total: 4,
-        names: ['Fabi', 'Bea', 'Ana', 'Inés'],
+        names: ['Bea', 'Fabi', 'Ana', 'Inés'],
       });
       const byName = new Map(out.rows.map((r) => [r.patientFirstName, r]));
       expect(byName.get('Ana')).toEqual({
@@ -763,6 +939,8 @@ describe('recall en la BD (int, DX-551)', () => {
         phoneRegion: 'VE',
         reminderOptedOut: false,
         kind: 'CHECKUP',
+        recallTypeId: a.types.CHECKUP,
+        recallTypeName: 'Control',
         intervalMonths: 6,
         baseDate: '2026-04-01',
         dueAt: '2026-10-01',
@@ -774,11 +952,13 @@ describe('recall en la BD (int, DX-551)', () => {
           createdAt: expect.any(Date) as Date,
         },
       });
-      // La visita atendida en Sur (posterior a lo fijado) da la base y la sede.
+      // DX-015-bis: la visita atendida en Sur (posterior a lo fijado) da la
+      // sede, pero ya NO la base: sin un procedimiento disparador, no mueve
+      // el reloj.
       expect(byName.get('Bea')).toMatchObject({
-        baseDate: '2026-03-10',
-        dueAt: '2026-09-10',
-        daysOverdue: 57,
+        baseDate: '2025-12-01',
+        dueAt: '2026-06-01',
+        daysOverdue: 158,
         locationId: a.sur,
         lastContact: null,
       });
@@ -791,6 +971,8 @@ describe('recall en la BD (int, DX-551)', () => {
       // 31/05 + 5 meses recorta a 31/10.
       expect(byName.get('Inés')).toMatchObject({
         kind: 'HYGIENE',
+        recallTypeId: a.types.HYGIENE,
+        recallTypeName: 'Higiene',
         dueAt: '2026-10-31',
         daysOverdue: 6,
       });
@@ -799,7 +981,7 @@ describe('recall en la BD (int, DX-551)', () => {
     it('orden inverso con LEAST_OVERDUE', async () => {
       expect(names(await listDue(a, { sort: 'LEAST_OVERDUE' }))).toEqual({
         total: 4,
-        names: ['Inés', 'Ana', 'Bea', 'Fabi'],
+        names: ['Inés', 'Ana', 'Fabi', 'Bea'],
       });
     });
 
@@ -808,7 +990,7 @@ describe('recall en la BD (int, DX-551)', () => {
       const out = await listDue(a, { withinDays: 6 });
       expect(names(out)).toEqual({
         total: 5,
-        names: ['Fabi', 'Bea', 'Ana', 'Inés', 'Gala'],
+        names: ['Bea', 'Fabi', 'Ana', 'Inés', 'Gala'],
       });
       expect(out.rows[4]).toMatchObject({
         dueAt: '2026-11-12',
@@ -816,14 +998,28 @@ describe('recall en la BD (int, DX-551)', () => {
       });
     });
 
-    it('filtra por tipo', async () => {
+    it('filtra por tipo: por su clave (compatibilidad) o por su id (DX-015-bis)', async () => {
       expect(
         names(await listDue(a, { kind: RecallKind.HYGIENE, withinDays: 10 })),
       ).toEqual({ total: 2, names: ['Inés', 'Gala'] });
       expect(names(await listDue(a, { kind: RecallKind.CHECKUP }))).toEqual({
         total: 3,
-        names: ['Fabi', 'Bea', 'Ana'],
+        names: ['Bea', 'Fabi', 'Ana'],
       });
+      expect(
+        names(
+          await listDue(a, { recallTypeId: a.types.HYGIENE, withinDays: 10 }),
+        ),
+      ).toEqual({ total: 2, names: ['Inés', 'Gala'] });
+      expect(
+        names(
+          await listDue(a, { recallTypeId: a.types.PERIO, withinDays: 60 }),
+        ),
+      ).toEqual({ total: 0, names: [] });
+      // El id de un tipo de otra clínica no trae nada.
+      expect(
+        names(await listDue(a, { recallTypeId: b.types.CHECKUP })),
+      ).toEqual({ total: 0, names: [] });
     });
 
     it('filtra por la sede de la última cita atendida (no la del recall): cabecera y sedes permitidas', async () => {
@@ -833,11 +1029,11 @@ describe('recall en la BD (int, DX-551)', () => {
       });
       expect(names(await listDue(a, {}, { locationId: a.sur }))).toEqual({
         total: 3,
-        names: ['Fabi', 'Bea', 'Inés'],
+        names: ['Bea', 'Fabi', 'Inés'],
       });
       expect(names(await listDue(a, {}, { allowed: [a.sur] }))).toEqual({
         total: 3,
-        names: ['Fabi', 'Bea', 'Inés'],
+        names: ['Bea', 'Fabi', 'Inés'],
       });
       expect(
         names(await listDue(a, {}, { allowed: [a.norte, a.sur] })).total,
@@ -858,7 +1054,7 @@ describe('recall en la BD (int, DX-551)', () => {
         names(await listDue(a, { page: n, pageSize: 2 }));
       await expect(page(1)).resolves.toEqual({
         total: 4,
-        names: ['Fabi', 'Bea'],
+        names: ['Bea', 'Fabi'],
       });
       await expect(page(2)).resolves.toEqual({
         total: 4,
@@ -891,7 +1087,7 @@ describe('recall en la BD (int, DX-551)', () => {
       ).resolves.toBe(false);
     });
 
-    it('patientRecalls: sede y día de la última visita, cita futura y contactos con su autor', async () => {
+    it('patientRecalls: tipo, vencimiento guardado, sede de la última visita, cita futura y contactos con su autor', async () => {
       const bea = await inA(() =>
         repository.patientRecalls(a.patients.Bea, NOW),
       );
@@ -899,9 +1095,14 @@ describe('recall en la BD (int, DX-551)', () => {
         expect.objectContaining({
           id: a.recalls.Bea,
           kind: 'CHECKUP',
+          recallTypeId: a.types.CHECKUP,
+          recallTypeName: 'Control',
           lastDoneAt: '2025-12-01',
+          dueAt: '2026-06-01',
+          manualDoneAt: null,
+          lastDoneItemId: null,
+          source: 'MANUAL',
           locationId: a.sur,
-          lastCompletedVisit: '2026-03-10',
           hasUpcomingAppointment: false,
           today: '2026-11-06',
           disabledUntil: null,
@@ -917,7 +1118,6 @@ describe('recall en la BD (int, DX-551)', () => {
       expect(carla.rows[0]).toMatchObject({
         hasUpcomingAppointment: true,
         locationId: a.sur,
-        lastCompletedVisit: null,
       });
 
       const dora = await inA(() =>
@@ -936,6 +1136,8 @@ describe('recall en la BD (int, DX-551)', () => {
           id: anaContact,
           recallId: a.recalls.Ana,
           kind: 'CHECKUP',
+          recallTypeId: a.types.CHECKUP,
+          recallTypeName: 'Control',
           locationId: a.norte,
           author: { id: a.authorId, fullName: 'Recepción Uno' },
         }),
@@ -950,13 +1152,14 @@ describe('recall en la BD (int, DX-551)', () => {
     });
 
     it('upsertRecall: crea en la sede de trabajo y luego cambia el mismo recall sin moverlo de sede', async () => {
+      const checkup = { id: a.types.CHECKUP, systemKey: RecallKind.CHECKUP };
       const created = await inA(
         () =>
           repository.upsertRecall({
             patientId: a.patients.Juan,
-            kind: RecallKind.CHECKUP,
+            recallType: checkup,
             intervalMonths: 6,
-            lastDoneAt: '2026-11-06',
+            manualDoneAt: '2026-11-06',
             active: true,
             disabledUntil: null,
             disabledReason: 'se descarta sin fecha',
@@ -968,9 +1171,9 @@ describe('recall en la BD (int, DX-551)', () => {
         () =>
           repository.upsertRecall({
             patientId: a.patients.Juan,
-            kind: RecallKind.CHECKUP,
+            recallType: checkup,
             intervalMonths: 12,
-            lastDoneAt: '2026-02-28',
+            manualDoneAt: '2026-02-28',
             active: true,
             disabledUntil: '2026-12-01',
             disabledReason: 'Viaje',
@@ -987,7 +1190,13 @@ describe('recall en la BD (int, DX-551)', () => {
           id: created.id,
           tenantId: a.tenantId,
           intervalMonths: 12,
+          kind: RecallKind.CHECKUP,
+          recallTypeId: a.types.CHECKUP,
+          // Lo fijado (sin DONE de disparadores) es la base; vence a los 12.
+          manualDoneAt: DAY('2026-02-28'),
           lastDoneAt: DAY('2026-02-28'),
+          dueAt: DAY('2027-02-28'),
+          source: 'MANUAL',
           locationId: a.sur,
           disabledUntil: DAY('2026-12-01'),
           disabledReason: 'Viaje',
@@ -1065,6 +1274,8 @@ describe('recall en la BD (int, DX-551)', () => {
         id: expect.any(String) as string,
         recallId: a.recalls.Carla,
         kind: 'CHECKUP',
+        recallTypeId: a.types.CHECKUP,
+        recallTypeName: 'Control',
         patientId: a.patients.Carla,
         locationId: a.sur,
         channel: 'WHATSAPP_LINK',

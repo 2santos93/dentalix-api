@@ -24,6 +24,10 @@ import {
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
 import { referenceListDue } from './support/recall-due-reference';
+import {
+  type DefaultRecallTypes,
+  seedDefaultRecallTypes,
+} from './support/recall-types';
 
 // DX-547 (DB-079), capa BD: la lista de recall con el repositorio Prisma REAL
 // como `dentalix_app` (DATABASE_URL, RLS FORCE). `raw` (owner, DIRECT_URL)
@@ -34,6 +38,10 @@ import { referenceListDue } from './support/recall-due-reference';
 // en zonas extremas (UTC+14 y UTC−11, el «hoy» cambia de día entre sedes),
 // pacientes sin cita atendida (base = lastDoneAt), pausados, inactivos,
 // archivados y dos clínicas.
+//
+// DX-015-bis: el oráculo es la regla nueva (la base es "lastDoneAt"; la cita
+// atendida solo da la sede) y calcula el vencimiento sin leer la columna
+// generada; la consulta de la app recorre `patient_recalls_tenant_due_idx`.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -70,6 +78,7 @@ interface Clinic {
   tenantId: string;
   sedes: string[];
   authorId: string;
+  types: DefaultRecallTypes;
   recallIds: Set<string>;
 }
 
@@ -103,6 +112,7 @@ async function seedClinic(
     });
     sedes.push(loc.id);
   }
+  const types = await seedDefaultRecallTypes(raw, tenant.id);
   const author = await raw.user.create({
     data: {
       email: `recepcion@${subdomain}.test`,
@@ -146,6 +156,7 @@ async function seedClinic(
         tenantId: tenant.id,
         patientId,
         kind,
+        recallTypeId: types[kind],
         intervalMonths: pick(INTERVALS),
         lastDoneAt: DAY(civil(lastDoneAt)),
         locationId: pick(sedes),
@@ -270,6 +281,7 @@ async function seedClinic(
     tenantId: tenant.id,
     sedes,
     authorId: author.id,
+    types,
     recallIds: new Set(recallRows.map((r) => r.id as string)),
   };
 }
@@ -303,6 +315,7 @@ const both = (c: Clinic, scope: Scope, query: RecallDueQuery) =>
 
 interface PlanNode {
   'Index Name'?: string;
+  'Index Cond'?: string;
   'Actual Loops'?: number;
   'Actual Rows'?: number;
   Filter?: string;
@@ -353,20 +366,21 @@ const FIXED: FixedCase[] = [
     intervalMonths: 6,
     disabledUntil: '2026-11-07',
   },
-  // c) una visita atendida posterior a lastDoneAt + intervalo.
+  // c) DX-015-bis: una visita atendida posterior a lastDoneAt + intervalo ya
+  // NO mueve el vencimiento (2026-01-10 en los dos); solo da la sede (P).
   {
     name: 'C1',
     sede: 'K',
     lastDoneAt: '2025-01-10',
     intervalMonths: 12,
-    completed: { start: '2026-03-15T20:00:00.000Z', sede: 'P' }, // vence 2027-03-15: fuera
+    completed: { start: '2026-03-15T20:00:00.000Z', sede: 'P' },
   },
   {
     name: 'C2',
     sede: 'K',
     lastDoneAt: '2025-01-10',
     intervalMonths: 12,
-    completed: { start: '2025-11-10T20:00:00.000Z', sede: 'P' }, // vence 2026-11-10 en Pago Pago
+    completed: { start: '2025-11-10T20:00:00.000Z', sede: 'P' },
   },
   // d) lastDoneAt de fin de mes + 1 mes (recorte a fin de mes).
   { name: 'D1', sede: 'K', lastDoneAt: '2026-08-31', intervalMonths: 1 }, // 2026-09-30
@@ -391,6 +405,7 @@ async function seedFixed(
     ).id;
   const k = await sede('Sede Kiritimati', 'Pacific/Kiritimati');
   const p = await sede('Sede Pago Pago', 'Pacific/Pago_Pago');
+  const types = await seedDefaultRecallTypes(raw, tenant.id);
   const author = await raw.user.create({
     data: {
       email: `recepcion@${subdomain}.test`,
@@ -408,6 +423,7 @@ async function seedFixed(
         tenantId: tenant.id,
         patientId: patient.id,
         kind: RecallKind.CHECKUP,
+        recallTypeId: types.CHECKUP,
         intervalMonths: c.intervalMonths,
         lastDoneAt: DAY(c.lastDoneAt),
         locationId: c.sede === 'K' ? k : p,
@@ -437,6 +453,7 @@ async function seedFixed(
     tenantId: tenant.id,
     sedes: [k, p],
     authorId: author.id,
+    types,
     recallIds: ids,
     k,
     p,
@@ -511,7 +528,7 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
       now,
     ]),
   )(
-    'mismo total y mismas filas que la consulta de DX-015 (now = %s)',
+    'mismo total y mismas filas que el oráculo (now = %s)',
     async (_label, now) => {
       let compared = 0;
       for (const [clinic, other] of [
@@ -519,10 +536,12 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
         [b, a],
       ] as const) {
         for (const scope of scopesOf(clinic, other)) {
-          for (const kind of [
-            undefined,
-            RecallKind.HYGIENE,
-            RecallKind.CHECKUP,
+          for (const filter of [
+            {},
+            { kind: RecallKind.HYGIENE },
+            { kind: RecallKind.CHECKUP },
+            { recallTypeId: clinic.types.HYGIENE },
+            { recallTypeId: other.types.CHECKUP },
           ]) {
             for (const sort of [
               'MOST_OVERDUE',
@@ -532,7 +551,7 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
                 // Páginas de 100 hasta pasar del final (la vacía también).
                 for (let page = 1; ; page += 1) {
                   const query = {
-                    kind,
+                    ...filter,
                     withinDays,
                     sort,
                     page,
@@ -558,7 +577,7 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
     120_000,
   );
 
-  it('página a página (de 7) coincide con la de DX-015, y la página fuera de rango trae el total', async () => {
+  it('página a página (de 7) coincide con el oráculo, y la página fuera de rango trae el total', async () => {
     for (const sort of ['MOST_OVERDUE', 'LEAST_OVERDUE'] as RecallDueSort[]) {
       const first = await both(
         a,
@@ -708,8 +727,10 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
       ]);
     };
 
-    it('withinDays = 0: vence justo hoy en Kiritimati (A1); en Pago Pago aún no (A2); B1 sigue pausado', async () => {
+    it('withinDays = 0: vence justo hoy en Kiritimati (A1); en Pago Pago aún no (A2); B1 sigue pausado; C1 y C2, por lo fijado', async () => {
       expect(await run(0)).toEqual<Expected[]>([
+        ['C1', 'P', '2025-01-10', '2026-01-10', 300],
+        ['C2', 'P', '2025-01-10', '2026-01-10', 300],
         ['B2', 'K', '2026-01-01', '2026-07-01', 129],
         ['D1', 'K', '2026-08-31', '2026-09-30', 38],
         ['A1', 'K', '2026-05-07', '2026-11-07', 0],
@@ -718,23 +739,25 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
 
     it('withinDays = 15: entra lo que vence en maxToday + 15 (A3) y hoy de Pago Pago + 15 (A5); A4 y A6 no', async () => {
       expect(await run(15)).toEqual<Expected[]>([
+        ['C1', 'P', '2025-01-10', '2026-01-10', 300],
+        ['C2', 'P', '2025-01-10', '2026-01-10', 300],
         ['B2', 'K', '2026-01-01', '2026-07-01', 129],
         ['D1', 'K', '2026-08-31', '2026-09-30', 38],
         ['A1', 'K', '2026-05-07', '2026-11-07', 0],
         ['A2', 'P', '2026-05-07', '2026-11-07', -1],
-        ['C2', 'P', '2025-11-10', '2026-11-10', -4],
         ['A3', 'K', '2026-05-22', '2026-11-22', -15],
         ['A5', 'P', '2026-05-21', '2026-11-21', -15],
       ]);
     });
 
-    it('withinDays = 60: fin de mes + 1 mes recorta a 30/11 (D2); la visita posterior saca a C1 de la ventana', async () => {
+    it('withinDays = 60: fin de mes + 1 mes recorta a 30/11 (D2)', async () => {
       expect(await run(60)).toEqual<Expected[]>([
+        ['C1', 'P', '2025-01-10', '2026-01-10', 300],
+        ['C2', 'P', '2025-01-10', '2026-01-10', 300],
         ['B2', 'K', '2026-01-01', '2026-07-01', 129],
         ['D1', 'K', '2026-08-31', '2026-09-30', 38],
         ['A1', 'K', '2026-05-07', '2026-11-07', 0],
         ['A2', 'P', '2026-05-07', '2026-11-07', -1],
-        ['C2', 'P', '2025-11-10', '2026-11-10', -4],
         ['A3', 'K', '2026-05-22', '2026-11-22', -15],
         ['A5', 'P', '2026-05-21', '2026-11-21', -15],
         ['A4', 'K', '2026-05-23', '2026-11-23', -16],
@@ -743,18 +766,19 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
       ]);
     });
 
-    it('sede de Pago Pago: la visita atendida allí trae a C2 aunque el recall se fijó en Kiritimati', async () => {
+    it('sede de Pago Pago: la visita atendida allí trae a C1 y C2 aunque el recall se fijó en Kiritimati', async () => {
       expect(await run(15, { label: 'Pago Pago', locationId: f.p })).toEqual<
         Expected[]
       >([
+        ['C1', 'P', '2025-01-10', '2026-01-10', 300],
+        ['C2', 'P', '2025-01-10', '2026-01-10', 300],
         ['A2', 'P', '2026-05-07', '2026-11-07', -1],
-        ['C2', 'P', '2025-11-10', '2026-11-10', -4],
         ['A5', 'P', '2026-05-21', '2026-11-21', -15],
       ]);
     });
   });
 
-  it('la cota descarta antes de la LATERAL: del recorrido de patient_recalls salen menos recall que los activos', async () => {
+  it('DX-015-bis: la cota es un rango del índice por vencimiento: del recorrido de patient_recalls salen menos recall que los activos', async () => {
     const [{ n: active }] = await prisma.runWithTenant(
       a.tenantId,
       (tx) =>
@@ -762,6 +786,10 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
         SELECT count(*)::int AS n FROM "patient_recalls" WHERE "active"`,
     );
     const plan = await prisma.runWithTenant(a.tenantId, async (tx) => {
+      // Con los pocos datos del test Postgres puede preferir recorrer la
+      // tabla; con volumen elige el índice (test/recall-due-load.int-spec.ts).
+      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      await tx.$executeRaw`SET LOCAL enable_bitmapscan = off`;
       const rows = await tx.$queryRaw<{ 'QUERY PLAN': { Plan: PlanNode }[] }[]>(
         Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${recallDueSql({
           tenantId: a.tenantId,
@@ -774,13 +802,17 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
       );
       return nodes(rows[0]['QUERY PLAN'][0].Plan);
     });
-    // Un solo recorrido, con la cota en su filtro: lo que sale de él (lo único
-    // que puede llegar a la LATERAL de la última visita) ya viene recortado.
+    // Un solo recorrido, con la cota por "dueAt" dentro (como condición del
+    // índice por vencimiento o como filtro, según elija el planificador con
+    // tan pocos datos; con volumen es el rango del índice, lo fija
+    // test/recall-due-load.int-spec.ts): lo que sale de él (lo único que puede
+    // llegar a la LATERAL de la sede) ya viene recortado.
     const scans = plan.filter((n) => n['Relation Name'] === 'patient_recalls');
     expect(scans).toHaveLength(1);
     const [scan] = scans;
-    expect(scan.Filter ?? '').toContain('"disabledUntil" <=');
-    expect(scan.Filter ?? '').toContain('"lastDoneAt" + make_interval');
+    expect(`${scan['Index Cond'] ?? ''} ${scan.Filter ?? ''}`).toContain(
+      '"dueAt" <=',
+    );
     // Holgura: la cota sola (sin contar la cita futura) quita más de un 20 %.
     expect(
       (scan['Actual Rows'] ?? 0) * (scan['Actual Loops'] ?? 1),

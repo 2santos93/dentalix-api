@@ -26,6 +26,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { seedDefaultRecallTypes } from './support/recall-types';
 
 // DX-089: el personal restringido a sedes solo ve y escribe en las suyas, y un
 // profesional restringido solo atiende en sus sedes (DX-121d).
@@ -631,6 +632,7 @@ describe('Personal restringido a sedes (DX-089)', () => {
           tenantId: a.tenantId,
           patientId,
           kind: 'CHECKUP',
+          recallTypeId: (await seedDefaultRecallTypes(raw, a.tenantId)).CHECKUP,
           intervalMonths: 6,
           lastDoneAt: new Date('2020-01-15T00:00:00.000Z'),
           locationId,
