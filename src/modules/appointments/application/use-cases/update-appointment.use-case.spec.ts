@@ -1529,6 +1529,23 @@ describe('UpdateAppointmentUseCase', () => {
       expect(drafts.map((d) => d.metadata.reason)).toEqual([
         'APPOINTMENT_MOVED',
       ]);
+      // DX-436-bis: el movimiento lleva su origen para «Huecos recuperados».
+      expect(drafts[0].metadata.move?.via).toBe('OPENING');
+    });
+
+    it('DX-436-bis: un reagendado normal no lleva `via` (no cuenta «por la lista»)', async () => {
+      const { repo, drafts, uc } = setup();
+      const a = repo.seed({ start: far('10:00'), end: far('10:30') });
+      await uc.execute(
+        a.id,
+        { start: at('15:00'), end: at('15:30') },
+        ctx('RECEPTION'),
+      );
+      expect(drafts.map((d) => d.metadata.reason)).toEqual([
+        'APPOINTMENT_MOVED',
+      ]);
+      expect(drafts[0].metadata.move).toBeDefined();
+      expect(drafts[0].metadata.move?.via).toBeUndefined();
     });
 
     it('mover al hueco una cita sin la marca (o cancelada) da 409 en español', async () => {

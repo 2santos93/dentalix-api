@@ -462,6 +462,96 @@ describe('Huecos recuperados en la BD (DX-436, int)', () => {
     });
   });
 
+  it('DX-436-bis: «Asignar» desde «Ocupar este hueco» (move.via OPENING) cuenta «por la lista»; un reagendado normal, no', async () => {
+    const tenant = await raw.tenant.create({
+      data: { name: 'dx436-bis', subdomain: 'dx436-bis' },
+    });
+    const seed = new ReportSeeder(raw, tenant.id);
+    const main = await seed.location('Sede principal');
+    const ana = (await seed.dentist()).userId;
+    const agenda = new Agenda(seed, tenant.id);
+    const at = { locationId: main, providerId: ana };
+    const moved = async (
+      appointmentId: string,
+      fromStart: Date,
+      toStart: Date,
+      occurredAt: Date,
+      via?: 'OPENING',
+    ) =>
+      raw.auditEvent.create({
+        data: {
+          tenantId: tenant.id,
+          locationId: main,
+          actorUserId: ana,
+          actorRole: 'RECEPTION',
+          action: 'UPDATE',
+          resourceType: 'APPOINTMENT',
+          resourceId: appointmentId,
+          occurredAt,
+          metadata: {
+            reason: 'APPOINTMENT_MOVED',
+            move: {
+              from: slotIso(fromStart, 30, ana),
+              to: slotIso(toStart, 30, ana),
+              ...(via ? { via } : {}),
+            },
+          },
+        },
+      });
+
+    // H1: hueco del 03/12 9:00 liberado el 02/12 8:00; W1 («quiere antes»,
+    // creada el 01/12 para el 10/12) entra por «Asignar» el 02/12 9:00.
+    const h1 = local('2026-12-03', '09:00');
+    await agenda.appointment({
+      ...at,
+      start: h1,
+      createdAt: local('2026-12-01', '08:00'),
+      cancelledAt: local('2026-12-02', '08:00'),
+    });
+    const w1 = await agenda.appointment({
+      ...at,
+      start: h1,
+      createdAt: local('2026-12-01', '09:00'),
+    });
+    await moved(
+      w1.id,
+      local('2026-12-10', '09:00'),
+      h1,
+      local('2026-12-02', '09:00'),
+      'OPENING',
+    );
+
+    // H2: igual, pero la cita entra por un reagendado normal (sin `via`).
+    const h2 = local('2026-12-04', '09:00');
+    await agenda.appointment({
+      ...at,
+      start: h2,
+      createdAt: local('2026-12-01', '08:00'),
+      cancelledAt: local('2026-12-02', '08:00'),
+    });
+    const w2 = await agenda.appointment({
+      ...at,
+      start: h2,
+      createdAt: local('2026-12-01', '09:00'),
+    });
+    await moved(
+      w2.id,
+      local('2026-12-11', '09:00'),
+      h2,
+      local('2026-12-02', '10:00'),
+    );
+
+    const r = await report(tenant.id, {
+      from: '2026-12-01',
+      to: '2026-12-31',
+    });
+    expect(r.totals).toMatchObject({
+      freedSlots: 2,
+      filledSlots: 2,
+      filledByListSlots: 1, // solo H1
+    });
+  });
+
   it('por profesional y por semana (días civiles de la sede)', async () => {
     const r = await report(a.tenantId);
     expect(
