@@ -96,17 +96,22 @@ export interface RecallDueSqlParams extends RecallDueQuery {
  *
  * DX-015-bis: el vencimiento es el GUARDADO (`dueAt`, columna generada:
  * "lastDoneAt" + intervalo), que ya no depende de la última visita. En orden:
- * 1. `c`: los recall ACTIVOS de pacientes vivos de la clínica que pueden
- *    salir, antes de las LATERAL: un RANGO sobre
- *    `patient_recalls_tenant_due_idx` ("dueAt" <= el «hoy» más adelantado de
- *    las sedes de la clínica + la ventana; `maxToday` es un InitPlan, así que
- *    la cota va en el propio recorrido del índice). «Hoy» en la sede del
- *    paciente nunca pasa de `maxToday`, así que la cota solo descarta lo que
- *    tampoco saldría después. Sin cita futura ni en la clínica
- *    (`appointments_tenant_patient_upcoming_idx`; no depende de la sede).
+ * 0. `locs`: las sedes de la clínica con su «hoy» (2–20 filas, una vez).
+ * 1. `c`: los recall ACTIVOS de la clínica que pueden salir, antes de las
+ *    LATERAL: un RANGO SOLO de índice sobre `patient_recalls_tenant_due_idx`
+ *    ("dueAt" <= el «hoy» más adelantado de las sedes de la clínica + la
+ *    ventana; `maxToday` es un InitPlan, así que la cota va en el propio
+ *    recorrido del índice). «Hoy» en la sede del paciente nunca pasa de
+ *    `maxToday`, así que la cota solo descarta lo que tampoco saldría después.
+ *    Sin cita futura ni en la clínica (`appointments_tenant_patient_upcoming_idx`;
+ *    no depende de la sede). Sin columnas del paciente: la fila es estrecha.
  * 2. `d`: la última cita atendida (appointments_tenant_patient_completed_idx)
- *    da SOLO la sede del paciente y su «hoy»; ahí se aplican el filtro exacto
- *    por ese «hoy» y el de sede, que depende de esa cita.
+ *    da SOLO la sede del paciente y su «hoy» (de `locs`, sin ir a la tabla por
+ *    fila); ahí se aplican el filtro exacto por ese «hoy» y el de sede, y solo
+ *    a lo que queda se le busca el paciente (vivo, nombre y teléfono). Medido
+ *    con 60.000 pacientes (withinDays = 60, una sede): unir el paciente
+ *    después del filtro de sede y `locs` en vez de `locations` por fila bajan
+ *    la mediana ~1/3 (REPORT-1A-R4 de DX-015-bis).
  * 3. El nombre del tipo y el último contacto, solo de la página.
  */
 export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
@@ -116,33 +121,29 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
   const typeFilter = p.recallTypeId
     ? Prisma.sql`AND pr."recallTypeId" = ${p.recallTypeId}::uuid`
     : Prisma.empty;
-  const locationFilter = p.locationIds
-    ? Prisma.sql`AND k."homeLocationId" = ANY(${p.locationIds}::uuid[])`
-    : Prisma.empty;
   const order = (alias: Prisma.Sql) =>
     p.sort === 'MOST_OVERDUE'
       ? Prisma.sql`${alias}."dueIn" ASC, ${alias}."lastName" ASC, ${alias}."firstName" ASC, ${alias}."id" ASC`
       : Prisma.sql`${alias}."dueIn" DESC, ${alias}."lastName" ASC, ${alias}."firstName" ASC, ${alias}."id" ASC`;
   const offset = (p.page - 1) * p.pageSize;
   return Prisma.sql`
-    WITH bound AS (
-      SELECT max(((${p.now}::timestamptz) AT TIME ZONE coalesce(l."timeZone", 'UTC'))::date) AS "maxToday"
+    WITH locs AS MATERIALIZED (
+      SELECT l."id", l."defaultPhoneRegion",
+             ((${p.now}::timestamptz) AT TIME ZONE coalesce(l."timeZone", 'UTC'))::date AS "today"
         FROM "locations" l
        WHERE l."tenantId" = ${p.tenantId}::uuid
+    ),
+    bound AS (
+      SELECT max(locs."today") AS "maxToday" FROM locs
     ),
     c AS MATERIALIZED (
       SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."recallTypeId",
              pr."intervalMonths", pr."lastDoneAt", pr."dueAt", pr."disabledUntil",
-             pr."locationId",
-             pa."firstName", pa."lastName", pa."phone",
-             (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut"
+             pr."locationId"
         FROM "patient_recalls" pr
-        JOIN "patients" pa
-          ON pa."tenantId" = pr."tenantId" AND pa."id" = pr."patientId"
        WHERE pr."tenantId" = ${p.tenantId}::uuid
          AND pr."active"
          AND pr."dueAt" <= (SELECT "maxToday" FROM bound) + ${p.withinDays}::int
-         AND pa."deletedAt" IS NULL
          ${kindFilter}
          ${typeFilter}
          AND (pr."disabledUntil" IS NULL OR pr."disabledUntil" <= (SELECT "maxToday" FROM bound))
@@ -162,10 +163,11 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
     ),
     d AS MATERIALIZED (
       SELECT c."id", c."tenantId", c."patientId", c."kind", c."recallTypeId",
-             c."intervalMonths", c."firstName", c."lastName", c."phone",
-             c."reminderOptedOut",
-             k."homeLocationId", k."phoneRegion", k."today",
-             c."lastDoneAt" AS "baseDate", c."dueAt", c."dueAt" - k."today" AS "dueIn"
+             c."intervalMonths", pa."firstName", pa."lastName", pa."phone",
+             (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut",
+             lo."id" AS "homeLocationId", lo."defaultPhoneRegion" AS "phoneRegion",
+             lo."today",
+             c."lastDoneAt" AS "baseDate", c."dueAt", c."dueAt" - lo."today" AS "dueIn"
         FROM c
         LEFT JOIN LATERAL (
           SELECT a."locationId"
@@ -177,17 +179,13 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
            ORDER BY a."start" DESC, a."id" DESC
            LIMIT 1
         ) lc ON true
-        JOIN "locations" lo
-          ON lo."tenantId" = c."tenantId"
-         AND lo."id" = coalesce(lc."locationId", c."locationId")
-       CROSS JOIN LATERAL (
-         SELECT lo."id" AS "homeLocationId",
-                lo."defaultPhoneRegion" AS "phoneRegion",
-                ((${p.now}::timestamptz) AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "today"
-       ) k
-       WHERE c."dueAt" <= k."today" + ${p.withinDays}::int
-         AND (c."disabledUntil" IS NULL OR c."disabledUntil" <= k."today")
-         ${locationFilter}
+        JOIN locs lo ON lo."id" = coalesce(lc."locationId", c."locationId")
+        JOIN "patients" pa
+          ON pa."tenantId" = c."tenantId" AND pa."id" = c."patientId"
+       WHERE c."dueAt" <= lo."today" + ${p.withinDays}::int
+         AND (c."disabledUntil" IS NULL OR c."disabledUntil" <= lo."today")
+         AND pa."deletedAt" IS NULL
+         ${p.locationIds ? Prisma.sql`AND lo."id" = ANY(${p.locationIds}::uuid[])` : Prisma.empty}
     ),
     page AS (
       SELECT d.* FROM d
