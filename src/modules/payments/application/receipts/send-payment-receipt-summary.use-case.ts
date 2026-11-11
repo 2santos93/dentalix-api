@@ -70,6 +70,8 @@ export class SendPaymentReceiptSummaryUseCase {
       responsibles: notice.responsibles,
       majorityAge: notice.settings.majorityAge,
       today: civilDateIn(this.now(), notice.settings.timeZone),
+      timeZone: notice.settings.timeZone,
+      majorityReview: notice.majorityReview,
     });
     if (!recipient.email) {
       throw new UnprocessableEntityException(PATIENT_WITHOUT_EMAIL_MESSAGE);

@@ -1872,6 +1872,29 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         `/patients/${a.patientId}/responsible-parties/${a.responsiblePartyId}`,
       status: 404,
     },
+    // --- paso a la mayoría de edad (DX-342) ---
+    {
+      name: 'GET /patients/coming-of-age ?locationId de A',
+      verb: 'get',
+      path: () =>
+        `/patients/coming-of-age?from=2026-11-01&to=2026-11-30&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 404,
+      message: 'Sede no encontrada',
+    },
+    {
+      name: 'GET /patients/:id/majority-review',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/majority-review`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:id/majority-review',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/majority-review`,
+      body: () => ({ decision: 'KEEP_RESPONSIBLE' }),
+      status: 404,
+    },
     // --- coberturas del paciente (DX-153) ---
     {
       name: 'GET /patients/:patientId/coverages',

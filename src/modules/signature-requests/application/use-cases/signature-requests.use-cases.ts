@@ -204,6 +204,8 @@ function decideRecipient(
     })),
     majorityAge: ctx.majorityAge,
     today: civilDateIn(now, ctx.timeZone),
+    timeZone: ctx.timeZone,
+    majorityReview: ctx.majorityReview,
   });
 }
 

@@ -10,6 +10,7 @@ import type {
   NoticePatientFields,
   NoticeResponsible,
 } from '../../../patients/domain/communication/notice-recipient';
+import type { MajorityReviewRecord } from '../../../patients/domain/responsible-parties/majority-review';
 
 export const PAYMENT_RECEIPT_REPOSITORY = Symbol('PAYMENT_RECEIPT_REPOSITORY');
 
@@ -43,6 +44,8 @@ export interface LegacyReceiptSource {
 export interface ReceiptNoticeData {
   patient: NoticePatientFields;
   responsibles: NoticeResponsible[];
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
   settings: NoticeSettings;
 }
 

@@ -4,6 +4,7 @@ import type {
   NoticePatientFields,
   NoticeResponsible,
 } from '../communication/notice-recipient';
+import type { MajorityReviewRecord } from '../responsible-parties/majority-review';
 
 export const RESPONSIBLE_PARTY_REPOSITORY = Symbol(
   'RESPONSIBLE_PARTY_REPOSITORY',
@@ -60,6 +61,8 @@ export interface PatientResponsiblesSnapshot {
   parties: ResponsiblePartyView[];
   /** Para la regla de destinatario (mismo orden que `parties`). */
   noticeResponsibles: NoticeResponsible[];
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
   responsibleFor: ResponsibleForView[];
   noticeSettings: NoticeSettings;
 }

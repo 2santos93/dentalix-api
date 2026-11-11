@@ -205,6 +205,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/responsible-parties': EVERY_ROLE,
   'PATCH /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
   'DELETE /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
+  // DX-342: paso a la mayoría de edad. Lista y revisión, mostrador (ADMIN +
+  // RECEPTION); el estado del aviso de la ficha, los 4 roles.
+  'GET /patients/coming-of-age': roles('ADMIN', 'RECEPTION'),
+  'GET /patients/:id/majority-review': EVERY_ROLE,
+  'POST /patients/:id/majority-review': roles('ADMIN', 'RECEPTION'),
   // Retención de la HC (loop/informes/DX-039.md): archivar, cambiar la
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.

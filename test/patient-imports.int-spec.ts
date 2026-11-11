@@ -495,6 +495,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'patient_dentition_events.patientId',
       'patient_documents.patientId',
       'patient_implants.patientId',
+      // DX-342: la revisión del paso a la mayoría de edad es una decisión
+      // auditada sobre a quién van los avisos: bloquea el deshacer.
+      'patient_majority_reviews.patientId',
       // DX-015: un recall fijado o un contacto de recall es actividad durable.
       'patient_recalls.patientId',
       'patient_responsible_parties.patientId',

@@ -12,6 +12,7 @@ import { requireLocationTimeZone } from '../../../shared/locations/location-time
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
   loadNoticeResponsibles,
+  loadMajorityReview,
   loadTenantMajorityAge,
 } from '../../patients/infrastructure/notices/notice-context';
 import {
@@ -266,28 +267,30 @@ export class PrismaReminderRepository implements ReminderRepository {
         },
       });
       if (!appointment) return null;
-      const [settings, responsibles, policy, majorityAge] = await Promise.all([
-        tx.locationReminderSettings.findFirst({
-          where: { locationId: appointment.locationId },
-          select: { enabled: true, leadHours: true },
-        }),
-        loadNoticeResponsibles(tx, appointment.patient.id),
-        // DX-291: la política vigente de la sede, para el email.
-        tx.cancellationPolicyVersion.findFirst({
-          where: { locationId: appointment.locationId },
-          orderBy: { version: 'desc' },
-          select: {
-            id: true,
-            version: true,
-            noticeHours: true,
-            patientText: true,
-            suggestedFee: true,
-            currency: true,
-          },
-        }),
-        // DX-328: la vigente al enviarse, no la de cuando se encoló.
-        loadTenantMajorityAge(tx, tenantId),
-      ]);
+      const [settings, responsibles, majorityReview, policy, majorityAge] =
+        await Promise.all([
+          tx.locationReminderSettings.findFirst({
+            where: { locationId: appointment.locationId },
+            select: { enabled: true, leadHours: true },
+          }),
+          loadNoticeResponsibles(tx, appointment.patient.id),
+          loadMajorityReview(tx, appointment.patient.id),
+          // DX-291: la política vigente de la sede, para el email.
+          tx.cancellationPolicyVersion.findFirst({
+            where: { locationId: appointment.locationId },
+            orderBy: { version: 'desc' },
+            select: {
+              id: true,
+              version: true,
+              noticeHours: true,
+              patientText: true,
+              suggestedFee: true,
+              currency: true,
+            },
+          }),
+          // DX-328: la vigente al enviarse, no la de cuando se encoló.
+          loadTenantMajorityAge(tx, tenantId),
+        ]);
       return {
         appointment: {
           id: appointment.id,
@@ -309,6 +312,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           emergencyContactName: appointment.patient.emergencyContactName,
         },
         responsibles,
+        majorityReview,
         settings,
         cancellationPolicy: policy
           ? {

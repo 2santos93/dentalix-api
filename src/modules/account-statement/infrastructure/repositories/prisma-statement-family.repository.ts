@@ -4,6 +4,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import {
   loadNoticeSettings,
   loadNoticeResponsibles,
+  loadMajorityReview,
 } from '../../../patients/infrastructure/notices/notice-context';
 import type {
   StatementFamily,
@@ -42,15 +43,16 @@ export class PrismaStatementFamilyRepository implements StatementFamilyRepositor
         },
       });
       if (!patient) return null;
-      const [responsibles, settings] = await Promise.all([
+      const [responsibles, majorityReview, settings] = await Promise.all([
         loadNoticeResponsibles(tx, patientId),
+        loadMajorityReview(tx, patientId),
         loadNoticeSettings(
           tx,
           tenantId,
           this.tenantContext.getLocationId() ?? null,
         ),
       ]);
-      return { patient, responsibles, settings };
+      return { patient, responsibles, majorityReview, settings };
     });
   }
 

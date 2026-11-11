@@ -27,6 +27,7 @@ const NOTICE = {
     emergencyContactName: null,
   },
   responsibles: [],
+  majorityReview: null,
   settings: { timeZone: 'America/Caracas', majorityAge: 18 },
 };
 

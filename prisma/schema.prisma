@@ -168,6 +168,7 @@ model Tenant {
   recallContacts                          RecallContact[]
   // DX-203: responsables de pago y avisos de los pacientes.
   patientResponsibleParties               PatientResponsibleParty[]
+  patientMajorityReviews                  PatientMajorityReview[]
   // DX-153: pagadores de la clínica y coberturas de sus pacientes.
   payers                                  Payer[]
   patientCoverages                        PatientCoverage[]
@@ -794,6 +795,7 @@ model Patient {
   // DX-203: sus responsables (de pago y avisos) y de quién es responsable.
   responsibleParties          PatientResponsibleParty[]        @relation("PatientResponsibleParties")
   responsibleFor              PatientResponsibleParty[]        @relation("ResponsiblePatient")
+  majorityReviews             PatientMajorityReview[]
   // DX-153: sus coberturas (pagador, plan, afiliado, vigencia).
   coverages                   PatientCoverage[]
   // DX-105: asignaciones de convenio (una viva; las retiradas son el historial).
@@ -5001,10 +5003,39 @@ enum ResponsibleRelationship {
   OTHER
 }
 
+// DX-342: revisión del paso a la mayoría de edad con responsable.
+enum MajorityReviewDecision {
+  PATIENT_SELF
+  KEEP_RESPONSIBLE
+}
+
 // DX-203: destinatario de un mensaje saliente.
 enum OutboundRecipientKind {
   PATIENT
   RESPONSIBLE
+}
+
+/// DX-342: revisión del paso a la mayoría de edad de un paciente que tenía
+/// responsable de menor. Solo alta; rige la última y solo para la fecha de
+/// mayoría de edad con la que se hizo (`majorityDate`).
+model PatientMajorityReview {
+  id           String                 @id @default(uuid()) @db.Uuid
+  tenantId     String                 @db.Uuid
+  patientId    String                 @db.Uuid
+  decision     MajorityReviewDecision
+  /// Nota libre (≤ 500); nunca va a la auditoría.
+  note         String?
+  /// Fecha de mayoría de edad (día civil) que se revisó.
+  majorityDate DateTime               @db.Date
+  /// Puntero suave a User, como `PatientResponsibleParty.createdById`.
+  reviewedById String                 @db.Uuid
+  reviewedAt   DateTime               @default(now()) @db.Timestamptz(3)
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_majority_reviews_patient_fkey")
+
+  @@index([tenantId, patientId, reviewedAt(sort: Desc)], map: "patient_majority_reviews_patient_idx")
+  @@map("patient_majority_reviews")
 }
 
 /// DX-203: responsable de pago y/o de los avisos de un paciente (el tutor

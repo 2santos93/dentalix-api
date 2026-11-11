@@ -21,6 +21,7 @@ import {
 import { readPlanQuoteSource } from '../../treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
 import {
   loadNoticeResponsibles,
+  loadMajorityReview,
   loadTenantMajorityAge,
 } from '../../patients/infrastructure/notices/notice-context';
 import type {
@@ -268,9 +269,10 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         },
       });
       if (!patient) return null;
-      const [responsibles, documents, majorityAge, location] =
+      const [responsibles, majorityReview, documents, majorityAge, location] =
         await Promise.all([
           loadNoticeResponsibles(tx, patientId),
+          loadMajorityReview(tx, patientId),
           tx.patientResponsibleParty.findMany({
             where: { patientId, deletedAt: null },
             select: {
@@ -317,6 +319,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
             docNumber: null,
           },
         })),
+        majorityReview,
         majorityAge,
         timeZone: location.timeZone,
       };

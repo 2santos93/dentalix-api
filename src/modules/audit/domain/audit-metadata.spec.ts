@@ -1370,4 +1370,50 @@ describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
       }
     });
   });
+
+  describe('majorityReview (DX-342)', () => {
+    it('conserva la decisión, la fecha y el largo de la nota', () => {
+      expect(
+        sanitizeAuditMetadata({
+          majorityReview: {
+            decision: 'PATIENT_SELF',
+            majorityDate: '2026-11-20',
+            noteLength: 42,
+          },
+        }),
+      ).toEqual({
+        majorityReview: {
+          decision: 'PATIENT_SELF',
+          majorityDate: '2026-11-20',
+          noteLength: 42,
+        },
+      });
+    });
+
+    it('descarta el texto de la nota, decisiones desconocidas y fechas que no existen', () => {
+      for (const majorityReview of [
+        {
+          decision: 'PATIENT_SELF',
+          majorityDate: '2026-11-20',
+          noteLength: 3,
+          note: 'Habló con la madre',
+        },
+        { decision: 'OTHER', majorityDate: '2026-11-20', noteLength: 0 },
+        {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-02-30',
+          noteLength: 0,
+        },
+        { decision: 'KEEP_RESPONSIBLE', majorityDate: null, noteLength: 0 },
+        {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-11-20',
+          noteLength: 501,
+        },
+        'PATIENT_SELF',
+      ]) {
+        expect(sanitizeAuditMetadata({ majorityReview })).toEqual({});
+      }
+    });
+  });
 });

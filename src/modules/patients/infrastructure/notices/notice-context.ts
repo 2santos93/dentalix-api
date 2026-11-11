@@ -8,6 +8,7 @@ import type {
   NoticeResponsible,
   NoticeSettings,
 } from '../../domain/communication/notice-recipient';
+import type { MajorityReviewRecord } from '../../domain/responsible-parties/majority-review';
 
 /**
  * Los responsables VIVOS del paciente para la regla de destinatario
@@ -29,6 +30,7 @@ export async function loadNoticeResponsibles(
       email: true,
       isPayer: true,
       receivesNotices: true,
+      createdAt: true,
       responsiblePatient: {
         select: {
           firstName: true,
@@ -54,9 +56,32 @@ export async function loadNoticeResponsibles(
       optedOut: p
         ? p.reminderOptOutAt !== null || p.contactChannel !== 'EMAIL'
         : false,
+      createdAt: row.createdAt,
     });
   }
   return out;
+}
+
+/**
+ * DX-342: la ÚLTIMA revisión del paso a la mayoría de edad del paciente
+ * (patient_majority_reviews_patient_idx), dentro de la transacción del
+ * llamador (bajo su RLS). La regla de destinatario decide si sigue valiendo.
+ */
+export async function loadMajorityReview(
+  tx: Prisma.TransactionClient,
+  patientId: string,
+): Promise<MajorityReviewRecord | null> {
+  const row = await tx.patientMajorityReview.findFirst({
+    where: { patientId },
+    orderBy: [{ reviewedAt: 'desc' }, { id: 'desc' }],
+    select: { decision: true, majorityDate: true },
+  });
+  return row
+    ? {
+        decision: row.decision,
+        majorityDate: row.majorityDate.toISOString().slice(0, 10),
+      }
+    : null;
 }
 
 /**

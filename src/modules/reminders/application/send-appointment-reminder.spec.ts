@@ -38,6 +38,7 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
       emergencyContactName: null,
     },
     responsibles: [],
+    majorityReview: null,
     settings: { enabled: true, leadHours: [48, 2] },
     cancellationPolicy: null,
     ...over,
@@ -206,6 +207,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     isPayer: true,
     receivesNotices: true,
     optedOut: false,
+    createdAt: new Date('2026-10-01T12:00:00.000Z'),
   };
   const minorWithoutEmail = {
     firstName: 'Ana',
@@ -333,6 +335,51 @@ describe('SendAppointmentReminder (DX-026)', () => {
       });
     }
     expect(email.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('DX-342: came of age with a responsible from childhood and without email: skipped NO_EMAIL, never the responsible', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: null,
+          email: null,
+        },
+        // Cumplió 18 el 2026-10-01; la madre, dada de alta en 2016.
+        recipient: { ...minorWithoutEmail, birthDate: new Date('2008-10-01') },
+        responsibles: [
+          { ...mother, createdAt: new Date('2016-02-10T12:00:00.000Z') },
+        ],
+      }),
+    );
+    await handler.handle(payload);
+    expect(repo.reminders[0]).toMatchObject({ skipReason: 'NO_EMAIL' });
+    expect(email.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('DX-342: reviewed KEEP_RESPONSIBLE: the reminder goes to the responsible again', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: null,
+          email: null,
+        },
+        recipient: { ...minorWithoutEmail, birthDate: new Date('2008-10-01') },
+        responsibles: [
+          { ...mother, createdAt: new Date('2016-02-10T12:00:00.000Z') },
+        ],
+        majorityReview: {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-10-01',
+        },
+      }),
+    );
+    await handler.handle(payload);
+    const [input] = email.enqueue.mock.calls[0] as [{ to: string }];
+    expect(input.to).toBe('maria@example.com');
   });
 
   it('la baja del propio paciente gana aunque tenga responsable (DX-128)', async () => {
