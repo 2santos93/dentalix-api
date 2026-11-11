@@ -707,6 +707,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /reports/production-by-procedure': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure.csv': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure/items': roles('ADMIN', 'DENTIST'),
+  // DX-436: «Huecos recuperados» y su CSV (auditado). Solo ADMIN.
+  'GET /reports/recovered-slots': ADMIN_ONLY,
+  'GET /reports/recovered-slots.csv': ADMIN_ONLY,
   // DX-439: «Pendiente de cerrar». ADMIN todo; DENTIST evolución y
   // tratamiento de sus citas; RECEPTION el desenlace (lo acota el caso de uso).
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),

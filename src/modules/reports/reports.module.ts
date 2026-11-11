@@ -14,10 +14,15 @@ import { GetUnallocatedPaymentsUseCase } from './application/use-cases/get-unall
 import { UNALLOCATED_PAYMENTS_REPOSITORY } from './domain/ports/unallocated-payments-repository.port';
 import { PrismaUnallocatedPaymentsRepository } from './infrastructure/prisma-unallocated-payments.repository';
 import { UnallocatedPaymentsController } from './presentation/unallocated-payments.controller';
+import { GetRecoveredSlotsUseCase } from './application/use-cases/get-recovered-slots.use-case';
+import { RECOVERED_SLOTS_REPOSITORY } from './domain/ports/recovered-slots-repository.port';
+import { PrismaRecoveredSlotsRepository } from './infrastructure/prisma-recovered-slots.repository';
+import { RecoveredSlotsController } from './presentation/recovered-slots.controller';
 
 // Reportes de gestión (DX-014). Pestañas: «Comparar sedes» (indicadores en
 // `domain/kpi-definitions.ts`), «Producción por procedimiento» (DX-423) y
-// «Cobrado sin imputar» (DX-399, ADMIN y recepción); las
+// «Cobrado sin imputar» (DX-399, ADMIN y recepción) y «Huecos recuperados»
+// (DX-436); las
 // siguientes se añaden como controladores bajo el mismo prefijo `reports`.
 @Module({
   imports: [JwtModule.register({})],
@@ -25,11 +30,13 @@ import { UnallocatedPaymentsController } from './presentation/unallocated-paymen
     LocationsComparisonController,
     ProductionByProcedureController,
     UnallocatedPaymentsController,
+    RecoveredSlotsController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
     GetProductionByProcedureUseCase,
     GetUnallocatedPaymentsUseCase,
+    GetRecoveredSlotsUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -43,6 +50,10 @@ import { UnallocatedPaymentsController } from './presentation/unallocated-paymen
     {
       provide: UNALLOCATED_PAYMENTS_REPOSITORY,
       useClass: PrismaUnallocatedPaymentsRepository,
+    },
+    {
+      provide: RECOVERED_SLOTS_REPOSITORY,
+      useClass: PrismaRecoveredSlotsRepository,
     },
   ],
 })
