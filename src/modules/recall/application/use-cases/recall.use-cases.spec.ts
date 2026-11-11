@@ -140,6 +140,7 @@ class InMemoryRecallRepository implements RecallRepository {
           manualDoneAt: r.lastDoneAt,
           lastDoneItemId: null,
           source: 'MANUAL',
+          preBackfillDoneAt: null,
           active: r.active,
           disabledUntil: r.disabledUntil,
           disabledReason: r.disabledReason,

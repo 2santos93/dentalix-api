@@ -100,6 +100,8 @@ export interface PatientRecallRow {
   manualDoneAt: string | null;
   lastDoneItemId: string | null;
   source: RecallSource;
+  /** Lo fijado antes del relleno, si la base congelada lo movió. */
+  preBackfillDoneAt: string | null;
   active: boolean;
   disabledUntil: string | null;
   disabledReason: string | null;
@@ -121,6 +123,7 @@ export interface PatientRecallView {
   manualDoneAt: string | null;
   lastDoneItemId: string | null;
   source: RecallSource;
+  preBackfillDoneAt: string | null;
   active: boolean;
   disabledUntil: string | null;
   disabledReason: string | null;

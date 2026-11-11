@@ -9,6 +9,11 @@ export interface ProcedureRecallUpdate {
   dueAt: string;
 }
 
+/** Interno: si este cambio creó o movió el recall (solo entonces se audita). */
+export interface ProcedureRecallResult extends ProcedureRecallUpdate {
+  changed: boolean;
+}
+
 export interface ProcedureRecallChange {
   tenantId: string;
   patientId: string;
@@ -16,8 +21,9 @@ export interface ProcedureRecallChange {
   catalogItemId: string;
   /**
    * El ítem acaba de pasar a DONE: crea el recall de cada tipo disparado que
-   * aún no lo tenga (D4). En una salida de DONE (CLEAR) o una corrección de
-   * fecha o sede (CORRECT) solo se recalculan los que ya existen.
+   * aún no lo tenga (D4). En una salida de DONE (CLEAR), una corrección de
+   * fecha o sede (CORRECT) o el borrado de un ítem DONE solo se recalculan
+   * los que ya existen.
    */
   createMissing: boolean;
   /** Quien lo crea (`createdById`/`updatedById`); sin él no se crea nada. */
@@ -38,16 +44,19 @@ export interface ProcedureRecallChange {
  * 2. Recalcula la base desde la historia (`dx_recall_recompute`, que bloquea
  *    la fila antes de leer los ítems: queda el máximo).
  *
- * Devuelve los recalls que quedan, con su vencimiento nuevo. Bajo la RLS de la
- * transacción (`runWithTenant`).
+ * Devuelve los recalls que quedan, con su vencimiento nuevo y si este cambio
+ * los creó o movió. Tipos en orden estable (`sortOrder`, id) también en el
+ * INSERT: dos DONE concurrentes que disparen varios tipos no se cruzan en la
+ * UNIQUE. Bajo la RLS de la transacción (`runWithTenant`).
  */
 export async function recallsFromProcedure(
   tx: Prisma.TransactionClient,
   change: ProcedureRecallChange,
-): Promise<ProcedureRecallUpdate[]> {
+): Promise<ProcedureRecallResult[]> {
   const { tenantId, patientId, itemId, catalogItemId } = change;
+  const created = new Set<string>();
   if (change.createMissing && change.actorId) {
-    await tx.$executeRaw`
+    const rows = await tx.$queryRaw<{ recallTypeId: string }[]>`
       INSERT INTO "patient_recalls"
         ("id", "tenantId", "patientId", "recallTypeId", "kind", "intervalMonths",
          "lastDoneAt", "lastDoneItemId", "locationId", "source",
@@ -70,7 +79,10 @@ export async function recallsFromProcedure(
          AND t."catalogItemId" = ${catalogItemId}::uuid
          AND i."completedAt" IS NOT NULL
          AND l."timeZone" IS NOT NULL
-      ON CONFLICT ("tenantId", "patientId", "recallTypeId") DO NOTHING`;
+       ORDER BY rt."sortOrder", rt."id"
+      ON CONFLICT ("tenantId", "patientId", "recallTypeId") DO NOTHING
+      RETURNING "recallTypeId"`;
+    for (const row of rows) created.add(row.recallTypeId);
   }
   const types = await tx.$queryRaw<{ id: string }[]>`
     SELECT rt."id"
@@ -82,8 +94,11 @@ export async function recallsFromProcedure(
        AND t."catalogItemId" = ${catalogItemId}::uuid
      ORDER BY rt."sortOrder", rt."id"`;
   if (types.length === 0) return [];
+  const moved = new Set<string>(created);
   for (const type of types) {
-    await tx.$executeRaw`SELECT public.dx_recall_recompute(${tenantId}::uuid, ${patientId}::uuid, ${type.id}::uuid)`;
+    const [{ changed }] = await tx.$queryRaw<{ changed: boolean }[]>`
+      SELECT public.dx_recall_recompute(${tenantId}::uuid, ${patientId}::uuid, ${type.id}::uuid) AS changed`;
+    if (changed) moved.add(type.id);
   }
   const rows = await tx.$queryRaw<
     {
@@ -107,5 +122,6 @@ export async function recallsFromProcedure(
     recallTypeId: r.recallTypeId,
     recallTypeName: r.recallTypeName,
     dueAt: r.dueAt.toISOString().slice(0, 10),
+    changed: moved.has(r.recallTypeId),
   }));
 }

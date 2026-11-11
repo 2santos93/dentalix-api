@@ -8,6 +8,7 @@ import { TREATMENT_PLAN_REPOSITORY } from '../../domain/ports/treatment-plan-rep
 import type { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-repository.port';
 import { assertItemsEditable } from './signed-plan-lock';
 import { FEE_ITEM_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 @Injectable()
 export class RemoveTreatmentPlanItemUseCase {
@@ -16,7 +17,8 @@ export class RemoveTreatmentPlanItemUseCase {
     private readonly repo: TreatmentPlanRepository,
   ) {}
 
-  async execute(itemId: string): Promise<void> {
+  /** `audit`: para el evento del recall que mueva un DONE borrado (DX-015-bis). */
+  async execute(itemId: string, audit?: AuditRequestContext): Promise<void> {
     const existing = await this.repo.findItemById(itemId);
     if (!existing) {
       throw new NotFoundException('Treatment plan item not found');
@@ -31,6 +33,6 @@ export class RemoveTreatmentPlanItemUseCase {
     if (plan) assertItemsEditable(plan);
 
     // Soft-delete only — never a hard delete on a domain table.
-    await this.repo.softDeleteItem(itemId);
+    await this.repo.softDeleteItem(itemId, audit);
   }
 }

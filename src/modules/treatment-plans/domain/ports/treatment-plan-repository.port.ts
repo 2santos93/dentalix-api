@@ -312,8 +312,12 @@ export interface TreatmentPlanRepository {
     audit?: AuditRequestContext,
   ): Promise<TreatmentPlanItemUpdate>;
 
-  /** Soft-delete: sets `deletedAt`. Never a hard delete. */
-  softDeleteItem(id: string): Promise<void>;
+  /**
+   * Soft-delete: sets `deletedAt`. Never a hard delete. DX-015-bis: si el
+   * ítem estaba DONE, recalcula en la misma transacción el recall de los
+   * tipos que dispara y lo audita con `audit`.
+   */
+  softDeleteItem(id: string, audit?: AuditRequestContext): Promise<void>;
 
   /**
    * Acción «Descuento %» (DX-204): en UNA transacción bloquea el plan (FOR

@@ -250,7 +250,8 @@ export class PrismaRecallRepository implements RecallRepository {
       SELECT pr."id", pr."tenantId", pr."patientId", pr."kind",
              pr."recallTypeId", rt."name" AS "recallTypeName", rt."sortOrder",
              pr."intervalMonths", pr."lastDoneAt", pr."dueAt", pr."manualDoneAt",
-             pr."lastDoneItemId", pr."source", pr."active", pr."disabledUntil",
+             pr."lastDoneItemId", pr."source", pr."preBackfillDoneAt",
+             pr."active", pr."disabledUntil",
              pr."disabledReason", pr."updatedAt", pr."updatedById",
              pa."firstName", pa."lastName", pa."phone",
              (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut",
@@ -367,6 +368,7 @@ export class PrismaRecallRepository implements RecallRepository {
           manualDoneAt: Date | null;
           lastDoneItemId: string | null;
           source: RecallSource;
+          preBackfillDoneAt: Date | null;
           active: boolean;
           disabledUntil: Date | null;
           disabledReason: string | null;
@@ -400,6 +402,9 @@ export class PrismaRecallRepository implements RecallRepository {
           manualDoneAt: f.manualDoneAt ? civilOf(f.manualDoneAt) : null,
           lastDoneItemId: f.lastDoneItemId,
           source: f.source,
+          preBackfillDoneAt: f.preBackfillDoneAt
+            ? civilOf(f.preBackfillDoneAt)
+            : null,
           active: f.active,
           disabledUntil: f.disabledUntil ? civilOf(f.disabledUntil) : null,
           disabledReason: f.disabledReason,
@@ -441,6 +446,8 @@ export class PrismaRecallRepository implements RecallRepository {
         intervalMonths: data.intervalMonths,
         manualDoneAt,
         lastDoneAt: manualDoneAt,
+        // Lo fijado ahora es de verdad del clínico (ya no la base congelada).
+        preBackfillDoneAt: null,
         active: data.active,
         disabledUntil: data.disabledUntil ? dateOf(data.disabledUntil) : null,
         disabledReason: data.disabledUntil ? data.disabledReason : null,
@@ -473,7 +480,12 @@ export class PrismaRecallRepository implements RecallRepository {
     });
   }
 
-  /** DX-015-bis: el tipo vivo con esa clave del enum o ese id; null si no hay. */
+  /**
+   * DX-015-bis: el tipo vivo con esa clave del enum o ese id; null si no hay.
+   * Vale también uno desactivado, a propósito: sus recalls ya existentes se
+   * siguen pausando, retirando o corrigiendo a mano (desactivar el tipo solo
+   * deja de crearlos por procedimiento).
+   */
   findType(
     ref: { systemKey: RecallKind } | { id: string },
   ): Promise<RecallTypeRef | null> {

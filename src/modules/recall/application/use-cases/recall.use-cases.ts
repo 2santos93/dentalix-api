@@ -186,6 +186,7 @@ export class GetPatientRecallsUseCase {
           manualDoneAt: row.manualDoneAt,
           lastDoneItemId: row.lastDoneItemId,
           source: row.source,
+          preBackfillDoneAt: row.preBackfillDoneAt,
           active: row.active,
           disabledUntil: row.disabledUntil,
           disabledReason: row.disabledReason,

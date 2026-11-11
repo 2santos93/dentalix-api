@@ -400,6 +400,15 @@ export class PatientRecallDto {
   })
   source!: RecallSource;
 
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description:
+      'Relleno del despliegue de DX-015-bis: si no es null, `manualDoneAt` NO lo tecleó nadie (es la última visita atendida, que entonces movía el reloj) y esto es lo que había fijado el clínico. Se vuelve null al fijarlo de nuevo.',
+  })
+  preBackfillDoneAt!: string | null;
+
   @ApiProperty()
   active!: boolean;
 

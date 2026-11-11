@@ -519,7 +519,13 @@ export class TreatmentPlansController {
   @ApiConflictResponse({
     description: `${ITEMS_LOCKED_CONFLICT}; ${FEE_ITEM_CONFLICT}`,
   })
-  removeItem(@Param('itemId', ParseUUIDPipe) itemId: string): Promise<void> {
-    return this.removeTreatmentPlanItem.execute(itemId);
+  removeItem(
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    return this.removeTreatmentPlanItem.execute(
+      itemId,
+      auditRequestContext(req, this.tenantContext),
+    );
   }
 }
