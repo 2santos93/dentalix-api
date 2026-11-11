@@ -60,7 +60,7 @@ function build(future: FutureRow[]) {
         },
       ),
     },
-    patientRecall: { findMany: jest.fn(() => Promise.resolve([])) },
+    patientRecall: { findFirst: jest.fn(() => Promise.resolve(null)) },
   };
   const prisma = {
     runWithTenant: (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),

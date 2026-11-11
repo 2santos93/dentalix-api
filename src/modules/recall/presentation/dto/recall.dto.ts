@@ -3,6 +3,7 @@ import {
   RecallContactChannel,
   RecallContactOutcome,
   RecallKind,
+  RecallSource,
 } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
@@ -49,11 +50,21 @@ export class RecallDueCountQueryDto {
   @ApiPropertyOptional({
     enum: RecallKind,
     enumName: 'RecallKind',
-    description: 'Solo un tipo de recall (higiene o control)',
+    description:
+      'Compatibilidad: solo el tipo con esa clave (higiene o control). Mejor `recallTypeId`.',
   })
   @IsOptional()
   @IsEnum(RecallKind, { message: 'kind debe ser HYGIENE o CHECKUP.' })
   kind?: RecallKind;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-015-bis: solo un tipo de recall de la clínica (GET /recall-types)',
+  })
+  @IsOptional()
+  @IsUUID('4', { message: 'recallTypeId debe ser un UUID.' })
+  recallTypeId?: string;
 
   @ApiPropertyOptional({
     minimum: 0,
@@ -261,15 +272,28 @@ export class RecallDueItemDto {
   })
   reminderOptedOut!: boolean;
 
-  @ApiProperty({ enum: RecallKind, enumName: 'RecallKind' })
-  kind!: RecallKind;
+  @ApiProperty({
+    enum: RecallKind,
+    enumName: 'RecallKind',
+    nullable: true,
+    description:
+      'DEPRECADO (DX-015-bis): la clave del tipo; null en los tipos sin clave. Usar `recallTypeId`.',
+  })
+  kind!: RecallKind | null;
+
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+
+  @ApiProperty({ description: 'Nombre del tipo (p. ej. «Higiene»)' })
+  recallTypeName!: string;
 
   @ApiProperty()
   intervalMonths!: number;
 
   @ApiProperty({
     format: 'date',
-    description: 'Base del vencimiento: lo fijado o la última visita atendida',
+    description:
+      'Base del vencimiento: lo fijado a mano o el último procedimiento disparador realizado',
   })
   baseDate!: string;
 
@@ -325,14 +349,56 @@ export class PatientRecallDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ enum: RecallKind, enumName: 'RecallKind' })
-  kind!: RecallKind;
+  @ApiProperty({
+    enum: RecallKind,
+    enumName: 'RecallKind',
+    nullable: true,
+    description:
+      'DEPRECADO (DX-015-bis): la clave del tipo; null en los tipos sin clave. Usar `recallTypeId`.',
+  })
+  kind!: RecallKind | null;
+
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+
+  @ApiProperty({ description: 'Nombre del tipo (p. ej. «Higiene»)' })
+  recallTypeName!: string;
 
   @ApiProperty()
   intervalMonths!: number;
 
-  @ApiProperty({ format: 'date' })
+  @ApiProperty({
+    format: 'date',
+    description:
+      'Base del vencimiento: el máximo entre lo fijado a mano y el último procedimiento disparador realizado',
+  })
   lastDoneAt!: string;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description:
+      'Lo fijado a mano; null si el recall nació de un procedimiento',
+  })
+  manualDoneAt!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Ítem del plan realizado que da la base (si la da un procedimiento y no lo fijado)',
+  })
+  lastDoneItemId!: string | null;
+
+  @ApiProperty({
+    enum: RecallSource,
+    enumName: 'RecallSource',
+    description:
+      'MANUAL: fijado a mano · PROCEDURE: lo creó un procedimiento realizado · BACKFILL: lo creó el relleno del historial',
+  })
+  source!: RecallSource;
 
   @ApiProperty()
   active!: boolean;
@@ -349,7 +415,10 @@ export class PatientRecallDto {
   @ApiProperty({ format: 'date' })
   baseDate!: string;
 
-  @ApiProperty({ format: 'date' })
+  @ApiProperty({
+    format: 'date',
+    description: 'Vencimiento guardado: base + intervalo',
+  })
   dueAt!: string;
 
   @ApiProperty()
@@ -377,8 +446,19 @@ export class RecallContactDto {
   @ApiProperty({ format: 'uuid' })
   recallId!: string;
 
-  @ApiProperty({ enum: RecallKind, enumName: 'RecallKind' })
-  kind!: RecallKind;
+  @ApiProperty({
+    enum: RecallKind,
+    enumName: 'RecallKind',
+    nullable: true,
+    description: 'DEPRECADO (DX-015-bis): usar `recallTypeId`.',
+  })
+  kind!: RecallKind | null;
+
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+
+  @ApiProperty()
+  recallTypeName!: string;
 
   @ApiProperty({ format: 'uuid' })
   patientId!: string;
@@ -414,4 +494,48 @@ export class PatientRecallsDto {
     description: 'Historial de contactos, más recientes primero (hasta 50)',
   })
   contacts!: RecallContactDto[];
+}
+
+export class RecallTypeDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ example: 'Higiene' })
+  name!: string;
+
+  @ApiProperty({
+    minimum: RECALL_INTERVAL_MIN,
+    maximum: RECALL_INTERVAL_MAX,
+    description: 'Intervalo de los recalls que crea un procedimiento realizado',
+  })
+  defaultIntervalMonths!: number;
+
+  @ApiProperty()
+  active!: boolean;
+
+  @ApiProperty()
+  sortOrder!: number;
+
+  @ApiProperty({
+    enum: RecallKind,
+    enumName: 'RecallKind',
+    nullable: true,
+    description: 'Clave de compatibilidad (rutas `:kind`); null si no tiene',
+  })
+  systemKey!: RecallKind | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Tipos excluyentes entre sí (p. ej. HYGIENE_PERIO)',
+  })
+  exclusionGroup!: string | null;
+
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description:
+      'Procedimientos del catálogo cuyo DONE mueve el reloj de este tipo',
+  })
+  triggerCatalogItemIds!: string[];
 }

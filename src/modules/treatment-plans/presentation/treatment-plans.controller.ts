@@ -43,7 +43,10 @@ import {
   ApplyBulkDiscountResultDto,
 } from './dto/apply-bulk-discount.dto';
 import { TreatmentPlanDto } from './dto/treatment-plan.dto';
-import { TreatmentPlanItemDto } from './dto/treatment-plan-item.dto';
+import {
+  TreatmentPlanItemDto,
+  UpdatedTreatmentPlanItemDto,
+} from './dto/treatment-plan-item.dto';
 import { CreateTreatmentPlanUseCase } from '../application/use-cases/create-treatment-plan.use-case';
 import { ListTreatmentPlansUseCase } from '../application/use-cases/list-treatment-plans.use-case';
 import { GetTreatmentPlanUseCase } from '../application/use-cases/get-treatment-plan.use-case';
@@ -62,7 +65,10 @@ import {
   TreatmentPlan,
   TreatmentPlanDetail,
 } from '../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../domain/entities/treatment-plan-item.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -457,7 +463,7 @@ export class TreatmentPlansController {
     description:
       'DX-050: sede donde se realizó al pasar a DONE; sin ella, la de escritura de la sesión (la principal o la primera permitida)',
   })
-  @ApiOkResponse({ type: TreatmentPlanItemDto })
+  @ApiOkResponse({ type: UpdatedTreatmentPlanItemDto })
   @ApiBadRequestResponse({
     description:
       'DX-050: pasar a DONE sin `performedById` quien no atiende (ASSISTANT); el profesional no atiende (ASSISTANT/RECEPTION) o no atiende en la sede; `completedAt` al pasar a DONE o futuro; `performedById`/`completedAt` en un ítem que no queda DONE. Mensaje en español',
@@ -477,7 +483,7 @@ export class TreatmentPlansController {
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() dto: UpdateTreatmentPlanItemDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlanItem> {
+  ): Promise<TreatmentPlanItemUpdate> {
     // El actor (token, nunca el body) decide el tope del descuento (DX-204)
     // y, si atiende, es por defecto quien realizó el ítem (DX-050), que firma
     // el registro del odontograma (Pieza B).

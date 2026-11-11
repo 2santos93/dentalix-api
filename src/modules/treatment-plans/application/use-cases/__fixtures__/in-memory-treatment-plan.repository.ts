@@ -10,7 +10,10 @@ import {
   TreatmentPlanAcceptanceSummary,
   TreatmentPlanWithItems,
 } from '../../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../../domain/entities/treatment-plan-item.entity';
 import {
   CreateTreatmentPlanRepoInput,
   DecideBulkDiscount,
@@ -531,7 +534,7 @@ export class InMemoryTreatmentPlanRepository
   async updateItem(
     id: string,
     decide: DecideItemChange,
-  ): Promise<TreatmentPlanItem> {
+  ): Promise<TreatmentPlanItemUpdate> {
     const row = this.items.find((i) => i.id === id && i.deletedAt === null);
     const plan = row && this.lockedPlan(row.planId);
     if (!row || !plan) {
@@ -551,7 +554,8 @@ export class InMemoryTreatmentPlanRepository
       Object.assign(row, this.stampColumns(discountStamp));
     }
     if (attribution) Object.assign(row, this.attributionColumns(attribution));
-    return this.toItemEntity(row);
+    // El recall de un procedimiento (DX-015-bis) lo cubren los tests con BD.
+    return { ...this.toItemEntity(row), recallUpdates: [] };
   }
 
   /** DX-050: igual que el repositorio real, sin resolver nombres. */

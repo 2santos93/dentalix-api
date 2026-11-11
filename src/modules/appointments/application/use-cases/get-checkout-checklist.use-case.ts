@@ -2,7 +2,6 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { AppointmentStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { addCivilMonths } from '../../../recall/domain/recall-rules';
 import { RESERVED_APPOINTMENT_STATUSES } from '../../../treatment-plans/domain/plan-visits';
 
 /** Lo que recepción comprueba al despedir al paciente; nada clínico. */
@@ -77,23 +76,17 @@ export class GetCheckoutChecklistUseCase {
         orderBy: { start: 'asc' },
         select: { start: true },
       });
-      const recalls = await tx.patientRecall.findMany({
+      // DX-015-bis: el vencimiento GUARDADO, el mismo de la lista y la ficha.
+      const recall = await tx.patientRecall.findFirst({
         where: { patientId: patient.id, active: true },
-        select: { lastDoneAt: true, intervalMonths: true },
+        orderBy: [{ dueAt: 'asc' }, { id: 'asc' }],
+        select: { dueAt: true },
       });
-      const dues = recalls
-        .map((r) =>
-          addCivilMonths(
-            r.lastDoneAt.toISOString().slice(0, 10),
-            r.intervalMonths,
-          ),
-        )
-        .sort();
       return {
         appointmentId: appointment.id,
         patientId: patient.id,
         nextAppointmentStart: next?.start ?? null,
-        recallDueOn: dues[0] ?? null,
+        recallDueOn: recall ? recall.dueAt.toISOString().slice(0, 10) : null,
         hasPhone: Boolean(patient.phone?.trim()),
         hasEmail: Boolean(patient.email?.trim()),
         remindersOptedOut: patient.reminderOptOutAt !== null,

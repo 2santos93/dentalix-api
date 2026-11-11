@@ -14,9 +14,12 @@ import type {
   RecallDueQuery,
   RecallDueRow,
   RecallRef,
+  RecallTypeRef,
+  RecallTypeView,
   SetPatientRecallData,
   StaffRef,
 } from '../../domain/recall.entity';
+import { addCivilMonths } from '../../domain/recall-rules';
 import {
   APPOINTMENT_NOT_OF_PATIENT_MESSAGE,
   BOOKED_NEEDS_APPOINTMENT_MESSAGE,
@@ -30,8 +33,10 @@ import {
   LAST_DONE_INVALID_MESSAGE,
   ListDueRecallsUseCase,
   NOTE_TOO_LONG_MESSAGE,
+  ListRecallTypesUseCase,
   PATIENT_NOT_FOUND_MESSAGE,
   RECALL_NOT_FOUND_MESSAGE,
+  RECALL_TYPE_NOT_FOUND_MESSAGE,
   SetPatientRecallUseCase,
 } from './recall.use-cases';
 
@@ -43,6 +48,17 @@ const clock = () => NOW;
 
 const NORTE = 'sede-norte';
 const SUR = 'sede-sur';
+
+/** Tipos sembrados de la clínica (DX-015-bis): id y nombre por clave. */
+const TYPE_ID: Record<RecallKind, string> = {
+  HYGIENE: 'tipo-higiene',
+  CHECKUP: 'tipo-control',
+};
+const TYPE_NAME: Record<RecallKind, string> = {
+  HYGIENE: 'Higiene',
+  CHECKUP: 'Control',
+};
+const byKey = (systemKey: RecallKind) => ({ systemKey });
 
 interface FakeRecall {
   id: string;
@@ -69,8 +85,10 @@ interface FakeAppointment {
 
 /**
  * Doble del puerto: las mismas reglas que el repositorio Prisma (la sede del
- * recall es la de la última cita atendida o, sin ella, la del recall), sin BD.
- * Guarda cada llamada para poder comprobar qué recibió.
+ * recall es la de la última cita atendida o, sin ella, la del recall; el
+ * vencimiento, la columna generada "lastDoneAt" + intervalo), sin BD. La base
+ * de lo fijado es `lastDoneAt` (sin DONE de procedimientos: eso lo prueban los
+ * tests con BD). Guarda cada llamada para poder comprobar qué recibió.
  */
 class InMemoryRecallRepository implements RecallRepository {
   readonly patients = new Set<string>();
@@ -114,13 +132,18 @@ class InMemoryRecallRepository implements RecallRepository {
         return {
           id: r.id,
           kind: r.kind,
+          recallTypeId: TYPE_ID[r.kind],
+          recallTypeName: TYPE_NAME[r.kind],
           intervalMonths: r.intervalMonths,
           lastDoneAt: r.lastDoneAt,
+          dueAt: addCivilMonths(r.lastDoneAt, r.intervalMonths),
+          manualDoneAt: r.lastDoneAt,
+          lastDoneItemId: null,
+          source: 'MANUAL',
           active: r.active,
           disabledUntil: r.disabledUntil,
           disabledReason: r.disabledReason,
           locationId: visit?.locationId ?? r.locationId,
-          lastCompletedVisit: visit?.day ?? null,
           hasUpcomingAppointment: this.appointments.some(
             (a) =>
               a.patientId === patientId &&
@@ -147,12 +170,13 @@ class InMemoryRecallRepository implements RecallRepository {
   upsertRecall(data: SetPatientRecallData): Promise<{ id: string }> {
     this.calls.push('upsertRecall');
     this.upserts.push(data);
+    const kind = data.recallType.systemKey as RecallKind;
     const existing = this.recalls.find(
-      (r) => r.patientId === data.patientId && r.kind === data.kind,
+      (r) => r.patientId === data.patientId && r.kind === kind,
     );
     const fields = {
       intervalMonths: data.intervalMonths,
-      lastDoneAt: data.lastDoneAt,
+      lastDoneAt: data.manualDoneAt,
       active: data.active,
       disabledUntil: data.disabledUntil,
       disabledReason: data.disabledReason,
@@ -166,11 +190,37 @@ class InMemoryRecallRepository implements RecallRepository {
     this.recalls.push({
       id,
       patientId: data.patientId,
-      kind: data.kind,
+      kind,
       locationId: NORTE,
       ...fields,
     });
     return Promise.resolve({ id });
+  }
+
+  findType(
+    ref: { systemKey: RecallKind } | { id: string },
+  ): Promise<RecallTypeRef | null> {
+    this.calls.push('findType');
+    const key = (Object.keys(TYPE_ID) as RecallKind[]).find((k) =>
+      'id' in ref ? TYPE_ID[k] === ref.id : k === ref.systemKey,
+    );
+    return Promise.resolve(key ? { id: TYPE_ID[key], systemKey: key } : null);
+  }
+
+  listTypes(): Promise<RecallTypeView[]> {
+    this.calls.push('listTypes');
+    return Promise.resolve(
+      (Object.keys(TYPE_ID) as RecallKind[]).map((k, i) => ({
+        id: TYPE_ID[k],
+        name: TYPE_NAME[k],
+        defaultIntervalMonths: k === 'HYGIENE' ? 6 : 12,
+        active: true,
+        sortOrder: i,
+        systemKey: k,
+        exclusionGroup: k === 'HYGIENE' ? 'HYGIENE_PERIO' : null,
+        triggerCatalogItemIds: [],
+      })),
+    );
   }
 
   findRecall(recallId: string): Promise<RecallRef | null> {
@@ -206,6 +256,8 @@ class InMemoryRecallRepository implements RecallRepository {
       id: `contact-${this.contacts.length + 1}`,
       recallId: data.recallId,
       kind: recall.kind,
+      recallTypeId: TYPE_ID[recall.kind],
+      recallTypeName: TYPE_NAME[recall.kind],
       patientId: data.patientId,
       locationId: data.locationId,
       channel: data.channel,
@@ -276,6 +328,8 @@ function dueRow(data: Partial<RecallDueRow> = {}): RecallDueRow {
     phoneRegion: 'VE',
     reminderOptedOut: false,
     kind: 'CHECKUP',
+    recallTypeId: TYPE_ID.CHECKUP,
+    recallTypeName: 'Control',
     intervalMonths: 6,
     baseDate: '2026-04-01',
     dueAt: '2026-10-01',
@@ -416,6 +470,8 @@ describe('ListDueRecallsUseCase (DX-015)', () => {
       patientWhatsApp: '584125550101',
       reminderOptedOut: false,
       kind: 'CHECKUP',
+      recallTypeId: TYPE_ID.CHECKUP,
+      recallTypeName: 'Control',
       intervalMonths: 6,
       baseDate: '2026-04-01',
       dueAt: '2026-10-01',
@@ -607,52 +663,29 @@ describe('GetPatientRecallsUseCase (DX-015)', () => {
     },
   );
 
-  it('la última cita atendida, posterior a lo fijado, reinicia el reloj y da la sede del recall', async () => {
+  it('DX-015-bis: una cita atendida ya no mueve la base (solo da la sede del recall)', async () => {
     repo.seedRecall({
       patientId: 'pac-1',
       lastDoneAt: '2026-01-10',
       locationId: NORTE,
     });
-    repo.appointments.push(
-      {
-        id: 'v1',
-        patientId: 'pac-1',
-        locationId: NORTE,
-        day: '2026-02-01',
-        status: 'COMPLETED',
-      },
-      {
-        id: 'v2',
-        patientId: 'pac-1',
-        locationId: SUR,
-        day: '2026-08-31',
-        status: 'COMPLETED',
-      },
-    );
-    const [recall] = (await get.execute('pac-1')).recalls;
-    expect(recall).toMatchObject({
-      lastDoneAt: '2026-01-10',
-      baseDate: '2026-08-31',
-      dueAt: '2027-02-28',
-      status: 'UPCOMING',
-      locationId: SUR,
-    });
-  });
-
-  it('una visita anterior a lo fijado no mueve la base', async () => {
-    repo.seedRecall({ patientId: 'pac-1', lastDoneAt: '2026-05-06' });
     repo.appointments.push({
       id: 'v1',
       patientId: 'pac-1',
       locationId: SUR,
-      day: '2026-03-01',
+      day: '2026-08-31',
       status: 'COMPLETED',
     });
     const [recall] = (await get.execute('pac-1')).recalls;
     expect(recall).toMatchObject({
-      baseDate: '2026-05-06',
-      dueAt: '2026-11-06',
+      lastDoneAt: '2026-01-10',
+      baseDate: '2026-01-10',
+      dueAt: '2026-07-10',
       status: 'DUE',
+      locationId: SUR,
+      recallTypeId: TYPE_ID.CHECKUP,
+      recallTypeName: 'Control',
+      source: 'MANUAL',
     });
   });
 
@@ -670,6 +703,8 @@ describe('GetPatientRecallsUseCase (DX-015)', () => {
       id: 'c1',
       recallId: 'recall-1',
       kind: 'CHECKUP',
+      recallTypeId: TYPE_ID.CHECKUP,
+      recallTypeName: 'Control',
       patientId: 'pac-1',
       locationId: NORTE,
       channel: 'CALL',
@@ -712,7 +747,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
   it('crea el recall con la fecha de hoy en la sede y activo por defecto, y devuelve la ficha', async () => {
     const out = await set.execute(
       'pac-1',
-      'CHECKUP',
+      byKey('CHECKUP'),
       { intervalMonths: 6 },
       'dra-lopez',
     );
@@ -720,9 +755,9 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
     expect(repo.upserts).toEqual([
       {
         patientId: 'pac-1',
-        kind: 'CHECKUP',
+        recallType: { id: TYPE_ID.CHECKUP, systemKey: 'CHECKUP' },
         intervalMonths: 6,
-        lastDoneAt: SEDE_DAY,
+        manualDoneAt: SEDE_DAY,
         active: true,
         disabledUntil: null,
         disabledReason: null,
@@ -740,10 +775,15 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
   });
 
   it('cambia el mismo recall del tipo (no lo duplica) y puede retirarlo', async () => {
-    await set.execute('pac-1', 'CHECKUP', { intervalMonths: 6 }, 'dra-lopez');
+    await set.execute(
+      'pac-1',
+      byKey('CHECKUP'),
+      { intervalMonths: 6 },
+      'dra-lopez',
+    );
     const out = await set.execute(
       'pac-1',
-      'CHECKUP',
+      byKey('CHECKUP'),
       { intervalMonths: 12, lastDoneAt: '2026-02-28', active: false },
       'dr-ruiz',
     );
@@ -762,20 +802,52 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
     '400 con el intervalo %p, antes de tocar la BD',
     async (intervalMonths) => {
       await expect(
-        set.execute('pac-1', 'CHECKUP', { intervalMonths }, 'dra-lopez'),
+        set.execute('pac-1', byKey('CHECKUP'), { intervalMonths }, 'dra-lopez'),
       ).rejects.toThrow(new BadRequestException(INTERVAL_RANGE_MESSAGE));
       expect(repo.calls).toEqual([]);
     },
   );
 
   it.each([1, 36])('acepta los extremos del intervalo (%p)', async (n) => {
-    await set.execute('pac-1', 'HYGIENE', { intervalMonths: n }, 'dra-lopez');
+    await set.execute(
+      'pac-1',
+      byKey('HYGIENE'),
+      { intervalMonths: n },
+      'dra-lopez',
+    );
     expect(repo.upserts[0].intervalMonths).toBe(n);
+  });
+
+  it('DX-015-bis: el tipo también por su id; uno que no existe en la clínica da 404 sin escribir', async () => {
+    await set.execute(
+      'pac-1',
+      { id: TYPE_ID.HYGIENE },
+      { intervalMonths: 6 },
+      'dra-lopez',
+    );
+    expect(repo.upserts[0].recallType).toEqual({
+      id: TYPE_ID.HYGIENE,
+      systemKey: 'HYGIENE',
+    });
+    await expect(
+      set.execute(
+        'pac-1',
+        { id: 'tipo-de-otra-clinica' },
+        { intervalMonths: 6 },
+        'dra-lopez',
+      ),
+    ).rejects.toThrow(new NotFoundException(RECALL_TYPE_NOT_FOUND_MESSAGE));
+    expect(repo.upserts).toHaveLength(1);
   });
 
   it('404 si el paciente no existe, sin escribir', async () => {
     await expect(
-      set.execute('nadie', 'CHECKUP', { intervalMonths: 6 }, 'dra-lopez'),
+      set.execute(
+        'nadie',
+        byKey('CHECKUP'),
+        { intervalMonths: 6 },
+        'dra-lopez',
+      ),
     ).rejects.toThrow(new NotFoundException(PATIENT_NOT_FOUND_MESSAGE));
     expect(repo.calls).toEqual(['patientExists']);
   });
@@ -786,7 +858,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
       await expect(
         set.execute(
           'pac-1',
-          'CHECKUP',
+          byKey('CHECKUP'),
           { intervalMonths: 6, lastDoneAt },
           'dra-lopez',
         ),
@@ -799,24 +871,24 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
     await expect(
       set.execute(
         'pac-1',
-        'CHECKUP',
+        byKey('CHECKUP'),
         { intervalMonths: 6, lastDoneAt: '2026-11-07' },
         'dra-lopez',
       ),
     ).rejects.toThrow(new BadRequestException(LAST_DONE_FUTURE_MESSAGE));
     await set.execute(
       'pac-1',
-      'CHECKUP',
+      byKey('CHECKUP'),
       { intervalMonths: 6, lastDoneAt: SEDE_DAY },
       'dra-lopez',
     );
     await set.execute(
       'pac-1',
-      'HYGIENE',
+      byKey('HYGIENE'),
       { intervalMonths: 6, lastDoneAt: '1900-01-01' },
       'dra-lopez',
     );
-    expect(repo.upserts.map((u) => u.lastDoneAt)).toEqual([
+    expect(repo.upserts.map((u) => u.manualDoneAt)).toEqual([
       SEDE_DAY,
       '1900-01-01',
     ]);
@@ -833,7 +905,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
     await expect(
       late.execute(
         'pac-1',
-        'CHECKUP',
+        byKey('CHECKUP'),
         { intervalMonths: 6, lastDoneAt: '2026-11-07' },
         'dra-lopez',
       ),
@@ -846,7 +918,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
   it('pausa hasta una fecha posterior a hoy con su motivo recortado', async () => {
     await set.execute(
       'pac-1',
-      'CHECKUP',
+      byKey('CHECKUP'),
       {
         intervalMonths: 6,
         disabledUntil: '2026-11-07',
@@ -866,7 +938,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
       await expect(
         set.execute(
           'pac-1',
-          'CHECKUP',
+          byKey('CHECKUP'),
           { intervalMonths: 6, disabledUntil },
           'dra-lopez',
         ),
@@ -882,7 +954,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
       await expect(
         set.execute(
           'pac-1',
-          'CHECKUP',
+          byKey('CHECKUP'),
           { intervalMonths: 6, disabledUntil },
           'dra-lopez',
         ),
@@ -900,7 +972,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
     ]) {
       await set.execute(
         'pac-1',
-        'CHECKUP',
+        byKey('CHECKUP'),
         { intervalMonths: 6, ...input },
         'dra-lopez',
       );
@@ -918,7 +990,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
   it('el motivo admite 120 caracteres (tras recortar) y 121 da 400', async () => {
     await set.execute(
       'pac-1',
-      'CHECKUP',
+      byKey('CHECKUP'),
       {
         intervalMonths: 6,
         disabledUntil: '2026-12-01',
@@ -930,7 +1002,7 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
     await expect(
       set.execute(
         'pac-1',
-        'CHECKUP',
+        byKey('CHECKUP'),
         {
           intervalMonths: 6,
           disabledUntil: '2026-12-01',
@@ -1002,6 +1074,8 @@ describe('CreateRecallContactUseCase (DX-015)', () => {
       id: 'contact-1',
       recallId,
       kind: 'CHECKUP',
+      recallTypeId: TYPE_ID.CHECKUP,
+      recallTypeName: 'Control',
       patientId: 'pac-1',
       locationId: SUR,
       channel: 'CALL',
@@ -1157,5 +1231,17 @@ describe('CreateRecallContactUseCase (DX-015)', () => {
     await expect(
       build([NORTE]).create(pac2.id, { channel: 'CALL', outcome: 'NO_ANSWER' }),
     ).resolves.toMatchObject({ kind: 'HYGIENE', locationId: NORTE });
+  });
+});
+
+describe('ListRecallTypesUseCase (DX-015-bis)', () => {
+  it('devuelve los tipos de la clínica tal cual los da el repositorio', async () => {
+    const repo = new InMemoryRecallRepository();
+    const types = await new ListRecallTypesUseCase(repo).execute();
+    expect(types.map((t) => [t.name, t.systemKey])).toEqual([
+      ['Higiene', 'HYGIENE'],
+      ['Control', 'CHECKUP'],
+    ]);
+    expect(repo.calls).toEqual(['listTypes']);
   });
 });

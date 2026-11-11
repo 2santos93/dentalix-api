@@ -43,12 +43,14 @@ import {
   CreateRecallContactUseCase,
   GetPatientRecallsUseCase,
   ListDueRecallsUseCase,
+  ListRecallTypesUseCase,
   SetPatientRecallUseCase,
 } from '../application/use-cases/recall.use-cases';
 import type {
   PatientRecalls,
   RecallContactView,
   RecallDuePage,
+  RecallTypeView,
 } from '../domain/recall.entity';
 import {
   CreateRecallContactDto,
@@ -58,6 +60,7 @@ import {
   RecallDueCountQueryDto,
   RecallDuePageDto,
   RecallDueQueryDto,
+  RecallTypeDto,
   SetPatientRecallDto,
 } from './dto/recall.dto';
 
@@ -102,7 +105,7 @@ export class RecallController {
   @ApiOperation({
     summary: 'Lista de llamada: pacientes con el control vencido y sin cita',
     description:
-      'Recalls activos vencidos (o que vencen en ≤ withinDays) cuyo paciente no tiene cita futura agendada o confirmada ni una en curso, en cualquier sede; sin pausa vigente ni paciente archivado. Vencimiento = MAX(último control fijado, última cita atendida) + intervalo. Ordenada por días de vencido.',
+      'Recalls activos vencidos (o que vencen en ≤ withinDays) cuyo paciente no tiene cita futura agendada o confirmada ni una en curso, en cualquier sede; sin pausa vigente ni paciente archivado. Vencimiento (guardado) = MAX(último control fijado a mano, último procedimiento disparador del tipo realizado) + intervalo; una cita atendida sin ese procedimiento ya no lo mueve (DX-015-bis). Ordenada por días de vencido.',
   })
   @ApiHeader(LOCATION_HEADER)
   @ApiOkResponse({ type: RecallDuePageDto })
@@ -110,6 +113,7 @@ export class RecallController {
   list(@Query() query: RecallDueQueryDto): Promise<RecallDuePage> {
     return this.listDue.execute({
       kind: query.kind,
+      recallTypeId: query.recallTypeId,
       withinDays: query.withinDays,
       sort: query.sort,
       page: query.page,
@@ -129,6 +133,7 @@ export class RecallController {
   ): Promise<RecallDueCountDto> {
     const page = await this.listDue.execute({
       kind: query.kind,
+      recallTypeId: query.recallTypeId,
       withinDays: query.withinDays,
       page: 1,
       pageSize: 1,
@@ -181,13 +186,50 @@ export class RecallController {
   }
 }
 
-/** `:kind` de la ruta, en mayúsculas o minúsculas. */
-function parseKind(value: string): RecallKind {
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * `:kind` de la ruta: la clave del enum en mayúsculas o minúsculas
+ * (compatibilidad, DX-015) o, desde DX-015-bis, el id de un tipo de la clínica.
+ */
+function parseTypeRef(
+  value: string,
+): { systemKey: RecallKind } | { id: string } {
+  if (UUID_PATTERN.test(value)) return { id: value.toLowerCase() };
   const kind = value.toUpperCase();
-  if (kind === RecallKind.HYGIENE || kind === RecallKind.CHECKUP) return kind;
+  if (kind === RecallKind.HYGIENE || kind === RecallKind.CHECKUP) {
+    return { systemKey: kind };
+  }
   throw new BadRequestException(
-    'El tipo de recall debe ser HYGIENE o CHECKUP.',
+    'El tipo de recall debe ser HYGIENE, CHECKUP o el id de un tipo de la clínica.',
   );
+}
+
+/**
+ * DX-015-bis: los tipos de recall de la clínica (Higiene, Control,
+ * Mantenimiento periodontal y los que añada en Ajustes). Lectura para los
+ * cuatro roles que ven la ficha; sin datos de pacientes, así que sin @Audit.
+ */
+@ApiTags('recall')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(TenantContextInterceptor)
+@Controller('recall-types')
+export class RecallTypesController {
+  constructor(private readonly listTypes: ListRecallTypesUseCase) {}
+
+  @Roles(...APPOINTMENT_ROLES)
+  @Get()
+  @ApiOperation({
+    summary: 'Tipos de recall de la clínica',
+    description:
+      'Vivos (activos o no), por su orden: nombre, intervalo por defecto, clave de compatibilidad (HYGIENE/CHECKUP) y los procedimientos del catálogo cuyo DONE mueve su reloj.',
+  })
+  @ApiOkResponse({ type: [RecallTypeDto] })
+  list(): Promise<RecallTypeView[]> {
+    return this.listTypes.execute();
+  }
 }
 
 /**
@@ -236,9 +278,14 @@ export class PatientRecallsController {
   @ApiOperation({
     summary: 'Fijar (o cambiar, pausar, retirar) el recall de un tipo',
     description:
-      '«Control cada 6 meses»: intervalo (1–36 meses), día del último control (por defecto hoy en la sede), pausa hasta un día con motivo, o `active: false` para retirarlo. Un recall por paciente y tipo.',
+      '«Control cada 6 meses»: intervalo (1–36 meses), día del último control (por defecto hoy en la sede), pausa hasta un día con motivo, o `active: false` para retirarlo. Un recall por paciente y tipo. DX-015-bis: lo fijado queda como `manualDoneAt`; la base es el máximo con el último procedimiento disparador realizado.',
   })
-  @ApiParam({ name: 'kind', enum: RecallKind, enumName: 'RecallKind' })
+  @ApiParam({
+    name: 'kind',
+    type: String,
+    description:
+      'HYGIENE o CHECKUP (compatibilidad) o el id de un tipo de la clínica (GET /recall-types)',
+  })
   @ApiHeader({
     name: 'X-Location-Id',
     required: false,
@@ -250,7 +297,8 @@ export class PatientRecallsController {
   })
   @ApiForbiddenResponse({ description: RECALL_INTERVAL_FORBIDDEN_MESSAGE })
   @ApiNotFoundResponse({
-    description: 'Paciente de otra clínica o inexistente',
+    description:
+      'Paciente de otra clínica o inexistente; tipo de recall que no existe en esta clínica',
   })
   set(
     @Param('id', ParseUUIDPipe) patientId: string,
@@ -260,7 +308,7 @@ export class PatientRecallsController {
   ): Promise<PatientRecalls> {
     return this.setRecall.execute(
       patientId,
-      parseKind(kind),
+      parseTypeRef(kind),
       {
         intervalMonths: dto.intervalMonths,
         lastDoneAt: dto.lastDoneAt,

@@ -6,6 +6,7 @@ import {
   CreateRecallContactUseCase,
   GetPatientRecallsUseCase,
   ListDueRecallsUseCase,
+  ListRecallTypesUseCase,
   RECALL_CLOCK,
   SetPatientRecallUseCase,
 } from './application/use-cases/recall.use-cases';
@@ -14,19 +15,27 @@ import { PrismaRecallRepository } from './infrastructure/prisma-recall.repositor
 import {
   PatientRecallsController,
   RecallController,
+  RecallTypesController,
 } from './presentation/recall.controller';
 
 /**
  * Recall (DX-015): recall por paciente y tipo, lista de llamada de los
- * vencidos sin cita y registro de contactos. Exporta `ListDueRecallsUseCase`
+ * vencidos sin cita y registro de contactos. DX-015-bis: tipos por clínica con
+ * sus procedimientos disparadores (`GET /recall-types`); el DONE de uno mueve
+ * el reloj desde el repositorio de planes (`recall-from-procedure.ts`). Exporta `ListDueRecallsUseCase`
  * para el recuento de «Mi día» (DX-503). DX-465 (ocultar N días, tope de
  * intentos) y DX-391 (avisos automáticos) se apoyan en estas tablas.
  */
 @Module({
   imports: [JwtModule.register({})],
-  controllers: [RecallController, PatientRecallsController],
+  controllers: [
+    RecallController,
+    PatientRecallsController,
+    RecallTypesController,
+  ],
   providers: [
     ListDueRecallsUseCase,
+    ListRecallTypesUseCase,
     GetPatientRecallsUseCase,
     SetPatientRecallUseCase,
     CreateRecallContactUseCase,

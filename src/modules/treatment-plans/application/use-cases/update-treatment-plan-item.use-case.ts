@@ -16,7 +16,10 @@ import type {
   TreatmentPlanRepository,
   UpdateTreatmentPlanItemRepoInput,
 } from '../../domain/ports/treatment-plan-repository.port';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import { DENTAL_CATALOG_REPOSITORY } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 import type { DentalCatalogRepository } from '../../../dental-catalog/domain/ports/dental-catalog-repository.port';
 import {
@@ -148,7 +151,7 @@ export class UpdateTreatmentPlanItemUseCase {
     patch: UpdateTreatmentPlanItemInput,
     actor: DiscountActor,
     audit?: AuditRequestContext,
-  ): Promise<TreatmentPlanItem> {
+  ): Promise<TreatmentPlanItemUpdate> {
     const existing = await this.repo.findItemById(itemId);
     if (!existing) {
       throw new NotFoundException('Treatment plan item not found');

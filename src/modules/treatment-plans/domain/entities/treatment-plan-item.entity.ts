@@ -97,3 +97,21 @@ export interface TreatmentPlanItem {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * DX-015-bis: un recall que movió el cambio del ítem (DONE, salida de DONE o
+ * corrección de fecha o sede de un procedimiento disparador).
+ */
+export interface ItemRecallUpdate {
+  recallId: string;
+  recallTypeId: string;
+  recallTypeName: string;
+  /** Vencimiento tras el cambio (día civil). */
+  dueAt: string;
+}
+
+/** DX-015-bis: lo que devuelve el PATCH del ítem. */
+export interface TreatmentPlanItemUpdate extends TreatmentPlanItem {
+  /** Vacío si el procedimiento no dispara ningún tipo de recall. */
+  recallUpdates: ItemRecallUpdate[];
+}

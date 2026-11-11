@@ -153,6 +153,10 @@ export class PrismaAuthRepository implements AuthRepository {
           tenantId: tenant.id,
         })),
       });
+      // DX-015-bis: y con sus tipos de recall por defecto (Higiene, Control y
+      // Mantenimiento periodontal), ligados a los procedimientos del catálogo
+      // recién sembrado. La misma función que siembra las clínicas antiguas.
+      await tx.$executeRaw`SELECT public.dx_recall_seed_default_types(${tenant.id}::uuid)`;
       // DX-377: y con sus 4 medios de pago iniciales (uno por método antiguo).
       await seedInitialPaymentMethods(tx, tenant.id);
       // DX-359: el alta de la clínica y su ADMIN, auditada en esta misma

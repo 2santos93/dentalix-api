@@ -4,6 +4,7 @@ import {
   type RecallContactChannel,
   type RecallContactOutcome,
   type RecallKind,
+  type RecallSource,
 } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -17,6 +18,8 @@ import type {
   RecallDueQuery,
   RecallDueRow,
   RecallRef,
+  RecallTypeRef,
+  RecallTypeView,
   SetPatientRecallData,
   StaffRef,
 } from '../domain/recall.entity';
@@ -36,7 +39,13 @@ const CONTACT_SELECT = {
   appointmentId: true,
   authorId: true,
   createdAt: true,
-  recall: { select: { kind: true } },
+  recall: {
+    select: {
+      kind: true,
+      recallTypeId: true,
+      recallType: { select: { name: true } },
+    },
+  },
 } as const satisfies Prisma.RecallContactSelect;
 
 type ContactRow = Prisma.RecallContactGetPayload<{
@@ -52,7 +61,9 @@ interface DuePageColumns {
   patientPhone: string | null;
   phoneRegion: string | null;
   reminderOptedOut: boolean;
-  kind: RecallKind;
+  kind: RecallKind | null;
+  recallTypeId: string;
+  recallTypeName: string;
   intervalMonths: number;
   baseDate: Date;
   dueAt: Date;
@@ -83,24 +94,27 @@ export interface RecallDueSqlParams extends RecallDueQuery {
  * página salen de la misma evaluación de `d` (MATERIALIZED), y siempre vuelve
  * al menos una fila con el total (en una página fuera de rango, sin recall).
  *
- * Misma cuenta que DX-015 (`recallState`), en este orden:
+ * DX-015-bis: el vencimiento es el GUARDADO (`dueAt`, columna generada:
+ * "lastDoneAt" + intervalo), que ya no depende de la última visita. En orden:
  * 1. `c`: los recall ACTIVOS de pacientes vivos de la clínica que pueden
- *    salir, antes de las LATERAL. Sin cita futura ni en la clínica
- *    (`appointments_tenant_patient_upcoming_idx`; no depende de la sede) y
- *    con dos cotas que solo descartan lo que tampoco saldría después: «hoy» en
- *    la sede del paciente nunca pasa del «hoy» más adelantado de las sedes de
- *    la clínica (`maxToday`, un InitPlan: la cota va en el propio recorrido
- *    de patient_recalls), y el vencimiento nunca es anterior a lastDoneAt
- *    + intervalo (la base es el MAX con la última visita y sumar meses no
- *    retrocede).
+ *    salir, antes de las LATERAL: un RANGO sobre
+ *    `patient_recalls_tenant_due_idx` ("dueAt" <= el «hoy» más adelantado de
+ *    las sedes de la clínica + la ventana; `maxToday` es un InitPlan, así que
+ *    la cota va en el propio recorrido del índice). «Hoy» en la sede del
+ *    paciente nunca pasa de `maxToday`, así que la cota solo descarta lo que
+ *    tampoco saldría después. Sin cita futura ni en la clínica
+ *    (`appointments_tenant_patient_upcoming_idx`; no depende de la sede).
  * 2. `d`: la última cita atendida (appointments_tenant_patient_completed_idx)
- *    da la sede del paciente, su «hoy», la base y el vencimiento; ahí se
- *    aplican el filtro exacto y el de sede, que depende de esa cita.
- * 3. El último contacto solo de la página.
+ *    da SOLO la sede del paciente y su «hoy»; ahí se aplican el filtro exacto
+ *    por ese «hoy» y el de sede, que depende de esa cita.
+ * 3. El nombre del tipo y el último contacto, solo de la página.
  */
 export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
   const kindFilter = p.kind
     ? Prisma.sql`AND pr."kind" = ${p.kind}::"RecallKind"`
+    : Prisma.empty;
+  const typeFilter = p.recallTypeId
+    ? Prisma.sql`AND pr."recallTypeId" = ${p.recallTypeId}::uuid`
     : Prisma.empty;
   const locationFilter = p.locationIds
     ? Prisma.sql`AND k."homeLocationId" = ANY(${p.locationIds}::uuid[])`
@@ -116,9 +130,10 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
         FROM "locations" l
        WHERE l."tenantId" = ${p.tenantId}::uuid
     ),
-    c AS (
-      SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."intervalMonths",
-             pr."lastDoneAt", pr."disabledUntil", pr."locationId",
+    c AS MATERIALIZED (
+      SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."recallTypeId",
+             pr."intervalMonths", pr."lastDoneAt", pr."dueAt", pr."disabledUntil",
+             pr."locationId",
              pa."firstName", pa."lastName", pa."phone",
              (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut"
         FROM "patient_recalls" pr
@@ -126,11 +141,11 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
           ON pa."tenantId" = pr."tenantId" AND pa."id" = pr."patientId"
        WHERE pr."tenantId" = ${p.tenantId}::uuid
          AND pr."active"
+         AND pr."dueAt" <= (SELECT "maxToday" FROM bound) + ${p.withinDays}::int
          AND pa."deletedAt" IS NULL
          ${kindFilter}
+         ${typeFilter}
          AND (pr."disabledUntil" IS NULL OR pr."disabledUntil" <= (SELECT "maxToday" FROM bound))
-         AND (pr."lastDoneAt" + make_interval(months => pr."intervalMonths"))::date
-               <= (SELECT "maxToday" FROM bound) + ${p.withinDays}::int
          AND NOT EXISTS (
            SELECT 1 FROM "appointments" a
             WHERE a."tenantId" = pr."tenantId"
@@ -146,13 +161,14 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
          )
     ),
     d AS MATERIALIZED (
-      SELECT c."id", c."tenantId", c."patientId", c."kind", c."intervalMonths",
-             c."firstName", c."lastName", c."phone", c."reminderOptedOut",
+      SELECT c."id", c."tenantId", c."patientId", c."kind", c."recallTypeId",
+             c."intervalMonths", c."firstName", c."lastName", c."phone",
+             c."reminderOptedOut",
              k."homeLocationId", k."phoneRegion", k."today",
-             k."baseDate", k."dueAt", k."dueAt" - k."today" AS "dueIn"
+             c."lastDoneAt" AS "baseDate", c."dueAt", c."dueAt" - k."today" AS "dueIn"
         FROM c
         LEFT JOIN LATERAL (
-          SELECT a."start", a."locationId"
+          SELECT a."locationId"
             FROM "appointments" a
            WHERE a."tenantId" = c."tenantId"
              AND a."patientId" = c."patientId"
@@ -167,16 +183,9 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
        CROSS JOIN LATERAL (
          SELECT lo."id" AS "homeLocationId",
                 lo."defaultPhoneRegion" AS "phoneRegion",
-                v."today",
-                greatest(c."lastDoneAt", v."lastCompletedVisit") AS "baseDate",
-                (greatest(c."lastDoneAt", v."lastCompletedVisit")
-                  + make_interval(months => c."intervalMonths"))::date AS "dueAt"
-           FROM (
-             SELECT ((${p.now}::timestamptz) AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "today",
-                    ((lc."start" AT TIME ZONE 'UTC') AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "lastCompletedVisit"
-           ) v
+                ((${p.now}::timestamptz) AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "today"
        ) k
-       WHERE k."dueAt" <= k."today" + ${p.withinDays}::int
+       WHERE c."dueAt" <= k."today" + ${p.withinDays}::int
          AND (c."disabledUntil" IS NULL OR c."disabledUntil" <= k."today")
          ${locationFilter}
     ),
@@ -194,6 +203,8 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
            pg."phoneRegion",
            pg."reminderOptedOut",
            pg."kind",
+           pg."recallTypeId",
+           rt."name" AS "recallTypeName",
            pg."intervalMonths",
            pg."baseDate",
            pg."dueAt",
@@ -204,6 +215,8 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
            rc."createdAt" AS "lastContactAt"
       FROM (SELECT count(*)::int AS "total" FROM d) t
       LEFT JOIN page pg ON true
+      LEFT JOIN "recall_types" rt
+        ON rt."tenantId" = pg."tenantId" AND rt."id" = pg."recallTypeId"
       LEFT JOIN LATERAL (
         SELECT x."channel", x."outcome", x."createdAt"
           FROM "recall_contacts" x
@@ -216,10 +229,9 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
 }
 
 /**
- * DX-015 · Recall sobre Prisma. La lista hace en SQL la misma cuenta que
- * `recallState` (domain/recall-rules.ts): vencimiento = MAX(lastDoneAt, día de
- * la última cita atendida en la zona de la sede del paciente) + intervalo en
- * meses (`make_interval` recorta a fin de mes igual que `addCivilMonths`).
+ * DX-015 · Recall sobre Prisma. DX-015-bis: el vencimiento es la columna
+ * generada `dueAt` y la base la mantiene `dx_recall_recompute` (lo fijado a
+ * mano o el último DONE de un procedimiento disparador del tipo).
  */
 @Injectable()
 export class PrismaRecallRepository implements RecallRepository {
@@ -229,21 +241,22 @@ export class PrismaRecallRepository implements RecallRepository {
   ) {}
 
   /**
-   * Los recalls ACTIVOS de pacientes vivos, con su sede (la de la última cita
+   * Los recalls de pacientes con su tipo, su sede (la de la última cita
    * atendida o, sin ella, la del recall), hoy en la zona de esa sede, la base
-   * y el vencimiento. `extra` acota (paciente, tipo, sin cita futura).
+   * y el vencimiento guardado. `extra` acota (paciente, recall).
    */
   private recallFacts(now: Date, extra: Prisma.Sql): Prisma.Sql {
     return Prisma.sql`
-      SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."intervalMonths",
-             pr."lastDoneAt", pr."active", pr."disabledUntil",
+      SELECT pr."id", pr."tenantId", pr."patientId", pr."kind",
+             pr."recallTypeId", rt."name" AS "recallTypeName", rt."sortOrder",
+             pr."intervalMonths", pr."lastDoneAt", pr."dueAt", pr."manualDoneAt",
+             pr."lastDoneItemId", pr."source", pr."active", pr."disabledUntil",
              pr."disabledReason", pr."updatedAt", pr."updatedById",
              pa."firstName", pa."lastName", pa."phone",
              (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut",
              lo."id" AS "homeLocationId",
              lo."defaultPhoneRegion" AS "phoneRegion",
              ((${now}::timestamptz) AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "today",
-             ((lc."start" AT TIME ZONE 'UTC') AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "lastCompletedVisit",
              EXISTS (
                SELECT 1 FROM "appointments" a
                 WHERE a."tenantId" = pr."tenantId"
@@ -257,9 +270,12 @@ export class PrismaRecallRepository implements RecallRepository {
         FROM "patient_recalls" pr
         JOIN "patients" pa
           ON pa."tenantId" = pr."tenantId" AND pa."id" = pr."patientId"
-        -- Última cita atendida (appointments_tenant_patient_completed_idx).
+        JOIN "recall_types" rt
+          ON rt."tenantId" = pr."tenantId" AND rt."id" = pr."recallTypeId"
+        -- Última cita atendida (appointments_tenant_patient_completed_idx):
+        -- solo la sede del paciente.
         LEFT JOIN LATERAL (
-          SELECT a."start", a."locationId"
+          SELECT a."locationId"
             FROM "appointments" a
            WHERE a."tenantId" = pr."tenantId"
              AND a."patientId" = pr."patientId"
@@ -300,6 +316,8 @@ export class PrismaRecallRepository implements RecallRepository {
                   phoneRegion: r.phoneRegion,
                   reminderOptedOut: r.reminderOptedOut,
                   kind: r.kind,
+                  recallTypeId: r.recallTypeId,
+                  recallTypeName: r.recallTypeName,
                   intervalMonths: r.intervalMonths,
                   baseDate: civilOf(r.baseDate),
                   dueAt: civilOf(r.dueAt),
@@ -340,21 +358,26 @@ export class PrismaRecallRepository implements RecallRepository {
       const facts = await tx.$queryRaw<
         {
           id: string;
-          kind: RecallKind;
+          kind: RecallKind | null;
+          recallTypeId: string;
+          recallTypeName: string;
           intervalMonths: number;
           lastDoneAt: Date;
+          dueAt: Date;
+          manualDoneAt: Date | null;
+          lastDoneItemId: string | null;
+          source: RecallSource;
           active: boolean;
           disabledUntil: Date | null;
           disabledReason: string | null;
           homeLocationId: string;
           today: Date;
-          lastCompletedVisit: Date | null;
           hasUpcomingAppointment: boolean;
           updatedAt: Date;
           updatedById: string;
         }[]
       >`${this.recallFacts(now, Prisma.sql`AND pr."patientId" = ${patientId}::uuid`)}
-        ORDER BY pr."kind" ASC`;
+        ORDER BY rt."sortOrder" ASC, rt."name" ASC, pr."id" ASC`;
       const contactRows = await tx.recallContact.findMany({
         where: { patientId },
         select: CONTACT_SELECT,
@@ -369,15 +392,18 @@ export class PrismaRecallRepository implements RecallRepository {
         rows: facts.map((f) => ({
           id: f.id,
           kind: f.kind,
+          recallTypeId: f.recallTypeId,
+          recallTypeName: f.recallTypeName,
           intervalMonths: f.intervalMonths,
           lastDoneAt: civilOf(f.lastDoneAt),
+          dueAt: civilOf(f.dueAt),
+          manualDoneAt: f.manualDoneAt ? civilOf(f.manualDoneAt) : null,
+          lastDoneItemId: f.lastDoneItemId,
+          source: f.source,
           active: f.active,
           disabledUntil: f.disabledUntil ? civilOf(f.disabledUntil) : null,
           disabledReason: f.disabledReason,
           locationId: f.homeLocationId,
-          lastCompletedVisit: f.lastCompletedVisit
-            ? civilOf(f.lastCompletedVisit)
-            : null,
           hasUpcomingAppointment: f.hasUpcomingAppointment,
           today: civilOf(f.today),
           updatedAt: f.updatedAt,
@@ -399,40 +425,93 @@ export class PrismaRecallRepository implements RecallRepository {
     });
   }
 
+  /**
+   * DX-015-bis: crea o cambia el único recall del paciente de ese tipo y
+   * recalcula su base en la MISMA transacción: lo fijado va a "manualDoneAt"
+   * y "lastDoneAt" queda en el máximo con el último DONE de un disparador
+   * (`dx_recall_recompute`). El alta va a la sede de trabajo.
+   */
   upsertRecall(data: SetPatientRecallData): Promise<{ id: string }> {
     return this.prisma.runWithTenant(async (tx) => {
       const tenantId = this.tenantId();
+      const manualDoneAt = dateOf(data.manualDoneAt);
       const fields = {
+        // Compatibilidad (D7): la clave del tipo, si tiene.
+        kind: data.recallType.systemKey,
         intervalMonths: data.intervalMonths,
-        lastDoneAt: dateOf(data.lastDoneAt),
+        manualDoneAt,
+        lastDoneAt: manualDoneAt,
         active: data.active,
         disabledUntil: data.disabledUntil ? dateOf(data.disabledUntil) : null,
         disabledReason: data.disabledUntil ? data.disabledReason : null,
         updatedById: data.actorId,
       };
       const existing = await tx.patientRecall.findFirst({
-        where: { patientId: data.patientId, kind: data.kind },
+        where: { patientId: data.patientId, recallTypeId: data.recallType.id },
         select: { id: true },
       });
-      if (existing) {
-        return tx.patientRecall.update({
-          where: { id: existing.id },
-          data: fields,
-          select: { id: true },
-        });
-      }
-      const locationId = await this.tenantContext.writeLocationId(tx);
-      return tx.patientRecall.create({
-        data: {
-          tenantId,
-          patientId: data.patientId,
-          kind: data.kind,
-          locationId,
-          createdById: data.actorId,
-          ...fields,
+      const row = existing
+        ? await tx.patientRecall.update({
+            where: { id: existing.id },
+            data: fields,
+            select: { id: true },
+          })
+        : await tx.patientRecall.create({
+            data: {
+              tenantId,
+              patientId: data.patientId,
+              recallTypeId: data.recallType.id,
+              locationId: await this.tenantContext.writeLocationId(tx),
+              createdById: data.actorId,
+              source: 'MANUAL',
+              ...fields,
+            },
+            select: { id: true },
+          });
+      await tx.$executeRaw`SELECT public.dx_recall_recompute(${tenantId}::uuid, ${data.patientId}::uuid, ${data.recallType.id}::uuid)`;
+      return row;
+    });
+  }
+
+  /** DX-015-bis: el tipo vivo con esa clave del enum o ese id; null si no hay. */
+  findType(
+    ref: { systemKey: RecallKind } | { id: string },
+  ): Promise<RecallTypeRef | null> {
+    return this.prisma.runWithTenant((tx) =>
+      tx.recallType.findFirst({
+        where: {
+          deletedAt: null,
+          ...('id' in ref ? { id: ref.id } : { systemKey: ref.systemKey }),
         },
-        select: { id: true },
+        select: { id: true, systemKey: true },
+      }),
+    );
+  }
+
+  /** DX-015-bis: los tipos vivos de la clínica (activos o no), en su orden. */
+  listTypes(): Promise<RecallTypeView[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.recallType.findMany({
+        where: { deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          defaultIntervalMonths: true,
+          active: true,
+          sortOrder: true,
+          systemKey: true,
+          exclusionGroup: true,
+          triggers: {
+            select: { catalogItemId: true },
+            orderBy: { catalogItemId: 'asc' },
+          },
+        },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
       });
+      return rows.map(({ triggers, ...type }) => ({
+        ...type,
+        triggerCatalogItemIds: triggers.map((t) => t.catalogItemId),
+      }));
     });
   }
 
@@ -444,7 +523,7 @@ export class PrismaRecallRepository implements RecallRepository {
         {
           id: string;
           patientId: string;
-          kind: RecallKind;
+          kind: RecallKind | null;
           homeLocationId: string;
         }[]
       >`${this.recallFacts(
@@ -523,6 +602,8 @@ export class PrismaRecallRepository implements RecallRepository {
       id: row.id,
       recallId: row.recallId,
       kind: row.recall.kind,
+      recallTypeId: row.recall.recallTypeId,
+      recallTypeName: row.recall.recallType.name,
       patientId: row.patientId,
       locationId: row.locationId,
       channel: row.channel,

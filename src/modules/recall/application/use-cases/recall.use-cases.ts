@@ -28,6 +28,8 @@ import {
   type RecallContactView,
   type RecallDuePage,
   type RecallDueSort,
+  type RecallTypeRef,
+  type RecallTypeView,
 } from '../../domain/recall.entity';
 import {
   RECALL_INTERVAL_MAX,
@@ -40,6 +42,8 @@ export type RecallClock = () => Date;
 export const RECALL_CLOCK = Symbol('RECALL_CLOCK');
 
 export const PATIENT_NOT_FOUND_MESSAGE = 'Paciente no encontrado.';
+export const RECALL_TYPE_NOT_FOUND_MESSAGE =
+  'Ese tipo de recall no existe en esta clínica.';
 export const RECALL_NOT_FOUND_MESSAGE = 'Recall no encontrado.';
 export const INTERVAL_RANGE_MESSAGE = `El intervalo va de ${RECALL_INTERVAL_MIN} a ${RECALL_INTERVAL_MAX} meses.`;
 export const LAST_DONE_INVALID_MESSAGE =
@@ -69,6 +73,8 @@ function wholeOrDefault(
 
 export interface ListDueRecallsInput {
   kind?: RecallKind;
+  /** DX-015-bis: solo un tipo de la clínica. */
+  recallTypeId?: string;
   withinDays?: number;
   sort?: RecallDueSort;
   page?: number;
@@ -97,6 +103,7 @@ export class ListDueRecallsUseCase {
     );
     const { rows, total } = await this.repo.listDue({
       kind: input.kind,
+      recallTypeId: input.recallTypeId,
       withinDays: wholeOrDefault(
         input.withinDays,
         0,
@@ -123,6 +130,8 @@ export class ListDueRecallsUseCase {
             ),
         reminderOptedOut: row.reminderOptedOut,
         kind: row.kind,
+        recallTypeId: row.recallTypeId,
+        recallTypeName: row.recallTypeName,
         intervalMonths: row.intervalMonths,
         baseDate: row.baseDate,
         dueAt: row.dueAt,
@@ -158,9 +167,8 @@ export class GetPatientRecallsUseCase {
       recalls: rows.map((row) => {
         const state = recallState(
           {
-            intervalMonths: row.intervalMonths,
             lastDoneAt: row.lastDoneAt,
-            lastCompletedVisit: row.lastCompletedVisit,
+            dueAt: row.dueAt,
             active: row.active,
             disabledUntil: row.disabledUntil,
             hasUpcomingAppointment: row.hasUpcomingAppointment,
@@ -171,8 +179,13 @@ export class GetPatientRecallsUseCase {
         return {
           id: row.id,
           kind: row.kind,
+          recallTypeId: row.recallTypeId,
+          recallTypeName: row.recallTypeName,
           intervalMonths: row.intervalMonths,
           lastDoneAt: row.lastDoneAt,
+          manualDoneAt: row.manualDoneAt,
+          lastDoneItemId: row.lastDoneItemId,
+          source: row.source,
           active: row.active,
           disabledUntil: row.disabledUntil,
           disabledReason: row.disabledReason,
@@ -208,6 +221,10 @@ export interface SetPatientRecallInput {
  * Fijar el recall de un tipo (DX-015): «control cada 6 meses». Crea o cambia el
  * único recall del paciente de ese tipo. Lo hace el clínico; cada cambio deja
  * un audit_event (en el controlador).
+ *
+ * DX-015-bis: el tipo llega por su clave del enum (`HYGIENE`, `CHECKUP`:
+ * compatibilidad) o por su id. Lo fijado es `manualDoneAt`; la base es el
+ * máximo con el último DONE de un procedimiento disparador del tipo.
  */
 @Injectable()
 export class SetPatientRecallUseCase {
@@ -219,7 +236,7 @@ export class SetPatientRecallUseCase {
 
   async execute(
     patientId: string,
-    kind: RecallKind,
+    type: { systemKey: RecallKind } | { id: string },
     input: SetPatientRecallInput,
     actorId: string,
   ): Promise<PatientRecalls> {
@@ -232,6 +249,10 @@ export class SetPatientRecallUseCase {
     }
     if (!(await this.repo.patientExists(patientId))) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    }
+    const recallType: RecallTypeRef | null = await this.repo.findType(type);
+    if (!recallType) {
+      throw new NotFoundException(RECALL_TYPE_NOT_FOUND_MESSAGE);
     }
     const today = await this.repo.writeToday(this.now());
 
@@ -265,15 +286,27 @@ export class SetPatientRecallUseCase {
 
     await this.repo.upsertRecall({
       patientId,
-      kind,
+      recallType,
       intervalMonths: input.intervalMonths,
-      lastDoneAt,
+      manualDoneAt: lastDoneAt,
       active: input.active ?? true,
       disabledUntil,
       disabledReason: disabledUntil ? reason : null,
       actorId,
     });
     return this.getRecalls.execute(patientId);
+  }
+}
+
+/** DX-015-bis: los tipos de recall de la clínica (ficha, filtro de la lista). */
+@Injectable()
+export class ListRecallTypesUseCase {
+  constructor(
+    @Inject(RECALL_REPOSITORY) private readonly repo: RecallRepository,
+  ) {}
+
+  execute(): Promise<RecallTypeView[]> {
+    return this.repo.listTypes();
   }
 }
 

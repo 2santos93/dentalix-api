@@ -1,3 +1,4 @@
+import type { RecallKind } from '@prisma/client';
 import type {
   NewRecallContact,
   PatientRecallRow,
@@ -5,6 +6,8 @@ import type {
   RecallDueQuery,
   RecallDueRow,
   RecallRef,
+  RecallTypeRef,
+  RecallTypeView,
   SetPatientRecallData,
   StaffRef,
 } from '../recall.entity';
@@ -25,7 +28,14 @@ export interface RecallRepository {
   ): Promise<{ rows: PatientRecallRow[]; contacts: RecallContactView[] }>;
   /** Hoy en la zona de la sede donde se escribe (la activa o la de trabajo). */
   writeToday(now: Date): Promise<string>;
+  /** Crea o cambia el recall del tipo y recalcula su base (misma transacción). */
   upsertRecall(data: SetPatientRecallData): Promise<{ id: string }>;
+  /** DX-015-bis: el tipo vivo por su clave del enum o por su id. */
+  findType(
+    ref: { systemKey: RecallKind } | { id: string },
+  ): Promise<RecallTypeRef | null>;
+  /** DX-015-bis: los tipos vivos de la clínica, en su orden. */
+  listTypes(): Promise<RecallTypeView[]>;
   /** El recall con su sede: la misma que usa la lista para filtrar. */
   findRecall(recallId: string): Promise<RecallRef | null>;
   appointmentOfPatient(

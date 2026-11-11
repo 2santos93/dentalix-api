@@ -2,6 +2,7 @@ import type {
   RecallContactChannel,
   RecallContactOutcome,
   RecallKind,
+  RecallSource,
 } from '@prisma/client';
 import type { RecallStatus } from './recall-rules';
 
@@ -17,7 +18,10 @@ export const RECALL_MAX_PAGE_SIZE = 100;
 export type RecallDueSort = 'MOST_OVERDUE' | 'LEAST_OVERDUE';
 
 export interface RecallDueQuery {
+  /** Compatibilidad (DX-015): el tipo con esa `systemKey`. */
   kind?: RecallKind;
+  /** DX-015-bis: solo un tipo de la clínica. */
+  recallTypeId?: string;
   withinDays: number;
   sort: RecallDueSort;
   page: number;
@@ -42,9 +46,12 @@ export interface RecallDueRow {
   /** Región telefónica por defecto de la sede del paciente (lectura de wa.me). */
   phoneRegion: string | null;
   reminderOptedOut: boolean;
-  kind: RecallKind;
+  /** DEPRECADO (D7): la `systemKey` del tipo, o null si no tiene. */
+  kind: RecallKind | null;
+  recallTypeId: string;
+  recallTypeName: string;
   intervalMonths: number;
-  /** Base del vencimiento (lo fijado o la última visita atendida). */
+  /** Base del vencimiento: lo fijado o el último DONE de un disparador. */
   baseDate: string;
   dueAt: string;
   daysOverdue: number;
@@ -62,7 +69,9 @@ export interface RecallDueItem {
   patientWhatsApp: string | null;
   /** DX-128: baja de los avisos. Sigue en la lista, pero sin «Llamar»/«WhatsApp». */
   reminderOptedOut: boolean;
-  kind: RecallKind;
+  kind: RecallKind | null;
+  recallTypeId: string;
+  recallTypeName: string;
   intervalMonths: number;
   baseDate: string;
   dueAt: string;
@@ -81,14 +90,20 @@ export interface RecallDuePage {
 /** Hechos de un recall del paciente leídos de la BD (ficha). */
 export interface PatientRecallRow {
   id: string;
-  kind: RecallKind;
+  kind: RecallKind | null;
+  recallTypeId: string;
+  recallTypeName: string;
   intervalMonths: number;
   lastDoneAt: string;
+  /** Vencimiento guardado (columna generada). */
+  dueAt: string;
+  manualDoneAt: string | null;
+  lastDoneItemId: string | null;
+  source: RecallSource;
   active: boolean;
   disabledUntil: string | null;
   disabledReason: string | null;
   locationId: string;
-  lastCompletedVisit: string | null;
   hasUpcomingAppointment: boolean;
   /** Hoy en la zona de la sede del paciente. */
   today: string;
@@ -98,9 +113,14 @@ export interface PatientRecallRow {
 
 export interface PatientRecallView {
   id: string;
-  kind: RecallKind;
+  kind: RecallKind | null;
+  recallTypeId: string;
+  recallTypeName: string;
   intervalMonths: number;
   lastDoneAt: string;
+  manualDoneAt: string | null;
+  lastDoneItemId: string | null;
+  source: RecallSource;
   active: boolean;
   disabledUntil: string | null;
   disabledReason: string | null;
@@ -117,7 +137,7 @@ export interface PatientRecallView {
 export interface RecallRef {
   id: string;
   patientId: string;
-  kind: RecallKind;
+  kind: RecallKind | null;
   locationId: string;
 }
 
@@ -130,7 +150,9 @@ export interface StaffRef {
 export interface RecallContactView {
   id: string;
   recallId: string;
-  kind: RecallKind;
+  kind: RecallKind | null;
+  recallTypeId: string;
+  recallTypeName: string;
   patientId: string;
   locationId: string | null;
   channel: RecallContactChannel;
@@ -148,9 +170,10 @@ export interface PatientRecalls {
 
 export interface SetPatientRecallData {
   patientId: string;
-  kind: RecallKind;
+  recallType: RecallTypeRef;
   intervalMonths: number;
-  lastDoneAt: string;
+  /** Lo que fija el clínico (`manualDoneAt`); la base es el máximo con los DONE. */
+  manualDoneAt: string;
   active: boolean;
   disabledUntil: string | null;
   disabledReason: string | null;
@@ -166,4 +189,23 @@ export interface NewRecallContact {
   note: string | null;
   appointmentId: string | null;
   authorId: string;
+}
+
+/** DX-015-bis: lo justo de un tipo para fijar un recall. */
+export interface RecallTypeRef {
+  id: string;
+  systemKey: RecallKind | null;
+}
+
+/** DX-015-bis: un tipo de recall de la clínica (`GET /recall-types`). */
+export interface RecallTypeView {
+  id: string;
+  name: string;
+  defaultIntervalMonths: number;
+  active: boolean;
+  sortOrder: number;
+  systemKey: RecallKind | null;
+  exclusionGroup: string | null;
+  /** Procedimientos del catálogo cuyo DONE mueve el reloj del tipo. */
+  triggerCatalogItemIds: string[];
 }

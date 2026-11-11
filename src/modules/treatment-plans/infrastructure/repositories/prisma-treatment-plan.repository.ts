@@ -37,7 +37,10 @@ import {
   TreatmentPlanAcceptanceSummary,
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import {
   ItemAttributionChange,
   PERFORMER_NOT_AT_LOCATION_MESSAGE,
@@ -54,6 +57,7 @@ import {
 } from '../../../discounts/domain/reference-in-plan';
 import type { AuditAttributionSide } from '../../../audit/domain/audit-metadata';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { recallsFromProcedure } from '../../../recall/infrastructure/recall-from-procedure';
 
 type PrismaTreatmentPlan = Prisma.TreatmentPlanGetPayload<
   Record<string, never>
@@ -560,7 +564,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
     id: string,
     decide: DecideItemChange,
     audit?: AuditRequestContext,
-  ): Promise<TreatmentPlanItem> {
+  ): Promise<TreatmentPlanItemUpdate> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const planId = await lockPlanOfItem(tx, id);
@@ -636,7 +640,51 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       if (mirror && becameDone) {
         await mirrorIntoOdontogram(tx, tenantId, item, mirror);
       }
-      return mapItemToEntity(item);
+
+      // DX-015-bis: el reloj del recall lo mueve el procedimiento, en esta
+      // misma transacción (si falla, falla todo).
+      const leftDone =
+        previous.status === TreatmentPlanItemStatus.DONE &&
+        item.status !== TreatmentPlanItemStatus.DONE;
+      const corrected =
+        attribution?.kind === 'CORRECT' &&
+        item.status === TreatmentPlanItemStatus.DONE;
+      const recallUpdates =
+        becameDone || leftDone || corrected
+          ? await recallsFromProcedure(tx, {
+              tenantId,
+              patientId: item.patientId,
+              itemId: item.id,
+              catalogItemId: item.catalogItemId,
+              createMissing: becameDone,
+              actorId: audit?.actor.userId ?? item.performedById,
+            })
+          : [];
+      if (audit) {
+        for (const update of recallUpdates) {
+          await writeAuditEvent(tx, {
+            tenantId,
+            locationId: audit.locationId,
+            actor: {
+              kind: 'user',
+              userId: audit.actor.userId,
+              role: audit.actor.role,
+            },
+            action: 'UPDATE',
+            resourceType: 'PATIENT_RECALL',
+            resourceId: update.recallId,
+            patient: { kind: 'patient', id: plan.patientId },
+            requestId: audit.requestId,
+            ip: audit.ip,
+            userAgent: audit.userAgent,
+            metadata: {
+              reason: 'RECALL_FROM_PROCEDURE',
+              params: { itemId: item.id, recallTypeId: update.recallTypeId },
+            },
+          });
+        }
+      }
+      return { ...mapItemToEntity(item), recallUpdates };
     });
   }
 
