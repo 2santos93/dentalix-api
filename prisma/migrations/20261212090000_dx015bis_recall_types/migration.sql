@@ -242,7 +242,7 @@ BEGIN
        "systemKey", "exclusionGroup", "createdAt", "updatedAt")
     VALUES
       (v_type, p_tenant, d."name", d."months", true, d."sortOrder",
-       d."systemKey", d."exclusionGroup", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+       d."systemKey", d."exclusionGroup", pg_catalog.timezone('UTC', pg_catalog.now()), pg_catalog.timezone('UTC', pg_catalog.now()));
     INSERT INTO public."recall_type_triggers" ("tenantId", "recallTypeId", "catalogItemId")
     SELECT p_tenant, v_type, ci."id"
       FROM public."dental_catalog_items" ci
@@ -323,7 +323,7 @@ BEGIN
   IF v_day IS NULL AND v_manual IS NULL THEN
     UPDATE public."patient_recalls" pr
        SET "lastDoneItemId" = NULL,
-           "updatedAt" = CURRENT_TIMESTAMP
+           "updatedAt" = pg_catalog.timezone('UTC', pg_catalog.now())
      WHERE pr."id" = v_recall
        AND pr."lastDoneItemId" IS NOT NULL;
     GET DIAGNOSTICS v_changed = ROW_COUNT;
@@ -337,7 +337,7 @@ BEGIN
            WHEN v_day IS NOT NULL AND (v_manual IS NULL OR v_day >= v_manual) THEN v_item
            ELSE NULL
          END,
-         "updatedAt" = CURRENT_TIMESTAMP
+         "updatedAt" = pg_catalog.timezone('UTC', pg_catalog.now())
    WHERE pr."id" = v_recall
      AND (pr."lastDoneAt" IS DISTINCT FROM greatest(v_manual, v_day)
           OR pr."lastDoneItemId" IS DISTINCT FROM CASE
@@ -471,7 +471,7 @@ BEGIN
      "createdById", "updatedById", "createdAt", "updatedAt")
   SELECT gen_random_uuid(), p_tenant, d."patientId", d."recallTypeId", rt."systemKey",
          rt."defaultIntervalMonths", d."day", d."itemId", d."performedLocationId", 'BACKFILL',
-         d."performedById", d."performedById", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+         d."performedById", d."performedById", pg_catalog.timezone('UTC', pg_catalog.now()), pg_catalog.timezone('UTC', pg_catalog.now())
     FROM last_done d
     JOIN public."recall_types" rt ON rt."tenantId" = p_tenant AND rt."id" = d."recallTypeId"
    WHERE NOT EXISTS (

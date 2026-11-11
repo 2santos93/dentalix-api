@@ -66,7 +66,7 @@ export async function recallsFromProcedure(
              ((i."completedAt" AT TIME ZONE 'UTC') AT TIME ZONE l."timeZone")::date,
              i."id", i."performedLocationId", 'PROCEDURE',
              ${change.actorId}::uuid, ${change.actorId}::uuid,
-             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+             pg_catalog.timezone('UTC', pg_catalog.now()), pg_catalog.timezone('UTC', pg_catalog.now())
         FROM "recall_type_triggers" t
         JOIN "recall_types" rt
           ON rt."tenantId" = t."tenantId" AND rt."id" = t."recallTypeId"
