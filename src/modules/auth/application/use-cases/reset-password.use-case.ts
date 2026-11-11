@@ -33,13 +33,37 @@ export const RESET_TOKEN_MESSAGES: Record<
   USED: 'Este enlace para restablecer la contraseña ya se usó. Si necesitas cambiarla otra vez, pide un enlace nuevo.',
 };
 
-function tokenError(
+/**
+ * DX-114 R4: código estable (`code`) del cuerpo de los 404/410 del enlace,
+ * para que la web distinga los casos sin depender del texto del mensaje.
+ */
+export const RESET_TOKEN_ERROR_CODES = {
+  INVALID: 'RESET_TOKEN_INVALID',
+  EXPIRED: 'RESET_TOKEN_EXPIRED',
+  USED: 'RESET_TOKEN_USED',
+} as const satisfies Record<Exclude<PasswordResetTokenStatus, 'VALID'>, string>;
+
+export type ResetTokenErrorCode =
+  (typeof RESET_TOKEN_ERROR_CODES)[keyof typeof RESET_TOKEN_ERROR_CODES];
+
+/**
+ * 404 (`RESET_TOKEN_INVALID`) o 410 (`RESET_TOKEN_EXPIRED` /
+ * `RESET_TOKEN_USED`), con el cuerpo `{ statusCode, error, code, message }`.
+ * El 404 es idéntico para un token inexistente, reemplazado o de otra clínica.
+ */
+export function resetTokenError(
   status: Exclude<PasswordResetTokenStatus, 'VALID'>,
 ): HttpException {
   const message = RESET_TOKEN_MESSAGES[status];
+  const code = RESET_TOKEN_ERROR_CODES[status];
   return status === 'INVALID'
-    ? new NotFoundException(message)
-    : new GoneException(message);
+    ? new NotFoundException({
+        statusCode: 404,
+        error: 'Not Found',
+        code,
+        message,
+      })
+    : new GoneException({ statusCode: 410, error: 'Gone', code, message });
 }
 
 export interface ResetRequestMeta {
@@ -86,13 +110,13 @@ export class ResetPasswordUseCase {
 
     const { status, record } = await this.lookup(input.tenantId, input.token);
     if (status !== 'VALID' || !record) {
-      throw tokenError(status === 'VALID' ? 'INVALID' : status);
+      throw resetTokenError(status === 'VALID' ? 'INVALID' : status);
     }
     const role = await this.repo.activeMembershipRole(
       input.tenantId,
       record.userId,
     );
-    if (!role) throw tokenError('INVALID');
+    if (!role) throw resetTokenError('INVALID');
 
     const passwordHash = await this.password.hash(input.password);
     const consumed = await this.repo.consumeAndSetPassword({
@@ -104,7 +128,7 @@ export class ResetPasswordUseCase {
     if (!consumed) {
       // Otra petición lo usó (o lo reemplazó) entre la lectura y el uso.
       const again = await this.lookup(input.tenantId, input.token);
-      throw tokenError(again.status === 'VALID' ? 'USED' : again.status);
+      throw resetTokenError(again.status === 'VALID' ? 'USED' : again.status);
     }
 
     // SEC-067: el contador de códigos MFA fallidos NO se borra aquí: solo lo

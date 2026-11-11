@@ -285,6 +285,11 @@ describe('Recuperar la contraseña (e2e, DX-010)', () => {
     expect((again.body as { message: string }).message).toMatch(
       /ya se usó.*pide un enlace nuevo/i,
     );
+    // DX-114 R4: código estable para la web.
+    expect(again.body).toMatchObject({
+      statusCode: 410,
+      code: 'RESET_TOKEN_USED',
+    });
 
     // Auditoría (DX-009): quién y cuándo, sin datos sensibles.
     const events = await raw.auditEvent.findMany({
@@ -337,9 +342,50 @@ describe('Recuperar la contraseña (e2e, DX-010)', () => {
     expect((res.body as { message: string }).message).toMatch(
       /no es válido.*Pide un enlace nuevo/,
     );
+    expect(res.body).toMatchObject({
+      statusCode: 404,
+      code: 'RESET_TOKEN_INVALID',
+    });
     await post(HOST_A, 'reset-password/check', { token: second.token })
       .expect(200)
       .expect({ status: 'VALID' });
+  });
+
+  it('DX-114: cambiar la contraseña desde el perfil invalida el enlace pedido antes (404 RESET_TOKEN_INVALID)', async () => {
+    const { token } = await requestLink();
+    const session = await login(HOST_A, USER_EMAIL, PASSWORD).expect(201);
+    const { accessToken } = session.body as { accessToken: string };
+    await request(app.getHttpServer())
+      .post('/api/v1/me/password')
+      .set('X-Tenant-Host', HOST_A)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD })
+      .expect(200);
+
+    await post(HOST_A, 'reset-password/check', { token })
+      .expect(200)
+      .expect({ status: 'INVALID' });
+    const res = await post(HOST_A, 'reset-password', {
+      token,
+      password: 'Otra-Clave-2026!',
+    }).expect(404);
+    // El mismo cuerpo que un enlace inexistente o reemplazado.
+    expect(res.body).toMatchObject({
+      statusCode: 404,
+      code: 'RESET_TOKEN_INVALID',
+    });
+    expect((res.body as { message: string }).message).toMatch(
+      /no es válido.*Pide un enlace nuevo/,
+    );
+    // La contraseña es la del perfil, no la del enlace.
+    await login(HOST_A, USER_EMAIL, NEW_PASSWORD).expect(201);
+
+    // Deja la contraseña como estaba para los demás casos.
+    const restore = await requestLink();
+    await post(HOST_A, 'reset-password', {
+      token: restore.token,
+      password: PASSWORD,
+    }).expect(204);
   });
 
   it('caducado: 410 en español y la cuenta no cambia', async () => {
@@ -359,6 +405,10 @@ describe('Recuperar la contraseña (e2e, DX-010)', () => {
       password: NEW_PASSWORD,
     }).expect(410);
     expect((res.body as { message: string }).message).toMatch(/caducó/);
+    expect(res.body).toMatchObject({
+      statusCode: 410,
+      code: 'RESET_TOKEN_EXPIRED',
+    });
     await login(HOST_A, USER_EMAIL, PASSWORD).expect(201);
   });
 
@@ -368,6 +418,10 @@ describe('Recuperar la contraseña (e2e, DX-010)', () => {
       password: NEW_PASSWORD,
     }).expect(404);
     expect((res.body as { message: string }).message).toMatch(/no es válido/);
+    expect(res.body).toMatchObject({
+      statusCode: 404,
+      code: 'RESET_TOKEN_INVALID',
+    });
   });
 
   it('aislamiento: el enlace no vale en el host de una clínica donde el usuario no es miembro activo', async () => {
@@ -375,10 +429,23 @@ describe('Recuperar la contraseña (e2e, DX-010)', () => {
     await post(HOST_B, 'reset-password/check', { token })
       .expect(200)
       .expect({ status: 'INVALID' });
-    await post(HOST_B, 'reset-password', {
+    const foreign = await post(HOST_B, 'reset-password', {
       token,
       password: NEW_PASSWORD,
     }).expect(404);
+    // Sin enumeración: idéntico a un token inexistente.
+    const unknown = await post(HOST_B, 'reset-password', {
+      token: 'B'.repeat(43),
+      password: NEW_PASSWORD,
+    }).expect(404);
+    const strip = (body: object) => {
+      const { requestId: _requestId, ...rest } = body as { requestId?: string };
+      return rest;
+    };
+    expect(strip(foreign.body as object)).toEqual(
+      strip(unknown.body as object),
+    );
+    expect(foreign.body).toMatchObject({ code: 'RESET_TOKEN_INVALID' });
     // Sigue vivo para su clínica.
     await post(HOST_A, 'reset-password/check', { token })
       .expect(200)
