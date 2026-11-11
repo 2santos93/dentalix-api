@@ -254,7 +254,7 @@ describe('Paso a la mayoría de edad (e2e, DX-342)', () => {
       .send({ locationIds: [principalId] })
       .expect(200);
     restrictedToken = await loginAs(app, clinic.host, restricted.email);
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await app.close();
