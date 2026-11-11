@@ -184,6 +184,8 @@ describe('consumidores de la zona de la sede: día civil en Tokio (int, G1)', ()
         responsibles,
         majorityAge,
         today: civilDateIn(NOW, timeZone),
+        timeZone,
+        majorityReview: ctx!.majorityReview,
         automatic: true,
       });
     expect(recipientOn(ctx!.locationTimeZone)).toMatchObject({

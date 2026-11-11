@@ -18,6 +18,7 @@ import {
 import {
   loadNoticeSettings,
   loadNoticeResponsibles,
+  loadMajorityReview,
 } from '../notices/notice-context';
 import { defaultPhoneRegionIn, reconcilePatientPhoneE164 } from '../phone-e164';
 
@@ -57,25 +58,28 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
     const { whatsappOptInById, id, ...rest } = row;
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
-    const [membership, responsibles, noticeSettings] = await Promise.all([
-      whatsappOptInById
-        ? tx.clinicMembership.findFirst({
-            where: { userId: whatsappOptInById },
-            orderBy: { createdAt: 'desc' },
-            select: { user: { select: { fullName: true } } },
-          })
-        : null,
-      loadNoticeResponsibles(tx, id),
-      loadNoticeSettings(
-        tx,
-        tenantId,
-        this.tenantContext.getLocationId() ?? null,
-      ),
-    ]);
+    const [membership, responsibles, majorityReview, noticeSettings] =
+      await Promise.all([
+        whatsappOptInById
+          ? tx.clinicMembership.findFirst({
+              where: { userId: whatsappOptInById },
+              orderBy: { createdAt: 'desc' },
+              select: { user: { select: { fullName: true } } },
+            })
+          : null,
+        loadNoticeResponsibles(tx, id),
+        loadMajorityReview(tx, id),
+        loadNoticeSettings(
+          tx,
+          tenantId,
+          this.tenantContext.getLocationId() ?? null,
+        ),
+      ]);
     return {
       patientId: id,
       ...rest,
       responsibles,
+      majorityReview,
       noticeSettings,
       whatsappOptInBy: whatsappOptInById
         ? {

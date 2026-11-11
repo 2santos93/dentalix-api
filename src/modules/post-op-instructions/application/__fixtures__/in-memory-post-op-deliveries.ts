@@ -24,6 +24,7 @@ export function appointmentContext(
     responsibles?: PostOpAppointmentContext['responsibles'];
     clinicName?: string;
     majorityAge?: number;
+    majorityReview?: PostOpAppointmentContext['majorityReview'];
   } = {},
 ): PostOpAppointmentContext {
   return {
@@ -50,6 +51,7 @@ export function appointmentContext(
       ...overrides.patient,
     },
     responsibles: overrides.responsibles ?? [],
+    majorityReview: overrides.majorityReview ?? null,
     location: {
       id: 'loc-1',
       name: 'Sede Norte',

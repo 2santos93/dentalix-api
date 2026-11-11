@@ -4,6 +4,14 @@ import { CollectionsModule } from '../collections/collections.module';
 import { PatientsController } from './presentation/patients.controller';
 import { PatientCommunicationController } from './presentation/patient-communication.controller';
 import { PatientResponsiblePartiesController } from './presentation/patient-responsible-parties.controller';
+import { PatientMajorityReviewController } from './presentation/patient-majority-review.controller';
+import {
+  GetMajorityReviewUseCase,
+  ListComingOfAgeUseCase,
+  ReviewMajorityUseCase,
+} from './application/use-cases/majority-review.use-cases';
+import { MAJORITY_REVIEW_REPOSITORY } from './domain/ports/majority-review-repository.port';
+import { PrismaMajorityReviewRepository } from './infrastructure/repositories/prisma-majority-review.repository';
 import {
   CreateResponsiblePartyUseCase,
   ListResponsiblePartiesUseCase,
@@ -85,6 +93,9 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     DocumentTypeNamesModule,
   ],
   controllers: [
+    // DX-342: antes que PatientsController, para que `GET
+    // /patients/coming-of-age` no caiga en `GET /patients/:id`.
+    PatientMajorityReviewController,
     PatientsController,
     PatientCommunicationController,
     PatientResponsiblePartiesController,
@@ -114,6 +125,14 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     UpdateResponsiblePartyUseCase,
     RemoveResponsiblePartyUseCase,
     { provide: RESPONSIBLES_CLOCK, useValue: () => new Date() },
+    // DX-342: paso a la mayoría de edad con responsable.
+    ListComingOfAgeUseCase,
+    GetMajorityReviewUseCase,
+    ReviewMajorityUseCase,
+    {
+      provide: MAJORITY_REVIEW_REPOSITORY,
+      useClass: PrismaMajorityReviewRepository,
+    },
     // DX-328: mayoría de edad de la clínica (Ajustes).
     GetPatientSettingsUseCase,
     UpdatePatientSettingsUseCase,

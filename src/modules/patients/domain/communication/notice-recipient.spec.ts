@@ -18,6 +18,7 @@ const mother: NoticeResponsible = {
   isPayer: false,
   receivesNotices: true,
   optedOut: false,
+  createdAt: new Date('2026-10-01T12:00:00.000Z'),
 };
 const father: NoticeResponsible = {
   id: 'father',
@@ -26,6 +27,7 @@ const father: NoticeResponsible = {
   isPayer: true,
   receivesNotices: true,
   optedOut: false,
+  createdAt: new Date('2026-10-01T12:00:00.000Z'),
 };
 
 function input(over: Partial<NoticeRecipientInput> = {}): NoticeRecipientInput {
@@ -39,6 +41,8 @@ function input(over: Partial<NoticeRecipientInput> = {}): NoticeRecipientInput {
     responsibles: [mother],
     majorityAge: 18,
     today: TODAY,
+    timeZone: 'America/Caracas',
+    majorityReview: null,
     ...over,
   };
 }
@@ -210,5 +214,100 @@ describe('noticeRecipient (DX-203: menores y pacientes sin email, al responsable
         }),
       ).kind,
     ).toBe('PATIENT');
+  });
+});
+
+describe('noticeRecipient (DX-342: paso a la mayoría de edad con responsable)', () => {
+  // Cumplió 18 el 2026-10-10 (TODAY 2026-10-17); la madre, de alta de niña.
+  const CAME_OF_AGE = new Date('2008-10-10T00:00:00.000Z');
+  const motherAsChild = {
+    ...mother,
+    createdAt: new Date('2015-03-10T14:00:00.000Z'),
+  };
+  const cameOfAge = (
+    email: string | null,
+    over: Partial<NoticeRecipientInput> = {},
+  ) =>
+    input({
+      patient: { ...input().patient, birthDate: CAME_OF_AGE, email },
+      responsibles: [motherAsChild],
+      ...over,
+    });
+  const self = (email: string | null) => ({
+    kind: 'PATIENT',
+    name: 'Sofía',
+    email,
+    minor: false,
+    responsiblePartyId: null,
+  });
+
+  it('a minor still goes to the responsible (DX-203 unchanged)', () => {
+    expect(noticeRecipient(input({ responsibles: [motherAsChild] })).kind).toBe(
+      'RESPONSIBLE',
+    );
+  });
+
+  it('came of age, unreviewed: to the patient, or nobody without email', () => {
+    expect(noticeRecipient(cameOfAge('sofia@example.com'))).toEqual(
+      self('sofia@example.com'),
+    );
+    // Sin email: nadie (el 422 «sin email»), nunca el responsable.
+    expect(noticeRecipient(cameOfAge(null))).toEqual(self(null));
+    expect(noticeRecipient(cameOfAge(null, { automatic: true }))).toEqual(
+      self(null),
+    );
+  });
+
+  it('reviewed PATIENT_SELF: to the patient, or nobody', () => {
+    const majorityReview = {
+      decision: 'PATIENT_SELF' as const,
+      majorityDate: '2026-10-10',
+    };
+    expect(noticeRecipient(cameOfAge(null, { majorityReview }))).toEqual(
+      self(null),
+    );
+    expect(
+      noticeRecipient(cameOfAge('sofia@example.com', { majorityReview })),
+    ).toEqual(self('sofia@example.com'));
+  });
+
+  it('reviewed KEEP_RESPONSIBLE: the DX-203 rule again (no own email: the responsible)', () => {
+    const majorityReview = {
+      decision: 'KEEP_RESPONSIBLE' as const,
+      majorityDate: '2026-10-10',
+    };
+    expect(noticeRecipient(cameOfAge(null, { majorityReview }))).toEqual({
+      kind: 'RESPONSIBLE',
+      name: 'María',
+      email: 'maria@example.com',
+      minor: false,
+      responsiblePartyId: 'mother',
+    });
+    // Con email propio, un adulto recibe los suyos (DX-203).
+    expect(
+      noticeRecipient(cameOfAge('sofia@example.com', { majorityReview })).kind,
+    ).toBe('PATIENT');
+  });
+
+  it('elderly adult with a responsible added as an adult: DX-203 unchanged', () => {
+    expect(
+      noticeRecipient(
+        input({
+          patient: { ...input().patient, birthDate: ADULT, email: null },
+          responsibles: [mother],
+        }),
+      ).kind,
+    ).toBe('RESPONSIBLE');
+  });
+
+  it('a KEEP_RESPONSIBLE review stops counting when the clinic majority age changes', () => {
+    const majorityReview = {
+      decision: 'KEEP_RESPONSIBLE' as const,
+      majorityDate: '2026-10-10',
+    };
+    // Con 16 su fecha pasa a 2024-10-10: la revisión de 2026-10-10 ya no vale.
+    expect(
+      noticeRecipient(cameOfAge(null, { majorityReview, majorityAge: 16 })),
+    ).toEqual(self(null));
   });
 });

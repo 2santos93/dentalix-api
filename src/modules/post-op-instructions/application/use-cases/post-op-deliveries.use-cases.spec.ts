@@ -317,6 +317,7 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
             isPayer: true,
             receivesNotices: true,
             optedOut: false,
+            createdAt: new Date('2026-10-01T12:00:00.000Z'),
           },
         ],
       }),
@@ -338,6 +339,56 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
     });
   });
 
+  it('DX-342: came of age with a responsible from childhood: the email goes to the patient, or 422 without one', async () => {
+    const claudia = {
+      id: 'resp-1',
+      name: 'Claudia Navarro',
+      email: 'claudia.navarro@example.com',
+      isPayer: true,
+      receivesNotices: true,
+      optedOut: false,
+      createdAt: new Date('2016-04-10T12:00:00.000Z'),
+    };
+    // Cumplió 18 el 2026-10-01 (hoy, 20/10 en la sede).
+    const cameOfAge = new Date('2008-10-01T00:00:00.000Z');
+    const withEmail = setup();
+    withEmail.deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({
+        patient: { birthDate: cameOfAge },
+        responsibles: [claudia],
+      }),
+    );
+    const result = await withEmail.deliver.execute(
+      APPOINTMENT_ID,
+      { templateId: withEmail.exo.id, channel: 'EMAIL' },
+      CTX,
+      LINK,
+    );
+    expect(result.sentToResponsible).toBe(false);
+    expect(withEmail.email.sent[0]).toMatchObject({
+      to: 'carolina.duque@example.com',
+    });
+
+    const without = setup();
+    without.deliveries.contexts.set(
+      APPOINTMENT_ID,
+      appointmentContext({
+        patient: { birthDate: cameOfAge, email: null },
+        responsibles: [claudia],
+      }),
+    );
+    await expect(
+      without.deliver.execute(
+        APPOINTMENT_ID,
+        { templateId: without.exo.id, channel: 'EMAIL' },
+        CTX,
+        LINK,
+      ),
+    ).rejects.toThrow(POSTOP_NO_EMAIL_MESSAGE);
+    expect(without.email.sent).toEqual([]);
+  });
+
   it('post-op email recipient uses the clinic majorityAge', async () => {
     const { deliver, exo, deliveries, email } = setup();
     deliveries.contexts.set(
@@ -353,6 +404,7 @@ describe('DeliverPostOpInstructionsUseCase (DX-222)', () => {
             isPayer: true,
             receivesNotices: true,
             optedOut: false,
+            createdAt: new Date('2026-10-01T12:00:00.000Z'),
           },
         ],
         majorityAge: 16,

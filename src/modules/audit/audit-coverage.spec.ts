@@ -15,6 +15,7 @@ import { CallerLookupController } from '../caller-lookup/presentation/caller-loo
 import { PatientAgreementsController } from '../patient-agreements/presentation/patient-agreements.controller';
 import { PatientCoveragesController } from '../patient-coverages/presentation/patient-coverages.controller';
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
+import { PatientMajorityReviewController } from '../patients/presentation/patient-majority-review.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
 import { PatientAnamnesisRequestsController } from '../medical-history-submissions/presentation/patient-anamnesis-requests.controller';
 import { PatientSignatureRequestsController } from '../signature-requests/presentation/patient-signature-requests.controller';
@@ -217,6 +218,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: P,
     patient: P,
     reason: 'RESPONSIBLE_PARTY_REMOVED',
+  },
+  // DX-342: revisión del paso a la mayoría de edad; la decisión, la fecha y
+  // el largo de la nota (nunca su texto) van en `metadata.majorityReview`.
+  'POST /patients/:id/majority-review': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'MAJORITY_REVIEWED',
   },
   // DX-153: coberturas del paciente; motivo y nombres de campo, nunca el número
   // de afiliado ni el titular. SEC-049: alta, cambio y verificación llevan el
@@ -1930,6 +1940,7 @@ const CONTROLLERS: Type[] = [
   PatientSignatureRequestsController,
   MedicalHistorySubmissionsController,
   PatientResponsiblePartiesController,
+  PatientMajorityReviewController,
   PatientCoveragesController,
   PatientAgreementsController,
   MedicalHistoryController,

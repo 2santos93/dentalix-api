@@ -20,6 +20,7 @@ import {
 } from '../../domain/receipt-number';
 import {
   loadNoticeResponsibles,
+  loadMajorityReview,
   loadNoticeSettings,
 } from '../../../patients/infrastructure/notices/notice-context';
 
@@ -241,8 +242,9 @@ export class PrismaPaymentReceiptSummaryRepository implements PaymentReceiptSumm
         },
       });
       const patientEmail = patient.email?.trim() ? patient.email.trim() : null;
-      const [responsibles, settings] = await Promise.all([
+      const [responsibles, majorityReview, settings] = await Promise.all([
         loadNoticeResponsibles(tx, patient.id),
+        loadMajorityReview(tx, patient.id),
         loadNoticeSettings(tx, patient.tenantId, locationId),
       ]);
       return {
@@ -255,6 +257,7 @@ export class PrismaPaymentReceiptSummaryRepository implements PaymentReceiptSumm
             emergencyContactName: patient.emergencyContactName,
           },
           responsibles,
+          majorityReview,
           settings,
         },
       };

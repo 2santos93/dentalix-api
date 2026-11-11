@@ -11,6 +11,7 @@ import type {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
+import type { MajorityReviewRecord } from '../../../patients/domain/responsible-parties/majority-review';
 import type { PlanQuoteSource } from '../../../treatment-plans/domain/ports/plan-quote-repository.port';
 import type {
   PublicSignatureContext,
@@ -37,6 +38,8 @@ export interface SignatureRecipientContext {
       docNumber: string | null;
     };
   })[];
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
   /** Mayoría de edad de la clínica (DX-328). */
   majorityAge: number;
   /** Zona de la sede activa o, sin ella, de la principal: da «hoy». */

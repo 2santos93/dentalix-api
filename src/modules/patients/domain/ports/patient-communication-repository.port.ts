@@ -10,6 +10,7 @@ import type {
   NoticeResponsible,
   NoticeSettings,
 } from '../communication/notice-recipient';
+import type { MajorityReviewRecord } from '../responsible-parties/majority-review';
 
 export const PATIENT_NOT_FOUND_MESSAGE = 'Paciente no encontrado';
 
@@ -22,6 +23,8 @@ export interface PatientCommunicationState {
   emergencyContactName: string | null;
   /** DX-203: responsables vivos del paciente (regla de destinatario). */
   responsibles: NoticeResponsible[];
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
   /** DX-203, DX-328: zona de la sede y mayoría de edad de la clínica. */
   noticeSettings: NoticeSettings;
   /**

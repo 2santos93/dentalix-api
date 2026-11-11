@@ -86,6 +86,7 @@ function recipient(
       ...partial,
     },
     responsibles,
+    majorityReview: null,
     majorityAge: 18,
     timeZone: 'America/Caracas',
   };
@@ -329,6 +330,7 @@ describe('enviar a firmar a distancia (DX-243)', () => {
           isPayer: false,
           receivesNotices: true,
           optedOut: false,
+          createdAt: new Date('2026-10-01T12:00:00.000Z'),
           document: {
             docType: 'NATIONAL_ID',
             docTypeLabel: null,
@@ -751,6 +753,7 @@ describe('enlace público, código y firma (DX-243)', () => {
           isPayer: false,
           receivesNotices: true,
           optedOut: false,
+          createdAt: new Date('2026-10-01T12:00:00.000Z'),
           document: { docType: null, docTypeLabel: null, docNumber: null },
         },
       ],

@@ -24,6 +24,7 @@ const mother: NoticeResponsible = {
   isPayer: true,
   receivesNotices: true,
   optedOut: false,
+  createdAt: new Date('2026-10-01T12:00:00.000Z'),
 };
 
 function loaded(
@@ -32,6 +33,7 @@ function loaded(
     birthDate?: Date | null;
     responsibles?: NoticeResponsible[];
     majorityAge?: number;
+    majorityReview?: LoadedPaymentReceipt['notice']['majorityReview'];
   } = {},
 ): LoadedPaymentReceipt {
   return {
@@ -45,6 +47,7 @@ function loaded(
         emergencyContactName: null,
       },
       responsibles: over.responsibles ?? [],
+      majorityReview: over.majorityReview ?? null,
       settings: {
         timeZone: 'America/Caracas',
         majorityAge: over.majorityAge ?? 18,
@@ -78,6 +81,43 @@ function makeUseCase(result: LoadedPaymentReceipt | Error) {
 }
 
 describe('SendPaymentReceiptUseCase (DX-136)', () => {
+  // DX-342: cumplió 18 el 2026-10-10 con la madre dada de alta de niña.
+  const motherAsChild = {
+    ...mother,
+    createdAt: new Date('2015-03-10T14:00:00.000Z'),
+  };
+
+  it('DX-342: came of age unreviewed and without email: 422, never the responsible', async () => {
+    const { uc, sent } = makeUseCase(
+      loaded(null, {
+        birthDate: new Date('2008-10-10'),
+        responsibles: [motherAsChild],
+      }),
+    );
+    await expect(uc.execute('pay-1')).rejects.toBeInstanceOf(
+      UnprocessableEntityException,
+    );
+    expect(sent).toEqual([]);
+  });
+
+  it('DX-342: reviewed KEEP_RESPONSIBLE goes to the responsible again', async () => {
+    const { uc, sent } = makeUseCase(
+      loaded(null, {
+        birthDate: new Date('2008-10-10'),
+        responsibles: [motherAsChild],
+        majorityReview: {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-10-10',
+        },
+      }),
+    );
+    await expect(uc.execute('pay-1')).resolves.toEqual({
+      sentTo: 'cl***@example.com',
+      sentToResponsible: true,
+    });
+    expect(sent[0].to).toBe('claudia.navarro@example.com');
+  });
+
   it('envía el MISMO recibo al email del paciente y devuelve el destino enmascarado', async () => {
     const { uc, sent } = makeUseCase(loaded('ana.ruiz@example.com'));
     await expect(uc.execute('pay-1')).resolves.toEqual({
