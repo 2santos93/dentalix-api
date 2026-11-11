@@ -2677,6 +2677,49 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           : []),
       ];
     }),
+    // DX-436: huecos recuperados. Una sede de A es 403 (sin decir si
+    // existe); el profesional de A da un informe sin filas suyas.
+    ...(
+      ['/reports/recovered-slots', '/reports/recovered-slots.csv'] as const
+    ).flatMap((route): IsolationCase[] => {
+      const range = `from=${day(-30)}&to=${day(0)}&`;
+      const empty = (body: unknown, text: string) => {
+        if (route.endsWith('.csv')) {
+          const rows = text.trim().split('\r\n');
+          expect(
+            rows.filter(
+              (l) => l.startsWith('"Profesional",') && l.split(',').length > 2,
+            ),
+          ).toEqual([]);
+          expect(rows.find((l) => l.startsWith('"Total",'))).toMatch(
+            /^"Total","",0,0,0,0,0,0,/,
+          );
+        } else {
+          expect(body).toMatchObject({
+            byProvider: [],
+            totals: { freedSlots: 0, cancellationRate: null },
+          });
+        }
+      };
+      return [
+        {
+          name: `GET ${route} ?locationId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}locationId=${a.locationId}`,
+          queryIds: ['locationId'],
+          status: 403,
+          message: 'No tienes acceso a esta sede.',
+        },
+        {
+          name: `GET ${route} ?providerId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}providerId=${a.dentistUserId}`,
+          queryIds: ['providerId'],
+          status: 200,
+          expectBody: empty,
+        },
+      ];
+    }),
     {
       name: 'GET /cash-sessions/current ?locationId de A',
       verb: 'get',
