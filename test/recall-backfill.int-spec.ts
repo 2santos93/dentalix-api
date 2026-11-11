@@ -28,7 +28,8 @@ import {
 //  - congela la base: sobre los MISMOS datos, la lista con la regla nueva
 //    después del relleno es exactamente la que daba la regla vieja (la última
 //    cita atendida reiniciaba el reloj) antes: nadie entra ni sale, con los
-//    mismos vencimientos, en sedes de zonas extremas (UTC+14 y UTC−11);
+//    mismos vencimientos, en sedes de zonas extremas (UTC+14 y UTC−11) y en
+//    una sin zona; lo fijado antes queda en "preBackfillDoneAt";
 //  - aplica el historial de DONE de los disparadores (greatest);
 //  - crea los recalls de source BACKFILL de pacientes vivos con un DONE de un
 //    disparador en los últimos 24 meses (D3), y solo esos.
@@ -45,7 +46,16 @@ const SUBDOMAINS = ['dx015bis-relleno', 'dx015bis-relleno-casos'];
 const EMAIL = `odontologa@${SUBDOMAINS[0]}.test`;
 const DAY_MS = 86_400_000;
 const NOW = new Date('2027-04-10T11:30:00.000Z');
-const ZONES = ['Pacific/Kiritimati', 'America/Caracas', 'Pacific/Pago_Pago'];
+/**
+ * Tres zonas extremas y una sede SIN zona (una réplica sin barrer: la lista
+ * vieja contaba su día en UTC, y la congelación lo reproduce).
+ */
+const ZONES: (string | null)[] = [
+  'Pacific/Kiritimati',
+  'America/Caracas',
+  'Pacific/Pago_Pago',
+  null,
+];
 const civil = (d: Date) => d.toISOString().slice(0, 10);
 const DAY = (d: string) => new Date(`${d}T00:00:00.000Z`);
 
@@ -354,7 +364,23 @@ describe('DX-015-bis · relleno del despliegue (int)', () => {
         frontera: await patient('Frontera'),
         antiguo: await patient('Antiguo'),
         archivado: await patient('Archivado', true),
+        sinZona: await patient('SinZona'),
       };
+      // Fijado el 01/01/2026 y una visita atendida el 01/09 a las 02:00 UTC
+      // en la sede sin zona: la lista vieja la contaba en UTC (01/09) y la
+      // base congelada es esa; lo fijado queda en preBackfillDoneAt.
+      await manualRecall(ids.sinZona, '2026-01-01');
+      await raw.appointment.create({
+        data: {
+          tenantId: f.tenantId,
+          locationId: f.sedes[3],
+          patientId: ids.sinZona,
+          providerId: userId,
+          start: new Date('2026-09-01T02:00:00.000Z'),
+          end: new Date('2026-09-01T02:30:00.000Z'),
+          status: 'COMPLETED',
+        },
+      });
       // Recall fijado el 01/06/2026 y una profilaxis posterior (01/02/2027
       // 10:30 UTC = 02/02 00:30 en Kiritimati): la base pasa al día civil de
       // la sede del DONE, no al UTC.
@@ -391,6 +417,8 @@ describe('DX-015-bis · relleno del despliegue (int)', () => {
         expect.objectContaining({
           source: 'MANUAL',
           manualDoneAt: DAY('2026-06-01'),
+          // Sin visita atendida, la congelación no movió lo fijado.
+          preBackfillDoneAt: null,
           lastDoneAt: DAY('2027-02-02'),
           dueAt: DAY('2027-08-02'),
           lastDoneItemId: items.posterior,
@@ -400,6 +428,17 @@ describe('DX-015-bis · relleno del despliegue (int)', () => {
         expect.objectContaining({
           lastDoneAt: DAY('2026-12-01'),
           lastDoneItemId: null,
+        }),
+      ]);
+    });
+
+    it('una visita en una sede sin zona congela su día en UTC, como la lista vieja; lo fijado queda aparte', async () => {
+      expect(await recalls(ids.sinZona)).toEqual([
+        expect.objectContaining({
+          lastDoneAt: DAY('2026-09-01'),
+          manualDoneAt: DAY('2026-09-01'),
+          preBackfillDoneAt: DAY('2026-01-01'),
+          dueAt: DAY('2027-03-01'),
         }),
       ]);
     });
@@ -441,14 +480,26 @@ describe('DX-015-bis · relleno del despliegue (int)', () => {
         }),
       );
       expect(out.rows.map((r) => r.patientFirstName)).toContain('Reciente');
+      // Un clínico fija a mano el de «Frontera» (el PUT escribe manualDoneAt):
+      // la receta de deshacer no lo toca.
+      await raw.patientRecall.updateMany({
+        where: { patientId: ids.frontera },
+        data: {
+          manualDoneAt: DAY('2027-04-01'),
+          lastDoneAt: DAY('2027-04-01'),
+        },
+      });
       const undo = await raw.patientRecall.deleteMany({
         where: {
           tenantId: f.tenantId,
           source: 'BACKFILL',
+          manualDoneAt: null,
           contacts: { none: {} },
         },
       });
-      expect(undo.count).toBe(2);
+      expect(undo.count).toBe(1);
+      expect(await recalls(ids.reciente)).toEqual([]);
+      expect(await recalls(ids.frontera)).toHaveLength(1);
     });
   });
 });

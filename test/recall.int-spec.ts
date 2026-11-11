@@ -765,6 +765,46 @@ describe('recall en la BD (int, DX-551)', () => {
       ).resolves.toMatchObject({ defaultIntervalMonths: 36 });
     });
 
+    it('DX-015-bis: compatibilidad con la app vieja en el despliegue: un alta solo con kind recibe su tipo; un PUT viejo (solo lastDoneAt) pasa a ser lo fijado', async () => {
+      await rolledBack(appDb, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+        // Como escribía DX-015: sin recallTypeId ni manualDoneAt.
+        const [{ id }] = await tx.$queryRaw<{ id: string }[]>`
+          INSERT INTO "patient_recalls"
+            ("id", "tenantId", "patientId", "kind", "intervalMonths", "lastDoneAt",
+             "locationId", "createdById", "updatedById", "updatedAt")
+          VALUES (gen_random_uuid(), ${a.tenantId}::uuid, ${a.patients.Juan}::uuid,
+                  'HYGIENE', 6, '2026-03-01', ${a.norte}::uuid,
+                  ${a.authorId}::uuid, ${a.authorId}::uuid, now())
+          RETURNING "id"`;
+        const inserted = await tx.patientRecall.findUniqueOrThrow({
+          where: { id },
+        });
+        expect(inserted).toMatchObject({
+          recallTypeId: a.types.HYGIENE,
+          manualDoneAt: null,
+        });
+        await tx.patientRecall.update({
+          where: { id },
+          data: {
+            manualDoneAt: DAY('2026-03-01'),
+            preBackfillDoneAt: DAY('2025-12-01'),
+          },
+        });
+        await tx.$executeRaw`
+          UPDATE "patient_recalls" SET "lastDoneAt" = '2026-05-10', "intervalMonths" = 3
+           WHERE "id" = ${id}::uuid`;
+        await expect(
+          tx.patientRecall.findUniqueOrThrow({ where: { id } }),
+        ).resolves.toMatchObject({
+          lastDoneAt: DAY('2026-05-10'),
+          manualDoneAt: DAY('2026-05-10'),
+          preBackfillDoneAt: null,
+          dueAt: DAY('2026-08-10'),
+        });
+      });
+    });
+
     it('la nota del contacto: no en blanco y ≤ 280', async () => {
       await expect(createContact({ note: '  ' })).rejects.toThrow(
         /recall_contacts_note_check/,

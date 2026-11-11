@@ -3,6 +3,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaTreatmentPlanRepository } from '../src/modules/treatment-plans/infrastructure/repositories/prisma-treatment-plan.repository';
 import { UpdateTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/update-treatment-plan-item.use-case';
+import { RemoveTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/remove-treatment-plan-item.use-case';
 import { testDiscountPolicy } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/discount-fixtures';
 import type { DentalCatalogRepository } from '../src/modules/dental-catalog/domain/ports/dental-catalog-repository.port';
 import type { DentalCatalogItem } from '../src/modules/dental-catalog/domain/entities/dental-catalog-item.entity';
@@ -325,8 +326,90 @@ describe('DX-015-bis · el DONE de un procedimiento mueve el reloj del recall (i
         source: 'PROCEDURE',
         lastDoneAt: DAY('2027-04-10'),
         dueAt: DAY('2027-10-10'),
+        // El ítem ya no está DONE: ya no «da la base».
+        lastDoneItemId: null,
       }),
     ]);
+  });
+
+  const recallEvents = (recallId: string) =>
+    raw.auditEvent.findMany({
+      where: {
+        tenantId: s.tenantId,
+        resourceType: 'PATIENT_RECALL',
+        resourceId: recallId,
+      },
+      orderBy: { occurredAt: 'asc' },
+    });
+
+  it('borrar un ítem DONE (Eliminar) recalcula su recall como un CLEAR, y lo audita', async () => {
+    const patientId = await patient('Borrado');
+    const manual = await raw.patientRecall.create({
+      data: {
+        tenantId: s.tenantId,
+        patientId,
+        recallTypeId: s.types.HYGIENE,
+        kind: 'HYGIENE',
+        intervalMonths: 6,
+        lastDoneAt: DAY('2026-12-01'),
+        manualDoneAt: DAY('2026-12-01'),
+        locationId: s.sede,
+        createdById: s.userId,
+        updatedById: s.userId,
+      },
+    });
+    const itemId = await planItem(patientId, 'PROFILAXIS');
+    await done(itemId);
+    expect(await recallsOf(patientId)).toEqual([
+      expect.objectContaining({ lastDoneItemId: itemId }),
+    ]);
+    await inSede(() =>
+      new RemoveTreatmentPlanItemUseCase(plans).execute(itemId, audit()),
+    );
+    expect(await recallsOf(patientId)).toEqual([
+      expect.objectContaining({
+        id: manual.id,
+        lastDoneAt: DAY('2026-12-01'),
+        dueAt: DAY('2027-06-01'),
+        lastDoneItemId: null,
+      }),
+    ]);
+    // Dos eventos: el DONE que movió la base y el borrado que la devolvió.
+    expect((await recallEvents(manual.id)).map((e) => e.metadata)).toEqual([
+      {
+        reason: 'RECALL_FROM_PROCEDURE',
+        params: { itemId, recallTypeId: s.types.HYGIENE },
+      },
+      {
+        reason: 'RECALL_FROM_PROCEDURE',
+        params: { itemId, recallTypeId: s.types.HYGIENE },
+      },
+    ]);
+  });
+
+  it('un cambio que no mueve el recall no deja evento (lo fijado es posterior al DONE)', async () => {
+    const patientId = await patient('SinCambio');
+    const manual = await raw.patientRecall.create({
+      data: {
+        tenantId: s.tenantId,
+        patientId,
+        recallTypeId: s.types.HYGIENE,
+        kind: 'HYGIENE',
+        intervalMonths: 6,
+        lastDoneAt: DAY('2027-06-01'),
+        manualDoneAt: DAY('2027-06-01'),
+        locationId: s.sede,
+        createdById: s.userId,
+        updatedById: s.userId,
+      },
+    });
+    const itemId = await planItem(patientId, 'PROFILAXIS');
+    const out = await done(itemId);
+    // La respuesta sigue diciendo cómo quedó, pero sin evento: nada cambió.
+    expect(out.recallUpdates).toEqual([
+      expect.objectContaining({ recallId: manual.id, dueAt: '2027-12-01' }),
+    ]);
+    expect(await recallEvents(manual.id)).toEqual([]);
   });
 
   it('corregir la fecha del DONE (CORRECT, ADMIN) recalcula el vencimiento', async () => {
