@@ -69,6 +69,12 @@ export const ALLOWED: readonly Allowed[] = [
     reason: 'solo la columna de diferencia % (1 decimal)',
   },
   {
+    file: 'src/modules/reports/application/recovered-slots-csv.ts',
+    text: '(rate * 100).toFixed(1)',
+    fn: 'function percent',
+    reason: 'tasas de relleno y cancelación (0..1) como % con 1 decimal',
+  },
+  {
     file: 'src/modules/reports/application/locations-comparison-csv.ts',
     text: 'value.toFixed(decimals)',
     reason:
