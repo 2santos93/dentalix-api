@@ -765,35 +765,51 @@ describe('recall en la BD (int, DX-551)', () => {
       ).resolves.toMatchObject({ defaultIntervalMonths: 36 });
     });
 
-    it('DX-015-bis: compatibilidad con la app vieja en el despliegue: un alta solo con kind recibe su tipo; un PUT viejo (solo lastDoneAt) pasa a ser lo fijado', async () => {
-      await rolledBack(appDb, async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
-        // Como escribía DX-015: sin recallTypeId ni manualDoneAt.
-        const [{ id }] = await tx.$queryRaw<{ id: string }[]>`
+    /** Un alta como la escribía DX-015: sin recallTypeId ni manualDoneAt. */
+    const oldInsert = async (
+      tx: Prisma.TransactionClient,
+      tenantId: string,
+      patientId: string,
+      locationId: string,
+      lastDoneAt: string,
+    ) =>
+      (
+        await tx.$queryRaw<{ id: string }[]>`
           INSERT INTO "patient_recalls"
             ("id", "tenantId", "patientId", "kind", "intervalMonths", "lastDoneAt",
              "locationId", "createdById", "updatedById", "updatedAt")
-          VALUES (gen_random_uuid(), ${a.tenantId}::uuid, ${a.patients.Juan}::uuid,
-                  'HYGIENE', 6, '2026-03-01', ${a.norte}::uuid,
+          VALUES (gen_random_uuid(), ${tenantId}::uuid, ${patientId}::uuid,
+                  'HYGIENE', 6, ${lastDoneAt}::date, ${locationId}::uuid,
                   ${a.authorId}::uuid, ${a.authorId}::uuid, now())
-          RETURNING "id"`;
-        const inserted = await tx.patientRecall.findUniqueOrThrow({
-          where: { id },
-        });
-        expect(inserted).toMatchObject({
+          RETURNING "id"`
+      )[0].id;
+    /** El PUT de DX-015: solo lastDoneAt (y lo demás), nunca manualDoneAt. */
+    const oldPut = (tx: Prisma.TransactionClient, id: string, day: string) =>
+      tx.$executeRaw`
+        UPDATE "patient_recalls" SET "lastDoneAt" = ${day}::date, "intervalMonths" = 3
+         WHERE "id" = ${id}::uuid`;
+
+    it('DX-015-bis: compatibilidad con la app vieja (clínica ya rellenada): el alta solo con kind recibe su tipo y queda como lo fijado; un PUT viejo pasa a lo fijado', async () => {
+      await rolledBack(appDb, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+        const id = await oldInsert(
+          tx,
+          a.tenantId,
+          a.patients.Juan,
+          a.norte,
+          '2026-03-01',
+        );
+        await expect(
+          tx.patientRecall.findUniqueOrThrow({ where: { id } }),
+        ).resolves.toMatchObject({
           recallTypeId: a.types.HYGIENE,
-          manualDoneAt: null,
+          manualDoneAt: DAY('2026-03-01'),
         });
         await tx.patientRecall.update({
           where: { id },
-          data: {
-            manualDoneAt: DAY('2026-03-01'),
-            preBackfillDoneAt: DAY('2025-12-01'),
-          },
+          data: { preBackfillDoneAt: DAY('2025-12-01') },
         });
-        await tx.$executeRaw`
-          UPDATE "patient_recalls" SET "lastDoneAt" = '2026-05-10', "intervalMonths" = 3
-           WHERE "id" = ${id}::uuid`;
+        await oldPut(tx, id, '2026-05-10');
         await expect(
           tx.patientRecall.findUniqueOrThrow({ where: { id } }),
         ).resolves.toMatchObject({
@@ -803,6 +819,84 @@ describe('recall en la BD (int, DX-551)', () => {
           dueAt: DAY('2026-08-10'),
         });
       });
+    });
+
+    it('DX-015-bis: un PUT viejo sobre un recall nacido de un procedimiento o del relleno queda como lo fijado: el recálculo no baja la base', async () => {
+      await rolledBack(appDb, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+        const row = await tx.patientRecall.create({
+          data: recallRow(a, 'Juan', {
+            kind: RecallKind.HYGIENE,
+            lastDoneAt: DAY('2026-01-01'),
+            source: 'BACKFILL',
+          }),
+        });
+        expect(row.manualDoneAt).toBeNull();
+        await oldPut(tx, row.id, '2026-06-01');
+        // Sin ningún DONE: antes el recálculo conservaba 2026-06-01 por D5,
+        // pero con lo fijado vacío un DONE anterior la habría bajado.
+        await tx.$queryRaw`SELECT public.dx_recall_recompute(${a.tenantId}::uuid, ${a.patients.Juan}::uuid, ${a.types.HYGIENE}::uuid)`;
+        await expect(
+          tx.patientRecall.findUniqueOrThrow({ where: { id: row.id } }),
+        ).resolves.toMatchObject({
+          source: 'BACKFILL',
+          manualDoneAt: DAY('2026-06-01'),
+          lastDoneAt: DAY('2026-06-01'),
+        });
+      });
+    });
+
+    it('DX-015-bis: una clínica sin tipos (alta de la app vieja en el despliegue) los recibe con su primer recall viejo, o al leerlos desde la app nueva', async () => {
+      const tenant = await raw.tenant.create({
+        data: { name: 'dx015bis-sin-tipos', subdomain: 'dx015bis-sin-tipos' },
+      });
+      try {
+        const location = await raw.location.create({
+          data: locationData(REGIONAL_CARACAS_FIXTURE, {
+            tenantId: tenant.id,
+            name: 'Sede',
+          }),
+        });
+        const patient = await raw.patient.create({
+          data: {
+            tenantId: tenant.id,
+            firstName: 'Nueva',
+            lastName: 'Clínica',
+          },
+        });
+        await rolledBack(appDb, async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${tenant.id}, true)`;
+          const id = await oldInsert(
+            tx,
+            tenant.id,
+            patient.id,
+            location.id,
+            '2026-03-01',
+          );
+          const types = await tx.recallType.findMany({
+            select: { id: true, systemKey: true },
+          });
+          expect(types).toHaveLength(3);
+          await expect(
+            tx.patientRecall.findUniqueOrThrow({ where: { id } }),
+          ).resolves.toMatchObject({
+            recallTypeId: types.find((t) => t.systemKey === 'HYGIENE')!.id,
+            // Sin relleno aún: lo congela el relleno, como a las demás.
+            manualDoneAt: null,
+          });
+        });
+        // La app nueva, al leer los tipos.
+        const listed = await tenantContext.run(tenant.id, undefined, () =>
+          repository.listTypes(),
+        );
+        expect(listed.map((t) => t.name)).toEqual([
+          'Higiene',
+          'Control',
+          'Mantenimiento periodontal',
+        ]);
+      } finally {
+        await purgeTenantsBySubdomain(raw, ['dx015bis-sin-tipos']);
+      }
     });
 
     it('la nota del contacto: no en blanco y ≤ 280', async () => {

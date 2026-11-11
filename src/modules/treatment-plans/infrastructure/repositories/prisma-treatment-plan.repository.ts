@@ -941,13 +941,6 @@ async function lockedPlan(
 }
 
 /**
- * DX-050: membresía VIVA de `userId` en esta clínica, bloqueada FOR SHARE.
- * 404 si no la hay (otra clínica, o desactivado), 400 si no atiende (solo
- * DENTIST y ADMIN) o si está restringido a sedes (DX-089) y `locationId` no es
- * una de ellas. Filtra por `tenantId` en la propia consulta (no solo por la
- * RLS), como el resto del SQL a mano.
- */
-/**
  * DX-015-bis: un `audit_event` PATIENT_RECALL por cada recall que el cambio
  * del ítem creó o movió (no por los que el recálculo dejó igual), en la
  * transacción del cambio. Sin contexto de la petición (seed), sin evento.
@@ -984,6 +977,13 @@ async function auditRecallsFromProcedure(
   }
 }
 
+/**
+ * DX-050: membresía VIVA de `userId` en esta clínica, bloqueada FOR SHARE.
+ * 404 si no la hay (otra clínica, o desactivado), 400 si no atiende (solo
+ * DENTIST y ADMIN) o si está restringido a sedes (DX-089) y `locationId` no es
+ * una de ellas. Filtra por `tenantId` en la propia consulta (no solo por la
+ * RLS), como el resto del SQL a mano.
+ */
 export async function resolvePerformer(
   tx: Prisma.TransactionClient,
   tenantId: string,

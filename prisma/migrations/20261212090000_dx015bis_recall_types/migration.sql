@@ -44,9 +44,10 @@
 -- funcionar ("lastDoneAt" sigue ahí; "kind" sigue lleno), y las escrituras de
 -- la app vieja las adapta el trigger `patient_recalls_compat_v1`: un alta
 -- solo con "kind" recibe su "recallTypeId" (así no la rompe el NOT NULL de
--- 20261212090200 ni lo hace fallar) y un cambio de "lastDoneAt" sin tocar
--- "manualDoneAt" (el PUT viejo) lo copia como lo fijado. Ese trigger se
--- borra en la release siguiente, cuando ya no quede app vieja.
+-- 20261212090200 ni lo hace fallar; una clínica sin tipos recibe los de por
+-- defecto) y, en una clínica ya rellenada, el alta o el PUT viejos quedan
+-- como lo fijado ("manualDoneAt"). Ese trigger se borra en la release
+-- siguiente, cuando ya no quede app vieja.
 --
 -- Grants: ALTER DEFAULT PRIVILEGES cubre a dentalix_app en las tablas nuevas.
 -- Las funciones son SECURITY INVOKER (la RLS de quien llama) y solo se dan a
@@ -155,25 +156,48 @@ CREATE INDEX "patient_recalls_tenant_type_idx" ON "patient_recalls"("tenantId", 
 -- ---------------------------------------------------------------------------
 -- Compatibilidad con la app vieja durante el despliegue (ver la cabecera). Con
 -- la RLS de quien escribe: el tipo se busca en su clínica. Ni toca las filas
--- de la app nueva (siempre escribe "recallTypeId") ni el recálculo, que se
--- marca con `dentalix.recall_recompute` mientras escribe.
+-- de la app nueva (siempre escribe "recallTypeId" y "manualDoneAt" a la vez
+-- que "lastDoneAt") ni el recálculo, que se marca con
+-- `dentalix.recall_recompute` mientras escribe.
+--  - Alta vieja (solo "kind"): recibe su "recallTypeId". Si la clínica no
+--    tiene ningún tipo (dada de alta por la app vieja durante el despliegue)
+--    se le siembran los de por defecto (`dx_recall_ensure_default_types`). Si
+--    la clínica ya pasó el relleno (el tipo existía), lo que fija es
+--    "manualDoneAt"; si no, el relleno la congela como a las demás.
+--  - Cambio viejo de "lastDoneAt" (el PUT) en una fila ya rellenada (con
+--    tipo), sin tocar "manualDoneAt": es lo que fijó el clínico, también en un
+--    recall nacido de un procedimiento o del relleno (así un recálculo
+--    posterior no baja la base ni la receta de deshacer los BACKFILL lo
+--    borra). "source" no cambia: la procedencia se conserva.
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION public.dx_patient_recalls_compat_v1() RETURNS trigger
   LANGUAGE plpgsql
   SECURITY INVOKER
   SET search_path = pg_catalog, public, pg_temp
 AS $$
+DECLARE
+  v_seeded boolean := false;
 BEGIN
   IF NEW."recallTypeId" IS NULL AND NEW."kind" IS NOT NULL THEN
     SELECT rt."id" INTO NEW."recallTypeId"
       FROM public."recall_types" rt
      WHERE rt."tenantId" = NEW."tenantId"
        AND rt."systemKey" = NEW."kind";
+    IF NEW."recallTypeId" IS NULL THEN
+      v_seeded := public.dx_recall_ensure_default_types(NEW."tenantId");
+      SELECT rt."id" INTO NEW."recallTypeId"
+        FROM public."recall_types" rt
+       WHERE rt."tenantId" = NEW."tenantId"
+         AND rt."systemKey" = NEW."kind";
+    END IF;
+    IF TG_OP = 'INSERT' AND NEW."recallTypeId" IS NOT NULL AND NOT v_seeded THEN
+      NEW."manualDoneAt" := coalesce(NEW."manualDoneAt", NEW."lastDoneAt");
+    END IF;
   END IF;
   IF TG_OP = 'UPDATE'
+     AND OLD."recallTypeId" IS NOT NULL
      AND NEW."lastDoneAt" IS DISTINCT FROM OLD."lastDoneAt"
      AND NEW."manualDoneAt" IS NOT DISTINCT FROM OLD."manualDoneAt"
-     AND OLD."manualDoneAt" IS NOT NULL
      AND coalesce(pg_catalog.current_setting('dentalix.recall_recompute', true), '') <> 'on' THEN
     NEW."manualDoneAt" := NEW."lastDoneAt";
     NEW."preBackfillDoneAt" := NULL;
@@ -257,6 +281,30 @@ $$;
 
 COMMENT ON FUNCTION public.dx_recall_seed_default_types(uuid) IS
   'DX-015-bis: tipos de recall por defecto de una clínica (alta, migración y tests). Idempotente.';
+
+-- ---------------------------------------------------------------------------
+-- dx_recall_ensure_default_types: siembra los tipos por defecto SOLO si la
+-- clínica no tiene ninguno (ni retirado: una clínica que los retiró en Ajustes
+-- no los recupera). Para la clínica que dio de alta la app vieja durante el
+-- despliegue: la llaman el trigger de compatibilidad y la app nueva cuando no
+-- encuentra tipos (lectura de tipos, PUT y DONE). Devuelve si sembró.
+-- ---------------------------------------------------------------------------
+CREATE FUNCTION public.dx_recall_ensure_default_types(p_tenant uuid) RETURNS boolean
+  LANGUAGE plpgsql
+  SECURITY INVOKER
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public."recall_types" rt WHERE rt."tenantId" = p_tenant) THEN
+    RETURN false;
+  END IF;
+  PERFORM public.dx_recall_seed_default_types(p_tenant);
+  RETURN true;
+END;
+$$;
+
+COMMENT ON FUNCTION public.dx_recall_ensure_default_types(uuid) IS
+  'DX-015-bis: los tipos por defecto si la clínica no tiene ninguno (clínicas dadas de alta por la app anterior durante el despliegue).';
 
 -- ---------------------------------------------------------------------------
 -- dx_recall_recompute: la base del recall de un paciente y tipo desde la
@@ -377,8 +425,8 @@ COMMENT ON FUNCTION public.dx_recall_recompute(uuid, uuid, uuid) IS
 --      (D3: 24) y sin recall de ese tipo, en la sede de ese DONE, con el
 --      intervalo por defecto del tipo. Deshacer solo los que nadie tocó:
 --      DELETE FROM patient_recalls WHERE source = 'BACKFILL' AND
---      "manualDoneAt" IS NULL (el PUT siempre lo escribe) AND sin
---      recall_contacts.
+--      "manualDoneAt" IS NULL (el PUT, el nuevo o el viejo vía el trigger de
+--      compatibilidad, siempre lo escribe) AND sin recall_contacts.
 -- Devuelve cuántos recalls creó.
 -- ---------------------------------------------------------------------------
 CREATE FUNCTION public.dx_recall_backfill(p_tenant uuid, p_horizon_months integer, p_now timestamptz DEFAULT now())
@@ -492,11 +540,13 @@ REVOKE ALL ON FUNCTION public.dx_recall_seed_default_types(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.dx_recall_recompute(uuid, uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.dx_recall_backfill(uuid, integer, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.dx_patient_recalls_compat_v1() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.dx_recall_ensure_default_types(uuid) FROM PUBLIC;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dentalix_app') THEN
     GRANT EXECUTE ON FUNCTION public.dx_recall_seed_default_types(uuid) TO dentalix_app;
     GRANT EXECUTE ON FUNCTION public.dx_recall_recompute(uuid, uuid, uuid) TO dentalix_app;
+    GRANT EXECUTE ON FUNCTION public.dx_recall_ensure_default_types(uuid) TO dentalix_app;
   END IF;
 END
 $$;

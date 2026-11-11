@@ -56,6 +56,7 @@ export async function recallsFromProcedure(
   const { tenantId, patientId, itemId, catalogItemId } = change;
   const created = new Set<string>();
   if (change.createMissing && change.actorId) {
+    await tx.$queryRaw`SELECT public.dx_recall_ensure_default_types(${tenantId}::uuid)`;
     const rows = await tx.$queryRaw<{ recallTypeId: string }[]>`
       INSERT INTO "patient_recalls"
         ("id", "tenantId", "patientId", "recallTypeId", "kind", "intervalMonths",

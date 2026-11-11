@@ -480,15 +480,15 @@ describe('DX-015-bis · relleno del despliegue (int)', () => {
         }),
       );
       expect(out.rows.map((r) => r.patientFirstName)).toContain('Reciente');
-      // Un clínico fija a mano el de «Frontera» (el PUT escribe manualDoneAt):
-      // la receta de deshacer no lo toca.
-      await raw.patientRecall.updateMany({
-        where: { patientId: ids.frontera },
-        data: {
-          manualDoneAt: DAY('2027-04-01'),
-          lastDoneAt: DAY('2027-04-01'),
-        },
-      });
+      // Un clínico fija a mano el de «Frontera» con la app VIEJA durante el
+      // despliegue (solo lastDoneAt; el trigger de compatibilidad lo pasa a
+      // manualDoneAt): la receta de deshacer no lo toca.
+      await raw.$executeRaw`
+        UPDATE "patient_recalls" SET "lastDoneAt" = '2027-04-01'
+         WHERE "patientId" = ${ids.frontera}::uuid`;
+      expect(await recalls(ids.frontera)).toEqual([
+        expect.objectContaining({ manualDoneAt: DAY('2027-04-01') }),
+      ]);
       const undo = await raw.patientRecall.deleteMany({
         where: {
           tenantId: f.tenantId,

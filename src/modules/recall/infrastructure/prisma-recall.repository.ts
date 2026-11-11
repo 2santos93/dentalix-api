@@ -229,6 +229,19 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
 }
 
 /**
+ * DX-015-bis: una clínica dada de alta por la app anterior durante el
+ * despliegue no tiene tipos; se le siembran los de por defecto la primera vez
+ * que se necesitan (idempotente; no hace nada si tiene alguno, también
+ * retirado).
+ */
+export async function ensureDefaultTypes(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<void> {
+  await tx.$queryRaw`SELECT public.dx_recall_ensure_default_types(${tenantId}::uuid)`;
+}
+
+/**
  * DX-015 · Recall sobre Prisma. DX-015-bis: el vencimiento es la columna
  * generada `dueAt` y la base la mantiene `dx_recall_recompute` (lo fijado a
  * mano o el último DONE de un procedimiento disparador del tipo).
@@ -489,20 +502,22 @@ export class PrismaRecallRepository implements RecallRepository {
   findType(
     ref: { systemKey: RecallKind } | { id: string },
   ): Promise<RecallTypeRef | null> {
-    return this.prisma.runWithTenant((tx) =>
-      tx.recallType.findFirst({
+    return this.prisma.runWithTenant(async (tx) => {
+      await ensureDefaultTypes(tx, this.tenantId());
+      return tx.recallType.findFirst({
         where: {
           deletedAt: null,
           ...('id' in ref ? { id: ref.id } : { systemKey: ref.systemKey }),
         },
         select: { id: true, systemKey: true },
-      }),
-    );
+      });
+    });
   }
 
   /** DX-015-bis: los tipos vivos de la clínica (activos o no), en su orden. */
   listTypes(): Promise<RecallTypeView[]> {
     return this.prisma.runWithTenant(async (tx) => {
+      await ensureDefaultTypes(tx, this.tenantId());
       const rows = await tx.recallType.findMany({
         where: { deletedAt: null },
         select: {
