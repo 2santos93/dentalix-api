@@ -1,0 +1,16 @@
+-- DX-015-bis (DB-079 bis): la lista de recall y su recuento («Mi día») por
+-- vencimiento GUARDADO. `recallDueSql` recorre solo los recalls ACTIVOS cuyo
+-- "dueAt" cae antes de «hoy» (el más adelantado de las sedes) + la ventana:
+-- un rango sobre este índice en lugar de todos los recalls de la clínica.
+-- INCLUDE: todas las columnas que lee esa primera etapa, así es un recorrido
+-- SOLO de índice (medido con 60.000 pacientes y ~20 % vencidos: sin ellas el
+-- planificador prefería recorrer la tabla entera).
+--
+-- CONCURRENTLY (DB-025): sin bloquear las escrituras de patient_recalls (el
+-- DONE de un procedimiento la escribe). Por eso es la ÚNICA sentencia del
+-- fichero (Prisma la ejecuta fuera de transacción) y no lleva `SET
+-- lock_timeout` (DB-078). Aditiva.
+-- Si falla: DROP INDEX CONCURRENTLY IF EXISTS "patient_recalls_tenant_due_idx",
+-- `npx prisma migrate resolve --rolled-back 20261212090300_dx015bis_recall_due_idx`
+-- y repetir `migrate deploy` (el IF NOT EXISTS saltaría un índice INVALID).
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "patient_recalls_tenant_due_idx" ON "patient_recalls" ("tenantId", "dueAt") INCLUDE ("id", "patientId", "recallTypeId", "kind", "intervalMonths", "lastDoneAt", "disabledUntil", "locationId") WHERE "active";
