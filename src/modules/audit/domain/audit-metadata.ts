@@ -27,7 +27,15 @@ export interface AuditMetadata {
    * DX-121: cita movida — hora y profesional antes y después. Solo instantes
    * ISO y uuids: ni paciente, ni motivo, ni notas.
    */
-  move?: { from: AuditAppointmentSlot; to: AuditAppointmentSlot };
+  move?: {
+    from: AuditAppointmentSlot;
+    to: AuditAppointmentSlot;
+    /**
+     * DX-436-bis: `OPENING` = «Asignar» desde «Ocupar este hueco» (una cita
+     * «quiere antes» adelantada a un hueco liberado). Sin él, un reagendado.
+     */
+    via?: 'OPENING';
+  };
   /**
    * DX-200: cambio de estado de una cita en el flujo de la clínica (llegó, en
    * sillón, listo para cobrar, salida, «Deshacer llegada»): solo los códigos
@@ -593,7 +601,8 @@ function appointmentMove(value: unknown): AuditMetadata['move'] | null {
   if (!isRecord(value)) return null;
   const from = appointmentSlot(value.from);
   const to = appointmentSlot(value.to);
-  return from && to ? { from, to } : null;
+  if (!from || !to) return null;
+  return value.via === 'OPENING' ? { from, to, via: 'OPENING' } : { from, to };
 }
 
 /** Lote/REF con formato de código y nº de filas; si no, nada. */

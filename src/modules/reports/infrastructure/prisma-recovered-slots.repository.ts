@@ -276,7 +276,10 @@ export class PrismaRecoveredSlotsRepository implements RecoveredSlotsRepository 
                    AND o."outcome" = 'ACCEPTED'
                    AND o."providerId" = f."providerId"
                    AND o."slotStart" < f."end"
-                   AND o."slotEnd" > f."start")) AS "byList"
+                   AND o."slotEnd" > f."start")
+              -- DX-436-bis: «Asignar» desde «Ocupar este hueco» (una cita
+              -- «quiere antes» movida al hueco por PATCH /appointments/:id/opening).
+              OR COALESCE(m."viaOpening", FALSE)) AS "byList"
         FROM f
         JOIN "appointments" c
           ON c."tenantId" = f."tenantId"
@@ -289,7 +292,8 @@ export class PrismaRecoveredSlotsRepository implements RecoveredSlotsRepository 
          AND c."deletedAt" IS NULL
          AND c."status" <> 'CANCELLED'
         LEFT JOIN LATERAL (
-          SELECT max(e."occurredAt") AS "movedAt"
+          SELECT max(e."occurredAt") AS "movedAt",
+                 bool_or(e."metadata"#>>'{move,via}' = 'OPENING') AS "viaOpening"
             FROM "audit_events" e
            WHERE c."createdAt" <= f."freedAt"
              AND e."tenantId" = f."tenantId"
