@@ -45,6 +45,13 @@ import { PAYMENT_RECEIPT_REPOSITORY } from './domain/ports/payment-receipt-repos
 import { RECEIPT_EMAIL_SENDER } from './domain/ports/receipt-email-sender.port';
 import { PrismaPaymentReceiptRepository } from './infrastructure/repositories/prisma-payment-receipt.repository';
 import { OutboxReceiptEmailSender } from './infrastructure/receipts/outbox-receipt-email-sender';
+import { PaymentReceiptSummaryController } from './presentation/payment-receipt-summary.controller';
+import { GetPaymentReceiptSummaryUseCase } from './application/receipts/get-payment-receipt-summary.use-case';
+import { SendPaymentReceiptSummaryUseCase } from './application/receipts/send-payment-receipt-summary.use-case';
+import { PAYMENT_RECEIPT_SUMMARY_REPOSITORY } from './domain/ports/payment-receipt-summary-repository.port';
+import { RECEIPT_SUMMARY_EMAIL_SENDER } from './domain/ports/receipt-summary-email-sender.port';
+import { PrismaPaymentReceiptSummaryRepository } from './infrastructure/repositories/prisma-payment-receipt-summary.repository';
+import { OutboxReceiptSummaryEmailSender } from './infrastructure/receipts/outbox-receipt-summary-email-sender';
 import { CollectionsModule } from '../collections/collections.module';
 import { EmailModule } from '../notifications/email/email.module';
 import { ExchangeModule } from '../exchange/exchange.module';
@@ -100,6 +107,8 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
   controllers: [
     PaymentsController,
     PaymentReceiptsController,
+    // DX-401: resumen de los recibos de un período del paciente.
+    PaymentReceiptSummaryController,
     // DX-051: ver y reasignar la imputación de un abono.
     PaymentAllocationsController,
     PaymentRateBacklogController,
@@ -142,6 +151,17 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
       useClass: PrismaPaymentReceiptRepository,
     },
     { provide: RECEIPT_EMAIL_SENDER, useClass: OutboxReceiptEmailSender },
+    // DX-401: resumen de los recibos de un período del paciente.
+    GetPaymentReceiptSummaryUseCase,
+    SendPaymentReceiptSummaryUseCase,
+    {
+      provide: PAYMENT_RECEIPT_SUMMARY_REPOSITORY,
+      useClass: PrismaPaymentReceiptSummaryRepository,
+    },
+    {
+      provide: RECEIPT_SUMMARY_EMAIL_SENDER,
+      useClass: OutboxReceiptSummaryEmailSender,
+    },
     // DX-515: recibo no fiscal (título, leyenda y nº de factura externa).
     GetReceiptSettingsUseCase,
     UpdateReceiptSettingsUseCase,

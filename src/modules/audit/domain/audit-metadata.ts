@@ -207,6 +207,16 @@ export interface AuditMetadata {
    * códigos y enteros.
    */
   retentionTermChange?: AuditRetentionTermChange;
+  /**
+   * DX-401: el período (días civiles, ambos inclusive) del resumen de
+   * recibos que se vio, imprimió o envió. Solo las dos fechas.
+   */
+  period?: AuditPeriod;
+}
+
+export interface AuditPeriod {
+  from: string;
+  to: string;
 }
 
 export interface AuditRetentionTermChange {
@@ -1038,6 +1048,16 @@ function coverageValiditySide(value: unknown): AuditCoverageValidity | null {
   return { validFrom: from, validTo: to };
 }
 
+/** DX-401: dos días civiles que existen con `from <= to`, o nada. */
+function period(value: unknown): AuditPeriod | null {
+  if (!isRecord(value)) return null;
+  const { from, to, ...rest } = value;
+  const validFrom = civilDateOrNull(from);
+  const validTo = civilDateOrNull(to);
+  if (Object.keys(rest).length > 0 || !validFrom || !validTo) return null;
+  return validFrom <= validTo ? { from: validFrom, to: validTo } : null;
+}
+
 /** Los dos lados con la forma admitida y el booleano, o nada (SEC-053). */
 function coverageValidity(value: unknown): AuditCoverageValidityChange | null {
   if (!isRecord(value)) return null;
@@ -1443,5 +1463,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (config) out.configChange = config;
   const term = retentionTermChange(input.retentionTermChange);
   if (term) out.retentionTermChange = term;
+  const range = period(input.period);
+  if (range) out.period = range;
   return out;
 }

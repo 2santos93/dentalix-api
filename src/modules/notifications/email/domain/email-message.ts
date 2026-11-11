@@ -17,6 +17,7 @@ export const EMAIL_TEMPLATES = [
   'appointment-reminder',
   'registration-notice',
   'payment-receipt',
+  'payment-receipt-summary',
   'post-op-instructions',
   'signature-request',
   'signature-code',
@@ -53,6 +54,7 @@ export const TENANT_DAILY_BUDGET: Readonly<
   'appointment-reminder': 'clinic',
   'registration-notice': 'clinic',
   'payment-receipt': 'clinic',
+  'payment-receipt-summary': 'clinic',
   'post-op-instructions': 'clinic',
   'signature-request': 'clinic',
   'signature-code': 'clinic',
@@ -204,6 +206,36 @@ export interface PaymentReceiptEmailVars {
 }
 
 /**
+ * DX-401: resumen de los abonos de un período. Igual que el recibo: el
+ * documento enmascarado, nada clínico y sin enlaces (el resumen va en el
+ * propio email). Fechas e importes ya formateados con los de la sede.
+ */
+export interface PaymentReceiptSummaryEmailVars {
+  patientName: string;
+  /** DX-203: va al responsable (nombre de pila); el email lo saluda a él. */
+  responsibleName?: string | null;
+  /** «{nombre visible} ******5678», o null sin documento. */
+  patientDocLabel: string | null;
+  /** «01/10/2026 al 31/10/2026». */
+  periodLabel: string;
+  /** «Razón social · Id. fiscal …», o null si los datos fiscales están pendientes. */
+  fiscalLine: string | null;
+  /** Una por forma de pago, en orden de emisión. */
+  lines: {
+    receiptNumber: string;
+    dateLabel: string;
+    locationName: string;
+    methodLabel: string;
+    amountLabel: string;
+    voided: boolean;
+  }[];
+  /** Total por moneda de lo no anulado («USD 150.00»); vacío si todo está anulado. */
+  totalLabels: string[];
+  voidedCount: number;
+  notice: string;
+}
+
+/**
  * DX-222: indicaciones de cuidado tras la visita. Solo el enlace a la página
  * pública y el teléfono de la sede: ni el título ni el texto de la plantilla,
  * que nombran el procedimiento (dato clínico), viajan en el email.
@@ -314,6 +346,7 @@ export interface EmailVarsByTemplate {
   'appointment-reminder': AppointmentReminderEmailVars;
   'registration-notice': RegistrationNoticeEmailVars;
   'payment-receipt': PaymentReceiptEmailVars;
+  'payment-receipt-summary': PaymentReceiptSummaryEmailVars;
   'post-op-instructions': PostOpInstructionsEmailVars;
   'signature-request': SignatureRequestEmailVars;
   'signature-code': SignatureCodeEmailVars;

@@ -4061,6 +4061,8 @@ enum AuditResourceType {
   STAFF_MEMBER
   // DX-136: recibo de caja de un abono (ver, reimprimir, enviar).
   PAYMENT_RECEIPT
+  // DX-401: resumen de los recibos de un período del paciente (ver, imprimir, enviar).
+  PAYMENT_RECEIPT_SUMMARY
   // DX-170: plantillas de evolución (crear, editar, desactivar).
   CLINICAL_NOTE_TEMPLATE
   // DX-191: registro de implantes (alta, anulación, tarjeta, búsqueda por lote).
@@ -4213,6 +4215,8 @@ enum EmailTemplate {
   REGISTRATION_NOTICE       @map("registration-notice")
   APPOINTMENT_REMINDER      @map("appointment-reminder")
   PAYMENT_RECEIPT           @map("payment-receipt")
+  // DX-401: resumen de los abonos de un período del paciente.
+  PAYMENT_RECEIPT_SUMMARY   @map("payment-receipt-summary")
   // DX-222: enlace a las indicaciones postoperatorias.
   POST_OP_INSTRUCTIONS      @map("post-op-instructions")
   // DX-243: firma a distancia (el enlace y el código de verificación).

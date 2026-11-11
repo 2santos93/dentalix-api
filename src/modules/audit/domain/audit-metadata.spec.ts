@@ -1347,4 +1347,27 @@ describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
       });
     });
   });
+
+  describe('period (DX-401)', () => {
+    it('conserva las dos fechas del resumen de recibos', () => {
+      expect(
+        sanitizeAuditMetadata({
+          period: { from: '2026-10-01', to: '2026-10-31' },
+        }),
+      ).toEqual({ period: { from: '2026-10-01', to: '2026-10-31' } });
+    });
+
+    it('descarta un período que no encaja o trae campos de más', () => {
+      for (const period of [
+        { from: '2026-10-31', to: '2026-10-01' },
+        { from: '2026-02-30', to: '2026-03-01' },
+        { from: '2026-10-01' },
+        { from: null, to: '2026-10-01' },
+        { from: '2026-10-01', to: '2026-10-31', patient: 'María Rondón' },
+        '2026-10-01..2026-10-31',
+      ]) {
+        expect(sanitizeAuditMetadata({ period })).toEqual({});
+      }
+    });
+  });
 });

@@ -42,6 +42,7 @@ import { PlanRepricingController } from '../treatment-plans/presentation/plan-re
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
+import { PaymentReceiptSummaryController } from '../payments/presentation/payment-receipt-summary.controller';
 import { ReceiptSettingsController } from '../payments/presentation/receipt-settings.controller';
 import { PaymentAllocationsController } from '../payments/presentation/payment-allocations.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
@@ -1053,6 +1054,26 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { lookup: 'payment', param: 'id' },
   },
+  // DX-401: ver, imprimir y enviar el resumen de recibos de un período (el
+  // período va a `metadata.period`, desde el handler).
+  'GET /patients/:patientId/payment-receipts/summary': {
+    action: 'VIEW',
+    resource: 'PAYMENT_RECEIPT_SUMMARY',
+    resourceId: { param: 'patientId' },
+    patient: { param: 'patientId' },
+  },
+  'POST /patients/:patientId/payment-receipts/summary/print': {
+    action: 'PRINT',
+    resource: 'PAYMENT_RECEIPT_SUMMARY',
+    resourceId: { param: 'patientId' },
+    patient: { param: 'patientId' },
+  },
+  'POST /patients/:patientId/payment-receipts/summary/email': {
+    action: 'SEND',
+    resource: 'PAYMENT_RECEIPT_SUMMARY',
+    resourceId: { param: 'patientId' },
+    patient: { param: 'patientId' },
+  },
 
   'POST /treatment-plans/:id/payment-plan': {
     action: 'CREATE',
@@ -1942,6 +1963,7 @@ const CONTROLLERS: Type[] = [
   PlanRepricingController,
   PaymentsController,
   PaymentReceiptsController,
+  PaymentReceiptSummaryController,
   ReceiptSettingsController,
   PaymentAllocationsController,
   PaymentPlansController,
