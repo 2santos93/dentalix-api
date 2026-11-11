@@ -29,6 +29,8 @@ export interface UserProfileRepository {
    * Guarda el hash nuevo e incrementa `tokenVersion` en la MISMA sentencia,
    * lo que invalida todos los refresh tokens previos del usuario. Devuelve la
    * versión nueva. DX-359: con el evento `audit` en la misma transacción.
+   * DX-114: en la misma transacción invalida los enlaces de restablecimiento
+   * de contraseña vivos del usuario.
    */
   updatePasswordAndRevokeSessions(
     userId: string,

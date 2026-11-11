@@ -62,7 +62,54 @@ export class PasswordResetTokenStatusDto {
     enum: PASSWORD_RESET_TOKEN_STATUSES,
     enumName: 'PasswordResetTokenStatus',
     description:
-      'VALID: se puede usar. EXPIRED: caducó (30 min). USED: ya se usó. INVALID: no existe, fue reemplazado por uno más reciente o no vale en esta clínica.',
+      'VALID: se puede usar. EXPIRED: caducó (30 min). USED: ya se usó. INVALID: no existe, fue reemplazado por uno más reciente, quedó invalidado por un cambio de contraseña o no vale en esta clínica.',
   })
   status!: (typeof PASSWORD_RESET_TOKEN_STATUSES)[number];
+}
+
+/**
+ * DX-114 R4: cuerpo del 404 de POST /auth/reset-password. `code` es estable;
+ * `message` es el texto para la persona.
+ */
+export class ResetTokenNotFoundErrorDto {
+  @ApiProperty({ example: 404 })
+  statusCode!: number;
+
+  @ApiProperty({ example: 'Not Found' })
+  error!: string;
+
+  @ApiProperty({
+    enum: ['RESET_TOKEN_INVALID'],
+    example: 'RESET_TOKEN_INVALID',
+  })
+  code!: 'RESET_TOKEN_INVALID';
+
+  @ApiProperty({
+    example:
+      'El enlace para restablecer la contraseña no es válido o ya fue reemplazado por uno más reciente. Pide un enlace nuevo.',
+  })
+  message!: string;
+}
+
+/** DX-114 R4: cuerpo del 410 de POST /auth/reset-password. */
+export class ResetTokenGoneErrorDto {
+  @ApiProperty({ example: 410 })
+  statusCode!: number;
+
+  @ApiProperty({ example: 'Gone' })
+  error!: string;
+
+  @ApiProperty({
+    enum: ['RESET_TOKEN_EXPIRED', 'RESET_TOKEN_USED'],
+    enumName: 'ResetTokenGoneCode',
+    description:
+      'RESET_TOKEN_EXPIRED: caducó (30 min). RESET_TOKEN_USED: ya se usó.',
+  })
+  code!: 'RESET_TOKEN_EXPIRED' | 'RESET_TOKEN_USED';
+
+  @ApiProperty({
+    example:
+      'El enlace para restablecer la contraseña caducó (vale 30 minutos). Pide un enlace nuevo.',
+  })
+  message!: string;
 }

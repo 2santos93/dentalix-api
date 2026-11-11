@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { type Prisma, UserTokenPurpose } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   UserProfileRepository,
@@ -73,6 +73,17 @@ export class PrismaUserProfileRepository implements UserProfileRepository {
         where: { id: userId },
         data: { passwordHash, tokenVersion: { increment: 1 } },
         select: { tokenVersion: true },
+      });
+      // DX-114 R3: un enlace de restablecimiento pedido ANTES del cambio deja
+      // de valer (responde «no es válido o ya fue reemplazado»), igual que
+      // cuando se pide uno más reciente. Misma transacción que el cambio.
+      await tx.userToken.updateMany({
+        where: {
+          userId,
+          purpose: UserTokenPurpose.PASSWORD_RESET,
+          invalidatedAt: null,
+        },
+        data: { invalidatedAt: new Date() },
       });
       if (audit.kind === 'tenant') {
         await writeAuditEvent(tx, audit.event);

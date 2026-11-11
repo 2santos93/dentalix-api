@@ -1,10 +1,16 @@
 import {
   BadRequestException,
   GoneException,
+  HttpException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ResetPasswordUseCase } from './reset-password.use-case';
+import {
+  RESET_TOKEN_ERROR_CODES,
+  RESET_TOKEN_MESSAGES,
+  ResetPasswordUseCase,
+  resetTokenError,
+} from './reset-password.use-case';
 import { RequestPasswordResetUseCase } from './request-password-reset.use-case';
 import {
   FakePasswordResetNotifier,
@@ -197,5 +203,84 @@ describe('ResetPasswordUseCase', () => {
         meta,
       }),
     ).rejects.toThrow(GoneException);
+  });
+
+  describe('DX-114 R4: código estable en el cuerpo del error', () => {
+    async function bodyOf(promise: Promise<unknown>) {
+      const err: unknown = await promise.then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(HttpException);
+      return {
+        status: (err as HttpException).getStatus(),
+        body: (err as HttpException).getResponse(),
+      };
+    }
+
+    it('resetTokenError: 404/410 con statusCode, error, code y el mismo mensaje', () => {
+      expect(resetTokenError('INVALID').getStatus()).toBe(404);
+      expect(resetTokenError('INVALID').getResponse()).toEqual({
+        statusCode: 404,
+        error: 'Not Found',
+        code: 'RESET_TOKEN_INVALID',
+        message: RESET_TOKEN_MESSAGES.INVALID,
+      });
+      expect(resetTokenError('EXPIRED').getStatus()).toBe(410);
+      expect(resetTokenError('EXPIRED').getResponse()).toEqual({
+        statusCode: 410,
+        error: 'Gone',
+        code: 'RESET_TOKEN_EXPIRED',
+        message: RESET_TOKEN_MESSAGES.EXPIRED,
+      });
+      expect(resetTokenError('USED').getResponse()).toMatchObject({
+        statusCode: 410,
+        code: 'RESET_TOKEN_USED',
+        message: RESET_TOKEN_MESSAGES.USED,
+      });
+      expect(RESET_TOKEN_ERROR_CODES).toEqual({
+        INVALID: 'RESET_TOKEN_INVALID',
+        EXPIRED: 'RESET_TOKEN_EXPIRED',
+        USED: 'RESET_TOKEN_USED',
+      });
+    });
+
+    it('execute lleva el code de cada caso', async () => {
+      const { useCase, token } = await setup();
+      const run = (tenantId: string, t: string) =>
+        useCase.execute({
+          tenantId,
+          token: t,
+          password: 'NuevaClave2026',
+          meta,
+        });
+
+      // Inexistente y de otra clínica: el mismo cuerpo (sin enumeración).
+      const unknown = await bodyOf(run(TENANT, 'A'.repeat(43)));
+      const foreign = await bodyOf(run('tenant-b', token));
+      expect(unknown.status).toBe(404);
+      expect(unknown.body).toMatchObject({ code: 'RESET_TOKEN_INVALID' });
+      expect(foreign).toEqual(unknown);
+
+      await run(TENANT, token);
+      const used = await bodyOf(run(TENANT, token));
+      expect(used.status).toBe(410);
+      expect(used.body).toMatchObject({ code: 'RESET_TOKEN_USED' });
+    });
+
+    it('caducado → RESET_TOKEN_EXPIRED', async () => {
+      const { useCase, token } = await setup();
+      jest.useFakeTimers({ now: Date.now() + 30 * 60_000 + 1 });
+      const expired = await bodyOf(
+        useCase.execute({
+          tenantId: TENANT,
+          token,
+          password: 'NuevaClave2026',
+          meta,
+        }),
+      );
+      expect(expired.status).toBe(410);
+      expect(expired.body).toMatchObject({ code: 'RESET_TOKEN_EXPIRED' });
+    });
   });
 });
