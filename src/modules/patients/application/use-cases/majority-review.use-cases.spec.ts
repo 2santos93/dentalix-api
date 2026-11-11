@@ -131,6 +131,7 @@ describe('paso a la mayoría de edad (DX-342)', () => {
       ).resolves.toEqual({
         status: 'PENDING',
         majorityDate: '2026-11-01',
+        majorityAge: 18,
         decision: null,
         reviewedAt: null,
         reviewedByName: null,

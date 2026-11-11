@@ -48,6 +48,8 @@ export const COMING_OF_AGE_PERIOD_TOO_LONG_MESSAGE = `El período no puede pasar
 export interface MajorityReviewView {
   status: MajorityReviewStatus;
   majorityDate: string | null;
+  /** Mayoría de edad de la clínica con la que se cuenta. */
+  majorityAge: number;
   decision: MajorityReviewDecision | null;
   reviewedAt: string | null;
   reviewedByName: string | null;
@@ -101,6 +103,7 @@ function toView(
   return {
     status: state.status,
     majorityDate: state.majorityDate,
+    majorityAge: settings.majorityAge,
     decision: state.decision,
     reviewedAt: reviewed ? review.reviewedAt.toISOString() : null,
     reviewedByName: reviewed ? review.reviewedByName : null,

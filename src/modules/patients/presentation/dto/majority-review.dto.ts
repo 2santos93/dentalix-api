@@ -99,6 +99,12 @@ export class MajorityReviewViewDto {
   majorityDate!: string | null;
 
   @ApiProperty({
+    example: 18,
+    description: 'Mayoría de edad de la clínica con la que se cuenta.',
+  })
+  majorityAge!: number;
+
+  @ApiProperty({
     enum: MAJORITY_REVIEW_DECISIONS,
     enumName: 'MajorityReviewDecision',
     nullable: true,
