@@ -7097,7 +7097,7 @@ model RecallTypeTrigger {
 
   tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   recallType  RecallType        @relation(fields: [tenantId, recallTypeId], references: [tenantId, id], onDelete: Restrict, map: "recall_type_triggers_type_fkey")
-  catalogItem DentalCatalogItem @relation(fields: [tenantId, catalogItemId], references: [tenantId, id], onDelete: Restrict, map: "recall_type_triggers_catalog_item_fkey")
+  catalogItem DentalCatalogItem @relation(fields: [tenantId, catalogItemId], references: [tenantId, id], onDelete: Cascade, map: "recall_type_triggers_catalog_item_fkey")
 
   @@id([tenantId, recallTypeId, catalogItemId])
   @@index([tenantId, catalogItemId], map: "recall_type_triggers_tenant_catalog_item_idx")

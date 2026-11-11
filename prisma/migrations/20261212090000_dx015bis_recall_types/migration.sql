@@ -110,9 +110,12 @@ CREATE TABLE "recall_type_triggers" (
     CONSTRAINT "recall_type_triggers_type_fkey"
       FOREIGN KEY ("tenantId", "recallTypeId") REFERENCES "recall_types"("tenantId", "id")
       ON DELETE RESTRICT ON UPDATE CASCADE,
+    -- CASCADE: un disparador es solo un enlace; un procedimiento del catálogo
+    -- borrado en duro (limpiezas, tests; la app los retira con "deletedAt")
+    -- simplemente deja de disparar. El tipo, en cambio, RESTRICT.
     CONSTRAINT "recall_type_triggers_catalog_item_fkey"
       FOREIGN KEY ("tenantId", "catalogItemId") REFERENCES "dental_catalog_items"("tenantId", "id")
-      ON DELETE RESTRICT ON UPDATE CASCADE
+      ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- «¿Este procedimiento dispara algún tipo?» en la transacción del DONE (y lado
