@@ -19,6 +19,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { purgeTenants } from './support/tenant-purge';
 
 // DX-042: carreras que la base y los repositorios cierran ahora en UNA
 // transacción (DB-012 último ADMIN, DB-013 espejo DONE → odontograma, DB-014
@@ -62,27 +63,16 @@ async function seed(): Promise<Seeded> {
 }
 
 async function cleanup(tenantId: string): Promise<void> {
-  const where = { tenantId };
   const memberships = await raw.clinicMembership.findMany({
-    where,
+    where: { tenantId },
     select: { userId: true },
   });
-  // DX-051: los abonos por repositorio dejan base, imputaciones e historial
-  // (borrar las imputaciones deja su movimiento: van antes).
-  await raw.paymentAllocation.deleteMany({ where });
-  await raw.paymentAllocationMovement.deleteMany({ where });
-  await raw.paymentPlanAmount.deleteMany({ where });
-  await raw.payment.deleteMany({ where });
-  await raw.treatmentPlanItem.deleteMany({ where });
-  await raw.treatmentPlan.deleteMany({ where });
-  await raw.toothRecord.deleteMany({ where });
-  await raw.patient.deleteMany({ where });
-  await raw.location.deleteMany({ where });
-  await raw.clinicMembership.deleteMany({ where });
+  // Todas las tablas de clínica en orden de FKs (un DONE con autor siembra
+  // los tipos de recall de la clínica: DX-015-bis).
+  await purgeTenants(raw, [tenantId]);
   await raw.user.deleteMany({
     where: { id: { in: memberships.map((m) => m.userId) } },
   });
-  await raw.tenant.deleteMany({ where: { id: tenantId } });
 }
 
 describe('Carreras cerradas en una transacción (DX-042, int)', () => {
