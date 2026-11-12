@@ -129,6 +129,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-099: cuestionario de anamnesis por enlace (el paciente, sin sesión).
   'GET /public/medical-history/:token': PUBLIC_TENANT,
   'POST /public/medical-history/:token': PUBLIC_TENANT,
+  'POST /public/medical-history/:token/opened': PUBLIC_TENANT,
   // DX-243: firma a distancia por enlace con código (el paciente, sin sesión).
   'GET /public/sign/:token': PUBLIC_TENANT,
   'POST /public/sign/:token/code': PUBLIC_TENANT,
@@ -717,6 +718,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-481: ocupación por sillón (REPORT_ROLES).
   'GET /reports/chair-occupancy': ADMIN_ONLY,
   'GET /reports/chair-occupancy.csv': ADMIN_ONLY,
+  // DX-424: enlaces del paciente (REPORT_ROLES).
+  'GET /reports/patient-links': ADMIN_ONLY,
   // DX-439: «Pendiente de cerrar». ADMIN todo; DENTIST evolución y
   // tratamiento de sus citas; RECEPTION el desenlace (lo acota el caso de uso).
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),

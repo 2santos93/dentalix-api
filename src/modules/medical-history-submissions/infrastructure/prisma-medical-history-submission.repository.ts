@@ -59,6 +59,7 @@ function toEntity(row: Row): MedicalHistorySubmission {
     locationId: row.locationId,
     expiresAt: row.expiresAt,
     revokedAt: row.revokedAt,
+    openedAt: row.openedAt,
     status: row.status,
     questionnaireVersion: row.questionnaireVersion,
     answers: (row.answers as AnamnesisAnswers | null) ?? null,
@@ -326,6 +327,22 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
         sensitiveHealthGranted: granted,
         policy,
       };
+    });
+  }
+
+  markOpened(id: string): Promise<boolean> {
+    // `openedAt: null` y PENDING_PATIENT en el where: dos aperturas a la vez
+    // solo marcan una, y nunca se toca un envío ya enviado o caducado.
+    return this.prisma.runWithTenant(async (tx) => {
+      const { count } = await tx.medicalHistorySubmission.updateMany({
+        where: {
+          id,
+          openedAt: null,
+          status: MedicalHistorySubmissionStatus.PENDING_PATIENT,
+        },
+        data: { openedAt: new Date() },
+      });
+      return count > 0;
     });
   }
 

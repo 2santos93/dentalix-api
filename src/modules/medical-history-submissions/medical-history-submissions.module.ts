@@ -20,6 +20,7 @@ import {
 } from './application/use-cases/anamnesis-review.use-cases';
 import {
   GetPublicAnamnesisUseCase,
+  MarkPublicAnamnesisOpenedUseCase,
   SubmitPublicAnamnesisUseCase,
 } from './application/use-cases/public-anamnesis.use-cases';
 import { MEDICAL_HISTORY_SUBMISSION_REPOSITORY } from './domain/ports/medical-history-submission-repository.port';
@@ -52,6 +53,7 @@ import { PublicMedicalHistoryController } from './presentation/public-medical-hi
     AcceptAnamnesisUseCase,
     RejectAnamnesisUseCase,
     GetPublicAnamnesisUseCase,
+    MarkPublicAnamnesisOpenedUseCase,
     SubmitPublicAnamnesisUseCase,
     { provide: ANAMNESIS_CLOCK, useValue: () => new Date() },
     {
