@@ -75,6 +75,18 @@ export const ALLOWED: readonly Allowed[] = [
     reason: 'tasas de relleno y cancelación (0..1) como % con 1 decimal',
   },
   {
+    file: 'src/modules/reports/application/chair-occupancy-csv.ts',
+    text: '(rate * 100).toFixed(1)',
+    fn: 'function percent',
+    reason: 'ocupación y % atendido (0..1) como % con 1 decimal (DX-481)',
+  },
+  {
+    file: 'src/modules/reports/domain/chair-occupancy.ts',
+    text: 'Math.round(Math.min(1, minutes / open) * 10_000) / 10_000',
+    reason:
+      'tasa de ocupación 0..1 con 4 decimales y tope 1 (DX-481), no un importe',
+  },
+  {
     file: 'src/modules/reports/application/locations-comparison-csv.ts',
     text: 'value.toFixed(decimals)',
     reason:

@@ -2642,6 +2642,19 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 403,
       message: 'No tienes acceso a esta sede.',
     })),
+    // DX-481: ocupación por sillón. Una sede de A es 403 (el mismo rechazo
+    // que una sede no permitida: no dice si existe).
+    ...(
+      ['/reports/chair-occupancy', '/reports/chair-occupancy.csv'] as const
+    ).map((route): IsolationCase => ({
+      name: `GET ${route} ?locationId de A`,
+      verb: 'get',
+      path: () =>
+        `${route}?from=${day(-30)}&to=${day(0)}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 403,
+      message: 'No tienes acceso a esta sede.',
+    })),
     // DX-423: producción por procedimiento. Una sede de A es 403; el
     // profesional o el procedimiento de A dan un reporte vacío.
     ...(

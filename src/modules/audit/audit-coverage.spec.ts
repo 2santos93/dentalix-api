@@ -57,6 +57,7 @@ import { DiscountReportController } from '../discounts/presentation/discount-rep
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
 import { UnallocatedPaymentsController } from '../reports/presentation/unallocated-payments.controller';
 import { RecoveredSlotsController } from '../reports/presentation/recovered-slots.controller';
+import { ChairOccupancyController } from '../reports/presentation/chair-occupancy.controller';
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
@@ -1277,6 +1278,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'APPOINTMENT',
     reason: 'RECOVERED_SLOTS_REPORT',
   },
+  // DX-481: el CSV de «Ocupación por sillón» (solo agregados) sale de la
+  // clínica: cada descarga queda auditada.
+  'GET /reports/chair-occupancy.csv': {
+    action: 'EXPORT',
+    resource: 'APPOINTMENT',
+    reason: 'CHAIR_OCCUPANCY_REPORT',
+  },
   // DX-439: «Pendiente de cerrar» lleva los nombres de muchos pacientes.
   'GET /closing-queue': {
     action: 'VIEW',
@@ -1996,6 +2004,7 @@ const CONTROLLERS: Type[] = [
   ProductionByProcedureController,
   UnallocatedPaymentsController,
   RecoveredSlotsController,
+  ChairOccupancyController,
   ClosingQueueController,
   ContingencyAgendaController,
   CollectionsController,

@@ -18,11 +18,15 @@ import { GetRecoveredSlotsUseCase } from './application/use-cases/get-recovered-
 import { RECOVERED_SLOTS_REPOSITORY } from './domain/ports/recovered-slots-repository.port';
 import { PrismaRecoveredSlotsRepository } from './infrastructure/prisma-recovered-slots.repository';
 import { RecoveredSlotsController } from './presentation/recovered-slots.controller';
+import { GetChairOccupancyUseCase } from './application/use-cases/get-chair-occupancy.use-case';
+import { CHAIR_OCCUPANCY_REPOSITORY } from './domain/ports/chair-occupancy-repository.port';
+import { PrismaChairOccupancyRepository } from './infrastructure/prisma-chair-occupancy.repository';
+import { ChairOccupancyController } from './presentation/chair-occupancy.controller';
 
 // Reportes de gestión (DX-014). Pestañas: «Comparar sedes» (indicadores en
 // `domain/kpi-definitions.ts`), «Producción por procedimiento» (DX-423) y
 // «Cobrado sin imputar» (DX-399, ADMIN y recepción) y «Huecos recuperados»
-// (DX-436); las
+// (DX-436) y «Ocupación por sillón» (DX-481); las
 // siguientes se añaden como controladores bajo el mismo prefijo `reports`.
 @Module({
   imports: [JwtModule.register({})],
@@ -31,12 +35,14 @@ import { RecoveredSlotsController } from './presentation/recovered-slots.control
     ProductionByProcedureController,
     UnallocatedPaymentsController,
     RecoveredSlotsController,
+    ChairOccupancyController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
     GetProductionByProcedureUseCase,
     GetUnallocatedPaymentsUseCase,
     GetRecoveredSlotsUseCase,
+    GetChairOccupancyUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -54,6 +60,10 @@ import { RecoveredSlotsController } from './presentation/recovered-slots.control
     {
       provide: RECOVERED_SLOTS_REPOSITORY,
       useClass: PrismaRecoveredSlotsRepository,
+    },
+    {
+      provide: CHAIR_OCCUPANCY_REPOSITORY,
+      useClass: PrismaChairOccupancyRepository,
     },
   ],
 })
