@@ -108,6 +108,13 @@ export interface ItemRecallUpdate {
   recallTypeName: string;
   /** Vencimiento tras el cambio (día civil). */
   dueAt: string;
+  /**
+   * D9: la exclusión lo desactivó porque otro recall de un tipo del mismo
+   * grupo pasó a activo con este cambio.
+   */
+  deactivated: boolean;
+  /** El tipo del recall que lo sustituye; null si no se desactivó. */
+  replacedBy: { recallTypeId: string; recallTypeName: string } | null;
 }
 
 /** DX-015-bis: lo que devuelve el PATCH del ítem. */

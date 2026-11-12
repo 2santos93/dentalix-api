@@ -31,6 +31,7 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   // --- recall (DX-015-bis) ---
   'GET /recall/due ?recallTypeId',
   'GET /recall/due/count ?recallTypeId',
+  'PUT /recall-types/:id/triggers body.catalogItemIds[]',
   // --- pacientes, cobertura y convenios (DX-105, DX-150, DX-153) ---
   'POST /patients body.dataConsents.policyVersionId',
   'GET /patients ?payerId',

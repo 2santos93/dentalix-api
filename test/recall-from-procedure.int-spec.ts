@@ -232,6 +232,8 @@ describe('DX-015-bis · el DONE de un procedimiento mueve el reloj del recall (i
         recallTypeId: s.types.HYGIENE,
         recallTypeName: 'Higiene',
         dueAt: '2027-10-10',
+        deactivated: false,
+        replacedBy: null,
       },
     ]);
     expect(await recallsOf(patientId)).toEqual([

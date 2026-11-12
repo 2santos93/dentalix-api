@@ -462,6 +462,8 @@ describe('Recall: lista de llamada (DX-015, e2e)', () => {
         recallTypeId: done.recallUpdates[0].recallTypeId,
         recallTypeName: 'Higiene',
         dueAt: '2026-10-10',
+        deactivated: false,
+        replacedBy: null,
       },
     ]);
     const ficha = (

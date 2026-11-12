@@ -30,7 +30,9 @@ import {
   type RecallDueSort,
   type RecallTypeRef,
   type RecallTypeView,
+  type SetPatientRecallResult,
 } from '../../domain/recall.entity';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import {
   RECALL_INTERVAL_MAX,
   RECALL_INTERVAL_MIN,
@@ -225,7 +227,9 @@ export interface SetPatientRecallInput {
  *
  * DX-015-bis: el tipo llega por su clave del enum (`HYGIENE`, `CHECKUP`:
  * compatibilidad) o por su id. Lo fijado es `manualDoneAt`; la base es el
- * máximo con el último DONE de un procedimiento disparador del tipo.
+ * máximo con el último DONE de un procedimiento disparador del tipo. Un alta
+ * o una reactivación de un tipo con grupo desactiva los demás recalls activos
+ * del paciente de ese grupo (D9) y los devuelve en `recallUpdates`.
  */
 @Injectable()
 export class SetPatientRecallUseCase {
@@ -240,7 +244,8 @@ export class SetPatientRecallUseCase {
     type: { systemKey: RecallKind } | { id: string },
     input: SetPatientRecallInput,
     actorId: string,
-  ): Promise<PatientRecalls> {
+    audit?: AuditRequestContext,
+  ): Promise<SetPatientRecallResult> {
     if (
       !Number.isInteger(input.intervalMonths) ||
       input.intervalMonths < RECALL_INTERVAL_MIN ||
@@ -287,7 +292,7 @@ export class SetPatientRecallUseCase {
       throw new BadRequestException(DISABLED_REASON_TOO_LONG_MESSAGE);
     }
 
-    await this.repo.upsertRecall({
+    const { excluded } = await this.repo.upsertRecall({
       patientId,
       recallType,
       intervalMonths: input.intervalMonths,
@@ -297,8 +302,10 @@ export class SetPatientRecallUseCase {
       disabledUntil,
       disabledReason: disabledUntil ? reason : null,
       actorId,
+      audit,
     });
-    return this.getRecalls.execute(patientId);
+    const recalls: PatientRecalls = await this.getRecalls.execute(patientId);
+    return { ...recalls, recallUpdates: excluded };
   }
 }
 

@@ -465,6 +465,10 @@ export const RECALL_LIST_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 export const RECALL_INTERVAL_ROLES: ClinicRole[] = [...CLINICAL_ROLES];
+// DX-015-bis: los tipos de recall de la clínica (Ajustes › Recall) — crear,
+// editar, desactivar, retirar y fijar sus disparadores: solo gestión, como
+// los tipos de cita. Leerlos: APPOINTMENT_ROLES.
+export const RECALL_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
 // DX-342: paso a la mayoría de edad. La lista «Pasan a la mayoría de edad» y
 // la revisión (a quién van los avisos del paciente ya adulto) son trabajo de

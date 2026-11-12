@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import {
   RecallContactChannel,
   RecallContactOutcome,
@@ -7,6 +7,8 @@ import {
 } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsIn,
@@ -14,10 +16,24 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
+import {
+  RECALL_EXCLUSION_GROUP,
+  RECALL_EXCLUSION_GROUP_MESSAGE,
+  RECALL_TYPE_INTERVAL_MESSAGE,
+  RECALL_TYPE_NAME_MAX,
+  RECALL_TYPE_NAME_TOO_LONG_MESSAGE,
+  RECALL_TYPE_SORT_MAX,
+  RECALL_TYPE_SORT_MESSAGE,
+  RECALL_TYPE_SORT_MIN,
+  RECALL_TYPE_TRIGGERS_MAX,
+  RECALL_TYPE_TRIGGERS_MAX_MESSAGE,
+} from '../../domain/recall-type-rules';
 import {
   RECALL_DEFAULT_PAGE_SIZE,
   RECALL_DISABLED_REASON_MAX,
@@ -505,6 +521,21 @@ export class PatientRecallsDto {
   contacts!: RecallContactDto[];
 }
 
+/** DX-015-bis: un procedimiento disparador de un tipo. */
+export class RecallTypeTriggerDto {
+  @ApiProperty({ format: 'uuid' })
+  catalogItemId!: string;
+
+  @ApiProperty({ example: 'PREV-PROFILAXIS' })
+  code!: string;
+
+  @ApiProperty({
+    example: 'Profilaxis',
+    description: 'Nombre del procedimiento en el catálogo de la clínica',
+  })
+  name!: string;
+}
+
 export class RecallTypeDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -547,4 +578,131 @@ export class RecallTypeDto {
       'Procedimientos del catálogo cuyo DONE mueve el reloj de este tipo',
   })
   triggerCatalogItemIds!: string[];
+
+  @ApiProperty({
+    type: [RecallTypeTriggerDto],
+    description:
+      'Los mismos procedimientos, con su código y su nombre (en el orden de triggerCatalogItemIds)',
+  })
+  triggers!: RecallTypeTriggerDto[];
+}
+
+/**
+ * DX-015-bis (D11): alta de un tipo de recall (ADMIN). Sin `tenantId`: sale
+ * del contexto del request.
+ */
+export class CreateRecallTypeDto {
+  @ApiProperty({ minLength: 1, maxLength: RECALL_TYPE_NAME_MAX })
+  @IsString()
+  @MaxLength(RECALL_TYPE_NAME_MAX, {
+    message: RECALL_TYPE_NAME_TOO_LONG_MESSAGE,
+  })
+  name!: string;
+
+  @ApiProperty({
+    minimum: RECALL_INTERVAL_MIN,
+    maximum: RECALL_INTERVAL_MAX,
+    description:
+      'Intervalo de los recalls que cree un procedimiento a partir de ahora (cambiarlo no mueve los que ya existen)',
+  })
+  @IsInt({ message: RECALL_TYPE_INTERVAL_MESSAGE })
+  @Min(RECALL_INTERVAL_MIN, { message: RECALL_TYPE_INTERVAL_MESSAGE })
+  @Max(RECALL_INTERVAL_MAX, { message: RECALL_TYPE_INTERVAL_MESSAGE })
+  defaultIntervalMonths!: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Por defecto, true. false: deja de crear recalls por procedimiento; los que hay siguen en la lista',
+  })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+
+  @ApiPropertyOptional({
+    minimum: RECALL_TYPE_SORT_MIN,
+    maximum: RECALL_TYPE_SORT_MAX,
+    description: 'Orden en las listas; por defecto, el último',
+  })
+  @IsOptional()
+  @IsInt({ message: RECALL_TYPE_SORT_MESSAGE })
+  @Min(RECALL_TYPE_SORT_MIN, { message: RECALL_TYPE_SORT_MESSAGE })
+  @Max(RECALL_TYPE_SORT_MAX, { message: RECALL_TYPE_SORT_MESSAGE })
+  sortOrder?: number;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    pattern: RECALL_EXCLUSION_GROUP.source,
+    example: 'HYGIENE_PERIO',
+    description:
+      'Grupo de exclusión (D9/D13): dos recalls de un paciente de tipos del mismo grupo no están activos a la vez. null = sin exclusión',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString({ message: RECALL_EXCLUSION_GROUP_MESSAGE })
+  @Matches(RECALL_EXCLUSION_GROUP, { message: RECALL_EXCLUSION_GROUP_MESSAGE })
+  exclusionGroup?: string | null;
+}
+
+/** D11: editar cualquier campo (solo los presentes). */
+export class UpdateRecallTypeDto extends PartialType(CreateRecallTypeDto) {}
+
+/** D12: el conjunto completo de procedimientos que disparan el tipo. */
+export class SetRecallTypeTriggersDto {
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    maxItems: RECALL_TYPE_TRIGGERS_MAX,
+    description:
+      'Reemplaza los disparadores: procedimientos vivos del catálogo de la clínica (o los que el tipo ya tenía). [] los quita todos',
+  })
+  @IsArray()
+  @ArrayMaxSize(RECALL_TYPE_TRIGGERS_MAX, {
+    message: RECALL_TYPE_TRIGGERS_MAX_MESSAGE,
+  })
+  @IsUUID('all', {
+    each: true,
+    message: 'Cada procedimiento debe ser un id válido.',
+  })
+  catalogItemIds!: string[];
+}
+
+/** D9: el tipo del recall que sustituye al desactivado. */
+export class RecallReplacementTypeDto {
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+
+  @ApiProperty({ example: 'Mantenimiento periodontal' })
+  recallTypeName!: string;
+}
+
+/** D9: un recall que la exclusión desactivó al fijar otro (PUT). */
+export class RecallExclusionUpdateDto {
+  @ApiProperty({ format: 'uuid' })
+  recallId!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+
+  @ApiProperty({ example: 'Higiene' })
+  recallTypeName!: string;
+
+  @ApiProperty({ format: 'date', description: 'Vencimiento (no cambia)' })
+  dueAt!: string;
+
+  @ApiProperty({ description: 'Siempre true (como en el PATCH del ítem)' })
+  deactivated!: boolean;
+
+  @ApiProperty({ type: RecallReplacementTypeDto })
+  replacedBy!: RecallReplacementTypeDto;
+}
+
+/** Respuesta del PUT del recall: la ficha y lo que desactivó la exclusión. */
+export class SetPatientRecallResultDto extends PatientRecallsDto {
+  @ApiProperty({
+    type: [RecallExclusionUpdateDto],
+    description:
+      'D9: recalls de tipos del mismo grupo de exclusión que este alta o reactivación desactivó («Recall de Higiene desactivado: lo sustituye Mantenimiento periodontal»); vacío si ninguno',
+  })
+  recallUpdates!: RecallExclusionUpdateDto[];
 }
