@@ -489,6 +489,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // presupuestos; lo cambia solo ADMIN.
   'GET /treatment-plan-settings': EVERY_ROLE,
   'PUT /treatment-plan-settings': ADMIN_ONLY,
+  // DX-448: caducidad y antelación de la oferta de hueco por enlace. La
+  // leen los roles de la agenda; la cambia solo ADMIN.
+  'GET /slot-offer-settings': EVERY_ROLE,
+  'PUT /slot-offer-settings': ADMIN_ONLY,
   // Alternativas A/B, presentar, rechazar y presupuestos por seguir:
   // loop/informes/DX-040.md. Crear una alternativa es preparar el plan
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,

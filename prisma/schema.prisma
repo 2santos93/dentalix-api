@@ -112,6 +112,16 @@ model Tenant {
   fiscalAddress                           String?
   contactEmail                            String?
   contactPhone                            String?
+  /// DX-448: minutos antes del inicio del hueco en que caduca el enlace de la
+  /// oferta (DX-435). NULL = el valor de la instalación
+  /// (`WAITLIST_LINK_OFFER_EXPIRY_LEAD_MINUTES`, 0 = al empezar). CHECK 0..240.
+  /// Se calcula y se guarda en `waitlist_offers.expiresAt` al crear la oferta:
+  /// cambiarlo no toca las ya enviadas. Solo ADMIN (PUT /slot-offer-settings,
+  /// auditado).
+  slotOfferExpiryLeadMinutes              Int?
+  /// DX-448: con menos de estos minutos de vida para el enlace no se ofrece
+  /// el hueco por enlace (antes, 20 fijos). CHECK 5..240. 20 por defecto.
+  slotOfferMinLeadMinutes                 Int                              @default(20)
   createdAt                               DateTime                         @default(now())
   updatedAt                               DateTime                         @updatedAt
   deletedAt                               DateTime?

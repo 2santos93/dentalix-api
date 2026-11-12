@@ -69,17 +69,19 @@ import { WAITLIST_NOT_FOUND_MESSAGE } from '../../domain/waitlist-rules';
 import {
   LINK_OFFER_OUTCOME_MESSAGE,
   LINK_OFFER_SLOT_TAKEN_MESSAGE,
-  LINK_OFFER_TOO_LATE_MESSAGE,
   OFFER_EMAIL_BLOCKED_MESSAGE,
   OFFER_EMAIL_MISSING_MESSAGE,
   OFFER_LINK_RESOLVED_MESSAGE,
   emailOfferBlock,
   isLinkChannel,
+  linkOfferOpenFor,
+  linkOfferTooLateMessage,
   linkOfferWindowOpen,
   type EmailOfferBlock,
   type PublicSlotOfferState,
 } from '../../domain/slot-offer-link';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { GetSlotOfferSettingsUseCase } from './slot-offer-settings.use-cases';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
@@ -177,8 +179,13 @@ export interface OpeningCandidatesView {
   offerCap: number;
   /** DX-435: ofertas con enlace del hueco (sin profesional, no hay). */
   linkOffers: SlotLinkOffersSummary;
-  /** DX-435: ¿quedan al menos 20 minutos para ofertar por enlace? */
+  /**
+   * DX-435: ¿le quedaría al enlace al menos la antelación mínima de la
+   * clínica (DX-448; 20 minutos de plataforma) contando su caducidad?
+   */
   linkOfferOpen: boolean;
+  /** DX-448: por qué ya no se ofrece por enlace (con los minutos de la clínica); `null` si se puede. */
+  linkOfferClosedMessage: string | null;
   items: OpeningCandidate[];
   truncated: boolean;
 }
@@ -300,6 +307,8 @@ export class ListOpeningCandidatesUseCase {
     private readonly tenantContext: TenantContextService,
     // DX-233: solo candidatos que caben en el horario de su profesional.
     private readonly availability: ProviderAvailabilityService,
+    // DX-448: caducidad y antelación mínima de la oferta por enlace.
+    private readonly slotOfferSettings: GetSlotOfferSettingsUseCase,
   ) {}
 
   async execute(
@@ -434,6 +443,8 @@ export class ListOpeningCandidatesUseCase {
       };
     });
 
+    const linkSettings = await this.slotOfferSettings.effective();
+    const linkOfferOpen = linkOfferOpenFor(input.start, now, linkSettings);
     return {
       locationId: location.id,
       providerId: slot.providerId,
@@ -443,7 +454,10 @@ export class ListOpeningCandidatesUseCase {
       providerOffSchedule,
       offerCap: this.config.offersPerPatientPerDay,
       linkOffers: summarizeLinkOffers(linkRows, now),
-      linkOfferOpen: linkOfferWindowOpen(input.start, now),
+      linkOfferOpen,
+      linkOfferClosedMessage: linkOfferOpen
+        ? null
+        : linkOfferTooLateMessage(linkSettings),
       items,
       truncated: ranked.truncated,
     };
@@ -516,6 +530,8 @@ export class CreateWaitlistOfferUseCase {
     @Inject(OPENING_CLOCK)
     private readonly clock: OpeningClock,
     private readonly tenantContext: TenantContextService,
+    // DX-448: antelación mínima de la clínica para ofertas con enlace.
+    private readonly slotOfferSettings: GetSlotOfferSettingsUseCase,
   ) {}
 
   async execute(
@@ -537,9 +553,16 @@ export class CreateWaitlistOfferUseCase {
     }
     const now = this.clock();
     assertSlot(input.slotStart, input.slotEnd, now);
-    // DX-435: con menos de 20 minutos no da tiempo a ver el enlace y llegar.
-    if (linked && !linkOfferWindowOpen(input.slotStart, now)) {
-      throw new ConflictException(LINK_OFFER_TOO_LATE_MESSAGE);
+    // DX-435: si al enlace le queda menos vida que la antelación mínima de la
+    // clínica (DX-448; 20 minutos de plataforma) no da tiempo a verlo y
+    // llegar. Cuenta su caducidad, ya calculada por quien lo crea.
+    if (linked && input.link) {
+      const settings = await this.slotOfferSettings.effective();
+      if (
+        !linkOfferWindowOpen(input.link.expiresAt, now, settings.minLeadMinutes)
+      ) {
+        throw new ConflictException(linkOfferTooLateMessage(settings));
+      }
     }
     // Sobre un hueco ya ocupado (p. ej. recepción lo llenó a mano) el enlace
     // nacería sin efecto y gastaría el tope del día: 409.
