@@ -11,9 +11,14 @@
 --
 -- Si se corta a mitad, las clínicas hechas quedan; repetirla
 -- (`prisma migrate resolve --rolled-back` y `deploy`) no cambia nada en ellas.
--- Lo que la app vieja deje con dos activos mientras tanto lo corrige el
--- siguiente DONE o PUT de ese paciente (la app nueva aplica la exclusión en
--- cada evento).
+-- Lo que la app vieja deje con dos activos del mismo grupo mientras tanto NO
+-- se corrige solo: la exclusión se aplica únicamente en eventos (D10). La app
+-- nueva lo resuelve cuando uno de los dos recalls pasa a activo o se mueve por
+-- un evento: el siguiente DONE de un disparador que cree, mueva la base o
+-- reactive uno de ellos, o un PUT que dé de alta o reactive uno. Un PUT sobre
+-- un recall que ya estaba activo (cambiar el intervalo, pausar) no excluye.
+-- Para cerrar ese hueco, repetir dx_recall_exclusion_backfill por clínica
+-- después del despliegue (seguro: es idempotente).
 DO $$
 DECLARE
   t uuid;
