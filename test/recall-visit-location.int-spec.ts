@@ -251,8 +251,10 @@ describe('DX-015-bis · la sede de la última visita guardada en el recall (int)
         },
       }),
     );
-    expect(created.visitLocationId).toBe(sur);
-    // Escribirla a mano tampoco cuela: se recalcula.
+    // La pone el trigger de sentencia, después del RETURNING del alta: se
+    // lee de nuevo.
+    expect(await visitOf(p)).toEqual([sur]);
+    // Escribirla a mano tampoco cuela: se queda la que había.
     await asApp((tx) =>
       tx.patientRecall.update({
         where: { id: created.id },
@@ -298,5 +300,57 @@ describe('DX-015-bis · la sede de la última visita guardada en el recall (int)
       ]);
     }
     expect(await mismatches()).toBe(0);
+  });
+
+  it('dentro de la misma transacción, tras el refresco, lo escrito a mano se sigue recalculando (la marca no se queda puesta)', async () => {
+    const p = await patient('Marca');
+    await recall(p, 'HYGIENE');
+    const after = await asApp(async (tx) => {
+      await tx.appointment.create({
+        data: appointmentData(p, '2026-03-10T14:00:00Z', 'COMPLETED', sur),
+      });
+      const [flag] = await tx.$queryRaw<{ v: string | null }[]>`
+        SELECT current_setting('dentalix.recall_visit_refresh', true) AS v`;
+      await tx.patientRecall.updateMany({
+        where: { patientId: p },
+        data: { visitLocationId: norte },
+      });
+      return flag.v;
+    });
+    expect(after ?? '').toBe('');
+    expect(await visitOf(p)).toEqual([sur]);
+  });
+
+  it('el refresco no depende de las estadísticas y el BEFORE no repite su búsqueda (un CREATE OR REPLACE sin esto lo quitaría)', async () => {
+    const fns = await raw.$queryRaw<
+      { name: string; config: string[] | null; source: string }[]
+    >`
+      SELECT p.proname AS name, p.proconfig AS config, p.prosrc AS source
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public'
+         AND p.proname IN ('dx_recall_visit_location_refresh', 'dx_recall_visit_location_on_recall')
+       ORDER BY p.proname`;
+    const by = Object.fromEntries(fns.map((f) => [f.name, f]));
+    // Sin plan genérico forzado en el BEFORE: se cachearía en la conexión con
+    // las estadísticas del primer uso.
+    expect(by.dx_recall_visit_location_on_recall.config ?? []).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^plan_cache_mode=/)]),
+    );
+    // Dentro del refresco no repite la búsqueda por fila.
+    expect(by.dx_recall_visit_location_on_recall.source).toMatch(
+      /dentalix\.recall_visit_refresh/,
+    );
+    expect(by.dx_recall_visit_location_refresh.config).toEqual(
+      expect.arrayContaining(['plan_cache_mode=force_custom_plan']),
+    );
+    // El UPDATE va sin sort (solo el índice parcial da el orden sin ordenar;
+    // el GiST de solapes + Sort empataba con estimaciones de 1 fila).
+    expect(by.dx_recall_visit_location_refresh.source).toMatch(
+      /set_config\('enable_sort', 'off', true\)/,
+    );
+    // Sin auto-join de patient_recalls en el UPDATE (DX-294-ter).
+    expect(by.dx_recall_visit_location_refresh.source).not.toMatch(
+      /"id"\s*=\s*v\."id"/,
+    );
   });
 });
