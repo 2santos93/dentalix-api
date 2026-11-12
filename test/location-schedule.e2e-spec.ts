@@ -169,12 +169,13 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
       new DocumentBuilder().build(),
     );
     const ref = '#/components/schemas/LocationScheduleDto';
-    const ok = (method: 'get' | 'put') =>
+    type Ok = { content?: Record<string, { schema?: unknown }> };
+    const ok = (method: 'get' | 'put'): unknown =>
       (
-        doc.paths['/api/v1/locations/schedule'][method]?.responses['200'] as {
-          content: { 'application/json': { schema: unknown } };
-        }
-      ).content['application/json'].schema;
+        doc.paths['/api/v1/locations/schedule'][method]?.responses[
+          '200'
+        ] as unknown as Ok | undefined
+      )?.content?.['application/json']?.schema;
     expect(ok('get')).toEqual({ nullable: true, allOf: [{ $ref: ref }] });
     expect(ok('put')).toEqual({ $ref: ref });
     const dto = doc.components?.schemas?.LocationScheduleDto as {
