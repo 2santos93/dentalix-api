@@ -242,9 +242,18 @@ export class OpeningCandidatesDto {
 
   @ApiProperty({
     description:
-      'DX-435: quedan al menos 20 minutos para el hueco (se puede enviar oferta con enlace).',
+      'DX-435: al enlace le quedaría al menos la antelación mínima de la clínica (DX-448; 20 minutos de plataforma), contando su caducidad anticipada: se puede enviar oferta con enlace.',
   })
   linkOfferOpen!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: null,
+    description:
+      'DX-448: por qué ya no se ofrece por enlace, con los minutos de la clínica (el mismo texto que el 409); `null` si se puede.',
+  })
+  linkOfferClosedMessage!: string | null;
 
   @ApiProperty({ type: [OpeningCandidateDto] })
   items!: OpeningCandidateDto[];

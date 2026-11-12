@@ -29,9 +29,7 @@ import {
   type SlotOfferRepository,
 } from '../../domain/ports/slot-offer-repository.port';
 import {
-  LINK_OFFER_CONFIG,
   LINK_OFFER_EMAIL_FAILED_MESSAGE,
-  LINK_OFFER_TOO_LATE_MESSAGE,
   OFFER_EMAIL_BLOCKED_MESSAGE,
   OFFER_EMAIL_MISSING_MESSAGE,
   buildSlotOfferUrl,
@@ -39,10 +37,11 @@ import {
   generateSlotOfferToken,
   hashSlotOfferToken,
   linkOfferExpiresAt,
+  linkOfferTooLateMessage,
   linkOfferWindowOpen,
   type LinkChannel,
-  type LinkOfferConfig,
 } from '../../domain/slot-offer-link';
+import { GetSlotOfferSettingsUseCase } from './slot-offer-settings.use-cases';
 import { whatsappOfferPhone } from '../../domain/waitlist-offer-rules';
 import {
   SLOT_OFFER_EMAIL_SENDER,
@@ -77,9 +76,12 @@ function firstNameOnly(name: string): string {
  * «Enviar oferta con enlace» (DX-435): la oferta de DX-210 (mismas reglas:
  * sede, profesional, candidato vigente, DX-128 y tope diario) con un token de
  * un solo uso que solo se guarda como hash y caduca al empezar el hueco (o
- * antes, `WAITLIST_LINK_OFFER_EXPIRY_LEAD_MINUTES`). Por email sale por el
- * outbox (DX-088); por WhatsApp el enlace vuelve al panel para `wa.me`.
- * Con menos de 20 minutos para el hueco no se envía.
+ * antes: DX-448, los minutos de la clínica, o los de la instalación,
+ * `WAITLIST_LINK_OFFER_EXPIRY_LEAD_MINUTES`). La caducidad se calcula AHORA y
+ * se guarda en la oferta: cambiar el ajuste después no la mueve. Por email
+ * sale por el outbox (DX-088); por WhatsApp el enlace vuelve al panel para
+ * `wa.me`. Si al enlace le quedaría menos vida que la antelación mínima de la
+ * clínica (20 minutos de plataforma), no se envía.
  */
 @Injectable()
 export class CreateLinkOfferUseCase {
@@ -96,8 +98,7 @@ export class CreateLinkOfferUseCase {
     @Inject(SLOT_OFFER_EMAIL_SENDER)
     private readonly email: SlotOfferEmailSender,
     private readonly audit: RecordAuditEventUseCase,
-    @Inject(LINK_OFFER_CONFIG)
-    private readonly config: LinkOfferConfig,
+    private readonly settings: GetSlotOfferSettingsUseCase,
     @Inject(OPENING_CLOCK)
     private readonly clock: OpeningClock,
   ) {}
@@ -110,13 +111,16 @@ export class CreateLinkOfferUseCase {
     ctx: AuditRequestContext,
   ): Promise<LinkOfferView> {
     const now = this.clock();
+    // DX-448: los minutos de la clínica, leídos al enviar; la caducidad queda
+    // fijada en la oferta (las ya enviadas no cambian con el ajuste).
+    const settings = await this.settings.effective();
     const expiresAt = linkOfferExpiresAt(
       input.slotStart,
-      this.config.expiryLeadMinutes,
+      settings.expiryLeadMinutes,
     );
-    // El enlace tiene que vivir al menos los mismos 20 minutos.
-    if (!linkOfferWindowOpen(expiresAt, now)) {
-      throw new ConflictException(LINK_OFFER_TOO_LATE_MESSAGE);
+    // El enlace tiene que vivir al menos la antelación mínima.
+    if (!linkOfferWindowOpen(expiresAt, now, settings.minLeadMinutes)) {
+      throw new ConflictException(linkOfferTooLateMessage(settings));
     }
     // Por email, los topes del outbox ANTES de crear nada (DX-088).
     const patient = await this.repo.patientContact(input.patientId);

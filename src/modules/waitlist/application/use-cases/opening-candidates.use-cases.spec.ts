@@ -10,6 +10,11 @@ import {
   RecordWaitlistOfferOutcomeUseCase,
 } from './opening-candidates.use-cases';
 import { InMemoryOpeningCandidatesRepository } from '../__fixtures__/in-memory-opening-candidates';
+import { linkOfferTooLateMessage } from '../../domain/slot-offer-link';
+import {
+  InMemorySlotOfferSettingsRepository,
+  inMemorySlotOfferSettings,
+} from '../__fixtures__/in-memory-slot-offer-settings';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 import type {
   AppointmentCandidateRow,
@@ -94,6 +99,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
   let offer: CreateWaitlistOfferUseCase;
   let outcome: RecordWaitlistOfferOutcomeUseCase;
   let providerSchedules: InMemoryProviderScheduleRepository;
+  let slotOfferSettings: InMemorySlotOfferSettingsRepository;
 
   function addEntry(
     id: string,
@@ -148,6 +154,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
 
   beforeEach(() => {
     defaultPhoneRegion = 'VE';
+    slotOfferSettings = new InMemorySlotOfferSettingsRepository();
     repo = new InMemoryOpeningCandidatesRepository();
     drafts = [];
     providerSchedules = new InMemoryProviderScheduleRepository();
@@ -159,6 +166,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       clock,
       new TenantContextService(),
       inMemoryAvailability(providerSchedules),
+      inMemorySlotOfferSettings(slotOfferSettings),
     );
     offer = new CreateWaitlistOfferUseCase(
       repo,
@@ -168,6 +176,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       config,
       clock,
       new TenantContextService(),
+      inMemorySlotOfferSettings(slotOfferSettings),
     );
     outcome = new RecordWaitlistOfferOutcomeUseCase(
       repo,
@@ -177,6 +186,35 @@ describe('«Ocupar este hueco» (DX-210)', () => {
   });
 
   describe('candidatos', () => {
+    it('DX-448: «se puede por enlace» cuenta la caducidad y la antelación mínima de la clínica', async () => {
+      // Hueco a las 9:00 de hoy (son las 8:00).
+      const soon = {
+        ...SLOT,
+        start: local('2026-10-19', '09:00'),
+        end: local('2026-10-19', '09:30'),
+      };
+      expect(await list.execute(soon, RECEPTION)).toMatchObject({
+        linkOfferOpen: true,
+        linkOfferClosedMessage: null,
+      });
+      // Caduca 45 min antes (8:15): le quedarían 15 min, menos de 20.
+      slotOfferSettings.stored = { expiryLeadMinutes: 45, minLeadMinutes: 20 };
+      expect(await list.execute(soon, RECEPTION)).toMatchObject({
+        linkOfferOpen: false,
+        linkOfferClosedMessage: linkOfferTooLateMessage({
+          expiryLeadMinutes: 45,
+          minLeadMinutes: 20,
+        }),
+      });
+      // Sin caducidad anticipada pero con 90 min de antelación mínima.
+      slotOfferSettings.stored = { expiryLeadMinutes: 0, minLeadMinutes: 90 };
+      const closed = await list.execute(soon, RECEPTION);
+      expect(closed.linkOfferOpen).toBe(false);
+      expect(closed.linkOfferClosedMessage).toMatch(
+        /^Faltan menos de 90 minutos para el hueco/,
+      );
+    });
+
     it('URGENT antes que NORMAL, luego la cita a adelantar; el de 60 min y el de otra sede no salen', async () => {
       addEntry('normal', 'p-normal');
       addEntry('urgente', 'p-urgente', { priority: 'URGENT' });

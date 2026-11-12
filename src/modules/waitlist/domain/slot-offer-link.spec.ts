@@ -9,6 +9,12 @@ import {
   isWellFormedSlotOfferToken,
   linkOfferExpiresAt,
   linkOfferWindowOpen,
+  linkOfferOpenFor,
+  linkOfferTooLateMessage,
+  LINK_OFFER_TOO_LATE_MESSAGE,
+  effectiveSlotOfferSettings,
+  isValidSlotOfferExpiryLead,
+  isValidSlotOfferMinLead,
   loadLinkOfferConfig,
   ACCEPTED_OFFER_VISIBLE_DAYS,
   acceptedOfferLapsed,
@@ -40,10 +46,66 @@ describe('enlace de la oferta de hueco (DX-435)', () => {
     it('no se oferta si faltan menos de 20 minutos para el hueco', () => {
       expect(LINK_OFFER_MIN_LEAD_MINUTES).toBe(20);
       const at = (m: number) => new Date(slotStart.getTime() - m * MIN);
-      expect(linkOfferWindowOpen(slotStart, at(21))).toBe(true);
-      expect(linkOfferWindowOpen(slotStart, at(20))).toBe(true);
-      expect(linkOfferWindowOpen(slotStart, at(19))).toBe(false);
-      expect(linkOfferWindowOpen(slotStart, at(-5))).toBe(false);
+      expect(linkOfferWindowOpen(slotStart, at(21), 20)).toBe(true);
+      expect(linkOfferWindowOpen(slotStart, at(20), 20)).toBe(true);
+      expect(linkOfferWindowOpen(slotStart, at(19), 20)).toBe(false);
+      expect(linkOfferWindowOpen(slotStart, at(-5), 20)).toBe(false);
+    });
+
+    it('DX-448: con la antelación de la clínica, contada sobre la caducidad', () => {
+      const at = (m: number) => new Date(slotStart.getTime() - m * MIN);
+      expect(linkOfferWindowOpen(slotStart, at(44), 45)).toBe(false);
+      expect(linkOfferWindowOpen(slotStart, at(45), 45)).toBe(true);
+      const settings = { expiryLeadMinutes: 60, minLeadMinutes: 20 };
+      // Caduca a -60: hacen falta 80 minutos hasta el hueco.
+      expect(linkOfferOpenFor(slotStart, at(80), settings)).toBe(true);
+      expect(linkOfferOpenFor(slotStart, at(79), settings)).toBe(false);
+    });
+
+    it('DX-448: el 409 dice los minutos de la clínica', () => {
+      expect(LINK_OFFER_TOO_LATE_MESSAGE).toBe(
+        'Faltan menos de 20 minutos para el hueco: ya no da tiempo a ofrecerlo por enlace. Llama al paciente.',
+      );
+      expect(
+        linkOfferTooLateMessage({ expiryLeadMinutes: 0, minLeadMinutes: 30 }),
+      ).toMatch(/^Faltan menos de 30 minutos para el hueco/);
+      expect(
+        linkOfferTooLateMessage({ expiryLeadMinutes: 60, minLeadMinutes: 30 }),
+      ).toBe(
+        'El enlace caduca 60 minutos antes del hueco y le quedarían menos de 30 minutos de vida: ya no da tiempo a ofrecerlo por enlace. Llama al paciente.',
+      );
+    });
+  });
+
+  describe('ajustes de la clínica (DX-448)', () => {
+    it('sin caducidad elegida rige la de la instalación', () => {
+      expect(
+        effectiveSlotOfferSettings(
+          { expiryLeadMinutes: null, minLeadMinutes: 20 },
+          { expiryLeadMinutes: 90 },
+        ),
+      ).toEqual({ expiryLeadMinutes: 90, minLeadMinutes: 20 });
+      expect(
+        effectiveSlotOfferSettings(
+          { expiryLeadMinutes: 0, minLeadMinutes: 30 },
+          { expiryLeadMinutes: 90 },
+        ),
+      ).toEqual({ expiryLeadMinutes: 0, minLeadMinutes: 30 });
+    });
+
+    it('rangos: caducidad 0..240 y antelación 5..240, enteros', () => {
+      for (const ok of [0, 1, 240]) {
+        expect(isValidSlotOfferExpiryLead(ok)).toBe(true);
+      }
+      for (const bad of [-1, 241, 1.5, '60', null, Number.NaN]) {
+        expect(isValidSlotOfferExpiryLead(bad)).toBe(false);
+      }
+      for (const ok of [5, 20, 240]) {
+        expect(isValidSlotOfferMinLead(ok)).toBe(true);
+      }
+      for (const bad of [0, 4, 241, 20.5, '20', undefined]) {
+        expect(isValidSlotOfferMinLead(bad)).toBe(false);
+      }
     });
   });
 

@@ -39,6 +39,7 @@ import { TreatmentPlansController } from '../treatment-plans/presentation/treatm
 import { PlanQuoteController } from '../treatment-plans/presentation/plan-quote.controller';
 import { PriceQuoteController } from '../treatment-plans/presentation/price-quote.controller';
 import { QuoteSettingsController } from '../treatment-plans/presentation/quote-settings.controller';
+import { SlotOfferSettingsController } from '../waitlist/presentation/slot-offer-settings.controller';
 import { PlanRepricingController } from '../treatment-plans/presentation/plan-repricing.controller';
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
@@ -1763,6 +1764,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // y el después en códigos QT; sin evento si nada cambió.
   'PUT /treatment-plan-settings':
     'quote-settings.use-cases.spec.ts y treatment-plan-quote-validity.e2e-spec.ts',
+  // DX-448: CLINIC_SETTINGS con SLOT_OFFER_SETTINGS y configChange antes y
+  // después, escrito por el repositorio en la transacción, sin sede (DX-363);
+  // sin evento si nada cambió.
+  'PUT /slot-offer-settings': 'slot-offer-settings.e2e-spec.ts',
   // DX-374: CLINIC_SETTINGS con EXCHANGE_RATE_SOURCE y el antes y el después;
   // sin evento si no cambia. DX-384: el plazo de la última tasa registrada
   // deja EXCHANGE_RATE_MAX_AGE con configChange antes/después, escrito por el
@@ -1987,6 +1992,7 @@ const CONTROLLERS: Type[] = [
   PlanQuoteController,
   PriceQuoteController,
   QuoteSettingsController,
+  SlotOfferSettingsController,
   PlanRepricingController,
   PaymentsController,
   PaymentReceiptsController,
