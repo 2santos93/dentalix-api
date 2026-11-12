@@ -13,6 +13,7 @@ import type {
   RecallContactView,
   RecallDueQuery,
   RecallDueRow,
+  RecallExclusionUpdate,
   RecallRef,
   RecallTypeRef,
   RecallTypeView,
@@ -168,7 +169,9 @@ class InMemoryRecallRepository implements RecallRepository {
     return Promise.resolve(this.sedeDay);
   }
 
-  upsertRecall(data: SetPatientRecallData): Promise<{ id: string }> {
+  upsertRecall(
+    data: SetPatientRecallData,
+  ): Promise<{ id: string; excluded: RecallExclusionUpdate[] }> {
     this.calls.push('upsertRecall');
     this.upserts.push(data);
     const kind = data.recallType.systemKey as RecallKind;
@@ -191,7 +194,7 @@ class InMemoryRecallRepository implements RecallRepository {
           ? {}
           : { lastDoneAt: data.manualDoneAt },
       );
-      return Promise.resolve({ id: existing.id });
+      return Promise.resolve({ id: existing.id, excluded: [] });
     }
     const id = `recall-${this.recalls.length + 1}`;
     this.recalls.push({
@@ -202,7 +205,7 @@ class InMemoryRecallRepository implements RecallRepository {
       lastDoneAt: data.manualDoneAt ?? data.newRecallDoneAt,
       ...fields,
     });
-    return Promise.resolve({ id });
+    return Promise.resolve({ id, excluded: [] });
   }
 
   findType(
@@ -212,7 +215,16 @@ class InMemoryRecallRepository implements RecallRepository {
     const key = (Object.keys(TYPE_ID) as RecallKind[]).find((k) =>
       'id' in ref ? TYPE_ID[k] === ref.id : k === ref.systemKey,
     );
-    return Promise.resolve(key ? { id: TYPE_ID[key], systemKey: key } : null);
+    return Promise.resolve(
+      key
+        ? {
+            id: TYPE_ID[key],
+            name: TYPE_NAME[key],
+            systemKey: key,
+            exclusionGroup: null,
+          }
+        : null,
+    );
   }
 
   listTypes(): Promise<RecallTypeView[]> {
@@ -227,8 +239,26 @@ class InMemoryRecallRepository implements RecallRepository {
         systemKey: k,
         exclusionGroup: k === 'HYGIENE' ? 'HYGIENE_PERIO' : null,
         triggerCatalogItemIds: [],
+        triggers: [],
       })),
     );
+  }
+
+  // El CRUD de tipos tiene su propio doble (recall-types.use-cases.spec.ts).
+  findTypeView(): Promise<RecallTypeView | null> {
+    return Promise.reject(new Error('no se usa aquí'));
+  }
+  createType(): Promise<RecallTypeView> {
+    return Promise.reject(new Error('no se usa aquí'));
+  }
+  updateType(): Promise<RecallTypeView> {
+    return Promise.reject(new Error('no se usa aquí'));
+  }
+  retireType(): Promise<void> {
+    return Promise.reject(new Error('no se usa aquí'));
+  }
+  setTriggers(): Promise<RecallTypeView> {
+    return Promise.reject(new Error('no se usa aquí'));
   }
 
   findRecall(recallId: string): Promise<RecallRef | null> {
@@ -763,7 +793,12 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
     expect(repo.upserts).toEqual([
       {
         patientId: 'pac-1',
-        recallType: { id: TYPE_ID.CHECKUP, systemKey: 'CHECKUP' },
+        recallType: {
+          id: TYPE_ID.CHECKUP,
+          name: 'Control',
+          systemKey: 'CHECKUP',
+          exclusionGroup: null,
+        },
         intervalMonths: 6,
         manualDoneAt: undefined,
         newRecallDoneAt: SEDE_DAY,
@@ -771,8 +806,11 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
         disabledUntil: null,
         disabledReason: null,
         actorId: 'dra-lopez',
+        audit: undefined,
       },
     ]);
+    // D9: sin exclusión que aplicar, nada desactivado.
+    expect(out.recallUpdates).toEqual([]);
     expect(out.recalls).toEqual([
       expect.objectContaining({
         kind: 'CHECKUP',
@@ -860,7 +898,9 @@ describe('SetPatientRecallUseCase (DX-015)', () => {
     );
     expect(repo.upserts[0].recallType).toEqual({
       id: TYPE_ID.HYGIENE,
+      name: 'Higiene',
       systemKey: 'HYGIENE',
+      exclusionGroup: null,
     });
     await expect(
       set.execute(

@@ -58,9 +58,12 @@ import {
 import type { AuditAttributionSide } from '../../../audit/domain/audit-metadata';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import {
-  type ProcedureRecallResult,
+  NO_PROCEDURE_RECALLS,
+  procedureRecallUpdates,
+  type ProcedureRecallOutcome,
   recallsFromProcedure,
 } from '../../../recall/infrastructure/recall-from-procedure';
+import { auditExclusions } from '../../../recall/infrastructure/recall-exclusion';
 
 type PrismaTreatmentPlan = Prisma.TreatmentPlanGetPayload<
   Record<string, never>
@@ -662,7 +665,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
               createMissing: becameDone,
               actorId: audit?.actor.userId ?? item.performedById,
             })
-          : [];
+          : NO_PROCEDURE_RECALLS;
       await auditRecallsFromProcedure(
         tx,
         recalls,
@@ -670,10 +673,10 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         plan.patientId,
         audit,
       );
-      const recallUpdates = recalls.map(
-        ({ changed: _changed, ...update }) => update,
-      );
-      return { ...mapItemToEntity(item), recallUpdates };
+      return {
+        ...mapItemToEntity(item),
+        recallUpdates: procedureRecallUpdates(recalls),
+      };
     });
   }
 
@@ -942,18 +945,20 @@ async function lockedPlan(
 
 /**
  * DX-015-bis: un `audit_event` PATIENT_RECALL por cada recall que el cambio
- * del ítem creó o movió (no por los que el recálculo dejó igual), en la
+ * del ítem creó, movió o reactivó (no por los que el recálculo dejó igual) y
+ * otro (`reason: 'EXCLUSION'`) por cada uno que la exclusión desactivó, en la
  * transacción del cambio. Sin contexto de la petición (seed), sin evento.
  */
 async function auditRecallsFromProcedure(
   tx: Prisma.TransactionClient,
-  recalls: readonly ProcedureRecallResult[],
+  outcome: ProcedureRecallOutcome,
   itemId: string,
   patientId: string,
   audit: AuditRequestContext | undefined,
 ): Promise<void> {
   if (!audit) return;
-  for (const recall of recalls.filter((r) => r.changed)) {
+  await auditExclusions(tx, outcome.excluded, patientId, audit);
+  for (const recall of outcome.recalls.filter((r) => r.changed)) {
     await writeAuditEvent(tx, {
       tenantId: audit.tenantId,
       locationId: audit.locationId,

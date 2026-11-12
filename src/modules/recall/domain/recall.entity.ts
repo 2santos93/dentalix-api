@@ -4,6 +4,7 @@ import type {
   RecallKind,
   RecallSource,
 } from '@prisma/client';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import type { RecallStatus } from './recall-rules';
 
 /** Tope de la nota de un contacto (CHECK en la BD). */
@@ -188,6 +189,26 @@ export interface SetPatientRecallData {
   disabledUntil: string | null;
   disabledReason: string | null;
   actorId: string;
+  /**
+   * DX-015-bis: quién escribe, para auditar en la transacción la desactivación
+   * por exclusión (D14). Sin él (tests, seed), sin evento.
+   */
+  audit?: AuditRequestContext;
+}
+
+/** DX-015-bis (D9): un recall que la exclusión desactivó en un PUT. */
+export interface RecallExclusionUpdate {
+  recallId: string;
+  recallTypeId: string;
+  recallTypeName: string;
+  dueAt: string;
+  deactivated: true;
+  replacedBy: { recallTypeId: string; recallTypeName: string };
+}
+
+/** Lo que devuelve el PUT del recall: la ficha y lo que desactivó la exclusión. */
+export interface SetPatientRecallResult extends PatientRecalls {
+  recallUpdates: RecallExclusionUpdate[];
 }
 
 export interface NewRecallContact {
@@ -204,7 +225,18 @@ export interface NewRecallContact {
 /** DX-015-bis: lo justo de un tipo para fijar un recall. */
 export interface RecallTypeRef {
   id: string;
+  name: string;
   systemKey: RecallKind | null;
+  /** D9: con grupo, activar su recall desactiva los del mismo grupo. */
+  exclusionGroup: string | null;
+}
+
+/** DX-015-bis: un procedimiento disparador de un tipo. */
+export interface RecallTypeTriggerView {
+  catalogItemId: string;
+  code: string;
+  /** Nombre del procedimiento en el catálogo de la clínica. */
+  name: string;
 }
 
 /** DX-015-bis: un tipo de recall de la clínica (`GET /recall-types`). */
@@ -218,4 +250,20 @@ export interface RecallTypeView {
   exclusionGroup: string | null;
   /** Procedimientos del catálogo cuyo DONE mueve el reloj del tipo. */
   triggerCatalogItemIds: string[];
+  /** Los mismos, con su código y su nombre (porción 2). */
+  triggers: RecallTypeTriggerView[];
 }
+
+/** DX-015-bis (D11): los campos editables de un tipo. */
+export interface RecallTypeFields {
+  name: string;
+  defaultIntervalMonths: number;
+  active: boolean;
+  sortOrder: number;
+  exclusionGroup: string | null;
+}
+
+/** Alta: sin orden, va el último. */
+export type NewRecallType = Omit<RecallTypeFields, 'sortOrder'> & {
+  sortOrder: number | undefined;
+};

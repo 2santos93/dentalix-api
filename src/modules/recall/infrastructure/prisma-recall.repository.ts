@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   Prisma,
   type RecallContactChannel,
@@ -10,6 +15,17 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { civilDateIn } from '../../../shared/time/civil-day';
+import { lockRow } from '../../../shared/prisma/lock-row';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
+import { configAuditEvent } from '../../audit/domain/config-audit';
+import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
+import { recallTypeSnapshot } from '../domain/recall-type-audit';
+import { RECALL_TYPE_SORT_STEP } from '../domain/recall-type-rules';
+import {
+  auditExclusions,
+  deactivateExcluded,
+  lockExclusionScope,
+} from './recall-exclusion';
 import type { RecallRepository } from '../domain/ports/recall-repository.port';
 import type {
   NewRecallContact,
@@ -17,12 +33,92 @@ import type {
   RecallContactView,
   RecallDueQuery,
   RecallDueRow,
+  NewRecallType,
+  RecallExclusionUpdate,
   RecallRef,
+  RecallTypeFields,
   RecallTypeRef,
   RecallTypeView,
   SetPatientRecallData,
   StaffRef,
 } from '../domain/recall.entity';
+
+const RECALL_TYPE_AUDIT = { resourceType: 'RECALL_TYPE' } as const;
+
+/** Igual que el de los casos de uso (no se importa de la capa de aplicación). */
+const RECALL_TYPE_NOT_FOUND_MESSAGE =
+  'Ese tipo de recall no existe en esta clínica.';
+
+export const DUPLICATE_RECALL_TYPE_MESSAGE =
+  'Ya existe un tipo de recall con ese nombre.';
+export const INVALID_RECALL_TRIGGERS_MESSAGE =
+  'Hay procedimientos que no existen en el catálogo de esta clínica o están retirados.';
+
+/**
+ * El único UNIQUE que una escritura de tipos puede violar desde la API es el
+ * del nombre entre vivos (`recall_types_tenant_name_ci_key`). Bajo RLS Prisma
+ * no informa `meta.target`: se traduce aquí, como en los tipos de cita.
+ */
+function rethrowDuplicateTypeName(error: unknown): never {
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  ) {
+    throw new ConflictException(DUPLICATE_RECALL_TYPE_MESSAGE);
+  }
+  throw error;
+}
+
+const TYPE_VIEW_SELECT = {
+  id: true,
+  name: true,
+  defaultIntervalMonths: true,
+  active: true,
+  sortOrder: true,
+  systemKey: true,
+  exclusionGroup: true,
+  triggers: {
+    select: {
+      catalogItemId: true,
+      catalogItem: { select: { code: true, labelEs: true } },
+    },
+    orderBy: { catalogItemId: 'asc' },
+  },
+} as const satisfies Prisma.RecallTypeSelect;
+
+type TypeViewRow = Prisma.RecallTypeGetPayload<{
+  select: typeof TYPE_VIEW_SELECT;
+}>;
+
+function toTypeView({ triggers, ...type }: TypeViewRow): RecallTypeView {
+  return {
+    ...type,
+    triggerCatalogItemIds: triggers.map((t) => t.catalogItemId),
+    triggers: triggers.map((t) => ({
+      catalogItemId: t.catalogItemId,
+      code: t.catalogItem.code,
+      name: t.catalogItem.labelEs,
+    })),
+  };
+}
+
+/**
+ * El tipo bloqueado (FOR UPDATE) hasta el final de la transacción y releído
+ * después del bloqueo: el «antes» de la auditoría es el que de verdad cambia
+ * (DX-360). 404 si lo retiraron mientras tanto.
+ */
+async function lockedLiveType(
+  tx: Prisma.TransactionClient,
+  id: string,
+): Promise<RecallTypeView> {
+  await lockRow(tx, 'recall_types', id);
+  const row = await tx.recallType.findFirst({
+    where: { id, deletedAt: null },
+    select: TYPE_VIEW_SELECT,
+  });
+  if (!row) throw new NotFoundException(RECALL_TYPE_NOT_FOUND_MESSAGE);
+  return toTypeView(row);
+}
 
 /** DATE de Postgres -> día civil (Prisma lo trae a medianoche UTC). */
 const civilOf = (date: Date): string => date.toISOString().slice(0, 10);
@@ -169,6 +265,11 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
              c."lastDoneAt" AS "baseDate", c."dueAt", c."dueAt" - lo."today" AS "dueIn"
         FROM c
         JOIN locs lo ON lo."id" = coalesce(c."visitLocationId", c."locationId")
+        -- DX-015-bis (D11): los recalls de un tipo retirado no salen (la
+        -- tabla de tipos es pequeña: un hash sobre lo que ya quedó).
+        JOIN "recall_types" ty
+          ON ty."tenantId" = c."tenantId" AND ty."id" = c."recallTypeId"
+         AND ty."deletedAt" IS NULL
         JOIN "patients" pa
           ON pa."tenantId" = c."tenantId" AND pa."id" = c."patientId"
        WHERE c."dueAt" <= lo."today" + ${p.withinDays}::int
@@ -271,8 +372,10 @@ export class PrismaRecallRepository implements RecallRepository {
         FROM "patient_recalls" pr
         JOIN "patients" pa
           ON pa."tenantId" = pr."tenantId" AND pa."id" = pr."patientId"
+        -- DX-015-bis (D11): sin los de un tipo retirado.
         JOIN "recall_types" rt
           ON rt."tenantId" = pr."tenantId" AND rt."id" = pr."recallTypeId"
+         AND rt."deletedAt" IS NULL
         -- Última cita atendida (appointments_tenant_patient_completed_idx):
         -- solo la sede del paciente.
         LEFT JOIN LATERAL (
@@ -442,9 +545,19 @@ export class PrismaRecallRepository implements RecallRepository {
    * trigger de compatibilidad no interviene (no cambia "lastDoneAt"). Un alta
    * sin fecha nace con `newRecallDoneAt` (hoy).
    */
-  upsertRecall(data: SetPatientRecallData): Promise<{ id: string }> {
+  upsertRecall(
+    data: SetPatientRecallData,
+  ): Promise<{ id: string; excluded: RecallExclusionUpdate[] }> {
     return this.prisma.runWithTenant(async (tx) => {
       const tenantId = this.tenantId();
+      const group = data.recallType.exclusionGroup;
+      // D9: antes de escribir, el bloqueo del paciente y sus recalls en orden.
+      await lockExclusionScope(
+        tx,
+        tenantId,
+        data.patientId,
+        group ? [group] : [],
+      );
       const base = {
         // Compatibilidad (D7): la clave del tipo, si tiene.
         kind: data.recallType.systemKey,
@@ -453,6 +566,8 @@ export class PrismaRecallRepository implements RecallRepository {
         disabledUntil: data.disabledUntil ? dateOf(data.disabledUntil) : null,
         disabledReason: data.disabledUntil ? data.disabledReason : null,
         updatedById: data.actorId,
+        // Activo = ya no está excluido; inactivo, se conserva cómo quedó.
+        ...(data.active ? { excludedAt: null } : {}),
       };
       const doneFields = (day: string) => {
         const manualDoneAt = dateOf(day);
@@ -469,7 +584,7 @@ export class PrismaRecallRepository implements RecallRepository {
           : { ...base, ...doneFields(data.manualDoneAt) };
       const existing = await tx.patientRecall.findFirst({
         where: { patientId: data.patientId, recallTypeId: data.recallType.id },
-        select: { id: true },
+        select: { id: true, active: true },
       });
       const row = existing
         ? await tx.patientRecall.update({
@@ -491,7 +606,47 @@ export class PrismaRecallRepository implements RecallRepository {
             select: { id: true },
           });
       await tx.$executeRaw`SELECT public.dx_recall_recompute(${tenantId}::uuid, ${data.patientId}::uuid, ${data.recallType.id}::uuid)`;
-      return row;
+
+      // D9: un alta o una reactivación de un tipo con grupo desactiva los
+      // demás recalls activos del paciente de ese grupo. Cambiar el
+      // intervalo o pausar uno que ya estaba activo no.
+      if (!group || !data.active || existing?.active) {
+        return { id: row.id, excluded: [] };
+      }
+      const now = await tx.patientRecall.findUniqueOrThrow({
+        where: { id: row.id },
+        select: { lastDoneAt: true, intervalMonths: true },
+      });
+      const excluded = await deactivateExcluded(tx, {
+        tenantId,
+        patientId: data.patientId,
+        candidates: [
+          {
+            recallId: row.id,
+            recallTypeId: data.recallType.id,
+            recallTypeName: data.recallType.name,
+            exclusionGroup: group,
+            lastDoneAt: civilOf(now.lastDoneAt),
+            intervalMonths: now.intervalMonths,
+          },
+        ],
+        actorId: data.actorId,
+      });
+      await auditExclusions(tx, excluded, data.patientId, data.audit);
+      return {
+        id: row.id,
+        excluded: excluded.map((e) => ({
+          recallId: e.recallId,
+          recallTypeId: e.recallTypeId,
+          recallTypeName: e.recallTypeName,
+          dueAt: e.dueAt,
+          deactivated: true as const,
+          replacedBy: {
+            recallTypeId: e.replacedBy.recallTypeId,
+            recallTypeName: e.replacedBy.recallTypeName,
+          },
+        })),
+      };
     });
   }
 
@@ -511,7 +666,7 @@ export class PrismaRecallRepository implements RecallRepository {
           deletedAt: null,
           ...('id' in ref ? { id: ref.id } : { systemKey: ref.systemKey }),
         },
-        select: { id: true, systemKey: true },
+        select: { id: true, name: true, systemKey: true, exclusionGroup: true },
       });
     });
   }
@@ -522,25 +677,201 @@ export class PrismaRecallRepository implements RecallRepository {
       await ensureDefaultTypes(tx, this.tenantId());
       const rows = await tx.recallType.findMany({
         where: { deletedAt: null },
-        select: {
-          id: true,
-          name: true,
-          defaultIntervalMonths: true,
-          active: true,
-          sortOrder: true,
-          systemKey: true,
-          exclusionGroup: true,
-          triggers: {
-            select: { catalogItemId: true },
-            orderBy: { catalogItemId: 'asc' },
-          },
-        },
+        select: TYPE_VIEW_SELECT,
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
       });
-      return rows.map(({ triggers, ...type }) => ({
-        ...type,
-        triggerCatalogItemIds: triggers.map((t) => t.catalogItemId),
-      }));
+      return rows.map(toTypeView);
+    });
+  }
+
+  findTypeView(id: string): Promise<RecallTypeView | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.recallType.findFirst({
+        where: { id, deletedAt: null },
+        select: TYPE_VIEW_SELECT,
+      });
+      return row ? toTypeView(row) : null;
+    });
+  }
+
+  /**
+   * D11: alta de un tipo. Antes, los tipos por defecto si la clínica no tiene
+   * ninguno (si no, el primer alta los dejaría sin sembrar para siempre). Sin
+   * orden, va el último (el mayor + 10).
+   */
+  createType(
+    data: NewRecallType,
+    audit: AuditRequestContext,
+  ): Promise<RecallTypeView> {
+    const tenantId = this.tenantId();
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        await ensureDefaultTypes(tx, tenantId);
+        let sortOrder = data.sortOrder;
+        if (sortOrder === undefined) {
+          const last = await tx.recallType.aggregate({
+            where: { deletedAt: null },
+            _max: { sortOrder: true },
+          });
+          sortOrder = (last._max.sortOrder ?? 0) + RECALL_TYPE_SORT_STEP;
+        }
+        const created = toTypeView(
+          await tx.recallType.create({
+            data: {
+              tenantId,
+              name: data.name,
+              defaultIntervalMonths: data.defaultIntervalMonths,
+              active: data.active,
+              sortOrder,
+              exclusionGroup: data.exclusionGroup,
+            },
+            select: TYPE_VIEW_SELECT,
+          }),
+        );
+        await writeAuditEvent(
+          tx,
+          configAuditEvent(audit, {
+            ...RECALL_TYPE_AUDIT,
+            action: 'CREATE',
+            resourceId: created.id,
+            reason: 'RECALL_TYPE_CREATED',
+            after: recallTypeSnapshot(created),
+          }),
+        );
+        return created;
+      })
+      .catch(rethrowDuplicateTypeName);
+  }
+
+  /**
+   * D11: cambiar el intervalo por defecto NO toca los recalls que ya existen
+   * (solo los que se creen después); cambiar el grupo tampoco desactiva nada
+   * por sí solo: la exclusión se aplica en el siguiente DONE o PUT (D10).
+   */
+  updateType(
+    id: string,
+    data: Partial<RecallTypeFields>,
+    audit: AuditRequestContext,
+  ): Promise<RecallTypeView> {
+    return this.prisma
+      .runWithTenant(async (tx) => {
+        // El antes, con la fila bloqueada hasta el final (DX-360).
+        const before = await lockedLiveType(tx, id);
+        const after = toTypeView(
+          await tx.recallType.update({
+            where: { id },
+            data: {
+              name: data.name,
+              defaultIntervalMonths: data.defaultIntervalMonths,
+              active: data.active,
+              sortOrder: data.sortOrder,
+              exclusionGroup: data.exclusionGroup,
+            },
+            select: TYPE_VIEW_SELECT,
+          }),
+        );
+        const event = configAuditEvent(audit, {
+          ...RECALL_TYPE_AUDIT,
+          action: 'UPDATE',
+          resourceId: id,
+          reason: 'RECALL_TYPE_UPDATED',
+          before: recallTypeSnapshot(before),
+          after: recallTypeSnapshot(after),
+        });
+        if (event) await writeAuditEvent(tx, event);
+        return after;
+      })
+      .catch(rethrowDuplicateTypeName);
+  }
+
+  /**
+   * D11: borrado lógico (y desactivado: deja de crear recalls). Sus recalls
+   * se conservan, pero ya no salen en la lista ni en la ficha (filtran por
+   * tipo vivo). El nombre queda libre para otro tipo.
+   */
+  retireType(id: string, audit: AuditRequestContext): Promise<void> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const before = await lockedLiveType(tx, id);
+      await tx.recallType.update({
+        where: { id },
+        data: { active: false, deletedAt: new Date() },
+      });
+      await writeAuditEvent(
+        tx,
+        configAuditEvent(audit, {
+          ...RECALL_TYPE_AUDIT,
+          action: 'DELETE',
+          resourceId: id,
+          reason: 'RECALL_TYPE_DELETED',
+          before: recallTypeSnapshot(before),
+        }),
+      );
+    });
+  }
+
+  /**
+   * D12: reemplaza el conjunto de disparadores. Cada id nuevo tiene que ser un
+   * procedimiento (kind PROCEDURE) vivo del catálogo de la clínica (bajo RLS,
+   * uno de otra clínica no existe); uno que el tipo ya tenía se puede
+   * conservar aunque se haya retirado del catálogo después. Un procedimiento
+   * puede disparar varios tipos. Auditado con los ids de antes y de después
+   * (sin evento si no cambia nada).
+   */
+  setTriggers(
+    id: string,
+    catalogItemIds: readonly string[],
+    audit: AuditRequestContext,
+  ): Promise<RecallTypeView> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const before = await lockedLiveType(tx, id);
+      const had = new Set(before.triggerCatalogItemIds);
+      const added = catalogItemIds.filter((c) => !had.has(c));
+      if (added.length > 0) {
+        const valid = await tx.dentalCatalogItem.count({
+          where: { id: { in: added }, deletedAt: null, kind: 'PROCEDURE' },
+        });
+        if (valid !== added.length) {
+          throw new UnprocessableEntityException(
+            INVALID_RECALL_TRIGGERS_MESSAGE,
+          );
+        }
+      }
+      // Un disparador es solo un enlace (la FK al catálogo ya es CASCADE): el
+      // conjunto se reemplaza y la auditoría guarda el antes.
+      // eslint-disable-next-line no-restricted-syntax
+      await tx.recallTypeTrigger.deleteMany({
+        where: {
+          recallTypeId: id,
+          catalogItemId: { notIn: [...catalogItemIds] },
+        },
+      });
+      if (added.length > 0) {
+        await tx.recallTypeTrigger.createMany({
+          data: added.map((catalogItemId) => ({
+            tenantId,
+            recallTypeId: id,
+            catalogItemId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      const after = toTypeView(
+        await tx.recallType.findUniqueOrThrow({
+          where: { id },
+          select: TYPE_VIEW_SELECT,
+        }),
+      );
+      const event = configAuditEvent(audit, {
+        ...RECALL_TYPE_AUDIT,
+        action: 'UPDATE',
+        resourceId: id,
+        reason: 'RECALL_TYPE_TRIGGERS_UPDATED',
+        before: { catalogItemIds: before.triggerCatalogItemIds },
+        after: { catalogItemIds: after.triggerCatalogItemIds },
+      });
+      if (event) await writeAuditEvent(tx, event);
+      return after;
     });
   }
 

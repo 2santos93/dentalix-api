@@ -2,9 +2,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Put,
   Query,
@@ -15,14 +18,17 @@ import {
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiHeader,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { RecallKind } from '@prisma/client';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
@@ -35,8 +41,21 @@ import {
   APPOINTMENT_ROLES,
   RECALL_INTERVAL_ROLES,
   RECALL_LIST_ROLES,
+  RECALL_TYPE_WRITE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  auditRequestContext,
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import {
+  CreateRecallTypeUseCase,
+  RetireRecallTypeUseCase,
+  SetRecallTypeTriggersUseCase,
+  UpdateRecallTypeUseCase,
+} from '../application/use-cases/recall-types.use-cases';
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
@@ -51,9 +70,11 @@ import type {
   RecallContactView,
   RecallDuePage,
   RecallTypeView,
+  SetPatientRecallResult,
 } from '../domain/recall.entity';
 import {
   CreateRecallContactDto,
+  CreateRecallTypeDto,
   PatientRecallsDto,
   RecallContactDto,
   RecallDueCountDto,
@@ -62,14 +83,19 @@ import {
   RecallDueQueryDto,
   RecallTypeDto,
   SetPatientRecallDto,
+  SetPatientRecallResultDto,
+  SetRecallTypeTriggersDto,
+  UpdateRecallTypeDto,
 } from './dto/recall.dto';
 
 export const RECALL_LIST_FORBIDDEN_MESSAGE =
   'Tu rol no gestiona la lista de recall: es para administración y recepción.';
 export const RECALL_INTERVAL_FORBIDDEN_MESSAGE =
   'Solo el personal clínico fija o pausa el recall de un paciente.';
+export const RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE =
+  'Solo administración gestiona los tipos de recall de la clínica.';
 
-interface AuthenticatedRequest {
+interface AuthenticatedRequest extends AuditableRequest {
   user: TenantJwtPayload;
 }
 
@@ -210,6 +236,9 @@ function parseTypeRef(
  * DX-015-bis: los tipos de recall de la clínica (Higiene, Control,
  * Mantenimiento periodontal y los que añada en Ajustes). Lectura para los
  * cuatro roles que ven la ficha; sin datos de pacientes, así que sin @Audit.
+ * Porción 2 (D11–D14): crear, editar, retirar y fijar los disparadores, solo
+ * ADMIN (como los tipos de cita); cada escritura deja su evento RECALL_TYPE
+ * desde el repositorio, en la transacción del cambio.
  */
 @ApiTags('recall')
 @ApiBearerAuth()
@@ -217,18 +246,137 @@ function parseTypeRef(
 @UseInterceptors(TenantContextInterceptor)
 @Controller('recall-types')
 export class RecallTypesController {
-  constructor(private readonly listTypes: ListRecallTypesUseCase) {}
+  constructor(
+    private readonly listTypes: ListRecallTypesUseCase,
+    private readonly createType: CreateRecallTypeUseCase,
+    private readonly updateType: UpdateRecallTypeUseCase,
+    private readonly retireType: RetireRecallTypeUseCase,
+    private readonly setTriggers: SetRecallTypeTriggersUseCase,
+    private readonly tenantContext: TenantContextService,
+  ) {}
 
   @Roles(...APPOINTMENT_ROLES)
   @Get()
   @ApiOperation({
     summary: 'Tipos de recall de la clínica',
     description:
-      'Vivos (activos o no), por su orden: nombre, intervalo por defecto, clave de compatibilidad (HYGIENE/CHECKUP) y los procedimientos del catálogo cuyo DONE mueve su reloj.',
+      'Vivos (activos o no), por su orden: nombre, intervalo por defecto, activo, orden, clave de compatibilidad (HYGIENE/CHECKUP), grupo de exclusión y los procedimientos del catálogo cuyo DONE mueve su reloj (con su código y su nombre).',
   })
   @ApiOkResponse({ type: [RecallTypeDto] })
   list(): Promise<RecallTypeView[]> {
     return this.listTypes.execute();
+  }
+
+  @Post()
+  @Roles(...RECALL_TYPE_WRITE_ROLES)
+  @RolesDeniedMessage(RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary: 'Crear un tipo de recall',
+    description:
+      'Nombre 1–60 (único entre los vivos sin distinguir mayúsculas), intervalo por defecto 1–36 meses, activo, orden (por defecto, el último) y grupo de exclusión opcional. Sin disparadores: se fijan con PUT /recall-types/:id/triggers.',
+  })
+  @ApiCreatedResponse({ type: RecallTypeDto })
+  @ApiBadRequestResponse({
+    description: 'Nombre vacío o largo, intervalo, orden o grupo inválidos',
+  })
+  @ApiConflictResponse({ description: 'Ya existe un tipo con ese nombre' })
+  @ApiForbiddenResponse({ description: RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE })
+  create(
+    @Body() dto: CreateRecallTypeDto,
+    @Req() req: AuditableRequest,
+  ): Promise<RecallTypeView> {
+    return this.createType.execute(
+      {
+        name: dto.name,
+        defaultIntervalMonths: dto.defaultIntervalMonths,
+        active: dto.active,
+        sortOrder: dto.sortOrder,
+        exclusionGroup: dto.exclusionGroup,
+      },
+      this.audit(req),
+    );
+  }
+
+  @Patch(':id')
+  @Roles(...RECALL_TYPE_WRITE_ROLES)
+  @RolesDeniedMessage(RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary: 'Editar un tipo de recall',
+    description:
+      'Cualquier campo. Cambiar el intervalo por defecto NO cambia los recalls que ya existen: solo los que se creen después. Desactivarlo deja de crear recalls por procedimiento; los que hay siguen. Cambiar el grupo de exclusión no desactiva nada por sí solo: se aplica en el siguiente DONE o PUT del paciente.',
+  })
+  @ApiOkResponse({ type: RecallTypeDto })
+  @ApiBadRequestResponse({ description: 'Campo inválido' })
+  @ApiNotFoundResponse({ description: 'Tipo no encontrado en esta clínica' })
+  @ApiConflictResponse({ description: 'Ya existe un tipo con ese nombre' })
+  @ApiForbiddenResponse({ description: RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE })
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateRecallTypeDto,
+    @Req() req: AuditableRequest,
+  ): Promise<RecallTypeView> {
+    return this.updateType.execute(
+      id,
+      {
+        name: dto.name,
+        defaultIntervalMonths: dto.defaultIntervalMonths,
+        active: dto.active,
+        sortOrder: dto.sortOrder,
+        exclusionGroup: dto.exclusionGroup,
+      },
+      this.audit(req),
+    );
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @Roles(...RECALL_TYPE_WRITE_ROLES)
+  @RolesDeniedMessage(RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary: 'Retirar un tipo de recall (borrado lógico)',
+    description:
+      'Sus recalls se conservan pero dejan de salir en la lista y en la ficha. Higiene y Control (con clave del enum) no se retiran: se desactivan (409).',
+  })
+  @ApiNoContentResponse({ description: 'Retirado' })
+  @ApiNotFoundResponse({ description: 'Tipo no encontrado en esta clínica' })
+  @ApiConflictResponse({
+    description: 'Es un tipo del sistema (Higiene, Control): solo se desactiva',
+  })
+  @ApiForbiddenResponse({ description: RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE })
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuditableRequest,
+  ): Promise<void> {
+    await this.retireType.execute(id, this.audit(req));
+  }
+
+  @Put(':id/triggers')
+  @Roles(...RECALL_TYPE_WRITE_ROLES)
+  @RolesDeniedMessage(RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary: 'Fijar los procedimientos que disparan un tipo',
+    description:
+      'Reemplaza el conjunto. Solo procedimientos vivos del catálogo de la clínica (o los que el tipo ya tenía); uno puede disparar varios tipos.',
+  })
+  @ApiOkResponse({ type: RecallTypeDto })
+  @ApiBadRequestResponse({ description: 'Lista inválida o de más de 50' })
+  @ApiNotFoundResponse({ description: 'Tipo no encontrado en esta clínica' })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'Algún id no es un procedimiento vivo del catálogo de esta clínica',
+  })
+  @ApiForbiddenResponse({ description: RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE })
+  triggers(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetRecallTypeTriggersDto,
+    @Req() req: AuditableRequest,
+  ): Promise<RecallTypeView> {
+    return this.setTriggers.execute(id, dto.catalogItemIds, this.audit(req));
+  }
+
+  /** Quién escribe, para el evento que el repositorio guarda (D14). */
+  private audit(req: AuditableRequest) {
+    return requireAuditRequestContext(req, this.tenantContext);
   }
 }
 
@@ -245,6 +393,7 @@ export class PatientRecallsController {
   constructor(
     private readonly getRecalls: GetPatientRecallsUseCase,
     private readonly setRecall: SetPatientRecallUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Roles(...APPOINTMENT_ROLES)
@@ -278,7 +427,7 @@ export class PatientRecallsController {
   @ApiOperation({
     summary: 'Fijar (o cambiar, pausar, retirar) el recall de un tipo',
     description:
-      '«Control cada 6 meses»: intervalo (1–36 meses), día del último control (por defecto hoy en la sede), pausa hasta un día con motivo, o `active: false` para retirarlo. Un recall por paciente y tipo. DX-015-bis: lo fijado queda como `manualDoneAt`; la base es el máximo con el último procedimiento disparador realizado.',
+      '«Control cada 6 meses»: intervalo (1–36 meses), día del último control (por defecto hoy en la sede), pausa hasta un día con motivo, o `active: false` para retirarlo. Un recall por paciente y tipo. DX-015-bis: lo fijado queda como `manualDoneAt`; la base es el máximo con el último procedimiento disparador realizado. D9: dar de alta o reactivar el recall de un tipo con grupo de exclusión desactiva los demás recalls activos del paciente de ese grupo (`recallUpdates`).',
   })
   @ApiParam({
     name: 'kind',
@@ -291,7 +440,7 @@ export class PatientRecallsController {
     required: false,
     description: 'Sede activa: la del recall nuevo y la de «hoy».',
   })
-  @ApiOkResponse({ type: PatientRecallsDto })
+  @ApiOkResponse({ type: SetPatientRecallResultDto })
   @ApiBadRequestResponse({
     description: 'Intervalo, fechas o motivo inválidos',
   })
@@ -305,7 +454,7 @@ export class PatientRecallsController {
     @Param('kind') kind: string,
     @Body() dto: SetPatientRecallDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<PatientRecalls> {
+  ): Promise<SetPatientRecallResult> {
     return this.setRecall.execute(
       patientId,
       parseTypeRef(kind),
@@ -317,6 +466,8 @@ export class PatientRecallsController {
         disabledReason: dto.disabledReason,
       },
       req.user.sub,
+      // D14: la desactivación por exclusión se audita en la transacción.
+      auditRequestContext(req, this.tenantContext),
     );
   }
 }
