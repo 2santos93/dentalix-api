@@ -2683,6 +2683,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 403,
       message: 'No tienes acceso a esta sede.',
     })),
+    // DX-424: enlaces del paciente. Una sede de A es 403 (el mismo rechazo
+    // que una sede no permitida: no dice si existe).
+    {
+      name: 'GET /reports/patient-links ?locationId de A',
+      verb: 'get',
+      path: () =>
+        `/reports/patient-links?from=${day(-30)}&to=${day(0)}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 403,
+      message: 'No tienes acceso a esta sede.',
+    },
     // DX-423: producción por procedimiento. Una sede de A es 403; el
     // profesional o el procedimiento de A dan un reporte vacío.
     ...(
@@ -4058,10 +4069,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     {
       spec: 'medical-history-submissions.e2e-spec.ts',
       checks:
-        'B → 404 con el token de A en su host al abrir y al enviar el formulario (DX-099)',
+        'B → 404 con el token de A en su host al abrir, al avisar de la apertura y al enviar el formulario (DX-099, DX-424)',
       routes: [
         'GET /public/medical-history/:token',
         'POST /public/medical-history/:token',
+        'POST /public/medical-history/:token/opened',
       ],
     },
   ];

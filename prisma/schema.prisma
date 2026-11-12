@@ -977,6 +977,9 @@ model MedicalHistorySubmission {
   tokenHash            String                         @unique
   expiresAt            DateTime
   revokedAt            DateTime?
+  /// DX-424: primera apertura por el paciente (la avisa la página con un
+  /// POST; el GET es de solo lectura). Solo pasa de NULL a una hora (guard).
+  openedAt             DateTime?
   status               MedicalHistorySubmissionStatus @default(PENDING_PATIENT)
   questionnaireVersion String
   answers              Json?

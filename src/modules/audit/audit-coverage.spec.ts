@@ -1957,6 +1957,9 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   // --- Citas y enlaces al paciente -----------------------------------------
   'POST /public/post-op-instructions/:token/opened':
     'marca la apertura de la indicación; sin evento',
+  // DX-424: igual para la anamnesis por enlace (`openedAt` del envío).
+  'POST /public/medical-history/:token/opened':
+    'marca la apertura del cuestionario; sin evento',
 };
 
 const CONTROLLERS: Type[] = [

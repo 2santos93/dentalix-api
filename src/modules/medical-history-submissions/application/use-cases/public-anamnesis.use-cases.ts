@@ -126,6 +126,34 @@ export class GetPublicAnamnesisUseCase {
 }
 
 /**
+ * PÚBLICO (DX-424): la página avisa de que el paciente abrió el enlace. Solo
+ * cuenta la primera vez (`openedAt`); las siguientes no cambian nada. Como en
+ * las indicaciones postoperatorias (DX-222), no se audita: la apertura queda
+ * en el propio envío. Mismo 404/410 que el GET.
+ */
+@Injectable()
+export class MarkPublicAnamnesisOpenedUseCase {
+  constructor(
+    private readonly tenantContext: TenantContextService,
+    @Inject(MEDICAL_HISTORY_SUBMISSION_REPOSITORY)
+    private readonly repo: MedicalHistorySubmissionRepository,
+    @Inject(ANAMNESIS_CLOCK) private readonly clock: AnamnesisClock,
+  ) {}
+
+  async execute(token: string): Promise<void> {
+    const view = await findOpen(
+      this.tenantContext,
+      this.repo,
+      this.clock,
+      token,
+    );
+    if (view.submission.openedAt === null) {
+      await this.repo.markOpened(view.submission.id);
+    }
+  }
+}
+
+/**
  * PÚBLICO (DX-099): guarda las respuestas una sola vez. La HC NO cambia: el
  * envío queda «por revisar» hasta que un profesional lo acepta. Si el
  * paciente no tenía la autorización SENSITIVE_HEALTH vigente, la da aquí

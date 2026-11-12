@@ -142,6 +142,17 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
     server()
       .get(`/api/v1/public/medical-history/${token}`)
       .set('X-Tenant-Host', host);
+  const publicOpened = (host: string, token: string) =>
+    server()
+      .post(`/api/v1/public/medical-history/${token}/opened`)
+      .set('X-Tenant-Host', host);
+  const openedAtOf = async (id: string) =>
+    (
+      await raw.medicalHistorySubmission.findUniqueOrThrow({
+        where: { id },
+        select: { openedAt: true },
+      })
+    ).openedAt;
   const publicPost = (host: string, token: string, body: object) =>
     server()
       .post(`/api/v1/public/medical-history/${token}`)
@@ -328,6 +339,16 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       }
     });
 
+    it('DX-424: leer no marca la apertura; el aviso de la página la marca una sola vez (204)', async () => {
+      await publicGet(clinicA.host, link.token).expect(200);
+      expect(await openedAtOf(link.created.id)).toBeNull();
+      await publicOpened(clinicA.host, link.token).expect(204);
+      const first = await openedAtOf(link.created.id);
+      expect(first).toBeInstanceOf(Date);
+      await publicOpened(clinicA.host, link.token).expect(204);
+      expect(await openedAtOf(link.created.id)).toEqual(first);
+    });
+
     it('las respuestas públicas no se guardan en cachés (no-store), también las de error', async () => {
       const ok = await publicGet(clinicA.host, link.token).expect(200);
       expect(ok.headers['cache-control']).toBe('no-store');
@@ -374,9 +395,11 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
 
     // ISOLATION_COVERS: GET /public/medical-history/:token
     // ISOLATION_COVERS: POST /public/medical-history/:token
+    // ISOLATION_COVERS: POST /public/medical-history/:token/opened
     it('el token de A en el host de B → 404', async () => {
       await publicGet(clinicB.host, link.token).expect(404);
       await publicPost(clinicB.host, link.token, validBody()).expect(404);
+      await publicOpened(clinicB.host, link.token).expect(404);
     });
 
     it('sin autorización de salud → 422; sin declaración → 400; incompleto → 400, todo en español y sin guardar nada', async () => {
@@ -632,6 +655,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       ANAMNESIS_LINK_GONE_MESSAGE,
     );
     await publicPost(clinicA.host, token, validBody()).expect(410);
+    await publicOpened(clinicA.host, token).expect(410);
     // La ficha lo ve caducado sin que nadie lo haya marcado.
     const ficha = await as(clinicA, receptionToken)
       .get(`/patients/${patientId}/medical-history/requests`)

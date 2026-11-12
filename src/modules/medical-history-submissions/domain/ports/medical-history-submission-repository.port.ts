@@ -120,6 +120,11 @@ export interface MedicalHistorySubmissionRepository {
   countInbox(status: MedicalHistorySubmissionStatus): Promise<number>;
   findDetail(id: string): Promise<SubmissionDetail | null>;
   findByTokenHash(tokenHash: string): Promise<PublicSubmissionView | null>;
+  /**
+   * DX-424: primera apertura del enlace (solo si sigue esperando al paciente
+   * y no estaba marcada). `true` si la marcó esta llamada.
+   */
+  markOpened(id: string): Promise<boolean>;
   /** Guarda las respuestas si el enlace sigue abierto (si no, `GONE`). */
   submit(input: SubmitInput): Promise<SubmitOutcome>;
   /**

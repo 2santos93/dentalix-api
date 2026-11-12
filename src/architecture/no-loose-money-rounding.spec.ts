@@ -87,6 +87,12 @@ export const ALLOWED: readonly Allowed[] = [
       'tasa de ocupación 0..1 con 4 decimales y tope 1 (DX-481), no un importe',
   },
   {
+    file: 'src/modules/reports/domain/patient-links.ts',
+    text: 'Math.round((part * 1000) / sent) / 10',
+    reason:
+      'tasa de enlaces del paciente (parte ÷ enviados) en % con 1 decimal (DX-424), no un importe',
+  },
+  {
     file: 'src/modules/reports/application/locations-comparison-csv.ts',
     text: 'value.toFixed(decimals)',
     reason:

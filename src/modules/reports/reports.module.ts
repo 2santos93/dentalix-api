@@ -22,11 +22,19 @@ import { GetChairOccupancyUseCase } from './application/use-cases/get-chair-occu
 import { CHAIR_OCCUPANCY_REPOSITORY } from './domain/ports/chair-occupancy-repository.port';
 import { PrismaChairOccupancyRepository } from './infrastructure/prisma-chair-occupancy.repository';
 import { ChairOccupancyController } from './presentation/chair-occupancy.controller';
+import {
+  GetPatientLinksUseCase,
+  PATIENT_LINKS_CLOCK,
+} from './application/use-cases/get-patient-links.use-case';
+import { PATIENT_LINKS_REPOSITORY } from './domain/ports/patient-links-repository.port';
+import { PrismaPatientLinksRepository } from './infrastructure/prisma-patient-links.repository';
+import { PatientLinksController } from './presentation/patient-links.controller';
 
 // Reportes de gestión (DX-014). Pestañas: «Comparar sedes» (indicadores en
 // `domain/kpi-definitions.ts`), «Producción por procedimiento» (DX-423) y
 // «Cobrado sin imputar» (DX-399, ADMIN y recepción) y «Huecos recuperados»
-// (DX-436) y «Ocupación por sillón» (DX-481); las
+// (DX-436), «Ocupación por sillón» (DX-481) y «Enlaces del paciente»
+// (DX-424); las
 // siguientes se añaden como controladores bajo el mismo prefijo `reports`.
 @Module({
   imports: [JwtModule.register({})],
@@ -36,6 +44,7 @@ import { ChairOccupancyController } from './presentation/chair-occupancy.control
     UnallocatedPaymentsController,
     RecoveredSlotsController,
     ChairOccupancyController,
+    PatientLinksController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
@@ -43,6 +52,7 @@ import { ChairOccupancyController } from './presentation/chair-occupancy.control
     GetUnallocatedPaymentsUseCase,
     GetRecoveredSlotsUseCase,
     GetChairOccupancyUseCase,
+    GetPatientLinksUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -65,6 +75,11 @@ import { ChairOccupancyController } from './presentation/chair-occupancy.control
       provide: CHAIR_OCCUPANCY_REPOSITORY,
       useClass: PrismaChairOccupancyRepository,
     },
+    {
+      provide: PATIENT_LINKS_REPOSITORY,
+      useClass: PrismaPatientLinksRepository,
+    },
+    { provide: PATIENT_LINKS_CLOCK, useValue: () => new Date() },
   ],
 })
 export class ReportsModule {}
