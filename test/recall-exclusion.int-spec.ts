@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
@@ -57,7 +58,7 @@ const MAY = new Date('2027-05-20T14:00:00.000Z');
 const PUT_NOW = new Date('2027-11-07T15:00:00.000Z');
 const DAY = (d: string) => new Date(`${d}T00:00:00.000Z`);
 
-type Code = 'PROFILAXIS' | 'MANTENIMIENTO';
+type Code = 'PROFILAXIS' | 'MANTENIMIENTO' | 'COMBO';
 interface Seeded {
   tenantId: string;
   userId: string;
@@ -127,8 +128,17 @@ async function seed(): Promise<Seeded> {
       'PERIO-MANTENIMIENTO',
       'Mantenimiento periodontal',
     ),
+    // Fuera del catálogo semilla: dispara a la vez Higiene y Perio (abajo).
+    COMBO: await item('DX015BIS-COMBO', 'Profilaxis con raspado'),
   };
   const types = await seedDefaultRecallTypes(raw, tenant.id);
+  await raw.recallTypeTrigger.createMany({
+    data: [types.HYGIENE, types.PERIO].map((recallTypeId) => ({
+      tenantId: tenant.id,
+      recallTypeId,
+      catalogItemId: catalog.COMBO.id,
+    })),
+  });
   return {
     tenantId: tenant.id,
     userId: user.id,
@@ -429,6 +439,71 @@ describe('DX-015-bis · exclusión entre tipos de recall (int)', () => {
           deactivated: true,
         }),
       ]);
+    } finally {
+      undo();
+    }
+    expect(await stateOf(patientId)).toEqual({
+      HYGIENE: { active: false, excluded: true },
+      PERIO: { active: true, excluded: false },
+    });
+  });
+
+  it('un CLEAR de un procedimiento que dispara dos tipos y un PUT a la vez no se bloquean en cruz (orden de id)', async () => {
+    // El recall de Higiene (sortOrder 10, el primero que recalcula el CLEAR)
+    // con el id MAYOR; el de Perio con el menor. Sin bloquear antes todos
+    // los recalls del paciente en orden de id, el CLEAR tendría la higiene y
+    // pediría el perio, y el PUT (que bloquea en orden de id) tendría el perio
+    // y pediría la higiene: 40P01.
+    const patientId = await patient('CruceOrden');
+    const [low, high] = [randomUUID(), randomUUID()].sort();
+    for (const [id, recallTypeId, kind, months] of [
+      [high, s.types.HYGIENE, 'HYGIENE', 6],
+      [low, s.types.PERIO, null, 3],
+    ] as const) {
+      await raw.patientRecall.create({
+        data: {
+          id,
+          tenantId: s.tenantId,
+          patientId,
+          recallTypeId,
+          kind,
+          intervalMonths: months,
+          lastDoneAt: DAY('2027-01-10'),
+          manualDoneAt: DAY('2027-01-10'),
+          locationId: s.sede,
+          createdById: s.userId,
+          updatedById: s.userId,
+        },
+      });
+    }
+    const combo = await planItem(patientId, 'COMBO');
+    await done(combo, APRIL);
+
+    const stop = sqlStop(/dx_recall_recompute/);
+    const undo = pauseAfterSql(prisma, [stop]);
+    try {
+      const clearing = settle(
+        inSede(() =>
+          new UpdateTreatmentPlanItemUseCase(
+            plans,
+            catalogRepo,
+            testDiscountPolicy(),
+            () => MAY,
+          ).execute(combo, { status: 'ACCEPTED' }, ADMIN(), audit()),
+        ),
+      );
+      const pid = await reachedWithin(stop, clearing, 'CLEAR del combo');
+      const putting = settle(
+        putRecall(patientId, s.types.PERIO, { intervalMonths: 4 }),
+      );
+      await waitForLockWaiters(raw, [pid], 1);
+      stop.release.open();
+      const [c, p] = await Promise.all([clearing, putting]);
+      expect(
+        [c, p].map((r) =>
+          r.status === 'rejected' ? String(r.reason) : r.status,
+        ),
+      ).toEqual(['fulfilled', 'fulfilled']);
     } finally {
       undo();
     }

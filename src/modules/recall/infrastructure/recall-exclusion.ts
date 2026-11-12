@@ -29,22 +29,23 @@ export function exclusionLockKey(tenantId: string, patientId: string): string {
 }
 
 /**
- * DX-015-bis · Antes de escribir un recall de un tipo con grupo de exclusión
- * (DONE de un disparador o PUT), en la transacción del cambio:
+ * DX-015-bis · Antes de escribir recalls de un paciente (DONE, salida de DONE,
+ * corrección, borrado de un ítem o PUT), en la transacción del cambio:
  *
- * 1. Un advisory lock por paciente: dos DONE (o un DONE y un PUT) del mismo
- *    paciente que activan tipos del mismo grupo se serializan aquí. Sin él,
- *    dos altas concurrentes (higiene y perio, cada una en su plan) no se ven
- *    entre sí (filas sin confirmar) y quedarían las dos activas. El que espera
- *    lee, después, lo que confirmó el otro (READ COMMITTED: cada sentencia
- *    tiene su instantánea) y lo desactiva: «el último manda».
- * 2. TODOS los recalls del paciente, FOR UPDATE en orden de id, antes de
- *    cualquier escritura: el mismo orden y el mismo conjunto que bloquea
- *    `dx_recall_visit_location_refresh` (el alta de un recall y las citas lo
- *    llaman), así que el recálculo, la desactivación y esos triggers no se
- *    esperan en cruz. Son pocas filas (una por tipo).
- *
- * Sin grupos, nada (los tipos sin exclusión no pagan el bloqueo).
+ * 1. Solo si hay grupos de exclusión en juego (`groups`): un advisory lock por
+ *    paciente. Dos DONE (o un DONE y un PUT) del mismo paciente que activan
+ *    tipos del mismo grupo se serializan aquí. Sin él, dos altas concurrentes
+ *    (higiene y perio, cada una en su plan) no se ven entre sí (filas sin
+ *    confirmar) y quedarían las dos activas. El que espera lee, después, lo
+ *    que confirmó el otro (READ COMMITTED: cada sentencia tiene su
+ *    instantánea) y lo desactiva: «el último manda».
+ * 2. SIEMPRE: TODOS los recalls del paciente, FOR UPDATE en orden de id,
+ *    antes de cualquier escritura. Es el mismo orden y el mismo conjunto que
+ *    bloquea `dx_recall_visit_location_refresh` (el alta de un recall y las
+ *    citas lo llaman). Sin él, el recálculo tipo a tipo (`dx_recall_recompute`,
+ *    en orden de `sortOrder`) de un procedimiento que dispara dos tipos y un
+ *    PUT (que bloquea en orden de id) se esperaban en cruz (40P01). Son pocas
+ *    filas (una por tipo).
  */
 export async function lockExclusionScope(
   tx: Prisma.TransactionClient,
@@ -52,8 +53,9 @@ export async function lockExclusionScope(
   patientId: string,
   groups: readonly string[],
 ): Promise<void> {
-  if (groups.length === 0) return;
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${exclusionLockKey(tenantId, patientId)}, 0))`;
+  if (groups.length > 0) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${exclusionLockKey(tenantId, patientId)}, 0))`;
+  }
   await tx.$queryRaw`
     SELECT pr."id"
       FROM "patient_recalls" pr

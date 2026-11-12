@@ -110,9 +110,9 @@ export function procedureRecallUpdates(
  * cambio del ítem del plan (`PrismaTreatmentPlanRepository.updateItem`), por
  * cada tipo de recall ACTIVO que dispara su procedimiento:
  *
- * 1. Con `createMissing` y algún tipo con grupo de exclusión, bloquea antes de
- *    escribir (`lockExclusionScope`: advisory lock del paciente y sus recalls
- *    de esos grupos en orden de id).
+ * 1. Antes de escribir, bloquea todos los recalls del paciente en orden de id
+ *    (`lockExclusionScope`) y, con `createMissing` y algún tipo con grupo de
+ *    exclusión, también el advisory lock del paciente.
  * 2. Con `createMissing`, crea el recall si el paciente no tiene uno de ese
  *    tipo: intervalo por defecto del tipo, sede = la del DONE, base = el día
  *    civil del DONE en la zona de esa sede, `source = 'PROCEDURE'`. INSERT …
@@ -157,9 +157,15 @@ export async function recallsFromProcedure(
   const groups = types.flatMap((t) =>
     t.exclusionGroup ? [t.exclusionGroup] : [],
   );
-  if (change.createMissing) {
-    await lockExclusionScope(tx, tenantId, patientId, groups);
-  }
+  // Siempre, también en CLEAR/CORRECT/borrado: los recalls del paciente en
+  // orden de id antes de recalcular tipo a tipo (sin cruces con un PUT). El
+  // advisory lock de la exclusión, solo cuando este DONE puede aplicarla.
+  await lockExclusionScope(
+    tx,
+    tenantId,
+    patientId,
+    change.createMissing ? groups : [],
+  );
 
   const moved = new Set<string>();
   if (change.createMissing && change.actorId) {

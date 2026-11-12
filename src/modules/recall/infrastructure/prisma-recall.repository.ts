@@ -551,7 +551,8 @@ export class PrismaRecallRepository implements RecallRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const tenantId = this.tenantId();
       const group = data.recallType.exclusionGroup;
-      // D9: antes de escribir, el bloqueo del paciente y sus recalls en orden.
+      // Antes de escribir: los recalls del paciente en orden de id y, si el
+      // tipo tiene grupo (D9), el advisory lock de la exclusión.
       await lockExclusionScope(
         tx,
         tenantId,
