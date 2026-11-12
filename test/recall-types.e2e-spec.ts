@@ -226,6 +226,26 @@ describe('Tipos de recall: Ajustes › Recall (DX-015-bis, e2e)', () => {
       expect(messageOf(res)).toContain(message);
     });
 
+    it.each([
+      [{ name: null }, 'El nombre no puede estar vacío'],
+      [
+        { defaultIntervalMonths: null },
+        'El intervalo por defecto va de 1 a 36',
+      ],
+      [{ active: null }, 'El campo «activo» debe ser verdadero o falso.'],
+      [{ sortOrder: null }, 'El orden va de 0 a 9999'],
+    ])(
+      'PATCH %j: null solo vale en exclusionGroup (400, nada cambia)',
+      async (body, message) => {
+        const [higiene] = await list();
+        const res = await api('patch', `/recall-types/${higiene.id}`)
+          .send(body)
+          .expect(400);
+        expect(messageOf(res)).toContain(message);
+        expect((await list())[0]).toEqual(higiene);
+      },
+    );
+
     it('nombre repetido entre los vivos, sin distinguir mayúsculas ni espacios: 409, al crear y al renombrar', async () => {
       const res = await api('post', '/recall-types')
         .send({ name: '  HIGIENE ', defaultIntervalMonths: 6 })

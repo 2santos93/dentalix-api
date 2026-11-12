@@ -15,11 +15,13 @@ import {
   RECALL_EXCLUSION_GROUP_MESSAGE,
   RECALL_TYPE_INTERVAL_MESSAGE,
   RECALL_TYPE_NAME_EMPTY_MESSAGE,
+  RECALL_TYPE_SORT_MESSAGE,
   RECALL_TYPE_TRIGGERS_MAX_MESSAGE,
 } from '../../domain/recall-type-rules';
 import { RECALL_TYPE_NOT_FOUND_MESSAGE } from './recall.use-cases';
 import {
   CreateRecallTypeUseCase,
+  RECALL_TYPE_ACTIVE_MESSAGE,
   RetireRecallTypeUseCase,
   SYSTEM_RECALL_TYPE_RETIRE_MESSAGE,
   SetRecallTypeTriggersUseCase,
@@ -175,6 +177,25 @@ describe('CRUD de tipos de recall (DX-015-bis)', () => {
         ['t-higiene', { name: 'Limpieza', active: false }],
       ]);
     });
+
+    it.each([
+      [{ name: null }, RECALL_TYPE_NAME_EMPTY_MESSAGE],
+      [{ defaultIntervalMonths: null }, RECALL_TYPE_INTERVAL_MESSAGE],
+      [{ active: null }, RECALL_TYPE_ACTIVE_MESSAGE],
+      [{ sortOrder: null }, RECALL_TYPE_SORT_MESSAGE],
+    ])(
+      '%j: null solo vale en exclusionGroup (400, sin escribir)',
+      async (input, message) => {
+        await expect(
+          new UpdateRecallTypeUseCase(asRepo(repo)).execute(
+            't-perio',
+            input,
+            AUDIT,
+          ),
+        ).rejects.toThrow(new BadRequestException(message));
+        expect(repo.updated).toEqual([]);
+      },
+    );
 
     it('404 si no existe (o es de otra clínica); 400 antes de buscarlo', async () => {
       const update = new UpdateRecallTypeUseCase(asRepo(repo));

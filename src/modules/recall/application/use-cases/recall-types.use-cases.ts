@@ -15,6 +15,9 @@ import type {
   RecallTypeView,
 } from '../../domain/recall.entity';
 import {
+  RECALL_TYPE_INTERVAL_MESSAGE,
+  RECALL_TYPE_NAME_EMPTY_MESSAGE,
+  RECALL_TYPE_SORT_MESSAGE,
   exclusionGroupError,
   normalizeTriggerIds,
   recallTypeIntervalError,
@@ -27,13 +30,21 @@ import { RECALL_TYPE_NOT_FOUND_MESSAGE } from './recall.use-cases';
 export const SYSTEM_RECALL_TYPE_RETIRE_MESSAGE =
   'Este tipo de recall es del sistema (Higiene o Control): no se puede retirar, solo desactivar.';
 
-/** Lo que llega del cuerpo (crear los trae todos menos los opcionales). */
+export const RECALL_TYPE_ACTIVE_MESSAGE =
+  'El campo «activo» debe ser verdadero o falso.';
+
+/**
+ * Lo que llega del cuerpo (crear los trae todos menos los opcionales). Un
+ * campo ausente (`undefined`) no cambia; `null` solo vale en
+ * `exclusionGroup` (quita la exclusión): en los demás es un 400. El DTO de la
+ * edición (`PartialType`) lo deja pasar con `IsOptional`, así que se rechaza
+ * aquí.
+ */
 export interface RecallTypeInput {
-  name?: string;
-  defaultIntervalMonths?: number;
-  active?: boolean;
-  sortOrder?: number;
-  /** `null` quita la exclusión; `undefined` no la cambia. */
+  name?: string | null;
+  defaultIntervalMonths?: number | null;
+  active?: boolean | null;
+  sortOrder?: number | null;
   exclusionGroup?: string | null;
 }
 
@@ -45,17 +56,31 @@ function assertValid(error: string | null): void {
 function normalize(input: RecallTypeInput): Partial<RecallTypeFields> {
   const out: Partial<RecallTypeFields> = {};
   if (input.name !== undefined) {
-    assertValid(recallTypeNameError(input.name));
-    out.name = input.name.trim();
+    if (input.name === null) assertValid(RECALL_TYPE_NAME_EMPTY_MESSAGE);
+    else {
+      assertValid(recallTypeNameError(input.name));
+      out.name = input.name.trim();
+    }
   }
   if (input.defaultIntervalMonths !== undefined) {
-    assertValid(recallTypeIntervalError(input.defaultIntervalMonths));
-    out.defaultIntervalMonths = input.defaultIntervalMonths;
+    if (input.defaultIntervalMonths === null) {
+      assertValid(RECALL_TYPE_INTERVAL_MESSAGE);
+    } else {
+      assertValid(recallTypeIntervalError(input.defaultIntervalMonths));
+      out.defaultIntervalMonths = input.defaultIntervalMonths;
+    }
   }
-  if (input.active !== undefined) out.active = input.active;
+  if (input.active !== undefined) {
+    if (typeof input.active !== 'boolean') {
+      assertValid(RECALL_TYPE_ACTIVE_MESSAGE);
+    } else out.active = input.active;
+  }
   if (input.sortOrder !== undefined) {
-    assertValid(recallTypeSortOrderError(input.sortOrder));
-    out.sortOrder = input.sortOrder;
+    if (input.sortOrder === null) assertValid(RECALL_TYPE_SORT_MESSAGE);
+    else {
+      assertValid(recallTypeSortOrderError(input.sortOrder));
+      out.sortOrder = input.sortOrder;
+    }
   }
   if (input.exclusionGroup !== undefined) {
     assertValid(exclusionGroupError(input.exclusionGroup));
