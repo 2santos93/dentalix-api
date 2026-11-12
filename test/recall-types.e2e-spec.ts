@@ -356,7 +356,38 @@ describe('Tipos de recall: Ajustes › Recall (DX-015-bis, e2e)', () => {
         .send({ intervalMonths: 12 })
         .expect(200);
 
+      // La lista de salida (checkout) lo ve antes de retirarlo...
+      const location = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinic.tenantId },
+        select: { id: true },
+      });
+      const start = new Date(Date.now() - 60 * 60_000);
+      const appointment = await raw.appointment.create({
+        data: {
+          tenantId: clinic.tenantId,
+          patientId,
+          locationId: location.id,
+          providerId: clinic.adminUserId,
+          start,
+          end: new Date(start.getTime() + 30 * 60_000),
+          status: 'SCHEDULED',
+        },
+        select: { id: true },
+      });
+      const checklist = async () =>
+        (
+          (
+            await api(
+              'get',
+              `/appointments/${appointment.id}/checkout-checklist`,
+            ).expect(200)
+          ).body as { recallDueOn: string | null }
+        ).recallDueOn;
+      expect(await checklist()).toEqual(expect.any(String));
+
       await api('delete', `/recall-types/${blanqueamiento.id}`).expect(204);
+      // ...y deja de verlo después, como la lista y la ficha.
+      expect(await checklist()).toBeNull();
       expect((await list()).map((t) => t.id)).not.toContain(blanqueamiento.id);
       const ficha = (
         await api(
