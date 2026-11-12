@@ -38,7 +38,7 @@ export class ScheduleRangeDto {
 export class ReplaceLocationScheduleDto {
   @ApiPropertyOptional({
     type: String,
-    example: 'Europe/Madrid',
+    example: 'America/Caracas',
     deprecated: true,
     description:
       'Obsoleto (G1): la zona es un dato de la sede (PATCH /locations/:id) y nunca se guarda desde aquí. Solo se acepta, para una web antigua, si es igual a la zona de la sede; distinta (o sede sin zona) es 400.',
@@ -57,5 +57,27 @@ export class ReplaceLocationScheduleDto {
   @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => ScheduleRangeDto)
+  ranges!: ScheduleRangeDto[];
+}
+
+/**
+ * Respuesta de `GET`/`PUT /locations/schedule` (DX-352): la forma de
+ * `BusinessHours`. Solo documenta Swagger; el controlador devuelve el objeto
+ * del caso de uso tal cual.
+ */
+export class LocationScheduleDto {
+  @ApiProperty({
+    type: String,
+    example: 'America/Caracas',
+    description:
+      'Zona IANA de la sede (`Location.timeZone`, de solo lectura aquí: se cambia en PATCH /locations/:id). Siempre presente: una sede sin zona válida responde 409 `LOCATION_TIMEZONE_REQUIRED`.',
+  })
+  timezone!: string;
+
+  @ApiProperty({
+    type: [ScheduleRangeDto],
+    description:
+      'Tramos vigentes de la semana. Un día sin tramos = cerrado; lista vacía = sede sin restricción.',
+  })
   ranges!: ScheduleRangeDto[];
 }
