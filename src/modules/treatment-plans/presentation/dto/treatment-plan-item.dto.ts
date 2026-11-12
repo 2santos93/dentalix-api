@@ -235,6 +235,14 @@ export class TreatmentPlanItemDto {
   updatedAt!: Date;
 }
 
+/** DX-015-bis (D9): el tipo del recall que sustituye a uno desactivado. */
+export class RecallReplacementDto {
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+  @ApiProperty({ example: 'Mantenimiento periodontal' })
+  recallTypeName!: string;
+}
+
 /** DX-015-bis: un recall que movió el cambio del ítem. */
 export class ItemRecallUpdateDto {
   @ApiProperty({ format: 'uuid' })
@@ -249,6 +257,17 @@ export class ItemRecallUpdateDto {
     description: 'Vencimiento del recall tras el cambio (día civil)',
   })
   dueAt!: string;
+  @ApiProperty({
+    description:
+      'D9: la exclusión lo acaba de desactivar porque otro recall de un tipo del mismo grupo pasó a activo («Recall de Higiene desactivado: lo sustituye Mantenimiento periodontal»). Sigue ahí (inactivo): reactivarlo es un PUT o un DONE posterior de su procedimiento.',
+  })
+  deactivated!: boolean;
+  @ApiProperty({
+    type: RecallReplacementDto,
+    nullable: true,
+    description: 'El tipo que lo sustituye; null si no se desactivó',
+  })
+  replacedBy!: RecallReplacementDto | null;
 }
 
 /** DX-015-bis: respuesta del PATCH del ítem (el ítem y los recalls que movió). */
@@ -256,7 +275,7 @@ export class UpdatedTreatmentPlanItemDto extends TreatmentPlanItemDto {
   @ApiProperty({
     type: [ItemRecallUpdateDto],
     description:
-      'Recalls que creó o recalculó el cambio (DONE, salida de DONE o corrección de fecha o sede de un procedimiento disparador); vacío si ninguno',
+      'Recalls que creó, recalculó o reactivó el cambio (DONE, salida de DONE o corrección de fecha o sede de un procedimiento disparador) y, tras ellos, los que la exclusión desactivó (`deactivated: true`); vacío si ninguno',
   })
   recallUpdates!: ItemRecallUpdateDto[];
 }

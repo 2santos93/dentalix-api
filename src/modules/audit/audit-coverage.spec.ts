@@ -1875,6 +1875,12 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /appointment-types': 'config-audit.e2e-spec.ts',
   'PATCH /appointment-types/:id': 'config-audit.e2e-spec.ts',
   'DELETE /appointment-types/:id': 'config-audit.e2e-spec.ts',
+  // DX-015-bis: tipos de recall (RECALL_TYPE): alta, edición con el diff,
+  // retirada y disparadores con los ids de antes y de después.
+  'POST /recall-types': 'recall-types.e2e-spec.ts',
+  'PATCH /recall-types/:id': 'recall-types.e2e-spec.ts',
+  'DELETE /recall-types/:id': 'recall-types.e2e-spec.ts',
+  'PUT /recall-types/:id/triggers': 'recall-types.e2e-spec.ts',
   // DX-516: ajustes por medio de pago (solo ADMIN): UPDATE/CREATE
   // PAYMENT_METHOD con PAYMENT_METHOD_ADJUSTMENT_CREATED/UPDATED y el antes y
   // el después, en la transacción del cambio.

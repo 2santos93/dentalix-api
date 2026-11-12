@@ -748,6 +748,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-015-bis: los tipos de recall de la clínica (sin datos de pacientes),
   // los cuatro roles que ven la ficha.
   'GET /recall-types': EVERY_ROLE,
+  // DX-015-bis (porción 2): gestionarlos (Ajustes › Recall), solo ADMIN,
+  // como los tipos de cita.
+  'POST /recall-types': ADMIN_ONLY,
+  'PATCH /recall-types/:id': ADMIN_ONLY,
+  'DELETE /recall-types/:id': ADMIN_ONLY,
+  'PUT /recall-types/:id/triggers': ADMIN_ONLY,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

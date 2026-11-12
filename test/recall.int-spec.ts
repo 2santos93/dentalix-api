@@ -1286,7 +1286,12 @@ describe('recall en la BD (int, DX-551)', () => {
     });
 
     it('upsertRecall: crea en la sede de trabajo y luego cambia el mismo recall sin moverlo de sede', async () => {
-      const checkup = { id: a.types.CHECKUP, systemKey: RecallKind.CHECKUP };
+      const checkup = {
+        id: a.types.CHECKUP,
+        name: 'Control',
+        systemKey: RecallKind.CHECKUP,
+        exclusionGroup: null,
+      };
       const created = await inA(
         () =>
           repository.upsertRecall({

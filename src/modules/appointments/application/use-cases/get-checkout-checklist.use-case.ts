@@ -76,9 +76,14 @@ export class GetCheckoutChecklistUseCase {
         orderBy: { start: 'asc' },
         select: { start: true },
       });
-      // DX-015-bis: el vencimiento GUARDADO, el mismo de la lista y la ficha.
+      // DX-015-bis: el vencimiento GUARDADO, el mismo de la lista y la ficha;
+      // como ellas, sin los recalls de un tipo retirado (D11).
       const recall = await tx.patientRecall.findFirst({
-        where: { patientId: patient.id, active: true },
+        where: {
+          patientId: patient.id,
+          active: true,
+          recallType: { deletedAt: null },
+        },
         orderBy: [{ dueAt: 'asc' }, { id: 'asc' }],
         select: { dueAt: true },
       });

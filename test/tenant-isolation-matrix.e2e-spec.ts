@@ -288,6 +288,8 @@ interface SeedB {
   allocationVersion: string;
   /** DX-446: bloqueo propio de B (B lo pasa a reservado con un tipo de A). */
   scheduleBlockId: string;
+  /** DX-015-bis: tipo de recall propio de B (B le pone un disparador de A). */
+  recallTypeId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -866,7 +868,12 @@ async function seedBExtras(
     end: futureAt(61, 14),
     kind: 'MEETING',
   });
+  const recallType = await raw.recallType.findFirstOrThrow({
+    where: { tenantId: b.tenantId, systemKey: 'HYGIENE' },
+    select: { id: true },
+  });
   return {
+    recallTypeId: recallType.id,
     scheduleBlockId: scheduleBlock.id,
     payerId: payer.id,
     coverageId: coverage.id,
@@ -1710,6 +1717,27 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /appointment-types/:id',
       verb: 'delete',
       path: () => `/appointment-types/${a.appointmentTypeId}`,
+      status: 404,
+    },
+    // --- recall-types (DX-015-bis) ---
+    {
+      name: 'PATCH /recall-types/:id',
+      verb: 'patch',
+      path: () => `/recall-types/${a.recallTypeId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /recall-types/:id',
+      verb: 'delete',
+      path: () => `/recall-types/${a.recallTypeId}`,
+      status: 404,
+    },
+    {
+      name: 'PUT /recall-types/:id/triggers',
+      verb: 'put',
+      path: () => `/recall-types/${a.recallTypeId}/triggers`,
+      body: () => ({ catalogItemIds: [b.catalogItemId] }),
       status: 404,
     },
     // --- chairs (DX-211) ---
@@ -2979,6 +3007,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       bodyIds: ['allocations[].treatmentPlanItemId'],
       status: 400,
       message: 'El ítem no es de este plan o ya no existe.',
+    },
+    {
+      name: 'PUT /recall-types/:id/triggers body.catalogItemIds[] de A',
+      verb: 'put',
+      path: () => `/recall-types/${b.recallTypeId}/triggers`,
+      body: () => ({ catalogItemIds: [b.catalogItemId, a.catalogItemId] }),
+      bodyIds: ['catalogItemIds[]'],
+      status: 422,
+      message:
+        'Hay procedimientos que no existen en el catálogo de esta clínica o están retirados.',
     },
     {
       name: 'PUT /price-lists/:id/items body.items[].catalogItemId de A',
