@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -158,5 +159,40 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
     expect(
       await raw.locationSchedule.count({ where: { locationId: legacyId } }),
     ).toBe(0);
+  });
+
+  // DX-352: la respuesta está en el contrato OpenAPI (antes salía sin esquema
+  // y la web tipaba `BusinessHours` a mano), y lo publicado es lo que devuelve.
+  it('OpenAPI: GET es LocationScheduleDto o null, PUT es LocationScheduleDto, y la respuesta real tiene esa forma', async () => {
+    const doc = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().build(),
+    );
+    const ref = '#/components/schemas/LocationScheduleDto';
+    const ok = (method: 'get' | 'put') =>
+      (
+        doc.paths['/api/v1/locations/schedule'][method]?.responses['200'] as {
+          content: { 'application/json': { schema: unknown } };
+        }
+      ).content['application/json'].schema;
+    expect(ok('get')).toEqual({ nullable: true, allOf: [{ $ref: ref }] });
+    expect(ok('put')).toEqual({ $ref: ref });
+    const dto = doc.components?.schemas?.LocationScheduleDto as {
+      required: string[];
+      properties: Record<string, { type?: string; items?: { $ref: string } }>;
+    };
+    expect(dto.properties.timezone.type).toBe('string');
+    expect(dto.properties.ranges.items?.$ref).toBe(
+      '#/components/schemas/ScheduleRangeDto',
+    );
+    expect([...dto.required].sort()).toEqual(['ranges', 'timezone']);
+
+    const res = await as(
+      api().get('/api/v1/locations/schedule'),
+      mainId,
+    ).expect(200);
+    expect(Object.keys(res.body as object).sort()).toEqual(
+      Object.keys(dto.properties).sort(),
+    );
   });
 });
