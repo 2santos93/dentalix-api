@@ -4169,6 +4169,8 @@ enum AuditResourceType {
   // DX-015: recall del paciente (intervalo, desactivación) y sus contactos.
   PATIENT_RECALL
   RECALL_CONTACT
+  // DX-015-bis: tipo de recall (alta, edición, retirada y disparadores).
+  RECALL_TYPE
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -7117,7 +7119,8 @@ model RecallType {
   sortOrder             Int         @default(0)
   /// Enlace con el enum de compatibilidad: uno por clínica.
   systemKey             RecallKind?
-  /// Tipos excluyentes entre sí (el efecto llega en la porción 2).
+  /// Tipos excluyentes entre sí (1–40 de [A-Z0-9_], CHECK): dos recalls de un
+  /// paciente de tipos del mismo grupo no están activos a la vez (D9).
   exclusionGroup        String?
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
@@ -7181,6 +7184,10 @@ model PatientRecall {
   /// última cita COMPLETED viva del paciente, o NULL si no tiene (20261212090400).
   visitLocationId   String?      @db.Uuid
   active            Boolean      @default(true)
+  /// DX-015-bis: cuándo lo desactivó la exclusión (otro recall del mismo grupo
+  /// pasó a activo); un DONE posterior de un disparador lo reactiva. NULL si
+  /// está activo o lo retiró el clínico.
+  excludedAt        DateTime?
   /// No sale en la lista hasta ese día (p. ej. «tratamiento en curso»).
   disabledUntil     DateTime?    @db.Date
   disabledReason    String?
