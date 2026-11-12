@@ -32,6 +32,7 @@ function fakeTx() {
     membershipLocation: model('membershipLocation'),
     postOpInstructionTemplateLink: model('postOpInstructionTemplateLink'),
     priceListItem: model('priceListItem'),
+    recallTypeTrigger: model('recallTypeTrigger'),
     $executeRaw: jest.fn(() => {
       calls.push('$executeRaw');
       return Promise.resolve(1);
@@ -120,6 +121,14 @@ describe('guardHardDeletes', () => {
 
     await guarded.postOpInstructionTemplateLink.deleteMany();
     expect(calls).toEqual(['postOpInstructionTemplateLink.deleteMany']);
+  });
+
+  it('deja borrar los disparadores de un tipo de recall (allowlist, DX-015-bis)', async () => {
+    const { tx, calls } = fakeTx();
+    const guarded = guard(tx);
+
+    await guarded.recallTypeTrigger.deleteMany();
+    expect(calls).toEqual(['recallTypeTrigger.deleteMany']);
   });
 
   it('deja borrar el precio de un procedimiento en una lista (allowlist, DX-105)', async () => {

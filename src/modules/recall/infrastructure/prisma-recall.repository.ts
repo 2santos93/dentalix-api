@@ -838,7 +838,8 @@ export class PrismaRecallRepository implements RecallRepository {
         }
       }
       // Un disparador es solo un enlace (la FK al catálogo ya es CASCADE): el
-      // conjunto se reemplaza y la auditoría guarda el antes.
+      // conjunto se reemplaza y la auditoría guarda el antes
+      // (HARD_DELETE_ALLOWLIST, src/shared/prisma/no-hard-delete.ts).
       // eslint-disable-next-line no-restricted-syntax
       await tx.recallTypeTrigger.deleteMany({
         where: {
