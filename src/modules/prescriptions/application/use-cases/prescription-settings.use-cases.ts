@@ -65,7 +65,9 @@ export class UpdatePrescriptionSettingsUseCase {
     if (changedFields.length > 0) {
       await this.audit.record({
         tenantId: ctx.tenantId,
-        locationId: ctx.locationId,
+        // DX-363: ajuste de TODA la clínica, sin la sede activa de quien lo
+        // cambia; el registro lo pinta en la zona de la sede principal.
+        locationId: null,
         actor: {
           kind: 'user',
           userId: ctx.actor.userId,

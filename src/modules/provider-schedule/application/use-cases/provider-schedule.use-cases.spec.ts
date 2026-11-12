@@ -18,6 +18,7 @@ import {
   ListProviderOverridesUseCase,
   ReplaceProviderScheduleUseCase,
   SetProviderOverrideUseCase,
+  UpdateProviderScheduleSettingsUseCase,
 } from './provider-schedule.use-cases';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -708,5 +709,33 @@ describe('horario de los profesionales y sedes permitidas (DX-233 × DX-089)', (
       (await getSchedule.execute('dr-z')).locations.map((l) => l.locationId),
     ).toEqual([A, B]);
     expect(await listOverrides.execute('dr-z', {})).toHaveLength(2);
+  });
+});
+
+describe('UpdateProviderScheduleSettingsUseCase (DX-363)', () => {
+  it('audita el modo estricto sin la sede activa de quien lo cambia', async () => {
+    const repo = new InMemoryProviderScheduleRepository();
+    const drafts: AuditEventDraft[] = [];
+    const audit = {
+      record: (d: AuditEventDraft) => {
+        drafts.push(d);
+        return Promise.resolve();
+      },
+    } as unknown as RecordAuditEventUseCase;
+    const uc = new UpdateProviderScheduleSettingsUseCase(repo, audit);
+
+    await expect(
+      uc.execute({ strictProviderSchedule: true }, { ...CTX, locationId: A }),
+    ).resolves.toEqual({ strictProviderSchedule: true });
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({
+      locationId: null,
+      resourceType: 'PROVIDER_SCHEDULE',
+      metadata: {
+        reason: 'PROVIDER_SCHEDULE_SETTINGS',
+        statusChange: { from: 'WARN', to: 'STRICT' },
+      },
+    });
   });
 });

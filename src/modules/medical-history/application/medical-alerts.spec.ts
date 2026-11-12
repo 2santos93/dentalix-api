@@ -279,6 +279,8 @@ describe('Casos de uso de alertas y vigencia (DX-247)', () => {
       expect(repo.validityMonths).toBe(6);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
+          // DX-363: con sede activa en el contexto, el evento va sin sede.
+          locationId: null,
           action: 'UPDATE',
           resourceType: 'MEDICAL_HISTORY',
           patient: null,
