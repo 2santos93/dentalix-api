@@ -290,7 +290,9 @@ resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
   TENANT_DOMAIN`, `DOMAIN_REGISTERED`: host y estado, nunca el token),
   publicar la política de datos (`CREATE PRIVACY_POLICY`: versión y hash
   antes y después y qué textos cambiaron, nunca los textos), tipos de cita
-  (`APPOINTMENT_TYPE`), pagadores (`PAYER`), plantillas de consentimiento
+  (`APPOINTMENT_TYPE`), tipos de recall (`RECALL_TYPE`, DX-015-bis: también
+  el cambio de disparadores con los ids de antes y de después), pagadores
+  (`PAYER`), plantillas de consentimiento
   (`CONSENT_TEMPLATE`: el texto solo por nombre, con la versión) y de receta
   (`PRESCRIPTION_TEMPLATE`: nombre y nº de medicamentos), y el inventario
   (`INVENTORY_ITEM`, `INVENTORY_MOVEMENT`: en la sede del artículo, sin notas
