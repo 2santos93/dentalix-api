@@ -59,7 +59,8 @@ describe('Mayoría de edad de la clínica (DX-328)', () => {
     expect(audit.record).toHaveBeenCalledTimes(1);
     expect(audit.record).toHaveBeenCalledWith({
       tenantId: 't-1',
-      locationId: 'l-1',
+      // DX-363: con sede activa en el contexto, el evento va sin sede.
+      locationId: null,
       actor: { kind: 'user', userId: 'u-admin', role: 'ADMIN' },
       action: 'UPDATE',
       resourceType: 'CLINIC_SETTINGS',
