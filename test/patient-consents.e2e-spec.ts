@@ -25,6 +25,7 @@ import {
   registerBody,
 } from './support/location-fixtures';
 import { pinCatalogCurrency } from './support/catalog-currency';
+import { makePng } from '../src/modules/clinic-settings/__fixtures__/logo-fixtures';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y
 // limpiar — mismo criterio que account-statement.e2e-spec.ts. El borrado de
@@ -808,6 +809,95 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
           data: { docTypeNameNationalId: null },
         });
       }
+    });
+  });
+
+  // DX-019-ter: el consentimiento congela el logo de la clínica al firmarse
+  // (fuera de `contentHash`); reimprimirlo pinta ese logo aunque luego cambie
+  // o se quite, y uno firmado sin logo sigue sin él.
+  describe('logo congelado (DX-019-ter)', () => {
+    let template: TemplateBody;
+
+    const read = async (patientId: string, id: string) =>
+      (
+        await as(clinicA, dentistA)
+          .get(`/patients/${patientId}/consents/${id}`)
+          .expect(200)
+      ).body as DocumentBody;
+    const uploadLogo = async (size: number): Promise<string> =>
+      (
+        (
+          await request(server())
+            .post('/api/v1/clinic/settings/logo')
+            .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+            .set('Authorization', `Bearer ${clinicA.accessToken}`)
+            .attach('file', makePng(size, size), {
+              filename: 'logo.png',
+              contentType: 'image/png',
+            })
+            .expect(200)
+        ).body as { logoUrl: string }
+      ).logoUrl;
+    const sign = async (patientId: string) =>
+      (
+        (
+          await as(clinicA, dentistA)
+            .post(`/patients/${patientId}/consents`, signBody(template))
+            .expect(201)
+        ).body as ConsentBody
+      ).id;
+
+    beforeAll(async () => {
+      template = (
+        await as(clinicA)
+          .post('/consent-templates', {
+            title: 'Consentimiento con logo',
+            body: 'Yo, {{paciente}}, autorizo a {{clinica}}.',
+          })
+          .expect(201)
+      ).body as TemplateBody;
+    });
+
+    afterAll(async () => {
+      await as(clinicA).delete('/clinic/settings/logo').expect(200);
+    });
+
+    it('se reimprime con el logo de la firma aunque luego cambie o se quite; sin logo, sigue sin él', async () => {
+      const patient = await createPatient(clinicA, 'Elena', 'CONS-LOGO-1');
+      const withoutLogo = await sign(patient);
+      const logoA = await uploadLogo(20);
+      const withLogo = await sign(patient);
+      const logoB = await uploadLogo(24);
+      expect(logoB).not.toBe(logoA);
+
+      const doc = await read(patient, withLogo);
+      expect(doc.clinic.logoUrl).toBe(logoA);
+      expect(doc.integrityOk).toBe(true);
+      expect((await read(patient, withoutLogo)).clinic.logoUrl).toBeNull();
+      expect(
+        (
+          await raw.patientConsent.findUniqueOrThrow({
+            where: { id: withLogo },
+            select: { clinicLogoKey: true },
+          })
+        ).clinicLogoKey,
+      ).toBe(`logos/${logoA.split('/files/logos/')[1]}`);
+
+      await as(clinicA).delete('/clinic/settings/logo').expect(200);
+      expect((await read(patient, withLogo)).clinic.logoUrl).toBe(logoA);
+      expect((await read(patient, withoutLogo)).clinic.logoUrl).toBeNull();
+    });
+
+    it('el logo congelado no se puede cambiar (trigger)', async () => {
+      const patient = await createPatient(clinicA, 'Irene', 'CONS-LOGO-2');
+      await uploadLogo(28);
+      const id = await sign(patient);
+      await expect(
+        raw.patientConsent.update({
+          where: { id },
+          data: { clinicLogoKey: null },
+        }),
+      ).rejects.toThrow(/inmutable/);
     });
   });
 });

@@ -295,7 +295,7 @@ describe('DX-019-bis (B): logo congelado — migraciones (Postgres)', () => {
           const checks = await tx.$queryRaw<
             { conname: string; convalidated: boolean }[]
           >`SELECT conname, convalidated FROM pg_constraint
-             WHERE conname LIKE '%clinic_logo_key_check' ORDER BY conname`;
+             WHERE conname IN ('prescriptions_clinic_logo_key_check', 'treatment_plan_acceptances_clinic_logo_key_check') ORDER BY conname`;
           expect(checks).toEqual([
             {
               conname: 'prescriptions_clinic_logo_key_check',

@@ -6125,11 +6125,14 @@ npm run credit-netting:report -- --tenant <uuid>   # una clínica
 
 ## Logo congelado en documentos emitidos (DX-019-bis)
 
-La receta (`prescriptions`) y el presupuesto firmado
-(`treatment_plan_acceptances`, en la clínica o a distancia) guardan en
-`"clinicLogoKey"` la clave del logo vigente al emitir o firmar, en la misma
-transacción, fuera de los hashes y protegida por sus triggers de
-inmutabilidad. Al reimprimir se usa esa clave; NULL es «emitido sin logo»
+La receta (`prescriptions`), el presupuesto firmado
+(`treatment_plan_acceptances`, en la clínica o a distancia) y, desde
+DX-019-ter, el consentimiento firmado (`patient_consents`, en la clínica o a
+distancia) y las indicaciones post-operatorias entregadas
+(`post_op_instruction_deliveries`: reimpresión desde la ficha y página
+pública del enlace) guardan en `"clinicLogoKey"` la clave del logo vigente al
+emitir, firmar o entregar, en la misma transacción, fuera de los hashes y
+protegida por sus triggers de inmutabilidad. Al reimprimir se usa esa clave; NULL es «emitido sin logo»
 (nunca se cae al logo de hoy). El presupuesto sin firmar sigue con el logo
 actual. Los objetos `logos/` no se borran nunca (guarda
 `src/architecture/no-logo-deletion.spec.ts`): las claves congeladas apuntan
@@ -6154,6 +6157,20 @@ a ellos.
     -f prisma/migrations/20261203090100_dx019b_clinic_logo_key_backfill/migration.sql
   ```
   `$DIRECT_URL_SIN_SCHEMA` es `DIRECT_URL` sin `?schema=public`.
+- **DX-019-ter** (`20261214090000_dx019t_clinic_logo_key`, `…090100_…_backfill`,
+  `…090200_…_validate`): el mismo mecanismo para consentimientos (fecha de la
+  firma, `"signedAt"`) y entregas post-operatorias (`"deliveredAt"`), con los
+  triggers `patient_consents_immutable` y
+  `post_op_instruction_deliveries_immutable` suspendidos solo alrededor de su
+  UPDATE. Mismas reglas de despliegue: fuera del horario de la clínica (firmar
+  y entregar esperan mientras dura) y, con despliegue escalonado, repetir el
+  relleno cuando no quede ninguna réplica sin DX-019-ter (idempotente):
+  ```bash
+  psql "$DIRECT_URL_SIN_SCHEMA" -X -v ON_ERROR_STOP=1 \
+    -f prisma/migrations/20261214090100_dx019t_clinic_logo_key_backfill/migration.sql
+  ```
+  La marca de la página pública del enlace post-operatorio (nombre y color)
+  sigue siendo la de hoy; solo el logo es el congelado.
 - La auditoría recorta los valores a 255 caracteres: un logo antiguo guardado
   como URL http(s) más larga quedaría rellenado con la URL recortada. Las
   claves `logos/…` nunca llegan a ese largo.

@@ -111,9 +111,11 @@ export class UpdateClinicSettingsUseCase {
  * público por diseño, sin datos personales). DX-019-bis (B): las recetas y
  * los presupuestos firmados congelan esta CLAVE al emitirse
  * (`prescriptions."clinicLogoKey"`, `treatment_plan_acceptances."clinicLogoKey"`)
- * y la reimpresión la pinta, así que un objeto `logos/` no se borra NUNCA,
- * tampoco en una limpieza de huérfanos (tendría que mirar esas dos tablas y
- * `tenants`). Lo vigila `src/architecture/no-logo-deletion.spec.ts`.
+ * y, desde DX-019-ter, los consentimientos firmados y las indicaciones
+ * post-operatorias entregadas (`patient_consents`,
+ * `post_op_instruction_deliveries`); la reimpresión la pinta, así que un
+ * objeto `logos/` no se borra NUNCA, tampoco en una limpieza de huérfanos
+ * (tendría que mirar esas cuatro tablas y `tenants`). Lo vigila `src/architecture/no-logo-deletion.spec.ts`.
  */
 @Injectable()
 export class SetClinicLogoUseCase {

@@ -3580,6 +3580,9 @@ model PatientConsent {
   remoteSentAt            DateTime?
   remoteOpenedAt          DateTime?
   remoteVerifiedAt        DateTime?
+  /// DX-019-ter: clave del logo congelada al firmar (fuera de `contentHash`;
+  /// el trigger impide cambiarla). NULL = firmado sin logo.
+  clinicLogoKey           String?
 
   // FK COMPUESTAS (SEC-004): paciente, plantilla y plan del MISMO tenant; el
   // plan, además, del MISMO paciente (mismo criterio que Payment).
@@ -5656,6 +5659,9 @@ model PostOpInstructionDelivery {
   firstOpenedAt     DateTime?
   /// La pone el servidor de BD (trigger).
   createdAt         DateTime              @default(now())
+  /// DX-019-ter: clave del logo congelada al entregar (el trigger impide
+  /// cambiarla). NULL = entregada sin logo: se reimprime sin él.
+  clinicLogoKey     String?
 
   tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   patient     Patient                   @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "post_op_instruction_deliveries_patient_fkey")
