@@ -14,7 +14,10 @@ import {
   CreateTreatmentPlanRepoInput,
   TreatmentPlanRepository,
 } from '../../domain/ports/treatment-plan-repository.port';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
 import {
   PLAN_WITHOUT_OPTIONS,
@@ -60,7 +63,7 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
-    updateItem: (): Promise<TreatmentPlanItem> =>
+    updateItem: (): Promise<TreatmentPlanItemUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),

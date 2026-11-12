@@ -234,3 +234,29 @@ export class TreatmentPlanItemDto {
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
 }
+
+/** DX-015-bis: un recall que movió el cambio del ítem. */
+export class ItemRecallUpdateDto {
+  @ApiProperty({ format: 'uuid' })
+  recallId!: string;
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+  @ApiProperty({ example: 'Higiene' })
+  recallTypeName!: string;
+  @ApiProperty({
+    format: 'date',
+    example: '2027-10-10',
+    description: 'Vencimiento del recall tras el cambio (día civil)',
+  })
+  dueAt!: string;
+}
+
+/** DX-015-bis: respuesta del PATCH del ítem (el ítem y los recalls que movió). */
+export class UpdatedTreatmentPlanItemDto extends TreatmentPlanItemDto {
+  @ApiProperty({
+    type: [ItemRecallUpdateDto],
+    description:
+      'Recalls que creó o recalculó el cambio (DONE, salida de DONE o corrección de fecha o sede de un procedimiento disparador); vacío si ninguno',
+  })
+  recallUpdates!: ItemRecallUpdateDto[];
+}

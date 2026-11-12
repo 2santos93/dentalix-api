@@ -26,6 +26,7 @@ import {
   type WorkQueuesSummary,
 } from '../src/modules/work-queues/domain/work-queues';
 import { WorkQueuesSummaryCache } from '../src/modules/work-queues/application/work-queues-summary.cache';
+import { seedDefaultRecallTypes } from './support/recall-types';
 
 /**
  * DX-503 · «Mi día» por HTTP real con Postgres. Clínica A con dos sedes
@@ -243,6 +244,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
           tenantId,
           patientId: recallPatient,
           kind: 'CHECKUP',
+          recallTypeId: (await seedDefaultRecallTypes(raw, tenantId)).CHECKUP,
           intervalMonths: 6,
           lastDoneAt: new Date(`${addCivilDays(today(), -365)}T00:00:00Z`),
           locationId,

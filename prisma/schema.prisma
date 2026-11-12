@@ -166,6 +166,8 @@ model Tenant {
   collectionNotes                         CollectionNote[]
   patientRecalls                          PatientRecall[]
   recallContacts                          RecallContact[]
+  recallTypes                             RecallType[]
+  recallTypeTriggers                      RecallTypeTrigger[]
   // DX-203: responsables de pago y avisos de los pacientes.
   patientResponsibleParties               PatientResponsibleParty[]
   patientMajorityReviews                  PatientMajorityReview[]
@@ -1217,6 +1219,8 @@ model DentalCatalogItem {
 
   // DX-105: precios de este procedimiento en las listas.
   priceListItems       PriceListItem[]
+  // DX-015-bis: tipos de recall a los que este procedimiento mueve el reloj.
+  recallTriggers       RecallTypeTrigger[]
   clinicalNoteTemplate ClinicalNoteTemplate? @relation(fields: [tenantId, clinicalNoteTemplateId], references: [tenantId, id], onDelete: Restrict, map: "dental_catalog_items_note_template_fkey")
 
   @@unique([tenantId, code], map: "catalog_tenant_code_key")
@@ -7049,8 +7053,9 @@ model ContingencyAgendaSnapshot {
   @@map("contingency_agenda_snapshots")
 }
 
-/// DX-015: tipo de recall. Lista cerrada en esta porción (higiene y control);
-/// los tipos configurables por clínica con disparadores son una porción aparte.
+/// DX-015: tipo de recall de la porción 1 (higiene y control). DX-015-bis:
+/// DEPRECADO (no se borra: D7). Los tipos son `RecallType`; esta clave solo
+/// enlaza los sembrados (`RecallType.systemKey`) con las rutas `:kind`.
 enum RecallKind {
   HYGIENE
   CHECKUP
@@ -7076,38 +7081,120 @@ enum RecallContactOutcome {
   BOOKED
 }
 
-/// DX-015: recall del paciente, uno por tipo. El vencimiento NO se guarda: es
-/// MAX(lastDoneAt, día de la última cita atendida) + intervalMonths, calculado
-/// al leer (`recall-rules.ts` y la consulta de la lista).
+/// DX-015-bis: de dónde salió el recall (para poder deshacer el relleno).
+enum RecallSource {
+  /// Fijado a mano (PUT) o anterior a DX-015-bis.
+  MANUAL
+  /// Lo creó el DONE de un procedimiento disparador.
+  PROCEDURE
+  /// Lo creó el relleno del historial (20261212090100).
+  BACKFILL
+}
+
+/// DX-015-bis: tipo de recall de la clínica. Lo que lo mueve son sus
+/// procedimientos disparadores (`RecallTypeTrigger`).
+model RecallType {
+  id                    String      @id @default(uuid()) @db.Uuid
+  tenantId              String      @db.Uuid
+  /// 1–60 (CHECK). Único entre vivos sin distinguir mayúsculas ni espacios de
+  /// los extremos: índice de EXPRESIÓN `recall_types_tenant_name_ci_key`
+  /// (20261212090000), que Prisma no expresa. NO aceptar un diff de migrate dev
+  /// que lo recree sobre `name`.
+  name                  String
+  /// Intervalo de los recalls que crea un procedimiento (1–36, CHECK).
+  defaultIntervalMonths Int
+  active                Boolean     @default(true)
+  sortOrder             Int         @default(0)
+  /// Enlace con el enum de compatibilidad: uno por clínica.
+  systemKey             RecallKind?
+  /// Tipos excluyentes entre sí (el efecto llega en la porción 2).
+  exclusionGroup        String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  deletedAt             DateTime?
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  triggers RecallTypeTrigger[]
+  recalls  PatientRecall[]
+
+  /// Destino de las FK compuestas.
+  @@unique([tenantId, id], map: "recall_types_tenant_id_key")
+  @@unique([tenantId, systemKey], map: "recall_types_tenant_system_key_key")
+  @@map("recall_types")
+}
+
+/// DX-015-bis: el DONE de este procedimiento del catálogo mueve el reloj del tipo.
+model RecallTypeTrigger {
+  tenantId      String   @db.Uuid
+  recallTypeId  String   @db.Uuid
+  catalogItemId String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  recallType  RecallType        @relation(fields: [tenantId, recallTypeId], references: [tenantId, id], onDelete: Restrict, map: "recall_type_triggers_type_fkey")
+  catalogItem DentalCatalogItem @relation(fields: [tenantId, catalogItemId], references: [tenantId, id], onDelete: Cascade, map: "recall_type_triggers_catalog_item_fkey")
+
+  @@id([tenantId, recallTypeId, catalogItemId])
+  @@index([tenantId, catalogItemId], map: "recall_type_triggers_tenant_catalog_item_idx")
+  @@map("recall_type_triggers")
+}
+
+/// DX-015: recall del paciente, uno por tipo. DX-015-bis: el vencimiento SE
+/// GUARDA (`dueAt`, columna generada) y la base ya no la mueve cualquier cita
+/// atendida: `lastDoneAt` = greatest(`manualDoneAt`, día civil del último DONE
+/// de un disparador del tipo), que mantiene `dx_recall_recompute`.
 model PatientRecall {
-  id             String     @id @default(uuid()) @db.Uuid
-  tenantId       String     @db.Uuid
-  patientId      String     @db.Uuid
-  kind           RecallKind
+  id                String       @id @default(uuid()) @db.Uuid
+  tenantId          String       @db.Uuid
+  patientId         String       @db.Uuid
+  recallTypeId      String       @db.Uuid
+  /// DEPRECADO (D7): la `systemKey` del tipo, o NULL si el tipo no tiene.
+  kind              RecallKind?
   /// 1–36 (CHECK en la BD).
-  intervalMonths Int
-  /// Día civil de la última limpieza/control que fijó el clínico.
-  lastDoneAt     DateTime   @db.Date
+  intervalMonths    Int
+  /// Base del vencimiento (derivada; ver arriba).
+  lastDoneAt        DateTime     @db.Date
+  /// Día que fijó el clínico (PUT); NULL si nació de un procedimiento.
+  manualDoneAt      DateTime?    @db.Date
+  /// Puntero suave (sin FK) al ítem del plan que da la base, si es un DONE.
+  lastDoneItemId    String?      @db.Uuid
+  /// Lo que había fijado el clínico antes del relleno del despliegue, solo si
+  /// la base congelada (la última visita atendida) lo movió: entonces
+  /// `manualDoneAt` es el día de esa visita. NULL en cuanto se vuelve a fijar.
+  preBackfillDoneAt DateTime?    @db.Date
+  source            RecallSource @default(MANUAL)
+  /// GENERADA: `lastDoneAt` + `intervalMonths` meses. Nunca se escribe.
+  dueAt             DateTime     @default(dbgenerated()) @db.Date
   /// Sede donde se fijó: la del recall si el paciente aún no tiene citas atendidas.
-  locationId     String     @db.Uuid
-  active         Boolean    @default(true)
+  locationId        String       @db.Uuid
+  /// DERIVADA (la mantiene la BD por trigger; nunca se escribe): la sede de la
+  /// última cita COMPLETED viva del paciente, o NULL si no tiene (20261212090400).
+  visitLocationId   String?      @db.Uuid
+  active            Boolean      @default(true)
   /// No sale en la lista hasta ese día (p. ej. «tratamiento en curso»).
-  disabledUntil  DateTime?  @db.Date
-  disabledReason String?
-  createdById    String     @db.Uuid
-  updatedById    String     @db.Uuid
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  disabledUntil     DateTime?    @db.Date
+  disabledReason    String?
+  createdById       String       @db.Uuid
+  updatedById       String       @db.Uuid
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient  Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_recalls_patient_fkey")
-  location Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_recalls_location_fkey")
-  contacts RecallContact[]
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient    Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_recalls_patient_fkey")
+  location   Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_recalls_location_fkey")
+  recallType RecallType      @relation(fields: [tenantId, recallTypeId], references: [tenantId, id], onDelete: Restrict, map: "patient_recalls_type_fkey")
+  contacts   RecallContact[]
 
-  @@unique([tenantId, patientId, kind], map: "patient_recalls_tenant_patient_kind_key")
+  @@unique([tenantId, patientId, recallTypeId], map: "patient_recalls_tenant_patient_type_key")
   /// Destino de la FK compuesta de recall_contacts.
   @@unique([tenantId, id], map: "patient_recalls_tenant_id_key")
   @@index([tenantId, locationId], map: "patient_recalls_tenant_location_idx")
+  @@index([tenantId, recallTypeId], map: "patient_recalls_tenant_type_idx")
+  // PARCIAL (WHERE "active"), con INCLUDE, no declarable en Prisma:
+  // patient_recalls_tenant_due_visit_idx ("tenantId", "dueAt") INCLUDE ("id",
+  // "patientId", "recallTypeId", "kind", "intervalMonths", "lastDoneAt",
+  // "disabledUntil", "locationId", "visitLocationId") (20261212090600; el
+  // anterior, sin "visitLocationId", se soltó en 20261212090700).
   @@map("patient_recalls")
 }
 

@@ -41,6 +41,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // DX-051 Task 3, contra Postgres con conexiones reales (rol dentalix_app vía
 // runWithTenant, RLS FORCE): el reparto automático (R5, R6, R9), el alta con
@@ -189,29 +190,9 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
 }
 
 async function cleanup(): Promise<void> {
-  const tenants = await raw.tenant.findMany({
-    where: { subdomain: { in: SUBDOMAINS } },
-    select: { id: true },
-  });
-  const ids = tenants.map((t) => t.id);
-  if (ids.length > 0) {
-    const where = { tenantId: { in: ids } };
-    // Las imputaciones antes que el historial: borrarlas deja su movimiento.
-    await raw.paymentAllocation.deleteMany({ where });
-    await raw.paymentAllocationMovement.deleteMany({ where });
-    await raw.paymentPlanAmount.deleteMany({ where });
-    await raw.paymentReceipt.deleteMany({ where });
-    await raw.payment.deleteMany({ where });
-    await raw.treatmentPlanItem.deleteMany({ where });
-    // La cola cae con sus planes (ON DELETE CASCADE).
-    await raw.treatmentPlan.deleteMany({ where });
-    await raw.patient.deleteMany({ where });
-    await raw.dentalCatalogItem.deleteMany({ where });
-    await raw.clinicMembership.deleteMany({ where });
-    await raw.paymentReceiptCounter.deleteMany({ where });
-    await raw.location.deleteMany({ where });
-    await raw.tenant.deleteMany({ where: { id: { in: ids } } });
-  }
+  // Todas las tablas de clínica en orden de FKs (un DONE con autor siembra
+  // los tipos de recall de la clínica: DX-015-bis).
+  await purgeTenantsBySubdomain(raw, SUBDOMAINS);
   await raw.user.deleteMany({
     where: { email: { in: SUBDOMAINS.map((s) => `${s}@example.com`) } },
   });

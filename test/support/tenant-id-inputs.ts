@@ -28,6 +28,9 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   // --- auditoría (DX-009) ---
   'GET /audit-events ?actorUserId',
   'GET /audit-events ?patientId',
+  // --- recall (DX-015-bis) ---
+  'GET /recall/due ?recallTypeId',
+  'GET /recall/due/count ?recallTypeId',
   // --- pacientes, cobertura y convenios (DX-105, DX-150, DX-153) ---
   'POST /patients body.dataConsents.policyVersionId',
   'GET /patients ?payerId',

@@ -741,6 +741,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /recall/:recallId/contacts': BILLING,
   'GET /patients/:id/recalls': EVERY_ROLE,
   'PUT /patients/:id/recalls/:kind': CLINICAL,
+  // DX-015-bis: los tipos de recall de la clínica (sin datos de pacientes),
+  // los cuatro roles que ven la ficha.
+  'GET /recall-types': EVERY_ROLE,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,

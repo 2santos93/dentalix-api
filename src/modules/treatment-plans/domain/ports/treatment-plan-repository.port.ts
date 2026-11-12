@@ -11,7 +11,10 @@ import {
   TreatmentPlan,
   TreatmentPlanWithItems,
 } from '../entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../entities/treatment-plan-item.entity';
 import type { ItemAttributionChange } from '../plan-item-attribution';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { ReferenceSnapshot } from '../../../discounts/domain/reference-in-plan';
@@ -297,15 +300,24 @@ export interface TreatmentPlanRepository {
    * atribución. Una corrección (CORRECT) o una salida de DONE (CLEAR) deja
    * además, en la misma transacción, un `audit_event` con el antes y el
    * después (`audit`, el contexto de la petición).
+   *
+   * DX-015-bis: si el ítem entra en DONE, sale de DONE o se corrige su fecha o
+   * su sede, y su procedimiento dispara algún tipo de recall, en la MISMA
+   * transacción crea (al entrar en DONE) y recalcula el recall de cada tipo y
+   * lo audita; `recallUpdates` dice cómo quedaron.
    */
   updateItem(
     id: string,
     decide: DecideItemChange,
     audit?: AuditRequestContext,
-  ): Promise<TreatmentPlanItem>;
+  ): Promise<TreatmentPlanItemUpdate>;
 
-  /** Soft-delete: sets `deletedAt`. Never a hard delete. */
-  softDeleteItem(id: string): Promise<void>;
+  /**
+   * Soft-delete: sets `deletedAt`. Never a hard delete. DX-015-bis: si el
+   * ítem estaba DONE, recalcula en la misma transacción el recall de los
+   * tipos que dispara y lo audita con `audit`.
+   */
+  softDeleteItem(id: string, audit?: AuditRequestContext): Promise<void>;
 
   /**
    * Acción «Descuento %» (DX-204): en UNA transacción bloquea el plan (FOR

@@ -44,6 +44,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // DX-109, contra Postgres y bajo RLS (rol dentalix_app vía runWithTenant):
 //  1. abono sobre plan no cobrable → 409, con el estado leído en el SELECT
@@ -154,30 +155,9 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
     tenantContext.run(tenantId, undefined, fn);
 
   async function purge(): Promise<void> {
-    const tenants = await owner.tenant.findMany({
-      where: { subdomain: SUBDOMAIN },
-      select: { id: true },
-    });
-    const where = { tenantId: { in: tenants.map((t) => t.id) } };
-    // DX-051: los abonos por repositorio dejan base, imputaciones e historial
-    // (borrar las imputaciones deja su movimiento: van antes).
-    await owner.paymentAllocation.deleteMany({ where });
-    await owner.paymentAllocationMovement.deleteMany({ where });
-    await owner.paymentPlanAmount.deleteMany({ where });
-    await owner.payment.deleteMany({ where });
-    await owner.toothRecord.deleteMany({ where });
-    await owner.installment.deleteMany({ where });
-    await owner.paymentPlan.deleteMany({ where });
-    await owner.treatmentPlanAcceptance.deleteMany({ where });
-    await owner.treatmentPlanItem.deleteMany({ where });
-    await owner.treatmentPlan.deleteMany({ where });
-    await owner.dentalCatalogItem.deleteMany({ where });
-    await owner.patient.deleteMany({ where });
-    await owner.clinicMembership.deleteMany({ where });
-    await owner.location.deleteMany({ where });
-    await owner.tenant.deleteMany({
-      where: { id: { in: tenants.map((t) => t.id) } },
-    });
+    // Todas las tablas de clínica (también los tipos de recall que el DONE
+    // siembra si la clínica no tiene: DX-015-bis), en orden de FKs.
+    await purgeTenantsBySubdomain(owner, [SUBDOMAIN]);
     await owner.user.deleteMany({
       where: { email: `${SUBDOMAIN}@example.com` },
     });

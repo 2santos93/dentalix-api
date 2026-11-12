@@ -16,7 +16,10 @@ import {
   TreatmentPlan,
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import {
   AddTreatmentPlanItemRepoInput,
   DecideNewItem,
@@ -150,7 +153,7 @@ function makeRepo(
     },
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
-    updateItem: (): Promise<TreatmentPlanItem> =>
+    updateItem: (): Promise<TreatmentPlanItemUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),

@@ -5,9 +5,12 @@ import {
 } from '../../../shared/time/civil-day';
 
 /**
- * DX-015 · Reglas del recall. Es la ÚNICA definición en TypeScript; la consulta
- * de la lista (`prisma-recall.repository.ts`) hace la misma cuenta en SQL y
- * `test/recall.e2e-spec.ts` comprueba que coinciden (fin de mes y 29/02).
+ * DX-015 · Reglas del recall. DX-015-bis: el vencimiento ya no se calcula al
+ * leer: es la columna generada `patient_recalls.dueAt` ("lastDoneAt" +
+ * intervalo, `make_interval`), la misma para la lista, la ficha y la salida
+ * del paciente. Aquí queda el estado en un día y `addCivilMonths`, la misma
+ * cuenta en TypeScript (la usan el seed-demo y los tests, que comprueban que
+ * coincide con la de la BD en fin de mes y 29/02).
  */
 
 /** Tope del intervalo (CHECK en la BD). */
@@ -36,11 +39,13 @@ export function addCivilMonths(day: string, months: number): string {
 
 /** Lo que decide el estado de un recall en un día. */
 export interface RecallFacts {
-  intervalMonths: number;
-  /** Día de la última limpieza/control que fijó el clínico. */
+  /**
+   * Base: lo fijado por el clínico o el día civil del último DONE de un
+   * procedimiento disparador, el más reciente (`dx_recall_recompute`).
+   */
   lastDoneAt: string;
-  /** Día (en la zona de su sede) de la última cita atendida, si la hay. */
-  lastCompletedVisit: string | null;
+  /** Vencimiento guardado (`patient_recalls.dueAt`). */
+  dueAt: string;
   active: boolean;
   disabledUntil: string | null;
   /** Cita futura agendada/confirmada o en curso, en cualquier sede. */
@@ -62,7 +67,7 @@ export type RecallStatus =
   | 'INACTIVE';
 
 export interface RecallState {
-  /** Base del vencimiento: la más reciente entre lo fijado y la última visita. */
+  /** Base del vencimiento: la más reciente entre lo fijado y el último DONE. */
   baseDate: string;
   dueAt: string;
   /** Días desde el vencimiento (0 = vence hoy; negativo = faltan). */
@@ -80,19 +85,16 @@ export function civilDayDiff(from: string, to: string): number {
 /**
  * Estado del recall en `today` (día civil de la sede).
  *
- * - Vencimiento = MAX(lastDoneAt, última visita atendida) + intervalo: cualquier
- *   cita atendida reinicia el reloj (si no, el paciente volvería a la lista
- *   justo después de su control).
+ * - DX-015-bis: el reloj lo mueven lo fijado a mano y el DONE de un
+ *   procedimiento disparador del tipo, NO cualquier cita atendida (una
+ *   obturación no retrasa la limpieza).
  * - Con cita futura (o en curso) no se llama: `SCHEDULED`. Al cancelarla,
  *   vuelve a `DUE` sin tocar nada.
  * - Desactivado hasta un día: `PAUSED` hasta ese día (inclusive el anterior).
  */
 export function recallState(facts: RecallFacts, today: string): RecallState {
-  const baseDate =
-    facts.lastCompletedVisit && facts.lastCompletedVisit > facts.lastDoneAt
-      ? facts.lastCompletedVisit
-      : facts.lastDoneAt;
-  const dueAt = addCivilMonths(baseDate, facts.intervalMonths);
+  const baseDate = facts.lastDoneAt;
+  const { dueAt } = facts;
   const daysOverdue = civilDayDiff(dueAt, today);
   let status: RecallStatus;
   if (!facts.active || facts.archived) status = 'INACTIVE';

@@ -104,7 +104,12 @@ jobs:
   integration:
     name: Integración (Postgres 16)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # 30 (antes 20): `test:int` va en serie (--runInBand) y en main ya tardaba
+    # 16–18 min; con la preparación del job (~2 min) varias runs de main se
+    # cancelaban por el tope sin ningún fallo (2 de 6 el 2026-11-11). DX-015-bis
+    # suma la int de carga de recall (60.000 pacientes, ~2 min). Repartirla en
+    # shards como la e2e (DX-396) es la solución de fondo.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16

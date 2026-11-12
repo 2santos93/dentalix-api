@@ -77,6 +77,10 @@ import {
   RecordMaintenanceUseCase,
 } from '../src/modules/equipment/application/use-cases/equipment.use-cases';
 import { addCivilMonths } from '../src/modules/recall/domain/recall-rules';
+import {
+  CreateRecallContactUseCase,
+  SetPatientRecallUseCase,
+} from '../src/modules/recall/application/use-cases/recall.use-cases';
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import { AnestheticCatalogUseCases } from '../src/modules/anesthesia/application/use-cases/anesthetic-catalog.use-cases';
 import { AnesthesiaUseCases } from '../src/modules/anesthesia/application/use-cases/anesthesia.use-cases';
@@ -264,6 +268,7 @@ import {
   type RotationSiteKey,
   type SoloSiteKey,
   localPatientIndexes,
+  DEMO_RECALL,
   sitePatientIndexes,
   regionOf,
 } from './demo/data';
@@ -967,6 +972,21 @@ class DemoSeeder {
     // fijaría el ADMIN desde la ficha.
     await this.inTenant(tenantId, undefined, () =>
       this.extendRetention(patientIds, ownerId),
+    );
+
+    // DX-015-bis: con la agenda y todos los realizados ya fechados (elige
+    // pacientes según sus citas y recalcula cada recall), antes de los
+    // convenios y del reparto de lo cobrado (su plan entra en esa cola).
+    await this.createRecallExamples(
+      tenantId,
+      locations,
+      hours,
+      patientIds,
+      localPatientIds,
+      dentists[0],
+      ownerId,
+      receptionId,
+      catalog,
     );
 
     // DX-105 al final: una lista activa en la Sede Norte o un convenio asignado
@@ -2989,6 +3009,191 @@ class DemoSeeder {
         );
       });
     }
+  }
+
+  /**
+   * DX-015-bis: la lista de recall de la demo (`DEMO_RECALL`). Los realizados
+   * de la demo ya crearon sus recalls al marcarse (el procedimiento mueve el
+   * reloj), pero con la fecha de HOY: `datePlanItemDone` y la historia los
+   * retroceden después con un `update` directo, así que al final se recalcula
+   * cada recall de la clínica (`dx_recall_recompute`, la misma función que el
+   * DONE y el relleno). Los pacientes se eligen entre los que no tienen
+   * recall: los dos primeros ejemplos, sin cita futura (salen en la lista; el
+   * de la profilaxis, de la rotación, para que su plan vaya en USD) y el
+   * tercero, de la rotación con cita (no sale).
+   */
+  private async createRecallExamples(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
+    allPatientIds: string[],
+    localPatientIds: string[],
+    dentistId: string,
+    ownerId: string,
+    receptionId: string,
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const { busy, withRecall } = await this.inTenant(tenantId, undefined, () =>
+      this.prisma.runWithTenant(async (tx) => ({
+        busy: await tx.appointment.findMany({
+          where: {
+            patientId: { in: allPatientIds },
+            deletedAt: null,
+            OR: [
+              {
+                status: {
+                  in: [
+                    AppointmentStatus.SCHEDULED,
+                    AppointmentStatus.CONFIRMED,
+                  ],
+                },
+                start: { gt: this.now },
+              },
+              {
+                status: {
+                  in: [
+                    AppointmentStatus.ARRIVED,
+                    AppointmentStatus.IN_CHAIR,
+                    AppointmentStatus.READY_FOR_CHECKOUT,
+                  ],
+                },
+              },
+            ],
+          },
+          select: { patientId: true },
+        }),
+        withRecall: await tx.patientRecall.findMany({
+          where: { patientId: { in: allPatientIds } },
+          select: { patientId: true },
+        }),
+      })),
+    );
+    const scheduled = new Set(busy.map((a) => a.patientId));
+    const taken = new Set(withRecall.map((r) => r.patientId));
+    const isFree = (id: string) => !scheduled.has(id) && !taken.has(id);
+    // La profilaxis va en un plan en USD: un paciente de la rotación. El
+    // Control fijado, otro libre si lo hay; la demo agenda a casi todos (hoy,
+    // a todos salvo uno), así que puede ser el mismo paciente: un recall por
+    // tipo, dos filas en la lista.
+    const prophylaxisPatient = localPatientIds.find(isFree);
+    const checkupPatient =
+      allPatientIds.find((id) => id !== prophylaxisPatient && isFree(id)) ??
+      prophylaxisPatient;
+    const booked = localPatientIds.find(
+      (id) => scheduled.has(id) && !taken.has(id),
+    );
+    if (!prophylaxisPatient || !checkupPatient || !booked) {
+      throw new Error(
+        'La demo no tiene pacientes libres para los ejemplos de recall',
+      );
+    }
+    const zone = DEMO_LOCATIONS.principal.timeZone;
+    const today = civilDateIn(this.now, zone);
+    const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
+
+    await this.inTenant(tenantId, locations.principal, async () => {
+      // 1. Profilaxis de cortesía realizada hace ~7 meses en la principal:
+      //    el DONE crea el recall de Higiene; luego se fecha como los demás
+      //    realizados (sin cita ni abono: la agenda y la caja de la demo son
+      //    de las últimas semanas, y sin importe no deja saldo).
+      const daysAgo = workdayDaysAgo(
+        this.now,
+        'principal',
+        DEMO_RECALL.prophylaxisDaysAgo,
+        hours.principal?.ranges ?? [],
+      );
+      const plan = await this.use(CreateTreatmentPlanUseCase).execute({
+        patientId: prophylaxisPatient,
+        currency: DEMO_LOCATIONS.principal.currency,
+        notes: DEMO_RECALL.planNotes,
+        createdById: dentistId,
+      });
+      const item = await this.use(AddTreatmentPlanItemUseCase).execute(
+        plan.id,
+        {
+          toothNumber: '11',
+          catalogItemId: catalogId(catalog, 'PREV-PROFILAXIS'),
+        },
+        dentist,
+      );
+      await this.use(UpdateTreatmentPlanItemUseCase).execute(
+        item.id,
+        {
+          discount: Number(item.price),
+          discountReason: 'LOYALTY',
+        },
+        { userId: ownerId, role: ClinicRole.ADMIN },
+      );
+      await this.use(UpdateTreatmentPlanItemUseCase).execute(
+        item.id,
+        { status: TreatmentPlanItemStatus.DONE },
+        dentist,
+      );
+      await this.prisma.runWithTenant((tx) =>
+        tx.treatmentPlanItem.update({
+          where: { id: item.id },
+          data: { completedAt: daysAgoAt(this.now, daysAgo, 10 * 60, zone) },
+        }),
+      );
+      for (const status of [
+        TreatmentPlanStatus.ACCEPTED,
+        TreatmentPlanStatus.COMPLETED,
+      ]) {
+        await this.use(UpdateTreatmentPlanUseCase).execute(
+          plan.id,
+          { status },
+          { role: ClinicRole.DENTIST },
+        );
+      }
+
+      // 2. Control fijado a mano hace 13 meses y un «No contesta».
+      const checkup = await this.use(SetPatientRecallUseCase).execute(
+        checkupPatient,
+        { systemKey: 'CHECKUP' },
+        {
+          intervalMonths: 12,
+          lastDoneAt: addCivilMonths(today, -DEMO_RECALL.checkupMonthsAgo),
+        },
+        dentistId,
+      );
+      const checkupRecall = checkup.recalls.find((r) => r.kind === 'CHECKUP');
+      if (!checkupRecall) throw new Error('Sin el Control de la demo');
+      await this.use(CreateRecallContactUseCase).execute(
+        checkupRecall.id,
+        {
+          channel: 'CALL',
+          outcome: 'NO_ANSWER',
+          note: DEMO_RECALL.contactNote,
+        },
+        receptionId,
+      );
+
+      // 3. Higiene vencida de alguien que ya tiene cita: no se le llama.
+      await this.use(SetPatientRecallUseCase).execute(
+        booked,
+        { systemKey: 'HYGIENE' },
+        {
+          intervalMonths: 6,
+          lastDoneAt: addCivilMonths(
+            today,
+            -DEMO_RECALL.scheduledHygieneMonthsAgo,
+          ),
+        },
+        dentistId,
+      );
+    });
+
+    // La base de cada recall desde la historia ya fechada.
+    await this.inTenant(tenantId, undefined, () =>
+      this.prisma.runWithTenant(async (tx) => {
+        const recalls = await tx.patientRecall.findMany({
+          select: { patientId: true, recallTypeId: true },
+        });
+        for (const r of recalls) {
+          await tx.$executeRaw`SELECT public.dx_recall_recompute(${tenantId}::uuid, ${r.patientId}::uuid, ${r.recallTypeId}::uuid)`;
+        }
+      }),
+    );
   }
 
   /**

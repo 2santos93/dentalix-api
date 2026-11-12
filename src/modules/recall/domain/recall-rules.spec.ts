@@ -6,10 +6,10 @@ import {
   type RecallFacts,
 } from './recall-rules';
 
+/** «Control cada 6 meses» desde el 10/04: la BD guarda dueAt = 10/10. */
 const facts = (over: Partial<RecallFacts> = {}): RecallFacts => ({
-  intervalMonths: 6,
   lastDoneAt: '2026-04-10',
-  lastCompletedVisit: null,
+  dueAt: '2026-10-10',
   active: true,
   disabledUntil: null,
   hasUpcomingAppointment: false,
@@ -66,10 +66,14 @@ describe('recallState (DX-015)', () => {
     });
   });
 
-  it('con intervalo propio de 3 meses vence el 10/07', () => {
-    expect(recallState(facts({ intervalMonths: 3 }), '2026-07-10').dueAt).toBe(
-      '2026-07-10',
-    );
+  it('el vencimiento es el guardado (columna generada), no se recalcula', () => {
+    const s = recallState(facts({ dueAt: '2026-07-10' }), '2026-07-10');
+    expect(s).toMatchObject({
+      baseDate: '2026-04-10',
+      dueAt: '2026-07-10',
+      status: 'DUE',
+      daysOverdue: 0,
+    });
   });
 
   it('vencido CON cita futura no se llama (SCHEDULED); sin ella, sí', () => {
@@ -86,9 +90,10 @@ describe('recallState (DX-015)', () => {
     );
   });
 
-  it('una visita atendida después reinicia el reloj', () => {
+  it('DX-015-bis: la base es la del recall (lo fijado o el último DONE de un disparador)', () => {
+    // Un DONE de profilaxis el 20/09 deja lastDoneAt = 20/09 y dueAt = 20/03.
     const s = recallState(
-      facts({ lastCompletedVisit: '2026-09-20' }),
+      facts({ lastDoneAt: '2026-09-20', dueAt: '2027-03-20' }),
       '2026-11-01',
     );
     expect(s).toMatchObject({
@@ -96,11 +101,6 @@ describe('recallState (DX-015)', () => {
       dueAt: '2027-03-20',
       status: 'UPCOMING',
     });
-    // Una visita ANTERIOR a lo fijado no cuenta.
-    expect(
-      recallState(facts({ lastCompletedVisit: '2026-01-02' }), '2026-11-01')
-        .baseDate,
-    ).toBe('2026-04-10');
   });
 
   it('desactivado hasta un día no aparece hasta ese día', () => {

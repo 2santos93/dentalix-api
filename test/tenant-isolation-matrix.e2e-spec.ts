@@ -252,6 +252,8 @@ interface SeedA {
   confirmationToken: string;
   /** DX-316: un festivo de la sede nueva de A (y su fila de calendario). */
   holidayId: string;
+  /** DX-015-bis: el tipo de recall «Higiene» de A (sembrado en el alta). */
+  recallTypeId: string;
 }
 
 interface SeedB {
@@ -727,8 +729,13 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   const notePrompt = await raw.clinicalNoteTemplatePrompt.findFirstOrThrow({
     where: { templateId: noteTemplate.id },
   });
+  const recallType = await raw.recallType.findFirstOrThrow({
+    where: { tenantId: a.tenantId, systemKey: 'HYGIENE' },
+    select: { id: true },
+  });
 
   return {
+    recallTypeId: recallType.id,
     patientId,
     appointmentId: appointment.id,
     catalogItemId,
@@ -2387,6 +2394,25 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     // filtros son de B; la respuesta es un 400/404 con su mensaje en español
     // o una lectura sin filas de A (la fotografía la comprueba el runner).
     // ======================================================================
+    // DX-015-bis: el tipo de recall de A como filtro de la lista de B: su
+    // lista (y su recuento) vacíos, nunca un recall de A.
+    {
+      name: 'GET /recall/due ?recallTypeId de A',
+      verb: 'get',
+      path: () => `/recall/due?recallTypeId=${a.recallTypeId}&withinDays=60`,
+      queryIds: ['recallTypeId'],
+      status: 200,
+      responseBody: { items: [], total: 0, page: 1, pageSize: 20 },
+    },
+    {
+      name: 'GET /recall/due/count ?recallTypeId de A',
+      verb: 'get',
+      path: () =>
+        `/recall/due/count?recallTypeId=${a.recallTypeId}&withinDays=60`,
+      queryIds: ['recallTypeId'],
+      status: 200,
+      responseBody: { total: 0 },
+    },
     {
       name: 'GET /appointments ?providerIds[] de A',
       verb: 'get',

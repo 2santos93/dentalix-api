@@ -25,7 +25,10 @@ import {
   TreatmentPlan,
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import {
   DecideItemChange,
   DoneMirrorInput,
@@ -94,7 +97,7 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
-    updateItem: (): Promise<TreatmentPlanItem> =>
+    updateItem: (): Promise<TreatmentPlanItemUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),
@@ -146,7 +149,10 @@ function applying(
         plan: planWithPatient,
         item: existing,
       });
-      return write(patch, mirror);
+      return write(patch, mirror).then((item) => ({
+        ...item,
+        recallUpdates: [],
+      }));
     } catch (error) {
       return Promise.reject(
         error instanceof Error ? error : new Error(String(error)),
@@ -160,7 +166,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     const repo = makeRepo({
       findItemById: (): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(null),
-      updateItem: (): Promise<TreatmentPlanItem> =>
+      updateItem: (): Promise<TreatmentPlanItemUpdate> =>
         Promise.reject(new Error('updateItem should not be called')),
     });
     const uc = new UpdateTreatmentPlanItemUseCase(
@@ -211,8 +217,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     const repo = makeRepo({
       findItemById: (id: string): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(id === existing.id ? existing : null),
-      updateItem: (): Promise<TreatmentPlanItem> =>
-        Promise.resolve({ ...existing, status }),
+      updateItem: (): Promise<TreatmentPlanItemUpdate> =>
+        Promise.resolve({ ...existing, status, recallUpdates: [] }),
     });
     const uc = new UpdateTreatmentPlanItemUseCase(
       repo,
@@ -386,7 +392,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
           Promise.resolve(existing),
         findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
           Promise.resolve(planWithPatient),
-        updateItem: (): Promise<TreatmentPlanItem> =>
+        updateItem: (): Promise<TreatmentPlanItemUpdate> =>
           Promise.reject(new Error('odontogram write failed')),
       });
       const uc = new UpdateTreatmentPlanItemUseCase(
@@ -434,6 +440,7 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
             return Promise.resolve({
               ...existing,
               status: change.patch.status ?? existing.status,
+              recallUpdates: [],
             });
           } catch (error) {
             return Promise.reject(

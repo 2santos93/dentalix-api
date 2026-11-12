@@ -37,7 +37,10 @@ import {
   TreatmentPlanAcceptanceSummary,
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import {
   ItemAttributionChange,
   PERFORMER_NOT_AT_LOCATION_MESSAGE,
@@ -54,6 +57,10 @@ import {
 } from '../../../discounts/domain/reference-in-plan';
 import type { AuditAttributionSide } from '../../../audit/domain/audit-metadata';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import {
+  type ProcedureRecallResult,
+  recallsFromProcedure,
+} from '../../../recall/infrastructure/recall-from-procedure';
 
 type PrismaTreatmentPlan = Prisma.TreatmentPlanGetPayload<
   Record<string, never>
@@ -560,7 +567,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
     id: string,
     decide: DecideItemChange,
     audit?: AuditRequestContext,
-  ): Promise<TreatmentPlanItem> {
+  ): Promise<TreatmentPlanItemUpdate> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const planId = await lockPlanOfItem(tx, id);
@@ -636,7 +643,37 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       if (mirror && becameDone) {
         await mirrorIntoOdontogram(tx, tenantId, item, mirror);
       }
-      return mapItemToEntity(item);
+
+      // DX-015-bis: el reloj del recall lo mueve el procedimiento, en esta
+      // misma transacción (si falla, falla todo).
+      const leftDone =
+        previous.status === TreatmentPlanItemStatus.DONE &&
+        item.status !== TreatmentPlanItemStatus.DONE;
+      const corrected =
+        attribution?.kind === 'CORRECT' &&
+        item.status === TreatmentPlanItemStatus.DONE;
+      const recalls =
+        becameDone || leftDone || corrected
+          ? await recallsFromProcedure(tx, {
+              tenantId,
+              patientId: item.patientId,
+              itemId: item.id,
+              catalogItemId: item.catalogItemId,
+              createMissing: becameDone,
+              actorId: audit?.actor.userId ?? item.performedById,
+            })
+          : [];
+      await auditRecallsFromProcedure(
+        tx,
+        recalls,
+        item.id,
+        plan.patientId,
+        audit,
+      );
+      const recallUpdates = recalls.map(
+        ({ changed: _changed, ...update }) => update,
+      );
+      return { ...mapItemToEntity(item), recallUpdates };
     });
   }
 
@@ -755,12 +792,18 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
     return data;
   }
 
-  async softDeleteItem(id: string): Promise<void> {
+  async softDeleteItem(id: string, audit?: AuditRequestContext): Promise<void> {
+    const tenantId = this.requireTenantId();
     await this.prisma.runWithTenant(async (tx) => {
       await lockPlanOfItem(tx, id);
       const existing = await tx.treatmentPlanItem.findFirst({
         where: { id, deletedAt: null },
-        select: { id: true },
+        select: {
+          id: true,
+          status: true,
+          catalogItemId: true,
+          patientId: true,
+        },
       });
       if (!existing) {
         throw new NotFoundException('Treatment plan item not found');
@@ -770,6 +813,25 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         where: { id },
         data: { deletedAt: new Date() },
       });
+      // DX-015-bis: un DONE borrado ya no da la base de su recall: se
+      // recalcula en esta misma transacción (como al sacarlo de DONE).
+      if (existing.status === TreatmentPlanItemStatus.DONE) {
+        const recalls = await recallsFromProcedure(tx, {
+          tenantId,
+          patientId: existing.patientId,
+          itemId: id,
+          catalogItemId: existing.catalogItemId,
+          createMissing: false,
+          actorId: null,
+        });
+        await auditRecallsFromProcedure(
+          tx,
+          recalls,
+          id,
+          existing.patientId,
+          audit,
+        );
+      }
     });
   }
 
@@ -876,6 +938,43 @@ async function lockedPlan(
     },
   });
   return plan ? mapToEntityWithItems(plan) : null;
+}
+
+/**
+ * DX-015-bis: un `audit_event` PATIENT_RECALL por cada recall que el cambio
+ * del ítem creó o movió (no por los que el recálculo dejó igual), en la
+ * transacción del cambio. Sin contexto de la petición (seed), sin evento.
+ */
+async function auditRecallsFromProcedure(
+  tx: Prisma.TransactionClient,
+  recalls: readonly ProcedureRecallResult[],
+  itemId: string,
+  patientId: string,
+  audit: AuditRequestContext | undefined,
+): Promise<void> {
+  if (!audit) return;
+  for (const recall of recalls.filter((r) => r.changed)) {
+    await writeAuditEvent(tx, {
+      tenantId: audit.tenantId,
+      locationId: audit.locationId,
+      actor: {
+        kind: 'user',
+        userId: audit.actor.userId,
+        role: audit.actor.role,
+      },
+      action: 'UPDATE',
+      resourceType: 'PATIENT_RECALL',
+      resourceId: recall.recallId,
+      patient: { kind: 'patient', id: patientId },
+      requestId: audit.requestId,
+      ip: audit.ip,
+      userAgent: audit.userAgent,
+      metadata: {
+        reason: 'RECALL_FROM_PROCEDURE',
+        params: { itemId, recallTypeId: recall.recallTypeId },
+      },
+    });
+  }
 }
 
 /**
