@@ -115,6 +115,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'PATCH /treatment-plans/:id/items/:itemId body.performedById',
   'PATCH /treatment-plans/:id/items/:itemId body.performedLocationId',
   // --- reportes, cartera y caja (DX-027, DX-204) ---
+  'GET /reports/chair-occupancy ?locationId',
+  'GET /reports/chair-occupancy.csv ?locationId',
   'GET /reports/discounts ?locationId',
   'GET /reports/discounts ?professionalId',
   'GET /reports/discounts.csv ?locationId',
