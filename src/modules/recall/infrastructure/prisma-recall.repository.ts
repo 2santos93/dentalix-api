@@ -20,7 +20,10 @@ import type { AuditRequestContext } from '../../audit/domain/audit-request-conte
 import { configAuditEvent } from '../../audit/domain/config-audit';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import { recallTypeSnapshot } from '../domain/recall-type-audit';
-import { RECALL_TYPE_SORT_STEP } from '../domain/recall-type-rules';
+import {
+  RECALL_TYPE_SORT_STEP,
+  recallAppointmentTypeError,
+} from '../domain/recall-type-rules';
 import {
   auditExclusions,
   deactivateExcluded,
@@ -91,6 +94,7 @@ const TYPE_VIEW_SELECT = {
   sortOrder: true,
   systemKey: true,
   exclusionGroup: true,
+  appointmentTypeId: true,
   triggers: {
     select: {
       catalogItemId: true,
@@ -114,6 +118,26 @@ function toTypeView({ triggers, ...type }: TypeViewRow): RecallTypeView {
       name: t.catalogItem.labelEs,
     })),
   };
+}
+
+/**
+ * D20: el tipo de cita que se enlaza tiene que ser de la clínica (bajo RLS,
+ * uno de otra no aparece), vivo y activo; si no, 422. FOR SHARE hasta el final
+ * de la transacción: retirarlo o desactivarlo a la vez espera a que el enlace
+ * confirme (la FK sola solo bloquea su clave, no esas columnas).
+ */
+async function assertLinkableAppointmentType(
+  tx: Prisma.TransactionClient,
+  appointmentTypeId: string,
+): Promise<void> {
+  const rows = await tx.$queryRaw<
+    { active: boolean; deletedAt: Date | null }[]
+  >`
+    SELECT "active", "deletedAt" FROM "appointment_types"
+     WHERE "id" = ${appointmentTypeId}::uuid
+       FOR SHARE`;
+  const error = recallAppointmentTypeError(rows[0] ?? null);
+  if (error !== null) throw new UnprocessableEntityException(error);
 }
 
 /**
@@ -1066,6 +1090,9 @@ export class PrismaRecallRepository implements RecallRepository {
     return this.prisma
       .runWithTenant(async (tx) => {
         await ensureDefaultTypes(tx, tenantId);
+        if (data.appointmentTypeId !== null) {
+          await assertLinkableAppointmentType(tx, data.appointmentTypeId);
+        }
         let sortOrder = data.sortOrder;
         if (sortOrder === undefined) {
           const last = await tx.recallType.aggregate({
@@ -1083,6 +1110,7 @@ export class PrismaRecallRepository implements RecallRepository {
               active: data.active,
               sortOrder,
               exclusionGroup: data.exclusionGroup,
+              appointmentTypeId: data.appointmentTypeId,
             },
             select: TYPE_VIEW_SELECT,
           }),
@@ -1116,6 +1144,15 @@ export class PrismaRecallRepository implements RecallRepository {
       .runWithTenant(async (tx) => {
         // El antes, con la fila bloqueada hasta el final (DX-360).
         const before = await lockedLiveType(tx, id);
+        // D20: solo se valida un enlace NUEVO. Conservar el que ya tenía vale
+        // aunque ese tipo de cita se haya retirado o desactivado después (como
+        // los disparadores): editar el nombre no obliga a quitarlo.
+        if (
+          data.appointmentTypeId != null &&
+          data.appointmentTypeId !== before.appointmentTypeId
+        ) {
+          await assertLinkableAppointmentType(tx, data.appointmentTypeId);
+        }
         const after = toTypeView(
           await tx.recallType.update({
             where: { id },
@@ -1125,6 +1162,7 @@ export class PrismaRecallRepository implements RecallRepository {
               active: data.active,
               sortOrder: data.sortOrder,
               exclusionGroup: data.exclusionGroup,
+              appointmentTypeId: data.appointmentTypeId,
             },
             select: TYPE_VIEW_SELECT,
           }),

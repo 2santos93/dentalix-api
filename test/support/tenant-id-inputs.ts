@@ -38,6 +38,9 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'POST /patients/:id/recalls/default body.appointmentId',
   'POST /patients/:patientId/clinical-entries body.recall.recallTypeId',
   'PUT /recall-types/:id/triggers body.catalogItemIds[]',
+  // DX-015-bis (porción 4, D20): el tipo de cita al agendar.
+  'POST /recall-types body.appointmentTypeId',
+  'PATCH /recall-types/:id body.appointmentTypeId',
   // --- pacientes, cobertura y convenios (DX-105, DX-150, DX-153) ---
   'POST /patients body.dataConsents.policyVersionId',
   'GET /patients ?payerId',

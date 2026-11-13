@@ -13,5 +13,6 @@ export function recallTypeSnapshot(type: RecallTypeView): ConfigSnapshot {
     active: type.active,
     sortOrder: type.sortOrder,
     exclusionGroup: type.exclusionGroup,
+    appointmentTypeId: type.appointmentTypeId,
   };
 }

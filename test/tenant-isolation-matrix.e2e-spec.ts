@@ -3039,6 +3039,32 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       message:
         'Hay procedimientos que no existen en el catálogo de esta clínica o están retirados.',
     },
+    // DX-015-bis (porción 4, D20): el tipo de cita de A como «tipo de cita al
+    // agendar» de un tipo de recall de B: 422 y nada cambia ni se crea.
+    {
+      name: 'PATCH /recall-types/:id body.appointmentTypeId de A',
+      verb: 'patch',
+      path: () => `/recall-types/${b.recallTypeId}`,
+      body: () => ({ appointmentTypeId: a.appointmentTypeId }),
+      bodyIds: ['appointmentTypeId'],
+      status: 422,
+      message:
+        'Ese tipo de cita no existe en esta clínica, está retirado o desactivado: elige uno activo o «Ninguno».',
+    },
+    {
+      name: 'POST /recall-types body.appointmentTypeId de A',
+      verb: 'post',
+      path: () => '/recall-types',
+      body: () => ({
+        name: 'Con tipo de cita ajeno',
+        defaultIntervalMonths: 6,
+        appointmentTypeId: a.appointmentTypeId,
+      }),
+      bodyIds: ['appointmentTypeId'],
+      status: 422,
+      message:
+        'Ese tipo de cita no existe en esta clínica, está retirado o desactivado: elige uno activo o «Ninguno».',
+    },
     // DX-015-bis (porción 3): el tipo de recall de A en «Programar recall»
     // y en el recall de la evolución de B: 422 y no se crea nada (tampoco la
     // evolución: misma transacción).

@@ -31,6 +31,7 @@ interface TypeBody {
   sortOrder: number;
   systemKey: string | null;
   exclusionGroup: string | null;
+  appointmentTypeId: string | null;
   triggerCatalogItemIds: string[];
   triggers: { catalogItemId: string; code: string; name: string }[];
 }
@@ -146,6 +147,10 @@ describe('Tipos de recall: Ajustes › Recall (DX-015-bis, e2e)', () => {
           api('patch', `/recall-types/${higiene.id}`, token).send({
             defaultIntervalMonths: 3,
           }),
+          // D20: enlazar un tipo de cita también es de administración.
+          api('patch', `/recall-types/${higiene.id}`, token).send({
+            appointmentTypeId: '0b7d1c2e-0000-4000-8000-000000000001',
+          }),
           api('delete', `/recall-types/${higiene.id}`, token),
           api('put', `/recall-types/${higiene.id}/triggers`, token).send({
             catalogItemIds: [],
@@ -198,6 +203,7 @@ describe('Tipos de recall: Ajustes › Recall (DX-015-bis, e2e)', () => {
                 active: true,
                 sortOrder: created.sortOrder,
                 exclusionGroup: 'ORTO',
+                appointmentTypeId: null,
               },
             },
           },
@@ -602,6 +608,146 @@ describe('Tipos de recall: Ajustes › Recall (DX-015-bis, e2e)', () => {
         .send({ catalogItemIds: many })
         .expect(400);
       expect(messageOf(res)).toContain('hasta 50 procedimientos');
+    });
+  });
+
+  describe('tipo de cita al agendar (D20)', () => {
+    async function appointmentType(
+      name: string,
+      c: Clinic = clinic,
+    ): Promise<string> {
+      const res = await api('post', '/appointment-types', c.adminToken, c.host)
+        .send({ name, durationMinutes: 45, color: '#16A34A' })
+        .expect(201);
+      return (res.body as { id: string }).id;
+    }
+
+    it('una clínica nueva no trae enlaces', async () => {
+      for (const t of await list()) expect(t.appointmentTypeId).toBeNull();
+    });
+
+    it('crear con uno, cambiarlo, leerlo y quitarlo con null; cada cambio va a la auditoría', async () => {
+      const limpieza = await appointmentType('Limpieza D20');
+      const valoracion = await appointmentType('Valoración D20');
+      const created = await createType({
+        name: 'Blanqueamiento D20',
+        appointmentTypeId: limpieza,
+      });
+      expect(created.appointmentTypeId).toBe(limpieza);
+
+      const changed = (
+        await api('patch', `/recall-types/${created.id}`)
+          .send({ appointmentTypeId: valoracion })
+          .expect(200)
+      ).body as TypeBody;
+      expect(changed.appointmentTypeId).toBe(valoracion);
+      expect(
+        (await list()).find((t) => t.id === created.id)?.appointmentTypeId,
+      ).toBe(valoracion);
+
+      // Ausente no lo toca.
+      const renamed = (
+        await api('patch', `/recall-types/${created.id}`)
+          .send({ sortOrder: 7 })
+          .expect(200)
+      ).body as TypeBody;
+      expect(renamed.appointmentTypeId).toBe(valoracion);
+
+      const cleared = (
+        await api('patch', `/recall-types/${created.id}`)
+          .send({ appointmentTypeId: null })
+          .expect(200)
+      ).body as TypeBody;
+      expect(cleared.appointmentTypeId).toBeNull();
+
+      const events = await eventsOf(created.id);
+      expect(events[0].metadata).toMatchObject({
+        reason: 'RECALL_TYPE_CREATED',
+        configChange: { after: { appointmentTypeId: limpieza } },
+      });
+      expect(
+        events
+          .slice(1)
+          .map(
+            (e) => (e.metadata as { changedFields: string[] }).changedFields,
+          ),
+      ).toEqual([['appointmentTypeId'], ['sortOrder'], ['appointmentTypeId']]);
+      expect(events[3].metadata).toMatchObject({
+        configChange: {
+          before: { appointmentTypeId: valoracion },
+          after: { appointmentTypeId: null },
+        },
+      });
+    });
+
+    it('422 en español si no existe, es de otra clínica, está desactivado o retirado; nada cambia', async () => {
+      const [higiene] = await list();
+      const inactive = await appointmentType('Desactivado D20');
+      await api('patch', `/appointment-types/${inactive}`)
+        .send({ active: false })
+        .expect(200);
+      const retired = await appointmentType('Retirado D20');
+      await api('delete', `/appointment-types/${retired}`).expect(204);
+      const foreign = await appointmentType('Ajeno D20', other);
+      const before = await eventsOf(higiene.id);
+      for (const id of [
+        '0b7d1c2e-0000-4000-8000-000000000999',
+        foreign,
+        inactive,
+        retired,
+      ]) {
+        const res = await api('patch', `/recall-types/${higiene.id}`)
+          .send({ appointmentTypeId: id, name: 'No cambia' })
+          .expect(422);
+        expect(messageOf(res)).toContain(
+          'Ese tipo de cita no existe en esta clínica, está retirado o desactivado',
+        );
+        await api('post', '/recall-types')
+          .send({
+            name: 'Nunca creado D20',
+            defaultIntervalMonths: 6,
+            appointmentTypeId: id,
+          })
+          .expect(422);
+      }
+      expect((await list()).find((t) => t.id === higiene.id)).toEqual(higiene);
+      expect((await list()).some((t) => t.name === 'Nunca creado D20')).toBe(
+        false,
+      );
+      expect(await eventsOf(higiene.id)).toEqual(before);
+    });
+
+    it('400 si no es un uuid', async () => {
+      const [higiene] = await list();
+      const res = await api('patch', `/recall-types/${higiene.id}`)
+        .send({ appointmentTypeId: 'no-es-un-id' })
+        .expect(400);
+      expect(messageOf(res)).toContain(
+        'appointmentTypeId debe ser el id de un tipo de cita',
+      );
+    });
+
+    it('el enlace guardado se devuelve aunque el tipo de cita se desactive después, y se puede conservar al editar', async () => {
+      const cita = await appointmentType('Control D20');
+      const type = await createType({
+        name: 'Control anual D20',
+        appointmentTypeId: cita,
+      });
+      await api('patch', `/appointment-types/${cita}`)
+        .send({ active: false })
+        .expect(200);
+      expect(
+        (await list()).find((t) => t.id === type.id)?.appointmentTypeId,
+      ).toBe(cita);
+      const kept = (
+        await api('patch', `/recall-types/${type.id}`)
+          .send({ name: 'Control anual D20 bis', appointmentTypeId: cita })
+          .expect(200)
+      ).body as TypeBody;
+      expect(kept).toMatchObject({
+        name: 'Control anual D20 bis',
+        appointmentTypeId: cita,
+      });
     });
   });
 

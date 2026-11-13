@@ -6,6 +6,7 @@ import {
   DocumentType,
   InventoryMovementType,
   PaymentMethod,
+  RecallKind,
   Sex,
   ToothRecordOrigin,
   ToothRecordStatus,
@@ -3455,3 +3456,14 @@ export const DEMO_RECALL = {
   planNotes: 'Profilaxis de cortesía (paciente frecuente).',
   contactNote: 'Sin respuesta; volver a llamar el jueves',
 } as const;
+
+/**
+ * DX-015-bis (D20): el tipo de cita con el que se agenda cada tipo de recall
+ * del sistema en la demo (por su `systemKey`; el valor es un nombre de
+ * `DEMO_APPOINTMENT_TYPES`). Una clínica nueva no trae enlaces: los tipos de
+ * cita son de cada clínica.
+ */
+export const DEMO_RECALL_APPOINTMENT_TYPES = {
+  HYGIENE: 'Limpieza',
+  CHECKUP: 'Valoración',
+} as const satisfies Record<RecallKind, string>;

@@ -36,7 +36,8 @@ export const RECALL_TYPE_ACTIVE_MESSAGE =
 /**
  * Lo que llega del cuerpo (crear los trae todos menos los opcionales). Un
  * campo ausente (`undefined`) no cambia; `null` solo vale en
- * `exclusionGroup` (quita la exclusión): en los demás es un 400. El DTO de la
+ * `exclusionGroup` (quita la exclusión) y en `appointmentTypeId` (quita el
+ * enlace): en los demás es un 400. El DTO de la
  * edición (`PartialType`) lo deja pasar con `IsOptional`, así que se rechaza
  * aquí.
  */
@@ -46,6 +47,11 @@ export interface RecallTypeInput {
   active?: boolean | null;
   sortOrder?: number | null;
   exclusionGroup?: string | null;
+  /**
+   * D20: el formato (uuid) lo valida el DTO; que sea un tipo de cita vivo y
+   * activo de la clínica, el repositorio en su transacción (422).
+   */
+  appointmentTypeId?: string | null;
 }
 
 function assertValid(error: string | null): void {
@@ -86,6 +92,9 @@ function normalize(input: RecallTypeInput): Partial<RecallTypeFields> {
     assertValid(exclusionGroupError(input.exclusionGroup));
     out.exclusionGroup = input.exclusionGroup;
   }
+  if (input.appointmentTypeId !== undefined) {
+    out.appointmentTypeId = input.appointmentTypeId?.toLowerCase() ?? null;
+  }
   return out;
 }
 
@@ -109,6 +118,7 @@ export class CreateRecallTypeUseCase {
         active: valid.active ?? true,
         sortOrder: valid.sortOrder,
         exclusionGroup: valid.exclusionGroup ?? null,
+        appointmentTypeId: valid.appointmentTypeId ?? null,
       },
       audit,
     );

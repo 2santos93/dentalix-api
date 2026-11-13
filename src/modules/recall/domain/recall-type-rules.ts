@@ -24,6 +24,12 @@ export const RECALL_EXCLUSION_GROUP_MESSAGE =
   'El grupo de exclusión admite de 1 a 40 letras mayúsculas, cifras o «_» (por ejemplo, HYGIENE_PERIO).';
 export const RECALL_TYPE_SORT_MESSAGE = `El orden va de ${RECALL_TYPE_SORT_MIN} a ${RECALL_TYPE_SORT_MAX}.`;
 export const RECALL_TYPE_TRIGGERS_MAX_MESSAGE = `Un tipo admite hasta ${RECALL_TYPE_TRIGGERS_MAX} procedimientos.`;
+/** D20 (400): el formato del id. */
+export const RECALL_APPOINTMENT_TYPE_ID_MESSAGE =
+  'appointmentTypeId debe ser el id de un tipo de cita (o null para quitarlo).';
+/** D20 (422): el tipo de cita al agendar tiene que estar vivo y activo. */
+export const RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE =
+  'Ese tipo de cita no existe en esta clínica, está retirado o desactivado: elige uno activo o «Ninguno».';
 
 export function recallTypeNameError(name: string): string | null {
   const trimmed = name.trim();
@@ -66,4 +72,19 @@ export function triggerIdsError(ids: readonly string[]): string | null {
   return normalizeTriggerIds(ids).length > RECALL_TYPE_TRIGGERS_MAX
     ? RECALL_TYPE_TRIGGERS_MAX_MESSAGE
     : null;
+}
+
+/**
+ * D20: si se puede enlazar este tipo de cita (`null` = no existe en la
+ * clínica: bajo RLS, uno de otra clínica tampoco). Solo vivo y activo; uno ya
+ * enlazado que se retire o desactive después se conserva (la web lo ignora).
+ */
+export function recallAppointmentTypeError(
+  appointmentType: { active: boolean; deletedAt: Date | null } | null,
+): string | null {
+  return appointmentType !== null &&
+    appointmentType.active &&
+    appointmentType.deletedAt === null
+    ? null
+    : RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE;
 }
