@@ -24,12 +24,15 @@ export function clinicLogoPublicUrl(stored: string | null): string | null {
 }
 
 /**
- * DX-019-bis (B): lo que una receta o una aceptación firmada congela del logo
- * al emitirse: la clave (o la URL http(s) anterior) si hoy se puede pintar; si
+ * DX-019-bis (B): lo que una receta o una aceptación firmada (y, desde
+ * DX-019-ter, un consentimiento firmado o una entrega post-operatoria) congela
+ * del logo al emitirse: la clave (o la URL http(s) anterior) si hoy se puede pintar; si
  * no, `null`, que es «emitido sin logo» (nunca se cae al logo de hoy). Mismo
  * criterio que el CHECK de `prescriptions."clinicLogoKey"` y
- * `treatment_plan_acceptances."clinicLogoKey"` (20261203090000_dx019b_clinic_logo_key),
- * así que congelar nunca hace fallar una emisión.
+ * `treatment_plan_acceptances."clinicLogoKey"` (20261203090000_dx019b_clinic_logo_key)
+ * y de `patient_consents` / `post_op_instruction_deliveries`
+ * (20261214090000_dx019t_clinic_logo_key), así que congelar nunca hace fallar
+ * una emisión.
  */
 export function clinicLogoKeyToFreeze(stored: string | null): string | null {
   return clinicLogoPublicUrl(stored) === null ? null : stored;

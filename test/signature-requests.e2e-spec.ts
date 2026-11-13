@@ -6,6 +6,7 @@ import { createE2eApp } from './support/create-e2e-app';
 import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import { CapturingMailer } from './support/capture-mailer';
 import { signaturePng } from './support/png-fixtures';
+import { makePng } from '../src/modules/clinic-settings/__fixtures__/logo-fixtures';
 import {
   type Clinic,
   loginAs,
@@ -825,6 +826,78 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       signerName: 'Claudia Navarro',
       signerDocument: expect.stringContaining('C01') as string,
     });
+  });
+
+  // DX-019-ter: el consentimiento a distancia congela el logo del instante de
+  // la firma (no el del envío: no está en el texto enviado, así que cambiarlo
+  // no anula el enlace) y se reimprime con él aunque luego cambie o se quite.
+  it('DX-019-ter: cambiar el logo tras el envío no anula el enlace; el consentimiento se reimprime con el logo de la firma', async () => {
+    const uploadLogo = async (size: number): Promise<string> =>
+      (
+        (
+          await server()
+            .post('/api/v1/clinic/settings/logo')
+            .set('X-Tenant-Host', clinicA.host)
+            .set('Authorization', `Bearer ${clinicA.adminToken}`)
+            .attach('file', makePng(size, size), {
+              filename: 'logo.png',
+              contentType: 'image/png',
+            })
+            .expect(200)
+        ).body as { logoUrl: string }
+      ).logoUrl;
+    const email = 'elena.logo@example.com';
+    const patient = await newPatient(clinicA, {
+      firstName: 'Elena',
+      lastName: 'Rangel',
+      docNumber: 'DX019T-1',
+      email,
+      birthDate: '1990-05-20',
+    });
+    try {
+      await uploadLogo(20);
+      const { created, token } = await send(patient, email);
+      const atSigning = await uploadLogo(24);
+      const session = await verify(token, await requestCode(token, email));
+      await pub(clinicA.host)
+        .post(
+          `${token}/sign`,
+          { signature: SIGNATURE, accepted: true },
+          session,
+        )
+        .expect(200);
+      const later = await uploadLogo(28);
+      expect(later).not.toBe(atSigning);
+
+      const consent = await raw.patientConsent.findFirstOrThrow({
+        where: { signatureRequestId: created.id },
+        select: { id: true, clinicLogoKey: true },
+      });
+      expect(consent.clinicLogoKey).toBe(
+        `logos/${atSigning.split('/files/logos/')[1]}`,
+      );
+      const reprint = async () =>
+        (
+          await as(clinicA, dentist)
+            .get(`/patients/${patient}/consents/${consent.id}`)
+            .expect(200)
+        ).body as { clinic: { logoUrl: string | null }; integrityOk: boolean };
+      expect(await reprint()).toMatchObject({
+        clinic: { logoUrl: atSigning },
+        integrityOk: true,
+      });
+      await server()
+        .delete('/api/v1/clinic/settings/logo')
+        .set('X-Tenant-Host', clinicA.host)
+        .set('Authorization', `Bearer ${clinicA.adminToken}`)
+        .expect(200);
+      expect((await reprint()).clinic.logoUrl).toBe(atSigning);
+    } finally {
+      await server()
+        .delete('/api/v1/clinic/settings/logo')
+        .set('X-Tenant-Host', clinicA.host)
+        .set('Authorization', `Bearer ${clinicA.adminToken}`);
+    }
   });
 
   it('BUDGET sin plan: 400 en español; sin profesional: 400; nada se crea', async () => {

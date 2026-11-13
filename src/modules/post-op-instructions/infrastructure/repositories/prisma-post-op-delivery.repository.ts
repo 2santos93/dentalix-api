@@ -2,7 +2,10 @@ import {
   DOCUMENT_REGIONAL_SELECT,
   documentRegional,
 } from '../../../../shared/locations/document-regional';
-import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
+import {
+  clinicLogoKeyToFreeze,
+  clinicLogoPublicUrl,
+} from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
   EmailOutboxStatus,
@@ -59,6 +62,27 @@ function toEntity(row: PostOpInstructionDelivery): PostOpDelivery {
     firstOpenedAt: row.firstOpenedAt,
     createdAt: row.createdAt,
   };
+}
+
+/**
+ * DX-019-ter: la marca con la que se reimprime (o abre por el enlace) una
+ * entrega: nombre y color de hoy, pero el logo congelado al entregarla, nunca
+ * el de hoy; NULL = se entregó sin logo y se muestra sin él.
+ */
+async function frozenClinicOf(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  clinicLogoKey: string | null,
+): Promise<{
+  name: string;
+  logoUrl: string | null;
+  primaryColor: string | null;
+}> {
+  const tenant = await tx.tenant.findUniqueOrThrow({
+    where: { id: tenantId },
+    select: { name: true, primaryColor: true },
+  });
+  return { ...tenant, logoUrl: clinicLogoPublicUrl(clinicLogoKey) };
 }
 
 /**
@@ -217,13 +241,24 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
   async create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery> {
     const tenantId = this.requireTenantId();
     try {
-      return await this.prisma.runWithTenant(async (tx) =>
-        toEntity(
+      return await this.prisma.runWithTenant(async (tx) => {
+        // DX-019-ter: la entrega congela la clave del logo de este instante,
+        // leída en la transacción que la registra (la protege el trigger).
+        // NULL = se entregó sin logo.
+        const tenant = await tx.tenant.findUniqueOrThrow({
+          where: { id: tenantId },
+          select: { logoKey: true },
+        });
+        return toEntity(
           await tx.postOpInstructionDelivery.create({
-            data: { tenantId, ...input },
+            data: {
+              tenantId,
+              ...input,
+              clinicLogoKey: clinicLogoKeyToFreeze(tenant.logoKey),
+            },
           }),
-        ),
-      );
+        );
+      });
     } catch (err) {
       // DX-250: la misma `Idempotency-Key` deriva el mismo id (clave primaria).
       if (
@@ -313,12 +348,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
         },
       });
       if (!row) return null;
-      const clinic = withClinicLogoUrl(
-        await tx.tenant.findUniqueOrThrow({
-          where: { id: tenantId },
-          select: { name: true, logoKey: true, primaryColor: true },
-        }),
-      );
+      const clinic = await frozenClinicOf(tx, tenantId, row.clinicLogoKey);
       const { location, patient, ...delivery } = row;
       return {
         ...toEntity(delivery),
@@ -339,12 +369,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
         include: { location: { select: { phone: true } } },
       });
       if (!row) return null;
-      const clinic = withClinicLogoUrl(
-        await tx.tenant.findUniqueOrThrow({
-          where: { id: tenantId },
-          select: { name: true, logoKey: true, primaryColor: true },
-        }),
-      );
+      const clinic = await frozenClinicOf(tx, tenantId, row.clinicLogoKey);
       const { location, ...delivery } = row;
       return { ...toEntity(delivery), clinic, locationPhone: location.phone };
     });

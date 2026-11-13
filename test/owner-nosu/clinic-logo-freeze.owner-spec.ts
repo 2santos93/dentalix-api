@@ -171,7 +171,7 @@ describe('DX-019-bis (B): logo congelado con owner sin superusuario', () => {
     expect(flags.every((r) => r.forced)).toBe(true);
     const checks = await raw.$queryRaw<{ convalidated: boolean }[]>`
       SELECT convalidated FROM pg_constraint
-       WHERE conname LIKE '%clinic_logo_key_check'`;
+       WHERE conname IN ('prescriptions_clinic_logo_key_check', 'treatment_plan_acceptances_clinic_logo_key_check')`;
     expect(checks.map((c) => c.convalidated)).toEqual([true, true]);
     await expect(
       raw.$executeRaw`UPDATE prescriptions SET "clinicLogoKey" = NULL`,
