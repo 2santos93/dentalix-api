@@ -30,6 +30,7 @@ import {
   type RecallDueSort,
   type RecallTypeRef,
   type RecallTypeView,
+  type RecallUnconfiguredPage,
   type SetPatientRecallResult,
 } from '../../domain/recall.entity';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
@@ -140,6 +141,69 @@ export class ListDueRecallsUseCase {
         daysOverdue: row.daysOverdue,
         locationId: row.locationId,
         lastContact: row.lastContact,
+      })),
+      total,
+      page,
+      pageSize,
+    };
+  }
+}
+
+export interface ListUnconfiguredRecallsInput {
+  /** Solo esa sede; tiene que estar entre las permitidas (403 si no). */
+  locationId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * D17 · «Sin recall configurado»: pacientes vivos atendidos en los últimos 24
+ * meses (en su sede), sin ningún recall activo de un tipo vivo y sin próxima
+ * cita; la última visita más reciente primero. Paginada como la de vencidos.
+ */
+@Injectable()
+export class ListUnconfiguredRecallsUseCase {
+  constructor(
+    @Inject(RECALL_REPOSITORY) private readonly repo: RecallRepository,
+    @Inject(RECALL_CLOCK) private readonly now: RecallClock,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  async execute(
+    input: ListUnconfiguredRecallsInput,
+  ): Promise<RecallUnconfiguredPage> {
+    // DX-089: un miembro acotado no lista otra sede por la query.
+    if (input.locationId) {
+      this.tenantContext.assertLocationAllowed(input.locationId);
+    }
+    const page = wholeOrDefault(input.page, 1, 1, Number.MAX_SAFE_INTEGER);
+    const pageSize = wholeOrDefault(
+      input.pageSize,
+      RECALL_DEFAULT_PAGE_SIZE,
+      1,
+      RECALL_MAX_PAGE_SIZE,
+    );
+    const { rows, total } = await this.repo.listUnconfigured({
+      locationId: input.locationId,
+      page,
+      pageSize,
+      now: this.now(),
+    });
+    return {
+      items: rows.map((row) => ({
+        patientId: row.patientId,
+        patientName: `${row.patientFirstName} ${row.patientLastName}`.trim(),
+        // DX-128: con baja de avisos no se ofrece el contacto (ni el número).
+        patientPhone: row.reminderOptedOut ? null : row.patientPhone,
+        patientWhatsApp: row.reminderOptedOut
+          ? null
+          : whatsAppDigits(
+              row.patientPhone,
+              phoneRegionOrNull(row.phoneRegion),
+            ),
+        reminderOptedOut: row.reminderOptedOut,
+        lastVisitAt: row.lastVisitAt,
+        lastVisitLocationId: row.lastVisitLocationId,
       })),
       total,
       page,
@@ -301,6 +365,43 @@ export class SetPatientRecallUseCase {
       active: input.active ?? true,
       disabledUntil,
       disabledReason: disabledUntil ? reason : null,
+      actorId,
+      audit,
+    });
+    const recalls: PatientRecalls = await this.getRecalls.execute(patientId);
+    return { ...recalls, recallUpdates: excluded };
+  }
+}
+
+/**
+ * D15 · «Programar recall» (salida del paciente, «Sin recall configurado»):
+ * crea el recall de un tipo con SU intervalo por defecto y la base en la
+ * última cita atendida del paciente (o hoy). Solo crea: 409 si ya tiene uno
+ * de ese tipo. También lo usa recepción; elegir otro intervalo, editar o
+ * reactivar sigue siendo el PUT clínico. Responde como el PUT: la ficha y lo
+ * que desactivó la exclusión.
+ */
+@Injectable()
+export class CreateDefaultRecallUseCase {
+  constructor(
+    @Inject(RECALL_REPOSITORY) private readonly repo: RecallRepository,
+    @Inject(RECALL_CLOCK) private readonly now: RecallClock,
+    private readonly getRecalls: GetPatientRecallsUseCase,
+  ) {}
+
+  async execute(
+    patientId: string,
+    recallTypeId: string,
+    actorId: string,
+    audit?: AuditRequestContext,
+  ): Promise<SetPatientRecallResult> {
+    if (!(await this.repo.patientExists(patientId))) {
+      throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    }
+    const { excluded } = await this.repo.createDefaultRecall({
+      patientId,
+      recallTypeId,
+      now: this.now(),
       actorId,
       audit,
     });

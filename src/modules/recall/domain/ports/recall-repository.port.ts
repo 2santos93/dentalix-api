@@ -8,6 +8,8 @@ import type {
   RecallRef,
   RecallTypeRef,
   RecallTypeView,
+  RecallUnconfiguredQuery,
+  RecallUnconfiguredRow,
   NewRecallType,
   RecallExclusionUpdate,
   RecallTypeFields,
@@ -24,6 +26,13 @@ export interface RecallRepository {
   listDue(
     query: RecallDueQuery,
   ): Promise<{ rows: RecallDueRow[]; total: number }>;
+  /**
+   * D17: pacientes vivos con una cita atendida en los últimos 24 meses, sin
+   * ningún recall activo de un tipo vivo y sin próxima cita, paginada.
+   */
+  listUnconfigured(
+    query: RecallUnconfiguredQuery,
+  ): Promise<{ rows: RecallUnconfiguredRow[]; total: number }>;
   patientExists(patientId: string): Promise<boolean>;
   /** Recalls del paciente (con los hechos del vencimiento) y su historial de contactos. */
   patientRecalls(
@@ -39,6 +48,18 @@ export interface RecallRepository {
   upsertRecall(
     data: SetPatientRecallData,
   ): Promise<{ id: string; excluded: RecallExclusionUpdate[] }>;
+  /**
+   * D15: alta de un recall con el intervalo por defecto del tipo y la base en
+   * la última cita atendida (o hoy). 422 si el tipo no está vivo y activo,
+   * 409 si ya hay uno de ese tipo. Aplica la exclusión (D9) y se audita.
+   */
+  createDefaultRecall(data: {
+    patientId: string;
+    recallTypeId: string;
+    now: Date;
+    actorId: string;
+    audit?: AuditRequestContext;
+  }): Promise<{ id: string; excluded: RecallExclusionUpdate[] }>;
   /** DX-015-bis: el tipo vivo por su clave del enum o por su id. */
   findType(
     ref: { systemKey: RecallKind } | { id: string },

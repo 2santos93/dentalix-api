@@ -25,7 +25,15 @@ import {
   auditExclusions,
   deactivateExcluded,
   lockExclusionScope,
+  type ExcludedRecall,
 } from './recall-exclusion';
+import {
+  RECALL_TYPE_INACTIVE_MESSAGE,
+  auditRecallWrite,
+  excludeOthers,
+  insertManualRecall,
+  requireLiveRecallType,
+} from './recall-manual-write';
 import type { RecallRepository } from '../domain/ports/recall-repository.port';
 import type {
   NewRecallContact,
@@ -39,6 +47,8 @@ import type {
   RecallTypeFields,
   RecallTypeRef,
   RecallTypeView,
+  RecallUnconfiguredQuery,
+  RecallUnconfiguredRow,
   SetPatientRecallData,
   StaffRef,
 } from '../domain/recall.entity';
@@ -51,6 +61,8 @@ const RECALL_TYPE_NOT_FOUND_MESSAGE =
 
 export const DUPLICATE_RECALL_TYPE_MESSAGE =
   'Ya existe un tipo de recall con ese nombre.';
+export const RECALL_ALREADY_EXISTS_MESSAGE =
+  'El paciente ya tiene un recall de ese tipo: cámbialo desde su ficha.';
 export const INVALID_RECALL_TRIGGERS_MESSAGE =
   'Hay procedimientos que no existen en el catálogo de esta clínica o están retirados.';
 
@@ -118,6 +130,21 @@ async function lockedLiveType(
   });
   if (!row) throw new NotFoundException(RECALL_TYPE_NOT_FOUND_MESSAGE);
   return toTypeView(row);
+}
+
+/** Un recall que desactivó la exclusión, como lo devuelven el PUT y D15. */
+function toExclusionUpdate(e: ExcludedRecall): RecallExclusionUpdate {
+  return {
+    recallId: e.recallId,
+    recallTypeId: e.recallTypeId,
+    recallTypeName: e.recallTypeName,
+    dueAt: e.dueAt,
+    deactivated: true,
+    replacedBy: {
+      recallTypeId: e.replacedBy.recallTypeId,
+      recallTypeName: e.replacedBy.recallTypeName,
+    },
+  };
 }
 
 /** DATE de Postgres -> día civil (Prisma lo trae a medianoche UTC). */
@@ -316,6 +343,156 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
      ORDER BY ${order(Prisma.raw('pg'))}`;
 }
 
+/** Columnas de una fila de la página de `recallUnconfiguredSql`. */
+interface UnconfiguredPageColumns {
+  patientId: string;
+  patientFirstName: string;
+  patientLastName: string;
+  patientPhone: string | null;
+  phoneRegion: string | null;
+  reminderOptedOut: boolean;
+  lastVisitAt: Date;
+  lastVisitLocationId: string;
+}
+
+/** Como `DueSqlRow`: el total en cada fila; página vacía = columnas a NULL. */
+type UnconfiguredSqlRow = { total: number } & (
+  UnconfiguredPageColumns | { [K in keyof UnconfiguredPageColumns]: null }
+);
+
+export interface RecallUnconfiguredSqlParams extends RecallUnconfiguredQuery {
+  tenantId: string;
+  /** Sedes a mostrar; `undefined` = sin restricción (vista consolidada). */
+  locationIds?: readonly string[];
+}
+
+/**
+ * DX-015-bis (porción 3, D17) · «Sin recall configurado» en UNA sentencia,
+ * con el total y la página de la misma evaluación de `d` (como
+ * `recallDueSql`). Pacientes vivos que cumplen todo esto:
+ *
+ * - su última cita COMPLETED viva cae en los 24 meses anteriores a «hoy» en
+ *   su sede (la de esa cita; «al menos una en 24 meses» es lo mismo que «la
+ *   última en 24 meses»);
+ * - ningún recall activo de un tipo vivo (uno retirado a mano, excluido o de
+ *   un tipo retirado no cuenta);
+ * - sin próxima cita: el mismo predicado que `recallDueSql`.
+ *
+ * Sin estadísticas de las que dependa el plan (ver la cabecera de
+ * 20261212090400): ningún join entre tablas grandes que estimar; cada
+ * búsqueda por paciente va por un índice, nunca contra un recorrido.
+ * 0. `locs`: las sedes (ya filtradas por la de la petición) con el primer
+ *    instante de su ventana de 24 meses; `live`: los tipos vivos.
+ * 1. `lv`: la última cita atendida por paciente, un DISTINCT ON que recorre
+ *    en su orden el índice parcial appointments_tenant_patient_completed_idx
+ *    ("tenantId", "patientId", "start" DESC, "id" DESC, INCLUDE "locationId":
+ *    solo índice, sin ordenar), desde la ventana más antigua de las sedes.
+ * 2. `r` y `c`: la ventana exacta de su sede y los dos NOT EXISTS
+ *    correlacionados por paciente, en este orden: los recalls por la UNIQUE
+ *    ("tenantId", "patientId", "recallTypeId") y las citas futuras por
+ *    appointments_tenant_patient_upcoming_idx.
+ * 3. `d`: solo a lo que queda, el paciente (vivo, nombre y teléfono) y el día
+ *    civil de la última visita.
+ * 4. Orden: la última visita más reciente primero, después el apellido y el id.
+ */
+export function recallUnconfiguredSql(
+  p: RecallUnconfiguredSqlParams,
+): Prisma.Sql {
+  const offset = (p.page - 1) * p.pageSize;
+  const order = (alias: Prisma.Sql) =>
+    Prisma.sql`${alias}."lastVisitAt" DESC, ${alias}."lastName" ASC, ${alias}."patientId" ASC`;
+  return Prisma.sql`
+    WITH locs AS MATERIALIZED (
+      SELECT x."id", x."defaultPhoneRegion", x."zone",
+             -- El primer instante (UTC, como "start") del día civil de hace
+             -- 24 meses en la zona de la sede: comparar instantes es más
+             -- barato que pasar cada cita a su día civil.
+             ((((${p.now}::timestamptz AT TIME ZONE x."zone")::date - interval '24 months')::date::timestamp
+               AT TIME ZONE x."zone") AT TIME ZONE 'UTC') AS "from"
+        FROM (
+          SELECT l."id", l."defaultPhoneRegion", coalesce(l."timeZone", 'UTC') AS "zone"
+            FROM "locations" l
+           WHERE l."tenantId" = ${p.tenantId}::uuid
+             ${p.locationIds ? Prisma.sql`AND l."id" = ANY(${p.locationIds}::uuid[])` : Prisma.empty}
+        ) x
+    ),
+    -- Los tipos vivos, una vez (InitPlan): sin una búsqueda en recall_types
+    -- por cada recall del anti-join.
+    live AS MATERIALIZED (
+      SELECT coalesce(array_agg(rt."id"), '{}'::uuid[]) AS "ids"
+        FROM "recall_types" rt
+       WHERE rt."tenantId" = ${p.tenantId}::uuid AND rt."deletedAt" IS NULL
+    ),
+    lv AS MATERIALIZED (
+      SELECT DISTINCT ON (a."patientId") a."patientId", a."start", a."locationId"
+        FROM "appointments" a
+       WHERE a."tenantId" = ${p.tenantId}::uuid
+         AND a."status" = 'COMPLETED'
+         AND a."deletedAt" IS NULL
+         AND a."start" >= (SELECT min(locs."from") FROM locs)
+       ORDER BY a."patientId", a."start" DESC, a."id" DESC
+    ),
+    -- Primero el anti-join de recalls, que en una clínica que ya usa el
+    -- recall deja fuera a casi todos; las citas futuras, solo a lo que queda.
+    r AS MATERIALIZED (
+      SELECT lv."patientId", lv."start", lo."id" AS "locationId",
+             lo."defaultPhoneRegion" AS "phoneRegion", lo."zone"
+        FROM lv
+        JOIN locs lo ON lo."id" = lv."locationId"
+       WHERE lv."start" >= lo."from"
+         AND NOT EXISTS (
+           SELECT 1
+             FROM "patient_recalls" pr
+            WHERE pr."tenantId" = ${p.tenantId}::uuid
+              AND pr."patientId" = lv."patientId"
+              AND pr."active"
+              AND pr."recallTypeId" = ANY ((SELECT live."ids" FROM live)::uuid[])
+         )
+    ),
+    c AS MATERIALIZED (
+      SELECT r.* FROM r
+       WHERE NOT EXISTS (
+           SELECT 1 FROM "appointments" a
+            WHERE a."tenantId" = ${p.tenantId}::uuid
+              AND a."patientId" = r."patientId"
+              AND a."deletedAt" IS NULL
+              -- El predicado del índice parcial, literal (como en recallDueSql).
+              AND a."status" IN ('SCHEDULED', 'CONFIRMED', 'ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+              AND (
+                (a."status" IN ('SCHEDULED', 'CONFIRMED') AND a."start" > ${p.now})
+                OR a."status" IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
+              )
+         )
+    ),
+    d AS MATERIALIZED (
+      SELECT c."patientId", pa."firstName", pa."lastName", pa."phone",
+             (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut",
+             c."locationId", c."phoneRegion",
+             ((c."start" AT TIME ZONE 'UTC') AT TIME ZONE c."zone")::date AS "lastVisitAt"
+        FROM c
+        JOIN "patients" pa
+          ON pa."tenantId" = ${p.tenantId}::uuid AND pa."id" = c."patientId"
+       WHERE pa."deletedAt" IS NULL
+    ),
+    page AS (
+      SELECT d.* FROM d
+       ORDER BY ${order(Prisma.raw('d'))}
+       LIMIT ${p.pageSize} OFFSET ${offset}
+    )
+    SELECT t."total",
+           pg."patientId",
+           pg."firstName" AS "patientFirstName",
+           pg."lastName" AS "patientLastName",
+           pg."phone" AS "patientPhone",
+           pg."phoneRegion",
+           pg."reminderOptedOut",
+           pg."lastVisitAt",
+           pg."locationId" AS "lastVisitLocationId"
+      FROM (SELECT count(*)::int AS "total" FROM d) t
+      LEFT JOIN page pg ON true
+     ORDER BY ${order(Prisma.raw('pg'))}`;
+}
+
 /**
  * DX-015-bis: una clínica dada de alta por la app anterior durante el
  * despliegue no tiene tipos; se le siembran los de por defecto la primera vez
@@ -437,6 +614,44 @@ export class PrismaRecallRepository implements RecallRepository {
                           createdAt: r.lastContactAt,
                         }
                       : null,
+                },
+              ],
+        ),
+      };
+    });
+  }
+
+  /**
+   * D17: «Sin recall configurado». Con `locationId` (ya autorizado por el caso
+   * de uso), solo esa sede; si no, la de la cabecera o las permitidas.
+   */
+  async listUnconfigured(
+    query: RecallUnconfiguredQuery,
+  ): Promise<{ rows: RecallUnconfiguredRow[]; total: number }> {
+    const sql = recallUnconfiguredSql({
+      ...query,
+      tenantId: this.tenantId(),
+      locationIds: query.locationId
+        ? [query.locationId]
+        : this.tenantContext.scopeLocationIds(),
+    });
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.$queryRaw<UnconfiguredSqlRow[]>(sql);
+      return {
+        total: rows[0]?.total ?? 0,
+        rows: rows.flatMap((r) =>
+          r.patientId === null
+            ? []
+            : [
+                {
+                  patientId: r.patientId,
+                  patientFirstName: r.patientFirstName,
+                  patientLastName: r.patientLastName,
+                  patientPhone: r.patientPhone,
+                  phoneRegion: r.phoneRegion,
+                  reminderOptedOut: r.reminderOptedOut,
+                  lastVisitAt: civilOf(r.lastVisitAt),
+                  lastVisitLocationId: r.lastVisitLocationId,
                 },
               ],
         ),
@@ -634,21 +849,125 @@ export class PrismaRecallRepository implements RecallRepository {
         actorId: data.actorId,
       });
       await auditExclusions(tx, excluded, data.patientId, data.audit);
-      return {
-        id: row.id,
-        excluded: excluded.map((e) => ({
-          recallId: e.recallId,
-          recallTypeId: e.recallTypeId,
-          recallTypeName: e.recallTypeName,
-          dueAt: e.dueAt,
-          deactivated: true as const,
-          replacedBy: {
-            recallTypeId: e.replacedBy.recallTypeId,
-            recallTypeName: e.replacedBy.recallTypeName,
-          },
-        })),
-      };
+      return { id: row.id, excluded: excluded.map(toExclusionUpdate) };
     });
+  }
+
+  /**
+   * D15 · «Programar recall» con el intervalo por defecto del tipo, solo alta.
+   * En una transacción, con el orden de bloqueo de siempre
+   * (`lockExclusionScope`): 422 si el tipo no existe, se retiró o está
+   * desactivado; 409 si el paciente ya tiene un recall de ese tipo (también
+   * uno inactivo: editarlo o reactivarlo es el PUT clínico). La base es el día
+   * civil de la última cita COMPLETED viva del paciente en la zona de su sede,
+   * y la sede, esa; sin ninguna, hoy en la sede de escritura. Aplica la
+   * exclusión (D9) y deja el evento del alta (`via: 'DEFAULT'`).
+   */
+  createDefaultRecall(data: {
+    patientId: string;
+    recallTypeId: string;
+    now: Date;
+    actorId: string;
+    audit?: AuditRequestContext;
+  }): Promise<{ id: string; excluded: RecallExclusionUpdate[] }> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const tenantId = this.tenantId();
+      await ensureDefaultTypes(tx, tenantId);
+      const type = await requireLiveRecallType(tx, tenantId, data.recallTypeId);
+      if (!type.active) {
+        throw new UnprocessableEntityException(RECALL_TYPE_INACTIVE_MESSAGE);
+      }
+      await lockExclusionScope(
+        tx,
+        tenantId,
+        data.patientId,
+        type.exclusionGroup ? [type.exclusionGroup] : [],
+      );
+      const { baseDay, locationId } = await this.defaultRecallBase(
+        tx,
+        tenantId,
+        data.patientId,
+        data.now,
+      );
+      const id = await insertManualRecall(tx, {
+        tenantId,
+        patientId: data.patientId,
+        type,
+        intervalMonths: type.defaultIntervalMonths,
+        baseDay,
+        locationId,
+        actorId: data.actorId,
+      });
+      if (id === null) {
+        throw new ConflictException(RECALL_ALREADY_EXISTS_MESSAGE);
+      }
+      await auditRecallWrite(
+        tx,
+        {
+          recallId: id,
+          recallTypeId: type.id,
+          patientId: data.patientId,
+          via: 'DEFAULT',
+          changedFields: ['intervalMonths', 'lastDoneAt'],
+        },
+        data.audit,
+      );
+      const excluded = await excludeOthers(tx, {
+        tenantId,
+        patientId: data.patientId,
+        recallId: id,
+        type,
+        actorId: data.actorId,
+        audit: data.audit,
+      });
+      return { id, excluded: excluded.map(toExclusionUpdate) };
+    });
+  }
+
+  /**
+   * D15: la base y la sede de un recall por defecto. La última cita COMPLETED
+   * viva del paciente (`appointments_tenant_patient_completed_idx`): su día
+   * civil en la zona de su sede (409 si la sede no tiene zona, nunca otra);
+   * sin ninguna, hoy en la sede de escritura.
+   */
+  private async defaultRecallBase(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    patientId: string,
+    now: Date,
+  ): Promise<{ baseDay: string; locationId: string }> {
+    const [last] = await tx.$queryRaw<
+      { start: Date; locationId: string; timeZone: string | null }[]
+    >`
+      SELECT a."start", a."locationId", l."timeZone"
+        FROM "appointments" a
+        JOIN "locations" l
+          ON l."tenantId" = a."tenantId" AND l."id" = a."locationId"
+       WHERE a."tenantId" = ${tenantId}::uuid
+         AND a."patientId" = ${patientId}::uuid
+         AND a."status" = 'COMPLETED'
+         AND a."deletedAt" IS NULL
+       ORDER BY a."start" DESC, a."id" DESC
+       LIMIT 1`;
+    if (last) {
+      const zone = requireLocationTimeZone({
+        id: last.locationId,
+        timeZone: last.timeZone,
+      });
+      return {
+        baseDay: civilDateIn(last.start, zone),
+        locationId: last.locationId,
+      };
+    }
+    const locationId = await this.tenantContext.writeLocationId(tx);
+    const location = await tx.location.findFirstOrThrow({
+      where: { id: locationId },
+      select: { id: true, timeZone: true },
+    });
+    return {
+      baseDay: civilDateIn(now, requireLocationTimeZone(location)),
+      locationId,
+    };
   }
 
   /**

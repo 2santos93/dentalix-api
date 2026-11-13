@@ -465,6 +465,13 @@ export const RECALL_LIST_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 export const RECALL_INTERVAL_ROLES: ClinicRole[] = [...CLINICAL_ROLES];
+// DX-015-bis (porción 3, D15): «Programar recall» con el intervalo por defecto
+// del tipo (`POST /patients/:id/recalls/default`). Recepción despide al
+// paciente y llama a los de la lista, así que también lo crea; elegir otro
+// intervalo, editarlo o reactivarlo sigue siendo clínico (el PUT).
+export const RECALL_DEFAULT_ROLES: ClinicRole[] = [
+  ...new Set([...RECALL_LIST_ROLES, ...CLINICAL_ROLES, ClinicRole.RECEPTION]),
+];
 // DX-015-bis: los tipos de recall de la clínica (Ajustes › Recall) — crear,
 // editar, desactivar, retirar y fijar sus disparadores: solo gestión, como
 // los tipos de cita. Leerlos: APPOINTMENT_ROLES.

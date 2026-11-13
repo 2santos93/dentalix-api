@@ -1309,6 +1309,13 @@ const EXPECTED: Record<string, AuditOptions> = {
   // DX-015: recall. La lista (con teléfonos) se audita sin paciente; el
   // contacto, sin la nota; fijar o pausar el recall, con el paciente.
   'GET /recall/due': { action: 'VIEW', resource: 'PATIENT_RECALL' },
+  // DX-015-bis (D17): «Sin recall configurado», con teléfonos: como la de
+  // vencidos, sin paciente y con su `reason`.
+  'GET /recall/unconfigured': {
+    action: 'VIEW',
+    resource: 'PATIENT_RECALL',
+    reason: 'RECALL_UNCONFIGURED',
+  },
   'POST /recall/:recallId/contacts': {
     action: 'CREATE',
     resource: 'RECALL_CONTACT',
@@ -1881,6 +1888,11 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'PATCH /recall-types/:id': 'recall-types.e2e-spec.ts',
   'DELETE /recall-types/:id': 'recall-types.e2e-spec.ts',
   'PUT /recall-types/:id/triggers': 'recall-types.e2e-spec.ts',
+  // DX-015-bis (D15): «Programar recall». UPDATE PATIENT_RECALL (como el PUT)
+  // con `via: 'DEFAULT'` y el recall en `resourceId`, y los de la exclusión,
+  // en la transacción del alta.
+  'POST /patients/:id/recalls/default':
+    'recall-default.int-spec.ts y recall.e2e-spec.ts',
   // DX-516: ajustes por medio de pago (solo ADMIN): UPDATE/CREATE
   // PAYMENT_METHOD con PAYMENT_METHOD_ADJUSTMENT_CREATED/UPDATED y el antes y
   // el después, en la transacción del cambio.
