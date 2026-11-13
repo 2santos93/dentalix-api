@@ -1,4 +1,7 @@
-import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
+import {
+  clinicLogoKeyToFreeze,
+  withClinicLogoUrl,
+} from '../../../shared/storage/clinic-logo-url';
 import { ConflictException, Injectable } from '@nestjs/common';
 import type { QuoteValidity } from '../../treatment-plans/domain/quote-validity';
 import {
@@ -625,12 +628,19 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
       }
       await tx.signatureRequest.update({ where: { id }, data: write.patch });
       if (write.consent) {
+        // DX-019-ter: el logo del instante de la firma (no el del envío: no
+        // está en el texto congelado, así que cambiarlo no anula el enlace).
+        const tenant = await tx.tenant.findUniqueOrThrow({
+          where: { id: tenantId },
+          select: { logoKey: true },
+        });
         await tx.patientConsent.create({
           data: {
             tenantId,
             patientId: request.patientId,
             signatureRequestId: request.id,
             ...write.consent,
+            clinicLogoKey: clinicLogoKeyToFreeze(tenant.logoKey),
           },
         });
       }

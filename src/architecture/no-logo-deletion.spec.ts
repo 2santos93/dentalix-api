@@ -6,7 +6,8 @@ import { join, relative, sep } from 'node:path';
  * del logo de la clínica (`logos/<clínica>-<16 hex>.<ext>`), no sus bytes.
  * Reimprimirlas pinta ese objeto, así que un objeto `logos/` NUNCA se borra:
  * ni al cambiar o quitar el logo, ni en un barrido de huérfanos (que tendría
- * que consultar `tenants`, `prescriptions` y `treatment_plan_acceptances`).
+ * que consultar `tenants`, `prescriptions`, `treatment_plan_acceptances` y,
+ * desde DX-019-ter, `patient_consents` y `post_op_instruction_deliveries`).
  *
  * El código de producción que borra o lista objetos del almacén
  * (`FileStoragePort.delete` / `listObjects`) está en una lista revisada:
