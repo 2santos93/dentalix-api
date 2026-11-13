@@ -9,6 +9,7 @@ import {
 } from '../src/modules/implants/infrastructure/prisma-patient-implant.repository';
 import {
   dueCandidatesSql,
+  loadSweepWindows,
   PrismaReminderRepository,
 } from '../src/modules/reminders/infrastructure/prisma-reminder.repository';
 import {
@@ -49,6 +50,8 @@ interface PlanNode {
   Filter?: string;
   'Actual Rows'?: number;
   'Actual Loops'?: number;
+  'Rows Removed by Index Recheck'?: number;
+  'Rows Removed by Filter'?: number;
   Plans?: PlanNode[];
 }
 
@@ -414,21 +417,57 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
 
   describe('barrido de recordatorios (DB-036)', () => {
     it(`con ${FUTURE_APPOINTMENTS} citas futuras en la sede, el rango de start va en Index Cond y solo lee la ventana`, async () => {
+      // La consulta que corre dueCandidates: primero las ventanas, luego las
+      // citas con las cotas como parámetros.
+      const windows = await prisma.runWithTenant(a.tenantId, (tx) =>
+        loadSweepWindows(tx, a.tenantId, NOW),
+      );
+      expect(windows.length).toBeGreaterThan(0);
       const plan = await explain(
         a.tenantId,
-        dueCandidatesSql(a.tenantId, NOW),
+        dueCandidatesSql(a.tenantId, windows),
         true,
       );
       const scans = on(plan, 'appointments');
       expect(scans.map((n) => n['Node Type'])).not.toContain('Seq Scan');
-      const hit = scans.find(
-        (n) => n['Index Name'] === 'appointments_tenant_location_start_idx',
+      // Cota inferior y superior de la ventana en el Index Cond de ALGÚN índice
+      // de appointments (Index Scan, o el Bitmap Index Scan hijo de un Bitmap
+      // Heap Scan, que no lleva «Relation Name»): no solo `start > now`. Ni el
+      // nombre del índice ni el tipo de nodo son el contrato. Postgres 16.16
+      // (imagen de la CI desde el 2026-11-13) elige un Bitmap Heap Scan donde
+      // 16.14/16.15 elegían un Index Scan, y lo que importa (acotar la ventana
+      // en el índice y leer solo la ventana) lo fija `read`.
+      const indexScans = scans.flatMap((n) =>
+        n['Node Type'] === 'Bitmap Heap Scan' ? nodes(n) : [n],
       );
-      // Cota inferior y superior de la ventana: no solo `start > now`.
-      expect(hit?.['Index Cond']).toMatch(/start > /);
-      expect(hit?.['Index Cond']).toMatch(/start <= /);
+      const hit = indexScans.find(
+        (n) =>
+          /start > /.test(n['Index Cond'] ?? '') &&
+          /start <= /.test(n['Index Cond'] ?? ''),
+      );
+      if (!hit) {
+        throw new Error(
+          `ningún índice de appointments acota la ventana: ${JSON.stringify(
+            indexScans.map((n) => [
+              n['Node Type'],
+              n['Index Name'],
+              n['Index Cond'],
+            ]),
+          )}`,
+        );
+      }
+      // Filas leídas de appointments: las devueltas y, en un Bitmap Heap Scan,
+      // también las que descarta tras leerlas (recheck o filtro). Leer toda
+      // la agenda y filtrar después no pasa.
       const read = scans.reduce(
-        (sum, n) => sum + (n['Actual Rows'] ?? 0) * (n['Actual Loops'] ?? 1),
+        (sum, n) =>
+          sum +
+          ((n['Actual Rows'] ?? 0) +
+            (n['Node Type'] === 'Bitmap Heap Scan'
+              ? (n['Rows Removed by Index Recheck'] ?? 0) +
+                (n['Rows Removed by Filter'] ?? 0)
+              : 0)) *
+            (n['Actual Loops'] ?? 1),
         0,
       );
       expect(read).toBeLessThan(50);
