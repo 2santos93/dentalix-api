@@ -41,6 +41,8 @@ const LOW_LIMITS: RateLimitConfig = {
   'slot-token': { limit: 2, ttlMs: 60_000 },
   'copy-link': { limit: 4, ttlMs: 60_000 },
   'copy-token': { limit: 2, ttlMs: 60_000 },
+  'branding-host': { limit: 4, ttlMs: 60_000 },
+  'branding-miss': { limit: 4, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -446,17 +448,24 @@ describe('Rate limiting (e2e)', () => {
       expectTooMany(await branding());
     });
 
-    it('DX-517-ter: la marca por host (pública, la pide el servidor web) también tiene límite, con su propio balde', async () => {
+    it('DX-555: la marca por host (la pide el servidor web) va FUERA del global, con sus baldes propios', async () => {
       const byHost = (host: string) =>
         request(app.getHttpServer())
           .get('/api/v1/public/tenant/branding/by-host')
           .query({ host });
-      // Hosts distintos (válidos, inválidos o desconocidos) no evaden el
-      // balde: es por IP y ruta, no por el `host` que se pregunta.
-      for (const host of ['a.localhost', 'a..b', 'b.localhost']) {
-        expect((await byHost(host)).status).not.toBe(429);
+      // Más fallos que el global (3) desde una IP: el global no la corta…
+      for (const host of [
+        'dx555-global-1.localhost',
+        'a..b',
+        'dx555-global-2.localhost',
+        'dx555-global-3.localhost',
+      ]) {
+        expect((await byHost(host)).status).toBe(404);
       }
-      expectTooMany(await byHost('c.localhost'));
+      // …la corta su balde de fallos por IP (`branding-miss`, 4 aquí).
+      // El detalle (aciertos, hosts, IPs) está en
+      // test/branding-rate-limit.e2e-spec.ts.
+      expectTooMany(await byHost('dx555-global-4.localhost'));
     });
 
     it('health y health/ready quedan fuera incluso del límite global (DX-023)', async () => {

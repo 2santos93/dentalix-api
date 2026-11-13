@@ -5096,6 +5096,54 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
   `balanceUndoneTotals` (lo retirado de verdad); totales AGREGADOS, nunca el
   de un paciente ni documentos.
 
+## Marca por host para el render del servidor (DX-517-ter, DX-555)
+
+`GET /api/v1/public/tenant/branding/by-host?host=` la llama el servidor web
+(Next) al pintar el primer HTML, con el host de la página. Es pública; la
+clínica sale solo del parámetro (mismo resolutor que el middleware) y un host
+desconocido o mal formado da el mismo 404 (el mal formado sin llegar a la BD).
+
+**Límites (DX-555).** Todas estas llamadas salen de la IP del servidor web,
+así que con el límite global por IP compartían UN balde: un aluvión de hosts
+inventados contra la web (o solo muchas clínicas por instancia) lo agotaba y
+TODAS las clínicas reales perdían la marca del primer HTML (la web la pide
+entonces desde el navegador: parpadeo). La ruta va fuera del global
+(`@SkipThrottle({ default: true })`) y tiene dos baldes propios:
+
+| Política        | Clave                           | Cuenta                            | Default | Variables                       |
+| --------------- | ------------------------------- | --------------------------------- | ------- | ------------------------------- |
+| `branding-host` | IP + host normalizado (hash)    | cada petición (guard)             | 600/min | `RATE_LIMIT_BRANDING_HOST_*`    |
+| `branding-miss` | IP                              | solo los 404 (desconocido o mal formado) | 60/min  | `RATE_LIMIT_BRANDING_MISS_*`    |
+
+- **Aciertos**: una clínica real nunca gasta ni ve agotado el balde de fallos.
+  Su balde es por IP + host (mayúsculas, puerto y punto final son el mismo
+  host): un cliente externo que machaque el host de una clínica agota el suyo,
+  no el del servidor web. 600/min = 10 renders por segundo de UNA clínica; la
+  web guarda cada host 30 s, pero un aluvión de hosts inventados le vacía esa
+  caché (LRU de 2000) y entonces cada render de una clínica real vuelve a
+  preguntar.
+- **Fallos**: el fallo solo se sabe tras la consulta, así que lo cuenta
+  `BrandingMissLimitInterceptor` (mismo almacén e IP que el guard): por debajo
+  del límite, el 404 de siempre; al pasarlo, 429 con `Retry-After` durante la
+  ventana. Enumerar hosts es una ristra de fallos y choca aquí desde cualquier
+  cliente.
+- **Lo que queda**: un aluvión de hosts inventados contra la web agota el
+  balde de fallos de la IP de la web, y sus otras consultas de hosts
+  desconocidos reciben 429 en vez de 404 (la web lo trata como «no se supo» y
+  no lo guarda: lo vuelve a intentar el navegador, que de todos modos no
+  tendría marca). Las clínicas reales siguen con marca. Y, como los aciertos
+  nunca se cortan por fallos, una IP con el balde de fallos agotado sigue
+  distinguiendo 200 de 429: el límite frena el RITMO de la enumeración (60
+  fallos por minuto e IP antes del 429), no oculta qué hosts existen (su marca
+  es pública en la propia página de la clínica).
+- **Log**: cada 429 sale en el log de acceso; además, `warn`
+  `{"event":"rate_limit.rejected","route":"GET /api/v1/public/tenant/branding/by-host","policy":"branding-miss"|"branding-host","rejected":N,"retryAfterSeconds":S}`,
+  como mucho una línea por política cada 10 s con el recuento desde la
+  anterior (sin IP ni host). `branding-miss` = alguien enumera o inunda la web
+  de hosts inventados; `branding-host` = una clínica recibe más renders de los
+  previstos.
+- En memoria de cada réplica, como el resto del rate limiting.
+
 ## Dominios personalizados (SEC-009)
 
 Módulo `src/modules/domains` (solo ADMIN). Una clínica registra su dominio

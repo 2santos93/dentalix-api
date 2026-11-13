@@ -34,6 +34,8 @@ for (const policy of [
   'ANAMNESIS_TOKEN',
   'SIGNATURE',
   'SIGNATURE_TOKEN',
+  'BRANDING_HOST',
+  'BRANDING_MISS',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }
