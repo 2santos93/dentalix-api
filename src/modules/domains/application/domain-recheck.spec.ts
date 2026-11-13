@@ -279,7 +279,7 @@ describe('re-verificación periódica de dominios (SEC-009, unidad)', () => {
     expect(store.rows[0].status).toBe('VERIFIED');
   });
 
-  it('la ronda es la hora del barrido: repetirlo en la misma hora (reintento, arriendo perdido) no suma otro fallo', async () => {
+  it('la ronda es la hora del barrido: repetirlo en la misma hora (reintento, reserva perdida) no suma otro fallo', async () => {
     const { store, dns, sweep, queued, clock, handlerFor, verified } = setup(3);
     const row = verified(A, 'citas.a.com');
     dns.records.delete(txt(row.host));

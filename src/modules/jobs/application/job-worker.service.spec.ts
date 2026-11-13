@@ -122,7 +122,7 @@ describe('JobWorker (unit)', () => {
     ]);
   });
 
-  it('un trabajo que ya gastó sus intentos (arriendo vencido) no se ejecuta', async () => {
+  it('un trabajo que ya gastó sus intentos (reserva vencida) no se ejecuta', async () => {
     const { repo, calls } = fakeRepo([job({ attempts: 4 })]);
     const handle = jest.fn(() => Promise.resolve());
     const registry = new JobRegistry();
@@ -247,13 +247,13 @@ describe('JobWorker (unit)', () => {
     );
   });
 
-  it('si el latido pierde el arriendo (otro worker reclamó el intento), aborta la señal y NO cierra el intento', async () => {
+  it('si el latido pierde la reserva (otro worker reclamó el intento), aborta la señal y NO cierra el intento', async () => {
     const { repo, calls } = fakeRepo([job({})]);
     const heartbeat = jest.spyOn(repo, 'heartbeat').mockResolvedValue(false);
     const registry = new JobRegistry();
     registry.register({
       name: 'unit.job',
-      // Trabaja hasta que le quitan el arriendo.
+      // Trabaja hasta que le quitan la reserva.
       handle: (_payload, ctx) =>
         new Promise<void>((resolve) =>
           ctx.signal.addEventListener('abort', () => resolve()),
@@ -272,7 +272,7 @@ describe('JobWorker (unit)', () => {
     expect(calls).toEqual([]);
   });
 
-  it('mientras el handler trabaja, renueva el arriendo con fencing por intento', async () => {
+  it('mientras el handler trabaja, renueva la reserva con fencing por intento', async () => {
     const { repo, calls } = fakeRepo([job({ attempts: 2 })]);
     let beats = 0;
     const heartbeat = jest.spyOn(repo, 'heartbeat').mockImplementation(() => {

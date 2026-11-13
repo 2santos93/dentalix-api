@@ -3230,12 +3230,6 @@ export const DEMO_PAYMENT_PROMISE = {
 };
 
 /**
- * DX-335: las categorías de gasto que la demo crea como propias de la clínica
- * (las demás son predefinidas); «Alquiler» no está entre las predefinidas.
- */
-export const DEMO_EXPENSE_OWN_CATEGORIES = ['Alquiler'] as const;
-
-/**
  * DX-274: gastos de la sede principal, en USD. Días relativos a hoy (el día de
  * la sede): `invoice`/`due`/`paid` negativos son pasado. Uno pagado del todo,
  * uno pagado a medias con el vencimiento ya pasado (sale «Vencido») y uno

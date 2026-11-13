@@ -92,7 +92,7 @@ async function row(id: string) {
   return owner.emailOutbox.findUniqueOrThrow({ where: { id } });
 }
 
-// Adelanta un reintento o un arriendo (minutos) con el reloj de la BD, sin
+// Adelanta un reintento o una reserva (minutos) con el reloj de la BD, sin
 // sleeps ni reloj fake.
 function makeDue(id: string) {
   return owner.$executeRaw`
@@ -309,11 +309,11 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     for (const state of states) {
       expect(state.status).toBe(state.id === ids[0] ? 'PENDING' : 'SENDING');
     }
-    // Con el arriendo vigente, nadie más puede reclamarlas.
+    // Con la reserva vigente, nadie más puede reclamarlas.
     expect((await repo.claimDue(20, 300)).map((c) => c.id)).toEqual([ids[0]]);
   });
 
-  it('un SENDING con el arriendo vencido (réplica caída) se puede reclamar otra vez', async () => {
+  it('un SENDING con la reserva vencida (réplica caída) se puede reclamar otra vez', async () => {
     const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
@@ -413,7 +413,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     });
   });
 
-  it('el arriendo se acota a 900 s aunque se pida más (revisión D1)', async () => {
+  it('la reserva se acota a 900 s aunque se pida más (revisión D1)', async () => {
     const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));

@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { LEGACY_PREDEFINED_CATEGORY_KEYS } from '../../domain/legacy-expense-categories';
 import { EXPENSE_NOT_FOUND_MESSAGE } from '../../domain/expense-rules';
 import {
   buildExpenseTestKit,
@@ -42,7 +43,7 @@ describe('consultas de gastos (DX-274)', () => {
         supplier: 'Pagado SA',
         invoiceDate: '2026-10-01',
         amount: 100,
-        category: 'Arriendo',
+        category: 'Alquiler',
       });
       kit.repo.seedPayment(paid.id, { amount: 100 });
       const partial = kit.repo.seed({
@@ -133,7 +134,12 @@ describe('consultas de gastos (DX-274)', () => {
         'Pendiente SA',
       ]);
       expect(await ids({ locationId: LOCATION_ID })).toHaveLength(3);
-      expect(await ids({ category: 'ARRIENDO' })).toEqual(['Pagado SA']);
+      expect(await ids({ category: 'ALQUILER' })).toEqual(['Pagado SA']);
+      // DX-274-bis: una URL guardada con el nombre anterior filtra por el actual.
+      const [oldRent] = [...LEGACY_PREDEFINED_CATEGORY_KEYS.keys()];
+      expect(await ids({ category: oldRent.toUpperCase() })).toEqual([
+        'Pagado SA',
+      ]);
       expect(await ids({ query: 'parcial' })).toEqual(['Parcial SA']);
       expect(await ids({ query: 'CAFE' })).toEqual(['Pendiente SA']);
     });

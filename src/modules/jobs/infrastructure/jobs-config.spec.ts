@@ -51,7 +51,7 @@ describe('loadJobsConfig', () => {
     ).toMatchObject({ workerEnabled: true });
   });
 
-  it('el latido renueva el arriendo a un tercio de su duración', () => {
+  it('el latido renueva la reserva a un tercio de su duración', () => {
     expect(loadJobsConfig(from({ JOBS_LEASE_SECONDS: '60' })).heartbeatMs).toBe(
       20_000,
     );

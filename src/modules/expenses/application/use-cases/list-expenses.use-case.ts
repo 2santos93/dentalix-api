@@ -4,6 +4,7 @@ import type {
   ExpenseStatusFilter,
 } from '../../domain/ports/expense-repository.port';
 import { parseDay } from '../../domain/expense-rules';
+import { categoryFilterName } from '../../domain/expense-categories';
 import {
   EXPENSE_REPOSITORY,
   type ExpenseRepository,
@@ -68,7 +69,9 @@ export class ListExpensesUseCase {
       from,
       to,
       locationId: input.locationId,
-      category: input.category?.trim() || undefined,
+      category: input.category?.trim()
+        ? categoryFilterName(input.category)
+        : undefined,
       status: input.status,
       overdue: input.overdue,
       query: query || undefined,

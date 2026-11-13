@@ -182,7 +182,7 @@ describe('Rentabilidad por sede: la fórmula (DX-410)', () => {
         {
           locationId: chacao.id,
           currency: 'USD',
-          category: 'Aseo y cafetería',
+          category: 'Limpieza y cafetería',
           cents: 100,
           count: 1,
         },
@@ -201,7 +201,7 @@ describe('Rentabilidad por sede: la fórmula (DX-410)', () => {
     ]);
     expect(
       locations[0].currencies[0].categories.map((c) => c.category),
-    ).toEqual(['Laboratorio', 'Aseo y cafetería', 'Papelería']);
+    ).toEqual(['Laboratorio', 'Limpieza y cafetería', 'Papelería']);
   });
 
   it('margen: resultado ÷ ingresos con 1 decimal; sin ingresos, null', () => {

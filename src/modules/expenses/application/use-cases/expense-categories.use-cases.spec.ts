@@ -4,7 +4,11 @@ import {
   CATEGORY_NAME_MESSAGE,
   CATEGORY_NOT_FOUND_MESSAGE,
 } from '../../domain/expense-rules';
-import { PREDEFINED_EXPENSE_CATEGORIES } from '../../domain/expense-categories';
+import {
+  PREDEFINED_EXPENSE_CATEGORIES,
+  categoryKey as categoryKeyOf,
+} from '../../domain/expense-categories';
+import { LEGACY_PREDEFINED_CATEGORY_KEYS } from '../../domain/legacy-expense-categories';
 import { InMemoryExpenseCategoryRepository } from '../__fixtures__/in-memory-expenses';
 import {
   CreateExpenseCategoryUseCase,
@@ -46,6 +50,16 @@ describe('categorías de gastos (DX-274)', () => {
     expect(custom.every((c) => typeof c.id === 'string')).toBe(true);
   });
 
+  it('DX-274-bis: una propia con el nombre de una predefinida (de una réplica anterior) no sale dos veces', async () => {
+    repo.seed('alquiler');
+    repo.seed('Seguros');
+    const out = await list.execute();
+    expect(out.filter((c) => categoryKeyOf(c.name) === 'alquiler')).toEqual([
+      { id: null, name: 'Alquiler', predefined: true },
+    ]);
+    expect(out.map((c) => c.name)).toContain('Seguros');
+  });
+
   describe('crear', () => {
     it('normaliza el nombre y devuelve la propia', async () => {
       const out = await create.execute('  Seguros   médicos ', 'u1');
@@ -65,6 +79,12 @@ describe('categorías de gastos (DX-274)', () => {
     it('409 si choca con una predefinida o una propia (sin mayúsculas ni tildes)', async () => {
       const dup = new ConflictException(CATEGORY_DUPLICATE_MESSAGE);
       await expect(create.execute('papeleria', 'u1')).rejects.toThrow(dup);
+      // DX-274-bis: un nombre anterior de una predefinida también choca.
+      for (const key of LEGACY_PREDEFINED_CATEGORY_KEYS.keys()) {
+        await expect(create.execute(key.toUpperCase(), 'u1')).rejects.toThrow(
+          dup,
+        );
+      }
       repo.seed('Seguros');
       await expect(create.execute(' SEGUROS ', 'u1')).rejects.toThrow(dup);
     });

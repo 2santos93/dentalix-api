@@ -439,6 +439,34 @@ const FIXTURE_DX484 = [
      ('${P_DX484_FIRST}','${T_A}','Ana','Archivada','2001-01-01 08:00',now(),'2026-01-01 00:00')`,
 ];
 
+/**
+ * DX-274-bis: las dos predefinidas de gastos con regionalismo pasan a
+ * términos neutros. En A, gastos con los dos nombres anteriores y la propia
+ * «Alquiler» viva (como la demo de DX-335): las fotos cambian y la propia se
+ * retira. En B, una propia «Arriendo» (solo posible por SQL): sus gastos con
+ * ese nombre no cambian; el de limpieza, sí. Sin `app.current_tenant`, el
+ * owner sin superusuario no vería ninguna fila.
+ */
+const DX274B = '20261219090000_dx274b_expense_category_neutral_names';
+const E274B_RENT_A = '00000000-0000-4000-8000-0000000274a1';
+const E274B_CLEAN_A = '00000000-0000-4000-8000-0000000274a2';
+const E274B_RENT_B = '00000000-0000-4000-8000-0000000274b1';
+const E274B_CLEAN_B = '00000000-0000-4000-8000-0000000274b2';
+const C274B_OWN_A = '00000000-0000-4000-8000-0000000274c1';
+const C274B_OLD_B = '00000000-0000-4000-8000-0000000274c2';
+const dx274bExpense = (id: string, tenant: string, category: string) =>
+  `('${id}','${tenant}',(SELECT "id" FROM "locations" WHERE "tenantId" = '${tenant}' AND "deletedAt" IS NULL ORDER BY "createdAt", "id" LIMIT 1),'${category}',100,'USD','2026-10-01','${U_A}','2026-10-02 12:00')`;
+const FIXTURE_DX274B = [
+  `INSERT INTO "expense_categories" ("id","tenantId","name","createdById","updatedAt") VALUES
+     ('${C274B_OWN_A}','${T_A}','Alquiler','${U_A}',now()),
+     ('${C274B_OLD_B}','${T_B}','Arriendo','${U_B}',now())`,
+  `INSERT INTO "expenses" ("id","tenantId","locationId","category","amount","currency","invoiceDate","createdById","updatedAt") VALUES
+     ${dx274bExpense(E274B_RENT_A, T_A, 'Arriendo')},
+     ${dx274bExpense(E274B_CLEAN_A, T_A, 'Aseo y cafetería')},
+     ${dx274bExpense(E274B_RENT_B, T_B, 'Arriendo')},
+     ${dx274bExpense(E274B_CLEAN_B, T_B, 'aseo y cafeteria')}`,
+];
+
 const STEPS: Step[] = [
   { until: '20260731115959', fixture: [] },
   // 20260731120000_structured_clinical_history y _remove_owner_role.
@@ -539,8 +567,12 @@ const STEPS: Step[] = [
   { until: DX484 },
   // dx484: código del paciente, relleno por clínica y por lotes con la
   // clínica fijada (sin NO FORCE), índice único CONCURRENTLY y CHECK validado;
-  // y las siguientes.
-  { until: '99999999999999', fixture: FIXTURE_DX484 },
+  // y las siguientes hasta DX-274-bis.
+  { until: DX274B, fixture: FIXTURE_DX484 },
+  // dx274b: fotos de la categoría reescritas por clínica (sin NO FORCE), la
+  // propia que ya es predefinida retirada y el trigger de alias; y las
+  // siguientes.
+  { until: '99999999999999', fixture: FIXTURE_DX274B },
 ];
 
 describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-nosu)', () => {
@@ -1758,6 +1790,55 @@ describe('DX-113 · migraciones de datos con un owner sin superusuario (owner-no
                         'public.patient_code_counters'::regclass)`,
       ),
     ).toBe('patient_code_counters=true,patients=true');
+  }, 180_000);
+
+  it('categorías de gastos neutras (DX-274-bis): el relleno ve los gastos de las dos clínicas, retira la propia que ya es predefinida y respeta la propia con el nombre anterior', async () => {
+    await run(STEPS[31]);
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("id"::text || '=' || "category", ',' ORDER BY "id") AS v
+           FROM "expenses"
+          WHERE "id" IN ('${E274B_RENT_A}', '${E274B_CLEAN_A}', '${E274B_RENT_B}', '${E274B_CLEAN_B}')`,
+      ),
+    ).toBe(
+      [
+        `${E274B_RENT_A}=Alquiler`,
+        `${E274B_CLEAN_A}=Limpieza y cafetería`,
+        `${E274B_RENT_B}=Arriendo`,
+        `${E274B_CLEAN_B}=Limpieza y cafetería`,
+      ].join(','),
+    );
+    expect(
+      await scalar<string>(
+        `SELECT string_agg("name" || '=' || "active" || '/' || ("deletedAt" IS NOT NULL), ',' ORDER BY "id") AS v
+           FROM "expense_categories" WHERE "id" IN ('${C274B_OWN_A}', '${C274B_OLD_B}')`,
+      ),
+    ).toBe('Alquiler=false/true,Arriendo=true/false');
+    // "updatedAt" del gasto no cambia: no es una edición de la clínica.
+    expect(
+      await scalar<number>(
+        `SELECT count(*)::int AS v FROM "expenses"
+          WHERE "id" IN ('${E274B_RENT_A}', '${E274B_CLEAN_A}', '${E274B_RENT_B}', '${E274B_CLEAN_B}')
+            AND "updatedAt" <> '2026-10-02 12:00'`,
+      ),
+    ).toBe(0);
+    // El trigger: una réplica anterior que escriba el nombre viejo deja el nuevo.
+    await target.$executeRawUnsafe(
+      `UPDATE "expenses" SET "category" = 'Arriendo' WHERE "id" = '${E274B_RENT_A}'`,
+    );
+    expect(
+      await scalar<string>(
+        `SELECT "category" AS v FROM "expenses" WHERE "id" = '${E274B_RENT_A}'`,
+      ),
+    ).toBe('Alquiler');
+    expect(
+      await scalar<string>(
+        `SELECT string_agg(relname || '=' || relforcerowsecurity, ',' ORDER BY relname) AS v
+           FROM pg_class
+          WHERE oid IN ('public.expenses'::regclass,
+                        'public.expense_categories'::regclass)`,
+      ),
+    ).toBe('expense_categories=true,expenses=true');
   }, 180_000);
 
   it('al terminar: FORCE en toda tabla con RLS y todo es del owner', async () => {

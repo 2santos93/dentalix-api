@@ -192,7 +192,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
     await income(loc2, 10, 'USD', '2026-10-31T23:30:00Z');
 
     await expense({
-      category: 'Arriendo',
+      category: 'Alquiler',
       amount: 400000,
       invoiceDate: '2026-10-02',
     });
@@ -213,7 +213,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       invoiceDate: '2026-10-21',
     });
     await expense({
-      category: 'Arriendo',
+      category: 'Alquiler',
       amount: 300000,
       invoiceDate: '2026-09-30',
     });
@@ -281,7 +281,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       expect(sep).toMatchObject({
         locationId: loc1,
         income: 200000,
-        categories: [{ category: 'Arriendo', amount: 300000 }],
+        categories: [{ category: 'Alquiler', amount: 300000 }],
         expensesTotal: 300000,
         net: -100000,
       });
@@ -289,7 +289,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
         locationId: loc1,
         income: 1500000.5,
         categories: [
-          { category: 'Arriendo', amount: 400000 },
+          { category: 'Alquiler', amount: 400000 },
           { category: 'Papelería', amount: 150000 },
         ],
         expensesTotal: 550000,

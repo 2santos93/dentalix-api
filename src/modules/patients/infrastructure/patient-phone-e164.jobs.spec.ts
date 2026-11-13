@@ -38,7 +38,7 @@ describe('runPhoneE164Backfill (DX-224, ronda 2)', () => {
       tenantIds: ['t1', 't2', 't3'],
       backfill: (id) => {
         seen.push(id);
-        if (id === 't1') aborted = true; // el arriendo se pierde durante t1
+        if (id === 't1') aborted = true; // la reserva se pierde durante t1
         return Promise.resolve(ok);
       },
       shouldStop: () => aborted,

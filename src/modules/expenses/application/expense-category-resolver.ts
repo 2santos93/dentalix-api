@@ -6,6 +6,7 @@ import {
 } from '../domain/expense-rules';
 import {
   categoryKey,
+  matchLegacyPredefinedCategory,
   matchPredefinedCategory,
   normalizeCategoryName,
 } from '../domain/expense-categories';
@@ -15,8 +16,9 @@ import {
 } from '../domain/ports/expense-category-repository.port';
 
 /**
- * «¿Esta categoría se puede poner en un gasto?» (R3): una predefinida o una
- * propia ACTIVA de la clínica. Devuelve el nombre con su grafía canónica (la
+ * «¿Esta categoría se puede poner en un gasto?» (R3): una predefinida, una
+ * propia ACTIVA de la clínica o el nombre anterior de una predefinida
+ * (DX-274-bis). Devuelve el nombre con su grafía canónica (la
  * foto que se guarda en el gasto).
  */
 @Injectable()
@@ -36,6 +38,11 @@ export class ExpenseCategoryResolver {
     if (predefined) return predefined;
     const custom = await this.categories.findActiveByKey(categoryKey(name));
     if (custom) return custom.name;
+    // DX-274-bis: el nombre anterior de una predefinida es la actual. Después
+    // de las propias: una propia con ese nombre (solo posible por SQL; la API
+    // la rechaza) sigue siendo suya.
+    const legacy = matchLegacyPredefinedCategory(name);
+    if (legacy) return legacy;
     throw new BadRequestException(CATEGORY_INVALID_MESSAGE);
   }
 }
