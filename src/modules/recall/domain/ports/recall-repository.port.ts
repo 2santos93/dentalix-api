@@ -56,6 +56,11 @@ export interface RecallRepository {
   createDefaultRecall(data: {
     patientId: string;
     recallTypeId: string;
+    /**
+     * La cita que se despide (viva, del paciente, en ARRIVED, IN_CHAIR,
+     * READY_FOR_CHECKOUT o COMPLETED; si no, 422): su día civil y su sede.
+     */
+    appointmentId?: string;
     now: Date;
     actorId: string;
     audit?: AuditRequestContext;

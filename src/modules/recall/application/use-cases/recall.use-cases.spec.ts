@@ -111,6 +111,7 @@ class InMemoryRecallRepository implements RecallRepository {
   readonly defaultCreates: {
     patientId: string;
     recallTypeId: string;
+    appointmentId?: string;
     now: Date;
     actorId: string;
   }[] = [];
@@ -146,6 +147,7 @@ class InMemoryRecallRepository implements RecallRepository {
   createDefaultRecall(data: {
     patientId: string;
     recallTypeId: string;
+    appointmentId?: string;
     now: Date;
     actorId: string;
   }): Promise<{ id: string; excluded: RecallExclusionUpdate[] }> {
@@ -153,6 +155,7 @@ class InMemoryRecallRepository implements RecallRepository {
     this.defaultCreates.push({
       patientId: data.patientId,
       recallTypeId: data.recallTypeId,
+      ...(data.appointmentId ? { appointmentId: data.appointmentId } : {}),
       now: data.now,
       actorId: data.actorId,
     });
@@ -1516,5 +1519,21 @@ describe('CreateDefaultRecallUseCase (DX-015-bis, D15)', () => {
       TYPE_ID.HYGIENE,
     ]);
     expect(result.recallUpdates).toEqual([excluded]);
+  });
+
+  it('desde la salida pasa la cita que se despide al repositorio', async () => {
+    const repo = new InMemoryRecallRepository();
+    repo.patients.add('pac-2');
+    await new CreateDefaultRecallUseCase(
+      repo,
+      clock,
+      new GetPatientRecallsUseCase(repo, clock),
+    ).execute('pac-2', TYPE_ID.CHECKUP, 'recepcion-1', undefined, 'cita-hoy');
+    expect(repo.defaultCreates).toEqual([
+      expect.objectContaining({
+        patientId: 'pac-2',
+        appointmentId: 'cita-hoy',
+      }),
+    ]);
   });
 });

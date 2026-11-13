@@ -3052,6 +3052,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       message: 'Ese tipo de recall no existe en esta clínica o se retiró.',
     },
     {
+      name: 'POST /patients/:id/recalls/default body.appointmentId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/recalls/default`,
+      body: () => ({
+        recallTypeId: b.recallTypeId,
+        appointmentId: a.appointmentId,
+      }),
+      bodyIds: ['appointmentId'],
+      status: 422,
+      message: 'La cita no es de este paciente o no está en curso ni atendida.',
+    },
+    {
       name: 'POST /patients/:patientId/clinical-entries body.recall.recallTypeId de A',
       verb: 'post',
       path: () => `/patients/${b.patientId}/clinical-entries`,

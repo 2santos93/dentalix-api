@@ -446,7 +446,7 @@ export class PatientRecallsController {
   @ApiOperation({
     summary: 'Programar el recall de un tipo con su intervalo por defecto',
     description:
-      'DX-015-bis (D15): solo crea. Intervalo = el por defecto del tipo (Ajustes › Recall). Base = el día civil de la última cita atendida del paciente en la zona de su sede (y esa sede); sin ninguna, hoy en la sede activa. `source` MANUAL. D9: si el tipo tiene grupo de exclusión, desactiva los demás recalls activos del paciente de ese grupo (`recallUpdates`). También recepción; elegir otro intervalo, editarlo o reactivarlo es el PUT clínico.',
+      'DX-015-bis (D15): solo crea. Intervalo = el por defecto del tipo (Ajustes › Recall). Base: con `appointmentId` (la cita que se despide en la salida), el día civil de esa cita en la zona de su sede (y esa sede); sin él, el de la última cita atendida del paciente; sin ninguna, hoy en la sede activa. `source` MANUAL. D9: si el tipo tiene grupo de exclusión, desactiva los demás recalls activos del paciente de ese grupo (`recallUpdates`). También recepción; elegir otro intervalo, editarlo o reactivarlo es el PUT clínico.',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -466,7 +466,7 @@ export class PatientRecallsController {
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'Tipo de recall inexistente en esta clínica, retirado o desactivado',
+      'Tipo de recall inexistente en esta clínica, retirado o desactivado; o `appointmentId` que no es una cita viva de este paciente en llegada, en sillón, lista para la salida o atendida',
   })
   createDefaultRecall(
     @Param('id', ParseUUIDPipe) patientId: string,
@@ -477,7 +477,10 @@ export class PatientRecallsController {
       patientId,
       dto.recallTypeId,
       req.user.sub,
-      auditRequestContext(req, this.tenantContext),
+      // DX-360: detrás del RolesGuard siempre hay sesión de clínica; sin
+      // ella es un error de programación, nunca un alta sin auditar.
+      requireAuditRequestContext(req, this.tenantContext),
+      dto.appointmentId,
     );
   }
 

@@ -61,6 +61,8 @@ const RECALL_TYPE_NOT_FOUND_MESSAGE =
 
 export const DUPLICATE_RECALL_TYPE_MESSAGE =
   'Ya existe un tipo de recall con ese nombre.';
+export const DEFAULT_RECALL_APPOINTMENT_MESSAGE =
+  'La cita no es de este paciente o no está en curso ni atendida.';
 export const RECALL_ALREADY_EXISTS_MESSAGE =
   'El paciente ya tiene un recall de ese tipo: cámbialo desde su ficha.';
 export const INVALID_RECALL_TRIGGERS_MESSAGE =
@@ -866,6 +868,7 @@ export class PrismaRecallRepository implements RecallRepository {
   createDefaultRecall(data: {
     patientId: string;
     recallTypeId: string;
+    appointmentId?: string;
     now: Date;
     actorId: string;
     audit?: AuditRequestContext;
@@ -888,6 +891,7 @@ export class PrismaRecallRepository implements RecallRepository {
         tenantId,
         data.patientId,
         data.now,
+        data.appointmentId,
       );
       const id = await insertManualRecall(tx, {
         tenantId,
@@ -925,7 +929,12 @@ export class PrismaRecallRepository implements RecallRepository {
   }
 
   /**
-   * D15: la base y la sede de un recall por defecto. La última cita COMPLETED
+   * D15: la base y la sede de un recall por defecto. Desde la salida
+   * (`appointmentId`), la cita que se despide: aún no está COMPLETED (la
+   * lista de salida se abre antes de completarla), así que la base es su día
+   * civil en la zona de su sede y la sede, la suya; 422 si no es una cita viva
+   * del paciente en llegada, sillón, lista para la salida o atendida. Sin
+   * ella («Sin recall configurado»), la última cita COMPLETED
    * viva del paciente (`appointments_tenant_patient_completed_idx`): su día
    * civil en la zona de su sede (409 si la sede no tiene zona, nunca otra);
    * sin ninguna, hoy en la sede de escritura.
@@ -935,7 +944,37 @@ export class PrismaRecallRepository implements RecallRepository {
     tenantId: string,
     patientId: string,
     now: Date,
+    appointmentId?: string,
   ): Promise<{ baseDay: string; locationId: string }> {
+    if (appointmentId) {
+      const [visit] = await tx.$queryRaw<
+        { start: Date; locationId: string; timeZone: string | null }[]
+      >`
+        SELECT a."start", a."locationId", l."timeZone"
+          FROM "appointments" a
+          JOIN "locations" l
+            ON l."tenantId" = a."tenantId" AND l."id" = a."locationId"
+         WHERE a."tenantId" = ${tenantId}::uuid
+           AND a."id" = ${appointmentId}::uuid
+           AND a."patientId" = ${patientId}::uuid
+           AND a."deletedAt" IS NULL
+           AND a."status" IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT', 'COMPLETED')`;
+      if (!visit) {
+        throw new UnprocessableEntityException(
+          DEFAULT_RECALL_APPOINTMENT_MESSAGE,
+        );
+      }
+      return {
+        baseDay: civilDateIn(
+          visit.start,
+          requireLocationTimeZone({
+            id: visit.locationId,
+            timeZone: visit.timeZone,
+          }),
+        ),
+        locationId: visit.locationId,
+      };
+    }
     const [last] = await tx.$queryRaw<
       { start: Date; locationId: string; timeZone: string | null }[]
     >`

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -1025,6 +1026,72 @@ describe('Recall: lista de llamada (DX-015, e2e)', () => {
         },
       },
     ]);
+  });
+
+  it('DX-015-bis (D15) desde la salida: con la cita de hoy lista para la salida y una visita antigua, la base es hoy (la cita que se despide)', async () => {
+    const { patientId, visitDay } = await attendedPatient(a, 'Salida', 400);
+    const start = new Date(Date.now() - 30 * 60_000);
+    const leaving = await raw.appointment.create({
+      data: {
+        tenantId: a.clinic.tenantId,
+        patientId,
+        locationId: a.norte,
+        // Su propio profesional: sin choques con el resto de la agenda.
+        providerId: randomUUID(),
+        start,
+        end: new Date(start.getTime() + 30 * 60_000),
+        status: 'READY_FOR_CHECKOUT',
+        arrivedAt: start,
+        seatedAt: start,
+        readyForCheckoutAt: start,
+      },
+      select: { id: true },
+    });
+    const control = await typeId(a, 'Control');
+    const res = await http(
+      a,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${patientId}/recalls/default`,
+    )
+      .send({ recallTypeId: control, appointmentId: leaving.id })
+      .expect(201);
+    const base = civilDateIn(start, ZONE);
+    expect(base).not.toBe(visitDay);
+    expect((res.body as PatientRecalls).recalls).toEqual([
+      expect.objectContaining({
+        recallTypeId: control,
+        manualDoneAt: base,
+        lastDoneAt: base,
+        dueAt: addCivilMonths(base, 12),
+      }),
+    ]);
+    expect(
+      await raw.patientRecall.findFirstOrThrow({
+        where: { patientId, recallTypeId: control },
+        select: { locationId: true },
+      }),
+    ).toEqual({ locationId: a.norte });
+
+    // Una cita agendada (aún no llega) no vale: 422 en español.
+    const other = await a.seed.patient('SalidaAgendada');
+    const scheduled = await appointment(
+      a,
+      other,
+      new Date(Date.now() + 2 * DAY_MS),
+      'SCHEDULED',
+    );
+    const res422 = await http(
+      a,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${other}/recalls/default`,
+    )
+      .send({ recallTypeId: control, appointmentId: scheduled })
+      .expect(422);
+    expect(messageOf(res422)).toBe(
+      'La cita no es de este paciente o no está en curso ni atendida.',
+    );
   });
 
   it('DX-015-bis (D15): los cuatro roles programan; tipo desactivado o de nadie 422, id inválido 400, en español', async () => {

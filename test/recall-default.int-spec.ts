@@ -8,6 +8,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import {
+  DEFAULT_RECALL_APPOINTMENT_MESSAGE,
   PrismaRecallRepository,
   RECALL_ALREADY_EXISTS_MESSAGE,
 } from '../src/modules/recall/infrastructure/prisma-recall.repository';
@@ -68,13 +69,17 @@ const audit = (): AuditRequestContext => ({
   userAgent: null,
 });
 
-const createDefault = (patientId: string, recallTypeId: string) =>
+const createDefault = (
+  patientId: string,
+  recallTypeId: string,
+  appointmentId?: string,
+) =>
   tenantContext.run(s.tenantId, s.caracas, () =>
     new CreateDefaultRecallUseCase(
       repo,
       () => NOW,
       new GetPatientRecallsUseCase(repo, () => NOW),
-    ).execute(patientId, recallTypeId, s.userId, audit()),
+    ).execute(patientId, recallTypeId, s.userId, audit(), appointmentId),
   );
 
 async function seed(): Promise<Seeded> {
@@ -124,11 +129,15 @@ async function appointment(
   patientId: string,
   locationId: string,
   start: string,
-  status: 'COMPLETED' | 'CANCELLED' | 'SCHEDULED' = 'COMPLETED',
+  status:
+    | 'COMPLETED'
+    | 'CANCELLED'
+    | 'SCHEDULED'
+    | 'READY_FOR_CHECKOUT' = 'COMPLETED',
   deletedAt: Date | null = null,
-): Promise<void> {
+): Promise<string> {
   const at = new Date(start);
-  await raw.appointment.create({
+  const row = await raw.appointment.create({
     data: {
       tenantId: s.tenantId,
       patientId,
@@ -138,8 +147,14 @@ async function appointment(
       end: new Date(at.getTime() + 30 * 60_000),
       status,
       deletedAt,
+      // DX-200: lista para la salida = llegó, se sentó y terminó.
+      ...(status === 'READY_FOR_CHECKOUT'
+        ? { arrivedAt: at, seatedAt: at, readyForCheckoutAt: at }
+        : {}),
     },
+    select: { id: true },
   });
+  return row.id;
 }
 
 const recallEvents = (patientId: string) =>
@@ -226,6 +241,67 @@ describe('DX-015-bis · «Programar recall» con el intervalo por defecto (int)'
         },
       }),
     ]);
+  });
+
+  it('desde la salida (appointmentId): la base es el día de la cita que se despide (aún sin completar) y su sede, no la visita antigua', async () => {
+    const patientId = await patient('Andrea');
+    // Una visita atendida hace más de un año, en Caracas.
+    await appointment(patientId, s.caracas, '2026-05-10T14:00:00.000Z');
+    // La de hoy, aún lista para la salida: 12:00 UTC del 07/11 = 02:00 del
+    // 08/11 en Kiritimati.
+    const today = await appointment(
+      patientId,
+      s.kiritimati,
+      '2027-11-07T12:00:00.000Z',
+      'READY_FOR_CHECKOUT',
+    );
+    await createDefault(patientId, s.types.CHECKUP, today);
+    expect(
+      await raw.patientRecall.findFirstOrThrow({
+        where: { patientId, recallTypeId: s.types.CHECKUP },
+      }),
+    ).toMatchObject({
+      manualDoneAt: DAY('2027-11-08'),
+      lastDoneAt: DAY('2027-11-08'),
+      dueAt: DAY('2028-11-08'),
+      locationId: s.kiritimati,
+    });
+  });
+
+  it('appointmentId de otro paciente, cancelada, agendada o borrada: 422 sin crear nada', async () => {
+    const patientId = await patient('Bárbara');
+    const other = await patient('Otra');
+    const cases = [
+      await appointment(other, s.caracas, '2027-11-02T14:00:00.000Z'),
+      await appointment(
+        patientId,
+        s.caracas,
+        '2027-11-03T14:00:00.000Z',
+        'CANCELLED',
+      ),
+      await appointment(
+        patientId,
+        s.caracas,
+        '2027-11-20T14:00:00.000Z',
+        'SCHEDULED',
+      ),
+      await appointment(
+        patientId,
+        s.caracas,
+        '2027-11-04T14:00:00.000Z',
+        'COMPLETED',
+        new Date('2027-11-05T00:00:00.000Z'),
+      ),
+      '00000000-0000-4000-8000-0000000000ab',
+    ];
+    for (const appointmentId of cases) {
+      await expect(
+        createDefault(patientId, s.types.CHECKUP, appointmentId),
+      ).rejects.toThrow(
+        new UnprocessableEntityException(DEFAULT_RECALL_APPOINTMENT_MESSAGE),
+      );
+    }
+    expect(await raw.patientRecall.count({ where: { patientId } })).toBe(0);
   });
 
   it('sin ninguna cita atendida: hoy en la sede activa (y esa sede)', async () => {

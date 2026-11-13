@@ -178,6 +178,15 @@ export class CreateDefaultRecallDto {
     message: 'recallTypeId debe ser el id de un tipo de recall.',
   })
   recallTypeId!: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'La cita que se despide (salida del paciente). Tiene que ser de este paciente, viva y en llegada, en sillón, lista para la salida o atendida (si no, 422). Con ella, la base es el día civil de esa cita en la zona de su sede, y la sede es la suya. Sin ella, la última cita atendida del paciente (o hoy): el caso de «Sin recall configurado».',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'appointmentId debe ser el id de una cita.' })
+  appointmentId?: string;
 }
 
 export class SetPatientRecallDto {

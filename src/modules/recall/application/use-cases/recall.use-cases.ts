@@ -394,6 +394,8 @@ export class CreateDefaultRecallUseCase {
     recallTypeId: string,
     actorId: string,
     audit?: AuditRequestContext,
+    /** D15 desde la salida: la cita que se despide da la base y la sede. */
+    appointmentId?: string,
   ): Promise<SetPatientRecallResult> {
     if (!(await this.repo.patientExists(patientId))) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
@@ -401,6 +403,7 @@ export class CreateDefaultRecallUseCase {
     const { excluded } = await this.repo.createDefaultRecall({
       patientId,
       recallTypeId,
+      appointmentId,
       now: this.now(),
       actorId,
       audit,

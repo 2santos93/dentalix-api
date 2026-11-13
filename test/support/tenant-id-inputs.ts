@@ -35,6 +35,7 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   // de A en «Programar recall» y en el recall de la evolución.
   'GET /recall/unconfigured ?locationId',
   'POST /patients/:id/recalls/default body.recallTypeId',
+  'POST /patients/:id/recalls/default body.appointmentId',
   'POST /patients/:patientId/clinical-entries body.recall.recallTypeId',
   'PUT /recall-types/:id/triggers body.catalogItemIds[]',
   // --- pacientes, cobertura y convenios (DX-105, DX-150, DX-153) ---
