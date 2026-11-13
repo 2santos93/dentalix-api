@@ -79,8 +79,10 @@ import {
 import { addCivilMonths } from '../src/modules/recall/domain/recall-rules';
 import {
   CreateRecallContactUseCase,
+  ListRecallTypesUseCase,
   SetPatientRecallUseCase,
 } from '../src/modules/recall/application/use-cases/recall.use-cases';
+import { UpdateRecallTypeUseCase } from '../src/modules/recall/application/use-cases/recall-types.use-cases';
 import { LoadSampleNoteTemplatesUseCase } from '../src/modules/clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import { AnestheticCatalogUseCases } from '../src/modules/anesthesia/application/use-cases/anesthetic-catalog.use-cases';
 import { AnesthesiaUseCases } from '../src/modules/anesthesia/application/use-cases/anesthesia.use-cases';
@@ -205,6 +207,7 @@ import {
   DEMO_SEDATION,
   DEMO_CONSENT_TEMPLATES,
   DEMO_APPOINTMENT_TYPES,
+  DEMO_RECALL_APPOINTMENT_TYPES,
   DEMO_CHAIRS,
   DEMO_LUNCH,
   DEMO_RESERVED_URGENCY,
@@ -811,6 +814,12 @@ class DemoSeeder {
 
     const typeByReason = await this.inTenant(tenantId, undefined, () =>
       this.createAppointmentTypes(ownerId),
+    );
+
+    // DX-015-bis (D20): Higiene se agenda como «Limpieza» y Control como
+    // «Valoración» (Ajustes › Recall).
+    await this.inTenant(tenantId, undefined, () =>
+      this.linkRecallAppointmentTypes(ownerId),
     );
 
     // DX-233: antes de las citas, para que las suyas caigan en su horario.
@@ -1598,6 +1607,41 @@ class DemoSeeder {
       for (const reason of spec.reasons) typeByReason.set(reason, type.id);
     }
     return typeByReason;
+  }
+
+  /**
+   * DX-015-bis (D20): enlaza los tipos de recall del sistema con su tipo de
+   * cita (`DEMO_RECALL_APPOINTMENT_TYPES`) como lo haría el ADMIN en Ajustes ›
+   * Recall: con el caso de uso, validado y auditado. Listarlos siembra antes
+   * Higiene y Control si la clínica aún no los tiene.
+   */
+  private async linkRecallAppointmentTypes(ownerId: string): Promise<void> {
+    const recallTypes = await this.use(ListRecallTypesUseCase).execute();
+    const appointmentTypes = await this.prisma.runWithTenant((tx) =>
+      tx.appointmentType.findMany({
+        where: {
+          deletedAt: null,
+          name: { in: Object.values(DEMO_RECALL_APPOINTMENT_TYPES) },
+        },
+        select: { id: true, name: true },
+      }),
+    );
+    for (const [key, typeName] of Object.entries(
+      DEMO_RECALL_APPOINTMENT_TYPES,
+    )) {
+      const recallType = recallTypes.find((t) => t.systemKey === key);
+      const appointmentType = appointmentTypes.find((t) => t.name === typeName);
+      if (!recallType || !appointmentType) {
+        throw new Error(
+          `Sin el tipo de recall ${key} o el tipo de cita ${typeName}`,
+        );
+      }
+      await this.use(UpdateRecallTypeUseCase).execute(
+        recallType.id,
+        { appointmentTypeId: appointmentType.id },
+        this.auditAs(ownerId, ClinicRole.ADMIN),
+      );
+    }
   }
 
   /**
