@@ -500,6 +500,10 @@ export class SignedPdfCopyQueue implements SignedPdfCopyScheduler {
  * estado PENDING y su trabajo de generación, por lotes y por clínica. La
  * clave de idempotencia es la misma que la de la firma: repetirlo no duplica
  * nada. No escribe al paciente (`notifyPatient = false`).
+ *
+ * DX-459: además, los que quedaron FAILED con `UNSUPPORTED_CHARACTERS` (otro
+ * alfabeto, antes de las fuentes Unicode) se reintentan una vez, también sin
+ * escribir al paciente.
  */
 @Injectable()
 export class BackfillSignedConsentPdfs {
@@ -509,12 +513,16 @@ export class BackfillSignedConsentPdfs {
     @Inject(SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY)
     private readonly repo: SignedConsentPdfBackfillRepository,
     @Inject(SignedConsentPdfQueue)
-    private readonly queue: Pick<SignedConsentPdfQueue, 'schedule'>,
+    private readonly queue: Pick<
+      SignedConsentPdfQueue,
+      'schedule' | 'retryWithUnicodeFonts'
+    >,
   ) {}
 
   /** Todas las clínicas; falla al final si alguna falló (la cola reintenta). */
-  async run(): Promise<{ queued: number }> {
+  async run(): Promise<{ queued: number; retried: number }> {
     let queued = 0;
+    let retried = 0;
     let failed = 0;
     for (const tenantId of await this.repo.tenantIds()) {
       try {
@@ -522,6 +530,11 @@ export class BackfillSignedConsentPdfs {
           tenantId,
           SIGNED_PDF_BACKFILL_BATCH,
           (tx, consentId) => this.queue.schedule(tx, consentId),
+        );
+        retried += await this.repo.retryUnsupportedCharacters(
+          tenantId,
+          SIGNED_PDF_BACKFILL_BATCH,
+          (tx, consentId) => this.queue.retryWithUnicodeFonts(tx, consentId),
         );
       } catch (error) {
         failed += 1;
@@ -532,17 +545,18 @@ export class BackfillSignedConsentPdfs {
         });
       }
     }
-    if (queued > 0 || failed > 0) {
+    if (queued > 0 || retried > 0 || failed > 0) {
       this.logger.log({
         event: 'consents.signed_pdf_backfill',
         queued,
+        retried,
         failed,
       });
     }
     if (failed > 0) {
       throw new Error(`Barrido de PDF firmados falló en ${failed} clínica(s)`);
     }
-    return { queued };
+    return { queued, retried };
   }
 }
 

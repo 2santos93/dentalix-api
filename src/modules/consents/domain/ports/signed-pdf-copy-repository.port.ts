@@ -126,6 +126,19 @@ export interface SignedConsentPdfBackfillRepository {
     limit: number,
     enqueue: (tx: Prisma.TransactionClient, consentId: string) => Promise<void>,
   ): Promise<number>;
+  /**
+   * DX-459: hasta `limit` PDF de la clínica que quedaron FAILED con
+   * `UNSUPPORTED_CHARACTERS` (otro alfabeto, antes de las fuentes Unicode)
+   * vuelven a PENDING SIN aviso al paciente (`notifyPatient = false`) y su
+   * generación se encola en la misma transacción. UPDATE condicional: uno que
+   * ya reintentó «Reintentar» (u otra réplica) se salta. Ese código ya no se
+   * emite, así que cada fila se reintenta como mucho una vez.
+   */
+  retryUnsupportedCharacters(
+    tenantId: string,
+    limit: number,
+    enqueue: (tx: Prisma.TransactionClient, consentId: string) => Promise<void>,
+  ): Promise<number>;
 }
 
 export const SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY = Symbol(

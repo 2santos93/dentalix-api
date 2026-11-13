@@ -72,7 +72,7 @@ export function namesColombianSample(line: string): boolean {
   return FORBIDDEN.test(text) || FORBIDDEN_COUNTRY.test(text);
 }
 
-const BINARY = /\.(?:png|jpe?g|gif|webp|ico|pdf|woff2?|ttf|xlsx)$/i;
+const BINARY = /\.(?:png|jpe?g|gif|webp|ico|pdf|woff2?|ttf|otf|xlsx)$/i;
 
 function trackedTextFiles(): string[] {
   return execFileSync('git', ['ls-files'], {
