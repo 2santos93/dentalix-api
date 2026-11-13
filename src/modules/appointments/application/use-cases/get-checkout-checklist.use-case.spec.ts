@@ -35,7 +35,12 @@ function matchesLocation(filter: LocationFilter, locationId: string): boolean {
   throw new Error(`Filtro de sede no soportado: ${JSON.stringify(filter)}`);
 }
 
-function build(future: FutureRow[]) {
+const RECALL_TYPES = [
+  { id: 'tipo-higiene', name: 'Higiene', defaultIntervalMonths: 6 },
+  { id: 'tipo-control', name: 'Control', defaultIntervalMonths: 12 },
+];
+
+function build(future: FutureRow[], recall: { dueAt: Date } | null = null) {
   const tx = {
     appointment: {
       findFirst: jest.fn(
@@ -60,7 +65,8 @@ function build(future: FutureRow[]) {
         },
       ),
     },
-    patientRecall: { findFirst: jest.fn(() => Promise.resolve(null)) },
+    patientRecall: { findFirst: jest.fn(() => Promise.resolve(recall)) },
+    recallType: { findMany: jest.fn(() => Promise.resolve(RECALL_TYPES)) },
   };
   const prisma = {
     runWithTenant: (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
@@ -69,6 +75,7 @@ function build(future: FutureRow[]) {
   return {
     useCase: new GetCheckoutChecklistUseCase(prisma, tenantContext),
     tenantContext,
+    tx,
   };
 }
 
@@ -149,5 +156,49 @@ describe('GetCheckoutChecklistUseCase — próxima cita por sede (SEC-069)', () 
         useCase.execute('66666666-6666-4666-8666-666666666666', NOW),
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('GetCheckoutChecklistUseCase — tipos de recall para programar (DX-015-bis, D16)', () => {
+  it('sin próxima cita ni recall: los tipos activos y vivos, en su orden', async () => {
+    const { useCase, tenantContext, tx } = build([]);
+    const list = await run(tenantContext, undefined, () =>
+      useCase.execute(APPOINTMENT, NOW),
+    );
+    expect(list).toMatchObject({
+      nextAppointmentStart: null,
+      recallDueOn: null,
+      recallTypes: RECALL_TYPES,
+    });
+    expect(tx.recallType.findMany).toHaveBeenCalledWith({
+      where: { active: true, deletedAt: null },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+      select: { id: true, name: true, defaultIntervalMonths: true },
+    });
+  });
+
+  it('con próxima cita: vacío y sin consultar los tipos', async () => {
+    const { useCase, tenantContext, tx } = build([
+      { locationId: NORTE, start: IN_NORTE },
+    ]);
+    const list = await run(tenantContext, undefined, () =>
+      useCase.execute(APPOINTMENT, NOW),
+    );
+    expect(list).toMatchObject({ recallTypes: [] });
+    expect(tx.recallType.findMany).not.toHaveBeenCalled();
+  });
+
+  it('con un recall activo: vacío y sin consultar los tipos', async () => {
+    const { useCase, tenantContext, tx } = build([], {
+      dueAt: new Date('2027-05-06T00:00:00.000Z'),
+    });
+    const list = await run(tenantContext, undefined, () =>
+      useCase.execute(APPOINTMENT, NOW),
+    );
+    expect(list).toMatchObject({
+      recallDueOn: '2027-05-06',
+      recallTypes: [],
+    });
+    expect(tx.recallType.findMany).not.toHaveBeenCalled();
   });
 });
