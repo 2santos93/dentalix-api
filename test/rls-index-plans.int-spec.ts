@@ -422,11 +422,16 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
       const scans = on(plan, 'appointments');
       expect(scans.map((n) => n['Node Type'])).not.toContain('Seq Scan');
       // Cota inferior y superior de la ventana en el Index Cond de ALGÚN índice
-      // de appointments: no solo `start > now`. El nombre del índice no es el
-      // contrato. Postgres 16.16 (imagen de la CI desde el 2026-11-13) ya no
-      // elige siempre appointments_tenant_location_start_idx, y lo que importa
-      // (acotar la ventana en el índice y leer solo la ventana) lo fija `read`.
-      const hit = scans.find(
+      // de appointments (Index Scan, o el Bitmap Index Scan hijo de un Bitmap
+      // Heap Scan, que no lleva «Relation Name»): no solo `start > now`. Ni el
+      // nombre del índice ni el tipo de nodo son el contrato. Postgres 16.16
+      // (imagen de la CI desde el 2026-11-13) elige un Bitmap Heap Scan donde
+      // 16.14/16.15 elegían un Index Scan, y lo que importa (acotar la ventana
+      // en el índice y leer solo la ventana) lo fija `read`.
+      const indexScans = scans.flatMap((n) =>
+        n['Node Type'] === 'Bitmap Heap Scan' ? nodes(n) : [n],
+      );
+      const hit = indexScans.find(
         (n) =>
           /start > /.test(n['Index Cond'] ?? '') &&
           /start <= /.test(n['Index Cond'] ?? ''),
@@ -434,7 +439,7 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
       if (!hit) {
         throw new Error(
           `ningún índice de appointments acota la ventana: ${JSON.stringify(
-            scans.map((n) => [
+            indexScans.map((n) => [
               n['Node Type'],
               n['Index Name'],
               n['Index Cond'],
