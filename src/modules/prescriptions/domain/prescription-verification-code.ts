@@ -6,7 +6,7 @@ import { randomInt } from 'node:crypto';
  * dictarlo (ni 0/O ni 1/I/L): dígitos 2–9 y letras mayúsculas salvo I, L y O.
  * Debe coincidir con la función `dx_prescription_verification_code()` y el
  * CHECK `prescriptions_verification_code_check` de la migración
- * 20261215090000_dx467_prescription_verification_code.
+ * 20261216090000_dx467_prescription_verification_code.
  */
 export const PRESCRIPTION_VERIFICATION_ALPHABET =
   '23456789ABCDEFGHJKMNPQRSTUVWXYZ';

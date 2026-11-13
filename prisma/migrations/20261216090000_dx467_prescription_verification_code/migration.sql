@@ -23,9 +23,9 @@
 -- Expand: columna NULL sin default (solo catálogo) y luego SET DEFAULT (solo
 -- afecta a las filas nuevas, sin reescribir la tabla). El CHECK (forma y NOT
 -- NULL) va NOT VALID aquí; el relleno es
--- 20261215090100_dx467_prescription_verification_code_backfill y el VALIDATE,
+-- 20261216090100_dx467_prescription_verification_code_backfill y el VALIDATE,
 -- el SET NOT NULL y el índice único van en
--- 20261215090200_dx467_prescription_verification_code_validate. Sin fechas:
+-- 20261216090200_dx467_prescription_verification_code_validate. Sin fechas:
 -- sin trigger UTC. La columna hereda el grant de la tabla y su RLS.
 
 SET LOCAL lock_timeout = '5s';

@@ -5,7 +5,7 @@
 -- recalculado). El CHECK de actor de audit_events es la UNIÓN del de main
 -- (20261209100100, DX-437) y esa escritura, y solo ella.
 --
--- Más permisivo (NOT VALID; su VALIDATE va en 20261215090400, molde de
+-- Más permisivo (NOT VALID; su VALIDATE va en 20261216090400, molde de
 -- DX-361 / DX-435 / DX-443 / DX-437). lock_timeout evita quedar encolado tras
 -- una transacción larga.
 

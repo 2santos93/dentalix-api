@@ -1,6 +1,6 @@
 -- DX-467: relleno ÚNICO del código de verificación de las recetas ya
 -- emitidas, con la misma función que el DEFAULT
--- (20261215090000_dx467_prescription_verification_code). Una colisión con otro
+-- (20261216090000_dx467_prescription_verification_code). Una colisión con otro
 -- código es improbable (31^12) pero no imposible: el índice único llega en la
 -- migración siguiente, así que aquí se comprueba a mano y se repite el sorteo
 -- de esa fila; la siguiente migración falla de forma ruidosa si aun así

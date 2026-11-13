@@ -22,12 +22,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const MIGRATIONS = join(__dirname, '../prisma/migrations');
 const read = (name: string) =>
   readFileSync(join(MIGRATIONS, name, 'migration.sql'), 'utf8');
-const ADD = read('20261215090000_dx467_prescription_verification_code');
+const ADD = read('20261216090000_dx467_prescription_verification_code');
 const BACKFILL = read(
-  '20261215090100_dx467_prescription_verification_code_backfill',
+  '20261216090100_dx467_prescription_verification_code_backfill',
 );
 const VALIDATE = read(
-  '20261215090200_dx467_prescription_verification_code_validate',
+  '20261216090200_dx467_prescription_verification_code_validate',
 );
 const SHAPE = /^[2-9A-HJKMNP-Z]{12}$/;
 

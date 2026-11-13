@@ -1,5 +1,5 @@
 -- DX-467: cierra el relleno del código de verificación
--- (20261215090100_dx467_prescription_verification_code_backfill).
+-- (20261216090100_dx467_prescription_verification_code_backfill).
 --
 -- VALIDATE (SHARE UPDATE EXCLUSIVE: no bloquea lecturas ni escrituras) y un
 -- CHECK ve todas las filas aunque el owner esté sujeto a la RLS (DX-134): si

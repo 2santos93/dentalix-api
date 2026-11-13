@@ -52,7 +52,7 @@ type Row = Prisma.PrescriptionGetPayload<{ include: typeof INCLUDE }>;
 
 const UNKNOWN_PROFESSIONAL = 'Profesional';
 
-/** DX-467: el índice único del código de verificación (migración 20261215090200). */
+/** DX-467: el índice único del código de verificación (migración 20261216090200). */
 const VERIFICATION_CODE_KEY = 'prescriptions_verification_code_key';
 /** Sorteos del código antes de rendirse (31^12: chocar dos veces ya es absurdo). */
 const VERIFICATION_CODE_ATTEMPTS = 3;
