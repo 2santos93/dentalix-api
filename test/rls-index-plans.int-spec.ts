@@ -9,6 +9,7 @@ import {
 } from '../src/modules/implants/infrastructure/prisma-patient-implant.repository';
 import {
   dueCandidatesSql,
+  loadSweepWindows,
   PrismaReminderRepository,
 } from '../src/modules/reminders/infrastructure/prisma-reminder.repository';
 import {
@@ -49,6 +50,8 @@ interface PlanNode {
   Filter?: string;
   'Actual Rows'?: number;
   'Actual Loops'?: number;
+  'Rows Removed by Index Recheck'?: number;
+  'Rows Removed by Filter'?: number;
   Plans?: PlanNode[];
 }
 
@@ -414,9 +417,15 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
 
   describe('barrido de recordatorios (DB-036)', () => {
     it(`con ${FUTURE_APPOINTMENTS} citas futuras en la sede, el rango de start va en Index Cond y solo lee la ventana`, async () => {
+      // La consulta que corre dueCandidates: primero las ventanas, luego las
+      // citas con las cotas como parámetros.
+      const windows = await prisma.runWithTenant(a.tenantId, (tx) =>
+        loadSweepWindows(tx, a.tenantId, NOW),
+      );
+      expect(windows.length).toBeGreaterThan(0);
       const plan = await explain(
         a.tenantId,
-        dueCandidatesSql(a.tenantId, NOW),
+        dueCandidatesSql(a.tenantId, windows),
         true,
       );
       const scans = on(plan, 'appointments');
@@ -447,8 +456,18 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
           )}`,
         );
       }
+      // Filas leídas de appointments: las devueltas y, en un Bitmap Heap Scan,
+      // también las que descarta tras leerlas (recheck o filtro). Leer toda
+      // la agenda y filtrar después no pasa.
       const read = scans.reduce(
-        (sum, n) => sum + (n['Actual Rows'] ?? 0) * (n['Actual Loops'] ?? 1),
+        (sum, n) =>
+          sum +
+          ((n['Actual Rows'] ?? 0) +
+            (n['Node Type'] === 'Bitmap Heap Scan'
+              ? (n['Rows Removed by Index Recheck'] ?? 0) +
+                (n['Rows Removed by Filter'] ?? 0)
+              : 0)) *
+            (n['Actual Loops'] ?? 1),
         0,
       );
       expect(read).toBeLessThan(50);
