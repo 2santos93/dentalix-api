@@ -264,6 +264,14 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
   });
 
   describe('DX-497: idioma preferido del paciente', () => {
+    // Los enlaces de baja de estos envíos no cuentan para los casos que vienen
+    // detrás (el de [48, 2] cuenta los de la clínica).
+    afterEach(() =>
+      owner.reminderOptOutLink.deleteMany({
+        where: { tenantId: clinicA.tenantId },
+      }),
+    );
+
     async function sendOne(preferredLanguage: string | null) {
       await configure(clinicA, [2]);
       const start = new Date(Date.now() + 2 * HOUR + 5 * MIN);
