@@ -265,6 +265,10 @@ export async function recallFromClinicalEntry(
          SET "intervalMonths" = ${change.intervalMonths}::int,
              "active" = true,
              "excludedAt" = NULL,
+             -- Reactivar quita también la pausa, como el PUT; con el recall
+             -- ya activo, la pausa se conserva.
+             "disabledUntil" = CASE WHEN pr."active" THEN pr."disabledUntil" END,
+             "disabledReason" = CASE WHEN pr."active" THEN pr."disabledReason" END,
              "updatedById" = ${change.actorId}::uuid,
              "updatedAt" = pg_catalog.timezone('UTC', pg_catalog.now())
        WHERE pr."tenantId" = ${tenantId}::uuid

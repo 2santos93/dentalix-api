@@ -368,6 +368,40 @@ describe('DX-015-bis · recall en la evolución (int)', () => {
     });
   });
 
+  it('reactivar quita también la pausa (como el PUT); con el recall activo, la pausa se conserva', async () => {
+    const patientId = await patient('Irene');
+    const retired = await recall(patientId, s.types.CHECKUP, { active: false });
+    const paused = await recall(patientId, s.types.HYGIENE);
+    await raw.patientRecall.updateMany({
+      where: { id: { in: [retired, paused] } },
+      data: {
+        disabledUntil: DAY('2026-12-31'),
+        disabledReason: 'Tratamiento de ortodoncia',
+      },
+    });
+    for (const recallTypeId of [s.types.CHECKUP, s.types.HYGIENE]) {
+      await createEntry(patientId, {
+        notes: 'Control',
+        entryDate: DAY('2026-04-10'),
+        recall: { recallTypeId, intervalMonths: 6 },
+      });
+    }
+    expect(
+      await raw.patientRecall.findUniqueOrThrow({ where: { id: retired } }),
+    ).toMatchObject({
+      active: true,
+      disabledUntil: null,
+      disabledReason: null,
+    });
+    expect(
+      await raw.patientRecall.findUniqueOrThrow({ where: { id: paused } }),
+    ).toMatchObject({
+      active: true,
+      disabledUntil: DAY('2026-12-31'),
+      disabledReason: 'Tratamiento de ortodoncia',
+    });
+  });
+
   it('crear uno de un tipo con grupo desactiva el otro activo del grupo', async () => {
     const patientId = await patient('Fabiola');
     const hygiene = await recall(patientId, s.types.HYGIENE);
