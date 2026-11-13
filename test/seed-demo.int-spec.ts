@@ -252,6 +252,25 @@ async function demoRecallList(app: INestApplication<App>): Promise<{
   return res.body as Awaited<ReturnType<typeof demoRecallList>>;
 }
 
+/** DX-015-bis (D19): «Sin recall configurado» de la demo, como la ve la administración. */
+async function demoUnconfiguredList(app: INestApplication<App>): Promise<{
+  total: number;
+  items: { patientId: string; lastVisitAt: string }[];
+}> {
+  const login = await request(app.getHttpServer())
+    .post('/api/v1/auth/login')
+    .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+    .send({ email: DEMO_USERS[0].email, password: DEMO_PASSWORD })
+    .expect(201);
+  const token = (login.body as { accessToken: string }).accessToken;
+  const res = await request(app.getHttpServer())
+    .get('/api/v1/recall/unconfigured?pageSize=100')
+    .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+    .set('Authorization', `Bearer ${token}`)
+    .expect(200);
+  return res.body as Awaited<ReturnType<typeof demoUnconfiguredList>>;
+}
+
 describe('seed demo (prisma/seed-demo.ts)', () => {
   let app: INestApplication<App>;
   let firstCounts: Counts;
@@ -2510,6 +2529,17 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(booked).toBeDefined();
     expect(booked!.dueAt.getTime()).toBeLessThan(Date.now());
     expect(list.items.map((i) => i.patientId)).not.toContain(booked!.patientId);
+
+    // D19: «Sin recall configurado» no sale vacía: un atendido sin recall ni
+    // cita futura.
+    const unconfigured = await demoUnconfiguredList(app);
+    expect(unconfigured.total).toBeGreaterThanOrEqual(1);
+    const withRecall = new Set(
+      recalls.filter((r) => r.active).map((r) => r.patientId),
+    );
+    for (const item of unconfigured.items) {
+      expect(withRecall.has(item.patientId)).toBe(false);
+    }
   });
 
   it('--reset aborta sin escribir si un usuario demo es miembro vivo de otra clínica', async () => {
