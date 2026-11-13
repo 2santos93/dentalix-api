@@ -36,8 +36,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 // puede comprobar que el JSON no lo filtra por su cuenta.
 const BODY =
   'Muerde la gasa 30 minutos. Te atendió {{profesional}} en {{clinica}}. Dudas: {{telefono_sede}}.';
-const EMAIL = 'mariana.zuluaga@example.com';
-const LAST_NAME = 'Zuluagarrestrepo';
+const EMAIL = 'mariana.urdaneta@example.com';
+const LAST_NAME = 'Urdanetabracho';
 const DOC_NUMBER = '1098765432';
 const DAY_MS = 24 * 60 * 60 * 1000;
 

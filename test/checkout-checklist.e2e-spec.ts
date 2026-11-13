@@ -161,7 +161,7 @@ describe('Salida del paciente: id y sedes de la próxima cita (SEC-069)', () => 
         await admin()
           .post('/patients', {
             firstName: 'Lucía',
-            lastName: 'Restrepo',
+            lastName: 'Urdaneta',
             docType: 'NATIONAL_ID',
             docNumber: 'SEC069-1',
             sex: Sex.F,
