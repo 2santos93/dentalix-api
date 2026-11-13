@@ -51,6 +51,8 @@ import { CreateExpenseUseCase } from '../application/use-cases/create-expense.us
 import { GetExpenseReceiptUrlUseCase } from '../application/use-cases/get-expense-receipt-url.use-case';
 import { toExpensesSummaryCsv } from '../application/expenses-summary-csv';
 import { GetExpenseSummaryUseCase } from '../application/use-cases/get-expense-summary.use-case';
+import { GetExpensePayablesUseCase } from '../application/use-cases/get-expense-payables.use-case';
+import { toExpensePayablesCsv } from '../application/expense-payables-csv';
 import { GetExpenseUseCase } from '../application/use-cases/get-expense.use-case';
 import { ListExpensesUseCase } from '../application/use-cases/list-expenses.use-case';
 import { SuggestSuppliersUseCase } from '../application/use-cases/suggest-suppliers.use-case';
@@ -64,8 +66,10 @@ import {
   AttachExpenseReceiptDto,
   CreateExpenseDto,
   CreateExpenseUploadDto,
+  ExpensePayablesQueryDto,
   ExpenseSummaryQueryDto,
   ListExpensesQueryDto,
+  PayableExpensesQueryDto,
   ReceiptUrlQueryDto,
   SuppliersQueryDto,
   UpdateExpenseDto,
@@ -74,9 +78,11 @@ import {
 import {
   ExpenseDetailDto,
   ExpensePageDto,
+  ExpensePayablesDto,
   ExpenseReceiptUploadDto,
   ExpenseReceiptUrlDto,
   ExpenseSummaryDto,
+  PayableExpensesDto,
 } from './dto/expense.dto';
 import { CSV_RESPONSE, sendCsv } from '../../../shared/csv/csv-response';
 
@@ -126,6 +132,7 @@ export class ExpensesController {
     private readonly receiptUrl: GetExpenseReceiptUrlUseCase,
     private readonly suggestSuppliers: SuggestSuppliersUseCase,
     private readonly summary: GetExpenseSummaryUseCase,
+    private readonly payables: GetExpensePayablesUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -202,6 +209,63 @@ export class ExpensesController {
     const summary = await this.summary.execute(query);
     sendCsv(res, `gastos-resumen-${summary.from}-${summary.to}.csv`);
     return toExpensesSummaryCsv(summary.rows);
+  }
+
+  @Audit({ action: 'VIEW', resource: 'EXPENSE', reason: 'EXPENSE_PAYABLES' })
+  @Get('payables')
+  @ApiOperation({
+    summary: 'Cuentas por pagar por proveedor y moneda (DX-411)',
+    description:
+      'Gastos abiertos (no anulados, con lo pagado en pagos vivos por debajo del importe) agrupados por proveedor normalizado (sin espacios de más, mayúsculas ni tildes; sin proveedor = su propio grupo) y moneda. Pendiente, vencido (vencimiento < hoy), vence en 7 días (hoy … hoy + 6) y en 30 días (hoy … hoy + 29), con el día civil de la sede de cada gasto; sin vencimiento cuenta solo en el pendiente. Filtros: `locationId`, `currency`. Respeta las sedes permitidas del usuario.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: ExpensePayablesDto })
+  @ApiBadRequestResponse({ description: 'Sede o moneda no válidas' })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  payablesOf(
+    @Query() query: ExpensePayablesQueryDto,
+  ): ReturnType<GetExpensePayablesUseCase['execute']> {
+    return this.payables.execute(query);
+  }
+
+  @Audit({
+    action: 'EXPORT',
+    resource: 'EXPENSE',
+    reason: 'EXPENSE_PAYABLES',
+  })
+  @Get('payables.csv')
+  @ApiOperation({
+    summary: 'Cuentas por pagar por proveedor en CSV (mismas filas)',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiProduces('text/csv')
+  @ApiOkResponse(CSV_RESPONSE)
+  @ApiBadRequestResponse({ description: 'Sede o moneda no válidas' })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  async payablesCsv(
+    @Query() query: ExpensePayablesQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const { rows } = await this.payables.execute(query);
+    sendCsv(res, 'cuentas-por-pagar.csv');
+    return toExpensePayablesCsv(rows);
+  }
+
+  @Audit({ action: 'VIEW', resource: 'EXPENSE', reason: 'EXPENSE_PAYABLES' })
+  @Get('payables/expenses')
+  @ApiOperation({
+    summary: 'Gastos abiertos de un proveedor en una moneda (DX-411)',
+    description:
+      'Por vencimiento (sin vencimiento al final), hasta 500, con `total`. `supplierKey` es la de la fila del agregado; vacía = sin proveedor.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: PayableExpensesDto })
+  @ApiBadRequestResponse({ description: 'Proveedor, sede o moneda no válidos' })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  payableExpenses(
+    @Query() query: PayableExpensesQueryDto,
+  ): ReturnType<GetExpensePayablesUseCase['expensesOf']> {
+    return this.payables.expensesOf(query);
   }
 
   @Audit({ action: 'VIEW', resource: 'EXPENSE' })

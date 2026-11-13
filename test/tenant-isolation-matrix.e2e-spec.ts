@@ -1837,6 +1837,28 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 200,
       responseBody: { items: [], total: 0, page: 1, pageSize: 50 },
     },
+    // DX-411: las cuentas por pagar de B no traen el gasto abierto de A.
+    {
+      name: 'GET /expenses/payables (cuentas por pagar de B)',
+      verb: 'get',
+      path: () => '/expenses/payables',
+      status: 200,
+      responseBody: { rows: [], totals: [] },
+    },
+    {
+      name: 'GET /expenses/payables/expenses (proveedor de A desde B)',
+      verb: 'get',
+      path: () =>
+        '/expenses/payables/expenses?supplierKey=proveedor%20de%20a&currency=VES',
+      status: 200,
+      responseBody: {
+        supplierKey: 'proveedor de a',
+        supplier: null,
+        currency: 'VES',
+        items: [],
+        total: 0,
+      },
+    },
     // --- listas de precios (DX-105) ---
     {
       name: 'PATCH /price-lists/:id',

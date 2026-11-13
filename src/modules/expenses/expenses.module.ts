@@ -26,6 +26,7 @@ import {
 import { GetExpenseReceiptUrlUseCase } from './application/use-cases/get-expense-receipt-url.use-case';
 import { GetExpenseUseCase } from './application/use-cases/get-expense.use-case';
 import { GetExpenseSummaryUseCase } from './application/use-cases/get-expense-summary.use-case';
+import { GetExpensePayablesUseCase } from './application/use-cases/get-expense-payables.use-case';
 import { ListExpensesUseCase } from './application/use-cases/list-expenses.use-case';
 import { SuggestSuppliersUseCase } from './application/use-cases/suggest-suppliers.use-case';
 import { UpdateExpenseUseCase } from './application/use-cases/update-expense.use-case';
@@ -38,6 +39,8 @@ import {
 import { EXPENSE_CATEGORY_REPOSITORY } from './domain/ports/expense-category-repository.port';
 import { EXPENSE_REPOSITORY } from './domain/ports/expense-repository.port';
 import { EXPENSE_SUMMARY_REPOSITORY } from './domain/ports/expense-summary-repository.port';
+import { EXPENSE_PAYABLES_REPOSITORY } from './domain/ports/expense-payables-repository.port';
+import { PrismaExpensePayablesRepository } from './infrastructure/repositories/prisma-expense-payables.repository';
 import { PrismaExpenseCategoryRepository } from './infrastructure/repositories/prisma-expense-category.repository';
 import { PrismaExpenseSummaryRepository } from './infrastructure/repositories/prisma-expense-summary.repository';
 import { PrismaExpenseRepository } from './infrastructure/repositories/prisma-expense.repository';
@@ -66,6 +69,7 @@ import { ExpensesController } from './presentation/expenses.controller';
   providers: [
     ListExpensesUseCase,
     GetExpenseSummaryUseCase,
+    GetExpensePayablesUseCase,
     GetExpenseUseCase,
     CreateExpenseUseCase,
     UpdateExpenseUseCase,
@@ -95,6 +99,10 @@ import { ExpensesController } from './presentation/expenses.controller';
     {
       provide: EXPENSE_SUMMARY_REPOSITORY,
       useClass: PrismaExpenseSummaryRepository,
+    },
+    {
+      provide: EXPENSE_PAYABLES_REPOSITORY,
+      useClass: PrismaExpensePayablesRepository,
     },
     {
       provide: EXPENSE_CATEGORY_REPOSITORY,

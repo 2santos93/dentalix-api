@@ -1409,6 +1409,22 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'EXPENSE',
     reason: 'EXPENSE_SUMMARY',
   },
+  // DX-411: cuentas por pagar por proveedor, su CSV y el detalle.
+  'GET /expenses/payables': {
+    action: 'VIEW',
+    resource: 'EXPENSE',
+    reason: 'EXPENSE_PAYABLES',
+  },
+  'GET /expenses/payables.csv': {
+    action: 'EXPORT',
+    resource: 'EXPENSE',
+    reason: 'EXPENSE_PAYABLES',
+  },
+  'GET /expenses/payables/expenses': {
+    action: 'VIEW',
+    resource: 'EXPENSE',
+    reason: 'EXPENSE_PAYABLES',
+  },
   'GET /expenses.csv': {
     action: 'EXPORT',
     resource: 'EXPENSE',

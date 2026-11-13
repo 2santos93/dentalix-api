@@ -159,3 +159,24 @@ export function countQuery(args: ListQueryArgs): Prisma.Sql {
   return Prisma.sql`${baseCte(args, Prisma.empty)}
     SELECT count(*)::int AS "total" FROM base WHERE ${derivedFilter(args.filters)}`;
 }
+
+/**
+ * DX-411: los gastos ABIERTOS (pendientes o parciales) de un proveedor
+ * normalizado en una moneda, por vencimiento (sin vencimiento al final) y,
+ * a igualdad, por fecha de factura y alta. `total` = cuántos hay sin el tope.
+ * `supplierKey` se normaliza también aquí: la misma función en los dos lados.
+ */
+export function payableExpensesQuery(
+  args: ListQueryArgs,
+  group: { supplierKey: string; currency: string; limit: number },
+): Prisma.Sql {
+  const picked = Prisma.sql`
+    AND e."voidedAt" IS NULL
+    AND e."currency" = ${group.currency}
+    AND public.dx_search_normalize(coalesce(e."supplier", '')) = public.dx_search_normalize(${group.supplierKey})`;
+  return Prisma.sql`${baseCte(args, picked)}
+    SELECT *, count(*) OVER ()::int AS "total" FROM base
+     WHERE "status" IN ('PENDING', 'PARTIAL')
+     ORDER BY "dueDate" ASC NULLS LAST, "invoiceDate" ASC, "createdAt" ASC, "id" ASC
+     LIMIT ${group.limit}`;
+}

@@ -337,6 +337,8 @@ export class ReportSeeder {
     amount: number;
     category: string;
     invoiceDate: string;
+    /** DX-411: vencimiento (AAAA-MM-DD). */
+    dueDate?: string;
     supplier?: string;
     payments?: { amount: number; paidOn: string; voided?: boolean }[];
     voided?: boolean;
@@ -351,6 +353,7 @@ export class ReportSeeder {
         amount: input.amount,
         currency: input.currency,
         invoiceDate: new Date(`${input.invoiceDate}T00:00:00Z`),
+        dueDate: input.dueDate ? new Date(`${input.dueDate}T00:00:00Z`) : null,
         createdById: userId,
       },
       select: { id: true },

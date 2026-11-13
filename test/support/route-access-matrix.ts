@@ -805,6 +805,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /expenses': ADMIN_ONLY,
   'GET /expenses/summary': ADMIN_ONLY,
   'GET /expenses/summary.csv': ADMIN_ONLY,
+  // DX-411: cuentas por pagar por proveedor (mismos roles que los gastos).
+  'GET /expenses/payables': ADMIN_ONLY,
+  'GET /expenses/payables.csv': ADMIN_ONLY,
+  'GET /expenses/payables/expenses': ADMIN_ONLY,
   'GET /expenses.csv': ADMIN_ONLY,
   'POST /expenses': ADMIN_ONLY,
   'GET /expenses/:id': ADMIN_ONLY,
