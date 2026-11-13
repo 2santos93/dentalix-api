@@ -105,7 +105,8 @@ export class CreateExpenseDto {
 
   @ApiProperty({
     example: 'Servicios públicos',
-    description: 'Una predefinida o una propia activa de la clínica.',
+    description:
+      'Una predefinida o una propia activa de la clínica, sin distinguir mayúsculas ni tildes. El nombre anterior de una predefinida cuenta como el actual.',
   })
   @IsString({ message: CATEGORY_INVALID_MESSAGE })
   category!: string;
@@ -262,7 +263,10 @@ export class ListExpensesQueryDto {
   @IsUUID('all', { message: LOCATION_INVALID_MESSAGE })
   locationId?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Sin distinguir mayúsculas ni tildes. El nombre anterior de una predefinida filtra por el actual.',
+  })
   @IsOptional()
   @IsString()
   category?: string;

@@ -6,6 +6,7 @@ import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { RECEIPT_TYPE_MESSAGE } from '../src/modules/expenses/domain/expense-receipt';
+import { LEGACY_PREDEFINED_CATEGORY_KEYS } from '../src/modules/expenses/domain/legacy-expense-categories';
 import {
   EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE,
   CATEGORY_DUPLICATE_MESSAGE,
@@ -42,6 +43,9 @@ import {
 // DX-274 (Task 2) en HTTP real: gastos de la sede con sus pagos, categorías,
 // proveedores y soporte. El aislamiento entre clínicas por id lo cubre
 // tenant-isolation-matrix; los roles, role-matrix. Aquí van las reglas.
+
+/** DX-274-bis: los nombres anteriores, de su único sitio (ver la guarda). */
+const [OLD_RENT, OLD_CLEANING] = [...LEGACY_PREDEFINED_CATEGORY_KEYS.keys()];
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -406,7 +410,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
 
       const paid = await make({
         supplier: 'Pagado SA',
-        category: 'Arriendo',
+        category: 'Alquiler',
         invoiceDate: '2026-09-01',
       });
       await payOn(paid.id, 100000);
@@ -471,7 +475,11 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         'Pendiente SA',
         'Parcial SA',
       ]);
-      expect(await names({ category: 'ARRIENDO' })).toEqual(['Pagado SA']);
+      expect(await names({ category: 'ALQUILER' })).toEqual(['Pagado SA']);
+      // DX-274-bis: una URL guardada con el nombre anterior filtra por el actual.
+      expect(await names({ category: OLD_RENT.toUpperCase() })).toEqual([
+        'Pagado SA',
+      ]);
       expect(await names({ query: 'CAFÉ' })).toEqual(['Pendiente SA']);
       expect(await names({ query: 'parcial' })).toEqual(['Parcial SA']);
     });
@@ -1307,10 +1315,28 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
       await call('post', '/expense-categories')
         .send({ name: 'SEGUROS MEDICOS' })
         .expect(409);
+      // DX-274-bis: el nombre anterior de una predefinida también choca.
+      await call('post', '/expense-categories')
+        .send({ name: OLD_RENT })
+        .expect(409);
       await call('post', '/expense-categories').send({ name: 'A' }).expect(400);
       await call('post', '/expense-categories')
         .send({ name: 'x'.repeat(61) })
         .expect(400);
+    });
+
+    it('DX-274-bis: el nombre anterior de una predefinida (cliente antiguo) guarda la actual', async () => {
+      expect((await createExpense({ category: OLD_RENT })).category).toBe(
+        'Alquiler',
+      );
+      expect((await createExpense({ category: OLD_CLEANING })).category).toBe(
+        'Limpieza y cafetería',
+      );
+      const listed = (await call('get', '/expense-categories').expect(200))
+        .body as CategoryBody[];
+      expect(listed.map((c) => c.name)).toEqual(
+        expect.arrayContaining(['Alquiler', 'Limpieza y cafetería']),
+      );
     });
 
     it('una propia sirve en un gasto; retirada, ya no, pero los gastos viejos la conservan', async () => {

@@ -145,7 +145,7 @@ export class ExpenseCategoryDto {
 }
 
 export class ExpenseSummaryCategoryDto {
-  @ApiProperty({ example: 'Arriendo' }) category!: string;
+  @ApiProperty({ example: 'Alquiler' }) category!: string;
   @ApiProperty({ example: 2500000 }) amount!: number;
 }
 

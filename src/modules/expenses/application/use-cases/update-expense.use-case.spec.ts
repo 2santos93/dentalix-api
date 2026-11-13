@@ -64,8 +64,8 @@ describe('edición de un gasto (DX-274)', () => {
   });
 
   it('un cuerpo sin cambios devuelve el gasto tal cual', async () => {
-    const e = kit.repo.seed({ category: 'Arriendo' });
-    const out = await run(e.id, { category: 'Arriendo', amount: undefined });
+    const e = kit.repo.seed({ category: 'Alquiler' });
+    const out = await run(e.id, { category: 'Alquiler', amount: undefined });
     expect(out.updatedAt).toEqual(e.updatedAt);
   });
 

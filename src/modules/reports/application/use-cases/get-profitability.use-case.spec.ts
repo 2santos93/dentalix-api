@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import type { AllowedLocations } from '../../../../shared/tenancy/location-access';
+import { LEGACY_PREDEFINED_CATEGORY_KEYS } from '../../../expenses/domain/legacy-expense-categories';
 import type { ProfitabilityLocation } from '../../domain/profitability';
 import type {
   ProfitabilityLinesQuery,
@@ -264,5 +265,29 @@ describe('GetProfitabilityUseCase (DX-410)', () => {
     ).rejects.toThrow(
       new BadRequestException(PROFITABILITY_CATEGORY_ONLY_EXPENSES_MESSAGE),
     );
+  });
+
+  it('DX-274-bis: la categoría del detalle va con la grafía canónica, también la de un nombre anterior', async () => {
+    const { useCase, repo } = setup();
+    const [oldRent] = [...LEGACY_PREDEFINED_CATEGORY_KEYS.keys()];
+    const out = await useCase.lines({
+      ...OCTOBER,
+      basis: 'ACCRUAL',
+      side: 'EXPENSE',
+      currency: 'USD',
+      category: ` ${oldRent.toUpperCase()} `,
+      allowedLocationIds: 'ALL',
+    });
+    expect(repo.linesCalls[0]).toMatchObject({ category: 'Alquiler' });
+    expect(out.category).toBe('Alquiler');
+    await useCase.lines({
+      ...OCTOBER,
+      basis: 'ACCRUAL',
+      side: 'EXPENSE',
+      currency: 'USD',
+      category: 'Seguros médicos',
+      allowedLocationIds: 'ALL',
+    });
+    expect(repo.linesCalls[1]).toMatchObject({ category: 'Seguros médicos' });
   });
 });

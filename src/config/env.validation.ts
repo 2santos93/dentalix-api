@@ -466,7 +466,7 @@ function jobsProblems(env: Env): string[] {
       problems.push(`${key} debe ser un entero entre ${min} y ${max}.`);
     }
   }
-  // Revisión H1: si el apagado espera más que el arriendo, otro worker
+  // Revisión H1: si el apagado espera más que la reserva, otro worker
   // retoma trabajos que siguen en curso en el que se apaga.
   const intOf = (key: string, fallback: number): number => {
     const raw = str(env, key)?.trim();

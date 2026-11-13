@@ -361,7 +361,7 @@ referenceId?})` renderiza la plantilla con la marca de la clínica (nombre, y
 - **Despachador en proceso** (`EmailDispatcher`; sigue en cada réplica tras la cola de DX-085, ver «Trabajos en segundo plano»): se
   despierta tras cada encolado y barre cada `MAIL_DISPATCH_INTERVAL_MS`
   (default 30 s; 0 lo apaga, y es 0 con `NODE_ENV=test`). Reclama filas con
-  `FOR UPDATE SKIP LOCKED` y un arriendo de 5 min, así que con varias réplicas
+  `FOR UPDATE SKIP LOCKED` y una reserva de 5 min, así que con varias réplicas
   ninguna fila se envía dos veces y la de una réplica caída se recupera. 3
   intentos con backoff exponencial (`MAIL_RETRY_BASE_MS`, 1 min y 2 min por
   defecto); tras el 3.er fallo queda `FAILED`. Al apagar (SIGTERM,
@@ -380,7 +380,7 @@ referenceId?})` renderiza la plantilla con la marca de la clínica (nombre, y
   Desde DX-113 son del rol NOLOGIN `dentalix_email_dispatcher` (sin
   BYPASSRLS, con una política permisiva en `email_outbox` solo para él), no
   del owner de las migraciones, que en un Postgres gestionado no se salta la
-  RLS (ver «Despliegue: roles de la BD»). El arriendo de un reclamo se acota a 900 s y el cierre de
+  RLS (ver «Despliegue: roles de la BD»). La reserva de un reclamo se acota a 900 s y el cierre de
   un intento solo vale para ESE intento (fencing por `attempts`). Si el rol de la app se crea después de migrar, concédele
   `EXECUTE` sobre `email_outbox_claim`, `email_outbox_settle`,
   `email_outbox_enqueue_platform_capped`, `email_outbox_platform_allowed` y
@@ -2666,7 +2666,7 @@ de esquemas propios de una librería).
   En producción: N réplicas `api` + 1 o más `worker` (pueden ser varias: cada
   trabajo y cada tick los ejecuta uno solo). Con `SIGTERM` el worker deja de
   reclamar y espera a los trabajos en curso (`JOBS_SHUTDOWN_GRACE_MS`, 20 s,
-  siempre menor que el arriendo); lo que no termine vuelve a la cola al
+  siempre menor que la reserva); lo que no termine vuelve a la cola al
   momento (su handler recibe `signal` abortada). El periodo de gracia del
   orquestador (`terminationGracePeriodSeconds` en Kubernetes, 30 s por
   defecto) tiene que ser mayor que `JOBS_SHUTDOWN_GRACE_MS` más unos segundos
@@ -2707,7 +2707,7 @@ de esquemas propios de una librería).
   | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | `queue.pendingDue` / `pendingScheduled`   | PENDING cuya hora llegó / programados para después                                                                                                                                                                                                                |
   | `queue.lagMs`, `oldestDueRunAt`           | Retraso: ahora − `min(runAt)` de los PENDING vencidos                                                                                                                                                                                                             |
-  | `queue.running`, `runningExpired`         | RUNNING y los que tienen el arriendo vencido                                                                                                                                                                                                                      |
+  | `queue.running`, `runningExpired`         | RUNNING y los que tienen la reserva vencida                                                                                                                                                                                                                       |
   | `queue.failedLast24h`                     | FAILED en las últimas 24 h                                                                                                                                                                                                                                        |
   | `workers.alive`, `lastBeatAt`, `recent[]` | Workers con latido de menos de 60 s; los 50 más recientes                                                                                                                                                                                                         |
   | `schedules[]`                             | Por tarea: `cron`, `lastRunAt`, `nextRunAt`, `periodMs`, `delayMs` y `overdue` (más de **2 periodos** sin correr, o sin sincronizar: `nextRunAt` null). DX-380: `singleton`, `skippedCount` y `lastSkippedAt` (ticks saltados porque el anterior seguía en curso) |
@@ -2727,7 +2727,7 @@ idempotencyKey)` garantiza que no tiene ninguna otra fila: no duplica el
   clínica, intentos y tipo de error; **sin el payload**). La respuesta
   tampoco lo lleva.
 
-  **Fila envenenada (OPS-030).** Un trabajo RUNNING con el arriendo vencido
+  **Fila envenenada (OPS-030).** Un trabajo RUNNING con la reserva vencida
   que ya gastó sus intentos (`attempts >= maxAttempts`: su worker murió o su
   cierre falló por un corte de BD) lo cierra `failExhausted` en cada vuelta,
   **antes** del reclamo, como FAILED `LeaseExpired` sin sumar intento; y el
@@ -2771,7 +2771,7 @@ idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
 'modulo.trabajo', handle, maxAttempts?, retryBaseMs? })`. Si el trabajo
   tiene clínica, el handler corre con ese tenant en el contexto
   (`runWithTenant(fn)` lo usa). Mientras el handler trabaja, un latido
-  renueva el arriendo cada tercio de `JOBS_LEASE_SECONDS` (con fencing por
+  renueva la reserva cada tercio de `JOBS_LEASE_SECONDS` (con fencing por
   intento); si otro worker retomó el intento, `ctx.signal` se aborta y su
   resultado no cuenta. Entrega «al menos una vez»: handlers idempotentes. En
   los tests (`NODE_ENV=test`) el worker nunca arranca solo, aunque `.env`
@@ -2800,7 +2800,7 @@ idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
   el regional de G1, los recordatorios, los compromisos de pago y las purgas
   (tokens, emails, enlaces de baja y trabajos terminados). Un `RUNNING` cuyo
   worker murió frena los ticks hasta que otro lo retoma o lo cierra
-  `failExhausted` (el arriendo, 300 s). El índice parcial
+  `failExhausted` (la reserva, 300 s). El índice parcial
   `jobs_active_name_idx` (`name` de los `PENDING`/`RUNNING`) acota la
   comprobación. Una réplica anterior a DX-380 sigue disparando cada tick.
 
@@ -4209,8 +4209,8 @@ país.
   Lo que ninguna región entiende se marca (`phoneE164CheckedAt`) y NO se relee
   cada hora; cambiar el teléfono quita la marca. Un índice parcial deja el
   barrido en el residuo. Una clínica que falla se registra (id y clase del
-  error) y no frena a las demás; el trabajo para entre lotes si pierde el
-  arriendo. Tras corregir el prefijo de una sede:
+  error) y no frena a las demás; el trabajo para entre lotes si pierde la
+  reserva. Tras corregir el prefijo de una sede:
   `npm run phones:e164-backfill -- --recheck` (vuelve a leer lo marcado).
   Para forzarlo: `npm run phones:e164-backfill` (mismo código, idempotente; con
   una clínica enorme y `57014`, `statement_timeout=0` solo para esa
@@ -4676,6 +4676,18 @@ migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
   son constantes de código), `expenses` y `expense_payments`, con RLS FORCE y
   FK compuestas por clínica. El pago hereda sede y moneda del gasto por una FK
   de cuatro columnas. Sin DELETE en la BD: anular conserva todo.
+- **Categorías neutras (DX-274-bis)**: las predefinidas usan términos sin
+  regionalismos («Alquiler», «Limpieza y cafetería»). Sus nombres anteriores
+  son alias de entrada (crear, editar, filtrar la lista, el CSV y el detalle
+  de rentabilidad dan la categoría actual; crear una propia con ellos es 409).
+  `20261219090000_dx274b_expense_category_neutral_names` reescribió las fotos
+  clínica a clínica y retiró la propia viva que ya era una predefinida nueva
+  (la de la demo); una propia con el nombre anterior (solo posible por SQL)
+  conserva sus gastos. El trigger `expenses_category_legacy_alias`
+  (`…090100_dx274b_expense_category_legacy_alias`) hace lo mismo con lo que
+  escriba una réplica anterior durante el despliegue. La guarda
+  `src/architecture/no-regional-expense-categories.spec.ts` impide que los
+  nombres anteriores vuelvan a un fichero versionado.
 - **Zona horaria explícita**: gastos, salidas y resumen usan la zona IANA
   guardada en el horario de cada sede. Si falta o no es válida, responden
   `409 LOCATION_TIMEZONE_REQUIRED` con el mensaje «Configura una zona horaria
@@ -5015,7 +5027,7 @@ WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
   (no pasajero) queda `FAILED` y el resto sigue; un fallo pasajero (BD,
   conexión, interbloqueo) sube y lo reintenta la cola. Una importación en cola
   o en curso por clínica (índice único parcial; 409). Un lote cuyo trabajo
-  murió (intentos agotados, arriendo vencido o purgado) pasa a `FAILED` al
+  murió (intentos agotados, reserva vencida o purgado) pasa a `FAILED` al
   consultar o confirmar en la clínica y en la tarea
   `patient-imports.reap-stuck.hourly`: nunca deja la clínica bloqueada.
 - **Retención (datos del fichero)**: un dry-run caduca a las 24 h o al subir
@@ -5255,7 +5267,7 @@ así que desactivar o borrar surte efecto al momento.
   VERIFIED de una clínica viva, en la clínica del dominio, con clave por
   (dominio, ronda); la
   ronda es la hora UTC truncada, así que repetir el barrido en la misma hora
-  (reintento, arriendo perdido) no cuenta dos veces el mismo fallo. Si el
+  (reintento, reserva perdida) no cuenta dos veces el mismo fallo. Si el
   TXT con el token sigue publicado, `failedChecks` vuelve a 0; si no, suma uno
   y al llegar a `DOMAIN_RECHECK_MAX_FAILURES` (default **3**, 1..20) seguidos
   pasa a **DISABLED**: deja de enrutar y queda `disabledAt`. Solo cuentan

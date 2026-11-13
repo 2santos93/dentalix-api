@@ -10,6 +10,7 @@ import {
   htmlFake,
 } from '../../../../../test/support/document-fixtures';
 import { RECEIPT_TYPE_MESSAGE } from '../../domain/expense-receipt';
+import { LEGACY_PREDEFINED_CATEGORY_KEYS } from '../../domain/legacy-expense-categories';
 import {
   AMOUNT_MESSAGE,
   EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE,
@@ -113,6 +114,19 @@ describe('alta de un gasto (DX-274)', () => {
       supplier: 'Dental Pro',
       currency: 'USD',
     });
+  });
+
+  it('DX-274-bis: el nombre anterior de una predefinida guarda la actual; una propia con ese nombre (solo por SQL) sigue siendo suya', async () => {
+    const [oldRent, oldCleaning] = [...LEGACY_PREDEFINED_CATEGORY_KEYS.keys()];
+    expect(
+      (await run(input({ category: oldRent.toUpperCase() }))).category,
+    ).toBe('Alquiler');
+    expect((await run(input({ category: oldCleaning }))).category).toBe(
+      'Limpieza y cafetería',
+    );
+    const own = oldRent.charAt(0).toUpperCase() + oldRent.slice(1);
+    kit.categories.seed(own);
+    expect((await run(input({ category: oldRent }))).category).toBe(own);
   });
 
   it('acepta una categoría propia activa y rechaza una desconocida o retirada', async () => {

@@ -51,7 +51,7 @@ describe('resumen mensual de gastos (DX-274)', () => {
         month: '2026-10',
         locationId: NORTE,
         currency: 'VES',
-        category: 'Arriendo',
+        category: 'Alquiler',
         cents: 300000,
       },
       {
@@ -81,7 +81,7 @@ describe('resumen mensual de gastos (DX-274)', () => {
         currency: 'VES',
         income: 5000,
         categories: [
-          { category: 'Arriendo', amount: 3000 },
+          { category: 'Alquiler', amount: 3000 },
           { category: 'Papelería', amount: 250.5 },
         ],
         expensesTotal: 3250.5,

@@ -128,10 +128,6 @@ import {
 } from '../src/modules/cash-sessions/application/use-cases/cash-sessions.use-cases';
 import { CreateCashOutflowUseCase } from '../src/modules/expenses/application/use-cases/create-cash-outflow.use-case';
 import { CreateExpenseUseCase } from '../src/modules/expenses/application/use-cases/create-expense.use-case';
-import {
-  CreateExpenseCategoryUseCase,
-  ListExpenseCategoriesUseCase,
-} from '../src/modules/expenses/application/use-cases/expense-categories.use-cases';
 import { CreatePaymentPlanUseCase } from '../src/modules/payment-plans/application/use-cases/create-payment-plan.use-case';
 import { CreateInventoryItemUseCase } from '../src/modules/inventory/application/use-cases/create-inventory-item.use-case';
 import { RecordInventoryMovementUseCase } from '../src/modules/inventory/application/use-cases/record-inventory-movement.use-case';
@@ -223,7 +219,6 @@ import {
   DEMO_PRESCRIPTION_SETTINGS,
   demoPerioMeasures,
   DEMO_COMPARISON_HISTORY,
-  DEMO_EXPENSE_OWN_CATEGORIES,
   DEMO_MANUAL_RATE_DAYS,
   DEMO_MANUAL_RATES,
   demoAmountIn,
@@ -3642,15 +3637,6 @@ class DemoSeeder {
     const today = civilDateIn(this.now, timeZone);
     const day = (offset: number) => addCivilDays(today, offset);
     await this.inTenant(tenantId, locations.principal, async () => {
-      const existing = new Set(
-        (await this.use(ListExpenseCategoriesUseCase).execute()).map(
-          (category) => category.name,
-        ),
-      );
-      for (const name of DEMO_EXPENSE_OWN_CATEGORIES) {
-        if (existing.has(name)) continue;
-        await this.use(CreateExpenseCategoryUseCase).execute(name, ownerId);
-      }
       for (const expense of DEMO_EXPENSES) {
         await this.use(CreateExpenseUseCase).execute(
           {

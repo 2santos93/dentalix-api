@@ -25,18 +25,18 @@ export interface JobsConfig {
   pollIntervalMs: number;
   /** Trabajos a la vez por proceso. */
   concurrency: number;
-  /** Arriendo de un trabajo reclamado: si el worker muere, otro lo retoma al vencer. */
+  /** Plazo de reserva de un trabajo reclamado: si el worker muere, otro lo retoma al vencer. */
   leaseSeconds: number;
   maxAttempts: number;
   retryBaseMs: number;
   /**
-   * Cuánto espera el apagado a los trabajos en curso. Menor que el arriendo
+   * Cuánto espera el apagado a los trabajos en curso. Menor que la reserva
    * (validateEnv): si no, otro worker retomaría trabajos aún en curso. El
    * periodo de gracia del orquestador (terminationGracePeriodSeconds en
    * Kubernetes, 30 s por defecto) tiene que ser MAYOR que esto.
    */
   shutdownGraceMs: number;
-  /** Cada cuánto renueva el arriendo un trabajo en curso (un tercio del arriendo). */
+  /** Cada cuánto renueva la reserva un trabajo en curso (un tercio de la reserva). */
   heartbeatMs: number;
   /** Días que se conservan los trabajos terminados (COMPLETED y FAILED). */
   retentionDays: number;

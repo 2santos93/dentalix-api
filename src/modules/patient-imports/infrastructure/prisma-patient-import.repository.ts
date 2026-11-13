@@ -626,7 +626,7 @@ export class PrismaPatientImportRepository {
 
   /**
    * Lotes QUEUED/RUNNING cuyo trabajo ya no está vivo (agotó los intentos,
-   * el arriendo venció sin reintentos o se purgó): pasan a FAILED con lo
+   * la reserva venció sin reintentos o se purgó): pasan a FAILED con lo
    * hecho, para no dejar bloqueada la clínica (una importación en marcha) ni
    * el deshacer. `tenantId` explícito en el barrido; si no, el del contexto.
    */

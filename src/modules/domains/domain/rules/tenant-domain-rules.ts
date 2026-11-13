@@ -60,7 +60,7 @@ const HOUR_MS = 60 * 60 * 1000;
 
 /**
  * Ronda de la re-verificación periódica: la hora UTC en curso (truncada). Un
- * barrido repetido en la misma hora (reintento del trabajo, arriendo perdido,
+ * barrido repetido en la misma hora (reintento del trabajo, reserva perdida,
  * tick atrasado) produce la misma ronda, así que la idempotencyKey lo
  * deduplica y no se cuenta dos veces el mismo fallo en una hora.
  */

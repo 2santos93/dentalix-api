@@ -51,7 +51,7 @@ export async function backfillTenantPhoneE164(
   prisma: PrismaService,
   tenantId: string,
   batchSize = BATCH_SIZE,
-  /** Se consulta entre lotes: el trabajo perdió su arriendo o se apaga. */
+  /** Se consulta entre lotes: el trabajo perdió su reserva o se apaga. */
   shouldStop: () => boolean = () => false,
 ): Promise<PhoneE164BackfillCounts> {
   const counts: PhoneE164BackfillCounts = {

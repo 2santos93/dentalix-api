@@ -82,7 +82,7 @@ export class PatientImportJobs implements OnModuleInit {
       cron: '47 4 * * *',
       job: EXPIRE_IMPORTS_JOB,
     });
-    // Lotes cuyo trabajo murió (intentos agotados, arriendo vencido): FAILED,
+    // Lotes cuyo trabajo murió (intentos agotados, reserva vencida): FAILED,
     // para que no bloqueen otra importación ni el deshacer. También se hace
     // al consultar o confirmar en la clínica.
     this.registry.register({

@@ -129,14 +129,14 @@ export interface EmailOutboxRepository {
 
   /**
    * Reclama hasta `limit` envíos vencidos de cualquier clínica (FOR UPDATE
-   * SKIP LOCKED), los pasa a SENDING y les da `leaseSeconds` de arriendo.
+   * SKIP LOCKED), los pasa a SENDING y les da `leaseSeconds` de reserva.
    */
   claimDue(limit: number, leaseSeconds: number): Promise<ClaimedOutboxEmail[]>;
 
   /**
    * Cierra el intento número `attempts` de una fila reclamada. Devuelve si la
    * fila seguía en SENDING en ESE intento (si otra réplica la reclamó tras
-   * vencer el arriendo, el cierre tardío no la pisa).
+   * vencer la reserva, el cierre tardío no la pisa).
    */
   settle(
     id: string,

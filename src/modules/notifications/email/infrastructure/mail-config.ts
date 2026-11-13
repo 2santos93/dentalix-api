@@ -16,7 +16,7 @@ export interface MailConfig {
   dispatchIntervalMs: number;
   /** Base del backoff exponencial entre intentos. */
   retryBaseMs: number;
-  /** Arriendo de una fila reclamada: tras él, otra réplica puede reclamarla. */
+  /** Plazo de reserva de una fila reclamada: tras él, otra réplica puede reclamarla. */
   leaseSeconds: number;
   /** Filas por reclamo. */
   batchSize: number;

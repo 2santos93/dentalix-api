@@ -24,6 +24,7 @@ import {
   PROFITABILITY_REPOSITORY,
   type ProfitabilityRepository,
 } from '../../domain/ports/profitability-repository.port';
+import { categoryFilterName } from '../../../expenses/domain/expense-categories';
 
 /** Un año (bisiesto incluido), como «Comparar sedes». */
 export const PROFITABILITY_MAX_DAYS = 366;
@@ -171,6 +172,12 @@ export class GetProfitabilityUseCase {
         PROFITABILITY_CATEGORY_ONLY_EXPENSES_MESSAGE,
       );
     }
+    // La foto del gasto guarda la grafía canónica de la predefinida; un nombre
+    // anterior (DX-274-bis) o con otras mayúsculas filtra por ella.
+    const category =
+      input.category === undefined
+        ? undefined
+        : categoryFilterName(input.category);
     const locations = await this.scope(input);
     const page = input.page ?? 1;
     const pageSize = input.pageSize ?? PROFITABILITY_LINES_DEFAULT_PAGE_SIZE;
@@ -179,7 +186,7 @@ export class GetProfitabilityUseCase {
       basis: input.basis,
       side: input.side,
       currency: input.currency,
-      category: input.category,
+      category,
       locations,
       page,
       pageSize,
@@ -192,7 +199,7 @@ export class GetProfitabilityUseCase {
       side: input.side,
       currency: input.currency,
       locationId: input.locationId ?? null,
-      category: input.category ?? null,
+      category: category ?? null,
       total: fromCents(result.totalCents),
       count: result.count,
       page,

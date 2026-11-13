@@ -11,7 +11,7 @@ const ves: ExpenseSummaryRowView = {
   currency: 'RSD',
   income: 500000,
   categories: [
-    { category: 'Arriendo', amount: 300000 },
+    { category: 'Alquiler', amount: 300000 },
     { category: '-Propia', amount: 50000 },
   ],
   expensesTotal: 350000,
@@ -25,7 +25,7 @@ describe('CSV del resumen de gastos (DX-274)', () => {
     expect(csv.slice(1).split('\r\n')).toEqual([
       EXPENSES_SUMMARY_CSV_HEADER.join(','),
       `2026-10,"'=Sede",RSD,Ingresos,"",500000`,
-      `2026-10,"'=Sede",RSD,Gasto,"Arriendo",300000`,
+      `2026-10,"'=Sede",RSD,Gasto,"Alquiler",300000`,
       `2026-10,"'=Sede",RSD,Gasto,"'-Propia",50000`,
       `2026-10,"'=Sede",RSD,Total gastos,"",350000`,
       `2026-10,"'=Sede",RSD,Neto,"",150000`,
@@ -53,7 +53,7 @@ describe('CSV del resumen de gastos (DX-274)', () => {
       {
         ...ves,
         income: 150000.5,
-        categories: [{ category: 'Arriendo', amount: 0.45 }],
+        categories: [{ category: 'Alquiler', amount: 0.45 }],
         expensesTotal: 0.45,
         net: 150000.05,
       },

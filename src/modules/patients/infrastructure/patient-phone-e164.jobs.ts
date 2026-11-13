@@ -18,7 +18,7 @@ export interface PhoneE164BackfillRun {
     tenantId: string,
     shouldStop: () => boolean,
   ) => Promise<{ patientsWritten: number; responsiblesWritten: number }>;
-  /** Pierde el arriendo o se apaga: dejar de producir efectos. */
+  /** Pierde la reserva o se apaga: dejar de producir efectos. */
   shouldStop: () => boolean;
   onTenantError: (tenantId: string, error: unknown) => void;
 }

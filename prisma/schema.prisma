@@ -4435,7 +4435,7 @@ model Job {
   state          JobState  @default(PENDING)
   attempts       Int       @default(0)
   maxAttempts    Int       @default(5)
-  /// PENDING: cuándo puede empezar. RUNNING: cuándo vence el arriendo.
+  /// PENDING: cuándo puede empezar. RUNNING: cuándo vence la reserva.
   runAt          DateTime  @default(dbgenerated("timezone('utc'::text, now())"))
   /// Única por (tenantId, idempotencyKey): ver el índice parcial abajo.
   idempotencyKey String?
@@ -5993,8 +5993,10 @@ model ExpenseCategory {
 ///
 /// Solo SQL (Prisma no expresa los CHECK ni los triggers): importes > 0,
 /// `dueDate >= invoiceDate`, soporte completo o vacío, anulación completa o
-/// vacía; triggers `expenses_guard` (sin DELETE, soporte y anulación una vez)
-/// y `expenses_server_created_at` (hora UTC de la BD).
+/// vacía; triggers `expenses_guard` (sin DELETE, soporte y anulación una vez),
+/// `expenses_server_created_at` (hora UTC de la BD) y
+/// `expenses_category_legacy_alias` (DX-274-bis: el nombre anterior de una
+/// predefinida se guarda con el actual).
 model Expense {
   id                     String    @id @default(uuid()) @db.Uuid
   tenantId               String    @db.Uuid

@@ -23,7 +23,7 @@ export class JobsQueueStatsDto {
   @ApiProperty({ example: 1 }) running!: number;
   @ApiProperty({
     example: 0,
-    description: 'RUNNING con el arriendo vencido (worker caído o sin latido)',
+    description: 'RUNNING con la reserva vencida (worker caído o sin latido)',
   })
   runningExpired!: number;
   @ApiProperty({ example: 0, description: 'FAILED en las últimas 24 h' })

@@ -731,7 +731,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     }
   });
 
-  describe('DX-272 · un solo email aunque el worker pierda el arriendo', () => {
+  describe('DX-272 · un solo email aunque el worker pierda la reserva', () => {
     const payloadOf = (id: string, start: Date) => ({
       appointmentId: id,
       leadHours: 2,
@@ -812,7 +812,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       }
     });
 
-    it('si A pierde el arriendo mientras trabaja, no encola nada al reanudar', async () => {
+    it('si A pierde la reserva mientras trabaja, no encola nada al reanudar', async () => {
       const { id, start } = await seedTwoHours();
       const door = gate();
       const lease = new AbortController();
@@ -847,7 +847,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
         await expect(stalled).rejects.toThrow('Intento abortado');
         expect(enqueue).not.toHaveBeenCalled();
         expect(await reminderEmails(clinicA.tenantId)).toBe(1);
-        // El intento que perdió el arriendo no cierra el recordatorio como
+        // El intento que perdió la reserva no cierra el recordatorio como
         // fallido: el del worker B quedó SENT.
         expect((await records(id)).map((r) => r.status)).toEqual(['SENT']);
       } finally {

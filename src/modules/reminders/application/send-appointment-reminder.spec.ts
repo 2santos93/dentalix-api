@@ -467,7 +467,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(repo.reminders[0]).toMatchObject({ status: 'SENT' });
   });
 
-  describe('DX-272 · arriendo perdido y clave estable', () => {
+  describe('DX-272 · reserva perdida y clave estable', () => {
     const jobContext = (signal: AbortSignal, attempt = 1) => ({
       jobId: 'job-1',
       attempt,
@@ -489,7 +489,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
       expect(email.enqueue).not.toHaveBeenCalled();
     });
 
-    it('si el arriendo se pierde mientras se prepara el email, no lo encola', async () => {
+    it('si la reserva se pierde mientras se prepara el email, no lo encola', async () => {
       repo.contexts.set(APPT, context());
       const lease = new AbortController();
       optOutLinks.issue.mockImplementation(() => {

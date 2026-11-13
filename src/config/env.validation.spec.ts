@@ -762,7 +762,7 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
 
-    it('la gracia del apagado tiene que ser menor que el arriendo (si no, otro worker retoma trabajos aún en curso)', () => {
+    it('la gracia del apagado tiene que ser menor que la reserva (si no, otro worker retoma trabajos aún en curso)', () => {
       expect(
         errorOf(
           baseEnv({

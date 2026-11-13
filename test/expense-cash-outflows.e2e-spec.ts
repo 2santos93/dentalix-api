@@ -410,7 +410,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
 
   it('anular una salida con la caja abierta: deja de restar y sale en «Salidas anuladas», sin ajuste', async () => {
     const second = expenseOf(
-      await outflow({ amount: 5_000, category: 'Aseo y cafetería' }).expect(
+      await outflow({ amount: 5_000, category: 'Limpieza y cafetería' }).expect(
         201,
       ),
     );
@@ -429,7 +429,7 @@ describe('Salidas de caja menor en el arqueo (e2e, DX-274)', () => {
     expect(seen.voidedOutflows).toEqual([
       expect.objectContaining({
         id: second.payments[0].id,
-        category: 'Aseo y cafetería',
+        category: 'Limpieza y cafetería',
         voidReason: 'Se devolvió el dinero',
         bookedAsAdjustment: false,
       }),

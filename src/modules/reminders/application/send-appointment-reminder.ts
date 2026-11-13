@@ -56,7 +56,7 @@ function parsePayload(payload: JobPayload): ParsedPayload {
   return { appointmentId, leadHours, start: startDate };
 }
 
-/** DX-272: el worker perdió el arriendo del trabajo (o se apaga). */
+/** DX-272: el worker perdió la reserva del trabajo (o se apaga). */
 function assertLeaseHeld(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error('Intento abortado');
 }
@@ -71,7 +71,7 @@ function assertLeaseHeld(signal?: AbortSignal): void {
  * appointment_reminders, única por (cita, antelación, hora de inicio), es el
  * reclamo. Un intento caído a mitad se retoma donde quedó: si el email ya
  * está en email_outbox no se vuelve a encolar. Si dos workers lo intentan a la
- * vez (arriendo perdido), la clave estable es el id del mensaje saliente de la
+ * vez (reserva perdida), la clave estable es el id del mensaje saliente de la
  * ventana (cita, antelación, hora de inicio): email_outbox es único por
  * (clínica, ese id) para esta plantilla.
  */
@@ -166,7 +166,7 @@ export class SendAppointmentReminder {
       return;
     }
 
-    // DX-272: con el arriendo perdido otro worker ya tiene el trabajo; este
+    // DX-272: con la reserva perdida otro worker ya tiene el trabajo; este
     // intento no produce más efectos (claim, enlace, constancia, email).
     assertLeaseHeld(signal);
     const claim = await this.repo.claim(appointmentId, leadHours, start);
@@ -247,7 +247,7 @@ export class SendAppointmentReminder {
         ctx.cancellationPolicy.id,
       );
     }
-    // DX-272: última puerta antes del efecto externo. Si aun así el arriendo
+    // DX-272: última puerta antes del efecto externo. Si aun así la reserva
     // se pierde justo después, el índice único de email_outbox por
     // recordatorio (`referenceId` = outbound) hace que el segundo `enqueue`
     // devuelva el email ya encolado en vez de crear otro.

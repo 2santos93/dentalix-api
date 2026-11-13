@@ -990,7 +990,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       person('9103'),
     ]);
     const running = await inTenant(a, () => repo.findBatch(batch!.id));
-    // Primer bloque: 1 creado. Luego el worker «pierde» el arriendo.
+    // Primer bloque: 1 creado. Luego el worker «pierde» la reserva.
     expect(
       (await inTenant(a, () => repo.processChunk(running!, 1, 'EMAIL')))
         .created,
