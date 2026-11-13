@@ -180,8 +180,20 @@ describe('PdfkitSignedConsentPdfRenderer: fuentes Unicode embebidas (DX-459)', (
     expect(used).not.toContain('Helvetica');
     expect(raw).toContain('/FontFile2'); // TrueType (Noto Sans)
     expect(raw).toContain('/FontFile3'); // CFF (Noto Sans CJK)
-    // La CJK entera pesa 16 MB: el PDF lleva solo unas decenas de glifos.
+    // La CJK (subconjunto) pesa 7,2 MB: el PDF lleva solo unas decenas de glifos.
     expect(pdf.length).toBeLessThan(400_000);
+  });
+
+  it('subconjunto CJK: 臺灣 + 山田花子 + 뷁 + griego + cirílico se pintan tal cual', async () => {
+    const body = 'Ζωή — Мария\n臺灣 山田花子 뷁';
+    const pdf = await new PdfkitSignedConsentPdfRenderer().render({
+      ...model(body),
+      title: '同意書',
+    });
+    const lines = pdfTextLines(pdf);
+    expect(lines).toContain('同意書');
+    expect(lines).toContain('Ζωή — Мария');
+    expect(lines).toContain('臺灣 山田花子 뷁');
   });
 
   it('respeta las líneas en blanco del texto firmado', async () => {
@@ -198,8 +210,9 @@ describe('PdfkitSignedConsentPdfRenderer: fuentes Unicode embebidas (DX-459)', (
     for (const ch of ['a', 'ñ', '€', 'Ζ', 'Ж', '名', 'ひ', 'カ', '한']) {
       expect(renderer.canPaint(ch)).toBe(true);
     }
-    // Sin fuente: emoji, devanagari, tailandés y (sin bidi) árabe y hebreo.
-    for (const ch of ['😀', 'न', 'ส', 'ع', 'ש']) {
+    // Sin fuente: emoji, devanagari, tailandés, (sin bidi) árabe y hebreo, y
+    // el hueco del subconjunto CJK (堃 喆 赟 de nombres de pila, 髙 de 髙橋).
+    for (const ch of ['😀', 'न', 'ส', 'ع', 'ש', '堃', '喆', '赟', '髙']) {
       expect(renderer.canPaint(ch)).toBe(false);
     }
   });

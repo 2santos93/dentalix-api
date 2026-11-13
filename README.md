@@ -1115,11 +1115,20 @@ no hay una común. No cambia después (trigger
 - Si algún texto (título, cuerpo, nombres, sede, navegador, un formato de
   fecha) sale de WinAnsi, el documento ENTERO se pinta con fuentes **Noto**
   (SIL OFL 1.1) embebidas en **subconjunto** (solo los glifos usados): Noto
-  Sans (latín, griego, cirílico; regular y negrita) y Noto Sans CJK SC regular
-  (chino, japonés y coreano: hanzi/kanji/hanja, kana y hangul; un ideograma
-  con variantes regionales sale con la forma china simplificada; la negrita
-  CJK usa la regular). Cada letra va con la primera de esas fuentes que la
-  tiene.
+  Sans (latín, griego, cirílico; regular y negrita) y un **subconjunto** de
+  Noto Sans CJK SC regular (la negrita CJK usa la regular): GB2312 (6763 hanzi,
+  chino simplificado), JIS X 0208 (6356 kanji), Big5 nivel 1 (5401 hanzi
+  tradicionales de uso común), las 11 172 sílabas hangul, kana, puntuación y
+  formas de ancho completo (un ideograma con variantes regionales sale con la
+  forma china simplificada). Cada letra va con la primera de esas fuentes que
+  la tiene.
+- **Hueco conocido del subconjunto**: ideogramas fuera de GB2312/JIS X 0208/
+  Big5-1, p. ej. caracteres de nombres de pila chinos modernos (堃, 喆, 赟) o
+  variantes de apellidos japoneses (髙 de 髙橋). Ese consentimiento queda
+  `FAILED` con `UNSUPPORTED_GLYPHS` (definitivo, visible en la ficha), nunca un
+  PDF con huecos. Si una clínica lo necesita, el siguiente paso es añadir la
+  lista china de 8105 caracteres de uso general (通用规范汉字表, de una fuente
+  revisada) y regenerar el subconjunto (`src/shared/pdf/fonts/README.md`).
 - Se niegan siempre (`FAILED` con `UNSUPPORTED_GLYPHS`, sin reintento: nunca
   se archiva un texto que se VEA distinto del firmado), aunque una fuente
   tenga el glifo:
@@ -1151,22 +1160,31 @@ no hay una común. No cambia después (trigger
   | --- | ---: |
   | `NotoSans-Regular.ttf` | 431 364 |
   | `NotoSans-Bold.ttf` | 432 376 |
-  | `NotoSansCJKsc-Regular.otf` | 16 437 364 |
-  | **Total** (con `OFL.txt` y su `README.md`) | **17 308 010 (≈ 16,5 MiB)** |
+  | `NotoSansCJKsc-Regular-subset.otf` | 7 561 140 |
+  | **Total** (con `OFL.txt` y su `README.md`) | **8 433 954 (≈ 8,0 MiB)** |
 
-  La imagen crece ≈ 16,5 MiB sin comprimir (≈ 13,4 MiB en gzip, lo que se
-  descarga del registro). Tope: **20 MiB** para `src/shared/pdf/fonts/`; lo
+  La imagen crece ≈ 8,0 MiB sin comprimir (≈ 6,3 MiB en gzip, lo que se
+  descarga del registro). Tope: **10 MiB** para `src/shared/pdf/fonts/`; lo
   comprueba `unicode-fonts.spec.ts`. fontkit, el motor de fuentes, ya venía con
   pdfkit (ahora declarado y fijado, `2.0.4`): 0 bytes más de dependencias.
 - Memoria: cada fuente se abre la primera vez que hace falta y se queda en
-  memoria (la CJK, ≈ 16 MB, solo si algún PDF la necesita). Medido: 500 PDF
+  memoria (la CJK, ≈ 7,2 MB, solo si algún PDF la necesita). Medido: 500 PDF
   con CJK seguidos, heap vivo estable (≈ 31 MB tras GC); un PDF con CJK pesa
   ≈ 100 KB.
-- Alternativas descartadas: el subconjunto regional `NotoSansSC` (8,3 MB) no
-  tiene hangul (coreano); la colección `.ttc` (≈ 19 MB por peso) y la negrita
-  CJK duplicarían el tamaño; guardarla comprimida (brotli, 11 MB) ahorra poco en
-  el registro (las capas ya van comprimidas) y obliga a descomprimir en
-  arranque.
+- Alternativas medidas y descartadas (coste en el pack de git, que es para
+  siempre; en la imagen, el tamaño del fichero):
+  - la CJK entera (16,4 MB; ≈ 13,0 MiB de pack): todo el CJK, pero +59 % de
+    pack;
+  - subconjuntos sin todo el hangul o sin Big5-1 (4,7–5,6 MiB de pack): pierden
+    coreano o chino tradicional; con todo GBK (≈ 10,2 MiB de pack) casi tanto
+    como la entera;
+  - el subconjunto regional `NotoSansSC` (8,3 MB): sin hangul;
+  - paquetes npm (`@fontsource/noto-sans-sc`, 75 MB en 102 trozos WOFF2 por
+    peso; `@expo-google-fonts/noto-sans-sc`, 96 MB en 9 pesos; ninguno con
+    hangul) o descargarla en el build: más imagen, una cadena de >100 fuentes o
+    dependencia de red en build, CI y local;
+  - la colección `.ttc`, la negrita CJK o guardarla comprimida (brotli): más
+    tamaño, o descomprimir en arranque para ahorrar poco.
 
 ### Copia del PDF firmado al paciente y PDF retroactivos (DX-443)
 

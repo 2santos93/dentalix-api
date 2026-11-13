@@ -10,7 +10,7 @@ import { create, type Font } from 'fontkit';
  * a `dist` junto a este módulo. Tamaños y criterio: `./fonts/README.md`.
  *
  * Cada fuente se abre la primera vez que hace falta y se queda en memoria
- * (la CJK, 16 MB, solo si algún texto la necesita). pdfkit incrusta en cada
+ * (la CJK, 7,2 MB, solo si algún texto la necesita). pdfkit incrusta en cada
  * PDF un SUBCONJUNTO: solo los glifos usados.
  */
 export type PdfFontWeight = 'regular' | 'bold';
@@ -19,21 +19,21 @@ const FONTS_DIR = join(__dirname, 'fonts');
 
 interface FontFamily {
   regular: string;
-  /** Sin negrita propia (CJK: 16 MB más), la negrita usa la regular. */
+  /** Sin negrita propia (CJK: 7 MB más), la negrita usa la regular. */
   bold: string;
 }
 
 /**
  * Orden de preferencia: la primera que tenga el glifo. Noto Sans (latín,
- * griego, cirílico) y Noto Sans CJK SC (todo el CJK
- * unificado: hanzi/kanji/hanja, kana y hangul; con glifos de forma china
- * simplificada cuando un ideograma tiene variantes regionales).
+ * griego, cirílico) y un SUBCONJUNTO de Noto Sans CJK SC (GB2312, JIS X
+ * 0208, Big5 nivel 1, todo el hangul, kana y puntuación; con glifos de
+ * forma china simplificada cuando un ideograma tiene variantes regionales).
  */
 const FAMILIES: readonly FontFamily[] = [
   { regular: 'NotoSans-Regular.ttf', bold: 'NotoSans-Bold.ttf' },
   {
-    regular: 'NotoSansCJKsc-Regular.otf',
-    bold: 'NotoSansCJKsc-Regular.otf',
+    regular: 'NotoSansCJKsc-Regular-subset.otf',
+    bold: 'NotoSansCJKsc-Regular-subset.otf',
   },
 ];
 
@@ -80,7 +80,8 @@ const LETTER = /^\p{L}$/u;
  * Parte UNA línea (sin saltos) en tramos de una sola fuente. Una letra va con
  * la primera fuente que la tiene; lo demás (espacios, signos, cifras, marcas
  * que se combinan con la letra anterior) se queda en la fuente del tramo en
- * curso si la tiene, para no cortar una frase china por un espacio.
+ * curso si la tiene (p. ej. la puntuación CJK dentro de una frase china).
+ * El subconjunto CJK no lleva ASCII: un espacio normal va con Noto Sans.
  * Devuelve null si algún carácter no está en ninguna fuente.
  */
 export function unicodeRuns(

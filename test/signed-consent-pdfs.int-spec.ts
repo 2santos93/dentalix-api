@@ -169,6 +169,48 @@ describe('PDF firmado en Postgres (DX-422)', () => {
     expect(pdf.length).toBeLessThan(400_000);
   });
 
+  it('DX-459 subconjunto CJK: 臺灣 + 山田花子 + 뷁 + griego + cirílico se archivan READY', async () => {
+    const title = 'Συναίνεση — Согласие — 同意書';
+    const body = '臺灣 山田花子 뷁\nΖωή Παπαδοπούλου\nМария Иванова';
+    const consentId = await remoteSigned(a, { title, body });
+    await countersign(a, consentId);
+    await generate(a, consentId);
+    const state = await owner.signedConsentPdf.findFirstOrThrow({
+      where: { consentId },
+    });
+    expect(state).toMatchObject({ status: 'READY', lastErrorCode: null });
+    const doc = await owner.patientDocument.findUniqueOrThrow({
+      where: { id: state.documentId! },
+    });
+    const painted = pdfTextLines(storage.files.get(doc.storageKey)!.bytes);
+    expect(painted).toContain(title);
+    for (const line of body.split('\n')) expect(painted).toContain(line);
+  });
+
+  it('DX-459 subconjunto CJK: un ideograma fuera (堃, 髙) queda FAILED UNSUPPORTED_GLYPHS definitivo, sin archivar', async () => {
+    for (const body of ['患者：张堃，同意治疗。', '髙橋花子は同意します。']) {
+      const consentId = await remoteSigned(a, { body });
+      await countersign(a, consentId);
+      const docsBefore = await owner.patientDocument.count({
+        where: { patientId: a.patientId },
+      });
+      // Primer intento de 6: aun así es definitivo (no relanza a la cola).
+      await expect(generate(a, consentId)).resolves.toBeUndefined();
+      expect(
+        await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+      ).toMatchObject({
+        status: 'FAILED',
+        lastErrorCode: 'UNSUPPORTED_GLYPHS',
+        documentId: null,
+      });
+      expect(
+        await owner.patientDocument.count({
+          where: { patientId: a.patientId },
+        }),
+      ).toBe(docsBefore);
+    }
+  });
+
   it('inmutable: ni el documento archivado ni su estado READY cambian, y no se borran', async () => {
     const { consentId, documentId } =
       (await owner.signedConsentPdf.findFirstOrThrow({

@@ -1,7 +1,8 @@
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
     NotoSans-Regular.ttf, NotoSans-Bold.ttf
 © 2014-2021 Adobe (http://www.adobe.com/).
-    NotoSansCJKsc-Regular.otf (https://github.com/notofonts/noto-cjk)
+    NotoSansCJKsc-Regular-subset.otf (subconjunto de NotoSansCJKsc-Regular.otf,
+    https://github.com/notofonts/noto-cjk)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
