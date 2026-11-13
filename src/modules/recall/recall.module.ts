@@ -3,10 +3,12 @@ import { JwtModule } from '@nestjs/jwt';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import {
+  CreateDefaultRecallUseCase,
   CreateRecallContactUseCase,
   GetPatientRecallsUseCase,
   ListDueRecallsUseCase,
   ListRecallTypesUseCase,
+  ListUnconfiguredRecallsUseCase,
   RECALL_CLOCK,
   SetPatientRecallUseCase,
 } from './application/use-cases/recall.use-cases';
@@ -43,9 +45,11 @@ import {
   ],
   providers: [
     ListDueRecallsUseCase,
+    ListUnconfiguredRecallsUseCase,
     ListRecallTypesUseCase,
     GetPatientRecallsUseCase,
     SetPatientRecallUseCase,
+    CreateDefaultRecallUseCase,
     CreateRecallContactUseCase,
     CreateRecallTypeUseCase,
     UpdateRecallTypeUseCase,

@@ -1,5 +1,8 @@
 import { ListClinicalEntriesUseCase } from './list-clinical-entries.use-case';
-import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import {
+  ClinicalEntry,
+  type CreatedClinicalEntryRecord,
+} from '../../domain/entities/clinical-entry.entity';
 import {
   ClinicalEntryRepository,
   ListClinicalEntriesParams,
@@ -33,7 +36,7 @@ function makeRepo(
   overrides: Partial<ClinicalEntryRepository> = {},
 ): ClinicalEntryRepository {
   return {
-    create: (): Promise<ClinicalEntry> =>
+    create: (): Promise<CreatedClinicalEntryRecord> =>
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ClinicalEntry[]> => Promise.resolve([]),
     authorLicense: () => Promise.resolve(null),
@@ -60,7 +63,7 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
     this.store.push(...entries);
   }
 
-  create(): Promise<ClinicalEntry> {
+  create(): Promise<CreatedClinicalEntryRecord> {
     return Promise.reject(new Error('not implemented in this fake'));
   }
 

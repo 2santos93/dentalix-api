@@ -25,6 +25,7 @@ import {
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { CreateClinicalEntryDto } from './dto/create-clinical-entry.dto';
 import { ListClinicalEntriesQueryDto } from './dto/list-clinical-entries-query.dto';
@@ -50,8 +51,13 @@ import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets'
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import {
+  auditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 
-interface AuthenticatedRequest {
+interface AuthenticatedRequest extends AuditableRequest {
   user: JwtPayload;
 }
 
@@ -76,6 +82,7 @@ export class ClinicalEntriesController {
     private readonly listClinicalEntries: ListClinicalEntriesUseCase,
     private readonly createAddendum: CreateClinicalEntryAddendumUseCase,
     private readonly listAddenda: ListClinicalEntryAddendaUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   @Audit({
@@ -88,7 +95,11 @@ export class ClinicalEntriesController {
   @ApiOperation({
     summary: 'Registra una evolución (inalterable, DX-038)',
     description:
-      'DX-170: con `templateId`, el texto compuesto se guarda en `notes` (enviado ya revisado, o compuesto por el servidor con `answers`). Con `appointmentId`, la evolución queda ligada a la cita. DX-540: congela el registro profesional del autor (`authorProfessionalLicense`) y, si la clínica tiene el aviso activo y el autor no lo tiene, responde `warnings: [{ code: PROFESSIONAL_LICENSE_MISSING }]` sin bloquear la firma.',
+      'DX-170: con `templateId`, el texto compuesto se guarda en `notes` (enviado ya revisado, o compuesto por el servidor con `answers`). Con `appointmentId`, la evolución queda ligada a la cita. DX-540: congela el registro profesional del autor (`authorProfessionalLicense`) y, si la clínica tiene el aviso activo y el autor no lo tiene, responde `warnings: [{ code: PROFESSIONAL_LICENSE_MISSING }]` sin bloquear la firma. DX-015-bis (D18): con `recall`, fija el intervalo del recall de ese tipo en la misma transacción (`recallUpdates`).',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'DX-015-bis (D18): el tipo de `recall` no existe en esta clínica o se retiró; no se guarda la evolución.',
   })
   @ApiCreatedResponse({ type: CreatedClinicalEntryDto })
   @ApiBadRequestResponse({
@@ -122,8 +133,17 @@ export class ClinicalEntriesController {
           values: a.values,
           skipped: a.skipped,
         })),
+        recall: dto.recall
+          ? {
+              recallTypeId: dto.recall.recallTypeId,
+              intervalMonths: dto.recall.intervalMonths,
+            }
+          : undefined,
       },
       req.user.sub,
+      // D18: los eventos del recall (PATIENT_RECALL, `via: CLINICAL_ENTRY`)
+      // van en la transacción del alta.
+      auditRequestContext(req, this.tenantContext),
     );
   }
 

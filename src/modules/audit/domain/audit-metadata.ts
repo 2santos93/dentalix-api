@@ -225,7 +225,17 @@ export interface AuditMetadata {
    * mayoría de edad revisada y el LARGO de la nota (nunca su texto).
    */
   majorityReview?: AuditMajorityReview;
+  /**
+   * DX-015-bis (porción 3): por dónde se creó o cambió un recall que no es el
+   * PUT de la ficha: `DEFAULT` = «Programar recall» con el intervalo por
+   * defecto del tipo (salida o «Sin recall configurado»); `CLINICAL_ENTRY` =
+   * el intervalo fijado al registrar la evolución. Solo el código.
+   */
+  via?: AuditRecallVia;
 }
+
+export const AUDIT_RECALL_VIAS = ['DEFAULT', 'CLINICAL_ENTRY'] as const;
+export type AuditRecallVia = (typeof AUDIT_RECALL_VIAS)[number];
 
 export interface AuditMajorityReview {
   decision: 'PATIENT_SELF' | 'KEEP_RESPONSIBLE';
@@ -1506,5 +1516,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (range) out.period = range;
   const reviewed = majorityReview(input.majorityReview);
   if (reviewed) out.majorityReview = reviewed;
+  const via = AUDIT_RECALL_VIAS.find((v) => v === input.via);
+  if (via) out.via = via;
   return out;
 }

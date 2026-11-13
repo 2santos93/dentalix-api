@@ -31,6 +31,48 @@ export interface RecallDueQuery {
 }
 
 /** El último contacto del recall (lo usará DX-465 para ocultar N días). */
+/** D17: «Sin recall configurado», paginada. */
+export interface RecallUnconfiguredQuery {
+  /** Solo esa sede (ya autorizada); sin ella, la cabecera o las permitidas. */
+  locationId?: string;
+  page: number;
+  pageSize: number;
+  now: Date;
+}
+
+/** Una fila de «Sin recall configurado» tal como sale de la BD. */
+export interface RecallUnconfiguredRow {
+  patientId: string;
+  patientFirstName: string;
+  patientLastName: string;
+  patientPhone: string | null;
+  /** Región telefónica de la sede de la última visita. */
+  phoneRegion: string | null;
+  reminderOptedOut: boolean;
+  /** Día civil de la última cita atendida, en la zona de su sede. */
+  lastVisitAt: string;
+  /** Sede de la última cita atendida: la del paciente. */
+  lastVisitLocationId: string;
+}
+
+export interface RecallUnconfiguredItem {
+  patientId: string;
+  patientName: string;
+  /** `null` sin teléfono o con baja de avisos (DX-128). */
+  patientPhone: string | null;
+  patientWhatsApp: string | null;
+  reminderOptedOut: boolean;
+  lastVisitAt: string;
+  lastVisitLocationId: string;
+}
+
+export interface RecallUnconfiguredPage {
+  items: RecallUnconfiguredItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface RecallLastContact {
   channel: RecallContactChannel;
   outcome: RecallContactOutcome;
