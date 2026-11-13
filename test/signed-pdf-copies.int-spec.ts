@@ -15,6 +15,7 @@ import {
   SignedConsentPdfAudit,
   SignedConsentPdfQueue,
   signedConsentPdfJobKey,
+  signedConsentPdfUnicodeRetryJobKey,
 } from '../src/modules/consents/application/signed-consent-pdf.service';
 import {
   BackfillSignedConsentPdfs,
@@ -578,7 +579,7 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
       await owner.signedConsentPdf.count({ where: { consentId: withPdf } }),
     ).toBe(1);
 
-    await expect(sweep.run()).resolves.toEqual({ queued: 0 });
+    await expect(sweep.run()).resolves.toEqual({ queued: 0, retried: 0 });
     expect(await owner.signedConsentPdf.count({ where: { consentId } })).toBe(
       1,
     );
@@ -596,5 +597,98 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
     expect(loaded).toMatchObject({ notifyPatient: false });
     await asClinic(b.tenantId, () => sendJob.handle({ consentId }));
     expect(emails).toHaveLength(emailsBefore);
+  });
+
+  it('DX-459: los FAILED por otro alfabeto (UNSUPPORTED_CHARACTERS) se regeneran READY una vez, sin escribir al paciente', async () => {
+    // Un consentimiento en griego/cirílico/CJK firmado ANTES de las fuentes
+    // Unicode: su PDF quedó FAILED con el código de entonces. Se firmó por el
+    // flujo normal (notifyPatient = true).
+    const consentId = await remoteSigned(b, {
+      title: 'Συγκατάθεση — Согласие — 同意书',
+      body: 'Ζωή Παπαδοπούλου\nМария Иванова\n山田花子',
+    });
+    await countersign(b, consentId, (tx) => pdfQueue.schedule(tx, consentId));
+    await asClinic(b.tenantId, () =>
+      pdfs.recordFailure(consentId, {
+        code: 'UNSUPPORTED_CHARACTERS',
+        final: true,
+      }),
+    );
+    // Otros FAILED no se tocan: uno sin glifo ni en las fuentes embebidas y
+    // uno del almacén (esos los reintenta la ficha).
+    const noGlyph = await remoteSigned(b);
+    await countersign(b, noGlyph, (tx) => pdfQueue.schedule(tx, noGlyph));
+    await asClinic(b.tenantId, () =>
+      pdfs.recordFailure(noGlyph, { code: 'UNSUPPORTED_GLYPHS', final: true }),
+    );
+    const storageFailed = await remoteSigned(b);
+    await countersign(b, storageFailed, (tx) =>
+      pdfQueue.schedule(tx, storageFailed),
+    );
+    await asClinic(b.tenantId, () =>
+      pdfs.recordFailure(storageFailed, { code: 'STORAGE_ERROR', final: true }),
+    );
+    const before = await owner.signedConsentPdf.findFirstOrThrow({
+      where: { consentId },
+    });
+    expect(before).toMatchObject({ status: 'FAILED', notifyPatient: true });
+
+    const sweep = new BackfillSignedConsentPdfs(copies, pdfQueue);
+    const first = await sweep.run();
+    expect(first.retried).toBe(1);
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({
+      status: 'PENDING',
+      lastErrorCode: null,
+      notifyPatient: false,
+      attempts: before.attempts,
+    });
+    expect(
+      await owner.job.count({
+        where: {
+          idempotencyKey: signedConsentPdfUnicodeRetryJobKey(consentId),
+        },
+      }),
+    ).toBe(1);
+    for (const [other, code] of [
+      [noGlyph, 'UNSUPPORTED_GLYPHS'],
+      [storageFailed, 'STORAGE_ERROR'],
+    ] as const) {
+      expect(
+        await owner.signedConsentPdf.findFirstOrThrow({
+          where: { consentId: other },
+        }),
+      ).toMatchObject({ status: 'FAILED', lastErrorCode: code });
+    }
+    // Repetir el barrido mientras está PENDING no lo vuelve a encolar.
+    await expect(sweep.run()).resolves.toMatchObject({ retried: 0 });
+
+    // El trabajo lo genera con las fuentes embebidas y lo archiva READY...
+    const emailsBefore = emails.length;
+    await asClinic(b.tenantId, () =>
+      generator.handle({ consentId }, jobContext(b.tenantId)),
+    );
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({ status: 'READY', lastErrorCode: null });
+    // ...SIN encolar la copia al paciente ni escribirle.
+    expect(
+      await owner.job.count({
+        where: { idempotencyKey: signedPdfCopyJobKey(consentId) },
+      }),
+    ).toBe(0);
+    await asClinic(b.tenantId, () => sendJob.handle({ consentId }));
+    expect(emails).toHaveLength(emailsBefore);
+
+    // Ya READY: el barrido no lo vuelve a tocar.
+    await expect(sweep.run()).resolves.toMatchObject({ retried: 0 });
+    expect(
+      await owner.job.count({
+        where: {
+          idempotencyKey: signedConsentPdfUnicodeRetryJobKey(consentId),
+        },
+      }),
+    ).toBe(1);
   });
 });

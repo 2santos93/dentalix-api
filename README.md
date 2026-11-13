@@ -1094,16 +1094,69 @@ no hay una común. No cambia después (trigger
   (`GET /patients/:id/documents/:docId/url/download`, URL firmada y auditada).
 - Reintentos: backoff exponencial de la cola, 6 intentos; el último deja
   `FAILED` con un código técnico (`lastErrorCode`, nunca un mensaje). Un origen
-  inválido (hash que no casa, sede sin zona o formato, texto que las fuentes
-  estándar no pintan: `UNSUPPORTED_CHARACTERS`) es `FAILED` sin reintento: nunca
+  inválido (hash que no casa, sede sin zona o formato, texto que ninguna fuente
+  del PDF pinta: `UNSUPPORTED_GLYPHS`) es `FAILED` sin reintento: nunca
   se archiva un documento alterado. `POST /patients/:id/consents/:consentId/signed-pdf/retry`
   (los cuatro roles, 202; 409 si no está en error; 404 de otra clínica) lo
   vuelve a encolar.
 - La lista de la ficha (`GET …/signature-requests`) trae `signedPdfStatus` y
   `signedPdfDocumentId`.
-- Fuentes: Helvetica (WinAnsi), que cubre el español, el portugués y el resto
-  de lenguas de Europa occidental. Un texto con otros alfabetos queda `FAILED`
-  con `UNSUPPORTED_CHARACTERS` hasta que se embeba una fuente Unicode.
+- Fuentes: ver «Fuentes Unicode del PDF firmado (DX-459)».
+
+### Fuentes Unicode del PDF firmado (DX-459)
+
+- Si TODO lo que pinta el PDF cabe en WinAnsi (español, portugués y el resto de
+  Europa occidental), se pinta como siempre con las fuentes estándar
+  (Helvetica, sin fuente embebida): **las mismas llamadas a pdfkit y los mismos
+  bytes** que antes de DX-459, así que la huella (`patient_documents.sha256`)
+  de un PDF latino no cambia. Lo fija
+  `signed-consent-pdf.latin-pin.spec.ts` (SHA-256 de un PDF latino tomado con
+  el renderer de DX-422).
+- Si algún texto (título, cuerpo, nombres, sede, navegador, un formato de
+  fecha) sale de WinAnsi, el documento ENTERO se pinta con fuentes **Noto**
+  (SIL OFL 1.1) embebidas en **subconjunto** (solo los glifos usados): Noto
+  Sans (latín, griego, cirílico; regular y negrita), Noto Sans Arabic (regular
+  y negrita) y Noto Sans CJK SC regular (chino, japonés y coreano: hanzi/kanji/
+  hanja, kana y hangul; un ideograma con variantes regionales sale con la
+  forma china simplificada; la negrita CJK usa la regular). Cada letra va con
+  la primera de esas fuentes que la tiene. El árabe sale con sus formas
+  unidas, pero sin reordenación bidi de líneas mixtas (fuera de alcance).
+- Lo que ninguna tiene (emoji, devanagari, hebreo, tailandés…) o un control
+  (tabulador, `\r` suelto) queda `FAILED` con `UNSUPPORTED_GLYPHS`, sin
+  reintento: nunca se archiva un texto alterado.
+- Los PDF que quedaron `FAILED` con el código anterior
+  (`UNSUPPORTED_CHARACTERS`) los reintenta UNA vez el barrido retroactivo de
+  DX-443 (`consents.signed-pdf-backfill`): vuelven a `PENDING` con
+  `notifyPatient = false` (UPDATE condicional; clave
+  `consents.signed-pdf:<id>:unicode-fonts`), así que **no se escribe al
+  paciente** al archivarlos; la clínica puede usar «Reenviar copia». Ese
+  código ya no se emite: no se reintenta en bucle.
+- Ficheros y tamaño (en el repo y en la imagen, en `src/shared/pdf/fonts/`,
+  que `nest build` copia a `dist/shared/pdf/fonts/`; licencia en `OFL.txt`,
+  origen y SHA-256 en su `README.md`):
+
+  | Fichero | Bytes |
+  | --- | ---: |
+  | `NotoSans-Regular.ttf` | 431 364 |
+  | `NotoSans-Bold.ttf` | 432 376 |
+  | `NotoSansArabic-Regular.ttf` | 142 140 |
+  | `NotoSansArabic-Bold.ttf` | 141 852 |
+  | `NotoSansCJKsc-Regular.otf` | 16 437 364 |
+  | **Total** (con `OFL.txt`) | **17 589 784 (≈ 16,8 MiB)** |
+
+  La imagen crece ≈ 16,8 MiB sin comprimir (≈ 13,5 MiB en gzip, lo que se
+  descarga del registro). Tope: **20 MiB** para `src/shared/pdf/fonts/`; lo
+  comprueba `unicode-fonts.spec.ts`. fontkit, el motor de fuentes, ya venía con
+  pdfkit (ahora declarado y fijado, `2.0.4`): 0 bytes más de dependencias.
+- Memoria: cada fuente se abre la primera vez que hace falta y se queda en
+  memoria (la CJK, ≈ 16 MB, solo si algún PDF la necesita). Medido: 500 PDF
+  con CJK seguidos, heap vivo estable (≈ 31 MB tras GC); un PDF con CJK pesa
+  ≈ 100 KB.
+- Alternativas descartadas: el subconjunto regional `NotoSansSC` (8,3 MB) no
+  tiene hangul (coreano); la colección `.ttc` (≈ 19 MB por peso) y la negrita
+  CJK duplicarían el tamaño; guardarla comprimida (brotli, 11 MB) ahorra poco en
+  el registro (las capas ya van comprimidas) y obliga a descomprimir en
+  arranque.
 
 ### Copia del PDF firmado al paciente y PDF retroactivos (DX-443)
 

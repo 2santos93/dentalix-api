@@ -17,6 +17,7 @@ import type {
   SignedPdfCopyTarget,
 } from '../../domain/ports/signed-pdf-copy-repository.port';
 import { SIGNED_PDF_COPY_DOWNLOADED_REASON } from '../../domain/signed-pdf-copy-link';
+import { LEGACY_UNSUPPORTED_CHARACTERS } from '../../domain/signed-consent-pdf';
 
 /**
  * Copia del PDF firmado (DX-443) en Postgres, todo bajo `runWithTenant` (RLS
@@ -290,6 +291,46 @@ export class PrismaSignedPdfCopyRepository
         return count === 1;
       });
       if (created) queued += 1;
+    }
+    return queued;
+  }
+
+  async retryUnsupportedCharacters(
+    tenantId: string,
+    limit: number,
+    enqueue: (tx: Prisma.TransactionClient, consentId: string) => Promise<void>,
+  ): Promise<number> {
+    const failed = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.signedConsentPdf.findMany({
+        where: {
+          status: 'FAILED',
+          lastErrorCode: LEGACY_UNSUPPORTED_CHARACTERS,
+        },
+        select: { consentId: true },
+        orderBy: { updatedAt: 'asc' },
+        take: limit,
+      }),
+    );
+    let queued = 0;
+    for (const { consentId } of failed) {
+      // Una transacción por consentimiento: el estado y su trabajo juntos.
+      const retried = await this.prisma.runWithTenant(tenantId, async (tx) => {
+        const { count } = await tx.signedConsentPdf.updateMany({
+          where: {
+            consentId,
+            status: 'FAILED',
+            lastErrorCode: LEGACY_UNSUPPORTED_CHARACTERS,
+          },
+          data: {
+            status: 'PENDING',
+            lastErrorCode: null,
+            notifyPatient: false,
+          },
+        });
+        if (count === 1) await enqueue(tx, consentId);
+        return count === 1;
+      });
+      if (retried) queued += 1;
     }
     return queued;
   }

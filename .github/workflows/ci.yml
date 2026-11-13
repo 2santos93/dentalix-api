@@ -560,6 +560,25 @@ jobs:
               .then((b) => sharp(b).metadata())
               .then((m) => { if (m.format !== 'png') process.exit(1); console.log('sharp', sharp.versions.sharp, 'libvips', sharp.versions.vips); })
               .catch((e) => { console.error(e); process.exit(1); });"
+      # DX-459: las fuentes Noto (OFL) van en la imagen junto al renderer
+      # (nest-cli las copia a dist) y un PDF firmado en griego, cirílico, CJK y
+      # árabe se genera con ellas embebidas en subconjunto.
+      - name: Fuentes Unicode del PDF firmado en la imagen
+        run: |
+          docker run --rm dentalix-api:ci sh -c 'test -f dist/shared/pdf/fonts/OFL.txt && du -sk dist/shared/pdf/fonts'
+          docker run --rm dentalix-api:ci node -e "
+            const { PdfkitSignedConsentPdfRenderer } = require('./dist/modules/consents/infrastructure/pdf/signed-consent-pdf.renderer');
+            const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+            const r = new PdfkitSignedConsentPdfRenderer();
+            for (const ch of ['Ζ', 'Ж', '名', 'ひ', '한', 'ع']) if (!r.canPaint(ch)) { console.error('sin glifo', ch); process.exit(1); }
+            r.render({ clinicName: 'Clínica', title: 'Συγκατάθεση — Согласие — 同意书', body: 'Ζωή\\nМария\\n山田花子 김민준\\nالمريض', signerLabel: 'Ζωή', professionalLabel: 'Dra.', patientSignature: png, professionalSignature: png, completedAt: new Date(0), evidence: [] })
+              .then((pdf) => {
+                const raw = pdf.toString('latin1');
+                for (const f of ['NotoSans-Regular', 'NotoSans-Bold', 'NotoSansCJKsc-Regular', 'NotoSansArabic-Regular'])
+                  if (!new RegExp('/BaseFont /[A-Z]{6}\\\\+' + f).test(raw)) { console.error('sin', f); process.exit(1); }
+                console.log('PDF Unicode', pdf.length, 'bytes');
+              })
+              .catch((e) => { console.error(e); process.exit(1); });"
       - name: Prueba de humo de la imagen
         env:
           PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres

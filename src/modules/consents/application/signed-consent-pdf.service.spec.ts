@@ -118,6 +118,11 @@ class FakeRepo implements SignedConsentPdfRepository {
 
 class FakeRenderer implements SignedConsentPdfRenderer {
   fail = false;
+  /** DX-459: lo que el renderer falso «sabe pintar». */
+  painted = (ch: string) => ch !== '☃';
+  canPaint(ch: string): boolean {
+    return this.painted(ch);
+  }
   render(): Promise<Buffer> {
     if (this.fail) return Promise.reject(new Error('laura@example.com'));
     return Promise.resolve(Buffer.from('%PDF-1.7 fake'));
@@ -263,6 +268,33 @@ describe('GenerateSignedConsentPdf (DX-422)', () => {
     expect(repo.failures).toEqual([
       { code: 'INTEGRITY_MISMATCH', final: true },
     ]);
+  });
+
+  it('DX-459: un carácter que ninguna fuente del renderer pinta es definitivo (UNSUPPORTED_GLYPHS), sin archivar', async () => {
+    const { repo, storage, run } = setup();
+    const source = signedSource();
+    repo.job = {
+      ...repo.job!,
+      source: { ...source, location: { ...source.location, name: 'Sede ☃' } },
+    };
+    await run();
+    expect(repo.archived).toEqual([]);
+    expect(storage.saved).toEqual([]);
+    expect(repo.failures).toEqual([
+      { code: 'UNSUPPORTED_GLYPHS', final: true },
+    ]);
+  });
+
+  it('DX-459: el dominio pregunta al renderer qué glifos tiene (otro alfabeto que sí pinta se archiva)', async () => {
+    const { repo, run } = setup();
+    const source = signedSource();
+    repo.job = {
+      ...repo.job!,
+      source: { ...source, location: { ...source.location, name: '渋谷院' } },
+    };
+    await run();
+    expect(repo.archived).toHaveLength(1);
+    expect(repo.failures).toEqual([]);
   });
 
   it('M2: un registro alterado deja un evento de auditoría de sistema (solo ids) y un log de error con event estable', async () => {

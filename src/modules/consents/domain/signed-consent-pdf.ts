@@ -6,7 +6,6 @@ import {
   regionalFormat,
   type RegionalFormat,
 } from '../../../shared/format/regional-format';
-import { isWinAnsiChar } from '../../../shared/pdf/win-ansi';
 import { transliterateToAscii } from '../../../shared/storage/ascii-filename';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import {
@@ -80,7 +79,21 @@ export type SignedConsentPdfSourceErrorCode =
   | 'LOCATION_TIMEZONE_REQUIRED'
   | 'LOCATION_LOCALE_REQUIRED'
   | 'NOT_COMPLETE'
-  | 'UNSUPPORTED_CHARACTERS';
+  | 'UNSUPPORTED_GLYPHS';
+
+/**
+ * DX-459: código con el que quedaban FAILED, ANTES de las fuentes Unicode, los
+ * textos fuera de WinAnsi. Ya no se emite (ahora es `UNSUPPORTED_GLYPHS`: ni
+ * las fuentes embebidas tienen el glifo); el barrido retroactivo (DX-443)
+ * reintenta una vez, sin escribir al paciente, las filas con este código.
+ */
+export const LEGACY_UNSUPPORTED_CHARACTERS = 'UNSUPPORTED_CHARACTERS';
+
+/**
+ * DX-459: ¿el PDF tiene con qué pintar este carácter (uno solo, no un salto
+ * de línea)? Lo responde el renderer según sus fuentes.
+ */
+export type GlyphCoverage = (ch: string) => boolean;
 
 /** El origen no permite generar un PDF probatorio: no se reintenta. */
 export class SignedConsentPdfSourceError extends Error {
@@ -98,26 +111,36 @@ const NOT_RECORDED = 'No registrado';
 
 const THIN_SPACES = /[\u2007\u2009\u202f]/g;
 
+/** Controles C0 y C1 (y DEL): no tienen glifo que pintar. */
+function isControl(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f);
+}
+
 /**
- * Lo que las fuentes estándar del PDF (WinAnsi, `isWinAnsiChar`) pintan tal
- * cual, más los saltos de línea (\n o \r\n).
+ * Lo que el PDF pinta tal cual con sus fuentes (`covers`), más los saltos de
+ * línea (\n o \r\n).
  */
-function isWinAnsiPrintable(text: string): boolean {
+function isPrintable(text: string, covers: GlyphCoverage): boolean {
   const chars = [...text];
   return chars.every((ch, i) => {
     // B5: el tabulador no avanza igual que en pantalla y un \r suelto no es
     // un salto de línea: no se pintarían tal cual. \r\n sí (un salto).
     if (ch === '\r') return chars[i + 1] === '\n';
-    return ch === '\n' || isWinAnsiChar(ch);
+    if (ch === '\n') return true;
+    return !isControl(ch) && covers(ch);
   });
 }
 
 /**
- * Un carácter que la fuente no tiene saldría como otro: el PDF ya no
- * reproduciría el texto firmado. Se niega (fallo definitivo, la ficha lo
- * dice) en vez de archivar un documento alterado.
+ * Un carácter que ninguna fuente del PDF tiene saldría como otro (o como un
+ * hueco): el PDF ya no reproduciría el texto firmado. Se niega (fallo
+ * definitivo, la ficha lo dice) en vez de archivar un documento alterado.
  */
-function assertPrintable(src: SignedConsentPdfSource): void {
+function assertPrintable(
+  src: SignedConsentPdfSource,
+  covers: GlyphCoverage,
+): void {
   const texts = [
     src.clinicName,
     src.title,
@@ -129,8 +152,8 @@ function assertPrintable(src: SignedConsentPdfSource): void {
     src.userAgent ?? '',
     src.location.name,
   ];
-  if (!texts.every(isWinAnsiPrintable)) {
-    throw new SignedConsentPdfSourceError('UNSUPPORTED_CHARACTERS');
+  if (!texts.every((text) => isPrintable(text, covers))) {
+    throw new SignedConsentPdfSourceError('UNSUPPORTED_GLYPHS');
   }
 }
 
@@ -197,12 +220,14 @@ function assertIntegrity(src: SignedConsentPdfSource): void {
  * registro alterado por fuera de la app no se archiva como probatorio. Cada
  * hora va en la zona IANA y el formato de la sede desde la que se envió, con
  * el instante UTC exacto al lado (la evidencia no depende del formato).
+ * `covers` (DX-459): los glifos que el renderer sabe pintar.
  */
 export function buildSignedConsentPdfModel(
   src: SignedConsentPdfSource,
+  covers: GlyphCoverage,
 ): SignedConsentPdfModel {
   assertIntegrity(src);
-  assertPrintable(src);
+  assertPrintable(src, covers);
   const { timeZone, fmt } = regionalOf(src.location);
   // Intl separa con espacios finos (U+202F, U+2009): en el PDF, un espacio.
   const at = (instant: Date) =>
@@ -258,8 +283,8 @@ export function buildSignedConsentPdfModel(
     ],
   };
   // El formato de la sede (p. ej. un locale con «午後») también tiene que caber.
-  if (!model.evidence.every((row) => isWinAnsiPrintable(row.value))) {
-    throw new SignedConsentPdfSourceError('UNSUPPORTED_CHARACTERS');
+  if (!model.evidence.every((row) => isPrintable(row.value, covers))) {
+    throw new SignedConsentPdfSourceError('UNSUPPORTED_GLYPHS');
   }
   return model;
 }

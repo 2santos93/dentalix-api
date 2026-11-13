@@ -51,6 +51,14 @@ export function signedConsentPdfJobKey(consentId: string, retry = 0): string {
     : `consents.signed-pdf:${consentId}:retry-${retry}`;
 }
 
+/**
+ * DX-459: clave del reintento del barrido para un PDF que quedó FAILED por
+ * otro alfabeto antes de las fuentes Unicode (uno por consentimiento).
+ */
+export function signedConsentPdfUnicodeRetryJobKey(consentId: string): string {
+  return `consents.signed-pdf:${consentId}:unicode-fonts`;
+}
+
 /** Códigos de Prisma de conexión perdida (no de la consulta), como DX-151. */
 const CONNECTION_LOST_CODES = new Set(['P1001', 'P1002', 'P1008', 'P1017']);
 
@@ -103,7 +111,7 @@ export class SignedConsentPdfAudit {
  * BD y comprueba los hashes guardados antes de pintar.
  *
  * Errores: los del ORIGEN (registro alterado, no completo, sede sin zona o
- * formato, texto que la fuente no pinta) son definitivos: FAILED sin
+ * formato, texto que ninguna fuente del PDF pinta) son definitivos: FAILED sin
  * reintento. Los demás (almacén, BD, render) se cuentan y se relanzan para
  * que la cola reintente; en el último intento queda FAILED y la ficha ofrece
  * reintentar. Ni en el log ni en la fila va nada clínico: ids y códigos.
@@ -156,7 +164,9 @@ export class GenerateSignedConsentPdf {
     let storageKey: string | null = null;
     try {
       if (!job.source) throw new SignedConsentPdfSourceError('NOT_COMPLETE');
-      const model = buildSignedConsentPdfModel(job.source);
+      const model = buildSignedConsentPdfModel(job.source, (ch) =>
+        this.renderer.canPaint(ch),
+      );
       const pdf = await this.renderer.render(model);
       if (context.signal.aborted) throw new Error('Intento abortado');
       const documentId = randomUUID();
@@ -247,6 +257,18 @@ export class SignedConsentPdfQueue implements SignedConsentPdfScheduler {
       SIGNED_CONSENT_PDF_JOB,
       { consentId },
       { tx, idempotencyKey: signedConsentPdfJobKey(consentId) },
+    );
+  }
+
+  /** DX-459: reintento del barrido tras las fuentes Unicode (una sola vez). */
+  async retryWithUnicodeFonts(
+    tx: Prisma.TransactionClient,
+    consentId: string,
+  ): Promise<void> {
+    await this.jobs.enqueue(
+      SIGNED_CONSENT_PDF_JOB,
+      { consentId },
+      { tx, idempotencyKey: signedConsentPdfUnicodeRetryJobKey(consentId) },
     );
   }
 

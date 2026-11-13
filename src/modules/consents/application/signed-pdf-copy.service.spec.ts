@@ -554,6 +554,7 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
 describe('barrido retroactivo de PDF firmados (DX-443)', () => {
   function backfillSetup(failing: string[] = []) {
     const calls: { tenantId: string; limit: number; keys: string[] }[] = [];
+    const retryCalls: { tenantId: string; limit: number }[] = [];
     const repo: SignedConsentPdfBackfillRepository = {
       tenantIds: () => Promise.resolve(['t1', 't2', 't3']),
       backfill: async (tenantId, limit, enqueue) => {
@@ -565,30 +566,59 @@ describe('barrido retroactivo de PDF firmados (DX-443)', () => {
         calls.push({ tenantId, limit, keys });
         return keys.length;
       },
+      // DX-459: t3 tiene un PDF FAILED por otro alfabeto.
+      retryUnsupportedCharacters: async (tenantId, limit, enqueue) => {
+        retryCalls.push({ tenantId, limit });
+        if (tenantId !== 't3') return 0;
+        await enqueue({} as Prisma.TransactionClient, 't3-legacy');
+        return 1;
+      },
     };
     const enqueued: string[] = [];
+    const unicodeRetries: string[] = [];
     const queue = {
       schedule: (_tx: Prisma.TransactionClient, consentId: string) => {
         enqueued.push(consentId);
         return Promise.resolve();
       },
+      retryWithUnicodeFonts: (
+        _tx: Prisma.TransactionClient,
+        consentId: string,
+      ) => {
+        unicodeRetries.push(consentId);
+        return Promise.resolve();
+      },
     };
     return {
       calls,
+      retryCalls,
       enqueued,
+      unicodeRetries,
       sweep: new BackfillSignedConsentPdfs(repo, queue),
     };
   }
 
   it('recorre las clínicas por lotes y encola la generación con la clave de siempre', async () => {
     const ctx = backfillSetup();
-    await expect(ctx.sweep.run()).resolves.toEqual({ queued: 3 });
+    await expect(ctx.sweep.run()).resolves.toEqual({ queued: 3, retried: 1 });
     expect(ctx.calls.map((c) => [c.tenantId, c.limit])).toEqual([
       ['t1', 100],
       ['t2', 100],
       ['t3', 100],
     ]);
     expect(ctx.enqueued).toEqual(['t1-c1', 't2-c1', 't3-c1']);
+  });
+
+  it('DX-459: reintenta por clínica los FAILED por otro alfabeto con su propia clave, no con la de la firma', async () => {
+    const ctx = backfillSetup();
+    await ctx.sweep.run();
+    expect(ctx.retryCalls).toEqual([
+      { tenantId: 't1', limit: 100 },
+      { tenantId: 't2', limit: 100 },
+      { tenantId: 't3', limit: 100 },
+    ]);
+    expect(ctx.unicodeRetries).toEqual(['t3-legacy']);
+    expect(ctx.enqueued).not.toContain('t3-legacy');
   });
 
   it('una clínica que falla no frena a las demás; al final falla para que la cola reintente', async () => {

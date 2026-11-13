@@ -79,8 +79,14 @@ export function signedConsentFixtures(deps: {
   const asClinic = <T>(tenantId: string, fn: () => Promise<T>): Promise<T> =>
     tenantContext.run(tenantId, fn);
 
-  /** Envía, firma (con el hash real) y devuelve el consentimiento a distancia. */
-  async function remoteSigned(s: Seeded): Promise<string> {
+  /**
+   * Envía, firma (con el hash real) y devuelve el consentimiento a distancia.
+   * `text` (DX-459): otro título o texto (p. ej. en otro alfabeto).
+   */
+  async function remoteSigned(
+    s: Seeded,
+    text: { title?: string; body?: string } = {},
+  ): Promise<string> {
     const now = new Date();
     const token = generateSignatureToken();
     const { id } = await asClinic(s.tenantId, () =>
@@ -92,8 +98,10 @@ export function signedConsentFixtures(deps: {
         templateId: s.templateId,
         templateVersion: 1,
         treatmentPlanId: null,
-        title: 'Consentimiento — Exodoncia',
-        body: 'Yo, Ana Int, autorizo la exodoncia.\n\nRiesgos: sangrado, ¿dudas? ¡sí!',
+        title: text.title ?? 'Consentimiento — Exodoncia',
+        body:
+          text.body ??
+          'Yo, Ana Int, autorizo la exodoncia.\n\nRiesgos: sangrado, ¿dudas? ¡sí!',
         professionalUserId: s.userId,
         professionalName: 'Dra. Int',
         signerType: 'PATIENT',
