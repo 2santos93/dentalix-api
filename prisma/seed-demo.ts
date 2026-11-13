@@ -3020,7 +3020,8 @@ class DemoSeeder {
    * DONE y el relleno). Los pacientes se eligen entre los que no tienen
    * recall: los dos primeros ejemplos, sin cita futura (salen en la lista; el
    * de la profilaxis, de la rotación, para que su plan vaya en USD) y el
-   * tercero, de la rotación con cita (no sale).
+   * tercero, de la rotación con cita (no sale). D19: otro libre con una cita
+   * atendida se reserva y no recibe recall («Sin recall configurado»).
    */
   private async createRecallExamples(
     tenantId: string,
@@ -3033,56 +3034,82 @@ class DemoSeeder {
     receptionId: string,
     catalog: Map<string, string>,
   ): Promise<void> {
-    const { busy, withRecall } = await this.inTenant(tenantId, undefined, () =>
-      this.prisma.runWithTenant(async (tx) => ({
-        busy: await tx.appointment.findMany({
-          where: {
-            patientId: { in: allPatientIds },
-            deletedAt: null,
-            OR: [
-              {
-                status: {
-                  in: [
-                    AppointmentStatus.SCHEDULED,
-                    AppointmentStatus.CONFIRMED,
-                  ],
+    const { busy, withRecall, attended } = await this.inTenant(
+      tenantId,
+      undefined,
+      () =>
+        this.prisma.runWithTenant(async (tx) => ({
+          busy: await tx.appointment.findMany({
+            where: {
+              patientId: { in: allPatientIds },
+              deletedAt: null,
+              OR: [
+                {
+                  status: {
+                    in: [
+                      AppointmentStatus.SCHEDULED,
+                      AppointmentStatus.CONFIRMED,
+                    ],
+                  },
+                  start: { gt: this.now },
                 },
-                start: { gt: this.now },
-              },
-              {
-                status: {
-                  in: [
-                    AppointmentStatus.ARRIVED,
-                    AppointmentStatus.IN_CHAIR,
-                    AppointmentStatus.READY_FOR_CHECKOUT,
-                  ],
+                {
+                  status: {
+                    in: [
+                      AppointmentStatus.ARRIVED,
+                      AppointmentStatus.IN_CHAIR,
+                      AppointmentStatus.READY_FOR_CHECKOUT,
+                    ],
+                  },
                 },
-              },
-            ],
-          },
-          select: { patientId: true },
-        }),
-        withRecall: await tx.patientRecall.findMany({
-          where: { patientId: { in: allPatientIds } },
-          select: { patientId: true },
-        }),
-      })),
+              ],
+            },
+            select: { patientId: true },
+          }),
+          withRecall: await tx.patientRecall.findMany({
+            where: { patientId: { in: allPatientIds } },
+            select: { patientId: true },
+          }),
+          // DX-015-bis (D19): quién tiene una cita atendida reciente.
+          attended: await tx.appointment.findMany({
+            where: {
+              patientId: { in: allPatientIds },
+              deletedAt: null,
+              status: AppointmentStatus.COMPLETED,
+              start: { lte: this.now },
+            },
+            select: { patientId: true },
+          }),
+        })),
     );
     const scheduled = new Set(busy.map((a) => a.patientId));
     const taken = new Set(withRecall.map((r) => r.patientId));
+    const seen = new Set(attended.map((a) => a.patientId));
     const isFree = (id: string) => !scheduled.has(id) && !taken.has(id);
-    // La profilaxis va en un plan en USD: un paciente de la rotación. El
-    // Control fijado, otro libre si lo hay; la demo agenda a casi todos (hoy,
-    // a todos salvo uno), así que puede ser el mismo paciente: un recall por
-    // tipo, dos filas en la lista.
+    // La profilaxis va en un plan en USD: un paciente de la rotación.
+    // D19: después, uno libre con una cita atendida reciente se queda SIN
+    // recall, para que «Sin recall configurado» no salga vacía (la demo es de
+    // las últimas semanas: su visita cae en los 24 meses). El Control fijado,
+    // otro libre si lo hay; la demo agenda a casi todos, así que puede ser el
+    // mismo paciente que la profilaxis: un recall por tipo, dos filas.
     const prophylaxisPatient = localPatientIds.find(isFree);
+    const unconfiguredPatient = allPatientIds.find(
+      (id) => id !== prophylaxisPatient && isFree(id) && seen.has(id),
+    );
     const checkupPatient =
-      allPatientIds.find((id) => id !== prophylaxisPatient && isFree(id)) ??
-      prophylaxisPatient;
+      allPatientIds.find(
+        (id) =>
+          id !== prophylaxisPatient && id !== unconfiguredPatient && isFree(id),
+      ) ?? prophylaxisPatient;
     const booked = localPatientIds.find(
       (id) => scheduled.has(id) && !taken.has(id),
     );
-    if (!prophylaxisPatient || !checkupPatient || !booked) {
+    if (
+      !prophylaxisPatient ||
+      !checkupPatient ||
+      !booked ||
+      !unconfiguredPatient
+    ) {
       throw new Error(
         'La demo no tiene pacientes libres para los ejemplos de recall',
       );

@@ -234,7 +234,7 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
         await admin()
           .post('/patients', {
             firstName: 'Lucía',
-            lastName: 'Restrepo',
+            lastName: 'Urdaneta',
             docType: 'NATIONAL_ID',
             docNumber: 'SEC045-1',
             sex: Sex.F,

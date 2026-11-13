@@ -3445,6 +3445,8 @@ export const DEMO_COMPARISON_HISTORY = {
  *    sale vencido;
  *  - un Control (12 meses) fijado a mano hace 13 meses, con un «No contesta»;
  *  - una Higiene vencida de alguien que ya tiene cita: no sale en la lista.
+ * Y (porción 3, D19) un paciente libre con una cita atendida reciente se queda
+ * SIN recall, para que «Sin recall configurado» tampoco salga vacía.
  */
 export const DEMO_RECALL = {
   prophylaxisDaysAgo: 213,

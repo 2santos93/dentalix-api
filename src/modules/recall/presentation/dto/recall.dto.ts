@@ -133,6 +133,62 @@ export class RecallDueQueryDto extends RecallDueCountQueryDto {
   pageSize?: number;
 }
 
+/** D17: «Sin recall configurado», paginada. */
+export class RecallUnconfiguredQueryDto {
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Solo los pacientes cuya última cita atendida es de esta sede (tiene que estar entre las permitidas: 403 si no). Sin ella, la sede activa (X-Location-Id) o las permitidas.',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'locationId debe ser el id de una sede.' })
+  locationId?: string;
+
+  @ApiPropertyOptional({ minimum: 1, maximum: MAX_PAGE, default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'page debe ser un número entero.' })
+  @Min(1, { message: 'page empieza en 1.' })
+  @Max(MAX_PAGE, { message: `page admite hasta ${MAX_PAGE}.` })
+  page?: number;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: RECALL_MAX_PAGE_SIZE,
+    default: RECALL_DEFAULT_PAGE_SIZE,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'pageSize debe ser un número entero.' })
+  @Min(1, { message: 'pageSize empieza en 1.' })
+  @Max(RECALL_MAX_PAGE_SIZE, {
+    message: `pageSize admite hasta ${RECALL_MAX_PAGE_SIZE}.`,
+  })
+  pageSize?: number;
+}
+
+/** D15: «Programar recall» con el intervalo por defecto del tipo. */
+export class CreateDefaultRecallDto {
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Tipo de recall de la clínica (GET /recall-types), vivo y activo. Se usa su intervalo por defecto.',
+  })
+  @IsUUID('all', {
+    message: 'recallTypeId debe ser el id de un tipo de recall.',
+  })
+  recallTypeId!: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'La cita que se despide (salida del paciente). Tiene que ser de este paciente, viva y en llegada, en sillón, lista para la salida o atendida (si no, 422). Con ella, la base es el día civil de esa cita en la zona de su sede, y la sede es la suya. Sin ella, la última cita atendida del paciente (o hoy): el caso de «Sin recall configurado».',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'appointmentId debe ser el id de una cita.' })
+  appointmentId?: string;
+}
+
 export class SetPatientRecallDto {
   @ApiProperty({
     minimum: RECALL_INTERVAL_MIN,
@@ -335,6 +391,64 @@ export class RecallDueItemDto {
 export class RecallDuePageDto {
   @ApiProperty({ type: [RecallDueItemDto] })
   items!: RecallDueItemDto[];
+
+  @ApiProperty()
+  total!: number;
+
+  @ApiProperty()
+  page!: number;
+
+  @ApiProperty()
+  pageSize!: number;
+}
+
+/** D17: un paciente sin recall configurado. */
+export class RecallUnconfiguredItemDto {
+  @ApiProperty({ format: 'uuid' })
+  patientId!: string;
+
+  @ApiProperty({ example: 'María Rondón' })
+  patientName!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '`null` sin teléfono o con baja de avisos (DX-128)',
+  })
+  patientPhone!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'E.164 sin `+` para `https://wa.me/…` (región de la sede de la última visita); `null` si no sirve o hay baja de avisos',
+  })
+  patientWhatsApp!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-128: el paciente pidió no recibir avisos. Sigue en la lista, sin contacto.',
+  })
+  reminderOptedOut!: boolean;
+
+  @ApiProperty({
+    format: 'date',
+    example: '2027-03-15',
+    description:
+      'Día civil de la última cita atendida, en la zona de su sede (en los últimos 24 meses)',
+  })
+  lastVisitAt!: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Sede de la última cita atendida: la del paciente',
+  })
+  lastVisitLocationId!: string;
+}
+
+export class RecallUnconfiguredPageDto {
+  @ApiProperty({ type: [RecallUnconfiguredItemDto] })
+  items!: RecallUnconfiguredItemDto[];
 
   @ApiProperty()
   total!: number;

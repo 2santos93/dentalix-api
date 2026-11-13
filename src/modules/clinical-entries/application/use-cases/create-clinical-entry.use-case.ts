@@ -9,7 +9,15 @@ import type {
   ClinicalEntryAppointmentRef,
   ClinicalEntryRepository,
 } from '../../domain/ports/clinical-entry-repository.port';
-import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import {
+  ClinicalEntry,
+  type ClinicalEntryRecallUpdate,
+} from '../../domain/entities/clinical-entry.entity';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import {
+  RECALL_INTERVAL_MAX,
+  RECALL_INTERVAL_MIN,
+} from '../../../recall/domain/recall-rules';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
@@ -60,6 +68,7 @@ export const ENTRY_APPOINTMENT_FUTURE_MESSAGE =
 export { ENTRY_DATE_FUTURE_MESSAGE, ENTRY_DATE_OTHER_DAY_MESSAGE };
 export const BLANK_NOTES_MESSAGE =
   'El texto de la evolución no puede estar vacío';
+export const ENTRY_RECALL_INTERVAL_MESSAGE = `El intervalo del recall va de ${RECALL_INTERVAL_MIN} a ${RECALL_INTERVAL_MAX} meses.`;
 
 /** DX-170: respuesta a una pregunta de la plantilla. */
 export interface ClinicalEntryAnswerInput extends NoteAnswer {
@@ -90,6 +99,11 @@ export interface CreateClinicalEntryInput {
    * ellos la evolución se sigue guardando.
    */
   diagnoses?: DiagnosisInput[];
+  /**
+   * DX-015-bis (D18): «Volver en N meses» para un tipo de recall. Opcional; va
+   * en la misma transacción que la evolución.
+   */
+  recall?: { recallTypeId: string; intervalMonths: number };
 }
 
 /**
@@ -99,6 +113,11 @@ export interface CreateClinicalEntryInput {
  */
 export interface CreatedClinicalEntry extends ClinicalEntry {
   warnings: ClinicalEntryWarning[];
+  /**
+   * DX-015-bis (D18): el recall que fijó la evolución y los que la exclusión
+   * desactivó; vacío sin `recall`.
+   */
+  recallUpdates: ClinicalEntryRecallUpdate[];
 }
 
 const NOT_ATTENDED = new Set(['CANCELLED', 'NO_SHOW']);
@@ -140,9 +159,19 @@ export class CreateClinicalEntryUseCase {
     patientId: string,
     input: CreateClinicalEntryInput,
     performedById: string,
+    audit?: AuditRequestContext,
   ): Promise<CreatedClinicalEntry> {
     // DX-038: autoría obligatoria (la BD además exige performedById NOT NULL).
     const author = assertAuthor(performedById);
+    // D18: el intervalo se valida antes de nada (el DTO también lo hace).
+    if (
+      input.recall &&
+      (!Number.isInteger(input.recall.intervalMonths) ||
+        input.recall.intervalMonths < RECALL_INTERVAL_MIN ||
+        input.recall.intervalMonths > RECALL_INTERVAL_MAX)
+    ) {
+      throw new BadRequestException(ENTRY_RECALL_INTERVAL_MESSAGE);
+    }
     if (input.answers !== undefined && input.templateId === undefined) {
       throw new BadRequestException(
         'Las respuestas necesitan una plantilla (templateId)',
@@ -178,7 +207,9 @@ export class CreateClinicalEntryUseCase {
     // anything sneaked into `input` beyond this shape (e.g. a client-supplied
     // `tenantId`/`performedById`) is dropped here, never forwarded to the
     // repository.
-    const created = await this.repo.create({
+    // D18: el tipo (vivo, de esta clínica: 422 si no) se comprueba DENTRO de
+    // la transacción del alta, así un 422 no deja la evolución guardada.
+    const { recallUpdates, ...created } = await this.repo.create({
       patientId,
       // Fecha de atención: la indicada, el día de la cita o "ahora".
       entryDate:
@@ -190,6 +221,13 @@ export class CreateClinicalEntryUseCase {
       appointmentId: appointment?.id,
       templateId: input.templateId,
       diagnoses,
+      recall: input.recall
+        ? {
+            recallTypeId: input.recall.recallTypeId,
+            intervalMonths: input.recall.intervalMonths,
+          }
+        : undefined,
+      audit,
     });
     return {
       ...created,
@@ -197,6 +235,7 @@ export class CreateClinicalEntryUseCase {
         warnMissingProfessionalLicense,
         professionalLicense: created.authorProfessionalLicense,
       }),
+      recallUpdates,
     };
   }
 
