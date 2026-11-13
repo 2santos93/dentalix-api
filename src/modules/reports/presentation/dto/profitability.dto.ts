@@ -74,7 +74,6 @@ export class ProfitabilityLinesQueryDto extends ProfitabilityQueryDto {
   side!: ProfitabilitySide;
 
   @ApiProperty({
-    example: 'USD',
     description: 'La moneda de la cifra (ISO 4217)',
   })
   @Matches(CURRENCY_CODE, { message: CURRENCY_CODE_MESSAGE })
@@ -155,7 +154,7 @@ export class ProfitabilityCategoryDto {
 }
 
 export class ProfitabilityCurrencyDto {
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras' })
   currency!: string;
 
   @ApiProperty({ example: 1500, description: 'Ingresos en esta moneda' })
@@ -336,7 +335,7 @@ export class ProfitabilityLinesDto {
   @ApiProperty({ enum: PROFITABILITY_SIDES })
   side!: string;
 
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras' })
   currency!: string;
 
   @ApiProperty({ type: String, format: 'uuid', nullable: true })

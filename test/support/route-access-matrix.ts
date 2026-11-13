@@ -726,6 +726,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /reports/chair-occupancy.csv': ADMIN_ONLY,
   // DX-424: enlaces del paciente (REPORT_ROLES).
   'GET /reports/patient-links': ADMIN_ONLY,
+  // DX-410: rentabilidad por sede, su CSV y el detalle de cada cifra
+  // (PROFITABILITY_REPORT_ROLES).
+  'GET /reports/profitability': ADMIN_ONLY,
+  'GET /reports/profitability.csv': ADMIN_ONLY,
+  'GET /reports/profitability/lines': ADMIN_ONLY,
   // DX-439: «Pendiente de cerrar». ADMIN todo; DENTIST evolución y
   // tratamiento de sus citas; RECEPTION el desenlace (lo acota el caso de uso).
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),

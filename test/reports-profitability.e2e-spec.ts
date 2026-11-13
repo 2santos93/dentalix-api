@@ -539,9 +539,23 @@ describe('GET /reports/profitability (DX-410)', () => {
     const r = res.body as ProfitabilityReport;
     expect(r.locations.map((l) => l.locationId)).toEqual([bLocation]);
     expect(nets(r.total)).toEqual([['USD', 66_666, 55_555, 11_111]]);
-    const mine = JSON.stringify(await report('CASH'));
-    expect(mine).not.toContain('66666');
-    expect(mine).not.toContain('55555');
+    // A: sus tres sedes y sus importes exactos, sin nada de B.
+    const mine = await report('CASH');
+    expect(mine.locations.map((l) => l.locationId)).toEqual([
+      principal,
+      norte,
+      sur,
+    ]);
+    expect(nets(mine.total)).toEqual([
+      ['USD', 1_000, 350, 650],
+      ['VES', 50_000, 0, 50_000],
+    ]);
+    const detail = await lines({
+      basis: 'CASH',
+      side: 'EXPENSE',
+      currency: 'USD',
+    });
+    expect(detail.lines.map((l) => l.locationId)).not.toContain(bLocation);
   });
 
   describe('permisos', () => {
