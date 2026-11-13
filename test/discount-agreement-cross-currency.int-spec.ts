@@ -962,9 +962,37 @@ describe('rebaja de convenio entre monedas en las listas (DX-513-ter, Postgres)'
              (SELECT "id" FROM "treatment_plans" WHERE "tenantId" = ${s.tenantId}::uuid LIMIT 1),
              '18', '{}', ${s.catalogItemId}::uuid, 100, 100, 0, now()
         FROM generate_series(1, 3000)`;
+    // DX-513-quinquies: las dos tablas del join (TRUNCATE no borra las
+    // estadísticas; con las de "treatment_plans" que dejó otro test, la parada
+    // temprana del merge join a veces le ganaba a los índices parciales).
     await raw.$executeRawUnsafe('ANALYZE "treatment_plan_items"');
+    await raw.$executeRawUnsafe('ANALYZE "treatment_plans"');
     const from = new Date(Date.now() - 7 * 24 * 3600 * 1000);
     const to = new Date(Date.now() + 24 * 3600 * 1000);
+    // Los índices parciales responden al predicado de los ítems: se comprueban
+    // con ese lado solo, sin join que el planificador pueda reordenar.
+    const itemsExplain = await raw.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      return tx.$queryRawUnsafe<{ 'QUERY PLAN': string }[]>(
+        `EXPLAIN SELECT i."id"
+           FROM "treatment_plan_items" i
+          WHERE i."tenantId" = $1::uuid
+            AND ${where}
+            AND i."deletedAt" IS NULL
+            AND COALESCE(i."discountAt", i."createdAt") >= $2
+            AND COALESCE(i."discountAt", i."createdAt") < $3`,
+        s.tenantId,
+        from,
+        to,
+      );
+    });
+    const itemsPlan = itemsExplain.map((r) => r['QUERY PLAN']).join('\n');
+    expect(itemsPlan).toContain(
+      'treatment_plan_items_tenant_effective_ref_discount_at_idx',
+    );
+    expect(itemsPlan).toContain(NEW_IDX);
+    // La consulta completa del informe: sin recorrido secuencial de los ítems,
+    // sea cual sea el join que elija.
     const explain = await raw.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
       return tx.$queryRawUnsafe<{ 'QUERY PLAN': string }[]>(
@@ -985,10 +1013,6 @@ describe('rebaja de convenio entre monedas en las listas (DX-513-ter, Postgres)'
       );
     });
     const planText = explain.map((r) => r['QUERY PLAN']).join('\n');
-    expect(planText).toContain(
-      'treatment_plan_items_tenant_effective_ref_discount_at_idx',
-    );
-    expect(planText).toContain(NEW_IDX);
     expect(planText).not.toMatch(/Seq Scan on treatment_plan_items/);
   });
 });
