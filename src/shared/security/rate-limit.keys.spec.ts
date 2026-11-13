@@ -1,4 +1,6 @@
 import {
+  brandingHostRateLimitKey,
+  brandingMissRateLimitKey,
   passwordRateLimitKey,
   publicTokenRateLimitKey,
   staffActorRateLimitKey,
@@ -110,5 +112,55 @@ describe('publicTokenRateLimitKey (DX-099)', () => {
     expect(publicTokenRateLimitKey('r', undefined)).toBe(
       publicTokenRateLimitKey('r', ''),
     );
+  });
+});
+
+describe('brandingHostRateLimitKey (DX-555)', () => {
+  const prefix = 'PublicBrandingByHostController-branding-branding-host';
+
+  it('un balde por IP + host: otro host u otra IP, otro balde', () => {
+    const a = brandingHostRateLimitKey(
+      prefix,
+      '10.0.0.1',
+      'sonrisa.dentalix.app',
+    );
+    expect(
+      brandingHostRateLimitKey(prefix, '10.0.0.1', 'sonrisa.dentalix.app'),
+    ).toBe(a);
+    expect(
+      brandingHostRateLimitKey(prefix, '10.0.0.1', 'norte.dentalix.app'),
+    ).not.toBe(a);
+    expect(
+      brandingHostRateLimitKey(prefix, '10.0.0.2', 'sonrisa.dentalix.app'),
+    ).not.toBe(a);
+  });
+
+  it('todos los hosts mal formados de una IP comparten UN balde', () => {
+    expect(brandingHostRateLimitKey(prefix, '10.0.0.1', null)).toBe(
+      brandingHostRateLimitKey(prefix, '10.0.0.1', null),
+    );
+    expect(brandingHostRateLimitKey(prefix, '10.0.0.1', null)).not.toBe(
+      brandingHostRateLimitKey(prefix, '10.0.0.1', 'invalid'),
+    );
+  });
+
+  it('no guarda el host ni la IP en claro', () => {
+    const key = brandingHostRateLimitKey(
+      prefix,
+      '10.0.0.1',
+      'sonrisa.dentalix.app',
+    );
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('brandingMissRateLimitKey (DX-555)', () => {
+  const prefix = 'PublicBrandingByHostController-branding-branding-miss';
+
+  it('un balde por IP, distinto del de aciertos de cualquier host', () => {
+    const miss = brandingMissRateLimitKey(prefix, '10.0.0.1');
+    expect(brandingMissRateLimitKey(prefix, '10.0.0.1')).toBe(miss);
+    expect(brandingMissRateLimitKey(prefix, '10.0.0.2')).not.toBe(miss);
+    expect(miss).not.toBe(brandingHostRateLimitKey(prefix, '10.0.0.1', null));
   });
 });

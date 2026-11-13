@@ -8,7 +8,8 @@
  * register/verify).
  *
  * - global:        cada ruta, por IP (salvo las sondas /health y
- *                  /health/ready, con @SkipThrottle en HealthController). Red
+ *                  /health/ready, con @SkipThrottle en HealthController, y la
+ *                  marca por host, que tiene los dos baldes propios de abajo). Red
  *                  de seguridad contra abuso/scraping, holgada porque una
  *                  clínica entera suele salir por UNA IP (NAT).
  * - auth:          register y su verificación; por IP.
@@ -79,6 +80,23 @@
  *                  pacientes por un teléfono: frena a quien pruebe números
  *                  en bloque, y deja sobrado a una recepción que atiende
  *                  una llamada por minuto.
+ * - branding-host: la marca por host del render de servidor (`GET
+ *                  /public/tenant/branding/by-host`, DX-555), por IP + HOST
+ *                  normalizado (hash), SIN el balde global: todas esas
+ *                  llamadas salen de la IP del servidor web, y con el global
+ *                  un aluvión de hosts inventados dejaba sin marca a todas las
+ *                  clínicas. Holgado (600/min): la web guarda cada host 30 s,
+ *                  pero si un aluvión le vacía esa caché (LRU de 2000 hosts)
+ *                  cada render de una clínica real vuelve a preguntar; 600/min
+ *                  son 10 renders por segundo de UNA clínica. Por IP + host y
+ *                  no solo por host: un cliente externo que machaque el host
+ *                  de una clínica agota su balde, no el del servidor web.
+ * - branding-miss: la misma ruta, por IP, pero solo cuentan los FALLOS (404:
+ *                  host desconocido o mal formado). No es un limitador del
+ *                  guard (el fallo se sabe tras la consulta): lo cuenta
+ *                  `BrandingMissLimitInterceptor`. Enumerar es una ristra de
+ *                  fallos y choca aquí; una clínica real es un acierto, nunca
+ *                  lo gasta ni lo ve agotado.
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -102,7 +120,9 @@ export type RateLimitPolicy =
   | 'slot-offer'
   | 'slot-token'
   | 'copy-link'
-  | 'copy-token';
+  | 'copy-token'
+  | 'branding-host'
+  | 'branding-miss';
 
 export interface RateLimitRule {
   limit: number;
@@ -139,6 +159,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'slot-token': { limit: 10, ttlMs: MINUTE },
   'copy-link': { limit: 20, ttlMs: MINUTE },
   'copy-token': { limit: 10, ttlMs: MINUTE },
+  'branding-host': { limit: 600, ttlMs: MINUTE },
+  'branding-miss': { limit: 60, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -187,5 +209,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'slot-token': rule('slot-token'),
     'copy-link': rule('copy-link'),
     'copy-token': rule('copy-token'),
+    'branding-host': rule('branding-host'),
+    'branding-miss': rule('branding-miss'),
   };
 }

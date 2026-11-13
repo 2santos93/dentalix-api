@@ -9,19 +9,32 @@ import {
 import { GetTenantBrandingByHostUseCase } from '../application/use-cases/get-tenant-branding-by-host.use-case';
 import { BrandingDto } from './dto/branding.dto';
 import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
+import { SkipThrottle } from '@nestjs/throttler';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
+import { BrandingMissLimitInterceptor } from '../../../shared/security/branding-miss-limit.interceptor';
 
 // DX-517-ter. PÚBLICA y SIN clínica en contexto: ni JwtAuthGuard/RolesGuard ni
 // PublicTenantContextInterceptor (va en su propio controlador para no heredar
 // el de `PublicBrandingController`). La clínica sale SOLO del parámetro
 // `host`; las cabeceras de la petición (Host, X-Forwarded-Host, X-Tenant-Host,
-// X-Tenant) no cuentan. Límite: el global del throttler (por IP y ruta).
+// X-Tenant) no cuentan.
+//
+// Límites (DX-555): FUERA del global por IP, porque todas las llamadas salen
+// de la IP del servidor web y un aluvión de hosts inventados agotaba ese
+// balde y dejaba sin marca a las clínicas reales. En su lugar:
+// - `branding-host`: por IP + host normalizado (guard), para los aciertos;
+// - `branding-miss`: por IP, contando solo los 404 (host desconocido o mal
+//   formado), en `BrandingMissLimitInterceptor`. Frena la enumeración desde
+//   cualquier cliente sin tocar a las clínicas reales, que son aciertos.
 @ApiTags('public')
-@UseInterceptors(NoStoreHeadersInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, BrandingMissLimitInterceptor)
 @Controller('public/tenant')
 export class PublicBrandingByHostController {
   constructor(private readonly getByHost: GetTenantBrandingByHostUseCase) {}
 
   @Get('branding/by-host')
+  @SkipThrottle({ default: true })
+  @RateLimit('branding-host')
   @ApiOperation({
     summary: 'Marca pública de la clínica de un host',
     description:
