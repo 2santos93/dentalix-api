@@ -127,6 +127,8 @@ export class ColumnMappingDto {
   @ApiPropertyOptional() emergencyContactName?: string;
   @ApiPropertyOptional() emergencyContactPhone?: string;
   @ApiPropertyOptional() notes?: string;
+  /** DX-497: columna «idioma» (BCP 47 de la lista de la clínica). */
+  @ApiPropertyOptional() preferredLanguage?: string;
 }
 
 export class PatientImportInspectDto {
@@ -244,6 +246,8 @@ export class ImportPatientDataDto {
   @ApiPropertyOptional() emergencyContactName?: string;
   @ApiPropertyOptional() emergencyContactPhone?: string;
   @ApiPropertyOptional() notes?: string;
+  /** DX-497: columna «idioma» (BCP 47 de la lista de la clínica). */
+  @ApiPropertyOptional() preferredLanguage?: string;
 }
 
 export class ImportPreviewRowDto {

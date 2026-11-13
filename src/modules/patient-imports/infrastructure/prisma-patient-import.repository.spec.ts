@@ -94,3 +94,31 @@ describe('filas de la importación (DX-327)', () => {
     expect(created).not.toHaveProperty('docType');
   });
 });
+
+describe('columna «idioma» de la importación (DX-497)', () => {
+  const base = {
+    tenantId: 't1',
+    importBatchId: 'b1',
+    contactChannel: 'EMAIL' as const,
+    createdById: 'u1',
+    now: new Date('2026-11-13T10:00:00.000Z'),
+  };
+  it('el paciente nuevo nace con el idioma de la fila, o con el de la clínica (null)', () => {
+    expect(
+      importedPatientData(
+        { ...row('NATIONAL_ID'), preferredLanguage: 'en' },
+        base,
+      ),
+    ).toMatchObject({ preferredLanguage: 'en' });
+    expect(importedPatientData(row('NATIONAL_ID'), base)).toMatchObject({
+      preferredLanguage: null,
+    });
+  });
+  it('la fila preparada guarda el idioma y se lee igual', () => {
+    const stored = storedImportRowData({
+      ...row('NATIONAL_ID'),
+      preferredLanguage: 'ca',
+    });
+    expect(stored).toMatchObject({ preferredLanguage: 'ca' });
+  });
+});
