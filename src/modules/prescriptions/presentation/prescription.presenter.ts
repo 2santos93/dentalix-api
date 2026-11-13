@@ -77,10 +77,16 @@ export function presentPublicVerification(
     clinicName: null,
     patientInitials: null,
     locale: null,
+    hourCycle: null,
   };
   if (v.status === 'UNVERIFIABLE') return empty;
   if (v.status === 'VOIDED') {
-    return { ...empty, voidedOn: v.voidedOn, locale: v.locale };
+    return {
+      ...empty,
+      voidedOn: v.voidedOn,
+      locale: v.locale,
+      hourCycle: v.hourCycle,
+    };
   }
   return {
     ...empty,
@@ -90,5 +96,6 @@ export function presentPublicVerification(
     clinicName: v.clinicName,
     patientInitials: v.patientInitials,
     locale: v.locale,
+    hourCycle: v.hourCycle,
   };
 }

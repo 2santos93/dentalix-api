@@ -56,6 +56,7 @@ interface Verification {
   clinicName: string | null;
   patientInitials: string | null;
   locale: string | null;
+  hourCycle: 'h12' | 'h23' | null;
 }
 
 describe('Verificación pública de la receta por su código (e2e, DX-467)', () => {
@@ -153,6 +154,7 @@ describe('Verificación pública de la receta por su código (e2e, DX-467)', () 
       clinicName: 'Clinica dx467-receta-a',
       patientInitials: 'M. J. P. R.',
       locale: expect.any(String) as string,
+      hourCycle: expect.stringMatching(/^h(12|23)$/) as string,
     });
     expect(res.text).not.toContain(MEDICINE);
     expect(res.text).not.toContain(DOC_NUMBER);
@@ -198,6 +200,7 @@ describe('Verificación pública de la receta por su código (e2e, DX-467)', () 
       clinicName: null,
       patientInitials: null,
       locale: expect.any(String) as string,
+      hourCycle: expect.stringMatching(/^h(12|23)$/) as string,
     });
     expect(res.text).not.toContain(VOID_REASON);
     expect(res.headers['cache-control']).toBe('no-store');
@@ -226,6 +229,7 @@ describe('Verificación pública de la receta por su código (e2e, DX-467)', () 
       clinicName: null,
       patientInitials: null,
       locale: null,
+      hourCycle: null,
     });
     expect(await publicAudit(rx.id)).toEqual([
       {

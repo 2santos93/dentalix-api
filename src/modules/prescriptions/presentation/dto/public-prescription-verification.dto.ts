@@ -64,7 +64,17 @@ export class PublicPrescriptionVerificationDto {
     nullable: true,
     example: 'es-VE',
     description:
-      'Locale de la sede, para escribir las fechas como allí (null = el de la web).',
+      'Locale de la sede, para escribir las fechas con su formato (null = sin formato: la web pinta «—»).',
   })
   locale!: string | null;
+
+  @ApiProperty({
+    enum: ['h12', 'h23'],
+    enumName: 'PrescriptionHourCycle',
+    nullable: true,
+    example: 'h12',
+    description:
+      'Reloj de la sede (lo pide el formateador regional de la web junto al locale).',
+  })
+  hourCycle!: 'h12' | 'h23' | null;
 }

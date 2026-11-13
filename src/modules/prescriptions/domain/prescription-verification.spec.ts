@@ -13,7 +13,11 @@ const RX: VerifiablePrescription = {
   professionalLicense: 'MPPS 45678',
   clinicName: 'Clínica Dental Los Palos Grandes',
   patientName: 'María José Pérez de la Rosa',
-  locationFormat: { timeZone: 'America/Caracas', locale: 'es-VE' },
+  locationFormat: {
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h12',
+  },
 };
 
 describe('iniciales del paciente (DX-467)', () => {
@@ -40,6 +44,7 @@ describe('verificación pública de la receta (DX-467)', () => {
       clinicName: 'Clínica Dental Los Palos Grandes',
       patientInitials: 'M. J. P. R.',
       locale: 'es-VE',
+      hourCycle: 'h12',
     });
   });
 
@@ -53,7 +58,12 @@ describe('verificación pública de la receta (DX-467)', () => {
         },
         true,
       ),
-    ).toEqual({ status: 'VOIDED', voidedOn: '2026-11-19', locale: 'es-VE' });
+    ).toEqual({
+      status: 'VOIDED',
+      voidedOn: '2026-11-19',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
   });
 
   it('hash que no casa: no se puede verificar, aunque esté anulada', () => {
@@ -67,14 +77,21 @@ describe('verificación pública de la receta (DX-467)', () => {
   });
 
   it('sede sin zona válida: el día queda null, nunca una zona de reserva', () => {
-    const noZone = { ...RX, locationFormat: { timeZone: null, locale: null } };
+    const noZone = {
+      ...RX,
+      locationFormat: { timeZone: null, locale: null, hourCycle: null },
+    };
     expect(verifyPrescription(noZone, true)).toMatchObject({
       issuedOn: null,
       locale: null,
     });
     const badZone = {
       ...RX,
-      locationFormat: { timeZone: 'Mars/Olympus', locale: 'es-VE' },
+      locationFormat: {
+        timeZone: 'Mars/Olympus',
+        locale: 'es-VE',
+        hourCycle: 'h12' as const,
+      },
     };
     expect(verifyPrescription(badZone, true)).toMatchObject({ issuedOn: null });
   });

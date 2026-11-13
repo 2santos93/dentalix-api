@@ -1,3 +1,4 @@
+import type { HourCycle } from '../../../shared/format/regional-format';
 import { civilDateIn, isValidTimeZone } from '../../../shared/time/civil-day';
 
 /**
@@ -14,8 +15,8 @@ import { civilDateIn, isValidTimeZone } from '../../../shared/time/civil-day';
  *
  * Los días son civiles (`YYYY-MM-DD`) en la zona de la sede de la receta;
  * `null` si la sede no tiene una zona válida (nunca una zona de reserva,
- * GLOBAL-G1). `locale` es el de la sede, para que la web los escriba como allí
- * se escriben (DD/MM/AAAA en Venezuela).
+ * GLOBAL-G1). `locale` y `hourCycle` son los de la sede, para que la web los
+ * escriba con su formato (DX-354: nunca el del navegador ni uno fijo).
  */
 export type PrescriptionVerification =
   | {
@@ -26,8 +27,14 @@ export type PrescriptionVerification =
       clinicName: string;
       patientInitials: string;
       locale: string | null;
+      hourCycle: HourCycle | null;
     }
-  | { status: 'VOIDED'; voidedOn: string | null; locale: string | null }
+  | {
+      status: 'VOIDED';
+      voidedOn: string | null;
+      locale: string | null;
+      hourCycle: HourCycle | null;
+    }
   | { status: 'UNVERIFIABLE' };
 
 /** Lo que la verificación lee de una receta guardada. */
@@ -39,7 +46,11 @@ export interface VerifiablePrescription {
   professionalLicense: string;
   clinicName: string;
   patientName: string;
-  locationFormat: { timeZone: string | null; locale: string | null };
+  locationFormat: {
+    timeZone: string | null;
+    locale: string | null;
+    hourCycle: HourCycle | null;
+  };
 }
 
 /** Partículas de los apellidos que no dan inicial («de la Rosa» → R). */
@@ -90,12 +101,13 @@ export function verifyPrescription(
   integrityOk: boolean,
 ): PrescriptionVerification {
   if (!integrityOk) return { status: 'UNVERIFIABLE' };
-  const { timeZone, locale } = rx.locationFormat;
+  const { timeZone, locale, hourCycle } = rx.locationFormat;
   if (rx.status === 'VOIDED') {
     return {
       status: 'VOIDED',
       voidedOn: civilDayOrNull(rx.voidedAt, timeZone),
       locale,
+      hourCycle,
     };
   }
   return {
@@ -106,5 +118,6 @@ export function verifyPrescription(
     clinicName: rx.clinicName,
     patientInitials: patientInitials(rx.patientName),
     locale,
+    hourCycle,
   };
 }

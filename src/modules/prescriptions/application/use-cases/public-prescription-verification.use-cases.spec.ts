@@ -57,7 +57,7 @@ describe('VerifyPublicPrescriptionUseCase (DX-467)', () => {
     repo.locationFormats.set(rx.locationId, {
       timeZone: 'America/Caracas',
       locale: 'es-VE',
-      hourCycle: null,
+      hourCycle: 'h12',
     });
   });
 
@@ -77,6 +77,7 @@ describe('VerifyPublicPrescriptionUseCase (DX-467)', () => {
       clinicName: 'Clínica Demo',
       patientInitials: 'A. P. G.',
       locale: 'es-VE',
+      hourCycle: 'h12',
     });
     expect(repo.publicVerifications).toEqual([
       {
@@ -102,6 +103,7 @@ describe('VerifyPublicPrescriptionUseCase (DX-467)', () => {
       status: 'VOIDED',
       voidedOn: '2026-10-19',
       locale: 'es-VE',
+      hourCycle: 'h12',
     });
   });
 
