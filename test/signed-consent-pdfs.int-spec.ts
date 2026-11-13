@@ -8,6 +8,10 @@ import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastr
 import { PrismaSignedConsentPdfRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-consent-pdf.repository';
 import { PdfkitSignedConsentPdfRenderer } from '../src/modules/consents/infrastructure/pdf/signed-consent-pdf.renderer';
 import {
+  pdfFonts,
+  pdfTextLines,
+} from '../src/modules/consents/infrastructure/pdf/__fixtures__/pdf-text';
+import {
   GenerateSignedConsentPdf,
   SignedConsentPdfAudit,
 } from '../src/modules/consents/application/signed-consent-pdf.service';
@@ -131,6 +135,80 @@ describe('PDF firmado en Postgres (DX-422)', () => {
         where: { patientId: a.patientId, category: 'SIGNED_CONSENT' },
       }),
     ).toBe(1);
+  });
+
+  it('DX-459: griego, cirílico y CJK se archivan READY con el texto tal cual y las fuentes embebidas en subconjunto', async () => {
+    const title = 'Συγκατάθεση — Согласие — 同意书';
+    const lines = [
+      'Η Ζωή Παπαδοπούλου συναινεί στην εξαγωγή του 38.',
+      'Мария Иванова согласна на удаление зуба 38.',
+      '患者：山田花子は同意します。환자 김민준은 동의합니다.',
+    ];
+    const consentId = await remoteSigned(a, { title, body: lines.join('\n') });
+    await countersign(a, consentId);
+    await generate(a, consentId);
+    const state = await owner.signedConsentPdf.findFirstOrThrow({
+      where: { consentId },
+    });
+    expect(state).toMatchObject({ status: 'READY', lastErrorCode: null });
+    const doc = await owner.patientDocument.findUniqueOrThrow({
+      where: { id: state.documentId! },
+    });
+    const pdf = storage.files.get(doc.storageKey)!.bytes;
+    expect(createHash('sha256').update(pdf).digest('hex')).toBe(doc.sha256);
+    const painted = pdfTextLines(pdf);
+    expect(painted).toContain(title);
+    for (const line of lines) expect(painted).toContain(line);
+    const fonts = [...pdfFonts(pdf).values()].map((f) => f.baseFont);
+    expect(fonts).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^[A-Z]{6}\+NotoSans-Regular$/),
+        expect.stringMatching(/^[A-Z]{6}\+NotoSansCJKsc-Regular$/),
+      ]) as string[],
+    );
+    expect(pdf.length).toBeLessThan(400_000);
+  });
+
+  it('DX-459 subconjunto CJK: 臺灣 + 山田花子 + 뷁 + griego + cirílico se archivan READY', async () => {
+    const title = 'Συναίνεση — Согласие — 同意書';
+    const body = '臺灣 山田花子 뷁\nΖωή Παπαδοπούλου\nМария Иванова';
+    const consentId = await remoteSigned(a, { title, body });
+    await countersign(a, consentId);
+    await generate(a, consentId);
+    const state = await owner.signedConsentPdf.findFirstOrThrow({
+      where: { consentId },
+    });
+    expect(state).toMatchObject({ status: 'READY', lastErrorCode: null });
+    const doc = await owner.patientDocument.findUniqueOrThrow({
+      where: { id: state.documentId! },
+    });
+    const painted = pdfTextLines(storage.files.get(doc.storageKey)!.bytes);
+    expect(painted).toContain(title);
+    for (const line of body.split('\n')) expect(painted).toContain(line);
+  });
+
+  it('DX-459 subconjunto CJK: un ideograma fuera (堃, 髙) queda FAILED UNSUPPORTED_GLYPHS definitivo, sin archivar', async () => {
+    for (const body of ['患者：张堃，同意治疗。', '髙橋花子は同意します。']) {
+      const consentId = await remoteSigned(a, { body });
+      await countersign(a, consentId);
+      const docsBefore = await owner.patientDocument.count({
+        where: { patientId: a.patientId },
+      });
+      // Primer intento de 6: aun así es definitivo (no relanza a la cola).
+      await expect(generate(a, consentId)).resolves.toBeUndefined();
+      expect(
+        await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+      ).toMatchObject({
+        status: 'FAILED',
+        lastErrorCode: 'UNSUPPORTED_GLYPHS',
+        documentId: null,
+      });
+      expect(
+        await owner.patientDocument.count({
+          where: { patientId: a.patientId },
+        }),
+      ).toBe(docsBefore);
+    }
   });
 
   it('inmutable: ni el documento archivado ni su estado READY cambian, y no se borran', async () => {

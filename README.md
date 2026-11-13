@@ -1094,16 +1094,97 @@ no hay una común. No cambia después (trigger
   (`GET /patients/:id/documents/:docId/url/download`, URL firmada y auditada).
 - Reintentos: backoff exponencial de la cola, 6 intentos; el último deja
   `FAILED` con un código técnico (`lastErrorCode`, nunca un mensaje). Un origen
-  inválido (hash que no casa, sede sin zona o formato, texto que las fuentes
-  estándar no pintan: `UNSUPPORTED_CHARACTERS`) es `FAILED` sin reintento: nunca
+  inválido (hash que no casa, sede sin zona o formato, texto que ninguna fuente
+  del PDF pinta: `UNSUPPORTED_GLYPHS`) es `FAILED` sin reintento: nunca
   se archiva un documento alterado. `POST /patients/:id/consents/:consentId/signed-pdf/retry`
   (los cuatro roles, 202; 409 si no está en error; 404 de otra clínica) lo
   vuelve a encolar.
 - La lista de la ficha (`GET …/signature-requests`) trae `signedPdfStatus` y
   `signedPdfDocumentId`.
-- Fuentes: Helvetica (WinAnsi), que cubre el español, el portugués y el resto
-  de lenguas de Europa occidental. Un texto con otros alfabetos queda `FAILED`
-  con `UNSUPPORTED_CHARACTERS` hasta que se embeba una fuente Unicode.
+- Fuentes: ver «Fuentes Unicode del PDF firmado (DX-459)».
+
+### Fuentes Unicode del PDF firmado (DX-459)
+
+- Si TODO lo que pinta el PDF cabe en WinAnsi (español, portugués y el resto de
+  Europa occidental), se pinta como siempre con las fuentes estándar
+  (Helvetica, sin fuente embebida): **las mismas llamadas a pdfkit y los mismos
+  bytes** que antes de DX-459, así que la huella (`patient_documents.sha256`)
+  de un PDF latino no cambia. Lo fija
+  `signed-consent-pdf.latin-pin.spec.ts` (SHA-256 de un PDF latino tomado con
+  el renderer de DX-422).
+- Si algún texto (título, cuerpo, nombres, sede, navegador, un formato de
+  fecha) sale de WinAnsi, el documento ENTERO se pinta con fuentes **Noto**
+  (SIL OFL 1.1) embebidas en **subconjunto** (solo los glifos usados): Noto
+  Sans (latín, griego, cirílico; regular y negrita) y un **subconjunto** de
+  Noto Sans CJK SC regular (la negrita CJK usa la regular): GB2312 (6763 hanzi,
+  chino simplificado), JIS X 0208 (6356 kanji), Big5 nivel 1 (5401 hanzi
+  tradicionales de uso común), las 11 172 sílabas hangul, kana, puntuación y
+  formas de ancho completo (un ideograma con variantes regionales sale con la
+  forma china simplificada). Cada letra va con la primera de esas fuentes que
+  la tiene.
+- **Hueco conocido del subconjunto**: ideogramas fuera de GB2312/JIS X 0208/
+  Big5-1, p. ej. caracteres de nombres de pila chinos modernos (堃, 喆, 赟) o
+  variantes de apellidos japoneses (髙 de 髙橋). Ese consentimiento queda
+  `FAILED` con `UNSUPPORTED_GLYPHS` (definitivo, visible en la ficha), nunca un
+  PDF con huecos. Si una clínica lo necesita, el siguiente paso es añadir la
+  lista china de 8105 caracteres de uso general (通用规范汉字表, de una fuente
+  revisada) y regenerar el subconjunto (`src/shared/pdf/fonts/README.md`).
+- Se niegan siempre (`FAILED` con `UNSUPPORTED_GLYPHS`, sin reintento: nunca
+  se archiva un texto que se VEA distinto del firmado), aunque una fuente
+  tenga el glifo:
+  - controles (tabulador, `\r` suelto…);
+  - caracteres de formato `\p{Cf}` (marcas y aislamientos bidi U+200E/F,
+    U+202A–E, U+2066–9; espacios y uniones de ancho cero; U+FEFF…) y los
+    separadores U+2028/U+2029. No se quitan en silencio: eso cambiaría el
+    texto firmado y hasheado. Excepción: el guion opcional U+00AD, que está en
+    WinAnsi y Helvetica pinta visible como siempre; en un documento con
+    fuentes embebidas (que lo pintan como espacio) se niega;
+  - escrituras de derecha a izquierda (árabe, hebreo, siríaco, thaana, n'ko,
+    samaritano, mandeo, adlam, hanifi rohingya, yazidí): sin maquetación bidi
+    (fuera de alcance), pintadas en orden lógico, una línea mixta podría
+    leerse en otro orden que el firmado. Se aceptarán cuando haya bidi;
+  - lo que ninguna fuente tiene (emoji, devanagari, tailandés…).
+- Los PDF que quedaron `FAILED` con el código anterior
+  (`UNSUPPORTED_CHARACTERS`) los reintenta UNA vez el barrido retroactivo de
+  DX-443 (`consents.signed-pdf-backfill`): vuelven a `PENDING` con
+  `notifyPatient = false` (UPDATE condicional; clave
+  `consents.signed-pdf:<id>:unicode-fonts`), así que **no se escribe al
+  paciente** al archivarlos; la clínica puede usar «Reenviar copia». Ese
+  código ya no se emite (los que vuelvan a fallar, p. ej. un texto árabe,
+  quedan con `UNSUPPORTED_GLYPHS`): no se reintenta en bucle.
+- Ficheros y tamaño (en el repo y en la imagen, en `src/shared/pdf/fonts/`,
+  que `nest build` copia a `dist/shared/pdf/fonts/`; licencia en `OFL.txt`,
+  origen y SHA-256 en su `README.md`):
+
+  | Fichero | Bytes |
+  | --- | ---: |
+  | `NotoSans-Regular.ttf` | 431 364 |
+  | `NotoSans-Bold.ttf` | 432 376 |
+  | `NotoSansCJKsc-Regular-subset.otf` | 7 561 140 |
+  | **Total** (con `OFL.txt` y su `README.md`) | **8 433 954 (≈ 8,0 MiB)** |
+
+  La imagen crece ≈ 8,0 MiB sin comprimir (≈ 6,3 MiB en gzip, lo que se
+  descarga del registro). Tope: **10 MiB** para `src/shared/pdf/fonts/`; lo
+  comprueba `unicode-fonts.spec.ts`. fontkit, el motor de fuentes, ya venía con
+  pdfkit (ahora declarado y fijado, `2.0.4`): 0 bytes más de dependencias.
+- Memoria: cada fuente se abre la primera vez que hace falta y se queda en
+  memoria (la CJK, ≈ 7,2 MB, solo si algún PDF la necesita). Medido: 500 PDF
+  con CJK seguidos, heap vivo estable (≈ 31 MB tras GC); un PDF con CJK pesa
+  ≈ 100 KB.
+- Alternativas medidas y descartadas (coste en el pack de git, que es para
+  siempre; en la imagen, el tamaño del fichero):
+  - la CJK entera (16,4 MB; ≈ 13,0 MiB de pack): todo el CJK, pero +59 % de
+    pack;
+  - subconjuntos sin todo el hangul o sin Big5-1 (4,7–5,6 MiB de pack): pierden
+    coreano o chino tradicional; con todo GBK (≈ 10,2 MiB de pack) casi tanto
+    como la entera;
+  - el subconjunto regional `NotoSansSC` (8,3 MB): sin hangul;
+  - paquetes npm (`@fontsource/noto-sans-sc`, 75 MB en 102 trozos WOFF2 por
+    peso; `@expo-google-fonts/noto-sans-sc`, 96 MB en 9 pesos; ninguno con
+    hangul) o descargarla en el build: más imagen, una cadena de >100 fuentes o
+    dependencia de red en build, CI y local;
+  - la colección `.ttc`, la negrita CJK o guardarla comprimida (brotli): más
+    tamaño, o descomprimir en arranque para ahorrar poco.
 
 ### Copia del PDF firmado al paciente y PDF retroactivos (DX-443)
 
