@@ -9,14 +9,20 @@ const sha256 = (pdf: Buffer) => createHash('sha256').update(pdf).digest('hex');
  * Bytes del PDF de PRODUCCIÓN (comprimido) por plataforma: el `deflate` de
  * Node (zlib con optimizaciones por CPU) da otros bytes con los mismos datos
  * en otra arquitectura. darwin-arm64 se tomó con el renderer de DX-422 sin
- * cambios (origin/main 6371c3a7). En otra plataforma el caso de contenido
- * (igual en todas) ya lo cubre, y zlib es determinista en una misma
- * plataforma: mismo contenido, mismos bytes que antes de DX-459.
+ * cambios (origin/main 6371c3a7). linux-x64 (la CI y la imagen) se tomó en
+ * la CI de DX-459; su contenido descomprimido es el fijado abajo, el mismo
+ * que dio el renderer sin cambios, y zlib es determinista en una misma
+ * plataforma: mismos bytes que antes de DX-459. En otra plataforma, el caso
+ * de contenido (igual en todas) ya lo cubre.
  */
 const PRODUCTION_BYTES: Record<string, { length: number; sha256: string }> = {
   'darwin-arm64': {
     length: 5408,
     sha256: '236d32b6614f5b7e83c769fa2556e9b3a10f211abfc67357720081e992697c98',
+  },
+  'linux-x64': {
+    length: 5382,
+    sha256: 'cfe202c0227b6d126c81499ed769d8ea348b76dd255f08bfa5a9661cefd8ae52',
   },
 };
 
