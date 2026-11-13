@@ -6,6 +6,7 @@ import {
   regionalFormat,
   type RegionalFormat,
 } from '../../../shared/format/regional-format';
+import { isWinAnsiChar } from '../../../shared/pdf/win-ansi';
 import { transliterateToAscii } from '../../../shared/storage/ascii-filename';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import {
@@ -91,7 +92,9 @@ export const LEGACY_UNSUPPORTED_CHARACTERS = 'UNSUPPORTED_CHARACTERS';
 
 /**
  * DX-459: ¿el PDF tiene con qué pintar este carácter (uno solo, no un salto
- * de línea)? Lo responde el renderer según sus fuentes.
+ * de línea)? Lo responde el renderer según sus fuentes. El dominio niega
+ * además, aunque haya glifo, controles, caracteres de formato/bidi,
+ * separadores U+2028/U+2029 y escrituras de derecha a izquierda.
  */
 export type GlyphCoverage = (ch: string) => boolean;
 
@@ -118,8 +121,35 @@ function isControl(ch: string): boolean {
 }
 
 /**
+ * DX-459 (revisión de seguridad): caracteres de formato (`\p{Cf}`: marcas y
+ * aislamientos bidi U+200E/F, U+202A–E, U+2066–9, espacios y uniones de ancho
+ * cero, U+FEFF…) y separadores de línea o párrafo (U+2028/U+2029). En el PDF
+ * cambiarían lo que se VE frente al texto lógico firmado y hasheado (o
+ * desaparecerían). No se quitan en silencio (eso alteraría el texto firmado):
+ * se niega el PDF.
+ */
+const INVISIBLE_OR_FORMAT = /^[\p{Cf}\p{Zl}\p{Zp}]$/u;
+
+/**
+ * El guion opcional (U+00AD) es `Cf` pero está en WinAnsi: Helvetica lo pinta
+ * como un guion visible, igual que antes de DX-459 (un texto latino con él se
+ * sigue archivando). Las fuentes embebidas, en cambio, lo pintan como un
+ * espacio: en un documento que no cabe en WinAnsi se niega (ver abajo).
+ */
+const SOFT_HYPHEN = '\u00ad';
+
+/**
+ * DX-459: escrituras de derecha a izquierda. El PDF no tiene maquetación
+ * bidi (fuera de alcance): pintadas en orden lógico, una línea mixta podría
+ * leerse en otro orden que el firmado. Se siguen negando hasta que la haya.
+ */
+const RIGHT_TO_LEFT =
+  /^[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}\p{Script=Hanifi_Rohingya}\p{Script=Yezidi}]$/u;
+
+/**
  * Lo que el PDF pinta tal cual con sus fuentes (`covers`), más los saltos de
- * línea (\n o \r\n).
+ * línea (\n o \r\n). Nunca controles, caracteres de formato ni escrituras
+ * de derecha a izquierda, aunque una fuente los tenga.
  */
 function isPrintable(text: string, covers: GlyphCoverage): boolean {
   const chars = [...text];
@@ -128,7 +158,12 @@ function isPrintable(text: string, covers: GlyphCoverage): boolean {
     // un salto de línea: no se pintarían tal cual. \r\n sí (un salto).
     if (ch === '\r') return chars[i + 1] === '\n';
     if (ch === '\n') return true;
-    return !isControl(ch) && covers(ch);
+    return (
+      !isControl(ch) &&
+      (ch === SOFT_HYPHEN || !INVISIBLE_OR_FORMAT.test(ch)) &&
+      !RIGHT_TO_LEFT.test(ch) &&
+      covers(ch)
+    );
   });
 }
 
@@ -215,6 +250,28 @@ function assertIntegrity(src: SignedConsentPdfSource): void {
   }
 }
 
+function modelTexts(model: SignedConsentPdfModel): string[] {
+  return [
+    model.clinicName,
+    model.title,
+    model.body,
+    model.signerLabel,
+    model.professionalLabel,
+    ...model.evidence.flatMap((row) => [row.label, row.value]),
+  ];
+}
+
+/**
+ * DX-459: todo lo que pinta el PDF cabe en las fuentes estándar (WinAnsi; un
+ * salto de línea no se pinta). Si sí, el renderer pinta como antes de DX-459
+ * (mismos bytes); si no, el documento entero va con las fuentes embebidas.
+ */
+export function fitsStandardFonts(model: SignedConsentPdfModel): boolean {
+  return modelTexts(model).every((text) =>
+    [...text].every((ch) => ch === '\n' || ch === '\r' || isWinAnsiChar(ch)),
+  );
+}
+
 /**
  * El modelo del PDF firmado (DX-422). Comprueba ANTES los dos hashes: un
  * registro alterado por fuera de la app no se archiva como probatorio. Cada
@@ -284,6 +341,13 @@ export function buildSignedConsentPdfModel(
   };
   // El formato de la sede (p. ej. un locale con «午後») también tiene que caber.
   if (!model.evidence.every((row) => isPrintable(row.value, covers))) {
+    throw new SignedConsentPdfSourceError('UNSUPPORTED_GLYPHS');
+  }
+  // El guion opcional solo se pinta tal cual con las fuentes estándar.
+  if (
+    !fitsStandardFonts(model) &&
+    modelTexts(model).some((text) => text.includes(SOFT_HYPHEN))
+  ) {
     throw new SignedConsentPdfSourceError('UNSUPPORTED_GLYPHS');
   }
   return model;

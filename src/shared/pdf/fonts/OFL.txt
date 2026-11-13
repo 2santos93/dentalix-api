@@ -1,7 +1,5 @@
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
     NotoSans-Regular.ttf, NotoSans-Bold.ttf
-Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
-    NotoSansArabic-Regular.ttf, NotoSansArabic-Bold.ttf
 © 2014-2021 Adobe (http://www.adobe.com/).
     NotoSansCJKsc-Regular.otf (https://github.com/notofonts/noto-cjk)
 

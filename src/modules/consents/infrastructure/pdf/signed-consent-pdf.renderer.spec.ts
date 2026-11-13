@@ -184,20 +184,6 @@ describe('PdfkitSignedConsentPdfRenderer: fuentes Unicode embebidas (DX-459)', (
     expect(pdf.length).toBeLessThan(400_000);
   });
 
-  it('árabe: con su fuente embebida (formas unidas; sin reordenar bidi, fuera de alcance)', async () => {
-    const arabic = 'يوافق المريض على العلاج';
-    const pdf = await renderer.render(
-      model(`Autorizo el tratamiento.\n${arabic}`),
-    );
-    const font = [...pdfFonts(pdf).values()].find((f) =>
-      /\+NotoSansArabic-Regular$/.test(f.baseFont),
-    );
-    expect(font).toBeDefined();
-    const glyphs = [...font!.toUnicode!.values()].join('');
-    for (const ch of arabic.replace(/ /g, '')) expect(glyphs).toContain(ch);
-    expect(pdfTextLines(pdf)).toContain('Autorizo el tratamiento.');
-  });
-
   it('respeta las líneas en blanco del texto firmado', async () => {
     const pdf = await renderer.render({
       ...model('Ζωή\n\nМария'),
@@ -209,11 +195,11 @@ describe('PdfkitSignedConsentPdfRenderer: fuentes Unicode embebidas (DX-459)', (
   });
 
   it('canPaint: lo que tienen las fuentes estándar o las embebidas; no lo demás', () => {
-    for (const ch of ['a', 'ñ', '€', 'Ζ', 'Ж', '名', 'ひ', 'カ', '한', 'ع']) {
+    for (const ch of ['a', 'ñ', '€', 'Ζ', 'Ж', '名', 'ひ', 'カ', '한']) {
       expect(renderer.canPaint(ch)).toBe(true);
     }
-    // Emoji, devanagari, hebreo, tailandés: sin fuente (UNSUPPORTED_GLYPHS).
-    for (const ch of ['😀', 'न', 'ש', 'ส']) {
+    // Sin fuente: emoji, devanagari, tailandés y (sin bidi) árabe y hebreo.
+    for (const ch of ['😀', 'न', 'ส', 'ع', 'ש']) {
       expect(renderer.canPaint(ch)).toBe(false);
     }
   });

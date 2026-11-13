@@ -207,6 +207,77 @@ describe('buildSignedConsentPdfModel (DX-422)', () => {
     );
   });
 
+  it('DX-459 (seguridad): caracteres de formato/bidi e invisibles NO se archivan aunque la fuente los tenga (ni se quitan)', () => {
+    const everything: GlyphCoverage = () => true;
+    const invisible = [
+      '\u200b', // espacio de ancho cero
+      '\u200c', // ZWNJ
+      '\u200d', // ZWJ
+      '\u200e', // LRM
+      '\u200f', // RLM
+      '\u202a', // LRE
+      '\u202b', // RLE
+      '\u202c', // PDF
+      '\u202d', // LRO
+      '\u202e', // RLO
+      '\u2066', // LRI
+      '\u2067', // RLI
+      '\u2068', // FSI
+      '\u2069', // PDI
+      '\u2060', // WORD JOINER
+      '\ufeff', // BOM / ZWNBSP
+      '\u061c', // ALM
+      '\u2028', // separador de línea (Zl)
+      '\u2029', // separador de párrafo (Zp)
+    ];
+    for (const ch of invisible) {
+      for (const field of ['body', 'title', 'signerName'] as const) {
+        expect(() =>
+          build(source({ [field]: `Autorizo ${ch}la exodoncia` }), everything),
+        ).toThrow(
+          expect.objectContaining({ code: 'UNSUPPORTED_GLYPHS' }) as Error,
+        );
+      }
+    }
+    // Un RLO en el nombre de la sede (fuera del hash) tampoco.
+    const src = source();
+    expect(() =>
+      build(
+        { ...src, location: { ...src.location, name: 'Sede \u202eortneC' } },
+        everything,
+      ),
+    ).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_GLYPHS' }) as Error);
+  });
+
+  it('DX-459 (seguridad): escrituras de derecha a izquierda se niegan (sin bidi), aunque la fuente las tenga', () => {
+    const everything: GlyphCoverage = () => true;
+    for (const text of [
+      'يوافق المريض',
+      'המטופל מסכים',
+      'ܫܠܡܐ',
+      'ދިވެހި',
+      'ߒߞߏ',
+      'Laura عربي ok',
+    ]) {
+      expect(() => build(source({ body: text }), everything)).toThrow(
+        expect.objectContaining({ code: 'UNSUPPORTED_GLYPHS' }) as Error,
+      );
+    }
+    // Las cifras arábigo-índicas también son escritura árabe.
+    expect(() => build(source({ body: 'Dosis: ١٢٣' }), everything)).toThrow(
+      SignedConsentPdfSourceError,
+    );
+  });
+
+  it('DX-459: el guion opcional (U+00AD, en WinAnsi) se archiva como antes en un PDF latino; con fuentes embebidas, no', () => {
+    const latin = build(source({ body: 'Exo\u00addoncia' }));
+    expect(latin.body).toBe('Exo\u00addoncia');
+    const everything: GlyphCoverage = () => true;
+    expect(() =>
+      build(source({ body: 'Exo\u00addoncia de Ζωή' }), everything),
+    ).toThrow(expect.objectContaining({ code: 'UNSUPPORTED_GLYPHS' }) as Error);
+  });
+
   it('DX-459: los controles no se pintan aunque la fuente diga tener glifo', () => {
     const everything: GlyphCoverage = () => true;
     for (const body of ['Uno\u0000dos', 'Uno\u0085dos', 'Uno\u007fdos']) {

@@ -1115,22 +1115,34 @@ no hay una común. No cambia después (trigger
 - Si algún texto (título, cuerpo, nombres, sede, navegador, un formato de
   fecha) sale de WinAnsi, el documento ENTERO se pinta con fuentes **Noto**
   (SIL OFL 1.1) embebidas en **subconjunto** (solo los glifos usados): Noto
-  Sans (latín, griego, cirílico; regular y negrita), Noto Sans Arabic (regular
-  y negrita) y Noto Sans CJK SC regular (chino, japonés y coreano: hanzi/kanji/
-  hanja, kana y hangul; un ideograma con variantes regionales sale con la
-  forma china simplificada; la negrita CJK usa la regular). Cada letra va con
-  la primera de esas fuentes que la tiene. El árabe sale con sus formas
-  unidas, pero sin reordenación bidi de líneas mixtas (fuera de alcance).
-- Lo que ninguna tiene (emoji, devanagari, hebreo, tailandés…) o un control
-  (tabulador, `\r` suelto) queda `FAILED` con `UNSUPPORTED_GLYPHS`, sin
-  reintento: nunca se archiva un texto alterado.
+  Sans (latín, griego, cirílico; regular y negrita) y Noto Sans CJK SC regular
+  (chino, japonés y coreano: hanzi/kanji/hanja, kana y hangul; un ideograma
+  con variantes regionales sale con la forma china simplificada; la negrita
+  CJK usa la regular). Cada letra va con la primera de esas fuentes que la
+  tiene.
+- Se niegan siempre (`FAILED` con `UNSUPPORTED_GLYPHS`, sin reintento: nunca
+  se archiva un texto que se VEA distinto del firmado), aunque una fuente
+  tenga el glifo:
+  - controles (tabulador, `\r` suelto…);
+  - caracteres de formato `\p{Cf}` (marcas y aislamientos bidi U+200E/F,
+    U+202A–E, U+2066–9; espacios y uniones de ancho cero; U+FEFF…) y los
+    separadores U+2028/U+2029. No se quitan en silencio: eso cambiaría el
+    texto firmado y hasheado. Excepción: el guion opcional U+00AD, que está en
+    WinAnsi y Helvetica pinta visible como siempre; en un documento con
+    fuentes embebidas (que lo pintan como espacio) se niega;
+  - escrituras de derecha a izquierda (árabe, hebreo, siríaco, thaana, n'ko,
+    samaritano, mandeo, adlam, hanifi rohingya, yazidí): sin maquetación bidi
+    (fuera de alcance), pintadas en orden lógico, una línea mixta podría
+    leerse en otro orden que el firmado. Se aceptarán cuando haya bidi;
+  - lo que ninguna fuente tiene (emoji, devanagari, tailandés…).
 - Los PDF que quedaron `FAILED` con el código anterior
   (`UNSUPPORTED_CHARACTERS`) los reintenta UNA vez el barrido retroactivo de
   DX-443 (`consents.signed-pdf-backfill`): vuelven a `PENDING` con
   `notifyPatient = false` (UPDATE condicional; clave
   `consents.signed-pdf:<id>:unicode-fonts`), así que **no se escribe al
   paciente** al archivarlos; la clínica puede usar «Reenviar copia». Ese
-  código ya no se emite: no se reintenta en bucle.
+  código ya no se emite (los que vuelvan a fallar, p. ej. un texto árabe,
+  quedan con `UNSUPPORTED_GLYPHS`): no se reintenta en bucle.
 - Ficheros y tamaño (en el repo y en la imagen, en `src/shared/pdf/fonts/`,
   que `nest build` copia a `dist/shared/pdf/fonts/`; licencia en `OFL.txt`,
   origen y SHA-256 en su `README.md`):
@@ -1139,12 +1151,10 @@ no hay una común. No cambia después (trigger
   | --- | ---: |
   | `NotoSans-Regular.ttf` | 431 364 |
   | `NotoSans-Bold.ttf` | 432 376 |
-  | `NotoSansArabic-Regular.ttf` | 142 140 |
-  | `NotoSansArabic-Bold.ttf` | 141 852 |
   | `NotoSansCJKsc-Regular.otf` | 16 437 364 |
-  | **Total** (con `OFL.txt`) | **17 589 784 (≈ 16,8 MiB)** |
+  | **Total** (con `OFL.txt` y su `README.md`) | **17 308 010 (≈ 16,5 MiB)** |
 
-  La imagen crece ≈ 16,8 MiB sin comprimir (≈ 13,5 MiB en gzip, lo que se
+  La imagen crece ≈ 16,5 MiB sin comprimir (≈ 13,4 MiB en gzip, lo que se
   descarga del registro). Tope: **20 MiB** para `src/shared/pdf/fonts/`; lo
   comprueba `unicode-fonts.spec.ts`. fontkit, el motor de fuentes, ya venía con
   pdfkit (ahora declarado y fijado, `2.0.4`): 0 bytes más de dependencias.

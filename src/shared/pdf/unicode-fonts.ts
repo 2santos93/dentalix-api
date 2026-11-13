@@ -4,8 +4,9 @@ import { create, type Font } from 'fontkit';
 
 /**
  * DX-459: las fuentes OFL embebidas (Noto) con las que un PDF pinta texto que
- * las fuentes estándar (WinAnsi) no tienen: griego, cirílico, árabe, chino,
- * japonés, coreano. Viven en `./fonts` (con su OFL.txt) y nest-cli las copia
+ * las fuentes estándar (WinAnsi) no tienen: griego, cirílico, chino,
+ * japonés, coreano. Sin escrituras de derecha a izquierda: sin maquetación
+ * bidi, el dominio las niega (y no se distribuye su fuente). Viven en `./fonts` (con su OFL.txt) y nest-cli las copia
  * a `dist` junto a este módulo. Tamaños y criterio: `./fonts/README.md`.
  *
  * Cada fuente se abre la primera vez que hace falta y se queda en memoria
@@ -24,13 +25,12 @@ interface FontFamily {
 
 /**
  * Orden de preferencia: la primera que tenga el glifo. Noto Sans (latín,
- * griego, cirílico), Noto Sans Arabic y Noto Sans CJK SC (todo el CJK
+ * griego, cirílico) y Noto Sans CJK SC (todo el CJK
  * unificado: hanzi/kanji/hanja, kana y hangul; con glifos de forma china
  * simplificada cuando un ideograma tiene variantes regionales).
  */
 const FAMILIES: readonly FontFamily[] = [
   { regular: 'NotoSans-Regular.ttf', bold: 'NotoSans-Bold.ttf' },
-  { regular: 'NotoSansArabic-Regular.ttf', bold: 'NotoSansArabic-Bold.ttf' },
   {
     regular: 'NotoSansCJKsc-Regular.otf',
     bold: 'NotoSansCJKsc-Regular.otf',
@@ -80,8 +80,8 @@ const LETTER = /^\p{L}$/u;
  * Parte UNA línea (sin saltos) en tramos de una sola fuente. Una letra va con
  * la primera fuente que la tiene; lo demás (espacios, signos, cifras, marcas
  * que se combinan con la letra anterior) se queda en la fuente del tramo en
- * curso si la tiene, para no cortar una palabra árabe o una frase china por
- * un espacio. Devuelve null si algún carácter no está en ninguna fuente.
+ * curso si la tiene, para no cortar una frase china por un espacio.
+ * Devuelve null si algún carácter no está en ninguna fuente.
  */
 export function unicodeRuns(
   line: string,

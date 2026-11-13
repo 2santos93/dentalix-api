@@ -9,6 +9,7 @@ import {
 import { isWinAnsiChar } from '../../../../shared/pdf/win-ansi';
 import {
   SignedConsentPdfSourceError,
+  fitsStandardFonts,
   type SignedConsentPdfModel,
 } from '../../domain/signed-consent-pdf';
 
@@ -69,8 +70,8 @@ type FontSource = PDFKit.Mixins.PDFFontSource;
  * fuente que se pintan seguidos (`continued`) con el mismo ajuste de línea
  * (pdfkit pierde un salto al final de un tramo seguido, así que los saltos
  * no van dentro de los tramos). Una línea en blanco avanza lo que avanzaría
- * pdfkit. Sin bidi: el árabe sale con sus formas unidas, pero el orden de
- * las palabras de una línea mixta no se reordena (fuera de alcance).
+ * pdfkit. Sin bidi: el dominio niega las escrituras de derecha a izquierda
+ * (árabe, hebreo…) hasta que haya maquetación bidi.
  */
 const paintUnicode: PaintText = (doc, text, weight, size, options) => {
   if (text === '') return; // Como `text('')`: no avanza.
@@ -94,21 +95,6 @@ const paintUnicode: PaintText = (doc, text, weight, size, options) => {
     });
   }
 };
-
-/** Todo lo que se pinta cabe en las fuentes estándar (un salto no se pinta). */
-function fitsStandardFonts(model: SignedConsentPdfModel): boolean {
-  const texts = [
-    model.clinicName,
-    model.title,
-    model.body,
-    model.signerLabel,
-    model.professionalLabel,
-    ...model.evidence.flatMap((row) => [row.label, row.value]),
-  ];
-  return texts.every((text) =>
-    [...text].every((ch) => ch === '\n' || ch === '\r' || isWinAnsiChar(ch)),
-  );
-}
 
 /**
  * pdfkit decodifica los PNG con zlib asíncrono y escribe el objeto de la imagen

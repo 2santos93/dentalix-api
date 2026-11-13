@@ -691,4 +691,37 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
       }),
     ).toBe(1);
   });
+
+  it('DX-459: uno FAILED por un texto que sigue sin poder pintarse (árabe, sin bidi) se reintenta UNA vez y queda UNSUPPORTED_GLYPHS, sin bucle', async () => {
+    const consentId = await remoteSigned(b, {
+      body: 'يوافق المريض على العلاج',
+    });
+    await countersign(b, consentId, (tx) => pdfQueue.schedule(tx, consentId));
+    await asClinic(b.tenantId, () =>
+      pdfs.recordFailure(consentId, {
+        code: 'UNSUPPORTED_CHARACTERS',
+        final: true,
+      }),
+    );
+    const sweep = new BackfillSignedConsentPdfs(copies, pdfQueue);
+    await expect(sweep.run()).resolves.toMatchObject({ retried: 1 });
+    await asClinic(b.tenantId, () =>
+      generator.handle({ consentId }, jobContext(b.tenantId)),
+    );
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({
+      status: 'FAILED',
+      lastErrorCode: 'UNSUPPORTED_GLYPHS',
+      documentId: null,
+      notifyPatient: false,
+    });
+    // El código nuevo no lo vuelve a seleccionar el barrido.
+    await expect(sweep.run()).resolves.toMatchObject({ retried: 0 });
+    expect(
+      await owner.job.count({
+        where: { idempotencyKey: signedPdfCopyJobKey(consentId) },
+      }),
+    ).toBe(0);
+  });
 });
