@@ -290,6 +290,11 @@ export interface RecallTypeView {
   sortOrder: number;
   systemKey: RecallKind | null;
   exclusionGroup: string | null;
+  /**
+   * D20: tipo de cita con el que se agenda; null = sin enlace. El guardado,
+   * aunque el tipo de cita se haya retirado o desactivado después.
+   */
+  appointmentTypeId: string | null;
   /** Procedimientos del catálogo cuyo DONE mueve el reloj del tipo. */
   triggerCatalogItemIds: string[];
   /** Los mismos, con su código y su nombre (porción 2). */
@@ -303,6 +308,8 @@ export interface RecallTypeFields {
   active: boolean;
   sortOrder: number;
   exclusionGroup: string | null;
+  /** D20: null lo quita. */
+  appointmentTypeId: string | null;
 }
 
 /** Alta: sin orden, va el último. */

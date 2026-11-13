@@ -23,6 +23,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import {
+  RECALL_APPOINTMENT_TYPE_ID_MESSAGE,
   RECALL_EXCLUSION_GROUP,
   RECALL_EXCLUSION_GROUP_MESSAGE,
   RECALL_TYPE_INTERVAL_MESSAGE,
@@ -686,6 +687,15 @@ export class RecallTypeDto {
   exclusionGroup!: string | null;
 
   @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Tipo de cita con el que se agenda un recall de este tipo (la web lo prellena en «Agendar»); null = ninguno. Es el guardado aunque ese tipo de cita se haya retirado o desactivado después: la web lo ignora si ya no está activo',
+  })
+  appointmentTypeId!: string | null;
+
+  @ApiProperty({
     type: [String],
     format: 'uuid',
     description:
@@ -756,6 +766,18 @@ export class CreateRecallTypeDto {
   @IsString({ message: RECALL_EXCLUSION_GROUP_MESSAGE })
   @Matches(RECALL_EXCLUSION_GROUP, { message: RECALL_EXCLUSION_GROUP_MESSAGE })
   exclusionGroup?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Tipo de cita al agendar (D20): uno vivo y activo de esta clínica (si no, 422). null = ninguno (lo quita); ausente, no cambia. Volver a mandar el que ya tenía vale aunque se haya retirado o desactivado después',
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID('all', { message: RECALL_APPOINTMENT_TYPE_ID_MESSAGE })
+  appointmentTypeId?: string | null;
 }
 
 /** D11: editar cualquier campo (solo los presentes). */

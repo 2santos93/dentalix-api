@@ -44,6 +44,7 @@ import {
   DEMO_PRICES,
   DEMO_PROFESSIONAL_LICENSES,
   DEMO_PROFESSIONAL_SPECIALTIES,
+  DEMO_RECALL_APPOINTMENT_TYPES,
   DEMO_SITE_PRICE_LISTS,
   type DemoLocationKey,
 } from '../prisma/demo/data';
@@ -2539,6 +2540,55 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     );
     for (const item of unconfigured.items) {
       expect(withRecall.has(item.patientId)).toBe(false);
+    }
+  });
+
+  it('DX-015-bis (D20): Higiene se agenda como «Limpieza» y Control como «Valoración», enlazados por el ADMIN (auditado)', async () => {
+    const tenantId = await liveDemoTenantId();
+    const types = await raw.recallType.findMany({
+      where: { tenantId, deletedAt: null },
+      select: {
+        id: true,
+        systemKey: true,
+        appointmentType: {
+          select: { name: true, active: true, deletedAt: true },
+        },
+      },
+    });
+    const linked: Record<string, unknown> = {};
+    for (const t of types) {
+      // Uno sin systemKey enlazado saldría como «null» y rompería la igualdad.
+      if (t.appointmentType !== null) {
+        linked[String(t.systemKey)] = t.appointmentType;
+      }
+    }
+    expect(linked).toEqual(
+      Object.fromEntries(
+        Object.entries(DEMO_RECALL_APPOINTMENT_TYPES).map(([key, name]) => [
+          key,
+          { name, active: true, deletedAt: null },
+        ]),
+      ),
+    );
+    expect(DEMO_RECALL_APPOINTMENT_TYPES).toEqual({
+      HYGIENE: 'Limpieza',
+      CHECKUP: 'Valoración',
+    });
+    const events = await raw.auditEvent.findMany({
+      where: {
+        tenantId,
+        resourceType: 'RECALL_TYPE',
+        metadata: { path: ['reason'], equals: 'RECALL_TYPE_UPDATED' },
+      },
+      select: { resourceId: true, actorRole: true, metadata: true },
+    });
+    const ids = types.filter((t) => t.appointmentType).map((t) => t.id);
+    expect(events.map((e) => e.resourceId).sort()).toEqual([...ids].sort());
+    for (const e of events) {
+      expect(e.actorRole).toBe(ClinicRole.ADMIN);
+      expect(e.metadata).toMatchObject({
+        changedFields: ['appointmentTypeId'],
+      });
     }
   });
 

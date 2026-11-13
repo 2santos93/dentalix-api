@@ -57,6 +57,7 @@ import {
   SetRecallTypeTriggersUseCase,
   UpdateRecallTypeUseCase,
 } from '../application/use-cases/recall-types.use-cases';
+import { RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE } from '../domain/recall-type-rules';
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
@@ -314,13 +315,16 @@ export class RecallTypesController {
   @ApiOperation({
     summary: 'Crear un tipo de recall',
     description:
-      'Nombre 1–60 (único entre los vivos sin distinguir mayúsculas), intervalo por defecto 1–36 meses, activo, orden (por defecto, el último) y grupo de exclusión opcional. Sin disparadores: se fijan con PUT /recall-types/:id/triggers.',
+      'Nombre 1–60 (único entre los vivos sin distinguir mayúsculas), intervalo por defecto 1–36 meses, activo, orden (por defecto, el último), grupo de exclusión y tipo de cita al agendar opcionales. Sin disparadores: se fijan con PUT /recall-types/:id/triggers.',
   })
   @ApiCreatedResponse({ type: RecallTypeDto })
   @ApiBadRequestResponse({
     description: 'Nombre vacío o largo, intervalo, orden o grupo inválidos',
   })
   @ApiConflictResponse({ description: 'Ya existe un tipo con ese nombre' })
+  @ApiUnprocessableEntityResponse({
+    description: RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE,
+  })
   @ApiForbiddenResponse({ description: RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE })
   create(
     @Body() dto: CreateRecallTypeDto,
@@ -333,6 +337,7 @@ export class RecallTypesController {
         active: dto.active,
         sortOrder: dto.sortOrder,
         exclusionGroup: dto.exclusionGroup,
+        appointmentTypeId: dto.appointmentTypeId,
       },
       this.audit(req),
     );
@@ -344,12 +349,15 @@ export class RecallTypesController {
   @ApiOperation({
     summary: 'Editar un tipo de recall',
     description:
-      'Cualquier campo. Cambiar el intervalo por defecto NO cambia los recalls que ya existen: solo los que se creen después. Desactivarlo deja de crear recalls por procedimiento; los que hay siguen. Cambiar el grupo de exclusión no desactiva nada por sí solo: se aplica en el siguiente DONE o PUT del paciente.',
+      'Cualquier campo. Cambiar el intervalo por defecto NO cambia los recalls que ya existen: solo los que se creen después. Desactivarlo deja de crear recalls por procedimiento; los que hay siguen. Cambiar el grupo de exclusión no desactiva nada por sí solo: se aplica en el siguiente DONE o PUT del paciente. El tipo de cita al agendar tiene que ser uno vivo y activo de la clínica (null lo quita).',
   })
   @ApiOkResponse({ type: RecallTypeDto })
   @ApiBadRequestResponse({ description: 'Campo inválido' })
   @ApiNotFoundResponse({ description: 'Tipo no encontrado en esta clínica' })
   @ApiConflictResponse({ description: 'Ya existe un tipo con ese nombre' })
+  @ApiUnprocessableEntityResponse({
+    description: RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE,
+  })
   @ApiForbiddenResponse({ description: RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE })
   update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -364,6 +372,7 @@ export class RecallTypesController {
         active: dto.active,
         sortOrder: dto.sortOrder,
         exclusionGroup: dto.exclusionGroup,
+        appointmentTypeId: dto.appointmentTypeId,
       },
       this.audit(req),
     );

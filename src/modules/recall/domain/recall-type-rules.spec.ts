@@ -1,4 +1,5 @@
 import {
+  RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE,
   RECALL_EXCLUSION_GROUP_MESSAGE,
   RECALL_TYPE_INTERVAL_MESSAGE,
   RECALL_TYPE_NAME_EMPTY_MESSAGE,
@@ -7,6 +8,7 @@ import {
   RECALL_TYPE_TRIGGERS_MAX_MESSAGE,
   exclusionGroupError,
   normalizeTriggerIds,
+  recallAppointmentTypeError,
   recallTypeIntervalError,
   recallTypeNameError,
   recallTypeSortOrderError,
@@ -81,5 +83,21 @@ describe('reglas de un tipo de recall (DX-015-bis)', () => {
     // Repetidos no cuentan dos veces.
     expect(triggerIdsError([...ids(50), ...ids(50)])).toBeNull();
     expect(triggerIdsError(ids(51))).toBe(RECALL_TYPE_TRIGGERS_MAX_MESSAGE);
+  });
+
+  it('D20: solo se enlaza un tipo de cita vivo y activo de la clínica (422)', () => {
+    expect(
+      recallAppointmentTypeError({ active: true, deletedAt: null }),
+    ).toBeNull();
+    // Inexistente o de otra clínica (bajo RLS no aparece).
+    expect(recallAppointmentTypeError(null)).toBe(
+      RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE,
+    );
+    expect(recallAppointmentTypeError({ active: false, deletedAt: null })).toBe(
+      RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE,
+    );
+    expect(
+      recallAppointmentTypeError({ active: true, deletedAt: new Date() }),
+    ).toBe(RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE);
   });
 });

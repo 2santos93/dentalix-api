@@ -295,6 +295,7 @@ class InMemoryRecallRepository implements RecallRepository {
         sortOrder: i,
         systemKey: k,
         exclusionGroup: k === 'HYGIENE' ? 'HYGIENE_PERIO' : null,
+        appointmentTypeId: null,
         triggerCatalogItemIds: [],
         triggers: [],
       })),
