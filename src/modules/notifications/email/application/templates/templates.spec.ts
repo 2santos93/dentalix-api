@@ -604,12 +604,29 @@ describe('plantillas reservadas para otras tareas', () => {
   });
 
   it('rechaza un idioma sin plantilla', () => {
+    // DX-497: `en` existe, pero solo el recordatorio tiene catálogo.
     expect(() =>
       renderEmail(
         'email-verify',
         { verifyUrl: 'https://a.co', expiresInHours: 1 },
         null,
-        'en' as 'es',
+        'en',
+      ),
+    ).toThrow('Idioma de email no soportado');
+    expect(() =>
+      renderEmail(
+        'appointment-reminder',
+        {
+          patientName: 'Ana',
+          startsAtLabel: 'x',
+          locationName: 'Sede',
+          locationAddress: null,
+          providerName: null,
+          confirmUrl: null,
+          unsubscribeUrl: null,
+        },
+        null,
+        'fr' as 'es',
       ),
     ).toThrow('Idioma de email no soportado');
   });
