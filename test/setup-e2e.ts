@@ -34,6 +34,7 @@ for (const policy of [
   'ANAMNESIS_TOKEN',
   'SIGNATURE',
   'SIGNATURE_TOKEN',
+  'PRESCRIPTION_VERIFY',
   'BRANDING_HOST',
   'BRANDING_MISS',
 ]) {

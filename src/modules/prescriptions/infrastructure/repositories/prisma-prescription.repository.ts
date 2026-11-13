@@ -19,7 +19,10 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { isHourCycle } from '../../../../shared/locations/location-regional';
 import { legacyClinicCountry } from '../../../../shared/locations/legacy-clinic-country';
+import { prismaRuleCode } from '../../../../shared/prisma/prisma-exception.filter';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import type { AllergyMatch } from '../../domain/allergy-match';
+import { generatePrescriptionVerificationCode } from '../../domain/prescription-verification-code';
 import type {
   SafetyAlert,
   SafetyAnamnesis,
@@ -34,6 +37,7 @@ import type {
 import type {
   CreatePrescriptionRepoInput,
   PrescriptionRepository,
+  RecordPublicVerificationInput,
   StoredPrescription,
   VoidPrescriptionOutcome,
   VoidPrescriptionRepoInput,
@@ -47,6 +51,28 @@ const INCLUDE = {
 type Row = Prisma.PrescriptionGetPayload<{ include: typeof INCLUDE }>;
 
 const UNKNOWN_PROFESSIONAL = 'Profesional';
+
+/** DX-467: el índice único del código de verificación (migración 20261215090200). */
+const VERIFICATION_CODE_KEY = 'prescriptions_verification_code_key';
+/** Sorteos del código antes de rendirse (31^12: chocar dos veces ya es absurdo). */
+const VERIFICATION_CODE_ATTEMPTS = 3;
+
+/** ¿El error es el choque del código de verificación con el de otra receta? */
+function isVerificationCodeClash(error: unknown): boolean {
+  if (prismaRuleCode(error) !== '23505') return false;
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    const target = (error.meta as { target?: unknown } | undefined)?.target;
+    const names = Array.isArray(target) ? target : [target];
+    if (
+      names.some((n) => n === 'verificationCode' || n === VERIFICATION_CODE_KEY)
+    ) {
+      return true;
+    }
+  }
+  return (
+    error instanceof Error && error.message.includes(VERIFICATION_CODE_KEY)
+  );
+}
 
 function toDateOnly(value: Date): string {
   return value.toISOString().slice(0, 10);
@@ -192,6 +218,7 @@ function mapRow(row: Row): Prescription {
     safetyAlerts: readSafetyAlerts(row.safetyAlerts),
     safetyOverrideReason: row.safetyOverrideReason,
     contentHash: row.contentHash,
+    verificationCode: row.verificationCode,
     voidedAt: row.voidedAt,
     voidedById: row.voidedById,
     voidedByName: row.voidedBy?.fullName ?? null,
@@ -347,7 +374,30 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
     );
   }
 
+  /**
+   * DX-467: el código de verificación lo sortea la app (CSPRNG) en cada
+   * intento; si choca con el de otra receta (índice único global), la
+   * transacción entera se deshace y se repite con otro.
+   */
   async create(input: CreatePrescriptionRepoInput): Promise<Prescription> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.insert(input, generatePrescriptionVerificationCode());
+      } catch (error) {
+        if (
+          attempt >= VERIFICATION_CODE_ATTEMPTS ||
+          !isVerificationCodeClash(error)
+        ) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  private async insert(
+    input: CreatePrescriptionRepoInput,
+    verificationCode: string,
+  ): Promise<Prescription> {
     const tenantId = this.requireTenantId();
     const {
       items,
@@ -385,6 +435,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
             (rest.clinicFiscal as unknown as Prisma.InputJsonValue | null) ??
             Prisma.DbNull,
           country: legacyClinicCountry(country),
+          verificationCode,
           tenantId,
           dispensationDate: fromDateOnly(dispensationDate),
           validUntil: fromDateOnly(validUntil),
@@ -415,11 +466,47 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
    * válido llega como `null`, nunca un 409; la web pinta «—». El logo, el
    * congelado al emitir (DX-019-bis B).
    */
-  async findById(id: string): Promise<StoredPrescription | null> {
+  findById(id: string): Promise<StoredPrescription | null> {
+    return this.findStored({ id });
+  }
+
+  /**
+   * DX-467: bajo `runWithTenant` con la clínica del HOST (la ruta pública no
+   * tiene sesión): la RLS hace invisible el código de otra clínica, que
+   * responde igual que uno que no existe.
+   */
+  findByVerificationCode(code: string): Promise<StoredPrescription | null> {
+    return this.findStored({ verificationCode: code });
+  }
+
+  async recordPublicVerification(
+    input: RecordPublicVerificationInput,
+  ): Promise<void> {
+    const tenantId = this.requireTenantId();
+    await this.prisma.runWithTenant((tx) =>
+      writeAuditEvent(tx, {
+        tenantId,
+        locationId: input.locationId,
+        actor: { kind: 'public' },
+        action: 'VIEW',
+        resourceType: 'PRESCRIPTION',
+        resourceId: input.prescriptionId,
+        patient: { kind: 'prescription', id: input.prescriptionId },
+        requestId: input.meta.requestId,
+        ip: input.meta.ip,
+        userAgent: input.meta.userAgent,
+        metadata: { origin: 'PUBLIC_LINK', reason: input.reason },
+      }),
+    );
+  }
+
+  private async findStored(
+    where: Prisma.PrescriptionWhereInput,
+  ): Promise<StoredPrescription | null> {
     this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.prescription.findFirst({
-        where: { id },
+        where,
         include: INCLUDE,
       });
       if (!row) return null;

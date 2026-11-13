@@ -9,6 +9,8 @@ import type {
   PrescriptionDocument,
 } from '../domain/entities/prescription.entity';
 import type { PrescriptionIssuerView } from '../application/use-cases/prescriptions.use-cases';
+import type { PrescriptionVerification } from '../domain/prescription-verification';
+import type { PublicPrescriptionVerificationDto } from './dto/public-prescription-verification.dto';
 import type {
   PrescriptionDocumentDto,
   PrescriptionDto,
@@ -60,4 +62,33 @@ export function presentIssuer(
 ): PrescriptionIssuerDto {
   const { phase1, ...issuer } = view;
   return { ...issuer, country: phase1.country };
+}
+
+/** DX-467: la respuesta pública, plana; lo que no toca al estado, `null`. */
+export function presentPublicVerification(
+  v: PrescriptionVerification,
+): PublicPrescriptionVerificationDto {
+  const empty: PublicPrescriptionVerificationDto = {
+    status: v.status,
+    issuedOn: null,
+    voidedOn: null,
+    professionalName: null,
+    professionalLicense: null,
+    clinicName: null,
+    patientInitials: null,
+    locale: null,
+  };
+  if (v.status === 'UNVERIFIABLE') return empty;
+  if (v.status === 'VOIDED') {
+    return { ...empty, voidedOn: v.voidedOn, locale: v.locale };
+  }
+  return {
+    ...empty,
+    issuedOn: v.issuedOn,
+    professionalName: v.professionalName,
+    professionalLicense: v.professionalLicense,
+    clinicName: v.clinicName,
+    patientInitials: v.patientInitials,
+    locale: v.locale,
+  };
 }

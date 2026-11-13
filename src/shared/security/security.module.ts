@@ -131,6 +131,8 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-467: verificar una receta por el código de su QR, por IP.
+    strict('prescription-verify'),
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>

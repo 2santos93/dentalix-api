@@ -3987,6 +3987,11 @@ model Prescription {
   safetyOverrideReason  String?
   // SHA-256 (hex) del contenido emitido (prescription-hash.ts).
   contentHash           String
+  /// DX-467: código corto de verificación (12 de «23456789ABCDEFGHJKMNPQRSTUVWXYZ»,
+  /// aleatorio, nunca derivado del id) que la impresión lleva con su QR hacia
+  /// `/receta/<código>`. Fuera del hash; lo protege el trigger. Lo genera la app
+  /// al emitir; el DEFAULT es la red de una réplica anterior. Único global.
+  verificationCode      String             @unique(map: "prescriptions_verification_code_key") @default(dbgenerated("dx_prescription_verification_code()"))
   voidedAt              DateTime?
   voidedById            String?            @db.Uuid
   voidReason            String?

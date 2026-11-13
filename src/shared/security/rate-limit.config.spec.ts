@@ -46,6 +46,8 @@ describe('loadRateLimitConfig', () => {
     // DX-443: la copia pública del PDF firmado, por IP y por token.
     expect(cfg['copy-link']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['copy-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-467: verificar una receta por su código, por IP.
+    expect(cfg['prescription-verify']).toEqual({ limit: 30, ttlMs: 60_000 });
     // DX-555: la marca por host, fuera del global: aciertos por IP + host,
     // fallos por IP.
     expect(cfg['branding-host']).toEqual({ limit: 600, ttlMs: 60_000 });
