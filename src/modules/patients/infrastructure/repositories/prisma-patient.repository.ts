@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -12,6 +13,7 @@ import {
 } from '@prisma/client';
 import { WAITLIST_PATIENT_ARCHIVED_REASON } from '../../../waitlist/domain/waitlist-rules';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { LANGUAGE_NOT_OFFERED_MESSAGE } from '../../../../shared/i18n/patient-language';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   ArchiveRevocation,
@@ -240,8 +242,17 @@ export async function insertPatientRowInTx(
   // `tenants` no tiene RLS: se lee por el id del contexto.
   const clinic = await tx.tenant.findUniqueOrThrow({
     where: { id: tenantId },
-    select: { defaultContactChannel: true },
+    select: { defaultContactChannel: true, patientLanguages: true },
   });
+  // DX-497: solo un idioma de la lista de la clínica, leída en la MISMA
+  // transacción (un ADMIN que lo quita a la vez no deja pasar uno retirado).
+  const preferredLanguage = input.preferredLanguage ?? null;
+  if (
+    preferredLanguage !== null &&
+    !clinic.patientLanguages.includes(preferredLanguage)
+  ) {
+    throw new BadRequestException(LANGUAGE_NOT_OFFERED_MESSAGE);
+  }
   // DX-224: el E.164 va en el MISMO INSERT (no un UPDATE después): cada UPDATE
   // deja una versión muerta de la fila y fragmenta el montón.
   const phoneE164 = input.phone
@@ -255,6 +266,7 @@ export async function insertPatientRowInTx(
       tenantId,
       phoneE164,
       contactChannel: clinic.defaultContactChannel,
+      preferredLanguage,
       firstName: input.firstName,
       lastName: input.lastName,
       ...patientDocFields(input.docType, input.docTypeLabel),
@@ -333,6 +345,7 @@ export function mapToEntity(
     partiallySuppressedAt: patient.partiallySuppressedAt,
     importBatchId: patient.importBatchId,
     contactChannel: patient.contactChannel,
+    preferredLanguage: patient.preferredLanguage,
     whatsappOptInAt: patient.whatsappOptInAt,
     whatsappOptInSource: patient.whatsappOptInSource,
     whatsappOptInById: patient.whatsappOptInById,

@@ -155,13 +155,18 @@ export function googleCalendarUrl(
     | 'locationName'
     | 'locationAddress'
   >,
+  /**
+   * DX-497: título y detalle en el idioma del paciente (catálogo del
+   * recordatorio). Ausente = los de la clínica.
+   */
+  texts?: { summary: string; details: string },
 ): string {
   const params = new URLSearchParams({
     action: 'TEMPLATE',
-    text: calendarSummary(e),
+    text: texts?.summary ?? calendarSummary(e),
     dates: `${icsUtc(e.start)}/${icsUtc(e.end)}`,
     location: calendarLocation(e),
-    details: DESCRIPTION,
+    details: texts?.details ?? DESCRIPTION,
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }

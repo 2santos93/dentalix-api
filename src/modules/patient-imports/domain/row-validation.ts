@@ -45,6 +45,8 @@ export interface RowContext {
   today: string;
   /** Nombres locales de los tipos de documento de la clínica (R16, R19). */
   clinicNames: ClinicDocumentTypeNames;
+  /** DX-497: idiomas de los pacientes de la clínica (columna «idioma»). */
+  patientLanguages: readonly string[];
 }
 
 export interface ValidatedRow {
@@ -82,6 +84,7 @@ const SEX_ALIASES: ReadonlyArray<
 
 /** Clave de comparación del documento (la misma que usa el alta manual). */
 export { docKey } from '../../patients/domain/doc-key';
+import { canonicalLanguageTag } from '../../../shared/i18n/patient-language';
 
 /**
  * Tipo de la celda (DX-327, R19), por `documentTypeKey` (sin mayúsculas, ni
@@ -293,6 +296,11 @@ function excerpt(value: string): string {
     : value;
 }
 
+/** DX-497: el idioma de la fila no es una etiqueta o no está en la lista. */
+export function unknownLanguageMessage(languages: readonly string[]): string {
+  return `Idioma no admitido: usa uno de la lista de la clínica (${languages.join(', ')}) o deja la celda vacía para el idioma de la clínica.`;
+}
+
 /**
  * Valida y normaliza una fila con el mapeo elegido. Cada problema sale como
  * un error de la fila (fila, columna, motivo en español); con alguno, la fila
@@ -440,6 +448,20 @@ export function validateRow(
     false,
   );
   const notes = text('notes', 'Notas', false);
+  const rawLanguage = clean(cell('preferredLanguage'));
+  if (rawLanguage !== '') {
+    const tag = canonicalLanguageTag(rawLanguage);
+    if (!tag || !ctx.patientLanguages.includes(tag)) {
+      fail(
+        'preferredLanguage',
+        'Idioma',
+        unknownLanguageMessage(ctx.patientLanguages),
+        rawLanguage,
+      );
+    } else {
+      data.preferredLanguage = tag;
+    }
+  }
 
   if (issues.length > 0 || !firstName || !lastName || !docType || !docNumber) {
     return { rowNumber: row.rowNumber, data: null, issues };

@@ -2,25 +2,11 @@ import { BadRequestException } from '@nestjs/common';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { MAJORITY_AGE_MESSAGE } from '../../domain/responsible-parties/majority-age';
-import type { PatientSettingsRepository } from '../../domain/ports/patient-settings-repository.port';
+import { InMemoryPatientSettingsRepository } from '../__fixtures__/in-memory-patient-settings.repository';
 import {
   GetPatientSettingsUseCase,
   UpdatePatientSettingsUseCase,
 } from './patient-settings.use-cases';
-
-class InMemoryPatientSettingsRepository implements PatientSettingsRepository {
-  majorityAge = 18;
-
-  getMajorityAge(): Promise<number> {
-    return Promise.resolve(this.majorityAge);
-  }
-
-  setMajorityAge(age: number): Promise<{ before: number; after: number }> {
-    const before = this.majorityAge;
-    this.majorityAge = age;
-    return Promise.resolve({ before, after: age });
-  }
-}
 
 describe('Mayoría de edad de la clínica (DX-328)', () => {
   let repo: InMemoryPatientSettingsRepository;

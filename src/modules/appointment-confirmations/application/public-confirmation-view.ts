@@ -7,6 +7,15 @@ import { civilDateIn } from '../../../shared/time/civil-day';
 import { MOVABLE_STATUSES } from '../../waitlist/domain/opening-candidates';
 import { googleCalendarUrl } from '../../../shared/calendar/appointment-calendar';
 import {
+  CLINIC_LANGUAGE,
+  resolveCatalogLanguage,
+} from '../../../shared/i18n/patient-language';
+import {
+  DEFAULT_EMAIL_LOCALE,
+  EMAIL_LOCALES,
+} from '../../notifications/email/domain/email-message';
+import { APPOINTMENT_REMINDER_CATALOG } from '../../notifications/email/application/templates/catalog/appointment-reminder.catalog';
+import {
   AppointmentConfirmation,
   ClinicBranding,
   ConfirmationAppointment,
@@ -102,6 +111,13 @@ export interface PublicCancellationPolicyView {
 
 export interface PublicConfirmationView {
   /**
+   * DX-497: idioma en que abre la página: el preferido del paciente de la
+   * cita (BCP 47) o, sin preferencia, el de la clínica. La web lo resuelve
+   * contra su catálogo (sin traducción, el de la clínica) y deja cambiarlo
+   * sin tocar la ficha.
+   */
+  language: string;
+  /**
    * DX-469: «Añadir a mi calendario»: la cita está viva (no cancelada) y aún
    * no terminó, y el enlace sigue valiendo. Con ello, el .ics de la ruta
    * `/calendar.ics` y el enlace de Google Calendar.
@@ -172,14 +188,35 @@ function calendarFields(
   }
   return {
     calendarAvailable: true,
-    googleCalendarUrl: googleCalendarUrl({
-      start: appointment.start,
-      end: appointment.end,
-      clinicName: clinic?.name ?? 'la clínica',
-      providerName: appointment.providerName,
-      locationName: appointment.locationName,
-      locationAddress: appointment.locationAddress,
-    }),
+    googleCalendarUrl: googleCalendarUrl(
+      {
+        start: appointment.start,
+        end: appointment.end,
+        clinicName: clinic?.name ?? 'la clínica',
+        providerName: appointment.providerName,
+        locationName: appointment.locationName,
+        locationAddress: appointment.locationAddress,
+      },
+      // DX-497: el evento en el idioma del paciente, si hay catálogo.
+      calendarTexts(appointment, clinic),
+    ),
+  };
+}
+
+function calendarTexts(
+  appointment: ConfirmationAppointment,
+  clinic: ClinicBranding | null,
+): { summary: string; details: string } | undefined {
+  const { language } = resolveCatalogLanguage(
+    appointment.patientPreferredLanguage,
+    EMAIL_LOCALES,
+    DEFAULT_EMAIL_LOCALE,
+  );
+  if (language === DEFAULT_EMAIL_LOCALE || !clinic) return undefined;
+  const t = APPOINTMENT_REMINDER_CATALOG[language];
+  return {
+    summary: t.calendarSummary(clinic.name, appointment.providerName),
+    details: t.calendarDetails,
   };
 }
 
@@ -194,6 +231,7 @@ export function toPublicConfirmationView(
   const pending = status === 'PENDING' && appointment !== null;
   return {
     ...calendarFields(status, appointment, clinic, now),
+    language: appointment?.patientPreferredLanguage ?? CLINIC_LANGUAGE,
     status,
     clinic,
     appointment:

@@ -1077,6 +1077,47 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
        WHERE "import_batch_id" = ${importBatchId}::uuid
        ORDER BY "docNumber"`;
 
+  it('DX-497: la columna opcional «idioma» acepta los de la lista de la clínica', async () => {
+    await as(api().put('/api/v1/patients/languages'), a.adminToken)
+      .send({ languages: ['es', 'en'] })
+      .expect(200);
+    const bytes = Buffer.from(
+      [
+        'tipo_documento;numero_documento;nombres;apellidos;idioma',
+        'NATIONAL_ID;RX-4971;Ana;Idioma;EN',
+        'NATIONAL_ID;RX-4972;Luis;Idioma;',
+        'NATIONAL_ID;RX-4973;Eva;Idioma;fr',
+      ].join('\n') + '\n',
+      'utf8',
+    );
+    const dry = (await upload('', bytes, 'idiomas.csv').expect(201))
+      .body as Batch;
+    expect(dry.issues).toEqual([
+      expect.objectContaining({
+        row: 4,
+        column: 'idioma',
+        kind: 'ERROR',
+        value: 'fr',
+      }),
+    ]);
+    await as(
+      api().post(`/api/v1/patient-imports/${dry.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    const created = await raw.patient.findMany({
+      where: { importBatchId: dry.id },
+      select: { firstName: true, preferredLanguage: true },
+      orderBy: { firstName: 'asc' },
+    });
+    expect(created).toEqual([
+      { firstName: 'Ana', preferredLanguage: 'en' },
+      { firstName: 'Luis', preferredLanguage: null },
+    ]);
+  });
+
   it('a file with generic types imports every type and stores only the generic one', async () => {
     const bytes = csvOf([
       'NATIONAL_ID;RX-5001;Uno;Genérico;;;;;',

@@ -64,6 +64,9 @@ interface CommunicationBody {
     minor: boolean;
     responsiblePartyId?: string | null;
   };
+  preferredLanguage: string | null;
+  patientLanguages: string[];
+  clinicLanguage: string;
 }
 
 describe('Comunicaciones del paciente (e2e, DX-128)', () => {
@@ -154,6 +157,10 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         minor: false,
         responsiblePartyId: null,
       },
+      // DX-497: sin preferencia, con la lista de la clínica.
+      preferredLanguage: null,
+      patientLanguages: ['es'],
+      clinicLanguage: 'es',
     } satisfies CommunicationBody);
   });
 

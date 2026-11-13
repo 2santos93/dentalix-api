@@ -102,7 +102,16 @@ import {
   UpdatePatientSettingsUseCase,
   type PatientSettings,
 } from '../application/use-cases/patient-settings.use-cases';
-import { PatientSettingsDto } from './dto/patient-settings.dto';
+import {
+  PatientLanguagesDto,
+  PatientSettingsDto,
+  UpdatePatientLanguagesDto,
+} from './dto/patient-settings.dto';
+import {
+  GetPatientLanguagesUseCase,
+  UpdatePatientLanguagesUseCase,
+  type PatientLanguages,
+} from '../application/use-cases/patient-languages.use-cases';
 import {
   GetRetentionSettingsUseCase,
   UpdateRetentionSettingsUseCase,
@@ -198,6 +207,8 @@ export class PatientsController {
     // DX-328: mayoría de edad de la clínica.
     private readonly getSettings: GetPatientSettingsUseCase,
     private readonly updateSettings: UpdatePatientSettingsUseCase,
+    private readonly getLanguages: GetPatientLanguagesUseCase,
+    private readonly updateLanguagesUseCase: UpdatePatientLanguagesUseCase,
     // DX-327: nombre local de cada tipo de documento de la clínica.
     private readonly getDocumentTypeNames: GetDocumentTypeNamesUseCase,
     private readonly updateDocumentTypeNames: UpdateDocumentTypeNamesUseCase,
@@ -428,6 +439,43 @@ export class PatientsController {
     const ctx = auditRequestContext(req, this.tenantContext);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
     return this.updateSettings.execute({ majorityAge: dto.majorityAge }, ctx);
+  }
+
+  // DX-497: antes de `@Get(':id')`, por lo mismo que `settings`. Lo leen los
+  // 4 roles: es la lista del desplegable de la ficha.
+  @Get('languages')
+  @ApiOperation({
+    summary: 'Idiomas de los pacientes de la clínica (DX-497)',
+  })
+  @ApiOkResponse({ type: PatientLanguagesDto })
+  languages(): Promise<PatientLanguages> {
+    return this.getLanguages.execute();
+  }
+
+  @Put('languages')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(CLINIC_SETTINGS_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Cambia los idiomas que la ficha ofrece al paciente; queda en la auditoría',
+    description:
+      'DX-497. Solo ADMIN. Etiquetas BCP 47 normalizadas, sin repetidos, con el idioma de la clínica siempre incluido. ' +
+      'Quitar un idioma no borra el de ningún paciente (la ficha lo enseña «(no disponible)»). ' +
+      'Si la lista no cambia, 200 sin evento de auditoría.',
+  })
+  @ApiOkResponse({ type: PatientLanguagesDto })
+  @ApiBadRequestResponse({ description: 'Etiqueta no válida o más de 20' })
+  @ApiForbiddenResponse({ description: CLINIC_SETTINGS_FORBIDDEN_MESSAGE })
+  updateLanguages(
+    @Body() dto: UpdatePatientLanguagesDto,
+    @Req() req: AuditableRequest,
+  ): Promise<PatientLanguages> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateLanguagesUseCase.execute(
+      { languages: dto.languages },
+      ctx,
+    );
   }
 
   // También antes de `@Get(':id')`, por lo mismo que `settings`.

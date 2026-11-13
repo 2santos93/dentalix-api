@@ -43,4 +43,29 @@ export class PrismaPatientSettingsRepository implements PatientSettingsRepositor
       return { before: locked.age, after: tenant.majorityAge };
     });
   }
+
+  async getPatientLanguages(): Promise<string[]> {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: this.tenantId() },
+      select: { patientLanguages: true },
+    });
+    return tenant.patientLanguages;
+  }
+
+  async setPatientLanguages(
+    languages: string[],
+  ): Promise<{ before: string[]; after: string[] }> {
+    const id = this.tenantId();
+    return this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<{ languages: string[] }[]>`
+        SELECT "patientLanguages" AS languages
+          FROM "tenants" WHERE "id" = ${id}::uuid FOR UPDATE`;
+      const tenant = await tx.tenant.update({
+        where: { id },
+        data: { patientLanguages: languages },
+        select: { patientLanguages: true },
+      });
+      return { before: locked.languages, after: tenant.patientLanguages };
+    });
+  }
 }

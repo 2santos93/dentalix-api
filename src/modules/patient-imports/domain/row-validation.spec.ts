@@ -225,6 +225,7 @@ function typeError(raw: string, clinicNames: ClinicDocumentTypeNames): string {
       defaultRegion: NO_REGION,
       today: TODAY,
       clinicNames,
+      patientLanguages: ['es'],
     },
   );
   return r.issues.find((i) => i.column === 'tipo')?.message ?? '';
@@ -412,6 +413,7 @@ describe('tipos de documento de la importación (DX-327)', () => {
           defaultRegion: NO_REGION,
           today: TODAY,
           clinicNames: NO_NAMES,
+          patientLanguages: ['es'],
         },
       );
       expect(r.issues).toEqual([]);
@@ -539,7 +541,12 @@ describe('validateRow', () => {
     },
     defaultDocType: 'NATIONAL_ID',
   });
-  const ctx = { defaultRegion: 'VE', today: TODAY, clinicNames: NO_NAMES };
+  const ctx = {
+    defaultRegion: 'VE',
+    today: TODAY,
+    clinicNames: NO_NAMES,
+    patientLanguages: ['es'],
+  };
 
   it('fila válida normalizada; tipo vacío usa el de por defecto', () => {
     const r = validateRow(
@@ -909,6 +916,7 @@ describe('CSV de la plantilla y del informe', () => {
         defaultRegion: 'VE',
         today: TODAY,
         clinicNames: NO_NAMES,
+        patientLanguages: ['es'],
       }),
     );
     expect(rows.map((r) => r.issues)).toEqual([[], []]);
@@ -941,12 +949,65 @@ describe('fila con más celdas que la cabecera', () => {
     const r = validateRow(
       { rowNumber: 5, cells: ['1020', 'Ana', 'Pérez'], extraCells: true },
       mapping,
-      { defaultRegion: 'VE', today: TODAY, clinicNames: NO_NAMES },
+      {
+        defaultRegion: 'VE',
+        today: TODAY,
+        clinicNames: NO_NAMES,
+        patientLanguages: ['es'],
+      },
     );
     expect(r.data).toBeNull();
     expect(r.issues).toEqual([
       expect.objectContaining({ row: 5, column: null, kind: 'ERROR' }),
     ]);
     expect(r.issues[0].message).toMatch(/más celdas que la cabecera/);
+  });
+});
+
+describe('validateRow: columna «idioma» (DX-497)', () => {
+  const headers = ['numero_documento', 'nombres', 'apellidos', 'idioma'];
+  const mapping = resolveMapping(headers, {
+    columns: suggestMapping(headers),
+    defaultDocType: 'NATIONAL_ID',
+  });
+  const ctx = {
+    defaultRegion: 'VE',
+    today: '2026-11-13',
+    clinicNames: {},
+    patientLanguages: ['es', 'en', 'ca'],
+  };
+  const row = (language: string) =>
+    validateRow(
+      { rowNumber: 2, cells: ['V-12345678', 'Ana', 'Pérez', language] },
+      mapping,
+      ctx,
+    );
+
+  it('el mapeo automático reconoce la cabecera «idioma»', () => {
+    expect(mapping.headers.preferredLanguage).toBe('idioma');
+  });
+
+  it('una etiqueta de la lista se guarda canónica', () => {
+    expect(row('EN').data?.preferredLanguage).toBe('en');
+    expect(row('ca').data?.preferredLanguage).toBe('ca');
+  });
+
+  it('vacía = «Idioma de la clínica» (sin el campo)', () => {
+    expect(row('').data).not.toHaveProperty('preferredLanguage');
+  });
+
+  it('fuera de la lista o no válida: error de la fila con la lista', () => {
+    for (const raw of ['fr', 'inglés']) {
+      const r = row(raw);
+      expect(r.data).toBeNull();
+      expect(r.issues).toEqual([
+        expect.objectContaining({
+          column: 'idioma',
+          kind: 'ERROR',
+          message: expect.stringContaining('es, en, ca') as string,
+          value: raw,
+        }),
+      ]);
+    }
   });
 });

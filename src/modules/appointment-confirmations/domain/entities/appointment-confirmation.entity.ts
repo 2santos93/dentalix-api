@@ -44,6 +44,8 @@ export interface ConfirmationAppointment {
   earlierWindow: EarlierWindow | null;
   patientFirstName: string | null;
   patientPhone: string | null;
+  /** DX-497: idioma preferido del paciente (null = el de la clínica). */
+  patientPreferredLanguage: string | null;
   providerName: string | null;
   /** Sede de la cita: la restricción por sedes (DX-089) se comprueba con ella. */
   locationId: string;

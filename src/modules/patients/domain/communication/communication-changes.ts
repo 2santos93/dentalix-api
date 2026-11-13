@@ -35,5 +35,10 @@ export function effectiveCommunicationChanges(
       patch.reminderOptOutSource !== current.reminderOptOutSource)
   )
     changed.push('reminderOptOutAt');
+  if (
+    patch.preferredLanguage !== undefined &&
+    patch.preferredLanguage !== current.preferredLanguage
+  )
+    changed.push('preferredLanguage');
   return changed.sort();
 }

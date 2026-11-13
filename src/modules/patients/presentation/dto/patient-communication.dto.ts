@@ -176,6 +176,26 @@ export class PatientCommunicationDto {
       'A quién se dirigen los avisos (como Dentrix Ascend: un menor, a su tutor o contacto principal). Usan el correo y el móvil de la ficha.',
   })
   recipient!: CommunicationRecipientDto;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'en',
+    description:
+      'DX-497: idioma preferido (BCP 47) del recordatorio y de la página de confirmar. null = «Idioma de la clínica». Si ya no está en `patientLanguages`, la ficha lo enseña «(no disponible)».',
+  })
+  preferredLanguage!: string | null;
+
+  @ApiProperty({
+    type: [String],
+    example: ['es', 'en', 'ca'],
+    description:
+      'DX-497: idiomas que ofrece la clínica (opciones del desplegable).',
+  })
+  patientLanguages!: string[];
+
+  @ApiProperty({ example: 'es', description: 'DX-497: idioma de la clínica.' })
+  clinicLanguage!: string;
 }
 
 /**
@@ -232,6 +252,19 @@ export class UpdatePatientCommunicationDto {
       'Indica si el paciente se da de baja de los recordatorios (sí o no).',
   })
   reminderOptOut?: boolean;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: 35,
+    example: 'en',
+    description:
+      'DX-497: idioma preferido (BCP 47). null o vacío = «Idioma de la clínica». Tiene que estar en la lista de la clínica (400 si no). Queda en la auditoría con el antes y el después.',
+  })
+  @IsOptional()
+  @IsString({ message: 'El idioma debe ser un texto.' })
+  @MaxLength(35, { message: 'El idioma admite como máximo 35 caracteres.' })
+  preferredLanguage?: string | null;
 }
 
 /** DX-214: metadatos mínimos del aviso, sin datos de contacto. */

@@ -15,6 +15,7 @@ function appointment(
     calendarAlarmHours: 24,
     patientFirstName: 'Ana María',
     patientPhone: '+58 414 555 0101',
+    patientPreferredLanguage: null,
     providerName: 'Dra. Pérez',
     locationId: 'location-sentinel-1',
     locationName: 'Sede Este',

@@ -263,6 +263,95 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     await owner.locationReminderSettings.deleteMany({ where });
   });
 
+  describe('DX-497: idioma preferido del paciente', () => {
+    // Los enlaces de baja de estos envíos no cuentan para los casos que vienen
+    // detrás (el de [48, 2] cuenta los de la clínica).
+    afterEach(() =>
+      owner.reminderOptOutLink.deleteMany({
+        where: { tenantId: clinicA.tenantId },
+      }),
+    );
+
+    async function sendOne(preferredLanguage: string | null) {
+      await configure(clinicA, [2]);
+      const start = new Date(Date.now() + 2 * HOUR + 5 * MIN);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, 'carolina.duque@example.com', {
+          preferredLanguage,
+        }),
+        start,
+      );
+      await sweep();
+      await releaseDue(clinicA.tenantId);
+      await waitFor(() => mailer.sent.length === 1, 'el despachador entrega 1');
+      const [outbound] = await owner.outboundMessage.findMany({
+        where: { appointmentId: id },
+      });
+      const view = await a
+        .get(TenantContextService)
+        .run(clinicA.tenantId, () =>
+          a.get(GetAppointmentRemindersUseCase).execute(id),
+        );
+      return { start, outbound, email: mailer.sent[0], view };
+    }
+
+    it('en: asunto y cuerpo en inglés; fecha y hora con el locale y la zona de la sede', async () => {
+      const { start, outbound, email, view } = await sendOne('en');
+      expect(email.subject).toBe(
+        `Reminder: your appointment at Clínica ${SUBDOMAINS[0]}`,
+      );
+      expect(email.text).toContain('Hello Carolina,');
+      // DX-315: la fecha sigue la sede (es-VE, Caracas), no el idioma.
+      expect(email.text).toContain(
+        `Date and time: ${startsAtLabel(
+          start,
+          REGIONAL_CARACAS_FIXTURE.timeZone,
+          regionalFormat(REGIONAL_CARACAS_FIXTURE),
+        )} (local time at the clinic)`,
+      );
+      expect(email.html).toContain('<html lang="en">');
+      expect(outbound).toMatchObject({
+        language: 'en',
+        languageFallbackFrom: null,
+      });
+      expect(view.items[0]).toMatchObject({
+        state: 'SENT',
+        language: 'en',
+        languageFallbackFrom: null,
+      });
+    });
+
+    it('ca sin catálogo: sale en el idioma de la clínica y el registro dice ca → es', async () => {
+      const { outbound, email, view } = await sendOne('ca');
+      expect(email.subject).toBe(
+        `Recordatorio de tu cita en Clínica ${SUBDOMAINS[0]}`,
+      );
+      expect(outbound).toMatchObject({
+        language: 'es',
+        languageFallbackFrom: 'ca',
+      });
+      expect(view.items[0]).toMatchObject({
+        language: 'es',
+        languageFallbackFrom: 'ca',
+      });
+    });
+
+    it('sin preferencia: el de la clínica, sin caída', async () => {
+      const { outbound } = await sendOne(null);
+      expect(outbound).toMatchObject({
+        language: 'es',
+        languageFallbackFrom: null,
+      });
+    });
+
+    it('la BD rechaza un idioma con formato no válido (CHECK)', async () => {
+      await expect(
+        patient(clinicA, null, { preferredLanguage: 'English' }),
+      ).rejects.toThrow(/patients_preferred_language_check/);
+    });
+  });
+
   it('con [48, 2] una cita recibe exactamente 2 emails aunque el barrido corra varias veces y en dos workers', async () => {
     await configure(clinicA, [48, 2]);
     const email = 'carolina.duque@example.com';

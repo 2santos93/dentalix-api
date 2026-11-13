@@ -228,6 +228,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-328: la mayoría de edad de la clínica la leen todos; la cambia gestión.
   'GET /patients/settings': EVERY_ROLE,
   'PUT /patients/settings': ADMIN_ONLY,
+  // DX-497: los idiomas de los pacientes los leen todos (el desplegable de la
+  // ficha); los cambia gestión.
+  'GET /patients/languages': EVERY_ROLE,
+  'PUT /patients/languages': ADMIN_ONLY,
   // DX-327: el nombre local de cada tipo de documento lo leen todos (los
   // formularios y la importación lo usan); lo cambia gestión.
   'GET /patients/document-type-names': EVERY_ROLE,

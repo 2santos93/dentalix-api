@@ -34,6 +34,8 @@ describe('buildReminderTimeline (DX-026)', () => {
         failureReason: null,
         emailDelivery: 'SENT',
         sentToResponsible: false,
+        language: null,
+        languageFallbackFrom: null,
         current: true,
       },
       {
@@ -46,6 +48,8 @@ describe('buildReminderTimeline (DX-026)', () => {
         failureReason: null,
         emailDelivery: null,
         sentToResponsible: false,
+        language: null,
+        languageFallbackFrom: null,
         current: true,
       },
       {
@@ -58,6 +62,8 @@ describe('buildReminderTimeline (DX-026)', () => {
         failureReason: null,
         emailDelivery: null,
         sentToResponsible: false,
+        language: null,
+        languageFallbackFrom: null,
         current: true,
       },
     ]);
@@ -166,5 +172,29 @@ describe('buildReminderTimeline (DX-026)', () => {
       now: NOW,
     });
     expect(items.map((i) => i.state)).toEqual(['SENDING']);
+  });
+
+  it('DX-497: el registro dice en qué idioma salió y si no había traducción', () => {
+    const items = buildReminderTimeline({
+      appointment: { start, status: 'SCHEDULED', deleted: false },
+      settings: { enabled: true, leadHours: [48] },
+      records: [
+        {
+          leadHours: 48,
+          appointmentStart: start,
+          status: 'SENT',
+          skipReason: null,
+          sentAt: at(-18 * HOUR),
+          emailDelivery: 'SENT',
+          language: 'es',
+          languageFallbackFrom: 'ca',
+        },
+      ],
+      now: NOW,
+    });
+    expect(items[0]).toMatchObject({
+      language: 'es',
+      languageFallbackFrom: 'ca',
+    });
   });
 });
