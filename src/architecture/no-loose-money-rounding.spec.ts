@@ -99,6 +99,18 @@ export const ALLOWED: readonly Allowed[] = [
       'num(): solo conteos, % y variaciones; los importes (unit MONEY) van por csvAmount',
   },
   {
+    file: 'src/modules/reports/domain/profitability.ts',
+    text: 'Math.round((netCents / incomeCents) * 1000) / 10',
+    reason:
+      'margen de rentabilidad (resultado ÷ ingresos) en % con 1 decimal (DX-410), no un importe',
+  },
+  {
+    file: 'src/modules/reports/application/profitability-csv.ts',
+    text: 'm.margin.toFixed(1)',
+    reason:
+      'columna «Margen (%)» del CSV de rentabilidad (DX-410); los importes van por csvAmount',
+  },
+  {
     file: 'src/modules/periodontal/domain/perio-measures.ts',
     text: 'Math.round((part / total) * 1000) / 10',
     reason: '% de sitios con sangrado/placa, no un importe',

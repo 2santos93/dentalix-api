@@ -2693,6 +2693,24 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 403,
       message: 'No tienes acceso a esta sede.',
     })),
+    // DX-410: rentabilidad por sede (informe, CSV y detalle). Una sede de A
+    // es 403 (el mismo rechazo que una sede no permitida: no dice si existe).
+    ...(
+      [
+        '/reports/profitability',
+        '/reports/profitability.csv',
+        '/reports/profitability/lines',
+      ] as const
+    ).map((route): IsolationCase => ({
+      name: `GET ${route} ?locationId de A`,
+      verb: 'get',
+      path: () =>
+        `${route}?from=${day(-30)}&to=${day(0)}&basis=CASH&locationId=${a.locationId}` +
+        (route.endsWith('/lines') ? '&side=INCOME&currency=USD' : ''),
+      queryIds: ['locationId'],
+      status: 403,
+      message: 'No tienes acceso a esta sede.',
+    })),
     // DX-424: enlaces del paciente. Una sede de A es 403 (el mismo rechazo
     // que una sede no permitida: no dice si existe).
     {

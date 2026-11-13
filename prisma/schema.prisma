@@ -6139,6 +6139,11 @@ model ExpensePayment {
   /// Destino de la FK de `cash_session_adjustments.expensePaymentId`.
   @@unique([tenantId, id], map: "expense_payments_tenant_id_key")
   @@index([tenantId, expenseId], map: "expense_payments_tenant_expense_idx")
+  /// DX-410 (Rentabilidad, base Caja): pagos vivos por sede y `paidOn`.
+  /// PARCIAL (WHERE "voidedAt" IS NULL): el WHERE vive solo en la migración
+  /// 20261218100000_dx410_expense_payments_paid_on_idx. NO aceptes un diff de
+  /// migrate dev que lo vuelva completo.
+  @@index([tenantId, locationId, paidOn], map: "expense_payments_tenant_location_paid_on_idx")
   @@map("expense_payments")
 }
 

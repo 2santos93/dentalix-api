@@ -325,4 +325,84 @@ export class ReportSeeder {
       });
     }
   }
+
+  /**
+   * DX-410: un gasto de la sede (fecha de factura civil) y, si se piden, sus
+   * pagos (fecha de pago civil). Anular el gasto anula antes sus pagos vivos,
+   * como el caso de uso (la BD no deja anular un gasto con pagos vivos).
+   */
+  async expense(input: {
+    locationId: string;
+    currency: string;
+    amount: number;
+    category: string;
+    invoiceDate: string;
+    supplier?: string;
+    payments?: { amount: number; paidOn: string; voided?: boolean }[];
+    voided?: boolean;
+  }): Promise<string> {
+    const { userId } = await this.dentist();
+    const expense = await this.raw.expense.create({
+      data: {
+        tenantId: this.tenantId,
+        locationId: input.locationId,
+        category: input.category,
+        supplier: input.supplier ?? null,
+        amount: input.amount,
+        currency: input.currency,
+        invoiceDate: new Date(`${input.invoiceDate}T00:00:00Z`),
+        createdById: userId,
+      },
+      select: { id: true },
+    });
+    for (const payment of input.payments ?? []) {
+      // Un pago nace vivo (trigger de DX-274): se anula después.
+      const created = await this.raw.expensePayment.create({
+        data: {
+          tenantId: this.tenantId,
+          expenseId: expense.id,
+          locationId: input.locationId,
+          currency: input.currency,
+          amount: payment.amount,
+          method: 'TRANSFER',
+          paidOn: new Date(`${payment.paidOn}T00:00:00Z`),
+          createdById: userId,
+        },
+        select: { id: true },
+      });
+      if (payment.voided) {
+        await this.raw.expensePayment.update({
+          where: { id: created.id },
+          data: {
+            voidedAt: new Date(),
+            voidedById: userId,
+            voidReason: 'Error',
+          },
+        });
+      }
+    }
+    if (input.voided) {
+      await this.raw.expensePayment.updateMany({
+        where: {
+          tenantId: this.tenantId,
+          expenseId: expense.id,
+          voidedAt: null,
+        },
+        data: {
+          voidedAt: new Date(),
+          voidedById: userId,
+          voidReason: 'Anulado',
+        },
+      });
+      await this.raw.expense.update({
+        where: { id: expense.id },
+        data: {
+          voidedAt: new Date(),
+          voidedById: userId,
+          voidReason: 'Anulado',
+        },
+      });
+    }
+    return expense.id;
+  }
 }

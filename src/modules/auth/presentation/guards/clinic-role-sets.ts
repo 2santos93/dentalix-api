@@ -391,6 +391,13 @@ export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
 // dueño. Solo gestión, como el dashboard (DASHBOARD_ROLES).
 export const REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// «Rentabilidad por sede» (DX-410): ingresos − gastos de cada sede. Junta el
+// dato financiero de los abonos y el de los gastos (EXPENSE_ROLES, solo
+// ADMIN): la mirada del dueño. No hay todavía un permiso de «reportes
+// financieros» aparte de los roles: el día que lo haya, se añade aquí. Las
+// sedes las acota el claim `loc` (DX-089).
+export const PROFITABILITY_REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // «Producción por procedimiento» (DX-423): ADMIN ve la de todo el equipo; un
 // DENTIST, solo la suya (lo acota el caso de uso). Asistente y recepción no.
 export const PRODUCTION_REPORT_ROLES: ClinicRole[] = [

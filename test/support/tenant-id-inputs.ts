@@ -130,6 +130,10 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   // --- reportes, cartera y caja (DX-027, DX-204) ---
   'GET /reports/chair-occupancy ?locationId',
   'GET /reports/chair-occupancy.csv ?locationId',
+  // DX-410: rentabilidad por sede, su CSV y el detalle de cada cifra.
+  'GET /reports/profitability ?locationId',
+  'GET /reports/profitability.csv ?locationId',
+  'GET /reports/profitability/lines ?locationId',
   'GET /reports/patient-links ?locationId',
   'GET /reports/discounts ?locationId',
   'GET /reports/discounts ?professionalId',
