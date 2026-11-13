@@ -29,12 +29,16 @@ import {
 import { PATIENT_LINKS_REPOSITORY } from './domain/ports/patient-links-repository.port';
 import { PrismaPatientLinksRepository } from './infrastructure/prisma-patient-links.repository';
 import { PatientLinksController } from './presentation/patient-links.controller';
+import { GetProfitabilityUseCase } from './application/use-cases/get-profitability.use-case';
+import { PROFITABILITY_REPOSITORY } from './domain/ports/profitability-repository.port';
+import { PrismaProfitabilityRepository } from './infrastructure/prisma-profitability.repository';
+import { ProfitabilityController } from './presentation/profitability.controller';
 
 // Reportes de gestión (DX-014). Pestañas: «Comparar sedes» (indicadores en
 // `domain/kpi-definitions.ts`), «Producción por procedimiento» (DX-423) y
 // «Cobrado sin imputar» (DX-399, ADMIN y recepción) y «Huecos recuperados»
-// (DX-436), «Ocupación por sillón» (DX-481) y «Enlaces del paciente»
-// (DX-424); las
+// (DX-436), «Ocupación por sillón» (DX-481), «Enlaces del paciente»
+// (DX-424) y «Rentabilidad por sede» (DX-410); las
 // siguientes se añaden como controladores bajo el mismo prefijo `reports`.
 @Module({
   imports: [JwtModule.register({})],
@@ -45,6 +49,7 @@ import { PatientLinksController } from './presentation/patient-links.controller'
     RecoveredSlotsController,
     ChairOccupancyController,
     PatientLinksController,
+    ProfitabilityController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
@@ -53,6 +58,7 @@ import { PatientLinksController } from './presentation/patient-links.controller'
     GetRecoveredSlotsUseCase,
     GetChairOccupancyUseCase,
     GetPatientLinksUseCase,
+    GetProfitabilityUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -80,6 +86,10 @@ import { PatientLinksController } from './presentation/patient-links.controller'
       useClass: PrismaPatientLinksRepository,
     },
     { provide: PATIENT_LINKS_CLOCK, useValue: () => new Date() },
+    {
+      provide: PROFITABILITY_REPOSITORY,
+      useClass: PrismaProfitabilityRepository,
+    },
   ],
 })
 export class ReportsModule {}
