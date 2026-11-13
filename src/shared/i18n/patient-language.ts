@@ -17,7 +17,7 @@ export const LANGUAGE_TAG_PATTERN =
 export const MAX_PATIENT_LANGUAGES = 20;
 
 export const LANGUAGE_TAG_MESSAGE =
-  'El idioma debe ser una etiqueta BCP 47 como «en», «ca» o «pt-BR».';
+  'El idioma debe ser una etiqueta BCP 47 como «en», «ca» o «es-419».';
 export const LANGUAGE_NOT_OFFERED_MESSAGE =
   'Ese idioma no está en la lista de idiomas de los pacientes de la clínica (Ajustes › Idiomas de los pacientes).';
 

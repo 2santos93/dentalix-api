@@ -11,7 +11,7 @@ import {
   type PatientSettingsRepository,
 } from '../../domain/ports/patient-settings-repository.port';
 
-export const PATIENT_LANGUAGES_MESSAGE = `Cada idioma debe ser una etiqueta BCP 47 como «en», «ca» o «pt-BR», con un máximo de ${MAX_PATIENT_LANGUAGES}.`;
+export const PATIENT_LANGUAGES_MESSAGE = `Cada idioma debe ser una etiqueta BCP 47 como «en», «ca» o «es-419», con un máximo de ${MAX_PATIENT_LANGUAGES}.`;
 
 /** DX-497: idiomas que la ficha ofrece como idioma preferido del paciente. */
 export interface PatientLanguages {
