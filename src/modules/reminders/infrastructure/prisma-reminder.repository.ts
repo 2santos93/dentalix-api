@@ -290,6 +290,7 @@ export class PrismaReminderRepository implements ReminderRepository {
               firstName: true,
               birthDate: true,
               emergencyContactName: true,
+              preferredLanguage: true,
             },
           },
           location: {
@@ -340,6 +341,7 @@ export class PrismaReminderRepository implements ReminderRepository {
         // de formato y el envío no sale, igual que con una zona NULL.
         locationFormat: requireLocationFormat(appointment.location),
         patientId: appointment.patient.id,
+        preferredLanguage: appointment.patient.preferredLanguage,
         contact: toContact(appointment.patient),
         recipient: {
           firstName: appointment.patient.firstName,
@@ -553,7 +555,13 @@ export class PrismaReminderRepository implements ReminderRepository {
             failureReason: true,
             sentAt: true,
             outboundMessageId: true,
-            outboundMessage: { select: { recipientKind: true } },
+            outboundMessage: {
+              select: {
+                recipientKind: true,
+                language: true,
+                languageFallbackFrom: true,
+              },
+            },
           },
         }),
       ]);
@@ -597,6 +605,8 @@ export class PrismaReminderRepository implements ReminderRepository {
             ? (delivery.get(r.outboundMessageId) ?? null)
             : null,
           sentToResponsible: r.outboundMessage?.recipientKind === 'RESPONSIBLE',
+          language: r.outboundMessage?.language ?? null,
+          languageFallbackFrom: r.outboundMessage?.languageFallbackFrom ?? null,
         })),
       };
     });

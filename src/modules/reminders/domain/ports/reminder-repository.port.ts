@@ -51,6 +51,8 @@ export interface ReminderSendContext {
   /** G1-B: formato y reloj de la sede de la cita, con los que se pinta el email. */
   locationFormat: RegionalFormat;
   patientId: string;
+  /** DX-497: idioma preferido del paciente (null = el de la clínica). */
+  preferredLanguage: string | null;
   /** Canal, baja y email VIGENTES del paciente (DX-128). */
   contact: ReminderContact;
   /** Para decidir a quién va y a quién se saluda (DX-128, DX-203). */

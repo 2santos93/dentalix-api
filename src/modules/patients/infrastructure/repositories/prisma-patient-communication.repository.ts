@@ -36,6 +36,7 @@ const SELECT = {
   whatsappOptInById: true,
   reminderOptOutAt: true,
   reminderOptOutSource: true,
+  preferredLanguage: true,
 } as const satisfies Prisma.PatientSelect;
 
 type Row = Prisma.PatientGetPayload<{ select: typeof SELECT }>;
@@ -58,7 +59,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
     const { whatsappOptInById, id, ...rest } = row;
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
-    const [membership, responsibles, majorityReview, noticeSettings] =
+    const [membership, responsibles, majorityReview, noticeSettings, clinic] =
       await Promise.all([
         whatsappOptInById
           ? tx.clinicMembership.findFirst({
@@ -74,6 +75,11 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
           tenantId,
           this.tenantContext.getLocationId() ?? null,
         ),
+        // DX-497: `tenants` no tiene RLS: por el id del contexto.
+        tx.tenant.findUniqueOrThrow({
+          where: { id: tenantId },
+          select: { patientLanguages: true },
+        }),
       ]);
     return {
       patientId: id,
@@ -81,6 +87,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
       responsibles,
       majorityReview,
       noticeSettings,
+      patientLanguages: clinic.patientLanguages,
       whatsappOptInBy: whatsappOptInById
         ? {
             id: whatsappOptInById,
@@ -189,7 +196,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
           data: { usedAt: invalidateOptOutLinksAt },
         });
       }
-      return { state, changedFields };
+      return { state, previous: current, changedFields };
     });
   }
 }

@@ -18,6 +18,10 @@ export interface ReminderRecord {
   emailDelivery: ReminderEmailDelivery | null;
   /** DX-203: el registro de envíos dice que fue al responsable del paciente. */
   sentToResponsible?: boolean;
+  /** DX-497: idioma en que salió (registro de envíos); null si no consta. */
+  language?: string | null;
+  /** DX-497: idioma del paciente sin traducción («sin traducción: ca → es»). */
+  languageFallbackFrom?: string | null;
 }
 
 /**
@@ -42,6 +46,10 @@ export interface ReminderTimelineItem {
   emailDelivery: ReminderEmailDelivery | null;
   /** DX-203: «Recordatorio enviado al responsable». */
   sentToResponsible: boolean;
+  /** DX-497: idioma en que salió; null si no salió o es anterior a DX-497. */
+  language: string | null;
+  /** DX-497: el del paciente, sin traducción; null si no hubo caída. */
+  languageFallbackFrom: string | null;
   /** false = de una hora anterior de la cita (se reprogramó). */
   current: boolean;
 }
@@ -77,6 +85,8 @@ function fromRecord(
     failureReason: record.failureReason ?? null,
     emailDelivery: record.emailDelivery,
     sentToResponsible: record.sentToResponsible ?? false,
+    language: record.language ?? null,
+    languageFallbackFrom: record.languageFallbackFrom ?? null,
     current,
   };
 }
@@ -119,6 +129,8 @@ export function buildReminderTimeline(
         failureReason: null,
         emailDelivery: null,
         sentToResponsible: false,
+        language: null,
+        languageFallbackFrom: null,
         current: true,
       });
     }

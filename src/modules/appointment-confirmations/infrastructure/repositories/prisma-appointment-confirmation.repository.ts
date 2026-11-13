@@ -52,7 +52,9 @@ const APPOINTMENT_SELECT = {
   updatedAt: true,
   providerId: true,
   locationId: true,
-  patient: { select: { firstName: true, phone: true } },
+  patient: {
+    select: { firstName: true, phone: true, preferredLanguage: true },
+  },
   // Sin filtrar `deletedAt` (DX-329, m17): la sede de la cita da el prefijo.
   location: {
     select: {
@@ -183,6 +185,7 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
         DEFAULT_CALENDAR_ALARM_HOURS,
       patientFirstName: a.patient.firstName,
       patientPhone: a.patient.phone,
+      patientPreferredLanguage: a.patient.preferredLanguage,
       providerName: membership?.user.fullName ?? null,
       locationId: a.locationId,
       locationName: a.location.name,

@@ -18,6 +18,10 @@ export interface RecordOutboundMessage {
   /** DX-203: al paciente (por defecto) o a su responsable. */
   recipientKind?: OutboundRecipientKind;
   appointmentId?: string;
+  /** DX-497: idioma (BCP 47) en que sale el mensaje. */
+  language?: string;
+  /** DX-497: el del paciente cuando no había traducción (el mensaje sale en `language`). */
+  languageFallbackFrom?: string | null;
 }
 
 /** Asociación de negocio confirmada en la misma transacción que el mensaje. */
@@ -54,13 +58,15 @@ export class OutboundMessages {
       const [recorded] = await tx.$queryRaw<{ id: string; tenantId: string }[]>`
         INSERT INTO "outbound_messages"
           ("id", "tenantId", "channel", "template", "recipientMasked",
-           "recipientKind", "appointmentId", "updatedAt")
+           "recipientKind", "appointmentId", "language",
+           "languageFallbackFrom", "updatedAt")
         VALUES
           (gen_random_uuid(), current_setting('app.current_tenant', true)::uuid,
            ${input.channel}::"OutboundChannel", ${input.template},
            ${recipientMasked},
            ${input.recipientKind ?? 'PATIENT'}::"OutboundRecipientKind",
            ${input.appointmentId ?? null}::uuid,
+           ${input.language ?? null}, ${input.languageFallbackFrom ?? null},
            CURRENT_TIMESTAMP)
         RETURNING "id", "tenantId"`;
       // Fallar la asociación revierte también el INSERT, en cada intento.
@@ -76,6 +82,8 @@ export class OutboundMessages {
       to: recipientMasked,
       recipientKind: input.recipientKind ?? 'PATIENT',
       appointmentId: input.appointmentId ?? null,
+      language: input.language ?? null,
+      languageFallbackFrom: input.languageFallbackFrom ?? null,
     });
     return { id };
   }

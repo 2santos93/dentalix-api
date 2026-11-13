@@ -22,6 +22,11 @@ import {
 } from '../../domain/communication/notice-recipient';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import {
+  CLINIC_LANGUAGE,
+  LANGUAGE_NOT_OFFERED_MESSAGE,
+} from '../../../../shared/i18n/patient-language';
+import { preferredLanguageInput } from '../preferred-language-input';
+import {
   parsePhone,
   phoneInternational,
   phoneRegionOrNull,
@@ -81,6 +86,12 @@ export interface PatientCommunicationView {
    * o al contacto principal (DX-128).
    */
   recipient: NoticeRecipient;
+  /** DX-497: idioma preferido; null = «Idioma de la clínica». */
+  preferredLanguage: string | null;
+  /** DX-497: idiomas que ofrece la clínica (las opciones del desplegable). */
+  patientLanguages: string[];
+  /** DX-497: el idioma de la clínica. */
+  clinicLanguage: string;
 }
 
 export interface UpdatePatientCommunicationInput {
@@ -90,6 +101,8 @@ export interface UpdatePatientCommunicationInput {
   whatsappOptIn?: boolean;
   whatsappOptInSource?: WhatsappOptInSource;
   reminderOptOut?: boolean;
+  /** DX-497: null o vacío = «Idioma de la clínica». */
+  preferredLanguage?: string | null;
 }
 
 function toView(
@@ -130,6 +143,9 @@ function toView(
       timeZone: state.noticeSettings.timeZone,
       majorityReview: state.majorityReview,
     }),
+    preferredLanguage: state.preferredLanguage,
+    patientLanguages: state.patientLanguages,
+    clinicLanguage: CLINIC_LANGUAGE,
   };
 }
 
@@ -218,6 +234,8 @@ export class UpdatePatientCommunicationUseCase {
       this.repo.clinicDefaultChannel(),
     ]);
     const now = this.clock();
+    // DX-497: forma de la etiqueta antes de abrir la transacción (400).
+    const preferredLanguage = preferredLanguageInput(input.preferredLanguage);
     const saved = await this.repo.update(
       patientId,
       (state) => {
@@ -267,6 +285,22 @@ export class UpdatePatientCommunicationUseCase {
           patch.reminderOptOutSource = null;
         }
 
+        // DX-497: solo uno de la lista de la clínica (leída bajo el lock).
+        // Dejar el que ya tenía, aunque se haya quitado de la lista, no es
+        // un cambio: no se exige.
+        if (
+          preferredLanguage !== undefined &&
+          preferredLanguage !== state.preferredLanguage
+        ) {
+          if (
+            preferredLanguage !== null &&
+            !state.patientLanguages.includes(preferredLanguage)
+          ) {
+            throw new BadRequestException(LANGUAGE_NOT_OFFERED_MESSAGE);
+          }
+          patch.preferredLanguage = preferredLanguage;
+        }
+
         return patch;
       },
       input.reminderOptOut === false ? now : undefined,
@@ -293,6 +327,18 @@ export class UpdatePatientCommunicationUseCase {
         reason: 'COMMUNICATION_PREFERENCES_CHANGED',
         origin,
         changedFields: saved.changedFields,
+        // DX-497: el idioma no es dato clínico ni sensible: va con su antes y
+        // su después (null = «Idioma de la clínica»), como un ajuste.
+        ...(saved.changedFields.includes('preferredLanguage')
+          ? {
+              configChange: {
+                before: {
+                  preferredLanguage: saved.previous.preferredLanguage,
+                },
+                after: { preferredLanguage: saved.state.preferredLanguage },
+              },
+            }
+          : {}),
       },
     });
     return toView(saved.state, region, clinicDefault, now);

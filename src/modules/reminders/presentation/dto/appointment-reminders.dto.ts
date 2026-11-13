@@ -70,6 +70,24 @@ export class AppointmentReminderItemDto {
   sentToResponsible!: boolean;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'en',
+    description:
+      'DX-497: idioma (BCP 47) en que salió el email, del registro de envíos. null si no salió o es anterior a DX-497.',
+  })
+  language!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'ca',
+    description:
+      'DX-497: el idioma del paciente no tenía traducción y el email salió en `language` (el de la clínica): «sin traducción: ca → es». null si no hubo caída.',
+  })
+  languageFallbackFrom!: string | null;
+
+  @ApiProperty({
     description:
       'false = de una hora de inicio anterior (la cita se reprogramó)',
   })

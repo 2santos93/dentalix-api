@@ -56,6 +56,7 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
     retentionFloorUntil: null,
     partiallySuppressedAt: null,
     contactChannel: 'EMAIL',
+    preferredLanguage: null,
     whatsappOptInAt: null,
     whatsappOptInSource: null,
     whatsappOptInById: null,

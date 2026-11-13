@@ -12,4 +12,14 @@ export interface PatientSettingsRepository {
    * dos ADMIN a la vez no dejan un «antes» que no fue real.
    */
   setMajorityAge(age: number): Promise<{ before: number; after: number }>;
+  /** DX-497: `tenants.patientLanguages` de la clínica del contexto. */
+  getPatientLanguages(): Promise<string[]>;
+  /**
+   * DX-497: cambia la lista (ya normalizada) y devuelve la de antes y la de
+   * después, con la fila de la clínica bloqueada (como la mayoría de edad).
+   * No toca a ningún paciente: el que tenía un idioma retirado lo conserva.
+   */
+  setPatientLanguages(
+    languages: string[],
+  ): Promise<{ before: string[]; after: string[] }>;
 }

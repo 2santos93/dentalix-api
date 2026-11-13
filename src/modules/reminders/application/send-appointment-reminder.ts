@@ -23,6 +23,11 @@ import { OPT_OUT_PATH, ReminderOptOutLinks } from './reminder-opt-out-links';
 import { noticeRecipient } from '../../patients/domain/communication/notice-recipient';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import { reminderPolicyVars } from '../../cancellation-policies/domain/reminder-policy-vars';
+import { resolveCatalogLanguage } from '../../../shared/i18n/patient-language';
+import {
+  DEFAULT_EMAIL_LOCALE,
+  EMAIL_LOCALES,
+} from '../../notifications/email/domain/email-message';
 
 const TEMPLATE = 'appointment-reminder';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -198,6 +203,22 @@ export class SendAppointmentReminder {
     const optOutToken = linkBase
       ? await this.optOutLinks.issue(ctx.patientId)
       : null;
+    // DX-497: el idioma del paciente si hay catálogo para él; si no, el de la
+    // clínica, y el registro de envíos lo dice («sin traducción: ca → es»).
+    // La fecha y la hora siguen el locale y la zona de la sede (DX-315).
+    const { language, fallbackFrom } = resolveCatalogLanguage(
+      ctx.preferredLanguage,
+      EMAIL_LOCALES,
+      DEFAULT_EMAIL_LOCALE,
+    );
+    if (fallbackFrom) {
+      this.logger.log({
+        event: 'reminders.language_fallback',
+        appointmentId,
+        requested: fallbackFrom,
+        language,
+      });
+    }
     const outboundId =
       claim.outboundMessageId ??
       (
@@ -209,6 +230,8 @@ export class SendAppointmentReminder {
             recipientKind:
               recipient.kind === 'RESPONSIBLE' ? 'RESPONSIBLE' : 'PATIENT',
             appointmentId,
+            language,
+            languageFallbackFrom: fallbackFrom,
           },
           (id, tx) => this.repo.attachOutbound(claim.id, id, tx),
         )
@@ -236,6 +259,7 @@ export class SendAppointmentReminder {
       to,
       template: TEMPLATE,
       referenceId: outboundId,
+      locale: language,
       vars: {
         patientName: link.appointment.patientFirstName ?? '',
         guardianName: recipient.kind === 'PATIENT' ? null : recipient.name,

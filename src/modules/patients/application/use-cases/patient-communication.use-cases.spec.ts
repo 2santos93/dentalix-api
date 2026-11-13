@@ -65,6 +65,9 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
           minor: false,
           responsiblePartyId: null,
         },
+        preferredLanguage: null,
+        patientLanguages: ['es'],
+        clinicLanguage: 'es',
       });
     });
 
@@ -303,6 +306,61 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       await expect(get.execute(ANA)).rejects.toThrow(
         new NotFoundException('Paciente no encontrado'),
       );
+    });
+  });
+
+  describe('DX-497: idioma preferido', () => {
+    it('recepción elige uno de la lista: queda auditado con el antes y el después', async () => {
+      repo.add(ANA, { patientLanguages: ['es', 'en', 'ca'] });
+      const view = await update.execute(ANA, { preferredLanguage: 'EN' }, ctx);
+      expect(view.preferredLanguage).toBe('en');
+      expect(lastAudit()).toMatchObject({
+        action: 'UPDATE',
+        resourceType: 'PATIENT',
+        resourceId: ANA,
+        actor: { kind: 'user', userId: RECEPTION },
+        metadata: {
+          reason: 'COMMUNICATION_PREFERENCES_CHANGED',
+          changedFields: ['preferredLanguage'],
+          configChange: {
+            before: { preferredLanguage: null },
+            after: { preferredLanguage: 'en' },
+          },
+        },
+      });
+    });
+
+    it('volver a «Idioma de la clínica» (null o vacío) también se audita', async () => {
+      repo.add(ANA, {
+        preferredLanguage: 'ca',
+        patientLanguages: ['es', 'ca'],
+      });
+      const view = await update.execute(ANA, { preferredLanguage: '' }, ctx);
+      expect(view.preferredLanguage).toBeNull();
+      expect(lastAudit().metadata?.configChange).toEqual({
+        before: { preferredLanguage: 'ca' },
+        after: { preferredLanguage: null },
+      });
+    });
+
+    it('un idioma fuera de la lista es 400 y no guarda nada', async () => {
+      repo.add(ANA, { patientLanguages: ['es', 'en'] });
+      await expect(
+        update.execute(ANA, { preferredLanguage: 'ca' }, ctx),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        update.execute(ANA, { preferredLanguage: 'no válido' }, ctx),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.updates).toEqual([]);
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('un idioma retirado de la lista se conserva: reenviarlo no es un cambio ni un 400', async () => {
+      repo.add(ANA, { preferredLanguage: 'ca', patientLanguages: ['es'] });
+      const view = await update.execute(ANA, { preferredLanguage: 'ca' }, ctx);
+      expect(view.preferredLanguage).toBe('ca');
+      expect(view.patientLanguages).toEqual(['es']);
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 

@@ -74,6 +74,11 @@ export interface Patient {
    * acceso). Se cambian por `PATCH /patients/:id/communication`.
    */
   contactChannel: ContactChannel;
+  /**
+   * DX-497: idioma preferido (BCP 47) de lo que se le envía; null = el de la
+   * clínica. Se cambia en el alta o por `PATCH /patients/:id/communication`.
+   */
+  preferredLanguage: string | null;
   whatsappOptInAt: Date | null;
   whatsappOptInSource: WhatsappOptInSource | null;
   whatsappOptInById: string | null;
