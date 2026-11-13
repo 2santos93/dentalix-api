@@ -421,12 +421,27 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
       );
       const scans = on(plan, 'appointments');
       expect(scans.map((n) => n['Node Type'])).not.toContain('Seq Scan');
+      // Cota inferior y superior de la ventana en el Index Cond de ALGÚN índice
+      // de appointments: no solo `start > now`. El nombre del índice no es el
+      // contrato. Postgres 16.16 (imagen de la CI desde el 2026-11-13) ya no
+      // elige siempre appointments_tenant_location_start_idx, y lo que importa
+      // (acotar la ventana en el índice y leer solo la ventana) lo fija `read`.
       const hit = scans.find(
-        (n) => n['Index Name'] === 'appointments_tenant_location_start_idx',
+        (n) =>
+          /start > /.test(n['Index Cond'] ?? '') &&
+          /start <= /.test(n['Index Cond'] ?? ''),
       );
-      // Cota inferior y superior de la ventana: no solo `start > now`.
-      expect(hit?.['Index Cond']).toMatch(/start > /);
-      expect(hit?.['Index Cond']).toMatch(/start <= /);
+      if (!hit) {
+        throw new Error(
+          `ningún índice de appointments acota la ventana: ${JSON.stringify(
+            scans.map((n) => [
+              n['Node Type'],
+              n['Index Name'],
+              n['Index Cond'],
+            ]),
+          )}`,
+        );
+      }
       const read = scans.reduce(
         (sum, n) => sum + (n['Actual Rows'] ?? 0) * (n['Actual Loops'] ?? 1),
         0,
