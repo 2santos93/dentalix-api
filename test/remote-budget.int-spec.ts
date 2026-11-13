@@ -197,7 +197,11 @@ async function sendBudget(
     destination: 'ana@example.com',
     destinationMasked: 'an***@example.com',
     tokenHash: hashSignatureToken(generateSignatureToken()),
-    expiresAt: new Date(now.getTime() + 72 * 3600_000),
+    // `createdAt` lo pone el reloj de la BD (trigger de DX-425), no `now`:
+    // la caducidad sale del reloj real para que `expiresAt > createdAt` se
+    // cumpla aunque `now` sea una fecha fija ya pasada (antes, desde el
+    // 12-11-2026 15:00 UTC = NOW + 72 h, la CHECK rechazaba la fila).
+    expiresAt: new Date(Math.max(now.getTime(), Date.now()) + 72 * 3600_000),
     createdById: s.userId,
     createdAt: now,
   };
