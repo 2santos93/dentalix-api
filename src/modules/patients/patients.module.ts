@@ -47,6 +47,10 @@ import {
   GetPatientSettingsUseCase,
   UpdatePatientSettingsUseCase,
 } from './application/use-cases/patient-settings.use-cases';
+import {
+  GetPatientLanguagesUseCase,
+  UpdatePatientLanguagesUseCase,
+} from './application/use-cases/patient-languages.use-cases';
 import { PATIENT_SETTINGS_REPOSITORY } from './domain/ports/patient-settings-repository.port';
 import { PrismaPatientSettingsRepository } from './infrastructure/repositories/prisma-patient-settings.repository';
 import {
@@ -136,6 +140,8 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     // DX-328: mayoría de edad de la clínica (Ajustes).
     GetPatientSettingsUseCase,
     UpdatePatientSettingsUseCase,
+    GetPatientLanguagesUseCase,
+    UpdatePatientLanguagesUseCase,
     {
       provide: PATIENT_SETTINGS_REPOSITORY,
       useClass: PrismaPatientSettingsRepository,

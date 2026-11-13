@@ -55,6 +55,7 @@ function fakePatientFrom(
     partiallySuppressedAt: null,
     importBatchId: null,
     contactChannel: 'EMAIL',
+    preferredLanguage: null,
     whatsappOptInAt: null,
     whatsappOptInSource: null,
     whatsappOptInById: null,

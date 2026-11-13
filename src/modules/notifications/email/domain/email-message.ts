@@ -69,8 +69,21 @@ export const TENANT_DAILY_BUDGET: Readonly<
 export const TENANT_DAILY_EXEMPT_TEMPLATES: readonly EmailTemplateName[] =
   EMAIL_TEMPLATES.filter((t) => TENANT_DAILY_BUDGET[t] === 'self-service');
 
-/** Idioma de la plantilla (la app está en español). Los formatos son los de la sede (G1-B). */
-export type EmailLocale = 'es';
+/**
+ * Idiomas con catálogo de textos (DX-497). Los formatos de fecha, hora e
+ * importe son SIEMPRE los de la sede (G1-B, DX-315), no los del idioma.
+ */
+export const EMAIL_LOCALES = ['es', 'en'] as const;
+export type EmailLocale = (typeof EMAIL_LOCALES)[number];
+/** El idioma de la clínica: el de las plantillas sin catálogo por idioma. */
+export const DEFAULT_EMAIL_LOCALE: EmailLocale = 'es';
+/**
+ * DX-497: plantillas que se escriben en el idioma del paciente (las demás
+ * solo existen en el de la clínica: pedirles otro es un error de quien llama).
+ */
+export const LOCALIZED_EMAIL_TEMPLATES: readonly EmailTemplateName[] = [
+  'appointment-reminder',
+];
 
 /** Marca de la clínica que firma el email; `null` = email de plataforma. */
 export interface EmailBrand {

@@ -146,6 +146,21 @@ export const IMPORT_FIELDS = [
     required: false,
     synonyms: ['notas', 'nota', 'observaciones', 'comentarios'],
   },
+  {
+    // DX-497: idioma preferido (BCP 47) de la lista de la clínica; vacío =
+    // «Idioma de la clínica».
+    key: 'preferredLanguage',
+    header: 'idioma',
+    label: 'Idioma',
+    required: false,
+    synonyms: [
+      'idioma',
+      'idiomapreferido',
+      'lengua',
+      'language',
+      'preferredlanguage',
+    ],
+  },
 ] as const;
 
 export type ImportFieldKey = (typeof IMPORT_FIELDS)[number]['key'];
@@ -186,6 +201,8 @@ export interface ImportPatientData {
   emergencyContactName?: string;
   emergencyContactPhone?: string;
   notes?: string;
+  /** DX-497: etiqueta canónica de la lista de la clínica. */
+  preferredLanguage?: string;
 }
 
 /**

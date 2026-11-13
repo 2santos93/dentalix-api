@@ -155,6 +155,7 @@ export function importedPatientData(
     emergencyContactName: data.emergencyContactName ?? null,
     emergencyContactPhone: data.emergencyContactPhone ?? null,
     notes: data.notes ?? null,
+    preferredLanguage: data.preferredLanguage ?? null,
     createdAt: base.now,
     updatedAt: base.now,
   } satisfies Prisma.PatientCreateManyInput & DocTypeColumn;
@@ -428,6 +429,15 @@ export class PrismaPatientImportRepository {
    * crudo (mensajes con cifras, G1-B). Sin zona válida, 409
    * `LOCATION_TIMEZONE_REQUIRED`.
    */
+  /** DX-497: idiomas de los pacientes de la clínica (`tenants` no tiene RLS). */
+  async patientLanguages(): Promise<string[]> {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: this.tenantId() },
+      select: { patientLanguages: true },
+    });
+    return tenant.patientLanguages;
+  }
+
   async batchLocation(): Promise<BatchLocation> {
     return this.prisma.runWithTenant(async (tx) => {
       const id = await this.tenantContext.writeLocationId(tx);

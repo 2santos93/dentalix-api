@@ -164,6 +164,13 @@ export class PublicCancellationPolicyDto {
 // Respuesta de GET y POST /public/appointment-confirmations/:token.
 export class PublicAppointmentConfirmationDto {
   @ApiProperty({
+    example: 'en',
+    description:
+      'DX-497: idioma (BCP 47) en que abre la página: el preferido del paciente de la cita o, sin preferencia, el de la clínica. Sin traducción para él, la página sale en el de la clínica; el paciente puede cambiarlo en la página sin tocar su ficha.',
+  })
+  language!: string;
+
+  @ApiProperty({
     description:
       'DX-469: se puede añadir la cita al calendario (enlace válido, cita no cancelada y aún no terminada): `GET …/:token/calendar.ics` y `googleCalendarUrl`.',
   })

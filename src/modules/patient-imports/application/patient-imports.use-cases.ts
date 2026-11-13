@@ -377,6 +377,8 @@ export class PatientImportsService {
       defaultRegion: location.defaultPhoneRegion,
       today: civilDateIn(new Date(), location.timeZone),
       clinicNames,
+      // DX-497: la columna «idioma», contra la lista vigente de la clínica.
+      patientLanguages: await this.repo.patientLanguages(),
     };
 
     const issues: RowIssue[] = [];

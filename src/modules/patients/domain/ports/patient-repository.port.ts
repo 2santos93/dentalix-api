@@ -56,6 +56,8 @@ export interface CreatePatientRepoInput {
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
   createdById?: string;
+  /** DX-497: ya canónico; debe estar en la lista de la clínica (si no, 400). */
+  preferredLanguage?: string | null;
   medicalHistory?: {
     data: MedicalHistoryVersionData;
     safetyFlags: SafetyFlags;

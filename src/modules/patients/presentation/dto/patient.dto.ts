@@ -234,6 +234,15 @@ export class PatientDto {
   })
   contactChannel!: ContactChannel;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'en',
+    description:
+      'DX-497: idioma preferido (BCP 47); null = «Idioma de la clínica». Puede no estar ya en la lista de la clínica (se quitó): la ficha lo enseña «(no disponible)» y los envíos salen en el idioma de la clínica.',
+  })
+  preferredLanguage!: string | null;
+
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   whatsappOptInAt!: Date | null;
 

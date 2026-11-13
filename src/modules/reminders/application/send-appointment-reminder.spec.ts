@@ -26,6 +26,7 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
     // Ajustes explícitos de la sede: el reloj sale de aquí, nunca del país.
     locationFormat: regionalFormat({ locale: 'es-VE', hourCycle: 'h12' }),
     patientId: PATIENT,
+    preferredLanguage: null,
     contact: {
       contactChannel: 'EMAIL',
       reminderOptOutAt: null,
@@ -124,6 +125,8 @@ describe('SendAppointmentReminder (DX-026)', () => {
         recipient: 'ana@example.com',
         recipientKind: 'PATIENT',
         appointmentId: APPT,
+        language: 'es',
+        languageFallbackFrom: null,
       },
       expect.any(Function),
     );
@@ -132,6 +135,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
       to: 'ana@example.com',
       template: 'appointment-reminder',
       referenceId: 'out-1',
+      locale: 'es',
       vars: {
         patientName: 'Ana',
         guardianName: null,
@@ -703,5 +707,36 @@ describe('SendAppointmentReminder (DX-026)', () => {
     await expect(
       handler.handle({ appointmentId: 'x', leadHours: 2, start: 'no' }),
     ).rejects.toThrow('payload');
+  });
+
+  describe('DX-497: idioma del paciente', () => {
+    it('un paciente con en recibe el email en inglés, con la fecha en el formato de la sede', async () => {
+      repo.contexts.set(APPT, context({ preferredLanguage: 'en' }));
+      await handler.handle(payload);
+      expect(outbound.record).toHaveBeenCalledWith(
+        expect.objectContaining({ language: 'en', languageFallbackFrom: null }),
+        expect.any(Function),
+      );
+      const [[call]] = email.enqueue.mock.calls as [
+        [{ locale: string; vars: { startsAtLabel: string } }],
+      ];
+      expect(call.locale).toBe('en');
+      // DX-315: la fecha y la hora no cambian con el idioma.
+      expect(call.vars.startsAtLabel).toBe(
+        'martes 20 de octubre de 2026 a las 9:00 a. m.',
+      );
+    });
+
+    it('un paciente con ca sin catálogo recibe el de la clínica y el registro dice ca → es', async () => {
+      repo.contexts.set(APPT, context({ preferredLanguage: 'ca' }));
+      await handler.handle(payload);
+      expect(outbound.record).toHaveBeenCalledWith(
+        expect.objectContaining({ language: 'es', languageFallbackFrom: 'ca' }),
+        expect.any(Function),
+      );
+      expect(email.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ locale: 'es' }),
+      );
+    });
   });
 });

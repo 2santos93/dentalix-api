@@ -43,6 +43,10 @@ model Tenant {
   /// el default de la BD es el mismo valor, para réplicas anteriores).
   /// CHECK 14..21. Lo cambia el ADMIN (PUT /patients/settings, auditado).
   majorityAge                             Int                              @default(18)
+  /// DX-497: idiomas (BCP 47) que la ficha ofrece como idioma preferido del
+  /// paciente (Ajustes › Idiomas de los pacientes, solo ADMIN, auditado).
+  /// ARRAY['es'] al crear la clínica. CHECK de formato y 1..20 en la BD.
+  patientLanguages                        String[]                         @default(["es"])
   /// DX-330: años que la clínica conserva la historia clínica desde la última atención (15..100, CHECK en la BD). 15 de plataforma al crear la clínica (lo escribe la API; el default de la BD es el mismo valor, para réplicas anteriores). Lo cambia el ADMIN (PUT /patients/retention/settings, auditado) y nunca baja la fecha de una historia ya en retención (DX-330).
   clinicalRecordRetentionYears            Int                              @default(15)
   /// DX-330 (R13): cuándo se subió el plazo por última vez. Abre la ventana de corrección de 24 h; NULL = sin ventana. Va con clinicalRecordRetentionYearsBeforeRaise (CHECK: las dos o ninguna).
@@ -729,6 +733,11 @@ model Patient {
   // dónde y quién lo registró (NULL si lo dio el propio paciente por enlace o
   // mensaje). `reminderOptOutAt`: baja de los recordatorios; con ella no sale
   // ningún envío automático. CHECK en la BD: fecha y origen van juntos.
+  /// DX-497: idioma preferido (BCP 47) de lo que se le envía al paciente
+  /// (recordatorio, página de confirmar). NULL = el de la clínica. No es un
+  /// dato clínico. CHECK de formato en la BD; la API exige que esté en
+  /// `Tenant.patientLanguages` al escribirlo.
+  preferredLanguage            String?
   contactChannel               ContactChannel        @default(EMAIL)
   whatsappOptInAt              DateTime?
   whatsappOptInSource          WhatsappOptInSource?
@@ -4538,20 +4547,25 @@ enum OutboundMessageStatus {
 /// email_outbox con `referenceId` = este id. Ver la migración
 /// 20261017200100_dx085_outbound_messages.
 model OutboundMessage {
-  id              String                @id @default(uuid()) @db.Uuid
-  tenantId        String                @db.Uuid
-  channel         OutboundChannel
-  template        String
-  recipientMasked String
+  id                   String                @id @default(uuid()) @db.Uuid
+  tenantId             String                @db.Uuid
+  channel              OutboundChannel
+  template             String
+  recipientMasked      String
   /// DX-203: a quién se envió: al propio paciente o a su responsable.
-  recipientKind   OutboundRecipientKind @default(PATIENT)
-  status          OutboundMessageStatus @default(PENDING)
-  attempts        Int                   @default(0)
-  lastError       String?
-  appointmentId   String?               @db.Uuid
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  sentAt          DateTime?
+  recipientKind        OutboundRecipientKind @default(PATIENT)
+  status               OutboundMessageStatus @default(PENDING)
+  attempts             Int                   @default(0)
+  lastError            String?
+  appointmentId        String?               @db.Uuid
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  sentAt               DateTime?
+  /// DX-497: idioma (BCP 47) en que salió; NULL en los anteriores a DX-497.
+  language             String?
+  /// DX-497: idioma del paciente sin traducción (el mensaje salió en
+  /// `language`, el de la clínica): «sin traducción: ca → es».
+  languageFallbackFrom String?
 
   tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // FK COMPUESTA (SEC-004): la cita tiene que ser del MISMO tenant.

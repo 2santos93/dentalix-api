@@ -74,6 +74,7 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       calendarAlarmHours: 24,
       patientFirstName: 'Ana María',
       patientPhone: '+58 414 555 0101',
+      patientPreferredLanguage: null as string | null,
       providerName: 'Dra. Pérez',
       locationId: 'loc-principal',
       locationName: 'Sede Principal',

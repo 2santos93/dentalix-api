@@ -123,6 +123,7 @@ describe('PatientImportsService: tipos de documento genéricos (DX-327)', () => 
     let saved: NewBatch | undefined;
     const repo = {
       batchLocation: () => Promise.resolve(location()),
+      patientLanguages: () => Promise.resolve(['es']),
       existingDocs: () => Promise.resolve([]),
       createBatch: (input: NewBatch) => {
         saved = input;

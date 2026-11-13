@@ -1,6 +1,6 @@
-import { googleCalendarUrl } from '../../../../../shared/calendar/appointment-calendar';
 import {
-  AppointmentReminderEmailVars,
+  DEFAULT_EMAIL_LOCALE,
+  EMAIL_LOCALES,
   EmailBrand,
   EmailLocale,
   EmailTemplateName,
@@ -13,8 +13,8 @@ import {
   PaymentReceiptEmailVars,
   PaymentReceiptSummaryEmailVars,
   PostOpInstructionsEmailVars,
+  LOCALIZED_EMAIL_TEMPLATES,
   RegistrationNoticeEmailVars,
-  ReminderCancellationPolicyVars,
   RenderedEmail,
   SignatureBudgetAcceptedEmailVars,
   SignatureCodeEmailVars,
@@ -23,7 +23,10 @@ import {
   SignedConsentCopyEmailVars,
 } from '../../domain/email-message';
 import { EmailBlock, renderLayout } from './layout';
-import { endSentence } from '../../../../../shared/format/end-sentence';
+import { appointmentReminder } from './appointment-reminder.template';
+
+// DX-497: re-exportado para quien ya lo importaba de aquí (vista previa).
+export { cancellationPolicyText } from './appointment-reminder.template';
 
 const PRODUCT_NAME = 'Dentalix';
 
@@ -120,106 +123,6 @@ function registrationNotice(
       },
     ],
     action: { label: 'Ir a Dentalix', url: vars.loginUrl },
-  });
-}
-
-/**
- * DX-291: el texto de `{politica_cancelacion}` en el recordatorio: cuántas
- * horas de aviso pide la sede, el texto de la clínica y el cargo, si lo hay.
- */
-export function cancellationPolicyText(
-  policy: ReminderCancellationPolicyVars,
-): string {
-  const parts = [
-    `Política de cancelación: si no puedes asistir, avísanos con al menos ${policy.noticeHours} h de antelación.`,
-  ];
-  const text = policy.text.trim();
-  if (text) parts.push(text);
-  if (policy.feeLabel)
-    parts.push(
-      // Algunos símbolos de moneda ya acaban en punto («ج.م.»).
-      endSentence(
-        `La inasistencia o la cancelación con menos aviso puede tener un cargo de ${policy.feeLabel}`,
-      ),
-    );
-  return parts.join(' ');
-}
-
-function appointmentReminder(
-  vars: AppointmentReminderEmailVars,
-  brand: EmailBrand | null,
-): RenderedEmail {
-  const clinic = brand?.clinicName ?? PRODUCT_NAME;
-  const where = vars.locationAddress
-    ? `${vars.locationName} (${vars.locationAddress})`
-    : vars.locationName;
-  // DX-128: la de un menor va a su tutor: se le saluda y se nombra al paciente.
-  const guardian = vars.guardianName?.trim() || null;
-  const whose = guardian ? `la cita de ${vars.patientName}` : 'tu cita';
-  const blocks: EmailBlock[] = [
-    { kind: 'paragraph', text: `Te recordamos ${whose} en ${clinic}.` },
-    {
-      kind: 'paragraph',
-      text: `Fecha y hora: ${vars.startsAtLabel} (hora de la sede)`,
-    },
-    { kind: 'paragraph', text: `Sede: ${where}` },
-  ];
-  if (vars.providerName) {
-    blocks.push({
-      kind: 'paragraph',
-      text: `Profesional: ${vars.providerName}`,
-    });
-  }
-  blocks.push({
-    kind: 'note',
-    text: vars.confirmUrl
-      ? 'Usa el botón para confirmarla o avisarnos si no puedes asistir.'
-      : 'Si no puedes asistir, avísanos con tiempo para darle el espacio a otro paciente.',
-  });
-  if (vars.cancellationPolicy) {
-    blocks.push({
-      kind: 'note',
-      text: cancellationPolicyText(vars.cancellationPolicy),
-    });
-  }
-  return renderLayout({
-    brand,
-    subject: `Recordatorio de ${whose} en ${clinic}`,
-    heading: `Hola, ${guardian ?? vars.patientName}`,
-    blocks,
-    action: vars.confirmUrl
-      ? { label: 'Confirmar o cancelar', url: vars.confirmUrl }
-      : null,
-    // DX-469: «Añadir a mi calendario» (.ics y Google Calendar).
-    links: vars.calendar
-      ? {
-          lead: 'Añadir a mi calendario:',
-          items: [
-            {
-              label: 'Archivo .ics (Apple, Outlook)',
-              url: vars.calendar.icsUrl,
-            },
-            {
-              label: 'Google Calendar',
-              url: googleCalendarUrl({
-                start: new Date(vars.calendar.start),
-                end: new Date(vars.calendar.end),
-                clinicName: clinic,
-                providerName: vars.providerName,
-                locationName: vars.locationName,
-                locationAddress: vars.locationAddress,
-              }),
-            },
-          ],
-        }
-      : null,
-    footerLink: vars.unsubscribeUrl
-      ? {
-          lead: '¿No quieres recibir más recordatorios?',
-          label: 'Dejar de recibir recordatorios',
-          url: vars.unsubscribeUrl,
-        }
-      : null,
   });
 }
 
@@ -589,6 +492,7 @@ function signedConsentCopy(
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
+  locale: EmailLocale,
 ) => RenderedEmail;
 
 const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
@@ -610,18 +514,24 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
 };
 
 /**
- * Renderiza una plantilla en el idioma pedido (hoy solo `es`). La marca de la
- * clínica firma el email cuando hay tenant; sin ella firma Dentalix.
+ * Renderiza una plantilla en el idioma pedido. Solo las de
+ * `LOCALIZED_EMAIL_TEMPLATES` tienen catálogo por idioma (DX-497); las demás
+ * existen solo en el de la clínica. La marca de la clínica firma el email
+ * cuando hay tenant; sin ella firma Dentalix.
  */
 export function renderEmail<T extends EmailTemplateName>(
   template: T,
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
-  locale: EmailLocale = 'es',
+  locale: EmailLocale = DEFAULT_EMAIL_LOCALE,
 ): RenderedEmail {
-  if (locale !== 'es') {
+  if (
+    !EMAIL_LOCALES.includes(locale) ||
+    (locale !== DEFAULT_EMAIL_LOCALE &&
+      !LOCALIZED_EMAIL_TEMPLATES.includes(template))
+  ) {
     throw new Error(`Idioma de email no soportado: ${String(locale)}`);
   }
   const render = RENDERERS[template] as Renderer<T>;
-  return render(vars, brand);
+  return render(vars, brand, locale);
 }
