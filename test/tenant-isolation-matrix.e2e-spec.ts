@@ -2432,6 +2432,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 200,
       responseBody: { items: [], total: 0, page: 1, pageSize: 20 },
     },
+    // DX-015-bis (D17): la sede de A en «Sin recall configurado» de B: su
+    // lista vacía, nunca un paciente de A.
+    {
+      name: 'GET /recall/unconfigured ?locationId de A',
+      verb: 'get',
+      path: () => `/recall/unconfigured?locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 200,
+      responseBody: { items: [], total: 0, page: 1, pageSize: 20 },
+    },
     {
       name: 'GET /recall/due/count ?recallTypeId de A',
       verb: 'get',
@@ -3028,6 +3038,30 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 422,
       message:
         'Hay procedimientos que no existen en el catálogo de esta clínica o están retirados.',
+    },
+    // DX-015-bis (porción 3): el tipo de recall de A en «Programar recall»
+    // y en el recall de la evolución de B: 422 y no se crea nada (tampoco la
+    // evolución: misma transacción).
+    {
+      name: 'POST /patients/:id/recalls/default body.recallTypeId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/recalls/default`,
+      body: () => ({ recallTypeId: a.recallTypeId }),
+      bodyIds: ['recallTypeId'],
+      status: 422,
+      message: 'Ese tipo de recall no existe en esta clínica o se retiró.',
+    },
+    {
+      name: 'POST /patients/:patientId/clinical-entries body.recall.recallTypeId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/clinical-entries`,
+      body: () => ({
+        notes: 'Intento',
+        recall: { recallTypeId: a.recallTypeId, intervalMonths: 3 },
+      }),
+      bodyIds: ['recall.recallTypeId'],
+      status: 422,
+      message: 'Ese tipo de recall no existe en esta clínica o se retiró.',
     },
     {
       name: 'PUT /price-lists/:id/items body.items[].catalogItemId de A',
@@ -3686,10 +3720,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     {
       spec: 'recall.e2e-spec.ts',
       checks:
-        'B → 404 al leer y al fijar el recall del paciente de A y al registrar un contacto en el recall de A; ni el recall de A ni los contactos cambian (DX-015)',
+        'B → 404 al leer, fijar y programar (D15) el recall del paciente de A y al registrar un contacto en el recall de A; ni los recalls de A ni los contactos cambian (DX-015, DX-015-bis)',
       routes: [
         'GET /patients/:id/recalls',
         'PUT /patients/:id/recalls/:kind',
+        'POST /patients/:id/recalls/default',
         'POST /recall/:recallId/contacts',
       ],
     },

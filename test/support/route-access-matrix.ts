@@ -748,6 +748,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /recall/:recallId/contacts': BILLING,
   'GET /patients/:id/recalls': EVERY_ROLE,
   'PUT /patients/:id/recalls/:kind': CLINICAL,
+  // DX-015-bis (porción 3): «Sin recall configurado», el mostrador como la
+  // lista de vencidos; «Programar recall» con el intervalo por defecto
+  // (D15), también recepción, que no puede usar el PUT.
+  'GET /recall/unconfigured': BILLING,
+  'POST /patients/:id/recalls/default': EVERY_ROLE,
   // DX-015-bis: los tipos de recall de la clínica (sin datos de pacientes),
   // los cuatro roles que ven la ficha.
   'GET /recall-types': EVERY_ROLE,

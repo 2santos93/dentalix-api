@@ -4,7 +4,9 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import {
   PrismaRecallRepository,
   recallDueSql,
+  recallUnconfiguredSql,
   type RecallDueSqlParams,
+  type RecallUnconfiguredSqlParams,
 } from '../src/modules/recall/infrastructure/prisma-recall.repository';
 import {
   REGIONAL_CARACAS_FIXTURE,
@@ -26,6 +28,12 @@ import { seedDefaultRecallTypes } from './support/recall-types';
 // la clínica (ver `indexPlan` y el `it.each`). `raw` (DIRECT_URL,
 // owner) siembra y limpia. Sin "patientCode" en los INSERT: lo pone el
 // trigger (DX-484). Las cifras medidas se imprimen (informe de DX-015-bis).
+//
+// Porción 3 (D17): «Sin recall configurado» con la MISMA siembra más 6.000
+// pacientes atendidos sin ningún recall (~10 % con cita futura), medida igual
+// (`recallUnconfiguredSql` y `listUnconfigured`), su total contra una consulta
+// de referencia ingenua y, al final, el peor caso: la clínica sin ningún
+// recall (aún no lo usa: ~60.000 candidatos que ordenar).
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -35,6 +43,8 @@ const repository = new PrismaRecallRepository(prisma, tenantContext);
 
 const SUBDOMAINS = ['dx015bis-load', 'dx015bis-load-ruido'];
 const PATIENTS = 60_000;
+/** D17: atendidos sin ningún recall, además de los 60.000. */
+const UNCONFIGURED = 6_000;
 const NOISE_PATIENTS = 10_000;
 const BUDGET_MS = 500;
 const NOW = new Date('2027-04-10T15:00:00.000Z');
@@ -151,6 +161,85 @@ async function seedClinic(
   return { tenantId, sedes };
 }
 
+/**
+ * D17: `count` pacientes «Sin recall» sin ningún recall, con 2 citas
+ * atendidas repartidas en 800 días (alguno queda fuera de los 24 meses) y, en
+ * m % 10 = 0, una cita futura agendada.
+ */
+async function seedUnconfigured(clinic: Clinic, count: number): Promise<void> {
+  const { tenantId, sedes } = clinic;
+  await raw.$executeRaw`
+    INSERT INTO "patients" ("id", "tenantId", "firstName", "lastName", "phone", "updatedAt")
+    SELECT gen_random_uuid(), ${tenantId}::uuid, 'Paciente', 'Sin recall ' || g,
+           '+58 414 555 ' || lpad((g % 10000)::text, 4, '0'), now()
+      FROM generate_series(1, ${count}::int) AS g`;
+  const numbered = Prisma.sql`(
+    SELECT "id", row_number() OVER (ORDER BY "id")::int AS m
+      FROM "patients"
+     WHERE "tenantId" = ${tenantId}::uuid AND "lastName" LIKE 'Sin recall %'
+  ) p`;
+  await raw.$executeRaw`
+    INSERT INTO "appointments"
+      ("id", "tenantId", "locationId", "patientId", "providerId", "start", "end",
+       "status", "createdAt", "updatedAt")
+    SELECT gen_random_uuid(), ${tenantId}::uuid,
+           CASE WHEN (p.m + k) % 2 = 0 THEN ${sedes[0]}::uuid ELSE ${sedes[1]}::uuid END,
+           p."id", gen_random_uuid(),
+           ${NOW}::timestamp - make_interval(days => 10 + ((p.m * 37 + k * 211) % 800)),
+           ${NOW}::timestamp - make_interval(days => 10 + ((p.m * 37 + k * 211) % 800)) + interval '30 minutes',
+           'COMPLETED', now(), now()
+      FROM ${numbered}, generate_series(1, 2) AS k`;
+  await raw.$executeRaw`
+    INSERT INTO "appointments"
+      ("id", "tenantId", "locationId", "patientId", "providerId", "start", "end",
+       "status", "createdAt", "updatedAt")
+    SELECT gen_random_uuid(), ${tenantId}::uuid, ${sedes[1]}::uuid, p."id", gen_random_uuid(),
+           ${NOW}::timestamp + make_interval(days => 1 + p.m % 60),
+           ${NOW}::timestamp + make_interval(days => 1 + p.m % 60) + interval '30 minutes',
+           'SCHEDULED', now(), now()
+      FROM ${numbered}
+     WHERE p.m % 10 = 0`;
+}
+
+/**
+ * D17, consulta de referencia ingenua (owner, sin RLS): la última atendida
+ * por paciente con una LATERAL, y las tres condiciones por paciente. Solo
+ * para comprobar el total de `recallUnconfiguredSql`, no su plan.
+ */
+async function referenceUnconfiguredTotal(
+  tenantId: string,
+  locationId?: string,
+): Promise<number> {
+  const [row] = await raw.$queryRaw<{ total: number }[]>`
+    SELECT count(*)::int AS total
+      FROM "patients" p
+      JOIN LATERAL (
+        SELECT a."start", a."locationId"
+          FROM "appointments" a
+         WHERE a."tenantId" = p."tenantId" AND a."patientId" = p."id"
+           AND a."status" = 'COMPLETED' AND a."deletedAt" IS NULL
+         ORDER BY a."start" DESC, a."id" DESC
+         LIMIT 1
+      ) lc ON true
+      JOIN "locations" l ON l."id" = lc."locationId"
+     WHERE p."tenantId" = ${tenantId}::uuid
+       AND p."deletedAt" IS NULL
+       AND ((lc."start" AT TIME ZONE 'UTC') AT TIME ZONE l."timeZone")::date
+             >= (((${NOW}::timestamptz) AT TIME ZONE l."timeZone")::date - interval '24 months')::date
+       ${locationId ? Prisma.sql`AND l."id" = ${locationId}::uuid` : Prisma.empty}
+       AND NOT EXISTS (
+         SELECT 1 FROM "patient_recalls" pr
+           JOIN "recall_types" rt ON rt."id" = pr."recallTypeId" AND rt."deletedAt" IS NULL
+          WHERE pr."tenantId" = p."tenantId" AND pr."patientId" = p."id" AND pr."active")
+       AND NOT EXISTS (
+         SELECT 1 FROM "appointments" a
+          WHERE a."tenantId" = p."tenantId" AND a."patientId" = p."id"
+            AND a."deletedAt" IS NULL
+            AND ((a."status" IN ('SCHEDULED', 'CONFIRMED') AND a."start" > ${NOW})
+                 OR a."status" IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')))`;
+  return row.total;
+}
+
 describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)', () => {
   let clinic: Clinic;
   const measured: string[] = [];
@@ -159,6 +248,7 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
     await prisma.onModuleInit();
     await purgeTenantsBySubdomain(raw, SUBDOMAINS);
     clinic = await seedClinic(SUBDOMAINS[0], PATIENTS);
+    await seedUnconfigured(clinic, UNCONFIGURED);
     await seedClinic(SUBDOMAINS[1], NOISE_PATIENTS);
     for (const table of ['patients', 'patient_recalls', 'appointments']) {
       await raw.$executeRawUnsafe(`VACUUM ANALYZE "${table}"`);
@@ -248,7 +338,7 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
     expect(row.recalls).toBe(90_000);
     expect(row.due / row.recalls).toBeGreaterThan(0.17);
     expect(row.due / row.recalls).toBeLessThan(0.23);
-    expect(row.upcoming).toBe(PATIENTS / 10);
+    expect(row.upcoming).toBe(PATIENTS / 10 + UNCONFIGURED / 10);
   });
 
   it.each<[string, Partial<RecallDueSqlParams>]>([
@@ -328,4 +418,145 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
     expect(pageMs).toBeLessThan(BUDGET_MS);
     expect(countMs).toBeLessThan(BUDGET_MS);
   }, 120_000);
+
+  // ------------------------------------------------------------------------
+  // D17 · «Sin recall configurado»
+  // ------------------------------------------------------------------------
+  const unconfigured = (
+    over: Partial<RecallUnconfiguredSqlParams> = {},
+  ): RecallUnconfiguredSqlParams => ({
+    tenantId: clinic.tenantId,
+    page: 1,
+    pageSize: 25,
+    now: NOW,
+    ...over,
+  });
+
+  /** Mediana de EXPLAIN ANALYZE tras el calentamiento. */
+  async function measureSql(label: string, sql: Prisma.Sql) {
+    const times: number[] = [];
+    let nodes: PlanNode[] = [];
+    for (let i = 0; i < WARMUP + RUNS; i += 1) {
+      const run = await explain(sql);
+      if (i >= WARMUP) times.push(run.ms);
+      nodes = run.nodes;
+    }
+    const ms = median(times);
+    const line = `  ${label}: ${ms.toFixed(1)} ms (min ${Math.min(...times).toFixed(1)}, max ${Math.max(...times).toFixed(1)})`;
+    measured.push(line);
+    console.log(`DX-015-bis · mediana de ${RUNS} tras ${WARMUP}:${line}`);
+    return { ms, nodes };
+  }
+
+  const appointmentScans = (nodes: PlanNode[]) =>
+    nodes.filter((n) => n['Relation Name'] === 'appointments');
+
+  it('D17: el total coincide con la consulta de referencia (consolidada y por sede)', async () => {
+    const run = (locationIds?: string[]) =>
+      prisma.runWithTenant(clinic.tenantId, (tx) =>
+        tx.$queryRaw<{ total: number }[]>(
+          recallUnconfiguredSql(unconfigured({ pageSize: 1, locationIds })),
+        ),
+      );
+    const all = await referenceUnconfiguredTotal(clinic.tenantId);
+    // Los 6.000 menos los de cita futura y los que quedan fuera de 24 meses.
+    expect(all).toBeGreaterThan(UNCONFIGURED * 0.8);
+    expect(all).toBeLessThan(UNCONFIGURED * 0.9 + 1);
+    expect((await run())[0].total).toBe(all);
+    expect((await run([clinic.sedes[0]]))[0].total).toBe(
+      await referenceUnconfiguredTotal(clinic.tenantId, clinic.sedes[0]),
+    );
+  }, 120_000);
+
+  it.each<[string, Partial<RecallUnconfiguredSqlParams>]>([
+    ['sin recall: página 1, una sede', { locationIds: [] }],
+    ['sin recall: página 1, vista consolidada', {}],
+    ['sin recall: recuento (consolidada, pageSize 1)', { pageSize: 1 }],
+  ])(
+    `%s: < ${BUDGET_MS} ms; citas por el índice de atendidas y recalls por índice`,
+    async (label, over) => {
+      const params = unconfigured({
+        ...over,
+        ...(over.locationIds ? { locationIds: [clinic.sedes[0]] } : {}),
+      });
+      const { ms } = await measureSql(label, recallUnconfiguredSql(params));
+      expect(ms).toBeLessThan(BUDGET_MS);
+      // Sin Seq Scan: la última atendida sale del índice parcial de
+      // atendidas y el anti-join de recalls va por un índice de la clínica
+      // ("tenantId" en cabeza, como la UNIQUE de paciente y tipo).
+      const indexed = await indexPlan(recallUnconfiguredSql(params));
+      expect(appointmentScans(indexed).map((n) => n['Index Name'])).toContain(
+        'appointments_tenant_patient_completed_idx',
+      );
+      const recallIndexes = recallScans(indexed);
+      expect(recallIndexes.length).toBeGreaterThan(0);
+      for (const n of recallIndexes) {
+        expect(n['Index Name']).toMatch(/^patient_recalls_/);
+        expect(n['Index Cond']).toMatch(/^\(+"tenantId" = /);
+      }
+      console.log(
+        `DX-015-bis · ${label}: índices sin Seq Scan = ${[
+          ...appointmentScans(indexed),
+          ...recallIndexes,
+        ]
+          .map((n) => n['Index Name'])
+          .join(', ')}`,
+      );
+    },
+    120_000,
+  );
+
+  it(`D17 de punta a punta (repositorio, como la app): página 1 y recuento < ${BUDGET_MS} ms`, async () => {
+    const wall = async (fn: () => Promise<unknown>) => {
+      const times: number[] = [];
+      for (let i = 0; i < WARMUP + RUNS; i += 1) {
+        const t0 = performance.now();
+        await fn();
+        if (i >= WARMUP) times.push(performance.now() - t0);
+      }
+      return median(times);
+    };
+    const list = (pageSize: number, locationId?: string) =>
+      tenantContext.run(clinic.tenantId, locationId, () =>
+        repository.listUnconfigured({ page: 1, pageSize, now: NOW }),
+      );
+    const page = await list(25, clinic.sedes[0]);
+    expect(page.rows).toHaveLength(25);
+    expect(page.total).toBeGreaterThan(1_000);
+    // La última visita más reciente primero.
+    const days = page.rows.map((r) => r.lastVisitAt);
+    expect(days).toEqual([...days].sort().reverse());
+    const pageMs = await wall(() => list(25, clinic.sedes[0]));
+    const countMs = await wall(() => list(1));
+    const lines = [
+      `  listUnconfigured de punta a punta, página 1: ${pageMs.toFixed(1)} ms`,
+      `  listUnconfigured de punta a punta, recuento: ${countMs.toFixed(1)} ms`,
+    ];
+    measured.push(...lines);
+    console.log(
+      `DX-015-bis · mediana de ${RUNS} tras ${WARMUP}:\n${lines.join('\n')}`,
+    );
+    expect(pageMs).toBeLessThan(BUDGET_MS);
+    expect(countMs).toBeLessThan(BUDGET_MS);
+  }, 120_000);
+
+  // El ÚLTIMO de la suite: deja la clínica sin recalls (afterAll la purga).
+  it(`D17, peor caso: la clínica sin ningún recall (~60.000 candidatos) < ${BUDGET_MS} ms`, async () => {
+    // Una clínica que aún no usa el recall: sin ninguno. Con las estadísticas
+    // y el mapa de visibilidad al día, como el resto de la suite.
+    await raw.$executeRaw`
+      DELETE FROM "patient_recalls" WHERE "tenantId" = ${clinic.tenantId}::uuid`;
+    await raw.$executeRawUnsafe('VACUUM ANALYZE "patient_recalls"');
+    const sql = recallUnconfiguredSql(unconfigured());
+    const { ms } = await measureSql(
+      'sin recall, peor caso (clínica sin recalls): página 1, consolidada',
+      sql,
+    );
+    const [row] = await prisma.runWithTenant(clinic.tenantId, (tx) =>
+      tx.$queryRaw<{ total: number }[]>(sql),
+    );
+    expect(row.total).toBeGreaterThan(PATIENTS * 0.8);
+    expect(row.total).toBe(await referenceUnconfiguredTotal(clinic.tenantId));
+    expect(ms).toBeLessThan(BUDGET_MS);
+  }, 300_000);
 });

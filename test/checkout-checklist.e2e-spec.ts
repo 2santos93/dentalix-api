@@ -25,6 +25,8 @@ import {
 //    entera de que el paciente tiene cita en Sur. Quien ve todas las sedes
 //    sigue viendo la más cercana de cualquiera, también con `X-Location-Id`.
 //  - Otra clínica: 404, sin filtrar nada de la cita ni del paciente.
+//  - DX-015-bis (D16): sin próxima cita ni recall, los tipos de recall activos
+//    para «Programar recall» (D15); si no, vacío.
 //
 // DIRECT_URL (superusuario, sin RLS) solo siembra miembros y citas.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -232,6 +234,104 @@ describe('Salida del paciente: id y sedes de la próxima cita (SEC-069)', () => 
       expect(res.status).toBe(403);
       expect(res.body).toMatchObject({ code: LOCATION_NOT_ALLOWED_CODE });
       await raw.appointment.delete({ where: { id: surLeaving } });
+    });
+  });
+
+  describe('tipos de recall para programar (DX-015-bis, D16)', () => {
+    interface WithRecallTypes {
+      recallDueOn: string | null;
+      nextAppointmentStart: string | null;
+      recallTypes: {
+        id: string;
+        name: string;
+        defaultIntervalMonths: number;
+      }[];
+    }
+
+    it('con próxima cita: vacío', async () => {
+      const res = await checklist(unrestrictedToken, leaving).expect(200);
+      expect((res.body as WithRecallTypes).recallTypes).toEqual([]);
+    });
+
+    it('sin próxima cita ni recall: los activos y vivos en su orden; tras programar uno (D15), vacío y con el recall', async () => {
+      const lone = (
+        (
+          await admin()
+            .post('/patients', {
+              firstName: 'Mariela',
+              lastName: 'Guédez',
+              docType: 'NATIONAL_ID',
+              docNumber: 'DX015BIS-D16',
+              sex: Sex.F,
+              phone: '+58 414 555 0170',
+            })
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      const start = new Date(Date.now() - 2 * 3600 * 1000);
+      const appointment = await raw.appointment.create({
+        data: {
+          tenantId: clinic.tenantId,
+          locationId: norte,
+          patientId: lone,
+          providerId: dentistId,
+          start,
+          end: new Date(start.getTime() + 30 * 60 * 1000),
+          status: 'COMPLETED',
+        },
+        select: { id: true },
+      });
+      // Un tipo desactivado y uno retirado no se ofrecen.
+      await raw.recallType.createMany({
+        data: [
+          {
+            tenantId: clinic.tenantId,
+            name: 'Ortodoncia',
+            defaultIntervalMonths: 2,
+            active: false,
+            sortOrder: 5,
+          },
+          {
+            tenantId: clinic.tenantId,
+            name: 'Blanqueamiento',
+            defaultIntervalMonths: 12,
+            active: false,
+            sortOrder: 6,
+            deletedAt: new Date(),
+          },
+        ],
+      });
+      const types = await raw.recallType.findMany({
+        where: { tenantId: clinic.tenantId, active: true, deletedAt: null },
+        orderBy: { sortOrder: 'asc' },
+        select: { id: true, name: true, defaultIntervalMonths: true },
+      });
+      expect(types.map((t) => [t.name, t.defaultIntervalMonths])).toEqual([
+        ['Higiene', 6],
+        ['Control', 12],
+        ['Mantenimiento periodontal', 3],
+      ]);
+
+      const before = (
+        await checklist(unrestrictedToken, appointment.id).expect(200)
+      ).body as WithRecallTypes;
+      expect(before).toMatchObject({
+        nextAppointmentStart: null,
+        recallDueOn: null,
+        recallTypes: types,
+      });
+
+      // «Programar recall de Control (12 meses)» desde la salida: recepción.
+      await api(unrestrictedToken)
+        .post(`/patients/${lone}/recalls/default`, {
+          recallTypeId: types[1].id,
+        })
+        .expect(201);
+      const after = (
+        await checklist(unrestrictedToken, appointment.id).expect(200)
+      ).body as WithRecallTypes;
+      expect(after.recallTypes).toEqual([]);
+      expect(after.recallDueOn).not.toBeNull();
     });
   });
 

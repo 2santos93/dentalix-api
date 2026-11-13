@@ -26,6 +26,9 @@ import { addCivilMonths } from '../src/modules/recall/domain/recall-rules';
  * profilaxis que crea y mueve el recall de Higiene (PATCH del ítem, con
  * `recallUpdates`), y que una cita atendida sin procedimiento disparador ya
  * no reinicia el reloj.
+ *
+ * Porción 3: «Programar recall» con el intervalo por defecto (D15, también
+ * recepción) y «Sin recall configurado» (D17).
  */
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -895,6 +898,415 @@ describe('Recall: lista de llamada (DX-015, e2e)', () => {
     ).toBe(1);
   });
 
+  /** Id de un tipo de la clínica por su nombre. */
+  const typeId = async (s: Seeded, name: string) =>
+    (
+      await raw.recallType.findFirstOrThrow({
+        where: { tenantId: s.clinic.tenantId, name, deletedAt: null },
+        select: { id: true },
+      })
+    ).id;
+
+  interface UnconfiguredPage {
+    items: {
+      patientId: string;
+      patientName: string;
+      patientPhone: string | null;
+      patientWhatsApp: string | null;
+      reminderOptedOut: boolean;
+      lastVisitAt: string;
+      lastVisitLocationId: string;
+    }[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }
+
+  const unconfigured = async (
+    s: Seeded,
+    query = '?pageSize=100',
+    location?: string,
+  ) =>
+    (
+      await http(
+        s,
+        ClinicRole.RECEPTION,
+        'get',
+        `/recall/unconfigured${query}`,
+        location,
+      ).expect(200)
+    ).body as UnconfiguredPage;
+
+  /** Paciente con teléfono y una cita atendida hace `daysAgo` días. */
+  async function attendedPatient(
+    s: Seeded,
+    name: string,
+    daysAgo: number,
+    location = s.principal,
+  ): Promise<{ patientId: string; visitDay: string }> {
+    const patientId = await s.seed.patient(name);
+    await raw.patient.update({
+      where: { id: patientId },
+      data: { phone: '+58 412 555 0101' },
+    });
+    const id = await appointment(
+      s,
+      patientId,
+      new Date(Date.now() - daysAgo * DAY_MS),
+      'COMPLETED',
+      location,
+    );
+    const { start } = await raw.appointment.findUniqueOrThrow({
+      where: { id },
+      select: { start: true },
+    });
+    return { patientId, visitDay: civilDateIn(start, ZONE) };
+  }
+
+  it('DX-015-bis (D15): recepción programa el recall con el intervalo del tipo y la base de la última cita atendida; 409 al repetir; auditado', async () => {
+    const { patientId, visitDay } = await attendedPatient(a, 'Programar', 20);
+    const control = await typeId(a, 'Control');
+    const res = await http(
+      a,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${patientId}/recalls/default`,
+    )
+      .send({ recallTypeId: control })
+      .expect(201);
+    const body = res.body as PatientRecalls & { recallUpdates: unknown[] };
+    expect(body.recallUpdates).toEqual([]);
+    expect(body.recalls).toEqual([
+      expect.objectContaining({
+        recallTypeId: control,
+        recallTypeName: 'Control',
+        intervalMonths: 12,
+        source: 'MANUAL',
+        manualDoneAt: visitDay,
+        lastDoneAt: visitDay,
+        dueAt: addCivilMonths(visitDay, 12),
+      }),
+    ]);
+    const repeated = await http(
+      a,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${patientId}/recalls/default`,
+    )
+      .send({ recallTypeId: control })
+      .expect(409);
+    expect(messageOf(repeated)).toBe(
+      'El paciente ya tiene un recall de ese tipo: cámbialo desde su ficha.',
+    );
+    const recallId = body.recalls[0].id;
+    expect(
+      await raw.auditEvent.findMany({
+        where: {
+          tenantId: a.clinic.tenantId,
+          resourceType: 'PATIENT_RECALL',
+          resourceId: recallId,
+        },
+        select: {
+          action: true,
+          patientId: true,
+          actorRole: true,
+          metadata: true,
+        },
+      }),
+    ).toEqual([
+      {
+        action: 'UPDATE',
+        patientId,
+        actorRole: 'RECEPTION',
+        metadata: {
+          via: 'DEFAULT',
+          changedFields: ['intervalMonths', 'lastDoneAt'],
+          params: { recallTypeId: control },
+        },
+      },
+    ]);
+  });
+
+  it('DX-015-bis (D15): los cuatro roles programan; tipo desactivado o de nadie 422, id inválido 400, en español', async () => {
+    const higiene = await typeId(a, 'Higiene');
+    for (const role of [
+      ClinicRole.ADMIN,
+      ClinicRole.DENTIST,
+      ClinicRole.ASSISTANT,
+      ClinicRole.RECEPTION,
+    ]) {
+      const patientId = await a.seed.patient(`Rol${role}`);
+      await http(a, role, 'post', `/patients/${patientId}/recalls/default`)
+        .send({ recallTypeId: higiene })
+        .expect(201);
+    }
+    const patientId = await a.seed.patient('Validar');
+    const paused = await raw.recallType.create({
+      data: {
+        tenantId: a.clinic.tenantId,
+        name: 'Ortodoncia',
+        defaultIntervalMonths: 2,
+        active: false,
+        sortOrder: 90,
+      },
+    });
+    const inactive = await http(
+      a,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${patientId}/recalls/default`,
+    )
+      .send({ recallTypeId: paused.id })
+      .expect(422);
+    expect(messageOf(inactive)).toBe(
+      'Ese tipo de recall está desactivado: actívalo en Ajustes › Recall o elige otro.',
+    );
+    const missing = await http(
+      a,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${patientId}/recalls/default`,
+    )
+      .send({ recallTypeId: '00000000-0000-4000-8000-000000000015' })
+      .expect(422);
+    expect(messageOf(missing)).toBe(
+      'Ese tipo de recall no existe en esta clínica o se retiró.',
+    );
+    const invalid = await http(
+      a,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${patientId}/recalls/default`,
+    )
+      .send({ recallTypeId: 'higiene' })
+      .expect(400);
+    expect(messageOf(invalid)).toEqual([
+      'recallTypeId debe ser el id de un tipo de recall.',
+    ]);
+    expect(await raw.patientRecall.count({ where: { patientId } })).toBe(0);
+  });
+
+  it('DX-015-bis (D17): «Sin recall configurado» lista al atendido sin recall ni cita; al programarle uno, sale; filtro de sede; roles', async () => {
+    const north = await attendedPatient(a, 'SinRecallNorte', 40, a.norte);
+    const main = await attendedPatient(a, 'SinRecallPrincipal', 30);
+    // Con cita futura: no sale.
+    const booked = await attendedPatient(a, 'SinRecallConCita', 25);
+    await appointment(
+      a,
+      booked.patientId,
+      new Date(Date.now() + 5 * DAY_MS),
+      'SCHEDULED',
+    );
+
+    const page = await unconfigured(a);
+    const row = (id: string) => page.items.find((i) => i.patientId === id);
+    expect(row(main.patientId)).toMatchObject({
+      patientName: 'Paciente SinRecallPrincipal',
+      patientPhone: '+58 412 555 0101',
+      reminderOptedOut: false,
+      lastVisitAt: main.visitDay,
+      lastVisitLocationId: a.principal,
+    });
+    expect(row(main.patientId)!.patientWhatsApp).toMatch(/^58412/);
+    expect(row(north.patientId)).toMatchObject({
+      lastVisitLocationId: a.norte,
+    });
+    expect(row(booked.patientId)).toBeUndefined();
+    // La última visita más reciente primero.
+    const days = page.items.map((i) => i.lastVisitAt);
+    expect(days).toEqual([...days].sort().reverse());
+
+    // Por la query o la cabecera: solo los de esa sede.
+    const onlyNorth = await unconfigured(
+      a,
+      `?pageSize=100&locationId=${a.norte}`,
+    );
+    expect(onlyNorth.items.map((i) => i.lastVisitLocationId)).toEqual(
+      onlyNorth.items.map(() => a.norte),
+    );
+    expect(onlyNorth.items.map((i) => i.patientId)).toContain(north.patientId);
+    expect((await unconfigured(a, '?pageSize=100', a.norte)).total).toBe(
+      onlyNorth.total,
+    );
+
+    // Programarle uno lo saca de la lista.
+    await http(
+      a,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${main.patientId}/recalls/default`,
+    )
+      .send({ recallTypeId: await typeId(a, 'Higiene') })
+      .expect(201);
+    expect((await unconfigured(a)).items.map((i) => i.patientId)).not.toContain(
+      main.patientId,
+    );
+
+    // Auditada como la de vencidos, con su motivo.
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: a.clinic.tenantId,
+          action: 'VIEW',
+          resourceType: 'PATIENT_RECALL',
+          metadata: { path: ['reason'], equals: 'RECALL_UNCONFIGURED' },
+        },
+      }),
+    ).toBeGreaterThan(0);
+
+    // Roles: el mostrador (ADMIN y RECEPTION).
+    for (const role of [ClinicRole.DENTIST, ClinicRole.ASSISTANT]) {
+      const res = await http(a, role, 'get', '/recall/unconfigured').expect(
+        403,
+      );
+      expect(messageOf(res)).toBe(
+        'Tu rol no gestiona la lista de recall: es para administración y recepción.',
+      );
+    }
+    await http(a, ClinicRole.ADMIN, 'get', '/recall/unconfigured').expect(200);
+    const bad = await http(
+      a,
+      ClinicRole.RECEPTION,
+      'get',
+      '/recall/unconfigured?locationId=norte&pageSize=0',
+    ).expect(400);
+    expect(messageOf(bad)).toEqual(
+      expect.arrayContaining([
+        'locationId debe ser el id de una sede.',
+        'pageSize empieza en 1.',
+      ]),
+    );
+  });
+
+  it('DX-015-bis (D18): «volver en N meses» al registrar la evolución: crea o cambia el recall en la misma transacción; 422 sin evolución', async () => {
+    const patientId = await a.seed.patient('Evolucion');
+    const control = await typeId(a, 'Control');
+    const entryDate = addCivilDays(today(), -3);
+    const res = await http(
+      a,
+      ClinicRole.DENTIST,
+      'post',
+      `/patients/${patientId}/clinical-entries`,
+    )
+      .send({
+        notes: 'Control sin hallazgos. Volver en 4 meses.',
+        entryDate: `${entryDate}T00:00:00.000Z`,
+        recall: { recallTypeId: control, intervalMonths: 4 },
+      })
+      .expect(201);
+    const created = res.body as {
+      id: string;
+      recallUpdates: {
+        recallId: string;
+        recallTypeId: string;
+        dueAt: string;
+        deactivated: boolean;
+        replacedBy: unknown;
+      }[];
+    };
+    expect(created.recallUpdates).toEqual([
+      expect.objectContaining({
+        recallTypeId: control,
+        recallTypeName: 'Control',
+        dueAt: addCivilMonths(entryDate, 4),
+        deactivated: false,
+        replacedBy: null,
+      }),
+    ]);
+    // Otra evolución: solo cambia el intervalo; la base sigue.
+    const second = await http(
+      a,
+      ClinicRole.ASSISTANT,
+      'post',
+      `/patients/${patientId}/clinical-entries`,
+    )
+      .send({
+        notes: 'Nota de la asistente.',
+        recall: { recallTypeId: control, intervalMonths: 6 },
+      })
+      .expect(201);
+    expect((second.body as typeof created).recallUpdates[0].dueAt).toBe(
+      addCivilMonths(entryDate, 6),
+    );
+    // Sin recall: vacío.
+    const plain = await http(
+      a,
+      ClinicRole.DENTIST,
+      'post',
+      `/patients/${patientId}/clinical-entries`,
+    )
+      .send({ notes: 'Sin recall.' })
+      .expect(201);
+    expect((plain.body as typeof created).recallUpdates).toEqual([]);
+
+    // Tipo de nadie: 422 y la evolución NO se guarda.
+    const entries = await raw.clinicalEntry.count({ where: { patientId } });
+    const missing = await http(
+      a,
+      ClinicRole.DENTIST,
+      'post',
+      `/patients/${patientId}/clinical-entries`,
+    )
+      .send({
+        notes: 'No debe quedar.',
+        recall: {
+          recallTypeId: '00000000-0000-4000-8000-000000000015',
+          intervalMonths: 3,
+        },
+      })
+      .expect(422);
+    expect(messageOf(missing)).toBe(
+      'Ese tipo de recall no existe en esta clínica o se retiró.',
+    );
+    expect(await raw.clinicalEntry.count({ where: { patientId } })).toBe(
+      entries,
+    );
+    // Intervalo fuera de 1–36: 400 en español (con la ruta del campo
+    // anidado, como cualquier DTO anidado de la ValidationPipe).
+    const bad = await http(
+      a,
+      ClinicRole.DENTIST,
+      'post',
+      `/patients/${patientId}/clinical-entries`,
+    )
+      .send({
+        notes: 'Intervalo inválido.',
+        recall: { recallTypeId: control, intervalMonths: 40 },
+      })
+      .expect(400);
+    expect(messageOf(bad)).toEqual([
+      'recall.El intervalo del recall va de 1 a 36 meses.',
+    ]);
+    // Auditado como el PUT, con la evolución.
+    expect(
+      await raw.auditEvent.findMany({
+        where: {
+          tenantId: a.clinic.tenantId,
+          patientId,
+          resourceType: 'PATIENT_RECALL',
+        },
+        orderBy: { occurredAt: 'asc' },
+        select: { action: true, metadata: true },
+      }),
+    ).toEqual([
+      {
+        action: 'UPDATE',
+        metadata: {
+          via: 'CLINICAL_ENTRY',
+          changedFields: ['intervalMonths', 'lastDoneAt'],
+          params: { recallTypeId: control, entryId: created.id },
+        },
+      },
+      {
+        action: 'UPDATE',
+        metadata: expect.objectContaining({
+          via: 'CLINICAL_ENTRY',
+          changedFields: ['intervalMonths'],
+        }) as unknown,
+      },
+    ]);
+  });
+
   it('roles: la lista es del mostrador; el intervalo, del clínico (403 en español)', async () => {
     for (const role of [ClinicRole.DENTIST, ClinicRole.ASSISTANT]) {
       const res = await http(a, role, 'get', '/recall/due').expect(403);
@@ -926,6 +1338,7 @@ describe('Recall: lista de llamada (DX-015, e2e)', () => {
   // ISOLATION_COVERS: GET /patients/:id/recalls
   // ISOLATION_COVERS: PUT /patients/:id/recalls/:kind
   // ISOLATION_COVERS: POST /recall/:recallId/contacts
+  // ISOLATION_COVERS: POST /patients/:id/recalls/default
   it('aísla entre clínicas (RLS): B no ve, no lee ni contacta lo de A', async () => {
     const patientId = await patientWithRecall(a, 'SoloDeA', {
       intervalMonths: 6,
@@ -999,6 +1412,24 @@ describe('Recall: lista de llamada (DX-015, e2e)', () => {
     );
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.body).not.toHaveProperty('items');
+    // DX-015-bis (D15): B no programa un recall al paciente de A (404, ni
+    // con su propio tipo) y su «Sin recall configurado» no trae a nadie de A.
+    const recallsOfA = await raw.patientRecall.count({ where: { patientId } });
+    await http(
+      b,
+      ClinicRole.RECEPTION,
+      'post',
+      `/patients/${patientId}/recalls/default`,
+    )
+      .send({ recallTypeId: await typeId(b, 'Higiene') })
+      .expect(404);
+    expect(await raw.patientRecall.count({ where: { patientId } })).toBe(
+      recallsOfA,
+    );
+    const attendedOfA = await attendedPatient(a, 'AtendidoDeA', 15);
+    expect((await unconfigured(b)).items.map((i) => i.patientId)).not.toContain(
+      attendedOfA.patientId,
+    );
     // El recall de A sigue con su intervalo.
     expect(
       (await raw.patientRecall.findUniqueOrThrow({ where: { id: recallId } }))
