@@ -473,6 +473,77 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
       expect(read).toBeLessThan(50);
     });
 
+    // TEMPORAL (diagnóstico en la CI, se quita en el commit siguiente).
+    it('DIAG plan del barrido nuevo y del LATERAL anterior', async () => {
+      const summary = (plan: PlanNode[]) => {
+        const scans = on(plan, 'appointments');
+        return {
+          nodes: scans
+            .flatMap((n) =>
+              n['Node Type'] === 'Bitmap Heap Scan' ? nodes(n) : [n],
+            )
+            .map((n) => [
+              n['Node Type'],
+              n['Index Name'],
+              n['Index Cond'],
+              n['Actual Rows'],
+              n['Actual Loops'],
+              n['Rows Removed by Index Recheck'],
+              n['Rows Removed by Filter'],
+            ]),
+          read: scans.reduce(
+            (sum, n) =>
+              sum +
+              ((n['Actual Rows'] ?? 0) +
+                (n['Node Type'] === 'Bitmap Heap Scan'
+                  ? (n['Rows Removed by Index Recheck'] ?? 0) +
+                    (n['Rows Removed by Filter'] ?? 0)
+                  : 0)) *
+                (n['Actual Loops'] ?? 1),
+            0,
+          ),
+        };
+      };
+      const [{ server_version }] = await raw.$queryRaw<
+        { server_version: string }[]
+      >`SHOW server_version`;
+      const windows = await prisma.runWithTenant(a.tenantId, (tx) =>
+        loadSweepWindows(tx, a.tenantId, NOW),
+      );
+      const fixed = await explain(
+        a.tenantId,
+        dueCandidatesSql(a.tenantId, windows),
+        true,
+      );
+      const utc = (d: Date) =>
+        Prisma.sql`(${d.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+      const legacy = Prisma.sql`
+    SELECT c."appointmentId", w.lead AS "leadHours", c."start"
+      FROM "location_reminder_settings" rs
+      JOIN "locations" l ON l."tenantId" = rs."tenantId" AND l."id" = rs."locationId" AND l."deletedAt" IS NULL
+      CROSS JOIN LATERAL (
+        SELECT lead,
+               GREATEST(${utc(NOW)}, ${utc(NOW)} + make_interval(hours => lead, secs => ${-3600})) AS lo,
+               ${utc(NOW)} + make_interval(hours => lead, secs => ${600}) AS hi
+          FROM unnest(rs."leadHours") AS lead
+      ) w
+      CROSS JOIN LATERAL (
+        SELECT a."id" AS "appointmentId", a."start"
+          FROM "appointments" a
+          JOIN "patients" p ON p."tenantId" = a."tenantId" AND p."id" = a."patientId"
+         WHERE a."tenantId" = rs."tenantId" AND a."locationId" = rs."locationId"
+           AND a."start" > w.lo AND a."start" <= w.hi AND a."deletedAt" IS NULL
+           AND p."contactChannel" = 'EMAIL' AND p."reminderOptOutAt" IS NULL
+        OFFSET 0
+      ) c
+     WHERE rs."tenantId" = ${a.tenantId}::uuid AND rs."enabled"
+     ORDER BY c."start"`;
+      const old = await explain(a.tenantId, legacy, true);
+      console.log(
+        `DIAG-PLAN ${JSON.stringify({ server_version, fixed: summary(fixed), legacy: summary(old) })}`,
+      );
+    });
+
     it('varias antelaciones: mismo conjunto que la ventana del dominio, sin sedes retiradas, citas retiradas ni bajas', async () => {
       const optedOut = await patient(a, {
         reminderOptOutAt: new Date(),
