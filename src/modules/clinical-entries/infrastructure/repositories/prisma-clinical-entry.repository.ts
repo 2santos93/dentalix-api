@@ -9,7 +9,12 @@ import {
   CreateClinicalEntryRepoInput,
   ListClinicalEntriesParams,
 } from '../../domain/ports/clinical-entry-repository.port';
-import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import {
+  ClinicalEntry,
+  type CreatedClinicalEntryRecord,
+} from '../../domain/entities/clinical-entry.entity';
+import { entryCivilDay } from '../../domain/entry-date-rules';
+import { recallFromClinicalEntry } from '../../../recall/infrastructure/recall-manual-write';
 import {
   ADDENDA_ORDER,
   mapAddendum,
@@ -132,7 +137,9 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     return tenantId;
   }
 
-  async create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry> {
+  async create(
+    input: CreateClinicalEntryRepoInput,
+  ): Promise<CreatedClinicalEntryRecord> {
     const tenantId = this.requireTenantId();
 
     // Append-only: this is a plain INSERT. There is no update/delete method
@@ -190,7 +197,30 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           diagnoses: DIAGNOSES,
         },
       });
-      return mapToEntity(row, await providerNamesOf(tx, [row]));
+      const entry = mapToEntity(row, await providerNamesOf(tx, [row]));
+      if (!input.recall) return { ...entry, recallUpdates: [] };
+      // DX-015-bis (D18): el recall en la MISMA transacción; un 422 (tipo
+      // inexistente o retirado) deshace también la evolución. La base de un
+      // recall nuevo es el día civil de la evolución en la zona de su sede.
+      const location = await tx.location.findFirstOrThrow({
+        where: { id: locationId },
+        select: { id: true, timeZone: true },
+      });
+      const recallUpdates = await recallFromClinicalEntry(tx, {
+        tenantId,
+        patientId: input.patientId,
+        entryId: row.id,
+        recallTypeId: input.recall.recallTypeId,
+        intervalMonths: input.recall.intervalMonths,
+        entryDay: entryCivilDay(
+          row.entryDate,
+          requireLocationTimeZone(location),
+        ),
+        locationId,
+        actorId: input.performedById,
+        audit: input.audit,
+      });
+      return { ...entry, recallUpdates };
     });
   }
 

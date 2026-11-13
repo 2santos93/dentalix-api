@@ -1,4 +1,7 @@
-import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import {
+  ClinicalEntry,
+  type CreatedClinicalEntryRecord,
+} from '../../domain/entities/clinical-entry.entity';
 import {
   ClinicalEntryAppointmentRef,
   ClinicalEntryRepository,
@@ -26,13 +29,22 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
   readonly licenses = new Map<string, string>();
   /** DX-231: zona de la sede de escritura de los tests (Caracas, UTC−4). */
   writeTimeZone = 'America/Caracas';
+  /**
+   * DX-015-bis (D18): el `recall` que recibió cada alta. Las reglas del recall
+   * (crear, solo intervalo, exclusión, 422) las prueban los tests con BD.
+   */
+  readonly recallRequests: NonNullable<
+    CreateClinicalEntryRepoInput['recall']
+  >[] = [];
   private nextId = 1;
 
   writeLocationTimeZone(): Promise<string> {
     return Promise.resolve(this.writeTimeZone);
   }
 
-  create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry> {
+  create(
+    input: CreateClinicalEntryRepoInput,
+  ): Promise<CreatedClinicalEntryRecord> {
     const row: ClinicalEntry = {
       id: `ce-${this.nextId++}`,
       tenantId: 't1',
@@ -61,7 +73,22 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
     };
     // Append-only: push a NEW row, never mutate/replace an existing one.
     this.rows.push(row);
-    return Promise.resolve(structuredClone(row));
+    if (input.recall) this.recallRequests.push(input.recall);
+    return Promise.resolve({
+      ...structuredClone(row),
+      recallUpdates: input.recall
+        ? [
+            {
+              recallId: `recall-${row.id}`,
+              recallTypeId: input.recall.recallTypeId,
+              recallTypeName: 'Higiene',
+              dueAt: '2027-01-23',
+              deactivated: false,
+              replacedBy: null,
+            },
+          ]
+        : [],
+    });
   }
 
   authorLicense(userId: string): Promise<string | null> {
