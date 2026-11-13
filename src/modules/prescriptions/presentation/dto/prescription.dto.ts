@@ -223,6 +223,13 @@ export class PrescriptionDto {
   safetyOverrideReason!: string | null;
   @ApiProperty({ description: 'SHA-256 (hex) del contenido emitido' })
   contentHash!: string;
+  @ApiProperty({
+    description:
+      'DX-467: código de verificación (12 símbolos de «23456789ABCDEFGHJKMNPQRSTUVWXYZ»). La impresión lo muestra agrupado de 4 en 4 con un QR hacia `/receta/<código>`; la página pública dice si la receta es válida o está anulada.',
+    example: 'K7M3QH9XRT2W',
+    pattern: '^[2-9A-HJKMNP-Z]{12}$',
+  })
+  verificationCode!: string;
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   voidedAt!: Date | null;
   @ApiProperty({ type: String, format: 'uuid', nullable: true }) voidedById!:

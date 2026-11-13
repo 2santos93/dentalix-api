@@ -80,6 +80,11 @@
  *                  pacientes por un teléfono: frena a quien pruebe números
  *                  en bloque, y deja sobrado a una recepción que atiende
  *                  una llamada por minuto.
+ * - prescription-verify: verificar una receta por el código de su QR
+ *                  (`GET /public/prescriptions/:code`, DX-467), por IP: frena
+ *                  el barrido de códigos (12 símbolos de 31, ~59 bits). 30/min
+ *                  sobra para una farmacia que comprueba recetas a mano (o con
+ *                  varias cajas tras una IP); un barrido no avanza.
  * - branding-host: la marca por host del render de servidor (`GET
  *                  /public/tenant/branding/by-host`, DX-555), por IP + HOST
  *                  normalizado (hash), SIN el balde global: todas esas
@@ -121,6 +126,7 @@ export type RateLimitPolicy =
   | 'slot-token'
   | 'copy-link'
   | 'copy-token'
+  | 'prescription-verify'
   | 'branding-host'
   | 'branding-miss';
 
@@ -159,6 +165,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'slot-token': { limit: 10, ttlMs: MINUTE },
   'copy-link': { limit: 20, ttlMs: MINUTE },
   'copy-token': { limit: 10, ttlMs: MINUTE },
+  'prescription-verify': { limit: 30, ttlMs: MINUTE },
   'branding-host': { limit: 600, ttlMs: MINUTE },
   'branding-miss': { limit: 60, ttlMs: MINUTE },
 };
@@ -209,6 +216,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'slot-token': rule('slot-token'),
     'copy-link': rule('copy-link'),
     'copy-token': rule('copy-token'),
+    'prescription-verify': rule('prescription-verify'),
     'branding-host': rule('branding-host'),
     'branding-miss': rule('branding-miss'),
   };
