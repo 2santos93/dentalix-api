@@ -1425,4 +1425,26 @@ describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
       }
     });
   });
+
+  describe('via (DX-015-bis, porción 3)', () => {
+    it('conserva DEFAULT y CLINICAL_ENTRY junto a los parámetros', () => {
+      for (const via of ['DEFAULT', 'CLINICAL_ENTRY']) {
+        expect(
+          sanitizeAuditMetadata({
+            via,
+            params: { recallTypeId: '11111111-1111-4111-8111-111111111111' },
+          }),
+        ).toEqual({
+          via,
+          params: { recallTypeId: '11111111-1111-4111-8111-111111111111' },
+        });
+      }
+    });
+
+    it('descarta cualquier otro valor', () => {
+      for (const via of ['OPENING', 'default', 'Dra. Pérez', 3, null]) {
+        expect(sanitizeAuditMetadata({ via })).toEqual({});
+      }
+    });
+  });
 });

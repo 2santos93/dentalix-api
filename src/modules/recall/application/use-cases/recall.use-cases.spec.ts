@@ -17,6 +17,8 @@ import type {
   RecallRef,
   RecallTypeRef,
   RecallTypeView,
+  RecallUnconfiguredQuery,
+  RecallUnconfiguredRow,
   SetPatientRecallData,
   StaffRef,
 } from '../../domain/recall.entity';
@@ -24,6 +26,7 @@ import { addCivilMonths } from '../../domain/recall-rules';
 import {
   APPOINTMENT_NOT_OF_PATIENT_MESSAGE,
   BOOKED_NEEDS_APPOINTMENT_MESSAGE,
+  CreateDefaultRecallUseCase,
   CreateRecallContactUseCase,
   DISABLED_REASON_TOO_LONG_MESSAGE,
   DISABLED_UNTIL_INVALID_MESSAGE,
@@ -33,6 +36,7 @@ import {
   LAST_DONE_FUTURE_MESSAGE,
   LAST_DONE_INVALID_MESSAGE,
   ListDueRecallsUseCase,
+  ListUnconfiguredRecallsUseCase,
   NOTE_TOO_LONG_MESSAGE,
   ListRecallTypesUseCase,
   PATIENT_NOT_FOUND_MESSAGE,
@@ -101,6 +105,18 @@ class InMemoryRecallRepository implements RecallRepository {
   dueTotal = 0;
   sedeDay = SEDE_DAY;
 
+  unconfiguredRows: RecallUnconfiguredRow[] = [];
+  unconfiguredTotal = 0;
+  readonly unconfiguredQueries: RecallUnconfiguredQuery[] = [];
+  readonly defaultCreates: {
+    patientId: string;
+    recallTypeId: string;
+    appointmentId?: string;
+    now: Date;
+    actorId: string;
+  }[] = [];
+  /** Lo que «desactiva» la exclusión en el próximo alta por defecto. */
+  nextExcluded: RecallExclusionUpdate[] = [];
   readonly dueQueries: RecallDueQuery[] = [];
   readonly upserts: SetPatientRecallData[] = [];
   readonly writeTodayCalls: Date[] = [];
@@ -113,6 +129,47 @@ class InMemoryRecallRepository implements RecallRepository {
     this.calls.push('listDue');
     this.dueQueries.push(query);
     return Promise.resolve({ rows: this.dueRows, total: this.dueTotal });
+  }
+
+  listUnconfigured(
+    query: RecallUnconfiguredQuery,
+  ): Promise<{ rows: RecallUnconfiguredRow[]; total: number }> {
+    this.calls.push('listUnconfigured');
+    this.unconfiguredQueries.push(query);
+    return Promise.resolve({
+      rows: this.unconfiguredRows,
+      total: this.unconfiguredTotal,
+    });
+  }
+
+  // Las reglas del alta (base, 409, 422, exclusión) las prueban los tests con
+  // BD (recall-default.int-spec.ts); aquí solo el orden y lo que recibe.
+  createDefaultRecall(data: {
+    patientId: string;
+    recallTypeId: string;
+    appointmentId?: string;
+    now: Date;
+    actorId: string;
+  }): Promise<{ id: string; excluded: RecallExclusionUpdate[] }> {
+    this.calls.push('createDefaultRecall');
+    this.defaultCreates.push({
+      patientId: data.patientId,
+      recallTypeId: data.recallTypeId,
+      ...(data.appointmentId ? { appointmentId: data.appointmentId } : {}),
+      now: data.now,
+      actorId: data.actorId,
+    });
+    const kind = (Object.keys(TYPE_ID) as RecallKind[]).find(
+      (k) => TYPE_ID[k] === data.recallTypeId,
+    );
+    if (!kind) return Promise.reject(new Error('tipo inexistente'));
+    const recall = this.seedRecall({
+      patientId: data.patientId,
+      kind,
+      lastDoneAt: SEDE_DAY,
+      updatedById: data.actorId,
+    });
+    return Promise.resolve({ id: recall.id, excluded: this.nextExcluded });
   }
 
   patientExists(patientId: string): Promise<boolean> {
@@ -1316,5 +1373,167 @@ describe('ListRecallTypesUseCase (DX-015-bis)', () => {
       ['Control', 'CHECKUP'],
     ]);
     expect(repo.calls).toEqual(['listTypes']);
+  });
+});
+
+describe('ListUnconfiguredRecallsUseCase (DX-015-bis, D17)', () => {
+  const row = (
+    data: Partial<RecallUnconfiguredRow> = {},
+  ): RecallUnconfiguredRow => ({
+    patientId: 'pac-1',
+    patientFirstName: 'María',
+    patientLastName: 'Rondón',
+    patientPhone: '+58 412 555 0101',
+    phoneRegion: 'VE',
+    reminderOptedOut: false,
+    lastVisitAt: '2026-10-20',
+    lastVisitLocationId: NORTE,
+    ...data,
+  });
+
+  it('sin parámetros: página 1 de 20, sin sede de la query y el reloj inyectado', async () => {
+    const repo = new InMemoryRecallRepository();
+    const { ctx, inRequest } = requestContext();
+    const page = await inRequest(() =>
+      new ListUnconfiguredRecallsUseCase(repo, clock, ctx).execute({}),
+    );
+    expect(repo.unconfiguredQueries).toEqual([
+      { locationId: undefined, page: 1, pageSize: 20, now: NOW },
+    ]);
+    expect(page).toEqual({ items: [], total: 0, page: 1, pageSize: 20 });
+  });
+
+  it('acota la paginación como la lista de vencidos', async () => {
+    const repo = new InMemoryRecallRepository();
+    const { ctx, inRequest } = requestContext();
+    const page = await inRequest(() =>
+      new ListUnconfiguredRecallsUseCase(repo, clock, ctx).execute({
+        page: 0,
+        pageSize: 500,
+      }),
+    );
+    expect(repo.unconfiguredQueries[0]).toMatchObject({
+      page: 1,
+      pageSize: 100,
+    });
+    expect(page).toMatchObject({ page: 1, pageSize: 100 });
+  });
+
+  it('nombre, teléfono y WhatsApp con la región de la sede; con baja de avisos, sin contacto', async () => {
+    const repo = new InMemoryRecallRepository();
+    repo.unconfiguredRows = [
+      row(),
+      row({
+        patientId: 'pac-2',
+        patientFirstName: 'José',
+        patientLastName: 'Guédez',
+        reminderOptedOut: true,
+      }),
+    ];
+    repo.unconfiguredTotal = 2;
+    const { ctx, inRequest } = requestContext();
+    const page = await inRequest(() =>
+      new ListUnconfiguredRecallsUseCase(repo, clock, ctx).execute({}),
+    );
+    expect(page.total).toBe(2);
+    expect(page.items).toEqual([
+      {
+        patientId: 'pac-1',
+        patientName: 'María Rondón',
+        patientPhone: '+58 412 555 0101',
+        patientWhatsApp: '584125550101',
+        reminderOptedOut: false,
+        lastVisitAt: '2026-10-20',
+        lastVisitLocationId: NORTE,
+      },
+      {
+        patientId: 'pac-2',
+        patientName: 'José Guédez',
+        patientPhone: null,
+        patientWhatsApp: null,
+        reminderOptedOut: true,
+        lastVisitAt: '2026-10-20',
+        lastVisitLocationId: NORTE,
+      },
+    ]);
+  });
+
+  it('locationId de una sede permitida pasa al repositorio; de otra, 403 sin consultar', async () => {
+    const repo = new InMemoryRecallRepository();
+    const { ctx, inRequest } = requestContext([NORTE]);
+    const list = new ListUnconfiguredRecallsUseCase(repo, clock, ctx);
+    await inRequest(() => list.execute({ locationId: NORTE }));
+    expect(repo.unconfiguredQueries[0]).toMatchObject({ locationId: NORTE });
+    await expect(
+      inRequest(() => list.execute({ locationId: SUR })),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(repo.unconfiguredQueries).toHaveLength(1);
+  });
+});
+
+describe('CreateDefaultRecallUseCase (DX-015-bis, D15)', () => {
+  it('paciente inexistente: 404 sin tocar nada', async () => {
+    const repo = new InMemoryRecallRepository();
+    const create = new CreateDefaultRecallUseCase(
+      repo,
+      clock,
+      new GetPatientRecallsUseCase(repo, clock),
+    );
+    await expect(
+      create.execute('pac-x', TYPE_ID.HYGIENE, 'recepcion-1'),
+    ).rejects.toThrow(new NotFoundException(PATIENT_NOT_FOUND_MESSAGE));
+    expect(repo.calls).toEqual(['patientExists']);
+  });
+
+  it('crea con el reloj inyectado y responde como el PUT: la ficha y lo que desactivó la exclusión', async () => {
+    const repo = new InMemoryRecallRepository();
+    repo.patients.add('pac-1');
+    const excluded: RecallExclusionUpdate = {
+      recallId: 'recall-perio',
+      recallTypeId: 'tipo-perio',
+      recallTypeName: 'Mantenimiento periodontal',
+      dueAt: '2027-01-10',
+      deactivated: true,
+      replacedBy: { recallTypeId: TYPE_ID.HYGIENE, recallTypeName: 'Higiene' },
+    };
+    repo.nextExcluded = [excluded];
+    const result = await new CreateDefaultRecallUseCase(
+      repo,
+      clock,
+      new GetPatientRecallsUseCase(repo, clock),
+    ).execute('pac-1', TYPE_ID.HYGIENE, 'recepcion-1');
+    expect(repo.defaultCreates).toEqual([
+      {
+        patientId: 'pac-1',
+        recallTypeId: TYPE_ID.HYGIENE,
+        now: NOW,
+        actorId: 'recepcion-1',
+      },
+    ]);
+    expect(repo.calls.slice(0, 3)).toEqual([
+      'patientExists',
+      'createDefaultRecall',
+      'patientExists',
+    ]);
+    expect(result.recalls.map((r) => r.recallTypeId)).toEqual([
+      TYPE_ID.HYGIENE,
+    ]);
+    expect(result.recallUpdates).toEqual([excluded]);
+  });
+
+  it('desde la salida pasa la cita que se despide al repositorio', async () => {
+    const repo = new InMemoryRecallRepository();
+    repo.patients.add('pac-2');
+    await new CreateDefaultRecallUseCase(
+      repo,
+      clock,
+      new GetPatientRecallsUseCase(repo, clock),
+    ).execute('pac-2', TYPE_ID.CHECKUP, 'recepcion-1', undefined, 'cita-hoy');
+    expect(repo.defaultCreates).toEqual([
+      expect.objectContaining({
+        patientId: 'pac-2',
+        appointmentId: 'cita-hoy',
+      }),
+    ]);
   });
 });

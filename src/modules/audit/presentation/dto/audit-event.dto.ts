@@ -4,9 +4,11 @@ import {
   AUDIT_CANCELLATION_KINDS,
   AUDIT_CANCELLATION_REASONS,
   AUDIT_ORIGINS,
+  AUDIT_RECALL_VIAS,
   MAX_AUDIT_CONFIG_TEXT,
   type AuditCancellation,
   type AuditOrigin,
+  type AuditRecallVia,
 } from '../../domain/audit-metadata';
 
 // Forma de la respuesta de `GET /audit-events` (DX-009). Solo documenta el
@@ -552,6 +554,14 @@ export class AuditMetadataDto {
       'DX-401: el período (días civiles, ambos inclusive) del resumen de recibos del paciente que se vio, imprimió o envió. Solo las dos fechas.',
   })
   period?: AuditPeriodDto;
+
+  @ApiPropertyOptional({
+    enum: AUDIT_RECALL_VIAS,
+    enumName: 'AuditRecallVia',
+    description:
+      'DX-015-bis: por dónde se creó o cambió un recall (`PATIENT_RECALL`) fuera del PUT de la ficha: DEFAULT = «Programar recall» con el intervalo por defecto del tipo; CLINICAL_ENTRY = el intervalo fijado al registrar la evolución.',
+  })
+  via?: AuditRecallVia;
 }
 
 export class AuditEventDto {

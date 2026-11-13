@@ -39,6 +39,7 @@ import {
 } from '../../auth/presentation/guards/roles.decorator';
 import {
   APPOINTMENT_ROLES,
+  RECALL_DEFAULT_ROLES,
   RECALL_INTERVAL_ROLES,
   RECALL_LIST_ROLES,
   RECALL_TYPE_WRITE_ROLES,
@@ -59,10 +60,12 @@ import {
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
+  CreateDefaultRecallUseCase,
   CreateRecallContactUseCase,
   GetPatientRecallsUseCase,
   ListDueRecallsUseCase,
   ListRecallTypesUseCase,
+  ListUnconfiguredRecallsUseCase,
   SetPatientRecallUseCase,
 } from '../application/use-cases/recall.use-cases';
 import type {
@@ -70,9 +73,11 @@ import type {
   RecallContactView,
   RecallDuePage,
   RecallTypeView,
+  RecallUnconfiguredPage,
   SetPatientRecallResult,
 } from '../domain/recall.entity';
 import {
+  CreateDefaultRecallDto,
   CreateRecallContactDto,
   CreateRecallTypeDto,
   PatientRecallsDto,
@@ -82,6 +87,8 @@ import {
   RecallDuePageDto,
   RecallDueQueryDto,
   RecallTypeDto,
+  RecallUnconfiguredPageDto,
+  RecallUnconfiguredQueryDto,
   SetPatientRecallDto,
   SetPatientRecallResultDto,
   SetRecallTypeTriggersDto,
@@ -92,6 +99,8 @@ export const RECALL_LIST_FORBIDDEN_MESSAGE =
   'Tu rol no gestiona la lista de recall: es para administración y recepción.';
 export const RECALL_INTERVAL_FORBIDDEN_MESSAGE =
   'Solo el personal clínico fija o pausa el recall de un paciente.';
+export const RECALL_DEFAULT_FORBIDDEN_MESSAGE =
+  'Tu rol no programa recalls de pacientes.';
 export const RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE =
   'Solo administración gestiona los tipos de recall de la clínica.';
 
@@ -121,8 +130,40 @@ const LOCATION_HEADER = {
 export class RecallController {
   constructor(
     private readonly listDue: ListDueRecallsUseCase,
+    private readonly listUnconfigured: ListUnconfiguredRecallsUseCase,
     private readonly createContact: CreateRecallContactUseCase,
   ) {}
+
+  // Como la de vencidos: muchos pacientes con teléfonos; el evento no lleva
+  // paciente y el `reason` la distingue.
+  @Audit({
+    action: 'VIEW',
+    resource: 'PATIENT_RECALL',
+    reason: 'RECALL_UNCONFIGURED',
+  })
+  @Get('unconfigured')
+  @ApiOperation({
+    summary: 'Sin recall configurado: atendidos sin recall ni cita',
+    description:
+      'DX-015-bis (D17): pacientes vivos con al menos una cita atendida en los últimos 24 meses (antes de «hoy» en su sede), sin ningún recall activo de un tipo vivo y sin cita futura agendada o confirmada ni una en curso. La sede del paciente es la de su última cita atendida. Orden: la última visita más reciente primero, después el apellido.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: RecallUnconfiguredPageDto })
+  @ApiBadRequestResponse({
+    description: 'page, pageSize o locationId inválidos',
+  })
+  @ApiForbiddenResponse({
+    description: `${RECALL_LIST_FORBIDDEN_MESSAGE} O 403 LOCATION_NOT_ALLOWED: locationId de una sede no permitida.`,
+  })
+  unconfigured(
+    @Query() query: RecallUnconfiguredQueryDto,
+  ): Promise<RecallUnconfiguredPage> {
+    return this.listUnconfigured.execute({
+      locationId: query.locationId,
+      page: query.page,
+      pageSize: query.pageSize,
+    });
+  }
 
   // Lista de muchos pacientes con teléfonos: el evento no lleva paciente,
   // pero queda quién la consultó (mismo criterio que pending-follow-up).
@@ -393,8 +434,55 @@ export class PatientRecallsController {
   constructor(
     private readonly getRecalls: GetPatientRecallsUseCase,
     private readonly setRecall: SetPatientRecallUseCase,
+    private readonly createDefault: CreateDefaultRecallUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
+
+  // Sin @Audit: el evento del alta (PATIENT_RECALL/UPDATE, `via: 'DEFAULT'`)
+  // y los de la exclusión van en la transacción del repositorio.
+  @Roles(...RECALL_DEFAULT_ROLES)
+  @RolesDeniedMessage(RECALL_DEFAULT_FORBIDDEN_MESSAGE)
+  @Post('default')
+  @ApiOperation({
+    summary: 'Programar el recall de un tipo con su intervalo por defecto',
+    description:
+      'DX-015-bis (D15): solo crea. Intervalo = el por defecto del tipo (Ajustes › Recall). Base: con `appointmentId` (la cita que se despide en la salida), el día civil de esa cita en la zona de su sede (y esa sede); sin él, el de la última cita atendida del paciente; sin ninguna, hoy en la sede activa. `source` MANUAL. D9: si el tipo tiene grupo de exclusión, desactiva los demás recalls activos del paciente de ese grupo (`recallUpdates`). También recepción; elegir otro intervalo, editarlo o reactivarlo es el PUT clínico.',
+  })
+  @ApiHeader({
+    name: 'X-Location-Id',
+    required: false,
+    description:
+      'Sede activa: solo cuenta si el paciente no tiene ninguna cita atendida (sede y «hoy» del recall).',
+  })
+  @ApiCreatedResponse({ type: SetPatientRecallResultDto })
+  @ApiBadRequestResponse({ description: 'recallTypeId inválido' })
+  @ApiForbiddenResponse({ description: RECALL_DEFAULT_FORBIDDEN_MESSAGE })
+  @ApiNotFoundResponse({
+    description: 'Paciente de otra clínica o inexistente',
+  })
+  @ApiConflictResponse({
+    description:
+      'El paciente ya tiene un recall de ese tipo (también uno inactivo); o la sede de su última cita no tiene zona horaria (LOCATION_TIMEZONE_REQUIRED)',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'Tipo de recall inexistente en esta clínica, retirado o desactivado; o `appointmentId` que no es una cita viva de este paciente en llegada, en sillón, lista para la salida o atendida',
+  })
+  createDefaultRecall(
+    @Param('id', ParseUUIDPipe) patientId: string,
+    @Body() dto: CreateDefaultRecallDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SetPatientRecallResult> {
+    return this.createDefault.execute(
+      patientId,
+      dto.recallTypeId,
+      req.user.sub,
+      // DX-360: detrás del RolesGuard siempre hay sesión de clínica; sin
+      // ella es un error de programación, nunca un alta sin auditar.
+      requireAuditRequestContext(req, this.tenantContext),
+      dto.appointmentId,
+    );
+  }
 
   @Roles(...APPOINTMENT_ROLES)
   @Audit({

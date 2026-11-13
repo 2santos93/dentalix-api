@@ -50,7 +50,7 @@ const POLICY = {
     'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
   marketingText: 'Autorizo recibir comunicaciones comerciales.',
 };
-const LAST_NAME = 'Zuluagarrestrepo';
+const LAST_NAME = 'Urdanetabracho';
 const DOC_NUMBER = '1098765432';
 const PRIOR_ALLERGEN = 'Ibuprofenazol';
 const DAY_MS = 24 * 60 * 60 * 1000;

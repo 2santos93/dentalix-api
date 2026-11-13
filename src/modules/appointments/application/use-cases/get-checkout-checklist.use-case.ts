@@ -13,6 +13,13 @@ export const CHECKOUT_ITEMS = [
 ] as const;
 export type CheckoutItem = (typeof CHECKOUT_ITEMS)[number];
 
+/** D16: un tipo de recall que la salida ofrece programar (D15). */
+export interface CheckoutRecallType {
+  id: string;
+  name: string;
+  defaultIntervalMonths: number;
+}
+
 export interface CheckoutChecklist {
   appointmentId: string;
   patientId: string;
@@ -23,6 +30,11 @@ export interface CheckoutChecklist {
   hasEmail: boolean;
   /** Dio de baja los recordatorios: tener el dato no basta para escribirle. */
   remindersOptedOut: boolean;
+  /**
+   * DX-015-bis (D16): sin próxima cita ni recall activo, los tipos de recall
+   * activos de la clínica en su orden, para «Programar recall»; si no, vacío.
+   */
+  recallTypes: CheckoutRecallType[];
 }
 
 /**
@@ -87,6 +99,16 @@ export class GetCheckoutChecklistUseCase {
         orderBy: [{ dueAt: 'asc' }, { id: 'asc' }],
         select: { dueAt: true },
       });
+      // D16: solo si no hay próxima cita ni recall (sin otra consulta si los
+      // hay). Los activos y vivos, por su orden, como el resto de listas.
+      const recallTypes =
+        next || recall
+          ? []
+          : await tx.recallType.findMany({
+              where: { active: true, deletedAt: null },
+              orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }],
+              select: { id: true, name: true, defaultIntervalMonths: true },
+            });
       return {
         appointmentId: appointment.id,
         patientId: patient.id,
@@ -95,6 +117,7 @@ export class GetCheckoutChecklistUseCase {
         hasPhone: Boolean(patient.phone?.trim()),
         hasEmail: Boolean(patient.email?.trim()),
         remindersOptedOut: patient.reminderOptOutAt !== null,
+        recallTypes,
       };
     });
   }

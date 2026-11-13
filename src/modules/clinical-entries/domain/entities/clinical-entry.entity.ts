@@ -63,3 +63,24 @@ export interface ClinicalEntry {
   /** DX-212: vacío en las evoluciones sin diagnóstico (todas las anteriores). */
   diagnoses: ClinicalEntryDiagnosis[];
 }
+
+/**
+ * DX-015-bis (D18): un recall que movió el alta de la evolución con
+ * `recall`: el de la evolución (creado, con otro intervalo o reactivado) y,
+ * tras él, los que la exclusión desactivó (`deactivated`, con el tipo que los
+ * sustituye). La misma forma que `recallUpdates` del PATCH del ítem del plan.
+ */
+export interface ClinicalEntryRecallUpdate {
+  recallId: string;
+  recallTypeId: string;
+  recallTypeName: string;
+  /** Vencimiento tras el cambio (día civil). */
+  dueAt: string;
+  deactivated: boolean;
+  replacedBy: { recallTypeId: string; recallTypeName: string } | null;
+}
+
+/** Lo que devuelve el alta: la evolución y los recalls que movió (D18). */
+export interface CreatedClinicalEntryRecord extends ClinicalEntry {
+  recallUpdates: ClinicalEntryRecallUpdate[];
+}

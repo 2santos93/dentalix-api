@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ClinicalDiagnosisKind } from '@prisma/client';
 import { ClinicalEntryAddendumDto } from './clinical-entry-addendum.dto';
+import { ItemRecallUpdateDto } from '../../../treatment-plans/presentation/dto/treatment-plan-item.dto';
 import {
   CLINICAL_ENTRY_WARNING_CODES,
   type ClinicalEntryWarningCode,
@@ -149,4 +150,11 @@ export class CreatedClinicalEntryDto extends ClinicalEntryDto {
       'DX-540: avisos de la firma; vacío si no hay nada que avisar. No se guardan con la evolución.',
   })
   warnings!: ClinicalEntryWarningDto[];
+
+  @ApiProperty({
+    type: [ItemRecallUpdateDto],
+    description:
+      'DX-015-bis (D18): con `recall`, el recall que fijó la evolución (creado, con otro intervalo o reactivado) y, tras él, los que la exclusión desactivó (`deactivated: true`); vacío sin `recall`.',
+  })
+  recallUpdates!: ItemRecallUpdateDto[];
 }
