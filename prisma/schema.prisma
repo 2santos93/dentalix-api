@@ -1571,6 +1571,8 @@ model AppointmentType {
   waitlistEntries     AppointmentWaitlistEntry[]
   // DX-222: plantillas de indicaciones sugeridas para este tipo de cita.
   postOpTemplateLinks PostOpInstructionTemplateLink[]
+  // DX-015-bis (D20): tipos de recall que se agendan con este tipo de cita.
+  recallTypes         RecallType[]
 
   // Destino de la FK compuesta de appointments.appointmentTypeId.
   @@unique([tenantId, id], map: "appointment_types_tenant_id_key")
@@ -7131,16 +7133,24 @@ model RecallType {
   /// Tipos excluyentes entre sí (1–40 de [A-Z0-9_], CHECK): dos recalls de un
   /// paciente de tipos del mismo grupo no están activos a la vez (D9).
   exclusionGroup        String?
+  /// D20: tipo de cita con el que se agenda (la web lo prellena si sigue
+  /// activo). FK compuesta con la clínica; la API exige uno vivo y activo al
+  /// enlazarlo. NULL = sin enlace.
+  appointmentTypeId     String?     @db.Uuid
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
   deletedAt             DateTime?
 
-  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  triggers RecallTypeTrigger[]
-  recalls  PatientRecall[]
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  appointmentType AppointmentType?    @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict, map: "recall_types_appointment_type_fkey")
+  triggers        RecallTypeTrigger[]
+  recalls         PatientRecall[]
 
   /// Destino de las FK compuestas.
   @@unique([tenantId, id], map: "recall_types_tenant_id_key")
+  // El lado hijo de la FK al tipo de cita es un índice PARCIAL
+  // (`recall_types_tenant_appointment_type_idx`, WHERE "appointmentTypeId" IS
+  // NOT NULL, 20261215090000) que Prisma no expresa: no se declara aquí.
   @@unique([tenantId, systemKey], map: "recall_types_tenant_system_key_key")
   @@map("recall_types")
 }

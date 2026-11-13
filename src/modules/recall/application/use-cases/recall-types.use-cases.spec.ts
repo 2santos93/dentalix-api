@@ -49,6 +49,7 @@ const view = (
   sortOrder: 10,
   systemKey: null,
   exclusionGroup: null,
+  appointmentTypeId: null,
   triggerCatalogItemIds: [],
   triggers: [],
   ...over,
@@ -114,8 +115,23 @@ describe('CRUD de tipos de recall (DX-015-bis)', () => {
           active: true,
           sortOrder: undefined,
           exclusionGroup: null,
+          appointmentTypeId: null,
         },
       ]);
+    });
+
+    it('D20: con tipo de cita (en minúsculas; validarlo es del repositorio)', async () => {
+      await new CreateRecallTypeUseCase(asRepo(repo)).execute(
+        {
+          name: 'Blanqueamiento',
+          defaultIntervalMonths: 12,
+          appointmentTypeId: 'AB1D1C2E-0000-4000-8000-000000000001',
+        },
+        AUDIT,
+      );
+      expect(repo.created[0]).toMatchObject({
+        appointmentTypeId: 'ab1d1c2e-0000-4000-8000-000000000001',
+      });
     });
 
     it('con grupo, orden e inactivo', async () => {
@@ -164,6 +180,25 @@ describe('CRUD de tipos de recall (DX-015-bis)', () => {
       );
       expect(repo.updated).toEqual([
         ['t-perio', { defaultIntervalMonths: 4, exclusionGroup: null }],
+      ]);
+    });
+
+    it('D20: null quita el tipo de cita; ausente no lo toca', async () => {
+      const update = new UpdateRecallTypeUseCase(asRepo(repo));
+      await update.execute('t-perio', { appointmentTypeId: null }, AUDIT);
+      await update.execute(
+        't-perio',
+        { appointmentTypeId: 'ab1d1c2e-0000-4000-8000-000000000001' },
+        AUDIT,
+      );
+      await update.execute('t-perio', { sortOrder: 3 }, AUDIT);
+      expect(repo.updated).toEqual([
+        ['t-perio', { appointmentTypeId: null }],
+        [
+          't-perio',
+          { appointmentTypeId: 'ab1d1c2e-0000-4000-8000-000000000001' },
+        ],
+        ['t-perio', { sortOrder: 3 }],
       ]);
     });
 
