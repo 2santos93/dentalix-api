@@ -418,9 +418,46 @@ describe('referencia convertida y congelada en el ítem (DX-513-bis, Postgres)',
       SELECT gen_random_uuid(), ${s.tenantId}::uuid, ${ves}::uuid, '18', '{}',
              ${s.catalogItemId}::uuid, 100, 100, 0, now()
         FROM generate_series(1, 3000)`;
+    // DX-513-quinquies: las dos tablas del join. TRUNCATE (resetDatabase) no
+    // borra las estadísticas: sin este ANALYZE las de "treatment_plans" son las
+    // que dejó otro test y, con UUID aleatorios, la parada temprana del merge
+    // join cambiaba de una corrida a otra y a veces le ganaba a los índices
+    // parciales (run 43456320463, intento 1).
     await raw.$executeRawUnsafe('ANALYZE "treatment_plan_items"');
+    await raw.$executeRawUnsafe('ANALYZE "treatment_plans"');
     const from = new Date(Date.now() - 7 * 24 * 3600 * 1000);
     const to = new Date(Date.now() + 24 * 3600 * 1000);
+    // Los índices parciales responden al predicado de los ítems: se comprueban
+    // con ese lado solo, sin join que el planificador pueda reordenar.
+    const itemsExplain = await raw.$transaction(async (tx) => {
+      await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
+      return tx.$queryRaw<{ 'QUERY PLAN': string }[]>`
+        EXPLAIN SELECT i."id"
+          FROM "treatment_plan_items" i
+         WHERE i."tenantId" = ${s.tenantId}::uuid
+           AND (i."discount" > 0 OR i."price" < i."catalogPrice"
+                OR i."price" < i."referencePriceInPlan"
+                OR (i."agreementId" IS NOT NULL
+                    AND (i."basePrice" > i."catalogPrice"
+                         OR i."basePriceInPlan" > i."referencePriceInPlan"
+                         OR (i."basePriceInPlan" IS NULL AND i."basePrice" IS NOT NULL
+                             AND i."catalogCurrency" IS NOT NULL
+                             AND i."referenceCurrency" IS DISTINCT FROM i."catalogCurrency"))))
+           AND i."deletedAt" IS NULL
+           AND COALESCE(i."discountAt", i."createdAt") >= ${from}
+           AND COALESCE(i."discountAt", i."createdAt") < ${to}`;
+    });
+    const itemsPlan = itemsExplain.map((r) => r['QUERY PLAN']).join('\n');
+    // Las tres primeras ramas, por el índice rehecho; la de convenio, por el
+    // suyo (SEC-047, rehecho en DX-513-ter).
+    expect(itemsPlan).toContain(
+      'treatment_plan_items_tenant_effective_ref_discount_at_idx',
+    );
+    expect(itemsPlan).toContain(
+      'treatment_plan_items_tenant_agreement_ref_reduction_at_idx',
+    );
+    // La consulta completa del informe (con el plan): sin recorrido secuencial
+    // de los ítems, sea cual sea el join que elija.
     const explain = await raw.$transaction(async (tx) => {
       await tx.$executeRaw`SET LOCAL enable_seqscan = off`;
       return tx.$queryRaw<{ 'QUERY PLAN': string }[]>`
@@ -444,14 +481,6 @@ describe('referencia convertida y congelada en el ítem (DX-513-bis, Postgres)',
            AND COALESCE(i."discountAt", i."createdAt") < ${to}`;
     });
     const planText = explain.map((r) => r['QUERY PLAN']).join('\n');
-    // Las tres primeras ramas, por el índice rehecho; la de convenio, por el
-    // suyo (SEC-047, rehecho en DX-513-ter).
-    expect(planText).toContain(
-      'treatment_plan_items_tenant_effective_ref_discount_at_idx',
-    );
-    expect(planText).toContain(
-      'treatment_plan_items_tenant_agreement_ref_reduction_at_idx',
-    );
     expect(planText).not.toMatch(/Seq Scan on treatment_plan_items/);
   });
 
