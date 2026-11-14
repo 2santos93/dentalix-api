@@ -89,9 +89,9 @@ jobs:
       STORAGE_DIR: ./storage-test
       FILES_PUBLIC_BASE_URL: http://localhost:3000/api/v1/files
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
