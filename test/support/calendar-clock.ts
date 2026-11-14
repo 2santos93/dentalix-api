@@ -84,8 +84,8 @@ const lastDayOfMonth = (year: number, month: number) =>
  * La hora de cada frontera en el mes en curso (UTC), para que el reloj de la
  * app no se aleje del de Postgres:
  *  - fin-de-mes: el último día del mes (el 31 si lo tiene) a las 23:59:30 UTC;
- *  - medianoche-sede: el día 1 a las 05:01 UTC (un minuto después de la
- *    medianoche de una sede en UTC−5; la de los fixtures, UTC−4, ya pasó);
+ *  - medianoche-sede: el día 1 a las 04:01 UTC (un minuto después de la
+ *    medianoche de la sede de los fixtures, Caracas, UTC−4);
  *  - fin-de-anio: el 31 de diciembre del año en curso a las 23:59:30 UTC.
  */
 export function calendarBoundary(
@@ -95,7 +95,7 @@ export function calendarBoundary(
   const year = today.getUTCFullYear();
   const month = today.getUTCMonth();
   if (kind === 'medianoche-sede')
-    return `${year}-${pad(month + 1)}-01T05:01:00Z`;
+    return `${year}-${pad(month + 1)}-01T04:01:00Z`;
   if (kind === 'fin-de-anio') return `${year}-12-31T23:59:30Z`;
   return `${year}-${pad(month + 1)}-${pad(lastDayOfMonth(year, month))}T23:59:30Z`;
 }

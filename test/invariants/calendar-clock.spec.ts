@@ -86,7 +86,7 @@ describe('DX-495: reloj de las fronteras de calendario', () => {
       Date.parse('2026-11-30T23:59:30Z'),
     );
     expect(parseFakeNow('medianoche-sede', today)).toBe(
-      Date.parse('2026-11-01T05:01:00Z'),
+      Date.parse('2026-11-01T04:01:00Z'),
     );
     expect(parseFakeNow('fin-de-anio', today)).toBe(
       Date.parse('2026-12-31T23:59:30Z'),
@@ -107,13 +107,13 @@ describe('DX-495: reloj de las fronteras de calendario', () => {
       },
     );
 
-    it('medianoche de la sede: el día 1 del mes en curso a las 05:01 UTC', () => {
+    it('medianoche de la sede: el día 1 del mes en curso a las 04:01 UTC', () => {
       expect(
         calendarBoundary('medianoche-sede', new Date('2026-11-14T03:45:00Z')),
-      ).toBe('2026-11-01T05:01:00Z');
+      ).toBe('2026-11-01T04:01:00Z');
       expect(
         calendarBoundary('medianoche-sede', new Date('2027-01-31T23:00:00Z')),
-      ).toBe('2027-01-01T05:01:00Z');
+      ).toBe('2027-01-01T04:01:00Z');
     });
 
     it('fin de año: el 31 de diciembre del año en curso', () => {

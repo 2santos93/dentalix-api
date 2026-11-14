@@ -6,7 +6,7 @@ name: Fronteras de calendario
 # workflow corre la unit y la integración con la hora fijada, en el mes en
 # curso, a:
 #   - fin-de-mes:      el último día del mes (el 31 si lo tiene), 23:59:30 UTC;
-#   - medianoche-sede: el día 1, 05:01 UTC (00:01 en una sede UTC−5);
+#   - medianoche-sede: el día 1, 04:01 UTC (00:01 en Caracas, UTC−4);
 #   - fin-de-anio:     el 31 de diciembre, 23:59:30 UTC.
 # Las fechas salen de `calendarBoundary` (test/support/calendar-clock.ts).
 #
