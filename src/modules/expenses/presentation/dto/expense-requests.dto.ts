@@ -16,6 +16,7 @@ import {
   IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
   ValidateIf,
   ValidateNested,
@@ -391,6 +392,45 @@ export class ExpenseSummaryQueryDto {
   })
   @IsString({ message: SUMMARY_PERIOD_INVALID_MESSAGE })
   to!: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID('all', { message: LOCATION_INVALID_MESSAGE })
+  locationId?: string;
+}
+
+/** DX-411: las cuentas por pagar por proveedor y su CSV. */
+export class ExpensePayablesQueryDto {
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID('all', { message: LOCATION_INVALID_MESSAGE })
+  locationId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Código ISO 4217 de 3 letras; sin él, todas las monedas.',
+  })
+  @IsOptional()
+  @Transform(toUpperCase)
+  @IsISO4217CurrencyCode({ message: CURRENCY_MESSAGE })
+  currency?: string;
+}
+
+export const PAYABLE_SUPPLIER_KEY_MESSAGE = 'El proveedor no es válido.';
+
+/** DX-411: los gastos abiertos de un proveedor en una moneda. */
+export class PayableExpensesQueryDto {
+  @ApiProperty({
+    description:
+      'La `supplierKey` de una fila de `GET /expenses/payables` (proveedor sin mayúsculas ni tildes); vacía = gastos sin proveedor.',
+  })
+  @IsString({ message: PAYABLE_SUPPLIER_KEY_MESSAGE })
+  @MaxLength(400, { message: PAYABLE_SUPPLIER_KEY_MESSAGE })
+  supplierKey!: string;
+
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  @Transform(toUpperCase)
+  @IsISO4217CurrencyCode({ message: CURRENCY_MESSAGE })
+  currency!: string;
 
   @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
