@@ -80,6 +80,7 @@ function paymentPlan(
         amount: 100,
       },
     ],
+    timeZone: 'America/Caracas',
     ...overrides,
   };
 }
@@ -89,6 +90,58 @@ function snapshot(partial: Partial<StatementSnapshot>): StatementSnapshot {
 }
 
 describe('computeAccountStatement', () => {
+  describe('DX-110: la cuota vence por el día civil de la sede de SU plan', () => {
+    const dueOn10 = (overrides: Partial<StatementPaymentPlanRow> = {}) =>
+      paymentPlan('tp-1', {
+        startDate: new Date('2026-11-10T00:00:00.000Z'),
+        installments: [
+          {
+            sequence: 1,
+            dueDate: new Date('2026-11-10T00:00:00.000Z'),
+            amount: 100,
+          },
+        ],
+        ...overrides,
+      });
+    const at = (now: string, pp = dueOn10()) =>
+      computeAccountStatement(
+        snapshot({
+          plans: [plan('tp-1', { billable: 100 })],
+          paymentPlans: [pp],
+        }),
+        { today: new Date(now) },
+      );
+
+    it('21:00 del día de vencimiento en Caracas (01:00Z del siguiente): no vencida y es la próxima', () => {
+      const out = at('2026-11-11T01:00:00.000Z');
+      expect(out.installments[0].status).toBe('PENDING');
+      expect(out.summary[0]).toMatchObject({
+        overdueCount: 0,
+        overdueAmount: 0,
+        nextInstallment: { sequence: 1, amount: 100 },
+      });
+    });
+
+    it('00:30 del día siguiente en Caracas: vencida y deja de ser la próxima', () => {
+      const out = at('2026-11-11T04:30:00.000Z');
+      expect(out.installments[0].status).toBe('OVERDUE');
+      expect(out.summary[0]).toMatchObject({
+        overdueCount: 1,
+        overdueAmount: 100,
+        nextInstallment: null,
+      });
+    });
+
+    it('la zona es la del plan: el mismo instante, en Madrid ya venció', () => {
+      // 01:00Z del 11 = 02:00 del 11 en Madrid.
+      const out = at(
+        '2026-11-11T01:00:00.000Z',
+        dueOn10({ timeZone: 'Europe/Madrid' }),
+      );
+      expect(out.installments[0].status).toBe('OVERDUE');
+    });
+  });
+
   it('DX-414: cada línea de un cobro dividido lleva el recibo único; un abono sin recibo, null', () => {
     const out = computeAccountStatement(
       snapshot({
@@ -816,6 +869,7 @@ describe('computeAccountStatement con el saldo de cada plan (DX-472)', () => {
     status: 'ACTIVE',
     downPayment: 0,
     startDate: new Date('2026-01-15T00:00:00.000Z'),
+    timeZone: 'America/Caracas',
     installments: [
       {
         sequence: 1,

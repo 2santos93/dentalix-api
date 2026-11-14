@@ -3,10 +3,7 @@ import { Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { PAYMENT_CLOCK } from '../src/modules/payments/application/use-cases/void-payment.use-case';
-import {
-  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
-  PAID_AT_IN_FUTURE_MESSAGE,
-} from '../src/modules/payments/domain/paid-at-window';
+import { PAID_AT_AFTER_SITE_TODAY_MESSAGE } from '../src/modules/payments/domain/paid-at-window';
 import { DONE_ITEM_PRICE_LOCKED_MESSAGE } from '../src/modules/treatment-plans/domain/plan-status-machine';
 import {
   type Clinic,
@@ -141,7 +138,10 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
     expect((balance.body as { billable: number }).billable).toBe(100);
   });
 
-  it('un abono con instante a más de 24 h en el futuro → 400 en español y no se registra', async () => {
+  // DX-110: la sede tiene zona (Caracas), así que un instante que cae otro día
+  // en la sede da antes el mensaje de la sede; la regla de 24 h (DX-054) solo
+  // decide en una sede sin zona.
+  it('un abono con instante en un día posterior a hoy en la sede (aunque sea a más de 24 h) → 400 en español y no se registra', async () => {
     for (const paidAt of [
       '2026-11-03T12:00:00.000Z',
       '2026-11-01T15:00:01.000Z',
@@ -152,7 +152,7 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
         .send({ amount: 10, currency: 'USD', paidAt, method: 'CASH' })
         .expect(400);
       expect((res.body as { message: string }).message).toBe(
-        PAID_AT_IN_FUTURE_MESSAGE,
+        PAID_AT_AFTER_SITE_TODAY_MESSAGE,
       );
     }
     const balance = await as(

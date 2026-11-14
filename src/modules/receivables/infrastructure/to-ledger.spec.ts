@@ -1,19 +1,25 @@
 import { toLedger } from './prisma-receivables.repository';
 
+/** DX-110: zona de la sede de cada plan de tratamiento. */
+const CARACAS_ZONE = (): string => 'America/Caracas';
+
 describe('toLedger (DX-155, DX-262)', () => {
   it('lee los saldos migrados del resumen; una fila anterior sin «openings» no trae ninguno', () => {
-    const withOpenings = toLedger({
-      patientId: 'p-1',
-      locationId: 'loc-1',
-      ledger: JSON.stringify({
-        plans: [],
-        paymentPlans: [],
-        openings: [
-          ['ob-1', 'VES', 150000.5, '2026-03-15', false, 50000],
-          ['ob-2', 'USD', 40, '2026-10-23', true, 0],
-        ],
-      }),
-    });
+    const withOpenings = toLedger(
+      {
+        patientId: 'p-1',
+        locationId: 'loc-1',
+        ledger: JSON.stringify({
+          plans: [],
+          paymentPlans: [],
+          openings: [
+            ['ob-1', 'VES', 150000.5, '2026-03-15', false, 50000],
+            ['ob-2', 'USD', 40, '2026-10-23', true, 0],
+          ],
+        }),
+      },
+      CARACAS_ZONE,
+    );
     expect(withOpenings.openings).toEqual([
       {
         id: 'ob-1',
@@ -39,11 +45,14 @@ describe('toLedger (DX-155, DX-262)', () => {
         amount: 50000,
       },
     ]);
-    const legacy = toLedger({
-      patientId: 'p-1',
-      locationId: null,
-      ledger: JSON.stringify({ plans: [], paymentPlans: [] }),
-    });
+    const legacy = toLedger(
+      {
+        patientId: 'p-1',
+        locationId: null,
+        ledger: JSON.stringify({ plans: [], paymentPlans: [] }),
+      },
+      CARACAS_ZONE,
+    );
     expect(legacy.openings).toEqual([]);
   });
 
@@ -59,44 +68,47 @@ describe('toLedger (DX-155, DX-262)', () => {
       [['VES', 7200]],
       ...extra,
     ];
-    const row = toLedger({
-      patientId: 'p-1',
-      locationId: 'loc-1',
-      ledger: JSON.stringify({
-        plans: [
-          plan([
-            100,
-            [
+    const row = toLedger(
+      {
+        patientId: 'p-1',
+        locationId: 'loc-1',
+        ledger: JSON.stringify({
+          plans: [
+            plan([
+              100,
               [
-                'pay-frozen',
-                'VES',
-                1800,
-                Date.parse('2026-10-14T16:00:00.000Z'),
-                'loc-2',
-                'USD',
-                36,
-                1,
-                'MANUAL',
-                '2026-10-14',
+                [
+                  'pay-frozen',
+                  'VES',
+                  1800,
+                  Date.parse('2026-10-14T16:00:00.000Z'),
+                  'loc-2',
+                  'USD',
+                  36,
+                  1,
+                  'MANUAL',
+                  '2026-10-14',
+                ],
+                [
+                  'pay-legacy',
+                  'VES',
+                  1800,
+                  Date.parse('2026-10-15T16:00:00.000Z'),
+                  'loc-2',
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                ],
               ],
-              [
-                'pay-legacy',
-                'VES',
-                1800,
-                Date.parse('2026-10-15T16:00:00.000Z'),
-                'loc-2',
-                null,
-                null,
-                null,
-                null,
-                null,
-              ],
-            ],
-          ]),
-        ],
-        paymentPlans: [],
-      }),
-    });
+            ]),
+          ],
+          paymentPlans: [],
+        }),
+      },
+      CARACAS_ZONE,
+    );
     expect(row.plans[0].otherCurrency).toEqual({
       based: 100,
       pending: [
@@ -132,11 +144,14 @@ describe('toLedger (DX-155, DX-262)', () => {
       { treatmentPlanId: 'tp-1', currency: 'VES', amount: 7200 },
     ]);
 
-    const before = toLedger({
-      patientId: 'p-1',
-      locationId: 'loc-1',
-      ledger: JSON.stringify({ plans: [plan([])], paymentPlans: [] }),
-    });
+    const before = toLedger(
+      {
+        patientId: 'p-1',
+        locationId: 'loc-1',
+        ledger: JSON.stringify({ plans: [plan([])], paymentPlans: [] }),
+      },
+      CARACAS_ZONE,
+    );
     expect(before.plans[0].otherCurrency).toBeUndefined();
   });
 });

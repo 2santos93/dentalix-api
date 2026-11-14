@@ -101,6 +101,11 @@ export interface StatementPaymentPlanRow {
   downPayment: number;
   startDate: Date;
   installments: { sequence: number; dueDate: Date; amount: number }[];
+  /**
+   * DX-110: zona IANA de la sede del plan (`paymentPlanLocationId`, o la
+   * principal): su día civil de hoy decide qué cuota está vencida.
+   */
+  timeZone: string;
 }
 
 /**

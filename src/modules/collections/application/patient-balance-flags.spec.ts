@@ -49,6 +49,7 @@ function legacyLedger(): PatientLedger {
         currency: 'USD',
         status: 'ACTIVE',
         downPayment: 0,
+        timeZone: 'America/Caracas',
         startDate: new Date('2026-08-03T00:00:00.000Z'),
         installments: [
           {

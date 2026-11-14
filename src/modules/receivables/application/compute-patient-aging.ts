@@ -6,6 +6,10 @@ import {
 import { roundToDigits } from '../../../shared/money/line-rounding';
 import { civilDateResolver } from '../../../shared/time/civil-day';
 import {
+  dueDayOf,
+  isDueDayPast,
+} from '../../payment-plans/domain/installment-due';
+import {
   addToBuckets,
   ageInDays,
   bucketOf,
@@ -104,7 +108,10 @@ interface CurrencyAcc {
  * - Saldo migrado (DX-262): una línea por saldo, desde su fecha de corte
  *   (aproximada si el archivo no la traía y se usó la de la importación).
  * - «Hoy» y el día de `agingFrom` son días civiles de la zona de la sede (DX-097).
- *   El vencimiento de una cuota es su día UTC, como en deriveStatuses.
+ *   El vencimiento de una cuota es su día UTC, como en deriveStatuses, y si
+ *   venció y cuántos días tiene se cuenta con el «hoy» de la sede de SU plan
+ *   (DX-110, `timeZone` del plan de pagos), la misma regla que el estado de
+ *   cuenta y `GET /payment-plan`.
  */
 export function computePatientAging(
   ledger: PatientLedger,
@@ -124,6 +131,13 @@ export function computePatientAging(
   const dayOf = civilDayIn(options.timeZone);
   const today = dayOf(options.now);
   const agingFromOf = new Map(ledger.plans.map((p) => [p.id, p.agingFrom]));
+  // DX-110: el «hoy» de cada plan de pagos, en la zona de la sede de su plan.
+  const planTodayOf = new Map(
+    ledger.paymentPlans.map((pp) => [
+      pp.id,
+      civilDayIn(pp.timeZone)(options.now),
+    ]),
+  );
 
   const byCurrency = new Map<string, CurrencyAcc>();
   const acc = (currency: string): CurrencyAcc => {
@@ -182,11 +196,11 @@ export function computePatientAging(
     for (const inst of dues) {
       const cents = Math.min(toCents(inst.outstanding), remaining);
       if (cents <= 0) continue;
-      const dueDay = inst.dueDate.toISOString().slice(0, 10);
+      const planToday = planTodayOf.get(inst.paymentPlanId) ?? today;
       target.lines.push({
         cents,
-        ageDays: ageInDays(dueDay, today),
-        due: mayBeDue && dueDay < today,
+        ageDays: ageInDays(dueDayOf(inst.dueDate), planToday),
+        due: mayBeDue && isDueDayPast(inst.dueDate, planToday),
         approximate: false,
       });
       remaining -= cents;

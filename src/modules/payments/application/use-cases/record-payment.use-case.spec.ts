@@ -166,8 +166,11 @@ describe('RecordPaymentUseCase', () => {
   }
 
   describe('DX-054: fecha del abono en el futuro', () => {
+    // DX-110: con zona en la sede, un instante de otro día ya cae antes en la
+    // regla del día civil; la de 24 h queda para la sede sin zona.
     it('un instante a más de 24 h por delante del reloj → 400 en español, sin leer el plan ni registrar', async () => {
       const { repo, fakeGetPlan, uc } = makeUseCase();
+      repo.siteHasZone = false;
       fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
       for (const paidAt of [
         '2026-11-01T14:00:00.001Z',
@@ -180,8 +183,24 @@ describe('RecordPaymentUseCase', () => {
       expect(repo.lastCreateInput).toBeNull();
     });
 
-    it('un instante hasta 24 h por delante (reloj desfasado) se registra', async () => {
+    it('con zona en la sede, el mismo instante de otro día da el mensaje de la sede (DX-110)', async () => {
       const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await expect(
+        uc.execute('plan-1', {
+          amount: 10,
+          currency: 'USD',
+          paidAt: '2026-11-03T12:00:00Z',
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+      );
+      expect(repo.lastCreateInput).toBeNull();
+    });
+
+    it('un instante hasta 24 h por delante (reloj desfasado, sede sin zona) se registra', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      repo.siteHasZone = false;
       fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
       await uc.execute('plan-1', {
         amount: 10,
@@ -227,6 +246,38 @@ describe('RecordPaymentUseCase', () => {
         amount: 10,
         currency: 'USD',
         paidAt: '2026-11-04',
+      });
+      expect(repo.lastCreateInput).not.toBeNull();
+    });
+  });
+
+  describe('DX-110: un instante también se mide por su día civil en la sede', () => {
+    // 21:00 del 4 en Caracas (UTC-4, zona del fake) = 01:00Z del 5.
+    const caracasAt2100 = () =>
+      makeUseCase(new Date('2026-11-05T01:00:00.000Z'));
+
+    it('paidAt de mañana en Caracas (10:00 del 5, dentro de 24 h) → 400 y no se registra', async () => {
+      const { repo, fakeGetPlan, uc } = caracasAt2100();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await expect(
+        uc.execute('plan-1', {
+          amount: 10,
+          currency: 'USD',
+          paidAt: '2026-11-05T14:00:00.000Z',
+        }),
+      ).rejects.toThrow(
+        new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+      );
+      expect(repo.lastCreateInput).toBeNull();
+    });
+
+    it('paidAt de hoy a las 23:00 en Caracas se registra aunque en UTC ya sea mañana', async () => {
+      const { repo, fakeGetPlan, uc } = caracasAt2100();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await uc.execute('plan-1', {
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-11-05T03:00:00.000Z',
       });
       expect(repo.lastCreateInput).not.toBeNull();
     });
