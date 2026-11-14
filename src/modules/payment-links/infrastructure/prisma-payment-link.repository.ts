@@ -409,18 +409,42 @@ export class PrismaPaymentLinkRepository implements PaymentLinkRepository {
     });
   }
 
-  clinicCurrencies(): Promise<string[]> {
-    return this.prisma.runWithTenant(async (tx) => {
-      const rows = await tx.location.findMany({
-        where: { deletedAt: null, currency: { not: null } },
-        select: { currency: true },
-        distinct: ['currency'],
-      });
-      return rows
-        .map((r) => r.currency)
-        .filter((c): c is string => c !== null)
-        .sort();
+  /**
+   * Las monedas que cobra la clínica: las de sus sedes vivas, las que tienen
+   * texto propio (DX-517, p. ej. «Bs.») y las que tienen alguna tasa manual
+   * registrada (DX-374). Tablas pequeñas; nunca se recorren los abonos.
+   */
+  async clinicCurrencies(): Promise<string[]> {
+    // `tenants` no tiene RLS: se lee por el id del contexto.
+    const tenant = await this.prisma.tenant.findFirst({
+      where: { id: this.tenantId() },
+      select: { currencyTexts: true },
     });
+    const texts = tenant?.currencyTexts;
+    const textCodes =
+      texts && typeof texts === 'object' && !Array.isArray(texts)
+        ? Object.keys(texts).filter((c) => /^[A-Z]{3}$/.test(c))
+        : [];
+    const [locations, manual] = await this.prisma.runWithTenant((tx) =>
+      Promise.all([
+        tx.location.findMany({
+          where: { deletedAt: null, currency: { not: null } },
+          select: { currency: true },
+          distinct: ['currency'],
+        }),
+        tx.manualExchangeRate.findMany({
+          select: { currency: true },
+          distinct: ['currency'],
+        }),
+      ]),
+    );
+    return [
+      ...new Set([
+        ...locations.flatMap((r) => (r.currency ? [r.currency] : [])),
+        ...manual.map((r) => r.currency),
+        ...textCodes,
+      ]),
+    ].sort();
   }
 
   async markOpened(linkId: string, now: Date): Promise<void> {

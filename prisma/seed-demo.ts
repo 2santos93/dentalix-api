@@ -109,6 +109,9 @@ import {
 import { PlanAllocationRebalancer } from '../src/modules/payments/application/plan-allocation-rebalancer';
 import { GetPaymentAllocationsUseCase } from '../src/modules/payments/application/use-cases/get-payment-allocations.use-case';
 import { RecordPaymentUseCase } from '../src/modules/payments/application/use-cases/record-payment.use-case';
+import { SavePaymentMethodInstructionsUseCase } from '../src/modules/payment-methods/application/payment-method-instructions.use-cases';
+import { CreatePaymentLinkUseCase } from '../src/modules/payment-links/application/use-cases/patient-payment-links.use-cases';
+import { SubmitPaymentReportUseCase } from '../src/modules/payment-links/application/use-cases/public-payment-links.use-cases';
 import {
   CreatePaymentMethodUseCase,
   ListPaymentMethodsUseCase,
@@ -240,6 +243,8 @@ import {
   DEMO_EXPENSES,
   DEMO_EQUIPMENT,
   DEMO_PAYMENT_PROMISE,
+  DEMO_PAYMENT_INSTRUCTIONS,
+  DEMO_PAYMENT_REPORT,
   DEMO_PLAN_OPTIONS,
   DEMO_CANCELLATION,
   DEMO_MEDICAL_ALERTS,
@@ -697,6 +702,8 @@ class DemoSeeder {
   ): Promise<string> {
     if (this.mobileMethodId) return this.mobileMethodId;
     // DX-389: «Pago móvil» y «Transferencia» admiten el comprobante (OPTIONAL).
+    // DX-569: los dos se ofrecen en el enlace de pago, con datos para pagar
+    // de toda la clínica (inventados; ningún banco ni cuenta reales).
     const created = await this.inTenant(tenantId, undefined, async () => {
       const method = await this.use(CreatePaymentMethodUseCase).execute(
         {
@@ -704,6 +711,7 @@ class DemoSeeder {
           kind: 'DIGITAL',
           requiresReference: true,
           proofPolicy: 'OPTIONAL',
+          allowInPaymentLink: true,
         },
         ownerId,
       );
@@ -713,8 +721,18 @@ class DemoSeeder {
       if (transfer) {
         await this.use(UpdatePaymentMethodUseCase).execute(
           transfer.id,
-          { proofPolicy: 'OPTIONAL' },
+          { proofPolicy: 'OPTIONAL', allowInPaymentLink: true },
           ownerId,
+        );
+      }
+      const save = this.use(SavePaymentMethodInstructionsUseCase);
+      const audit = this.auditAs(ownerId, ClinicRole.ADMIN);
+      await save.execute(method.id, DEMO_PAYMENT_INSTRUCTIONS.mobile, audit);
+      if (transfer) {
+        await save.execute(
+          transfer.id,
+          DEMO_PAYMENT_INSTRUCTIONS.transfer,
+          audit,
         );
       }
       return method;
@@ -959,6 +977,9 @@ class DemoSeeder {
     );
 
     await this.createCollections(tenantId, locations, patientIds, receptionId);
+
+    // DX-569: un pago reportado por enlace, pendiente de confirmar en Caja.
+    await this.createPaymentReport(tenantId, locations, ownerId, receptionId);
 
     await this.createCashSessions(tenantId, locations, receptionId);
 
@@ -3791,6 +3812,61 @@ class DemoSeeder {
           ),
         },
         receptionId,
+      ),
+    );
+  }
+
+  /**
+   * DX-569: «Enviar enlace de pago» (sin canal: solo la URL) para el primer
+   * plan cobrable de la sede principal y el reporte del paciente por Pago
+   * móvil en bolívares, hoy, con referencia y sin comprobante (el seed no
+   * sube ficheros al almacén). Queda PENDIENTE en «Pagos por confirmar».
+   */
+  private async createPaymentReport(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    ownerId: string,
+    receptionId: string,
+  ): Promise<void> {
+    const mobileId = await this.mobilePaymentMethod(tenantId, ownerId);
+    const plan = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.treatmentPlan.findFirst({
+        where: {
+          deletedAt: null,
+          status: TreatmentPlanStatus.ACCEPTED,
+          currency: 'USD',
+          OR: [
+            { acceptedLocationId: locations.principal },
+            { presentedLocationId: locations.principal },
+          ],
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, patientId: true },
+      }),
+    );
+    if (!plan) return;
+    const usd = DEMO_PAYMENT_REPORT.amountUsd;
+    const created = await this.inTenant(tenantId, locations.principal, () =>
+      this.use(CreatePaymentLinkUseCase).execute(
+        plan.patientId,
+        { target: { treatmentPlanId: plan.id }, amount: usd, channel: null },
+        receptionId,
+        { protocol: 'http', host: `${DEMO_SUBDOMAIN}.localhost:3001` },
+      ),
+    );
+    const token = created.url.split('/').pop() ?? '';
+    await this.inTenant(tenantId, locations.principal, () =>
+      this.use(SubmitPaymentReportUseCase).execute(
+        token,
+        {
+          paymentMethodId: mobileId,
+          currency: 'VES',
+          amount: demoAmountIn('VES', usd, 0),
+          reference: DEMO_PAYMENT_REPORT.reference,
+          paidOn: civilDateIn(this.now, DEMO_LOCATIONS.principal.timeZone),
+          note: DEMO_PAYMENT_REPORT.note,
+        },
+        { requestId: null, ip: null, userAgent: null },
       ),
     );
   }
