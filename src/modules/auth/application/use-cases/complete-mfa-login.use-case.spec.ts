@@ -26,6 +26,8 @@ const request = { requestId: 'req-1', ip: '10.0.0.1', userAgent: 'jest' };
 
 const config = {
   getOrThrow: () => 'jwt-access-secret-de-prueba',
+  // DX-045: sin JWT_ISSUER/JWT_AUDIENCE → defaults de desarrollo.
+  get: () => undefined,
 } as unknown as ConfigService;
 
 function member(role: ClinicRole): SessionState {
