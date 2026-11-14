@@ -3061,6 +3061,88 @@ class DemoSeeder {
   }
 
   /**
+   * DX-495 (D19): la única cita del paciente de «Sin recall configurado»
+   * (`DEMO_RECALL.unconfigured`), atendida hace ~45 días en la principal: el
+   * día abierto no festivo más reciente desde ahí, a su hora o la siguiente
+   * media hora dentro del horario si la dentista ya tiene otra cita (la
+   * historia de «Comparar sedes» o las inasistencias caen en esas semanas).
+   * Sin plan ni cobro: la visita basta para la lista, que mira la última cita
+   * COMPLETED de los 24 meses.
+   */
+  private async createUnconfiguredRecallVisit(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    hours: Record<DemoLocationKey, BusinessHours | null>,
+    patientId: string,
+    dentistId: string,
+    receptionId: string,
+  ): Promise<void> {
+    const spec = DEMO_RECALL.unconfigured;
+    const zone = DEMO_LOCATIONS.principal.timeZone;
+    const daysAgo = workdayDaysAgo(
+      this.now,
+      'principal',
+      spec.daysAgo,
+      hours.principal?.ranges ?? [],
+    );
+    await this.inTenant(tenantId, locations.principal, async () => {
+      const appointment = await this.registerUnconfiguredVisit(
+        spec,
+        daysAgo,
+        zone,
+        hours.principal,
+        patientId,
+        dentistId,
+        receptionId,
+      );
+      await this.use(UpdateAppointmentUseCase).execute(appointment.id, {
+        status: AppointmentStatus.COMPLETED,
+      });
+    });
+  }
+
+  /** La cita de `createUnconfiguredRecallVisit` en el primer hueco libre. */
+  private async registerUnconfiguredVisit(
+    spec: typeof DEMO_RECALL.unconfigured,
+    daysAgo: number,
+    zone: string,
+    hours: BusinessHours | null,
+    patientId: string,
+    dentistId: string,
+    receptionId: string,
+  ): Promise<{ id: string }> {
+    for (
+      let minute = spec.startMinute;
+      minute + spec.durationMinutes <= 24 * 60;
+      minute += 30
+    ) {
+      const start = daysAgoAt(this.now, daysAgo, minute, zone);
+      const end = daysAgoAt(
+        this.now,
+        daysAgo,
+        minute + spec.durationMinutes,
+        zone,
+      );
+      if (!fitsBusinessHours(start, end, hours)) continue;
+      try {
+        return await this.use(CreateAppointmentUseCase).registerHistorical({
+          patientId,
+          providerId: dentistId,
+          start,
+          end,
+          reason: spec.reason,
+          createdById: receptionId,
+        });
+      } catch (error) {
+        if (!(error instanceof ConflictException)) throw error;
+      }
+    }
+    throw new Error(
+      `Sin hueco para la visita de «Sin recall configurado» hace ${daysAgo} días`,
+    );
+  }
+
+  /**
    * DX-015-bis: la lista de recall de la demo (`DEMO_RECALL`). Los realizados
    * de la demo ya crearon sus recalls al marcarse (el procedimiento mueve el
    * reloj), pero con la fecha de HOY: `datePlanItemDone` y la historia los
@@ -3069,8 +3151,9 @@ class DemoSeeder {
    * DONE y el relleno). Los pacientes se eligen entre los que no tienen
    * recall: los dos primeros ejemplos, sin cita futura (salen en la lista; el
    * de la profilaxis, de la rotación, para que su plan vaya en USD) y el
-   * tercero, de la rotación con cita (no sale). D19: otro libre con una cita
-   * atendida se reserva y no recibe recall («Sin recall configurado»).
+   * tercero, de la rotación con cita (no sale). D19: el paciente propio de
+   * `DEMO_RECALL.unconfigured`, fuera de la rotación, recibe aquí su única
+   * cita (atendida hace ~45 días) y ningún recall («Sin recall configurado»).
    */
   private async createRecallExamples(
     tenantId: string,
@@ -3083,97 +3166,83 @@ class DemoSeeder {
     receptionId: string,
     catalog: Map<string, string>,
   ): Promise<void> {
-    const { busy, withRecall, attended } = await this.inTenant(
+    // D19 (DX-495): un paciente propio, no uno libre de la rotación, que según
+    // la fecha de la siembra puede no quedar ninguno.
+    const unconfiguredPatient =
+      allPatientIds[DEMO_RECALL.unconfigured.patientIndex];
+    await this.createUnconfiguredRecallVisit(
       tenantId,
-      undefined,
-      () =>
-        this.prisma.runWithTenant(async (tx) => ({
-          busy: await tx.appointment.findMany({
-            where: {
-              patientId: { in: allPatientIds },
-              deletedAt: null,
-              OR: [
-                {
-                  status: {
-                    in: [
-                      AppointmentStatus.SCHEDULED,
-                      AppointmentStatus.CONFIRMED,
-                    ],
-                  },
-                  start: { gt: this.now },
+      locations,
+      hours,
+      unconfiguredPatient,
+      dentistId,
+      receptionId,
+    );
+    const { busy, withRecall } = await this.inTenant(tenantId, undefined, () =>
+      this.prisma.runWithTenant(async (tx) => ({
+        busy: await tx.appointment.findMany({
+          where: {
+            patientId: { in: allPatientIds },
+            deletedAt: null,
+            OR: [
+              {
+                status: {
+                  in: [
+                    AppointmentStatus.SCHEDULED,
+                    AppointmentStatus.CONFIRMED,
+                  ],
                 },
-                {
-                  status: {
-                    in: [
-                      AppointmentStatus.ARRIVED,
-                      AppointmentStatus.IN_CHAIR,
-                      AppointmentStatus.READY_FOR_CHECKOUT,
-                    ],
-                  },
+                start: { gt: this.now },
+              },
+              {
+                status: {
+                  in: [
+                    AppointmentStatus.ARRIVED,
+                    AppointmentStatus.IN_CHAIR,
+                    AppointmentStatus.READY_FOR_CHECKOUT,
+                  ],
                 },
-              ],
-            },
-            select: { patientId: true },
-          }),
-          withRecall: await tx.patientRecall.findMany({
-            where: { patientId: { in: allPatientIds } },
-            select: { patientId: true },
-          }),
-          // DX-015-bis (D19): quién tiene una cita atendida reciente.
-          attended: await tx.appointment.findMany({
-            where: {
-              patientId: { in: allPatientIds },
-              deletedAt: null,
-              status: AppointmentStatus.COMPLETED,
-              start: { lte: this.now },
-            },
-            select: { patientId: true },
-          }),
-        })),
+              },
+            ],
+          },
+          select: { patientId: true },
+        }),
+        withRecall: await tx.patientRecall.findMany({
+          where: { patientId: { in: allPatientIds } },
+          select: { patientId: true },
+        }),
+      })),
     );
     const scheduled = new Set(busy.map((a) => a.patientId));
     const taken = new Set(withRecall.map((r) => r.patientId));
-    const seen = new Set(attended.map((a) => a.patientId));
-    const isFree = (id: string) => !scheduled.has(id) && !taken.has(id);
-    // La profilaxis va en un plan en USD: un paciente de la rotación.
-    // D19: después, uno libre con una cita atendida reciente se queda SIN
-    // recall, para que «Sin recall configurado» no salga vacía (la demo es de
-    // las últimas semanas: su visita cae en los 24 meses). El Control fijado,
-    // otro libre si lo hay; la demo agenda a casi todos, así que puede ser el
-    // mismo paciente que la profilaxis: un recall por tipo, dos filas.
+    // El de D19 nunca recibe recall: fuera de los candidatos.
+    const isFree = (id: string) =>
+      id !== unconfiguredPatient && !scheduled.has(id) && !taken.has(id);
+    // La profilaxis va en un plan en USD: un paciente de la rotación. El
+    // Control fijado, otro libre si lo hay; la demo agenda a casi todos, así
+    // que puede ser el mismo paciente que la profilaxis: un recall por tipo,
+    // dos filas.
     const prophylaxisPatient = localPatientIds.find(isFree);
-    const unconfiguredPatient = allPatientIds.find(
-      (id) => id !== prophylaxisPatient && isFree(id) && seen.has(id),
-    );
     const checkupPatient =
-      allPatientIds.find(
-        (id) =>
-          id !== prophylaxisPatient && id !== unconfiguredPatient && isFree(id),
-      ) ?? prophylaxisPatient;
+      allPatientIds.find((id) => id !== prophylaxisPatient && isFree(id)) ??
+      prophylaxisPatient;
     const booked = localPatientIds.find(
       (id) => scheduled.has(id) && !taken.has(id),
     );
-    if (
-      !prophylaxisPatient ||
-      !checkupPatient ||
-      !booked ||
-      !unconfiguredPatient
-    ) {
+    if (!prophylaxisPatient || !checkupPatient || !booked) {
       // Qué ejemplo se queda sin paciente y con qué números: el job de
       // fronteras de calendario (DX-495) solo da esta línea para saberlo.
       const missing = Object.entries({
         prophylaxisPatient,
         checkupPatient,
         booked,
-        unconfiguredPatient,
       })
         .filter(([, id]) => !id)
         .map(([name]) => name);
       throw new Error(
         `La demo no tiene pacientes libres para los ejemplos de recall (falta: ${missing.join(', ')}; ` +
           `pacientes ${allPatientIds.length}, con cita futura o en curso ${scheduled.size}, ` +
-          `con recall ${taken.size}, atendidos ${seen.size}, libres ${allPatientIds.filter(isFree).length}, ` +
-          `libres y atendidos ${allPatientIds.filter((id) => isFree(id) && seen.has(id)).length}; ahora ${this.now.toISOString()})`,
+          `con recall ${taken.size}, libres ${allPatientIds.filter(isFree).length}; ahora ${this.now.toISOString()})`,
       );
     }
     const zone = DEMO_LOCATIONS.principal.timeZone;

@@ -406,6 +406,11 @@ interface DemoPatient {
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
   medicalHistory?: MedicalHistoryVersionData;
+  /**
+   * DX-495: fuera de la rotación de citas (`localPatientIndexes`) aunque su
+   * sede sea de la rotación: sus citas las siembra a mano su ejemplo.
+   */
+  outsideRotation?: true;
 }
 
 const healthy: MedicalHistoryVersionData = {
@@ -1037,12 +1042,34 @@ export const DEMO_PATIENTS: readonly DemoPatient[] = [
     email: 'harry.walsh@example.com',
     address: '88 Birch Avenue',
   },
+  // DX-495 (33): el ejemplo de «Sin recall configurado» (D19), al final para no
+  // mover los índices. Fuera de la rotación: una sola cita atendida hace ~45
+  // días, sin cita futura ni recall, sea cual sea la fecha de la siembra.
+  {
+    firstName: 'Rosángela',
+    lastName: 'Briceño Urdaneta',
+    docType: 'NATIONAL_ID',
+    docNumber: 'DEMO-0025',
+    birthDate: '1979-06-08',
+    sex: Sex.F,
+    location: 'principal',
+    outsideRotation: true,
+    phone: '+58 414 555 0126',
+    email: 'rosangela.briceno@example.com',
+    address: 'Av. Francisco de Miranda 210, Chacao, Caracas',
+    occupation: 'Contadora',
+  },
 ];
 
-/** Índices de los pacientes de las sedes de la rotación (R3). */
+/**
+ * Índices de los pacientes de las sedes de la rotación (R3), sin los que
+ * quedan fuera de ella (`outsideRotation`).
+ */
 export function localPatientIndexes(): number[] {
   return DEMO_PATIENTS.flatMap((p, i) =>
-    p.location === 'principal' || p.location === 'norte' ? [i] : [],
+    (p.location === 'principal' || p.location === 'norte') && !p.outsideRotation
+      ? [i]
+      : [],
   );
 }
 
@@ -3440,8 +3467,9 @@ export const DEMO_COMPARISON_HISTORY = {
  *    sale vencido;
  *  - un Control (12 meses) fijado a mano hace 13 meses, con un «No contesta»;
  *  - una Higiene vencida de alguien que ya tiene cita: no sale en la lista.
- * Y (porción 3, D19) un paciente libre con una cita atendida reciente se queda
- * SIN recall, para que «Sin recall configurado» tampoco salga vacía.
+ * Y (porción 3, D19) un paciente propio, fuera de la rotación (DX-495), con
+ * una cita atendida hace ~45 días en la principal y SIN recall ni cita futura,
+ * para que «Sin recall configurado» tampoco salga vacía (`unconfigured`).
  */
 export const DEMO_RECALL = {
   prophylaxisDaysAgo: 213,
@@ -3449,6 +3477,15 @@ export const DEMO_RECALL = {
   scheduledHygieneMonthsAgo: 8,
   planNotes: 'Profilaxis de cortesía (paciente frecuente).',
   contactNote: 'Sin respuesta; volver a llamar el jueves',
+  unconfigured: {
+    /** En `DEMO_PATIENTS`; lo atiende la dentista de los ejemplos (`dentists[0]`). */
+    patientIndex: 33,
+    daysAgo: 45,
+    /** Minutos de pared en la principal; si está ocupado, la media hora siguiente. */
+    startMinute: 9 * 60,
+    durationMinutes: 30,
+    reason: 'Valoración y limpieza',
+  },
 } as const;
 
 /**
