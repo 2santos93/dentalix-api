@@ -71,4 +71,12 @@ describe('voidDenial / canVoidPayment (regla de anulación, DX-057)', () => {
       ),
     ).toBe(true);
   });
+
+  it('DX-090: ASSISTANT y DENTIST no anulan nunca, ni un abono suyo de hoy (PAYMENT_REGISTER no anula)', () => {
+    for (const role of [ClinicRole.ASSISTANT, ClinicRole.DENTIST]) {
+      const actor = { userId: 'u-recep', role };
+      expect(voidDenial(ownToday, actor, NOW)).toBe('NO_VOID_ROLE');
+      expect(canVoidPayment(ownToday, actor, NOW)).toBe(false);
+    }
+  });
 });

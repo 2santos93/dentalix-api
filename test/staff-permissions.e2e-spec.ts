@@ -233,6 +233,16 @@ describe('Permisos extra por miembro (DX-090)', () => {
     await api(a, asistenteToken, 'put', `/payments/${paid}/allocations`)
       .send({ allocations: [] })
       .expect(403);
+    // La caja nunca le ofrece «Anular», ni en sus propios abonos de hoy.
+    const caja = await api(
+      a,
+      asistenteToken,
+      'get',
+      `/payments?from=${today()}&to=${today()}`,
+    ).expect(200);
+    const items = (caja.body as { items: { canVoid: boolean }[] }).items;
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((i) => !i.canVoid)).toBe(true);
     const row = await raw.payment.findUniqueOrThrow({
       where: { id: paid },
       select: { voidedAt: true },
