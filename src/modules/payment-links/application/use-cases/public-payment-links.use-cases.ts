@@ -483,6 +483,9 @@ export class SubmitPaymentReportUseCase {
     });
     if (outcome.kind === 'USED') throw linkUsed();
     if (outcome.kind === 'GONE') throw notFound();
+    if (outcome.kind === 'PROOF_CHANGED') {
+      throw new BadRequestException(REPORT_PROOF_UNKNOWN_MESSAGE);
+    }
     return { status: 'REPORTED', message: PAYMENT_LINK_USED_MESSAGE };
   }
 }

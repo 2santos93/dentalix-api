@@ -518,12 +518,17 @@ export class PrismaPaymentLinkRepository implements PaymentLinkRepository {
         // Uso único (D5): el UPDATE condicional decide entre dos reportes a la
         // vez; el segundo espera al COMMIT del primero, relee la fila y no la
         // cuenta. Paciente vivo (DX-461) y enlace sin anular ni caducar.
+        // El comprobante tiene que seguir siendo el preparado: otra subida
+        // completada a la vez lo habría sustituido (y borrado su copia).
         const { count } = await tx.paymentLink.updateMany({
           where: {
             id: input.linkId,
             usedAt: null,
             revokedAt: null,
             expiresAt: { gt: input.now },
+            ...(input.proof
+              ? { stagedProofUploadId: input.proof.uploadId }
+              : {}),
           },
           data: { usedAt: input.now },
         });
@@ -533,11 +538,20 @@ export class PrismaPaymentLinkRepository implements PaymentLinkRepository {
             patientId: true,
             locationId: true,
             usedAt: true,
+            revokedAt: true,
+            expiresAt: true,
           },
         });
         if (!link) return { kind: 'GONE' };
-        if (count === 0)
-          return link.usedAt ? { kind: 'USED' } : { kind: 'GONE' };
+        if (count === 0) {
+          if (link.usedAt) return { kind: 'USED' };
+          const live =
+            link.revokedAt === null &&
+            link.expiresAt.getTime() > input.now.getTime();
+          return live && input.proof
+            ? { kind: 'PROOF_CHANGED' }
+            : { kind: 'GONE' };
+        }
         const patient = await tx.patient.findFirst({
           where: { id: link.patientId, deletedAt: null },
           select: { id: true },

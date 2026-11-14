@@ -3251,7 +3251,7 @@ export const DEMO_COLLECTION_NOTES: readonly DemoCollectionNote[] = [
 /**
  * DX-569: datos para pagar de los dos medios del enlace de pago, de toda la
  * clínica. INVENTADOS para la demo del piloto (VE): ni el banco, ni la
- * cuenta, ni el RIF, ni el teléfono existen.
+ * cuenta, ni la identificación, ni el teléfono existen.
  */
 export const DEMO_PAYMENT_INSTRUCTIONS = {
   mobile: {

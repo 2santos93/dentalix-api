@@ -4,6 +4,7 @@ import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
+import { sedeTodayFixture } from './support/sede-clock';
 import {
   loginAs,
   registerClinic,
@@ -23,6 +24,7 @@ import {
   PAYMENT_LINK_PLAN_NOT_FOUND_MESSAGE,
   PAYMENT_LINK_TARGET_REQUIRED_MESSAGE,
   PAYMENT_REPORT_NOT_FOUND_MESSAGE,
+  paymentLinkWhatsAppMessage,
 } from '../src/modules/payment-links/domain/payment-link';
 import {
   PAYMENT_INSTRUCTIONS_EMPTY_MESSAGE,
@@ -42,7 +44,10 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const ZONE = 'America/Caracas';
+// DX-449: la sede en una zona lejos de su medianoche, la que decide «hoy»
+// con el reloj real de la API.
+const FIXTURE = sedeTodayFixture();
+const ZONE = FIXTURE.timeZone;
 const today = () => civilDateIn(new Date(), ZONE);
 const hex = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 const FAKE_TOKEN = 'x'.repeat(43);
@@ -104,7 +109,7 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
     (res.body as { message: string }).message;
 
   async function setup(subdomain: string): Promise<Ctx> {
-    const clinic = await registerClinic(app, subdomain);
+    const clinic = await registerClinic(app, subdomain, FIXTURE);
     const tokens = { [ClinicRole.ADMIN]: clinic.adminToken } as Record<
       ClinicRole,
       string
@@ -352,9 +357,14 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
         ),
       );
       expect(instructionEvents.length).toBeGreaterThan(0);
-      expect(JSON.stringify(instructionEvents)).not.toMatch(
-        /0414|0000-1111|Clínica Ejemplo/,
-      );
+      const audited = JSON.stringify(instructionEvents);
+      for (const value of [
+        '0414-555-0100',
+        '0000-1111-22',
+        'Clínica Ejemplo',
+      ]) {
+        expect(audited).not.toContain(value);
+      }
       // Quitar la de la sede: vuelve a regir la de la clínica.
       await as(a, ClinicRole.ADMIN)
         .delete(
@@ -600,9 +610,14 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
         { channel: 'WHATSAPP' },
       );
       expect(link.whatsapp?.phone).toBe('584145550101');
-      expect(link.whatsapp?.text).toContain('Hola Lucía');
-      expect(link.whatsapp?.text).toContain(link.url);
-      expect(link.whatsapp?.text).not.toMatch(/40|USD|Bs/);
+      // Exactamente saludo, clínica y enlace: ningún importe ni moneda.
+      expect(link.whatsapp?.text).toBe(
+        paymentLinkWhatsAppMessage({
+          firstName: 'Lucía',
+          clinicName: 'Clinica dx569-e2e-a',
+          url: link.url,
+        }),
+      );
     });
 
     // ISOLATION_COVERS: POST /patients/:id/payment-links
@@ -1011,7 +1026,14 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
         changedFields: ['amount', 'reference'],
         params: { paymentId: payment.id },
       });
-      expect(JSON.stringify(event.metadata)).not.toMatch(/REF-|9500/);
+      // Solo nombres de campo: ni el importe ni la referencia corregidos.
+      expect(Object.keys(event.metadata as object).sort()).toEqual([
+        'changedFields',
+        'params',
+        'reason',
+        'statusChange',
+      ]);
+      expect(JSON.stringify(event.metadata)).not.toContain('REF-CORREGIDA');
       // Ya confirmado: rechazar es 409.
       const reject = await as(a)
         .post(`/payment-reports/${report.id}/reject`, { reason: 'Tarde' })

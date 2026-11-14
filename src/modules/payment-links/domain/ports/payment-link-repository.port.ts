@@ -150,7 +150,11 @@ export interface SubmitReportInput {
 }
 
 export type SubmitReportOutcome =
-  { kind: 'CREATED'; reportId: string } | { kind: 'USED' } | { kind: 'GONE' };
+  | { kind: 'CREATED'; reportId: string }
+  | { kind: 'USED' }
+  | { kind: 'GONE' }
+  /** Otra subida sustituyó el comprobante preparado mientras tanto. */
+  | { kind: 'PROOF_CHANGED' };
 
 /** Un reporte en la bandeja «Pagos por confirmar». */
 export interface PaymentReportRow {

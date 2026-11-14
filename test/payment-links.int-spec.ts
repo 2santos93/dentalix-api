@@ -3,6 +3,7 @@ import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
+import { sedeTodayFixture } from './support/sede-clock';
 import {
   loginAs,
   registerClinic,
@@ -29,7 +30,10 @@ const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DATABASE_URL } },
 });
 
-const ZONE = 'America/Caracas';
+// DX-449: la sede en una zona lejos de su medianoche, la que decide «hoy»
+// con el reloj real de la API.
+const FIXTURE = sedeTodayFixture();
+const ZONE = FIXTURE.timeZone;
 const today = () => civilDateIn(new Date(), ZONE);
 const yesterday = () => addCivilDays(today(), -1);
 
@@ -84,7 +88,7 @@ describe('enlace de pago y reporte del paciente (DX-569, int)', () => {
   });
 
   async function setup(subdomain: string): Promise<Ctx> {
-    const clinic = await registerClinic(app, subdomain);
+    const clinic = await registerClinic(app, subdomain, FIXTURE);
     const { email } = await seedMember(raw, clinic, ClinicRole.RECEPTION);
     const reception = await loginAs(app, clinic.host, email);
     const location = await raw.location.findFirstOrThrow({
@@ -236,7 +240,11 @@ describe('enlace de pago y reporte del paciente (DX-569, int)', () => {
       reason: 'PAYMENT_REPORT_SUBMITTED',
     });
     // Ni importes ni la referencia en el evento.
-    expect(JSON.stringify(events[0].metadata)).not.toMatch(/REF-|VES|\d+\.\d/);
+    expect(Object.keys(events[0].metadata as object).sort()).toEqual([
+      'origin',
+      'params',
+      'reason',
+    ]);
     // Ya usado: 410 también al abrirlo.
     await pub(a).get(token).expect(410);
   });
