@@ -39,6 +39,11 @@ import {
 } from '../src/modules/medical-history-submissions/domain/anamnesis-token';
 import { ANAMNESIS_LINK_GONE_MESSAGE } from '../src/modules/medical-history-submissions/application/use-cases/public-anamnesis.use-cases';
 import { PATIENT_ARCHIVED_LINKS_REVOKED_REASON } from '../src/modules/patients/domain/live-public-links';
+import {
+  PAYMENT_LINK_NOT_FOUND_MESSAGE,
+  generatePaymentLinkToken,
+  hashPaymentLinkToken,
+} from '../src/modules/payment-links/domain/payment-link';
 import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-461 en HTTP real: archivar a un paciente anula sus enlaces públicos vivos
@@ -77,6 +82,8 @@ interface Links {
   budget: string;
   pdf: string;
   anamnesis: string;
+  /** DX-569: el enlace de pago. */
+  payment: string;
 }
 
 describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)', () => {
@@ -226,7 +233,22 @@ describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)',
         createdById: clinicA.adminUserId,
       },
     });
-    return { offer, offerId, consent, budget, pdf, anamnesis };
+    const payment = generatePaymentLinkToken();
+    await raw.paymentLink.create({
+      data: {
+        tenantId: clinicA.tenantId,
+        patientId,
+        treatmentPlanId: await presentedPlan(patientId),
+        locationId,
+        amount: 40,
+        currency: 'USD',
+        concept: 'BALANCE',
+        tokenHash: hashPaymentLinkToken(payment),
+        expiresAt: new Date(Date.now() + 72 * HOUR),
+        createdById: clinicA.adminUserId,
+      },
+    });
+    return { offer, offerId, consent, budget, pdf, anamnesis, payment };
   }
 
   /** Todas sirven: así el «después» prueba algo. */
@@ -237,6 +259,7 @@ describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)',
     await pub.get(`sign/${l.budget}`).expect(200);
     await pub.get(`signed-consent-copies/${l.pdf}`).expect(200);
     await pub.get(`medical-history/${l.anamnesis}`).expect(200);
+    await pub.get(`payment-links/${l.payment}`).expect(200);
   }
 
   /** Cada ruta pública responde como a un enlace caducado, y nada se crea. */
@@ -281,6 +304,20 @@ describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)',
     expect((form.body as { message: string }).message).toBe(
       ANAMNESIS_LINK_GONE_MESSAGE,
     );
+
+    // DX-569: el enlace de pago, el mismo 404 que uno inventado.
+    for (const res of [
+      await pub.get(`payment-links/${l.payment}`).expect(404),
+      await pub.post(`payment-links/${l.payment}/opened`).expect(404),
+    ]) {
+      expect((res.body as { message: string }).message).toBe(
+        PAYMENT_LINK_NOT_FOUND_MESSAGE,
+      );
+    }
+    const paymentLink = await raw.paymentLink.findUniqueOrThrow({
+      where: { tokenHash: hashPaymentLinkToken(l.payment) },
+    });
+    expect(paymentLink.openedAt).toBeNull();
   }
 
   beforeAll(async () => {
@@ -356,7 +393,8 @@ describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)',
       budgetSignatures: 1,
       signedPdfCopies: 1,
       anamnesis: 1,
-      total: 5,
+      paymentLinks: 1,
+      total: 6,
     });
 
     await as(clinicA).delete(`/patients/${patientId}`).expect(204);
@@ -389,6 +427,7 @@ describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)',
           budgetSignatures: 1,
           signedPdfCopies: 1,
           anamnesis: 1,
+          paymentLinks: 1,
         },
       },
     });
