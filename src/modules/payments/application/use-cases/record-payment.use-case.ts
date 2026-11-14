@@ -19,8 +19,11 @@ import {
 import type {
   CivilPaidDay,
   CreatePaymentRepoInput,
+  PaymentInsertHook,
   PaymentRepository,
 } from '../../domain/ports/payment-repository.port';
+import type { PaymentProofAttachment } from '../../domain/payment-proof';
+import { BASE_CURRENCY } from '../../../exchange/domain/exchange-rate-source';
 import { parseCivilDate } from '../../../../shared/time/civil-day';
 import { Payment } from '../../domain/entities/payment.entity';
 import {
@@ -74,6 +77,61 @@ export interface RecordPaymentInput {
   /** DX-389: subida del comprobante (`POST /payments/proofs/upload-url`). */
   proofUploadId?: string;
   notes?: string;
+}
+
+/**
+ * DX-569: lo que añade quien registra el abono por otra vía que el
+ * formulario de caja (confirmar el reporte del paciente).
+ */
+export interface RecordPaymentOptions {
+  /**
+   * El comprobante ya comprobado y copiado a su clave definitiva (el del
+   * reporte): pasa tal cual a `PaymentProof`, sin `proofs.complete` ni
+   * limpieza (su objeto lo sigue referenciando el reporte). `proofUploadId`
+   * del input tiene que ser el suyo (la política del medio lo mira).
+   */
+  proof?: PaymentProofAttachment | null;
+  /**
+   * La tasa que fija recepción con motivo, en unidades de la moneda que no
+   * es la base por 1 USD (una de las dos monedas tiene que ser USD): se
+   * congela en vez de la cotizada con la fuente de la clínica.
+   */
+  rateOverride?: number;
+  /** Ver `PaymentInsertHook`. */
+  afterInsertInTx?: PaymentInsertHook;
+}
+
+export const RATE_OVERRIDE_PAIR_MESSAGE =
+  'Solo se puede indicar la tasa cuando una de las dos monedas es la base (USD) y la otra no.';
+export const RATE_OVERRIDE_NOT_NEEDED_MESSAGE =
+  'El abono va en la moneda de lo que se cobra: no hace falta tasa.';
+
+/**
+ * DX-569: la tasa que fija recepción como tasa congelada (fuente MANUAL, del
+ * día del abono). `perBase` son unidades de la moneda que no es USD por
+ * 1 USD; 400 si ninguna de las dos es USD o si las dos son la misma.
+ */
+export function overrideFrozenRate(
+  paymentCurrency: string,
+  targetCurrency: string,
+  perBase: number,
+  paidOn: string,
+): FrozenExchangeRate {
+  if (paymentCurrency === targetCurrency) {
+    throw new BadRequestException(RATE_OVERRIDE_NOT_NEEDED_MESSAGE);
+  }
+  if (paymentCurrency !== BASE_CURRENCY && targetCurrency !== BASE_CURRENCY) {
+    throw new BadRequestException(RATE_OVERRIDE_PAIR_MESSAGE);
+  }
+  const rate = Number(perBase.toFixed(8));
+  return {
+    currency: targetCurrency,
+    fromPerBase: paymentCurrency === BASE_CURRENCY ? 1 : rate,
+    toPerBase: targetCurrency === BASE_CURRENCY ? 1 : rate,
+    source: 'MANUAL',
+    date: paidOn,
+    quotedOn: paidOn,
+  };
 }
 
 /** Lo que `prepareLine` resuelve de un abono antes de su transacción. */
@@ -216,6 +274,7 @@ export class RecordPaymentUseCase {
     input: RecordPaymentInput,
     createdById?: string,
     idempotencyKey?: string,
+    options: RecordPaymentOptions = {},
   ): Promise<Payment> {
     // Idempotency short-circuit FIRST — before any validation or plan lookup: a
     // replay must be cheap and must NOT re-run "does the plan still exist" (a
@@ -259,7 +318,13 @@ export class RecordPaymentUseCase {
       paidOn,
       frozenRate,
       converted,
-    } = await this.prepareLine(plan, input, currency, paidAt);
+    } = await this.prepareLine(
+      plan,
+      input,
+      currency,
+      paidAt,
+      options.rateOverride,
+    );
     const receiptPlanBalance = await this.receiptBalance.afterPayment(
       treatmentPlanId,
       converted,
@@ -270,10 +335,11 @@ export class RecordPaymentUseCase {
         : { planCurrency: plan.currency, amount: converted, rateDate: paidOn };
 
     // DX-389: lo último antes de la transacción (copia el objeto subido).
-    const proof = await this.proofs.complete(
-      payMethod.proofUploadId,
-      createdById,
-    );
+    // DX-569: el del reporte ya está copiado y comprobado.
+    const proof =
+      options.proof === undefined
+        ? await this.proofs.complete(payMethod.proofUploadId, createdById)
+        : null;
     const repoInput: CreatePaymentRepoInput = {
       treatmentPlanId,
       openingBalanceId: null,
@@ -287,7 +353,7 @@ export class RecordPaymentUseCase {
       referenceNormalized: payMethod.referenceNormalized,
       duplicateReferenceReason: payMethod.duplicateReferenceReason,
       adjustments: payMethod.adjustments,
-      proof: attachmentOf(proof),
+      proof: options.proof === undefined ? attachmentOf(proof) : options.proof,
       notes: input.notes,
       createdById,
       idempotencyKey: key,
@@ -296,6 +362,8 @@ export class RecordPaymentUseCase {
       receiptBalanceInTx: this.receiptBalance.inTransaction,
       planAmount,
       frozenRate,
+      frozenRateOverride: options.rateOverride !== undefined,
+      afterInsertInTx: options.afterInsertInTx,
     };
 
     let payment: Payment;
@@ -342,6 +410,8 @@ export class RecordPaymentUseCase {
     input: PaymentMethodRequest & { amount: number },
     currency: string,
     paidAt: Date | CivilPaidDay,
+    /** DX-569: ver `RecordPaymentOptions.rateOverride`. */
+    rateOverride?: number,
   ): Promise<PreparedPaymentLine> {
     // DX-516: con los ajustes del medio sobre el importe de ESTA línea.
     const method = await this.paymentMethodGate.resolve(input, paidAt, {
@@ -356,11 +426,14 @@ export class RecordPaymentUseCase {
     // sin tasa (o con cualquier fallo) el abono se guarda «sin tasa», el
     // recibo sin saldo y sin base, y el barrido la congela cuando la haya.
     const paidOn = await this.repo.resolvePaidOn(paidAt);
-    const frozenRate = await this.freeze({
-      currency,
-      targetCurrency: plan.currency,
-      paidOn,
-    });
+    const frozenRate =
+      rateOverride === undefined
+        ? await this.freeze({
+            currency,
+            targetCurrency: plan.currency,
+            paidOn,
+          })
+        : overrideFrozenRate(currency, plan.currency, rateOverride, paidOn);
     const converted = await paymentBaseAmount(
       this.convertAmount,
       {

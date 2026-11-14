@@ -5,6 +5,7 @@ import {
   ClinicRole,
   PaymentAdjustmentType,
   PaymentMethod,
+  type Prisma,
 } from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
@@ -48,6 +49,16 @@ export type ReceiptBalanceInTx = (data: {
   /** Σ de los asientos del saldo a favor del plan, en su moneda (DX-253). */
   creditMovements: number;
 }) => Promise<ReceiptPlanBalance | null>;
+
+/**
+ * DX-569: lo que quien registra el abono hace DENTRO de su transacción, tras
+ * insertarlo con su recibo (confirmar el reporte del paciente que lo
+ * origina). Si lanza, se deshace todo: el abono, el recibo y su número.
+ */
+export type PaymentInsertHook = (
+  tx: Prisma.TransactionClient,
+  payment: Payment,
+) => Promise<void>;
 
 export interface CreatePaymentRepoInput {
   /** Exactamente uno de los dos (payments_target_check, DX-262). */
@@ -124,6 +135,14 @@ export interface CreatePaymentRepoInput {
    * `null`: misma moneda que el destino, o sin tasa ese día.
    */
   frozenRate: FrozenExchangeRate | null;
+  /**
+   * DX-569: `frozenRate` la fijó recepción con motivo (no la cotizó la
+   * fuente de la clínica): se congela tal cual si es del día del abono, sin
+   * compararla con las tasas manuales registradas.
+   */
+  frozenRateOverride?: boolean;
+  /** DX-569: ver `PaymentInsertHook` (solo el abono suelto). */
+  afterInsertInTx?: PaymentInsertHook;
 }
 
 /**

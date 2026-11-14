@@ -131,6 +131,16 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-569: el enlace de pago público, por IP y por token.
+    strict('payment-link'),
+    {
+      ...strict('payment-link-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
     // DX-467: verificar una receta por el código de su QR, por IP.
     strict('prescription-verify'),
     {

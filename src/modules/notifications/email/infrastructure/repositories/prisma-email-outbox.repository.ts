@@ -35,6 +35,8 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'signed-consent-copy': EmailTemplate.SIGNED_CONSENT_COPY,
   'mfa-notice': EmailTemplate.MFA_NOTICE,
   'mfa-enrollment-code': EmailTemplate.MFA_ENROLLMENT_CODE,
+  'payment-link': EmailTemplate.PAYMENT_LINK,
+  'payment-report-rejected': EmailTemplate.PAYMENT_REPORT_REJECTED,
 };
 
 /**
@@ -238,8 +240,10 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
             ON o."template" = 'slot-offer' AND wo."id" = o."referenceId"
           LEFT JOIN "signed_consent_pdf_links" cl
             ON o."template" = 'signed-consent-copy' AND cl."id" = o."referenceId"
+          LEFT JOIN "payment_links" pl
+            ON o."template" = 'payment-link' AND pl."id" = o."referenceId"
           JOIN "patients" p
-            ON p."id" = COALESCE(sr."patientId", wo."patientId", cl."patientId")
+            ON p."id" = COALESCE(sr."patientId", wo."patientId", cl."patientId", pl."patientId")
          WHERE o."id" = ${outboxId}::uuid AND p."deletedAt" IS NOT NULL`;
       return rows.length > 0;
     });
