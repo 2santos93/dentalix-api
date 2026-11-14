@@ -1189,6 +1189,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     budgetSignatures: 0,
     signedPdfCopies: 1,
     anamnesis: 3,
+    paymentLinks: 2,
   };
 
   it('conserva el número de enlaces anulados por tipo', () => {
@@ -1200,6 +1201,13 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     ).toEqual({ reason: 'PATIENT_ARCHIVED_LINKS_REVOKED', revokedLinks });
   });
 
+  it('DX-569: un evento anterior a los enlaces de pago se lee con paymentLinks 0', () => {
+    const { paymentLinks: _omit, ...before } = revokedLinks;
+    expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
+      revokedLinks: { ...before, paymentLinks: 0 },
+    });
+  });
+
   it('descarta el bloque entero con tokens, claves ajenas o números raros', () => {
     for (const bad of [
       { ...revokedLinks, token: 'abc' },
@@ -1207,6 +1215,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
       { ...revokedLinks, anamnesis: 1.5 },
       { ...revokedLinks, consentSignatures: '2' },
       { ...revokedLinks, signedPdfCopies: 1_000_001 },
+      { ...revokedLinks, paymentLinks: -1 },
       { slotOffers: 1 },
       'muchos',
     ]) {

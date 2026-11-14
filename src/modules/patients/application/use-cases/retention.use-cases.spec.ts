@@ -232,6 +232,7 @@ describe('CountPatientLivePublicLinksUseCase (DX-461)', () => {
     budgetSignatures: 2,
     signedPdfCopies: 0,
     anamnesis: 1,
+    paymentLinks: 0,
   };
 
   it('devuelve los enlaces vivos por tipo y el total, a la hora del reloj', async () => {

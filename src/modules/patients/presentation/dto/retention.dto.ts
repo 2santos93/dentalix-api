@@ -166,6 +166,12 @@ export class LivePublicLinksDto {
   })
   anamnesis!: number;
 
+  @ApiProperty({
+    minimum: 0,
+    description: 'Enlaces de pago sin reporte (DX-569)',
+  })
+  paymentLinks!: number;
+
   @ApiProperty({ minimum: 0, description: 'Suma de todos los tipos' })
   total!: number;
 }

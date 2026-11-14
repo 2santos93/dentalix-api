@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -51,6 +51,7 @@ const EXPECTED_KEYS: Record<ClinicRole, WorkQueueKey[]> = {
   DENTIST: ['CLOSING_QUEUE', 'ANAMNESIS_REVIEW'],
   RECEPTION: [
     'CLOSING_QUEUE',
+    'PAYMENT_REPORTS',
     'QUOTE_FOLLOW_UP',
     'ACCEPTED_UNSCHEDULED',
     'WAITLIST',
@@ -118,6 +119,8 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
     switch (key) {
       case 'CLOSING_QUEUE':
         return (await body('/closing-queue/count')).total as number;
+      case 'PAYMENT_REPORTS':
+        return (await body('/payment-reports/count')).pending as number;
       case 'ANAMNESIS_REVIEW':
         return (await body('/medical-history/submissions/summary'))
           .submitted as number;
@@ -221,6 +224,40 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
         data: {
           acceptedAt: new Date(Date.now() - 3 * DAY_MS),
           acceptedLocationId: locationId,
+        },
+      });
+      // DX-569: el paciente reportó su pago por enlace; pendiente.
+      const method = await raw.clinicPaymentMethod.findFirstOrThrow({
+        where: { tenantId },
+        select: { id: true },
+      });
+      const linkId = randomUUID();
+      await raw.paymentLink.create({
+        data: {
+          id: linkId,
+          tenantId,
+          patientId,
+          treatmentPlanId: accepted,
+          locationId,
+          amount: 40,
+          currency: 'USD',
+          concept: 'BALANCE',
+          tokenHash: randomBytes(32).toString('hex'),
+          expiresAt: new Date(Date.now() + 7 * DAY_MS),
+          createdById: dentistId,
+          usedAt: new Date(),
+        },
+      });
+      await raw.paymentReport.create({
+        data: {
+          tenantId,
+          linkId,
+          patientId,
+          locationId,
+          paymentMethodId: method.id,
+          amount: 40,
+          currency: 'USD',
+          paidOn: new Date(`${today()}T00:00:00Z`),
         },
       });
       // Cartera: un ítem hecho hace 40 días sin abono.

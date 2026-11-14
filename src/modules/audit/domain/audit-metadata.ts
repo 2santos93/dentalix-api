@@ -965,19 +965,30 @@ function closingQueueDismissal(
 /** Tope de enlaces de un tipo en un evento: muy por encima de lo real. */
 const MAX_REVOKED_LINKS = 1_000_000;
 
+/**
+ * DX-569: los eventos anteriores a los enlaces de pago no traen
+ * `paymentLinks` (no existían: se leen como 0).
+ */
+const LINK_KINDS_ADDED_LATER: readonly string[] = ['paymentLinks'];
+
 /** Exactamente los tipos de enlace, cada uno un natural acotado, o nada (DX-461). */
 function revokedLinks(value: unknown): LivePublicLinkCounts | null {
   if (!isRecord(value)) return null;
   const keys = Object.keys(value);
+  const required = LIVE_PUBLIC_LINK_KINDS.filter(
+    (k) => !LINK_KINDS_ADDED_LATER.includes(k),
+  );
   if (
-    keys.length !== LIVE_PUBLIC_LINK_KINDS.length ||
-    keys.some((k) => !(LIVE_PUBLIC_LINK_KINDS as readonly string[]).includes(k))
+    keys.some(
+      (k) => !(LIVE_PUBLIC_LINK_KINDS as readonly string[]).includes(k),
+    ) ||
+    required.some((k) => !keys.includes(k))
   ) {
     return null;
   }
   const out = {} as LivePublicLinkCounts;
   for (const kind of LIVE_PUBLIC_LINK_KINDS) {
-    const n = value[kind];
+    const n = kind in value ? value[kind] : 0;
     if (
       typeof n !== 'number' ||
       !Number.isInteger(n) ||
