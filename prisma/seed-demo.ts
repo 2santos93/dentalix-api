@@ -345,6 +345,12 @@ export interface DemoSeedOptions {
   reset?: boolean;
   /** No imprime el resumen (tests). */
   quiet?: boolean;
+  /**
+   * «Hoy» de referencia (tests). Dos siembras que deben salir iguales lo
+   * comparten: si la corrida cruza la medianoche, cada una fecharía sus datos
+   * en un día distinto (DX-495, fronteras de calendario).
+   */
+  now?: Date;
 }
 
 export interface DemoSeedResult {
@@ -422,7 +428,7 @@ export async function seedDemo(
       ALLOW_DEMO_SEED: config.get<string>('ALLOW_DEMO_SEED'),
     });
 
-    const seeder = new DemoSeeder(app);
+    const seeder = new DemoSeeder(app, options.now);
     const existing = await seeder.findLiveDemoTenantId();
     if (existing) await seeder.assertSeedOwned(existing);
 
@@ -464,10 +470,14 @@ class DemoSeeder {
   private readonly prisma: PrismaService;
   private readonly tenantContext: TenantContextService;
   /** "Hoy" de referencia para fechar los datos (no para decidir pasado/futuro). */
-  private readonly now = new Date();
+  private readonly now: Date;
   private mobileMethodId: string | null = null;
 
-  constructor(private readonly app: INestApplicationContext) {
+  constructor(
+    private readonly app: INestApplicationContext,
+    now: Date = new Date(),
+  ) {
+    this.now = new Date(now.getTime());
     this.prisma = app.get(PrismaService);
     this.tenantContext = app.get(TenantContextService);
   }
@@ -3149,8 +3159,21 @@ class DemoSeeder {
       !booked ||
       !unconfiguredPatient
     ) {
+      // Qué ejemplo se queda sin paciente y con qué números: el job de
+      // fronteras de calendario (DX-495) solo da esta línea para saberlo.
+      const missing = Object.entries({
+        prophylaxisPatient,
+        checkupPatient,
+        booked,
+        unconfiguredPatient,
+      })
+        .filter(([, id]) => !id)
+        .map(([name]) => name);
       throw new Error(
-        'La demo no tiene pacientes libres para los ejemplos de recall',
+        `La demo no tiene pacientes libres para los ejemplos de recall (falta: ${missing.join(', ')}; ` +
+          `pacientes ${allPatientIds.length}, con cita futura o en curso ${scheduled.size}, ` +
+          `con recall ${taken.size}, atendidos ${seen.size}, libres ${allPatientIds.filter(isFree).length}, ` +
+          `libres y atendidos ${allPatientIds.filter((id) => isFree(id) && seen.has(id)).length}; ahora ${this.now.toISOString()})`,
       );
     }
     const zone = DEMO_LOCATIONS.principal.timeZone;

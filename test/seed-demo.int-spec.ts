@@ -278,6 +278,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
   let outsideBefore: Counts;
   let usersBefore: string[];
   let seededBetween: { start: number; end: number };
+  // DX-495: el «hoy» de la primera siembra; el --reset lo reutiliza para que
+  // una corrida que cruce la medianoche no feche la demo nueva otro día.
+  let seedNow: Date;
 
   beforeAll(async () => {
     await purgeDemo();
@@ -377,7 +380,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
 
   it('la primera corrida crea la clínica demo completa', async () => {
     const start = Date.now();
-    const result = await seedDemo({ quiet: true });
+    seedNow = new Date(start);
+    const result = await seedDemo({ quiet: true, now: seedNow });
     seededBetween = { start, end: Date.now() };
     expect(result.status).toBe('created');
     expect(result.password).toBe(DEMO_PASSWORD);
@@ -2619,7 +2623,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
 
   it('--reset retira la demo anterior en blando y la reconstruye igual', async () => {
     const oldId = await liveDemoTenantId();
-    const result = await seedDemo({ quiet: true, reset: true });
+    const result = await seedDemo({ quiet: true, reset: true, now: seedNow });
     expect(result.status).toBe('rebuilt');
     const newId = await liveDemoTenantId();
     expect(newId).not.toBe(oldId);
