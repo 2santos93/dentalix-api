@@ -1,3 +1,4 @@
+import { testDiscountPolicy } from './__fixtures__/discount-fixtures';
 import {
   BadRequestException,
   ConflictException,
@@ -9,9 +10,17 @@ import {
   TreatmentPlanRejectionReason,
   TreatmentPlanStatus,
 } from '@prisma/client';
-import { UpdateTreatmentPlanUseCase } from './update-treatment-plan.use-case';
+import {
+  PLAN_CHANGED_RETRY_MESSAGE,
+  UpdateTreatmentPlanUseCase,
+} from './update-treatment-plan.use-case';
+import type {
+  QuoteExpiryRegional,
+  QuoteExpiryRegionalReader,
+} from '../../domain/ports/quote-expiry-regional.port';
 import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
 import { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const NOW = new Date('2026-10-16T15:00:00.000Z');
 const { DRAFT, PRESENTED, ACCEPTED, REJECTED, COMPLETED, CANCELLED } =
@@ -21,7 +30,7 @@ const DENTIST = { role: ClinicRole.DENTIST };
 // Fake whitelist: allows the codes actually exercised by this suite. `has`
 // is case-sensitive here on purpose, to catch a regression where the use
 // case forgets to `.toUpperCase()` BEFORE calling it.
-function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
+function makeWhitelist(allowed: string[] = ['USD', 'VES']): CurrencyWhitelist {
   return {
     has: (code: string): Promise<boolean> =>
       Promise.resolve(allowed.includes(code)),
@@ -30,7 +39,12 @@ function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
 
 function setup(whitelist: CurrencyWhitelist = makeWhitelist()) {
   const repo = new InMemoryTreatmentPlanRepository();
-  const uc = new UpdateTreatmentPlanUseCase(repo, whitelist, () => NOW);
+  const uc = new UpdateTreatmentPlanUseCase(
+    repo,
+    whitelist,
+    () => NOW,
+    testDiscountPolicy(),
+  );
   return { repo, uc };
 }
 
@@ -203,8 +217,8 @@ describe('UpdateTreatmentPlanUseCase', () => {
   it('validates and uppercases currency only when provided, forwarding it to the repo', async () => {
     const { repo, uc } = setup();
     const plan = repo.seedPlan();
-    const result = await uc.execute(plan.id, { currency: 'cop' }, DENTIST);
-    expect(result.currency).toBe('COP');
+    const result = await uc.execute(plan.id, { currency: 'ves' }, DENTIST);
+    expect(result.currency).toBe('VES');
   });
 
   it('rejects an unknown currency with BadRequestException, without writing', async () => {
@@ -212,19 +226,19 @@ describe('UpdateTreatmentPlanUseCase', () => {
     const plan = repo.seedPlan();
     await expect(
       uc.execute(plan.id, { currency: 'XXX' }, DENTIST),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toThrow(new BadRequestException(UNKNOWN_CURRENCY_MESSAGE));
     expect(repo.stored(plan.id).currency).toBe('USD');
   });
 
   it('leaves currency untouched (no whitelist call needed) when omitted', async () => {
     const { repo, uc } = setup(makeWhitelist([]));
-    const plan = repo.seedPlan({ currency: 'COP' });
+    const plan = repo.seedPlan({ currency: 'VES' });
     const result = await uc.execute(
       plan.id,
       { notes: 'sin cambio de moneda' },
       DENTIST,
     );
-    expect(result.currency).toBe('COP');
+    expect(result.currency).toBe('VES');
   });
 
   describe('plan con un cargo por inasistencia vigente (SEC-050)', () => {
@@ -232,7 +246,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
       'Este plan lleva un cargo por inasistencia o cancelación tardía vigente: no se cancela ni cambia de moneda. Anula antes el cargo desde la cita (con motivo).';
     function feePlan() {
       const ctx = setup();
-      const plan = ctx.repo.seedPlan({ status: ACCEPTED, currency: 'COP' });
+      const plan = ctx.repo.seedPlan({ status: ACCEPTED, currency: 'VES' });
       ctx.repo.seedItem({
         planId: plan.id,
         price: 50000,
@@ -270,7 +284,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
     function creditPlan(status: TreatmentPlanStatus) {
       const ctx = setup();
       // Recibió un traspaso: tiene asientos, pero ningún abono.
-      const plan = ctx.repo.seedPlan({ status, currency: 'COP' });
+      const plan = ctx.repo.seedPlan({ status, currency: 'VES' });
       ctx.repo.creditEntryPlanIds.add(plan.id);
       return { ...ctx, plan };
     }
@@ -289,7 +303,7 @@ describe('UpdateTreatmentPlanUseCase', () => {
           code: 'PLAN_CURRENCY_LOCKED_BY_CREDIT',
           message: CREDIT_LOCKED,
         });
-        expect(repo.stored(plan.id).currency).toBe('COP');
+        expect(repo.stored(plan.id).currency).toBe('VES');
         expect(repo.stored(plan.id).notes).not.toBe('después');
       },
     );
@@ -297,11 +311,11 @@ describe('UpdateTreatmentPlanUseCase', () => {
     it('la misma moneda, las notas o cancelarlo sí pasan', async () => {
       const { uc, plan } = creditPlan(DRAFT);
       await expect(
-        uc.execute(plan.id, { currency: 'cop', notes: 'Notas' }, DENTIST),
-      ).resolves.toMatchObject({ currency: 'COP', notes: 'Notas' });
+        uc.execute(plan.id, { currency: 'ves', notes: 'Notas' }, DENTIST),
+      ).resolves.toMatchObject({ currency: 'VES', notes: 'Notas' });
       await expect(
         uc.execute(plan.id, { status: CANCELLED }, DENTIST),
-      ).resolves.toMatchObject({ status: CANCELLED, currency: 'COP' });
+      ).resolves.toMatchObject({ status: CANCELLED, currency: 'VES' });
     });
 
     it('con asientos y además abonos vivos, el 409 es el del saldo a favor (anular los abonos no lo desbloquearía)', async () => {
@@ -314,15 +328,123 @@ describe('UpdateTreatmentPlanUseCase', () => {
         code: 'PLAN_CURRENCY_LOCKED_BY_CREDIT',
         message: CREDIT_LOCKED,
       });
-      expect(repo.stored(plan.id).currency).toBe('COP');
+      expect(repo.stored(plan.id).currency).toBe('VES');
     });
 
     it('sin asientos ni abonos la moneda de un borrador sí cambia', async () => {
       const { repo, uc } = setup();
-      const plan = repo.seedPlan({ status: DRAFT, currency: 'COP' });
+      const plan = repo.seedPlan({ status: DRAFT, currency: 'VES' });
       await expect(
         uc.execute(plan.id, { currency: 'USD' }, DENTIST),
       ).resolves.toMatchObject({ currency: 'USD' });
     });
+  });
+});
+
+describe('DX-379 (C): PATCH «Aceptado» de un presupuesto vencido', () => {
+  // 16/10/2026 11:00 en Caracas.
+  const regional = (
+    overrides: Partial<QuoteExpiryRegional> = {},
+  ): QuoteExpiryRegionalReader & { calls: number } => {
+    const reader = {
+      calls: 0,
+      forPlan: () => {
+        reader.calls += 1;
+        return Promise.resolve({
+          presentedLocationId: 'loc-1',
+          locationId: 'loc-1',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h12',
+          ...overrides,
+        });
+      },
+    };
+    return reader;
+  };
+
+  function setupWith(reader: QuoteExpiryRegionalReader) {
+    const repo = new InMemoryTreatmentPlanRepository();
+    const uc = new UpdateTreatmentPlanUseCase(
+      repo,
+      makeWhitelist(),
+      () => NOW,
+      testDiscountPolicy(),
+      reader,
+    );
+    return { repo, uc };
+  }
+
+  const presentedPlan = (
+    repo: InMemoryTreatmentPlanRepository,
+    validUntil: string,
+  ) =>
+    repo.seedPlan({
+      status: PRESENTED,
+      presentedLocationId: 'loc-1',
+      quoteIssuedOn: '2026-09-01',
+      quoteValidUntil: validUntil,
+    });
+
+  it('vencido → 409 QUOTE_EXPIRED en español y el plan no cambia', async () => {
+    const { repo, uc } = setupWith(regional());
+    const plan = presentedPlan(repo, '2026-10-01');
+    let error: unknown;
+    try {
+      await uc.execute(plan.id, { status: ACCEPTED }, DENTIST);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'QUOTE_EXPIRED',
+      message:
+        'El presupuesto venció el 01/10/2026: acéptalo con firma para elegir cómo.',
+      quoteValidUntil: '2026-10-01',
+    });
+    expect((await repo.findPlanById(plan.id))?.status).toBe(PRESENTED);
+  });
+
+  it('no vencido (el último día vale) → acepta', async () => {
+    const { repo, uc } = setupWith(regional());
+    const plan = presentedPlan(repo, '2026-10-16');
+    const result = await uc.execute(plan.id, { status: ACCEPTED }, DENTIST);
+    expect(result.status).toBe(ACCEPTED);
+  });
+
+  it('sin validez guardada (plan anterior a DX-379) → acepta como siempre', async () => {
+    const { repo, uc } = setupWith(regional());
+    const plan = repo.seedPlan({ status: PRESENTED });
+    const result = await uc.execute(plan.id, { status: ACCEPTED }, DENTIST);
+    expect(result.status).toBe(ACCEPTED);
+  });
+
+  it('solo mira la sede al ACEPTAR: cancelar un vencido no la lee', async () => {
+    const reader = regional();
+    const { repo, uc } = setupWith(reader);
+    const plan = presentedPlan(repo, '2026-10-01');
+    const result = await uc.execute(plan.id, { status: CANCELLED }, DENTIST);
+    expect(result.status).toBe(CANCELLED);
+    expect(reader.calls).toBe(0);
+  });
+
+  it('sede sin zona válida → 409 LOCATION_TIMEZONE_REQUIRED (nunca otra zona)', async () => {
+    const { repo, uc } = setupWith(regional({ timeZone: null }));
+    const plan = presentedPlan(repo, '2026-10-20');
+    await expect(
+      uc.execute(plan.id, { status: ACCEPTED }, DENTIST),
+    ).rejects.toMatchObject({
+      response: { code: 'LOCATION_TIMEZONE_REQUIRED' },
+    });
+  });
+
+  it('presentado en otra sede entre la lectura y el bloqueo → 409 «vuelve a intentarlo»', async () => {
+    const { repo, uc } = setupWith(regional({ presentedLocationId: null }));
+    const plan = presentedPlan(repo, '2026-10-20');
+    await expect(
+      uc.execute(plan.id, { status: ACCEPTED }, DENTIST),
+    ).rejects.toThrow(PLAN_CHANGED_RETRY_MESSAGE);
   });
 });

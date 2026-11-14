@@ -19,17 +19,17 @@ import type {
 import type { VoidActor, VoidSubject } from '../../domain/void-window';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
 
-// 2026-10-16 10:00 en Bogotá (UTC-5): el "hoy" de la sede de las filas.
-const NOW = new Date('2026-10-16T15:00:00.000Z');
+// 2026-10-16 10:00 en la zona de la sede (UTC-4): el "hoy" de la sede de las filas.
+const NOW = new Date('2026-10-16T14:00:00.000Z');
 const clock = (): Date => NOW;
 const ADMIN: VoidActor = { userId: 'u-admin', role: ClinicRole.ADMIN };
 const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
 
-/** Registrado por recepción hoy (en la sede, Bogotá). */
+/** Registrado por recepción hoy (en la zona de la sede). */
 const OWN_TODAY: VoidSubject = {
   createdById: 'u-recep',
-  createdAt: new Date('2026-10-16T13:00:00.000Z'),
-  timeZone: 'America/Bogota',
+  createdAt: new Date('2026-10-16T12:00:00.000Z'),
+  timeZone: 'America/Caracas',
 };
 
 function fakeRow(
@@ -40,13 +40,14 @@ function fakeRow(
   const payment: CashPayment = {
     id,
     createdById: voidSubject.createdById,
-    paidAt: new Date('2026-10-15T17:00:00.000Z'),
+    paidAt: new Date('2026-10-15T16:00:00.000Z'),
     paidOn: '2026-10-15',
     amount: 100,
-    currency: 'COP',
+    currency: 'VES',
     method: PaymentMethod.CASH,
     paymentMethod: null,
     reference: null,
+    externalInvoiceNumber: null,
     notes: null,
     location: { id: 'loc-1', name: 'Sede principal' },
     patient: { id: 'pat-1', fullName: 'Ana Gómez' },
@@ -58,6 +59,10 @@ function fakeRow(
     openingBalance: null,
     splitId: null,
     splitLines: null,
+    receiptNumber: null,
+    hasProof: false,
+    adjustments: [],
+    collectedAmount: overrides.amount ?? 100,
     ...overrides,
   };
   return { payment, voidSubject };
@@ -74,6 +79,8 @@ function medium(
     kind: 'OTHER',
     active: true,
     requiresReference: false,
+    proofPolicy: 'NONE',
+    adjustments: [],
     legacyMethod: null,
     createdAt: METHOD_AT,
     updatedAt: METHOD_AT,
@@ -368,9 +375,9 @@ describe('ListCashPaymentsUseCase', () => {
       groups: [
         { currency: 'USD', method: PaymentMethod.CARD, total: 0.1, count: 1 },
         { currency: 'USD', method: PaymentMethod.CASH, total: 0.2, count: 2 },
-        { currency: 'COP', method: null, total: 50000, count: 1 },
+        { currency: 'VES', method: null, total: 50000, count: 1 },
         {
-          currency: 'COP',
+          currency: 'VES',
           method: PaymentMethod.CASH,
           total: 150000.55,
           count: 2,
@@ -383,21 +390,50 @@ describe('ListCashPaymentsUseCase', () => {
     expect(summary.count).toBe(6);
     // 0.1 + 0.2 en coma flotante es 0.30000000000000004.
     expect(summary.byCurrency).toEqual([
-      { currency: 'COP', total: 200000.55, count: 3 },
       { currency: 'USD', total: 0.3, count: 3 },
+      { currency: 'VES', total: 200000.55, count: 3 },
     ]);
     // Orden estable: por método (orden del enum, "sin método" al final) y
     // dentro del método por moneda.
     expect(summary.byMethod).toEqual([
+      { method: PaymentMethod.CASH, currency: 'USD', total: 0.2, count: 2 },
       {
         method: PaymentMethod.CASH,
-        currency: 'COP',
+        currency: 'VES',
         total: 150000.55,
         count: 2,
       },
-      { method: PaymentMethod.CASH, currency: 'USD', total: 0.2, count: 2 },
       { method: PaymentMethod.CARD, currency: 'USD', total: 0.1, count: 1 },
-      { method: null, currency: 'COP', total: 50000, count: 1 },
+      { method: null, currency: 'VES', total: 50000, count: 1 },
+    ]);
+  });
+
+  it('DX-516: lo cobrado por moneda suma impuestos y recargos y resta descuentos; sin ajustes, igual a los abonos', async () => {
+    const repo = new SpyPaymentRepository({
+      items: [],
+      total: 3,
+      scopeLocation: null,
+      groups: [
+        { currency: 'USD', method: PaymentMethod.CASH, total: 150, count: 2 },
+        { currency: 'EUR', method: PaymentMethod.CARD, total: 40, count: 1 },
+      ],
+      adjustmentGroups: [
+        { currency: 'USD', type: 'TAX', total: 3, count: 1 },
+        { currency: 'USD', type: 'SURCHARGE', total: 0.1, count: 1 },
+        { currency: 'USD', type: 'DISCOUNT', total: 2.5, count: 1 },
+      ],
+    });
+
+    const { summary } = await useCaseFor(repo).execute(RANGE);
+
+    expect(summary.adjustments).toEqual([
+      { currency: 'USD', type: 'TAX', total: 3, count: 1 },
+      { currency: 'USD', type: 'SURCHARGE', total: 0.1, count: 1 },
+      { currency: 'USD', type: 'DISCOUNT', total: 2.5, count: 1 },
+    ]);
+    expect(summary.collected).toEqual([
+      { currency: 'EUR', total: 40 },
+      { currency: 'USD', total: 150.6 },
     ]);
   });
 
@@ -411,14 +447,14 @@ describe('ListCashPaymentsUseCase', () => {
       scopeLocation: null,
       groups: [
         {
-          currency: 'COP',
+          currency: 'VES',
           method: PaymentMethod.TRANSFER,
           paymentMethod: movil,
           total: 100.1,
           count: 2,
         },
         {
-          currency: 'COP',
+          currency: 'VES',
           method: PaymentMethod.TRANSFER,
           paymentMethod: transferencia,
           total: 0.2,
@@ -432,7 +468,7 @@ describe('ListCashPaymentsUseCase', () => {
           count: 1,
         },
         {
-          currency: 'COP',
+          currency: 'VES',
           method: null,
           paymentMethod: null,
           total: 5,
@@ -447,11 +483,11 @@ describe('ListCashPaymentsUseCase', () => {
       { method: PaymentMethod.CASH, currency: 'USD', total: 10, count: 1 },
       {
         method: PaymentMethod.TRANSFER,
-        currency: 'COP',
+        currency: 'VES',
         total: 100.3,
         count: 3,
       },
-      { method: null, currency: 'COP', total: 5, count: 1 },
+      { method: null, currency: 'VES', total: 5, count: 1 },
     ]);
     expect(summary.byPaymentMethod).toEqual([
       {
@@ -464,21 +500,21 @@ describe('ListCashPaymentsUseCase', () => {
       {
         paymentMethodId: 'pm-mobile',
         name: 'Pago móvil',
-        currency: 'COP',
+        currency: 'VES',
         total: 100.1,
         count: 2,
       },
       {
         paymentMethodId: 'pm-transfer',
         name: 'Transferencia',
-        currency: 'COP',
+        currency: 'VES',
         total: 0.2,
         count: 1,
       },
       {
         paymentMethodId: null,
         name: null,
-        currency: 'COP',
+        currency: 'VES',
         total: 5,
         count: 1,
       },
@@ -491,6 +527,9 @@ describe('ListCashPaymentsUseCase', () => {
 
     expect(out.summary).toEqual({
       count: 0,
+      // DX-516: sin ajustes, vacíos.
+      adjustments: [],
+      collected: [],
       byCurrency: [],
       byMethod: [],
       byPaymentMethod: [],
@@ -505,8 +544,8 @@ describe('ListCashPaymentsUseCase', () => {
     const OTHER_USER: VoidSubject = { ...OTHER_AUTHOR };
     const OWN_YESTERDAY: VoidSubject = {
       ...OWN_TODAY,
-      // 23:30 del 15 en Bogotá: es 16 en UTC, pero no "hoy" en la sede.
-      createdAt: new Date('2026-10-16T04:30:00.000Z'),
+      // 23:30 del 15 en la zona de la sede: es 16 en UTC, pero no "hoy" en la sede.
+      createdAt: new Date('2026-10-16T03:30:00.000Z'),
     };
 
     it('recepción: true solo en sus abonos de hoy (día de la sede)', async () => {
@@ -560,13 +599,13 @@ describe('ListCashPaymentsUseCase', () => {
     it('registeredOn es el día civil del alta EN LA SEDE y registeredToday lo compara con hoy allí', async () => {
       const repo = new SpyPaymentRepository(
         pageWith(
-          // Alta hoy 08:00 en Bogotá, con fecha de pago de ayer.
+          // Alta hoy 08:00 en la zona de la sede, con fecha de pago de ayer.
           fakeRow('today'),
-          // 23:30 del 15 en Bogotá: en UTC ya es 16, pero en la sede no es hoy.
+          // 23:30 del 15 en la zona de la sede: en UTC ya es 16, pero en la sede no es hoy.
           fakeRow(
             'late-yesterday',
             {},
-            { ...OWN_TODAY, createdAt: new Date('2026-10-16T04:30:00.000Z') },
+            { ...OWN_TODAY, createdAt: new Date('2026-10-16T03:30:00.000Z') },
           ),
           // 20:00 del 16 en Madrid: allí ya es 16, en UTC también.
           fakeRow(
@@ -603,6 +642,99 @@ describe('ListCashPaymentsUseCase', () => {
         registeredOn: '2026-10-16',
         registeredToday: true,
       });
+    });
+  });
+
+  describe('arqueo ciego (SEC-043)', () => {
+    it.each([
+      ['ADMIN', ADMIN, false],
+      ['RECEPTION', RECEPTION, true],
+    ])(
+      '%s: la lista y el CSV piden quitar las cajas abiertas solo si no es ADMIN (%s)',
+      async (_who, actor, blindViewer) => {
+        const repo = new SpyPaymentRepository();
+        await useCaseFor(repo, actor).execute(RANGE);
+        await useCaseFor(repo, actor).exportAll(RANGE);
+        expect(repo.calls.map((c) => c.blindViewer)).toEqual([
+          blindViewer,
+          blindViewer,
+        ]);
+      },
+    );
+
+    it('una fila de una caja abierta sale sin importe, moneda, cobrado, notas ni ajustes; las demás, enteras', async () => {
+      const hidden = fakeRow('p-open', {
+        amount: 30,
+        notes: 'pagó 30 en billetes',
+        reference: 'Pago móvil 30 USD',
+        externalInvoiceNumber: 'F-0001',
+        adjustments: [
+          {
+            type: 'TAX',
+            label: 'Impuesto',
+            calculation: 'FIXED',
+            percent: null,
+            fixedAmount: 1,
+            base: 30,
+            amount: 1,
+            currency: 'VES',
+          },
+        ],
+        collectedAmount: 31,
+      });
+      const page: CashRegisterPage = {
+        items: [
+          { ...hidden, inOpenCashSession: true },
+          fakeRow('p-closed', { amount: 20 }),
+        ],
+        total: 2,
+        groups: [],
+        scopeLocation: null,
+        blindHidden: true,
+      };
+      for (const run of ['execute', 'exportAll'] as const) {
+        const out = await useCaseFor(new SpyPaymentRepository(page), RECEPTION)[
+          run
+        ](RANGE);
+        const [open, closed] = out.items;
+        expect(open).toMatchObject({
+          id: 'p-open',
+          amount: null,
+          currency: null,
+          collectedAmount: null,
+          notes: null,
+          reference: null,
+          // El nº de factura externa no es un importe: se queda.
+          externalInvoiceNumber: 'F-0001',
+          adjustments: [],
+          amountHidden: true,
+          // Lo que sirve para encontrarlo y actuar sigue.
+          patient: { fullName: 'Ana Gómez' },
+          method: PaymentMethod.CASH,
+          canVoid: true,
+        });
+        expect(closed).toMatchObject({
+          id: 'p-closed',
+          amount: 20,
+          currency: 'VES',
+          amountHidden: false,
+        });
+      }
+    });
+
+    it('el repositorio dice si quitó algo: la lista y el CSV lo devuelven', async () => {
+      const repo = new SpyPaymentRepository({
+        items: [],
+        total: 0,
+        groups: [],
+        scopeLocation: null,
+        blindHidden: true,
+      });
+      const uc = useCaseFor(repo, RECEPTION);
+      expect((await uc.execute(RANGE)).blindHidden).toBe(true);
+      expect((await uc.exportAll(RANGE)).blindHidden).toBe(true);
+      const plain = useCaseFor(new SpyPaymentRepository(), RECEPTION);
+      expect((await plain.execute(RANGE)).blindHidden).toBe(false);
     });
   });
 });

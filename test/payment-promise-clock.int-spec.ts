@@ -7,7 +7,7 @@ import { RecordAuditEventUseCase } from '../src/modules/audit/application/record
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -27,7 +27,7 @@ const prisma = new PrismaService(tenantContext);
 
 const SUBDOMAIN = 'dx226-promesa-int';
 const EMAIL = 'caja@dx226-promesa-int.test';
-const ZONE = 'America/Bogota';
+const ZONE = 'America/Caracas';
 const SKEWS = [5, -5];
 
 let tenantId: string;
@@ -52,8 +52,8 @@ async function cleanup(): Promise<void> {
   await raw.user.deleteMany({ where: { email: EMAIL } });
 }
 
-/** Como la API, pero con la sesión en Bogotá. */
-function inBogota<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) {
+/** Como la API, pero con la sesión en la zona de la sede. */
+function inCaracas<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) {
   return prisma.runWithTenant(tenantId, async (tx) => {
     await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE '${ZONE}'`);
     return fn(tx);
@@ -68,7 +68,7 @@ async function patientWithPlan(name: string) {
     data: {
       tenantId,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
   });
@@ -83,24 +83,24 @@ function payWithSkewedClock(
   p: { patientId: string; planId: string },
   skew: number,
 ) {
-  return inBogota(
+  return inCaracas(
     (tx) => tx.$executeRaw`
       INSERT INTO "payments" ("id", "tenantId", "locationId", "treatmentPlanId", "patientId",
         "amount", "currency", "paidAt", "createdAt", "updatedAt")
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${locationId}::uuid, ${p.planId}::uuid,
-        ${p.patientId}::uuid, 200000, 'COP', now() AT TIME ZONE 'UTC',
+        ${p.patientId}::uuid, 200000, 'USD', now() AT TIME ZONE 'UTC',
         (now() AT TIME ZONE 'UTC') + make_interval(secs => ${skew}),
         now() AT TIME ZONE 'UTC')`,
   );
 }
 
 async function promiseFor(patientId: string): Promise<string> {
-  const [{ id }] = await inBogota(
+  const [{ id }] = await inCaracas(
     (tx) => tx.$queryRaw<{ id: string }[]>`
       INSERT INTO "payment_promises" ("id", "tenantId", "patientId", "locationId", "amount",
         "currency", "dueDate", "createdById")
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${patientId}::uuid, ${locationId}::uuid,
-        200000, 'COP', (now() AT TIME ZONE 'UTC')::date + 10, ${userId}::uuid)
+        200000, 'USD', (now() AT TIME ZONE 'UTC')::date + 10, ${userId}::uuid)
       RETURNING "id"`,
   );
   return id;
@@ -140,10 +140,10 @@ describe('compromiso de pago con la hora de la BD como única fuente (DX-226, in
     ).id;
     locationId = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Sede',
-          country: 'CO',
+          country: 'VE',
         }),
       })
     ).id;

@@ -1,19 +1,35 @@
+import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../../shared/locations/document-regional';
+import {
+  clinicLogoKeyToFreeze,
+  clinicLogoPublicUrl,
+} from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
-import type { PostOpInstructionDelivery, Prisma } from '@prisma/client';
+import {
+  EmailOutboxStatus,
+  EmailTemplate,
+  Prisma,
+  type PostOpInstructionDelivery,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import {
   loadNoticeResponsibles,
+  loadMajorityReview,
   loadTenantMajorityAge,
 } from '../../../patients/infrastructure/notices/notice-context';
 import { performedItemsOf } from '../../../clinical-entries/infrastructure/repositories/performed-items';
 import type { PostOpDelivery } from '../../domain/entities/post-op-delivery.entity';
+import { PostOpDeliveryAlreadyExistsError } from '../../domain/ports/post-op-delivery-repository.port';
 import type {
   CreatePostOpDeliveryRepoInput,
   PostOpAppointmentContext,
   PostOpDeliveryDocumentView,
   PostOpDeliveryRepository,
+  PostOpEmailStatus,
   PostOpPublicDeliveryView,
 } from '../../domain/ports/post-op-delivery-repository.port';
 
@@ -49,6 +65,27 @@ function toEntity(row: PostOpInstructionDelivery): PostOpDelivery {
 }
 
 /**
+ * DX-019-ter: la marca con la que se reimprime (o abre por el enlace) una
+ * entrega: nombre y color de hoy, pero el logo congelado al entregarla, nunca
+ * el de hoy; NULL = se entregó sin logo y se muestra sin él.
+ */
+async function frozenClinicOf(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  clinicLogoKey: string | null,
+): Promise<{
+  name: string;
+  logoUrl: string | null;
+  primaryColor: string | null;
+}> {
+  const tenant = await tx.tenant.findUniqueOrThrow({
+    where: { id: tenantId },
+    select: { name: true, primaryColor: true },
+  });
+  return { ...tenant, logoUrl: clinicLogoPublicUrl(clinicLogoKey) };
+}
+
+/**
  * Entregas de indicaciones postoperatorias (DX-222). Todo bajo RLS
  * (`runWithTenant`): una cita, un paciente o una entrega de otra clínica no
  * existen. Sin delete y sin más update que la primera apertura: la entrega es
@@ -80,6 +117,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           locationId: true,
           appointmentTypeId: true,
           start: true,
+          status: true,
           providerId: true,
           patient: {
             select: {
@@ -110,19 +148,21 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
       if (!appointment || appointment.patient.deletedAt) return null;
       const { patient, location } = appointment;
 
-      const [provider, tenant, responsibles, majorityAge] = await Promise.all([
-        tx.clinicMembership.findFirst({
-          where: { userId: appointment.providerId },
-          orderBy: { createdAt: 'desc' },
-          select: { user: { select: { fullName: true } } },
-        }),
-        tx.tenant.findUniqueOrThrow({
-          where: { id: tenantId },
-          select: { name: true },
-        }),
-        loadNoticeResponsibles(tx, appointment.patientId),
-        loadTenantMajorityAge(tx, tenantId),
-      ]);
+      const [provider, tenant, responsibles, majorityReview, majorityAge] =
+        await Promise.all([
+          tx.clinicMembership.findFirst({
+            where: { userId: appointment.providerId },
+            orderBy: { createdAt: 'desc' },
+            select: { user: { select: { fullName: true } } },
+          }),
+          tx.tenant.findUniqueOrThrow({
+            where: { id: tenantId },
+            select: { name: true },
+          }),
+          loadNoticeResponsibles(tx, appointment.patientId),
+          loadMajorityReview(tx, appointment.patientId),
+          loadTenantMajorityAge(tx, tenantId),
+        ]);
 
       return {
         appointment: {
@@ -131,6 +171,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           locationId: appointment.locationId,
           appointmentTypeId: appointment.appointmentTypeId,
           start: appointment.start,
+          status: appointment.status,
           providerName: provider?.user.fullName ?? '',
         },
         patient: {
@@ -144,6 +185,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
           contactChannel: patient.contactChannel,
         },
         responsibles,
+        majorityReview,
         location: {
           id: location.id,
           name: location.name,
@@ -196,15 +238,76 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
     });
   }
 
-  create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery> {
+  async create(input: CreatePostOpDeliveryRepoInput): Promise<PostOpDelivery> {
     const tenantId = this.requireTenantId();
-    return this.prisma.runWithTenant(async (tx) =>
-      toEntity(
-        await tx.postOpInstructionDelivery.create({
-          data: { tenantId, ...input },
-        }),
-      ),
-    );
+    try {
+      return await this.prisma.runWithTenant(async (tx) => {
+        // DX-019-ter: la entrega congela la clave del logo de este instante,
+        // leída en la transacción que la registra (la protege el trigger).
+        // NULL = se entregó sin logo.
+        const tenant = await tx.tenant.findUniqueOrThrow({
+          where: { id: tenantId },
+          select: { logoKey: true },
+        });
+        return toEntity(
+          await tx.postOpInstructionDelivery.create({
+            data: {
+              tenantId,
+              ...input,
+              clinicLogoKey: clinicLogoKeyToFreeze(tenant.logoKey),
+            },
+          }),
+        );
+      });
+    } catch (err) {
+      // DX-250: la misma `Idempotency-Key` deriva el mismo id (clave primaria).
+      if (
+        input.id &&
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new PostOpDeliveryAlreadyExistsError();
+      }
+      throw err;
+    }
+  }
+
+  findById(id: string): Promise<PostOpDelivery | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.postOpInstructionDelivery.findFirst({
+        where: { id },
+      });
+      return row ? toEntity(row) : null;
+    });
+  }
+
+  emailStatuses(
+    deliveryIds: string[],
+  ): Promise<Map<string, PostOpEmailStatus>> {
+    const statuses = new Map<string, PostOpEmailStatus>();
+    if (deliveryIds.length === 0) return Promise.resolve(statuses);
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.emailOutbox.findMany({
+        where: {
+          template: EmailTemplate.POST_OP_INSTRUCTIONS,
+          referenceId: { in: deliveryIds },
+        },
+        select: { referenceId: true, status: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      for (const row of rows) {
+        if (!row.referenceId) continue;
+        statuses.set(
+          row.referenceId,
+          row.status === EmailOutboxStatus.SENT
+            ? 'SENT'
+            : row.status === EmailOutboxStatus.FAILED
+              ? 'NOT_SENT'
+              : 'QUEUED',
+        );
+      }
+      return statuses;
+    });
   }
 
   listByAppointment(appointmentId: string): Promise<PostOpDelivery[]> {
@@ -238,21 +341,21 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
       const row = await tx.postOpInstructionDelivery.findFirst({
         where: { id, patientId },
         include: {
-          location: { select: { name: true, phone: true } },
+          location: {
+            select: { name: true, phone: true, ...DOCUMENT_REGIONAL_SELECT },
+          },
           patient: { select: { firstName: true, lastName: true } },
         },
       });
       if (!row) return null;
-      const clinic = await tx.tenant.findUniqueOrThrow({
-        where: { id: tenantId },
-        select: { name: true, logoUrl: true, primaryColor: true },
-      });
+      const clinic = await frozenClinicOf(tx, tenantId, row.clinicLogoKey);
       const { location, patient, ...delivery } = row;
       return {
         ...toEntity(delivery),
         clinic,
         locationName: location.name,
         locationPhone: location.phone,
+        regional: documentRegional(location),
         patientName: `${patient.firstName} ${patient.lastName}`,
       };
     });
@@ -266,10 +369,7 @@ export class PrismaPostOpDeliveryRepository implements PostOpDeliveryRepository 
         include: { location: { select: { phone: true } } },
       });
       if (!row) return null;
-      const clinic = await tx.tenant.findUniqueOrThrow({
-        where: { id: tenantId },
-        select: { name: true, logoUrl: true, primaryColor: true },
-      });
+      const clinic = await frozenClinicOf(tx, tenantId, row.clinicLogoKey);
       const { location, ...delivery } = row;
       return { ...toEntity(delivery), clinic, locationPhone: location.phone };
     });

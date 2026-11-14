@@ -76,11 +76,11 @@ const BALANCES_HEADER =
 const csv = (header: string, lines: string[]) =>
   Buffer.from(`${header}\n${lines.join('\n')}\n`, 'utf8');
 
-/** Día civil en Bogotá (la sede de la demo): el «hoy» de la clínica. */
-function bogotaDay(offsetDays = 0): string {
+/** Día civil en la zona de la sede de la demo: el «hoy» de la clínica. */
+function caracasDay(offsetDays = 0): string {
   const d = new Date(Date.now() + offsetDays * 86_400_000);
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
   }).format(d);
 }
 const ddmmyyyy = (iso: string) => iso.split('-').reverse().join('/');
@@ -167,8 +167,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       }[];
     };
 
-  const OLD_DAY = bogotaDay(-75);
-  const RECENT_DAY = bogotaDay(-10);
+  const OLD_DAY = caracasDay(-75);
+  const RECENT_DAY = caracasDay(-10);
 
   beforeAll(async () => {
     app = await createE2eApp();
@@ -238,7 +238,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     );
   });
 
-  it('balances template carries the location currency, never COP', async () => {
+  it('balances template carries the location currency, never VES', async () => {
     // DX-327 (AC4).
     const tokyo = await raw.location.create({
       data: locationData(REGIONAL_TOKYO_FIXTURE, {
@@ -257,13 +257,13 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     expect(example).toBe(
       '"DOC-1000001","150000","JPY","15/03/2026","Fila de ejemplo: bórrala antes de importar"',
     );
-    expect(res.text).not.toContain('COP');
+    expect(res.text).not.toContain('VES');
   });
 
   it('solo ADMIN: recepción recibe 403 en español al subir la hoja de saldos', async () => {
     const res = await attach(
       `/${batch.id}/balances`,
-      csv(BALANCES_HEADER, ['111111;100;COP;;']),
+      csv(BALANCES_HEADER, ['111111;100;VES;;']),
       'saldos.csv',
       reception,
     ).expect(403);
@@ -276,7 +276,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
   it('otra clínica no ve el lote: 404 al subirle saldos', async () => {
     await attach(
       `/${batch.id}/balances`,
-      csv(BALANCES_HEADER, ['111111;100;COP;;']),
+      csv(BALANCES_HEADER, ['111111;100;VES;;']),
       'saldos.csv',
       b.adminToken,
       b,
@@ -288,13 +288,13 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     const res = await attach(
       `/${batch.id}/balances`,
       csv(BALANCES_HEADER, [
-        `111111;150.000;COP;${ddmmyyyy(OLD_DAY)};Ortodoncia 2025`,
-        '111111;50.000,50;COP;;',
+        `111111;150.000;VES;${ddmmyyyy(OLD_DAY)};Ortodoncia 2025`,
+        '111111;50.000,50;VES;;',
         '900900;40;USD;;',
-        '999999;100;COP;;',
-        '222222;-5;COP;;',
+        '999999;100;VES;;',
+        '222222;-5;VES;;',
         '222222;100;XYZ;;',
-        `222222;1.000;cop;${RECENT_DAY};`,
+        `222222;1.000;ves;${RECENT_DAY};`,
       ]),
       'saldos.csv',
     ).expect(201);
@@ -307,12 +307,12 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       mergedRows: 1,
       preparedCount: 3,
       fileTotals: [
-        { currency: 'COP', rows: 4, amount: 201100.5 },
         { currency: 'USD', rows: 1, amount: 40 },
+        { currency: 'VES', rows: 4, amount: 201100.5 },
       ],
       validTotals: [
-        { currency: 'COP', rows: 3, amount: 201000.5 },
         { currency: 'USD', rows: 1, amount: 40 },
+        { currency: 'VES', rows: 3, amount: 201000.5 },
       ],
       imported: [],
     });
@@ -337,7 +337,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         'moneda',
         'ERROR',
         expect.stringMatching(
-          /^La moneda «XYZ» no está admitida en la clínica\. Admitidas: .*COP.*USD/,
+          /^La moneda «XYZ» no está admitida en la clínica\. Admitidas: .*USD.*VES/,
         ),
       ],
     ]);
@@ -399,8 +399,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       existing: 0,
     });
     expect(done.balances?.imported).toEqual([
-      { currency: 'COP', count: 2, amount: 201000.5 },
       { currency: 'USD', count: 1, amount: 40 },
+      { currency: 'VES', count: 2, amount: 201000.5 },
     ]);
     expect(done.balances?.imported.map((t) => [t.currency, t.amount])).toEqual(
       done.balances?.validTotals.map((t) => [t.currency, t.amount]),
@@ -413,7 +413,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     expect(st.openingBalances).toEqual([
       {
         id: expect.any(String) as string,
-        currency: 'COP',
+        currency: 'VES',
         amount: 200000.5,
         asOfDate: OLD_DAY,
         asOfDateApproximate: false,
@@ -425,7 +425,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     ]);
     expect(st.summary).toEqual([
       expect.objectContaining({
-        currency: 'COP',
+        currency: 'VES',
         budgeted: 0,
         openingBalance: 200000.5,
         paid: 0,
@@ -437,7 +437,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       expect.objectContaining({
         currency: 'USD',
         amount: 40,
-        asOfDate: bogotaDay(),
+        asOfDate: caracasDay(),
         asOfDateApproximate: true,
         concept: 'Saldo migrado',
       }),
@@ -451,7 +451,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     const row = (id: string) => rows.find((r) => r.patient.id === id);
     expect(row(ana.id)?.currencies).toEqual([
       expect.objectContaining({
-        currency: 'COP',
+        currency: 'VES',
         balance: 200000.5,
         ageApproximate: false,
         buckets: expect.objectContaining({
@@ -493,8 +493,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         balanceRows: 7,
         balanceErrors: 3,
         balanceTotals: [
-          { currency: 'COP', rows: 3, amount: 201000.5 },
           { currency: 'USD', rows: 1, amount: 40 },
+          { currency: 'VES', rows: 3, amount: 201000.5 },
         ],
       },
     });
@@ -517,8 +517,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     const key = '0f5e7a52-8a1c-4a9e-9d61-3b1f0e6c2a10';
     const body = {
       amount: 50000.5,
-      currency: 'COP',
-      paidAt: bogotaDay(),
+      currency: 'VES',
+      paidAt: caracasDay(),
       method: 'TRANSFER',
     };
     const res = await as(
@@ -592,7 +592,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       .send({ ...body, amount: 150000.01 })
       .expect(400);
     expect((over.body as { message: string }).message).toMatch(
-      /^El abono supera lo pendiente del saldo migrado: quedan \$\s150\.000,00\.$/,
+      /^El abono supera lo pendiente del saldo migrado: quedan VES\s150\.000,00\.$/,
     );
     // G1-B (R12): el importe va en el formato de la sede del saldo, no en el
     // de la sede donde se cobra (otra, de-DE y sin reloj: no se le pide).
@@ -654,8 +654,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       undoneCount: 3,
       imported: [],
       undoneTotals: [
-        { currency: 'COP', rows: 2, amount: 201000.5 },
         { currency: 'USD', rows: 1, amount: 40 },
+        { currency: 'VES', rows: 2, amount: 201000.5 },
       ],
     });
     const st = await statementOf(existingId);
@@ -674,8 +674,8 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       importBatch: {
         balancesUndone: 3,
         balanceUndoneTotals: [
-          { currency: 'COP', rows: 2, amount: 201000.5 },
           { currency: 'USD', rows: 1, amount: 40 },
+          { currency: 'VES', rows: 2, amount: 201000.5 },
         ],
       },
     });
@@ -691,7 +691,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     const third = res.body as Batch;
     await attach(
       `/${third.id}/balances`,
-      csv(BALANCES_HEADER, ['444444;70.000;COP;;']),
+      csv(BALANCES_HEADER, ['444444;70.000;VES;;']),
       'saldos3.csv',
     ).expect(201);
     await as(
@@ -754,7 +754,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       const batch = res.body as Batch;
       let req = attach(
         `/${batch.id}/balances`,
-        csv(BALANCES_HEADER, ['555555;80.000;COP;01/09/2026;Cartera']),
+        csv(BALANCES_HEADER, ['555555;80.000;VES;01/09/2026;Cartera']),
         'saldos-dora.csv',
       );
       if (addToExisting !== undefined) {
@@ -788,7 +788,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
         row: 2,
         kind: 'ERROR',
         message: expect.stringMatching(
-          /^Este paciente ya tiene un saldo migrado vivo de \$\s80\.000,00 \(lote «dora-1\.csv» del \d{2}\/\d{2}\/\d{4}, corte 01\/09\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
+          /^Este paciente ya tiene un saldo migrado vivo de VES\s80\.000,00 \(lote «dora-1\.csv» del \d{2}\/\d{2}\/\d{4}, corte 01\/09\/2026\): no se crea otro\. Si es otra deuda, marca «Añadir aunque ya tenga saldo migrado» y vuelve a subir la hoja\.$/,
         ) as string,
       }),
     ]);
@@ -846,7 +846,7 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
     const second = res.body as Batch;
     await attach(
       `/${second.id}/balances`,
-      csv(BALANCES_HEADER, ['333333;10;COP;;']),
+      csv(BALANCES_HEADER, ['333333;10;VES;;']),
       'saldos.csv',
     ).expect(201);
     // DX-451: otra clínica no quita la hoja del lote de A (404) y sigue ahí.
@@ -865,5 +865,45 @@ describe('Saldo migrado — hoja de saldos del importador (DX-262, e2e)', () => 
       api().delete(`/api/v1/patient-imports/${batch.id}/balances`),
       a.adminToken,
     ).expect(409);
+  });
+
+  it('DX-517-quater: el tope del importe de una celda usa el formato de la sede y el texto propio de la moneda', async () => {
+    // Lote propio: no pisa la hoja del lote compartido de las pruebas de arriba.
+    const own = (
+      await attach(
+        '',
+        csv(PATIENTS_HEADER, ['NATIONAL_ID;444444;Rosa;Tope']),
+        'p3.csv',
+      ).expect(201)
+    ).body as Batch;
+    const send = async () => {
+      const res = await attach(
+        `/${own.id}/balances`,
+        csv(BALANCES_HEADER, ['444444;10000000000000;VES;;']),
+        'saldos.csv',
+      ).expect(201);
+      return (res.body as Batch).balanceIssues.map((i) => i.message);
+    };
+    expect(await send()).toEqual([
+      'El importe es demasiado grande (máximo VES\u00a0999.999.999.999,99): revisa la celda.',
+    ]);
+    await raw.tenant.update({
+      where: { id: a.tenantId },
+      data: { currencyTexts: { VES: 'Bs.' } },
+    });
+    try {
+      expect(await send()).toEqual([
+        'El importe es demasiado grande (máximo Bs.\u00a0999.999.999.999,99): revisa la celda.',
+      ]);
+    } finally {
+      await raw.tenant.update({
+        where: { id: a.tenantId },
+        data: { currencyTexts: {} },
+      });
+      await as(
+        api().delete(`/api/v1/patient-imports/${own.id}/balances`),
+        a.adminToken,
+      ).expect(200);
+    }
   });
 });

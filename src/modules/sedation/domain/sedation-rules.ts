@@ -62,10 +62,9 @@ export interface ReversalDoses {
   flumazenilMg: number;
 }
 
-function round(value: number, decimals: number): number {
-  const f = 10 ** decimals;
-  return Math.round(value * f) / f;
-}
+/** Dosis e IMC de sedación (mg, kg/m²), no importes. */
+const roundDose = (value: number, decimals: number): number =>
+  Math.round(value * 10 ** decimals) / 10 ** decimals;
 
 function filled(text: string | null | undefined): boolean {
   return typeof text === 'string' && text.trim().length > 0;
@@ -82,7 +81,7 @@ export function bodyMassIndex(
 ): number | null {
   if (!weightKg || !heightCm) return null;
   const m = heightCm / 100;
-  return round(weightKg / (m * m), 1);
+  return roundDose(weightKg / (m * m), 1);
 }
 
 /** Dosis de los reversores para ese peso, con sus topes. Sin peso, null. */
@@ -91,11 +90,11 @@ export function reversalDoses(
 ): ReversalDoses | null {
   if (!weightKg) return null;
   return {
-    naloxoneMg: round(
+    naloxoneMg: roundDose(
       Math.min(NALOXONE_MG_PER_KG * weightKg, NALOXONE_MAX_MG),
       2,
     ),
-    flumazenilMg: round(
+    flumazenilMg: roundDose(
       Math.min(FLUMAZENIL_MG_PER_KG * weightKg, FLUMAZENIL_MAX_MG),
       3,
     ),

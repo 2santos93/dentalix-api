@@ -1,0 +1,12 @@
+-- DX-015-bis: el índice de la lista de recall (20261212090300) más
+-- "visitLocationId" (20261212090400) en el INCLUDE: la primera etapa de
+-- `recallDueSql` sigue siendo un recorrido SOLO de índice y ya trae la sede
+-- del paciente (sin LATERAL a appointments por candidato). El anterior se
+-- suelta en 20261212090700, después de que exista este (nunca sin índice).
+--
+-- CONCURRENTLY (DB-025): única sentencia del fichero, sin lock_timeout
+-- (DB-078). Aditiva.
+-- Si falla: DROP INDEX CONCURRENTLY IF EXISTS "patient_recalls_tenant_due_visit_idx",
+-- `npx prisma migrate resolve --rolled-back 20261212090600_dx015bis_recall_due_visit_idx`
+-- y repetir `migrate deploy` (el IF NOT EXISTS saltaría un índice INVALID).
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "patient_recalls_tenant_due_visit_idx" ON "patient_recalls" ("tenantId", "dueAt") INCLUDE ("id", "patientId", "recallTypeId", "kind", "intervalMonths", "lastDoneAt", "disabledUntil", "locationId", "visitLocationId") WHERE "active";

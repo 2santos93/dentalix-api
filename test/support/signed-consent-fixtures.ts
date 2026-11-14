@@ -11,7 +11,7 @@ import {
   computeCountersignatureHash,
   computeRemoteConsentHash,
 } from '../../src/modules/consents/domain/consent-hash';
-import { REGIONAL_BOGOTA_FIXTURE, locationData } from './location-fixtures';
+import { REGIONAL_CARACAS_FIXTURE, locationData } from './location-fixtures';
 
 // Clínica, consentimiento firmado a distancia y firma del profesional contra
 // Postgres, para las pruebas de integración del PDF firmado (DX-422) y de su
@@ -41,7 +41,7 @@ export function signedConsentFixtures(deps: {
       data: { name: `Clínica ${subdomain}`, subdomain },
     });
     const location = await owner.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: tenant.id,
         name: `Sede ${subdomain}`,
       }),
@@ -79,8 +79,14 @@ export function signedConsentFixtures(deps: {
   const asClinic = <T>(tenantId: string, fn: () => Promise<T>): Promise<T> =>
     tenantContext.run(tenantId, fn);
 
-  /** Envía, firma (con el hash real) y devuelve el consentimiento a distancia. */
-  async function remoteSigned(s: Seeded): Promise<string> {
+  /**
+   * Envía, firma (con el hash real) y devuelve el consentimiento a distancia.
+   * `text` (DX-459): otro título o texto (p. ej. en otro alfabeto).
+   */
+  async function remoteSigned(
+    s: Seeded,
+    text: { title?: string; body?: string } = {},
+  ): Promise<string> {
     const now = new Date();
     const token = generateSignatureToken();
     const { id } = await asClinic(s.tenantId, () =>
@@ -92,8 +98,10 @@ export function signedConsentFixtures(deps: {
         templateId: s.templateId,
         templateVersion: 1,
         treatmentPlanId: null,
-        title: 'Consentimiento — Exodoncia',
-        body: 'Yo, Ana Int, autorizo la exodoncia.\n\nRiesgos: sangrado, ¿dudas? ¡sí!',
+        title: text.title ?? 'Consentimiento — Exodoncia',
+        body:
+          text.body ??
+          'Yo, Ana Int, autorizo la exodoncia.\n\nRiesgos: sangrado, ¿dudas? ¡sí!',
         professionalUserId: s.userId,
         professionalName: 'Dra. Int',
         signerType: 'PATIENT',

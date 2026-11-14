@@ -9,7 +9,8 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
+  locationData,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 
@@ -29,7 +30,7 @@ const SEEDED_PASSWORD = 'S3cret!!';
 // blank in .env.test (see .env.test / exchange.e2e-spec.ts), so if
 // GetPaymentsTotalsUseCase (invoked via GetDoctorDashboardUseCase) ever fell
 // through to the live provider it would throw instead of silently hitting
-// the network -- the seeded payment below is in COP, so it must hit the
+// the network -- the seeded payment below is in VES, so it must hit the
 // seeded snapshot for RATE_DATE, never OpenExchangeRatesProvider.
 const RATE_DATE = '2026-05-15';
 const RATE_COP = 4000;
@@ -59,6 +60,7 @@ interface AppointmentResponseBody {
   id: string;
   start: string;
   end: string;
+  locationId: string;
 }
 
 interface DashboardIncomesBody {
@@ -80,6 +82,7 @@ interface DashboardUpcomingAppointmentBody {
   start: string;
   end: string;
   status: string;
+  locationId: string;
 }
 
 interface DashboardResponseBody {
@@ -101,7 +104,7 @@ async function registerAndLogin(
 }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,
@@ -204,13 +207,13 @@ describe('Dashboard (e2e)', () => {
 
     await cleanup();
 
-    // Seed the COP snapshot directly via DIRECT_URL so
+    // Seed the VES snapshot directly via DIRECT_URL so
     // GetPaymentsTotalsUseCase -> ConvertAmountUseCase -> GetRatesForDateUseCase's
     // cache-then-fetch finds a row for RATE_DATE and returns immediately
     // (cache hit) -- it never calls OpenExchangeRatesProvider.fetchRates, so
     // this suite needs no network access and no real EXCHANGE_APP_ID.
     await raw.exchangeRateSnapshot.create({
-      data: { date: RATE_DATE, currency: 'COP', rate: RATE_COP },
+      data: { date: RATE_DATE, currency: 'VES', rate: RATE_COP },
     });
   });
 
@@ -247,7 +250,7 @@ describe('Dashboard (e2e)', () => {
       const patient = patientRes.body as PatientResponseBody;
 
       // --- 2. Seed a treatment plan (raw/DIRECT_URL -- no payments REST yet,
-      // that's PAY-T3) then a COP payment against it on RATE_DATE -- converts
+      // that's PAY-T3) then a VES payment against it on RATE_DATE -- converts
       // offline via the seeded snapshot (500000 / 4000 = 125 USD).
       // GetPaymentsTotalsUseCase (invoked via GetDoctorDashboardUseCase) sums
       // every active payment in [from,to) regardless of which plan it
@@ -274,7 +277,7 @@ describe('Dashboard (e2e)', () => {
           treatmentPlanId: plan.id,
           patientId: patient.id,
           amount: 500000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: new Date(`${RATE_DATE}T10:00:00.000Z`),
           method: 'CASH',
         },
@@ -326,7 +329,7 @@ describe('Dashboard (e2e)', () => {
       expect(dash.incomes.currency).toBe('USD');
       expect(dash.incomes.count).toBeGreaterThanOrEqual(1);
       expect(dash.incomes.totalConverted).toBe(125);
-      expect(dash.incomes.byCurrency).toEqual({ COP: 500000 });
+      expect(dash.incomes.byCurrency).toEqual({ VES: 500000 });
 
       expect(dash.lowStockItems.count).toBeGreaterThanOrEqual(1);
       expect(dash.lowStockItems.items.map((i) => i.id)).toContain(item.id);
@@ -335,8 +338,51 @@ describe('Dashboard (e2e)', () => {
         dash.upcomingAppointments.map((a) => ({
           id: a.id,
           start: a.start,
+          locationId: a.locationId,
         })),
-      ).toContainEqual({ id: appointment.id, start: appointment.start });
+      ).toContainEqual({
+        id: appointment.id,
+        start: appointment.start,
+        locationId: locationA.id,
+      });
+
+      // DX-354b: con dos sedes, cada próxima cita trae la suya.
+      const locationA2 = await raw.location.create({
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+          tenantId: clinicA.tenantId,
+          name: 'Sede Norte DX354b',
+        }),
+        select: { id: true },
+      });
+      const secondStart = new Date(futureStart.getTime() + 24 * 60 * 60 * 1000);
+      const secondRes = await request(app.getHttpServer())
+        .post('/api/v1/appointments')
+        .set('X-Tenant-Host', hostFor(subdomainA))
+        .set('Authorization', `Bearer ${clinicA.accessToken}`)
+        .set('X-Location-Id', locationA2.id)
+        .send({
+          patientId: patient.id,
+          providerId: clinicA.userId,
+          start: secondStart.toISOString(),
+          end: new Date(secondStart.getTime() + 30 * 60 * 1000).toISOString(),
+          reason: 'Control norte',
+        })
+        .expect(201);
+      const second = secondRes.body as AppointmentResponseBody;
+      const dashTwoRes = await request(app.getHttpServer())
+        .get(
+          `/api/v1/dashboard?from=${FROM}&to=${TO}&currency=usd&upcomingLimit=5`,
+        )
+        .set('X-Tenant-Host', hostFor(subdomainA))
+        .set('Authorization', `Bearer ${clinicA.accessToken}`)
+        .expect(200);
+      const dashTwo = dashTwoRes.body as DashboardResponseBody;
+      expect(
+        dashTwo.upcomingAppointments.map((a) => [a.id, a.locationId]),
+      ).toEqual([
+        [appointment.id, locationA.id],
+        [second.id, locationA2.id],
+      ]);
 
       expect(dash.patientCount).toBeGreaterThanOrEqual(1);
 
@@ -479,7 +525,7 @@ describe('Dashboard (e2e)', () => {
     );
   });
 
-  // DX-097: el mes se corta a medianoche de la zona de la sede (Bogotá, la
+  // DX-097: el mes se corta a medianoche de la zona de la sede (la
   // del horario con que nace la sede principal), no a medianoche UTC.
   it('el resumen mensual incluye el último día a las 22:00 de la sede y excluye el primero del mes siguiente a las 00:30', async () => {
     const subdomain = 'clinica-dash-tz';
@@ -496,7 +542,7 @@ describe('Dashboard (e2e)', () => {
       data: {
         tenantId: clinic.tenantId,
         patientId: patient.id,
-        currency: 'COP',
+        currency: 'VES',
       },
       select: { id: true },
     });
@@ -512,24 +558,24 @@ describe('Dashboard (e2e)', () => {
           treatmentPlanId: plan.id,
           patientId: patient.id,
           amount,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: new Date(paidAt),
           method: 'CASH',
         },
       });
-    // 31/10 22:00 en Bogotá = 01/11 03:00 UTC -> octubre.
-    await pay(1000, '2026-11-01T03:00:00.000Z');
-    // 01/11 00:30 en Bogotá = 01/11 05:30 UTC -> noviembre.
-    await pay(7, '2026-11-01T05:30:00.000Z');
-    // 01/10 00:30 en Bogotá = 01/10 05:30 UTC -> octubre.
-    await pay(20, '2026-10-01T05:30:00.000Z');
-    // 30/09 23:00 en Bogotá = 01/10 04:00 UTC -> septiembre.
-    await pay(300, '2026-10-01T04:00:00.000Z');
+    // 31/10 22:00 en la zona de la sede = 01/11 02:00 UTC -> octubre.
+    await pay(1000, '2026-11-01T02:00:00.000Z');
+    // 01/11 00:30 en la zona de la sede = 01/11 04:30 UTC -> noviembre.
+    await pay(7, '2026-11-01T04:30:00.000Z');
+    // 01/10 00:30 en la zona de la sede = 01/10 04:30 UTC -> octubre.
+    await pay(20, '2026-10-01T04:30:00.000Z');
+    // 30/09 23:00 en la zona de la sede = 01/10 03:00 UTC -> septiembre.
+    await pay(300, '2026-10-01T03:00:00.000Z');
 
     const dashboard = async (from: string, to: string) =>
       (
         await request(app.getHttpServer())
-          .get(`/api/v1/dashboard?from=${from}&to=${to}&currency=COP`)
+          .get(`/api/v1/dashboard?from=${from}&to=${to}&currency=VES`)
           .set('X-Tenant-Host', hostFor(subdomain))
           .set('Authorization', `Bearer ${clinic.accessToken}`)
           .expect(200)
@@ -538,21 +584,21 @@ describe('Dashboard (e2e)', () => {
     // `to` es exclusivo: octubre = [2026-10-01, 2026-11-01).
     const october = await dashboard('2026-10-01', '2026-11-01');
     expect(october.incomes.count).toBe(2);
-    expect(october.incomes.byCurrency).toEqual({ COP: 1020 });
+    expect(october.incomes.byCurrency).toEqual({ VES: 1020 });
     expect(october.incomes.totalConverted).toBe(1020);
 
     const november = await dashboard('2026-11-01', '2026-12-01');
-    expect(november.incomes.byCurrency).toEqual({ COP: 7 });
+    expect(november.incomes.byCurrency).toEqual({ VES: 7 });
 
     // Un día: el 31/10 de la sede.
     const oct31 = await dashboard('2026-10-31', '2026-11-01');
-    expect(oct31.incomes.byCurrency).toEqual({ COP: 1000 });
+    expect(oct31.incomes.byCurrency).toEqual({ VES: 1000 });
 
     // from = to: período vacío. Día inexistente: 400.
     const empty = await dashboard('2026-10-31', '2026-10-31');
     expect(empty.incomes.count).toBe(0);
     await request(app.getHttpServer())
-      .get('/api/v1/dashboard?from=2026-02-30&to=2026-03-01&currency=COP')
+      .get('/api/v1/dashboard?from=2026-02-30&to=2026-03-01&currency=VES')
       .set('X-Tenant-Host', hostFor(subdomain))
       .set('Authorization', `Bearer ${clinic.accessToken}`)
       .expect(400);

@@ -25,6 +25,7 @@ import { LocationsModule } from '../locations/locations.module';
 import { CollectionsModule } from '../collections/collections.module';
 import { FindOpeningsUseCase } from './application/use-cases/find-openings.use-case';
 import { ListInClinicUseCase } from './application/use-cases/list-in-clinic.use-case';
+import { GetCheckoutChecklistUseCase } from './application/use-cases/get-checkout-checklist.use-case';
 import { PatientAttendanceController } from './presentation/patient-attendance.controller';
 import {
   GetPatientAttendanceUseCase,
@@ -76,6 +77,7 @@ import { ChairAssignmentService } from './application/chair-assignment';
     FindOpeningsUseCase,
     // DX-200: panel «En clínica».
     ListInClinicUseCase,
+    GetCheckoutChecklistUseCase,
     // DX-211: sillón de la cita al agendar o mover.
     ChairAssignmentService,
     TokenService,

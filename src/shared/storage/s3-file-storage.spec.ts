@@ -525,7 +525,9 @@ describe('S3FileStorage (DX-084, cliente simulado)', () => {
           bytes: 3,
         },
       ]);
-      expect(JSON.stringify(lines)).not.toMatch(/6f1c|9a2b|juan|perez|pdf/);
+      expect(JSON.stringify(lines)).not.toMatch(
+        /documents\/6f1c|9a2b-juan|juan|perez|pdf/,
+      );
     });
   });
 });

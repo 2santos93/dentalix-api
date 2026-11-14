@@ -25,6 +25,7 @@ import {
 } from '../../domain/patient-flow';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { PlanItemReservedElsewhere } from '../../domain/entities/appointment.entity';
+import type { ChairSummary } from '../../../chairs/domain/entities/chair.entity';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import type { HourCycle } from '../../../../shared/format/regional-format';
@@ -52,6 +53,9 @@ export interface InClinicItem {
   patientLastName: string | null;
   providerId: string;
   providerName: string | null;
+  /** DX-492: el sillón de la cita. */
+  chairId: string | null;
+  chair: ChairSummary | null;
   start: Date;
   end: Date;
   status: InClinicStatus;
@@ -117,6 +121,8 @@ function toItem(
     patientLastName: a.patientLastName,
     providerId: a.providerId,
     providerName: a.providerName,
+    chairId: a.chairId,
+    chair: a.chair,
     start: a.start,
     end: a.end,
     status: a.status as InClinicStatus,

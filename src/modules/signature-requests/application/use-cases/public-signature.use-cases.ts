@@ -21,7 +21,11 @@ import {
 import { describeDeliveryError } from '../../../notifications/email/application/retry-policy';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
-import { computeAcceptanceHash } from '../../../treatment-plans/domain/plan-quote';
+import {
+  computeAcceptanceHash,
+  withListPriceCurrencies,
+  type QuoteSourceItem,
+} from '../../../treatment-plans/domain/plan-quote';
 import type { QuoteContent } from '../../../treatment-plans/domain/plan-quote';
 import { RemoteBudgetCheck, sentBudget } from '../remote-budget';
 import type {
@@ -40,6 +44,7 @@ import {
   SIGNATURE_CODE_MAX_SENDS,
   SIGNATURE_CODE_TTL_MINUTES,
   codeResendWaitSeconds,
+  SIGNATURE_CODE_RESEND_SECONDS,
   generateSignatureCode,
   hmacSignatureCode,
   signatureCodeExpiry,
@@ -160,7 +165,7 @@ async function findLive(
   }
   const ctx = await repo.findByTokenHash(hashSignatureToken(token));
   if (!ctx || !isLinkUsable(ctx.request, now)) throw invalidLink();
-  if (!(await budgets.isStillValid(ctx.request))) throw invalidLink();
+  if (!(await budgets.isStillValid(ctx.request, now))) throw invalidLink();
   return ctx;
 }
 
@@ -180,7 +185,14 @@ export interface PublicSignatureView {
 
 function viewOf(ctx: PublicSignatureContext, now: Date): PublicSignatureView {
   const { request } = ctx;
-  const wait = codeResendWaitSeconds(request.codeSentAt, now);
+  // DX-425: `codeSentAt` es hora de la BD; el «puede reenviar a las…» se da
+  // como instante absoluto sobre ese mismo reloj (la comprobación real usa
+  // `dbNow` dentro de la transacción).
+  const resendAt = request.codeSentAt
+    ? new Date(
+        request.codeSentAt.getTime() + SIGNATURE_CODE_RESEND_SECONDS * 1000,
+      )
+    : null;
   return {
     type: request.type,
     clinic: ctx.clinic,
@@ -191,7 +203,8 @@ function viewOf(ctx: PublicSignatureContext, now: Date): PublicSignatureView {
       request.codeHash !== null &&
       request.codeExpiresAt !== null &&
       request.codeExpiresAt.getTime() > now.getTime(),
-    resendAvailableAt: wait > 0 ? new Date(now.getTime() + wait * 1000) : null,
+    resendAvailableAt:
+      resendAt && resendAt.getTime() > now.getTime() ? resendAt : null,
     codeSendsLeft: Math.max(
       0,
       SIGNATURE_CODE_MAX_SENDS - request.codeSendCount,
@@ -264,14 +277,14 @@ export class RequestSignatureCodeUseCase {
     const outcome = await this.repo.withLockedRequest<CodeOutcome>(
       ctx.request.id,
       evidence,
-      (request) => {
+      (request, dbNow) => {
         if (!isLinkUsable(request, now)) {
           return { write: null, result: { kind: 'INVALID' } };
         }
         if (request.codeSendCount >= SIGNATURE_CODE_MAX_SENDS) {
           return { write: null, result: { kind: 'MAX' } };
         }
-        const seconds = codeResendWaitSeconds(request.codeSentAt, now);
+        const seconds = codeResendWaitSeconds(request.codeSentAt, dbNow);
         if (seconds > 0) {
           return { write: null, result: { kind: 'WAIT', seconds } };
         }
@@ -280,9 +293,11 @@ export class RequestSignatureCodeUseCase {
           patch: {
             codeHash: hmacSignatureCode(this.codeKey, request.id, code),
             codeExpiresAt: signatureCodeExpiry(now),
-            codeSentAt: now,
+            // DX-425: las horas de la evidencia son las de la BD (`dbNow`); el
+            // trigger las pone igual, esto solo las lleva a la respuesta.
+            codeSentAt: dbNow,
             codeSendCount: request.codeSendCount + 1,
-            openedAt: request.openedAt ?? now,
+            openedAt: request.openedAt ?? dbNow,
           },
           audit: [
             ...(request.openedAt
@@ -383,7 +398,7 @@ export class VerifySignatureCodeUseCase {
     const outcome = await this.repo.withLockedRequest<VerifyOutcome>(
       ctx.request.id,
       evidence,
-      (request) => {
+      (request, dbNow) => {
         if (!isLinkUsable(request, now)) {
           return { write: null, result: { kind: 'INVALID' } };
         }
@@ -407,7 +422,7 @@ export class VerifySignatureCodeUseCase {
               patch: {
                 codeHash: null,
                 codeExpiresAt: null,
-                verifiedAt: request.verifiedAt ?? now,
+                verifiedAt: request.verifiedAt ?? dbNow,
                 sessionHash: hashSignatureToken(session),
                 sessionExpiresAt,
               },
@@ -422,7 +437,7 @@ export class VerifySignatureCodeUseCase {
             write: {
               patch: {
                 failedAttempts,
-                lockedAt: now,
+                lockedAt: dbNow,
                 codeHash: null,
                 codeExpiresAt: null,
                 sessionHash: null,
@@ -533,9 +548,22 @@ export interface PublicSignatureDocument {
   budget: PublicBudgetView | null;
 }
 
-function documentOf(ctx: PublicSignatureContext): PublicSignatureDocument {
+/**
+ * `liveItems` (DX-502): la moneda del catálogo congelada en los ítems del plan
+ * vivo, para completar la de un enlace v2/v3 enviado antes de DX-502. Solo se
+ * pasa cuando el enlace sigue valiendo (el plan vivo es la foto enviada), y no
+ * toca nada de lo sellado: una foto v4 se devuelve tal cual.
+ */
+function documentOf(
+  ctx: PublicSignatureContext,
+  liveItems: readonly Pick<QuoteSourceItem, 'id' | 'listPriceCurrency'>[] = [],
+): PublicSignatureDocument {
   const { request } = ctx;
-  const budget = sentBudget(request);
+  const sent = sentBudget(request);
+  const budget =
+    sent && liveItems.length > 0
+      ? withListPriceCurrencies(sent, liveItems)
+      : sent;
   return {
     type: request.type,
     title: request.title,
@@ -595,7 +623,8 @@ export class GetPublicSignatureDocumentUseCase {
       now,
     );
     if (!sessionMatches(ctx.request, session, now)) throw sessionRequired();
-    return documentOf(ctx);
+    // `findLive` ya comprobó que el enlace sigue valiendo (DX-415).
+    return documentOf(ctx, await this.budgets.listPriceCurrencies(ctx.request));
   }
 }
 
@@ -691,8 +720,14 @@ export class SignPublicSignatureUseCase {
     const outcome = await this.repo.withLockedRequest<SignOutcome>(
       ctx.request.id,
       evidence,
-      (request) => {
-        if (!isLinkUsable(request, now)) {
+      (request, dbNow) => {
+        // El CHECK `signedAt <= expiresAt` compara la hora de la BD con la
+        // caducidad que fijó el reloj de la app: si la BD ya la pasó, es un
+        // enlace caducado, no un error de regla (DX-425).
+        if (
+          !isLinkUsable(request, now) ||
+          dbNow.getTime() > request.expiresAt.getTime()
+        ) {
           return { write: null, result: { kind: 'INVALID' } };
         }
         if (
@@ -716,7 +751,7 @@ export class SignPublicSignatureUseCase {
           signerDocument,
           professionalName: request.professionalName,
           patientSignature: signature,
-          signedAt: now,
+          signedAt: dbNow,
           channel: request.channel,
           destinationMasked: request.destinationMasked,
           sentAt: request.createdAt,
@@ -728,7 +763,7 @@ export class SignPublicSignatureUseCase {
         return {
           write: {
             patch: {
-              signedAt: now,
+              signedAt: dbNow,
               sessionHash: null,
               sessionExpiresAt: null,
               codeHash: null,
@@ -747,7 +782,7 @@ export class SignPublicSignatureUseCase {
               professionalName: request.professionalName,
               patientSignature: signature,
               contentHash,
-              signedAt: now,
+              signedAt: dbNow,
               recordedById: request.createdById,
               ipAddress: evidence.ipAddress,
               userAgent,
@@ -760,7 +795,7 @@ export class SignPublicSignatureUseCase {
           },
           result: {
             kind: 'SIGNED',
-            signedAt: now,
+            signedAt: dbNow,
             contentHash,
             signerDocument,
           },
@@ -794,14 +829,19 @@ export class SignPublicSignatureUseCase {
     evidence: PublicRequestEvidence,
     now: Date,
   ): Promise<PublicSignedCopy> {
-    const stillMatches = await this.budgets.matcher(ctx.request);
+    const stillMatches = await this.budgets.matcher(ctx.request, now);
     let outcome: SignOutcome | null;
     try {
       outcome = await this.repo.withLockedRequest<SignOutcome>(
         ctx.request.id,
         evidence,
-        (request) => {
-          if (!isLinkUsable(request, now)) {
+        (request, dbNow) => {
+          // Ver la nota del CHECK `signedAt <= expiresAt` en la firma del
+          // consentimiento.
+          if (
+            !isLinkUsable(request, now) ||
+            dbNow.getTime() > request.expiresAt.getTime()
+          ) {
             return { write: null, result: { kind: 'INVALID' } };
           }
           const content = sentBudget(request);
@@ -819,12 +859,12 @@ export class SignPublicSignatureUseCase {
             contentHash: request.budgetContentHash,
             signerName: request.signerName,
             signature,
-            acceptedAt: now,
+            acceptedAt: dbNow,
           });
           return {
             write: {
               patch: {
-                signedAt: now,
+                signedAt: dbNow,
                 sessionHash: null,
                 sessionExpiresAt: null,
                 codeHash: null,
@@ -840,7 +880,7 @@ export class SignPublicSignatureUseCase {
                 content,
                 contentHash: request.budgetContentHash,
                 acceptanceHash,
-                acceptedAt: now,
+                acceptedAt: dbNow,
                 acceptedById: request.createdById,
                 ipAddress: evidence.ipAddress,
                 userAgent: evidence.userAgent?.slice(0, 512) ?? null,
@@ -853,7 +893,7 @@ export class SignPublicSignatureUseCase {
             },
             result: {
               kind: 'SIGNED',
-              signedAt: now,
+              signedAt: dbNow,
               contentHash: acceptanceHash,
               signerDocument: request.signerDocument,
             },

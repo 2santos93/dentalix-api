@@ -1,5 +1,10 @@
 import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
 import { isMinor } from '../responsible-parties/majority-age';
+import {
+  majorityReviewState,
+  noticesStayWithPatient,
+  type MajorityReviewRecord,
+} from '../responsible-parties/majority-review';
 
 /**
  * Un responsable del paciente (DX-203) tal como lo ve la regla de destinatario.
@@ -18,6 +23,11 @@ export interface NoticeResponsible {
    * (DX-128): no se le mandan recordatorios automáticos.
    */
   optedOut: boolean;
+  /**
+   * DX-342: alta del responsable. Uno dado de alta antes de la mayoría de
+   * edad del paciente hace que, al cumplirla, sus envíos se revisen.
+   */
+  createdAt: Date;
 }
 
 /**
@@ -44,6 +54,13 @@ export interface NoticeRecipientInput {
   majorityAge: number;
   /** Día civil (YYYY-MM-DD) de la sede. */
   today: string;
+  /** Zona de la sede (la de `today`): el día civil del alta de cada responsable. */
+  timeZone: string;
+  /**
+   * DX-342: última revisión del paso a la mayoría de edad del paciente
+   * (`patient_majority_reviews`), o null si nunca se revisó.
+   */
+  majorityReview: MajorityReviewRecord | null;
   /** Envío automático (recordatorio): respeta la baja del responsable. */
   automatic?: boolean;
 }
@@ -80,6 +97,12 @@ const clean = (email: string | null): string | null => email?.trim() || null;
  * ninguno, al email de la ficha (si lo hay). Un adulto con email recibe los
  * suyos.
  *
+ * DX-342: un paciente que CUMPLIÓ la mayoría de edad con un responsable dado
+ * de alta cuando era menor no los manda al responsable hasta que una revisión
+ * confirme KEEP_RESPONSIBLE: van a su propio email o, sin él, a nadie
+ * (`email: null`, el 422 «sin email» de quien envía). Con PATIENT_SELF,
+ * igual. Un adulto con responsable dado de alta ya adulto sigue con DX-203.
+ *
  * El canal y la baja del PACIENTE (DX-128) los aplica antes quien envía
  * (reminder-eligibility.ts): esto solo decide a quién.
  */
@@ -87,6 +110,23 @@ export function noticeRecipient(input: NoticeRecipientInput): NoticeRecipient {
   const { patient } = input;
   const minor = isMinor(patient.birthDate, input.majorityAge, input.today);
   const own = clean(patient.email);
+  const review = majorityReviewState({
+    birthDate: patient.birthDate,
+    majorityAge: input.majorityAge,
+    today: input.today,
+    timeZone: input.timeZone,
+    responsibles: input.responsibles,
+    review: input.majorityReview,
+  });
+  if (noticesStayWithPatient(review)) {
+    return {
+      kind: 'PATIENT',
+      name: firstNameOnly(patient.firstName),
+      email: own,
+      minor,
+      responsiblePartyId: null,
+    };
+  }
   const candidates = input.responsibles
     .filter((r) => r.receivesNotices && !(input.automatic && r.optedOut))
     .sort((a, b) => Number(b.isPayer) - Number(a.isPayer));

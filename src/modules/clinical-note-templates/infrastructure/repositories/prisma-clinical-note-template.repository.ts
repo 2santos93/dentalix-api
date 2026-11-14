@@ -9,7 +9,20 @@ import type {
   UpdateNoteTemplateRepoInput,
 } from '../../domain/ports/clinical-note-template-repository.port';
 import type { NoteTemplateDraft } from '../../domain/note-template-rules';
-import { DUPLICATE_NOTE_TEMPLATE_MESSAGE } from '../../application/note-template-errors';
+import {
+  DUPLICATE_NOTE_TEMPLATE_MESSAGE,
+  shortcutConflict,
+  staleNoteTemplate,
+} from '../../application/note-template-errors';
+import {
+  duplicateShortcutMessage,
+  findShortcutConflict,
+  shortcutConflictMessage,
+  type ShortcutHolder,
+} from '../../domain/note-template-shortcut';
+
+/** Posiciones de paso (CHECK 0..49; las definitivas son 0..19). */
+const PARKING_POSITION = 20;
 
 const WITH_PROMPTS = {
   prompts: { orderBy: { position: 'asc' } },
@@ -26,7 +39,9 @@ function mapToEntity(row: PrismaTemplate): ClinicalNoteTemplate {
     name: row.name,
     category: row.category,
     body: row.body,
+    shortcut: row.shortcut,
     active: row.active,
+    version: row.version,
     prompts: row.prompts.map((p) => ({
       id: p.id,
       label: p.label,
@@ -40,18 +55,51 @@ function mapToEntity(row: PrismaTemplate): ClinicalNoteTemplate {
   };
 }
 
-/**
- * El único UNIQUE que una escritura puede violar es (tenantId, name). Se
- * traduce aquí porque, bajo RLS, Prisma no informa `meta.target`.
- */
-function rethrowDuplicateName(error: unknown): never {
-  if (
+function isUniqueViolation(error: unknown): boolean {
+  return (
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2002'
-  ) {
-    throw new ConflictException(DUPLICATE_NOTE_TEMPLATE_MESSAGE);
+  );
+}
+
+/**
+ * DX-455: candado de transacción por clínica para los atajos. La regla de
+ * prefijos (#re frente a #resina) no cabe en un índice: dos altas simultáneas
+ * de #re y #resina se serializan aquí y la segunda ve la primera.
+ */
+async function lockShortcuts(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+    hashtext('dx455_note_shortcut'),
+    hashtext(${tenantId})
+  )`;
+}
+
+/**
+ * 409 si `shortcut` choca con el de otra plantilla de la clínica (activa o
+ * no), bajo la RLS de `tx` y con el candado ya tomado.
+ */
+async function assertShortcutFree(
+  tx: Prisma.TransactionClient,
+  shortcut: string,
+  exceptId: string | null,
+): Promise<void> {
+  const rows = await tx.clinicalNoteTemplate.findMany({
+    where: {
+      shortcut: { not: null },
+      ...(exceptId ? { id: { not: exceptId } } : {}),
+    },
+    select: { id: true, name: true, shortcut: true },
+  });
+  const holders: ShortcutHolder[] = rows.flatMap((r) =>
+    r.shortcut ? [{ id: r.id, name: r.name, shortcut: r.shortcut }] : [],
+  );
+  const conflict = findShortcutConflict(shortcut, holders);
+  if (conflict) {
+    throw shortcutConflict(shortcutConflictMessage(shortcut, conflict));
   }
-  throw error;
 }
 
 @Injectable()
@@ -77,6 +125,36 @@ export class PrismaClinicalNoteTemplateRepository implements ClinicalNoteTemplat
       defaultValue: p.defaultValue,
       position,
     }));
+  }
+
+  /**
+   * Dos UNIQUE puede violar una escritura: (tenantId, name) y, DX-455, el
+   * parcial de los atajos ("tenantId", lower("shortcut")). Bajo RLS Prisma no
+   * informa cuál (`meta.target`), así que, si se escribía un atajo, se mira
+   * después (otra transacción, misma RLS) si otra plantilla ya lo tiene. Es la
+   * red de los duplicados exactos: el choque llega casi siempre antes, en la
+   * comprobación bajo candado, con el nombre de la otra plantilla.
+   */
+  private async rethrowDuplicate(
+    error: unknown,
+    shortcut: string | null | undefined,
+    exceptId: string | null,
+  ): Promise<never> {
+    if (!isUniqueViolation(error)) throw error;
+    if (shortcut) {
+      const taken = await this.prisma.runWithTenant(
+        (tx) => tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "clinical_note_templates"
+           WHERE "shortcut" IS NOT NULL
+             AND lower("shortcut") = lower(${shortcut})
+             AND (${exceptId}::uuid IS NULL OR "id" <> ${exceptId}::uuid)
+           LIMIT 1`,
+      );
+      if (taken.length > 0) {
+        throw shortcutConflict(duplicateShortcutMessage(shortcut));
+      }
+    }
+    throw new ConflictException(DUPLICATE_NOTE_TEMPLATE_MESSAGE);
   }
 
   list(params: { includeInactive: boolean }): Promise<ClinicalNoteTemplate[]> {
@@ -111,7 +189,10 @@ export class PrismaClinicalNoteTemplateRepository implements ClinicalNoteTemplat
     const rows = await this.prisma
       .runWithTenant(async (tx) => {
         const created: PrismaTemplate[] = [];
+        if (inputs.some((i) => i.shortcut)) await lockShortcuts(tx, tenantId);
         for (const input of inputs) {
+          if (input.shortcut)
+            await assertShortcutFree(tx, input.shortcut, null);
           created.push(
             await tx.clinicalNoteTemplate.create({
               data: {
@@ -119,6 +200,7 @@ export class PrismaClinicalNoteTemplateRepository implements ClinicalNoteTemplat
                 name: input.name,
                 category: input.category,
                 body: input.body,
+                shortcut: input.shortcut ?? null,
                 active: input.active,
                 createdById: input.createdById,
                 updatedById: input.createdById,
@@ -134,11 +216,25 @@ export class PrismaClinicalNoteTemplateRepository implements ClinicalNoteTemplat
         }
         return created;
       })
-      .catch(rethrowDuplicateName);
+      .catch((error: unknown) =>
+        this.rethrowDuplicate(
+          error,
+          inputs.find((i) => i.shortcut)?.shortcut,
+          null,
+        ),
+      );
     return rows.map(mapToEntity);
   }
 
-  /** Por `id` bajo RLS; el use-case ya comprobó que existe en la clínica. */
+  /**
+   * Por `id` bajo RLS; el use-case ya comprobó que existe en la clínica.
+   *
+   * DX-231: la versión se comprueba y sube con UN `updateMany ... WHERE
+   * version = esperada` al principio de la transacción: si otro PATCH ganó, no
+   * hay fila que tocar y se lanza 409 sin haber escrito nada (el UPDATE además
+   * toma el bloqueo de la fila hasta el commit, así dos PATCH simultáneos con
+   * la misma versión se serializan y el segundo ve la versión nueva).
+   */
   async update(
     id: string,
     input: UpdateNoteTemplateRepoInput,
@@ -146,23 +242,23 @@ export class PrismaClinicalNoteTemplateRepository implements ClinicalNoteTemplat
     const tenantId = this.requireTenantId();
     const row = await this.prisma
       .runWithTenant(async (tx) => {
+        // DX-455: el candado antes que la fila, siempre en el mismo orden.
+        if (input.shortcut) await lockShortcuts(tx, tenantId);
+        const claimed = await tx.clinicalNoteTemplate.updateMany({
+          where: {
+            id,
+            ...(input.expectedVersion !== undefined
+              ? { version: input.expectedVersion }
+              : {}),
+          },
+          data: { version: { increment: 1 } },
+        });
+        if (claimed.count === 0) {
+          throw staleNoteTemplate();
+        }
+        if (input.shortcut) await assertShortcutFree(tx, input.shortcut, id);
         if (input.prompts !== undefined) {
-          // Excepción legítima al borrado lógico: las preguntas son la
-          // configuración de la plantilla, sin datos de pacientes, y nada las
-          // referencia (la evolución guarda su texto compuesto, no las
-          // respuestas). Editar la plantilla las sustituye en la MISMA
-          // transacción; el cambio queda en audit_events.
-          // eslint-disable-next-line no-restricted-syntax
-          await tx.clinicalNoteTemplatePrompt.deleteMany({
-            where: { templateId: id },
-          });
-          await tx.clinicalNoteTemplatePrompt.createMany({
-            data: this.promptRows(input.prompts).map((p) => ({
-              ...p,
-              tenantId,
-              templateId: id,
-            })),
-          });
+          await this.syncPrompts(tx, tenantId, id, input.prompts);
         }
         return tx.clinicalNoteTemplate.update({
           where: { id },
@@ -170,13 +266,74 @@ export class PrismaClinicalNoteTemplateRepository implements ClinicalNoteTemplat
             name: input.name,
             category: input.category,
             body: input.body,
+            shortcut: input.shortcut,
             active: input.active,
             updatedById: input.updatedById,
           },
           include: WITH_PROMPTS,
         });
       })
-      .catch(rethrowDuplicateName);
+      .catch((error: unknown) =>
+        this.rethrowDuplicate(error, input.shortcut, id),
+      );
     return mapToEntity(row);
+  }
+
+  /**
+   * DX-231 (BE-034): upsert por id. Las preguntas que ya eran de la plantilla
+   * conservan su id (una composición en curso con ese id sigue guardándose);
+   * las nuevas se crean y las que ya no vienen se quitan. Un id ajeno o
+   * inexistente cuenta como pregunta nueva. La posición es UNIQUE por
+   * plantilla y el CHECK la limita a 0..49 (como mucho 20 preguntas), así que
+   * las que se quedan pasan primero a 20..39 y luego a la definitiva.
+   */
+  private async syncPrompts(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    templateId: string,
+    prompts: NoteTemplateDraft['prompts'],
+  ): Promise<void> {
+    const existing = await tx.clinicalNoteTemplatePrompt.findMany({
+      where: { templateId },
+      select: { id: true },
+    });
+    const own = new Set(existing.map((p) => p.id));
+    const rows = this.promptRows(prompts).map((row, i) => {
+      const keep = prompts[i].id;
+      return {
+        ...row,
+        keepId: keep !== undefined && own.has(keep) ? keep : null,
+      };
+    });
+    const keptIds = rows.flatMap((r) => (r.keepId ? [r.keepId] : []));
+    // Excepción legítima al borrado lógico: las preguntas son la configuración
+    // de la plantilla, sin datos de pacientes, y nada las referencia (la
+    // evolución guarda su texto compuesto, no las respuestas). El cambio queda
+    // en audit_events.
+    // eslint-disable-next-line no-restricted-syntax
+    await tx.clinicalNoteTemplatePrompt.deleteMany({
+      where: { templateId, id: { notIn: keptIds } },
+    });
+    for (const [i, row] of rows.entries()) {
+      if (row.keepId) {
+        await tx.clinicalNoteTemplatePrompt.update({
+          where: { id: row.keepId },
+          data: { position: PARKING_POSITION + i },
+        });
+      }
+    }
+    for (const row of rows) {
+      const { keepId, ...data } = row;
+      if (keepId) {
+        await tx.clinicalNoteTemplatePrompt.update({
+          where: { id: keepId },
+          data,
+        });
+      } else {
+        await tx.clinicalNoteTemplatePrompt.create({
+          data: { ...data, tenantId, templateId },
+        });
+      }
+    }
   }
 }

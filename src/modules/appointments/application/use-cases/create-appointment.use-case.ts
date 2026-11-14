@@ -7,6 +7,10 @@ import {
   Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import {
+  SCHEDULE_BLOCKED_RACE_MESSAGE,
+  ScheduleBlockedRaceError,
+} from '../../../schedule-blocks/domain/schedule-block-rules';
 import type { ClinicRole } from '@prisma/client';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
@@ -37,8 +41,10 @@ import { endFromDuration } from '../../../appointment-types/domain/appointment-t
 import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import type { ScheduleBlockRepository } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
+import { assertAttendingRole } from '../../../staff/domain/attending';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import { collectWarnings } from '../appointment-warnings';
 import { ChairAssignmentService } from '../chair-assignment';
 import type { Chair } from '../../../chairs/domain/entities/chair.entity';
@@ -240,6 +246,8 @@ export class CreateAppointmentUseCase {
       throw new NotFoundException('Profesional no encontrado');
     }
     assertAttendsAt(provider, target);
+    // DX-161: recepción y asistencia no atienden: no se les agenda.
+    assertAttendingRole(provider);
     return this.createFor({ ...input, providerId }, target, chair);
   }
 
@@ -261,8 +269,13 @@ export class CreateAppointmentUseCase {
         ? await this.schedule.findByLocation(input.locationId)
         : await this.schedule.findForCurrentLocation();
     if (!fitsBusinessHours(input.start, input.end, hours)) {
+      // DX-354: las horas del mensaje, con el formato y el reloj de la sede;
+      // el formato se pide solo si el mensaje lleva horas (día abierto).
+      const source = await this.schedule.formatSourceOf(input.locationId);
       throw new UnprocessableEntityException(
-        businessHoursErrorMessage(input.start, input.end, hours!),
+        businessHoursErrorMessage(input.start, input.end, hours!, () =>
+          requireLocationFormat(source),
+        ),
       );
     }
 
@@ -362,6 +375,11 @@ export class CreateAppointmentUseCase {
           : {}),
       };
     } catch (error) {
+      // DX-149: un bloqueo que no deja agendar se creó a la vez (visto dentro
+      // de la transacción, con el candado de la agenda).
+      if (error instanceof ScheduleBlockedRaceError) {
+        throw new ConflictException(SCHEDULE_BLOCKED_RACE_MESSAGE);
+      }
       const scope = overlapExclusionScope(error);
       if (scope === 'chair' && chair) {
         throw await this.requireChairs().raceConflict(chair.id, input);

@@ -6,6 +6,7 @@ import {
   StatementSnapshot,
 } from '../domain/entities/account-statement.entity';
 import { computeAccountStatement } from './compute-account-statement';
+import type { GetPlanBalanceResult } from '../../payments/application/use-cases/get-plan-balance.use-case';
 
 const TODAY = new Date('2026-03-01T15:00:00.000Z');
 const SEDE = { id: 'loc-1', name: 'Sede Principal' };
@@ -17,7 +18,7 @@ function plan(
   return {
     id,
     status: 'ACCEPTED',
-    currency: 'COP',
+    currency: 'VES',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     billable: 0,
     ...overrides,
@@ -35,7 +36,7 @@ function payment(
     id: `pay-${paymentSeq}`,
     treatmentPlanId,
     amount,
-    currency: 'COP',
+    currency: 'VES',
     paidAt: new Date('2026-02-01T00:00:00.000Z'),
     method: 'CASH',
     paymentMethod: null,
@@ -43,7 +44,7 @@ function payment(
     location: SEDE,
     createdById: 'u-recep',
     createdAt: new Date('2026-02-01T14:00:00.000Z'),
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     voidedAt: null,
     voidedBy: null,
     voidReason: null,
@@ -58,7 +59,7 @@ function paymentPlan(
   return {
     id: `pp-${treatmentPlanId}`,
     treatmentPlanId,
-    currency: 'COP',
+    currency: 'VES',
     status: 'ACTIVE',
     downPayment: 0,
     startDate: new Date('2026-01-15T00:00:00.000Z'),
@@ -88,6 +89,41 @@ function snapshot(partial: Partial<StatementSnapshot>): StatementSnapshot {
 }
 
 describe('computeAccountStatement', () => {
+  it('DX-414: cada línea de un cobro dividido lleva el recibo único; un abono sin recibo, null', () => {
+    const out = computeAccountStatement(
+      snapshot({
+        plans: [plan('tp-1', { billable: 1000 })],
+        payments: [
+          payment('tp-1', 100, {
+            id: 'a',
+            splitId: 'a',
+            receiptNumber: 'PRI-000007',
+          }),
+          payment('tp-1', 50, {
+            id: 'b',
+            splitId: 'a',
+            receiptNumber: 'PRI-000007',
+          }),
+          payment('tp-1', 10, { id: 'c' }),
+        ],
+      }),
+      { today: TODAY },
+    );
+    const byId = new Map(out.movements.map((m) => [m.id, m]));
+    expect(byId.get('a')).toMatchObject({
+      splitLines: 2,
+      receiptNumber: 'PRI-000007',
+    });
+    expect(byId.get('b')).toMatchObject({
+      splitLines: 2,
+      receiptNumber: 'PRI-000007',
+    });
+    expect(byId.get('c')).toMatchObject({
+      splitLines: null,
+      receiptNumber: null,
+    });
+  });
+
   it('returns an empty statement for a patient with no plans or payments', () => {
     const out = computeAccountStatement(snapshot({}), { today: TODAY });
     expect(out).toEqual({
@@ -117,13 +153,15 @@ describe('computeAccountStatement', () => {
 
     expect(out.summary).toEqual([
       {
-        currency: 'COP',
+        currency: 'VES',
         budgeted: 1500.5,
         openingBalance: 0,
         openingPending: 0,
         paid: 300.3,
         creditMovements: 0,
         balance: 1200.2,
+        convertedPaid: 300.3,
+        convertedBalance: 1200.2,
         overdueCount: 0,
         overdueAmount: 0,
         nextInstallment: null,
@@ -141,14 +179,14 @@ describe('computeAccountStatement', () => {
     const out = computeAccountStatement(
       snapshot({
         plans: [
-          plan('tp-cop', { billable: 1000 }),
+          plan('tp-ves', { billable: 1000 }),
           plan('tp-usd', { currency: 'USD', billable: 200 }),
         ],
         payments: [
-          payment('tp-cop', 400),
+          payment('tp-ves', 400),
           payment('tp-usd', 50, { currency: 'USD' }),
-          // Abono en USD contra un plan en COP: suma a USD, no al plan COP.
-          payment('tp-cop', 10, { currency: 'USD' }),
+          // Abono en USD contra un plan en VES: suma a USD, no al plan VES.
+          payment('tp-ves', 10, { currency: 'USD' }),
         ],
       }),
       { today: TODAY },
@@ -157,11 +195,11 @@ describe('computeAccountStatement', () => {
     expect(
       out.summary.map((s) => [s.currency, s.budgeted, s.paid, s.balance]),
     ).toEqual([
-      ['COP', 1000, 400, 600],
       ['USD', 200, 60, 140],
+      ['VES', 1000, 400, 600],
     ]);
-    const cop = out.plans.find((p) => p.id === 'tp-cop');
-    expect(cop).toMatchObject({
+    const ves = out.plans.find((p) => p.id === 'tp-ves');
+    expect(ves).toMatchObject({
       paid: 400,
       balance: 600,
       paidOtherCurrencies: [{ currency: 'USD', amount: 10 }],
@@ -466,21 +504,21 @@ describe('computeAccountStatement', () => {
       snapshot({
         plans: [plan('tp-1', { billable: 1000 })],
         payments: [
-          // 31/01 23:00 en Bogotá (01/02 04:00 UTC): fuera.
+          // 31/01 23:00 en la zona de la sede (01/02 03:00 UTC): fuera.
           payment('tp-1', 100, {
-            paidAt: new Date('2026-02-01T04:00:00.000Z'),
+            paidAt: new Date('2026-02-01T03:00:00.000Z'),
           }),
-          // 01/02 00:30 en Bogotá: dentro.
+          // 01/02 00:30 en la zona de la sede: dentro.
           payment('tp-1', 200, {
-            paidAt: new Date('2026-02-01T05:30:00.000Z'),
+            paidAt: new Date('2026-02-01T04:30:00.000Z'),
           }),
-          // 28/02 22:00 en Bogotá (01/03 03:00 UTC): dentro.
+          // 28/02 22:00 en la zona de la sede (01/03 02:00 UTC): dentro.
           payment('tp-1', 300, {
-            paidAt: new Date('2026-03-01T03:00:00.000Z'),
+            paidAt: new Date('2026-03-01T02:00:00.000Z'),
           }),
-          // 01/03 00:30 en Bogotá: fuera.
+          // 01/03 00:30 en la zona de la sede: fuera.
           payment('tp-1', 400, {
-            paidAt: new Date('2026-03-01T05:30:00.000Z'),
+            paidAt: new Date('2026-03-01T04:30:00.000Z'),
           }),
         ],
       }),
@@ -522,7 +560,7 @@ describe('computeAccountStatement', () => {
     ): StatementOpeningBalanceRow {
       return {
         id,
-        currency: 'COP',
+        currency: 'VES',
         amount,
         asOfDate: '2025-12-15',
         asOfDateApproximate: false,
@@ -543,13 +581,15 @@ describe('computeAccountStatement', () => {
       );
       expect(out.summary).toEqual([
         {
-          currency: 'COP',
+          currency: 'VES',
           budgeted: 1000,
           openingBalance: 250.5,
           openingPending: 250.5,
           paid: 300,
           creditMovements: 0,
           balance: 950.5,
+          convertedPaid: 300,
+          convertedBalance: 950.5,
           overdueCount: 0,
           overdueAmount: 0,
           nextInstallment: null,
@@ -558,7 +598,7 @@ describe('computeAccountStatement', () => {
       expect(out.openingBalances).toEqual([
         {
           id: 'ob-1',
-          currency: 'COP',
+          currency: 'VES',
           amount: 250.5,
           asOfDate: '2025-12-15',
           asOfDateApproximate: false,
@@ -578,7 +618,7 @@ describe('computeAccountStatement', () => {
               currency: 'USD',
               asOfDateApproximate: true,
             }),
-            opening('ob-cop', 150000),
+            opening('ob-ves', 150000),
           ],
         }),
         { today: TODAY },
@@ -586,13 +626,13 @@ describe('computeAccountStatement', () => {
       expect(
         out.summary.map((s) => [s.currency, s.openingBalance, s.balance]),
       ).toEqual([
-        ['COP', 150000, 150000],
         ['USD', 40, 40],
+        ['VES', 150000, 150000],
       ]);
       // Del más antiguo al más reciente y, a igual fecha, por moneda.
       expect(out.openingBalances.map((o) => o.id)).toEqual([
-        'ob-cop',
         'ob-usd',
+        'ob-ves',
       ]);
     });
 
@@ -646,6 +686,39 @@ describe('computeAccountStatement — saldo a favor (DX-253)', () => {
   const cancelled = plan('origen', { status: 'CANCELLED', billable: 500_000 });
   const live = plan('destino', { billable: 400_000 });
 
+  it('DX-432: un abono de referencia de una devolución lleva el motivo por el que no se anula; el resto, null', () => {
+    const referenced = payment('origen', 300_000, {
+      refundNumber: 'DEV-CCS-000007',
+    });
+    const free = payment('origen', 10);
+    const out = computeAccountStatement(
+      snapshot({ plans: [cancelled], payments: [referenced, free] }),
+      { today: TODAY },
+    );
+    const byId = new Map(out.movements.map((m) => [m.id, m]));
+    expect(byId.get(referenced.id)?.voidBlockedReason).toMatch(
+      /referencia de la devolución DEV-CCS-000007/,
+    );
+    expect(byId.get(free.id)?.voidBlockedReason).toBeNull();
+  });
+
+  it('DX-432: en un cobro dividido, todas las líneas llevan el motivo si alguna respalda una devolución', () => {
+    const head = payment('origen', 200, {
+      splitId: 'sp-1',
+      refundNumber: 'DEV-CCS-000003',
+    });
+    const sibling = payment('origen', 100, { splitId: 'sp-1' });
+    const other = payment('origen', 50, { splitId: 'sp-2' });
+    const out = computeAccountStatement(
+      snapshot({ plans: [cancelled], payments: [head, sibling, other] }),
+      { today: TODAY },
+    );
+    const byId = new Map(out.movements.map((m) => [m.id, m]));
+    expect(byId.get(head.id)?.voidBlockedReason).toMatch(/DEV-CCS-000003/);
+    expect(byId.get(sibling.id)?.voidBlockedReason).toMatch(/DEV-CCS-000003/);
+    expect(byId.get(other.id)?.voidBlockedReason).toBeNull();
+  });
+
   it('traspaso: el origen cancelado queda con 100.000 a favor y el destino baja 200.000, sin tocar los abonos', () => {
     const paid = payment('origen', 300_000);
     const out = computeAccountStatement(
@@ -653,8 +726,8 @@ describe('computeAccountStatement — saldo a favor (DX-253)', () => {
         plans: [cancelled, live],
         payments: [paid],
         creditEntries: [
-          { treatmentPlanId: 'origen', currency: 'COP', amount: -200_000 },
-          { treatmentPlanId: 'destino', currency: 'COP', amount: 200_000 },
+          { treatmentPlanId: 'origen', currency: 'VES', amount: -200_000 },
+          { treatmentPlanId: 'destino', currency: 'VES', amount: 200_000 },
         ],
       }),
       { today: TODAY },
@@ -677,7 +750,7 @@ describe('computeAccountStatement — saldo a favor (DX-253)', () => {
     ]);
     // Traspaso dentro del paciente: el saldo total no cambia (400.000 − 300.000).
     expect(out.summary[0]).toMatchObject({
-      currency: 'COP',
+      currency: 'VES',
       paid: 300_000,
       creditMovements: 0,
       balance: 100_000,
@@ -690,7 +763,7 @@ describe('computeAccountStatement — saldo a favor (DX-253)', () => {
         plans: [cancelled],
         payments: [payment('origen', 300_000)],
         creditEntries: [
-          { treatmentPlanId: 'origen', currency: 'COP', amount: -300_000 },
+          { treatmentPlanId: 'origen', currency: 'VES', amount: -300_000 },
         ],
       }),
       { today: TODAY },
@@ -709,7 +782,7 @@ describe('computeAccountStatement — saldo a favor (DX-253)', () => {
         plans: [plan('p', { billable: 300 })],
         payments: [payment('p', 50, { voidedAt: TODAY })],
         paymentPlans: [paymentPlan('p')],
-        creditEntries: [{ treatmentPlanId: 'p', currency: 'COP', amount: 100 }],
+        creditEntries: [{ treatmentPlanId: 'p', currency: 'VES', amount: 100 }],
       }),
       { today: TODAY },
     );
@@ -719,5 +792,196 @@ describe('computeAccountStatement — saldo a favor (DX-253)', () => {
       'OVERDUE',
       'PENDING',
     ]);
+  });
+});
+
+describe('computeAccountStatement con el saldo de cada plan (DX-472)', () => {
+  const figures = (
+    overrides: Partial<GetPlanBalanceResult>,
+  ): GetPlanBalanceResult => ({
+    planCurrency: 'USD',
+    billable: 100,
+    paid: 0,
+    creditMovements: 0,
+    balance: 100,
+    paymentsCount: 1,
+    paymentsWithoutRate: [],
+    rateProviderTimedOut: false,
+    ...overrides,
+  });
+  const tramos: StatementPaymentPlanRow = {
+    id: 'pp-1',
+    treatmentPlanId: 'p1',
+    currency: 'USD',
+    status: 'ACTIVE',
+    downPayment: 0,
+    startDate: new Date('2026-01-15T00:00:00.000Z'),
+    installments: [
+      {
+        sequence: 1,
+        dueDate: new Date('2026-01-15T00:00:00.000Z'),
+        amount: 50,
+      },
+      {
+        sequence: 2,
+        dueDate: new Date('2026-02-15T00:00:00.000Z'),
+        amount: 50,
+      },
+    ],
+  };
+  const snapshot = (): StatementSnapshot => ({
+    plans: [plan('p1', { currency: 'USD', billable: 100 })],
+    payments: [payment('p1', 3600, { currency: 'VES' })],
+    paymentPlans: [tramos],
+  });
+
+  it('un abono en otra moneda cuenta convertido en el plan, en el resumen y en las cuotas', () => {
+    const out = computeAccountStatement(snapshot(), {
+      today: TODAY,
+      planBalances: new Map([['p1', figures({ paid: 60, balance: 40 })]]),
+    });
+
+    expect(out.plans[0]).toMatchObject({
+      budgeted: 100,
+      billable: 100,
+      paid: 60,
+      balance: 40,
+      // Lo entregado sigue a la vista, en campo aparte.
+      paidOtherCurrencies: [{ currency: 'VES', amount: 3600 }],
+    });
+    expect(out.summary).toEqual([
+      expect.objectContaining({
+        currency: 'USD',
+        budgeted: 100,
+        paid: 0,
+        balance: 100,
+        convertedPaid: 60,
+        convertedBalance: 40,
+      }),
+      expect.objectContaining({
+        currency: 'VES',
+        paid: 3600,
+        balance: -3600,
+        convertedPaid: 0,
+        convertedBalance: 0,
+      }),
+    ]);
+    expect(out.installments.map((i) => i.covered)).toEqual([50, 10]);
+    expect(out.installments.map((i) => i.status)).toEqual(['PAID', 'OVERDUE']);
+    // Lo entregado en la moneda original sigue en los movimientos.
+    expect(out.movements[0]).toMatchObject({ amount: 3600, currency: 'VES' });
+  });
+
+  it('un plan cancelado: billable 0 aunque budgeted conserve lo presupuestado', () => {
+    const out = computeAccountStatement(
+      {
+        ...snapshot(),
+        plans: [
+          plan('p1', { status: 'CANCELLED', currency: 'USD', billable: 100 }),
+        ],
+        paymentPlans: [],
+      },
+      {
+        today: TODAY,
+        planBalances: new Map([
+          ['p1', figures({ billable: 0, paid: 60, balance: -60 })],
+        ]),
+      },
+    );
+    expect(out.plans[0]).toMatchObject({
+      budgeted: 100,
+      billable: 0,
+      paid: 60,
+      balance: -60,
+    });
+    expect(out.summary[0]).toMatchObject({
+      budgeted: 0,
+      convertedPaid: 60,
+      convertedBalance: -60,
+    });
+  });
+
+  it('con el proveedor colgado: lo no convertido no suma, se avisa y nada sale vencido', () => {
+    const missing = {
+      paymentId: 'x',
+      amount: 3600,
+      currency: 'VES',
+      paidOn: '2026-02-01',
+    };
+    const out = computeAccountStatement(snapshot(), {
+      today: TODAY,
+      planBalances: new Map([
+        [
+          'p1',
+          figures({
+            paymentsWithoutRate: [missing],
+            rateProviderTimedOut: true,
+          }),
+        ],
+      ]),
+    });
+    expect(out.plans[0]).toMatchObject({
+      paid: 0,
+      balance: 100,
+      paymentsWithoutRate: [missing],
+      rateProviderTimedOut: true,
+    });
+    expect(out.installments.map((i) => i.status)).toEqual([
+      'PENDING',
+      'PENDING',
+    ]);
+    expect(out.summary[0]).toMatchObject({ overdueCount: 0, overdueAmount: 0 });
+  });
+
+  it('con el proveedor colgado, la próxima cuota nunca es una de fecha pasada', () => {
+    const out = computeAccountStatement(
+      {
+        ...snapshot(),
+        paymentPlans: [
+          {
+            ...tramos,
+            installments: [
+              ...tramos.installments,
+              {
+                sequence: 3,
+                dueDate: new Date('2026-04-15T00:00:00.000Z'),
+                amount: 50,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        today: TODAY,
+        planBalances: new Map([
+          ['p1', figures({ rateProviderTimedOut: true })],
+        ]),
+      },
+    );
+    expect(out.summary[0].nextInstallment).toMatchObject({ sequence: 3 });
+  });
+
+  it('un abono a un saldo migrado no se convierte: suma en su moneda', () => {
+    const out = computeAccountStatement(
+      {
+        ...snapshot(),
+        payments: [
+          payment('p1', 3600, { currency: 'VES' }),
+          payment('', 20, {
+            currency: 'VES',
+            treatmentPlanId: null,
+            openingBalanceId: 'ob-1',
+          }),
+        ],
+      },
+      {
+        today: TODAY,
+        planBalances: new Map([['p1', figures({ paid: 60, balance: 40 })]]),
+      },
+    );
+    expect(out.summary.find((s) => s.currency === 'VES')).toMatchObject({
+      paid: 3620,
+      convertedPaid: 20,
+    });
   });
 });

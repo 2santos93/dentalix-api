@@ -35,7 +35,7 @@ import { OptOutByMessageUseCase } from '../src/modules/reminders/application/use
 import { CapturingMailer } from './support/capture-mailer';
 import { waitFor } from './support/wait-for';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   g1LocationInsert,
   locationData,
@@ -76,7 +76,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: `Clínica ${subdomain}`, subdomain },
   });
   const location = await owner.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Centro',
       address: 'Calle 1 # 2-3',
@@ -263,6 +263,95 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     await owner.locationReminderSettings.deleteMany({ where });
   });
 
+  describe('DX-497: idioma preferido del paciente', () => {
+    // Los enlaces de baja de estos envíos no cuentan para los casos que vienen
+    // detrás (el de [48, 2] cuenta los de la clínica).
+    afterEach(() =>
+      owner.reminderOptOutLink.deleteMany({
+        where: { tenantId: clinicA.tenantId },
+      }),
+    );
+
+    async function sendOne(preferredLanguage: string | null) {
+      await configure(clinicA, [2]);
+      const start = new Date(Date.now() + 2 * HOUR + 5 * MIN);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, 'carolina.duque@example.com', {
+          preferredLanguage,
+        }),
+        start,
+      );
+      await sweep();
+      await releaseDue(clinicA.tenantId);
+      await waitFor(() => mailer.sent.length === 1, 'el despachador entrega 1');
+      const [outbound] = await owner.outboundMessage.findMany({
+        where: { appointmentId: id },
+      });
+      const view = await a
+        .get(TenantContextService)
+        .run(clinicA.tenantId, () =>
+          a.get(GetAppointmentRemindersUseCase).execute(id),
+        );
+      return { start, outbound, email: mailer.sent[0], view };
+    }
+
+    it('en: asunto y cuerpo en inglés; fecha y hora con el locale y la zona de la sede', async () => {
+      const { start, outbound, email, view } = await sendOne('en');
+      expect(email.subject).toBe(
+        `Reminder: your appointment at Clínica ${SUBDOMAINS[0]}`,
+      );
+      expect(email.text).toContain('Hello Carolina,');
+      // DX-315: la fecha sigue la sede (es-VE, Caracas), no el idioma.
+      expect(email.text).toContain(
+        `Date and time: ${startsAtLabel(
+          start,
+          REGIONAL_CARACAS_FIXTURE.timeZone,
+          regionalFormat(REGIONAL_CARACAS_FIXTURE),
+        )} (local time at the clinic)`,
+      );
+      expect(email.html).toContain('<html lang="en">');
+      expect(outbound).toMatchObject({
+        language: 'en',
+        languageFallbackFrom: null,
+      });
+      expect(view.items[0]).toMatchObject({
+        state: 'SENT',
+        language: 'en',
+        languageFallbackFrom: null,
+      });
+    });
+
+    it('ca sin catálogo: sale en el idioma de la clínica y el registro dice ca → es', async () => {
+      const { outbound, email, view } = await sendOne('ca');
+      expect(email.subject).toBe(
+        `Recordatorio de tu cita en Clínica ${SUBDOMAINS[0]}`,
+      );
+      expect(outbound).toMatchObject({
+        language: 'es',
+        languageFallbackFrom: 'ca',
+      });
+      expect(view.items[0]).toMatchObject({
+        language: 'es',
+        languageFallbackFrom: 'ca',
+      });
+    });
+
+    it('sin preferencia: el de la clínica, sin caída', async () => {
+      const { outbound } = await sendOne(null);
+      expect(outbound).toMatchObject({
+        language: 'es',
+        languageFallbackFrom: null,
+      });
+    });
+
+    it('la BD rechaza un idioma con formato no válido (CHECK)', async () => {
+      await expect(
+        patient(clinicA, null, { preferredLanguage: 'English' }),
+      ).rejects.toThrow(/patients_preferred_language_check/);
+    });
+  });
+
   it('con [48, 2] una cita recibe exactamente 2 emails aunque el barrido corra varias veces y en dos workers', async () => {
     await configure(clinicA, [48, 2]);
     const email = 'carolina.duque@example.com';
@@ -321,8 +410,8 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     expect(text).toContain(
       `Fecha y hora: ${startsAtLabel(
         start,
-        REGIONAL_BOGOTA_FIXTURE.timeZone,
-        regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+        REGIONAL_CARACAS_FIXTURE.timeZone,
+        regionalFormat(REGIONAL_CARACAS_FIXTURE),
       )} (hora de la sede)`,
     );
     expect(text).toContain('Sede: Sede Centro (Calle 1 # 2-3)');
@@ -640,6 +729,154 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
     } finally {
       markSent.mockRestore();
     }
+  });
+
+  describe('DX-272 · un solo email aunque el worker pierda la reserva', () => {
+    const payloadOf = (id: string, start: Date) => ({
+      appointmentId: id,
+      leadHours: 2,
+      start: start.toISOString(),
+    });
+
+    const attempt = (
+      app: TestingModule,
+      tenantId: string,
+      payload: ReturnType<typeof payloadOf>,
+      signal: AbortSignal,
+    ) =>
+      app.get(TenantContextService).run(tenantId, () =>
+        app.get(SendAppointmentReminder).handle(payload, {
+          jobId: randomUUID(),
+          attempt: 1,
+          maxAttempts: 5,
+          tenantId,
+          signal,
+        }),
+      );
+
+    /** Una puerta: `reached` avisa de que el intento llegó, `open` lo suelta. */
+    function gate() {
+      let reached!: () => void;
+      let open!: () => void;
+      const hit = new Promise<void>((resolve) => (reached = resolve));
+      const released = new Promise<void>((resolve) => (open = resolve));
+      return { hit, released, reached, open };
+    }
+
+    async function seedTwoHours() {
+      await configure(clinicA, [2]);
+      const start = new Date(Date.now() + 2 * HOUR);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, 'ana@example.com'),
+        start,
+      );
+      return { id, start };
+    }
+
+    it('el worker A queda detenido justo antes de encolar, B retoma y termina: A encola después y sigue habiendo UN email', async () => {
+      const { id, start } = await seedTwoHours();
+      const door = gate();
+      const original = a.get(EmailOutbox).enqueue.bind(a.get(EmailOutbox));
+      const enqueue = jest
+        .spyOn(a.get(EmailOutbox), 'enqueue')
+        .mockImplementation(async (input) => {
+          door.reached();
+          await door.released;
+          return original(input);
+        });
+      try {
+        const stalled = attempt(
+          a,
+          clinicA.tenantId,
+          payloadOf(id, start),
+          new AbortController().signal,
+        );
+        await door.hit;
+        // B retoma el mismo trabajo: ve el outbound de A sin email en la
+        // cola y lo encola él.
+        await attempt(
+          b,
+          clinicA.tenantId,
+          payloadOf(id, start),
+          new AbortController().signal,
+        );
+        expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+        door.open();
+        await stalled;
+        expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+        expect((await records(id)).map((r) => r.status)).toEqual(['SENT']);
+        await waitFor(() => mailer.sent.length === 1, 'sale un solo email');
+      } finally {
+        enqueue.mockRestore();
+      }
+    });
+
+    it('si A pierde la reserva mientras trabaja, no encola nada al reanudar', async () => {
+      const { id, start } = await seedTwoHours();
+      const door = gate();
+      const lease = new AbortController();
+      const record = a
+        .get(OutboundMessages)
+        .record.bind(a.get(OutboundMessages));
+      const recordSpy = jest
+        .spyOn(a.get(OutboundMessages), 'record')
+        .mockImplementation(async (...args) => {
+          const created = await record(...args);
+          door.reached();
+          await door.released;
+          return created;
+        });
+      const enqueue = jest.spyOn(a.get(EmailOutbox), 'enqueue');
+      try {
+        const stalled = attempt(
+          a,
+          clinicA.tenantId,
+          payloadOf(id, start),
+          lease.signal,
+        );
+        await door.hit;
+        lease.abort();
+        await attempt(
+          b,
+          clinicA.tenantId,
+          payloadOf(id, start),
+          new AbortController().signal,
+        );
+        door.open();
+        await expect(stalled).rejects.toThrow('Intento abortado');
+        expect(enqueue).not.toHaveBeenCalled();
+        expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+        // El intento que perdió la reserva no cierra el recordatorio como
+        // fallido: el del worker B quedó SENT.
+        expect((await records(id)).map((r) => r.status)).toEqual(['SENT']);
+      } finally {
+        recordSpy.mockRestore();
+        enqueue.mockRestore();
+      }
+    });
+
+    it('cita reprogramada: la hora nueva es otra ventana y su recordatorio sí sale', async () => {
+      const { id, start } = await seedTwoHours();
+      const live = new AbortController().signal;
+      await attempt(a, clinicA.tenantId, payloadOf(id, start), live);
+      // Reenvío del mismo trabajo (misma ventana): no duplica.
+      await attempt(b, clinicA.tenantId, payloadOf(id, start), live);
+      expect(await reminderEmails(clinicA.tenantId)).toBe(1);
+
+      const moved = new Date(start.getTime() + 24 * HOUR);
+      await owner.appointment.update({
+        where: { id },
+        data: { start: moved, end: new Date(moved.getTime() + 30 * MIN) },
+      });
+      clock.current = new Date(moved.getTime() - 2 * HOUR - MIN);
+      await attempt(a, clinicA.tenantId, payloadOf(id, moved), live);
+      expect(await reminderEmails(clinicA.tenantId)).toBe(2);
+      expect((await records(id)).map((r) => r.status)).toEqual([
+        'SENT',
+        'SENT',
+      ]);
+    });
   });
 
   it('DX-160: escritura rechaza token ya caducado aunque lectura haya sido pendiente', async () => {
@@ -1164,7 +1401,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
         version: 1,
         noticeHours: 24,
         suggestedFee: 50000,
-        currency: 'COP',
+        currency: 'USD',
         patientText: 'Avísanos con 24 horas.',
         createdById: clinicA.providerId,
       },
@@ -1300,7 +1537,8 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       expect(text).toContain(
         'Fecha y hora: miércoles 10 de marzo de 2027 a las 3:05 p. m. (hora de la sede)',
       );
-      expect(text).toContain('un cargo de ￥3,000.');
+      // DX-517-bis: el texto del email conserva el espacio duro del importe.
+      expect(text).toContain('un cargo de JPY\u00a03,000.');
     });
 
     it('reminder for a location without hourCycle is not sent', async () => {
@@ -1389,7 +1627,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       const none = await book('bea@example.com', { contactChannel: 'NONE' });
       const whatsapp = await book('cami@example.com', {
         contactChannel: 'WHATSAPP',
-        phone: '+573101234567',
+        phone: '+584141234567',
       });
       const optedOut = await book('dani@example.com', {
         reminderOptOutAt: new Date(Date.now() - HOUR),
@@ -1412,7 +1650,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       await configure(clinicA, [2]);
       const start = new Date(Date.now() + 2 * HOUR + 3 * MIN);
       const patientId = await patient(clinicA, 'ana@example.com', {
-        phone: '310 555 0001',
+        phone: '414 555 0001',
       });
       const id = await appointment(clinicA, patientId, start);
       await sweep(); // encolado para su hora (dentro de 3 min)
@@ -1422,7 +1660,7 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       const before = Date.now();
       const result = await a.get(OptOutByMessageUseCase).execute({
         tenantId: clinicA.tenantId,
-        fromPhone: '573105550001',
+        fromPhone: '584145550001',
         text: 'Baja',
       });
       expect(result).toEqual({ isOptOut: true, optedOut: [patientId] });

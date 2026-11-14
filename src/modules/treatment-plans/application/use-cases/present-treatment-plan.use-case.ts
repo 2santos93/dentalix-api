@@ -29,6 +29,8 @@ export class PresentTreatmentPlanUseCase {
    * DRAFT → PRESENTED (DX-040): el presupuesto se le presentó al paciente. Se
    * guarda la hora del servidor y la sede (la del request o la principal),
    * que es desde donde lo sigue recepción. Un plan sin ítems no se presenta.
+   * DX-379 (D-3): el repositorio fija además la validez del presupuesto
+   * (hoy en esa sede + los días del ajuste de la clínica), siempre.
    */
   async execute(id: string): Promise<TreatmentPlan> {
     const at = this.now();

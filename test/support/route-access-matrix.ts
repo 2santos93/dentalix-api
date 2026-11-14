@@ -73,6 +73,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Readiness con BD, sin tenant ni rate limit: loop/informes/DX-023.md.
   'GET /health/ready': PUBLIC,
   'GET /files/avatars/:name': PUBLIC,
+  // DX-019: logo de la clínica (público por diseño, re-escrito al subirlo).
+  'GET /files/logos/:name': PUBLIC,
   // URL firmada del adaptador de disco (solo desarrollo; la firma HMAC es la
   // autorización, y con S3 responde 404): loop/informes/DX-084.md.
   'GET /files/signed': PUBLIC,
@@ -89,6 +91,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // sesión ni clínica; límite propio `subdomain-check` por IP.
   'GET /public/subdomains/:slug/availability': PUBLIC,
   'POST /auth/login': PUBLIC,
+  // DX-021: segundo paso del login (se autentica con el token intermedio).
+  'POST /auth/login/mfa': PUBLIC,
+  'POST /auth/login/mfa/enrollment': PUBLIC,
+  'POST /auth/login/mfa/enrollment/confirm': PUBLIC,
   'POST /auth/refresh': PUBLIC,
   'POST /auth/logout': PUBLIC,
   // DX-010: recuperar la contraseña, en el host de la clínica.
@@ -104,10 +110,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Invitaciones: dentalix-docs/docs/plans/2026-08-01-invitaciones-backend.md;
   // confirmación de cita: loop/informes/DX-005.md.
   'GET /public/tenant/branding': PUBLIC_TENANT,
+  // DX-517-ter: la clínica sale del parámetro `host`, nunca del contexto.
+  'GET /public/tenant/branding/by-host': PUBLIC,
   'GET /public/invitations/:token': PUBLIC_TENANT,
   'POST /public/invitations/:token/accept': PUBLIC_TENANT,
   'GET /public/appointment-confirmations/:token': PUBLIC_TENANT,
   'POST /public/appointment-confirmations/:token': PUBLIC_TENANT,
+  // DX-469: el .ics de la cita del enlace (solo lee).
+  'GET /public/appointment-confirmations/:token/calendar.ics': PUBLIC_TENANT,
+  // DX-437: el paciente pide (o quita) «Avisarme si se libera un hueco antes» desde el enlace.
+  'POST /public/appointment-confirmations/:token/wants-earlier': PUBLIC_TENANT,
   // DX-128: baja de los recordatorios desde el enlace del email (el paciente).
   'GET /public/reminder-opt-outs/:token': PUBLIC_TENANT,
   'POST /public/reminder-opt-outs/:token': PUBLIC_TENANT,
@@ -117,6 +129,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-099: cuestionario de anamnesis por enlace (el paciente, sin sesión).
   'GET /public/medical-history/:token': PUBLIC_TENANT,
   'POST /public/medical-history/:token': PUBLIC_TENANT,
+  'POST /public/medical-history/:token/opened': PUBLIC_TENANT,
   // DX-243: firma a distancia por enlace con código (el paciente, sin sesión).
   'GET /public/sign/:token': PUBLIC_TENANT,
   'POST /public/sign/:token/code': PUBLIC_TENANT,
@@ -130,6 +143,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-443: la copia del PDF firmado por enlace de un solo uso.
   'GET /public/signed-consent-copies/:token': PUBLIC_TENANT,
   'POST /public/signed-consent-copies/:token/download': PUBLIC_TENANT,
+  // DX-467: verificar una receta por el código de su QR impreso.
+  'GET /public/prescriptions/:code': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -137,6 +152,17 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /me': AUTHENTICATED,
   'PATCH /me': AUTHENTICATED,
   'POST /me/password': AUTHENTICATED,
+  // DX-021: verificación en dos pasos de la cuenta propia (sesión de clínica).
+  'GET /me/mfa': EVERY_ROLE,
+  'POST /me/mfa/enrollment': EVERY_ROLE,
+  'POST /me/mfa/enrollment/confirm': EVERY_ROLE,
+  'POST /me/mfa/disable': EVERY_ROLE,
+  'POST /me/mfa/recovery-codes': EVERY_ROLE,
+  'GET /me/mfa/trusted-devices': EVERY_ROLE,
+  'DELETE /me/mfa/trusted-devices': EVERY_ROLE,
+  'DELETE /me/mfa/trusted-devices/:id': EVERY_ROLE,
+  'GET /security-policy': ADMIN_ONLY,
+  'PUT /security-policy': ADMIN_ONLY,
   'POST /me/avatar': AUTHENTICATED,
   'DELETE /me/avatar': AUTHENTICATED,
   'GET /currencies': AUTHENTICATED,
@@ -155,15 +181,19 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /platform/jobs/:id/retry': PLATFORM,
   // MFA del superadmin, exigido para el break-glass: loop/informes/SEC-008.md.
   'GET /platform/mfa': PLATFORM,
-  'POST /platform/mfa/enrollment': PLATFORM,
-  'POST /platform/mfa/enrollment/confirm': PLATFORM,
+  'POST /platform/mfa/recovery-codes': PLATFORM,
 
   // --- Pacientes (demográficos) --------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (PATIENT_ROLES).
   'POST /patients': EVERY_ROLE,
   'GET /patients': EVERY_ROLE,
   'GET /patients/:id': EVERY_ROLE,
+  // DX-224: «¿Quién llama?» (POST: el número va en el cuerpo, no en la URL).
+  'POST /patients/lookup-by-phone': EVERY_ROLE,
   'PATCH /patients/:id': EVERY_ROLE,
+  // DX-484: ficha de texto para el software de imagen (radiografía, cámara
+  // intraoral): la usa el personal clínico, recepción no.
+  'GET /patients/:id/imaging-export.txt': CLINICAL,
   // DX-128: bloque «Comunicaciones». Lo ven todos (el profesional en solo
   // lectura); el canal lo cambian recepción y ADMIN.
   'GET /patients/:id/communication': EVERY_ROLE,
@@ -178,7 +208,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/responsible-parties': EVERY_ROLE,
   'PATCH /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
   'DELETE /patients/:patientId/responsible-parties/:partyId': EVERY_ROLE,
-  // Retención legal de la HC (loop/informes/DX-039.md): archivar, cambiar la
+  // DX-342: paso a la mayoría de edad. Lista y revisión, mostrador (ADMIN +
+  // RECEPTION); el estado del aviso de la ficha, los 4 roles.
+  'GET /patients/coming-of-age': roles('ADMIN', 'RECEPTION'),
+  'GET /patients/:id/majority-review': EVERY_ROLE,
+  'POST /patients/:id/majority-review': roles('ADMIN', 'RECEPTION'),
+  // Retención de la HC (loop/informes/DX-039.md): archivar, cambiar la
   // retención extendida, supresión parcial e historias que salen de
   // retención, solo gestión.
   'DELETE /patients/:id': ADMIN_ONLY,
@@ -187,9 +222,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:id/retention': ADMIN_ONLY,
   'POST /patients/:id/partial-suppression': ADMIN_ONLY,
   'GET /patients/retention/expiring': ADMIN_ONLY,
+  // DX-330: el plazo de conservación lo leen todos; lo cambia gestión.
+  'GET /patients/retention/settings': EVERY_ROLE,
+  'PUT /patients/retention/settings': ADMIN_ONLY,
   // DX-328: la mayoría de edad de la clínica la leen todos; la cambia gestión.
   'GET /patients/settings': EVERY_ROLE,
   'PUT /patients/settings': ADMIN_ONLY,
+  // DX-497: los idiomas de los pacientes los leen todos (el desplegable de la
+  // ficha); los cambia gestión.
+  'GET /patients/languages': EVERY_ROLE,
+  'PUT /patients/languages': ADMIN_ONLY,
   // DX-327: el nombre local de cada tipo de documento lo leen todos (los
   // formularios y la importación lo usan); lo cambia gestión.
   'GET /patients/document-type-names': EVERY_ROLE,
@@ -226,6 +268,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'PUT /patients/:patientId/clinical-entries/:entryId': CLINICAL,
   'DELETE /patients/:patientId/clinical-entries/:entryId': CLINICAL,
+  // DX-540: aviso de registro profesional; lo lee quien firma, lo cambia el ADMIN.
+  'GET /clinical-entries/signing': CLINICAL,
+  'GET /clinical-entries/settings': CLINICAL,
+  'PUT /clinical-entries/settings': ADMIN_ONLY,
   // DX-307: anestesia local en la evolución y catálogo de anestésicos.
   'GET /patients/:patientId/anesthesia': CLINICAL,
   'GET /patients/:patientId/clinical-entries/:entryId/anesthesia': CLINICAL,
@@ -340,6 +386,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /exchange/convert': EVERY_ROLE,
   'GET /exchange/settings': ADMIN_ONLY,
   'PUT /exchange/settings': ADMIN_ONLY,
+  // DX-517: texto propio de cada moneda de la clínica, solo ADMIN.
+  'GET /exchange/currency-texts': ADMIN_ONLY,
+  'PUT /exchange/currency-texts': ADMIN_ONLY,
+  // DX-019: Ajustes › Datos de la clínica.
+  'GET /clinic/settings': ADMIN_ONLY,
+  'PATCH /clinic/settings': ADMIN_ONLY,
+  'POST /clinic/settings/logo': ADMIN_ONLY,
+  'DELETE /clinic/settings/logo': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,
   'POST /exchange/manual-rates': ADMIN_ONLY,
   'PUT /exchange/manual-rates/:id': ADMIN_ONLY,
@@ -424,7 +478,28 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Aceptarlo con firma: desde DX-040 solo quien decide el plan (ADMIN y
   // DENTIST); la asistente lo ve pero no lo acepta en nombre del doctor.
   'GET /patients/:patientId/treatment-plans/:planId/quote': EVERY_ROLE,
+  // DX-379: imprimir (la primera impresión fija la validez): quien lo lee.
+  'POST /patients/:patientId/treatment-plans/:planId/quote/issue': EVERY_ROLE,
   'POST /patients/:patientId/treatment-plans/:planId/acceptance': PLAN_DECIDERS,
+  // DX-379 (C): la vista previa del presupuesto recotizado para firmarlo
+  // vencido: quien lo acepta.
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/reprice-preview':
+    PLAN_DECIDERS,
+  // DX-417: la vista previa de aceptar en parte: quien lo acepta.
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview':
+    PLAN_DECIDERS,
+  // DX-379 (B): «Actualizar precios» (recotizar): los que editan los ítems
+  // del plan (CLINICAL); el tope de descuento por rol lo aplica el caso de uso.
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/preview': CLINICAL,
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/apply': CLINICAL,
+  // DX-379: días de validez del presupuesto. Lo leen los que leen
+  // presupuestos; lo cambia solo ADMIN.
+  'GET /treatment-plan-settings': EVERY_ROLE,
+  'PUT /treatment-plan-settings': ADMIN_ONLY,
+  // DX-448: caducidad y antelación de la oferta de hueco por enlace. La
+  // leen los roles de la agenda; la cambia solo ADMIN.
+  'GET /slot-offer-settings': EVERY_ROLE,
+  'PUT /slot-offer-settings': ADMIN_ONLY,
   // Alternativas A/B, presentar, rechazar y presupuestos por seguir:
   // loop/informes/DX-040.md. Crear una alternativa es preparar el plan
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,
@@ -445,6 +520,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointments': EVERY_ROLE,
   'GET /appointments': EVERY_ROLE,
   'GET /appointments/:id': EVERY_ROLE,
+  // DX-202: la salida del paciente; el saldo solo para los roles de cobro.
+  'GET /appointments/:id/checkout-checklist': EVERY_ROLE,
   'PATCH /appointments/:id': EVERY_ROLE,
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
   // Estado de los recordatorios de la cita (DX-026): quien gestiona la agenda.
@@ -471,6 +548,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /payment-methods': BILLING,
   'POST /payment-methods': ADMIN_ONLY,
   'PATCH /payment-methods/:id': ADMIN_ONLY,
+  // DX-516: ajustes por medio de pago, solo ADMIN.
+  'POST /payment-methods/:id/adjustments': ADMIN_ONLY,
+  'PATCH /payment-methods/:id/adjustments/:adjustmentId': ADMIN_ONLY,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
   // DX-211: sillones de cada sede; leerlos quien agenda, escribirlos ADMIN.
   'GET /chairs': EVERY_ROLE,
@@ -479,6 +559,15 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /chairs/:id': ADMIN_ONLY,
   'POST /chairs/:id/deactivate': ADMIN_ONLY,
   'POST /chairs/:id/reactivate': ADMIN_ONLY,
+  // DX-542: equipos biomédicos por sede y su hoja de vida, solo ADMIN.
+  'GET /equipment': ADMIN_ONLY,
+  'POST /equipment': ADMIN_ONLY,
+  'GET /equipment/maintenance-due': ADMIN_ONLY,
+  'GET /equipment/:id': ADMIN_ONLY,
+  'PATCH /equipment/:id': ADMIN_ONLY,
+  'POST /equipment/:id/retire': ADMIN_ONLY,
+  'POST /equipment/:id/maintenances': ADMIN_ONLY,
+  'POST /equipment/:id/maintenances/:maintenanceId/void': ADMIN_ONLY,
   'GET /payers': EVERY_ROLE,
   'POST /payers': roles('ADMIN', 'RECEPTION'),
   'PATCH /payers/:id': ADMIN_ONLY,
@@ -566,10 +655,19 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /treatment-plans/:id/payments': BILLING,
   'GET /treatment-plans/:id/balance': BILLING,
   'DELETE /payments/:id': BILLING,
+  // DX-389: comprobante del cobro (subida directa y URL firmada).
+  'POST /payments/proofs/upload-url': BILLING,
+  'GET /payments/:id/proof/url': BILLING,
+  // DX-515: el nº de la factura fiscal externa lo ponen los roles de cobro.
+  'PUT /payments/:id/external-invoice-number': BILLING,
   // Recibo de caja (DX-136): loop/informes/DX-136.md.
   'GET /payments/:id/receipt': BILLING,
   'POST /payments/:id/receipt/print': BILLING,
   'POST /payments/:id/receipt/email': BILLING,
+  // DX-401: resumen de los recibos de un período del paciente.
+  'GET /patients/:patientId/payment-receipts/summary': BILLING,
+  'POST /patients/:patientId/payment-receipts/summary/print': BILLING,
+  'POST /patients/:patientId/payment-receipts/summary/email': BILLING,
   // DX-051: ver la imputación de un abono (ADMIN y recepción) y reasignarla
   // (solo ADMIN, spec R10).
   'GET /payments/:id/allocations': BILLING,
@@ -590,7 +688,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // personal de muchos pacientes: solo ADMIN.
   'GET /receivables/aging': BILLING,
   'GET /receivables/aging/summary': BILLING,
+  // DX-430: saldo a favor por paciente, mismo dato financiero que la lista.
+  'GET /receivables/credit-balances': BILLING,
   'GET /receivables/aging.csv': ADMIN_ONLY,
+  // DX-399: cobrado sin imputar / a cuenta (lista de abonos de muchos
+  // pacientes): ADMIN y recepción, también el CSV (sin teléfonos).
+  'GET /reports/unallocated-payments': BILLING,
+  'GET /reports/unallocated-payments.csv': BILLING,
   // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
   // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.
   // DX-253: saldo a favor (loop/informes/DX-253.md): financiero, ADMIN y
@@ -614,11 +718,27 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /reports/production-by-procedure': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure.csv': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure/items': roles('ADMIN', 'DENTIST'),
+  // DX-436: «Huecos recuperados» y su CSV (auditado). Solo ADMIN.
+  'GET /reports/recovered-slots': ADMIN_ONLY,
+  'GET /reports/recovered-slots.csv': ADMIN_ONLY,
+  // DX-481: ocupación por sillón (REPORT_ROLES).
+  'GET /reports/chair-occupancy': ADMIN_ONLY,
+  'GET /reports/chair-occupancy.csv': ADMIN_ONLY,
+  // DX-424: enlaces del paciente (REPORT_ROLES).
+  'GET /reports/patient-links': ADMIN_ONLY,
+  // DX-410: rentabilidad por sede, su CSV y el detalle de cada cifra
+  // (PROFITABILITY_REPORT_ROLES).
+  'GET /reports/profitability': ADMIN_ONLY,
+  'GET /reports/profitability.csv': ADMIN_ONLY,
+  'GET /reports/profitability/lines': ADMIN_ONLY,
   // DX-439: «Pendiente de cerrar». ADMIN todo; DENTIST evolución y
   // tratamiento de sus citas; RECEPTION el desenlace (lo acota el caso de uso).
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'GET /closing-queue/count': roles('ADMIN', 'DENTIST', 'RECEPTION'),
   'POST /closing-queue/dismissals': roles('ADMIN', 'DENTIST', 'RECEPTION'),
+  // DX-503: «Mi día». Los cuatro roles; qué listas cuenta cada uno lo decide
+  // WORK_QUEUE_ROLES, que nunca amplía el @Roles de ninguna lista.
+  'GET /work-queues/summary': EVERY_ROLE,
   // DX-339: agenda de contingencia por sede (PDF de hoy y mañana con los
   // teléfonos de los pacientes): recepción y gestión; la sede la acota el
   // caso de uso (DX-089).
@@ -631,6 +751,28 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'ADMIN',
     'RECEPTION',
   ),
+  // DX-015: recall. La lista de llamada y sus contactos, el mostrador; fijar o
+  // pausar el recall de un paciente, el personal clínico; leer el bloque de la
+  // ficha (sin datos clínicos), los cuatro roles.
+  'GET /recall/due': BILLING,
+  'GET /recall/due/count': BILLING,
+  'POST /recall/:recallId/contacts': BILLING,
+  'GET /patients/:id/recalls': EVERY_ROLE,
+  'PUT /patients/:id/recalls/:kind': CLINICAL,
+  // DX-015-bis (porción 3): «Sin recall configurado», el mostrador como la
+  // lista de vencidos; «Programar recall» con el intervalo por defecto
+  // (D15), también recepción, que no puede usar el PUT.
+  'GET /recall/unconfigured': BILLING,
+  'POST /patients/:id/recalls/default': EVERY_ROLE,
+  // DX-015-bis: los tipos de recall de la clínica (sin datos de pacientes),
+  // los cuatro roles que ven la ficha.
+  'GET /recall-types': EVERY_ROLE,
+  // DX-015-bis (porción 2): gestionarlos (Ajustes › Recall), solo ADMIN,
+  // como los tipos de cita.
+  'POST /recall-types': ADMIN_ONLY,
+  'PATCH /recall-types/:id': ADMIN_ONLY,
+  'DELETE /recall-types/:id': ADMIN_ONLY,
+  'PUT /recall-types/:id/triggers': ADMIN_ONLY,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
   'POST /patients/:id/payment-promises': BILLING,
@@ -640,6 +782,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // ajustes de caja de la clínica, solo ADMIN.
   'GET /cash-sessions/settings': BILLING,
   'PUT /cash-sessions/settings': ADMIN_ONLY,
+  // DX-515: título y leyenda del recibo (clínica y sede), solo ADMIN.
+  'GET /payment-receipts/settings': ADMIN_ONLY,
+  'PUT /payment-receipts/settings': ADMIN_ONLY,
+  'PUT /payment-receipts/settings/locations/:locationId': ADMIN_ONLY,
   'GET /cash-sessions/current': BILLING,
   'POST /cash-sessions/open': BILLING,
   'GET /cash-sessions': BILLING,
@@ -721,6 +867,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-316: calendario de la sede (días hábiles y festivos), solo ADMIN, también
   // para leer (spec G1.5 §6, R9).
   'GET /locations/:id/calendar': ADMIN_ONLY,
+  // DX-358: si un día es festivo, para avisar a quien agenda.
+  'GET /locations/:id/holiday': EVERY_ROLE,
   'PUT /locations/:id/calendar/working-weekdays': ADMIN_ONLY,
   'POST /locations/:id/holidays': ADMIN_ONLY,
   'PATCH /locations/:id/holidays/:holidayId': ADMIN_ONLY,
@@ -738,6 +886,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /staff/:userId/reactivate': ADMIN_ONLY,
   // DX-048: desbloquear el inicio de sesión de un miembro.
   'POST /staff/:userId/login-unlock': ADMIN_ONLY,
+  // DX-021-bis: la verificación en dos pasos de otro miembro.
+  'GET /staff/:userId/mfa': ADMIN_ONLY,
+  'POST /staff/:userId/mfa/reset': ADMIN_ONLY,
   // DX-089: sedes permitidas de un miembro.
   'GET /staff/:userId/locations': ADMIN_ONLY,
   'PUT /staff/:userId/locations': ADMIN_ONLY,

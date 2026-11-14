@@ -10,14 +10,18 @@ import {
 } from './rate-limit.config';
 import { RATE_LIMIT_POLICIES } from './rate-limit.decorator';
 import {
+  brandingHostRateLimitKey,
   passwordRateLimitKey,
   publicTokenRateLimitKey,
   staffActorRateLimitKey,
 } from './rate-limit.keys';
 import { RateLimitGuard } from './rate-limit.guard';
+import { normalizeBrandingHost } from '../../modules/public-branding/application/branding-host';
 
 // Proveedor propio para la configuración: así un test puede sustituirla
-// (`overrideProvider(RATE_LIMIT_CONFIG)`) sin tocar variables de entorno.
+// (`overrideProvider(RATE_LIMIT_CONFIG)`) sin tocar variables de entorno. Lo
+// importa también el módulo de la marca para `BrandingMissLimitInterceptor`
+// (DX-555): es el mismo módulo, así que la sustitución vale para los dos.
 @Module({
   providers: [
     {
@@ -29,7 +33,7 @@ import { RateLimitGuard } from './rate-limit.guard';
   ],
   exports: [RATE_LIMIT_CONFIG],
 })
-class RateLimitConfigModule {}
+export class RateLimitConfigModule {}
 
 function throttlers(
   cfg: RateLimitConfig,
@@ -57,6 +61,7 @@ function throttlers(
     context.switchToHttp().getRequest<{
       headers: Record<string, string | string[] | undefined>;
       params?: Record<string, string | undefined>;
+      query?: Record<string, unknown>;
     }>();
   return [
     // `default` = límite global, por IP, en cada ruta.
@@ -126,6 +131,8 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-467: verificar una receta por el código de su QR, por IP.
+    strict('prescription-verify'),
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>
@@ -144,6 +151,24 @@ function throttlers(
     {
       // SEC-054: leer tasas, un balde por clínica + usuario para las dos rutas.
       ...strict('exchange-rates'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(name, request(context).headers.authorization),
+    },
+    {
+      // DX-555: la marca por host del render de servidor, por IP + host
+      // normalizado (la ruta va FUERA del global con @SkipThrottle). Sus
+      // FALLOS, por IP, los cuenta BrandingMissLimitInterceptor.
+      ...strict('branding-host'),
+      generateKey: (context, ip, name) =>
+        brandingHostRateLimitKey(
+          routePrefix(context, name),
+          ip,
+          normalizeBrandingHost(request(context).query?.host),
+        ),
+    },
+    {
+      // DX-224: «¿Quién llama?», un balde por clínica + usuario.
+      ...strict('caller-lookup'),
       generateKey: (context, _ip, name) =>
         staffActorRateLimitKey(name, request(context).headers.authorization),
     },

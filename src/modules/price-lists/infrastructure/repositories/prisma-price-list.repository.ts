@@ -26,6 +26,7 @@ import {
   PRICE_LIST_LOCATION_TAKEN_MESSAGE,
   PRICE_LIST_NOT_FOUND_MESSAGE,
 } from '../../domain/price-list-rules';
+import { amountText } from '../../../../shared/money/money';
 
 type PrismaPriceList = Prisma.PriceListGetPayload<{
   include: { _count: { select: { items: true } } };
@@ -362,6 +363,9 @@ export class PrismaPriceListRepository implements PriceListRepository {
         if (locked.length === 0) {
           throw new NotFoundException(PRICE_LIST_NOT_FOUND_MESSAGE);
         }
+        // DX-105-bis: cambiar sus precios es cambiar la lista: `updatedAt` lo dice.
+        await tx.$executeRaw`
+          UPDATE "price_lists" SET "updatedAt" = now() WHERE id = ${id}::uuid`;
 
         let upserted = 0;
         if (toSet.length > 0) {
@@ -372,7 +376,7 @@ export class PrismaPriceListRepository implements PriceListRepository {
             SELECT gen_random_uuid(), ${tenantId}::uuid, ${id}::uuid, x.catalog_item_id, x.price, now(), now()
             FROM unnest(
               ${toSet.map((r) => r.catalogItemId)}::uuid[],
-              ${toSet.map((r) => r.price.toFixed(2))}::text[]::numeric[]
+              ${toSet.map((r) => amountText(r.price, 2))}::text[]::numeric[]
             ) AS x(catalog_item_id, price)
             ON CONFLICT ("tenantId", "priceListId", "catalogItemId")
             DO UPDATE SET "price" = EXCLUDED."price", "updatedAt" = now()`;
@@ -402,8 +406,14 @@ export class PrismaPriceListRepository implements PriceListRepository {
 
   priceFor(listId: string, catalogItemId: string): Promise<number | null> {
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-105-bis: una lista retirada no fija precios aunque conserve sus
+      // filas (un convenio o una sede que todavía la señalen caen al catálogo).
       const row = await tx.priceListItem.findFirst({
-        where: { priceListId: listId, catalogItemId },
+        where: {
+          priceListId: listId,
+          catalogItemId,
+          priceList: { deletedAt: null },
+        },
         select: { price: true },
       });
       return row ? row.price.toNumber() : null;

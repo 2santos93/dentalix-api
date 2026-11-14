@@ -1,3 +1,5 @@
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
+import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import type { AllergyMatch } from '../allergy-match';
 import type { PrescriptionItemContent } from '../prescription-hash';
 import type { SafetyAlert } from '../prescription-safety';
@@ -33,6 +35,8 @@ export interface CreatePrescriptionRepoInput {
   professionalSpecialty: string | null;
   professionalEmail: string | null;
   clinicName: string;
+  /** DX-019: la foto fiscal (o null). */
+  clinicFiscal: ClinicFiscalData | null;
   locationName: string;
   locationAddress: string | null;
   notes: string | null;
@@ -58,9 +62,21 @@ export type VoidPrescriptionOutcome =
 
 /** La receta guardada con lo que la vista imprimible lee de la clínica y la sede. */
 export type StoredPrescription = Prescription & {
+  /** DX-019-bis (B): el logo congelado al emitir; `null` = emitida sin logo. */
   clinicLogoUrl: string | null;
   locationFormat: PrescriptionLocationFormat;
 };
+
+/** DX-467: el motivo con el que se audita una consulta pública. */
+export type PublicVerificationAuditReason =
+  'PRESCRIPTION_VERIFIED' | 'PRESCRIPTION_INTEGRITY_MISMATCH';
+
+export interface RecordPublicVerificationInput {
+  prescriptionId: string;
+  locationId: string;
+  reason: PublicVerificationAuditReason;
+  meta: AuditRequestMeta;
+}
 
 export const PRESCRIPTION_REPOSITORY = Symbol('PRESCRIPTION_REPOSITORY');
 
@@ -78,7 +94,8 @@ export interface PrescriptionRepository {
   saveProfessionalLicense(userId: string, license: string): Promise<void>;
 
   /**
-   * Inserta receta y medicamentos en UNA transacción. No hay `update` de
+   * Inserta receta y medicamentos en UNA transacción, con un código de
+   * verificación nuevo (DX-467; si choca con otro, repite con uno nuevo). No hay `update` de
    * contenido en este puerto (la base también lo impide). En fase 1 copia en
    * la fila, en esa misma transacción, el país actual de la sede como dato.
    */
@@ -92,6 +109,19 @@ export interface PrescriptionRepository {
    * sede, también si está retirada.
    */
   findById(id: string): Promise<StoredPrescription | null>;
+
+  /**
+   * DX-467: la receta de un código de verificación, bajo la RLS de la clínica
+   * del contexto (la del host de la página pública): `null` si no existe o es
+   * de otra clínica. Con el formato actual de su sede, como `findById`.
+   */
+  findByVerificationCode(code: string): Promise<StoredPrescription | null>;
+
+  /**
+   * DX-467: audita una consulta pública de la receta (sin usuario, origen
+   * PUBLIC_LINK). Solo ids y el motivo: el código no va en el evento.
+   */
+  recordPublicVerification(input: RecordPublicVerificationInput): Promise<void>;
 
   /** ISSUED → VOIDED, atómico: dos anulaciones a la vez, solo gana una. */
   void(

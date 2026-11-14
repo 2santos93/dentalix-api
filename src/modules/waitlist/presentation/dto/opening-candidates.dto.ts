@@ -5,20 +5,14 @@ import {
   WaitlistOfferOutcome,
   WaitlistPriority,
 } from '@prisma/client';
-import {
-  IsDateString,
-  IsEnum,
-  IsIn,
-  IsOptional,
-  IsUUID,
-} from 'class-validator';
+import { IsEnum, IsISO8601, IsIn, IsOptional, IsUUID } from 'class-validator';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
 import { OPENING_CANDIDATES_LIMIT } from '../../domain/opening-candidates';
 
 /** Un hueco libre: `[start, end)` de una sede y, si es una columna, su profesional. */
 export class OpeningCandidatesQueryDto {
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   start!: string;
 
   @ApiProperty({
@@ -26,7 +20,7 @@ export class OpeningCandidatesQueryDto {
     format: 'date-time',
     description: 'Fin del hueco: posterior a `start`, como mucho 8 h.',
   })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   end!: string;
 
   @ApiPropertyOptional({
@@ -248,9 +242,18 @@ export class OpeningCandidatesDto {
 
   @ApiProperty({
     description:
-      'DX-435: quedan al menos 20 minutos para el hueco (se puede enviar oferta con enlace).',
+      'DX-435: al enlace le quedaría al menos la antelación mínima de la clínica (DX-448; 20 minutos de plataforma), contando su caducidad anticipada: se puede enviar oferta con enlace.',
   })
   linkOfferOpen!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: null,
+    description:
+      'DX-448: por qué ya no se ofrece por enlace, con los minutos de la clínica (el mismo texto que el 409); `null` si se puede.',
+  })
+  linkOfferClosedMessage!: string | null;
 
   @ApiProperty({ type: [OpeningCandidateDto] })
   items!: OpeningCandidateDto[];
@@ -266,11 +269,11 @@ type ResolvedOutcome = (typeof RESOLVED_OUTCOMES)[number];
 
 export class CreateWaitlistOfferDto {
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   slotStart!: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   slotEnd!: string;
 
   @ApiProperty({ format: 'uuid' })

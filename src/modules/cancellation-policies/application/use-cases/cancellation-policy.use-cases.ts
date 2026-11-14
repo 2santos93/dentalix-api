@@ -3,7 +3,9 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { ClinicCurrencyTextsReader } from '../../../../shared/money/clinic-currency-texts.reader';
 import {
   CANCELLATION_POLICY_MESSAGES,
   policyInputError,
@@ -114,6 +116,8 @@ export class PreviewReminderEmailUseCase {
     private readonly repo: CancellationPolicyRepository,
     private readonly email: EmailOutbox,
     private readonly tenantContext: TenantContextService,
+    // DX-517: opcional para los tests que construyen el caso a mano.
+    @Optional() private readonly currencyTexts?: ClinicCurrencyTextsReader,
   ) {}
 
   async execute(locationId: string, now = new Date()): Promise<RenderedEmail> {
@@ -142,7 +146,12 @@ export class PreviewReminderEmailUseCase {
       providerName: PREVIEW_SAMPLE.providerName,
       confirmUrl: PREVIEW_SAMPLE.confirmUrl,
       unsubscribeUrl: null,
-      cancellationPolicy: reminderPolicyVars(versions[0] ?? null, fmt),
+      // DX-517: con el texto propio de cada moneda, como el envío real.
+      cancellationPolicy: reminderPolicyVars(
+        versions[0] ?? null,
+        fmt,
+        await this.currencyTexts?.forTenant(tenantId),
+      ),
     });
   }
 }

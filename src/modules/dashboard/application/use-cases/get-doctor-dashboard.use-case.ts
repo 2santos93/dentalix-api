@@ -12,6 +12,7 @@ import {
 import { ListInventoryItemsUseCase } from '../../../inventory/application/use-cases/list-inventory-items.use-case';
 import { ListUpcomingAppointmentsUseCase } from '../../../appointments/application/use-cases/list-upcoming-appointments.use-case';
 import { CountPatientsUseCase } from '../../../patients/application/use-cases/count-patients.use-case';
+import { CURRENCY_REQUIRED_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const DEFAULT_UPCOMING_LIMIT = 5;
 /**
@@ -62,6 +63,8 @@ export interface DashboardUpcomingAppointment {
   start: Date;
   end: Date;
   status: AppointmentStatus;
+  /** Sede de la cita (DX-354b): la web formatea su hora con el reloj de esa sede. */
+  locationId: string;
 }
 
 export interface GetDoctorDashboardResult {
@@ -131,7 +134,7 @@ export class GetDoctorDashboardUseCase {
       throw new BadRequestException('from must be <= to');
     }
     if (!input.currency || !input.currency.trim()) {
-      throw new BadRequestException('currency is required');
+      throw new BadRequestException(CURRENCY_REQUIRED_MESSAGE);
     }
     const upcomingLimit = input.upcomingLimit ?? DEFAULT_UPCOMING_LIMIT;
     if (
@@ -194,6 +197,7 @@ export class GetDoctorDashboardUseCase {
       start: appt.start,
       end: appt.end,
       status: appt.status,
+      locationId: appt.locationId,
     }));
 
     const period = { from: civilDateLabel(from), to: civilDateLabel(to) };

@@ -10,6 +10,11 @@ import {
   RecordWaitlistOfferOutcomeUseCase,
 } from './opening-candidates.use-cases';
 import { InMemoryOpeningCandidatesRepository } from '../__fixtures__/in-memory-opening-candidates';
+import { linkOfferTooLateMessage } from '../../domain/slot-offer-link';
+import {
+  InMemorySlotOfferSettingsRepository,
+  inMemorySlotOfferSettings,
+} from '../__fixtures__/in-memory-slot-offer-settings';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 import type {
   AppointmentCandidateRow,
@@ -24,10 +29,10 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/application/__fixtures__/in-memory-provider-schedule.repository';
 
-// Hoy es el lunes 19/10/2026 a las 08:00 en Bogotá; el hueco, el martes 20 de
+// Hoy es el lunes 19/10/2026 a las 08:00 en la zona de la sede; el hueco, el martes 20 de
 // 10:00 a 10:30 con la Dra. X en la sede 1.
 const local = (day: string, hhmm: string) =>
-  new Date(`${day}T${hhmm}:00-05:00`);
+  new Date(`${day}T${hhmm}:00-04:00`);
 const NOW = local('2026-10-19', '08:00');
 const clock = () => NOW;
 const SLOT = {
@@ -37,6 +42,9 @@ const SLOT = {
   end: local('2026-10-20', '10:30'),
 };
 
+let defaultPhoneRegion = 'VE';
+/** SEC-014: sedes desactivadas del doble. */
+let inactiveLocations: string[] = [];
 const locations = {
   findById: (id: string) =>
     Promise.resolve(
@@ -44,9 +52,10 @@ const locations = {
         ? {
             id,
             name: 'Sede',
-            country: 'CO',
-            defaultPhoneRegion: 'CO',
-            timeZone: 'America/Bogota',
+            isActive: !inactiveLocations.includes(id),
+            country: 'VE',
+            defaultPhoneRegion,
+            timeZone: 'America/Caracas',
           }
         : null,
     ),
@@ -58,7 +67,7 @@ const staff = {
       ['drx', 'dry'].includes(userId)
         ? { userId }
         : userId === 'drz'
-          ? { userId, locationIds: ['loc2'] }
+          ? { userId, role: 'DENTIST', locationIds: ['loc2'] }
           : null,
     ),
 } as unknown as StaffRepository;
@@ -90,6 +99,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
   let offer: CreateWaitlistOfferUseCase;
   let outcome: RecordWaitlistOfferOutcomeUseCase;
   let providerSchedules: InMemoryProviderScheduleRepository;
+  let slotOfferSettings: InMemorySlotOfferSettingsRepository;
 
   function addEntry(
     id: string,
@@ -143,6 +153,8 @@ describe('«Ocupar este hueco» (DX-210)', () => {
   }
 
   beforeEach(() => {
+    defaultPhoneRegion = 'VE';
+    slotOfferSettings = new InMemorySlotOfferSettingsRepository();
     repo = new InMemoryOpeningCandidatesRepository();
     drafts = [];
     providerSchedules = new InMemoryProviderScheduleRepository();
@@ -154,6 +166,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       clock,
       new TenantContextService(),
       inMemoryAvailability(providerSchedules),
+      inMemorySlotOfferSettings(slotOfferSettings),
     );
     offer = new CreateWaitlistOfferUseCase(
       repo,
@@ -163,6 +176,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       config,
       clock,
       new TenantContextService(),
+      inMemorySlotOfferSettings(slotOfferSettings),
     );
     outcome = new RecordWaitlistOfferOutcomeUseCase(
       repo,
@@ -172,6 +186,35 @@ describe('«Ocupar este hueco» (DX-210)', () => {
   });
 
   describe('candidatos', () => {
+    it('DX-448: «se puede por enlace» cuenta la caducidad y la antelación mínima de la clínica', async () => {
+      // Hueco a las 9:00 de hoy (son las 8:00).
+      const soon = {
+        ...SLOT,
+        start: local('2026-10-19', '09:00'),
+        end: local('2026-10-19', '09:30'),
+      };
+      expect(await list.execute(soon, RECEPTION)).toMatchObject({
+        linkOfferOpen: true,
+        linkOfferClosedMessage: null,
+      });
+      // Caduca 45 min antes (8:15): le quedarían 15 min, menos de 20.
+      slotOfferSettings.stored = { expiryLeadMinutes: 45, minLeadMinutes: 20 };
+      expect(await list.execute(soon, RECEPTION)).toMatchObject({
+        linkOfferOpen: false,
+        linkOfferClosedMessage: linkOfferTooLateMessage({
+          expiryLeadMinutes: 45,
+          minLeadMinutes: 20,
+        }),
+      });
+      // Sin caducidad anticipada pero con 90 min de antelación mínima.
+      slotOfferSettings.stored = { expiryLeadMinutes: 0, minLeadMinutes: 90 };
+      const closed = await list.execute(soon, RECEPTION);
+      expect(closed.linkOfferOpen).toBe(false);
+      expect(closed.linkOfferClosedMessage).toMatch(
+        /^Faltan menos de 90 minutos para el hueco/,
+      );
+    });
+
     it('URGENT antes que NORMAL, luego la cita a adelantar; el de 60 min y el de otra sede no salen', async () => {
       addEntry('normal', 'p-normal');
       addEntry('urgente', 'p-urgente', { priority: 'URGENT' });
@@ -190,7 +233,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
         'p-cita',
       ]);
       expect(view).toMatchObject({
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
         offerCap: 2,
         truncated: false,
       });
@@ -199,7 +242,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
         appointmentId: 'cita',
         durationMinutes: 30,
         currentAppointment: { id: 'cita', start: local('2026-11-10', '09:00') },
-        whatsappPhone: '573101234567',
+        whatsappPhone: '584141234567',
         whatsappBlocked: false,
       });
     });
@@ -346,6 +389,23 @@ describe('«Ocupar este hueco» (DX-210)', () => {
       patientId: 'p1',
     };
 
+    it('SEC-014: el hueco de una sede desactivada no se ofrece (400, sin oferta)', async () => {
+      repo.addPatient({ id: 'p1' });
+      inactiveLocations = ['loc1'];
+      try {
+        const err = await offer
+          .execute({ ...base, channel: 'PHONE', outcome: 'NO_ANSWER' }, CTX)
+          .catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          code: 'LOCATION_INACTIVE',
+        });
+        expect(repo.offers).toHaveLength(0);
+      } finally {
+        inactiveLocations = [];
+      }
+    });
+
     it('la tercera oferta del día al mismo paciente: 409 «Ya se le ofrecieron 2 huecos hoy»', async () => {
       addEntry('e1', 'p1');
       await offer.execute(
@@ -431,6 +491,7 @@ describe('«Ocupar este hueco» (DX-210)', () => {
     });
 
     it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', async () => {
+      defaultPhoneRegion = 'TH';
       repo.addPatient({ id: 'p1', phone: '0058 412 1234567' });
       await expect(
         offer.execute({ ...base, channel: 'WA_ME' }, CTX),

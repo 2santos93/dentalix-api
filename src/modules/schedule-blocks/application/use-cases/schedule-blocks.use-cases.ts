@@ -20,6 +20,7 @@ import {
 } from '../../domain/ports/schedule-block-repository.port';
 import {
   ATTENDING_ROLES,
+  AffectedAppointmentsRaceError,
   MAX_AFFECTED_APPOINTMENTS,
   MAX_BLOCK_LIST_DAYS,
   NOT_ATTENDING_MESSAGE,
@@ -241,6 +242,21 @@ async function toViews(
   });
 }
 
+/**
+ * DX-149: citas que aparecieron debajo del bloqueo mientras se escribía (otra
+ * petición a la vez): el mismo 409 que pide confirmar, con su número.
+ */
+async function withAffectedRace<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (error instanceof AffectedAppointmentsRaceError) {
+      throw new ConflictException(affectedMessage(error.total));
+    }
+    throw error;
+  }
+}
+
 @Injectable()
 export class ListScheduleBlocksUseCase {
   constructor(
@@ -384,17 +400,21 @@ export class CreateScheduleBlockUseCase {
       if (total > 0) throw new ConflictException(affectedMessage(total));
     }
 
-    return this.repo.create({
-      ...scope,
-      start: input.start,
-      end: input.end,
-      kind: input.kind,
-      allowsBooking: reserved.allowsBooking,
-      note,
-      reservedForTypeIds: reserved.reservedForTypeIds,
-      releaseAtMinute: reserved.releaseAtMinute,
-      createdById: actor.userId,
-    });
+    return withAffectedRace(() =>
+      this.repo.create({
+        ...scope,
+        start: input.start,
+        end: input.end,
+        kind: input.kind,
+        allowsBooking: reserved.allowsBooking,
+        note,
+        reservedForTypeIds: reserved.reservedForTypeIds,
+        releaseAtMinute: reserved.releaseAtMinute,
+        createdById: actor.userId,
+        // DX-149: una cita creada a la vez también pide confirmar.
+        recheckAffected: !input.confirmAffected,
+      }),
+    );
   }
 }
 
@@ -473,16 +493,23 @@ export class UpdateScheduleBlockUseCase {
       if (total > 0) throw new ConflictException(affectedMessage(total));
     }
 
-    return this.repo.update(id, {
-      start: input.start,
-      end: input.end,
-      kind: input.kind,
-      allowsBooking: input.allowsBooking,
-      note,
-      reservedForTypeIds,
-      releaseAtMinute,
-      updatedById: actor.userId,
-    });
+    const updated = await withAffectedRace(() =>
+      this.repo.update(id, {
+        start: input.start,
+        end: input.end,
+        kind: input.kind,
+        allowsBooking: input.allowsBooking,
+        note,
+        reservedForTypeIds,
+        releaseAtMinute,
+        updatedById: actor.userId,
+        // DX-149: como la comprobación de arriba, ya con el candado de la agenda.
+        recheckAffected: (rangeChanged || hardened) && !input.confirmAffected,
+      }),
+    );
+    // DX-161: otra petición lo retiró mientras tanto.
+    if (!updated) throw new NotFoundException(SCHEDULE_BLOCK_NOT_FOUND_MESSAGE);
+    return updated;
   }
 }
 
@@ -500,6 +527,9 @@ export class DeleteScheduleBlockUseCase {
     if (!current) throw new NotFoundException(SCHEDULE_BLOCK_NOT_FOUND_MESSAGE);
     assertCanWrite(actor, current.providerId);
     assertLocationWritable(this.tenantContext, current.locationId);
-    await this.repo.softDelete(id, actor.userId);
+    // DX-161: dos borrados a la vez: el segundo, 404 (el primero queda como autor).
+    if (!(await this.repo.softDelete(id, actor.userId))) {
+      throw new NotFoundException(SCHEDULE_BLOCK_NOT_FOUND_MESSAGE);
+    }
   }
 }

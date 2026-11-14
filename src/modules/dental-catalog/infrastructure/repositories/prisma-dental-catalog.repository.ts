@@ -12,9 +12,17 @@ import {
 } from '../../domain/ports/dental-catalog-repository.port';
 import { DentalCatalogItem } from '../../domain/entities/dental-catalog-item.entity';
 
-type PrismaDentalCatalogItem = Prisma.DentalCatalogItemGetPayload<
-  Record<string, never>
->;
+/**
+ * DX-455: si la plantilla ligada está activa, para `suggestedClinicalNoteTemplateId`.
+ * Va en toda lectura: un `select` de una columna por la FK, sin coste aparte.
+ */
+const WITH_NOTE_TEMPLATE = {
+  clinicalNoteTemplate: { select: { active: true } },
+} as const satisfies Prisma.DentalCatalogItemInclude;
+
+type PrismaDentalCatalogItem = Prisma.DentalCatalogItemGetPayload<{
+  include: typeof WITH_NOTE_TEMPLATE;
+}>;
 
 function mapToEntity(item: PrismaDentalCatalogItem): DentalCatalogItem {
   return {
@@ -30,6 +38,11 @@ function mapToEntity(item: PrismaDentalCatalogItem): DentalCatalogItem {
     defaultPrice: item.defaultPrice ? item.defaultPrice.toNumber() : null,
     allowDiscount: item.allowDiscount,
     active: item.active,
+    clinicalNoteTemplateId: item.clinicalNoteTemplateId,
+    suggestedClinicalNoteTemplateId:
+      item.clinicalNoteTemplate?.active === true
+        ? item.clinicalNoteTemplateId
+        : null,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
   };
@@ -77,7 +90,9 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
           defaultPrice: input.defaultPrice,
           allowDiscount: input.allowDiscount,
           active: input.active,
+          clinicalNoteTemplateId: input.clinicalNoteTemplateId,
         },
+        include: WITH_NOTE_TEMPLATE,
       });
     });
     return mapToEntity(item);
@@ -87,6 +102,7 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
     const item = await this.prisma.runWithTenant(async (tx) => {
       return tx.dentalCatalogItem.findFirst({
         where: { id, deletedAt: null },
+        include: WITH_NOTE_TEMPLATE,
       });
     });
     return item ? mapToEntity(item) : null;
@@ -97,6 +113,7 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
     const items = await this.prisma.runWithTenant(async (tx) => {
       return tx.dentalCatalogItem.findMany({
         where: { id: { in: ids }, deletedAt: null },
+        include: WITH_NOTE_TEMPLATE,
       });
     });
     return items.map(mapToEntity);
@@ -115,6 +132,7 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
       const items = await tx.dentalCatalogItem.findMany({
         where,
         orderBy: { code: 'asc' },
+        include: WITH_NOTE_TEMPLATE,
       });
       return items.map(mapToEntity);
     });
@@ -175,6 +193,7 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
           orderBy: { code: 'asc' },
           skip: params.skip,
           take: params.take,
+          include: WITH_NOTE_TEMPLATE,
         }),
         tx.dentalCatalogItem.count({ where }),
       ]);
@@ -200,6 +219,7 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
       const item = await tx.dentalCatalogItem.update({
         where: { id },
         data: patch,
+        include: WITH_NOTE_TEMPLATE,
       });
       return mapToEntity(item);
     });

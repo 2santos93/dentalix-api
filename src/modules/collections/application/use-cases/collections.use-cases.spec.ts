@@ -19,7 +19,7 @@ import {
   PROMISE_TOO_FAR_MESSAGE,
 } from './collections.use-cases';
 
-const NOW = new Date('2026-11-01T15:00:00.000Z'); // 10:00 del 1/11 en Bogotá
+const NOW = new Date('2026-11-01T15:00:00.000Z'); // 10:00 del 1/11 en la zona de la sede
 
 function fakeRepo(overrides: Partial<CollectionsRepository> = {}) {
   const notes: NewCollectionNote[] = [];
@@ -28,8 +28,8 @@ function fakeRepo(overrides: Partial<CollectionsRepository> = {}) {
     patientExists: (id: string) => Promise.resolve(id === 'p1'),
     locationExists: (id: string) => Promise.resolve(id === 'loc-1'),
     defaultLocationFor: () => Promise.resolve('loc-1'),
-    timeZoneOf: () => Promise.resolve('America/Bogota'),
-    currencyExists: (code: string) => Promise.resolve(code === 'COP'),
+    timeZoneOf: () => Promise.resolve('America/Caracas'),
+    currencyExists: (code: string) => Promise.resolve(code === 'USD'),
     createNote: (input: NewCollectionNote) => {
       notes.push(input);
       return Promise.resolve({
@@ -49,7 +49,7 @@ function fakeRepo(overrides: Partial<CollectionsRepository> = {}) {
         createdAt: NOW,
         settledAt: null,
         reopenedAt: null,
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
       };
       return Promise.resolve(row);
     },
@@ -112,7 +112,7 @@ describe('CreateCollectionNoteUseCase (DX-150)', () => {
 });
 
 describe('CreatePaymentPromiseUseCase (DX-150)', () => {
-  const input = { amount: 200_000, currency: 'cop', dueDate: '2026-11-15' };
+  const input = { amount: 200_000, currency: 'usd', dueDate: '2026-11-15' };
 
   it('crea el compromiso abierto en la sede de la deuda si no hay sede activa', async () => {
     const { repo, promises } = fakeRepo();
@@ -122,7 +122,7 @@ describe('CreatePaymentPromiseUseCase (DX-150)', () => {
       patientId: 'p1',
       locationId: 'loc-1',
       amount: 200_000,
-      currency: 'COP',
+      currency: 'USD',
       dueDate: '2026-11-15',
       createdById: 'u1',
     });

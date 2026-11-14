@@ -14,11 +14,14 @@ import { createE2eApp } from './support/create-e2e-app';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
+import { pinCatalogCurrency } from './support/catalog-currency';
+import { boundedDecimalMessage } from '../src/shared/money/currency-messages';
+import { MONEY_MAX } from '../src/shared/validation/bounded-decimal';
 
 // DX-042, por HTTP: topes de importes y cantidades en las DTO (400, nunca 500
 // ni redondeo), insumo único por sede y sin mayúsculas, y las tres carreras
@@ -98,7 +101,7 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
 
     const register = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'DX-042',
         subdomain: SUBDOMAIN,
         email: ADMIN_EMAIL,
@@ -125,6 +128,9 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
       .send({ currency: 'USD' })
       .expect(201);
     planId = (plan.body as IdBody).id;
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, tenantId, 'USD');
     const catalog = await authed(api().post('/api/v1/catalog/items'))
       .send({
         code: 'DX042-RES',
@@ -166,7 +172,10 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
         )
           .send({ amount, currency: 'USD', paidAt })
           .expect(400);
-        expect(JSON.stringify(res.body)).toContain('amount');
+        // DX-517-quater: el 400 del importe sale en español (IsMoney).
+        expect((res.body as { message: string[] }).message).toContain(
+          boundedDecimalMessage(2, MONEY_MAX, 'El importe'),
+        );
         expect(await raw.payment.count({ where: { tenantId } })).toBe(0);
       },
     );
@@ -234,7 +243,7 @@ describe('Reglas de dominio por HTTP (DX-042, e2e)', () => {
 
     beforeAll(async () => {
       const res = await authed(api().post('/api/v1/locations'))
-        .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+        .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
         .expect(201);
       sedeNorte = (res.body as IdBody).id;
     });

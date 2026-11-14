@@ -150,6 +150,8 @@ export class CreateAgreementDto {
   kind!: AgreementKind;
 
   @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
     minimum: PERCENT_MIN,
     maximum: PERCENT_MAX,
     description: 'Obligatorio con PERCENT_DISCOUNT; no va con PRICE_LIST.',

@@ -57,3 +57,16 @@ export interface CurrencyDigitsCatalog {
   /** La tabla con, al menos, las monedas de `codes`. */
   table(codes?: readonly string[]): Promise<CurrencyDigitsTable>;
 }
+
+/**
+ * B4 (DX-472-bis): los decimales de redondeo de estas monedas, para los
+ * estados de cuota. Sin catálogo (specs que no lo dan), `undefined`: 2.
+ */
+export async function roundingDigitsLookup(
+  catalog: CurrencyDigitsCatalog | undefined,
+  codes: readonly string[],
+): Promise<((code: string) => RoundingDigits) | undefined> {
+  if (!catalog) return undefined;
+  const table = await catalog.table([...new Set(codes)]);
+  return (code) => table.roundingDigits(code);
+}

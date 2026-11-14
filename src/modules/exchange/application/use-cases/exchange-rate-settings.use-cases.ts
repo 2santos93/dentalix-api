@@ -13,8 +13,15 @@ import {
   type ClinicExchangeSettings,
   type ClinicExchangeSettingsRepository,
 } from '../../domain/ports/clinic-exchange-settings-repository.port';
+import {
+  MANUAL_RATE_MAX_AGE_MESSAGE,
+  isValidManualRateMaxAge,
+} from '../../domain/manual-rate-fallback';
 import { EXCHANGE_RATE_CLOCK } from './manual-exchange-rates.use-cases';
 import { ExchangeSourceChangeHooks } from '../exchange-source-change-hooks';
+
+export const EXCHANGE_SETTINGS_EMPTY_MESSAGE =
+  'Indica la fuente de la tasa, el plazo de la última tasa registrada o los dos.';
 
 export interface ExchangeRateSettings extends ClinicExchangeSettings {
   /** Moneda base de todas las tasas (unidades de cada moneda por 1 de ella). */
@@ -24,6 +31,7 @@ export interface ExchangeRateSettings extends ClinicExchangeSettings {
 const withBase = (settings: ClinicExchangeSettings): ExchangeRateSettings => ({
   source: settings.source,
   manualSince: settings.manualSince,
+  manualRateMaxAgeDays: settings.manualRateMaxAgeDays,
   baseCurrency: BASE_CURRENCY,
 });
 
@@ -57,6 +65,12 @@ export class GetExchangeRateSettingsUseCase {
  * de la automática o, si el proveedor no tiene la de su día, de la manual de
  * ese día como tasa de respaldo (DX-402). Si congelar falla, la fuente no
  * cambia.
+ *
+ * DX-384: también cambia `manualRateMaxAgeDays` (0..30): hasta cuántos días
+ * de antigüedad puede tener la última tasa manual que sustituye a la de un
+ * día sin tasa. Cualquiera de los dos campos puede ir solo; al menos uno. El
+ * evento del plazo (antes y después) lo escribe el repositorio en la misma
+ * transacción; si cambia, los abonos aplazados «sin tasa» se intentan ya.
  */
 @Injectable()
 export class UpdateExchangeRateSettingsUseCase {
@@ -70,32 +84,52 @@ export class UpdateExchangeRateSettingsUseCase {
   ) {}
 
   async execute(
-    input: { source: ExchangeRateSource },
+    input: { source?: ExchangeRateSource; manualRateMaxAgeDays?: number },
     ctx: AuditRequestContext,
   ): Promise<ExchangeRateSettings> {
-    if (!EXCHANGE_RATE_SOURCES.includes(input.source)) {
+    const { source, manualRateMaxAgeDays: maxAge } = input;
+    if (source === undefined && maxAge === undefined) {
+      throw new BadRequestException(EXCHANGE_SETTINGS_EMPTY_MESSAGE);
+    }
+    if (source !== undefined && !EXCHANGE_RATE_SOURCES.includes(source)) {
       throw new BadRequestException(EXCHANGE_RATE_SOURCE_MESSAGE);
+    }
+    if (maxAge !== undefined && !isValidManualRateMaxAge(maxAge)) {
+      throw new BadRequestException(MANUAL_RATE_MAX_AGE_MESSAGE);
     }
     // Solo hace falta la zona al elegir MANUAL: una clínica sin sedes puede
     // seguir guardando AUTOMATIC.
     const today =
-      input.source === 'MANUAL'
+      source === 'MANUAL'
         ? civilDateIn(this.now(), await this.settings.principalTimeZone())
         : null;
-    if ((await this.settings.get()).source !== input.source) {
+    if (source !== undefined && (await this.settings.get()).source !== source) {
       await this.hooks.beforeSourceChange();
     }
-    const { before, after } = await this.settings.set((current) =>
-      input.source === 'MANUAL'
+    const { before, after } = await this.settings.set((current) => {
+      const days = maxAge ?? current.manualRateMaxAgeDays;
+      if (source === undefined)
+        return { ...current, manualRateMaxAgeDays: days };
+      return source === 'MANUAL'
         ? {
             source: 'MANUAL',
             manualSince:
               current.source === 'MANUAL' && current.manualSince
                 ? current.manualSince
                 : today,
+            manualRateMaxAgeDays: days,
           }
-        : { source: 'AUTOMATIC', manualSince: null },
-    );
+        : {
+            source: 'AUTOMATIC',
+            manualSince: null,
+            manualRateMaxAgeDays: days,
+          };
+    }, ctx);
+    // DX-384: el evento del plazo (EXCHANGE_RATE_MAX_AGE, con el id de la
+    // clínica) lo escribe el repositorio en la transacción del cambio; este,
+    // el de la fuente (DX-374, `resourceId` null), sigue yendo fuera para no
+    // tocar su contrato ni su orden con los hooks de congelación. Un PUT con
+    // los dos campos deja los dos eventos.
     // Como la mayoría de edad y la receta: el evento va tras confirmar el
     // cambio y `record` nunca lanza (DX-009).
     if (before.source !== after.source) {
@@ -120,8 +154,12 @@ export class UpdateExchangeRateSettingsUseCase {
         },
       });
     }
-    if (before.source !== after.source) {
-      // DX-380: con la otra fuente, sus abonos sin tasa se intentan ya.
+    if (
+      before.source !== after.source ||
+      before.manualRateMaxAgeDays !== after.manualRateMaxAgeDays
+    ) {
+      // DX-380: con la otra fuente (DX-384: u otro plazo), sus abonos sin
+      // tasa se intentan ya.
       await this.hooks.afterRatesChange();
     }
     return withBase(after);

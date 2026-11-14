@@ -47,6 +47,7 @@ interface Summary {
   sentToResponsible: boolean;
   firstOpenedAt: string | null;
   linkExpiresAt: string | null;
+  emailStatus: 'QUEUED' | 'SENT' | 'NOT_SENT' | null;
 }
 
 interface Created {
@@ -143,7 +144,17 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
         ...(appointmentTypeId ? { appointmentTypeId } : {}),
       })
       .expect(201);
-    return (res.body as { id: string }).id;
+    const id = (res.body as { id: string }).id;
+    // DX-250: solo se entrega tras una cita atendida o de hoy. La API no agenda
+    // en el pasado y una cita a futuro cae mañana si el spec corre al final del
+    // día en la zona de la sede: se pasa a unas horas antes (un día pasado
+    // también vale), sin solaparse con las demás ni con la de las evoluciones.
+    const past = new Date(Date.now() - (120 + 10 * slot) * 60 * 1000);
+    await raw.appointment.update({
+      where: { id },
+      data: { start: past, end: new Date(past.getTime() + 5 * 60 * 1000) },
+    });
+    return id;
   }
 
   const deliver = (
@@ -179,7 +190,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       where: { tenantId: clinicA.tenantId },
     });
     await as(clinicA)
-      .patch(`/locations/${location.id}`, { phone: '601 555 0101' })
+      .patch(`/locations/${location.id}`, { phone: '212 555 0101' })
       .expect(200);
 
     const type = await as(clinicA)
@@ -212,7 +223,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       firstName: 'Carolina',
       lastName: 'Duque',
       email: ADULT_EMAIL,
-      phone: '+57 310 123 4567',
+      phone: '+58 414 123 4567',
       birthDate: '1990-05-01',
     });
     appointmentId = await appointment(patientId, typeId);
@@ -248,8 +259,8 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
         toMasked: 'ca***@example.com',
         toResponsible: false,
       },
-      whatsapp: { phone: '573101234567', reason: null },
-      locationPhone: '601 555 0101',
+      whatsapp: { phone: '584141234567', reason: null },
+      locationPhone: '212 555 0101',
       deliveries: [],
     });
     const audit = await raw.auditEvent.findFirstOrThrow({
@@ -300,7 +311,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     });
     expect(row.tokenHash).toBeNull();
     expect(row.renderedText).toBe(
-      'Hola Carolina Duque: muerde la gasa 30 minutos. Te atendió Miembro DENTIST en Clinica dx222-entregas-a. Dudas: 601 555 0101.',
+      'Hola Carolina Duque: muerde la gasa 30 minutos. Te atendió Miembro DENTIST en Clinica dx222-entregas-a. Dudas: 212 555 0101.',
     );
     const audit = await raw.auditEvent.findFirstOrThrow({
       where: {
@@ -356,7 +367,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       201,
     );
     const created = res.body as Created;
-    expect(created.whatsapp?.phone).toBe('573101234567');
+    expect(created.whatsapp?.phone).toBe('584141234567');
     expect(created.whatsapp?.text).toContain(created.publicUrl);
     expect(created.whatsapp?.text).toContain('Hola Carolina');
     expect(created.whatsapp?.text).not.toContain('Exodoncia');
@@ -403,7 +414,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       templateVersion: 1,
       clinic: { name: 'Clinica dx222-entregas-a' },
       locationName: 'Sede principal',
-      locationPhone: '601 555 0101',
+      locationPhone: '212 555 0101',
       patientName: 'Carolina Duque',
     });
 
@@ -453,7 +464,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       firstName: 'Dado',
       lastName: 'Debaja',
       email: 'baja@example.com',
-      phone: '+57 310 999 0000',
+      phone: '+58 414 999 0000',
     });
     await raw.patient.update({
       where: { id },
@@ -540,6 +551,52 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     });
   });
 
+  it('DX-354: el documento lleva el regional de la sede de la entrega (no el de la sede activa) y null sin reloj, con 200', async () => {
+    const list = await as(clinicA)
+      .get(`/patients/${patientId}/post-op-deliveries`)
+      .expect(200);
+    const deliveryId = (list.body as Summary[])[0].id;
+    const { locationId } =
+      await raw.postOpInstructionDelivery.findUniqueOrThrow({
+        where: { id: deliveryId },
+        select: { locationId: true },
+      });
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: locationId },
+      select: { timeZone: true, locale: true, hourCycle: true },
+    });
+    const read = async () =>
+      (
+        (
+          await as(clinicA, reception)
+            .get(`/patients/${patientId}/post-op-deliveries/${deliveryId}`)
+            .expect(200)
+        ).body as { regional: unknown }
+      ).regional;
+    try {
+      await raw.location.update({
+        where: { id: locationId },
+        data: {
+          timeZone: 'America/New_York',
+          locale: 'en-US',
+          hourCycle: 'h12',
+        },
+      });
+      expect(await read()).toEqual({
+        timeZone: 'America/New_York',
+        locale: 'en-US',
+        hourCycle: 'h12',
+      });
+      await raw.location.update({
+        where: { id: locationId },
+        data: { hourCycle: null },
+      });
+      expect(await read()).toBeNull();
+    } finally {
+      await raw.location.update({ where: { id: locationId }, data: before });
+    }
+  });
+
   it('una entrega no se edita ni se borra: no hay PATCH ni DELETE', async () => {
     const list = await as(clinicA)
       .get(`/patients/${patientId}/post-op-deliveries`)
@@ -554,6 +611,261 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
       where: { id: deliveryId },
     });
     expect(row.renderedText).not.toBe('x');
+  });
+
+  describe('DX-250: citas que no se atendieron', () => {
+    const NOT_ATTENDED =
+      'No se pueden entregar indicaciones de una cita cancelada o en la que el paciente no asistió';
+    const FUTURE =
+      'No se pueden entregar indicaciones de una cita que aún no ha llegado';
+
+    it.each(['CANCELLED', 'NO_SHOW'] as const)(
+      'cita %s: 422 en español por los tres canales, sin entrega ni email',
+      async (status) => {
+        const appt = await appointment(patientId, typeId);
+        await raw.appointment.update({
+          where: { id: appt },
+          data: { status },
+        });
+        const outboxBefore = await raw.emailOutbox.count({
+          where: { tenantId: clinicA.tenantId },
+        });
+        for (const channel of ['PRINT', 'EMAIL', 'WHATSAPP_LINK'] as const) {
+          const res = await deliver(reception, appt, channel).expect(422);
+          expect((res.body as { message: string }).message).toBe(NOT_ATTENDED);
+        }
+        expect(
+          await raw.postOpInstructionDelivery.count({
+            where: { appointmentId: appt },
+          }),
+        ).toBe(0);
+        expect(
+          await raw.emailOutbox.count({
+            where: { tenantId: clinicA.tenantId },
+          }),
+        ).toBe(outboxBefore);
+      },
+    );
+
+    it('cita de un día posterior: 422 en español, sin entrega', async () => {
+      const appt = await appointment(patientId, typeId);
+      const later = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+      await raw.appointment.update({
+        where: { id: appt },
+        data: { start: later, end: new Date(later.getTime() + 30 * 60 * 1000) },
+      });
+      const res = await deliver(reception, appt, 'PRINT').expect(422);
+      expect((res.body as { message: string }).message).toBe(FUTURE);
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(0);
+    });
+  });
+
+  it('DX-250: el resumen de una entrega EMAIL dice el estado del email, también desde la ficha', async () => {
+    const appt = await appointment(patientId, typeId);
+    const created = (await deliver(reception, appt, 'EMAIL').expect(201))
+      .body as Created;
+    expect(created.delivery.emailStatus).toBe('QUEUED');
+    await dispatcher.whenIdle();
+    const printed = (await deliver(reception, appt, 'PRINT').expect(201))
+      .body as Created;
+    expect(printed.delivery.emailStatus).toBeNull();
+
+    const fromAppointment = (
+      (
+        await as(clinicA, reception)
+          .get(`/appointments/${appt}/post-op-instructions`)
+          .expect(200)
+      ).body as Suggestions
+    ).deliveries.find((d) => d.id === created.delivery.id);
+    // El despachador ya lo entregó al proveedor (el correo de prueba).
+    expect(fromAppointment?.emailStatus).toBe('SENT');
+
+    // El outbox se rindió (FAILED): la ficha lo dice como no enviado.
+    await raw.emailOutbox.updateMany({
+      where: { referenceId: created.delivery.id },
+      data: { status: 'FAILED' },
+    });
+    // Una entrega EMAIL RECIENTE cuya fila del outbox no existe tampoco salió.
+    const lost = (await deliver(reception, appt, 'EMAIL').expect(201))
+      .body as Created;
+    await raw.emailOutbox.deleteMany({
+      where: { referenceId: lost.delivery.id },
+    });
+    // Una ANTIGUA sin fila pudo salir y haber sido purgada del outbox: la HC
+    // no afirma «no enviado» (desconocido). La entrega es inalterable por
+    // trigger: solo el superusuario del test lo apaga un instante para
+    // envejecerla.
+    const old = (await deliver(reception, appt, 'EMAIL').expect(201))
+      .body as Created;
+    await raw.emailOutbox.deleteMany({
+      where: { referenceId: old.delivery.id },
+    });
+    await raw.$executeRawUnsafe(
+      'ALTER TABLE "post_op_instruction_deliveries" DISABLE TRIGGER "post_op_instruction_deliveries_immutable"',
+    );
+    try {
+      await raw.$executeRaw`UPDATE "post_op_instruction_deliveries" SET "deliveredAt" = now() - interval '200 days' WHERE "id" = ${old.delivery.id}::uuid`;
+    } finally {
+      await raw.$executeRawUnsafe(
+        'ALTER TABLE "post_op_instruction_deliveries" ENABLE TRIGGER "post_op_instruction_deliveries_immutable"',
+      );
+    }
+    const history = (
+      await as(clinicA, reception)
+        .get(`/patients/${patientId}/post-op-deliveries`)
+        .expect(200)
+    ).body as Summary[];
+    const status = (id: string) =>
+      history.find((d) => d.id === id)?.emailStatus;
+    expect(status(created.delivery.id)).toBe('NOT_SENT');
+    expect(status(lost.delivery.id)).toBe('NOT_SENT');
+    expect(status(old.delivery.id)).toBeNull();
+    expect(status(printed.delivery.id)).toBeNull();
+  });
+
+  describe('DX-250: Idempotency-Key', () => {
+    const KEY = 'c0a8e1c4-5a9f-4d4e-8f55-6a1f4b2d9e01';
+    const withKey = (appt: string, key: string, channel = 'EMAIL') =>
+      as(clinicA, reception)
+        .post(`/appointments/${appt}/post-op-instructions/deliveries`, {
+          templateId: exoId,
+          channel,
+        })
+        .set('Idempotency-Key', key);
+
+    it('la misma clave dos veces: una entrega, una fila en el outbox, sin enlace en la repetición', async () => {
+      const appt = await appointment(patientId, typeId);
+      const first = (await withKey(appt, KEY).expect(201)).body as Created;
+      expect(first.publicUrl).toMatch(/\/indicaciones\//);
+      const second = (await withKey(appt, KEY).expect(201)).body as Created;
+      expect(second.delivery.id).toBe(first.delivery.id);
+      expect(second.publicUrl).toBeNull();
+      expect(second.whatsapp).toBeNull();
+      expect(second.emailQueued).toBe(true);
+      expect(second.sentTo).toBe('ca***@example.com');
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(1);
+      expect(
+        await raw.emailOutbox.count({
+          where: { referenceId: first.delivery.id },
+        }),
+      ).toBe(1);
+      expect(
+        await raw.auditEvent.count({
+          where: {
+            tenantId: clinicA.tenantId,
+            resourceId: first.delivery.id,
+            resourceType: 'POSTOP_DELIVERY',
+          },
+        }),
+      ).toBe(1);
+    });
+
+    it('en paralelo (dos pestañas): una sola entrega', async () => {
+      const appt = await appointment(patientId, typeId);
+      const key = 'd1b9f2d5-6bae-4e5f-9a66-7b2a5c3eaf12';
+      const [a, b] = await Promise.all([
+        withKey(appt, key, 'PRINT'),
+        withKey(appt, key, 'PRINT'),
+      ]);
+      expect([a.status, b.status]).toEqual([201, 201]);
+      expect((a.body as Created).delivery.id).toBe(
+        (b.body as Created).delivery.id,
+      );
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(1);
+    });
+
+    it('EMAIL en paralelo con la misma clave: una entrega y un email; la otra respuesta es una repetición 201 o un 409, nunca «no enviado»', async () => {
+      const appt = await appointment(patientId, typeId);
+      const key = 'e2c0a3e6-7cbf-4f60-8b77-8c3b6d4fb023';
+      const [a, b] = await Promise.all([
+        withKey(appt, key, 'EMAIL'),
+        withKey(appt, key, 'EMAIL'),
+      ]);
+      for (const res of [a, b]) {
+        expect([201, 409]).toContain(res.status);
+        if (res.status === 409) {
+          expect(res.body).toMatchObject({
+            code: 'POSTOP_DELIVERY_IN_PROGRESS',
+            message: expect.stringMatching(/se está registrando/) as string,
+          });
+        } else {
+          const body = res.body as Created;
+          expect(body.delivery.emailStatus).not.toBe('NOT_SENT');
+          expect(body.emailQueued).toBe(true);
+        }
+      }
+      const created = [a, b].filter(
+        (r) => r.status === 201 && (r.body as Created).publicUrl !== null,
+      );
+      expect(created).toHaveLength(1);
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(1);
+      const id = (created[0].body as Created).delivery.id;
+      expect(await raw.emailOutbox.count({ where: { referenceId: id } })).toBe(
+        1,
+      );
+    });
+
+    it('la misma clave con otro canal u otra plantilla: 422 IDEMPOTENCY_KEY_REUSED y nada nuevo', async () => {
+      const appt = await appointment(patientId, typeId);
+      const key = 'f3d1b4f7-8dc0-4071-9c88-9d4c7e5ac134';
+      await withKey(appt, key, 'PRINT').expect(201);
+      const otherChannel = await withKey(appt, key, 'WHATSAPP_LINK').expect(
+        422,
+      );
+      expect(otherChannel.body).toMatchObject({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      });
+      const otherTemplate = await as(clinicA, reception)
+        .post(`/appointments/${appt}/post-op-instructions/deliveries`, {
+          templateId: otherTemplateId,
+          channel: 'PRINT',
+        })
+        .set('Idempotency-Key', key)
+        .expect(422);
+      expect(otherTemplate.body).toMatchObject({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      });
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: appt },
+        }),
+      ).toBe(1);
+    });
+
+    it('otra cita con la misma clave es otra entrega; sin clave nunca se deduplica; una clave que no es UUID da 400', async () => {
+      const apptA = await appointment(patientId, typeId);
+      const apptB = await appointment(patientId, typeId);
+      const a = (await withKey(apptA, KEY, 'PRINT').expect(201))
+        .body as Created;
+      const b = (await withKey(apptB, KEY, 'PRINT').expect(201))
+        .body as Created;
+      expect(a.delivery.id).not.toBe(b.delivery.id);
+      await deliver(reception, apptA, 'PRINT').expect(201);
+      await deliver(reception, apptA, 'PRINT').expect(201);
+      expect(
+        await raw.postOpInstructionDelivery.count({
+          where: { appointmentId: apptA },
+        }),
+      ).toBe(3);
+      const bad = await withKey(apptA, 'no-es-un-uuid', 'PRINT').expect(400);
+      expect((bad.body as { message: string }).message).toMatch(/UUID/);
+    });
   });
 
   it('una plantilla inactiva no se entrega (400) y una inexistente da 404', async () => {
@@ -591,7 +903,7 @@ describe('Entregas de indicaciones postoperatorias (e2e, DX-222)', () => {
     const appt = await appointment(patientId);
     // La evolución no se liga a una cita de un día civil futuro, y la de
     // `appointment()` cae mañana si el spec corre al final del día en
-    // Bogotá: se pasa a la hora anterior (agendar en el pasado no se puede
+    // la zona de la sede: se pasa a la hora anterior (agendar en el pasado no se puede
     // por la API).
     await raw.appointment.update({
       where: { id: appt },

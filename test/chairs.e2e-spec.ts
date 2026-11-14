@@ -11,10 +11,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
-import { sedeTodayFixture } from './support/sede-clock';
+import { minutesIntoDay } from './support/sede-clock';
 
 // DX-211 en HTTP real: sillones por sede (CRUD solo ADMIN, desactivar en vez
 // de borrar, auditado), el sillón como recurso de la cita (409 por sillón con
@@ -25,9 +25,13 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
+/** DX-492-bis: el 400 de `chairId` que no es un id (también `null`). */
+const CHAIR_ID_INVALID =
+  'El sillón no es válido: elige uno de la sede o deja la cita sin sillón';
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DAY = new Date(Date.now() + 3 * DAY_MS).toISOString().slice(0, 10);
-/** Instante UTC; la sede está en Bogotá (UTC−5): 15:00Z son las 10:00. */
+/** Instante UTC; la zona de la sede es UTC−4: 15:00Z son las 11:00. */
 const at = (time: string) => `${DAY}T${time}:00.000Z`;
 const FROM = `${DAY}T00:00:00.000Z`;
 const TO = new Date(new Date(FROM).getTime() + DAY_MS).toISOString();
@@ -97,14 +101,14 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
     norte = (
       (
         await as(api().post('/api/v1/locations'), clinic.adminToken)
-          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
           .expect(201)
       ).body as { id: string }
     ).id;
     sur = (
       (
         await as(api().post('/api/v1/locations'), clinic.adminToken)
-          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Sur' }))
+          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Sur' }))
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -325,7 +329,7 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
         end: at('15:45'),
       }).expect(409);
       expect((clash.body as { message: string }).message).toBe(
-        'El sillón «Sillón 1» ya está ocupado de 10:00 a 10:30',
+        'El sillón «Sillón 1» ya está ocupado de 11:00 a 11:30',
       );
     });
 
@@ -378,6 +382,59 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       );
     });
 
+    it('DX-492-bis: `chairId: null` al agendar es un dato inválido: 400 en español, no un 500, y no guarda nada', async () => {
+      const before = await raw.appointment.count({
+        where: { tenantId: clinic.tenantId },
+      });
+      const res = await book({
+        chairId: null,
+        patientId: patients[3],
+        start: at('20:00'),
+        end: at('20:30'),
+      }).expect(400);
+      expect((res.body as { message: string[] }).message).toEqual([
+        CHAIR_ID_INVALID,
+      ]);
+      // Sin profesional y con `null`, tampoco llega a buscar el sillón.
+      await book({
+        chairId: null,
+        providerId: undefined,
+        patientId: patients[3],
+        start: at('20:00'),
+        end: at('20:30'),
+      }).expect(400);
+      expect(
+        await raw.appointment.count({ where: { tenantId: clinic.tenantId } }),
+      ).toBe(before);
+    });
+
+    it('DX-492-bis: al editar, un `chairId` que no es un id da 400 en español (null sí quita el sillón)', async () => {
+      const mine = (
+        await book({
+          chairId: one.id,
+          patientId: patients[2],
+          start: at('16:00'),
+          end: at('16:30'),
+        }).expect(201)
+      ).body as AppointmentBody;
+      const bad = await as(
+        api().patch(`/api/v1/appointments/${mine.id}`),
+        reception.token,
+      )
+        .send({ chairId: 'sillon-1' })
+        .expect(400);
+      expect((bad.body as { message: string[] }).message).toEqual([
+        'El sillón no es válido: elige uno de la sede o quítalo',
+      ]);
+      const cleared = await as(
+        api().patch(`/api/v1/appointments/${mine.id}`),
+        reception.token,
+      )
+        .send({ chairId: null })
+        .expect(200);
+      expect((cleared.body as AppointmentBody).chairId).toBeNull();
+    });
+
     it('reprogramar al hueco ocupado del sillón: 409; cambiar de sillón a uno libre: 200', async () => {
       const mine = (
         await book({
@@ -394,9 +451,12 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       )
         .send({ start: at('19:00'), end: at('19:30') })
         .expect(409);
-      expect((clash.body as { message: string }).message).toBe(
-        'El sillón «Sillón 2» ya está ocupado de 14:00 a 14:30',
-      );
+      // DX-492-bis: al mover, con el código y el ámbito de los demás solapes.
+      expect(clash.body).toMatchObject({
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 2» ya está ocupado de 15:00 a 15:30',
+      });
       const moved = await as(
         api().patch(`/api/v1/appointments/${mine.id}`),
         reception.token,
@@ -417,9 +477,12 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       )
         .send({ chairId: two.id })
         .expect(409);
-      expect((occupied.body as { message: string }).message).toBe(
-        'El sillón «Sillón 2» ya está ocupado de 16:00 a 16:30',
-      );
+      // DX-492-bis: al mover, con el código y el ámbito de los demás solapes.
+      expect(occupied.body).toMatchObject({
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 2» ya está ocupado de 17:00 a 17:30',
+      });
     });
 
     it('la agenda filtra por chairIds; un sillón de otra sede da 400', async () => {
@@ -561,46 +624,24 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
     });
 
     it('se cambia el sillón de una cita de hoy con el paciente ya en la clínica', async () => {
-      // DX-495 (TST-062): «hoy» es el de la sede, y la API lo decide con su
-      // reloj real. Entre las 05:00 y las 05:05 UTC la cita «de hace 5 min»
-      // caía en el día anterior de Bogotá y ARRIVED daba 409. La sede de este
-      // caso usa la zona segura de DX-449 (Bogotá lejos de su medianoche; si
-      // no, una zona en la que ahora es cerca del mediodía) y sus propios
-      // sillones; el resto del spec sigue en Bogotá (sus mensajes llevan las
-      // horas de la sede).
-      const now = new Date();
-      const hoy = (
-        (
-          await as(api().post('/api/v1/locations'), clinic.adminToken)
-            .send(locationBody(sedeTodayFixture(now), { name: 'Sede Hoy' }))
-            .expect(201)
-        ).body as { id: string }
-      ).id;
-      await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
-        .set('X-Location-Id', hoy)
-        .send({ ranges: [] })
-        .expect(200);
-      const first = await createChair({
-        locationId: hoy,
-        name: 'Sillón Hoy 1',
-      });
-      const second = await createChair({
-        locationId: hoy,
-        name: 'Sillón Hoy 2',
-      });
       const appt = (
-        await book(
-          {
-            chairId: first.id,
-            patientId: patients[3],
-            start: at('13:00'),
-            end: at('13:30'),
-          },
-          hoy,
-        ).expect(201)
+        await book({
+          chairId: one.id,
+          patientId: patients[3],
+          start: at('13:00'),
+          end: at('13:30'),
+        }).expect(201)
       ).body as AppointmentBody & { start: string; end: string };
-      // Se trae a HOY (empezó hace 5 min) por `raw`: agendar en el pasado no se puede.
-      const start = new Date(now.getTime() - 5 * 60_000);
+      // Se trae a HOY (empezó hace un rato) por `raw`: agendar en el pasado no se
+      // puede. Nunca antes de la medianoche de la sede: sería de ayer (DX-460).
+      const start = new Date(
+        Date.now() -
+          Math.min(
+            5,
+            minutesIntoDay(new Date(), REGIONAL_CARACAS_FIXTURE.timeZone),
+          ) *
+            60_000,
+      );
       const end = new Date(start.getTime() + 30 * 60_000);
       await raw.appointment.update({
         where: { id: appt.id },
@@ -615,10 +656,10 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
           start: start.toISOString(),
           end: end.toISOString(),
         },
-        second.id,
+        two.id,
       ).expect(200);
       expect(moved.body as AppointmentBody & { status: string }).toMatchObject({
-        chairId: second.id,
+        chairId: two.id,
         status: 'ARRIVED',
       });
     });
@@ -719,6 +760,80 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
       )
         .send({ defaultProviderId: dentist.userId })
         .expect(404);
+    });
+
+    it('DX-492: B no busca huecos, atiende sin cita ni agenda desde pendientes con el sillón de A (404)', async () => {
+      const patientB = (
+        (
+          await as(api().post('/api/v1/patients'), other.adminToken, other.host)
+            .send({
+              firstName: 'Rosa',
+              lastName: 'Ajena',
+              docType: 'NATIONAL_ID',
+              docNumber: '492900',
+              sex: 'F',
+            })
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      await as(
+        api().get('/api/v1/appointments/openings').query({
+          providerId: other.adminUserId,
+          locationId: locationB,
+          from: DAY,
+          to: DAY,
+          durationMinutes: 30,
+          chairIds: chairA.id,
+        }),
+        other.adminToken,
+        other.host,
+      ).expect(404);
+      await as(
+        api().post('/api/v1/appointment-types'),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          name: 'Urgencia B',
+          durationMinutes: 30,
+          color: '#DC2626',
+          isUrgent: true,
+        })
+        .expect(201);
+      const walkIn = await as(
+        api().post('/api/v1/appointments/walk-in'),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          patientId: patientB,
+          providerId: other.adminUserId,
+          chairId: chairA.id,
+          overbookReason: 'Dolor agudo',
+        })
+        .expect(404);
+      expect((walkIn.body as { message: string }).message).toBe(
+        'Sillón no encontrado',
+      );
+      const entry = (
+        await as(api().post('/api/v1/waitlist'), other.adminToken, other.host)
+          .send({ patientId: patientB, durationMinutes: 30 })
+          .expect(201)
+      ).body as { id: string };
+      await as(
+        api().post(`/api/v1/waitlist/${entry.id}/schedule`),
+        other.adminToken,
+        other.host,
+      )
+        .send({
+          providerId: other.adminUserId,
+          start: at('19:00'),
+          chairId: chairA.id,
+        })
+        .expect(404);
+      expect(
+        await raw.appointment.count({ where: { tenantId: other.tenantId } }),
+      ).toBe(0);
     });
 
     it('una cita de B con el sillón de A: 404 «Sillón no encontrado»; la agenda de B con ese sillón: 400', async () => {

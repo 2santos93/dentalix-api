@@ -28,7 +28,7 @@ const PNG_A =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const PNG_B =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
-// 17:30 UTC del 16 de octubre = 12:30 en Bogotá.
+// 17:30 UTC del 16 de octubre = 12:30 en la zona de la sede.
 const NOW = new Date('2026-10-16T17:30:00.000Z');
 const META = {
   recordedById: 'dentist-1',
@@ -271,6 +271,18 @@ describe('SignPatientConsentUseCase', () => {
     });
   });
 
+  it('DX-524: sella el nombre del documento de la sede donde se firma', async () => {
+    const { sign, consents, names, template } = setup();
+    names.names.NATIONAL_ID = 'Documento clínica';
+    names.byLocation.set(consents.location.id, {
+      NATIONAL_ID: 'Documento sede',
+    });
+    names.byLocation.set('otra-sede', { NATIONAL_ID: 'Documento otra' });
+    names.activeLocationId = 'otra-sede';
+    const signed = await sign.execute('p1', signInput(template.id), META);
+    expect(signed.signerDocument).toBe('Documento sede 1020304050');
+  });
+
   it('firma un tutor con su nombre y documento', async () => {
     const { sign, template } = setup();
     const signed = await sign.execute(
@@ -417,6 +429,17 @@ describe('ListPatientConsentsUseCase / GetPatientConsentUseCase', () => {
     consents.rows[0] = { ...consents.rows[0], body: 'alterado' };
 
     expect((await get.execute('p1', signed.id)).integrityOk).toBe(false);
+  });
+
+  it('DX-354: el detalle lleva la región de la sede del documento', async () => {
+    const { sign, get, template } = setup();
+    const signed = await sign.execute('p1', signInput(template.id), META);
+
+    expect((await get.execute('p1', signed.id)).regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
   });
 
   it('404 si el consentimiento no es de ese paciente', async () => {

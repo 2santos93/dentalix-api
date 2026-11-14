@@ -1,6 +1,12 @@
+import { regionalFormat } from '../../../shared/format/regional-format';
 import { ClinicRole } from '@prisma/client';
 import {
+  CREDIT_AMOUNT_EXCEEDS_MESSAGE,
   canMoveCredit,
+  creditExceedsMessage,
+  dailyRefundCapMessage,
+  dailyRefundRemainingCents,
+  dailyRefundWindow,
   formatRefundNumber,
   normalizeReason,
   parseIdempotencyKey,
@@ -91,8 +97,8 @@ describe('saldo a favor (DX-253)', () => {
     });
 
     it('el 409 de un abono de referencia nombra la devolución', () => {
-      expect(voidRefundReferenceMessage('DEV-BOG-000007')).toMatch(
-        /^No se puede anular: .*DEV-BOG-000007/,
+      expect(voidRefundReferenceMessage('DEV-CCS-000007')).toMatch(
+        /^No se puede anular: .*DEV-CCS-000007/,
       );
     });
   });
@@ -163,13 +169,24 @@ describe('saldo a favor (DX-253)', () => {
     });
 
     it('el 403 explica el tope en español', () => {
-      expect(receptionCapMessage(0, 'COP', 0)).toMatch(/administración/);
-      // D3 (QA): el tope con los decimales de su moneda y su código, sin locale fijo.
-      expect(receptionCapMessage(1_000_000, 'COP', 0)).toContain('10000 COP');
-      expect(receptionCapMessage(1_000_050, 'USD', 2)).toContain(
-        '10000.50 USD',
+      const enUS = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
+      const esVE = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
+      expect(receptionCapMessage(0, 'VES', esVE)).toMatch(/administración/);
+      // DX-354b: el tope con el formato de la sede y el código ISO de su moneda.
+      expect(receptionCapMessage(1_000_000, 'VES', esVE)).toContain(
+        'hasta VES\u00a010.000,00 por operación',
       );
-      expect(receptionCapMessage(500_000, 'JPY', 0)).toContain('5000 JPY');
+      expect(receptionCapMessage(1_000_050, 'USD', enUS)).toContain(
+        'USD\u00a010,000.50',
+      );
+      // DX-517-quater: con el texto propio de la moneda de la clínica.
+      expect(receptionCapMessage(1_000_000, 'VES', esVE, { VES: 'Bs.' })).toBe(
+        'Recepción puede mover hasta Bs.\u00a010.000,00 por operación: pídeselo a administración.',
+      );
+      // JPY no tiene unidad menor: 0 decimales.
+      expect(receptionCapMessage(500_000, 'JPY', enUS)).toContain(
+        'JPY\u00a05,000 por',
+      );
     });
   });
 
@@ -181,10 +198,10 @@ describe('saldo a favor (DX-253)', () => {
   });
 
   it('serie propia DEV-<serie de la sede> y número de 6 cifras', () => {
-    expect(refundSeriesOf('BOG')).toBe('DEV-BOG');
-    expect(formatRefundNumber('DEV-BOG', 7)).toBe('DEV-BOG-000007');
+    expect(refundSeriesOf('CCS')).toBe('DEV-CCS');
+    expect(formatRefundNumber('DEV-CCS', 7)).toBe('DEV-CCS-000007');
     expect(() => refundSeriesOf('bad prefix')).toThrow(RangeError);
-    expect(() => formatRefundNumber('DEV-BOG', 0)).toThrow(RangeError);
+    expect(() => formatRefundNumber('DEV-CCS', 0)).toThrow(RangeError);
   });
 
   it('Idempotency-Key: UUID o 400', () => {
@@ -200,13 +217,13 @@ describe('saldo a favor (DX-253)', () => {
     const base = {
       planId: 'A',
       amountCents: 100,
-      currency: 'cop',
+      currency: 'ves',
       method: 'CASH' as const,
       reason: 'Motivo',
       paymentIds: ['b', 'a', 'a'],
     };
     expect(refundFingerprint(base)).toBe(
-      refundFingerprint({ ...base, currency: 'COP', paymentIds: ['a', 'b'] }),
+      refundFingerprint({ ...base, currency: 'VES', paymentIds: ['a', 'b'] }),
     );
     expect(refundFingerprint(base)).not.toBe(
       refundFingerprint({ ...base, amountCents: 101 }),
@@ -215,11 +232,79 @@ describe('saldo a favor (DX-253)', () => {
       sourcePlanId: 'A',
       targetPlanId: 'B',
       amountCents: 1,
-      currency: 'COP',
+      currency: 'VES',
       reason: null,
     };
     expect(transferFingerprint(transfer)).not.toBe(
       transferFingerprint({ ...transfer, targetPlanId: 'C' }),
     );
+  });
+});
+
+describe('creditExceedsMessage (DX-472-bis, revisión B3)', () => {
+  it('sin abonos en otra moneda pendientes, el mensaje de siempre', () => {
+    expect(creditExceedsMessage(0)).toBe(CREDIT_AMOUNT_EXCEEDS_MESSAGE);
+  });
+
+  it('con abonos en otra moneda que aún no cuentan, lo explica', () => {
+    expect(creditExceedsMessage(2)).toBe(
+      'El importe supera el saldo a favor del plan. 2 abonos en otra moneda todavía no cuentan en el saldo a favor: se suman en unos minutos, cuando quede registrada la tasa de su día. Vuelve a intentarlo después.',
+    );
+  });
+
+  describe('tope diario de devoluciones de RECEPCIÓN (DX-462)', () => {
+    const esVE = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
+    const enUS = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
+
+    it('lo que queda es el tope menos lo ya devuelto hoy (nunca negativo)', () => {
+      expect(dailyRefundRemainingCents(10_000, 6_000)).toBe(4_000);
+      expect(dailyRefundRemainingCents(10_000, 10_000)).toBe(0);
+      expect(dailyRefundRemainingCents(10_000, 12_000)).toBe(0);
+    });
+
+    it('el mensaje dice lo que queda con el formato de la sede y el código ISO', () => {
+      expect(dailyRefundCapMessage(4_000, 'USD', enUS)).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan USD\u00a040.00 hoy; pide a un administrador que la registre.',
+      );
+      expect(dailyRefundCapMessage(4_000, 'VES', enUS, { VES: 'Bs.' })).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan Bs.\u00a040.00 hoy; pide a un administrador que la registre.',
+      );
+      expect(dailyRefundCapMessage(0, 'VES', esVE)).toContain(
+        'Te quedan VES\u00a00,00 hoy',
+      );
+    });
+
+    it('el día es el civil de la sede: Caracas (UTC−4) cerca de la medianoche', () => {
+      // 23:30 del 4 nov en Caracas = 03:30Z del 5 nov.
+      const late = dailyRefundWindow(
+        new Date('2026-11-05T03:30:00Z'),
+        'America/Caracas',
+      );
+      // 00:30 del 5 nov en Caracas = 04:30Z del 5 nov.
+      const early = dailyRefundWindow(
+        new Date('2026-11-05T04:30:00Z'),
+        'America/Caracas',
+      );
+      expect(late.day).toBe('2026-11-04');
+      expect(early.day).toBe('2026-11-05');
+      expect(late.end).toEqual(early.start);
+      expect(early.start).toEqual(new Date('2026-11-05T04:00:00Z'));
+    });
+
+    it('el día es el civil de la sede: Madrid (UTC+1) cerca de la medianoche', () => {
+      // 23:30 del 4 nov en Madrid = 22:30Z; 00:30 del 5 nov = 23:30Z.
+      const late = dailyRefundWindow(
+        new Date('2026-11-04T22:30:00Z'),
+        'Europe/Madrid',
+      );
+      const early = dailyRefundWindow(
+        new Date('2026-11-04T23:30:00Z'),
+        'Europe/Madrid',
+      );
+      expect(late.day).toBe('2026-11-04');
+      expect(early.day).toBe('2026-11-05');
+      expect(late.end).toEqual(early.start);
+      expect(early.start).toEqual(new Date('2026-11-04T23:00:00Z'));
+    });
   });
 });

@@ -24,6 +24,8 @@ export interface WalkInWrite {
   /** Sede ya resuelta y permitida (cabecera o sede de escritura). */
   locationId: string;
   appointmentTypeId: string;
+  /** DX-492: sillón ya validado y libre (la EXCLUDE cierra la carrera). */
+  chairId: string | null;
   start: Date;
   end: Date;
   /** Reloj del servidor: la llegada es ahora. */
@@ -33,6 +35,12 @@ export interface WalkInWrite {
   /** Sobrecupo con su motivo (ya validado); `null` = hueco reservado. */
   overbookReason: string | null;
   createdById: string;
+  /**
+   * DX-510: Idempotency-Key (UUID ya validado) y huella de la petición. Con
+   * clave, la transacción espera a la otra petición con la misma clave y, si
+   * esa ya creó la cita, la devuelve (`replayed`) en vez de escribir.
+   */
+  idempotency?: { key: string; fingerprint: string };
 }
 
 export interface WalkInWriteResult {
@@ -41,6 +49,18 @@ export interface WalkInWriteResult {
   /** Fila de `appointment_reserved_overrides` del sobrecupo, o null. */
   overbookId: string | null;
 }
+
+/** DX-510: la cita que creó una Idempotency-Key y la huella de su petición. */
+export interface WalkInReplay {
+  appointment: Appointment;
+  overbookId: string | null;
+  fingerprint: string | null;
+}
+
+/** Lo que escribió `create`, o la cita que ya había creado la misma clave. */
+export type WalkInCreateOutcome =
+  | ({ replayed: false } & WalkInWriteResult)
+  | ({ replayed: true } & WalkInReplay);
 
 export interface WalkInRepository {
   /**
@@ -58,5 +78,10 @@ export interface WalkInRepository {
   create(
     input: WalkInWrite,
     ctx: AuditRequestContext,
-  ): Promise<WalkInWriteResult>;
+  ): Promise<WalkInCreateOutcome>;
+  /**
+   * DX-510: la cita creada con esta Idempotency-Key en la clínica del
+   * contexto (RLS + `tenantId`), con la huella de su petición, o null.
+   */
+  findByIdempotencyKey(key: string): Promise<WalkInReplay | null>;
 }

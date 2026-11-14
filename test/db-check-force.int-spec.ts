@@ -61,6 +61,22 @@ describe('db:check-force (DX-134)', () => {
     expect(checkForce().status).toBe(0);
   }, 60_000);
 
+  it('dentalix_app con DELETE sobre signature_requests: sale con 1 y la nombra (DX-425)', async () => {
+    await raw.$executeRawUnsafe(
+      'GRANT DELETE ON public.signature_requests TO dentalix_app',
+    );
+    try {
+      const { status, out } = checkForce();
+      expect(status).toBe(1);
+      expect(out).toContain('"app_delete":["signature_requests:DELETE"]');
+    } finally {
+      await raw.$executeRawUnsafe(
+        'REVOKE DELETE ON public.signature_requests FROM dentalix_app',
+      );
+    }
+    expect(checkForce().status).toBe(0);
+  }, 60_000);
+
   it('una tabla de public con RLS y sin FORCE: sale con 1 y la nombra', async () => {
     await raw.$executeRawUnsafe(
       `CREATE TABLE public."${TABLE}" ("id" int PRIMARY KEY)`,
@@ -136,13 +152,13 @@ describe('db:check-force (DX-134)', () => {
     const [{ db }] = await raw.$queryRaw<{ db: string }[]>`
       SELECT current_database()::text AS db`;
     await raw.$executeRawUnsafe(
-      `ALTER ROLE dentalix_app IN DATABASE "${db}" SET timezone = 'America/Bogota'`,
+      `ALTER ROLE dentalix_app IN DATABASE "${db}" SET timezone = 'America/Caracas'`,
     );
     try {
       const { status, out } = checkForce();
       expect(out).toContain('"event":"db.check_force_failed"');
       expect(out).toContain(
-        '"timezone":["dentalix_app: TimeZone = America/Bogota (tiene que ser UTC)"]',
+        '"timezone":["dentalix_app: TimeZone = America/Caracas (tiene que ser UTC)"]',
       );
       expect(out).toContain('la hora del servidor tiene que ser UTC');
       expect(status).toBe(1);

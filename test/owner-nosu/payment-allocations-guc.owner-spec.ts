@@ -7,7 +7,7 @@ import {
   requireOwnerNosuEnv,
 } from './owner-nosu-env';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from '../support/location-fixtures';
 
@@ -103,7 +103,7 @@ describe('DX-051 · liberación de imputaciones sin el tenant de la sesión (own
       data: { id: T_A, name: 'Clínica imputación', subdomain: 'dx051-nosu' },
     });
     const location = await target.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: T_A,
         name: 'Sede',
       }),

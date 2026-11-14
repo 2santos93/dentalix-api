@@ -18,13 +18,14 @@ import {
   ListProviderOverridesUseCase,
   ReplaceProviderScheduleUseCase,
   SetProviderOverrideUseCase,
+  UpdateProviderScheduleSettingsUseCase,
 } from './provider-schedule.use-cases';
 
 const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const OFF = '33333333-3333-4333-8333-333333333333';
 const H = (h: number) => h * 60;
-// Martes 20-10-2026, 12:00 en Bogotá.
+// Martes 20-10-2026, 12:00 en la zona de la sede.
 const NOW = new Date('2026-10-20T17:00:00.000Z');
 
 const CTX: AuditRequestContext = {
@@ -36,15 +37,38 @@ const CTX: AuditRequestContext = {
   userAgent: null,
 };
 
-function makeLocations(): LocationRepository {
+// DX-354: datos de test; la sede A es de 24 h (de-DE) y la B de 12 h (en-US).
+const FORMAT_A = { locale: 'de-DE', hourCycle: 'h23' };
+const FORMAT_B = { locale: 'en-US', hourCycle: 'h12' };
+
+function makeLocations(
+  formats: { a: object | null; b: object | null } = {
+    a: FORMAT_A,
+    b: FORMAT_B,
+  },
+): LocationRepository {
+  const noFormat = { locale: null, hourCycle: null };
   const all = [
-    { id: A, name: 'Sede A', timeZone: 'America/Bogota', isActive: true },
-    { id: B, name: 'Sede B', timeZone: 'America/Bogota', isActive: true },
+    {
+      id: A,
+      name: 'Sede A',
+      timeZone: 'America/Caracas',
+      isActive: true,
+      ...(formats.a ?? noFormat),
+    },
+    {
+      id: B,
+      name: 'Sede B',
+      timeZone: 'America/Caracas',
+      isActive: true,
+      ...(formats.b ?? noFormat),
+    },
     {
       id: OFF,
       name: 'Sede Cerrada',
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
       isActive: false,
+      ...FORMAT_A,
     },
   ];
   return {
@@ -173,6 +197,56 @@ describe('horario de los profesionales (DX-233)', () => {
         'El tramo 08:00–13:00 en Sede A se solapa el lunes con 12:00–15:00 en Sede B: un profesional no puede estar en dos sedes a la vez.',
       );
       expect(audits).toHaveLength(0);
+    });
+
+    const CROSSING = {
+      locations: [
+        DRA_X.locations[0],
+        {
+          locationId: B,
+          ranges: [{ weekday: 1, startMinute: H(12), endMinute: H(15) }],
+        },
+      ],
+    };
+
+    it('DX-354: el mensaje usa el reloj de la sede de la petición (12 h con la sede B), un solo reloj para toda la frase', async () => {
+      await expect(
+        replace.execute('dra-x', CROSSING, { ...CTX, locationId: B }),
+      ).rejects.toThrow(
+        'El tramo 8:00 a. m.–1:00 p. m. en Sede A se solapa el lunes con 12:00 p. m.–3:00 p. m. en Sede B: un profesional no puede estar en dos sedes a la vez.',
+      );
+    });
+
+    it('DX-354: si la sede de la petición no tiene formato, 409 LOCATION_LOCALE_REQUIRED y no guarda', async () => {
+      const noFormat = new ReplaceProviderScheduleUseCase(
+        repo,
+        makeStaff(),
+        makeLocations({ a: null, b: null }),
+        {
+          record: () => Promise.resolve(),
+        } as unknown as RecordAuditEventUseCase,
+        () => NOW,
+      );
+      await expect(
+        noFormat.execute('dra-x', CROSSING, CTX),
+      ).rejects.toMatchObject({
+        response: { code: 'LOCATION_LOCALE_REQUIRED' },
+      });
+    });
+
+    it('DX-354: sin error, el formato no se pide (una sede sin formato sigue guardando)', async () => {
+      const noFormat = new ReplaceProviderScheduleUseCase(
+        repo,
+        makeStaff(),
+        makeLocations({ a: null, b: null }),
+        {
+          record: () => Promise.resolve(),
+        } as unknown as RecordAuditEventUseCase,
+        () => NOW,
+      );
+      await expect(
+        noFormat.execute('dra-x', DRA_X, CTX),
+      ).resolves.toBeDefined();
     });
 
     it('sede sin tramos no se guarda; lista vacía deja al profesional sin horario', async () => {
@@ -635,5 +709,33 @@ describe('horario de los profesionales y sedes permitidas (DX-233 × DX-089)', (
       (await getSchedule.execute('dr-z')).locations.map((l) => l.locationId),
     ).toEqual([A, B]);
     expect(await listOverrides.execute('dr-z', {})).toHaveLength(2);
+  });
+});
+
+describe('UpdateProviderScheduleSettingsUseCase (DX-363)', () => {
+  it('audita el modo estricto sin la sede activa de quien lo cambia', async () => {
+    const repo = new InMemoryProviderScheduleRepository();
+    const drafts: AuditEventDraft[] = [];
+    const audit = {
+      record: (d: AuditEventDraft) => {
+        drafts.push(d);
+        return Promise.resolve();
+      },
+    } as unknown as RecordAuditEventUseCase;
+    const uc = new UpdateProviderScheduleSettingsUseCase(repo, audit);
+
+    await expect(
+      uc.execute({ strictProviderSchedule: true }, { ...CTX, locationId: A }),
+    ).resolves.toEqual({ strictProviderSchedule: true });
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({
+      locationId: null,
+      resourceType: 'PROVIDER_SCHEDULE',
+      metadata: {
+        reason: 'PROVIDER_SCHEDULE_SETTINGS',
+        statusChange: { from: 'WARN', to: 'STRICT' },
+      },
+    });
   });
 });

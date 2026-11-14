@@ -14,7 +14,7 @@ import { deferred, waitFor } from './support/wait-for';
 // DX-085, capa de BD: la cola `jobs` contra Postgres con DOS workers reales
 // (dos PrismaService, dos pools de conexiones), como dos réplicas. Outbox con
 // rollback y commit, idempotencia con concurrencia, cron con candado,
-// reintentos con backoff hasta FAILED y arriendos vencidos. Sin sleeps: las
+// reintentos con backoff hasta FAILED y reservas vencidas. Sin sleeps: las
 // esperas son barreras (deferred) o polling con tope (waitFor).
 
 const owner = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -404,8 +404,8 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
     });
   });
 
-  describe('latido del arriendo (revisión H1)', () => {
-    it('mientras el handler trabaja, el latido renueva el arriendo y otro worker no lo retoma', async () => {
+  describe('latido de la reserva (revisión H1)', () => {
+    it('mientras el handler trabaja, el latido renueva la reserva y otro worker no lo retoma', async () => {
       const name = `${PREFIX}.heartbeat`;
       const started = deferred();
       const release = deferred();
@@ -419,13 +419,13 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       const running = a.worker.runOnce();
       await started.promise;
 
-      // El arriendo «vence» (como si el handler llevara más de lo pactado).
+      // La reserva «vence» (como si el handler llevara más de lo pactado).
       const expired = new Date(Date.now() - 1000);
       await owner.job.update({ where: { id }, data: { runAt: expired } });
       await waitFor(async () => {
         const row = await owner.job.findUniqueOrThrow({ where: { id } });
         return row.runAt.getTime() > Date.now();
-      }, 'el latido renueva el arriendo');
+      }, 'el latido renueva la reserva');
 
       await b.worker.runOnce();
       expect(runs).toBe(1);
@@ -670,7 +670,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       });
     });
 
-    it('un arriendo vencido (worker caído) se retoma; en el último intento queda FAILED sin ejecutarse', async () => {
+    it('una reserva vencida (worker caído) se retoma; en el último intento queda FAILED sin ejecutarse', async () => {
       const name = `${PREFIX}.lease`;
       let runs = 0;
       onBoth(
@@ -683,7 +683,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       );
       const retaken = await a.queue.enqueue(name, { n: 1 });
       const exhausted = await a.queue.enqueue(name, { n: 2 });
-      // Dos trabajos que un worker reclamó y abandonó (arriendo vencido).
+      // Dos trabajos que un worker reclamó y abandonó (reserva vencida).
       await owner.job.update({
         where: { id: retaken.id },
         data: {
@@ -720,7 +720,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       });
     });
 
-    it('el cierre tardío de un worker cuyo arriendo venció no pisa el del worker que lo retomó', async () => {
+    it('el cierre tardío de un worker cuya reserva venció no pisa el del worker que lo retomó', async () => {
       const name = `${PREFIX}.fencing`;
       onBoth(name, () => Promise.resolve());
       const { id } = await a.queue.enqueue(name, {});
@@ -731,7 +731,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
          WHERE id = ${id}::uuid`;
       const [claimed] = await a.repo.claim([name], 1, 300, 'int:a:00000000');
       expect(claimed.attempts).toBe(1);
-      // Vence el arriendo y B lo retoma y lo termina.
+      // Vence la reserva y B lo retoma y lo termina.
       await owner.$executeRaw`
         UPDATE jobs SET "runAt" = timezone('utc', clock_timestamp()) - interval '1 second'
          WHERE id = ${id}::uuid`;
@@ -772,7 +772,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
   });
 
   describe('DX-220 · sin fila envenenada, latido, stats y reintento', () => {
-    /** Un trabajo que un worker reclamó y abandonó (arriendo vencido). */
+    /** Un trabajo que un worker reclamó y abandonó (reserva vencida). */
     async function abandoned(
       name: string,
       data: { attempts: number; maxAttempts: number; runAt?: Date },
@@ -884,7 +884,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       expect(rows.get(last)?.finishedAt).toBeInstanceOf(Date);
       expect(rows.get(poison)).toMatchObject({ state: 'FAILED', attempts: 3 });
       expect(rows.get(retakable)).toMatchObject({ state: 'RUNNING' });
-      // Arriendo vigente: su worker sigue con él.
+      // Reserva vigente: su worker sigue con él.
       expect(rows.get(alive)).toMatchObject({ state: 'RUNNING', attempts: 2 });
     });
 

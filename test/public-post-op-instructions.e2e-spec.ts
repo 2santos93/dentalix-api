@@ -21,6 +21,7 @@ import {
   POSTOP_LINK_EXPIRED_MESSAGE,
   POSTOP_LINK_NOT_FOUND_MESSAGE,
 } from '../src/modules/post-op-instructions/application/use-cases/public-post-op.use-cases';
+import { makePng } from '../src/modules/clinic-settings/__fixtures__/logo-fixtures';
 
 // DX-222 en HTTP real: la página pública de indicaciones que abre el paciente
 // desde el email (sin sesión, la clínica sale del host). Muestra el texto
@@ -35,8 +36,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 // puede comprobar que el JSON no lo filtra por su cuenta.
 const BODY =
   'Muerde la gasa 30 minutos. Te atendió {{profesional}} en {{clinica}}. Dudas: {{telefono_sede}}.';
-const EMAIL = 'mariana.zuluaga@example.com';
-const LAST_NAME = 'Zuluagarrestrepo';
+const EMAIL = 'mariana.urdaneta@example.com';
+const LAST_NAME = 'Urdanetabracho';
 const DOC_NUMBER = '1098765432';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -59,6 +60,8 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
   let patientId: string;
   let deliveryId: string;
   let token: string;
+  let appointmentId: string;
+  let templateId: string;
 
   const server = () => request(app.getHttpServer());
   const as = (clinic: Clinic) => {
@@ -112,7 +115,7 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
       where: { tenantId: clinicA.tenantId },
     });
     await as(clinicA)
-      .patch(`/locations/${location.id}`, { phone: '601 555 0101' })
+      .patch(`/locations/${location.id}`, { phone: '212 555 0101' })
       .expect(200);
 
     const template = await as(clinicA)
@@ -122,7 +125,7 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
         body: BODY,
       })
       .expect(201);
-    const templateId = (template.body as { id: string }).id;
+    templateId = (template.body as { id: string }).id;
 
     const patient = await as(clinicA)
       .post('/patients', {
@@ -146,7 +149,7 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
         end: new Date(start.getTime() + 30 * 60 * 1000).toISOString(),
       })
       .expect(201);
-    const appointmentId = (appointment.body as { id: string }).id;
+    appointmentId = (appointment.body as { id: string }).id;
 
     const created = await as(clinicA)
       .post(`/appointments/${appointmentId}/post-op-instructions/deliveries`, {
@@ -179,10 +182,10 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
     expect(view).toEqual({
       clinic: {
         name: 'Clinica dx222-publica-a',
-        logoUrl: tenant.logoUrl,
+        logoUrl: tenant.logoKey,
         primaryColor: tenant.primaryColor,
       },
-      locationPhone: '601 555 0101',
+      locationPhone: '212 555 0101',
       title: 'Exodoncia',
       code: 'POI-EXO',
       version: 1,
@@ -195,6 +198,79 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
     expect(res.text).not.toContain(DOC_NUMBER);
     // Abrir la página no la marca como leída: eso lo hace el POST.
     expect((await deliveryRow()).firstOpenedAt).toBeNull();
+  });
+
+  // DX-019-ter: la entrega congela el logo de la clínica al entregarse; la
+  // página pública y la reimpresión desde la ficha lo pintan aunque luego
+  // cambie o se quite. La entrega sin logo sigue sin él.
+  it('DX-019-ter: la página pública y la reimpresión pintan el logo de la entrega aunque luego cambie o se quite', async () => {
+    const uploadLogo = async (size: number): Promise<string> =>
+      (
+        (
+          await server()
+            .post('/api/v1/clinic/settings/logo')
+            .set('X-Tenant-Host', clinicA.host)
+            .set('Authorization', `Bearer ${clinicA.adminToken}`)
+            .attach('file', makePng(size, size), {
+              filename: 'logo.png',
+              contentType: 'image/png',
+            })
+            .expect(200)
+        ).body as { logoUrl: string }
+      ).logoUrl;
+    const reprint = async (id: string) =>
+      (
+        (
+          await as(clinicA)
+            .get(`/patients/${patientId}/post-op-deliveries/${id}`)
+            .expect(200)
+        ).body as { clinic: { logoUrl: string | null } }
+      ).clinic.logoUrl;
+    const publicLogo = async (t: string) =>
+      ((await publicGet(clinicA.host, t).expect(200)).body as PublicPostOp)
+        .clinic.logoUrl;
+
+    const logoA = await uploadLogo(20);
+    mailer.clear();
+    const created = await as(clinicA)
+      .post(`/appointments/${appointmentId}/post-op-instructions/deliveries`, {
+        templateId,
+        channel: 'EMAIL',
+      })
+      .expect(201);
+    const withLogo = (created.body as { delivery: { id: string } }).delivery.id;
+    const withLogoToken = (
+      await mailer.waitFor(EMAIL, /\/indicaciones\/([A-Za-z0-9_-]{43})/)
+    )[1];
+    const logoB = await uploadLogo(24);
+    expect(logoB).not.toBe(logoA);
+
+    expect(await publicLogo(withLogoToken)).toBe(logoA);
+    expect(await reprint(withLogo)).toBe(logoA);
+    // La de beforeAll se entregó sin logo: sigue sin él con el logo de hoy.
+    expect(await publicLogo(token)).toBeNull();
+    expect(await reprint(deliveryId)).toBeNull();
+    const row = await raw.postOpInstructionDelivery.findUniqueOrThrow({
+      where: { id: withLogo },
+      select: { clinicLogoKey: true },
+    });
+    expect(row.clinicLogoKey).toBe(`logos/${logoA.split('/files/logos/')[1]}`);
+
+    await server()
+      .delete('/api/v1/clinic/settings/logo')
+      .set('X-Tenant-Host', clinicA.host)
+      .set('Authorization', `Bearer ${clinicA.adminToken}`)
+      .expect(200);
+    expect(await publicLogo(withLogoToken)).toBe(logoA);
+    expect(await reprint(withLogo)).toBe(logoA);
+
+    // El trigger impide cambiar el logo congelado.
+    await expect(
+      raw.postOpInstructionDelivery.update({
+        where: { id: withLogo },
+        data: { clinicLogoKey: null },
+      }),
+    ).rejects.toThrow(/inalterable/);
   });
 
   // ISOLATION_COVERS: GET /public/post-op-instructions/:token

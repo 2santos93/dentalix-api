@@ -17,7 +17,7 @@ const input = (
   location: {
     id: 'loc-1',
     name: 'Sede Norte',
-    address: 'Calle 100 # 15-20, Bogotá',
+    address: 'Av. Libertador 100, Caracas',
   },
   patient: {
     id: 'pat-1',
@@ -30,7 +30,7 @@ const input = (
   payment: {
     id: 'pay-1',
     amount: 150000,
-    currency: 'COP',
+    currency: 'GBP',
     method: 'CASH',
     paidAt: new Date('2026-10-17T17:00:00.000Z'),
     paidOn: '2026-10-17',
@@ -41,7 +41,7 @@ const input = (
     createdAt: new Date('2026-09-01T15:00:00.000Z'),
   },
   planBalance: {
-    currency: 'COP',
+    currency: 'GBP',
     billable: 900000,
     paid: 450000,
     balance: 450000,
@@ -63,7 +63,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
       location: {
         id: 'loc-1',
         name: 'Sede Norte',
-        address: 'Calle 100 # 15-20, Bogotá',
+        address: 'Av. Libertador 100, Caracas',
       },
       fiscalDataPending: true,
       patient: {
@@ -77,7 +77,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
       payment: {
         id: 'pay-1',
         amount: 150000,
-        currency: 'COP',
+        currency: 'GBP',
         method: 'CASH',
         // DX-377: sin medio ni referencia en la entrada, nulos.
         paymentMethodName: null,
@@ -93,7 +93,7 @@ describe('buildReceiptSnapshot (DX-136)', () => {
       // DX-262: un abono a un plan no tiene saldo migrado.
       openingBalance: null,
       planBalance: {
-        currency: 'COP',
+        currency: 'GBP',
         billable: 900000,
         paid: 450000,
         balance: 450000,
@@ -103,33 +103,70 @@ describe('buildReceiptSnapshot (DX-136)', () => {
     });
   });
 
+  describe('región de la sede (DX-521, R1)', () => {
+    const REGIONAL = {
+      timeZone: 'Europe/London',
+      locale: 'en-GB',
+      hourCycle: 'h23',
+    } as const;
+
+    it('congela zona, locale y reloj de la sede si vienen', () => {
+      const snapshot = buildReceiptSnapshot(
+        input({ regional: REGIONAL }),
+        NO_LOCAL_NAMES,
+      );
+      expect(snapshot.regional).toEqual(REGIONAL);
+      expect(snapshot.version).toBe(1);
+    });
+
+    it.each([
+      ['ausente', undefined],
+      ['null (sede sin ajustes válidos)', null],
+    ])('%s: la foto es la de antes, sin la clave', (_label, regional) => {
+      const snapshot = buildReceiptSnapshot(
+        input({ regional }),
+        NO_LOCAL_NAMES,
+      );
+      expect('regional' in snapshot).toBe(false);
+      expect(snapshot).toEqual(buildReceiptSnapshot(input(), NO_LOCAL_NAMES));
+    });
+
+    it('la foto no comparte el objeto de la entrada', () => {
+      const snapshot = buildReceiptSnapshot(
+        input({ regional: { ...REGIONAL } }),
+        NO_LOCAL_NAMES,
+      );
+      expect(snapshot.regional).not.toBe(REGIONAL);
+    });
+  });
+
   it('nunca guarda el documento del paciente en claro', () => {
     const json = JSON.stringify(buildReceiptSnapshot(input(), NO_LOCAL_NAMES));
     expect(json).not.toContain('1012345678');
   });
 
-  it('con razón social y NIT de la clínica los datos fiscales no quedan pendientes', () => {
+  it('con razón social e identificación fiscal de la clínica los datos fiscales no quedan pendientes', () => {
     const snapshot = buildReceiptSnapshot(
       input({
         clinic: {
           name: 'Clínica Demo',
-          legalName: 'Clínica Demo S.A.S.',
-          taxId: '900123456-7',
-          address: 'Cra 7 # 72-10, Bogotá',
+          legalName: 'Clínica Demo C.A.',
+          taxId: 'J-12345678-9',
+          address: 'Av. Urdaneta 72, Caracas',
         },
       }),
       NO_LOCAL_NAMES,
     );
     expect(snapshot.fiscalDataPending).toBe(false);
-    expect(snapshot.clinic.taxId).toBe('900123456-7');
+    expect(snapshot.clinic.taxId).toBe('J-12345678-9');
   });
 
-  it('sin NIT (aunque haya razón social) siguen pendientes', () => {
+  it('sin identificación fiscal (aunque haya razón social) siguen pendientes', () => {
     const snapshot = buildReceiptSnapshot(
       input({
         clinic: {
           name: 'Clínica Demo',
-          legalName: 'Clínica Demo S.A.S.',
+          legalName: 'Clínica Demo C.A.',
           taxId: '  ',
           address: null,
         },
@@ -273,5 +310,159 @@ describe('receiptPatientView (DX-327)', () => {
       patient: { ...unknown.patient, docType: 'toString' },
     } as unknown as ReceiptSnapshot;
     expect(() => receiptPatientView(toString, NO_LOCAL_NAMES)).toThrow();
+  });
+});
+
+describe('buildReceiptSnapshot: título y leyenda del recibo (DX-515)', () => {
+  it('sin título ni leyenda configurados, la foto es byte a byte la de antes', () => {
+    const before = JSON.stringify(
+      buildReceiptSnapshot(input(), NO_LOCAL_NAMES),
+    );
+    for (const texts of [undefined, null, { title: null, legend: null }]) {
+      const snapshot = buildReceiptSnapshot(input({ texts }), NO_LOCAL_NAMES);
+      expect(JSON.stringify(snapshot)).toBe(before);
+      expect(snapshot).not.toHaveProperty('title');
+      expect(snapshot).not.toHaveProperty('legend');
+    }
+  });
+
+  it('congela el título y la leyenda configurados al emitir, y nada más cambia', () => {
+    const plain = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
+    const snapshot = buildReceiptSnapshot(
+      input({
+        texts: {
+          title: 'Recibo de pago',
+          legend: 'Este recibo no es una factura',
+        },
+      }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot).toEqual({
+      ...plain,
+      title: 'Recibo de pago',
+      legend: 'Este recibo no es una factura',
+    });
+  });
+
+  it('solo la leyenda, o solo el título: la otra clave no aparece', () => {
+    const onlyLegend = buildReceiptSnapshot(
+      input({ texts: { title: null, legend: 'Sin valor fiscal' } }),
+      NO_LOCAL_NAMES,
+    );
+    expect(onlyLegend.legend).toBe('Sin valor fiscal');
+    expect(onlyLegend).not.toHaveProperty('title');
+    const onlyTitle = buildReceiptSnapshot(
+      input({ texts: { title: 'Recibo de pago', legend: null } }),
+      NO_LOCAL_NAMES,
+    );
+    expect(onlyTitle.title).toBe('Recibo de pago');
+    expect(onlyTitle).not.toHaveProperty('legend');
+  });
+});
+
+describe('buildReceiptSnapshot: ajustes por medio de pago (DX-516)', () => {
+  const TAX = {
+    type: 'TAX' as const,
+    label: 'Impuesto 3 %',
+    calculation: 'PERCENT' as const,
+    percent: 3,
+    fixedAmount: null,
+    base: 150000,
+    amount: 4500,
+    currency: 'USD',
+  };
+
+  it('sin ajustes la foto es byte a byte la de antes (sin clave nueva)', () => {
+    const before = JSON.stringify(
+      buildReceiptSnapshot(input(), NO_LOCAL_NAMES),
+    );
+    for (const adjustments of [undefined, []]) {
+      const base = input();
+      const snapshot = buildReceiptSnapshot(
+        input({ payment: { ...base.payment, adjustments } }),
+        NO_LOCAL_NAMES,
+      );
+      expect(JSON.stringify(snapshot)).toBe(before);
+      expect(snapshot.payment).not.toHaveProperty('adjustments');
+    }
+  });
+
+  it('congela los ajustes del abono con su base e importe, y nada más cambia', () => {
+    const plain = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
+    const base = input();
+    const snapshot = buildReceiptSnapshot(
+      input({ payment: { ...base.payment, adjustments: [TAX] } }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot).toEqual({
+      ...plain,
+      payment: { ...plain.payment, adjustments: [TAX] },
+    });
+  });
+
+  it('en un cobro dividido los ajustes van en su línea, no en `payment`', () => {
+    const base = input();
+    const snapshot = buildReceiptSnapshot(
+      input({
+        payment: { ...base.payment, adjustments: [TAX] },
+        split: {
+          planCurrency: 'USD',
+          lines: [
+            {
+              paymentId: 'pay-1',
+              line: 1,
+              amount: 150000,
+              currency: 'USD',
+              method: 'CASH',
+              paymentMethodName: 'Efectivo',
+              reference: null,
+              equivalentAmount: 150000,
+              adjustments: [TAX],
+            },
+            {
+              paymentId: 'pay-2',
+              line: 2,
+              amount: 50000,
+              currency: 'USD',
+              method: 'CARD',
+              paymentMethodName: 'Tarjeta',
+              reference: null,
+              equivalentAmount: 50000,
+            },
+          ],
+        },
+      }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot.payment).not.toHaveProperty('adjustments');
+    expect(snapshot.split?.lines[0].adjustments).toEqual([TAX]);
+    expect(snapshot.split?.lines[1]).not.toHaveProperty('adjustments');
+  });
+});
+
+describe('buildReceiptSnapshot: texto propio de cada moneda (DX-517)', () => {
+  it('sin textos, la foto es byte a byte la de antes', () => {
+    const before = JSON.stringify(
+      buildReceiptSnapshot(input(), NO_LOCAL_NAMES),
+    );
+    for (const currencyTexts of [undefined, null, {}]) {
+      const snapshot = buildReceiptSnapshot(
+        input({ currencyTexts }),
+        NO_LOCAL_NAMES,
+      );
+      expect(JSON.stringify(snapshot)).toBe(before);
+      expect(snapshot).not.toHaveProperty('currencyTexts');
+    }
+  });
+
+  it('congela el mapa de la clínica al emitir (una copia), y nada más cambia', () => {
+    const texts = { EUR: '€', VES: 'Bs.' };
+    const plain = buildReceiptSnapshot(input(), NO_LOCAL_NAMES);
+    const snapshot = buildReceiptSnapshot(
+      input({ currencyTexts: texts }),
+      NO_LOCAL_NAMES,
+    );
+    expect(snapshot).toEqual({ ...plain, currencyTexts: texts });
+    expect(snapshot.currencyTexts).not.toBe(texts);
   });
 });

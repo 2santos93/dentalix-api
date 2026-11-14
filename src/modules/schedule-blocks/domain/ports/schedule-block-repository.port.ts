@@ -37,6 +37,12 @@ export interface CreateScheduleBlockRepoInput extends ScheduleBlockScope {
   reservedForTypeIds?: string[];
   releaseAtMinute?: number | null;
   createdById: string;
+  /**
+   * DX-149: sin `confirmAffected`, se vuelve a contar dentro de la transacción
+   * (con el candado de la agenda) y, si hay citas debajo, se lanza
+   * `AffectedAppointmentsRaceError` sin crear nada.
+   */
+  recheckAffected?: boolean;
 }
 
 export interface UpdateScheduleBlockRepoInput {
@@ -48,6 +54,8 @@ export interface UpdateScheduleBlockRepoInput {
   reservedForTypeIds?: string[];
   releaseAtMinute?: number | null;
   updatedById: string;
+  /** DX-149: como en el alta, al ampliar o endurecer sin `confirmAffected`. */
+  recheckAffected?: boolean;
 }
 
 export interface AffectingBlocksQuery {
@@ -95,9 +103,9 @@ export interface ScheduleBlockRepository {
   update(
     id: string,
     patch: UpdateScheduleBlockRepoInput,
-  ): Promise<ScheduleBlock>;
+  ): Promise<ScheduleBlock | null>;
   /** Borrado lógico. */
-  softDelete(id: string, deletedById: string): Promise<void>;
+  softDelete(id: string, deletedById: string): Promise<boolean>;
   /**
    * Bloqueos vivos que se solapan con una cita de `providerId` en su sede:
    * los suyos en esa sede o en todas, y los de toda la sede.

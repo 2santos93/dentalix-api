@@ -1,11 +1,11 @@
 import { AppointmentStatus, ClinicRole, PrismaClient } from '@prisma/client';
-import { REGIONAL_BOGOTA_FIXTURE, locationData } from './location-fixtures';
+import { REGIONAL_CARACAS_FIXTURE, locationData } from './location-fixtures';
 
 /**
  * DX-014: actividad fija de una clínica para los reportes, sembrada por `raw`
  * (DIRECT_URL, owner) para que las fechas sean exactas: los casos de uso no
  * registran el pasado. Las horas van en UTC; las sedes de los tests están en
- * America/Bogota (UTC−5 fijo).
+ * America/Caracas (UTC−4 fijo).
  */
 export class ReportSeeder {
   private readonly taken = new Set<string>();
@@ -19,7 +19,7 @@ export class ReportSeeder {
 
   async location(name: string): Promise<string> {
     const location = await this.raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: this.tenantId,
         name,
       }),
@@ -89,7 +89,7 @@ export class ReportSeeder {
         tenantId: this.tenantId,
         providerId: input.providerId,
         locationId: input.locationId,
-        timezone: 'America/Bogota',
+        timezone: 'America/Caracas',
       },
       select: { id: true },
     });
@@ -109,7 +109,11 @@ export class ReportSeeder {
     ranges: { weekday: number; startMinute: number; endMinute: number }[],
   ): Promise<void> {
     const schedule = await this.raw.locationSchedule.create({
-      data: { tenantId: this.tenantId, locationId, timezone: 'America/Bogota' },
+      data: {
+        tenantId: this.tenantId,
+        locationId,
+        timezone: 'America/Caracas',
+      },
       select: { id: true },
     });
     await this.raw.locationScheduleRange.createMany({
@@ -261,7 +265,7 @@ export class ReportSeeder {
   }
 
   /**
-   * Una cita de 30 min desde las 10:00 de Bogotá (15:00 UTC) del día civil
+   * Una cita de 30 min desde las 10:00 de la sede (15:00 UTC) del día civil
    * `day`: cada cita del día en la siguiente media hora libre, para no chocar
    * con los EXCLUDE de profesional y paciente.
    */
@@ -320,5 +324,85 @@ export class ReportSeeder {
         status: input.status,
       });
     }
+  }
+
+  /**
+   * DX-410: un gasto de la sede (fecha de factura civil) y, si se piden, sus
+   * pagos (fecha de pago civil). Anular el gasto anula antes sus pagos vivos,
+   * como el caso de uso (la BD no deja anular un gasto con pagos vivos).
+   */
+  async expense(input: {
+    locationId: string;
+    currency: string;
+    amount: number;
+    category: string;
+    invoiceDate: string;
+    supplier?: string;
+    payments?: { amount: number; paidOn: string; voided?: boolean }[];
+    voided?: boolean;
+  }): Promise<string> {
+    const { userId } = await this.dentist();
+    const expense = await this.raw.expense.create({
+      data: {
+        tenantId: this.tenantId,
+        locationId: input.locationId,
+        category: input.category,
+        supplier: input.supplier ?? null,
+        amount: input.amount,
+        currency: input.currency,
+        invoiceDate: new Date(`${input.invoiceDate}T00:00:00Z`),
+        createdById: userId,
+      },
+      select: { id: true },
+    });
+    for (const payment of input.payments ?? []) {
+      // Un pago nace vivo (trigger de DX-274): se anula después.
+      const created = await this.raw.expensePayment.create({
+        data: {
+          tenantId: this.tenantId,
+          expenseId: expense.id,
+          locationId: input.locationId,
+          currency: input.currency,
+          amount: payment.amount,
+          method: 'TRANSFER',
+          paidOn: new Date(`${payment.paidOn}T00:00:00Z`),
+          createdById: userId,
+        },
+        select: { id: true },
+      });
+      if (payment.voided) {
+        await this.raw.expensePayment.update({
+          where: { id: created.id },
+          data: {
+            voidedAt: new Date(),
+            voidedById: userId,
+            voidReason: 'Error',
+          },
+        });
+      }
+    }
+    if (input.voided) {
+      await this.raw.expensePayment.updateMany({
+        where: {
+          tenantId: this.tenantId,
+          expenseId: expense.id,
+          voidedAt: null,
+        },
+        data: {
+          voidedAt: new Date(),
+          voidedById: userId,
+          voidReason: 'Anulado',
+        },
+      });
+      await this.raw.expense.update({
+        where: { id: expense.id },
+        data: {
+          voidedAt: new Date(),
+          voidedById: userId,
+          voidReason: 'Anulado',
+        },
+      });
+    }
+    return expense.id;
   }
 }

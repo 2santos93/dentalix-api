@@ -1,0 +1,26 @@
+-- DX-513-bis (1/2): índice parcial del informe de descuentos (DX-204/SEC-041)
+-- con la rebaja frente a la referencia convertida ("price" <
+-- "referencePriceInPlan"): con un plan en VES y el catálogo en USD,
+-- "price" < "catalogPrice" compara 3.900 Bs. con 4,50 y la fila no estaría en
+-- el índice anterior. Mismo predicado que la consulta del informe
+-- (prisma-discount-report.repository.ts). PARCIAL y de expresión: no
+-- declarable en Prisma (ver schema.prisma).
+--
+-- Se CREA con un nombre nuevo ANTES de quitar el anterior
+-- (treatment_plan_items_tenant_effective_discount_at_idx, lo quita
+-- 20261201090300_dx513b_effective_discount_idx_drop_old): el informe nunca se
+-- queda sin índice parcial.
+--
+-- CONCURRENTLY (DB-025): no bloquea las escrituras de los ítems del plan. Por
+-- eso es la ÚNICA sentencia del fichero (Prisma la ejecuta fuera de
+-- transacción) y no lleva `SET lock_timeout`: CONCURRENTLY espera a las
+-- transacciones abiertas y un tope la haría fallar a medias (DB-078).
+-- Aditiva, sin cambios de datos.
+-- IF NOT EXISTS: un reintento tras un fallo se SALTARÍA si quedó un índice
+-- INVALID con este nombre, así que la receta empieza por el DROP: si falla,
+-- DROP INDEX CONCURRENTLY IF EXISTS "treatment_plan_items_tenant_effective_ref_discount_at_idx",
+-- `npx prisma migrate resolve --rolled-back
+-- 20261201090200_dx513b_effective_ref_discount_idx` y repetir
+-- `migrate deploy`. Vuelta atrás: el mismo DROP INDEX CONCURRENTLY (antes,
+-- recrear el anterior si ya se quitó).
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "treatment_plan_items_tenant_effective_ref_discount_at_idx" ON "treatment_plan_items" ("tenantId", (COALESCE("discountAt", "createdAt"))) WHERE ("discount" > 0 OR "price" < "catalogPrice" OR "price" < "referencePriceInPlan") AND "deletedAt" IS NULL;

@@ -8,12 +8,14 @@ import {
   CreateLocationUseCase,
   ListLocationsUseCase,
   UpdateLocationUseCase,
+  LAST_ACTIVE_LOCATION_MESSAGE,
 } from './manage-locations.use-cases';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type {
   Location,
   LocationRepository,
 } from '../../domain/ports/location-repository.port';
+import type { DocumentTypeNames } from '../../../patients/domain/document-type-names';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 const AUDIT: AuditRequestContext = {
@@ -25,26 +27,36 @@ const AUDIT: AuditRequestContext = {
   userAgent: null,
 };
 
+const NO_DOC_NAMES: DocumentTypeNames = {
+  NATIONAL_ID: null,
+  PASSPORT: null,
+  RESIDENCE_PERMIT: null,
+  TAX_ID: null,
+  OTHER: null,
+};
+
 function makeLocation(overrides: Partial<Location> = {}): Location {
   return {
     id: 'loc-1',
     tenantId: 't1',
     name: 'Sede principal',
     address: null,
-    country: 'CO',
+    country: 'VE',
     healthRegistrationNumber: null,
     showHealthRegistrationNumber: false,
     phone: null,
     defaultPhoneRegion: null,
     isActive: true,
-    currency: 'COP',
-    timeZone: 'America/Bogota',
-    locale: 'es-CO',
+    currency: 'VES',
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
     hourCycle: 'h23',
     regionalSettingsReviewedAt: new Date('2026-01-01'),
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     ...overrides,
+    // Un `undefined` explícito (un parche sin nombres) no borra los de la sede.
+    docTypeNames: overrides.docTypeNames ?? { ...NO_DOC_NAMES },
   };
 }
 
@@ -56,7 +68,15 @@ function makeRepo(over: Partial<LocationRepository> = {}): LocationRepository {
       ),
     list: () => Promise.resolve([]),
     findById: () => Promise.resolve(makeLocation()),
-    update: (_id, patch) => Promise.resolve(makeLocation({ ...patch })),
+    update: (_id, patch) => {
+      const { docTypeNames, ...rest } = patch;
+      return Promise.resolve(
+        makeLocation({
+          ...rest,
+          docTypeNames: { ...NO_DOC_NAMES, ...docTypeNames },
+        }),
+      );
+    },
     countActive: () => Promise.resolve(2),
     hasOperations: () => Promise.resolve(false),
     updateRegional: () => Promise.resolve(null),
@@ -72,19 +92,19 @@ const COUNTRIES = {
 
 /** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
 const CURRENCIES = {
-  has: (code: string) => Promise.resolve(['COP', 'EUR', 'JPY'].includes(code)),
+  has: (code: string) => Promise.resolve(['VES', 'EUR', 'JPY'].includes(code)),
 };
 
 /** Los valores regionales del alta: datos de test, no defaults. */
 const TOKYO = {
-  country: 'CO',
+  country: 'VE',
   currency: 'JPY',
   timeZone: 'Asia/Tokyo',
   locale: 'ja-JP',
   hourCycle: 'h23',
 };
 const NEW_YORK = {
-  country: 'CO',
+  country: 'VE',
   currency: 'USD',
   timeZone: 'America/New_York',
   locale: 'en-US',
@@ -115,9 +135,11 @@ function regionalRepo(opts: {
         hasRegionalHistory: () => Promise.resolve(opts.history ?? false),
       });
       opts.written?.push(write);
+      const { docTypeNames, ...rest } = patch;
       return makeLocation({
         ...current,
-        ...patch,
+        ...rest,
+        docTypeNames: { ...current.docTypeNames, ...docTypeNames },
         ...(write.currency ? { currency: write.currency } : {}),
         ...(write.timeZone ? { timeZone: write.timeZone } : {}),
         ...(write.locale ? { locale: write.locale } : {}),
@@ -153,8 +175,8 @@ describe('CreateLocationUseCase', () => {
         name: 'Sede Norte',
         address: undefined,
         phone: undefined,
-        // DX-329: sin el campo, el alta sugiere el país (CO).
-        defaultPhoneRegion: 'CO',
+        // DX-329: sin el campo, el alta sugiere el país (VE).
+        defaultPhoneRegion: 'VE',
         ...TOKYO,
       },
     ]);
@@ -167,7 +189,7 @@ describe('CreateLocationUseCase', () => {
     await createUseCase(makeRepo({ create })).execute(
       {
         name: 'Tokio',
-        country: 'CO',
+        country: 'VE',
         currency: 'jpy',
         timeZone: 'Asia/Tokyo',
         locale: 'JA-jp',
@@ -176,7 +198,7 @@ describe('CreateLocationUseCase', () => {
     );
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        country: 'CO',
+        country: 'VE',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',
@@ -284,9 +306,9 @@ describe('UpdateLocationUseCase', () => {
       makeRepo({ countActive: () => Promise.resolve(1) }),
     );
 
-    await expect(
-      uc.execute('loc-1', { isActive: false }),
-    ).rejects.toBeInstanceOf(ConflictException);
+    await expect(uc.execute('loc-1', { isActive: false })).rejects.toThrow(
+      new ConflictException(LAST_ACTIVE_LOCATION_MESSAGE),
+    );
   });
 
   it('sí deja desactivar una sede cuando quedan otras activas', async () => {
@@ -424,7 +446,7 @@ describe('país de la sede (DX-013)', () => {
 
 describe('UpdateLocationUseCase · nº de registro sanitario (DX-319)', () => {
   const updateSpy = () =>
-    jest.fn((_id: string, patch: Partial<Location>) =>
+    jest.fn((_id: string, patch: Omit<Partial<Location>, 'docTypeNames'>) =>
       Promise.resolve(makeLocation(patch)),
     );
 
@@ -553,15 +575,15 @@ describe('teléfono de la sede (DX-222)', () => {
     const uc = updateUseCase(makeRepo({ update }));
 
     const { location: saved } = await uc.execute('loc-1', {
-      phone: ' +57 601 555 0101 ',
+      phone: ' +58 212 555 0101 ',
     });
     await uc.execute('loc-1', { phone: '' });
     await uc.execute('loc-1', { phone: null });
     await uc.execute('loc-1', { name: 'Otra' });
 
-    expect(saved.phone).toBe('+57 601 555 0101');
+    expect(saved.phone).toBe('+58 212 555 0101');
     expect(update.mock.calls.map(([, patch]) => patch)).toEqual([
-      expect.objectContaining({ phone: '+57 601 555 0101' }),
+      expect.objectContaining({ phone: '+58 212 555 0101' }),
       expect.objectContaining({ phone: null }),
       expect.objectContaining({ phone: null }),
       expect.objectContaining({ phone: undefined }),
@@ -605,7 +627,7 @@ describe('teléfono de la sede (DX-222)', () => {
       ).rejects.toMatchObject({
         response: {
           code: 'LOCATION_REGIONAL_CHANGE_UNCONFIRMED',
-          message: expect.stringContaining('movimientos en COP') as string,
+          message: expect.stringContaining('movimientos en VES') as string,
         },
       });
       await expect(
@@ -627,7 +649,7 @@ describe('teléfono de la sede (DX-222)', () => {
       ).rejects.toMatchObject({
         response: {
           message: expect.stringMatching(
-            /movimientos en COP.*Las citas conservan su hora/,
+            /movimientos en VES.*Las citas conservan su hora/,
           ) as string,
         },
       });
@@ -645,15 +667,15 @@ describe('teléfono de la sede (DX-222)', () => {
       ]);
       expect(out.regionalSettings).toEqual({
         before: {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h23',
         },
         after: {
           currency: 'JPY',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h23',
         },
         reviewed: true,
@@ -688,15 +710,15 @@ describe('teléfono de la sede (DX-222)', () => {
         }),
       );
       await uc.execute('loc-1', {
-        currency: 'COP',
-        timeZone: 'America/Bogota',
-        locale: 'es-CO',
+        currency: 'VES',
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
       });
       expect(written).toEqual([
         {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           reviewed: true,
         },
       ]);
@@ -721,7 +743,7 @@ describe('teléfono de la sede (DX-222)', () => {
       const uc = updateUseCase(
         regionalRepo({
           written,
-          current: { currency: 'COP', timeZone: null, locale: null },
+          current: { currency: 'VES', timeZone: null, locale: null },
         }),
       );
       await expect(
@@ -774,15 +796,15 @@ describe('teléfono de la sede (DX-222)', () => {
       ]);
       expect(out.regionalSettings).toEqual({
         before: {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h23',
         },
         after: {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h12',
         },
         reviewed: true,
@@ -826,7 +848,7 @@ describe('teléfono de la sede (DX-222)', () => {
         locale: 'en-IN',
       });
       expect(out.regionalSettings).toMatchObject({
-        before: { timeZone: 'Asia/Kolkata', locale: 'es-CO' },
+        before: { timeZone: 'Asia/Kolkata', locale: 'es-VE' },
         after: { timeZone: 'Asia/Kolkata', locale: 'en-IN' },
         reviewed: true,
       });
@@ -986,7 +1008,7 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
         name: 'Sede',
         ...TOKYO,
         country: 'VE',
-        defaultPhoneRegion: ' co ',
+        defaultPhoneRegion: ' es ',
       },
       AUDIT,
     );
@@ -1000,7 +1022,7 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
       AUDIT,
     );
     expect(create.mock.calls.map(([i]) => i.defaultPhoneRegion)).toEqual([
-      'CO',
+      'ES',
       null,
     ]);
     const bad = await uc
@@ -1021,11 +1043,11 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
     const uc = updateUseCase(
       makeRepo({
         findById: () =>
-          Promise.resolve(makeLocation({ defaultPhoneRegion: 'CO' })),
+          Promise.resolve(makeLocation({ defaultPhoneRegion: 'VE' })),
         update,
       }),
     );
-    await uc.execute('loc-1', { country: 'VE' });
+    await uc.execute('loc-1', { country: 'ES' });
     expect(
       (update.mock.calls[0][1] as { defaultPhoneRegion?: unknown })
         .defaultPhoneRegion,
@@ -1074,5 +1096,104 @@ describe('prefijo telefónico de la sede (DX-329)', () => {
       defaultPhoneRegion: 'AQ',
     });
     expect(update.mock.calls[0][1]).toMatchObject({ defaultPhoneRegion: 'AQ' });
+  });
+});
+
+describe('UpdateLocationUseCase: nombres de documento de la sede (DX-524)', () => {
+  /** Repo en memoria que aplica solo las claves enviadas, como el real. */
+  function namesRepo(initial: Partial<DocumentTypeNames> = {}) {
+    const written: object[] = [];
+    let current = makeLocation({
+      docTypeNames: { ...NO_DOC_NAMES, ...initial },
+    });
+    const repo = makeRepo({
+      findById: () => Promise.resolve(current),
+      update: (_id, patch) => {
+        written.push(patch);
+        current = makeLocation({
+          ...current,
+          docTypeNames: { ...current.docTypeNames, ...patch.docTypeNames },
+        });
+        return Promise.resolve(current);
+      },
+    });
+    return { repo, written };
+  }
+
+  it('guarda solo los tipos enviados y deja los demás', async () => {
+    const { repo, written } = namesRepo({ PASSPORT: 'Pasaporte sede' });
+    const { location } = await updateUseCase(repo).execute('loc-1', {
+      docTypeNames: { NATIONAL_ID: '  Cédula   de identidad ' },
+    });
+    expect(written).toEqual([
+      expect.objectContaining({
+        docTypeNames: { NATIONAL_ID: 'Cédula de identidad' },
+      }),
+    ]);
+    expect(location.docTypeNames).toEqual({
+      ...NO_DOC_NAMES,
+      NATIONAL_ID: 'Cédula de identidad',
+      PASSPORT: 'Pasaporte sede',
+    });
+  });
+
+  it('null o vacío vuelve a heredar el de la clínica', async () => {
+    const { repo, written } = namesRepo({ NATIONAL_ID: 'Cédula' });
+    await updateUseCase(repo).execute('loc-1', {
+      docTypeNames: { NATIONAL_ID: '   ' },
+    });
+    expect(written[0]).toEqual(
+      expect.objectContaining({ docTypeNames: { NATIONAL_ID: null } }),
+    );
+  });
+
+  it('una clave con undefined (el DTO declara las cinco) no se toca', async () => {
+    const { repo, written } = namesRepo({ NATIONAL_ID: 'Cédula' });
+    await updateUseCase(repo).execute('loc-1', {
+      docTypeNames: { NATIONAL_ID: undefined, PASSPORT: 'Pasaporte sede' },
+    });
+    expect(written[0]).toEqual(
+      expect.objectContaining({ docTypeNames: { PASSPORT: 'Pasaporte sede' } }),
+    );
+  });
+
+  it('sin el campo no toca los nombres', async () => {
+    const { repo, written } = namesRepo({ NATIONAL_ID: 'Cédula' });
+    const result = await updateUseCase(repo).execute('loc-1', { name: 'X' });
+    expect(written[0]).toEqual(
+      expect.objectContaining({ docTypeNames: undefined }),
+    );
+    expect(result.docTypeNamesChange).toBeNull();
+  });
+
+  it('rechaza (400) un nombre repetido o el genérico de otro tipo, sin guardar', async () => {
+    const { repo, written } = namesRepo({ PASSPORT: 'Documento sede' });
+    const uc = updateUseCase(repo);
+    await expect(
+      uc.execute('loc-1', { docTypeNames: { NATIONAL_ID: 'documento sede' } }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      uc.execute('loc-1', { docTypeNames: { NATIONAL_ID: 'a'.repeat(61) } }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(written).toEqual([]);
+  });
+
+  it('devuelve antes y después solo de los tipos que cambiaron (auditoría)', async () => {
+    const { repo } = namesRepo({ NATIONAL_ID: 'Cédula', TAX_ID: 'RIF' });
+    const { docTypeNamesChange } = await updateUseCase(repo).execute('loc-1', {
+      docTypeNames: { NATIONAL_ID: 'Cédula de identidad', TAX_ID: 'RIF' },
+    });
+    expect(docTypeNamesChange).toEqual({
+      before: { docTypeNameNationalId: 'Cédula' },
+      after: { docTypeNameNationalId: 'Cédula de identidad' },
+    });
+  });
+
+  it('enviar lo mismo que ya tiene no audita', async () => {
+    const { repo } = namesRepo({ NATIONAL_ID: 'Cédula' });
+    const result = await updateUseCase(repo).execute('loc-1', {
+      docTypeNames: { NATIONAL_ID: 'Cédula' },
+    });
+    expect(result.docTypeNamesChange).toBeNull();
   });
 });

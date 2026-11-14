@@ -13,6 +13,7 @@ import type {
   NoticePatientFields,
   NoticeResponsible,
 } from '../../../patients/domain/communication/notice-recipient';
+import type { MajorityReviewRecord } from '../../../patients/domain/responsible-parties/majority-review';
 import type { LinkCancellationPolicy } from '../../../appointment-confirmations/domain/link-cancellation-policy';
 
 // Sin `tenantId` en ningún input salvo el barrido, que corre como trabajo de
@@ -24,6 +25,8 @@ export interface LocationReminderSettingsView {
   locationName: string;
   enabled: boolean;
   leadHours: number[];
+  /** DX-469: horas antes de la alarma de «Añadir a mi calendario» (0 = sin alarma). */
+  calendarAlarmHours: number;
   /** null = la sede nunca se configuró (desactivada por defecto). */
   updatedAt: Date | null;
 }
@@ -48,12 +51,16 @@ export interface ReminderSendContext {
   /** G1-B: formato y reloj de la sede de la cita, con los que se pinta el email. */
   locationFormat: RegionalFormat;
   patientId: string;
+  /** DX-497: idioma preferido del paciente (null = el de la clínica). */
+  preferredLanguage: string | null;
   /** Canal, baja y email VIGENTES del paciente (DX-128). */
   contact: ReminderContact;
   /** Para decidir a quién va y a quién se saluda (DX-128, DX-203). */
   recipient: NoticePatientFields;
   /** DX-203: responsables vivos del paciente (un menor o sin email: a ellos). */
   responsibles: NoticeResponsible[];
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
   settings: { enabled: boolean; leadHours: number[] } | null;
   /** DX-291: política VIGENTE de la sede de la cita (`null` = sin política). */
   cancellationPolicy: LinkCancellationPolicy | null;

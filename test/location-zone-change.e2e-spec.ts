@@ -12,7 +12,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   g1LocationInsert,
   locationBody,
@@ -56,12 +56,12 @@ describe('Locations / cambio regional (e2e)', () => {
       .set('X-Tenant-Host', clinic.host)
       .set('Authorization', `Bearer ${token}`);
 
-  /** Sede nueva en COP / Bogotá (revisada al crearla). */
+  /** Sede nueva en VES / UTC−4 (revisada al crearla). */
   const newLocation = async (): Promise<string> =>
     (
       (
         await api('post', '/locations')
-          .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede X' }))
+          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede X' }))
           .expect(201)
       ).body as LocationBody
     ).id;
@@ -86,7 +86,7 @@ describe('Locations / cambio regional (e2e)', () => {
         locationId,
         category: 'Otros',
         amount: 1000,
-        currency: 'COP',
+        currency: 'VES',
         invoiceDate: new Date('2026-10-01'),
         createdById: adminId,
       },
@@ -114,7 +114,7 @@ describe('Locations / cambio regional (e2e)', () => {
       'Cierra la caja abierta de la sede antes de cambiar su moneda o su zona horaria.',
     );
     const after = await raw.location.findUniqueOrThrow({ where: { id } });
-    expect(after.currency).toBe('COP');
+    expect(after.currency).toBe('VES');
   });
 
   it('zone change with an open cash session is 409 even when confirmed', async () => {
@@ -133,7 +133,7 @@ describe('Locations / cambio regional (e2e)', () => {
     const res = await patch(id, { currency: 'EUR' }).expect(409);
     const body = res.body as ErrorBody;
     expect(body.code).toBe('LOCATION_REGIONAL_CHANGE_UNCONFIRMED');
-    expect(body.message).toContain('La sede ya tiene movimientos en COP.');
+    expect(body.message).toContain('La sede ya tiene movimientos en VES.');
   });
 
   it('zone change with history and no confirmation', async () => {
@@ -163,7 +163,7 @@ describe('Locations / cambio regional (e2e)', () => {
     }).expect(200);
     const body = res.body as LocationBody;
     expect(body.currency).toBe('EUR');
-    expect(body.timeZone).toBe('America/Bogota');
+    expect(body.timeZone).toBe('America/Caracas');
 
     const event = await raw.auditEvent.findFirstOrThrow({
       where: { resourceType: 'LOCATION', resourceId: id, action: 'UPDATE' },
@@ -172,14 +172,14 @@ describe('Locations / cambio regional (e2e)', () => {
     expect(event.metadata).toMatchObject({
       regionalSettings: {
         before: {
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          currency: 'VES',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
         },
         after: {
           currency: 'EUR',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
         },
         reviewed: true,
       },
@@ -220,7 +220,7 @@ describe('Locations / cambio regional (e2e)', () => {
     const before = await raw.locationSchedule.findFirstOrThrow({
       where: { locationId: id },
     });
-    expect(before.timezone).toBe('America/Bogota');
+    expect(before.timezone).toBe('America/Caracas');
     await patch(id, { timeZone: 'Europe/Madrid' }).expect(200);
     const after = await raw.locationSchedule.findFirstOrThrow({
       where: { locationId: id },
@@ -237,7 +237,7 @@ describe('Locations / cambio regional (e2e)', () => {
     const res = await patch(id, { confirmRegionalSettings: true }).expect(200);
     const body = res.body as LocationBody;
     expect(body.regionalSettingsReviewedAt).not.toBeNull();
-    expect(body.currency).toBe('COP');
+    expect(body.currency).toBe('VES');
   });
 
   it('null currency is 400', async () => {
@@ -269,8 +269,8 @@ describe('Locations / cambio regional (e2e)', () => {
     });
     expect(event.metadata).toMatchObject({
       regionalSettings: {
-        before: { locale: 'es-CO', hourCycle: 'h23' },
-        after: { locale: 'es-CO', hourCycle: 'h12' },
+        before: { locale: 'es-VE', hourCycle: 'h23' },
+        after: { locale: 'es-VE', hourCycle: 'h12' },
         reviewed: true,
       },
     });
@@ -334,7 +334,7 @@ describe('Locations / cambio regional (e2e)', () => {
       .expect(403);
   });
 
-  it('payment of 2026-10-20 at Bogotá shows on 2026-10-21 after moving to Asia/Tokyo', async () => {
+  it('payment of 2026-10-20 at Caracas shows on 2026-10-21 after moving to Asia/Tokyo', async () => {
     // Caracterización: el cambio de zona NO reescribe los abonos; su día civil
     // se lee en la zona vigente de la sede (README: «Cambiar la zona de una
     // sede»). Se documenta, no se corrige.
@@ -346,10 +346,10 @@ describe('Locations / cambio regional (e2e)', () => {
       data: {
         tenantId: clinic.tenantId,
         patientId: patient.id,
-        currency: 'COP',
+        currency: 'VES',
       },
     });
-    // 17:00 del 20/10 en Bogotá = 22:00 UTC = 07:00 del 21/10 en Tokio.
+    // 17:00 del 20/10 en Caracas = 22:00 UTC = 07:00 del 21/10 en Tokio.
     const paidAt = new Date('2026-10-20T22:00:00.000Z');
     await raw.payment.create({
       data: {
@@ -358,7 +358,7 @@ describe('Locations / cambio regional (e2e)', () => {
         treatmentPlanId: plan.id,
         patientId: patient.id,
         amount: 100,
-        currency: 'COP',
+        currency: 'VES',
         paidAt,
       },
     });
@@ -428,7 +428,7 @@ describe('Locations / cambio regional (e2e)', () => {
     expect(res.status).toBe(409);
     expect((res.body as ErrorBody).code).toBe('LOCATION_REGIONAL_CASH_OPEN');
     const after = await raw.location.findUniqueOrThrow({ where: { id } });
-    expect(after.currency).toBe('COP');
+    expect(after.currency).toBe('VES');
   });
 
   it('both currency and zone unconfirmed: the 409 carries both warnings', async () => {
@@ -440,7 +440,7 @@ describe('Locations / cambio regional (e2e)', () => {
     }).expect(409);
     const body = res.body as ErrorBody;
     expect(body.code).toBe('LOCATION_REGIONAL_CHANGE_UNCONFIRMED');
-    expect(body.message).toContain('movimientos en COP');
+    expect(body.message).toContain('movimientos en VES');
     expect(body.message).toContain('Las citas conservan su hora');
   });
 
@@ -454,7 +454,7 @@ describe('Locations / cambio regional (e2e)', () => {
           data: {
             tenantId: clinic.tenantId,
             patientId: patient.id,
-            currency: 'COP',
+            currency: 'VES',
           },
         });
         return raw.payment.create({
@@ -464,7 +464,7 @@ describe('Locations / cambio regional (e2e)', () => {
             treatmentPlanId: plan.id,
             patientId: patient.id,
             amount: 1,
-            currency: 'COP',
+            currency: 'VES',
             paidAt: new Date('2026-10-01T15:00:00Z'),
           },
         });
@@ -475,7 +475,7 @@ describe('Locations / cambio regional (e2e)', () => {
             tenantId: clinic.tenantId,
             locationId,
             name: `L ${locationId}`,
-            currency: 'COP',
+            currency: 'VES',
           },
         }),
       inventoryItem: async (locationId) =>

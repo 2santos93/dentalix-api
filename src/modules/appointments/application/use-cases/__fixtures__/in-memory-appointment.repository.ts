@@ -34,7 +34,7 @@ import {
 } from '../../../domain/ports/appointment-repository.port';
 
 /** Zona de la sede del fake: dato de test, no un valor por defecto del producto. */
-const FAKE_LOCATION_TIME_ZONE = 'America/Bogota';
+const FAKE_LOCATION_TIME_ZONE = 'America/Caracas';
 
 // `Appointment` (the API-facing entity) deliberately has no `deletedAt` field
 // — same convention as Patient/ToothRecord, see appointment.entity.ts. The
@@ -104,6 +104,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       confirmationSentAt: overrides.confirmationSentAt ?? null,
       callbackRequestedAt: overrides.callbackRequestedAt ?? null,
       wantsEarlier: overrides.wantsEarlier ?? false,
+      earlierWindow: overrides.earlierWindow ?? null,
+      earlierRequestedAt: overrides.earlierRequestedAt ?? null,
       arrivedAt: overrides.arrivedAt ?? null,
       seatedAt: overrides.seatedAt ?? null,
       readyForCheckoutAt: overrides.readyForCheckoutAt ?? null,
@@ -153,6 +155,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       confirmationSentAt: row.confirmationSentAt,
       callbackRequestedAt: row.callbackRequestedAt,
       wantsEarlier: row.wantsEarlier,
+      earlierWindow: row.earlierWindow,
+      earlierRequestedAt: row.earlierRequestedAt,
       arrivedAt: row.arrivedAt,
       seatedAt: row.seatedAt,
       readyForCheckoutAt: row.readyForCheckoutAt,
@@ -215,6 +219,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       confirmationSentAt: null,
       callbackRequestedAt: null,
       wantsEarlier: input.wantsEarlier ?? false,
+      earlierWindow: null,
+      earlierRequestedAt: null,
       arrivedAt: null,
       seatedAt: null,
       readyForCheckoutAt: null,
@@ -361,7 +367,8 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
           key !== 'completedExit' &&
           key !== 'audit' &&
           key !== 'cancel' &&
-          key !== 'clearCancellation',
+          key !== 'clearCancellation' &&
+          key !== 'recheckSlot',
       ),
     );
     Object.assign(row, definedPatch, {
@@ -428,7 +435,10 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
     });
   }
 
-  undoArrival(id: string): Promise<Appointment | null> {
+  undoArrival(
+    id: string,
+    options: { clearOverbooked?: boolean } = {},
+  ): Promise<Appointment | null> {
     const row = this.rows.find((r) => r.id === id && r.deletedAt === null);
     if (
       !row ||
@@ -441,6 +451,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       status: row.preArrivalStatus,
       preArrivalStatus: null,
       arrivedAt: null,
+      ...(options.clearOverbooked ? { overbooked: false } : {}),
     });
     return Promise.resolve(this.toEntity(row));
   }

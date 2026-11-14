@@ -1,3 +1,4 @@
+import { NOT_ATTENDING_MESSAGE } from '../../../staff/domain/attending';
 import {
   BadRequestException,
   ConflictException,
@@ -65,6 +66,8 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     confirmationSentAt: null,
     callbackRequestedAt: null,
     wantsEarlier: false,
+    earlierWindow: null,
+    earlierRequestedAt: null,
     arrivedAt: null,
     seatedAt: null,
     readyForCheckoutAt: null,
@@ -141,12 +144,21 @@ function makeBlocks(
 // Doble del horario de la sede: por defecto SIN horario configurado (null), que
 // el dominio interpreta como "sin restricción" — así los tests existentes siguen
 // probando lo suyo sin que el horario interfiera. Los tests del horario lo pasan.
-function makeSchedule(hours: unknown = null): LocationScheduleRepository {
+function makeSchedule(
+  hours: unknown = null,
+  format: { locale: string | null; hourCycle: string | null } = {
+    locale: 'de-DE',
+    hourCycle: 'h23',
+  },
+): LocationScheduleRepository {
   return {
     findByLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
     findForCurrentLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
+    // DX-354: la sede del doble, de 24 h salvo que el test cambie `format`.
+    formatSourceOf: (locationId = 'loc-1') =>
+      Promise.resolve({ id: locationId, ...format }),
     replaceForCurrentLocation: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
   };
@@ -158,16 +170,16 @@ function makeStaff(known?: string[]): StaffRepository {
   return {
     findById: (userId: string): Promise<never> =>
       Promise.resolve(
-        !known || known.includes(userId) ? { userId } : null,
+        !known || known.includes(userId) ? { userId, role: 'DENTIST' } : null,
       ) as Promise<never>,
   } as unknown as StaffRepository;
 }
 
 // Doble de las sedes (DX-200): la zona con la que se decide qué día es hoy.
-function makeLocations(): LocationRepository {
+function makeLocations(isActive = true): LocationRepository {
   return {
     findById: (id: string) =>
-      Promise.resolve({ id, timeZone: 'America/Bogota' }),
+      Promise.resolve({ id, timeZone: 'America/Caracas', isActive }),
   } as unknown as LocationRepository;
 }
 
@@ -254,6 +266,42 @@ describe('UpdateAppointmentUseCase', () => {
       expectStatus: AppointmentStatus.SCHEDULED,
     });
     expect(overlapChecked).toBe(false);
+  });
+
+  it('SEC-014: en una sede desactivada no se reagenda (400 sin escribir); editar notas sí', async () => {
+    const existing = fakeAppointment();
+    let writes = 0;
+    const repo = makeRepo({
+      findById: (id: string): Promise<Appointment | null> =>
+        Promise.resolve(id === existing.id ? existing : null),
+      findOverlapping: (): Promise<Appointment[]> => Promise.resolve([]),
+      update: (): Promise<Appointment> => {
+        writes += 1;
+        return Promise.resolve(existing);
+      },
+    });
+    const uc = new UpdateAppointmentUseCase(
+      repo,
+      makeSchedule(),
+      makeStaff(),
+      makeAudit(),
+      makeBlocks(),
+      makeLocations(false),
+      new TenantContextService(),
+      inMemoryAvailability(),
+    );
+    const err = await uc
+      .execute(existing.id, { start: at('14:00'), end: at('14:30') })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect((err as BadRequestException).getResponse()).toMatchObject({
+      code: 'LOCATION_INACTIVE',
+    });
+    expect(writes).toBe(0);
+    await uc.execute(existing.id, {
+      notes: 'Paciente avisado del cierre de la sede',
+    });
+    expect(writes).toBe(1);
   });
 
   it('reschedules (start/end) and re-checks overlap EXCLUDING its own id', async () => {
@@ -502,16 +550,30 @@ describe('UpdateAppointmentUseCase', () => {
           end: at('11:30'),
         }),
       ).rejects.toThrow('El profesional ya tiene una cita en ese horario');
+      // DX-509-bis: el 409 de solape lleva su código (la web ofrece hueco).
+      const error = await uc
+        .execute('a1', { start: at('11:00'), end: at('11:30') })
+        .catch((e: ConflictException) => e);
+      expect((error as ConflictException).getResponse()).toEqual(
+        expect.objectContaining({
+          code: 'APPOINTMENT_OVERLAP',
+          scope: 'provider',
+        }),
+      );
     });
 
-    it('maps an UN-CANCEL into a taken slot to 409 (no pre-check runs on a status-only patch)', async () => {
+    it('maps an UN-CANCEL into a slot taken meanwhile to 409 (the pre-check passed, the EXCLUDE decides)', async () => {
+      // DX-267-bis: reactivar ya corre el pre-check de solape (libre aquí);
+      // si otra cita entra entre el pre-check y la escritura, el backstop
+      // 23P01 sigue dando el 409 con su código.
       const existing = fakeAppointment({ status: AppointmentStatus.CANCELLED });
+      let overlapChecked = false;
       const repo = makeRepo({
         findById: (): Promise<Appointment | null> => Promise.resolve(existing),
-        findOverlapping: (): Promise<Appointment[]> =>
-          Promise.reject(
-            new Error('findOverlapping should not run for a status-only patch'),
-          ),
+        findOverlapping: (): Promise<Appointment[]> => {
+          overlapChecked = true;
+          return Promise.resolve([]);
+        },
         update: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
       const uc = new UpdateAppointmentUseCase(
@@ -525,9 +587,14 @@ describe('UpdateAppointmentUseCase', () => {
         inMemoryAvailability(),
       );
 
-      await expect(
-        uc.execute('a1', { status: AppointmentStatus.SCHEDULED }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      const error = await uc
+        .execute('a1', { status: AppointmentStatus.SCHEDULED })
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toEqual(
+        expect.objectContaining({ code: 'APPOINTMENT_OVERLAP' }),
+      );
+      expect(overlapChecked).toBe(true);
     });
 
     it('does NOT swallow unrelated update errors (rethrows as-is)', async () => {
@@ -1104,7 +1171,7 @@ describe('UpdateAppointmentUseCase', () => {
       });
       expect(result.start).toEqual(at('18:00'));
       expect(result.warnings).toEqual([
-        'La cita cae en un bloqueo que permite agendar: Almuerzo (13:00–14:00).',
+        'La cita cae en un bloqueo que permite agendar: Almuerzo (14:00–15:00).',
       ]);
     });
 
@@ -1462,6 +1529,23 @@ describe('UpdateAppointmentUseCase', () => {
       expect(drafts.map((d) => d.metadata.reason)).toEqual([
         'APPOINTMENT_MOVED',
       ]);
+      // DX-436-bis: el movimiento lleva su origen para «Huecos recuperados».
+      expect(drafts[0].metadata.move?.via).toBe('OPENING');
+    });
+
+    it('DX-436-bis: un reagendado normal no lleva `via` (no cuenta «por la lista»)', async () => {
+      const { repo, drafts, uc } = setup();
+      const a = repo.seed({ start: far('10:00'), end: far('10:30') });
+      await uc.execute(
+        a.id,
+        { start: at('15:00'), end: at('15:30') },
+        ctx('RECEPTION'),
+      );
+      expect(drafts.map((d) => d.metadata.reason)).toEqual([
+        'APPOINTMENT_MOVED',
+      ]);
+      expect(drafts[0].metadata.move).toBeDefined();
+      expect(drafts[0].metadata.move?.via).toBeUndefined();
     });
 
     it('mover al hueco una cita sin la marca (o cancelada) da 409 en español', async () => {
@@ -1549,6 +1633,47 @@ describe('UpdateAppointmentUseCase', () => {
         uc.moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION')),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
+
+    it('DX-354: el mensaje del horario sale en 12 h con una sede h12 y en 24 h con una h23', async () => {
+      const hours: BusinessHours = {
+        timezone: 'UTC',
+        ranges: [0, 1, 2, 3, 4, 5, 6].map((weekday) => ({
+          weekday,
+          startMinute: 480,
+          endMinute: 540,
+        })),
+      };
+      const messageWith = async (hourCycle: string, locale: string) => {
+        const repo = new InMemoryAppointmentRepository();
+        const a = repo.seed({
+          start: far('10:00'),
+          end: far('10:30'),
+          wantsEarlier: true,
+        });
+        const uc = new UpdateAppointmentUseCase(
+          repo,
+          makeSchedule(hours, { locale, hourCycle }),
+          makeStaff(),
+          makeAudit(),
+          makeBlocks(),
+          makeLocations(),
+          new TenantContextService(),
+          inMemoryAvailability(),
+        );
+        return uc
+          .moveToOpening(a.id, { start: at('15:00') }, ctx('RECEPTION'))
+          .then(
+            () => '',
+            (error: Error) => error.message,
+          );
+      };
+      expect(await messageWith('h12', 'en-US')).toMatch(
+        /\(\p{L}+: 8:00 a\. m\.–9:00 a\. m\.\)/u,
+      );
+      expect(await messageWith('h23', 'de-DE')).toMatch(
+        /\(\p{L}+: 08:00–09:00\)/u,
+      );
+    });
   });
 });
 
@@ -1582,10 +1707,28 @@ describe('UpdateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('DX-161: pasar la cita a recepción o asistencia es 400', async () => {
+    const staff = {
+      findById: (userId: string): Promise<never> =>
+        Promise.resolve({
+          userId,
+          role: 'ASSISTANT',
+          locationIds: null,
+        }) as Promise<never>,
+    } as unknown as StaffRepository;
+    await expect(
+      uc(staff).execute('a1', { providerId: 'prov2' }),
+    ).rejects.toThrow(NOT_ATTENDING_MESSAGE);
+  });
+
   it('pasar la cita a un profesional que no atiende en su sede es 400', async () => {
     const staff = {
       findById: (userId: string): Promise<never> =>
-        Promise.resolve({ userId, locationIds: ['loc2'] }) as Promise<never>,
+        Promise.resolve({
+          userId,
+          role: 'DENTIST',
+          locationIds: ['loc2'],
+        }) as Promise<never>,
     } as unknown as StaffRepository;
     await expect(
       uc(staff).execute('a1', { providerId: 'prov2' }),

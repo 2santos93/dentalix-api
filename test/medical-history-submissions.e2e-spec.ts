@@ -28,7 +28,7 @@ import {
 import { allNoAnswers } from '../src/modules/medical-history-submissions/domain/__fixtures__/anamnesis-answers';
 import type { AnamnesisAnswers } from '../src/modules/medical-history-submissions/domain/anamnesis-questionnaire';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -50,7 +50,7 @@ const POLICY = {
     'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
   marketingText: 'Autorizo recibir comunicaciones comerciales.',
 };
-const LAST_NAME = 'Zuluagarrestrepo';
+const LAST_NAME = 'Urdanetabracho';
 const DOC_NUMBER = '1098765432';
 const PRIOR_ALLERGEN = 'Ibuprofenazol';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -142,6 +142,17 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
     server()
       .get(`/api/v1/public/medical-history/${token}`)
       .set('X-Tenant-Host', host);
+  const publicOpened = (host: string, token: string) =>
+    server()
+      .post(`/api/v1/public/medical-history/${token}/opened`)
+      .set('X-Tenant-Host', host);
+  const openedAtOf = async (id: string) =>
+    (
+      await raw.medicalHistorySubmission.findUniqueOrThrow({
+        where: { id },
+        select: { openedAt: true },
+      })
+    ).openedAt;
   const publicPost = (host: string, token: string, body: object) =>
     server()
       .post(`/api/v1/public/medical-history/${token}`)
@@ -215,7 +226,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
         sex: 'F',
         firstName: 'Mariana Isabel',
         lastName: LAST_NAME,
-        phone: '+57 300 123 4567',
+        phone: '+58 412 123 4567',
         birthDate: '1988-03-14',
       })
       .expect(201);
@@ -270,7 +281,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
         appointmentStart.getTime(),
       );
       expect(created.consentRequired).toBe(true);
-      expect(created.whatsapp?.phone).toBe('573001234567');
+      expect(created.whatsapp?.phone).toBe('584121234567');
       expect(created.whatsapp?.text).toContain(created.url);
       expect(created.whatsapp?.text).toContain('Hola Mariana,');
       expect(created.whatsapp?.text).not.toContain(LAST_NAME);
@@ -328,6 +339,16 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       }
     });
 
+    it('DX-424: leer no marca la apertura; el aviso de la página la marca una sola vez (204)', async () => {
+      await publicGet(clinicA.host, link.token).expect(200);
+      expect(await openedAtOf(link.created.id)).toBeNull();
+      await publicOpened(clinicA.host, link.token).expect(204);
+      const first = await openedAtOf(link.created.id);
+      expect(first).toBeInstanceOf(Date);
+      await publicOpened(clinicA.host, link.token).expect(204);
+      expect(await openedAtOf(link.created.id)).toEqual(first);
+    });
+
     it('las respuestas públicas no se guardan en cachés (no-store), también las de error', async () => {
       const ok = await publicGet(clinicA.host, link.token).expect(200);
       expect(ok.headers['cache-control']).toBe('no-store');
@@ -341,11 +362,44 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       expect(invalid.headers['cache-control']).toBe('no-store');
     });
 
+    it('DX-354: trae el regional de la sede principal y null con 200 si no tiene reloj; no filtra ids', async () => {
+      const read = async () =>
+        (await publicGet(clinicA.host, link.token).expect(200)).body as {
+          regional: unknown;
+        };
+      expect((await read()).regional).toEqual({
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h23',
+      });
+      const principal = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      await raw.location.update({
+        where: { id: principal.id },
+        data: { hourCycle: null },
+      });
+      try {
+        const body = await read();
+        expect(body.regional).toBeNull();
+        expect(JSON.stringify(body)).not.toContain(principal.id);
+      } finally {
+        await raw.location.update({
+          where: { id: principal.id },
+          data: { hourCycle: 'h23' },
+        });
+      }
+    });
+
     // ISOLATION_COVERS: GET /public/medical-history/:token
     // ISOLATION_COVERS: POST /public/medical-history/:token
+    // ISOLATION_COVERS: POST /public/medical-history/:token/opened
     it('el token de A en el host de B → 404', async () => {
       await publicGet(clinicB.host, link.token).expect(404);
       await publicPost(clinicB.host, link.token, validBody()).expect(404);
+      await publicOpened(clinicB.host, link.token).expect(404);
     });
 
     it('sin autorización de salud → 422; sin declaración → 400; incompleto → 400, todo en español y sin guardar nada', async () => {
@@ -601,6 +655,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
       ANAMNESIS_LINK_GONE_MESSAGE,
     );
     await publicPost(clinicA.host, token, validBody()).expect(410);
+    await publicOpened(clinicA.host, token).expect(410);
     // La ficha lo ve caducado sin que nadie lo haya marcado.
     const ficha = await as(clinicA, receptionToken)
       .get(`/patients/${patientId}/medical-history/requests`)
@@ -763,7 +818,7 @@ describe('Anamnesis previa a la cita por enlace (e2e, DX-099)', () => {
         declarationAccepted: true,
       }).expect(200);
       const north = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: clinicA.tenantId,
           name: 'Sede Norte DX-099',
         }),

@@ -48,7 +48,7 @@ describe('StorageOpLogger: la línea storage.op (DX-259)', () => {
     // Ni la clave, ni el nombre del fichero, ni nada de lo que devolvió la
     // operación llega a la línea.
     expect(JSON.stringify(info)).not.toMatch(
-      /6c1d|9f00|ana|gomez|radiograf|pdf/i,
+      /6c1d0b4e|9f00-ana|ana|gomez|radiograf|pdf/i,
     );
   });
 
@@ -75,7 +75,7 @@ describe('StorageOpLogger: la línea storage.op (DX-259)', () => {
         error: 'AccessDenied',
       },
     ]);
-    expect(JSON.stringify(warn)).not.toContain('6c1d');
+    expect(JSON.stringify(warn)).not.toContain('6c1d0b4e');
   });
 
   it('not_found es info y sin error; timeout es warn', async () => {

@@ -91,7 +91,7 @@ describe('cargo por inasistencia (DX-291, int)', () => {
           .post(`/api/v1/locations/${location}/cancellation-policy`)
           .set('X-Tenant-Host', a.host)
           .set('Authorization', `Bearer ${a.adminToken}`)
-          .send({ noticeHours: 24, suggestedFee: 50000, currency: 'COP' })
+          .send({ noticeHours: 24, suggestedFee: 50000, currency: 'USD' })
           .expect(201)
       ).body as { id: string }
     ).id;

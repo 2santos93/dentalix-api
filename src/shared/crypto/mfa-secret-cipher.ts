@@ -1,6 +1,7 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createHmac,
   hkdfSync,
   randomBytes,
 } from 'node:crypto';
@@ -24,6 +25,8 @@ export const MFA_SECRET_CIPHER = Symbol('MFA_SECRET_CIPHER');
  */
 export class MfaSecretCipher {
   private readonly key: Buffer;
+  /** DX-021: clave (distinta, misma maestra) del HMAC de los códigos de recuperación. */
+  private readonly recoveryKey: Buffer;
 
   constructor(masterKey: Buffer) {
     if (masterKey.length !== 32) {
@@ -38,6 +41,27 @@ export class MfaSecretCipher {
         32,
       ),
     );
+    this.recoveryKey = Buffer.from(
+      hkdfSync(
+        'sha256',
+        masterKey,
+        Buffer.alloc(0),
+        'dentalix-mfa-recovery-codes',
+        32,
+      ),
+    );
+  }
+
+  /**
+   * DX-021: huella de un código de recuperación YA normalizado: HMAC-SHA-256
+   * (hex) con una clave derivada de MFA_ENCRYPTION_KEY y ligado al usuario.
+   * Los códigos tienen 80 bits de azar, así que no hace falta un hash lento;
+   * con la clave fuera de la BD, una copia de la tabla no permite probarlos.
+   */
+  hashRecoveryCode(code: string, userId: string): string {
+    return createHmac('sha256', this.recoveryKey)
+      .update(`${userId}:${code}`, 'utf8')
+      .digest('hex');
   }
 
   encrypt(secret: string, userId: string): string {

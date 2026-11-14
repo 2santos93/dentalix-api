@@ -11,7 +11,7 @@ import {
   type FileStoragePort,
 } from '../src/shared/storage/file-storage.port';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
@@ -61,7 +61,7 @@ describe('Me (e2e)', () => {
 
     await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Perfil E2E',
         subdomain: sub,
         email: 'perfil@e2e.com',

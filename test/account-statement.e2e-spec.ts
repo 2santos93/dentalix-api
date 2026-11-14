@@ -15,9 +15,15 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
+  locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y para
 // limpiar entre tenants — mismo criterio que payment-plans.e2e-spec.ts.
@@ -90,6 +96,7 @@ interface StatementBody {
 
 async function cleanup(): Promise<void> {
   await resetDatabase(raw);
+  dropParRates ??= await seedParProviderRates(raw);
 }
 
 describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)', () => {
@@ -134,7 +141,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,
@@ -251,12 +258,12 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
   //   usdPlan       USD 1000 ACCEPTED · abonos 300 + 100 (anulado) · cuotas 3
   //                 mensuales desde 2026-01-10 (todas vencidas)
   //   futurePlan    USD 200 · cuotas 2 desde 2099-01-01 (próxima cuota)
-  //   copPlan       COP 500000 · abono 200000
+  //   vesPlan       VES 500000 · abono 200000
   //   cancelledPlan USD 500 · abono 50 · luego CANCELLED
   //   draftPlan     USD 999 PROPOSED (no facturable)
   let usdPlan: string;
   let futurePlan: string;
-  let copPlan: string;
+  let vesPlan: string;
   let cancelledPlan: string;
   let voidedPaymentId: string;
 
@@ -313,8 +320,8 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
       })
       .expect(201);
 
-    copPlan = await createPlan('COP', 500000);
-    await pay(copPlan, 200000, 'COP', '2026-08-01');
+    vesPlan = await createPlan('VES', 500000);
+    await pay(vesPlan, 200000, 'VES', '2026-08-01');
 
     cancelledPlan = await createPlan('USD', 500);
     await pay(cancelledPlan, 50, 'USD', '2026-06-01');
@@ -326,6 +333,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await cleanup();
     await app.close();
     await raw.$disconnect();
@@ -346,19 +354,6 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
 
     expect(body.summary).toEqual([
       {
-        currency: 'COP',
-        budgeted: 500000,
-        // DX-262: sin saldo migrado.
-        openingBalance: 0,
-        openingPending: 0,
-        paid: 200000,
-        creditMovements: 0,
-        balance: 300000,
-        overdueCount: 0,
-        overdueAmount: 0,
-        nextInstallment: null,
-      },
-      {
         currency: 'USD',
         // 1000 + 200; el cancelado (500) y el borrador (PROPOSED) no suman.
         budgeted: 1200,
@@ -368,6 +363,8 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
         paid: 350,
         creditMovements: 0,
         balance: 850,
+        convertedPaid: 350,
+        convertedBalance: 850,
         // 700 en 3 cuotas (233.33/233.33/233.34) con 300 abonados: la 1 pagada,
         // la 2 con 166.66 pendiente y la 3 entera.
         overdueCount: 2,
@@ -379,6 +376,21 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
           amount: 100,
         },
       },
+      {
+        currency: 'VES',
+        budgeted: 500000,
+        // DX-262: sin saldo migrado.
+        openingBalance: 0,
+        openingPending: 0,
+        paid: 200000,
+        creditMovements: 0,
+        balance: 300000,
+        convertedPaid: 200000,
+        convertedBalance: 300000,
+        overdueCount: 0,
+        overdueAmount: 0,
+        nextInstallment: null,
+      },
     ]);
 
     // Cada plan cuadra con sus propios abonos.
@@ -389,7 +401,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
       paid: 300,
       balance: 700,
     });
-    expect(byId.get(copPlan)).toMatchObject({
+    expect(byId.get(vesPlan)).toMatchObject({
       budgeted: 500000,
       paid: 200000,
       balance: 300000,
@@ -551,5 +563,86 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     await as(clinicA)
       .get(`/patients/${patientId}/account-statement?from=ayer`)
       .expect(400);
+  });
+  describe('DX-354: `regional`, la sede del documento', () => {
+    const NEW_YORK = {
+      timeZone: 'America/New_York',
+      locale: 'en-US',
+      hourCycle: 'h12',
+    };
+    const CARACAS = {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h23',
+    };
+    let eastLocationId: string;
+    let mainLocationId: string;
+
+    beforeAll(async () => {
+      mainLocationId = (
+        await raw.location.findFirstOrThrow({
+          where: { tenantId: clinicA.tenantId },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        })
+      ).id;
+      const east = await as(clinicA)
+        .post(
+          '/locations',
+          locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Este' }),
+        )
+        .expect(201);
+      eastLocationId = (east.body as { id: string }).id;
+    });
+
+    const statementAt = (
+      locationId: string | null,
+      path = 'account-statement',
+    ) => {
+      const req = request(server())
+        .get(`/api/v1/patients/${patientId}/${path}`)
+        .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+        .set('Authorization', `Bearer ${clinicA.accessToken}`);
+      return locationId ? req.set('X-Location-Id', locationId) : req;
+    };
+
+    it('devuelve regional de la sede del estado de cuenta (h12, en-US), no la principal', async () => {
+      const res = await statementAt(eastLocationId).expect(200);
+      expect((res.body as { regional: unknown }).regional).toEqual(NEW_YORK);
+    });
+
+    it('en «Todas las sedes» sale la sede principal', async () => {
+      const res = await statementAt(null).expect(200);
+      expect((res.body as { regional: unknown }).regional).toEqual(CARACAS);
+    });
+
+    it('el familiar lleva el regional de la misma sede', async () => {
+      const res = await statementAt(
+        eastLocationId,
+        'family-account-statement',
+      ).expect(200);
+      expect((res.body as { regional: unknown }).regional).toEqual(NEW_YORK);
+    });
+
+    it('regional null sin reloj: 200 y sin 409', async () => {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: { hourCycle: null },
+      });
+      try {
+        const res = await statementAt(mainLocationId).expect(200);
+        expect((res.body as { regional: unknown }).regional).toBeNull();
+        const family = await statementAt(
+          mainLocationId,
+          'family-account-statement',
+        ).expect(200);
+        expect((family.body as { regional: unknown }).regional).toBeNull();
+      } finally {
+        await raw.location.update({
+          where: { id: mainLocationId },
+          data: { hourCycle: CARACAS.hourCycle },
+        });
+      }
+    });
   });
 });

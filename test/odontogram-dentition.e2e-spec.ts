@@ -1,3 +1,5 @@
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { sedeTodayFixture } from './support/sede-clock';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -10,8 +12,6 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { sedeTodayFixture } from './support/sede-clock';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 
 // DX-120 · odontograma fase 2 de punta a punta: dentición por edad,
 // exfoliar 55 → erupcionar 15 → registrar → anular → carta a una fecha
@@ -58,13 +58,17 @@ interface GroupBody {
   records: RecordBody[];
 }
 
-// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
-// su medianoche; si no, una zona en la que ahora es cerca del mediodía), así
-// el «hoy» del test y el de la API no se separan si la corrida cruza la
-// medianoche de Bogotá.
+// DX-495 (TST-062): las clínicas usan la zona segura de DX-449 (la de los
+// fixtures lejos de su medianoche; si no, una zona en la que ahora es cerca del
+// mediodía): el «hoy» del test y el de la API no se separan si la corrida
+// cruza la medianoche de la sede.
 const SEDE = sedeTodayFixture();
 
-/** Día civil de la sede de la clínica `daysAgo` días atrás. */
+/**
+ * Día civil en la zona IANA de la sede (la de `registerClinic`) `daysAgo` días
+ * atrás. Antes restaba 5 h fijas a UTC y cerca de la medianoche daba el día
+ * anterior.
+ */
 function sedeDay(daysAgo = 0): string {
   return addCivilDays(civilDateIn(new Date(), SEDE.timeZone), -daysAgo);
 }

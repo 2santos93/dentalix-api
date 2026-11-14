@@ -26,6 +26,8 @@ export function statementAddressee(
     responsibles: notice.responsibles,
     majorityAge: notice.settings.majorityAge,
     today: civilDateIn(now, notice.settings.timeZone),
+    timeZone: notice.settings.timeZone,
+    majorityReview: notice.majorityReview,
   });
   const responsible = notice.responsibles.find(
     (r) => r.id === recipient.responsiblePartyId,

@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   BadRequestException,
   ConflictException,
@@ -46,6 +47,8 @@ export interface PublicAnamnesis {
   /** Solo el nombre de pila: ni apellidos, ni documento, ni datos previos. */
   patientFirstName: string | null;
   expiresAt: Date;
+  /** DX-354: región de la sede principal de la clínica, para pintar `expiresAt`. */
+  regional: DocumentRegionalDto | null;
   questionnaire: QuestionnaireDefinition;
   consent: {
     /** El paciente no tiene vigente SENSITIVE_HEALTH: se pide antes. */
@@ -115,9 +118,38 @@ export class GetPublicAnamnesisUseCase {
       clinic: view.clinic,
       patientFirstName: firstNameOnly(view.patientFirstName),
       expiresAt: view.submission.expiresAt,
+      regional: view.regional,
       questionnaire: anamnesisQuestionnaire(),
       consent: { required, policy: required ? view.policy : null },
     };
+  }
+}
+
+/**
+ * PÚBLICO (DX-424): la página avisa de que el paciente abrió el enlace. Solo
+ * cuenta la primera vez (`openedAt`); las siguientes no cambian nada. Como en
+ * las indicaciones postoperatorias (DX-222), no se audita: la apertura queda
+ * en el propio envío. Mismo 404/410 que el GET.
+ */
+@Injectable()
+export class MarkPublicAnamnesisOpenedUseCase {
+  constructor(
+    private readonly tenantContext: TenantContextService,
+    @Inject(MEDICAL_HISTORY_SUBMISSION_REPOSITORY)
+    private readonly repo: MedicalHistorySubmissionRepository,
+    @Inject(ANAMNESIS_CLOCK) private readonly clock: AnamnesisClock,
+  ) {}
+
+  async execute(token: string): Promise<void> {
+    const view = await findOpen(
+      this.tenantContext,
+      this.repo,
+      this.clock,
+      token,
+    );
+    if (view.submission.openedAt === null) {
+      await this.repo.markOpened(view.submission.id);
+    }
   }
 }
 

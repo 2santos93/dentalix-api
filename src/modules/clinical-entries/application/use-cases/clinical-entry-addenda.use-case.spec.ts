@@ -1,3 +1,5 @@
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -23,10 +25,24 @@ class InMemoryAddendumRepository implements ClinicalEntryAddendumRepository {
   readonly rows: ClinicalEntryAddendum[] = [];
   private seq = 0;
 
-  constructor(private readonly entries: Record<string, string>) {}
+  constructor(
+    private readonly entries: Record<string, string>,
+    private readonly locations: Record<string, string | null> = {},
+  ) {}
 
   entryExists(patientId: string, entryId: string): Promise<boolean> {
     return Promise.resolve(this.entries[entryId] === patientId);
+  }
+
+  findEntryLocation(
+    patientId: string,
+    entryId: string,
+  ): Promise<{ locationId: string | null } | null> {
+    return Promise.resolve(
+      this.entries[entryId] === patientId
+        ? { locationId: this.locations[entryId] ?? null }
+        : null,
+    );
   }
 
   create(
@@ -60,16 +76,21 @@ class InMemoryAddendumRepository implements ClinicalEntryAddendumRepository {
 const REASON = 'Dato de la pieza dental mal transcrito';
 
 function setUp() {
-  const repo = new InMemoryAddendumRepository({ e1: 'p1', e2: 'p2' });
+  const repo = new InMemoryAddendumRepository(
+    { e1: 'p1', e2: 'p2', e3: 'p1' },
+    { e1: 'loc-a', e3: null },
+  );
+  const tenantContext = new TenantContextService();
   const create = new CreateClinicalEntryAddendumUseCase(
     repo,
     patientsInClinic('p1', 'p2'),
+    tenantContext,
   );
   const list = new ListClinicalEntryAddendaUseCase(
     repo,
     patientsInClinic('p1', 'p2'),
   );
-  return { repo, create, list };
+  return { repo, create, list, tenantContext };
 }
 
 describe('CreateClinicalEntryAddendumUseCase (DX-038)', () => {
@@ -138,6 +159,40 @@ describe('CreateClinicalEntryAddendumUseCase (DX-038)', () => {
       create.execute('p1', 'e2', { reason: REASON, text: 'x' }, 'user-1'),
     ).rejects.toThrow(CLINICAL_ENTRY_NOT_FOUND_MESSAGE);
     expect(repo.rows).toHaveLength(0);
+  });
+});
+
+describe('CreateClinicalEntryAddendumUseCase: sede de la evolución (SEC-014)', () => {
+  const input = { reason: REASON, text: 'Es la 36, no la 46.' };
+
+  it('evolución de una sede no permitida → 403 sin escribir', async () => {
+    const { repo, create, tenantContext } = setUp();
+    await expect(
+      tenantContext.run(
+        't1',
+        undefined,
+        () => create.execute('p1', 'e1', input, 'user-1'),
+        ['loc-b'],
+      ),
+    ).rejects.toThrow(LOCATION_NOT_ALLOWED_MESSAGE);
+    expect(repo.rows).toHaveLength(0);
+  });
+
+  it('su sede, o una evolución sin sede (anterior a multi-sede), sí', async () => {
+    const { repo, create, tenantContext } = setUp();
+    await tenantContext.run(
+      't1',
+      undefined,
+      () => create.execute('p1', 'e1', input, 'user-1'),
+      ['loc-a'],
+    );
+    await tenantContext.run(
+      't1',
+      undefined,
+      () => create.execute('p1', 'e3', input, 'user-1'),
+      ['loc-b'],
+    );
+    expect(repo.rows.map((r) => r.clinicalEntryId)).toEqual(['e1', 'e3']);
   });
 });
 

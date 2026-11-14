@@ -53,8 +53,9 @@ function ctx(overrides: Partial<PricingContext> = {}): PricingContext {
       category: 'Endodoncia',
       allowDiscount: true,
     },
-    planCurrency: 'COP',
+    planCurrency: 'VES',
     planRoundingDigits: 0,
+    catalogCurrency: 'VES',
     today: TODAY,
     locationId: SEDE,
     agreement: null,
@@ -66,6 +67,7 @@ function ctx(overrides: Partial<PricingContext> = {}): PricingContext {
 
 const CATALOG = {
   basePrice: 100000,
+  catalogCurrency: 'VES',
   price: 100000,
   source: PriceSource.CATALOG,
   agreementId: null,
@@ -95,6 +97,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
   it('convenio % general: base × (1 − p/100), con nombre y id del convenio', () => {
     expect(resolveItemPrice(ctx({ agreement: percentAgreement() }))).toEqual({
       basePrice: 100000,
+      catalogCurrency: 'VES',
       price: 85000,
       source: PriceSource.AGREEMENT_PERCENT,
       agreementId: 'agr-1',
@@ -156,7 +159,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
         ctx({
           agreement: percentAgreement(),
           catalogItem: noDiscount,
-          locationList: { price: 90000, currency: 'COP' },
+          locationList: { price: 90000, currency: 'VES' },
         }),
       ),
     ).toEqual({
@@ -186,7 +189,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
     const result = resolveItemPrice(
       ctx({
         agreement: listAgreement(),
-        agreementListPrice: { price: 72000, currency: 'COP', active: true },
+        agreementListPrice: { price: 72000, currency: 'VES', active: true },
         catalogItem: {
           defaultPrice: 100000,
           category: null,
@@ -196,6 +199,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
     );
     expect(result).toEqual({
       basePrice: 100000,
+      catalogCurrency: 'VES',
       price: 72000,
       source: PriceSource.AGREEMENT_PRICE_LIST,
       agreementId: 'agr-2',
@@ -210,7 +214,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
         ctx({
           agreement: listAgreement(),
           agreementListPrice: null,
-          locationList: { price: 95000, currency: 'COP' },
+          locationList: { price: 95000, currency: 'VES' },
         }),
       ),
     ).toEqual({ ...CATALOG, price: 95000, source: PriceSource.PRICE_LIST });
@@ -222,7 +226,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
       resolveItemPrice(
         ctx({
           agreement,
-          agreementListPrice: { price: 72000, currency: 'COP', active: false },
+          agreementListPrice: { price: 72000, currency: 'VES', active: false },
         }),
       ),
     ).toEqual(CATALOG);
@@ -239,7 +243,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
   it('lista activa de la sede en la moneda del plan con precio: PRICE_LIST', () => {
     expect(
       resolveItemPrice(
-        ctx({ locationList: { price: 95000, currency: 'COP' } }),
+        ctx({ locationList: { price: 95000, currency: 'VES' } }),
       ),
     ).toEqual({ ...CATALOG, price: 95000, source: PriceSource.PRICE_LIST });
   });
@@ -251,7 +255,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
       ),
     ).toEqual(CATALOG);
     expect(
-      resolveItemPrice(ctx({ locationList: { price: null, currency: 'COP' } })),
+      resolveItemPrice(ctx({ locationList: { price: null, currency: 'VES' } })),
     ).toEqual(CATALOG);
   });
 
@@ -260,7 +264,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
       resolveItemPrice(
         ctx({
           agreement: percentAgreement(),
-          locationList: { price: 95000, currency: 'COP' },
+          locationList: { price: 95000, currency: 'VES' },
         }),
       ).source,
     ).toBe(PriceSource.AGREEMENT_PERCENT);
@@ -319,13 +323,13 @@ describe('resolveItemPrice (DX-105 §3)', () => {
   });
 
   describe('redondeo a la moneda del plan (R6)', () => {
-    it('COP sin decimales, la mitad hacia arriba', () => {
+    it('RSD sin decimales, la mitad hacia arriba', () => {
       // 33 333 × 0,85 = 28 333,05 → 28 333; 10 001 × 0,85 = 8 500,85 → 8 501.
-      expect(percentPrice(33333, 15, digits('COP'))).toBe(28333);
-      expect(percentPrice(10001, 15, digits('COP'))).toBe(8501);
+      expect(percentPrice(33333, 15, digits('RSD'))).toBe(28333);
+      expect(percentPrice(10001, 15, digits('RSD'))).toBe(8501);
       // 7,5 %: 99 999 × 0,925 = 92 499,075 → 92 499; 1 × 0,5 = 0,5 → 1.
-      expect(percentPrice(99999, 7.5, digits('COP'))).toBe(92499);
-      expect(percentPrice(1, 50, digits('COP'))).toBe(1);
+      expect(percentPrice(99999, 7.5, digits('RSD'))).toBe(92499);
+      expect(percentPrice(1, 50, digits('RSD'))).toBe(1);
     });
 
     it('USD a céntimos, la mitad hacia arriba sin perderla por coma flotante', () => {
@@ -341,7 +345,7 @@ describe('resolveItemPrice (DX-105 §3)', () => {
       expect(percentPrice(100, 100, digits('USD'))).toBe(0);
       expect(percentPrice(100, 0, digits('USD'))).toBe(100);
       // Base con decimales en una moneda sin ellos: no sube por encima.
-      expect(percentPrice(100.6, 0, digits('COP'))).toBe(100);
+      expect(percentPrice(100.6, 0, digits('RSD'))).toBe(100);
     });
 
     it('el precio por % del convenio sale redondeado en la moneda del plan', () => {
@@ -357,6 +361,28 @@ describe('resolveItemPrice (DX-105 §3)', () => {
           }),
         ).price,
       ).toBe(28333);
+    });
+  });
+
+  describe('moneda del catálogo (DX-502)', () => {
+    it('acompaña al precio de catálogo en cualquier origen del precio', () => {
+      const sede = ctx({
+        planCurrency: 'EUR',
+        catalogCurrency: 'VES',
+        locationList: { price: 100.55, currency: 'EUR' },
+      });
+      expect(resolveItemPrice(sede)).toMatchObject({
+        basePrice: 100000,
+        catalogCurrency: 'VES',
+        price: 100.55,
+        source: PriceSource.PRICE_LIST,
+      });
+    });
+
+    it('null si no se sabe (sedes sin moneda común)', () => {
+      expect(
+        resolveItemPrice(ctx({ catalogCurrency: null })).catalogCurrency,
+      ).toBeNull();
     });
   });
 });

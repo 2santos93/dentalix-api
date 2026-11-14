@@ -6,7 +6,7 @@ import { prismaRuleCode } from '../src/shared/prisma/prisma-exception.filter';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -98,7 +98,7 @@ function newExpense(amount = 100) {
         locationId,
         category: 'Insumos clínicos',
         amount,
-        currency: 'COP',
+        currency: 'USD',
         invoiceDate: DAY,
         createdById: userId,
       },
@@ -116,7 +116,7 @@ function paymentData(
     expenseId,
     locationId,
     amount,
-    currency: 'COP',
+    currency: 'USD',
     method: 'TRANSFER',
     paidOn: DAY,
     createdById: userId,
@@ -140,7 +140,7 @@ function openCash(openedById: string) {
       data: { tenantId, locationId, openedById },
     });
     await tx.cashSessionFloat.create({
-      data: { tenantId, sessionId: session.id, currency: 'COP', amount: 0 },
+      data: { tenantId, sessionId: session.id, currency: 'USD', amount: 0 },
     });
     return session.id;
   });
@@ -164,7 +164,7 @@ function closeCash(sessionId: string) {
       data: {
         tenantId,
         closingId: closing.id,
-        currency: 'COP',
+        currency: 'USD',
         method: 'CASH',
         opening: 0,
         expected: 0,
@@ -188,10 +188,10 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
     });
     tenantId = tenant.id;
     const location = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId,
         name: 'Sede',
-        country: 'CO',
+        country: 'VE',
       }),
     });
     locationId = location.id;
@@ -267,7 +267,7 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
                 ("id", "tenantId", "expenseId", "locationId", "amount", "currency",
                  "method", "paidOn", "createdById")
               VALUES (gen_random_uuid(), ${tenantId}::uuid, ${e.id}::uuid,
-                ${locationId}::uuid, 1, 'COP', 'TRANSFER', ${DAY}, ${userId}::uuid)`,
+                ${locationId}::uuid, 1, 'USD', 'TRANSFER', ${DAY}, ${userId}::uuid)`,
           ),
         ),
       ).resolves.toBe('Q3930');
@@ -342,10 +342,10 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
       });
       try {
         const loc = await raw.location.create({
-          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          data: locationData(REGIONAL_CARACAS_FIXTURE, {
             tenantId: foreign.id,
             name: 'Ajena',
-            country: 'CO',
+            country: 'VE',
           }),
         });
         const e = await raw.expense.create({
@@ -354,7 +354,7 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
             locationId: loc.id,
             category: 'Ajeno',
             amount: 100,
-            currency: 'COP',
+            currency: 'USD',
             invoiceDate: DAY,
             createdById: userId,
           },
@@ -463,7 +463,7 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
             kind: 'OUTFLOW_VOID',
             expensePaymentId: payment.id,
             originalSessionId: payment.cashSessionId ?? openSession,
-            currency: 'COP',
+            currency: 'USD',
             method: 'CASH',
             amount: 10_000,
             reason: 'Salida registrada por error',
@@ -546,7 +546,7 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
           tenantId,
           locationId,
           category: 'Incoherente',
-          currency: 'COP',
+          currency: 'USD',
           invoiceDate: DAY,
           createdById: userId,
         };
@@ -574,7 +574,7 @@ describe('DX-393 · integridad entre gasto y pagos en la BD (int)', () => {
             kind: 'OUTFLOW_VOID',
             expensePaymentId: out.id,
             originalSessionId: otherSession,
-            currency: 'COP',
+            currency: 'USD',
             method: 'CASH',
             amount: 7,
             reason: 'Ajuste incoherente',

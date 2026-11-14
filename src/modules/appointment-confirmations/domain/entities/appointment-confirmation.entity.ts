@@ -1,6 +1,8 @@
+import type { HourCycle } from '../../../../shared/format/regional-format';
 import {
   AppointmentConfirmationResponse,
   AppointmentStatus,
+  EarlierWindow,
 } from '@prisma/client';
 
 /**
@@ -34,8 +36,16 @@ export interface ConfirmationAppointment {
   start: Date;
   end: Date;
   status: AppointmentStatus;
+  /** DX-469: última modificación (DTSTAMP/SEQUENCE del .ics) y alarma de la sede. */
+  updatedAt: Date;
+  calendarAlarmHours: number;
+  /** DX-437: «Adelantar si hay hueco» y la franja pedida (null = cualquiera). */
+  wantsEarlier: boolean;
+  earlierWindow: EarlierWindow | null;
   patientFirstName: string | null;
   patientPhone: string | null;
+  /** DX-497: idioma preferido del paciente (null = el de la clínica). */
+  patientPreferredLanguage: string | null;
   providerName: string | null;
   /** Sede de la cita: la restricción por sedes (DX-089) se comprueba con ella. */
   locationId: string;
@@ -46,6 +56,14 @@ export interface ConfirmationAppointment {
    * ella se lee un número sin «+». null: la sede no tiene.
    */
   locationPhoneRegion: string | null;
+  /**
+   * DX-354: zona, formato y reloj de la sede de la cita, en crudo, para que la
+   * página pública pinte el día y la hora como la sede. null: la sede no los
+   * tiene (la página pinta «—» y pide llamar a la clínica).
+   */
+  locationTimeZone: string | null;
+  locationLocale: string | null;
+  locationHourCycle: HourCycle | null;
 }
 
 export interface ClinicBranding {

@@ -1,3 +1,4 @@
+import { isValidTimeZone } from '../../../../shared/time/civil-day';
 import { Injectable } from '@nestjs/common';
 import { Prisma, TreatmentPlanItemStatus } from '@prisma/client';
 import { phoneRegionOrNull } from '../../../../shared/phone/phone-number';
@@ -29,6 +30,8 @@ interface FollowUpSqlRow {
   optionLabel: string | null;
   presentedAt: Date;
   presentedLocationId: string;
+  presentedLocationTimeZone: string | null;
+  quoteValidUntil: string | null;
   currency: string;
   total: Prisma.Decimal;
   itemCount: number;
@@ -125,7 +128,18 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
             catalogPrice: item.catalogPrice,
             // DX-105: la foto del precio viaja tal cual; no se re-resuelve.
             basePrice: item.basePrice,
+            // DX-502: con la moneda del catálogo de su alta.
+            catalogCurrency: item.catalogCurrency,
             priceSource: item.priceSource,
+            // DX-513-bis: la foto de la referencia (y su tasa) viaja tal cual:
+            // la moneda del plan es la misma.
+            referenceCurrency: item.referenceCurrency,
+            referencePriceInPlan: item.referencePriceInPlan,
+            basePriceInPlan: item.basePriceInPlan,
+            referenceRateFrom: item.referenceRateFrom,
+            referenceRateTo: item.referenceRateTo,
+            referenceRateSource: item.referenceRateSource,
+            referenceRateDate: item.referenceRateDate,
             agreementId: item.agreementId,
             agreementName: item.agreementName,
             pricingLocationId: item.pricingLocationId,
@@ -212,6 +226,9 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
                  p."optionLabel",
                  p."presentedAt",
                  p."presentedLocationId",
+                 lo."timeZone" AS "presentedLocationTimeZone",
+                 -- DX-379: el día civil tal cual (DATE sin zona), como texto.
+                 to_char(p."quoteValidUntil", 'YYYY-MM-DD') AS "quoteValidUntil",
                  p."currency",
                  coalesce(sum(i."price" - i."discount"), 0) AS "total",
                  count(i."id")::int AS "itemCount"
@@ -233,6 +250,11 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
             presentedLocationPhoneRegion: phoneRegionOrNull(
               row.presentedLocationPhoneRegion,
             ),
+            presentedLocationTimeZone:
+              row.presentedLocationTimeZone &&
+              isValidTimeZone(row.presentedLocationTimeZone)
+                ? row.presentedLocationTimeZone
+                : null,
             total: row.total.toNumber(),
           })),
         };

@@ -47,7 +47,7 @@ function rendered(run: () => unknown, fmt: RegionalFormat): string {
   }
   throw new Error('no lanzó');
 }
-const ES_CO = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const ES_CO = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 const EN_US = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
 
 const csvBytes = (text: string, encoding: BufferEncoding = 'utf8') =>
@@ -265,7 +265,7 @@ describe('XLSX', () => {
     const book = buildXlsx([
       ['nombres', 'documento', 'nacimiento', 'telefono'],
       ['Ana & Eva <x>', 1020304050, { date: 32874 }, null],
-      ['Luis', 12345678901, { date: 45000 }, 3101234567],
+      ['Luis', 12345678901, { date: 45000 }, 4141234567],
     ]);
     expect(await records(book)).toEqual([
       {
@@ -275,7 +275,7 @@ describe('XLSX', () => {
       { rowNumber: 2, cells: ['Ana & Eva <x>', '1020304050', '1990-01-01'] },
       {
         rowNumber: 3,
-        cells: ['Luis', '12345678901', '2023-03-15', '3101234567'],
+        cells: ['Luis', '12345678901', '2023-03-15', '4141234567'],
       },
     ]);
     const inlined = await records(
@@ -637,9 +637,71 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
       readImportFile(book, 'x.xlsx'),
     );
     expect(outcome).toBeInstanceOf(ImportFileError);
-    expect((outcome as Error).message).toMatch(message);
+    expect((outcome as ImportFileError).render(() => ES_CO)).toMatch(message);
     expectYieldsTheThread({ maxPerTurn, total });
   }
+
+  describe('los topes del .xlsx dicen sus cifras con el formato de la sede (DX-354)', () => {
+    const tooManyCells = () =>
+      readImportFile(
+        rawBook(sheetWith(`<row r="3">${'<c r="CW3"/>'.repeat(20_000)}</row>`)),
+        'x.xlsx',
+      ).then(
+        () => {
+          throw new Error('no lanzó');
+        },
+        (error: unknown) => error as ImportFileError,
+      );
+
+    it('TOO_MANY_CELLS: en-US 16,384 · de-DE 16.384 · fr-FR 16 384 (espacio fino normalizado)', async () => {
+      const error = await tooManyCells();
+      const text = (locale: string, hourCycle: 'h12' | 'h23') =>
+        error
+          .render(() => regionalFormat({ locale, hourCycle }))
+          .replace(/[\u202f\u00a0]/g, ' ');
+      expect(text('en-US', 'h12')).toContain('más de 16,384 celdas');
+      expect(text('de-DE', 'h23')).toContain('más de 16.384 celdas');
+      expect(text('fr-FR', 'h23')).toContain('más de 16 384 celdas');
+    });
+
+    it('TOO_MANY_STYLES y TOO_MANY_STRINGS también', async () => {
+      const styles = await readImportFile(
+        rawBook(sheetWith(''), [
+          part(
+            'xl/styles.xml',
+            `<styleSheet><cellXfs>${'<xf/>'.repeat(64_001)}</cellXfs></styleSheet>`,
+          ),
+        ]),
+        'x.xlsx',
+      ).catch((error: unknown) => error as ImportFileError);
+      expect(styles).toBeInstanceOf(ImportFileError);
+      expect((styles as ImportFileError).render(() => EN_US)).toContain(
+        'más de 64,000 estilos',
+      );
+      const strings = await readImportFile(
+        rawBook(sheetWith(''), [
+          part(
+            'xl/sharedStrings.xml',
+            `<sst>${'<si/>'.repeat(1_000_001)}</sst>`,
+          ),
+        ]),
+        'x.xlsx',
+      ).catch((error: unknown) => error as ImportFileError);
+      expect(strings).toBeInstanceOf(ImportFileError);
+      expect((strings as ImportFileError).render(() => EN_US)).toContain(
+        'más de 1,000,000 cadenas',
+      );
+    });
+
+    it('una sede sin formato: el formato se pide al escribir el texto (409 en el caso de uso), no antes', async () => {
+      const error = await tooManyCells();
+      expect(() =>
+        error.render(() => {
+          throw new Error('formato requerido');
+        }),
+      ).toThrow('formato requerido');
+    });
+  });
 
   it('sharedStrings con 5,5 M de <si/>: 400 sin bloquear el hilo', async () => {
     await expectRejectedYielding(
@@ -705,7 +767,9 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
       collect(book, { maxXmlSteps }),
     );
     expect(outcome).toBeInstanceOf(ImportFileError);
-    expect((outcome as Error).message).toMatch(/demasiado complej/);
+    expect((outcome as ImportFileError).render(() => ES_CO)).toMatch(
+      /demasiado complej/,
+    );
     expectYieldsTheThread({ maxPerTurn, total });
   });
 
@@ -737,7 +801,7 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
         `Nombre ${i}`,
         `Apellido ${i}`,
         String(1_000_000 + i),
-        '3001234567',
+        '4121234567',
       ]);
     }
     const { outcome, maxPerTurn, total } = await watchTurns(() =>

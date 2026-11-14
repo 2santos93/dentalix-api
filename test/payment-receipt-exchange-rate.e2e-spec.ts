@@ -4,8 +4,10 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
-import { sedeTodayFixture } from './support/sede-clock';
+import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
+import { TREATMENT_PLAN_CLOCK } from '../src/modules/treatment-plans/application/plan-clock';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 
 // DX-376 en HTTP real: el recibo de un abono en otra moneda trae la tasa que
 // congeló el abono (DX-375), su fuente, su día y el equivalente en la moneda
@@ -17,12 +19,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
-// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
-// «hoy» de los abonos y el de la API no se separan si la corrida cruza la
-// medianoche de Bogotá.
-const SEDE = sedeTodayFixture();
-const TODAY = civilDateIn(new Date(), SEDE.timeZone);
+// DX-460: «hoy» fijo de la sede, el mismo que ve la API por su
+// EXCHANGE_RATE_CLOCK (manualSince al pasar a MANUAL) y por el del plan (la
+// tasa de referencia del ítem, DX-513-bis): el abono de TODAY no cae en
+// «ayer» si la suite cruza la medianoche de la sede.
+const SEDE_DAY = fixedSedeDay();
+const TODAY = SEDE_DAY.day;
 const YESTERDAY = addCivilDays(TODAY, -1);
 
 interface ReceiptBody {
@@ -139,7 +141,14 @@ describe('Recibo con la tasa congelada del abono (e2e, DX-376)', () => {
   }
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder
+          .overrideProvider(EXCHANGE_RATE_CLOCK)
+          .useValue(() => SEDE_DAY.at)
+          .overrideProvider(TREATMENT_PLAN_CLOCK)
+          .useValue(() => SEDE_DAY.at),
+    });
     await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({
       where: { date: { in: [YESTERDAY, TODAY] } },
@@ -151,8 +160,8 @@ describe('Recibo con la tasa congelada del abono (e2e, DX-376)', () => {
         { date: TODAY, currency: 'VES', rate: 40 },
       ],
     });
-    auto = await registerClinic(app, 'dx376-auto', SEDE);
-    manual = await registerClinic(app, 'dx376-manual', SEDE);
+    auto = await registerClinic(app, 'dx376-auto');
+    manual = await registerClinic(app, 'dx376-manual');
     await seedPlan(auto, 'A');
     await seedPlan(manual, 'M');
   });

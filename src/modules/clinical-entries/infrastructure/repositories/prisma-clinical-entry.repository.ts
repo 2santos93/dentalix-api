@@ -9,11 +9,32 @@ import {
   CreateClinicalEntryRepoInput,
   ListClinicalEntriesParams,
 } from '../../domain/ports/clinical-entry-repository.port';
-import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import {
+  ClinicalEntry,
+  type CreatedClinicalEntryRecord,
+} from '../../domain/entities/clinical-entry.entity';
+import { entryCivilDay } from '../../domain/entry-date-rules';
+import { recallFromClinicalEntry } from '../../../recall/infrastructure/recall-manual-write';
 import {
   ADDENDA_ORDER,
   mapAddendum,
 } from './prisma-clinical-entry-addendum.repository';
+import { licenseSnapshot } from '../../domain/author-license';
+
+/**
+ * DX-540: registro profesional vigente del usuario en la clínica de `tx` (la
+ * membresía tiene RLS: solo la de esta clínica), recortado o null.
+ */
+async function membershipLicense(
+  tx: Prisma.TransactionClient,
+  userId: string,
+): Promise<string | null> {
+  const membership = await tx.clinicMembership.findFirst({
+    where: { userId, deletedAt: null },
+    select: { professionalLicense: true },
+  });
+  return licenseSnapshot(membership?.professionalLicense);
+}
 
 /** DX-170: lo que la ficha muestra de la cita ligada. */
 const APPOINTMENT_SUMMARY = {
@@ -45,6 +66,7 @@ function mapToEntity(
     reason: row.reason,
     notes: row.notes,
     performedById: row.performedById,
+    authorProfessionalLicense: row.authorProfessionalLicense,
     appointmentId: row.appointmentId,
     templateId: row.templateId,
     appointment: row.appointment
@@ -115,7 +137,9 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
     return tenantId;
   }
 
-  async create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry> {
+  async create(
+    input: CreateClinicalEntryRepoInput,
+  ): Promise<CreatedClinicalEntryRecord> {
     const tenantId = this.requireTenantId();
 
     // Append-only: this is a plain INSERT. There is no update/delete method
@@ -133,6 +157,12 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
       const locationId =
         appointment?.locationId ??
         (await this.tenantContext.writeLocationId(tx));
+      // DX-540: foto del registro del autor en la misma transacción que la
+      // firma; el trigger DX-038 impide cambiarla después.
+      const authorProfessionalLicense = await membershipLicense(
+        tx,
+        input.performedById,
+      );
       const row = await tx.clinicalEntry.create({
         data: {
           tenantId,
@@ -142,6 +172,7 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           reason: input.reason,
           notes: input.notes,
           performedById: input.performedById,
+          authorProfessionalLicense,
           // DX-170: FK compuestas — la cita tiene que ser de esta clínica y
           // de este paciente; la plantilla, de esta clínica.
           appointmentId: input.appointmentId,
@@ -166,7 +197,45 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           diagnoses: DIAGNOSES,
         },
       });
-      return mapToEntity(row, await providerNamesOf(tx, [row]));
+      const entry = mapToEntity(row, await providerNamesOf(tx, [row]));
+      if (!input.recall) return { ...entry, recallUpdates: [] };
+      // DX-015-bis (D18): el recall en la MISMA transacción; un 422 (tipo
+      // inexistente o retirado) deshace también la evolución. La base de un
+      // recall nuevo es el día civil de la evolución en la zona de su sede.
+      const location = await tx.location.findFirstOrThrow({
+        where: { id: locationId },
+        select: { id: true, timeZone: true },
+      });
+      const recallUpdates = await recallFromClinicalEntry(tx, {
+        tenantId,
+        patientId: input.patientId,
+        entryId: row.id,
+        recallTypeId: input.recall.recallTypeId,
+        intervalMonths: input.recall.intervalMonths,
+        entryDay: entryCivilDay(
+          row.entryDate,
+          requireLocationTimeZone(location),
+        ),
+        locationId,
+        actorId: input.performedById,
+        audit: input.audit,
+      });
+      return { ...entry, recallUpdates };
+    });
+  }
+
+  authorLicense(userId: string): Promise<string | null> {
+    return this.prisma.runWithTenant((tx) => membershipLicense(tx, userId));
+  }
+
+  writeLocationTimeZone(): Promise<string> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const locationId = await this.tenantContext.writeLocationId(tx);
+      const location = await tx.location.findFirstOrThrow({
+        where: { id: locationId },
+        select: { id: true, timeZone: true },
+      });
+      return requireLocationTimeZone(location);
     });
   }
 

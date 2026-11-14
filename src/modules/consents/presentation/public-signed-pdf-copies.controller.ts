@@ -30,6 +30,7 @@ import {
   PublicSignedPdfCopyDto,
   SignedPdfCopyDownloadDto,
 } from './dto/public-signed-pdf-copy.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 function requestMeta(
   req: TenantHostRequest & { ip?: string },
@@ -49,7 +50,7 @@ const NOT_FOUND =
 // su responsable. El tenant sale SOLO del host (PublicTenantContextInterceptor,
 // invariante de DX-207); la RLS hace invisible un token de otra clínica.
 @ApiTags('public')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 // Por IP y por token: frena la enumeración y el martilleo de un enlace.
 @RateLimit('copy-link', 'copy-token')
 @ApiTooManyRequestsResponse({ description: 'Demasiadas peticiones' })

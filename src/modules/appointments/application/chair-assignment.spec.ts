@@ -13,14 +13,14 @@ const locations = {
   findById: (id: string) =>
     Promise.resolve({
       id,
-      timeZone: 'America/Bogota',
-      locale: 'es-CO',
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
       hourCycle: 'h23',
     }),
 } as unknown as LocationRepository;
 
-const START = new Date('2031-03-03T15:00:00.000Z'); // 10:00 en Bogotá
-const END = new Date('2031-03-03T15:30:00.000Z');
+const START = new Date('2031-03-03T14:00:00.000Z'); // 10:00 en la zona de la sede
+const END = new Date('2031-03-03T14:30:00.000Z');
 
 describe('sillón de una cita (DX-211)', () => {
   let appointments: InMemoryAppointmentRepository;
@@ -65,14 +65,41 @@ describe('sillón de una cita (DX-211)', () => {
     await expect(
       service.assertFree(chair, {
         locationId: 'norte',
-        start: new Date('2031-03-03T15:15:00.000Z'),
-        end: new Date('2031-03-03T15:45:00.000Z'),
+        start: new Date('2031-03-03T14:15:00.000Z'),
+        end: new Date('2031-03-03T14:45:00.000Z'),
       }),
     ).rejects.toThrow(
       new ConflictException(
         'El sillón «Sillón 2» ya está ocupado de 10:00 a 10:30',
       ),
     );
+  });
+
+  it('DX-492-bis: al mover, el 409 lleva el código y el ámbito de los demás solapes', async () => {
+    const chair = chairs.seed({ locationId: 'norte', name: 'Sillón 2' });
+    appointments.seed({ chairId: chair.id, start: START, end: END });
+    const slot = { locationId: 'norte', start: START, end: END };
+    const response = (err: unknown) =>
+      (err as ConflictException).getResponse() as Record<string, unknown>;
+    const moving = await service
+      .assertFree(chair, slot, { moving: true })
+      .catch(response);
+    expect(moving).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'APPOINTMENT_OVERLAP',
+      scope: 'chair',
+      message: 'El sillón «Sillón 2» ya está ocupado de 10:00 a 10:30',
+    });
+    // Al agendar, como antes: sin código.
+    expect(
+      await service.assertFree(chair, slot).catch(response),
+    ).not.toHaveProperty('code');
+    expect(
+      (
+        await service.raceConflict(chair.id, slot, { moving: true })
+      ).getResponse(),
+    ).toMatchObject({ code: 'APPOINTMENT_OVERLAP', scope: 'chair' });
   });
 
   it('contigua, cancelada o la propia cita no ocupan el sillón', async () => {
@@ -85,7 +112,7 @@ describe('sillón de una cita (DX-211)', () => {
     appointments.seed({
       chairId: chair.id,
       start: END,
-      end: new Date('2031-03-03T16:00:00.000Z'),
+      end: new Date('2031-03-03T15:00:00.000Z'),
     });
     appointments.seed({
       chairId: chair.id,

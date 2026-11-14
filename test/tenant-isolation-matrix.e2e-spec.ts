@@ -43,9 +43,13 @@ import {
 import { clinicTables, TenantTable } from './support/tenant-tables';
 import { pdfFixture } from './support/document-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 /**
  * DX-068 (TST-002): matriz de aislamiento entre clínicas en las rutas por id.
@@ -248,6 +252,8 @@ interface SeedA {
   confirmationToken: string;
   /** DX-316: un festivo de la sede nueva de A (y su fila de calendario). */
   holidayId: string;
+  /** DX-015-bis: el tipo de recall «Higiene» de A (sembrado en el alta). */
+  recallTypeId: string;
 }
 
 interface SeedB {
@@ -282,6 +288,8 @@ interface SeedB {
   allocationVersion: string;
   /** DX-446: bloqueo propio de B (B lo pasa a reservado con un tipo de A). */
   scheduleBlockId: string;
+  /** DX-015-bis: tipo de recall propio de B (B le pone un disparador de A). */
+  recallTypeId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -427,7 +435,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     app,
     a,
     '/locations',
-    locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte A' }),
+    locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte A' }),
   );
   // Recordatorios por sede (DX-026): A los activa en su sede nueva.
   await api(app, a, 'put', `/reminder-settings/${location.id}`, {
@@ -442,7 +450,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     {
       noticeHours: 24,
       suggestedFee: 50000,
-      currency: 'COP',
+      currency: 'VES',
       patientText: 'Avísanos con 24 horas.',
     },
   );
@@ -532,7 +540,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     supplier: 'Proveedor de A',
     description: 'Póliza anual de A',
     amount: 100000,
-    currency: 'COP',
+    currency: 'VES',
     invoiceDate: '2026-01-15',
   });
   const expensePaid = (
@@ -545,7 +553,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   // DX-105: una lista de precios de A con un precio (para `price_list_items`).
   const priceList = await create(app, a, '/price-lists', {
     name: 'Lista de A',
-    currency: 'COP',
+    currency: 'VES',
   });
   await api(app, a, 'put', `/price-lists/${priceList.id}/items`, {
     items: [{ catalogItemId, price: 90000 }],
@@ -601,7 +609,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   });
   await create(app, a, `/patients/${patientId}/payment-promises`, {
     amount: 1000,
-    currency: 'COP',
+    currency: 'VES',
     dueDate: futureAt(10, 15).slice(0, 10),
   });
 
@@ -640,6 +648,17 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     body: 'Hola {{paciente}}, cuídate.',
     appointmentTypeIds: [appointmentType.id],
   });
+  // DX-250: solo se entrega tras una cita atendida (o de hoy): la cita de A se
+  // pasa un instante al pasado para entregar y vuelve a su hora enseguida.
+  const original = await raw.appointment.findUniqueOrThrow({
+    where: { id: appointment.id },
+    select: { start: true, end: true },
+  });
+  const pastStart = new Date(Date.now() - 9 * 24 * 3600 * 1000);
+  await raw.appointment.update({
+    where: { id: appointment.id },
+    data: { start: pastStart, end: new Date(pastStart.getTime() + 3600_000) },
+  });
   const postOpDelivery = await api(
     app,
     a,
@@ -647,6 +666,10 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     `/appointments/${appointment.id}/post-op-instructions/deliveries`,
     { templateId: postOpTemplate.id, channel: 'PRINT' },
   ).expect(201);
+  await raw.appointment.update({
+    where: { id: appointment.id },
+    data: original,
+  });
 
   // DX-151: un documento del paciente de A, subido por la API (multipart).
   await request(app.getHttpServer())
@@ -708,8 +731,13 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   const notePrompt = await raw.clinicalNoteTemplatePrompt.findFirstOrThrow({
     where: { templateId: noteTemplate.id },
   });
+  const recallType = await raw.recallType.findFirstOrThrow({
+    where: { tenantId: a.tenantId, systemKey: 'HYGIENE' },
+    select: { id: true },
+  });
 
   return {
+    recallTypeId: recallType.id,
     patientId,
     appointmentId: appointment.id,
     catalogItemId,
@@ -785,7 +813,7 @@ async function seedBExtras(
   });
   const priceList = await create(app, b, '/price-lists', {
     name: 'Lista de B',
-    currency: 'COP',
+    currency: 'VES',
   });
   const agreement = await create(app, b, '/agreements', {
     name: 'Convenio de B',
@@ -840,7 +868,12 @@ async function seedBExtras(
     end: futureAt(61, 14),
     kind: 'MEETING',
   });
+  const recallType = await raw.recallType.findFirstOrThrow({
+    where: { tenantId: b.tenantId, systemKey: 'HYGIENE' },
+    select: { id: true },
+  });
   return {
+    recallTypeId: recallType.id,
     scheduleBlockId: scheduleBlock.id,
     payerId: payer.id,
     coverageId: coverage.id,
@@ -883,6 +916,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       builder.overrideProvider(MAILER).useValue(mailer),
     );
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     clinicA = await registerClinic(app, 'clinica-aislada-a');
     clinicB = await registerClinic(app, 'clinica-aislada-b');
     a = await seedA(app, clinicA);
@@ -959,6 +993,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     // El documento de A (DX-151) quedó en el almacén de disco de los e2e.
     await fs.rm(
       path.join(
@@ -1063,6 +1098,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'GET /patients/:id',
       verb: 'get',
       path: () => `/patients/${a.patientId}`,
+      status: 404,
+    },
+    // DX-484: ficha de texto para el software de imagen.
+    {
+      name: 'GET /patients/:id/imaging-export.txt',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/imaging-export.txt`,
       status: 404,
     },
     {
@@ -1261,9 +1303,23 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     },
     // --- calendario de la sede (DX-316): la sede de A no existe para B ---
     {
+      name: 'GET /appointments/:id/checkout-checklist',
+      verb: 'get',
+      path: () => `/appointments/${a.appointmentId}/checkout-checklist`,
+      status: 404,
+      message: 'Cita no encontrada',
+    },
+    {
       name: 'GET /locations/:id/calendar',
       verb: 'get',
       path: () => `/locations/${a.locationId}/calendar`,
+      status: 404,
+      message: 'No encontramos esa sede.',
+    },
+    {
+      name: 'GET /locations/:id/holiday',
+      verb: 'get',
+      path: () => `/locations/${a.locationId}/holiday?date=2030-12-24`,
       status: 404,
       message: 'No encontramos esa sede.',
     },
@@ -1429,6 +1485,44 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         `/patients/${a.patientId}/treatment-plans/${a.signedPlanId}/quote`,
       status: 404,
     },
+    // DX-379: imprimir el presupuesto (la primera impresión fija la validez).
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/quote/issue',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/quote/issue`,
+      body: () => ({}),
+      status: 404,
+    },
+    // DX-379 (B): vista previa de «Actualizar precios» de un plan de A. El
+    // aplicar (lleva Idempotency-Key) está en treatment-plan-repricing.
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/reprice/preview',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/reprice/preview`,
+      body: () => ({}),
+      status: 404,
+    },
+    // DX-379 (C): vista previa del presupuesto recotizado para firmarlo
+    // vencido (no escribe nada).
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance/reprice-preview',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/acceptance/reprice-preview`,
+      body: () => ({}),
+      status: 404,
+    },
+    // DX-417: vista previa de aceptar en parte un plan de A (no escribe).
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/treatment-plans/${a.planId}/acceptance/partial-preview`,
+      body: () => ({ itemIds: [a.planItemId] }),
+      status: 404,
+    },
     {
       name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance',
       verb: 'post',
@@ -1554,10 +1648,39 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/payments/${a.paymentId}/receipt/print`,
       status: 404,
     },
+    // DX-389: el comprobante del cobro del abono de A (404, también sin comprobante).
+    {
+      name: 'GET /payments/:id/proof/url',
+      verb: 'get',
+      path: () => `/payments/${a.paymentId}/proof/url`,
+      status: 404,
+    },
     {
       name: 'POST /payments/:id/receipt/email',
       verb: 'post',
       path: () => `/payments/${a.paymentId}/receipt/email`,
+      status: 404,
+    },
+    // DX-401: el resumen de recibos de un período del paciente de A.
+    {
+      name: 'GET /patients/:patientId/payment-receipts/summary',
+      verb: 'get',
+      path: () =>
+        `/patients/${a.patientId}/payment-receipts/summary?from=2026-01-01&to=2026-12-31`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/payment-receipts/summary/print',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/payment-receipts/summary/print?from=2026-01-01&to=2026-12-31`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:patientId/payment-receipts/summary/email',
+      verb: 'post',
+      path: () =>
+        `/patients/${a.patientId}/payment-receipts/summary/email?from=2026-01-01&to=2026-12-31`,
       status: 404,
     },
     // --- consents (plantillas) ---
@@ -1594,6 +1717,27 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'DELETE /appointment-types/:id',
       verb: 'delete',
       path: () => `/appointment-types/${a.appointmentTypeId}`,
+      status: 404,
+    },
+    // --- recall-types (DX-015-bis) ---
+    {
+      name: 'PATCH /recall-types/:id',
+      verb: 'patch',
+      path: () => `/recall-types/${a.recallTypeId}`,
+      body: () => ({ name: 'Hackeado', active: false }),
+      status: 404,
+    },
+    {
+      name: 'DELETE /recall-types/:id',
+      verb: 'delete',
+      path: () => `/recall-types/${a.recallTypeId}`,
+      status: 404,
+    },
+    {
+      name: 'PUT /recall-types/:id/triggers',
+      verb: 'put',
+      path: () => `/recall-types/${a.recallTypeId}/triggers`,
+      body: () => ({ catalogItemIds: [b.catalogItemId] }),
       status: 404,
     },
     // --- chairs (DX-211) ---
@@ -1763,6 +1907,29 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         `/patients/${a.patientId}/responsible-parties/${a.responsiblePartyId}`,
       status: 404,
     },
+    // --- paso a la mayoría de edad (DX-342) ---
+    {
+      name: 'GET /patients/coming-of-age ?locationId de A',
+      verb: 'get',
+      path: () =>
+        `/patients/coming-of-age?from=2026-11-01&to=2026-11-30&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 404,
+      message: 'Sede no encontrada',
+    },
+    {
+      name: 'GET /patients/:id/majority-review',
+      verb: 'get',
+      path: () => `/patients/${a.patientId}/majority-review`,
+      status: 404,
+    },
+    {
+      name: 'POST /patients/:id/majority-review',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/majority-review`,
+      body: () => ({ decision: 'KEEP_RESPONSIBLE' }),
+      status: 404,
+    },
     // --- coberturas del paciente (DX-153) ---
     {
       name: 'GET /patients/:patientId/coverages',
@@ -1879,7 +2046,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${a.patientId}/payment-promises`,
       body: () => ({
         amount: 1000,
-        currency: 'COP',
+        currency: 'VES',
         dueDate: futureAt(10, 15).slice(0, 10),
       }),
       status: 404,
@@ -1889,7 +2056,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       name: 'PATCH /clinical-note-templates/:id',
       verb: 'patch',
       path: () => `/clinical-note-templates/${a.noteTemplateId}`,
-      body: () => ({ name: 'Hackeada', active: false }),
+      body: () => ({ name: 'Hackeada', active: false, version: 1 }),
       status: 404,
     },
     // La evolución de B no puede colgarse de la cita ni de la plantilla de A
@@ -2196,7 +2363,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       responseBody: {
         items: [],
         nextCursor: null,
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
       },
     })),
     // --- indicaciones postoperatorias (DX-222) ---
@@ -2255,6 +2422,35 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     // filtros son de B; la respuesta es un 400/404 con su mensaje en español
     // o una lectura sin filas de A (la fotografía la comprueba el runner).
     // ======================================================================
+    // DX-015-bis: el tipo de recall de A como filtro de la lista de B: su
+    // lista (y su recuento) vacíos, nunca un recall de A.
+    {
+      name: 'GET /recall/due ?recallTypeId de A',
+      verb: 'get',
+      path: () => `/recall/due?recallTypeId=${a.recallTypeId}&withinDays=60`,
+      queryIds: ['recallTypeId'],
+      status: 200,
+      responseBody: { items: [], total: 0, page: 1, pageSize: 20 },
+    },
+    // DX-015-bis (D17): la sede de A en «Sin recall configurado» de B: su
+    // lista vacía, nunca un paciente de A.
+    {
+      name: 'GET /recall/unconfigured ?locationId de A',
+      verb: 'get',
+      path: () => `/recall/unconfigured?locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 200,
+      responseBody: { items: [], total: 0, page: 1, pageSize: 20 },
+    },
+    {
+      name: 'GET /recall/due/count ?recallTypeId de A',
+      verb: 'get',
+      path: () =>
+        `/recall/due/count?recallTypeId=${a.recallTypeId}&withinDays=60`,
+      queryIds: ['recallTypeId'],
+      status: 200,
+      responseBody: { total: 0 },
+    },
     {
       name: 'GET /appointments ?providerIds[] de A',
       verb: 'get',
@@ -2297,6 +2493,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           () =>
             `providerId=${clinicB.adminUserId}&locationId=${b.locationId}&patientId=${a.patientId}`,
           'Paciente no encontrado',
+        ],
+        [
+          // DX-509-bis: la cita que se mueve (no ocupa su propia hora).
+          'excludeAppointmentId',
+          () =>
+            `providerId=${clinicB.adminUserId}&locationId=${b.locationId}&excludeAppointmentId=${a.appointmentId}`,
+          'Cita no encontrada',
         ],
       ] as const
     ).map(([field, query, message]): IsolationCase => ({
@@ -2452,6 +2655,73 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         },
       },
     ]),
+    // DX-430: el saldo a favor, con el mismo rechazo de la sede de A.
+    {
+      name: 'GET /receivables/credit-balances ?locationId de A',
+      verb: 'get',
+      path: () => `/receivables/credit-balances?locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 400,
+      message: 'La sede no es de esta clínica.',
+    },
+    // DX-399: cobrado sin imputar. Una sede de A es 403 (el mismo rechazo que
+    // una sede no permitida: no dice si existe).
+    ...(
+      [
+        '/reports/unallocated-payments',
+        '/reports/unallocated-payments.csv',
+      ] as const
+    ).map((route): IsolationCase => ({
+      name: `GET ${route} ?locationId de A`,
+      verb: 'get',
+      path: () =>
+        `${route}?from=${day(-30)}&to=${day(0)}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 403,
+      message: 'No tienes acceso a esta sede.',
+    })),
+    // DX-481: ocupación por sillón. Una sede de A es 403 (el mismo rechazo
+    // que una sede no permitida: no dice si existe).
+    ...(
+      ['/reports/chair-occupancy', '/reports/chair-occupancy.csv'] as const
+    ).map((route): IsolationCase => ({
+      name: `GET ${route} ?locationId de A`,
+      verb: 'get',
+      path: () =>
+        `${route}?from=${day(-30)}&to=${day(0)}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 403,
+      message: 'No tienes acceso a esta sede.',
+    })),
+    // DX-410: rentabilidad por sede (informe, CSV y detalle). Una sede de A
+    // es 403 (el mismo rechazo que una sede no permitida: no dice si existe).
+    ...(
+      [
+        '/reports/profitability',
+        '/reports/profitability.csv',
+        '/reports/profitability/lines',
+      ] as const
+    ).map((route): IsolationCase => ({
+      name: `GET ${route} ?locationId de A`,
+      verb: 'get',
+      path: () =>
+        `${route}?from=${day(-30)}&to=${day(0)}&basis=CASH&locationId=${a.locationId}` +
+        (route.endsWith('/lines') ? '&side=INCOME&currency=USD' : ''),
+      queryIds: ['locationId'],
+      status: 403,
+      message: 'No tienes acceso a esta sede.',
+    })),
+    // DX-424: enlaces del paciente. Una sede de A es 403 (el mismo rechazo
+    // que una sede no permitida: no dice si existe).
+    {
+      name: 'GET /reports/patient-links ?locationId de A',
+      verb: 'get',
+      path: () =>
+        `/reports/patient-links?from=${day(-30)}&to=${day(0)}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 403,
+      message: 'No tienes acceso a esta sede.',
+    },
     // DX-423: producción por procedimiento. Una sede de A es 403; el
     // profesional o el procedimiento de A dan un reporte vacío.
     ...(
@@ -2511,6 +2781,49 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
               },
             ]
           : []),
+      ];
+    }),
+    // DX-436: huecos recuperados. Una sede de A es 403 (sin decir si
+    // existe); el profesional de A da un informe sin filas suyas.
+    ...(
+      ['/reports/recovered-slots', '/reports/recovered-slots.csv'] as const
+    ).flatMap((route): IsolationCase[] => {
+      const range = `from=${day(-30)}&to=${day(0)}&`;
+      const empty = (body: unknown, text: string) => {
+        if (route.endsWith('.csv')) {
+          const rows = text.trim().split('\r\n');
+          expect(
+            rows.filter(
+              (l) => l.startsWith('"Profesional",') && l.split(',').length > 2,
+            ),
+          ).toEqual([]);
+          expect(rows.find((l) => l.startsWith('"Total",'))).toMatch(
+            /^"Total","",0,0,0,0,0,0,/,
+          );
+        } else {
+          expect(body).toMatchObject({
+            byProvider: [],
+            totals: { freedSlots: 0, cancellationRate: null },
+          });
+        }
+      };
+      return [
+        {
+          name: `GET ${route} ?locationId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}locationId=${a.locationId}`,
+          queryIds: ['locationId'],
+          status: 403,
+          message: 'No tienes acceso a esta sede.',
+        },
+        {
+          name: `GET ${route} ?providerId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}providerId=${a.dentistUserId}`,
+          queryIds: ['providerId'],
+          status: 200,
+          expectBody: empty,
+        },
       ];
     }),
     {
@@ -2609,7 +2922,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/patients/${b.patientId}/payment-promises`,
       body: () => ({
         amount: 1000,
-        currency: 'COP',
+        currency: 'VES',
         dueDate: futureAt(10, 15).slice(0, 10),
         locationId: a.locationId,
       }),
@@ -2705,7 +3018,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => '/price-lists',
       body: () => ({
         name: 'Lista con sede ajena',
-        currency: 'COP',
+        currency: 'VES',
         locationId: a.locationId,
       }),
       bodyIds: ['locationId'],
@@ -2733,6 +3046,78 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       bodyIds: ['allocations[].treatmentPlanItemId'],
       status: 400,
       message: 'El ítem no es de este plan o ya no existe.',
+    },
+    {
+      name: 'PUT /recall-types/:id/triggers body.catalogItemIds[] de A',
+      verb: 'put',
+      path: () => `/recall-types/${b.recallTypeId}/triggers`,
+      body: () => ({ catalogItemIds: [b.catalogItemId, a.catalogItemId] }),
+      bodyIds: ['catalogItemIds[]'],
+      status: 422,
+      message:
+        'Hay procedimientos que no existen en el catálogo de esta clínica o están retirados.',
+    },
+    // DX-015-bis (porción 4, D20): el tipo de cita de A como «tipo de cita al
+    // agendar» de un tipo de recall de B: 422 y nada cambia ni se crea.
+    {
+      name: 'PATCH /recall-types/:id body.appointmentTypeId de A',
+      verb: 'patch',
+      path: () => `/recall-types/${b.recallTypeId}`,
+      body: () => ({ appointmentTypeId: a.appointmentTypeId }),
+      bodyIds: ['appointmentTypeId'],
+      status: 422,
+      message:
+        'Ese tipo de cita no existe en esta clínica, está retirado o desactivado: elige uno activo o «Ninguno».',
+    },
+    {
+      name: 'POST /recall-types body.appointmentTypeId de A',
+      verb: 'post',
+      path: () => '/recall-types',
+      body: () => ({
+        name: 'Con tipo de cita ajeno',
+        defaultIntervalMonths: 6,
+        appointmentTypeId: a.appointmentTypeId,
+      }),
+      bodyIds: ['appointmentTypeId'],
+      status: 422,
+      message:
+        'Ese tipo de cita no existe en esta clínica, está retirado o desactivado: elige uno activo o «Ninguno».',
+    },
+    // DX-015-bis (porción 3): el tipo de recall de A en «Programar recall»
+    // y en el recall de la evolución de B: 422 y no se crea nada (tampoco la
+    // evolución: misma transacción).
+    {
+      name: 'POST /patients/:id/recalls/default body.recallTypeId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/recalls/default`,
+      body: () => ({ recallTypeId: a.recallTypeId }),
+      bodyIds: ['recallTypeId'],
+      status: 422,
+      message: 'Ese tipo de recall no existe en esta clínica o se retiró.',
+    },
+    {
+      name: 'POST /patients/:id/recalls/default body.appointmentId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/recalls/default`,
+      body: () => ({
+        recallTypeId: b.recallTypeId,
+        appointmentId: a.appointmentId,
+      }),
+      bodyIds: ['appointmentId'],
+      status: 422,
+      message: 'La cita no es de este paciente o no está en curso ni atendida.',
+    },
+    {
+      name: 'POST /patients/:patientId/clinical-entries body.recall.recallTypeId de A',
+      verb: 'post',
+      path: () => `/patients/${b.patientId}/clinical-entries`,
+      body: () => ({
+        notes: 'Intento',
+        recall: { recallTypeId: a.recallTypeId, intervalMonths: 3 },
+      }),
+      bodyIds: ['recall.recallTypeId'],
+      status: 422,
+      message: 'Ese tipo de recall no existe en esta clínica o se retiró.',
     },
     {
       name: 'PUT /price-lists/:id/items body.items[].catalogItemId de A',
@@ -3122,6 +3507,43 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         'Evolución no encontrada en la historia clínica de este paciente',
     },
     {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/reprice/preview body.itemIds[] de A',
+      verb: 'post',
+      path: () =>
+        `/patients/${b.patientId}/treatment-plans/${b.planId}/reprice/preview`,
+      body: () => ({ itemIds: [a.planItemId] }),
+      bodyIds: ['itemIds[]'],
+      status: 404,
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    },
+    // DX-417: B acepta en parte su plan con un ítem de A (vista previa y
+    // firma): el id ajeno es 404 antes que cualquier otra regla.
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview body.itemIds[] de A',
+      verb: 'post',
+      path: () =>
+        `/patients/${b.patientId}/treatment-plans/${b.planId}/acceptance/partial-preview`,
+      body: () => ({ itemIds: [a.planItemId] }),
+      bodyIds: ['itemIds[]'],
+      status: 404,
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    },
+    {
+      name: 'POST /patients/:patientId/treatment-plans/:planId/acceptance body.partial.itemIds[] de A',
+      verb: 'post',
+      path: () =>
+        `/patients/${b.patientId}/treatment-plans/${b.planId}/acceptance`,
+      body: () => ({
+        signerName: 'Hackeado',
+        signature: SIGNATURE_PNG,
+        contentHash: 'a'.repeat(64),
+        partial: { itemIds: [a.planItemId] },
+      }),
+      bodyIds: ['partial.itemIds[]'],
+      status: 404,
+      message: 'Algún ítem no existe o no es de este plan de tratamiento.',
+    },
+    {
       name: 'POST /treatment-plans/:id/items/bulk-discount body.itemIds[] de A',
       verb: 'post',
       path: () => `/treatment-plans/${b.planId}/items/bulk-discount`,
@@ -3265,13 +3687,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     // ======================================================================
     ...(
       [
-        ['get', undefined],
-        ['post', () => ({ action: 'confirm' })],
+        ['get', undefined, ''],
+        ['post', () => ({ action: 'confirm' }), ''],
+        // DX-437: «Avisarme si se libera un hueco antes» desde el enlace.
+        ['post', () => ({ wantsEarlier: true }), '/wants-earlier'],
+        // DX-469: el .ics de la cita.
+        ['get', undefined, '/calendar.ics'],
       ] as const
-    ).map(([verb, body]): IsolationCase => ({
-      name: `${verb.toUpperCase()} /public/appointment-confirmations/:token (token de A en el host de B)`,
+    ).map(([verb, body, suffix]): IsolationCase => ({
+      name: `${verb.toUpperCase()} /public/appointment-confirmations/:token${suffix} (token de A en el host de B)`,
       verb,
-      path: () => `/public/appointment-confirmations/${a.confirmationToken}`,
+      path: () =>
+        `/public/appointment-confirmations/${a.confirmationToken}${suffix}`,
       body,
       public: true,
       status: 404,
@@ -3327,6 +3754,37 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    */
   const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
     {
+      spec: 'treatment-plan-repricing.e2e-spec.ts',
+      checks:
+        'B → 404 al aplicar «Actualizar precios» al plan de A con una Idempotency-Key válida, y los precios de A no cambian (DX-379 B)',
+      routes: [
+        'POST /patients/:patientId/treatment-plans/:planId/reprice/apply',
+      ],
+    },
+    {
+      spec: 'equipment.e2e-spec.ts',
+      checks:
+        'B → 404 al leer, editar, dar de baja y registrar o anular mantenimientos del equipo de A, y la hoja de vida de A no cambia (DX-542)',
+      routes: [
+        'GET /equipment/:id',
+        'PATCH /equipment/:id',
+        'POST /equipment/:id/retire',
+        'POST /equipment/:id/maintenances',
+        'POST /equipment/:id/maintenances/:maintenanceId/void',
+      ],
+    },
+    {
+      spec: 'recall.e2e-spec.ts',
+      checks:
+        'B → 404 al leer, fijar y programar (D15) el recall del paciente de A y al registrar un contacto en el recall de A; ni los recalls de A ni los contactos cambian (DX-015, DX-015-bis)',
+      routes: [
+        'GET /patients/:id/recalls',
+        'PUT /patients/:id/recalls/:kind',
+        'POST /patients/:id/recalls/default',
+        'POST /recall/:recallId/contacts',
+      ],
+    },
+    {
       spec: 'anesthesia.e2e-spec.ts',
       checks:
         'B → 404 en la ficha del paciente de A; y en sentido inverso, A → 404 al leer la anestesia de la evolución de B, al registrar con la evolución de B y al editar el anestésico de B',
@@ -3370,6 +3828,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       spec: 'payment-methods.e2e-spec.ts',
       checks: 'B → 404 al editar (desactivar) el medio de pago de A (DX-377)',
       routes: ['PATCH /payment-methods/:id'],
+    },
+    {
+      spec: 'payment-method-adjustments.e2e-spec.ts',
+      checks:
+        'B → 404 al añadir un ajuste al medio de A y al editar el ajuste de A, sin cambiar nada en A (DX-516)',
+      routes: [
+        'POST /payment-methods/:id/adjustments',
+        'PATCH /payment-methods/:id/adjustments/:adjustmentId',
+      ],
     },
     {
       spec: 'reminder-opt-out.e2e-spec.ts',
@@ -3502,6 +3969,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: ['POST /treatment-plans/:id/split-payments'],
     },
     {
+      spec: 'receipt-settings.e2e-spec.ts',
+      checks:
+        'B → 404 al anotar la factura externa de un abono de A y A → 404 al cambiar la leyenda de una sede de B, sin cambios (DX-515)',
+      routes: [
+        'PUT /payments/:id/external-invoice-number',
+        'PUT /payment-receipts/settings/locations/:locationId',
+      ],
+    },
+    {
       spec: 'patient-credit.e2e-spec.ts',
       checks:
         'B → 404 sobre el plan, el comprobante y el paciente de A: traslado, devolución, comprobante y movimientos (DX-253)',
@@ -3591,6 +4067,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       checks: 'B → 404 al corregir la tasa manual sin usar de A (DX-375)',
       routes: ['PUT /exchange/manual-rates/:id'],
     },
+    {
+      spec: 'mfa-bis.e2e-spec.ts',
+      checks:
+        'B → 404 al ver y resetear el MFA de un miembro de A, y al revocar un dispositivo de confianza ajeno (DX-021-bis)',
+      routes: [
+        'GET /staff/:userId/mfa',
+        'POST /staff/:userId/mfa/reset',
+        'DELETE /me/mfa/trusted-devices/:id',
+      ],
+    },
   ];
 
   /** `MÉTODO /ruta` de un caso (las dos primeras palabras de su nombre). */
@@ -3674,10 +4160,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     {
       spec: 'medical-history-submissions.e2e-spec.ts',
       checks:
-        'B → 404 con el token de A en su host al abrir y al enviar el formulario (DX-099)',
+        'B → 404 con el token de A en su host al abrir, al avisar de la apertura y al enviar el formulario (DX-099, DX-424)',
       routes: [
         'GET /public/medical-history/:token',
         'POST /public/medical-history/:token',
+        'POST /public/medical-history/:token/opened',
       ],
     },
   ];

@@ -9,6 +9,7 @@ import {
   Min,
 } from 'class-validator';
 import { MAX_UPCOMING_LIMIT } from '../../application/use-cases/get-doctor-dashboard.use-case';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 // Uppercase-normalizes ISO 4217 codes before validation -- same convention
 // as CreatePaymentDto (payments, PAY-T3).
@@ -47,7 +48,7 @@ export class DashboardQueryDto {
   })
   @Transform(toUpperCase)
   @IsISO4217CurrencyCode({
-    message: 'currency must be a real ISO 4217 currency code',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency!: string;
 

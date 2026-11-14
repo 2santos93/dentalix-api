@@ -14,6 +14,7 @@ import type {
   PaymentBaseRetryFailure,
   PaymentBaseRetryRepository,
   PaymentRatePendingDay,
+  PostponeResult,
 } from '../../domain/ports/payment-base-retry-repository.port';
 import { pendingOnDayOf } from '../../domain/payment-rate-pending-day';
 
@@ -57,6 +58,7 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
         ({
           paymentId: string;
           attempts: number;
+          wakeCount: number;
           amount: Prisma.Decimal;
           currency: string;
           paidAt: Date;
@@ -67,7 +69,7 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
           hasBase: boolean;
         } & FrozenRateColumns)[]
       >`
-        SELECT r."paymentId", r."attempts",
+        SELECT r."paymentId", r."attempts", r."wakeCount",
                p."amount", p."currency", p."paidAt", p."locationId",
                p."deletedAt" IS NOT NULL AS "voided",
                p."exchangeRateCurrency", p."exchangeRateFrom",
@@ -99,6 +101,7 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
       return rows.map((r) => ({
         paymentId: r.paymentId,
         attempts: r.attempts,
+        wakeCount: r.wakeCount,
         live: !r.voided && r.targetCurrency !== null,
         amount: Number(r.amount),
         currency: r.currency,
@@ -127,29 +130,55 @@ export class PrismaPaymentBaseRetryRepository implements PaymentBaseRetryReposit
   async postpone(
     paymentId: string,
     failure: PaymentBaseRetryFailure,
-  ): Promise<void> {
+  ): Promise<PostponeResult> {
     const tenantId = this.requireTenantId();
-    await this.prisma.runWithTenant(
-      (tx) => tx.$executeRaw`
+    // DX-413: condicional. Si `wake()` despertó la fila durante el intento
+    // ("wakeCount" cambió), no se pisa: el reintento queda adelantado. Con la
+    // fila bloqueada por un wake en curso, Postgres reevalúa el WHERE al
+    // soltarse (READ COMMITTED) y tampoco aplaza.
+    return this.prisma.runWithTenant(async (tx) => {
+      const updated = await tx.$executeRaw`
         UPDATE "payment_base_retries"
            SET "attempts" = ${failure.attempts}::int,
                "lastReason" = ${failure.reason}::"PaymentBaseRetryReason",
                "nextAttemptAt" = ${NOW} + make_interval(secs => ${failure.delayMs / 1000}::float8),
                "updatedAt" = ${NOW}
          WHERE "tenantId" = ${tenantId}::uuid
-           AND "paymentId" = ${paymentId}::uuid`,
-    );
+           AND "paymentId" = ${paymentId}::uuid
+           AND "wakeCount" = ${failure.wakeCount}::int`;
+      if (updated > 0) return { postponed: true, wakeCount: null };
+      // Otra sentencia (otra instantánea): ve el wake que acaba de confirmarse.
+      const [row] = await tx.$queryRaw<{ wakeCount: number }[]>`
+        SELECT "wakeCount" FROM "payment_base_retries"
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "paymentId" = ${paymentId}::uuid`;
+      return { postponed: false, wakeCount: row?.wakeCount ?? null };
+    });
   }
 
-  wake(): Promise<number> {
+  async wake(): Promise<number> {
     const tenantId = this.requireTenantId();
-    return this.prisma.runWithTenant(
-      (tx) => tx.$executeRaw`
-        UPDATE "payment_base_retries"
-           SET "nextAttemptAt" = ${NOW}, "updatedAt" = ${NOW}
-         WHERE "tenantId" = ${tenantId}::uuid
-           AND "nextAttemptAt" > ${NOW}`,
+    // Todas las filas de la clínica anotan el despertar; solo las aplazadas
+    // se adelantan (LEAST no retrasa a las vencidas). `later` cuenta las que
+    // estaban aplazadas.
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<{ later: boolean }[]>`
+        WITH prev AS (
+          SELECT "paymentId", "nextAttemptAt" > ${NOW} AS "later"
+            FROM "payment_base_retries"
+           WHERE "tenantId" = ${tenantId}::uuid
+             FOR UPDATE
+        )
+        UPDATE "payment_base_retries" r
+           SET "wakeCount" = r."wakeCount" + 1,
+               "nextAttemptAt" = LEAST(r."nextAttemptAt", ${NOW}),
+               "updatedAt" = ${NOW}
+          FROM prev
+         WHERE r."tenantId" = ${tenantId}::uuid
+           AND r."paymentId" = prev."paymentId"
+        RETURNING prev."later"`,
     );
+    return rows.filter((r) => r.later).length;
   }
 
   async backlog(olderThanHours: number): Promise<PaymentBaseBacklog> {

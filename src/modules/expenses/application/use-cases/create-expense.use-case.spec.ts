@@ -10,6 +10,7 @@ import {
   htmlFake,
 } from '../../../../../test/support/document-fixtures';
 import { RECEIPT_TYPE_MESSAGE } from '../../domain/expense-receipt';
+import { LEGACY_PREDEFINED_CATEGORY_KEYS } from '../../domain/legacy-expense-categories';
 import {
   AMOUNT_MESSAGE,
   EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE,
@@ -53,7 +54,7 @@ const input = (
   category: 'Papelería',
   supplier: 'Papelería Luna',
   amount: 120000,
-  currency: 'COP',
+  currency: 'VES',
   invoiceDate: '2026-10-20',
   ...patch,
 });
@@ -86,7 +87,7 @@ describe('alta de un gasto (DX-274)', () => {
       supplier: 'Papelería Luna',
       description: 'Resmas',
       amount: 120000,
-      currency: 'COP',
+      currency: 'VES',
       invoiceDate: '2026-10-20',
       dueDate: '2026-11-20',
       paidAmount: 0,
@@ -113,6 +114,19 @@ describe('alta de un gasto (DX-274)', () => {
       supplier: 'Dental Pro',
       currency: 'USD',
     });
+  });
+
+  it('DX-274-bis: el nombre anterior de una predefinida guarda la actual; una propia con ese nombre (solo por SQL) sigue siendo suya', async () => {
+    const [oldRent, oldCleaning] = [...LEGACY_PREDEFINED_CATEGORY_KEYS.keys()];
+    expect(
+      (await run(input({ category: oldRent.toUpperCase() }))).category,
+    ).toBe('Alquiler');
+    expect((await run(input({ category: oldCleaning }))).category).toBe(
+      'Limpieza y cafetería',
+    );
+    const own = oldRent.charAt(0).toUpperCase() + oldRent.slice(1);
+    kit.categories.seed(own);
+    expect((await run(input({ category: oldRent }))).category).toBe(own);
   });
 
   it('acepta una categoría propia activa y rechaza una desconocida o retirada', async () => {
@@ -200,10 +214,21 @@ describe('alta de un gasto (DX-274)', () => {
       expect(paid.payments[0].paidOn).toBe('2026-10-21');
     });
 
+    it('DX-517-quater: el tope del pago inicial dice el importe con el texto propio de la moneda', async () => {
+      kit.repo.currencyTexts = { VES: 'Bs.' };
+      await expect(
+        run(input({ payment: { amount: 120001, method: 'CARD' } })),
+      ).rejects.toThrow(
+        'El pago supera lo pendiente del gasto (Bs.\u00a0120.000,00).',
+      );
+    });
+
     it('no admite un pago mayor que el gasto ni con día futuro', async () => {
       await expect(
         run(input({ payment: { amount: 120001, method: 'CARD' } })),
-      ).rejects.toThrow('El pago supera lo pendiente del gasto (120.000 COP).');
+      ).rejects.toThrow(
+        'El pago supera lo pendiente del gasto (VES\u00a0120.000,00).',
+      );
       await expect(
         run(
           input({

@@ -70,10 +70,10 @@ describe('ventana del acumulado del paciente (DX-418)', () => {
     expect(isInDoseWindow(new Date(w.to.getTime() + 1), w)).toBe(false);
     expect(isInDoseWindow(new Date(AT.getTime() - 25 * HOUR), w)).toBe(false);
     // No es el día civil: las 23:30 y las 00:30 cuentan juntas.
-    const lateNight = new Date('2026-10-30T23:30:00-05:00');
+    const lateNight = new Date('2026-10-30T23:30:00-04:00');
     expect(
       isInDoseWindow(
-        new Date('2026-10-31T00:30:00-05:00'),
+        new Date('2026-10-31T00:30:00-04:00'),
         doseWindowAround(lateNight),
       ),
     ).toBe(true);

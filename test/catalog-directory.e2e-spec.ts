@@ -2,13 +2,13 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
-import { resetDatabase } from './support/e2e-fixtures';
+import { loginAs, resetDatabase, seedMember } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -33,12 +33,14 @@ interface CatalogItemBody {
   kind: 'DIAGNOSIS' | 'PROCEDURE';
   active: boolean;
   allowDiscount: boolean;
+  catalogCurrency?: string | null;
 }
 interface DirectoryBody {
   items: CatalogItemBody[];
   total: number;
   page: number;
   pageSize: number;
+  catalogCurrency: string | null;
 }
 
 // `resetDatabase` vacía todas las tablas de clínica: borrar a mano en orden de
@@ -71,7 +73,7 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
 
     await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clínica Catálogo',
         subdomain: SUBDOMAIN,
         email: 'admin@catalogo.test',
@@ -301,5 +303,61 @@ describe('Catálogo · GET /catalog/items/directory (e2e)', () => {
       })
       .expect(201);
     expect((created.body as CatalogItemBody).allowDiscount).toBe(false);
+  });
+  // DX-502-ter: la moneda del catálogo la ven todos los roles que leen el
+  // catálogo, sin pasar por /clinic/settings (solo ADMIN).
+  it('DX-502-ter: todos los roles lectores ven la moneda fijada; /clinic/settings sigue cerrada', async () => {
+    const tenant = await raw.tenant.findUniqueOrThrow({
+      where: { subdomain: SUBDOMAIN },
+      select: { id: true },
+    });
+    const clinic = {
+      tenantId: tenant.id,
+      adminUserId: '',
+      subdomain: SUBDOMAIN,
+      host,
+      adminToken: token,
+    };
+    const dentist = await seedMember(raw, clinic, ClinicRole.DENTIST);
+    const assistant = await seedMember(raw, clinic, ClinicRole.ASSISTANT);
+    const tokens = [
+      token,
+      await loginAs(app, host, dentist.email),
+      await loginAs(app, host, assistant.email),
+    ];
+    const get = (path: string, t: string) =>
+      request(app.getHttpServer())
+        .get(`/api/v1${path}`)
+        .set('X-Tenant-Host', host)
+        .set('Authorization', `Bearer ${t}`);
+
+    // Sedes en la moneda de Caracas (una sola): la común, sin fijar.
+    for (const t of tokens) {
+      const dir = await get('/catalog/items/directory', t).expect(200);
+      expect((dir.body as DirectoryBody).catalogCurrency).toBe('VES');
+    }
+
+    // Fijada en USD: manda sobre la de las sedes, para todos.
+    await raw.tenant.update({
+      where: { id: tenant.id },
+      data: { catalogCurrency: 'USD' },
+    });
+    try {
+      for (const t of tokens) {
+        const dir = await get('/catalog/items/directory', t).expect(200);
+        expect((dir.body as DirectoryBody).catalogCurrency).toBe('USD');
+        const list = await get('/catalog/items?kind=PROCEDURE', t).expect(200);
+        const items = list.body as CatalogItemBody[];
+        expect(items.length).toBeGreaterThan(0);
+        expect(items.every((i) => i.catalogCurrency === 'USD')).toBe(true);
+      }
+      await get('/clinic/settings', tokens[1]).expect(403);
+      await get('/clinic/settings', tokens[2]).expect(403);
+    } finally {
+      await raw.tenant.update({
+        where: { id: tenant.id },
+        data: { catalogCurrency: null },
+      });
+    }
   });
 });

@@ -51,7 +51,7 @@ export class AgingCurrencyDto {
 
   @ApiProperty({
     description:
-      'Saldo a favor (abonos de más o en otra moneda). Nunca se resta de los tramos',
+      'Saldo a favor (abonos de más, convertidos a la moneda del plan como en el estado de cuenta, DX-472-bis). Nunca se resta de los tramos',
   })
   credit!: number;
 
@@ -73,6 +73,18 @@ export class AgingCurrencyDto {
 
   @ApiProperty({ type: AgingNextInstallmentDto, nullable: true })
   nextInstallment!: AgingNextInstallmentDto | null;
+
+  @ApiProperty({
+    description:
+      'DX-472-ter: abonos en otra moneda sin contar en los planes de ESTA moneda (sin tasa o sin respuesta del proveedor); el `paymentsWithoutRateCount` de la fila, por moneda',
+  })
+  paymentsWithoutRateCount!: number;
+
+  @ApiProperty({
+    description:
+      'DX-472-ter: el proveedor de tasas no respondió a tiempo para algún plan de esta moneda',
+  })
+  rateProviderTimedOut!: boolean;
 }
 
 export class AgingPatientDto {
@@ -179,6 +191,18 @@ export class AgingRowDto {
   ageApproximate!: boolean;
 
   @ApiProperty({
+    description:
+      'DX-472-bis: abonos en otra moneda que no suman por falta de tasa (o porque el proveedor no respondió): el saldo de la fila está incompleto',
+  })
+  paymentsWithoutRateCount!: number;
+
+  @ApiProperty({
+    description:
+      'DX-472-bis: el proveedor de tasas no respondió a tiempo para algún abono de la fila; esa deuda no se da por vencida (va a `current`) hasta que responda',
+  })
+  rateProviderTimedOut!: boolean;
+
+  @ApiProperty({
     type: [AgingCurrencyDto],
     description: 'Una entrada por moneda con deuda o saldo a favor',
   })
@@ -278,11 +302,29 @@ export class ReceivablesAgingPageDto {
     description: 'Por moneda, de TODAS las filas filtradas (no solo la página)',
   })
   totals!: AgingTotalDto[];
+
+  @ApiProperty({
+    description:
+      'DX-472-bis: Σ `paymentsWithoutRateCount` de TODAS las filas filtradas',
+  })
+  paymentsWithoutRateCount!: number;
+
+  @ApiProperty({
+    description:
+      'DX-472-bis: el proveedor de tasas no respondió a tiempo para alguna fila filtrada: cifras incompletas; volver a pedirla las completa',
+  })
+  rateProviderTimedOut!: boolean;
 }
 
 // GET /receivables/aging/summary (Inicio, I1): la cabecera de la cartera sin
 // filas de pacientes.
 export class ReceivablesAgingSummaryDto extends PickType(
   ReceivablesAgingPageDto,
-  ['asOf', 'scope', 'totals'] as const,
+  [
+    'asOf',
+    'scope',
+    'totals',
+    'paymentsWithoutRateCount',
+    'rateProviderTimedOut',
+  ] as const,
 ) {}

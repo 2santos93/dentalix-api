@@ -15,9 +15,19 @@ export const DUPLICATE_LEAD_MESSAGE =
 export const ENABLED_WITHOUT_LEADS_MESSAGE =
   'Para activar los recordatorios elige al menos una antelación.';
 
+/** DX-469: alarma del evento «Añadir a mi calendario» (0 = sin alarma). */
+import {
+  DEFAULT_CALENDAR_ALARM_HOURS,
+  MAX_CALENDAR_ALARM_HOURS,
+} from '../../../shared/calendar/appointment-calendar';
+export { DEFAULT_CALENDAR_ALARM_HOURS, MAX_CALENDAR_ALARM_HOURS };
+export const CALENDAR_ALARM_RANGE_MESSAGE = `La alarma del calendario debe ser de 0 a ${MAX_CALENDAR_ALARM_HOURS} horas antes (0 la quita).`;
+
 export interface ReminderSettingsInput {
   enabled: boolean;
   leadHours: number[];
+  /** DX-469: sin ella, se conserva la que tenía la sede (24 si no tenía). */
+  calendarAlarmHours?: number;
 }
 
 export function leadHoursError(leadHours: number[]): string | null {
@@ -35,6 +45,13 @@ export function leadHoursError(leadHours: number[]): string | null {
 export function settingsError(input: ReminderSettingsInput): string | null {
   const error = leadHoursError(input.leadHours);
   if (error) return error;
+  const alarm = input.calendarAlarmHours;
+  if (
+    alarm !== undefined &&
+    (!Number.isInteger(alarm) || alarm < 0 || alarm > MAX_CALENDAR_ALARM_HOURS)
+  ) {
+    return CALENDAR_ALARM_RANGE_MESSAGE;
+  }
   return input.enabled && input.leadHours.length === 0
     ? ENABLED_WITHOUT_LEADS_MESSAGE
     : null;

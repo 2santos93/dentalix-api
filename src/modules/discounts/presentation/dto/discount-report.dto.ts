@@ -1,3 +1,4 @@
+import { ReferenceRateDto } from './reference-rate.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsUUID, Matches, Max, Min } from 'class-validator';
@@ -95,6 +96,18 @@ export class DiscountReportTotalDto {
   percentOfGross!: number;
 }
 
+/** DX-513-ter: líneas de convenio sin medir de una moneda, sin importe. */
+export class AgreementUnmeasuredTotalDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({
+    description:
+      'Líneas de convenio «sin referencia comparable» en esta moneda (no se suman en `agreementTotals`)',
+  })
+  items!: number;
+}
+
 /** SEC-047: rebajas de convenio de una moneda, aparte de los totales de DX-204. */
 export class AgreementReductionTotalDto {
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
@@ -151,16 +164,70 @@ export class DiscountReportItemDto {
     type: Number,
     nullable: true,
     description:
-      'SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre)',
+      'SEC-041: precio de catálogo al dar de alta el ítem (null = ítem libre). DX-513-bis: en SU moneda (`referenceCurrency`), que puede no ser la del plan',
   })
   catalogPrice!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502: moneda de `basePrice` (la del catálogo al dar de alta el ítem); null si no se supo. En un ítem de lista no es la de `catalogPrice`',
+  })
+  catalogCurrency!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-513-bis: moneda de `catalogPrice` (la del plan para las listas, la del catálogo para el resto); null si no se sabe o el ítem es libre',
+  })
+  referenceCurrency!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `catalogPrice` en la moneda del plan, congelado al escribir el ítem (convertido con `rate` si estaba en otra moneda): la rebaja se mide frente a él. Null en los ítems anteriores sin foto (se miden como en DX-513)',
+  })
+  referencePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `basePrice` en la moneda del plan, congelado con la referencia (la rebaja de convenio se mide con él)',
+  })
+  basePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-bis: la tasa congelada (de la moneda del catálogo a la del plan) con que se convirtió la referencia; null si no hizo falta. El informe nunca convierte al consultar. DX-513-ter: siempre null en las listas, cuya referencia ya está en la moneda del plan: su tasa va en `baseRate`',
+  })
+  rate!: ReferenceRateDto | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-ter: en una lista de convenio con el catálogo en otra moneda, la tasa del día (de `catalogCurrency` a la del plan) con que se convirtió `basePrice` a `basePriceInPlan` al dar de alta el ítem; null si no',
+  })
+  baseRate!: ReferenceRateDto | null;
+
+  @ApiProperty({
+    description:
+      'DX-513-ter: ítem de convenio con el catálogo en otra moneda conocida y sin la base congelada en la moneda del plan (no había tasa al darlo de alta, o es anterior), o lista de convenio con la moneda del catálogo desconocida (NULL; DX-513-quater): su rebaja de convenio no se puede medir sin convertir al consultar. Se señala «sin referencia comparable»: `agreementReduction` es 0 y no suma en `agreementTotals`',
+  })
+  agreementUnmeasured!: boolean;
 
   @ApiProperty({ description: 'Precio pactado del ítem' })
   price!: number;
 
   @ApiProperty({
     description:
-      'SEC-041: rebaja del precio frente al de catálogo (0 si no la hay)',
+      'SEC-041: rebaja del precio frente al de catálogo (0 si no la hay), en la moneda del plan. DX-513-bis: frente a `referencePriceInPlan` (la referencia convertida y congelada) si el ítem la tiene; en un ítem anterior sin ella, DX-513: 0 si la referencia está en otra moneda conocida; con la moneda del catálogo desconocida cuenta',
   })
   priceReduction!: number;
 
@@ -239,7 +306,7 @@ export class DiscountReportItemDto {
 
   @ApiProperty({
     description:
-      'SEC-047: rebaja de convenio (precio de catálogo − precio del convenio; 0 sin convenio). Aparte del descuento total',
+      'SEC-047: rebaja de convenio (precio de catálogo − precio del convenio; 0 sin convenio ni si `agreementUnmeasured`). Aparte del descuento total',
   })
   agreementReduction!: number;
 
@@ -313,6 +380,13 @@ export class DiscountReportDto {
       'SEC-047: rebajas de convenio por moneda. Van aparte: `totals` solo cuenta los descuentos (como en DX-204)',
   })
   agreementTotals!: AgreementReductionTotalDto[];
+
+  @ApiProperty({
+    type: [AgreementUnmeasuredTotalDto],
+    description:
+      'DX-513-ter: líneas de convenio sin medir por moneda (catálogo en otra moneda sin la base congelada, o lista de convenio con la moneda del catálogo desconocida), sin importe. Aparte de `agreementTotals`',
+  })
+  agreementUnmeasuredTotals!: AgreementUnmeasuredTotalDto[];
 
   @ApiProperty({
     type: [DiscountReportItemDto],

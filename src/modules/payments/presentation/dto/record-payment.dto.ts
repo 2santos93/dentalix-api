@@ -4,9 +4,7 @@ import {
   IsDateString,
   IsEnum,
   IsISO4217CurrencyCode,
-  IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   IsUUID,
   MaxLength,
@@ -19,9 +17,10 @@ import {
 } from '../../../payment-methods/domain/payment-method-rules';
 import { PaymentMethod } from '@prisma/client';
 import {
-  IsMoney,
+  IsPositiveMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 // Uppercase-normalizes ISO 4217 codes, same convention as ConvertQueryDto
 // (exchange module) / the deleted CreateSaleDto -- snapshots/rates are always
@@ -40,18 +39,16 @@ function toUpperCase({ value }: { value: unknown }): unknown {
 export class RecordPaymentDto {
   @ApiProperty({
     example: 100,
-    description: 'Must be a finite number > 0, with at most 2 decimal places',
+    description: 'Número finito mayor que 0, con como mucho 2 decimales.',
     maximum: MONEY_MAX,
   })
-  @IsNumber()
-  @IsPositive()
-  @IsMoney()
+  @IsPositiveMoney()
   amount!: number;
 
   @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
   @Transform(toUpperCase)
   @IsISO4217CurrencyCode({
-    message: 'currency must be a real ISO 4217 currency code',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency!: string;
 
@@ -64,8 +61,10 @@ export class RecordPaymentDto {
       'solo el día civil `YYYY-MM-DD`, que se guarda al mediodía de la zona ' +
       'horaria de la sede del abono (DX-097). La caja y el dashboard lo ' +
       'cuentan en su día civil en la zona de la sede. GET .../balance busca ' +
-      'la tasa de cambio por su fecha UTC. DX-054: 400 si va a más de 24 h ' +
-      'en el futuro (un día civil cuenta desde su primer instante en UTC+14); ' +
+      'la tasa de cambio por su fecha UTC. DX-075: un día civil posterior a ' +
+      'hoy en la zona de la sede es 400 («La fecha del abono no puede ser ' +
+      'posterior a hoy en la sede.»). DX-054: un instante a más de 24 h en ' +
+      'el futuro es 400 (también un día civil si la sede no tiene zona); ' +
       'las fechas pasadas no tienen límite. También en el abono al saldo migrado.',
   })
   @IsDateString()
@@ -118,6 +117,17 @@ export class RecordPaymentDto {
     message: DUPLICATE_REFERENCE_REASON_TOO_LONG_MESSAGE,
   })
   duplicateReferenceReason?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-389: el `uploadId` de `POST /payments/proofs/upload-url` (el comprobante ya subido al almacén). ' +
+      'Si el medio «Pide comprobante» = REQUIRED y no llega: 400; si es NONE y llega: 400. ' +
+      'Se comprueba (tamaño, huella y tipo por contenido: JPG, PNG, WebP o PDF de hasta 10 MB) al registrar el abono.',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'La subida del comprobante no es válida.' })
+  proofUploadId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

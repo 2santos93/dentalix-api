@@ -20,6 +20,8 @@ import type {
   ScheduleBlockScope,
   UpdateScheduleBlockRepoInput,
 } from '../../domain/ports/schedule-block-repository.port';
+import { lockAgenda } from '../agenda-lock';
+import { AffectedAppointmentsRaceError } from '../../domain/schedule-block-rules';
 
 type PrismaScheduleBlock = Prisma.ScheduleBlockGetPayload<
   Record<string, never>
@@ -64,6 +66,40 @@ function affectingWhere(
 }
 
 /** Las citas que caen bajo el alcance de un bloqueo. */
+/** DX-149: el candado que comparte el bloqueo con las citas a las que afecta. */
+function blockLockScope(scope: ScheduleBlockScope): {
+  providerId: string | null;
+  locationId: string | null;
+} {
+  return scope.providerId !== null
+    ? { providerId: scope.providerId, locationId: null }
+    : { providerId: null, locationId: scope.locationId };
+}
+
+/** DX-149: las citas vivas bajo el bloqueo, dentro de su transacción. */
+function countAffectedIn(
+  tx: Prisma.TransactionClient,
+  scope: ScheduleBlockScope,
+  start: Date,
+  end: Date,
+): Promise<number> {
+  return tx.appointment.count({
+    where: {
+      ...affectedAppointmentsWhere(scope),
+      deletedAt: null,
+      status: {
+        in: [
+          AppointmentStatus.SCHEDULED,
+          AppointmentStatus.CONFIRMED,
+          ...IN_CLINIC_STATUSES,
+        ],
+      },
+      start: { lt: end },
+      end: { gt: start },
+    },
+  });
+}
+
 function affectedAppointmentsWhere(
   scope: ScheduleBlockScope,
 ): Prisma.AppointmentWhereInput {
@@ -145,8 +181,14 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
 
   async create(input: CreateScheduleBlockRepoInput): Promise<ScheduleBlock> {
     const tenantId = this.requireTenantId();
-    const row = await this.prisma.runWithTenant((tx) =>
-      tx.scheduleBlock.create({
+    const row = await this.prisma.runWithTenant(async (tx) => {
+      // DX-149: con el candado de la agenda, una cita creada a la vez ya se ve.
+      await lockAgenda(tx, tenantId, blockLockScope(input));
+      if (input.recheckAffected) {
+        const total = await countAffectedIn(tx, input, input.start, input.end);
+        if (total > 0) throw new AffectedAppointmentsRaceError(total);
+      }
+      return tx.scheduleBlock.create({
         data: {
           tenantId,
           providerId: input.providerId,
@@ -161,19 +203,39 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
           createdById: input.createdById,
           updatedById: input.createdById,
         },
-      }),
-    );
+      });
+    });
     return mapToEntity(row);
   }
 
-  /** Por `id` bajo RLS; el use-case ya comprobó que existe y está vivo. */
+  /**
+   * Por `id` bajo RLS, solo si sigue vivo (DX-161): si otra petición lo retiró
+   * entre la lectura del use-case y aquí, `null` y no se toca.
+   */
   async update(
     id: string,
     patch: UpdateScheduleBlockRepoInput,
-  ): Promise<ScheduleBlock> {
-    const row = await this.prisma.runWithTenant((tx) =>
-      tx.scheduleBlock.update({
-        where: { id },
+  ): Promise<ScheduleBlock | null> {
+    const tenantId = this.requireTenantId();
+    const row = await this.prisma.runWithTenant(async (tx) => {
+      const current = await tx.scheduleBlock.findFirst({
+        where: { id, deletedAt: null },
+        select: { providerId: true, locationId: true, start: true, end: true },
+      });
+      if (!current) return null;
+      // DX-149: con el candado de la agenda, una cita creada a la vez ya se ve.
+      await lockAgenda(tx, tenantId, blockLockScope(current));
+      if (patch.recheckAffected) {
+        const total = await countAffectedIn(
+          tx,
+          current,
+          patch.start ?? current.start,
+          patch.end ?? current.end,
+        );
+        if (total > 0) throw new AffectedAppointmentsRaceError(total);
+      }
+      const { count } = await tx.scheduleBlock.updateMany({
+        where: { id, deletedAt: null },
         data: {
           start: patch.start,
           end: patch.end,
@@ -184,18 +246,27 @@ export class PrismaScheduleBlockRepository implements ScheduleBlockRepository {
           releaseAtMinute: patch.releaseAtMinute,
           updatedById: patch.updatedById,
         },
-      }),
-    );
-    return mapToEntity(row);
+      });
+      return count === 0
+        ? null
+        : tx.scheduleBlock.findUnique({ where: { id } });
+    });
+    return row ? mapToEntity(row) : null;
   }
 
-  async softDelete(id: string, deletedById: string): Promise<void> {
-    await this.prisma.runWithTenant((tx) =>
-      tx.scheduleBlock.update({
-        where: { id },
+  /**
+   * Borrado lógico, solo si sigue vivo (DX-161): de dos borrados a la vez, el
+   * segundo no pisa `updatedById` (la auditoría conserva al primer autor). `false`
+   * si ya estaba retirado.
+   */
+  async softDelete(id: string, deletedById: string): Promise<boolean> {
+    const { count } = await this.prisma.runWithTenant((tx) =>
+      tx.scheduleBlock.updateMany({
+        where: { id, deletedAt: null },
         data: { deletedAt: new Date(), updatedById: deletedById },
       }),
     );
+    return count > 0;
   }
 
   findAffecting(query: AffectingBlocksQuery): Promise<AffectingBlocks> {

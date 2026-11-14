@@ -1,9 +1,19 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
+import {
+  CreateClinicalEntryUseCase,
+  ENTRY_RECALL_INTERVAL_MESSAGE,
+} from './create-clinical-entry.use-case';
 import { CreateClinicalEntryRepoInput } from '../../domain/ports/clinical-entry-repository.port';
-import { InMemoryClinicalEntryRepository } from '../__fixtures__/in-memory-clinical-entries';
+import {
+  InMemoryClinicalEntryRepository,
+  InMemoryClinicalEntrySettingsRepository,
+} from '../__fixtures__/in-memory-clinical-entries';
 import { InMemoryClinicalNoteTemplateRepository } from '../../../clinical-note-templates/application/__fixtures__/in-memory-clinical-note-templates';
 
 /** Alta con la clínica de los tests: paciente p1 y sin plantillas. */
@@ -13,6 +23,7 @@ function useCase(repo: InMemoryClinicalEntryRepository) {
     patientsInClinic('p1'),
     new InMemoryClinicalNoteTemplateRepository(),
     new TenantContextService(),
+    new InMemoryClinicalEntrySettingsRepository(),
   );
 }
 
@@ -119,4 +130,64 @@ describe('CreateClinicalEntryUseCase — pertenencia del paciente (SEC-004)', ()
     ).rejects.toThrow(new NotFoundException('Paciente no encontrado'));
     expect(repo.rows).toHaveLength(0);
   });
+});
+
+describe('CreateClinicalEntryUseCase — recall en la evolución (DX-015-bis, D18)', () => {
+  const TYPE = '7a1f0c2e-1111-4111-8111-111111111111';
+
+  it('pasa el recall y el contexto de auditoría al alta, y devuelve sus recallUpdates', async () => {
+    const repo = new InMemoryClinicalEntryRepository();
+    let captured: CreateClinicalEntryRepoInput | undefined;
+    const originalCreate = repo.create.bind(repo);
+    repo.create = (input) => {
+      captured = input;
+      return originalCreate(input);
+    };
+    const audit = {
+      tenantId: 't1',
+      locationId: null,
+      actor: { userId: 'user-1', role: null },
+      requestId: 'req-1',
+      ip: null,
+      userAgent: null,
+    };
+    const result = await useCase(repo).execute(
+      'p1',
+      { notes: 'Control', recall: { recallTypeId: TYPE, intervalMonths: 3 } },
+      'user-1',
+      audit,
+    );
+    expect(captured?.recall).toEqual({ recallTypeId: TYPE, intervalMonths: 3 });
+    expect(captured?.audit).toBe(audit);
+    expect(result.recallUpdates).toEqual([
+      expect.objectContaining({ recallTypeId: TYPE, deactivated: false }),
+    ]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('sin recall: recallUpdates vacío y nada que pedir al recall', async () => {
+    const repo = new InMemoryClinicalEntryRepository();
+    const result = await useCase(repo).execute(
+      'p1',
+      { notes: 'Control' },
+      'user-1',
+    );
+    expect(result.recallUpdates).toEqual([]);
+    expect(repo.recallRequests).toEqual([]);
+  });
+
+  it.each([0, 37, 2.5, Number.NaN])(
+    'intervalo %p fuera de 1–36: 400 sin guardar la evolución',
+    async (intervalMonths) => {
+      const repo = new InMemoryClinicalEntryRepository();
+      await expect(
+        useCase(repo).execute(
+          'p1',
+          { notes: 'Control', recall: { recallTypeId: TYPE, intervalMonths } },
+          'user-1',
+        ),
+      ).rejects.toThrow(new BadRequestException(ENTRY_RECALL_INTERVAL_MESSAGE));
+      expect(repo.rows).toHaveLength(0);
+    },
+  );
 });

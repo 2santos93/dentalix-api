@@ -1,13 +1,17 @@
+import { PLAN_STATUS_LABELS } from '../../../treatment-plans/domain/plan-status-machine';
+import type { QuoteValidity } from '../../../treatment-plans/domain/quote-validity';
 import type {
   ClinicRole,
   ConsentSignerType,
   ContactChannel,
   DocumentType,
+  Prisma,
   SignatureRequestChannel,
   SignatureRequestType,
   TreatmentPlanStatus,
 } from '@prisma/client';
 import type { NoticeResponsible } from '../../../patients/domain/communication/notice-recipient';
+import type { MajorityReviewRecord } from '../../../patients/domain/responsible-parties/majority-review';
 import type { PlanQuoteSource } from '../../../treatment-plans/domain/ports/plan-quote-repository.port';
 import type {
   PublicSignatureContext,
@@ -34,6 +38,8 @@ export interface SignatureRecipientContext {
       docNumber: string | null;
     };
   })[];
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
   /** Mayoría de edad de la clínica (DX-328). */
   majorityAge: number;
   /** Zona de la sede activa o, sin ella, de la principal: da «hoy». */
@@ -55,7 +61,33 @@ export interface SignaturePlanOption {
   createdAt: Date;
 }
 
+/** Lo que se hace además en la transacción de `create`. */
+export interface CreateSignatureRequestOptions {
+  /**
+   * DX-379 (M-3): enviar a firmar un presupuesto (BUDGET) es emitirlo. Si el
+   * plan aún no tiene validez guardada, se guarda esta (la de la foto) en la
+   * MISMA transacción, solo si sigue «Presentado» y sin aceptar (si no, 409
+   * `budgetNotPresentedMessage`); si otro la guardó entre medias y es otra,
+   * 409 `SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE`. En los dos casos no se
+   * crea nada.
+   */
+  planQuoteValidity?: QuoteValidity;
+}
+
+/** 409: solo un presupuesto «Presentado» (y sin aceptar) se envía a aceptar. */
+export function budgetNotPresentedMessage(status: TreatmentPlanStatus): string {
+  return `Solo se envía a aceptar un presupuesto «Presentado»: este está «${PLAN_STATUS_LABELS[status]}».`;
+}
+
+export const SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE =
+  'La validez del presupuesto cambió mientras se enviaba: vuelve a enviarlo.';
+
 export interface CreateSignatureRequestRepoInput {
+  /**
+   * DX-149-ter: id elegido por quien llama, para que el email del enlace
+   * (preparado antes de abrir la transacción) lleve ya su referencia.
+   */
+  id?: string;
   locationId: string;
   patientId: string;
   type: SignatureRequestType;
@@ -229,9 +261,18 @@ export interface SignatureRequestRepository {
    * paciente y plantilla (o, BUDGET, del mismo plan) que aún esperaban al
    * paciente. Devuelve el id y los
    * ids anulados (para cancelar sus emails pendientes).
+   *
+   * DX-149-ter: `enqueue` corre AL FINAL de esa misma transacción con los
+   * ids anulados (cancela sus emails pendientes y encola el del enlace). Si
+   * lanza, nada queda: ni la solicitud nueva ni la anulación de la anterior.
    */
   create(
     input: CreateSignatureRequestRepoInput,
+    enqueue?: (
+      tx: Prisma.TransactionClient,
+      supersededIds: string[],
+    ) => Promise<void>,
+    options?: CreateSignatureRequestOptions,
   ): Promise<{ id: string; supersededIds: string[] }>;
 
   /** Del paciente, las más recientes primero. */
@@ -270,11 +311,21 @@ export interface SignatureRequestRepository {
    * intentos sobre un mismo enlace: nunca se evalúan más de 5 códigos.
    * `null` si la fila no existe (o es de otra clínica) o, DX-461, si el
    * paciente está archivado.
+   *
+   * `dbNow` (DX-425) es la hora de la BD en esta transacción
+   * (`transaction_timestamp()`, a milisegundos): la MISMA con la que el
+   * trigger `signature_requests_evidence_clock` sellará apertura, envío del
+   * código, verificación, bloqueo y firma. Las horas de evidencia que `decide`
+   * escribe (y los hashes que las sellan) salen de aquí, no del reloj de la
+   * app (que sigue mandando en la caducidad).
    */
   withLockedRequest<T>(
     id: string,
     evidence: PublicRequestEvidence,
-    decide: (request: SignatureRequestRecord) => {
+    decide: (
+      request: SignatureRequestRecord,
+      dbNow: Date,
+    ) => {
       write: LockedWrite | null;
       result: T;
     },

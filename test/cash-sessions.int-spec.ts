@@ -6,7 +6,7 @@ import { recordVoidAdjustment } from '../src/modules/cash-sessions/infrastructur
 import { PrismaCashSessionRepository } from '../src/modules/cash-sessions/infrastructure/prisma-cash-session.repository';
 import { deferred, waitFor } from './support/wait-for';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -53,17 +53,17 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const other = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede Norte',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const patient = await raw.patient.create({
@@ -74,7 +74,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
       tenantId,
       patientId: patient.id,
       status: 'ACCEPTED',
-      currency: 'COP',
+      currency: 'VES',
     },
   });
   return {
@@ -155,7 +155,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         data: {
           tenantId: a.tenantId,
           sessionId: session.id,
-          currency: 'COP',
+          currency: 'VES',
           amount: float,
         },
       });
@@ -181,7 +181,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         data: {
           tenantId: a.tenantId,
           closingId: closing.id,
-          currency: 'COP',
+          currency: 'VES',
           method: 'CASH',
           opening: 50_000,
           expected: 50_000,
@@ -207,7 +207,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
       treatmentPlanId: clinic.planId,
       patientId: clinic.patientId,
       amount: 10_000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date(),
       method: 'CASH',
       createdById: userId,
@@ -365,7 +365,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
           data: {
             tenantId: a.tenantId,
             closingId: closing.id,
-            currency: 'COP',
+            currency: 'VES',
             method: 'CASH',
             opening: 0,
             expected: 100,
@@ -439,6 +439,85 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         }),
       ),
     ).rejects.toThrow(/reabre con motivo/);
+  });
+
+  it('SEC-043: «diferencia sin justificar» solo en un cierre a ciegas, con diferencia y sin motivo', async () => {
+    const session = await open();
+    const closing = (
+      extra: Partial<Prisma.CashSessionClosingUncheckedCreateInput>,
+    ) =>
+      asA((tx) =>
+        tx.cashSessionClosing.create({
+          data: {
+            tenantId: a.tenantId,
+            sessionId: session.id,
+            sequence: 1,
+            closedById: userId,
+            blind: true,
+            hasDifference: true,
+            unjustifiedDifference: true,
+            suggestedLockDate: new Date('2026-10-17T00:00:00.000Z'),
+            ...extra,
+          },
+        }),
+      );
+    // Sin ciego, sin diferencia o con motivo, la marca no vale.
+    await expect(closing({ blind: false })).rejects.toThrow(/check constraint/);
+    await expect(closing({ hasDifference: false })).rejects.toThrow(
+      /check constraint/,
+    );
+    await expect(
+      closing({ differenceReason: 'Faltó el cambio' }),
+    ).rejects.toThrow(/check constraint/);
+    // Con diferencia y sin motivo ni marca, sigue siendo inválido (la regla
+    // de DX-027 no se relaja para nadie más).
+    await expect(closing({ unjustifiedDifference: false })).rejects.toThrow(
+      /check constraint/,
+    );
+    const saved = await asA(async (tx) => {
+      const row = await tx.cashSessionClosing.create({
+        data: {
+          tenantId: a.tenantId,
+          sessionId: session.id,
+          sequence: 1,
+          closedById: userId,
+          blind: true,
+          hasDifference: true,
+          unjustifiedDifference: true,
+          suggestedLockDate: new Date('2026-10-17T00:00:00.000Z'),
+        },
+      });
+      await tx.cashSessionClosingLine.create({
+        data: {
+          tenantId: a.tenantId,
+          closingId: row.id,
+          currency: 'VES',
+          method: 'CASH',
+          opening: 50_000,
+          expected: 50_000,
+          counted: 49_000,
+          difference: -1_000,
+        },
+      });
+      await tx.cashSession.update({
+        where: { id: session.id },
+        data: { status: 'CLOSED', closedById: userId },
+      });
+      return row;
+    });
+    expect(saved).toMatchObject({
+      unjustifiedDifference: true,
+      differenceReason: null,
+    });
+    // Inalterable como cualquier cierre: la marca no se quita.
+    await expect(
+      asA((tx) =>
+        tx.cashSessionClosing.update({
+          where: { id: saved.id },
+          data: { unjustifiedDifference: false },
+        }),
+      ),
+    ).rejects.toThrow(IMMUTABLE);
   });
 
   it('la reapertura deja su fila con motivo y el siguiente cierre es la vuelta 2', async () => {
@@ -532,7 +611,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
       kind: 'VOID',
       paymentId: paid.id,
       originalSessionId: closed.id,
-      currency: 'COP',
+      currency: 'VES',
       method: 'CASH',
       amount: -10_000,
       createdById: userId,
@@ -623,7 +702,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
   });
   it('abrir durante la anulación de un abono de caja cerrada recoge el VOID', async () => {
     const location = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: a.tenantId,
         name: 'Sede carrera VOID cerrado',
       }),
@@ -743,7 +822,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
   });
   it('abrir mientras se anula un abono tardío pendiente recoge juntos el positivo y su compensación', async () => {
     const location = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: a.tenantId,
         name: 'Sede carrera de ajustes',
       }),
@@ -757,7 +836,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         locationId: location.id,
         paymentId: paid.id,
         kind: 'LATE_PAYMENT',
-        currency: 'COP',
+        currency: 'VES',
         method: 'CASH',
         amount: paid.amount,
         createdById: userId,
@@ -865,7 +944,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
         repo.close(session.id, {}, otherUserId, ({ expected, blind }) => {
           expect(expected).toEqual([
             expect.objectContaining({
-              currency: 'COP',
+              currency: 'VES',
               method: 'CASH',
               expectedCents: 0,
               adjustmentsCents: 0,
@@ -879,6 +958,7 @@ describe('caja por turno: tablas, RLS e inmutabilidad (int, DX-027)', () => {
             })),
             hasDifference: false,
             differenceReason: null,
+            unjustifiedDifference: false,
             notes: null,
             blind,
             suggestedLockDate: '2026-10-19',

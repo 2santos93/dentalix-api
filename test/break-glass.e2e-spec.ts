@@ -13,18 +13,19 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { createE2eApp as createAppWith } from './support/create-e2e-app';
+import { apexPassword, enrollPlatformAdmin } from './support/platform-mfa';
+import { currentTotpStep, totpAt as codeAt } from './support/totp';
 import {
   DEFAULT_LOGIN_LOCKOUT,
   LOGIN_LOCKOUT_CONFIG,
 } from '../src/modules/auth/domain/login-lockout';
 import { PasswordService } from '../src/shared/crypto/password.service';
-import { decodeBase32, totpCode } from '../src/shared/crypto/totp';
 
 /**
  * SEC-008: acceso break-glass del superadmin a una clínica donde no es
  * miembro. Antes bastaba la contraseña para recibir un token ADMIN con
  * refresh de 30 días y sin más rastro que un `logger.warn`. Ahora exige MFA
- * (TOTP) enrolado desde la sesión de plataforma y un motivo; el token dura
+ * (TOTP) enrolado en el login del apex y un motivo; el token dura
  * como mucho 60 min, no lleva refresh y cada acceso deja una fila inmutable
  * en `platform_access_audit` que el ADMIN de la clínica puede listar.
  */
@@ -53,12 +54,6 @@ function claimsOf(jwt: string): Record<string, unknown> {
     string,
     unknown
   >;
-}
-
-/** Código TOTP para un paso concreto (30 s) del secreto en base32. */
-function codeAt(secret: string, offsetSteps = 0): string {
-  const step = Math.floor(Date.now() / 30_000) + offsetSteps;
-  return totpCode(decodeBase32(secret), step);
 }
 
 describe('Break-glass del superadmin (e2e, SEC-008)', () => {
@@ -94,7 +89,6 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
       select: { id: true },
     });
     superId = user.id;
-    platformToken = await loginAs(app, 'localhost', SUPER_EMAIL);
   });
 
   beforeEach(async () => {
@@ -120,68 +114,17 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
       expect(body.code).toBe('MFA_NOT_ENROLLED');
       expect(body.message).toMatch(/verificación en dos pasos/);
     });
-
-    it('la sesión de plataforma informa que no hay MFA', async () => {
-      const res = await http()
-        .get('/api/v1/platform/mfa')
-        .set('X-Tenant-Host', 'localhost')
-        .set('Authorization', `Bearer ${platformToken}`)
-        .expect(200);
-      expect(res.body).toEqual({
-        enabled: false,
-        enabledAt: null,
-        breakGlassAvailableAt: null,
-      });
-    });
   });
 
-  describe('enrolado desde la sesión de plataforma', () => {
-    it('alta: devuelve el secreto y el otpauth URI; el secreto queda cifrado', async () => {
-      const res = await http()
-        .post('/api/v1/platform/mfa/enrollment')
-        .set('X-Tenant-Host', 'localhost')
-        .set('Authorization', `Bearer ${platformToken}`)
-        .expect(200);
-      const body = res.body as { secret: string; otpauthUri: string };
-      expect(body.secret).toMatch(/^[A-Z2-7]{32}$/);
-      expect(body.otpauthUri).toMatch(
-        /^otpauth:\/\/totp\/Dentalix:soporte%40platform\.test\?secret=[A-Z2-7]{32}&issuer=Dentalix&algorithm=SHA1&digits=6&period=30$/,
-      );
-      secret = body.secret;
-
-      const row = await raw.user.findUniqueOrThrow({
-        where: { id: superId },
-        select: { mfaTotpPendingSecretEnc: true, mfaEnabledAt: true },
+  describe('alta en el login del apex (DX-021-bis)', () => {
+    it('alta forzada: el secreto queda cifrado y el MFA activo; la sesión lo informa', async () => {
+      const enrolled = await enrollPlatformAdmin(app, {
+        id: superId,
+        email: SUPER_EMAIL,
       });
-      expect(row.mfaEnabledAt).toBeNull();
-      expect(row.mfaTotpPendingSecretEnc).not.toContain(secret);
-    });
-
-    it('un token de clínica no puede enrolar (403)', async () => {
-      await http()
-        .post('/api/v1/platform/mfa/enrollment')
-        .set('X-Tenant-Host', 'localhost')
-        .set('Authorization', `Bearer ${clinic.adminToken}`)
-        .expect(403);
-    });
-
-    it('confirmación con un código erróneo → 400', async () => {
-      await http()
-        .post('/api/v1/platform/mfa/enrollment/confirm')
-        .set('X-Tenant-Host', 'localhost')
-        .set('Authorization', `Bearer ${platformToken}`)
-        .send({ code: '000000' === codeAt(secret) ? '111111' : '000000' })
-        .expect(400);
-    });
-
-    it('confirmación con el código vigente → activa el MFA', async () => {
-      const res = await http()
-        .post('/api/v1/platform/mfa/enrollment/confirm')
-        .set('X-Tenant-Host', 'localhost')
-        .set('Authorization', `Bearer ${platformToken}`)
-        .send({ code: codeAt(secret, -1) })
-        .expect(200);
-      expect((res.body as { enabled: boolean }).enabled).toBe(true);
+      secret = enrolled.secret;
+      platformToken = enrolled.accessToken;
+      expect(secret).toMatch(/^[A-Z2-7]{32}$/);
 
       const row = await raw.user.findUniqueOrThrow({
         where: { id: superId },
@@ -194,12 +137,22 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
       expect(row.mfaEnabledAt).not.toBeNull();
       expect(row.mfaTotpPendingSecretEnc).toBeNull();
       expect(row.mfaTotpSecretEnc).not.toContain(secret);
+
+      const res = await http()
+        .get('/api/v1/platform/mfa')
+        .set('X-Tenant-Host', 'localhost')
+        .set('Authorization', `Bearer ${platformToken}`)
+        .expect(200);
+      expect(res.body).toMatchObject({
+        enabled: true,
+        recoveryCodesRemaining: 10,
+      });
     });
 
     it('recién activado: el break-glass espera el periodo de seguridad (401 MFA_COOLDOWN)', async () => {
-      // Riesgo de transición: quien robe la contraseña de un superadmin sin
-      // MFA podría enrolar el suyo desde el apex. El periodo de espera da
-      // margen para detectarlo (el dueño real recibe 409 al intentar el alta).
+      // Riesgo de transición: quien robe la contraseña y el correo de un
+      // superadmin sin MFA podría enrolar el suyo. El periodo de espera da
+      // margen para detectarlo.
       const res = await tenantLogin(clinic.host, {
         email: SUPER_EMAIL,
         password: SEEDED_PASSWORD,
@@ -224,14 +177,6 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         where: { id: superId },
         data: { mfaEnabledAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) },
       });
-    });
-
-    it('con el MFA activo, otra alta → 409 (no se pisa el secreto)', async () => {
-      await http()
-        .post('/api/v1/platform/mfa/enrollment')
-        .set('X-Tenant-Host', 'localhost')
-        .set('Authorization', `Bearer ${platformToken}`)
-        .expect(409);
     });
   });
 
@@ -264,7 +209,8 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
     });
 
     it('código incorrecto → 401 genérico y sin fila de auditoría', async () => {
-      const valid = new Set([-1, 0, 1].map((o) => codeAt(secret, o)));
+      // Los que la API aceptaría ahora o tras cruzar al paso siguiente (DX-552).
+      const valid = new Set([-1, 0, 1, 2].map((o) => codeAt(secret, o)));
       const wrong = ['123456', '654321', '000001'].find((c) => !valid.has(c));
       const res = await tenantLogin(clinic.host, {
         email: SUPER_EMAIL,
@@ -477,12 +423,14 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
     });
 
     it('pagina por cursor', async () => {
-      // Dos accesos más (pasos TOTP distintos: el actual ya se usó).
+      // Dos accesos más, con pasos TOTP distintos y crecientes (anti-reuso):
+      // el actual y el siguiente, que aguantan aunque la petición cruce al
+      // paso siguiente (el anterior, −1, caducaba en ese cruce: DX-552).
       await raw.user.update({
         where: { id: superId },
         data: { mfaLastUsedStep: null },
       });
-      for (const offset of [-1, 1]) {
+      for (const offset of [0, 1]) {
         await tenantLogin(clinic.host, {
           email: SUPER_EMAIL,
           password: SEEDED_PASSWORD,
@@ -572,7 +520,8 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         data: { mfaLastUsedStep: null },
       });
       const before = await raw.platformAccessAudit.count();
-      const valid = new Set([-1, 0, 1].map((o) => codeAt(secret, o)));
+      // Los que la API aceptaría ahora o tras cruzar al paso siguiente (DX-552).
+      const valid = new Set([-1, 0, 1, 2].map((o) => codeAt(secret, o)));
       const wrongs = [
         '123456',
         '654321',
@@ -592,7 +541,7 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         }).expect(401);
         // Quien tiene la contraseña entra al apex: el bloqueo de la CUENTA
         // vuelve a empezar, el del código no.
-        await loginAs(strict, 'localhost', SUPER_EMAIL);
+        await apexPassword(strict, SUPER_EMAIL);
       }
       const res = await strictLogin(clinic.host, {
         email: SUPER_EMAIL,
@@ -623,7 +572,10 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         .expect(201);
     });
 
-    it('un superadmin que SÍ es miembro entra con su rol sin MFA ni motivo', async () => {
+    // DX-021: el MFA es obligatorio para el superadmin también como MIEMBRO.
+    // Sigue sin motivo ni break-glass, pero la contraseña sola ya no basta:
+    // el login pide el código y luego entra con su rol (y refresh).
+    it('un superadmin que SÍ es miembro entra con su rol sin motivo, pero con su código (DX-021)', async () => {
       await raw.clinicMembership.create({
         data: {
           tenantId: other.tenantId,
@@ -635,10 +587,24 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         email: SUPER_EMAIL,
         password: SEEDED_PASSWORD,
       }).expect(201);
-      const body = res.body as Body;
+      const challenge = res.body as Body & { mfa?: string; mfaToken?: string };
+      expect(challenge.mfa).toBe('MFA_REQUIRED');
+      expect(challenge.accessToken).toBeUndefined();
+      // El paso usado vuelve atrás: el código vigente ya se gastó en otro caso.
+      await raw.user.update({
+        where: { id: superId },
+        data: { mfaLastUsedStep: currentTotpStep() - 5 },
+      });
+      const done = await http()
+        .post('/api/v1/auth/login/mfa')
+        .set('X-Tenant-Host', other.host)
+        .send({ mfaToken: challenge.mfaToken, code: codeAt(secret) })
+        .expect(200);
+      const body = done.body as Body;
       expect(claimsOf(body.accessToken!)).toMatchObject({
         role: ClinicRole.RECEPTION,
       });
+      expect(claimsOf(body.accessToken!).breakGlass).toBeUndefined();
       expect(body.refreshToken).toEqual(expect.any(String));
     });
   });

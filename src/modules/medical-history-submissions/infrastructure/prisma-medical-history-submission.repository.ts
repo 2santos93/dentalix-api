@@ -1,3 +1,5 @@
+import { loadDocumentRegional } from '../../../shared/locations/document-regional';
+import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
   DataConsentChannel,
@@ -5,6 +7,7 @@ import {
   MedicalHistorySubmissionStatus,
   Prisma,
 } from '@prisma/client';
+import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
@@ -56,6 +59,7 @@ function toEntity(row: Row): MedicalHistorySubmission {
     locationId: row.locationId,
     expiresAt: row.expiresAt,
     revokedAt: row.revokedAt,
+    openedAt: row.openedAt,
     status: row.status,
     questionnaireVersion: row.questionnaireVersion,
     answers: (row.answers as AnamnesisAnswers | null) ?? null,
@@ -183,6 +187,9 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
   issue(input: IssueRequestInput): Promise<IssuedRequest> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
+      // está archivado: nunca un enlace vivo de un paciente archivado.
+      await lockLivePatientOrConflict(tx, input.patientId);
       const locationId =
         input.locationId ?? (await this.tenantContext.writeLocationId(tx));
       // Un solo enlace vivo por paciente: emitir otro anula los que aún
@@ -292,10 +299,10 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
         },
       });
       if (!row) return null;
-      const [tenant, granted, policy] = await Promise.all([
+      const [tenant, granted, policy, regional] = await Promise.all([
         tx.tenant.findUniqueOrThrow({
           where: { id: tenantId },
-          select: { name: true, logoUrl: true, primaryColor: true },
+          select: { name: true, logoKey: true, primaryColor: true },
         }),
         sensitiveHealthGranted(tx, row.patientId),
         tx.privacyPolicyVersion.findFirst({
@@ -308,15 +315,34 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
             policyText: true,
           },
         }),
+        // DX-354: el enlace es público (sin sede activa): la sede principal.
+        loadDocumentRegional(tx, tenantId, null),
       ]);
       return {
         submission: toEntity(row),
         patientFirstName: row.patient.firstName,
         patientDeleted: row.patient.deletedAt !== null,
-        clinic: tenant,
+        clinic: withClinicLogoUrl(tenant),
+        regional,
         sensitiveHealthGranted: granted,
         policy,
       };
+    });
+  }
+
+  markOpened(id: string): Promise<boolean> {
+    // `openedAt: null` y PENDING_PATIENT en el where: dos aperturas a la vez
+    // solo marcan una, y nunca se toca un envío ya enviado o caducado.
+    return this.prisma.runWithTenant(async (tx) => {
+      const { count } = await tx.medicalHistorySubmission.updateMany({
+        where: {
+          id,
+          openedAt: null,
+          status: MedicalHistorySubmissionStatus.PENDING_PATIENT,
+        },
+        data: { openedAt: new Date() },
+      });
+      return count > 0;
     });
   }
 

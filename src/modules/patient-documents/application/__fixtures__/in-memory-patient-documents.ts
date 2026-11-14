@@ -34,7 +34,7 @@ export class InMemoryPatientDocumentRepository implements PatientDocumentReposit
     }
     return Promise.resolve({
       locationId: LOCATION_ID,
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
     });
   }
 

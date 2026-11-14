@@ -3,6 +3,7 @@ import { ClinicRole, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
+import { leavesWith } from './support/content-leaves';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   Clinic,
@@ -460,8 +461,11 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
           }) as unknown,
         }),
       ]);
-      // El número entero no está en ningún evento.
-      expect(JSON.stringify(events)).not.toContain('102030');
+      // Ni el número entero ni lo que no son sus 4 últimos en ningún evento
+      // (los ids y las horas no cuentan: DX-496, TST-059).
+      for (const part of [NUMBER, NUMBER.slice(0, -4)]) {
+        expect(leavesWith(events, part)).toEqual([]);
+      }
     });
 
     it('editar el nº borra la verificación; quien lo editó vuelve a necesitarla para asignar', async () => {
@@ -743,7 +747,9 @@ describe('Cobertura verificable para asignar un convenio (e2e, SEC-049)', () => 
       const foreign = await verify(foreignPatient, foreignCoverage).expect(404);
       expect(message(foreign)).toBe('Paciente no encontrado.');
       for (const res of [own, foreign]) {
-        expect(JSON.stringify(res.body)).not.toMatch(/9988|6655|Aseguradora/);
+        for (const leaked of ['9988776655', '9988', '6655', 'Aseguradora']) {
+          expect(leavesWith(res.body, leaked)).toEqual([]);
+        }
       }
       const row = await raw.patientCoverage.findUniqueOrThrow({
         where: { id: foreignCoverage },

@@ -8,10 +8,15 @@ import {
 import { NO_LOCAL_NAMES } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import type { PaymentReceiptView } from '../../domain/entities/payment-receipt.entity';
 import { regionalFormat } from '../../../../shared/format/regional-format';
+import { moneyWithCode } from '../../../../shared/format/money-with-code';
 
 const SNAPSHOT_INPUT = {
   clinic: { name: 'Clínica Demo', legalName: null, taxId: null, address: null },
-  location: { id: 'loc-1', name: 'Sede Norte', address: 'Cra 15 # 93-60' },
+  location: {
+    id: 'loc-1',
+    name: 'Sede Norte',
+    address: 'Av. Francisco de Miranda 93',
+  },
   patient: {
     id: 'pat-1',
     firstName: 'Carolina',
@@ -23,18 +28,18 @@ const SNAPSHOT_INPUT = {
   payment: {
     id: 'pay-1',
     amount: 150000,
-    currency: 'COP',
+    currency: 'VES',
     method: 'CASH',
-    paidAt: new Date('2026-10-17T17:00:00.000Z'),
+    paidAt: new Date('2026-10-17T16:00:00.000Z'),
     paidOn: '2026-10-17',
   },
   plan: {
     id: 'plan-1',
     optionLabel: 'Opción A: implante',
-    createdAt: new Date('2026-09-01T15:00:00.000Z'),
+    createdAt: new Date('2026-09-01T14:00:00.000Z'),
   },
   planBalance: {
-    currency: 'COP',
+    currency: 'VES',
     billable: 900000,
     paid: 450000,
     balance: 450000,
@@ -57,19 +62,20 @@ const view = (
   seriesPrefix: 'NOR',
   number: 123,
   legacy: false,
-  issuedAt: new Date('2026-10-17T17:00:05.000Z'),
+  issuedAt: new Date('2026-10-17T16:00:05.000Z'),
   voided: false,
   voidedAt: null,
   voidReason: null,
   exchangeRate: null,
   split: null,
+  regional: null,
   snapshot,
   ...overrides,
 });
 
 /** Zona y formato de la sede del recibo en estos casos (ajustes explícitos). */
-const SEDE_ZONE = 'America/Bogota';
-const SEDE_FMT = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const SEDE_ZONE = 'America/Caracas';
+const SEDE_FMT = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 
 describe('receiptEmailVars (DX-136)', () => {
   it('arma el email desde la foto del recibo, con el documento enmascarado', () => {
@@ -78,15 +84,18 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_ZONE,
       SEDE_FMT,
     );
-    expect(amountLabel).toBe(SEDE_FMT.money(150000, 'COP'));
-    expect(amountLabel).toMatch(/^\$\s150\.000,00$/);
-    expect(balanceLabel).toMatch(/^\$\s450\.000,00$/);
+    // DX-521: el código ISO, como el papel (DX-378); nunca el símbolo «$».
+    expect(amountLabel).toBe(moneyWithCode(150000, 'VES', SEDE_FMT, undefined));
+    expect(amountLabel).toMatch(/^VES\s150\.000,00$/);
+    expect(balanceLabel).toMatch(/^VES\s450\.000,00$/);
+    expect(amountLabel).not.toContain('$');
+    expect(balanceLabel).not.toContain('$');
     expect(vars).toEqual({
       patientName: 'Carolina Duque',
       reference: 'NOR-000123',
       legacy: false,
       locationName: 'Sede Norte',
-      locationAddress: 'Cra 15 # 93-60',
+      locationAddress: 'Av. Francisco de Miranda 93',
       fiscalLine: null,
       patientDocLabel: 'Documento nacional ******5678',
       paidOnLabel: '17/10/2026',
@@ -125,23 +134,25 @@ describe('receiptEmailVars (DX-136)', () => {
           paymentMethodName: null,
           reference: null,
           amount: 100000,
-          currency: 'COP',
+          currency: 'VES',
           equivalentAmount: 100000,
         },
       ],
-      total: { currency: 'COP', amount: 300000 },
+      total: { currency: 'VES', amount: 300000 },
     };
     const vars = receiptEmailVars(view({ split }), SEDE_ZONE, SEDE_FMT);
-    expect(vars.amountLabel).toBe(SEDE_FMT.money(300000, 'COP'));
+    expect(vars.amountLabel).toBe(
+      moneyWithCode(300000, 'VES', SEDE_FMT, undefined),
+    );
     expect(vars.methodLabel).toBe('Pago móvil + Efectivo');
 
     const withoutRate = receiptEmailVars(
-      view({ split: { ...split, total: { currency: 'COP', amount: null } } }),
+      view({ split: { ...split, total: { currency: 'VES', amount: null } } }),
       SEDE_ZONE,
       SEDE_FMT,
     );
     expect(withoutRate.amountLabel).toBe(
-      `${SEDE_FMT.money(50, 'USD')} + ${SEDE_FMT.money(100000, 'COP')}`,
+      `${moneyWithCode(50, 'USD', SEDE_FMT, undefined)} + ${moneyWithCode(100000, 'VES', SEDE_FMT, undefined)}`,
     );
   });
 
@@ -184,7 +195,7 @@ describe('receiptEmailVars (DX-136)', () => {
     const vars = receiptEmailVars(
       view({
         voided: true,
-        voidedAt: new Date('2026-10-18T02:00:00.000Z'),
+        voidedAt: new Date('2026-10-18T01:00:00.000Z'),
         voidReason: 'Cobro duplicado',
       }),
       SEDE_ZONE,
@@ -200,17 +211,17 @@ describe('receiptEmailVars (DX-136)', () => {
     const vars = receiptEmailVars(
       view({
         voided: true,
-        voidedAt: new Date('2026-10-18T02:00:00.000Z'),
+        voidedAt: new Date('2026-10-18T01:00:00.000Z'),
         voidReason: 'Cobro duplicado',
       }),
       'Europe/Berlin',
       SEDE_FMT,
     );
-    // 02:00 UTC del 18 es el 17 en UTC-5, pero ya el 18 en Berlín.
+    // 01:00 UTC del 18 es el 17 en UTC-4, pero ya el 18 en Berlín.
     expect(vars.voided?.dateLabel).toBe('18/10/2026');
   });
 
-  it('con razón social y NIT, la línea fiscal; sin método, «Sin especificar»', () => {
+  it('con razón social e identificación fiscal, la línea fiscal; sin método, «Sin especificar»', () => {
     const vars = receiptEmailVars(
       view({
         snapshot: {
@@ -218,8 +229,8 @@ describe('receiptEmailVars (DX-136)', () => {
           fiscalDataPending: false,
           clinic: {
             name: 'Clínica Demo',
-            legalName: 'Clínica Demo S.A.S.',
-            taxId: '900123456-7',
+            legalName: 'Clínica Demo C.A.',
+            taxId: 'J-12345678-9',
             address: null,
           },
           payment: { ...snapshot.payment, method: null },
@@ -229,9 +240,7 @@ describe('receiptEmailVars (DX-136)', () => {
       SEDE_ZONE,
       SEDE_FMT,
     );
-    expect(vars.fiscalLine).toBe(
-      'Clínica Demo S.A.S. · Id. fiscal 900123456-7',
-    );
+    expect(vars.fiscalLine).toBe('Clínica Demo C.A. · Id. fiscal J-12345678-9');
     expect(vars.methodLabel).toBe('Sin especificar');
     expect(vars.planLabel).toBe('Plan del 01/09/2026');
     expect(vars.toOpeningBalance).toBe(false);
@@ -284,8 +293,8 @@ describe('receiptEmailVars (DX-136)', () => {
       'Asia/Tokyo',
       regionalFormat({ locale: 'ja-JP', hourCycle: 'h23' }),
     );
-    expect(vars.amountLabel).toBe('￥12,000');
-    expect(vars.balanceLabel).toBe('￥38,000');
+    expect(vars.amountLabel).toBe('JPY\u00a012,000');
+    expect(vars.balanceLabel).toBe('JPY\u00a038,000');
   });
 
   it('receipt email dates follow the location locale (en-US 10/27/2026)', () => {
@@ -296,7 +305,7 @@ describe('receiptEmailVars (DX-136)', () => {
           payment: { ...snapshot.payment, paidOn: '2026-10-27' },
         },
         voided: true,
-        voidedAt: new Date('2026-10-28T15:00:00.000Z'),
+        voidedAt: new Date('2026-10-28T14:00:00.000Z'),
         voidReason: 'Cobro duplicado',
       }),
       'America/New_York',
@@ -305,5 +314,91 @@ describe('receiptEmailVars (DX-136)', () => {
     expect(vars.paidOnLabel).toBe('10/27/2026');
     expect(vars.planLabel).toBe('Plan del 09/01/2026 · Opción A: implante');
     expect(vars.voided?.dateLabel).toBe('10/28/2026');
+  });
+
+  it('DX-517: los importes usan el texto de moneda congelado en la foto; sin él, los de antes', () => {
+    const plain = receiptEmailVars(view(), SEDE_ZONE, SEDE_FMT);
+    const frozen = forView(
+      buildReceiptSnapshot(
+        { ...SNAPSHOT_INPUT, currencyTexts: { VES: 'Bs.' } },
+        NO_LOCAL_NAMES,
+      ),
+    );
+    const vars = receiptEmailVars(
+      view({ snapshot: frozen }),
+      SEDE_ZONE,
+      SEDE_FMT,
+    );
+    expect(vars.amountLabel).toBe(
+      moneyWithCode(150000, 'VES', SEDE_FMT, { VES: 'Bs.' }),
+    );
+    expect(vars.amountLabel).toMatch(/^Bs\.\s150\.000,00$/);
+    expect(vars.balanceLabel).toMatch(/^Bs\.\s450\.000,00$/);
+    expect({ ...vars, amountLabel: '', balanceLabel: '' }).toEqual({
+      ...plain,
+      amountLabel: '',
+      balanceLabel: '',
+    });
+  });
+
+  it('DX-515-bis: título y leyenda de la foto van al email; sin ellos, las variables de antes', () => {
+    const plain = receiptEmailVars(view(), SEDE_ZONE, SEDE_FMT);
+    expect(plain).not.toHaveProperty('title');
+    expect(plain).not.toHaveProperty('legend');
+    const vars = receiptEmailVars(
+      view({
+        snapshot: {
+          ...snapshot,
+          title: 'Recibo de pago',
+          legend: 'Este recibo no es una factura',
+        },
+      }),
+      SEDE_ZONE,
+      SEDE_FMT,
+    );
+    expect(vars).toEqual({
+      ...plain,
+      title: 'Recibo de pago',
+      legend: 'Este recibo no es una factura',
+    });
+  });
+
+  it('DX-521: con el texto «Bs.» congelado en la foto el email lo escribe, y sin él el código ISO, nunca «$»', () => {
+    const caracas = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
+    const ves = (currencyTexts?: Record<string, string>) =>
+      forView(
+        buildReceiptSnapshot(
+          {
+            ...SNAPSHOT_INPUT,
+            payment: {
+              ...SNAPSHOT_INPUT.payment,
+              amount: 1234.5,
+              currency: 'VES',
+            },
+            planBalance: {
+              currency: 'USD',
+              billable: 100,
+              paid: 40,
+              balance: 60,
+            },
+            currencyTexts,
+          },
+          NO_LOCAL_NAMES,
+        ),
+      );
+    const withText = receiptEmailVars(
+      view({ snapshot: ves({ VES: 'Bs.' }) }),
+      'America/Caracas',
+      caracas,
+    );
+    expect(withText.amountLabel).toBe('Bs.\u00a01.234,50');
+    expect(withText.balanceLabel).toBe('USD\u00a060,00');
+    const without = receiptEmailVars(
+      view({ snapshot: ves() }),
+      'America/Caracas',
+      caracas,
+    );
+    expect(without.amountLabel).toBe('VES\u00a01.234,50');
+    expect(without.balanceLabel).not.toContain('$');
   });
 });

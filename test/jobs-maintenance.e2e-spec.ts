@@ -27,7 +27,7 @@ const hex = () => randomBytes(32).toString('hex');
 const fetchRates = jest.fn<
   ReturnType<ExchangeRateProvider['fetchRates']>,
   [string]
->(() => Promise.resolve({ base: 'USD', rates: { COP: 4100.5, EUR: 0.91 } }));
+>(() => Promise.resolve({ base: 'USD', rates: { VES: 4100.5, EUR: 0.91 } }));
 
 describe('Tareas programadas iniciales (e2e, DX-085)', () => {
   let app: INestApplication<App>;
@@ -342,8 +342,8 @@ describe('Tareas programadas iniciales (e2e, DX-085)', () => {
       orderBy: { currency: 'asc' },
     });
     expect(rows.map((r) => [r.currency, r.rate.toNumber()])).toEqual([
-      ['COP', 4100.5],
       ['EUR', 0.91],
+      ['VES', 4100.5],
     ]);
   });
 });

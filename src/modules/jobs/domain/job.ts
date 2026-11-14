@@ -21,8 +21,8 @@ export interface JobContext {
    */
   tenantId: string | null;
   /**
-   * Se aborta si este worker pierde el intento (el latido no pudo renovar el
-   * arriendo porque otro worker lo retomó) o si el apagado agota su gracia.
+   * Se aborta si este worker pierde el intento (el latido no pudo renovar la
+   * reserva porque otro worker lo retomó) o si el apagado agota su gracia.
    * Un handler largo debe consultarla y dejar de producir efectos: su
    * resultado ya no cuenta.
    */
@@ -47,7 +47,7 @@ export interface JobDefinition<P extends JobPayload = JobPayload> {
   handle: JobHandler<P>;
   /**
    * DX-422: aviso cuando el ÚLTIMO intento se quedó a medias (el worker murió
-   * o perdió el arriendo) y la cola lo cierra FAILED `LeaseExpired` SIN llamar
+   * o perdió la reserva) y la cola lo cierra FAILED `LeaseExpired` SIN llamar
    * al handler. Corre bajo el tenant del trabajo; si falla, solo se registra
    * en el log (el trabajo ya está FAILED). Para que el estado de negocio no se
    * quede «en curso» para siempre.
@@ -178,7 +178,7 @@ export interface QueueSnapshot {
   /** `min(runAt)` de los PENDING vencidos, o null si no hay. */
   oldestDueRunAt: Date | null;
   running: number;
-  /** RUNNING con el arriendo vencido (su worker murió o no late). */
+  /** RUNNING con la reserva vencida (su worker murió o no late). */
   runningExpired: number;
   failedLast24h: number;
   workers: WorkerRow[];

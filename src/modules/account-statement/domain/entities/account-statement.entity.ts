@@ -1,3 +1,5 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import {
   DocumentType,
   PaymentMethod,
@@ -6,6 +8,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { InstallmentStatus } from '../../../payment-plans/application/schedule/derive-statuses';
+import type { PaymentWithoutRate } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 /*
  * Estado de cuenta del paciente (DX-011): la foto financiera consolidada de UN
@@ -46,8 +49,14 @@ export interface StatementPaymentRow {
   paymentMethod: StatementPaymentMethodRef | null;
   /** DX-395: referencia del pago tal como se tecleó, o `null`. */
   reference: string | null;
+  /** DX-515: nº de la factura fiscal externa del abono, o `null`. */
+  externalInvoiceNumber?: string | null;
   /** DX-390: el cobro dividido del abono (id de su línea 1), o `null`. */
   splitId?: string | null;
+  /** DX-414: nº del recibo del abono (el de su cobro dividido), o `null`. */
+  receiptNumber?: string | null;
+  /** DX-389: el abono tiene comprobante del cobro adjunto. */
+  hasProof?: boolean;
   location: { id: string; name: string };
   /** Quién registró el abono (`null` en abonos antiguos sin autor). */
   createdById: string | null;
@@ -61,6 +70,11 @@ export interface StatementPaymentRow {
   voidedBy: StatementVoidedBy | null;
   /** Motivo de la anulación; `null` si está activo o es una anulación antigua. */
   voidReason: string | null;
+  /**
+   * DX-432: número de la devolución de la que este abono es referencia
+   * (`DEV-CCS-000001`), o `null`/ausente. Un abono así no se anula.
+   */
+  refundNumber?: string | null;
 }
 
 /** Medio de pago de la clínica de un abono (DX-395): id y nombre. */
@@ -189,6 +203,12 @@ export interface StatementCurrencySummary {
    */
   creditMovements: number;
   balance: number;
+  /**
+   * DX-472: lo mismo que `paid` y `balance`, con lo de los planes convertido a
+   * su moneda: lo que cuadra con `plans[]`. `paid` y `balance` son sin convertir.
+   */
+  convertedPaid: number;
+  convertedBalance: number;
   overdueCount: number;
   overdueAmount: number;
   nextInstallment: StatementNextInstallment | null;
@@ -199,13 +219,15 @@ export interface StatementPlanLine {
   status: TreatmentPlanStatus;
   currency: string;
   createdAt: Date;
-  /** Facturable del plan (ítems ACCEPTED|DONE), aunque esté cancelado. */
+  /** Presupuestado (ítems ACCEPTED|DONE), aunque el plan esté cancelado. */
   budgeted: number;
+  /** DX-472: el `billable` de `/balance`: 0 si el plan no se cobra. */
+  billable: number;
   /** `false` para un plan CANCELLED o REJECTED: su facturable no suma al saldo. */
   countsTowardsBalance: boolean;
-  /** Abonos vivos del plan en SU moneda. */
+  /** DX-472: el `paid` de `/balance`: abonos vivos convertidos a su moneda. */
   paid: number;
-  /** Abonos vivos del plan hechos en otra moneda (no se convierten). */
+  /** Lo entregado en otra moneda, sin convertir (ya cuenta en `paid`). */
   paidOtherCurrencies: { currency: string; amount: number }[];
   /**
    * DX-253: Σ de los asientos del saldo a favor del plan en su moneda, con
@@ -213,8 +235,12 @@ export interface StatementPlanLine {
    * originales no cambian: esta cifra se suma a ellos.
    */
   creditMovements: number;
-  /** `(countsTowardsBalance ? budgeted : 0) - paid - creditMovements`. */
+  /** DX-472: el `balance` de `/balance`: `billable - paid - creditMovements`. */
   balance: number;
+  /** DX-472: abonos del plan que no suman en `paid` por no tener tasa. */
+  paymentsWithoutRate: PaymentWithoutRate[];
+  /** DX-472: el proveedor no respondió y `paid` está incompleto. */
+  rateProviderTimedOut: boolean;
 }
 
 export interface StatementMovement {
@@ -229,12 +255,18 @@ export interface StatementMovement {
   paymentMethod: StatementPaymentMethodRef | null;
   /** DX-395: referencia del pago, o `null`. */
   reference: string | null;
+  /** DX-515: nº de la factura fiscal emitida fuera de Dentalix, o `null`. */
+  externalInvoiceNumber: string | null;
   /**
    * DX-390: el cobro dividido del abono (id de su línea 1) y cuántas formas de
    * pago tiene; `null` en un abono suelto. Anular una anula el cobro entero.
    */
   splitId: string | null;
   splitLines: number | null;
+  /** DX-414: nº del recibo del abono; el cobro dividido comparte uno. */
+  receiptNumber: string | null;
+  /** DX-389: el abono tiene comprobante del cobro (se ve con `GET /payments/:id/proof/url`). */
+  hasProof: boolean;
   location: { id: string; name: string };
   /** `null` si el abono es contra un saldo migrado (DX-262). */
   treatmentPlanId: string | null;
@@ -247,6 +279,12 @@ export interface StatementMovement {
    * `DELETE /payments/:id` (`voidDenial`); siempre `false` si ya está anulado.
    */
   canVoid: boolean;
+  /**
+   * DX-432: por qué NO se puede anular aunque la regla del rol lo permita
+   * (el abono es referencia de una devolución), con el mismo texto del 409;
+   * `null` si nada lo impide.
+   */
+  voidBlockedReason: string | null;
   voided: boolean;
   voidedAt: Date | null;
   voidedBy: StatementVoidedBy | null;
@@ -305,6 +343,8 @@ export interface StatementPatient {
 export interface StatementClinic {
   name: string;
   logoUrl: string | null;
+  /** DX-019: datos fiscales y de contacto de la clínica. */
+  fiscal: ClinicFiscalData;
 }
 
 /**
@@ -324,11 +364,15 @@ export interface StatementAddressee {
 export interface AccountStatement extends ComputedAccountStatement {
   issuedAt: Date;
   clinic: StatementClinic;
+  /** DX-354: región de la sede en contexto (o la principal) para formatear el impreso; `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   /** En vivo, con el nombre visible de hoy (DX-327, R17). */
   patient: StatementPatient & { docTypeName: string };
   addressee: StatementAddressee;
   /** Filtro aplicado a `movements` (días civiles inclusive), o `null`. */
   range: { from: string | null; to: string | null };
+  /** DX-472: en algún plan, el proveedor de tasas no respondió a tiempo. */
+  rateProviderTimedOut: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +389,8 @@ export interface FamilyCurrencyAmounts {
   openingPending: number;
   paid: number;
   balance: number;
+  convertedPaid: number;
+  convertedBalance: number;
   overdueAmount: number;
 }
 
@@ -360,8 +406,14 @@ export interface FamilyStatementMember {
 export interface FamilyAccountStatement {
   issuedAt: Date;
   clinic: StatementClinic;
+  /** DX-354: como `AccountStatement.regional`. */
+  regional: DocumentRegionalDto | null;
   payer: { id: string; firstName: string; lastName: string };
   members: FamilyStatementMember[];
   /** Suma de los subtotales, por moneda y al céntimo. */
   totals: FamilyCurrencyAmounts[];
+  /** DX-472: abonos de la familia que no suman por no tener tasa. */
+  paymentsWithoutRateCount: number;
+  /** DX-472: en algún plan, el proveedor de tasas no respondió a tiempo. */
+  rateProviderTimedOut: boolean;
 }

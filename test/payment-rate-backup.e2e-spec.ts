@@ -23,14 +23,16 @@ import {
 import { PaymentAllocationJobs } from '../src/modules/payments/application/payment-allocation-jobs';
 import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
 import { PAYMENT_RATE_BACKLOG_FORBIDDEN_MESSAGE } from '../src/modules/payments/presentation/payment-rate-backlog.controller';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 
 // DX-402: el caso de la QA de DX-380 (punto 7, caso A) en HTTP real. La
 // clínica está en la fuente automática, el proveedor no responde (doble
-// CAÍDO que cuenta sus llamadas) y un abono en USD a un plan en COP de hace
+// CAÍDO que cuenta sus llamadas) y un abono en USD a un plan en VES de hace
 // dos días queda «sin tasa» más de 24 h. El ADMIN sigue el aviso: pasa hoy a
 // manual (`manualSince` = hoy), ve cuántos abonos de ese día tomarían la tasa
-// y registra la tasa COP de ese día. El barrido siguiente congela esa tasa
+// y registra la tasa VES de ese día. El barrido siguiente congela esa tasa
 // como tasa de respaldo, crea la base, quita el aviso y lo deja en la
 // auditoría; la tasa congelada ya no cambia. `raw` (DIRECT_URL) solo
 // envejece filas y lee.
@@ -39,8 +41,11 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const PREFIX = `dx402-e2e-${Date.now().toString(36)}`;
-const ZONE = 'America/Bogota';
-const TODAY = civilDateIn(new Date(), ZONE);
+// DX-460: «hoy» fijo de la sede, el mismo que ve la API por su
+// EXCHANGE_RATE_CLOCK (manualSince al pasar a MANUAL), corra la suite a la
+// hora que corra; antes TODAY salía del reloj real al cargar el módulo.
+const SEDE_DAY = fixedSedeDay();
+const TODAY = SEDE_DAY.day;
 const DAY = addCivilDays(TODAY, -2);
 const BACKLOG = '/api/v1/payments/rate-backlog';
 const dayPreview = (date: string, currency: string) =>
@@ -97,7 +102,7 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
           api().post(`/api/v1/patients/${patient.id}/treatment-plans`),
           c,
         )
-          .send({ notes: 'Plan DX-402', currency: 'COP' })
+          .send({ notes: 'Plan DX-402', currency: 'VES' })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -112,7 +117,9 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
       override: (builder) =>
         builder
           .overrideProvider(EXCHANGE_RATE_PROVIDER)
-          .useValue({ fetchRates }),
+          .useValue({ fetchRates })
+          .overrideProvider(EXCHANGE_RATE_CLOCK)
+          .useValue(() => SEDE_DAY.at),
     });
     await purgeDay();
     clinic = await registerClinic(app, `${PREFIX}-a`);
@@ -175,11 +182,11 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
       manualSince: TODAY,
     });
 
-    await as(api().get(dayPreview(DAY, 'COP')), clinic)
+    await as(api().get(dayPreview(DAY, 'VES')), clinic)
       .expect(200)
       .expect({
         date: DAY,
-        currency: 'COP',
+        currency: 'VES',
         count: 1,
         providerRateSaved: false,
         otherRatesMissing: { count: 0, currencies: [] },
@@ -194,21 +201,21 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
         providerRateSaved: false,
         otherRatesMissing: { count: 0, currencies: [] },
       });
-    await as(api().get(dayPreview(addCivilDays(DAY, -1), 'COP')), clinic)
+    await as(api().get(dayPreview(addCivilDays(DAY, -1), 'VES')), clinic)
       .expect(200)
       .expect((res) => expect((res.body as { count: number }).count).toBe(0));
-    await as(api().get(dayPreview(DAY, 'COP')), other)
+    await as(api().get(dayPreview(DAY, 'VES')), other)
       .expect(200)
       .expect((res) => expect((res.body as { count: number }).count).toBe(0));
   });
 
-  it('registrar la tasa COP de ese día: el barrido siguiente la congela como respaldo, crea la base y quita el aviso', async () => {
+  it('registrar la tasa VES de ese día: el barrido siguiente la congela como respaldo, crea la base y quita el aviso', async () => {
     const calls = fetchRates.mock.calls.length;
     const created = await as(
       api().post('/api/v1/exchange/manual-rates'),
       clinic,
     )
-      .send({ date: DAY, currency: 'COP', rate: 4000 })
+      .send({ date: DAY, currency: 'VES', rate: 4000 })
       .expect(201);
     // El registro adelanta el reintento (DX-380): no espera las 20 h.
     const [retry] = await raw.paymentBaseRetry.findMany({
@@ -259,7 +266,7 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
           exchangeRateBackup: {
             rateDate: DAY,
             manualSince: TODAY,
-            currencies: ['COP', 'USD'],
+            currencies: ['USD', 'VES'],
           },
         },
       }),
@@ -271,7 +278,7 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
     expect(JSON.stringify(listed.body)).toContain('EXCHANGE_RATE_BACKUP');
 
     // Ya no queda ninguno pendiente ese día.
-    await as(api().get(dayPreview(DAY, 'COP')), clinic)
+    await as(api().get(dayPreview(DAY, 'VES')), clinic)
       .expect(200)
       .expect((res) => expect((res.body as { count: number }).count).toBe(0));
 
@@ -304,7 +311,7 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
       const member = await seedMember(raw, clinic, role);
       const token = await loginAs(app, clinic.host, member.email);
       const denied = await as(
-        api().get(dayPreview(DAY, 'COP')),
+        api().get(dayPreview(DAY, 'VES')),
         clinic,
         token,
       ).expect(403);
@@ -312,12 +319,12 @@ describe('Tasa manual de un día anterior a «manual desde» (e2e, DX-402)', () 
         PAYMENT_RATE_BACKLOG_FORBIDDEN_MESSAGE,
       );
     }
-    await as(api().get(dayPreview('2026-02-30', 'COP')), clinic).expect(400);
+    await as(api().get(dayPreview('2026-02-30', 'VES')), clinic).expect(400);
     await as(api().get(dayPreview(DAY, 'cop1')), clinic).expect(400);
     await as(api().get(`${BACKLOG}/day`), clinic).expect(400);
-    await as(api().get(dayPreview(DAY, 'cop')), clinic).expect(400);
+    await as(api().get(dayPreview(DAY, 'ves')), clinic).expect(400);
     await as(
-      api().get(`${BACKLOG}/day?date=${DAY}&currency=COP&currency=EUR`),
+      api().get(`${BACKLOG}/day?date=${DAY}&currency=VES&currency=EUR`),
       clinic,
     ).expect(400);
   });

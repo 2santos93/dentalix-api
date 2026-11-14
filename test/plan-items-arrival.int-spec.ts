@@ -9,7 +9,7 @@ import {
 } from '../src/modules/appointments/domain/plan-item-reservation';
 import { resolveLocationTimeZones } from '../src/shared/locations/location-time-zone';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -133,7 +133,7 @@ describe('DX-271 triggers de reserva de ítems', () => {
     ).id;
     locationId = (
       await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Principal',
         }),
@@ -170,7 +170,7 @@ describe('DX-271 triggers de reserva de ítems', () => {
           tenantId,
           patientId,
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'USD',
           acceptedAt: new Date(),
           acceptedLocationId: locationId,
         },
@@ -335,8 +335,8 @@ describe('DX-271 triggers de reserva de ítems', () => {
           timeZone: zoneOf(locationId),
           location: {
             id: locationId,
-            locale: REGIONAL_BOGOTA_FIXTURE.locale,
-            hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+            locale: REGIONAL_CARACAS_FIXTURE.locale,
+            hourCycle: REGIONAL_CARACAS_FIXTURE.hourCycle,
           },
         }),
       };

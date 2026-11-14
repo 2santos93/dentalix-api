@@ -105,16 +105,41 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
    | RECEPTION | `recepcion@demo.dentalix.app`                                  |
    | ASSISTANT | `asistente@demo.dentalix.app`                                  |
    | RECEPTION | `recepcion.norte@demo.dentalix.app` (solo Sede Norte — DX-089) |
+   | DENTIST   | `dentista.saopaulo@demo.dentalix.app` (Beatriz Nogueira Prado, solo Sede São Paulo) |
+   | DENTIST   | `dentista.londres@demo.dentalix.app` (Oliver Bennett, solo Sede Londres) |
 
-   Contenido: 2 sedes con horario (la principal con el horario por defecto del
-   registro; "Sede Norte" con el suyo), catálogo por defecto con tarifas en la moneda de la sede demo (la demo es una clínica venezolana que trabaja en USD: las dos sedes en `VE`, `USD`, `America/Caracas` y `es-VE`; parte de los abonos y de la caja abierta en bolívares con la tasa MANUAL del día que la demo registra para los últimos 61 días; el documento nacional con su nombre local venezolano (`DEMO_DOCUMENT_TYPE_NAMES`, editable en Ajustes); teléfonos +58 con el abonado ficticio 555-01XX/02XX/03XX; ver `prisma/demo/data.ts`. Solo los DATOS dicen Venezuela),
+   Las sedes de la demo (DX-335) cubren varios países a propósito: la demo no
+   es de un país, enseña que una clínica puede tener sedes con moneda, zona,
+   idioma y reloj propios. Solo esta tabla afirma un país; ninguna regla del
+   producto ramifica por ellas (`DEMO_LOCATIONS` en `prisma/demo/data.ts`):
+
+   | Sede           | País | Moneda            | Zona                | Locale | Reloj | Teléfono           | Horario                       |
+   | -------------- | ---- | ----------------- | ------------------- | ------ | ----- | ------------------ | ----------------------------- |
+   | Sede principal | VE   | USD (+ abonos VES) | `America/Caracas`   | es-VE  | h23   | `+58 212 555 0100` | el del registro               |
+   | Sede Norte     | VE   | USD               | `America/Caracas`   | es-VE  | h23   | —                  | propio (lun–vie y sáb)        |
+   | Sede São Paulo | BR   | BRL               | `America/Sao_Paulo` | pt-BR  | h23   | `+55 11 3555 0100` | lun–vie 8–12 y 13–18          |
+   | Sede Londres   | GB   | GBP               | `Europe/London`     | en-GB  | h23   | `+44 20 7946 0100` | lun–vie 9–13 y 14–18          |
+
+   Cada sede nueva tiene su propio dentista, tarifa en su moneda, planes y
+   abonos en esa moneda, citas y realizados en su zona (con el cambio de hora
+   de Londres), tres festivos de ejemplo que se repiten cada año y un
+   cierre puntual a 28 días (o el siguiente día que no sea festivo): la
+   demo no pone ninguna cita en un festivo de su sede. Las tasas MANUAL de
+   los últimos 61 días cubren VES, BRL y GBP (ficticias; hoy y ayer valen
+   igual). «Comparar sedes» (DX-014) cuenta los meses en la zona de cada sede.
+   La política de privacidad es la plantilla neutra de DX-325 rellenada con
+   los datos de la principal (sin ley ni autoridad de ningún país), y dos
+   pacientes tienen la retención de la historia clínica ampliada.
+
+   Contenido: 4 sedes con horario (la principal con el horario por defecto del
+   registro; las demás con el suyo, ver la tabla de arriba), catálogo por defecto con tarifas en la moneda de cada sede (las dos sedes venezolanas trabajan en USD, con parte de los abonos y de la caja abierta en bolívares con la tasa MANUAL del día que la demo registra para los últimos 61 días; São Paulo y Londres con su tarifa propia en BRL y GBP; el documento nacional con el nombre genérico de documento; teléfonos de cada sede de su región con abonado ficticio; ver `prisma/demo/data.ts`),
    25 pacientes ficticios (correos `@example.com`) con historias clínicas,
    evoluciones (una corregida con una adenda — DX-038; tres con diagnóstico CIE-10 — DX-212) y odontograma (un hallazgo anulado con motivo y una paciente infantil con dentición mixta, registros temporales y de otro origen — DX-120), 5 tipos de cita con duración y color (DX-121), las 6 plantillas de evolución de ejemplo con dos evoluciones redactadas con ellas («Resina» y «Profilaxis») y ligadas a las últimas citas atendidas (DX-170), las 5 indicaciones postoperatorias de ejemplo con `POI-EXO` vinculada a «Exodoncia simple», la sede principal con teléfono y una entrega impresa de ayer (o del último día con consulta) — DX-222, ~90 citas desde el lunes de la semana pasada hasta
    el sábado de la próxima en distintos estados (las de valoración, limpieza, endodoncia, urgencia y ortodoncia con su tipo), bloqueos de agenda (vacaciones de la segunda dentista de lunes a viernes de la semana siguiente a la próxima, en todas las sedes, y el almuerzo del equipo en la sede principal el próximo día laborable, que deja agendar con aviso) y 3 «Pendientes por agendar» abiertos (las dos cancelaciones o no-shows más recientes y un alta manual urgente; las más antiguas quedan descartadas con motivo) — DX-122, y la cita agendada más lejana de la primera dentista en la sede principal marcada «Adelantar si hay hueco», que sale como candidata en «Ocupar este hueco» al cancelar una cita anterior (DX-210), la rotación de la segunda dentista entre las dos sedes (lunes, miércoles y viernes en la principal; martes y jueves en la Norte, con sus citas dentro) y una excepción el lunes que vuelve de vacaciones: no va a la principal y cubre la Norte de 7:00 a 12:00 — DX-233, planes de tratamiento en todos
    sus estados (con un presupuesto en borrador con descuentos —uno del 10 % del
    odontólogo y otro del 15 % de la administración con su motivo, que salen en
-   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Duque —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en la moneda de la sede de los últimos 60 días en ambas sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
-   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2 USD (con su motivo) y la de la tarde abierta con su fondo en USD y en VES y un cobro en cada moneda; los abonos históricos quedan sin caja. «Recepción Norte» está restringida a la Sede Norte (DX-089): al entrar con ella la agenda, la caja, el inventario y la cartera muestran solo esa sede, y la principal da 403 (ver «Personal restringido a sedes»).
+   el informe de descuentos (DX-204)—, listo para presentar, y otro aceptado con la firma del paciente — DX-012; y dos opciones A/B de Carolina Durán —implante o puente— presentadas hace 9 días y sin cita futura, que salen en «Presupuestos por seguir» — DX-040), abonos en la moneda de la sede de los últimos 60 días en las cuatro sedes, cada uno con su recibo de caja numerado por sede (`PRI-000001`…, `NOR-000001`…; el abono duplicado anulado conserva su número y sale «ANULADO» — DX-136), un plan de
+   pagos con cuotas e inventario por sede con ítems bajo el stock mínimo. Varios planes se abrieron hace 20, 40, 75 y 100 días (`openedDaysAgo`), así que la cartera (DX-145) tiene deudores en todos los tramos en las dos sedes venezolanas. Dos de ellos tienen gestiones de cobro y uno un compromiso de pago abierto a 5 días (DX-150): se ven en la cartera, en el bloque «Cobranza» de su ficha y con el chip «Saldo vencido» en sus citas. Recepción tiene en la sede principal la caja por turno de hoy (DX-027): la de la mañana cerrada con un arqueo que no cuadra por 2 USD (con su motivo) y la de la tarde abierta con su fondo en USD y en VES y un cobro en cada moneda; los abonos históricos quedan sin caja. «Recepción Norte» está restringida a la Sede Norte (DX-089): al entrar con ella la agenda, la caja, el inventario y la cartera muestran solo esa sede, y la principal da 403 (ver «Personal restringido a sedes»). Registro profesional en las evoluciones (DX-540): el aviso de la clínica está activo (Ajustes › Historia clínica) y los cuatro dentistas tienen su registro desde antes de su primera evolución, así que todas las evoluciones demo muestran «Reg. prof.»; el ADMIN y la asistente no tienen registro: al entrar con `admin@` o `asistente@` y abrir «Nueva evolución» sale el aviso previo, y al guardar, el toast del servidor.
 
    - **Idempotencia**: si el tenant `demo` ya existe, no hace nada (solo vuelve a
      imprimir las credenciales). `--reset` retira la demo anterior **en blando**
@@ -125,8 +150,10 @@ de despliegue hacen falta las devDependencies para sembrar. El puerto se lee de
      `admin@demo.dentalix.app` como ADMIN vivo) aborta la corrida, con o sin
      `--reset`; y si algún usuario `@demo.dentalix.app` es miembro vivo de otra
      clínica, tampoco se retira nada.
-   - **Determinista**: sin azar; todo depende solo de la fecha de hoy (en la zona
-     de la sede demo, `America/Caracas`, UTC−4 fijo). Moneda, zona horaria y país dependen siempre de la sede.
+   - **Determinista**: sin azar; todo depende solo de la fecha de hoy, contada en
+     la zona de la sede de cada dato (la hora de pared pasa a instante con el
+     desfase que esa zona tiene ese día, horario de verano incluido). Moneda,
+     zona horaria y país dependen siempre de la sede.
    - **Conexión**: no usa `DIRECT_URL`. Levanta la app (`AppModule`) y escribe con
      los mismos casos de uso que la API (registro, invitación + aceptación, sedes,
      horarios, pacientes, planes, abonos, plan de pagos, inventario), por
@@ -263,7 +290,9 @@ resourceId?, patient? })`: pacientes, historia clínica, evoluciones,
   TENANT_DOMAIN`, `DOMAIN_REGISTERED`: host y estado, nunca el token),
   publicar la política de datos (`CREATE PRIVACY_POLICY`: versión y hash
   antes y después y qué textos cambiaron, nunca los textos), tipos de cita
-  (`APPOINTMENT_TYPE`), pagadores (`PAYER`), plantillas de consentimiento
+  (`APPOINTMENT_TYPE`), tipos de recall (`RECALL_TYPE`, DX-015-bis: también
+  el cambio de disparadores con los ids de antes y de después), pagadores
+  (`PAYER`), plantillas de consentimiento
   (`CONSENT_TEMPLATE`: el texto solo por nombre, con la versión) y de receta
   (`PRESCRIPTION_TEMPLATE`: nombre y nº de medicamentos), y el inventario
   (`INVENTORY_ITEM`, `INVENTORY_MOVEMENT`: en la sede del artículo, sin notas
@@ -332,7 +361,7 @@ referenceId?})` renderiza la plantilla con la marca de la clínica (nombre, y
 - **Despachador en proceso** (`EmailDispatcher`; sigue en cada réplica tras la cola de DX-085, ver «Trabajos en segundo plano»): se
   despierta tras cada encolado y barre cada `MAIL_DISPATCH_INTERVAL_MS`
   (default 30 s; 0 lo apaga, y es 0 con `NODE_ENV=test`). Reclama filas con
-  `FOR UPDATE SKIP LOCKED` y un arriendo de 5 min, así que con varias réplicas
+  `FOR UPDATE SKIP LOCKED` y una reserva de 5 min, así que con varias réplicas
   ninguna fila se envía dos veces y la de una réplica caída se recupera. 3
   intentos con backoff exponencial (`MAIL_RETRY_BASE_MS`, 1 min y 2 min por
   defecto); tras el 3.er fallo queda `FAILED`. Al apagar (SIGTERM,
@@ -351,7 +380,7 @@ referenceId?})` renderiza la plantilla con la marca de la clínica (nombre, y
   Desde DX-113 son del rol NOLOGIN `dentalix_email_dispatcher` (sin
   BYPASSRLS, con una política permisiva en `email_outbox` solo para él), no
   del owner de las migraciones, que en un Postgres gestionado no se salta la
-  RLS (ver «Despliegue: roles de la BD»). El arriendo de un reclamo se acota a 900 s y el cierre de
+  RLS (ver «Despliegue: roles de la BD»). La reserva de un reclamo se acota a 900 s y el cierre de
   un intento solo vale para ESE intento (fencing por `attempts`). Si el rol de la app se crea después de migrar, concédele
   `EXECUTE` sobre `email_outbox_claim`, `email_outbox_settle`,
   `email_outbox_enqueue_platform_capped`, `email_outbox_platform_allowed` y
@@ -527,6 +556,32 @@ base>` (`TenantLinkBaseService` / `tenantLinkHost`). El enlace de
   confirma esa cita. Además (DX-143), aceptar una invitación no reclama una
   cuenta sin verificar con acceso a otra clínica (ver DX-029 arriba).
   Si se superan los topes `MAIL_*` no se envía (y tampoco se dice).
+  **DX-149-quater:**
+  - **Tope por usuario:** como mucho `PASSWORD_RESET_USER_DAILY_LIMIT`
+    (5, de 1 a 20) enlaces en 24 h a la misma persona, **sumando todas sus
+    clínicas**. Es independiente de `MAIL_RECIPIENT_DAILY_LIMIT`. Se cuentan
+    en `user_tokens`, en la transacción que emite el token y después de
+    bloquear la fila del usuario; antes, un aviso temprano sin candado evita
+    preparar el correo. Sin él, alguien en K clínicas recibiría K × 5
+    pidiéndolo desde cada host. Alcanzado, no se rota el token ni se encola
+    nada, y la respuesta es el mismo 202.
+  - **Fuera del tope de la clínica:** el restablecimiento ni gasta ni
+    respeta `MAIL_TENANT_DAILY_LIMIT` (`TENANT_DAILY_BUDGET` en
+    `email-message.ts`). Así, un tercero que pide restablecimientos para el
+    personal no deja a la clínica 24 h sin correos. Siguen valiendo el tope
+    por destinatario y el de usuario.
+  - **Concurrencia acotada:** como mucho `PASSWORD_RESET_MAX_CONCURRENCY`
+    (4, de 1 a 100) restablecimientos con su trabajo en curso a la vez por
+    proceso, y por tanto con su transacción abierta. Los demás esperan turno
+    en orden de llegada, sin error, y la respuesta ya salió. Una inundación
+    desde muchas IP no agota el pool de las clínicas.
+  - **Cola acotada:** esperan turno como mucho `PASSWORD_RESET_MAX_QUEUE`
+    (1000, de 1 a 10000) por proceso. Los que no caben (`QUEUE_FULL`) y los
+    que llevan más de 30 s esperando cuando les llega el turno
+    (`QUEUE_EXPIRED`) se descartan en silencio, sin tocar la BD. Se registra
+    `password_reset.dropped` como mucho una vez cada 10 s, solo con
+    recuentos (`queueFull`, `queueExpired`, `queued`, `concurrency`), nunca
+    el email ni la clínica.
 - `POST /auth/reset-password/check` `{ token }` → `{ status: VALID | EXPIRED | USED | INVALID }`.
 - `POST /auth/reset-password` `{ token, password }` → 204. Exige la política de
   contraseña (8–200), consume el token (un solo uso, check-and-set), invalida
@@ -534,6 +589,9 @@ base>` (`TenantLinkBaseService` / `tenantLinkHost`). El enlace de
   cambio de contraseña). Errores en español: 404 (inexistente, reemplazado o de
   otra clínica) y 410 (caducado o usado). Deja un evento `PASSWORD_RESET` en la
   auditoría, sin datos sensibles.
+  **SEC-067:** no borra el contador de códigos MFA fallidos (solo lo borra un
+  código correcto): quien controla el buzón pero no el móvil no gana intentos
+  restableciendo la contraseña.
 - Token: 32 bytes aleatorios (base64url); en `user_tokens` solo su SHA-256,
   caduca a los 30 min y pedir otro invalida los anteriores. Tabla global de
   usuario (sin `tenantId` ni RLS, como `users`): el enlace solo vale en el host
@@ -723,10 +781,10 @@ UPDATE … WHERE` no en espera) y el login correcto lo borra después. Si se
   `mhv_tenant_patient_id_key`, creado CONCURRENTLY) e inalterable como la
   historia (DX-038).
 - **Seed demo**: Jorge Eduardo Ramírez (prótesis valvular) requiere
-  premedicación y entra primero en «En clínica» hoy; Ana María Zapata tiene la
+  premedicación y entra primero en «En clínica» hoy; Ana María Zambrano tiene la
   anamnesis de hace 14 meses (caducada); la de Gustavo Ríos es de hace 13
   meses con «Sin cambios hoy» de la segunda dentista; quince pacientes no
-  tienen anamnesis (p. ej. Daniela Montoya).
+  tienen anamnesis (p. ej. Daniela Morales).
 
 ## Anamnesis previa a la cita por enlace (DX-099)
 
@@ -913,6 +971,105 @@ la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
 - **Pendiente** (DX-422): el PDF del presupuesto firmado generado en el
   servidor; hoy el paciente imprime o guarda la copia desde la página.
 
+### Moneda del precio de lista (DX-502)
+
+El precio de lista del presupuesto es el `defaultPrice` del catálogo, que no
+lleva moneda. Al dar de alta un ítem, la API congela en
+`treatment_plan_items."catalogCurrency"` la moneda del catálogo: la común de
+TODAS las sedes activas de la clínica (no solo las del usuario), o `NULL` si
+no hay una común. No cambia después (trigger
+`treatment_plan_items_catalog_currency_frozen`) y las alternativas la copian.
+
+- El presupuesto se compone como **v4** (con `PLAN_QUOTE_COMPOSE_V4`, por
+  defecto `true`; ver «Despliegue» más abajo): cada ítem lleva `listPriceCurrency`
+  (sellado en el hash) y el «Ahorro por convenio» solo suma los ítems cuyo
+  precio de lista está en la moneda del plan (nunca resta monedas distintas).
+  La v4 sella también los datos fiscales de la clínica (DX-019) o `null` si
+  no los tiene; la v3 de DX-019 ya no se compone.
+- Las fotos v1/v2/v3 ya firmadas conservan su hash; al leerlas, la API
+  completa `listPriceCurrency` con la del ítem. Un enlace a distancia v2/v3
+  enviado antes del despliegue se recompone con la regla de entonces (v3 con
+  datos fiscales, v2 sin ellos) y sigue valiendo; la página pública le
+  completa `listPriceCurrency` con la de los ítems del plan vivo (solo para
+  mostrarla: el enlace vale si el plan es la foto, y no está sellada en v2/v3).
+- Se expone en `TreatmentPlanItemDto.catalogCurrency`,
+  `PriceQuoteDto.catalogCurrency`, `PlanQuoteItemDto.listPriceCurrency` y
+  `PublicBudgetItemDto.listPriceCurrency`.
+- Relleno: `20261128090100_dx502_plan_item_catalog_currency_backfill`
+  (moneda común de las sedes activas de cada clínica; sin común, `NULL`).
+  Solo el relleno puede poner la moneda a un ítem que no la tenía: fija
+  `app.dx502_backfill = 'on'` en cada lote y los triggers lo exigen.
+- **Despliegue y vuelta atrás: `PLAN_QUOTE_COMPOSE_V4`.** Una réplica sin
+  DX-502 no sabe leer una foto v4 (`parseQuoteContent` lanza y la ruta
+  responde 500: presupuesto imprimible, aceptación en la clínica, enlace
+  público y su firma). Con `PLAN_QUOTE_COMPOSE_V4=false` la API compone los
+  presupuestos nuevos exactamente como antes de DX-502 (v2, o v3 con datos
+  fiscales, con los mismos hashes), y sigue LEYENDO y verificando las v4. La
+  variable solo admite `true` o `false` (`validateEnv`); sin definir, `true`.
+  - **Despliegue _rolling_ desde una versión anterior a DX-502:**
+    1. `prisma migrate deploy` (aditiva: las réplicas viejas siguen
+       funcionando con la columna nueva).
+    2. Desplegar DX-502 con `PLAN_QUOTE_COMPOSE_V4=false`: réplicas viejas y
+       nuevas conviven, porque ninguna emite v4.
+    3. Con TODAS las réplicas en DX-502, repetir el relleno (ítems que dieron
+       de alta las réplicas viejas; ver el punto siguiente). Repetirlo SOLO
+       con `PLAN_QUOTE_COMPOSE_V4=false`: enviar un enlace no toma bloqueo, y
+       con el flag en `true` un enlace v4 enviado a la vez que el relleno
+       cambiaría de hash («el presupuesto cambió» para el paciente).
+    4. Poner `PLAN_QUOTE_COMPOSE_V4=true` (o quitarla) y reiniciar en
+       _rolling_: desde ahí se emiten v4.
+  - **Vuelta atrás:** primero `PLAN_QUOTE_COMPOSE_V4=false` en todas las
+    réplicas (dejan de emitirse v4); después se puede volver a una versión
+    anterior a DX-502. Las v4 ya emitidas (firmadas o enlaces enviados)
+    siguen necesitando una réplica con DX-502 para leerse: mientras existan,
+    la versión anterior da 500 en ellas. Con DX-502 desplegado y el flag en
+    `false`, todo sigue funcionando.
+  - Cambiar el flag no invalida nada firmado ni enviado (cada foto se
+    verifica con su versión). Un presupuesto que se MOSTRÓ en la clínica con
+    un valor y se acepta con el otro da 409 («el presupuesto cambió»): se
+    vuelve a mostrar.
+- **Ítems creados por réplicas viejas tras el relleno.** Los ítems que dé de
+  alta una réplica sin DX-502 entre el relleno y el cambio de réplicas quedan
+  con `catalogCurrency` NULL (la web oculta su precio de lista con la nota).
+  El relleno es idempotente (solo toca ítems sin moneda) y, cuando ya no
+  queda ninguna réplica vieja, se repite ejecutando su `migration.sql` con el
+  owner de las migraciones (fuera de una transacción: hace COMMIT por lote):
+  ```bash
+  psql "$DIRECT_URL_SIN_SCHEMA" -X -v ON_ERROR_STOP=1 \
+    -f prisma/migrations/20261128090100_dx502_plan_item_catalog_currency_backfill/migration.sql
+  ```
+  `$DIRECT_URL_SIN_SCHEMA` es `DIRECT_URL` sin `?schema=public` (psql no lo
+  acepta). **Repetirlo no invalida enlaces v4 pendientes:** se salta los
+  planes con un enlace a distancia v4 sin firmar, anular ni caducar (su foto
+  selló esos ítems sin moneda, y rellenarlos cambiaría el presupuesto vivo);
+  esos ítems se rellenan en una pasada posterior, cuando el enlace ya no
+  está pendiente. Un presupuesto v4 que solo se MOSTRÓ en la clínica (sin
+  enlace) sí cambia: aceptarlo da 409 y se vuelve a mostrar. Siguiendo el
+  despliegue de arriba (relleno antes de activar la v4) no hay ninguno. Si el relleno de la migración se cortó a medias (migración
+  fallida), basta `npx prisma migrate resolve --rolled-back
+  20261128090100_dx502_plan_item_catalog_currency_backfill` y
+  `npx prisma migrate deploy`.
+- DX-513: un precio por debajo de un catálogo en otra moneda CONOCIDA (y que
+  no sale de una lista) ya no es un descuento: ni tope, ni motivo, ni informe.
+  Con la moneda desconocida (NULL) cuenta como antes. Cambiar la moneda de un
+  plan con ítems los vuelve a medir (403/422/409 si una rebaja aparece o se
+  escondería). Nota de despliegue: los ítems antiguos cuya moneda rellenada
+  por DX-502 difiere de la del plan salen como rebaja de los informes de
+  periodos pasados (su `discount` propio sigue contando).
+- **Moneda del catálogo fijada por la clínica (DX-502-bis).** Una clínica con
+  sedes en varias monedas no tiene una común y sus ítems quedarían sin moneda
+  del catálogo (sin precio de lista ni «Ahorro por convenio»). El ADMIN la
+  fija en Ajustes › Monedas: `tenants."catalogCurrency"` (opcional, ISO 4217
+  validado contra `currencies`, FK; `PATCH /clinic/settings`
+  `{ catalogCurrency }`, auditado en `CLINIC_PROFILE`; `null` la quita). Si
+  está, es la que se congela en los ítems NUEVOS (`clinicCatalogCurrency`);
+  si no, la regla de arriba. No convierte nada, no toca lo ya congelado ni
+  ningún importe, y con ella la regla de descuentos de DX-513 se aplica sola
+  (misma moneda que el plan: tope y motivo; otra: libre). La demo la fija en
+  USD. El relleno de DX-502 no la mira: es para ítems anteriores a DX-502.
+  Migraciones `20261129090000_dx502b_tenant_catalog_currency` (columna NULL y
+  FK NOT VALID; `tenants` y `currencies` no tienen RLS) y `…090100_…_fk_validate`.
+
 ### PDF firmado generado en el servidor (DX-422)
 
 - Cuando el profesional firma en la app un consentimiento firmado a distancia
@@ -937,16 +1094,97 @@ la clínica (DX-012/DX-040). Migraciones `20261106160000_dx415_enums` y
   (`GET /patients/:id/documents/:docId/url/download`, URL firmada y auditada).
 - Reintentos: backoff exponencial de la cola, 6 intentos; el último deja
   `FAILED` con un código técnico (`lastErrorCode`, nunca un mensaje). Un origen
-  inválido (hash que no casa, sede sin zona o formato, texto que las fuentes
-  estándar no pintan: `UNSUPPORTED_CHARACTERS`) es `FAILED` sin reintento: nunca
+  inválido (hash que no casa, sede sin zona o formato, texto que ninguna fuente
+  del PDF pinta: `UNSUPPORTED_GLYPHS`) es `FAILED` sin reintento: nunca
   se archiva un documento alterado. `POST /patients/:id/consents/:consentId/signed-pdf/retry`
   (los cuatro roles, 202; 409 si no está en error; 404 de otra clínica) lo
   vuelve a encolar.
 - La lista de la ficha (`GET …/signature-requests`) trae `signedPdfStatus` y
   `signedPdfDocumentId`.
-- Fuentes: Helvetica (WinAnsi), que cubre el español, el portugués y el resto
-  de lenguas de Europa occidental. Un texto con otros alfabetos queda `FAILED`
-  con `UNSUPPORTED_CHARACTERS` hasta que se embeba una fuente Unicode.
+- Fuentes: ver «Fuentes Unicode del PDF firmado (DX-459)».
+
+### Fuentes Unicode del PDF firmado (DX-459)
+
+- Si TODO lo que pinta el PDF cabe en WinAnsi (español, portugués y el resto de
+  Europa occidental), se pinta como siempre con las fuentes estándar
+  (Helvetica, sin fuente embebida): **las mismas llamadas a pdfkit y los mismos
+  bytes** que antes de DX-459, así que la huella (`patient_documents.sha256`)
+  de un PDF latino no cambia. Lo fija
+  `signed-consent-pdf.latin-pin.spec.ts` (SHA-256 de un PDF latino tomado con
+  el renderer de DX-422).
+- Si algún texto (título, cuerpo, nombres, sede, navegador, un formato de
+  fecha) sale de WinAnsi, el documento ENTERO se pinta con fuentes **Noto**
+  (SIL OFL 1.1) embebidas en **subconjunto** (solo los glifos usados): Noto
+  Sans (latín, griego, cirílico; regular y negrita) y un **subconjunto** de
+  Noto Sans CJK SC regular (la negrita CJK usa la regular): GB2312 (6763 hanzi,
+  chino simplificado), JIS X 0208 (6356 kanji), Big5 nivel 1 (5401 hanzi
+  tradicionales de uso común), las 11 172 sílabas hangul, kana, puntuación y
+  formas de ancho completo (un ideograma con variantes regionales sale con la
+  forma china simplificada). Cada letra va con la primera de esas fuentes que
+  la tiene.
+- **Hueco conocido del subconjunto**: ideogramas fuera de GB2312/JIS X 0208/
+  Big5-1, p. ej. caracteres de nombres de pila chinos modernos (堃, 喆, 赟) o
+  variantes de apellidos japoneses (髙 de 髙橋). Ese consentimiento queda
+  `FAILED` con `UNSUPPORTED_GLYPHS` (definitivo, visible en la ficha), nunca un
+  PDF con huecos. Si una clínica lo necesita, el siguiente paso es añadir la
+  lista china de 8105 caracteres de uso general (通用规范汉字表, de una fuente
+  revisada) y regenerar el subconjunto (`src/shared/pdf/fonts/README.md`).
+- Se niegan siempre (`FAILED` con `UNSUPPORTED_GLYPHS`, sin reintento: nunca
+  se archiva un texto que se VEA distinto del firmado), aunque una fuente
+  tenga el glifo:
+  - controles (tabulador, `\r` suelto…);
+  - caracteres de formato `\p{Cf}` (marcas y aislamientos bidi U+200E/F,
+    U+202A–E, U+2066–9; espacios y uniones de ancho cero; U+FEFF…) y los
+    separadores U+2028/U+2029. No se quitan en silencio: eso cambiaría el
+    texto firmado y hasheado. Excepción: el guion opcional U+00AD, que está en
+    WinAnsi y Helvetica pinta visible como siempre; en un documento con
+    fuentes embebidas (que lo pintan como espacio) se niega;
+  - escrituras de derecha a izquierda (árabe, hebreo, siríaco, thaana, n'ko,
+    samaritano, mandeo, adlam, hanifi rohingya, yazidí): sin maquetación bidi
+    (fuera de alcance), pintadas en orden lógico, una línea mixta podría
+    leerse en otro orden que el firmado. Se aceptarán cuando haya bidi;
+  - lo que ninguna fuente tiene (emoji, devanagari, tailandés…).
+- Los PDF que quedaron `FAILED` con el código anterior
+  (`UNSUPPORTED_CHARACTERS`) los reintenta UNA vez el barrido retroactivo de
+  DX-443 (`consents.signed-pdf-backfill`): vuelven a `PENDING` con
+  `notifyPatient = false` (UPDATE condicional; clave
+  `consents.signed-pdf:<id>:unicode-fonts`), así que **no se escribe al
+  paciente** al archivarlos; la clínica puede usar «Reenviar copia». Ese
+  código ya no se emite (los que vuelvan a fallar, p. ej. un texto árabe,
+  quedan con `UNSUPPORTED_GLYPHS`): no se reintenta en bucle.
+- Ficheros y tamaño (en el repo y en la imagen, en `src/shared/pdf/fonts/`,
+  que `nest build` copia a `dist/shared/pdf/fonts/`; licencia en `OFL.txt`,
+  origen y SHA-256 en su `README.md`):
+
+  | Fichero | Bytes |
+  | --- | ---: |
+  | `NotoSans-Regular.ttf` | 431 364 |
+  | `NotoSans-Bold.ttf` | 432 376 |
+  | `NotoSansCJKsc-Regular-subset.otf` | 7 561 140 |
+  | **Total** (con `OFL.txt` y su `README.md`) | **8 433 954 (≈ 8,0 MiB)** |
+
+  La imagen crece ≈ 8,0 MiB sin comprimir (≈ 6,3 MiB en gzip, lo que se
+  descarga del registro). Tope: **10 MiB** para `src/shared/pdf/fonts/`; lo
+  comprueba `unicode-fonts.spec.ts`. fontkit, el motor de fuentes, ya venía con
+  pdfkit (ahora declarado y fijado, `2.0.4`): 0 bytes más de dependencias.
+- Memoria: cada fuente se abre la primera vez que hace falta y se queda en
+  memoria (la CJK, ≈ 7,2 MB, solo si algún PDF la necesita). Medido: 500 PDF
+  con CJK seguidos, heap vivo estable (≈ 31 MB tras GC); un PDF con CJK pesa
+  ≈ 100 KB.
+- Alternativas medidas y descartadas (coste en el pack de git, que es para
+  siempre; en la imagen, el tamaño del fichero):
+  - la CJK entera (16,4 MB; ≈ 13,0 MiB de pack): todo el CJK, pero +59 % de
+    pack;
+  - subconjuntos sin todo el hangul o sin Big5-1 (4,7–5,6 MiB de pack): pierden
+    coreano o chino tradicional; con todo GBK (≈ 10,2 MiB de pack) casi tanto
+    como la entera;
+  - el subconjunto regional `NotoSansSC` (8,3 MB): sin hangul;
+  - paquetes npm (`@fontsource/noto-sans-sc`, 75 MB en 102 trozos WOFF2 por
+    peso; `@expo-google-fonts/noto-sans-sc`, 96 MB en 9 pesos; ninguno con
+    hangul) o descargarla en el build: más imagen, una cadena de >100 fuentes o
+    dependencia de red en build, CI y local;
+  - la colección `.ttc`, la negrita CJK o guardarla comprimida (brotli): más
+    tamaño, o descomprimir en arranque para ahorrar poco.
 
 ### Copia del PDF firmado al paciente y PDF retroactivos (DX-443)
 
@@ -1319,7 +1557,7 @@ siguen admitiendo NULL hasta la fase 2.
 | ---------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | API antigua                                          | BD de fase 1                                          | INSERT de sede sin columnas nuevas → filas NULL, las rellena el barrido (desde DX-312, el paso 0 del trigger rechaza ese INSERT); lee `location_schedules.timezone`, que el código nuevo mantiene igual a `Location.timeZone` (R20)                                              |
 | Web antigua                                          | API nueva                                             | `PUT /locations/schedule` con `timezone` igual a la zona de la sede se acepta; `LocationDto` solo gana campos. El registro sin campos de sede (forma legada) es 400 con `field: locationCountry` desde DX-312                                                                    |
-| Web nueva                                            | API antigua                                           | `LocationDto` sin `currency` → `SedeConfigError`, nunca COP                                                                                                                                                                                                                      |
+| Web nueva                                            | API antigua                                           | `LocationDto` sin `currency` → `SedeConfigError`, nunca USD                                                                                                                                                                                                                      |
 | Enlace de registro de una réplica antigua            | API nueva                                             | Con los campos de sede, `verify` lo acepta. Sin ellos (forma legada), 410 `REGISTRATION_LINK_EXPIRED` sin consumirlo, desde DX-312                                                                                                                                               |
 | Web antigua                                          | API antigua (`PUT /locations/schedule` con otra zona) | La zona se guarda solo en `location_schedules.timezone`, que el código nuevo no lee: se pierde. El ADMIN la corrige en Ajustes → Sedes                                                                                                                                           |
 | Registro pendiente con los cuatro campos (API nueva) | `verify` en una réplica antigua                       | Desde DX-312, el paso 0 del trigger de `locations` rechaza la sede sin datos regionales que crearía esa réplica: el alta se deshace entera, la respuesta es un 400 genérico, no se crea ninguna clínica y el pendiente queda consumido (ver «País de la sede ISO 3166 (DX-312)») |
@@ -1327,8 +1565,9 @@ siguen admitiendo NULL hasta la fase 2.
 La lista ISO de monedas amplía las aceptadas en listas, gastos, caja y planes;
 el proveedor de tasas puede no tener alguna y esos abonos cuentan en
 `unconvertedPaymentsCount`. La demo (`npm run seed:demo`) crea sus sedes con
-valores explícitos y ya revisadas: `USD`, `America/Caracas`, `es-VE` y `VE`
-(una clínica venezolana que trabaja en USD; son datos, no reglas).
+valores explícitos y ya revisadas, cada una con su país, moneda, zona, locale
+y reloj (ver la tabla de sedes de la demo en el paso del `seed:demo`; son
+datos, no reglas).
 
 ### Fase 2 (ticket aparte)
 
@@ -1524,6 +1763,9 @@ patient_ledgers_refresh(ARRAY['<tenant>']::uuid[], ARRAY['<paciente>']::uuid[])`
   del estado de cuenta, que crece con los deudores.
 - **Sin datos clínicos**: ni ítems, ni dientes, ni procedimientos; solo
   importes, fechas y el contacto (con `whatsApp` en E.164 para `wa.me`).
+- **«Mi día» (OPS-056)** solo pide los totales (`summary`): las mismas filas y
+  el mismo cálculo, sin página, orden, contactos ni cobranza, y con una lectura
+  tras otra (ver «Conexiones por petición: «Mi día»»).
 
 ## Compromiso de pago que se reabre al anular su abono (DX-215)
 
@@ -1583,7 +1825,7 @@ regla de SEC-013) un abono que contaba para él, ya no es verdad que se pagó:
   sede del request o la principal).
 - **«Descuento %» en bloque**: el % de cada precio, redondeado a los
   `roundingDigits` de la moneda del plan (`currencies.rounding_digits`, ver
-  «Redondeo de importes», DX-340: COP, JPY, RSD… sin decimales; EUR, USD a
+  «Redondeo de importes», DX-340: ALL, JPY, RSD… sin decimales; EUR, USD a
   céntimos) y nunca por encima del tope del rol ítem a ítem (si el redondeo lo
   pasara, baja a la unidad que lo respeta). Todo o nada, en una transacción;
   un evento de auditoría (`reason` BULK_DISCOUNT) sin importes ni la nota.
@@ -1616,7 +1858,9 @@ discount`, en % del precio de referencia (el de catálogo si el precio está
   y conserva la firma de la rebaja. En un plan aceptado el precio no baja (409).
   El informe y su CSV muestran precio de catálogo, rebaja de precio, descuento
   del ítem y el total (bruto = precio de referencia); el índice parcial pasa a
-  `treatment_plan_items_tenant_effective_discount_at_idx`.
+  `treatment_plan_items_tenant_effective_discount_at_idx`, que DX-513-bis
+  sustituyó por `treatment_plan_items_tenant_effective_ref_discount_at_idx`
+  (incluye la referencia convertida a la moneda del plan).
 - **Rebaja de convenio en el informe (SEC-047)**. El informe y su CSV
   incluyen también los ítems resueltos por convenio con rebaja (`basePrice` >
   `catalogPrice`), aunque no tengan descuento propio, con `agreementName`,
@@ -1638,6 +1882,33 @@ discount`, en % del precio de referencia (el de catálogo si el precio está
   `20261024120100_sec047_plan_item_agreement_reduction_idx` (parcial
   `treatment_plan_items_tenant_agreement_reduction_at_idx`, CONCURRENTLY).
   e2e: `test/discounts-agreement.e2e-spec.ts`.
+- **Rebaja de convenio entre monedas en las listas (DX-513-ter)**. Al dar
+  de alta un ítem de lista de CONVENIO (`AGREEMENT_PRICE_LIST`) con el
+  catálogo en otra moneda conocida, la API pide la tasa del día (la misma
+  fuente, día y redondeo único que DX-513-bis) sin exigirla: con ella congela
+  `basePriceInPlan` (el catálogo convertido) y la tasa en la fila; sin ella, o
+  con cualquier error al pedirla (se avisa con el nombre del error), el ítem
+  se crea igual, sin base. El tope sigue midiéndose contra el precio de lista.
+  El informe mide la rebaja de convenio con lo congelado (`basePriceInPlan` −
+  `referencePriceInPlan`) y nunca convierte al consultar; un ítem de convenio
+  con el catálogo en otra moneda conocida y sin base congelada (sin tasa, o
+  anterior) sale con `agreementUnmeasured: true`, sin importe, y se cuenta
+  aparte en `agreementUnmeasuredTotals` por moneda («sin referencia
+  comparable»; no suma en `agreementTotals`). Contrato aditivo: la tasa de la
+  base va en `baseRate` (ítem del plan y fila del informe); `referenceRate`
+  / `rate` siguen siendo null en las listas. CSV: las columnas no se mueven,
+  «Rebaja por convenio» va vacía (no `0.00`) en las filas sin medir, la tasa
+  de la base rellena las de tasa (cabecera «Tasa (por 1 USD: catálogo /
+  plan)») y al final van «Precio sin convenio en la moneda del catálogo» y
+  «Rebaja por convenio medida». Nota de despliegue: los informes de periodos
+  pasados GANAN filas señaladas (ítems de convenio entre monedas que antes no
+  salían); sus importes y totales no cambian. Migraciones
+  `20261202090000_dx513t_agreement_ref_reduction_idx` (crea
+  `treatment_plan_items_tenant_agreement_ref_reduction_at_idx` CONCURRENTLY)
+  y `20261202090100_dx513t_agreement_reduction_idx_drop_old` (quita el de
+  SEC-047). Si alguna falla: `DROP INDEX CONCURRENTLY IF EXISTS` del índice
+  que creaba, `npx prisma migrate resolve --rolled-back <migración>` y repetir
+  `migrate deploy`.
 - **Estado del plan en la transacción (BE-036)**: alta, edición y bloque
   bloquean la fila del plan (FOR SHARE; el ítem, FOR UPDATE), la releen y solo
   entonces validan si está aceptado, firmado o cerrado. Una aceptación sin
@@ -1693,37 +1964,90 @@ CLDR (DX-313); el campo se renombró a `cldrDigits` porque no son los de ISO.
 
 **Decisión de producto (vigente).** Los importes ya guardados no cambian: no se
 reescribe ni recalcula ningún documento histórico (la migración solo toca la
-tabla de referencia), y `rounding_digits` **congela** la regla anterior: 0 para
-las monedas sin decimales en CLDR 47 y para el conjunto anterior a G1 (COP,
-CLP, JPY, KRW, PYG); el resto, sus minor units. Así ningún descuento ni precio
-nuevo cambia. Donde ISO y la regla difieren (minor units 2, redondeo 0): AFN,
-ALL, COP, IRR, KPW, LAK, LBP, MGA, MMK, RSD, SOS, SYP, YER. Caso de referencia:
-**123,45 RSD × 7,5 % = 9,25875 → 9 RSD** (vigente, redondeo 0) frente a
-**9,26 RSD** si se redondeara a sus 2 minor units ISO (CLDR 48.1 separa
-`digits` 2 y `cashDigits` 0). Se mantiene 0 porque cambiarlo alteraría
-resultados actuales; pasar RSD/COP (u otra) a 2 es una **decisión pendiente
-del dueño**, compatible con los contratos (el campo ya existe) y sin tocar
-documentos guardados. Cómo se aplica, en este orden: (1) cambiar la regla en
-`prisma/scripts/generate-currency-digits.ts` y regenerar
-`prisma/reference/currency-digits.ts`; (2) una migración de datos
+tabla de referencia). `rounding_digits` sigue la regla: **la unidad de
+redondeo de una línea es la unidad más pequeña EN USO de la moneda**. Es 0
+decimales en toda moneda sin minor units ISO y en las monedas cuya fracción no
+se usa (ni monedas ni billetes; precios y cobros en unidades enteras), y sus
+minor units ISO en el resto (USD y VES, a céntimos). Donde ISO y la regla
+difieren (minor units 2, redondeo 0) son **13 monedas** de
+`prisma/reference/currency-digits.ts`: AFN, ALL, IRR, KPW, LAK, LBP, MGA, MMK,
+RSD, SOS, SYP, YER y una más de la referencia. **DX-488 decidió dejarlas en
+0**: ninguna tiene la fracción en uso y el CLDR actual (48.1) da 0 decimales a
+12 de ellas, así que redondear un descuento a céntimos que nadie paga no aporta
+nada y haría visibles como deuda o saldo a favor residuos de menos de una
+unidad. Caso de referencia: **123,45 RSD × 7,5 % = 9,25875 → 9 RSD** (vigente)
+frente a 9,26 RSD si se redondeara a sus 2 minor units ISO. Lo fija
+`src/shared/money/rounding-digits-decision.spec.ts`, que enumera las 13 y falla
+si una regeneración las cambia. Solo se redondean a esta unidad los
+descuentos, los precios por convenio y los ajustes por medio de pago; precios,
+abonos y gastos conservan los céntimos con que se registraron. El generador
+(`prisma/scripts/generate-currency-digits.ts`) se niega a regenerar si cambia
+la versión de CLDR: es el momento de revisar esta lista. Si un día se cambia la
+de una moneda, en este orden: (1) cambiar la regla en el generador y
+regenerar `prisma/reference/currency-digits.ts`; (2) una migración de datos
 `UPDATE "currencies" SET "rounding_digits" = … WHERE "code" IN (…)`; (3)
-desplegar. Las réplicas leen el valor nuevo en ≤ 5 minutos (caché con TTL)
-o al reiniciar. El seed **no** pisa los decimales de una moneda que ya existe
-(solo los escribe al crearla), así que volver a sembrar no deshace el cambio;
-el oráculo congelado de los tests fallará a propósito para esa moneda y hay
-que actualizar el test con la decisión.
+actualizar la prueba de la decisión y el oráculo congelado (fallarán a
+propósito para esa moneda); (4) desplegar. Las réplicas leen el valor nuevo
+en ≤ 5 minutos (caché con TTL) o al reiniciar, y el seed **no** pisa los
+decimales de una moneda que ya existe.
 
 **Límite de precisión.** Los importes son `Decimal(14,2)` (`Decimal(12,2)` en
 algunas tablas): ninguna moneda puede tener más de 2 decimales. Las de 3 de
 ISO (BHD, IQD, JOD, KWD, LYD, OMR, TND) no están en el catálogo (la FK las
 rechaza), la CHECK `currencies_minor_units_check` rechaza `minor_units > 2` y
 `roundingDigits()` lanza un error explícito: nunca se truncan en silencio.
-Las cuotas de un plan de pagos se siguen repartiendo al céntimo (también en
-JPY): repartirlas en unidades de la moneda es otra decisión pendiente.
+
+**Cuotas en unidades de la moneda (DX-488).** Un plan de pagos nuevo reparte
+lo financiado en unidades de los `roundingDigits` de su moneda
+(`generateSchedule`, `src/modules/payment-plans/application/schedule/`): con
+`unit = 10^(2 − roundingDigits)` céntimos, las cuotas 1…n−1 valen
+`floor(financiadoCéntimos / unit / n) · unit` y la última el resto (también los
+céntimos sueltos si lo financiado los tiene). La suma es exacta. JPY 10 000 en
+3 cuotas = 3 333, 3 333 y 3 334 (antes 3 333,33, 3 333,33 y 3 333,34, y dos
+pagos de ¥3 333 dejaban la 2.ª vencida por ¥0,66); JPY 10 000,50 en 3 = 3 333,
+3 333 y 3 334,50. En USD y VES (2 dígitos) la unidad es el céntimo y el
+resultado es idéntico al de antes (prueba de propiedades en
+`generate-schedule.spec.ts`). Las cuotas ya guardadas no cambian: nada vuelve a
+repartir un plan existente y no hay migración. La vista previa del modal
+«Crear plan de pagos» de la web aplica la misma regla.
+
+**Sin redondeos sueltos (DX-488).** Fuera de `src/shared/money` ya no queda
+ningún `Math.round(x * k)` ni `.toFixed(` de importes: se redondea con `round2`,
+`roundToDigits` o `roundCents`, y se escribe un importe (claves de
+idempotencia, SQL `numeric`, CSV, presupuestos) con `amountText`. Lo vigila
+`src/architecture/no-loose-money-rounding.spec.ts` (mira `src` y `prisma/demo`; usa `git ls-files`: se
+ejecuta tras commitear); lo que no es dinero (porcentajes, dosis, pesos, tasas
+de cambio, minutos) está en su lista blanca con la razón de cada entrada, y
+una entrada que ya no coincide con nada también falla. Se migró sin cambiar
+ningún resultado.
+
+**Promedios de importes exactos (DX-488).** Un promedio de dinero se calcula
+en céntimos enteros: `averageCents(totalCéntimos, n) = floor((2·totalCéntimos
++ n) / (2·n))`, la mitad hacia arriba exacta, y `averageAmount(total, n)` en
+unidades (`src/shared/money/money.ts`). Lo usan el honorario medio y el medio
+de catálogo de «Producción por procedimiento» y el ticket medio de «Comparar
+sedes». Las sumas (bruto, descuentos, neto y totales) son céntimos exactos con
+`round2`. Se borró `round2WithEpsilon`: sumar `Number.EPSILON` solo acertaba
+algunos empates pequeños (1,005 → 1,01) y fallaba el resto (2,135 → 2,13;
+4,015 → 4,01), y `round2` sobre el cociente en coma flotante también falla
+empates. Ahora 2,135 → 2,14 y 4,015 → 4,02; ningún promedio sin empate ni
+ninguna suma cambia. La guarda rechaza un `Math.round(… Number.EPSILON …)`.
+
+**Importes en los CSV (DX-488).** Todos los CSV escriben los importes con los
+decimales de la **pantalla**, con un solo helper (`csvAmount` de
+`src/shared/csv/csv-cells.ts`, la regla de `moneyWithCode` de la web): 0
+decimales solo si el importe es entero y la moneda se pinta sin decimales
+(CLDR, `CLDR_ZERO_FORMAT_DIGITS`); si no, 2. Nunca con `roundingDigits`, que
+redondea descuentos y no debe comerse céntimos guardados: un gasto de
+150 000,50 RSD con 0,45 pagado sale `150000.50,0.45,150000.05` (importe =
+pagado + pendiente; antes `150001,0,150000`), JPY 1 000 sale `1000` y JPY
+1 000,50 `1000.50`. Lo usan gastos, resumen de gastos, descuentos, caja,
+cartera, «Comparar sedes», «Producción por procedimiento» y «Cobrado sin
+imputar».
 
 **Paridad API/web.** `src/shared/money/rounding-vectors.json` (copia byte a
 byte en la web, `src/lib/money/rounding-vectors.json`, vigilada por
-`scripts/check-api-reference-sync.mjs` de la web) fija RSD, JPY, EUR y COP con
+`scripts/check-api-reference-sync.mjs` de la web) fija RSD, JPY, EUR y ALL con
 123,45 × 7,5 %, límites del descuento y total de líneas; lo comprueban
 `rounding-vectors.spec.ts` (API) y `line-rounding.test.ts` (web).
 
@@ -1835,7 +2159,8 @@ dice qué sedes existen),
 - **Columnas** por procedimiento (categoría y código) y moneda del plan:
   cantidad, bruto (Σ precio), descuentos (Σ descuento), neto, honorario medio
   (neto ÷ cantidad), medio de catálogo (Σ `basePrice`, el precio de catálogo
-  congelado en el ítem por DX-105, ÷ los ítems que lo tienen) y diferencia %
+  congelado en el ítem por DX-105, ÷ los ítems que lo tienen; los dos medios,
+  exactos en céntimos con la mitad hacia arriba: `averageAmount`) y diferencia %
   ((Σ neto − Σ catálogo) ÷ Σ catálogo, solo sobre los ítems con catálogo).
   Subtotal por categoría y total **por moneda**; nunca se mezclan monedas.
 - **«Sin atribuir»** (como DX-305), en dos partes:
@@ -2121,6 +2446,89 @@ módulo `src/modules/implants`, tabla `patient_implants`.
 - **Demo**: implante y pilar del 36 del paciente del plan de implante y otro
   paciente con el mismo lote `DEMO-LOT-2026A`.
 
+## Equipos biomédicos por sede (DX-542)
+
+Inventario de dotación de cada sede con la hoja de vida de cada equipo y su
+programa de mantenimiento preventivo (sin citar la norma de ningún país),
+módulo `src/modules/equipment`, tablas `equipment` y `equipment_maintenances`.
+
+- **Solo ADMIN** lee y escribe (`EQUIPMENT_ROLES`); el resto recibe 403
+  «Solo administración gestiona los equipos biomédicos.». No hay un rol de
+  gestión de sede: el ADMIN siempre tiene todas las sedes.
+- **Equipo**: sede obligatoria, sillón opcional de ESA sede (activo; otra sede
+  → 400 «El sillón no es de la sede del equipo.», otra clínica → 404), nombre,
+  tipo (`AUTOCLAVE|DENTAL_UNIT|XRAY|COMPRESSOR|CURING_LIGHT|ULTRASONIC_SCALER|OTHER`),
+  marca, modelo, nº de serie, registro sanitario (texto libre), clase de
+  riesgo (`I|IIA|IIB|III`), fecha de adquisición (no futura en la sede),
+  periodicidad del preventivo en meses (1–120) y notas. Trasladarlo a otra
+  sede quita el sillón salvo que venga uno de la sede nueva.
+- **Endpoints**: `GET /equipment?locationId&status=ACTIVE|RETIRED|ALL&query&page&pageSize`
+  (por nombre; sin `locationId`, la sede de `X-Location-Id` o todas),
+  `POST /equipment`, `GET /equipment/:id` (hoja de vida: el equipo y TODOS sus
+  mantenimientos en orden cronológico, también los anulados),
+  `PATCH /equipment/:id`, `POST /equipment/:id/retire` (`{ retiredOn?, reason }`;
+  por defecto hoy en la sede; no se deshace: 409 la segunda vez y el equipo dado
+  de baja ya no se edita ni recibe mantenimientos), `POST /equipment/:id/maintenances`
+  y `POST /equipment/:id/maintenances/:maintenanceId/void` (`{ reason }`, 409 la
+  segunda vez). No hay DELETE.
+- **Mantenimiento**: `PREVENTIVE|CORRECTIVE|CALIBRATION`, fecha (no futura en la
+  sede ni anterior a la adquisición del equipo), técnico, empresa, descripción, costo opcional SIEMPRE con su moneda
+  (ISO 4217 del catálogo), próximo explícito (posterior a la fecha y a 10 años
+  como mucho) y quién lo
+  registró. Inalterable (trigger `dx_equipment_maintenances_immutable`): solo
+  se anula, una vez. Un preventivo sin próximo explícito deja la fecha + la
+  periodicidad del equipo.
+- **Próximo y estado**: el próximo preventivo es el que fijó el último
+  preventivo vivo (o su fecha + la periodicidad actual); sin preventivos, la
+  adquisición + la periodicidad; si no, «sin programar». `maintenanceStatus`
+  se cuenta en el día de la sede del equipo: `OVERDUE` (antes de hoy),
+  `DUE_SOON` (hoy a +30 días), `UP_TO_DATE`, `UNSCHEDULED`; `null` si está dado
+  de baja. Los avisos en «Mi día» son DX-543 (abajo).
+- **Carreras**: editar es un UPDATE condicional a `ACTIVE` y registrar un
+  mantenimiento bloquea el equipo activo (`FOR UPDATE`): si otra petición lo
+  dio de baja en medio, 409 «El equipo está dado de baja…», nunca 500. Un
+  `null` en `locationId`, `name` o `category` del PATCH es 400.
+- **BD**: RLS FORCE con `tenant_isolation` (NULLIF) en las dos tablas, FK
+  compuestas a la sede, al sillón (`(tenantId, locationId, chairId)` → misma
+  sede) y al equipo, sin DELETE para `dentalix_app`, un equipo dado de baja no
+  cambia (`dx_equipment_retired_final`). Auditoría `EQUIPMENT` (alta, edición,
+  baja con `EQUIPMENT_RETIRED`) y `EQUIPMENT_MAINTENANCE` (alta y `VOID`).
+- **Fuera de esta porción**: el PDF del informe de cada mantenimiento (no hay
+  un servicio de ficheros de clínica que se reutilice sin más).
+- **Demo**: autoclave al día y rayos X próximo en la principal, la unidad del
+  Sillón 1 de la Sede Norte vencida y un compresor sin programar en São Paulo.
+
+### Avisos de mantenimiento en «Mi día» (DX-543)
+
+`GET /equipment/maintenance-due?limit=1..50` (10 por defecto), solo ADMIN como
+el resto del módulo: los equipos ACTIVOS con el preventivo **vencido**
+(`OVERDUE`) o que **vence hoy o en ≤30 días** (`DUE_SOON`), con la MISMA regla
+del próximo y del estado que la lista (`nextMaintenanceOn` +
+`maintenanceStatus`, en el día de la sede de cada equipo). Al día, sin
+programar y dados de baja no salen. Respuesta `{ generatedAt, items, total }`;
+cada item lleva equipo, tipo, sede, sillón, `nextMaintenanceOn`,
+`maintenanceStatus` y `daysUntilDue` (0 = hoy, negativo = días de retraso),
+de lo más urgente a lo menos (fecha, sede, nombre, id). `total` los cuenta
+todos.
+
+- **Alcance**: la sede activa de `X-Location-Id` (el selector global de la
+  web); sin ella, las sedes permitidas del token (`loc`) o toda la clínica.
+  Un ADMIN acotado que pide otra sede recibe 403 `LOCATION_NOT_ALLOWED`.
+- **No es una lista de `work-queues`**: esas son recuentos de pantallas que ya
+  existen; este bloque lista filas, tiene su propio endpoint y la web lo pide
+  aparte, así un fallo suyo no tumba el resto de «Mi día».
+- **Consulta** (`maintenanceCandidatesSql`): la BD preselecciona los activos
+  cuyo próximo, calculado en SQL como el dominio (`date + interval` recorta a
+  fin de mes como `addCivilMonths`), cae en el día UTC + 31 o antes (ninguna
+  zona va más de un día por delante de UTC); el dominio
+  (`selectMaintenanceDue`) decide con el «hoy» de cada sede. Filtra
+  `tenantId` además de la RLS FORCE.
+- **Índice**: `equipment_tenant_active_location_idx` (`tenantId, locationId`
+  WHERE `status = 'ACTIVE'`), migración `20261125090000_dx543_equipment_active_idx`
+  con `lock_timeout` 5 s, aditiva. El WHERE vive solo en la migración.
+- **Demo**: el ADMIN ve la unidad del Sillón 1 (Sede Norte, vencida) y los
+  rayos X periapical (principal, vence pronto) con «Todas las sedes».
+
 ## Personal restringido a sedes (DX-089)
 
 Un miembro puede atender solo en algunas sedes de la clínica (la recepción de
@@ -2165,6 +2573,15 @@ la Sede Norte, por ejemplo). Por defecto nadie está restringido.
   ajena, inactiva o borrada da 400 «Alguna sede no existe en esta clínica.» sin
   escribir nada. `GET /staff` y la ficha del miembro traen `locationIds`
   (`null` = todas). Otra clínica: 404.
+- **Anulaciones y stock (DX-089-bis)**: anular un abono o registrar un
+  movimiento de inventario exige acceso a la sede persistida del recurso,
+  incluso sin cabecera o desde el consolidado. Una sede no permitida da
+  403 `LOCATION_NOT_ALLOWED` sin modificar abonos, compromisos ni stock.
+  Las reglas de autoría, día de anulación y caja siguen vigentes.
+- **Asignación tras invitar**: `POST /invitations` y `PATCH /staff/:userId`
+  no aceptan `locationIds`; se asignan con el `PUT` dedicado anterior.
+  Este es el contrato vigente, aunque el texto antiguo del ticket mencionara
+  esos campos en invitación y actualización.
 - **Invariante del ADMIN**: no se puede restringir (`PUT` → 409 «El ADMIN
   siempre tiene todas las sedes y no se puede restringir.»). Ascender a ADMIN
   (`PATCH /staff/:userId`) borra sus filas en la misma transacción, y también
@@ -2249,7 +2666,7 @@ de esquemas propios de una librería).
   En producción: N réplicas `api` + 1 o más `worker` (pueden ser varias: cada
   trabajo y cada tick los ejecuta uno solo). Con `SIGTERM` el worker deja de
   reclamar y espera a los trabajos en curso (`JOBS_SHUTDOWN_GRACE_MS`, 20 s,
-  siempre menor que el arriendo); lo que no termine vuelve a la cola al
+  siempre menor que la reserva); lo que no termine vuelve a la cola al
   momento (su handler recibe `signal` abortada). El periodo de gracia del
   orquestador (`terminationGracePeriodSeconds` en Kubernetes, 30 s por
   defecto) tiene que ser mayor que `JOBS_SHUTDOWN_GRACE_MS` más unos segundos
@@ -2290,7 +2707,7 @@ de esquemas propios de una librería).
   | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | `queue.pendingDue` / `pendingScheduled`   | PENDING cuya hora llegó / programados para después                                                                                                                                                                                                                |
   | `queue.lagMs`, `oldestDueRunAt`           | Retraso: ahora − `min(runAt)` de los PENDING vencidos                                                                                                                                                                                                             |
-  | `queue.running`, `runningExpired`         | RUNNING y los que tienen el arriendo vencido                                                                                                                                                                                                                      |
+  | `queue.running`, `runningExpired`         | RUNNING y los que tienen la reserva vencida                                                                                                                                                                                                                       |
   | `queue.failedLast24h`                     | FAILED en las últimas 24 h                                                                                                                                                                                                                                        |
   | `workers.alive`, `lastBeatAt`, `recent[]` | Workers con latido de menos de 60 s; los 50 más recientes                                                                                                                                                                                                         |
   | `schedules[]`                             | Por tarea: `cron`, `lastRunAt`, `nextRunAt`, `periodMs`, `delayMs` y `overdue` (más de **2 periodos** sin correr, o sin sincronizar: `nextRunAt` null). DX-380: `singleton`, `skippedCount` y `lastSkippedAt` (ticks saltados porque el anterior seguía en curso) |
@@ -2310,7 +2727,7 @@ idempotencyKey)` garantiza que no tiene ninguna otra fila: no duplica el
   clínica, intentos y tipo de error; **sin el payload**). La respuesta
   tampoco lo lleva.
 
-  **Fila envenenada (OPS-030).** Un trabajo RUNNING con el arriendo vencido
+  **Fila envenenada (OPS-030).** Un trabajo RUNNING con la reserva vencida
   que ya gastó sus intentos (`attempts >= maxAttempts`: su worker murió o su
   cierre falló por un corte de BD) lo cierra `failExhausted` en cada vuelta,
   **antes** del reclamo, como FAILED `LeaseExpired` sin sumar intento; y el
@@ -2354,7 +2771,7 @@ idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
 'modulo.trabajo', handle, maxAttempts?, retryBaseMs? })`. Si el trabajo
   tiene clínica, el handler corre con ese tenant en el contexto
   (`runWithTenant(fn)` lo usa). Mientras el handler trabaja, un latido
-  renueva el arriendo cada tercio de `JOBS_LEASE_SECONDS` (con fencing por
+  renueva la reserva cada tercio de `JOBS_LEASE_SECONDS` (con fencing por
   intento); si otro worker retomó el intento, `ctx.signal` se aborta y su
   resultado no cuenta. Entrega «al menos una vez»: handlers idempotentes. En
   los tests (`NODE_ENV=test`) el worker nunca arranca solo, aunque `.env`
@@ -2383,7 +2800,7 @@ idempotencyKey, tenantId })`. Con `tx` (la de `runWithTenant`) el trabajo
   el regional de G1, los recordatorios, los compromisos de pago y las purgas
   (tokens, emails, enlaces de baja y trabajos terminados). Un `RUNNING` cuyo
   worker murió frena los ticks hasta que otro lo retoma o lo cierra
-  `failExhausted` (el arriendo, 300 s). El índice parcial
+  `failExhausted` (la reserva, 300 s). El índice parcial
   `jobs_active_name_idx` (`name` de los `PENDING`/`RUNNING`) acota la
   comprobación. Una réplica anterior a DX-380 sigue disparando cada tick.
 
@@ -2469,7 +2886,7 @@ suggestedFee?, currency?, patientText?, receptionCanCharge? }`, que crea la
   consulta para todo el lote (índice parcial
   `appointments_tenant_patient_incidents_idx`), y omite `cancelReasonText`.
 - **Demo**: la sede principal tiene una política de 24 h con cargo sugerido de
-  50 USD, y Daniela Montoya Arango tiene dos inasistencias y una
+  50 USD, y Daniela Morales Rangel tiene dos inasistencias y una
   cancelación con 5 h de aviso la semana pasada (insignia en su ficha y en sus
   citas). Las cancelaciones del calendario se registran avisadas por el
   paciente con 2 días.
@@ -2578,9 +2995,9 @@ false`, y un plan aceptado no se vuelve a descontar, DX-204); un cargo
 /locations/:id/cancellation-policy/email-preview` → `{ subject, html, text }`
   del recordatorio con la marca de la clínica y la política vigente (paciente
   y profesional de ejemplo). No envía nada.
-- **Demo**: las dos inasistencias y la cancelación tardía de Daniela Montoya
-  Arango tienen la política comunicada y se pueden cobrar. La inasistencia de
-  Jorge Eduardo Ramírez Ospina (hace 8 días) también tiene la política
+- **Demo**: las dos inasistencias y la cancelación tardía de Daniela Morales
+  Rangel tienen la política comunicada y se pueden cobrar. La inasistencia de
+  Jorge Eduardo Ramírez Ortega (hace 8 días) también tiene la política
   comunicada: ahí «Generar cargo» funciona igual como ADMIN.
 
 ## Recordatorios de cita por email (DX-026)
@@ -2672,7 +3089,7 @@ LINK`; `audit_events_actor_check` admite actor NULL solo para eso y el
 /patients/:id/communication`).
 - **Demo**: `seed:demo` deja a Laura con WhatsApp y opt-in en persona, al
   tercer paciente con canal ninguno, al cuarto dado de baja y al quinto con un
-  fijo (móvil no válido). Sofía Ortiz (menor) muestra los avisos dirigidos a
+  fijo (no sirve para WhatsApp). Sofía Ortiz (menor) muestra los avisos dirigidos a
   su madre Claudia.
 
 ## Responsable de pago y grupo familiar (DX-203)
@@ -2729,10 +3146,39 @@ Dentrix. Módulo `patients`, tabla `patient_responsible_parties`; migraciones
   responsable `LEGAL_GUARDIAN` que recibe avisos y no paga, de forma
   idempotente (índice único parcial `migratedFromGuardian`) y sin tocar las
   columnas viejas.
-- **Demo**: la abuela Martha Lucía Becerra paga a Sofía Ortiz y a Mateo
-  Cifuentes (su ficha muestra «Responsable de» y el estado de cuenta
+- **Demo**: la abuela Marta Elena Becerra paga a Sofía Ortiz y a Mateo
+  Contreras (su ficha muestra «Responsable de» y el estado de cuenta
   familiar); los avisos de Sofía van a su madre Claudia (contacto) y los de
   Mateo a la abuela.
+
+## Plazo de conservación de la historia clínica (DX-330)
+
+Cada clínica guarda en `tenants."clinicalRecordRetentionYears"` cuántos años
+conserva la historia clínica desde la última atención. El plazo que rige es el
+guardado, nunca por debajo del mínimo de plataforma
+(`PLATFORM_MIN_CLINICAL_RETENTION_YEARS`).
+
+- **Endpoints**: `GET /patients/retention/settings` (los 4 roles) devuelve el
+  plazo guardado, el vigente, el mínimo de plataforma, el máximo y la ventana
+  de corrección (`correctionWindow`, `null` si no hay ninguna abierta).
+  `PUT /patients/retention/settings` solo lo usa el ADMIN
+  (`CLINIC_SETTINGS_WRITE_ROLES`). Las dos rutas están declaradas antes de
+  `GET /patients/:id`.
+- **Reducir pide confirmación**: sin `confirmReduction: true` responde 409
+  `RETENTION_REDUCTION_UNCONFIRMED` con `previousYears`, `newYears`,
+  `protectedPatients` y `withinCorrectionWindow`, sin guardar nada. Con él, las
+  historias que ya estaban en retención mantienen su fecha de fin y el plazo
+  nuevo se aplica al resto y a las atenciones nuevas. En una subida, o sin
+  cambio, `confirmReduction` se ignora.
+- **Ventana de corrección**: durante las 24 horas siguientes a una subida,
+  volver al plazo anterior no deja ninguna fecha fijada por esa subida.
+- **Concurrencia**: el cambio bloquea la fila de la clínica con
+  `FOR NO KEY UPDATE`; si otra operación con los pacientes lo impide, o la
+  reducción tarda demasiado, responde 409 `RETENTION_SETTINGS_BUSY` sin
+  guardar nada.
+- **Auditoría**: un cambio real deja un UPDATE de `CLINIC_SETTINGS` con
+  `reason: CLINICAL_RECORD_RETENTION_SETTINGS`, `configChange` y
+  `retentionTermChange`, en la misma transacción. Sin cambio, 200 sin evento.
 
 ## Mayoría de edad de la clínica (DX-328)
 
@@ -3102,7 +3548,8 @@ después no altera nada ya calculado.
   abonos anteriores solo (50 por clínica y minuto).
 - **Demo**: la clínica demo está en `MANUAL` desde hace 60 días, con la tasa
   VES de cada día (ficticia: 250,00 hoy y ayer, 0,50 menos por cada día
-  anterior). Deja un abono de hoy de 11.250,00 VES (45 USD) en efectivo en el
+  anterior) y, desde DX-335, también la de BRL y la de GBP para los planes y
+  abonos de las sedes São Paulo y Londres. Deja un abono de hoy de 11.250,00 VES (45 USD) en efectivo en el
   plan «Endodoncia y rehabilitación de 46» (en USD), dos «Pago móvil» en
   bolívares y un cobro en Bs. en la caja abierta: todos congelan la tasa de su
   día, sin proveedor. Para ver el aviso «sin tasa», crea un abono en otra
@@ -3745,6 +4192,29 @@ país.
   de teléfonos (unit, `test:int` y los e2e de teléfono). Los metadatos
   atrasados son el principal riesgo de rechazar un móvil nuevo: **subirla al
   menos una vez por trimestre**.
+- **«¿Quién llama?» y `phoneE164` (DX-224).** `POST /patients/lookup-by-phone`
+  compara el E.164 COMPLETO guardado en `patients.phoneE164` y
+  `patient_responsible_parties.phoneE164` (índices parciales, nunca un sufijo).
+  El trigger `dx_phone_e164_stale` lo pone a NULL cuando `phone` cambia y todo
+  escritor de la app lo vuelve a rellenar en su transacción (la guarda
+  `src/architecture/phone-e164-writers.spec.ts` falla si aparece un escritor
+  nuevo sin hacerlo). **El relleno de las filas anteriores es automático**:
+  el trabajo `patients.phone-e164-backfill` se encola al arrancar (una vez por
+  hora y clave de idempotencia) y corre cada hora (minuto 41 UTC), por lotes de
+  1 000, clínica a clínica, solo sobre filas con teléfono y sin E.164 (lo que
+  no es un número válido queda NULL). Cada paciente importado se lee con el
+  prefijo de la sede de SU lote; el resto, con el de la sede principal. No
+  hace falta ningún paso tras `prisma migrate deploy`; hasta que corra (como
+  mucho una hora), un paciente antiguo puede no aparecer en la búsqueda.
+  Lo que ninguna región entiende se marca (`phoneE164CheckedAt`) y NO se relee
+  cada hora; cambiar el teléfono quita la marca. Un índice parcial deja el
+  barrido en el residuo. Una clínica que falla se registra (id y clase del
+  error) y no frena a las demás; el trabajo para entre lotes si pierde la
+  reserva. Tras corregir el prefijo de una sede:
+  `npm run phones:e164-backfill -- --recheck` (vuelve a leer lo marcado).
+  Para forzarlo: `npm run phones:e164-backfill` (mismo código, idempotente; con
+  una clínica enorme y `57014`, `statement_timeout=0` solo para esa
+  ejecución, como más abajo). Benchmark: `docs/perf/DX-224.md`.
 - **Informe de teléfonos guardados** (`npm run phones:report`, `-- --detail`
   para el CSV): solo lectura, con el rol de la app, clínica a clínica y por
   lotes de 1 000 filas, cada uno en una transacción `READ ONLY`. Clasifica
@@ -4089,7 +4559,8 @@ de precios) que fijan el precio de cada ítem del plan al añadirlo. Módulos
 - **Demo**: `npm run seed:demo` crea las listas «Tarifa Sede Norte» (5
   precios en USD, sede Norte) y «Convenio Alfa» (3, en USD), el pagador
   «Empresa Alfa», los convenios «Aseguradora Demo −15 %» y «Empresa Alfa lista» y los asigna a tres
-  pacientes. Se crean al final para no cambiar los precios de los planes de la
+  pacientes. Las sedes São Paulo y Londres llevan además su propia tarifa, en
+  BRL y GBP, con los mismos códigos (DX-335). Se crean al final para no cambiar los precios de los planes de la
   demo.
 - **Tests**: `plan-quote.spec.ts`, `price-lists.e2e-spec.ts`,
   `agreements.e2e-spec.ts`, `patient-agreements.e2e-spec.ts`,
@@ -4205,6 +4676,18 @@ migraciones `20261024150000_dx274_enums`, `…150100_dx274_expenses`,
   son constantes de código), `expenses` y `expense_payments`, con RLS FORCE y
   FK compuestas por clínica. El pago hereda sede y moneda del gasto por una FK
   de cuatro columnas. Sin DELETE en la BD: anular conserva todo.
+- **Categorías neutras (DX-274-bis)**: las predefinidas usan términos sin
+  regionalismos («Alquiler», «Limpieza y cafetería»). Sus nombres anteriores
+  son alias de entrada (crear, editar, filtrar la lista, el CSV y el detalle
+  de rentabilidad dan la categoría actual; crear una propia con ellos es 409).
+  `20261219090000_dx274b_expense_category_neutral_names` reescribió las fotos
+  clínica a clínica y retiró la propia viva que ya era una predefinida nueva
+  (la de la demo); una propia con el nombre anterior (solo posible por SQL)
+  conserva sus gastos. El trigger `expenses_category_legacy_alias`
+  (`…090100_dx274b_expense_category_legacy_alias`) hace lo mismo con lo que
+  escriba una réplica anterior durante el despliegue. La guarda
+  `src/architecture/no-regional-expense-categories.spec.ts` impide que los
+  nombres anteriores vuelvan a un fichero versionado.
 - **Zona horaria explícita**: gastos, salidas y resumen usan la zona IANA
   guardada en el horario de cada sede. Si falta o no es válida, responden
   `409 LOCATION_TIMEZONE_REQUIRED` con el mensaje «Configura una zona horaria
@@ -4269,7 +4752,7 @@ salidas`, puede quedar negativo). Anular una salida con la caja abierta la
 - **CSV** (ADMIN, `@Audit` EXPORT con `reason` `EXPENSE_LIST` o
   `EXPENSE_SUMMARY`, `Cache-Control: no-store`, UTF-8 con BOM y CRLF, celdas
   de texto entre comillas, sin saltos de línea y con prefijo `'` si empiezan
-  por `= + - @`, importes con los decimales de su moneda):
+  por `= + - @`, importes con los decimales de la pantalla, `csvAmount`):
   `GET /expenses.csv` (mismos filtros que la lista, una línea por gasto, hasta
   10 000: más es 400 «acota el periodo») y `GET /expenses/summary.csv` (por
   mes, sede y moneda: `Ingresos`, un `Gasto` por categoría, `Total gastos` y
@@ -4306,6 +4789,45 @@ migrate deploy`). `…150300` crea un índice no concurrente sobre
   salida de caja menor de recepción en el turno ABIERTO de la tarde; la caja
   cerrada de la mañana no se toca, así que su arqueo (diferencia de −2.000)
   sigue igual.
+
+## Comprobante del cobro (DX-389)
+
+- **Qué es**: la captura del pago móvil o de la transferencia que se guarda con
+  el abono, para conciliar con el banco. JPG, PNG, WebP o PDF de hasta 10 MB,
+  validado por CONTENIDO (el mismo detector y la misma subida prefirmada que
+  los documentos del paciente y el soporte de gastos). Almacén privado:
+  `payment-proofs/<tenantId>/<uuid>-<sha16>.<ext>` (sin datos del paciente).
+- **Medio de pago**: «Pide comprobante» = `NONE` (defecto) | `OPTIONAL` |
+  `REQUIRED` (`proofPolicy`, solo ADMIN, auditado como el resto del medio).
+  Un abono sin medio resuelto no tiene política: admite el comprobante como
+  OPTIONAL y nunca lo exige.
+- **Flujo**: `POST /payments/proofs/upload-url` → el navegador sube al bucket →
+  `proofUploadId` en `POST /treatment-plans/:id/payments`, `POST
+  /opening-balances/:id/payments` o en cada línea de `…/split-payments`. La
+  fila `payment_proofs` nace en la MISMA transacción que el abono (con
+  REQUIRED, el abono no queda sin comprobante). Una subida respalda un solo
+  abono (único por clínica; repetirla es 404 o 400).
+- **Ver**: `GET /payments/:id/proof/url?disposition=inline|attachment` (ADMIN y
+  RECEPTION, y solo si la sede del abono está entre las del miembro, como su
+  recibo): URL firmada de 5 min, auditada (VIEW / EXPORT) sin datos del
+  paciente.
+- **Despliegue**:
+  1. Aplicar la migración `20261118090000_dx389_payment_proofs` (aditiva).
+  2. **Antes o junto al despliegue**, añadir al bucket la regla de ciclo de
+     vida de `payment-proofs/pending/` (24 h), igual que
+     `expense-receipts/pending/`: ver
+     [Ficheros en un bucket S3 (DX-084)](#ficheros-en-un-bucket-s3-dx-084)
+     (en R2, una regla por prefijo).
+  3. Red de la aplicación: la tarea `payments.proof-pending-sweep.daily` (04:17
+     UTC, singleton, en la cola de DX-085) borra de `payment-proofs/pending/`
+     lo de más de 24 h que ninguna fila use (hasta 1000 por pasada). No
+     sustituye a la regla del bucket: se cubren mutuamente. **Permiso**: el
+     usuario o rol de la API necesita `s3:ListBucket` sobre
+     `arn:aws:s3:::<bucket>` con la condición `s3:prefix` =
+     `payment-proofs/pending/*` (ver «Credenciales mínimas»). Si falta, el
+     barrido registra UN aviso (`desactivado … AccessDenied`) y el trabajo
+     termina bien; la regla de ciclo de vida sigue limpiando. Sin variables de
+     entorno nuevas.
 
 ## Integridad entre gasto y pagos (DX-393)
 
@@ -4505,7 +5027,7 @@ WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
   (no pasajero) queda `FAILED` y el resto sigue; un fallo pasajero (BD,
   conexión, interbloqueo) sube y lo reintenta la cola. Una importación en cola
   o en curso por clínica (índice único parcial; 409). Un lote cuyo trabajo
-  murió (intentos agotados, arriendo vencido o purgado) pasa a `FAILED` al
+  murió (intentos agotados, reserva vencida o purgado) pasa a `FAILED` al
   consultar o confirmar en la clínica y en la tarea
   `patient-imports.reap-stuck.hourly`: nunca deja la clínica bloqueada.
 - **Retención (datos del fichero)**: un dry-run caduca a las 24 h o al subir
@@ -4589,7 +5111,7 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
 - **La misma hoja dos veces no duplica la deuda** (QA D1): si el paciente ya
   tiene un saldo migrado VIVO en esa moneda de otro lote, cada fila suya es
   un error del dry-run que dice cuál («Este paciente ya tiene un saldo
-  migrado vivo de 80.000,00 COP (lote «x.csv» del dd/mm/aaaa, corte
+  migrado vivo de 80.000,00 USD (lote «x.csv» del dd/mm/aaaa, corte
   dd/mm/aaaa): no se crea otro…») y no se importa. Solo con el campo
   `addToExisting=true` del multipart (casilla «Añadir aunque ya tenga saldo
   migrado» en la web, guardada en el lote como `balanceAddToExisting`) se
@@ -4667,6 +5189,54 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
   `balanceUndoneTotals` (lo retirado de verdad); totales AGREGADOS, nunca el
   de un paciente ni documentos.
 
+## Marca por host para el render del servidor (DX-517-ter, DX-555)
+
+`GET /api/v1/public/tenant/branding/by-host?host=` la llama el servidor web
+(Next) al pintar el primer HTML, con el host de la página. Es pública; la
+clínica sale solo del parámetro (mismo resolutor que el middleware) y un host
+desconocido o mal formado da el mismo 404 (el mal formado sin llegar a la BD).
+
+**Límites (DX-555).** Todas estas llamadas salen de la IP del servidor web,
+así que con el límite global por IP compartían UN balde: un aluvión de hosts
+inventados contra la web (o solo muchas clínicas por instancia) lo agotaba y
+TODAS las clínicas reales perdían la marca del primer HTML (la web la pide
+entonces desde el navegador: parpadeo). La ruta va fuera del global
+(`@SkipThrottle({ default: true })`) y tiene dos baldes propios:
+
+| Política        | Clave                           | Cuenta                            | Default | Variables                       |
+| --------------- | ------------------------------- | --------------------------------- | ------- | ------------------------------- |
+| `branding-host` | IP + host normalizado (hash)    | cada petición (guard)             | 600/min | `RATE_LIMIT_BRANDING_HOST_*`    |
+| `branding-miss` | IP                              | solo los 404 (desconocido o mal formado) | 60/min  | `RATE_LIMIT_BRANDING_MISS_*`    |
+
+- **Aciertos**: una clínica real nunca gasta ni ve agotado el balde de fallos.
+  Su balde es por IP + host (mayúsculas, puerto y punto final son el mismo
+  host): un cliente externo que machaque el host de una clínica agota el suyo,
+  no el del servidor web. 600/min = 10 renders por segundo de UNA clínica; la
+  web guarda cada host 30 s, pero un aluvión de hosts inventados le vacía esa
+  caché (LRU de 2000) y entonces cada render de una clínica real vuelve a
+  preguntar.
+- **Fallos**: el fallo solo se sabe tras la consulta, así que lo cuenta
+  `BrandingMissLimitInterceptor` (mismo almacén e IP que el guard): por debajo
+  del límite, el 404 de siempre; al pasarlo, 429 con `Retry-After` durante la
+  ventana. Enumerar hosts es una ristra de fallos y choca aquí desde cualquier
+  cliente.
+- **Lo que queda**: un aluvión de hosts inventados contra la web agota el
+  balde de fallos de la IP de la web, y sus otras consultas de hosts
+  desconocidos reciben 429 en vez de 404 (la web lo trata como «no se supo» y
+  no lo guarda: lo vuelve a intentar el navegador, que de todos modos no
+  tendría marca). Las clínicas reales siguen con marca. Y, como los aciertos
+  nunca se cortan por fallos, una IP con el balde de fallos agotado sigue
+  distinguiendo 200 de 429: el límite frena el RITMO de la enumeración (60
+  fallos por minuto e IP antes del 429), no oculta qué hosts existen (su marca
+  es pública en la propia página de la clínica).
+- **Log**: cada 429 sale en el log de acceso; además, `warn`
+  `{"event":"rate_limit.rejected","route":"GET /api/v1/public/tenant/branding/by-host","policy":"branding-miss"|"branding-host","rejected":N,"retryAfterSeconds":S}`,
+  como mucho una línea por política cada 10 s con el recuento desde la
+  anterior (sin IP ni host). `branding-miss` = alguien enumera o inunda la web
+  de hosts inventados; `branding-host` = una clínica recibe más renders de los
+  previstos.
+- En memoria de cada réplica, como el resto del rate limiting.
+
 ## Dominios personalizados (SEC-009)
 
 Módulo `src/modules/domains` (solo ADMIN). Una clínica registra su dominio
@@ -4697,7 +5267,7 @@ así que desactivar o borrar surte efecto al momento.
   VERIFIED de una clínica viva, en la clínica del dominio, con clave por
   (dominio, ronda); la
   ronda es la hora UTC truncada, así que repetir el barrido en la misma hora
-  (reintento, arriendo perdido) no cuenta dos veces el mismo fallo. Si el
+  (reintento, reserva perdida) no cuenta dos veces el mismo fallo. Si el
   TXT con el token sigue publicado, `failedChecks` vuelve a 0; si no, suma uno
   y al llegar a `DOMAIN_RECHECK_MAX_FAILURES` (default **3**, 1..20) seguidos
   pasa a **DISABLED**: deja de enrutar y queda `disabledAt`. Solo cuentan
@@ -4773,38 +5343,59 @@ de 30 días; ahora ese acceso es **break-glass**:
   producción; fuera, derivada de `JWT_ACCESS_SECRET`) y el id del usuario como
   dato autenticado. Cambiar la clave obliga a re-enrolar.
 
-**Enrolar el MFA** (en la web: área de plataforma del apex, `/admin`, tarjeta
-«Verificación en dos pasos»; o por API con el token de plataforma):
+**Enrolar el MFA**: en el login del apex (`/admin`). `POST /auth/login` nunca da
+sesión: responde `mfa: "MFA_ENROLLMENT_REQUIRED"` y envía un código al correo.
 
 ```bash
-# 1. Login en el APEX (sin subdominio de clínica) → token de plataforma
+# 1. Login en el APEX → mfaToken (MFA_REQUIRED, o el alta si no tiene MFA)
 curl -s -X POST http://localhost:3000/api/v1/auth/login \
   -H 'X-Tenant-Host: localhost' -H 'Content-Type: application/json' \
-  -d '{"email":"soporte@dentalix.app","password":"…"}'          # → accessToken
-# 2. Alta: devuelve el secreto (base32) y el otpauth:// para la app
-curl -s -X POST http://localhost:3000/api/v1/platform/mfa/enrollment \
-  -H 'X-Tenant-Host: localhost' -H "Authorization: Bearer $TOKEN"
-# 3. Confirmar con el código que muestra la app
-curl -s -X POST http://localhost:3000/api/v1/platform/mfa/enrollment/confirm \
-  -H 'X-Tenant-Host: localhost' -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"code":"123456"}'
+  -d '{"email":"soporte@dentalix.app","password":"…"}'
+# 2. Alta: con el código del correo, devuelve el secreto y el otpauth://
+curl -s -X POST http://localhost:3000/api/v1/auth/login/mfa/enrollment \
+  -H 'X-Tenant-Host: localhost' -H 'Content-Type: application/json' \
+  -d '{"mfaToken":"…","emailCode":"12345678"}'
+# 3. Confirmar: código del correo + código de la app → sesión y 10 códigos
+curl -s -X POST http://localhost:3000/api/v1/auth/login/mfa/enrollment/confirm \
+  -H 'X-Tenant-Host: localhost' -H 'Content-Type: application/json' \
+  -d '{"mfaToken":"…","emailCode":"12345678","code":"123456"}'
 ```
 
-Con el MFA activo no se puede volver a enrolar (`409`): perder el móvil exige
-borrar a mano `mfaTotpSecretEnc`, `mfaEnabledAt` y `mfaLastUsedStep` del
-usuario en la BD (y re-enrolar). **Riesgo de la transición**: mientras un
-superadmin no haya enrolado, quien robe su contraseña podría enrolar su propio
-MFA desde el apex (que solo pide contraseña). Mitigación: la espera de
-seguridad de arriba (24 h sin break-glass tras el alta), el evento de log
-`platform_mfa.enabled` (conviene alertar sobre él) y el `409` que recibe el
-dueño real al intentar su alta, que le pide avisar. Enrolad a todos los
-superadmins en cuanto se despliegue.
+Con el MFA activo se entra con `POST /auth/login/mfa`. Perder el móvil y los
+códigos: `docs/runbooks/platform-mfa.md`; un miembro de clínica,
+`docs/runbooks/mfa-recovery.md`. La espera de seguridad del acceso de soporte se
+conserva (`BREAK_GLASS_MFA_COOLDOWN_MINUTES`).
 
 **Probar en local** (con `BREAK_GLASS_MFA_COOLDOWN_MINUTES=0` en `.env`): convierte en superadmin a un usuario que NO sea miembro
 de la demo (`UPDATE users SET "isPlatformAdmin" = true WHERE email = '…'`),
 enrola el MFA en http://localhost:3001/admin y entra en
 http://demo.localhost:3001/login con su email: la web pide el código y el
 motivo. Luego, como `admin@demo.dentalix.app`, Ajustes → «Accesos de soporte».
+
+### Alta forzada del MFA de un miembro de clínica (SEC-066)
+
+Con la política de la clínica (`requireAdminMfa` para los ADMIN,
+`requireAllMfa` para todos) quien aún no tiene el MFA no recibe sesión: el
+login responde `mfa: "MFA_ENROLLMENT_REQUIRED"`. Igual que en el alta del
+superadmin (DX-021-bis), la contraseña sola no enrola un móvil:
+
+- el login envía un código de 8 dígitos al correo de la **cuenta** y lo dice
+  con `emailCodeRequired: true` y `emailCodeRef` (la referencia del correo de
+  ese intento). El correo es de seguridad de plataforma (firma Dentalix, fuera
+  de los topes de la clínica); sale como mucho uno por cuenta y cliente cada
+  minuto y, si no sale, el login responde 429 con `Retry-After`;
+- `POST /auth/login/mfa/enrollment` y `/enrollment/confirm` exigen ese
+  `emailCode`. Sin él (o con uno malo) responden 400 con el mismo mensaje, no
+  hay secreto, ni activación, ni sesión, ni códigos de recuperación, y queda
+  `LOGIN_FAILED` `INVALID_EMAIL_CODE` en la auditoría de la clínica;
+- el código sale del `jti` del `mfaToken`, que es de esa cuenta y de esa
+  clínica: no vale para otra, caduca con el token (10 min), es de un solo uso
+  (el token entra en la denylist al canjearlo) y admite 10 intentos. Los
+  fallos cuentan además para la espera por cuenta y cliente
+  (`MFA_ENROLL_CLIENT_BACKOFF`: 5 libres, tope 10 min).
+
+La web ya muestra el paso del código (`MfaEnrollStep` con `emailCodeRequired`)
+en el login de la clínica y en el del apex.
 
 ## Ficheros en un bucket S3 (DX-084)
 
@@ -4889,7 +5480,11 @@ el que se sirve sale de la extensión de la clave, con `nosniff`.
 5. **Credenciales mínimas**: un usuario o rol solo para la API con
    `s3:GetObject`, `s3:PutObject` y `s3:DeleteObject` sobre
    `arn:aws:s3:::<bucket>/*` y nada más (sin `s3:ListAllMyBuckets`, sin
-   permisos de bucket ni de otros buckets). En R2, un token de API «Object
+   permisos de bucket ni de otros buckets). Excepción acotada (DX-389): el
+   barrido de `payment-proofs/pending/` necesita `s3:ListBucket` sobre
+   `arn:aws:s3:::<bucket>` SOLO con el prefijo `payment-proofs/pending/*`
+   (condición `s3:prefix`); sin él el barrido se desactiva con un aviso y
+   manda la regla de ciclo de vida del bucket. En R2, un token de API «Object
    Read & Write» limitado a ese bucket. Ejemplo de política de AWS:
 
    ```json
@@ -4900,6 +5495,14 @@ el que se sirve sale de la extensión de la clave, con `nosniff`.
          "Effect": "Allow",
          "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
          "Resource": "arn:aws:s3:::dentalix-files/*"
+       },
+       {
+         "Effect": "Allow",
+         "Action": "s3:ListBucket",
+         "Resource": "arn:aws:s3:::dentalix-files",
+         "Condition": {
+           "StringLike": { "s3:prefix": ["payment-proofs/pending/*"] }
+         }
        }
      ]
    }
@@ -5096,8 +5699,9 @@ file://cors.json` con `{"CORSRules": [...]}`; GET no hace falta: el visor
 
 - **Ciclo de vida** de los pendientes: los objetos de
   `patient-documents/pending/` (documentos del paciente) y de
-  `expense-receipts/pending/` (soporte de gastos, DX-274) que no llegaron a
-  `complete` o al alta del gasto se borran a las 24 h. AWS (junto a las
+  `expense-receipts/pending/` (soporte de gastos, DX-274) y de
+  `payment-proofs/pending/` (comprobante del cobro, DX-389) que no llegaron a
+  `complete` o al alta del gasto o del abono se borran a las 24 h. AWS (junto a las
   reglas de DX-084); es UNA configuración con una regla por prefijo, porque
   `put-bucket-lifecycle-configuration` reemplaza las reglas existentes:
 
@@ -5119,15 +5723,24 @@ file://cors.json` con `{"CORSRules": [...]}`; GET no hace falta: el visor
         "Expiration": { "Days": 1 },
         "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
         "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+      },
+      {
+        "ID": "payment-proofs-pending-24h",
+        "Status": "Enabled",
+        "Filter": { "Prefix": "payment-proofs/pending/" },
+        "Expiration": { "Days": 1 },
+        "NoncurrentVersionExpiration": { "NoncurrentDays": 1 },
+        "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
       }
     ]
   }
   ```
 
   En R2, una regla de ciclo de vida por cada prefijo
-  (`patient-documents/pending/` y `expense-receipts/pending/`) y «Delete
-  after 1 day». En local, `minio_init` aplica las dos a `dentalix-local` y
-  `dentalix-test` (`mc ilm import`, un solo JSON con las dos reglas).
+  (`patient-documents/pending/`, `expense-receipts/pending/` y
+  `payment-proofs/pending/`) y «Delete after 1 day». En local, `minio_init`
+  aplica las tres a `dentalix-local` y `dentalix-test` (`mc ilm import`, un
+  solo JSON con las tres reglas).
 
 - **Decisión: Cloudflare R2 no está soportado para la subida directa.** R2 no
   implementa el POST de formulario (PostObject), así que con R2 la web no
@@ -5582,6 +6195,126 @@ automática). Ahora:
   web lo usa para decir, al registrar una tasa anterior a «manual desde», a
   qué abonos se aplicará, qué otra tasa falta o que no se usará.
 - **Fuera**: la tasa de respaldo de N días (DX-384).
+
+### Devoluciones y traspasos del saldo a favor en la imputación (DX-399-bis, DX-399-ter, DX-399-quater)
+
+- El disponible de un abono para imputar es su base menos lo imputado y menos lo
+  que `payments/domain/credit-netting.ts` (la regla del informe «Cobrado sin
+  imputar», DX-399) atribuye a ese abono como devuelto o traspasado. Lo aplican
+  el reparto automático (`readDonors`) y la imputación manual
+  (`replaceAllocations`: 400 en español «supera lo que queda a cuenta…» y, si la
+  cascada moviera la salida a otro abono, «dejaría imputado dinero que ya se
+  devolvió…»; en ambos casos no se escribe nada).
+- Bloqueos: sin ninguno nuevo. Plan `FOR SHARE` → bases `FOR UPDATE` por
+  `paymentId` → ítems `FOR UPDATE` por id; la lectura del netting va después, sin
+  bloqueo. Devolución y traspaso toman el plan `FOR NO KEY UPDATE`, que choca con
+  ese `FOR SHARE`: o su asiento ya está confirmado o el reparto espera.
+- **Sin backfill automático.** Un plan que el fallo dejó mal puede corregirse
+  sin cambiar totales cuando hay un abono posterior con sobrante (cambiar el
+  abono que cubre el ítem), y si no lo hay hay que quitar cobertura: decisión
+  humana, plan a plan. Para listarlos (solo lectura, rol de la app, una línea
+  JSON por plan con céntimos enteros):
+
+```bash
+npm run credit-netting:report                      # todas las clínicas
+npm run credit-netting:report -- --tenant <uuid>   # una clínica
+```
+
+- **Orden de consumo (DX-399-ter).** Cada devolución o traspaso de salida, en
+  orden cronológico, consume primero lo que el plan recibió por traspaso
+  (TRANSFER_IN, del más reciente al más antiguo, llegara antes o después de la
+  salida: un traspaso de ida y vuelta no deja nada pendiente), que no se puede
+  imputar a ítems, y después el excedente de los abonos registrados antes que
+  ella (del `paidAt` más reciente al más antiguo, el LIFO de DX-399). Así un
+  ítem nuevo no queda pendiente con el saldo del plan en 0. Un plan sin
+  traspasos recibidos da lo de siempre. El diagnóstico tampoco lista lo que
+  absorbió un traspaso recibido.
+- El estado de cuenta y la pestaña del plan (`GET /treatment-plans/:id/balance`,
+  `unallocated`) dan «Sin imputar» NETO, la misma cifra que el informe y que
+  `onAccount` de la ventana «Ver imputación», también en un plan cancelado o
+  rechazado (cancelar y devolver).
+- **Lo recibido por traspaso cubre ítems (DX-399-quater).** Lo que el plan
+  recibió por traspaso y ninguna salida gastó (`transfersInLeft` de
+  `credit-netting`, = máx(0, Σ recibido − Σ salidas) del plan) es dinero del
+  paciente que ya está en el plan. Cubre lo que los abonos no cubren, después de
+  ellos y en el orden de reparto de los ítems (`coverWithTransfersIn`). No se
+  guarda como imputación: se deriva en cada lectura del libro de asientos
+  (inmutable) y de las imputaciones de los abonos, sin migración. Por eso un
+  abono que después se imputa al ítem lo desplaza, y lo recibido vuelve a quedar
+  a cuenta del plan. El reparto y la imputación manual no cambian: los abonos
+  van primero.
+  - `GET /treatment-plans/:id/balance`: el `paid` del ítem lo incluye y
+    `paidByTransfersIn` dice cuánto. `transfersInOnAccount` es lo recibido que
+    sigue a cuenta. Los dos campos son opcionales y no aparecen si valen 0.
+  - En «Ver imputación» (`GET /payments/:id/allocations`), `items[].paidByTransfersIn`
+    dice cuánto cubre lo recibido.
+  - No hay doble gasto. Una salida gasta primero lo recibido que queda, y a los
+    ítems solo llega lo que dejan todas las salidas. Ejemplo: con 30 recibidos y
+    una devolución de 30, no cubre nada.
+  - Un plan sin traspasos recibidos queda igual.
+  - Cartera no cambia: ya sumaba los asientos.
+  - `allocated` es solo de los abonos: Σ `items[].paid` = `allocated` +
+    Σ `paidByTransfersIn`.
+  - **Caso límite del modo manual.** Datos: un abono MANUAL con 50 sin imputar
+    (el reparto no lo toca) y un ítem de 50 cubierto por 50 recibidos. Una
+    devolución de 50 gasta primero lo recibido. El ítem pasa a «pendiente 50»
+    y el «Sin imputar» del abono sigue en 50. Cartera da 0, así que no hay
+    doble gasto. Es lo de siempre en el modo manual: el ADMIN tiene que
+    reimputar ese abono al ítem.
+- F6 (DX-399-quater): la cascada, el informe y el diagnóstico solo cuentan los
+  asientos y las bases en la moneda actual del plan, como el saldo del plan.
+
+## Logo congelado en documentos emitidos (DX-019-bis)
+
+La receta (`prescriptions`), el presupuesto firmado
+(`treatment_plan_acceptances`, en la clínica o a distancia) y, desde
+DX-019-ter, el consentimiento firmado (`patient_consents`, en la clínica o a
+distancia) y las indicaciones post-operatorias entregadas
+(`post_op_instruction_deliveries`: reimpresión desde la ficha y página
+pública del enlace) guardan en `"clinicLogoKey"` la clave del logo vigente al
+emitir, firmar o entregar, en la misma transacción, fuera de los hashes y
+protegida por sus triggers de inmutabilidad. Al reimprimir se usa esa clave; NULL es «emitido sin logo»
+(nunca se cae al logo de hoy). El presupuesto sin firmar sigue con el logo
+actual. Los objetos `logos/` no se borran nunca (guarda
+`src/architecture/no-logo-deletion.spec.ts`): las claves congeladas apuntan
+a ellos.
+
+- **Relleno de lo ya emitido** (`20261203090100_dx019b_clinic_logo_key_backfill`):
+  el logo de cada documento en su fecha, reconstruido con la auditoría
+  `CLINIC_LOGO` de su clínica (sin eventos: el logo actual). Corre en UNA
+  transacción con los triggers `*_immutable` suspendidos solo alrededor del
+  UPDATE: mientras dura, emitir, anular y firmar esperan (≈16 s con 100 000
+  recetas y 1 M de eventos de auditoría); una firma a distancia que espere más
+  que el `statement_timeout` de la app (15 s) falla y se reintenta. Conviene
+  desplegarlo fuera del horario de la clínica.
+- **Despliegue escalonado:** una réplica sin DX-019-bis que emita o firme
+  después del relleno guarda NULL y ese documento se reimprimiría sin logo
+  para siempre (la fila es inmutable). Despliega con parada única o, cuando
+  ya no quede ninguna réplica vieja, repite el relleno con el owner de las
+  migraciones. Es idempotente (solo toca filas con la clave NULL) y exacto
+  (sale de la auditoría, así que una receta emitida sin logo sigue sin él):
+  ```bash
+  psql "$DIRECT_URL_SIN_SCHEMA" -X -v ON_ERROR_STOP=1 \
+    -f prisma/migrations/20261203090100_dx019b_clinic_logo_key_backfill/migration.sql
+  ```
+  `$DIRECT_URL_SIN_SCHEMA` es `DIRECT_URL` sin `?schema=public`.
+- **DX-019-ter** (`20261214090000_dx019t_clinic_logo_key`, `…090100_…_backfill`,
+  `…090200_…_validate`): el mismo mecanismo para consentimientos (fecha de la
+  firma, `"signedAt"`) y entregas post-operatorias (`"deliveredAt"`), con los
+  triggers `patient_consents_immutable` y
+  `post_op_instruction_deliveries_immutable` suspendidos solo alrededor de su
+  UPDATE. Mismas reglas de despliegue: fuera del horario de la clínica (firmar
+  y entregar esperan mientras dura) y, con despliegue escalonado, repetir el
+  relleno cuando no quede ninguna réplica sin DX-019-ter (idempotente):
+  ```bash
+  psql "$DIRECT_URL_SIN_SCHEMA" -X -v ON_ERROR_STOP=1 \
+    -f prisma/migrations/20261214090100_dx019t_clinic_logo_key_backfill/migration.sql
+  ```
+  La marca de la página pública del enlace post-operatorio (nombre y color)
+  sigue siendo la de hoy; solo el logo es el congelado.
+- La auditoría recorta los valores a 255 caracteres: un logo antiguo guardado
+  como URL http(s) más larga quedaría rellenado con la URL recortada. Las
+  claves `logos/…` nunca llegan a ese largo.
 
 ## Despliegue: roles de la BD (DX-113)
 
@@ -6070,6 +6803,46 @@ Para que una petición o una transacción colgada no agote el pool:
     transacción, lo de sentencias anteriores ya quedó guardado.
 - `validateEnv` no deja arrancar con un valor fuera de rango ni con las
   relaciones rotas, y dice cuál.
+
+### Conexiones por petición: «Mi día» (OPS-056)
+
+El runbook dimensiona `connection_limit` con **2 transacciones a la vez por
+petición** (la del caso de uso y la de la auditoría; ver `.env.example`).
+`GET /work-queues/summary` («Mi día», DX-503), que la web pide cada 60 s en
+cada pestaña visible, reúne hasta 8 listas y cada una abre varias
+transacciones en paralelo: antes llegaba a **12 abiertas a la vez** con un
+ADMIN (medido en `test/work-queues.e2e-spec.ts`), más que todo el pool de
+ejemplo (`connection_limit=10`). Ahora:
+
+- **Como mucho 2 conexiones a la vez por petición del resumen**
+  (`WORK_QUEUES_MAX_CONNECTIONS`): corren 2 listas a la vez
+  (`settleWithLimit`) y toda la petición va dentro de un presupuesto de 2
+  transacciones (`withTransactionBudget`, `src/shared/prisma/transaction-budget.ts`):
+  cada `runWithTenant` espera plaza antes de pedir su conexión, también los
+  `Promise.all` de dentro de cada lista. La espera por la plaza no cuenta para
+  `TENANT_TX_MAX_WAIT_MS`. Una transacción abierta desde dentro de otra no
+  espera plaza (sería un interbloqueo) y sí suma una conexión; la e2e mide el
+  pico con todas las listas de ADMIN y exige ≤ 2. Fuera de un presupuesto, `runWithTenant` no cambia. Las
+  lecturas de tablas de referencia fuera de transacción (`currencies`, con su
+  caché de 5 min) no pasan por el presupuesto.
+- **Caché corta**: cada réplica guarda el resumen 30 s
+  (`WORK_QUEUES_CACHE_TTL_MS`, como mucho 5.000 entradas) por clínica, sede
+  activa, sedes permitidas, rol, usuario y listas pedidas; nunca se comparte
+  entre ellos. Las pestañas de un mismo usuario comparten el cálculo y un
+  número puede llegar con hasta 30 s de retraso (`generatedAt` es el instante
+  del cálculo). Una respuesta con alguna lista en `ERROR` no se guarda.
+- **Cartera, solo los totales**: la lista de cartera usa
+  `GetReceivablesAgingUseCase.summary`: las mismas filas y el mismo cálculo que
+  `GET /receivables/aging/summary` (mismo número, lo comprueba
+  `test/receivables-summary.int-spec.ts`), con las lecturas una tras otra y sin
+  ordenar ni pedir contactos ni cobranza.
+- Una lista que falla deja en el log un evento estructurado
+  (`work_queues.source_failed` con `key`, `error` —el tipo— y `code`), nunca el
+  mensaje, que puede llevar valores.
+
+Para dimensionar: una pestaña de «Mi día» abierta cuenta como una petición de
+2 transacciones cada 60 s (o menos, si otra pestaña del mismo usuario acaba de
+pedirlo).
 - `create-app-role.sql` fija los dos topes de `dentalix_app` en cada ejecución
   (idempotente). Si el owner no tiene ADMIN OPTION sobre el rol (lo creó otro),
   avisa con un `WARNING` con los `ALTER ROLE` que tiene que ejecutar un admin.
@@ -6082,7 +6855,7 @@ Para que una petición o una transacción colgada no agote el pool:
   `... 'SHOW idle_in_transaction_session_timeout'` → `150s`.
 - **Scripts de mantenimiento largos** que corren como `dentalix_app`
   (`npm run allocations:backfill`, `npm run phones:report`,
-  `npm run g1:backfill-locations`): trabajan por lotes, pero si una sentencia
+  `npm run phones:e164-backfill`, `npm run g1:backfill-locations`): trabajan por lotes, pero si una sentencia
   no cabe en 15 s (una clínica enorme, sale `57014` en el log), quita el tope
   SOLO para esa ejecución, nunca en el rol:
   - Con Prisma (estos scripts), en la URL de esa ejecución:

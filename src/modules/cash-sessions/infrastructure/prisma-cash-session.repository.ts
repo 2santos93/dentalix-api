@@ -1,5 +1,9 @@
+import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../shared/locations/document-regional';
 import { Injectable } from '@nestjs/common';
-import { Prisma, type CashSessionStatus } from '@prisma/client';
+import { CashSessionStatus, Prisma } from '@prisma/client';
 import { formatRefundNumber } from '../../patient-credit/domain/patient-credit';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -12,6 +16,10 @@ import {
 import { civilDateIn, civilPeriodByZone } from '../../../shared/time/civil-day';
 import { formatReceiptNumber } from '../../payments/domain/receipt-number';
 import {
+  adjustmentsNetCents,
+  collectedAmount,
+} from '../../payment-methods/domain/payment-adjustments';
+import {
   ARQUEO_METHODS,
   centsOf,
   expectedLines,
@@ -22,10 +30,10 @@ import type {
   CashAdjustmentView,
   CashClosingView,
   CashExpectedLine,
+  CashReceiptViews,
   CashCreditRefund,
   CashOutflow,
   CashSessionPayment,
-  CashSessionSummary,
   CashSettings,
   CashVoidedOutflow,
   CashVoidedPayment,
@@ -34,6 +42,7 @@ import type {
 } from '../domain/cash-session.entity';
 import type {
   CashSessionRecord,
+  CashSessionSummaryRecord,
   CashSessionRepository,
   CashSessionScope,
   CloseContext,
@@ -70,10 +79,22 @@ const SUMMARY_SELECT = {
   closings: {
     select: {
       sequence: true,
+      unjustifiedDifference: true,
       lines: { select: { currency: true, difference: true } },
     },
     orderBy: { sequence: 'desc' },
     take: 1,
+  },
+  // SEC-043: los grupos con un ajuste nacido de esta caja que cuenta en otra
+  // abierta o está pendiente (el caso de uso oculta sus cifras con ciego).
+  originatedAdjustments: {
+    where: {
+      OR: [
+        { sessionId: null },
+        { session: { is: { status: CashSessionStatus.OPEN } } },
+      ],
+    },
+    select: { currency: true, method: true },
   },
 } satisfies Prisma.CashSessionSelect;
 
@@ -92,6 +113,8 @@ const PAYMENT_SELECT = {
   voidedAt: true,
   voidedById: true,
   voidReason: true,
+  // DX-516: sus ajustes por medio de pago (lo cobrado).
+  methodAdjustments: { select: { type: true, amount: true } },
   receipt: { select: { seriesPrefix: true, number: true } },
   // DX-390: una línea 2..N de un cobro dividido lleva el recibo de su línea 1.
   splitHead: {
@@ -133,6 +156,8 @@ const ADJUSTMENT_SELECT = {
   createdAt: true,
   createdById: true,
   sessionId: true,
+  // SEC-043: si cuenta en una caja abierta, su importe se oculta (ciego).
+  session: { select: { status: true } },
   payment: { select: PAYMENT_SELECT },
   expensePayment: {
     select: {
@@ -168,6 +193,13 @@ type OutflowRow = Prisma.ExpensePaymentGetPayload<{
   select: typeof OUTFLOW_SELECT;
 }>;
 
+/**
+ * Un instante JS como `timestamp` UTC, sin depender del TimeZone de la sesión
+ * (las columnas son `timestamp(3)` sin zona, en UTC; como en jobs).
+ */
+const utc = (date: Date): Prisma.Sql =>
+  Prisma.sql`(${date.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
+
 const CLOSING_SELECT = {
   id: true,
   sequence: true,
@@ -176,6 +208,7 @@ const CLOSING_SELECT = {
   blind: true,
   hasDifference: true,
   differenceReason: true,
+  unjustifiedDifference: true,
   notes: true,
   suggestedLockDate: true,
   lines: {
@@ -257,6 +290,42 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
   ) {}
+
+  async countReceiptViews(params: {
+    sessionId: string;
+    actorUserId: string;
+    from: Date;
+    to: Date;
+  }): Promise<CashReceiptViews> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // Los abonos de la caja (también los anulados) y los de todo ajuste que
+      // cuenta en ella (un tardío, la anulación de un abono de otra caja ya
+      // cerrada…): todos suman en su esperado y su recibo lleva el importe.
+      // El índice (tenantId, actorUserId, occurredAt) acota la búsqueda.
+      const [row] = await tx.$queryRaw<{ receipts: number; views: number }[]>`
+        SELECT count(DISTINCT e."resourceId")::int AS "receipts",
+               count(*)::int AS "views"
+          FROM "audit_events" e
+         WHERE e."tenantId" = ${tenantId}::uuid
+           AND e."actorUserId" = ${params.actorUserId}::uuid
+           AND e."resourceType" = 'PAYMENT_RECEIPT'
+           AND e."action" IN ('VIEW', 'PRINT')
+           AND e."occurredAt" >= ${utc(params.from)}
+           AND e."occurredAt" < ${utc(params.to)}
+           AND e."resourceId" IN (
+             SELECT p."id" FROM "payments" p
+              WHERE p."tenantId" = ${tenantId}::uuid
+                AND p."cashSessionId" = ${params.sessionId}::uuid
+             UNION
+             SELECT a."paymentId" FROM "cash_session_adjustments" a
+              WHERE a."tenantId" = ${tenantId}::uuid
+                AND a."sessionId" = ${params.sessionId}::uuid
+                AND a."paymentId" IS NOT NULL
+           )`;
+      return { receipts: row?.receipts ?? 0, views: row?.views ?? 0 };
+    });
+  }
 
   private tenantId(): string {
     const tenantId = this.tenantContext.getTenantId();
@@ -380,7 +449,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
 
   list(
     params: ListCashSessionsParams,
-  ): Promise<{ items: CashSessionSummary[]; total: number }> {
+  ): Promise<{ items: CashSessionSummaryRecord[]; total: number }> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(
       async (tx) => {
@@ -532,6 +601,13 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         const timeZone = (
           await resolveLocationTimeZones(tx, tenantId, [session.locationId])
         )(session.locationId);
+        // DX-354: la región de la sede de la caja, para imprimir el cierre.
+        const regional = documentRegional(
+          await tx.location.findFirst({
+            where: { id: session.locationId, tenantId },
+            select: DOCUMENT_REGIONAL_SELECT,
+          }),
+        );
         const names = await this.staffNames(tx, [
           session.openedById,
           ...(session.closedById ? [session.closedById] : []),
@@ -555,16 +631,19 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           ...this.toSummary(session, names, timeZone),
           notes: session.notes,
           timeZone,
+          regional,
           expected: expectedLines(source).map((line): CashExpectedLine => ({
             currency: line.currency,
             method: line.method,
             opening: fromCents(line.openingCents),
             payments: fromCents(line.paymentsCents),
             paymentsCount: line.paymentsCount,
+            paymentAdjustments: fromCents(line.paymentAdjustmentsCents),
             adjustments: fromCents(line.adjustmentsCents),
             outflows: fromCents(line.outflowsCents),
             outflowsCount: line.outflowsCount,
             expected: fromCents(line.expectedCents),
+            amountHidden: false,
           })),
           payments: active.map((p) => this.toPayment(p, names, timeZone)),
           voidedPayments: voided.map((p): CashVoidedPayment => ({
@@ -573,6 +652,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             voidedBy: p.voidedById ? this.staff(p.voidedById, names) : null,
             voidReason: p.voidReason,
             bookedAsAdjustment: p.cashAdjustments.length > 0,
+            amountHidden: false,
           })),
           outflows: liveOutflows.map((o) => this.toOutflow(o, names)),
           creditRefunds: creditRefunds.map((r): CashCreditRefund => ({
@@ -596,6 +676,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             voidedBy: o.voidedById ? this.staff(o.voidedById, names) : null,
             voidReason: o.voidReason,
             bookedAsAdjustment: o.cashAdjustments.length > 0,
+            amountHidden: false,
           })),
           adjustments: adjustments.map((a) =>
             this.toAdjustment(a, names, timeZone),
@@ -633,7 +714,13 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         }),
         tx.payment.findMany({
           where: { tenantId, ...countedPayments(sessionId) },
-          select: { currency: true, method: true, amount: true },
+          select: {
+            currency: true,
+            method: true,
+            amount: true,
+            // DX-516: lo cobrado entra con el abono en el cajón.
+            methodAdjustments: { select: { type: true, amount: true } },
+          },
         }),
         tx.cashSessionAdjustment.findMany({
           where: { tenantId, sessionId },
@@ -661,6 +748,12 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         currency: p.currency,
         method: p.method,
         cents: cents(p.amount),
+        adjustmentCents: adjustmentsNetCents(
+          p.methodAdjustments.map((a) => ({
+            type: a.type,
+            amount: a.amount.toNumber(),
+          })),
+        ),
       })),
       adjustments: adjustments.map((a) => ({
         currency: a.currency,
@@ -745,6 +838,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           blind: draft.blind,
           hasDifference: draft.hasDifference,
           differenceReason: draft.differenceReason,
+          unjustifiedDifference: draft.unjustifiedDifference,
           notes: draft.notes,
           suggestedLockDate: new Date(
             `${draft.suggestedLockDate}T00:00:00.000Z`,
@@ -885,7 +979,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     row: SummaryRow,
     names: Map<string, string>,
     timeZone: string,
-  ): CashSessionSummary {
+  ): CashSessionSummaryRecord {
     const latest = row.status === 'CLOSED' ? row.closings[0] : undefined;
     const differences = new Map<string, number>();
     for (const line of latest?.lines ?? []) {
@@ -911,7 +1005,16 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       })),
       differences: [...differences.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([currency, cents]) => ({ currency, amount: fromCents(cents) })),
+        .map(([currency, cents]) => ({
+          currency,
+          amount: fromCents(cents),
+          amountHidden: false,
+        })),
+      unjustifiedDifference: latest?.unjustifiedDifference ?? false,
+      openLaterGroups: row.originatedAdjustments.map((a) => ({
+        currency: a.currency,
+        method: a.method,
+      })),
     };
   }
 
@@ -933,6 +1036,13 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         : null,
       patient: patientOf(row),
       createdBy: row.createdById ? this.staff(row.createdById, names) : null,
+      collectedAmount: collectedAmount(
+        amountOf(row.amount),
+        row.methodAdjustments.map((a) => ({
+          type: a.type,
+          amount: amountOf(a.amount),
+        })),
+      ),
     };
   }
 
@@ -967,6 +1077,8 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       createdAt: row.createdAt,
       createdBy: this.staff(row.createdById, names),
       sessionId: row.sessionId,
+      sessionStatus: row.session?.status ?? null,
+      amountHidden: false,
       payment: payment
         ? {
             id: payment.id,
@@ -1005,6 +1117,9 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
       blind: row.blind,
       hasDifference: row.hasDifference,
       differenceReason: row.differenceReason,
+      unjustifiedDifference: row.unjustifiedDifference,
+      // SEC-043-bis: lo calcula el caso de uso, solo para ADMIN.
+      receiptViews: null,
       notes: row.notes,
       suggestedLockDate: civilOf(row.suggestedLockDate),
       lines: [...row.lines]
@@ -1020,6 +1135,7 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           expected: amountOf(line.expected),
           counted: amountOf(line.counted),
           difference: amountOf(line.difference),
+          amountHidden: false,
         })),
     };
   }

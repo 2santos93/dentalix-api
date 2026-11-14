@@ -1,4 +1,10 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
 import {
   ACCOUNT_STATEMENT_REPOSITORY,
   type AccountStatementRepository,
@@ -14,12 +20,19 @@ import type {
   StatementClinic,
 } from '../../domain/entities/account-statement.entity';
 import { computeAccountStatement } from '../compute-account-statement';
+import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
+import type { AccountStatementData } from '../../domain/ports/account-statement-repository.port';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 import {
   ACCOUNT_STATEMENT_CLOCK,
   type AccountStatementClock,
 } from './get-account-statement.use-case';
 import { toCents } from '../../../../shared/money/money';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  roundingDigitsLookup,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 
 // Montos Decimal(14,2): se suman en céntimos enteros (como el cálculo
 // individual), así el total cuadra al céntimo con la suma de los subtotales.
@@ -31,6 +44,8 @@ const FIELDS = [
   'openingPending',
   'paid',
   'balance',
+  'convertedPaid',
+  'convertedBalance',
   'overdueAmount',
 ] as const;
 
@@ -44,6 +59,8 @@ function addInto(
     openingPending: 0,
     paid: 0,
     balance: 0,
+    convertedPaid: 0,
+    convertedBalance: 0,
     overdueAmount: 0,
   };
   for (const f of FIELDS) current[f] += cents(row[f]);
@@ -67,6 +84,11 @@ export class GetFamilyAccountStatementUseCase {
     private readonly family: StatementFamilyRepository,
     @Inject(ACCOUNT_STATEMENT_CLOCK)
     private readonly now: AccountStatementClock,
+    private readonly getPlanBalance: GetPlanBalanceUseCase,
+    // B4 (DX-472-bis): decimales de cada moneda para los estados de cuota.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   async execute(payerPatientId: string): Promise<FamilyAccountStatement> {
@@ -75,16 +97,36 @@ export class GetFamilyAccountStatementUseCase {
     const issuedAt = this.now();
     const refs = [family.payer, ...family.dependents];
 
-    let clinic: StatementClinic = { name: '', logoUrl: null };
+    let clinic: StatementClinic = {
+      name: '',
+      logoUrl: null,
+      fiscal: EMPTY_CLINIC_FISCAL,
+    };
     const members: FamilyStatementMember[] = [];
     const totals = new Map<string, Record<(typeof FIELDS)[number], number>>();
+    const loaded: { ref: (typeof refs)[number]; data: AccountStatementData }[] =
+      [];
     for (const ref of refs) {
-      const data = await this.repo.load(ref.id);
+      const data = await this.repo.load(ref.id, { regional: false });
       // Retirado entre las dos lecturas: no cuenta.
-      if (!data) continue;
+      if (data) loaded.push({ ref, data });
+    }
+    // DX-472: los saldos de toda la familia comparten el plazo del proveedor.
+    const planBalances = await this.getPlanBalance.computeMany(
+      loaded.flatMap(({ data }) => data.planBalances),
+    );
+    const roundingDigitsOf = await roundingDigitsLookup(
+      this.currencyDigits,
+      loaded.flatMap(({ data }) =>
+        data.snapshot.paymentPlans.map((pp) => pp.currency),
+      ),
+    );
+    for (const { ref, data } of loaded) {
       clinic = data.clinic;
       const { summary } = computeAccountStatement(data.snapshot, {
         today: issuedAt,
+        planBalances,
+        roundingDigitsOf,
       });
       const rows = summary.map((s) => ({
         currency: s.currency,
@@ -93,6 +135,8 @@ export class GetFamilyAccountStatementUseCase {
         openingPending: s.openingPending,
         paid: s.paid,
         balance: s.balance,
+        convertedPaid: s.convertedPaid,
+        convertedBalance: s.convertedBalance,
         overdueAmount: s.overdueAmount,
       }));
       for (const row of rows) addInto(totals, row);
@@ -108,9 +152,13 @@ export class GetFamilyAccountStatementUseCase {
       });
     }
 
+    // DX-354: una sola lectura de la región para toda la familia.
+    const regional = await this.repo.loadRegional();
+
     return {
       issuedAt,
       clinic,
+      regional,
       payer: {
         id: family.payer.id,
         firstName: family.payer.firstName,
@@ -126,8 +174,17 @@ export class GetFamilyAccountStatementUseCase {
           openingPending: sum.openingPending / 100,
           paid: sum.paid / 100,
           balance: sum.balance / 100,
+          convertedPaid: sum.convertedPaid / 100,
+          convertedBalance: sum.convertedBalance / 100,
           overdueAmount: sum.overdueAmount / 100,
         })),
+      paymentsWithoutRateCount: [...planBalances.values()].reduce(
+        (n, b) => n + b.paymentsWithoutRate.length,
+        0,
+      ),
+      rateProviderTimedOut: [...planBalances.values()].some(
+        (b) => b.rateProviderTimedOut,
+      ),
     };
   }
 }

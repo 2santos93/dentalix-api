@@ -272,3 +272,48 @@ describe('DiskFileStorage · subida directa (DX-259)', () => {
     );
   });
 });
+
+describe('DiskFileStorage · listObjects (DX-389)', () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'dx389-list-'));
+  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  const storage = () => new DiskFileStorage({ ...CFG, root }, SILENT);
+
+  it('lista por prefijo, en orden de clave, con fecha y tamaño, y pagina con el token', async () => {
+    const s = storage();
+    await s.save('payment-proofs/pending/t1/b', Buffer.from('bb'), 'x/y');
+    await s.save('payment-proofs/pending/t1/a', Buffer.from('a'), 'x/y');
+    await s.save('payment-proofs/pending/t2/c', Buffer.from('c'), 'x/y');
+    await s.save('payment-proofs/t1/final.png', Buffer.from('f'), 'x/y');
+    const first = await s.listObjects('payment-proofs/pending/', {
+      maxKeys: 2,
+    });
+    expect(first.objects.map((o) => o.key)).toEqual([
+      'payment-proofs/pending/t1/a',
+      'payment-proofs/pending/t1/b',
+    ]);
+    expect(first.objects[1].size).toBe(2);
+    expect(first.objects[0].lastModified.getTime()).toBeGreaterThan(0);
+    expect(first.nextToken).toBe('payment-proofs/pending/t1/b');
+    const second = await s.listObjects('payment-proofs/pending/', {
+      maxKeys: 2,
+      token: first.nextToken,
+    });
+    expect(second.objects.map((o) => o.key)).toEqual([
+      'payment-proofs/pending/t2/c',
+    ]);
+    expect(second.nextToken).toBeNull();
+  });
+
+  it('un prefijo que aún no existe lista vacío y uno inseguro se rechaza', async () => {
+    const s = storage();
+    expect(await s.listObjects('payment-proofs/pending/')).toEqual({
+      objects: [],
+      nextToken: null,
+    });
+    await expect(s.listObjects('../fuera/')).rejects.toThrow(/Prefijo/);
+    await expect(s.listObjects('.meta/')).rejects.toThrow(/Prefijo/);
+  });
+});

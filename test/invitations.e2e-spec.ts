@@ -11,7 +11,7 @@ import { CapturingMailer } from './support/capture-mailer';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 
@@ -72,7 +72,7 @@ async function registerAndLogin(
 }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,
@@ -407,6 +407,54 @@ describe('Staff invitations (e2e)', () => {
     expect((getAfter.body as PublicInvitationResponseBody).status).toBe(
       'VALID',
     );
+  });
+
+  it('DX-021: aceptar con una cuenta con MFA activo no abre sesión: queda aceptada y entra por /login', async () => {
+    const home = await registerAndLogin(app, {
+      clinicName: 'Clinica Inv Mfa',
+      subdomain: 'clinica-inv-mfa',
+      email: 'owner@clinica-inv-mfa.com',
+    });
+    const email = 'con.mfa@example.com';
+    const { userId } = await seedRoledMember(
+      home.tenantId,
+      email,
+      ClinicRole.DENTIST,
+      'Con Mfa',
+    );
+    await raw.user.update({
+      where: { id: userId },
+      data: { mfaEnabledAt: new Date(), mfaTotpSecretEnc: 'v1.x' },
+    });
+    const target = await registerAndLogin(app, {
+      clinicName: 'Clinica Inv Mfa Dos',
+      subdomain: 'clinica-inv-mfa-dos',
+      email: 'owner@clinica-inv-mfa-dos.com',
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/staff/invitations')
+      .set('X-Tenant-Host', hostFor(target.subdomain))
+      .set('Authorization', `Bearer ${target.accessToken}`)
+      .send({ fullName: 'Con Mfa', email, role: ClinicRole.DENTIST })
+      .expect(201);
+    const token = await mailer.invitationToken(email);
+    const res = await request(app.getHttpServer())
+      .post(`/api/v1/public/invitations/${token}/accept`)
+      .set('X-Tenant-Host', hostFor(target.subdomain))
+      .send({ password: SEEDED_PASSWORD })
+      .expect(201);
+    expect(res.body).toEqual({ loginRequired: true });
+    expect(res.headers['set-cookie']).toBeUndefined();
+    const member = await raw.clinicMembership.findFirst({
+      where: { tenantId: target.tenantId, userId, deletedAt: null },
+    });
+    expect(member).not.toBeNull();
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(target.subdomain))
+      .send({ email, password: SEEDED_PASSWORD })
+      .expect(201);
+    expect((login.body as { mfa?: string }).mfa).toBe('MFA_REQUIRED');
   });
 
   it('DX-089: un miembro restringido a sedes, dado de baja y reinvitado, conserva su restricción en el token de la aceptación', async () => {

@@ -21,6 +21,7 @@ import {
   GetPublicOptOutUseCase,
 } from '../application/use-cases/reminder-opt-out.use-cases';
 import { PublicReminderOptOutDto } from './dto/public-reminder-opt-out.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 interface PublicRequest {
   ip?: string;
@@ -32,7 +33,7 @@ interface PublicRequest {
 // tenant sale SOLO del host y la RLS hace invisible un token de otra clínica
 // (→ 404). Mismo límite por IP que la confirmación (frena la enumeración).
 @ApiTags('public')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 @RateLimit('confirmation')
 @Controller('public/reminder-opt-outs')
 export class PublicReminderOptOutsController {

@@ -1,5 +1,7 @@
+import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { lockLivePatientOrConflict } from '../../../../shared/patients/lock-live-patient';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
@@ -9,11 +11,13 @@ import type {
   ConsumeSignedPdfCopyOutcome,
   IssueSignedPdfCopyLinkInput,
   SignedConsentPdfBackfillRepository,
+  SignedPdfCopyDownload,
   SignedPdfCopyLinkRow,
   SignedPdfCopyRepository,
   SignedPdfCopyTarget,
 } from '../../domain/ports/signed-pdf-copy-repository.port';
 import { SIGNED_PDF_COPY_DOWNLOADED_REASON } from '../../domain/signed-pdf-copy-link';
+import { LEGACY_UNSUPPORTED_CHARACTERS } from '../../domain/signed-consent-pdf';
 
 /**
  * Copia del PDF firmado (DX-443) en Postgres, todo bajo `runWithTenant` (RLS
@@ -97,6 +101,9 @@ export class PrismaSignedPdfCopyRepository
   async issueLink(input: IssueSignedPdfCopyLinkInput): Promise<{ id: string }> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
+      // está archivado: nunca un enlace vivo ni un mensaje a un archivado.
+      await lockLivePatientOrConflict(tx, input.patientId);
       // Serializa los envíos del mismo consentimiento (dos «Reenviar copia»
       // a la vez, o uno con el envío automático): sin este bloqueo, los dos
       // invalidan el mismo enlace y el segundo INSERT choca con el índice
@@ -117,8 +124,9 @@ export class PrismaSignedPdfCopyRepository
         },
         data: { revokedAt: input.now },
       });
-      return tx.signedConsentPdfLink.create({
+      const link = await tx.signedConsentPdfLink.create({
         data: {
+          id: input.id,
           tenantId,
           patientId: input.patientId,
           consentId: input.consentId,
@@ -129,6 +137,10 @@ export class PrismaSignedPdfCopyRepository
         },
         select: { id: true },
       });
+      // DX-463: el email del enlace nuevo, en esta misma transacción: si no
+      // se puede encolar, se deshace también la revocación del anterior.
+      await input.enqueue?.(tx);
+      return link;
     });
   }
 
@@ -154,6 +166,7 @@ export class PrismaSignedPdfCopyRepository
     linkId: string,
     now: Date,
     meta: AuditRequestMeta,
+    beforeCommit?: (download: SignedPdfCopyDownload) => Promise<void>,
   ): Promise<ConsumeSignedPdfCopyOutcome> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -214,16 +227,21 @@ export class PrismaSignedPdfCopyRepository
           reason: SIGNED_PDF_COPY_DOWNLOADED_REASON,
         },
       });
+      // DX-463: lo último antes del COMMIT (genera la URL firmada): si falla,
+      // se deshacen el gasto y la auditoría, y el enlace sigue sirviendo.
+      await beforeCommit?.(document);
       return { kind: 'CONSUMED', download: document };
     });
   }
 
   findClinicBranding(): Promise<ClinicBranding | null> {
     // `tenants` no tiene RLS: se lee por el id ya resuelto desde el host.
-    return this.prisma.tenant.findFirst({
-      where: { id: this.tenantId(), deletedAt: null },
-      select: { name: true, primaryColor: true, logoUrl: true },
-    });
+    return this.prisma.tenant
+      .findFirst({
+        where: { id: this.tenantId(), deletedAt: null },
+        select: { name: true, primaryColor: true, logoKey: true },
+      })
+      .then((row) => withClinicLogoUrl(row));
   }
 
   async tenantIds(): Promise<string[]> {
@@ -273,6 +291,46 @@ export class PrismaSignedPdfCopyRepository
         return count === 1;
       });
       if (created) queued += 1;
+    }
+    return queued;
+  }
+
+  async retryUnsupportedCharacters(
+    tenantId: string,
+    limit: number,
+    enqueue: (tx: Prisma.TransactionClient, consentId: string) => Promise<void>,
+  ): Promise<number> {
+    const failed = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.signedConsentPdf.findMany({
+        where: {
+          status: 'FAILED',
+          lastErrorCode: LEGACY_UNSUPPORTED_CHARACTERS,
+        },
+        select: { consentId: true },
+        orderBy: { updatedAt: 'asc' },
+        take: limit,
+      }),
+    );
+    let queued = 0;
+    for (const { consentId } of failed) {
+      // Una transacción por consentimiento: el estado y su trabajo juntos.
+      const retried = await this.prisma.runWithTenant(tenantId, async (tx) => {
+        const { count } = await tx.signedConsentPdf.updateMany({
+          where: {
+            consentId,
+            status: 'FAILED',
+            lastErrorCode: LEGACY_UNSUPPORTED_CHARACTERS,
+          },
+          data: {
+            status: 'PENDING',
+            lastErrorCode: null,
+            notifyPatient: false,
+          },
+        });
+        if (count === 1) await enqueue(tx, consentId);
+        return count === 1;
+      });
+      if (retried) queued += 1;
     }
     return queued;
   }

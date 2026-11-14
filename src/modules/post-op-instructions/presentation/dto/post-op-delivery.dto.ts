@@ -1,3 +1,4 @@
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ApiProperty } from '@nestjs/swagger';
 import { PostOpDeliveryChannel } from '@prisma/client';
 import { IsEnum, IsUUID } from 'class-validator';
@@ -73,6 +74,14 @@ export class PostOpDeliverySummaryDto {
     description: 'Caducidad del enlace público; null en PRINT',
   })
   linkExpiresAt!: Date | null;
+  @ApiProperty({
+    enum: ['QUEUED', 'SENT', 'NOT_SENT'],
+    enumName: 'PostOpEmailStatus',
+    nullable: true,
+    description:
+      'DX-250: estado del email de una entrega EMAIL, leído del outbox. `QUEUED`: en cola; `SENT`: el proveedor lo aceptó; `NOT_SENT`: nunca se encoló o se agotaron los reintentos (la historia clínica debe decir «no enviado»). null: PRINT y WHATSAPP_LINK, y también una entrega EMAIL anterior a la retención del outbox (MAIL_OUTBOX_RETENTION_DAYS) sin fila: desconocido, no se afirma nada. Si se alarga la retención, las filas ya purgadas dentro de la nueva ventana se leen `NOT_SENT`.',
+  })
+  emailStatus!: 'QUEUED' | 'SENT' | 'NOT_SENT' | null;
 }
 
 export class PostOpEmailChannelDto {
@@ -173,5 +182,12 @@ export class PostOpDeliveryDocumentDto extends PostOpDeliverySummaryDto {
   clinic!: PostOpClinicBrandingDto;
   @ApiProperty() locationName!: string;
   @ApiProperty({ type: String, nullable: true }) locationPhone!: string | null;
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede de la entrega. null si le falta algo: la entrega se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
   @ApiProperty() patientName!: string;
 }

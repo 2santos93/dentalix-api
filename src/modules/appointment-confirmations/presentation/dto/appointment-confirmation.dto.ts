@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 import type { ConfirmationState } from '../../domain/entities/appointment-confirmation.entity';
 import type { ConfirmationAction } from '../../application/public-confirmation-view';
+import type { EarlierWindow } from '@prisma/client';
 
 const CONFIRMATION_STATES: ConfirmationState[] = [
   'PENDING',
@@ -19,6 +20,7 @@ const CONFIRMATION_ACTIONS: ConfirmationAction[] = [
   'cancel',
   'call_me',
 ];
+const EARLIER_WINDOWS: EarlierWindow[] = ['MORNING', 'AFTERNOON', 'ANY'];
 
 /**
  * La cita tal como la ve el paciente: nombre de pila, cuándo, con quién y
@@ -46,6 +48,77 @@ export class PublicConfirmationAppointmentDto {
 
   @ApiProperty({ type: String, nullable: true })
   locationAddress!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'America/Caracas',
+    description:
+      'DX-354: zona IANA de la sede de la cita, en crudo. null si la sede no la tiene.',
+  })
+  timeZone!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'es-VE',
+    description:
+      'DX-354: formato regional (BCP 47) de la sede de la cita, en crudo. null si la sede no lo tiene.',
+  })
+  locale!: string | null;
+
+  @ApiProperty({
+    enum: ['h12', 'h23'],
+    enumName: 'HourCycle',
+    nullable: true,
+    example: 'h12',
+    description:
+      'DX-354: reloj de la sede de la cita, en crudo. null si la sede no lo tiene: la página pinta «—» y pide llamar a la clínica.',
+  })
+  hourCycle!: 'h12' | 'h23' | null;
+
+  @ApiProperty({
+    description:
+      'DX-437: el paciente pidió que le avisen si se libera un hueco antes («Adelantar si hay hueco»).',
+  })
+  wantsEarlier!: boolean;
+
+  @ApiProperty({
+    enum: EARLIER_WINDOWS,
+    enumName: 'EarlierWindow',
+    nullable: true,
+    description:
+      'DX-437: franja pedida (solo con wantsEarlier). null = cualquiera.',
+  })
+  earlierWindow!: EarlierWindow | null;
+
+  @ApiProperty({
+    description:
+      'DX-437: se puede pedir (o quitar) ahora: cita agendada o confirmada, futura y de un día posterior a hoy en la sede.',
+  })
+  earlierAllowed!: boolean;
+}
+
+/** DX-437: `POST /public/appointment-confirmations/:token/wants-earlier`. */
+export class PublicWantsEarlierDto {
+  @ApiProperty({
+    description:
+      '`true` = avisarme si se libera un hueco antes; `false` = quitar la petición.',
+  })
+  @IsBoolean()
+  wantsEarlier!: boolean;
+
+  @ApiPropertyOptional({
+    enum: EARLIER_WINDOWS,
+    enumName: 'EarlierWindow',
+    description:
+      'Franja preferida; sin ella, ANY. Se ignora con `wantsEarlier: false`.',
+  })
+  @IsOptional()
+  @IsIn(EARLIER_WINDOWS, {
+    message: 'La franja tiene que ser MORNING, AFTERNOON o ANY.',
+  })
+  preferredWindow?: EarlierWindow;
 }
 
 export class PublicConfirmationClinicDto {
@@ -90,6 +163,27 @@ export class PublicCancellationPolicyDto {
 
 // Respuesta de GET y POST /public/appointment-confirmations/:token.
 export class PublicAppointmentConfirmationDto {
+  @ApiProperty({
+    example: 'en',
+    description:
+      'DX-497: idioma (BCP 47) en que abre la página: el preferido del paciente de la cita o, sin preferencia, el de la clínica. Sin traducción para él, la página sale en el de la clínica; el paciente puede cambiarlo en la página sin tocar su ficha.',
+  })
+  language!: string;
+
+  @ApiProperty({
+    description:
+      'DX-469: se puede añadir la cita al calendario (enlace válido, cita no cancelada y aún no terminada): `GET …/:token/calendar.ics` y `googleCalendarUrl`.',
+  })
+  calendarAvailable!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-469: «Añadir a Google Calendar» (plantilla de evento, sin datos clínicos). null si `calendarAvailable` es false.',
+  })
+  googleCalendarUrl!: string | null;
+
   @ApiProperty({
     enum: CONFIRMATION_STATES,
     description:

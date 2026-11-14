@@ -8,6 +8,7 @@ import {
   ReplaceScheduleInput,
   SCHEDULE_TIME_ZONE_MOVED,
 } from '../../domain/ports/location-schedule-repository.port';
+import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import { BusinessHours } from '../../application/business-hours';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
@@ -101,6 +102,19 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
       // principal sin restricción): la misma en la que se agenda.
       const locationId = await this.tenantContext.writeLocationId(tx);
       return this.scheduleOf(tx, tenantId, locationId);
+    });
+  }
+
+  async formatSourceOf(locationId?: string): Promise<LocationFormatSource> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const id = locationId ?? (await this.tenantContext.writeLocationId(tx));
+      const location = await tx.location.findFirst({
+        where: { id, tenantId },
+        select: { id: true, locale: true, hourCycle: true },
+      });
+      // Sede que no existe: sin formato (409 al formatear), nunca otro.
+      return location ?? { id, locale: null, hourCycle: null };
     });
   }
 

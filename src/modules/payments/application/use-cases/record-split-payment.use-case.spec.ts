@@ -1,7 +1,11 @@
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../../shared/validation/idempotency-key';
+import { buildPaymentProofKit } from '../__fixtures__/payment-proof-kit';
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  ServiceUnavailableException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
@@ -16,7 +20,10 @@ import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-c
 import type { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 import type { GetPlanBalanceUseCase } from './get-plan-balance.use-case';
 import { RecordPaymentUseCase } from './record-payment.use-case';
-import { PAID_AT_IN_FUTURE_MESSAGE } from '../../domain/paid-at-window';
+import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+  PAID_AT_IN_FUTURE_MESSAGE,
+} from '../../domain/paid-at-window';
 import {
   RecordSplitPaymentUseCase,
   type RecordSplitPaymentInput,
@@ -42,6 +49,8 @@ function medium(
     kind: 'CASH',
     active: true,
     requiresReference: false,
+    proofPolicy: 'NONE',
+    adjustments: [],
     legacyMethod: 'CASH',
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -76,7 +85,7 @@ function makePlan(
     tenantId: 't1',
     patientId: 'patient-1',
     status: TreatmentPlanStatus.ACCEPTED,
-    currency: 'COP',
+    currency: 'VES',
     notes: null,
     createdById: null,
     ...PLAN_WITHOUT_OPTIONS,
@@ -91,7 +100,7 @@ function makePlan(
 
 /** Cotización de prueba (DX-375): unidades por 1 USD. */
 class FakeConvertAmount {
-  public perBase: Record<string, number> = { COP: 4000 };
+  public perBase: Record<string, number> = { VES: 4000 };
   execute(): Promise<never> {
     return Promise.reject(new Error('no debe convertir en vivo'));
   }
@@ -111,7 +120,7 @@ class FakeConvertAmount {
   }
 }
 
-function makeUseCase() {
+function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
   const repo = new InMemoryPaymentRepository();
   let plan: TreatmentPlanDetail | null = makePlan();
   const getPlan = {
@@ -121,41 +130,67 @@ function makeUseCase() {
         : Promise.reject(new NotFoundException('Treatment plan not found')),
   };
   const convert = new FakeConvertAmount();
-  const balance = { billable: 500_000, paid: 100_000 };
+  const balance = {
+    billable: 500_000,
+    paid: 100_000,
+    unreadable: false,
+    notFound: false,
+    withoutRate: false,
+    timedOut: false,
+  };
+  const current = () => ({
+    planCurrency: 'VES',
+    billable: balance.billable,
+    paid: balance.paid,
+    balance: balance.billable - balance.paid,
+    creditMovements: 0,
+    paymentsCount: 1,
+    paymentsWithoutRate: balance.withoutRate
+      ? [{ paymentId: 'p-ves', amount: 1, currency: 'VES' }]
+      : [],
+    rateProviderTimedOut: balance.timedOut,
+  });
   const getPlanBalance = {
     execute: () =>
-      Promise.resolve({
-        planCurrency: 'COP',
-        billable: balance.billable,
-        paid: balance.paid,
-        balance: balance.billable - balance.paid,
-        creditMovements: 0,
-        paymentsCount: 1,
-        paymentsWithoutRate: [],
-      }),
+      balance.notFound
+        ? Promise.reject(new NotFoundException('Treatment plan not found'))
+        : balance.unreadable
+          ? Promise.reject(new Error('db down'))
+          : Promise.resolve(current()),
+    // La misma cuenta sobre la foto de la transacción (DX-463, L4).
+    fromSnapshot: () => Promise.resolve(current()),
   };
   const methods = {
     findById: (id: string) =>
       Promise.resolve(MEDIUMS.find((m) => m.id === id) ?? null),
     findByLegacyMethod: () => Promise.resolve(null),
   } as unknown as PaymentMethodRepository;
-  const gate = new PaymentMethodGate(methods, repo);
+  const gate = new PaymentMethodGate(
+    methods,
+    repo,
+    referenceCurrencyDigitsCatalog(),
+  );
   const recordPayment = new RecordPaymentUseCase(
     repo,
     getPlan as unknown as GetTreatmentPlanUseCase,
-    { has: (code: string) => Promise.resolve(['USD', 'COP'].includes(code)) },
+    { has: (code: string) => Promise.resolve(['USD', 'VES'].includes(code)) },
     {
       afterPayment: () => Promise.resolve(null),
     } as unknown as ReceiptPlanBalanceCalculator,
     convert as unknown as ConvertAmountUseCase,
     gate,
-    () => new Date('2026-10-31T15:00:00.000Z'),
+    buildPaymentProofKit(repo).proofs,
+    () => now,
   );
   const uc = new RecordSplitPaymentUseCase(
     repo,
     getPlan as unknown as GetTreatmentPlanUseCase,
     recordPayment,
     getPlanBalance as unknown as GetPlanBalanceUseCase,
+    buildPaymentProofKit(repo).proofs,
+    {
+      inTransaction: () => Promise.resolve(null),
+    } as unknown as ReceiptPlanBalanceCalculator,
   );
   return {
     repo,
@@ -169,7 +204,7 @@ function makeUseCase() {
   };
 }
 
-/** 50 USD por transferencia + 100 000 COP en efectivo, el 30/10/2026. */
+/** 50 USD por transferencia + 100 000 VES en efectivo, el 30/10/2026. */
 function twoLines(
   overrides: Partial<RecordSplitPaymentInput> = {},
 ): RecordSplitPaymentInput {
@@ -182,19 +217,41 @@ function twoLines(
         paymentMethodId: 'm-transfer',
         reference: 'TR-001',
       },
-      { amount: 100_000, currency: 'COP', paymentMethodId: 'm-cash' },
+      { amount: 100_000, currency: 'VES', paymentMethodId: 'm-cash' },
     ],
     ...overrides,
   };
 }
 
 describe('RecordSplitPaymentUseCase (DX-390)', () => {
-  it('DX-054: fecha a más de 24 h en el futuro → 400 en español y no se registra nada', async () => {
+  it('DX-054: un instante a más de 24 h en el futuro → 400 en español y no se registra nada', async () => {
     const { uc, repo } = makeUseCase();
     await expect(
-      uc.execute('plan-1', twoLines({ paidAt: '2026-11-05' }), 'user-1', KEY),
+      uc.execute(
+        'plan-1',
+        twoLines({ paidAt: '2026-11-05T12:00:00.000Z' }),
+        'user-1',
+        KEY,
+      ),
     ).rejects.toThrow(new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE));
     expect(repo.lastSplitInput).toBeNull();
+  });
+
+  it('DX-075: sede en Caracas cerca de medianoche (03:30Z del 5): el 4 se registra, el 5 → 400 y no se registra nada', async () => {
+    const { uc, repo } = makeUseCase(new Date('2026-11-05T03:30:00.000Z'));
+    await expect(
+      uc.execute('plan-1', twoLines({ paidAt: '2026-11-05' }), 'user-1', KEY),
+    ).rejects.toThrow(
+      new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+    );
+    expect(repo.lastSplitInput).toBeNull();
+    await uc.execute(
+      'plan-1',
+      twoLines({ paidAt: '2026-11-04' }),
+      'user-1',
+      KEY,
+    );
+    expect(repo.lastSplitInput).not.toBeNull();
   });
 
   it('registra un abono por línea en UNA llamada al repositorio, con su tasa, su base y el total en la moneda del plan', async () => {
@@ -202,8 +259,8 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
 
     const result = await uc.execute('plan-1', twoLines(), 'user-1', KEY);
 
-    expect(result.planCurrency).toBe('COP');
-    // 50 USD × 4000 + 100 000 COP.
+    expect(result.planCurrency).toBe('VES');
+    // 50 USD × 4000 + 100 000 VES.
     expect(result.total).toBe(300_000);
     expect(result.payments).toHaveLength(2);
     expect(result.id).toBe(result.payments[0].id);
@@ -218,21 +275,21 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       input?.lines.map((l) => [l.currency, l.method, l.reference]),
     ).toEqual([
       ['USD', 'TRANSFER', 'TR-001'],
-      ['COP', 'CASH', null],
+      ['VES', 'CASH', null],
     ]);
     expect(input?.lines[0].frozenRate).toMatchObject({
-      currency: 'COP',
+      currency: 'VES',
       fromPerBase: 1,
       toPerBase: 4000,
     });
     expect(input?.lines[0].planAmount).toEqual({
-      planCurrency: 'COP',
+      planCurrency: 'VES',
       amount: 200_000,
       rateDate: '2026-10-30',
     });
     // Saldo del recibo: 500 000 − (100 000 + 300 000).
     expect(input?.receiptPlanBalance).toEqual({
-      currency: 'COP',
+      currency: 'VES',
       billable: 500_000,
       paid: 400_000,
       balance: 100_000,
@@ -256,7 +313,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     ['seis líneas', 6],
   ])('%s → 400', async (_label, count) => {
     const { uc, repo } = makeUseCase();
-    const line = { amount: 1000, currency: 'COP', paymentMethodId: 'm-cash' };
+    const line = { amount: 1000, currency: 'VES', paymentMethodId: 'm-cash' };
     await expect(
       uc.execute('plan-1', {
         paidAt: '2026-10-30',
@@ -305,7 +362,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     const input = twoLines();
     input.lines[1] = {
       amount: 50_000,
-      currency: 'COP',
+      currency: 'VES',
       paymentMethodId: 'm-mobile',
       reference: 'PM-777',
     };
@@ -334,7 +391,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     const input = twoLines();
     input.lines[1] = {
       amount: 10_000,
-      currency: 'COP',
+      currency: 'VES',
       paymentMethodId: 'm-transfer',
       reference: 'tr 001',
     };
@@ -353,7 +410,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     expect(error).toBeInstanceOf(ConflictException);
     expect((error as ConflictException).getResponse()).toMatchObject({
       code: SPLIT_PAYMENT_EXCEEDS_BALANCE,
-      currency: 'COP',
+      currency: 'VES',
       total: 300_000,
       pending: 200_000,
       excess: 100_000,
@@ -385,6 +442,88 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
     });
   });
 
+  // DX-463 (BE-058): sin leer lo pendiente no hay con qué comparar el total;
+  // saltarse la comprobación dejaría pasar un excedente sin confirmar.
+  it.each([
+    ['el saldo no se puede leer', 'unreadable'],
+    ['el proveedor de tasas tardó demasiado', 'timedOut'],
+  ] as const)(
+    'DX-463: %s y sin confirmar → 503 SPLIT_PAYMENT_BALANCE_UNAVAILABLE en español y no se registra nada',
+    async (_label, failure) => {
+      const { uc, repo, balance } = makeUseCase();
+      balance[failure] = true;
+      const error: unknown = await uc
+        .execute('plan-1', twoLines(), 'user-1')
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect(
+        (error as ServiceUnavailableException).getResponse(),
+      ).toMatchObject({
+        statusCode: 503,
+        code: 'SPLIT_PAYMENT_BALANCE_UNAVAILABLE',
+        message: expect.stringContaining('No se pudo leer') as string,
+      });
+      expect(repo.lastSplitInput).toBeNull();
+    },
+  );
+
+  it('DX-463 (L3): si el plan ya no existe al leer el saldo, sale su 404, no un 503', async () => {
+    const { uc, balance } = makeUseCase();
+    balance.notFound = true;
+    await expect(
+      uc.execute('plan-1', twoLines(), 'user-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('DX-463 (L4): la guarda de la transacción usa lo pendiente de AHORA: si baja, 409 con las cifras nuevas; si el saldo es incierto, 503', async () => {
+    const { uc, repo, balance } = makeUseCase();
+    await uc.execute('plan-1', twoLines(), 'user-1');
+    const guard = repo.lastSplitInput?.excessGuardInTx;
+    expect(guard).toBeDefined();
+    const run = () =>
+      guard!({
+        planId: 'plan-1',
+        snapshot: {} as never,
+        creditMovements: 0,
+      });
+    balance.paid = 100_000; // pendiente 400 000: el cobro (300 000) cabe
+    await expect(run()).resolves.toBeUndefined();
+    balance.paid = 400_000; // el plan bajó o se cobró: pendiente 100 000
+    const error: unknown = await run().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: 'SPLIT_PAYMENT_EXCEEDS_BALANCE',
+      pending: 100_000,
+      excess: 200_000,
+    });
+  });
+
+  // DX-463 ronda 2: un abono «sin tasa» solo puede reducir lo pendiente.
+  it('DX-463: con un abono sin tasa en el plan, la guarda de la transacción compara con lo conocido (cabe: sigue; excede: 409), nunca 503', async () => {
+    const { uc, repo, balance } = makeUseCase();
+    await uc.execute('plan-1', twoLines(), 'user-1');
+    const guard = repo.lastSplitInput?.excessGuardInTx;
+    const run = () =>
+      guard!({ planId: 'plan-1', snapshot: {} as never, creditMovements: 0 });
+    balance.withoutRate = true;
+    balance.timedOut = true;
+    balance.paid = 100_000; // conocido: pendiente 400 000, el cobro (300 000) cabe
+    await expect(run()).resolves.toBeUndefined();
+    balance.paid = 400_000; // conocido: pendiente 100 000 < 300 000
+    await expect(run()).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('DX-463: con el excedente ya confirmado, el saldo ilegible no frena el cobro (no hay comprobación que saltar) y el recibo sale sin saldo', async () => {
+    const { uc, repo, balance } = makeUseCase();
+    balance.unreadable = true;
+    await uc.execute(
+      'plan-1',
+      twoLines({ confirmCreditBalance: true }),
+      'user-1',
+    );
+    expect(repo.lastSplitInput?.receiptPlanBalance).toBeNull();
+  });
+
   it('justo lo pendiente no pide confirmación', async () => {
     const { uc, balance } = makeUseCase();
     balance.paid = 200_000; // pendiente 300 000 = el cobro
@@ -399,7 +538,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
   it('sin confirmar, pasa al repositorio cuántos abonos tenía el plan ANTES de leer lo pendiente; confirmado, no', async () => {
     const { uc, repo } = makeUseCase();
     await uc.execute('plan-1', twoLines());
-    const seen = repo.lastSplitInput?.balanceGuard?.planPaymentsSeen;
+    const seen = repo.lastSplitInput?.balanceGuard?.planMovementsSeen;
     expect(seen).toEqual(expect.any(Number));
 
     // Cuenta también los anulados (solo crece).
@@ -413,7 +552,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
         ),
       }),
     );
-    expect(repo.lastSplitInput?.balanceGuard?.planPaymentsSeen).toBe(
+    expect(repo.lastSplitInput?.balanceGuard?.planMovementsSeen).toBe(
       (seen ?? 0) + 4,
     );
 
@@ -493,7 +632,7 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       const singleKey = 'aa0a3f1e-9a51-4d1f-8f63-1c2d3e4f5a6b';
       await recordPayment.execute(
         'plan-1',
-        { amount: 1000, currency: 'COP', paidAt: '2026-10-30' },
+        { amount: 1000, currency: 'VES', paidAt: '2026-10-30' },
         'user-1',
         singleKey,
       );
@@ -506,7 +645,9 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       const { uc } = makeUseCase();
       await expect(
         uc.execute('plan-1', twoLines(), 'user-1', 'no-es-uuid'),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).rejects.toThrow(
+        new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE),
+      );
     });
   });
 });

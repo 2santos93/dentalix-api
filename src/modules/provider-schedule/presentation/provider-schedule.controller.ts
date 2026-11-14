@@ -138,7 +138,7 @@ export class ProviderScheduleController {
   ): Promise<ProviderScheduleView> {
     return this.replaceSchedule.execute(
       providerId,
-      { locations: dto.locations },
+      { locations: dto.locations, confirmAffected: dto.confirmAffected },
       requireCtx(req, this.tenantContext),
     );
   }
@@ -188,6 +188,7 @@ export class ProviderScheduleController {
         date: dto.date,
         ranges: dto.ranges,
         note: dto.note,
+        confirmAffected: dto.confirmAffected,
       },
       requireCtx(req, this.tenantContext),
     );

@@ -46,6 +46,7 @@ import {
   boundedInt,
   storageDriverOf,
 } from '../shared/storage/storage-config';
+import { platformMinYearsProblem } from '../modules/patients/domain/retention/clinical-retention-config';
 import { parseMailEncryptionKey } from '../modules/notifications/email/infrastructure/email-payload-cipher';
 import { AUDIT_MIN_RETENTION_MONTHS } from '../modules/audit/infrastructure/audit-retention-config';
 import {
@@ -61,6 +62,7 @@ import {
 import { RECHECK_MAX_FAILURES_LIMIT } from '../modules/domains/domain/rules/tenant-domain-rules';
 import { parseMfaEncryptionKey } from '../shared/crypto/mfa-secret-cipher';
 import { loadShutdownConfig, shutdownConfigProblems } from './shutdown-config';
+import { planQuoteComposeV4Problems } from '../modules/treatment-plans/application/plan-quote-composition.config';
 import { httpServerTimeoutProblems } from './http-server-timeouts';
 import { transactionConfigProblems } from '../shared/prisma/transaction-config';
 import { providerRatesLimitsProblems } from '../modules/exchange/application/provider-rates-limits';
@@ -380,6 +382,22 @@ function mailProblems(env: Env, isProd: boolean): string[] {
     }
   }
 
+  // DX-149-quater: límites del restablecimiento de contraseña (endpoint
+  // público): en curso a la vez por proceso (cada uno, una conexión del
+  // pool), cuántos esperan turno y el tope por usuario al día.
+  for (const [key, min, max] of [
+    ['PASSWORD_RESET_MAX_CONCURRENCY', 1, 100],
+    ['PASSWORD_RESET_MAX_QUEUE', 1, 10_000],
+    ['PASSWORD_RESET_USER_DAILY_LIMIT', 1, 20],
+  ] as const) {
+    const raw = str(env, key);
+    if (raw == null) continue;
+    const value = Number(raw.trim());
+    if (!/^\d{1,5}$/.test(raw.trim()) || value < min || value > max) {
+      problems.push(`${key} debe ser un entero entre ${min} y ${max}.`);
+    }
+  }
+
   return problems;
 }
 
@@ -407,6 +425,17 @@ function auditProblems(env: Env): string[] {
     }
   }
   return problems;
+}
+
+/**
+ * DX-330: mínimo de plataforma del plazo de conservación de la historia
+ * clínica. Vacío = 15; por debajo del suelo, la API no arranca.
+ */
+function retentionProblems(env: Env): string[] {
+  const problem = platformMinYearsProblem(
+    str(env, 'PLATFORM_MIN_CLINICAL_RETENTION_YEARS'),
+  );
+  return problem ? [problem] : [];
 }
 
 /** DX-085: papel del proceso y ajustes de la cola de trabajos. */
@@ -437,7 +466,7 @@ function jobsProblems(env: Env): string[] {
       problems.push(`${key} debe ser un entero entre ${min} y ${max}.`);
     }
   }
-  // Revisión H1: si el apagado espera más que el arriendo, otro worker
+  // Revisión H1: si el apagado espera más que la reserva, otro worker
   // retoma trabajos que siguen en curso en el que se apaga.
   const intOf = (key: string, fallback: number): number => {
     const raw = str(env, key)?.trim();
@@ -556,6 +585,15 @@ function breakGlassProblems(env: Env, isProd: boolean): string[] {
         `BREAK_GLASS_MFA_COOLDOWN_MINUTES debe ser un entero entre 0 y ${BREAK_GLASS_MFA_COOLDOWN_MAX_MINUTES} (minutos de espera tras activar el MFA antes del primer acceso de soporte).`,
       );
     }
+  }
+  const newClinicMfa = str(env, 'NEW_CLINIC_REQUIRE_ADMIN_MFA');
+  if (
+    newClinicMfa != null &&
+    !['true', 'false'].includes(newClinicMfa.trim())
+  ) {
+    problems.push(
+      'NEW_CLINIC_REQUIRE_ADMIN_MFA debe ser true o false (si las clínicas nuevas exigen la verificación en dos pasos a sus administradores).',
+    );
   }
   return problems;
 }
@@ -713,6 +751,7 @@ export function validateEnv(env: Env): Env {
   if (isProd) problems.push(...productionProblems(env));
   problems.push(...mailProblems(env, isProd));
   problems.push(...auditProblems(env));
+  problems.push(...retentionProblems(env));
   problems.push(...jobsProblems(env));
   problems.push(...domainProblems(env));
   problems.push(...breakGlassProblems(env, isProd));
@@ -728,6 +767,8 @@ export function validateEnv(env: Env): Env {
   );
   // SEC-054/SEC-058: topes del proveedor de tasas (y que cuadren entre sí).
   problems.push(...providerRatesLimitsProblems(get));
+  // DX-502: versión con que se componen los presupuestos nuevos.
+  problems.push(...planQuoteComposeV4Problems(get));
 
   if (problems.length > 0) {
     throw new Error(

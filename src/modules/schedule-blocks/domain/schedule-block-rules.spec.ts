@@ -13,7 +13,7 @@ import { regionalFormat } from '../../../shared/format/regional-format';
 
 const z = (iso: string) => new Date(iso);
 /** La sede de las pruebas de siempre: 24 h, día/mes (lo que mostraba). */
-const H23 = regionalFormat({ locale: 'es-CO', hourCycle: 'h23' });
+const H23 = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 const EN_US_H12 = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
 const JA_JP_H23 = regionalFormat({ locale: 'ja-JP', hourCycle: 'h23' });
 
@@ -23,8 +23,8 @@ function block(overrides: Partial<ScheduleBlock> = {}): ScheduleBlock {
     tenantId: 't1',
     locationId: null,
     providerId: 'doc',
-    start: z('2026-10-20T13:00:00.000Z'),
-    end: z('2026-10-25T00:00:00.000Z'),
+    start: z('2026-10-20T12:00:00.000Z'),
+    end: z('2026-10-24T23:00:00.000Z'),
     kind: ScheduleBlockKind.VACATION,
     allowsBooking: false,
     note: null,
@@ -41,14 +41,14 @@ describe('reglas de bloqueos (DX-122)', () => {
   it('el rango: fin posterior al inicio y como mucho un año', () => {
     expect(
       scheduleBlockRangeError(
+        z('2026-10-20T09:00:00Z'),
         z('2026-10-20T10:00:00Z'),
-        z('2026-10-20T11:00:00Z'),
       ),
     ).toBeNull();
     expect(
       scheduleBlockRangeError(
-        z('2026-10-20T10:00:00Z'),
-        z('2026-10-20T10:00:00Z'),
+        z('2026-10-20T09:00:00Z'),
+        z('2026-10-20T09:00:00Z'),
       ),
     ).toMatch(/posterior/);
     const tooLong = new Date(
@@ -95,7 +95,7 @@ describe('reglas de bloqueos (DX-122)', () => {
   });
 
   it('el 409 dice el motivo y el rango en la hora de la sede', () => {
-    expect(blockConflictMessage(block(), 'America/Bogota', H23)).toBe(
+    expect(blockConflictMessage(block(), 'America/Caracas', H23)).toBe(
       'La agenda del profesional está bloqueada (Vacaciones) del 20/10 08:00 al 24/10 19:00. Elige otro horario.',
     );
     expect(
@@ -105,7 +105,7 @@ describe('reglas de bloqueos (DX-122)', () => {
           locationId: 'loc',
           kind: ScheduleBlockKind.MEETING,
         }),
-        'America/Bogota',
+        'America/Caracas',
         H23,
       ),
     ).toBe(
@@ -117,27 +117,27 @@ describe('reglas de bloqueos (DX-122)', () => {
     const lunch = block({
       kind: ScheduleBlockKind.LUNCH,
       allowsBooking: true,
-      start: z('2026-10-20T18:00:00.000Z'),
-      end: z('2026-10-20T19:00:00.000Z'),
+      start: z('2026-10-20T17:00:00.000Z'),
+      end: z('2026-10-20T18:00:00.000Z'),
     });
-    expect(blockWarningMessage(lunch, 'America/Bogota', H23)).toBe(
+    expect(blockWarningMessage(lunch, 'America/Caracas', H23)).toBe(
       'La cita cae en un bloqueo que permite agendar: Almuerzo (13:00–14:00).',
     );
   });
 
   it('un bloqueo de días completos se dice con el último día elegido (no «al 23 00:00»)', () => {
     const wholeDays = block({
-      start: z('2026-10-21T05:00:00.000Z'), // 21/10 00:00 en Bogotá
-      end: z('2026-10-23T05:00:00.000Z'), // 23/10 00:00 = fin del 22
+      start: z('2026-10-21T04:00:00.000Z'), // 21/10 00:00 en la zona de la sede
+      end: z('2026-10-23T04:00:00.000Z'), // 23/10 00:00 = fin del 22
     });
-    expect(blockConflictMessage(wholeDays, 'America/Bogota', H23)).toBe(
+    expect(blockConflictMessage(wholeDays, 'America/Caracas', H23)).toBe(
       'La agenda del profesional está bloqueada (Vacaciones) del 21/10 al 22/10. Elige otro horario.',
     );
     const oneDay = block({
-      start: z('2026-10-21T05:00:00.000Z'),
-      end: z('2026-10-22T05:00:00.000Z'),
+      start: z('2026-10-21T04:00:00.000Z'),
+      end: z('2026-10-22T04:00:00.000Z'),
     });
-    expect(blockConflictMessage(oneDay, 'America/Bogota', H23)).toBe(
+    expect(blockConflictMessage(oneDay, 'America/Caracas', H23)).toBe(
       'La agenda del profesional está bloqueada (Vacaciones) el 21/10. Elige otro horario.',
     );
   });

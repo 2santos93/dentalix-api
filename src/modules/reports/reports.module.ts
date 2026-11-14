@@ -10,16 +10,55 @@ import { GetProductionByProcedureUseCase } from './application/use-cases/get-pro
 import { PRODUCTION_BY_PROCEDURE_REPOSITORY } from './domain/ports/production-by-procedure-repository.port';
 import { PrismaProductionByProcedureRepository } from './infrastructure/prisma-production-by-procedure.repository';
 import { ProductionByProcedureController } from './presentation/production-by-procedure.controller';
+import { GetUnallocatedPaymentsUseCase } from './application/use-cases/get-unallocated-payments.use-case';
+import { UNALLOCATED_PAYMENTS_REPOSITORY } from './domain/ports/unallocated-payments-repository.port';
+import { PrismaUnallocatedPaymentsRepository } from './infrastructure/prisma-unallocated-payments.repository';
+import { UnallocatedPaymentsController } from './presentation/unallocated-payments.controller';
+import { GetRecoveredSlotsUseCase } from './application/use-cases/get-recovered-slots.use-case';
+import { RECOVERED_SLOTS_REPOSITORY } from './domain/ports/recovered-slots-repository.port';
+import { PrismaRecoveredSlotsRepository } from './infrastructure/prisma-recovered-slots.repository';
+import { RecoveredSlotsController } from './presentation/recovered-slots.controller';
+import { GetChairOccupancyUseCase } from './application/use-cases/get-chair-occupancy.use-case';
+import { CHAIR_OCCUPANCY_REPOSITORY } from './domain/ports/chair-occupancy-repository.port';
+import { PrismaChairOccupancyRepository } from './infrastructure/prisma-chair-occupancy.repository';
+import { ChairOccupancyController } from './presentation/chair-occupancy.controller';
+import {
+  GetPatientLinksUseCase,
+  PATIENT_LINKS_CLOCK,
+} from './application/use-cases/get-patient-links.use-case';
+import { PATIENT_LINKS_REPOSITORY } from './domain/ports/patient-links-repository.port';
+import { PrismaPatientLinksRepository } from './infrastructure/prisma-patient-links.repository';
+import { PatientLinksController } from './presentation/patient-links.controller';
+import { GetProfitabilityUseCase } from './application/use-cases/get-profitability.use-case';
+import { PROFITABILITY_REPOSITORY } from './domain/ports/profitability-repository.port';
+import { PrismaProfitabilityRepository } from './infrastructure/prisma-profitability.repository';
+import { ProfitabilityController } from './presentation/profitability.controller';
 
 // Reportes de gestión (DX-014). Pestañas: «Comparar sedes» (indicadores en
-// `domain/kpi-definitions.ts`) y «Producción por procedimiento» (DX-423); las
+// `domain/kpi-definitions.ts`), «Producción por procedimiento» (DX-423) y
+// «Cobrado sin imputar» (DX-399, ADMIN y recepción) y «Huecos recuperados»
+// (DX-436), «Ocupación por sillón» (DX-481), «Enlaces del paciente»
+// (DX-424) y «Rentabilidad por sede» (DX-410); las
 // siguientes se añaden como controladores bajo el mismo prefijo `reports`.
 @Module({
   imports: [JwtModule.register({})],
-  controllers: [LocationsComparisonController, ProductionByProcedureController],
+  controllers: [
+    LocationsComparisonController,
+    ProductionByProcedureController,
+    UnallocatedPaymentsController,
+    RecoveredSlotsController,
+    ChairOccupancyController,
+    PatientLinksController,
+    ProfitabilityController,
+  ],
   providers: [
     GetLocationsComparisonUseCase,
     GetProductionByProcedureUseCase,
+    GetUnallocatedPaymentsUseCase,
+    GetRecoveredSlotsUseCase,
+    GetChairOccupancyUseCase,
+    GetPatientLinksUseCase,
+    GetProfitabilityUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -29,6 +68,27 @@ import { ProductionByProcedureController } from './presentation/production-by-pr
     {
       provide: PRODUCTION_BY_PROCEDURE_REPOSITORY,
       useClass: PrismaProductionByProcedureRepository,
+    },
+    {
+      provide: UNALLOCATED_PAYMENTS_REPOSITORY,
+      useClass: PrismaUnallocatedPaymentsRepository,
+    },
+    {
+      provide: RECOVERED_SLOTS_REPOSITORY,
+      useClass: PrismaRecoveredSlotsRepository,
+    },
+    {
+      provide: CHAIR_OCCUPANCY_REPOSITORY,
+      useClass: PrismaChairOccupancyRepository,
+    },
+    {
+      provide: PATIENT_LINKS_REPOSITORY,
+      useClass: PrismaPatientLinksRepository,
+    },
+    { provide: PATIENT_LINKS_CLOCK, useValue: () => new Date() },
+    {
+      provide: PROFITABILITY_REPOSITORY,
+      useClass: PrismaProfitabilityRepository,
     },
   ],
 })

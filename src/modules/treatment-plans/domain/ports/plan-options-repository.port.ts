@@ -45,6 +45,13 @@ export interface PendingFollowUpRow {
   optionLabel: string | null;
   presentedAt: Date;
   presentedLocationId: string;
+  /**
+   * DX-379: zona IANA de la sede de la presentación (la de «hoy» para saber
+   * si venció); `null` si no tiene una válida.
+   */
+  presentedLocationTimeZone: string | null;
+  /** DX-379: vencimiento guardado (`YYYY-MM-DD`); `null` en planes anteriores. */
+  quoteValidUntil: string | null;
   currency: string;
   /** Σ (precio − descuento) de los ítems vivos, en `currency`. */
   total: number;

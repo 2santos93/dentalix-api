@@ -163,6 +163,13 @@ export class CancellationFeeViewDto {
   @ApiProperty({ format: 'uuid' })
   appointmentId!: string;
 
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Sede de la cita: el importe y las fechas se pintan con el formato de esa sede',
+  })
+  locationId!: string;
+
   @ApiProperty({ format: 'uuid' })
   patientId!: string;
 

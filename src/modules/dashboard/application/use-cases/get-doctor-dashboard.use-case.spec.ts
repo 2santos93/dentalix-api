@@ -20,6 +20,7 @@ import {
 import { Appointment } from '../../../appointments/domain/entities/appointment.entity';
 import { CountPatientsUseCase } from '../../../patients/application/use-cases/count-patients.use-case';
 import { AppointmentStatus } from '@prisma/client';
+import { CURRENCY_REQUIRED_MESSAGE } from '../../../../shared/money/currency-messages';
 
 /**
  * Fakes for the 4 reused use cases -- same pattern as
@@ -143,6 +144,8 @@ function makeAppointment(overrides: Partial<Appointment>): Appointment {
     confirmationSentAt: null,
     callbackRequestedAt: null,
     wantsEarlier: false,
+    earlierWindow: null,
+    earlierRequestedAt: null,
     arrivedAt: null,
     seatedAt: null,
     readyForCheckoutAt: null,
@@ -363,7 +366,40 @@ describe('GetDoctorDashboardUseCase', () => {
       start: new Date('2026-07-16T09:00:00.000Z'),
       end: new Date('2026-07-16T10:00:00.000Z'),
       status: AppointmentStatus.SCHEDULED,
+      locationId: 'loc-1',
     });
+
+    jest.useRealTimers();
+  });
+
+  it('trae la sede (locationId) de cada próxima cita y conserva el orden (DX-354b)', async () => {
+    const { appointmentsUc, uc } = makeUseCase();
+    const now = new Date('2026-07-15T12:00:00.000Z');
+    jest.useFakeTimers().setSystemTime(now);
+
+    appointmentsUc.items = [
+      makeAppointment({
+        id: 'sede-b',
+        locationId: 'loc-b',
+        start: new Date('2026-07-17T09:00:00.000Z'),
+        end: new Date('2026-07-17T10:00:00.000Z'),
+      }),
+      makeAppointment({
+        id: 'sede-a',
+        locationId: 'loc-a',
+        start: new Date('2026-07-16T09:00:00.000Z'),
+        end: new Date('2026-07-16T10:00:00.000Z'),
+      }),
+    ];
+
+    const result = await uc.execute(baseInput);
+
+    expect(
+      result.upcomingAppointments.map((a) => [a.id, a.locationId]),
+    ).toEqual([
+      ['sede-a', 'loc-a'],
+      ['sede-b', 'loc-b'],
+    ]);
 
     jest.useRealTimers();
   });
@@ -454,7 +490,7 @@ describe('GetDoctorDashboardUseCase', () => {
     const { uc } = makeUseCase();
 
     await expect(uc.execute({ ...baseInput, currency: '  ' })).rejects.toThrow(
-      /currency/i,
+      CURRENCY_REQUIRED_MESSAGE,
     );
   });
 

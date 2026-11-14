@@ -1,4 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import {
+  clinicLogoKeyToFreeze,
+  withClinicLogoUrl,
+} from '../../../shared/storage/clinic-logo-url';
+import { ConflictException, Injectable } from '@nestjs/common';
+import type { QuoteValidity } from '../../treatment-plans/domain/quote-validity';
 import {
   ClinicRole,
   Prisma,
@@ -6,6 +11,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
@@ -18,6 +24,7 @@ import {
 import { readPlanQuoteSource } from '../../treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
 import {
   loadNoticeResponsibles,
+  loadMajorityReview,
   loadTenantMajorityAge,
 } from '../../patients/infrastructure/notices/notice-context';
 import type {
@@ -28,7 +35,10 @@ import type {
 import {
   RemoteBudgetChangedError,
   type BudgetSource,
+  type CreateSignatureRequestOptions,
   type CreateSignatureRequestRepoInput,
+  SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE,
+  budgetNotPresentedMessage,
   type LockedWrite,
   type PublicRequestEvidence,
   type RemoteBudgetAcceptanceInsert,
@@ -145,6 +155,87 @@ function toListRow(row: ListRow): SignatureRequestListRow {
 }
 
 /**
+ * DX-379 (M-3): guarda en el plan la validez de la foto enviada si aún no
+ * tiene ninguna (la primera emisión manda, como al imprimir), y solo si el
+ * plan sigue «Presentado» y sin aceptar: si entre la lectura y esta
+ * transacción se aceptó, se rechazó o se canceló, el 409 de «no presentado»
+ * (la regla `validityOnFirstIssue`: nunca se emite un plan cerrado). Si otro
+ * guardó entre medias otras fechas, la foto ya no sería la del plan: 409. En
+ * los dos casos no se crea nada.
+ */
+async function fixPlanQuoteValidity(
+  tx: Prisma.TransactionClient,
+  planId: string,
+  validity: QuoteValidity,
+): Promise<void> {
+  const issuedOn = new Date(`${validity.issuedOn}T00:00:00.000Z`);
+  const validUntil = new Date(`${validity.validUntil}T00:00:00.000Z`);
+  const { count } = await tx.treatmentPlan.updateMany({
+    where: {
+      id: planId,
+      status: TreatmentPlanStatus.PRESENTED,
+      acceptance: { is: null },
+      quoteIssuedOn: null,
+      quoteValidUntil: null,
+    },
+    data: { quoteIssuedOn: issuedOn, quoteValidUntil: validUntil },
+  });
+  if (count > 0) return;
+  const plan = await tx.treatmentPlan.findFirst({
+    where: { id: planId },
+    select: {
+      status: true,
+      quoteIssuedOn: true,
+      quoteValidUntil: true,
+      acceptance: { select: { id: true } },
+    },
+  });
+  if (
+    !plan ||
+    plan.acceptance ||
+    plan.status !== TreatmentPlanStatus.PRESENTED
+  ) {
+    throw new ConflictException(
+      budgetNotPresentedMessage(
+        plan?.acceptance || !plan ? TreatmentPlanStatus.ACCEPTED : plan.status,
+      ),
+    );
+  }
+  if (
+    plan.quoteIssuedOn?.getTime() !== issuedOn.getTime() ||
+    plan.quoteValidUntil?.getTime() !== validUntil.getTime()
+  ) {
+    throw new ConflictException(SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE);
+  }
+}
+
+/** DX-425: otro envío del mismo documento ganó la carrera. */
+export const SIGNATURE_ALREADY_SENDING_MESSAGE =
+  'Este documento ya se está enviando a firma. Actualiza la lista de envíos y, si hace falta, vuelve a enviarlo.';
+
+const LIVE_LINK_INDEX = /signature_requests_live_(consent|budget)_key/;
+
+/**
+ * P2002 de los índices únicos parciales «un enlace vivo por documento»
+ * (`signature_requests_live_consent_key` y `_live_budget_key`, DX-425). Se
+ * reconoce por el nombre del índice si Prisma lo informa (`meta.target` o el
+ * mensaje) y, como Prisma 6 no declara estos índices y deja `meta.target`
+ * nulo, también con el target nulo. El único declarado que podría chocar al
+ * crear, el de `tokenHash`, trae su campo y se deja pasar como el error que es.
+ */
+function isLiveLinkViolation(error: unknown): boolean {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+    error.code !== 'P2002'
+  ) {
+    return false;
+  }
+  const target = (error.meta as { target?: unknown } | undefined)?.target;
+  if (!target) return true;
+  return LIVE_LINK_INDEX.test(JSON.stringify(target) + error.message);
+}
+
+/**
  * Firma a distancia en Postgres (DX-243). Todo bajo `runWithTenant`: con la
  * RLS FORCE, una solicitud, un paciente o un token de otra clínica no
  * existen. `tenants` y `users` no tienen RLS: se acotan por el tenant del
@@ -181,9 +272,10 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         },
       });
       if (!patient) return null;
-      const [responsibles, documents, majorityAge, location] =
+      const [responsibles, majorityReview, documents, majorityAge, location] =
         await Promise.all([
           loadNoticeResponsibles(tx, patientId),
+          loadMajorityReview(tx, patientId),
           tx.patientResponsibleParty.findMany({
             where: { patientId, deletedAt: null },
             select: {
@@ -230,6 +322,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
             docNumber: null,
           },
         })),
+        majorityReview,
         majorityAge,
         timeZone: location.timeZone,
       };
@@ -305,11 +398,49 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
     );
   }
 
-  create(
+  async create(
     input: CreateSignatureRequestRepoInput,
+    enqueue?: (
+      tx: Prisma.TransactionClient,
+      supersededIds: string[],
+    ) => Promise<void>,
+    options: CreateSignatureRequestOptions = {},
+  ): Promise<{ id: string; supersededIds: string[] }> {
+    try {
+      return await this.createLive(input, enqueue, options);
+    } catch (error) {
+      // DX-425 (DB-061): dos envíos a la vez del mismo documento. Ambos
+      // vieron «nada pendiente» e insertaron; el índice único parcial deja
+      // pasar al primero en confirmar. El otro no deja enlace ni mensaje.
+      if (isLiveLinkViolation(error)) {
+        throw new ConflictException(SIGNATURE_ALREADY_SENDING_MESSAGE);
+      }
+      throw error;
+    }
+  }
+
+  private createLive(
+    input: CreateSignatureRequestRepoInput,
+    enqueue:
+      | ((
+          tx: Prisma.TransactionClient,
+          supersededIds: string[],
+        ) => Promise<void>)
+      | undefined,
+    options: CreateSignatureRequestOptions,
   ): Promise<{ id: string; supersededIds: string[] }> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
+      // está archivado: nunca un enlace vivo ni un mensaje a un archivado.
+      await lockLivePatientOrConflict(tx, input.patientId);
+      if (options.planQuoteValidity && input.treatmentPlanId) {
+        await fixPlanQuoteValidity(
+          tx,
+          input.treatmentPlanId,
+          options.planQuoteValidity,
+        );
+      }
       // La anterior del mismo paciente y plantilla (o, BUDGET, del mismo
       // plan) que aún esperaba deja de servir: un solo enlace vivo por
       // documento.
@@ -336,6 +467,10 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         data: { tenantId, ...input },
         select: { id: true },
       });
+      // DX-149-ter: el email del enlace (y la cancelación de los de las
+      // anuladas) AL FINAL de esta transacción: sus candados del tope son lo
+      // último que se toma. Si el tope no deja, se deshace todo.
+      await enqueue?.(tx, supersededIds);
       return { id: created.id, supersededIds };
     });
   }
@@ -426,10 +561,12 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         },
       });
       if (!row) return null;
-      const tenant = await tx.tenant.findUniqueOrThrow({
-        where: { id: tenantId },
-        select: { name: true, logoUrl: true, primaryColor: true },
-      });
+      const tenant = withClinicLogoUrl(
+        await tx.tenant.findUniqueOrThrow({
+          where: { id: tenantId },
+          select: { name: true, logoKey: true, primaryColor: true },
+        }),
+      );
       const { location, ...request } = row;
       return {
         request: toRecord(request),
@@ -446,7 +583,10 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
   withLockedRequest<T>(
     id: string,
     evidence: PublicRequestEvidence,
-    decide: (request: SignatureRequestRecord) => {
+    decide: (
+      request: SignatureRequestRecord,
+      dbNow: Date,
+    ) => {
       write: LockedWrite | null;
       result: T;
     },
@@ -475,7 +615,12 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         where: { id },
       });
       const request = toRecord(row);
-      const { write, result } = decide(request);
+      // DX-425: la hora de la BD en esta transacción, redondeada igual que
+      // el trigger `signature_requests_evidence_clock` (TIMESTAMP(3), UTC):
+      // lo que `decide` sella con ella coincide con lo que queda guardado.
+      const [{ now: dbNow }] = await tx.$queryRaw<{ now: Date }[]>`
+        SELECT (pg_catalog.transaction_timestamp() AT TIME ZONE 'UTC')::timestamp(3) AS now`;
+      const { write, result } = decide(request, dbNow);
       if (!write) return result;
 
       if (write.budget) {
@@ -483,12 +628,19 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
       }
       await tx.signatureRequest.update({ where: { id }, data: write.patch });
       if (write.consent) {
+        // DX-019-ter: el logo del instante de la firma (no el del envío: no
+        // está en el texto congelado, así que cambiarlo no anula el enlace).
+        const tenant = await tx.tenant.findUniqueOrThrow({
+          where: { id: tenantId },
+          select: { logoKey: true },
+        });
         await tx.patientConsent.create({
           data: {
             tenantId,
             patientId: request.patientId,
             signatureRequestId: request.id,
             ...write.consent,
+            clinicLogoKey: clinicLogoKeyToFreeze(tenant.logoKey),
           },
         });
       }
@@ -562,6 +714,14 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           remoteSentAt: budget.remoteSentAt,
           remoteOpenedAt: budget.remoteOpenedAt,
           remoteVerifiedAt: budget.remoteVerifiedAt,
+          // DX-019-bis (B): el logo del instante de la firma (no el del envío:
+          // no está en la foto enviada, así que cambiarlo no anula el enlace).
+          clinicLogoKey: source.clinic.logoKey,
+          // DX-379 (C): copia del último día válido del presupuesto (nunca
+          // vencido: `stillMatches` lo comprobó con el plan bloqueado).
+          quoteValidUntil: source.plan.quoteValidUntil
+            ? new Date(`${source.plan.quoteValidUntil}T00:00:00.000Z`)
+            : null,
         },
       });
     } catch (error) {

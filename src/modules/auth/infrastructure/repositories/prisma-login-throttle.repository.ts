@@ -118,4 +118,11 @@ export class PrismaLoginThrottleRepository implements LoginThrottleRepository {
          AND "blockedUntil" > ${NOW}`;
     return rows[0]?.blockedUntil ?? null;
   }
+
+  async accountFailures(accountKeyHash: string): Promise<number> {
+    const rows = await this.prisma.$queryRaw<{ failures: number }[]>`
+      SELECT "failures" FROM "login_throttles"
+       WHERE "scope" = ${ACCOUNT} AND "keyHash" = ${accountKeyHash}`;
+    return rows[0]?.failures ?? 0;
+  }
 }

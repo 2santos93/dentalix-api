@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   Optional,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { DocumentType, TriageFlag } from '@prisma/client';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
@@ -12,10 +13,12 @@ import type { AppointmentRepository } from '../../domain/ports/appointment-repos
 import { WALK_IN_REPOSITORY } from '../../domain/ports/walk-in-repository.port';
 import type {
   WalkInPatient,
+  WalkInReplay,
   WalkInRepository,
 } from '../../domain/ports/walk-in-repository.port';
 import type { AppointmentWriteResult } from '../../domain/entities/appointment.entity';
 import {
+  IDEMPOTENCY_KEY_REUSED_CODE,
   NO_RESERVED_SLOT_CODE,
   PATIENT_DUPLICATE_CODE,
   WALK_IN_MESSAGES,
@@ -25,10 +28,13 @@ import {
   normalizeTriageNote,
   overbookReasonError,
   triageNoteError,
+  walkInRequestFingerprint,
   type Interval,
 } from '../../domain/walk-in';
+import { parseIdempotencyKey } from '../../../expenses/domain/expense-idempotency';
 import { checkScheduleBlocks } from '../schedule-block-check';
-import { collectWarnings } from '../appointment-warnings';
+import { NO_WARNINGS, collectWarnings } from '../appointment-warnings';
+import { ChairAssignmentService } from '../chair-assignment';
 import {
   OVERLAP_MESSAGES,
   overlapExclusionScope,
@@ -47,6 +53,7 @@ import { DOC_TAKEN_MESSAGE } from '../../../patients/infrastructure/repositories
 import { STAFF_REPOSITORY } from '../../../staff/domain/ports/staff-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
+import { assertAttendingRole } from '../../../staff/domain/attending';
 import { APPOINTMENT_TYPE_REPOSITORY } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
 import type { AppointmentTypeRepository } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
 import type { AppointmentType } from '../../../appointment-types/domain/entities/appointment-type.entity';
@@ -80,6 +87,8 @@ export interface CreateWalkInInput {
   providerId: string;
   /** Tipo urgente concreto; sin él, el primer tipo urgente activo. */
   appointmentTypeId?: string;
+  /** DX-492: sillón de la sede; sin él, la cita va sin sillón. */
+  chairId?: string;
   triageFlags?: TriageFlag[];
   triageNote?: string | null;
   /** Sobrecupo AHORA con su motivo (5–300); sin él, hueco reservado o 409. */
@@ -119,14 +128,49 @@ export class CreateWalkInUseCase {
     @Inject(LOCATION_REPOSITORY)
     private readonly locations: LocationRepository,
     private readonly availability: ProviderAvailabilityService,
+    private readonly chairs: ChairAssignmentService,
     @Optional()
     @Inject(SCHEDULE_BLOCK_CLOCK)
     private readonly clock: ScheduleBlockClock = systemScheduleBlockClock,
   ) {}
 
+  /**
+   * DX-510: con `Idempotency-Key` (UUID), repetir la MISMA petición (doble
+   * clic, reintento de red) devuelve la cita que creó la primera, sin un
+   * segundo paciente ni una segunda cita; con otros datos es un 422
+   * `IDEMPOTENCY_KEY_REUSED`. La clave es por clínica y vive con la cita
+   * (sin caducidad, como en abonos y gastos). Sin clave, como siempre.
+   */
   async execute(
     input: CreateWalkInInput,
     ctx: AuditRequestContext,
+    idempotencyHeader?: string,
+  ): Promise<WalkInResult> {
+    const key = parseIdempotencyKey(idempotencyHeader);
+    if (key === null) {
+      throw new BadRequestException(WALK_IN_MESSAGES.idempotencyKeyInvalid);
+    }
+    if (key === undefined) return this.attend(input, ctx, undefined);
+    const locationId = await this.appointments.resolveWriteLocationId();
+    const fingerprint = walkInRequestFingerprint({ ...input, locationId });
+    const stored = await this.walkIns.findByIdempotencyKey(key);
+    if (stored) return replayResult(stored, fingerprint);
+    try {
+      return await this.attend(input, ctx, { key, fingerprint });
+    } catch (error) {
+      // La otra petición con la misma clave ganó la carrera y su cita ya está
+      // escrita: lo que esta vio después (el documento ya dado de alta, el
+      // hueco ocupado, el paciente ya en una cita) es esa misma cita.
+      const raced = await this.walkIns.findByIdempotencyKey(key);
+      if (raced) return replayResult(raced, fingerprint);
+      throw error;
+    }
+  }
+
+  private async attend(
+    input: CreateWalkInInput,
+    ctx: AuditRequestContext,
+    idempotency: { key: string; fingerprint: string } | undefined,
   ): Promise<WalkInResult> {
     const patient = this.patientChoice(input);
     const noteError = triageNoteError(input.triageNote);
@@ -157,9 +201,18 @@ export class CreateWalkInUseCase {
     // dentro de las permitidas); el profesional tiene que atender en ella.
     const locationId = await this.appointments.resolveWriteLocationId();
     assertAttendsAt(provider, locationId);
+    // DX-161: tampoco sin cita se atiende con recepción o asistencia.
+    assertAttendingRole(provider);
     const location = await this.locations.findById(locationId);
     if (!location) throw new NotFoundException('Sede no encontrada');
     const timeZone = requireLocationTimeZone(location);
+    const chair =
+      input.chairId === undefined
+        ? null
+        : await this.chairs.load(input.chairId, {
+            locationId,
+            requireActive: true,
+          });
 
     const arrivedAt = this.clock();
     const now = floorToMinute(arrivedAt);
@@ -231,6 +284,11 @@ export class CreateWalkInUseCase {
       }
     }
 
+    // El sillón no mueve el hueco: si está ocupado, se elige otro.
+    if (chair !== null) {
+      await this.chairs.assertFree(chair, { locationId, ...slot });
+    }
+
     try {
       const written = await this.walkIns.create(
         {
@@ -238,6 +296,7 @@ export class CreateWalkInUseCase {
           providerId: input.providerId,
           locationId,
           appointmentTypeId: type.id,
+          chairId: chair?.id ?? null,
           start: slot.start,
           end: slot.end,
           arrivedAt,
@@ -245,9 +304,13 @@ export class CreateWalkInUseCase {
           triageNote: normalizeTriageNote(input.triageNote),
           overbookReason,
           createdById: ctx.actor.userId,
+          ...(idempotency ? { idempotency } : {}),
         },
         ctx,
       );
+      if (written.replayed) {
+        return replayResult(written, idempotency?.fingerprint ?? null);
+      }
       return {
         ...written.appointment,
         ...warnings,
@@ -264,9 +327,11 @@ export class CreateWalkInUseCase {
       if (scope === 'provider') {
         throw new ConflictException(WALK_IN_MESSAGES.slotTaken);
       }
-      // Una cita sin cita previa no lleva sillón (DX-211): solo queda el paciente.
       if (scope === 'patient') {
         throw new ConflictException(OVERLAP_MESSAGES.patient);
+      }
+      if (scope === 'chair' && chair !== null) {
+        throw await this.chairs.raceConflict(chair.id, slot);
       }
       throw error;
     }
@@ -393,6 +458,31 @@ export class CreateWalkInUseCase {
       busy,
     });
   }
+}
+
+/**
+ * DX-510: la cita que creó la clave, si la petición es la misma; si no, 422.
+ * Esta petición no escribió nada: sin avisos ni paciente nuevo.
+ */
+function replayResult(
+  stored: WalkInReplay,
+  fingerprint: string | null,
+): WalkInResult {
+  if (stored.fingerprint !== fingerprint) {
+    throw new UnprocessableEntityException({
+      statusCode: 422,
+      error: 'Unprocessable Entity',
+      code: IDEMPOTENCY_KEY_REUSED_CODE,
+      message: WALK_IN_MESSAGES.idempotencyKeyReused,
+    });
+  }
+  return {
+    ...stored.appointment,
+    ...NO_WARNINGS,
+    planItemsReservedElsewhere: [],
+    patientCreated: false,
+    overbookId: stored.overbookId,
+  };
 }
 
 /** El id del 409 `PATIENT_DUPLICATE` de la transacción (que no trae nombre). */

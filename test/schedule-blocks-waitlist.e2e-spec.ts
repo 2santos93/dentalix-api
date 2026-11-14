@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import {
   ClinicRole,
@@ -16,11 +17,11 @@ import {
   seedMember,
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
-import { DAY_MONTH, dayMonthNumbers } from './support/sede-day-month';
 import { blockConflictMessage } from '../src/modules/schedule-blocks/domain/schedule-block-rules';
 import { regionalFormat } from '../src/shared/format/regional-format';
+import { zonedStartOfDay } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
 } from './support/location-fixtures';
 
@@ -34,11 +35,11 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const BOGOTA_MS = 5 * 60 * 60 * 1000;
+const CARACAS_MS = 5 * 60 * 60 * 1000;
 
-/** YYYY-MM-DD (Bogotá) del primer martes a 7 días o más: siempre futuro. */
+/** YYYY-MM-DD (zona de la sede) del primer martes a 7 días o más: siempre futuro. */
 function nextTuesday(): string {
-  let t = Date.now() - BOGOTA_MS + 7 * DAY_MS;
+  let t = Date.now() - CARACAS_MS + 7 * DAY_MS;
   while (new Date(t).getUTCDay() !== 2) t += DAY_MS;
   return new Date(t).toISOString().slice(0, 10);
 }
@@ -47,18 +48,25 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** Hora de pared de Bogotá (UTC−5 fijo) como instante ISO. */
+/** Hora de pared de la sede (UTC−4 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
-  return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
+  return new Date(`${day}T${hhmm}:00-04:00`).toISOString();
 }
 
-/** `[díaIni, mesIni, díaFin, mesFin]` del 409 de unas vacaciones de días completos. */
-function vacationRange(message: string): number[] {
-  const range = new RegExp(
-    `^La agenda del profesional está bloqueada \\(Vacaciones\\) del ${DAY_MONTH} al ${DAY_MONTH}\\. Elige otro horario\\.$`,
-  ).exec(message);
-  expect(range).not.toBeNull();
-  return range!.slice(1).map(Number);
+/**
+ * DX-520: el 409 de unas vacaciones de días completos, exacto. El «día/mes» es
+ * el patrón corto del locale de la sede (`regionalFormat().dayMonth`, Intl/CLDR):
+ * en es-* sin ceros («5/1», «1/11»), en en-US con ellos («01/05»). El spec lo
+ * calcula con la misma regla, así no depende de la fecha en que corre.
+ */
+function vacationMessage(
+  fmt: ReturnType<typeof regionalFormat>,
+  timeZone: string,
+  firstDay: string,
+  lastDay: string,
+): string {
+  const noon = (day: string) => new Date(`${day}T12:00:00Z`);
+  return `La agenda del profesional está bloqueada (Vacaciones) del ${fmt.dayMonth(noon(firstDay), timeZone)} al ${fmt.dayMonth(noon(lastDay), timeZone)}. Elige otro horario.`;
 }
 
 const TUE = nextTuesday();
@@ -211,7 +219,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       token: await loginAs(app, clinic.host, d2.email),
     };
 
-    // Horario conocido de la sede: lun–vie 9–13 y 15–19, Bogotá.
+    // Horario conocido de la sede: lun–vie 9–13 y 15–19, en la zona de la sede.
     await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
       .send({
         ranges: [1, 2, 3, 4, 5].flatMap((weekday) => [
@@ -225,6 +233,8 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     patients.push(await createPatient(clinic, '122001', 'Ana'));
     patients.push(await createPatient(clinic, '122002', 'Berta'));
     patients.push(await createPatient(clinic, '122003', 'Carla'));
+    // DX-161: sin entradas en pendientes: cada cancelación suya crea la suya.
+    patients.push(await createPatient(clinic, '122004', 'Diana'));
     otherPatientId = await createPatient(other, '122901', 'Otra');
   });
 
@@ -307,12 +317,15 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
     );
 
     const rejected = await book(dentist.userId, WED, '10:00').expect(409);
-    // Del martes al viernes (último día elegido), en día/mes de la sede. El
-    // ICU de es-CO quita el cero del día y del mes («5/1», «3/11»): se comparan
-    // números, no el relleno, para que no dependa de la fecha (DAY_MONTH).
-    expect(
-      vacationRange((rejected.body as { message: string }).message),
-    ).toEqual([...dayMonthNumbers(TUE), ...dayMonthNumbers(addDays(TUE, 3))]);
+    // Del martes al viernes (último día elegido), en día/mes de la sede.
+    expect((rejected.body as { message: string }).message).toBe(
+      vacationMessage(
+        regionalFormat(REGIONAL_CARACAS_FIXTURE),
+        'America/Caracas',
+        TUE,
+        addDays(TUE, 3),
+      ),
+    );
 
     const monday = await book(dentist.userId, MON, '10:00').expect(201);
     await as(
@@ -456,7 +469,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
       monday.body as { openings: { start: string; end: string }[] }
     ).openings;
     expect(monday.body).toMatchObject({
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
       durationMinutes: 30,
       truncated: false,
     });
@@ -639,8 +652,66 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
   });
 
   describe('cambios tras revisión y QA', () => {
+    it('DX-149: archivar a la paciente cierra su pendiente (auditado) y la página tiene tope', async () => {
+      const elena = await createPatient(clinic, '122149', 'Elena');
+      const entry = await as(api().post('/api/v1/waitlist'), reception.token)
+        .send({ patientId: elena })
+        .expect(201);
+      const entryId = (entry.body as Body).id;
+      await as(api().delete(`/api/v1/patients/${elena}`), clinic.adminToken)
+        .send({})
+        .expect(204);
+      expect((await waitlist()).items.map((e) => e.id)).not.toContain(entryId);
+      const row = await raw.appointmentWaitlistEntry.findUniqueOrThrow({
+        where: { id: entryId },
+        select: { status: true, dismissReason: true, resolvedAt: true },
+      });
+      expect(row).toMatchObject({
+        status: 'DISMISSED',
+        dismissReason: 'Paciente archivado',
+      });
+      expect(row.resolvedAt).not.toBeNull();
+      await expect(
+        auditCount('WAITLIST_ENTRY', 'UPDATE', entryId),
+      ).resolves.toBe(1);
+
+      const tooFar = await as(
+        api().get('/api/v1/waitlist?page=501'),
+        reception.token,
+      ).expect(400);
+      expect(JSON.stringify(tooFar.body)).toMatch(
+        /La página no puede pasar de 500/,
+      );
+      await as(api().get('/api/v1/waitlist?page=500'), reception.token).expect(
+        200,
+      );
+    });
+
+    it('DX-161: recepción como profesional es 400 y una fecha que no existe también', async () => {
+      const asProvider = await book(reception.userId, THU, '09:00', 1).expect(
+        400,
+      );
+      expect((asProvider.body as { message: string }).message).toMatch(
+        /no atiende pacientes/,
+      );
+      const bad = await block(dentist.token, {
+        providerId: dentist.userId,
+        start: '2026-02-30T10:00:00Z',
+        end: '2026-02-30T11:00:00Z',
+        kind: 'MEETING',
+      }).expect(400);
+      expect(JSON.stringify(bad.body)).toMatch(/start/);
+      await as(
+        api().post(`/api/v1/waitlist/${randomUUID()}/schedule`),
+        reception.token,
+      )
+        .send({ providerId: dentist.userId, start: '2026-02-30T10:00:00Z' })
+        .expect(400);
+    });
+
     it('reactivar una cita cancelada la saca de pendientes (queda SCHEDULED con la propia cita)', async () => {
-      const appt = await book(dentist2.userId, THU, '17:00', 0).expect(201);
+      // Diana no tiene otra entrada abierta (DX-161: una OPEN por paciente).
+      const appt = await book(dentist2.userId, THU, '17:00', 3).expect(201);
       const id = (appt.body as Body).id;
       const patch = (status: string) =>
         as(api().patch(`/api/v1/appointments/${id}`), reception.token)
@@ -755,7 +826,7 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
             const fmt = regionalFormat(REGIONAL_NEW_YORK_FIXTURE);
             const day = fmt.dayMonth(
               new Date(local(NEXT_TUE, '15:00')),
-              'America/Bogota',
+              'America/Caracas',
             );
             const rejected = await book(
               dentist2.userId,
@@ -822,19 +893,25 @@ describe('Bloqueos de agenda y pendientes por agendar (e2e, DX-122)', () => {
   });
 });
 
-// DX-252: el mismo análisis con el formateador real de la API en meses y días
-// de una cifra (del martes 5 al viernes 8 de enero) y de dos (octubre/noviembre),
-// sin esperar a que el calendario llegue a esas fechas.
-describe('rango «día/mes» del 409 de vacaciones, a cualquier fecha (DX-252)', () => {
-  const vacationFrom = (from: string, toExclusive: string) =>
+// DX-252 / DX-520: el mismo mensaje con el formateador real de la API en meses
+// y días de una cifra (del martes 5 al viernes 8 de enero), en un fin de año y
+// de dos cifras, sin esperar a que el calendario llegue a esas fechas. El
+// «día/mes» sale del locale de la sede (Intl/CLDR), nunca de un país: es-*
+// sin ceros, en-US con ellos y mes primero.
+describe('rango «día/mes» del 409 de vacaciones, a cualquier fecha (DX-252, DX-520)', () => {
+  const vacationFrom = (
+    from: string,
+    toExclusive: string,
+    region: typeof REGIONAL_CARACAS_FIXTURE,
+  ) =>
     blockConflictMessage(
       {
         id: 'b',
         tenantId: 't',
         locationId: null,
         providerId: 'doc',
-        start: new Date(local(from, '00:00')),
-        end: new Date(local(toExclusive, '00:00')),
+        start: zonedStartOfDay(from, region.timeZone),
+        end: zonedStartOfDay(toExclusive, region.timeZone),
         kind: ScheduleBlockKind.VACATION,
         allowsBooking: false,
         note: 'Vacaciones',
@@ -844,16 +921,30 @@ describe('rango «día/mes» del 409 de vacaciones, a cualquier fecha (DX-252)',
         createdAt: new Date(0),
         updatedAt: new Date(0),
       },
-      'America/Bogota',
-      regionalFormat(REGIONAL_BOGOTA_FIXTURE),
+      region.timeZone,
+      regionalFormat(region),
     );
+  const message = (range: string) =>
+    `La agenda del profesional está bloqueada (Vacaciones) ${range}. Elige otro horario.`;
 
   it.each([
-    ['2027-01-05', '2027-01-09', [5, 1, 8, 1]],
-    ['2026-12-29', '2027-01-02', [29, 12, 1, 1]],
-    ['2026-11-03', '2026-11-07', [3, 11, 6, 11]],
-    ['2026-10-20', '2026-10-24', [20, 10, 23, 10]],
-  ])('del %s al día anterior a %s', (from, toExclusive, expected) => {
-    expect(vacationRange(vacationFrom(from, toExclusive))).toEqual(expected);
-  });
+    ['2027-01-05', '2027-01-09', 'del 5/1 al 8/1', 'del 01/05 al 01/08'],
+    ['2026-12-29', '2027-01-02', 'del 29/12 al 1/1', 'del 12/29 al 01/01'],
+    ['2026-11-01', '2026-11-03', 'del 1/11 al 2/11', 'del 11/01 al 11/02'],
+    ['2026-10-31', '2026-11-02', 'del 31/10 al 1/11', 'del 10/31 al 11/01'],
+    ['2026-10-20', '2026-10-24', 'del 20/10 al 23/10', 'del 10/20 al 10/23'],
+  ])(
+    'del %s al día anterior a %s',
+    (from, toExclusive, esCo: string, enUs: string) => {
+      expect(vacationFrom(from, toExclusive, REGIONAL_CARACAS_FIXTURE)).toBe(
+        message(esCo),
+      );
+      // Nueva York cambia de horario el 1-nov-2026 y el 14-mar-2027: la
+      // medianoche se calcula en su zona, así el rango sigue siendo de días
+      // completos a ambos lados del cambio.
+      expect(vacationFrom(from, toExclusive, REGIONAL_NEW_YORK_FIXTURE)).toBe(
+        message(enUs),
+      );
+    },
+  );
 });

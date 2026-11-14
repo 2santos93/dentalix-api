@@ -149,7 +149,9 @@ export class UpdateAnamnesisSettingsUseCase {
     );
     await this.audit.record({
       tenantId: ctx.tenantId,
-      locationId: ctx.locationId,
+      // DX-363: ajuste de TODA la clínica, sin la sede activa de quien lo
+      // cambia; el registro lo pinta en la zona de la sede principal.
+      locationId: null,
       actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
       action: 'UPDATE',
       resourceType: 'MEDICAL_HISTORY',

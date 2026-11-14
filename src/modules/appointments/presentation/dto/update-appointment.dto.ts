@@ -1,4 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  CHECKOUT_ITEMS,
+  type CheckoutItem,
+} from '../../application/use-cases/get-checkout-checklist.use-case';
 import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -14,6 +18,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
+import { CHAIR_ID_INVALID_ON_EDIT_MESSAGE } from '../../../chairs/domain/chair-rules';
 import {
   CANCEL_REASON_TEXT_MAX,
   CANCELLATION_MESSAGES,
@@ -68,10 +73,10 @@ export class UpdateAppointmentDto {
     format: 'uuid',
     nullable: true,
     description:
-      'DX-211: cambiar el sillón (de la sede de la cita y activo; si no, 400/404) o quitarlo con null. Al cambiarlo o reagendar una cita con sillón se mira que esté libre en la franja (409 con su nombre y horas). Cambiar solo el sillón no anula el enlace de confirmación; queda auditado como movimiento.',
+      'DX-211: cambiar el sillón (de la sede de la cita y activo; si no, 400/404) o quitarlo con null. Al cambiarlo o reagendar una cita con sillón se mira que esté libre en la franja (409 con su nombre y horas, `code: APPOINTMENT_OVERLAP` y `scope: chair`; DX-492-bis). Un valor que no es un id: 400 en español. Cambiar solo el sillón no anula el enlace de confirmación; queda auditado como movimiento.',
   })
   @IsOptional()
-  @IsUUID()
+  @IsUUID(undefined, { message: CHAIR_ID_INVALID_ON_EDIT_MESSAGE })
   chairId?: string | null;
 
   @ApiPropertyOptional({
@@ -171,4 +176,36 @@ export class UpdateAppointmentDto {
       'El motivo para agendar en un hueco reservado debe tener entre 5 y 300 caracteres.',
   })
   overrideReason?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-509: al reactivar (desde CANCELLED o NO_SHOW) una urgencia en sobrecupo cuya hora ya ocupa otra cita del profesional, `true` la mantiene en sobrecupo a sabiendas (`audit_event` `WALK_IN_OVERBOOK_KEPT`). Sin él ese caso es 409 `OVERBOOK_SLOT_TAKEN`. Con el hueco libre deja de ser sobrecupo sola (`WALK_IN_OVERBOOK_CLEARED`); moverla a otra hora u otro profesional también. En cualquier otro cambio se ignora.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  keepOverbooked?: boolean;
+
+  @ApiPropertyOptional({
+    enum: CHECKOUT_ITEMS,
+    isArray: true,
+    description:
+      'DX-202: lo que faltaba al completar la cita desde la salida del paciente. No bloquea: queda en la auditoría.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(CHECKOUT_ITEMS.length)
+  @ArrayUnique()
+  @IsIn(CHECKOUT_ITEMS, { each: true })
+  checkoutPending?: CheckoutItem[];
+}
+
+/** DX-509: cuerpo opcional de «Deshacer llegada». */
+export class UndoArrivalDto {
+  @ApiPropertyOptional({
+    description:
+      'DX-509: para una urgencia en sobrecupo cuya hora ya ocupa otra cita del profesional, `true` la deja agendada y en sobrecupo a sabiendas (`audit_event` `WALK_IN_OVERBOOK_KEPT`). Sin él ese caso es 409 `OVERBOOK_SLOT_TAKEN`. Con el hueco libre deja de ser sobrecupo sola (`WALK_IN_OVERBOOK_CLEARED`). Se ignora en una cita que no es sobrecupo.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  keepOverbooked?: boolean;
 }

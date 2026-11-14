@@ -38,9 +38,10 @@ import {
   waitForTransactionWaiters,
 } from './support/postgres-concurrency';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // DX-051 Task 3, contra Postgres con conexiones reales (rol dentalix_app vía
 // runWithTenant, RLS FORCE): el reparto automático (R5, R6, R9), el alta con
@@ -82,6 +83,8 @@ const convert: ConvertAmountUseCase = {
     }
     return Promise.resolve({
       ...input,
+      // DX-384: la cotización lleva el día de la tasa usada.
+      rateDate: input.date,
       source: 'AUTOMATIC',
       ...(input.from === 'USD'
         ? { fromPerBase: 1, toPerBase: rate }
@@ -122,6 +125,16 @@ const DAY = new Date('2026-10-20T15:00:00.000Z');
 const REPEAT = 20;
 const DEADLOCK = '40P01';
 
+/** Quién y desde dónde, para el evento de auditoría de la reimputación (DX-399). */
+const auditOf = (clinic: { tenantId: string; userId: string }) => ({
+  tenantId: clinic.tenantId,
+  locationId: null,
+  actor: { userId: clinic.userId, role: 'ADMIN' as const },
+  requestId: null,
+  ip: null,
+  userAgent: null,
+});
+
 interface Clinic {
   tenantId: string;
   locationId: string;
@@ -143,7 +156,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const user = await raw.user.create({
     data: {
@@ -177,29 +190,9 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
 }
 
 async function cleanup(): Promise<void> {
-  const tenants = await raw.tenant.findMany({
-    where: { subdomain: { in: SUBDOMAINS } },
-    select: { id: true },
-  });
-  const ids = tenants.map((t) => t.id);
-  if (ids.length > 0) {
-    const where = { tenantId: { in: ids } };
-    // Las imputaciones antes que el historial: borrarlas deja su movimiento.
-    await raw.paymentAllocation.deleteMany({ where });
-    await raw.paymentAllocationMovement.deleteMany({ where });
-    await raw.paymentPlanAmount.deleteMany({ where });
-    await raw.paymentReceipt.deleteMany({ where });
-    await raw.payment.deleteMany({ where });
-    await raw.treatmentPlanItem.deleteMany({ where });
-    // La cola cae con sus planes (ON DELETE CASCADE).
-    await raw.treatmentPlan.deleteMany({ where });
-    await raw.patient.deleteMany({ where });
-    await raw.dentalCatalogItem.deleteMany({ where });
-    await raw.clinicMembership.deleteMany({ where });
-    await raw.paymentReceiptCounter.deleteMany({ where });
-    await raw.location.deleteMany({ where });
-    await raw.tenant.deleteMany({ where: { id: { in: ids } } });
-  }
+  // Todas las tablas de clínica en orden de FKs (un DONE con autor siembra
+  // los tipos de recall de la clínica: DX-015-bis).
+  await purgeTenantsBySubdomain(raw, SUBDOMAINS);
   await raw.user.deleteMany({
     where: { email: { in: SUBDOMAINS.map((s) => `${s}@example.com`) } },
   });
@@ -414,6 +407,9 @@ async function assertInvariants(planId: string): Promise<Map<string, number>> {
         createdAt: base.payment.createdAt,
         baseCents: cents(base.amount),
         allocatedCents: used,
+        // Estas carreras no tienen devoluciones ni traspasos: con salidas habría
+        // que atribuirlas (credit-netting) o `hasFixedPointViolation` daría falsos positivos.
+        creditOutCents: 0,
       });
     }
   }
@@ -895,7 +891,7 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
               amount: l.amount,
             })),
           },
-          a.userId,
+          auditOf(a),
         ),
       );
 
@@ -1000,6 +996,7 @@ describe('DX-051 · reparto automático con conexiones reales (int)', () => {
             expectedVersion: version,
             lines: [{ itemId: v, cents: 5_000 }],
             actorId: a.userId,
+            audit: auditOf(a),
           }),
         ),
       );

@@ -1,11 +1,19 @@
 import type { IdempotentPayment } from '../idempotency';
+import type { CurrencyTexts } from '../../../../shared/format/currency-text';
 import type { FrozenExchangeRate } from '../payment-exchange-rate';
-import { ClinicRole, PaymentMethod } from '@prisma/client';
+import {
+  ClinicRole,
+  PaymentAdjustmentType,
+  PaymentMethod,
+} from '@prisma/client';
 import { Payment } from '../entities/payment.entity';
 import { CashPayment } from '../entities/cash-payment.entity';
 import type { VoidSubject } from '../void-window';
 import type { ReceiptPlanBalance } from '../receipt-snapshot';
+import type { PlanBalanceSnapshot } from './plan-allocation-repository.port';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import type { PaymentProofAttachment } from '../payment-proof';
+import type { ComputedAdjustment } from '../../../payment-methods/domain/payment-adjustments';
 
 // NOTE: deliberately NO `tenantId`/`id` field — the tenant comes from the
 // guarded request context (never the client), same convention as
@@ -21,6 +29,25 @@ import type { RegionalFormat } from '../../../../shared/format/regional-format';
 export interface CivilPaidDay {
   civilDate: string;
 }
+
+/**
+ * DX-182: el saldo del plan para el recibo, calculado DENTRO de la transacción
+ * del abono, con el plan ya bloqueado y el abono (y su base) ya insertados.
+ * El repositorio lee la foto (la misma que usa el saldo del plan) y quien
+ * llama aplica la cuenta del saldo sobre ella. `null`: sin saldo en el recibo.
+ */
+export type ReceiptBalanceInTx = (data: {
+  planId: string;
+  /**
+   * Los abonos que esta transacción acaba de insertar (el suelto, o todas las
+   * líneas del cobro dividido). Si alguno no cuenta en el saldo por falta de
+   * tasa, el saldo no los incluye y el recibo sale SIN saldo (`null`).
+   */
+  paymentIds: readonly string[];
+  snapshot: PlanBalanceSnapshot;
+  /** Σ de los asientos del saldo a favor del plan, en su moneda (DX-253). */
+  creditMovements: number;
+}) => Promise<ReceiptPlanBalance | null>;
 
 export interface CreatePaymentRepoInput {
   /** Exactamente uno de los dos (payments_target_check, DX-262). */
@@ -40,7 +67,18 @@ export interface CreatePaymentRepoInput {
   referenceNormalized?: string | null;
   /** DX-377: motivo de la confirmación de una referencia repetida. */
   duplicateReferenceReason?: string | null;
+  /**
+   * DX-516: los ajustes del medio ya calculados sobre `amount` (en su
+   * moneda): se insertan en la MISMA transacción, antes del recibo.
+   * Ausente o vacío: sin ajustes.
+   */
+  adjustments?: ComputedAdjustment[];
   notes?: string;
+  /**
+   * DX-389: el comprobante ya comprobado y copiado a su clave definitiva: la
+   * fila nace en la MISMA transacción que el abono.
+   */
+  proof?: PaymentProofAttachment | null;
   createdById?: string;
   /**
    * Idempotency-Key (UUID) for dedup. When set, persisted and covered by the
@@ -61,6 +99,14 @@ export interface CreatePaymentRepoInput {
    * pudo calcular (p. ej. sin tasa de cambio): el recibo se emite igual.
    */
   receiptPlanBalance: ReceiptPlanBalance | null;
+  /**
+   * DX-182: con el plan bloqueado y el abono insertado, el repositorio
+   * recalcula el saldo del recibo en la propia transacción con esto, y
+   * `receiptPlanBalance` (leído fuera, sin garantía frente a otro abono
+   * simultáneo) queda solo de respaldo cuando falta. Cada recibo muestra así
+   * el saldo tras SU abono, en el orden en que se registraron.
+   */
+  receiptBalanceInTx?: ReceiptBalanceInTx;
   /**
    * DX-051 (R4): el abono convertido a la moneda del plan con la tasa de su
    * `paidOn`, calculado FUERA de la transacción. Si la moneda que lee el
@@ -97,16 +143,35 @@ export interface CreateSplitPaymentRepoInput {
   requestFingerprint?: string;
   /** Saldo del plan tras el cobro entero, para la foto del recibo. */
   receiptPlanBalance: ReceiptPlanBalance | null;
+  /** DX-182: como en `CreatePaymentRepoInput`, para el cobro entero. */
+  receiptBalanceInTx?: ReceiptBalanceInTx;
   /**
    * Revisión DX-390: sin `confirmCreditBalance`, lo pendiente se leyó fuera
    * de la transacción. Con esto, la transacción bloquea el plan (FOR NO KEY
    * UPDATE: espera a los abonos en curso al plan y los pone en fila) y, si el
-   * plan tiene más abonos (vivos o anulados) que `planPaymentsSeen`, contados
-   * ANTES de leer lo pendiente, es 409 `SPLIT_PAYMENT_BALANCE_CHANGED` y no
+   * plan tiene más movimientos (abonos vivos o anulados y asientos de saldo a
+   * favor, DX-463) que `planMovementsSeen`, contados ANTES de leer lo
+   * pendiente, es 409 `SPLIT_PAYMENT_BALANCE_CHANGED` y no
    * se registra nada.
    */
-  balanceGuard?: { planPaymentsSeen: number };
+  balanceGuard?: { planMovementsSeen: number };
+  /**
+   * DX-463 (L4): sin `confirmCreditBalance`, con el plan bloqueado y ANTES de
+   * insertar nada, la transacción relee la foto del saldo (la misma de
+   * `balanceForReceipt`) y llama a esto; lanza (409 de excedente, 503 de saldo
+   * ilegible) si el total supera lo pendiente de AHORA. Atrapa lo que el
+   * conteo de `balanceGuard` no ve: un ítem descontado o cancelado, o la base
+   * de un abono en otra moneda que llegó tarde.
+   */
+  excessGuardInTx?: ReceiptExcessGuardInTx;
 }
+
+/** DX-463: comprueba, bajo el bloqueo del plan, que el cobro no deja excedente sin confirmar. */
+export type ReceiptExcessGuardInTx = (data: {
+  planId: string;
+  snapshot: PlanBalanceSnapshot;
+  creditMovements: number;
+}) => Promise<void>;
 
 /** DX-390: un cobro dividido registrado, con sus líneas en orden. */
 export interface SplitPaymentRecord {
@@ -155,6 +220,10 @@ export type ListPaymentsReceivedInRangeParams = CivilPeriod;
 /** Abono del período (ya trae `paidOn`, su día civil en la zona de su sede). */
 export type ReceivedPayment = Payment;
 
+/** DX-515: filtro de la caja por nº de factura externa. */
+export const EXTERNAL_INVOICE_FILTERS = ['WITH', 'WITHOUT'] as const;
+export type ExternalInvoiceFilter = (typeof EXTERNAL_INVOICE_FILTERS)[number];
+
 export interface ListCashRegisterParams extends CivilPeriod {
   method?: PaymentMethod;
   /**
@@ -163,6 +232,14 @@ export interface ListCashRegisterParams extends CivilPeriod {
    * medio de ese método (réplicas anteriores), como el resumen.
    */
   paymentMethod?: { id: string; legacyMethod: PaymentMethod | null };
+  /** DX-515: solo los abonos con (o sin) nº de factura externa. */
+  externalInvoice?: ExternalInvoiceFilter;
+  /**
+   * SEC-043: quien consulta no es ADMIN. Si la clínica tiene «arqueo ciego»,
+   * el resumen no suma los abonos que cuentan en una caja aún abierta y sus
+   * filas se marcan (ver `CashRegisterPage.blindHidden`).
+   */
+  blindViewer?: boolean;
   /** Ya normalizado por el caso de uso. */
   skip: number;
   /** Ya acotado por el caso de uso. */
@@ -185,10 +262,23 @@ export interface CashRegisterGroup {
   count: number;
 }
 
+/** DX-516: suma de los ajustes de un (moneda, tipo) del período. */
+export interface CashAdjustmentGroup {
+  currency: string;
+  type: PaymentAdjustmentType;
+  total: number;
+  count: number;
+}
+
 /** Una fila de la caja con lo que decide si el actor puede anularla. */
 export interface CashRegisterRow {
   payment: CashPayment;
   voidSubject: VoidSubject;
+  /**
+   * SEC-043: con arqueo ciego y quien consulta sin ser ADMIN, el abono cuenta
+   * en una caja aún abierta: sale sin importe (ver `CashPaymentView`).
+   */
+  inOpenCashSession?: boolean;
 }
 
 export interface CashRegisterPage {
@@ -197,8 +287,20 @@ export interface CashRegisterPage {
   total: number;
   /** Agregado por (moneda, método) del período entero, sin paginar. */
   groups: CashRegisterGroup[];
+  /**
+   * DX-516: ajustes por medio de pago de los mismos abonos, por (moneda,
+   * tipo), en positivo. Ausente o vacío: ninguno.
+   */
+  adjustmentGroups?: CashAdjustmentGroup[];
   /** La sede activa del request, o `null` en la vista consolidada. */
   scopeLocation: { id: string; name: string } | null;
+  /**
+   * SEC-043: rige el arqueo ciego y quien consulta no es ADMIN. Los abonos
+   * que cuentan en una caja abierta —por la caja del abono o por un ajuste de
+   * esa caja— no suman en el resumen y sus filas van marcadas: sumados al
+   * fondo darían el esperado antes de contar. Sus importes vuelven al cerrar.
+   */
+  blindHidden?: boolean;
 }
 
 /**
@@ -208,6 +310,8 @@ export interface CashRegisterPage {
  */
 export interface PaymentVoidTarget extends VoidSubject {
   id: string;
+  /** Sede persistida del abono, para autorizar antes de escribir. */
+  locationId: string;
   /**
    * DX-390: si es una línea de un cobro dividido, los ids de sus líneas vivas
    * en orden (ella incluida): se anulan juntas, con su recibo. `[]` en un
@@ -237,6 +341,15 @@ export interface PaymentVoidAudit {
 
 export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');
 
+/** DX-389: el comprobante de un abono y el paciente de éste (para la auditoría). */
+export interface PaymentProofRecord {
+  paymentId: string;
+  patientId: string;
+  /** La sede del abono: manda para quién puede verlo (DX-089). */
+  locationId: string;
+  attachment: PaymentProofAttachment;
+}
+
 export interface PaymentRepository {
   /**
    * Inserta el abono. Dentro de la MISMA transacción vuelve a comprobar que el
@@ -263,11 +376,13 @@ export interface PaymentRepository {
   findSplit(splitId: string): Promise<SplitPaymentRecord | null>;
 
   /**
-   * Revisión DX-390: cuántos abonos tiene el plan, vivos o anulados (solo
-   * crece: un abono nunca se borra). La guarda del saldo a favor del cobro
+   * Revisión DX-390 / DX-463: cuántos movimientos tiene el plan que cambian
+   * lo pendiente: abonos, vivos o anulados (un abono nunca se borra), y
+   * asientos de saldo a favor (traspasos y devoluciones, DX-253), que
+   * tampoco se borran: la cuenta solo crece. La guarda del saldo a favor del cobro
    * dividido (`CreateSplitPaymentRepoInput.balanceGuard`).
    */
-  countPlanPayments(treatmentPlanId: string): Promise<number>;
+  countPlanMovements(treatmentPlanId: string): Promise<number>;
 
   /**
    * DX-262: el saldo migrado vivo (no retirado) de esta clínica con lo abonado
@@ -298,6 +413,14 @@ export interface PaymentRepository {
   resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string>;
 
   /**
+   * DX-075: el día civil (YYYY-MM-DD) de `now` en la zona de la sede donde se
+   * va a registrar el abono (la misma de `resolvePaidOn`), o `null` si la sede
+   * no tiene zona válida: no lanza, la validación del abono cae entonces en la
+   * regla de 24 h.
+   */
+  siteToday(now: Date): Promise<string | null>;
+
+  /**
    * G1-B: el formato de una sede de la clínica (la del dato, R12), para
    * pintar un importe en un mensaje. Sin formato o sin reloj, 409
    * `LOCATION_LOCALE_REQUIRED`: se pide solo al pintar (I4).
@@ -305,11 +428,27 @@ export interface PaymentRepository {
   locationFormat(locationId: string): Promise<RegionalFormat>;
 
   /**
+   * DX-517-bis: el texto propio de cada moneda de la clínica (vacío = el
+   * código), para pintar un importe en un mensaje. Se pide solo al pintar.
+   */
+  clinicCurrencyTexts(): Promise<CurrencyTexts>;
+
+  /**
    * The payment, or `null` if it is absent, soft-deleted (voided), or
    * belongs to another tenant (RLS makes those indistinguishable from
    * "absent").
    */
   findById(id: string): Promise<Payment | null>;
+
+  /**
+   * DX-389: el comprobante de un abono VIVO o anulado de esta clínica (RLS),
+   * o `null` si el abono no existe (otra clínica incluida) o no tiene. La
+   * clave del almacén solo la usa quien firma la URL.
+   */
+  findProof(paymentId: string): Promise<PaymentProofRecord | null>;
+
+  /** DX-389: ¿alguna fila usa ya esa clave de almacén? (limpieza de huérfanos). */
+  proofKeyInUse(key: string): Promise<boolean>;
 
   /**
    * The payment carrying this Idempotency-Key in the current tenant (RLS-

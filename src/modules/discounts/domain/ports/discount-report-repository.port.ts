@@ -1,3 +1,4 @@
+import type { FrozenReferenceRate } from '../reference-in-plan';
 import type {
   DiscountReason,
   PriceSource,
@@ -32,11 +33,56 @@ export interface DiscountReportRow {
   toothNumber: string;
   procedure: string;
   currency: string;
-  /** Precio de catálogo al dar de alta el ítem (null = ítem libre). */
+  /**
+   * Precio de catálogo al dar de alta el ítem (null = ítem libre), en SU
+   * moneda (`referenceCurrency`), que puede no ser la del plan.
+   */
   catalogPrice: number | null;
+  /**
+   * DX-502: moneda de `basePrice` (la del catálogo al dar de alta el ítem);
+   * null si no se supo. No es la de `catalogPrice` en un ítem de lista.
+   */
+  catalogCurrency: string | null;
+  /**
+   * DX-513-bis: moneda de `catalogPrice` (la congelada o, en un ítem
+   * anterior, la de DX-513); null si no se sabe o el ítem es libre.
+   */
+  referenceCurrency: string | null;
+  /**
+   * DX-513-bis: `catalogPrice` en la moneda del plan, congelado al escribir
+   * el ítem; null en los anteriores sin foto.
+   */
+  referencePriceInPlan: number | null;
+  /** DX-513-bis: `basePrice` en la moneda del plan (con la foto). */
+  basePriceInPlan: number | null;
+  /**
+   * DX-513-bis: la tasa con que se convirtió la referencia; null si no.
+   * DX-513-ter: siempre null en las listas (su referencia ya está en la moneda
+   * del plan): su tasa, la de la base, va en `baseRate`.
+   */
+  rate: FrozenReferenceRate | null;
+  /**
+   * DX-513-ter: en una lista de convenio con el catálogo en otra moneda, la
+   * tasa con que se convirtió `basePrice` a `basePriceInPlan` al dar de alta
+   * el ítem; null si no.
+   */
+  baseRate: FrozenReferenceRate | null;
+  /**
+   * DX-513-ter: ítem de convenio con el catálogo en otra moneda conocida y sin
+   * la base congelada en la moneda del plan (no había tasa al darlo de alta,
+   * o es anterior): su rebaja de convenio no se puede medir sin convertir al
+   * consultar, así que se señala «sin referencia comparable», sin importe.
+   * DX-513-quater: también la lista de convenio con la moneda del catálogo
+   * desconocida (NULL); el convenio por % con NULL se sigue midiendo.
+   */
+  agreementUnmeasured: boolean;
   /** Precio pactado del ítem. */
   price: number;
-  /** Rebaja de precio frente al catálogo: max(0, catálogo − precio). */
+  /**
+   * Rebaja de precio frente a la referencia en la moneda del plan (la foto,
+   * DX-513-bis); en un ítem anterior sin foto, max(0, catálogo − precio), 0
+   * con la referencia en otra moneda conocida (DX-513).
+   */
   priceReduction: number;
   /** El `discount` del ítem. */
   itemDiscount: number;
@@ -60,7 +106,10 @@ export interface DiscountReportRow {
   basePrice: number | null;
   /**
    * SEC-047: rebaja de convenio, max(0, basePrice − catalogPrice) en un ítem
-   * resuelto por convenio; 0 en el resto.
+   * resuelto por convenio, salvo con el catálogo en otra moneda conocida
+   * (DX-513); 0 en el resto. Con foto, max(0, basePriceInPlan −
+   * referencePriceInPlan) (DX-513-bis; en las listas de convenio, con la base
+   * convertida al darlo de alta, DX-513-ter). 0 si `agreementUnmeasured`.
    */
   agreementReduction: number;
   /**
@@ -104,7 +153,18 @@ export interface AgreementReductionTotal {
 export interface DiscountReportSummary {
   totals: DiscountReportTotal[];
   agreementTotals: AgreementReductionTotal[];
+  /** DX-513-ter: líneas de convenio sin medir, por moneda del plan. */
+  agreementUnmeasuredTotals: AgreementUnmeasuredTotal[];
   rows: number;
+}
+
+/**
+ * DX-513-ter: cuántas líneas de convenio de una moneda no se pudieron medir
+ * («sin referencia comparable»). Sin importe: no se convierte al consultar.
+ */
+export interface AgreementUnmeasuredTotal {
+  currency: string;
+  items: number;
 }
 
 export const DISCOUNT_REPORT_REPOSITORY = Symbol('DISCOUNT_REPORT_REPOSITORY');

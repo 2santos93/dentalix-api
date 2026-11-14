@@ -22,7 +22,17 @@ import {
   type VoidActor,
 } from '../../payments/domain/void-window';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
+import type { GetPlanBalanceResult } from '../../payments/application/use-cases/get-plan-balance.use-case';
+import { voidRefundReferenceMessage } from '../../patient-credit/domain/patient-credit';
 import { fromCents, toCents } from '../../../shared/money/money';
+import type { RoundingDigits } from '../../../shared/money/line-rounding';
+
+/**
+ * DX-472: el saldo de cada plan según `GetPlanBalanceUseCase`, por id de plan.
+ * Sin él (la cartera, que lee sumas sin convertir) cuentan los abonos en la
+ * moneda del plan.
+ */
+export type PlanBalances = ReadonlyMap<string, GetPlanBalanceResult>;
 
 export interface ComputeAccountStatementOptions {
   /** "Hoy" para decidir qué cuota está vencida (inyectado, nunca el reloj). */
@@ -36,7 +46,14 @@ export interface ComputeAccountStatementOptions {
   movementsFrom?: string;
   /** Filtro de `movements`: último día civil (YYYY-MM-DD), inclusive. */
   movementsTo?: string;
+  /** El saldo de cada plan (DX-472): lo que se muestra de él y de sus cuotas. */
+  planBalances?: PlanBalances;
+  /** B4 (DX-472-bis): decimales de redondeo de cada moneda; sin ellos, 2. */
+  roundingDigitsOf?: RoundingDigitsOf;
 }
+
+/** Decimales de redondeo de una moneda (`currencies.rounding_digits`). */
+export type RoundingDigitsOf = (currency: string) => RoundingDigits;
 
 /*
  * CRITERIOS (documentados también en el informe DX-011):
@@ -48,11 +65,16 @@ export interface ComputeAccountStatementOptions {
  *   saldo. COMPLETED sí cuenta (lo hecho se debe hasta que se pague).
  * - Abonado = Σ abonos NO anulados, de cualquier plan (también de uno
  *   cancelado: ese dinero se recibió y queda a favor del paciente).
- * - Por moneda y SIN convertir. Cada cifra va en la moneda en que se presupuestó
- *   o se pagó. Convertir exigiría una tasa por abono (una consulta por fila) y
- *   mezclaría cifras de mercado con lo que el paciente de verdad entregó; un
- *   abono en otra moneda que la del plan se informa aparte en ese plan
- *   (`paidOtherCurrencies`) y no cubre sus cuotas.
+ * - Plan = las cifras de GetPlanBalanceUseCase (DX-472): `billable`, `paid` y
+ *   `balance` son las de `/balance` y las de `/payment-plan`; un abono en otra
+ *   moneda cuenta convertido a la del plan, con su tasa, y cubre cuotas. Lo que
+ *   difiere a propósito va en otro campo: `budgeted` (lo presupuestado aunque
+ *   el plan esté cancelado) y `paidOtherCurrencies` (lo entregado sin convertir).
+ * - Resumen por moneda: `paid` y `balance` son por moneda y SIN convertir (lo
+ *   que el paciente entregó en cada una): la cartera (DX-145) reparte esa cifra.
+ *   `convertedPaid` y `convertedBalance` son las de los planes (DX-472): la
+ *   suma de sus `paid` en su moneda más lo abonado a saldos migrados, que no se
+ *   convierte. Los abonos «sin tasa» no suman ahí y se informan en su plan.
  * - Cuotas: las de los planes de pago vivos de planes no cancelados, con el
  *   mismo reparto voraz y los mismos estados que GetPaymentPlanUseCase
  *   (deriveStatuses): lo abonado al plan en la moneda del plan de pagos cubre
@@ -83,6 +105,7 @@ interface CurrencyAccumulator {
   openingCents: number;
   openingPendingCents: number;
   paidCents: number;
+  convertedPaidCents: number;
   creditCents: number;
   overdueCount: number;
   overdueCents: number;
@@ -96,6 +119,7 @@ function emptyAccumulator(): CurrencyAccumulator {
     openingCents: 0,
     openingPendingCents: 0,
     paidCents: 0,
+    convertedPaidCents: 0,
     creditCents: 0,
     overdueCount: 0,
     overdueCents: 0,
@@ -165,6 +189,8 @@ function inRange(
 export function computeBalances(
   snapshot: BalanceSnapshot,
   today: Date,
+  planBalances?: PlanBalances,
+  roundingDigitsOf?: RoundingDigitsOf,
 ): ComputedBalances {
   const currencies = new Map<string, CurrencyAccumulator>();
   const acc = (currency: string): CurrencyAccumulator => {
@@ -197,17 +223,23 @@ export function computeBalances(
     const counts = countsTowardsBalance(plan.status);
     const budgetedCents = toCents(plan.billable);
     const paidMap = paidByPlan.get(plan.id) ?? new Map<string, number>();
-    const paidCents = paidMap.get(plan.currency) ?? 0;
+    const known = planBalances?.get(plan.id);
+    const paidCents = known
+      ? toCents(known.paid)
+      : (paidMap.get(plan.currency) ?? 0);
     const creditCents = creditOf(plan.id, plan.currency);
+    const billableCents = counts ? budgetedCents : 0;
     if (counts) {
       acc(plan.currency).budgetedCents += budgetedCents;
     }
+    if (known) acc(plan.currency).convertedPaidCents += paidCents;
     return {
       id: plan.id,
       status: plan.status,
       currency: plan.currency,
       createdAt: plan.createdAt,
       budgeted: fromCents(budgetedCents),
+      billable: known?.billable ?? fromCents(billableCents),
       countsTowardsBalance: counts,
       paid: fromCents(paidCents),
       paidOtherCurrencies: [...paidMap.entries()]
@@ -215,9 +247,10 @@ export function computeBalances(
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([currency, cents]) => ({ currency, amount: fromCents(cents) })),
       creditMovements: fromCents(creditCents),
-      balance: fromCents(
-        (counts ? budgetedCents : 0) - paidCents - creditCents,
-      ),
+      balance:
+        known?.balance ?? fromCents(billableCents - paidCents - creditCents),
+      paymentsWithoutRate: known?.paymentsWithoutRate ?? [],
+      rateProviderTimedOut: known?.rateProviderTimedOut ?? false,
     };
   });
 
@@ -253,6 +286,10 @@ export function computeBalances(
   for (const p of snapshot.payments) {
     if (isActive(p)) {
       acc(p.currency).paidCents += toCents(p.amount);
+      // Lo de un plan con su saldo ya está sumado arriba, convertido.
+      if (!planBalances?.has(p.treatmentPlanId ?? '')) {
+        acc(p.currency).convertedPaidCents += toCents(p.amount);
+      }
     }
   }
 
@@ -265,13 +302,24 @@ export function computeBalances(
     }
     // DX-253: un traspaso recibido cubre cuotas como un abono; una
     // devolución deja de cubrirlas.
+    const known = planBalances?.get(paymentPlan.treatmentPlanId);
     const paidCents =
-      (paidByPlan.get(paymentPlan.treatmentPlanId)?.get(paymentPlan.currency) ??
-        0) + creditOf(paymentPlan.treatmentPlanId, paymentPlan.currency);
+      (known
+        ? toCents(known.paid)
+        : (paidByPlan
+            .get(paymentPlan.treatmentPlanId)
+            ?.get(paymentPlan.currency) ?? 0)) +
+      creditOf(paymentPlan.treatmentPlanId, paymentPlan.currency);
     const derived = deriveStatuses(
       buildTramos(paymentPlan),
       fromCents(paidCents),
       today,
+      {
+        paidIncomplete: known?.rateProviderTimedOut,
+        // B4: un residuo de la conversión que la moneda no tiene no deja una
+        // cuota vencida de «0».
+        roundingDigits: roundingDigitsOf?.(paymentPlan.currency),
+      },
     );
     const currencyAcc = acc(paymentPlan.currency);
     currencyAcc.hasInstallments ||= derived.length > 0;
@@ -299,6 +347,9 @@ export function computeBalances(
         currencyAcc.overdueCents += outstandingCents;
       } else if (
         (tramo.status === 'PENDING' || tramo.status === 'PARTIAL') &&
+        // DX-472: una cuota pasada sin marcar vencida no es la próxima.
+        tramo.dueDate.toISOString().slice(0, 10) >=
+          today.toISOString().slice(0, 10) &&
         (currencyAcc.next === null ||
           tramo.dueDate.getTime() < currencyAcc.next.dueDate.getTime())
       ) {
@@ -325,6 +376,7 @@ export function computeBalances(
         a.budgetedCents !== 0 ||
         a.openingCents !== 0 ||
         a.paidCents !== 0 ||
+        a.convertedPaidCents !== 0 ||
         a.creditCents !== 0 ||
         a.hasInstallments,
     )
@@ -338,6 +390,10 @@ export function computeBalances(
       creditMovements: fromCents(a.creditCents),
       balance: fromCents(
         a.budgetedCents + a.openingCents - a.paidCents - a.creditCents,
+      ),
+      convertedPaid: fromCents(a.convertedPaidCents),
+      convertedBalance: fromCents(
+        a.budgetedCents + a.openingCents - a.convertedPaidCents - a.creditCents,
       ),
       overdueCount: a.overdueCount,
       overdueAmount: fromCents(a.overdueCents),
@@ -354,6 +410,8 @@ export function computeAccountStatement(
   const { summary, plans, installments, openingBalances } = computeBalances(
     snapshot,
     options.today,
+    options.planBalances,
+    options.roundingDigitsOf,
   );
 
   // --- Movimientos ----------------------------------------------------------
@@ -364,6 +422,17 @@ export function computeAccountStatement(
   for (const p of snapshot.payments) {
     if (p.splitId)
       splitLines.set(p.splitId, (splitLines.get(p.splitId) ?? 0) + 1);
+  }
+  // DX-432: anular un cobro dividido anula TODAS sus líneas y la API da 409 si
+  // alguna respalda una devolución; todas llevan, pues, el mismo motivo (la
+  // devolución de menor número entre las líneas vivas).
+  const splitRefund = new Map<string, string>();
+  for (const p of snapshot.payments) {
+    if (!p.splitId || p.voidedAt !== null || !p.refundNumber) continue;
+    const known = splitRefund.get(p.splitId);
+    if (known === undefined || p.refundNumber < known) {
+      splitRefund.set(p.splitId, p.refundNumber);
+    }
   }
   const movements: StatementMovement[] = snapshot.payments
     .map((p) => ({ p, paidOn: civilDateIn(p.paidAt, p.timeZone) }))
@@ -379,8 +448,11 @@ export function computeAccountStatement(
       method: p.method,
       paymentMethod: p.paymentMethod,
       reference: p.reference,
+      externalInvoiceNumber: p.externalInvoiceNumber ?? null,
       splitId: p.splitId ?? null,
       splitLines: p.splitId ? (splitLines.get(p.splitId) ?? null) : null,
+      receiptNumber: p.receiptNumber ?? null,
+      hasProof: p.hasProof ?? false,
       location: p.location,
       treatmentPlanId: p.treatmentPlanId,
       openingBalanceId: p.openingBalanceId ?? null,
@@ -389,6 +461,13 @@ export function computeAccountStatement(
         p.voidedAt === null &&
         options.voidActor !== undefined &&
         canVoidPayment(p, options.voidActor, options.today),
+      voidBlockedReason:
+        p.voidedAt === null &&
+        (p.splitId ? splitRefund.get(p.splitId) : p.refundNumber)
+          ? voidRefundReferenceMessage(
+              (p.splitId ? splitRefund.get(p.splitId) : p.refundNumber)!,
+            )
+          : null,
       voided: p.voidedAt !== null,
       voidedAt: p.voidedAt,
       voidedBy: p.voidedBy,

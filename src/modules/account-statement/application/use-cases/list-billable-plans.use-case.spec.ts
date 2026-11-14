@@ -2,10 +2,17 @@ import { NotFoundException } from '@nestjs/common';
 import { ListBillablePlansUseCase } from './list-billable-plans.use-case';
 import { AccountStatementRepository } from '../../domain/ports/account-statement-repository.port';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
+import type { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 type BillableRows = Awaited<
   ReturnType<AccountStatementRepository['loadBillablePlans']>
 >;
+
+// Sin `balanceInput` el saldo es el de su moneda (los planes del caso no
+// tienen abonos en otra).
+const noBalances = {
+  computeMany: () => Promise.resolve(new Map()),
+} as unknown as GetPlanBalanceUseCase;
 
 function repoWith(result: BillableRows) {
   const loadBillablePlans = jest.fn<Promise<BillableRows>, [string]>(() =>
@@ -14,6 +21,7 @@ function repoWith(result: BillableRows) {
   const repo: AccountStatementRepository = {
     load: jest.fn(),
     loadBillablePlans,
+    loadRegional: () => Promise.resolve(null),
   };
   return { repo, loadBillablePlans };
 }
@@ -40,7 +48,7 @@ describe('ListBillablePlansUseCase', () => {
         hasActivePaymentPlan: false,
       },
     ]);
-    const useCase = new ListBillablePlansUseCase(repo);
+    const useCase = new ListBillablePlansUseCase(repo, noBalances);
 
     const plans = await useCase.execute('p-1');
 
@@ -56,19 +64,24 @@ describe('ListBillablePlansUseCase', () => {
         paidOtherCurrencies: [],
         balance: 300,
         hasActivePaymentPlan: true,
+        paymentsWithoutRate: [],
+        rateProviderTimedOut: false,
       },
     ]);
   });
 
   it('paciente inexistente, retirado o de otra clínica -> 404 con el mensaje de siempre', async () => {
-    const useCase = new ListBillablePlansUseCase(repoWith(null).repo);
+    const useCase = new ListBillablePlansUseCase(
+      repoWith(null).repo,
+      noBalances,
+    );
     await expect(useCase.execute('p-x')).rejects.toThrow(
       new NotFoundException(PATIENT_NOT_FOUND_MESSAGE),
     );
   });
 
   it('paciente sin planes cobrables -> lista vacía', async () => {
-    const useCase = new ListBillablePlansUseCase(repoWith([]).repo);
+    const useCase = new ListBillablePlansUseCase(repoWith([]).repo, noBalances);
     await expect(useCase.execute('p-1')).resolves.toEqual([]);
   });
 });

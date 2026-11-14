@@ -12,7 +12,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   g1LocationInsert,
   legacyLocationInsert,
@@ -29,16 +29,16 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const MIN = 60_000;
-const TZ = 'America/Bogota';
+const TZ = 'America/Caracas';
 
-/** Hoy en Bogotá (YYYY-MM-DD). */
-function bogotaToday(): string {
+/** Hoy en la zona de la sede (YYYY-MM-DD). */
+function caracasToday(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
 }
 
-/** Instante de una hora de pared de hoy en Bogotá (UTC−5 fijo). */
-function bogotaAt(hhmm: string): Date {
-  return new Date(`${bogotaToday()}T${hhmm}:00-05:00`);
+/** Instante de una hora de pared de hoy en la zona de la sede (UTC−4 fijo). */
+function caracasAt(hhmm: string): Date {
+  return new Date(`${caracasToday()}T${hhmm}:00-04:00`);
 }
 
 interface Member {
@@ -126,7 +126,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     // pared, sin cruzar la medianoche ni solaparse) y se trae a HOY por `raw`: así el spec no depende de la hora a la que corra
     // (agendar en el pasado no se puede, y la llegada solo vale hoy).
     const later = new Date(
-      bogotaAt('00:00').getTime() + 2 * 24 * 60 * MIN + offsetMinutes * MIN,
+      caracasAt('00:00').getTime() + 2 * 24 * 60 * MIN + offsetMinutes * MIN,
     );
     const res = await as(
       api().post('/api/v1/appointments'),
@@ -142,7 +142,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       })
       .expect(201);
     const id = (res.body as AppointmentBody).id;
-    const today = new Date(bogotaAt('00:00').getTime() + offsetMinutes * MIN);
+    const today = new Date(caracasAt('00:00').getTime() + offsetMinutes * MIN);
     await raw.appointment.update({
       where: { id },
       data: { start: today, end: new Date(today.getTime() + 10 * MIN) },
@@ -174,7 +174,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     ).expect(200);
     mainId = (locations.body as { id: string }[])[0].id;
     const north = await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     northId = (north.body as { id: string }).id;
     const otherLocations = await as(
@@ -290,12 +290,30 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     expect(flowEvents).toHaveLength(4);
   });
 
+  it('DX-237: un odontólogo no sienta ni deja lista la cita de otro; la asistente y la administración sí', async () => {
+    const appt = await book('Ajena', mainId, 200, clinic.adminUserId);
+    await setStatus(appt.id, 'ARRIVED', reception.token).expect(200);
+
+    const refused = await setStatus(appt.id, 'IN_CHAIR', dentist.token).expect(
+      403,
+    );
+    expect((refused.body as { message: string }).message).toMatch(
+      /una cita tuya/,
+    );
+
+    await setStatus(appt.id, 'IN_CHAIR', assistant.token).expect(200);
+    await setStatus(appt.id, 'READY_FOR_CHECKOUT', dentist.token).expect(403);
+    await setStatus(appt.id, 'READY_FOR_CHECKOUT', clinic.adminToken).expect(
+      200,
+    );
+  });
+
   it('sin saltos: de agendada a «En sillón» es 409; la llegada de otro día también', async () => {
     const appt = await book('Berta', mainId, 8 * 60 + 15);
     await setStatus(appt.id, 'IN_CHAIR', clinic.adminToken).expect(409);
 
     const patientId = await patient(clinic, 'Carla');
-    const later = new Date(bogotaAt('12:00').getTime() + 3 * 24 * 60 * MIN);
+    const later = new Date(caracasAt('12:00').getTime() + 3 * 24 * 60 * MIN);
     const future = await as(
       api().post('/api/v1/appointments'),
       reception.token,
@@ -360,14 +378,14 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     const view = await panel(reception.token, mainId).expect(200);
     const body = view.body as InClinicBody;
     expect(body).toMatchObject({
-      date: bogotaToday(),
+      date: caracasToday(),
       timeZone: TZ,
       scope: 'LOCATION',
     });
     expect(body.waiting.map((i) => i.appointmentId)).toEqual([waiting.id]);
     expect(body.inChair.map((i) => i.appointmentId)).toEqual([seated.id]);
     // Elena tenía cita a las 09:00 y llegó «ahora» (a la hora que corra).
-    const late = Date.now() - bogotaAt('09:00').getTime();
+    const late = Date.now() - caracasAt('09:00').getTime();
     expect(body.waiting[0]).toMatchObject({
       patientFirstName: 'Elena',
       providerName: 'Miembro DENTIST',
@@ -410,6 +428,95 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
     });
   });
 
+  describe('DX-202: salida del paciente', () => {
+    const checklist = (id: string, token: string) =>
+      as(api().get(`/api/v1/appointments/${id}/checkout-checklist`), token);
+
+    it('dice qué falta con datos reales; el saldo solo para quien cobra', async () => {
+      const appt = await book('Salida', mainId, 60);
+      const res = await checklist(appt.id, reception.token).expect(200);
+      expect(res.body).toMatchObject({
+        appointmentId: appt.id,
+        nextAppointmentStart: null,
+        recallDueOn: null,
+        remindersOptedOut: false,
+        balance: { hasOverdue: false },
+      });
+      const clinical = await checklist(appt.id, dentist.token).expect(200);
+      expect((clinical.body as { balance: unknown }).balance).toBeNull();
+    });
+
+    it('una cita futura del paciente cuenta; las canceladas no', async () => {
+      const appt = await book('Salida Futura', mainId, 120);
+      const { patientId } = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+        select: { patientId: true },
+      });
+      // Mediodía de la sede dentro de 30 días: con `Date.now()` la cita cruzaba la
+      // medianoche de Caracas a las 23:30 y daba 422 (como DX-460).
+      const start = new Date(caracasAt('12:00').getTime() + 30 * 24 * 60 * MIN);
+      const future = await as(
+        api().post('/api/v1/appointments'),
+        reception.token,
+        mainId,
+      )
+        .send({
+          patientId,
+          providerId: dentist.userId,
+          start: start.toISOString(),
+          end: new Date(start.getTime() + 30 * MIN).toISOString(),
+        })
+        .expect(201);
+      const res = await checklist(appt.id, reception.token).expect(200);
+      expect(
+        (res.body as { nextAppointmentStart: string }).nextAppointmentStart,
+      ).toBe(start.toISOString());
+      await raw.appointment.update({
+        where: { id: (future.body as { id: string }).id },
+        data: { status: 'CANCELLED' },
+      });
+      const after = await checklist(appt.id, reception.token).expect(200);
+      expect(
+        (after.body as { nextAppointmentStart: unknown }).nextAppointmentStart,
+      ).toBeNull();
+    });
+
+    it('otra clínica no la ve; completar con pendientes no bloquea y queda en la auditoría', async () => {
+      const appt = await book('Salida Cierre', mainId, 180);
+      await as(
+        api().get(`/api/v1/appointments/${appt.id}/checkout-checklist`),
+        other.adminToken,
+        undefined,
+        other.host,
+      ).expect(404);
+      await setStatus(appt.id, 'ARRIVED', reception.token).expect(200);
+      await setStatus(appt.id, 'IN_CHAIR', dentist.token).expect(200);
+      await setStatus(appt.id, 'READY_FOR_CHECKOUT', dentist.token).expect(200);
+      await as(api().patch(`/api/v1/appointments/${appt.id}`), reception.token)
+        .send({ status: 'COMPLETED', checkoutPending: ['NEXT_VISIT', 'EMAIL'] })
+        .expect(200);
+      const events = await raw.auditEvent.findMany({
+        where: { resourceId: appt.id, tenantId: clinic.tenantId },
+      });
+      const pending = events.find(
+        (e) =>
+          (e.metadata as { reason?: string } | null)?.reason ===
+          'APPOINTMENT_CHECKOUT_PENDING',
+      );
+      expect(pending?.metadata).toMatchObject({
+        changedFields: ['EMAIL', 'NEXT_VISIT'],
+      });
+      expect(pending?.actorUserId).toBe(reception.userId);
+    });
+
+    it('un código inventado es 400', async () => {
+      const appt = await book('Salida Rara', mainId, 240);
+      await as(api().patch(`/api/v1/appointments/${appt.id}`), reception.token)
+        .send({ status: 'CONFIRMED', checkoutPending: ['OTRO'] })
+        .expect(400);
+    });
+  });
+
   it('un paciente en la clínica no se puede archivar (su cita está en curso)', async () => {
     const appt = await book('Hilda', mainId, 10 * 60);
     const { patientId } = (
@@ -429,8 +536,8 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
   it('in-clinic view includes locale and hourCycle', async () => {
     const main = await panel(reception.token, mainId).expect(200);
     expect(main.body).toMatchObject({
-      timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
-      locale: REGIONAL_BOGOTA_FIXTURE.locale,
+      timeZone: REGIONAL_CARACAS_FIXTURE.timeZone,
+      locale: REGIONAL_CARACAS_FIXTURE.locale,
       hourCycle: 'h23',
     });
     const newYork = await as(api().post('/api/v1/locations'), clinic.adminToken)
@@ -466,7 +573,7 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       raw,
       clinic.tenantId,
       'Réplica antigua',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     const noZone = await panel(clinic.adminToken, legacy).expect(409);
     expect(noZone.body).toMatchObject({

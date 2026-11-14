@@ -1,3 +1,4 @@
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 /**
  * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. La entidad lleva
  * el campo histórico `country`; ninguna regla decide con él (spec R1, R12).
@@ -59,6 +60,8 @@ export interface Prescription {
   professionalSpecialty: string | null;
   professionalEmail: string | null;
   clinicName: string;
+  /** DX-019: congelados al emitir; `null` = se imprime sin datos fiscales. */
+  clinicFiscal: ClinicFiscalData | null;
   locationName: string;
   locationAddress: string | null;
   notes: string | null;
@@ -71,6 +74,11 @@ export interface Prescription {
   /** DX-300: motivo de la confirmación de los avisos bloqueantes. */
   safetyOverrideReason: string | null;
   contentHash: string;
+  /**
+   * DX-467: código corto de verificación (impreso con su QR hacia
+   * `/receta/<código>`). Aleatorio, fuera del hash, inmutable.
+   */
+  verificationCode: string;
   voidedAt: Date | null;
   voidedById: string | null;
   voidedByName: string | null;
@@ -90,6 +98,7 @@ export interface PrescriptionLocationFormat {
 
 /** La receta con lo que necesita la vista imprimible. */
 export interface PrescriptionDocument extends Prescription {
+  /** DX-019-bis (B): el logo congelado al emitir; `null` = emitida sin logo. */
   clinicLogoUrl: string | null;
   locationFormat: PrescriptionLocationFormat;
   /** `true` si el hash guardado coincide con el recalculado al leer. */
@@ -126,6 +135,8 @@ export interface PrescriptionIssuer {
     timeZone: string;
   };
   clinicName: string;
+  /** DX-019: los de hoy; la receta los congela al emitirse. */
+  clinicFiscal: ClinicFiscalData;
   settings: PrescriptionSettings;
   /** Solo para la web anterior a DX-324; ninguna regla lo lee (R1). */
   phase1: Phase1IssuerCompat;

@@ -23,6 +23,7 @@ import {
 } from '../../../patient-agreements/domain/ports/patient-agreement-repository.port';
 import type { PricingSource } from '../../domain/ports/pricing-source.port';
 import type { PricingContext } from '../../domain/pricing/resolve-item-price';
+import { clinicCatalogCurrency } from '../../domain/pricing/catalog-currency';
 import {
   TREATMENT_PLAN_CLOCK,
   type PlanClock,
@@ -66,7 +67,8 @@ export class PrismaPricingSource implements PricingSource {
     const catalogItem = await this.catalog.findById(catalogItemId);
     if (!catalogItem) return null;
 
-    const { locationId, today } = await this.writeLocationAndToday();
+    const { locationId, today, catalogCurrency } =
+      await this.writeLocationAndToday();
     const assignment = await this.assignments.currentLiveByPatient(patientId);
     // `findLiveById` no devuelve retirados: un convenio retirado no aplica.
     const agreement = assignment
@@ -82,6 +84,7 @@ export class PrismaPricingSource implements PricingSource {
       },
       planCurrency,
       planRoundingDigits: digits.roundingDigits(planCurrency),
+      catalogCurrency,
       today,
       locationId,
       agreement:
@@ -109,17 +112,36 @@ export class PrismaPricingSource implements PricingSource {
     };
   }
 
-  /** Sede de escritura del request y su día civil de hoy (R8). */
+  /**
+   * Sede de escritura del request, su día civil de hoy (R8) y la moneda del
+   * catálogo: la que fijó la clínica (DX-502-bis) o, sin ella, la común de
+   * TODAS las sedes activas de la clínica (DX-502; la RLS es por clínica), no
+   * solo las del miembro.
+   */
   private writeLocationAndToday(): Promise<{
     locationId: string;
     today: string;
+    catalogCurrency: string | null;
   }> {
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
     return this.prisma.runWithTenant(async (tx) => {
       const locationId = await this.tenantContext.writeLocationId(tx);
       const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
-      return { locationId, today: civilDateIn(this.now(), zoneOf(locationId)) };
+      const active = await tx.location.findMany({
+        where: { tenantId, isActive: true, deletedAt: null },
+        select: { currency: true },
+      });
+      // `tenants` es global (sin RLS): por el id del contexto.
+      const tenant = await tx.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { catalogCurrency: true },
+      });
+      return {
+        locationId,
+        today: civilDateIn(this.now(), zoneOf(locationId)),
+        catalogCurrency: clinicCatalogCurrency(tenant.catalogCurrency, active),
+      };
     });
   }
 

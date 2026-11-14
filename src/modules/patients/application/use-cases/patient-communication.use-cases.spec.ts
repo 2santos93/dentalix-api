@@ -31,7 +31,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
   beforeEach(() => {
     repo = new FakePatientCommunicationRepository();
     // La región de la sede de estos casos; los que leen sin región la quitan.
-    repo.region = 'CO';
+    repo.region = 'VE';
     repo.staff.set(RECEPTION, 'Rosa Recepción');
     audit = { record: jest.fn().mockResolvedValue(undefined) };
     const clock = () => NOW;
@@ -44,17 +44,17 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
 
   describe('lectura', () => {
     it('muestra el canal, el móvil validado en E.164 con el país de la sede y el canal de la clínica', async () => {
-      repo.add(ANA, { phone: '310 123 4567' });
+      repo.add(ANA, { phone: '414 123 4567' });
       await expect(get.execute(ANA)).resolves.toEqual({
         patientId: ANA,
         contactChannel: 'EMAIL',
         clinicDefaultChannel: 'EMAIL',
-        phone: '310 123 4567',
-        phoneE164: '+573101234567',
+        phone: '414 123 4567',
+        phoneE164: '+584141234567',
         phoneStatus: 'VALID',
         phoneAmbiguous: false,
-        phoneInternational: '+57 310 1234567',
-        phoneCountry: 'CO',
+        phoneInternational: '+58 414 1234567',
+        phoneCountry: 'VE',
         email: 'ana@example.com',
         whatsappOptIn: null,
         reminderOptOut: null,
@@ -65,6 +65,9 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
           minor: false,
           responsiblePartyId: null,
         },
+        preferredLanguage: null,
+        patientLanguages: ['es'],
+        clinicLanguage: 'es',
       });
     });
 
@@ -76,6 +79,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
         isPayer: true,
         receivesNotices: true,
         optedOut: false,
+        createdAt: new Date('2026-10-01T12:00:00.000Z'),
       };
       repo.add(ANA, {
         birthDate: new Date('2015-06-01'),
@@ -105,6 +109,44 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       });
       await expect(get.execute(ANA)).resolves.toMatchObject({
         recipient: { kind: 'CONTACT', name: 'Luis', minor: true },
+      });
+    });
+
+    it('DX-342: came of age with a responsible from childhood, unreviewed: recipient is the patient (null email), never the responsible', async () => {
+      const mother = {
+        id: 'r1',
+        name: 'María José Pérez',
+        email: 'maria@example.com',
+        isPayer: true,
+        receivesNotices: true,
+        optedOut: false,
+        createdAt: new Date('2014-01-10T12:00:00.000Z'),
+      };
+      // Cumplió 18 el 2026-10-01 (hoy, 20/10).
+      repo.add(ANA, {
+        birthDate: new Date('2008-10-01'),
+        email: null,
+        responsibles: [mother],
+      });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        recipient: {
+          kind: 'PATIENT',
+          email: null,
+          minor: false,
+          responsiblePartyId: null,
+        },
+      });
+      repo.add(ANA, {
+        birthDate: new Date('2008-10-01'),
+        email: null,
+        responsibles: [mother],
+        majorityReview: {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-10-01',
+        },
+      });
+      await expect(get.execute(ANA)).resolves.toMatchObject({
+        recipient: { kind: 'RESPONSIBLE', email: 'maria@example.com' },
       });
     });
 
@@ -176,13 +218,14 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     });
 
     it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', async () => {
+      repo.region = 'TH';
       repo.add(ANA, { phone: '0058 412 1234567' });
       await expect(get.execute(ANA)).resolves.toMatchObject({
         phoneE164: null,
         phoneStatus: 'INVALID',
         phoneAmbiguous: true,
         phoneInternational: null,
-        phoneCountry: 'CO',
+        phoneCountry: 'TH',
       });
       repo.add(ANA, { phone: null });
       await expect(
@@ -196,6 +239,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     });
 
     it('the WhatsApp 400 for an ambiguous number asks to write it with +', async () => {
+      repo.region = 'TH';
       repo.add(ANA);
       const err = await update
         .execute(
@@ -265,9 +309,64 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     });
   });
 
+  describe('DX-497: idioma preferido', () => {
+    it('recepción elige uno de la lista: queda auditado con el antes y el después', async () => {
+      repo.add(ANA, { patientLanguages: ['es', 'en', 'ca'] });
+      const view = await update.execute(ANA, { preferredLanguage: 'EN' }, ctx);
+      expect(view.preferredLanguage).toBe('en');
+      expect(lastAudit()).toMatchObject({
+        action: 'UPDATE',
+        resourceType: 'PATIENT',
+        resourceId: ANA,
+        actor: { kind: 'user', userId: RECEPTION },
+        metadata: {
+          reason: 'COMMUNICATION_PREFERENCES_CHANGED',
+          changedFields: ['preferredLanguage'],
+          configChange: {
+            before: { preferredLanguage: null },
+            after: { preferredLanguage: 'en' },
+          },
+        },
+      });
+    });
+
+    it('volver a «Idioma de la clínica» (null o vacío) también se audita', async () => {
+      repo.add(ANA, {
+        preferredLanguage: 'ca',
+        patientLanguages: ['es', 'ca'],
+      });
+      const view = await update.execute(ANA, { preferredLanguage: '' }, ctx);
+      expect(view.preferredLanguage).toBeNull();
+      expect(lastAudit().metadata?.configChange).toEqual({
+        before: { preferredLanguage: 'ca' },
+        after: { preferredLanguage: null },
+      });
+    });
+
+    it('un idioma fuera de la lista es 400 y no guarda nada', async () => {
+      repo.add(ANA, { patientLanguages: ['es', 'en'] });
+      await expect(
+        update.execute(ANA, { preferredLanguage: 'ca' }, ctx),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        update.execute(ANA, { preferredLanguage: 'no válido' }, ctx),
+      ).rejects.toThrow(BadRequestException);
+      expect(repo.updates).toEqual([]);
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('un idioma retirado de la lista se conserva: reenviarlo no es un cambio ni un 400', async () => {
+      repo.add(ANA, { preferredLanguage: 'ca', patientLanguages: ['es'] });
+      const view = await update.execute(ANA, { preferredLanguage: 'ca' }, ctx);
+      expect(view.preferredLanguage).toBe('ca');
+      expect(view.patientLanguages).toEqual(['es']);
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
   describe('cambio de canal', () => {
     it('WHATSAPP con móvil válido: guarda el móvil normalizado y audita autor y origen', async () => {
-      repo.add(ANA, { phone: '310 123 4567' });
+      repo.add(ANA, { phone: '414 123 4567' });
       const view = await update.execute(
         ANA,
         { contactChannel: 'WHATSAPP' },
@@ -275,8 +374,8 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       );
       expect(view).toMatchObject({
         contactChannel: 'WHATSAPP',
-        phone: '310 123 4567',
-        phoneE164: '+573101234567',
+        phone: '414 123 4567',
+        phoneE164: '+584141234567',
       });
       expect(lastAudit()).toEqual({
         tenantId: TENANT,
@@ -320,12 +419,12 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       repo.add(ANA, { phone: null });
       const view = await update.execute(
         ANA,
-        { contactChannel: 'WHATSAPP', phone: ' 3101234567 ' },
+        { contactChannel: 'WHATSAPP', phone: ' 4141234567 ' },
         ctx,
       );
       expect(view).toMatchObject({
         contactChannel: 'WHATSAPP',
-        phone: '+573101234567',
+        phone: '+584141234567',
         phoneStatus: 'VALID',
       });
       expect(lastAudit().metadata.changedFields).toEqual([
@@ -335,7 +434,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     });
 
     it('cambiar a un móvil inválido con canal WHATSAPP: 400', async () => {
-      repo.add(ANA, { phone: '+573101234567', contactChannel: 'WHATSAPP' });
+      repo.add(ANA, { phone: '+584141234567', contactChannel: 'WHATSAPP' });
       await expect(
         update.execute(ANA, { phone: '123' }, ctx),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -351,7 +450,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     });
 
     it('vaciar el móvil (cadena vacía) lo deja en null', async () => {
-      repo.add(ANA, { phone: '310 123 4567' });
+      repo.add(ANA, { phone: '414 123 4567' });
       await expect(
         update.execute(ANA, { phone: '  ' }, ctx),
       ).resolves.toMatchObject({ phone: null, phoneStatus: 'MISSING' });
@@ -365,10 +464,10 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     });
 
     it('sin cambios reales no escribe ni audita', async () => {
-      repo.add(ANA, { phone: '+573101234567' });
+      repo.add(ANA, { phone: '+584141234567' });
       await update.execute(
         ANA,
-        { contactChannel: 'EMAIL', phone: '+57 310 123 4567' },
+        { contactChannel: 'EMAIL', phone: '+58 414 123 4567' },
         ctx,
       );
       expect(repo.updates).toEqual([]);
@@ -384,7 +483,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
 
   describe('opt-in de WhatsApp', () => {
     it('registra fecha, origen y autor, y el origen va a la auditoría', async () => {
-      repo.add(ANA, { phone: '3101234567' });
+      repo.add(ANA, { phone: '4141234567' });
       const view = await update.execute(
         ANA,
         { whatsappOptIn: true, whatsappOptInSource: 'IN_PERSON' },
@@ -403,7 +502,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     });
 
     it('exige el origen (400 en español)', async () => {
-      repo.add(ANA, { phone: '3101234567' });
+      repo.add(ANA, { phone: '4141234567' });
       await expect(
         update.execute(ANA, { whatsappOptIn: true }, ctx),
       ).rejects.toThrow(/dónde aceptó/);
@@ -423,7 +522,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
     it('volver a marcarlo no cambia la fecha original', async () => {
       const before = new Date('2026-09-01T10:00:00.000Z');
       repo.add(ANA, {
-        phone: '3101234567',
+        phone: '4141234567',
         whatsappOptInAt: before,
         whatsappOptInSource: 'LINK',
       });
@@ -438,7 +537,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
 
     it('retirarlo borra fecha, origen y autor', async () => {
       repo.add(ANA, {
-        phone: '3101234567',
+        phone: '4141234567',
         whatsappOptInAt: NOW,
         whatsappOptInSource: 'IN_PERSON',
         whatsappOptInBy: { id: RECEPTION, fullName: 'Rosa Recepción' },
@@ -472,7 +571,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
         repo.add(ANA, {
           reminderOptOutAt: new Date(NOW.getTime() - 1000),
           reminderOptOutSource: 'LINK',
-          phone: '+573209876543',
+          phone: '+584249876543',
           contactChannel: 'NONE',
         });
         return originalUpdate(...args);
@@ -480,7 +579,7 @@ describe('Bloque «Comunicaciones» de la ficha (DX-128)', () => {
       const result = await update.execute(ANA, { reminderOptOut: false }, ctx);
       expect(result).toMatchObject({
         reminderOptOut: null,
-        phone: '+573209876543',
+        phone: '+584249876543',
         contactChannel: 'NONE',
       });
       expect(audit.record).toHaveBeenCalledTimes(1);

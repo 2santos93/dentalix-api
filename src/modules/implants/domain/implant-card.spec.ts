@@ -49,11 +49,16 @@ const PATIENT: ImplantCardPatient = {
 describe('composeImplantCard (DX-191)', () => {
   const card = composeImplantCard({
     clinicName: 'Clínica Demo',
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     patient: PATIENT,
     documentTypeNames: NO_LOCAL_NAMES,
     placedOn: '2026-10-10',
     locations: [
-      { id: 'l1', name: 'Sede principal', address: 'Cra 1 # 2-3' },
+      { id: 'l1', name: 'Sede principal', address: 'Av. Bolívar 1' },
       { id: 'l2', name: 'Sede Norte', address: null },
     ],
     implants: [
@@ -80,9 +85,19 @@ describe('composeImplantCard (DX-191)', () => {
       patientDocument: 'Documento nacional 52123456',
       patientBirthDate: '1980-05-02',
       clinicName: 'Clínica Demo',
-      locations: [{ id: 'l1', name: 'Sede principal', address: 'Cra 1 # 2-3' }],
+      locations: [
+        { id: 'l1', name: 'Sede principal', address: 'Av. Bolívar 1' },
+      ],
       placedOn: '2026-10-10',
       professionals: ['Dra. Ruiz'],
+    });
+  });
+
+  it('DX-354: lleva el regional de la sede de la tarjeta', () => {
+    expect(card.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
     });
   });
 
@@ -110,6 +125,7 @@ describe('composeImplantCard (DX-191)', () => {
     ) =>
       composeImplantCard({
         clinicName: 'C',
+        regional: null,
         patient: { ...PATIENT, ...patient },
         documentTypeNames: names,
         placedOn: '2026-10-10',
@@ -129,6 +145,7 @@ describe('composeImplantCard (DX-191)', () => {
   it('sin documento, null (nunca se inventa)', () => {
     const noDoc = composeImplantCard({
       clinicName: 'C',
+      regional: null,
       patient: { ...PATIENT, docNumber: ' ' },
       documentTypeNames: NO_LOCAL_NAMES,
       placedOn: '2026-10-10',

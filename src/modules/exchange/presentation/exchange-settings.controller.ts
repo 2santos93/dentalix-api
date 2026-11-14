@@ -68,8 +68,15 @@ import {
 export const EXCHANGE_RATE_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede ver y cambiar la tasa de cambio de la clínica.';
 
+/** Decimal en texto, sin notación científica ni ceros de más («0.91»). */
+function rateText(rate: number): string {
+  return rate.toFixed(8).replace(/\.?0+$/, '');
+}
+
 interface AuthenticatedRequest extends AuditableRequest {
   user: TenantJwtPayload;
+  /** DX-381: metadata que el handler añade al evento de `@Audit`. */
+  auditMetadata?: Record<string, unknown>;
 }
 
 /**
@@ -97,7 +104,8 @@ export class ExchangeSettingsController {
 
   @Get('settings')
   @ApiOperation({
-    summary: 'Fuente de la tasa de cambio de la clínica (DX-374)',
+    summary:
+      'Fuente de la tasa de cambio de la clínica y plazo de la última tasa registrada (DX-374, DX-384)',
   })
   @ApiOkResponse({ type: ExchangeRateSettingsDto })
   settings(): Promise<ExchangeRateSettings> {
@@ -119,11 +127,18 @@ export class ExchangeSettingsController {
       'de ese día que siguen sin tasa (si el proveedor no tiene la de ese ' +
       'día). Evento CLINIC_SETTINGS con reason ' +
       'EXCHANGE_RATE_SOURCE y el antes y el después; si la fuente no cambia, ' +
-      '200 sin evento.',
+      '200 sin evento. DX-384: `manualRateMaxAgeDays` (0..30, 3 por defecto) ' +
+      'es hasta cuántos días de antigüedad puede tener la última tasa manual ' +
+      'que se usa cuando no hay la del día del abono (0 = solo la del mismo ' +
+      'día); cualquiera de los dos campos puede ir solo. Si cambia, evento ' +
+      'CLINIC_SETTINGS con reason EXCHANGE_RATE_MAX_AGE y el antes y el ' +
+      'después, en la misma transacción, y los abonos aplazados «sin tasa» ' +
+      'se intentan ya. Solo ADMIN (403 al resto).',
   })
   @ApiOkResponse({ type: ExchangeRateSettingsDto })
   @ApiBadRequestResponse({
-    description: 'Fuente que no es AUTOMATIC ni MANUAL',
+    description:
+      'Fuente que no es AUTOMATIC ni MANUAL, plazo que no es un entero de 0 a 30, o ninguno de los dos campos',
   })
   updateClinicSettings(
     @Body() dto: UpdateExchangeRateSettingsDto,
@@ -131,7 +146,13 @@ export class ExchangeSettingsController {
   ): Promise<ExchangeRateSettings> {
     const ctx = auditRequestContext(req, this.tenantContext);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
-    return this.updateSettings.execute({ source: dto.source }, ctx);
+    return this.updateSettings.execute(
+      {
+        source: dto.source,
+        manualRateMaxAgeDays: dto.manualRateMaxAgeDays,
+      },
+      ctx,
+    );
   }
 
   @Get('manual-rates')
@@ -174,14 +195,23 @@ export class ExchangeSettingsController {
   })
   @ApiConflictResponse({ description: MANUAL_RATE_DUPLICATE_MESSAGE })
   @ApiForbiddenResponse({ description: MANUAL_RATE_NOT_A_MEMBER_MESSAGE })
-  register(
+  async register(
     @Body() dto: RegisterManualExchangeRateDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<ManualExchangeRate> {
-    return this.registerManualRate.execute(
+    const created = await this.registerManualRate.execute(
       { date: dto.date, currency: dto.currency, rate: dto.rate },
       req.user.sub,
     );
+    // DX-381: moneda, día y tasa, sin el autor (metadata cerrada).
+    req.auditMetadata = {
+      exchangeRate: {
+        currency: created.currency,
+        day: created.date,
+        rate: rateText(created.rate),
+      },
+    };
+    return created;
   }
 
   @Audit({

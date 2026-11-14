@@ -15,6 +15,7 @@ export const STORAGE_OPS = [
   'head',
   'copy',
   'delete',
+  'list',
   'head-bucket',
 ] as const;
 export type StorageOp = (typeof STORAGE_OPS)[number];

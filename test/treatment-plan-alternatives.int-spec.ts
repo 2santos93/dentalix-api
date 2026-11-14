@@ -1,3 +1,4 @@
+import { testDiscountPolicy } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/discount-fixtures';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { PrismaDocumentTypeNamesRepository } from '../src/modules/patients/infrastructure/repositories/prisma-document-type-names.repository';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -15,7 +16,7 @@ import {
   GetPlanQuoteUseCase,
 } from '../src/modules/treatment-plans/application/use-cases/plan-quote.use-cases';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -37,7 +38,7 @@ const documentTypeNames = new PrismaDocumentTypeNamesRepository(
 const plans = new PrismaTreatmentPlanRepository(prisma, tenantContext);
 const quotes = new PrismaPlanQuoteRepository(prisma, tenantContext);
 const options = new PrismaPlanOptionsRepository(prisma, tenantContext);
-const whitelist = { has: (code: string) => Promise.resolve(code === 'COP') };
+const whitelist = { has: (code: string) => Promise.resolve(code === 'USD') };
 
 const DAY = 24 * 60 * 60 * 1000;
 const PNG =
@@ -68,13 +69,13 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     },
   });
   const main = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede principal',
     }),
   });
   const north = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede norte',
       createdAt: new Date(Date.now() + 1000),
@@ -110,7 +111,7 @@ async function patient(
       tenantId: c.tenantId,
       firstName,
       lastName: 'Prueba',
-      phone: '+57 300 000 0000',
+      phone: '+58 412 000 0000',
       ...extra,
     },
   });
@@ -124,7 +125,7 @@ async function plan(
   items: { price: number; discount?: number }[] = [{ price: 100 }],
 ): Promise<string> {
   const row = await raw.treatmentPlan.create({
-    data: { tenantId: c.tenantId, patientId, currency: 'COP', ...data },
+    data: { tenantId: c.tenantId, patientId, currency: 'USD', ...data },
   });
   for (const item of items) {
     await raw.treatmentPlanItem.create({
@@ -245,6 +246,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         plans,
         whitelist,
         () => new Date('2026-10-16T15:00:00.000Z'),
+        testDiscountPolicy(),
       );
 
       await inClinic(a, () =>
@@ -277,6 +279,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         plans,
         whitelist,
         () => new Date(),
+        testDiscountPolicy(),
       );
 
       await expect(
@@ -310,7 +313,12 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
               signature: PNG,
               contentHash: quote.contentHash,
             },
-            { acceptedById: a.userId, ipAddress: null, userAgent: null },
+            {
+              acceptedById: a.userId,
+              role: ClinicRole.DENTIST,
+              ipAddress: null,
+              userAgent: null,
+            },
           );
         },
         a.mainLocationId,
@@ -332,6 +340,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         plans,
         whitelist,
         () => new Date(),
+        testDiscountPolicy(),
       );
       const results = await Promise.allSettled(
         [g.a, g.b].map((id) =>
@@ -406,7 +415,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
           treatmentPlanId: g.b,
           patientId: p,
           amount: 50,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date(),
         },
       });
@@ -414,6 +423,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
         plans,
         whitelist,
         () => new Date(),
+        testDiscountPolicy(),
       );
       await expect(
         inClinic(a, () => update.execute(g.a, { status: 'ACCEPTED' }, DENTIST)),
@@ -544,7 +554,7 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
       // Clínica propia para esta lista: lo de los demás tests no se cuela.
       const c = await seedClinic('tpl-follow-up-int');
       f = c;
-      const due = await patient(c, 'Debe', { phone: '+57 301 111 2222' });
+      const due = await patient(c, 'Debe', { phone: '+58 412 111 2222' });
       expected = await plan(c, due, presented(10, c.mainLocationId), [
         { price: 3500000, discount: 100000 },
         { price: 900000 },
@@ -598,9 +608,9 @@ describe('alternativas de plan y seguimiento (DX-040, int)', () => {
       const page = await inClinic(f, () => list.execute({}));
       expect(page.items.find((i) => i.planId === expected)).toMatchObject({
         patientName: 'Debe Prueba',
-        patientPhone: '+57 301 111 2222',
+        patientPhone: '+58 412 111 2222',
         total: 4300000,
-        currency: 'COP',
+        currency: 'USD',
         itemCount: 2,
         daysSincePresented: 10,
       });

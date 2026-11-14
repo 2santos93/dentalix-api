@@ -42,6 +42,7 @@ import {
   STAFF_REPOSITORY,
   type StaffRepository,
 } from '../../../staff/domain/ports/staff-repository.port';
+import { assertAttendingRole } from '../../../staff/domain/attending';
 import {
   APPOINTMENT_TYPE_REPOSITORY,
   type AppointmentTypeRepository,
@@ -55,6 +56,7 @@ import type { AppointmentWriteResult } from '../../../appointments/domain/entiti
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { assertLocationWritable } from '../../../../shared/tenancy/active-location';
 
 function assertValid(error: string | null): void {
   if (error !== null) throw new BadRequestException(error);
@@ -170,9 +172,9 @@ export class CreateWaitlistEntryUseCase {
     if (!(await this.patients.findById(input.patientId))) {
       throw new NotFoundException('Paciente no encontrado');
     }
-    // Ya está en la lista (p. ej. canceló hace poco): no se duplica. Dos altas
-    // manuales simultáneas podrían colar dos; el panel las enseña y se
-    // descarta una (las automáticas son una por cita).
+    // Ya está en la lista (p. ej. canceló hace poco): no se duplica. Es la vía
+    // rápida; el árbitro de dos altas simultáneas es el repositorio (candado por
+    // paciente y único parcial de OPEN, DX-161).
     if (await this.repo.hasOpenForPatient(input.patientId)) {
       throw new ConflictException(WAITLIST_DUPLICATE_MESSAGE);
     }
@@ -185,8 +187,11 @@ export class CreateWaitlistEntryUseCase {
     ) {
       throw new NotFoundException('Sede no encontrada');
     }
-    if (input.providerId && !(await this.staff.findById(input.providerId))) {
-      throw new NotFoundException('Profesional no encontrado');
+    if (input.providerId) {
+      const provider = await this.staff.findById(input.providerId);
+      if (!provider) throw new NotFoundException('Profesional no encontrado');
+      // DX-161: el profesional preferido tiene que atender pacientes.
+      assertAttendingRole(provider);
     }
     let typeDuration: number | undefined;
     if (input.appointmentTypeId) {
@@ -211,6 +216,8 @@ export class CreateWaitlistEntryUseCase {
       note: input.note?.trim() ?? null,
       createdById: ctx.actor.userId,
     });
+    // DX-161: otra alta del mismo paciente ganó la carrera.
+    if (!entry) throw new ConflictException(WAITLIST_DUPLICATE_MESSAGE);
     await recordEntryEvent(this.audit, ctx, entry, 'CREATE', 'WAITLIST_MANUAL');
     return entry;
   }
@@ -263,6 +270,8 @@ export interface ScheduleFromWaitlistInput {
   end?: Date;
   /** Si falta: el de la entrada, si sigue activo. */
   appointmentTypeId?: string;
+  /** DX-492: el sillón que devolvió «Buscar hueco». */
+  chairId?: string;
   reason?: string;
   notes?: string;
 }
@@ -277,6 +286,8 @@ export class ScheduleFromWaitlistUseCase {
     private readonly createAppointment: CreateAppointmentUseCase,
     private readonly audit: RecordAuditEventUseCase,
     private readonly tenantContext: TenantContextService,
+    @Inject(LOCATION_REPOSITORY)
+    private readonly locations: LocationRepository,
   ) {}
 
   /**
@@ -296,6 +307,9 @@ export class ScheduleFromWaitlistUseCase {
     if (entry.status !== WaitlistStatus.OPEN) {
       throw new ConflictException(WAITLIST_NOT_OPEN_MESSAGE);
     }
+    // SEC-014: y activa: una sede desactivada no recibe citas nuevas.
+    const location = await this.locations.findById(entry.locationId);
+    if (location) assertLocationWritable(location);
 
     const appointment = await this.createAppointment.execute({
       patientId: entry.patientId,
@@ -306,6 +320,7 @@ export class ScheduleFromWaitlistUseCase {
         new Date(input.start.getTime() + entry.durationMinutes * 60_000),
       appointmentTypeId:
         input.appointmentTypeId ?? (await this.inheritedType(entry)),
+      chairId: input.chairId,
       reason: input.reason,
       notes: input.notes,
       createdById: ctx.actor.userId,

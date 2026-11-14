@@ -21,7 +21,7 @@ import {
 } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_MADRID_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   locationData,
@@ -64,6 +64,9 @@ interface CommunicationBody {
     minor: boolean;
     responsiblePartyId?: string | null;
   };
+  preferredLanguage: string | null;
+  patientLanguages: string[];
+  clinicLanguage: string;
 }
 
 describe('Comunicaciones del paciente (e2e, DX-128)', () => {
@@ -109,7 +112,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         docNumber: '128001',
         sex: 'F',
         email: 'carolina@example.com',
-        phone: '601 234 5678',
+        phone: '212 234 5678',
       })
       .expect(201);
     patientId = (res.body as { id: string }).id;
@@ -138,12 +141,12 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       patientId,
       contactChannel: 'EMAIL',
       clinicDefaultChannel: 'EMAIL',
-      phone: '601 234 5678',
+      phone: '212 234 5678',
       phoneE164: null,
       phoneStatus: 'INVALID',
       phoneAmbiguous: false,
-      phoneInternational: '+57 601 2345678',
-      phoneCountry: 'CO',
+      phoneInternational: '+58 212 2345678',
+      phoneCountry: 'VE',
       email: 'carolina@example.com',
       whatsappOptIn: null,
       reminderOptOut: null,
@@ -154,6 +157,10 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         minor: false,
         responsiblePartyId: null,
       },
+      // DX-497: sin preferencia, con la lista de la clínica.
+      preferredLanguage: null,
+      patientLanguages: ['es'],
+      clinicLanguage: 'es',
     } satisfies CommunicationBody);
   });
 
@@ -227,7 +234,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
   it('recepción pone el móvil, WhatsApp y el opt-in en persona: E.164 y auditado con autor y origen', async () => {
     const res = await as(api().patch(comms()), tokens[ClinicRole.RECEPTION])
       .send({
-        phone: '310 123 4567',
+        phone: '414 123 4567',
         contactChannel: 'WHATSAPP',
         whatsappOptIn: true,
         whatsappOptInSource: 'IN_PERSON',
@@ -236,8 +243,8 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
     const body = res.body as CommunicationBody;
     expect(body).toMatchObject({
       contactChannel: 'WHATSAPP',
-      phone: '+573101234567',
-      phoneE164: '+573101234567',
+      phone: '+584141234567',
+      phoneE164: '+584141234567',
       phoneStatus: 'VALID',
       whatsappOptIn: {
         source: 'IN_PERSON',
@@ -290,7 +297,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       api().patch(`/api/v1/patients/${patientId}`),
       tokens[ClinicRole.DENTIST],
     )
-      .send({ phone: '320 765 4321' })
+      .send({ phone: '424 765 4321' })
       .expect(200);
   });
 
@@ -368,7 +375,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         docType: 'NATIONAL_ID',
         docNumber: '214990',
         sex: 'F',
-        phone: '+573101234567',
+        phone: '+584141234567',
       })
       .expect(201);
     const id = (created.body as { id: string }).id;
@@ -449,7 +456,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         tokens[ClinicRole.RECEPTION],
       )
         .send({
-          phone: '+573209876543',
+          phone: '+584249876543',
           contactChannel: 'WHATSAPP',
           whatsappOptIn: true,
           whatsappOptInSource: 'MESSAGE',
@@ -463,7 +470,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       expect(response.status).toBe(200);
       expect(response.body).toMatchObject({
         reminderOptOut: null,
-        phone: '+573209876543',
+        phone: '+584249876543',
         contactChannel: 'WHATSAPP',
         whatsappOptIn: { at: staffAt.toISOString(), source: 'MESSAGE' },
       });
@@ -599,6 +606,12 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         where: { tenantId: phones.tenantId },
       });
       locationId = location.id;
+      // La región no se deduce del país: esta sede es de un país distinto
+      // de la región que le pone cada test.
+      await raw.location.update({
+        where: { id: locationId },
+        data: { country: 'ES' },
+      });
     });
 
     it('a location with region VE normalizes 0412-1234567 to +58 and shows +58 412 1234567', async () => {
@@ -623,15 +636,15 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
       expect(location.country).not.toBe('VE');
     });
 
-    it('a CO location still normalizes to +57', async () => {
-      await setPhoneRegion('CO');
+    it('a VE location still normalizes to +58', async () => {
+      await setPhoneRegion('VE');
       const id = await newPatient();
-      const res = await setPhone(id, '310 123 4567').expect(200);
+      const res = await setPhone(id, '414 123 4567').expect(200);
       expect(res.body).toMatchObject({
-        phone: '+573101234567',
-        phoneE164: '+573101234567',
+        phone: '+584141234567',
+        phoneE164: '+584141234567',
         phoneStatus: 'VALID',
-        phoneCountry: 'CO',
+        phoneCountry: 'VE',
       });
     });
 
@@ -682,36 +695,35 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
     });
 
     it('two locations with different regions read the same unprefixed number with the active one', async () => {
-      await setPhoneRegion('CO');
+      await setPhoneRegion('VE');
       const second = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_MADRID_FIXTURE, {
           tenantId: phones.tenantId,
-          name: 'Sede 329 VE',
-          defaultPhoneRegion: 'VE',
+          name: 'Sede 329 ES',
         }),
       });
       const id = await newPatient();
-      await keepPhone(id, '0412-1234567');
+      await keepPhone(id, '612 34 56 78');
       const read = (activeLocation: string) =>
         as(api().get(comms(id)), phones.adminToken, phones.host)
           .set('X-Location-Id', activeLocation)
           .expect(200);
       expect((await read(locationId)).body).toMatchObject({
-        phone: '0412-1234567',
+        phone: '612 34 56 78',
         phoneE164: null,
         phoneStatus: 'INVALID',
-        phoneCountry: 'CO',
+        phoneCountry: 'VE',
       });
       expect((await read(second.id)).body).toMatchObject({
-        phone: '0412-1234567',
-        phoneE164: '+584121234567',
+        phone: '612 34 56 78',
+        phoneE164: '+34612345678',
         phoneStatus: 'VALID',
-        phoneCountry: 'VE',
+        phoneCountry: 'ES',
       });
     });
 
     it('an ambiguous number answers phoneAmbiguous and is refused for WhatsApp', async () => {
-      await setPhoneRegion('CO');
+      await setPhoneRegion('TH');
       const id = await newPatient();
       const refused = await setPhone(id, '0058 412 1234567').expect(400);
       expect(refused.body).toMatchObject({
@@ -726,7 +738,7 @@ describe('Comunicaciones del paciente (e2e, DX-128)', () => {
         phoneStatus: 'INVALID',
         phoneAmbiguous: true,
         phoneInternational: null,
-        phoneCountry: 'CO',
+        phoneCountry: 'TH',
       });
       expect(
         (await raw.patient.findUniqueOrThrow({ where: { id } })).phone,

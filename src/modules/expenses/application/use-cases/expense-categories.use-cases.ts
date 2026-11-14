@@ -7,6 +7,7 @@ import {
 import {
   PREDEFINED_EXPENSE_CATEGORIES,
   categoryKey,
+  matchLegacyPredefinedCategory,
   matchPredefinedCategory,
 } from '../../domain/expense-categories';
 import {
@@ -34,9 +35,16 @@ export class ListExpenseCategoriesUseCase {
     private readonly repo: ExpenseCategoryRepository,
   ) {}
 
-  /** Las predefinidas en su orden y, después, las propias por nombre. */
+  /**
+   * Las predefinidas en su orden y, después, las propias por nombre. Una
+   * propia con el nombre de una predefinida no sale dos veces: la migración
+   * de DX-274-bis retiró las que ya había («Alquiler» pasó a predefinida) y
+   * esto cubre la que una réplica anterior cree durante el despliegue.
+   */
   async execute(): Promise<ExpenseCategoryView[]> {
-    const custom = await this.repo.listActive();
+    const custom = (await this.repo.listActive()).filter(
+      (c) => matchPredefinedCategory(c.name) === null,
+    );
     return [
       ...PREDEFINED_EXPENSE_CATEGORIES.map((name) => ({
         id: null,
@@ -55,7 +63,10 @@ export class CreateExpenseCategoryUseCase {
     private readonly repo: ExpenseCategoryRepository,
   ) {}
 
-  /** 409 si ya existe (predefinida o propia), sin mayúsculas ni tildes. */
+  /**
+   * 409 si ya existe (predefinida, nombre anterior de una predefinida o
+   * propia), sin mayúsculas ni tildes.
+   */
   async execute(
     rawName: string,
     createdById: string,
@@ -63,6 +74,7 @@ export class CreateExpenseCategoryUseCase {
     const name = rule(() => validateCategoryName(rawName));
     if (
       matchPredefinedCategory(name) ||
+      matchLegacyPredefinedCategory(name) ||
       (await this.repo.findLiveByKey(categoryKey(name)))
     ) {
       throw new ConflictException(CATEGORY_DUPLICATE_MESSAGE);

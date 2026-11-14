@@ -1,4 +1,10 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Query,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOkResponse,
@@ -20,6 +26,7 @@ import { Country } from '../domain/entities/country.entity';
 import { City } from '../domain/entities/city.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 // Reference data (currencies/countries/cities) is global, NOT tenant domain
 // data — same rationale as ExchangeController: this controller applies ONLY
@@ -80,6 +87,7 @@ export class ReferenceController {
  * el mismo límite por IP que `POST /auth/register`.
  */
 @ApiTags('public')
+@UseInterceptors(NoStoreHeadersInterceptor)
 @Controller('public')
 export class PublicReferenceController {
   constructor(private readonly listCurrencies: ListCurrenciesUseCase) {}

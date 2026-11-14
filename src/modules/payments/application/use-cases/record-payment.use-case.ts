@@ -7,10 +7,13 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../../shared/validation/idempotency-key';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
 import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
   PAID_AT_IN_FUTURE_MESSAGE,
+  isPaidAtAfterSiteToday,
   isPaidAtTooFarInFuture,
 } from '../../domain/paid-at-window';
 import type {
@@ -37,11 +40,17 @@ import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/co
 import { errorName } from '../payment-in-plan-currency';
 import { freezePaymentRate, paymentBaseAmount } from '../payment-exchange-rate';
 import type { FrozenExchangeRate } from '../../domain/payment-exchange-rate';
+import { PaymentProofs, attachmentOf } from '../payment-proofs';
 import {
   PaymentMethodGate,
   type PaymentMethodRequest,
   type ResolvedPaymentMethod,
 } from '../payment-method-gate';
+import {
+  CURRENCY_REQUIRED_MESSAGE,
+  PAYMENT_AMOUNT_MESSAGE,
+  UNKNOWN_CURRENCY_MESSAGE,
+} from '../../../../shared/money/currency-messages';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
@@ -62,6 +71,8 @@ export interface RecordPaymentInput {
   reference?: string;
   /** DX-377: motivo para confirmar una referencia repetida (409 sin él). */
   duplicateReferenceReason?: string;
+  /** DX-389: subida del comprobante (`POST /payments/proofs/upload-url`). */
+  proofUploadId?: string;
   notes?: string;
 }
 
@@ -90,6 +101,29 @@ const EXPLICIT_OFFSET = /(Z|[+-]\d{2}:?\d{2})$/i;
  */
 function isUtcMidnight(instant: Date): boolean {
   return instant.getTime() % (24 * 60 * 60 * 1000) === 0;
+}
+
+/**
+ * La ventana de fecha de un abono, una sola vez para los tres caminos (suelto,
+ * repartido y saldo inicial): un día civil no puede ser
+ * posterior a hoy en la sede (DX-075; se mira primero, así que mañana, o dentro
+ * de 3 días, da el mismo mensaje) y, para un instante o si la sede no tiene
+ * zona, rige la ventana de 24 h por delante del reloj (DX-054).
+ */
+export async function assertPaidAtWindow(
+  repo: Pick<PaymentRepository, 'siteToday'>,
+  paidAt: Date | CivilPaidDay,
+  now: Date,
+): Promise<void> {
+  if (
+    !(paidAt instanceof Date) &&
+    isPaidAtAfterSiteToday(paidAt, await repo.siteToday(now))
+  ) {
+    throw new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE);
+  }
+  if (isPaidAtTooFarInFuture(paidAt, now)) {
+    throw new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE);
+  }
 }
 
 /**
@@ -154,20 +188,21 @@ export class RecordPaymentUseCase {
     private readonly convertAmount: ConvertAmountUseCase,
     // DX-377: medio del catálogo, referencia y aviso de referencia repetida.
     private readonly paymentMethodGate: PaymentMethodGate,
+    // DX-389: el comprobante del cobro (subida directa ya hecha).
+    private readonly proofs: PaymentProofs,
     // DX-054: la fecha del abono no puede ir más de 24 h por delante.
     @Inject(PAYMENT_CLOCK)
     private readonly now: PaymentClock,
   ) {}
 
   /**
-   * `normalizePaidAt` más la ventana de DX-054 (400 si va a más de 24 h en
-   * el futuro). La usan el abono suelto y el repartido.
+   * `normalizePaidAt` más la ventana de fecha: DX-054 (400 si va a más de 24 h
+   * en el futuro) y DX-075 (400 si es un día civil posterior a hoy en la
+   * sede). La usan el abono suelto y el repartido.
    */
-  checkedPaidAt(value: string | Date): Date | CivilPaidDay {
+  async checkedPaidAt(value: string | Date): Promise<Date | CivilPaidDay> {
     const paidAt = normalizePaidAt(value);
-    if (isPaidAtTooFarInFuture(paidAt, this.now())) {
-      throw new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE);
-    }
+    await assertPaidAtWindow(this.repo, paidAt, this.now());
     return paidAt;
   }
 
@@ -193,7 +228,7 @@ export class RecordPaymentUseCase {
     );
     if (key !== undefined) {
       if (!UUID_RE.test(key)) {
-        throw new BadRequestException('Idempotency-Key must be a UUID');
+        throw new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE);
       }
       const existing = await this.repo.findByIdempotencyKey(key);
       if (existing) {
@@ -209,7 +244,7 @@ export class RecordPaymentUseCase {
     }
 
     const currency = await this.validCurrency(input);
-    const paidAt = this.checkedPaidAt(input.paidAt);
+    const paidAt = await this.checkedPaidAt(input.paidAt);
 
     // Throws NotFoundException when the plan is absent, soft-deleted, or
     // belongs to another tenant — never re-derived here.
@@ -234,6 +269,11 @@ export class RecordPaymentUseCase {
         ? null
         : { planCurrency: plan.currency, amount: converted, rateDate: paidOn };
 
+    // DX-389: lo último antes de la transacción (copia el objeto subido).
+    const proof = await this.proofs.complete(
+      payMethod.proofUploadId,
+      createdById,
+    );
     const repoInput: CreatePaymentRepoInput = {
       treatmentPlanId,
       openingBalanceId: null,
@@ -246,16 +286,26 @@ export class RecordPaymentUseCase {
       reference: payMethod.reference,
       referenceNormalized: payMethod.referenceNormalized,
       duplicateReferenceReason: payMethod.duplicateReferenceReason,
+      adjustments: payMethod.adjustments,
+      proof: attachmentOf(proof),
       notes: input.notes,
       createdById,
       idempotencyKey: key,
       requestFingerprint: key === undefined ? undefined : requestFingerprint,
       receiptPlanBalance,
+      receiptBalanceInTx: this.receiptBalance.inTransaction,
       planAmount,
       frozenRate,
     };
 
-    const payment = await this.repo.create(repoInput);
+    let payment: Payment;
+    try {
+      payment = await this.repo.create(repoInput);
+    } catch (error) {
+      await this.proofs.settle([proof], false);
+      throw error;
+    }
+    await this.proofs.settle([proof], true);
     return { ...payment, duplicateReferenceOf: payMethod.duplicateReferenceOf };
   }
 
@@ -268,14 +318,14 @@ export class RecordPaymentUseCase {
     currency: string;
   }): Promise<string> {
     if (!isFinitePositive(input.amount)) {
-      throw new BadRequestException('amount must be a finite number > 0');
+      throw new BadRequestException(PAYMENT_AMOUNT_MESSAGE);
     }
     if (!input.currency || input.currency.trim() === '') {
-      throw new BadRequestException('currency is required');
+      throw new BadRequestException(CURRENCY_REQUIRED_MESSAGE);
     }
     const currency = input.currency.trim().toUpperCase();
     if (!(await this.whitelist.has(currency))) {
-      throw new BadRequestException(`Unknown currency: ${currency}`);
+      throw new BadRequestException(UNKNOWN_CURRENCY_MESSAGE);
     }
     return currency;
   }
@@ -293,7 +343,11 @@ export class RecordPaymentUseCase {
     currency: string,
     paidAt: Date | CivilPaidDay,
   ): Promise<PreparedPaymentLine> {
-    const method = await this.paymentMethodGate.resolve(input, paidAt);
+    // DX-516: con los ajustes del medio sobre el importe de ESTA línea.
+    const method = await this.paymentMethodGate.resolve(input, paidAt, {
+      amount: input.amount,
+      currency,
+    });
 
     // DX-375, DX-136 y DX-051 (R4): fuera de la transacción del abono (la
     // tasa puede pedir un proveedor externo), UNA cotización con la fuente de

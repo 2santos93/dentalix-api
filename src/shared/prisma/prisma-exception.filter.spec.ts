@@ -10,6 +10,7 @@ import {
   TRANSACTION_TIMEOUT_MESSAGE,
   conflictMessageForTarget,
 } from './prisma-exception.filter';
+import { leavesWith } from '../../../test/support/content-leaves';
 import { requestContext } from '../observability/request-context';
 
 function mockHost(): {
@@ -177,7 +178,8 @@ describe('PrismaExceptionFilter', () => {
       message: 'Los datos enviados no cumplen las reglas de la clínica.',
     });
     const serialized = JSON.stringify(bodyOf(json));
-    expect(serialized).not.toMatch(/Failing row|payments|constraint|23514/);
+    expect(serialized).not.toMatch(/Failing row|payments|constraint/);
+    expect(leavesWith(bodyOf(json), '23514')).toEqual([]);
     // El log identifica la constraint, pero nunca lleva la fila (datos clínicos).
     const logged = logSpy.mock.calls.map((c) => String(c[0])).join('\n');
     expect(logged).toContain('payments_amount_positive');

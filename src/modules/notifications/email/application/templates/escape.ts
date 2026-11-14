@@ -35,13 +35,16 @@ export function safeUrl(value: string | null | undefined): string | null {
 /**
  * Texto de una sola línea para el asunto o la versión de texto: sin saltos ni
  * caracteres de control (un salto en el asunto sería inyección de cabeceras
- * si un proveedor no lo saneara).
+ * si un proveedor no lo saneara). Los espacios duros (U+00A0, U+202F) se
+ * conservan: son los que el locale pone entre el código o texto de la moneda
+ * y la cifra («Bs.\u00a01.234,50»), y el texto del email tiene que decir lo
+ * mismo que el papel, sin partir el importe (DX-517-bis).
  */
 export function singleLine(value: string): string {
   // \p{Cc}: controles C0 y C1 (U+0080–U+009F) y DEL; más los separadores
   // de línea y párrafo Unicode (U+2028/U+2029).
   return value
     .replace(/[\p{Cc}\u2028\u2029]+/gu, ' ')
-    .replace(/\s+/g, ' ')
+    .replace(/[^\S\u00a0\u202f]+/g, ' ')
     .trim();
 }

@@ -9,6 +9,7 @@ import {
 } from '../src/modules/implants/infrastructure/prisma-patient-implant.repository';
 import {
   dueCandidatesSql,
+  loadSweepWindows,
   PrismaReminderRepository,
 } from '../src/modules/reminders/infrastructure/prisma-reminder.repository';
 import {
@@ -17,7 +18,7 @@ import {
 } from '../src/modules/reminders/infrastructure/prisma-reminder-opt-out.repository';
 import { isInSweepWindow } from '../src/modules/reminders/domain/reminder-window';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -49,6 +50,8 @@ interface PlanNode {
   Filter?: string;
   'Actual Rows'?: number;
   'Actual Loops'?: number;
+  'Rows Removed by Index Recheck'?: number;
+  'Rows Removed by Filter'?: number;
   Plans?: PlanNode[];
 }
 
@@ -90,19 +93,19 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Centro',
     }),
   });
   const other = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Norte',
     }),
   });
   const retired = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Cerrada',
       deletedAt: new Date(),
@@ -148,7 +151,7 @@ async function seedPatients(c: Clinic, total: number): Promise<void> {
   await raw.$executeRawUnsafe(`
     INSERT INTO "patients" ("id", "tenantId", "firstName", "lastName", "phone", "updatedAt")
     SELECT gen_random_uuid(), '${c.tenantId}', 'P' || n, 'Volumen',
-           '+57 3' || lpad(n::text, 9, '0'), now()
+           '+58 4' || lpad(n::text, 9, '0'), now()
       FROM generate_series(1, ${total}) AS n`);
 }
 
@@ -161,6 +164,11 @@ async function patient(
   });
   return row.id;
 }
+
+const NO_BOOK = {
+  clinic: NO_LOCAL_NAMES,
+  forLocation: () => NO_LOCAL_NAMES,
+};
 
 describe('DX-225 · índices que sirven bajo RLS (int)', () => {
   let a: Clinic;
@@ -307,16 +315,13 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
     it('ignora mayúsculas y blancos alrededor, también en el parámetro, y solo en la clínica', async () => {
       const repo = new PrismaPatientImplantRepository(prisma, tenantContext);
       const byLot = await tenantContext.run(a.tenantId, () =>
-        repo.searchByLot({ lot: ' lot-77 ' }, NO_LOCAL_NAMES),
+        repo.searchByLot({ lot: ' lot-77 ' }, NO_BOOK),
       );
       expect(byLot.map((m) => m.lot).sort()).toEqual(
         [' lot-77 ', 'LOT-77', 'Lot-77'].sort(),
       );
       const byRef = await tenantContext.run(a.tenantId, () =>
-        repo.searchByLot(
-          { reference: 'Ref-9', lot: 'LOT-77  ' },
-          NO_LOCAL_NAMES,
-        ),
+        repo.searchByLot({ reference: 'Ref-9', lot: 'LOT-77  ' }, NO_BOOK),
       );
       expect(byRef.map((m) => [m.lot, m.reference]).sort()).toEqual(
         [
@@ -376,21 +381,21 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
 
     it('el trigger mantiene phoneTail al crear y al cambiar el teléfono', async () => {
       const repo = new PrismaReminderOptOutRepository(prisma, tenantContext);
-      const id = await patient(a, { phone: '310 555 0101' });
+      const id = await patient(a, { phone: '414 555 0101' });
       const found = () =>
-        tenantContext.run(a.tenantId, () => repo.findByPhoneTail('05550101'));
+        tenantContext.run(a.tenantId, () => repo.findByPhoneTail('45550101'));
       expect((await found()).map((m) => m.patientId)).toEqual([id]);
 
       await prisma.runWithTenant(a.tenantId, (tx) =>
         tx.patient.update({
           where: { id },
-          data: { phone: '+57 320 999 8877' },
+          data: { phone: '+58 424 999 8877' },
         }),
       );
       expect(await found()).toEqual([]);
       const [row] = await raw.$queryRaw<{ phoneTail: string }[]>`
         SELECT "phoneTail" FROM "patients" WHERE "id" = ${id}::uuid`;
-      expect(row.phoneTail).toBe('09998877');
+      expect(row.phoneTail).toBe('49998877');
 
       await prisma.runWithTenant(a.tenantId, (tx) =>
         tx.patient.update({ where: { id }, data: { phone: null } }),
@@ -401,32 +406,68 @@ describe('DX-225 · índices que sirven bajo RLS (int)', () => {
     });
 
     it('el valor que escriba el cliente no cuenta: lo recalcula el trigger', async () => {
-      const id = await patient(a, { phone: '300 111 2233' });
+      const id = await patient(a, { phone: '412 111 2233' });
       await raw.$executeRaw`UPDATE "patients" SET "phoneTail" = '99999999'
                              WHERE "id" = ${id}::uuid`;
       const [row] = await raw.$queryRaw<{ phoneTail: string }[]>`
         SELECT "phoneTail" FROM "patients" WHERE "id" = ${id}::uuid`;
-      expect(row.phoneTail).toBe('01112233');
+      expect(row.phoneTail).toBe('21112233');
     });
   });
 
   describe('barrido de recordatorios (DB-036)', () => {
     it(`con ${FUTURE_APPOINTMENTS} citas futuras en la sede, el rango de start va en Index Cond y solo lee la ventana`, async () => {
+      // La consulta que corre dueCandidates: primero las ventanas, luego las
+      // citas con las cotas como parámetros.
+      const windows = await prisma.runWithTenant(a.tenantId, (tx) =>
+        loadSweepWindows(tx, a.tenantId, NOW),
+      );
+      expect(windows.length).toBeGreaterThan(0);
       const plan = await explain(
         a.tenantId,
-        dueCandidatesSql(a.tenantId, NOW),
+        dueCandidatesSql(a.tenantId, windows),
         true,
       );
       const scans = on(plan, 'appointments');
       expect(scans.map((n) => n['Node Type'])).not.toContain('Seq Scan');
-      const hit = scans.find(
-        (n) => n['Index Name'] === 'appointments_tenant_location_start_idx',
+      // Cota inferior y superior de la ventana en el Index Cond de ALGÚN índice
+      // de appointments (Index Scan, o el Bitmap Index Scan hijo de un Bitmap
+      // Heap Scan, que no lleva «Relation Name»): no solo `start > now`. Ni el
+      // nombre del índice ni el tipo de nodo son el contrato. Postgres 16.16
+      // (imagen de la CI desde el 2026-11-13) elige un Bitmap Heap Scan donde
+      // 16.14/16.15 elegían un Index Scan, y lo que importa (acotar la ventana
+      // en el índice y leer solo la ventana) lo fija `read`.
+      const indexScans = scans.flatMap((n) =>
+        n['Node Type'] === 'Bitmap Heap Scan' ? nodes(n) : [n],
       );
-      // Cota inferior y superior de la ventana: no solo `start > now`.
-      expect(hit?.['Index Cond']).toMatch(/start > /);
-      expect(hit?.['Index Cond']).toMatch(/start <= /);
+      const hit = indexScans.find(
+        (n) =>
+          /start > /.test(n['Index Cond'] ?? '') &&
+          /start <= /.test(n['Index Cond'] ?? ''),
+      );
+      if (!hit) {
+        throw new Error(
+          `ningún índice de appointments acota la ventana: ${JSON.stringify(
+            indexScans.map((n) => [
+              n['Node Type'],
+              n['Index Name'],
+              n['Index Cond'],
+            ]),
+          )}`,
+        );
+      }
+      // Filas leídas de appointments: las devueltas y, en un Bitmap Heap Scan,
+      // también las que descarta tras leerlas (recheck o filtro). Leer toda
+      // la agenda y filtrar después no pasa.
       const read = scans.reduce(
-        (sum, n) => sum + (n['Actual Rows'] ?? 0) * (n['Actual Loops'] ?? 1),
+        (sum, n) =>
+          sum +
+          ((n['Actual Rows'] ?? 0) +
+            (n['Node Type'] === 'Bitmap Heap Scan'
+              ? (n['Rows Removed by Index Recheck'] ?? 0) +
+                (n['Rows Removed by Filter'] ?? 0)
+              : 0)) *
+            (n['Actual Loops'] ?? 1),
         0,
       );
       expect(read).toBeLessThan(50);

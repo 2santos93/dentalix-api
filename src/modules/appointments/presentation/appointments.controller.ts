@@ -4,6 +4,7 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Inject,
@@ -22,13 +23,17 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import {
+  UndoArrivalDto,
+  UpdateAppointmentDto,
+} from './dto/update-appointment.dto';
 import { ListAppointmentsQueryDto } from './dto/list-appointments-query.dto';
 import {
   AppointmentDto,
@@ -44,7 +49,10 @@ import {
   PatientCoverageFlags,
   type CoverageSummary,
 } from '../../patient-coverages/application/patient-coverage-flags';
-import type { OverdueBalance } from '../../collections/domain/overdue-balance';
+import {
+  NO_OVERDUE,
+  type OverdueBalance,
+} from '../../collections/domain/overdue-balance';
 import { PatientMedicalAlertFlags } from '../../medical-history/application/patient-medical-alert-flags';
 import {
   NO_ANAMNESIS_FLAGS,
@@ -96,7 +104,12 @@ import {
 } from '../domain/wants-earlier';
 import { OPENING_ASSIGN_FORBIDDEN_MESSAGE } from '../../waitlist/domain/waitlist-offer-rules';
 import { RecordAuditEventUseCase } from '../../audit/application/record-audit-event.use-case';
-import { APPOINTMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import {
+  APPOINTMENT_ROLES,
+  PAYMENT_ROLES,
+} from '../../auth/presentation/guards/clinic-role-sets';
+import { GetCheckoutChecklistUseCase } from '../application/use-cases/get-checkout-checklist.use-case';
+import { CheckoutChecklistDto } from './dto/checkout-checklist.dto';
 import {
   isTenantPayload,
   JwtPayload,
@@ -141,6 +154,7 @@ export class AppointmentsController {
     private readonly medicalAlertFlags: PatientMedicalAlertFlags,
     private readonly audit: RecordAuditEventUseCase,
     private readonly listInClinic: ListInClinicUseCase,
+    private readonly checkoutChecklist: GetCheckoutChecklistUseCase,
     // DX-279: insignia «inasistencias · cancelaciones tardías» de las tarjetas.
     private readonly attendanceFlags: PatientAttendanceFlags,
     // DX-446: motivo de «Agendar igualmente» fuera de la auditoría.
@@ -355,26 +369,37 @@ export class AppointmentsController {
   @ApiCreatedResponse({
     type: WalkInResultDto,
     description:
-      'DX-470 «Atender sin cita», en una transacción: el paciente (existente por `patientId`, o alta mínima `newPatient` con nombre, apellido y teléfono) y una cita de tipo urgente DESDE AHORA ya en «En clínica» (ARRIVED, `arrivedAt` = reloj del servidor, `walkIn`), con las señales y la nota de triaje. Va al primer hueco RESERVED libre de hoy del profesional que admite el tipo urgente (DX-446); con `overbookReason`, en sobrecupo ahora (`overbooked`, motivo en `appointment_reserved_overrides`). Sede: la de X-Location-Id (o la de escritura de la sesión), entre las permitidas al usuario; autor, el del token. Queda en auditoría (`WALK_IN_PATIENT`, `WALK_IN_ARRIVAL`, `WALK_IN_OVERBOOK`) sin el triaje ni el motivo.',
+      'DX-470 «Atender sin cita», en una transacción: el paciente (existente por `patientId`, o alta mínima `newPatient` con nombre, apellido y teléfono) y una cita de tipo urgente DESDE AHORA ya en «En clínica» (ARRIVED, `arrivedAt` = reloj del servidor, `walkIn`), con las señales y la nota de triaje. Va al primer hueco RESERVED libre de hoy del profesional que admite el tipo urgente (DX-446); con `overbookReason`, en sobrecupo ahora (`overbooked`, motivo en `appointment_reserved_overrides`). DX-492: `chairId` opcional, un sillón activo de la sede. Sede: la de X-Location-Id (o la de escritura de la sesión), entre las permitidas al usuario; autor, el del token. Queda en auditoría (`WALK_IN_PATIENT`, `WALK_IN_ARRIVAL`, `WALK_IN_OVERBOOK`) sin el triaje ni el motivo.',
   })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos: ni `patientId` ni `newPatient` (o los dos), señales fuera de las 6, nota de más de 200, motivo del sobrecupo fuera de 5–300, tipo no urgente o desactivado, o el profesional no atiende en la sede',
+      'Datos inválidos: ni `patientId` ni `newPatient` (o los dos), señales fuera de las 6, nota de más de 200, motivo del sobrecupo fuera de 5–300, tipo no urgente o desactivado, el profesional no atiende en la sede, o el sillón es de otra sede o está desactivado',
   })
   @ApiForbiddenResponse({
     description:
       'Solo RECEPTION, ASSISTANT y ADMIN (marcan la llegada); sede no permitida (`LOCATION_NOT_ALLOWED`)',
   })
   @ApiNotFoundResponse({
-    description: 'Paciente o profesional que no son de esta clínica',
+    description: 'Paciente, profesional o sillón que no son de esta clínica',
   })
   @ApiConflictResponse({
     description:
-      '`NO_RESERVED_SLOT` (`canOverbook`): no queda hueco reservado libre hoy, se puede reintentar con `overbookReason`; `PATIENT_DUPLICATE` (`existingPatientId` y `existingPatient` con `id`, `firstName`, `lastName`): el documento del alta mínima ya es de otro paciente (se comprueba antes que el hueco); sin tipo urgente activo; un bloqueo que no deja agendar; el paciente ya está en otra cita a esa hora; u otra persona ocupó el hueco a la vez',
+      '`NO_RESERVED_SLOT` (`canOverbook`): no queda hueco reservado libre hoy, se puede reintentar con `overbookReason`; `PATIENT_DUPLICATE` (`existingPatientId` y `existingPatient` con `id`, `firstName`, `lastName`): el documento del alta mínima ya es de otro paciente (se comprueba antes que el hueco); sin tipo urgente activo; un bloqueo que no deja agendar; el paciente ya está en otra cita a esa hora; el sillón está ocupado (mensaje con su nombre y horas); u otra persona ocupó el hueco a la vez',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: false,
+    description:
+      'DX-510: UUID estable por intento de «Atender sin cita» (doble clic, reintento de red). Repetir la MISMA petición con la misma clave devuelve la cita original (sin un segundo paciente ni una segunda cita, `patientCreated: false`); otros datos con la misma clave son 422 `IDEMPOTENCY_KEY_REUSED`. Por clínica; vive con la cita (sin caducidad, como en abonos y gastos).',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      '`IDEMPOTENCY_KEY_REUSED`: la Idempotency-Key ya creó una atención sin cita con otros datos (otro paciente, profesional, triaje, motivo o sede)',
   })
   async walkIn(
     @Body() dto: CreateWalkInDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<WalkInResult> {
     const ctx = this.auditContext(req);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
@@ -384,11 +409,13 @@ export class AppointmentsController {
         newPatient: dto.newPatient,
         providerId: dto.providerId,
         appointmentTypeId: dto.appointmentTypeId,
+        chairId: dto.chairId,
         triageFlags: dto.triageFlags,
         triageNote: dto.triageNote,
         overbookReason: dto.overbookReason,
       },
       ctx,
+      idempotencyKey,
     );
   }
 
@@ -397,14 +424,15 @@ export class AppointmentsController {
   @ApiOkResponse({
     type: OpeningsDto,
     description:
-      'DX-122 «Buscar hueco»: huecos del profesional dentro del horario de la sede (su zona horaria), fuera de bloqueos y sin solape con sus citas (ni con las del paciente, si se indica). Nunca en el pasado.',
+      'DX-122 «Buscar hueco»: huecos del profesional dentro del horario de la sede (su zona horaria), fuera de bloqueos y sin solape con sus citas (ni con las del paciente, si se indica). Nunca en el pasado. DX-492: con `chairIds`, solo los huecos con alguno de esos sillones libre, y cada hueco lleva el suyo en `chair`.',
   })
   @ApiBadRequestResponse({
     description:
-      'Fechas inválidas, al revés o más de 31 días; duración fuera de 5–480',
+      'Fechas inválidas, al revés o más de 31 días; duración fuera de 5–480; DX-492: sillón de otra sede o desactivado, o más de 12',
   })
   @ApiNotFoundResponse({
-    description: 'Sede, profesional o paciente de otra clínica',
+    description:
+      'Sede, profesional, paciente, cita a excluir o sillón de otra clínica',
   })
   openings(@Query() query: OpeningsQueryDto): Promise<OpeningsView> {
     return this.findOpenings.execute({
@@ -414,6 +442,8 @@ export class AppointmentsController {
       to: query.to,
       durationMinutes: query.durationMinutes,
       patientId: query.patientId,
+      excludeAppointmentId: query.excludeAppointmentId,
+      chairIds: query.chairIds,
     });
   }
 
@@ -480,8 +510,39 @@ export class AppointmentsController {
 
   @Get(':id')
   @ApiOkResponse({ type: AppointmentDto })
-  get(@Param('id') id: string): Promise<Appointment> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  get(@Param('id', ParseUUIDPipe) id: string): Promise<Appointment> {
     return this.getAppointment.execute(id);
+  }
+
+  @Get(':id/checkout-checklist')
+  @ApiOkResponse({
+    type: CheckoutChecklistDto,
+    description:
+      'DX-202: lo que recepción comprueba al despedir al paciente. El saldo solo para los roles de cobro.',
+  })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiForbiddenResponse({
+    description: 'La cita es de una sede no permitida al usuario (DX-089)',
+  })
+  @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
+  async getCheckoutChecklist(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: { user: JwtPayload },
+  ): Promise<CheckoutChecklistDto> {
+    const checklist = await this.checkoutChecklist.execute(id);
+    const role = isTenantPayload(req.user) ? req.user.role : null;
+    if (!role || !PAYMENT_ROLES.includes(role)) {
+      return { ...checklist, balance: null };
+    }
+    const flags = await this.balanceFlags.forPatients(
+      [checklist.patientId],
+      role,
+    );
+    return {
+      ...checklist,
+      balance: flags.get(checklist.patientId) ?? NO_OVERDUE,
+    };
   }
 
   @Audit({
@@ -498,7 +559,7 @@ export class AppointmentsController {
   })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos o al pasado, salida de COMPLETED sin `statusReason` válido (DX-273), o cancelar sin `cancelledByKind` o sin `cancelReasonCode` (DX-279), con el mensaje en español',
+      'Id que no es UUID, datos inválidos o al pasado, salida de COMPLETED sin `statusReason` válido (DX-273), o cancelar sin `cancelledByKind` o sin `cancelReasonCode` (DX-279), con el mensaje en español',
   })
   @ApiForbiddenResponse({
     description:
@@ -509,13 +570,14 @@ export class AppointmentsController {
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita del profesional, del paciente o del sillón (DX-211, con su nombre y horas; también si otro movimiento ganó la carrera), el nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200)',
+      'Solape con otra cita del profesional, del paciente o del sillón (DX-211, con su nombre y horas; también si otro movimiento ganó la carrera): cuerpo con `code: APPOINTMENT_OVERLAP` y `scope` (`provider` | `patient` | `chair`) para que la web ofrezca el siguiente hueco (DX-509-bis, DX-492-bis). El nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200). DX-509: `OVERBOOK_SLOT_TAKEN` (`canKeepOverbooked`) al reactivar una urgencia en sobrecupo cuya hora ya ocupa otra cita del profesional; se puede reintentar con `keepOverbooked: true`. DX-267-bis: reactivar (CANCELLED/NO_SHOW → SCHEDULED/CONFIRMED) aplica las reglas de mover a su misma hora y profesional (bloqueos, hueco reservado, horario del profesional en modo estricto, solapes); si la cita ya terminó, `code: APPOINTMENT_PAST` («La cita ya pasó: agenda una nueva»)',
   })
   @ApiUnprocessableEntityResponse({
-    description: 'Fuera del horario de atención de la sede de la cita',
+    description:
+      'Fuera del horario de atención de la sede de la cita, al mover o al reactivar (DX-267-bis)',
   })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAppointmentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<AppointmentWriteResult> {
@@ -539,12 +601,44 @@ export class AppointmentsController {
           reasonText: dto.cancelReasonText,
         },
         overrideReason: dto.overrideReason,
+        keepOverbooked: dto.keepOverbooked,
       },
       ctx,
     );
     await this.auditReservedOverride(updated, 'UPDATE', ctx);
     await this.auditPlanItems(updated, dto.planItemIds, 'UPDATE', ctx);
+    await this.auditCheckoutPending(updated, dto, ctx);
     return updated;
+  }
+
+  /**
+   * DX-202: cerrar con algo pendiente no se bloquea, pero queda quién la cerró
+   * y qué faltó. Solo los códigos de la lista: nada de datos del paciente.
+   */
+  private async auditCheckoutPending(
+    appointment: AppointmentWriteResult,
+    dto: UpdateAppointmentDto,
+    ctx: AppointmentAuditContext | undefined,
+  ): Promise<void> {
+    if (!ctx || dto.status !== 'COMPLETED' || !dto.checkoutPending?.length) {
+      return;
+    }
+    await this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: 'APPOINTMENT_CHECKOUT_PENDING',
+        changedFields: dto.checkoutPending,
+      },
+    });
   }
 
   @Post(':id/plan-items/:planItemId/claim')
@@ -592,15 +686,18 @@ export class AppointmentsController {
   @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
   @ApiConflictResponse({
     description:
-      'La cita no está en espera (ya pasó al sillón, o nunca llegó), o cambió mientras tanto',
+      'La cita no está en espera (ya pasó al sillón, o nunca llegó), o cambió mientras tanto. DX-509: `OVERBOOK_SLOT_TAKEN` (`canKeepOverbooked`): la urgencia es un sobrecupo y su hora ya la ocupa otra cita del profesional; se puede reintentar con `keepOverbooked: true`',
   })
   undoArrival(
     @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UndoArrivalDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<AppointmentWriteResult> {
     const ctx = this.auditContext(req);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
-    return this.updateAppointment.undoArrival(id, ctx);
+    return this.updateAppointment.undoArrival(id, ctx, {
+      keepOverbooked: dto.keepOverbooked,
+    });
   }
 
   @Patch(':id/opening')

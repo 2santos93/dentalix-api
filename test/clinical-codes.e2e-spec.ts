@@ -14,14 +14,14 @@ import {
 import { seedIcd10Codes } from '../src/modules/reference/infrastructure/seed-icd10-codes';
 import { civilDateIn } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
 // DX-212 · códigos clínicos de punta a punta: búsqueda CIE-10, evolución con
 // diagnósticos por rol, sede de la evolución (DX-232) y aislamiento entre
 // clínicas. DX-318/DX-320/DX-319: ya no existen la preparación RDA, el código
-// CUPS del catálogo ni el REPS de la sede (ver location-health-registration). DIRECT_URL solo lee y limpia.
+// código externo del catálogo ni el código de habilitación anterior de la sede (ver location-health-registration). DIRECT_URL solo lee y limpia.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -72,9 +72,9 @@ describe('Códigos clínicos: CIE-10 (DX-212, e2e)', () => {
       .set('Authorization', `Bearer ${token}`);
   }
 
-  /** Hoy en Bogotá como fecha civil (lo que manda la web al elegir fecha). */
+  /** Hoy en la zona de la sede como fecha civil (lo que manda la web al elegir fecha). */
   const today = () =>
-    `${civilDateIn(new Date(), 'America/Bogota')}T00:00:00.000Z`;
+    `${civilDateIn(new Date(), 'America/Caracas')}T00:00:00.000Z`;
 
   const entries = (p: string) => `/patients/${p}/clinical-entries`;
 
@@ -323,11 +323,11 @@ describe('Códigos clínicos: CIE-10 (DX-212, e2e)', () => {
     });
   });
 
-  // DX-320 (decisión D4): el catálogo no tiene código CUPS ni ningún «código
+  // DX-320 (decisión D4): el catálogo no tiene código externo ni ningún «código
   // externo»; basta su código interno. Un cliente antiguo que aún lo mande ve
   // el campo descartado por la ValidationPipe global (whitelist), como
   // cualquier campo desconocido: no se guarda ni se devuelve.
-  describe('DX-320: el catálogo no tiene código CUPS', () => {
+  describe('DX-320: el catálogo no tiene código externo', () => {
     it('el listado no devuelve cupsCode', async () => {
       const res = await call(
         a,
@@ -439,7 +439,7 @@ describe('Códigos clínicos: CIE-10 (DX-212, e2e)', () => {
   describe('DX-232: sede de la evolución', () => {
     it('sin cita en la sede B guarda B; la cita prevalece sobre la cabecera', async () => {
       const second = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: a.tenantId,
           name: 'Sede B DX232',
         }),

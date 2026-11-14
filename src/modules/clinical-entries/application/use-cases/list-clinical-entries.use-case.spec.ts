@@ -1,5 +1,8 @@
 import { ListClinicalEntriesUseCase } from './list-clinical-entries.use-case';
-import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import {
+  ClinicalEntry,
+  type CreatedClinicalEntryRecord,
+} from '../../domain/entities/clinical-entry.entity';
 import {
   ClinicalEntryRepository,
   ListClinicalEntriesParams,
@@ -18,6 +21,7 @@ function fakeEntry(
     reason: null,
     notes: 'Nota',
     performedById: null,
+    authorProfessionalLicense: null,
     appointmentId: null,
     templateId: null,
     appointment: null,
@@ -32,10 +36,12 @@ function makeRepo(
   overrides: Partial<ClinicalEntryRepository> = {},
 ): ClinicalEntryRepository {
   return {
-    create: (): Promise<ClinicalEntry> =>
+    create: (): Promise<CreatedClinicalEntryRecord> =>
       Promise.reject(new Error('not implemented in this fake')),
     listByPatient: (): Promise<ClinicalEntry[]> => Promise.resolve([]),
+    authorLicense: () => Promise.resolve(null),
     findAppointment: () => Promise.resolve(null),
+    writeLocationTimeZone: () => Promise.resolve('America/Caracas'),
     existingIcd10Codes: () => Promise.resolve(new Set<string>()),
     ...overrides,
   };
@@ -57,8 +63,16 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
     this.store.push(...entries);
   }
 
-  create(): Promise<ClinicalEntry> {
+  create(): Promise<CreatedClinicalEntryRecord> {
     return Promise.reject(new Error('not implemented in this fake'));
+  }
+
+  writeLocationTimeZone(): Promise<string> {
+    return Promise.resolve('America/Caracas');
+  }
+
+  authorLicense(): Promise<null> {
+    return Promise.resolve(null);
   }
 
   findAppointment(): Promise<null> {

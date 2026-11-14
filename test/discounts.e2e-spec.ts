@@ -1,3 +1,4 @@
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { INestApplication } from '@nestjs/common';
 import {
   CatalogKind,
@@ -17,7 +18,8 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   legacyLocationInsert,
   locationBody,
 } from './support/location-fixtures';
@@ -36,11 +38,16 @@ const DAY = 24 * 60 * 60 * 1000;
 let requestSeq = 0;
 /** X-Request-Id propio para encontrar el evento de auditoría de la petición. */
 const nextRequestId = () => `dx204-e2e-${++requestSeq}-${Date.now()}`;
-/** Día civil de Bogotá (UTC−5 fijo) `offset` días desde hoy. */
-const bogotaDay = (offset = 0) =>
-  new Date(Date.now() - 5 * 60 * 60 * 1000 + offset * DAY)
-    .toISOString()
-    .slice(0, 10);
+/**
+ * Día civil de la sede `offset` días desde hoy, en su zona IANA (la de
+ * `registerClinic`). Antes restaba 5 h fijas a UTC (Caracas es UTC−4) y entre
+ * las 04:00 y las 05:00 UTC daba el día anterior: el informe salía vacío.
+ */
+const caracasDay = (offset = 0) =>
+  addCivilDays(
+    civilDateIn(new Date(), REGIONAL_CARACAS_FIXTURE.timeZone),
+    offset,
+  );
 
 interface Item {
   id: string;
@@ -75,6 +82,9 @@ interface Report {
     discountById: string | null;
     discountByName: string | null;
     locationId: string | null;
+    referenceCurrency?: string | null;
+    referencePriceInPlan?: number | null;
+    rate?: object | null;
   }[];
   total: number;
 }
@@ -113,7 +123,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     };
   };
 
-  async function newPlan(currency = 'COP'): Promise<string> {
+  async function newPlan(currency = 'USD'): Promise<string> {
     const res = await as(clinicA)
       .post(`/patients/${patientA}/treatment-plans`, { currency })
       .expect(201);
@@ -190,7 +200,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     const north = await as(clinicA)
       .post(
         '/locations',
-        locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+        locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
       )
       .expect(201);
     northLocationA = (north.body as { id: string }).id;
@@ -335,8 +345,8 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
   });
 
   describe('«Descuento %» sobre varios ítems', () => {
-    it('COP sin decimales, tope ítem a ítem, un solo evento de auditoría', async () => {
-      const planId = await newPlan('COP');
+    it('RSD sin decimales, tope ítem a ítem, un solo evento de auditoría', async () => {
+      const planId = await newPlan('RSD');
       const items = [
         await addItem(planId, 85000),
         await addItem(planId, 123457),
@@ -558,7 +568,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       });
     });
 
-    const period = () => `from=${bogotaDay(-7)}&to=${bogotaDay(0)}`;
+    const period = () => `from=${caracasDay(-7)}&to=${caracasDay(0)}`;
 
     it('cuadra con la suma del descuento efectivo de los ítems vivos del periodo', async () => {
       const res = await as(clinicA)
@@ -572,7 +582,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           deletedAt: null,
           discountAt: { gte: from },
           plan: {
-            currency: 'COP',
+            currency: 'USD',
             deletedAt: null,
             status: { notIn: ['REJECTED', 'CANCELLED'] },
           },
@@ -592,11 +602,11 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         (s, i) => s + Number(i.price) + reduction(i),
         0,
       );
-      const cop = report.totals.find((t) => t.currency === 'COP')!;
-      expect(cop.discount).toBe(expected);
-      expect(cop.gross).toBe(gross);
-      expect(cop.items).toBe(live.length);
-      expect(cop.percentOfGross).toBe(
+      const usd = report.totals.find((t) => t.currency === 'USD')!;
+      expect(usd.discount).toBe(expected);
+      expect(usd.gross).toBe(gross);
+      expect(usd.items).toBe(live.length);
+      expect(usd.percentOfGross).toBe(
         Math.round((expected / gross) * 10000) / 100,
       );
       const ids = report.items.map((i) => i.itemId);
@@ -628,7 +638,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
           raw,
           clinicA.tenantId,
           'Réplica antigua',
-          REGIONAL_BOGOTA_FIXTURE.country,
+          REGIONAL_CARACAS_FIXTURE.country,
         );
       });
 
@@ -767,10 +777,10 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         'Solo la administración ve el informe de descuentos.',
       );
       await as(clinicA)
-        .get(`/reports/discounts?from=${bogotaDay(0)}&to=${bogotaDay(-1)}`)
+        .get(`/reports/discounts?from=${caracasDay(0)}&to=${caracasDay(-1)}`)
         .expect(400);
       await as(clinicA)
-        .get(`/reports/discounts?from=${bogotaDay(-400)}&to=${bogotaDay(0)}`)
+        .get(`/reports/discounts?from=${caracasDay(-400)}&to=${caracasDay(0)}`)
         .expect(400);
     });
 
@@ -791,6 +801,9 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
   // SEC-041: bajar el precio por debajo del de catálogo cuenta como descuento
   // (tope del rol y motivo de DX-204) en el alta, la edición y el bloque, y
   // sale en el informe con su importe, autor y sede.
+  // DX-513: las sedes (y el catálogo) de la clínica están en VES; los planes
+  // de SEC-041 van en VES, la misma moneda, como antes. En otra moneda, el
+  // bloque de DX-513 al final.
   describe('precio por debajo del de catálogo = descuento (SEC-041)', () => {
     const CAP_0 =
       'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 0 % de descuento por ítem.';
@@ -798,7 +811,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 10 % de descuento por ítem.';
     const REASON =
       'Precio por debajo del de catálogo: cuenta como descuento y supera el 10 %. Indica el motivo del descuento.';
-    const period = () => `from=${bogotaDay(-1)}&to=${bogotaDay(1)}`;
+    const period = () => `from=${caracasDay(-1)}&to=${caracasDay(1)}`;
 
     async function report(): Promise<Report> {
       const res = await as(clinicA)
@@ -820,7 +833,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     }
 
     it('alta: DENTIST (10 %) con el precio al 50 % del catálogo → 403 en español; al 95 % → 201 a su nombre', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const denied = await addCrown(
         planId,
         { price: 500000 },
@@ -852,7 +865,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('edición: ASSISTANT baja el precio → 403 y no cambia; lo sube → 200 sin firma de descuento', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       // Sin precio: el de catálogo.
       const item = (await addCrown(planId, {}).expect(201)).body as Item;
       expect(item).toMatchObject({ price: 1000000, discountById: null });
@@ -877,7 +890,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('rebaja por encima del umbral: 422 «Indica el motivo del descuento» sin motivo; con motivo, 201 y sale en el informe con importe, autor y sede', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const missing = await addCrown(planId, { price: 800000 }).expect(422);
       expect((missing.body as { message: string }).message).toBe(REASON);
       // También en la edición.
@@ -929,12 +942,14 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         .get(`/reports/discounts.csv?${period()}`)
         .expect(200);
       expect(csv.text).toContain(
-        'COP,1000000,800000,200000,0,200000,20.00,"Promoción o campaña"',
+        // DX-513-bis: moneda del catálogo, catálogo en su moneda, referencia
+        // en la del plan y la tasa (vacía: misma moneda).
+        'VES,VES,1000000.00,1000000.00,,,,800000.00,200000.00,0.00,200000.00,20.00,"Promoción o campaña"',
       );
     });
 
     it('ADMIN puede fijar cualquier precio (con motivo) y queda en el informe a su nombre', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const item = (await addCrown(planId, {}).expect(201)).body as Item;
       const res = await as(clinicA)
         .patch(`/treatment-plans/${planId}/items/${item.id}`, {
@@ -958,7 +973,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('un ítem libre (sin precio de catálogo) no se trata como descuento', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const res = await as(clinicA, tokens.ASSISTANT)
         .post(`/treatment-plans/${planId}/items`, {
           toothNumber: '17',
@@ -981,7 +996,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('«Descuento %» en bloque suma la rebaja de precio al tope del rol', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const item = (
         await addCrown(planId, { price: 950000 }, tokens.DENTIST).expect(201)
       ).body as Item;
@@ -1015,7 +1030,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('el cliente no puede mover la referencia: `catalogPrice` en el alta y `catalogItemId` en la edición se ignoran', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       // Un `catalogPrice` falso en el body no rebaja la referencia.
       const denied = await addCrown(
         planId,
@@ -1043,7 +1058,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
     });
 
     it('un plan aceptado no admite bajar el precio de catálogo (409)', async () => {
-      const planId = await newPlan();
+      const planId = await newPlan('VES');
       const item = (await addCrown(planId, {}).expect(201)).body as Item;
       await as(clinicA)
         .patch(`/treatment-plans/${planId}`, { status: 'ACCEPTED' })
@@ -1054,6 +1069,235 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
         })
         .expect(409);
       await addCrown(planId, { price: 990000 }).expect(409);
+    });
+  });
+  // DX-513: el catálogo de la clínica A está en VES (la moneda de sus sedes).
+  // Una rebaja frente a él en un plan en USD no es un descuento: ni tope, ni
+  // motivo, ni informe. Con la moneda del catálogo desconocida (NULL), cuenta
+  // como hoy (decisión de producto).
+  describe('rebaja frente a un catálogo en otra moneda: referencia convertida (DX-513-bis)', () => {
+    const CAP_0 =
+      'Precio por debajo del de catálogo: cuenta como descuento. Tu rol permite hasta un 0 % de descuento por ítem.';
+    const REASON =
+      'Precio por debajo del de catálogo: cuenta como descuento y supera el 10 %. Indica el motivo del descuento.';
+    // Tasa MANUAL de la clínica: 400 Bs./USD. Corona de 1.000.000 Bs. →
+    // 2.500,00 USD (la CI no tiene EXCHANGE_APP_ID: la tasa se siembra).
+    const RATE = 400;
+
+    beforeAll(async () => {
+      await as(clinicA)
+        .put('/exchange/settings', { source: 'MANUAL' })
+        .expect(200);
+      for (const offset of [-1, 0]) {
+        await as(clinicA)
+          .post('/exchange/manual-rates', {
+            date: caracasDay(offset),
+            currency: 'VES',
+            rate: RATE,
+          })
+          .expect(201);
+      }
+    });
+
+    async function report(): Promise<Report> {
+      const res = await as(clinicA)
+        .get(
+          `/reports/discounts?from=${caracasDay(-1)}&to=${caracasDay(1)}&pageSize=200`,
+        )
+        .expect(200);
+      return res.body as Report;
+    }
+
+    const addCrown = (planId: string, body: object, token = tokens.ADMIN) =>
+      as(clinicA, token).post(`/treatment-plans/${planId}/items`, {
+        toothNumber: '16',
+        catalogItemId: crownA,
+        ...body,
+      });
+
+    type Converted = Item & {
+      catalogCurrency: string | null;
+      referenceCurrency: string | null;
+      referencePriceInPlan: number | null;
+      referenceRate: {
+        fromPerBase: number;
+        toPerBase: number;
+        source: string;
+        rateDate: string;
+      } | null;
+    };
+
+    it('la vista previa propone la referencia convertida con la tasa', async () => {
+      const res = await as(clinicA, tokens.ASSISTANT)
+        .get(
+          `/patients/${patientA}/price-quote?catalogItemId=${crownA}&currency=USD`,
+        )
+        .expect(200);
+      expect(res.body).toMatchObject({
+        price: 1000000,
+        currency: 'USD',
+        referenceCurrency: 'VES',
+        referencePriceInPlan: 2500,
+        rate: { fromPerBase: RATE, toPerBase: 1, source: 'MANUAL' },
+        rateMissing: false,
+      });
+    });
+
+    it('plan en USD con el catálogo en VES: la asistente (0 %) recibe 403 al bajar de 2.500 (antes 201); sin precio se propone 2.500', async () => {
+      const planId = await newPlan('USD');
+      const denied = await addCrown(
+        planId,
+        { price: 2400 },
+        tokens.ASSISTANT,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_0);
+      const created = (await addCrown(planId, {}, tokens.ASSISTANT).expect(201))
+        .body as Converted;
+      expect(created).toMatchObject({
+        price: 2500,
+        catalogPrice: 1000000,
+        catalogCurrency: 'VES',
+        referenceCurrency: 'VES',
+        referencePriceInPlan: 2500,
+        referenceRate: { fromPerBase: RATE, toPerBase: 1, source: 'MANUAL' },
+        discountById: null,
+      });
+      await as(clinicA, tokens.ASSISTANT)
+        .patch(`/treatment-plans/${planId}/items/${created.id}`, { price: 50 })
+        .expect(403);
+      // El plan ya no cambia de moneda (PLAN_CURRENCY_LOCKED_BY_PRICED_ITEMS).
+      const locked = await as(clinicA)
+        .patch(`/treatment-plans/${planId}`, { currency: 'VES' })
+        .expect(409);
+      expect(locked.body).toMatchObject({
+        code: 'PLAN_CURRENCY_LOCKED_BY_PRICED_ITEMS',
+      });
+    });
+
+    it('el ADMIN a 2.000 USD: 422 sin motivo; con motivo, 201 y en el informe con la tasa; el CSV pone el catálogo en VES', async () => {
+      const planId = await newPlan('USD');
+      const unreasoned = await addCrown(planId, { price: 2000 }).expect(422);
+      expect((unreasoned.body as { message: string }).message).toBe(REASON);
+      const created = (
+        await addCrown(planId, {
+          price: 2000,
+          discountReason: 'PROMOTION',
+        }).expect(201)
+      ).body as Converted;
+      const body = await report();
+      const row = body.items.find((i) => i.itemId === created.id);
+      expect(row).toMatchObject({
+        catalogPrice: 1000000,
+        referenceCurrency: 'VES',
+        referencePriceInPlan: 2500,
+        price: 2000,
+        priceReduction: 500,
+        discount: 500,
+        rate: { fromPerBase: RATE, toPerBase: 1, source: 'MANUAL' },
+      });
+      const rateDate = created.referenceRate!.rateDate;
+      const csv = await as(clinicA)
+        .get(
+          `/reports/discounts.csv?from=${caracasDay(-1)}&to=${caracasDay(1)}`,
+        )
+        .expect(200);
+      const [header, ...lines] = csv.text.slice(1).split('\r\n');
+      expect(header.split(',').slice(6, 13)).toEqual([
+        'Moneda',
+        'Moneda del catálogo',
+        'Precio de catálogo',
+        'Precio de catálogo en la moneda del plan',
+        'Tasa (por 1 USD: catálogo / plan)',
+        'Fuente de la tasa',
+        'Fecha de la tasa',
+      ]);
+      expect(
+        lines.some(
+          (l) =>
+            l.split(',').slice(6, 14).join(',') ===
+            `USD,VES,1000000.00,2500.00,${RATE} / 1,Manual,${rateDate},2000.00`,
+        ),
+      ).toBe(true);
+    });
+
+    it('sin tasa de la otra moneda (plan EUR, solo VES registrada): 422 DISCOUNT_REFERENCE_RATE_MISSING que nombra EUR y no se crea', async () => {
+      const planId = await newPlan('EUR');
+      const res = await addCrown(planId, { price: 1 }).expect(422);
+      expect(res.body).toMatchObject({
+        code: 'DISCOUNT_REFERENCE_RATE_MISSING',
+        currency: 'EUR',
+      });
+      expect((res.body as { message: string }).message).toMatch(
+        /^No hay tasa de EUR para el .*Ajustes › Tasa de cambio/,
+      );
+      // L7: el día con el formato de la sede, nunca ISO.
+      expect((res.body as { message: string }).message).not.toMatch(
+        /\d{4}-\d{2}-\d{2}/,
+      );
+      expect(await planItems(planId)).toHaveLength(0);
+    });
+
+    it('plan en VES con el catálogo en VES: igual que hasta ahora (403, 422 y en el informe), sin tasa', async () => {
+      const planId = await newPlan('VES');
+      const denied = await addCrown(
+        planId,
+        { price: 80 },
+        tokens.ASSISTANT,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_0);
+      const unreasoned = await addCrown(planId, { price: 800000 }).expect(422);
+      expect((unreasoned.body as { message: string }).message).toBe(REASON);
+      const created = (
+        await addCrown(planId, {
+          price: 800000,
+          discountReason: 'PROMOTION',
+        }).expect(201)
+      ).body as Converted;
+      expect(created).toMatchObject({
+        referenceCurrency: 'VES',
+        referencePriceInPlan: 1000000,
+        referenceRate: null,
+      });
+      const body = await report();
+      expect(body.items.find((i) => i.itemId === created.id)).toMatchObject({
+        catalogPrice: 1000000,
+        price: 800000,
+        priceReduction: 200000,
+        discount: 200000,
+      });
+    });
+
+    it('con una sede activa en USD la moneda del catálogo es NULL: cuenta como hasta ahora (403, 422 y en el informe), sin tasa', async () => {
+      await as(clinicA)
+        .post(
+          '/locations',
+          locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Miami' }),
+        )
+        .expect(201);
+      const planId = await newPlan('USD');
+      const denied = await addCrown(
+        planId,
+        { price: 80 },
+        tokens.ASSISTANT,
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(CAP_0);
+      const unreasoned = await addCrown(planId, { price: 800000 }).expect(422);
+      expect((unreasoned.body as { message: string }).message).toBe(REASON);
+      const created = (
+        await addCrown(planId, {
+          price: 800000,
+          discountReason: 'PROMOTION',
+        }).expect(201)
+      ).body as Converted;
+      expect(created).toMatchObject({
+        catalogCurrency: null,
+        referenceRate: null,
+      });
+      const body = await report();
+      expect(body.items.find((i) => i.itemId === created.id)).toMatchObject({
+        priceReduction: 200000,
+        discount: 200000,
+      });
     });
   });
 });

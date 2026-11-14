@@ -19,6 +19,8 @@ export interface PublicSlotOffer {
   appointmentId: string | null;
   outcome: WaitlistOfferOutcome;
   expiresAt: Date | null;
+  /** Cuándo se resolvió (SEC-064: de aquí cuenta el plazo de una oferta aceptada). */
+  outcomeAt: Date | null;
   /** DX-461: el paciente está archivado; el enlace ya no sirve. */
   patientArchived: boolean;
   /** Cuándo se creó: para saber si otra oferta ganó el hueco después. */
@@ -29,6 +31,8 @@ export interface PublicSlotOffer {
   patientFirstName: string;
   providerName: string | null;
   locationName: string;
+  /** SEC-014: una sede desactivada ya no recibe citas: el hueco no está. */
+  locationActive: boolean;
   locationAddress: string | null;
   timeZone: string;
   /** Formato de la sede (locale BCP 47 y 12/24 h) para pintar la hora como ella. */
@@ -53,12 +57,21 @@ export interface SlotOfferResolution {
   appointmentId: string | null;
 }
 
+/** Lo que hizo un lote del barrido: `scanned` < tamaño pedido = no queda más. */
+export interface ExpiredBatch {
+  scanned: number;
+  expired: number;
+  lastId: string | null;
+}
+
 export interface SlotOfferRepository {
   findByTokenHash(tokenHash: string): Promise<PublicSlotOffer | null>;
   findClinicBranding(): Promise<ClinicBrandingRow | null>;
   /**
    * ¿Hay ya una cita viva del profesional, o del paciente (otra que la que se
-   * adelantaría), que choca con la cita que crearía la oferta?
+   * adelantaría), que choca con la cita que crearía la oferta? DX-480: en una
+   * sede con sillones activos, también si ninguno está libre en esa franja
+   * (o el de la cita que se adelanta está ocupado o desactivado).
    */
   slotTaken(offer: PublicSlotOffer): Promise<boolean>;
   /**
@@ -68,6 +81,9 @@ export interface SlotOfferRepository {
    * mueve la marcada «Adelantar si hay hueco») con el anti-solape de la BD,
    * marca la oferta ACCEPTED, las demás pendientes del hueco TAKEN_BY_OTHER y
    * lo audita todo con origen PUBLIC_LINK. Exactamente una aceptación gana.
+   * DX-480: en una sede con sillones activos la cita lleva el primero libre
+   * (orden de la agenda); si la EXCLUDE por sillón resuelve una carrera, se
+   * reintenta con el siguiente y, sin ninguno, UNAVAILABLE.
    * DX-461: antes, comparte el candado del paciente (el que toma archivar):
    * con el paciente archivado responde EXPIRED sin escribir nada.
    */
@@ -79,11 +95,18 @@ export interface SlotOfferRepository {
   /** Clínicas vivas (el barrido de caducadas las recorre todas). */
   tenantIds(): Promise<string[]>;
   /**
-   * Barrido: pasa a EXPIRED (auditado, SLOT_OFFER_EXPIRED) hasta `limit`
-   * ofertas con enlace PENDING de la clínica cuyo `expiresAt` ya pasó.
-   * Devuelve cuántas cambió.
+   * Barrido (DX-476): un lote, en su propia transacción, de hasta `size`
+   * ofertas con enlace PENDING de la clínica cuyo `expiresAt` ya pasó, por id
+   * ascendente a partir de `afterId`; pasan a EXPIRED (auditado,
+   * SLOT_OFFER_EXPIRED). Salta las filas que otra transacción tiene
+   * bloqueadas: las recoge la siguiente pasada.
    */
-  expireDue(tenantId: string, now: Date, limit: number): Promise<number>;
+  expireDueBatch(
+    tenantId: string,
+    now: Date,
+    size: number,
+    afterId: string | null,
+  ): Promise<ExpiredBatch>;
   /**
    * Rechaza si sigue pendiente y vigente (si caducó, la marca EXPIRED). Con
    * el paciente archivado (DX-461), EXPIRED sin escribir nada.

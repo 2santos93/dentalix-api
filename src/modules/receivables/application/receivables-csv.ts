@@ -4,6 +4,7 @@ import type {
   PaymentPromiseStatus,
 } from '@prisma/client';
 import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
+import { csvAmount } from '../../../shared/csv/csv-cells';
 
 /*
  * CSV de la cartera (DX-145): una línea por paciente y moneda, con los mismos
@@ -11,7 +12,9 @@ import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
  * descarga ADMIN y la descarga queda auditada (ver el controlador).
  *
  * - UTF-8 con BOM y CRLF (RFC 4180): Excel lo abre con tildes bien.
- * - Importes con punto decimal y dos decimales, sin separador de miles.
+ * - Importes con punto decimal, sin separador de miles y con los decimales
+ *   de la pantalla (`csvAmount`, DX-488: 2, o 0 en JPY y demás monedas que se
+ *   pintan sin decimales si el importe es entero).
  * - Texto entre comillas; una celda que empieza por = + - @ (o tabulador/CR)
  *   se antepone con «'» para que la hoja no la ejecute como fórmula (inyección
  *   CSV). El nombre y el teléfono son texto libre.
@@ -20,6 +23,10 @@ import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
  * - DX-150: al final, la última gestión de cobro (canal · resultado y su día
  *   en la zona de la sede de la deuda; NUNCA el texto de la nota) y el último
  *   compromiso de pago con su estado.
+ * - DX-472-ter: «Cifras incompletas», la última para no mover las columnas de
+ *   quien ya importa el CSV. Vacía si la línea está completa; si no, por qué
+ *   (ver INCOMPLETE_LABELS). Vacía = completa: filtrar «no vacías» da todas
+ *   las líneas por revisar, y cada texto, las de una causa.
  */
 export const RECEIVABLES_CSV_HEADER = [
   'Paciente',
@@ -46,7 +53,31 @@ export const RECEIVABLES_CSV_HEADER = [
   'Importe compromiso',
   'Moneda compromiso',
   'Fecha compromiso',
+  'Cifras incompletas',
 ] as const;
+
+/*
+ * DX-472-ter: por qué la línea no cuenta algún abono en otra moneda. Un valor
+ * fijo por causa (sin el número de abonos) para que la hoja pueda filtrar y
+ * contar por él. «Proveedor sin respuesta» manda sobre «Sin tasa»: esos abonos
+ * también figuran como sin tasa, y basta volver a exportar cuando responda; con
+ * «Sin tasa», hay que registrar la tasa de su día (estado de cuenta).
+ */
+export const INCOMPLETE_LABELS = {
+  withoutRate: 'Sin tasa',
+  providerTimedOut: 'Proveedor sin respuesta',
+} as const;
+
+function incomplete(c: {
+  paymentsWithoutRateCount: number;
+  rateProviderTimedOut: boolean;
+}): string {
+  if (c.rateProviderTimedOut) return text(INCOMPLETE_LABELS.providerTimedOut);
+  if (c.paymentsWithoutRateCount > 0) {
+    return text(INCOMPLETE_LABELS.withoutRate);
+  }
+  return '';
+}
 
 // Mismas etiquetas que la pantalla de la cartera (web).
 const CHANNEL_LABELS: Record<CollectionChannel, string> = {
@@ -76,10 +107,6 @@ function text(value: string | null): string {
   return `"${safe.replace(/"/g, '""')}"`;
 }
 
-function money(value: number): string {
-  return value.toFixed(2);
-}
-
 export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
   const lines: string[] = [RECEIVABLES_CSV_HEADER.join(',')];
   for (const row of rows) {
@@ -89,23 +116,27 @@ export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
           text(row.patient.fullName),
           text(row.patient.phone),
           c.currency,
-          money(c.debt),
-          money(c.buckets.current),
-          money(c.buckets.days0to30),
-          money(c.buckets.days31to60),
-          money(c.buckets.days61to90),
-          money(c.buckets.over90),
-          money(c.credit),
-          money(c.balance),
+          csvAmount(c.debt, c.currency),
+          csvAmount(c.buckets.current, c.currency),
+          csvAmount(c.buckets.days0to30, c.currency),
+          csvAmount(c.buckets.days31to60, c.currency),
+          csvAmount(c.buckets.days61to90, c.currency),
+          csvAmount(c.buckets.over90, c.currency),
+          csvAmount(c.credit, c.currency),
+          csvAmount(c.balance, c.currency),
           c.oldestAgeDays === null ? '' : String(c.oldestAgeDays),
           c.debt > 0 && c.ageApproximate ? 'Sí' : 'No',
           row.lastPayment?.paidOn ?? '',
-          row.lastPayment ? money(row.lastPayment.amount) : '',
+          row.lastPayment
+            ? csvAmount(row.lastPayment.amount, row.lastPayment.currency)
+            : '',
           row.lastPayment?.currency ?? '',
           c.nextInstallment
             ? c.nextInstallment.dueDate.toISOString().slice(0, 10)
             : '',
-          c.nextInstallment ? money(c.nextInstallment.amount) : '',
+          c.nextInstallment
+            ? csvAmount(c.nextInstallment.amount, c.currency)
+            : '',
           row.lastNote
             ? text(
                 `${CHANNEL_LABELS[row.lastNote.channel]} · ${OUTCOME_LABELS[row.lastNote.outcome]}`,
@@ -113,9 +144,12 @@ export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
             : '',
           row.lastNoteOn ?? '',
           row.promise ? text(PROMISE_STATUS_LABELS[row.promise.status]) : '',
-          row.promise ? money(row.promise.amount) : '',
+          row.promise
+            ? csvAmount(row.promise.amount, row.promise.currency)
+            : '',
           row.promise?.currency ?? '',
           row.promise?.dueDate ?? '',
+          incomplete(c),
         ].join(','),
       );
     }

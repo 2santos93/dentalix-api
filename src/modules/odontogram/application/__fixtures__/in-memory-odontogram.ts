@@ -30,7 +30,7 @@ export class InMemoryToothRecordRepository implements ToothRecordRepository {
     private readonly now: () => Date = () =>
       new Date('2026-07-23T00:00:00.000Z'),
     private readonly names: Record<string, string> = {},
-    private readonly timeZone = 'America/Bogota',
+    private readonly timeZone = 'America/Caracas',
   ) {}
 
   create(input: CreateToothRecordRepoInput): Promise<ToothRecord> {

@@ -17,8 +17,13 @@ import type {
   SignatureRequestEmailVars,
 } from '../../../notifications/email/domain/email-message';
 import { quoteSource } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-plan-quote.repository';
-import { computeQuoteHash } from '../../../treatment-plans/domain/plan-quote';
-import { RemoteBudgetCheck } from '../remote-budget';
+import {
+  computeQuoteHash,
+  parseQuoteContent,
+  type QuoteComposition,
+} from '../../../treatment-plans/domain/plan-quote';
+import { composeQuoteContent } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
+import { RemoteBudgetCheck, budgetStillMatches } from '../remote-budget';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { SignatureRecipientContext } from '../../domain/ports/signature-request-repository.port';
 import { deriveSignatureCodeKey } from '../../domain/signature-code';
@@ -81,18 +86,19 @@ function recipient(
       ...partial,
     },
     responsibles,
+    majorityReview: null,
     majorityAge: 18,
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
   };
 }
 
-function setup() {
+function setup(composition?: QuoteComposition) {
   let now = SENT_AT;
   const clock = () => now;
   const templates = new InMemoryConsentTemplateRepository();
   const consents = new InMemoryPatientConsentRepository();
-  consents.location = { id: 'loc-1', locale: 'es-CO', hourCycle: 'h12' };
-  consents.timeZone = 'America/Bogota';
+  consents.location = { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' };
+  consents.timeZone = 'America/Caracas';
   const template = templates.seed({
     title: 'Consentimiento de exodoncia',
     body: 'Yo, {{paciente}} ({{documento}}), autorizo a {{profesional}}.',
@@ -100,9 +106,13 @@ function setup() {
   const names = new FixedDocumentTypeNamesReader();
   const renderer = new ConsentDocumentRenderer(templates, consents, names);
   const repo = new InMemorySignatureRequestRepository({ p1: recipient() });
+  repo.dbClock = clock;
   const links: { to: string; vars: SignatureRequestEmailVars }[] = [];
   const codes: { to: string; vars: SignatureCodeEmailVars }[] = [];
   const cancelled: string[] = [];
+  // DX-149-ter: el email del enlace se encola DENTRO de la transacción que
+  // guarda la solicitud; `throttleLink` simula el tope contado bajo candado.
+  const linkState = { throttle: false, kicks: 0 };
   const confirmations: {
     to: string;
     vars: SignatureBudgetAcceptedEmailVars;
@@ -113,10 +123,31 @@ function setup() {
       return Promise.resolve();
     },
     assertCanSend: () => Promise.resolve(),
-    sendLink: (input) => {
-      links.push(input);
-      return Promise.resolve();
-    },
+    prepareLink: (input) =>
+      Promise.resolve({
+        insert: (_tx, supersededIds) => {
+          if (linkState.throttle) {
+            return Promise.reject(
+              new HttpException(
+                {
+                  statusCode: 429,
+                  error: 'Too Many Requests',
+                  message:
+                    'Ya enviamos un correo a esta persona hace un momento. Espera 60 segundos antes de volver a enviarlo.',
+                  retryAfterSeconds: 60,
+                },
+                429,
+              ),
+            );
+          }
+          cancelled.push(...supersededIds);
+          links.push(input);
+          return Promise.resolve();
+        },
+        kick: () => {
+          linkState.kicks += 1;
+        },
+      }),
     sendCode: (input) => {
       codes.push(input);
       return Promise.resolve();
@@ -141,6 +172,7 @@ function setup() {
     links,
     codes,
     cancelled,
+    linkState,
     advance: (ms: number) => {
       now = new Date(now.getTime() + ms);
     },
@@ -157,6 +189,7 @@ function setup() {
       email,
       tenantContext,
       clock,
+      composition,
     ),
     list: new ListPatientSignatureRequestsUseCase(repo, clock),
     revoke: new RevokeSignatureRequestUseCase(
@@ -297,6 +330,7 @@ describe('enviar a firmar a distancia (DX-243)', () => {
           isPayer: false,
           receivesNotices: true,
           optedOut: false,
+          createdAt: new Date('2026-10-01T12:00:00.000Z'),
           document: {
             docType: 'NATIONAL_ID',
             docTypeLabel: null,
@@ -326,6 +360,45 @@ describe('enviar a firmar a distancia (DX-243)', () => {
       UnprocessableEntityException,
     );
     expect(ctx.repo.rows).toHaveLength(0);
+  });
+
+  it('DX-476: si el paciente se archiva antes de guardar la solicitud, 409 «El paciente está archivado» y no sale ningún email', async () => {
+    const ctx = setup();
+    jest
+      .spyOn(ctx.repo, 'create')
+      .mockRejectedValue(new ConflictException('El paciente está archivado'));
+    await expect(send(ctx)).rejects.toThrow('El paciente está archivado');
+    expect(ctx.links).toHaveLength(0);
+    expect(ctx.codes).toHaveLength(0);
+  });
+
+  it('DX-149-ter: si el tope salta al encolar (otro envío al mismo paciente ganó la carrera), 429 en español y no queda nada: ni solicitud nueva, ni la anterior anulada, ni su email cancelado', async () => {
+    const ctx = setup();
+    const first = await send(ctx);
+    expect(ctx.linkState.kicks).toBe(1);
+    ctx.linkState.throttle = true;
+
+    const error = await send(ctx).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(429);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      message: expect.stringMatching(/^Ya enviamos un correo/) as string,
+    });
+    expect(ctx.repo.rows).toHaveLength(1);
+    expect(ctx.repo.rows[0]).toMatchObject({ id: first.id, revokedAt: null });
+    expect(ctx.cancelled).toEqual([]);
+    expect(ctx.links).toHaveLength(1);
+    expect(ctx.linkState.kicks).toBe(1);
+  });
+
+  it('DX-149-ter: la solicitud y su email se guardan en la MISMA transacción; el despachador se despierta tras el COMMIT', async () => {
+    const ctx = setup();
+    const created = await send(ctx);
+    expect(ctx.repo.createdWithEmail).toEqual([created.id]);
+    // El email lleva el id de la solicitud (su estado de envío en el outbox).
+    expect(ctx.links).toHaveLength(1);
+    expect(ctx.linkState.kicks).toBe(1);
   });
 
   it('un segundo envío del mismo documento anula el anterior y cancela su email pendiente', async () => {
@@ -680,6 +753,7 @@ describe('enlace público, código y firma (DX-243)', () => {
           isPayer: false,
           receivesNotices: true,
           optedOut: false,
+          createdAt: new Date('2026-10-01T12:00:00.000Z'),
           document: { docType: null, docTypeLabel: null, docNumber: null },
         },
       ],
@@ -709,6 +783,34 @@ describe('enlace público, código y firma (DX-243)', () => {
       signerType: 'GUARDIAN',
       signerName: 'Claudia Navarro',
       signerDocument: 'C01',
+    });
+  });
+
+  it('DX-425: si la hora de la BD ya pasó la caducidad, firmar es «Enlace no válido» (no un error del CHECK); en el instante exacto, firma', async () => {
+    const signWith = async (dbOffsetMs: number) => {
+      const ctx = setup();
+      const { token, session } = await verified(ctx);
+      ctx.advance(5 * 60_000);
+      const expiresAt = ctx.repo.rows[0].expiresAt;
+      ctx.repo.dbClock = () => new Date(expiresAt.getTime() + dbOffsetMs);
+      return {
+        ctx,
+        result: ctx.inTenant(() =>
+          ctx.sign.execute(
+            token,
+            session,
+            { signature: `data:image/png;base64,${PNG}`, accepted: true },
+            EVIDENCE,
+          ),
+        ),
+      };
+    };
+    const late = await signWith(1);
+    await expect(late.result).rejects.toThrow(SIGNATURE_LINK_INVALID_MESSAGE);
+    expect(late.ctx.repo.consents).toHaveLength(0);
+    const exact = await signWith(0);
+    await expect(exact.result).resolves.toMatchObject({
+      signedAt: exact.ctx.repo.rows[0].expiresAt,
     });
   });
 
@@ -760,10 +862,19 @@ function presentedBudget(ctx: Ctx, planId = 'plan-1') {
         id: planId,
         patientId: 'p1',
         status: 'PRESENTED',
-        currency: 'COP',
+        currency: 'USD',
+        quoteIssuedOn: null,
+        quoteValidUntil: null,
+        presentedLocationId: null,
+        quoteRegional: {
+          locationId: 'loc-1',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h12',
+        },
       },
     }),
-    location: { id: 'loc-1', locale: 'es-CO', hourCycle: 'h12' },
+    location: { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' },
   };
   ctx.repo.budgets.set(planId, budget);
   return budget;
@@ -818,6 +929,157 @@ describe('presupuesto a distancia (DX-415)', () => {
     expect(JSON.stringify(ctx.links[0].vars)).not.toMatch(
       /implante|resina|3500000|presupuesto/i,
     );
+  });
+
+  it('DX-379: la foto enviada lleva la validez guardada en el plan, no hoy + días', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-10-20',
+        quoteValidUntil: '2026-11-04',
+      },
+    };
+    await sendBudget(ctx);
+    expect(ctx.repo.rows[0].budgetContent).toMatchObject({
+      issuedOn: '2026-10-20',
+      validUntil: '2026-11-04',
+      validityDays: 15,
+    });
+  });
+
+  it('DX-379 (M-3): enviar un plan sin validez guardada la fija en el plan con las mismas fechas que la foto', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      clinic: { ...budget.quote.clinic, quoteValidityDays: 10 },
+    };
+    await sendBudget(ctx);
+    expect(ctx.repo.rows[0].budgetContent).toMatchObject({
+      issuedOn: '2026-10-30',
+      validUntil: '2026-11-09',
+      validityDays: 10,
+    });
+    expect(ctx.repo.budgets.get('plan-1')?.quote.plan).toMatchObject({
+      quoteIssuedOn: '2026-10-30',
+      quoteValidUntil: '2026-11-09',
+    });
+  });
+
+  it('DX-379 (M-3): con validez guardada no la toca', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-10-20',
+        quoteValidUntil: '2026-11-04',
+      },
+    };
+    await sendBudget(ctx);
+    expect(ctx.repo.budgets.get('plan-1')?.quote.plan).toMatchObject({
+      quoteIssuedOn: '2026-10-20',
+      quoteValidUntil: '2026-11-04',
+    });
+  });
+
+  it('DX-379 (G.5): un enlace enviado sin validez guardada sigue valiendo aunque luego cambie el ajuste o se guarden fechas', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    const { token } = await verifiedBudget(ctx);
+    expect(ctx.repo.rows[0].budgetContent).toMatchObject({
+      issuedOn: '2026-10-30',
+      validUntil: '2026-11-29',
+    });
+    budget.quote = {
+      ...budget.quote,
+      clinic: { ...budget.quote.clinic, quoteValidityDays: 10 },
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-10-31',
+        quoteValidUntil: '2026-11-10',
+      },
+    };
+    await expect(
+      ctx.inTenant(() => ctx.view.execute(token)),
+    ).resolves.toBeDefined();
+  });
+
+  it('DX-379 (C): un presupuesto vencido no se envía a firmar a distancia: 409 QUOTE_EXPIRED en español; nada se crea', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    // Hoy es el 30/10 en Caracas: venció el 29/10.
+    budget.quote = {
+      ...budget.quote,
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-09-29',
+        quoteValidUntil: '2026-10-29',
+        presentedLocationId: 'loc-1',
+      },
+    };
+    let error: unknown;
+    try {
+      await sendBudget(ctx);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toEqual({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'QUOTE_EXPIRED',
+      message:
+        'El presupuesto venció el 29/10/2026: actualiza sus precios antes de enviarlo a firmar a distancia.',
+      quoteValidUntil: '2026-10-29',
+    });
+    expect(ctx.repo.rows).toHaveLength(0);
+    expect(ctx.links).toHaveLength(0);
+  });
+
+  it('DX-379 (C): si vence entre el envío y la firma, el enlace deja de valer («Enlace no válido»)', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      plan: {
+        ...budget.quote.plan,
+        quoteIssuedOn: '2026-10-01',
+        quoteValidUntil: '2026-10-31',
+        presentedLocationId: 'loc-1',
+      },
+    };
+    const { token, session } = await verifiedBudget(ctx);
+    const [row] = ctx.repo.rows;
+    // El 31/10 23:30 en Caracas todavía vale.
+    expect(
+      budgetStillMatches(
+        row,
+        budget.quote,
+        {},
+        new Date('2026-11-01T03:30:00.000Z'),
+      ),
+    ).toBe(true);
+    // 1/11 02:00 en Caracas: venció (el enlace de 72 h seguiría vivo).
+    expect(
+      budgetStillMatches(
+        row,
+        budget.quote,
+        {},
+        new Date('2026-11-01T06:00:00.000Z'),
+      ),
+    ).toBe(false);
+    ctx.advance(40 * 3600_000);
+    await expect(ctx.inTenant(() => ctx.view.execute(token))).rejects.toThrow(
+      new NotFoundException(SIGNATURE_LINK_INVALID_MESSAGE),
+    );
+    await expect(
+      ctx.inTenant(() => ctx.document.execute(token, session)),
+    ).rejects.toThrow(SIGNATURE_LINK_INVALID_MESSAGE);
   });
 
   it('solo quien decide el plan (odontólogo o ADMIN) lo envía: recepción y asistente, 403 en español; nada se crea', async () => {
@@ -884,7 +1146,7 @@ describe('presupuesto a distancia (DX-415)', () => {
     expect(doc.body).toMatch(/Al firmar aceptas este presupuesto/);
     expect(doc.signerDocumentRequired).toBe(false);
     expect(doc.budget).toMatchObject({
-      currency: 'COP',
+      currency: 'USD',
       issuedOn: '2026-10-30',
       validUntil: '2026-11-29',
       totals: [{ gross: 3680000, discount: 350000, net: 3330000 }],
@@ -921,6 +1183,167 @@ describe('presupuesto a distancia (DX-415)', () => {
         ctx.inTenant(() => ctx.document.execute(token, session)),
       ).rejects.toThrow(SIGNATURE_LINK_INVALID_MESSAGE);
     }
+  });
+
+  describe('DX-502: plan en EUR con el catálogo en VES', () => {
+    function eurBudget(ctx: Ctx) {
+      const budget = presentedBudget(ctx);
+      budget.quote = {
+        ...budget.quote,
+        plan: { ...budget.quote.plan, currency: 'EUR' },
+        items: [
+          {
+            ...budget.quote.items[0],
+            price: 100.55,
+            discount: 0,
+            basePrice: 80000,
+            referencePrice: 100.55,
+            agreementName: 'Lista Euro',
+            agreementPayerName: 'Aseguradora',
+            listPriceCurrency: 'VES',
+          },
+        ],
+      };
+      return budget;
+    }
+
+    it('la foto enviada lleva el precio de lista en VES y el paciente lo ve así, sin ahorro', async () => {
+      const ctx = setup();
+      eurBudget(ctx);
+      const { token, session } = await verifiedBudget(ctx);
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, session),
+      );
+      expect(doc.budget?.currency).toBe('EUR');
+      expect(doc.budget?.items[0]).toMatchObject({
+        unitPrice: 100.55,
+        listPrice: 80000,
+        listPriceCurrency: 'VES',
+      });
+      expect(doc.budget?.totals[0]).toMatchObject({
+        currency: 'EUR',
+        agreementSaving: 0,
+      });
+    });
+
+    it('un enlace v2 enviado antes de DX-502 sigue valiendo (se recompone como v2)', async () => {
+      const ctx = setup();
+      const budget = eurBudget(ctx);
+      await sendBudget(ctx);
+      const [row] = ctx.repo.rows;
+      const sent = row.budgetContent as {
+        issuedOn: string;
+        validUntil: string;
+      };
+      const v2 = composeQuoteContent(budget.quote, sent, {}, 'legacy');
+      row.budgetContent = JSON.parse(JSON.stringify(v2)) as never;
+      row.budgetContentHash = computeQuoteHash(v2);
+      const token = tokenOf(ctx);
+      await ctx.inTenant(() => ctx.code.execute(token, EVIDENCE));
+      const code = ctx.codes.at(-1)!.vars.code;
+      const { sessionToken } = await ctx.inTenant(() =>
+        ctx.verify.execute(token, code, EVIDENCE),
+      );
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, sessionToken),
+      );
+      // L2: la foto v2 no guardó la moneda; para mostrarla se completa con
+      // la congelada en el ítem vivo (el enlace vale: el plan es la foto),
+      // sin tocar lo sellado.
+      expect(doc.budget?.items[0].listPriceCurrency).toBe('VES');
+      expect(doc.budget?.totals).toEqual(v2.totals);
+      expect(row.budgetContentHash).toBe(computeQuoteHash(v2));
+      expect(computeQuoteHash(parseQuoteContent(row.budgetContent))).toBe(
+        row.budgetContentHash,
+      );
+    });
+
+    it('L2: un enlace v2 de una clínica con una sola moneda enseña el precio de lista en ella', async () => {
+      const ctx = setup();
+      const budget = presentedBudget(ctx);
+      budget.quote = {
+        ...budget.quote,
+        items: [
+          {
+            ...budget.quote.items[0],
+            price: 850,
+            discount: 0,
+            basePrice: 1000,
+            referencePrice: 850,
+            agreementName: 'Surco Salud',
+            agreementPayerName: 'Surco Salud',
+            listPriceCurrency: 'USD',
+          },
+        ],
+      };
+      await sendBudget(ctx);
+      const [row] = ctx.repo.rows;
+      const sent = row.budgetContent as {
+        issuedOn: string;
+        validUntil: string;
+      };
+      const v2 = composeQuoteContent(budget.quote, sent, {}, 'legacy');
+      row.budgetContent = JSON.parse(JSON.stringify(v2)) as never;
+      row.budgetContentHash = computeQuoteHash(v2);
+      const token = tokenOf(ctx);
+      await ctx.inTenant(() => ctx.code.execute(token, EVIDENCE));
+      const code = ctx.codes.at(-1)!.vars.code;
+      const { sessionToken } = await ctx.inTenant(() =>
+        ctx.verify.execute(token, code, EVIDENCE),
+      );
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, sessionToken),
+      );
+      expect(doc.budget?.items[0]).toMatchObject({
+        listPrice: 1000,
+        listPriceCurrency: 'USD',
+      });
+      expect(doc.budget?.totals[0].agreementSaving).toBe(150);
+      expect(row.budgetContentHash).toBe(computeQuoteHash(v2));
+    });
+
+    it('con PLAN_QUOTE_COMPOSE_V4=false el enlace se envía como antes (v2) y sigue valiendo', async () => {
+      const ctx = setup('legacy');
+      const budget = eurBudget(ctx);
+      await sendBudget(ctx);
+      const [row] = ctx.repo.rows;
+      const sent = parseQuoteContent(row.budgetContent);
+      expect(sent.version).toBe(2);
+      expect(row.budgetContentHash).toBe(
+        computeQuoteHash(composeQuoteContent(budget.quote, sent, {}, 'legacy')),
+      );
+      const token = tokenOf(ctx);
+      await expect(
+        ctx.inTenant(() => ctx.view.execute(token)),
+      ).resolves.toBeDefined();
+    });
+
+    it('con el flag en false, un enlace v4 ya enviado se sigue verificando y leyendo', async () => {
+      const ctx = setup('legacy');
+      const budget = eurBudget(ctx);
+      await sendBudget(ctx);
+      const [row] = ctx.repo.rows;
+      const sent = row.budgetContent as {
+        issuedOn: string;
+        validUntil: string;
+      };
+      // La foto que envió una réplica con el flag en true.
+      const v4 = composeQuoteContent(budget.quote, sent, {});
+      expect(v4.version).toBe(4);
+      row.budgetContent = JSON.parse(JSON.stringify(v4)) as never;
+      row.budgetContentHash = computeQuoteHash(v4);
+      const token = tokenOf(ctx);
+      await ctx.inTenant(() => ctx.code.execute(token, EVIDENCE));
+      const code = ctx.codes.at(-1)!.vars.code;
+      const { sessionToken } = await ctx.inTenant(() =>
+        ctx.verify.execute(token, code, EVIDENCE),
+      );
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, sessionToken),
+      );
+      expect(doc.budget?.items[0].listPriceCurrency).toBe('VES');
+      expect(doc.budget?.totals[0].agreementSaving).toBe(0);
+    });
   });
 
   it('el día siguiente el mismo presupuesto sigue valiendo (la emisión es la de la foto)', async () => {
@@ -978,6 +1401,8 @@ describe('presupuesto a distancia (DX-415)', () => {
     expect(JSON.stringify(ctx.confirmations[0].vars)).not.toMatch(
       /implante|resina|3330000/i,
     );
+    // DX-514: ni el token ni la página de firma.
+    expect(JSON.stringify(ctx.confirmations[0].vars)).not.toContain(token);
     // El enlace ya está usado.
     await expect(ctx.inTenant(() => ctx.view.execute(token))).rejects.toThrow(
       SIGNATURE_LINK_INVALID_MESSAGE,

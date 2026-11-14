@@ -20,12 +20,17 @@ import {
   type ReceiptSnapshot,
   type ReceiptViewSnapshot,
 } from '../../domain/receipt-snapshot';
+import {
+  locationRegionalOrNull,
+  type LocationRegionalSettings,
+} from '../../../../shared/locations/location-regional';
 import type { ClinicDocumentTypeNames } from '../../../patients/domain/document-type';
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import {
   formatReceiptNumber,
   legacyReceiptReference,
 } from '../../domain/receipt-number';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 
 export const PAYMENT_NOT_FOUND_MESSAGE = 'No encontramos ese abono.';
@@ -34,7 +39,26 @@ function viewSnapshot(
   snapshot: ReceiptSnapshot,
   names: ClinicDocumentTypeNames,
 ): ReceiptViewSnapshot {
-  return { ...snapshot, patient: receiptPatientView(snapshot, names) };
+  // DX-521 (PF3): la región de la foto no se sirve dentro de `snapshot`; la
+  // respuesta lleva solo la de nivel superior (`PaymentReceiptView.regional`).
+  const { regional: _frozen, ...rest } = snapshot;
+  return { ...rest, patient: receiptPatientView(snapshot, names) };
+}
+
+/**
+ * DX-521 (R3, PF4, PF8): la región con la que se pinta el recibo. La de la
+ * foto si es válida en este runtime (prioridad siempre foto > sede de hoy:
+ * cambiar la zona de la sede no cambia un recibo que ya la congeló); si no, la
+ * de hoy de la sede; si tampoco, `null`. Leer nunca da un 409 por esto.
+ */
+function receiptRegional(
+  source: PaymentReceiptSource,
+): LocationRegionalSettings | null {
+  const frozen =
+    source.kind === 'issued'
+      ? locationRegionalOrNull(source.receipt.snapshot.regional ?? null)
+      : null;
+  return frozen ?? source.locationRegional;
 }
 
 /**
@@ -113,6 +137,7 @@ export class GetPaymentReceiptUseCase {
     private readonly repo: PaymentReceiptRepository,
     private readonly getPlanBalance: GetPlanBalanceUseCase,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(paymentId: string): Promise<PaymentReceiptView> {
@@ -124,9 +149,14 @@ export class GetPaymentReceiptUseCase {
     if (!source) {
       throw new NotFoundException(PAYMENT_NOT_FOUND_MESSAGE);
     }
+    // DX-525: la sede del abono manda (emitido o «sin serie», sede activa o
+    // retirada), como al anularlo: un miembro restringido a otras sedes no ve,
+    // reimprime ni envía este recibo (403 antes de leer nada más).
+    this.tenantContext.assertLocationAllowed(source.locationId);
     // DX-327 (spec §4.6): el nombre visible del documento se resuelve AQUÍ,
     // una vez, y de la vista salen la pantalla, el papel y el email.
-    const names = await this.documentTypeNames.get();
+    // DX-524: y con el nombre de la sede del abono, no el de la activa.
+    const names = await this.documentTypeNames.get(source.locationId);
     return {
       view:
         source.kind === 'issued'
@@ -155,6 +185,7 @@ export class GetPaymentReceiptUseCase {
       voidReason: receipt.voidReason,
       exchangeRate: split ? null : receiptExchangeRate(source.rate),
       split,
+      regional: receiptRegional(source),
       snapshot: viewSnapshot(receipt.snapshot, names),
     };
   }
@@ -176,6 +207,7 @@ export class GetPaymentReceiptUseCase {
       voidReason: legacy.voidReason,
       exchangeRate: receiptExchangeRate(source.rate),
       split: null,
+      regional: receiptRegional(source),
       snapshot: viewSnapshot(
         buildReceiptSnapshot(
           {

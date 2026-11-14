@@ -20,18 +20,18 @@ INSERT INTO first_names SELECT ordinality - 1, v FROM unnest(ARRAY[
 CREATE TEMP TABLE last_names(i int, v text) ON COMMIT DROP;
 INSERT INTO last_names SELECT ordinality - 1, v FROM unnest(ARRAY[
   'Pérez','Gómez','Rodríguez','Martínez','López','García','Hernández','Díaz',
-  'Muñoz','Álvarez','Ramírez','Torres','Ruiz','Vásquez','Castaño','Peña',
-  'Núñez','Ospina','Restrepo','Zuluaga','Cardona','Jaramillo','Mejía','Sánchez',
-  'Rojas','Moreno','Quintero','Salazar','Giraldo','Londoño']) WITH ORDINALITY AS t(v, ordinality);
+  'Muñoz','Álvarez','Ramírez','Torres','Ruiz','Vásquez','Briceño','Peña',
+  'Núñez','Urdaneta','Bracho','Colmenares','Mendoza','Villalobos','Mejía','Sánchez',
+  'Rojas','Moreno','Quintero','Salazar','Chacón','Guerrero']) WITH ORDINALITY AS t(v, ordinality);
 
 INSERT INTO tenants (id, name, subdomain, "updatedAt") VALUES
   ('00000000-0000-4000-a000-00000000000a', 'Bench A', 'bench-a', now()),
   ('00000000-0000-4000-a000-00000000000b', 'Bench B', 'bench-b', now());
--- G1: dato de bench (REGIONAL_BOGOTA_FIXTURE), no un default del producto.
+-- G1: dato de bench (REGIONAL_CARACAS_FIXTURE), no un default del producto.
 INSERT INTO locations (id, "tenantId", name, country, currency, "timeZone", locale, "updatedAt") VALUES
-  ('00000000-0000-4000-b000-0000000000a1', '00000000-0000-4000-a000-00000000000a', 'Sede A1', 'CO', 'COP', 'America/Bogota', 'es-CO', now()),
-  ('00000000-0000-4000-b000-0000000000a2', '00000000-0000-4000-a000-00000000000a', 'Sede A2', 'CO', 'COP', 'America/Bogota', 'es-CO', now()),
-  ('00000000-0000-4000-b000-0000000000b1', '00000000-0000-4000-a000-00000000000b', 'Sede B1', 'CO', 'COP', 'America/Bogota', 'es-CO', now());
+  ('00000000-0000-4000-b000-0000000000a1', '00000000-0000-4000-a000-00000000000a', 'Sede A1', 'VE', 'USD', 'America/Caracas', 'es-VE', now()),
+  ('00000000-0000-4000-b000-0000000000a2', '00000000-0000-4000-a000-00000000000a', 'Sede A2', 'VE', 'USD', 'America/Caracas', 'es-VE', now()),
+  ('00000000-0000-4000-b000-0000000000b1', '00000000-0000-4000-a000-00000000000b', 'Sede B1', 'VE', 'USD', 'America/Caracas', 'es-VE', now());
 
 -- Pacientes. createdAt repartido en ~3 años; id derivado de (tenant, n) para
 -- que dos corridas den el mismo dataset.

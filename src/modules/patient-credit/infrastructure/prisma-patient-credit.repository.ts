@@ -1,4 +1,8 @@
 import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../shared/locations/document-regional';
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -8,8 +12,21 @@ import { Prisma, type TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { prismaRuleCode } from '../../../shared/prisma/prisma-exception.filter';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../shared/format/currency-text';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
+import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
+import { configAuditEvent } from '../../audit/domain/config-audit';
+import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
+import { lockDailyRefundDay } from './daily-refund-cap-lock';
 import { lockOpenSessionOf } from '../../cash-sessions/infrastructure/payment-cash-session';
+import { enqueuePlanRebalance } from '../../payments/infrastructure/allocations/prisma-plan-allocation.repository';
 import {
   formatReceiptNumber,
   legacyReceiptReference,
@@ -21,6 +38,8 @@ import {
   CREDIT_IDEMPOTENCY_REUSED_MESSAGE,
   CREDIT_PAYMENT_NOT_OF_PLAN_MESSAGE,
   CREDIT_TARGET_NOT_BILLABLE_MESSAGE,
+  DailyRefundCapExceededError,
+  dailyRefundRemainingCents,
   formatRefundNumber,
   fromCents,
   planCreditCents,
@@ -49,6 +68,7 @@ interface PlanCreditRow {
   billable: string;
   paid: string;
   entries: string;
+  pendingOther: number;
 }
 
 const TRANSFER_SELECT = {
@@ -81,6 +101,8 @@ const REFUND_SELECT = {
   createdById: true,
   createdAt: true,
   idempotencyFingerprint: true,
+  // DX-354: la región de la sede del comprobante.
+  location: { select: DOCUMENT_REGIONAL_SELECT },
   payments: { select: { paymentId: true }, orderBy: { paymentId: 'asc' } },
 } satisfies Prisma.PatientCreditRefundSelect;
 
@@ -96,9 +118,10 @@ function toTransfer(row: TransferRow): CreditTransferRecord {
 }
 
 function toRefund(row: RefundRow): CreditRefundRecord {
-  const { payments, seriesPrefix, number, snapshot, ...rest } = row;
+  const { payments, seriesPrefix, number, snapshot, location, ...rest } = row;
   return {
     ...rest,
+    regional: documentRegional(location),
     amount: row.amount.toNumber(),
     number: formatRefundNumber(seriesPrefix, number),
     paymentIds: payments.map((p) => p.paymentId),
@@ -166,16 +189,34 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
                 WHERE i."tenantId" = tp."tenantId" AND i."planId" = tp."id"
                   AND i."deletedAt" IS NULL AND i."status" IN ('ACCEPTED', 'DONE')
              ), 0)::text AS "billable",
+             -- DX-472-bis: lo abonado en otra moneda cuenta por su base (el
+             -- abono convertido con su tasa congelada, inmutable), la misma
+             -- cifra que el saldo del plan; sin base todavía, no cuenta.
              COALESCE((
-               SELECT pg_catalog.sum(p."amount") FROM "payments" p
+               SELECT pg_catalog.sum(CASE WHEN p."currency" = tp."currency"
+                                          THEN p."amount" ELSE b."amount" END)
+                 FROM "payments" p
+                 LEFT JOIN "payment_plan_amounts" b
+                   ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                  AND b."currency" = tp."currency"
                 WHERE p."tenantId" = tp."tenantId" AND p."treatmentPlanId" = tp."id"
-                  AND p."currency" = tp."currency" AND p."deletedAt" IS NULL
+                  AND p."deletedAt" IS NULL
+                  AND (p."currency" = tp."currency" OR b."paymentId" IS NOT NULL)
              ), 0)::text AS "paid",
              COALESCE((
                SELECT pg_catalog.sum(e."amount") FROM "patient_credit_entries" e
                 WHERE e."tenantId" = tp."tenantId" AND e."treatmentPlanId" = tp."id"
                   AND e."currency" = tp."currency"
-             ), 0)::text AS "entries"
+             ), 0)::text AS "entries",
+             -- DX-472-bis (revisión B3): abonos en otra moneda aún sin base,
+             -- que todavía no cuentan (para explicar un «supera»).
+             (SELECT pg_catalog.count(*)::int FROM "payments" p
+               WHERE p."tenantId" = tp."tenantId" AND p."treatmentPlanId" = tp."id"
+                 AND p."deletedAt" IS NULL AND p."currency" <> tp."currency"
+                 AND NOT EXISTS (
+                   SELECT 1 FROM "payment_plan_amounts" b
+                    WHERE b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                      AND b."currency" = tp."currency")) AS "pendingOther"
         FROM "treatment_plans" tp
        WHERE tp."tenantId" = ${tenantId}::uuid AND tp."id" = ${planId}::uuid
          AND tp."deletedAt" IS NULL`;
@@ -194,6 +235,7 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
       paidCents,
       entriesCents,
       creditCents: planCreditCents({ billableCents, paidCents, entriesCents }),
+      pendingOtherCurrencyPayments: row.pendingOther,
     };
   }
 
@@ -222,18 +264,71 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
     return toCents(tenant?.creditReceptionMaxAmount.toNumber() ?? 0);
   }
 
-  async updateReceptionCap(cents: number): Promise<number> {
+  async referenceLocationFormat(): Promise<RegionalFormat> {
     const tenantId = this.tenantId();
-    const tenant = await this.prisma.runWithTenant((tx) =>
-      tx.tenant.update({
+    const locationId = this.tenantContext.getLocationId() ?? null;
+    const reference = await this.prisma.runWithTenant((tx) =>
+      resolveReferenceLocation(tx, tenantId, locationId),
+    );
+    return requireLocationFormat(reference);
+  }
+
+  async currencyTexts(): Promise<CurrencyTexts> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: this.tenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
+  }
+
+  async locationFormat(locationId: string): Promise<RegionalFormat> {
+    const tenantId = this.tenantId();
+    const location = await this.prisma.runWithTenant((tx) =>
+      tx.location.findFirstOrThrow({
+        where: { tenantId, id: locationId },
+        select: { id: true, locale: true, hourCycle: true },
+      }),
+    );
+    return requireLocationFormat(location);
+  }
+
+  async updateReceptionCap(
+    cents: number,
+    audit: AuditRequestContext,
+  ): Promise<number> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // Fila bloqueada: dos cambios a la vez se ordenan y cada uno audita su
+      // antes real.
+      const [locked] = await tx.$queryRaw<{ cap: Prisma.Decimal }[]>`
+        SELECT "creditReceptionMaxAmount" AS cap
+          FROM "tenants" WHERE "id" = ${tenantId}::uuid FOR UPDATE`;
+      const tenant = await tx.tenant.update({
         where: { id: tenantId },
         data: {
           creditReceptionMaxAmount: new Prisma.Decimal(fromCents(cents)),
         },
         select: { creditReceptionMaxAmount: true },
-      }),
-    );
-    return toCents(tenant.creditReceptionMaxAmount.toNumber());
+      });
+      const event = configAuditEvent(audit, {
+        action: 'UPDATE',
+        resourceType: 'PATIENT_CREDIT',
+        resourceId: tenantId,
+        reason: 'POLICY',
+        before: {
+          creditReceptionMaxAmount: fromCents(
+            toCents(new Prisma.Decimal(locked.cap).toNumber()),
+          ),
+        },
+        after: {
+          creditReceptionMaxAmount: fromCents(
+            toCents(tenant.creditReceptionMaxAmount.toNumber()),
+          ),
+        },
+      });
+      if (event) await writeAuditEvent(tx, event);
+      return toCents(tenant.creditReceptionMaxAmount.toNumber());
+    });
   }
 
   async findTransferByKey(key: string): Promise<CreditTransferRecord | null> {
@@ -330,6 +425,13 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
             },
           ],
         });
+        // DX-399-ter (N1): lo recibido por traspaso absorbe las salidas del
+        // destino aunque llegue después (`credit-netting`), así que puede
+        // devolver excedente a un abono anterior: el destino se encola para el
+        // reparto en ESTA transacción, como el alta o la anulación de un abono.
+        // El origen también (inocuo: una salida nunca da más que repartir).
+        await enqueuePlanRebalance(tx, tenantId, input.targetPlanId);
+        await enqueuePlanRebalance(tx, tenantId, input.sourcePlanId);
         return toTransfer(transfer);
       });
     } catch (error) {
@@ -347,6 +449,10 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
         await this.lockPlans(tx, tenantId, [input.planId]);
+        // DX-462: un reintento con la misma clave que esperaba al bloqueo
+        // devuelve la devolución original (ya en la suma del tope), no un 403.
+        const replayed = await this.replayRefundIn(tx, tenantId, input);
+        if (replayed) return replayed;
         const plan = await this.planCredit(tx, tenantId, input.planId);
         // DX-438: el saldo se leyó en la moneda del plan; si cambió antes del
         // bloqueo, la devolución saldría en una moneda que ya no es la suya.
@@ -391,6 +497,25 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
           await this.assertSingleWriteLocation(tx);
         }
         const locationId = await this.tenantContext.writeLocationId(tx);
+        // DX-378: el comprobante pinta fechas y horas en la zona de la sede
+        // (y DX-462: el día del tope diario es el civil de esa zona).
+        const timeZone = (
+          await resolveLocationTimeZones(tx, tenantId, [locationId])
+        )(locationId);
+        if (input.dailyCap) {
+          await this.assertDailyRefundCap(
+            tx,
+            tenantId,
+            locationId,
+            timeZone,
+            input,
+            input.dailyCap,
+          );
+          // Tras esperar el bloqueo, otra petición con la misma clave pudo
+          // entrar: es la original, no un exceso del tope.
+          const again = await this.replayRefundIn(tx, tenantId, input);
+          if (again) return again;
+        }
         let cashSessionId: string | null = null;
         if (input.method === 'CASH') {
           // FOR SHARE hasta el COMMIT: un cierre simultáneo espera al egreso.
@@ -450,10 +575,6 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
           throw new Error('La sede no tiene serie de recibos');
         }
         const series = refundSeriesOf(location.receiptPrefix);
-        // DX-378: el comprobante pinta fechas y horas en la zona de la sede.
-        const timeZone = (
-          await resolveLocationTimeZones(tx, tenantId, [location.id])
-        )(location.id);
         // UPSERT del contador: la fila queda bloqueada hasta el COMMIT (dos
         // devoluciones de la misma sede se ordenan; un rollback no deja hueco).
         const [{ lastNumber }] = await tx.$queryRaw<{ lastNumber: number }[]>`
@@ -564,6 +685,64 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
     }
   }
 
+  /** La devolución ya guardada con esa clave (misma petición), si existe. */
+  private async replayRefundIn(
+    tx: Tx,
+    tenantId: string,
+    input: CreateRefundInput,
+  ): Promise<CreditRefundRecord | null> {
+    if (!input.idempotencyKey) return null;
+    const row = await tx.patientCreditRefund.findFirst({
+      where: { tenantId, idempotencyKey: input.idempotencyKey },
+      select: REFUND_SELECT,
+    });
+    return row ? sameRequestOrThrow(toRefund(row), input.fingerprint) : null;
+  }
+
+  /**
+   * DX-462: tope diario acumulado de RECEPTION. Bajo un bloqueo consultivo por
+   * (clínica, sede, usuario, día de la sede) se suman sus devoluciones del día
+   * en esta moneda (de cualquier paciente) y, si con esta pasan del tope,
+   * `DailyRefundCapExceededError`. El bloqueo dura hasta el COMMIT, que es
+   * cuando la devolución nueva entra en la suma de la siguiente. El día sale
+   * del reloj inyectado, leído TRAS esperar el bloqueo (ver
+   * `lockDailyRefundDay`); el `createdAt` lo fija el trigger del servidor
+   * (DX-226, `now()` de la BD al abrir la transacción) y no admite otro valor.
+   */
+  private async assertDailyRefundCap(
+    tx: Tx,
+    tenantId: string,
+    locationId: string,
+    timeZone: string,
+    input: CreateRefundInput,
+    cap: { capCents: number; clock: () => Date },
+  ): Promise<void> {
+    const { window } = await lockDailyRefundDay(
+      tx,
+      { tenantId, locationId, userId: input.userId },
+      timeZone,
+      cap.clock,
+    );
+    const total = await tx.patientCreditRefund.aggregate({
+      where: {
+        tenantId,
+        locationId,
+        createdById: input.userId,
+        currency: input.currency,
+        createdAt: { gte: window.start, lt: window.end },
+      },
+      _sum: { amount: true },
+    });
+    const usedCents = toCents(total._sum.amount?.toNumber() ?? 0);
+    if (usedCents + input.amountCents > cap.capCents) {
+      throw new DailyRefundCapExceededError(
+        dailyRefundRemainingCents(cap.capCents, usedCents),
+        input.currency,
+        locationId,
+      );
+    }
+  }
+
   /** 400 si, sin sede en la cabecera, el miembro podría escribir en varias. */
   private async assertSingleWriteLocation(tx: Tx): Promise<void> {
     const allowed = this.tenantContext.scopeLocationIds();
@@ -612,8 +791,23 @@ export class PrismaPatientCreditRepository implements PatientCreditRepository {
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           }),
         ]);
+        // DX-432: el nombre de quien traspasó, por su membresía (RLS y
+        // `tenantId`); sin filtrar `deletedAt`: si dejó la clínica, el
+        // traspaso sigue siendo suyo.
+        const authorIds = [...new Set(transfers.map((t) => t.createdById))];
+        const authors =
+          authorIds.length === 0
+            ? []
+            : await tx.clinicMembership.findMany({
+                where: { tenantId, userId: { in: authorIds } },
+                select: { userId: true, user: { select: { fullName: true } } },
+              });
+        const nameOf = new Map(authors.map((m) => [m.userId, m.user.fullName]));
         return {
-          transfers: transfers.map(toTransfer),
+          transfers: transfers.map((t) => ({
+            ...toTransfer(t),
+            createdByName: nameOf.get(t.createdById) ?? null,
+          })),
           refunds: refunds.map(toRefund),
         };
       },

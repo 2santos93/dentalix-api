@@ -3,16 +3,19 @@ import {
   IsDateString,
   IsIn,
   IsInt,
-  IsNumber,
   IsOptional,
   IsString,
   Max,
   Min,
 } from 'class-validator';
 import {
-  IsMoney,
+  IsNonNegativeMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
+import {
+  DOWN_PAYMENT_MESSAGE,
+  TOTAL_TO_FINANCE_MESSAGE,
+} from '../../../../shared/money/currency-messages';
 
 export class CreatePaymentPlanDto {
   @ApiProperty({
@@ -42,9 +45,7 @@ export class CreatePaymentPlanDto {
     maximum: MONEY_MAX,
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @IsMoney()
+  @IsNonNegativeMoney(DOWN_PAYMENT_MESSAGE)
   downPayment?: number;
 
   @ApiPropertyOptional({
@@ -54,9 +55,7 @@ export class CreatePaymentPlanDto {
     maximum: MONEY_MAX,
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @IsMoney()
+  @IsNonNegativeMoney(TOTAL_TO_FINANCE_MESSAGE)
   totalToFinance?: number;
 
   @ApiPropertyOptional()

@@ -64,7 +64,7 @@ export interface JobRepository {
   /** `app.current_tenant` de la transacción (null si no lo fija). */
   transactionTenant(tx: Prisma.TransactionClient): Promise<string | null>;
   /**
-   * Latido: renueva el arriendo `leaseSeconds` más SOLO si el trabajo sigue
+   * Latido: renueva la reserva `leaseSeconds` más SOLO si el trabajo sigue
    * RUNNING en ese intento (fencing). false = otro worker lo retomó.
    */
   heartbeat(
@@ -74,7 +74,7 @@ export interface JobRepository {
   ): Promise<boolean>;
   /**
    * Reclama hasta `limit` trabajos vencidos con esos nombres (FOR UPDATE SKIP
-   * LOCKED): RUNNING, intento + 1 y arriendo de `leaseSeconds`. Ignora las
+   * LOCKED): RUNNING, intento + 1 y reserva de `leaseSeconds`. Ignora las
    * filas con `attempts > maxAttempts` (DX-220, OPS-030): sumarles uno
    * violaría `jobs_attempts_check` y tumbaría el lote entero.
    */
@@ -86,7 +86,7 @@ export interface JobRepository {
   ): Promise<ClaimedJob[]>;
   /**
    * DX-220 (OPS-030): pasa a FAILED `LeaseExpired`, SIN sumar intento, hasta
-   * `limit` RUNNING con el arriendo vencido que ya gastaron sus intentos
+   * `limit` RUNNING con la reserva vencida que ya gastaron sus intentos
    * (`attempts >= maxAttempts`): su último intento se quedó a medias y no se
    * repite. Corre en cada vuelta del worker antes del reclamo.
    */

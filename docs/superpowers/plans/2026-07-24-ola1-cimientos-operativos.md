@@ -18,7 +18,7 @@
 - **Copy Web:** constantes `es` (i18n-ready) por componente, patrón de `AgendaView`.
 - **AGENTS.md:** leer `node_modules/next/dist/docs` de `dentalix-web` antes de escribir código del Web (breaking changes de Next).
 - **Rutas:** los paths con prefijo `dentalix-api/` son del repo API; `dentalix-web/` del repo Web. Rama de trabajo API: `feat/ola1-cimientos-operativos` (ya creada). Crear rama equivalente en Web.
-- **Moneda dashboard:** selector COP/USD en la UI, COP por defecto.
+- **Moneda dashboard:** selector VES/USD en la UI, VES por defecto.
 
 ---
 
@@ -623,12 +623,12 @@ Notas: el `@Roles(...PATIENT_ROLES)` a nivel de clase se mantiene para `GET`; se
 
 - [ ] **Step 1: Test.**
   - Renderiza tres tarjetas de ingresos (día/semana/mes) con `totalConverted` formateado, desde `getSalesTotals` (3 rangos).
-  - Cambiar el selector de moneda (COP→USD) reconsulta `getSalesTotals`/`getDashboard` con `currency: 'USD'`.
+  - Cambiar el selector de moneda (VES→USD) reconsulta `getSalesTotals`/`getDashboard` con `currency: 'USD'`.
   - Lista "Citas de hoy" desde `listAppointments` del rango de hoy, resolviendo nombre de paciente y de profesional.
   - Muestra `patientCount` y la lista de stock bajo desde `getDashboard`.
   - Estados loading/error con `role="alert"`.
 - [ ] **Step 2: Ver fallar.** Run: `npx jest src/components/dashboard/dashboard-view` → FAIL.
-- [ ] **Step 3: Implementar.** Copy `es` en constantes. Calcular rangos día/semana/mes con `localDayRange`/`weekRange` + un `monthRange` local (inline). Selector de moneda `<select>` (COP/USD), estado `currency`. Cargar en paralelo (`Promise.all`) al montar y al cambiar moneda. "Citas de hoy": `listAppointments({ from, to })` (rango de hoy, sin `providerId`), mapear `patientNames` (de `listPatients`) y `providerNames` (de `listStaff`). Formateo de moneda con `Intl.NumberFormat`. Tarjetas con el UI kit (`Card`).
+- [ ] **Step 3: Implementar.** Copy `es` en constantes. Calcular rangos día/semana/mes con `localDayRange`/`weekRange` + un `monthRange` local (inline). Selector de moneda `<select>` (VES/USD), estado `currency`. Cargar en paralelo (`Promise.all`) al montar y al cambiar moneda. "Citas de hoy": `listAppointments({ from, to })` (rango de hoy, sin `providerId`), mapear `patientNames` (de `listPatients`) y `providerNames` (de `listStaff`). Formateo de moneda con `Intl.NumberFormat`. Tarjetas con el UI kit (`Card`).
 - [ ] **Step 4: Ver pasar.** Run: `npx jest src/components/dashboard/dashboard-view` → PASS.
 - [ ] **Step 5: Commit.** `git commit -am "feat(web/dashboard): DashboardView (revenue tiles + today + stock + count)"`
 

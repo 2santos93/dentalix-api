@@ -9,6 +9,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  MaxLength,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -76,7 +77,7 @@ export class CreatePatientDto {
   @IsString()
   address?: string;
 
-  @ApiPropertyOptional({ example: 'CO', description: 'ISO 3166-1 alpha-2' })
+  @ApiPropertyOptional({ example: 'VE', description: 'ISO 3166-1 alpha-2' })
   @IsOptional()
   @IsString()
   countryCode?: string;
@@ -131,6 +132,19 @@ export class CreatePatientDto {
   @IsOptional()
   @IsString()
   occupation?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: 35,
+    example: 'en',
+    description:
+      'DX-497: idioma preferido (BCP 47) de lo que se le envía (recordatorio, página de confirmar). null o ausente = «Idioma de la clínica». Tiene que estar en la lista de la clínica (GET /patients/languages); si no, 400.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(35)
+  preferredLanguage?: string | null;
 
   // DX-153/DX-322: el texto libre de aseguradora anterior a DX-153 ya no se
   // lee ni se escribe (la ValidationPipe lo descarta); la aseguradora se

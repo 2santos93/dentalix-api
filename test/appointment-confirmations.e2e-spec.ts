@@ -9,8 +9,9 @@ import { PasswordService } from '../src/shared/crypto/password.service';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase, STAFF_CANCELLATION } from './support/e2e-fixtures';
+import { minutesIntoDay, SEDE_FIXTURE_ZONE } from './support/sede-clock';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -66,7 +67,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
   async function registerClinic(subdomain: string): Promise<Clinic> {
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clínica ${subdomain}`,
         subdomain,
         email: `owner@${subdomain}.com`,
@@ -126,7 +127,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         docType: 'NATIONAL_ID',
         docNumber,
         sex: Sex.F,
-        phone: '+57 310 555 0101',
+        phone: '+58 414 555 0101',
       })
       .expect(201);
     return (res.body as { id: string }).id;
@@ -237,7 +238,7 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       expect(body.url).toBe(`http://${clinicA.host}/confirmar/${token}`);
       expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(body.expiresAt).toBe(appt.start);
-      expect(body.whatsappPhone).toBe('573105550101');
+      expect(body.whatsappPhone).toBe('584145550101');
       expect(body.appointment).toEqual({
         patientFirstName: 'Ana',
         start: appt.start,
@@ -245,6 +246,14 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         providerName: 'Dra. Dueña',
         locationName: expect.any(String) as string,
         locationAddress: null,
+        // DX-354: la sede de la cita, en crudo (sede de registro de la clínica).
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h23',
+        // DX-437: «Avisarme si se libera un hueco antes».
+        wantsEarlier: false,
+        earlierWindow: null,
+        earlierAllowed: true,
       });
       expect(
         (await getAppointment(clinicA, appt.id)).confirmationSentAt,
@@ -255,21 +264,21 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       const patient = await createPatient(clinicA, '329001');
       await raw.patient.update({
         where: { id: patient },
-        data: { phone: '310 555 0101', countryCode: null },
+        data: { phone: '414 555 0101', countryCode: null },
       });
       const appt = await createAppointment(clinicA, patient);
       const { body } = await newLink(clinicA, appt.id);
-      expect(body.whatsappPhone).toBe('573105550101');
+      expect(body.whatsappPhone).toBe('584145550101');
     });
 
     it("a patient whose country differs from the location's is read with the location's region", async () => {
       const patient = await createPatient(clinicA, '329002');
       await raw.patient.update({
         where: { id: patient },
-        data: { phone: '0412-1234567', countryCode: 'VE' },
+        data: { phone: '612 34 56 78', countryCode: 'ES' },
       });
       const appt = await createAppointment(clinicA, patient);
-      // Con la región de la sede (CO), ese número no es válido: sin enlace.
+      // Con la región de la sede (VE), ese número no es válido: sin enlace.
       expect((await newLink(clinicA, appt.id)).body.whatsappPhone).toBeNull();
       const location = await raw.appointment.findUniqueOrThrow({
         where: { id: appt.id },
@@ -279,11 +288,11 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       });
       await raw.location.update({
         where: { id: location.location.id },
-        data: { defaultPhoneRegion: 'VE' },
+        data: { defaultPhoneRegion: 'ES' },
       });
       try {
         expect((await newLink(clinicA, appt.id)).body.whatsappPhone).toBe(
-          '584121234567',
+          '34612345678',
         );
       } finally {
         await raw.location.update({
@@ -388,12 +397,54 @@ describe('Confirmación de cita por enlace (e2e)', () => {
         'Endodoncia',
         'penicilina',
         'Secreta',
-        '310',
+        // El móvil del paciente, con o sin espacios: '310' a secas aparecía
+        // al azar en UUID y horas (DX-496, TST-059).
+        '414 555 0101',
+        '4145550101',
         patientA,
         appt.id,
         clinicA.tenantId,
       ]) {
         expect(text).not.toContain(secret);
+      }
+    });
+
+    it('DX-354: trae zona, locale y reloj de la sede de la cita, y null con 200 si la sede no tiene reloj', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const { id: locationId } = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: locationId },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
+      const appointmentOf = async () =>
+        ((await view(clinicA.host, token).expect(200)).body as PublicBody)
+          .appointment;
+      try {
+        await raw.location.update({
+          where: { id: locationId },
+          data: { timeZone: 'Asia/Tokyo', locale: 'ja-JP', hourCycle: 'h23' },
+        });
+        expect(await appointmentOf()).toMatchObject({
+          timeZone: 'Asia/Tokyo',
+          locale: 'ja-JP',
+          hourCycle: 'h23',
+        });
+        await raw.location.update({
+          where: { id: locationId },
+          data: { hourCycle: null },
+        });
+        expect(await appointmentOf()).toMatchObject({
+          timeZone: 'Asia/Tokyo',
+          locale: 'ja-JP',
+          hourCycle: null,
+        });
+      } finally {
+        await raw.location.update({ where: { id: locationId }, data: before });
       }
     });
 
@@ -738,6 +789,309 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       await respond(clinicA.host, once, 'confirm').expect(200);
       await respond(clinicA.host, once, 'cancel').expect(409);
       expect(await patientEvents()).toBe(before + 1);
+    });
+  });
+
+  describe('DX-469: «Añadir a mi calendario» (.ics por el enlace)', () => {
+    const ics = (host: string, token: string) =>
+      request(server)
+        .get(`/api/v1/public/appointment-confirmations/${token}/calendar.ics`)
+        .set('X-Tenant-Host', host);
+    const unfold = (text: string) => text.replace(/\r\n /g, '').split('\r\n');
+
+    it('sirve text/calendar con la cita (UTC), la clínica, el profesional y la sede, sin nada clínico; la vista trae Google Calendar', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const res = await ics(clinicA.host, token).expect(200);
+      expect(res.headers['content-type']).toMatch(/^text\/calendar/);
+      expect(res.headers['content-disposition']).toContain('cita.ics');
+      expect(res.headers['cache-control']).toContain('no-store');
+      const lines = unfold(res.text);
+      expect(lines[0]).toBe('BEGIN:VCALENDAR');
+      const start = new Date(appt.start)
+        .toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/\.\d{3}/, '');
+      expect(lines).toContain(`DTSTART:${start}`);
+      expect(lines.find((l) => l.startsWith('SUMMARY:'))).toBe(
+        'SUMMARY:Cita en Clínica confirma-a con Dra. Dueña',
+      );
+      expect(lines).toContain('STATUS:CONFIRMED');
+      expect(lines).toContain('TRIGGER:-PT24H');
+      // Nada clínico ni el id de la cita ni el token.
+      expect(res.text).not.toMatch(/Endodoncia|penicilina/);
+      expect(res.text).not.toContain(appt.id);
+      expect(res.text).not.toContain(token);
+
+      const v = (await view(clinicA.host, token).expect(200)).body as {
+        calendarAvailable: boolean;
+        googleCalendarUrl: string | null;
+      };
+      expect(v.calendarAvailable).toBe(true);
+      expect(v.googleCalendarUrl).toMatch(
+        /^https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE/,
+      );
+      expect(v.googleCalendarUrl).not.toMatch(/Endodoncia|penicilina/);
+    });
+
+    it('UID estable: el mismo evento al volver a pedirlo; cancelada por el enlace: STATUS:CANCELLED y la página ya no lo ofrece', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const uid = (text: string) =>
+        unfold(text).find((l) => l.startsWith('UID:'));
+      const first = uid((await ics(clinicA.host, token).expect(200)).text);
+      expect(uid((await ics(clinicA.host, token).expect(200)).text)).toBe(
+        first,
+      );
+      await respond(clinicA.host, token, 'cancel').expect(200);
+      const cancelled = await ics(clinicA.host, token).expect(200);
+      expect(uid(cancelled.text)).toBe(first);
+      expect(unfold(cancelled.text)).toContain('STATUS:CANCELLED');
+      expect(cancelled.text).not.toContain('VALARM');
+      const v = (await view(clinicA.host, token).expect(200)).body as {
+        calendarAvailable: boolean;
+        googleCalendarUrl: string | null;
+      };
+      expect(v).toMatchObject({
+        calendarAvailable: false,
+        googleCalendarUrl: null,
+      });
+    });
+
+    it('la alarma sale de los ajustes de la sede (0 la quita)', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const location = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+        select: { locationId: true, tenantId: true },
+      });
+      await raw.locationReminderSettings.upsert({
+        where: {
+          tenantId_locationId: {
+            tenantId: location.tenantId,
+            locationId: location.locationId,
+          },
+        },
+        create: {
+          tenantId: location.tenantId,
+          locationId: location.locationId,
+          calendarAlarmHours: 0,
+        },
+        update: { calendarAlarmHours: 0 },
+      });
+      try {
+        expect((await ics(clinicA.host, token).expect(200)).text).not.toContain(
+          'VALARM',
+        );
+      } finally {
+        await raw.locationReminderSettings.update({
+          where: {
+            tenantId_locationId: {
+              tenantId: location.tenantId,
+              locationId: location.locationId,
+            },
+          },
+          data: { calendarAlarmHours: 24 },
+        });
+      }
+    });
+
+    it('enlace revocado 410, token de otra clínica 404, inventado 404', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      await ics(clinicB.host, token).expect(404);
+      await ics(clinicA.host, 'x'.repeat(43)).expect(404);
+      await newLink(clinicA, appt.id);
+      await ics(clinicA.host, token).expect(410);
+    });
+  });
+
+  describe('DX-437: «Avisarme si se libera un hueco antes» desde el enlace', () => {
+    interface EarlierView {
+      status: string;
+      appointment: {
+        wantsEarlier: boolean;
+        earlierWindow: string | null;
+        earlierAllowed: boolean;
+      } | null;
+      message?: string;
+    }
+    const asView = (res: request.Response): EarlierView =>
+      res.body as EarlierView;
+    const wantsEarlier = (
+      host: string,
+      token: string,
+      body: Record<string, unknown>,
+    ) =>
+      request(server)
+        .post(`/api/v1/public/appointment-confirmations/${token}/wants-earlier`)
+        .set('X-Tenant-Host', host)
+        .send(body);
+    const readAppointment = async (id: string) =>
+      (
+        await request(server)
+          .get(`/api/v1/appointments/${id}`)
+          .set('X-Tenant-Host', clinicA.host)
+          .set('Authorization', `Bearer ${clinicA.accessToken}`)
+          .expect(200)
+      ).body as {
+        wantsEarlier: boolean;
+        earlierWindow: string | null;
+        earlierRequestedAt: string | null;
+        status: string;
+      };
+
+    it('marca con franja, la vista lo refleja, la cita queda marcada por el paciente y se audita (origen PUBLIC_LINK); quitar la limpia', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      const before = await view(clinicA.host, token).expect(200);
+      expect(asView(before).appointment).toMatchObject({
+        wantsEarlier: false,
+        earlierWindow: null,
+        earlierAllowed: true,
+      });
+
+      const marked = await wantsEarlier(clinicA.host, token, {
+        wantsEarlier: true,
+        preferredWindow: 'MORNING',
+      }).expect(200);
+      expect(asView(marked).status).toBe('PENDING');
+      expect(asView(marked).appointment).toMatchObject({
+        wantsEarlier: true,
+        earlierWindow: 'MORNING',
+      });
+      const stored = await readAppointment(appt.id);
+      expect(stored).toMatchObject({
+        wantsEarlier: true,
+        earlierWindow: 'MORNING',
+      });
+      expect(stored.earlierRequestedAt).not.toBeNull();
+
+      // Sin franja: ANY. Y el enlace sigue pendiente de confirmar.
+      const any = await wantsEarlier(clinicA.host, token, {
+        wantsEarlier: true,
+      }).expect(200);
+      expect(asView(any).appointment?.earlierWindow).toBe('ANY');
+
+      const cleared = await wantsEarlier(clinicA.host, token, {
+        wantsEarlier: false,
+      }).expect(200);
+      expect(asView(cleared).appointment).toMatchObject({
+        wantsEarlier: false,
+        earlierWindow: null,
+      });
+      expect(await readAppointment(appt.id)).toMatchObject({
+        wantsEarlier: false,
+        earlierWindow: null,
+        earlierRequestedAt: null,
+      });
+
+      const events = await raw.auditEvent.findMany({
+        where: { resourceId: appt.id, resourceType: 'APPOINTMENT' },
+        orderBy: { occurredAt: 'asc' },
+        select: { action: true, actorUserId: true, metadata: true },
+      });
+      const earlier = events.filter((e) =>
+        String((e.metadata as { reason?: string }).reason).startsWith(
+          'CONFIRMATION_LINK_EARLIER',
+        ),
+      );
+      expect(
+        earlier.map((e) => (e.metadata as { reason: string }).reason),
+      ).toEqual([
+        'CONFIRMATION_LINK_EARLIER_REQUESTED',
+        'CONFIRMATION_LINK_EARLIER_REQUESTED',
+        'CONFIRMATION_LINK_EARLIER_CLEARED',
+      ]);
+      expect(
+        earlier.every(
+          (e) =>
+            e.action === 'UPDATE' &&
+            e.actorUserId === null &&
+            (e.metadata as { origin?: string }).origin === 'PUBLIC_LINK',
+        ),
+      ).toBe(true);
+      // Sin el token ni la URL en el registro.
+      const leaked = await raw.$queryRaw<{ found: boolean }[]>`
+        SELECT bool_or(metadata::text LIKE ${'%' + token.slice(0, 16) + '%'}) AS found
+          FROM audit_events WHERE "resourceId" = ${appt.id}::uuid`;
+      expect(leaked[0].found).toBe(false);
+    });
+
+    it('vale con el enlace ya respondido (confirmar no lo gasta para esto)', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      await respond(clinicA.host, token, 'confirm').expect(200);
+      const res = await wantsEarlier(clinicA.host, token, {
+        wantsEarlier: true,
+        preferredWindow: 'AFTERNOON',
+      }).expect(200);
+      expect(asView(res).status).toBe('RESPONDED');
+      expect(asView(res).appointment).toMatchObject({
+        wantsEarlier: true,
+        earlierWindow: 'AFTERNOON',
+      });
+      expect((await readAppointment(appt.id)).status).toBe('CONFIRMED');
+    });
+
+    it('una cita cancelada, pasada o de hoy no admite la marca (400 en español) y no se toca', async () => {
+      const cancelled = await createAppointment(clinicA, patientA);
+      const cancelledLink = await newLink(clinicA, cancelled.id);
+      await respond(clinicA.host, cancelledLink.token, 'cancel').expect(200);
+      const c = await wantsEarlier(clinicA.host, cancelledLink.token, {
+        wantsEarlier: true,
+      }).expect(400);
+      expect(asView(c).message).toBe('Esta cita ya no se puede adelantar.');
+
+      // De hoy: la fecha se mueve en BD a dentro de una hora (el enlace sigue
+      // valiendo porque su foto de la cita se actualiza a la par).
+      const today = await createAppointment(clinicA, patientA);
+      const todayLink = await newLink(clinicA, today.id);
+      // «De hoy» en la sede (Caracas): dentro de una hora, salvo que el día
+      // esté a punto de acabar (DX-449: nunca cruzar la medianoche de la sede).
+      const now = new Date();
+      const minutesLeft = 24 * 60 - minutesIntoDay(now, SEDE_FIXTURE_ZONE);
+      const soon = new Date(
+        now.getTime() + (minutesLeft > 90 ? 60 : 2) * 60_000,
+      );
+      await raw.appointment.update({
+        where: { id: today.id },
+        data: { start: soon, end: new Date(soon.getTime() + 30 * 60_000) },
+      });
+      await raw.appointmentConfirmation.updateMany({
+        where: { appointmentId: today.id },
+        data: { appointmentStart: soon },
+      });
+      const t = await wantsEarlier(clinicA.host, todayLink.token, {
+        wantsEarlier: true,
+      }).expect(400);
+      expect(asView(t).message).toBe(
+        'La cita es hoy: ya no hay huecos anteriores.',
+      );
+      expect(
+        asView(await view(clinicA.host, todayLink.token).expect(200))
+          .appointment?.earlierAllowed,
+      ).toBe(false);
+      expect((await readAppointment(today.id)).wantsEarlier).toBe(false);
+    });
+
+    it('token de A en el host de B es 404; caducado 410; franja inválida 400', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { token } = await newLink(clinicA, appt.id);
+      await wantsEarlier(clinicB.host, token, { wantsEarlier: true }).expect(
+        404,
+      );
+      await wantsEarlier(clinicA.host, token, {
+        wantsEarlier: true,
+        preferredWindow: 'NOCHE',
+      }).expect(400);
+      expect((await readAppointment(appt.id)).wantsEarlier).toBe(false);
+      // Otro enlace revoca este: 410 y nada cambia.
+      await newLink(clinicA, appt.id);
+      await wantsEarlier(clinicA.host, token, { wantsEarlier: true }).expect(
+        410,
+      );
+      expect((await readAppointment(appt.id)).wantsEarlier).toBe(false);
     });
   });
 

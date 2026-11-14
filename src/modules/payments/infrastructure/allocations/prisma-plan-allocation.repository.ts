@@ -10,13 +10,25 @@ import {
   TreatmentPlanItemStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import { auditDraftFromContext } from '../../../audit/domain/audit-request-context';
+import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { loadCreditEntries, loadNettingFacts } from './credit-netting-facts';
+import { netCredit } from '../../domain/credit-netting';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../../shared/format/currency-text';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
 import {
   allocationVersion,
+  coverWithTransfersIn,
   itemBillableCents,
   validateManualAllocation,
   type AllocatableItem,
@@ -25,6 +37,7 @@ import {
 } from '../../domain/allocation-rules';
 import {
   ALLOCATION_MIGRATED_BALANCE,
+  ALLOCATION_OVER_CREDIT_OUT,
   ALLOCATION_PAYMENT_NOT_FOUND,
   ALLOCATION_VERSION_CONFLICT,
   allocationNoRate,
@@ -47,12 +60,14 @@ import type {
   ReplaceAllocationsInput,
   PaymentPendingRate,
   PaymentWithoutBase,
+  PlanBalanceItemsSnapshot,
   PlanBalanceSnapshot,
   PlanAllocationRepository,
+  PlanTransfersInCoverage,
   PlanAllocationSnapshot,
   RebalanceOptions,
 } from '../../domain/ports/plan-allocation-repository.port';
-import { toCents } from '../../../../shared/money/money';
+import { amountText, toCents } from '../../../../shared/money/money';
 
 /** Centavos de una columna Decimal (o de un número). */
 const decimalCents = (value: Prisma.Decimal | number): number =>
@@ -208,6 +223,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     const donors = await this.readDonors(
       tx,
       tenantId,
+      planId,
       plan.currency,
       bases.map((b) => b.paymentId),
     );
@@ -230,6 +246,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
   private async readDonors(
     tx: Prisma.TransactionClient,
     tenantId: string,
+    planId: string,
     planCurrency: string,
     paymentIds: string[],
   ): Promise<Donor[]> {
@@ -254,12 +271,24 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
          AND b."manual" = false
          AND b."currency" = ${planCurrency}
          AND p."deletedAt" IS NULL`;
+    // DX-399-bis: lo devuelto o traspasado sale del disponible de cada abono por
+    // la MISMA regla que el informe (`credit-netting`, la cascada del plan
+    // entero). Se lee tras los bloqueos: la devolución y el traspaso toman el
+    // plan FOR NO KEY UPDATE, que choca con nuestro FOR SHARE, así que sus
+    // asientos confirmados no cambian durante este reparto.
+    // Sin sobrante bruto no hay nada que descontar: se salta la cascada.
+    const creditOut = rows.some(
+      (r) => decimalCents(r.amount) > decimalCents(r.allocated),
+    )
+      ? (await this.planCreditOut(tx, tenantId, planId)).byPayment
+      : new Map<string, number>();
     return rows.map((r) => ({
       paymentId: r.paymentId,
       paidAt: r.paidAt,
       createdAt: r.createdAt,
       baseCents: decimalCents(r.amount),
       allocatedCents: decimalCents(r.allocated),
+      creditOutCents: creditOut.get(r.paymentId) ?? 0,
     }));
   }
 
@@ -359,87 +388,30 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
 
   async readPlanBalanceSnapshot(
     planId: string,
-  ): Promise<PlanBalanceSnapshot | null> {
+  ): Promise<PlanBalanceItemsSnapshot | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(
       async (tx) => {
-        const plan = await tx.treatmentPlan.findFirst({
-          where: { id: planId, tenantId, deletedAt: null },
-          select: { status: true, currency: true },
-        });
-        if (!plan) return null;
-        const livePayment = { deletedAt: null, treatmentPlanId: planId };
-        const items = await tx.treatmentPlanItem.findMany({
-          where: { tenantId, planId, deletedAt: null },
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-          select: {
-            id: true,
-            toothNumber: true,
-            catalogItemId: true,
-            status: true,
-            price: true,
-            discount: true,
-          },
-        });
-        const labelOf = await procedureLabels(tx, tenantId, items);
-        const payments = await tx.payment.findMany({
-          where: { tenantId, ...livePayment },
-          select: {
-            id: true,
-            amount: true,
-            currency: true,
-            paidAt: true,
-            locationId: true,
-            ...FROZEN_RATE_SELECT,
-          },
-        });
-        // DX-097: la fecha de la tasa es el día civil del abono en SU sede.
-        const zoneOf = await resolveLocationTimeZones(
+        const snapshot = await readPlanBalanceSnapshotIn(tx, tenantId, planId);
+        if (!snapshot) return null;
+        // DX-399-ter: «Sin imputar» neto. La MISMA cascada del informe y de la
+        // ventana, en la misma foto (RepeatableRead), también para un plan
+        // cancelado o rechazado (F1).
+        const { totalCents, transfersInLeftCents } = await this.planCreditOut(
           tx,
           tenantId,
-          payments.map((p) => p.locationId),
+          planId,
+          { transfersIn: true },
         );
-        const allocations = await tx.paymentAllocation.findMany({
-          where: { tenantId, treatmentPlanId: planId, payment: livePayment },
-          select: {
-            paymentId: true,
-            treatmentPlanItemId: true,
-            amount: true,
-          },
-        });
-        const bases = await tx.paymentPlanAmount.findMany({
-          where: { tenantId, treatmentPlanId: planId, payment: livePayment },
-          select: { paymentId: true, amount: true, manual: true },
-        });
-        return {
-          plan,
-          items: items.map((i) => ({
-            id: i.id,
-            toothNumber: i.toothNumber,
-            procedureName: labelOf.get(i.catalogItemId) ?? '',
-            status: i.status,
-            price: Number(i.price),
-            discount: Number(i.discount),
-          })),
-          payments: payments.map((p) => ({
-            id: p.id,
-            amount: Number(p.amount),
-            currency: p.currency,
-            paidOn: civilDateIn(p.paidAt, zoneOf(p.locationId)),
-            exchangeRateCurrency: p.exchangeRateCurrency,
-            frozenRate: frozenRateOf(p),
-          })),
-          allocations: allocations.map((a) => ({
-            paymentId: a.paymentId,
-            itemId: a.treatmentPlanItemId,
-            amount: Number(a.amount),
-          })),
-          bases: bases.map((b) => ({
-            paymentId: b.paymentId,
-            amount: Number(b.amount),
-            manual: b.manual,
-          })),
-        };
+        // DX-399-quater: y lo que cubre de cada ítem lo recibido por traspaso.
+        const transfersIn = await this.transfersInCoverage(
+          tx,
+          tenantId,
+          planId,
+          isPlanBillable(snapshot.plan.status),
+          transfersInLeftCents,
+        );
+        return { ...snapshot, creditOutCents: totalCents, transfersIn };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
@@ -651,7 +623,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         INSERT INTO "payment_plan_amounts"
                ("paymentId", "tenantId", "treatmentPlanId", "amount", "currency", "rateDate")
         SELECT ${paymentId}::uuid, ${tenantId}::uuid, t."id",
-               ${amount.toFixed(2)}::numeric, ${currency}, ${rateDate}::date
+               ${amountText(amount, 2)}::numeric, ${currency}, ${rateDate}::date
           FROM "treatment_plans" t
          WHERE t."tenantId" = ${tenantId}::uuid
            AND t."id" = ${payment.treatmentPlanId}::uuid
@@ -708,10 +680,150 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
                 paymentId,
               )
             : [];
-        return { target, lines, items };
+        // UNA cascada por transacción (R4): la necesitan «a cuenta» (con base)
+        // y lo que cubre lo recibido (con ítems). Sin ninguno de los dos, nada.
+        const planId = target.treatmentPlanId;
+        const needsCredit =
+          planId !== null && (target.base !== null || items.length > 0);
+        const credit = needsCredit
+          ? await this.planCreditOut(tx, tenantId, planId, {
+              transfersIn: items.length > 0,
+            })
+          : null;
+        // DX-399-quater: de dónde sale lo que cubre cada ítem: lo que el plan
+        // recibió por traspaso cubre después de todos los abonos.
+        if (credit && planId && items.length > 0) {
+          const { byItem } = await this.transfersInCoverage(
+            tx,
+            tenantId,
+            planId,
+            true,
+            credit.transfersInLeftCents,
+          );
+          for (const option of items) {
+            const cents = byItem.get(option.id);
+            if (cents) option.paidByTransfersInCents = cents;
+          }
+        }
+        // DX-399-ter (F1): también en un plan cancelado o rechazado, para que
+        // «a cuenta» diga lo mismo que el estado de cuenta.
+        const creditOutCents =
+          credit && target.base ? (credit.byPayment.get(paymentId) ?? 0) : 0;
+        return { target, lines, items, creditOutCents };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
+  }
+
+  /**
+   * La cascada de `credit-netting` del plan entero (la MISMA regla del informe):
+   * lo devuelto o traspasado que se atribuye a cada abono y el total atribuido.
+   * De UN plan, sea cual sea su estado (DX-399-ter, F1): un plan que se cobra da
+   * lo mismo que en el informe; uno cancelado o rechazado (sin imputaciones ni
+   * reparto) netea sus devoluciones para el estado de cuenta y la ventana.
+   */
+  private async planCreditOut(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    planId: string,
+    /**
+     * `transfersIn`: también lo recibido que queda (`transfersInLeftCents`).
+     * Sin él, un plan sin abonos con algo sin imputar no lee sus asientos: el
+     * reparto y la imputación manual solo usan `byPayment`, vacío en ese caso.
+     */
+    options: { transfersIn?: boolean } = {},
+  ): Promise<{
+    byPayment: Map<string, number>;
+    totalCents: number;
+    /** DX-399-quater: lo recibido por traspaso que ninguna salida gastó. */
+    transfersInLeftCents: number;
+  }> {
+    const netting = await loadNettingFacts(
+      tx,
+      tenantId,
+      Prisma.sql`tp."id" = ${planId}::uuid`,
+      { anyPlanStatus: true },
+    );
+    // Sin abonos con algo sin imputar, `loadNettingFacts` no lee los asientos;
+    // lo recibido por traspaso cuenta igual (DX-399-quater).
+    if (netting.facts.length === 0 && options.transfersIn) {
+      Object.assign(netting, await loadCreditEntries(tx, tenantId, [planId]));
+    }
+    const netted = netCredit(
+      netting.facts,
+      netting.entries,
+      netting.transfersIn,
+    );
+    const byPayment = new Map<string, number>();
+    let totalCents = 0;
+    for (const [paymentId, net] of netted.byPayment) {
+      byPayment.set(paymentId, net.creditOutCents);
+      totalCents += net.creditOutCents;
+    }
+    return {
+      byPayment,
+      totalCents,
+      transfersInLeftCents: netted.transfersInLeft.get(planId) ?? 0,
+    };
+  }
+
+  /**
+   * DX-399-quater: lo que cubre de cada ítem lo recibido por traspaso que queda
+   * (`leftCents`), DESPUÉS de lo que imputan los abonos vivos (la misma cifra
+   * que el saldo por ítem). Regla en `coverWithTransfersIn`; un plan que no se
+   * cobra no tiene ítems facturables y no cubre nada.
+   */
+  private async transfersInCoverage(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    planId: string,
+    planBillable: boolean,
+    leftCents: number,
+  ): Promise<PlanTransfersInCoverage> {
+    if (leftCents <= 0 || !planBillable) {
+      return { leftCents: Math.max(0, leftCents), byItem: new Map() };
+    }
+    const rows = await tx.$queryRaw<
+      {
+        id: string;
+        status: TreatmentPlanItemStatus;
+        price: Prisma.Decimal;
+        discount: Prisma.Decimal;
+        createdAt: Date;
+        completedAt: Date | null;
+        allocated: Prisma.Decimal;
+      }[]
+    >`
+      SELECT i."id", i."status", i."price", i."discount", i."createdAt",
+             i."completedAt",
+             COALESCE((SELECT sum(a."amount") FROM "payment_allocations" a
+                         JOIN "payments" p
+                           ON p."tenantId" = a."tenantId" AND p."id" = a."paymentId"
+                        WHERE a."tenantId" = i."tenantId"
+                          AND a."treatmentPlanItemId" = i."id"
+                          AND p."deletedAt" IS NULL), 0) AS "allocated"
+        FROM "treatment_plan_items" i
+       WHERE i."tenantId" = ${tenantId}::uuid
+         AND i."planId" = ${planId}::uuid
+         AND i."deletedAt" IS NULL
+         AND i."status" IN ('ACCEPTED', 'DONE')`;
+    const items: AllocatableItem[] = rows.map((r) => ({
+      id: r.id,
+      status: r.status === TreatmentPlanItemStatus.DONE ? 'DONE' : 'ACCEPTED',
+      createdAt: r.createdAt,
+      completedAt: r.completedAt,
+      billableCents: itemBillableCents(
+        {
+          status: r.status,
+          price: Number(r.price),
+          discount: Number(r.discount),
+          deletedAt: null,
+        },
+        true,
+      ),
+      allocatedCents: decimalCents(r.allocated),
+    }));
+    return { leftCents, byItem: coverWithTransfersIn(items, leftCents) };
   }
 
   /** El abono vivo con su plan (vivo) y su base; `null` si no. */
@@ -752,6 +864,7 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     ]);
     return {
       paymentId: payment.id,
+      locationId: payment.locationId,
       receiptNumber: payment.receipt
         ? formatReceiptNumber(
             payment.receipt.seriesPrefix,
@@ -834,6 +947,38 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
     }));
   }
 
+  /** G1-B: formato de la sede del abono, solo para pintar el mensaje (I4). */
+  private async locationFormatIn(
+    tx: Prisma.TransactionClient,
+    id: string,
+  ): Promise<RegionalFormat> {
+    const location = await tx.location.findFirst({
+      where: { id, tenantId: this.requireTenantId() },
+      select: { locale: true, hourCycle: true },
+    });
+    return requireLocationFormat({
+      id,
+      locale: location?.locale ?? null,
+      hourCycle: location?.hourCycle ?? null,
+    });
+  }
+
+  /**
+   * DX-517-quater: el texto propio de cada moneda de la clínica, solo para
+   * pintar el mensaje. Lectura simple de `tenants` (global, sin RLS) con la
+   * transacción ya abierta: sin `FOR UPDATE`, así que no toma ningún bloqueo
+   * de fila ni cambia el orden de los de la imputación (sin riesgo de deadlock).
+   */
+  private async currencyTextsIn(
+    tx: Prisma.TransactionClient,
+  ): Promise<CurrencyTexts> {
+    const tenant = await tx.tenant.findUnique({
+      where: { id: this.requireTenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
+  }
+
   async replaceAllocations(
     input: ReplaceAllocationsInput,
   ): Promise<{ previous: { itemId: string; cents: number }[] }> {
@@ -846,9 +991,10 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
           currency: string;
           paidAt: Date;
           locationId: string;
+          patientId: string;
         }[]
       >`
-        SELECT "treatmentPlanId", "currency", "paidAt", "locationId"
+        SELECT "treatmentPlanId", "currency", "paidAt", "locationId", "patientId"
           FROM "payments"
          WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${paymentId}::uuid
            AND "deletedAt" IS NULL`;
@@ -949,9 +1095,15 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
       }
 
       const baseCents = decimalCents(base.amount);
+      // DX-399-bis: lo devuelto o traspasado no se imputa a mano tampoco.
+      const creditBefore =
+        input.mode === 'MANUAL'
+          ? await this.planCreditOut(tx, tenantId, planId)
+          : null;
       if (input.mode === 'MANUAL') {
         const violation = validateManualAllocation({
           baseCents,
+          creditOutCents: creditBefore?.byPayment.get(paymentId) ?? 0,
           lines: input.lines,
           items: await this.readLineItems(
             tx,
@@ -963,7 +1115,16 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
         if (violation) {
           throw new BadRequestException(
-            allocationViolationMessage(violation, plan.currency, baseCents),
+            allocationViolationMessage(
+              violation,
+              plan.currency,
+              baseCents,
+              // Perezoso (I4): solo al haber violación; la sede del abono (R12).
+              await this.locationFormatIn(tx, payment.locationId),
+              // DX-517-quater: el texto propio de la moneda, también solo
+              // al haber violación y justo antes de lanzar el 400.
+              await this.currencyTextsIn(tx),
+            ),
           );
         }
       }
@@ -1009,6 +1170,51 @@ export class PrismaPlanAllocationRepository implements PlanAllocationRepository 
         });
       }
       await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
+      // NO debería saltar nunca con la regla actual (cada salida elige entre
+      // un conjunto de abonos que solo crece y la validación previa deja a este
+      // abono con lo que ya tenía atribuido): protege de cambios futuros de la
+      // regla, y por eso no tiene un caso rojo de integración.
+      // Red de DX-399-bis: la cascada puede mover la salida a otro abono. Si
+      // tras escribir quedara menos devuelto atribuido que antes, esta
+      // imputación dejaría dinero devuelto imputado dos veces: se deshace.
+      if (creditBefore) {
+        const after = await this.planCreditOut(tx, tenantId, planId);
+        if (after.totalCents < creditBefore.totalCents) {
+          throw new BadRequestException(ALLOCATION_OVER_CREDIT_OUT);
+        }
+      }
+      // DX-399: el evento de auditoría en la MISMA transacción: usuario, modo y
+      // las líneas de antes y de después (en AUTO, `after` vacío: el reparto lo
+      // hace el sistema después del COMMIT y queda en el historial de movimientos).
+      // Si algo falla, el cambio y el evento se deshacen juntos.
+      await writeAuditEvent(tx, {
+        ...auditDraftFromContext(input.audit, {
+          action: 'UPDATE',
+          resourceType: 'PAYMENT_ALLOCATION',
+          resourceId: paymentId,
+          metadata: {
+            reason: 'PAYMENT_REALLOCATED',
+            changedFields:
+              input.mode === 'MANUAL'
+                ? ['allocations', 'expectedVersion', 'mode']
+                : ['expectedVersion', 'mode'],
+            params: { id: paymentId },
+            allocation: {
+              currency: plan.currency,
+              mode: input.mode,
+              before: previous.map((r) => ({
+                itemId: r.itemId,
+                amount: r.cents / 100,
+              })),
+              after: [...wanted].map(([itemId, cents]) => ({
+                itemId,
+                amount: cents / 100,
+              })),
+            },
+          },
+        }),
+        patient: { kind: 'payment', id: paymentId },
+      });
       // Lo que este abono deja libre lo llenan otros abonos (R9).
       await enqueuePlanRebalance(tx, tenantId, planId);
       return { previous };
@@ -1188,4 +1394,99 @@ export async function removeVoidedAllocations(
      WHERE "tenantId" = ${tenantId}::uuid AND "paymentId" = ${paymentId}::uuid`;
   await tx.$executeRaw`SELECT set_config('app.allocation_cause', '', true)`;
   await enqueuePlanRebalance(tx, tenantId, planId);
+}
+
+/**
+ * DX-051 / DX-182: la foto del plan para el saldo, leída con la transacción de
+ * quien llama (la lectura del saldo la abre `RepeatableRead`; el abono la lee
+ * dentro de la suya, con el plan bloqueado, para el saldo de su recibo).
+ */
+export async function readPlanBalanceSnapshotIn(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  planId: string,
+): Promise<PlanBalanceSnapshot | null> {
+  const plan = await tx.treatmentPlan.findFirst({
+    where: { id: planId, tenantId, deletedAt: null },
+    select: { status: true, currency: true },
+  });
+  if (!plan) return null;
+  const livePayment = { deletedAt: null, treatmentPlanId: planId };
+  const items = await tx.treatmentPlanItem.findMany({
+    where: { tenantId, planId, deletedAt: null },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      toothNumber: true,
+      catalogItemId: true,
+      status: true,
+      price: true,
+      discount: true,
+    },
+  });
+  const labelOf = await procedureLabels(tx, tenantId, items);
+  const payments = await tx.payment.findMany({
+    where: { tenantId, ...livePayment },
+    select: {
+      id: true,
+      amount: true,
+      currency: true,
+      paidAt: true,
+      locationId: true,
+      ...FROZEN_RATE_SELECT,
+    },
+  });
+  // DX-097: la fecha de la tasa es el día civil del abono en SU sede.
+  const zoneOf = await resolveLocationTimeZones(
+    tx,
+    tenantId,
+    payments.map((p) => p.locationId),
+  );
+  const allocations = await tx.paymentAllocation.findMany({
+    where: { tenantId, treatmentPlanId: planId, payment: livePayment },
+    select: {
+      paymentId: true,
+      treatmentPlanItemId: true,
+      amount: true,
+    },
+  });
+  // DX-472-bis (revisión B1): solo una base en la moneda del plan.
+  const bases = await tx.paymentPlanAmount.findMany({
+    where: {
+      tenantId,
+      treatmentPlanId: planId,
+      currency: plan.currency,
+      payment: livePayment,
+    },
+    select: { paymentId: true, amount: true, manual: true },
+  });
+  return {
+    plan,
+    items: items.map((i) => ({
+      id: i.id,
+      toothNumber: i.toothNumber,
+      procedureName: labelOf.get(i.catalogItemId) ?? '',
+      status: i.status,
+      price: Number(i.price),
+      discount: Number(i.discount),
+    })),
+    payments: payments.map((p) => ({
+      id: p.id,
+      amount: Number(p.amount),
+      currency: p.currency,
+      paidOn: civilDateIn(p.paidAt, zoneOf(p.locationId)),
+      exchangeRateCurrency: p.exchangeRateCurrency,
+      frozenRate: frozenRateOf(p),
+    })),
+    allocations: allocations.map((a) => ({
+      paymentId: a.paymentId,
+      itemId: a.treatmentPlanItemId,
+      amount: Number(a.amount),
+    })),
+    bases: bases.map((b) => ({
+      paymentId: b.paymentId,
+      amount: Number(b.amount),
+      manual: b.manual,
+    })),
+  };
 }

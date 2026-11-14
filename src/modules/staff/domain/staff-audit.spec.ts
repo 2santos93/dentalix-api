@@ -2,6 +2,7 @@ import { ClinicRole } from '@prisma/client';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { sanitizeAuditMetadata } from '../../audit/domain/audit-metadata';
 import {
+  staffLocationsAuditEvent,
   staffStatusAuditEvent,
   staffUpdateAuditEvent,
   type StaffAccessSnapshot,
@@ -107,5 +108,54 @@ describe('staffStatusAuditEvent (DX-359)', () => {
       reason: 'STAFF_REACTIVATED',
       statusChange: { from: 'INACTIVE', to: 'ACTIVE' },
     });
+  });
+});
+
+describe('staffLocationsAuditEvent (DX-381)', () => {
+  const LOC_B = '0192f0a0-0000-7000-8000-0000000000bb';
+
+  it('las sedes antes y después, solo ids, con el motivo LOCATIONS_CHANGED', () => {
+    const event = staffLocationsAuditEvent(
+      ctx,
+      MEMBER,
+      [LOC_A],
+      [LOC_A, LOC_B],
+    );
+    expect(event).toMatchObject({
+      action: 'UPDATE',
+      resourceType: 'STAFF_MEMBER',
+      resourceId: MEMBER,
+      actor: { kind: 'user', userId: ADMIN },
+      metadata: {
+        reason: 'LOCATIONS_CHANGED',
+        staffAccess: {
+          before: { locationIds: [LOC_A] },
+          after: { locationIds: [LOC_A, LOC_B] },
+        },
+      },
+    });
+    expect(sanitizeAuditMetadata(event!.metadata)).toEqual(event!.metadata);
+  });
+
+  it('null = todas las sedes en cualquiera de los dos lados', () => {
+    const event = staffLocationsAuditEvent(ctx, MEMBER, null, [LOC_B]);
+    expect(event?.metadata).toMatchObject({
+      staffAccess: {
+        before: { locationIds: null },
+        after: { locationIds: [LOC_B] },
+      },
+    });
+    expect(
+      staffLocationsAuditEvent(ctx, MEMBER, [LOC_A], null)?.metadata,
+    ).toMatchObject({ staffAccess: { after: { locationIds: null } } });
+    expect(sanitizeAuditMetadata(event!.metadata)).toEqual(event!.metadata);
+  });
+
+  it('mismo conjunto, en cualquier orden, no deja evento', () => {
+    expect(
+      staffLocationsAuditEvent(ctx, MEMBER, [LOC_A, LOC_B], [LOC_B, LOC_A]),
+    ).toBeNull();
+    expect(staffLocationsAuditEvent(ctx, MEMBER, null, null)).toBeNull();
+    expect(staffLocationsAuditEvent(ctx, MEMBER, [], [])).toBeNull();
   });
 });

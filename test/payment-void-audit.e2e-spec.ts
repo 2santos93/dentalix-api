@@ -80,9 +80,9 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      // DX-495 (TST-062): «hoy» de recepción es el de la sede; con la zona
+      // DX-495 (TST-062): el «hoy» de recepción es el de la sede; con la zona
       // segura de DX-449 un abono «de hoy» no cae en ayer si la corrida cruza
-      // la medianoche de Bogotá.
+      // la medianoche de la sede.
       registerBody(sedeTodayFixture(), {
         clinicName: `Clinica ${subdomain}`,
         subdomain,

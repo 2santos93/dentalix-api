@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { CookieOptions, Response } from 'express';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
+import { MFA_TRUSTED_DEVICE_DAYS } from '../domain/user-mfa';
 import {
   SecuritySettings,
   isAllowedOrigin,
@@ -16,6 +17,13 @@ export const REFRESH_COOKIE = 'dentalix_rt';
  * resto de la API ni a las páginas de la web.
  */
 export const REFRESH_COOKIE_PATH = '/api/v1/auth';
+
+/**
+ * DX-021-bis: cookie del dispositivo de confianza. Mismo ámbito que el refresh:
+ * solo la lee el login. Host-only: confiar en un navegador vale para esa
+ * clínica, y lo que da valor al token es su fila en `user_trusted_devices`.
+ */
+export const TRUSTED_DEVICE_COOKIE = 'dentalix_td';
 
 /**
  * Cabecera con la que el cliente pide el modo cookie: `X-Refresh-Transport:
@@ -86,12 +94,28 @@ export class SessionCookieService {
 
   /** Refresh token de la cookie, o `undefined` si no la hay. */
   read(req: TenantHostRequest): string | undefined {
+    return this.readCookie(req, REFRESH_COOKIE);
+  }
+
+  /** Token del dispositivo de confianza, o `undefined` si no lo hay. */
+  readTrustedDevice(req: TenantHostRequest): string | undefined {
+    return this.readCookie(req, TRUSTED_DEVICE_COOKIE);
+  }
+
+  writeTrustedDevice(res: Response, token: string): void {
+    res.cookie(TRUSTED_DEVICE_COOKIE, token, {
+      ...this.options(),
+      maxAge: MFA_TRUSTED_DEVICE_DAYS * 24 * 60 * 60_000,
+    });
+  }
+
+  private readCookie(req: TenantHostRequest, name: string): string | undefined {
     const header = headerOf(req, 'cookie');
     if (!header) return undefined;
     for (const part of header.split(';')) {
       const eq = part.indexOf('=');
       if (eq === -1) continue;
-      if (part.slice(0, eq).trim() !== REFRESH_COOKIE) continue;
+      if (part.slice(0, eq).trim() !== name) continue;
       const value = part.slice(eq + 1).trim();
       return value || undefined;
     }

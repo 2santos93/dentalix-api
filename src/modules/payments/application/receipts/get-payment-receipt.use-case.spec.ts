@@ -1,4 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 import { GetPaymentReceiptUseCase } from './get-payment-receipt.use-case';
 import type {
   PaymentReceiptRepository,
@@ -25,7 +27,8 @@ const NOTICE = {
     emergencyContactName: null,
   },
   responsibles: [],
-  settings: { timeZone: 'America/Bogota', majorityAge: 18 },
+  majorityReview: null,
+  settings: { timeZone: 'America/Caracas', majorityAge: 18 },
 };
 
 const PAYMENT_ID = '3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60';
@@ -34,8 +37,8 @@ const PAYMENT_ID = '3f1c2b9e-8a4d-4c1e-9f0a-1b2c3d4e5f60';
 // plan no hay tasa que imprimir.
 const SAME_CURRENCY_RATE: PaymentReceiptSource['rate'] = {
   amount: 50000,
-  currency: 'COP',
-  exchangeRateCurrency: 'COP',
+  currency: 'EUR',
+  exchangeRateCurrency: 'EUR',
   frozenRate: null,
 };
 
@@ -53,7 +56,7 @@ const snapshotInput: Omit<ReceiptSnapshotInput, 'planBalance'> = {
   payment: {
     id: PAYMENT_ID,
     amount: 50000,
-    currency: 'COP',
+    currency: 'EUR',
     method: 'CARD',
     paidAt: new Date('2025-01-10T17:00:00.000Z'),
     paidOn: '2025-01-10',
@@ -66,7 +69,7 @@ const issuedSnapshot = buildReceiptSnapshot(
   {
     ...snapshotInput,
     planBalance: {
-      currency: 'COP',
+      currency: 'EUR',
       billable: 100000,
       paid: 50000,
       balance: 50000,
@@ -75,6 +78,7 @@ const issuedSnapshot = buildReceiptSnapshot(
   NO_LOCAL_NAMES,
 );
 
+const tenantContext = new TenantContextService();
 let names: FixedDocumentTypeNamesReader;
 beforeEach(() => {
   names = new FixedDocumentTypeNamesReader();
@@ -95,13 +99,18 @@ function makeUseCase(
       balance instanceof Error
         ? Promise.reject(balance)
         : Promise.resolve({
-            planCurrency: 'COP',
+            planCurrency: 'EUR',
             ...balance,
             balance: balance.billable - balance.paid,
             paymentsCount: 2,
           }),
   } as unknown as GetPlanBalanceUseCase;
-  return new GetPaymentReceiptUseCase(repo, getPlanBalance, names);
+  return new GetPaymentReceiptUseCase(
+    repo,
+    getPlanBalance,
+    names,
+    tenantContext,
+  );
 }
 
 const issued = (
@@ -111,11 +120,13 @@ const issued = (
 ): PaymentReceiptSource => ({
   kind: 'issued',
   paymentId: PAYMENT_ID,
+  locationId: 'loc-1',
   treatmentPlanId: 'plan-1',
   patientEmail: 'ana@example.com',
   notice: NOTICE,
   rate: SAME_CURRENCY_RATE,
   splitRates: [],
+  locationRegional: null,
   receipt: {
     seriesPrefix: 'NOR',
     number: 123,
@@ -141,6 +152,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       voidReason: null,
       exchangeRate: null,
       split: null,
+      regional: null,
       snapshot: {
         ...issuedSnapshot,
         patient: {
@@ -180,6 +192,26 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     });
   });
 
+  it('DX-524: una foto sin nombre congelado se pinta con el nombre de la sede del abono, no el de la activa', async () => {
+    names.names.NATIONAL_ID = 'Documento clínica';
+    names.byLocation.set('loc-1', { NATIONAL_ID: 'Documento sede' });
+    names.byLocation.set('loc-activa', { NATIONAL_ID: 'Documento activa' });
+    names.activeLocationId = 'loc-activa';
+    const old = {
+      ...issuedSnapshot,
+      patient: {
+        id: 'pat-1',
+        fullName: 'Ana Ruiz',
+        docType: 'CC',
+        docNumberMasked: '****3456',
+      },
+    } satisfies ReceiptSnapshot;
+    const view = await makeUseCase(issued({ snapshot: old })).execute(
+      PAYMENT_ID,
+    );
+    expect(view.snapshot.patient.docTypeName).toBe('Documento sede');
+  });
+
   it('un recibo anulado conserva el número y trae fecha y motivo', async () => {
     const voidedAt = new Date('2026-10-18T10:00:00.000Z');
     const view = await makeUseCase(
@@ -199,7 +231,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       paid: 1,
     }).execute(PAYMENT_ID);
     expect(view.snapshot.planBalance).toEqual({
-      currency: 'COP',
+      currency: 'EUR',
       billable: 100000,
       paid: 50000,
       balance: 50000,
@@ -210,11 +242,13 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     const view = await makeUseCase({
       kind: 'legacy',
       paymentId: PAYMENT_ID,
+      locationId: 'loc-1',
       treatmentPlanId: 'plan-1',
       patientEmail: null,
       notice: NOTICE,
       rate: SAME_CURRENCY_RATE,
       splitRates: [],
+      locationRegional: null,
       legacy: {
         issuedAt: new Date('2025-01-10T17:05:00.000Z'),
         voidedAt: null,
@@ -231,7 +265,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     });
     expect(view.snapshot.patient.docNumberMasked).toBe('****3456');
     expect(view.snapshot.planBalance).toEqual({
-      currency: 'COP',
+      currency: 'EUR',
       billable: 300000,
       paid: 120000,
       balance: 180000,
@@ -243,11 +277,13 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       {
         kind: 'legacy',
         paymentId: PAYMENT_ID,
+        locationId: 'loc-1',
         treatmentPlanId: 'plan-1',
         patientEmail: null,
         notice: NOTICE,
         rate: SAME_CURRENCY_RATE,
         splitRates: [],
+        locationRegional: null,
         legacy: {
           issuedAt: new Date(),
           voidedAt: new Date('2025-02-01T12:00:00.000Z'),
@@ -315,7 +351,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
 
   describe('DX-390: el recibo único de un cobro dividido', () => {
     const FROZEN = {
-      currency: 'COP',
+      currency: 'EUR',
       fromPerBase: 1,
       toPerBase: 4000,
       source: 'AUTOMATIC' as const,
@@ -330,15 +366,15 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       paymentMethodName: n === 1 ? 'Transferencia' : 'Efectivo',
       reference: n === 1 ? 'TR-1' : null,
       // La línea en USD se emitió «sin tasa».
-      equivalentAmount: currency === 'COP' ? amount : null,
+      equivalentAmount: currency === 'EUR' ? amount : null,
     });
     const splitSnapshot = buildReceiptSnapshot(
       {
         ...snapshotInput,
         planBalance: null,
         split: {
-          lines: [line(1, 50, 'USD'), line(2, 100000, 'COP')],
-          planCurrency: 'COP',
+          lines: [line(1, 50, 'USD'), line(2, 100000, 'EUR')],
+          planCurrency: 'EUR',
         },
       },
       NO_LOCAL_NAMES,
@@ -351,14 +387,14 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
           paymentId: 'line-1',
           amount: 50,
           currency: 'USD',
-          exchangeRateCurrency: 'COP',
+          exchangeRateCurrency: 'EUR',
           frozenRate: usdRate,
         },
         {
           paymentId: 'line-2',
           amount: 100000,
-          currency: 'COP',
-          exchangeRateCurrency: 'COP',
+          currency: 'EUR',
+          exchangeRateCurrency: 'EUR',
           frozenRate: null,
         },
       ],
@@ -367,7 +403,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     it('la foto guarda las líneas y el total al emitir (null si alguna estaba sin tasa)', () => {
       expect(splitSnapshot.split?.lines).toHaveLength(2);
       expect(splitSnapshot.split?.total).toEqual({
-        currency: 'COP',
+        currency: 'EUR',
         amount: null,
       });
     });
@@ -382,7 +418,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
         status: 'FROZEN',
         equivalentAmount: 200000,
       });
-      expect(view.split?.total).toEqual({ currency: 'COP', amount: 300000 });
+      expect(view.split?.total).toEqual({ currency: 'EUR', amount: 300000 });
     });
 
     it('mientras una línea siga sin tasa, el total es null', async () => {
@@ -396,5 +432,178 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
     await expect(makeUseCase(null).execute(PAYMENT_ID)).rejects.toThrow(
       new NotFoundException('No encontramos ese abono.'),
     );
+  });
+});
+
+describe('GetPaymentReceiptUseCase · región de la sede (DX-521, R3 y PF3/PF4/PF8)', () => {
+  const PHOTO = {
+    timeZone: 'Europe/London',
+    locale: 'en-GB',
+    hourCycle: 'h23',
+  } as const;
+  const CURRENT = {
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h23',
+  } as const;
+  const withRegional = (regional: unknown): PaymentReceiptSource => {
+    const base = issued();
+    if (base.kind !== 'issued') throw new Error('fixture');
+    return {
+      ...base,
+      receipt: {
+        ...base.receipt,
+        snapshot: { ...base.receipt.snapshot, regional } as ReceiptSnapshot,
+      },
+    };
+  };
+  const legacy = (
+    locationRegional: PaymentReceiptSource['locationRegional'],
+  ): PaymentReceiptSource => ({
+    kind: 'legacy',
+    paymentId: PAYMENT_ID,
+    locationId: 'loc-1',
+    treatmentPlanId: 'plan-1',
+    patientEmail: null,
+    notice: NOTICE,
+    rate: SAME_CURRENCY_RATE,
+    splitRates: [],
+    locationRegional,
+    legacy: {
+      issuedAt: new Date('2025-01-10T17:05:00.000Z'),
+      voidedAt: null,
+      voidReason: null,
+      snapshotInput,
+    },
+  });
+
+  it('la foto manda: sirve la región congelada aunque la sede tenga otra hoy', async () => {
+    const view = await makeUseCase({
+      ...withRegional(PHOTO),
+      locationRegional: CURRENT,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(PHOTO);
+  });
+
+  it('PF3: la foto servida no lleva `regional`; solo el de nivel superior', async () => {
+    const view = await makeUseCase(withRegional(PHOTO)).execute(PAYMENT_ID);
+    expect('regional' in view.snapshot).toBe(false);
+  });
+
+  it('una foto sin región usa los ajustes de hoy de la sede', async () => {
+    const view = await makeUseCase({
+      ...issued(),
+      locationRegional: CURRENT,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(CURRENT);
+  });
+
+  it('una foto sin región y una sede sin ajustes válidos (o retirada sin ellos): null, sin lanzar', async () => {
+    const view = await makeUseCase({
+      ...issued(),
+      locationRegional: null,
+    }).execute(PAYMENT_ID);
+    expect(view.regional).toBeNull();
+  });
+
+  it.each([
+    ['zona que este runtime no conoce', { ...PHOTO, timeZone: 'Mars/Olympus' }],
+    ['locale no soportado', { ...PHOTO, locale: 'zz-ZZ-not-a-tag-!!' }],
+    ['reloj inválido', { ...PHOTO, hourCycle: 'h11' }],
+  ])(
+    'PF4: una región de la foto con %s vale como ausente y se prueba con la sede actual',
+    async (_label, photo) => {
+      const withCurrent = await makeUseCase({
+        ...withRegional(photo),
+        locationRegional: CURRENT,
+      }).execute(PAYMENT_ID);
+      expect(withCurrent.regional).toEqual(CURRENT);
+      const withoutCurrent = await makeUseCase({
+        ...withRegional(photo),
+        locationRegional: null,
+      }).execute(PAYMENT_ID);
+      expect(withoutCurrent.regional).toBeNull();
+    },
+  );
+
+  it('un «sin serie» usa los ajustes actuales de la sede', async () => {
+    const view = await makeUseCase(legacy(CURRENT)).execute(PAYMENT_ID);
+    expect(view.regional).toEqual(CURRENT);
+    expect('regional' in view.snapshot).toBe(false);
+    const none = await makeUseCase(legacy(null)).execute(PAYMENT_ID);
+    expect(none.regional).toBeNull();
+  });
+
+  // DX-525: leer el recibo respeta las sedes permitidas, igual que anular el
+  // abono (VoidPaymentUseCase): la sede es la del abono.
+  describe('sedes permitidas (DX-525)', () => {
+    const legacy = (): PaymentReceiptSource => ({
+      kind: 'legacy',
+      paymentId: PAYMENT_ID,
+      locationId: 'loc-1',
+      treatmentPlanId: null,
+      patientEmail: null,
+      notice: NOTICE,
+      rate: SAME_CURRENCY_RATE,
+      splitRates: [],
+      locationRegional: null,
+      legacy: {
+        issuedAt: new Date('2025-01-10T17:00:00.000Z'),
+        voidedAt: null,
+        voidReason: null,
+        snapshotInput,
+      },
+    });
+
+    it.each([
+      ['emitido, vista consolidada', issued(), undefined, ['loc-2']],
+      ['«sin serie», vista consolidada', legacy(), undefined, ['loc-2']],
+      ['emitido, cabecera permitida', issued(), 'loc-2', ['loc-2']],
+      ['ninguna sede permitida', issued(), undefined, []],
+    ] as const)('403 en otra sede: %s', async (_, source, active, allowed) => {
+      const uc = makeUseCase(source);
+      await tenantContext.run(
+        't1',
+        active,
+        async () => {
+          await expect(uc.execute(PAYMENT_ID)).rejects.toThrow(
+            LOCATION_NOT_ALLOWED_MESSAGE,
+          );
+          await expect(uc.load(PAYMENT_ID)).rejects.toThrow(
+            LOCATION_NOT_ALLOWED_MESSAGE,
+          );
+        },
+        allowed,
+      );
+    });
+
+    it('su sede (emitido o «sin serie») y sin restricción: lo ve', async () => {
+      for (const source of [issued(), legacy()]) {
+        const uc = makeUseCase(source);
+        await tenantContext.run(
+          't1',
+          undefined,
+          async () => {
+            await expect(uc.execute(PAYMENT_ID)).resolves.toBeDefined();
+          },
+          ['loc-1', 'loc-9'],
+        );
+        await expect(uc.execute(PAYMENT_ID)).resolves.toBeDefined();
+      }
+    });
+
+    it('un abono que no existe sigue siendo 404 aunque esté restringido', async () => {
+      const uc = makeUseCase(null);
+      await tenantContext.run(
+        't1',
+        undefined,
+        async () => {
+          await expect(uc.execute(PAYMENT_ID)).rejects.toBeInstanceOf(
+            NotFoundException,
+          );
+        },
+        ['loc-2'],
+      );
+    });
   });
 });

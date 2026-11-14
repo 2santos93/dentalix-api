@@ -1,7 +1,7 @@
 {
-  "about": "DX-340: vectores de redondeo compartidos por la API (src/shared/money/rounding-vectors.json) y la web (src/lib/money/rounding-vectors.json, copia byte a byte). Fijan la regla vigente: cada línea se redondea a roundingDigits de su moneda (la mitad hacia arriba) y el total es la suma de líneas. No dependen de Intl.",
+  "about": "DX-340: vectores de redondeo compartidos por la API (src/shared/money/rounding-vectors.json) y la web (src/lib/money/rounding-vectors.json, copia byte a byte). Fijan la regla vigente: cada línea se redondea a roundingDigits de su moneda (la mitad hacia arriba) y el total es la suma de líneas. No dependen de Intl. DX-488: installmentSplit fija el reparto de las cuotas de un plan de pagos en unidades de roundingDigits (el resto a la última); en 2 decimales es el reparto al céntimo de siempre.",
   "currencies": {
-    "COP": {
+    "ALL": {
       "minorUnits": 2,
       "roundingDigits": 0
     },
@@ -16,6 +16,14 @@
     "RSD": {
       "minorUnits": 2,
       "roundingDigits": 0
+    },
+    "USD": {
+      "minorUnits": 2,
+      "roundingDigits": 2
+    },
+    "VES": {
+      "minorUnits": 2,
+      "roundingDigits": 2
     }
   },
   "discountForPercent": [
@@ -188,56 +196,56 @@
       "discount": 0.5
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 123.45,
       "percent": 7.5,
       "capPercent": 100,
       "discount": 9
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 1000,
       "percent": 10,
       "capPercent": 10,
       "discount": 100
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 1005,
       "percent": 10.01,
       "capPercent": 10,
       "discount": 100
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 99.99,
       "percent": 10,
       "capPercent": 10,
       "discount": 9
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 19.99,
       "percent": 50,
       "capPercent": 100,
       "discount": 10
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 0.4,
       "percent": 100,
       "capPercent": 100,
       "discount": 0
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 150000.5,
       "percent": 12.34,
       "capPercent": 15,
       "discount": 18510
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "price": 10.05,
       "percent": 5,
       "capPercent": 5,
@@ -318,25 +326,25 @@
       "price": 0.25
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "base": 123.45,
       "percent": 7.5,
       "price": 114
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "base": 19.99,
       "percent": 12.34,
       "price": 18
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "base": 100.5,
       "percent": 0,
       "price": 100
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "base": 0.5,
       "percent": 50,
       "price": 0
@@ -353,13 +361,13 @@
       "note": "Si RSD redondeara a sus 2 minor units ISO: decisión pendiente del dueño, no vigente."
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "roundingDigits": 2,
       "price": 123.45,
       "percent": 7.5,
       "capPercent": 100,
       "discount": 9.26,
-      "note": "Ídem COP."
+      "note": "Ídem ALL."
     }
   ],
   "discountLimits": [
@@ -458,7 +466,7 @@
       "total": 214.45
     },
     {
-      "currency": "COP",
+      "currency": "ALL",
       "lines": [
         {
           "price": 150000.5,
@@ -470,6 +478,59 @@
         }
       ],
       "total": 211490.5
+    }
+  ],
+  "installmentSplit": [
+    {
+      "currency": "JPY",
+      "financed": 10000,
+      "count": 3,
+      "installments": [3333, 3333, 3334]
+    },
+    {
+      "currency": "JPY",
+      "financed": 100000,
+      "count": 7,
+      "installments": [14285, 14285, 14285, 14285, 14285, 14285, 14290]
+    },
+    {
+      "currency": "JPY",
+      "financed": 10000.5,
+      "count": 3,
+      "installments": [3333, 3333, 3334.5]
+    },
+    {
+      "currency": "JPY",
+      "financed": 2,
+      "count": 3,
+      "installments": [0, 0, 2]
+    },
+    {
+      "currency": "RSD",
+      "financed": 150000.5,
+      "count": 4,
+      "installments": [37500, 37500, 37500, 37500.5]
+    },
+    {
+      "currency": "USD",
+      "financed": 100,
+      "count": 3,
+      "installments": [33.33, 33.33, 33.34]
+    },
+    {
+      "currency": "VES",
+      "financed": 200,
+      "count": 3,
+      "installments": [66.66, 66.66, 66.68]
+    },
+    {
+      "currency": "VES",
+      "financed": 1200000,
+      "count": 12,
+      "installments": [
+        100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000,
+        100000, 100000, 100000
+      ]
     }
   ]
 }

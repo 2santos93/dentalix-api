@@ -21,11 +21,21 @@ export interface AuditMetadata {
   params?: Record<string, string>;
   /** Código de resultado, p. ej. `INVALID_CREDENTIALS` en un login fallido. */
   reason?: string;
+  /** DX-021-bis: sesiones que cerró endurecer la política de MFA (un recuento). */
+  sessionsClosed?: number;
   /**
    * DX-121: cita movida — hora y profesional antes y después. Solo instantes
    * ISO y uuids: ni paciente, ni motivo, ni notas.
    */
-  move?: { from: AuditAppointmentSlot; to: AuditAppointmentSlot };
+  move?: {
+    from: AuditAppointmentSlot;
+    to: AuditAppointmentSlot;
+    /**
+     * DX-436-bis: `OPENING` = «Asignar» desde «Ocupar este hueco» (una cita
+     * «quiere antes» adelantada a un hueco liberado). Sin él, un reagendado.
+     */
+    via?: 'OPENING';
+  };
   /**
    * DX-200: cambio de estado de una cita en el flujo de la clínica (llegó, en
    * sillón, listo para cobrar, salida, «Deshacer llegada»): solo los códigos
@@ -139,6 +149,12 @@ export interface AuditMetadata {
    */
   exchangeRateBackup?: AuditExchangeRateBackup;
   /**
+   * DX-381: alta de una tasa de cambio manual (`resourceId` = la tasa): la
+   * moneda, el día civil y la tasa como decimal en texto. Nada del autor ni
+   * de los abonos que la usen.
+   */
+  exchangeRate?: AuditExchangeRate;
+  /**
    * G1 (R13): moneda, zona y formato de una sede antes y después de una
    * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
    * 4217, IANA, BCP 47); un lado puede traer null (sede sin configurar).
@@ -191,6 +207,53 @@ export interface AuditMetadata {
    * verificación de un dominio) ni datos de un paciente.
    */
   configChange?: AuditConfigChange;
+  /**
+   * DX-330: cambio del plazo de conservación de la historia clínica de la
+   * clínica: dirección según el plazo vigente, pacientes que quedan
+   * protegidos por la reducción (0 en una subida), plazos vigentes antes y
+   * después, y si una bajada corrigió una subida de menos de 24 h. Solo
+   * códigos y enteros.
+   */
+  retentionTermChange?: AuditRetentionTermChange;
+  /**
+   * DX-401: el período (días civiles, ambos inclusive) del resumen de
+   * recibos que se vio, imprimió o envió. Solo las dos fechas.
+   */
+  period?: AuditPeriod;
+  /**
+   * DX-342: revisión del paso a la mayoría de edad: la decisión, la fecha de
+   * mayoría de edad revisada y el LARGO de la nota (nunca su texto).
+   */
+  majorityReview?: AuditMajorityReview;
+  /**
+   * DX-015-bis (porción 3): por dónde se creó o cambió un recall que no es el
+   * PUT de la ficha: `DEFAULT` = «Programar recall» con el intervalo por
+   * defecto del tipo (salida o «Sin recall configurado»); `CLINICAL_ENTRY` =
+   * el intervalo fijado al registrar la evolución. Solo el código.
+   */
+  via?: AuditRecallVia;
+}
+
+export const AUDIT_RECALL_VIAS = ['DEFAULT', 'CLINICAL_ENTRY'] as const;
+export type AuditRecallVia = (typeof AUDIT_RECALL_VIAS)[number];
+
+export interface AuditMajorityReview {
+  decision: 'PATIENT_SELF' | 'KEEP_RESPONSIBLE';
+  majorityDate: string;
+  noteLength: number;
+}
+
+export interface AuditPeriod {
+  from: string;
+  to: string;
+}
+
+export interface AuditRetentionTermChange {
+  direction: 'UP' | 'DOWN';
+  protectedPatients: number;
+  effectiveBefore: number;
+  effectiveAfter: number;
+  withinCorrectionWindow: boolean;
 }
 
 /** Valor de configuración en la auditoría (DX-360). */
@@ -319,6 +382,15 @@ export interface AuditExchangeRateBackup {
   manualSince: string;
   /** Las monedas de la cotización (ISO 4217), una o dos. */
   currencies: string[];
+}
+
+export interface AuditExchangeRate {
+  /** ISO 4217, nunca USD. */
+  currency: string;
+  /** Día civil de la tasa, AAAA-MM-DD. */
+  day: string;
+  /** Unidades de `currency` por 1 USD, decimal en texto («0.91»). */
+  rate: string;
 }
 
 export interface AuditPaymentReference {
@@ -539,7 +611,8 @@ function appointmentMove(value: unknown): AuditMetadata['move'] | null {
   if (!isRecord(value)) return null;
   const from = appointmentSlot(value.from);
   const to = appointmentSlot(value.to);
-  return from && to ? { from, to } : null;
+  if (!from || !to) return null;
+  return value.via === 'OPENING' ? { from, to, via: 'OPENING' } : { from, to };
 }
 
 /** Lote/REF con formato de código y nº de filas; si no, nada. */
@@ -1005,6 +1078,35 @@ function coverageValiditySide(value: unknown): AuditCoverageValidity | null {
   return { validFrom: from, validTo: to };
 }
 
+/** DX-342: decisión conocida, día civil que existe y largo 0..500. */
+function majorityReview(value: unknown): AuditMajorityReview | null {
+  if (!isRecord(value)) return null;
+  const { decision, majorityDate, noteLength, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    (decision !== 'PATIENT_SELF' && decision !== 'KEEP_RESPONSIBLE') ||
+    typeof majorityDate !== 'string' ||
+    civilDateOrNull(majorityDate) !== majorityDate ||
+    typeof noteLength !== 'number' ||
+    !Number.isSafeInteger(noteLength) ||
+    noteLength < 0 ||
+    noteLength > 500
+  ) {
+    return null;
+  }
+  return { decision, majorityDate, noteLength };
+}
+
+/** DX-401: dos días civiles que existen con `from <= to`, o nada. */
+function period(value: unknown): AuditPeriod | null {
+  if (!isRecord(value)) return null;
+  const { from, to, ...rest } = value;
+  const validFrom = civilDateOrNull(from);
+  const validTo = civilDateOrNull(to);
+  if (Object.keys(rest).length > 0 || !validFrom || !validTo) return null;
+  return validFrom <= validTo ? { from: validFrom, to: validTo } : null;
+}
+
 /** Los dos lados con la forma admitida y el booleano, o nada (SEC-053). */
 function coverageValidity(value: unknown): AuditCoverageValidityChange | null {
   if (!isRecord(value)) return null;
@@ -1237,6 +1339,40 @@ function configChange(value: unknown): AuditConfigChange | null {
   return { ...(before ? { before } : {}), ...(after ? { after } : {}) };
 }
 
+/** DX-330: la forma exacta o nada; una clave de más lo tira entero. */
+function retentionTermChange(value: unknown): AuditRetentionTermChange | null {
+  if (!isRecord(value)) return null;
+  const {
+    direction,
+    protectedPatients,
+    effectiveBefore,
+    effectiveAfter,
+    withinCorrectionWindow,
+    ...rest
+  } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    (direction !== 'UP' && direction !== 'DOWN') ||
+    !isCount(protectedPatients) ||
+    !isCount(effectiveBefore) ||
+    !isCount(effectiveAfter) ||
+    typeof withinCorrectionWindow !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    direction,
+    protectedPatients,
+    effectiveBefore,
+    effectiveAfter,
+    withinCorrectionWindow,
+  };
+}
+
+function isCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
 /** DX-402: los dos días reales, el de la tasa antes del de inicio. */
 function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
   if (!isRecord(value)) return null;
@@ -1255,6 +1391,26 @@ function exchangeRateBackup(value: unknown): AuditExchangeRateBackup | null {
     return null;
   }
   return { rateDate, manualSince, currencies: [...(currencies as string[])] };
+}
+
+const RATE_TEXT = /^\d{1,12}(\.\d{1,8})?$/;
+
+/** DX-381: moneda, día real y tasa decimal; lo que no encaja se descarta. */
+function exchangeRate(value: unknown): AuditExchangeRate | null {
+  if (!isRecord(value)) return null;
+  const { currency, day, rate } = value;
+  if (
+    typeof currency !== 'string' ||
+    !CURRENCY_CODE.test(currency) ||
+    currency === 'USD' ||
+    typeof day !== 'string' ||
+    parseCivilDate(day) !== day ||
+    typeof rate !== 'string' ||
+    !RATE_TEXT.test(rate)
+  ) {
+    return null;
+  }
+  return { currency, day, rate };
 }
 
 /**
@@ -1295,6 +1451,13 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (typeof input.reason === 'string' && CODE.test(input.reason)) {
     out.reason = input.reason;
   }
+  if (
+    typeof input.sessionsClosed === 'number' &&
+    Number.isSafeInteger(input.sessionsClosed) &&
+    input.sessionsClosed >= 0
+  ) {
+    out.sessionsClosed = input.sessionsClosed;
+  }
   const move = appointmentMove(input.move);
   if (move) out.move = move;
   const status = statusChange(input.status);
@@ -1323,6 +1486,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (referenced) out.paymentReference = referenced;
   const backup = exchangeRateBackup(input.exchangeRateBackup);
   if (backup) out.exchangeRateBackup = backup;
+  const rated = exchangeRate(input.exchangeRate);
+  if (rated) out.exchangeRate = rated;
   const covered = coverage(input.coverage);
   if (covered) out.coverage = covered;
   const validity = coverageValidity(input.coverageValidity);
@@ -1345,5 +1510,13 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (revoked) out.revokedLinks = revoked;
   const config = configChange(input.configChange);
   if (config) out.configChange = config;
+  const term = retentionTermChange(input.retentionTermChange);
+  if (term) out.retentionTermChange = term;
+  const range = period(input.period);
+  if (range) out.period = range;
+  const reviewed = majorityReview(input.majorityReview);
+  if (reviewed) out.majorityReview = reviewed;
+  const via = AUDIT_RECALL_VIAS.find((v) => v === input.via);
+  if (via) out.via = via;
   return out;
 }

@@ -1,3 +1,4 @@
+import { NOT_ATTENDING_MESSAGE } from '../../../staff/domain/attending';
 import {
   BadRequestException,
   ConflictException,
@@ -61,6 +62,8 @@ function fakeAppointment(overrides: Partial<Appointment> = {}): Appointment {
     confirmationSentAt: null,
     callbackRequestedAt: null,
     wantsEarlier: false,
+    earlierWindow: null,
+    earlierRequestedAt: null,
     arrivedAt: null,
     seatedAt: null,
     readyForCheckoutAt: null,
@@ -132,12 +135,21 @@ function makePatients(found: unknown = { id: 'p1' }): PatientRepository {
 // Doble del horario de la sede: por defecto SIN horario configurado (null), que
 // el dominio interpreta como "sin restricción" — así los tests existentes siguen
 // probando lo suyo sin que el horario interfiera. Los tests del horario lo pasan.
-function makeSchedule(hours: unknown = null): LocationScheduleRepository {
+function makeSchedule(
+  hours: unknown = null,
+  format: { locale: string | null; hourCycle: string | null } = {
+    locale: 'de-DE',
+    hourCycle: 'h23',
+  },
+): LocationScheduleRepository {
   return {
     findByLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
     findForCurrentLocation: (): Promise<never> =>
       Promise.resolve(hours) as Promise<never>,
+    // DX-354: la sede del doble, de 24 h salvo que el test cambie `format`.
+    formatSourceOf: (locationId = 'loc-1') =>
+      Promise.resolve({ id: locationId, ...format }),
     replaceForCurrentLocation: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
   };
@@ -157,7 +169,9 @@ function makeBlocks(
   return repo;
 }
 
-function makeStaff(found: unknown = { userId: 'prov1' }): StaffRepository {
+function makeStaff(
+  found: unknown = { userId: 'prov1', role: 'DENTIST' },
+): StaffRepository {
   return {
     findById: (): Promise<never> => Promise.resolve(found) as Promise<never>,
   } as unknown as StaffRepository;
@@ -250,7 +264,7 @@ describe('CreateAppointmentUseCase', () => {
 
   describe('registerHistorical (carga histórica: seed demo, importaciones)', () => {
     const DAY = 24 * 60 * 60 * 1000;
-    // Hace 3 días a las 15:00 UTC (10:00 en Bogotá).
+    // Hace 3 días a las 15:00 UTC (10:00 en la zona de la sede).
     const pastStart = new Date(
       Math.floor((Date.now() - 3 * DAY) / DAY) * DAY + 15 * 60 * 60 * 1000,
     );
@@ -361,11 +375,11 @@ describe('CreateAppointmentUseCase', () => {
     });
 
     it('sigue validando el horario de atención de la sede', async () => {
-      // Abre solo un día DISTINTO al de la cita (10:00 Bogotá), así que ese día
+      // Abre solo un día DISTINTO al de la cita (10:00 de la zona de la sede), así que ese día
       // está cerrado.
       const otherWeekday = (pastStart.getUTCDay() + 1) % 7;
       const closedThatDay: BusinessHours = {
-        timezone: 'America/Bogota',
+        timezone: 'America/Caracas',
         ranges: [
           { weekday: otherWeekday, startMinute: 9 * 60, endMinute: 13 * 60 },
         ],
@@ -395,15 +409,15 @@ describe('CreateAppointmentUseCase', () => {
   });
 
   describe('horario de atención de la sede', () => {
-    // Sede en Bogotá (UTC-5 fijo) que abre lunes 9-13. `at()` construye horas en
+    // Sede en la zona de la sede (UTC-4 fijo) que abre lunes 9-13. `at()` construye horas en
     // Z sobre un día futuro, así que se calcula el lunes explícitamente.
     function mondayHours(): BusinessHours {
       return {
-        timezone: 'America/Bogota',
+        timezone: 'America/Caracas',
         ranges: [{ weekday: 1, startMinute: 9 * 60, endMinute: 13 * 60 }],
       };
     }
-    /** Próximo lunes a la hora local indicada, como instante UTC (Bogotá = +5). */
+    /** Próximo lunes a la hora local indicada, como instante UTC (la zona del fake es UTC−4). */
     function nextMondayLocal(hour: number): Date {
       const d = new Date();
       d.setUTCDate(d.getUTCDate() + ((8 - d.getUTCDay()) % 7 || 7)); // próximo lunes
@@ -445,6 +459,58 @@ describe('CreateAppointmentUseCase', () => {
           end: new Date(start.getTime() + 30 * 60 * 1000),
         }),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    });
+
+    it('DX-354: el mensaje usa el reloj de la sede (12 h), no 24 h fijas', async () => {
+      const uc = new CreateAppointmentUseCase(
+        makeRepo({
+          create: (): Promise<Appointment> =>
+            Promise.reject(new Error('create should not be called')),
+        }),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(mondayHours(), { locale: 'en-US', hourCycle: 'h12' }),
+        makeTypes(),
+        makeBlocks(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+      const start = nextMondayLocal(20);
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start,
+          end: new Date(start.getTime() + 30 * 60 * 1000),
+        }),
+      ).rejects.toThrow(
+        'Fuera del horario de atención (lunes: 9:00 a. m.–1:00 p. m.)',
+      );
+    });
+
+    it('DX-354: sede sin reloj: 409 LOCATION_LOCALE_REQUIRED al rechazar por horario', async () => {
+      const uc = new CreateAppointmentUseCase(
+        makeRepo({
+          create: (): Promise<Appointment> =>
+            Promise.reject(new Error('create should not be called')),
+        }),
+        makePatients(),
+        makeStaff(),
+        makeSchedule(mondayHours(), { locale: 'en-US', hourCycle: null }),
+        makeTypes(),
+        makeBlocks(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+      const start = nextMondayLocal(20);
+      await expect(
+        uc.execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start,
+          end: new Date(start.getTime() + 30 * 60 * 1000),
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('acepta una cita dentro del horario', async () => {
@@ -519,6 +585,25 @@ describe('CreateAppointmentUseCase', () => {
           end,
         }),
       ).rejects.toThrow('Paciente no encontrado');
+    });
+
+    it('DX-161: recepción o asistencia como profesional es 400', async () => {
+      const uc = new CreateAppointmentUseCase(
+        makeRepo({
+          create: (): Promise<Appointment> =>
+            Promise.reject(new Error('create should not be called')),
+        }),
+        makePatients(),
+        makeStaff({ userId: 'rec', role: 'RECEPTION', locationIds: null }),
+        makeSchedule(),
+        makeTypes(),
+        makeBlocks(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'rec', start, end }),
+      ).rejects.toThrow(NOT_ATTENDING_MESSAGE);
     });
 
     it('rechaza un providerId que no es staff activo de la clínica (antes pasaba cualquier UUID)', async () => {
@@ -1379,10 +1464,10 @@ describe('CreateAppointmentUseCase', () => {
   });
 });
 
-/** «20/10 08:00 al 20/10 20:00» en la zona del fake de bloqueos (Bogotá). */
+/** «20/10 08:00 al 20/10 20:00» en la zona del fake de bloqueos. */
 function blockRangeLabel(from: Date, to: Date): string {
-  const f = new Intl.DateTimeFormat('es-CO', {
-    timeZone: 'America/Bogota',
+  const f = new Intl.DateTimeFormat('es-VE', {
+    timeZone: 'America/Caracas',
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -1403,7 +1488,13 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
   const tenantContext = new TenantContextService();
   const start = at('10:00');
   const end = at('10:30');
-  const uc = (provider: unknown = { userId: 'prov1', locationIds: ['loc1'] }) =>
+  const uc = (
+    provider: unknown = {
+      userId: 'prov1',
+      role: 'DENTIST',
+      locationIds: ['loc1'],
+    },
+  ) =>
     new CreateAppointmentUseCase(
       // Como el repositorio real: la sede del request o, sin ella, 'loc1'.
       makeRepo({
@@ -1445,7 +1536,7 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
 
   it('sin restricción el profesional atiende en todas', async () => {
     await expect(
-      uc({ userId: 'prov1', locationIds: null }).execute({
+      uc({ userId: 'prov1', role: 'DENTIST', locationIds: null }).execute({
         ...input,
         locationId: 'loc2',
       }),
@@ -1457,7 +1548,9 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
       providerId: 'prov1',
     });
     await expect(
-      uc({ userId: 'prov1', locationIds: ['loc2'] }).execute(input),
+      uc({ userId: 'prov1', role: 'DENTIST', locationIds: ['loc2'] }).execute(
+        input,
+      ),
     ).rejects.toThrow(PROVIDER_NOT_AT_LOCATION_MESSAGE);
   });
 });
@@ -1465,7 +1558,10 @@ describe('CreateAppointmentUseCase · sedes permitidas y profesional ↔ sede', 
 describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)', () => {
   // La sede del contexto es loc1 (zona UTC para leer las horas tal cual):
   // el profesional trabaja allí ese día de 08:00 a 12:00.
-  function withSchedule(strict = false) {
+  function withSchedule(
+    strict = false,
+    format?: { locale: string | null; hourCycle: string | null },
+  ) {
     const schedules = new InMemoryProviderScheduleRepository();
     schedules.currentLocationId = 'loc1';
     schedules.strict = strict;
@@ -1485,9 +1581,25 @@ describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)'
       makeTypes(),
       makeBlocks(),
       new TenantContextService(),
-      inMemoryAvailability(schedules, 'UTC'),
+      inMemoryAvailability(schedules, 'UTC', format),
     );
   }
+
+  it('DX-354: sede sin reloj: el aviso fuera de horario se devuelve igual, sin horas, y nunca es 409', async () => {
+    const result = await withSchedule(false, {
+      locale: 'de-DE',
+      hourCycle: null,
+    }).execute({
+      patientId: 'p1',
+      providerId: 'prov1',
+      start: at('14:00'),
+      end: at('14:30'),
+    });
+    expect(result.warnings).toEqual([
+      expect.stringMatching(/^Fuera del horario del profesional en .*\.$/),
+    ]);
+    expect(JSON.stringify(result.warnings)).not.toMatch(/\d{1,2}:\d{2}/);
+  });
 
   it('dentro de su horario: sin aviso', async () => {
     const result = await withSchedule().execute({

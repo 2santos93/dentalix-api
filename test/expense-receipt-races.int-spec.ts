@@ -22,7 +22,7 @@ import {
 } from './support/postgres-concurrency';
 import { INVOICE_DATE_FUTURE_MESSAGE } from '../src/modules/expenses/domain/expense-rules';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -73,10 +73,10 @@ describeWithMinio(
       ).id;
       locationId = (
         await raw.location.create({
-          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          data: locationData(REGIONAL_CARACAS_FIXTURE, {
             tenantId,
             name: 'Tokyo',
-            country: 'CO',
+            country: 'VE',
             timeZone: 'Asia/Tokyo',
           }),
         })
@@ -251,10 +251,10 @@ describeWithMinio(
       beforeAll(async () => {
         previousDayLocation = (
           await raw.location.create({
-            data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+            data: locationData(REGIONAL_CARACAS_FIXTURE, {
               tenantId,
               name: 'Pacific',
-              country: 'CO',
+              country: 'VE',
               timeZone: 'America/Los_Angeles',
             }),
           })

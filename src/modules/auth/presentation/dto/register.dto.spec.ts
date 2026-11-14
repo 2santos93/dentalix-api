@@ -48,7 +48,7 @@ describe('RegisterDto (DX-144)', () => {
 
   it('un texto de phishing largo en el nombre no pasa la validación', async () => {
     const lure =
-      'Tu cuenta bancaria fue bloqueada, entra en https://bit.ly/xxxx y llama al +57 300 000 0000 para desbloquearla hoy mismo antes de que la cerremos';
+      'Tu cuenta bancaria fue bloqueada, entra en https://bit.ly/xxxx y llama al +58 412 000 0000 para desbloquearla hoy mismo antes de que la cerremos';
     expect(lure.length).toBeGreaterThan(120);
     expect(await messagesFor('fullName', lure)).toHaveLength(1);
   });
@@ -84,7 +84,7 @@ describe('RegisterDto · primera sede (G1)', () => {
   it('acepta los cuatro campos; la forma legada sin ninguno pasa el DTO y la rechaza el caso de uso (400)', async () => {
     expect(
       await messages({
-        locationCountry: 'CO',
+        locationCountry: 'VE',
         locationCurrency: 'JPY',
         locationTimeZone: 'Asia/Tokyo',
         locationLocale: 'ja-JP',

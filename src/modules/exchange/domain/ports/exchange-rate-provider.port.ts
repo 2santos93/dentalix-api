@@ -12,6 +12,20 @@ export class ExchangeRateUnavailableError extends Error {
 }
 
 /**
+ * DX-472: el proveedor no contestó (plazo agotado, sin conexión, corte a medio
+ * cuerpo, un 5xx, 429 o 408): es
+ * pasajero y no dice nada de si hay tasa ese día. Quien solo convierte lo trata
+ * como «sin tasa»; el saldo lo distingue para pedir que se reintente en vez de
+ * que se registre una tasa.
+ */
+export class ExchangeRateProviderNotRespondingError extends ExchangeRateUnavailableError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ExchangeRateProviderNotRespondingError';
+  }
+}
+
+/**
  * SEC-054: se agotó el presupuesto de llamadas al proveedor (el de la clínica
  * o el global de la plataforma). Para quien convierte es «sin tasa», como
  * cualquier `ExchangeRateUnavailableError`; las rutas de tasas lo devuelven

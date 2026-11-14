@@ -19,10 +19,10 @@ import {
   UpdateAnamnesisSettingsUseCase,
 } from './use-cases/medical-alerts.use-cases';
 
-const NOW = new Date('2026-10-20T15:00:00.000Z');
-const TODAY = { date: '2026-10-20', timeZone: 'America/Bogota' };
+const NOW = new Date('2026-10-20T14:00:00.000Z');
+const TODAY = { date: '2026-10-20', timeZone: 'America/Caracas' };
 
-/** El repositorio en memoria trae dos sedes: la principal en Bogotá y otra en Madrid. */
+/** El repositorio en memoria trae dos sedes: la principal en Caracas y otra en Madrid. */
 function flagsService(
   repo: InMemoryMedicalAlertsRepository,
   tenantContext = new TenantContextService(),
@@ -80,42 +80,42 @@ describe('PatientMedicalAlertFlags (DX-247, por lote)', () => {
   });
 
   it('cada cita se evalúa el día civil de su inicio en la zona de su sede, sin N+1', async () => {
-    // Revisada el 25/10/2025: caduca el 25/10/2026 en Bogotá.
+    // Revisada el 25/10/2025: caduca el 25/10/2026 en la zona de la sede.
     repo.seedSnapshot('p-1', {
-      createdAt: new Date('2025-10-25T15:00:00.000Z'),
+      createdAt: new Date('2025-10-25T14:00:00.000Z'),
     });
     const map = await flags.forAppointments([
       {
         id: 'hoy',
         patientId: 'p-1',
-        start: new Date('2026-10-21T14:00:00.000Z'),
-        locationId: 'bog',
+        start: new Date('2026-10-21T13:00:00.000Z'),
+        locationId: 'ccs',
       },
       {
         id: 'jueves',
         patientId: 'p-1',
-        start: new Date('2026-10-29T14:00:00.000Z'),
-        locationId: 'bog',
+        start: new Date('2026-10-29T13:00:00.000Z'),
+        locationId: 'ccs',
       },
-      // 24/10 a las 23:30 en Bogotá es el 25/10 en UTC: sigue al día.
+      // 24/10 a las 23:30 en la zona de la sede es el 25/10 en UTC: sigue al día.
       {
         id: 'noche',
         patientId: 'p-1',
-        start: new Date('2026-10-25T04:30:00.000Z'),
-        locationId: 'bog',
+        start: new Date('2026-10-25T03:30:00.000Z'),
+        locationId: 'ccs',
       },
       // La misma hora en Madrid ya es el 25/10 allí.
       {
         id: 'madrid',
         patientId: 'p-1',
-        start: new Date('2026-10-25T04:30:00.000Z'),
+        start: new Date('2026-10-25T03:30:00.000Z'),
         locationId: 'mad',
       },
       {
         id: 'nuevo',
         patientId: 'p-2',
-        start: new Date('2026-10-21T14:00:00.000Z'),
-        locationId: 'bog',
+        start: new Date('2026-10-21T13:00:00.000Z'),
+        locationId: 'ccs',
       },
     ]);
     expect(map.get('hoy')?.anamnesisStatus).toBe('CURRENT');
@@ -131,10 +131,10 @@ describe('PatientMedicalAlertFlags (DX-247, por lote)', () => {
   it('hoy en la sede del request o, sin sede, en la principal', async () => {
     const tenantContext = new TenantContextService();
     flags = flagsService(repo, tenantContext);
-    // 15:00 UTC del 20/10: ya es 20/10 en Bogotá y en Madrid.
+    // 14:00 UTC del 20/10: ya es 20/10 en Caracas y en Madrid.
     await expect(flags.todayInSede()).resolves.toEqual({
       date: '2026-10-20',
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
     });
     await expect(
       tenantContext.run('t-1', 'mad', () => flags.todayInSede()),
@@ -190,7 +190,7 @@ describe('Casos de uso de alertas y vigencia (DX-247)', () => {
     it('banderas, vigencia, fecha de caducidad y la última revisión', async () => {
       repo.seedSnapshot('p-1', {
         ...premedication,
-        createdAt: new Date('2025-11-01T10:00:00.000Z'),
+        createdAt: new Date('2025-11-01T09:00:00.000Z'),
       });
       const view = await uc().execute('p-1');
       expect(view).toMatchObject({
@@ -199,10 +199,10 @@ describe('Casos de uso de alertas y vigencia (DX-247)', () => {
         validityMonths: 12,
         anamnesisExpiresOn: '2026-11-01',
         today: '2026-10-20',
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
         lastReview: {
           kind: 'UPDATED',
-          at: new Date('2025-11-01T10:00:00.000Z'),
+          at: new Date('2025-11-01T09:00:00.000Z'),
         },
       });
     });
@@ -279,6 +279,8 @@ describe('Casos de uso de alertas y vigencia (DX-247)', () => {
       expect(repo.validityMonths).toBe(6);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
+          // DX-363: con sede activa en el contexto, el evento va sin sede.
+          locationId: null,
           action: 'UPDATE',
           resourceType: 'MEDICAL_HISTORY',
           patient: null,

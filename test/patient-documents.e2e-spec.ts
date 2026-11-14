@@ -24,7 +24,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -273,7 +273,7 @@ describe('Documentos del paciente — /patients/:patientId/documents (DX-151, e2
         a.adminToken,
         'post',
         '/locations',
-        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+        locationBody(REGIONAL_CARACAS_FIXTURE, {
           name: 'Sede Norte Docs',
         }),
       ).expect(201);

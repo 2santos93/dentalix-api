@@ -235,7 +235,7 @@ export class CashSessionsController {
   @ApiOperation({
     summary: 'Una caja: fondo, abonos, anulados, ajustes, arqueo y cierres',
     description:
-      'Con «arqueo ciego» y la caja abierta, quien no es ADMIN recibe `expected` y `payments` a null.',
+      'Con «arqueo ciego» y la caja abierta, quien no es ADMIN recibe `expected`, `payments`, `voidedPayments` y `adjustments` a null, y los cierres anteriores sin líneas (SEC-043).',
   })
   @ApiOkResponse({ type: CashSessionDetailDto })
   @ApiForbiddenResponse({ description: CASH_SESSIONS_FORBIDDEN_MESSAGE })
@@ -260,10 +260,12 @@ export class CashSessionsController {
   @ApiOperation({
     summary: 'Cerrar la caja con el arqueo por moneda y método',
     description:
-      'Calcula el esperado (fondo + abonos del turno + ajustes) y guarda contado y diferencia. Una diferencia distinta de 0 exige motivo. El cierre es inmutable y deja la fecha de bloqueo sugerida (DX-091).',
+      'Calcula el esperado (fondo + abonos del turno + ajustes) y guarda contado y diferencia. Una diferencia distinta de 0 exige motivo (400), salvo en un cierre a ciegas de quien no es ADMIN: ese se guarda siempre y, si no cuadra y no trae motivo, queda marcado «diferencia sin justificar» (SEC-043). El cierre es inmutable y deja la fecha de bloqueo sugerida (DX-091).',
   })
   @ApiCreatedResponse({ type: CashSessionDetailDto })
-  @ApiBadRequestResponse({ description: DIFFERENCE_REASON_REQUIRED_MESSAGE })
+  @ApiBadRequestResponse({
+    description: `${DIFFERENCE_REASON_REQUIRED_MESSAGE} (nunca en un cierre a ciegas de quien no es ADMIN)`,
+  })
   @ApiForbiddenResponse({ description: CASH_SESSIONS_FORBIDDEN_MESSAGE })
   @ApiNotFoundResponse({
     description:

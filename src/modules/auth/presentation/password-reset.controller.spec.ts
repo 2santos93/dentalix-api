@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import type { RequestPasswordResetUseCase } from '../application/use-cases/request-password-reset.use-case';
 import type { ResetPasswordUseCase } from '../application/use-cases/reset-password.use-case';
 import type { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
@@ -65,5 +66,31 @@ describe('PasswordResetController.forgotPassword (SEC-033)', () => {
       }),
     ).resolves.toEqual({ message: FORGOT_PASSWORD_MESSAGE });
     expect(accept).not.toHaveBeenCalled();
+  });
+});
+
+describe('PasswordResetController.reset (DX-114)', () => {
+  it('host sin clínica: 404 con code RESET_TOKEN_INVALID, sin llamar al caso de uso', async () => {
+    const execute = jest.fn();
+    const controller = new PasswordResetController(
+      {} as unknown as RequestPasswordResetUseCase,
+      { execute } as unknown as ResetPasswordUseCase,
+      {} as unknown as TenantLinkBaseService,
+    );
+    const err: unknown = await controller
+      .reset(
+        { headers: {}, tenantHost: { host: 'x', tenantId: null } },
+        {
+          token: 'A'.repeat(43),
+          password: 'NuevaClave2026',
+        },
+      )
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(NotFoundException);
+    expect((err as NotFoundException).getResponse()).toMatchObject({
+      statusCode: 404,
+      code: 'RESET_TOKEN_INVALID',
+    });
+    expect(execute).not.toHaveBeenCalled();
   });
 });

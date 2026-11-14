@@ -13,6 +13,7 @@ import {
   locationCurrencyRequired,
   locationRequired,
 } from '../../../../shared/locations/reference-location';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and a
@@ -49,7 +50,7 @@ export class CreateTreatmentPlanUseCase {
       input.currency ?? (await this.defaultCurrency())
     ).toUpperCase();
     if (!(await this.whitelist.has(currency))) {
-      throw new BadRequestException(`Unknown currency: ${currency}`);
+      throw new BadRequestException(UNKNOWN_CURRENCY_MESSAGE);
     }
 
     await assertPatientInClinic(this.patients, input.patientId);

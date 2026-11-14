@@ -6,11 +6,11 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaPatientRepository } from '../src/modules/patients/infrastructure/repositories/prisma-patient.repository';
 import { assertNotUnderRetention } from '../src/modules/patients/application/retention-guard';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
-// DX-039, capa DB de la retención legal de la HC: backfill de la migración,
+// DX-039, capa DB de la retención de la HC: backfill de la migración,
 // triggers que mantienen `last_attention_at` (nunca retrocede), RLS FORZADA y
 // append-only de `patient_retention_actions`, y la supresión parcial por la
 // misma ruta que la app (runWithTenant, rol dentalix_app).
@@ -42,13 +42,13 @@ async function newPatient(tenantId: string, name: string): Promise<string> {
         tenantId,
         firstName: name,
         lastName: 'DX039',
-        phone: '3001112233',
+        phone: '4121112233',
         email: `${name.toLowerCase()}@example.com`,
         address: 'Calle 1 # 2-3',
         notes: 'Prefiere citas en la tarde',
         emergencyContactName: 'Luis',
         emergencyContactRelationship: 'Hermano',
-        emergencyContactPhone: '3004445566',
+        emergencyContactPhone: '4124445566',
         occupation: 'Docente',
       },
     })
@@ -95,7 +95,7 @@ function appointment(
   );
 }
 
-describe('retención legal de la HC (DX-039, int)', () => {
+describe('retención de la HC (DX-039, int)', () => {
   beforeAll(async () => {
     await prisma.onModuleInit();
     userId = (
@@ -119,7 +119,7 @@ describe('retención legal de la HC (DX-039, int)', () => {
     ).id;
     locationA = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: tenantA,
           name: 'Sede',
         }),
@@ -234,7 +234,9 @@ describe('retención legal de la HC (DX-039, int)', () => {
   });
 
   it('archivar bajo retención falla dentro de la transacción y no marca deletedAt', async () => {
-    const repo = new PrismaPatientRepository(prisma, tenantContext);
+    const repo = new PrismaPatientRepository(prisma, tenantContext, {
+      platformMinYears: 15,
+    });
     const p = await newPatient(tenantA, 'Archivo');
     await entry(tenantA, p, '2026-02-01T10:00:00Z');
     const now = new Date('2026-10-16T12:00:00Z');
@@ -273,7 +275,9 @@ describe('retención legal de la HC (DX-039, int)', () => {
   });
 
   it('supresión parcial: vacía lo no clínico, retira marketing, conserva la HC y deja rastro', async () => {
-    const repo = new PrismaPatientRepository(prisma, tenantContext);
+    const repo = new PrismaPatientRepository(prisma, tenantContext, {
+      platformMinYears: 15,
+    });
     const p = await newPatient(tenantA, 'Supresion');
     const e = await entry(tenantA, p, '2026-02-01T10:00:00Z');
     const policy = await raw.privacyPolicyVersion.create({
@@ -302,7 +306,7 @@ describe('retención legal de la HC (DX-039, int)', () => {
 
     const result = await tenantContext.run(tenantA, () =>
       repo.partiallySuppress(p, {
-        reason: 'Reclamo del titular de los datos',
+        reason: 'Solicitud del paciente sobre sus datos',
         actorId: userId,
         assertAllowed: () => undefined,
       }),
@@ -336,14 +340,16 @@ describe('retención legal de la HC (DX-039, int)', () => {
     expect(actions).toEqual([
       expect.objectContaining({
         kind: 'PARTIAL_SUPPRESSION',
-        reason: 'Reclamo del titular de los datos',
+        reason: 'Solicitud del paciente sobre sus datos',
         actorId: userId,
       }),
     ]);
   });
 
   it('patient_retention_actions: RLS forzada entre tenants y append-only para la app', async () => {
-    const repo = new PrismaPatientRepository(prisma, tenantContext);
+    const repo = new PrismaPatientRepository(prisma, tenantContext, {
+      platformMinYears: 15,
+    });
     const p = await newPatient(tenantA, 'Extension');
     const updated = await tenantContext.run(tenantA, () =>
       repo.setRetentionExtension(p, {

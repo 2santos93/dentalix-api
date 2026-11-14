@@ -9,7 +9,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 
@@ -108,7 +108,7 @@ describe('Alta de paciente con anamnesis inicial según rol — POST /patients (
     const email = `owner@${SUBDOMAIN}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clinica Alta',
         subdomain: SUBDOMAIN,
         email,

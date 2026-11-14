@@ -1,12 +1,19 @@
-import { EmailTemplateName } from '../../domain/email-message';
+import type { Prisma } from '@prisma/client';
+import {
+  EmailTemplateName,
+  TENANT_DAILY_BUDGET,
+} from '../../domain/email-message';
 import {
   ClaimedOutboxEmail,
   EmailDeliveryStatus,
   EmailOutboxRepository,
   NewOutboxEmail,
   NewPlatformOutboxEmail,
+  OutboxQuotaGuard,
   OutboxSettlement,
   PlatformRecipientQuota,
+  QuotaLockScope,
+  RecentSends,
 } from '../../domain/ports/email-outbox-repository.port';
 
 export interface StoredOutboxEmail extends NewPlatformOutboxEmail {
@@ -32,13 +39,49 @@ let seq = 0;
  */
 export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   readonly rows: StoredOutboxEmail[] = [];
+  /** Los `scope` de candado que pidió cada insert con tope (DX-149-ter). */
+  readonly guardScopes: QuotaLockScope[] = [];
   brands = new Map<
     string,
     { name: string; logoUrl: string | null; primaryColor: string | null }
   >();
 
-  insert(row: NewOutboxEmail): Promise<{ id: string }> {
-    return Promise.resolve(this.store(row));
+  /** Con `guard`, cuenta y decide antes de guardar (como bajo el candado). */
+  async insert(
+    row: NewOutboxEmail,
+    guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
+  ): Promise<{ id: string }> {
+    if (guard) this.guardScopes.push(scope ?? 'recipient-and-tenant');
+    if (guard) guard(await this.recentSends(row.tenantId, row.toHash));
+    return this.store(row);
+  }
+
+  insertInTx(
+    _tx: Prisma.TransactionClient,
+    row: NewOutboxEmail,
+    guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
+  ): Promise<{ id: string }> {
+    return this.insert(row, guard, scope);
+  }
+
+  /** Misma regla que email_outbox_enqueue_platform_security (DX-021-bis). */
+  insertPlatformSecurity(
+    row: NewPlatformOutboxEmail,
+    minIntervalSeconds: number,
+  ): Promise<{ id: string } | null> {
+    const recent = this.rows.some(
+      (r) =>
+        r.tenantId === null &&
+        r.toHash === row.toHash &&
+        r.template === row.template &&
+        r.referenceId === row.referenceId &&
+        Date.now() - r.createdAt.getTime() < minIntervalSeconds * 1000,
+    );
+    return Promise.resolve(
+      recent ? null : this.store({ ...row, tenantId: null }),
+    );
   }
 
   /** Misma regla que email_outbox_platform_allowed (DX-144). */
@@ -48,7 +91,10 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   ): Promise<boolean> {
     const now = Date.now();
     const mine = this.rows.filter(
-      (r) => r.tenantId === null && r.toHash === toHash,
+      (r) =>
+        r.tenantId === null &&
+        r.toHash === toHash &&
+        !['mfa-notice', 'mfa-enrollment-code'].includes(r.template),
     );
     const inCooldown = mine.some(
       (r) =>
@@ -130,6 +176,13 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     return Promise.resolve(true);
   }
 
+  /** DX-476: todos los pacientes de los enlaces se dan por archivados. */
+  patientsArchived = false;
+
+  patientArchivedFor(): Promise<boolean> {
+    return Promise.resolve(this.patientsArchived);
+  }
+
   supersedePending(
     tenantId: string,
     referenceId: string,
@@ -150,16 +203,25 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
     return Promise.resolve(pending.length);
   }
 
+  /** El fake no tiene RLS: los `referenceId` son únicos entre clínicas. */
+  supersedePendingInTx(
+    _tx: Prisma.TransactionClient,
+    referenceId: string,
+    template: EmailTemplateName,
+  ): Promise<number> {
+    const tenants = new Set(
+      this.rows
+        .filter((r) => r.referenceId === referenceId && r.tenantId !== null)
+        .map((r) => r.tenantId as string),
+    );
+    return Promise.all(
+      [...tenants].map((t) => this.supersedePending(t, referenceId, template)),
+    ).then((counts) => counts.reduce((a, b) => a + b, 0));
+  }
+
   access = { executable: true, ownerSeesAllRows: true };
 
-  recentSends(
-    tenantId: string,
-    toHash: string,
-  ): Promise<{
-    tenant: number;
-    recipient: number;
-    secondsSinceLastToRecipient: number | null;
-  }> {
+  recentSends(tenantId: string, toHash: string): Promise<RecentSends> {
     const now = Date.now();
     const since = new Date(now - 24 * 60 * 60 * 1000);
     const ofTenant = this.rows.filter((r) => r.tenantId === tenantId);
@@ -169,7 +231,11 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
       null,
     );
     return Promise.resolve({
-      tenant: ofTenant.filter((r) => r.createdAt >= since).length,
+      // DX-149-quater: como el SQL, sin las que no gastan el tope de la clínica.
+      tenant: ofTenant.filter(
+        (r) =>
+          r.createdAt >= since && TENANT_DAILY_BUDGET[r.template] === 'clinic',
+      ).length,
       recipient: toRecipient.filter((r) => r.createdAt >= since).length,
       secondsSinceLastToRecipient: last ? (now - last.getTime()) / 1000 : null,
     });

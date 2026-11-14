@@ -16,7 +16,7 @@
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "JPY"], "expected": "¥1,234" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "JPY"], "expected": "¥1,234.50" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [150000, "VND"], "expected": "₫150,000" },
-  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "COP"], "expected": "COP\u00a01,234.00" },
+  { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234, "VES"], "expected": "VES\u00a01,234.00" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "KWD"], "expected": "KWD\u00a01,234.50" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "XYZ"], "expected": "XYZ\u00a01,234.50" },
   { "locale": "en-US", "hourCycle": "h12", "op": "money", "args": [1234.5, "US"], "expected": "US 1,234.50" },
@@ -120,5 +120,11 @@
   { "locale": "en-US", "hourCycle": "h12", "op": "weekdayName", "args": [0], "expected": "domingo" },
   { "locale": "de-DE", "hourCycle": "h23", "op": "civilLongDate", "args": ["2027-05-03"], "expected": "lunes 3 de mayo de 2027" },
   { "locale": "de-DE", "hourCycle": "h23", "op": "civilLongDate", "args": ["2027-05-03", { "weekday": false, "year": false }], "expected": "3 de mayo" },
-  { "locale": "de-DE", "hourCycle": "h23", "op": "weekdayName", "args": [0], "expected": "domingo" }
+  { "locale": "de-DE", "hourCycle": "h23", "op": "weekdayName", "args": [0], "expected": "domingo" },
+  { "locale": "es-VE", "hourCycle": "h12", "op": "dayMonth", "args": ["2026-11-01T15:00:00Z", "America/Caracas"], "expected": "1/11" },
+  { "locale": "es-VE", "hourCycle": "h12", "op": "date", "args": ["2026-11-01T15:00:00Z", "America/Caracas"], "expected": "01/11/2026" },
+  { "locale": "en-GB", "hourCycle": "h23", "op": "dayMonth", "args": ["2026-11-01T15:00:00Z", "Europe/London"], "expected": "01/11" },
+  { "locale": "en-US", "hourCycle": "h12", "op": "dayMonth", "args": ["2026-11-01T15:00:00Z", "America/New_York"], "expected": "11/01" },
+  { "locale": "es-ES", "hourCycle": "h23", "op": "dayMonth", "args": ["2026-12-31T23:30:00Z", "Europe/Madrid"], "expected": "1/1" },
+  { "locale": "pt-BR", "hourCycle": "h23", "op": "dayMonth", "args": ["2027-03-05T12:00:00Z", "America/Sao_Paulo"], "expected": "05/03" }
 ]

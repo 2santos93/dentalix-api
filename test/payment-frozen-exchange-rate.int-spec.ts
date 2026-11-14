@@ -19,7 +19,7 @@ import { RecordAuditEventUseCase } from '../src/modules/audit/application/record
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { PrismaPaymentBaseRetryRepository } from '../src/modules/payments/infrastructure/allocations/prisma-payment-base-retry.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -74,7 +74,7 @@ const SUBDOMAINS = ['dx375-int-auto', 'dx375-int-manual'];
 const DAY = '2026-10-29';
 const OTHER_DAY = '2026-10-28';
 /** Snapshot del proveedor del día (el mismo para todas las clínicas). */
-const PROVIDER = { COP: 4000, EUR: 0.9 };
+const PROVIDER = { VES: 4000, EUR: 0.9 };
 
 interface Clinic {
   tenantId: string;
@@ -89,7 +89,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const user = await raw.user.create({
     data: {
@@ -160,7 +160,7 @@ async function pay(
       frozenOverride !== undefined
         ? frozenOverride
         : await freezePaymentRate(convert, {
-            currency: 'COP',
+            currency: 'VES',
             targetCurrency: 'USD',
             paidOn: day,
           });
@@ -168,7 +168,7 @@ async function pay(
       treatmentPlanId: clinic.planId,
       patientId: clinic.patientId,
       amount,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: { civilDate: day },
       createdById: clinic.userId,
       receiptPlanBalance,
@@ -246,7 +246,7 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
   });
 
   it('dos clínicas el mismo día con fuentes distintas congelan cada una su tasa y su fuente', async () => {
-    await registerManual(manual, DAY, 'COP', 4100);
+    await registerManual(manual, DAY, 'VES', 4100);
     const a = await pay(auto, 400000, DAY);
     const b = await pay(manual, 410000, DAY);
 
@@ -280,7 +280,7 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
 
   it('una tasa manual usada no se cambia: el repositorio lo rechaza y la BD también', async () => {
     const [rate] = await inClinic(manual, () => manualRepo.listRecent(10));
-    expect(rate).toMatchObject({ date: DAY, currency: 'COP', inUse: true });
+    expect(rate).toMatchObject({ date: DAY, currency: 'VES', inUse: true });
     await expect(
       inClinic(manual, () => manualRepo.correct(rate.id, 4200)),
     ).rejects.toBeInstanceOf(ManualExchangeRateInUseError);
@@ -378,7 +378,7 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
 
     // DX-380: registrar la tasa adelanta el reintento aplazado (el hook de
     // las tasas de la clínica llama a `wake`).
-    await registerManual(manual, OTHER_DAY, 'COP', 4100);
+    await registerManual(manual, OTHER_DAY, 'VES', 4100);
     await inClinic(manual, () => retries.wake());
     await inClinic(manual, () => retries.retryDue(50));
     expect(asNumbers(await storedRate(id))).toMatchObject({
@@ -422,7 +422,7 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
       raw.$executeRaw`UPDATE "payments" SET "exchangeRateSource" = NULL WHERE "id" = ${id}::uuid`,
     ).rejects.toThrow(/payments_exchange_rate_check/);
     await expect(
-      raw.$executeRaw`UPDATE "payments" SET "exchangeRateCurrency" = 'COP' WHERE "id" = ${id}::uuid`,
+      raw.$executeRaw`UPDATE "payments" SET "exchangeRateCurrency" = 'VES' WHERE "id" = ${id}::uuid`,
     ).rejects.toThrow(/payments_exchange_rate_check/);
     await expect(
       raw.$executeRaw`UPDATE "payments" SET "exchangeRateCurrency" = 'XXX', "exchangeRateFrom" = NULL, "exchangeRateTo" = NULL, "exchangeRateSource" = NULL, "exchangeRateDate" = NULL WHERE "id" = ${id}::uuid`,

@@ -84,10 +84,18 @@ export async function assertVoidKeepsPatientCredit(
               WHERE i."tenantId" = tp."tenantId" AND i."planId" = tp."id"
                 AND i."deletedAt" IS NULL AND i."status" IN ('ACCEPTED', 'DONE')
            ), 0)::text AS "billable",
+           -- DX-472-bis: lo de otra moneda cuenta por su base, como en el
+           -- saldo a favor del plan (planCredit); sin base, no cuenta.
            COALESCE((
-             SELECT pg_catalog.sum(p."amount") FROM "payments" p
+             SELECT pg_catalog.sum(CASE WHEN p."currency" = tp."currency"
+                                        THEN p."amount" ELSE b."amount" END)
+               FROM "payments" p
+               LEFT JOIN "payment_plan_amounts" b
+                 ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                  AND b."currency" = tp."currency"
               WHERE p."tenantId" = tp."tenantId" AND p."treatmentPlanId" = tp."id"
-                AND p."currency" = tp."currency" AND p."deletedAt" IS NULL
+                AND p."deletedAt" IS NULL
+                AND (p."currency" = tp."currency" OR b."paymentId" IS NOT NULL)
            ), 0)::text AS "paid",
            COALESCE((
              SELECT pg_catalog.sum(e."amount") FROM "patient_credit_entries" e
@@ -100,9 +108,15 @@ export async function assertVoidKeepsPatientCredit(
                 AND e."currency" = tp."currency" AND e."amount" < 0
            ), 0)::text AS "outflow",
            COALESCE((
-             SELECT pg_catalog.sum(p."amount") FROM "payments" p
+             SELECT pg_catalog.sum(CASE WHEN p."currency" = tp."currency"
+                                        THEN p."amount" ELSE b."amount" END)
+               FROM "payments" p
+               LEFT JOIN "payment_plan_amounts" b
+                 ON b."tenantId" = p."tenantId" AND b."paymentId" = p."id"
+                  AND b."currency" = tp."currency"
               WHERE p."tenantId" = tp."tenantId" AND p."treatmentPlanId" = tp."id"
-                AND p."currency" = tp."currency" AND p."deletedAt" IS NULL
+                AND p."deletedAt" IS NULL
+                AND (p."currency" = tp."currency" OR b."paymentId" IS NOT NULL)
                 AND p."id" = ANY(${lineIds}::uuid[])
            ), 0)::text AS "voided"
       FROM "treatment_plans" tp

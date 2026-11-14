@@ -5,11 +5,14 @@ import { App } from 'supertest/types';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
-import { registerVerified } from './support/register-verified';
+import {
+  registerVerified,
+  waitForPendingRegistration,
+} from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   registerBody as clinicRegisterBody,
@@ -66,7 +69,7 @@ describe('Auth (e2e)', () => {
   it('registers a clinic and logs the owner in', async () => {
     const register = await registerVerified(
       app,
-      clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Sonrisa',
         subdomain: 'sonrisa',
         email: 'owner@sonrisa.com',
@@ -93,7 +96,7 @@ describe('Auth (e2e)', () => {
   it('a registered clinic is created with majorityAge 18', async () => {
     const register = await registerVerified(
       app,
-      clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Mayoría',
         subdomain: 'dx328-registro',
         email: 'owner@dx328-registro.com',
@@ -133,7 +136,7 @@ describe('Auth (e2e)', () => {
     // Nueva clínica aislada para no chocar con los otros tests.
     await registerVerified(
       app,
-      clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+      clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Muela',
         subdomain: 'muela',
         email: 'owner@muela.com',
@@ -218,13 +221,9 @@ describe('Auth (e2e)', () => {
         .send({ token, password: PASSWORD });
     }
 
-    async function waitForPending(email: string) {
-      for (let i = 0; i < 200; i++) {
-        if (await raw.pendingRegistration.count({ where: { email } })) return;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      throw new Error('no apareció el registro pendiente');
-    }
+    // DX-520: sondeo con tope (no 2 s fijos), el mismo que `registerVerified`.
+    const waitForPending = (email: string) =>
+      waitForPendingRegistration(raw, email);
 
     it('registration creates the location with the four values, reviewed', async () => {
       const before = Date.now();
@@ -369,7 +368,7 @@ describe('Auth (e2e)', () => {
         .set('X-Tenant-Host', 'localhost')
         .send({
           ...subset,
-          locationCountry: 'CO',
+          locationCountry: 'VE',
           locationCurrency: 'JPY',
           locationLocale: 'ja-JP',
         })
@@ -545,7 +544,7 @@ describe('Auth (e2e)', () => {
         .set('X-Tenant-Host', 'localhost')
         .expect(200);
       const codes = (res.body as { code: string }[]).map((c) => c.code);
-      expect(codes).toEqual(expect.arrayContaining(['COP', 'EUR', 'JPY']));
+      expect(codes).toEqual(expect.arrayContaining(['GBP', 'EUR', 'JPY']));
       expect(codes).not.toContain('KWD');
       expect(res.body).toEqual(
         expect.arrayContaining([

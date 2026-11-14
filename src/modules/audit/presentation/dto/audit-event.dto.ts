@@ -4,9 +4,11 @@ import {
   AUDIT_CANCELLATION_KINDS,
   AUDIT_CANCELLATION_REASONS,
   AUDIT_ORIGINS,
+  AUDIT_RECALL_VIAS,
   MAX_AUDIT_CONFIG_TEXT,
   type AuditCancellation,
   type AuditOrigin,
+  type AuditRecallVia,
 } from '../../domain/audit-metadata';
 
 // Forma de la respuesta de `GET /audit-events` (DX-009). Solo documenta el
@@ -58,6 +60,13 @@ export class AuditAppointmentMoveDto {
 
   @ApiProperty({ type: AuditAppointmentSlotDto })
   to!: AuditAppointmentSlotDto;
+
+  @ApiPropertyOptional({
+    enum: ['OPENING'],
+    description:
+      'DX-436-bis: `OPENING` = «Asignar» desde «Ocupar este hueco»; sin él, un reagendado.',
+  })
+  via?: 'OPENING';
 }
 
 export class AuditSearchDto {
@@ -256,6 +265,20 @@ export class AuditStaffAccessChangeDto {
   after?: AuditStaffAccessSideDto;
 }
 
+export class AuditExchangeRateDto {
+  @ApiProperty({ description: 'ISO 4217, nunca USD.' })
+  currency!: string;
+
+  @ApiProperty({ format: 'date', example: '2026-10-29' })
+  day!: string;
+
+  @ApiProperty({
+    example: '36.5',
+    description: 'Unidades de la moneda por 1 USD, decimal en texto.',
+  })
+  rate!: string;
+}
+
 export class AuditExchangeRateBackupDto {
   @ApiProperty({
     format: 'date',
@@ -277,6 +300,38 @@ export class AuditExchangeRateBackupDto {
     description: 'Las monedas de la cotización (ISO 4217).',
   })
   currencies!: string[];
+}
+
+export class AuditAllocationLineDto {
+  @ApiProperty({ format: 'uuid', description: 'El ítem del plan.' })
+  itemId!: string;
+
+  @ApiProperty({ example: 25.5, description: 'En la moneda del plan.' })
+  amount!: number;
+}
+
+export class AuditAllocationDto {
+  @ApiProperty({ description: 'ISO 4217: la moneda del plan.' })
+  currency!: string;
+
+  @ApiProperty({
+    enum: ['MANUAL', 'AUTO'],
+    description:
+      'MANUAL: el ADMIN fijó la imputación a mano. AUTO: la devolvió al reparto automático.',
+  })
+  mode!: 'MANUAL' | 'AUTO';
+
+  @ApiProperty({
+    type: [AuditAllocationLineDto],
+    description: 'Origen: las líneas de antes de guardar.',
+  })
+  before!: AuditAllocationLineDto[];
+
+  @ApiProperty({
+    type: [AuditAllocationLineDto],
+    description: 'Destino: las líneas que quedaron (tras el reparto).',
+  })
+  after!: AuditAllocationLineDto[];
 }
 
 /** Valor de un campo de configuración (DX-360): texto de una línea, número, booleano, null o lista. */
@@ -311,6 +366,56 @@ export class AuditConfigChangeDto {
     example: { durationMinutes: 45 },
   })
   after?: Record<string, unknown>;
+}
+
+/** Cambio del plazo de conservación de la historia clínica (DX-330). */
+export class AuditPeriodDto {
+  @ApiProperty({
+    example: '2026-10-01',
+    description: 'Primer día (AAAA-MM-DD), inclusive.',
+  })
+  from!: string;
+
+  @ApiProperty({
+    example: '2026-10-31',
+    description: 'Último día (AAAA-MM-DD), inclusive.',
+  })
+  to!: string;
+}
+
+export class AuditRetentionTermChangeDto {
+  @ApiProperty({
+    enum: ['UP', 'DOWN'],
+    description: 'Dirección según el plazo vigente.',
+  })
+  direction!: 'UP' | 'DOWN';
+
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description:
+      'Pacientes que conservan una fecha posterior a la del plazo nuevo; 0 en una subida.',
+  })
+  protectedPatients!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: 'Plazo vigente antes del cambio, en años.',
+  })
+  effectiveBefore!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: 'Plazo vigente después del cambio, en años.',
+  })
+  effectiveAfter!: number;
+
+  @ApiProperty({
+    description: 'Una bajada que corrige una subida de hace menos de 24 horas.',
+  })
+  withinCorrectionWindow!: boolean;
 }
 
 export class AuditMetadataDto {
@@ -416,11 +521,47 @@ export class AuditMetadataDto {
   exchangeRateBackup?: AuditExchangeRateBackupDto;
 
   @ApiPropertyOptional({
+    type: AuditExchangeRateDto,
+    description:
+      'DX-381: alta de una tasa de cambio manual (`resourceId` = la tasa): moneda, día y tasa. Nada del autor ni de los abonos.',
+  })
+  exchangeRate?: AuditExchangeRateDto;
+
+  @ApiPropertyOptional({
+    type: AuditAllocationDto,
+    description:
+      'DX-051/DX-399: un ADMIN reasignó la imputación de un abono (`resourceId` = el abono, `reason` PAYMENT_REALLOCATED): modo, moneda del plan y las líneas (ítem e importe) de antes y de después. Nada del paciente.',
+  })
+  allocation?: AuditAllocationDto;
+
+  @ApiPropertyOptional({
     type: AuditConfigChangeDto,
     description:
       'DX-360: configuración de la clínica (sedes, horario, recordatorios, dominios, política de datos, tipos de cita, pagadores, plantillas, inventario): los campos que cambiaron con su antes y después, o un lado en un alta o un retiro. El texto libre o largo (cuerpo de una plantilla, notas, motivo) solo figura en `changedFields`; nunca secretos (token de un dominio) ni datos de pacientes.',
   })
   configChange?: AuditConfigChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditRetentionTermChangeDto,
+    description:
+      'DX-330: cambio del plazo de conservación de la historia clínica (`reason` CLINICAL_RECORD_RETENTION_SETTINGS): dirección, pacientes protegidos, plazos vigentes y si corrigió una subida reciente. Solo códigos y enteros.',
+  })
+  retentionTermChange?: AuditRetentionTermChangeDto;
+
+  @ApiPropertyOptional({
+    type: AuditPeriodDto,
+    description:
+      'DX-401: el período (días civiles, ambos inclusive) del resumen de recibos del paciente que se vio, imprimió o envió. Solo las dos fechas.',
+  })
+  period?: AuditPeriodDto;
+
+  @ApiPropertyOptional({
+    enum: AUDIT_RECALL_VIAS,
+    enumName: 'AuditRecallVia',
+    description:
+      'DX-015-bis: por dónde se creó o cambió un recall (`PATIENT_RECALL`) fuera del PUT de la ficha: DEFAULT = «Programar recall» con el intervalo por defecto del tipo; CLINICAL_ENTRY = el intervalo fijado al registrar la evolución.',
+  })
+  via?: AuditRecallVia;
 }
 
 export class AuditEventDto {

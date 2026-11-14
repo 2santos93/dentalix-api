@@ -16,7 +16,7 @@ import {
   CANCELLATION_POLICY_MESSAGES,
 } from '../src/modules/cancellation-policies/domain/cancellation-policy';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -30,6 +30,22 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
+/** La sede principal está en Caracas (UTC−4 fijo, sin horario de verano). */
+const CARACAS_OFFSET = 4 * HOUR;
+
+/**
+ * DX-267-bis: el martes a 2 días o más de hoy a las 10:00–10:30 en Caracas.
+ * Cae SIEMPRE dentro del horario por defecto de la sede (lun–vie 9–13), sea
+ * cual sea la hora a la que corre la suite: el día civil se calcula en la
+ * zona de la sede y la hora es fija.
+ */
+function nextTuesdayAt10Caracas(): Date {
+  let t = Date.now() - CARACAS_OFFSET + 2 * DAY;
+  while (new Date(t).getUTCDay() !== 2) t += DAY;
+  const day = new Date(t).toISOString().slice(0, 10);
+  return new Date(`${day}T10:00:00-04:00`);
+}
 
 interface PolicyVersion {
   id: string;
@@ -98,19 +114,23 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
   };
   /** Una cita de A (sembrada por `raw`: el horario no importa aquí). */
   async function appointment(
-    hoursFromNow: number,
+    hoursFromNow: number | Date,
     locationId = principal,
     patientId = patient,
+    providerId: string = randomUUID(),
   ): Promise<string> {
     // Un profesional por cita (sin solapes del profesional); las del mismo
     // paciente van a horas distintas.
-    const start = new Date(Date.now() + hoursFromNow * HOUR);
+    const start =
+      hoursFromNow instanceof Date
+        ? hoursFromNow
+        : new Date(Date.now() + hoursFromNow * HOUR);
     const created = await raw.appointment.create({
       data: {
         tenantId: a.tenantId,
         locationId,
         patientId,
-        providerId: randomUUID(),
+        providerId,
         start,
         end: new Date(start.getTime() + 30 * 60_000),
       },
@@ -138,7 +158,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
         await admin()
           .post(
             '/locations',
-            locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+            locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
           )
           .expect(201)
       ).body as { id: string }
@@ -231,7 +251,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
       [{ noticeHours: -1 }, CANCELLATION_POLICY_MESSAGES.noticeHours],
       [{ noticeHours: 1.5 }, CANCELLATION_POLICY_MESSAGES.noticeHours],
       [
-        { noticeHours: 24, suggestedFee: -1, currency: 'COP' },
+        { noticeHours: 24, suggestedFee: -1, currency: 'USD' },
         CANCELLATION_POLICY_MESSAGES.fee,
       ],
       [
@@ -264,7 +284,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
           .post(`/locations/${principal}/cancellation-policy`, {
             noticeHours: 24,
             suggestedFee: 50000,
-            currency: 'cop',
+            currency: 'usd',
             patientText: 'Avísanos con 24 horas.',
           })
           .expect(201)
@@ -279,7 +299,7 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
         version: 2,
         noticeHours: 24,
         suggestedFee: 50000,
-        currency: 'COP',
+        currency: 'USD',
       });
       const res = await admin()
         .get(`/locations/${principal}/cancellation-policy`)
@@ -433,7 +453,15 @@ describe('Política de cancelación por sede y cancelaciones (DX-279)', () => {
     });
 
     it('marcar NO_SHOW guarda la hora; reactivar limpia todo', async () => {
-      const id = await appointment(-30);
+      // DX-267-bis: reactivar aplica las reglas de mover (no al pasado,
+      // profesional de verdad de la clínica, horario por defecto de la sede):
+      // cita futura del titular a una hora fija dentro del horario.
+      const id = await appointment(
+        nextTuesdayAt10Caracas(),
+        principal,
+        patient,
+        a.adminUserId,
+      );
       const noShow = await api(a, tokens.RECEPTION!)
         .patch(`/appointments/${id}`, { status: 'NO_SHOW' })
         .expect(200);

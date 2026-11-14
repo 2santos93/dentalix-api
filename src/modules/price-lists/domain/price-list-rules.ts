@@ -3,6 +3,8 @@
  * (400 en español), el DTO y los tests; la migración repite el largo del
  * nombre y `price >= 0` como CHECK, que es la red si algo se saltara la API.
  */
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../shared/money/currency-messages';
+
 export const PRICE_LIST_NAME_MIN = 2;
 export const PRICE_LIST_NAME_MAX = 120;
 /** Filas por `PUT /price-lists/:id/items`. */
@@ -19,7 +21,7 @@ export const PRICE_LIST_CURRENCY_LOCKED_MESSAGE =
   'La lista tiene precios; crea una lista nueva para otra moneda.';
 export const PRICE_LIST_IN_USE_MESSAGE =
   'Esta lista la usa un convenio; desactívala en lugar de retirarla.';
-export const PRICE_LIST_CURRENCY_UNKNOWN_MESSAGE = 'Moneda no válida.';
+export const PRICE_LIST_CURRENCY_UNKNOWN_MESSAGE = UNKNOWN_CURRENCY_MESSAGE;
 export const PRICE_LIST_LOCATION_NOT_FOUND_MESSAGE = 'Sede no encontrada.';
 export const PRICE_LIST_CATALOG_ITEMS_MESSAGE =
   'Hay prestaciones que no existen en el catálogo de esta clínica.';

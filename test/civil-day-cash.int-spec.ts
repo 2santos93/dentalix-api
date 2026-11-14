@@ -9,7 +9,7 @@ import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/in
 import { GetPaymentsTotalsUseCase } from '../src/modules/payments/application/use-cases/get-payments-totals.use-case';
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   legacyLocationInsert,
   locationData,
@@ -24,10 +24,10 @@ const owner = new PrismaClient<Prisma.PrismaClientOptions>({
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 const repo = new PrismaPaymentRepository(prisma, tenantContext);
-// 17/10/2026 10:00 en Bogotá: solo decide `canVoid`, no el período.
+// 17/10/2026 10:00 en la zona de la sede: solo decide `canVoid`, no el período.
 const cash = new ListCashPaymentsUseCase(
   repo,
-  () => new Date('2026-10-17T15:00:00.000Z'),
+  () => new Date('2026-10-17T14:00:00.000Z'),
   new PrismaPaymentMethodRepository(prisma, tenantContext),
 );
 // Tasa 1:1: aquí importa QUÉ abonos entran, no la conversión.
@@ -83,9 +83,9 @@ async function purge(): Promise<void> {
 describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
   let tenantA: string;
   let tenantB: string;
-  let bogota: string;
+  let caracas: string;
   let madrid: string;
-  let bogotaB: string;
+  let caracasB: string;
   let planA: string;
   let patientA: string;
   const ids: Record<string, string> = {};
@@ -122,12 +122,12 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     const sede = async (
       tenantId: string,
       name: string,
-      country: 'CO' | 'ES',
+      country: 'VE' | 'ES',
       timeZone: string,
       withSchedule: boolean,
     ) => {
       const loc = await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name,
           country,
@@ -141,10 +141,10 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       }
       return loc.id;
     };
-    bogota = await sede(tenantA, 'Bogotá', 'CO', 'America/Bogota', true);
+    caracas = await sede(tenantA, 'Caracas', 'VE', 'America/Caracas', true);
     // Sede de España SIN horario: su zona es la de la sede (Europe/Madrid).
     madrid = await sede(tenantA, 'Madrid', 'ES', 'Europe/Madrid', false);
-    bogotaB = await sede(tenantB, 'Bogotá B', 'CO', 'America/Bogota', true);
+    caracasB = await sede(tenantB, 'Caracas B', 'VE', 'America/Caracas', true);
 
     patientA = (
       await owner.patient.create({
@@ -153,7 +153,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     ).id;
     planA = (
       await owner.treatmentPlan.create({
-        data: { tenantId: tenantA, patientId: patientA, currency: 'COP' },
+        data: { tenantId: tenantA, patientId: patientA, currency: 'USD' },
       })
     ).id;
     const patientB = (
@@ -163,7 +163,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     ).id;
     const planB = (
       await owner.treatmentPlan.create({
-        data: { tenantId: tenantB, patientId: patientB, currency: 'COP' },
+        data: { tenantId: tenantB, patientId: patientB, currency: 'USD' },
       })
     ).id;
 
@@ -173,7 +173,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       paidAt: string,
       amount = 100,
     ) => {
-      const isB = locationId === bogotaB;
+      const isB = locationId === caracasB;
       ids[key] = (
         await owner.payment.create({
           data: {
@@ -182,27 +182,27 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
             treatmentPlanId: isB ? planB : planA,
             patientId: isB ? patientB : patientA,
             amount,
-            currency: 'COP',
+            currency: 'USD',
             paidAt: new Date(paidAt),
           },
         })
       ).id;
     };
-    // 16/10 20:00 en Bogotá = 17/10 01:00 UTC.
-    await pay('bogEvening', bogota, '2026-10-17T01:00:00.000Z', 80000);
-    // 17/10 09:00 en Bogotá.
-    await pay('bogNextMorning', bogota, '2026-10-17T14:00:00.000Z', 1);
-    // 16/10 01:00 en Madrid (CEST) = 15/10 23:00 UTC = 15/10 18:00 en Bogotá.
+    // 16/10 21:00 en la zona de la sede = 17/10 01:00 UTC.
+    await pay('ccsEvening', caracas, '2026-10-17T01:00:00.000Z', 80000);
+    // 17/10 09:00 en la zona de la sede.
+    await pay('ccsNextMorning', caracas, '2026-10-17T13:00:00.000Z', 1);
+    // 16/10 01:00 en Madrid (CEST) = 15/10 23:00 UTC = 15/10 19:00 en Caracas.
     await pay('madEarly', madrid, '2026-10-15T23:00:00.000Z', 2);
-    // 17/10 00:30 en Madrid = 16/10 22:30 UTC = 16/10 17:30 en Bogotá.
+    // 17/10 00:30 en Madrid = 16/10 22:30 UTC = 16/10 18:30 en Caracas.
     await pay('madAfterMidnight', madrid, '2026-10-16T22:30:00.000Z', 4);
-    // Cambio de mes: 31/10 22:00 y 01/11 00:30 en Bogotá.
-    await pay('bogOct31Late', bogota, '2026-11-01T03:00:00.000Z', 1000);
-    await pay('bogNov1Early', bogota, '2026-11-01T05:30:00.000Z', 7);
-    // 30/09 23:59 en Bogotá (01/10 04:59 UTC): septiembre.
-    await pay('bogSep30Late', bogota, '2026-10-01T04:59:00.000Z', 9);
+    // Cambio de mes: 31/10 22:00 y 01/11 00:30 en la zona de la sede.
+    await pay('ccsOct31Late', caracas, '2026-11-01T02:00:00.000Z', 1000);
+    await pay('ccsNov1Early', caracas, '2026-11-01T04:30:00.000Z', 7);
+    // 30/09 23:59 en la zona de la sede (01/10 03:59 UTC): septiembre.
+    await pay('ccsSep30Late', caracas, '2026-10-01T03:59:00.000Z', 9);
     // Otra clínica, mismo día.
-    await pay('otherTenant', bogotaB, '2026-10-17T01:00:00.000Z', 5);
+    await pay('otherTenant', caracasB, '2026-10-17T01:00:00.000Z', 5);
   });
 
   afterAll(async () => {
@@ -211,22 +211,22 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     await owner.$disconnect();
   });
 
-  it('un abono a las 20:00 de Bogotá está en la caja de «hoy» (D) de su sede y no en D+1', async () => {
-    expect(await cashIds(bogota, '2026-10-16')).toEqual(idsOf('bogEvening'));
-    expect(await cashIds(bogota, '2026-10-17')).toEqual(
-      idsOf('bogNextMorning'),
+  it('un abono a las 20:00 de Caracas está en la caja de «hoy» (D) de su sede y no en D+1', async () => {
+    expect(await cashIds(caracas, '2026-10-16')).toEqual(idsOf('ccsEvening'));
+    expect(await cashIds(caracas, '2026-10-17')).toEqual(
+      idsOf('ccsNextMorning'),
     );
   });
 
   it('la fila trae su día civil en la zona de la sede (paidOn)', async () => {
-    const out = await inA(bogota, () =>
+    const out = await inA(caracas, () =>
       cash.execute({ from: '2026-10-16', to: '2026-10-16' }, ADMIN),
     );
     expect(out.items).toHaveLength(1);
     expect(out.items[0].paidAt.toISOString()).toBe('2026-10-17T01:00:00.000Z');
     expect(out.items[0].paidOn).toBe('2026-10-16');
     expect(out.summary.byCurrency).toEqual([
-      { currency: 'COP', total: 80000, count: 1 },
+      { currency: 'USD', total: 80000, count: 1 },
     ]);
   });
 
@@ -238,33 +238,33 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     );
     // Vista consolidada: el 16 de CADA sede, en su zona.
     expect(await cashIds(undefined, '2026-10-16')).toEqual(
-      idsOf('bogEvening', 'madEarly'),
+      idsOf('ccsEvening', 'madEarly'),
     );
     expect(await cashIds(undefined, '2026-10-17')).toEqual(
-      idsOf('bogNextMorning', 'madAfterMidnight'),
+      idsOf('ccsNextMorning', 'madAfterMidnight'),
     );
   });
 
   it('el resumen mensual incluye el 31 a las 22:00 y excluye el 1 del mes siguiente a las 00:30 (hora de la sede)', async () => {
-    const october = await inA(bogota, () =>
-      totals.execute({ from: '2026-10-01', to: '2026-10-31', currency: 'COP' }),
+    const october = await inA(caracas, () =>
+      totals.execute({ from: '2026-10-01', to: '2026-10-31', currency: 'USD' }),
     );
-    // bogEvening + bogNextMorning + bogOct31Late; ni bogNov1Early ni bogSep30Late.
+    // ccsEvening + ccsNextMorning + ccsOct31Late; ni ccsNov1Early ni ccsSep30Late.
     expect(october.count).toBe(3);
-    expect(october.byCurrency).toEqual({ COP: 81001 });
+    expect(october.byCurrency).toEqual({ USD: 81001 });
 
-    const november = await inA(bogota, () =>
-      totals.execute({ from: '2026-11-01', to: '2026-11-30', currency: 'COP' }),
+    const november = await inA(caracas, () =>
+      totals.execute({ from: '2026-11-01', to: '2026-11-30', currency: 'USD' }),
     );
-    expect(november.byCurrency).toEqual({ COP: 7 });
+    expect(november.byCurrency).toEqual({ USD: 7 });
   });
 
   it('la caja de un rango from/to es inclusiva en los dos extremos en la zona de la sede', async () => {
-    expect(await cashIds(bogota, '2026-10-01', '2026-10-31')).toEqual(
-      idsOf('bogEvening', 'bogNextMorning', 'bogOct31Late'),
+    expect(await cashIds(caracas, '2026-10-01', '2026-10-31')).toEqual(
+      idsOf('ccsEvening', 'ccsNextMorning', 'ccsOct31Late'),
     );
-    expect(await cashIds(bogota, '2026-09-30', '2026-09-30')).toEqual(
-      idsOf('bogSep30Late'),
+    expect(await cashIds(caracas, '2026-09-30', '2026-09-30')).toEqual(
+      idsOf('ccsSep30Late'),
     );
   });
 
@@ -287,7 +287,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         treatmentPlanId: planA,
         patientId: patientA,
         amount: 3,
-        currency: 'COP',
+        currency: 'USD',
         paidAt: { civilDate: '2026-12-01' },
         receiptPlanBalance: null,
         planAmount: null,
@@ -314,11 +314,11 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
           `INSERT INTO "payments" ("id", "tenantId", "locationId", "treatmentPlanId", "patientId", "amount", "currency", "paidAt", "updatedAt")
            SELECT gen_random_uuid(), $1::uuid,
                   CASE WHEN g % 2 = 0 THEN $2::uuid ELSE $3::uuid END,
-                  $4::uuid, $5::uuid, 1, 'COP',
+                  $4::uuid, $5::uuid, 1, 'USD',
                   timestamp '2025-01-01 15:00' + g * interval '1 day', now()
              FROM generate_series(1, 300) AS g`,
           tenantA,
-          bogota,
+          caracas,
           madrid,
           planA,
           patientA,
@@ -331,9 +331,9 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
             AND (("locationId" = ANY($2::uuid[]) AND "paidAt" >= $3 AND "paidAt" < $4)
               OR ("locationId" = ANY($5::uuid[]) AND "paidAt" >= $6 AND "paidAt" < $7))`,
           tenantA,
-          [bogota],
-          new Date('2026-10-16T05:00:00.000Z'),
-          new Date('2026-10-17T05:00:00.000Z'),
+          [caracas],
+          new Date('2026-10-16T04:00:00.000Z'),
+          new Date('2026-10-17T04:00:00.000Z'),
           [madrid],
           new Date('2026-10-15T22:00:00.000Z'),
           new Date('2026-10-16T22:00:00.000Z'),
@@ -358,7 +358,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
           treatmentPlanId: planA,
           patientId: patientA,
           amount: 1,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date(paidAt),
         },
       })
@@ -385,7 +385,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     try {
       expect(await cashIds(tokyo, '2026-10-20')).toEqual([before]);
       expect(await cashIds(tokyo, '2026-10-21')).toEqual([after]);
-      // Consolidada: también en su zona, junto a las de Bogotá y Madrid.
+      // Consolidada: también en su zona, junto a las de Caracas y Madrid.
       expect(await cashIds(undefined, '2026-10-21')).toEqual([after]);
     } finally {
       await dropPayments([before, after]);
@@ -401,7 +401,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
         owner,
         tenantA,
         'Réplica antigua',
-        REGIONAL_BOGOTA_FIXTURE.country,
+        REGIONAL_CARACAS_FIXTURE.country,
       );
     });
 
@@ -412,13 +412,13 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     it('tenant-wide view ignores an unconfigured location without movements', async () => {
       // Caja y dashboard consolidados siguen funcionando.
       expect(await cashIds(undefined, '2026-10-16')).toEqual(
-        idsOf('bogEvening', 'madEarly'),
+        idsOf('ccsEvening', 'madEarly'),
       );
       const month = await inA(undefined, () =>
         totals.execute({
           from: '2026-10-01',
           to: '2026-10-31',
-          currency: 'COP',
+          currency: 'USD',
         }),
       );
       expect(month.count).toBeGreaterThan(0);
@@ -429,7 +429,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
     });
 
     it('tenant-wide view with movements at an unconfigured location is 409 LOCATION_TIMEZONE_REQUIRED', async () => {
-      const paid = await payAt(legacy, '2026-10-16T17:00:00.000Z');
+      const paid = await payAt(legacy, '2026-10-16T16:00:00.000Z');
       try {
         const conflict = {
           response: { code: 'LOCATION_TIMEZONE_REQUIRED', locationId: legacy },
@@ -442,13 +442,13 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
             totals.execute({
               from: '2026-10-01',
               to: '2026-10-31',
-              currency: 'COP',
+              currency: 'USD',
             }),
           ),
         ).rejects.toMatchObject(conflict);
         // La caja de otra sede no la necesita.
-        expect(await cashIds(bogota, '2026-10-16')).toEqual(
-          idsOf('bogEvening'),
+        expect(await cashIds(caracas, '2026-10-16')).toEqual(
+          idsOf('ccsEvening'),
         );
       } finally {
         await dropPayments([paid]);
@@ -488,12 +488,12 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       });
 
     it('mueve las medianoches UTC (días del formulario) al mediodía de la sede, deja rastro y no toca los instantes reales', async () => {
-      await pay2('legacyBog', bogota, '2026-10-16T00:00:00.000Z');
+      await pay2('legacyBog', caracas, '2026-10-16T00:00:00.000Z');
       await pay2('legacyMad', madrid, '2026-10-16T00:00:00.000Z');
       // Anulado: se mueve igual (su día de caja también era ese).
       await pay2(
         'legacyVoided',
-        bogota,
+        caracas,
         '2026-10-18T00:00:00.000Z',
         new Date(),
       );
@@ -502,7 +502,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       // zona de su país (ES), sin abortar el despliegue.
       const retired = (
         await owner.location.create({
-          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          data: locationData(REGIONAL_CARACAS_FIXTURE, {
             tenantId: tenantA,
             name: 'Retirada',
             country: 'ES',
@@ -528,14 +528,14 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       });
       const at = (key: string) =>
         rows.find((r) => r.id === ids[key])!.paidAt.toISOString();
-      expect(at('legacyBog')).toBe('2026-10-16T17:00:00.000Z');
+      expect(at('legacyBog')).toBe('2026-10-16T16:00:00.000Z');
       expect(at('legacyMad')).toBe('2026-10-16T10:00:00.000Z');
-      expect(at('legacyVoided')).toBe('2026-10-18T17:00:00.000Z');
+      expect(at('legacyVoided')).toBe('2026-10-18T16:00:00.000Z');
       expect(at('legacyRetired')).toBe('2026-10-19T10:00:00.000Z');
-      expect(at('bogEvening')).toBe('2026-10-17T01:00:00.000Z');
+      expect(at('ccsEvening')).toBe('2026-10-17T01:00:00.000Z');
       // El día de caja es el que se eligió en el formulario.
-      expect(await cashIds(bogota, '2026-10-16')).toEqual(
-        idsOf('bogEvening', 'legacyBog'),
+      expect(await cashIds(caracas, '2026-10-16')).toEqual(
+        idsOf('ccsEvening', 'legacyBog'),
       );
       expect(await cashIds(madrid, '2026-10-16')).toEqual(
         idsOf('madEarly', 'legacyMad'),
@@ -556,11 +556,11 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
       const byId = new Map(trail.map((t) => [t.payment_id, t]));
       expect(byId.get(ids.legacyBog)).toMatchObject({
         old_paid_at: new Date('2026-10-16T00:00:00.000Z'),
-        new_paid_at: new Date('2026-10-16T17:00:00.000Z'),
-        time_zone: 'America/Bogota',
+        new_paid_at: new Date('2026-10-16T16:00:00.000Z'),
+        time_zone: 'America/Caracas',
       });
       expect(byId.get(ids.legacyRetired)?.time_zone).toBe('Europe/Madrid');
-      expect(byId.has(ids.bogEvening)).toBe(false);
+      expect(byId.has(ids.ccsEvening)).toBe(false);
       expect(trail).toHaveLength(4);
 
       // Segunda ejecución: no cambia nada ni duplica el rastro.
@@ -603,7 +603,7 @@ describe('DX-097 · días civiles de la sede en caja y dashboard (int)', () => {
             treatmentPlanId: planA,
             patientId: patientA,
             amount: 50,
-            currency: 'COP',
+            currency: 'USD',
             paidAt: new Date(paidAt),
             deletedAt: deletedAt ?? null,
           },

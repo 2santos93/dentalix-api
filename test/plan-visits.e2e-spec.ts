@@ -12,7 +12,7 @@ import {
   STAFF_CANCELLATION,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   legacyLocationInsert,
   locationData,
 } from './support/location-fixtures';
@@ -59,7 +59,7 @@ describe('DX-256 visitas y agenda', () => {
     });
     otherLocation = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId: a.tenantId,
           name: 'Norte',
         }),
@@ -73,7 +73,7 @@ describe('DX-256 visitas y agenda', () => {
           tenantId: a.tenantId,
           firstName: 'Ana',
           lastName: 'Visitas',
-          phone: '+573001234567',
+          phone: '+584121234567',
         },
       })
     ).id;
@@ -88,7 +88,7 @@ describe('DX-256 visitas y agenda', () => {
     });
     planId = (
       await raw.treatmentPlan.create({
-        data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+        data: { tenantId: a.tenantId, patientId, currency: 'VES' },
       })
     ).id;
     itemIds = [];
@@ -193,9 +193,31 @@ describe('DX-256 visitas y agenda', () => {
       ).items,
     ).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ planId, currency: 'COP', total: 270 }),
+        expect.objectContaining({ planId, currency: 'VES', total: 270 }),
       ]),
     );
+    // DX-283: la lista dice qué tratamientos entran, también a recepción, que no lee el catálogo.
+    const row = (
+      page.body as {
+        items: {
+          planId: string;
+          planItemIds: string[];
+          planItems: {
+            id: string;
+            toothNumber: string;
+            procedureName: string;
+          }[];
+        }[];
+      }
+    ).items.find((p) => p.planId === planId)!;
+    expect(row.planItems.map((i) => i.id).sort()).toEqual(
+      [...row.planItemIds].sort(),
+    );
+    expect(row.planItems.length).toBeGreaterThan(0);
+    for (const item of row.planItems) {
+      expect(item.procedureName).toBe('Corona');
+      expect(item.toothNumber).toBeTruthy();
+    }
     const north = await call(
       'get',
       `/treatment-plans/unscheduled?locationId=${otherLocation}`,
@@ -482,13 +504,13 @@ describe('DX-256 visitas y agenda', () => {
       where: { id: otherLocation },
       select: { defaultPhoneRegion: true },
     });
-    const veneciana = await raw.patient.create({
+    const madrilena = await raw.patient.create({
       data: {
         tenantId: a.tenantId,
         firstName: 'Vera',
         lastName: 'Visitas',
-        phone: '0412-1234567',
-        countryCode: 'CO',
+        phone: '612 34 56 78',
+        countryCode: 'ES',
       },
     });
     const catalog = await raw.dentalCatalogItem.findFirstOrThrow({
@@ -497,8 +519,8 @@ describe('DX-256 visitas y agenda', () => {
     const plan = await raw.treatmentPlan.create({
       data: {
         tenantId: a.tenantId,
-        patientId: veneciana.id,
-        currency: 'COP',
+        patientId: madrilena.id,
+        currency: 'VES',
         status: 'ACCEPTED',
         acceptedAt: new Date(Date.now() - 2 * DAY),
         acceptedLocationId: otherLocation,
@@ -524,13 +546,13 @@ describe('DX-256 visitas y agenda', () => {
         }
       ).items.find((i) => i.planId === plan.id)?.patientWhatsApp;
     try {
-      // La sede del plan lee con su región (CO): ese número no es válido.
+      // La sede del plan lee con su región (VE): ese número no es válido.
       expect(await whatsAppOf()).toBeNull();
       await raw.location.update({
         where: { id: otherLocation },
-        data: { defaultPhoneRegion: 'VE' },
+        data: { defaultPhoneRegion: 'ES' },
       });
-      expect(await whatsAppOf()).toBe('584121234567');
+      expect(await whatsAppOf()).toBe('34612345678');
     } finally {
       await raw.location.update({
         where: { id: otherLocation },
@@ -558,7 +580,7 @@ describe('DX-256 visitas y agenda', () => {
         raw,
         a.tenantId,
         'Réplica antigua',
-        REGIONAL_BOGOTA_FIXTURE.country,
+        REGIONAL_CARACAS_FIXTURE.country,
       );
     });
 

@@ -5,7 +5,7 @@ import { App } from 'supertest/types';
 import { createE2eApp } from './support/create-e2e-app';
 import { Clinic, registerClinic, resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   locationBody,
   locationData,
@@ -31,7 +31,7 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
   let app: INestApplication<App>;
   let clinic: Clinic;
   let mainLocation: string;
-  let veLocation: string;
+  let esLocation: string;
   let doc = 387000;
 
   const api = () => request(app.getHttpServer());
@@ -59,22 +59,22 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    // Bogotá: la sede principal nace con la región CO (DX-329).
+    // La sede principal nace con la región VE (DX-329).
     clinic = await registerClinic(app, 'dx387-telefonos');
     const main = await raw.location.findFirstOrThrow({
       where: { tenantId: clinic.tenantId },
       select: { id: true, defaultPhoneRegion: true },
     });
-    expect(main.defaultPhoneRegion).toBe('CO');
+    expect(main.defaultPhoneRegion).toBe('VE');
     mainLocation = main.id;
     const second = await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: clinic.tenantId,
-        name: 'Sede 387 VE',
-        defaultPhoneRegion: 'VE',
+        name: 'Sede 387 ES',
+        defaultPhoneRegion: 'ES',
       }),
     });
-    veLocation = second.id;
+    esLocation = second.id;
   });
 
   afterAll(async () => {
@@ -85,8 +85,8 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
 
   describe('pacientes', () => {
     it('the create and edit responses carry the international format', async () => {
-      const created = await newPatient('310 5550101');
-      expect(created.phoneInternational).toBe('+57 310 5550101');
+      const created = await newPatient('414 5550101');
+      expect(created.phoneInternational).toBe('+58 414 5550101');
       const edited = await as(api().patch(`/api/v1/patients/${created.id}`))
         .send({ phone: '+58 412 1234567' })
         .expect(200);
@@ -99,7 +99,7 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
     });
 
     it('the record reads a number without + with the region of the active location, or the main one', async () => {
-      const patient = await newPatient('0412-1234567');
+      const patient = await newPatient('612 34 56 78');
       const read = async (location?: string) =>
         (
           await as(
@@ -107,17 +107,17 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
             location,
           ).expect(200)
         ).body as PhoneBody;
-      // En CO no es un número válido: null, y el guardado tal cual.
+      // Con la región VE no es un número válido: null, y el guardado tal cual.
       expect(await read()).toMatchObject({
-        phone: '0412-1234567',
+        phone: '612 34 56 78',
         phoneInternational: null,
       });
       expect(await read(mainLocation)).toMatchObject({
         phoneInternational: null,
       });
-      expect(await read(veLocation)).toMatchObject({
-        phone: '0412-1234567',
-        phoneInternational: '+58 412 1234567',
+      expect(await read(esLocation)).toMatchObject({
+        phone: '612 34 56 78',
+        phoneInternational: '+34 612 34 56 78',
       });
     });
 
@@ -127,15 +127,31 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
         phone: 'llamar por la tarde',
         phoneInternational: null,
       });
-      const ambiguous = await newPatient('0058 412 1234567');
-      expect(ambiguous.phoneInternational).toBeNull();
-      const long = await newPatient('+57 310 555 0101 ext. 123456');
-      expect(long.phoneInternational).toBe('+57 310 5550101 ext. 123456');
+      // En una región cuyo prefijo de salida es 00, «0058…» se puede leer como
+      // internacional o como nacional: sin + no se decide. Con VE no lo es.
+      await raw.location.update({
+        where: { id: mainLocation },
+        data: { defaultPhoneRegion: 'TH' },
+      });
+      try {
+        const ambiguous = await newPatient('0058 412 1234567');
+        expect(ambiguous).toMatchObject({
+          phone: '0058 412 1234567',
+          phoneInternational: null,
+        });
+      } finally {
+        await raw.location.update({
+          where: { id: mainLocation },
+          data: { defaultPhoneRegion: 'VE' },
+        });
+      }
+      const long = await newPatient('+58 414 555 0101 ext. 123456');
+      expect(long.phoneInternational).toBe('+58 414 5550101 ext. 123456');
     });
 
     it('the list reads the region once per request, not once per patient', async () => {
-      await newPatient('311 5550102');
-      await newPatient('312 5550103');
+      await newPatient('414 5550102');
+      await newPatient('414 5550103');
       const reader = app.get(DefaultPhoneRegionReader);
       const spy = jest.spyOn(reader, 'defaultPhoneRegion');
       try {
@@ -148,8 +164,8 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
         const byPhone = new Map(
           items.map((p) => [p.phone, p.phoneInternational]),
         );
-        expect(byPhone.get('311 5550102')).toBe('+57 311 5550102');
-        expect(byPhone.get('0412-1234567')).toBeNull();
+        expect(byPhone.get('414 5550102')).toBe('+58 414 5550102');
+        expect(byPhone.get('612 34 56 78')).toBeNull();
         expect(byPhone.get('llamar por la tarde')).toBeNull();
         for (const item of items) {
           expect(item).toHaveProperty('phoneInternational');
@@ -159,20 +175,20 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
       }
     });
 
-    it('the list in the VE location reads the same digits with its region', async () => {
+    it('the list in the ES location reads the same digits with its region', async () => {
       const res = await as(
         api().get('/api/v1/patients').query({ pageSize: 50 }),
-        veLocation,
+        esLocation,
       ).expect(200);
       const items = (res.body as { items: PhoneBody[] }).items;
-      const match = items.find((p) => p.phone === '0412-1234567');
-      expect(match?.phoneInternational).toBe('+58 412 1234567');
+      const match = items.find((p) => p.phone === '612 34 56 78');
+      expect(match?.phoneInternational).toBe('+34 612 34 56 78');
     });
   });
 
   describe('aislamiento por clínica', () => {
     it('another clinic reads with its own main location, never with an older one of this clinic nor with a foreign X-Location-Id', async () => {
-      // La sede principal de ESTA clínica (CO) es más antigua: si la lectura
+      // La sede principal de ESTA clínica (VE) es más antigua: si la lectura
       // de la región no se filtrase por clínica, la otra la tomaría.
       const other = await registerClinic(
         app,
@@ -205,26 +221,26 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
       // Una sede de otra clínica no es la sede activa de nadie aquí.
       const foreign = await asOther(
         api().get(`/api/v1/patients/${(created.body as PhoneBody).id}`),
-      ).set('X-Location-Id', veLocation);
+      ).set('X-Location-Id', esLocation);
       expect(foreign.status).toBeGreaterThanOrEqual(400);
-      expect(JSON.stringify(foreign.body)).not.toContain('+58');
+      expect(JSON.stringify(foreign.body)).not.toContain('+34');
     });
   });
 
   describe('responsables', () => {
     it('a contact and a responsible patient carry the international format', async () => {
       const child = await newPatient(null);
-      const mother = await newPatient('313 5550104');
+      const mother = await newPatient('414 5550104');
       const parties = `/api/v1/patients/${child.id}/responsible-parties`;
       const created = await as(api().post(parties))
         .send({
           fullName: 'Luis Ortiz',
-          phone: '0412-7654321',
+          phone: '612 76 54 32',
           relationship: 'FATHER',
         })
         .expect(201);
       expect(created.body).toMatchObject({
-        phone: '0412-7654321',
+        phone: '612 76 54 32',
         phoneInternational: null,
       });
       await as(api().post(parties))
@@ -248,21 +264,21 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
       const contact = inMain.find((p) => p.kind === 'CONTACT');
       const patient = inMain.find((p) => p.kind === 'PATIENT');
       expect(contact).toMatchObject({
-        phone: '0412-7654321',
+        phone: '612 76 54 32',
         phoneInternational: null,
       });
       expect(patient).toMatchObject({
-        phone: '313 5550104',
-        phoneInternational: '+57 313 5550104',
+        phone: '414 5550104',
+        phoneInternational: '+58 414 5550104',
         responsiblePatient: {
-          phone: '313 5550104',
-          phoneInternational: '+57 313 5550104',
+          phone: '414 5550104',
+          phoneInternational: '+58 414 5550104',
         },
       });
 
-      const inVe = await list(veLocation);
+      const inVe = await list(esLocation);
       expect(inVe.find((p) => p.kind === 'CONTACT')).toMatchObject({
-        phoneInternational: '+58 412 7654321',
+        phoneInternational: '+34 612 76 54 32',
       });
     });
   });
@@ -270,24 +286,24 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
   describe('sedes', () => {
     it('each location reads its own phone with its own region', async () => {
       await as(api().patch(`/api/v1/locations/${mainLocation}`))
-        .send({ phone: '601 555 0101' })
+        .send({ phone: '0212-5550101' })
         .expect(200)
         .expect((res) =>
           expect(res.body).toMatchObject({
-            phone: '601 555 0101',
-            phoneInternational: '+57 601 5550101',
+            phone: '0212-5550101',
+            phoneInternational: '+58 212 5550101',
           }),
         );
       await raw.location.update({
-        where: { id: veLocation },
-        data: { phone: '0212-5551234' },
+        where: { id: esLocation },
+        data: { phone: '912 34 56 78' },
       });
       const res = await as(api().get('/api/v1/locations')).expect(200);
       const byId = new Map(
         (res.body as PhoneBody[]).map((l) => [l.id, l.phoneInternational]),
       );
-      expect(byId.get(mainLocation)).toBe('+57 601 5550101');
-      expect(byId.get(veLocation)).toBe('+58 212 5551234');
+      expect(byId.get(mainLocation)).toBe('+58 212 5550101');
+      expect(byId.get(esLocation)).toBe('+34 912 34 56 78');
     });
 
     it('a location without a default prefix or with an unreadable phone answers null and keeps the stored one', async () => {
@@ -295,12 +311,12 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
         .send({ defaultPhoneRegion: null })
         .expect(200);
       expect(cleared.body).toMatchObject({
-        phone: '601 555 0101',
+        phone: '0212-5550101',
         defaultPhoneRegion: null,
         phoneInternational: null,
       });
       const text = await as(api().patch(`/api/v1/locations/${mainLocation}`))
-        .send({ phone: 'Recepción, ext. 2', defaultPhoneRegion: 'CO' })
+        .send({ phone: 'Recepción, ext. 2', defaultPhoneRegion: 'VE' })
         .expect(200);
       expect(text.body).toMatchObject({
         phone: 'Recepción, ext. 2',
@@ -311,14 +327,14 @@ describe('Teléfono con formato internacional (e2e, DX-387)', () => {
     it('a new location answers with the international format too', async () => {
       const created = await as(api().post('/api/v1/locations'))
         .send(
-          locationBody(REGIONAL_BOGOTA_FIXTURE, {
+          locationBody(REGIONAL_CARACAS_FIXTURE, {
             name: 'Sede 387 nueva',
-            phone: '+57 601 5550199',
+            phone: '+58 212 5550199',
           }),
         )
         .expect(201);
       expect((created.body as PhoneBody).phoneInternational).toBe(
-        '+57 601 5550199',
+        '+58 212 5550199',
       );
     });
   });

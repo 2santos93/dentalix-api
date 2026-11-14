@@ -11,7 +11,7 @@ import {
 import type { ImportPatientData } from '../src/modules/patient-imports/domain/import-fields';
 import { ANESTHESIA_DOSE_RULES_VERSION } from '../src/modules/anesthesia/domain/anesthesia-dose';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -73,7 +73,7 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),
@@ -356,7 +356,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
         // Sin el trigger de DX-327, la columna toma su DEFAULT 'OTHER'.
         documentType: 'NATIONAL_ID',
         docNumber: '4444',
-        phone: '3001112222',
+        phone: '4121112222',
       },
     });
     const outsider = await raw.patient.create({
@@ -371,7 +371,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       a,
       [
         person('4444', {
-          phone: '3109999999',
+          phone: '4149999999',
           email: 'nuevo@x.com',
           birthDate: '1990-01-01',
         }),
@@ -384,7 +384,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       where: { id: before.id },
     });
     expect(filled).toMatchObject({
-      phone: '3001112222',
+      phone: '4121112222',
       email: 'nuevo@x.com',
       firstName: 'Lleno',
     });
@@ -399,7 +399,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       where: { id: before.id },
     });
     expect(reverted).toMatchObject({
-      phone: '3001112222',
+      phone: '4121112222',
       email: null,
       birthDate: null,
       deletedAt: null,
@@ -495,6 +495,11 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'patient_dentition_events.patientId',
       'patient_documents.patientId',
       'patient_implants.patientId',
+      // DX-342: la revisión del paso a la mayoría de edad es una decisión
+      // auditada sobre a quién van los avisos: bloquea el deshacer.
+      'patient_majority_reviews.patientId',
+      // DX-015: un recall fijado o un contacto de recall es actividad durable.
+      'patient_recalls.patientId',
       'patient_responsible_parties.patientId',
       'patient_responsible_parties.responsiblePatientId',
       'patient_retention_actions.patientId',
@@ -502,6 +507,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'perio_exams.patientId',
       'post_op_instruction_deliveries.patientId',
       'prescriptions.patientId',
+      'recall_contacts.patientId',
       'reminder_opt_out_links.patientId',
       // DX-214: el aviso auditable es actividad durable y debe bloquear undo.
       'reminder_opt_out_match_warnings.patientId',
@@ -633,7 +639,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
   });
 
   it('DX-214: un aviso durable bloquea deshacer el lote y conserva paciente, filas y avisos bajo RLS', async () => {
-    const batch = await prepared(a, [person('8883', { phone: '3101234567' })]);
+    const batch = await prepared(a, [person('8883', { phone: '4141234567' })]);
     await runAll(a, batch!.id);
     const created = await raw.patient.findFirstOrThrow({
       where: { importBatchId: batch!.id },
@@ -718,7 +724,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
   it('alta manual con el mismo documento escrito distinto: 409, también si la importación ya lo creó', async () => {
     const batch = await prepared(a, [person('9.191.919')]);
     await runAll(a, batch!.id);
-    const manual = new PrismaPatientRepository(prisma, tenantContext);
+    const manual = new PrismaPatientRepository(prisma, tenantContext, {
+      platformMinYears: 15,
+    });
     await expect(
       inTenant(a, () =>
         manual.create({
@@ -900,12 +908,12 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       a,
       [
         person('8181', {
-          phone: '+573109999999',
+          phone: '+584149999999',
           email: 'viejo@x.com',
           address: 'Calle vieja',
           notes: 'nota vieja',
           emergencyContactName: 'Luis',
-          emergencyContactPhone: '+573108888888',
+          emergencyContactPhone: '+584148888888',
           birthDate: '1980-05-05',
         }),
       ],
@@ -928,7 +936,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       where: { batchId: batch!.id },
     });
     expect(JSON.stringify(row.filledValues)).not.toMatch(
-      /viejo@x\.com|3109999999|Calle vieja|nota vieja|Luis|3108888888/,
+      /viejo@x\.com|4149999999|Calle vieja|nota vieja|Luis|4148888888/,
     );
   });
 
@@ -982,7 +990,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       person('9103'),
     ]);
     const running = await inTenant(a, () => repo.findBatch(batch!.id));
-    // Primer bloque: 1 creado. Luego el worker «pierde» el arriendo.
+    // Primer bloque: 1 creado. Luego el worker «pierde» la reserva.
     expect(
       (await inTenant(a, () => repo.processChunk(running!, 1, 'EMAIL')))
         .created,

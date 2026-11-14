@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PaymentAdjustmentLineDto } from './payment-adjustment-line.dto';
 import { PaymentMethod } from '@prisma/client';
 import {
   PAYMENT_EXCHANGE_RATE_STATUSES,
@@ -88,6 +89,14 @@ export class PaymentDto {
     type: String,
     nullable: true,
     description:
+      'DX-515: nº de la factura fiscal emitida fuera de Dentalix (texto libre); null si no se anotó.',
+  })
+  externalInvoiceNumber!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
       'Motivo con que se confirmó una referencia repetida (DX-377); null si no se repetía.',
   })
   duplicateReferenceReason!: string | null;
@@ -167,4 +176,24 @@ export class PaymentDto {
     description: EXCHANGE_RATE_STATUS_DESCRIPTION,
   })
   exchangeRateStatus!: PaymentExchangeRateStatus;
+
+  @ApiProperty({
+    type: [PaymentAdjustmentLineDto],
+    description:
+      'DX-516: ajustes por medio de pago congelados en el abono (vacío sin ajustes).',
+  })
+  adjustments!: PaymentAdjustmentLineDto[];
+
+  @ApiProperty({
+    example: 103,
+    description:
+      'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe). El saldo del plan se mueve por `amount`.',
+  })
+  collectedAmount!: number;
+
+  @ApiProperty({
+    description:
+      'DX-389: el abono tiene comprobante del cobro. La clave del almacén no sale nunca: se ve con `GET /payments/:id/proof/url`.',
+  })
+  hasProof!: boolean;
 }

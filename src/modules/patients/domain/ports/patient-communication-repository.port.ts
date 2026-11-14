@@ -10,6 +10,7 @@ import type {
   NoticeResponsible,
   NoticeSettings,
 } from '../communication/notice-recipient';
+import type { MajorityReviewRecord } from '../responsible-parties/majority-review';
 
 export const PATIENT_NOT_FOUND_MESSAGE = 'Paciente no encontrado';
 
@@ -22,6 +23,8 @@ export interface PatientCommunicationState {
   emergencyContactName: string | null;
   /** DX-203: responsables vivos del paciente (regla de destinatario). */
   responsibles: NoticeResponsible[];
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
   /** DX-203, DX-328: zona de la sede y mayoría de edad de la clínica. */
   noticeSettings: NoticeSettings;
   /**
@@ -38,6 +41,10 @@ export interface PatientCommunicationState {
   whatsappOptInBy: { id: string; fullName: string | null } | null;
   reminderOptOutAt: Date | null;
   reminderOptOutSource: ReminderOptOutSource | null;
+  /** DX-497: idioma preferido (BCP 47); null = el de la clínica. */
+  preferredLanguage: string | null;
+  /** DX-497: idiomas que ofrece la clínica (leídos en la misma transacción). */
+  patientLanguages: string[];
 }
 
 /** Columnas que cambia el bloque; ausente = no se toca. */
@@ -49,6 +56,7 @@ export interface PatientCommunicationPatch {
   whatsappOptInById?: string | null;
   reminderOptOutAt?: Date | null;
   reminderOptOutSource?: ReminderOptOutSource | null;
+  preferredLanguage?: string | null;
 }
 
 /** El plan se evalúa dentro de la TX, sobre la fila del paciente bloqueada. */
@@ -58,6 +66,8 @@ export type PatientCommunicationUpdate =
 
 export interface PatientCommunicationUpdateResult {
   state: PatientCommunicationState;
+  /** El estado bajo el lock ANTES del cambio (el «antes» de la auditoría). */
+  previous: PatientCommunicationState;
   /** Cambios de preferencias efectivos frente al estado protegido por el lock. */
   changedFields: string[];
 }

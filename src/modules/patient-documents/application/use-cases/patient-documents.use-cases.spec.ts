@@ -1,3 +1,4 @@
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 import {
   UPLOAD_STORAGE_BUDGET_MS,
   remainingStorageBudgetMs,
@@ -140,7 +141,7 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
     list = new ListPatientDocumentsUseCase(repo, patients);
     get = new GetPatientDocumentUseCase(repo, patients);
     url = new GetPatientDocumentUrlUseCase(repo, patients, storage, clock, 300);
-    voidDoc = new VoidPatientDocumentUseCase(repo, patients);
+    voidDoc = new VoidPatientDocumentUseCase(repo, patients, ctx);
   });
 
   describe('subir', () => {
@@ -1104,6 +1105,32 @@ describe('Documentos del paciente (DX-151, casos de uso)', () => {
       await expect(
         voidDoc.execute(OTHER_PATIENT, doc.id, 'Ajeno', actor),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('SEC-014: desde otra sede → 403 sin anular; se sigue viendo', async () => {
+      const doc = await uploadPdf();
+      const actor = { userId: AUTHOR, role: ClinicRole.DENTIST };
+      await expect(
+        ctx.run(
+          TENANT_ID,
+          undefined,
+          () => voidDoc.execute(PATIENT, doc.id, 'Desde otra sede', actor),
+          ['otra-sede'],
+        ),
+      ).rejects.toThrow(LOCATION_NOT_ALLOWED_MESSAGE);
+      await expect(
+        ctx.run(TENANT_ID, undefined, () => get.execute(PATIENT, doc.id), [
+          'otra-sede',
+        ]),
+      ).resolves.toMatchObject({ voidedAt: null });
+      await expect(
+        ctx.run(
+          TENANT_ID,
+          undefined,
+          () => voidDoc.execute(PATIENT, doc.id, 'Desde su sede', actor),
+          [LOCATION_ID],
+        ),
+      ).resolves.toMatchObject({ voidedByName: 'Dra. Autora' });
     });
   });
 });

@@ -11,6 +11,7 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -19,13 +20,18 @@ import {
   ApiBearerAuth,
   ApiConflictResponse,
   ApiCreatedResponse,
-  ApiNoContentResponse,
+  ApiExtraModels,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
+  ApiProduces,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { CreatePatientDto } from './dto/create-patient.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
 import { ListPatientsQueryDto } from './dto/list-patients-query.dto';
@@ -57,6 +63,7 @@ import {
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
 import {
+  CLINICAL_ROLES,
   CLINIC_SETTINGS_WRITE_ROLES,
   PATIENT_RETENTION_ROLES,
   PATIENT_ROLES,
@@ -95,13 +102,39 @@ import {
   UpdatePatientSettingsUseCase,
   type PatientSettings,
 } from '../application/use-cases/patient-settings.use-cases';
-import { PatientSettingsDto } from './dto/patient-settings.dto';
+import {
+  PatientLanguagesDto,
+  PatientSettingsDto,
+  UpdatePatientLanguagesDto,
+} from './dto/patient-settings.dto';
+import {
+  GetPatientLanguagesUseCase,
+  UpdatePatientLanguagesUseCase,
+  type PatientLanguages,
+} from '../application/use-cases/patient-languages.use-cases';
+import {
+  GetRetentionSettingsUseCase,
+  UpdateRetentionSettingsUseCase,
+  type RetentionSettings,
+  type RetentionSettingsUpdateResult,
+} from '../application/use-cases/retention-settings.use-cases';
+import {
+  RetentionReductionUnconfirmedErrorDto,
+  RetentionSettingsBusyErrorDto,
+  RetentionSettingsDto,
+  RetentionSettingsUpdateResultDto,
+  UpdateRetentionSettingsDto,
+} from './dto/retention-settings.dto';
 import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
   type DocumentTypeNamesSettings,
+  type DocumentTypeNamesView,
 } from '../application/use-cases/document-type-names.use-cases';
-import { DocumentTypeNamesDto } from './dto/document-type-names.dto';
+import {
+  DocumentTypeNamesDto,
+  DocumentTypeNamesViewDto,
+} from './dto/document-type-names.dto';
 import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../domain/document-type-names';
 import { DocumentTypeNamesReader } from '../domain/ports/document-type-names-repository.port';
 import {
@@ -110,12 +143,22 @@ import {
 } from './doc-type-name.presenter';
 import { DefaultPhoneRegionReader } from '../domain/ports/default-phone-region-reader.port';
 import {
+  imagingExportFileName,
+  imagingExportText,
+} from '../domain/imaging-export';
+import {
   withPhoneInternational,
   type WithPhoneInternational,
 } from '../../../shared/phone/with-phone-international';
 
 export const CLINIC_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar la mayoría de edad.';
+
+export const RETENTION_SETTINGS_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede cambiar el plazo de conservación.';
+
+export const IMAGING_EXPORT_FORBIDDEN_MESSAGE =
+  'Solo el personal clínico puede exportar los datos para el software de imagen.';
 
 type ListPatientsWithCoverageOutput = Omit<ListPatientsOutput, 'items'> & {
   items: WithPhoneInternational<
@@ -153,6 +196,9 @@ export class PatientsController {
     private readonly setRetention: SetRetentionExtensionUseCase,
     private readonly partiallySuppress: PartiallySuppressPatientUseCase,
     private readonly listRetentionExpiring: ListRetentionExpiringUseCase,
+    // DX-330: plazo de conservación de la HC de la clínica.
+    private readonly getRetentionSettings: GetRetentionSettingsUseCase,
+    private readonly updateRetentionSettings: UpdateRetentionSettingsUseCase,
     // DX-150: marca «Saldo vencido» de la cabecera de la ficha.
     private readonly balanceFlags: PatientBalanceFlags,
     // DX-153: resumen de cobertura de la ficha y del listado.
@@ -161,6 +207,8 @@ export class PatientsController {
     // DX-328: mayoría de edad de la clínica.
     private readonly getSettings: GetPatientSettingsUseCase,
     private readonly updateSettings: UpdatePatientSettingsUseCase,
+    private readonly getLanguages: GetPatientLanguagesUseCase,
+    private readonly updateLanguagesUseCase: UpdatePatientLanguagesUseCase,
     // DX-327: nombre local de cada tipo de documento de la clínica.
     private readonly getDocumentTypeNames: GetDocumentTypeNamesUseCase,
     private readonly updateDocumentTypeNames: UpdateDocumentTypeNamesUseCase,
@@ -267,12 +315,16 @@ export class PatientsController {
   @Get('retention/expiring')
   @Roles(...PATIENT_RETENTION_ROLES)
   @ApiOperation({
-    summary: 'Historias que salen de retención legal (solo ADMIN)',
+    summary: 'Historias que salen de retención (solo ADMIN)',
     description:
       'DX-039. Pacientes vivos cuya HC ya no está en retención o deja de ' +
-      'estarlo dentro de `withinDays` (NONE: 15 años, DOUBLE: 30 años desde ' +
-      'la última atención; PERMANENT nunca sale). Orden: la que antes vence. ' +
-      'Paginada, con tope. Solo informa: no purga nada.',
+      'estarlo dentro de `withinDays` (NONE: el plazo de la clínica, DOUBLE: ' +
+      'el doble, desde la última atención; PERMANENT nunca sale). Una ' +
+      'reducción del plazo no adelanta la lista: la fecha de fin que una ' +
+      'historia ya tenía se respeta. Orden: `lastAttentionAt` ascendente; con ' +
+      'esa fecha fijada, una fila puede aparecer más tarde que su última ' +
+      'atención, y `retentionUntil` es la fecha efectiva. Paginada, con ' +
+      'tope. Solo informa: no purga nada.',
   })
   @ApiOkResponse({ type: ListRetentionExpiringResponseDto })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
@@ -293,6 +345,69 @@ export class PatientsController {
         RETENTION_EXPIRING_MAX_PAGE_SIZE,
       ),
     });
+  }
+
+  // DX-330: antes de `@Get(':id')`, como `retention/expiring`.
+  @Get('retention/settings')
+  @ApiOperation({
+    summary: 'Plazo de conservación de la historia clínica de la clínica',
+    description:
+      'DX-330. `effectiveYears` es el plazo que rige (el guardado, nunca por ' +
+      'debajo del mínimo de plataforma). `correctionWindow` aparece durante ' +
+      'las 24 horas siguientes a una subida.',
+  })
+  @ApiOkResponse({ type: RetentionSettingsDto })
+  retentionSettings(): Promise<RetentionSettings> {
+    return this.getRetentionSettings.execute();
+  }
+
+  @Put('retention/settings')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(RETENTION_SETTINGS_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Cambia el plazo de conservación de la historia clínica; queda en la auditoría',
+    description:
+      'DX-330. Subir aplica desde la siguiente petición. Reducir pide ' +
+      '`confirmReduction: true`: las historias que ya estaban en retención ' +
+      'mantienen su fecha de fin y el plazo nuevo se aplica al resto y a las ' +
+      'atenciones nuevas. Si el valor no cambia, responde 200 sin evento de ' +
+      'auditoría.',
+  })
+  @ApiOkResponse({ type: RetentionSettingsUpdateResultDto })
+  @ApiBadRequestResponse({
+    description:
+      'No entero o fuera del rango del mínimo de plataforma al máximo',
+  })
+  @ApiForbiddenResponse({ description: RETENTION_SETTINGS_FORBIDDEN_MESSAGE })
+  @ApiExtraModels(
+    RetentionReductionUnconfirmedErrorDto,
+    RetentionSettingsBusyErrorDto,
+  )
+  @ApiConflictResponse({
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(RetentionReductionUnconfirmedErrorDto) },
+        { $ref: getSchemaPath(RetentionSettingsBusyErrorDto) },
+      ],
+    },
+    description:
+      '`RETENTION_REDUCTION_UNCONFIRMED`: reducir sin confirmar, sin guardar nada. ' +
+      '`RETENTION_SETTINGS_BUSY`: otra operación con los pacientes de la clínica en curso, o la reducción tarda demasiado; no se guardó nada.',
+  })
+  updateRetention(
+    @Body() dto: UpdateRetentionSettingsDto,
+    @Req() req: AuditableRequest,
+  ): Promise<RetentionSettingsUpdateResult> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateRetentionSettings.execute(
+      {
+        clinicalRecordRetentionYears: dto.clinicalRecordRetentionYears,
+        confirmReduction: dto.confirmReduction,
+      },
+      ctx,
+    );
   }
 
   // Antes de `@Get(':id')`, como `retention/expiring`: si no, `settings` se
@@ -326,6 +441,43 @@ export class PatientsController {
     return this.updateSettings.execute({ majorityAge: dto.majorityAge }, ctx);
   }
 
+  // DX-497: antes de `@Get(':id')`, por lo mismo que `settings`. Lo leen los
+  // 4 roles: es la lista del desplegable de la ficha.
+  @Get('languages')
+  @ApiOperation({
+    summary: 'Idiomas de los pacientes de la clínica (DX-497)',
+  })
+  @ApiOkResponse({ type: PatientLanguagesDto })
+  languages(): Promise<PatientLanguages> {
+    return this.getLanguages.execute();
+  }
+
+  @Put('languages')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(CLINIC_SETTINGS_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Cambia los idiomas que la ficha ofrece al paciente; queda en la auditoría',
+    description:
+      'DX-497. Solo ADMIN. Etiquetas BCP 47 normalizadas, sin repetidos, con el idioma de la clínica siempre incluido. ' +
+      'Quitar un idioma no borra el de ningún paciente (la ficha lo enseña «(no disponible)»). ' +
+      'Si la lista no cambia, 200 sin evento de auditoría.',
+  })
+  @ApiOkResponse({ type: PatientLanguagesDto })
+  @ApiBadRequestResponse({ description: 'Etiqueta no válida o más de 20' })
+  @ApiForbiddenResponse({ description: CLINIC_SETTINGS_FORBIDDEN_MESSAGE })
+  updateLanguages(
+    @Body() dto: UpdatePatientLanguagesDto,
+    @Req() req: AuditableRequest,
+  ): Promise<PatientLanguages> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateLanguagesUseCase.execute(
+      { languages: dto.languages },
+      ctx,
+    );
+  }
+
   // También antes de `@Get(':id')`, por lo mismo que `settings`.
   @Get('document-type-names')
   @ApiOperation({
@@ -334,10 +486,12 @@ export class PatientsController {
       'Null = sin nombre local: se usa el genérico. El nombre visible de un ' +
       'documento es la etiqueta del paciente, si no el nombre local de la ' +
       'clínica para su tipo, si no el genérico (R17). La importación de ' +
-      'pacientes reconoce también estos nombres, antes que los genéricos (R19).',
+      'pacientes reconoce también estos nombres, antes que los genéricos (R19). ' +
+      'DX-524: `names` son los de la clínica; `effective`, los que rigen en la ' +
+      'sede activa (los de la sede sobre los de la clínica, por tipo).',
   })
-  @ApiOkResponse({ type: DocumentTypeNamesDto })
-  documentTypeNames(): Promise<DocumentTypeNamesSettings> {
+  @ApiOkResponse({ type: DocumentTypeNamesViewDto })
+  documentTypeNames(): Promise<DocumentTypeNamesView> {
     return this.getDocumentTypeNames.execute();
   }
 
@@ -380,8 +534,10 @@ export class PatientsController {
     description:
       'La ficha con `balance` (DX-150): marca «Saldo vencido» y días para todos los roles; el importe, solo ADMIN y RECEPTION. Con `coverage` (DX-153): resumen de la cobertura principal. Y con `agreement` (DX-105): resumen del convenio vigente.',
   })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async get(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<
     PatientOutput & {
@@ -401,6 +557,51 @@ export class PatientsController {
   }
 
   @Audit({
+    action: 'EXPORT',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'IMAGING_EXPORT',
+  })
+  @Get(':id/imaging-export.txt')
+  @Roles(...CLINICAL_ROLES)
+  @RolesDeniedMessage(IMAGING_EXPORT_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary: 'Datos del paciente para el software de imagen (texto)',
+    description:
+      'DX-484. Fichero de texto UTF-8 con fin de línea CRLF y una línea ' +
+      '«Etiqueta: valor» por dato: código del paciente, apellidos y nombre ' +
+      '(también sin tildes), fecha de nacimiento (dd.mm.aaaa y aaaa-mm-dd) y ' +
+      'sexo; «Sin indicar» si falta. Solo identificación: ni documento, ni ' +
+      'contacto, ni datos clínicos. Solo el personal clínico (DENTIST, ' +
+      'ASSISTANT, ADMIN); cada descarga deja un evento EXPORT en la ' +
+      'auditoría. 404 como `GET /patients/:id`.',
+  })
+  @ApiProduces('text/plain')
+  @ApiOkResponse({
+    description: 'Fichero de texto `paciente-<código>.txt`',
+    content: { 'text/plain': { schema: { type: 'string' } } },
+  })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiNotFoundResponse({ description: 'Paciente inexistente en la clínica' })
+  @ApiForbiddenResponse({ description: IMAGING_EXPORT_FORBIDDEN_MESSAGE })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  async imagingExport(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const patient = await this.getPatient.execute(id);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${imagingExportFileName(patient.patientCode)}"`,
+    );
+    // Dato personal: ni el navegador ni un proxy lo guardan.
+    res.setHeader('Cache-Control', 'no-store');
+    return imagingExportText(patient);
+  }
+
+  @Audit({
     action: 'UPDATE',
     resource: 'PATIENT',
     resourceId: { param: 'id' },
@@ -408,8 +609,10 @@ export class PatientsController {
   })
   @Patch(':id')
   @ApiOkResponse({ type: PatientDto })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdatePatientDto,
   ): Promise<PatientOutput> {
     const patient = await this.updatePatient.execute(id, {
@@ -439,8 +642,9 @@ export class PatientsController {
     summary: 'Archivar paciente (borrado blando, solo ADMIN)',
     description:
       'DX-039. Retira al paciente de los listados (`deletedAt`); su HC se ' +
-      'conserva siempre. Si la HC está en retención legal (15 años desde la ' +
-      'última atención, 30 con DOUBLE, siempre con PERMANENT) responde 409 ' +
+      'conserva siempre. Si la HC está en retención (el plazo de la ' +
+      'clínica desde la última atención, el doble con DOUBLE, siempre con ' +
+      'PERMANENT) responde 409 ' +
       '`CLINICAL_RECORD_RETENTION` con la fecha hasta la que se conserva. Un ' +
       'paciente sin atenciones clínicas se archiva, salvo que tenga citas ' +
       'programadas o confirmadas (409 `PATIENT_HAS_PENDING_APPOINTMENTS`: ' +
@@ -455,7 +659,7 @@ export class PatientsController {
   @ApiConflictResponse({
     type: ClinicalRecordRetentionErrorDto,
     description:
-      'HC en retención legal (`CLINICAL_RECORD_RETENTION`) o citas abiertas ' +
+      'HC en retención (`CLINICAL_RECORD_RETENTION`) o citas abiertas ' +
       '(`PATIENT_HAS_PENDING_APPOINTMENTS`, sin `retentionUntil`)',
   })
   @ApiForbiddenResponse({ description: 'Rol distinto de ADMIN' })
@@ -501,7 +705,7 @@ export class PatientsController {
   @ApiOperation({
     summary: 'Cambiar la retención extendida de la HC (solo ADMIN)',
     description:
-      'DX-039. NONE (15 años), DOUBLE (30) o PERMANENT. Motivo obligatorio: ' +
+      'DX-039. NONE (el plazo de la clínica), DOUBLE (el doble) o PERMANENT. Motivo obligatorio: ' +
       'queda con el autor y la fecha en el rastro de retención del paciente; ' +
       'el registro de auditoría guarda quién y cuándo (sin el motivo).',
   })

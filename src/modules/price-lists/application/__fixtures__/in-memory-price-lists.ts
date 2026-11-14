@@ -34,7 +34,7 @@ export class InMemoryPriceListRepository implements PriceListRepository {
     const row: PriceList = {
       id: `list-${this.nextId++}`,
       name: 'Lista base',
-      currency: 'COP',
+      currency: 'USD',
       locationId: null,
       active: true,
       itemCount: 0,

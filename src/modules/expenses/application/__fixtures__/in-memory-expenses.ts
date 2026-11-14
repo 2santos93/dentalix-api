@@ -7,6 +7,7 @@ import type {
   ExpensePayment,
 } from '../../domain/entities/expense.entity';
 import { categoryKey } from '../../domain/expense-categories';
+import { expenseMoneyText } from '../../domain/expense-money';
 import {
   ATTACHMENT_ALREADY_MESSAGE,
   EXPENSE_ALREADY_VOIDED_MESSAGE,
@@ -34,6 +35,7 @@ import type {
   IdempotentWrite,
   SupplierSuggestion,
   UpdateExpenseRepoInput,
+  ResolvedExpenseLocation,
 } from '../../domain/ports/expense-repository.port';
 
 export const TENANT_ID = '11111111-1111-4111-8111-111111111111';
@@ -84,6 +86,13 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
   /** Día civil que devuelve el «hoy» de cualquier sede. */
   today = '2026-10-23';
   defaultLocationId = LOCATION_ID;
+  /** Formato de la sede de los gastos (DX-354); por defecto Venezuela, 12 h. */
+  format: { locale: string | null; hourCycle: string | null } = {
+    locale: 'es-VE',
+    hourCycle: 'h12',
+  };
+  /** Texto propio de cada moneda de la clínica (DX-517-quater); vacío = el código. */
+  currencyTexts: Record<string, string> = {};
   /** Sedes que `resolveLocation` rechaza (400). */
   invalidLocations = new Set<string>();
   /** El efectivo exige caja abierta en esta clínica. */
@@ -108,7 +117,7 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       supplier: null,
       description: null,
       amount: 100,
-      currency: 'COP',
+      currency: 'VES',
       invoiceDate: '2026-10-20',
       dueDate: null,
       attachment: null,
@@ -160,13 +169,16 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
   // --- Puerto ------------------------------------------------------------------
   resolveLocation(
     requested: string | undefined,
-  ): Promise<{ locationId: string; today: string }> {
+  ): Promise<ResolvedExpenseLocation> {
     if (requested && this.invalidLocations.has(requested)) {
       return Promise.reject(rule(LOCATION_INVALID_MESSAGE, 'INVALID'));
     }
+    const locationId = requested ?? this.defaultLocationId;
     return Promise.resolve({
-      locationId: requested ?? this.defaultLocationId,
+      locationId,
       today: this.today,
+      format: { id: locationId, ...this.format },
+      currencyTexts: this.currencyTexts,
     });
   }
 
@@ -432,7 +444,11 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       },
       liveCents: this.liveCents(id),
       paymentCount: this.paymentsOf(id).length,
-      currency: row.currency,
+      moneyText: expenseMoneyText(
+        { id: row.locationId, ...this.format },
+        row.currency,
+        this.currencyTexts,
+      ),
     });
     if (denial) return Promise.reject(denial);
     validateDueDate(
@@ -509,7 +525,11 @@ export class InMemoryExpenseRepository implements ExpenseRepository {
       amountCents: toCents(row.amount),
       liveCents: this.liveCents(expenseId),
       paymentCents: toCents(input.amount),
-      currency: row.currency,
+      moneyText: expenseMoneyText(
+        { id: row.locationId, ...this.format },
+        row.currency,
+        this.currencyTexts,
+      ),
     });
     if (denial) throw denial;
     const cashSessionId = input.cashLink
@@ -646,8 +666,8 @@ export class InMemoryExpenseCategoryRepository implements ExpenseCategoryReposit
   }
 }
 
-/** Moneda conocida para los tests: COP y USD. */
+/** Moneda conocida para los tests: VES y USD. */
 export const KNOWN_CURRENCIES = {
   has: (code: string): Promise<boolean> =>
-    Promise.resolve(['COP', 'USD'].includes(code)),
+    Promise.resolve(['VES', 'USD'].includes(code)),
 };

@@ -14,12 +14,16 @@ import {
   CreateTreatmentPlanRepoInput,
   TreatmentPlanRepository,
 } from '../../domain/ports/treatment-plan-repository.port';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import { CurrencyWhitelist } from '../../domain/ports/currency-whitelist.port';
 import {
   PLAN_WITHOUT_OPTIONS,
   planCurrencySource,
 } from './__fixtures__/in-memory-treatment-plan.repository';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
 
 function fakePlan(overrides: Partial<TreatmentPlan> = {}): TreatmentPlan {
   return {
@@ -59,7 +63,7 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
-    updateItem: (): Promise<TreatmentPlanItem> =>
+    updateItem: (): Promise<TreatmentPlanItemUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),
@@ -72,7 +76,7 @@ function makeRepo(
 // Fake whitelist: allows the codes actually exercised by this suite. `has`
 // is case-sensitive here on purpose, to catch a regression where the use
 // case forgets to `.toUpperCase()` BEFORE calling it.
-function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
+function makeWhitelist(allowed: string[] = ['USD', 'VES']): CurrencyWhitelist {
   return {
     has: (code: string): Promise<boolean> =>
       Promise.resolve(allowed.includes(code)),
@@ -82,7 +86,7 @@ function makeWhitelist(allowed: string[] = ['USD', 'COP']): CurrencyWhitelist {
 const LOC_COP = planCurrencySource({
   kind: 'location',
   locationId: 'loc-1',
-  currency: 'COP',
+  currency: 'VES',
 });
 
 describe('CreateTreatmentPlanUseCase', () => {
@@ -155,7 +159,7 @@ describe('CreateTreatmentPlanUseCase', () => {
 
   function makeUc(
     source: ReturnType<typeof planCurrencySource>,
-    allowed = ['USD', 'COP', 'JPY'],
+    allowed = ['USD', 'VES', 'JPY'],
   ) {
     let captured: CreateTreatmentPlanRepoInput | undefined;
     const repo = makeRepo({
@@ -194,7 +198,7 @@ describe('CreateTreatmentPlanUseCase', () => {
     const { uc, captured } = makeUc(
       planCurrencySource({
         kind: 'clinic',
-        currencies: ['COP', 'JPY'],
+        currencies: ['VES', 'JPY'],
         unconfigured: false,
       }),
     );
@@ -247,7 +251,7 @@ describe('CreateTreatmentPlanUseCase', () => {
     const { uc } = makeUc(
       planCurrencySource({
         kind: 'clinic',
-        currencies: ['COP'],
+        currencies: ['VES'],
         unconfigured: true,
       }),
     );
@@ -301,9 +305,9 @@ describe('CreateTreatmentPlanUseCase', () => {
       LOC_COP,
     );
 
-    await uc.execute({ patientId: 'p1', currency: 'cop' });
+    await uc.execute({ patientId: 'p1', currency: 'ves' });
 
-    expect(captured?.currency).toBe('COP');
+    expect(captured?.currency).toBe('VES');
   });
 
   it('rejects an unknown currency with BadRequestException, without calling the repo', async () => {
@@ -320,7 +324,7 @@ describe('CreateTreatmentPlanUseCase', () => {
 
     await expect(
       uc.execute({ patientId: 'p1', currency: 'XXX' }),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).rejects.toThrow(new BadRequestException(UNKNOWN_CURRENCY_MESSAGE));
   });
 });
 

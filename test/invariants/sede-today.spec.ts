@@ -13,7 +13,7 @@ import { readSpecs } from './bare-delete-many';
 import { findRealClockToday } from './real-clock-today';
 
 // DX-449 (TST-053): los specs de agenda y reservas calculaban «hoy» con el
-// reloj real y la zona fija de Bogotá; entre las 04:40 y las 06:00 UTC (la
+// reloj real y una zona fija (UTC−4); entre las 03:40 y las 05:00 UTC (la
 // medianoche de la sede, cuando el loop fusiona) sus citas «de hoy que ya
 // empezaron» caían en ayer o se solapaban. Un spec nuevo que hable de «hoy»
 // (un identificador con today/TODAY) y lea el reloj real (`Date.now()` o
@@ -25,23 +25,22 @@ const REPO_ROOT = join(__dirname, '..', '..');
 
 /**
  * Lista blanca: specs anteriores a DX-449 que nombran «hoy» y leen el reloj
- * real sin sede-clock. Justificación: ninguno aparece en las runs rojas de la
- * franja 04:40–06:00 UTC que cita TST-053 y su «hoy» no exige citas ya
- * empezadas en la sede; quedan para migrar (ver informe de DX-449). Solo puede
- * bajar: cada entrada tiene que seguir cumpliendo el patrón (un spec migrado
- * sale de aquí) y un spec nuevo no entra.
- *
- * DX-495 (TST-062): de 29 a 19. Salen los de dinero (split-payments,
- * patient-credit, collections*, cash-sessions*, payment-can-void,
- * payment-method-statement, payment-receipt-exchange-rate), que registran la
- * clínica con `sedeTodayFixture`. `cash-register` se queda: sus casos fijan
- * abonos a horas de Bogotá y la zona publicada de la sede.
+ * real sin sede-clock. DX-460 revisó uno por uno los 27 que quedaban: en 8 el
+ * «hoy» se fijaba en beforeAll, al cargar el módulo o en un test anterior y se
+ * comparaba tests después con el que calcula la API con su reloj real (fallo
+ * real al cruzar la medianoche de la sede); esos 8 ya usan sede-clock y
+ * salieron de aquí. En los 19 que siguen, «hoy» es un campo de la respuesta
+ * (offersToday, registeredToday), un literal, un día UTC, un reloj ya
+ * inyectado o un cálculo y su comprobación dentro del mismo test (carrera de
+ * milisegundos, la misma que aceptan los specs migrados). El patrón es léxico
+ * y los sigue marcando: se quedan aquí, documentados, y no se tocan por
+ * maquillaje. Solo puede bajar: cada entrada tiene que seguir cumpliendo el
+ * patrón (un spec migrado sale de aquí) y un spec nuevo no entra.
  */
 const LEGACY_REAL_CLOCK_TODAY: ReadonlySet<string> = new Set([
-  'test/appointments-medical-alerts.e2e-spec.ts',
-  'test/cancellation-fee-protected.e2e-spec.ts',
-  'test/cash-register.e2e-spec.ts',
+  'test/cash-sessions-concurrency.e2e-spec.ts',
   'test/clinical-codes.e2e-spec.ts',
+  'test/collections-reopen.e2e-spec.ts',
   'test/exchange-provider-budget.e2e-spec.ts',
   'test/exchange-provider-quota.e2e-spec.ts',
   'test/exchange-rate-dates.e2e-spec.ts',
@@ -49,33 +48,34 @@ const LEGACY_REAL_CLOCK_TODAY: ReadonlySet<string> = new Set([
   'test/implants.e2e-spec.ts',
   'test/jobs-maintenance.e2e-spec.ts',
   'test/opening-candidates.e2e-spec.ts',
+  'test/patient-credit.e2e-spec.ts',
   'test/patient-flow.e2e-spec.ts',
-  'test/payment-rate-backup.e2e-spec.ts',
-  'test/plan-items-arrival.e2e-spec.ts',
+  'test/payment-can-void.e2e-spec.ts',
+  'test/payment-method-statement.e2e-spec.ts',
   'test/receivables.e2e-spec.ts',
+  'test/collections.int-spec.ts',
   'test/opening-balances.int-spec.ts',
   'test/payment-promise-reopen.int-spec.ts',
-  'test/seed-demo.int-spec.ts',
   'test/waitlist-offers.int-spec.ts',
 ]);
 
 describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
   describe('safeTodayZone', () => {
-    it('es Bogotá cuando su medianoche queda lejos', () => {
-      // 12:00 en Bogotá.
-      expect(safeTodayZone(new Date('2026-10-31T17:00:00Z'))).toBe(
+    it('es Caracas cuando su medianoche queda lejos', () => {
+      // 12:00 en la zona de la sede.
+      expect(safeTodayZone(new Date('2026-10-31T16:00:00Z'))).toBe(
         SEDE_FIXTURE_ZONE,
       );
     });
 
     it.each([
-      '2026-10-31T04:40:00Z',
-      '2026-10-31T05:01:00Z',
-      '2026-10-31T05:30:00Z',
-      '2026-10-31T05:56:00Z',
-      '2026-10-31T07:30:00Z',
+      '2026-10-31T03:40:00Z',
+      '2026-10-31T04:01:00Z',
+      '2026-10-31T04:30:00Z',
+      '2026-10-31T04:56:00Z',
+      '2026-10-31T06:30:00Z',
     ])(
-      'cerca de la medianoche de Bogotá (%s) elige una zona lejos de la suya',
+      'cerca de la medianoche de Caracas (%s) elige una zona lejos de la suya',
       (iso) => {
         const now = new Date(iso);
         const zone = safeTodayZone(now);
@@ -108,7 +108,7 @@ describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
     });
 
     it('«hace 3 h» y «ahora» son el mismo día de la sede en la franja de los merges', () => {
-      for (const iso of ['2026-10-31T05:01:00Z', '2026-10-31T05:56:00Z']) {
+      for (const iso of ['2026-10-31T04:01:00Z', '2026-10-31T04:56:00Z']) {
         const now = new Date(iso);
         const { timeZone } = sedeTodayFixture(now);
         const before = new Date(now.getTime() - 179 * 60_000);
@@ -119,10 +119,10 @@ describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
 
   it('civilDaysSince da uno o dos días civiles, del más antiguo al último', () => {
     expect(
-      civilDaysSince(60, SEDE_FIXTURE_ZONE, new Date('2026-10-31T17:00:00Z')),
+      civilDaysSince(60, SEDE_FIXTURE_ZONE, new Date('2026-10-31T16:00:00Z')),
     ).toEqual(['2026-10-31']);
     expect(
-      civilDaysSince(60, SEDE_FIXTURE_ZONE, new Date('2026-10-31T05:20:00Z')),
+      civilDaysSince(60, SEDE_FIXTURE_ZONE, new Date('2026-10-31T04:20:00Z')),
     ).toEqual(['2026-10-30', '2026-10-31']);
   });
 
@@ -134,7 +134,7 @@ describe('DX-449: «hoy» de la sede en los specs de agenda y reservas', () => {
       },
       {
         path: 'test/nuevo.int-spec.ts',
-        source: "const TODAY = civilDateIn(new Date(), 'America/Bogota');",
+        source: "const TODAY = civilDateIn(new Date(), 'America/Caracas');",
       },
       {
         path: 'test/migrado.e2e-spec.ts',

@@ -80,6 +80,9 @@ jobs:
       - name: tsc --noEmit
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
         run: npx tsc --noEmit
+      - name: Supuestos de país (check:country-assumptions)
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        run: npm run check:country-assumptions
       - name: Unit (npm test)
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
         run: npm test
@@ -101,7 +104,12 @@ jobs:
   integration:
     name: Integración (Postgres 16)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # 30 (antes 20): `test:int` va en serie (--runInBand) y en main ya tardaba
+    # 16–18 min; con la preparación del job (~2 min) varias runs de main se
+    # cancelaban por el tope sin ningún fallo (2 de 6 el 2026-11-11). DX-015-bis
+    # suma la int de carga de recall (60.000 pacientes, ~2 min). Repartirla en
+    # shards como la e2e (DX-396) es la solución de fondo.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -569,8 +577,8 @@ jobs:
           PGPASSWORD: postgres
         run: |
           psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d postgres \
-            -c "ALTER SYSTEM SET timezone = 'America/Bogota'" -c "SELECT pg_reload_conf()"
-          test "$(psql -h localhost -U postgres -d postgres -tAc 'SHOW TimeZone')" = America/Bogota
+            -c "ALTER SYSTEM SET timezone = 'America/Caracas'" -c "SELECT pg_reload_conf()"
+          test "$(psql -h localhost -U postgres -d postgres -tAc 'SHOW TimeZone')" = America/Caracas
 
       # Privilegios mínimos del owner (README): LOGIN, CREATEROLE (crea
       # dentalix_app y los roles NOLOGIN de las migraciones) y dueño de la base.
@@ -669,6 +677,36 @@ jobs:
             test ! -e node_modules/country-state-city &&
             test ! -e node_modules/@nestjs/cli &&
             test -f dist/main.js && test -f dist/scripts/prisma/seed.js'
+      # DX-019-bis: el logo se re-codifica con sharp (binarios nativos de
+      # libvips por plataforma); que carguen y codifiquen en la imagen runtime.
+      - name: sharp (libvips) carga y codifica en la imagen
+        run: |
+          docker run --rm dentalix-api:ci node -e "
+            const sharp = require('sharp');
+            sharp({ create: { width: 2, height: 2, channels: 4, background: '#0e7490' } })
+              .png().toBuffer()
+              .then((b) => sharp(b).metadata())
+              .then((m) => { if (m.format !== 'png') process.exit(1); console.log('sharp', sharp.versions.sharp, 'libvips', sharp.versions.vips); })
+              .catch((e) => { console.error(e); process.exit(1); });"
+      # DX-459: las fuentes Noto (OFL) van en la imagen junto al renderer
+      # (nest-cli las copia a dist) y un PDF firmado en griego, cirílico y CJK
+      # se genera con ellas embebidas en subconjunto.
+      - name: Fuentes Unicode del PDF firmado en la imagen
+        run: |
+          docker run --rm dentalix-api:ci sh -c 'test -f dist/shared/pdf/fonts/OFL.txt && du -sk dist/shared/pdf/fonts'
+          docker run --rm dentalix-api:ci node -e "
+            const { PdfkitSignedConsentPdfRenderer } = require('./dist/modules/consents/infrastructure/pdf/signed-consent-pdf.renderer');
+            const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+            const r = new PdfkitSignedConsentPdfRenderer();
+            for (const ch of ['Ζ', 'Ж', '名', 'ひ', '한']) if (!r.canPaint(ch)) { console.error('sin glifo', ch); process.exit(1); }
+            r.render({ clinicName: 'Clínica', title: 'Συγκατάθεση — Согласие — 同意书', body: 'Ζωή\\nМария\\n山田花子 김민준', signerLabel: 'Ζωή', professionalLabel: 'Dra.', patientSignature: png, professionalSignature: png, completedAt: new Date(0), evidence: [] })
+              .then((pdf) => {
+                const raw = pdf.toString('latin1');
+                for (const f of ['NotoSans-Regular', 'NotoSans-Bold', 'NotoSansCJKsc-Regular'])
+                  if (!new RegExp('/BaseFont /[A-Z]{6}\\\\+' + f).test(raw)) { console.error('sin', f); process.exit(1); }
+                console.log('PDF Unicode', pdf.length, 'bytes');
+              })
+              .catch((e) => { console.error(e); process.exit(1); });"
       - name: Prueba de humo de la imagen
         env:
           PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres

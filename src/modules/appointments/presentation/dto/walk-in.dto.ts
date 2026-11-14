@@ -10,9 +10,11 @@ import {
   IsUUID,
   MaxLength,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { DocumentType, TriageFlag } from '@prisma/client';
+import { CHAIR_ID_INVALID_MESSAGE } from '../../../chairs/domain/chair-rules';
 import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
 import { DOC_TYPE_LABEL_PROPERTY } from '../../../patients/presentation/dto/doc-type-input';
 import { TRIAGE_FLAGS, TRIAGE_NOTE_MAX } from '../../domain/walk-in';
@@ -107,6 +109,16 @@ export class CreateWalkInDto {
   @IsOptional()
   @IsUUID()
   appointmentTypeId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-492: sillón activo de la sede. Ocupado a la hora de la cita: 409 con su nombre y horas; de otra sede o desactivado: 400; de otra clínica: 404.',
+  })
+  // `null` no es «sin sillón»: se rechaza aquí, no con un 500 al buscarlo.
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsUUID(undefined, { message: CHAIR_ID_INVALID_MESSAGE })
+  chairId?: string;
 
   @ApiPropertyOptional({
     enum: TriageFlag,

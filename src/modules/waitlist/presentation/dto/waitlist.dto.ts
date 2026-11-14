@@ -6,8 +6,8 @@ import {
 } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
-  IsDateString,
   IsEnum,
+  IsISO8601,
   IsInt,
   IsOptional,
   IsString,
@@ -15,12 +15,16 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { AppointmentTypeSummaryDto } from '../../../appointment-types/presentation/dto/appointment-type.dto';
+import { CHAIR_ID_INVALID_MESSAGE } from '../../../chairs/domain/chair-rules';
 import {
   WAITLIST_DISMISS_REASON_MAX,
+  WAITLIST_MAX_PAGE,
   WAITLIST_MAX_PAGE_SIZE,
   WAITLIST_NOTE_MAX,
+  WAITLIST_PAGE_TOO_HIGH_MESSAGE,
   WAITLIST_PREFERRED_WINDOW_MAX,
 } from '../../domain/waitlist-rules';
 
@@ -169,6 +173,8 @@ export class ListWaitlistQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  // DX-149: sin tope, una página enorme obliga a saltar miles de filas.
+  @Max(WAITLIST_MAX_PAGE, { message: WAITLIST_PAGE_TOO_HIGH_MESSAGE })
   page?: number;
 
   @ApiPropertyOptional({
@@ -259,7 +265,7 @@ export class ScheduleFromWaitlistDto {
   providerId!: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
-  @IsDateString()
+  @IsISO8601({ strict: true })
   start!: string;
 
   @ApiPropertyOptional({
@@ -268,7 +274,7 @@ export class ScheduleFromWaitlistDto {
     description: 'Si falta, `start` + la duración de la entrada.',
   })
   @IsOptional()
-  @IsDateString()
+  @IsISO8601({ strict: true })
   end?: string;
 
   @ApiPropertyOptional({
@@ -278,6 +284,16 @@ export class ScheduleFromWaitlistDto {
   @IsOptional()
   @IsUUID()
   appointmentTypeId?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-492: sillón de la sede de la entrada (el que devolvió «Buscar hueco»).',
+  })
+  // `null` no es «sin sillón»: se rechaza aquí, no con un 500 al buscarlo.
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsUUID(undefined, { message: CHAIR_ID_INVALID_MESSAGE })
+  chairId?: string;
 
   @ApiPropertyOptional({ maxLength: 200 })
   @IsOptional()

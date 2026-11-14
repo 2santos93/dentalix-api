@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { ReminderOptOutSource } from '@prisma/client';
 import type {
   MobileCandidate,
@@ -134,6 +135,16 @@ export class FakeReminderOptOutRepository implements ReminderOptOutRepository {
 
   liveLocationPhoneRegions(): Promise<string[]> {
     return Promise.resolve(this.regions);
+  }
+
+  regional: DocumentRegionalDto | null = {
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
+    hourCycle: 'h12',
+  };
+
+  principalRegional(): Promise<DocumentRegionalDto | null> {
+    return Promise.resolve(this.regional);
   }
 
   clinicBranding(): Promise<OptOutClinicBranding | null> {

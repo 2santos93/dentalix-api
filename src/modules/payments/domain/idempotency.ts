@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Payment } from './entities/payment.entity';
+import { amountText } from '../../../shared/money/money';
 
 /** 422 al repetir una Idempotency-Key con otro plan u otro cuerpo (DX-109). */
 export const IDEMPOTENCY_KEY_REUSED_MESSAGE =
@@ -14,13 +15,14 @@ export interface PaymentRequestShape {
   notes?: unknown;
   paymentMethodId?: string;
   reference?: string;
+  proofUploadId?: string;
 }
 
 const CIVIL_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
 
 function normalizeAmount(amount: unknown): unknown {
   return typeof amount === 'number' && Number.isFinite(amount)
-    ? amount.toFixed(2)
+    ? amountText(amount, 2)
     : (amount ?? null);
 }
 
@@ -75,6 +77,12 @@ export function paymentRequestFingerprint(
     ...(input.paymentMethodId || input.reference
       ? [input.paymentMethodId ?? null, input.reference?.trim() ?? null]
       : []),
+    // DX-389: el comprobante cuenta (solo si viene, las huellas anteriores
+    // siguen valiendo): la misma clave con otro comprobante es 422, no el
+    // abono original sin él.
+    ...(input.proofUploadId
+      ? [`proof:${input.proofUploadId.toLowerCase()}`]
+      : []),
   ];
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }
@@ -88,6 +96,7 @@ export interface SplitPaymentRequestShape {
     currency: unknown;
     paymentMethodId?: string;
     reference?: string;
+    proofUploadId?: string;
   }[];
 }
 
@@ -112,6 +121,9 @@ export function splitPaymentRequestFingerprint(
       normalizeCurrency(line.currency),
       line.paymentMethodId ?? null,
       line.reference?.trim() ?? null,
+      ...(line.proofUploadId
+        ? [`proof:${line.proofUploadId.toLowerCase()}`]
+        : []),
     ]),
   ];
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');

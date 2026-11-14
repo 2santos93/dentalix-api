@@ -7,15 +7,17 @@ function row(overrides: Partial<AgingCsvRow> = {}): AgingCsvRow {
     patient: {
       id: 'p1',
       fullName: 'Ana Pérez',
-      phone: '+57 300 123 4567',
-      whatsApp: '573001234567',
+      phone: '+58 412 123 4567',
+      whatsApp: '584121234567',
     },
     locationId: 'loc-1',
     oldestAgeDays: 120,
     ageApproximate: true,
+    paymentsWithoutRateCount: 0,
+    rateProviderTimedOut: false,
     currencies: [
       {
-        currency: 'COP',
+        currency: 'VES',
         balance: 750000,
         debt: 800000,
         credit: 50000,
@@ -26,9 +28,11 @@ function row(overrides: Partial<AgingCsvRow> = {}): AgingCsvRow {
           dueDate: new Date('2026-11-07T00:00:00.000Z'),
           amount: 100000,
         },
+        paymentsWithoutRateCount: 0,
+        rateProviderTimedOut: false,
       },
     ],
-    lastPayment: { paidOn: '2026-09-30', amount: 50000, currency: 'COP' },
+    lastPayment: { paidOn: '2026-09-30', amount: 50000, currency: 'VES' },
     nextInstallment: null,
     lastNote: null,
     lastNoteOn: null,
@@ -47,8 +51,8 @@ describe('toReceivablesCsv', () => {
       [
         '"Ana Pérez"',
         // Empieza por «+»: se neutraliza para que la hoja no lo lea como fórmula.
-        `"'+57 300 123 4567"`,
-        'COP',
+        `"'+58 412 123 4567"`,
+        'VES',
         '800000.00',
         '0.00',
         '300000.00',
@@ -61,7 +65,7 @@ describe('toReceivablesCsv', () => {
         'Sí',
         '2026-09-30',
         '50000.00',
-        'COP',
+        'VES',
         '2026-11-07',
         '100000.00',
         '',
@@ -69,6 +73,8 @@ describe('toReceivablesCsv', () => {
         '',
         '',
         '',
+        '',
+        // DX-472-ter: cifras completas, celda vacía.
         '',
       ].join(','),
     );
@@ -90,12 +96,14 @@ describe('toReceivablesCsv', () => {
             oldestAgeDays: null,
             ageApproximate: false,
             nextInstallment: null,
+            paymentsWithoutRateCount: 0,
+            rateProviderTimedOut: false,
           },
         ],
       }),
     ]);
     expect(csv.split('\r\n')[1]).toBe(
-      '"Luis","",USD,10.00,10.00,0.00,0.00,0.00,0.00,0.00,10.00,,No,,,,,,,,,,,',
+      '"Luis","",USD,10.00,10.00,0.00,0.00,0.00,0.00,0.00,10.00,,No,,,,,,,,,,,,',
     );
   });
 
@@ -111,7 +119,7 @@ describe('toReceivablesCsv', () => {
         promise: {
           id: 'pp1',
           amount: 200000,
-          currency: 'COP',
+          currency: 'VES',
           dueDate: '2026-11-15',
           status: 'BROKEN',
           reopenedAt: null,
@@ -119,7 +127,7 @@ describe('toReceivablesCsv', () => {
       }),
     ]);
     const header = csv.slice(1).split('\r\n')[0].split(',');
-    expect(header.slice(-6)).toEqual([
+    expect(header.slice(-7, -1)).toEqual([
       'Última gestión',
       'Fecha última gestión',
       'Compromiso',
@@ -128,8 +136,51 @@ describe('toReceivablesCsv', () => {
       'Fecha compromiso',
     ]);
     expect(csv.split('\r\n')[1]).toMatch(
-      /,"Llamada · Promete pago",2026-10-15,"Incumplido",200000\.00,COP,2026-11-15$/,
+      /,"Llamada · Promete pago",2026-10-15,"Incumplido",200000\.00,VES,2026-11-15,$/,
     );
+  });
+
+  it('DX-472-ter: «Cifras incompletas» es la última columna y dice por qué en cada línea (vacía si está completa)', () => {
+    const line = (flags: {
+      paymentsWithoutRateCount: number;
+      rateProviderTimedOut: boolean;
+    }) => {
+      const base = row();
+      const csv = toReceivablesCsv([
+        row({ currencies: [{ ...base.currencies[0], ...flags }] }),
+      ]);
+      return csv.split('\r\n')[1].split(',').at(-1);
+    };
+    expect(RECEIVABLES_CSV_HEADER.at(-1)).toBe('Cifras incompletas');
+    // Las 24 columnas de antes no se mueven (importaciones existentes).
+    expect(RECEIVABLES_CSV_HEADER.indexOf('Fecha compromiso')).toBe(23);
+    expect(
+      line({ paymentsWithoutRateCount: 0, rateProviderTimedOut: false }),
+    ).toBe('');
+    expect(
+      line({ paymentsWithoutRateCount: 2, rateProviderTimedOut: false }),
+    ).toBe('"Sin tasa"');
+    // Sin respuesta del proveedor: esos abonos también cuentan como sin tasa,
+    // pero lo que hay que hacer es volver a exportar.
+    expect(
+      line({ paymentsWithoutRateCount: 1, rateProviderTimedOut: true }),
+    ).toBe('"Proveedor sin respuesta"');
+  });
+
+  it('DX-472-ter: cada moneda dice lo suyo; el aviso de un plan en EUR no marca la línea en USD', () => {
+    const base = row().currencies[0];
+    const csv = toReceivablesCsv([
+      row({
+        paymentsWithoutRateCount: 1,
+        currencies: [
+          { ...base, currency: 'EUR', paymentsWithoutRateCount: 1 },
+          { ...base, currency: 'USD' },
+        ],
+      }),
+    ]);
+    const [eur, usd] = csv.split('\r\n').slice(1, 3);
+    expect(eur).toMatch(/^"Ana Pérez",[^,]*,EUR,.*,"Sin tasa"$/);
+    expect(usd).toMatch(/^"Ana Pérez",[^,]*,USD,.*,$/);
   });
 
   it('escapa comillas y neutraliza fórmulas en el nombre (=, +, -, @)', () => {
@@ -152,5 +203,58 @@ describe('toReceivablesCsv', () => {
     expect(toReceivablesCsv([])).toBe(
       `\uFEFF${RECEIVABLES_CSV_HEADER.join(',')}\r\n`,
     );
+  });
+
+  it('DX-488: importes con los decimales de la pantalla (csvAmount): JPY entero sin decimales, con céntimos con 2; USD siempre con 2', () => {
+    const csv = toReceivablesCsv([
+      row({
+        lastPayment: { paidOn: '2026-09-30', amount: 3333, currency: 'JPY' },
+        promise: {
+          id: 'pp1',
+          amount: 10.5,
+          currency: 'USD',
+          dueDate: '2026-11-15',
+          status: 'OPEN',
+          reopenedAt: null,
+        },
+        currencies: [
+          {
+            currency: 'JPY',
+            balance: 6666.5,
+            debt: 6666.5,
+            credit: 0,
+            buckets: { ...emptyBuckets(), current: 3334, days0to30: 3332.5 },
+            oldestAgeDays: 10,
+            ageApproximate: false,
+            nextInstallment: {
+              dueDate: new Date('2026-11-07T00:00:00.000Z'),
+              amount: 3334,
+            },
+            paymentsWithoutRateCount: 0,
+            rateProviderTimedOut: false,
+          },
+        ],
+      }),
+    ]);
+    const cells = csv.slice(1).split('\r\n')[1].split(',');
+    expect(cells.slice(2, 11)).toEqual([
+      'JPY',
+      '6666.50',
+      '3334',
+      '3332.50',
+      '0',
+      '0',
+      '0',
+      '0',
+      '6666.50',
+    ]);
+    expect(cells.slice(13, 18)).toEqual([
+      '2026-09-30',
+      '3333',
+      'JPY',
+      '2026-11-07',
+      '3334',
+    ]);
+    expect(cells.slice(20, 23)).toEqual(['"Abierto"', '10.50', 'USD']);
   });
 });

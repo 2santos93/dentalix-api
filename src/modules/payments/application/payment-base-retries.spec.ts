@@ -44,6 +44,7 @@ function quoting(
       }
       return Promise.resolve({
         ...input,
+        rateDate: input.date,
         source: backup ? 'MANUAL' : 'AUTOMATIC',
         fromPerBase: perBase(input.from),
         toPerBase: perBase(input.to),
@@ -97,11 +98,11 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it('congela la tasa, crea la base con ella y cierra el reintento', async () => {
-    const { retries, allocations, service } = setup({ COP: 4000 });
+    const { retries, allocations, service } = setup({ EUR: 4000 });
     retries.add({
-      paymentId: 'cop',
+      paymentId: 'gbp',
       amount: 200_000,
-      currency: 'COP',
+      currency: 'EUR',
       targetCurrency: 'USD',
       planCurrency: 'USD',
       exchangeRateCurrency: 'USD',
@@ -112,22 +113,22 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
       withoutRate: 0,
       failed: 0,
     });
-    expect(allocations.frozen.get('cop')?.rate).toMatchObject({
+    expect(allocations.frozen.get('gbp')?.rate).toMatchObject({
       fromPerBase: 4000,
       toPerBase: 1,
     });
-    expect(allocations.bases.get('cop')).toEqual({
+    expect(allocations.bases.get('gbp')).toEqual({
       amount: 50,
       currency: 'USD',
       rateDate: '2026-10-30',
     });
-    expect(retries.rows.has('cop')).toBe(false);
+    expect(retries.rows.has('gbp')).toBe(false);
   });
 
   // DX-402: el reintento lee con la tasa de respaldo (la manual de un día
   // anterior a «manual desde») y deja en la auditoría que la usó.
   it('el reintento pide la lectura con tasa de respaldo', async () => {
-    const { retries, service, memoizedWith } = setup({ COP: 4000 });
+    const { retries, service, memoizedWith } = setup({ EUR: 4000 });
     retries.add(stuck('ves'));
     await service.retryDue(50);
     expect(memoizedWith).toEqual([{ manualBackup: true }]);
@@ -135,7 +136,7 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
 
   it('congelar con la tasa de respaldo queda en la auditoría, con el día y desde cuándo rige la manual', async () => {
     const { retries, allocations, service, backupUses } = setup(
-      { COP: 4000 },
+      { EUR: 4000 },
       undefined,
       { manualSince: '2026-10-30' },
     );
@@ -144,9 +145,9 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
       amount: 50,
       currency: 'USD',
       paidOn: '2026-10-28',
-      targetCurrency: 'COP',
-      planCurrency: 'COP',
-      exchangeRateCurrency: 'COP',
+      targetCurrency: 'EUR',
+      planCurrency: 'EUR',
+      exchangeRateCurrency: 'EUR',
     });
 
     await expect(service.retryDue(50)).resolves.toMatchObject({ resolved: 1 });
@@ -167,11 +168,11 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
   });
 
   it('una tasa que no es de respaldo no deja ese evento', async () => {
-    const { retries, service, backupUses } = setup({ COP: 4000 });
+    const { retries, service, backupUses } = setup({ EUR: 4000 });
     retries.add({
-      paymentId: 'cop',
+      paymentId: 'gbp',
       amount: 200_000,
-      currency: 'COP',
+      currency: 'EUR',
       targetCurrency: 'USD',
       planCurrency: 'USD',
       exchangeRateCurrency: 'USD',
@@ -182,7 +183,7 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
 
   it('si el abono ya tenía la tasa congelada (otra pasada), no se audita el respaldo', async () => {
     const { retries, allocations, service, backupUses } = setup(
-      { COP: 4000 },
+      { EUR: 4000 },
       undefined,
       { manualSince: '2026-10-30' },
     );
@@ -191,15 +192,15 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
       amount: 50,
       currency: 'USD',
       paidOn: '2026-10-28',
-      targetCurrency: 'COP',
-      planCurrency: 'COP',
-      exchangeRateCurrency: 'COP',
+      targetCurrency: 'EUR',
+      planCurrency: 'EUR',
+      exchangeRateCurrency: 'EUR',
     });
     // Otra pasada lo congeló entre la lectura y la escritura (DX-375).
     allocations.frozen.set('ya', {
-      targetCurrency: 'COP',
+      targetCurrency: 'EUR',
       rate: {
-        currency: 'COP',
+        currency: 'EUR',
         fromPerBase: 1,
         toPerBase: 3900,
         source: 'AUTOMATIC',
@@ -238,12 +239,12 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
   });
 
   it('con 60 atascados más nuevos, el resoluble más antiguo recibe su base en la primera pasada', async () => {
-    const { retries, allocations, service } = setup({ COP: 4000 });
+    const { retries, allocations, service } = setup({ EUR: 4000 });
     retries.add(
       {
-        paymentId: 'old-cop',
+        paymentId: 'old-gbp',
         amount: 4000,
-        currency: 'COP',
+        currency: 'EUR',
         targetCurrency: 'USD',
         planCurrency: 'USD',
         exchangeRateCurrency: 'USD',
@@ -262,11 +263,11 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
       withoutRate: 49,
       failed: 0,
     });
-    expect(allocations.bases.get('old-cop')?.amount).toBe(1);
+    expect(allocations.bases.get('old-gbp')?.amount).toBe(1);
   });
 
   it('la selección va por nextAttemptAt: un aplazado no entra antes de su hora y deja sitio a los demás', async () => {
-    const { retries, service, quotes } = setup({ COP: 4000 });
+    const { retries, service, quotes } = setup({ EUR: 4000 });
     retries.add(stuck('later'), new Date(retries.now.getTime() + 5 * MIN));
     retries.add(stuck('first'), new Date(retries.now.getTime() - 2 * MIN));
     retries.add(stuck('second'), new Date(retries.now.getTime() - MIN));
@@ -336,10 +337,10 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
   });
 
   it('un abono a un saldo migrado solo congela su tasa (no lleva base)', async () => {
-    const { retries, allocations, service } = setup({ COP: 4000 });
+    const { retries, allocations, service } = setup({ EUR: 4000 });
     retries.add({
       paymentId: 'opening',
-      currency: 'COP',
+      currency: 'EUR',
       targetCurrency: 'USD',
       planCurrency: null,
       exchangeRateCurrency: 'USD',
@@ -357,7 +358,7 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
     retries.add({
       paymentId: 'frozen',
       amount: 8000,
-      currency: 'COP',
+      currency: 'EUR',
       targetCurrency: 'USD',
       planCurrency: 'USD',
       exchangeRateCurrency: 'USD',
@@ -389,6 +390,133 @@ describe('PaymentBaseRetries (DX-380, OPS-045)', () => {
     await service.retryDue(50);
 
     expect(quotes).toHaveLength(2);
+  });
+
+  it('DX-413: un wake durante el intento no se pisa: no aplaza, queda adelantado y el convertidor se recarga', async () => {
+    const { retries, allocations, service, memoizedWith } = setup();
+    retries.add(stuck('first'));
+    retries.add(stuck('second'), new Date(retries.now.getTime() + MIN));
+    retries.advance(2 * MIN);
+    const freezeRate = allocations.freezeRate.bind(allocations);
+    let woke = false;
+    jest
+      .spyOn(allocations, 'freezeRate')
+      .mockImplementation(async (...args) => {
+        if (!woke) {
+          woke = true;
+          await service.wake();
+        }
+        return freezeRate(...args);
+      });
+
+    const pass = await service.retryDue(50);
+
+    // El primero fue el que vio el wake: ni contado ni aplazado.
+    expect(retries.rows.get('first')).toMatchObject({
+      lastReason: null,
+      candidate: { attempts: 0, wakeCount: 1 },
+    });
+    expect(
+      retries.rows.get('first')?.nextAttemptAt.getTime(),
+    ).toBeLessThanOrEqual(retries.now.getTime());
+    // Uno al empezar y uno por el wake (no uno por abono).
+    expect(memoizedWith).toHaveLength(2);
+    // El segundo se leyó antes del wake: tampoco se aplaza.
+    expect(retries.rows.get('second')?.candidate.attempts).toBe(0);
+    expect(pass).toEqual({ resolved: 0, withoutRate: 0, failed: 0 });
+  });
+
+  it('DX-413: 50 abonos fallidos tras un solo wake recargan el convertidor una vez', async () => {
+    const { retries, allocations, service, memoizedWith } = setup();
+    for (let i = 0; i < 50; i += 1)
+      retries.add(stuck(`p${String(i).padStart(2, '0')}`));
+    const freezeRate = allocations.freezeRate.bind(allocations);
+    let woke = false;
+    jest
+      .spyOn(allocations, 'freezeRate')
+      .mockImplementation(async (...args) => {
+        if (!woke) {
+          woke = true;
+          await service.wake();
+        }
+        return freezeRate(...args);
+      });
+
+    await service.retryDue(50);
+
+    expect(memoizedWith).toHaveLength(2);
+  });
+
+  it('DX-413: con contadores distintos por fila (A=5, B=0, C=0) el wake recarga una vez y C se resuelve en la misma pasada', async () => {
+    const rates: Record<string, number> = {};
+    const { retries, allocations, service, memoizedWith } = setup(rates);
+    const t = retries.now.getTime();
+    retries.add(stuck('b'), new Date(t - 3 * MIN));
+    retries.add(stuck('c'), new Date(t - 2 * MIN));
+    retries.add({ ...stuck('a'), wakeCount: 5 }, new Date(t - MIN));
+    const freezeRate = allocations.freezeRate.bind(allocations);
+    let woke = false;
+    jest
+      .spyOn(allocations, 'freezeRate')
+      .mockImplementation(async (...args) => {
+        if (!woke) {
+          woke = true;
+          // La tasa llega y la clínica despierta los reintentos en pleno intento de B.
+          rates.VES = 40;
+          await service.wake();
+        }
+        return freezeRate(...args);
+      });
+
+    const pass = await service.retryDue(50);
+
+    expect(memoizedWith).toHaveLength(2);
+    expect(retries.rows.has('c')).toBe(false);
+    expect(pass.resolved).toBeGreaterThanOrEqual(1);
+    // B vio el wake: sigue adelantado, sin intento contado.
+    expect(retries.rows.get('b')?.candidate.attempts).toBe(0);
+  });
+
+  it('DX-413: si la fila desapareció durante el intento no se recarga el convertidor', async () => {
+    const { retries, allocations, service, memoizedWith } = setup();
+    retries.add(stuck('gone'));
+    const freezeRate = allocations.freezeRate.bind(allocations);
+    jest
+      .spyOn(allocations, 'freezeRate')
+      .mockImplementation(async (...args) => {
+        retries.rows.delete('gone');
+        return freezeRate(...args);
+      });
+
+    await service.retryDue(50);
+
+    expect(memoizedWith).toHaveLength(1);
+  });
+
+  it('DX-413: postpone solo aplaza si la fila sigue como se leyó', async () => {
+    const { retries } = setup();
+    retries.add(stuck('a'));
+    const failure = {
+      attempts: 1,
+      wakeCount: 0,
+      reason: 'NO_RATE' as const,
+      delayMs: MIN,
+    };
+    await retries.wake();
+    await expect(retries.postpone('a', failure)).resolves.toEqual({
+      postponed: false,
+      wakeCount: 1,
+    });
+    await expect(
+      retries.postpone('a', { ...failure, wakeCount: 1 }),
+    ).resolves.toMatchObject({ postponed: true });
+    await expect(retries.postpone('gone', failure)).resolves.toEqual({
+      postponed: false,
+      wakeCount: null,
+    });
+    expect(retries.rows.get('a')?.nextAttemptAt.getTime()).toBe(
+      retries.now.getTime() + MIN,
+    );
   });
 
   it('el aviso al ADMIN cuenta los pendientes de más de 24 h y desde cuándo', async () => {

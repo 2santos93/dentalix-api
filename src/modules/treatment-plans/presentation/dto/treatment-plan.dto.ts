@@ -47,7 +47,7 @@ export class TreatmentPlanAcceptanceSummaryDto {
 // return the bare plan, so those two fields are optional here.
 export class TreatmentPlanDto {
   @ApiPropertyOptional({
-    type: Object,
+    type: 'object',
     additionalProperties: { type: 'integer' },
   })
   visitIntervals!: Record<string, number>;
@@ -92,6 +92,24 @@ export class TreatmentPlanDto {
   })
   optionLabel!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-417: este plan es el presupuesto pendiente que dejó la aceptación parcial de ese plan (con los procedimientos no aceptados); null si no. «Resto del plan aceptado el …»',
+  })
+  splitFromPlanId!: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-417: este plan se aceptó en parte («Aceptado parcialmente») y lo no aceptado está en ese plan pendiente; null si no. En la lista y en GET by id',
+  })
+  partialPendingPlanId?: string | null;
+
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   presentedAt!: Date | null;
 
@@ -102,6 +120,32 @@ export class TreatmentPlanDto {
     description: 'Sede donde se presentó (la del request o la principal)',
   })
   presentedLocationId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2026-11-09',
+    description:
+      'DX-379: día de emisión del presupuesto (día civil de la sede), fijado al presentarlo o al imprimirlo por primera vez (POST …/quote/issue). null = plan anterior a DX-379 o borrador nunca impreso',
+  })
+  quoteIssuedOn!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2026-12-09',
+    description:
+      'DX-379: último día en que vale el presupuesto (inclusive). Lo fijan presentar (siempre) o la primera impresión; editar ítems o cambiar el ajuste de días no lo mueve. null = sin validez guardada (nunca vence)',
+  })
+  quoteValidUntil!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-379: el presupuesto venció — hoy, en la zona de la sede del plan (la de su presentación o, sin presentar, la del request), es posterior a quoteValidUntil. Solo puede ser true en borrador (DRAFT) o presentado (PRESENTED): aceptado (con o sin firma), completado, rechazado o cancelado es siempre false. También false si quoteValidUntil es null. Lo calcula el servidor: la web no lo recalcula con la fecha del navegador',
+  })
+  quoteExpired!: boolean;
 
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   rejectedAt!: Date | null;

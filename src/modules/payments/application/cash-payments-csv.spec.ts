@@ -1,9 +1,9 @@
-import { REFERENCE_CURRENCY_DIGITS } from '../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 import { CSV_BOM } from '../../../shared/csv/csv-cells';
 import type { CashPaymentView } from '../domain/entities/cash-payment.entity';
 import {
   CASH_PAYMENTS_CSV_HEADER,
+  CSV_HIDDEN_AMOUNT,
   toCashPaymentsCsv,
 } from './cash-payments-csv';
 
@@ -14,10 +14,11 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
     paidAt: new Date('2026-10-15T17:00:00.000Z'),
     paidOn: '2026-10-15',
     amount: 150000,
-    currency: 'COP',
+    currency: 'RSD',
     method: PaymentMethod.TRANSFER,
     paymentMethod: { id: 'pm-mobile', name: 'Pago móvil' },
     reference: 'ABC 123',
+    externalInvoiceNumber: null,
     notes: 'nota interna',
     location: { id: 'l1', name: 'Sede Norte' },
     patient: { id: 'pat-1', fullName: 'Ana Gómez' },
@@ -29,6 +30,11 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
     openingBalance: null,
     splitId: null,
     splitLines: null,
+    receiptNumber: null,
+    hasProof: false,
+    adjustments: [],
+    collectedAmount: overrides.amount ?? 150000,
+    amountHidden: false,
     canVoid: false,
     registeredOn: '2026-10-15',
     registeredToday: false,
@@ -40,10 +46,7 @@ const linesOf = (csv: string) => csv.slice(1).split('\r\n');
 
 describe('CSV de la caja (DX-395)', () => {
   it('UTF-8 con BOM, CRLF, cabecera con medio y referencia y una línea por abono', () => {
-    const csv = toCashPaymentsCsv(
-      [row(), row({ id: 'p2' })],
-      REFERENCE_CURRENCY_DIGITS,
-    );
+    const csv = toCashPaymentsCsv([row(), row({ id: 'p2' })]);
     expect(csv.startsWith(CSV_BOM)).toBe(true);
     const lines = linesOf(csv);
     expect(lines[0]).toBe(CASH_PAYMENTS_CSV_HEADER.join(','));
@@ -54,17 +57,22 @@ describe('CSV de la caja (DX-395)', () => {
       'Destino',
       'Medio',
       'Referencia',
+      'Factura externa',
       'Moneda',
       'Importe',
+      // DX-516: al final, sin mover las anteriores.
+      'Impuestos',
+      'Recargos',
+      'Descuentos',
+      'Total cobrado',
+      'Detalle de ajustes',
     ]);
     expect(lines).toHaveLength(4);
     expect(lines[3]).toBe('');
   });
 
   it('lleva el medio de la clínica y la referencia, con los decimales de la moneda', () => {
-    expect(
-      linesOf(toCashPaymentsCsv([row()], REFERENCE_CURRENCY_DIGITS))[1],
-    ).toBe(
+    expect(linesOf(toCashPaymentsCsv([row()]))[1]).toBe(
       [
         '2026-10-15',
         '"Sede Norte"',
@@ -72,57 +80,208 @@ describe('CSV de la caja (DX-395)', () => {
         '"Plan del 2026-09-01"',
         '"Pago móvil"',
         '"ABC 123"',
-        'COP',
+        '""',
+        'RSD',
         '150000',
+        // DX-516: sin ajustes, vacíos y lo cobrado = el importe.
+        '',
+        '',
+        '',
+        '150000',
+        '""',
       ].join(','),
     );
     expect(
       linesOf(
-        toCashPaymentsCsv(
-          [row({ currency: 'USD', amount: 10.5 })],
-          REFERENCE_CURRENCY_DIGITS,
-        ),
-      )[1].endsWith(',USD,10.50'),
+        toCashPaymentsCsv([row({ currency: 'USD', amount: 10.5 })]),
+      )[1].endsWith(',USD,10.50,,,,10.50,""'),
     ).toBe(true);
   });
 
   it('saldo migrado, sin medio ni referencia', () => {
     const line = linesOf(
-      toCashPaymentsCsv(
-        [
-          row({
-            treatmentPlan: null,
-            openingBalance: { id: 'ob1', concept: 'Deuda anterior' },
-            method: null,
-            paymentMethod: null,
-            reference: null,
-          }),
-        ],
-        REFERENCE_CURRENCY_DIGITS,
-      ),
+      toCashPaymentsCsv([
+        row({
+          treatmentPlan: null,
+          openingBalance: { id: 'ob1', concept: 'Deuda anterior' },
+          method: null,
+          paymentMethod: null,
+          reference: null,
+        }),
+      ]),
     )[1];
     expect(line).toContain('"Saldo migrado · Deuda anterior","Sin método",""');
   });
 
   it('protege las fórmulas en la referencia y el nombre (inyección CSV)', () => {
     const line = linesOf(
-      toCashPaymentsCsv(
-        [
-          row({
-            reference: '=HYPERLINK("x")',
-            patient: { id: 'p', fullName: '+Ana' },
-          }),
-        ],
-        REFERENCE_CURRENCY_DIGITS,
-      ),
+      toCashPaymentsCsv([
+        row({
+          reference: '=HYPERLINK("x")',
+          patient: { id: 'p', fullName: '+Ana' },
+        }),
+      ]),
     )[1];
     expect(line).toContain(`"'+Ana"`);
     expect(line).toContain(`"'=HYPERLINK(""x"")"`);
   });
 
-  it('las notas internas no salen en el CSV', () => {
-    expect(toCashPaymentsCsv([row()], REFERENCE_CURRENCY_DIGITS)).not.toContain(
-      'nota interna',
+  it('DX-515: lleva el nº de la factura externa tal cual, sin formato', () => {
+    const line = linesOf(
+      toCashPaymentsCsv([row({ externalInvoiceNumber: 'A/2026 00-77' })]),
+    )[1];
+    expect(line).toBe(
+      [
+        '2026-10-15',
+        '"Sede Norte"',
+        '"Ana Gómez"',
+        '"Plan del 2026-09-01"',
+        '"Pago móvil"',
+        '"ABC 123"',
+        '"A/2026 00-77"',
+        'RSD',
+        '150000',
+        '',
+        '',
+        '',
+        '150000',
+        '""',
+      ].join(','),
     );
+  });
+
+  it('DX-515: protege las fórmulas en el nº de la factura externa', () => {
+    for (const [value, cell] of [
+      ['=1+1', `"'=1+1"`],
+      ['-5', `"'-5"`],
+      ['@SUM(A1)', `"'@SUM(A1)"`],
+    ]) {
+      const line = linesOf(
+        toCashPaymentsCsv([row({ externalInvoiceNumber: value })]),
+      )[1];
+      expect(line).toContain(`,"ABC 123",${cell},RSD,`);
+    }
+  });
+
+  it('las notas internas no salen en el CSV', () => {
+    expect(toCashPaymentsCsv([row()])).not.toContain('nota interna');
+  });
+
+  it('DX-516: impuestos, recargos y descuentos por separado, lo cobrado y el detalle saneado', () => {
+    const line = linesOf(
+      toCashPaymentsCsv([
+        row({
+          currency: 'USD',
+          amount: 100,
+          adjustments: [
+            {
+              type: 'TAX',
+              label: 'Impuesto 3 %',
+              calculation: 'PERCENT',
+              percent: 3,
+              fixedAmount: null,
+              base: 100,
+              amount: 3,
+              currency: 'USD',
+            },
+            {
+              type: 'SURCHARGE',
+              label: 'Comisión',
+              calculation: 'FIXED',
+              percent: null,
+              fixedAmount: 1.5,
+              base: 100,
+              amount: 1.5,
+              currency: 'USD',
+            },
+            {
+              type: 'DISCOUNT',
+              label: '-Pronto pago',
+              calculation: 'PERCENT',
+              percent: 5,
+              fixedAmount: null,
+              base: 100,
+              amount: 5,
+              currency: 'USD',
+            },
+          ],
+          collectedAmount: 99.5,
+        }),
+      ]),
+    )[1];
+    expect(
+      line.endsWith(
+        `,USD,100.00,3.00,1.50,5.00,99.50,"Impuesto 3 % +3.00; Comisión +1.50; -Pronto pago -5.00"`,
+      ),
+    ).toBe(true);
+    // Una etiqueta que empieza como una fórmula se neutraliza.
+    const formula = linesOf(
+      toCashPaymentsCsv([
+        row({
+          currency: 'USD',
+          adjustments: [
+            {
+              type: 'DISCOUNT',
+              label: '=HYPERLINK("x")',
+              calculation: 'FIXED',
+              percent: null,
+              fixedAmount: 10,
+              base: 150000,
+              amount: 10,
+              currency: 'USD',
+            },
+          ],
+        }),
+      ]),
+    )[1];
+    expect(formula).toContain(`"'=HYPERLINK(""x"") -10.00"`);
+  });
+
+  it('SEC-043: un abono de una caja abierta con arqueo ciego va sin cifras ni moneda, con el texto en Importe y Total cobrado', () => {
+    const csv = toCashPaymentsCsv([
+      row({
+        amount: null,
+        currency: null,
+        collectedAmount: null,
+        notes: null,
+        amountHidden: true,
+      }),
+    ]);
+    const [, line] = csv.replace(CSV_BOM, '').trim().split(/\r?\n/);
+    const cells = line.split(',');
+    const col = (name: (typeof CASH_PAYMENTS_CSV_HEADER)[number]) =>
+      cells[CASH_PAYMENTS_CSV_HEADER.indexOf(name)];
+    expect(col('Moneda')).toBe('');
+    expect(col('Importe')).toBe(`"${CSV_HIDDEN_AMOUNT}"`);
+    expect(col('Total cobrado')).toBe(`"${CSV_HIDDEN_AMOUNT}"`);
+    expect(col('Impuestos')).toBe('');
+    expect(col('Paciente')).toBe('"Ana Gómez"');
+    expect(cells).toHaveLength(CASH_PAYMENTS_CSV_HEADER.length);
+  });
+
+  it('DX-488: un abono con céntimos en una moneda de redondeo 0 sale con ellos (RSD 150000.50), también sus ajustes', () => {
+    const line = linesOf(
+      toCashPaymentsCsv([
+        row({
+          amount: 150000.5,
+          collectedAmount: 150001.25,
+          adjustments: [
+            {
+              type: 'SURCHARGE',
+              label: 'Comisión',
+              calculation: 'FIXED',
+              percent: null,
+              fixedAmount: 0.75,
+              base: 150000.5,
+              amount: 0.75,
+              currency: 'RSD',
+            },
+          ],
+        }),
+      ]),
+    )[1];
+    expect(
+      line.endsWith(',RSD,150000.50,,0.75,,150001.25,"Comisión +0.75"'),
+    ).toBe(true);
   });
 });

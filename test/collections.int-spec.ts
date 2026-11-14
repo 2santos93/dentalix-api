@@ -6,8 +6,10 @@ import { SettlePaymentPromises } from '../src/modules/collections/application/se
 import { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
-import { locationData } from './support/location-fixtures';
-import { sedeTodayFixture } from './support/sede-clock';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 
 // DX-150, capa DB: notas de cobranza y compromisos de pago (RLS FORCE, FK
 // compuestas, append-only por trigger, un compromiso abierto por paciente) y
@@ -23,11 +25,7 @@ const prisma = new PrismaService(tenantContext);
 const SUBDOMAINS = ['dx150-int-a', 'dx150-int-b'];
 const FK_VIOLATION = { code: 'P2003' };
 const IMMUTABLE = /inalterable|no admite/;
-// DX-495 (TST-062): la sede usa la zona segura de DX-449 (Bogotá lejos de su
-// medianoche; si no, una zona en la que ahora es cerca del mediodía): el «hoy»
-// de los compromisos y el del barrido no se separan si la corrida cruza la
-// medianoche de Bogotá.
-const SEDE = sedeTodayFixture();
+const CARACAS = 'America/Caracas';
 
 interface Clinic {
   tenantId: string;
@@ -44,10 +42,10 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(SEDE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const patients: string[] = [];
@@ -61,7 +59,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
         tenantId,
         patientId: patient.id,
         status: 'ACCEPTED',
-        currency: 'COP',
+        currency: 'USD',
       },
     });
     patients.push(patient.id);
@@ -147,13 +145,13 @@ describe('cobranza: notas y compromisos de pago (int, DX-150)', () => {
     patientId,
     locationId: clinic.locationId,
     amount: 200_000,
-    currency: 'COP',
+    currency: 'USD',
     dueDate: new Date(`${dueDate}T00:00:00.000Z`),
     createdById: authorId,
     ...extra,
   });
 
-  const today = () => civilDateIn(new Date(), SEDE.timeZone);
+  const today = () => civilDateIn(new Date(), CARACAS);
 
   describe.each(['collection_notes', 'payment_promises'])('%s', (table) => {
     it('tiene RLS ENABLE + FORCE y la política del tenant', async () => {
@@ -320,7 +318,7 @@ describe('cobranza: notas y compromisos de pago (int, DX-150)', () => {
         treatmentPlanId: a.planOf.get(kept)!,
         patientId: kept,
         amount: 200_000,
-        currency: 'COP',
+        currency: 'USD',
         paidAt: new Date(),
       },
     });

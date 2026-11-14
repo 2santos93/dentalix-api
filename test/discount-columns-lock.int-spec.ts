@@ -7,7 +7,7 @@ import {
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -57,13 +57,13 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     ),
   );
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede principal',
     }),
   });
   const otherLocation = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId,
       name: 'Sede norte',
     }),
@@ -118,7 +118,7 @@ async function seedDiscountedPlan(
   itemStatus: 'PROPOSED' | 'ACCEPTED' = 'ACCEPTED',
 ): Promise<{ planId: string; itemId: string }> {
   const plan = await raw.treatmentPlan.create({
-    data: { tenantId: s.tenantId, patientId: s.patientId, currency: 'COP' },
+    data: { tenantId: s.tenantId, patientId: s.patientId, currency: 'USD' },
   });
   const item = await raw.treatmentPlanItem.create({
     data: {
@@ -559,10 +559,12 @@ describe('DX-204 · columnas del descuento en la BD: triggers, FK, CHECK y RLS (
        WHERE tablename = 'treatment_plan_items'
          AND indexname LIKE 'treatment_plan_items_tenant_%discount%at_idx'`;
     expect(indexes.map((i) => i.indexname)).toEqual([
-      'treatment_plan_items_tenant_effective_discount_at_idx',
+      // DX-513-bis: el índice rehecho con la referencia convertida.
+      'treatment_plan_items_tenant_effective_ref_discount_at_idx',
     ]);
     expect(indexes[0].indexdef).toMatch(
-      /COALESCE\("discountAt", "createdAt"\).*WHERE \(\(\(discount > \(0\)::numeric\) OR \(price < "catalogPrice"\)\) AND \("deletedAt" IS NULL\)\)/,
+      // DX-513-bis: también la rebaja frente a la referencia convertida.
+      /COALESCE\("discountAt", "createdAt"\).*WHERE \(\(\(discount > \(0\)::numeric\) OR \(price < "catalogPrice"\) OR \(price < "referencePriceInPlan"\)\) AND \("deletedAt" IS NULL\)\)/,
     );
   });
 });

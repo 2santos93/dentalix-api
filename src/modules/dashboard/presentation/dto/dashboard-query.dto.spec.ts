@@ -13,7 +13,7 @@ describe('DashboardQueryDto currency validation', () => {
     to: '2026-07-31',
   };
 
-  it.each(['USD', 'COP', 'usd'])(
+  it.each(['USD', 'VES', 'usd'])(
     'accepts a real ISO-4217 currency, case-insensitively (%s)',
     async (currency) => {
       const dto = plainToInstance(DashboardQueryDto, { ...base, currency });

@@ -17,9 +17,13 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-040 en HTTP real: alternativas A/B, presentar, rechazar, la máquina de
 // estados (409), los permisos por rol y la lista de presupuestos por seguir
@@ -95,7 +99,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
     price = 1000000,
   ): Promise<string> {
     const plan = await as(clinic)
-      .post(`/patients/${patientId}/treatment-plans`, { currency: 'COP' })
+      .post(`/patients/${patientId}/treatment-plans`, { currency: 'USD' })
       .expect(201);
     const id = (plan.body as Plan).id;
     await as(clinic)
@@ -151,6 +155,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     clinicA = await registerClinic(app, 'alternativas-a');
     clinicB = await registerClinic(app, 'alternativas-b');
     tokens.ADMIN = clinicA.adminToken;
@@ -166,19 +171,20 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
     // (mismo criterio que tenant-isolation-matrix.e2e-spec.ts).
     await as(clinicA).put('/locations/schedule', { ranges: [] }).expect(200);
     catalogA = await catalogItem(clinicA, 'IMPL-A');
-    patientA = await patient(clinicA, 'Ana', '+57 300 111 2222');
+    patientA = await patient(clinicA, 'Ana', '+58 412 111 2222');
     const locations = await as(clinicA).get('/locations').expect(200);
     mainLocationA = (locations.body as { id: string }[])[0].id;
     const north = await as(clinicA)
       .post(
         '/locations',
-        locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+        locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
       )
       .expect(201);
     northLocationA = (north.body as { id: string }).id;
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
@@ -360,7 +366,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       await as(clinicA)
         .post(`/treatment-plans/${paid}/payments`, {
           amount: 10000,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date().toISOString(),
           method: 'CASH',
         })
@@ -395,7 +401,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
 
     it('un plan sin ítems no se presenta (400)', async () => {
       const empty = await as(clinicA)
-        .post(`/patients/${patientA}/treatment-plans`, { currency: 'COP' })
+        .post(`/patients/${patientA}/treatment-plans`, { currency: 'USD' })
         .expect(201);
       await as(clinicA)
         .post(`/treatment-plans/${(empty.body as Plan).id}/present`)
@@ -415,7 +421,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
         where: { tenantId: clinicA.tenantId, status: 'PRESENTED' },
         data: { status: 'CANCELLED' },
       });
-      const duePatient = await patient(clinicA, 'Laura', '+57 300 555 6666');
+      const duePatient = await patient(clinicA, 'Laura', '+58 412 555 6666');
       due = await planWithItem(clinicA, duePatient, catalogA, 2000000);
       await presentDaysAgo(due, 10, mainLocationA);
 
@@ -482,10 +488,10 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       expect(page.items.map((i) => i.planId)).toEqual([dueNorth, due]);
       expect(page.items[1]).toMatchObject({
         patientName: 'Laura Seguimiento',
-        patientPhone: '+57 300 555 6666',
-        patientWhatsApp: '573005556666',
+        patientPhone: '+58 412 555 6666',
+        patientWhatsApp: '584125556666',
         total: 1950000,
-        currency: 'COP',
+        currency: 'USD',
         daysSincePresented: 10,
       });
       const ids = page.items.map((i) => i.planId);
@@ -545,7 +551,7 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       });
       await raw.patient.update({
         where: { id: plan.patientId },
-        data: { phone: '0412-1234567', countryCode: 'CO' },
+        data: { phone: '612 34 56 78', countryCode: 'ES' },
       });
       const read = async () =>
         (
@@ -562,12 +568,12 @@ describe('Alternativas de plan y presupuestos por seguir (e2e, DX-040)', () => {
       });
       await raw.location.update({
         where: { id: northLocationA },
-        data: { defaultPhoneRegion: 'VE' },
+        data: { defaultPhoneRegion: 'ES' },
       });
       try {
         expect(await read()).toMatchObject({
           planId: dueNorth,
-          patientWhatsApp: '584121234567',
+          patientWhatsApp: '34612345678',
         });
       } finally {
         await raw.location.update({

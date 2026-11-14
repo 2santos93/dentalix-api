@@ -96,4 +96,8 @@ export class InMemoryLoginThrottleRepository implements LoginThrottleRepository 
       until !== null && until > this.now ? new Date(until) : null,
     );
   }
+
+  accountFailures(key: string): Promise<number> {
+    return Promise.resolve(this.rows.get(`ACCOUNT:${key}`)?.failures ?? 0);
+  }
 }

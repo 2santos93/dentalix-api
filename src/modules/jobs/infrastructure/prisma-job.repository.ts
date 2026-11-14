@@ -111,7 +111,7 @@ export class PrismaJobRepository implements JobRepository {
     if (names.length === 0 || limit <= 0) {
       return Promise.resolve([]);
     }
-    // RUNNING con `runAt` vencido = arriendo vencido (el worker murió): se
+    // RUNNING con `runAt` vencido = reserva vencida (el worker murió): se
     // retoma. Índice (state, runAt). DX-220 (OPS-030): nunca una fila con
     // `attempts > maxAttempts` (la deja `maxAttempts + 1` un cierre que no
     // llegó a hacerse): sumarle uno violaría jobs_attempts_check y, como el
@@ -139,7 +139,7 @@ export class PrismaJobRepository implements JobRepository {
   }
 
   failExhausted(limit: number): Promise<ExhaustedJob[]> {
-    // Sin fencing por intento: la fila ya no tiene dueño (arriendo vencido) y
+    // Sin fencing por intento: la fila ya no tiene dueño (reserva vencida) y
     // SKIP LOCKED la salta si otro worker la está cerrando ahora mismo.
     return this.prisma.$queryRaw<ExhaustedJob[]>`
       UPDATE "jobs" AS j

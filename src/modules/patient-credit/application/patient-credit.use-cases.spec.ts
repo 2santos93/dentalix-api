@@ -1,4 +1,3 @@
-import { referenceCurrencyDigitsCatalog } from '../../../shared/money/__fixtures__/reference-currency-digits';
 import {
   BadRequestException,
   ConflictException,
@@ -7,16 +6,22 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
+import {
+  regionalFormat,
+  type RegionalFormat,
+} from '../../../shared/format/regional-format';
 import type {
   PatientCreditRepository,
   PlanCreditState,
 } from '../domain/ports/patient-credit-repository.port';
+import { DailyRefundCapExceededError } from '../domain/patient-credit';
 import {
   RefundCreditUseCase,
   TransferCreditUseCase,
 } from './patient-credit.use-cases';
 
 const ADMIN = { userId: 'u-admin', role: ClinicRole.ADMIN };
+const esVE = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
 const RECEPTION = { userId: 'u-recep', role: ClinicRole.RECEPTION };
 const KEY = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
 
@@ -28,7 +33,7 @@ function plan(
     planId: id,
     patientId: 'pat-1',
     status: 'ACCEPTED',
-    currency: 'COP',
+    currency: 'VES',
     billableCents: 0,
     paidCents: 0,
     entriesCents: 0,
@@ -37,16 +42,28 @@ function plan(
   };
 }
 
-function repo(plans: PlanCreditState[], capCents = 0) {
+function repo(
+  plans: PlanCreditState[],
+  capCents = 0,
+  format: () => Promise<RegionalFormat> = () => Promise.resolve(esVE),
+  texts: Record<string, string> = {},
+) {
   const byId = new Map(plans.map((p) => [p.planId, p]));
   const createTransfer = jest.fn((input: { sourcePlanId: string }) =>
     Promise.resolve({ id: 't-1', sourcePlanId: input.sourcePlanId }),
   );
-  const createRefund = jest.fn(() => Promise.resolve({ id: 'r-1' }));
+  const createRefund = jest.fn((_input?: unknown) =>
+    Promise.resolve({ id: 'r-1' }),
+  );
   const findTransferByKey = jest.fn(() => Promise.resolve(null));
+  const referenceLocationFormat = jest.fn(format);
+  const currencyTexts = jest.fn(() => Promise.resolve(texts));
   const mock = {
     readPlanCredit: (id: string) => Promise.resolve(byId.get(id) ?? null),
     receptionCapCents: () => Promise.resolve(capCents),
+    referenceLocationFormat,
+    locationFormat: referenceLocationFormat,
+    currencyTexts,
     updateReceptionCap: jest.fn(),
     findTransferByKey,
     findRefundByKey: () => Promise.resolve(null),
@@ -55,7 +72,14 @@ function repo(plans: PlanCreditState[], capCents = 0) {
     getRefund: jest.fn(),
     listByPatient: jest.fn(),
   } as unknown as PatientCreditRepository;
-  return { mock, createTransfer, createRefund, findTransferByKey };
+  return {
+    mock,
+    createTransfer,
+    createRefund,
+    findTransferByKey,
+    referenceLocationFormat,
+    currencyTexts,
+  };
 }
 
 const origin = plan('origen', {
@@ -67,19 +91,16 @@ const origin = plan('origen', {
 describe('TransferCreditUseCase (DX-253)', () => {
   it('traspasa a un plan vivo del mismo paciente con el importe en céntimos', async () => {
     const r = repo([origin, plan('destino')]);
-    await new TransferCreditUseCase(
-      r.mock,
-      referenceCurrencyDigitsCatalog(),
-    ).execute(
+    await new TransferCreditUseCase(r.mock).execute(
       'origen',
-      { targetPlanId: 'destino', amount: 200_000, currency: 'cop' },
+      { targetPlanId: 'destino', amount: 200_000, currency: 'ves' },
       ADMIN,
       KEY,
     );
     expect(r.createTransfer).toHaveBeenCalledWith(
       expect.objectContaining({
         amountCents: 20_000_000,
-        currency: 'COP',
+        currency: 'VES',
         idempotencyKey: KEY,
       }),
     );
@@ -100,12 +121,9 @@ describe('TransferCreditUseCase (DX-253)', () => {
   ])('destino de %s: rechazado sin guardar', async (_, target, error) => {
     const r = repo([origin, target]);
     await expect(
-      new TransferCreditUseCase(
-        r.mock,
-        referenceCurrencyDigitsCatalog(),
-      ).execute(
+      new TransferCreditUseCase(r.mock).execute(
         'origen',
-        { targetPlanId: 'destino', amount: 1, currency: 'COP' },
+        { targetPlanId: 'destino', amount: 1, currency: 'VES' },
         ADMIN,
       ),
     ).rejects.toBeInstanceOf(error);
@@ -114,28 +132,25 @@ describe('TransferCreditUseCase (DX-253)', () => {
 
   it('el mismo plan, más que el saldo o un plan inexistente', async () => {
     const r = repo([origin, plan('destino')]);
-    const uc = new TransferCreditUseCase(
-      r.mock,
-      referenceCurrencyDigitsCatalog(),
-    );
+    const uc = new TransferCreditUseCase(r.mock);
     await expect(
       uc.execute(
         'origen',
-        { targetPlanId: 'origen', amount: 1, currency: 'COP' },
+        { targetPlanId: 'origen', amount: 1, currency: 'VES' },
         ADMIN,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       uc.execute(
         'origen',
-        { targetPlanId: 'destino', amount: 300_000.01, currency: 'COP' },
+        { targetPlanId: 'destino', amount: 300_000.01, currency: 'VES' },
         ADMIN,
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
     await expect(
       uc.execute(
         'nada',
-        { targetPlanId: 'destino', amount: 1, currency: 'COP' },
+        { targetPlanId: 'destino', amount: 1, currency: 'VES' },
         ADMIN,
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -148,12 +163,9 @@ describe('TransferCreditUseCase (DX-253)', () => {
       idempotencyFingerprint: 'otra',
     } as never);
     await expect(
-      new TransferCreditUseCase(
-        r.mock,
-        referenceCurrencyDigitsCatalog(),
-      ).execute(
+      new TransferCreditUseCase(r.mock).execute(
         'origen',
-        { targetPlanId: 'destino', amount: 1, currency: 'COP' },
+        { targetPlanId: 'destino', amount: 1, currency: 'VES' },
         ADMIN,
         KEY,
       ),
@@ -164,7 +176,7 @@ describe('TransferCreditUseCase (DX-253)', () => {
 describe('RefundCreditUseCase (DX-253)', () => {
   const body = {
     amount: 50_000,
-    currency: 'COP',
+    currency: 'VES',
     method: 'CASH' as const,
     reason: 'Se muda',
     paymentIds: ['p-1'],
@@ -172,23 +184,142 @@ describe('RefundCreditUseCase (DX-253)', () => {
 
   it('RECEPTION: con el tope por defecto (0) 403; hasta el tope sí', async () => {
     await expect(
-      new RefundCreditUseCase(
-        repo([origin]).mock,
-        referenceCurrencyDigitsCatalog(),
-      ).execute('origen', body, RECEPTION),
+      new RefundCreditUseCase(repo([origin]).mock).execute(
+        'origen',
+        body,
+        RECEPTION,
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     const r = repo([origin], 5_000_000);
-    await new RefundCreditUseCase(
-      r.mock,
-      referenceCurrencyDigitsCatalog(),
-    ).execute('origen', body, RECEPTION);
+    await new RefundCreditUseCase(r.mock).execute('origen', body, RECEPTION);
     expect(r.createRefund).toHaveBeenCalled();
     await expect(
-      new RefundCreditUseCase(
-        repo([origin], 4_999_999).mock,
-        referenceCurrencyDigitsCatalog(),
-      ).execute('origen', body, RECEPTION),
+      new RefundCreditUseCase(repo([origin], 4_999_999).mock).execute(
+        'origen',
+        body,
+        RECEPTION,
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('el 403 del tope pinta el importe con el formato de la sede de referencia, solo al rechazar (DX-354b)', async () => {
+    const deDE = regionalFormat({ locale: 'de-DE', hourCycle: 'h23' });
+    const denied = repo([origin], 10_000, () => Promise.resolve(deDE));
+    const error = await new RefundCreditUseCase(denied.mock)
+      .execute('origen', body, RECEPTION)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ForbiddenException);
+    expect((error as ForbiddenException).message).toBe(
+      'Recepción puede mover hasta 100,00\u00a0VES por operación: pídeselo a administración.',
+    );
+    expect(denied.referenceLocationFormat).toHaveBeenCalledTimes(1);
+
+    // Dentro del tope no se pide el formato: una sede sin formato no estorba.
+    const allowed = repo([origin], 5_000_000, () =>
+      Promise.reject(new Error('no debe pedirse')),
+    );
+    await new RefundCreditUseCase(allowed.mock).execute(
+      'origen',
+      body,
+      RECEPTION,
+    );
+    expect(allowed.referenceLocationFormat).not.toHaveBeenCalled();
+  });
+
+  // DX-517-quater: el texto propio de la moneda de la clínica, leído solo al rechazar.
+  it('el 403 del tope pinta el importe con el texto propio de la moneda, solo al rechazar', async () => {
+    const denied = repo([origin], 10_000, undefined, { VES: 'Bs.' });
+    const error = await new RefundCreditUseCase(denied.mock)
+      .execute('origen', body, RECEPTION)
+      .catch((e: unknown) => e);
+    expect((error as ForbiddenException).message).toBe(
+      'Recepción puede mover hasta Bs.\u00a0100,00 por operación: pídeselo a administración.',
+    );
+    expect(denied.currencyTexts).toHaveBeenCalledTimes(1);
+
+    const allowed = repo([origin], 5_000_000);
+    await new RefundCreditUseCase(allowed.mock).execute(
+      'origen',
+      body,
+      RECEPTION,
+    );
+    expect(allowed.currencyTexts).not.toHaveBeenCalled();
+  });
+
+  it('el 403 del traspaso también lleva el texto propio de la moneda', async () => {
+    const denied = repo([origin, plan('destino')], 10_000, undefined, {
+      VES: 'Bs.',
+    });
+    const error = await new TransferCreditUseCase(denied.mock)
+      .execute(
+        'origen',
+        { targetPlanId: 'destino', amount: 200_000, currency: 'VES' },
+        RECEPTION,
+        KEY,
+      )
+      .catch((e: unknown) => e);
+    expect((error as ForbiddenException).message).toContain('Bs.\u00a0100,00');
+    expect((error as ForbiddenException).message).not.toContain('VES');
+  });
+
+  describe('tope diario acumulado (DX-462)', () => {
+    const NOW = new Date('2026-11-04T15:00:00Z');
+
+    it('RECEPTION: pasa al repositorio el tope y el reloj para acumular dentro del bloqueo', async () => {
+      const r = repo([origin], 5_000_000);
+      const clock = () => NOW;
+      await new RefundCreditUseCase(r.mock, clock).execute(
+        'origen',
+        body,
+        RECEPTION,
+      );
+      expect(r.createRefund).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dailyCap: { capCents: 5_000_000, clock },
+        }),
+      );
+    });
+
+    it('ADMIN no tiene tope diario', async () => {
+      const r = repo([origin], 1);
+      await new RefundCreditUseCase(r.mock, () => NOW).execute(
+        'origen',
+        body,
+        ADMIN,
+      );
+      expect(r.createRefund.mock.calls[0][0]).not.toHaveProperty('dailyCap');
+    });
+
+    it('el 403 del tope diario lleva el texto propio, leído después de que el bloqueo se soltó', async () => {
+      const r = repo([origin], 10_000, undefined, { VES: 'Bs.' });
+      r.createRefund.mockRejectedValueOnce(
+        new DailyRefundCapExceededError(4_000, 'VES', 'sede-1'),
+      );
+      const error = await new RefundCreditUseCase(r.mock, () => NOW)
+        .execute('origen', { ...body, amount: 60 }, RECEPTION)
+        .catch((e: unknown) => e);
+      expect((error as ForbiddenException).message).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan Bs.\u00a040,00 hoy; pide a un administrador que la registre.',
+      );
+      expect(r.currencyTexts.mock.invocationCallOrder[0]).toBeGreaterThan(
+        r.createRefund.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('si el repositorio dice que la suma pasa del tope: 403 con lo que queda', async () => {
+      const r = repo([origin], 10_000);
+      const smallBody = { ...body, amount: 60 };
+      r.createRefund.mockRejectedValueOnce(
+        new DailyRefundCapExceededError(4_000, 'VES', 'sede-1'),
+      );
+      const error = await new RefundCreditUseCase(r.mock, () => NOW)
+        .execute('origen', smallBody, RECEPTION)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).message).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan VES\u00a040,00 hoy; pide a un administrador que la registre.',
+      );
+    });
   });
 
   it.each([
@@ -199,7 +330,7 @@ describe('RefundCreditUseCase (DX-253)', () => {
   ])('%s: 400', async (_, extra) => {
     const r = repo([origin]);
     await expect(
-      new RefundCreditUseCase(r.mock, referenceCurrencyDigitsCatalog()).execute(
+      new RefundCreditUseCase(r.mock).execute(
         'origen',
         { ...body, ...extra },
         ADMIN,
@@ -210,10 +341,12 @@ describe('RefundCreditUseCase (DX-253)', () => {
 
   it('Idempotency-Key que no es UUID: 400', async () => {
     await expect(
-      new RefundCreditUseCase(
-        repo([origin]).mock,
-        referenceCurrencyDigitsCatalog(),
-      ).execute('origen', body, ADMIN, 'x'),
+      new RefundCreditUseCase(repo([origin]).mock).execute(
+        'origen',
+        body,
+        ADMIN,
+        'x',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

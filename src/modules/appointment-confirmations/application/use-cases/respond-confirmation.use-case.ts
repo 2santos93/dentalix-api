@@ -112,10 +112,18 @@ export class RespondConfirmationUseCase {
     }
 
     const clinic = await this.repo.findClinicBranding();
+    // La vista refleja la cita tras la respuesta (DX-469): cancelada ya no
+    // ofrece «Añadir a mi calendario».
+    const statusAfter =
+      action === 'cancel'
+        ? 'CANCELLED'
+        : action === 'confirm'
+          ? 'CONFIRMED'
+          : appointment.status;
     return toPublicConfirmationView(
       'RESPONDED',
       { ...confirmation, respondedAt: now, response },
-      appointment,
+      { ...appointment, status: statusAfter },
       clinic,
     );
   }

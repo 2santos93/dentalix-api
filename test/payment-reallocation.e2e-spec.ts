@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
+import {
+  PLAN_ALLOCATION_REPOSITORY,
+  type PlanAllocationRepository,
+} from '../src/modules/payments/domain/ports/plan-allocation-repository.port';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -11,6 +16,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-051 Task 5 por HTTP: un ADMIN fija a mano a qué ítems va un abono
 // (MANUAL) o lo devuelve al reparto (AUTO); cada error de spec §5.3 con su
@@ -34,6 +43,7 @@ interface Line {
 interface Allocations {
   paymentId: string;
   receiptNumber: string | null;
+  locationId: string;
   treatmentPlanId: string;
   paymentAmount: number;
   paymentCurrency: string;
@@ -175,6 +185,7 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: RATE_DATE } });
     await raw.exchangeRateSnapshot.create({
       data: { date: RATE_DATE, currency: 'EUR', rate: 0.9 },
@@ -219,6 +230,7 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await resetDatabase(raw);
     await raw.exchangeRateSnapshot.deleteMany({ where: { date: RATE_DATE } });
     await app.close();
@@ -232,6 +244,8 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
     const paymentId = await pay(planId, 100);
     const before = await allocationsOf(paymentId);
     expect(before).toMatchObject({
+      // DX-354c: la sede del abono, con la que la web pinta importes y fechas.
+      locationId,
       manual: false,
       allocated: 100,
       unallocated: 0,
@@ -667,8 +681,71 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
         400,
       );
       expect(message(res)).toBe(
-        'Un ítem admite como máximo 30.00 EUR: es lo que le queda por cubrir.',
+        'Un ítem admite como máximo EUR\u00a030,00: es lo que le queda por cubrir.',
       );
+    });
+
+    it('el importe sigue el formato de la sede del abono, y sin formato es 409 (DX-354b)', async () => {
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: locationId },
+        select: { locale: true, hourCycle: true },
+      });
+      try {
+        // Sede en-US: «EUR 30.00» (código ISO + separadores de la sede).
+        await raw.location.update({
+          where: { id: locationId },
+          data: { locale: 'en-US', hourCycle: 'h12' },
+        });
+        const us = await put(
+          paymentId,
+          { mode: 'MANUAL', allocations: [line(accepted, 30.01)] },
+          400,
+        );
+        expect(message(us)).toBe(
+          'Un ítem admite como máximo EUR\u00a030.00: es lo que le queda por cubrir.',
+        );
+        expect(message(us)).not.toMatch(/30\.00 EUR/);
+
+        // Sede sin formato: igual que A1 de DX-354.
+        await raw.location.update({
+          where: { id: locationId },
+          data: { locale: null, hourCycle: null },
+        });
+        const none = await put(
+          paymentId,
+          { mode: 'MANUAL', allocations: [line(accepted, 30.01)] },
+          409,
+        );
+        expect(none.body).toMatchObject({
+          code: 'LOCATION_LOCALE_REQUIRED',
+          locationId,
+        });
+      } finally {
+        await raw.location.update({ where: { id: locationId }, data: before });
+      }
+    });
+
+    it('DX-517-quater: los importes llevan el texto propio de la moneda de la clínica, no el código', async () => {
+      await raw.tenant.update({
+        where: { id: clinic.tenantId },
+        data: { currencyTexts: { EUR: 'Eur.' } },
+      });
+      try {
+        const res = await put(
+          paymentId,
+          { mode: 'MANUAL', allocations: [line(accepted, 30.01)] },
+          400,
+        );
+        expect(message(res)).toBe(
+          'Un ítem admite como máximo Eur.\u00a030,00: es lo que le queda por cubrir.',
+        );
+        expect(message(res)).not.toContain('EUR');
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinic.tenantId },
+          data: { currencyTexts: {} },
+        });
+      }
     });
 
     it('over the converted payment amount (USD payment)', async () => {
@@ -688,7 +765,7 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
         400,
       );
       expect(message(res)).toBe(
-        'La suma imputada (90.01 EUR) supera el abono convertido a la moneda del plan (90.00 EUR).',
+        'La suma imputada (EUR\u00a090,01) supera el abono convertido a la moneda del plan (EUR\u00a090,00).',
       );
       await put(
         usd,
@@ -783,10 +860,109 @@ describe('Reasignación de la imputación de un abono (DX-051, e2e)', () => {
           currency: 'EUR',
           mode: 'AUTO',
           before: [{ itemId: accepted, amount: 25.5 }],
-          after: [{ itemId: done, amount: 100 }],
+          // En AUTO el reparto lo hace el sistema tras el COMMIT: el evento de
+          // la transacción no inventa un «después» (DX-399).
+          after: [],
         },
       }),
     ]);
+  });
+
+  it('DX-399: the reallocation audit names the user and when, closes the metadata and reaches the audit log API', async () => {
+    const planId = await createPlan();
+    await addItem(planId, 100, 'DONE');
+    const accepted = await addItem(planId, 100);
+    const paymentId = await pay(planId, 100);
+    const done = Object.keys(await rowsOf(paymentId))[0];
+    const started = Date.now();
+
+    await put(
+      paymentId,
+      { mode: 'MANUAL', allocations: [line(accepted, 25.5)] },
+      200,
+    );
+
+    // La fila: usuario, instante del servidor y metadata cerrada.
+    const events = await raw.auditEvent.findMany({
+      where: {
+        tenantId: clinic.tenantId,
+        resourceType: 'PAYMENT_ALLOCATION',
+        resourceId: paymentId,
+      },
+    });
+    expect(events).toHaveLength(1);
+    const [event] = events;
+    expect(event.actorUserId).toBe(clinic.adminUserId);
+    expect(event.occurredAt.getTime()).toBeGreaterThanOrEqual(started - 1000);
+    expect(
+      Object.keys(event.metadata as Record<string, unknown>).sort(),
+    ).toEqual(['allocation', 'changedFields', 'params', 'reason']);
+    expect((event.metadata as { allocation: unknown }).allocation).toEqual({
+      currency: 'EUR',
+      mode: 'MANUAL',
+      before: [{ itemId: done, amount: 100 }],
+      after: [{ itemId: accepted, amount: 25.5 }],
+    });
+
+    // La lectura del registro (la que pinta la pantalla de auditoría) la trae.
+    const log = await api()
+      .get(`/audit-events?resourceType=PAYMENT_ALLOCATION&limit=50`)
+      .expect(200);
+    const listed = (
+      log.body as {
+        items: {
+          resourceId: string;
+          actor: { userId: string } | null;
+          metadata: { allocation?: { mode: string } };
+        }[];
+      }
+    ).items.find((e) => e.resourceId === paymentId);
+    expect(listed?.metadata.allocation?.mode).toBe('MANUAL');
+  });
+
+  it('DX-399: if the audit event cannot be written, the reallocation rolls back with it', async () => {
+    const planId = await createPlan();
+    await addItem(planId, 100, 'DONE');
+    const accepted = await addItem(planId, 100);
+    const paymentId = await pay(planId, 100);
+    const before = await rowsOf(paymentId);
+    const { version } = await allocationsOf(paymentId);
+    const repo = app.get<PlanAllocationRepository>(PLAN_ALLOCATION_REPOSITORY);
+    const tenantContext = app.get(TenantContextService);
+
+    await expect(
+      tenantContext.run(clinic.tenantId, undefined, () =>
+        repo.replaceAllocations({
+          paymentId,
+          mode: 'MANUAL',
+          expectedVersion: version,
+          lines: [{ itemId: accepted, cents: 2_550 }],
+          actorId: clinic.adminUserId,
+          // Un actor que no es un uuid: el INSERT del evento falla DENTRO de la transacción.
+          audit: {
+            tenantId: clinic.tenantId,
+            locationId: null,
+            actor: { userId: 'not-a-uuid', role: 'ADMIN' },
+            requestId: null,
+            ip: null,
+            userAgent: null,
+          },
+        }),
+      ),
+    ).rejects.toBeDefined();
+
+    // Ni la imputación ni el abono fijado cambiaron, y no quedó evento.
+    expect(await rowsOf(paymentId)).toEqual(before);
+    expect((await allocationsOf(paymentId)).manual).toBe(false);
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: clinic.tenantId,
+          resourceId: paymentId,
+          resourceType: 'PAYMENT_ALLOCATION',
+        },
+      }),
+    ).toBe(0);
   });
 
   it('isolation: routes of A from B are 404; a PUT of B with an item of A is 400', async () => {

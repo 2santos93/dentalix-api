@@ -37,7 +37,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const MIN = 60000;
 const DAY = 86400000;
 /**
- * DX-449: la sede de A está en Bogotá salvo cerca de su medianoche, cuando pasa
+ * DX-449: la sede de A está en la zona de la sede salvo cerca de su medianoche, cuando pasa
  * a una zona donde ahora es mediodía: las citas «de hoy que ya empezaron»
  * caben antes de «ahora» sin cruzar de día, corra la CI a la hora que corra.
  */
@@ -99,7 +99,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
   };
   const acceptedItems = async (n: number) => {
     const plan = await raw.treatmentPlan.create({
-      data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+      data: { tenantId: a.tenantId, patientId, currency: 'USD' },
     });
     const ids: string[] = [];
     for (let i = 0; i < n; i++)
@@ -251,7 +251,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
           tenantId: a.tenantId,
           firstName: 'Marta',
           lastName: 'Implante',
-          phone: '+573001112244',
+          phone: '+584121112244',
         },
       })
     ).id;
@@ -853,7 +853,7 @@ describe('DX-273 salida de «Completada» y reservas en otra cita', () => {
           data: {
             tenantId: a.tenantId,
             patientId: patient.id,
-            currency: 'COP',
+            currency: 'USD',
           },
         });
         const { id: itemId } = await raw.treatmentPlanItem.create({

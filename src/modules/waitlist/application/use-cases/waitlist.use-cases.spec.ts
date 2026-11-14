@@ -1,3 +1,4 @@
+import { NOT_ATTENDING_MESSAGE } from '../../../staff/domain/attending';
 import {
   BadRequestException,
   ConflictException,
@@ -45,12 +46,15 @@ const patients = {
   findById: known(['p1', 'p2'], (id) => ({ id })),
 } as unknown as PatientRepository;
 const staff = {
-  findById: known(['prov1', 'prov2'], (userId) => ({ userId })),
+  findById: known(['prov1', 'prov2', 'rec'], (userId) => ({
+    userId,
+    role: userId === 'rec' ? 'RECEPTION' : 'DENTIST',
+  })),
 } as unknown as StaffRepository;
 const locations = {
   findById: known(['loc1', 'loc2'], (id) => ({
     id,
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
   })),
 } as unknown as LocationRepository;
 const noSchedule = {
@@ -174,6 +178,12 @@ describe('pendientes por agendar (DX-122)', () => {
       expect(drafts).toHaveLength(0);
     });
 
+    it('DX-161: con recepción como profesional preferido es 400', async () => {
+      await expect(
+        useCase().execute({ patientId: 'p1', providerId: 'rec' }, CTX),
+      ).rejects.toThrow(NOT_ATTENDING_MESSAGE);
+    });
+
     it('rechaza paciente, sede o profesional ajenos (404) y tipo desactivado (400)', async () => {
       await expect(
         useCase().execute({ patientId: 'ajeno' }, CTX),
@@ -232,7 +242,17 @@ describe('pendientes por agendar (DX-122)', () => {
   });
 
   describe('agendar desde la entrada («Agendar aquí»)', () => {
-    function useCase(blocks = new InMemoryScheduleBlockRepository()) {
+    /** Sedes por id: todas activas salvo las de `inactive` (SEC-014). */
+    const entryLocations = (inactive: string[] = []) =>
+      ({
+        findById: (id: string) =>
+          Promise.resolve({ id, isActive: !inactive.includes(id) }),
+      }) as unknown as LocationRepository;
+
+    function useCase(
+      blocks = new InMemoryScheduleBlockRepository(),
+      locations = entryLocations(),
+    ) {
       const appointments = new InMemoryAppointmentRepository(waitlist);
       const create = new CreateAppointmentUseCase(
         appointments,
@@ -252,9 +272,23 @@ describe('pendientes por agendar (DX-122)', () => {
           create,
           audit(drafts),
           new TenantContextService(),
+          locations,
         ),
       };
     }
+
+    it('SEC-014: la entrada de una sede desactivada no se agenda (400) y sigue abierta', async () => {
+      const entry = waitlist.seed({ patientId: 'p2', locationId: 'loc2' });
+      const { schedule } = useCase(undefined, entryLocations(['loc2']));
+      const err = await schedule
+        .execute(entry.id, { providerId: 'prov1', start: at('15:00') }, CTX)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect((err as BadRequestException).getResponse()).toMatchObject({
+        code: 'LOCATION_INACTIVE',
+      });
+      expect(waitlist.rows.find((r) => r.id === entry.id)?.status).toBe('OPEN');
+    });
 
     it('crea la cita del paciente en la sede de la entrada, con su duración, y la saca de la lista', async () => {
       const entry = waitlist.seed({

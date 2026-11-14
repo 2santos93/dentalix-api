@@ -88,7 +88,7 @@ function makeUseCase(
 describe('GetRatesForDateUseCase', () => {
   it('returns cached rates without calling the provider (cache hit)', async () => {
     const repo = makeInMemoryRepo();
-    repo.seed('2026-07-20', { COP: 4000, EUR: 0.92 });
+    repo.seed('2026-07-20', { GBP: 4000, EUR: 0.92 });
     const fetchRates = jest.fn();
     const provider = makeProvider(fetchRates);
     const uc = makeUseCase(repo, provider);
@@ -98,7 +98,8 @@ describe('GetRatesForDateUseCase', () => {
     expect(result).toEqual({
       base: 'USD',
       source: 'AUTOMATIC',
-      rates: { COP: 4000, EUR: 0.92 },
+      rates: { GBP: 4000, EUR: 0.92 },
+      rateDate: '2026-07-20',
     });
     expect(fetchRates).not.toHaveBeenCalled();
   });
@@ -107,7 +108,7 @@ describe('GetRatesForDateUseCase', () => {
     const repo = makeInMemoryRepo();
     const fetchRates = jest
       .fn()
-      .mockResolvedValue({ base: 'USD', rates: { COP: 4100, EUR: 0.93 } });
+      .mockResolvedValue({ base: 'USD', rates: { GBP: 4100, EUR: 0.93 } });
     const provider = makeProvider(fetchRates);
     const uc = makeUseCase(repo, provider);
 
@@ -118,7 +119,8 @@ describe('GetRatesForDateUseCase', () => {
     expect(result).toEqual({
       base: 'USD',
       source: 'AUTOMATIC',
-      rates: { COP: 4100, EUR: 0.93 },
+      rates: { GBP: 4100, EUR: 0.93 },
+      rateDate: '2026-07-21',
     });
     // Persisted, so a subsequent read of the same date sees it.
     const stored = await repo.findByDate('2026-07-21');
@@ -129,7 +131,7 @@ describe('GetRatesForDateUseCase', () => {
     const repo = makeInMemoryRepo();
     const fetchRates = jest
       .fn()
-      .mockResolvedValue({ base: 'USD', rates: { COP: 4100 } });
+      .mockResolvedValue({ base: 'USD', rates: { GBP: 4100 } });
     const provider = makeProvider(fetchRates);
     const uc = makeUseCase(repo, provider);
 
@@ -170,7 +172,7 @@ describe('GetRatesForDateUseCase', () => {
 
     function setup() {
       const repo = makeInMemoryRepo();
-      repo.seed(DAY, { COP: 4000, VES: 36.5 });
+      repo.seed(DAY, { GBP: 4000, VES: 36.5 });
       const fetchRates = jest.fn();
       const tenantContext = new TenantContextService();
       const uc = new GetRatesForDateUseCase(
@@ -193,7 +195,8 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
-        rates: { COP: 4000, VES: 36.5 },
+        rates: { GBP: 4000, VES: 36.5 },
+        rateDate: '2026-10-30',
       });
     });
 
@@ -205,6 +208,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'MANUAL',
         rates: { VES: 40.12345678 },
+        rateDate: '2026-10-30',
       });
       expect(fetchRates).not.toHaveBeenCalled();
     });
@@ -223,7 +227,12 @@ describe('GetRatesForDateUseCase', () => {
       const { uc, tenantContext, fetchRates } = setup();
       await expect(
         tenantContext.run(B, () => uc.execute('2026-10-29')),
-      ).resolves.toEqual({ base: 'USD', source: 'MANUAL', rates: {} });
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+        rateDate: '2026-10-29',
+      });
       expect(fetchRates).not.toHaveBeenCalled();
     });
 
@@ -231,7 +240,7 @@ describe('GetRatesForDateUseCase', () => {
       const { uc, tenantContext } = setup();
       await expect(
         tenantContext.run(B, () => uc.providerRates(DAY)),
-      ).resolves.toEqual({ COP: 4000, VES: 36.5 });
+      ).resolves.toEqual({ GBP: 4000, VES: 36.5 });
     });
   });
 
@@ -270,6 +279,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'AUTOMATIC',
         rates: { VES: 35 },
+        rateDate: '2026-10-29',
       });
     });
 
@@ -277,10 +287,20 @@ describe('GetRatesForDateUseCase', () => {
       const { uc, tenantContext, fetchRates } = setup();
       await expect(
         tenantContext.run(C, () => uc.execute(SINCE)),
-      ).resolves.toEqual({ base: 'USD', source: 'MANUAL', rates: { VES: 40 } });
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: { VES: 40 },
+        rateDate: '2026-10-30',
+      });
       await expect(
         tenantContext.run(C, () => uc.execute('2026-10-31')),
-      ).resolves.toEqual({ base: 'USD', source: 'MANUAL', rates: {} });
+      ).resolves.toEqual({
+        base: 'USD',
+        source: 'MANUAL',
+        rates: {},
+        rateDate: '2026-10-31',
+      });
       expect(fetchRates).not.toHaveBeenCalled();
     });
 
@@ -317,7 +337,7 @@ describe('GetRatesForDateUseCase', () => {
 
     function setup(options: { snapshotOn28?: boolean } = {}) {
       const repo = makeInMemoryRepo();
-      if (options.snapshotOn28) repo.seed('2026-10-28', { COP: 3900 });
+      if (options.snapshotOn28) repo.seed('2026-10-28', { GBP: 3900 });
       const fetchRates = jest
         .fn()
         .mockRejectedValue(new ExchangeRateUnavailableError('caído'));
@@ -330,7 +350,7 @@ describe('GetRatesForDateUseCase', () => {
           tenantContext,
         ),
         makeManualRates(
-          { [C]: { '2026-10-28': { COP: 4000 } } },
+          { [C]: { '2026-10-28': { GBP: 4000 } } },
           tenantContext,
         ),
         tenantContext,
@@ -348,7 +368,8 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        rates: { COP: 4000 },
+        rates: { GBP: 4000 },
+        rateDate: '2026-10-28',
         backup: { manualSince: SINCE },
       });
       expect(fetchRates).not.toHaveBeenCalled();
@@ -364,7 +385,8 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
-        rates: { COP: 3900 },
+        rates: { GBP: 3900 },
+        rateDate: '2026-10-28',
       });
     });
 
@@ -409,7 +431,7 @@ describe('GetRatesForDateUseCase', () => {
         makeProvider(fetchRates),
         makeSettings({}, tenantContext),
         makeManualRates(
-          { [C]: { '2026-10-28': { COP: 4000 } } },
+          { [C]: { '2026-10-28': { GBP: 4000 } } },
           tenantContext,
         ),
         tenantContext,
@@ -431,6 +453,7 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'MANUAL',
         rates: {},
+        rateDate: '2026-10-30',
       });
     });
   });
@@ -450,13 +473,13 @@ describe('GetRatesForDateUseCase', () => {
       } = {},
     ) {
       const repo = makeInMemoryRepo();
-      repo.seed('2020-01-02', { COP: 3200 });
+      repo.seed('2020-01-02', { GBP: 3200 });
       const fetchRates = jest.fn(
         options.fetchRates ??
           ((date: string) =>
             Promise.resolve({
               base: 'USD' as const,
-              rates: { COP: 4000 + date.length },
+              rates: { GBP: 4000 + date.length },
             })),
       );
       const tenantContext = new TenantContextService();
@@ -474,7 +497,7 @@ describe('GetRatesForDateUseCase', () => {
       const window = {
         // Alta el 2026-09-01; su primer abono, anterior, el 2026-08-15.
         since: new Date('2026-08-15T15:00:00.000Z'),
-        timeZones: options.timeZones ?? ['America/Bogota'],
+        timeZones: options.timeZones ?? ['America/Caracas'],
       };
       const settings = makeSettings(
         { [M]: { source: 'MANUAL', manualSince: '2026-10-01' } },
@@ -549,7 +572,7 @@ describe('GetRatesForDateUseCase', () => {
       'fuera de PERIOD_DAY_MIN..MAX (%s): 400 con las dos fuentes, sin leer ni llamar (DX-383)',
       async (date) => {
         const { uc, repo, fetchRates, asA, asM } = setup();
-        repo.seed(date, { COP: 1 });
+        repo.seed(date, { GBP: 1 });
         for (const as of [asA, asM]) {
           const body = await badRequestBody(as(() => uc.forRequest(date)));
           expect(body).toMatchObject({
@@ -570,7 +593,7 @@ describe('GetRatesForDateUseCase', () => {
       async (_label, date) => {
         const { uc, repo, fetchRates, asA, asM } = setup();
         // Un snapshot futuro (p. ej. de la precarga en UTC) tampoco se sirve.
-        repo.seed(date, { COP: 1 });
+        repo.seed(date, { GBP: 1 });
         for (const as of [asA, asM]) {
           const body = await badRequestBody(as(() => uc.forRequest(date)));
           expect(body).toMatchObject({
@@ -586,12 +609,13 @@ describe('GetRatesForDateUseCase', () => {
 
     it('«hoy» de una sede más adelantada no es futuro, con las dos fuentes (DX-383)', async () => {
       const { uc, fetchRates, asA, asM } = setup({
-        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+        timeZones: ['America/Caracas', 'Pacific/Kiritimati'],
       });
       await expect(asM(() => uc.forRequest('2026-10-31'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
         rates: {},
+        rateDate: '2026-10-31',
       });
       const body = await badRequestBody(asA(() => uc.forRequest('2026-11-01')));
       expect(body).toMatchObject({
@@ -603,7 +627,7 @@ describe('GetRatesForDateUseCase', () => {
 
     it('un día que ya llegó en todo el planeta no lee la ventana; uno sin guardar, una vez (DX-383)', async () => {
       const { uc, fetchRates, asA, asM, settings } = setup({
-        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+        timeZones: ['America/Caracas', 'Pacific/Kiritimati'],
       });
       const providerWindow = jest.spyOn(settings, 'providerWindow');
       // Guardado, con MANUAL, y hoy (en UTC−12 ya es el 30): sin leer la ventana.
@@ -631,7 +655,7 @@ describe('GetRatesForDateUseCase', () => {
 
     it('«hoy» es el de la sede más adelantada', async () => {
       const { uc, fetchRates, asA } = setup({
-        timeZones: ['America/Bogota', 'Pacific/Kiritimati'],
+        timeZones: ['America/Caracas', 'Pacific/Kiritimati'],
       });
       await asA(() => uc.forRequest('2026-10-31'));
       expect(fetchRates).toHaveBeenCalledWith('2026-10-31');
@@ -642,7 +666,8 @@ describe('GetRatesForDateUseCase', () => {
       await expect(asA(() => uc.forRequest('2020-01-02'))).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
-        rates: { COP: 3200 },
+        rates: { GBP: 3200 },
+        rateDate: '2020-01-02',
       });
       expect(fetchRates).not.toHaveBeenCalled();
     });
@@ -679,7 +704,7 @@ describe('GetRatesForDateUseCase', () => {
       );
       expect(fetchRates).toHaveBeenCalledTimes(1);
       expect(upsert).toHaveBeenCalledTimes(1);
-      expect(new Set(results.map((r) => r.rates.COP)).size).toBe(1);
+      expect(new Set(results.map((r) => r.rates.GBP)).size).toBe(1);
     });
 
     it('presupuesto de la clínica: superado, ExchangeRateBudgetExceededError sin llamar', async () => {
@@ -715,17 +740,20 @@ describe('GetRatesForDateUseCase', () => {
         base: 'USD',
         source: 'MANUAL',
         rates: {},
+        rateDate: '2026-10-15',
       });
       await expect(asM(() => uc.execute('2026-10-30'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
         rates: {},
+        rateDate: '2026-10-30',
       });
       // El día anterior al cambio que ya está guardado se lee de la caché.
       await expect(asM(() => uc.execute('2020-01-02'))).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
-        rates: { COP: 3200 },
+        rates: { GBP: 3200 },
+        rateDate: '2020-01-02',
       });
       expect(fetchRates).not.toHaveBeenCalled();
     });
@@ -739,12 +767,14 @@ describe('GetRatesForDateUseCase', () => {
       await expect(asM(() => uc.execute('2026-09-15'))).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
-        rates: { COP: 4010 },
+        rates: { GBP: 4010 },
+        rateDate: '2026-09-15',
       });
       await expect(asM(() => uc.forRequest('2026-09-15'))).resolves.toEqual({
         base: 'USD',
         source: 'AUTOMATIC',
-        rates: { COP: 4010 },
+        rates: { GBP: 4010 },
+        rateDate: '2026-09-15',
       });
       expect(fetchRates).toHaveBeenCalledTimes(1);
       expect(await repo.findByDate('2026-09-15')).toHaveLength(1);

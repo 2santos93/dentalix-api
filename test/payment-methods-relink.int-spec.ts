@@ -11,8 +11,8 @@ import { join } from 'node:path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { normalizeReference } from '../src/modules/payment-methods/domain/payment-method-rules';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationData,
+  REGIONAL_CARACAS_FIXTURE,
+  regionalLocationInsert,
 } from './support/location-fixtures';
 
 // DX-395, capa DB: la migración 20261103130000 repite el enlace de los abonos
@@ -40,22 +40,30 @@ async function seedClinic(
     INSERT INTO "tenants" ("id", "name", "subdomain", "updatedAt")
     VALUES (gen_random_uuid(), ${subdomain}, ${subdomain}, now())
     RETURNING "id"`;
-  const location = await db.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
-      tenantId: tenant.id,
-      name: 'Sede',
-    }),
-  });
+  // Sede también por SQL: el cliente insertaría columnas de sede posteriores
+  // (p. ej. DX-515) aunque no se pidan.
+  const location = {
+    id: await regionalLocationInsert(
+      db,
+      tenant.id,
+      'Sede',
+      REGIONAL_CARACAS_FIXTURE,
+    ),
+  };
+  // Solo el id: el cliente leería columnas de paciente posteriores (DX-330).
   const patient = await db.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
+    select: { id: true },
   });
+  // Solo el id: el cliente leería columnas del plan posteriores (DX-379).
   const plan = await db.treatmentPlan.create({
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
+    select: { id: true },
   });
   // Los 4 medios iniciales (como el alta) y uno propio.
   const methods: Record<string, string> = {};
@@ -66,9 +74,14 @@ async function seedClinic(
     ['Otro', 'OTHER', 'OTHER'],
     ['Pago móvil', 'DIGITAL', null],
   ] as const) {
-    const row = await db.clinicPaymentMethod.create({
-      data: { tenantId: tenant.id, name, kind, legacyMethod },
-    });
+    // SQL: la BD desechable llega solo hasta DX-395 y el cliente insertaría
+    // columnas posteriores (p. ej. `proofPolicy`, DX-389).
+    const [row] = await db.$queryRaw<{ id: string }[]>`
+      INSERT INTO "payment_methods"
+        ("id", "tenantId", "name", "kind", "legacyMethod", "updatedAt")
+      VALUES (gen_random_uuid(), ${tenant.id}::uuid, ${name},
+              ${kind}::"PaymentMethodKind", ${legacyMethod}::"PaymentMethod", now())
+      RETURNING "id"`;
     methods[name] = row.id;
   }
   return {
@@ -96,7 +109,7 @@ async function insertPayment(
        "patientId", "amount", "currency", "paidAt", "method", "updatedAt",
        "paymentMethodId", "reference", "referenceNormalized")
      VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1000,
-       'COP', now(), $5::"PaymentMethod", now(), $6::uuid, $7, $8)
+       'USD', now(), $5::"PaymentMethod", now(), $6::uuid, $7, $8)
      RETURNING "id"`,
     c.tenantId,
     c.locationId,

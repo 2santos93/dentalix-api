@@ -22,7 +22,7 @@ import {
   waitForTransactionWaiters,
 } from './support/postgres-concurrency';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -80,7 +80,7 @@ async function openSession(): Promise<string> {
     cashRepo.open({
       locationId,
       openedById: userId,
-      floats: [{ currency: 'COP', cents: FLOAT * 100 }],
+      floats: [{ currency: 'USD', cents: FLOAT * 100 }],
       notes: null,
     }),
   );
@@ -105,6 +105,7 @@ function closeSession(id: string, seen: ExpectedLine[][] = []) {
         lines: result.lines,
         hasDifference: false,
         differenceReason: null,
+        unjustifiedDifference: false,
         notes: null,
         blind: context.blind,
         suggestedLockDate: '2026-10-23',
@@ -123,7 +124,7 @@ function outflow(link: ExpenseCashLink = cashLink) {
         supplier: 'Rappi',
         description: null,
         amount: AMOUNT,
-        currency: 'COP',
+        currency: 'USD',
         invoiceDate: '2026-10-23',
         dueDate: null,
         attachment: null,
@@ -142,7 +143,7 @@ function outflow(link: ExpenseCashLink = cashLink) {
 }
 
 const cashLine = (lines: ExpectedLine[]) =>
-  lines.find((l) => l.currency === 'COP' && l.method === 'CASH');
+  lines.find((l) => l.currency === 'USD' && l.method === 'CASH');
 
 describe('salida de caja frente al cierre de su caja (int, DX-274)', () => {
   beforeAll(async () => {
@@ -160,10 +161,10 @@ describe('salida de caja frente al cierre de su caja (int, DX-274)', () => {
     ).id;
     locationId = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Sede',
-          country: 'CO',
+          country: 'VE',
           timeZone: 'Asia/Tokyo',
         }),
       })
@@ -216,7 +217,7 @@ describe('salida de caja frente al cierre de su caja (int, DX-274)', () => {
       expectedCents: (FLOAT - AMOUNT) * 100,
     });
     const line = await raw.cashSessionClosingLine.findFirstOrThrow({
-      where: { closing: { sessionId }, currency: 'COP', method: 'CASH' },
+      where: { closing: { sessionId }, currency: 'USD', method: 'CASH' },
     });
     expect(line.expected.toNumber()).toBe(FLOAT - AMOUNT);
   });
@@ -248,7 +249,7 @@ describe('salida de caja frente al cierre de su caja (int, DX-274)', () => {
         data: {
           tenantId,
           closingId: row.id,
-          currency: 'COP',
+          currency: 'USD',
           method: 'CASH',
           opening: FLOAT,
           expected: FLOAT,

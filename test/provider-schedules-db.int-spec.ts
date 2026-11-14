@@ -3,7 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -27,13 +27,13 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const a = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede A',
     }),
   });
   const b = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede B',
     }),
@@ -53,7 +53,7 @@ async function cleanup(tenantIds: string[]): Promise<void> {
 
 const FK_VIOLATION = { code: 'P2003' };
 const UNIQUE_VIOLATION = { code: 'P2002' };
-const TZ = 'America/Bogota';
+const TZ = 'America/Caracas';
 
 describe('Horario de los profesionales: reglas de la BD (DX-233, int)', () => {
   let c: Clinic;

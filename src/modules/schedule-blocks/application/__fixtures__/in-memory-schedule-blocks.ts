@@ -26,9 +26,9 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
   readonly rows: (ScheduleBlock & { deletedAt: Date | null })[] = [];
   readonly appointments: AffectedAppointment[] = [];
   currentLocationId = 'loc1';
-  timeZone = 'America/Bogota';
+  timeZone = 'America/Caracas';
   /** Formato y reloj de la sede (lo que mostraba: 24 h, día/mes). */
-  locale: string | null = 'es-CO';
+  locale: string | null = 'es-VE';
   hourCycle: string | null = 'h23';
   /** DX-446: tipos de cita de ESTA clínica (los de otra no están). */
   readonly types: ReservedTypeRef[] = [];
@@ -127,9 +127,9 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
   update(
     id: string,
     patch: UpdateScheduleBlockRepoInput,
-  ): Promise<ScheduleBlock> {
+  ): Promise<ScheduleBlock | null> {
     const row = this.live().find((r) => r.id === id);
-    if (!row) return Promise.reject(new Error(`not found ${id}`));
+    if (!row) return Promise.resolve(null);
     const fields = {
       start: patch.start,
       end: patch.end,
@@ -148,10 +148,10 @@ export class InMemoryScheduleBlockRepository implements ScheduleBlockRepository 
     return Promise.resolve(this.toEntity(row));
   }
 
-  softDelete(id: string): Promise<void> {
+  softDelete(id: string): Promise<boolean> {
     const row = this.live().find((r) => r.id === id);
     if (row) row.deletedAt = new Date();
-    return Promise.resolve();
+    return Promise.resolve(row !== undefined);
   }
 
   findAffecting(query: AffectingBlocksQuery): Promise<AffectingBlocks> {

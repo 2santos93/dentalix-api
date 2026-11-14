@@ -4,12 +4,16 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { ConflictException, NotFoundException } from '@nestjs/common';
+import { validityOnPresentation } from '../../../domain/quote-validity';
 import {
   TreatmentPlan,
   TreatmentPlanAcceptanceSummary,
   TreatmentPlanWithItems,
 } from '../../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../../domain/entities/treatment-plan-item.entity';
 import {
   CreateTreatmentPlanRepoInput,
   DecideBulkDiscount,
@@ -38,6 +42,10 @@ import type {
   PlanCurrencySource,
 } from '../../../domain/ports/plan-currency-source.port';
 import type { ItemAttributionChange } from '../../../domain/plan-item-attribution';
+import {
+  itemRates,
+  type ReferenceSnapshot,
+} from '../../../../discounts/domain/reference-in-plan';
 
 // `TreatmentPlan`/`TreatmentPlanItem` (the API-facing entities) deliberately
 // have no `deletedAt` field — same convention as Appointment. The fake still
@@ -48,7 +56,11 @@ type StoredPlan = TreatmentPlan & {
   deletedAt: Date | null;
   acceptance: TreatmentPlanAcceptanceSummary | null;
 };
-type StoredItem = TreatmentPlanItem & { deletedAt: Date | null };
+// `referenceRate` guarda la columna (la tasa de la foto, sea de la referencia
+// o de la base); la entidad la separa en `referenceRate`/`baseRate` (DX-513-ter).
+type StoredItem = Omit<TreatmentPlanItem, 'baseRate'> & {
+  deletedAt: Date | null;
+};
 
 let seq = 0;
 
@@ -76,6 +88,9 @@ export class InMemoryTreatmentPlanRepository
   private readonly items: StoredItem[] = [];
   /** Sede que el repositorio real tomaría del request (o la principal). */
   locationId = 'loc-1';
+  /** DX-379: zona de la sede de escritura y días del ajuste de la clínica. */
+  timeZone = 'America/Caracas';
+  quoteValidityDays = 30;
   /** Filas que devuelve `listPendingFollowUp` (el filtro SQL se prueba en integración). */
   pendingFollowUp: PendingFollowUpRow[] = [];
   lastFollowUpQuery: PendingFollowUpQuery | null = null;
@@ -107,6 +122,8 @@ export class InMemoryTreatmentPlanRepository
       optionLabel: overrides.optionLabel ?? null,
       presentedAt: overrides.presentedAt ?? null,
       presentedLocationId: overrides.presentedLocationId ?? null,
+      quoteIssuedOn: overrides.quoteIssuedOn ?? null,
+      quoteValidUntil: overrides.quoteValidUntil ?? null,
       rejectedAt: overrides.rejectedAt ?? null,
       rejectionReason: overrides.rejectionReason ?? null,
       rejectionNote: overrides.rejectionNote ?? null,
@@ -130,7 +147,12 @@ export class InMemoryTreatmentPlanRepository
       catalogItemId: overrides.catalogItemId ?? 'catalog-1',
       catalogPrice: overrides.catalogPrice ?? null,
       basePrice: overrides.basePrice ?? null,
+      catalogCurrency: overrides.catalogCurrency ?? null,
       priceSource: overrides.priceSource ?? null,
+      referenceCurrency: overrides.referenceCurrency ?? null,
+      referencePriceInPlan: overrides.referencePriceInPlan ?? null,
+      basePriceInPlan: overrides.basePriceInPlan ?? null,
+      referenceRate: overrides.referenceRate ?? null,
       agreementId: overrides.agreementId ?? null,
       agreementName: overrides.agreementName ?? null,
       pricingLocationId: overrides.pricingLocationId ?? null,
@@ -174,6 +196,8 @@ export class InMemoryTreatmentPlanRepository
       optionLabel: row.optionLabel,
       presentedAt: row.presentedAt,
       presentedLocationId: row.presentedLocationId,
+      quoteIssuedOn: row.quoteIssuedOn,
+      quoteValidUntil: row.quoteValidUntil,
       rejectedAt: row.rejectedAt,
       rejectionReason: row.rejectionReason,
       rejectionNote: row.rejectionNote,
@@ -192,7 +216,12 @@ export class InMemoryTreatmentPlanRepository
       catalogItemId: row.catalogItemId,
       catalogPrice: row.catalogPrice,
       basePrice: row.basePrice,
+      catalogCurrency: row.catalogCurrency,
       priceSource: row.priceSource,
+      referenceCurrency: row.referenceCurrency,
+      referencePriceInPlan: row.referencePriceInPlan,
+      basePriceInPlan: row.basePriceInPlan,
+      ...itemRates(row.priceSource, row.referenceRate),
       agreementId: row.agreementId,
       agreementName: row.agreementName,
       pricingLocationId: row.pricingLocationId,
@@ -229,6 +258,8 @@ export class InMemoryTreatmentPlanRepository
       optionLabel: null,
       presentedAt: null,
       presentedLocationId: null,
+      quoteIssuedOn: null,
+      quoteValidUntil: null,
       rejectedAt: null,
       rejectionReason: null,
       rejectionNote: null,
@@ -384,6 +415,14 @@ export class InMemoryTreatmentPlanRepository
     if (change.presentation) {
       row.presentedAt = change.presentation.at;
       row.presentedLocationId = this.locationId;
+      // Como el de Prisma (DX-379): presentar fija siempre la validez.
+      const validity = validityOnPresentation(
+        change.presentation.at,
+        this.timeZone,
+        this.quoteValidityDays,
+      );
+      row.quoteIssuedOn = validity.issuedOn;
+      row.quoteValidUntil = validity.validUntil;
     }
     if (change.rejection) {
       row.rejectedAt = change.rejection.at;
@@ -417,6 +456,8 @@ export class InMemoryTreatmentPlanRepository
       createdById: decision.createdById ?? null,
       presentedAt: null,
       presentedLocationId: null,
+      quoteIssuedOn: null,
+      quoteValidUntil: null,
       rejectedAt: null,
       rejectionReason: null,
       rejectionNote: null,
@@ -464,6 +505,7 @@ export class InMemoryTreatmentPlanRepository
       catalogItemId: input.catalogItemId,
       catalogPrice: input.catalogPrice,
       ...input.pricing,
+      ...input.pricing.reference,
       price: input.price,
       discount: input.discount ?? 0,
       discountReason: input.discountReason ?? null,
@@ -492,7 +534,7 @@ export class InMemoryTreatmentPlanRepository
   async updateItem(
     id: string,
     decide: DecideItemChange,
-  ): Promise<TreatmentPlanItem> {
+  ): Promise<TreatmentPlanItemUpdate> {
     const row = this.items.find((i) => i.id === id && i.deletedAt === null);
     const plan = row && this.lockedPlan(row.planId);
     if (!row || !plan) {
@@ -502,7 +544,8 @@ export class InMemoryTreatmentPlanRepository
       decide({ plan, item: this.toItemEntity(row) }),
     );
     this.lastMirror = mirror;
-    const { discountStamp, ...fields } = patch;
+    const { discountStamp, reference, ...fields } = patch;
+    if (reference) this.writeReference(row, reference);
     const definedPatch = Object.fromEntries(
       Object.entries(fields).filter(([, value]) => value !== undefined),
     );
@@ -511,7 +554,8 @@ export class InMemoryTreatmentPlanRepository
       Object.assign(row, this.stampColumns(discountStamp));
     }
     if (attribution) Object.assign(row, this.attributionColumns(attribution));
-    return this.toItemEntity(row);
+    // El recall de un procedimiento (DX-015-bis) lo cubren los tests con BD.
+    return { ...this.toItemEntity(row), recallUpdates: [] };
   }
 
   /** DX-050: igual que el repositorio real, sin resolver nombres. */
@@ -533,6 +577,24 @@ export class InMemoryTreatmentPlanRepository
         performedLocationId: change.performedLocationId,
       }).filter(([, value]) => value !== undefined),
     );
+  }
+
+  /**
+   * DX-513-bis: igual que el trigger `treatment_plan_items_reference_frozen`:
+   * una foto escrita no cambia; solo se pasa de NULL a un valor.
+   */
+  private writeReference(row: StoredItem, reference: ReferenceSnapshot): void {
+    const written =
+      row.referenceCurrency !== null ||
+      row.referencePriceInPlan !== null ||
+      row.basePriceInPlan !== null ||
+      row.referenceRate !== null;
+    if (written) {
+      throw new Error(
+        'la referencia del ítem en la moneda del plan queda fijada al escribirla: no cambia',
+      );
+    }
+    Object.assign(row, reference);
   }
 
   /** Igual que el repositorio real: la sede es la del request (o la principal). */
@@ -568,8 +630,9 @@ export class InMemoryTreatmentPlanRepository
       decide({ plan, items: rows.map((r) => this.toItemEntity(r)) }),
     );
     return changes.map((change) => {
-      const { itemId, discountStamp, ...fields } = change;
+      const { itemId, discountStamp, reference, ...fields } = change;
       const row = rows.find((r) => r.id === itemId)!;
+      if (reference) this.writeReference(row, reference);
       const definedFields = Object.fromEntries(
         Object.entries(fields).filter(([, value]) => value !== undefined),
       );
@@ -601,6 +664,8 @@ export const PLAN_WITHOUT_OPTIONS = {
   optionLabel: null,
   presentedAt: null,
   presentedLocationId: null,
+  quoteIssuedOn: null,
+  quoteValidUntil: null,
   rejectedAt: null,
   rejectionReason: null,
   rejectionNote: null,

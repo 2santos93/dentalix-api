@@ -24,9 +24,10 @@ import { PaymentAllocationJobs } from '../src/modules/payments/application/payme
 import { PaymentBaseRetries } from '../src/modules/payments/application/payment-base-retries';
 import { PAYMENT_RATE_BACKLOG_FORBIDDEN_MESSAGE } from '../src/modules/payments/presentation/payment-rate-backlog.controller';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-380 en HTTP real, con un doble del proveedor de tasas CAÍDO que cuenta
-// sus llamadas (nunca sale a la red): N clínicas cobran en COP a un plan en
+// sus llamadas (nunca sale a la red): N clínicas cobran en VES a un plan en
 // USD el mismo día sin snapshot. El alta y los barridos piden ese día al
 // proveedor UNA vez en todo el sistema (caché negativa de SEC-054) y los
 // abonos quedan «sin tasa» con su reintento escalonado, sin 500. Una clínica
@@ -40,7 +41,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 
 // Sufijo por ejecución: el registro no admite repetir subdominio.
 const PREFIX = `dx380-e2e-${Date.now().toString(36)}`;
-const ZONE = 'America/Bogota';
+const ZONE = 'America/Caracas';
 const DAY = addCivilDays(civilDateIn(new Date(), ZONE), -2);
 const N = 4;
 const BACKLOG = '/api/v1/payments/rate-backlog';
@@ -81,6 +82,9 @@ describe('Abonos sin tasa con el proveedor caído (e2e, DX-380)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({
@@ -118,7 +122,7 @@ describe('Abonos sin tasa con el proveedor caído (e2e, DX-380)', () => {
       )
         .send({
           amount: 40000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: `${DAY}T15:00:00.000Z`,
           method: 'CASH',
         })
@@ -260,7 +264,7 @@ describe('Abonos sin tasa con el proveedor caído (e2e, DX-380)', () => {
     });
     const calls = fetchRates.mock.calls.length;
     await as(api().post('/api/v1/exchange/manual-rates'), first)
-      .send({ date: DAY, currency: 'COP', rate: 4000 })
+      .send({ date: DAY, currency: 'VES', rate: 4000 })
       .expect(201);
     await sweep();
 

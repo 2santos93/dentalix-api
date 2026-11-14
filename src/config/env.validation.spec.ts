@@ -61,6 +61,19 @@ const errorOf = (env: Record<string, unknown>): string => {
 };
 
 describe('validateEnv', () => {
+  it('DX-502: PLAN_QUOTE_COMPOSE_V4 solo admite «true» o «false» (sin definir vale)', () => {
+    for (const value of [undefined, '', 'true', 'false']) {
+      expect(() =>
+        validateEnv(baseEnv({ PLAN_QUOTE_COMPOSE_V4: value })),
+      ).not.toThrow();
+    }
+    for (const value of ['si', '1', 'TRUE']) {
+      expect(errorOf(baseEnv({ PLAN_QUOTE_COMPOSE_V4: value }))).toContain(
+        'PLAN_QUOTE_COMPOSE_V4 debe ser "true" o "false".',
+      );
+    }
+  });
+
   describe('MFA de plataforma y break-glass (SEC-008)', () => {
     it('producción exige MFA_ENCRYPTION_KEY; fuera de producción es opcional', () => {
       expect(errorOf(prodEnv({ MFA_ENCRYPTION_KEY: undefined }))).toContain(
@@ -554,6 +567,31 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
 
+    it.each([
+      [
+        'PASSWORD_RESET_MAX_CONCURRENCY',
+        ['0', '101', 'x', '2.5', '-1'],
+        ['1', '4', '100'],
+      ],
+      [
+        'PASSWORD_RESET_MAX_QUEUE',
+        ['0', '10001', 'x', '1e3', '-1'],
+        ['1', '1000', '10000'],
+      ],
+      [
+        'PASSWORD_RESET_USER_DAILY_LIMIT',
+        ['0', '21', 'x', '2.5', '-1'],
+        ['1', '5', '20'],
+      ],
+    ])('DX-149-quater: %s fuera de rango no arranca', (key, bad, ok) => {
+      for (const value of bad) {
+        expect(errorOf(baseEnv({ [key]: value }))).toContain(key);
+      }
+      for (const value of ok) {
+        expect(() => validateEnv(baseEnv({ [key]: value }))).not.toThrow();
+      }
+    });
+
     it('tope de los emails de plataforma (DX-144): enfriamiento 0..86400 s y 1..1000 al día', () => {
       expect(() =>
         validateEnv(
@@ -589,6 +627,29 @@ describe('validateEnv', () => {
         'MAIL_RETRY_BASE_MS',
       );
     });
+  });
+
+  describe('mínimo de conservación de la historia clínica (DX-330)', () => {
+    it('acepta vacío y un entero entre 15 y 100', () => {
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+      expect(() =>
+        validateEnv(baseEnv({ PLATFORM_MIN_CLINICAL_RETENTION_YEARS: '' })),
+      ).not.toThrow();
+      expect(() =>
+        validateEnv(baseEnv({ PLATFORM_MIN_CLINICAL_RETENTION_YEARS: '20' })),
+      ).not.toThrow();
+    });
+
+    it.each(['14', '101', 'abc', '15.5'])(
+      'rechaza %s con el mensaje exacto',
+      (value) => {
+        expect(
+          errorOf(baseEnv({ PLATFORM_MIN_CLINICAL_RETENTION_YEARS: value })),
+        ).toContain(
+          'PLATFORM_MIN_CLINICAL_RETENTION_YEARS debe ser un entero entre 15 y 100.',
+        );
+      },
+    );
   });
 
   describe('auditoría (DX-102)', () => {
@@ -701,7 +762,7 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
 
-    it('la gracia del apagado tiene que ser menor que el arriendo (si no, otro worker retoma trabajos aún en curso)', () => {
+    it('la gracia del apagado tiene que ser menor que la reserva (si no, otro worker retoma trabajos aún en curso)', () => {
       expect(
         errorOf(
           baseEnv({

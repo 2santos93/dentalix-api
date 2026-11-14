@@ -11,9 +11,13 @@ import {
   TreatmentPlan,
   TreatmentPlanWithItems,
 } from '../entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../entities/treatment-plan-item.entity';
 import type { ItemAttributionChange } from '../plan-item-attribution';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { ReferenceSnapshot } from '../../../discounts/domain/reference-in-plan';
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — the tenant comes
 // from the guarded request context (never the client, same convention as
@@ -135,10 +139,14 @@ export interface AddTreatmentPlanItemRepoInput {
  */
 export interface PricingSnapshot {
   basePrice: number | null;
+  /** DX-502: moneda de `basePrice`; null si no se supo o no hay precio de catálogo. */
+  catalogCurrency: string | null;
   priceSource: PriceSource;
   agreementId: string | null;
   agreementName: string | null;
   pricingLocationId: string;
+  /** DX-513-bis: la referencia en la moneda del plan (y su tasa), congelada. */
+  reference: ReferenceSnapshot;
 }
 
 /**
@@ -171,6 +179,11 @@ export interface UpdateTreatmentPlanItemRepoInput {
   discountReasonNote?: string | null;
   /** Solo cuando el descuento cambia (DX-204); ver `DiscountStamp`. */
   discountStamp?: DiscountStamp | null;
+  /**
+   * DX-513-bis §5.8: la foto de la referencia de un ítem anterior que aún no
+   * la tenía, tomada en su primera rebaja. Nunca reescribe una foto.
+   */
+  reference?: ReferenceSnapshot;
 }
 
 /**
@@ -205,6 +218,8 @@ export interface BulkItemDiscount {
   discountReason?: DiscountReason | null;
   discountReasonNote?: string | null;
   discountStamp?: DiscountStamp | null;
+  /** DX-513-bis §5.8: la foto de un ítem anterior, en su primera rebaja. */
+  reference?: ReferenceSnapshot;
 }
 
 /**
@@ -285,15 +300,24 @@ export interface TreatmentPlanRepository {
    * atribución. Una corrección (CORRECT) o una salida de DONE (CLEAR) deja
    * además, en la misma transacción, un `audit_event` con el antes y el
    * después (`audit`, el contexto de la petición).
+   *
+   * DX-015-bis: si el ítem entra en DONE, sale de DONE o se corrige su fecha o
+   * su sede, y su procedimiento dispara algún tipo de recall, en la MISMA
+   * transacción crea (al entrar en DONE) y recalcula el recall de cada tipo y
+   * lo audita; `recallUpdates` dice cómo quedaron.
    */
   updateItem(
     id: string,
     decide: DecideItemChange,
     audit?: AuditRequestContext,
-  ): Promise<TreatmentPlanItem>;
+  ): Promise<TreatmentPlanItemUpdate>;
 
-  /** Soft-delete: sets `deletedAt`. Never a hard delete. */
-  softDeleteItem(id: string): Promise<void>;
+  /**
+   * Soft-delete: sets `deletedAt`. Never a hard delete. DX-015-bis: si el
+   * ítem estaba DONE, recalcula en la misma transacción el recall de los
+   * tipos que dispara y lo audita con `audit`.
+   */
+  softDeleteItem(id: string, audit?: AuditRequestContext): Promise<void>;
 
   /**
    * Acción «Descuento %» (DX-204): en UNA transacción bloquea el plan (FOR

@@ -1,3 +1,4 @@
+import { wholePercent } from '../../../shared/format/whole-percent';
 import { maxDoseMg } from './anesthesia-dose';
 import { type DoseAdjustment, NO_ADJUSTMENT } from './anesthesia-limits';
 import type { AnesthesiaAdministration } from './entities';
@@ -179,7 +180,7 @@ export function doseWindowBreakdown(
     part.carpules += r.carpules;
     part.mg = round1(part.mg + r.doseMg);
     part.lastAdministeredAt = r.administeredAt;
-    part.percent = maxMg === null ? null : Math.round(fraction * 100);
+    part.percent = maxMg === null ? null : wholePercent(fraction);
     parts.set(key, part);
   }
   return [...parts.values()];

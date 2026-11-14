@@ -42,6 +42,13 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       const view = await inTenant(() => get.execute(token));
 
       expect(view).toEqual({
+        // DX-469: «Añadir a mi calendario».
+        calendarAvailable: true,
+        googleCalendarUrl: expect.stringMatching(
+          /^https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE&text=Cita\+en\+/,
+        ) as string,
+        // DX-497: sin preferencia, el idioma de la clínica.
+        language: 'es',
         status: 'PENDING',
         clinic: {
           name: 'Clínica Sonrisa',
@@ -55,12 +62,32 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
           providerName: 'Dra. Pérez',
           locationName: 'Sede Principal',
           locationAddress: 'Calle 1 # 2-3',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h12',
+          wantsEarlier: false,
+          earlierWindow: null,
+          earlierAllowed: true,
         },
         response: null,
         respondedAt: null,
         cancellationPolicy: null,
         isLate: false,
       });
+    });
+
+    it('DX-497: abre en el idioma del paciente de la cita (y Google Calendar en ese idioma)', async () => {
+      const { token } = await issue({ patientPreferredLanguage: 'en' });
+      const view = await inTenant(() => get.execute(token));
+      expect(view.language).toBe('en');
+      expect(view.googleCalendarUrl).toContain('text=Appointment+at+');
+    });
+
+    it('DX-497: un idioma sin catálogo llega tal cual (la web cae al de la clínica)', async () => {
+      const { token } = await issue({ patientPreferredLanguage: 'ca' });
+      const view = await inTenant(() => get.execute(token));
+      expect(view.language).toBe('ca');
+      expect(view.googleCalendarUrl).toContain('text=Cita+en+');
     });
 
     it('no cambia nada (a prueba de previsualizadores de enlaces)', async () => {
@@ -127,8 +154,13 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
 
     it('cancel -> CANCELLED', async () => {
       const { appointment, token } = await issue();
-      await inTenant(() => respond.execute(token, 'cancel'));
+      const view = await inTenant(() => respond.execute(token, 'cancel'));
       expect(repo.appointments.get(appointment.id)?.status).toBe('CANCELLED');
+      // DX-469: la respuesta ya no ofrece añadir al calendario.
+      expect(view).toMatchObject({
+        calendarAvailable: false,
+        googleCalendarUrl: null,
+      });
     });
 
     it('call_me -> sigue SCHEDULED pero marca "pide llamada"', async () => {
@@ -272,7 +304,7 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       noticeHours: 24,
       patientText: 'Avísanos con 24 h o se cobra la cita.',
       suggestedFee: 50000,
-      currency: 'COP',
+      currency: 'USD',
     };
     const fiveHours = () => ({ start: new Date(Date.now() + 5 * 3600_000) });
 
@@ -288,7 +320,7 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
         noticeHours: 24,
         text: 'Avísanos con 24 h o se cobra la cita.',
         suggestedFee: 50000,
-        currency: 'COP',
+        currency: 'USD',
       });
       expect(view.isLate).toBe(true);
     });
@@ -353,12 +385,18 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
       const { token } = await issue(fiveHours());
       const view = await inTenant(() => get.execute(token));
       expect(Object.keys(view.appointment ?? {}).sort()).toEqual([
+        'earlierAllowed',
+        'earlierWindow',
         'end',
+        'hourCycle',
+        'locale',
         'locationAddress',
         'locationName',
         'patientFirstName',
         'providerName',
         'start',
+        'timeZone',
+        'wantsEarlier',
       ]);
     });
   });

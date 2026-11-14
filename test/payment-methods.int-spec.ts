@@ -8,8 +8,8 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/infrastructure/prisma-payment-method.repository';
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
-  locationData,
+  REGIONAL_CARACAS_FIXTURE,
+  regionalLocationInsert,
 } from './support/location-fixtures';
 
 // DX-377, capa DB: el catálogo de medios de pago (RLS FORCE, sin DELETE para
@@ -47,26 +47,31 @@ async function seedClinic(
     INSERT INTO "tenants" ("id", "name", "subdomain", "updatedAt")
     VALUES (gen_random_uuid(), ${subdomain}, ${subdomain}, now())
     RETURNING "id"`;
-  const { defaultPhoneRegion: _region, ...regional } = REGIONAL_BOGOTA_FIXTURE;
-  const location = await db.location.create({
-    data: beforeDx377
-      ? { ...regional, tenantId: tenant.id, name: 'Sede' }
-      : locationData(REGIONAL_BOGOTA_FIXTURE, {
-          tenantId: tenant.id,
-          name: 'Sede',
-        }),
-    select: { id: true },
-  });
+  // Sede también por SQL: el cliente insertaría columnas de sede posteriores
+  // (p. ej. DX-515) aunque no se pidan.
+  const location = {
+    id: await regionalLocationInsert(
+      db,
+      tenant.id,
+      'Sede',
+      REGIONAL_CARACAS_FIXTURE,
+      { phoneRegion: !beforeDx377 },
+    ),
+  };
+  // Solo el id: el cliente leería columnas de paciente posteriores (DX-330).
   const patient = await db.patient.create({
     data: { tenantId: tenant.id, firstName: 'Ana', lastName: subdomain },
+    select: { id: true },
   });
+  // Solo el id: el cliente leería columnas del plan posteriores (DX-379).
   const plan = await db.treatmentPlan.create({
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
+    select: { id: true },
   });
   return {
     tenantId: tenant.id,
@@ -88,7 +93,7 @@ async function insertPayment(
        "patientId", "amount", "currency", "paidAt", "method", "updatedAt"
        ${extra.paymentMethodId ? ', "paymentMethodId", "reference", "referenceNormalized"' : ''})
      VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::uuid, 1000,
-       'COP', now(), $5::"PaymentMethod", now()
+       'USD', now(), $5::"PaymentMethod", now()
        ${extra.paymentMethodId ? ', $6::uuid, $7, $7' : ''})
      RETURNING "id"`,
     c.tenantId,

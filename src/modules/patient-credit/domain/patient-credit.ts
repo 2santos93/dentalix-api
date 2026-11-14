@@ -1,8 +1,16 @@
 import { createHash } from 'node:crypto';
 import { ClinicRole, type PaymentMethod } from '@prisma/client';
 import { RECEIPT_PREFIX_PATTERN } from '../../payments/domain/receipt-number';
-import type { RoundingDigits } from '../../../shared/money/line-rounding';
+import { moneyWithCode } from '../../../shared/format/money-with-code';
+import type { CurrencyTexts } from '../../../shared/format/currency-text';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { fromCents, toCents } from '../../../shared/money/money';
+import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../shared/validation/idempotency-key';
+import {
+  civilDateIn,
+  civilDayRange,
+  type InstantRange,
+} from '../../../shared/time/civil-day';
 
 /*
  * Saldo a favor del paciente (DX-253): reglas puras del traspaso a otro plan y
@@ -12,8 +20,11 @@ import { fromCents, toCents } from '../../../shared/money/money';
  * saldo a favor (traspasos recibidos − traspasos dados − devoluciones) −
  * facturable (0 si el plan está cancelado o rechazado), si es positivo. Es la
  * misma cifra que el estado de cuenta muestra como saldo negativo del plan
- * (`computeBalances`). Lo abonado en OTRA moneda que la del plan no entra: el
- * traspaso entre monedas está fuera de alcance.
+ * (`computeBalances`). DX-472-bis: lo abonado en OTRA moneda entra por su base
+ * (el abono convertido una vez a la moneda del plan con su tasa congelada,
+ * DX-051), como en el saldo del plan; sin base todavía, no entra. El saldo a
+ * favor se mueve siempre en la moneda del plan: el traspaso a un plan de otra
+ * moneda sigue fuera de alcance.
  */
 
 export const CREDIT_REASON_MIN = 3;
@@ -25,6 +36,20 @@ export const CREDIT_PLAN_NOT_FOUND_MESSAGE =
 export const CREDIT_REFUND_NOT_FOUND_MESSAGE = 'Devolución no encontrada.';
 export const CREDIT_AMOUNT_EXCEEDS_MESSAGE =
   'El importe supera el saldo a favor del plan.';
+
+/**
+ * DX-472-bis (revisión B3): el «supera» cuando el plan tiene abonos en otra
+ * moneda que aún no cuentan: el estado de cuenta ya los suma con su tasa,
+ * pero el saldo a favor solo cuenta la cifra congelada (su base).
+ */
+export function creditExceedsMessage(pendingOtherCurrency: number): string {
+  if (pendingOtherCurrency <= 0) return CREDIT_AMOUNT_EXCEEDS_MESSAGE;
+  const what =
+    pendingOtherCurrency === 1
+      ? '1 abono en otra moneda todavía no cuenta en el saldo a favor: se suma'
+      : `${pendingOtherCurrency} abonos en otra moneda todavía no cuentan en el saldo a favor: se suman`;
+  return `${CREDIT_AMOUNT_EXCEEDS_MESSAGE} ${what} en unos minutos, cuando quede registrada la tasa de su día. Vuelve a intentarlo después.`;
+}
 export const CREDIT_CURRENCY_MISMATCH_MESSAGE =
   'La moneda no es la del plan: el saldo a favor se mueve en la moneda del plan de origen.';
 export const CREDIT_TARGET_CURRENCY_MESSAGE =
@@ -47,7 +72,7 @@ export const CREDIT_CASH_SESSION_REQUIRED_MESSAGE =
 export const CREDIT_IDEMPOTENCY_REUSED_MESSAGE =
   'Esta clave de idempotencia ya se usó para otro movimiento de saldo a favor. Vuelve a intentarlo para generar una clave nueva.';
 export const CREDIT_IDEMPOTENCY_INVALID_MESSAGE =
-  'La cabecera Idempotency-Key tiene que ser un UUID.';
+  IDEMPOTENCY_KEY_INVALID_MESSAGE;
 export const CREDIT_ROLE_FORBIDDEN_MESSAGE =
   'Tu rol no mueve saldo a favor: solo administración y recepción.';
 
@@ -67,27 +92,71 @@ export const CREDIT_CASH_LOCATION_REQUIRED_MESSAGE =
   'Elige la sede de la caja de la que sale el efectivo.';
 
 /**
- * El tope con los decimales de redondeo de su moneda y su código («10000.50 USD»,
- * «5000 JPY»). Sin separador de miles a propósito: el dominio no conoce el
- * formato regional de la sede (DX-311, sin locales fijos).
+ * 403 de RECEPTION por encima del tope de la clínica (mismo patrón que DX-204).
+ * El tope sale con el formato de la sede de referencia y el código ISO de su
+ * moneda («USD 10,000.50», «JPY 5,000», «VES 10.000,00») (DX-354b), o con el
+ * texto propio que la clínica da a esa moneda («Bs. 10.000,00») (DX-517-quater).
  */
-function capText(
-  capCents: number,
-  currency: string,
-  digits: RoundingDigits,
-): string {
-  return `${(capCents / 100).toFixed(digits)} ${currency}`;
-}
-
-/** 403 de RECEPTION por encima del tope de la clínica (mismo patrón que DX-204). */
 export function receptionCapMessage(
   capCents: number,
   currency: string,
-  digits: RoundingDigits,
+  fmt: RegionalFormat,
+  texts: CurrencyTexts | null = null,
 ): string {
   return capCents === 0
     ? 'Recepción no puede traspasar ni devolver saldo a favor en esta clínica: pídeselo a administración.'
-    : `Recepción puede mover hasta ${capText(capCents, currency, digits)} por operación: pídeselo a administración.`;
+    : `Recepción puede mover hasta ${moneyWithCode(capCents / 100, currency, fmt, texts)} por operación: pídeselo a administración.`;
+}
+
+/**
+ * DX-462: el tope de RECEPCIÓN para DEVOLVER se acumula por (clínica, sede,
+ * quien devuelve, día civil de la sede, moneda de la devolución). La cifra del
+ * tope es una sola por clínica y se compara tal cual con el importe de cada
+ * moneda (como ya hacía la regla por operación); por eso la suma es por
+ * moneda. Cuentan todas las devoluciones de ese usuario en esa sede ese día, de
+ * cualquier paciente (el control es de caja). Las devoluciones no se anulan
+ * (son inmutables), así que no hay "anuladas" que excluir. ADMIN sin tope.
+ * Los traspasos no sacan dinero de caja y siguen con el tope por operación.
+ */
+export function dailyRefundRemainingCents(
+  capCents: number,
+  usedTodayCents: number,
+): number {
+  return Math.max(0, capCents - usedTodayCents);
+}
+
+/** Día civil de la sede en `now` y su rango `[start, end)` de instantes. */
+export type DailyRefundWindow = InstantRange & { day: string };
+
+export function dailyRefundWindow(
+  now: Date,
+  timeZone: string,
+): DailyRefundWindow {
+  const day = civilDateIn(now, timeZone);
+  return { day, ...civilDayRange(day, timeZone) };
+}
+
+/** 403 de RECEPTION al superar el tope diario acumulado de devoluciones. */
+export function dailyRefundCapMessage(
+  remainingCents: number,
+  currency: string,
+  fmt: RegionalFormat,
+  texts: CurrencyTexts | null = null,
+): string {
+  return `Supera tu tope diario de devoluciones en esta sede. Te quedan ${moneyWithCode(remainingCents / 100, currency, fmt, texts)} hoy; pide a un administrador que la registre.`;
+}
+
+/** Lo lanza el repositorio (dentro del bloqueo) cuando la suma pasa del tope. */
+export class DailyRefundCapExceededError extends Error {
+  constructor(
+    readonly remainingCents: number,
+    readonly currency: string,
+    /** Sede de la devolución: con su formato se pinta el importe. */
+    readonly locationId: string,
+  ) {
+    super('Daily refund cap exceeded');
+    this.name = 'DailyRefundCapExceededError';
+  }
 }
 
 export { fromCents, toCents };
@@ -95,7 +164,7 @@ export { fromCents, toCents };
 export interface PlanCreditInput {
   /** Facturable del plan (0 si no se cobra: cancelado o rechazado). */
   billableCents: number;
-  /** Abonos vivos al plan en su moneda. */
+  /** Abonos vivos al plan en su moneda (DX-472-bis: y los de otra, por su base). */
   paidCents: number;
   /** Σ asientos del saldo a favor del plan en su moneda (con signo). */
   entriesCents: number;
@@ -166,7 +235,7 @@ export function refundSeriesOf(receiptPrefix: string): string {
   return `DEV-${receiptPrefix}`;
 }
 
-/** Número visible del comprobante: `DEV-BOG-000007`. */
+/** Número visible del comprobante: `DEV-CCS-000007`. */
 export function formatRefundNumber(series: string, number: number): string {
   if (!Number.isInteger(number) || number <= 0) {
     throw new RangeError(`Número de comprobante inválido: ${number}`);

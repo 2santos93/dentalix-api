@@ -24,7 +24,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const UA = 'dx360-e2e-agent';
 
 const POLICY = {
-  policyText: 'Política de tratamiento de datos de la clínica (Ley 1581).',
+  policyText:
+    'Política de tratamiento de datos de la clínica (versión de prueba).',
   generalText: 'Autorizo el tratamiento de mis datos personales.',
   sensitiveHealthText:
     'Autorizo el tratamiento de mis datos sensibles de salud (historia clínica). No está obligado a autorizarlo. Finalidad: la atención odontológica.',
@@ -115,11 +116,11 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
         .send('post', '/locations')
         .send({
           name: 'Sede Norte',
-          address: 'Calle 100 # 15-20',
-          country: 'CO',
-          currency: 'COP',
-          timeZone: 'America/Bogota',
-          locale: 'es-CO',
+          address: 'Av. Libertador 100',
+          country: 'VE',
+          currency: 'USD',
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
           hourCycle: 'h23',
         })
         .expect(201);
@@ -136,16 +137,16 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
           configChange: {
             after: {
               name: 'Sede Norte',
-              country: 'CO',
-              currency: 'COP',
-              timeZone: 'America/Bogota',
-              locale: 'es-CO',
+              country: 'VE',
+              currency: 'USD',
+              timeZone: 'America/Caracas',
+              locale: 'es-VE',
               hourCycle: 'h23',
             },
           },
         },
       });
-      expect(JSON.stringify(event)).not.toContain('Calle 100');
+      expect(JSON.stringify(event)).not.toContain('Av. Libertador');
     });
 
     it('PUT /locations/schedule: UPDATE LOCATION_SCHEDULE con los tramos antes y después; el mismo horario otra vez no deja evento', async () => {
@@ -280,7 +281,7 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
         },
       });
       const dump = JSON.stringify(events);
-      expect(dump).not.toContain('Ley 1581');
+      expect(dump).not.toContain('versión de prueba');
       expect(dump).not.toContain('Versión 2 de la política');
     });
   });

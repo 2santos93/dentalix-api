@@ -12,9 +12,15 @@ import {
   type ResponsiblePatientSummary,
   type UpdateResponsiblePartyData,
 } from '../../domain/ports/responsible-party-repository.port';
+import { storedPhoneE164 } from '../../domain/caller-lookup/caller-phone';
+import {
+  defaultPhoneRegionIn,
+  reconcileResponsiblePhoneE164,
+} from '../phone-e164';
 import {
   loadNoticeSettings,
   loadNoticeResponsibles,
+  loadMajorityReview,
 } from '../notices/notice-context';
 
 const SUMMARY_SELECT = {
@@ -164,45 +170,52 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
         },
       });
       if (!patient) return null;
-      const [rows, responsibleFor, noticeResponsibles, noticeSettings] =
-        await Promise.all([
-          tx.patientResponsibleParty.findMany({
-            // Con el responsable archivado también: sigue ocupando el pagador
-            // (índice único) y recepción tiene que poder quitarlo. Los avisos
-            // no le llegan (loadNoticeResponsibles lo excluye).
-            where: { patientId, deletedAt: null },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-            select: PARTY_SELECT,
-          }),
-          // Índice parcial patient_responsible_parties_responsible_idx.
-          tx.patientResponsibleParty.findMany({
-            where: {
-              responsiblePatientId: patientId,
-              deletedAt: null,
-              patient: { deletedAt: null },
+      const [
+        rows,
+        responsibleFor,
+        noticeResponsibles,
+        majorityReview,
+        noticeSettings,
+      ] = await Promise.all([
+        tx.patientResponsibleParty.findMany({
+          // Con el responsable archivado también: sigue ocupando el pagador
+          // (índice único) y recepción tiene que poder quitarlo. Los avisos
+          // no le llegan (loadNoticeResponsibles lo excluye).
+          where: { patientId, deletedAt: null },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: PARTY_SELECT,
+        }),
+        // Índice parcial patient_responsible_parties_responsible_idx.
+        tx.patientResponsibleParty.findMany({
+          where: {
+            responsiblePatientId: patientId,
+            deletedAt: null,
+            patient: { deletedAt: null },
+          },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            relationship: true,
+            isPayer: true,
+            receivesNotices: true,
+            patient: {
+              select: { id: true, firstName: true, lastName: true },
             },
-            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-            select: {
-              id: true,
-              relationship: true,
-              isPayer: true,
-              receivesNotices: true,
-              patient: {
-                select: { id: true, firstName: true, lastName: true },
-              },
-            },
-          }),
-          loadNoticeResponsibles(tx, patientId),
-          loadNoticeSettings(
-            tx,
-            tenantId,
-            this.tenantContext.getLocationId() ?? null,
-          ),
-        ]);
+          },
+        }),
+        loadNoticeResponsibles(tx, patientId),
+        loadMajorityReview(tx, patientId),
+        loadNoticeSettings(
+          tx,
+          tenantId,
+          this.tenantContext.getLocationId() ?? null,
+        ),
+      ]);
       return {
         patient,
         parties: rows.map(toView),
         noticeResponsibles,
+        majorityReview,
         responsibleFor,
         noticeSettings,
       };
@@ -228,26 +241,50 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
   ): Promise<ResponsiblePartyView> {
     const tenantId = this.requireTenantId();
     try {
-      return await this.prisma.runWithTenant(async (tx) =>
-        toView(
-          await tx.patientResponsibleParty.create({
-            data: {
-              tenantId,
-              patientId,
-              responsiblePatientId: data.responsiblePatientId,
-              ...(data.contact ? contactCreateData(data.contact) : {}),
-              relationship: data.relationship,
-              isPayer: data.isPayer,
-              receivesNotices: data.receivesNotices,
-              createdById,
-            },
-            select: PARTY_SELECT,
-          }),
-        ),
-      );
+      return await this.prisma.runWithTenant(async (tx) => {
+        // DX-224: el E.164 en el mismo INSERT (sin UPDATE posterior).
+        const phoneE164 = data.contact?.phone
+          ? storedPhoneE164(
+              data.contact.phone,
+              await defaultPhoneRegionIn(
+                tx,
+                this.tenantContext.getLocationId(),
+              ),
+            )
+          : null;
+        const created = await tx.patientResponsibleParty.create({
+          data: {
+            tenantId,
+            phoneE164,
+            patientId,
+            responsiblePatientId: data.responsiblePatientId,
+            ...(data.contact ? contactCreateData(data.contact) : {}),
+            relationship: data.relationship,
+            isPayer: data.isPayer,
+            receivesNotices: data.receivesNotices,
+            createdById,
+          },
+          select: PARTY_SELECT,
+        });
+        return toView(created);
+      });
     } catch (err) {
       throw conflictOf(err) ?? err;
     }
+  }
+
+  /** DX-224: el E.164 del contacto, con el prefijo de la sede activa. */
+  private async reconcilePhone(
+    tx: Prisma.TransactionClient,
+    partyId: string,
+    phone: string | null | undefined,
+  ): Promise<void> {
+    if (!phone) return;
+    await reconcileResponsiblePhoneE164(
+      tx,
+      [partyId],
+      await defaultPhoneRegionIn(tx, this.tenantContext.getLocationId()),
+    );
   }
 
   async update(
@@ -279,6 +316,7 @@ export class PrismaResponsiblePartyRepository implements ResponsiblePartyReposit
           },
         });
         if (count === 0) return null;
+        await this.reconcilePhone(tx, partyId, data.contact?.phone);
         return toView(
           await tx.patientResponsibleParty.findFirstOrThrow({
             where: { id: partyId },

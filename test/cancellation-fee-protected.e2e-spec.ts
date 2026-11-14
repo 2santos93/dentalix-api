@@ -17,10 +17,10 @@ import {
   FEE_PLAN_LOCKED_MESSAGE,
 } from '../src/modules/cancellation-fees/domain/cancellation-fee';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
-import { civilDateIn } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 
 // SEC-050: el cargo por inasistencia o cancelación tardía (DX-291) ya no se
 // rebaja ni se anula desde el plan. Matriz rol × acción sobre el ítem del
@@ -89,7 +89,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
       .post(`/locations/${principal}/cancellation-policy`, {
         noticeHours: 24,
         suggestedFee: 50000,
-        currency: 'COP',
+        currency: 'VES',
         patientText: 'Avísanos con 24 h.',
         receptionCanCharge,
       })
@@ -418,7 +418,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
       await admin()
         .post(`/treatment-plans/${fee.planId}/payments`, {
           amount: 50000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: new Date().toISOString(),
           method: 'CASH',
         })
@@ -436,12 +436,17 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
 
     // DX-382 (BE-046): «ya cobrado» se compara en la moneda del plan, con la
     // base de imputación de cada abono (DX-051/DX-375), no con la suma bruta
-    // de importes en monedas mezcladas. Tasa del día: 1 USD = 4.000 COP (sin
+    // de importes en monedas mezcladas. Tasa del día: 1 USD = 4.000 VES (sin
     // EUR: un abono en EUR se guarda «sin tasa» y sin base).
     describe('en la moneda del plan (DX-382)', () => {
-      const today = civilDateIn(new Date(), 'America/Bogota');
+      // DX-209: día FIJO (ayer, a mediodía en la sede) para la tasa y para el
+      // abono. Con «hoy» al cargar el módulo y el abono a `Date.now()`, una
+      // corrida que cruzaba la medianoche de Caracas (04:00 UTC) dejaba el
+      // abono sin tasa: «Hay abonos todavía sin convertir» en vez de 409.
+      const rateDay = fixedSedeDay(1);
+      const today = rateDay.day;
 
-      /** Cargos de un paciente nuevo (comparten el plan COP) y un abono. */
+      /** Cargos de un paciente nuevo (comparten el plan VES) y un abono. */
       async function feesPaidWith(
         fees: number,
         payment: { amount: number; currency: string },
@@ -465,7 +470,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
         await admin()
           .post(`/treatment-plans/${charged[0].planId}/payments`, {
             ...payment,
-            paidAt: new Date(Date.now() - 60_000).toISOString(),
+            paidAt: rateDay.at.toISOString(),
             method: 'CASH',
           })
           .expect(201);
@@ -475,7 +480,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
       beforeAll(async () => {
         await raw.exchangeRateSnapshot.deleteMany({ where: { date: today } });
         await raw.exchangeRateSnapshot.create({
-          data: { date: today, currency: 'COP', rate: 4000 },
+          data: { date: today, currency: 'VES', rate: 4000 },
         });
       });
 
@@ -483,7 +488,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
         await raw.exchangeRateSnapshot.deleteMany({ where: { date: today } });
       });
 
-      it('dos cargos de 50.000 COP y 25 USD (100.000 COP) cobrados: anular uno es 409 «ya cobrado»', async () => {
+      it('dos cargos de 50.000 VES y 25 USD (100.000 VES) cobrados: anular uno es 409 «ya cobrado»', async () => {
         const [first] = await feesPaidWith(2, { amount: 25, currency: 'USD' });
         const res = await admin()
           .post(`/appointments/${first.appointmentId}/cancellation-fee/void`, {
@@ -496,7 +501,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
         expect((await itemRow(first.itemId)).deletedAt).toBeNull();
       });
 
-      it('dos cargos de 50.000 COP y 10 USD (40.000 COP): el abono cabe en el otro y se anula', async () => {
+      it('dos cargos de 50.000 VES y 10 USD (40.000 VES): el abono cabe en el otro y se anula', async () => {
         const [first, second] = await feesPaidWith(2, {
           amount: 10,
           currency: 'USD',
@@ -541,7 +546,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
             await admin()
               .post(
                 '/locations',
-                locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede norte' }),
+                locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede norte' }),
               )
               .expect(201)
           ).body as { id: string }
@@ -600,7 +605,7 @@ describe('cargo por cancelación protegido en el plan (SEC-050)', () => {
     it('DENTIST cambia el precio y ASSISTANT quita un ítem normal', async () => {
       const plan = (
         await admin()
-          .post(`/patients/${patient}/treatment-plans`, { currency: 'COP' })
+          .post(`/patients/${patient}/treatment-plans`, { currency: 'VES' })
           .expect(201)
       ).body as { id: string };
       const catalog = (

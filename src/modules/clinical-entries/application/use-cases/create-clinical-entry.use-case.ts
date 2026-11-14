@@ -9,7 +9,15 @@ import type {
   ClinicalEntryAppointmentRef,
   ClinicalEntryRepository,
 } from '../../domain/ports/clinical-entry-repository.port';
-import { ClinicalEntry } from '../../domain/entities/clinical-entry.entity';
+import {
+  ClinicalEntry,
+  type ClinicalEntryRecallUpdate,
+} from '../../domain/entities/clinical-entry.entity';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import {
+  RECALL_INTERVAL_MAX,
+  RECALL_INTERVAL_MIN,
+} from '../../../recall/domain/recall-rules';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
@@ -33,7 +41,21 @@ import {
   INACTIVE_NOTE_TEMPLATE_MESSAGE,
   NOTE_TEMPLATE_NOT_FOUND_MESSAGE,
 } from '../../../clinical-note-templates/application/note-template-errors';
+import {
+  ENTRY_DATE_FUTURE_MESSAGE,
+  ENTRY_DATE_OTHER_DAY_MESSAGE,
+  isAppointmentDay,
+  isFutureEntryDate,
+} from '../../domain/entry-date-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import {
+  CLINICAL_ENTRY_SETTINGS_REPOSITORY,
+  type ClinicalEntrySettingsRepository,
+} from '../../domain/ports/clinical-entry-settings-repository.port';
+import {
+  signingWarnings,
+  type ClinicalEntryWarning,
+} from '../../domain/author-license';
 
 export const ENTRY_APPOINTMENT_NOT_FOUND_MESSAGE =
   'Cita no encontrada en esta clínica';
@@ -43,8 +65,10 @@ export const ENTRY_APPOINTMENT_NOT_ATTENDED_MESSAGE =
   'No se puede registrar una evolución en una cita cancelada o en la que el paciente no asistió';
 export const ENTRY_APPOINTMENT_FUTURE_MESSAGE =
   'No se puede registrar una evolución en una cita de un día futuro';
+export { ENTRY_DATE_FUTURE_MESSAGE, ENTRY_DATE_OTHER_DAY_MESSAGE };
 export const BLANK_NOTES_MESSAGE =
   'El texto de la evolución no puede estar vacío';
+export const ENTRY_RECALL_INTERVAL_MESSAGE = `El intervalo del recall va de ${RECALL_INTERVAL_MIN} a ${RECALL_INTERVAL_MAX} meses.`;
 
 /** DX-170: respuesta a una pregunta de la plantilla. */
 export interface ClinicalEntryAnswerInput extends NoteAnswer {
@@ -75,6 +99,25 @@ export interface CreateClinicalEntryInput {
    * ellos la evolución se sigue guardando.
    */
   diagnoses?: DiagnosisInput[];
+  /**
+   * DX-015-bis (D18): «Volver en N meses» para un tipo de recall. Opcional; va
+   * en la misma transacción que la evolución.
+   */
+  recall?: { recallTypeId: string; intervalMonths: number };
+}
+
+/**
+ * DX-540: la evolución recién firmada con los avisos de la firma (p. ej.
+ * firmada sin registro profesional). Los avisos no se guardan: solo viajan en
+ * la respuesta del alta.
+ */
+export interface CreatedClinicalEntry extends ClinicalEntry {
+  warnings: ClinicalEntryWarning[];
+  /**
+   * DX-015-bis (D18): el recall que fijó la evolución y los que la exclusión
+   * desactivó; vacío sin `recall`.
+   */
+  recallUpdates: ClinicalEntryRecallUpdate[];
 }
 
 const NOT_ATTENDED = new Set(['CANCELLED', 'NO_SHOW']);
@@ -93,6 +136,9 @@ export class CreateClinicalEntryUseCase {
     @Inject(CLINICAL_NOTE_TEMPLATE_REPOSITORY)
     private readonly templates: ClinicalNoteTemplateRepository,
     private readonly tenantContext: TenantContextService,
+    // DX-540: el aviso de registro profesional es un ajuste de la clínica.
+    @Inject(CLINICAL_ENTRY_SETTINGS_REPOSITORY)
+    private readonly settings: ClinicalEntrySettingsRepository,
   ) {}
 
   /**
@@ -104,14 +150,28 @@ export class CreateClinicalEntryUseCase {
    * guarda es TEXTO: editar o desactivar la plantilla después no lo cambia).
    * Con cita, la evolución queda ligada a ella y, si no trae fecha de
    * atención, toma el día de la cita en la zona de su sede.
+   *
+   * DX-540: el repositorio congela el registro profesional del autor en el
+   * INSERT; si la clínica tiene el aviso activo y no lo había, la respuesta
+   * lo dice (`warnings`). Nunca bloquea la firma.
    */
   async execute(
     patientId: string,
     input: CreateClinicalEntryInput,
     performedById: string,
-  ): Promise<ClinicalEntry> {
+    audit?: AuditRequestContext,
+  ): Promise<CreatedClinicalEntry> {
     // DX-038: autoría obligatoria (la BD además exige performedById NOT NULL).
     const author = assertAuthor(performedById);
+    // D18: el intervalo se valida antes de nada (el DTO también lo hace).
+    if (
+      input.recall &&
+      (!Number.isInteger(input.recall.intervalMonths) ||
+        input.recall.intervalMonths < RECALL_INTERVAL_MIN ||
+        input.recall.intervalMonths > RECALL_INTERVAL_MAX)
+    ) {
+      throw new BadRequestException(ENTRY_RECALL_INTERVAL_MESSAGE);
+    }
     if (input.answers !== undefined && input.templateId === undefined) {
       throw new BadRequestException(
         'Las respuestas necesitan una plantilla (templateId)',
@@ -130,18 +190,26 @@ export class CreateClinicalEntryUseCase {
     const appointment = input.appointmentId
       ? await this.appointmentFor(patientId, input.appointmentId)
       : null;
+    await this.assertEntryDate(input.entryDate, appointment);
     const notes = input.templateId
       ? await this.templateNotes(input.templateId, input)
       : (input.notes as string);
     if (notes.trim() === '') throw new BadRequestException(BLANK_NOTES_MESSAGE);
     const diagnoses = await this.diagnosesFor(input.diagnoses);
 
+    // DX-540: el ajuste se lee ANTES del INSERT: si esta lectura fallara después,
+    // el POST daría 500 con la evolución (inalterable) ya guardada y un
+    // reintento la duplicaría.
+    const { warnMissingProfessionalLicense } = await this.settings.get();
+
     // Rebuild the payload from only the known fields — same defensive
     // convention as SaveMedicalHistoryUseCase / CreateCatalogItemUseCase:
     // anything sneaked into `input` beyond this shape (e.g. a client-supplied
     // `tenantId`/`performedById`) is dropped here, never forwarded to the
     // repository.
-    return this.repo.create({
+    // D18: el tipo (vivo, de esta clínica: 422 si no) se comprueba DENTRO de
+    // la transacción del alta, así un 422 no deja la evolución guardada.
+    const { recallUpdates, ...created } = await this.repo.create({
       patientId,
       // Fecha de atención: la indicada, el día de la cita o "ahora".
       entryDate:
@@ -153,7 +221,47 @@ export class CreateClinicalEntryUseCase {
       appointmentId: appointment?.id,
       templateId: input.templateId,
       diagnoses,
+      recall: input.recall
+        ? {
+            recallTypeId: input.recall.recallTypeId,
+            intervalMonths: input.recall.intervalMonths,
+          }
+        : undefined,
+      audit,
     });
+    return {
+      ...created,
+      warnings: signingWarnings({
+        warnMissingProfessionalLicense,
+        professionalLicense: created.authorProfessionalLicense,
+      }),
+      recallUpdates,
+    };
+  }
+
+  /**
+   * DX-231 (BE-033): con cita, la fecha de atención es el día civil de la cita
+   * en la zona de su sede; sin cita, no puede ser posterior a «hoy» en la zona
+   * de la sede de escritura. Sin fecha no hay nada que comprobar (el día de la
+   * cita, o ahora).
+   */
+  private async assertEntryDate(
+    entryDate: Date | undefined,
+    appointment: ClinicalEntryAppointmentRef | null,
+  ): Promise<void> {
+    if (entryDate === undefined) return;
+    if (appointment) {
+      if (
+        !isAppointmentDay(entryDate, appointment.start, appointment.timeZone)
+      ) {
+        throw new BadRequestException(ENTRY_DATE_OTHER_DAY_MESSAGE);
+      }
+      return;
+    }
+    const timeZone = await this.repo.writeLocationTimeZone();
+    if (isFutureEntryDate(entryDate, new Date(), timeZone)) {
+      throw new BadRequestException(ENTRY_DATE_FUTURE_MESSAGE);
+    }
   }
 
   /**

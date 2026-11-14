@@ -59,6 +59,11 @@ export const APPOINTMENT_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // desactivar: solo ADMIN.
 export const CHAIR_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// Equipos biomédicos de cada sede y su hoja de vida (DX-542) — leer y
+// escribir: solo ADMIN (el dueño prepara la visita de habilitación). No hay
+// un rol de gestión de sede; el ADMIN siempre tiene todas las sedes.
+export const EQUIPMENT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Pagadores (DX-153) — leer (selectores de cobertura): los 4 roles. Crear:
 // ADMIN y recepción, que da de alta al paciente en mostrador y no puede
 // esperar al administrador. Editar, desactivar y retirar: solo gestión.
@@ -225,7 +230,7 @@ export const TREATMENT_PLAN_FOLLOW_UP_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 
-// Retención legal de la HC (DX-039): archivar un paciente, cambiar su
+// Retención de la HC (DX-039): archivar un paciente, cambiar su
 // retención extendida, la supresión parcial y la lista de historias que salen
 // de retención. Solo gestión: quien responde de la conservación de la
 // historia clínica es el titular de la clínica.
@@ -386,11 +391,27 @@ export const ANAMNESIS_REVIEW_DECISION_ROLES: ClinicRole[] = [
 // dueño. Solo gestión, como el dashboard (DASHBOARD_ROLES).
 export const REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// «Rentabilidad por sede» (DX-410): ingresos − gastos de cada sede. Junta el
+// dato financiero de los abonos y el de los gastos (EXPENSE_ROLES, solo
+// ADMIN): la mirada del dueño. No hay todavía un permiso de «reportes
+// financieros» aparte de los roles: el día que lo haya, se añade aquí. Las
+// sedes las acota el claim `loc` (DX-089).
+export const PROFITABILITY_REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // «Producción por procedimiento» (DX-423): ADMIN ve la de todo el equipo; un
 // DENTIST, solo la suya (lo acota el caso de uso). Asistente y recepción no.
 export const PRODUCTION_REPORT_ROLES: ClinicRole[] = [
   ClinicRole.DENTIST,
   ClinicRole.ADMIN,
+];
+
+// «Cobrado sin imputar / a cuenta» (DX-399): los abonos que todavía no cubren
+// ningún ítem del plan, de muchos pacientes. Dato financiero como los abonos
+// (PAYMENT_ROLES): lo trabajan la administración y recepción (y recepción
+// puede exportarlo: no lleva teléfonos); DENTIST/ASSISTANT, no.
+export const UNALLOCATED_PAYMENTS_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
 ];
 
 // «Pendiente de cerrar» (DX-439): el desenlace de las citas pasadas es del
@@ -438,6 +459,36 @@ export const SEDATION_VITALS_ROLES: ClinicRole[] = [
 // (recepción) y gestión. Odontólogos y asistentes no: lleva los teléfonos de
 // todos los pacientes del día.
 export const CONTINGENCY_AGENDA_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+
+// Recall (DX-015): la lista de llamada y sus contactos son trabajo del
+// mostrador: ADMIN y RECEPTION. Fijar el intervalo o pausar el recall de un
+// paciente es una decisión clínica: CLINICAL_ROLES. El bloque de la ficha lo
+// leen los cuatro roles (sin datos clínicos).
+export const RECALL_LIST_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+export const RECALL_INTERVAL_ROLES: ClinicRole[] = [...CLINICAL_ROLES];
+// DX-015-bis (porción 3, D15): «Programar recall» con el intervalo por defecto
+// del tipo (`POST /patients/:id/recalls/default`). Recepción despide al
+// paciente y llama a los de la lista, así que también lo crea; elegir otro
+// intervalo, editarlo o reactivarlo sigue siendo clínico (el PUT).
+export const RECALL_DEFAULT_ROLES: ClinicRole[] = [
+  ...new Set([...RECALL_LIST_ROLES, ...CLINICAL_ROLES, ClinicRole.RECEPTION]),
+];
+// DX-015-bis: los tipos de recall de la clínica (Ajustes › Recall) — crear,
+// editar, desactivar, retirar y fijar sus disparadores: solo gestión, como
+// los tipos de cita. Leerlos: APPOINTMENT_ROLES.
+export const RECALL_TYPE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// DX-342: paso a la mayoría de edad. La lista «Pasan a la mayoría de edad» y
+// la revisión (a quién van los avisos del paciente ya adulto) son trabajo de
+// mostrador: ADMIN + RECEPTION. El estado del aviso de la ficha lo leen los 4
+// roles (PATIENT_ROLES), como los responsables.
+export const MAJORITY_REVIEW_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.RECEPTION,
 ];

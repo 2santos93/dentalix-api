@@ -36,8 +36,9 @@ import {
   SUPPLIER_MESSAGE,
 } from '../../domain/expense-rules';
 import { SUMMARY_PERIOD_INVALID_MESSAGE } from '../../application/use-cases/get-expense-summary.use-case';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
-const CURRENCY_MESSAGE = 'La moneda no es válida.';
+const CURRENCY_MESSAGE = CURRENCY_CODE_MESSAGE;
 const FROM_CASH_SESSION_MESSAGE = 'fromCashSession debe ser verdadero o falso.';
 const METHOD_MESSAGE = `El medio de pago debe ser uno de: ${Object.values(PaymentMethod).join(', ')}.`;
 const STATUSES = ['PENDING', 'PARTIAL', 'PAID', 'VOIDED', 'OPEN'] as const;
@@ -104,7 +105,8 @@ export class CreateExpenseDto {
 
   @ApiProperty({
     example: 'Servicios públicos',
-    description: 'Una predefinida o una propia activa de la clínica.',
+    description:
+      'Una predefinida o una propia activa de la clínica, sin distinguir mayúsculas ni tildes. El nombre anterior de una predefinida cuenta como el actual.',
   })
   @IsString({ message: CATEGORY_INVALID_MESSAGE })
   category!: string;
@@ -261,7 +263,10 @@ export class ListExpensesQueryDto {
   @IsUUID('all', { message: LOCATION_INVALID_MESSAGE })
   locationId?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Sin distinguir mayúsculas ni tildes. El nombre anterior de una predefinida filtra por el actual.',
+  })
   @IsOptional()
   @IsString()
   category?: string;

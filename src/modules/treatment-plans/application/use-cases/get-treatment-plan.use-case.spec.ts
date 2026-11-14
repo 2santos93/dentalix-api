@@ -5,7 +5,10 @@ import {
   TreatmentPlan,
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-repository.port';
 import { InMemoryTreatmentPlanRepository } from './__fixtures__/in-memory-treatment-plan.repository';
 import { PLAN_WITHOUT_OPTIONS } from './__fixtures__/in-memory-treatment-plan.repository';
@@ -25,7 +28,7 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
-    updateItem: (): Promise<TreatmentPlanItem> =>
+    updateItem: (): Promise<TreatmentPlanItemUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),
@@ -71,7 +74,13 @@ describe('GetTreatmentPlanUseCase', () => {
           catalogItemId: 'cat1',
           catalogPrice: null,
           basePrice: null,
+          catalogCurrency: null,
           priceSource: null,
+          referenceCurrency: null,
+          referencePriceInPlan: null,
+          basePriceInPlan: null,
+          referenceRate: null,
+          baseRate: null,
           agreementId: null,
           agreementName: null,
           pricingLocationId: null,
@@ -102,7 +111,13 @@ describe('GetTreatmentPlanUseCase', () => {
           catalogItemId: 'cat2',
           catalogPrice: null,
           basePrice: null,
+          catalogCurrency: null,
           priceSource: null,
+          referenceCurrency: null,
+          referencePriceInPlan: null,
+          basePriceInPlan: null,
+          referenceRate: null,
+          baseRate: null,
           agreementId: null,
           agreementName: null,
           pricingLocationId: null,

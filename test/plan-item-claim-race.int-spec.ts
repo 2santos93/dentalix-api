@@ -8,6 +8,7 @@ import { regionalFormat } from '../src/shared/format/regional-format';
 import { resetDatabase } from './support/e2e-fixtures';
 import { locationData } from './support/location-fixtures';
 import { sedeTodayFixture } from './support/sede-clock';
+import { backendPid, waitForLockWaiters } from './support/postgres-concurrency';
 
 /**
  * DX-288: «Traer a esta cita» (DX-273) es atómico. Con varias peticiones de
@@ -26,7 +27,7 @@ const prisma = new PrismaService(context);
 const repo = new PrismaAppointmentRepository(prisma, context);
 const MIN = 60000;
 /**
- * DX-449: Bogotá salvo cerca de su medianoche, cuando las sedes pasan a una
+ * DX-449: la zona de la sede salvo cerca de su medianoche, cuando las sedes pasan a una
  * zona donde ahora es mediodía: las citas «de hoy que ya empezaron» son de hoy
  * a cualquier hora de la CI.
  */
@@ -89,7 +90,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
           tenantId,
           patientId: patient,
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'USD',
           acceptedAt: new Date(),
           acceptedLocationId: locationId,
         },
@@ -174,17 +175,6 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
       },
       select: { resourceId: true },
     });
-  /** Espera a que haya `n` sesiones de esta base esperando un bloqueo. */
-  const waitForLockWaiters = async (n: number) => {
-    for (let i = 0; i < 200; i++) {
-      const [{ waiting }] = await owner.$queryRaw<{ waiting: number }[]>`
-        SELECT count(*)::int AS waiting FROM pg_stat_activity
-         WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-      if (waiting >= n) return;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    throw new Error(`no llegaron ${n} esperas de bloqueo`);
-  };
   /**
    * Abre una transacción (otra conexión) que bloquea FOR UPDATE la cita
    * `appointmentId` y no confirma hasta `release()`: las peticiones que
@@ -200,16 +190,18 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     const isLocked = new Promise<void>((resolve) => {
       locked = resolve;
     });
+    let pid!: number;
     const done = owner.$transaction(
       async (tx) => {
         await tx.$queryRaw`SELECT id FROM appointments WHERE id=${appointmentId}::uuid FOR UPDATE`;
+        pid = await backendPid(tx);
         locked();
         await released;
       },
       { timeout: 30_000 },
     );
     await isLocked;
-    return { release, done };
+    return { release, done, pid };
   };
   const settle = (attempts: Promise<unknown>[]) =>
     Promise.all(
@@ -300,7 +292,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     } = await inClinicWithHolder(2);
     const lock = await holdLock(futureId);
     const attempts = [claim(first, itemId), claim(second, itemId)];
-    await waitForLockWaiters(2);
+    await waitForLockWaiters(owner, [lock.pid], 2);
     lock.release();
     await lock.done;
     const outcomes = await settle(attempts);
@@ -319,7 +311,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     const lock = await holdLock(futureId);
     const attempts = inClinic.map((id) => claim(id, itemId));
     // Las que ya pidieron conexión esperan el bloqueo; las demás, al pool.
-    await waitForLockWaiters(2);
+    await waitForLockWaiters(owner, [lock.pid], 2);
     lock.release();
     await lock.done;
     const outcomes = await settle(attempts);
@@ -341,7 +333,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     } = await inClinicWithHolder(1);
     const lock = await holdLock(futureId);
     const attempts = Array.from({ length: 5 }, () => claim(only, itemId));
-    await waitForLockWaiters(2);
+    await waitForLockWaiters(owner, [lock.pid], 2);
     lock.release();
     await lock.done;
     expect(await settle(attempts)).toEqual(Array(5).fill('ok'));
@@ -402,7 +394,7 @@ describe('DX-288 «Traer a esta cita» con peticiones concurrentes (int)', () =>
     // La mía lee «sin titular» y espera su propia cita; la de Norte lo trae.
     const lock = await holdLock(mine);
     const late = claim(mine, itemId, [locationId]).catch((e: unknown) => e);
-    await waitForLockWaiters(1);
+    await waitForLockWaiters(owner, [lock.pid], 1);
     await claim(theirs, itemId);
     lock.release();
     await lock.done;

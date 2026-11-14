@@ -1,9 +1,17 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
+import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import type {
+  ConsentSignerType,
   DocumentType,
   SignatureRequestChannel,
   TreatmentPlanStatus,
 } from '@prisma/client';
 import type { QuoteLocation, QuoteSourceItem } from '../plan-quote';
+import type { QuoteValidity } from '../quote-validity';
+import type { ExpiredAcceptanceRecord } from '../expired-quote-acceptance';
+import type { Repricing } from '../../application/repricing';
+import type { RepricingSubject } from './plan-repricing-repository.port';
+import type { PartialPlanState, PartialSplit } from '../partial-acceptance';
 
 /** La aceptación firmada tal como está guardada (DX-012). */
 export interface StoredPlanAcceptance {
@@ -20,6 +28,30 @@ export interface StoredPlanAcceptance {
   userAgent: string | null;
   /** DX-415: aceptado por el paciente a distancia; `null` en la clínica. */
   remote: PlanAcceptanceRemoteEvidence | null;
+  /**
+   * DX-019-bis (B): el logo congelado al firmar (columna propia, fuera del
+   * contenido y de sus hashes); `null` = se firmó sin logo y se imprime sin él.
+   */
+  clinicLogoUrl: string | null;
+  /**
+   * DX-379 (C): cómo se aceptó (columnas fuera del contenido y de sus
+   * hashes). Sin `mode`, el presupuesto no estaba vencido.
+   */
+  expiry: ExpiredAcceptanceRecord;
+  /**
+   * DX-417: aceptación PARCIAL (columnas fuera del contenido y de sus
+   * hashes): el plan pendiente, los ítems que se dejaron fuera y su total al
+   * firmar. `null` (o ausente) si se aceptó entero.
+   */
+  partial?: PlanAcceptancePartial | null;
+}
+
+/** DX-417: lo que quedó pendiente al aceptar en parte. */
+export interface PlanAcceptancePartial {
+  pendingPlanId: string;
+  pendingItemIds: string[];
+  /** En la moneda del plan. */
+  pendingTotal: number;
 }
 
 /** Evidencias de la aceptación a distancia, congeladas al firmar (DX-415). */
@@ -30,6 +62,12 @@ export interface PlanAcceptanceRemoteEvidence {
   sentAt: Date;
   openedAt: Date;
   verifiedAt: Date;
+  /**
+   * DX-514: quién firmó por el enlace, el paciente o su representante (el de
+   * la solicitud). `acceptedByName` es quien la envió, no quien firmó. Sin
+   * ella la aceptación sigue siendo a distancia: nunca «Registró la firma».
+   */
+  signerType?: ConsentSignerType;
 }
 
 /**
@@ -49,6 +87,27 @@ export interface PlanQuoteSource {
     patientId: string;
     status: TreatmentPlanStatus;
     currency: string;
+    /**
+     * DX-379: validez guardada (`YYYY-MM-DD`, las dos o ninguna); `null` si el
+     * plan aún no se presentó ni se imprimió (o es anterior a DX-379).
+     */
+    quoteIssuedOn: string | null;
+    quoteValidUntil: string | null;
+    /** Sede de la presentación (DX-040); null sin presentar. */
+    presentedLocationId: string | null;
+    /**
+     * DX-379 (C): la sede con la que se decide si el presupuesto venció y se
+     * escribe su fecha (D-13): la de la presentación o, sin presentar, la de
+     * este presupuesto. `timeZone` null si la sede de la presentación no
+     * tiene una zona válida (quien decide da el 409 de zona); `locale` y
+     * `hourCycle` crudos (pueden faltar).
+     */
+    quoteRegional: {
+      locationId: string;
+      timeZone: string | null;
+      locale: string | null;
+      hourCycle: string | null;
+    };
   };
   /** Ítems vivos, en orden de alta. */
   items: QuoteSourceItem[];
@@ -60,8 +119,22 @@ export interface PlanQuoteSource {
     docTypeLabel: string | null;
     docNumber: string | null;
   };
-  clinic: { name: string; logoUrl: string | null };
+  /**
+   * DX-019: `fiscal`, los de hoy: entran en el contenido que se presenta y se
+   * firma. DX-019-bis (B): `logoKey`, la clave de hoy que congela la
+   * aceptación (`clinicLogoKeyToFreeze`); el logo NO entra en el contenido.
+   */
+  clinic: {
+    name: string;
+    logoUrl: string | null;
+    logoKey: string | null;
+    fiscal: ClinicFiscalData;
+    /** DX-379: días de validez del ajuste de hoy (para un plan sin fechas guardadas). */
+    quoteValidityDays: number;
+  };
   location: QuoteLocation & { timeZone: string };
+  /** DX-354: región de la sede del presupuesto; `null` si le falta algo. No entra en el contenido firmado ni en su hash. */
+  regional: DocumentRegionalDto | null;
   /** Quien creó el plan; `null` si no consta. */
   professionalName: string | null;
   acceptance: StoredPlanAcceptance | null;
@@ -79,12 +152,66 @@ export interface NewPlanAcceptance {
   acceptedById: string;
   ipAddress: string | null;
   userAgent: string | null;
+  /**
+   * DX-379 (C): cómo se aceptó un presupuesto vencido. Sin ella, se guarda
+   * solo la copia de la validez del plan leído (sin modo).
+   */
+  expiry?: ExpiredAcceptanceRecord;
+  /**
+   * DX-417: con aceptación parcial, los ítems que pasan al plan pendiente y
+   * su total (el id del pendiente lo pone el repositorio al crearlo).
+   */
+  partial?: { pendingItemIds: string[]; pendingTotal: number };
+}
+
+/**
+ * DX-417: aceptar solo una parte del presupuesto, en la MISMA transacción de
+ * la firma (y después de recotizar, si se recotiza).
+ */
+export interface AcceptPartial {
+  /**
+   * Con el plan bloqueado: decide qué se acepta y qué queda pendiente. Si
+   * lanza, nada se escribe.
+   */
+  decide(source: PlanQuoteSource, state: PartialPlanState): PartialSplit;
+  /**
+   * El `contentHash` del presupuesto releído tras mover los pendientes (red
+   * de seguridad: tiene que ser el que se firma).
+   */
+  contentHashOf(source: PlanQuoteSource): string;
+}
+
+/**
+ * DX-379 (C): recotizar en la MISMA transacción de la firma, antes de firmar
+ * (aceptar un presupuesto vencido «actualizando los precios»).
+ */
+export interface AcceptReprice {
+  /** Autor de la recotización (quien firma en la clínica). */
+  actorUserId: string;
+  /**
+   * Con el plan bloqueado: valida el presupuesto leído y calcula la
+   * recotización de TODOS los ítems propuestos. Si lanza, nada se escribe.
+   */
+  decide(source: PlanQuoteSource, subject: RepricingSubject): Repricing;
+}
+
+/** La recotización hecha en la firma, para quien decide la aceptación. */
+export interface AcceptRepriced {
+  repricingId: string;
+  /** El presupuesto leído ANTES de recotizar (con la validez vencida). */
+  before: PlanQuoteSource;
 }
 
 export type AcceptPlanOutcome =
   | { kind: 'NOT_FOUND' }
   | { kind: 'ALREADY_ACCEPTED' }
   | { kind: 'ACCEPTED'; source: PlanQuoteSource };
+
+/** DX-417: el presupuesto y lo que la partición necesita saber del plan. */
+export interface PartialAcceptanceRead {
+  source: PlanQuoteSource;
+  state: PartialPlanState;
+}
 
 export const PLAN_QUOTE_REPOSITORY = Symbol('PLAN_QUOTE_REPOSITORY');
 
@@ -105,10 +232,71 @@ export interface PlanQuoteRepository {
    * (si lanza, no se escribe nada), la inserta, pasa el plan a ACCEPTED y sus
    * ítems PROPOSED a ACCEPTED. Dos firmas simultáneas: la segunda choca con el
    * índice único y sale como `ALREADY_ACCEPTED`.
+   *
+   * DX-379 (C): con `reprice`, antes de `decide` y en la misma transacción,
+   * recotiza (ítems con la marca, validez renovada y fila de la recotización
+   * con source ACCEPT) y relee el presupuesto: `decide` recibe el recotizado
+   * y la recotización. Si algo lanza después, la recotización se deshace.
+   *
+   * DX-417: con `partial`, tras recotizar (si toca) `partial.decide` parte el
+   * plan y `decide` recibe la partición (compone y compara el presupuesto de
+   * lo aceptado ANTES de escribir). Después crea el plan pendiente
+   * (PRESENTED, fuera del grupo de opciones, enlazado al original), le MUEVE
+   * los ítems pendientes (mismo id), relee y exige el mismo `contentHash`
+   * (si no, lanza y se deshace todo), y solo entonces inserta la aceptación
+   * y acepta el original.
    */
   accept(
     patientId: string,
     planId: string,
-    decide: (source: PlanQuoteSource) => NewPlanAcceptance,
+    decide: (
+      source: PlanQuoteSource,
+      repriced: AcceptRepriced | null,
+      split: PartialSplit | null,
+    ) => NewPlanAcceptance,
+    reprice?: AcceptReprice,
+    partial?: AcceptPartial,
   ): Promise<AcceptPlanOutcome>;
+
+  /**
+   * DX-417: el presupuesto y el estado del plan para la vista previa de una
+   * aceptación parcial, leídos sin bloquear. `null` si el plan no existe para
+   * este paciente (404).
+   */
+  loadPartial(
+    patientId: string,
+    planId: string,
+  ): Promise<PartialAcceptanceRead | null>;
+
+  /**
+   * DX-379 (C): el presupuesto como quedaría tras recotizar en la firma: hace
+   * lo mismo que `accept` con `reprice` hasta releer el presupuesto y lo
+   * DESHACE todo (no queda nada escrito). `null` si el plan no existe para
+   * este paciente (404). DX-417: con el estado del plan recotizado, para
+   * partir la vista previa.
+   */
+  previewRepriced(
+    patientId: string,
+    planId: string,
+    reprice: AcceptReprice,
+  ): Promise<{
+    source: PlanQuoteSource;
+    repricing: Repricing;
+    state: PartialPlanState;
+  } | null>;
+
+  /**
+   * DX-379: emite el presupuesto (primera impresión). Lee el presupuesto sin
+   * bloquear y deja que `decide` diga qué validez guardar (`null` = nada: se
+   * devuelve lo leído sin bloquear). Si hay que guardar, en UNA transacción
+   * con el grupo del plan bloqueado relee, vuelve a llamar a `decide` (puede
+   * llamarse dos veces) y escribe solo si el plan aún no tiene fechas.
+   * Devuelve el presupuesto releído, o `null` si el plan no existe para este
+   * paciente (404).
+   */
+  issue(
+    patientId: string,
+    planId: string,
+    decide: (source: PlanQuoteSource) => QuoteValidity | null,
+  ): Promise<PlanQuoteSource | null>;
 }

@@ -1,4 +1,4 @@
-# ADR 0002 · Retención legal de la historia clínica y supresión parcial (DX-039)
+# ADR 0002 · Retención de la historia clínica y supresión parcial (DX-039)
 
 Estado: aceptado · 2026-10-16
 
@@ -7,8 +7,8 @@ Estado: aceptado · 2026-10-16
 La historia clínica (HC) se conserva un plazo mínimo; por defecto, 15 años
 desde la última atención (un valor prudente que iguala o supera el de muchas
 normativas sanitarias); en casos especiales el plazo se dobla o es permanente
-(p. ej. víctimas de violaciones de DD. HH./DIH). Un archivado por error, o
-pedido en un reclamo de datos del paciente, puede incumplirlo. La HC ya es
+(ver la enmienda DX-330). Un archivado por error, o pedido en un reclamo
+de datos del paciente, puede incumplirlo. La HC ya es
 inalterable en la BD (DX-038).
 
 ## Decisión
@@ -67,3 +67,26 @@ inalterable en la BD (DX-038).
   datos del paciente.
 - Un cambio de estado de una cita que vuelve de `COMPLETED` a otro estado no
   retrocede la fecha: la atención ocurrió.
+
+## Enmienda DX-330
+
+El plazo de conservación ya no es una constante de la plataforma sino un
+ajuste de cada clínica, y esta enmienda corrige lo que arriba quedó fijado:
+
+- **Plazo de la clínica.** `tenants.clinicalRecordRetentionYears` (entre el
+  mínimo de plataforma, 15 por defecto, y 100). Lo cambia solo el ADMIN con
+  `PUT /patients/retention/settings`, auditado. `NONE` es ese plazo y `DOUBLE`
+  el doble; los «15» y «30 años» de arriba son los valores por defecto, no una
+  regla. `PERMANENT` no cambia.
+- **Sin «legal».** Dentalix no afirma qué ley rige el plazo: lo pone la clínica
+  y la clínica responde de que cumpla la norma de su país. Por eso los textos
+  dicen «retención» y no «retención legal», y la causal de un país concreto
+  para `PERMANENT` (que citaba este ADR en su contexto) sale de los textos.
+- **Reducir no adelanta fechas.** Al reducir el plazo, cada historia que ya
+  estaba en retención conserva su fecha de fin (`patients.retention_floor_until`,
+  que nunca baja); el plazo nuevo se aplica al resto y a las atenciones
+  nuevas. Una reducción pide confirmación expresa. Una subida corregida dentro
+  de las 24 h siguientes no deja fechas fijadas.
+- Archivar y la supresión parcial evalúan con el plazo vigente de la clínica,
+  en la misma transacción que bloquea al paciente (`tenants` `FOR SHARE` y
+  luego `patients` `FOR UPDATE`).

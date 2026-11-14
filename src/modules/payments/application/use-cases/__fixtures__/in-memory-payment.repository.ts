@@ -1,4 +1,6 @@
+import { collectedAmount } from '../../../../payment-methods/domain/payment-adjustments';
 import { Payment } from '../../../domain/entities/payment.entity';
+import type { PaymentProofAttachment } from '../../../domain/payment-proof';
 import { exchangeRateStatus } from '../../../domain/payment-exchange-rate';
 import type { IdempotentPayment } from '../../../domain/idempotency';
 import {
@@ -15,10 +17,13 @@ import {
   ReceivedPayment,
   ReferenceMatch,
   SplitPaymentRecord,
+  PaymentProofRecord,
 } from '../../../domain/ports/payment-repository.port';
 import { civilDateIn, civilNoonIn } from '../../../../../shared/time/civil-day';
 import type { RegionalFormat } from '../../../../../shared/format/regional-format';
+import type { CurrencyTexts } from '../../../../../shared/format/currency-text';
 import { requireLocationFormat } from '../../../../../shared/locations/location-regional';
+import { toCents } from '../../../../../shared/money/money';
 
 // `Payment` (the API-facing entity) deliberately has no `deletedAt` field —
 // same convention as Sale/TreatmentPlan. The fake still has to honour
@@ -29,6 +34,7 @@ type StoredPayment = Omit<
   Payment,
   'paidOn' | 'receiptNumber' | 'exchangeRateStatus' | 'duplicateReferenceOf'
 > & {
+  locationId: string;
   referenceNormalized: string | null;
   deletedAt: Date | null;
   idempotencyKey: string | null;
@@ -55,7 +61,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
    * @param timeZone zona de la sede de TODOS los abonos de este fake (el real
    * la lee del horario de la sede de cada abono).
    */
-  constructor(private readonly timeZone = 'America/Bogota') {}
+  constructor(private readonly timeZone = 'America/Caracas') {}
 
   /** Test helper: el rastro de anulación guardado, o `null` si sigue activo. */
   voidAuditOf(id: string): PaymentVoidAudit | null {
@@ -65,6 +71,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   /** Test helper: seed a payment row directly, bypassing use-case validation. */
   seedPayment(overrides: Partial<StoredPayment> = {}): Payment {
     const row: StoredPayment = {
+      locationId: overrides.locationId ?? 'loc-1',
       id: overrides.id ?? `payment-seed-${++seq}`,
       tenantId: overrides.tenantId ?? 't1',
       treatmentPlanId:
@@ -82,6 +89,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       reference: overrides.reference ?? null,
       referenceNormalized: overrides.referenceNormalized ?? null,
       duplicateReferenceReason: overrides.duplicateReferenceReason ?? null,
+      externalInvoiceNumber: overrides.externalInvoiceNumber ?? null,
       notes: overrides.notes ?? null,
       splitId: overrides.splitId ?? null,
       splitLine: overrides.splitLine ?? null,
@@ -95,6 +103,9 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       // Sin indicarlo, un abono anterior a DX-375 (se lee con la tasa de su día).
       exchangeRateCurrency: overrides.exchangeRateCurrency ?? null,
       frozenRate: overrides.frozenRate ?? null,
+      adjustments: overrides.adjustments ?? [],
+      collectedAmount: overrides.collectedAmount ?? overrides.amount ?? 0,
+      hasProof: overrides.hasProof ?? false,
     };
     this.payments.push(row);
     return this.toEntity(row);
@@ -119,6 +130,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       paymentMethodName: row.paymentMethodName,
       reference: row.reference,
       duplicateReferenceReason: row.duplicateReferenceReason,
+      externalInvoiceNumber: row.externalInvoiceNumber,
       notes: row.notes,
       splitId: row.splitId,
       splitLine: row.splitLine,
@@ -129,7 +141,34 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       exchangeRateCurrency: row.exchangeRateCurrency,
       frozenRate: row.frozenRate,
       exchangeRateStatus: exchangeRateStatus(row),
+      adjustments: row.adjustments,
+      collectedAmount: row.collectedAmount,
+      hasProof: row.hasProof,
     };
+  }
+
+  /** Test helper: el comprobante guardado por abono (DX-389). */
+  readonly proofs = new Map<string, PaymentProofAttachment>();
+
+  findProof(paymentId: string): Promise<PaymentProofRecord | null> {
+    const row = this.payments.find((p) => p.id === paymentId);
+    const attachment = this.proofs.get(paymentId);
+    return Promise.resolve(
+      row && attachment
+        ? {
+            paymentId,
+            patientId: row.patientId,
+            locationId: row.locationId,
+            attachment,
+          }
+        : null,
+    );
+  }
+
+  proofKeyInUse(key: string): Promise<boolean> {
+    return Promise.resolve(
+      [...this.proofs.values()].some((a) => a.key === key),
+    );
   }
 
   resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string> {
@@ -138,6 +177,10 @@ export class InMemoryPaymentRepository implements PaymentRepository {
         ? civilDateIn(paidAt, this.timeZone)
         : paidAt.civilDate,
     );
+  }
+
+  siteToday(now: Date): Promise<string | null> {
+    return Promise.resolve(civilDateIn(now, this.timeZone));
   }
 
   create(input: CreatePaymentRepoInput): Promise<Payment> {
@@ -169,7 +212,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     });
   }
 
-  countPlanPayments(treatmentPlanId: string): Promise<number> {
+  countPlanMovements(treatmentPlanId: string): Promise<number> {
     return Promise.resolve(
       this.payments.filter((p) => p.treatmentPlanId === treatmentPlanId).length,
     );
@@ -195,6 +238,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     split: { id?: string; splitId: string; line: number } | null,
   ): StoredPayment {
     const row: StoredPayment = {
+      locationId: 'loc-1',
       id: split?.id ?? `payment-${++seq}`,
       tenantId: 't1',
       treatmentPlanId: input.treatmentPlanId,
@@ -212,6 +256,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       reference: input.reference ?? null,
       referenceNormalized: input.referenceNormalized ?? null,
       duplicateReferenceReason: input.duplicateReferenceReason ?? null,
+      externalInvoiceNumber: null,
       notes: input.notes ?? null,
       splitId: split?.splitId ?? null,
       splitLine: split?.line ?? null,
@@ -227,8 +272,22 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       exchangeRateCurrency:
         input.frozenRate?.currency ?? input.planAmount?.planCurrency ?? null,
       frozenRate: input.frozenRate,
+      // DX-516: lo que el real inserta en payment_adjustments.
+      adjustments: (input.adjustments ?? []).map((a) => ({
+        type: a.type,
+        label: a.label,
+        calculation: a.calculation,
+        percent: a.percent,
+        fixedAmount: a.fixedAmount,
+        base: a.base,
+        amount: a.amount,
+        currency: a.currency,
+      })),
+      collectedAmount: collectedAmount(input.amount, input.adjustments ?? []),
+      hasProof: Boolean(input.proof),
     };
     this.payments.push(row);
+    if (input.proof) this.proofs.set(row.id, input.proof);
     return row;
   }
 
@@ -277,7 +336,14 @@ export class InMemoryPaymentRepository implements PaymentRepository {
   readonly locations = new Map<
     string,
     { locale: string | null; hourCycle: string | null }
-  >([['loc-1', { locale: 'es-CO', hourCycle: 'h23' }]]);
+  >([['loc-1', { locale: 'es-VE', hourCycle: 'h23' }]]);
+
+  /** DX-517-bis: el texto propio de cada moneda de la clínica. */
+  currencyTexts: CurrencyTexts = {};
+
+  clinicCurrencyTexts(): Promise<CurrencyTexts> {
+    return Promise.resolve(this.currencyTexts);
+  }
 
   locationFormat(locationId: string): Promise<RegionalFormat> {
     return Promise.resolve().then(() =>
@@ -299,7 +365,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
           p.deletedAt === null &&
           p.currency === balance.currency,
       )
-      .reduce((sum, p) => sum + Math.round(p.amount * 100), 0);
+      .reduce((sum, p) => sum + toCents(p.amount), 0);
     return Promise.resolve({
       ...balance,
       locationId: balance.locationId ?? 'loc-1',
@@ -365,6 +431,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       row
         ? {
             id: row.id,
+            locationId: row.locationId,
             createdById: row.createdById,
             createdAt: row.createdAt,
             timeZone: this.timeZone,

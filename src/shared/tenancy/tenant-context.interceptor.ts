@@ -10,7 +10,10 @@ import { isTenantPayload } from '../crypto/token.service';
 import { TenantContextService } from './tenant-context.service';
 import { TenantHostRequest } from './tenant-host-request';
 import { PrismaService } from '../prisma/prisma.service';
-import { resolveActiveLocationId } from './active-location';
+import {
+  assertBodyLocationWritable,
+  resolveActiveLocationId,
+} from './active-location';
 
 @Injectable()
 export class TenantContextInterceptor implements NestInterceptor {
@@ -45,7 +48,25 @@ export class TenantContextInterceptor implements NestInterceptor {
       // resuelve ANTES de abrir el store: así el handler ya corre con la sede
       // definitiva y nunca con una a medio validar (ver resolveActiveLocationId).
       const allowed = allowedLocationsOf(req);
-      resolveActiveLocationId(this.prisma, req.headers, hostTenantId, allowed)
+      resolveActiveLocationId(
+        this.prisma,
+        req.headers,
+        hostTenantId,
+        allowed,
+        req.method,
+      )
+        .then(async (locationId) => {
+          // SEC-014: tampoco se escribe en una sede desactivada por el cuerpo.
+          await assertBodyLocationWritable(
+            this.prisma,
+            hostTenantId,
+            req.body,
+            req.method,
+            locationId,
+            allowed,
+          );
+          return locationId;
+        })
         .then((locationId) => {
           this.tenantContext.run(
             hostTenantId,

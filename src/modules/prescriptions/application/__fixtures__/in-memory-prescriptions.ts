@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
 import { PrescriptionStatus } from '@prisma/client';
 import type {
   Prescription,
@@ -10,11 +11,13 @@ import type { PrescriptionSettings } from '../../domain/prescription-settings';
 import type {
   CreatePrescriptionRepoInput,
   PrescriptionRepository,
+  RecordPublicVerificationInput,
   StoredPrescription,
   VoidPrescriptionOutcome,
   VoidPrescriptionRepoInput,
 } from '../../domain/ports/prescription-repository.port';
 import { emptySafetyAnamnesis } from '../../domain/prescription-safety';
+import { generatePrescriptionVerificationCode } from '../../domain/prescription-verification-code';
 import type { PrescriptionTemplate } from '../../domain/entities/prescription-template.entity';
 import type {
   PrescriptionTemplateRepoInput,
@@ -50,6 +53,7 @@ export function makeIssuer(
       ...overrides,
     },
     clinicName: 'Clínica Demo',
+    clinicFiscal: EMPTY_CLINIC_FISCAL,
     settings: { ...TEST_PRESCRIPTION_SETTINGS, ...extra.settings },
     phase1: { country: 'CO' },
     professional: {
@@ -125,6 +129,7 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
       id,
       tenantId: TENANT_ID,
       status: PrescriptionStatus.ISSUED,
+      verificationCode: generatePrescriptionVerificationCode(),
       voidedAt: null,
       voidedById: null,
       voidedByName: null,
@@ -147,7 +152,26 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
   locationFormats = new Map<string, PrescriptionLocationFormat>();
 
   findById(id: string): Promise<StoredPrescription | null> {
-    const row = this.rows.find((r) => r.id === id);
+    return this.stored(this.rows.find((r) => r.id === id));
+  }
+
+  findByVerificationCode(code: string): Promise<StoredPrescription | null> {
+    return this.stored(this.rows.find((r) => r.verificationCode === code));
+  }
+
+  /** Las consultas públicas auditadas (DX-467), en orden. */
+  publicVerifications: RecordPublicVerificationInput[] = [];
+
+  recordPublicVerification(
+    input: RecordPublicVerificationInput,
+  ): Promise<void> {
+    this.publicVerifications.push(structuredClone(input));
+    return Promise.resolve();
+  }
+
+  private stored(
+    row: Prescription | undefined,
+  ): Promise<StoredPrescription | null> {
     return Promise.resolve(
       row
         ? {

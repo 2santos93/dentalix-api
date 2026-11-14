@@ -15,8 +15,11 @@ import {
   civilDateIn,
   zonedStartOfDay,
 } from '../src/shared/time/civil-day';
-import { locationBody } from './support/location-fixtures';
-import { sedeTodayFixture } from './support/sede-clock';
+import { fixedSedeDay } from './support/sede-clock';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-027 · Caja por turno: abrir con fondo → cobrar → anular → cerrar con
 // arqueo (esperado vs contado, motivo si no cuadra) → cierre inmutable →
@@ -28,12 +31,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
-// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
-// «hoy» de la caja y el de la API no se separan si la corrida cruza la
-// medianoche de Bogotá.
-const SEDE = sedeTodayFixture();
-const today = (): string => civilDateIn(new Date(), SEDE.timeZone);
+const CARACAS = 'America/Caracas';
+const today = (): string => civilDateIn(new Date(), CARACAS);
 
 interface Line {
   currency: string;
@@ -131,7 +130,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
       token,
       locationId,
     ).send({
-      currency: 'COP',
+      currency: 'USD',
       paidAt: today(),
       ...body,
     });
@@ -139,8 +138,8 @@ describe('Caja por turno (e2e, DX-027)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    clinicA = await registerClinic(app, 'caja-turno-a', SEDE);
-    clinicB = await registerClinic(app, 'caja-turno-b', SEDE);
+    clinicA = await registerClinic(app, 'caja-turno-a');
+    clinicB = await registerClinic(app, 'caja-turno-b');
     const reception = await seedMember(raw, clinicA, ClinicRole.RECEPTION);
     receptionId = reception.userId;
     receptionToken = await loginAs(app, clinicA.host, reception.email);
@@ -154,7 +153,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
       })
     ).id;
     const norte = await api(clinicA, 'post', '/locations')
-      .send(locationBody(SEDE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     sedeNorte = (norte.body as { id: string }).id;
 
@@ -172,7 +171,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
         data: {
           tenantId: clinicA.tenantId,
           patientId: patient.id,
-          currency: 'COP',
+          currency: 'USD',
           status: 'ACCEPTED',
         },
         select: { id: true },
@@ -221,7 +220,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
       sedePrincipal,
     )
       .send({
-        floats: [{ currency: 'cop', amount: 50_000 }],
+        floats: [{ currency: 'usd', amount: 50_000 }],
         notes: 'Turno mañana',
       })
       .expect(201);
@@ -231,7 +230,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
       status: 'OPEN',
       openedBy: { id: receptionId },
       location: { id: sedePrincipal },
-      floats: [{ currency: 'COP', amount: 50_000 }],
+      floats: [{ currency: 'USD', amount: 50_000 }],
       can: { close: true, reopen: false, adjust: false },
     });
     await api(
@@ -285,19 +284,50 @@ describe('Caja por turno (e2e, DX-027)', () => {
         receptionToken,
       ).expect(200),
     );
-    expect(lineOf(detail, 'COP', 'CASH')).toMatchObject({
+    expect(lineOf(detail, 'USD', 'CASH')).toMatchObject({
       opening: 50_000,
       payments: 30_000,
       adjustments: 0,
       expected: 80_000,
     });
-    expect(lineOf(detail, 'COP', 'CARD')).toMatchObject({ expected: 80_000 });
+    expect(lineOf(detail, 'USD', 'CARD')).toMatchObject({ expected: 80_000 });
     expect(detail.payments?.map((p) => p.id).sort()).toEqual(
       [cashId, cardId].sort(),
     );
     expect(detail.voidedPayments).toEqual([
       expect.objectContaining({ id: voidedId, bookedAsAdjustment: false }),
     ]);
+  });
+
+  it('DX-354: el detalle lleva el regional de la sede de la caja y, sin reloj, null con 200', async () => {
+    const regionalOf = async () =>
+      (
+        detailOf(
+          await api(
+            clinicA,
+            'get',
+            `/cash-sessions/${sessionId}`,
+            receptionToken,
+          ).expect(200),
+        ) as unknown as { regional: unknown }
+      ).regional;
+    expect(await regionalOf()).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h23',
+    });
+    await raw.location.update({
+      where: { id: sedePrincipal },
+      data: { hourCycle: null },
+    });
+    try {
+      expect(await regionalOf()).toBeNull();
+    } finally {
+      await raw.location.update({
+        where: { id: sedePrincipal },
+        data: { hourCycle: 'h23' },
+      });
+    }
   });
 
   it('RECEPTION solo ve y cierra las suyas; ADMIN ve todas', async () => {
@@ -345,7 +375,9 @@ describe('Caja por turno (e2e, DX-027)', () => {
     const norteOnly = await api(
       clinicA,
       'get',
-      `/cash-sessions?locationId=${sedeNorte}&from=${today()}&to=${today()}`,
+      // DX-460: la caja se abrió unas líneas más arriba; si la suite cruzó
+      // la medianoche de la sede entre medias, su día es el anterior.
+      `/cash-sessions?locationId=${sedeNorte}&from=${addCivilDays(today(), -1)}&to=${today()}`,
       clinicA.adminToken,
     ).expect(200);
     expect(
@@ -359,8 +391,8 @@ describe('Caja por turno (e2e, DX-027)', () => {
 
   it('cerrar: una diferencia sin motivo es 400; con motivo guarda esperado, contado y diferencia y la fecha de bloqueo', async () => {
     const counts = [
-      { currency: 'COP', method: 'CASH', counted: 79_000 },
-      { currency: 'COP', method: 'CARD', counted: 80_000 },
+      { currency: 'USD', method: 'CASH', counted: 79_000 },
+      { currency: 'USD', method: 'CARD', counted: 80_000 },
     ];
     await api(
       clinicA,
@@ -389,23 +421,28 @@ describe('Caja por turno (e2e, DX-027)', () => {
     });
     expect(closed.closing?.lines).toEqual([
       {
-        currency: 'COP',
+        currency: 'USD',
         method: 'CASH',
         opening: 50_000,
         expected: 80_000,
         counted: 79_000,
         difference: -1_000,
+        // SEC-043: sin arqueo ciego, nunca se oculta.
+        amountHidden: false,
       },
       {
-        currency: 'COP',
+        currency: 'USD',
         method: 'CARD',
         opening: 0,
         expected: 80_000,
         counted: 80_000,
         difference: 0,
+        amountHidden: false,
       },
     ]);
-    expect(closed.differences).toEqual([{ currency: 'COP', amount: -1_000 }]);
+    expect(closed.differences).toEqual([
+      { currency: 'USD', amount: -1_000, amountHidden: false },
+    ]);
 
     const audit = await raw.auditEvent.findMany({
       where: {
@@ -456,7 +493,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
     const original = detailOf(
       await api(clinicA, 'get', `/cash-sessions/${sessionId}`).expect(200),
     );
-    expect(lineOf(original, 'COP', 'CASH')?.expected).toBe(80_000);
+    expect(lineOf(original, 'USD', 'CASH')?.expected).toBe(80_000);
     expect(original.closing?.lines[0].counted).toBe(79_000);
     expect(original.voidedPayments).toEqual(
       expect.arrayContaining([
@@ -480,7 +517,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
         receptionToken,
         sedePrincipal,
       )
-        .send({ floats: [{ currency: 'COP', amount: 40_000 }] })
+        .send({ floats: [{ currency: 'USD', amount: 40_000 }] })
         .expect(201),
     ).id;
     const next = detailOf(
@@ -499,7 +536,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
         originalSession: containing({ id: sessionId }),
       }),
     ]);
-    expect(lineOf(next, 'COP', 'CASH')).toMatchObject({
+    expect(lineOf(next, 'USD', 'CASH')).toMatchObject({
       opening: 40_000,
       adjustments: -30_000,
       expected: 10_000,
@@ -507,8 +544,11 @@ describe('Caja por turno (e2e, DX-027)', () => {
   });
 
   it('un abono con fecha de un día cuya caja ya cerró es un ajuste de la caja abierta, con enlace a la cerrada', async () => {
-    const yesterday = addCivilDays(today(), -1);
-    const start = zonedStartOfDay(yesterday, SEDE.timeZone).getTime();
+    // DX-460: el día anterior al de la carga del módulo (sede-clock), no al
+    // de este test: ninguna caja abierta durante la suite cubre ese día, aunque
+    // la suite cruce la medianoche de la sede.
+    const yesterday = fixedSedeDay(1).day;
+    const start = zonedStartOfDay(yesterday, CARACAS).getTime();
     const hour = 60 * 60 * 1000;
     const closedYesterday = await raw.$transaction(async (tx) => {
       // Siembra de una caja de AYER: los triggers ponen la hora del servidor.
@@ -563,7 +603,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
         originalSession: containing({ id: closedYesterday.id }),
       }),
     ]);
-    expect(lineOf(detail, 'COP', 'TRANSFER')?.expected).toBe(12_000);
+    expect(lineOf(detail, 'USD', 'TRANSFER')?.expected).toBe(12_000);
 
     // Anulado mientras su caja está abierta: se compensa en la misma caja.
     await api(clinicA, 'delete', `/payments/${late.id}`, receptionToken)
@@ -577,7 +617,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
         receptionToken,
       ).expect(200),
     );
-    expect(lineOf(after, 'COP', 'TRANSFER')?.expected).toBe(0);
+    expect(lineOf(after, 'USD', 'TRANSFER')?.expected).toBe(0);
     await api(
       clinicA,
       'post',
@@ -610,7 +650,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
       `/cash-sessions/${nextSessionId}/close`,
       receptionToken,
     )
-      .send({ counts: [{ currency: 'COP', method: 'CASH', counted: 10_000 }] })
+      .send({ counts: [{ currency: 'USD', method: 'CASH', counted: 10_000 }] })
       .expect(201);
 
     const reopened = detailOf(
@@ -629,7 +669,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
       .expect(409);
     // El abono anulado tras el primer cierre sigue contando aquí (su
     // anulación es el ajuste de la caja siguiente): no se descuenta dos veces.
-    expect(lineOf(reopened, 'COP', 'CASH')?.expected).toBe(80_000);
+    expect(lineOf(reopened, 'USD', 'CASH')?.expected).toBe(80_000);
     const reclosed = detailOf(
       await api(
         clinicA,
@@ -639,8 +679,8 @@ describe('Caja por turno (e2e, DX-027)', () => {
       )
         .send({
           counts: [
-            { currency: 'COP', method: 'CASH', counted: 80_000 },
-            { currency: 'COP', method: 'CARD', counted: 80_000 },
+            { currency: 'USD', method: 'CASH', counted: 80_000 },
+            { currency: 'USD', method: 'CARD', counted: 80_000 },
           ],
         })
         .expect(201),
@@ -660,7 +700,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
 
   it('corregir un cierre: solo ADMIN, un ajuste con motivo y autor (el cierre no cambia)', async () => {
     const body = {
-      currency: 'COP',
+      currency: 'USD',
       method: 'CASH',
       amount: -500,
       reason: 'Billete falso detectado',
@@ -724,7 +764,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
         receptionToken,
         sedePrincipal,
       )
-        .send({ floats: [{ currency: 'COP', amount: 10_000 }] })
+        .send({ floats: [{ currency: 'USD', amount: 10_000 }] })
         .expect(201),
     );
     await pay(receptionToken, { amount: 3_000, method: 'CASH' }).expect(201);
@@ -745,7 +785,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
       await api(clinicA, 'get', `/cash-sessions/${blind.id}`).expect(200),
     );
     // Fondo + abono − la corrección pendiente del ADMIN, que entró al abrir.
-    expect(lineOf(admin, 'COP', 'CASH')).toMatchObject({
+    expect(lineOf(admin, 'USD', 'CASH')).toMatchObject({
       expected: 12_500,
       adjustments: -500,
     });
@@ -758,7 +798,7 @@ describe('Caja por turno (e2e, DX-027)', () => {
         receptionToken,
       )
         .send({
-          counts: [{ currency: 'COP', method: 'CASH', counted: 12_500 }],
+          counts: [{ currency: 'USD', method: 'CASH', counted: 12_500 }],
         })
         .expect(201),
     );

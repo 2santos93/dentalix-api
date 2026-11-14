@@ -1,21 +1,87 @@
+import {
+  clinicLogoKeyToFreeze,
+  clinicLogoPublicUrl,
+} from '../../../../shared/storage/clinic-logo-url';
+import {
+  CLINIC_FISCAL_SELECT,
+  clinicFiscalOf,
+} from '../../../../shared/clinic/clinic-fiscal';
 import { Injectable } from '@nestjs/common';
-import { Prisma, type SignatureRequestChannel } from '@prisma/client';
+import {
+  Prisma,
+  TreatmentPlanRepricingSource,
+  type ConsentSignerType,
+  type SignatureRequestChannel,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../../shared/locations/document-regional';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { isValidTimeZone } from '../../../../shared/time/civil-day';
 import type {
+  AcceptPartial,
   AcceptPlanOutcome,
+  AcceptReprice,
+  AcceptRepriced,
+  PartialAcceptanceRead,
   PlanAcceptanceRemoteEvidence,
   NewPlanAcceptance,
   PlanQuoteRepository,
   PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
+import type {
+  PartialPlanState,
+  PartialSplit,
+} from '../../domain/partial-acceptance';
+import { readPlanFacts } from './prisma-treatment-plan.repository';
+import type { Repricing } from '../../application/repricing';
+import type { RepricingRecord } from '../../domain/ports/plan-repricing-repository.port';
 import { acceptPlanInTx, lockPlanGroup } from './plan-option-group';
+import {
+  loadRepricingSubjectInTx,
+  writeRepricingInTx,
+} from './prisma-plan-repricing.repository';
+import {
+  PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
+  type QuoteValidity,
+} from '../../domain/quote-validity';
+import { NO_EXPIRED_ACCEPTANCE } from '../../domain/expired-quote-acceptance';
 
 const PROCEDURE_FALLBACK = 'Procedimiento';
+
+/** Una columna DATE (Prisma la lee a medianoche UTC) como `YYYY-MM-DD`. */
+export function civilDayOf(value: Date | null): string | null {
+  return value ? value.toISOString().slice(0, 10) : null;
+}
 const UNKNOWN_PROFESSIONAL = 'Profesional';
 
 class AlreadyAccepted extends Error {}
+
+/**
+ * El plan desapareció DESPUÉS de escribir algo (recotización o aceptación):
+ * se lanza para que la transacción se deshaga y se responde 404.
+ */
+class VanishedAfterWrite extends Error {}
+
+type RepricedPreview = {
+  source: PlanQuoteSource;
+  repricing: Repricing;
+  state: PartialPlanState;
+};
+
+/** Deshace la transacción de la vista previa llevándose su resultado. */
+class DryRun extends Error {
+  constructor(readonly result: RepricedPreview | null) {
+    super('dry run');
+  }
+}
+
+/** Una fecha `YYYY-MM-DD` como columna DATE. */
+const dateColumn = (day: string | null): Date | null =>
+  day === null ? null : new Date(`${day}T00:00:00.000Z`);
 
 /**
  * Presupuesto y aceptación firmada (DX-012). Todo bajo `runWithTenant` (RLS):
@@ -62,7 +128,13 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
   async accept(
     patientId: string,
     planId: string,
-    decide: (source: PlanQuoteSource) => NewPlanAcceptance,
+    decide: (
+      source: PlanQuoteSource,
+      repriced: AcceptRepriced | null,
+      split: PartialSplit | null,
+    ) => NewPlanAcceptance,
+    reprice?: AcceptReprice,
+    partial?: AcceptPartial,
   ): Promise<AcceptPlanOutcome> {
     const tenantId = this.requireTenantId();
     try {
@@ -90,7 +162,61 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
         );
         if (!source) return { kind: 'NOT_FOUND' } as const;
 
-        const row = decide(source);
+        // DX-379 (C): «actualizar los precios» de un presupuesto vencido, en
+        // esta misma transacción y antes de firmar el presupuesto recotizado.
+        let signing = source;
+        let repriced: AcceptRepriced | null = null;
+        if (reprice) {
+          const done = await repriceInTx(tx, {
+            tenantId,
+            patientId,
+            planId,
+            locationId,
+            source,
+            reprice,
+          });
+          if (!done) throw new VanishedAfterWrite();
+          signing = done.source;
+          repriced = { repricingId: done.record.id, before: source };
+        }
+
+        // DX-417: la partición, con el plan bloqueado y ya recotizado (si
+        // tocaba). `decide` compone y compara lo aceptado antes de escribir.
+        const split = partial
+          ? partial.decide(
+              signing,
+              await readPartialState(tx, tenantId, planId, signing),
+            )
+          : null;
+        const row = decide(signing, repriced, split);
+        let pendingPlanId: string | null = null;
+        if (split && partial) {
+          if (!row.partial) throw new Error('aceptación parcial sin pendiente');
+          pendingPlanId = await splitPendingInTx(tx, {
+            tenantId,
+            patientId,
+            planId,
+            pendingItemIds: split.pendingItemIds,
+          });
+          // Red: lo que queda en el original es exactamente lo que se firma.
+          const kept = await readPlanQuoteSource(
+            tx,
+            tenantId,
+            patientId,
+            planId,
+            locationId,
+          );
+          if (!kept) throw new VanishedAfterWrite();
+          if (partial.contentHashOf(kept) !== row.contentHash) {
+            throw new Error(
+              `Plan ${planId}: el presupuesto releído tras partirlo no es el que se firma.`,
+            );
+          }
+        }
+        const expiry = row.expiry ?? {
+          ...NO_EXPIRED_ACCEPTANCE,
+          quoteValidUntil: signing.plan.quoteValidUntil,
+        };
         try {
           await tx.treatmentPlanAcceptance.create({
             data: {
@@ -107,6 +233,23 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
               acceptedById: row.acceptedById,
               ipAddress: row.ipAddress,
               userAgent: row.userAgent,
+              // DX-019-bis (B): el logo de este instante, leído en esta
+              // transacción con el plan bloqueado.
+              clinicLogoKey: signing.clinic.logoKey,
+              // DX-379 (C): cómo se aceptó, fuera del contenido firmado.
+              quoteValidUntil: dateColumn(expiry.quoteValidUntil),
+              expiredMode: expiry.mode,
+              expiredReason: expiry.reason,
+              expiredNote: expiry.note,
+              repricingId: expiry.repricingId,
+              // DX-417: lo que quedó pendiente, fuera del contenido firmado.
+              ...(pendingPlanId && row.partial
+                ? {
+                    pendingPlanId,
+                    pendingItemIds: row.partial.pendingItemIds,
+                    pendingTotal: new Prisma.Decimal(row.partial.pendingTotal),
+                  }
+                : {}),
             },
           });
         } catch (error) {
@@ -135,14 +278,287 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           planId,
           locationId,
         );
-        if (!accepted) return { kind: 'NOT_FOUND' } as const;
+        if (!accepted) throw new VanishedAfterWrite();
         return { kind: 'ACCEPTED', source: accepted } as const;
       });
     } catch (error) {
       if (error instanceof AlreadyAccepted) return { kind: 'ALREADY_ACCEPTED' };
+      if (error instanceof VanishedAfterWrite) return { kind: 'NOT_FOUND' };
       throw error;
     }
   }
+
+  loadPartial(
+    patientId: string,
+    planId: string,
+  ): Promise<PartialAcceptanceRead | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(
+      async (tx) => {
+        const source = await readPlanQuoteSource(
+          tx,
+          tenantId,
+          patientId,
+          planId,
+          await this.tenantContext.writeLocationId(tx),
+        );
+        if (!source) return null;
+        return {
+          source,
+          state: await readPartialState(tx, tenantId, planId, source),
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  async previewRepriced(
+    patientId: string,
+    planId: string,
+    reprice: AcceptReprice,
+  ): Promise<RepricedPreview | null> {
+    const tenantId = this.requireTenantId();
+    try {
+      await this.prisma.runWithTenant(async (tx) => {
+        // Lo mismo que `accept` con `reprice`, hasta releer el presupuesto
+        // recotizado; después se deshace todo (DryRun). Así la vista previa
+        // es exactamente lo que firmaría la aceptación.
+        const owned = await tx.treatmentPlan.findFirst({
+          where: { id: planId, patientId, deletedAt: null },
+          select: { id: true },
+        });
+        const locked = owned ? await lockPlanGroup(tx, planId) : null;
+        if (!locked) throw new DryRun(null);
+        const locationId = await this.tenantContext.writeLocationId(tx);
+        const source = await readPlanQuoteSource(
+          tx,
+          tenantId,
+          patientId,
+          planId,
+          locationId,
+        );
+        if (!source) throw new DryRun(null);
+        const done = await repriceInTx(tx, {
+          tenantId,
+          patientId,
+          planId,
+          locationId,
+          source,
+          reprice,
+        });
+        throw new DryRun(
+          done
+            ? {
+                source: done.source,
+                repricing: done.repricing,
+                state: await readPartialState(
+                  tx,
+                  tenantId,
+                  planId,
+                  done.source,
+                ),
+              }
+            : null,
+        );
+      });
+    } catch (error) {
+      if (error instanceof DryRun) return error.result;
+      throw error;
+    }
+    throw new Error('previewRepriced: la transacción no se deshizo');
+  }
+
+  async issue(
+    patientId: string,
+    planId: string,
+    decide: (source: PlanQuoteSource) => QuoteValidity | null,
+  ): Promise<PlanQuoteSource | null> {
+    const tenantId = this.requireTenantId();
+    // M-2: primero SIN bloquear. La mayoría de impresiones son reimpresiones
+    // (fechas ya guardadas, plan firmado o cerrado) y no escriben nada: no
+    // toman el FOR UPDATE del grupo, que haría esperar a los abonos, ítems y
+    // asientos que insertan con FK al plan.
+    const read = await this.loadSource(patientId, planId);
+    if (!read) return null;
+    if (!decide(read)) return read;
+    return this.prisma.runWithTenant(async (tx) => {
+      // Hay que guardar fechas: con el plan bloqueado, como al aceptar. Dos
+      // primeras impresiones simultáneas esperan aquí; la segunda relee, ve
+      // las fechas de la primera y no escribe (y una firma concurrente espera
+      // y luego ve las fechas, o al revés: la impresión ve el plan firmado).
+      const locked = await lockPlanGroup(tx, planId);
+      if (!locked) return null;
+      const locationId = await this.tenantContext.writeLocationId(tx);
+      const source = await readPlanQuoteSource(
+        tx,
+        tenantId,
+        patientId,
+        planId,
+        locationId,
+      );
+      if (!source) return null;
+      const validity = decide(source);
+      if (!validity) return source;
+      // Solo si aún no tiene fechas: la primera impresión manda.
+      const { count } = await tx.treatmentPlan.updateMany({
+        where: { id: planId, quoteIssuedOn: null, quoteValidUntil: null },
+        data: {
+          quoteIssuedOn: new Date(`${validity.issuedOn}T00:00:00.000Z`),
+          quoteValidUntil: new Date(`${validity.validUntil}T00:00:00.000Z`),
+        },
+      });
+      if (count === 0) return source;
+      return readPlanQuoteSource(tx, tenantId, patientId, planId, locationId);
+    });
+  }
+}
+
+/**
+ * DX-379 (C): recotiza en la transacción de la firma (el plan ya está
+ * bloqueado): relee el plan como lo ve la recotización, deja que `decide`
+ * valide y calcule, escribe (source ACCEPT, sin clave de idempotencia: la
+ * firma ya es única por plan) y relee el presupuesto recotizado. `null` si el
+ * plan ya no existe para este paciente.
+ */
+async function repriceInTx(
+  tx: Prisma.TransactionClient,
+  args: {
+    tenantId: string;
+    patientId: string;
+    planId: string;
+    locationId: string;
+    source: PlanQuoteSource;
+    reprice: AcceptReprice;
+  },
+): Promise<{
+  source: PlanQuoteSource;
+  repricing: Repricing;
+  record: RepricingRecord;
+} | null> {
+  const { tenantId, patientId, planId, locationId } = args;
+  const subject = await loadRepricingSubjectInTx(
+    tx,
+    tenantId,
+    patientId,
+    planId,
+  );
+  if (!subject) return null;
+  const repricing = args.reprice.decide(args.source, subject);
+  const record = await writeRepricingInTx(tx, {
+    tenantId,
+    planId,
+    patientId,
+    locationId,
+    actorUserId: args.reprice.actorUserId,
+    source: TreatmentPlanRepricingSource.ACCEPT,
+    idempotency: null,
+    repricing,
+  });
+  const source = await readPlanQuoteSource(
+    tx,
+    tenantId,
+    patientId,
+    planId,
+    locationId,
+  );
+  return source ? { source, repricing, record } : null;
+}
+
+/**
+ * DX-417: lo que la partición necesita del plan leído (con el plan bloqueado
+ * en la firma): su estado, si está firmado, abonos, cuotas y saldo a favor, y
+ * el estado de cada ítem vivo en el orden del presupuesto.
+ */
+async function readPartialState(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  planId: string,
+  source: PlanQuoteSource,
+): Promise<PartialPlanState> {
+  const [facts, items] = await Promise.all([
+    readPlanFacts(tx, tenantId, planId),
+    tx.treatmentPlanItem.findMany({
+      where: { planId, deletedAt: null },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, status: true },
+    }),
+  ]);
+  return {
+    status: source.plan.status,
+    signed: source.acceptance !== null,
+    facts,
+    items,
+  };
+}
+
+/**
+ * DX-417: crea el plan pendiente de una aceptación parcial y le MUEVE los
+ * ítems pendientes (mismo id: las reservas de citas, los descartes y el
+ * historial de recotizaciones siguen con ellos). Va antes de insertar la
+ * aceptación del original: el trigger de un plan firmado no deja sacar
+ * ítems. El pendiente nace PRESENTED con la presentación, la validez (la
+ * renovada si se recotizó en la firma), la moneda, las visitas, las notas y
+ * el autor del original, fuera de su grupo de opciones (si no, quedaría
+ * «otra opción ya aceptada» y no se podría aceptar). Mover no toca precios
+ * ni la foto de referencia: no salta ningún trigger de congelado ni el de
+ * imputaciones. Devuelve el id del pendiente.
+ */
+async function splitPendingInTx(
+  tx: Prisma.TransactionClient,
+  args: {
+    tenantId: string;
+    patientId: string;
+    planId: string;
+    pendingItemIds: string[];
+  },
+): Promise<string> {
+  const { tenantId, patientId, planId, pendingItemIds } = args;
+  const original = await tx.treatmentPlan.findFirst({
+    where: { id: planId, patientId, deletedAt: null },
+    select: {
+      currency: true,
+      notes: true,
+      createdById: true,
+      presentedAt: true,
+      presentedLocationId: true,
+      quoteIssuedOn: true,
+      quoteValidUntil: true,
+      visitIntervals: true,
+    },
+  });
+  if (!original) throw new VanishedAfterWrite();
+  const pending = await tx.treatmentPlan.create({
+    data: {
+      tenantId,
+      patientId,
+      status: 'PRESENTED',
+      currency: original.currency,
+      notes: original.notes,
+      createdById: original.createdById,
+      presentedAt: original.presentedAt,
+      presentedLocationId: original.presentedLocationId,
+      quoteIssuedOn: original.quoteIssuedOn,
+      quoteValidUntil: original.quoteValidUntil,
+      visitIntervals: original.visitIntervals ?? {},
+      splitFromPlanId: planId,
+    },
+    select: { id: true },
+  });
+  const { count } = await tx.treatmentPlanItem.updateMany({
+    where: {
+      id: { in: pendingItemIds },
+      planId,
+      deletedAt: null,
+      status: 'PROPOSED',
+    },
+    data: { planId: pending.id },
+  });
+  if (count !== pendingItemIds.length) {
+    throw new Error(
+      `Plan ${planId}: se esperaban ${pendingItemIds.length} ítems pendientes y se movieron ${count}.`,
+    );
+  }
+  return pending.id;
 }
 
 /**
@@ -165,6 +581,9 @@ export async function readPlanQuoteSource(
       patientId: true,
       status: true,
       currency: true,
+      quoteIssuedOn: true,
+      quoteValidUntil: true,
+      presentedLocationId: true,
       visitIntervals: true,
       createdById: true,
       patient: {
@@ -190,6 +609,7 @@ export async function readPlanQuoteSource(
           price: true,
           discount: true,
           basePrice: true,
+          catalogCurrency: true,
           catalogPrice: true,
           agreementId: true,
           agreementName: true,
@@ -197,6 +617,7 @@ export async function readPlanQuoteSource(
       },
       acceptance: {
         select: {
+          locationId: true,
           content: true,
           contentHash: true,
           signerName: true,
@@ -212,6 +633,17 @@ export async function readPlanQuoteSource(
           remoteSentAt: true,
           remoteOpenedAt: true,
           remoteVerifiedAt: true,
+          clinicLogoKey: true,
+          quoteValidUntil: true,
+          expiredMode: true,
+          expiredReason: true,
+          expiredNote: true,
+          repricingId: true,
+          pendingPlanId: true,
+          pendingItemIds: true,
+          pendingTotal: true,
+          // DX-514: el impreso dice si firmó el paciente o su representante.
+          signatureRequest: { select: { signerType: true } },
         },
       },
     },
@@ -221,11 +653,21 @@ export async function readPlanQuoteSource(
   const [location, tenant, professional, catalog, zoneOf] = await Promise.all([
     tx.location.findFirstOrThrow({
       where: { id: locationId, deletedAt: null },
-      select: { id: true, name: true, address: true },
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        ...DOCUMENT_REGIONAL_SELECT,
+      },
     }),
     tx.tenant.findFirst({
       where: { id: tenantId },
-      select: { name: true, logoUrl: true },
+      select: {
+        name: true,
+        logoKey: true,
+        quoteValidityDays: true,
+        ...CLINIC_FISCAL_SELECT,
+      },
     }),
     plan.createdById
       ? tx.user.findFirst({
@@ -240,6 +682,20 @@ export async function readPlanQuoteSource(
     resolveLocationTimeZones(tx, tenantId, [locationId]),
   ]);
   const labels = new Map(catalog.map((c) => [c.id, c.labelEs]));
+  // DX-379 (C): el vencimiento se decide con el día de la sede de la
+  // presentación (como `quoteExpired`, D-13) y su fecha se escribe con el
+  // formato de esa misma sede; sin presentar, con los de esta. Tolerante: una
+  // sede de presentación sin zona válida da zona null.
+  const presented = plan.presentedLocationId;
+  const quoteLocation =
+    presented === null || presented === locationId
+      ? {
+          id: locationId,
+          timeZone: zoneOf(locationId),
+          locale: location.locale,
+          hourCycle: location.hourCycle,
+        }
+      : await presentationRegional(tx, tenantId, presented);
   // DX-105: el pagador de cada convenio, una consulta por los ids distintos
   // (no una por ítem). El nombre del convenio es el de la foto del ítem; el
   // pagador se lee vivo porque la foto no lo guarda.
@@ -257,6 +713,18 @@ export async function readPlanQuoteSource(
         });
   const payerNames = new Map(agreements.map((a) => [a.id, a.payer.name]));
   const { patient, acceptance } = plan;
+  // DX-514: aceptado, las horas del impreso (firma, envío) son las de la sede
+  // donde se aceptó, como en la ficha, aunque se imprima desde otra sede; la
+  // de la firma aunque luego se archivara. Sin aceptar, la del request.
+  const regional =
+    acceptance && acceptance.locationId !== location.id
+      ? documentRegional(
+          await tx.location.findFirst({
+            where: { id: acceptance.locationId, tenantId },
+            select: DOCUMENT_REGIONAL_SELECT,
+          }),
+        )
+      : documentRegional(location);
 
   return {
     visitOrganization: plan.items.map((i) => ({
@@ -271,6 +739,15 @@ export async function readPlanQuoteSource(
       patientId: plan.patientId,
       status: plan.status,
       currency: plan.currency,
+      quoteIssuedOn: civilDayOf(plan.quoteIssuedOn),
+      quoteValidUntil: civilDayOf(plan.quoteValidUntil),
+      presentedLocationId: plan.presentedLocationId,
+      quoteRegional: {
+        locationId: quoteLocation.id,
+        timeZone: quoteLocation.timeZone,
+        locale: quoteLocation.locale,
+        hourCycle: quoteLocation.hourCycle,
+      },
     },
     items: plan.items.map((item) => ({
       id: item.id,
@@ -285,6 +762,7 @@ export async function readPlanQuoteSource(
       agreementPayerName: item.agreementId
         ? requirePayerName(payerNames, item.agreementId, plan.id)
         : null,
+      listPriceCurrency: item.catalogCurrency,
     })),
     patient: {
       firstName: patient.firstName,
@@ -293,8 +771,21 @@ export async function readPlanQuoteSource(
       docTypeLabel: patient.docTypeLabel,
       docNumber: patient.docNumber,
     },
-    clinic: { name: tenant?.name ?? '', logoUrl: tenant?.logoUrl ?? null },
-    location: { ...location, timeZone: zoneOf(location.id) },
+    clinic: {
+      name: tenant?.name ?? '',
+      logoUrl: clinicLogoPublicUrl(tenant?.logoKey ?? null),
+      logoKey: clinicLogoKeyToFreeze(tenant?.logoKey ?? null),
+      fiscal: clinicFiscalOf(tenant),
+      quoteValidityDays:
+        tenant?.quoteValidityDays ?? PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
+    },
+    location: {
+      id: location.id,
+      name: location.name,
+      address: location.address,
+      timeZone: zoneOf(location.id),
+    },
+    regional,
     professionalName: plan.createdById
       ? (professional?.fullName ?? UNKNOWN_PROFESSIONAL)
       : null,
@@ -310,18 +801,69 @@ export async function readPlanQuoteSource(
           ipAddress: acceptance.ipAddress,
           userAgent: acceptance.userAgent,
           remote: remoteEvidenceOf(acceptance),
+          // DX-019-bis (B): el congelado al firmar, nunca el de hoy.
+          clinicLogoUrl: clinicLogoPublicUrl(acceptance.clinicLogoKey),
+          expiry: {
+            quoteValidUntil: civilDayOf(acceptance.quoteValidUntil),
+            mode: acceptance.expiredMode,
+            reason: acceptance.expiredReason,
+            note: acceptance.expiredNote,
+            repricingId: acceptance.repricingId,
+          },
+          // DX-417: lo que quedó pendiente al aceptar en parte.
+          partial:
+            acceptance.pendingPlanId !== null &&
+            acceptance.pendingTotal !== null
+              ? {
+                  pendingPlanId: acceptance.pendingPlanId,
+                  pendingItemIds: acceptance.pendingItemIds ?? [],
+                  pendingTotal: acceptance.pendingTotal.toNumber(),
+                }
+              : null,
         }
       : null,
   };
 }
 
-function remoteEvidenceOf(acceptance: {
+/**
+ * DX-379 (C): zona (válida o null), formato y reloj de la sede de la
+ * presentación de un plan, bajo la RLS de la clínica.
+ */
+async function presentationRegional(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  locationId: string,
+): Promise<{
+  id: string;
+  timeZone: string | null;
+  locale: string | null;
+  hourCycle: string | null;
+}> {
+  const row = await tx.location.findFirst({
+    where: { id: locationId, tenantId },
+    select: { timeZone: true, locale: true, hourCycle: true },
+  });
+  const zone = row?.timeZone ?? null;
+  return {
+    id: locationId,
+    timeZone: zone && isValidTimeZone(zone) ? zone : null,
+    locale: row?.locale ?? null,
+    hourCycle: row?.hourCycle ?? null,
+  };
+}
+
+/**
+ * Evidencias congeladas de una aceptación a distancia, o `null` si se firmó
+ * en la clínica. Exportada para sus pruebas (DX-514).
+ */
+export function remoteEvidenceOf(acceptance: {
   signatureRequestId: string | null;
   remoteChannel: SignatureRequestChannel | null;
   remoteDestinationMasked: string | null;
   remoteSentAt: Date | null;
   remoteOpenedAt: Date | null;
   remoteVerifiedAt: Date | null;
+  signatureRequest: { signerType: ConsentSignerType } | null;
 }): PlanAcceptanceRemoteEvidence | null {
   // Todas o ninguna (CHECK treatment_plan_acceptances_remote_check).
   if (
@@ -341,6 +883,11 @@ function remoteEvidenceOf(acceptance: {
     sentAt: acceptance.remoteSentAt,
     openedAt: acceptance.remoteOpenedAt,
     verifiedAt: acceptance.remoteVerifiedAt,
+    // Sin la solicitud (no debería pasar: FK con Restrict), sigue siendo a
+    // distancia; solo falta decir si firmó el paciente o su representante.
+    ...(acceptance.signatureRequest
+      ? { signerType: acceptance.signatureRequest.signerType }
+      : {}),
   };
 }
 

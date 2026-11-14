@@ -36,6 +36,8 @@ const CATALOG_ITEM: DentalCatalogItem = {
   defaultPrice: 200,
   allowDiscount: true,
   active: true,
+  clinicalNoteTemplateId: null,
+  suggestedClinicalNoteTemplateId: null,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
 };
@@ -103,6 +105,7 @@ function setup(acceptance: typeof SIGNED | null, status?: TreatmentPlanStatus) {
       repo,
       whitelist,
       () => new Date('2026-10-16T15:00:00.000Z'),
+      testDiscountPolicy(),
     ),
     get: new GetTreatmentPlanUseCase(repo),
   };
@@ -174,7 +177,7 @@ describe('Descuento por ítem (DX-012)', () => {
 describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
   it('sin firma, todo sigue editable como antes', async () => {
     const { add, update, remove, updatePlan } = setup(null);
-    await add.execute(
+    const added = await add.execute(
       'plan1',
       { toothNumber: '21', catalogItemId: 'cat1' },
       ADMIN_ACTOR,
@@ -185,6 +188,8 @@ describe('Plan aceptado con firma: ítems congelados (DX-012)', () => {
       ADMIN_ACTOR,
     );
     await remove.execute('item1');
+    // DX-513-bis: un ítem vivo con precio de referencia bloquearía la moneda.
+    await remove.execute(added.id);
     await updatePlan.execute(
       'plan1',
       { currency: 'EUR', status: TreatmentPlanStatus.DRAFT },

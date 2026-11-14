@@ -1,7 +1,11 @@
-import { findOpenings, type OpeningsQuery } from './openings';
+import {
+  findOpenings,
+  mergeChairOpenings,
+  type OpeningsQuery,
+} from './openings';
 import type { ScheduleRange } from '../../location-schedule/application/business-hours';
 
-// Martes 20-10-2026 en Bogotá (UTC−5 fijo): 09:00 local = 14:00Z.
+// Martes 20-10-2026 en la zona de la sede (UTC−4 fijo): 09:00 local = 13:00Z.
 const TUESDAY = '2026-10-20';
 const WEEKDAY_RANGES: ScheduleRange[] = [1, 2, 3, 4, 5].flatMap((weekday) => [
   { weekday, startMinute: 9 * 60, endMinute: 13 * 60 },
@@ -14,7 +18,7 @@ function query(overrides: Partial<OpeningsQuery> = {}): OpeningsQuery {
   return {
     fromDay: TUESDAY,
     toDay: TUESDAY,
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     ranges: WEEKDAY_RANGES,
     busy: [],
     durationMinutes: 30,
@@ -33,8 +37,8 @@ function asIso(result: ReturnType<typeof findOpenings>) {
 describe('findOpenings (DX-122): horario ∩ ¬bloqueos ∩ ¬citas', () => {
   it('sin nada ocupado, los tramos del horario en la zona de la sede', () => {
     expect(asIso(findOpenings(query()))).toEqual([
-      ['2026-10-20T14:00:00.000Z', '2026-10-20T18:00:00.000Z'],
-      ['2026-10-20T20:00:00.000Z', '2026-10-21T00:00:00.000Z'],
+      ['2026-10-20T13:00:00.000Z', '2026-10-20T17:00:00.000Z'],
+      ['2026-10-20T19:00:00.000Z', '2026-10-20T23:00:00.000Z'],
     ]);
   });
 
@@ -44,30 +48,30 @@ describe('findOpenings (DX-122): horario ∩ ¬bloqueos ∩ ¬citas', () => {
         busy: [
           // cita 10:00–10:30
           {
-            start: z('2026-10-20T15:00:00.000Z'),
-            end: z('2026-10-20T15:30:00.000Z'),
+            start: z('2026-10-20T14:00:00.000Z'),
+            end: z('2026-10-20T14:30:00.000Z'),
           },
           // bloqueo 11:00–12:00
           {
-            start: z('2026-10-20T16:00:00.000Z'),
-            end: z('2026-10-20T17:00:00.000Z'),
+            start: z('2026-10-20T15:00:00.000Z'),
+            end: z('2026-10-20T16:00:00.000Z'),
           },
           // cita 12:00–12:40: deja 12:40–13:00 (20 min < 30)
           {
-            start: z('2026-10-20T17:00:00.000Z'),
-            end: z('2026-10-20T17:40:00.000Z'),
+            start: z('2026-10-20T16:00:00.000Z'),
+            end: z('2026-10-20T16:40:00.000Z'),
           },
           // bloqueo que cubre toda la tarde y la desborda
           {
-            start: z('2026-10-20T19:00:00.000Z'),
-            end: z('2026-10-21T03:00:00.000Z'),
+            start: z('2026-10-20T18:00:00.000Z'),
+            end: z('2026-10-21T02:00:00.000Z'),
           },
         ],
       }),
     );
     expect(asIso(result)).toEqual([
-      ['2026-10-20T14:00:00.000Z', '2026-10-20T15:00:00.000Z'],
-      ['2026-10-20T15:30:00.000Z', '2026-10-20T16:00:00.000Z'],
+      ['2026-10-20T13:00:00.000Z', '2026-10-20T14:00:00.000Z'],
+      ['2026-10-20T14:30:00.000Z', '2026-10-20T15:00:00.000Z'],
     ]);
   });
 
@@ -77,14 +81,14 @@ describe('findOpenings (DX-122): horario ∩ ¬bloqueos ∩ ¬citas', () => {
         ranges: [{ weekday: 2, startMinute: 9 * 60, endMinute: 10 * 60 }],
         busy: [
           {
-            start: z('2026-10-20T14:30:00.000Z'),
-            end: z('2026-10-20T15:00:00.000Z'),
+            start: z('2026-10-20T13:30:00.000Z'),
+            end: z('2026-10-20T14:00:00.000Z'),
           },
         ],
       }),
     );
     expect(asIso(result)).toEqual([
-      ['2026-10-20T14:00:00.000Z', '2026-10-20T14:30:00.000Z'],
+      ['2026-10-20T13:00:00.000Z', '2026-10-20T13:30:00.000Z'],
     ]);
   });
 
@@ -96,10 +100,10 @@ describe('findOpenings (DX-122): horario ∩ ¬bloqueos ∩ ¬citas', () => {
   });
 
   it('nunca ofrece el pasado: recorta al minuto múltiplo de 5 siguiente a "ahora"', () => {
-    const result = findOpenings(query({ now: z('2026-10-20T16:12:30.000Z') }));
+    const result = findOpenings(query({ now: z('2026-10-20T15:12:30.000Z') }));
     expect(asIso(result)[0]).toEqual([
-      '2026-10-20T16:15:00.000Z',
-      '2026-10-20T18:00:00.000Z',
+      '2026-10-20T15:15:00.000Z',
+      '2026-10-20T17:00:00.000Z',
     ]);
   });
 
@@ -130,18 +134,18 @@ describe('findOpenings (DX-122): horario ∩ ¬bloqueos ∩ ¬citas', () => {
           { weekday: 2, startMinute: 20 * 60, endMinute: 24 * 60 },
           { weekday: 3, startMinute: 0, endMinute: 2 * 60 },
         ],
-        // 23:30 del martes – 00:30 del miércoles (hora de Bogotá).
+        // 23:30 del martes – 00:30 del miércoles (hora de la sede).
         busy: [
           {
-            start: z('2026-10-21T04:30:00.000Z'),
-            end: z('2026-10-21T05:30:00.000Z'),
+            start: z('2026-10-21T03:30:00.000Z'),
+            end: z('2026-10-21T04:30:00.000Z'),
           },
         ],
       }),
     );
     expect(asIso(result)).toEqual([
-      ['2026-10-21T01:00:00.000Z', '2026-10-21T04:30:00.000Z'],
-      ['2026-10-21T05:30:00.000Z', '2026-10-21T07:00:00.000Z'],
+      ['2026-10-21T00:00:00.000Z', '2026-10-21T03:30:00.000Z'],
+      ['2026-10-21T04:30:00.000Z', '2026-10-21T06:00:00.000Z'],
     ]);
   });
 
@@ -166,8 +170,8 @@ describe('findOpenings con el horario del profesional (DX-233)', () => {
     );
     expect(asIso(result)).toEqual([
       // 12:00–13:00 (la sede cierra a las 13) y 15:00–16:00.
-      ['2026-10-20T17:00:00.000Z', '2026-10-20T18:00:00.000Z'],
-      ['2026-10-20T20:00:00.000Z', '2026-10-20T21:00:00.000Z'],
+      ['2026-10-20T16:00:00.000Z', '2026-10-20T17:00:00.000Z'],
+      ['2026-10-20T19:00:00.000Z', '2026-10-20T20:00:00.000Z'],
     ]);
   });
 
@@ -181,5 +185,46 @@ describe('findOpenings con el horario del profesional (DX-233)', () => {
     expect(
       asIso(findOpenings(query({ providerRangesOn: () => null }))),
     ).toEqual(asIso(findOpenings(query())));
+  });
+});
+
+describe('mergeChairOpenings (DX-492)', () => {
+  const at = (hh: string) => new Date(`2026-10-20T${hh}:00:00.000Z`);
+  const result = (...slots: [string, string][]) => ({
+    openings: slots.map(([s, e]) => ({ start: at(s), end: at(e) })),
+    truncated: false,
+  });
+
+  it('ordena por hora y no repite un hueco que otro sillón cubre', () => {
+    const merged = mergeChairOpenings([
+      { chair: 'A', result: result(['14', '15'], ['16', '18']) },
+      { chair: 'B', result: result(['14', '18']) },
+      { chair: 'C', result: result(['14', '18']) },
+    ]);
+    expect(merged.openings).toEqual([
+      { start: at('14'), end: at('18'), chair: 'B' },
+    ]);
+  });
+
+  it('huecos que se solapan sin cubrirse salen los dos', () => {
+    const merged = mergeChairOpenings([
+      { chair: 'A', result: result(['14', '16']) },
+      { chair: 'B', result: result(['15', '17']) },
+    ]);
+    expect(merged.openings.map((o) => o.chair)).toEqual(['A', 'B']);
+  });
+
+  it('recorta al tope y avisa; también si un sillón venía recortado', () => {
+    const many = mergeChairOpenings(
+      [{ chair: 'A', result: result(['14', '15'], ['16', '17']) }],
+      1,
+    );
+    expect(many.openings).toHaveLength(1);
+    expect(many.truncated).toBe(true);
+    expect(
+      mergeChairOpenings([
+        { chair: 'A', result: { ...result(['14', '15']), truncated: true } },
+      ]).truncated,
+    ).toBe(true);
   });
 });

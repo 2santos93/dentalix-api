@@ -64,8 +64,8 @@ describe('edición de un gasto (DX-274)', () => {
   });
 
   it('un cuerpo sin cambios devuelve el gasto tal cual', async () => {
-    const e = kit.repo.seed({ category: 'Arriendo' });
-    const out = await run(e.id, { category: 'Arriendo', amount: undefined });
+    const e = kit.repo.seed({ category: 'Alquiler' });
+    const out = await run(e.id, { category: 'Alquiler', amount: undefined });
     expect(out.updatedAt).toEqual(e.updatedAt);
   });
 
@@ -157,7 +157,7 @@ describe('edición de un gasto (DX-274)', () => {
       expect((await run(e.id, { amount: 40 })).status).toBe('PAID');
       expect((await run(e.id, { amount: 90 })).status).toBe('PARTIAL');
       await expect(run(e.id, { amount: 39.99 })).rejects.toThrow(
-        'El importe no puede ser menor a lo ya pagado (40 COP).',
+        'El importe no puede ser menor a lo ya pagado (VES\u00a040,00).',
       );
     });
 

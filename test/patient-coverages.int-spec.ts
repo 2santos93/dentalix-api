@@ -170,12 +170,12 @@ describe('pagadores y coberturas (int, DX-153)', () => {
       await expect(
         raw.$executeRaw`INSERT INTO payers
           ("id", "tenantId", "name", "type", "country", "updatedAt")
-          VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Mutua con CO',
+          VALUES (gen_random_uuid(), ${a.tenantId}::uuid, 'Mutua con VE',
                   'INSURER', 'ES', now())`,
       ).resolves.toBe(1);
     } finally {
       await raw.$executeRaw`DELETE FROM payers
-        WHERE "tenantId" = ${a.tenantId}::uuid AND "name" = 'Mutua con CO'`;
+        WHERE "tenantId" = ${a.tenantId}::uuid AND "name" = 'Mutua con VE'`;
     }
   });
 

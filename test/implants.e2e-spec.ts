@@ -11,9 +11,11 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-191 · Registro de implantes, tarjeta imprimible y búsqueda por lote.
 // Todo por la API; `raw` (DIRECT_URL) solo lee la auditoría y limpia.
@@ -320,6 +322,52 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
       expect(prints).toBe(2);
     });
 
+    it('DX-354: la tarjeta lleva el regional de la sede donde se colocó, no el de la activa; null sin reloj (200)', async () => {
+      const east = (
+        (
+          await call(
+            a,
+            a.adminToken,
+            'post',
+            '/locations',
+            locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Sede Este' }),
+          ).expect(201)
+        ).body as { id: string }
+      ).id;
+      const patient = await createPatient(a, 'Sofía', '52000009');
+      const created = await call(
+        a,
+        dentist.token,
+        'post',
+        `/patients/${patient}/implants`,
+        {
+          ...IMPLANT,
+          lot: 'LOT-REGIONAL-01',
+        },
+      )
+        .set('X-Location-Id', east)
+        .expect(201);
+      // El día de colocación es el de ESA sede: cerca de la medianoche no es
+      // el `today` de la sede del fixture y la tarjeta daba 404 (DX-460).
+      const { placedOn } = created.body as { placedOn: string };
+      const path = `/patients/${patient}/implant-card?date=${placedOn}`;
+
+      // Se abre sin sede activa (o con otra): sale la sede del implante.
+      const card = await call(a, reception, 'get', path).expect(200);
+      expect((card.body as { regional: unknown }).regional).toEqual({
+        timeZone: 'America/New_York',
+        locale: 'en-US',
+        hourCycle: 'h12',
+      });
+
+      await raw.location.update({
+        where: { id: east },
+        data: { hourCycle: null },
+      });
+      const noClock = await call(a, reception, 'get', path).expect(200);
+      expect((noClock.body as { regional: unknown }).regional).toBeNull();
+    });
+
     it('400 sin día y 404 sin implantes ese día', async () => {
       await call(
         a,
@@ -566,6 +614,9 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
       patientId: string,
       code: string,
     ): Promise<string> {
+      // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+      // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+      await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
       const catalog = await call(
         clinic,
         clinic.adminToken,
@@ -584,7 +635,7 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
         clinic.adminToken,
         'post',
         `/patients/${patientId}/treatment-plans`,
-        { currency: 'COP' },
+        { currency: 'USD' },
       ).expect(201);
       const item = await call(
         clinic,
@@ -608,9 +659,9 @@ describe('Implantes — /patients/:id/implants, /implant-card, /implants (DX-191
             a.adminToken,
             'post',
             '/locations',
-            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            locationBody(REGIONAL_CARACAS_FIXTURE, {
               name: 'Sede Norte',
-              address: 'Cra 15',
+              address: 'Av. Bolívar 15',
             }),
           ).expect(201)
         ).body as { id: string }

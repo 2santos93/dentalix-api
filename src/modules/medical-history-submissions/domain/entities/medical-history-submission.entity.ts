@@ -15,6 +15,8 @@ export interface MedicalHistorySubmission {
   locationId: string;
   expiresAt: Date;
   revokedAt: Date | null;
+  /** DX-424: primera apertura por el paciente (la avisa la página). */
+  openedAt: Date | null;
   status: MedicalHistorySubmissionStatus;
   questionnaireVersion: string;
   /** Lo que respondió el paciente; `null` hasta que lo envía. */

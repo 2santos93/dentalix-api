@@ -40,7 +40,8 @@ function setup() {
       findByLocation: () => Promise.resolve(null),
     } as unknown as LocationScheduleRepository,
     {
-      findById: (userId: string) => Promise.resolve({ userId }),
+      findById: (userId: string) =>
+        Promise.resolve({ userId, role: 'DENTIST' }),
     } as unknown as StaffRepository,
     {
       record: (draft: AuditEventDraft) => {
@@ -50,8 +51,9 @@ function setup() {
     } as unknown as RecordAuditEventUseCase,
     new InMemoryScheduleBlockRepository(),
     {
+      // DX-267-bis: reactivar mira que la sede siga activa (SEC-014).
       findById: (id: string) =>
-        Promise.resolve({ id, timeZone: 'America/Bogota' }),
+        Promise.resolve({ id, timeZone: 'America/Caracas', isActive: true }),
     } as unknown as LocationRepository,
     tenantContext,
     inMemoryAvailability(),

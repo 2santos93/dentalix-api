@@ -8,7 +8,9 @@ import {
   LOCATION_REPOSITORY,
   type LocationRepository,
 } from '../../locations/domain/ports/location-repository.port';
-import { civilDateIn, civilWeekday } from '../../../shared/time/civil-day';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { civilDateIn } from '../../../shared/time/civil-day';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
   PROVIDER_SCHEDULE_REPOSITORY,
   type ProviderScheduleRepository,
@@ -17,7 +19,6 @@ import {
   describeRanges,
   providerRangesOn,
   providerWorksAt,
-  weekdayName,
   type MinuteRange,
 } from '../domain/provider-availability';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
@@ -42,9 +43,18 @@ export interface ScheduleWarning {
   message: string;
 }
 
-function dayMonth(day: string): string {
-  const [, m, d] = day.split('-');
-  return `${d}/${m}`;
+/** El formato de la sede, o `null` si le falta el formato o el reloj. */
+function formatOrNull(location: {
+  id: string;
+  locale: string | null;
+  hourCycle: string | null;
+}): RegionalFormat | null {
+  try {
+    return requireLocationFormat(location);
+  } catch (error) {
+    if (error instanceof ConflictException) return null;
+    throw error;
+  }
 }
 
 /**
@@ -91,10 +101,19 @@ export class ProviderAvailabilityService {
       return null;
     }
     const ranges = providerRangesOn(snapshot, locationId, day) ?? [];
-    const weekday = weekdayName(civilWeekday(day));
+    // DX-354: el día y las horas con el formato y el reloj de la sede del
+    // horario. Es un AVISO que no bloquea: si la sede no tiene formato o reloj
+    // se devuelve igual, sin horas escritas (nunca con otro formato ni 409).
+    const fmt = formatOrNull(location);
+    if (fmt === null) {
+      return ranges.length === 0
+        ? `Fuera del horario del profesional: no trabaja en ${location.name} ese día.`
+        : `Fuera del horario del profesional en ${location.name}.`;
+    }
+    const when = fmt.civilLongDate(day, { weekday: true, year: false });
     return ranges.length === 0
-      ? `Fuera del horario del profesional: no trabaja en ${location.name} el ${weekday} ${dayMonth(day)}.`
-      : `Fuera del horario del profesional en ${location.name} (${weekday} ${dayMonth(day)}: ${describeRanges(ranges)}).`;
+      ? `Fuera del horario del profesional: no trabaja en ${location.name} el ${when}.`
+      : `Fuera del horario del profesional en ${location.name} (${when}: ${describeRanges(ranges, fmt)}).`;
   }
 
   /**

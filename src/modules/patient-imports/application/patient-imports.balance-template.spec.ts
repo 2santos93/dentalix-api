@@ -20,7 +20,7 @@ describe('PatientImportsService.balanceTemplate', () => {
     );
     const csv = await uc.balanceTemplate();
     expect(csv).toContain('"JPY"');
-    expect(csv).not.toContain('COP');
+    expect(csv).not.toContain('USD');
   });
 
   it('a location with NULL currency is 409 LOCATION_CURRENCY_REQUIRED', async () => {

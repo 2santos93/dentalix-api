@@ -10,7 +10,7 @@ import type { ImportPatientData } from '../src/modules/patient-imports/domain/im
 import { PrismaPaymentRepository } from '../src/modules/payments/infrastructure/repositories/prisma-payment.repository';
 import type { PreparedBalance } from '../src/modules/patient-imports/domain/opening-balance-sheet';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -84,7 +84,7 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),
@@ -141,7 +141,7 @@ function opening(
     locationId: s.locationId,
     patientId: s.patientId,
     importBatchId: s.batchId,
-    currency: 'COP',
+    currency: 'VES',
     amount: new Prisma.Decimal('150000.50'),
     asOfDate: new Date('2026-03-15T00:00:00.000Z'),
     concept: 'Saldo migrado',
@@ -197,7 +197,7 @@ describe('opening_balances: RLS, FK, CHECKs, inmutable y resumen de cartera (DX-
         batchId: b.batchId,
         rowNumber: 2,
         docKey: '123',
-        currency: 'COP',
+        currency: 'VES',
         amount: new Prisma.Decimal(10),
       },
     });
@@ -326,7 +326,7 @@ describe('opening_balances: RLS, FK, CHECKs, inmutable y resumen de cartera (DX-
       ledger: expect.objectContaining({
         plans: [],
         paymentPlans: [],
-        openings: [[created.id, 'COP', 150000.5, '2026-03-15', true, 0]],
+        openings: [[created.id, 'VES', 150000.5, '2026-03-15', true, 0]],
       }) as LedgerRow['ledger'],
     });
 
@@ -361,7 +361,7 @@ async function clinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),
@@ -387,7 +387,7 @@ const balance = (
   rowNumber: number,
   docKey: string,
   cents: number,
-  currency = 'COP',
+  currency = 'VES',
   asOfDate: string | null = null,
 ): PreparedBalance => ({
   rowNumber,
@@ -559,8 +559,8 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
       repo.saveBalances(
         batch.id,
         sheet([
-          balance(2, '7070', 15_000_050, 'COP', '2026-03-15'),
-          balance(3, '6060', 2_000_000, 'COP'),
+          balance(2, '7070', 15_000_050, 'VES', '2026-03-15'),
+          balance(3, '6060', 2_000_000, 'VES'),
           balance(4, '6060', 4_550, 'USD', '2025-12-31'),
         ]),
       ),
@@ -588,7 +588,17 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     ).toEqual([
       [
         existing.id,
-        'COP',
+        'USD',
+        '45.5',
+        '2025-12-31',
+        false,
+        'Saldo migrado',
+        a.locationId,
+        a.userId,
+      ],
+      [
+        existing.id,
+        'VES',
         '20000',
         '2026-10-23',
         true,
@@ -598,7 +608,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
       ],
       [
         created.id,
-        'COP',
+        'VES',
         '150000.5',
         '2026-03-15',
         false,
@@ -606,20 +616,10 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
         a.locationId,
         a.userId,
       ],
-      [
-        existing.id,
-        'USD',
-        '45.5',
-        '2025-12-31',
-        false,
-        'Saldo migrado',
-        a.locationId,
-        a.userId,
-      ],
     ]);
     expect(await inA(() => repo.importedBalanceTotals(batch.id))).toEqual([
-      { currency: 'COP', count: 2, cents: 17_000_050 },
       { currency: 'USD', count: 1, cents: 4_550 },
+      { currency: 'VES', count: 2, cents: 17_000_050 },
     ]);
     expect(await inA(() => repo.findBatch(batch.id))).toMatchObject({
       status: 'COMPLETED',
@@ -713,7 +713,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     openingBalanceId: string,
     patientId: string,
     amount: number,
-    currency = 'COP',
+    currency = 'VES',
   ) {
     return tenantContext.run(a.tenantId, a.locationId, () =>
       payments.create({
@@ -763,7 +763,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     expect(receipt.snapshot).toMatchObject({
       plan: null,
       openingBalance: { id: ob.id, concept: 'Saldo migrado' },
-      planBalance: { currency: 'COP', billable: 900, paid: 400, balance: 500 },
+      planBalance: { currency: 'VES', billable: 900, paid: 400, balance: 500 },
     });
     let ledger = await ledgerOfPatient(ob.patientId);
     expect(ledger.owing).toBe(true);
@@ -790,7 +790,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
       'Este saldo migrado ya está pagado: no admite más abonos.',
     );
     await expect(payOpening(ob.id, ob.patientId, 1, 'USD')).rejects.toThrow(
-      'El abono al saldo migrado tiene que ir en su moneda (COP).',
+      'El abono al saldo migrado tiene que ir en su moneda (VES).',
     );
   });
 
@@ -808,7 +808,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
       tenantId: a.tenantId,
       locationId: a.locationId,
       amount: new Prisma.Decimal(1),
-      currency: 'COP',
+      currency: 'VES',
       paidAt: new Date(),
     };
     await expect(
@@ -888,7 +888,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     expect(await inA(() => repo.findBatch(batch.id))).toMatchObject({
       status: 'COMPLETED',
       balanceUndoneCount: 1,
-      balanceUndoneTotals: [{ currency: 'COP', rows: 1, cents: 12_345 }],
+      balanceUndoneTotals: [{ currency: 'VES', rows: 1, cents: 12_345 }],
     });
     expect(
       (await raw.patient.findUniqueOrThrow({ where: { id: ob.patientId } }))
@@ -914,11 +914,11 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     await inA(() => repo.undoBalances(retired.id, a.userId));
     const other = await validated([person('5656')]);
     const found = await inA(() =>
-      repo.existingBalances(other.id, ['3434', '5656'], 'America/Bogota'),
+      repo.existingBalances(other.id, ['3434', '5656'], 'America/Caracas'),
     );
     expect([...found.entries()]).toEqual([
       [
-        '3434\u0000COP',
+        '3434\u0000VES',
         {
           count: 1,
           cents: 150_000,
@@ -935,7 +935,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     expect(
       (
         await inA(() =>
-          repo.existingBalances(batch.id, ['3434'], 'America/Bogota'),
+          repo.existingBalances(batch.id, ['3434'], 'America/Caracas'),
         )
       ).size,
     ).toBe(0);
@@ -966,7 +966,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
     expect(
       (
         await inA(() =>
-          repo.existingBalances(second.id, ['7878'], 'America/Bogota'),
+          repo.existingBalances(second.id, ['7878'], 'America/Caracas'),
         )
       ).size,
     ).toBe(0);

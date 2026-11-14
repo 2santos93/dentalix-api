@@ -61,6 +61,46 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     expect(sanitizeAuditMetadata({ reason: 'clave errónea' })).toEqual({});
   });
 
+  it('DX-379 (C): los motivos de la firma de un presupuesto vencido y su recotización pasan', () => {
+    const repricingId = '77777777-7777-4777-8777-777777777777';
+    for (const reason of [
+      'QUOTE_EXPIRED_ORIGINAL_PRICES',
+      'QUOTE_EXPIRED_REPRICED',
+      'ACCEPT_REPRICE_PREVIEW',
+    ]) {
+      expect(
+        sanitizeAuditMetadata({ reason, params: { repricingId } }),
+      ).toEqual({ reason, params: { repricingId } });
+    }
+  });
+
+  it('DX-417: la firma parcial y su vista previa pasan con el pendiente (y la recotización)', () => {
+    const pendingPlanId = '88888888-8888-4888-8888-888888888888';
+    const repricingId = '77777777-7777-4777-8777-777777777777';
+    for (const reason of [
+      'PLAN_PARTIALLY_ACCEPTED',
+      'ACCEPT_PARTIAL_PREVIEW',
+      'PLAN_SPLIT_PENDING',
+      'QUOTE_EXPIRED_REPRICED',
+    ]) {
+      expect(
+        sanitizeAuditMetadata({
+          reason,
+          params: { repricingId, pendingPlanId },
+        }),
+      ).toEqual({ reason, params: { repricingId, pendingPlanId } });
+    }
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'PLAN_SPLIT_PENDING',
+        params: { splitFromPlanId: pendingPlanId },
+      }),
+    ).toEqual({
+      reason: 'PLAN_SPLIT_PENDING',
+      params: { splitFromPlanId: pendingPlanId },
+    });
+  });
+
   it('acota el número de campos y quita los repetidos', () => {
     const many = Array.from({ length: 80 }, (_, i) => `field${i}`);
     const out = sanitizeAuditMetadata({
@@ -112,6 +152,15 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
         }),
       ).toEqual({});
       expect(sanitizeAuditMetadata({ move: 'x' })).toEqual({});
+    });
+
+    it('DX-436-bis: conserva `via: OPENING` y descarta cualquier otro valor', () => {
+      expect(
+        sanitizeAuditMetadata({ move: { from, to, via: 'OPENING' } }),
+      ).toEqual({ move: { from, to, via: 'OPENING' } });
+      expect(
+        sanitizeAuditMetadata({ move: { from, to, via: 'Dra. Pérez' } }),
+      ).toEqual({ move: { from, to } });
     });
 
     it('no deja pasar claves de más dentro del movimiento', () => {
@@ -180,7 +229,7 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
 
     it('descarta cualquier otro valor', () => {
       expect(sanitizeAuditMetadata({ origin: 'WEBHOOK' })).toEqual({});
-      expect(sanitizeAuditMetadata({ origin: '+573101234567' })).toEqual({});
+      expect(sanitizeAuditMetadata({ origin: '+584141234567' })).toEqual({});
       expect(sanitizeAuditMetadata({ origin: 1 })).toEqual({});
     });
   });
@@ -389,12 +438,12 @@ describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
           balancesCreated: 9,
           balancesUndone: -1,
           balanceTotals: [
-            { currency: 'COP', rows: 9, amount: 1500000.5, docNumber: '123' },
+            { currency: 'GBP', rows: 9, amount: 1500000.5, docNumber: '123' },
             { currency: 'usd', rows: 1, amount: 10 },
             { currency: 'EUR', rows: 1, amount: 10.555 },
             { currency: 'USD', rows: 1, amount: 40 },
           ],
-          balanceUndoneTotals: [{ currency: 'COP', rows: 2, amount: 10.5 }],
+          balanceUndoneTotals: [{ currency: 'GBP', rows: 2, amount: 10.5 }],
         },
       }),
     ).toEqual({
@@ -405,10 +454,10 @@ describe('sanitizeAuditMetadata — saldos migrados del lote (DX-262)', () => {
         balanceErrors: 2,
         balancesCreated: 9,
         balanceTotals: [
-          { currency: 'COP', rows: 9, amount: 1500000.5 },
+          { currency: 'GBP', rows: 9, amount: 1500000.5 },
           { currency: 'USD', rows: 1, amount: 40 },
         ],
-        balanceUndoneTotals: [{ currency: 'COP', rows: 2, amount: 10.5 }],
+        balanceUndoneTotals: [{ currency: 'GBP', rows: 2, amount: 10.5 }],
       },
     });
   });
@@ -781,14 +830,14 @@ describe('sanitizeAuditMetadata — reasignación de un abono (DX-051)', () => {
 describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () => {
   const side = (currency: string | null) => ({
     currency,
-    timeZone: currency ? 'America/Bogota' : null,
-    locale: currency ? 'es-CO' : null,
+    timeZone: currency ? 'America/Caracas' : null,
+    locale: currency ? 'es-VE' : null,
   });
 
   it('conserva antes y después (con null en una sede sin configurar) y la revisión', () => {
     const regionalSettings = {
       before: side(null),
-      after: side('COP'),
+      after: side('GBP'),
       reviewed: true,
     };
     expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({
@@ -798,31 +847,31 @@ describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () 
 
   it('descarta el cambio entero si un valor o un lado no tiene la forma admitida', () => {
     for (const regionalSettings of [
-      { before: side('COP'), after: side('COP') },
+      { before: side('GBP'), after: side('GBP') },
       {
-        before: side('COP'),
-        after: { ...side('COP'), currency: 'cop' },
+        before: side('GBP'),
+        after: { ...side('GBP'), currency: 'gbp' },
         reviewed: true,
       },
       {
-        before: side('COP'),
-        after: { ...side('COP'), timeZone: 'a b' },
+        before: side('GBP'),
+        after: { ...side('GBP'), timeZone: 'a b' },
         reviewed: true,
       },
       {
-        before: side('COP'),
-        after: { ...side('COP'), extra: 1 },
+        before: side('GBP'),
+        after: { ...side('GBP'), extra: 1 },
         reviewed: true,
       },
-      { before: side('COP'), reviewed: false },
+      { before: side('GBP'), reviewed: false },
       {
-        before: { ...side('COP'), hourCycle: 'h23' },
-        after: { ...side('COP'), hourCycle: 'h24' },
+        before: { ...side('GBP'), hourCycle: 'h23' },
+        after: { ...side('GBP'), hourCycle: 'h24' },
         reviewed: true,
       },
       {
-        before: { ...side('COP'), hourCycle: 'h23' },
-        after: { ...side('COP'), hourCycle: 12 },
+        before: { ...side('GBP'), hourCycle: 'h23' },
+        after: { ...side('GBP'), hourCycle: 12 },
         reviewed: true,
       },
     ]) {
@@ -832,8 +881,8 @@ describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () 
 
   it('G1-B: conserva el reloj de cada lado (null en una sede sin reloj)', () => {
     const regionalSettings = {
-      before: { ...side('COP'), hourCycle: null },
-      after: { ...side('COP'), hourCycle: 'h12' },
+      before: { ...side('GBP'), hourCycle: null },
+      after: { ...side('GBP'), hourCycle: 'h12' },
       reviewed: true,
     };
     expect(sanitizeAuditMetadata({ regionalSettings })).toEqual({
@@ -843,7 +892,7 @@ describe('sanitizeAuditMetadata — moneda, zona y formato de la sede (G1)', () 
 
   it('G1-B: un evento de G1 sin reloj se sigue leyendo igual', () => {
     const regionalSettings = {
-      before: side('COP'),
+      before: side('GBP'),
       after: side('EUR'),
       reviewed: true,
     };
@@ -1036,7 +1085,7 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
         exchangeRateBackup: {
           rateDate: '2026-10-28',
           manualSince: '2026-10-30',
-          currencies: ['COP', 'USD'],
+          currencies: ['GBP', 'USD'],
           amount: 50,
           patientName: 'Ana',
         },
@@ -1047,7 +1096,7 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
       exchangeRateBackup: {
         rateDate: '2026-10-28',
         manualSince: '2026-10-30',
-        currencies: ['COP', 'USD'],
+        currencies: ['GBP', 'USD'],
       },
     });
   });
@@ -1057,23 +1106,23 @@ describe('sanitizeAuditMetadata — tasa de respaldo de un día sin tasa (DX-402
       {
         rateDate: '2026-02-30',
         manualSince: '2026-10-30',
-        currencies: ['COP'],
+        currencies: ['GBP'],
       },
       {
         rateDate: '2026-10-30',
         manualSince: '2026-10-30',
-        currencies: ['COP'],
+        currencies: ['GBP'],
       },
       {
         rateDate: '2026-10-28',
         manualSince: '2026-10-30',
-        currencies: ['cop'],
+        currencies: ['gbp'],
       },
       { rateDate: '2026-10-28', manualSince: '2026-10-30', currencies: [] },
       {
         rateDate: '2026-10-28',
         manualSince: '2026-10-30',
-        currencies: ['COP', 'EUR', 'VES'],
+        currencies: ['GBP', 'EUR', 'VES'],
       },
       '2026-10-28',
     ]) {
@@ -1229,5 +1278,173 @@ describe('sanitizeAuditMetadata — cambio de configuración de la clínica (DX-
     ]) {
       expect(sanitizeAuditMetadata({ configChange })).toEqual({});
     }
+  });
+});
+
+describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
+  const retentionTermChange = {
+    direction: 'DOWN',
+    protectedPatients: 6,
+    effectiveBefore: 25,
+    effectiveAfter: 15,
+    withinCorrectionWindow: false,
+  };
+
+  it('conserva los cinco campos', () => {
+    expect(sanitizeAuditMetadata({ retentionTermChange })).toEqual({
+      retentionTermChange,
+    });
+    const raised = {
+      ...retentionTermChange,
+      direction: 'UP',
+      protectedPatients: 0,
+      withinCorrectionWindow: true,
+    };
+    expect(sanitizeAuditMetadata({ retentionTermChange: raised })).toEqual({
+      retentionTermChange: raised,
+    });
+  });
+
+  it('un campo que no encaja o una clave de más lo tira entero', () => {
+    const { withinCorrectionWindow: _, ...incomplete } = retentionTermChange;
+    for (const value of [
+      { ...retentionTermChange, protectedPatients: -1 },
+      { ...retentionTermChange, protectedPatients: 1.5 },
+      { ...retentionTermChange, protectedPatients: '6' },
+      { ...retentionTermChange, protectedPatients: Number.NaN },
+      { ...retentionTermChange, effectiveBefore: -15 },
+      { ...retentionTermChange, effectiveAfter: 'x' },
+      { ...retentionTermChange, direction: 'SIDEWAYS' },
+      { ...retentionTermChange, withinCorrectionWindow: 'false' },
+      { ...retentionTermChange, patientName: 'Ana' },
+      incomplete,
+      'x',
+    ]) {
+      expect(sanitizeAuditMetadata({ retentionTermChange: value })).toEqual({});
+    }
+  });
+
+  describe('exchangeRate (DX-381)', () => {
+    it('deja pasar moneda, día y tasa decimal en texto', () => {
+      const exchangeRate = { currency: 'VES', day: '2026-10-29', rate: '36.5' };
+      expect(sanitizeAuditMetadata({ exchangeRate })).toEqual({ exchangeRate });
+    });
+
+    it('descarta lo que no encaja y no deja pasar campos de más', () => {
+      for (const exchangeRate of [
+        { currency: 'USD', day: '2026-10-29', rate: '1' },
+        { currency: 'ves', day: '2026-10-29', rate: '36.5' },
+        { currency: 'VES', day: '2026-02-30', rate: '36.5' },
+        { currency: 'VES', day: '2026-10-29', rate: 36.5 },
+        { currency: 'VES', day: '2026-10-29', rate: '1e3' },
+        { currency: 'VES', day: '2026-10-29', rate: '36,5' },
+        'VES',
+      ]) {
+        expect(sanitizeAuditMetadata({ exchangeRate })).toEqual({});
+      }
+      expect(
+        sanitizeAuditMetadata({
+          exchangeRate: {
+            currency: 'VES',
+            day: '2026-10-29',
+            rate: '36.5',
+            createdBy: 'Ana Pérez',
+          },
+        }),
+      ).toEqual({
+        exchangeRate: { currency: 'VES', day: '2026-10-29', rate: '36.5' },
+      });
+    });
+  });
+
+  describe('period (DX-401)', () => {
+    it('conserva las dos fechas del resumen de recibos', () => {
+      expect(
+        sanitizeAuditMetadata({
+          period: { from: '2026-10-01', to: '2026-10-31' },
+        }),
+      ).toEqual({ period: { from: '2026-10-01', to: '2026-10-31' } });
+    });
+
+    it('descarta un período que no encaja o trae campos de más', () => {
+      for (const period of [
+        { from: '2026-10-31', to: '2026-10-01' },
+        { from: '2026-02-30', to: '2026-03-01' },
+        { from: '2026-10-01' },
+        { from: null, to: '2026-10-01' },
+        { from: '2026-10-01', to: '2026-10-31', patient: 'María Rondón' },
+        '2026-10-01..2026-10-31',
+      ]) {
+        expect(sanitizeAuditMetadata({ period })).toEqual({});
+      }
+    });
+  });
+
+  describe('majorityReview (DX-342)', () => {
+    it('conserva la decisión, la fecha y el largo de la nota', () => {
+      expect(
+        sanitizeAuditMetadata({
+          majorityReview: {
+            decision: 'PATIENT_SELF',
+            majorityDate: '2026-11-20',
+            noteLength: 42,
+          },
+        }),
+      ).toEqual({
+        majorityReview: {
+          decision: 'PATIENT_SELF',
+          majorityDate: '2026-11-20',
+          noteLength: 42,
+        },
+      });
+    });
+
+    it('descarta el texto de la nota, decisiones desconocidas y fechas que no existen', () => {
+      for (const majorityReview of [
+        {
+          decision: 'PATIENT_SELF',
+          majorityDate: '2026-11-20',
+          noteLength: 3,
+          note: 'Habló con la madre',
+        },
+        { decision: 'OTHER', majorityDate: '2026-11-20', noteLength: 0 },
+        {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-02-30',
+          noteLength: 0,
+        },
+        { decision: 'KEEP_RESPONSIBLE', majorityDate: null, noteLength: 0 },
+        {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-11-20',
+          noteLength: 501,
+        },
+        'PATIENT_SELF',
+      ]) {
+        expect(sanitizeAuditMetadata({ majorityReview })).toEqual({});
+      }
+    });
+  });
+
+  describe('via (DX-015-bis, porción 3)', () => {
+    it('conserva DEFAULT y CLINICAL_ENTRY junto a los parámetros', () => {
+      for (const via of ['DEFAULT', 'CLINICAL_ENTRY']) {
+        expect(
+          sanitizeAuditMetadata({
+            via,
+            params: { recallTypeId: '11111111-1111-4111-8111-111111111111' },
+          }),
+        ).toEqual({
+          via,
+          params: { recallTypeId: '11111111-1111-4111-8111-111111111111' },
+        });
+      }
+    });
+
+    it('descarta cualquier otro valor', () => {
+      for (const via of ['OPENING', 'default', 'Dra. Pérez', 3, null]) {
+        expect(sanitizeAuditMetadata({ via })).toEqual({});
+      }
+    });
   });
 });

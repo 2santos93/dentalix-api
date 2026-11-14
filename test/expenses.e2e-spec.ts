@@ -6,6 +6,7 @@ import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { RECEIPT_TYPE_MESSAGE } from '../src/modules/expenses/domain/expense-receipt';
+import { LEGACY_PREDEFINED_CATEGORY_KEYS } from '../src/modules/expenses/domain/legacy-expense-categories';
 import {
   EXPENSE_CASH_ALWAYS_IN_SESSION_MESSAGE,
   CATEGORY_DUPLICATE_MESSAGE,
@@ -33,13 +34,18 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_BERLIN_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_NEW_YORK_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
 // DX-274 (Task 2) en HTTP real: gastos de la sede con sus pagos, categorías,
 // proveedores y soporte. El aislamiento entre clínicas por id lo cubre
 // tenant-isolation-matrix; los roles, role-matrix. Aquí van las reglas.
+
+/** DX-274-bis: los nombres anteriores, de su único sitio (ver la guarda). */
+const [OLD_RENT, OLD_CLEANING] = [...LEGACY_PREDEFINED_CATEGORY_KEYS.keys()];
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -138,7 +144,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
     category: 'Papelería',
     supplier: `Proveedor ${++seq}`,
     amount: 100000,
-    currency: 'COP',
+    currency: 'VES',
     invoiceDate: '2026-10-01',
     ...patch,
   });
@@ -239,7 +245,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
     const sedes = await call('get', '/locations').expect(200);
     loc1 = (sedes.body as { id: string }[])[0].id;
     const second = await call('post', '/locations')
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     loc2 = (second.body as { id: string }).id;
   });
@@ -264,7 +270,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         supplier: '  Papelería   Luna  ',
         description: ' Resmas y carpetas ',
         category: 'papeleria',
-        currency: 'cop',
+        currency: 'ves',
         dueDate: '2099-12-31',
         amount: 120000.5,
       });
@@ -274,7 +280,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         supplier: 'Papelería Luna',
         description: 'Resmas y carpetas',
         amount: 120000.5,
-        currency: 'COP',
+        currency: 'VES',
         invoiceDate: '2026-10-01',
         dueDate: '2099-12-31',
         paidAmount: 0,
@@ -324,7 +330,10 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         [{ category: undefined }, CATEGORY_INVALID_MESSAGE],
         [{ amount: 0 }, /importe/],
         [{ amount: 10.005 }, /importe/],
-        [{ currency: 'ZZZ' }, 'La moneda no es válida.'],
+        [
+          { currency: 'ZZZ' },
+          'La moneda tiene que ser un código ISO 4217 de tres letras en mayúsculas.',
+        ],
         [{ supplier: 'x'.repeat(201) }, /proveedor/],
         [{ invoiceDate: '2099-01-01' }, /no puede ser futura/],
         [{ invoiceDate: '2026-02-30' }, /fecha de la factura no es válida/],
@@ -388,7 +397,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
             .post('/api/v1/expenses')
             .set('X-Tenant-Host', listClinic.host)
             .set('Authorization', `Bearer ${token}`)
-            .send({ currency: 'COP', amount: 100000, ...payload })
+            .send({ currency: 'VES', amount: 100000, ...payload })
             .expect(201)
         ).body as ExpenseBody;
       const payOn = (id: string, amount: number) =>
@@ -401,7 +410,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
 
       const paid = await make({
         supplier: 'Pagado SA',
-        category: 'Arriendo',
+        category: 'Alquiler',
         invoiceDate: '2026-09-01',
       });
       await payOn(paid.id, 100000);
@@ -466,7 +475,11 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         'Pendiente SA',
         'Parcial SA',
       ]);
-      expect(await names({ category: 'ARRIENDO' })).toEqual(['Pagado SA']);
+      expect(await names({ category: 'ALQUILER' })).toEqual(['Pagado SA']);
+      // DX-274-bis: una URL guardada con el nombre anterior filtra por el actual.
+      expect(await names({ category: OLD_RENT.toUpperCase() })).toEqual([
+        'Pagado SA',
+      ]);
       expect(await names({ query: 'CAFÉ' })).toEqual(['Pendiente SA']);
       expect(await names({ query: 'parcial' })).toEqual(['Parcial SA']);
     });
@@ -533,11 +546,95 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
       await pay(e.id, { amount: 99999.5, method: 'CARD' }).expect(201);
       const res = await pay(e.id, { amount: 0.51, method: 'CARD' }).expect(400);
       expect(messageOf(res)).toBe(
-        'El pago supera lo pendiente del gasto (0,50 COP).',
+        'El pago supera lo pendiente del gasto (VES\u00a00,50).',
       );
       expect(
         await raw.expensePayment.count({ where: { expenseId: e.id } }),
       ).toBe(1);
+    });
+
+    it('DX-517-quater: el tope (dentro del bloqueo del gasto) y el del pago inicial dicen el importe con el texto propio de la moneda', async () => {
+      await raw.tenant.update({
+        where: { id: clinic.tenantId },
+        data: { currencyTexts: { VES: 'Bs.' } },
+      });
+      try {
+        const e = await createExpense({ amount: 100000 });
+        await pay(e.id, { amount: 99999.5, method: 'CARD' }).expect(201);
+        const res = await pay(e.id, { amount: 0.51, method: 'CARD' }).expect(
+          400,
+        );
+        expect(messageOf(res)).toBe(
+          'El pago supera lo pendiente del gasto (Bs.\u00a00,50).',
+        );
+        // El pago inicial del alta (tope en el caso de uso, antes del INSERT).
+        const initial = await call('post', '/expenses')
+          .send(
+            body({ amount: 100, payment: { amount: 100.01, method: 'CARD' } }),
+          )
+          .expect(400);
+        expect(messageOf(initial)).toBe(
+          'El pago supera lo pendiente del gasto (Bs.\u00a0100,00).',
+        );
+      } finally {
+        await raw.tenant.update({
+          where: { id: clinic.tenantId },
+          data: { currencyTexts: {} },
+        });
+      }
+    });
+
+    it('DX-354: el tope dice el importe con el formato de la sede del gasto y el código ISO, y 409 si la sede no tiene formato', async () => {
+      const berlin = (
+        (
+          await call('post', '/locations')
+            .send(locationBody(REGIONAL_BERLIN_FIXTURE, { name: 'Berlín' }))
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      const newYork = (
+        (
+          await call('post', '/locations')
+            .send(
+              locationBody(REGIONAL_NEW_YORK_FIXTURE, { name: 'Nueva York' }),
+            )
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+      const eur = await createExpense({
+        locationId: berlin,
+        currency: 'EUR',
+        amount: 1234.5,
+      });
+      const usd = await createExpense({
+        locationId: newYork,
+        currency: 'USD',
+        amount: 1234.5,
+      });
+      expect(
+        messageOf(
+          await pay(eur.id, { amount: 1234.51, method: 'CARD' }).expect(400),
+        ),
+      ).toBe('El pago supera lo pendiente del gasto (1.234,50\u00a0EUR).');
+      expect(
+        messageOf(
+          await pay(usd.id, { amount: 1234.51, method: 'CARD' }).expect(400),
+        ),
+      ).toBe('El pago supera lo pendiente del gasto (USD\u00a01,234.50).');
+
+      await raw.location.update({
+        where: { id: newYork },
+        data: { hourCycle: null },
+      });
+      const noFormat = await pay(usd.id, {
+        amount: 1234.51,
+        method: 'CARD',
+      }).expect(409);
+      expect((noFormat.body as { code: string }).code).toBe(
+        'LOCATION_LOCALE_REQUIRED',
+      );
+      // Dentro del tope no hay mensaje con cifras: se paga igual.
+      await pay(usd.id, { amount: 1234.5, method: 'CARD' }).expect(201);
     });
 
     it('dos pagos simultáneos que juntos pasan lo pendiente: uno entra y otro es 400', async () => {
@@ -869,7 +966,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
         .send({ amount: 39999.99 })
         .expect(409);
       expect(messageOf(below)).toBe(
-        'El importe no puede ser menor a lo ya pagado (40.000 COP).',
+        'El importe no puede ser menor a lo ya pagado (VES\u00a040.000,00).',
       );
       expect(
         (
@@ -1141,7 +1238,7 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
             category: 'Otros',
             supplier,
             amount: 1000,
-            currency: 'COP',
+            currency: 'VES',
             invoiceDate: '2026-10-01',
           })
           .expect(201);
@@ -1218,10 +1315,28 @@ describe('Gastos de la sede (e2e, DX-274)', () => {
       await call('post', '/expense-categories')
         .send({ name: 'SEGUROS MEDICOS' })
         .expect(409);
+      // DX-274-bis: el nombre anterior de una predefinida también choca.
+      await call('post', '/expense-categories')
+        .send({ name: OLD_RENT })
+        .expect(409);
       await call('post', '/expense-categories').send({ name: 'A' }).expect(400);
       await call('post', '/expense-categories')
         .send({ name: 'x'.repeat(61) })
         .expect(400);
+    });
+
+    it('DX-274-bis: el nombre anterior de una predefinida (cliente antiguo) guarda la actual', async () => {
+      expect((await createExpense({ category: OLD_RENT })).category).toBe(
+        'Alquiler',
+      );
+      expect((await createExpense({ category: OLD_CLEANING })).category).toBe(
+        'Limpieza y cafetería',
+      );
+      const listed = (await call('get', '/expense-categories').expect(200))
+        .body as CategoryBody[];
+      expect(listed.map((c) => c.name)).toEqual(
+        expect.arrayContaining(['Alquiler', 'Limpieza y cafetería']),
+      );
     });
 
     it('una propia sirve en un gasto; retirada, ya no, pero los gastos viejos la conservan', async () => {

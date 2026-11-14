@@ -11,8 +11,10 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
-import { locationBody } from './support/location-fixtures';
-import { sedeTodayFixture } from './support/sede-clock';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-027 · Caja por turno bajo concurrencia y con varias monedas y sedes:
 // dos aperturas o dos cierres a la vez (uno gana, el otro 409), abonos y
@@ -23,12 +25,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
-// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
-// «hoy» de la caja y el de la API no se separan si la corrida cruza la
-// medianoche de Bogotá.
-const SEDE = sedeTodayFixture();
-const today = (): string => civilDateIn(new Date(), SEDE.timeZone);
+const CARACAS = 'America/Caracas';
+const today = (): string => civilDateIn(new Date(), CARACAS);
 const ROUNDS = 6;
 
 interface ClosingLine {
@@ -74,7 +72,7 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
     api('post', '/cash-sessions/open', receptionToken).send({ floats });
   const close = (id: string, counted = 0) =>
     api('post', `/cash-sessions/${id}/close`, receptionToken).send({
-      counts: [{ currency: 'COP', method: 'CASH', counted }],
+      counts: [{ currency: 'VES', method: 'CASH', counted }],
       differenceReason: 'Prueba de concurrencia',
     });
   const pay = (
@@ -88,32 +86,32 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
       receptionToken,
       locationId,
     ).send({
-      currency: 'COP',
+      currency: 'VES',
       method: 'CASH',
       paidAt: today(),
       amount,
       ...extra,
     });
 
-  /** Σ de los ajustes en efectivo COP que entraron en la caja. */
+  /** Σ de los ajustes en efectivo VES que entraron en la caja. */
   const adjustmentsIn = async (sessionId: string): Promise<number> => {
     const rows = await raw.cashSessionAdjustment.findMany({
-      where: { sessionId, currency: 'COP', method: 'CASH' },
+      where: { sessionId, currency: 'VES', method: 'CASH' },
       select: { amount: true },
     });
     return rows.reduce((sum, row) => sum + row.amount.toNumber(), 0);
   };
 
-  /** Lo esperado en efectivo COP según el cierre guardado. */
+  /** Lo esperado en efectivo VES según el cierre guardado. */
   const closedCashExpected = (detail: Detail): number =>
     detail.closing?.lines.find(
-      (l) => l.currency === 'COP' && l.method === 'CASH',
+      (l) => l.currency === 'VES' && l.method === 'CASH',
     )?.expected ?? 0;
 
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    clinic = await registerClinic(app, 'caja-concurrencia', SEDE);
+    clinic = await registerClinic(app, 'caja-concurrencia');
     const reception = await seedMember(raw, clinic, ClinicRole.RECEPTION);
     receptionToken = await loginAs(app, clinic.host, reception.email);
     sedePrincipal = (
@@ -125,7 +123,7 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
     sedeNorte = (
       (
         await api('post', '/locations')
-          .send(locationBody(SEDE, { name: 'Norte' }))
+          .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Norte' }))
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -143,7 +141,7 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
         data: {
           tenantId: clinic.tenantId,
           patientId: patient.id,
-          currency: 'COP',
+          currency: 'VES',
           status: 'ACCEPTED',
         },
         select: { id: true },
@@ -182,7 +180,7 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
   it('un abono que se cruza con el cierre: o entra en el arqueo guardado o queda sin caja, nunca en una caja cerrada sin contar', async () => {
     for (let round = 0; round < ROUNDS; round += 1) {
       const id = detailOf(
-        await open([{ currency: 'COP', amount: 10_000 }]).expect(201),
+        await open([{ currency: 'VES', amount: 10_000 }]).expect(201),
       ).id;
       await pay(1_000).expect(201);
       const [, closed] = await Promise.all([
@@ -226,7 +224,7 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
       );
       expect(
         detail.expected?.find(
-          (l) => l.currency === 'COP' && l.method === 'CASH',
+          (l) => l.currency === 'VES' && l.method === 'CASH',
         )?.expected ?? 0,
       ).toBe(closedCashExpected(detail));
     }
@@ -234,7 +232,7 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
 
   it('un abono en otra moneda va en su propia línea y uno de otra sede no entra en la caja', async () => {
     const id = detailOf(
-      await open([{ currency: 'COP', amount: 20_000 }]).expect(201),
+      await open([{ currency: 'VES', amount: 20_000 }]).expect(201),
     ).id;
     await pay(5_000).expect(201);
     await pay(30, { currency: 'USD' }).expect(201);
@@ -255,9 +253,9 @@ describe('Caja por turno: concurrencia, monedas y sedes (e2e, DX-027)', () => {
     expect(
       detail.expected?.map((l) => [l.currency, l.method, l.expected]),
     ).toEqual([
-      ['COP', 'CASH', 25_000 + (await adjustmentsIn(id))],
       ['USD', 'CASH', 30],
       ['USD', 'CARD', 15],
+      ['VES', 'CASH', 25_000 + (await adjustmentsIn(id))],
     ]);
     expect(detail.payments).toHaveLength(3);
   });

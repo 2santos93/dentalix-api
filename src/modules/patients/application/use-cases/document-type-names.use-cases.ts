@@ -16,6 +16,11 @@ export interface DocumentTypeNamesSettings {
   names: DocumentTypeNames;
 }
 
+/** DX-524: los de la clínica y lo que rige en la sede activa de la petición. */
+export interface DocumentTypeNamesView extends DocumentTypeNamesSettings {
+  effective: DocumentTypeNames;
+}
+
 @Injectable()
 export class GetDocumentTypeNamesUseCase {
   constructor(
@@ -23,8 +28,17 @@ export class GetDocumentTypeNamesUseCase {
     private readonly repo: DocumentTypeNamesRepository,
   ) {}
 
-  async execute(): Promise<DocumentTypeNamesSettings> {
-    return { names: await this.repo.get() };
+  /**
+   * `names` son SIEMPRE los de la clínica (los que edita Ajustes, DX-327);
+   * `effective`, los de la sede activa sobre ellos (DX-524): los selects y
+   * fichas los usan para escribir el tipo como lo escribe esa sede.
+   */
+  async execute(): Promise<DocumentTypeNamesView> {
+    const [names, effective] = await Promise.all([
+      this.repo.get(null),
+      this.repo.get(),
+    ]);
+    return { names, effective };
   }
 }
 

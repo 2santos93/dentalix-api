@@ -12,6 +12,7 @@ import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiGoneResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -24,6 +25,7 @@ import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-t
 import {
   ANAMNESIS_LINK_GONE_MESSAGE,
   GetPublicAnamnesisUseCase,
+  MarkPublicAnamnesisOpenedUseCase,
   SubmitPublicAnamnesisUseCase,
 } from '../application/use-cases/public-anamnesis.use-cases';
 import { SubmitPublicAnamnesisDto } from './dto/anamnesis-answers.dto';
@@ -31,7 +33,7 @@ import {
   PublicAnamnesisDto,
   PublicAnamnesisSubmittedDto,
 } from './dto/public-anamnesis.dto';
-import { NoStoreHeadersInterceptor } from './no-store-headers.interceptor';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 interface PublicRequest {
   ip?: string;
@@ -53,6 +55,7 @@ const NOT_FOUND = 'Token malformado, desconocido o de otra clínica.';
 export class PublicMedicalHistoryController {
   constructor(
     private readonly getAnamnesis: GetPublicAnamnesisUseCase,
+    private readonly markOpened: MarkPublicAnamnesisOpenedUseCase,
     private readonly submitAnamnesis: SubmitPublicAnamnesisUseCase,
   ) {}
 
@@ -66,6 +69,27 @@ export class PublicMedicalHistoryController {
   @ApiGoneResponse({ description: ANAMNESIS_LINK_GONE_MESSAGE })
   get(@Param('token') token: string): Promise<PublicAnamnesisDto> {
     return this.getAnamnesis.execute(token);
+  }
+
+  // DX-424: la página (no un previsualizador) avisa de la apertura.
+  @Post(':token/opened')
+  @HttpCode(204)
+  @ApiOperation({
+    summary:
+      'Marcar la primera apertura del enlace (para «Enlaces del paciente»)',
+    description:
+      'La llama la página al mostrar el cuestionario: el GET es de solo lectura porque los previsualizadores de enlaces lo abren solos. Solo cuenta la primera vez (las siguientes no cambian nada). Sin auditoría: la apertura queda en el envío.',
+  })
+  @ApiNoContentResponse({
+    description:
+      'Primera apertura registrada (las siguientes no cambian nada).',
+  })
+  @ApiNotFoundResponse({ description: NOT_FOUND })
+  @ApiGoneResponse({
+    description: `${ANAMNESIS_LINK_GONE_MESSAGE} (caducado, anulado o ya enviado)`,
+  })
+  opened(@Param('token') token: string): Promise<void> {
+    return this.markOpened.execute(token);
   }
 
   @Post(':token')

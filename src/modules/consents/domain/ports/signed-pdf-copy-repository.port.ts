@@ -30,6 +30,8 @@ export interface SignedPdfCopyTarget {
 }
 
 export interface IssueSignedPdfCopyLinkInput {
+  /** El id del enlace, elegido antes: el email lo lleva como referencia. */
+  id?: string;
   consentId: string;
   patientId: string;
   tokenHash: string;
@@ -37,6 +39,12 @@ export interface IssueSignedPdfCopyLinkInput {
   /** null: el envío automático al quedar READY. */
   createdById: string | null;
   now: Date;
+  /**
+   * DX-463: corre en la MISMA transacción, después de crear el enlace nuevo
+   * (encola el email). Si falla, la transacción se deshace entera: el enlace
+   * anterior NO se revoca y el paciente no se queda sin enlace.
+   */
+  enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
 }
 
 /** Un enlace buscado por el hash del token (RLS de la clínica del host). */
@@ -74,8 +82,8 @@ export interface SignedPdfCopyRepository {
     patientId?: string,
   ): Promise<SignedPdfCopyTarget | null>;
   /**
-   * En UNA transacción: invalida el enlace vivo anterior (si lo hay) y crea
-   * el nuevo. Devuelve su id y la hora del envío.
+   * En UNA transacción: invalida el enlace vivo anterior (si lo hay), crea
+   * el nuevo y ejecuta `enqueue` (el email). Todo o nada. Devuelve su id.
    */
   issueLink(input: IssueSignedPdfCopyLinkInput): Promise<{ id: string }>;
   /** null también si el paciente está archivado (DX-461). */
@@ -84,12 +92,15 @@ export interface SignedPdfCopyRepository {
    * Gasta el enlace (UPDATE condicional: sin usar, sin invalidar, sin
    * caducar y con el paciente vivo) y, en la misma transacción, deja el
    * evento de auditoría EXPORT de CONSENT con origen PUBLIC_LINK. Dos
-   * descargas a la vez: una gana.
+   * descargas a la vez: una gana. DX-463: `beforeCommit` corre en esa misma
+   * transacción con el PDF a entregar (genera la URL firmada): si falla, el
+   * enlace NO se gasta ni se audita y el paciente puede reintentar.
    */
   consumeLink(
     linkId: string,
     now: Date,
     meta: AuditRequestMeta,
+    beforeCommit?: (download: SignedPdfCopyDownload) => Promise<void>,
   ): Promise<ConsumeSignedPdfCopyOutcome>;
   findClinicBranding(): Promise<ClinicBranding | null>;
 }
@@ -111,6 +122,19 @@ export interface SignedConsentPdfBackfillRepository {
    * tenga fila (otra réplica, la firma en curso) se salta: idempotente.
    */
   backfill(
+    tenantId: string,
+    limit: number,
+    enqueue: (tx: Prisma.TransactionClient, consentId: string) => Promise<void>,
+  ): Promise<number>;
+  /**
+   * DX-459: hasta `limit` PDF de la clínica que quedaron FAILED con
+   * `UNSUPPORTED_CHARACTERS` (otro alfabeto, antes de las fuentes Unicode)
+   * vuelven a PENDING SIN aviso al paciente (`notifyPatient = false`) y su
+   * generación se encola en la misma transacción. UPDATE condicional: uno que
+   * ya reintentó «Reintentar» (u otra réplica) se salta. Ese código ya no se
+   * emite, así que cada fila se reintenta como mucho una vez.
+   */
+  retryUnsupportedCharacters(
     tenantId: string,
     limit: number,
     enqueue: (tx: Prisma.TransactionClient, consentId: string) => Promise<void>,

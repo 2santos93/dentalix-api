@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { unknownCurrencyNamedMessage } from '../../../shared/money/currency-messages';
 import type { CountryWhitelist } from './ports/country-whitelist.port';
 import type { CurrencyWhitelist } from '../../treatment-plans/domain/ports/currency-whitelist.port';
 import { isPhoneRegion } from '../../../shared/phone/phone-number';
@@ -71,8 +72,7 @@ export interface DefaultPhoneRegionError {
 
 export const REGIONAL_MESSAGES = {
   currencyMissing: 'Elige la moneda de la sede.',
-  currencyUnknown: (code: string) =>
-    `La moneda ${code} no está en la lista de monedas admitidas.`,
+  currencyUnknown: unknownCurrencyNamedMessage,
   timeZoneMissing: 'Elige la zona horaria de la sede.',
   timeZoneUnknown: (zone: string) => `La zona horaria «${zone}» no existe.`,
   localeMissing: 'Elige el formato regional de la sede.',

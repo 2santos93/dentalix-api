@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { locationRegionalOrNull } from '../../../../shared/locations/location-regional';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import type {
   PaymentReceiptRepository,
@@ -15,6 +16,7 @@ import {
 import {
   loadNoticeSettings,
   loadNoticeResponsibles,
+  loadMajorityReview,
 } from '../../../patients/infrastructure/notices/notice-context';
 
 const RECEIPT_PATIENT_SELECT = {
@@ -57,7 +59,17 @@ const RECEIPT_SOURCE_SELECT = {
       voidReason: true,
     },
   },
-  location: { select: { id: true, name: true, address: true } },
+  // DX-521: y su región de hoy, para los recibos sin región en la foto.
+  location: {
+    select: {
+      id: true,
+      name: true,
+      address: true,
+      timeZone: true,
+      locale: true,
+      hourCycle: true,
+    },
+  },
   plan: {
     select: {
       id: true,
@@ -105,14 +117,17 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
         throw new Error(`Abono ${payment.id} sin plan ni saldo migrado`);
       }
       const patientEmail = patient.email?.trim() ? patient.email.trim() : null;
-      const [responsibles, settings] = await Promise.all([
+      const [responsibles, majorityReview, settings] = await Promise.all([
         loadNoticeResponsibles(tx, patient.id),
+        loadMajorityReview(tx, patient.id),
         loadNoticeSettings(tx, payment.tenantId, payment.locationId),
       ]);
       const base = {
         paymentId: payment.id,
+        locationId: payment.locationId,
         treatmentPlanId: payment.treatmentPlanId,
         patientEmail,
+        locationRegional: locationRegionalOrNull(payment.location),
         notice: {
           patient: {
             firstName: patient.firstName,
@@ -121,6 +136,7 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
             emergencyContactName: patient.emergencyContactName,
           },
           responsibles,
+          majorityReview,
           settings,
         },
         rate: {
@@ -197,7 +213,11 @@ export class PrismaPaymentReceiptRepository implements PaymentReceiptRepository 
               taxId: null,
               address: null,
             },
-            location: payment.location,
+            location: {
+              id: payment.location.id,
+              name: payment.location.name,
+              address: payment.location.address,
+            },
             patient: {
               id: patient.id,
               firstName: patient.firstName,

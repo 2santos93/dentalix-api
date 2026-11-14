@@ -10,7 +10,7 @@ function sums(overrides: Partial<ProcedureSums> = {}): ProcedureSums {
     code: 'D2391',
     label: 'Resina',
     category: 'Operatoria',
-    currency: 'COP',
+    currency: 'VES',
     count: 0,
     gross: 0,
     discounts: 0,
@@ -39,7 +39,7 @@ describe('buildProcedureProduction (DX-423)', () => {
         code: 'D2391',
         label: 'Resina',
         category: 'Operatoria',
-        currency: 'COP',
+        currency: 'VES',
         count: 3,
         gross: 280,
         discounts: 20,
@@ -52,7 +52,7 @@ describe('buildProcedureProduction (DX-423)', () => {
     ]);
     expect(report.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'VES',
         count: 3,
         gross: 280,
         discounts: 20,
@@ -107,28 +107,20 @@ describe('buildProcedureProduction (DX-423)', () => {
 
   it('dos monedas: subtotal por moneda y ningún total mezclado', () => {
     const report = buildProcedureProduction([
-      sums({ currency: 'COP', count: 2, gross: 200_000, discounts: 10_000 }),
+      sums({ currency: 'VES', count: 2, gross: 200_000, discounts: 10_000 }),
       sums({ currency: 'USD', count: 1, gross: 50, discounts: 0 }),
       sums({
         catalogItemId: 'c-2',
         code: 'D1110',
         label: 'Profilaxis',
         category: 'Prevención',
-        currency: 'COP',
+        currency: 'VES',
         count: 1,
         gross: 80_000,
         discounts: 0,
       }),
     ]);
     expect(report.totals).toEqual([
-      {
-        currency: 'COP',
-        count: 3,
-        gross: 280_000,
-        discounts: 10_000,
-        net: 270_000,
-        averageNet: 90_000,
-      },
       {
         currency: 'USD',
         count: 1,
@@ -137,21 +129,29 @@ describe('buildProcedureProduction (DX-423)', () => {
         net: 50,
         averageNet: 50,
       },
+      {
+        currency: 'VES',
+        count: 3,
+        gross: 280_000,
+        discounts: 10_000,
+        net: 270_000,
+        averageNet: 90_000,
+      },
     ]);
     expect(report.categoryTotals).toEqual([
-      expect.objectContaining({
-        category: 'Operatoria',
-        currency: 'COP',
-        net: 190_000,
-      }),
       expect.objectContaining({
         category: 'Operatoria',
         currency: 'USD',
         net: 50,
       }),
       expect.objectContaining({
+        category: 'Operatoria',
+        currency: 'VES',
+        net: 190_000,
+      }),
+      expect.objectContaining({
         category: 'Prevención',
-        currency: 'COP',
+        currency: 'VES',
         net: 80_000,
       }),
     ]);
@@ -185,7 +185,7 @@ describe('buildProcedureProduction (DX-423)', () => {
         catalogItemId: 'a',
         code: 'A1',
         category: 'Operatoria',
-        currency: 'COP',
+        currency: 'VES',
         count: 1,
         gross: 1,
       }),
@@ -200,11 +200,11 @@ describe('buildProcedureProduction (DX-423)', () => {
     expect(
       report.rows.map((r) => `${r.category ?? '-'}/${r.code}/${r.currency}`),
     ).toEqual([
-      'Operatoria/A1/COP',
       'Operatoria/A1/USD',
-      'Prevención/A0/COP',
-      'Prevención/B2/COP',
-      '-/Z9/COP',
+      'Operatoria/A1/VES',
+      'Prevención/A0/VES',
+      'Prevención/B2/VES',
+      '-/Z9/VES',
     ]);
     expect(report.categoryTotals.map((c) => c.category)).toEqual([
       'Operatoria',
@@ -230,5 +230,63 @@ describe('buildProcedureProduction (DX-423)', () => {
     ]);
     expect(report.totals[0].gross).toBe(0.3);
     expect(report.totals[0].averageNet).toBe(0.15);
+  });
+
+  describe('DX-488: honorario medio y medio de catálogo exactos en céntimos', () => {
+    it('neto 2.01 en 2 da 1.01 y neto 4.27 en 2 da 2.14 (empates hacia arriba)', () => {
+      const report = buildProcedureProduction([
+        sums({ catalogItemId: 'a', code: 'A', count: 2, gross: 2.01 }),
+        sums({
+          catalogItemId: 'b',
+          code: 'B',
+          count: 2,
+          gross: 5,
+          discounts: 0.73,
+        }),
+      ]);
+      expect(report.rows.map((r) => [r.code, r.net, r.averageNet])).toEqual([
+        ['A', 2.01, 1.01],
+        ['B', 4.27, 2.14],
+      ]);
+      // El total suma los netos exactos (6.28) y su medio es 6.28 ÷ 4 = 1.57.
+      expect(report.totals).toEqual([
+        expect.objectContaining({
+          currency: 'VES',
+          count: 4,
+          gross: 7.01,
+          discounts: 0.73,
+          net: 6.28,
+          averageNet: 1.57,
+        }),
+      ]);
+    });
+
+    it('medio de catálogo 8.03 ÷ 2 = 4.02 (el épsilon daba 4.01); sin precio de catálogo, null', () => {
+      const report = buildProcedureProduction([
+        sums({
+          catalogItemId: 'a',
+          code: 'A',
+          count: 2,
+          gross: 8,
+          catalogCount: 2,
+          catalogSum: 8.03,
+          catalogPricedNet: 8,
+        }),
+        sums({ catalogItemId: 'b', code: 'B', count: 1, gross: 10 }),
+      ]);
+      expect(
+        report.rows.map((r) => [r.code, r.catalogAverage, r.catalogCount]),
+      ).toEqual([
+        ['A', 4.02, 2],
+        ['B', null, 0],
+      ]);
+    });
+
+    it('USD: 4.27 de neto en 2 ítems da 2.14, no 2.13', () => {
+      const [row] = buildProcedureProduction([
+        sums({ currency: 'USD', count: 2, gross: 4.27 }),
+      ]).rows;
+      expect(row.averageNet).toBe(2.14);
+    });
   });
 });

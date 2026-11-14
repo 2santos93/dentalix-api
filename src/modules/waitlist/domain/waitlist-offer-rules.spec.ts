@@ -8,9 +8,9 @@ import {
 
 describe('ofertas de huecos (DX-210)', () => {
   describe('día de la oferta en la zona de la sede', () => {
-    it('las 23:30 de Bogotá siguen siendo hoy aunque en UTC ya sea mañana', () => {
-      const now = new Date('2026-10-21T04:30:00Z'); // 20/10 23:30 en Bogotá
-      expect(offerDayFor(now, 'America/Bogota')).toBe('2026-10-20');
+    it('las 23:30 de Caracas siguen siendo hoy aunque en UTC ya sea mañana', () => {
+      const now = new Date('2026-10-21T03:30:00Z'); // 20/10 23:30 en la zona de la sede
+      expect(offerDayFor(now, 'America/Caracas')).toBe('2026-10-20');
       expect(offerDayFor(now, 'Europe/Madrid')).toBe('2026-10-21');
     });
   });
@@ -41,38 +41,38 @@ describe('ofertas de huecos (DX-210)', () => {
 
   describe('WhatsApp según el permiso, el canal y la baja del paciente (DX-128)', () => {
     const base = {
-      phone: '310 123 4567',
+      phone: '414 123 4567',
       contactChannel: 'EMAIL' as const,
       reminderOptOutAt: null,
-      whatsappOptInAt: new Date('2026-01-10T15:00:00Z'),
+      whatsappOptInAt: new Date('2026-01-10T14:00:00Z'),
     };
 
     it('con permiso de WhatsApp, móvil válido y sin baja: el número para wa.me', () => {
-      expect(whatsappOfferPhone(base, 'CO')).toEqual({
+      expect(whatsappOfferPhone(base, 'VE')).toEqual({
         blocked: false,
         reason: null,
-        phone: '573101234567',
+        phone: '584141234567',
       });
     });
 
     it('sin el permiso de WhatsApp registrado: bloqueado (se le llama)', () => {
       expect(
-        whatsappOfferPhone({ ...base, whatsappOptInAt: null }, 'CO'),
+        whatsappOfferPhone({ ...base, whatsappOptInAt: null }, 'VE'),
       ).toEqual({ blocked: true, reason: 'NO_OPT_IN', phone: null });
     });
 
     it('con baja de los avisos o sin canal: bloqueado aunque tenga el permiso', () => {
       expect(
-        whatsappOfferPhone({ ...base, reminderOptOutAt: new Date() }, 'CO'),
+        whatsappOfferPhone({ ...base, reminderOptOutAt: new Date() }, 'VE'),
       ).toEqual({ blocked: true, reason: 'OPTED_OUT', phone: null });
       expect(
-        whatsappOfferPhone({ ...base, contactChannel: 'NONE' }, 'CO'),
+        whatsappOfferPhone({ ...base, contactChannel: 'NONE' }, 'VE'),
       ).toEqual({ blocked: true, reason: 'CHANNEL_NONE', phone: null });
     });
 
     it('an ambiguous number is never VALID, never a wa.me and never stored as E.164', () => {
       expect(
-        whatsappOfferPhone({ ...base, phone: '0058 412 1234567' }, 'CO'),
+        whatsappOfferPhone({ ...base, phone: '0058 412 1234567' }, 'TH'),
       ).toEqual({ blocked: false, reason: null, phone: null });
     });
 
@@ -86,9 +86,9 @@ describe('ofertas de huecos (DX-210)', () => {
 
     it('un fijo o un número inválido no recibe WhatsApp', () => {
       expect(
-        whatsappOfferPhone({ ...base, phone: '601 555 1234' }, 'CO'),
+        whatsappOfferPhone({ ...base, phone: '601 555 1234' }, 'VE'),
       ).toEqual({ blocked: false, reason: null, phone: null });
-      expect(whatsappOfferPhone({ ...base, phone: null }, 'CO')).toEqual({
+      expect(whatsappOfferPhone({ ...base, phone: null }, 'VE')).toEqual({
         blocked: false,
         reason: null,
         phone: null,

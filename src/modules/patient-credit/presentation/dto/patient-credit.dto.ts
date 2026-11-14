@@ -1,3 +1,4 @@
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
@@ -25,10 +26,11 @@ import {
   CREDIT_REASON_MAX,
   CREDIT_REASON_REQUIRED_MESSAGE,
 } from '../../domain/patient-credit';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const AMOUNT_MESSAGE =
   'El importe tiene que ser un número mayor que 0 con 2 decimales como máximo.';
-const CURRENCY_MESSAGE = 'La moneda tiene que ser un código ISO 4217 válido.';
+const CURRENCY_MESSAGE = CURRENCY_CODE_MESSAGE;
 const METHOD_MESSAGE =
   'El método de la devolución tiene que ser CASH, CARD, TRANSFER u OTHER.';
 const TARGET_MESSAGE = 'Elige el plan de destino.';
@@ -113,7 +115,7 @@ export class UpdateCreditPolicyDto {
 export class CreditPolicyDto {
   @ApiProperty({
     description:
-      'Tope de RECEPTION por traspaso o devolución, en la moneda del plan (0 = no puede). ADMIN no tiene tope.',
+      'Tope de RECEPTION, una sola cifra por clínica que se compara en cada moneda: por operación en un traspaso y, en una devolución, también acumulado por día, sede y quien devuelve (DX-462). 0 = no puede. ADMIN no tiene tope.',
   })
   receptionMaxAmount!: number;
 }
@@ -201,7 +203,7 @@ export class RefundReceiptSnapshotDto {
 
 export class CreditRefundDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
-  @ApiProperty({ example: 'DEV-BOG-000001' }) number!: string;
+  @ApiProperty({ example: 'DEV-CCS-000001' }) number!: string;
   @ApiProperty({ format: 'uuid' }) patientId!: string;
   @ApiProperty({ format: 'uuid' }) locationId!: string;
   @ApiProperty({ format: 'uuid' }) treatmentPlanId!: string;
@@ -217,9 +219,27 @@ export class CreditRefundDto {
   @ApiProperty() createdAt!: Date;
   @ApiProperty({ type: RefundReceiptSnapshotDto })
   snapshot!: RefundReceiptSnapshotDto;
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede del comprobante. null si le falta algo: el comprobante se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
+}
+
+export class CreditTransferMovementDto extends CreditTransferDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-432: nombre de quien traspasó; `null` si ya no es (ni fue) miembro de la clínica.',
+  })
+  createdByName!: string | null;
 }
 
 export class PatientCreditMovementsDto {
-  @ApiProperty({ type: [CreditTransferDto] }) transfers!: CreditTransferDto[];
+  @ApiProperty({ type: [CreditTransferMovementDto] })
+  transfers!: CreditTransferMovementDto[];
   @ApiProperty({ type: [CreditRefundDto] }) refunds!: CreditRefundDto[];
 }

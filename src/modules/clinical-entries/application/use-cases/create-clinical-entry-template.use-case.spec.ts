@@ -7,7 +7,10 @@ import { patientsInClinic } from '../../../patients/application/__fixtures__/pat
 import { InMemoryClinicalNoteTemplateRepository } from '../../../clinical-note-templates/application/__fixtures__/in-memory-clinical-note-templates';
 import { UpdateNoteTemplateUseCase } from '../../../clinical-note-templates/application/use-cases/clinical-note-templates.use-cases';
 import type { NoteTemplateDraft } from '../../../clinical-note-templates/domain/note-template-rules';
-import { InMemoryClinicalEntryRepository } from '../__fixtures__/in-memory-clinical-entries';
+import {
+  InMemoryClinicalEntryRepository,
+  InMemoryClinicalEntrySettingsRepository,
+} from '../__fixtures__/in-memory-clinical-entries';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { CreateClinicalEntryUseCase } from './create-clinical-entry.use-case';
 
@@ -42,6 +45,7 @@ function setup() {
     patientsInClinic('p1', 'p2'),
     templates,
     tenantContext,
+    new InMemoryClinicalEntrySettingsRepository(),
   );
   const [surface, material, remarks] = resin.prompts;
   return {
@@ -180,12 +184,12 @@ describe('CreateClinicalEntryUseCase con plantilla (DX-170)', () => {
 });
 
 describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
-  const start = new Date('2026-10-17T14:00:00.000Z');
-  const timeZone = 'America/Bogota';
+  const start = new Date('2026-10-17T13:00:00.000Z');
+  const timeZone = 'America/Caracas';
 
-  // «Hoy» en Bogotá: 17/10/2026 a las 15:00 (20:00 UTC).
+  // «Hoy» en la zona de la sede: 17/10/2026 a las 15:00 (19:00 UTC).
   beforeEach(() => {
-    jest.useFakeTimers({ now: new Date('2026-10-17T20:00:00.000Z') });
+    jest.useFakeTimers({ now: new Date('2026-10-17T19:00:00.000Z') });
   });
   afterEach(() => {
     jest.useRealTimers();
@@ -193,8 +197,8 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
 
   it('admite una cita del día aunque empiece más tarde (hora de la sede)', async () => {
     const { uc, entries } = setup();
-    // 23:30 del 17/10 en Bogotá = 04:30 UTC del 18/10.
-    const tonight = new Date('2026-10-18T04:30:00.000Z');
+    // 23:30 del 17/10 en la zona de la sede = 03:30 UTC del 18/10.
+    const tonight = new Date('2026-10-18T03:30:00.000Z');
     entries.appointments.push({
       id: 'a-hoy',
       patientId: 'p1',
@@ -213,13 +217,13 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
 
   it('400 en español si la cita es de un día futuro (no crea nada)', async () => {
     const { uc, entries } = setup();
-    // 00:30 del 18/10 en Bogotá.
+    // 00:30 del 18/10 en la zona de la sede.
     entries.appointments.push({
       id: 'a-manana',
       patientId: 'p1',
       locationId: 'loc-1',
       status: 'SCHEDULED',
-      start: new Date('2026-10-18T05:30:00.000Z'),
+      start: new Date('2026-10-18T04:30:00.000Z'),
       timeZone,
     });
     const call = uc.execute(
@@ -258,13 +262,13 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
 
   it('el día de la cita es el de la zona de su sede, no el de UTC', async () => {
     const { uc, entries } = setup();
-    // 21:30 del 16/10 en Bogotá = 02:30 UTC del 17/10.
+    // 21:30 del 16/10 en la zona de la sede = 01:30 UTC del 17/10.
     entries.appointments.push({
       id: 'a-noche',
       patientId: 'p1',
       locationId: 'loc-1',
       status: 'COMPLETED',
-      start: new Date('2026-10-17T02:30:00.000Z'),
+      start: new Date('2026-10-17T01:30:00.000Z'),
       timeZone,
     });
     const entry = await uc.execute(
@@ -275,7 +279,7 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
     expect(entry.entryDate).toEqual(new Date('2026-10-16T00:00:00.000Z'));
   });
 
-  it('una fecha de atención enviada manda sobre la de la cita', async () => {
+  it('acepta una fecha de atención que es el día de la cita (zona de la sede)', async () => {
     const { uc, entries } = setup();
     entries.appointments.push({
       id: 'a1',
@@ -285,13 +289,41 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
       start,
       timeZone,
     });
-    const entryDate = new Date('2026-10-15T00:00:00.000Z');
+    const entryDate = new Date('2026-10-17T00:00:00.000Z');
     const entry = await uc.execute(
       'p1',
       { notes: 'Control', appointmentId: 'a1', entryDate },
       'd',
     );
     expect(entry.entryDate).toEqual(entryDate);
+  });
+
+  it('400 en español si la fecha de atención es de otro día que la cita (no crea nada)', async () => {
+    const { uc, entries } = setup();
+    entries.appointments.push({
+      id: 'a1',
+      patientId: 'p1',
+      locationId: 'loc-1',
+      status: 'COMPLETED',
+      start,
+      timeZone,
+    });
+    for (const day of ['2026-10-15', '2026-10-16', '2026-10-18']) {
+      const call = uc.execute(
+        'p1',
+        {
+          notes: 'Control',
+          appointmentId: 'a1',
+          entryDate: new Date(`${day}T00:00:00.000Z`),
+        },
+        'd',
+      );
+      await expect(call).rejects.toThrow(BadRequestException);
+      await expect(call).rejects.toThrow(
+        'La fecha de atención tiene que ser el día de la cita',
+      );
+    }
+    expect(entries.rows).toHaveLength(0);
   });
 
   it('404 en español si la cita no es de la clínica', async () => {
@@ -359,4 +391,46 @@ describe('CreateClinicalEntryUseCase ligada a la cita (DX-170)', () => {
       ).rejects.toThrow(/cancelada o .*no asistió/);
     },
   );
+});
+
+describe('CreateClinicalEntryUseCase sin cita: fecha no futura (DX-231)', () => {
+  // 21:00 del 17/10/2026 en Caracas = 01:00 UTC del 18/10.
+  beforeEach(() => {
+    jest.useFakeTimers({ now: new Date('2026-10-18T01:00:00.000Z') });
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('400 en español con una fecha posterior a hoy en la sede (no crea nada)', async () => {
+    const { uc, entries } = setup();
+    const call = uc.execute(
+      'p1',
+      { notes: 'x', entryDate: new Date('2026-10-18T00:00:00.000Z') },
+      'd',
+    );
+    await expect(call).rejects.toThrow(BadRequestException);
+    await expect(call).rejects.toThrow(
+      'La fecha de atención no puede ser una fecha futura',
+    );
+    expect(entries.rows).toHaveLength(0);
+  });
+
+  it('hoy en la sede vale aunque en UTC ya sea mañana; el pasado también', async () => {
+    const { uc } = setup();
+    await expect(
+      uc.execute(
+        'p1',
+        { notes: 'x', entryDate: new Date('2026-10-17T00:00:00.000Z') },
+        'd',
+      ),
+    ).resolves.toBeDefined();
+    await expect(
+      uc.execute(
+        'p1',
+        { notes: 'x', entryDate: new Date('2026-09-01T00:00:00.000Z') },
+        'd',
+      ),
+    ).resolves.toBeDefined();
+  });
 });

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   AppointmentStatus,
@@ -11,6 +12,8 @@ import {
   TriageFlag,
 } from '@prisma/client';
 import { CreateWalkInUseCase } from './create-walk-in.use-case';
+import { ChairAssignmentService } from '../chair-assignment';
+import { InMemoryChairRepository } from '../../../chairs/application/__fixtures__/in-memory-chairs';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 import { InMemoryScheduleBlockRepository } from '../../../schedule-blocks/application/__fixtures__/in-memory-schedule-blocks';
 import { InMemoryAppointmentTypeRepository } from '../../../appointment-types/application/__fixtures__/in-memory-appointment-types';
@@ -19,21 +22,24 @@ import type { PatientRepository } from '../../../patients/domain/ports/patient-r
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type {
+  WalkInReplay,
   WalkInRepository,
   WalkInWrite,
 } from '../../domain/ports/walk-in-repository.port';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 import {
+  IDEMPOTENCY_KEY_REUSED_CODE,
   NO_RESERVED_SLOT_CODE,
   PATIENT_DUPLICATE_CODE,
   WALK_IN_MESSAGES,
   WALK_IN_ROLES,
+  walkInRequestFingerprint,
 } from '../../domain/walk-in';
 import { PATIENT_ROLES } from '../../../auth/presentation/guards/clinic-role-sets';
 import { DOC_TAKEN_MESSAGE } from '../../../patients/infrastructure/repositories/prisma-patient.repository';
 
-// DX-470: «Atender sin cita». Martes 10 nov 2026 en Bogotá (UTC−5): las
+// DX-470: «Atender sin cita». Martes 10 nov 2026 en la zona de la sede (UTC−4): las
 // 10:07:42 del reloj del servidor son las 15:07:42 UTC.
 const NOW = new Date('2026-11-10T15:07:42.000Z');
 const utc = (hhmm: string) => new Date(`2026-11-10T${hhmm}:00.000Z`);
@@ -67,14 +73,19 @@ function setup(
   const writes: WalkInWrite[] = [];
   let failWith: Error | null = null;
   const docLookups: string[] = [];
+  // DX-510: lo que el doble guarda por Idempotency-Key (como la columna).
+  const byKey = new Map<string, WalkInReplay>();
   const walkIns: WalkInRepository = {
     findLivePatientIdByDoc: (docNumber) => {
       docLookups.push(docNumber);
       return Promise.resolve(options.docOwner?.id ?? null);
     },
+    findByIdempotencyKey: (key) => Promise.resolve(byKey.get(key) ?? null),
     create: (input) => {
       writes.push(input);
       if (failWith) return Promise.reject(failWith);
+      const stored = input.idempotency && byKey.get(input.idempotency.key);
+      if (stored) return Promise.resolve({ replayed: true, ...stored });
       const patientId =
         input.patient.kind === 'existing' ? input.patient.id : 'new-patient';
       const appointment = appointments.seed({
@@ -91,10 +102,19 @@ function setup(
         triageFlags: input.triageFlags,
         triageNote: input.triageNote,
       });
+      const overbookId = input.overbookReason !== null ? 'override-1' : null;
+      if (input.idempotency) {
+        byKey.set(input.idempotency.key, {
+          appointment,
+          overbookId,
+          fingerprint: input.idempotency.fingerprint,
+        });
+      }
       return Promise.resolve({
+        replayed: false,
         appointment,
         patientCreated: input.patient.kind === 'new',
-        overbookId: input.overbookReason !== null ? 'override-1' : null,
+        overbookId,
       });
     },
   };
@@ -110,15 +130,16 @@ function setup(
   } as unknown as PatientRepository;
   const provider =
     options.provider === undefined
-      ? { userId: 'prov1', locationIds: null }
+      ? { userId: 'prov1', role: 'DENTIST', locationIds: null }
       : options.provider;
   const staff = {
     findById: () => Promise.resolve(provider),
   } as unknown as StaffRepository;
   const locations = {
     findById: (id: string) =>
-      Promise.resolve({ id, name: 'Sede', timeZone: 'America/Bogota' }),
+      Promise.resolve({ id, name: 'Sede', timeZone: 'America/Caracas' }),
   } as unknown as LocationRepository;
+  const chairs = new InMemoryChairRepository();
   const uc = new CreateWalkInUseCase(
     appointments,
     walkIns,
@@ -128,6 +149,7 @@ function setup(
     blocks,
     locations,
     inMemoryAvailability(),
+    new ChairAssignmentService(chairs, appointments, locations),
     () => NOW,
   );
   const reserved = (start: string, end: string, typeIds = [urgent.id]) =>
@@ -143,12 +165,14 @@ function setup(
     uc,
     appointments,
     blocks,
+    chairs,
     types,
     urgent,
     cleaning,
     writes,
     docLookups,
     reserved,
+    byKey,
     fail: (error: Error) => {
       failWith = error;
     },
@@ -158,10 +182,82 @@ function setup(
 const NEW_PATIENT = {
   firstName: ' Lucía ',
   lastName: 'Pérez',
-  phone: ' +57 300 123 4567 ',
+  phone: ' +58 412 123 4567 ',
 };
 
 describe('CreateWalkInUseCase (DX-470)', () => {
+  describe('con sillón (DX-492)', () => {
+    const overbook = { overbookReason: 'Dolor agudo sin hueco' };
+    const input = { newPatient: NEW_PATIENT, providerId: 'prov1', ...overbook };
+
+    it('guarda el sillón libre de la sede', async () => {
+      const { uc, chairs, writes } = setup();
+      const chair = chairs.seed({ name: 'Sillón 1' });
+      await uc.execute({ ...input, chairId: chair.id }, CTX);
+      expect(writes[0].chairId).toBe(chair.id);
+    });
+
+    it('sin sillón, la cita va sin sillón', async () => {
+      const { uc, writes } = setup();
+      await uc.execute(input, CTX);
+      expect(writes[0].chairId).toBeNull();
+    });
+
+    it('ocupado: 409 con el nombre del sillón y nada escrito', async () => {
+      const { uc, chairs, appointments, writes } = setup();
+      const chair = chairs.seed({ name: 'Sillón 1' });
+      appointments.seed({
+        providerId: 'otro',
+        chairId: chair.id,
+        start: new Date(NOW.getTime() - 10 * 60_000),
+        end: new Date(NOW.getTime() + 10 * 60_000),
+      });
+      await expect(
+        uc.execute({ ...input, chairId: chair.id }, CTX),
+      ).rejects.toThrow(/Sillón 1/);
+      expect(writes).toHaveLength(0);
+    });
+
+    it('otra sede o desactivado: 400; de otra clínica: 404', async () => {
+      const { uc, chairs } = setup();
+      const elsewhere = chairs.seed({ locationId: 'loc2' });
+      const off = chairs.seed({ active: false });
+      await expect(
+        uc.execute({ ...input, chairId: elsewhere.id }, CTX),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute({ ...input, chairId: off.id }, CTX),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute({ ...input, chairId: 'ajena' }, CTX),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('la carrera (EXCLUDE del sillón) también dice su nombre', async () => {
+      const { uc, chairs, fail } = setup();
+      const chair = chairs.seed({ name: 'Sillón 1' });
+      fail(
+        new Prisma.PrismaClientUnknownRequestError(
+          'exclusion 23P01 appointments_no_overlap_per_chair',
+          { clientVersion: 'test' },
+        ),
+      );
+      await expect(
+        uc.execute({ ...input, chairId: chair.id }, CTX),
+      ).rejects.toThrow(/Sillón 1/);
+    });
+
+    it('la huella cambia con el sillón y es la de siempre sin él', () => {
+      const shape = { locationId: 'loc1', providerId: 'prov1' };
+      expect(walkInRequestFingerprint({ ...shape, chairId: 'a' })).not.toBe(
+        walkInRequestFingerprint(shape),
+      );
+      expect(walkInRequestFingerprint({ ...shape, chairId: undefined })).toBe(
+        walkInRequestFingerprint(shape),
+      );
+    });
+  });
+
   it('paciente nuevo en el primer hueco reservado libre: ARRIVED, urgente, llegada ahora', async () => {
     const { uc, writes, reserved, urgent } = setup();
     reserved('20:00', '20:30');
@@ -184,7 +280,7 @@ describe('CreateWalkInUseCase (DX-470)', () => {
         data: {
           firstName: 'Lucía',
           lastName: 'Pérez',
-          phone: '+57 300 123 4567',
+          phone: '+58 412 123 4567',
           docType: DocumentType.OTHER,
           docTypeLabel: null,
           docNumber: undefined,
@@ -193,6 +289,7 @@ describe('CreateWalkInUseCase (DX-470)', () => {
       providerId: 'prov1',
       locationId: 'loc1',
       appointmentTypeId: urgent.id,
+      chairId: null,
       start: utc('17:00'),
       end: utc('17:30'),
       arrivedAt: NOW,
@@ -542,5 +639,127 @@ describe('CreateWalkInUseCase (DX-470)', () => {
     await expect(
       uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX),
     ).rejects.toThrow(WALK_IN_MESSAGES.slotTaken);
+  });
+
+  describe('Idempotency-Key (DX-510)', () => {
+    const KEY = '0F8FAD5B-D9CB-469F-A165-70867728950E';
+
+    it('dos envíos con la misma clave: la misma cita, sin segundo paciente ni segunda cita', async () => {
+      const { uc, writes, reserved, appointments } = setup();
+      reserved('17:00', '18:00');
+      const input = { newPatient: NEW_PATIENT, providerId: 'prov1' };
+
+      const first = await uc.execute(input, CTX, KEY);
+      const second = await uc.execute(
+        { ...input, newPatient: { ...NEW_PATIENT, firstName: 'Lucía' } },
+        CTX,
+        ` ${KEY.toLowerCase()} `,
+      );
+
+      expect(first.patientCreated).toBe(true);
+      expect(second.id).toBe(first.id);
+      expect(second.patientCreated).toBe(false);
+      expect(second.overbookId).toBe(first.overbookId);
+      // El atajo encontró la cita antes de escribir: una sola escritura.
+      expect(writes).toHaveLength(1);
+      expect(writes[0].idempotency).toEqual({
+        key: KEY.toLowerCase(),
+        fingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) as string,
+      });
+      expect(
+        await appointments.findOverlapping('prov1', utc('00:00'), utc('23:59')),
+      ).toHaveLength(1);
+    });
+
+    it('misma clave con otros datos: 422 IDEMPOTENCY_KEY_REUSED y nada nuevo', async () => {
+      const { uc, writes, reserved } = setup();
+      reserved('17:00', '19:00');
+      await uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX, KEY);
+
+      const variants = [
+        {
+          patientId: 'p1',
+          providerId: 'prov1',
+          triageFlags: [TriageFlag.PAIN],
+        },
+        { patientId: 'p1', providerId: 'prov1', triageNote: 'otra' },
+        { patientId: 'p2', providerId: 'prov1' },
+        {
+          patientId: 'p1',
+          providerId: 'prov1',
+          overbookReason: 'Dolor agudo, no espera',
+        },
+      ];
+      for (const variant of variants) {
+        const error = await uc
+          .execute(variant, CTX, KEY)
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(UnprocessableEntityException);
+        expect(
+          (error as UnprocessableEntityException).getResponse(),
+        ).toMatchObject({
+          code: IDEMPOTENCY_KEY_REUSED_CODE,
+          message: WALK_IN_MESSAGES.idempotencyKeyReused,
+        });
+      }
+      expect(writes).toHaveLength(1);
+    });
+
+    it('la transacción encuentra la cita de la otra petición con la misma clave: la devuelve', async () => {
+      const { uc, writes, reserved, byKey } = setup();
+      reserved('17:00', '18:00');
+      const input = { patientId: 'p1', providerId: 'prov1' };
+      const first = await uc.execute(input, CTX, KEY);
+      // Simula la carrera: el atajo no la vio (la primera aún no había
+      // confirmado) pero la transacción, tras el candado, sí.
+      const stored = byKey.get(KEY.toLowerCase())!;
+      byKey.delete(KEY.toLowerCase());
+      let lookups = 0;
+      const original = byKey.get.bind(byKey);
+      byKey.get = (k: string) =>
+        lookups++ === 0 ? undefined : (original(k) ?? stored);
+
+      const second = await uc.execute(input, CTX, KEY);
+      expect(second.id).toBe(first.id);
+      expect(second.patientCreated).toBe(false);
+      expect(writes).toHaveLength(2);
+    });
+
+    it('carrera: lo que ve la segunda petición (p. ej. el hueco ocupado) es la cita de la primera', async () => {
+      const { uc, reserved, byKey, fail } = setup();
+      reserved('17:00', '18:00');
+      const input = { patientId: 'p1', providerId: 'prov1' };
+      const first = await uc.execute(input, CTX, KEY);
+      const stored = byKey.get(KEY.toLowerCase())!;
+      byKey.delete(KEY.toLowerCase());
+      fail(
+        new Prisma.PrismaClientUnknownRequestError(
+          'conflicting key value violates exclusion constraint "appointments_no_overlap_per_provider" 23P01',
+          { clientVersion: 'x' },
+        ),
+      );
+      let lookups = 0;
+      const original = byKey.get.bind(byKey);
+      byKey.get = (k: string) =>
+        lookups++ === 0 ? undefined : (original(k) ?? stored);
+
+      const second = await uc.execute(input, CTX, KEY);
+      expect(second.id).toBe(first.id);
+    });
+
+    it('sin clave: como siempre (dos envíos, dos citas); clave que no es UUID: 400', async () => {
+      const { uc, writes, reserved } = setup();
+      reserved('17:00', '18:00');
+      await uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX);
+      await uc.execute({ patientId: 'p2', providerId: 'prov1' }, CTX, '  ');
+      expect(writes).toHaveLength(2);
+      expect(writes.every((w) => w.idempotency === undefined)).toBe(true);
+      await expect(
+        uc.execute({ patientId: 'p1', providerId: 'prov1' }, CTX, 'doble-clic'),
+      ).rejects.toThrow(
+        new BadRequestException(WALK_IN_MESSAGES.idempotencyKeyInvalid),
+      );
+      expect(writes).toHaveLength(2);
+    });
   });
 });

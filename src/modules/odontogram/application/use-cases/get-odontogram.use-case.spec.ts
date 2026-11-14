@@ -3,8 +3,8 @@ import { CatalogKind } from '@prisma/client';
 import { GetOdontogramUseCase } from './get-odontogram.use-case';
 import { InMemoryToothRecordRepository } from '../__fixtures__/in-memory-odontogram';
 
-// Bogotá (UTC-5): "hoy" es 2026-10-16 hasta las 05:00 UTC del 17.
-const NOW = new Date('2026-10-16T20:00:00.000Z');
+// En la zona de la sede (UTC-4): "hoy" es 2026-10-16 hasta las 04:00 UTC del 17.
+const NOW = new Date('2026-10-16T19:00:00.000Z');
 
 function seeded() {
   // Las anulaciones toman la fecha de este reloj: el 16.
@@ -31,10 +31,10 @@ describe('GetOdontogramUseCase', () => {
 
   it('groups records by toothNumber, ordered by toothNumber ascending', async () => {
     const { repo, add } = seeded();
-    await add('48', '2026-10-01T10:00:00Z');
-    await add('11', '2026-10-02T10:00:00Z');
-    await add('11', '2026-10-03T10:00:00Z');
-    await add('21', '2026-10-04T10:00:00Z');
+    await add('48', '2026-10-01T09:00:00Z');
+    await add('11', '2026-10-02T09:00:00Z');
+    await add('11', '2026-10-03T09:00:00Z');
+    await add('21', '2026-10-04T09:00:00Z');
     const uc = new GetOdontogramUseCase(repo, () => NOW);
 
     const result = await uc.execute('p1');
@@ -45,7 +45,7 @@ describe('GetOdontogramUseCase', () => {
 
   it('scopes by patientId (does not leak another patient records)', async () => {
     const { repo, add } = seeded();
-    await add('11', '2026-10-01T10:00:00Z');
+    await add('11', '2026-10-01T09:00:00Z');
     const uc = new GetOdontogramUseCase(repo, () => NOW);
 
     expect(await uc.execute('p2')).toEqual([]);
@@ -53,7 +53,7 @@ describe('GetOdontogramUseCase', () => {
 
   it('keeps each record intact inside its group (no data loss/mutation)', async () => {
     const { repo, add } = seeded();
-    const record = await add('11', '2026-10-01T10:00:00Z', 'nota importante');
+    const record = await add('11', '2026-10-01T09:00:00Z', 'nota importante');
     const uc = new GetOdontogramUseCase(repo, () => NOW);
 
     expect((await uc.execute('p1'))[0].records[0]).toEqual(record);
@@ -62,8 +62,8 @@ describe('GetOdontogramUseCase', () => {
   describe('anulación y carta a una fecha (DX-120)', () => {
     it('no pinta lo anulado ni la anulación', async () => {
       const { repo, add } = seeded();
-      const target = await add('64', '2026-10-01T10:00:00Z');
-      await add('65', '2026-10-02T10:00:00Z');
+      const target = await add('64', '2026-10-01T09:00:00Z');
+      await add('65', '2026-10-02T09:00:00Z');
       await repo.createVoid({
         patientId: 'p1',
         target,
@@ -79,11 +79,11 @@ describe('GetOdontogramUseCase', () => {
 
     it('asOf incluye lo anulado después y excluye lo posterior, cortando el día en la zona de la clínica', async () => {
       const { repo, add } = seeded();
-      const target = await add('64', '2026-10-01T10:00:00Z');
-      // 2026-10-05 a las 23:30 en Bogotá = 04:30 UTC del 6: sigue siendo el 5.
-      await add('65', '2026-10-06T04:30:00Z');
-      // 2026-10-06 en Bogotá: posterior.
-      await add('84', '2026-10-06T15:00:00Z');
+      const target = await add('64', '2026-10-01T09:00:00Z');
+      // 2026-10-05 a las 23:30 en la zona de la sede = 03:30 UTC del 6: sigue siendo el 5.
+      await add('65', '2026-10-06T03:30:00Z');
+      // 2026-10-06 en la zona de la sede: posterior.
+      await add('84', '2026-10-06T14:00:00Z');
       // La anulación de 64 lleva la fecha del reloj del doble: el 16.
       await repo.createVoid({
         patientId: 'p1',

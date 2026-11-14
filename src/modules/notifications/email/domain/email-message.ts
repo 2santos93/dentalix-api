@@ -17,17 +17,73 @@ export const EMAIL_TEMPLATES = [
   'appointment-reminder',
   'registration-notice',
   'payment-receipt',
+  'payment-receipt-summary',
   'post-op-instructions',
   'signature-request',
   'signature-code',
   'signature-budget-accepted',
   'slot-offer',
   'signed-consent-copy',
+  'mfa-notice',
+  'mfa-enrollment-code',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
-/** Idioma de la plantilla (la app está en español). Los formatos son los de la sede (G1-B). */
-export type EmailLocale = 'es';
+/**
+ * DX-149-quater: si un correo de clínica gasta su tope diario
+ * (`MAIL_TENANT_DAILY_LIMIT`, DX-088) y si lo respeta.
+ * - `clinic`: lo dispara la clínica (su personal o sus trabajos): cuenta en
+ *   el tope y, si encola con tope, se frena al pasarlo.
+ * - `self-service`: lo pide la propia persona desde un endpoint PÚBLICO
+ *   (restablecer la contraseña). Ni cuenta ni se frena: si contara, un
+ *   tercero agotaría el cupo de la clínica pidiendo restablecimientos para su
+ *   personal y la dejaría 24 h sin correos (ni del personal ni
+ *   restablecimientos legítimos). Lo acotan el tope por destinatario y el
+ *   suyo propio (el restablecimiento: por usuario, en `user_tokens`).
+ * Los de plataforma (sin clínica) no entran en ningún recuento de clínica;
+ * se clasifican igual para que la tabla sea exhaustiva.
+ */
+export type TenantDailyBudget = 'clinic' | 'self-service';
+
+export const TENANT_DAILY_BUDGET: Readonly<
+  Record<EmailTemplateName, TenantDailyBudget>
+> = {
+  invitation: 'clinic',
+  'password-reset': 'self-service',
+  'email-verify': 'clinic',
+  'appointment-reminder': 'clinic',
+  'registration-notice': 'clinic',
+  'payment-receipt': 'clinic',
+  'payment-receipt-summary': 'clinic',
+  'post-op-instructions': 'clinic',
+  'signature-request': 'clinic',
+  'signature-code': 'clinic',
+  'signature-budget-accepted': 'clinic',
+  'slot-offer': 'clinic',
+  'signed-consent-copy': 'clinic',
+  'mfa-notice': 'clinic',
+  'mfa-enrollment-code': 'clinic',
+};
+
+/** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
+export const TENANT_DAILY_EXEMPT_TEMPLATES: readonly EmailTemplateName[] =
+  EMAIL_TEMPLATES.filter((t) => TENANT_DAILY_BUDGET[t] === 'self-service');
+
+/**
+ * Idiomas con catálogo de textos (DX-497). Los formatos de fecha, hora e
+ * importe son SIEMPRE los de la sede (G1-B, DX-315), no los del idioma.
+ */
+export const EMAIL_LOCALES = ['es', 'en'] as const;
+export type EmailLocale = (typeof EMAIL_LOCALES)[number];
+/** El idioma de la clínica: el de las plantillas sin catálogo por idioma. */
+export const DEFAULT_EMAIL_LOCALE: EmailLocale = 'es';
+/**
+ * DX-497: plantillas que se escriben en el idioma del paciente (las demás
+ * solo existen en el de la clínica: pedirles otro es un error de quien llama).
+ */
+export const LOCALIZED_EMAIL_TEMPLATES: readonly EmailTemplateName[] = [
+  'appointment-reminder',
+];
 
 /** Marca de la clínica que firma el email; `null` = email de plataforma. */
 export interface EmailBrand {
@@ -94,6 +150,12 @@ export interface AppointmentReminderEmailVars {
   /** Enlace de baja de los recordatorios (DX-128), si se emitió uno. */
   unsubscribeUrl: string | null;
   /**
+   * DX-469: «Añadir a mi calendario»: el .ics del enlace de confirmación y
+   * el inicio/fin (ISO) de la cita para el enlace de Google Calendar. null o
+   * ausente = sin enlace de confirmación: el email no lo ofrece.
+   */
+  calendar?: { icsUrl: string; start: string; end: string } | null;
+  /**
    * DX-291: la variable `{politica_cancelacion}` del recordatorio: la política
    * VIGENTE de la sede al enviarlo (horas de aviso, texto de la clínica e
    * importe del cargo ya formateado). null/ausente = la sede no tiene
@@ -147,6 +209,43 @@ export interface PaymentReceiptEmailVars {
   cashierName: string | null;
   voided: { dateLabel: string; reason: string } | null;
   legalNotice: string;
+  /**
+   * DX-515-bis: el título del recibo congelado en su foto; ausente = «Recibo
+   * de caja», como siempre.
+   */
+  title?: string;
+  /** DX-515-bis: la leyenda congelada en la foto; ausente = ninguna. */
+  legend?: string;
+}
+
+/**
+ * DX-401: resumen de los abonos de un período. Igual que el recibo: el
+ * documento enmascarado, nada clínico y sin enlaces (el resumen va en el
+ * propio email). Fechas e importes ya formateados con los de la sede.
+ */
+export interface PaymentReceiptSummaryEmailVars {
+  patientName: string;
+  /** DX-203: va al responsable (nombre de pila); el email lo saluda a él. */
+  responsibleName?: string | null;
+  /** «{nombre visible} ******5678», o null sin documento. */
+  patientDocLabel: string | null;
+  /** «01/10/2026 al 31/10/2026». */
+  periodLabel: string;
+  /** «Razón social · Id. fiscal …», o null si los datos fiscales están pendientes. */
+  fiscalLine: string | null;
+  /** Una por forma de pago, en orden de emisión. */
+  lines: {
+    receiptNumber: string;
+    dateLabel: string;
+    locationName: string;
+    methodLabel: string;
+    amountLabel: string;
+    voided: boolean;
+  }[];
+  /** Total por moneda de lo no anulado («USD 150.00»); vacío si todo está anulado. */
+  totalLabels: string[];
+  voidedCount: number;
+  notice: string;
 }
 
 /**
@@ -184,6 +283,24 @@ export interface SignatureRequestEmailVars {
 }
 
 /** DX-243: el código de 6 dígitos que abre el documento. Solo el código. */
+/** DX-021-bis: qué pasó con la verificación en dos pasos de la cuenta. */
+export type MfaNoticeKind =
+  'ENABLED' | 'RECOVERY_CODE_USED' | 'RESET_BY_ADMIN' | 'ATTEMPTS_LOCKED';
+
+export interface MfaNoticeEmailVars {
+  kind: MfaNoticeKind;
+  /** Códigos de recuperación que quedan (`RECOVERY_CODE_USED`). */
+  recoveryCodesRemaining?: number;
+}
+
+/** DX-021-bis, SEC-066: código del correo para el alta forzada del MFA. */
+export interface MfaEnrollmentCodeEmailVars {
+  code: string;
+  /** Dice cuál de varios correos es el del intento que está en pantalla. */
+  ref: string;
+  expiresInMinutes: number;
+}
+
 export interface SignatureCodeEmailVars {
   recipientFirstName: string;
   clinicName: string;
@@ -242,9 +359,12 @@ export interface EmailVarsByTemplate {
   'appointment-reminder': AppointmentReminderEmailVars;
   'registration-notice': RegistrationNoticeEmailVars;
   'payment-receipt': PaymentReceiptEmailVars;
+  'payment-receipt-summary': PaymentReceiptSummaryEmailVars;
   'post-op-instructions': PostOpInstructionsEmailVars;
   'signature-request': SignatureRequestEmailVars;
   'signature-code': SignatureCodeEmailVars;
+  'mfa-notice': MfaNoticeEmailVars;
+  'mfa-enrollment-code': MfaEnrollmentCodeEmailVars;
   'signature-budget-accepted': SignatureBudgetAcceptedEmailVars;
   'slot-offer': SlotOfferEmailVars;
   'signed-consent-copy': SignedConsentCopyEmailVars;

@@ -1,13 +1,20 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import {
   EmailBrand,
   EmailLocale,
   EmailTemplateName,
   EmailVarsByTemplate,
   RenderedEmail,
+  TENANT_DAILY_BUDGET,
 } from '../domain/email-message';
 import { EMAIL_OUTBOX_REPOSITORY } from '../domain/ports/email-outbox-repository.port';
-import type { EmailOutboxRepository } from '../domain/ports/email-outbox-repository.port';
+import type {
+  EmailOutboxRepository,
+  OutboxQuotaGuard,
+  QuotaLockScope,
+  RecentSends,
+} from '../domain/ports/email-outbox-repository.port';
 import { EmailPayloadCipher } from '../infrastructure/email-payload-cipher';
 import { MAIL_CONFIG } from '../infrastructure/mail-config';
 import type { MailConfig } from '../infrastructure/mail-config';
@@ -31,6 +38,26 @@ export interface EnqueueEmailInput<
 > extends EnqueuePlatformEmailInput<T> {
   /** Clínica que envía (marca y RLS). Sin clínica: `enqueuePlatform`. */
   tenantId: string;
+  /**
+   * DX-149-bis: vuelve a aplicar los topes de `assertWithinQuota` al
+   * insertar, contados en la MISMA transacción bajo el candado de la clínica
+   * y del destinatario (lo que de verdad frena N peticiones a la vez). Si se
+   * superan, lanza EmailQuotaExceededError y no encola nada. Lo piden quienes
+   * comprueban el tope antes; sin él (p. ej. recordatorios) no se cuenta.
+   *
+   * DX-149-ter: `'recipient'` aplica los mismos topes pero toma SOLO el
+   * candado del destinatario (endpoint público: restablecer la contraseña;
+   * ver `QuotaLockScope`). DX-149-quater: el tope diario de la clínica solo
+   * cuenta y frena las plantillas que lo gastan (`TENANT_DAILY_BUDGET`).
+   */
+  enforceQuota?: boolean | 'recipient';
+}
+
+/** Un email listo para encolar dentro de una transacción ajena (DX-463). */
+export interface PreparedEmail {
+  insert(tx: Prisma.TransactionClient): Promise<{ id: string }>;
+  /** Despierta al despachador: llamar solo tras el COMMIT de la transacción. */
+  kick(): void;
 }
 
 /**
@@ -57,38 +84,85 @@ export class EmailOutbox {
    * destinatario de la clínica (cubre reenviar e invitar otra vez al mismo
    * correo), y un máximo diario por clínica. Se llama ANTES de cambiar nada
    * (crear la invitación, regenerar el token). Lanza EmailQuotaExceededError.
+   *
+   * DX-149-quater: `template` dice si el tope diario de la clínica aplica
+   * (`TENANT_DAILY_BUDGET`); el del destinatario aplica siempre.
    */
-  async assertWithinQuota(tenantId: string, to: string): Promise<void> {
-    const { quotas } = this.config;
-    const sends = await this.repo.recentSends(
-      tenantId,
-      this.cipher.hashRecipient(to),
+  async assertWithinQuota(
+    tenantId: string,
+    to: string,
+    template: EmailTemplateName,
+  ): Promise<void> {
+    this.quotaGuardFor(template)(
+      await this.repo.recentSends(tenantId, this.cipher.hashRecipient(to)),
     );
-    if (
-      sends.secondsSinceLastToRecipient !== null &&
-      quotas.recipientCooldownSeconds > 0
-    ) {
-      const elapsed = Math.floor(sends.secondsSinceLastToRecipient);
-      if (elapsed < quotas.recipientCooldownSeconds) {
-        const wait = quotas.recipientCooldownSeconds - elapsed;
+  }
+
+  /**
+   * Los topes sobre un recuento (DX-088). `assertWithinQuota` lo usa como
+   * aviso temprano, antes de cambiar nada; con `enforceQuota`, el insert lo
+   * vuelve a aplicar bajo candado (DX-149-bis) y ese es el que manda. El tope
+   * diario de la clínica, solo para las plantillas que lo gastan
+   * (DX-149-quater, `TENANT_DAILY_BUDGET`).
+   */
+  private quotaGuardFor(template: EmailTemplateName): OutboxQuotaGuard {
+    const tenantDaily = TENANT_DAILY_BUDGET[template] === 'clinic';
+    return (sends: RecentSends) => {
+      const { quotas } = this.config;
+      if (
+        sends.secondsSinceLastToRecipient !== null &&
+        quotas.recipientCooldownSeconds > 0
+      ) {
+        const elapsed = Math.floor(sends.secondsSinceLastToRecipient);
+        if (elapsed < quotas.recipientCooldownSeconds) {
+          const wait = quotas.recipientCooldownSeconds - elapsed;
+          throw new EmailQuotaExceededError(
+            `Ya enviamos un correo a esta persona hace un momento. Espera ${wait} ${wait === 1 ? 'segundo' : 'segundos'} antes de volver a enviarlo.`,
+            wait,
+          );
+        }
+      }
+      if (sends.recipient >= quotas.recipientDaily) {
         throw new EmailQuotaExceededError(
-          `Ya enviamos un correo a esta persona hace un momento. Espera ${wait} ${wait === 1 ? 'segundo' : 'segundos'} antes de volver a enviarlo.`,
-          wait,
+          `Ya enviamos ${quotas.recipientDaily} correos a esta persona en las últimas 24 horas. Vuelve a intentarlo mañana.`,
+          60 * 60,
         );
       }
-    }
-    if (sends.recipient >= quotas.recipientDaily) {
-      throw new EmailQuotaExceededError(
-        `Ya enviamos ${quotas.recipientDaily} correos a esta persona en las últimas 24 horas. Vuelve a intentarlo mañana.`,
-        60 * 60,
+      if (tenantDaily && sends.tenant >= quotas.tenantDaily) {
+        throw new EmailQuotaExceededError(
+          `La clínica alcanzó el máximo de ${quotas.tenantDaily} correos en 24 horas. Vuelve a intentarlo más tarde o escribe a soporte si necesitas más.`,
+          60 * 60,
+        );
+      }
+    };
+  }
+
+  private guardOf(input: {
+    template: EmailTemplateName;
+    enforceQuota?: boolean | 'recipient';
+  }): {
+    guard?: OutboxQuotaGuard;
+    scope?: QuotaLockScope;
+  } {
+    if (!input.enforceQuota) return {};
+    // DX-149-quater (I2): `'recipient'` no toma el candado de la clínica, así
+    // que solo vale para plantillas que no cuentan en su tope diario; con una
+    // de clínica, ese tope se podría saltar con envíos a la vez.
+    if (
+      input.enforceQuota === 'recipient' &&
+      TENANT_DAILY_BUDGET[input.template] !== 'self-service'
+    ) {
+      throw new Error(
+        `enforceQuota 'recipient' solo para plantillas fuera del tope de la clínica (${input.template})`,
       );
     }
-    if (sends.tenant >= quotas.tenantDaily) {
-      throw new EmailQuotaExceededError(
-        `La clínica alcanzó el máximo de ${quotas.tenantDaily} correos en 24 horas. Vuelve a intentarlo más tarde o escribe a soporte si necesitas más.`,
-        60 * 60,
-      );
-    }
+    return {
+      guard: this.quotaGuardFor(input.template),
+      scope:
+        input.enforceQuota === 'recipient'
+          ? 'recipient'
+          : 'recipient-and-tenant',
+    };
   }
 
   async enqueue<T extends EmailTemplateName>(
@@ -96,9 +170,49 @@ export class EmailOutbox {
   ): Promise<{ id: string }> {
     const brand = await this.brandOf(input.tenantId);
     const row = this.prepare(input, brand);
-    const { id } = await this.repo.insert({ ...row, tenantId: input.tenantId });
+    const { guard, scope } = this.guardOf(input);
+    const { id } = await this.repo.insert(
+      { ...row, tenantId: input.tenantId },
+      guard,
+      scope,
+    );
     this.enqueued(id, input.tenantId, input.template, row.toMasked);
     return { id };
+  }
+
+  /**
+   * DX-463: encolar DENTRO de la transacción de quien llama (p. ej. revocar
+   * un enlace y encolar el email del nuevo): si la transacción se deshace, el
+   * email no existe; si confirma, ya está encolado. Se hace en dos pasos para
+   * no pedir otra conexión (la marca de la clínica) con la transacción
+   * abierta: `prepareInTx` antes de abrirla, `insert(tx)` dentro y `kick()`
+   * DESPUÉS del commit.
+   */
+  async prepareInTx<T extends EmailTemplateName>(
+    input: EnqueueEmailInput<T>,
+  ): Promise<PreparedEmail> {
+    const brand = await this.brandOf(input.tenantId);
+    const row = { ...this.prepare(input, brand), tenantId: input.tenantId };
+    const { guard, scope } = this.guardOf(input);
+    let outboxId: string | null = null;
+    return {
+      insert: async (tx) => {
+        const { id } = await this.repo.insertInTx(tx, row, guard, scope);
+        outboxId = id;
+        return { id };
+      },
+      // Tras el COMMIT: el log solo afirma lo que de verdad quedó encolado.
+      kick: () => {
+        this.logger.log({
+          event: 'email.enqueued',
+          outboxId,
+          tenantId: input.tenantId,
+          template: input.template,
+          to: row.toMasked,
+        });
+        this.dispatcher.kick();
+      },
+    };
   }
 
   /**
@@ -160,6 +274,24 @@ export class EmailOutbox {
     return created;
   }
 
+  /**
+   * Correo de seguridad de plataforma (DX-021-bis): fuera del tope por
+   * destinatario, que quien conoce una contraseña podría agotar para dejar al
+   * titular sin código. `null`: ya salió uno en `minIntervalSeconds`.
+   */
+  async enqueuePlatformSecurity<T extends 'mfa-notice' | 'mfa-enrollment-code'>(
+    input: EnqueuePlatformEmailInput<T>,
+    minIntervalSeconds: number,
+  ): Promise<{ id: string } | null> {
+    const row = this.prepare(input, null);
+    const created = await this.repo.insertPlatformSecurity(
+      row,
+      minIntervalSeconds,
+    );
+    if (created) this.enqueued(created.id, null, input.template, row.toMasked);
+    return created;
+  }
+
   private prepare<T extends EmailTemplateName>(
     input: EnqueuePlatformEmailInput<T>,
     brand: EmailBrand | null,
@@ -208,6 +340,15 @@ export class EmailOutbox {
     template: EmailTemplateName,
   ): Promise<number> {
     return this.repo.supersedePending(tenantId, referenceId, template);
+  }
+
+  /** DX-149-bis: `supersedePending` dentro de la transacción de quien llama. */
+  supersedePendingInTx(
+    tx: Prisma.TransactionClient,
+    referenceId: string,
+    template: EmailTemplateName,
+  ): Promise<number> {
+    return this.repo.supersedePendingInTx(tx, referenceId, template);
   }
 
   private async brandOf(tenantId: string): Promise<EmailBrand | null> {

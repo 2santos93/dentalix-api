@@ -1,3 +1,4 @@
+import type { PaymentAdjustmentLine } from '../payment-adjustment-line';
 import { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 
 /**
@@ -29,6 +30,8 @@ export interface CashPayment {
   paymentMethod: { id: string; name: string } | null;
   /** DX-377: referencia del pago, tal como la dio el pagador. */
   reference: string | null;
+  /** DX-515: nº de la factura fiscal emitida fuera de Dentalix, o `null`. */
+  externalInvoiceNumber: string | null;
   notes: string | null;
   location: { id: string; name: string };
   patient: { id: string; fullName: string };
@@ -47,6 +50,21 @@ export interface CashPayment {
    */
   splitId: string | null;
   splitLines: number | null;
+  /**
+   * DX-414: número del recibo del abono (el de la línea 1 en un cobro
+   * dividido: todas sus líneas lo comparten); `null` si es anterior a la
+   * numeración.
+   */
+  receiptNumber: string | null;
+  /** DX-389: el abono tiene comprobante del cobro adjunto. */
+  hasProof: boolean;
+  /**
+   * DX-516: los ajustes por medio de pago congelados en el abono (vacío sin
+   * ajustes) y lo cobrado: importe + impuestos + recargos − descuentos. Sin
+   * ajustes, lo cobrado es el importe.
+   */
+  adjustments: PaymentAdjustmentLine[];
+  collectedAmount: number;
 }
 
 /**
@@ -54,7 +72,25 @@ export interface CashPayment {
  * (misma regla que `DELETE /payments/:id`, ver `voidDenial`). Es solo una pista
  * para la interfaz: el endpoint de anulación vuelve a aplicar la regla.
  */
-export interface CashPaymentView extends CashPayment {
+export interface CashPaymentView extends Omit<
+  CashPayment,
+  'amount' | 'currency' | 'collectedAmount' | 'notes'
+> {
+  /**
+   * SEC-043: `null` con `amountHidden` (lo mismo `currency`,
+   * `collectedAmount`, `notes` y `reference`, y `adjustments` va vacío).
+   */
+  amount: number | null;
+  currency: string | null;
+  collectedAmount: number | null;
+  notes: string | null;
+  /**
+   * SEC-043: rige el arqueo ciego, quien consulta no es ADMIN y el abono
+   * cuenta en una caja aún abierta. La fila sirve para encontrarlo, ver su
+   * recibo o anularlo, pero sin cifras: sumadas al fondo darían el esperado
+   * antes de contar. Vuelven al cerrar la caja.
+   */
+  amountHidden: boolean;
   canVoid: boolean;
   /**
    * Día civil (YYYY-MM-DD) en que se REGISTRÓ el abono, en la zona de su sede

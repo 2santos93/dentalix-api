@@ -1,6 +1,8 @@
 import { TreatmentPlanItemStatus } from '@prisma/client';
 import {
   allocationVersion,
+  coverWithTransfersIn,
+  donorAvailableCents,
   hasFixedPointViolation,
   itemBillableCents,
   orderDonors,
@@ -30,6 +32,7 @@ const donor = (over: Partial<Donor> & { paymentId: string }): Donor => ({
   createdAt: d(1),
   baseCents: 0,
   allocatedCents: 0,
+  creditOutCents: 0,
   ...over,
 });
 
@@ -231,7 +234,7 @@ describe('validateManualAllocation', () => {
   const run = (
     lines: { itemId: string; cents: number }[],
     baseCents: number | null = 120,
-  ) => validateManualAllocation({ baseCents, lines, items });
+  ) => validateManualAllocation({ baseCents, creditOutCents: 0, lines, items });
 
   it('accepts a valid list and an empty one', () => {
     expect(
@@ -328,5 +331,152 @@ describe('itemBillableCents', () => {
     ).toBe(0);
     expect(itemBillableCents({ ...base, deletedAt: d(1) }, true)).toBe(0);
     expect(itemBillableCents(base, false)).toBe(0);
+  });
+});
+
+describe('donantes netos de lo devuelto o traspasado (DX-399-bis)', () => {
+  it('el disponible es base - imputado - devuelto, sin bajar de 0', () => {
+    expect(
+      respreadSurplus(
+        [
+          donor({
+            paymentId: 'A',
+            baseCents: 13_000,
+            allocatedCents: 10_000,
+            creditOutCents: 3_000,
+          }),
+        ],
+        [item({ id: 'I', billableCents: 3_000 })],
+      ),
+    ).toEqual([]);
+    expect(
+      respreadSurplus(
+        [
+          donor({
+            paymentId: 'A',
+            baseCents: 13_000,
+            allocatedCents: 10_000,
+            creditOutCents: 1_000,
+          }),
+        ],
+        [item({ id: 'I', billableCents: 3_000 })],
+      ),
+    ).toEqual([{ paymentId: 'A', itemId: 'I', cents: 2_000 }]);
+  });
+
+  it('un abono con todo devuelto cede el turno al siguiente, aunque sea más antiguo', () => {
+    const donors = [
+      donor({
+        paymentId: 'OLD',
+        paidAt: d(1),
+        baseCents: 3_000,
+        creditOutCents: 3_000,
+      }),
+      donor({ paymentId: 'NEW', paidAt: d(2), baseCents: 3_000 }),
+    ];
+    expect(
+      respreadSurplus(donors, [item({ id: 'I', billableCents: 3_000 })]),
+    ).toEqual([{ paymentId: 'NEW', itemId: 'I', cents: 3_000 }]);
+  });
+
+  it('el punto fijo ignora lo devuelto: sin disponible real no hay violación', () => {
+    const donors = [
+      donor({ paymentId: 'A', baseCents: 3_000, creditOutCents: 3_000 }),
+    ];
+    const items = [item({ id: 'I', billableCents: 3_000 })];
+    expect(hasFixedPointViolation(donors, items)).toBe(false);
+    expect(donorAvailableCents(donors[0])).toBe(0);
+    expect(
+      hasFixedPointViolation([{ ...donors[0], creditOutCents: 0 }], items),
+    ).toBe(true);
+  });
+
+  it('sin salidas (0) el disponible es base - imputado', () => {
+    expect(
+      donorAvailableCents(
+        donor({ paymentId: 'A', baseCents: 500, allocatedCents: 200 }),
+      ),
+    ).toBe(300);
+  });
+
+  it('manual: no deja imputar lo devuelto (OVER_NET) y distingue de superar la base', () => {
+    const items = new Map([
+      ['A', { status: TreatmentPlanItemStatus.ACCEPTED, freeCents: 20_000 }],
+    ]);
+    const run = (cents: number) =>
+      validateManualAllocation({
+        baseCents: 13_000,
+        creditOutCents: 3_000,
+        lines: [{ itemId: 'A', cents }],
+        items,
+      });
+    expect(run(10_000)).toBeNull();
+    expect(run(13_000)).toEqual({
+      code: 'OVER_NET',
+      sumCents: 13_000,
+      creditOutCents: 3_000,
+    });
+    expect(run(13_001)).toEqual({ code: 'OVER_PAYMENT', sumCents: 13_001 });
+  });
+});
+
+// DX-399-quater: lo recibido por traspaso que queda cubre lo que los abonos no
+// cubren, en el orden de reparto de los ítems (DONE y luego ACCEPTED).
+describe('coverWithTransfersIn (DX-399-quater)', () => {
+  it('la secuencia del ticket: 30 recibidos cubren lo que falta de un ítem de 60 al que el abono dio 30', () => {
+    const covered = coverWithTransfersIn(
+      [
+        item({ id: 'old', billableCents: 7000, allocatedCents: 7000 }),
+        item({
+          id: 'new',
+          createdAt: d(5),
+          billableCents: 6000,
+          allocatedCents: 3000,
+        }),
+      ],
+      3000,
+    );
+    expect([...covered]).toEqual([['new', 3000]]);
+  });
+
+  it('un ítem mayor que todo lo disponible queda cubierto solo en parte', () => {
+    const covered = coverWithTransfersIn(
+      [item({ id: 'big', billableCents: 10000, allocatedCents: 3000 })],
+      3000,
+    );
+    expect(covered.get('big')).toBe(3000);
+  });
+
+  it('nunca cubre más de lo que le falta a cada ítem, y sigue el orden de reparto', () => {
+    const covered = coverWithTransfersIn(
+      [
+        item({ id: 'accepted', createdAt: d(1), billableCents: 5000 }),
+        item({
+          id: 'done',
+          status: 'DONE',
+          createdAt: d(9),
+          completedAt: d(10),
+          billableCents: 2000,
+          allocatedCents: 500,
+        }),
+      ],
+      3000,
+    );
+    // Primero el DONE (le faltan 15), luego el ACCEPTED con lo que queda.
+    expect([...covered]).toEqual([
+      ['done', 1500],
+      ['accepted', 1500],
+    ]);
+  });
+
+  it('sin nada recibido, o con todo cubierto por abonos, no cubre nada', () => {
+    const items = [item({ id: 'x', billableCents: 5000, allocatedCents: 0 })];
+    expect(coverWithTransfersIn(items, 0).size).toBe(0);
+    expect(
+      coverWithTransfersIn(
+        [item({ id: 'x', billableCents: 5000, allocatedCents: 5000 })],
+        3000,
+      ).size,
+    ).toBe(0);
   });
 });

@@ -1,3 +1,4 @@
+import type { PaymentAdjustmentLine } from '../payment-adjustment-line';
 import { PaymentMethod } from '@prisma/client';
 import type {
   FrozenExchangeRate,
@@ -38,6 +39,11 @@ export interface Payment {
   /** DX-377: motivo con que se confirmó una referencia repetida. */
   duplicateReferenceReason: string | null;
   /**
+   * DX-515: nº de la factura fiscal emitida fuera de Dentalix para el abono,
+   * texto libre; `null` si no se anotó.
+   */
+  externalInvoiceNumber: string | null;
+  /**
    * DX-377: solo en la respuesta del alta: los abonos con la misma referencia
    * y medio que se confirmaron con motivo (para la auditoría).
    */
@@ -67,4 +73,16 @@ export interface Payment {
   frozenRate: FrozenExchangeRate | null;
   /** DX-375: `exchangeRateStatus` de las dos de arriba. */
   exchangeRateStatus: PaymentExchangeRateStatus;
+  /**
+   * DX-516: los ajustes por medio de pago congelados en el abono (vacío sin
+   * ajustes) y lo cobrado: importe + impuestos + recargos − descuentos. Sin
+   * ajustes, lo cobrado es el importe.
+   */
+  adjustments: PaymentAdjustmentLine[];
+  collectedAmount: number;
+  /**
+   * DX-389: el abono tiene comprobante del cobro adjunto. Solo un indicador:
+   * la clave del almacén no sale nunca; se ve con `GET /payments/:id/proof/url`.
+   */
+  hasProof: boolean;
 }

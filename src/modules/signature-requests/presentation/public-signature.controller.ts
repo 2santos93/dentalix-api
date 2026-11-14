@@ -22,7 +22,6 @@ import {
 import { currentRequestId } from '../../../shared/observability/request-context';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
-import { NoStoreHeadersInterceptor } from '../../medical-history-submissions/presentation/no-store-headers.interceptor';
 import type { PublicRequestEvidence } from '../domain/ports/signature-request-repository.port';
 import {
   GetPublicSignatureDocumentUseCase,
@@ -40,6 +39,7 @@ import {
   SignatureSessionDto,
   VerifySignatureCodeDto,
 } from './dto/public-signature.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 interface PublicRequest {
   ip?: string;

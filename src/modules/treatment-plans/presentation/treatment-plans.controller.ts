@@ -43,7 +43,10 @@ import {
   ApplyBulkDiscountResultDto,
 } from './dto/apply-bulk-discount.dto';
 import { TreatmentPlanDto } from './dto/treatment-plan.dto';
-import { TreatmentPlanItemDto } from './dto/treatment-plan-item.dto';
+import {
+  TreatmentPlanItemDto,
+  UpdatedTreatmentPlanItemDto,
+} from './dto/treatment-plan-item.dto';
 import { CreateTreatmentPlanUseCase } from '../application/use-cases/create-treatment-plan.use-case';
 import { ListTreatmentPlansUseCase } from '../application/use-cases/list-treatment-plans.use-case';
 import { GetTreatmentPlanUseCase } from '../application/use-cases/get-treatment-plan.use-case';
@@ -62,7 +65,10 @@ import {
   TreatmentPlan,
   TreatmentPlanDetail,
 } from '../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../domain/entities/treatment-plan-item.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -83,6 +89,10 @@ import {
   type AuditableRequest,
 } from '../../audit/presentation/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { QuoteExpiry } from '../application/quote-expiry';
+
+/** DX-379: el plan con `quoteExpired` (día civil de su sede). */
+type StampedPlan<T> = T & { quoteExpired: boolean };
 
 const SIGNED_PLAN_CONFLICT =
   'Plan aceptado con firma: sus ítems quedan congelados (DX-012)';
@@ -96,7 +106,7 @@ const DISCOUNT_LOCKED_CONFLICT = `${ITEMS_LOCKED_CONFLICT}; o el descuento (tamb
 const DISCOUNT_FORBIDDEN =
   'DX-204: el descuento EFECTIVO (SEC-041: rebaja del precio frente al de catálogo + descuento) supera el tope del rol de quien lo da («Tu rol permite hasta un X % de descuento por ítem.»; con rebaja de precio, precedido de «Precio por debajo del de catálogo: cuenta como descuento.»). Subir el precio es libre';
 const DISCOUNT_UNPROCESSABLE =
-  'DX-204: por encima del umbral de la política falta el motivo (con rebaja de precio: «… Indica el motivo del descuento.»), o «Otro» sin nota, o nota sin motivo';
+  'DX-204: por encima del umbral de la política falta el motivo (con rebaja de precio: «… Indica el motivo del descuento.»), o «Otro» sin nota, o nota sin motivo. DX-513-bis: `code` DISCOUNT_REFERENCE_RATE_MISSING si el precio de catálogo está en otra moneda y la clínica no tiene la tasa de hoy (el mensaje nombra la moneda y el día con el formato de la sede; a quien gestiona las tasas lo remite a Ajustes › Tasa de cambio y al resto le pide que avise a un administrador); no se guarda nada';
 
 interface AuthenticatedRequest extends AuditableRequest {
   user: JwtPayload;
@@ -142,6 +152,8 @@ export class TreatmentPlansController {
     private readonly rejectTreatmentPlan: RejectTreatmentPlanUseCase,
     private readonly createPlanAlternative: CreatePlanAlternativeUseCase,
     private readonly applyBulkDiscount: ApplyBulkDiscountUseCase,
+    // DX-379: `quoteExpired` en cada plan devuelto (día civil de su sede).
+    private readonly quoteExpiry: QuoteExpiry,
     private readonly tenantContext: TenantContextService,
     // DX-340: decimales de la moneda del plan, para la web.
     @Inject(CURRENCY_DIGITS_CATALOG)
@@ -161,20 +173,22 @@ export class TreatmentPlansController {
     description:
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
   })
-  create(
+  async create(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlan> {
+  ): Promise<StampedPlan<TreatmentPlan>> {
     // `createdById` comes from the authenticated user (req.user.sub), never
     // from the client body — same convention as AppointmentsController.create
     // / OdontogramController.create.
-    return this.createTreatmentPlan.execute({
-      patientId,
-      currency: dto.currency,
-      notes: dto.notes,
-      createdById: req.user.sub,
-    });
+    return this.quoteExpiry.one(
+      await this.createTreatmentPlan.execute({
+        patientId,
+        currency: dto.currency,
+        notes: dto.notes,
+        createdById: req.user.sub,
+      }),
+    );
   }
 
   @Audit({
@@ -185,10 +199,12 @@ export class TreatmentPlansController {
   @Get('patients/:patientId/treatment-plans')
   @ApiParam({ name: 'patientId', format: 'uuid' })
   @ApiOkResponse({ type: [TreatmentPlanDto] })
-  list(
+  async list(
     @Param('patientId', ParseUUIDPipe) patientId: string,
-  ): Promise<TreatmentPlan[]> {
-    return this.listTreatmentPlans.execute(patientId);
+  ): Promise<StampedPlan<TreatmentPlan>[]> {
+    return this.quoteExpiry.stamp(
+      await this.listTreatmentPlans.execute(patientId),
+    );
   }
 
   @Audit({
@@ -201,8 +217,12 @@ export class TreatmentPlansController {
   @ApiOkResponse({ type: TreatmentPlanDto })
   async get(
     @Param('id', ParseUUIDPipe) id: string,
-  ): Promise<TreatmentPlanDetail & { currencyDigits: CurrencyDigits }> {
-    const plan = await this.getTreatmentPlan.execute(id);
+  ): Promise<
+    StampedPlan<TreatmentPlanDetail> & { currencyDigits: CurrencyDigits }
+  > {
+    const plan = await this.quoteExpiry.one(
+      await this.getTreatmentPlan.execute(id),
+    );
     const digits = await this.currencyDigits.table([plan.currency]);
     return { ...plan, currencyDigits: digits.of(plan.currency) };
   }
@@ -221,25 +241,31 @@ export class TreatmentPlansController {
   })
   @ApiForbiddenResponse({
     description:
-      'status ACCEPTED: solo DENTIST y ADMIN (la asistente no acepta en nombre del doctor)',
+      'status ACCEPTED: solo DENTIST y ADMIN (la asistente no acepta en nombre del doctor). DX-513: al cambiar la moneda, un ítem cuya rebaja frente al catálogo pasaría a contar como descuento supera el tope del rol de quien la cambia (mismo mensaje que el alta)',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'DX-513: al cambiar la moneda, un ítem cuya rebaja frente al catálogo pasaría a contar como descuento supera el umbral del motivo y no lo tiene (mismo mensaje que el alta)',
   })
   @ApiConflictResponse({
-    description: `${TRANSITION_CONFLICT}; plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109), ni si tiene asientos de saldo a favor (traspaso dado o recibido, o devolución), aunque no tenga abonos: code PLAN_CURRENCY_LOCKED_BY_CREDIT (DX-438). SEC-050: el plan que lleva un cargo vigente por inasistencia no se cancela ni cambia de moneda (completarlo sí). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada, y cancela el plan de cuotas activo de las hermanas que rechaza; cancelar cancela también el plan de cuotas activo`,
+    description: `${TRANSITION_CONFLICT}; DX-513-bis: la moneda no cambia si el plan tiene algún ítem vivo con precio de referencia (catálogo, lista o convenio): code PLAN_CURRENCY_LOCKED_BY_PRICED_ITEMS (los ítems libres no bloquean); DX-513: la moneda no cambia si con ella un ítem pasaría a contar como descuento sin firmar, o si una rebaja frente al catálogo que cuenta hoy dejaría de verse en el informe de descuentos (nada cambia: ni el plan ni sus ítems); plan aceptado con firma: no cambia de moneda ni vuelve atrás (DX-012); otra opción del grupo ya aceptada; la moneda no cambia si el plan tiene abonos vivos, un plan de cuotas activo o está cerrado (DX-109), ni si tiene asientos de saldo a favor (traspaso dado o recibido, o devolución), aunque no tenga abonos: code PLAN_CURRENCY_LOCKED_BY_CREDIT (DX-438). SEC-050: el plan que lleva un cargo vigente por inasistencia no se cancela ni cambia de moneda (completarlo sí). Aceptar pasa los ítems propuestos a aceptados, igual que la aceptación firmada, y cancela el plan de cuotas activo de las hermanas que rechaza; cancelar cancela también el plan de cuotas activo. DX-379 (C): status ACCEPTED con el presupuesto vencido (quoteExpired): code QUOTE_EXPIRED («El presupuesto venció el {fecha}: acéptalo con firma para elegir cómo.», con quoteValidUntil); la sede del plan sin zona válida: LOCATION_TIMEZONE_REQUIRED`,
   })
-  update(
+  async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlan> {
-    return this.updateTreatmentPlan.execute(
-      id,
-      {
-        status: dto.status,
-        currency: dto.currency,
-        notes: dto.notes,
-        optionLabel: dto.optionLabel,
-      },
-      actorRole(req),
+  ): Promise<StampedPlan<TreatmentPlan>> {
+    return this.quoteExpiry.one(
+      await this.updateTreatmentPlan.execute(
+        id,
+        {
+          status: dto.status,
+          currency: dto.currency,
+          notes: dto.notes,
+          optionLabel: dto.optionLabel,
+        },
+        actorRole(req),
+      ),
     );
   }
 
@@ -263,16 +289,19 @@ export class TreatmentPlansController {
   })
   @ApiOkResponse({
     type: TreatmentPlanDto,
-    description: 'Plan PRESENTED, con presentedAt (servidor) y la sede',
+    description:
+      'Plan PRESENTED, con presentedAt (servidor) y la sede. DX-379: fija también la validez del presupuesto (quoteIssuedOn = hoy en la sede, quoteValidUntil = hoy + los días de GET /treatment-plan-settings), aunque un borrador impreso ya la tuviera',
   })
   @ApiBadRequestResponse({ description: 'El plan no tiene ítems' })
   @ApiForbiddenResponse({ description: 'Solo DENTIST y ADMIN presentan' })
   @ApiNotFoundResponse({ description: 'Plan no encontrado en esta clínica' })
   @ApiConflictResponse({
-    description: `${TRANSITION_CONFLICT}: solo se presenta un borrador`,
+    description: `${TRANSITION_CONFLICT}: solo se presenta un borrador. DX-379: code LOCATION_TIMEZONE_REQUIRED si la sede de la presentación no tiene una zona horaria válida (hace falta para fijar el día de emisión del presupuesto); el plan no cambia`,
   })
-  present(@Param('id', ParseUUIDPipe) id: string): Promise<TreatmentPlan> {
-    return this.presentTreatmentPlan.execute(id);
+  async present(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<StampedPlan<TreatmentPlan>> {
+    return this.quoteExpiry.one(await this.presentTreatmentPlan.execute(id));
   }
 
   @Audit({
@@ -301,15 +330,17 @@ export class TreatmentPlansController {
   @ApiConflictResponse({
     description: `${TRANSITION_CONFLICT}: solo se rechaza un plan presentado`,
   })
-  reject(
+  async reject(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlan> {
-    return this.rejectTreatmentPlan.execute(
-      id,
-      { reason: dto.reason, note: dto.note },
-      actorRole(req).userId,
+  ): Promise<StampedPlan<TreatmentPlan>> {
+    return this.quoteExpiry.one(
+      await this.rejectTreatmentPlan.execute(
+        id,
+        { reason: dto.reason, note: dto.note },
+        actorRole(req).userId,
+      ),
     );
   }
 
@@ -330,15 +361,17 @@ export class TreatmentPlansController {
   @ApiConflictResponse({
     description: 'Una opción del grupo ya está aceptada o completada',
   })
-  createAlternative(
+  async createAlternative(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CreatePlanAlternativeDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlan> {
-    return this.createPlanAlternative.execute(id, {
-      optionLabel: dto.optionLabel,
-      createdById: req.user.sub,
-    });
+  ): Promise<StampedPlan<TreatmentPlan>> {
+    return this.quoteExpiry.one(
+      await this.createPlanAlternative.execute(id, {
+        optionLabel: dto.optionLabel,
+        createdById: req.user.sub,
+      }),
+    );
   }
 
   @Audit({
@@ -430,7 +463,7 @@ export class TreatmentPlansController {
     description:
       'DX-050: sede donde se realizó al pasar a DONE; sin ella, la de escritura de la sesión (la principal o la primera permitida)',
   })
-  @ApiOkResponse({ type: TreatmentPlanItemDto })
+  @ApiOkResponse({ type: UpdatedTreatmentPlanItemDto })
   @ApiBadRequestResponse({
     description:
       'DX-050: pasar a DONE sin `performedById` quien no atiende (ASSISTANT); el profesional no atiende (ASSISTANT/RECEPTION) o no atiende en la sede; `completedAt` al pasar a DONE o futuro; `performedById`/`completedAt` en un ítem que no queda DONE. Mensaje en español',
@@ -450,7 +483,7 @@ export class TreatmentPlansController {
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() dto: UpdateTreatmentPlanItemDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<TreatmentPlanItem> {
+  ): Promise<TreatmentPlanItemUpdate> {
     // El actor (token, nunca el body) decide el tope del descuento (DX-204)
     // y, si atiende, es por defecto quien realizó el ítem (DX-050), que firma
     // el registro del odontograma (Pieza B).
@@ -486,7 +519,13 @@ export class TreatmentPlansController {
   @ApiConflictResponse({
     description: `${ITEMS_LOCKED_CONFLICT}; ${FEE_ITEM_CONFLICT}`,
   })
-  removeItem(@Param('itemId', ParseUUIDPipe) itemId: string): Promise<void> {
-    return this.removeTreatmentPlanItem.execute(itemId);
+  removeItem(
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    return this.removeTreatmentPlanItem.execute(
+      itemId,
+      auditRequestContext(req, this.tenantContext),
+    );
   }
 }

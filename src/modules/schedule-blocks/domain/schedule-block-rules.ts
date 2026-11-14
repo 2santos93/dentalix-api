@@ -1,4 +1,4 @@
-import { ClinicRole, ScheduleBlockKind } from '@prisma/client';
+import { ScheduleBlockKind } from '@prisma/client';
 import type { ScheduleBlock } from './entities/schedule-block.entity';
 import type { ScheduleBlockScope } from './ports/schedule-block-repository.port';
 import type {
@@ -28,17 +28,11 @@ export const SCHEDULE_BLOCK_NOT_FOUND_MESSAGE = 'Bloqueo no encontrado';
 /** Tope de citas afectadas que se devuelven (el total se dice aparte). */
 export const MAX_AFFECTED_APPOINTMENTS = 50;
 
-/**
- * Quién tiene agenda de pacientes: odontología y administración (el titular).
- * Recepción y asistencia no atienden, así que ni se les bloquea la agenda ni se
- * les buscan huecos (revisión de DX-122).
- */
-export const ATTENDING_ROLES: readonly ClinicRole[] = [
-  ClinicRole.DENTIST,
-  ClinicRole.ADMIN,
-];
-export const NOT_ATTENDING_MESSAGE =
-  'Ese miembro del equipo no atiende pacientes: no tiene agenda que bloquear ni huecos que buscar.';
+// DX-161: el rol «atiende» vive en staff/domain; se reexporta por compatibilidad.
+export {
+  ATTENDING_ROLES,
+  NOT_ATTENDING_MESSAGE,
+} from '../../staff/domain/attending';
 export const SCHEDULE_BLOCK_OWN_ONLY_MESSAGE =
   'Solo puedes bloquear o cambiar tu propia agenda.';
 
@@ -152,4 +146,27 @@ export function blockWarningMessage(
 ): string {
   const kind = SCHEDULE_BLOCK_KIND_LABELS[block.kind];
   return `La cita cae en un bloqueo que permite agendar: ${kind} (${describeRange(block, timeZone, fmt, true)}).`;
+}
+
+/**
+ * DX-149: dentro de la transacción de la cita apareció un bloqueo que no deja
+ * agendar (otra petición lo creó a la vez). El caso de uso responde el 409.
+ */
+export const SCHEDULE_BLOCKED_RACE_MESSAGE =
+  'Mientras agendabas se bloqueó ese horario. Elige otra hora.';
+
+export class ScheduleBlockedRaceError extends Error {
+  constructor() {
+    super('Un bloqueo que no deja agendar se creó a la vez que la cita');
+  }
+}
+
+/**
+ * DX-149: dentro de la transacción del bloqueo aparecieron citas debajo (otra
+ * petición las creó a la vez). El caso de uso pide confirmar (409).
+ */
+export class AffectedAppointmentsRaceError extends Error {
+  constructor(readonly total: number) {
+    super(`El bloqueo tiene ${total} citas debajo creadas a la vez`);
+  }
 }

@@ -1,3 +1,5 @@
+import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import {
   BadRequestException,
@@ -16,7 +18,7 @@ import {
   type RegisterImplantInput,
 } from './implants.use-cases';
 
-// 2026-10-17 15:00 UTC = 10:00 en Bogotá.
+// 2026-10-17 15:00 UTC = 10:00 en la zona de la sede.
 const NOW = new Date('2026-10-17T15:00:00.000Z');
 const clock = () => NOW;
 
@@ -120,7 +122,11 @@ describe('Implantes (DX-191, casos de uso)', () => {
 
   describe('anular', () => {
     it('exige motivo, autor o ADMIN, y una sola vez', async () => {
-      const voider = new VoidImplantUseCase(repo, clock);
+      const voider = new VoidImplantUseCase(
+        repo,
+        clock,
+        new TenantContextService(),
+      );
       const { id } = await register.execute('p1', IMPLANT, 'dr-1');
       await expect(
         voider.execute(id, '  ', { userId: 'dr-1', role: ClinicRole.DENTIST }),
@@ -148,6 +154,30 @@ describe('Implantes (DX-191, casos de uso)', () => {
         }),
       ).rejects.toThrow(ConflictException);
     });
+
+    it('SEC-014: desde otra sede → 403 sin anular; desde la suya, sí', async () => {
+      const tenantContext = new TenantContextService();
+      const voider = new VoidImplantUseCase(repo, clock, tenantContext);
+      const { id, locationId } = await register.execute('p1', IMPLANT, 'dr-1');
+      const actor = { userId: 'dr-1', role: ClinicRole.DENTIST };
+      await expect(
+        tenantContext.run(
+          't1',
+          undefined,
+          () => voider.execute(id, 'Lote mal transcrito', actor),
+          ['otra-sede'],
+        ),
+      ).rejects.toThrow(LOCATION_NOT_ALLOWED_MESSAGE);
+      expect((await repo.findById(id))?.voidedAt).toBeNull();
+      await expect(
+        tenantContext.run(
+          't1',
+          undefined,
+          () => voider.execute(id, 'Lote mal transcrito', actor),
+          [locationId],
+        ),
+      ).resolves.toMatchObject({ voidedAt: NOW });
+    });
   });
 
   describe('tarjeta', () => {
@@ -172,6 +202,21 @@ describe('Implantes (DX-191, casos de uso)', () => {
       ]);
       const delivered = await card.deliver('p1', '2026-10-17', 'rec-1');
       expect(delivered.deliveredAt).toEqual(NOW);
+    });
+
+    it('DX-354: la tarjeta lleva el regional de la sede de sus implantes, sin 409 si no hay', async () => {
+      const card = new GetImplantCardUseCase(repo, clock, names);
+      await register.execute('p1', IMPLANT, 'dr-1');
+      const shown = await card.execute('p1', '2026-10-17');
+      expect(shown.regional).toEqual({
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h12',
+      });
+      // Una sola sede: se pide esa, no la activa.
+      expect(repo.regionalAsked).toBe('loc-1');
+      repo.regionalResult = null;
+      expect((await card.execute('p1', '2026-10-17')).regional).toBeNull();
     });
 
     it('400 sin día válido y 404 sin implantes ese día', async () => {

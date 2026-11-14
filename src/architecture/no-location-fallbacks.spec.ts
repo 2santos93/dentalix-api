@@ -244,6 +244,57 @@ describe('formato regional y reloj solo desde el helper (G1-B, I5)', () => {
     ).toEqual([]);
   });
 
+  // DX-354 (D5): las horas de un texto salen de `fmt.clock`. Ningún literal de
+  // plantilla las compone a mano (`${pad(h)}:${pad(m)}`, `${String(h).padStart(2, '0')}:…`).
+  // DX-520-bis: tampoco un día `dd/mm` (`${pad(d)}/${pad(m)}`): sale de `fmt.civilDate`.
+  const TEMPLATE = /`(?:[^`\\]|\\.)*`/g;
+  const ZERO_PAD = /(?:padStart\(\s*2\s*,\s*'0'\s*\)|\bpad\w*\()/;
+  const handClock = (template: string): boolean =>
+    new RegExp(
+      `${ZERO_PAD.source}[^\`]*\\}[:/]\\$\\{|\\}[:/]\\$\\{[^\`]*${ZERO_PAD.source}`,
+    ).test(template);
+  /** Fechas de máquina y relojes de salida que sí componen ceros a mano. */
+  const MACHINE_CLOCK = [
+    join(SRC, 'shared', 'time', 'civil-day.ts'),
+    join(SRC, 'modules', 'recall', 'domain', 'recall-rules.ts'),
+  ];
+
+  it('DX-354: ningún literal de plantilla compone una hora con ceros a mano fuera de shared/format/', () => {
+    const files = production.filter(
+      (file) =>
+        !MACHINE_CLOCK.includes(file) && !file.endsWith(`${sep}csv-cells.ts`),
+    );
+    expect(
+      offendingMatches(files, TEMPLATE, (match) => handClock(match[0])),
+    ).toEqual([]);
+  });
+
+  it('DX-354 y DX-520-bis: la regla de la hora a mano detecta ${pad(h)}:${pad(m)} y ${pad(d)}/${pad(m)} y deja pasar fmt.clock', () => {
+    for (const template of [
+      '`${pad(h)}:${pad(m)}–${pad(h2)}:${pad(m2)}`',
+      "`${String(hour).padStart(2, '0')}:${mm}`",
+      "`${h}:${String(minute).padStart(2, '0')}`",
+      '`${pad(day)}/${pad(month)}`',
+      "`${String(d).padStart(2, '0')}/${m}`",
+    ]) {
+      expect({ template, caught: handClock(template) }).toEqual({
+        template,
+        caught: true,
+      });
+    }
+    for (const template of [
+      '`Fuera del horario (${fmt.clock(9, 0)}–${fmt.clock(13, 0)})`',
+      "`${series}-${String(number).padStart(6, '0')}`",
+      '`${locationId}:${weekday}`',
+      '`${base}/${id}/${slug}`',
+    ]) {
+      expect({ template, caught: handClock(template) }).toEqual({
+        template,
+        caught: false,
+      });
+    }
+  });
+
   it('DX-316: every production file of the location calendar is in the country-free list', () => {
     const calendar = join(SRC, 'modules', 'location-calendar');
     for (const layer of [
@@ -614,8 +665,19 @@ function allFiles(dir: string): string[] {
   });
 }
 
-/** `prisma/demo/**` y `prisma/seed*.ts`. */
-const demoFiles = (): string[] => [
+/**
+ * DX-524: el ÚNICO fichero de la demo con nombres de documento de un país
+ * («Cédula de identidad» en las sedes venezolanas, «CPF» en São Paulo). Son
+ * datos de las sedes de la demo; el código no los conoce, y ningún otro
+ * fichero de la demo, de producción ni de migraciones puede nombrarlos.
+ */
+const DEMO_DOC_NAMES_FILE = join(PRISMA_DIR, 'demo', 'document-type-names.ts');
+
+/** `prisma/demo/**` y `prisma/seed*.ts`, sin el fichero de nombres de sede. */
+const demoFiles = (): string[] =>
+  demoFilesWithDocNames().filter((file) => file !== DEMO_DOC_NAMES_FILE);
+
+const demoFilesWithDocNames = (): string[] => [
   ...allFiles(join(PRISMA_DIR, 'demo')),
   ...readdirSync(PRISMA_DIR)
     .filter((name) => /^seed.*\.ts$/.test(name))
@@ -675,24 +737,6 @@ const COUNTRY_DOC_ACRONYM = new RegExp(
  */
 const FROZEN_DOC_CODE =
   /\bLegacyDocumentCode\b|\blegacyDocumentCode\b|"docType"|\$Enums\s*(?:\.\s*DocType\b|\[\s*['"]DocType['"]\s*\])|\{[^}]*\bDocType\b[^}]*\}\s*=\s*\$Enums\b/;
-/**
- * V1 (decisión del dueño, 2026-10-31): la demo es una clínica venezolana y su
- * documento nacional lleva el nombre local con el que la llaman allí. Es DATO
- * de la clínica (DX-327: el ADMIN lo pone en Ajustes y el seed lo pone por ese
- * mismo caso de uso), no una regla: la única línea de la demo que nombra un
- * documento de un país. Ningún otro fichero ni línea se exime.
- */
-const DEMO_DOCUMENT_NAME_FILE = join(PRISMA_DIR, 'demo', 'data.ts');
-const DEMO_DOCUMENT_NAME_LINE = "NATIONAL_ID: 'Cédula de identidad',";
-/** `fichero:línea` de esa única línea; falla si no está una sola vez. */
-function demoDocumentNameHit(): string {
-  const lines = readFileSync(DEMO_DOCUMENT_NAME_FILE, 'utf8').split('\n');
-  const at = lines
-    .map((line, i) => (line.trim() === DEMO_DOCUMENT_NAME_LINE ? i : -1))
-    .filter((i) => i >= 0);
-  expect(at).toHaveLength(1);
-  return `${relative(SRC, DEMO_DOCUMENT_NAME_FILE)}:${at[0] + 1}`;
-}
 /**
  * `legacy-document-codes.ts` ya no se exime entero: solo estas líneas, los
  * alias de importación de uso en muchos países (en América y Europa), una
@@ -787,7 +831,7 @@ describe('tipos de documento genéricos (DX-327, DX-323)', () => {
     expect(files).toContain(LEGACY_DOCUMENT_CODES_FILE);
     expect(files.length).toBeGreaterThan(500);
     expect(productionDataFiles().length).toBeGreaterThan(0);
-    const allowed = [demoDocumentNameHit(), ...multiCountryAliasHits()];
+    const allowed = multiCountryAliasHits();
     expect(
       offending(files, legacyDocTypeHit).filter(
         (hit) => !allowed.includes(hit),
@@ -869,14 +913,24 @@ describe('tipos de documento genéricos (DX-327, DX-323)', () => {
     ).toBe(true);
   });
 
+  it('architecture: the country document names of the demo live only in its location-names data file (DX-524)', () => {
+    expect(demoFilesWithDocNames()).toContain(DEMO_DOC_NAMES_FILE);
+    // Es datos: sin importar nada de producción ni de la demo.
+    const lines = readFileSync(DEMO_DOC_NAMES_FILE, 'utf8').split('\n');
+    expect(lines.filter((line) => /^\s*import\b/.test(line))).toEqual([]);
+    // Y lo lee solo la semilla de la demo.
+    const readers = [...production, ...demoFiles()].filter((file) =>
+      /demo\/document-type-names['"]/.test(readFileSync(file, 'utf8')),
+    );
+    expect(readers.map((file) => relative(ROOT, file)).sort()).toEqual([
+      'prisma/seed-demo.ts',
+    ]);
+  });
+
   it('architecture: the demo names no country document or authority', () => {
     const files = demoFiles();
     expect(files.some((file) => file.endsWith('.csv'))).toBe(true);
-    // Excepción nombrada: el nombre local del documento nacional (V1).
-    const allowed = demoDocumentNameHit();
-    expect(
-      offending(files, demoCountryDocumentHit).filter((hit) => hit !== allowed),
-    ).toEqual([]);
+    expect(offending(files, demoCountryDocumentHit)).toEqual([]);
   });
 
   it('architecture: no code derives a document label from a legacy code', () => {
@@ -1780,9 +1834,10 @@ describe('textos sin ejemplos de un país (DX-368)', () => {
 });
 
 /**
- * DX-325: ningún texto de producción ni la demo cita una ley, una norma con
- * número o una autoridad de datos o sanitaria. Los comentarios quedan fuera:
- * son de DX-371. El nombre `AUTHORITY` ya lo usa DX-327 en este módulo.
+ * DX-325/DX-371: ningún texto de producción ni la demo cita una ley, una norma
+ * con número o una autoridad de datos o sanitaria, comentarios incluidos: la
+ * justificación de una regla es funcional, no una norma. El nombre `AUTHORITY`
+ * ya lo usa DX-327 en este módulo.
  */
 const NUM = String.raw`(?:n\.?[º°o]\.?\s*|no\.\s*)?`;
 /** Regímenes por su sigla y normas con número, en español, inglés y portugués. */
@@ -1804,9 +1859,6 @@ const citesLaw = (line: string): boolean =>
   LAW_CITATION.test(line) || LAW_AUTHORITY.test(line);
 
 describe('textos sin leyes ni autoridades (DX-325)', () => {
-  const citesLawInCode = (line: string): boolean =>
-    !isComment(line) && citesLaw(line);
-
   it('architecture: no production text or seed cites a law or an authority', () => {
     const files = [
       ...tsFiles(SRC).filter(isProduction),
@@ -1828,7 +1880,7 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
         join('prisma', 'seed.ts'),
       ]),
     );
-    expect(offending(files, citesLawInCode)).toEqual([]);
+    expect(offending(files, citesLaw)).toEqual([]);
   });
 
   it('the law patterns catch each citation and skip neutral text', () => {
@@ -1853,10 +1905,12 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
       `'${'Lei' + ' 13'}.709'`,
       `'registro ${'IN' + 'HRR'}'`,
       `'permiso ${'SA' + 'CS'}'`,
+      `// ${'Le' + 'y 1581'}, art. 6`,
+      ` * ${'Res. ' + '839'}/2017`,
       `'${'AN' + 'PD'}'`,
       `'${'CN' + 'IL'}'`,
     ]) {
-      expect({ line, caught: citesLawInCode(line) }).toEqual({
+      expect({ line, caught: citesLaw(line) }).toEqual({
         line,
         caught: true,
       });
@@ -1872,9 +1926,8 @@ describe('textos sin leyes ni autoridades (DX-325)', () => {
       `'(sic)'`,
       `'basic'`,
       `'artículos de limpieza'`,
-      `// ${'Le' + 'y 1581'}`,
     ]) {
-      expect({ line, caught: citesLawInCode(line) }).toEqual({
+      expect({ line, caught: citesLaw(line) }).toEqual({
         line,
         caught: false,
       });
@@ -1965,6 +2018,22 @@ const COLOMBIA_TERMS: ReadonlyArray<[string, RegExp]> = [
     'valor por defecto',
     new RegExp('@default\\("(?:CO' + 'P|America/' + 'Bogota|es-' + 'CO)"\\)'),
   ],
+  [
+    'medio de pago o banco de un país',
+    new RegExp(
+      '\\b(?:' +
+        [
+          'ne' + 'qui',
+          'davi' + 'plata',
+          'banco' + 'lombia',
+          'davi' + 'vienda',
+          'efec' + 'ty',
+          'balo' + 'to',
+        ].join('|') +
+        ')\\b',
+      'i',
+    ),
+  ],
 ];
 
 function colombiaHit(line: string): string | null {
@@ -2053,6 +2122,8 @@ describe('sin Colombia (DX-323, DX-325)', () => {
       `${'MUTUA' + '_ES'},`,
       `  migratedFrom${'Insurer' + 'Eps'}: true,`,
       `UPDATE patients SET "${'insurer' + 'Eps'}" = 'x'`,
+      `notes: '${'Pago por ' + 'Ne' + 'qui'}'`,
+      `'${'Davi' + 'plata'}'`,
     ]) {
       expect({ line, caught: colombiaHit(line) !== null }).toEqual({
         line,
@@ -2075,11 +2146,121 @@ describe('sin Colombia (DX-323, DX-325)', () => {
       `'+00 000 000 0001'`,
       `'surable'`,
       `const steps = 3;`,
+      `notes: 'Pago con billetera digital'`,
+      `'efectivo'`,
     ]) {
       expect({ line, caught: colombiaHit(line) !== null }).toEqual({
         line,
         caught: false,
       });
     }
+  });
+});
+
+/**
+ * G1 (DX-330, spec §8): el plazo de la HC es de la clínica. Ni una constante
+ * de 15 años, ni un texto que lo fije, ni «legal», ni las causales de un país.
+ * Los literales se arman por partes para que este fichero no se delate solo.
+ */
+describe('el plazo de la HC es de la clínica (DX-330)', () => {
+  const PRODUCTION = tsFiles(SRC).filter(isProduction);
+  const PATIENTS = join(SRC, 'modules', 'patients') + sep;
+  const DEMO = join(SRC, '..', 'prisma', 'demo');
+  const SCHEMA = join(SRC, '..', 'prisma', 'schema.prisma');
+  const FIXED_CONSTANT = 'CLINICAL_RECORD_' + 'RETENTION_YEARS';
+  const FIXED_TERM = /\b\d+\s+años\b/;
+  const RETENTION_WORD = /atenci[oó]n|retenci[oó]n/;
+  const LEGAL_RETENTION = new RegExp('retenci[oó]n ' + 'legal');
+  const COUNTRY_GROUNDS = new RegExp('DD\\.\\s?' + 'HH\\.|\\b' + 'DI' + 'H\\b');
+
+  /**
+   * Literales de texto de un fichero, sin comentarios y con los trozos unidos
+   * por `+` (Prettier parte los textos largos) fundidos en uno.
+   */
+  const literals = (text: string): { text: string; line: number }[] => {
+    const code = text
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+    const joined = code.replace(/(['"`])\s*\+\s*\1/g, '');
+    return [
+      ...joined.matchAll(
+        /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g,
+      ),
+    ].map((m) => ({
+      text: m[0],
+      line: joined.slice(0, m.index).split('\n').length,
+    }));
+  };
+  const fixedTermLiteral = (literal: string): boolean =>
+    (FIXED_TERM.test(literal) && RETENTION_WORD.test(literal)) ||
+    LEGAL_RETENTION.test(literal);
+  /** `fichero:línea` de cada literal de `files` que cumple `matches`. */
+  const offendingLiterals = (
+    files: string[],
+    matches: (literal: string) => boolean,
+  ): string[] =>
+    files.flatMap((file) =>
+      literals(readFileSync(file, 'utf8')).flatMap((l) =>
+        matches(l.text) ? [`${relative(SRC, file)}:${l.line}`] : [],
+      ),
+    );
+  /** Un texto suelto, como si fuera el único literal de un fichero. */
+  const fixedTermText = (line: string): boolean =>
+    literals(line).some((l) => fixedTermLiteral(l.text));
+
+  it('G1.1: no production file names the fixed 15-year constant', () => {
+    expect(
+      offending(PRODUCTION, (line) => line.includes(FIXED_CONSTANT)),
+    ).toEqual([]);
+  });
+
+  it('G1.2: no patients literal fixes a number of years or says legal retention', () => {
+    const patients = PRODUCTION.filter((file) => file.startsWith(PATIENTS));
+    expect(offendingLiterals(patients, fixedTermLiteral)).toEqual([]);
+  });
+
+  it('G1.3: no production text, demo seed or schema comment names the grounds of a country', () => {
+    const demo = existsSync(DEMO) ? tsFiles(DEMO) : [];
+    const texts = offendingLiterals([...PRODUCTION, ...demo], (literal) =>
+      COUNTRY_GROUNDS.test(literal),
+    );
+    const schema = readFileSync(SCHEMA, 'utf8')
+      .split('\n')
+      .flatMap((line, i) =>
+        COUNTRY_GROUNDS.test(line) ? [`prisma/schema.prisma:${i + 1}`] : [],
+      );
+    expect([...texts, ...schema]).toEqual([]);
+  });
+
+  it('G1.4: the patterns catch each retired form and skip the clinic term', () => {
+    for (const line of [
+      `  message: '${'15 ' + 'años'} desde la última atención',`,
+      `  summary: 'Historias en ${'retención ' + 'legal'}',`,
+    ]) {
+      expect({ line, caught: fixedTermText(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    for (const line of [
+      '  message: `${years} años desde la última atención`,',
+      "  reason: 'Vigencia: 12 meses',",
+      `  // ${'15 ' + 'años'} de retención: comentario`,
+    ]) {
+      expect({ line, caught: fixedTermText(line) }).toEqual({
+        line,
+        caught: false,
+      });
+    }
+    for (const line of [
+      `víctimas de violaciones de ${'DD. ' + 'HH./' + 'DI' + 'H'}`,
+      `razón ${'DI' + 'H'}`,
+    ]) {
+      expect({ line, caught: COUNTRY_GROUNDS.test(line) }).toEqual({
+        line,
+        caught: true,
+      });
+    }
+    expect(COUNTRY_GROUNDS.test('Permanente (nunca se libera)')).toBe(false);
   });
 });

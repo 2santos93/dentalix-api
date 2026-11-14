@@ -9,9 +9,13 @@ import type { AppointmentRepository } from '../../domain/ports/appointment-repos
 import {
   MAX_OPENINGS_RANGE_DAYS,
   findOpenings,
+  mergeChairOpenings,
+  type ChairOpening,
   type Interval,
   type Opening,
 } from '../../domain/openings';
+import { ChairAssignmentService } from '../chair-assignment';
+import type { ChairSummary } from '../../../chairs/domain/entities/chair.entity';
 import { LOCATION_SCHEDULE_REPOSITORY } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import { SCHEDULE_BLOCK_REPOSITORY } from '../../../schedule-blocks/domain/ports/schedule-block-repository.port';
@@ -47,13 +51,23 @@ export interface FindOpeningsInput {
   durationMinutes: number;
   /** Opcional: las otras citas del paciente también ocupan. */
   patientId?: string;
+  /** DX-509-bis: la cita que se mueve no ocupa su propia hora. */
+  excludeAppointmentId?: string;
+  /** DX-492: el hueco tiene que tener libre alguno de estos sillones. */
+  chairIds?: string[];
 }
 
 export interface OpeningsView {
   timeZone: string;
   durationMinutes: number;
-  openings: Opening[];
+  openings: (Opening | ChairOpening<ChairSummary>)[];
   truncated: boolean;
+  /**
+   * DX-533: la sede no tiene horario y se buscó dentro del de alta
+   * (`DEFAULT_BUSINESS_HOURS`). La agenda sigue aceptando cualquier hora; la
+   * interfaz lo dice para que «no hay huecos a las 23:30» no parezca un fallo.
+   */
+  defaultHours: boolean;
 }
 
 /**
@@ -62,7 +76,9 @@ export interface OpeningsView {
  * sin horario configurado, sin restricción; la excepción de la fecha
  * prevalece), fuera de bloqueos (también de los que dejan agendar:
  * un hueco propuesto no debería caer en el almuerzo) y sin solape con sus
- * citas (de cualquier sede) ni, si se indica, con las del paciente.
+ * citas (de cualquier sede) ni, si se indica, con las del paciente. Con
+ * `chairIds` (DX-492), además libres de alguno de esos sillones de la sede,
+ * también de sobrecupos: son los que ocupan el sillón en la EXCLUDE.
  */
 @Injectable()
 export class FindOpeningsUseCase {
@@ -82,6 +98,7 @@ export class FindOpeningsUseCase {
     private readonly tenantContext: TenantContextService,
     // DX-233: solo donde el profesional trabaja en esa sede.
     private readonly availability: ProviderAvailabilityService,
+    private readonly chairs: ChairAssignmentService,
   ) {}
 
   async execute(input: FindOpeningsInput): Promise<OpeningsView> {
@@ -117,14 +134,32 @@ export class FindOpeningsUseCase {
     if (input.patientId && !(await this.patients.findById(input.patientId))) {
       throw new NotFoundException('Paciente no encontrado');
     }
+    // DX-509-bis: la cita que se mueve tiene que ser de esta clínica (como
+    // el resto de ids de la consulta).
+    if (
+      input.excludeAppointmentId &&
+      !(await this.appointments.findById(input.excludeAppointmentId))
+    ) {
+      throw new NotFoundException('Cita no encontrada');
+    }
+
+    const chairs = [];
+    for (const chairId of new Set(input.chairIds)) {
+      chairs.push(
+        await this.chairs.load(chairId, {
+          locationId: input.locationId,
+          requireActive: true,
+        }),
+      );
+    }
 
     // Sin horario configurado la agenda no se restringe, pero proponer huecos
     // a las 3 de la mañana no ayuda: se usa el horario por defecto del alta.
     const hours = await this.schedule.findByLocation(input.locationId);
     // G1 (R4): la zona es la de la sede, tenga o no horario.
     const timeZone = requireLocationTimeZone(location);
-    const ranges =
-      hours && hours.ranges.length > 0 ? hours.ranges : DEFAULT_BUSINESS_HOURS;
+    const defaultHours = !hours || hours.ranges.length === 0;
+    const ranges = defaultHours ? DEFAULT_BUSINESS_HOURS : hours.ranges;
     const range = civilRangeInZone(input.from, input.to, timeZone);
 
     const busy: Interval[] = [
@@ -132,12 +167,14 @@ export class FindOpeningsUseCase {
         input.providerId,
         range.start,
         range.end,
+        input.excludeAppointmentId,
       )),
       ...(input.patientId
         ? await this.appointments.findOverlappingForPatient(
             input.patientId,
             range.start,
             range.end,
+            input.excludeAppointmentId,
           )
         : []),
       ...(
@@ -156,16 +193,45 @@ export class FindOpeningsUseCase {
       input.to,
     );
 
-    const result = findOpenings({
-      fromDay: input.from,
-      toDay: input.to,
+    const now = new Date();
+    const openingsWith = (extraBusy: readonly Interval[]) =>
+      findOpenings({
+        fromDay: input.from,
+        toDay: input.to,
+        timeZone,
+        ranges,
+        busy: [...busy, ...extraBusy],
+        durationMinutes: input.durationMinutes,
+        now,
+        providerRangesOn,
+      });
+
+    if (chairs.length === 0) {
+      return {
+        timeZone,
+        durationMinutes: input.durationMinutes,
+        defaultHours,
+        ...openingsWith([]),
+      };
+    }
+    const perChair = [];
+    for (const chair of chairs) {
+      const occupied = await this.appointments.findOverlappingForChair(
+        chair.id,
+        range.start,
+        range.end,
+        input.excludeAppointmentId,
+      );
+      perChair.push({
+        chair: { id: chair.id, name: chair.name, active: chair.active },
+        result: openingsWith(occupied),
+      });
+    }
+    return {
       timeZone,
-      ranges,
-      busy,
       durationMinutes: input.durationMinutes,
-      now: new Date(),
-      providerRangesOn,
-    });
-    return { timeZone, durationMinutes: input.durationMinutes, ...result };
+      defaultHours,
+      ...mergeChairOpenings(perChair),
+    };
   }
 }

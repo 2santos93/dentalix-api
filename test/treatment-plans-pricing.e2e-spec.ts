@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { CURRENCY_CODE_MESSAGE } from '../src/shared/money/currency-messages';
 import {
   CatalogKind,
   ClinicRole,
@@ -17,9 +18,13 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DX-105 en HTTP real: el precio de un ítem nuevo se resuelve en el servidor
 // (convenio vigente del paciente → lista activa de la sede del request →
@@ -31,6 +36,9 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 interface Item {
+  referenceCurrency: string | null;
+  referencePriceInPlan: number | null;
+  referenceRate: object | null;
   id: string;
   catalogItemId: string;
   catalogPrice: number | null;
@@ -38,6 +46,7 @@ interface Item {
   discount: number;
   discountById: string | null;
   basePrice: number | null;
+  catalogCurrency: string | null;
   priceSource: string | null;
   agreementId: string | null;
   agreementName: string | null;
@@ -137,7 +146,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
       .expect(200);
   }
 
-  async function newPlan(patientId: string, currency = 'COP'): Promise<string> {
+  async function newPlan(patientId: string, currency = 'VES'): Promise<string> {
     return create(`/patients/${patientId}/treatment-plans`, { currency });
   }
 
@@ -175,7 +184,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
   async function quote(
     patientId: string,
     catalogItemId: string,
-    currency = 'COP',
+    currency = 'VES',
     location?: string,
   ): Promise<Quote> {
     const res = await as(dentistToken, location)
@@ -189,6 +198,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
+    dropParRates ??= await seedParProviderRates(raw);
     clinic = await registerClinic(app, 'dx105-pricing');
     const dentist = await seedMember(raw, clinic, ClinicRole.DENTIST);
     dentistToken = await loginAs(app, clinic.host, dentist.email);
@@ -197,7 +207,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
     mainLocation = (locations.body as { id: string }[])[0].id;
     northLocation = await create(
       '/locations',
-      locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }),
+      locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }),
     );
 
     endo = await create('/catalog/items', {
@@ -229,10 +239,10 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
       type: 'PUBLIC_SYSTEM',
     });
 
-    // Lista de la Sede Norte (COP): la endodoncia a 90 000.
+    // Lista de la Sede Norte (VES): la endodoncia a 90 000.
     const northList = await create('/price-lists', {
       name: 'Lista Sede Norte',
-      currency: 'COP',
+      currency: 'VES',
       locationId: northLocation,
     });
     await as()
@@ -245,7 +255,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
     // usa en la resolución automática salvo vía convenio (R7).
     agreementListId = await create('/price-lists', {
       name: 'Lista Empresa X',
-      currency: 'COP',
+      currency: 'VES',
     });
     await as()
       .put(`/price-lists/${agreementListId}/items`, {
@@ -258,6 +268,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await resetDatabase(raw);
     await app.close();
     await raw.$disconnect();
@@ -348,15 +359,22 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
     it('price-quote da lo mismo que el alta', async () => {
       const plan = await newPlan(patient);
       const item = await added(plan, endo, {}, mainLocation);
-      const q = await quote(patient, endo, 'COP', mainLocation);
+      const q = await quote(patient, endo, 'VES', mainLocation);
       expect(q).toEqual({
         basePrice: item.basePrice,
+        catalogCurrency: item.catalogCurrency,
         price: item.catalogPrice,
         source: item.priceSource,
         agreementId: item.agreementId,
         agreementName: item.agreementName,
         allowDiscount: true,
-        currency: 'COP',
+        currency: 'VES',
+        // DX-513-bis: la misma foto de la referencia que el alta.
+        referenceCurrency: item.referenceCurrency,
+        referencePriceInPlan: item.referencePriceInPlan,
+        rate: item.referenceRate,
+        rateMissing: false,
+        missingRateCurrency: null,
       });
     });
 
@@ -505,7 +523,7 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
         price: 30000,
         priceSource: 'AGREEMENT_PRICE_LIST',
       });
-      // Lista del convenio en COP y plan en USD: no aplica (R12).
+      // Lista del convenio en VES y plan en USD: no aplica (R12).
       const usd = await newPlan(patient, 'USD');
       expect(await added(usd, endo)).toMatchObject({
         price: 100000,
@@ -515,6 +533,35 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
         source: 'CATALOG',
         currency: 'USD',
       });
+    });
+
+    it('DX-105-bis: si la lista del convenio quedó retirada (fuera del flujo normal), el precio no sale de una lista muerta', async () => {
+      const patient = await createPatient('ListaRetirada');
+      const agreement = await createAgreement('Empresa X retirada', {
+        kind: 'PRICE_LIST',
+        priceListId: agreementListId,
+      });
+      await assign(patient, { agreementId: agreement });
+      expect(await quote(patient, endo, 'VES')).toMatchObject({
+        source: 'AGREEMENT_PRICE_LIST',
+        price: 60000,
+      });
+      // El retiro por HTTP lo impide el 409 del convenio vivo: se simula el
+      // estado (una carrera o un arreglo a mano) directamente en la BD.
+      await raw.priceList.update({
+        where: { id: agreementListId },
+        data: { deletedAt: new Date() },
+      });
+      try {
+        const q = await quote(patient, endo, 'VES');
+        expect(q.source).not.toBe('AGREEMENT_PRICE_LIST');
+        expect(q.price).not.toBe(60000);
+      } finally {
+        await raw.priceList.update({
+          where: { id: agreementListId },
+          data: { deletedAt: null },
+        });
+      }
     });
 
     it('convenio de otra sede: no aplica; en su sede, sí', async () => {
@@ -557,10 +604,22 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
   });
 
   describe('price-quote', () => {
+    it('DX-105-bis: una moneda con forma ISO pero fuera del catálogo da 400 con el mensaje de moneda', async () => {
+      const patient = await createPatient('Moneda');
+      const res = await as(dentistToken)
+        .get(
+          `/patients/${patient}/price-quote?catalogItemId=${endo}&currency=ZZZ`,
+        )
+        .expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        CURRENCY_CODE_MESSAGE,
+      );
+    });
+
     it('valida la consulta y responde 404 si el procedimiento no existe', async () => {
       const patient = await createPatient('Consulta');
       await as(dentistToken)
-        .get(`/patients/${patient}/price-quote?catalogItemId=x&currency=COP`)
+        .get(`/patients/${patient}/price-quote?catalogItemId=x&currency=VES`)
         .expect(400);
       await as(dentistToken)
         .get(
@@ -569,12 +628,12 @@ describe('Precio resuelto y foto en el ítem del plan (e2e, DX-105)', () => {
         .expect(400);
       await as(dentistToken)
         .get(
-          `/patients/${patient}/price-quote?catalogItemId=00000000-0000-4000-8000-000000000000&currency=COP`,
+          `/patients/${patient}/price-quote?catalogItemId=00000000-0000-4000-8000-000000000000&currency=VES`,
         )
         .expect(404);
       const res = await as(dentistToken)
         .get(
-          `/patients/00000000-0000-4000-8000-000000000000/price-quote?catalogItemId=${endo}&currency=COP`,
+          `/patients/00000000-0000-4000-8000-000000000000/price-quote?catalogItemId=${endo}&currency=VES`,
         )
         .expect(404);
       expect((res.body as { message: string }).message).toBe(

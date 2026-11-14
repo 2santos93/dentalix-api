@@ -19,14 +19,81 @@ const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 /** Ruta pública de la web (`/hueco/<token>`). */
 export const SLOT_OFFER_PUBLIC_PATH = '/hueco';
 
-/** Con menos de esto para el hueco no da tiempo a verlo y llegar. */
+/**
+ * Con menos de esto de vida para el enlace no da tiempo a verlo y llegar. Es
+ * el valor de plataforma; desde DX-448 cada clínica elige el suyo
+ * (`tenants.slotOfferMinLeadMinutes`).
+ */
 export const LINK_OFFER_MIN_LEAD_MINUTES = 20;
 
 export const LINK_OFFER_CONFIG = Symbol('LINK_OFFER_CONFIG');
 
 export interface LinkOfferConfig {
-  /** Minutos antes del inicio del hueco en que caduca el enlace (0 = al empezar). */
+  /**
+   * Minutos antes del inicio del hueco en que caduca el enlace (0 = al
+   * empezar). Desde DX-448 es solo el valor por defecto de la instalación:
+   * una clínica que eligió el suyo usa el suyo.
+   */
   expiryLeadMinutes: number;
+}
+
+/**
+ * DX-448: ajustes de la oferta por enlace de la clínica (Ajustes › Agenda ›
+ * Ofertas de hueco). Ya resueltos: con la caducidad sin elegir, la de la
+ * instalación.
+ */
+export interface SlotOfferSettings {
+  /** Minutos antes del hueco en que caduca el enlace (0 = al empezar). */
+  expiryLeadMinutes: number;
+  /** Vida mínima del enlace para poder ofrecer el hueco por enlace. */
+  minLeadMinutes: number;
+}
+
+/** Lo que guarda la clínica: `expiryLeadMinutes` NULL = el de la instalación. */
+export interface StoredSlotOfferSettings {
+  expiryLeadMinutes: number | null;
+  minLeadMinutes: number;
+}
+
+export const SLOT_OFFER_EXPIRY_LEAD_MIN = 0;
+export const SLOT_OFFER_EXPIRY_LEAD_MAX = 240;
+export const SLOT_OFFER_MIN_LEAD_MIN = 5;
+export const SLOT_OFFER_MIN_LEAD_MAX = 240;
+
+export const SLOT_OFFER_EXPIRY_LEAD_MESSAGE = `La caducidad anticipada de la oferta tiene que ser un número entero de minutos entre ${SLOT_OFFER_EXPIRY_LEAD_MIN} y ${SLOT_OFFER_EXPIRY_LEAD_MAX}.`;
+export const SLOT_OFFER_MIN_LEAD_MESSAGE = `La antelación mínima para ofrecer un hueco tiene que ser un número entero de minutos entre ${SLOT_OFFER_MIN_LEAD_MIN} y ${SLOT_OFFER_MIN_LEAD_MAX}.`;
+
+function intBetween(value: unknown, min: number, max: number): boolean {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= min &&
+    value <= max
+  );
+}
+
+export function isValidSlotOfferExpiryLead(value: unknown): value is number {
+  return intBetween(
+    value,
+    SLOT_OFFER_EXPIRY_LEAD_MIN,
+    SLOT_OFFER_EXPIRY_LEAD_MAX,
+  );
+}
+
+export function isValidSlotOfferMinLead(value: unknown): value is number {
+  return intBetween(value, SLOT_OFFER_MIN_LEAD_MIN, SLOT_OFFER_MIN_LEAD_MAX);
+}
+
+/** Lo guardado, con la caducidad sin elegir resuelta a la de la instalación. */
+export function effectiveSlotOfferSettings(
+  stored: StoredSlotOfferSettings,
+  installation: LinkOfferConfig,
+): SlotOfferSettings {
+  return {
+    expiryLeadMinutes:
+      stored.expiryLeadMinutes ?? installation.expiryLeadMinutes,
+    minLeadMinutes: stored.minLeadMinutes,
+  };
 }
 
 const LEAD_ENV = 'WAITLIST_LINK_OFFER_EXPIRY_LEAD_MINUTES';
@@ -79,10 +146,31 @@ export function isLinkChannel(
   return (LINK_CHANNELS as readonly string[]).includes(channel);
 }
 
-/** ¿Quedan al menos 20 minutos para el hueco? */
-export function linkOfferWindowOpen(slotStart: Date, now: Date): boolean {
-  return (
-    slotStart.getTime() - now.getTime() >= LINK_OFFER_MIN_LEAD_MINUTES * MINUTE
+/**
+ * ¿Le quedan al menos `minLeadMinutes` de vida al enlace? `until` es cuándo
+ * caduca (el inicio del hueco, o antes con caducidad anticipada).
+ */
+export function linkOfferWindowOpen(
+  until: Date,
+  now: Date,
+  minLeadMinutes: number,
+): boolean {
+  return until.getTime() - now.getTime() >= minLeadMinutes * MINUTE;
+}
+
+/**
+ * ¿Se puede ofrecer AHORA por enlace un hueco que empieza en `slotStart`, con
+ * los ajustes de la clínica? El enlace tiene que vivir la antelación mínima.
+ */
+export function linkOfferOpenFor(
+  slotStart: Date,
+  now: Date,
+  settings: SlotOfferSettings,
+): boolean {
+  return linkOfferWindowOpen(
+    linkOfferExpiresAt(slotStart, settings.expiryLeadMinutes),
+    now,
+    settings.minLeadMinutes,
   );
 }
 
@@ -117,7 +205,23 @@ export const SLOT_OFFER_MESSAGES: Record<PublicSlotOfferState, string> = {
 export const SLOT_OFFER_NOT_FOUND_MESSAGE =
   'El enlace no existe o ya no es válido.';
 
-export const LINK_OFFER_TOO_LATE_MESSAGE = `Faltan menos de ${LINK_OFFER_MIN_LEAD_MINUTES} minutos para el hueco: ya no da tiempo a ofrecerlo por enlace. Llama al paciente.`;
+/**
+ * El 409 de «demasiado tarde» con los minutos de la clínica (DX-448). Con
+ * caducidad anticipada, lo que falta es vida para el enlace, no para el hueco.
+ */
+export function linkOfferTooLateMessage(settings: SlotOfferSettings): string {
+  const min = settings.minLeadMinutes;
+  if (settings.expiryLeadMinutes === 0) {
+    return `Faltan menos de ${min} minutos para el hueco: ya no da tiempo a ofrecerlo por enlace. Llama al paciente.`;
+  }
+  return `El enlace caduca ${settings.expiryLeadMinutes} minutos antes del hueco y le quedarían menos de ${min} minutos de vida: ya no da tiempo a ofrecerlo por enlace. Llama al paciente.`;
+}
+
+/** El de plataforma (20 minutos, caducidad al empezar). */
+export const LINK_OFFER_TOO_LATE_MESSAGE = linkOfferTooLateMessage({
+  expiryLeadMinutes: 0,
+  minLeadMinutes: LINK_OFFER_MIN_LEAD_MINUTES,
+});
 export const LINK_OFFER_OUTCOME_MESSAGE =
   'Una oferta con enlace nace pendiente: la responde el paciente desde el enlace.';
 export const LINK_OFFER_HOST_MESSAGE =
@@ -167,6 +271,41 @@ export function publicSlotOfferState(
       }
       return slotTaken ? 'UNAVAILABLE' : 'OPEN';
   }
+}
+
+/**
+ * SEC-064: una oferta ACCEPTED enseña nombre de pila, fecha, sede y
+ * profesional a quien tenga el enlace; no para siempre. Pasados estos días
+ * desde que se aceptó o desde que terminó la cita (lo que llegue DESPUÉS),
+ * responde como un enlace caducado.
+ */
+export const ACCEPTED_OFFER_VISIBLE_DAYS = 7;
+
+/** Hasta cuándo sigue visible una oferta aceptada (el instante ya no lo es). */
+export function acceptedOfferVisibleUntil(offer: {
+  outcomeAt: Date | null;
+  appointmentEnd: Date;
+}): Date {
+  const from = Math.max(
+    offer.outcomeAt?.getTime() ?? 0,
+    offer.appointmentEnd.getTime(),
+  );
+  return new Date(from + ACCEPTED_OFFER_VISIBLE_DAYS * 24 * 60 * MINUTE);
+}
+
+/** ¿Una oferta aceptada cuyo plazo venció? Las demás nunca. */
+export function acceptedOfferLapsed(
+  offer: {
+    outcome: WaitlistOfferOutcome;
+    outcomeAt: Date | null;
+    appointmentEnd: Date;
+  },
+  now: Date,
+): boolean {
+  return (
+    offer.outcome === 'ACCEPTED' &&
+    now.getTime() >= acceptedOfferVisibleUntil(offer).getTime()
+  );
 }
 
 /** Solo una oferta PENDING cambia de resultado, y a uno final. */

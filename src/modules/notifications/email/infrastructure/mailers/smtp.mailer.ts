@@ -3,7 +3,7 @@ import { OutgoingEmail } from '../../domain/email-message';
 import { Mailer } from '../../domain/ports/mailer.port';
 
 /**
- * Timeouts del socket SMTP: muy por debajo del arriendo de 5 min del
+ * Timeouts del socket SMTP: muy por debajo de la reserva de 5 min del
  * despachador, para que un proveedor colgado no provoque un doble envío.
  */
 export const SMTP_TIMEOUTS = {

@@ -3,7 +3,10 @@ import { Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { PAYMENT_CLOCK } from '../src/modules/payments/application/use-cases/void-payment.use-case';
-import { PAID_AT_IN_FUTURE_MESSAGE } from '../src/modules/payments/domain/paid-at-window';
+import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+  PAID_AT_IN_FUTURE_MESSAGE,
+} from '../src/modules/payments/domain/paid-at-window';
 import { DONE_ITEM_PRICE_LOCKED_MESSAGE } from '../src/modules/treatment-plans/domain/plan-status-machine';
 import {
   type Clinic,
@@ -11,6 +14,7 @@ import {
   registerClinic,
   resetDatabase,
 } from './support/e2e-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-054: invariantes del saldo y del plan que faltaban en main. Reloj de los
 // abonos inyectado (PAYMENT_CLOCK): nada depende de la hora de la CI.
@@ -49,6 +53,9 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
       })
       .expect(201);
     patientId = (patient.body as { id: string }).id;
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const catalog = await as(api().post('/api/v1/catalog/items'))
       .send({
         code: 'DX054-RES',
@@ -134,8 +141,11 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
     expect((balance.body as { billable: number }).billable).toBe(100);
   });
 
-  it('un abono con fecha a más de 24 h en el futuro → 400 en español y no se registra', async () => {
-    for (const paidAt of ['2026-11-03', '2026-11-01T15:00:01.000Z']) {
+  it('un abono con instante a más de 24 h en el futuro → 400 en español y no se registra', async () => {
+    for (const paidAt of [
+      '2026-11-03T12:00:00.000Z',
+      '2026-11-01T15:00:01.000Z',
+    ]) {
       const res = await as(
         api().post(`/api/v1/treatment-plans/${planId}/payments`),
       )
@@ -155,12 +165,28 @@ describe('DX-054: invariantes del saldo y del plan (e2e)', () => {
     });
   });
 
-  it('dentro de las 24 h (mañana en otra zona) se registra', async () => {
-    await as(api().post(`/api/v1/treatment-plans/${planId}/payments`))
+  it('DX-075: un día civil posterior a hoy en la sede (mañana) → 400 en español y no se registra', async () => {
+    const res = await as(
+      api().post(`/api/v1/treatment-plans/${planId}/payments`),
+    )
       .send({
         amount: 10,
         currency: 'USD',
         paidAt: '2026-11-01',
+        method: 'CASH',
+      })
+      .expect(400);
+    expect((res.body as { message: string }).message).toBe(
+      PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+    );
+  });
+
+  it('hoy en la sede se registra', async () => {
+    await as(api().post(`/api/v1/treatment-plans/${planId}/payments`))
+      .send({
+        amount: 10,
+        currency: 'USD',
+        paidAt: '2026-10-31',
         method: 'CASH',
       })
       .expect(201);

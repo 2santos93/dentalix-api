@@ -19,9 +19,10 @@ import type { DentalCatalogItem } from '../src/modules/dental-catalog/domain/ent
 import type { PricingSource } from '../src/modules/treatment-plans/domain/ports/pricing-source.port';
 import { catalogPricing } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/catalog-pricing-source';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { backendPid, waitForLockWaiters } from './support/postgres-concurrency';
 
 // BE-036 (SEC-041): el estado del plan se comprueba DENTRO de la transacción
 // que escribe el ítem, después de bloquear la fila del plan. Antes se leía
@@ -86,7 +87,7 @@ async function seed(): Promise<Seeded> {
     },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede principal',
     }),
@@ -104,7 +105,11 @@ async function seed(): Promise<Seeded> {
       defaultPrice: 1000000,
     },
   });
-  catalogEntity = { ...item, defaultPrice: 1000000 };
+  catalogEntity = {
+    ...item,
+    defaultPrice: 1000000,
+    suggestedClinicalNoteTemplateId: null,
+  };
   return {
     tenantId: tenant.id,
     userId: user.id,
@@ -121,7 +126,7 @@ async function draftPlanWithItem(): Promise<{
   itemId: string;
 }> {
   const plan = await raw.treatmentPlan.create({
-    data: { tenantId: s.tenantId, patientId: s.patientId, currency: 'COP' },
+    data: { tenantId: s.tenantId, patientId: s.patientId, currency: 'USD' },
   });
   const item = await raw.treatmentPlanItem.create({
     data: {
@@ -138,18 +143,6 @@ async function draftPlanWithItem(): Promise<{
 
 function inTenant<T>(fn: () => Promise<T>): Promise<T> {
   return tenantContext.run(s.tenantId, undefined, fn);
-}
-
-/** Espera a que haya `n` sesiones de esta base esperando un bloqueo. */
-async function waitForLockWaiters(n: number): Promise<void> {
-  for (let i = 0; i < 100; i++) {
-    const [{ waiting }] = await raw.$queryRaw<{ waiting: number }[]>`
-      SELECT count(*)::int AS waiting FROM pg_stat_activity
-       WHERE datname = current_database() AND wait_event_type = 'Lock'`;
-    if (waiting >= n) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`no llegaron ${n} esperas de bloqueo`);
 }
 
 /**
@@ -169,8 +162,10 @@ async function whileAccepting(
   const isAccepted = new Promise<void>((resolve) => {
     accepted = resolve;
   });
+  let acceptancePid!: number;
   const acceptance = prisma.runWithTenant(s.tenantId, async (tx) => {
     await tx.$queryRaw`SELECT "id" FROM "treatment_plans" WHERE "id" = ${planId}::uuid FOR UPDATE`;
+    acceptancePid = await backendPid(tx);
     await tx.treatmentPlanItem.updateMany({
       where: { planId, status: 'PROPOSED', deletedAt: null },
       data: { status: 'ACCEPTED' },
@@ -188,7 +183,7 @@ async function whileAccepting(
     () => 'ok',
     (error: unknown) => error,
   );
-  await waitForLockWaiters(1);
+  await waitForLockWaiters(raw, [acceptancePid], 1);
   release();
   await acceptance;
   return outcome;

@@ -22,7 +22,7 @@ import {
 } from './support/e2e-fixtures';
 import { CapturingMailer } from './support/capture-mailer';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_MADRID_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
@@ -76,6 +76,7 @@ interface OptOutBody {
   patientFirstName: string | null;
   optedOutAt: string | null;
   clinic: { name: string } | null;
+  regional: { timeZone: string; locale: string; hourCycle: string } | null;
 }
 
 describe('Baja de recordatorios (e2e, DX-128)', () => {
@@ -208,11 +209,40 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         patientFirstName: 'Carolina',
         optedOutAt: null,
         clinic: expect.objectContaining({ name: 'Clinica dx128-baja' }),
+        // DX-354: la región de la sede principal, para pintar la fecha de la baja.
+        regional: {
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h23',
+        },
       } satisfies Record<keyof OptOutBody, unknown>);
       const row = await raw.patient.findUniqueOrThrow({
         where: { id: patientId },
       });
       expect(row.reminderOptOutAt).toBeNull();
+    });
+
+    it('DX-354: sin reloj en la sede principal, regional es null y la página se sirve (200)', async () => {
+      const principal = await raw.location.findFirstOrThrow({
+        where: { tenantId: clinic.tenantId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      await raw.location.update({
+        where: { id: principal.id },
+        data: { hourCycle: null },
+      });
+      try {
+        const res = await pub(
+          api().get(`/api/v1/public/reminder-opt-outs/${token}`),
+        ).expect(200);
+        expect((res.body as OptOutBody).regional).toBeNull();
+      } finally {
+        await raw.location.update({
+          where: { id: principal.id },
+          data: { hourCycle: 'h23' },
+        });
+      }
     });
 
     // ISOLATION_COVERS: GET /public/reminder-opt-outs/:token
@@ -427,7 +457,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       const email = 'luisa@example.com';
       const patientId = await createPatient('128102', {
         email,
-        phone: '315 222 3344',
+        phone: '414 222 3344',
       });
       const appointmentId = await book(
         patientId,
@@ -450,7 +480,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         .post('/api/v1/test/fake-whatsapp-webhook')
         .send({
           tenantId: clinic.tenantId,
-          from: '573152223344',
+          from: '584142223344',
           text: 'No más',
         })
         .expect(200);
@@ -487,10 +517,10 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
     it('DX214: móvil compartido por6 no desactiva ninguno; por2 desactiva ambos', async () => {
       const six: string[] = [];
       for (let i = 0; i < 6; i++)
-        six.push(await createPatient(`21420${i}`, { phone: '+573152229999' }));
+        six.push(await createPatient(`21420${i}`, { phone: '+584142229999' }));
       await api()
         .post('/api/v1/test/fake-whatsapp-webhook')
-        .send({ tenantId: clinic.tenantId, from: '573152229999', text: 'BAJA' })
+        .send({ tenantId: clinic.tenantId, from: '584142229999', text: 'BAJA' })
         .expect(200, { isOptOut: true, optedOut: [] });
       expect(
         await raw.patient.count({
@@ -563,12 +593,12 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         'maxMatches',
       ]);
       const two = await Promise.all([
-        createPatient('214210', { phone: '+573152228888' }),
-        createPatient('214211', { phone: '+573152228888' }),
+        createPatient('214210', { phone: '+584142228888' }),
+        createPatient('214211', { phone: '+584142228888' }),
       ]);
       const response = await api()
         .post('/api/v1/test/fake-whatsapp-webhook')
-        .send({ tenantId: clinic.tenantId, from: '573152228888', text: 'BAJA' })
+        .send({ tenantId: clinic.tenantId, from: '584142228888', text: 'BAJA' })
         .expect(200);
       expect((response.body as InboundReplyResult).optedOut.sort()).toEqual(
         two.sort(),
@@ -577,19 +607,19 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
 
     it('otro texto, u otra clínica, no da de baja a nadie', async () => {
       const patientId = await createPatient('128103', {
-        phone: '316 000 1122',
+        phone: '414 000 1122',
       });
       await api()
         .post('/api/v1/test/fake-whatsapp-webhook')
         .send({
           tenantId: clinic.tenantId,
-          from: '573160001122',
+          from: '584140001122',
           text: 'Sí voy',
         })
         .expect(200, { isOptOut: false, optedOut: [] });
       await api()
         .post('/api/v1/test/fake-whatsapp-webhook')
-        .send({ tenantId: other.tenantId, from: '573160001122', text: 'BAJA' })
+        .send({ tenantId: other.tenantId, from: '584140001122', text: 'BAJA' })
         .expect(200, { isOptOut: true, optedOut: [] });
       const row = await raw.patient.findUniqueOrThrow({
         where: { id: patientId },
@@ -601,11 +631,11 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
       // Guardado tal cual: sin «+», solo es válido con la región de la
       // segunda sede.
       const patientId = await createPatient('329101', {
-        phone: '0414-7654321',
+        phone: '612 34 56 78',
       });
       const reply = {
         tenantId: clinic.tenantId,
-        from: '584147654321',
+        from: '34612345678',
         text: 'BAJA',
       };
       await api()
@@ -613,10 +643,9 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         .send(reply)
         .expect(200, { isOptOut: true, optedOut: [] });
       const second = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_MADRID_FIXTURE, {
           tenantId: clinic.tenantId,
-          name: 'Sede 329 VE',
-          defaultPhoneRegion: 'VE',
+          name: 'Sede 329 ES',
         }),
       });
       try {
@@ -634,20 +663,19 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
 
     it("an opt-out reply reads a location without a region with its country's suggestion, only to match", async () => {
       const patientId = await createPatient('329102', {
-        phone: '0416-5554321',
+        phone: '622 34 56 78',
       });
       const reply = {
         tenantId: clinic.tenantId,
-        from: '584165554321',
+        from: '34622345678',
         text: 'BAJA',
       };
-      // Sede VE sin región (vaciada por un ADMIN o creada por una réplica
+      // Sede española sin región (vaciada por un ADMIN o creada por una réplica
       // anterior): la baja casa con la sugerencia de su país.
       const withoutRegion = await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_MADRID_FIXTURE, {
           tenantId: clinic.tenantId,
-          name: 'Sede 329 VE sin prefijo',
-          country: 'VE',
+          name: 'Sede 329 ES sin prefijo',
           defaultPhoneRegion: null,
           defaultPhoneRegionSetAt: new Date(),
         }),
@@ -662,7 +690,7 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
           where: { id: patientId },
           select: { phone: true },
         });
-        expect(patient.phone).toBe('0416-5554321');
+        expect(patient.phone).toBe('622 34 56 78');
         const location = await raw.location.findUniqueOrThrow({
           where: { id: withoutRegion.id },
           select: { defaultPhoneRegion: true },

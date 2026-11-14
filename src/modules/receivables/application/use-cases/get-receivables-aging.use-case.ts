@@ -1,11 +1,20 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
 import { RECEIVABLES_REPOSITORY } from '../../domain/ports/receivables-repository.port';
-import type { ReceivablesRepository } from '../../domain/ports/receivables-repository.port';
+import type {
+  ReceivablesLocation,
+  ReceivablesRepository,
+} from '../../domain/ports/receivables-repository.port';
 import type {
   DebtorLastNote,
   DebtorPromise,
   PatientAging,
   PatientAgingCurrency,
+  PatientLedger,
 } from '../../domain/entities/receivables.entity';
 import {
   addToBuckets,
@@ -20,6 +29,13 @@ import {
   summarizeCurrencies,
 } from '../compute-patient-aging';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import { PlanBalanceCalculator } from '../../../payments/application/plan-balance-calculator';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  roundingDigitsLookup,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
+import { ledgerPlanBalanceInputs } from '../ledger-plan-balances';
 import { whatsAppDigits } from '../../../../shared/phone/phone-number';
 
 export const RECEIVABLES_DEFAULT_PAGE_SIZE = 20;
@@ -93,6 +109,25 @@ export interface ReceivablesAgingPage {
   page: number;
   pageSize: number;
   /** Por moneda, sobre TODAS las filas filtradas (no solo la página). */
+  totals: AgingTotal[];
+  /**
+   * DX-472-bis: abonos en otra moneda que no suman en las filas filtradas
+   * por falta de tasa (o porque el proveedor no respondió): cifras
+   * incompletas, como en el estado de cuenta.
+   */
+  paymentsWithoutRateCount: number;
+  /**
+   * DX-472-bis: el proveedor de tasas no respondió a tiempo para alguna fila
+   * filtrada; volver a pedir la cartera la completa cuando responda.
+   */
+  rateProviderTimedOut: boolean;
+}
+
+/**
+ * OPS-056: lo que «Mi día» necesita de la cartera: los `totals` de
+ * `ReceivablesAgingPage`, idénticos, sin la página.
+ */
+export interface ReceivablesAgingTotals {
   totals: AgingTotal[];
 }
 
@@ -200,6 +235,11 @@ export class GetReceivablesAgingUseCase {
     private readonly repo: ReceivablesRepository,
     @Inject(RECEIVABLES_CLOCK)
     private readonly now: ReceivablesClock,
+    private readonly planBalance: PlanBalanceCalculator,
+    // B4 (DX-472-bis): decimales de cada moneda para los estados de cuota.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   async execute(input: ReceivablesAgingInput): Promise<ReceivablesAgingPage> {
@@ -220,6 +260,11 @@ export class GetReceivablesAgingUseCase {
       page,
       pageSize,
       totals: totalsOf(rows),
+      paymentsWithoutRateCount: rows.reduce(
+        (sum, r) => sum + r.aging.paymentsWithoutRateCount,
+        0,
+      ),
+      rateProviderTimedOut: rows.some((r) => r.aging.rateProviderTimedOut),
     };
   }
 
@@ -234,16 +279,62 @@ export class GetReceivablesAgingUseCase {
     }));
   }
 
+  /**
+   * OPS-056: los `totals` de `execute` (las MISMAS filas con el MISMO cálculo,
+   * así que el mismo número) sin lo que solo pide la página: ni orden, ni
+   * contactos, ni cobranza. Las lecturas van una tras otra: una sola conexión
+   * a la vez. Es lo que cuenta «Mi día» cada minuto.
+   */
+  async summary(
+    filters: Pick<ReceivablesAgingFilters, 'locationId'>,
+  ): Promise<ReceivablesAgingTotals> {
+    const location = await this.locationOf(filters);
+    const ledgers = await this.repo.loadLedgers({ locationId: location?.id });
+    const zoneOf = await this.repo.locationTimeZones();
+    const { rows } = await this.debtorRows(ledgers, zoneOf, filters);
+    return { totals: totalsOf(rows) };
+  }
+
   private async scopedRows(filters: ReceivablesAgingFilters) {
-    const location = filters.locationId
-      ? await this.repo.findLocation(filters.locationId)
-      : null;
-    if (filters.locationId && !location) {
-      throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);
-    }
+    const location = await this.locationOf(filters);
     const [ledgers, zoneOf] = await Promise.all([
       this.repo.loadLedgers({ locationId: location?.id }),
       this.repo.locationTimeZones(),
+    ]);
+    const { rows, now } = await this.debtorRows(ledgers, zoneOf, filters);
+    rows.sort(byAge);
+    return {
+      rows: await this.byCollections(rows, filters),
+      location,
+      now,
+      zoneOf,
+    };
+  }
+
+  /** La sede pedida, o 400 si no es de esta clínica; sin ella, `null`. */
+  private async locationOf(
+    filters: Pick<ReceivablesAgingFilters, 'locationId'>,
+  ): Promise<ReceivablesLocation | null> {
+    if (!filters.locationId) return null;
+    const location = await this.repo.findLocation(filters.locationId);
+    if (!location) throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);
+    return location;
+  }
+
+  /** Los deudores de estas fichas que pasan los filtros de saldo, sin ordenar. */
+  private async debtorRows(
+    ledgers: PatientLedger[],
+    zoneOf: (locationId: string | null) => string,
+    filters: ReceivablesAgingFilters,
+  ): Promise<{ rows: ScopedRow[]; now: Date }> {
+    // DX-472-bis: lo abonado en otra moneda, convertido como en `/balance`,
+    // con UN plazo para toda la cartera; casi siempre sin red (tasa congelada).
+    const [planBalances, roundingDigitsOf] = await Promise.all([
+      this.planBalance.computeMany(ledgerPlanBalanceInputs(ledgers, zoneOf)),
+      roundingDigitsLookup(
+        this.currencyDigits,
+        ledgers.flatMap((l) => l.plans.map((p) => p.currency)),
+      ),
     ]);
     const now = this.now();
     const minAge = filters.minAgeDays ?? null;
@@ -253,10 +344,17 @@ export class GetReceivablesAgingUseCase {
     const rows: ScopedRow[] = [];
     for (const ledger of ledgers) {
       const timeZone = zoneOf(ledger.locationId);
-      const full = computePatientAging(ledger, { now, timeZone });
+      const full = computePatientAging(ledger, {
+        now,
+        timeZone,
+        planBalances,
+        roundingDigitsOf,
+        flagsCurrency: filters.currency,
+      });
       const aging = filters.currency
         ? summarizeCurrencies(
             full.currencies.filter((c) => c.currency === filters.currency),
+            full,
           )
         : full;
       // Deudor = debe algo; un saldo solo a favor no es cartera.
@@ -280,13 +378,7 @@ export class GetReceivablesAgingUseCase {
         debtCents: debtCents(aging),
       });
     }
-    rows.sort(byAge);
-    return {
-      rows: await this.byCollections(rows, filters),
-      location,
-      now,
-      zoneOf,
-    };
+    return { rows, now };
   }
 
   /**

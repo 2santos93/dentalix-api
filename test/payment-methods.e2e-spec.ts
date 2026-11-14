@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { leavesWith } from './support/content-leaves';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   Clinic,
@@ -17,6 +18,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { fixedSedeDay } from './support/sede-clock';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-377 en HTTP real: cada clínica nace con sus 4 medios iniciales; solo el
 // ADMIN gestiona el catálogo (403 en español para recepción); un medio que
@@ -32,7 +34,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 /**
  * Día de los abonos y de la caja: uno FIJO en el pasado reciente (el anterior
  * al real), no el de la carga del módulo frente a la hora del abono: una
- * corrida que cruce la medianoche de Bogotá ya no deja el abono fuera del
+ * corrida que cruce la medianoche de la sede ya no deja el abono fuera del
  * rango de la caja (DX-209, TST-049).
  */
 const TODAY = fixedSedeDay().day;
@@ -88,6 +90,9 @@ describe('Medios de pago y referencia repetida (e2e, DX-377)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({
@@ -273,9 +278,11 @@ describe('Medios de pago y referencia repetida (e2e, DX-377)', () => {
     expect(audit?.metadata).toMatchObject({
       paymentReference: { duplicateConfirmed: true, duplicateOf: [first.id] },
     });
-    // Ni la referencia ni el motivo en la auditoría.
-    expect(JSON.stringify(audit?.metadata)).not.toContain('0412');
-    expect(JSON.stringify(audit?.metadata)).not.toContain('cuotas');
+    // Ni la referencia (entera o su prefijo de operadora) ni el motivo en la
+    // auditoría; `duplicateOf` lleva ids, que no cuentan (DX-496, TST-059).
+    for (const leaked of ['04125551234', '0412', 'cuotas']) {
+      expect(leavesWith(audit?.metadata, leaked)).toEqual([]);
+    }
   });
 
   it('un abono anulado ya no cuenta como repetido', async () => {

@@ -61,6 +61,13 @@ export class AllocationItemOptionDto {
   @ApiProperty({ example: 30, description: 'Lo que le imputan otros abonos' })
   paidByOthers!: number;
 
+  @ApiPropertyOptional({
+    example: 30,
+    description:
+      'DX-399-quater: lo que le cubre el saldo que el plan recibió por traspaso, después de todos los abonos (también este). No resta de `free`: los abonos van primero, así que imputar este abono al ítem lo desplaza y lo recibido vuelve a quedar a cuenta del plan. Ausente si es 0',
+  })
+  paidByTransfersIn?: number;
+
   @ApiProperty({
     example: 70,
     description: 'Lo que este abono puede imputarle: billable − paidByOthers',
@@ -79,6 +86,13 @@ export class PaymentAllocationsDto {
     description: 'Null en los abonos anteriores a la numeración (DX-136)',
   })
   receiptNumber!: string | null;
+
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Sede del abono: el importe y la fecha se pintan con el formato de esa sede',
+  })
+  locationId!: string;
 
   @ApiProperty({ format: 'uuid' })
   treatmentPlanId!: string;
@@ -123,6 +137,22 @@ export class PaymentAllocationsDto {
 
   @ApiProperty({ type: Number, nullable: true, example: 20 })
   unallocated!: number | null;
+
+  @ApiProperty({
+    example: 20,
+    description:
+      'De lo sin imputar a ítems, lo que el plan ya devolvió o traspasó de su saldo a favor (DX-253) y se atribuye a este abono. Cada salida gasta primero lo que el plan recibió por traspaso (DX-399-ter, llegara antes o después) y solo el resto resta de abonos registrados antes que ella, empezando por el más reciente. 0 si no hay',
+  })
+  creditOut!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 10,
+    description:
+      'A cuenta neto: `unallocated − creditOut`. Es la cifra que da el informe «Cobrado sin imputar» para este abono (y la que no aparece si es 0). null sin tasa',
+  })
+  onAccount!: number | null;
 
   @ApiProperty({
     description: 'Versión de la imputación: se reenvía como expectedVersion',

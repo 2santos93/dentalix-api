@@ -39,7 +39,7 @@ describe('responsiblePartyWithPhoneInternational (DX-387)', () => {
     const out = responsiblePartyWithPhoneInternational(
       party({
         kind: 'PATIENT',
-        phone: '+573105550101',
+        phone: '+584145550101',
         responsiblePatient: {
           id: 'p2',
           firstName: 'Rosa',
@@ -49,15 +49,15 @@ describe('responsiblePartyWithPhoneInternational (DX-387)', () => {
           docTypeName: 'Documento nacional',
           docNumber: '1',
           email: null,
-          phone: '+573105550101',
+          phone: '+584145550101',
         },
       }),
       'VE',
     );
-    expect(out.phoneInternational).toBe('+57 310 5550101');
+    expect(out.phoneInternational).toBe('+58 414 5550101');
     expect(out.responsiblePatient).toMatchObject({
-      phone: '+573105550101',
-      phoneInternational: '+57 310 5550101',
+      phone: '+584145550101',
+      phoneInternational: '+58 414 5550101',
     });
   });
 

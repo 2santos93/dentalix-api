@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { ClinicCurrencyTextsReader } from '../../../shared/money/clinic-currency-texts.reader';
 import { CreateConfirmationLinkUseCase } from '../../appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { OutboundMessages } from '../../notifications/outbound/application/outbound-messages.service';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
@@ -12,13 +13,21 @@ import {
 import { decideReminder } from '../domain/reminder-window';
 import { startsAtLabel } from '../domain/starts-at-label';
 import { MAX_LEAD_HOURS, MIN_LEAD_HOURS } from '../domain/reminder-lead-hours';
-import { CONFIRMATION_PATH } from '../../appointment-confirmations/presentation/confirmation-url';
+import {
+  CALENDAR_ICS_PATH,
+  CONFIRMATION_PATH,
+} from '../../appointment-confirmations/presentation/confirmation-url';
 import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
 import { ReminderClock } from './reminder-clock';
 import { OPT_OUT_PATH, ReminderOptOutLinks } from './reminder-opt-out-links';
 import { noticeRecipient } from '../../patients/domain/communication/notice-recipient';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import { reminderPolicyVars } from '../../cancellation-policies/domain/reminder-policy-vars';
+import { resolveCatalogLanguage } from '../../../shared/i18n/patient-language';
+import {
+  DEFAULT_EMAIL_LOCALE,
+  EMAIL_LOCALES,
+} from '../../notifications/email/domain/email-message';
 
 const TEMPLATE = 'appointment-reminder';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -47,6 +56,11 @@ function parsePayload(payload: JobPayload): ParsedPayload {
   return { appointmentId, leadHours, start: startDate };
 }
 
+/** DX-272: el worker perdió la reserva del trabajo (o se apaga). */
+function assertLeaseHeld(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new Error('Intento abortado');
+}
+
 /**
  * Handler del envío de UN recordatorio (DX-026). Corre como trabajo de la
  * cola con el tenant del trabajo en el contexto, y NO se fía del payload
@@ -56,7 +70,10 @@ function parsePayload(payload: JobPayload): ParsedPayload {
  * Idempotente (la cola entrega «al menos una vez»): la fila de
  * appointment_reminders, única por (cita, antelación, hora de inicio), es el
  * reclamo. Un intento caído a mitad se retoma donde quedó: si el email ya
- * está en email_outbox no se vuelve a encolar.
+ * está en email_outbox no se vuelve a encolar. Si dos workers lo intentan a la
+ * vez (reserva perdida), la clave estable es el id del mensaje saliente de la
+ * ventana (cita, antelación, hora de inicio): email_outbox es único por
+ * (clínica, ese id) para esta plantilla.
  */
 @Injectable()
 export class SendAppointmentReminder {
@@ -71,12 +88,14 @@ export class SendAppointmentReminder {
     private readonly clock: ReminderClock,
     private readonly tenantContext: TenantContextService,
     private readonly optOutLinks: ReminderOptOutLinks,
+    // DX-517: opcional para los tests que construyen el caso a mano.
+    @Optional() private readonly currencyTexts?: ClinicCurrencyTextsReader,
   ) {}
 
   async handle(payload: JobPayload, context?: JobContext): Promise<void> {
     const parsed = parsePayload(payload);
     try {
-      await this.send(parsed);
+      await this.send(parsed, context?.signal);
     } catch (error) {
       if (
         context &&
@@ -96,11 +115,10 @@ export class SendAppointmentReminder {
     }
   }
 
-  private async send({
-    appointmentId,
-    leadHours,
-    start,
-  }: ParsedPayload): Promise<void> {
+  private async send(
+    { appointmentId, leadHours, start }: ParsedPayload,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const ctx = await this.repo.loadSendContext(appointmentId);
     if (!ctx) {
       this.logger.warn({
@@ -119,6 +137,8 @@ export class SendAppointmentReminder {
       responsibles: ctx.responsibles,
       majorityAge: ctx.majorityAge,
       today: civilDateIn(now, ctx.locationTimeZone),
+      timeZone: ctx.locationTimeZone,
+      majorityReview: ctx.majorityReview,
       automatic: true,
     });
     const decision = decideReminder({
@@ -146,6 +166,9 @@ export class SendAppointmentReminder {
       return;
     }
 
+    // DX-272: con la reserva perdida otro worker ya tiene el trabajo; este
+    // intento no produce más efectos (claim, enlace, constancia, email).
+    assertLeaseHeld(signal);
     const claim = await this.repo.claim(appointmentId, leadHours, start);
     if (claim.status !== 'SENDING') return;
     if (
@@ -170,6 +193,7 @@ export class SendAppointmentReminder {
     // Sin petición: el host de PLATAFORMA de la clínica (`<sub>.<base>`),
     // nunca su dominio personalizado (SEC-033). null = sale sin enlace.
     const linkBase = await this.links.forTenant(tenantId);
+    assertLeaseHeld(signal);
     const link = await this.createLink.execute({
       appointmentId,
       automatic: true,
@@ -179,6 +203,22 @@ export class SendAppointmentReminder {
     const optOutToken = linkBase
       ? await this.optOutLinks.issue(ctx.patientId)
       : null;
+    // DX-497: el idioma del paciente si hay catálogo para él; si no, el de la
+    // clínica, y el registro de envíos lo dice («sin traducción: ca → es»).
+    // La fecha y la hora siguen el locale y la zona de la sede (DX-315).
+    const { language, fallbackFrom } = resolveCatalogLanguage(
+      ctx.preferredLanguage,
+      EMAIL_LOCALES,
+      DEFAULT_EMAIL_LOCALE,
+    );
+    if (fallbackFrom) {
+      this.logger.log({
+        event: 'reminders.language_fallback',
+        appointmentId,
+        requested: fallbackFrom,
+        language,
+      });
+    }
     const outboundId =
       claim.outboundMessageId ??
       (
@@ -190,6 +230,8 @@ export class SendAppointmentReminder {
             recipientKind:
               recipient.kind === 'RESPONSIBLE' ? 'RESPONSIBLE' : 'PATIENT',
             appointmentId,
+            language,
+            languageFallbackFrom: fallbackFrom,
           },
           (id, tx) => this.repo.attachOutbound(claim.id, id, tx),
         )
@@ -205,6 +247,11 @@ export class SendAppointmentReminder {
         ctx.cancellationPolicy.id,
       );
     }
+    // DX-272: última puerta antes del efecto externo. Si aun así la reserva
+    // se pierde justo después, el índice único de email_outbox por
+    // recordatorio (`referenceId` = outbound) hace que el segundo `enqueue`
+    // devuelva el email ya encolado en vez de crear otro.
+    assertLeaseHeld(signal);
     // DX-128: la de un menor saluda a su responsable (o contacto principal)
     // y nombra al paciente.
     await this.email.enqueue({
@@ -212,6 +259,7 @@ export class SendAppointmentReminder {
       to,
       template: TEMPLATE,
       referenceId: outboundId,
+      locale: language,
       vars: {
         patientName: link.appointment.patientFirstName ?? '',
         guardianName: recipient.kind === 'PATIENT' ? null : recipient.name,
@@ -230,9 +278,20 @@ export class SendAppointmentReminder {
           linkBase && optOutToken
             ? `${linkBase}${OPT_OUT_PATH}/${optOutToken}`
             : null,
+        // DX-469: el .ics por el MISMO host de la clínica (la web reenvía /api/v1).
+        calendar: linkBase
+          ? {
+              icsUrl: `${linkBase}${CALENDAR_ICS_PATH}/${link.token}/calendar.ics`,
+              start: link.appointment.start.toISOString(),
+              end: link.appointment.end.toISOString(),
+            }
+          : null,
         cancellationPolicy: reminderPolicyVars(
           ctx.cancellationPolicy,
           ctx.locationFormat,
+          ctx.cancellationPolicy?.suggestedFee
+            ? await this.currencyTexts?.forTenant(tenantId)
+            : null,
         ),
       },
     });

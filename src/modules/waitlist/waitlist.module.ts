@@ -35,6 +35,13 @@ import {
   loadLinkOfferConfig,
 } from './domain/slot-offer-link';
 import { OpeningCandidatesController } from './presentation/opening-candidates.controller';
+import { SlotOfferSettingsController } from './presentation/slot-offer-settings.controller';
+import {
+  GetSlotOfferSettingsUseCase,
+  UpdateSlotOfferSettingsUseCase,
+} from './application/use-cases/slot-offer-settings.use-cases';
+import { SLOT_OFFER_SETTINGS_REPOSITORY } from './domain/ports/slot-offer-settings-repository.port';
+import { PrismaSlotOfferSettingsRepository } from './infrastructure/repositories/prisma-slot-offer-settings.repository';
 import {
   CreateWaitlistOfferUseCase,
   ListOpeningCandidatesUseCase,
@@ -86,6 +93,7 @@ import { PrismaWaitlistRepository } from './infrastructure/repositories/prisma-w
     WaitlistController,
     OpeningCandidatesController,
     PublicSlotOffersController,
+    SlotOfferSettingsController,
   ],
   providers: [
     ListWaitlistUseCase,
@@ -122,8 +130,17 @@ import { PrismaWaitlistRepository } from './infrastructure/repositories/prisma-w
     WaitlistJobs,
     { provide: SLOT_OFFER_REPOSITORY, useClass: PrismaSlotOfferRepository },
     { provide: SLOT_OFFER_EMAIL_SENDER, useClass: OutboxSlotOfferEmailSender },
-    // Minutos antes del hueco en que caduca el enlace
-    // (WAITLIST_LINK_OFFER_EXPIRY_LEAD_MINUTES, 0 = al empezar).
+    // DX-448: caducidad anticipada y antelación mínima de cada clínica
+    // (Ajustes › Agenda › Ofertas de hueco).
+    GetSlotOfferSettingsUseCase,
+    UpdateSlotOfferSettingsUseCase,
+    {
+      provide: SLOT_OFFER_SETTINGS_REPOSITORY,
+      useClass: PrismaSlotOfferSettingsRepository,
+    },
+    // Minutos antes del hueco en que caduca el enlace por defecto
+    // (WAITLIST_LINK_OFFER_EXPIRY_LEAD_MINUTES, 0 = al empezar). Desde DX-448
+    // solo rige en las clínicas que no eligieron la suya.
     {
       provide: LINK_OFFER_CONFIG,
       inject: [ConfigService],
@@ -131,5 +148,7 @@ import { PrismaWaitlistRepository } from './infrastructure/repositories/prisma-w
         loadLinkOfferConfig((key) => config.get<string>(key)),
     },
   ],
+  // DX-503: «Mi día» cuenta la lista de espera con el mismo caso de uso.
+  exports: [ListWaitlistUseCase],
 })
 export class WaitlistModule {}

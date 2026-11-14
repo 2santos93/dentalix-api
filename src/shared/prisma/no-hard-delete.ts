@@ -43,6 +43,12 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // Editar la plantilla los sustituye en la misma transacción y el cambio
   // queda en audit_events.
   'postOpInstructionTemplateLink',
+  // DX-015-bis: los disparadores de un tipo de recall (qué procedimiento
+  // mueve su reloj) son configuración, sin datos de pacientes y sin nada que
+  // los referencie (el recall guarda su base, no el disparador). El PUT de
+  // Ajustes › Recall sustituye el conjunto en la misma transacción y el
+  // cambio queda en audit_events (RECALL_TYPE_TRIGGERS_UPDATED).
+  'recallTypeTrigger',
   // DX-107: filas preparadas de un dry-run de importación que CADUCÓ (nadie
   // lo confirmó o se subió otro fichero). Son datos del fichero que ya no
   // hacen falta, nunca crearon ni tocaron un paciente (outcome PENDING, sin
@@ -58,6 +64,17 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // dentro de la misma transacción que el resto del lote y el cambio queda en
   // audit_events (PRICES_REPLACED). La lista entera sí se retira en blando.
   'priceListItem',
+  // DX-021: huellas (HMAC) de los códigos de recuperación de la verificación
+  // en dos pasos. Son material de credencial, sin datos de pacientes y sin
+  // nada que las referencie: regenerarlos o desactivar el MFA DEBE
+  // destruirlos (conservarlos «en blando» solo dejaría credenciales viejas en
+  // la BD). Cada cambio queda en audit_events (MFA_RECOVERY_CODES_REGENERATED
+  // / MFA_DISABLED).
+  'userMfaRecoveryCode',
+  // DX-021-bis: huellas de tokens de dispositivos de confianza ya caducados o
+  // revocados; al guardar uno nuevo se borran los muertos del usuario.
+  // Material de credencial sin datos de pacientes y sin nada que lo referencie.
+  'userTrustedDevice',
 ]);
 
 const FORBIDDEN_OPERATIONS: ReadonlySet<string> = new Set([

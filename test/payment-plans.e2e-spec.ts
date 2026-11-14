@@ -15,9 +15,10 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // Same admin/superuser connection convention as payments.e2e-spec.ts /
 // dashboard.e2e-spec.ts / treatment-plans.e2e-spec.ts: DIRECT_URL bypasses RLS
@@ -105,7 +106,7 @@ async function registerAndLogin(
 }> {
   const register = await registerVerified(
     app,
-    clinicRegisterBody(REGIONAL_BOGOTA_FIXTURE, {
+    clinicRegisterBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: opts.clinicName,
       subdomain: opts.subdomain,
       email: opts.email,
@@ -241,6 +242,9 @@ describe('Payment plans / cuotas (e2e)', () => {
 
       // --- 0. Seed a PROCEDURE catalog item priced so a single ACCEPTED item
       // makes the plan's balance exactly 1200.
+      // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+      // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+      await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
       const createCatalogItem = await request(app.getHttpServer())
         .post('/api/v1/catalog/items')
         .set('X-Tenant-Host', hostFor(clinic.subdomain))
@@ -255,7 +259,7 @@ describe('Payment plans / cuotas (e2e)', () => {
         .expect(201);
       const catalogItem = createCatalogItem.body as CatalogItemResponseBody;
 
-      // --- 1. Create a treatment plan (explicit USD; the clinic's location is COP).
+      // --- 1. Create a treatment plan (explicit USD; the clinic's location is VES).
       const createPlan = await request(app.getHttpServer())
         .post(`/api/v1/patients/${patient.id}/treatment-plans`)
         .set('X-Tenant-Host', hostFor(clinic.subdomain))
@@ -411,4 +415,139 @@ describe('Payment plans / cuotas (e2e)', () => {
       expect(recreatedPlan.totalToFinance).toBe(1200);
     },
   );
+
+  it('DX-488: en JPY las cuotas son yenes enteros (3333/3333/3334) y dos pagos de ¥3333 dejan las cuotas 1 y 2 pagadas', async () => {
+    const subdomain = 'clinica-cuotas-jpy';
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Cuotas JPY',
+      subdomain,
+      email: 'owner@clinica-cuotas-jpy.com',
+    });
+    const patient = await createPatient(
+      app,
+      clinic.accessToken,
+      subdomain,
+      'CUOTAS-JPY-001',
+    );
+    const as = (r: request.Test) =>
+      r
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`);
+    const api = () => request(app.getHttpServer());
+
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (JPY): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'JPY');
+    const catalogItem = (
+      await as(api().post('/api/v1/catalog/items'))
+        .send({
+          code: 'RESINA-CUOTAS-JPY',
+          kind: CatalogKind.PROCEDURE,
+          labelEs: 'Resina',
+          color: '#2A2B3C',
+          defaultPrice: 100,
+        })
+        .expect(201)
+    ).body as CatalogItemResponseBody;
+    const plan = (
+      await as(api().post(`/api/v1/patients/${patient.id}/treatment-plans`))
+        .send({ currency: 'JPY' })
+        .expect(201)
+    ).body as TreatmentPlanResponseBody;
+    expect(plan.currency).toBe('JPY');
+    const item = (
+      await as(api().post(`/api/v1/treatment-plans/${plan.id}/items`))
+        .send({
+          toothNumber: '11',
+          catalogItemId: catalogItem.id,
+          price: 10000,
+        })
+        .expect(201)
+    ).body as TreatmentPlanItemResponseBody;
+    await as(api().patch(`/api/v1/treatment-plans/${plan.id}/items/${item.id}`))
+      .send({ status: 'ACCEPTED' })
+      .expect(200);
+
+    const created = (
+      await as(api().post(`/api/v1/treatment-plans/${plan.id}/payment-plan`))
+        .send({
+          installmentsCount: 3,
+          periodicity: 'MONTHLY',
+          startDate: START_DATE,
+        })
+        .expect(201)
+    ).body as PaymentPlanResponseBody;
+    expect(created.totalToFinance).toBe(10000);
+    expect(created.installments.map((i) => i.amount)).toEqual([
+      3333, 3333, 3334,
+    ]);
+
+    for (let i = 0; i < 2; i++) {
+      await as(api().post(`/api/v1/treatment-plans/${plan.id}/payments`))
+        .send({
+          amount: 3333,
+          currency: 'JPY',
+          paidAt: PAID_AT,
+          method: 'CASH',
+        })
+        .expect(201);
+    }
+
+    const read = (
+      await as(
+        api().get(`/api/v1/treatment-plans/${plan.id}/payment-plan`),
+      ).expect(200)
+    ).body as PaymentPlanResponseBody;
+    expect(read.installments.map((i) => i.amount)).toEqual([3333, 3333, 3334]);
+    expect(read.installments.reduce((sum, i) => sum + i.amount, 0)).toBe(
+      read.financedAmount,
+    );
+    expect(read.financedAmount).toBe(10000);
+    expect(read.paidTotal).toBe(6666);
+    expect(
+      read.installments.map((i) => [i.sequence, i.covered, i.status]),
+    ).toEqual([
+      [1, 3333, 'PAID'],
+      [2, 3333, 'PAID'],
+      [3, 0, 'PENDING'],
+    ]);
+    expect(read.remaining).toBe(3334);
+  });
+
+  // DX-517-quater: ningún 400 de importe responde en inglés.
+  it('pie o total con 3 decimales, sobre el máximo o negativo: 400 en español', async () => {
+    const clinic = await registerAndLogin(app, {
+      clinicName: 'Clinica Cuotas Importes',
+      subdomain: 'clinica-cuotas-importes',
+      email: 'owner@clinica-cuotas-importes.com',
+    });
+    const post = async (body: Record<string, unknown>) =>
+      (
+        (
+          await request(app.getHttpServer())
+            .post(
+              '/api/v1/treatment-plans/00000000-0000-4000-8000-000000000001/payment-plan',
+            )
+            .set('X-Tenant-Host', hostFor(clinic.subdomain))
+            .set('Authorization', `Bearer ${clinic.accessToken}`)
+            .send({
+              installmentsCount: 3,
+              periodicity: 'MONTHLY',
+              startDate: START_DATE,
+              ...body,
+            })
+            .expect(400)
+        ).body as { message: string[] }
+      ).message;
+    const decimals =
+      'El importe tiene que ser un número con hasta 2 decimales y no mayor que 9.999.999.999,99.';
+    expect(await post({ downPayment: 10.005 })).toContain(decimals);
+    expect(await post({ totalToFinance: 10_000_000_000 })).toContain(decimals);
+    expect(await post({ downPayment: -1 })).toContain(
+      'El pago inicial tiene que ser un número mayor o igual que 0.',
+    );
+    expect(await post({ totalToFinance: -1 })).toContain(
+      'El total a financiar tiene que ser un número mayor o igual que 0.',
+    );
+  });
 });

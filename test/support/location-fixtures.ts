@@ -19,14 +19,27 @@ export interface RegionalFixture {
   defaultPhoneRegion: string;
 }
 
-/** Conserva las expectativas de los tests anteriores a G1 (COP, Bogotá). */
-export const REGIONAL_BOGOTA_FIXTURE: RegionalFixture = {
-  country: 'CO',
-  currency: 'COP',
-  timeZone: 'America/Bogota',
-  locale: 'es-CO',
+/** Conserva las expectativas de los tests anteriores a G1 (VES, zona UTC−4). */
+export const REGIONAL_CARACAS_FIXTURE: RegionalFixture = {
+  country: 'VE',
+  currency: 'VES',
+  timeZone: 'America/Caracas',
+  locale: 'es-VE',
   hourCycle: 'h23',
-  defaultPhoneRegion: 'CO',
+  defaultPhoneRegion: 'VE',
+};
+
+/**
+ * Sede de Madrid: otra región telefónica que la principal, y un país que
+ * cabe en la columna legada `ClinicCountry` (CO/ES).
+ */
+export const REGIONAL_MADRID_FIXTURE: RegionalFixture = {
+  country: 'ES',
+  currency: 'EUR',
+  timeZone: 'Europe/Madrid',
+  locale: 'es-ES',
+  hourCycle: 'h23',
+  defaultPhoneRegion: 'ES',
 };
 
 /** Sede de Tokio: un número sin «+» se lee con su región (DX-329). */
@@ -101,6 +114,7 @@ export function registerBody<T extends object>(
  * de las sedes que los int de migraciones insertan en una etapa ANTERIOR a
  * DX-312 (sin la columna "countryCode"); no decide nada.
  */
+// El enum `ClinicCountry` solo admite CO/ES: un dato de esquema, no un ejemplo.
 export const LEGACY_ENUM_COUNTRY = 'CO';
 
 const quote = (text: string) => `'${text.replace(/'/g, "''")}'`;
@@ -182,6 +196,40 @@ export async function g1LocationInsert(
     VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${regional.country},
             ${regional.currency}, ${regional.timeZone}, ${regional.locale}, now())
     RETURNING "id"`;
+  return rows[0].id;
+}
+
+/**
+ * INSERT crudo de una sede con TODOS los datos regionales (país, moneda, zona,
+ * formato, reloj y, salvo `phoneRegion: false`, prefijo telefónico de
+ * DX-329). Para los int de migración sobre una BD desechable migrada solo
+ * hasta cierta fecha: `db.location.create` insertaría columnas de sede
+ * posteriores (p. ej. `receiptLegendOverride` de DX-515) aunque no se pidan.
+ * Devuelve el id.
+ */
+export async function regionalLocationInsert(
+  prisma: Pick<PrismaClient, '$queryRaw'>,
+  tenantId: string,
+  name: string,
+  regional: RegionalFixture,
+  { phoneRegion = true }: { phoneRegion?: boolean } = {},
+): Promise<string> {
+  const rows = phoneRegion
+    ? await prisma.$queryRaw<{ id: string }[]>`
+        INSERT INTO "locations" ("id", "tenantId", "name", "countryCode", "currency",
+                                 "timeZone", "locale", "hourCycle",
+                                 "defaultPhoneRegion", "updatedAt")
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${regional.country},
+                ${regional.currency}, ${regional.timeZone}, ${regional.locale},
+                ${regional.hourCycle}, ${regional.defaultPhoneRegion}, now())
+        RETURNING "id"`
+    : await prisma.$queryRaw<{ id: string }[]>`
+        INSERT INTO "locations" ("id", "tenantId", "name", "countryCode", "currency",
+                                 "timeZone", "locale", "hourCycle", "updatedAt")
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${name}, ${regional.country},
+                ${regional.currency}, ${regional.timeZone}, ${regional.locale},
+                ${regional.hourCycle}, now())
+        RETURNING "id"`;
   return rows[0].id;
 }
 

@@ -13,6 +13,7 @@ import type {
   ConsumeSignedPdfCopyOutcome,
   IssueSignedPdfCopyLinkInput,
   SignedConsentPdfBackfillRepository,
+  SignedPdfCopyDownload,
   SignedPdfCopyLinkRow,
   SignedPdfCopyRepository,
   SignedPdfCopyTarget,
@@ -55,8 +56,8 @@ function target(over: Partial<SignedPdfCopyTarget> = {}): SignedPdfCopyTarget {
     clinicName: 'Sonrisas del Norte',
     location: {
       id: 'loc-1',
-      timeZone: 'America/Bogota',
-      locale: 'es-CO',
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
       hourCycle: 'h12',
     },
     ...over,
@@ -82,17 +83,28 @@ class FakeRepo implements SignedPdfCopyRepository {
     this.loadArgs.push([consentId, patientId]);
     return Promise.resolve(this.target);
   }
-  issueLink(input: IssueSignedPdfCopyLinkInput) {
-    const id = `link-${this.issued.length + 1}`;
+  /** Como la BD: `enqueue` va en la misma «transacción»; si falla, no queda nada. */
+  async issueLink(input: IssueSignedPdfCopyLinkInput) {
+    const id = input.id ?? `link-${this.issued.length + 1}`;
+    await input.enqueue?.({} as Prisma.TransactionClient);
     this.issued.push({ ...input, id });
-    return Promise.resolve({ id });
+    return { id };
   }
   findLinkByTokenHash(hash: string) {
     return Promise.resolve(this.links.get(hash) ?? null);
   }
-  consumeLink(linkId: string, _now: Date, meta: AuditRequestMeta) {
+  async consumeLink(
+    linkId: string,
+    _now: Date,
+    meta: AuditRequestMeta,
+    beforeCommit?: (download: SignedPdfCopyDownload) => Promise<void>,
+  ) {
+    // Como la BD: si `beforeCommit` falla, el enlace no queda gastado.
+    if (this.consumeOutcome.kind === 'CONSUMED') {
+      await beforeCommit?.(this.consumeOutcome.download);
+    }
     this.consumed.push({ linkId, meta });
-    return Promise.resolve(this.consumeOutcome);
+    return this.consumeOutcome;
   }
   findClinicBranding(): Promise<ClinicBranding | null> {
     return Promise.resolve({
@@ -117,6 +129,9 @@ function setup(
     vars: SignedConsentCopyEmailVars;
   }[] = [];
   const quotaChecks: string[] = [];
+  const kicks: string[] = [];
+  /** DX-149-ter: el `enforceQuota` con el que se preparó cada email. */
+  const enforced: boolean[] = [];
   const email: SignedPdfCopyEmailSender & { quotaError: Error | null } = {
     quotaError: null,
     assertCanSend(to) {
@@ -125,9 +140,17 @@ function setup(
         ? Promise.reject(this.quotaError)
         : Promise.resolve();
     },
-    send(input) {
-      emails.push(input);
-      return Promise.resolve();
+    prepare(input, options) {
+      enforced.push(options?.enforceQuota === true);
+      return Promise.resolve({
+        insert: () => {
+          emails.push(input);
+          return Promise.resolve({ id: 'outbox-1' });
+        },
+        kick: () => {
+          kicks.push(input.referenceId);
+        },
+      });
     },
   };
   const linkBaseCalls: (string | undefined)[][] = [];
@@ -169,6 +192,8 @@ function setup(
   return {
     repo,
     emails,
+    kicks,
+    enforced,
     quotaChecks,
     email,
     linkBaseCalls,
@@ -203,7 +228,11 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(ctx.emails).toHaveLength(1);
       const sent = ctx.emails[0];
       expect(sent.to).toBe('marta@example.com');
-      expect(sent.referenceId).toBe('link-1');
+      expect(sent.referenceId).toBe(link.id);
+      // El despachador se despierta tras el commit.
+      expect(ctx.kicks).toEqual([link.id]);
+      // DX-149-ter: el envío automático no cuenta el tope (no lo pide nadie).
+      expect(ctx.enforced).toEqual([false]);
       const token = sent.vars.url.split('/copia/')[1];
       expect(sent.vars.url).toBe(`https://demo.dentalix.app/copia/${token}`);
       expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -257,6 +286,17 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(ctx.emails).toEqual([]);
     });
 
+    it('DX-476: con el paciente archivado en medio, el envío automático no manda email (la cola recibe el 409)', async () => {
+      const ctx = setup();
+      jest
+        .spyOn(ctx.repo, 'issueLink')
+        .mockRejectedValue(new ConflictException('El paciente está archivado'));
+      await expect(ctx.job.handle({ consentId: CONSENT })).rejects.toThrow(
+        'El paciente está archivado',
+      );
+      expect(ctx.emails).toEqual([]);
+    });
+
     it('rechaza un payload sin uuid', async () => {
       const ctx = setup();
       await expect(ctx.job.handle({ consentId: 'x' })).rejects.toThrow(
@@ -281,6 +321,8 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(ctx.repo.issued).toHaveLength(1);
       expect(ctx.repo.issued[0]).toMatchObject({ createdById: 'u1' });
       expect(ctx.emails).toHaveLength(1);
+      // DX-149-ter: el reenvío cuenta el tope bajo candado al encolar.
+      expect(ctx.enforced).toEqual([true]);
       expect(ctx.linkBaseCalls).toEqual([['t1', 'demo.localhost:3000']]);
       expect(result).toEqual({
         sentAt: NOW,
@@ -317,6 +359,40 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       expect(ctx.repo.issued).toEqual([]);
     });
 
+    it('DX-463: si encolar el email falla, no se crea ni se invalida nada y no se despierta al despachador', async () => {
+      const ctx = setup();
+      jest.spyOn(ctx.email, 'prepare').mockResolvedValue({
+        insert: () => Promise.reject(new Error('outbox caído')),
+        kick: () => ctx.kicks.push('kick'),
+      });
+      await expect(ctx.resend.execute('p1', 'c1', 'u1')).rejects.toThrow(
+        'outbox caído',
+      );
+      expect(ctx.repo.issued).toEqual([]);
+      expect(ctx.kicks).toEqual([]);
+    });
+
+    it('DX-149-ter: si el tope salta al encolar (otro reenvío a la vez ganó), 429 y el enlace anterior sigue: no se crea ni invalida nada', async () => {
+      const ctx = setup();
+      const capped = new HttpException(
+        {
+          statusCode: 429,
+          error: 'Too Many Requests',
+          message:
+            'Ya enviamos un correo a esta persona hace un momento. Espera 60 segundos antes de volver a enviarlo.',
+          retryAfterSeconds: 60,
+        },
+        429,
+      );
+      jest.spyOn(ctx.email, 'prepare').mockResolvedValue({
+        insert: () => Promise.reject(capped),
+        kick: () => ctx.kicks.push('kick'),
+      });
+      await expect(ctx.resend.execute('p1', uuid, 'u1')).rejects.toBe(capped);
+      expect(ctx.repo.issued).toEqual([]);
+      expect(ctx.kicks).toEqual([]);
+    });
+
     it('el tope de emails frena ANTES de invalidar el enlace anterior', async () => {
       const ctx = setup();
       ctx.email.quotaError = new HttpException('Espera', 429);
@@ -324,6 +400,17 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
         'Espera',
       );
       expect(ctx.repo.issued).toEqual([]);
+      expect(ctx.emails).toEqual([]);
+    });
+
+    it('DX-476: si el paciente se archivó mientras tanto, el 409 sale de la creación del enlace y no se envía ningún email', async () => {
+      const ctx = setup();
+      jest
+        .spyOn(ctx.repo, 'issueLink')
+        .mockRejectedValue(new ConflictException('El paciente está archivado'));
+      await expect(ctx.resend.execute('p1', uuid, 'u1')).rejects.toThrow(
+        'El paciente está archivado',
+      );
       expect(ctx.emails).toEqual([]);
     });
 
@@ -416,6 +503,24 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
       });
     });
 
+    it('DX-463: si generar la URL firmada falla, el enlace no se gasta', async () => {
+      const ctx = setup();
+      ctx.repo.links.set(hash, live);
+      const storage = {
+        getSignedUrl: () => Promise.reject(new Error('storage caído')),
+      };
+      const download = new DownloadSignedPdfCopyUseCase(
+        ctx.repo,
+        { getTenantId: () => 't1' },
+        () => NOW,
+        storage,
+      );
+      await expect(download.execute(TOKEN, META)).rejects.toThrow(
+        'storage caído',
+      );
+      expect(ctx.repo.consumed).toEqual([]);
+    });
+
     it('la segunda descarga responde «enlace usado» (410) sin URL', async () => {
       const ctx = setup();
       ctx.repo.links.set(hash, { ...live, usedAt: NOW });
@@ -449,6 +554,7 @@ describe('copia del PDF firmado al paciente (DX-443)', () => {
 describe('barrido retroactivo de PDF firmados (DX-443)', () => {
   function backfillSetup(failing: string[] = []) {
     const calls: { tenantId: string; limit: number; keys: string[] }[] = [];
+    const retryCalls: { tenantId: string; limit: number }[] = [];
     const repo: SignedConsentPdfBackfillRepository = {
       tenantIds: () => Promise.resolve(['t1', 't2', 't3']),
       backfill: async (tenantId, limit, enqueue) => {
@@ -460,30 +566,59 @@ describe('barrido retroactivo de PDF firmados (DX-443)', () => {
         calls.push({ tenantId, limit, keys });
         return keys.length;
       },
+      // DX-459: t3 tiene un PDF FAILED por otro alfabeto.
+      retryUnsupportedCharacters: async (tenantId, limit, enqueue) => {
+        retryCalls.push({ tenantId, limit });
+        if (tenantId !== 't3') return 0;
+        await enqueue({} as Prisma.TransactionClient, 't3-legacy');
+        return 1;
+      },
     };
     const enqueued: string[] = [];
+    const unicodeRetries: string[] = [];
     const queue = {
       schedule: (_tx: Prisma.TransactionClient, consentId: string) => {
         enqueued.push(consentId);
         return Promise.resolve();
       },
+      retryWithUnicodeFonts: (
+        _tx: Prisma.TransactionClient,
+        consentId: string,
+      ) => {
+        unicodeRetries.push(consentId);
+        return Promise.resolve();
+      },
     };
     return {
       calls,
+      retryCalls,
       enqueued,
+      unicodeRetries,
       sweep: new BackfillSignedConsentPdfs(repo, queue),
     };
   }
 
   it('recorre las clínicas por lotes y encola la generación con la clave de siempre', async () => {
     const ctx = backfillSetup();
-    await expect(ctx.sweep.run()).resolves.toEqual({ queued: 3 });
+    await expect(ctx.sweep.run()).resolves.toEqual({ queued: 3, retried: 1 });
     expect(ctx.calls.map((c) => [c.tenantId, c.limit])).toEqual([
       ['t1', 100],
       ['t2', 100],
       ['t3', 100],
     ]);
     expect(ctx.enqueued).toEqual(['t1-c1', 't2-c1', 't3-c1']);
+  });
+
+  it('DX-459: reintenta por clínica los FAILED por otro alfabeto con su propia clave, no con la de la firma', async () => {
+    const ctx = backfillSetup();
+    await ctx.sweep.run();
+    expect(ctx.retryCalls).toEqual([
+      { tenantId: 't1', limit: 100 },
+      { tenantId: 't2', limit: 100 },
+      { tenantId: 't3', limit: 100 },
+    ]);
+    expect(ctx.unicodeRetries).toEqual(['t3-legacy']);
+    expect(ctx.enqueued).not.toContain('t3-legacy');
   });
 
   it('una clínica que falla no frena a las demás; al final falla para que la cola reintente', async () => {

@@ -10,7 +10,7 @@ import {
 } from '../src/shared/locations/location-time-zone';
 import { resolveReferenceLocation } from '../src/shared/locations/reference-location';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   legacyLocationInsert,
   locationData,
@@ -19,7 +19,7 @@ import {
 /**
  * GLOBAL-G1 (DX-314): la zona de una sede sale SOLO de `locations."timeZone"`,
  * contra Postgres real con el rol de la app (RLS FORCE). Ni el horario ni el
- * país: una zona NULL o corrupta es 409, nunca Bogotá.
+ * país: una zona NULL o corrupta es 409, nunca una zona por defecto.
  */
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -66,7 +66,7 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
     // La más antigua está desactivada: la principal es la activa más antigua.
     ids.retired = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Retirada',
           isActive: false,
@@ -95,13 +95,13 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
         }),
       })
     ).id;
-    // Su horario LEGADO dice Bogotá: el código nuevo no lo lee (R20).
+    // Su horario LEGADO dice una zona UTC−4: el código nuevo no lo lee (R20).
     await raw.locationSchedule.create({
-      data: { tenantId, locationId: ids.tokyo, timezone: 'America/Bogota' },
+      data: { tenantId, locationId: ids.tokyo, timezone: 'America/Caracas' },
     });
     ids.corrupt = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Marte',
           createdAt: at(3),
@@ -114,10 +114,10 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
       raw,
       tenantId,
       'Réplica antigua',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     await raw.location.create({
-      data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
         tenantId: emptyTenantId,
         name: 'Inactiva',
         isActive: false,
@@ -176,7 +176,7 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
     expect(() => zones.zoneOf(ids.legacy)).toThrow(ConflictException);
     // Con una fila en la tabla de la vista, la sede sin zona es 409.
     await raw.locationSchedule.create({
-      data: { tenantId, locationId: ids.legacy, timezone: 'America/Bogota' },
+      data: { tenantId, locationId: ids.legacy, timezone: 'America/Caracas' },
     });
     try {
       expect(await conflictOf(period())).toMatchObject({
@@ -190,11 +190,11 @@ describe('zona de la sede: solo Location.timeZone (int, G1)', () => {
     }
   });
 
-  it('NULL zone is 409 LOCATION_TIMEZONE_REQUIRED, never Bogotá', async () => {
+  it('NULL zone is 409 LOCATION_TIMEZONE_REQUIRED, never Caracas', async () => {
     const row = await raw.location.findUniqueOrThrow({
       where: { id: ids.legacy },
     });
-    expect(row).toMatchObject({ country: 'CO', timeZone: null });
+    expect(row).toMatchObject({ country: 'VE', timeZone: null });
     expect(
       await conflictOf(
         inTenant(tenantId, (tx) =>

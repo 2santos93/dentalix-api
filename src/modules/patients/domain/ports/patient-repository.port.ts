@@ -1,3 +1,4 @@
+import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { DocumentType, RetentionExtension, Sex } from '@prisma/client';
 import { Patient } from '../entities/patient.entity';
@@ -55,6 +56,8 @@ export interface CreatePatientRepoInput {
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
   createdById?: string;
+  /** DX-497: ya canónico; debe estar en la lista de la clínica (si no, 400). */
+  preferredLanguage?: string | null;
   medicalHistory?: {
     data: MedicalHistoryVersionData;
     safetyFlags: SafetyFlags;
@@ -115,6 +118,16 @@ export interface ListPatientsResult {
 export interface PatientRetentionState {
   lastAttentionAt: Date | null;
   retentionExtended: RetentionExtension;
+  /** DX-330: fecha que dejó una reducción del plazo; nunca baja. */
+  retentionFloorUntil: Date | null;
+  /** DX-330: plazo vigente de la clínica en años, leído con `tenants` bloqueada. */
+  years: number;
+  /**
+   * DX-354: la sede principal (R6) de la clínica, con el formato en crudo de la
+   * fecha del mensaje de retención; `null` si no hay ninguna sede activa o
+   * si el flujo no la usa (solo la lee el archivado).
+   */
+  format: LocationFormatSource | null;
 }
 
 /**
@@ -155,10 +168,12 @@ export const PARTIAL_SUPPRESSION_FIELDS = [
 ] as const;
 
 export interface RetentionExpiringParams {
-  /** Última atención anterior a esta fecha con plazo NONE (hoy + horizonte − 15 años). */
-  noneBefore: Date;
-  /** Ídem con plazo DOUBLE (hoy + horizonte − 30 años). */
-  doubleBefore: Date;
+  /**
+   * Día siguiente al horizonte, a medianoche UTC. Sale de la lista lo que termina
+   * antes: el repositorio resta el plazo vigente de la clínica (el doble con
+   * DOUBLE) y exige que el suelo también termine antes.
+   */
+  horizonNext: Date;
   skip: number;
   take: number;
 }

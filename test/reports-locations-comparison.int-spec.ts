@@ -44,7 +44,7 @@ async function seedClinic(
   const seed = new ReportSeeder(raw, tenant.id);
   const locationId = await seed.location('Sede principal');
   // La profesional atiende allí de lunes a viernes de 9 a 13 (240 min),
-  // Bogotá: es la capacidad de la sede (BE-042).
+  // En la zona de la sede: es la capacidad de la sede (BE-042).
   const { userId: providerId } = await seed.dentist();
   await seed.providerSchedule({
     providerId,
@@ -79,7 +79,7 @@ async function seedClinic(
   const patientId = await seed.patient(subdomain);
   const planId = await seed.plan({
     patientId,
-    currency: 'COP',
+    currency: 'USD',
     price: amount,
     done: { locationId, at: new Date('2026-10-05T15:00:00Z') },
   });
@@ -87,7 +87,7 @@ async function seedClinic(
     planId,
     patientId,
     locationId,
-    currency: 'COP',
+    currency: 'USD',
     amount: amount / 2,
     paidAt: new Date('2026-10-06T15:00:00Z'),
   });
@@ -105,7 +105,7 @@ async function seedClinic(
         id: locationId,
         name: 'Sede principal',
         isActive: true,
-        timeZone: 'America/Bogota',
+        timeZone: 'America/Caracas',
       },
     ],
   };
@@ -159,15 +159,15 @@ describe('Comparar sedes en la BD (DX-014, int)', () => {
       // la sede del 19/10.
       capacityMinutes: 22 * 240 - 120,
     });
-    expect([...(sums?.production ?? [])]).toEqual([['COP', 100_000]]);
-    expect([...(sums?.collected ?? [])]).toEqual([['COP', 50_000]]);
+    expect([...(sums?.production ?? [])]).toEqual([['USD', 100_000]]);
+    expect([...(sums?.collected ?? [])]).toEqual([['USD', 50_000]]);
     expect(result.attendedPatients).toBe(1);
   });
 
   it('las sedes son solo las de la clínica en contexto', async () => {
     const inA = await context.run(a.tenantId, () => repo.listLocations('ALL'));
     expect(inA.map((l) => l.id)).toEqual([a.locations[0].id]);
-    expect(inA[0].timeZone).toBe('America/Bogota');
+    expect(inA[0].timeZone).toBe('America/Caracas');
     const filtered = await context.run(a.tenantId, () =>
       repo.listLocations([b.locations[0].id]),
     );
@@ -208,7 +208,7 @@ describe('Comparar sedes en la BD (DX-014, int)', () => {
     );
     expect([
       ...(own.byLocation.get(b.locations[0].id)?.collected ?? []),
-    ]).toEqual([['COP', 3_500_000]]);
+    ]).toEqual([['USD', 3_500_000]]);
   });
 
   it('producción atribuible: el instante lo fija la migración y los «Sin atribuir» son de la clínica en contexto', async () => {
@@ -225,7 +225,7 @@ describe('Comparar sedes en la BD (DX-014, int)', () => {
     const seed = new ReportSeeder(raw, b.tenantId);
     await seed.unattributedDone({
       patientId: await seed.patient('Sin atribuir'),
-      currency: 'COP',
+      currency: 'USD',
       price: 1,
     });
     // El de B no cuenta para A (RLS y filtro explícito); para B, sí.

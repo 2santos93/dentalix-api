@@ -3,8 +3,26 @@ import { RecordOpeningBalancePaymentUseCase } from './application/use-cases/reco
 import { Module } from '@nestjs/common';
 import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
 import { PaymentMethodGate } from './application/payment-method-gate';
+import { PaymentProofUploads } from './application/payment-proof-uploads';
+import { PaymentProofs } from './application/payment-proofs';
+import {
+  PaymentProofJobs,
+  PaymentProofPendingSweep,
+} from './application/payment-proof-sweep';
+import { JobsModule } from '../jobs/jobs.module';
+import {
+  PAYMENT_PROOF_UPLOAD_TTL,
+  PAYMENT_PROOF_URL_TTL,
+} from './application/payment-proof-tokens';
+import {
+  PROOF_UPLOAD_TTL_SECONDS,
+  PROOF_URL_TTL_SECONDS,
+} from './domain/payment-proof';
+import { CreatePaymentProofUploadUseCase } from './application/use-cases/create-payment-proof-upload.use-case';
+import { GetPaymentProofUrlUseCase } from './application/use-cases/get-payment-proof-url.use-case';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { JwtModule } from '@nestjs/jwt';
+import { StorageModule } from '../../shared/storage/storage.module';
 import { RecordPaymentUseCase } from './application/use-cases/record-payment.use-case';
 import { ListPaymentsUseCase } from './application/use-cases/list-payments.use-case';
 import {
@@ -27,6 +45,13 @@ import { PAYMENT_RECEIPT_REPOSITORY } from './domain/ports/payment-receipt-repos
 import { RECEIPT_EMAIL_SENDER } from './domain/ports/receipt-email-sender.port';
 import { PrismaPaymentReceiptRepository } from './infrastructure/repositories/prisma-payment-receipt.repository';
 import { OutboxReceiptEmailSender } from './infrastructure/receipts/outbox-receipt-email-sender';
+import { PaymentReceiptSummaryController } from './presentation/payment-receipt-summary.controller';
+import { GetPaymentReceiptSummaryUseCase } from './application/receipts/get-payment-receipt-summary.use-case';
+import { SendPaymentReceiptSummaryUseCase } from './application/receipts/send-payment-receipt-summary.use-case';
+import { PAYMENT_RECEIPT_SUMMARY_REPOSITORY } from './domain/ports/payment-receipt-summary-repository.port';
+import { RECEIPT_SUMMARY_EMAIL_SENDER } from './domain/ports/receipt-summary-email-sender.port';
+import { PrismaPaymentReceiptSummaryRepository } from './infrastructure/repositories/prisma-payment-receipt-summary.repository';
+import { OutboxReceiptSummaryEmailSender } from './infrastructure/receipts/outbox-receipt-summary-email-sender';
 import { CollectionsModule } from '../collections/collections.module';
 import { EmailModule } from '../notifications/email/email.module';
 import { ExchangeModule } from '../exchange/exchange.module';
@@ -40,6 +65,17 @@ import { PaymentAllocationsController } from './presentation/payment-allocations
 import { PaymentRateBacklogController } from './presentation/payment-rate-backlog.controller';
 import { GetPaymentAllocationsUseCase } from './application/use-cases/get-payment-allocations.use-case';
 import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replace-payment-allocations.use-case';
+import { ReceiptSettingsController } from './presentation/receipt-settings.controller';
+import {
+  GetReceiptSettingsUseCase,
+  UpdateLocationReceiptLegendUseCase,
+  UpdateReceiptSettingsUseCase,
+} from './application/receipts/receipt-settings.use-cases';
+import { RECEIPT_SETTINGS_REPOSITORY } from './domain/ports/receipt-settings-repository.port';
+import { PrismaReceiptSettingsRepository } from './infrastructure/repositories/prisma-receipt-settings.repository';
+import { SetExternalInvoiceNumberUseCase } from './application/use-cases/set-external-invoice-number.use-case';
+import { EXTERNAL_INVOICE_REPOSITORY } from './domain/ports/external-invoice-repository.port';
+import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/prisma-external-invoice.repository';
 
 // REST lands here in PAY-T3 (`PAYMENT_ROLES`, controller, DTOs) on top of the
 // use-cases + repo PAY-T2 already built. ExchangeModule is imported (not
@@ -54,6 +90,9 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
   // EmailModule (DX-136): el recibo se envía por el outbox de DX-088.
   imports: [
     JwtModule.register({}),
+    // DX-389: el almacén privado de los comprobantes.
+    StorageModule,
+    JobsModule,
     ExchangeModule,
     DocumentTypeNamesModule,
     TreatmentPlansModule,
@@ -68,9 +107,13 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
   controllers: [
     PaymentsController,
     PaymentReceiptsController,
+    // DX-401: resumen de los recibos de un período del paciente.
+    PaymentReceiptSummaryController,
     // DX-051: ver y reasignar la imputación de un abono.
     PaymentAllocationsController,
     PaymentRateBacklogController,
+    // DX-515: título y leyenda del recibo (clínica y sede).
+    ReceiptSettingsController,
   ],
   providers: [
     RecordPaymentUseCase,
@@ -79,6 +122,16 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
     // DX-262: abono contra el saldo migrado.
     RecordOpeningBalancePaymentUseCase,
     PaymentMethodGate,
+    // DX-389: comprobante del cobro (subida directa al almacén privado).
+    PaymentProofUploads,
+    PaymentProofs,
+    // DX-389 (M1): barrido diario de los comprobantes pendientes sin entregar.
+    PaymentProofPendingSweep,
+    PaymentProofJobs,
+    CreatePaymentProofUploadUseCase,
+    GetPaymentProofUrlUseCase,
+    { provide: PAYMENT_PROOF_URL_TTL, useValue: PROOF_URL_TTL_SECONDS },
+    { provide: PAYMENT_PROOF_UPLOAD_TTL, useValue: PROOF_UPLOAD_TTL_SECONDS },
     ListPaymentsUseCase,
     VoidPaymentUseCase,
     GetPlanBalanceUseCase,
@@ -98,6 +151,30 @@ import { ReplacePaymentAllocationsUseCase } from './application/use-cases/replac
       useClass: PrismaPaymentReceiptRepository,
     },
     { provide: RECEIPT_EMAIL_SENDER, useClass: OutboxReceiptEmailSender },
+    // DX-401: resumen de los recibos de un período del paciente.
+    GetPaymentReceiptSummaryUseCase,
+    SendPaymentReceiptSummaryUseCase,
+    {
+      provide: PAYMENT_RECEIPT_SUMMARY_REPOSITORY,
+      useClass: PrismaPaymentReceiptSummaryRepository,
+    },
+    {
+      provide: RECEIPT_SUMMARY_EMAIL_SENDER,
+      useClass: OutboxReceiptSummaryEmailSender,
+    },
+    // DX-515: recibo no fiscal (título, leyenda y nº de factura externa).
+    GetReceiptSettingsUseCase,
+    UpdateReceiptSettingsUseCase,
+    UpdateLocationReceiptLegendUseCase,
+    {
+      provide: RECEIPT_SETTINGS_REPOSITORY,
+      useClass: PrismaReceiptSettingsRepository,
+    },
+    SetExternalInvoiceNumberUseCase,
+    {
+      provide: EXTERNAL_INVOICE_REPOSITORY,
+      useClass: PrismaExternalInvoiceRepository,
+    },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on PaymentsController.

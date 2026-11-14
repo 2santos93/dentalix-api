@@ -1,3 +1,4 @@
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   BadRequestException,
   ConflictException,
@@ -9,7 +10,6 @@ import {
 import { ClinicRole } from '@prisma/client';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 import { civilDateIn } from '../../../../shared/time/civil-day';
-import type { ClinicDocumentTypeNames } from '../../../patients/domain/document-type';
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import type {
   ImplantCatalogEntry,
@@ -119,6 +119,7 @@ export class VoidImplantUseCase {
     @Inject(PATIENT_IMPLANT_REPOSITORY)
     private readonly repo: PatientImplantRepository,
     @Inject(IMPLANT_CLOCK) private readonly now: ImplantClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /** Lo anula quien lo registró o un ADMIN, con motivo; una sola vez. */
@@ -130,6 +131,8 @@ export class VoidImplantUseCase {
     const trimmed = validateVoidReason(reason);
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException(IMPLANT_NOT_FOUND_MESSAGE);
+    // SEC-014: se anula solo desde una sede permitida (DX-089-bis).
+    this.tenantContext.assertRecordLocationAllowed(current.locationId);
     if (
       actor.role !== ClinicRole.ADMIN &&
       current.professionalId !== actor.userId
@@ -180,13 +183,12 @@ export class GetImplantCardUseCase {
     date: string | undefined,
   ): Promise<ImplantCard> {
     const placedOn = requireDay(date);
-    return this.card(patientId, placedOn, await this.documentTypeNames.get());
+    return this.card(patientId, placedOn);
   }
 
   private async card(
     patientId: string,
     placedOn: string,
-    names: ClinicDocumentTypeNames,
   ): Promise<ImplantCard> {
     const patient = await this.repo.loadPatient(patientId);
     if (!patient) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
@@ -196,12 +198,22 @@ export class GetImplantCardUseCase {
         'No hay implantes registrados para este paciente en esa fecha',
       );
     }
-    const [clinicName, locations] = await Promise.all([
+    const locationIds = [...new Set(implants.map((i) => i.locationId))];
+    const only = locationIds.length === 1 ? locationIds[0] : undefined;
+    const [clinicName, regional, locations, names] = await Promise.all([
       this.repo.clinicName(),
-      this.repo.locations([...new Set(implants.map((i) => i.locationId))]),
+      // DX-354: la sede de los implantes si es una; si junta varias, la activa.
+      this.repo.regional(only),
+      this.repo.locations(locationIds),
+      // DX-524: la sede de los implantes si es una; si la tarjeta junta
+      // varias, la activa (`undefined`).
+      this.documentTypeNames.get(
+        locationIds.length === 1 ? locationIds[0] : undefined,
+      ),
     ]);
     return composeImplantCard({
       clinicName,
+      regional,
       patient,
       documentTypeNames: names,
       placedOn,
@@ -221,13 +233,12 @@ export class GetImplantCardUseCase {
     actorId: string,
   ): Promise<ImplantCard> {
     const placedOn = requireDay(date);
-    const names = await this.documentTypeNames.get();
-    await this.card(patientId, placedOn, names);
+    await this.card(patientId, placedOn);
     await this.repo.markCardDelivered(patientId, placedOn, {
       deliveredById: actorId,
       deliveredAt: this.now(),
     });
-    return this.card(patientId, placedOn, names);
+    return this.card(patientId, placedOn);
   }
 }
 
@@ -273,7 +284,7 @@ export class SearchImplantsByLotUseCase {
     }
     return this.repo.searchByLot(
       { lot, reference },
-      await this.documentTypeNames.get(),
+      await this.documentTypeNames.book(),
     );
   }
 }

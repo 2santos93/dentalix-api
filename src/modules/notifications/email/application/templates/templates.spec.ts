@@ -31,6 +31,14 @@ describe('escape', () => {
     expect(singleLine('Hola\r\nBcc: x@y.co\t ')).toBe('Hola Bcc: x@y.co');
     expect(singleLine('A\u2028B\u2029C\u0085D\u009bE\u007f')).toBe('A B C D E');
   });
+
+  it('DX-517-bis: singleLine conserva el espacio duro de un importe (\u00abBs.\u00a01,234.50\u00bb), como el papel', () => {
+    expect(singleLine('Valor: Bs.\u00a01,234.50 \u00b7  Efectivo')).toBe(
+      'Valor: Bs.\u00a01,234.50 \u00b7 Efectivo',
+    );
+    expect(singleLine('1\u202f234,50\u00a0VES')).toBe('1\u202f234,50\u00a0VES');
+    expect(singleLine('\u00a0Hola\u00a0')).toBe('Hola');
+  });
 });
 
 describe('plantilla invitation', () => {
@@ -158,7 +166,7 @@ describe('plantillas reservadas para otras tareas', () => {
       patientName: 'Carolina',
       startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
       locationName: 'Sede Norte',
-      locationAddress: 'Cra 15 # 93-60',
+      locationAddress: 'Av. Francisco de Miranda 93',
       providerName: 'Dra. Laura Gómez',
       confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
       unsubscribeUrl: null,
@@ -174,7 +182,9 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(withLink.text).toContain(
       'Fecha y hora: martes 20 de octubre de 2026 a las 9:30 a. m. (hora de la sede)',
     );
-    expect(withLink.text).toContain('Sede: Sede Norte (Cra 15 # 93-60)');
+    expect(withLink.text).toContain(
+      'Sede: Sede Norte (Av. Francisco de Miranda 93)',
+    );
     expect(withLink.text).toContain('Profesional: Dra. Laura Gómez');
     expect(withLink.html).toContain('Confirmar o cancelar');
     expect(withLink.html).toContain(
@@ -189,6 +199,46 @@ describe('plantillas reservadas para otras tareas', () => {
     expect(noLink.html).not.toContain('<a ');
     expect(noLink.text).toContain('Sede: Sede Norte');
     expect(noLink.text).not.toContain('Profesional');
+  });
+
+  it('DX-469: appointment-reminder ofrece «Añadir a mi calendario» (.ics y Google) solo con el enlace', () => {
+    const base = {
+      patientName: 'Carolina',
+      startsAtLabel: 'martes 20 de octubre de 2026 a las 9:30 a. m.',
+      locationName: 'Sede Norte',
+      locationAddress: 'Av. Francisco de Miranda 93',
+      providerName: 'Dra. Laura Gómez',
+      confirmUrl: 'https://demo.dentalix.app/confirmar/abc',
+      unsubscribeUrl: null,
+    };
+    const ics =
+      'https://demo.dentalix.app/api/v1/public/appointment-confirmations/abc/calendar.ics';
+    const email = renderEmail(
+      'appointment-reminder',
+      {
+        ...base,
+        calendar: {
+          icsUrl: ics,
+          start: '2026-10-20T13:30:00.000Z',
+          end: '2026-10-20T14:00:00.000Z',
+        },
+      },
+      brand,
+    );
+    expect(email.html).toContain('Añadir a mi calendario:');
+    expect(email.html).toContain(`href="${ics}"`);
+    expect(email.html).toContain(
+      'href="https://calendar.google.com/calendar/render?action=TEMPLATE&amp;text=Cita+en+Sonrisas+del+Norte+con+Dra.+Laura+G%C3%B3mez&amp;dates=20261020T133000Z%2F20261020T140000Z',
+    );
+    expect(email.text).toContain(`Archivo .ics (Apple, Outlook): ${ics}`);
+    expect(email.text).toMatch(
+      /Google Calendar: https:\/\/calendar\.google\.com\//,
+    );
+    // Nada clínico en el evento de Google: ni el motivo ni notas.
+    expect(email.html).not.toMatch(/details=[^"]*(motivo|endodoncia)/i);
+
+    const without = renderEmail('appointment-reminder', base, brand);
+    expect(without.html).not.toContain('Añadir a mi calendario');
   });
 
   it('appointment-reminder lleva la política de cancelación de la sede (DX-291, {politica_cancelacion})', () => {
@@ -208,13 +258,13 @@ describe('plantillas reservadas para otras tareas', () => {
         cancellationPolicy: {
           noticeHours: 24,
           text: 'Las citas no avisadas se cobran.',
-          feeLabel: '$ 50.000 COP',
+          feeLabel: '$ 50.000 USD',
         },
       },
       brand,
     );
     const expected =
-      'Política de cancelación: si no puedes asistir, avísanos con al menos 24 h de antelación. Las citas no avisadas se cobran. La inasistencia o la cancelación con menos aviso puede tener un cargo de $ 50.000 COP.';
+      'Política de cancelación: si no puedes asistir, avísanos con al menos 24 h de antelación. Las citas no avisadas se cobran. La inasistencia o la cancelación con menos aviso puede tener un cargo de $ 50.000 USD.';
     expect(withPolicy.text).toContain(expected);
     expect(withPolicy.html).toContain('Política de cancelación');
 
@@ -314,7 +364,7 @@ describe('plantillas reservadas para otras tareas', () => {
       reference: 'NOR-000123',
       legacy: false,
       locationName: 'Sede Norte',
-      locationAddress: 'Cra 15 # 93-60',
+      locationAddress: 'Av. Francisco de Miranda 93',
       fiscalLine: null,
       patientDocLabel: 'Documento nacional ******5678',
       amountLabel: '$ 150.000',
@@ -337,7 +387,9 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).toContain('Documento: Documento nacional ******5678');
       expect(email.text).toContain('Valor: $ 150.000 · Efectivo · 17/10/2026');
       expect(email.text).toContain('Saldo del plan tras el abono: $ 450.000');
-      expect(email.text).toContain('Sede: Sede Norte (Cra 15 # 93-60)');
+      expect(email.text).toContain(
+        'Sede: Sede Norte (Av. Francisco de Miranda 93)',
+      );
       expect(email.text).toContain('Datos fiscales pendientes');
       expect(email.text).toContain('Este documento no es factura');
       expect(email.html).not.toContain('<a href');
@@ -398,7 +450,7 @@ describe('plantillas reservadas para otras tareas', () => {
           ...base,
           reference: 'REC-3f1c2b9e',
           legacy: true,
-          fiscalLine: 'Sonrisas S.A.S. · NIT 900123456-7',
+          fiscalLine: 'Sonrisas C.A. · Id. fiscal J-12345678-9',
           patientName: '<b>Ana</b>',
           patientDocLabel: null,
           balanceLabel: null,
@@ -406,11 +458,43 @@ describe('plantillas reservadas para otras tareas', () => {
         brand,
       );
       expect(email.text).toContain('sin serie');
-      expect(email.text).toContain('Sonrisas S.A.S. · NIT 900123456-7');
+      expect(email.text).toContain('Sonrisas C.A. · Id. fiscal J-12345678-9');
       expect(email.text).not.toContain('Datos fiscales pendientes');
       expect(email.text).not.toContain('Documento:');
       expect(email.text).not.toContain('Saldo del plan');
       expect(email.html).not.toContain('<b>Ana</b>');
+    });
+
+    it('DX-515-bis: con título y leyenda congelados, el asunto y el cuerpo los llevan', () => {
+      const email = renderEmail(
+        'payment-receipt',
+        {
+          ...base,
+          title: 'Recibo de pago',
+          legend: 'Este recibo no es una factura',
+        },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Recibo de pago NOR-000123 · Sonrisas del Norte',
+      );
+      expect(email.text).toContain('Recibo de pago N.º NOR-000123');
+      expect(email.text).not.toContain('Recibo de caja');
+      const lines = email.text.split('\n');
+      const titleAt = lines.findIndex((l) => l.includes('Recibo de pago N.º'));
+      expect(lines[titleAt + 1]).toContain('Este recibo no es una factura');
+      // El pie fijo de DX-136 sigue.
+      expect(email.text).toContain('Este documento no es factura');
+    });
+
+    it('DX-515-bis: sin título ni leyenda, el email es el de antes, byte a byte', () => {
+      const before = renderEmail('payment-receipt', base, brand);
+      const same = renderEmail(
+        'payment-receipt',
+        { ...base, title: undefined, legend: undefined },
+        brand,
+      );
+      expect(same).toEqual(before);
     });
   });
 
@@ -520,12 +604,29 @@ describe('plantillas reservadas para otras tareas', () => {
   });
 
   it('rechaza un idioma sin plantilla', () => {
+    // DX-497: `en` existe, pero solo el recordatorio tiene catálogo.
     expect(() =>
       renderEmail(
         'email-verify',
         { verifyUrl: 'https://a.co', expiresInHours: 1 },
         null,
-        'en' as 'es',
+        'en',
+      ),
+    ).toThrow('Idioma de email no soportado');
+    expect(() =>
+      renderEmail(
+        'appointment-reminder',
+        {
+          patientName: 'Ana',
+          startsAtLabel: 'x',
+          locationName: 'Sede',
+          locationAddress: null,
+          providerName: null,
+          confirmUrl: null,
+          unsubscribeUrl: null,
+        },
+        null,
+        'fr' as 'es',
       ),
     ).toThrow('Idioma de email no soportado');
   });
@@ -604,7 +705,32 @@ describe('plantillas reservadas para otras tareas', () => {
         'El 31/10/2026 9:30 a. m. registramos tu aceptación',
       );
       expect(email.html).not.toContain('href=');
-      expect(email.text).not.toMatch(/\$|\bCOP\b|implante|tratamiento/i);
+      expect(email.text).not.toMatch(/\$|\bCO[P]\b|implante|tratamiento/i);
+    });
+
+    it('DX-514: no manda a la página en la que firmó (ya usada); la copia se pide a la clínica (HTML y texto)', () => {
+      const email = renderEmail(
+        'signature-budget-accepted',
+        {
+          recipientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          acceptedAtLabel: '31/10/2026 9:30 a. m.',
+        },
+        brand,
+      );
+      for (const body of [email.text, email.html]) {
+        expect(body).not.toMatch(/desde la página en la que firmaste/);
+        expect(body).not.toMatch(/\/firmar\//);
+        expect(body).toContain(
+          'El enlace con el que firmaste ya no se puede volver a usar.',
+        );
+        expect(body).toContain(
+          'Si necesitas una copia del presupuesto firmado, pídesela a Sonrisas del Norte.',
+        );
+        expect(body).not.toMatch(/facilitar/);
+      }
+      expect(email.html).not.toContain('href=');
+      expect(email.text).not.toMatch(/https?:\/\//);
     });
 
     it('la oferta de hueco por enlace (DX-435): cuándo, dónde y con quién; sin nada clínico', () => {
@@ -678,5 +804,46 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).toContain('Hola, Laura');
       expect(email.text).not.toContain('en nombre de');
     });
+  });
+});
+
+describe('avisos de la verificación en dos pasos (DX-021-bis)', () => {
+  it.each(['RECOVERY_CODE_USED', 'RESET_BY_ADMIN', 'ATTEMPTS_LOCKED'] as const)(
+    '%s dice qué pasó y qué hacer, sin marca de país',
+    (kind) => {
+      const { subject, text } = renderEmail(
+        'mfa-notice',
+        { kind, recoveryCodesRemaining: 1 },
+        null,
+      );
+      expect(subject).not.toBe('');
+      expect(text).toMatch(/Dentalix/);
+    },
+  );
+
+  it('los códigos que quedan concuerdan en número', () => {
+    const one = renderEmail(
+      'mfa-notice',
+      { kind: 'RECOVERY_CODE_USED', recoveryCodesRemaining: 1 },
+      null,
+    );
+    expect(one.text).toContain('Te queda 1 código.');
+    const many = renderEmail(
+      'mfa-notice',
+      { kind: 'RECOVERY_CODE_USED', recoveryCodesRemaining: 9 },
+      null,
+    );
+    expect(many.text).toContain('Te quedan 9 códigos.');
+  });
+
+  it('el código del alta avisa de que la contraseña está comprometida si no se pidió', () => {
+    const { text } = renderEmail(
+      'mfa-enrollment-code',
+      { code: '12345678', ref: 'A1F3', expiresInMinutes: 10 },
+      null,
+    );
+    expect(text).toContain('Tu código es: 12345678');
+    expect(text).toContain('Referencia: A1F3');
+    expect(text).toMatch(/contraseña está comprometida/);
   });
 });

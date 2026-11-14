@@ -3,6 +3,11 @@ import { CatalogKind } from '@prisma/client';
 import { DENTAL_CATALOG_REPOSITORY } from '../../domain/ports/dental-catalog-repository.port';
 import type { DentalCatalogRepository } from '../../domain/ports/dental-catalog-repository.port';
 import { DentalCatalogItem } from '../../domain/entities/dental-catalog-item.entity';
+import {
+  CATALOG_NOTE_TEMPLATE_READER,
+  type CatalogNoteTemplateReader,
+} from '../../domain/ports/catalog-note-template-reader.port';
+import { assertLinkableNoteTemplate } from '../note-template-link';
 
 // Valid CSS hex color lengths are 3, 4, 6 or 8 hex digits after the `#`
 // (5 and 7 digits are not valid CSS hex colors and must be rejected).
@@ -31,6 +36,8 @@ export interface CreateCatalogItemInput {
   /** DX-105: por defecto true. */
   allowDiscount?: boolean;
   active?: boolean;
+  /** DX-455: plantilla sugerida al marcarlo hecho (de esta clínica, activa). */
+  clinicalNoteTemplateId?: string | null;
 }
 
 @Injectable()
@@ -38,6 +45,8 @@ export class CreateCatalogItemUseCase {
   constructor(
     @Inject(DENTAL_CATALOG_REPOSITORY)
     private readonly repo: DentalCatalogRepository,
+    @Inject(CATALOG_NOTE_TEMPLATE_READER)
+    private readonly noteTemplates: CatalogNoteTemplateReader,
   ) {}
 
   async execute(input: CreateCatalogItemInput): Promise<DentalCatalogItem> {
@@ -56,6 +65,11 @@ export class CreateCatalogItemUseCase {
     if (code === '') {
       throw new BadRequestException('code must not be blank');
     }
+    await assertLinkableNoteTemplate(
+      this.noteTemplates,
+      input.clinicalNoteTemplateId,
+      input.kind,
+    );
 
     return this.repo.create({
       code,
@@ -68,6 +82,7 @@ export class CreateCatalogItemUseCase {
       defaultPrice: input.defaultPrice,
       allowDiscount: input.allowDiscount,
       active: input.active,
+      clinicalNoteTemplateId: input.clinicalNoteTemplateId ?? undefined,
     });
   }
 }

@@ -25,5 +25,7 @@ import { ClosingQueueController } from './presentation/closing-queue.controller'
     },
     { provide: CLOSING_QUEUE_NOW, useValue: () => new Date() },
   ],
+  // DX-503: «Mi día» cuenta la lista con el mismo caso de uso.
+  exports: [ClosingQueueUseCases],
 })
 export class ClosingQueueModule {}

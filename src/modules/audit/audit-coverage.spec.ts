@@ -11,14 +11,17 @@ import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
+import { CallerLookupController } from '../caller-lookup/presentation/caller-lookup.controller';
 import { PatientAgreementsController } from '../patient-agreements/presentation/patient-agreements.controller';
 import { PatientCoveragesController } from '../patient-coverages/presentation/patient-coverages.controller';
 import { PatientResponsiblePartiesController } from '../patients/presentation/patient-responsible-parties.controller';
+import { PatientMajorityReviewController } from '../patients/presentation/patient-majority-review.controller';
 import { MedicalHistoryController } from '../medical-history/presentation/medical-history.controller';
 import { PatientAnamnesisRequestsController } from '../medical-history-submissions/presentation/patient-anamnesis-requests.controller';
 import { PatientSignatureRequestsController } from '../signature-requests/presentation/patient-signature-requests.controller';
 import { MedicalHistorySubmissionsController } from '../medical-history-submissions/presentation/medical-history-submissions.controller';
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
+import { ClinicalEntrySettingsController } from '../clinical-entries/presentation/clinical-entry-settings.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
 import { PriceListsController } from '../price-lists/presentation/price-lists.controller';
 import { AgreementsController } from '../agreements/presentation/agreements.controller';
@@ -35,9 +38,14 @@ import {
 import { TreatmentPlansController } from '../treatment-plans/presentation/treatment-plans.controller';
 import { PlanQuoteController } from '../treatment-plans/presentation/plan-quote.controller';
 import { PriceQuoteController } from '../treatment-plans/presentation/price-quote.controller';
+import { QuoteSettingsController } from '../treatment-plans/presentation/quote-settings.controller';
+import { SlotOfferSettingsController } from '../waitlist/presentation/slot-offer-settings.controller';
+import { PlanRepricingController } from '../treatment-plans/presentation/plan-repricing.controller';
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
+import { PaymentReceiptSummaryController } from '../payments/presentation/payment-receipt-summary.controller';
+import { ReceiptSettingsController } from '../payments/presentation/receipt-settings.controller';
 import { PaymentAllocationsController } from '../payments/presentation/payment-allocations.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
@@ -48,12 +56,20 @@ import { CancellationPolicyController } from '../cancellation-policies/presentat
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
+import { UnallocatedPaymentsController } from '../reports/presentation/unallocated-payments.controller';
+import { RecoveredSlotsController } from '../reports/presentation/recovered-slots.controller';
+import { ChairOccupancyController } from '../reports/presentation/chair-occupancy.controller';
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
+import {
+  PatientRecallsController,
+  RecallController,
+} from '../recall/presentation/recall.controller';
 import { CashSessionsController } from '../cash-sessions/presentation/cash-sessions.controller';
 import { ScheduleBlocksController } from '../schedule-blocks/presentation/schedule-blocks.controller';
 import { ChairsController } from '../chairs/presentation/chairs.controller';
+import { EquipmentController } from '../equipment/presentation/equipment.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
 import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
@@ -145,6 +161,16 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: RES,
     patient: RES,
   },
+  // DX-224: «¿Quién llama?», una lectura por paciente encontrado (`perMatch`);
+  // el número buscado nunca va al evento.
+  'POST /patients/lookup-by-phone': {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: RES,
+    patient: RES,
+    reason: 'CALLER_LOOKUP',
+    perMatch: true,
+  },
   'GET /patients/:id': {
     action: 'VIEW',
     resource: 'PATIENT',
@@ -157,8 +183,24 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { param: 'id' },
   },
+  // DX-484: cada descarga de la ficha para el software de imagen.
+  'GET /patients/:id/imaging-export.txt': {
+    action: 'EXPORT',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'IMAGING_EXPORT',
+  },
   // DX-203: responsables de pago y avisos, con el motivo y los nombres de los
   // campos (nunca los datos del tercero).
+  // SEC-044: la lectura (documento, email y teléfono de terceros) también.
+  'GET /patients/:patientId/responsible-parties': {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: P,
+    patient: P,
+    reason: 'RESPONSIBLE_PARTIES',
+  },
   'POST /patients/:patientId/responsible-parties': {
     action: 'UPDATE',
     resource: 'PATIENT',
@@ -179,6 +221,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: P,
     patient: P,
     reason: 'RESPONSIBLE_PARTY_REMOVED',
+  },
+  // DX-342: revisión del paso a la mayoría de edad; la decisión, la fecha y
+  // el largo de la nota (nunca su texto) van en `metadata.majorityReview`.
+  'POST /patients/:id/majority-review': {
+    action: 'UPDATE',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'MAJORITY_REVIEWED',
   },
   // DX-153: coberturas del paciente; motivo y nombres de campo, nunca el número
   // de afiliado ni el titular. SEC-049: alta, cambio y verificación llevan el
@@ -229,7 +280,7 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: P,
     reason: 'AGREEMENT_REMOVED',
   },
-  // DX-039: archivar y retención legal de la HC.
+  // DX-039: archivar y retención de la HC.
   'DELETE /patients/:id': {
     action: 'DELETE',
     resource: 'PATIENT',
@@ -878,12 +929,62 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'planId' },
     patient: P,
   },
+  // DX-379: imprimir (la primera impresión fija la validez del presupuesto).
+  'POST /patients/:patientId/treatment-plans/:planId/quote/issue': {
+    action: 'PRINT',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: P,
+  },
+  // DX-379 (B): «Actualizar precios». La vista previa lee el plan (VIEW);
+  // aplicar deja UPDATE con PLAN_REPRICED y `params.repricingId` (la fila con
+  // el antes y el después, el autor y la tasa; sin importes en el evento).
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/preview': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: P,
+    reason: 'REPRICE_PREVIEW',
+  },
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/apply': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'planId' },
+    patient: P,
+    reason: 'PLAN_REPRICED',
+  },
+  // DX-379 (C): firmar un presupuesto vencido pone además, desde el handler,
+  // `reason` QUOTE_EXPIRED_ORIGINAL_PRICES | QUOTE_EXPIRED_REPRICED y, al
+  // recotizar, `params.repricingId` (sin importes; ver audit-request.spec).
   'POST /patients/:patientId/treatment-plans/:planId/acceptance': {
     action: 'SIGN',
     resource: 'TREATMENT_PLAN',
     resourceId: { param: 'planId' },
     patient: P,
   },
+  // La vista previa del presupuesto recotizado para firmarlo vencido: lee
+  // el plan (VIEW) y no escribe nada (deshace su transacción).
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/reprice-preview':
+    {
+      action: 'VIEW',
+      resource: 'TREATMENT_PLAN',
+      resourceId: { param: 'planId' },
+      patient: P,
+      reason: 'ACCEPT_REPRICE_PREVIEW',
+    },
+  // DX-417: la vista previa de aceptar en parte lee el plan (VIEW). La firma
+  // parcial pone desde el handler `reason` PLAN_PARTIALLY_ACCEPTED (o el del
+  // vencido) y `params.pendingPlanId`; además el caso de uso escribe el alta
+  // del plan pendiente: CREATE TREATMENT_PLAN, `reason` PLAN_SPLIT_PENDING y
+  // `params.splitFromPlanId` (sin importes; partial-acceptance.use-cases.spec).
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview':
+    {
+      action: 'VIEW',
+      resource: 'TREATMENT_PLAN',
+      resourceId: { param: 'planId' },
+      patient: P,
+      reason: 'ACCEPT_PARTIAL_PREVIEW',
+    },
   // DX-040: presentar y rechazar cambian el plan; una alternativa es un plan
   // nuevo del mismo paciente. La lista de presupuestos por seguir es de
   // muchos pacientes (sin paciente en el evento), pero se audita porque
@@ -947,14 +1048,6 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { lookup: 'payment', param: 'id' },
   },
-  'PUT /payments/:id/allocations': {
-    action: 'UPDATE',
-    resource: 'PAYMENT_ALLOCATION',
-    resourceId: { param: 'id' },
-    patient: { lookup: 'payment', param: 'id' },
-    reason: 'PAYMENT_REALLOCATED',
-    allocation: true,
-  },
   // DX-136: ver, reimprimir y enviar el recibo de caja.
   'GET /payments/:id/receipt': {
     action: 'VIEW',
@@ -973,6 +1066,26 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PAYMENT_RECEIPT',
     resourceId: { param: 'id' },
     patient: { lookup: 'payment', param: 'id' },
+  },
+  // DX-401: ver, imprimir y enviar el resumen de recibos de un período (el
+  // período va a `metadata.period`, desde el handler).
+  'GET /patients/:patientId/payment-receipts/summary': {
+    action: 'VIEW',
+    resource: 'PAYMENT_RECEIPT_SUMMARY',
+    resourceId: { param: 'patientId' },
+    patient: { param: 'patientId' },
+  },
+  'POST /patients/:patientId/payment-receipts/summary/print': {
+    action: 'PRINT',
+    resource: 'PAYMENT_RECEIPT_SUMMARY',
+    resourceId: { param: 'patientId' },
+    patient: { param: 'patientId' },
+  },
+  'POST /patients/:patientId/payment-receipts/summary/email': {
+    action: 'SEND',
+    resource: 'PAYMENT_RECEIPT_SUMMARY',
+    resourceId: { param: 'patientId' },
+    patient: { param: 'patientId' },
   },
 
   'POST /treatment-plans/:id/payment-plan': {
@@ -1002,6 +1115,8 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     patient: P,
     reason: 'FAMILY_ACCOUNT_STATEMENT',
+    // SEC-044: un VIEW por miembro de la familia (pagador y dependientes).
+    familyStatement: true,
   },
   'GET /patients/:patientId/billable-plans': {
     action: 'VIEW',
@@ -1019,6 +1134,19 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'EXPORT',
     resource: 'ACCOUNT_STATEMENT',
     reason: 'RECEIVABLES_AGING',
+  },
+  // SEC-043 (M2): los totales de la cartera aproximan lo abonado entre dos
+  // consultas; quién los mira queda en la auditoría.
+  'GET /receivables/aging/summary': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_AGING_SUMMARY',
+  },
+  // DX-430: la lista de saldo a favor (dinero de muchos pacientes).
+  'GET /receivables/credit-balances': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_CREDIT_BALANCES',
   },
   // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
   // de muchos pacientes, sin paciente en el evento) y su CSV.
@@ -1051,11 +1179,6 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'VIEW',
     resource: 'PATIENT_CREDIT',
     patient: { param: 'id' },
-  },
-  'PUT /patient-credit/policy': {
-    action: 'UPDATE',
-    resource: 'PATIENT_CREDIT',
-    reason: 'POLICY',
   },
   // DX-279: nueva versión de la política de cancelación de una sede.
   'POST /locations/:id/cancellation-policy': {
@@ -1132,11 +1255,36 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'DISCOUNT_REPORT',
   },
+  // DX-399: lo cobrado sin imputar (abonos de muchos pacientes) y su CSV.
+  'GET /reports/unallocated-payments': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'UNALLOCATED_PAYMENTS',
+  },
+  'GET /reports/unallocated-payments.csv': {
+    action: 'EXPORT',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'UNALLOCATED_PAYMENTS',
+  },
   // DX-423: el detalle de una fila lleva el nombre de cada paciente.
   'GET /reports/production-by-procedure/items': {
     action: 'VIEW',
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'PRODUCTION_REPORT',
+  },
+  // DX-436: el CSV de «Huecos recuperados» (solo agregados) sale de la
+  // clínica: cada descarga queda auditada.
+  'GET /reports/recovered-slots.csv': {
+    action: 'EXPORT',
+    resource: 'APPOINTMENT',
+    reason: 'RECOVERED_SLOTS_REPORT',
+  },
+  // DX-481: el CSV de «Ocupación por sillón» (solo agregados) sale de la
+  // clínica: cada descarga queda auditada.
+  'GET /reports/chair-occupancy.csv': {
+    action: 'EXPORT',
+    resource: 'APPOINTMENT',
+    reason: 'CHAIR_OCCUPANCY_REPORT',
   },
   // DX-439: «Pendiente de cerrar» lleva los nombres de muchos pacientes.
   'GET /closing-queue': {
@@ -1157,6 +1305,32 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'LOCATION',
     resourceId: { param: 'locationId' },
     reason: 'CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED',
+  },
+  // DX-015: recall. La lista (con teléfonos) se audita sin paciente; el
+  // contacto, sin la nota; fijar o pausar el recall, con el paciente.
+  'GET /recall/due': { action: 'VIEW', resource: 'PATIENT_RECALL' },
+  // DX-015-bis (D17): «Sin recall configurado», con teléfonos: como la de
+  // vencidos, sin paciente y con su `reason`.
+  'GET /recall/unconfigured': {
+    action: 'VIEW',
+    resource: 'PATIENT_RECALL',
+    reason: 'RECALL_UNCONFIGURED',
+  },
+  'POST /recall/:recallId/contacts': {
+    action: 'CREATE',
+    resource: 'RECALL_CONTACT',
+    resourceId: RES,
+    patient: { response: 'patientId' },
+  },
+  'GET /patients/:id/recalls': {
+    action: 'VIEW',
+    resource: 'PATIENT_RECALL',
+    patient: { param: 'id' },
+  },
+  'PUT /patients/:id/recalls/:kind': {
+    action: 'UPDATE',
+    resource: 'PATIENT_RECALL',
+    patient: { param: 'id' },
   },
   // DX-150: cobranza. La nota se audita sin su texto (solo los nombres de los
   // campos); el cambio de estado del compromiso lo audita SettlePaymentPromises.
@@ -1343,20 +1517,41 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'CHAIR_REACTIVATED',
   },
 
+  // DX-542: equipos biomédicos (sin paciente). No se borran: se dan de baja;
+  // los mantenimientos se anulan con motivo.
+  'POST /equipment': {
+    action: 'CREATE',
+    resource: 'EQUIPMENT',
+    resourceId: RES,
+  },
+  'PATCH /equipment/:id': {
+    action: 'UPDATE',
+    resource: 'EQUIPMENT',
+    resourceId: { param: 'id' },
+  },
+  'POST /equipment/:id/retire': {
+    action: 'UPDATE',
+    resource: 'EQUIPMENT',
+    resourceId: { param: 'id' },
+    reason: 'EQUIPMENT_RETIRED',
+  },
+  'POST /equipment/:id/maintenances': {
+    action: 'CREATE',
+    resource: 'EQUIPMENT_MAINTENANCE',
+    resourceId: RES,
+  },
+  'POST /equipment/:id/maintenances/:maintenanceId/void': {
+    action: 'VOID',
+    resource: 'EQUIPMENT_MAINTENANCE',
+    resourceId: { param: 'maintenanceId' },
+  },
+
   // DX-048: un ADMIN desbloquea el inicio de sesión de un miembro.
   'POST /staff/:userId/login-unlock': {
     action: 'UPDATE',
     resource: 'STAFF_MEMBER',
     resourceId: { param: 'userId' },
     reason: 'LOGIN_UNLOCKED',
-  },
-
-  // DX-089: un ADMIN cambia las sedes en las que puede trabajar un miembro.
-  'PUT /staff/:userId/locations': {
-    action: 'UPDATE',
-    resource: 'STAFF_MEMBER',
-    resourceId: { param: 'userId' },
-    reason: 'LOCATIONS_CHANGED',
   },
 
   // DX-170: plantillas de evolución (sin paciente: no llevan sus datos).
@@ -1456,6 +1651,9 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-399: PAYMENT_ALLOCATION / PAYMENT_REALLOCATED con las líneas antes y
+  // después, en la MISMA transacción del cambio (si algo falla, se deshacen juntos).
+  'PUT /payments/:id/allocations': 'payment-reallocation.e2e-spec.ts',
   // DX-222: CREATE POSTOP_DELIVERY con el id de `delivery` y el canal como
   // `reason`; queda auditada aunque el email no se pueda encolar.
   'POST /appointments/:appointmentId/post-op-instructions/deliveries':
@@ -1472,6 +1670,12 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-328: CLINIC_SETTINGS con MAJORITY_AGE_SETTINGS; sin evento si no cambia.
   'PUT /patients/settings':
     'patient-settings.use-cases.spec.ts y patient-settings.e2e-spec.ts',
+  // DX-497: CLINIC_SETTINGS con PATIENT_LANGUAGES_SETTINGS y la lista antes y después; sin evento si no cambia.
+  'PUT /patients/languages':
+    'patient-languages.use-cases.spec.ts y patient-languages.e2e-spec.ts',
+  // DX-330: CLINIC_SETTINGS con CLINICAL_RECORD_RETENTION_SETTINGS y `retentionTermChange`, en la transacción del cambio; sin evento si no cambia.
+  'PUT /patients/retention/settings':
+    'retention-settings.use-cases.spec.ts y clinical-record-retention.e2e-spec.ts',
   // DX-327: CLINIC_SETTINGS con DOCUMENT_TYPE_NAMES_SETTINGS y los tipos cambiados; sin evento si no cambia.
   'PUT /patients/document-type-names':
     'document-type-names.use-cases.spec.ts y document-type-names.e2e-spec.ts',
@@ -1481,6 +1685,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // Vigencia de la anamnesis: CLINIC_SETTINGS con ANAMNESIS_VALIDITY_SETTINGS.
   'PUT /medical-history/settings':
     'medical-alerts.spec.ts y appointments-medical-alerts.e2e-spec.ts',
+  // DX-540: CLINIC_SETTINGS con CLINICAL_ENTRY_LICENSE_WARNING (OFF/ON); sin evento si no cambia.
+  'PUT /clinical-entries/settings':
+    'clinical-entry-license.use-cases.spec.ts y clinical-entry-license.e2e-spec.ts',
   // APPOINTMENT_PLAN_ITEMS en cada cita, en la transacción del traspaso.
   'POST /appointments/:id/plan-items/:planItemId/claim':
     'plan-items-arrival.e2e-spec.ts',
@@ -1531,23 +1738,60 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'confirmation-audit.spec.ts, create-confirmation-link.use-case.spec.ts, appointment-confirmations-audit.int-spec.ts y appointment-confirmations.e2e-spec.ts',
   'POST /public/appointment-confirmations/:token':
     'confirmation-audit.spec.ts, respond-confirmation.use-case.spec.ts, appointment-confirmations-audit.int-spec.ts y appointment-confirmations.e2e-spec.ts',
+  // DX-437: el paciente pide (o quita) «Avisarme si se libera un hueco antes»; auditado en el repositorio, origen PUBLIC_LINK.
+  'POST /public/appointment-confirmations/:token/wants-earlier':
+    'confirmation-audit.spec.ts y appointment-confirmations.e2e-spec.ts',
   // ANAMNESIS_SUBMITTED (y el consentimiento) en la transacción del envío.
   'POST /public/medical-history/:token':
     'medical-history-submissions.e2e-spec.ts',
   // Plataforma: JOB_RETRIED en `platform_audit_events`, no en `audit_events`.
   'POST /platform/jobs/:id/retry': 'jobs-platform.e2e-spec.ts',
+  // DX-515: el repositorio escribe el evento en la transacción del cambio,
+  // con el antes y el después (configAuditEvent); sin evento si no cambia.
+  // CLINIC_SETTINGS RECEIPT_SETTINGS, LOCATION RECEIPT_LEGEND y PAYMENT
+  // EXTERNAL_INVOICE_NUMBER (este, con el paciente del abono).
+  'PUT /payment-receipts/settings': 'receipt-settings.e2e-spec.ts',
+  'PUT /payment-receipts/settings/locations/:locationId':
+    'receipt-settings.e2e-spec.ts',
+  'PUT /payments/:id/external-invoice-number': 'receipt-settings.e2e-spec.ts',
+  // DX-432: PATIENT_CREDIT POLICY con el tope de recepción antes y después
+  // (configAuditEvent), en la transacción del cambio; sin evento si no cambia.
+  'PUT /patient-credit/policy': 'patient-credit.e2e-spec.ts',
+  // DX-517: CLINIC_SETTINGS CURRENCY_TEXTS con el antes y el después
+  // («VES=Bs.»), en la transacción del cambio; sin evento si no cambia.
+  'PUT /exchange/currency-texts': 'currency-texts.e2e-spec.ts',
+  // DX-019: CLINIC_SETTINGS CLINIC_PROFILE (datos de la clínica) y
+  // CLINIC_LOGO (clave del logo) con el antes y el después, en la
+  // transacción del cambio; sin evento si nada cambia.
+  'PATCH /clinic/settings': 'clinic-settings.e2e-spec.ts',
+  'POST /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
+  'DELETE /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':
     'prescription-settings.use-cases.spec.ts y prescription-settings.e2e-spec.ts',
+  // DX-379: CLINIC_SETTINGS con QUOTE_SETTINGS, el campo cambiado y el antes
+  // y el después en códigos QT; sin evento si nada cambió.
+  'PUT /treatment-plan-settings':
+    'quote-settings.use-cases.spec.ts y treatment-plan-quote-validity.e2e-spec.ts',
+  // DX-448: CLINIC_SETTINGS con SLOT_OFFER_SETTINGS y configChange antes y
+  // después, escrito por el repositorio en la transacción, sin sede (DX-363);
+  // sin evento si nada cambió.
+  'PUT /slot-offer-settings': 'slot-offer-settings.e2e-spec.ts',
   // DX-374: CLINIC_SETTINGS con EXCHANGE_RATE_SOURCE y el antes y el después;
-  // sin evento si no cambia.
+  // sin evento si no cambia. DX-384: el plazo de la última tasa registrada
+  // deja EXCHANGE_RATE_MAX_AGE con configChange antes/después, escrito por el
+  // repositorio en la misma transacción.
   'PUT /exchange/settings':
     'exchange-rate-settings.use-cases.spec.ts y exchange-rate-source.e2e-spec.ts',
   // DX-274: VIEW si se abre en el navegador, EXPORT si se descarga (la acción
   // depende de la query, que el decorador no lee).
   'GET /expenses/:id/attachment/url':
     'expense-receipts.use-cases.spec.ts y expenses.e2e-spec.ts',
+  // DX-389: VIEW si se abre en el navegador, EXPORT si se descarga (como el
+  // soporte del gasto); la metadata no lleva datos del paciente.
+  'GET /payments/:id/proof/url':
+    'payment-proofs.use-cases.spec.ts y payment-proofs.e2e-spec.ts',
   // DX-359: personal y accesos. Cada repositorio escribe el evento en la
   // MISMA transacción que el cambio (writeAuditEvent); ninguno guarda el
   // token, su hash, el email ni el nombre.
@@ -1570,6 +1814,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // changedFields); sin evento si nada cambió.
   'PATCH /staff/:userId':
     'staff-audit.spec.ts, update-staff.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-089 / DX-381: UPDATE STAFF_MEMBER LOCATIONS_CHANGED con las sedes
+  // antes y después (null = todas); sin evento si el conjunto no cambia.
+  'PUT /staff/:userId/locations':
+    'staff-audit.spec.ts, staff-locations.use-cases.spec.ts y staff-access-audit.e2e-spec.ts',
   // STAFF_REACTIVATED / STAFF_DEACTIVATED con el estado antes y después.
   'POST /staff/:userId/reactivate':
     'staff-audit.spec.ts y staff-access-audit.e2e-spec.ts',
@@ -1587,10 +1835,33 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'change-my-password.use-case.spec.ts, me-profile-repo.int-spec.ts y staff-access-audit.e2e-spec.ts',
   // DX-359: plataforma. MFA_ENROLLMENT_STARTED y MFA_ENABLED en
   // `platform_audit_events`, sin secreto, código ni URI.
-  'POST /platform/mfa/enrollment':
-    'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
-  'POST /platform/mfa/enrollment/confirm':
-    'platform-mfa.use-case.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-021: verificación en dos pasos de los miembros, en la auditoría de la
+  // clínica, sin secreto, URI ni códigos (TOTP o de recuperación).
+  'POST /auth/login/mfa':
+    'complete-mfa-login.use-case (LOGIN MFA_TOTP / MFA_RECOVERY_CODE, LOGIN_FAILED INVALID_MFA_CODE) y user-mfa.e2e-spec.ts',
+  'POST /auth/login/mfa/enrollment':
+    'user-mfa.service (UPDATE STAFF_MEMBER MFA_ENROLLMENT_STARTED), complete-mfa-login.use-case.spec.ts (LOGIN_FAILED INVALID_EMAIL_CODE, SEC-066) y user-mfa.e2e-spec.ts',
+  'POST /auth/login/mfa/enrollment/confirm':
+    'user-mfa.service (MFA_ENABLED, misma transacción) + LOGIN MFA_ENROLLED; user-mfa.e2e-spec.ts',
+  'POST /me/mfa/enrollment':
+    'user-mfa.service (MFA_ENROLLMENT_STARTED) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/enrollment/confirm':
+    'user-mfa.service.spec.ts (MFA_ENABLED, misma transacción) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/disable':
+    'user-mfa.service.spec.ts (MFA_DISABLED, misma transacción) y user-mfa.e2e-spec.ts',
+  'POST /me/mfa/recovery-codes':
+    'user-mfa.service.spec.ts (MFA_RECOVERY_CODES_REGENERATED) y user-mfa.e2e-spec.ts',
+  'PUT /security-policy':
+    'user-mfa.service.spec.ts (CLINIC_SETTINGS MFA_POLICY con antes/después) y user-mfa.e2e-spec.ts',
+  // DX-021-bis: los códigos del superadmin van a `platform_audit_events`.
+  'POST /platform/mfa/recovery-codes':
+    'user-mfa.service (MFA_RECOVERY_CODES_REGENERATED) y mfa-bis.e2e-spec.ts',
+  'DELETE /me/mfa/trusted-devices':
+    'user-mfa.service (MFA_TRUSTED_DEVICES_REVOKED) y mfa-bis.e2e-spec.ts',
+  'DELETE /me/mfa/trusted-devices/:id':
+    'user-mfa.service (MFA_TRUSTED_DEVICES_REVOKED) y mfa-bis.e2e-spec.ts',
+  'POST /staff/:userId/mfa/reset':
+    'user-mfa.service (MFA_RESET_<motivo> / MFA_RESET_REFUSED, en la transacción del reseteo) y mfa-bis.e2e-spec.ts',
   // DX-439: CREATE CLOSING_QUEUE_DISMISSAL (CLOSING_QUEUE_DISMISSED) en la
   // transacción del descarte, con la sección y el código del motivo y la cita
   // (y el ítem) en `params`; nunca el texto de «Otro».
@@ -1614,6 +1885,24 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /appointment-types': 'config-audit.e2e-spec.ts',
   'PATCH /appointment-types/:id': 'config-audit.e2e-spec.ts',
   'DELETE /appointment-types/:id': 'config-audit.e2e-spec.ts',
+  // DX-015-bis: tipos de recall (RECALL_TYPE): alta, edición con el diff,
+  // retirada y disparadores con los ids de antes y de después.
+  'POST /recall-types': 'recall-types.e2e-spec.ts',
+  'PATCH /recall-types/:id': 'recall-types.e2e-spec.ts',
+  'DELETE /recall-types/:id': 'recall-types.e2e-spec.ts',
+  'PUT /recall-types/:id/triggers': 'recall-types.e2e-spec.ts',
+  // DX-015-bis (D15): «Programar recall». UPDATE PATIENT_RECALL (como el PUT)
+  // con `via: 'DEFAULT'` y el recall en `resourceId`, y los de la exclusión,
+  // en la transacción del alta.
+  'POST /patients/:id/recalls/default':
+    'recall-default.int-spec.ts y recall.e2e-spec.ts',
+  // DX-516: ajustes por medio de pago (solo ADMIN): UPDATE/CREATE
+  // PAYMENT_METHOD con PAYMENT_METHOD_ADJUSTMENT_CREATED/UPDATED y el antes y
+  // el después, en la transacción del cambio.
+  'POST /payment-methods/:id/adjustments':
+    'payment-method-adjustments.e2e-spec.ts',
+  'PATCH /payment-methods/:id/adjustments/:adjustmentId':
+    'payment-method-adjustments.e2e-spec.ts',
   'POST /payers': 'config-audit.e2e-spec.ts',
   'PATCH /payers/:id': 'config-audit.e2e-spec.ts',
   'DELETE /payers/:id': 'config-audit.e2e-spec.ts',
@@ -1649,6 +1938,8 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'URL prefirmada; el alta del documento es la ruta auditada',
   'POST /expenses/attachments/upload-url':
     'URL prefirmada; el gasto que la usa es la ruta auditada',
+  'POST /payments/proofs/upload-url':
+    'URL prefirmada; el abono que la usa es la ruta auditada',
   'POST /files/uploads':
     'subida directa del adaptador de disco (desarrollo y tests)',
   'PATCH /patients/:patientId/clinical-entries/:entryId':
@@ -1681,19 +1972,25 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   // --- Citas y enlaces al paciente -----------------------------------------
   'POST /public/post-op-instructions/:token/opened':
     'marca la apertura de la indicación; sin evento',
+  // DX-424: igual para la anamnesis por enlace (`openedAt` del envío).
+  'POST /public/medical-history/:token/opened':
+    'marca la apertura del cuestionario; sin evento',
 };
 
 const CONTROLLERS: Type[] = [
   AuthController,
   PatientsController,
+  CallerLookupController,
   PatientAnamnesisRequestsController,
   PatientSignatureRequestsController,
   MedicalHistorySubmissionsController,
   PatientResponsiblePartiesController,
+  PatientMajorityReviewController,
   PatientCoveragesController,
   PatientAgreementsController,
   MedicalHistoryController,
   ClinicalEntriesController,
+  ClinicalEntrySettingsController,
   AnesthesiaController,
   AnestheticsController,
   SedationController,
@@ -1718,8 +2015,13 @@ const CONTROLLERS: Type[] = [
   TreatmentPlansController,
   PlanQuoteController,
   PriceQuoteController,
+  QuoteSettingsController,
+  SlotOfferSettingsController,
+  PlanRepricingController,
   PaymentsController,
   PaymentReceiptsController,
+  PaymentReceiptSummaryController,
+  ReceiptSettingsController,
   PaymentAllocationsController,
   PaymentPlansController,
   AccountStatementController,
@@ -1730,9 +2032,14 @@ const CONTROLLERS: Type[] = [
   CancellationFeeController,
   DiscountReportController,
   ProductionByProcedureController,
+  UnallocatedPaymentsController,
+  RecoveredSlotsController,
+  ChairOccupancyController,
   ClosingQueueController,
   ContingencyAgendaController,
   CollectionsController,
+  RecallController,
+  PatientRecallsController,
   CashSessionsController,
   ExpenseReportsController,
   ExpensesController,
@@ -1740,6 +2047,7 @@ const CONTROLLERS: Type[] = [
   CashOutflowsController,
   ScheduleBlocksController,
   ChairsController,
+  EquipmentController,
   StaffController,
   ClinicalNoteTemplatesController,
   DomainsController,

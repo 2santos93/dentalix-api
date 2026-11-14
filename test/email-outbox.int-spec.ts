@@ -92,7 +92,7 @@ async function row(id: string) {
   return owner.emailOutbox.findUniqueOrThrow({ where: { id } });
 }
 
-// Adelanta un reintento o un arriendo (minutos) con el reloj de la BD, sin
+// Adelanta un reintento o una reserva (minutos) con el reloj de la BD, sin
 // sleeps ni reloj fake.
 function makeDue(id: string) {
   return owner.$executeRaw`
@@ -309,11 +309,11 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     for (const state of states) {
       expect(state.status).toBe(state.id === ids[0] ? 'PENDING' : 'SENDING');
     }
-    // Con el arriendo vigente, nadie más puede reclamarlas.
+    // Con la reserva vigente, nadie más puede reclamarlas.
     expect((await repo.claimDue(20, 300)).map((c) => c.id)).toEqual([ids[0]]);
   });
 
-  it('un SENDING con el arriendo vencido (réplica caída) se puede reclamar otra vez', async () => {
+  it('un SENDING con la reserva vencida (réplica caída) se puede reclamar otra vez', async () => {
     const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
@@ -413,7 +413,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     });
   });
 
-  it('el arriendo se acota a 900 s aunque se pida más (revisión D1)', async () => {
+  it('la reserva se acota a 900 s aunque se pida más (revisión D1)', async () => {
     const { outbox, dispatcher } = services(new ConsoleMailer());
     await dispatcher.onModuleDestroy();
     const { id } = await outbox.enqueue(invitation(tenantA));
@@ -457,10 +457,10 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
     await strict.dispatcher.onModuleDestroy();
     await owner.emailOutbox.deleteMany({ where: { tenantId: tenantB } });
 
-    await strict.outbox.assertWithinQuota(tenantB, EMAIL);
+    await strict.outbox.assertWithinQuota(tenantB, EMAIL, 'invitation');
     await strict.outbox.enqueue(invitation(tenantB));
     await expect(
-      strict.outbox.assertWithinQuota(tenantB, EMAIL),
+      strict.outbox.assertWithinQuota(tenantB, EMAIL, 'invitation'),
     ).rejects.toThrow(/hace un momento/);
     // Pasado el enfriamiento, el 2.º vale; el 3.º supera el diario del destinatario.
     await owner.emailOutbox.updateMany({
@@ -473,7 +473,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       data: { createdAt: new Date(Date.now() - 120_000) },
     });
     await expect(
-      strict.outbox.assertWithinQuota(tenantB, EMAIL),
+      strict.outbox.assertWithinQuota(tenantB, EMAIL, 'invitation'),
     ).rejects.toThrow(/últimas 24 horas/);
     // Otro destinatario sí, hasta el tope de la clínica (3).
     await strict.outbox.enqueue({
@@ -481,12 +481,20 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       to: 'otra@clinica-outbox.co',
     });
     await expect(
-      strict.outbox.assertWithinQuota(tenantB, 'tercera@clinica-outbox.co'),
+      strict.outbox.assertWithinQuota(
+        tenantB,
+        'tercera@clinica-outbox.co',
+        'invitation',
+      ),
     ).rejects.toThrow(/máximo de 3 correos/);
     // La clínica A no comparte cuenta con B (A sin envíos propios).
     await owner.emailOutbox.deleteMany({ where: { tenantId: tenantA } });
     await expect(
-      strict.outbox.assertWithinQuota(tenantA, 'nadie@clinica-outbox.co'),
+      strict.outbox.assertWithinQuota(
+        tenantA,
+        'nadie@clinica-outbox.co',
+        'invitation',
+      ),
     ).resolves.toBeUndefined();
   });
 
@@ -522,6 +530,8 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       'email_outbox_enqueue_platform',
       // DX-144: tope por destinatario y purga de los emails de plataforma.
       'email_outbox_enqueue_platform_capped',
+      // DX-021-bis: los correos de seguridad, fuera de ese tope.
+      'email_outbox_enqueue_platform_security',
       'email_outbox_platform_allowed',
       'email_outbox_purge_platform',
       'email_outbox_settle',
@@ -533,6 +543,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
         // siguen como estaban.
         config: [
           r.fn === 'email_outbox_enqueue_platform_capped' ||
+          r.fn === 'email_outbox_enqueue_platform_security' ||
           r.fn === 'email_outbox_platform_allowed' ||
           r.fn === 'email_outbox_purge_platform'
             ? 'search_path=pg_catalog, public, pg_temp'
@@ -585,6 +596,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
       { fn: 'email_outbox_claim', public: false },
       { fn: 'email_outbox_enqueue_platform', public: false },
       { fn: 'email_outbox_enqueue_platform_capped', public: false },
+      { fn: 'email_outbox_enqueue_platform_security', public: false },
       { fn: 'email_outbox_platform_allowed', public: false },
       { fn: 'email_outbox_purge_platform', public: false },
       { fn: 'email_outbox_settle', public: false },
@@ -623,7 +635,7 @@ describe('DX-088 · email_outbox en la BD (int)', () => {
         await strict.outbox.enqueue(invitation(tenantB));
 
         const error = await strict.outbox
-          .assertWithinQuota(tenantB, EMAIL)
+          .assertWithinQuota(tenantB, EMAIL, 'invitation')
           .then(
             () => null,
             (e: unknown) => e,

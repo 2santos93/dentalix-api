@@ -1,4 +1,6 @@
+import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 import { ApiProperty } from '@nestjs/swagger';
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   type DocumentType,
   PaymentMethod,
@@ -6,6 +8,7 @@ import {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
+import { PaymentWithoutRateDto } from '../../../payments/presentation/dto/plan-balance.dto';
 import {
   DOC_TYPE_LABEL_PROPERTY,
   DOC_TYPE_NAME_DESCRIPTION,
@@ -24,6 +27,12 @@ export class AccountStatementClinicDto {
 
   @ApiProperty({ type: String, nullable: true })
   logoUrl!: string | null;
+
+  @ApiProperty({
+    type: ClinicFiscalDto,
+    description: 'DX-019: datos fiscales y de contacto.',
+  })
+  fiscal!: ClinicFiscalDto;
 }
 
 export class AccountStatementPatientDto {
@@ -82,7 +91,7 @@ export class AccountStatementCurrencySummaryDto {
   @ApiProperty({
     example: 3000000,
     description:
-      'Σ ítems ACCEPTED|DONE de los planes no cancelados en esta moneda',
+      'Σ ítems ACCEPTED|DONE de los planes no cancelados en esta moneda (Σ billable de esos planes)',
   })
   budgeted!: number;
 
@@ -102,7 +111,8 @@ export class AccountStatementCurrencySummaryDto {
 
   @ApiProperty({
     example: 1200000,
-    description: 'Σ abonos no anulados en esta moneda (sin convertir)',
+    description:
+      'Σ abonos no anulados en esta moneda, sin convertir: lo entregado en ella, la cifra de la cartera. Lo que cuadra con plans[] es convertedPaid.',
   })
   paid!: number;
 
@@ -115,9 +125,24 @@ export class AccountStatementCurrencySummaryDto {
 
   @ApiProperty({
     example: 1950000,
-    description: 'budgeted + openingBalance - paid (negativo = saldo a favor)',
+    description:
+      'budgeted + openingBalance - paid - creditMovements (negativo = saldo a favor), sin convertir: la cifra de la cartera. Lo que cuadra con plans[] es convertedBalance.',
   })
   balance!: number;
+
+  @ApiProperty({
+    example: 1200000,
+    description:
+      'DX-472: Σ plans[].paid en esta moneda (abonos convertidos a ella, como en /balance) más los abonos a saldos migrados de esta moneda. Difiere de paid a propósito: si todos los abonos son en la moneda del plan, coincide.',
+  })
+  convertedPaid!: number;
+
+  @ApiProperty({
+    example: 1950000,
+    description:
+      'DX-472: budgeted + openingBalance - convertedPaid - creditMovements: el saldo que cuadra con plans[].',
+  })
+  convertedBalance!: number;
 
   @ApiProperty({ example: 1 })
   overdueCount!: number;
@@ -192,8 +217,19 @@ export class AccountStatementPlanDto {
   })
   createdAt!: Date;
 
-  @ApiProperty({ example: 3000000, description: 'Ítems ACCEPTED|DONE' })
+  @ApiProperty({
+    example: 3000000,
+    description:
+      'Ítems ACCEPTED|DONE, aunque el plan esté cancelado o rechazado. Difiere de billable a propósito: es lo que se presupuestó, no lo que se cobra.',
+  })
   budgeted!: number;
+
+  @ApiProperty({
+    example: 3000000,
+    description:
+      'DX-472: el billable de GET /treatment-plans/:id/balance: ítems ACCEPTED|DONE; 0 si el plan está cancelado o rechazado.',
+  })
+  billable!: number;
 
   @ApiProperty({
     description:
@@ -203,7 +239,8 @@ export class AccountStatementPlanDto {
 
   @ApiProperty({
     example: 1200000,
-    description: 'Abonos vivos en la moneda del plan',
+    description:
+      'DX-472: el paid de /balance: abonos vivos convertidos a la moneda del plan con la tasa de cada uno. Los «sin tasa» (paymentsWithoutRate) no suman.',
   })
   paid!: number;
 
@@ -216,12 +253,31 @@ export class AccountStatementPlanDto {
 
   @ApiProperty({
     type: [AccountStatementOtherCurrencyDto],
-    description: 'Abonos vivos del plan hechos en otra moneda (sin convertir)',
+    description:
+      'Abonos vivos del plan hechos en otra moneda, en esa moneda y sin convertir: lo que el paciente entregó. Solo informa: si tenían tasa, ya cuentan en paid.',
   })
   paidOtherCurrencies!: AccountStatementOtherCurrencyDto[];
 
-  @ApiProperty({ example: 1800000 })
+  @ApiProperty({
+    example: 1800000,
+    description:
+      'DX-472: el balance de /balance: billable - paid - creditMovements.',
+  })
   balance!: number;
+
+  @ApiProperty({
+    type: [PaymentWithoutRateDto],
+    description:
+      'DX-472: abonos del plan que no suman en paid por no tener tasa, como en /balance.',
+  })
+  paymentsWithoutRate!: PaymentWithoutRateDto[];
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-472: el proveedor de tasas no respondió a tiempo: paid está incompleto y las cuotas de este plan no salen OVERDUE mientras tanto.',
+  })
+  rateProviderTimedOut!: boolean;
 }
 
 export class AccountStatementLocationRefDto {
@@ -312,6 +368,16 @@ export class AccountStatementMovementDto {
 
   @ApiProperty({
     type: String,
+    nullable: true,
+    example: '00-000123',
+    description:
+      'DX-515: nº de la factura fiscal emitida fuera de Dentalix para el ' +
+      'abono (texto libre), o `null` si no se anotó.',
+  })
+  externalInvoiceNumber!: string | null;
+
+  @ApiProperty({
+    type: String,
     format: 'uuid',
     nullable: true,
     description:
@@ -328,6 +394,23 @@ export class AccountStatementMovementDto {
       'DX-390: cuántas formas de pago tiene su cobro dividido; `null` en un abono suelto.',
   })
   splitLines!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'PRI-000123',
+    description:
+      'DX-414: número del recibo de caja del abono (DX-136); todas las líneas ' +
+      'de un cobro dividido llevan el de su recibo único. `null` en un abono ' +
+      'anterior a la numeración.',
+  })
+  receiptNumber!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-389: el abono tiene comprobante del cobro (la captura del pago móvil o de la transferencia). Se ve con `GET /payments/:id/proof/url` (solo ADMIN y recepción).',
+  })
+  hasProof!: boolean;
 
   @ApiProperty({ type: AccountStatementLocationRefDto })
   location!: AccountStatementLocationRefDto;
@@ -365,6 +448,17 @@ export class AccountStatementMovementDto {
       'interfaz: `DELETE /payments/:id` vuelve a aplicar la regla.',
   })
   canVoid!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-432: por qué este abono no se anula aunque su rol pueda (es ' +
+      'referencia de una devolución, que no se deshace), con el texto del ' +
+      '409 de `DELETE /payments/:id`. `null` si nada lo impide. La ' +
+      'interfaz lo pinta como «Anular» deshabilitado con esta explicación.',
+  })
+  voidBlockedReason!: string | null;
 
   @ApiProperty({ description: 'Abono anulado: se lista pero no suma.' })
   voided!: boolean;
@@ -446,6 +540,14 @@ export class AccountStatementDto {
   @ApiProperty({ type: AccountStatementClinicDto })
   clinic!: AccountStatementClinicDto;
 
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede en contexto (o la principal) para formatear el impreso. null si a la sede le falta algo: el documento se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
+
   @ApiProperty({ type: AccountStatementPatientDto })
   patient!: AccountStatementPatientDto;
 
@@ -473,6 +575,13 @@ export class AccountStatementDto {
       'DX-262: saldos migrados vivos, de la fecha de corte más antigua a la más reciente',
   })
   openingBalances!: AccountStatementOpeningBalanceDto[];
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-472: en algún plan, el proveedor de tasas no respondió a tiempo (el saldo espera como mucho 4 s): esas cifras están incompletas y volver a pedirlas las completa. Nunca es un 500.',
+  })
+  rateProviderTimedOut!: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -494,11 +603,19 @@ export class FamilyCurrencyAmountsDto {
   })
   openingPending!: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Igual que `summary[].paid`: sin convertir' })
   paid!: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Igual que `summary[].balance`: sin convertir' })
   balance!: number;
+
+  @ApiProperty({ description: 'DX-472: igual que `summary[].convertedPaid`' })
+  convertedPaid!: number;
+
+  @ApiProperty({
+    description: 'DX-472: igual que `summary[].convertedBalance`',
+  })
+  convertedBalance!: number;
 
   @ApiProperty()
   overdueAmount!: number;
@@ -545,6 +662,14 @@ export class FamilyAccountStatementDto {
   @ApiProperty({ type: AccountStatementClinicDto })
   clinic!: AccountStatementClinicDto;
 
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede en contexto (o la principal) para formatear el impreso. null si a la sede le falta algo: el documento se lee igual y la web pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
+
   @ApiProperty({ type: FamilyMemberPatientDto })
   payer!: FamilyMemberPatientDto;
 
@@ -556,4 +681,18 @@ export class FamilyAccountStatementDto {
     description: 'Suma de los subtotales por moneda, al céntimo.',
   })
   totals!: FamilyCurrencyAmountsDto[];
+
+  @ApiProperty({
+    example: 0,
+    description:
+      'DX-472: abonos de la familia que no suman por no tener tasa (paymentsWithoutRate de sus planes): las cifras están incompletas.',
+  })
+  paymentsWithoutRateCount!: number;
+
+  @ApiProperty({
+    example: false,
+    description:
+      'DX-472: en algún plan de la familia, el proveedor de tasas no respondió a tiempo: las cifras están incompletas.',
+  })
+  rateProviderTimedOut!: boolean;
 }

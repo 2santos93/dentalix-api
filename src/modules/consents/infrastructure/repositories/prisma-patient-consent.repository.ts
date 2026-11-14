@@ -1,6 +1,11 @@
+import {
+  clinicLogoKeyToFreeze,
+  clinicLogoPublicUrl,
+} from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
+import { loadDocumentRegional } from '../../../../shared/locations/document-regional';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import {
@@ -274,12 +279,23 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
     const tenantId = this.requireTenantId();
     // Append-only: un INSERT. Este repositorio no tiene update ni delete, y un
     // trigger de la base rechaza ambos (20261016180000_patient_consents).
-    const row = await this.prisma.runWithTenant((tx) =>
-      tx.patientConsent.create({
-        data: { tenantId, ...input },
+    const row = await this.prisma.runWithTenant(async (tx) => {
+      // DX-019-ter: el consentimiento congela la clave del logo de este
+      // instante, leída en la transacción que lo firma (fuera de
+      // `contentHash`: la protege el trigger). NULL = se firmó sin logo.
+      const tenant = await tx.tenant.findUniqueOrThrow({
+        where: { id: tenantId },
+        select: { logoKey: true },
+      });
+      return tx.patientConsent.create({
+        data: {
+          tenantId,
+          ...input,
+          clinicLogoKey: clinicLogoKeyToFreeze(tenant.logoKey),
+        },
         include: FULL_INCLUDE,
-      }),
-    );
+      });
+    });
     return mapToEntity(row);
   }
 
@@ -371,6 +387,10 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
         where: { id, patientId },
         include: {
           ...FULL_INCLUDE,
+          // DX-354: la sede de una firma a distancia, para el `regional`.
+          signatureRequest: {
+            select: { professionalUserId: true, locationId: true },
+          },
           patient: {
             select: {
               id: true,
@@ -386,15 +406,31 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
       if (!row) return null;
       const tenant = await tx.tenant.findFirst({
         where: { id: tenantId },
-        select: { name: true, logoUrl: true },
+        select: { name: true },
       });
       const {
         patient: { documentType, ...patient },
         ...consent
       } = row;
+      // DX-354: el consentimiento no guarda sede propia. La de su solicitud de
+      // firma a distancia; uno firmado en pantalla, la sede en contexto o, sin
+      // ella, la principal. Un impreso nunca se formatea con el navegador.
+      const regional = await loadDocumentRegional(
+        tx,
+        tenantId,
+        consent.signatureRequest?.locationId ??
+          this.tenantContext.getLocationId() ??
+          null,
+      );
       return {
         ...mapToEntity(consent),
-        clinic: { name: tenant?.name ?? '', logoUrl: tenant?.logoUrl ?? null },
+        regional,
+        clinic: {
+          name: tenant?.name ?? '',
+          // DX-019-ter: el logo congelado al firmar, nunca el de hoy; NULL
+          // = se firmó sin logo y se reimprime sin él.
+          logoUrl: clinicLogoPublicUrl(consent.clinicLogoKey),
+        },
         patient: { ...patient, docType: documentType },
         countersignature: consent.countersignature,
       };

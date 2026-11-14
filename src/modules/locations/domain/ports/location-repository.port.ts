@@ -1,4 +1,5 @@
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { DocumentTypeNames } from '../../../patients/domain/document-type-names';
 import type { HourCycle } from '../regional-settings';
 
 export interface Location {
@@ -19,6 +20,11 @@ export interface Location {
    * «+»; `null` = sin prefijo por defecto. Nunca se deduce del país.
    */
   defaultPhoneRegion: string | null;
+  /**
+   * DX-524: nombre propio de la sede para cada tipo de documento; null = el de
+   * la clínica y, sin este, el genérico.
+   */
+  docTypeNames: DocumentTypeNames;
   isActive: boolean;
   /**
    * G1: moneda ISO 4217, zona IANA y locale BCP 47 de la sede. La zona es la
@@ -78,6 +84,11 @@ export interface UpdateLocationRepoInput {
    * presente el repositorio escribe también la marca de decisión.
    */
   defaultPhoneRegion?: string | null;
+  /**
+   * DX-524: solo los tipos que cambian, ya normalizados (null = hereda). Los
+   * ausentes no se tocan, así dos ADMIN que editan tipos distintos no se pisan.
+   */
+  docTypeNames?: Partial<DocumentTypeNames>;
   isActive?: boolean;
 }
 

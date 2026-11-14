@@ -3,7 +3,9 @@ import {
   decimalPlaces,
 } from '../../../shared/validation/bounded-decimal';
 import type { ExpenseStatus } from './entities/expense.entity';
+import type { ExpenseMoneyText } from './expense-money';
 import { fromCents, toCents } from '../../../shared/money/money';
+import { UNKNOWN_CURRENCY_MESSAGE } from '../../../shared/money/currency-messages';
 
 /**
  * Reglas puras de un gasto (DX-274). Sin Nest ni Prisma: fallan con
@@ -30,7 +32,7 @@ const conflict = (message: string) => new ExpenseRuleError(message, 'CONFLICT');
 export const EXPENSE_NOT_FOUND_MESSAGE = 'Gasto no encontrado.';
 export const PAYMENT_NOT_FOUND_MESSAGE = 'Pago no encontrado.';
 export const LOCATION_INVALID_MESSAGE = 'La sede no es válida.';
-export const UNKNOWN_CURRENCY_MESSAGE = 'La moneda no es válida.';
+export { UNKNOWN_CURRENCY_MESSAGE };
 export const CATEGORY_INVALID_MESSAGE = 'Elige una categoría válida.';
 export const CATEGORY_DUPLICATE_MESSAGE =
   'Ya existe una categoría con ese nombre.';
@@ -75,8 +77,7 @@ export const FROM_CASH_METHOD_MESSAGE =
 export const FROM_CASH_PAID_ON_MESSAGE =
   'Un pago desde la caja es de hoy: no admite otra fecha.';
 export const ATTACHMENT_ALREADY_MESSAGE = 'El gasto ya tiene un soporte.';
-export const IDEMPOTENCY_KEY_INVALID_MESSAGE =
-  'La clave de idempotencia debe ser un UUID.';
+export { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../shared/validation/idempotency-key';
 export const IDEMPOTENCY_KEY_REUSED_MESSAGE =
   'Esta clave de idempotencia ya se usó con otros datos. Vuelve a enviar el formulario para generar una clave nueva.';
 
@@ -118,21 +119,6 @@ export function validateAmount(amount: unknown): number {
     throw invalid(AMOUNT_MESSAGE);
   }
   return amount;
-}
-
-/**
- * «1.234,50 USD»: miles con punto y coma decimal solo si hay céntimos. Es el
- * formato del mensaje de tope (R2), el mismo que ve la clínica en pantalla.
- */
-export function formatMoney(cents: number, currency: string): string {
-  const abs = Math.abs(cents);
-  const whole = Math.floor(abs / 100)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  const fraction = abs % 100;
-  const decimals =
-    fraction === 0 ? '' : `,${fraction.toString().padStart(2, '0')}`;
-  return `${cents < 0 ? '-' : ''}${whole}${decimals} ${currency}`;
 }
 
 // --- Textos -----------------------------------------------------------------
@@ -290,12 +276,13 @@ export function paymentCapDenial(input: {
   amountCents: number;
   liveCents: number;
   paymentCents: number;
-  currency: string;
+  /** Importes del mensaje con el formato de la sede del gasto (perezoso). */
+  moneyText: ExpenseMoneyText;
 }): ExpenseRuleError | null {
   const pending = input.amountCents - input.liveCents;
   if (input.paymentCents > pending) {
     return invalid(
-      `El pago supera lo pendiente del gasto (${formatMoney(Math.max(pending, 0), input.currency)}).`,
+      `El pago supera lo pendiente del gasto (${input.moneyText(Math.max(pending, 0))}).`,
     );
   }
   return null;
@@ -315,7 +302,8 @@ export interface ExpenseEditContext {
   liveCents: number;
   /** Pagos del gasto, vivos o anulados (la FK de cuatro columnas los ata). */
   paymentCount: number;
-  currency: string;
+  /** Importes del mensaje con el formato de la sede del gasto (perezoso). */
+  moneyText: ExpenseMoneyText;
 }
 
 /**
@@ -341,7 +329,7 @@ export function expenseEditDenial(
     ctx.patch.amountCents < ctx.liveCents
   ) {
     return conflict(
-      `El importe no puede ser menor a lo ya pagado (${formatMoney(ctx.liveCents, ctx.currency)}).`,
+      `El importe no puede ser menor a lo ya pagado (${ctx.moneyText(ctx.liveCents)}).`,
     );
   }
   return null;

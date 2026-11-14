@@ -114,6 +114,22 @@ export class PendingFollowUpItemDto {
   daysSincePresented!: number;
 
   @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2026-12-09',
+    description:
+      'DX-379: último día en que vale el presupuesto de esta opción (inclusive); null en planes presentados antes de DX-379 (nunca vencen)',
+  })
+  quoteValidUntil!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-379: hoy, en la zona de la sede de la presentación, es posterior a quoteValidUntil',
+  })
+  quoteExpired!: boolean;
+
+  @ApiProperty({
     description: 'Moneda del plan (código ISO 4217 de 3 letras).',
   })
   currency!: string;

@@ -1,11 +1,16 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { CreateWaitlistOfferUseCase } from './opening-candidates.use-cases';
 import { CreateLinkOfferUseCase } from './link-offers.use-cases';
 import { InMemoryOpeningCandidatesRepository } from '../__fixtures__/in-memory-opening-candidates';
+import {
+  InMemorySlotOfferSettingsRepository,
+  inMemorySlotOfferSettings,
+} from '../__fixtures__/in-memory-slot-offer-settings';
 import type { LocationRepository } from '../../../locations/domain/ports/location-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
@@ -22,10 +27,11 @@ import {
   OFFER_EMAIL_BLOCKED_MESSAGE,
   OFFER_EMAIL_MISSING_MESSAGE,
   hashSlotOfferToken,
+  linkOfferTooLateMessage,
 } from '../../domain/slot-offer-link';
 
 const local = (day: string, hhmm: string) =>
-  new Date(`${day}T${hhmm}:00-05:00`);
+  new Date(`${day}T${hhmm}:00-04:00`);
 let now = local('2026-10-19', '08:00');
 const clock = () => now;
 
@@ -36,10 +42,11 @@ const locations = {
         ? {
             id,
             name: 'Sede Centro',
-            country: 'CO',
-            defaultPhoneRegion: 'CO',
-            timeZone: 'America/Bogota',
-            locale: 'es-CO',
+            isActive: true,
+            country: 'VE',
+            defaultPhoneRegion: 'VE',
+            timeZone: 'America/Caracas',
+            locale: 'es-VE',
             hourCycle: 'h12',
           }
         : null,
@@ -71,8 +78,12 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
   let drafts: AuditEventDraft[];
   let sent: { to: string; referenceId: string; vars: SlotOfferEmailVars }[];
   let useCase: CreateLinkOfferUseCase;
+  /** El valor de la instalación (WAITLIST_LINK_OFFER_EXPIRY_LEAD_MINUTES). */
   let leadMinutes: number;
+  /** DX-448: lo que guardó la clínica. */
+  let settingsRepo: InMemorySlotOfferSettingsRepository;
   let sendFails: boolean;
+  let sendCapped: boolean;
 
   const base = {
     locationId: 'loc1',
@@ -86,6 +97,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
     now = local('2026-10-19', '08:00');
     leadMinutes = 0;
     sendFails = false;
+    sendCapped = false;
     repo = new InMemoryOpeningCandidatesRepository();
     repo.addPatient({ id: 'p1', firstName: 'Ana María', lastName: 'Pérez' });
     drafts = [];
@@ -94,6 +106,22 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       assertCanSend: () => Promise.resolve(),
       send: (input) => {
         if (sendFails) return Promise.reject(new Error('outbox caído'));
+        // DX-149-ter: el tope contado bajo candado al encolar (el adaptador
+        // ya lo da como el 429 en español).
+        if (sendCapped) {
+          return Promise.reject(
+            new HttpException(
+              {
+                statusCode: 429,
+                error: 'Too Many Requests',
+                message:
+                  'Ya enviamos un correo a esta persona hace un momento. Espera 60 segundos antes de volver a enviarlo.',
+                retryAfterSeconds: 60,
+              },
+              429,
+            ),
+          );
+        }
         sent.push(input);
         return Promise.resolve();
       },
@@ -104,6 +132,12 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
         return Promise.resolve();
       },
     } as unknown as RecordAuditEventUseCase;
+    settingsRepo = new InMemorySlotOfferSettingsRepository();
+    const settings = inMemorySlotOfferSettings(settingsRepo, {
+      get expiryLeadMinutes() {
+        return leadMinutes;
+      },
+    });
     const create = new CreateWaitlistOfferUseCase(
       repo,
       locations,
@@ -112,6 +146,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       { offersPerPatientPerDay: 2 },
       clock,
       new TenantContextService(),
+      settings,
     );
     useCase = new CreateLinkOfferUseCase(
       create,
@@ -121,11 +156,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       slotOffers,
       email,
       audit,
-      {
-        get expiryLeadMinutes() {
-          return leadMinutes;
-        },
-      },
+      settings,
       clock,
     );
   });
@@ -164,7 +195,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       CTX,
     );
     expect(view.url).toMatch(/\/hueco\/[A-Za-z0-9_-]{43}$/);
-    expect(view.whatsappPhone).toBe('573101234567');
+    expect(view.whatsappPhone).toBe('584141234567');
     expect(sent).toHaveLength(0);
   });
 
@@ -176,6 +207,54 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       CTX,
     );
     expect(view.expiresAt).toEqual(local('2026-10-20', '09:00'));
+  });
+
+  it('DX-448: la caducidad de la clínica manda sobre la de la instalación y queda fijada en la oferta', async () => {
+    leadMinutes = 30;
+    settingsRepo.stored = { expiryLeadMinutes: 90, minLeadMinutes: 20 };
+    const first = await useCase.execute(
+      { ...base, channel: 'LINK_WA_ME' },
+      LINK,
+      CTX,
+    );
+    expect(first.expiresAt).toEqual(local('2026-10-20', '08:30'));
+    // Cambiar el ajuste después no mueve la oferta ya enviada.
+    settingsRepo.stored = { expiryLeadMinutes: 0, minLeadMinutes: 20 };
+    const second = await useCase.execute(
+      { ...base, patientId: 'p1', channel: 'LINK_EMAIL' },
+      LINK,
+      CTX,
+    );
+    expect(second.expiresAt).toEqual(base.slotStart);
+    expect(repo.offers.find((o) => o.id === first.id)?.expiresAt).toEqual(
+      local('2026-10-20', '08:30'),
+    );
+  });
+
+  it('DX-448: sin caducidad elegida, la de la instalación', async () => {
+    leadMinutes = 30;
+    const view = await useCase.execute(
+      { ...base, channel: 'LINK_WA_ME' },
+      LINK,
+      CTX,
+    );
+    expect(view.expiresAt).toEqual(local('2026-10-20', '09:30'));
+  });
+
+  it('DX-448: la antelación mínima de la clínica, contada sobre la caducidad', async () => {
+    settingsRepo.stored = { expiryLeadMinutes: 60, minLeadMinutes: 45 };
+    // El hueco a las 10:00 caduca a las 9:00; a las 8:20 le quedan 40 min.
+    now = local('2026-10-20', '08:20');
+    const settings = { expiryLeadMinutes: 60, minLeadMinutes: 45 };
+    await expect(
+      useCase.execute({ ...base, channel: 'LINK_WA_ME' }, LINK, CTX),
+    ).rejects.toThrow(new ConflictException(linkOfferTooLateMessage(settings)));
+    expect(repo.offers).toHaveLength(0);
+    // A las 8:15 le quedan 45: entra.
+    now = local('2026-10-20', '08:15');
+    await expect(
+      useCase.execute({ ...base, channel: 'LINK_WA_ME' }, LINK, CTX),
+    ).resolves.toMatchObject({ expiresAt: local('2026-10-20', '09:00') });
   });
 
   it('con menos de 20 minutos para el hueco no se crea la oferta', async () => {
@@ -226,6 +305,7 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       { offersPerPatientPerDay: 2 },
       clock,
       new TenantContextService(),
+      inMemorySlotOfferSettings(),
     );
     await expect(
       create.execute({ ...base, channel: 'LINK_EMAIL' }, CTX),
@@ -244,6 +324,24 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
       outcome: 'EXPIRED',
       outcomeById: 'u-rec',
     });
+    expect(drafts.map((d) => d.metadata)).toEqual([
+      { reason: 'OFFER_LINK_EMAIL' },
+      { reason: 'OFFER_LINK_EMAIL_FAILED' },
+    ]);
+  });
+
+  it('DX-149-ter: si el tope salta al encolar (otra oferta al mismo paciente ganó la carrera), 429 en español —no 503— y la oferta queda sin efecto', async () => {
+    sendCapped = true;
+    const error = await useCase
+      .execute({ ...base, channel: 'LINK_EMAIL' }, LINK, CTX)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(HttpException);
+    expect((error as HttpException).getStatus()).toBe(429);
+    expect((error as HttpException).getResponse()).toMatchObject({
+      message: expect.stringMatching(/^Ya enviamos un correo/) as string,
+      retryAfterSeconds: 60,
+    });
+    expect(repo.offers[0]).toMatchObject({ outcome: 'EXPIRED' });
     expect(drafts.map((d) => d.metadata)).toEqual([
       { reason: 'OFFER_LINK_EMAIL' },
       { reason: 'OFFER_LINK_EMAIL_FAILED' },

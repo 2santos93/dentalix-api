@@ -21,7 +21,7 @@ import type {
  *
  *  - BE-042: la ocupación divide los minutos atendidos entre la CAPACIDAD de
  *    la sede (Σ horario de cada profesional en ella, menos sus bloqueos y los
- *    cierres), con tope de 100 %. Sedes en Bogotá (UTC−5): las 9:00 son las
+ *    cierres), con tope de 100 %. Sedes en la zona de la sede (UTC−4): las 9:00 son las
  *    14:00 UTC.
  *      Sede Tres: tres profesionales con horario los lunes 9–10.
  *      Sede Dos: dos profesionales los martes 9–13 y la sede abierta 9–13
@@ -199,13 +199,13 @@ describe('Comparar sedes: capacidad, fechas y producción sin atribuir (DX-305)'
     // un realizado de antes de DX-050 («Sin atribuir»).
     const planOct = await seed.plan({
       patientId: patients[8],
-      currency: 'COP',
+      currency: 'USD',
       price: 120_000,
       done: { locationId: tres, at: new Date('2026-10-05T15:00:00Z') },
     });
     await seed.plan({
       patientId: patients[8],
-      currency: 'COP',
+      currency: 'USD',
       price: 100_000,
       done: { locationId: tres, at: new Date('2026-09-10T15:00:00Z') },
     });
@@ -217,14 +217,14 @@ describe('Comparar sedes: capacidad, fechas y producción sin atribuir (DX-305)'
         planId: planOct,
         patientId: patients[8],
         locationId: tres,
-        currency: 'COP',
+        currency: 'USD',
         amount,
         paidAt: new Date(paidAt),
       });
     }
     await seed.unattributedDone({
       patientId: patients[9],
-      currency: 'COP',
+      currency: 'USD',
       price: 500_000,
     });
   });
@@ -378,7 +378,7 @@ describe('Comparar sedes: capacidad, fechas y producción sin atribuir (DX-305)'
       expect(sede.previousPeriodUnattributed).toBe(true);
       expect(sede.metrics.production).toEqual([
         {
-          currency: 'COP',
+          currency: 'USD',
           value: 120_000,
           previous: 100_000,
           change: null,
@@ -423,10 +423,10 @@ describe('Comparar sedes: capacidad, fechas y producción sin atribuir (DX-305)'
         compare: 'previous',
       }).expect(200);
       expect(res.text).toContain(
-        `"Sede Tres","Producción",COP,120000.00,100000.00,,,,"${UNATTRIBUTED_PREVIOUS_CSV_NOTE}"`,
+        `"Sede Tres","Producción",USD,120000.00,100000.00,,,,"${UNATTRIBUTED_PREVIOUS_CSV_NOTE}"`,
       );
       expect(res.text).toContain(
-        '"Sede Tres","Cobrado",COP,90000.00,80000.00,12.5,%,Mejora,',
+        '"Sede Tres","Cobrado",USD,90000.00,80000.00,12.5,%,Mejora,',
       );
     });
   });

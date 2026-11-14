@@ -8,6 +8,9 @@ import {
 } from '@nestjs/common';
 import type { ClinicRole } from '@prisma/client';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { moneyWithCode } from '../../../shared/format/money-with-code';
+import { NO_CURRENCY_TEXTS } from '../../../shared/format/currency-text';
+import { ClinicCurrencyTextsReader } from '../../../shared/money/clinic-currency-texts.reader';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
   CANCELLATION_FEE_MESSAGES,
@@ -38,6 +41,8 @@ export interface FeeActor {
 /** El cargo de una cita tal como lo ve recepción/administración. */
 export interface CancellationFeeView {
   appointmentId: string;
+  /** Sede de la cita (DX-354c): la web pinta con el formato de esa sede. */
+  locationId: string;
   patientId: string;
   /** NO_SHOW o cancelación tardía. */
   eligible: boolean;
@@ -86,6 +91,7 @@ function toView(
   });
   return {
     appointmentId: ctx.appointment.id,
+    locationId: ctx.appointment.locationId,
     patientId: ctx.appointment.patientId,
     eligible: isFeeEligible(ctx.appointment),
     status: ctx.fee?.voidedAt ? 'VOIDED' : (ctx.fee?.status ?? 'NONE'),
@@ -159,6 +165,7 @@ export class ChargeCancellationFeeUseCase {
     @Inject(CANCELLATION_FEE_REPOSITORY)
     private readonly repo: CancellationFeeRepository,
     private readonly tenantContext: TenantContextService,
+    private readonly currencyTexts: ClinicCurrencyTextsReader,
   ) {}
 
   async execute(
@@ -175,16 +182,27 @@ export class ChargeCancellationFeeUseCase {
     const communicated = ctx.communicated!;
     const currency = communicated.currency!;
     // El tope en el formato de la sede de la cita, pedido solo si se pinta
-    // (G1-B, I4).
+    // (G1-B, I4), y con el texto propio de la moneda de la clínica
+    // (DX-517-bis): solo un importe propio puede pasarse del sugerido, así que
+    // sin él no se leen los textos.
+    const texts =
+      amount === undefined
+        ? NO_CURRENCY_TEXTS
+        : await this.currencyTexts.forTenant(this.tenantContext.getTenantId()!);
     const resolved = resolveChargeAmount(
       amount,
       communicated.suggestedFee!,
       (value) =>
-        requireLocationFormat({
-          id: ctx.appointment.locationId,
-          locale: ctx.locationLocale,
-          hourCycle: ctx.locationHourCycle,
-        }).money(value, currency),
+        moneyWithCode(
+          value,
+          currency,
+          requireLocationFormat({
+            id: ctx.appointment.locationId,
+            locale: ctx.locationLocale,
+            hourCycle: ctx.locationHourCycle,
+          }),
+          texts,
+        ),
     );
     if (!resolved.ok) throw new BadRequestException(resolved.message);
 

@@ -15,6 +15,12 @@ import {
 export interface Patient {
   id: string;
   tenantId: string;
+  /**
+   * DX-484: código corto del paciente en su clínica, en dígitos decimales sin
+   * ceros a la izquierda («1042»). Lo asigna la BD en el alta y nunca cambia;
+   * es el que se da al software de imagen.
+   */
+  patientCode: string;
   firstName: string;
   lastName: string;
   /** DX-327: tipo genérico (columna `documentType`; nunca el código anterior). */
@@ -52,8 +58,12 @@ export interface Patient {
    * `underRetention`).
    */
   retentionUntil: string | null;
-  /** Si hoy la HC está en retención legal (no se puede archivar). */
+  /** Si hoy la HC está en retención (no se puede archivar). */
   underRetention: boolean;
+  /** DX-330: plazo vigente de la clínica en años (NONE); DOUBLE es el doble. */
+  clinicRetentionYears: number;
+  /** DX-330: la fecha de fin sale del plazo anterior de la clínica. */
+  retentionFromPreviousTerm: boolean;
   /** DX-039: cuándo se vaciaron los datos no clínicos (supresión parcial). */
   partiallySuppressedAt: Date | null;
   /** DX-107: lote de importación que creó al paciente (null = alta a mano). */
@@ -64,6 +74,11 @@ export interface Patient {
    * acceso). Se cambian por `PATCH /patients/:id/communication`.
    */
   contactChannel: ContactChannel;
+  /**
+   * DX-497: idioma preferido (BCP 47) de lo que se le envía; null = el de la
+   * clínica. Se cambia en el alta o por `PATCH /patients/:id/communication`.
+   */
+  preferredLanguage: string | null;
   whatsappOptInAt: Date | null;
   whatsappOptInSource: WhatsappOptInSource | null;
   whatsappOptInById: string | null;

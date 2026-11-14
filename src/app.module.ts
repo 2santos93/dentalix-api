@@ -10,6 +10,7 @@ import { TenantContextModule } from './shared/tenancy/tenant-context.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { MeModule } from './modules/me/me.module';
 import { PatientsModule } from './modules/patients/patients.module';
+import { CallerLookupModule } from './modules/caller-lookup/caller-lookup.module';
 import { DentalCatalogModule } from './modules/dental-catalog/dental-catalog.module';
 import { MedicalHistoryModule } from './modules/medical-history/medical-history.module';
 import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entries.module';
@@ -20,6 +21,7 @@ import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
 import { ChairsModule } from './modules/chairs/chairs.module';
+import { EquipmentModule } from './modules/equipment/equipment.module';
 import { PaymentMethodsModule } from './modules/payment-methods/payment-methods.module';
 import { PayersModule } from './modules/payers/payers.module';
 import { PriceListsModule } from './modules/price-lists/price-lists.module';
@@ -35,6 +37,7 @@ import { InvitationsModule } from './modules/invitations/invitations.module';
 import { DomainsModule } from './modules/domains/domains.module';
 import { PublicBrandingModule } from './modules/public-branding/public-branding.module';
 import { ExchangeModule } from './modules/exchange/exchange.module';
+import { ClinicSettingsModule } from './modules/clinic-settings/clinic-settings.module';
 import { ReferenceModule } from './modules/reference/reference.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentPlansModule } from './modules/payment-plans/payment-plans.module';
@@ -73,6 +76,8 @@ import { OutboundMessagesModule } from './modules/notifications/outbound/outboun
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
+import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
+import { RecallModule } from './modules/recall/recall.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
 @Module({
@@ -94,6 +99,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     InvitationsModule,
     MeModule,
     PatientsModule,
+    CallerLookupModule,
     DentalCatalogModule,
     MedicalHistoryModule,
     ClinicalEntriesModule,
@@ -105,6 +111,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AppointmentTypesModule,
     // DX-211: sillones de cada sede.
     ChairsModule,
+    EquipmentModule,
     PaymentMethodsModule,
     PayersModule,
     PriceListsModule,
@@ -118,6 +125,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     StaffModule,
     DomainsModule,
     PublicBrandingModule,
+    // DX-019: Ajustes › Datos de la clínica (marca, datos fiscales y logo).
+    ClinicSettingsModule,
     ExchangeModule,
     ReferenceModule,
     PaymentsModule,
@@ -168,6 +177,11 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OutboundMessagesModule,
     // Recordatorio automático de cita por email, por sede (DX-026).
     RemindersModule,
+    // DX-503: «Mi día», los recuentos de las listas de trabajo por rol y sede.
+    // El ÚLTIMO: importa seis módulos y, si fuera antes, adelantaría el registro
+    // de sus rutas (y cambiaría el orden del OpenAPI sin cambiar nada más).
+    RecallModule,
+    WorkQueuesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService, ShutdownState],

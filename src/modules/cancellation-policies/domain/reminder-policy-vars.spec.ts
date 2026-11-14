@@ -9,7 +9,7 @@ const policy = (suggestedFee: number | null, currency: string | null) => ({
 });
 
 describe('reminderPolicyVars (DX-291, DX-350)', () => {
-  it('policy fee in the reminder uses the location format', () => {
+  it('policy fee in the reminder uses the location format and the ISO code, never a symbol (DX-528)', () => {
     expect(
       reminderPolicyVars(
         policy(5000, 'JPY'),
@@ -18,14 +18,14 @@ describe('reminderPolicyVars (DX-291, DX-350)', () => {
     ).toEqual({
       noticeHours: 24,
       text: 'Avísanos con un día.',
-      feeLabel: '￥5,000',
+      feeLabel: 'JPY\u00a05,000',
     });
     expect(
       reminderPolicyVars(
         policy(1234.5, 'EUR'),
         regionalFormat({ locale: 'de-DE', hourCycle: 'h23' }),
       )?.feeLabel,
-    ).toMatch(/^1\.234,50\s€$/);
+    ).toMatch(/^1\.234,50\sEUR$/);
   });
 
   it('sin importe (o sin moneda) no hay frase del cargo; sin política, null', () => {
@@ -34,5 +34,15 @@ describe('reminderPolicyVars (DX-291, DX-350)', () => {
     expect(reminderPolicyVars(policy(0, 'USD'), fmt)?.feeLabel).toBeNull();
     expect(reminderPolicyVars(policy(10, null), fmt)?.feeLabel).toBeNull();
     expect(reminderPolicyVars(null, fmt)).toBeNull();
+  });
+
+  it('DX-517: con texto propio para la moneda, ese texto en el lugar del código; sin él, igual', () => {
+    const fmt = regionalFormat({ locale: 'es-VE', hourCycle: 'h12' });
+    expect(
+      reminderPolicyVars(policy(1234.5, 'VES'), fmt, { VES: 'Bs.' })?.feeLabel,
+    ).toBe('Bs.\u00a01.234,50');
+    expect(
+      reminderPolicyVars(policy(1234.5, 'VES'), fmt, { EUR: '€' })?.feeLabel,
+    ).toBe(reminderPolicyVars(policy(1234.5, 'VES'), fmt)?.feeLabel);
   });
 });

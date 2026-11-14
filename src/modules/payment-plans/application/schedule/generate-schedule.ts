@@ -1,4 +1,8 @@
-import { round2 } from '../../../../shared/money/money';
+import { round2, toCents } from '../../../../shared/money/money';
+import {
+  type RoundingDigits,
+  unitCents,
+} from '../../../../shared/money/line-rounding';
 export type Periodicity = 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
 
 export interface GenerateScheduleInput {
@@ -7,6 +11,11 @@ export interface GenerateScheduleInput {
   installmentsCount: number;
   periodicity: Periodicity;
   startDate: Date;
+  /**
+   * Dígitos de redondeo de la moneda del plan (`currencies.rounding_digits`,
+   * DX-488): las cuotas se reparten en unidades de esa moneda.
+   */
+  roundingDigits: RoundingDigits;
 }
 
 export interface GeneratedInstallment {
@@ -62,10 +71,17 @@ export function generateSchedule(
 
   // Do the per-installment split in INTEGER CENTS so the sum is bit-exact
   // by construction (float division/rounding would otherwise drift, e.g.
-  // 0.1 + 0.2 !== 0.3). Only the first N-1 installments use the floored
-  // base; the last absorbs whatever remains, which is always >= 0.
-  const financedCents = Math.round(financed * 100);
-  const baseCents = Math.floor(financedCents / installmentsCount);
+  // 0.1 + 0.2 !== 0.3). DX-488: the first N-1 installments get the floored
+  // base in whole units of the currency's rounding digits (1, 10 or 100
+  // cents: JPY 10000 / 3 -> 3333, 3333, 3334); the last absorbs whatever
+  // remains, loose cents of the financed amount included, which is always
+  // >= 0. With 2 rounding digits the unit is 1 cent: the same split as before.
+  // Existing plans are never re-split: installments are stored rows.
+  const financedCents = toCents(financed);
+  const unit = unitCents(input.roundingDigits);
+  const baseCents = Number(
+    (BigInt(financedCents) / unit / BigInt(installmentsCount)) * unit,
+  );
 
   const rows: GeneratedInstallment[] = [];
   for (let i = 0; i < installmentsCount; i++) {

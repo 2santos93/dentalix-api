@@ -7,7 +7,7 @@ import type { ReminderClock } from './reminder-clock';
 import { regionalFormat } from '../../../shared/format/regional-format';
 
 const HOUR = 3_600_000;
-const NOW = new Date('2026-10-20T12:00:00.000Z');
+const NOW = new Date('2026-10-20T11:00:00.000Z');
 const APPT = '5a1c7d2e-0000-4000-8000-000000000001';
 const TENANT = '9f3a1b2c-0000-4000-8000-0000000000aa';
 const START = new Date(NOW.getTime() + 2 * HOUR);
@@ -22,10 +22,11 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
       deleted: false,
     },
     majorityAge: 18,
-    locationTimeZone: 'America/Bogota',
+    locationTimeZone: 'America/Caracas',
     // Ajustes explícitos de la sede: el reloj sale de aquí, nunca del país.
-    locationFormat: regionalFormat({ locale: 'es-CO', hourCycle: 'h12' }),
+    locationFormat: regionalFormat({ locale: 'es-VE', hourCycle: 'h12' }),
     patientId: PATIENT,
+    preferredLanguage: null,
     contact: {
       contactChannel: 'EMAIL',
       reminderOptOutAt: null,
@@ -38,6 +39,7 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
       emergencyContactName: null,
     },
     responsibles: [],
+    majorityReview: null,
     settings: { enabled: true, leadHours: [48, 2] },
     cancellationPolicy: null,
     ...over,
@@ -69,7 +71,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
           end: new Date(START.getTime() + HOUR),
           providerName: 'Dra. Gómez',
           locationName: 'Sede Norte',
-          locationAddress: 'Cra 15 # 93-60',
+          locationAddress: 'Av. Francisco de Miranda 93',
         },
       }),
     };
@@ -123,6 +125,8 @@ describe('SendAppointmentReminder (DX-026)', () => {
         recipient: 'ana@example.com',
         recipientKind: 'PATIENT',
         appointmentId: APPT,
+        language: 'es',
+        languageFallbackFrom: null,
       },
       expect.any(Function),
     );
@@ -131,15 +135,23 @@ describe('SendAppointmentReminder (DX-026)', () => {
       to: 'ana@example.com',
       template: 'appointment-reminder',
       referenceId: 'out-1',
+      locale: 'es',
       vars: {
         patientName: 'Ana',
         guardianName: null,
         startsAtLabel: 'martes 20 de octubre de 2026 a las 9:00 a. m.',
         locationName: 'Sede Norte',
-        locationAddress: 'Cra 15 # 93-60',
+        locationAddress: 'Av. Francisco de Miranda 93',
         providerName: 'Dra. Gómez',
         confirmUrl: 'https://demo.dentalix.app/confirmar/tok_123',
         unsubscribeUrl: 'https://demo.dentalix.app/baja/opt_tok',
+        // DX-469: «Añadir a mi calendario» por el mismo host.
+        calendar: {
+          icsUrl:
+            'https://demo.dentalix.app/api/v1/public/appointment-confirmations/tok_123/calendar.ics',
+          start: '2026-10-20T13:00:00.000Z',
+          end: '2026-10-20T14:00:00.000Z',
+        },
         cancellationPolicy: null,
       },
     });
@@ -164,7 +176,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
           noticeHours: 24,
           patientText: 'Avísanos con tiempo.',
           suggestedFee: 50000,
-          currency: 'COP',
+          currency: 'USD',
         },
       }),
     );
@@ -176,7 +188,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(call[0].vars.cancellationPolicy).toEqual({
       noticeHours: 24,
       text: 'Avísanos con tiempo.',
-      feeLabel: expect.stringContaining('50.000') as unknown,
+      feeLabel: expect.stringMatching(/50\.000.*USD|USD.*50\.000/) as unknown,
     });
     expect(repo.reminders[0]).toMatchObject({
       status: 'SENT',
@@ -199,6 +211,7 @@ describe('SendAppointmentReminder (DX-026)', () => {
     isPayer: true,
     receivesNotices: true,
     optedOut: false,
+    createdAt: new Date('2026-10-01T12:00:00.000Z'),
   };
   const minorWithoutEmail = {
     firstName: 'Ana',
@@ -233,11 +246,11 @@ describe('SendAppointmentReminder (DX-026)', () => {
         };
       },
     ];
-    // 14:00 UTC del 20 = 23:00 del 20 en Tokio, en 24 h y en español.
+    // 13:00 UTC del 20 = 22:00 del 20 en Tokio, en 24 h y en español.
     expect(call[0].vars.startsAtLabel).toBe(
-      'martes 20 de octubre de 2026 a las 23:00',
+      'martes 20 de octubre de 2026 a las 22:00',
     );
-    expect(call[0].vars.cancellationPolicy.feeLabel).toBe('￥3,000');
+    expect(call[0].vars.cancellationPolicy.feeLabel).toBe('JPY\u00a03,000');
   });
 
   it('un menor sin email con responsable que recibe avisos: sale al email del responsable y queda «enviado al responsable» (DX-203)', async () => {
@@ -328,6 +341,51 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(email.enqueue).not.toHaveBeenCalled();
   });
 
+  it('DX-342: came of age with a responsible from childhood and without email: skipped NO_EMAIL, never the responsible', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: null,
+          email: null,
+        },
+        // Cumplió 18 el 2026-10-01; la madre, dada de alta en 2016.
+        recipient: { ...minorWithoutEmail, birthDate: new Date('2008-10-01') },
+        responsibles: [
+          { ...mother, createdAt: new Date('2016-02-10T12:00:00.000Z') },
+        ],
+      }),
+    );
+    await handler.handle(payload);
+    expect(repo.reminders[0]).toMatchObject({ skipReason: 'NO_EMAIL' });
+    expect(email.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('DX-342: reviewed KEEP_RESPONSIBLE: the reminder goes to the responsible again', async () => {
+    repo.contexts.set(
+      APPT,
+      context({
+        contact: {
+          contactChannel: 'EMAIL',
+          reminderOptOutAt: null,
+          email: null,
+        },
+        recipient: { ...minorWithoutEmail, birthDate: new Date('2008-10-01') },
+        responsibles: [
+          { ...mother, createdAt: new Date('2016-02-10T12:00:00.000Z') },
+        ],
+        majorityReview: {
+          decision: 'KEEP_RESPONSIBLE',
+          majorityDate: '2026-10-01',
+        },
+      }),
+    );
+    await handler.handle(payload);
+    const [input] = email.enqueue.mock.calls[0] as [{ to: string }];
+    expect(input.to).toBe('maria@example.com');
+  });
+
   it('la baja del propio paciente gana aunque tenga responsable (DX-128)', async () => {
     repo.contexts.set(
       APPT,
@@ -407,6 +465,76 @@ describe('SendAppointmentReminder (DX-026)', () => {
     expect(email.enqueue).not.toHaveBeenCalled();
     expect(outbound.settle).toHaveBeenCalledWith('out-0', { status: 'QUEUED' });
     expect(repo.reminders[0]).toMatchObject({ status: 'SENT' });
+  });
+
+  describe('DX-272 · reserva perdida y clave estable', () => {
+    const jobContext = (signal: AbortSignal, attempt = 1) => ({
+      jobId: 'job-1',
+      attempt,
+      maxAttempts: 5,
+      tenantId: TENANT,
+      signal,
+    });
+
+    it('con la señal ya abortada no reclama, ni emite enlace, ni encola, ni marca FAILED en el último intento', async () => {
+      repo.contexts.set(APPT, context());
+      const lease = new AbortController();
+      lease.abort();
+      await expect(
+        handler.handle(payload, jobContext(lease.signal, 5)),
+      ).rejects.toThrow('Intento abortado');
+      expect(repo.reminders).toHaveLength(0);
+      expect(createLink.execute).not.toHaveBeenCalled();
+      expect(outbound.record).not.toHaveBeenCalled();
+      expect(email.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('si la reserva se pierde mientras se prepara el email, no lo encola', async () => {
+      repo.contexts.set(APPT, context());
+      const lease = new AbortController();
+      optOutLinks.issue.mockImplementation(() => {
+        lease.abort();
+        return Promise.resolve('opt_tok');
+      });
+      await expect(
+        handler.handle(payload, jobContext(lease.signal)),
+      ).rejects.toThrow('Intento abortado');
+      expect(email.enqueue).not.toHaveBeenCalled();
+      // El recordatorio queda SENDING: el worker que retoma lo termina.
+      expect(repo.reminders[0]).toMatchObject({ status: 'SENDING' });
+    });
+
+    it('la clave del email es el mensaje saliente de la ventana: la misma ventana la repite, otra hora de inicio usa otra', async () => {
+      let n = 0;
+      outbound.record.mockImplementation(
+        async (_input: unknown, attach?: AttachOutboundMessage) => {
+          const id = `out-${++n}`;
+          await attach?.(id, {} as Prisma.TransactionClient);
+          return { id };
+        },
+      );
+      repo.contexts.set(APPT, context());
+      await handler.handle(payload);
+      await handler.handle(payload);
+      const moved = new Date(START.getTime() + 24 * HOUR);
+      repo.contexts.set(
+        APPT,
+        context({
+          appointment: {
+            id: APPT,
+            start: moved,
+            status: 'SCHEDULED',
+            deleted: false,
+          },
+        }),
+      );
+      await handler.handle({ ...payload, start: moved.toISOString() });
+      expect(
+        email.enqueue.mock.calls.map(
+          ([input]: [{ referenceId: string }]) => input.referenceId,
+        ),
+      ).toEqual(['out-1', 'out-2']);
+    });
   });
 
   it.each([1, 5])(
@@ -579,5 +707,36 @@ describe('SendAppointmentReminder (DX-026)', () => {
     await expect(
       handler.handle({ appointmentId: 'x', leadHours: 2, start: 'no' }),
     ).rejects.toThrow('payload');
+  });
+
+  describe('DX-497: idioma del paciente', () => {
+    it('un paciente con en recibe el email en inglés, con la fecha en el formato de la sede', async () => {
+      repo.contexts.set(APPT, context({ preferredLanguage: 'en' }));
+      await handler.handle(payload);
+      expect(outbound.record).toHaveBeenCalledWith(
+        expect.objectContaining({ language: 'en', languageFallbackFrom: null }),
+        expect.any(Function),
+      );
+      const [[call]] = email.enqueue.mock.calls as [
+        [{ locale: string; vars: { startsAtLabel: string } }],
+      ];
+      expect(call.locale).toBe('en');
+      // DX-315: la fecha y la hora no cambian con el idioma.
+      expect(call.vars.startsAtLabel).toBe(
+        'martes 20 de octubre de 2026 a las 9:00 a. m.',
+      );
+    });
+
+    it('un paciente con ca sin catálogo recibe el de la clínica y el registro dice ca → es', async () => {
+      repo.contexts.set(APPT, context({ preferredLanguage: 'ca' }));
+      await handler.handle(payload);
+      expect(outbound.record).toHaveBeenCalledWith(
+        expect.objectContaining({ language: 'es', languageFallbackFrom: 'ca' }),
+        expect.any(Function),
+      );
+      expect(email.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ locale: 'es' }),
+      );
+    });
   });
 });

@@ -209,6 +209,21 @@ function handlerMetadata(
     : rest;
 }
 
+/**
+ * Los `params` de la ruta y, detrás, los que añade el handler
+ * (`req.auditMetadata.params`) cuya clave no sea ya de la ruta.
+ */
+function routeThenHandlerParams(req: AuditedRequest): Record<string, unknown> {
+  const route: Record<string, unknown> = { ...(req.params ?? {}) };
+  const extra = req.auditMetadata?.params;
+  if (typeof extra === 'object' && extra !== null && !Array.isArray(extra)) {
+    for (const [key, value] of Object.entries(extra)) {
+      if (!(key in route)) route[key] = value;
+    }
+  }
+  return route;
+}
+
 /** SEC-049: tipo de pagador, 4 últimos del nº y verificación de la cobertura. */
 function coverageOf(body: unknown): Record<string, unknown> | null {
   if (typeof body !== 'object' || body === null) return null;
@@ -224,33 +239,6 @@ function coverageOf(body: unknown): Record<string, unknown> | null {
         ? memberNumberLast4(b.memberNumber)
         : null,
     verified: b.verifiedAt !== null && b.verifiedAt !== undefined,
-  };
-}
-
-/**
- * DX-051: moneda del plan, modo y líneas antes y después de una reasignación,
- * de la respuesta del PUT (que se lee tras el reparto).
- */
-function allocationOf(body: unknown): Record<string, unknown> | null {
-  if (typeof body !== 'object' || body === null) return null;
-  const b = body as {
-    planCurrency?: unknown;
-    manual?: unknown;
-    allocations?: unknown;
-    previous?: unknown;
-  };
-  const lines = (value: unknown): unknown =>
-    Array.isArray(value)
-      ? value.map((l: { treatmentPlanItemId?: unknown; amount?: unknown }) => ({
-          itemId: l?.treatmentPlanItemId,
-          amount: l?.amount,
-        }))
-      : null;
-  return {
-    currency: b.planCurrency,
-    mode: b.manual === true ? 'MANUAL' : 'AUTO',
-    before: lines(b.previous),
-    after: lines(b.allocations),
   };
 }
 
@@ -291,7 +279,10 @@ export function buildAuditDraft(
       ...(options.action === 'UPDATE'
         ? { changedFields: bodyFields(req.body) }
         : {}),
-      params: req.params,
+      // DX-379 (B): el handler puede añadir ids a los de la ruta (p. ej.
+      // `repricingId`, la fila con el antes y el después). Los de la ruta van
+      // primero y mandan: el tope de claves del saneador nunca los corta.
+      params: routeThenHandlerParams(req),
       ...(options.reason ? { reason: options.reason } : {}),
       ...(options.statusChange ? { statusChange: options.statusChange } : {}),
       ...(options.search && resultCount !== null
@@ -318,7 +309,6 @@ export function buildAuditDraft(
           }
         : {}),
       ...(options.coverage ? { coverage: coverageOf(responseBody) } : {}),
-      ...(options.allocation ? { allocation: allocationOf(responseBody) } : {}),
       ...(options.paymentReference
         ? { paymentReference: paymentReferenceOf(responseBody) }
         : {}),
@@ -327,9 +317,27 @@ export function buildAuditDraft(
 }
 
 /**
+ * SEC-044: ids (sin repetir) del pagador y de cada miembro del estado de
+ * cuenta familiar de la respuesta.
+ */
+function familyMemberIds(body: unknown): string[] {
+  if (typeof body !== 'object' || body === null) return [];
+  const b = body as {
+    payer?: { id?: unknown };
+    members?: { patient?: { id?: unknown } }[];
+  };
+  const members = Array.isArray(b.members) ? b.members : [];
+  const ids = [b.payer?.id, ...members.map((m) => m?.patient?.id)].flatMap(
+    (id) => uuidOrNull(id) ?? [],
+  );
+  return [...new Set(ids)];
+}
+
+/**
  * Los eventos de una petición que terminó bien: el de `buildAuditDraft` o,
  * en un cobro dividido (DX-390, `splitPayment`), uno por línea de la
- * respuesta (`payments`), cada uno con su abono y su referencia.
+ * respuesta (`payments`), cada uno con su abono y su referencia; y en «¿Quién
+ * llama?» (DX-224, `perMatch`), uno por paciente de `matches`.
  */
 export function buildAuditDrafts(
   options: AuditOptions,
@@ -338,6 +346,50 @@ export function buildAuditDrafts(
   scope: AuditScope,
   resultCount: number | null = null,
 ): AuditEventDraft[] {
+  if (options.familyStatement) {
+    const base = buildAuditDraft(
+      options,
+      req,
+      responseBody,
+      scope,
+      resultCount,
+    );
+    if (!base) return [];
+    const ids = familyMemberIds(responseBody);
+    return ids.length === 0
+      ? [base]
+      : ids.map((id) => ({ ...base, patient: { kind: 'patient', id } }));
+  }
+  if (options.perMatch) {
+    const matches =
+      typeof responseBody === 'object' &&
+      responseBody !== null &&
+      Array.isArray((responseBody as { matches?: unknown }).matches)
+        ? (responseBody as { matches: unknown[] }).matches
+        : [];
+    if (matches.length === 0) {
+      // Sin coincidencias también queda rastro (probar números a ciegas no
+      // puede ser invisible): un evento sin paciente, sin el número y con
+      // `rows: 0`.
+      const draft = buildAuditDraft(options, req, {}, scope, resultCount);
+      return draft
+        ? [
+            {
+              ...draft,
+              metadata: {
+                ...draft.metadata,
+                reason: 'CALLER_LOOKUP_NO_MATCH',
+                search: { rows: 0 },
+              },
+            },
+          ]
+        : [];
+    }
+    return matches.flatMap((match) => {
+      const draft = buildAuditDraft(options, req, match, scope, resultCount);
+      return draft ? [draft] : [];
+    });
+  }
   if (!options.splitPayment) {
     const draft = buildAuditDraft(
       options,

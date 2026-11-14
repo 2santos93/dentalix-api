@@ -23,7 +23,32 @@ export interface EmailLayoutInput {
    * una frase y el enlace, discretos, debajo de la tarjeta.
    */
   footerLink?: { lead: string; label: string; url: string } | null;
+  /**
+   * DX-469: enlaces secundarios bajo el botón (p. ej. «Añadir a mi
+   * calendario»): una frase y varios enlaces en una línea.
+   */
+  links?: { lead: string; items: { label: string; url: string }[] } | null;
+  /**
+   * DX-497: textos fijos del esqueleto (idioma del HTML, ayuda del botón y
+   * pie) en el idioma del email. Ausente = los de la clínica (español).
+   */
+  chrome?: EmailLayoutChrome;
 }
+
+export interface EmailLayoutChrome {
+  htmlLang: string;
+  buttonFallback: string;
+  footerClinic: (clinic: string, product: string) => string;
+  footerPlatform: (product: string) => string;
+}
+
+const DEFAULT_CHROME: EmailLayoutChrome = {
+  htmlLang: 'es',
+  buttonFallback: 'Si el botón no funciona, copia este enlace en tu navegador:',
+  footerClinic: (clinic, product) =>
+    `Enviado por ${clinic} a través de ${product}.`,
+  footerPlatform: (product) => `Enviado por ${product}.`,
+};
 
 /**
  * Esqueleto común de los emails: cabecera con la marca de la clínica (logo si
@@ -33,6 +58,7 @@ export interface EmailLayoutInput {
  */
 export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   const senderName = singleLine(input.brand?.clinicName ?? PRODUCT_NAME);
+  const chrome = input.chrome ?? DEFAULT_CHROME;
   const color =
     input.brand?.primaryColor && HEX_COLOR.test(input.brand.primaryColor)
       ? input.brand.primaryColor
@@ -62,19 +88,36 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   const button =
     input.action && actionUrl
       ? `<p style="margin:24px 0"><a href="${escapeHtml(actionUrl)}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:8px">${escapeHtml(input.action.label)}</a></p>
-<p style="margin:0 0 12px;font-size:13px;line-height:1.5;color:#5b6472">Si el botón no funciona, copia este enlace en tu navegador:<br /><span style="word-break:break-all">${escapeHtml(actionUrl)}</span></p>`
+<p style="margin:0 0 12px;font-size:13px;line-height:1.5;color:#5b6472">${escapeHtml(chrome.buttonFallback)}<br /><span style="word-break:break-all">${escapeHtml(actionUrl)}</span></p>`
       : '';
 
-  const footer = input.brand
-    ? `Enviado por ${escapeHtml(senderName)} a través de ${PRODUCT_NAME}.`
-    : `Enviado por ${PRODUCT_NAME}.`;
+  const links = (input.links?.items ?? []).map((item) => {
+    const url = safeUrl(item.url);
+    if (!url)
+      throw new Error('El enlace del email no es una URL http(s) válida');
+    return { label: item.label, url };
+  });
+  const linksHtml =
+    input.links && links.length > 0
+      ? `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#1f2933">${escapeHtml(input.links.lead)} ${links
+          .map(
+            (l) =>
+              `<a href="${escapeHtml(l.url)}" style="color:${color};font-weight:600">${escapeHtml(l.label)}</a>`,
+          )
+          .join(' · ')}</p>`
+      : '';
+
+  const footerText = input.brand
+    ? chrome.footerClinic(senderName, PRODUCT_NAME)
+    : chrome.footerPlatform(PRODUCT_NAME);
+  const footer = escapeHtml(footerText);
   const footerLink =
     input.footerLink && footerUrl
       ? `<p style="margin:8px 0 0;font-size:12px;color:#7b8794">${escapeHtml(input.footerLink.lead)} <a href="${escapeHtml(footerUrl)}" style="color:#5b6472">${escapeHtml(input.footerLink.label)}</a></p>`
       : '';
 
   const html = `<!doctype html>
-<html lang="es">
+<html lang="${escapeHtml(chrome.htmlLang)}">
 <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>${escapeHtml(singleLine(input.subject))}</title></head>
 <body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 12px">
@@ -85,6 +128,7 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
 <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1f2933">${escapeHtml(input.heading)}</h1>
 ${body}
 ${button}
+${linksHtml}
 </td></tr>
 </table>
 <p style="margin:16px 0 0;font-size:12px;color:#7b8794">${footer}</p>
@@ -104,13 +148,11 @@ ${footerLink}
   if (input.action && actionUrl) {
     textParts.push('', `${singleLine(input.action.label)}: ${actionUrl}`);
   }
-  textParts.push(
-    '',
-    '—',
-    input.brand
-      ? `Enviado por ${senderName} a través de ${PRODUCT_NAME}.`
-      : `Enviado por ${PRODUCT_NAME}.`,
-  );
+  if (input.links && links.length > 0) {
+    textParts.push('', singleLine(input.links.lead));
+    for (const l of links) textParts.push(`${singleLine(l.label)}: ${l.url}`);
+  }
+  textParts.push('', '—', footerText);
   if (input.footerLink && footerUrl) {
     textParts.push(
       `${singleLine(input.footerLink.lead)} ${singleLine(input.footerLink.label)}: ${footerUrl}`,

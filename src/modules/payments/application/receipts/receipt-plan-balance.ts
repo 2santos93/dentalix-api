@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { GetPlanBalanceUseCase } from '../use-cases/get-plan-balance.use-case';
 import { errorName } from '../payment-in-plan-currency';
 import type { ReceiptPlanBalance } from '../../domain/receipt-snapshot';
+import type { ReceiptBalanceInTx } from '../../domain/ports/payment-repository.port';
 import { round2 } from '../../../../shared/money/money';
 
 /**
@@ -49,6 +50,54 @@ export class ReceiptPlanBalanceCalculator {
       return null;
     }
   }
+
+  /**
+   * DX-182: el saldo para el recibo calculado DENTRO de la transacción del
+   * abono (`ReceiptBalanceInTx`): el plan ya está bloqueado, así que la foto
+   * trae los abonos anteriores y este (con su base), y su cuenta es la del
+   * saldo del plan, sin sumar nada a mano. Sin red: lo que pidiera la tasa del
+   * día a un proveedor (un abono anterior a DX-375 aún sin congelar, o este
+   * mismo sin base) deja el recibo sin saldo, como cualquier saldo ilegible.
+   * Limitación conocida: un plan con un abono en otra moneda anterior a DX-375
+   * que el barrido aún no ha congelado deja SIN saldo los recibos nuevos del
+   * plan hasta que el barrido (DX-413) lo congele.
+   */
+  readonly inTransaction: ReceiptBalanceInTx = async ({
+    planId,
+    paymentIds,
+    snapshot,
+    creditMovements,
+  }) => {
+    try {
+      const result = await this.getPlanBalance.fromSnapshot(
+        planId,
+        snapshot,
+        creditMovements,
+        { offline: true },
+      );
+      if (result.rateProviderTimedOut) {
+        this.warnUnavailable('RateProviderTimedOut');
+        return null;
+      }
+      // Un abono de este cobro sin tasa de su día no suma en `paid`: el saldo
+      // no lo incluiría y el recibo (inmutable) diría que no pagó. Sin saldo,
+      // como antes de DX-182 (`afterPayment` con importe `null`).
+      const own = new Set(paymentIds);
+      if (result.paymentsWithoutRate.some((p) => own.has(p.paymentId))) {
+        this.warnUnavailable('UnsupportedCurrency');
+        return null;
+      }
+      return {
+        currency: result.planCurrency,
+        billable: result.billable,
+        paid: result.paid,
+        balance: result.balance,
+      };
+    } catch (error) {
+      this.warnUnavailable(errorName(error));
+      return null;
+    }
+  };
 
   /** Sin datos del abono ni del paciente: solo el tipo del error. */
   private warnUnavailable(error: string): void {

@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CatalogKind } from '@prisma/client';
 
 // Response shape for DentalCatalogItem endpoints — documents the
@@ -44,8 +44,34 @@ export class DentalCatalogItemDto {
   })
   allowDiscount!: boolean;
 
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502-ter: moneda del `defaultPrice`, la del catálogo de la clínica; null si no se sabe. Solo la traen las lecturas (`GET /catalog/items`); es la misma en todos los ítems.',
+  })
+  catalogCurrency?: string | null;
+
   @ApiProperty()
   active!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-455: plantilla de evolución ligada al procedimiento (el vínculo guardado, aunque la plantilla esté desactivada); null = ninguna. Es lo que edita la pantalla del catálogo.',
+  })
+  clinicalNoteTemplateId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-455: plantilla a sugerir al marcar hecho el procedimiento: `clinicalNoteTemplateId` si la plantilla está activa; null si no hay o está desactivada.',
+  })
+  suggestedClinicalNoteTemplateId!: string | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

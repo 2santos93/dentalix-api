@@ -1,3 +1,8 @@
+import { testDiscountPolicy } from '../src/modules/treatment-plans/application/use-cases/__fixtures__/discount-fixtures';
+import { referenceCurrencyDigitsCatalog } from '../src/shared/money/__fixtures__/reference-currency-digits';
+import { PaymentProofs } from '../src/modules/payments/application/payment-proofs';
+import { PaymentProofUploads } from '../src/modules/payments/application/payment-proof-uploads';
+import { InMemoryFileStorage } from '../src/shared/storage/__fixtures__/in-memory-file-storage';
 import { PaymentMethodGate } from '../src/modules/payments/application/payment-method-gate';
 import { PrismaPaymentMethodRepository } from '../src/modules/payment-methods/infrastructure/prisma-payment-method.repository';
 import {
@@ -36,9 +41,10 @@ import { GetPlanBalanceUseCase } from '../src/modules/payments/application/use-c
 import type { ConvertAmountUseCase } from '../src/modules/exchange/application/use-cases/convert-amount.use-case';
 import type { CurrencyWhitelist } from '../src/modules/treatment-plans/domain/ports/currency-whitelist.port';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 
 // DX-109, contra Postgres y bajo RLS (rol dentalix_app vía runWithTenant):
 //  1. abono sobre plan no cobrable → 409, con el estado leído en el SELECT
@@ -66,6 +72,7 @@ const updatePlan = new UpdateTreatmentPlanUseCase(
   planRepo,
   whitelist,
   () => NOW,
+  testDiscountPolicy(),
 );
 const rejectPlan = new RejectTreatmentPlanUseCase(planRepo, () => NOW);
 const noCatalog = {
@@ -123,6 +130,11 @@ const recordPayment = new RecordPaymentUseCase(
   new PaymentMethodGate(
     new PrismaPaymentMethodRepository(prisma, tenantContext),
     paymentRepo,
+    referenceCurrencyDigitsCatalog(),
+  ),
+  new PaymentProofs(
+    new PaymentProofUploads(new InMemoryFileStorage(), tenantContext, 900),
+    paymentRepo,
   ),
   () => NOW,
 );
@@ -143,30 +155,9 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
     tenantContext.run(tenantId, undefined, fn);
 
   async function purge(): Promise<void> {
-    const tenants = await owner.tenant.findMany({
-      where: { subdomain: SUBDOMAIN },
-      select: { id: true },
-    });
-    const where = { tenantId: { in: tenants.map((t) => t.id) } };
-    // DX-051: los abonos por repositorio dejan base, imputaciones e historial
-    // (borrar las imputaciones deja su movimiento: van antes).
-    await owner.paymentAllocation.deleteMany({ where });
-    await owner.paymentAllocationMovement.deleteMany({ where });
-    await owner.paymentPlanAmount.deleteMany({ where });
-    await owner.payment.deleteMany({ where });
-    await owner.toothRecord.deleteMany({ where });
-    await owner.installment.deleteMany({ where });
-    await owner.paymentPlan.deleteMany({ where });
-    await owner.treatmentPlanAcceptance.deleteMany({ where });
-    await owner.treatmentPlanItem.deleteMany({ where });
-    await owner.treatmentPlan.deleteMany({ where });
-    await owner.dentalCatalogItem.deleteMany({ where });
-    await owner.patient.deleteMany({ where });
-    await owner.clinicMembership.deleteMany({ where });
-    await owner.location.deleteMany({ where });
-    await owner.tenant.deleteMany({
-      where: { id: { in: tenants.map((t) => t.id) } },
-    });
+    // Todas las tablas de clínica (también los tipos de recall que el DONE
+    // siembra si la clínica no tiene: DX-015-bis), en orden de FKs.
+    await purgeTenantsBySubdomain(owner, [SUBDOMAIN]);
     await owner.user.deleteMany({
       where: { email: `${SUBDOMAIN}@example.com` },
     });
@@ -245,7 +236,10 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
     });
     locationId = (
       await owner.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+          tenantId,
+          name: 'Sede',
+        }),
       })
     ).id;
     patientId = (
@@ -382,7 +376,12 @@ describe('DX-109 · reglas de cobro contra Postgres (int)', () => {
             signature: `data:image/png;base64,${PNG}`,
             contentHash: quote.contentHash,
           },
-          { acceptedById: userId, ipAddress: null, userAgent: null },
+          {
+            acceptedById: userId,
+            role: ClinicRole.DENTIST,
+            ipAddress: null,
+            userAgent: null,
+          },
         ),
       );
 

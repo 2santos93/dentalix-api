@@ -3,7 +3,6 @@ import {
   Controller,
   HttpCode,
   Logger,
-  NotFoundException,
   Post,
   Req,
   UseInterceptors,
@@ -23,8 +22,8 @@ import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.
 import { currentRequestId } from '../../../shared/observability/request-context';
 import { RequestPasswordResetUseCase } from '../application/use-cases/request-password-reset.use-case';
 import {
-  RESET_TOKEN_MESSAGES,
   ResetPasswordUseCase,
+  resetTokenError,
 } from '../application/use-cases/reset-password.use-case';
 import {
   ForgotPasswordDto,
@@ -32,7 +31,10 @@ import {
   PasswordResetTokenDto,
   PasswordResetTokenStatusDto,
   ResetPasswordDto,
+  ResetTokenGoneErrorDto,
+  ResetTokenNotFoundErrorDto,
 } from './dto/password-reset.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 export const FORGOT_PASSWORD_MESSAGE =
   'Si el correo pertenece a una cuenta de esta clínica, te enviamos un enlace para restablecer la contraseña. Revisa también la carpeta de spam.';
@@ -51,7 +53,7 @@ function header(req: PublicRequest, name: string): string | null {
  * balde por ruta.
  */
 @ApiTags('auth')
-@UseInterceptors(PublicTenantContextInterceptor)
+@UseInterceptors(NoStoreHeadersInterceptor, PublicTenantContextInterceptor)
 @RateLimit('password-reset')
 @Controller('auth')
 export class PasswordResetController {
@@ -124,14 +126,25 @@ export class PasswordResetController {
   @Post('reset-password')
   @HttpCode(204)
   @ApiNoContentResponse({ description: 'Contraseña restablecida.' })
-  @ApiNotFoundResponse({ description: 'Enlace inexistente o reemplazado.' })
-  @ApiGoneResponse({ description: 'Enlace caducado o ya usado.' })
+  @ApiNotFoundResponse({
+    type: ResetTokenNotFoundErrorDto,
+    description:
+      'Enlace inexistente, reemplazado por uno más reciente, invalidado por un ' +
+      'cambio de contraseña o de otra clínica (`code` RESET_TOKEN_INVALID; ' +
+      'mismo cuerpo en todos los casos).',
+  })
+  @ApiGoneResponse({
+    type: ResetTokenGoneErrorDto,
+    description:
+      'Enlace caducado (`code` RESET_TOKEN_EXPIRED) o ya usado ' +
+      '(`code` RESET_TOKEN_USED).',
+  })
   async reset(
     @Req() req: PublicRequest,
     @Body() dto: ResetPasswordDto,
   ): Promise<void> {
     const tenantId = req.tenantHost?.tenantId;
-    if (!tenantId) throw new NotFoundException(RESET_TOKEN_MESSAGES.INVALID);
+    if (!tenantId) throw resetTokenError('INVALID');
     await this.resetPassword.execute({
       tenantId,
       token: dto.token,

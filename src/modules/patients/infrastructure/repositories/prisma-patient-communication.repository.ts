@@ -18,7 +18,9 @@ import {
 import {
   loadNoticeSettings,
   loadNoticeResponsibles,
+  loadMajorityReview,
 } from '../notices/notice-context';
+import { defaultPhoneRegionIn, reconcilePatientPhoneE164 } from '../phone-e164';
 
 const SELECT = {
   id: true,
@@ -34,6 +36,7 @@ const SELECT = {
   whatsappOptInById: true,
   reminderOptOutAt: true,
   reminderOptOutSource: true,
+  preferredLanguage: true,
 } as const satisfies Prisma.PatientSelect;
 
 type Row = Prisma.PatientGetPayload<{ select: typeof SELECT }>;
@@ -56,26 +59,35 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
     const { whatsappOptInById, id, ...rest } = row;
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) throw new Error('No tenant in context');
-    const [membership, responsibles, noticeSettings] = await Promise.all([
-      whatsappOptInById
-        ? tx.clinicMembership.findFirst({
-            where: { userId: whatsappOptInById },
-            orderBy: { createdAt: 'desc' },
-            select: { user: { select: { fullName: true } } },
-          })
-        : null,
-      loadNoticeResponsibles(tx, id),
-      loadNoticeSettings(
-        tx,
-        tenantId,
-        this.tenantContext.getLocationId() ?? null,
-      ),
-    ]);
+    const [membership, responsibles, majorityReview, noticeSettings, clinic] =
+      await Promise.all([
+        whatsappOptInById
+          ? tx.clinicMembership.findFirst({
+              where: { userId: whatsappOptInById },
+              orderBy: { createdAt: 'desc' },
+              select: { user: { select: { fullName: true } } },
+            })
+          : null,
+        loadNoticeResponsibles(tx, id),
+        loadMajorityReview(tx, id),
+        loadNoticeSettings(
+          tx,
+          tenantId,
+          this.tenantContext.getLocationId() ?? null,
+        ),
+        // DX-497: `tenants` no tiene RLS: por el id del contexto.
+        tx.tenant.findUniqueOrThrow({
+          where: { id: tenantId },
+          select: { patientLanguages: true },
+        }),
+      ]);
     return {
       patientId: id,
       ...rest,
       responsibles,
+      majorityReview,
       noticeSettings,
+      patientLanguages: clinic.patientLanguages,
       whatsappOptInBy: whatsappOptInById
         ? {
             id: whatsappOptInById,
@@ -168,6 +180,14 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
           select: SELECT,
         });
         state = await this.toState(tx, saved);
+        if (changedFields.includes('phone')) {
+          // DX-224: el trigger anuló el E.164 viejo; se escribe el nuevo.
+          await reconcilePatientPhoneE164(
+            tx,
+            [patientId],
+            await defaultPhoneRegionIn(tx, this.tenantContext.getLocationId()),
+          );
+        }
       }
       // Se invalida incluso con preferencias iguales; no crea una falsa escritura de paciente.
       if (invalidateOptOutLinksAt) {
@@ -176,7 +196,7 @@ export class PrismaPatientCommunicationRepository implements PatientCommunicatio
           data: { usedAt: invalidateOptOutLinksAt },
         });
       }
-      return { state, changedFields };
+      return { state, previous: current, changedFields };
     });
   }
 }

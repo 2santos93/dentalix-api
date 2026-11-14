@@ -15,12 +15,14 @@ import {
   type PaymentAllocationsSnapshot,
   type PlanAllocationRepository,
 } from '../../domain/ports/plan-allocation-repository.port';
-import { fromCents } from '../../../../shared/money/money';
+import { fromCents, toCents } from '../../../../shared/money/money';
 
 /** La imputación de un abono (spec §5.2 `PaymentAllocationsDto`). */
 export interface PaymentAllocationsView {
   paymentId: string;
   receiptNumber: string | null;
+  /** Sede del abono (DX-354c). */
+  locationId: string;
   treatmentPlanId: string;
   paymentAmount: number;
   paymentCurrency: string;
@@ -35,6 +37,10 @@ export interface PaymentAllocationsView {
   manual: boolean;
   allocated: number;
   unallocated: number | null;
+  /** DX-399: de lo sin imputar, lo devuelto o traspasado del saldo a favor del plan. */
+  creditOut: number;
+  /** DX-399: a cuenta neto: `unallocated − creditOut` (null sin tasa). Es la cifra del informe. */
+  onAccount: number | null;
   version: string;
   allocations: {
     treatmentPlanItemId: string;
@@ -48,6 +54,12 @@ export interface PaymentAllocationsView {
     status: 'ACCEPTED' | 'DONE';
     billable: number;
     paidByOthers: number;
+    /**
+     * DX-399-quater: lo que le cubre el saldo recibido por traspaso (después
+     * de todos los abonos). Solo si es > 0. No resta de `free`: un abono
+     * imputado al ítem lo desplaza y lo recibido vuelve a quedar a cuenta.
+     */
+    paidByTransfersIn?: number;
     free: number;
   }[];
 }
@@ -77,8 +89,7 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
     throw new ConflictException(ALLOCATION_MIGRATED_BALANCE);
   }
   const manual = target.base?.manual ?? false;
-  const baseCents =
-    target.base === null ? null : Math.round(target.base.amount * 100);
+  const baseCents = target.base === null ? null : toCents(target.base.amount);
   const allocatedCents = lines.reduce((sum, l) => sum + l.cents, 0);
   // Las líneas en el orden de los ítems del plan; una línea en un ítem que
   // ya no es imputable (liberación en curso) va al final.
@@ -92,6 +103,7 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
   return {
     paymentId: target.paymentId,
     receiptNumber: target.receiptNumber,
+    locationId: target.locationId,
     treatmentPlanId: target.treatmentPlanId,
     paymentAmount: target.amount,
     paymentCurrency: target.currency,
@@ -103,6 +115,11 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
     allocated: fromCents(allocatedCents),
     unallocated:
       baseCents === null ? null : fromCents(baseCents - allocatedCents),
+    creditOut: fromCents(snapshot.creditOutCents),
+    onAccount:
+      baseCents === null
+        ? null
+        : fromCents(baseCents - allocatedCents - snapshot.creditOutCents),
     version: allocationVersion({ manual, lines }),
     allocations: ordered.map((l) => ({
       treatmentPlanItemId: l.itemId,
@@ -116,6 +133,9 @@ function toView(snapshot: PaymentAllocationsSnapshot): PaymentAllocationsView {
       status: item.status,
       billable: fromCents(item.billableCents),
       paidByOthers: fromCents(item.paidByOthersCents),
+      ...(item.paidByTransfersInCents
+        ? { paidByTransfersIn: fromCents(item.paidByTransfersInCents) }
+        : {}),
       free: fromCents(Math.max(0, item.billableCents - item.paidByOthersCents)),
     })),
   };

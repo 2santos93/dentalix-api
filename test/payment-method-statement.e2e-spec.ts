@@ -16,8 +16,8 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { civilDateIn, zonedStartOfDay } from '../src/shared/time/civil-day';
-import { sedeTodayFixture } from './support/sede-clock';
+import { civilDateIn } from '../src/shared/time/civil-day';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-395 en HTTP real: el estado de cuenta nombra el medio de la clínica y la
 // referencia de cada abono (también el de una réplica anterior sin medio); la
@@ -28,12 +28,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
-// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
-// «hoy» de los abonos y el de la API no se separan si la corrida cruza la
-// medianoche de Bogotá.
-const SEDE = sedeTodayFixture();
-const TODAY = civilDateIn(new Date(), SEDE.timeZone);
+const ZONE = 'America/Caracas';
+const TODAY = civilDateIn(new Date(), ZONE);
 
 interface MethodBody {
   id: string;
@@ -116,6 +112,9 @@ describe('Medio y referencia en estado de cuenta y caja (e2e, DX-395)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({
@@ -154,8 +153,8 @@ describe('Medio y referencia en estado de cuenta y caja (e2e, DX-395)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    a = await registerClinic(app, 'dx395-a', SEDE);
-    b = await registerClinic(app, 'dx395-b', SEDE);
+    a = await registerClinic(app, 'dx395-a');
+    b = await registerClinic(app, 'dx395-b');
     receptionA = await loginAs(
       app,
       a.host,
@@ -224,10 +223,7 @@ describe('Medio y referencia en estado de cuenta y caja (e2e, DX-395)', () => {
         patientId: plan.patientId,
         amount: 5,
         currency: 'USD',
-        // Mediodía de hoy en la sede.
-        paidAt: new Date(
-          zonedStartOfDay(TODAY, SEDE.timeZone).getTime() + 12 * 60 * 60_000,
-        ),
+        paidAt: new Date(`${TODAY}T17:00:00.000Z`),
         method: 'CASH',
       },
     });
@@ -357,11 +353,16 @@ describe('Medio y referencia en estado de cuenta y caja (e2e, DX-395)', () => {
       .trim()
       .split('\r\n');
     expect(lines[0]).toBe(
-      'Fecha,Sede,Paciente,Destino,Medio,Referencia,Moneda,Importe',
+      // DX-516: las columnas de los ajustes van al final.
+      'Fecha,Sede,Paciente,Destino,Medio,Referencia,Factura externa,Moneda,Importe,Impuestos,Recargos,Descuentos,Total cobrado,Detalle de ajustes',
     );
     expect(lines).toHaveLength(3);
-    expect(res.text).toContain('"Pago móvil","ABC 123",USD,10.00');
-    expect(res.text).toContain('"Pago móvil","123-456",USD,10.00');
+    expect(res.text).toContain(
+      '"Pago móvil","ABC 123","",USD,10.00,,,,10.00,""',
+    );
+    expect(res.text).toContain(
+      '"Pago móvil","123-456","",USD,10.00,,,,10.00,""',
+    );
 
     const audit = await raw.auditEvent.findFirst({
       where: {

@@ -13,6 +13,7 @@ import {
   makeManualRates,
   makeSettings,
 } from '../../exchange/application/__fixtures__/in-memory-exchange-settings';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 
 const DAY = '2026-10-30';
@@ -46,9 +47,9 @@ function liveConverter(rateUsed: number): {
   };
 }
 
-const cop = (over: Partial<Parameters<typeof paymentAmountIn>[1]> = {}) => ({
+const gbp = (over: Partial<Parameters<typeof paymentAmountIn>[1]> = {}) => ({
   amount: 200000,
-  currency: 'COP',
+  currency: 'GBP',
   paidOn: DAY,
   exchangeRateCurrency: 'USD',
   frozenRate: FROZEN_AUTO,
@@ -67,15 +68,15 @@ describe('tasa congelada de un abono (DX-375)', () => {
       ).toBe('NOT_NEEDED');
     });
     it('con tasa congelada', () => {
-      expect(exchangeRateStatus(cop())).toBe('FROZEN');
+      expect(exchangeRateStatus(gbp())).toBe('FROZEN');
     });
     it('nuevo sin tasa: «sin tasa»', () => {
-      expect(exchangeRateStatus(cop({ frozenRate: null }))).toBe('MISSING');
+      expect(exchangeRateStatus(gbp({ frozenRate: null }))).toBe('MISSING');
     });
     it('anterior a DX-375 sin congelar: LEGACY', () => {
       expect(
         exchangeRateStatus(
-          cop({ exchangeRateCurrency: null, frozenRate: null }),
+          gbp({ exchangeRateCurrency: null, frozenRate: null }),
         ),
       ).toBe('LEGACY');
     });
@@ -84,13 +85,13 @@ describe('tasa congelada de un abono (DX-375)', () => {
   describe('paymentAmountIn', () => {
     it('usa la tasa congelada y nunca la del día', async () => {
       await expect(
-        paymentAmountIn(noLiveConverter(), cop(), 'USD'),
+        paymentAmountIn(noLiveConverter(), gbp(), 'USD'),
       ).resolves.toBe(50);
     });
 
     it('cambiar la tasa después no altera el importe: manda la congelada', async () => {
       const { convert, execute } = liveConverter(1 / 5000);
-      await expect(paymentAmountIn(convert, cop(), 'USD')).resolves.toBe(50);
+      await expect(paymentAmountIn(convert, gbp(), 'USD')).resolves.toBe(50);
       expect(execute).not.toHaveBeenCalled();
     });
 
@@ -98,7 +99,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
       await expect(
         paymentAmountIn(
           noLiveConverter(),
-          cop({
+          gbp({
             exchangeRateCurrency: 'EUR',
             frozenRate: { ...FROZEN_AUTO, currency: 'EUR', toPerBase: 0.9 },
           }),
@@ -111,7 +112,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
       await expect(
         paymentAmountIn(
           noLiveConverter(),
-          cop({
+          gbp({
             exchangeRateCurrency: 'EUR',
             frozenRate: { ...FROZEN_AUTO, currency: 'EUR', toPerBase: 0.9 },
           }),
@@ -122,14 +123,14 @@ describe('tasa congelada de un abono (DX-375)', () => {
 
     it('en su propia moneda, el importe tal cual', async () => {
       await expect(
-        paymentAmountIn(noLiveConverter(), cop(), 'COP'),
+        paymentAmountIn(noLiveConverter(), gbp(), 'GBP'),
       ).resolves.toBe(200000);
     });
 
     it('sin tasa (nuevo) devuelve null y no convierte en vivo', async () => {
       const { convert, execute } = liveConverter(1 / 4000);
       await expect(
-        paymentAmountIn(convert, cop({ frozenRate: null }), 'USD'),
+        paymentAmountIn(convert, gbp({ frozenRate: null }), 'USD'),
       ).resolves.toBeNull();
       expect(execute).not.toHaveBeenCalled();
     });
@@ -139,13 +140,13 @@ describe('tasa congelada de un abono (DX-375)', () => {
       await expect(
         paymentAmountIn(
           convert,
-          cop({ exchangeRateCurrency: null, frozenRate: null }),
+          gbp({ exchangeRateCurrency: null, frozenRate: null }),
           'USD',
         ),
       ).resolves.toBe(50);
       expect(execute).toHaveBeenCalledWith({
         amount: 200000,
-        from: 'COP',
+        from: 'GBP',
         to: 'USD',
         date: DAY,
       });
@@ -154,13 +155,13 @@ describe('tasa congelada de un abono (DX-375)', () => {
     it('anterior sin tasa de su día: null', async () => {
       const convert: AmountConverter = {
         execute: () =>
-          Promise.reject(new BadRequestException('unsupported currency: COP')),
+          Promise.reject(new BadRequestException('unsupported currency: GBP')),
         quote: () => Promise.reject(new Error('no')),
       };
       await expect(
         paymentAmountIn(
           convert,
-          cop({ exchangeRateCurrency: null, frozenRate: null }),
+          gbp({ exchangeRateCurrency: null, frozenRate: null }),
           'USD',
         ),
       ).resolves.toBeNull();
@@ -173,6 +174,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         from: 'VES',
         to: 'EUR',
         date: DAY,
+        rateDate: DAY,
         source: 'MANUAL',
         fromPerBase: 40.12345678,
         toPerBase: 0.9,
@@ -193,6 +195,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         toPerBase: 0.9,
         source: 'MANUAL',
         date: DAY,
+        quotedOn: DAY,
       });
       expect(quote).toHaveBeenCalledWith({
         from: 'VES',
@@ -244,16 +247,17 @@ describe('tasa congelada de un abono (DX-375)', () => {
         execute: () => Promise.reject(new Error('no')),
         quote: () =>
           Promise.resolve({
-            from: 'COP',
+            from: 'GBP',
             to: 'USD',
             date: DAY,
+            rateDate: DAY,
             source: 'AUTOMATIC',
             fromPerBase: 3912.123456789,
             toPerBase: 1,
           }),
       };
       const frozen = await freezePaymentRate(convert, {
-        currency: 'COP',
+        currency: 'GBP',
         targetCurrency: 'USD',
         paidOn: DAY,
       });
@@ -271,6 +275,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
             from: 'XAU',
             to: 'USD',
             date: DAY,
+            rateDate: DAY,
             source: 'AUTOMATIC',
             fromPerBase: 0.000000004,
             toPerBase: 1,
@@ -306,10 +311,10 @@ describe('tasa congelada de un abono (DX-375)', () => {
 
     function clinics() {
       const tenantContext = new TenantContextService();
-      const provider: Record<string, number> = { COP: 4000 };
+      const provider: Record<string, number> = { GBP: 4000 };
       const settings = makeSettings({ [B]: 'MANUAL' }, tenantContext);
       const manual = makeManualRates(
-        { [B]: { [DAY]: { COP: 4100 } } },
+        { [B]: { [DAY]: { GBP: 4100 } } },
         tenantContext,
       );
       const convert = new ConvertAmountUseCase(
@@ -338,7 +343,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
       const freezeIn = (tenant: string) =>
         tenantContext.run(tenant, () =>
           freezePaymentRate(convert, {
-            currency: 'COP',
+            currency: 'GBP',
             targetCurrency: 'USD',
             paidOn: DAY,
           }),
@@ -356,6 +361,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         toPerBase: 1,
         source: 'AUTOMATIC',
         date: DAY,
+        quotedOn: DAY,
       });
       expect(b).toEqual({
         currency: 'USD',
@@ -363,6 +369,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         toPerBase: 1,
         source: 'MANUAL',
         date: DAY,
+        quotedOn: DAY,
       });
 
       const amountWith = (tenant: string, frozenRate: FrozenExchangeRate) =>
@@ -371,7 +378,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
             c.convert,
             {
               amount: 410000,
-              currency: 'COP',
+              currency: 'GBP',
               paidOn: DAY,
               exchangeRateCurrency: 'USD',
               frozenRate,
@@ -383,13 +390,133 @@ describe('tasa congelada de un abono (DX-375)', () => {
       await expect(amountWith(B, b!)).resolves.toBe(100);
 
       // Cambian el proveedor, la tasa manual de B y la fuente de A: nada se mueve.
-      c.provider.COP = 5000;
+      c.provider.GBP = 5000;
       c.manual.rows(B)[0].rate = 5100;
       await c.tenantContext.run(A, () =>
-        c.settings.set(() => ({ source: 'MANUAL', manualSince: DAY })),
+        c.settings.set(
+          (before) => ({ ...before, source: 'MANUAL', manualSince: DAY }),
+          {} as AuditRequestContext,
+        ),
       );
       await expect(amountWith(A, a!)).resolves.toBe(102.5);
       await expect(amountWith(B, b!)).resolves.toBe(100);
+    });
+  });
+
+  // DX-384: con tasa manual, el abono de un día sin tasa congela la última
+  // registrada dentro del plazo de la clínica, con su fecha.
+  describe('tasa manual de respaldo hasta N días (DX-384)', () => {
+    const FRI = '2026-10-30';
+    const SAT = '2026-10-31';
+    const T = '55555555-5555-4555-8555-555555555555';
+
+    function clinic(maxAgeDays: number) {
+      const tenantContext = new TenantContextService();
+      const settings = makeSettings(
+        {
+          [T]: {
+            source: 'MANUAL',
+            manualSince: '2026-10-01',
+            manualRateMaxAgeDays: maxAgeDays,
+          },
+        },
+        tenantContext,
+      );
+      const manual = makeManualRates(
+        { [T]: { [FRI]: { VES: 36.5 } } },
+        tenantContext,
+      );
+      const convert = new ConvertAmountUseCase(
+        new GetRatesForDateUseCase(
+          {
+            findByDate: () => Promise.reject(new Error('sin proveedor')),
+            upsertMany: () => Promise.reject(new Error('sin proveedor')),
+          },
+          { fetchRates: () => Promise.reject(new Error('sin proveedor')) },
+          settings,
+          manual,
+          tenantContext,
+        ),
+      );
+      const run = <R>(fn: () => Promise<R>) => tenantContext.run(T, fn);
+      return { manual, convert, run };
+    }
+
+    it('el abono del sábado congela la tasa del viernes con su fecha y el día para el que se cotizó', async () => {
+      const { convert, run } = clinic(3);
+      await expect(
+        run(() =>
+          freezePaymentRate(convert, {
+            currency: 'VES',
+            targetCurrency: 'USD',
+            paidOn: SAT,
+          }),
+        ),
+      ).resolves.toEqual({
+        currency: 'USD',
+        fromPerBase: 36.5,
+        toPerBase: 1,
+        source: 'MANUAL',
+        date: FRI,
+        quotedOn: SAT,
+      });
+    });
+
+    it('registrar después la tasa del sábado no cambia un abono ya congelado', async () => {
+      const { manual, convert, run } = clinic(3);
+      const frozenRate = await run(() =>
+        freezePaymentRate(convert, {
+          currency: 'VES',
+          targetCurrency: 'USD',
+          paidOn: SAT,
+        }),
+      );
+      await run(() =>
+        manual.create({
+          date: SAT,
+          currency: 'VES',
+          rate: 40,
+          createdById: 'admin-1',
+        }),
+      );
+      const amount = () =>
+        run(() =>
+          paymentAmountIn(
+            convert,
+            {
+              amount: 3650,
+              currency: 'VES',
+              paidOn: SAT,
+              exchangeRateCurrency: 'USD',
+              frozenRate,
+            },
+            'USD',
+          ),
+        );
+      await expect(amount()).resolves.toBe(100);
+      // Un abono nuevo del sábado ya usa la del día.
+      await expect(
+        run(() =>
+          freezePaymentRate(convert, {
+            currency: 'VES',
+            targetCurrency: 'USD',
+            paidOn: SAT,
+          }),
+        ),
+      ).resolves.toMatchObject({ fromPerBase: 40, date: SAT });
+    });
+
+    it('con N=0 el abono del sábado queda «sin tasa» (null), nunca 1:1', async () => {
+      const { convert, run } = clinic(0);
+      await expect(
+        run(() =>
+          freezePaymentRate(convert, {
+            currency: 'VES',
+            targetCurrency: 'USD',
+            paidOn: SAT,
+          }),
+        ),
+      ).resolves.toBeNull();
     });
   });
 });

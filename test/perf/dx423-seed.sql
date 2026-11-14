@@ -1,7 +1,7 @@
 -- DX-423 · siembra del benchmark de «Producción por procedimiento» (NO es parte
 -- de la suite; ver docs/perf/DX-423.md). Corre como owner en una base
 -- DESECHABLE ya migrada (con la siembra de referencia: monedas). Determinista.
---   Tenant "bench-produccion": 5 sedes (Bogotá), 20 profesionales, 20.000
+--   Tenant "bench-produccion": 5 sedes, 20 profesionales, 20.000
 --   pacientes, 60 procedimientos en 8 categorías y 24 MESES (2024-11-01 →
 --   2026-10-31) con 200.000 ítems REALIZADOS (1 de cada 10 en USD, 1 de cada 5
 --   con descuento, catálogo congelado), más 20.000 propuestos/aceptados, 2.000
@@ -25,11 +25,11 @@ INSERT INTO tenants (id, name, subdomain, "updatedAt") VALUES
   ('00000000-0000-4000-a000-000000000423', 'Bench producción', 'bench-produccion', now()),
   ('00000000-0000-4000-a000-000000000424', 'Bench ruido', 'bench-ruido', now());
 
--- G1: dato de bench (REGIONAL_BOGOTA_FIXTURE), no un default del producto.
+-- G1: dato de bench (REGIONAL_CARACAS_FIXTURE), no un default del producto.
 INSERT INTO locations (id, "tenantId", name, country, currency, "timeZone", locale, "createdAt", "updatedAt")
 SELECT md5('dx423-loc:' || t || ':' || s)::uuid,
        ('00000000-0000-4000-a000-00000000042' || t)::uuid, 'Sede ' || s,
-       'CO', 'COP', 'America/Bogota', 'es-CO',
+       'VE', 'VES', 'America/Caracas', 'es-VE',
        timestamp '2024-01-01' + s * interval '1 minute', now()
   FROM generate_series(3, 4) AS t, generate_series(1, 5) AS s;
 
@@ -62,7 +62,7 @@ INSERT INTO treatment_plans (id, "tenantId", "patientId", status, currency, "upd
 SELECT md5('dx423-plan:' || t || ':' || n)::uuid,
        ('00000000-0000-4000-a000-00000000042' || t)::uuid,
        md5('dx423-patient:' || t || ':' || (n % 20000))::uuid, 'ACCEPTED',
-       CASE WHEN n % 10 = 0 THEN 'USD' ELSE 'COP' END, now()
+       CASE WHEN n % 10 = 0 THEN 'USD' ELSE 'VES' END, now()
   FROM generate_series(3, 4) AS t,
        generate_series(0, 111999) AS n
  WHERE t = 3 OR n < 25000;

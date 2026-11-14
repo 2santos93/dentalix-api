@@ -16,6 +16,7 @@ function target(over: Partial<AllocationTarget> = {}): AllocationTarget {
   return {
     paymentId: 'pay-1',
     receiptNumber: 'NOR-000123',
+    locationId: 'loc-1',
     treatmentPlanId: 'plan-1',
     amount: 100,
     currency: 'USD',
@@ -29,7 +30,13 @@ function target(over: Partial<AllocationTarget> = {}): AllocationTarget {
   };
 }
 
-function makeUseCase(snapshot: PaymentAllocationsSnapshot | null) {
+function makeUseCase(
+  input:
+    | (Omit<PaymentAllocationsSnapshot, 'creditOutCents'> &
+        Partial<Pick<PaymentAllocationsSnapshot, 'creditOutCents'>>)
+    | null,
+) {
+  const snapshot = input && { creditOutCents: 0, ...input };
   const repo = {
     readPaymentAllocations: jest.fn().mockResolvedValue(snapshot),
   };
@@ -40,6 +47,55 @@ function makeUseCase(snapshot: PaymentAllocationsSnapshot | null) {
 }
 
 describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
+  it('DX-399: onAccount es lo sin imputar menos lo devuelto o traspasado', async () => {
+    const { uc } = makeUseCase({
+      target: target(),
+      lines: [{ itemId: 'item-a', cents: 5050, source: 'AUTO' }],
+      items: [],
+      creditOutCents: 1000,
+    });
+    const view = await uc.execute('pay-1');
+    expect(view).toMatchObject({
+      allocated: 50.5,
+      unallocated: 39.5,
+      creditOut: 10,
+      onAccount: 29.5,
+    });
+  });
+
+  it('DX-399-quater: cada ítem dice lo que le cubre lo recibido por traspaso; lo que este abono puede imputarle no cambia (los abonos van primero)', async () => {
+    const { uc } = makeUseCase({
+      target: target(),
+      lines: [{ itemId: 'item-a', cents: 3000, source: 'AUTO' }],
+      items: [
+        {
+          id: 'item-a',
+          toothNumber: '11',
+          procedureName: 'Resina',
+          status: 'ACCEPTED',
+          billableCents: 6000,
+          paidByOthersCents: 0,
+          paidByTransfersInCents: 3000,
+        },
+        {
+          id: 'item-b',
+          toothNumber: '12',
+          procedureName: 'Corona',
+          status: 'ACCEPTED',
+          billableCents: 7000,
+          paidByOthersCents: 7000,
+        },
+      ],
+    });
+    const view = await uc.execute('pay-1');
+    expect(view.items[0]).toMatchObject({
+      paidByOthers: 0,
+      paidByTransfersIn: 30,
+      free: 60,
+    });
+    expect(view.items[1]).not.toHaveProperty('paidByTransfersIn');
+  });
+
   it('404 for a voided, missing or foreign payment', async () => {
     const { uc } = makeUseCase(null);
     const error = await uc.execute('pay-1').catch((e: unknown) => e);
@@ -95,6 +151,7 @@ describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
     expect(view).toEqual({
       paymentId: 'pay-1',
       receiptNumber: 'NOR-000123',
+      locationId: 'loc-1',
       treatmentPlanId: 'plan-1',
       paymentAmount: 100,
       paymentCurrency: 'USD',
@@ -105,6 +162,8 @@ describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
       manual: false,
       allocated: 70.5,
       unallocated: 19.5,
+      creditOut: 0,
+      onAccount: 19.5,
       version: allocationVersion({
         manual: false,
         lines: [
@@ -154,6 +213,8 @@ describe('GetPaymentAllocationsUseCase (DX-051, spec §5.2)', () => {
       manual: false,
       allocated: 0,
       unallocated: null,
+      creditOut: 0,
+      onAccount: null,
       version: allocationVersion({ manual: false, lines: [] }),
     });
   });

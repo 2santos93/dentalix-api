@@ -33,7 +33,7 @@ export class InMemoryOpeningCandidatesRepository implements OpeningCandidatesRep
     const patient: CandidatePatient = {
       firstName: over.id,
       lastName: 'Paciente',
-      phone: '3101234567',
+      phone: '4141234567',
       contactChannel: 'WHATSAPP',
       reminderOptOutAt: null,
       whatsappOptInAt: new Date('2026-01-10T15:00:00Z'),

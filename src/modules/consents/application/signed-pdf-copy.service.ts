@@ -1,7 +1,6 @@
 import {
   ConflictException,
   GoneException,
-  HttpException,
   HttpStatus,
   Inject,
   Injectable,
@@ -9,6 +8,7 @@ import {
   NotFoundException,
   type OnModuleInit,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import {
   FILE_STORAGE,
@@ -21,9 +21,12 @@ import type { AuditRequestMeta } from '../../audit/domain/audit-request-context'
 import { JobQueue } from '../../jobs/application/job-queue.service';
 import { JobRegistry } from '../../jobs/application/job-registry';
 import type { JobPayload } from '../../jobs/domain/job';
-import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
+import {
+  EmailOutbox,
+  type PreparedEmail,
+} from '../../notifications/email/application/email-outbox.service';
 import type { SignedConsentCopyEmailVars } from '../../notifications/email/domain/email-message';
-import { EmailQuotaExceededError } from '../../notifications/email/domain/email-quota-exceeded.error';
+import { withEmailQuotaAs429 } from '../../notifications/email/application/email-quota-http';
 import {
   SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY,
   SIGNED_PDF_COPY_REPOSITORY,
@@ -89,11 +92,27 @@ export const SIGNED_PDF_COPY_EMAIL_SENDER = Symbol(
 export interface SignedPdfCopyEmailSender {
   /** Topes del outbox por destinatario y clínica (solo el reenvío manual). */
   assertCanSend(to: string): Promise<void>;
-  send(input: {
-    to: string;
-    referenceId: string;
-    vars: SignedConsentCopyEmailVars;
-  }): Promise<void>;
+  /**
+   * DX-463: deja el email listo para encolarlo DENTRO de la transacción que
+   * crea el enlace (outbox transaccional): `insert(tx)` dentro, `kick()`
+   * después del COMMIT.
+   */
+  prepare(
+    input: {
+      to: string;
+      referenceId: string;
+      vars: SignedConsentCopyEmailVars;
+    },
+    options?: {
+      /**
+       * DX-149-ter: el tope se cuenta al insertar, bajo el candado de la
+       * clínica y del destinatario (solo el reenvío manual; el envío
+       * automático tras archivar no lo lleva). Si no cabe, `insert` lanza el
+       * 429 en español y la transacción se deshace: el enlace anterior sigue.
+       */
+      enforceQuota?: boolean;
+    },
+  ): Promise<PreparedEmail>;
 }
 
 function tenantIdOf(tenantContext: Pick<TenantContextService, 'getTenantId'>) {
@@ -110,37 +129,36 @@ export class OutboxSignedPdfCopyEmailSender implements SignedPdfCopyEmailSender 
     private readonly tenantContext: TenantContextService,
   ) {}
 
-  async assertCanSend(to: string): Promise<void> {
-    try {
-      await this.outbox.assertWithinQuota(tenantIdOf(this.tenantContext), to);
-    } catch (err) {
-      if (err instanceof EmailQuotaExceededError) {
-        throw new HttpException(
-          {
-            statusCode: HttpStatus.TOO_MANY_REQUESTS,
-            error: 'Too Many Requests',
-            message: err.message,
-            retryAfterSeconds: err.retryAfterSeconds,
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      throw err;
-    }
+  assertCanSend(to: string): Promise<void> {
+    return withEmailQuotaAs429(() =>
+      this.outbox.assertWithinQuota(
+        tenantIdOf(this.tenantContext),
+        to,
+        'signed-consent-copy',
+      ),
+    );
   }
 
-  async send(input: {
-    to: string;
-    referenceId: string;
-    vars: SignedConsentCopyEmailVars;
-  }): Promise<void> {
-    await this.outbox.enqueue({
+  async prepare(
+    input: {
+      to: string;
+      referenceId: string;
+      vars: SignedConsentCopyEmailVars;
+    },
+    options: { enforceQuota?: boolean } = {},
+  ): Promise<PreparedEmail> {
+    const mail = await this.outbox.prepareInTx({
       tenantId: tenantIdOf(this.tenantContext),
       to: input.to,
       template: 'signed-consent-copy',
       vars: input.vars,
       referenceId: input.referenceId,
+      enforceQuota: options.enforceQuota === true,
     });
+    return {
+      insert: (tx) => withEmailQuotaAs429(() => mail.insert(tx)),
+      kick: () => mail.kick(),
+    };
   }
 }
 
@@ -160,7 +178,7 @@ export class SignedPdfCopySender {
     @Inject(SIGNED_PDF_COPY_REPOSITORY)
     private readonly repo: Pick<SignedPdfCopyRepository, 'issueLink'>,
     @Inject(SIGNED_PDF_COPY_EMAIL_SENDER)
-    private readonly email: Pick<SignedPdfCopyEmailSender, 'send'>,
+    private readonly email: Pick<SignedPdfCopyEmailSender, 'prepare'>,
     @Inject(TenantLinkBaseService)
     private readonly linkBase: Pick<TenantLinkBaseService, 'forTenant'>,
     @Inject(TenantContextService)
@@ -174,6 +192,8 @@ export class SignedPdfCopySender {
     target: SignedPdfCopyTarget,
     createdById: string | null,
     requestHost?: string,
+    /** DX-149-ter: el reenvío manual cuenta el tope bajo candado. */
+    options: { enforceQuota?: boolean } = {},
   ): Promise<{ sentAt: Date; expiresAt: Date } | null> {
     const tenantId = tenantIdOf(this.tenantContext);
     const base = await this.linkBase.forTenant(tenantId, requestHost);
@@ -184,28 +204,41 @@ export class SignedPdfCopySender {
     const now = this.clock();
     const expiresAt = signedPdfCopyExpiresAt(now, this.config.ttlHours);
     const token = generateSignedPdfCopyToken();
-    const link = await this.repo.issueLink({
+    // DX-463: el enlace nuevo, la revocación del anterior y el email entran en
+    // UNA transacción. Si encolar falla, el enlace anterior sigue válido (el
+    // paciente nunca se queda sin enlace); el despachador se despierta tras el
+    // COMMIT.
+    const linkId = randomUUID();
+    const mail = await this.email.prepare(
+      {
+        to: target.destination,
+        referenceId: linkId,
+        vars: {
+          recipientFirstName: firstName(target.signerName),
+          patientFirstName:
+            target.signerType === 'GUARDIAN'
+              ? firstName(target.patientFirstName)
+              : null,
+          clinicName: target.clinicName,
+          url: buildSignedPdfCopyUrl(base, token),
+          expiresAtLabel: format.longDateTime(expiresAt, timeZone),
+        },
+      },
+      { enforceQuota: options.enforceQuota === true },
+    );
+    await this.repo.issueLink({
+      id: linkId,
       consentId: target.consentId,
       patientId: target.patientId,
       tokenHash: hashSignedPdfCopyToken(token),
       expiresAt,
       createdById,
       now,
-    });
-    await this.email.send({
-      to: target.destination,
-      referenceId: link.id,
-      vars: {
-        recipientFirstName: firstName(target.signerName),
-        patientFirstName:
-          target.signerType === 'GUARDIAN'
-            ? firstName(target.patientFirstName)
-            : null,
-        clinicName: target.clinicName,
-        url: buildSignedPdfCopyUrl(base, token),
-        expiresAtLabel: format.longDateTime(expiresAt, timeZone),
+      enqueue: async (tx) => {
+        await mail.insert(tx);
       },
     });
+    mail.kick();
     return { sentAt: now, expiresAt };
   }
 }
@@ -257,7 +290,8 @@ export interface SignedPdfCopyResent {
  * en la misma transacción) y email. 404 si el consentimiento no es de este
  * paciente en esta clínica; 403 si su envío es de una sede no permitida al
  * usuario; 409 si el PDF no está archivado; 429 con el tope
- * del outbox ANTES de tocar nada.
+ * del outbox ANTES de tocar nada (y, DX-149-ter, también si otro reenvío a la
+ * vez lo alcanza: contado bajo candado al encolar, sin dejar nada a medias).
  */
 @Injectable()
 export class ResendSignedPdfCopyUseCase {
@@ -290,7 +324,11 @@ export class ResendSignedPdfCopyUseCase {
       throw new ConflictException(SIGNED_PDF_COPY_NOT_READY_MESSAGE);
     }
     await this.email.assertCanSend(target.destination);
-    const sent = await this.sender.send(target, userId, requestHost);
+    // DX-149-ter: el aviso temprano no frena dos reenvíos a la vez; el tope
+    // contado bajo candado al encolar, sí (429 y el enlace anterior sigue).
+    const sent = await this.sender.send(target, userId, requestHost, {
+      enforceQuota: true,
+    });
     if (!sent)
       throw new ConflictException(SIGNED_PDF_COPY_NO_LINK_HOST_MESSAGE);
     return { ...sent, destinationMasked: target.destinationMasked };
@@ -405,21 +443,30 @@ export class DownloadSignedPdfCopyUseCase {
       now,
     );
     if (state === 'USED') throw linkUsed();
-    const outcome = await this.repo.consumeLink(link.id, now, meta);
+    // DX-463: la URL firmada se genera ANTES del COMMIT del gasto: si falla,
+    // el enlace no se gasta (ni se audita la descarga) y se puede reintentar.
+    let url = '';
+    const outcome = await this.repo.consumeLink(
+      link.id,
+      now,
+      meta,
+      async (pdf) => {
+        url = await this.storage.getSignedUrl(
+          pdf.storageKey,
+          SIGNED_PDF_COPY_DOWNLOAD_TTL_SECONDS,
+          {
+            disposition: 'attachment',
+            filename: pdf.originalName,
+            contentType: pdf.mimeType,
+          },
+        );
+      },
+    );
     if (outcome.kind === 'USED') throw linkUsed();
     if (outcome.kind === 'GONE') {
       throw new NotFoundException(SIGNED_PDF_COPY_NOT_FOUND_MESSAGE);
     }
     const { download } = outcome;
-    const url = await this.storage.getSignedUrl(
-      download.storageKey,
-      SIGNED_PDF_COPY_DOWNLOAD_TTL_SECONDS,
-      {
-        disposition: 'attachment',
-        filename: download.originalName,
-        contentType: download.mimeType,
-      },
-    );
     return {
       url,
       expiresAt: new Date(
@@ -453,6 +500,10 @@ export class SignedPdfCopyQueue implements SignedPdfCopyScheduler {
  * estado PENDING y su trabajo de generación, por lotes y por clínica. La
  * clave de idempotencia es la misma que la de la firma: repetirlo no duplica
  * nada. No escribe al paciente (`notifyPatient = false`).
+ *
+ * DX-459: además, los que quedaron FAILED con `UNSUPPORTED_CHARACTERS` (otro
+ * alfabeto, antes de las fuentes Unicode) se reintentan una vez, también sin
+ * escribir al paciente.
  */
 @Injectable()
 export class BackfillSignedConsentPdfs {
@@ -462,12 +513,16 @@ export class BackfillSignedConsentPdfs {
     @Inject(SIGNED_CONSENT_PDF_BACKFILL_REPOSITORY)
     private readonly repo: SignedConsentPdfBackfillRepository,
     @Inject(SignedConsentPdfQueue)
-    private readonly queue: Pick<SignedConsentPdfQueue, 'schedule'>,
+    private readonly queue: Pick<
+      SignedConsentPdfQueue,
+      'schedule' | 'retryWithUnicodeFonts'
+    >,
   ) {}
 
   /** Todas las clínicas; falla al final si alguna falló (la cola reintenta). */
-  async run(): Promise<{ queued: number }> {
+  async run(): Promise<{ queued: number; retried: number }> {
     let queued = 0;
+    let retried = 0;
     let failed = 0;
     for (const tenantId of await this.repo.tenantIds()) {
       try {
@@ -475,6 +530,11 @@ export class BackfillSignedConsentPdfs {
           tenantId,
           SIGNED_PDF_BACKFILL_BATCH,
           (tx, consentId) => this.queue.schedule(tx, consentId),
+        );
+        retried += await this.repo.retryUnsupportedCharacters(
+          tenantId,
+          SIGNED_PDF_BACKFILL_BATCH,
+          (tx, consentId) => this.queue.retryWithUnicodeFonts(tx, consentId),
         );
       } catch (error) {
         failed += 1;
@@ -485,17 +545,18 @@ export class BackfillSignedConsentPdfs {
         });
       }
     }
-    if (queued > 0 || failed > 0) {
+    if (queued > 0 || retried > 0 || failed > 0) {
       this.logger.log({
         event: 'consents.signed_pdf_backfill',
         queued,
+        retried,
         failed,
       });
     }
     if (failed > 0) {
       throw new Error(`Barrido de PDF firmados falló en ${failed} clínica(s)`);
     }
-    return { queued };
+    return { queued, retried };
   }
 }
 

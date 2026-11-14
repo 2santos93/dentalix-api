@@ -30,6 +30,11 @@ import {
   markWaitlistEntryScheduled,
   resolveWaitlistForReactivated,
 } from '../../../waitlist/infrastructure/waitlist-transitions';
+import {
+  hardBlockOver,
+  lockAgenda,
+} from '../../../schedule-blocks/infrastructure/agenda-lock';
+import { ScheduleBlockedRaceError } from '../../../schedule-blocks/domain/schedule-block-rules';
 import { WAITLIST_NOT_OPEN_MESSAGE } from '../../../waitlist/domain/waitlist-rules';
 import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
 import { WANTS_EARLIER_GONE_MESSAGE } from '../../domain/wants-earlier';
@@ -131,6 +136,8 @@ export function mapToEntity(
     confirmationSentAt: appointment.confirmationSentAt,
     callbackRequestedAt: appointment.callbackRequestedAt,
     wantsEarlier: appointment.wantsEarlier,
+    earlierWindow: appointment.earlierWindow,
+    earlierRequestedAt: appointment.earlierRequestedAt,
     arrivedAt: appointment.arrivedAt,
     seatedAt: appointment.seatedAt,
     readyForCheckoutAt: appointment.readyForCheckoutAt,
@@ -197,15 +204,30 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           hashtext(${input.providerId})
         )`;
         }
+        // Sede explícita del caso de uso (DX-122: la de la entrada de
+        // pendientes, ya permitida); si no, la del request o, sin cabecera,
+        // la de escritura de la sesión (DX-089: la primera permitida del
+        // restringido, la principal para los demás).
+        const locationId =
+          input.locationId ?? (await this.tenantContext.writeLocationId(tx));
+        // DX-149: un bloqueo creado a la vez ya se ve con el candado de la agenda.
+        await lockAgenda(tx, tenantId, {
+          providerId: input.providerId,
+          locationId,
+        });
+        if (
+          await hardBlockOver(tx, {
+            providerId: input.providerId,
+            locationId,
+            start: input.start,
+            end: input.end,
+          })
+        ) {
+          throw new ScheduleBlockedRaceError();
+        }
         const created = await tx.appointment.create({
           data: {
-            // Sede explícita del caso de uso (DX-122: la de la entrada de
-            // pendientes, ya permitida); si no, la del request o, sin cabecera,
-            // la de escritura de la sesión (DX-089: la primera permitida del
-            // restringido, la principal para los demás).
-            locationId:
-              input.locationId ??
-              (await this.tenantContext.writeLocationId(tx)),
+            locationId,
             tenantId,
             patientId: input.patientId,
             providerId: input.providerId,
@@ -416,6 +438,36 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           throw new NotFoundException('Appointment not found');
         }
 
+        // DX-149: mover (hora o profesional) con el candado de la agenda y
+        // volviendo a mirar los bloqueos dentro de esta transacción.
+        // DX-267-bis: reactivar en su hora (`recheckSlot`), igual.
+        if (
+          patch.start !== undefined ||
+          patch.end !== undefined ||
+          patch.providerId !== undefined ||
+          patch.recheckSlot
+        ) {
+          const slot = await tx.appointment.findUniqueOrThrow({
+            where: { id },
+            select: {
+              providerId: true,
+              locationId: true,
+              start: true,
+              end: true,
+            },
+          });
+          const moved = {
+            providerId: patch.providerId ?? slot.providerId,
+            locationId: slot.locationId,
+            start: patch.start ?? slot.start,
+            end: patch.end ?? slot.end,
+          };
+          await lockAgenda(tx, this.requireTenantId(), moved);
+          if (await hardBlockOver(tx, moved)) {
+            throw new ScheduleBlockedRaceError();
+          }
+        }
+
         const {
           planItemIds,
           revokeConfirmations,
@@ -427,12 +479,17 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           audit,
           cancel,
           clearCancellation,
+          recheckSlot: _recheckSlot,
           ...rest
         } = patch;
         // DX-279: los datos de la cancelación van en la MISMA sentencia que el
         // estado (la CHECK appointments_cancellation_check se mira por fila).
         const data: Prisma.AppointmentUncheckedUpdateManyInput = {
           ...rest,
+          // DX-437: quitar la marca «Adelantar» borra la franja y quién la pidió.
+          ...(rest.wantsEarlier === false
+            ? { earlierWindow: null, earlierRequestedAt: null }
+            : {}),
           ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
           ...(clearCancellation ? CLEARED_CANCELLATION : {}),
         };
@@ -504,7 +561,11 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
               wantsEarlier: true,
               status: { in: [...MOVABLE_STATUSES] },
             },
-            data: { wantsEarlier: false },
+            data: {
+              wantsEarlier: false,
+              earlierWindow: null,
+              earlierRequestedAt: null,
+            },
           });
           if (count === 0) {
             throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
@@ -815,7 +876,15 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       );
   }
 
-  async undoArrival(id: string): Promise<Appointment | null> {
+  async undoArrival(
+    id: string,
+    options: { clearOverbooked?: boolean } = {},
+  ): Promise<Appointment | null> {
+    // DX-509: deja de ser sobrecupo en la misma sentencia; si su hueco ya lo
+    // ocupa otra cita, la EXCLUDE del profesional lo rechaza (23P01).
+    const overbooked = options.clearOverbooked
+      ? Prisma.sql`false`
+      : Prisma.sql`"overbooked"`;
     return this.prisma.runWithTenant(async (tx) => {
       // Una sola sentencia condicional: vuelve al estado previo SOLO si sigue
       // en ARRIVED (la CHECK de la tabla garantiza que entonces lo tiene).
@@ -824,6 +893,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
            SET "status" = "preArrivalStatus",
                "preArrivalStatus" = NULL,
                "arrivedAt" = NULL,
+               "overbooked" = ${overbooked},
                "updatedAt" = timezone('UTC', now())
          WHERE "id" = ${id}::uuid
            AND "deletedAt" IS NULL

@@ -127,7 +127,11 @@ async function resolveActor(
   actor: AuditActorRef,
 ): Promise<{ userId: string | null; role: ClinicRole | null }> {
   if (actor.kind === 'user') return { userId: actor.userId, role: actor.role };
-  if (actor.kind === 'patient' || actor.kind === 'system') {
+  if (
+    actor.kind === 'patient' ||
+    actor.kind === 'system' ||
+    actor.kind === 'public'
+  ) {
     return { userId: null, role: null };
   }
   const membership = await tx.clinicMembership.findFirst({

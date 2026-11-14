@@ -1,7 +1,7 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
 import type { PostOpInstructionsEmailVars } from '../../notifications/email/domain/email-message';
-import { EmailQuotaExceededError } from '../../notifications/email/domain/email-quota-exceeded.error';
+import { withEmailQuotaAs429 } from '../../notifications/email/application/email-quota-http';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 
 export interface PostOpEmailSendInput {
@@ -12,6 +12,17 @@ export interface PostOpEmailSendInput {
 }
 
 export const POSTOP_EMAIL_SENDER = Symbol('POSTOP_EMAIL_SENDER');
+
+/**
+ * DX-250: hasta cuándo el outbox da fe de un envío. Una entrega EMAIL anterior
+ * a este instante pudo salir y haber sido purgada del outbox (retención de
+ * `MAIL_OUTBOX_RETENTION_DAYS`): sin fila ya no se sabe (ni se afirma «no
+ * enviado»). Es una función para leer el reloj y la retención al llamarla.
+ */
+export const POSTOP_EMAIL_EVIDENCE_CUTOFF = Symbol(
+  'POSTOP_EMAIL_EVIDENCE_CUTOFF',
+);
+export type PostOpEmailEvidenceCutoff = () => Date;
 
 /**
  * Envío por email de las indicaciones (DX-222). En dos pasos para que el tope
@@ -40,32 +51,32 @@ export class OutboxPostOpEmailSender implements PostOpEmailSender {
     private readonly tenantContext: TenantContextService,
   ) {}
 
-  async assertCanSend(to: string): Promise<void> {
-    try {
-      await this.outbox.assertWithinQuota(tenantIdOf(this.tenantContext), to);
-    } catch (err) {
-      if (err instanceof EmailQuotaExceededError) {
-        throw new HttpException(
-          {
-            statusCode: HttpStatus.TOO_MANY_REQUESTS,
-            error: 'Too Many Requests',
-            message: err.message,
-            retryAfterSeconds: err.retryAfterSeconds,
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      throw err;
-    }
+  assertCanSend(to: string): Promise<void> {
+    return withEmailQuotaAs429(() =>
+      this.outbox.assertWithinQuota(
+        tenantIdOf(this.tenantContext),
+        to,
+        'post-op-instructions',
+      ),
+    );
   }
 
+  /**
+   * DX-149-ter: con `enforceQuota`, el tope se vuelve a contar al encolar,
+   * bajo el candado de la clínica y del destinatario: dos entregas a la vez
+   * que pasaron el aviso temprano no salen las dos. El que pierde es el 429;
+   * el caso de uso lo deja en `emailQueued: false` (la entrega ya está).
+   */
   async send(input: PostOpEmailSendInput): Promise<void> {
-    await this.outbox.enqueue({
-      tenantId: tenantIdOf(this.tenantContext),
-      to: input.to,
-      template: 'post-op-instructions',
-      vars: input.vars,
-      referenceId: input.referenceId,
-    });
+    await withEmailQuotaAs429(() =>
+      this.outbox.enqueue({
+        tenantId: tenantIdOf(this.tenantContext),
+        to: input.to,
+        template: 'post-op-instructions',
+        vars: input.vars,
+        referenceId: input.referenceId,
+        enforceQuota: true,
+      }),
+    );
   }
 }

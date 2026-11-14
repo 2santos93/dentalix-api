@@ -7,13 +7,20 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import {
+  RECALL_INTERVAL_MAX,
+  RECALL_INTERVAL_MIN,
+} from '../../../recall/domain/recall-rules';
 import {
   NOTE_ANSWER_TEXT_MAX,
   NOTE_PROMPT_OPTIONS_MAX,
@@ -80,6 +87,33 @@ export class ClinicalEntryDiagnosisInputDto {
   toothFdi?: string | null;
 }
 
+const ENTRY_RECALL_INTERVAL = `El intervalo del recall va de ${RECALL_INTERVAL_MIN} a ${RECALL_INTERVAL_MAX} meses.`;
+
+/** DX-015-bis (D18): «Volver en N meses» para un tipo de recall. */
+export class ClinicalEntryRecallInputDto {
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Tipo de recall de la clínica (GET /recall-types). Inexistente o retirado: 422 y no se guarda la evolución.',
+  })
+  @IsUUID('all', {
+    message: 'recallTypeId debe ser el id de un tipo de recall',
+  })
+  recallTypeId!: string;
+
+  @ApiProperty({
+    minimum: RECALL_INTERVAL_MIN,
+    maximum: RECALL_INTERVAL_MAX,
+    example: 3,
+    description: 'Cada cuántos meses vuelve (p. ej. 3 = «control en 3 meses»)',
+  })
+  @Type(() => Number)
+  @IsInt({ message: ENTRY_RECALL_INTERVAL })
+  @Min(RECALL_INTERVAL_MIN, { message: ENTRY_RECALL_INTERVAL })
+  @Max(RECALL_INTERVAL_MAX, { message: ENTRY_RECALL_INTERVAL })
+  intervalMonths!: number;
+}
+
 // NOTE: deliberately NO `tenantId`/`patientId`/`performedById` field —
 // tenant comes from the guarded request context, `patientId` from the route
 // param, and `performedById` from `req.user.sub` (same convention as
@@ -89,7 +123,7 @@ export class CreateClinicalEntryDto {
     type: String,
     format: 'date-time',
     description:
-      'Fecha de atención (fecha civil). Si falta: el día de la cita ligada en la zona de su sede o, sin cita, ahora.',
+      'Fecha de atención (fecha civil). Si falta: el día de la cita ligada en la zona de su sede o, sin cita, ahora. Con cita debe ser el día de la cita y sin cita no puede ser futura (día civil de la sede): si no, 400. Una hora exactamente 00:00:00.000Z se lee como fecha civil (ese día); con otra hora es un instante y se lee en la zona de la sede.',
   })
   @IsOptional()
   @IsDateString()
@@ -151,4 +185,14 @@ export class CreateClinicalEntryDto {
   @ValidateNested({ each: true })
   @Type(() => ClinicalEntryDiagnosisInputDto)
   diagnoses?: ClinicalEntryDiagnosisInputDto[];
+
+  @ApiPropertyOptional({
+    type: ClinicalEntryRecallInputDto,
+    description:
+      'DX-015-bis (D18): el intervalo del recall de un tipo, en la misma transacción que la evolución. Si el paciente no tiene recall de ese tipo, se crea (MANUAL) con la base en el día de la evolución y su sede (la de la cita o la activa); si lo tiene, solo cambia el intervalo (la base no) y, si estaba inactivo, se reactiva. Un alta o una reactivación de un tipo con grupo de exclusión desactiva los demás recalls activos del grupo. La respuesta lo devuelve en `recallUpdates`.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ClinicalEntryRecallInputDto)
+  recall?: ClinicalEntryRecallInputDto;
 }

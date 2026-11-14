@@ -1,3 +1,8 @@
+import { storedPhoneE164 } from '../../patients/domain/caller-lookup/caller-phone';
+import {
+  defaultPhoneRegionIn,
+  reconcilePatientPhoneE164,
+} from '../../patients/infrastructure/phone-e164';
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
@@ -48,6 +53,11 @@ import {
   type PreparedBalance,
 } from '../domain/opening-balance-sheet';
 import { docKey, type RowIssue } from '../domain/row-validation';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../shared/format/currency-text';
 
 type Tx = Prisma.TransactionClient;
 
@@ -145,6 +155,7 @@ export function importedPatientData(
     emergencyContactName: data.emergencyContactName ?? null,
     emergencyContactPhone: data.emergencyContactPhone ?? null,
     notes: data.notes ?? null,
+    preferredLanguage: data.preferredLanguage ?? null,
     createdAt: base.now,
     updatedAt: base.now,
   } satisfies Prisma.PatientCreateManyInput & DocTypeColumn;
@@ -187,6 +198,18 @@ const EMPTY_RESULT: ChunkResult = {
   skipped: 0,
   failed: 0,
 };
+
+/**
+ * Planes a medida en esta transacción (DX-294-ter). Prisma prepara cada
+ * sentencia: tras 5 ejecuciones en una conexión, PostgreSQL puede pasar al plan
+ * genérico, donde `"id" = ANY($n)` no se resuelve con tabla hash ni por índice
+ * si las estadísticas (de antes de importar) dan pocas filas a la clínica:
+ * cada fila de la clínica compara contra los 1.000 ids, 2 s por sentencia.
+ * Con el array conocido al planificar el coste es lineal en cualquier plan.
+ */
+async function customPlansForLargeArrays(tx: Tx): Promise<void> {
+  await tx.$executeRaw`SET LOCAL plan_cache_mode = force_custom_plan`;
+}
 
 /**
  * Pacientes del lote con algo registrado después, o saldos migrados del lote
@@ -406,6 +429,15 @@ export class PrismaPatientImportRepository {
    * crudo (mensajes con cifras, G1-B). Sin zona válida, 409
    * `LOCATION_TIMEZONE_REQUIRED`.
    */
+  /** DX-497: idiomas de los pacientes de la clínica (`tenants` no tiene RLS). */
+  async patientLanguages(): Promise<string[]> {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: this.tenantId() },
+      select: { patientLanguages: true },
+    });
+    return tenant.patientLanguages;
+  }
+
   async batchLocation(): Promise<BatchLocation> {
     return this.prisma.runWithTenant(async (tx) => {
       const id = await this.tenantContext.writeLocationId(tx);
@@ -594,7 +626,7 @@ export class PrismaPatientImportRepository {
 
   /**
    * Lotes QUEUED/RUNNING cuyo trabajo ya no está vivo (agotó los intentos,
-   * el arriendo venció sin reintentos o se purgó): pasan a FAILED con lo
+   * la reserva venció sin reintentos o se purgó): pasan a FAILED con lo
    * hecho, para no dejar bloqueada la clínica (una importación en marcha) ni
    * el deshacer. `tenantId` explícito en el barrido; si no, el del contexto.
    */
@@ -1051,6 +1083,15 @@ export class PrismaPatientImportRepository {
     return out;
   }
 
+  /** DX-517-bis: el texto propio de cada moneda de la clínica (vacío = el código). */
+  async currencyTexts(): Promise<CurrencyTexts> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: this.tenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
+  }
+
   /**
    * Monedas admitidas: el catálogo `currencies` (global, sin RLS), el mismo
    * que valida planes y abonos (DX-042).
@@ -1193,7 +1234,10 @@ export class PrismaPatientImportRepository {
    * siga fallando queda FAILED: el resto del lote sigue.
    */
   async processChunk(
-    batch: Pick<PatientImportBatch, 'id' | 'duplicateMode' | 'confirmedById'>,
+    batch: Pick<
+      PatientImportBatch,
+      'id' | 'duplicateMode' | 'confirmedById' | 'locationId'
+    >,
     size: number,
     channel: ContactChannel,
   ): Promise<ChunkResult> {
@@ -1280,7 +1324,10 @@ export class PrismaPatientImportRepository {
 
   private async applyRows(
     tx: Tx,
-    batch: Pick<PatientImportBatch, 'id' | 'duplicateMode' | 'confirmedById'>,
+    batch: Pick<
+      PatientImportBatch,
+      'id' | 'duplicateMode' | 'confirmedById' | 'locationId'
+    >,
     rows: { id: string; rowNumber: number; data: Prisma.JsonValue }[],
     channel: ContactChannel,
   ): Promise<ChunkResult> {
@@ -1360,18 +1407,21 @@ export class PrismaPatientImportRepository {
       const now = new Date();
       // ON CONFLICT DO NOTHING (patients_tenant_doc_key): dos filas del mismo
       // documento en el bloque (no debería: el dry-run las quita) crean uno.
+      // DX-224: el E.164 en el mismo INSERT, con el prefijo de la sede del lote.
+      const batchRegion = await defaultPhoneRegionIn(tx, batch.locationId);
       const created = await tx.patient.createManyAndReturn({
         skipDuplicates: true,
         select: { id: true, docNumber: true },
-        data: fresh.map((r) =>
-          importedPatientData(r.data, {
+        data: fresh.map((r) => ({
+          ...importedPatientData(r.data, {
             tenantId,
             importBatchId: batch.id,
             contactChannel: channel,
             createdById: batch.confirmedById,
             now,
           }),
-        ),
+          phoneE164: storedPhoneE164(r.data.phone, batchRegion),
+        })),
       });
       const idByDoc = new Map(created.map((p) => [p.docNumber, p.id]));
       const used = new Set<string>();
@@ -1403,6 +1453,21 @@ export class PrismaPatientImportRepository {
         patientId: null,
         filled: null,
       });
+    }
+
+    // DX-224: el E.164 de los teléfonos que acaban de entrar o se rellenaron,
+    // con el prefijo de la sede del lote.
+    const touched = outcomes.flatMap((o) =>
+      (o.outcome === 'CREATED' || o.outcome === 'FILLED') && o.patientId
+        ? [o.patientId]
+        : [],
+    );
+    if (touched.length > 0) {
+      await reconcilePatientPhoneE164(
+        tx,
+        touched,
+        await defaultPhoneRegionIn(tx, batch.locationId),
+      );
     }
 
     // Solo cuenta lo que de verdad pasó de PENDING a su resultado.
@@ -1602,6 +1667,7 @@ export class PrismaPatientImportRepository {
   ): Promise<{ undoneBalances: number }> {
     const references = await this.openingBalanceReferences();
     return this.prisma.runWithTenant(async (tx) => {
+      await customPlansForLargeArrays(tx);
       const status = await this.lockStatus(tx, id);
       if (status === null) throw new BatchStateError('EXPIRED');
       if (status !== 'COMPLETED' && status !== 'FAILED')
@@ -1625,6 +1691,7 @@ export class PrismaPatientImportRepository {
     const references = await this.patientReferences();
     const balanceReferences = await this.openingBalanceReferences();
     return this.prisma.runWithTenant(async (tx) => {
+      await customPlansForLargeArrays(tx);
       const locked = await tx.$queryRaw<{ status: PatientImportStatus }[]>`
         SELECT "status" FROM "patient_import_batches" WHERE "id" = ${id}::uuid FOR UPDATE`;
       if (locked.length === 0) throw new BatchStateError('EXPIRED');
@@ -1647,20 +1714,25 @@ export class PrismaPatientImportRepository {
          FOR UPDATE`;
       const ids = created.map((p) => p.id);
       if (ids.length > 0) {
+        // DX-294: los ids van UNA vez (CTE), no un array por tabla: con
+        // 10.000 pacientes y ~32 tablas eran 320.000 uuids en el bind y
+        // ~160 ms de planificación (la selectividad de cada elemento por
+        // tabla), segundos con la máquina cargada; así, ~15 ms.
         const checks = references.map(
           (ref) =>
             Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
                          FROM ${Prisma.raw(quoteIdent(ref.table))}
-                        WHERE ${Prisma.raw(quoteIdent(ref.column))} = ANY(${ids}::uuid[])`,
+                        WHERE ${Prisma.raw(quoteIdent(ref.column))} IN (SELECT id FROM batch_patients)`,
         );
         // DX-262: un saldo migrado de OTRO lote también es actividad (los
         // del propio lote se retiran con él).
         checks.push(Prisma.sql`SELECT "patientId" AS id FROM "opening_balances"
                                 WHERE "tenantId" = ${tenantId}::uuid
-                                  AND "patientId" = ANY(${ids}::uuid[])
+                                  AND "patientId" IN (SELECT id FROM batch_patients)
                                   AND "importBatchId" <> ${id}::uuid
                                   AND "voidedAt" IS NULL`);
         const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
+          WITH batch_patients AS MATERIALIZED (SELECT unnest(${ids}::uuid[]) AS id)
           SELECT count(DISTINCT id)::int AS n FROM (${Prisma.join(checks, ' UNION ALL ')}) a`;
         if (n > 0) throw new UndoBlockedError(n);
       }

@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { TreatmentPlanItemStatus } from '@prisma/client';
 
 // Response shape for GET /treatment-plans/:id/balance -- documents
@@ -74,7 +74,9 @@ export class PlanBalanceDto {
     example: false,
     description:
       'DX-054: el proveedor de tasas no respondió a tiempo (el saldo espera ' +
-      'como mucho 4 s a las conversiones en vivo). Los abonos que esperaban ' +
+      'como mucho 4 s a las conversiones en vivo), se sabe que no contesta o ' +
+      'su cupo está agotado: ' +
+      'no es que falte la tasa. Los abonos que esperaban ' +
       'su tasa salen en paymentsWithoutRate y no suman en paid: el saldo está ' +
       'incompleto y volver a pedirlo lo completa cuando el proveedor responda. ' +
       'Nunca es un 500.',
@@ -111,22 +113,45 @@ export class PlanItemBalanceDto {
   })
   billable!: number;
 
-  @ApiProperty({ example: 60, description: 'Σ de lo imputado al ítem' })
+  @ApiProperty({
+    example: 60,
+    description:
+      'Σ de lo imputado al ítem por los abonos más lo que le cubre el saldo recibido por traspaso (paidByTransfersIn, DX-399-quater)',
+  })
   paid!: number;
 
   @ApiProperty({ example: 40, description: 'billable - paid' })
   balance!: number;
+
+  @ApiPropertyOptional({
+    example: 30,
+    description:
+      'DX-399-quater: de `paid`, lo que cubre el saldo que el plan recibió por traspaso de otro plan del paciente y que ninguna devolución ni traspaso de salida gastó. Cubre lo que los abonos no cubren, después de ellos. Ausente si es 0',
+  })
+  paidByTransfersIn?: number;
 }
 
 export class PlanBalanceWithItemsDto extends PlanBalanceDto {
-  @ApiProperty({ example: 150, description: 'Σ de lo imputado a los ítems' })
+  @ApiProperty({
+    example: 150,
+    description:
+      'Σ de lo imputado a los ítems por los abonos (sin `paidByTransfersIn`): Σ `items[].paid` = `allocated` + Σ `items[].paidByTransfersIn` (DX-399-quater)',
+  })
   allocated!: number;
 
   @ApiProperty({
     example: 30,
-    description: 'Cobrado (con base) que aún no está imputado a ningún ítem',
+    description:
+      'Cobrado (con base) sin imputar a ningún ítem, NETO de lo devuelto o traspasado del saldo a favor que se atribuye a los abonos (DX-399-ter, también en un plan cancelado o rechazado): la suma de `onAccount` de `GET /payments/:id/allocations` de los abonos del plan y, si el plan se cobra, lo que da el informe «Cobrado sin imputar»',
   })
   unallocated!: number;
+
+  @ApiPropertyOptional({
+    example: 30,
+    description:
+      'DX-399-quater: lo que el plan recibió por traspaso y que no gastó ninguna salida ni cubre ningún ítem: sigue a cuenta del plan, aparte de `unallocated` (que es de los abonos). Ausente si es 0',
+  })
+  transfersInOnAccount?: number;
 
   @ApiProperty({
     example: 0,

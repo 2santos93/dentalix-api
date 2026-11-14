@@ -17,6 +17,7 @@ import {
 import { registerVerified } from './support/register-verified';
 import { hostFor } from './support/tenant-host';
 import { DOCUMENT_TYPE_NAMES_FORBIDDEN_MESSAGE } from '../src/modules/patients/domain/document-type-names';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-327 (R16) en HTTP real: el nombre local de cada tipo de documento lo
 // leen todos los roles y solo el ADMIN lo cambia; toda clínica empieza sin
@@ -136,8 +137,8 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
   });
 
   it('every clinic starts with no local names', async () => {
-    // Clínicas nuevas por el alta de la API. La demo (V1) pone los suyos
-    // después, por el mismo caso de uso de Ajustes: seed-demo.int-spec.
+    // Clínicas nuevas por el alta de la API. La demo deja los nombres
+    // genéricos: seed-demo.int-spec.
     expect(await names()).toStrictEqual(NONE);
     expect(await names(other.adminToken, other.host)).toStrictEqual(NONE);
     const rows = await raw.tenant.findMany({
@@ -170,7 +171,8 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
       });
     const viewsBefore = await patientViews();
     const res = await as(api().get(NAMES), tokens.RECEPTION).expect(200);
-    expect(res.body).toStrictEqual({ names: NONE });
+    // DX-524: `effective` = lo que rige en la sede activa (aquí, la clínica).
+    expect(res.body).toStrictEqual({ names: NONE, effective: NONE });
     expect(await patientViews()).toBe(viewsBefore);
   });
 
@@ -512,6 +514,9 @@ describe('Nombre local de cada tipo de documento (e2e, DX-327)', () => {
         where: { tenantId: clinic.tenantId, userId: dentist.id },
         data: { professionalLicense: 'RM-0001' },
       });
+      // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+      // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+      await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
       catalogItemId = (
         await post<{ id: string }>('/catalog/items', {
           code: 'DX327-PROC',

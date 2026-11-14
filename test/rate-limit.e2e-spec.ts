@@ -32,6 +32,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'direct-upload': { limit: 2, ttlMs: 60_000 },
   'patient-import': { limit: 2, ttlMs: 60_000 },
   'exchange-rates': { limit: 2, ttlMs: 60_000 },
+  'caller-lookup': { limit: 2, ttlMs: 60_000 },
   anamnesis: { limit: 4, ttlMs: 60_000 },
   'anamnesis-token': { limit: 2, ttlMs: 60_000 },
   signature: { limit: 4, ttlMs: 60_000 },
@@ -40,6 +41,9 @@ const LOW_LIMITS: RateLimitConfig = {
   'slot-token': { limit: 2, ttlMs: 60_000 },
   'copy-link': { limit: 4, ttlMs: 60_000 },
   'copy-token': { limit: 2, ttlMs: 60_000 },
+  'prescription-verify': { limit: 2, ttlMs: 60_000 },
+  'branding-host': { limit: 4, ttlMs: 60_000 },
+  'branding-miss': { limit: 4, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -352,7 +356,7 @@ describe('Rate limiting (e2e)', () => {
       const convert = (sub: string, tenantId: string) =>
         request(app.getHttpServer())
           .get(
-            '/api/v1/exchange/convert?amount=1&from=USD&to=COP&date=2026-10-01',
+            '/api/v1/exchange/convert?amount=1&from=USD&to=VES&date=2026-10-01',
           )
           .set('Authorization', bearer(sub, tenantId));
       expect((await rates('rx-1', 'clinica-1')).status).toBe(401);
@@ -360,6 +364,26 @@ describe('Rate limiting (e2e)', () => {
       expectTooMany(await rates('rx-1', 'clinica-1'));
       expectTooMany(await convert('rx-1', 'clinica-1'));
       expect((await rates('rx-2', 'clinica-1')).status).toBe(401);
+    });
+
+    it('DX-224: «¿Quién llama?», un balde por clínica+usuario', async () => {
+      const bearer = (sub: string, tenantId: string): string =>
+        'Bearer ' +
+        [
+          Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+          Buffer.from(JSON.stringify({ sub, tenantId })).toString('base64url'),
+          'firma-invalida',
+        ].join('.');
+      const ask = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .post('/api/v1/patients/lookup-by-phone')
+          .set('Authorization', bearer(sub, tenantId))
+          .send({ phone: '0412 1234567' });
+      for (let i = 0; i < LOW_LIMITS['caller-lookup'].limit; i++) {
+        expect((await ask('cl-1', 'clinica-1')).status).toBe(401);
+      }
+      expectTooMany(await ask('cl-1', 'clinica-1'));
+      expect((await ask('cl-2', 'clinica-1')).status).toBe(401);
     });
 
     it('health nunca se limita (@SkipThrottle)', async () => {
@@ -423,6 +447,26 @@ describe('Rate limiting (e2e)', () => {
         expect((await branding()).status).not.toBe(429);
       }
       expectTooMany(await branding());
+    });
+
+    it('DX-555: la marca por host (la pide el servidor web) va FUERA del global, con sus baldes propios', async () => {
+      const byHost = (host: string) =>
+        request(app.getHttpServer())
+          .get('/api/v1/public/tenant/branding/by-host')
+          .query({ host });
+      // Más fallos que el global (3) desde una IP: el global no la corta…
+      for (const host of [
+        'dx555-global-1.localhost',
+        'a..b',
+        'dx555-global-2.localhost',
+        'dx555-global-3.localhost',
+      ]) {
+        expect((await byHost(host)).status).toBe(404);
+      }
+      // …la corta su balde de fallos por IP (`branding-miss`, 4 aquí).
+      // El detalle (aciertos, hosts, IPs) está en
+      // test/branding-rate-limit.e2e-spec.ts.
+      expectTooMany(await byHost('dx555-global-4.localhost'));
     });
 
     it('health y health/ready quedan fuera incluso del límite global (DX-023)', async () => {

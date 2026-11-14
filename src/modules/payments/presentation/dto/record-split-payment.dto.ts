@@ -7,9 +7,7 @@ import {
   IsBoolean,
   IsDateString,
   IsISO4217CurrencyCode,
-  IsNumber,
   IsOptional,
-  IsPositive,
   IsString,
   IsUUID,
   MaxLength,
@@ -22,7 +20,7 @@ import {
   REFERENCE_TOO_LONG_MESSAGE,
 } from '../../../payment-methods/domain/payment-method-rules';
 import {
-  IsMoney,
+  IsPositiveMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
 import {
@@ -32,6 +30,7 @@ import {
   SPLIT_MIN_LINES,
 } from '../../domain/split-payment';
 import { PaymentDto } from './payment.dto';
+import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 function toUpperCase({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.toUpperCase() : value;
@@ -40,9 +39,7 @@ function toUpperCase({ value }: { value: unknown }): unknown {
 /** DX-390: una forma de pago del cobro dividido. */
 export class SplitPaymentLineDto {
   @ApiProperty({ example: 50, maximum: MONEY_MAX })
-  @IsNumber()
-  @IsPositive()
-  @IsMoney()
+  @IsPositiveMoney()
   amount!: number;
 
   @ApiProperty({
@@ -51,7 +48,7 @@ export class SplitPaymentLineDto {
   })
   @Transform(toUpperCase)
   @IsISO4217CurrencyCode({
-    message: 'currency must be a real ISO 4217 currency code',
+    message: CURRENCY_CODE_MESSAGE,
   })
   currency!: string;
 
@@ -85,6 +82,15 @@ export class SplitPaymentLineDto {
     message: DUPLICATE_REFERENCE_REASON_TOO_LONG_MESSAGE,
   })
   duplicateReferenceReason?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'DX-389: el `uploadId` del comprobante de ESTA línea (cada línea, el suyo). Mismas reglas que en el abono suelto.',
+  })
+  @IsOptional()
+  @IsUUID('all', { message: 'La subida del comprobante no es válida.' })
+  proofUploadId?: string;
 }
 
 // Sin `tenantId`/`treatmentPlanId`/`createdById`, como RecordPaymentDto.
@@ -94,8 +100,9 @@ export class RecordSplitPaymentDto {
     example: '2026-10-30',
     description:
       'El día civil `YYYY-MM-DD` (o un instante con `Z` o desfase) de TODO ' +
-      'el cobro, como en un abono (DX-097). DX-054: 400 si va a más de ' +
-      '24 h en el futuro.',
+      'el cobro, como en un abono (DX-097). DX-075: un día civil ' +
+      'posterior a hoy en la sede es 400. DX-054: un instante a más de 24 h ' +
+      'en el futuro es 400.',
   })
   @IsDateString()
   paidAt!: string;

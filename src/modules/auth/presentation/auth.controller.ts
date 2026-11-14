@@ -3,17 +3,17 @@ import {
   Body,
   Controller,
   HttpCode,
-  HttpException,
-  HttpStatus,
   Post,
   Req,
   Res,
   UnauthorizedException,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { currentRequestId } from '../../../shared/observability/request-context';
 import { ConfigService } from '@nestjs/config';
 import {
+  ApiExtraModels,
   ApiAcceptedResponse,
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -33,6 +33,7 @@ import { RegisterClinicUseCase } from '../application/use-cases/register-clinic.
 import {
   LoginUseCase,
   isBreakGlassSession,
+  isMfaChallenge,
   type LoginResult,
 } from '../application/use-cases/login.use-case';
 import { RefreshUseCase } from '../application/use-cases/refresh.use-case';
@@ -56,7 +57,9 @@ import {
 } from './session-cookie.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { LoginLockoutService } from '../application/login-lockout.service';
-import { LoginLockedError, loginLockedMessage } from '../domain/login-lockout';
+import { lockedOr } from './locked-response';
+import { MfaChallengeDto } from './dto/login-mfa.dto';
+import { NoStoreHeadersInterceptor } from '../../../shared/http/no-store-headers.interceptor';
 
 /** SEC-008: respuesta del login break-glass (solo access token). */
 interface BreakGlassResponse {
@@ -65,21 +68,13 @@ interface BreakGlassResponse {
   expiresAt: string;
 }
 
-/**
- * 429 con `Retry-After` si `err` es un bloqueo del login (DX-048) o del código
- * MFA (SEC-008); el mismo mensaje en ambos casos. Cualquier otro error, tal cual.
- */
-function lockedOr(err: unknown, res: Response): unknown {
-  if (!(err instanceof LoginLockedError)) return err;
-  res.setHeader('Retry-After', String(err.retryAfterSeconds));
-  return new HttpException(
-    {
-      statusCode: HttpStatus.TOO_MANY_REQUESTS,
-      error: 'Too Many Requests',
-      message: loginLockedMessage(err.retryAfterSeconds),
-    },
-    HttpStatus.TOO_MANY_REQUESTS,
-  );
+/** DX-021: falta el segundo factor (o su alta forzada); sin tokens de sesión. */
+interface MfaChallengeResponse {
+  mfa: 'MFA_REQUIRED' | 'MFA_ENROLLMENT_REQUIRED';
+  mfaToken: string;
+  expiresAt: string;
+  emailCodeRequired?: true;
+  emailCodeRef?: string;
 }
 
 function userAgentOf(req: TenantHostRequest): string | null {
@@ -91,6 +86,7 @@ export const REGISTER_ACCEPTED_MESSAGE =
   'Te enviamos un correo para confirmar el registro. Abre el enlace para activar tu clínica (revisa también la carpeta de spam).';
 
 @ApiTags('auth')
+@UseInterceptors(NoStoreHeadersInterceptor)
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -206,11 +202,22 @@ export class AuthController {
    */
   @Audit({ action: 'LOGIN', resource: 'SESSION' })
   @Post('login')
-  @ApiCreatedResponse({ type: AuthTokensDto })
+  @ApiCreatedResponse({
+    description:
+      'Sesión (`AuthTokensDto`) o, DX-021, el paso del segundo factor (`MfaChallengeDto`: `mfa`, `mfaToken`, `expiresAt`) que se completa en `POST /auth/login/mfa` (o en `/auth/login/mfa/enrollment*` si es un alta forzada).',
+    schema: {
+      oneOf: [
+        { $ref: '#/components/schemas/AuthTokensDto' },
+        { $ref: '#/components/schemas/MfaChallengeDto' },
+      ],
+    },
+  })
+  @ApiExtraModels(AuthTokensDto, MfaChallengeDto)
   @ApiOperation({
     summary:
       'Inicia sesión en la clínica del host (o en plataforma desde el apex)',
     description:
+      'DX-021-bis: en el apex la contraseña no basta: responde siempre `MfaChallengeDto`. SEC-066: toda alta forzada (superadmin en el apex o miembro de una clínica con el MFA obligatorio) exige además el código enviado al correo de la cuenta (`emailCodeRequired`, `emailCodeRef`); si no se pudo enviar (ya salió uno a esta cuenta desde este cliente hace menos de 1 min), 429 con `Retry-After`. ' +
       'SEC-008: un superadmin SIN membresía en la clínica solo entra como acceso de soporte (break-glass): ' +
       'necesita el MFA enrolado (`/platform/mfa`), `mfaCode` y `breakGlassReason`. Recibe solo un access token ' +
       'ADMIN de vida corta (`breakGlass: true`, `expiresAt`), sin refresh, y el acceso queda en ' +
@@ -242,7 +249,7 @@ export class AuthController {
     @Req() req: TenantHostRequest & { ip?: string },
     @Res({ passthrough: true }) res: Response,
     @Body() dto: LoginDto,
-  ): Promise<DeliveredSession | BreakGlassResponse> {
+  ): Promise<DeliveredSession | BreakGlassResponse | MfaChallengeResponse> {
     const tenantId = req.tenantHost?.tenantId;
     try {
       await this.lockout.assertCanAttempt(dto.email, req.ip);
@@ -250,8 +257,8 @@ export class AuthController {
       throw lockedOr(err, res);
     }
     // Host SIN clínica (el apex): es la puerta del área de plataforma. Solo la
-    // resuelve un superadmin, y recibe un token de plataforma (sin tenant ni
-    // rol). Para cualquier otro usuario `executePlatform` lanza el mismo
+    // resuelve un superadmin, y recibe el paso del segundo factor (DX-021-bis);
+    // el token de plataforma (sin tenant ni rol) sale tras él. Para cualquier otro usuario `executePlatform` lanza el mismo
     // 'Invalid credentials', así que no se filtra si el email existe ni si es
     // superadmin.
     let result: LoginResult;
@@ -263,12 +270,14 @@ export class AuthController {
             password: dto.password,
             mfaCode: dto.mfaCode,
             breakGlassReason: dto.breakGlassReason,
+            trustedDeviceToken: this.cookie.readTrustedDevice(req),
             ip: req.ip ?? null,
             userAgent: userAgentOf(req),
           })
         : await this.login.executePlatform({
             email: dto.email,
             password: dto.password,
+            ip: req.ip ?? null,
           });
     } catch (err) {
       if (err instanceof UnauthorizedException) {
@@ -278,6 +287,18 @@ export class AuthController {
       throw lockedOr(err, res);
     }
     await this.lockout.recordSuccess(dto.email);
+    if (isMfaChallenge(result)) {
+      // DX-021: contraseña correcta, falta el segundo factor. Ni access ni
+      // refresh (ni cookie): el token intermedio no abre ninguna ruta.
+      return {
+        mfa: result.mfa,
+        mfaToken: result.mfaToken,
+        expiresAt: result.expiresAt.toISOString(),
+        ...(result.emailCodeRequired
+          ? { emailCodeRequired: true, emailCodeRef: result.emailCodeRef }
+          : {}),
+      };
+    }
     if (isBreakGlassSession(result)) {
       // Sin refresh: y si en este navegador quedaba la cookie de una sesión
       // anterior en esta clínica, se borra para que nada renueve el acceso.

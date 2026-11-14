@@ -4,6 +4,7 @@ import type { AccountStatementRepository } from '../../domain/ports/account-stat
 import { BillablePlan } from '../../domain/entities/billable-plan.entity';
 import { computeBillablePlans } from '../compute-billable-plans';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
+import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 /**
  * Planes contra los que recepción puede registrar un abono o un plan de cuotas
@@ -15,6 +16,7 @@ export class ListBillablePlansUseCase {
   constructor(
     @Inject(ACCOUNT_STATEMENT_REPOSITORY)
     private readonly repo: AccountStatementRepository,
+    private readonly getPlanBalance: GetPlanBalanceUseCase,
   ) {}
 
   async execute(patientId: string): Promise<BillablePlan[]> {
@@ -22,6 +24,11 @@ export class ListBillablePlansUseCase {
     if (!rows) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     }
-    return computeBillablePlans(rows);
+    // DX-472-bis: el saldo de cada plan es el de `/balance`, con UN plazo
+    // para todos (un proveedor colgado no retiene el selector de cobro).
+    const planBalances = await this.getPlanBalance.computeMany(
+      rows.flatMap((row) => (row.balanceInput ? [row.balanceInput] : [])),
+    );
+    return computeBillablePlans(rows, planBalances);
   }
 }

@@ -1,6 +1,10 @@
 import type { AppointmentStatus } from '@prisma/client';
-import { ClinicalEntry } from '../entities/clinical-entry.entity';
+import {
+  ClinicalEntry,
+  type CreatedClinicalEntryRecord,
+} from '../entities/clinical-entry.entity';
 import type { ValidDiagnosis } from '../diagnosis-rules';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 // NOTE: deliberately NO `tenantId`/`id`/`createdAt` field — the tenant comes
 // from the guarded request context (never the client, same convention as
@@ -21,6 +25,15 @@ export interface CreateClinicalEntryRepoInput {
    * MISMA transacción que la evolución (la BD rechaza cualquier otro caso).
    */
   diagnoses?: ValidDiagnosis[];
+  /**
+   * DX-015-bis (D18): el intervalo del recall de un tipo, en la MISMA
+   * transacción (un tipo inexistente o retirado da 422 y no se guarda la
+   * evolución). Sin recall de ese tipo se crea con la base en el día de la
+   * evolución y su sede; con uno, solo cambia el intervalo (y se reactiva).
+   */
+  recall?: { recallTypeId: string; intervalMonths: number };
+  /** Quién escribe, para los eventos del recall (misma transacción). */
+  audit?: AuditRequestContext;
 }
 
 /** DX-170: lo que el alta necesita saber de la cita a la que se liga. */
@@ -48,8 +61,20 @@ export interface ClinicalEntryRepository {
    * delete an existing row — there is no update/delete method on this port
    * at all (immutability enforced at the interface level, not just by
    * convention).
+   *
+   * DX-540: en la MISMA transacción del INSERT congela en la evolución el
+   * registro profesional que el autor (`performedById`) tiene en esta clínica
+   * (`licenseSnapshot`), y lo devuelve en `authorProfessionalLicense`.
    */
-  create(input: CreateClinicalEntryRepoInput): Promise<ClinicalEntry>;
+  create(
+    input: CreateClinicalEntryRepoInput,
+  ): Promise<CreatedClinicalEntryRecord>;
+
+  /**
+   * DX-540: registro profesional vigente del usuario en esta clínica
+   * (recortado), o null si no lo tiene o no es miembro.
+   */
+  authorLicense(userId: string): Promise<string | null>;
 
   /**
    * DX-170: cita viva por id, de cualquier paciente de la clínica. Bajo RLS,
@@ -67,6 +92,12 @@ export interface ClinicalEntryRepository {
     patientId: string,
     params?: ListClinicalEntriesParams,
   ): Promise<ClinicalEntry[]>;
+
+  /**
+   * DX-231: zona IANA de la sede donde se escribe una evolución SIN cita (la
+   * del contexto, la misma que `create` le asigna). Decide qué es «hoy».
+   */
+  writeLocationTimeZone(): Promise<string>;
 
   /** DX-212: de `codes`, los que existen en la tabla CIE-10. */
   existingIcd10Codes(codes: string[]): Promise<Set<string>>;

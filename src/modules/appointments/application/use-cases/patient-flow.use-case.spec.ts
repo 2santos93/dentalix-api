@@ -29,17 +29,18 @@ const FOR_PATIENT = {
 // (llegó → en sillón → listo para cobrar → completada, y «Deshacer llegada»),
 // con la máquina de transiciones, las horas, los permisos y la auditoría.
 
-const TZ = 'America/Bogota';
+const TZ = 'America/Caracas';
 const HOUR = 60 * 60 * 1000;
 
 const schedule = {
   findByLocation: () => Promise.resolve(null),
 } as unknown as LocationScheduleRepository;
 const staff = {
-  findById: (userId: string) => Promise.resolve({ userId }),
+  findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),
 } as unknown as StaffRepository;
 const locations = {
-  findById: (id: string) => Promise.resolve({ id, timeZone: TZ }),
+  findById: (id: string) =>
+    Promise.resolve({ id, timeZone: TZ, isActive: true }),
 } as unknown as LocationRepository;
 
 function ctx(role: ClinicRole): AppointmentAuditContext {
@@ -53,7 +54,7 @@ function ctx(role: ClinicRole): AppointmentAuditContext {
   };
 }
 
-function setup() {
+function setup(clock?: () => Date) {
   const repo = new InMemoryAppointmentRepository();
   const drafts: AuditEventDraft[] = [];
   const audit = {
@@ -71,22 +72,26 @@ function setup() {
     locations,
     new TenantContextService(),
     inMemoryAvailability(),
+    clock,
   );
   return { repo, uc, drafts };
 }
 
-/** Una cita de hoy que no cruza la medianoche de Bogotá. */
+/** Una cita de hoy que no cruza la medianoche de la sede. */
 function todayAppointment(
   repo: InMemoryAppointmentRepository,
   status: AppointmentStatus = AppointmentStatus.CONFIRMED,
+  // DX-237: por defecto, del odontólogo que actúa en estas pruebas.
+  providerId = `u-${ClinicRole.DENTIST}`,
 ) {
-  // Dentro de 30 min, o antes si eso ya cae mañana en Bogotá: la llegada solo
+  // Dentro de 30 min, o antes si eso ya cae mañana en la zona de la sede: la llegada solo
   // depende del DÍA civil de la cita.
   const today = civilDayRange(civilDateIn(new Date(), TZ), TZ);
   const start = new Date(
     Math.min(Date.now() + 30 * 60 * 1000, today.end.getTime() - HOUR),
   );
   return repo.seed({
+    providerId,
     status,
     start,
     end: new Date(start.getTime() + 30 * 60 * 1000),
@@ -95,6 +100,28 @@ function todayAppointment(
 }
 
 describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
+  it('DX-237: el odontólogo no sienta la cita de otro profesional; la asistente sí', async () => {
+    const { repo, uc } = setup();
+    const a = todayAppointment(
+      repo,
+      AppointmentStatus.ARRIVED,
+      'otro-odontologo',
+    );
+    await expect(
+      uc.execute(
+        a.id,
+        { status: AppointmentStatus.IN_CHAIR },
+        ctx(ClinicRole.DENTIST),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    const seated = await uc.execute(
+      a.id,
+      { status: AppointmentStatus.IN_CHAIR },
+      ctx(ClinicRole.ASSISTANT),
+    );
+    expect(seated.status).toBe(AppointmentStatus.IN_CHAIR);
+  });
+
   it('llegó → en sillón → listo para cobrar → completada, con sus horas', async () => {
     const { repo, uc } = setup();
     const a = todayAppointment(repo);
@@ -266,8 +293,13 @@ describe('UpdateAppointmentUseCase · flujo del paciente (DX-200)', () => {
   });
 
   it('se fue sin pasar al sillón: se cancela, y al reactivarla no quedan horas', async () => {
-    const { repo, uc } = setup();
+    // DX-267-bis: reactivar exige que la cita no haya terminado (reloj
+    // inyectado); `todayAppointment` puede quedar ya terminada si la suite
+    // corre en la última media hora del día de la sede.
+    let start = new Date();
+    const { repo, uc } = setup(() => new Date(start.getTime() - 60_000));
     const a = todayAppointment(repo);
+    start = a.start;
     await uc.execute(
       a.id,
       { status: AppointmentStatus.ARRIVED },

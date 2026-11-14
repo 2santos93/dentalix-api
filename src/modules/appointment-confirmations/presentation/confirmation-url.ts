@@ -1,6 +1,9 @@
 /** Ruta pública de la web (src/app/(public)/confirmar/[token]). */
 export const CONFIRMATION_PATH = '/confirmar';
 
+/** DX-469: base del .ics por token (la web reenvía `/api/v1` a la API). */
+export const CALENDAR_ICS_PATH = '/api/v1/public/appointment-confirmations';
+
 // El host se valida con `safeLinkHost` (compartido con las invitaciones por
 // email, DX-088); se reexporta para los consumidores de siempre.
 export { safeLinkHost } from '../../../shared/tenancy/public-link';

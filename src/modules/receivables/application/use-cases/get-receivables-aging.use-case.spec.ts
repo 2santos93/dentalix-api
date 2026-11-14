@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { planBalanceWithoutLiveRates } from '../../../payments/application/__fixtures__/plan-balance-without-live-rates';
 import { locationZonesOf } from '../../../../shared/locations/location-time-zone';
 import type {
   DebtorCollections,
@@ -19,7 +20,7 @@ const NOW = new Date('2026-10-17T15:00:00.000Z');
 const NORTE: ReceivablesLocation = {
   id: 'loc-norte',
   name: 'Sede Norte',
-  timeZone: 'America/Bogota',
+  timeZone: 'America/Caracas',
 };
 
 function ledger(
@@ -35,7 +36,7 @@ function ledger(
       {
         id: `plan-${patientId}`,
         status: 'ACCEPTED',
-        currency: 'COP',
+        currency: 'VES',
         createdAt: new Date(agingFrom),
         billable,
         agingFrom: new Date(agingFrom),
@@ -52,7 +53,7 @@ function details(patientId: string, name: string): DebtorDetails {
     patientId,
     firstName: name,
     lastName: 'Prueba',
-    phone: '300 123 4567',
+    phone: '412 123 4567',
     lastPayment: null,
   };
 }
@@ -134,8 +135,12 @@ describe('GetReceivablesAgingUseCase', () => {
   beforeEach(() => {
     repo = new InMemoryReceivablesRepository();
     // La región por defecto del teléfono de la sede Norte (DX-329).
-    repo.phoneRegions.set(NORTE.id, 'CO');
-    useCase = new GetReceivablesAgingUseCase(repo, () => NOW);
+    repo.phoneRegions.set(NORTE.id, 'VE');
+    useCase = new GetReceivablesAgingUseCase(
+      repo,
+      () => NOW,
+      planBalanceWithoutLiveRates(),
+    );
     repo.ledgers = [
       ledger('p-reciente', 100000, '2026-10-07T17:00:00.000Z'), // 10 días
       ledger('p-antiguo', 500000, '2026-06-19T17:00:00.000Z'), // 120 días
@@ -143,13 +148,13 @@ describe('GetReceivablesAgingUseCase', () => {
       // Al día: no sale.
       ledger('p-al-dia', 100, '2026-01-01T17:00:00.000Z', {
         paid: [
-          { treatmentPlanId: 'plan-p-al-dia', currency: 'COP', amount: 100 },
+          { treatmentPlanId: 'plan-p-al-dia', currency: 'VES', amount: 100 },
         ],
       }),
       // Solo saldo a favor: no es deudor, no sale.
       ledger('p-a-favor', 100, '2026-01-01T17:00:00.000Z', {
         paid: [
-          { treatmentPlanId: 'plan-p-a-favor', currency: 'COP', amount: 300 },
+          { treatmentPlanId: 'plan-p-a-favor', currency: 'VES', amount: 300 },
         ],
       }),
     ];
@@ -173,7 +178,7 @@ describe('GetReceivablesAgingUseCase', () => {
     expect(out.total).toBe(3);
     expect(out.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'VES',
         patients: 3,
         balance: 800000,
         debt: 800000,
@@ -191,8 +196,8 @@ describe('GetReceivablesAgingUseCase', () => {
       patient: {
         id: 'p-antiguo',
         fullName: 'Ana Prueba',
-        phone: '300 123 4567',
-        whatsApp: '573001234567',
+        phone: '412 123 4567',
+        whatsApp: '584121234567',
       },
       locationId: NORTE.id,
       ageApproximate: true,
@@ -252,7 +257,7 @@ describe('GetReceivablesAgingUseCase', () => {
     expect(usd.items[0].currencies.map((c) => c.currency)).toEqual(['USD']);
 
     const all = await useCase.execute({});
-    expect(all.totals.map((t) => t.currency)).toEqual(['COP', 'USD']);
+    expect(all.totals.map((t) => t.currency)).toEqual(['USD', 'VES']);
   });
 
   it('pagina con tope y pide el contacto SOLO de la página', async () => {
@@ -267,6 +272,65 @@ describe('GetReceivablesAgingUseCase', () => {
     expect(capped.pageSize).toBe(RECEIVABLES_MAX_PAGE_SIZE);
   });
 
+  describe('summary: solo los totales («Mi día», OPS-056)', () => {
+    beforeEach(() => {
+      // Otra moneda y un deudor que en USD solo tiene saldo a favor: cuenta
+      // en los pacientes de USD, como en la cartera.
+      repo.ledgers.push(
+        ledger('p-dolares', 50, '2026-07-01T17:00:00.000Z', {
+          plans: [
+            {
+              id: 'plan-usd',
+              status: 'ACCEPTED',
+              currency: 'USD',
+              createdAt: new Date('2026-07-01T17:00:00.000Z'),
+              billable: 50,
+              agingFrom: new Date('2026-07-01T17:00:00.000Z'),
+            },
+            {
+              id: 'plan-ves-favor',
+              status: 'ACCEPTED',
+              currency: 'VES',
+              createdAt: new Date('2026-07-01T17:00:00.000Z'),
+              billable: 10,
+              agingFrom: new Date('2026-07-01T17:00:00.000Z'),
+            },
+          ],
+          paid: [
+            { treatmentPlanId: 'plan-ves-favor', currency: 'VES', amount: 25 },
+          ],
+        }),
+      );
+    });
+
+    it.each([{}, { locationId: NORTE.id }])(
+      'los mismos totales que la cartera (%p)',
+      async (filters) => {
+        const page = await useCase.execute({
+          ...filters,
+          page: 1,
+          pageSize: 1,
+        });
+        await expect(useCase.summary(filters)).resolves.toEqual({
+          totals: page.totals,
+        });
+      },
+    );
+
+    it('no pide contactos ni cobranza de nadie', async () => {
+      await useCase.summary({ locationId: NORTE.id });
+      expect(repo.debtorQueries).toEqual([]);
+      expect(repo.collectionQueries).toEqual([]);
+      expect(repo.ledgerQueries).toEqual([{ locationId: NORTE.id }]);
+    });
+
+    it('una sede que no es de la clínica es el mismo 400', async () => {
+      await expect(useCase.summary({ locationId: 'otra' })).rejects.toThrow(
+        new BadRequestException('La sede no es de esta clínica.'),
+      );
+    });
+  });
+
   it('una sede que no es de la clínica es un 400 en español', async () => {
     await expect(useCase.execute({ locationId: 'otra' })).rejects.toThrow(
       new BadRequestException('La sede no es de esta clínica.'),
@@ -275,17 +339,17 @@ describe('GetReceivablesAgingUseCase', () => {
 
   it('el último abono lleva su día civil en la zona de su sede', async () => {
     repo.debtors[1].lastPayment = {
-      // 02:00 UTC del 1-oct = 21:00 del 30-sep en Bogotá.
+      // 02:00 UTC del 1-oct = 21:00 del 30-sep en la zona de la sede.
       paidAt: new Date('2026-10-01T02:00:00.000Z'),
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
       amount: 50000,
-      currency: 'COP',
+      currency: 'VES',
     };
     const out = await useCase.execute({});
     expect(out.items[0].lastPayment).toEqual({
       paidOn: '2026-09-30',
       amount: 50000,
-      currency: 'COP',
+      currency: 'VES',
     });
   });
 
@@ -300,7 +364,7 @@ describe('GetReceivablesAgingUseCase', () => {
 
   describe('cobranza (DX-150)', () => {
     it('el CSV lleva el día de la última gestión en la zona de la sede de la deuda', async () => {
-      // 21:00 del 15/10 en Bogotá = 02:00 UTC del 16/10.
+      // 21:00 del 15/10 en la zona de la sede = 02:00 UTC del 16/10.
       repo.collections.set('p-antiguo', {
         lastNote: {
           channel: 'CALL',
@@ -328,7 +392,7 @@ describe('GetReceivablesAgingUseCase', () => {
         promise: {
           id: 'prom-1',
           amount: 200000,
-          currency: 'COP',
+          currency: 'VES',
           dueDate: '2026-11-15',
           status: 'OPEN',
           reopenedAt: null,

@@ -3,11 +3,13 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ACCOUNT_STATEMENT_REPOSITORY } from '../../domain/ports/account-statement-repository.port';
 import type { AccountStatementRepository } from '../../domain/ports/account-statement-repository.port';
 import { AccountStatement } from '../../domain/entities/account-statement.entity';
 import { computeAccountStatement } from '../compute-account-statement';
+import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import type { VoidActor } from '../../../payments/domain/void-window';
 import { parseCivilDate } from '../../../../shared/time/civil-day';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
@@ -18,6 +20,11 @@ import {
 import { statementAddressee } from '../statement-addressee';
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import { documentTypeName } from '../../../patients/domain/document-type';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  roundingDigitsLookup,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
 
 export interface GetAccountStatementInput {
   /** Primer día de los movimientos (YYYY-MM-DD), inclusive. */
@@ -56,6 +63,11 @@ export class GetAccountStatementUseCase {
     @Inject(STATEMENT_FAMILY_REPOSITORY)
     private readonly family: StatementFamilyRepository,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    private readonly getPlanBalance: GetPlanBalanceUseCase,
+    // B4 (DX-472-bis): decimales de cada moneda para los estados de cuota.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   /** `actor` (del token) solo decide el `canVoid` de cada movimiento. */
@@ -84,16 +96,26 @@ export class GetAccountStatementUseCase {
     }
 
     const issuedAt = this.now();
+    const planBalances = await this.getPlanBalance.computeMany(
+      data.planBalances,
+    );
+    const roundingDigitsOf = await roundingDigitsLookup(
+      this.currencyDigits,
+      data.snapshot.paymentPlans.map((pp) => pp.currency),
+    );
     const computed = computeAccountStatement(data.snapshot, {
+      roundingDigitsOf,
       today: issuedAt,
       voidActor: actor,
       movementsFrom: from,
       movementsTo: to,
+      planBalances,
     });
 
     return {
       issuedAt,
       clinic: data.clinic,
+      regional: data.regional,
       // En vivo: el nombre visible de hoy (DX-327, R17 y R18).
       patient: {
         ...data.patient,
@@ -106,6 +128,7 @@ export class GetAccountStatementUseCase {
       // DX-203: un menor o un paciente sin email, a nombre de su responsable.
       addressee: statementAddressee(data.patient, notice, issuedAt),
       range: { from: input.from ?? null, to: input.to ?? null },
+      rateProviderTimedOut: computed.plans.some((p) => p.rateProviderTimedOut),
       ...computed,
     };
   }

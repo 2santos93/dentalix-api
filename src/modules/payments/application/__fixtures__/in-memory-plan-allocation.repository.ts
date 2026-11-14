@@ -8,7 +8,7 @@ import type {
   PaymentAllocationsSnapshot,
   PaymentPendingRate,
   PaymentWithoutBase,
-  PlanBalanceSnapshot,
+  PlanBalanceItemsSnapshot,
   PlanAllocationRepository,
   PlanAllocationSnapshot,
   RebalanceOptions,
@@ -108,6 +108,7 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
           createdAt: p.createdAt,
           baseCents: p.baseCents ?? 0,
           allocatedCents: this.allocatedCents({ paymentId: p.id }),
+          creditOutCents: 0,
         })),
       items: this.items
         .filter((i) => i.planId === planId && i.billableCents > 0)
@@ -217,7 +218,7 @@ export class InMemoryPlanAllocationRepository implements PlanAllocationRepositor
     return Promise.resolve();
   }
 
-  readPlanBalanceSnapshot(): Promise<PlanBalanceSnapshot | null> {
+  readPlanBalanceSnapshot(): Promise<PlanBalanceItemsSnapshot | null> {
     return Promise.resolve(null);
   }
 

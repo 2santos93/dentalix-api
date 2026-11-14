@@ -5,6 +5,7 @@ import {
   type HourCycle,
   type RegionalFormat,
 } from '../format/regional-format';
+import { isValidTimeZone } from '../time/civil-day';
 import {
   locationTimeZoneRequired,
   locationZonesOf,
@@ -36,16 +37,24 @@ export function isHourCycle(value: unknown): value is HourCycle {
 }
 
 /**
+ * Lo que `requireLocationFormat` necesita de una sede: su id y el formato y el
+ * reloj en crudo (pueden faltar en una fila sin barrer).
+ */
+export interface LocationFormatSource {
+  id: string;
+  locale: string | null;
+  hourCycle: string | null;
+}
+
+/**
  * El formato de la sede; si le falta el locale o el reloj, o no son válidos,
  * el 409 de arriba. PEREZOSO (pre-flight I4): lo llama quien va a formatear,
  * en el momento de formatear; la lógica sigue con los cargadores de zona y una
  * sede sin reloj no bloquea lecturas que no pintan nada.
  */
-export function requireLocationFormat(location: {
-  id: string;
-  locale: string | null;
-  hourCycle: string | null;
-}): RegionalFormat {
+export function requireLocationFormat(
+  location: LocationFormatSource,
+): RegionalFormat {
   const { locale, hourCycle } = location;
   if (!locale || !isHourCycle(hourCycle)) {
     throw locationLocaleRequired(location.id);
@@ -110,4 +119,41 @@ export async function resolveLocationRegional(
     if (found === undefined) throw locationTimeZoneRequired(locationId);
     return found;
   };
+}
+
+/**
+ * DX-521: los ajustes regionales de una sede tal como se congelan en la foto
+ * del recibo y se sirven en su respuesta: zona, locale canónico y reloj.
+ */
+export interface LocationRegionalSettings {
+  timeZone: string;
+  locale: string;
+  hourCycle: HourCycle;
+}
+
+/**
+ * DX-521 (PF2): la región de una sede si tiene los TRES ajustes y este
+ * runtime los reconoce (zona IANA, locale soportado, reloj válido); `null` en
+ * cualquier otro caso. Nunca lanza: quien la usa decide qué hacer sin región
+ * (el recibo se lee igual; el email conserva su 409). Devuelve el locale
+ * canónico (`fmt.locale`), no el texto crudo de la columna.
+ */
+export function locationRegionalOrNull(
+  row: {
+    timeZone?: string | null;
+    locale?: string | null;
+    hourCycle?: string | null;
+  } | null,
+): LocationRegionalSettings | null {
+  if (!row) return null;
+  const { timeZone, locale, hourCycle } = row;
+  if (!timeZone || !isValidTimeZone(timeZone)) return null;
+  if (!locale || !isHourCycle(hourCycle)) return null;
+  try {
+    const fmt = regionalFormat({ locale, hourCycle });
+    return { timeZone, locale: fmt.locale, hourCycle };
+  } catch (error) {
+    if (error instanceof RangeError) return null;
+    throw error;
+  }
 }

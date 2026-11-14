@@ -9,6 +9,7 @@ import type {
   PaymentPromiseStatus,
 } from '@prisma/client';
 import type { AgingBuckets } from '../aging';
+import type { FrozenExchangeRate } from '../../../payments/domain/payment-exchange-rate';
 
 /*
  * Cartera por antigüedad (DX-145): lo que la clínica tiene por cobrar, por
@@ -30,6 +31,33 @@ export interface AgingPlanRow extends StatementPlanRow {
    * que esta antigüedad es siempre APROXIMADA (`ageApproximate`).
    */
   agingFrom: Date;
+  /**
+   * DX-472-bis: lo abonado en OTRA moneda que la del plan, para contarlo
+   * convertido como el estado de cuenta. Ausente si el plan no tiene abonos
+   * en otra moneda, o en una fila escrita antes de DX-472-bis (entonces esos
+   * abonos van, sin convertir, a `paid` y a saldo a favor, como antes).
+   */
+  otherCurrency?: PlanOtherCurrencyPaid;
+}
+
+/** DX-472-bis: lo abonado a un plan en otra moneda, según `patient_ledgers`. */
+export interface PlanOtherCurrencyPaid {
+  /** Σ de sus bases (DX-051): ya en la moneda del plan, inmutable. */
+  based: number;
+  /** Los que aún no tienen base: se convierten como en el saldo del plan. */
+  pending: LedgerPendingPayment[];
+}
+
+/** Un abono en otra moneda aún sin base, con su tasa congelada si la tiene. */
+export interface LedgerPendingPayment {
+  id: string;
+  currency: string;
+  amount: number;
+  paidAt: Date;
+  /** Sede del abono: su zona da el día civil de la tasa (DX-097). */
+  locationId: string;
+  exchangeRateCurrency: string | null;
+  frozenRate: FrozenExchangeRate | null;
 }
 
 /**
@@ -92,6 +120,12 @@ export interface PatientAgingCurrency {
   /** Alguna parte de la deuda envejece desde una fecha aproximada. */
   ageApproximate: boolean;
   nextInstallment: { dueDate: Date; amount: number } | null;
+  /**
+   * DX-472-ter: lo mismo que los avisos de la fila, solo de los planes de
+   * esta moneda (la línea del CSV dice cuál está incompleta).
+   */
+  paymentsWithoutRateCount: number;
+  rateProviderTimedOut: boolean;
 }
 
 export interface PatientAging {
@@ -99,6 +133,18 @@ export interface PatientAging {
   currencies: PatientAgingCurrency[];
   oldestAgeDays: number | null;
   ageApproximate: boolean;
+  /**
+   * DX-472-bis: abonos en otra moneda que no suman porque no tienen tasa
+   * (o porque el proveedor no respondió): el saldo de la fila es incompleto,
+   * como el del estado de cuenta.
+   */
+  paymentsWithoutRateCount: number;
+  /**
+   * DX-472-bis: el proveedor de tasas no respondió a tiempo para algún abono
+   * de la fila. Su deuda no se da por vencida (va a «por vencer») mientras
+   * tanto, igual que las cuotas del estado de cuenta.
+   */
+  rateProviderTimedOut: boolean;
 }
 
 // ---------------------------------------------------------------------------

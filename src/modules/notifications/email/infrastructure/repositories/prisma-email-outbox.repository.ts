@@ -1,15 +1,23 @@
+import { withClinicLogoUrl } from '../../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import { EmailOutboxStatus, EmailTemplate, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../../shared/prisma/prisma.service';
-import { EmailTemplateName } from '../../domain/email-message';
+import {
+  EmailTemplateName,
+  TENANT_DAILY_EXEMPT_TEMPLATES,
+} from '../../domain/email-message';
 import {
   ClaimedOutboxEmail,
   EmailOutboxRepository,
   NewOutboxEmail,
   NewPlatformOutboxEmail,
+  OutboxQuotaGuard,
   OutboxSettlement,
   PlatformRecipientQuota,
+  QuotaLockScope,
+  RecentSends,
 } from '../../domain/ports/email-outbox-repository.port';
+import { lockEmailQuota } from '../email-quota-lock';
 
 const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   invitation: EmailTemplate.INVITATION,
@@ -18,12 +26,15 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'appointment-reminder': EmailTemplate.APPOINTMENT_REMINDER,
   'registration-notice': EmailTemplate.REGISTRATION_NOTICE,
   'payment-receipt': EmailTemplate.PAYMENT_RECEIPT,
+  'payment-receipt-summary': EmailTemplate.PAYMENT_RECEIPT_SUMMARY,
   'post-op-instructions': EmailTemplate.POST_OP_INSTRUCTIONS,
   'signature-request': EmailTemplate.SIGNATURE_REQUEST,
   'signature-code': EmailTemplate.SIGNATURE_CODE,
   'signature-budget-accepted': EmailTemplate.SIGNATURE_BUDGET_ACCEPTED,
   'slot-offer': EmailTemplate.SLOT_OFFER,
   'signed-consent-copy': EmailTemplate.SIGNED_CONSENT_COPY,
+  'mfa-notice': EmailTemplate.MFA_NOTICE,
+  'mfa-enrollment-code': EmailTemplate.MFA_ENROLLMENT_CODE,
 };
 
 /**
@@ -34,6 +45,40 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
  * «en el futuro» y el kick tras encolar no la encontraba.
  */
 const NOW = Prisma.sql`timezone('utc', now())`;
+
+/**
+ * Como email_outbox_platform_allowed: ventana y enfriamiento contra NOW, el
+ * reloj que puso "createdAt". Índices (tenantId, createdAt DESC) y
+ * (tenantId, toHash, createdAt DESC). Una sentencia propia: tras esperar un
+ * candado, su foto (READ COMMITTED) ya ve lo que confirmó quien lo tenía.
+ *
+ * DX-149-quater: `tenant` (el tope diario de la clínica) no cuenta las
+ * plantillas que no lo gastan (`TENANT_DAILY_BUDGET`: el restablecimiento de
+ * contraseña). `recipient` y el enfriamiento siguen contándolas todas.
+ */
+async function countRecentSends(
+  tx: Prisma.TransactionClient,
+  tenantId: Prisma.Sql,
+  toHash: string,
+): Promise<RecentSends> {
+  const [sends] = await tx.$queryRaw<RecentSends[]>`
+    SELECT
+      (SELECT count(*)::int FROM "email_outbox"
+        WHERE "tenantId" = ${tenantId}
+          AND "createdAt" >= ${NOW} - interval '24 hours'
+          AND "template" <> ALL (${TENANT_DAILY_EXEMPT_TEMPLATES}::"EmailTemplate"[])) AS "tenant",
+      (SELECT count(*)::int FROM "email_outbox"
+        WHERE "tenantId" = ${tenantId} AND "toHash" = ${toHash}
+          AND "createdAt" >= ${NOW} - interval '24 hours') AS "recipient",
+      (SELECT extract(epoch FROM ${NOW} - max("createdAt"))::float8
+         FROM "email_outbox"
+        WHERE "tenantId" = ${tenantId} AND "toHash" = ${toHash})
+        AS "secondsSinceLastToRecipient"`;
+  return sends;
+}
+
+/** La clínica de la transacción (la que fijó `runWithTenant`). */
+const CONTEXT_TENANT = Prisma.sql`current_setting('app.current_tenant')::uuid`;
 
 /**
  * Persistencia del registro de envíos. Desde una petición (encolar, cancelar
@@ -61,6 +106,19 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     return created.id ? { id: created.id } : null;
   }
 
+  async insertPlatformSecurity(
+    row: NewPlatformOutboxEmail,
+    minIntervalSeconds: number,
+  ): Promise<{ id: string } | null> {
+    const [created] = await this.prisma.$queryRaw<{ id: string | null }[]>`
+      SELECT email_outbox_enqueue_platform_security(
+        ${row.template}::"EmailTemplate", ${row.toHash},
+        ${row.toMasked}, ${row.payload}, ${row.referenceId}::uuid,
+        ${minIntervalSeconds}::int
+      ) AS id`;
+    return created.id ? { id: created.id } : null;
+  }
+
   async platformRecipientAllowed(
     toHash: string,
     quota: PlatformRecipientQuota,
@@ -73,24 +131,56 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     return result.allowed;
   }
 
-  async insert(row: NewOutboxEmail): Promise<{ id: string }> {
+  async insert(
+    row: NewOutboxEmail,
+    guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
+  ): Promise<{ id: string }> {
+    return this.prisma.runWithTenant(row.tenantId, (tx) =>
+      this.insertInTx(tx, row, guard, scope),
+    );
+  }
+
+  async insertInTx(
+    tx: Prisma.TransactionClient,
+    row: NewOutboxEmail,
+    guard?: OutboxQuotaGuard,
+    scope?: QuotaLockScope,
+  ): Promise<{ id: string }> {
     const tenantId = row.tenantId;
+    if (guard) {
+      // DX-149-bis: contar e insertar en ESTA transacción, con el candado de
+      // la clínica del contexto y del destinatario: N peticiones a la vez ya
+      // no cuentan todas lo mismo. La RLS (WITH CHECK) obliga a que
+      // `row.tenantId` sea esa misma clínica. DX-149-ter: `scope` puede
+      // dejarlo en el del destinatario (endpoint público).
+      await lockEmailQuota(tx, row.toHash, scope);
+      guard(await countRecentSends(tx, CONTEXT_TENANT, row.toHash));
+    }
     // SQL crudo para que las horas las ponga la BD (ver NOW); sigue bajo la
     // RLS de la clínica, como el `create` de Prisma.
-    const [created] = await this.prisma.runWithTenant(
-      tenantId,
-      (tx) =>
-        tx.$queryRaw<{ id: string }[]>`
-        INSERT INTO "email_outbox"
-          ("id", "tenantId", "template", "toHash", "toMasked", "referenceId",
-           "payload", "status", "nextAttemptAt", "createdAt", "updatedAt")
-        VALUES
-          (gen_random_uuid(), ${tenantId}::uuid, ${row.template}::"EmailTemplate",
-           ${row.toHash}, ${row.toMasked}, ${row.referenceId}::uuid,
-           ${row.payload}, 'PENDING', ${NOW}, ${NOW}, ${NOW})
-        RETURNING "id"`,
-    );
-    return { id: created.id };
+    // DX-272: `ON CONFLICT DO NOTHING` sin objetivo: si el índice único de
+    // recordatorios (email_outbox_reminder_reference_key) ya tiene ese
+    // `referenceId`, el email YA está encolado y se devuelve el existente.
+    const [created] = await tx.$queryRaw<{ id: string }[]>`
+      INSERT INTO "email_outbox"
+        ("id", "tenantId", "template", "toHash", "toMasked", "referenceId",
+         "payload", "status", "nextAttemptAt", "createdAt", "updatedAt")
+      VALUES
+        (gen_random_uuid(), ${tenantId}::uuid, ${row.template}::"EmailTemplate",
+         ${row.toHash}, ${row.toMasked}, ${row.referenceId}::uuid,
+         ${row.payload}, 'PENDING', ${NOW}, ${NOW}, ${NOW})
+      ON CONFLICT DO NOTHING
+      RETURNING "id"`;
+    if (created) return { id: created.id };
+    const [existing] = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "email_outbox"
+       WHERE "tenantId" = ${tenantId}::uuid
+         AND "template" = ${row.template}::"EmailTemplate"
+         AND "referenceId" = ${row.referenceId}::uuid
+       ORDER BY "createdAt", "id"
+       LIMIT 1`;
+    return { id: existing.id };
   }
 
   async claimDue(
@@ -134,61 +224,62 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     return result.settled;
   }
 
+  async patientArchivedFor(
+    tenantId: string,
+    outboxId: string,
+  ): Promise<boolean> {
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const rows = await tx.$queryRaw<{ archived: boolean }[]>`
+        SELECT true AS archived
+          FROM "email_outbox" o
+          LEFT JOIN "signature_requests" sr
+            ON o."template" = 'signature-request' AND sr."id" = o."referenceId"
+          LEFT JOIN "waitlist_offers" wo
+            ON o."template" = 'slot-offer' AND wo."id" = o."referenceId"
+          LEFT JOIN "signed_consent_pdf_links" cl
+            ON o."template" = 'signed-consent-copy' AND cl."id" = o."referenceId"
+          JOIN "patients" p
+            ON p."id" = COALESCE(sr."patientId", wo."patientId", cl."patientId")
+         WHERE o."id" = ${outboxId}::uuid AND p."deletedAt" IS NOT NULL`;
+      return rows.length > 0;
+    });
+  }
+
   async supersedePending(
     tenantId: string,
     referenceId: string,
     template: EmailTemplateName,
   ): Promise<number> {
-    return this.prisma.runWithTenant(tenantId, async (tx) => {
-      const result = await tx.emailOutbox.updateMany({
-        where: {
-          referenceId,
-          template: TEMPLATE_TO_DB[template],
-          status: EmailOutboxStatus.PENDING,
-        },
-        data: {
-          status: EmailOutboxStatus.FAILED,
-          payload: null,
-          lastError: 'Superseded',
-        },
-      });
-      return result.count;
-    });
+    return this.prisma.runWithTenant(tenantId, (tx) =>
+      this.supersedePendingInTx(tx, referenceId, template),
+    );
   }
 
-  async recentSends(
-    tenantId: string,
-    toHash: string,
-  ): Promise<{
-    tenant: number;
-    recipient: number;
-    secondsSinceLastToRecipient: number | null;
-  }> {
-    // Como email_outbox_platform_allowed: ventana y enfriamiento contra NOW,
-    // el reloj que puso "createdAt". Índices (tenantId, createdAt DESC) y
-    // (tenantId, toHash, createdAt DESC).
-    const [sends] = await this.prisma.runWithTenant(
-      tenantId,
-      (tx) => tx.$queryRaw<
-        {
-          tenant: number;
-          recipient: number;
-          secondsSinceLastToRecipient: number | null;
-        }[]
-      >`
-        SELECT
-          (SELECT count(*)::int FROM "email_outbox"
-            WHERE "tenantId" = ${tenantId}::uuid
-              AND "createdAt" >= ${NOW} - interval '24 hours') AS "tenant",
-          (SELECT count(*)::int FROM "email_outbox"
-            WHERE "tenantId" = ${tenantId}::uuid AND "toHash" = ${toHash}
-              AND "createdAt" >= ${NOW} - interval '24 hours') AS "recipient",
-          (SELECT extract(epoch FROM ${NOW} - max("createdAt"))::float8
-             FROM "email_outbox"
-            WHERE "tenantId" = ${tenantId}::uuid AND "toHash" = ${toHash})
-            AS "secondsSinceLastToRecipient"`,
+  async supersedePendingInTx(
+    tx: Prisma.TransactionClient,
+    referenceId: string,
+    template: EmailTemplateName,
+  ): Promise<number> {
+    const result = await tx.emailOutbox.updateMany({
+      where: {
+        referenceId,
+        template: TEMPLATE_TO_DB[template],
+        status: EmailOutboxStatus.PENDING,
+      },
+      data: {
+        status: EmailOutboxStatus.FAILED,
+        payload: null,
+        lastError: 'Superseded',
+      },
+    });
+    return result.count;
+  }
+
+  /** Lectura previa, sin candado: el tope de verdad lo decide `insert` con `guard`. */
+  async recentSends(tenantId: string, toHash: string): Promise<RecentSends> {
+    return this.prisma.runWithTenant(tenantId, (tx) =>
+      countRecentSends(tx, Prisma.sql`${tenantId}::uuid`, toHash),
     );
-    return sends;
   }
 
   /**
@@ -238,9 +329,11 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     primaryColor: string | null;
   } | null> {
     // `tenants` es global (sin RLS), igual que PrismaTenantBrandingRepository.
-    return this.prisma.tenant.findFirst({
-      where: { id: tenantId, deletedAt: null },
-      select: { name: true, logoUrl: true, primaryColor: true },
-    });
+    return this.prisma.tenant
+      .findFirst({
+        where: { id: tenantId, deletedAt: null },
+        select: { name: true, logoKey: true, primaryColor: true },
+      })
+      .then((row) => withClinicLogoUrl(row));
   }
 }

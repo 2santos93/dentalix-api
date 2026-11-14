@@ -4,6 +4,7 @@ import { TriageFlag } from '@prisma/client';
 import { IN_CLINIC_STATUSES } from '../../domain/patient-flow';
 import { MedicalAlertFlagsDto } from '../../../medical-history/presentation/dto/medical-alerts.dto';
 import { PlanItemReservedElsewhereDto } from './appointment.dto';
+import { ChairSummaryDto } from '../../../chairs/presentation/dto/chair.dto';
 import { HOUR_CYCLES } from '../../../../shared/locations/location-regional';
 import type { HourCycle } from '../../../../shared/format/regional-format';
 
@@ -44,6 +45,17 @@ export class InClinicItemDto {
 
   @ApiProperty({ type: String, nullable: true })
   providerName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'DX-492: el sillón de la cita.',
+  })
+  chairId!: string | null;
+
+  @ApiProperty({ type: () => ChairSummaryDto, nullable: true })
+  chair!: ChairSummaryDto | null;
 
   @ApiProperty({ format: 'date-time' })
   start!: Date;

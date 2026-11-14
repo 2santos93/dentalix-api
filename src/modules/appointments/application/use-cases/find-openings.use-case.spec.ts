@@ -10,8 +10,10 @@ import type { PatientRepository } from '../../../patients/domain/ports/patient-r
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
 import { InMemoryProviderScheduleRepository } from '../../../provider-schedule/application/__fixtures__/in-memory-provider-schedule.repository';
+import { ChairAssignmentService } from '../chair-assignment';
+import { InMemoryChairRepository } from '../../../chairs/application/__fixtures__/in-memory-chairs';
 
-// Un martes futuro (para que "ahora" no recorte nada), en Bogotá (UTC−5).
+// Un martes futuro (para que "ahora" no recorte nada), en la zona de la sede (UTC−4).
 function nextTuesday(): string {
   const d = new Date(Date.now() + 7 * 86_400_000);
   while (d.getUTCDay() !== 2) d.setUTCDate(d.getUTCDate() + 1);
@@ -21,7 +23,7 @@ const DAY = nextTuesday();
 const z = (time: string) => new Date(`${DAY}T${time}:00.000Z`);
 
 const HOURS: BusinessHours = {
-  timezone: 'America/Bogota',
+  timezone: 'America/Caracas',
   ranges: [{ weekday: 2, startMinute: 9 * 60, endMinute: 13 * 60 }],
 };
 
@@ -32,7 +34,7 @@ function schedule(hours: BusinessHours | null): LocationScheduleRepository {
 }
 const locations = {
   findById: (id: string) =>
-    Promise.resolve(id === 'loc1' ? { id, timeZone: 'America/Bogota' } : null),
+    Promise.resolve(id === 'loc1' ? { id, timeZone: 'America/Caracas' } : null),
 } as unknown as LocationRepository;
 const staff = {
   findById: (id: string) =>
@@ -54,6 +56,7 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     blocks = new InMemoryScheduleBlockRepository(),
     hours: BusinessHours | null = HOURS,
     providerSchedules = new InMemoryProviderScheduleRepository(),
+    chairs = new InMemoryChairRepository(),
   ) {
     return new FindOpeningsUseCase(
       appointments,
@@ -64,6 +67,7 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       patients,
       new TenantContextService(),
       inMemoryAvailability(providerSchedules),
+      new ChairAssignmentService(chairs, appointments, locations),
     );
   }
 
@@ -75,44 +79,151 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     durationMinutes: 30,
   };
 
+  describe('con sillón (DX-492, DX-509-ter)', () => {
+    function withChairs() {
+      const appointments = new InMemoryAppointmentRepository();
+      const chairs = new InMemoryChairRepository();
+      const one = chairs.seed({ name: 'Sillón 1' });
+      const two = chairs.seed({ name: 'Sillón 2' });
+      const uc = build(appointments, undefined, undefined, undefined, chairs);
+      return { appointments, chairs, one, two, uc };
+    }
+    const iso = (d: Date) => d.toISOString();
+
+    it('profesional libre y sillón ocupado por otro: el hueco no pisa esa cita', async () => {
+      const { appointments, one, uc } = withChairs();
+      appointments.seed({
+        providerId: 'otro',
+        chairId: one.id,
+        start: z('14:00'),
+        end: z('14:30'),
+      });
+      const view = await uc.execute({ ...query, chairIds: [one.id] });
+      expect(view.openings).toEqual([
+        {
+          start: z('13:00'),
+          end: z('14:00'),
+          chair: { id: one.id, name: 'Sillón 1', active: true },
+        },
+        {
+          start: z('14:30'),
+          end: z('17:00'),
+          chair: { id: one.id, name: 'Sillón 1', active: true },
+        },
+      ]);
+    });
+
+    it('un sobrecupo también ocupa el sillón; la cita que se mueve, no', async () => {
+      const { appointments, one, uc } = withChairs();
+      appointments.seed({
+        providerId: 'otro',
+        chairId: one.id,
+        overbooked: true,
+        start: z('14:00'),
+        end: z('14:30'),
+      });
+      const moving = appointments.seed({
+        providerId: 'prov1',
+        chairId: one.id,
+        start: z('15:00'),
+        end: z('15:30'),
+      });
+      const view = await uc.execute({
+        ...query,
+        chairIds: [one.id],
+        excludeAppointmentId: moving.id,
+      });
+      expect(view.openings.map((o) => iso(o.start))).toEqual([
+        iso(z('13:00')),
+        iso(z('14:30')),
+      ]);
+    });
+
+    it('con varios, cada hueco lleva un sillón libre en todo él', async () => {
+      const { appointments, one, two, uc } = withChairs();
+      appointments.seed({
+        providerId: 'otro',
+        chairId: one.id,
+        start: z('14:00'),
+        end: z('14:30'),
+      });
+      const view = await uc.execute({ ...query, chairIds: [one.id, two.id] });
+      expect(view.openings).toEqual([
+        {
+          start: z('13:00'),
+          end: z('17:00'),
+          chair: { id: two.id, name: 'Sillón 2', active: true },
+        },
+      ]);
+    });
+
+    it('sillón de otra sede o desactivado: 400; de otra clínica: 404', async () => {
+      const { chairs, uc } = withChairs();
+      const elsewhere = chairs.seed({ locationId: 'loc2' });
+      const off = chairs.seed({ active: false });
+      await expect(
+        uc.execute({ ...query, chairIds: [elsewhere.id] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute({ ...query, chairIds: [off.id] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        uc.execute({ ...query, chairIds: ['ajeno'] }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('sin chairIds, los huecos no llevan sillón', async () => {
+      const { one, appointments, uc } = withChairs();
+      appointments.seed({
+        providerId: 'otro',
+        chairId: one.id,
+        start: z('14:00'),
+        end: z('14:30'),
+      });
+      const view = await uc.execute(query);
+      expect(view.openings).toEqual([{ start: z('13:00'), end: z('17:00') }]);
+    });
+  });
+
   it('horario de la sede − citas del profesional − bloqueos, en la zona de la sede', async () => {
     const appointments = new InMemoryAppointmentRepository();
     appointments.seed({
       providerId: 'prov1',
-      start: z('15:00'),
-      end: z('15:30'),
+      start: z('14:00'),
+      end: z('14:30'),
     });
     // Una cita CANCELADA no ocupa.
     appointments.seed({
       providerId: 'prov1',
-      start: z('16:00'),
-      end: z('16:30'),
+      start: z('15:00'),
+      end: z('15:30'),
       status: 'CANCELLED',
     });
     const blocks = new InMemoryScheduleBlockRepository();
     blocks.seed({
       providerId: null,
       locationId: 'loc1',
-      start: z('17:00'),
-      end: z('17:30'),
+      start: z('16:00'),
+      end: z('16:30'),
       allowsBooking: true,
     });
     // El de otra sede no estorba.
     blocks.seed({
       providerId: null,
       locationId: 'loc2',
-      start: z('14:00'),
-      end: z('18:00'),
+      start: z('13:00'),
+      end: z('17:00'),
     });
 
     const result = await build(appointments, blocks).execute(query);
-    expect(result.timeZone).toBe('America/Bogota');
+    expect(result.timeZone).toBe('America/Caracas');
     expect(result.openings.map((o) => [o.start, o.end])).toEqual([
-      [z('14:00'), z('15:00')],
-      [z('15:30'), z('17:00')],
-      [z('17:30'), z('18:00')],
+      [z('13:00'), z('14:00')],
+      [z('14:30'), z('16:00')],
+      [z('16:30'), z('17:00')],
     ]);
     expect(result.truncated).toBe(false);
+    expect(result.defaultHours).toBe(false);
   });
 
   it('con paciente, sus otras citas también ocupan', async () => {
@@ -120,27 +231,54 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     appointments.seed({
       providerId: 'otro',
       patientId: 'p1',
-      start: z('14:00'),
-      end: z('17:00'),
+      start: z('13:00'),
+      end: z('16:00'),
     });
     const result = await build(appointments).execute({
       ...query,
       patientId: 'p1',
     });
     expect(result.openings.map((o) => [o.start, o.end])).toEqual([
-      [z('17:00'), z('18:00')],
+      [z('16:00'), z('17:00')],
     ]);
   });
 
-  it('sede sin horario: propone el horario por defecto en la zona de la sede', async () => {
+  it('DX-509-bis: la cita que se mueve no tapa su propia hora (ni por profesional ni por paciente)', async () => {
+    const appointments = new InMemoryAppointmentRepository();
+    const moving = appointments.seed({
+      providerId: 'prov1',
+      patientId: 'p1',
+      start: z('14:00'),
+      end: z('14:30'),
+    });
+    const blocked = await build(appointments).execute({
+      ...query,
+      patientId: 'p1',
+    });
+    expect(blocked.openings.map((o) => [o.start, o.end])).toEqual([
+      [z('13:00'), z('14:00')],
+      [z('14:30'), z('17:00')],
+    ]);
+    const freed = await build(appointments).execute({
+      ...query,
+      patientId: 'p1',
+      excludeAppointmentId: moving.id,
+    });
+    expect(freed.openings.map((o) => [o.start, o.end])).toEqual([
+      [z('13:00'), z('17:00')],
+    ]);
+    await expect(
+      build(appointments).execute({ ...query, excludeAppointmentId: 'otra' }),
+    ).rejects.toThrow(new NotFoundException('Cita no encontrada'));
+  });
+
+  it('sede sin horario: propone el horario por defecto en la zona de la sede y lo dice (DX-533)', async () => {
     const result = await build(undefined, undefined, null).execute(query);
     expect(result.openings.map((o) => [o.start, o.end])).toEqual([
-      [z('14:00'), z('18:00')],
-      [
-        z('20:00'),
-        new Date(new Date(`${DAY}T00:00:00.000Z`).getTime() + 86_400_000),
-      ],
+      [z('13:00'), z('17:00')],
+      [z('19:00'), z('23:00')],
     ]);
+    expect(result.defaultHours).toBe(true);
   });
 
   it('valida fechas, tope de 31 días y que todo sea de la clínica', async () => {
@@ -185,8 +323,8 @@ describe('FindOpeningsUseCase (DX-122)', () => {
       const appointments = new InMemoryAppointmentRepository();
       appointments.seed({
         providerId: 'prov1',
-        start: z('16:00'),
-        end: z('16:30'),
+        start: z('15:00'),
+        end: z('15:30'),
       });
       const result = await build(
         appointments,
@@ -195,8 +333,8 @@ describe('FindOpeningsUseCase (DX-122)', () => {
         withSchedule(),
       ).execute(query);
       expect(result.openings.map((o) => [o.start, o.end])).toEqual([
-        [z('15:00'), z('16:00')],
-        [z('16:30'), z('17:00')],
+        [z('14:00'), z('15:00')],
+        [z('15:30'), z('16:00')],
       ]);
     });
 
@@ -226,14 +364,14 @@ describe('FindOpeningsUseCase (DX-122)', () => {
         query,
       );
       expect(result.openings.map((o) => [o.start, o.end])).toEqual([
-        [z('14:00'), z('15:00')],
+        [z('13:00'), z('14:00')],
       ]);
     });
 
     it('sin horario configurado, exactamente como antes (regresión)', async () => {
       const plain = await build().execute(query);
       expect(plain.openings.map((o) => [o.start, o.end])).toEqual([
-        [z('14:00'), z('18:00')],
+        [z('13:00'), z('17:00')],
       ]);
     });
   });

@@ -1,3 +1,5 @@
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { clinicFiscalToFreeze } from '../../../../shared/clinic/clinic-fiscal';
 import {
   BadRequestException,
   ConflictException,
@@ -335,7 +337,8 @@ export class IssuePrescriptionUseCase {
       patientName: `${patient.firstName} ${patient.lastName}`,
       patientDocument: patientDocument(
         patient,
-        await this.documentTypeNames.get(),
+        // DX-524: el nombre de la sede que emite, congelado en la receta.
+        await this.documentTypeNames.get(issuer.location.id),
       ),
       patientBirthYear: patient.birthDate
         ? patient.birthDate.getUTCFullYear()
@@ -350,6 +353,7 @@ export class IssuePrescriptionUseCase {
       professionalSpecialty: trimmedOrNull(issuer.professional.specialty),
       professionalEmail: issuer.professional.email,
       clinicName: issuer.clinicName,
+      clinicFiscal: clinicFiscalToFreeze(issuer.clinicFiscal),
       locationName: issuer.location.name,
       locationAddress: issuer.location.address,
       notes: trimmedOrNull(input.notes),
@@ -459,6 +463,7 @@ export class VoidPrescriptionUseCase {
     private readonly repo: PrescriptionRepository,
     @Inject(PRESCRIPTION_CLOCK)
     private readonly now: PrescriptionClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   /**
@@ -478,6 +483,9 @@ export class VoidPrescriptionUseCase {
     if (!current) {
       throw new NotFoundException(PRESCRIPTION_NOT_FOUND_MESSAGE);
     }
+    // SEC-014: la receta se lee desde toda la clínica (ficha), pero se anula
+    // solo desde una sede permitida, como un abono (DX-089-bis).
+    this.tenantContext.assertRecordLocationAllowed(current.locationId);
     if (
       actor.role !== ClinicRole.ADMIN &&
       current.professionalId !== actor.userId

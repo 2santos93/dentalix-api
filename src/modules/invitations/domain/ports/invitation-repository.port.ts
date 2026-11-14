@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, Prisma } from '@prisma/client';
 import { ClinicInvitation } from '../entities/clinic-invitation.entity';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
@@ -97,15 +97,6 @@ export interface InvitationRepository {
    */
   hasOtherActiveMemberships(userId: string): Promise<boolean>;
 
-  /**
-   * Revoca la invitación PENDIENTE de ese correo, si existe (INVITATION_REPLACED
-   * por cada una). Devuelve los ids revocados.
-   */
-  revokePendingByEmail(
-    email: string,
-    audit: AuditRequestContext,
-  ): Promise<string[]>;
-
   /** Revoca la invitación por id (INVITATION_REVOKED). Devuelve si afectó una fila. */
   revokeById(id: string, audit: AuditRequestContext): Promise<boolean>;
 
@@ -117,11 +108,15 @@ export interface InvitationRepository {
    * revocada (caducada o no) le pone un token y una caducidad nuevos. El hash
    * anterior se sobrescribe, así que el enlace viejo deja de existir. `null`
    * si no hay ninguna invitación así con ese id en el tenant en contexto.
+   * DX-149-bis: `enqueue` (el email con el enlace nuevo) corre en la MISMA
+   * transacción, tras el cambio de token: si lanza (p. ej. el tope del
+   * email), no cambia nada y el enlace vigente sigue valiendo.
    */
   reissue(
     id: string,
     input: { tokenHash: string; expiresAt: Date },
     audit: AuditRequestContext,
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<ClinicInvitation | null>;
 
   /**
@@ -131,9 +126,18 @@ export interface InvitationRepository {
    */
   findTenantName(): Promise<string | null>;
 
-  /** Alta de la invitación (INVITATION_SENT con el rol). */
-  create(
+  /**
+   * Alta de la invitación (INVITATION_SENT con el rol) con el `id` elegido por
+   * quien llama, en UNA transacción (DX-149-bis): revoca antes la pendiente
+   * del mismo correo (INVITATION_REPLACED, como mucho una por el índice único
+   * parcial) y, tras el alta, ejecuta `inTx` con los ids revocados (cancelar
+   * sus emails, encolar el nuevo). Si `inTx` lanza, no cambia nada: la
+   * anterior sigue viva con su email. Dos altas a la vez del mismo correo: la
+   * segunda choca con el índice único (P2002) y se deshace entera.
+   */
+  createReplacingPending(
     input: {
+      id: string;
       email: string;
       fullName: string;
       role: ClinicRole;
@@ -142,6 +146,10 @@ export interface InvitationRepository {
       invitedById?: string;
     },
     audit: AuditRequestContext,
+    inTx?: (
+      tx: Prisma.TransactionClient,
+      revokedIds: string[],
+    ) => Promise<void>,
   ): Promise<ClinicInvitation>;
 
   /**

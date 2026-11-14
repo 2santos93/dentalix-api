@@ -1,15 +1,14 @@
 import { TreatmentPlanStatus } from '@prisma/client';
 import { PLAN_STATUS_LABELS } from '../../treatment-plans/domain/plan-status-machine';
+import { moneyWithCode } from '../../../shared/format/money-with-code';
+import type { CurrencyTexts } from '../../../shared/format/currency-text';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 import type { AllocationViolation } from './allocation-rules';
 
 // Mensajes de la imputación de abonos a ítems (DX-051, spec §5.3). Los
-// importes salen con 2 decimales y punto, sin miles ni símbolo: formato neutro
-// de locale a propósito.
-
-/** Céntimos enteros -> «1234.50». */
-export function formatCents(cents: number): string {
-  return (cents / 100).toFixed(2);
-}
+// importes salen con el formato de la sede del abono y el código ISO de la
+// moneda («USD 1,234.50», «1.234,50 EUR») (DX-354b) o, si la clínica le dio
+// uno, con el texto propio de la moneda («Bs. 1.234,50») (DX-517-quater).
 
 export const ALLOCATION_PAYMENT_NOT_FOUND = 'Abono no encontrado.';
 export const ALLOCATION_MIGRATED_BALANCE =
@@ -23,6 +22,8 @@ export const ALLOCATION_DUPLICATE_ITEM =
 export const ALLOCATION_TOO_MANY_LINES = 'Como máximo 200 ítems por abono.';
 export const ALLOCATION_MODE_MISMATCH =
   'Con el reparto automático no se envían importes; con el manual, sí.';
+export const ALLOCATION_OVER_CREDIT_OUT =
+  'Esa imputación dejaría imputado dinero que ya se devolvió o traspasó del saldo a favor de este plan. Reduce los importes y vuelve a guardar.';
 export const ALLOCATION_ITEM_NOT_IN_PLAN =
   'El ítem no es de este plan o ya no existe.';
 export const ALLOCATION_ITEM_PROPOSED =
@@ -48,16 +49,34 @@ export function allocationNoRate(
 export function allocationOverItem(
   freeCents: number,
   currency: string,
+  fmt: RegionalFormat,
+  texts: CurrencyTexts | null = null,
 ): string {
-  return `Un ítem admite como máximo ${formatCents(freeCents)} ${currency}: es lo que le queda por cubrir.`;
+  return `Un ítem admite como máximo ${moneyWithCode(freeCents / 100, currency, fmt, texts)}: es lo que le queda por cubrir.`;
 }
 
 export function allocationOverPayment(
   sumCents: number,
   baseCents: number,
   currency: string,
+  fmt: RegionalFormat,
+  texts: CurrencyTexts | null = null,
 ): string {
-  return `La suma imputada (${formatCents(sumCents)} ${currency}) supera el abono convertido a la moneda del plan (${formatCents(baseCents)} ${currency}).`;
+  return `La suma imputada (${moneyWithCode(sumCents / 100, currency, fmt, texts)}) supera el abono convertido a la moneda del plan (${moneyWithCode(baseCents / 100, currency, fmt, texts)}).`;
+}
+
+/** DX-399-bis: parte del abono ya se devolvió o traspasó y no se puede imputar. */
+export function allocationOverNet(
+  sumCents: number,
+  baseCents: number,
+  creditOutCents: number,
+  currency: string,
+  fmt: RegionalFormat,
+  texts: CurrencyTexts | null = null,
+): string {
+  const money = (cents: number) =>
+    moneyWithCode(cents / 100, currency, fmt, texts);
+  return `La suma imputada (${money(sumCents)}) supera lo que queda a cuenta de este abono: de ${money(baseCents)}, ${money(creditOutCents)} ya se devolvieron o traspasaron del saldo a favor (máximo ${money(Math.max(0, baseCents - creditOutCents))}).`;
 }
 
 /**
@@ -68,6 +87,8 @@ export function allocationViolationMessage(
   violation: AllocationViolation,
   currency: string,
   baseCents: number,
+  fmt: RegionalFormat,
+  texts: CurrencyTexts | null = null,
 ): string {
   switch (violation.code) {
     case 'DUPLICATE':
@@ -79,12 +100,23 @@ export function allocationViolationMessage(
     case 'PROPOSED':
       return ALLOCATION_ITEM_PROPOSED;
     case 'OVER_ITEM':
-      return allocationOverItem(violation.freeCents ?? 0, currency);
+      return allocationOverItem(violation.freeCents ?? 0, currency, fmt, texts);
     case 'OVER_PAYMENT':
       return allocationOverPayment(
         violation.sumCents ?? 0,
         baseCents,
         currency,
+        fmt,
+        texts,
+      );
+    case 'OVER_NET':
+      return allocationOverNet(
+        violation.sumCents ?? 0,
+        baseCents,
+        violation.creditOutCents ?? 0,
+        currency,
+        fmt,
+        texts,
       );
     case 'NO_RATE':
       throw new Error('NO_RATE se responde antes de validar las líneas');

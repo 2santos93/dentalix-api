@@ -1,5 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import {
@@ -12,7 +13,7 @@ import {
   REGIONAL_TOKYO_FIXTURE,
   legacyLocationInsert,
   locationBody,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
 } from './support/location-fixtures';
 
 // GLOBAL-G1 fase 1 (spec §3.4, R15, R20): la zona es un dato de la sede. El
@@ -73,12 +74,12 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
     const res = await as(api().put('/api/v1/locations/schedule'), mainId)
       .send({ ranges: WEEK })
       .expect(200);
-    expect(res.body).toEqual({ timezone: 'America/Bogota', ranges: WEEK });
+    expect(res.body).toEqual({ timezone: 'America/Caracas', ranges: WEEK });
   });
 
   it("PUT schedule with the location's zone is 200 (old web)", async () => {
     await as(api().put('/api/v1/locations/schedule'), mainId)
-      .send({ timezone: 'America/Bogota', ranges: [] })
+      .send({ timezone: 'America/Caracas', ranges: [] })
       .expect(200);
   });
 
@@ -94,7 +95,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
       api().get('/api/v1/locations/schedule'),
       mainId,
     ).expect(200);
-    expect(after.body).toEqual({ timezone: 'America/Bogota', ranges: WEEK });
+    expect(after.body).toEqual({ timezone: 'America/Caracas', ranges: WEEK });
     expect(
       (
         await raw.location.findUniqueOrThrow({
@@ -102,7 +103,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
           select: { timeZone: true },
         })
       ).timeZone,
-    ).toBe('America/Bogota');
+    ).toBe('America/Caracas');
   });
 
   it('creating a location writes location_schedules.timezone equal to its zone', async () => {
@@ -123,7 +124,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
     // Una réplica antigua (o un dato viejo) dejó otra zona en el horario.
     await raw.locationSchedule.updateMany({
       where: { locationId: tokyoId },
-      data: { timezone: 'America/Bogota' },
+      data: { timezone: 'America/Caracas' },
     });
     const res = await as(
       api().get('/api/v1/locations/schedule'),
@@ -143,7 +144,7 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
       raw,
       clinic.tenantId,
       'Antigua',
-      REGIONAL_BOGOTA_FIXTURE.country,
+      REGIONAL_CARACAS_FIXTURE.country,
     );
     const res = await as(api().put('/api/v1/locations/schedule'), legacyId)
       .send({ ranges: WEEK })
@@ -153,10 +154,46 @@ describe('Horario de la sede sin zona propia (e2e, G1)', () => {
       locationId: legacyId,
     });
     await as(api().put('/api/v1/locations/schedule'), legacyId)
-      .send({ timezone: 'America/Bogota', ranges: WEEK })
+      .send({ timezone: 'America/Caracas', ranges: WEEK })
       .expect(400);
     expect(
       await raw.locationSchedule.count({ where: { locationId: legacyId } }),
     ).toBe(0);
+  });
+
+  // DX-352: la respuesta está en el contrato OpenAPI (antes salía sin esquema
+  // y la web tipaba `BusinessHours` a mano), y lo publicado es lo que devuelve.
+  it('OpenAPI: GET es LocationScheduleDto o null, PUT es LocationScheduleDto, y la respuesta real tiene esa forma', async () => {
+    const doc = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().build(),
+    );
+    const ref = '#/components/schemas/LocationScheduleDto';
+    type Ok = { content?: Record<string, { schema?: unknown }> };
+    const ok = (method: 'get' | 'put'): unknown =>
+      (
+        doc.paths['/api/v1/locations/schedule'][method]?.responses[
+          '200'
+        ] as unknown as Ok | undefined
+      )?.content?.['application/json']?.schema;
+    expect(ok('get')).toEqual({ nullable: true, allOf: [{ $ref: ref }] });
+    expect(ok('put')).toEqual({ $ref: ref });
+    const dto = doc.components?.schemas?.LocationScheduleDto as {
+      required: string[];
+      properties: Record<string, { type?: string; items?: { $ref: string } }>;
+    };
+    expect(dto.properties.timezone.type).toBe('string');
+    expect(dto.properties.ranges.items?.$ref).toBe(
+      '#/components/schemas/ScheduleRangeDto',
+    );
+    expect([...dto.required].sort()).toEqual(['ranges', 'timezone']);
+
+    const res = await as(
+      api().get('/api/v1/locations/schedule'),
+      mainId,
+    ).expect(200);
+    expect(Object.keys(res.body as object).sort()).toEqual(
+      Object.keys(dto.properties).sort(),
+    );
   });
 });

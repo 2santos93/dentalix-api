@@ -4,6 +4,14 @@ import { CollectionsModule } from '../collections/collections.module';
 import { PatientsController } from './presentation/patients.controller';
 import { PatientCommunicationController } from './presentation/patient-communication.controller';
 import { PatientResponsiblePartiesController } from './presentation/patient-responsible-parties.controller';
+import { PatientMajorityReviewController } from './presentation/patient-majority-review.controller';
+import {
+  GetMajorityReviewUseCase,
+  ListComingOfAgeUseCase,
+  ReviewMajorityUseCase,
+} from './application/use-cases/majority-review.use-cases';
+import { MAJORITY_REVIEW_REPOSITORY } from './domain/ports/majority-review-repository.port';
+import { PrismaMajorityReviewRepository } from './infrastructure/repositories/prisma-majority-review.repository';
 import {
   CreateResponsiblePartyUseCase,
   ListResponsiblePartiesUseCase,
@@ -39,14 +47,25 @@ import {
   GetPatientSettingsUseCase,
   UpdatePatientSettingsUseCase,
 } from './application/use-cases/patient-settings.use-cases';
+import {
+  GetPatientLanguagesUseCase,
+  UpdatePatientLanguagesUseCase,
+} from './application/use-cases/patient-languages.use-cases';
 import { PATIENT_SETTINGS_REPOSITORY } from './domain/ports/patient-settings-repository.port';
 import { PrismaPatientSettingsRepository } from './infrastructure/repositories/prisma-patient-settings.repository';
+import {
+  GetRetentionSettingsUseCase,
+  UpdateRetentionSettingsUseCase,
+} from './application/use-cases/retention-settings.use-cases';
+import { CLINIC_RETENTION_SETTINGS_REPOSITORY } from './domain/ports/clinic-retention-settings-repository.port';
+import { PrismaClinicRetentionSettingsRepository } from './infrastructure/repositories/prisma-clinic-retention-settings.repository';
 import {
   GetDocumentTypeNamesUseCase,
   UpdateDocumentTypeNamesUseCase,
 } from './application/use-cases/document-type-names.use-cases';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { PATIENT_REPOSITORY } from './domain/ports/patient-repository.port';
+import { clinicalRetentionConfigProvider } from './domain/retention/clinical-retention-config';
 import { PATIENT_PUBLIC_LINKS_READER } from './domain/ports/patient-public-links.port';
 import { PrismaPatientPublicLinksRepository } from './infrastructure/repositories/prisma-patient-public-links.repository';
 import { PrismaPatientRepository } from './infrastructure/repositories/prisma-patient.repository';
@@ -55,6 +74,8 @@ import { PrismaReferenceLookup } from './infrastructure/adapters/prisma-referenc
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 
+import { JobsModule } from '../jobs/jobs.module';
+import { PatientPhoneE164Jobs } from './infrastructure/patient-phone-e164.jobs';
 import { PatientCoveragesModule } from '../patient-coverages/patient-coverages.module';
 import { PatientAgreementsModule } from '../patient-agreements/patient-agreements.module';
 
@@ -67,6 +88,8 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
   // DX-150: CollectionsModule da la marca «Saldo vencido» de la ficha.
   imports: [
     JwtModule.register({}),
+    // DX-224: trabajo que rellena `phoneE164` (barrido horario + al arrancar).
+    JobsModule,
     CollectionsModule,
     PatientCoveragesModule,
     PatientAgreementsModule,
@@ -74,6 +97,9 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     DocumentTypeNamesModule,
   ],
   controllers: [
+    // DX-342: antes que PatientsController, para que `GET
+    // /patients/coming-of-age` no caiga en `GET /patients/:id`.
+    PatientMajorityReviewController,
     PatientsController,
     PatientCommunicationController,
     PatientResponsiblePartiesController,
@@ -90,6 +116,8 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     PartiallySuppressPatientUseCase,
     ListRetentionExpiringUseCase,
     { provide: RETENTION_CLOCK, useValue: () => new Date() },
+    // DX-330: mínimo de plataforma del plazo de conservación de la HC.
+    clinicalRetentionConfigProvider,
     // DX-128: bloque «Comunicaciones» de la ficha.
     GetPatientCommunicationUseCase,
     GetPatientOptOutWarningsUseCase,
@@ -101,12 +129,29 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
     UpdateResponsiblePartyUseCase,
     RemoveResponsiblePartyUseCase,
     { provide: RESPONSIBLES_CLOCK, useValue: () => new Date() },
+    // DX-342: paso a la mayoría de edad con responsable.
+    ListComingOfAgeUseCase,
+    GetMajorityReviewUseCase,
+    ReviewMajorityUseCase,
+    {
+      provide: MAJORITY_REVIEW_REPOSITORY,
+      useClass: PrismaMajorityReviewRepository,
+    },
     // DX-328: mayoría de edad de la clínica (Ajustes).
     GetPatientSettingsUseCase,
     UpdatePatientSettingsUseCase,
+    GetPatientLanguagesUseCase,
+    UpdatePatientLanguagesUseCase,
     {
       provide: PATIENT_SETTINGS_REPOSITORY,
       useClass: PrismaPatientSettingsRepository,
+    },
+    // DX-330: plazo de conservación de la HC de la clínica (Ajustes).
+    GetRetentionSettingsUseCase,
+    UpdateRetentionSettingsUseCase,
+    {
+      provide: CLINIC_RETENTION_SETTINGS_REPOSITORY,
+      useClass: PrismaClinicRetentionSettingsRepository,
     },
     // DX-327: nombre local de cada tipo de documento (Ajustes).
     GetDocumentTypeNamesUseCase,
@@ -125,6 +170,7 @@ import { PatientAgreementsModule } from '../patient-agreements/patient-agreement
       provide: DefaultPhoneRegionReader,
       useExisting: PATIENT_COMMUNICATION_REPOSITORY,
     },
+    PatientPhoneE164Jobs,
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on PatientsController.

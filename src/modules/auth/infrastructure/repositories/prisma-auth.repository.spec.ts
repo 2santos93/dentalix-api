@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../../../patients/domain/responsible-parties/majority-age';
 import { PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS } from '../../../prescriptions/domain/prescription-settings';
+import { PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS } from '../../../treatment-plans/domain/quote-validity';
 import { PrismaAuthRepository } from './prisma-auth.repository';
 
 describe('PrismaAuthRepository — refresh-token denylist', () => {
@@ -11,7 +12,11 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
       findUnique: jest.fn(),
     };
     const prisma = { revokedToken } as never;
-    const repo = new PrismaAuthRepository(prisma);
+    const repo = new PrismaAuthRepository(
+      prisma,
+      { platformMinYears: 15 },
+      false,
+    );
     const exp = new Date('2030-01-01T00:00:00Z');
 
     await repo.revokeToken('jti-1', exp);
@@ -40,7 +45,11 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
       deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     };
     const prisma = { revokedToken } as never;
-    const repo = new PrismaAuthRepository(prisma);
+    const repo = new PrismaAuthRepository(
+      prisma,
+      { platformMinYears: 15 },
+      false,
+    );
     const exp = new Date('2030-01-01T00:00:00Z');
 
     // INSERT (no upsert): la PK de `jti` es la que serializa dos refresh
@@ -59,7 +68,13 @@ describe('PrismaAuthRepository — refresh-token denylist', () => {
       create: jest.fn().mockRejectedValue(boom),
       deleteMany: jest.fn(),
     };
-    const repo = new PrismaAuthRepository({ revokedToken } as never);
+    const repo = new PrismaAuthRepository(
+      { revokedToken } as never,
+      {
+        platformMinYears: 15,
+      },
+      false,
+    );
 
     await expect(
       repo.consumeRefreshToken('jti-1', new Date('2030-01-01T00:00:00Z')),
@@ -79,7 +94,13 @@ describe('PrismaAuthRepository — createClinicWithOwner', () => {
     const prisma = {
       $transaction: (fn: (client: typeof tx) => Promise<unknown>) => fn(tx),
     };
-    const repo = new PrismaAuthRepository(prisma as never);
+    const repo = new PrismaAuthRepository(
+      prisma as never,
+      {
+        platformMinYears: 20,
+      },
+      false,
+    );
 
     await expect(
       repo.createClinicWithOwner({
@@ -103,12 +124,14 @@ describe('PrismaAuthRepository — createClinicWithOwner', () => {
     expect(tx.tenant.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         majorityAge: PLATFORM_DEFAULT_MAJORITY_AGE,
+        clinicalRecordRetentionYears: 20,
         prescriptionPrintQuantityInWords:
           PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.printQuantityInWords,
         prescriptionRequireClinicalRecordNumber:
           PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.requireClinicalRecordNumber,
         prescriptionValidityDays:
           PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.validityDays,
+        quoteValidityDays: PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
       }) as unknown,
       select: { id: true },
     });

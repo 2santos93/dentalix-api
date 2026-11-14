@@ -2,17 +2,16 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsEnum,
-  IsNumber,
   IsOptional,
   IsString,
   Matches,
-  Min,
   MinLength,
 } from 'class-validator';
 import { CatalogKind } from '@prisma/client';
+import { NoteTemplateLinkField } from './note-template-link.field';
 import { HEX_COLOR_PATTERN } from '../../application/use-cases/create-catalog-item.use-case';
 import {
-  IsMoney,
+  IsNonNegativeMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
 
@@ -64,9 +63,7 @@ export class CreateCatalogItemDto {
     maximum: MONEY_MAX,
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  @IsMoney()
+  @IsNonNegativeMoney()
   defaultPrice?: number;
 
   @ApiPropertyOptional({
@@ -82,4 +79,7 @@ export class CreateCatalogItemDto {
   @IsOptional()
   @IsBoolean()
   active?: boolean;
+
+  @NoteTemplateLinkField()
+  clinicalNoteTemplateId?: string | null;
 }

@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { TreatmentPlanStatus } from '@prisma/client';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { isPlanBillable } from '../../../treatment-plans/domain/plan-status-machine';
 import { allocationVersion } from '../../domain/allocation-rules';
@@ -28,6 +29,7 @@ import {
   GetPaymentAllocationsUseCase,
   type PaymentAllocationsView,
 } from './get-payment-allocations.use-case';
+import { toCents } from '../../../../shared/money/money';
 
 export interface ReplacePaymentAllocationsCommand {
   expectedVersion: string;
@@ -63,8 +65,9 @@ export class ReplacePaymentAllocationsUseCase {
   async execute(
     paymentId: string,
     command: ReplacePaymentAllocationsCommand,
-    actorId: string,
+    audit: AuditRequestContext,
   ): Promise<ReplacedPaymentAllocations> {
+    const actorId = audit.actor.userId;
     const found = await this.repo.findAllocationTarget(paymentId);
     const target = await this.withBase(checkTarget(found));
     const planId = target.treatmentPlanId as string;
@@ -77,10 +80,11 @@ export class ReplacePaymentAllocationsUseCase {
         command.mode === 'MANUAL'
           ? (command.allocations ?? []).map((l) => ({
               itemId: l.treatmentPlanItemId,
-              cents: Math.round(l.amount * 100),
+              cents: toCents(l.amount),
             }))
           : [],
       actorId,
+      audit,
     });
 
     // Si el reparto falla, la respuesta (y el `after` de la auditoría) es la
@@ -129,6 +133,7 @@ export class ReplacePaymentAllocationsUseCase {
       return {
         paymentId: target.paymentId,
         receiptNumber: target.receiptNumber,
+        locationId: target.locationId,
         treatmentPlanId: target.treatmentPlanId as string,
         paymentAmount: target.amount,
         paymentCurrency: target.currency,
@@ -139,6 +144,8 @@ export class ReplacePaymentAllocationsUseCase {
         manual,
         allocated: 0,
         unallocated: planAmount,
+        creditOut: 0,
+        onAccount: planAmount,
         version: allocationVersion({ manual, lines: [] }),
         allocations: [],
         items: [],

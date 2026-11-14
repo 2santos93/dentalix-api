@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
 import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import { NotFoundException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
@@ -9,6 +10,8 @@ import type {
 } from '../../domain/ports/account-statement-repository.port';
 import type { StatementFamilyRepository } from '../../domain/ports/statement-family-repository.port';
 import type { StatementPaymentRow } from '../../domain/entities/account-statement.entity';
+import { toCents } from '../../../../shared/money/money';
+import type { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
 const NOW = new Date('2026-03-01T15:00:00.000Z');
 
@@ -16,7 +19,7 @@ function payment(
   id: string,
   planId: string,
   amount: number,
-  currency = 'COP',
+  currency = 'USD',
 ): StatementPaymentRow {
   return {
     id,
@@ -30,12 +33,17 @@ function payment(
     location: { id: 'l-1', name: 'Sede' },
     createdById: 'u-1',
     createdAt: new Date('2026-02-10T17:00:00.000Z'),
-    timeZone: 'America/Bogota',
+    timeZone: 'America/Caracas',
     voidedAt: null,
     voidedBy: null,
     voidReason: null,
   };
 }
+
+// Sin saldos conocidos el cálculo usa sus propias cifras (camino de la cartera).
+const noPlanBalances = {
+  computeMany: () => Promise.resolve(new Map()),
+} as unknown as GetPlanBalanceUseCase;
 
 function statement(
   id: string,
@@ -44,7 +52,12 @@ function statement(
   payments: StatementPaymentRow[],
 ): AccountStatementData {
   return {
-    clinic: { name: 'Clínica Uno', logoUrl: null },
+    clinic: { name: 'Clínica Uno', logoUrl: null, fiscal: EMPTY_CLINIC_FISCAL },
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     patient: {
       id,
       firstName,
@@ -53,11 +66,12 @@ function statement(
       docTypeLabel: null,
       docNumber: `doc-${id}`,
     },
+    planBalances: [],
     snapshot: {
       plans: plans.map((p) => ({
         id: p.id,
         status: 'ACCEPTED',
-        currency: p.currency ?? 'COP',
+        currency: p.currency ?? 'USD',
         createdAt: new Date('2026-01-01'),
         billable: p.billable,
       })),
@@ -72,7 +86,7 @@ const MOTHER = statement('mother', 'Claudia', [], []);
 MOTHER.snapshot.openingBalances = [
   {
     id: 'ob-1',
-    currency: 'COP',
+    currency: 'USD',
     amount: 50000,
     asOfDate: '2025-11-30',
     asOfDateApproximate: false,
@@ -105,9 +119,17 @@ const DATA: Record<string, AccountStatementData> = {
   ),
 };
 
+const loadMember = jest.fn((id: string) => Promise.resolve(DATA[id] ?? null));
+
 function makeRepos() {
   const repo: AccountStatementRepository = {
-    load: (id) => Promise.resolve(DATA[id] ?? null),
+    load: loadMember,
+    loadRegional: () =>
+      Promise.resolve({
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h12',
+      }),
     loadBillablePlans: jest.fn(),
   };
   const family: StatementFamilyRepository = {
@@ -146,7 +168,12 @@ function makeRepos() {
 describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
   it('suma los saldos de sus pacientes con subtotal por paciente y cuadra al céntimo con los individuales', async () => {
     const { repo, family } = makeRepos();
-    const uc = new GetFamilyAccountStatementUseCase(repo, family, () => NOW);
+    const uc = new GetFamilyAccountStatementUseCase(
+      repo,
+      family,
+      () => NOW,
+      noPlanBalances,
+    );
     const out = await uc.execute('mother');
 
     expect(out.payer).toEqual({
@@ -161,12 +188,14 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
     ]);
     expect(out.members[1].summary).toEqual([
       {
-        currency: 'COP',
+        currency: 'USD',
         budgeted: 350000.35,
         openingBalance: 0,
         openingPending: 0,
         paid: 100000.25,
         balance: 250000.1,
+        convertedPaid: 100000.25,
+        convertedBalance: 250000.1,
         overdueAmount: 0,
       },
     ]);
@@ -177,6 +206,7 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
       () => NOW,
       family,
       new FixedDocumentTypeNamesReader(),
+      noPlanBalances,
     );
     const actor = { userId: 'u-1', role: ClinicRole.ADMIN };
     const byCurrency = new Map<string, number>();
@@ -184,23 +214,14 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
       for (const s of (await individual.execute(id, {}, actor)).summary) {
         byCurrency.set(
           s.currency,
-          (byCurrency.get(s.currency) ?? 0) + Math.round(s.balance * 100),
+          (byCurrency.get(s.currency) ?? 0) + toCents(s.balance),
         );
       }
     }
-    expect(
-      out.totals.map((t) => [t.currency, Math.round(t.balance * 100)]),
-    ).toEqual([...byCurrency.entries()].sort());
+    expect(out.totals.map((t) => [t.currency, toCents(t.balance)])).toEqual(
+      [...byCurrency.entries()].sort(),
+    );
     expect(out.totals).toEqual([
-      {
-        currency: 'COP',
-        budgeted: 1550000.55,
-        openingBalance: 50000,
-        openingPending: 50000,
-        paid: 550000.3,
-        balance: 1050000.25,
-        overdueAmount: 0,
-      },
       {
         currency: 'EUR',
         budgeted: 80.5,
@@ -208,9 +229,85 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
         openingPending: 0,
         paid: 20.25,
         balance: 60.25,
+        convertedPaid: 20.25,
+        convertedBalance: 60.25,
+        overdueAmount: 0,
+      },
+      {
+        currency: 'USD',
+        budgeted: 1550000.55,
+        openingBalance: 50000,
+        openingPending: 50000,
+        paid: 550000.3,
+        balance: 1050000.25,
+        convertedPaid: 550000.3,
+        convertedBalance: 1050000.25,
         overdueAmount: 0,
       },
     ]);
+  });
+
+  it('DX-354: lleva la región de la sede del documento', async () => {
+    const { repo, family } = makeRepos();
+    const uc = new GetFamilyAccountStatementUseCase(
+      repo,
+      family,
+      () => NOW,
+      noPlanBalances,
+    );
+    loadMember.mockClear();
+    const out = await uc.execute('mother');
+    // Una sola lectura de la región: ningún miembro la pide.
+    expect(loadMember).toHaveBeenCalledTimes(3);
+    for (const call of loadMember.mock.calls) {
+      expect(call).toEqual([expect.any(String), { regional: false }]);
+    }
+    expect(out.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
+  });
+
+  it('DX-472: cuenta los abonos sin tasa de toda la familia, que los impresos avisan', async () => {
+    const { repo, family } = makeRepos();
+    const withoutRate = {
+      paymentId: 'x',
+      amount: 3600,
+      currency: 'VES',
+      paidOn: '2026-02-01',
+    };
+    const balances = {
+      computeMany: () =>
+        Promise.resolve(
+          new Map([
+            [
+              'uno',
+              {
+                paymentsWithoutRate: [withoutRate, withoutRate],
+                rateProviderTimedOut: false,
+              },
+            ],
+            [
+              'dos',
+              {
+                paymentsWithoutRate: [withoutRate],
+                rateProviderTimedOut: false,
+              },
+            ],
+          ]),
+        ),
+    } as unknown as GetPlanBalanceUseCase;
+
+    const out = await new GetFamilyAccountStatementUseCase(
+      repo,
+      family,
+      () => NOW,
+      balances,
+    ).execute('mother');
+
+    expect(out.paymentsWithoutRateCount).toBe(3);
+    expect(out.rateProviderTimedOut).toBe(false);
   });
 
   it('solo importes y nombres: nada de documentos, planes ni movimientos', async () => {
@@ -219,6 +316,7 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
       repo,
       family,
       () => NOW,
+      noPlanBalances,
     ).execute('mother');
     const json = JSON.stringify(out);
     expect(json).not.toContain('doc-');
@@ -229,9 +327,12 @@ describe('GetFamilyAccountStatementUseCase (DX-203)', () => {
   it('un pagador que no es de esta clínica: 404', async () => {
     const { repo, family } = makeRepos();
     await expect(
-      new GetFamilyAccountStatementUseCase(repo, family, () => NOW).execute(
-        'otra',
-      ),
+      new GetFamilyAccountStatementUseCase(
+        repo,
+        family,
+        () => NOW,
+        noPlanBalances,
+      ).execute('otra'),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

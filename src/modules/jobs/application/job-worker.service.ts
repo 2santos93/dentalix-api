@@ -39,7 +39,7 @@ const EXHAUSTED_BATCH = 100;
  * fallo suma el intento y lo reprograma con backoff exponencial; el último lo
  * deja FAILED (cola de fallidos, GET /platform/jobs/failed). La entrega es
  * «al menos una vez» (un worker que muere a mitad deja el trabajo para cuando
- * venza su arriendo): los handlers deben ser idempotentes.
+ * venza su reserva): los handlers deben ser idempotentes.
  *
  * Apagado ordenado (SIGTERM con `enableShutdownHooks`): deja de reclamar y
  * espera a los trabajos en curso hasta JOBS_SHUTDOWN_GRACE_MS. Vive en un
@@ -161,7 +161,7 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
     clearTimeout(grace);
     if (!finished) {
       // Lo que quede vuelve a PENDING ya (con fencing), sin esperar a que
-      // venza el arriendo; su handler recibe abort y su cierre no cuenta.
+      // venza la reserva; su handler recibe abort y su cierre no cuenta.
       this.logger.warn({
         event: 'jobs.shutdown_grace_expired',
         workerId: this.config.workerId,
@@ -409,7 +409,7 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
       };
       const startedAt = Date.now();
       this.running.set(job.id, attempt);
-      // Latido: mientras el handler trabaja, el arriendo no vence.
+      // Latido: mientras el handler trabaja, la reserva no vence.
       const heartbeat = setInterval(
         () => void this.beat(job, attempt),
         this.config.heartbeatMs,
@@ -464,7 +464,7 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
         durationMs: Date.now() - startedAt,
       });
     } catch (err) {
-      // No se pudo cerrar el intento (BD caída): al vencer el arriendo, otro
+      // No se pudo cerrar el intento (BD caída): al vencer la reserva, otro
       // worker lo retoma.
       this.logger.error({
         event: 'jobs.settle_failed',
@@ -474,7 +474,7 @@ export class JobWorker implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
-  /** Renueva el arriendo; si el intento ya no es de este worker, aborta. */
+  /** Renueva la reserva; si el intento ya no es de este worker, aborta. */
   private async beat(job: ClaimedJob, attempt: RunningAttempt): Promise<void> {
     if (attempt.lost) return;
     let renewed: boolean;

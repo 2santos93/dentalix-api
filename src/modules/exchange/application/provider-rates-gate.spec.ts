@@ -1,11 +1,13 @@
 import { Logger } from '@nestjs/common';
 import {
   ExchangeRateBudgetExceededError,
+  ExchangeRateProviderNotRespondingError,
   ExchangeRateUnavailableError,
 } from '../domain/ports/exchange-rate-provider.port';
 import {
   DEFAULT_PROVIDER_RATES_LIMITS,
   loadProviderRatesLimits,
+  NOT_RESPONDING_NEGATIVE_TTL_MS,
   providerRatesLimitsProblems,
   ProviderRatesGate,
   type ProviderRatesLimits,
@@ -59,7 +61,7 @@ function setup(
 /** Deja correr el gasto del presupuesto (asíncrono) hasta llegar a `load`. */
 const settle = () => new Promise((r) => setImmediate(r));
 
-const ok = (rates: Record<string, number> = { COP: 4000 }) =>
+const ok = (rates: Record<string, number> = { USD: 4000 }) =>
   jest.fn(() => Promise.resolve(rates));
 const unavailable = () =>
   jest.fn(() =>
@@ -96,6 +98,73 @@ describe('ProviderRatesGate (SEC-054)', () => {
       expect(load).toHaveBeenCalledTimes(2);
     });
 
+    describe('DX-472: un proveedor que no contesta', () => {
+      const silent = () =>
+        jest.fn(() =>
+          Promise.reject(new ExchangeRateProviderNotRespondingError('colgado')),
+        );
+      const failed = (
+        gate: ProviderRatesGate,
+        date: string,
+        load: () => Promise<Record<string, number>>,
+      ) =>
+        expect(gate.fetch(date, A, load)).rejects.toBeInstanceOf(
+          ExchangeRateProviderNotRespondingError,
+        );
+
+      it('se reprueba al minuto y repite su error', async () => {
+        const { gate, clock } = setup({ negativeTtlMs: HOUR });
+        const load = silent();
+
+        await failed(gate, '2026-10-01', load);
+        clock.advance(NOT_RESPONDING_NEGATIVE_TTL_MS - 1);
+        await failed(gate, '2026-10-01', load);
+        expect(load).toHaveBeenCalledTimes(1);
+
+        clock.advance(1);
+        await failed(gate, '2026-10-01', load);
+        expect(load).toHaveBeenCalledTimes(2);
+      });
+
+      it('la espera se dobla hasta negativeTtlMs: una petición cada 5 s durante una hora llama unas pocas veces', async () => {
+        const { gate, clock } = setup({ negativeTtlMs: HOUR });
+        const load = silent();
+
+        for (let elapsed = 0; elapsed < HOUR; elapsed += 5_000) {
+          await failed(gate, '2026-10-01', load);
+          clock.advance(5_000);
+        }
+
+        expect(load.mock.calls.length).toBeLessThanOrEqual(6);
+      });
+
+      it('la espera es del proveedor, no del día: otro día tampoco gasta cupo', async () => {
+        const { gate } = setup();
+        const load = silent();
+
+        await failed(gate, '2026-10-01', load);
+        await failed(gate, '2026-10-02', load);
+
+        expect(load).toHaveBeenCalledTimes(1);
+      });
+
+      it('una respuesta buena borra la espera', async () => {
+        const { gate, clock } = setup({ negativeTtlMs: HOUR });
+        const load = silent();
+        await failed(gate, '2026-10-01', load);
+        clock.advance(NOT_RESPONDING_NEGATIVE_TTL_MS);
+        await failed(gate, '2026-10-01', load);
+        clock.advance(2 * NOT_RESPONDING_NEGATIVE_TTL_MS);
+
+        await gate.fetch('2026-10-01', A, () => Promise.resolve({ VES: 36 }));
+
+        await failed(gate, '2026-10-02', load);
+        clock.advance(NOT_RESPONDING_NEGATIVE_TTL_MS);
+        await failed(gate, '2026-10-02', load);
+        expect(load).toHaveBeenCalledTimes(4);
+      });
+    });
+
     it('solo vale para ese día', async () => {
       const { gate } = setup();
       await expect(
@@ -103,7 +172,7 @@ describe('ProviderRatesGate (SEC-054)', () => {
       ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
       const other = ok();
       await expect(gate.fetch('2026-10-02', A, other)).resolves.toEqual({
-        COP: 4000,
+        USD: 4000,
       });
       expect(other).toHaveBeenCalledTimes(1);
     });
@@ -127,12 +196,12 @@ describe('ProviderRatesGate (SEC-054)', () => {
       const load = jest
         .fn()
         .mockRejectedValueOnce(new Error('caída de la BD'))
-        .mockResolvedValueOnce({ COP: 1 });
+        .mockResolvedValueOnce({ USD: 1 });
       await expect(gate.fetch('2026-10-01', A, load)).rejects.toThrow(
         'caída de la BD',
       );
       await expect(gate.fetch('2026-10-01', A, load)).resolves.toEqual({
-        COP: 1,
+        USD: 1,
       });
     });
 
@@ -141,13 +210,13 @@ describe('ProviderRatesGate (SEC-054)', () => {
       await expect(
         gate.fetch('2026-10-30', A, unavailable()),
       ).rejects.toBeInstanceOf(ExchangeRateUnavailableError);
-      const load = ok({ COP: 4100 });
+      const load = ok({ USD: 4100 });
       await expect(gate.fetch('2026-10-30', PREFETCH, load)).resolves.toEqual({
-        COP: 4100,
+        USD: 4100,
       });
       expect(load).toHaveBeenCalledTimes(1);
       await expect(gate.fetch('2026-10-30', A, load)).resolves.toEqual({
-        COP: 4100,
+        USD: 4100,
       });
       expect(load).toHaveBeenCalledTimes(2);
     });
@@ -169,10 +238,10 @@ describe('ProviderRatesGate (SEC-054)', () => {
         ),
       );
       await settle();
-      resolve({ COP: 4000 });
+      resolve({ USD: 4000 });
       const results = await all;
       expect(load).toHaveBeenCalledTimes(1);
-      expect(results.every((r) => r.COP === 4000)).toBe(true);
+      expect(results.every((r) => r.USD === 4000)).toBe(true);
     });
 
     it('un fallo compartido lo reciben todas y deja la caché negativa', async () => {
@@ -268,7 +337,7 @@ describe('ProviderRatesGate (SEC-054)', () => {
       ).rejects.toBeInstanceOf(ExchangeRateBudgetExceededError);
 
       await expect(gate.fetch('2026-10-30', PREFETCH, load)).resolves.toEqual({
-        COP: 4000,
+        USD: 4000,
       });
       expect(load).toHaveBeenCalledTimes(3);
     });
@@ -279,7 +348,7 @@ describe('ProviderRatesGate (SEC-054)', () => {
       await gate.fetch('2026-10-29', PREFETCH, load);
       await gate.fetch('2026-10-30', PREFETCH, load);
       await expect(gate.fetch('2026-10-01', A, load)).resolves.toEqual({
-        COP: 4000,
+        USD: 4000,
       });
     });
 
@@ -433,28 +502,28 @@ describe('ProviderRatesGate (SEC-054)', () => {
     it('quien esperaba un día que no entró por el cupo de otra clínica lo pide con el suyo', async () => {
       const { gate } = setup({ clinicDaily: 1 });
       await gate.fetch('2000-01-01', A, ok());
-      const load = ok({ COP: 3900 });
+      const load = ok({ USD: 3900 });
       const [fromA, fromB] = await Promise.allSettled([
         gate.fetch('2000-02-01', A, load),
         gate.fetch('2000-02-01', B, load),
       ]);
       expect(fromA.status).toBe('rejected');
-      expect(fromB).toEqual({ status: 'fulfilled', value: { COP: 3900 } });
+      expect(fromB).toEqual({ status: 'fulfilled', value: { USD: 3900 } });
       expect(load).toHaveBeenCalledTimes(1);
     });
 
     it('un día que otra réplica ya guardó no gasta cupo ni llama', async () => {
       const { gate } = setup({ clinicDaily: 1 });
       const load = ok();
-      const stored = jest.fn(() => Promise.resolve({ COP: 3950 }));
+      const stored = jest.fn(() => Promise.resolve({ USD: 3950 }));
       await expect(gate.fetch('2000-03-01', A, load, stored)).resolves.toEqual({
-        COP: 3950,
+        USD: 3950,
       });
       expect(load).not.toHaveBeenCalled();
       // El cupo diario (1) sigue entero para un día sin guardar.
       await expect(
         gate.fetch('2000-03-02', A, load, () => Promise.resolve(null)),
-      ).resolves.toEqual({ COP: 4000 });
+      ).resolves.toEqual({ USD: 4000 });
       expect(load).toHaveBeenCalledTimes(1);
     });
   });

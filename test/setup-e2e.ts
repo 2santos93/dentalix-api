@@ -1,5 +1,13 @@
 import { config } from 'dotenv';
+import { installFakeNow } from './support/fake-now';
 config({ path: '.env.test' });
+
+// DX-460: E2E_FAKE_NOW mueve el reloj del proceso (ver support/fake-now.ts).
+installFakeNow();
+
+// DX-021-bis: las clínicas nuevas nacen exigiendo el MFA a sus ADMIN. Las suites
+// registran clínicas y entran con contraseña; test/mfa-policy lo enciende.
+process.env.NEW_CLINIC_REQUIRE_ADMIN_MFA ??= 'false';
 
 // Las suites e2e hacen decenas de logins/peticiones desde 127.0.0.1: con los
 // límites de producción se cortarían con 429. Si `.env.test` no los define, se
@@ -21,10 +29,14 @@ for (const policy of [
   'DIRECT_UPLOAD',
   'PATIENT_IMPORT',
   'EXCHANGE_RATES',
+  'CALLER_LOOKUP',
   'ANAMNESIS',
   'ANAMNESIS_TOKEN',
   'SIGNATURE',
   'SIGNATURE_TOKEN',
+  'PRESCRIPTION_VERIFY',
+  'BRANDING_HOST',
+  'BRANDING_MISS',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }
@@ -54,6 +66,10 @@ process.env.LOG_LEVEL ??= 'silent';
 process.env.MAIL_RECIPIENT_COOLDOWN_SECONDS ??= '0';
 process.env.MAIL_RECIPIENT_DAILY_LIMIT ??= '1000';
 process.env.MAIL_TENANT_DAILY_LIMIT ??= '1000';
+// DX-149-quater: tope de restablecimientos por usuario (todas sus clínicas):
+// el máximo permitido, porque los e2e piden muchos para el mismo usuario. El
+// real (5) se prueba en test/password-reset-quota.e2e-spec.ts.
+process.env.PASSWORD_RESET_USER_DAILY_LIMIT ??= '20';
 
 // Tope por destinatario de los emails de PLATAFORMA (DX-144): los e2e se
 // registran una y otra vez con los mismos correos, y las filas de

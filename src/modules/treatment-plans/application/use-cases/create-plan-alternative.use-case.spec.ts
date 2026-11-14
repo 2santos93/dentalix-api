@@ -17,7 +17,7 @@ describe('CreatePlanAlternativeUseCase (DX-040)', () => {
     const source = repo.seedPlan({
       id: 'a',
       status: PRESENTED,
-      currency: 'COP',
+      currency: 'USD',
       patientId: 'p1',
     });
     repo.seedItem({
@@ -35,7 +35,7 @@ describe('CreatePlanAlternativeUseCase (DX-040)', () => {
     expect(created).toMatchObject({
       status: DRAFT,
       patientId: 'p1',
-      currency: 'COP',
+      currency: 'USD',
       optionGroupId: 'a',
       optionLabel: 'Opción B',
       createdById: 'dra',

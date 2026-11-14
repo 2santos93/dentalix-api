@@ -1,14 +1,17 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsInt,
+  IsOptional,
   Max,
   Min,
 } from 'class-validator';
 import {
+  CALENDAR_ALARM_RANGE_MESSAGE,
   LEAD_RANGE_MESSAGE,
+  MAX_CALENDAR_ALARM_HOURS,
   MAX_LEAD_HOURS,
   MAX_REMINDER_LEADS,
   MIN_LEAD_HOURS,
@@ -32,6 +35,15 @@ export class LocationReminderSettingsDto {
     example: [48, 2],
   })
   leadHours!: number[];
+
+  @ApiProperty({
+    minimum: 0,
+    maximum: MAX_CALENDAR_ALARM_HOURS,
+    description:
+      'DX-469: horas antes de la cita de la alarma del evento «Añadir a mi calendario» (0 = sin alarma). Por defecto 24.',
+    example: 24,
+  })
+  calendarAlarmHours!: number;
 
   @ApiProperty({
     type: String,
@@ -64,4 +76,17 @@ export class UpdateReminderSettingsDto {
   @Min(MIN_LEAD_HOURS, { each: true, message: LEAD_RANGE_MESSAGE })
   @Max(MAX_LEAD_HOURS, { each: true, message: LEAD_RANGE_MESSAGE })
   leadHours!: number[];
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: MAX_CALENDAR_ALARM_HOURS,
+    description:
+      'DX-469: horas antes de la alarma de «Añadir a mi calendario» (0 la quita). Sin el campo, se conserva.',
+    example: 24,
+  })
+  @IsOptional()
+  @IsInt({ message: CALENDAR_ALARM_RANGE_MESSAGE })
+  @Min(0, { message: CALENDAR_ALARM_RANGE_MESSAGE })
+  @Max(MAX_CALENDAR_ALARM_HOURS, { message: CALENDAR_ALARM_RANGE_MESSAGE })
+  calendarAlarmHours?: number;
 }

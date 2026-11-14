@@ -249,14 +249,14 @@ describe('DX-380 · tareas programadas singleton (int)', () => {
     await a.worker.drain();
   });
 
-  it('un RUNNING huérfano (worker muerto) no frena la tarea para siempre: al vencer su arriendo se cierra y el tick siguiente encola', async () => {
+  it('un RUNNING huérfano (worker muerto) no frena la tarea para siempre: al vencer su reserva se cierra y el tick siguiente encola', async () => {
     const job = `${PREFIX}.orphan-sweep`;
     const schedule = `${PREFIX}.orphan-sweep.every-minute`;
     const sweep = slowSweep(job, schedule, true);
     sweep.gate.resolve();
     await a.worker.runOnce();
     // El trabajo del tick anterior lo reclamó un worker que murió: RUNNING,
-    // su único intento gastado y el arriendo aún vigente.
+    // su único intento gastado y la reserva aún vigente.
     await moveTick(schedule, pastTick(2));
     await new PrismaJobRepository(a.prisma).fireDueSchedules([
       toFire(schedule, job),
@@ -267,11 +267,11 @@ describe('DX-380 · tareas programadas singleton (int)', () => {
               "runAt" = timezone('UTC', now()) + interval '5 minutes'
         WHERE "name" = '${job}'`,
     );
-    // Con el arriendo vigente, el tick se salta (podría seguir vivo).
+    // Con la reserva vigente, el tick se salta (podría seguir vivo).
     await moveTick(schedule, pastTick(1));
     await b.worker.runOnce();
     expect((await jobsOf(job)).map((j) => j.state)).toEqual(['RUNNING']);
-    // Vence el arriendo: la vuelta siguiente lo cierra (LeaseExpired) y el
+    // Vence la reserva: la vuelta siguiente lo cierra (LeaseExpired) y el
     // tick siguiente ya encola y se ejecuta.
     await owner.$executeRawUnsafe(
       `UPDATE "jobs" SET "runAt" = timezone('UTC', now()) - interval '1 second'

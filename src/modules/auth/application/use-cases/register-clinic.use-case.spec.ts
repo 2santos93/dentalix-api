@@ -23,12 +23,20 @@ import type { RegistrationNotifier } from '../../domain/ports/registration-notif
 import { hashRegistrationToken } from '../registration-token';
 
 const createClinic = jest.fn();
+const FAKE_TX = {} as Prisma.TransactionClient;
 // DX-359: desde dónde se abre el enlace (va al evento del alta).
 const REQ = { requestId: 'req-1', ip: '10.0.0.1', userAgent: 'jest' };
 
 function makeRepo(overrides: Partial<AuthRepository> = {}): AuthRepository {
   createClinic.mockReset();
-  createClinic.mockResolvedValue({ tenantId: 't1', userId: 'u1' });
+  // DX-149-bis: como la transacción real, el alta corre primero `claimPending`
+  // (consumir el pendiente) y, si lanza, no crea nada.
+  createClinic.mockImplementation(
+    async (input: Parameters<AuthRepository['createClinicWithOwner']>[0]) => {
+      await input.claimPending?.(FAKE_TX);
+      return { tenantId: 't1', userId: 'u1' };
+    },
+  );
   return {
     findUserByEmail: () => Promise.resolve(null),
     findUserForAuth: () => Promise.resolve(null),
@@ -87,8 +95,17 @@ class InMemoryPending implements RegistrationRepository {
     );
   }
 
-  consumePending(id: string): Promise<boolean> {
-    const i = this.rows.findIndex((r) => r.id === id);
+  readonly consumedIn: (Prisma.TransactionClient | undefined)[] = [];
+
+  consumePending(
+    id: string,
+    tokenHash: string,
+    tx?: Prisma.TransactionClient,
+  ): Promise<boolean> {
+    this.consumedIn.push(tx);
+    const i = this.rows.findIndex(
+      (r) => r.id === id && r.tokenHash === tokenHash,
+    );
     if (i < 0) return Promise.resolve(false);
     this.rows.splice(i, 1);
     return Promise.resolve(true);
@@ -124,7 +141,7 @@ const COUNTRIES = {
 
 /** Monedas admitidas en estos tests (el puerto real consulta `currencies`). */
 const CURRENCIES = {
-  has: (code: string) => Promise.resolve(['COP', 'JPY'].includes(code)),
+  has: (code: string) => Promise.resolve(['USD', 'JPY'].includes(code)),
 };
 
 function newUseCase(
@@ -145,7 +162,7 @@ function newUseCase(
 
 // G1: la primera sede con sus cuatro valores (datos de test, no defaults).
 const TOKYO_LOCATION = {
-  locationCountry: 'CO',
+  locationCountry: 'VE',
   locationCurrency: 'JPY',
   locationTimeZone: 'Asia/Tokyo',
   locationLocale: 'ja-JP',
@@ -262,7 +279,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       );
       await uc.execute({
         ...INPUT,
-        fullName: 'Tu banco bloqueó tu cuenta: llama al +57 300',
+        fullName: 'Tu banco bloqueó tu cuenta: llama al +58 412',
         clinicName: 'Entra en bit.ly/xxxx',
       });
       const [args] = notifier.sendVerification.mock.calls[0];
@@ -505,6 +522,73 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       );
     });
 
+    it('DX-149-bis: consume el pendiente DENTRO de la transacción del alta, nunca antes', async () => {
+      const { pending, uc, token } = await pendingWithToken();
+
+      await uc.verify(token, INPUT.password, REQ);
+
+      expect(pending.consumedIn).toEqual([FAKE_TX]);
+      expect(pending.rows).toHaveLength(0);
+    });
+
+    it('DX-149-bis: si el alta falla, el pendiente sigue y el mismo enlace vuelve a servir', async () => {
+      const { pending, uc, token } = await pendingWithToken();
+      // Falla la transacción antes de llegar a consumir (rollback): en la BD
+      // real el DELETE del pendiente se deshace con ella (int-spec).
+      createClinic.mockRejectedValueOnce(new Error('fallo inyectado'));
+
+      await expect(uc.verify(token, INPUT.password, REQ)).rejects.toThrow(
+        'fallo inyectado',
+      );
+      expect(pending.rows).toHaveLength(1);
+
+      await expect(
+        uc.verify(token, INPUT.password, REQ),
+      ).resolves.toMatchObject({ subdomain: 'sonrisa' });
+      expect(pending.rows).toHaveLength(0);
+    });
+
+    it('DX-149-bis: el segundo uso del enlace que ya creó su clínica -> 404 de enlace usado, no 409', async () => {
+      const { repo, pending, uc, token } = await pendingWithToken();
+      // El otro uso confirma entre la lectura del pendiente y la comprobación
+      // del subdominio: clínica y borrado del pendiente llegan en el mismo
+      // COMMIT, así que ver la clínica implica que el pendiente ya no está.
+      repo.findTenantBySubdomain = () => {
+        pending.rows.splice(0, 1);
+        return Promise.resolve({ id: 't1' });
+      };
+
+      const error = await uc
+        .verify(token, INPUT.password, REQ)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(NotFoundException);
+      expect((error as NotFoundException).message).toBe(
+        REGISTRATION_LINK_INVALID,
+      );
+      expect(createClinic).not.toHaveBeenCalled();
+    });
+
+    it('DX-149-bis: el email lo dio de alta el otro uso del mismo enlace -> 404 de enlace usado', async () => {
+      const { repo, pending, uc, token } = await pendingWithToken();
+      repo.findUserByEmail = () => {
+        pending.rows.splice(0, 1);
+        return Promise.resolve({ id: 'u1', fullName: 'Dr. Owner' });
+      };
+
+      await expect(uc.verify(token, INPUT.password, REQ)).rejects.toThrow(
+        REGISTRATION_LINK_INVALID,
+      );
+    });
+
+    it('DX-149-bis: el pendiente lo consumió otro uso dentro de su transacción -> 404, sin crear nada', async () => {
+      const { pending, uc, token } = await pendingWithToken();
+      jest.spyOn(pending, 'consumePending').mockResolvedValueOnce(false);
+
+      await expect(uc.verify(token, INPUT.password, REQ)).rejects.toThrow(
+        REGISTRATION_LINK_INVALID,
+      );
+    });
+
     it('carrera de índices únicos (P2002) -> 409, no 500', async () => {
       const { uc, token } = await pendingWithToken();
       createClinic.mockRejectedValue(
@@ -532,7 +616,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         locationLocale: 'JA-jp',
       });
       expect(pending.rows[0].location).toEqual({
-        country: 'CO',
+        country: 'VE',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',
@@ -544,7 +628,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       expect(createClinic).toHaveBeenCalledWith(
         expect.objectContaining({
           location: {
-            country: 'CO',
+            country: 'VE',
             currency: 'JPY',
             timeZone: 'Asia/Tokyo',
             locale: 'ja-JP',
@@ -565,7 +649,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
         locationHourCycle: 'h12',
       });
       expect(pending.rows[0].location).toEqual({
-        country: 'CO',
+        country: 'VE',
         currency: 'JPY',
         timeZone: 'America/New_York',
         locale: 'en-US',
@@ -578,7 +662,7 @@ describe('RegisterClinicUseCase (DX-029)', () => {
       const uc = newUseCase(makeRepo(), pending, makeNotifier(), realPassword);
       await uc.execute({ ...INPUT, locationHourCycle: undefined });
       expect(pending.rows[0].location).toEqual({
-        country: 'CO',
+        country: 'VE',
         currency: 'JPY',
         timeZone: 'Asia/Tokyo',
         locale: 'ja-JP',

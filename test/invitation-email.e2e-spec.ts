@@ -15,7 +15,7 @@ import {
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
@@ -126,7 +126,7 @@ describe('Email de invitación (e2e, DX-088)', () => {
 
     const register = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: 'Clínica <b>Correo</b>',
         subdomain: SUB,
         email: ADMIN_EMAIL,

@@ -23,7 +23,7 @@ import {
   SEND_REMINDER_JOB,
 } from '../src/modules/reminders/application/plan-reminders';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -159,7 +159,7 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
       .send({ ranges: [] })
       .expect(200);
     await as(api().post('/api/v1/locations'), clinic.adminToken)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
   });
 
@@ -203,6 +203,46 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
       expect(
         (list.body as SettingsBody[]).filter((s) => s.enabled),
       ).toHaveLength(1);
+    });
+
+    it('DX-469: la alarma del calendario es 24 por defecto, se guarda (0 la quita), se conserva si no se manda y fuera de rango da 400', async () => {
+      const put = (body: object) =>
+        as(
+          api().put(`/api/v1/reminder-settings/${mainLocationId}`),
+          clinic.adminToken,
+        ).send(body);
+      const read = async () =>
+        (
+          (
+            await as(
+              api().get('/api/v1/reminder-settings'),
+              clinic.adminToken,
+            ).expect(200)
+          ).body as (SettingsBody & { calendarAlarmHours: number })[]
+        ).find((s) => s.locationId === mainLocationId)!.calendarAlarmHours;
+      expect(await read()).toBe(24);
+      await put({
+        enabled: true,
+        leadHours: [48, 2],
+        calendarAlarmHours: 0,
+      }).expect(200);
+      expect(await read()).toBe(0);
+      // Sin el campo, se conserva.
+      await put({ enabled: true, leadHours: [48, 2] }).expect(200);
+      expect(await read()).toBe(0);
+      const bad = await put({
+        enabled: true,
+        leadHours: [48, 2],
+        calendarAlarmHours: 169,
+      }).expect(400);
+      expect(JSON.stringify(bad.body)).toContain(
+        'La alarma del calendario debe ser de 0 a 168 horas antes (0 la quita).',
+      );
+      await put({
+        enabled: true,
+        leadHours: [48, 2],
+        calendarAlarmHours: 24,
+      }).expect(200);
     });
 
     it.each([

@@ -25,6 +25,7 @@ import type {
 } from '../../../data-consents/domain/entities/data-consent.entity';
 import { assertValidDecisions } from '../../../data-consents/domain/consent-state';
 import { docTypeLabelInput } from '../doc-type-label-input';
+import { preferredLanguageInput } from '../preferred-language-input';
 
 export interface CreatePatientInput {
   firstName: string;
@@ -58,6 +59,8 @@ export interface CreatePatientInput {
   emergencyContactRelationship?: string;
   emergencyContactPhone?: string;
   createdById?: string;
+  /** DX-497: idioma preferido (BCP 47); null/ausente = el de la clínica. */
+  preferredLanguage?: string | null;
   /**
    * Rol de quien crea (del token, nunca del cuerpo). Obligatorio: decide si
    * puede adjuntar la anamnesis v1 (ver SEC-005 en `execute`).
@@ -136,6 +139,7 @@ export class CreatePatientUseCase {
       emergencyContactRelationship: input.emergencyContactRelationship,
       emergencyContactPhone: input.emergencyContactPhone,
       createdById: input.createdById,
+      preferredLanguage: preferredLanguageInput(input.preferredLanguage),
       medicalHistory,
     });
   }

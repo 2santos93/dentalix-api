@@ -8,7 +8,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -40,6 +40,9 @@ type Plan = [
   number,
   number | null,
   [string, number][] | null,
+  // DX-472-bis: Σ bases de lo abonado en otra moneda y los que no tienen base.
+  number,
+  unknown[][] | null,
 ];
 type Schedule = [
   string,
@@ -74,10 +77,10 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     },
   });
   const sede1 = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede 1' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede 1' }),
   });
   const sede2 = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede 2' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede 2' }),
   });
   const catalog = await raw.dentalCatalogItem.create({
     data: {
@@ -161,7 +164,7 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
       treatmentPlans: {
         include: {
           items: true,
-          payments: true,
+          payments: { include: { planAmounts: true } },
           acceptance: true,
           paymentPlans: { include: { installments: true } },
         },
@@ -200,9 +203,14 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
         .filter((x) => x.currency === p.currency)
         .reduce((s, x) => s + Number(x.amount), 0);
       const other = new Map<string, number>();
+      let based = 0;
+      const pending: (typeof paid)[number][] = [];
       for (const x of paid) {
         if (x.currency === p.currency) continue;
         other.set(x.currency, (other.get(x.currency) ?? 0) + Number(x.amount));
+        const [base] = x.planAmounts;
+        if (base) based += Number(base.amount);
+        else pending.push(x);
       }
       return [
         p.id,
@@ -215,6 +223,23 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
         other.size === 0
           ? null
           : [...other.entries()].sort(([a], [b]) => a.localeCompare(b)),
+        based,
+        pending.length === 0
+          ? null
+          : pending
+              .sort((x, y) => ms(x.paidAt) - ms(y.paidAt) || byId(x, y))
+              .map((x) => [
+                x.id,
+                x.currency,
+                Number(x.amount),
+                ms(x.paidAt),
+                x.locationId,
+                x.exchangeRateCurrency,
+                x.exchangeRateFrom === null ? null : Number(x.exchangeRateFrom),
+                x.exchangeRateTo === null ? null : Number(x.exchangeRateTo),
+                x.exchangeRateSource,
+                x.exchangeRateDate?.toISOString().slice(0, 10) ?? null,
+              ]),
       ];
     });
     const paymentPlans: Schedule[] = live
@@ -260,7 +285,9 @@ async function expectedOf(tenantId: string): Promise<LedgerRow[]> {
         null,
       owing:
         pa.deletedAt === null &&
-        (plans.some(([, , , , , billable, own]) => billable > (own ?? 0)) ||
+        (plans.some(
+          ([, , , , , billable, own, , based]) => billable > (own ?? 0) + based,
+        ) ||
           openings.some(([, , amount, , , paid]) => amount > paid)),
       ledger: { plans, paymentPlans, openings },
     };
@@ -307,7 +334,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
   async function newPlan(
     s: Seeded,
     patientId: string,
-    currency = 'COP',
+    currency = 'VES',
   ): Promise<string> {
     const p = await as(s, (tx) =>
       tx.treatmentPlan.create({
@@ -362,7 +389,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
             treatmentPlanId: planId,
             patientId,
             amount,
-            currency: options.currency ?? 'COP',
+            currency: options.currency ?? 'VES',
             paidAt: options.paidAt ?? new Date(),
             method: 'CASH',
           },
@@ -412,7 +439,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
       ledger: { paymentPlans: [] },
     });
     expect(row?.ledger.plans.map((p) => p.slice(0, 3))).toEqual([
-      [planId, 'DRAFT', 'COP'],
+      [planId, 'DRAFT', 'VES'],
     ]);
     await expectInSync(a);
   });
@@ -460,11 +487,11 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
       paidAt: new Date(Date.now() - 86400000),
     });
     await pay(a, planId, ana, 50000, { locationId: a.sede2 });
-    await pay(a, planId, ana, 10, { currency: 'USD' });
-    await pay(a, planId, ana, 5, { currency: 'USD' });
-    await pay(a, planId, ana, 7, { currency: 'EUR' });
+    const usd10 = await pay(a, planId, ana, 10, { currency: 'USD' });
+    const usd5 = await pay(a, planId, ana, 5, { currency: 'USD' });
+    const eur7 = await pay(a, planId, ana, 7, { currency: 'EUR' });
     const row = await rowOf(a, ana);
-    expect(row?.ledger.plans[0].slice(5)).toEqual([
+    expect(row?.ledger.plans[0].slice(5, 8)).toEqual([
       300000,
       150000,
       [
@@ -472,6 +499,10 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
         ['USD', 15],
       ],
     ]);
+    // DX-472-bis: sin bases, los tres van uno a uno, por fecha de abono.
+    const [, , , , , , , , based, pending] = row!.ledger.plans[0];
+    expect(based).toBe(0);
+    expect(pending?.map((p) => p[0])).toEqual([usd10, usd5, eur7]);
     await expectInSync(a);
 
     // Anulación: como la hace PrismaPaymentRepository.softDelete.
@@ -482,10 +513,11 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
       }),
     );
     expect((await rowOf(a, ana))?.ledger.plans[0][6]).toBe(50000);
-    // Un cambio que no toca las entradas (notas) no las descuadra.
+    // Un cambio que no toca las entradas (notas) no las descuadra. SEC-042: el
+    // abono anulado es inmutable en la BD, así que se edita solo a los vigentes.
     await as(a, (tx) =>
       tx.payment.updateMany({
-        where: { treatmentPlanId: planId },
+        where: { treatmentPlanId: planId, deletedAt: null },
         data: { notes: 'revisado' },
       }),
     );
@@ -510,7 +542,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
       tx.treatmentPlan.update({
         where: { id: planId },
         data: {
-          currency: 'COP',
+          currency: 'VES',
           status: 'PRESENTED',
           presentedAt: new Date(),
           presentedLocationId: a.sede2,
@@ -563,7 +595,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
           tenantId: a.tenantId,
           treatmentPlanId: planId,
           patientId: ana,
-          currency: 'COP',
+          currency: 'VES',
           totalToFinance: 300000,
           installmentsCount: 3,
           periodicity: 'MONTHLY',
@@ -651,7 +683,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
         data: ids.map((patientId) => ({
           tenantId: a.tenantId,
           patientId,
-          currency: 'COP',
+          currency: 'VES',
         })),
       }),
     );
@@ -724,7 +756,7 @@ describe('patient_ledgers: resumen por paciente mantenido por la BD (DX-155, int
     const slow = (patientId: string, locked: ReturnType<typeof gate<string>>) =>
       as(a, async (tx) => {
         const plan = await tx.treatmentPlan.create({
-          data: { tenantId: a.tenantId, patientId, currency: 'COP' },
+          data: { tenantId: a.tenantId, patientId, currency: 'VES' },
           select: { id: true },
         });
         await tx.treatmentPlanItem.create({

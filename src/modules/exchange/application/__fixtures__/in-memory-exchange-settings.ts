@@ -1,4 +1,5 @@
 import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
+import { MANUAL_RATE_MAX_AGE_DEFAULT } from '../../domain/manual-rate-fallback';
 import type {
   ClinicExchangeSettings,
   ClinicExchangeSettingsRepository,
@@ -27,7 +28,12 @@ function tenantOf(ctx: TenantContextService): string {
  * default; dar solo `'MANUAL'` es MANUAL desde 2000-01-01 (todo día manual).
  */
 export function makeSettings(
-  initial: Record<string, ExchangeRateSource | ClinicExchangeSettings>,
+  initial: Record<
+    string,
+    | ExchangeRateSource
+    | (Omit<ClinicExchangeSettings, 'manualRateMaxAgeDays'> &
+        Partial<Pick<ClinicExchangeSettings, 'manualRateMaxAgeDays'>>)
+  >,
   ctx: TenantContextService = new TenantContextService(),
   options: {
     zones?: Record<string, string>;
@@ -41,6 +47,7 @@ export function makeSettings(
   const AUTOMATIC: ClinicExchangeSettings = {
     source: 'AUTOMATIC',
     manualSince: null,
+    manualRateMaxAgeDays: MANUAL_RATE_MAX_AGE_DEFAULT,
   };
   const store = new Map<string, ClinicExchangeSettings>(
     Object.entries(initial).map(([tenant, value]) => [
@@ -49,8 +56,9 @@ export function makeSettings(
         ? {
             source: value,
             manualSince: value === 'MANUAL' ? '2000-01-01' : null,
+            manualRateMaxAgeDays: MANUAL_RATE_MAX_AGE_DEFAULT,
           }
-        : value,
+        : { manualRateMaxAgeDays: MANUAL_RATE_MAX_AGE_DEFAULT, ...value },
     ]),
   );
   let reads = 0;
@@ -142,7 +150,7 @@ export function makeManualRates(
     }
   }
   const currencies = new Set(
-    options.currencies ?? ['USD', 'COP', 'EUR', 'VES'],
+    options.currencies ?? ['USD', 'GBP', 'EUR', 'VES'],
   );
   return {
     rows: (tenantId) => store.get(tenantId) ?? [],
@@ -156,6 +164,17 @@ export function makeManualRates(
       }
       return Promise.resolve(out);
     },
+    ratesBetween: (from, to, currencies) =>
+      Promise.resolve(
+        (store.get(tenantOf(ctx)) ?? [])
+          .filter(
+            (r) =>
+              r.date >= from &&
+              r.date <= to &&
+              (!currencies || currencies.includes(r.currency)),
+          )
+          .map((r) => ({ date: r.date, currency: r.currency, rate: r.rate })),
+      ),
     listRecent: (limit) =>
       Promise.resolve(
         [...(store.get(tenantOf(ctx)) ?? [])]

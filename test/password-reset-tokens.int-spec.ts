@@ -5,7 +5,12 @@ import { PrismaPasswordResetRepository } from '../src/modules/auth/infrastructur
 import {
   generatePasswordResetToken,
   hashPasswordResetToken,
+  passwordResetTokenStatus,
 } from '../src/modules/auth/application/password-reset-token';
+import { PrismaTokenMaintenanceRepository } from '../src/modules/auth/infrastructure/repositories/prisma-token-maintenance.repository';
+import { USER_TOKEN_GRACE_MS } from '../src/modules/auth/application/token-maintenance.jobs';
+import { PrismaUserProfileRepository } from '../src/modules/me/infrastructure/repositories/prisma-user-profile.repository';
+import { passwordChangeAuditEvent } from '../src/modules/me/domain/own-account-audit';
 
 /**
  * DX-010: tabla `user_tokens` contra Postgres real, con el rol de la app
@@ -83,10 +88,12 @@ describe('PrismaPasswordResetRepository (int)', () => {
   async function issue(now = new Date(), ttlMs = 30 * 60_000) {
     const token = generatePasswordResetToken();
     await repo.issue({
+      tenantId: tenantA,
       userId,
       tokenHash: hashPasswordResetToken(token),
       expiresAt: new Date(now.getTime() + ttlMs),
       now,
+      userDailyLimit: 1000,
     });
     return token;
   }
@@ -141,6 +148,78 @@ describe('PrismaPasswordResetRepository (int)', () => {
       now: new Date(),
     });
     expect(consumed).toBe(false);
+  });
+
+  it('DX-114: cambiar la contraseña desde el perfil invalida el enlace pedido antes', async () => {
+    const token = await issue();
+    const profiles = new PrismaUserProfileRepository(prisma);
+    await profiles.updatePasswordAndRevokeSessions(
+      userId,
+      'HASH-PERFIL',
+      passwordChangeAuditEvent(
+        { sub: userId, tenantId: tenantA, role: 'RECEPTION' },
+        { requestId: null, ip: null, userAgent: null },
+        null,
+      ),
+    );
+    const record = await repo.findByHash(hashPasswordResetToken(token));
+    expect(record?.invalidatedAt).toBeInstanceOf(Date);
+    expect(record?.usedAt).toBeNull();
+    expect(passwordResetTokenStatus(record, new Date())).toBe('INVALID');
+    const consumed = await repo.consumeAndSetPassword({
+      tokenId: record!.id,
+      userId,
+      passwordHash: 'HASH-DEL-ENLACE',
+      now: new Date(),
+    });
+    expect(consumed).toBe(false);
+    const user = await raw.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { passwordHash: true },
+    });
+    expect(user.passwordHash).toBe('HASH-PERFIL');
+    // Un enlace pedido DESPUÉS del cambio sí vale.
+    const after = await issue();
+    expect(
+      (await repo.findByHash(hashPasswordResetToken(after)))?.invalidatedAt,
+    ).toBeNull();
+  });
+
+  it('DX-114: la purga horaria borra los tokens muertos hace más de 7 días y conserva el resto', async () => {
+    const DAY = 86_400_000;
+    const ago = (days: number) => new Date(Date.now() - days * DAY);
+    const rows = {
+      expiredOld: { expiresAt: ago(8) },
+      usedOld: { expiresAt: ago(8), usedAt: ago(8), invalidatedAt: ago(8) },
+      invalidatedOld: { expiresAt: ago(7.9), invalidatedAt: ago(8) },
+      invalidatedRecent: { expiresAt: ago(1), invalidatedAt: ago(1) },
+      expiredRecent: { expiresAt: ago(6) },
+      live: { expiresAt: new Date(Date.now() + 30 * 60_000) },
+    };
+    for (const [name, data] of Object.entries(rows)) {
+      await raw.userToken.create({
+        data: {
+          userId,
+          purpose: 'PASSWORD_RESET',
+          tokenHash: hashPasswordResetToken(`purge-${name}`),
+          createdAt: data.expiresAt < new Date() ? ago(9) : new Date(),
+          ...data,
+        },
+      });
+    }
+    const purged = await new PrismaTokenMaintenanceRepository(
+      prisma,
+    ).purgeExpired(USER_TOKEN_GRACE_MS, 60 * 60_000);
+    expect(purged.userTokens).toBeGreaterThanOrEqual(3);
+    const left = await raw.userToken.findMany({
+      where: { userId },
+      select: { tokenHash: true },
+    });
+    expect(left.map((r) => r.tokenHash).sort()).toEqual(
+      ['invalidatedRecent', 'expiredRecent', 'live']
+        .map((name) => hashPasswordResetToken(`purge-${name}`))
+        .sort(),
+    );
   });
 
   it('dos peticiones de enlace a la vez: solo queda vivo uno', async () => {

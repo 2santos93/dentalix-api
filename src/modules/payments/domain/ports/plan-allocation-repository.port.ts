@@ -1,3 +1,4 @@
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type {
   Prisma,
   TreatmentPlanItemStatus,
@@ -82,6 +83,30 @@ export interface PlanBalanceSnapshot {
 }
 
 /**
+ * La foto del saldo con ítems (estado de cuenta y pestaña Plan): la del plan
+ * más lo devuelto o traspasado que la cascada de `credit-netting` atribuye a
+ * sus abonos (DX-399-ter), leído en la MISMA transacción.
+ */
+export interface PlanBalanceItemsSnapshot extends PlanBalanceSnapshot {
+  /** Σ `creditOutCents` de los abonos del plan (céntimos, ≥ 0). */
+  creditOutCents: number;
+  /**
+   * DX-399-quater: lo recibido por traspaso que ninguna salida gastó
+   * (`leftCents`) y lo que cubre de cada ítem después de los abonos
+   * (`byItem`, solo ítems con algo cubierto), en la MISMA foto.
+   */
+  transfersIn: PlanTransfersInCoverage;
+}
+
+/** DX-399-quater: el saldo recibido por traspaso de un plan y los ítems que cubre. */
+export interface PlanTransfersInCoverage {
+  /** Lo recibido que ninguna salida gastó (céntimos, ≥ 0). */
+  leftCents: number;
+  /** Lo que cubre de cada ítem, después de los abonos (Σ ≤ `leftCents`). */
+  byItem: ReadonlyMap<string, number>;
+}
+
+/**
  * El abono que se va a imputar a mano (spec R10, §5.2): vivo y de esta
  * clínica. `treatmentPlanId` `null` = abono a un saldo migrado (DX-262), sin
  * plan ni base. `base` `null` = aún sin convertir (sin tasa, R15).
@@ -89,6 +114,8 @@ export interface PlanBalanceSnapshot {
 export interface AllocationTarget extends PaymentRateState {
   paymentId: string;
   receiptNumber: string | null;
+  /** Sede del abono (DX-354c): la web pinta con el formato de la sede del dato. */
+  locationId: string;
   treatmentPlanId: string | null;
   /** En la moneda del abono. */
   amount: number;
@@ -109,6 +136,11 @@ export interface AllocationItemOption {
   billableCents: number;
   /** Lo que le imputan los OTROS abonos del plan. */
   paidByOthersCents: number;
+  /**
+   * DX-399-quater: lo que le cubre el saldo recibido por traspaso, después de
+   * TODOS los abonos (también este). Ausente o 0 si nada.
+   */
+  paidByTransfersInCents?: number;
 }
 
 /**
@@ -119,6 +151,12 @@ export interface PaymentAllocationsSnapshot {
   target: AllocationTarget;
   lines: { itemId: string; cents: number; source: 'AUTO' | 'MANUAL' }[];
   items: AllocationItemOption[];
+  /**
+   * DX-399: lo devuelto o traspasado del saldo a favor del plan que se atribuye a
+   * este abono (regla de `credit-netting.ts`, la misma del informe «Cobrado sin
+   * imputar»), en céntimos. 0 sin base o en un plan que no se cobra.
+   */
+  creditOutCents: number;
 }
 
 /** Reasignación de un ADMIN (R10). `lines` vacío con `AUTO`. */
@@ -128,6 +166,8 @@ export interface ReplaceAllocationsInput {
   expectedVersion: string;
   lines: { itemId: string; cents: number }[];
   actorId: string;
+  /** DX-399: quién y desde dónde; el evento de auditoría se escribe en la MISMA transacción. */
+  audit: AuditRequestContext;
 }
 
 export const PLAN_ALLOCATION_REPOSITORY = Symbol('PLAN_ALLOCATION_REPOSITORY');
@@ -208,7 +248,9 @@ export interface PlanAllocationRepository {
   ): Promise<void>;
 
   /** La foto del plan, o `null` si no existe, está retirado o es de otra clínica. */
-  readPlanBalanceSnapshot(planId: string): Promise<PlanBalanceSnapshot | null>;
+  readPlanBalanceSnapshot(
+    planId: string,
+  ): Promise<PlanBalanceItemsSnapshot | null>;
 
   /**
    * El abono vivo de esta clínica con su plan y su base, o `null` si no

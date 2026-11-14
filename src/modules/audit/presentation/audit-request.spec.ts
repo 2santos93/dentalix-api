@@ -6,6 +6,7 @@ import {
   type AuditedRequest,
 } from './audit-request';
 import type { AuditOptions } from './audit-options';
+import { leavesWith } from '../../../../test/support/content-leaves';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const USER = '22222222-2222-4222-8222-222222222222';
@@ -70,53 +71,9 @@ describe('buildAuditDraft (DX-009)', () => {
         verified: false,
       },
     });
-    expect(JSON.stringify(draft?.metadata)).not.toMatch(/1020|304/);
-  });
-
-  it('reasignación de un abono (DX-051): moneda del plan, modo e importes por ítem antes y después, de la respuesta', () => {
-    const options: AuditOptions = {
-      action: 'UPDATE',
-      resource: 'PAYMENT_ALLOCATION',
-      resourceId: { param: 'id' },
-      patient: { lookup: 'payment', param: 'id' },
-      reason: 'PAYMENT_REALLOCATED',
-      allocation: true,
-    };
-    const draft = buildAuditDraft(
-      options,
-      req({
-        params: { id: ENTRY },
-        body: {
-          expectedVersion: 'a'.repeat(64),
-          mode: 'MANUAL',
-          allocations: [],
-        },
-        user: { sub: USER, tenantId: TENANT, role: 'ADMIN' },
-      }),
-      {
-        paymentId: ENTRY,
-        planCurrency: 'EUR',
-        manual: true,
-        receiptNumber: 'NOR-000123',
-        allocations: [
-          { treatmentPlanItemId: PLAN, amount: 40, source: 'MANUAL' },
-        ],
-        previous: [{ treatmentPlanItemId: PLAN, amount: 100 }],
-      },
-      scope,
-    );
-    expect(draft?.resourceType).toBe('PAYMENT_ALLOCATION');
-    expect(draft?.metadata).toEqual({
-      changedFields: ['allocations', 'expectedVersion', 'mode'],
-      params: { id: ENTRY },
-      reason: 'PAYMENT_REALLOCATED',
-      allocation: {
-        currency: 'EUR',
-        mode: 'MANUAL',
-        before: [{ itemId: PLAN, amount: 100 }],
-        after: [{ itemId: PLAN, amount: 40 }],
-      },
-    });
+    for (const part of ['1020', '304']) {
+      expect(leavesWith(draft?.metadata, part)).toEqual([]);
+    }
   });
 
   it('receta segura (DX-300): códigos de los avisos y si se confirmaron; ni el texto de los avisos ni el motivo', () => {
@@ -217,7 +174,9 @@ describe('buildAuditDraft (DX-009)', () => {
         overridden: true,
       },
     });
-    expect(JSON.stringify(draft?.metadata)).not.toMatch(/204|Exodoncia/);
+    for (const clinical of [204, 'Exodoncia']) {
+      expect(leavesWith(draft?.metadata, clinical)).toEqual([]);
+    }
   });
 
   it('búsqueda por lote (DX-191): lote/REF de la query y filas de la respuesta', () => {
@@ -297,7 +256,7 @@ describe('buildAuditDraft (DX-009)', () => {
       },
       req({
         params: { id: PATIENT },
-        body: { phone: '3001234567', allergies: 'Penicilina' },
+        body: { phone: '4121234567', allergies: 'Penicilina' },
       }),
       { id: PATIENT },
       scope,
@@ -306,7 +265,7 @@ describe('buildAuditDraft (DX-009)', () => {
       changedFields: ['allergies', 'phone'],
       params: { id: PATIENT },
     });
-    expect(JSON.stringify(draft)).not.toMatch(/Penicilina|3001234567/);
+    expect(JSON.stringify(draft)).not.toMatch(/Penicilina|4121234567/);
   });
 
   it('DX-319: añade el antes/después que el handler deja en la petición, saneado', () => {
@@ -338,12 +297,113 @@ describe('buildAuditDraft (DX-009)', () => {
     });
   });
 
+  it('DX-379 (B): los ids que añade el handler van con los de la ruta (mandan los de la ruta); un valor que no es id, no', () => {
+    const REPRICING = '77777777-7777-4777-8777-777777777777';
+    const draft = buildAuditDraft(
+      {
+        action: 'UPDATE',
+        resource: 'TREATMENT_PLAN',
+        resourceId: { param: 'planId' },
+        patient: { param: 'patientId' },
+        reason: 'PLAN_REPRICED',
+      },
+      req({
+        params: { patientId: PATIENT, planId: PLAN },
+        body: { previewHash: 'a'.repeat(64) },
+        auditMetadata: {
+          params: {
+            repricingId: REPRICING,
+            planId: ENTRY,
+            total: '450,00 USD',
+          },
+        },
+      }),
+      {},
+      scope,
+    );
+    expect(draft?.metadata).toEqual({
+      changedFields: ['previewHash'],
+      params: { patientId: PATIENT, planId: PLAN, repricingId: REPRICING },
+      reason: 'PLAN_REPRICED',
+    });
+  });
+
+  it('DX-379 (C): la firma de un presupuesto vencido lleva el motivo y la recotización que pone el handler, nunca importes ni la nota', () => {
+    const REPRICING = '77777777-7777-4777-8777-777777777777';
+    const sign = {
+      action: 'SIGN',
+      resource: 'TREATMENT_PLAN',
+      resourceId: { param: 'planId' },
+      patient: { param: 'patientId' },
+    } as const;
+    const repriced = buildAuditDraft(
+      sign,
+      req({
+        params: { patientId: PATIENT, planId: PLAN },
+        auditMetadata: {
+          reason: 'QUOTE_EXPIRED_REPRICED',
+          params: { repricingId: REPRICING },
+        },
+      }),
+      {},
+      scope,
+    );
+    expect(repriced?.metadata).toEqual({
+      params: { patientId: PATIENT, planId: PLAN, repricingId: REPRICING },
+      reason: 'QUOTE_EXPIRED_REPRICED',
+    });
+    const original = buildAuditDraft(
+      sign,
+      req({
+        params: { patientId: PATIENT, planId: PLAN },
+        auditMetadata: {
+          reason: 'QUOTE_EXPIRED_ORIGINAL_PRICES',
+          note: 'Promesa de la directora',
+          total: '450,00 USD',
+        },
+      }),
+      {},
+      scope,
+    );
+    expect(original?.metadata).toEqual({
+      params: { patientId: PATIENT, planId: PLAN },
+      reason: 'QUOTE_EXPIRED_ORIGINAL_PRICES',
+    });
+  });
+
+  it('DX-379 (B, M-3): los de la ruta van primero; diez ids del handler no los cortan', () => {
+    const extra = Object.fromEntries(
+      Array.from({ length: 10 }, (_, n) => [
+        `extra${n}`,
+        `77777777-7777-4777-8777-77777777777${n}`,
+      ]),
+    );
+    const draft = buildAuditDraft(
+      {
+        action: 'UPDATE',
+        resource: 'TREATMENT_PLAN',
+        resourceId: { param: 'planId' },
+        patient: { param: 'patientId' },
+      },
+      req({
+        params: { patientId: PATIENT, planId: PLAN },
+        auditMetadata: { params: extra },
+      }),
+      {},
+      scope,
+    );
+    const params = draft?.metadata.params ?? {};
+    expect(params).toMatchObject({ patientId: PATIENT, planId: PLAN });
+    expect(Object.keys(params)).toHaveLength(10);
+    expect(Object.keys(params).slice(0, 2)).toEqual(['patientId', 'planId']);
+  });
+
   it('DX-319: el antes/después del nº de registro solo pasa en un evento de LOCATION', () => {
     const draft = buildAuditDraft(
       { action: 'UPDATE', resource: 'PATIENT', resourceId: { param: 'id' } },
       req({
         params: { id: PATIENT },
-        body: { phone: '3001234567' },
+        body: { phone: '4121234567' },
         auditMetadata: {
           healthRegistration: {
             before: { number: null, shown: false },
@@ -371,7 +431,7 @@ describe('buildAuditDraft (DX-009)', () => {
       },
       req({
         params: { id: PATIENT },
-        body: { reason: 'Reclamo del titular de los datos' },
+        body: { reason: 'Solicitud del paciente sobre sus datos' },
       }),
       { id: PATIENT },
       scope,
@@ -549,6 +609,120 @@ describe('buildAuditDrafts (DX-390)', () => {
     );
     expect(drafts).toHaveLength(1);
     expect(drafts[0].resourceId).toBe(LINE_1);
+  });
+});
+
+describe('buildAuditDrafts: estado de cuenta familiar (SEC-044)', () => {
+  const DEP_B = '66666666-6666-4666-8666-666666666666';
+  const DEP_C = '77777777-7777-4777-8777-777777777777';
+  const family: AuditOptions = {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    patient: { param: 'patientId' },
+    reason: 'FAMILY_ACCOUNT_STATEMENT',
+    familyStatement: true,
+  };
+  const body = {
+    payer: { id: PATIENT, firstName: 'Marta' },
+    members: [
+      { patient: { id: PATIENT, firstName: 'Marta' }, self: true },
+      { patient: { id: DEP_B, firstName: 'Iván' }, self: false },
+      { patient: { id: DEP_C, firstName: 'Lucía' }, self: false },
+    ],
+  };
+
+  it('deja un VIEW por miembro (pagador y dependientes), con el mismo contexto y sin nombres ni importes', () => {
+    const drafts = buildAuditDrafts(
+      family,
+      req({ params: { patientId: PATIENT } }),
+      body,
+      scope,
+    );
+    expect(drafts.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: PATIENT },
+      { kind: 'patient', id: DEP_B },
+      { kind: 'patient', id: DEP_C },
+    ]);
+    for (const d of drafts) {
+      expect(d.action).toBe('VIEW');
+      expect(d.resourceType).toBe('ACCOUNT_STATEMENT');
+      expect(d.requestId).toBe(scope.requestId);
+      expect(d.metadata.reason).toBe('FAMILY_ACCOUNT_STATEMENT');
+    }
+    expect(JSON.stringify(drafts)).not.toContain('Iván');
+  });
+
+  it('un pagador sin dependientes deja el evento del pagador; sin repetir ids', () => {
+    const alone = buildAuditDrafts(
+      family,
+      req({ params: { patientId: PATIENT } }),
+      { payer: { id: PATIENT }, members: [{ patient: { id: PATIENT } }] },
+      scope,
+    );
+    expect(alone.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: PATIENT },
+    ]);
+  });
+
+  it('si la respuesta no trae miembros, cae al paciente de la ruta', () => {
+    const drafts = buildAuditDrafts(
+      family,
+      req({ params: { patientId: PATIENT } }),
+      {},
+      scope,
+    );
+    expect(drafts.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: PATIENT },
+    ]);
+  });
+});
+
+describe('buildAuditDrafts: «¿Quién llama?» (DX-224)', () => {
+  const A = '99999999-9999-4999-8999-999999999991';
+  const B = '99999999-9999-4999-8999-999999999992';
+  const lookup: AuditOptions = {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: { response: 'id' },
+    patient: { response: 'id' },
+    reason: 'CALLER_LOOKUP',
+    perMatch: true,
+  };
+
+  it('deja una lectura por paciente encontrado y nunca el número buscado', () => {
+    const drafts = buildAuditDrafts(
+      lookup,
+      req({ body: { phone: '0412-1234567' } }),
+      { matches: [{ id: A }, { id: B }] },
+      scope,
+    );
+    expect(drafts.map((d) => d.resourceId)).toEqual([A, B]);
+    expect(drafts.map((d) => d.patient)).toEqual([
+      { kind: 'patient', id: A },
+      { kind: 'patient', id: B },
+    ]);
+    expect(drafts.every((d) => d.action === 'VIEW')).toBe(true);
+    expect(drafts.every((d) => d.metadata.reason === 'CALLER_LOOKUP')).toBe(
+      true,
+    );
+    expect(JSON.stringify(drafts)).not.toContain('1234567');
+  });
+
+  it('sin coincidencias deja un solo evento sin paciente, con rows 0 y sin el número', () => {
+    const drafts = buildAuditDrafts(
+      lookup,
+      req({ body: { phone: '0412-1234567' } }),
+      { matches: [] },
+      scope,
+    );
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0].patient).toBeNull();
+    expect(drafts[0].resourceId).toBeNull();
+    expect(drafts[0].metadata).toMatchObject({
+      reason: 'CALLER_LOOKUP_NO_MATCH',
+      search: { rows: 0 },
+    });
+    expect(JSON.stringify(drafts)).not.toContain('1234567');
   });
 });
 

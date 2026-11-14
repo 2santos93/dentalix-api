@@ -5,7 +5,7 @@ const NUMBER_DIGITS = 6;
 
 /**
  * Número visible del recibo: la serie de la sede, un guion y el consecutivo
- * con al menos 6 cifras (`BOG-000123`). Pasado el millón crece, nunca se
+ * con al menos 6 cifras (`CCS-000123`). Pasado el millón crece, nunca se
  * recorta ni vuelve a empezar.
  */
 export function formatReceiptNumber(prefix: string, number: number): string {
@@ -25,4 +25,13 @@ export function formatReceiptNumber(prefix: string, number: number): string {
  */
 export function legacyReceiptReference(paymentId: string): string {
   return `REC-${paymentId.slice(0, 8)}`;
+}
+
+/** Número visible de un recibo leído de la BD (serie + consecutivo), o `null` sin recibo (anterior a la numeración). */
+export function receiptNumberOf(
+  receipt: { seriesPrefix: string; number: number } | null,
+): string | null {
+  return receipt
+    ? formatReceiptNumber(receipt.seriesPrefix, receipt.number)
+    : null;
 }

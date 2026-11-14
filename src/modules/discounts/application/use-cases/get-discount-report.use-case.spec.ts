@@ -24,8 +24,15 @@ const row = (over: Partial<DiscountReportRow> = {}): DiscountReportRow => ({
   patientName: 'Ana Pérez',
   toothNumber: '11',
   procedure: 'Resina',
-  currency: 'COP',
+  currency: 'USD',
   catalogPrice: null,
+  catalogCurrency: null,
+  referenceCurrency: null,
+  referencePriceInPlan: null,
+  basePriceInPlan: null,
+  rate: null,
+  baseRate: null,
+  agreementUnmeasured: false,
   price: 300000,
   priceReduction: 0,
   itemDiscount: 30000,
@@ -55,10 +62,11 @@ class FakeRepo implements DiscountReportRepository {
   locations = new Set(['l1']);
   summaryResult: DiscountReportSummary = {
     totals: [
-      { currency: 'COP', items: 2, gross: 1000000, discount: 75000 },
+      { currency: 'USD', items: 2, gross: 1000000, discount: 75000 },
       { currency: 'EUR', items: 1, gross: 3, discount: 1 },
     ],
     agreementTotals: [],
+    agreementUnmeasuredTotals: [],
     rows: 3,
   };
   findLocation(id: string) {
@@ -103,7 +111,7 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     });
     expect(report.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'USD',
         items: 2,
         gross: 1000000,
         discount: 75000,
@@ -191,7 +199,8 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     // los suyos, y sí cuenta para la paginación.
     repo.summaryResult = {
       totals: [],
-      agreementTotals: [{ currency: 'COP', items: 1, reduction: 500000 }],
+      agreementTotals: [{ currency: 'USD', items: 1, reduction: 500000 }],
+      agreementUnmeasuredTotals: [],
       rows: 1,
     };
     repo.rows = () =>
@@ -218,7 +227,7 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
     });
     expect(report.totals).toEqual([]);
     expect(report.agreementTotals).toEqual([
-      { currency: 'COP', items: 1, reduction: 500000 },
+      { currency: 'USD', items: 1, reduction: 500000 },
     ]);
     expect(report.total).toBe(1);
     expect(report.items[0]).toMatchObject({
@@ -236,5 +245,42 @@ describe('GetDiscountReportUseCase (DX-204)', () => {
       to: '2026-10-31',
     });
     expect(report.items.every((i) => i.agreementPercent === 0)).toBe(true);
+  });
+
+  it('DX-513-ter: las líneas de convenio sin medir van con su recuento por moneda, sin importe ni %', async () => {
+    const repo = new FakeRepo();
+    repo.summaryResult = {
+      totals: [],
+      agreementTotals: [],
+      agreementUnmeasuredTotals: [{ currency: 'USD', items: 2 }],
+      rows: 2,
+    };
+    repo.rows = () =>
+      Promise.resolve([
+        row({
+          priceSource: 'AGREEMENT_PRICE_LIST',
+          agreementName: 'Empresa',
+          catalogCurrency: 'VES',
+          basePrice: 3600,
+          catalogPrice: 3.5,
+          price: 3.5,
+          itemDiscount: 0,
+          discount: 0,
+          agreementUnmeasured: true,
+        }),
+      ]);
+    const report = await new GetDiscountReportUseCase(repo).execute({
+      from: '2026-10-01',
+      to: '2026-10-31',
+    });
+    expect(report.agreementTotals).toEqual([]);
+    expect(report.agreementUnmeasuredTotals).toEqual([
+      { currency: 'USD', items: 2 },
+    ]);
+    expect(report.items[0]).toMatchObject({
+      agreementUnmeasured: true,
+      agreementReduction: 0,
+      agreementPercent: 0,
+    });
   });
 });

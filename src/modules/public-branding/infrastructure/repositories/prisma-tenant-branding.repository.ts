@@ -1,7 +1,9 @@
+import { clinicLogoPublicUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantBrandingRepository } from '../../domain/ports/tenant-branding-repository.port';
 import { TenantBranding } from '../../domain/entities/tenant-branding.entity';
+import { readCurrencyTexts } from '../../../../shared/format/currency-text';
 
 @Injectable()
 export class PrismaTenantBrandingRepository implements TenantBrandingRepository {
@@ -15,7 +17,12 @@ export class PrismaTenantBrandingRepository implements TenantBrandingRepository 
     // TenantResolverService.resolve(). No runWithTenant, no DIRECT_URL.
     const tenant = await this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },
-      select: { name: true, primaryColor: true, logoUrl: true },
+      select: {
+        name: true,
+        primaryColor: true,
+        logoKey: true,
+        currencyTexts: true,
+      },
     });
 
     if (!tenant) return null;
@@ -26,12 +33,14 @@ export class PrismaTenantBrandingRepository implements TenantBrandingRepository 
   private mapToEntity(tenant: {
     name: string;
     primaryColor: string;
-    logoUrl: string | null;
+    logoKey: string | null;
+    currencyTexts: unknown;
   }): TenantBranding {
     return {
       name: tenant.name,
       primaryColor: tenant.primaryColor,
-      logoUrl: tenant.logoUrl,
+      logoUrl: clinicLogoPublicUrl(tenant.logoKey),
+      currencyTexts: readCurrencyTexts(tenant.currencyTexts),
     };
   }
 }

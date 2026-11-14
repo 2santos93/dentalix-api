@@ -20,6 +20,7 @@ import {
 } from './application/use-cases/anamnesis-review.use-cases';
 import {
   GetPublicAnamnesisUseCase,
+  MarkPublicAnamnesisOpenedUseCase,
   SubmitPublicAnamnesisUseCase,
 } from './application/use-cases/public-anamnesis.use-cases';
 import { MEDICAL_HISTORY_SUBMISSION_REPOSITORY } from './domain/ports/medical-history-submission-repository.port';
@@ -52,6 +53,7 @@ import { PublicMedicalHistoryController } from './presentation/public-medical-hi
     AcceptAnamnesisUseCase,
     RejectAnamnesisUseCase,
     GetPublicAnamnesisUseCase,
+    MarkPublicAnamnesisOpenedUseCase,
     SubmitPublicAnamnesisUseCase,
     { provide: ANAMNESIS_CLOCK, useValue: () => new Date() },
     {
@@ -66,5 +68,7 @@ import { PublicMedicalHistoryController } from './presentation/public-medical-hi
     TenantContextInterceptor,
     PublicTenantContextInterceptor,
   ],
+  // DX-503: «Mi día» cuenta la bandeja con el mismo caso de uso.
+  exports: [CountAnamnesisInboxUseCase],
 })
 export class MedicalHistorySubmissionsModule {}

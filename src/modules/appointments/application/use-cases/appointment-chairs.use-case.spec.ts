@@ -24,8 +24,8 @@ import type { Appointment } from '../../domain/entities/appointment.entity';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 
 // DX-211: el sillón como recurso de la cita. Día siempre futuro (crear y
-// reagendar rechazan el pasado). La sede del doble es 'loc1' en Bogotá: las
-// 15:00 UTC son las 10:00 de pared.
+// reagendar rechazan el pasado). La sede del doble es 'loc1' en la zona de la sede: las
+// 14:00 UTC son las 10:00 de pared.
 const DAY = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
   .toISOString()
   .slice(0, 10);
@@ -36,7 +36,11 @@ const patients = {
 } as unknown as PatientRepository;
 const staff = {
   findById: (userId: string) =>
-    Promise.resolve(userId === 'ajeno' ? null : { userId, locationIds: null }),
+    Promise.resolve(
+      userId === 'ajeno'
+        ? null
+        : { userId, role: 'DENTIST', locationIds: null },
+    ),
   listActive: () =>
     Promise.resolve([
       { userId: 'dra', locationIds: null },
@@ -51,9 +55,10 @@ const locations = {
   findById: (id: string) =>
     Promise.resolve({
       id,
-      timeZone: 'America/Bogota',
-      locale: 'es-CO',
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
       hourCycle: 'h23',
+      isActive: true,
     }),
 } as unknown as LocationRepository;
 
@@ -121,8 +126,8 @@ describe('sillón de la cita (DX-211)', () => {
     create.execute({
       patientId: 'p1',
       providerId: 'dra',
-      start: at('15:00'),
-      end: at('15:30'),
+      start: at('14:00'),
+      end: at('14:30'),
       ...input,
     });
 
@@ -192,8 +197,8 @@ describe('sillón de la cita (DX-211)', () => {
           chairId: other.id,
           providerId: 'dra',
           patientId: 'p2',
-          start: at('16:00'),
-          end: at('16:30'),
+          start: at('15:00'),
+          end: at('15:30'),
         }),
       ).resolves.toMatchObject({ providerId: 'dra' });
     });
@@ -216,8 +221,8 @@ describe('sillón de la cita (DX-211)', () => {
       const chair = seedChair({ name: 'Sillón 1' });
       const winner = repo.seed({
         chairId: chair.id,
-        start: at('15:00'),
-        end: at('15:30'),
+        start: at('14:00'),
+        end: at('14:30'),
       });
       jest
         .spyOn(repo, 'findOverlappingForChair')
@@ -248,19 +253,62 @@ describe('sillón de la cita (DX-211)', () => {
 
     it('reprogramar una cita con sillón a una franja ocupada en ese sillón: 409', async () => {
       const chair = seedChair({ name: 'Sillón 1' });
-      await book({ chairId: chair.id, start: at('16:00'), end: at('16:30') });
+      await book({ chairId: chair.id, start: at('15:00'), end: at('15:30') });
       const mine = await book({
         chairId: chair.id,
         providerId: 'dr',
         patientId: 'p2',
       });
-      await expect(
-        update.execute(mine.id, { start: at('16:15'), end: at('16:45') }),
-      ).rejects.toThrow(
-        new ConflictException(
-          'El sillón «Sillón 1» ya está ocupado de 11:00 a 11:30',
-        ),
-      );
+      const err = await update
+        .execute(mine.id, { start: at('15:15'), end: at('15:45') })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      // DX-492-bis: con el código y el ámbito de los demás solapes al mover.
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 1» ya está ocupado de 11:00 a 11:30',
+      });
+    });
+
+    it('DX-492-bis: la carrera que gana otra cita al mover (23P01 por sillón) da el 409 con código y ámbito', async () => {
+      const chair = seedChair({ name: 'Sillón 1' });
+      const mine = await book({
+        chairId: chair.id,
+        providerId: 'dr',
+        patientId: 'p2',
+        start: at('17:00'),
+        end: at('17:30'),
+      });
+      const winner = repo.seed({
+        chairId: chair.id,
+        start: at('14:00'),
+        end: at('14:30'),
+      });
+      // El pre-check no la ve (llegó a la vez); la EXCLUDE la rechaza al escribir.
+      jest
+        .spyOn(repo, 'findOverlappingForChair')
+        .mockResolvedValueOnce([])
+        .mockResolvedValue([winner]);
+      jest
+        .spyOn(repo, 'update')
+        .mockRejectedValue(
+          new Prisma.PrismaClientUnknownRequestError(
+            'ERROR: conflicting key value violates exclusion constraint "appointments_no_overlap_per_chair" (23P01)',
+            { clientVersion: 'test' },
+          ),
+        );
+      const err = await update
+        .execute(mine.id, { start: at('14:00'), end: at('14:30') })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        code: 'APPOINTMENT_OVERLAP',
+        scope: 'chair',
+        message: 'El sillón «Sillón 1» ya está ocupado de 10:00 a 10:30',
+      });
     });
 
     it('cambiar solo de sillón valida el sillón destino y deja el movimiento auditado', async () => {
@@ -320,7 +368,7 @@ describe('sillón de la cita (DX-211)', () => {
         update.execute(mine.id, { status: AppointmentStatus.CONFIRMED }),
       ).resolves.toMatchObject({ status: AppointmentStatus.CONFIRMED });
       await expect(
-        update.execute(mine.id, { start: at('17:00'), end: at('17:30') }),
+        update.execute(mine.id, { start: at('16:00'), end: at('16:30') }),
       ).rejects.toThrow(
         new BadRequestException(
           'El sillón «Sillón 1» está desactivado: elige otro sillón',
@@ -331,7 +379,7 @@ describe('sillón de la cita (DX-211)', () => {
     it('sin sillón, mover la cita no mira ningún sillón', async () => {
       const mine = await booked(undefined);
       const spy = jest.spyOn(repo, 'findOverlappingForChair');
-      await update.execute(mine.id, { start: at('18:00'), end: at('18:30') });
+      await update.execute(mine.id, { start: at('17:00'), end: at('17:30') });
       expect(spy).not.toHaveBeenCalled();
     });
   });
@@ -344,15 +392,15 @@ describe('sillón de la cita (DX-211)', () => {
       const mine = repo.seed({
         chairId: one.id,
         providerId: 'dra',
-        start: at('15:00'),
-        end: at('15:30'),
+        start: at('14:00'),
+        end: at('14:30'),
         confirmationSentAt: sentAt,
       });
       const spy = jest.spyOn(repo, 'update');
       const moved = await update.execute(mine.id, {
         chairId: two.id,
-        start: at('15:00'),
-        end: at('15:30'),
+        start: at('14:00'),
+        end: at('14:30'),
         providerId: 'dra',
       });
       expect(moved).toMatchObject({
@@ -403,12 +451,12 @@ describe('sillón de la cita (DX-211)', () => {
 
     it('una cancelada sí puede pasar a un sillón activo ocupado (no lo ocupa)', async () => {
       const chair = seedChair({});
-      repo.seed({ chairId: chair.id, start: at('15:00'), end: at('15:30') });
+      repo.seed({ chairId: chair.id, start: at('14:00'), end: at('14:30') });
       const mine = repo.seed({
         status: AppointmentStatus.CANCELLED,
         patientId: 'p9',
-        start: at('15:00'),
-        end: at('15:30'),
+        start: at('14:00'),
+        end: at('14:30'),
       });
       await expect(
         update.execute(mine.id, { chairId: chair.id }),
@@ -420,8 +468,8 @@ describe('sillón de la cita (DX-211)', () => {
       const mine = repo.seed({
         chairId: chair.id,
         status: AppointmentStatus.CANCELLED,
-        start: at('18:00'),
-        end: at('18:30'),
+        start: at('17:00'),
+        end: at('17:30'),
       });
       chairs.rows.find((c) => c.id === chair.id)!.active = false;
       await expect(
@@ -438,15 +486,15 @@ describe('sillón de la cita (DX-211)', () => {
       const mine = repo.seed({
         chairId: chair.id,
         status: AppointmentStatus.CANCELLED,
-        start: at('19:00'),
-        end: at('19:30'),
+        start: at('18:00'),
+        end: at('18:30'),
       });
       repo.seed({
         chairId: chair.id,
         patientId: 'p7',
         providerId: 'otro',
-        start: at('19:00'),
-        end: at('19:30'),
+        start: at('18:00'),
+        end: at('18:30'),
       });
       await expect(
         update.execute(mine.id, { status: AppointmentStatus.SCHEDULED }),
@@ -476,8 +524,8 @@ describe('sillón de la cita (DX-211)', () => {
       await book({
         providerId: 'dr',
         patientId: 'p3',
-        start: at('17:00'),
-        end: at('17:30'),
+        start: at('16:00'),
+        end: at('16:30'),
       });
       const rows = await list.execute({
         from: at('00:00'),

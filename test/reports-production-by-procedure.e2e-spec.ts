@@ -28,21 +28,21 @@ import {
 import type { LocationsComparison } from '../src/modules/reports/application/use-cases/get-locations-comparison.use-case';
 
 /**
- * DX-423 · «Producción por procedimiento» por HTTP real. Clínica A (Bogotá,
- * UTC−5) con tres sedes y octubre de 2026:
+ * DX-423 · «Producción por procedimiento» por HTTP real. Clínica A (UTC−4)
+ * con tres sedes y octubre de 2026:
  *
- *  - Resina (Operatoria) COP en la principal: 100 y 100 de la Dra. Uno y 80
+ *  - Resina (Operatoria) VES en la principal: 100 y 100 de la Dra. Uno y 80
  *    con 20 de descuento del Dr. Dos, catálogo 100 en los tres → 3 · bruto
  *    280 · descuentos 20 · neto 260 · medio 86,67 · catálogo 100 · −13,3 %;
  *  - Resina USD en la Norte: 50 del Dr. Dos, catálogo 60 (dos monedas);
- *  - Profilaxis (Prevención) COP 40 en la Norte, de la Dra. Uno, para un
+ *  - Profilaxis (Prevención) VES 40 en la Norte, de la Dra. Uno, para un
  *    paciente cuyo plan se presentó en la principal («de» la principal);
- *  - Blanqueamiento (sin categoría) COP 30 en la Sur a las 22:00 del 31/10 en
- *    Bogotá (ya 1/11 en UTC): cuenta; otro a las 22:00 del 30/09: no;
+ *  - Blanqueamiento (sin categoría) VES 30 en la Sur a las 22:00 del 31/10 en
+ *    la zona de la sede (ya 1/11 en UTC): cuenta; otro a las 22:00 del 30/09: no;
  *  - no cuentan: un DONE borrado, uno de un plan borrado, un propuesto, un
  *    aceptado y uno aceptado en un plan cancelado;
- *  - «Sin atribuir»: un DONE sin quién, cuándo ni sede (COP 70) y uno de la
- *    Dra. Uno en la Sur sin fecha (COP 25).
+ *  - «Sin atribuir»: un DONE sin quién, cuándo ni sede (VES 70) y uno de la
+ *    Dra. Uno en la Sur sin fecha (VES 25).
  */
 
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
@@ -209,11 +209,11 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     const blanqueamiento = await catalog('BLQ-1', 'Blanqueamiento', null);
 
     const at = (d: string) => `2026-10-${d}T15:00:00Z`;
-    // Resina COP en la principal: 100, 100 y 80 con 20 de descuento.
+    // Resina VES en la principal: 100, 100 y 80 con 20 de descuento.
     await item({
       patientId: p1,
       catalogItemId: resina,
-      currency: 'COP',
+      currency: 'VES',
       price: 100,
       basePrice: 100,
       by: uno,
@@ -223,7 +223,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p2,
       catalogItemId: resina,
-      currency: 'COP',
+      currency: 'VES',
       price: 100,
       basePrice: 100,
       by: uno,
@@ -233,7 +233,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p3,
       catalogItemId: resina,
-      currency: 'COP',
+      currency: 'VES',
       price: 80,
       discount: 20,
       basePrice: 100,
@@ -256,7 +256,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p2,
       catalogItemId: profilaxis,
-      currency: 'COP',
+      currency: 'VES',
       price: 40,
       basePrice: 40,
       by: uno,
@@ -264,11 +264,11 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
       completedAt: at('09'),
       presentedLocationId: principal,
     });
-    // Bordes del período en la zona de la sede (Bogotá).
+    // Bordes del período en la zona de la sede.
     await item({
       patientId: p3,
       catalogItemId: blanqueamiento,
-      currency: 'COP',
+      currency: 'VES',
       price: 30,
       by: dos,
       locationId: sur,
@@ -277,7 +277,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p3,
       catalogItemId: blanqueamiento,
-      currency: 'COP',
+      currency: 'VES',
       price: 999,
       by: dos,
       locationId: sur,
@@ -287,7 +287,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p1,
       catalogItemId: resina,
-      currency: 'COP',
+      currency: 'VES',
       price: 1000,
       by: uno,
       locationId: principal,
@@ -297,7 +297,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p1,
       catalogItemId: resina,
-      currency: 'COP',
+      currency: 'VES',
       price: 1000,
       by: uno,
       locationId: principal,
@@ -307,21 +307,21 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p1,
       catalogItemId: resina,
-      currency: 'COP',
+      currency: 'VES',
       price: 1000,
       status: 'PROPOSED',
     });
     await item({
       patientId: p1,
       catalogItemId: resina,
-      currency: 'COP',
+      currency: 'VES',
       price: 1000,
       status: 'ACCEPTED',
     });
     await item({
       patientId: p1,
       catalogItemId: resina,
-      currency: 'COP',
+      currency: 'VES',
       price: 1000,
       status: 'ACCEPTED',
       planStatus: 'CANCELLED',
@@ -330,13 +330,13 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p2,
       catalogItemId: profilaxis,
-      currency: 'COP',
+      currency: 'VES',
       price: 70,
     });
     await item({
       patientId: p2,
       catalogItemId: profilaxis,
-      currency: 'COP',
+      currency: 'VES',
       price: 25,
       by: uno,
       locationId: sur,
@@ -345,7 +345,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p3,
       catalogItemId: profilaxis,
-      currency: 'COP',
+      currency: 'VES',
       price: 15,
       completedAt: at('11'),
     });
@@ -353,7 +353,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     await item({
       patientId: p3,
       catalogItemId: profilaxis,
-      currency: 'COP',
+      currency: 'VES',
       price: 90000,
       completedAt: '2020-01-10T15:00:00Z',
     });
@@ -381,13 +381,13 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
   it('100, 100 y 80 con 20 de descuento: 3 · bruto 280 · descuentos 20 · neto 260 · medio 86,67 · catálogo 100 · −13,3 %', async () => {
     const r = await report();
     expect(
-      r.rows.find((x) => x.catalogItemId === resina && x.currency === 'COP'),
+      r.rows.find((x) => x.catalogItemId === resina && x.currency === 'VES'),
     ).toEqual({
       catalogItemId: resina,
       code: 'RES-1',
       label: 'Resina',
       category: 'Operatoria',
-      currency: 'COP',
+      currency: 'VES',
       count: 3,
       gross: 280,
       discounts: 20,
@@ -405,28 +405,20 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     expect(
       r.rows.map((x) => [x.category, x.code, x.currency, x.count, x.net]),
     ).toEqual([
-      ['Operatoria', 'RES-1', 'COP', 3, 260],
       ['Operatoria', 'RES-1', 'USD', 1, 50],
-      ['Prevención', 'PRO-1', 'COP', 1, 40],
-      [null, 'BLQ-1', 'COP', 1, 30],
+      ['Operatoria', 'RES-1', 'VES', 3, 260],
+      ['Prevención', 'PRO-1', 'VES', 1, 40],
+      [null, 'BLQ-1', 'VES', 1, 30],
     ]);
     expect(
       r.categoryTotals.map((c) => [c.category, c.currency, c.net]),
     ).toEqual([
-      ['Operatoria', 'COP', 260],
       ['Operatoria', 'USD', 50],
-      ['Prevención', 'COP', 40],
-      [null, 'COP', 30],
+      ['Operatoria', 'VES', 260],
+      ['Prevención', 'VES', 40],
+      [null, 'VES', 30],
     ]);
     expect(r.totals).toEqual([
-      {
-        currency: 'COP',
-        count: 5,
-        gross: 350,
-        discounts: 20,
-        net: 330,
-        averageNet: 66,
-      },
       {
         currency: 'USD',
         count: 1,
@@ -434,6 +426,14 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
         discounts: 0,
         net: 50,
         averageNet: 50,
+      },
+      {
+        currency: 'VES',
+        count: 5,
+        gross: 350,
+        discounts: 20,
+        net: 330,
+        averageNet: 66,
       },
     ]);
     // Las del catálogo de la clínica (el registro siembra el suyo).
@@ -450,10 +450,10 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
   it('borrados, propuestos, aceptados sin hacer y cancelados no cuentan; sin sede (con fecha del período) en «Sin atribuir», sin fecha aparte', async () => {
     const r = await report();
     expect(r.unattributed).toEqual([
-      { currency: 'COP', count: 1, gross: 15, discounts: 0, net: 15 },
+      { currency: 'VES', count: 1, gross: 15, discounts: 0, net: 15 },
     ]);
     expect(r.undated).toEqual([
-      { currency: 'COP', count: 2, gross: 95, discounts: 0, net: 95 },
+      { currency: 'VES', count: 2, gross: 95, discounts: 0, net: 95 },
     ]);
     expect(r.hasActivity).toBe(true);
   });
@@ -467,11 +467,11 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
       hasActivity: false,
     });
     expect(february.undated).toEqual([
-      { currency: 'COP', count: 2, gross: 95, discounts: 0, net: 95 },
+      { currency: 'VES', count: 2, gross: 95, discounts: 0, net: 95 },
     ]);
     const january = await report({ from: '2020-01-01', to: '2020-01-31' });
     expect(january.unattributed).toEqual([
-      { currency: 'COP', count: 1, gross: 90000, discounts: 0, net: 90000 },
+      { currency: 'VES', count: 1, gross: 90000, discounts: 0, net: 90000 },
     ]);
   });
 
@@ -492,7 +492,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
   it('cuenta en la sede donde se realizó: el de la Norte de un paciente «de» la principal no lo ve quien solo ve la principal', async () => {
     const principalOnly = await report({}, onlyPrincipal);
     expect(principalOnly.rows.map((x) => [x.code, x.currency])).toEqual([
-      ['RES-1', 'COP'],
+      ['RES-1', 'VES'],
     ]);
     expect(principalOnly.options.locations.map((l) => l.id)).toEqual([
       principal,
@@ -504,7 +504,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     const norteOnly = await report({}, onlyNorte);
     expect(norteOnly.rows.map((x) => [x.code, x.currency])).toEqual([
       ['RES-1', 'USD'],
-      ['PRO-1', 'COP'],
+      ['PRO-1', 'VES'],
     ]);
     // Pedir la principal teniendo solo la Norte: 403.
     await get(ROUTE, { ...OCTOBER, locationId: principal }, onlyNorte).expect(
@@ -516,7 +516,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     const atNorte = await report({ locationId: norte });
     expect(atNorte.rows.map((x) => [x.code, x.currency])).toEqual([
       ['RES-1', 'USD'],
-      ['PRO-1', 'COP'],
+      ['PRO-1', 'VES'],
     ]);
     expect(atNorte.filters.locationName).toBe('Sede Norte');
     expect(atNorte.unattributed).toEqual([]);
@@ -524,14 +524,14 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     const atSur = await report({ locationId: sur });
     expect(atSur.unattributed).toEqual([]);
     expect(atSur.undated).toEqual([
-      { currency: 'COP', count: 1, gross: 25, discounts: 0, net: 25 },
+      { currency: 'VES', count: 1, gross: 25, discounts: 0, net: 25 },
     ]);
 
     const byDos = await report({ professionalId: dos.userId });
     expect(byDos.rows.map((x) => [x.code, x.currency, x.net])).toEqual([
-      ['RES-1', 'COP', 60],
       ['RES-1', 'USD', 50],
-      ['BLQ-1', 'COP', 30],
+      ['RES-1', 'VES', 60],
+      ['BLQ-1', 'VES', 30],
     ]);
     expect(byDos.filters.professionalName).toBe('Dr. Dos');
 
@@ -545,12 +545,12 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     const own = await report({}, dentistToken);
     expect(own.scope).toBe('OWN');
     expect(own.rows.map((x) => [x.code, x.currency, x.count, x.net])).toEqual([
-      ['RES-1', 'COP', 2, 200],
-      ['PRO-1', 'COP', 1, 40],
+      ['RES-1', 'VES', 2, 200],
+      ['PRO-1', 'VES', 1, 40],
     ]);
     expect(own.unattributed).toEqual([]);
     expect(own.undated).toEqual([
-      { currency: 'COP', count: 1, gross: 25, discounts: 0, net: 25 },
+      { currency: 'VES', count: 1, gross: 25, discounts: 0, net: 25 },
     ]);
     expect(own.options.professionals).toEqual([
       { userId: uno.userId, fullName: 'Miembro DENTIST' },
@@ -564,7 +564,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
       PRODUCTION_OWN_ONLY_MESSAGE,
     );
     const admin = await report();
-    expect(admin.totals[0].count).toBe(5);
+    expect(admin.totals[1].count).toBe(5);
   });
 
   it('recepción y asistente: 403 en el reporte, el CSV y el detalle', async () => {
@@ -670,7 +670,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     const before = new Date();
     const res = await get(
       `${ROUTE}/items`,
-      { ...OCTOBER, catalogItemId: resina, currency: 'COP' },
+      { ...OCTOBER, catalogItemId: resina, currency: 'VES' },
       a.adminToken,
     ).expect(200);
     const detail = res.body as ProductionItems;
@@ -685,7 +685,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     expect(detail.items[0]).toMatchObject({
       professionalName: 'Dr. Dos',
       completedAt: '2026-10-07T15:00:00.000Z',
-      timeZone: 'America/Bogota',
+      timeZone: 'America/Caracas',
     });
     const events = await raw.auditEvent.findMany({
       where: {
@@ -702,7 +702,7 @@ describe('GET /reports/production-by-procedure (DX-423)', () => {
     const own = (
       await get(
         `${ROUTE}/items`,
-        { ...OCTOBER, catalogItemId: resina, currency: 'COP' },
+        { ...OCTOBER, catalogItemId: resina, currency: 'VES' },
         dentistToken,
       ).expect(200)
     ).body as ProductionItems;

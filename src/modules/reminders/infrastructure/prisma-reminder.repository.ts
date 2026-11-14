@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { DEFAULT_CALENDAR_ALARM_HOURS } from '../domain/reminder-lead-hours';
 import {
   AppointmentReminderSkipReason,
   AppointmentReminderStatus,
@@ -11,6 +12,7 @@ import { requireLocationTimeZone } from '../../../shared/locations/location-time
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import {
   loadNoticeResponsibles,
+  loadMajorityReview,
   loadTenantMajorityAge,
 } from '../../patients/infrastructure/notices/notice-context';
 import {
@@ -31,6 +33,8 @@ import type {
   ReminderRepository,
   ReminderSendContext,
 } from '../domain/ports/reminder-repository.port';
+
+const HOUR_MS = 3_600_000;
 
 /** Las columnas son TIMESTAMP(3) en UTC (sin zona), como el resto del esquema. */
 const utc = (d: Date) =>
@@ -57,63 +61,94 @@ function toContact(
 const SETTINGS_SELECT = {
   enabled: true,
   leadHours: true,
+  calendarAlarmHours: true,
   updatedAt: true,
 } as const satisfies Prisma.LocationReminderSettingsSelect;
+
+/** Una ventana del barrido: citas de la sede con `start` en (lo, hi]. */
+export interface SweepWindow {
+  locationId: string;
+  leadHours: number;
+  lo: Date;
+  hi: Date;
+}
 
 /**
  * Por cada antelación de cada sede activa (y no retirada), el tramo de
  * `start` cuya hora de recordatorio cae en (now - catchUp, now + lookahead],
  * es decir `start` en (lo, hi] con lo = max(now, now + lead - catchUp) y
- * hi = now + lead + lookahead.
+ * hi = now + lead + lookahead. Misma fórmula que isInSweepWindow.
  *
- * DX-225 (DB-036): cada ventana se calcula ANTES (LATERAL `w`) y la cita se
- * busca en otro LATERAL con `OFFSET 0`, que el planificador no aplana: así
- * `a."start" > w.lo AND a."start" <= w.hi` es un rango parametrizado sobre
- * appointments_tenant_location_start_idx (tenantId, locationId, start), y
- * solo se leen las citas de la ventana. Con las cotas en el JOIN, el plan
- * recorría todas las citas futuras de la sede y las descartaba después.
+ * Una antelación repetida en el array da otra ventana igual, como daba el
+ * `unnest` de antes (el handler deduplica por idempotencyKey).
+ */
+export async function loadSweepWindows(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  now: Date,
+): Promise<SweepWindow[]> {
+  const settings = await tx.locationReminderSettings.findMany({
+    where: { tenantId, enabled: true, location: { deletedAt: null } },
+    orderBy: { locationId: 'asc' },
+    select: { locationId: true, leadHours: true },
+  });
+  const t = now.getTime();
+  return settings.flatMap(({ locationId, leadHours }) =>
+    leadHours.map((lead) => ({
+      locationId,
+      leadHours: lead,
+      lo: new Date(Math.max(t, t + lead * HOUR_MS - REMINDER_CATCH_UP_MS)),
+      hi: new Date(t + lead * HOUR_MS + REMINDER_LOOKAHEAD_MS),
+    })),
+  );
+}
+
+/**
+ * Las citas de todas las ventanas, por hora de inicio: un SELECT por ventana
+ * unidos con UNION ALL, cada uno con sus cotas como parámetros.
+ *
+ * DX-225 (DB-036): el barrido solo debe leer las citas de la ventana, con
+ * `a."start" > lo AND a."start" <= hi` como rango sobre
+ * appointments_tenant_location_start_idx (tenantId, locationId, start). La
+ * versión anterior calculaba las ventanas en SQL (LATERAL `w` con `unnest`)
+ * y buscaba las citas en otro LATERAL con `OFFSET 0`; las cotas eran
+ * referencias externas y llegar al índice dependía del planificador:
+ * Postgres 16.14/16.15 hacía un Index Scan con las dos cotas, pero 16.16
+ * elige un Bitmap Heap Scan cuyo Bitmap Index Scan solo lleva
+ * (tenantId, locationId) y recorre toda la agenda futura de la sede. Con las
+ * ventanas calculadas antes (loadSweepWindows) y pasadas como constantes,
+ * cualquier plan (Index Scan o Bitmap) las pone en el Index Cond.
  *
  * Todos los estados: el handler registra el motivo si la cita ya no va.
  * DX-128: sin los pacientes con baja o con canal distinto de EMAIL (regla
  * de reminder-eligibility.ts): esos nunca entran en la cola. El paciente
- * se lee por su PK (tenantId, id) desde cada cita. Exportada para que el
- * int-spec explique (EXPLAIN) la consulta real.
+ * se lee por su PK (tenantId, id) desde cada cita. Exportada (con
+ * loadSweepWindows) para que el int-spec explique (EXPLAIN) la consulta real.
  */
-export function dueCandidatesSql(tenantId: string, now: Date): Prisma.Sql {
-  const lookahead = REMINDER_LOOKAHEAD_MS / 1000;
-  const catchUp = REMINDER_CATCH_UP_MS / 1000;
-  return Prisma.sql`
-    SELECT c."appointmentId", w.lead AS "leadHours", c."start"
-      FROM "location_reminder_settings" rs
-      JOIN "locations" l
-        ON l."tenantId" = rs."tenantId"
-       AND l."id" = rs."locationId"
-       AND l."deletedAt" IS NULL
-      CROSS JOIN LATERAL (
-        SELECT lead,
-               GREATEST(${utc(now)},
-                        ${utc(now)} + make_interval(hours => lead, secs => ${-catchUp})) AS lo,
-               ${utc(now)} + make_interval(hours => lead, secs => ${lookahead}) AS hi
-          FROM unnest(rs."leadHours") AS lead
-      ) w
-      CROSS JOIN LATERAL (
-        SELECT a."id" AS "appointmentId", a."start"
-          FROM "appointments" a
-          JOIN "patients" p
-            ON p."tenantId" = a."tenantId"
-           AND p."id" = a."patientId"
-         WHERE a."tenantId" = rs."tenantId"
-           AND a."locationId" = rs."locationId"
-           AND a."start" > w.lo
-           AND a."start" <= w.hi
-           AND a."deletedAt" IS NULL
-           AND p."contactChannel" = 'EMAIL'
-           AND p."reminderOptOutAt" IS NULL
-        OFFSET 0
-      ) c
-     WHERE rs."tenantId" = ${tenantId}::uuid
-       AND rs."enabled"
-     ORDER BY c."start"`;
+export function dueCandidatesSql(
+  tenantId: string,
+  windows: readonly SweepWindow[],
+): Prisma.Sql {
+  if (windows.length === 0) {
+    throw new Error('dueCandidatesSql: sin ventanas no hay consulta');
+  }
+  const selects = windows.map(
+    (w) => Prisma.sql`
+    SELECT a."id" AS "appointmentId", ${w.leadHours}::int AS "leadHours", a."start"
+      FROM "appointments" a
+      JOIN "patients" p
+        ON p."tenantId" = a."tenantId"
+       AND p."id" = a."patientId"
+     WHERE a."tenantId" = ${tenantId}::uuid
+       AND a."locationId" = ${w.locationId}::uuid
+       AND a."start" > ${utc(w.lo)}
+       AND a."start" <= ${utc(w.hi)}
+       AND a."deletedAt" IS NULL
+       AND p."contactChannel" = 'EMAIL'
+       AND p."reminderOptOutAt" IS NULL`,
+  );
+  return Prisma.sql`${Prisma.join(selects, '\n    UNION ALL')}
+     ORDER BY "start"`;
 }
 
 @Injectable()
@@ -147,6 +182,8 @@ export class PrismaReminderRepository implements ReminderRepository {
           locationName: l.name,
           enabled: s?.enabled ?? false,
           leadHours: s?.leadHours ?? [],
+          calendarAlarmHours:
+            s?.calendarAlarmHours ?? DEFAULT_CALENDAR_ALARM_HOURS,
           updatedAt: s?.updatedAt ?? null,
         };
       });
@@ -172,13 +209,23 @@ export class PrismaReminderRepository implements ReminderRepository {
         select: {
           id: true,
           name: true,
-          reminderSettings: { select: { enabled: true, leadHours: true } },
+          reminderSettings: {
+            select: {
+              enabled: true,
+              leadHours: true,
+              calendarAlarmHours: true,
+            },
+          },
         },
       });
       if (!location) return null;
       const data = {
         enabled: input.enabled,
         leadHours: input.leadHours,
+        // DX-469: sin valor en el PUT se conserva (o el por defecto al crear).
+        ...(input.calendarAlarmHours !== undefined
+          ? { calendarAlarmHours: input.calendarAlarmHours }
+          : {}),
         updatedById: audit.actor.userId,
       };
       const saved = await tx.locationReminderSettings.upsert({
@@ -190,7 +237,11 @@ export class PrismaReminderRepository implements ReminderRepository {
       const event = reminderSettingsAuditEvent(
         audit,
         locationId,
-        location.reminderSettings[0] ?? { enabled: false, leadHours: [] },
+        location.reminderSettings[0] ?? {
+          enabled: false,
+          leadHours: [],
+          calendarAlarmHours: DEFAULT_CALENDAR_ALARM_HOURS,
+        },
         saved,
       );
       if (event) await writeAuditEvent(tx, event);
@@ -211,9 +262,13 @@ export class PrismaReminderRepository implements ReminderRepository {
   }
 
   dueCandidates(tenantId: string, now: Date): Promise<ReminderCandidate[]> {
-    return this.prisma.runWithTenant(tenantId, (tx) =>
-      tx.$queryRaw<ReminderCandidate[]>(dueCandidatesSql(tenantId, now)),
-    );
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const windows = await loadSweepWindows(tx, tenantId, now);
+      if (windows.length === 0) return [];
+      return tx.$queryRaw<ReminderCandidate[]>(
+        dueCandidatesSql(tenantId, windows),
+      );
+    });
   }
 
   loadSendContext(appointmentId: string): Promise<ReminderSendContext | null> {
@@ -235,6 +290,7 @@ export class PrismaReminderRepository implements ReminderRepository {
               firstName: true,
               birthDate: true,
               emergencyContactName: true,
+              preferredLanguage: true,
             },
           },
           location: {
@@ -248,28 +304,30 @@ export class PrismaReminderRepository implements ReminderRepository {
         },
       });
       if (!appointment) return null;
-      const [settings, responsibles, policy, majorityAge] = await Promise.all([
-        tx.locationReminderSettings.findFirst({
-          where: { locationId: appointment.locationId },
-          select: { enabled: true, leadHours: true },
-        }),
-        loadNoticeResponsibles(tx, appointment.patient.id),
-        // DX-291: la política vigente de la sede, para el email.
-        tx.cancellationPolicyVersion.findFirst({
-          where: { locationId: appointment.locationId },
-          orderBy: { version: 'desc' },
-          select: {
-            id: true,
-            version: true,
-            noticeHours: true,
-            patientText: true,
-            suggestedFee: true,
-            currency: true,
-          },
-        }),
-        // DX-328: la vigente al enviarse, no la de cuando se encoló.
-        loadTenantMajorityAge(tx, tenantId),
-      ]);
+      const [settings, responsibles, majorityReview, policy, majorityAge] =
+        await Promise.all([
+          tx.locationReminderSettings.findFirst({
+            where: { locationId: appointment.locationId },
+            select: { enabled: true, leadHours: true },
+          }),
+          loadNoticeResponsibles(tx, appointment.patient.id),
+          loadMajorityReview(tx, appointment.patient.id),
+          // DX-291: la política vigente de la sede, para el email.
+          tx.cancellationPolicyVersion.findFirst({
+            where: { locationId: appointment.locationId },
+            orderBy: { version: 'desc' },
+            select: {
+              id: true,
+              version: true,
+              noticeHours: true,
+              patientText: true,
+              suggestedFee: true,
+              currency: true,
+            },
+          }),
+          // DX-328: la vigente al enviarse, no la de cuando se encoló.
+          loadTenantMajorityAge(tx, tenantId),
+        ]);
       return {
         appointment: {
           id: appointment.id,
@@ -283,6 +341,7 @@ export class PrismaReminderRepository implements ReminderRepository {
         // de formato y el envío no sale, igual que con una zona NULL.
         locationFormat: requireLocationFormat(appointment.location),
         patientId: appointment.patient.id,
+        preferredLanguage: appointment.patient.preferredLanguage,
         contact: toContact(appointment.patient),
         recipient: {
           firstName: appointment.patient.firstName,
@@ -291,6 +350,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           emergencyContactName: appointment.patient.emergencyContactName,
         },
         responsibles,
+        majorityReview,
         settings,
         cancellationPolicy: policy
           ? {
@@ -495,7 +555,13 @@ export class PrismaReminderRepository implements ReminderRepository {
             failureReason: true,
             sentAt: true,
             outboundMessageId: true,
-            outboundMessage: { select: { recipientKind: true } },
+            outboundMessage: {
+              select: {
+                recipientKind: true,
+                language: true,
+                languageFallbackFrom: true,
+              },
+            },
           },
         }),
       ]);
@@ -539,6 +605,8 @@ export class PrismaReminderRepository implements ReminderRepository {
             ? (delivery.get(r.outboundMessageId) ?? null)
             : null,
           sentToResponsible: r.outboundMessage?.recipientKind === 'RESPONSIBLE',
+          language: r.outboundMessage?.language ?? null,
+          languageFallbackFrom: r.outboundMessage?.languageFallbackFrom ?? null,
         })),
       };
     });

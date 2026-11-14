@@ -11,6 +11,12 @@ export interface PaymentBaseRetryCandidate extends PaymentRateState {
   /** Intentos fallidos hasta ahora (0: aún no se intentó en un barrido). */
   attempts: number;
   /**
+   * DX-413: despertares de la fila cuando se leyó. `postpone` solo aplaza si
+   * sigue igual: si una tasa despertó el reintento durante el intento, queda
+   * adelantado.
+   */
+  wakeCount: number;
+  /**
    * `false`: ya no hay nada que hacer (anulado, o su plan o saldo migrado
    * retirado). El reintento se cierra sin convertir.
    */
@@ -28,8 +34,17 @@ export interface PaymentBaseRetryCandidate extends PaymentRateState {
 /** Un intento fallido: cuántos lleva, por qué y cuánto esperar. */
 export interface PaymentBaseRetryFailure {
   attempts: number;
+  /** Los despertares que se leyeron con el abono (`wakeCount`). */
+  wakeCount: number;
   reason: PaymentBaseRetryReason;
   delayMs: number;
+}
+
+/** Resultado de `postpone`: ver el método. */
+export interface PostponeResult {
+  postponed: boolean;
+  /** Despertares actuales de la fila si no se aplazó; `null` si ya no existe. */
+  wakeCount: number | null;
 }
 
 /** Abonos sin base de la clínica desde hace más del umbral. */
@@ -88,11 +103,22 @@ export interface PaymentBaseRetryRepository {
   due(limit: number): Promise<PaymentBaseRetryCandidate[]>;
   /** El abono ya tiene lo que le faltaba (o ya no lo necesita): se borra. */
   resolve(paymentId: string): Promise<void>;
-  /** Intento fallido: lo apunta y lo aplaza `delayMs` desde la hora de la BD. */
-  postpone(paymentId: string, failure: PaymentBaseRetryFailure): Promise<void>;
   /**
-   * Adelanta a ya todos los reintentos aplazados de la clínica (la clínica
-   * registró o corrigió una tasa, o cambió de fuente). Devuelve cuántos.
+   * Intento fallido: lo apunta y lo aplaza `delayMs` desde la hora de la BD,
+   * SOLO si la fila sigue como se leyó (`failure.wakeCount`). Si no se
+   * aplazó, el reintento queda como está, adelantado, y `wakeCount` es el
+   * valor ACTUAL de la fila (hubo un `wake()` durante el intento), o `null`
+   * si la fila ya no existe (resuelta o anulada por otra vía).
+   */
+  postpone(
+    paymentId: string,
+    failure: PaymentBaseRetryFailure,
+  ): Promise<PostponeResult>;
+  /**
+   * La clínica registró o corrigió una tasa, o cambió de fuente: adelanta a
+   * ya los reintentos aplazados y anota el despertar en TODOS los de la
+   * clínica (también en los que están vencidos y en curso, para que su
+   * aplazamiento no los pise). Devuelve cuántos estaban aplazados.
    */
   wake(): Promise<number>;
   /** Abonos vivos pendientes desde hace más de `olderThanHours`. */

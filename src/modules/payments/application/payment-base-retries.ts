@@ -75,8 +75,16 @@ export class PaymentBaseRetries {
   /** Hasta `limit` reintentos vencidos de la clínica del contexto. */
   async retryDue(limit: number): Promise<RetryPassResult> {
     const result: RetryPassResult = { resolved: 0, withoutRate: 0, failed: 0 };
-    const convert = this.convertAmount.memoized({ manualBackup: true });
-    for (const candidate of await this.retries.due(limit)) {
+    // DX-413: el convertidor memoiza las tasas leídas al empezar; si un
+    // `wake()` ocurre en plena pasada deja de valer y se recarga.
+    let convert = this.convertAmount.memoized({ manualBackup: true });
+    const candidates = await this.retries.due(limit);
+    // Despertares ya absorbidos por el convertidor, medidos como diferencia
+    // por fila (la actual menos la que se leyó con el abono; un wake suma 1 a
+    // todas las filas de la clínica): se recarga una vez por wake, no una por
+    // abono fallido, y no depende de que las filas tengan contadores distintos.
+    let wakesApplied = 0;
+    for (const candidate of candidates) {
       let outcome: AttemptOutcome;
       try {
         outcome = await this.attempt(convert, candidate);
@@ -95,11 +103,28 @@ export class PaymentBaseRetries {
         continue;
       }
       const attempts = candidate.attempts + 1;
-      await this.retries.postpone(candidate.paymentId, {
+      const postponed = await this.retries.postpone(candidate.paymentId, {
         attempts,
+        wakeCount: candidate.wakeCount,
         reason: outcome,
         delayMs: paymentBaseRetryDelayMs(attempts),
       });
+      if (!postponed.postponed) {
+        // Se registró o corrigió una tasa durante el intento: no se aplaza,
+        // el reintento queda adelantado para la pasada siguiente. Si el wake
+        // es nuevo respecto al convertidor, se recarga (los siguientes abonos
+        // se cotizan con las tasas actuales); si la fila ya no existe
+        // (`null`) no hay nada que recargar.
+        const wakesSinceRead =
+          postponed.wakeCount === null
+            ? 0
+            : postponed.wakeCount - candidate.wakeCount;
+        if (wakesSinceRead > wakesApplied) {
+          wakesApplied = wakesSinceRead;
+          convert = this.convertAmount.memoized({ manualBackup: true });
+        }
+        continue;
+      }
       if (outcome === 'NO_RATE') result.withoutRate += 1;
       else result.failed += 1;
     }

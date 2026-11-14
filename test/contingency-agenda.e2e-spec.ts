@@ -27,10 +27,10 @@ import {
 } from '../src/modules/contingency-agenda/infrastructure/pdf/contingency-agenda-pdf.renderer';
 
 /**
- * DX-339 · Agenda de contingencia por HTTP real. Clínica A (sedes en Bogotá,
- * UTC−5, reloj de 24 h) con la sede principal y la Norte, y la clínica B. El
+ * DX-339 · Agenda de contingencia por HTTP real. Clínica A (sedes en
+ * UTC−4, reloj de 24 h) con la sede principal y la Norte, y la clínica B. El
  * reloj del módulo es fijo: «hoy» es el lunes 4 de marzo de 2030 (mediodía en
- * Bogotá) y «mañana» el martes 5. El PDF se genera sin comprimir para leer lo
+ * la zona de la sede) y «mañana» el martes 5. El PDF se genera sin comprimir para leer lo
  * que pinta.
  *
  *  - hoyConfirmada: hoy 09:00, confirmada, primera visita → sale;
@@ -44,8 +44,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const NOW = new Date('2030-03-04T17:00:00Z'); // 12:00 en Bogotá
-const at = (day: string, time: string) => new Date(`${day}T${time}:00-05:00`);
+const NOW = new Date('2030-03-04T16:00:00Z'); // 12:00 en la zona de la sede
+const at = (day: string, time: string) => new Date(`${day}T${time}:00-04:00`);
 const route = (locationId: string, suffix = '') =>
   `/locations/${locationId}/contingency-agenda${suffix}`;
 
@@ -133,7 +133,7 @@ describe('Agenda de contingencia por sede (DX-339, e2e)', () => {
     norte = await seed.location('Sede Norte');
     await raw.location.update({
       where: { id: principal },
-      data: { name: 'Sede Principal', phone: '6015550000' },
+      data: { name: 'Sede Principal', phone: '2125550000' },
     });
     tokens.ADMIN = a.adminToken;
     let dentistId = '';
@@ -168,11 +168,11 @@ describe('Agenda de contingencia por sede (DX-339, e2e)', () => {
           select: { id: true },
         })
       ).id;
-    const laura = await patient('Laura', 'Castro', '3001234567');
-    const pedro = await patient('Pedro', 'Cancelado', '3007654321');
-    const marta = await patient('Marta', 'Mañana', '3011112233');
-    const lejano = await patient('Lucas', 'Pasado', '3019998877');
-    const nora = await patient('Nora', 'Norteña', '3024445566');
+    const laura = await patient('Laura', 'Castro', '4121234567');
+    const pedro = await patient('Pedro', 'Cancelado', '4127654321');
+    const marta = await patient('Marta', 'Mañana', '4121112233');
+    const lejano = await patient('Lucas', 'Pasado', '4129998877');
+    const nora = await patient('Nora', 'Norteña', '4124445566');
     const limpieza = await raw.appointmentType.create({
       data: {
         tenantId: a.tenantId,
@@ -267,12 +267,12 @@ describe('Agenda de contingencia por sede (DX-339, e2e)', () => {
       expect(text).toEqual(
         expect.arrayContaining([
           'Agenda de contingencia',
-          'Clinica contingencia-a · Sede Principal · Tel. +57 601 5550000',
+          'Clinica contingencia-a · Sede Principal · Tel. +58 212 5550000',
           'Hoy · lunes 4 de marzo de 2030',
           'Mañana · martes 5 de marzo de 2030',
           '09:00 – 09:30',
           'Laura Castro',
-          '+57 300 1234567',
+          '+58 412 1234567',
           'Miembro DENTIST',
           'Limpieza',
           'Confirmada · Primera visita',
@@ -288,7 +288,9 @@ describe('Agenda de contingencia por sede (DX-339, e2e)', () => {
       // Ni el motivo ni las notas de la cita.
       expect(joined).not.toContain('Dolor en la muela');
       expect(joined).not.toContain('ansiedad');
-      expect(joined).toContain('Generada el 04/03/2030 12:00 (America/Bogota)');
+      expect(joined).toContain(
+        'Generada el 04/03/2030 12:00 (America/Caracas)',
+      );
     });
 
     it('RECEPTION también; cada sede con sus citas', async () => {

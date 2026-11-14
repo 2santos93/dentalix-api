@@ -17,16 +17,21 @@ import { pngBombBase64, pngLyingBombBase64 } from './support/png-fixtures';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import { createLegacyQuoteApp } from './support/legacy-quote-app';
 import {
   computeAcceptanceHash,
   computeQuoteHash,
   parseQuoteContent,
 } from '../src/modules/treatment-plans/domain/plan-quote';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { seedParProviderRates } from './support/par-provider-rates';
+
+// DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
+let dropParRates: (() => Promise<void>) | undefined;
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol,
 // inspeccionar y limpiar. Borrar treatment_plan_acceptances está permitido aquí
@@ -76,8 +81,9 @@ interface QuoteBody {
     subtotal: number;
     listPrice: number | null;
     agreementName: string | null;
+    listPriceCurrency: string | null;
   }[];
-  version: 1 | 2;
+  version: 1 | 2 | 3 | 4;
   agreement: { name: string; payerName: string } | null;
   totals: {
     currency: string;
@@ -100,6 +106,7 @@ interface QuoteBody {
 async function cleanup(): Promise<void> {
   // TRUNCATE ... CASCADE: no depende del orden de las FK (convenios incluidos).
   await resetDatabase(raw);
+  dropParRates ??= await seedParProviderRates(raw);
 }
 
 describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatment-plans/:planId/{quote,acceptance} (e2e, DX-012)', () => {
@@ -152,7 +159,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
     const email = `owner@${subdomain}.com`;
     const reg = await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clinica ${subdomain}`,
         subdomain,
         email,
@@ -294,9 +301,9 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
     const north = await as(clinicA)
       .post(
         '/locations',
-        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+        locationBody(REGIONAL_CARACAS_FIXTURE, {
           name: 'Sede Norte',
-          address: 'Cra 7 # 100-20',
+          address: 'Av. Urdaneta 100',
         }),
       )
       .expect(201);
@@ -315,6 +322,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
   });
 
   afterAll(async () => {
+    await dropParRates?.();
     await cleanup();
     await raw.$disconnect();
     await app.close();
@@ -409,8 +417,53 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       expect((res.body as QuoteBody).location).toEqual({
         id: northLocationA,
         name: 'Sede Norte',
-        address: 'Cra 7 # 100-20',
+        address: 'Av. Urdaneta 100',
       });
+    });
+
+    it('DX-354: lleva el regional de la sede del request, no el de la principal; null sin reloj (200)', async () => {
+      const north = await raw.location.findUniqueOrThrow({
+        where: { id: northLocationA },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
+      const regionalAt = async (locationId?: string) => {
+        const req = as(clinicA).get(quotePath(patientA, planA));
+        const res = await (
+          locationId ? req.set('X-Location-Id', locationId) : req
+        ).expect(200);
+        return (res.body as { regional: unknown }).regional;
+      };
+      try {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: {
+            timeZone: 'America/New_York',
+            locale: 'en-US',
+            hourCycle: 'h12',
+          },
+        });
+        expect(await regionalAt(northLocationA)).toEqual({
+          timeZone: 'America/New_York',
+          locale: 'en-US',
+          hourCycle: 'h12',
+        });
+        // Sin sede en el request: la principal (Caracas).
+        expect(await regionalAt()).toEqual({
+          timeZone: 'America/Caracas',
+          locale: 'es-VE',
+          hourCycle: 'h23',
+        });
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: { hourCycle: null },
+        });
+        expect(await regionalAt(northLocationA)).toBeNull();
+      } finally {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: north,
+        });
+      }
     });
 
     it('la sede de otra clínica en X-Location-Id no vale (400)', async () => {
@@ -603,6 +656,16 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         remote: null,
         ipAddress: expect.any(String) as string,
         userAgent: 'tableta-recepcion',
+        // DX-379 (C): sin validez guardada ni vencimiento.
+        quoteValidUntil: null,
+        expiredMode: null,
+        expiredReason: null,
+        expiredNote: null,
+        repricingId: null,
+        // DX-417: aceptado entero.
+        pendingPlanId: null,
+        pendingItemIds: null,
+        pendingTotal: null,
       });
       expect(
         new Date(quote.acceptance!.acceptedAt).getTime(),
@@ -634,6 +697,45 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
           contentHash: shownHash,
         })
         .expect(409);
+    });
+
+    it('DX-514: aceptado, el regional es el de la sede donde se aceptó aunque se imprima desde otra con otra zona', async () => {
+      const accepted = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+        where: { planId: planA },
+        select: { locationId: true },
+      });
+      expect(accepted.locationId).not.toBe(northLocationA);
+      const acceptedAt = await raw.location.findUniqueOrThrow({
+        where: { id: accepted.locationId },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
+      const north = await raw.location.findUniqueOrThrow({
+        where: { id: northLocationA },
+        select: { timeZone: true, locale: true, hourCycle: true },
+      });
+      try {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: {
+            timeZone: 'America/New_York',
+            locale: 'en-US',
+            hourCycle: 'h12',
+          },
+        });
+        const res = await as(clinicA)
+          .get(quotePath(patientA, planA))
+          .set('X-Location-Id', northLocationA)
+          .expect(200);
+        const body = res.body as { regional: unknown; planStatus: string };
+        expect(body.planStatus).toBe('ACCEPTED');
+        expect(body.regional).toEqual(acceptedAt);
+        expect(acceptedAt.timeZone).not.toBe('America/New_York');
+      } finally {
+        await raw.location.update({
+          where: { id: northLocationA },
+          data: north,
+        });
+      }
     });
 
     it('el detalle del plan dice quién firmó y cuándo', async () => {
@@ -779,12 +881,14 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
       });
     });
 
-    it('muestra el convenio, el precio de lista y el ahorro', async () => {
+    // DX-502: el plan está en USD y el catálogo en VES (la moneda de las sedes):
+    // el precio de lista sale con su moneda y no hay «ahorro» entre monedas.
+    it('muestra el convenio y el precio de lista en la moneda del catálogo, sin ahorro entre monedas', async () => {
       const res = await as(clinicA)
         .get(quotePath(agreementPatient, agreementPlan))
         .expect(200);
       const quote = res.body as QuoteBody;
-      expect(quote.version).toBe(2);
+      expect(quote.version).toBe(4);
       expect(quote.agreement).toEqual({
         name: 'Surco Salud −15 %',
         payerName: 'Surco Salud',
@@ -796,6 +900,7 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
           subtotal: 850,
           listPrice: 1000,
           agreementName: 'Surco Salud −15 %',
+          listPriceCurrency: 'VES',
         }),
       ]);
       expect(quote.totals).toEqual([
@@ -804,22 +909,53 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
           gross: 850,
           discount: 0,
           net: 850,
-          agreementSaving: 150,
+          agreementSaving: 0,
         },
       ]);
       agreementShownHash = quote.contentHash;
     });
 
+    it('DX-502: con PLAN_QUOTE_COMPOSE_V4=false un plan de una clínica sin datos fiscales se compone como v2, sin moneda sellada', async () => {
+      // Un plan sin firmar (planA ya se aceptó antes en este fichero).
+      const plan = await createPlan(clinicA, patientA, dentistA);
+      await addItem(clinicA, plan, {
+        toothNumber: '11',
+        catalogItemId: catalogA,
+      });
+      await addItem(clinicA, plan, {
+        toothNumber: '12',
+        catalogItemId: catalogA,
+      });
+      const legacy = await createLegacyQuoteApp();
+      try {
+        const res = await request(legacy.getHttpServer())
+          .get(`/api/v1${quotePath(patientA, plan)}`)
+          .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+          .set('Authorization', `Bearer ${clinicA.accessToken}`)
+          .expect(200);
+        const quote = res.body as QuoteBody;
+        expect(quote.version).toBe(2);
+        expect(quote.items.map((i) => i.listPrice)).toEqual([1000, 1000]);
+        // La moneda se completa para mostrarla; no está sellada en la v2.
+        expect(quote.items.map((i) => i.listPriceCurrency)).toEqual([
+          'VES',
+          'VES',
+        ]);
+      } finally {
+        await legacy.close();
+      }
+    });
+
     it('un plan sin convenio sale con agreement null y ahorro 0', async () => {
       const res = await as(clinicA).get(quotePath(patientA, planA)).expect(200);
       const quote = res.body as QuoteBody;
-      expect(quote.version).toBe(2);
+      expect(quote.version).toBe(4);
       expect(quote.agreement).toBeNull();
       expect(quote.totals[0].agreementSaving).toBe(0);
       expect(quote.items.map((i) => i.listPrice)).toEqual([1000, 1000]);
     });
 
-    it('la aceptación firmada v2 guarda la foto con convenio y sigue íntegra', async () => {
+    it('la aceptación firmada (v4) guarda la foto con convenio y la moneda del catálogo, y sigue íntegra', async () => {
       const res = await as(clinicA, dentistA)
         .post(acceptPath(agreementPatient, agreementPlan), {
           signerName: 'Dora Presupuesto',
@@ -836,9 +972,10 @@ describe('Presupuesto imprimible y aceptación firmada — /patients/:id/treatme
         where: { planId: agreementPlan },
       });
       expect(row.content).toMatchObject({
-        version: 2,
+        version: 4,
         agreement: { name: 'Surco Salud −15 %', payerName: 'Surco Salud' },
-        totals: [expect.objectContaining({ agreementSaving: 150 })],
+        items: [expect.objectContaining({ listPriceCurrency: 'VES' })],
+        totals: [expect.objectContaining({ agreementSaving: 0 })],
       });
 
       // Cambiar el convenio después no toca la foto firmada.

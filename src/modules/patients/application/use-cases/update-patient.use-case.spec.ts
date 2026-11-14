@@ -15,6 +15,7 @@ function fakePatient(overrides: Partial<Patient> = {}): Patient {
   return {
     id: 'p1',
     tenantId: 't1',
+    patientCode: '1',
     firstName: 'Ana',
     lastName: 'Gomez',
     docType: 'NATIONAL_ID',
@@ -45,9 +46,12 @@ function fakePatient(overrides: Partial<Patient> = {}): Patient {
     retentionExtended: 'NONE',
     retentionUntil: null,
     underRetention: false,
+    clinicRetentionYears: 15,
+    retentionFromPreviousTerm: false,
     partiallySuppressedAt: null,
     importBatchId: null,
     contactChannel: 'EMAIL',
+    preferredLanguage: null,
     whatsappOptInAt: null,
     whatsappOptInSource: null,
     whatsappOptInById: null,
@@ -101,7 +105,7 @@ describe('UpdatePatientUseCase', () => {
     const existing = fakePatient();
     const updated = fakePatient({
       firstName: 'Ana Maria',
-      phone: '3001234567',
+      phone: '4121234567',
     });
     let receivedId: string | undefined;
     let receivedPatch: UpdatePatientRepoInput | undefined;
@@ -122,14 +126,14 @@ describe('UpdatePatientUseCase', () => {
 
     const result = await uc.execute(existing.id, {
       firstName: 'Ana Maria',
-      phone: '3001234567',
+      phone: '4121234567',
     });
 
     expect(result).toBe(updated);
     expect(receivedId).toBe(existing.id);
     expect(receivedPatch).toEqual({
       firstName: 'Ana Maria',
-      phone: '3001234567',
+      phone: '4121234567',
     });
   });
 
@@ -200,8 +204,8 @@ describe('UpdatePatientUseCase', () => {
       'rechaza %j con 400 en español y no guarda',
       async (phone) => {
         const { uc, updates } = setup(
-          fakePatient({ contactChannel: 'WHATSAPP', phone: '+573101234567' }),
-          'CO',
+          fakePatient({ contactChannel: 'WHATSAPP', phone: '+584141234567' }),
+          'VE',
         );
         const err = await uc.execute('p1', { phone }).catch((e: unknown) => e);
         expect(err).toBeInstanceOf(BadRequestException);
@@ -214,8 +218,8 @@ describe('UpdatePatientUseCase', () => {
 
     it('the WhatsApp 400 for an ambiguous number asks to write it with +', async () => {
       const { uc, updates } = setup(
-        fakePatient({ contactChannel: 'WHATSAPP', phone: '+573101234567' }),
-        'CO',
+        fakePatient({ contactChannel: 'WHATSAPP', phone: '+584141234567' }),
+        'TH',
       );
       const err = await uc
         .execute('p1', { phone: '0058 412 1234567' })
@@ -232,13 +236,13 @@ describe('UpdatePatientUseCase', () => {
       const { uc, updates } = setup(
         fakePatient({
           contactChannel: 'WHATSAPP',
-          phone: '+573101234567',
-          countryCode: 'CO',
+          phone: '+584141234567',
+          countryCode: 'VE',
         }),
         null,
       );
       const err = await uc
-        .execute('p1', { phone: '320 765 4321' })
+        .execute('p1', { phone: '424 765 4321' })
         .catch((e: unknown) => e);
       expect(err).toBeInstanceOf(BadRequestException);
       expect(updates).toEqual([]);
@@ -246,15 +250,15 @@ describe('UpdatePatientUseCase', () => {
 
     it('acepta otro móvil válido (con la región de la sede)', async () => {
       const { uc, updates } = setup(
-        fakePatient({ contactChannel: 'WHATSAPP', phone: '+573101234567' }),
-        'CO',
+        fakePatient({ contactChannel: 'WHATSAPP', phone: '+584141234567' }),
+        'VE',
       );
-      await uc.execute('p1', { phone: '320 765 4321' });
-      expect(updates).toEqual([{ phone: '320 765 4321' }]);
+      await uc.execute('p1', { phone: '424 765 4321' });
+      expect(updates).toEqual([{ phone: '424 765 4321' }]);
     });
 
     it('con canal EMAIL un móvil inválido se guarda (la ficha avisa)', async () => {
-      const { uc, updates } = setup(fakePatient({ phone: null }), 'CO');
+      const { uc, updates } = setup(fakePatient({ phone: null }), 'VE');
       await uc.execute('p1', { phone: '123' });
       expect(updates).toEqual([{ phone: '123' }]);
     });

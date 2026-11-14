@@ -4,9 +4,15 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPatientCreditRepository } from '../src/modules/patient-credit/infrastructure/prisma-patient-credit.repository';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import {
+  holdPlanRowLock,
+  settle,
+  waitForLockWaiters,
+  type Outcome,
+} from './support/postgres-concurrency';
 
 // DX-253, capa BD: los traspasos, las devoluciones, sus abonos de referencia y
 // sus asientos son append-only (sin UPDATE ni DELETE para la app), con RLS
@@ -67,10 +73,10 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
-      country: 'CO',
+      country: 'VE',
     }),
   });
   const patient = await raw.patient.create({
@@ -85,7 +91,7 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
   });
@@ -93,7 +99,7 @@ async function seed(subdomain: string): Promise<Seeded> {
     data: {
       tenantId: tenant.id,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'USD',
       status: 'ACCEPTED',
     },
   });
@@ -104,7 +110,7 @@ async function seed(subdomain: string): Promise<Seeded> {
       treatmentPlanId: cancelled.id,
       patientId: patient.id,
       amount: 300_000,
-      currency: 'COP',
+      currency: 'USD',
       paidAt: new Date(),
       method: 'CASH',
     },
@@ -190,7 +196,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
         sourcePlanId: a.cancelledPlan,
         targetPlanId: a.livePlan,
         amountCents: 20_000_000,
-        currency: 'COP',
+        currency: 'USD',
         reason: null,
         userId,
         fingerprint: 'f',
@@ -252,7 +258,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
               tenantId: a.tenantId,
               patientId: a.patientId,
               treatmentPlanId: a.livePlan,
-              currency: 'COP',
+              currency: 'USD',
               amount: 1,
               kind: 'TRANSFER_IN',
               transferId: a.cancelledPlan,
@@ -275,7 +281,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
               patientId: a.patientId,
               sourcePlanId: a.cancelledPlan,
               targetPlanId: b.livePlan,
-              currency: 'COP',
+              currency: 'USD',
               amount: 1,
               createdById: userId,
             },
@@ -294,7 +300,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
               patientId: a.patientId,
               sourcePlanId: a.cancelledPlan,
               targetPlanId: a.livePlan,
-              currency: 'COP',
+              currency: 'USD',
               amount: 1,
               createdById: userId,
             },
@@ -312,7 +318,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
               locationId: a.locationId,
               patientId: a.patientId,
               treatmentPlanId: a.cancelledPlan,
-              currency: 'COP',
+              currency: 'USD',
               amount: 1,
               method: 'CARD',
               reason: 'Motivo',
@@ -334,7 +340,7 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
         repository.createRefund({
           planId: a.cancelledPlan,
           amountCents: 6_000_000,
-          currency: 'COP',
+          currency: 'USD',
           method: 'TRANSFER',
           reason: 'Devolución pedida',
           paymentIds: [a.paymentId],
@@ -342,10 +348,24 @@ describe('DX-253 · saldo a favor en la BD (int)', () => {
           fingerprint: 'f',
         }),
       );
-    const results = await Promise.allSettled([refund(), refund()]);
+    // DX-450: el plan retenido FOR NO KEY UPDATE por otra transacción; las dos
+    // devoluciones llegan y esperan EN el plan (pg_locks, por PID del holder)
+    // y solo entonces se suelta. Sin el candado del plan no esperan y el test
+    // falla aquí, no en un desenlace que en serie sería el mismo.
+    const lock = await holdPlanRowLock(raw, a.cancelledPlan);
+    let attempts: Promise<Outcome<unknown>>[] = [];
+    try {
+      attempts = [settle(refund()), settle(refund())];
+      await waitForLockWaiters(raw, [lock.pid], 2);
+    } finally {
+      lock.release();
+      await lock.done;
+    }
+    const results = await Promise.all(attempts);
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
     const rejected = results.filter(
-      (r): r is PromiseRejectedResult => r.status === 'rejected',
+      (r): r is Extract<Outcome<unknown>, { status: 'rejected' }> =>
+        r.status === 'rejected',
     );
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);

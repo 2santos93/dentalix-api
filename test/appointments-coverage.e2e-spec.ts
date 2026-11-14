@@ -57,8 +57,8 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
   let foreignPayer: string;
   const patients: Record<string, string> = {};
   const appointments: Record<string, string> = {};
-  // Un martes futuro, a las 14:00-17:30 UTC: el horario por defecto de la sede
-  // (09:00-13:00 y 15:00-19:00 locales, Colombia) las acepta, y las citas
+  // Un martes futuro, a las 13:00-16:30 UTC (09:00-12:30 locales): el horario por defecto de la sede
+  // (09:00-13:00 y 15:00-19:00 locales) las acepta, y las citas
   // pasadas se rechazan.
   const futureDay = nextTuesday();
 
@@ -131,7 +131,7 @@ describe('Resumen de cobertura y filtro por pagador (e2e, DX-153)', () => {
     await cover('vigente', { payerId: surco, isPrimary: false });
     await cover('futura', { payerId: sanavida, validFrom: dayFromNow(30) });
 
-    let hour = 14;
+    let hour = 13;
     for (const key of Object.keys(patients)) {
       appointments[key] = await post(clinic, '/api/v1/appointments', {
         patientId: patients[key],

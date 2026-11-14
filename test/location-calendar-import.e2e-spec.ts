@@ -520,6 +520,31 @@ describe('Calendario de la sede: importar festivos (e2e, DX-316)', () => {
       expect(await holidaysOf(id)).toEqual([]);
     });
 
+    it('DX-316-bis: a CSV in UTF-16 BE or without BOM is 400 «El archivo no está en UTF-8…», not the .xlsx hint', async () => {
+      const id = await newLocation();
+      const le = Buffer.from(
+        'fecha\tnombre\r\n2027-01-04\tCierre\r\n',
+        'utf16le',
+      );
+      const files: [string, Buffer][] = [
+        [
+          'BE with BOM',
+          Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(le).swap16()]),
+        ],
+        ['LE without BOM', le],
+      ];
+      for (const [label, bytes] of files) {
+        const res = await upload(id, bytes, 'excel.csv', { preview: true });
+        expect({ label, status: res.status, message: message(res) }).toEqual({
+          label,
+          status: 400,
+          message:
+            'El archivo no está en UTF-8. Guárdalo desde Excel como «CSV UTF-8».',
+        });
+      }
+      expect(await holidaysOf(id)).toEqual([]);
+    });
+
     it('an empty file is 400 «El archivo está vacío.»', async () => {
       const id = await newLocation();
       for (const name of ['vacio.csv', 'vacio.ics']) {

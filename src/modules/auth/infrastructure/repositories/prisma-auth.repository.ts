@@ -1,5 +1,6 @@
 import { seedInitialPaymentMethods } from '../../../payment-methods/infrastructure/prisma-payment-method.repository';
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { NEW_CLINIC_REQUIRES_ADMIN_MFA } from '../../domain/user-mfa';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import { clinicRegisteredAuditEvent } from '../../domain/registration-audit';
 import { ClinicRole, Prisma } from '@prisma/client';
@@ -12,8 +13,13 @@ import {
 import { seedDefaultBusinessHours } from '../../../../shared/locations/default-business-hours';
 import { DEFAULT_DENTAL_CATALOG } from '../../../../shared/catalog/default-dental-catalog';
 import { suggestedPhoneRegion } from '../../../../shared/phone/phone-number';
+import {
+  CLINICAL_RETENTION_CONFIG,
+  type ClinicalRetentionConfig,
+} from '../../../patients/domain/retention/clinical-retention-config';
 import { PLATFORM_DEFAULT_MAJORITY_AGE } from '../../../patients/domain/responsible-parties/majority-age';
 import { PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS } from '../../../prescriptions/domain/prescription-settings';
+import { PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS } from '../../../treatment-plans/domain/quote-validity';
 import {
   AuthRepository,
   AuthUserRecord,
@@ -29,7 +35,13 @@ import {
 export class PrismaAuthRepository implements AuthRepository {
   private readonly logger = new Logger('Auth');
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(CLINICAL_RETENTION_CONFIG)
+    private readonly retention: ClinicalRetentionConfig,
+    @Inject(NEW_CLINIC_REQUIRES_ADMIN_MFA)
+    private readonly newClinicRequiresAdminMfa: boolean,
+  ) {}
 
   async findUserByEmail(
     email: string,
@@ -76,12 +88,19 @@ export class PrismaAuthRepository implements AuthRepository {
     // (SET LOCAL via set_config(..., true)) inside the SAME tx before inserting it
     // so the RLS WITH CHECK passes for the freshly created tenant.
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // DX-149-bis: lo primero, para que el segundo uso del mismo enlace
+      // espere aquí al COMMIT (o al ROLLBACK) del primero y no haga nada más.
+      await input.claimPending?.(tx);
       const tenant = await tx.tenant.create({
         data: {
           name: input.clinicName,
           subdomain: input.subdomain,
           // DX-328: explícito; el default de la BD es el mismo valor.
           majorityAge: PLATFORM_DEFAULT_MAJORITY_AGE,
+          // DX-330: igual con el plazo de la historia clínica (el mínimo de
+          // plataforma del entorno; el default de la BD es el suelo, 15).
+          clinicalRecordRetentionYears: this.retention.platformMinYears,
+          requireAdminMfa: this.newClinicRequiresAdminMfa,
           // DX-324: igual con los ajustes de la receta.
           prescriptionPrintQuantityInWords:
             PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.printQuantityInWords,
@@ -89,6 +108,8 @@ export class PrismaAuthRepository implements AuthRepository {
             PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.requireClinicalRecordNumber,
           prescriptionValidityDays:
             PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS.validityDays,
+          // DX-379: y con los días de validez del presupuesto.
+          quoteValidityDays: PLATFORM_DEFAULT_QUOTE_VALIDITY_DAYS,
         },
         select: { id: true },
       });
@@ -132,6 +153,10 @@ export class PrismaAuthRepository implements AuthRepository {
           tenantId: tenant.id,
         })),
       });
+      // DX-015-bis: y con sus tipos de recall por defecto (Higiene, Control y
+      // Mantenimiento periodontal), ligados a los procedimientos del catálogo
+      // recién sembrado. La misma función que siembra las clínicas antiguas.
+      await tx.$executeRaw`SELECT public.dx_recall_seed_default_types(${tenant.id}::uuid)`;
       // DX-377: y con sus 4 medios de pago iniciales (uno por método antiguo).
       await seedInitialPaymentMethods(tx, tenant.id);
       // DX-359: el alta de la clínica y su ADMIN, auditada en esta misma

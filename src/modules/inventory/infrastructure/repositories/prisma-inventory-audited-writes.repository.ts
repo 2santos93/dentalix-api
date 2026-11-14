@@ -151,11 +151,18 @@ export class PrismaInventoryAuditedWritesRepository implements InventoryAuditedW
   ): Promise<InventoryMovement> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      const item = await tx.inventoryItem.findFirst({
+        where: { id: input.itemId, deletedAt: null },
+        select: { locationId: true },
+      });
+      if (!item) throw new NotFoundException('Inventory item not found');
+      this.tenantContext.assertLocationAllowed(item.locationId);
+
       const row = await tx.inventoryMovement.create({
         data: {
-          // Sede del request si el cliente la fijó (X-Location-Id, ya validada
-          // contra esta clínica); si no, la de escritura de la sesión (DX-089).
-          locationId: await this.tenantContext.writeLocationId(tx),
+          // El movimiento pertenece a la sede persistida del ítem, leída y
+          // autorizada en esta misma transacción de escritura (DX-089-bis).
+          locationId: item.locationId,
           tenantId,
           itemId: input.itemId,
           type: input.type,

@@ -23,7 +23,8 @@ import { RECEIVABLES_CLOCK } from '../src/modules/receivables/application/use-ca
 import {
   locationBody,
   locationData,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_MADRID_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
 
@@ -34,16 +35,16 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-const BOGOTA = 'America/Bogota';
+const CARACAS = 'America/Caracas';
 const TOKYO = REGIONAL_TOKYO_FIXTURE.timeZone;
 /**
  * DX-209 (TST-025): la cartera corre con un instante FIJO (RECEIVABLES_CLOCK)
  * y todo se siembra respecto a él, no al día real: una corrida que cruza la
  * medianoche de la sede ya no mueve los tramos. Por defecto, el último
- * segundo del 29/02/2024 en Bogotá (04:59:59 UTC del 1/03): el día civil de
+ * segundo del 29/02/2024 en la zona de la sede (04:59:59 UTC del 1/03): el día civil de
  * la sede no es el de UTC y es un 29 de febrero. `RECEIVABLES_E2E_NOW`
  * cambia el instante sin tocar las aserciones (p. ej. 2024-03-01T05:00:01Z,
- * pasada la medianoche de Bogotá).
+ * pasada la medianoche de la sede).
  */
 const NOW = new Date(
   process.env.RECEIVABLES_E2E_NOW || '2024-03-01T04:59:59.000Z',
@@ -53,11 +54,11 @@ if (Number.isNaN(NOW.getTime())) {
     `RECEIVABLES_E2E_NOW no es un instante ISO: ${process.env.RECEIVABLES_E2E_NOW}`,
   );
 }
-const today = (): string => civilDateIn(NOW, BOGOTA);
+const today = (): string => civilDateIn(NOW, CARACAS);
 /** Medianoche UTC del día civil de hace `n` días (como guarda las cuotas la API). */
 const dueDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T00:00:00.000Z`);
-/** Mediodía de Bogotá de hace `n` días. */
+/** Mediodía de la sede de hace `n` días. */
 const noonDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T17:00:00.000Z`);
 
@@ -84,6 +85,8 @@ interface AgingRow {
   locationId: string | null;
   oldestAgeDays: number | null;
   ageApproximate: boolean;
+  paymentsWithoutRateCount: number;
+  rateProviderTimedOut: boolean;
   currencies: AgingCurrency[];
   lastPayment: { paidOn: string; amount: number; currency: string } | null;
   nextInstallment: { dueDate: string; amount: number; currency: string } | null;
@@ -100,7 +103,7 @@ interface AgingPage {
 }
 
 interface StatementBody {
-  summary: { currency: string; balance: number }[];
+  summary: { currency: string; balance: number; convertedBalance: number }[];
 }
 
 describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () => {
@@ -115,11 +118,11 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
   let assistantToken: string;
 
   // Pacientes de A:
-  //   cuotas    COP 300.000 en 3 cuotas: vencida hace 75, hace 10 y una futura
-  //   sinCuotas COP 500.000 sin calendario, plan creado hace 120 días
-  //   aFavor    COP 80.000 de deuda (hace 40) + 20.000 a favor (plan cancelado)
+  //   cuotas    VES 300.000 en 3 cuotas: vencida hace 75, hace 10 y una futura
+  //   sinCuotas VES 500.000 sin calendario, plan creado hace 120 días
+  //   aFavor    VES 80.000 de deuda (hace 40) + 20.000 a favor (plan cancelado)
   //   alDia     pagado entero: no sale
-  //   norte     COP 90.000 hace 5 días, atendido en Sede Norte
+  //   norte     VES 90.000 hace 5 días, atendido en Sede Norte
   let cuotas: string;
   let sinCuotas: string;
   let aFavor: string;
@@ -140,7 +143,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     clinic: Clinic,
     firstName: string,
     doc: string,
-    phone: string | null = '300 555 0101',
+    phone: string | null = '412 555 0101',
   ): Promise<string> {
     const row = await raw.patient.create({
       data: {
@@ -149,7 +152,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
         lastName: 'Cartera',
         docNumber: doc,
         phone,
-        countryCode: 'CO',
+        countryCode: 'VE',
       },
       select: { id: true },
     });
@@ -172,7 +175,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       data: {
         tenantId: clinic.tenantId,
         patientId,
-        currency: 'COP',
+        currency: 'VES',
         status: options.status ?? TreatmentPlanStatus.ACCEPTED,
         createdAt:
           options.createdAt ?? noonDaysAgo(options.createdDaysAgo ?? 0),
@@ -205,7 +208,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
         treatmentPlanId: planId,
         patientId,
         amount,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: noonDaysAgo(daysAgo),
         method: 'CASH',
       },
@@ -247,7 +250,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       .post('/api/v1/locations')
       .set('X-Tenant-Host', clinicA.host)
       .set('Authorization', `Bearer ${clinicA.adminToken}`)
-      .send(locationBody(REGIONAL_BOGOTA_FIXTURE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     sedeNorte = (created.body as { id: string }).id;
 
@@ -285,7 +288,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
         tenantId: clinicA.tenantId,
         treatmentPlanId: planCuotas,
         patientId: cuotas,
-        currency: 'COP',
+        currency: 'VES',
         totalToFinance: 300000,
         installmentsCount: 3,
         periodicity: 'MONTHLY',
@@ -384,12 +387,12 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       oldestAgeDays: 120,
       ageApproximate: true,
       locationId: sedePrincipal,
-      patient: { fullName: 'Sincuotas Cartera', whatsApp: '573005550101' },
+      patient: { fullName: 'Sincuotas Cartera', whatsApp: '584125550101' },
     });
     expect(rowSin.currencies[0].buckets.over90).toBe(500000);
 
     expect(rowCuotas.currencies[0]).toMatchObject({
-      currency: 'COP',
+      currency: 'VES',
       debt: 300000,
       credit: 0,
       oldestAgeDays: 75,
@@ -403,7 +406,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       },
     });
     expect(rowCuotas.nextInstallment).toMatchObject({
-      currency: 'COP',
+      currency: 'VES',
       amount: 100000,
       dueDate: dueDaysAgo(-20).toISOString(),
     });
@@ -418,12 +421,12 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     expect(rowFavor.lastPayment).toEqual({
       paidOn: addCivilDays(today(), -50),
       amount: 20000,
-      currency: 'COP',
+      currency: 'VES',
     });
 
     expect(body.totals).toEqual([
       {
-        currency: 'COP',
+        currency: 'VES',
         patients: 3,
         balance: 860000,
         debt: 880000,
@@ -439,7 +442,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     ]);
   });
 
-  it('I1: /receivables/aging/summary da los mismos totales sin filas de pacientes y sin auditar', async () => {
+  it('I1: /receivables/aging/summary da los mismos totales sin filas de pacientes; SEC-043: queda auditado como lectura', async () => {
     const list = (
       await get(clinicA, '/receivables/aging', receptionToken)
         .set('X-Location-Id', sedePrincipal)
@@ -452,13 +455,31 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       .set('X-Location-Id', sedePrincipal)
       .expect(200);
     const body = res.body as Record<string, unknown>;
-    expect(Object.keys(body).sort()).toEqual(['asOf', 'scope', 'totals']);
+    expect(Object.keys(body).sort()).toEqual([
+      'asOf',
+      'paymentsWithoutRateCount',
+      'rateProviderTimedOut',
+      'scope',
+      'totals',
+    ]);
     expect(body.asOf).toBe(list.asOf);
     expect(body.scope).toEqual(list.scope);
     expect(body.totals).toEqual(list.totals);
+    // SEC-043 (M2): la diferencia de totales entre dos consultas aproxima lo
+    // abonado; quién los mira queda en la auditoría (sin importes).
     expect(
       await raw.auditEvent.count({ where: { tenantId: clinicA.tenantId } }),
-    ).toBe(before);
+    ).toBe(before + 1);
+    const event = await raw.auditEvent.findFirst({
+      where: { tenantId: clinicA.tenantId, action: 'VIEW' },
+      orderBy: { occurredAt: 'desc' },
+    });
+    expect(event).toMatchObject({
+      resourceType: 'ACCOUNT_STATEMENT',
+      locationId: sedePrincipal,
+      patientId: null,
+      metadata: { reason: 'RECEIVABLES_AGING_SUMMARY' },
+    });
     // Mismos roles que la lista: el clínico no ve la cartera.
     for (const token of [dentistToken, assistantToken]) {
       await get(clinicA, '/receivables/aging/summary', token).expect(403);
@@ -520,16 +541,18 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
         },
       });
 
-    // mixto: COP 100.000, abona 30.000 COP y 10 USD; un abono de 50.000 COP
-    // anulado no cuenta. Debe 70.000 COP y tiene 10 USD a favor.
+    // mixto: VES 100.000, abona 30.000 VES y 10 USD; un abono de 50.000 VES
+    // anulado no cuenta. Debe 70.000 VES. Los 10 USD no tienen tasa (este
+    // entorno no tiene proveedor): como en el estado de cuenta desde DX-472,
+    // no suman ni quedan a favor en USD, y la fila lo avisa (DX-472-bis).
     const mixto = await patient(clinicC, 'Mixto', 'CAR-C1');
     const planMixto = await plan(clinicC, mixto, 100000, {
       createdDaysAgo: 45,
       catalog: catalogC.id,
     });
-    await payment(planMixto, mixto, 30000, 'COP');
+    await payment(planMixto, mixto, 30000, 'VES');
     await payment(planMixto, mixto, 10, 'USD');
-    await payment(planMixto, mixto, 50000, 'COP', new Date());
+    await payment(planMixto, mixto, 50000, 'VES', new Date());
     await attended(clinicC, mixto, sedeC, 4);
 
     // sinSede: ni citas, ni abonos, ni presentación: solo en la consolidada.
@@ -561,21 +584,20 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
         clinicC,
         `/patients/${row.patient.id}/account-statement`,
       ).expect(200);
+      // DX-472-bis: el saldo que pinta el estado de cuenta (`convertedBalance`);
+      // una moneda que queda a 0 no es fila de la cartera.
       expect(row.currencies.map((c) => [c.currency, c.balance])).toEqual(
-        (statement.body as StatementBody).summary.map((s) => [
-          s.currency,
-          s.balance,
-        ]),
+        (statement.body as StatementBody).summary
+          .filter((s) => s.convertedBalance !== 0)
+          .map((s) => [s.currency, s.convertedBalance]),
       );
     }
     const mixtoRow = all.items.find((r) => r.patient.id === mixto);
     expect(mixtoRow?.locationId).toBe(sedeC);
     expect(
       mixtoRow?.currencies.map((c) => [c.currency, c.debt, c.credit]),
-    ).toEqual([
-      ['COP', 70000, 0],
-      ['USD', 0, 10],
-    ]);
+    ).toEqual([['VES', 70000, 0]]);
+    expect(mixtoRow?.paymentsWithoutRateCount).toBe(1);
     expect(all.items.find((r) => r.patient.id === sinSede)?.locationId).toBe(
       null,
     );
@@ -650,7 +672,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     const plan = await send(
       'post',
       `/patients/${ana}/treatment-plans`,
-      { currency: 'COP' },
+      { currency: 'VES' },
       201,
     );
     const item1 = await send(
@@ -696,7 +718,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       `/treatment-plans/${plan.id}/payments`,
       {
         amount: 50000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: new Date().toISOString(),
         method: 'CASH',
       },
@@ -765,7 +787,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       `/treatment-plans/${plan.id}/payments`,
       {
         amount: 120000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: new Date().toISOString(),
         method: 'TRANSFER',
       },
@@ -778,7 +800,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     const second = await send(
       'post',
       `/patients/${ana}/treatment-plans`,
-      { currency: 'COP' },
+      { currency: 'VES' },
       201,
     );
     const item4 = await send(
@@ -804,7 +826,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       `/treatment-plans/${second.id}/payments`,
       {
         amount: 30000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: new Date().toISOString(),
         method: 'CASH',
       },
@@ -822,7 +844,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       await get(clinicD, `/patients/${ana}/account-statement`).expect(200)
     ).body as StatementBody;
     expect(statement.summary).toMatchObject([
-      { currency: 'COP', balance: -30000 },
+      { currency: 'VES', balance: -30000 },
     ]);
   });
 
@@ -971,9 +993,9 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     expect(last?.metadata).toMatchObject({ reason: 'RECEIVABLES_AGING' });
   });
 
-  it('DX-209: una sede en UTC+9 cuenta los días y el «al día» en SU zona, y la consolidada en la de la principal (UTC−5)', async () => {
+  it('DX-209: una sede en UTC+9 cuenta los días y el «al día» en SU zona, y la consolidada en la de la principal (UTC−4)', async () => {
     const clinicE = await registerClinic(app, 'cartera-e');
-    const sedeBogota = (
+    const sedeCaracas = (
       (await get(clinicE, '/locations').expect(200)).body as { id: string }[]
     )[0].id;
     const sedeTokio = (
@@ -997,11 +1019,11 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       select: { id: true },
     });
     // El plan nace hace 10 días de Tokio, a una hora elegida para que contar
-    // en la zona de Bogotá (14 h detrás) dé OTRA edad, sea cual sea NOW: si
+    // en la zona de la sede (14 h detrás) dé OTRA edad, sea cual sea NOW: si
     // hoy es el mismo día civil en las dos, nace a la 01:00 de Tokio (en
-    // Bogotá, aún el día anterior: 11 días); si Bogotá va un día por detrás
+    // la zona UTC−4, aún el día anterior: 11 días); si esa zona va un día por detrás
     // (antes de las 14:00 de Tokio, como el NOW por defecto), a las 20:00
-    // (en Bogotá, el mismo día: 9 días).
+    // (en esa zona, el mismo día: 9 días).
     const tokioToday = civilDateIn(NOW, TOKYO);
     const sameDay = tokioToday === today();
     const createdAt = new Date(
@@ -1012,7 +1034,7 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
         (Date.parse(day) - Date.parse(civilDateIn(createdAt, zone))) / 86400000,
       );
     expect(ageIn(TOKYO, tokioToday)).toBe(10);
-    expect(ageIn(BOGOTA, today())).not.toBe(10);
+    expect(ageIn(CARACAS, today())).not.toBe(10);
     const deudor = await patient(clinicE, 'Tokiota', 'CAR-E1');
     await plan(clinicE, deudor, 70000, { createdAt, catalog: catalogE.id });
     const lastVisit = new Date(createdAt.getTime() + 2 * 60 * 60 * 1000);
@@ -1042,50 +1064,49 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
     });
     expect(tokio.items[0].currencies[0].buckets.days0to30).toBe(70000);
 
-    // Sin sede: el «al día» es el de la sede principal (Bogotá), pero la edad
+    // Sin sede: el «al día» es el de la sede principal, pero la edad
     // de la deuda sigue en la zona de la sede de la deuda.
     const all = (await get(clinicE, '/receivables/aging').expect(200))
       .body as AgingPage;
     expect(all.asOf).toBe(today());
     expect(all.items[0]).toMatchObject({ oldestAgeDays: 10 });
-    const bogota = (
-      await get(clinicE, `/receivables/aging?locationId=${sedeBogota}`).expect(
+    const caracas = (
+      await get(clinicE, `/receivables/aging?locationId=${sedeCaracas}`).expect(
         200,
       )
     ).body as AgingPage;
-    expect(bogota).toMatchObject({ asOf: today(), items: [], total: 0 });
+    expect(caracas).toMatchObject({ asOf: today(), items: [], total: 0 });
   });
 
   describe('región del teléfono de la sede de la deuda (DX-329, P1)', () => {
-    let sedeVe: string;
-    let deudorVe: string;
+    let sedeEs: string;
+    let deudorEs: string;
     let deudorPrincipal: string;
 
     beforeAll(async () => {
-      sedeVe = (
+      sedeEs = (
         await raw.location.create({
-          data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+          data: locationData(REGIONAL_MADRID_FIXTURE, {
             tenantId: clinicA.tenantId,
-            name: 'Sede 329 VE',
-            defaultPhoneRegion: 'VE',
+            name: 'Sede 329 ES',
           }),
           select: { id: true },
         })
       ).id;
       // El mismo número sin «+», en dos sedes con regiones distintas.
-      deudorVe = await patient(
+      deudorEs = await patient(
         clinicA,
-        'Veneciano',
+        'Madrileño',
         'CAR-329A',
-        '0412-1234567',
+        '612 34 56 78',
       );
-      await plan(clinicA, deudorVe, 10000, { createdDaysAgo: 3 });
-      await attended(clinicA, deudorVe, sedeVe, 6);
+      await plan(clinicA, deudorEs, 10000, { createdDaysAgo: 3 });
+      await attended(clinicA, deudorEs, sedeEs, 6);
       deudorPrincipal = await patient(
         clinicA,
         'Principal',
         'CAR-329B',
-        '0412-1234567',
+        '612 34 56 78',
       );
       await plan(clinicA, deudorPrincipal, 10000, { createdDaysAgo: 3 });
       await attended(clinicA, deudorPrincipal, sedePrincipal, 7);
@@ -1095,14 +1116,14 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
       body.items.find((r) => r.patient.id === id)?.patient;
 
     it("the debtor's WhatsApp link uses the region of the debt's location", async () => {
-      const ve = (
-        await get(clinicA, `/receivables/aging?locationId=${sedeVe}`).expect(
+      const es = (
+        await get(clinicA, `/receivables/aging?locationId=${sedeEs}`).expect(
           200,
         )
       ).body as AgingPage;
-      expect(rowOf(ve, deudorVe)).toMatchObject({
-        phone: '0412-1234567',
-        whatsApp: '584121234567',
+      expect(rowOf(es, deudorEs)).toMatchObject({
+        phone: '612 34 56 78',
+        whatsApp: '34612345678',
       });
       const principal = (
         await get(
@@ -1110,23 +1131,23 @@ describe('Cartera por antigüedad — GET /receivables/aging (e2e, DX-145)', () 
           `/receivables/aging?locationId=${sedePrincipal}`,
         ).expect(200)
       ).body as AgingPage;
-      // La sede principal lee con su región (CO): ese número no es válido.
+      // La sede principal lee con su región (VE): ese número no es válido.
       expect(rowOf(principal, deudorPrincipal)).toMatchObject({
-        phone: '0412-1234567',
+        phone: '612 34 56 78',
         whatsApp: null,
       });
     });
 
     it("a debt whose location was soft-deleted still uses that location's region", async () => {
       await raw.location.update({
-        where: { id: sedeVe },
+        where: { id: sedeEs },
         data: { deletedAt: new Date() },
       });
       const all = (
         await get(clinicA, '/receivables/aging?pageSize=100').expect(200)
       ).body as AgingPage;
-      expect(rowOf(all, deudorVe)).toMatchObject({
-        whatsApp: '584121234567',
+      expect(rowOf(all, deudorEs)).toMatchObject({
+        whatsApp: '34612345678',
       });
     });
   });

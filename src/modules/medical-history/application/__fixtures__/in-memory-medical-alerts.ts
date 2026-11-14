@@ -23,7 +23,7 @@ export class InMemoryMedicalAlertsRepository implements MedicalAlertsRepository 
   now = () => new Date();
   /** Zona de cada sede; la primera es la principal. */
   zones = new Map<string, string>([
-    ['bog', 'America/Bogota'],
+    ['ccs', 'America/Caracas'],
     ['mad', 'Europe/Madrid'],
   ]);
 

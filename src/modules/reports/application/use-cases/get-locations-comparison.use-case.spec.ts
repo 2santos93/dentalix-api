@@ -22,13 +22,13 @@ const NORTE: ComparisonLocation = {
   id: 'l-norte',
   name: 'Sede Norte',
   isActive: true,
-  timeZone: 'America/Bogota',
+  timeZone: 'America/Caracas',
 };
 const PRINCIPAL: ComparisonLocation = {
   id: 'l-principal',
   name: 'Sede principal',
   isActive: true,
-  timeZone: 'America/Bogota',
+  timeZone: 'America/Caracas',
 };
 
 const agg = (over: Partial<PeriodAggregates>): PeriodAggregates => ({
@@ -94,9 +94,9 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
         [
           PRINCIPAL.id,
           agg({
-            production: new Map([['COP', 12]]),
+            production: new Map([['VES', 12]]),
             collected: new Map([
-              ['COP', 9],
+              ['VES', 9],
               ['USD', 50],
             ]),
             completed: 45,
@@ -128,8 +128,8 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
         [
           PRINCIPAL.id,
           agg({
-            production: new Map([['COP', 10]]),
-            collected: new Map([['COP', 10]]),
+            production: new Map([['VES', 10]]),
+            collected: new Map([['VES', 10]]),
             completed: 46,
             noShow: 4,
             attendedPatients: 2,
@@ -180,18 +180,18 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
     // con 0 de producción porque hubo cobros en USD.
     expect(principal.metrics.production).toEqual([
       {
-        currency: 'COP',
-        value: 12,
-        previous: 10,
-        change: 20,
-        trend: 'BETTER',
-      },
-      {
         currency: 'USD',
         value: 0,
         previous: 0,
         change: null,
         trend: 'EQUAL',
+      },
+      {
+        currency: 'VES',
+        value: 12,
+        previous: 10,
+        change: 20,
+        trend: 'BETTER',
       },
     ]);
     expect(principal.metrics.noShowRate).toEqual({
@@ -218,35 +218,35 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
     const [principal] = (await run()).locations;
     expect(principal.metrics.collected).toEqual([
       {
-        currency: 'COP',
-        value: 9,
-        previous: 10,
-        change: -10,
-        trend: 'WORSE',
-      },
-      {
         currency: 'USD',
         value: 50,
         previous: 0,
         change: null,
         trend: 'BETTER',
       },
+      {
+        currency: 'VES',
+        value: 9,
+        previous: 10,
+        change: -10,
+        trend: 'WORSE',
+      },
     ]);
     // Sin producción en USD: % de cobro en USD no se calcula.
     expect(principal.metrics.collectionRate).toEqual([
-      {
-        currency: 'COP',
-        value: 75,
-        previous: 100,
-        change: -25,
-        trend: 'WORSE',
-      },
       {
         currency: 'USD',
         value: null,
         previous: null,
         change: null,
         trend: null,
+      },
+      {
+        currency: 'VES',
+        value: 75,
+        previous: 100,
+        change: -25,
+        trend: 'WORSE',
       },
     ]);
   });
@@ -256,19 +256,19 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
     expect(total.name).toBe('Total clínica');
     expect(total.locationId).toBeNull();
     expect(total.metrics.production.map((m) => [m.currency, m.value])).toEqual([
-      ['COP', 12],
       ['USD', 200],
+      ['VES', 12],
     ]);
     expect(total.metrics.collected.map((m) => [m.currency, m.value])).toEqual([
-      ['COP', 9],
       ['USD', 150],
+      ['VES', 9],
     ]);
     // Ticket medio del total: cobrado ÷ 4 pacientes distintos (no 3 + 2).
     expect(
       total.metrics.averageTicket.map((m) => [m.currency, m.value]),
     ).toEqual([
-      ['COP', 2.25],
       ['USD', 37.5],
+      ['VES', 2.25],
     ]);
     expect(total.metrics.completedAppointments.value).toBe(55);
     expect(total.metrics.newPatients.value).toBe(3);
@@ -296,15 +296,15 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
     expect(report.previousFrom).toBeNull();
     expect(report.locations[0].metrics.production).toEqual([
       {
-        currency: 'COP',
-        value: 12,
+        currency: 'USD',
+        value: 0,
         previous: null,
         change: null,
         trend: null,
       },
       {
-        currency: 'USD',
-        value: 0,
+        currency: 'VES',
+        value: 12,
         previous: null,
         change: null,
         trend: null,
@@ -352,7 +352,7 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
   });
 
   describe('producción sin atribuir en el período comparado (BE-045)', () => {
-    // El 31/08 a medianoche de Bogotá es 05:00 UTC: DX-050 llegó después.
+    // El 31/08 a medianoche de la sede es 04:00 UTC: DX-050 llegó después.
     const beforePrevious = {
       attributedSince: new Date('2026-09-15T12:00:00Z'),
       hasUnattributed: true,
@@ -363,16 +363,16 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
       const report = await run();
       const [principal] = report.locations;
       expect(principal.previousPeriodUnattributed).toBe(true);
-      expect(principal.metrics.production[0]).toEqual({
-        currency: 'COP',
+      expect(principal.metrics.production[1]).toEqual({
+        currency: 'VES',
         value: 12,
         previous: 10,
         change: null,
         trend: null,
         previousUnattributed: true,
       });
-      expect(principal.metrics.collectionRate[0]).toMatchObject({
-        currency: 'COP',
+      expect(principal.metrics.collectionRate[1]).toMatchObject({
+        currency: 'VES',
         value: 75,
         previous: 100,
         change: null,
@@ -380,16 +380,16 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
         previousUnattributed: true,
       });
       // El resto de indicadores sí se comparan.
-      expect(principal.metrics.collected[0]).toMatchObject({
+      expect(principal.metrics.collected[1]).toMatchObject({
         change: -10,
         trend: 'WORSE',
       });
-      expect(principal.metrics.collected[0]).not.toHaveProperty(
+      expect(principal.metrics.collected[1]).not.toHaveProperty(
         'previousUnattributed',
       );
       expect(principal.metrics.noShowRate.trend).toBe('WORSE');
       expect(report.total.previousPeriodUnattributed).toBe(true);
-      expect(report.total.metrics.production[0].trend).toBeNull();
+      expect(report.total.metrics.production[1].trend).toBeNull();
       expect(report.previousPeriodUnattributed).toBe(true);
     });
 
@@ -397,17 +397,17 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
       repo.attribution = { ...beforePrevious, hasUnattributed: false };
       const report = await run();
       expect(report.previousPeriodUnattributed).toBe(false);
-      expect(report.locations[0].metrics.production[0].trend).toBe('BETTER');
+      expect(report.locations[0].metrics.production[1].trend).toBe('BETTER');
     });
 
     it('un período comparado posterior a DX-050 compara con normalidad', async () => {
       repo.attribution = {
-        attributedSince: new Date('2026-08-31T04:59:59Z'),
+        attributedSince: new Date('2026-08-31T03:59:59Z'),
         hasUnattributed: true,
       };
       const report = await run();
       expect(report.previousPeriodUnattributed).toBe(false);
-      expect(report.locations[0].metrics.production[0]).toMatchObject({
+      expect(report.locations[0].metrics.production[1]).toMatchObject({
         change: 20,
         trend: 'BETTER',
       });
@@ -434,9 +434,9 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
           previousUnattributed: true,
         },
       ]);
-      // En el total, USD (cobros sin producción en el anterior) sí; COP no.
+      // En el total, USD (cobros sin producción en el anterior) sí; VES no.
       const total = report.total.metrics.production;
-      expect(total.find((m) => m.currency === 'COP')?.trend).toBe('BETTER');
+      expect(total.find((m) => m.currency === 'VES')?.trend).toBe('BETTER');
       expect(total.find((m) => m.currency === 'USD')?.trend).toBeNull();
     });
 

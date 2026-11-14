@@ -9,7 +9,7 @@ import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
   registerBody,
 } from './support/location-fixtures';
@@ -64,7 +64,7 @@ async function registerClinic(
   const email = `owner@${subdomain}.com`;
   const res = await registerVerified(
     app,
-    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+    registerBody(REGIONAL_CARACAS_FIXTURE, {
       clinicName: `Clinica ${subdomain}`,
       subdomain,
       email,
@@ -224,9 +224,9 @@ describe('Appointments: anti-solape aislado por clínica (e2e, DX-036)', () => {
       .set('X-Tenant-Host', hostFor(clinicA.subdomain))
       .set('Authorization', `Bearer ${clinicA.token}`)
       .send(
-        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+        locationBody(REGIONAL_CARACAS_FIXTURE, {
           name: 'Sede Norte',
-          address: 'Cra 15',
+          address: 'Av. Bolívar 15',
         }),
       )
       .expect(201);

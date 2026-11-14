@@ -34,7 +34,7 @@ const FOR_PATIENT = {
 // motivo, el aviso de tratamientos reservados en otra cita y «Traer a esta
 // cita», en UpdateAppointmentUseCase.
 
-const TZ = 'America/Bogota';
+const TZ = 'America/Caracas';
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
@@ -42,10 +42,11 @@ const schedule = {
   findByLocation: () => Promise.resolve(null),
 } as unknown as LocationScheduleRepository;
 const staff = {
-  findById: (userId: string) => Promise.resolve({ userId }),
+  findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),
 } as unknown as StaffRepository;
 const locations = {
-  findById: (id: string) => Promise.resolve({ id, timeZone: TZ }),
+  findById: (id: string) =>
+    Promise.resolve({ id, timeZone: TZ, isActive: true }),
 } as unknown as LocationRepository;
 
 function ctx(role: ClinicRole): AppointmentAuditContext {
@@ -117,7 +118,7 @@ const reserved = (appointmentId: string): PlanItemReservedElsewhere => ({
   locationId: 'loc1',
   locationName: 'Sede Principal',
   timeZone: TZ,
-  locale: 'es-CO',
+  locale: 'es-VE',
   hourCycle: 'h23',
 });
 

@@ -1,3 +1,24 @@
+import {
+  AcceptanceRepricer,
+  ApplyPlanRepricingUseCase,
+  PreviewPlanRepricingUseCase,
+  RepricingContextReader,
+} from './application/use-cases/plan-repricing.use-cases';
+import { PLAN_REPRICING_REPOSITORY } from './domain/ports/plan-repricing-repository.port';
+import { PrismaPlanRepricingRepository } from './infrastructure/repositories/prisma-plan-repricing.repository';
+import { PlanRepricingController } from './presentation/plan-repricing.controller';
+import { QuoteExpiry } from './application/quote-expiry';
+import {
+  GetQuoteSettingsUseCase,
+  UpdateQuoteSettingsUseCase,
+} from './application/use-cases/quote-settings.use-cases';
+import { QUOTE_SETTINGS_REPOSITORY } from './domain/ports/quote-settings-repository.port';
+import { PrismaQuoteSettingsRepository } from './infrastructure/repositories/prisma-quote-settings.repository';
+import { QuoteSettingsController } from './presentation/quote-settings.controller';
+import { PLAN_QUOTE_ZONES } from './domain/ports/plan-quote-zones.port';
+import { QUOTE_EXPIRY_REGIONAL } from './domain/ports/quote-expiry-regional.port';
+import { PrismaQuoteExpiryRegional } from './infrastructure/adapters/prisma-quote-expiry-regional';
+import { PrismaPlanQuoteZones } from './infrastructure/adapters/prisma-plan-quote-zones';
 import { PlanVisitsService } from './application/plan-visits.service';
 import { PlanVisitsController } from './presentation/plan-visits.controller';
 import { Module } from '@nestjs/common';
@@ -14,9 +35,15 @@ import { PrismaPlanOptionsRepository } from './infrastructure/repositories/prism
 import { PlanQuoteController } from './presentation/plan-quote.controller';
 import {
   AcceptTreatmentPlanUseCase,
+  PreviewAcceptanceRepricingUseCase,
+  PreviewPartialAcceptanceUseCase,
   GetPlanQuoteUseCase,
+  IssuePlanQuoteUseCase,
   PLAN_QUOTE_CLOCK,
+  PLAN_QUOTE_COMPOSITION,
 } from './application/use-cases/plan-quote.use-cases';
+import { loadPlanQuoteComposition } from './application/plan-quote-composition.config';
+import { ConfigService } from '@nestjs/config';
 import { PLAN_QUOTE_REPOSITORY } from './domain/ports/plan-quote-repository.port';
 import { PrismaPlanQuoteRepository } from './infrastructure/repositories/prisma-plan-quote.repository';
 import { CreateTreatmentPlanUseCase } from './application/use-cases/create-treatment-plan.use-case';
@@ -47,6 +74,9 @@ import { PRICING_SOURCE } from './domain/ports/pricing-source.port';
 import { PrismaPricingSource } from './infrastructure/pricing/prisma-pricing-source';
 import { GetPriceQuoteUseCase } from './application/use-cases/get-price-quote.use-case';
 import { PriceQuoteController } from './presentation/price-quote.controller';
+import { ExchangeModule } from '../exchange/exchange.module';
+import { REFERENCE_RATE_SOURCE } from './domain/ports/reference-rate-source.port';
+import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-reference-rate-source';
 
 @Module({
   // JwtModule.register({}) mirrors AppointmentsModule/OdontogramModule:
@@ -75,6 +105,9 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     PatientAgreementsModule,
     // DX-051: las escrituras de ítems y planes drenan el reparto de abonos.
     PaymentAllocationsModule,
+    // DX-513-bis: la tasa de la clínica para congelar la referencia de un
+    // ítem en otra moneda (la misma lectura que los abonos).
+    ExchangeModule,
   ],
   // PlanFollowUpController va PRIMERO: su `GET treatment-plans/pending-follow-up`
   // quedaría tapado por `GET treatment-plans/:id` si se registrara después.
@@ -85,6 +118,10 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     PlanQuoteController,
     // Precio resuelto de un ítem nuevo (DX-105).
     PriceQuoteController,
+    // DX-379: días de validez del presupuesto de la clínica.
+    QuoteSettingsController,
+    // DX-379 (B): «Actualizar precios» (recotizar).
+    PlanRepricingController,
   ],
   providers: [
     PlanVisitsService,
@@ -99,6 +136,8 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     ApplyBulkDiscountUseCase,
     // Resolución del precio por convenio o lista (DX-105).
     { provide: PRICING_SOURCE, useClass: PrismaPricingSource },
+    // DX-513-bis: tasa de hoy en la sede de escritura para la referencia.
+    { provide: REFERENCE_RATE_SOURCE, useClass: ClinicReferenceRateSource },
     GetPriceQuoteUseCase,
     // Alternativas, presentación, rechazo y seguimiento (DX-040).
     PresentTreatmentPlanUseCase,
@@ -106,11 +145,40 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
     CreatePlanAlternativeUseCase,
     ListPendingFollowUpUseCase,
     { provide: TREATMENT_PLAN_CLOCK, useValue: () => new Date() },
+    // DX-379: `quoteExpired` de los planes, con la zona de su sede.
+    QuoteExpiry,
+    { provide: PLAN_QUOTE_ZONES, useClass: PrismaPlanQuoteZones },
+    { provide: QUOTE_EXPIRY_REGIONAL, useClass: PrismaQuoteExpiryRegional },
+    GetQuoteSettingsUseCase,
+    UpdateQuoteSettingsUseCase,
+    // DX-379 (B): recotizar con el precio vigente.
+    RepricingContextReader,
+    AcceptanceRepricer,
+    PreviewPlanRepricingUseCase,
+    ApplyPlanRepricingUseCase,
+    {
+      provide: PLAN_REPRICING_REPOSITORY,
+      useClass: PrismaPlanRepricingRepository,
+    },
+    {
+      provide: QUOTE_SETTINGS_REPOSITORY,
+      useClass: PrismaQuoteSettingsRepository,
+    },
     { provide: PLAN_OPTIONS_REPOSITORY, useClass: PrismaPlanOptionsRepository },
     // Presupuesto imprimible y aceptación firmada (DX-012).
     GetPlanQuoteUseCase,
+    IssuePlanQuoteUseCase,
     AcceptTreatmentPlanUseCase,
+    PreviewAcceptanceRepricingUseCase,
+    PreviewPartialAcceptanceUseCase,
     { provide: PLAN_QUOTE_CLOCK, useValue: () => new Date() },
+    // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).
+    {
+      provide: PLAN_QUOTE_COMPOSITION,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadPlanQuoteComposition((key) => config.get<string>(key)),
+    },
     { provide: PLAN_QUOTE_REPOSITORY, useClass: PrismaPlanQuoteRepository },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
@@ -131,6 +199,12 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
   // plan (+ its active items + currency) before recording/valuing a payment,
   // same cross-module DI pattern as ExchangeModule exporting
   // ConvertAmountUseCase for SalesModule/PaymentsModule.
-  exports: [GetTreatmentPlanUseCase],
+  // DX-503: «Mi día» cuenta presupuestos por seguir y aceptados sin agendar
+  // con los mismos casos de uso que sus `/count`.
+  exports: [
+    GetTreatmentPlanUseCase,
+    ListPendingFollowUpUseCase,
+    PlanVisitsService,
+  ],
 })
 export class TreatmentPlansModule {}

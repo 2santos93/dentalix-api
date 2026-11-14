@@ -192,3 +192,12 @@ export const pngRenamedAsPdf = () => ({
   originalName: 'informe.pdf',
   mimeType: 'application/pdf',
 });
+
+/** WebP mínimo: cabecera RIFF/WEBP y un chunk VP8 de relleno (DX-389). */
+export const webpFixture = (): Buffer =>
+  Buffer.concat([
+    Buffer.from('RIFF', 'latin1'),
+    Buffer.from([0x24, 0, 0, 0]),
+    Buffer.from('WEBPVP8 ', 'latin1'),
+    Buffer.alloc(32, 1),
+  ]);

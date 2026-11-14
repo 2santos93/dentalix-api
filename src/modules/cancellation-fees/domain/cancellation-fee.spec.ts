@@ -18,12 +18,12 @@ const facts = (over: Partial<FeeChargeFacts> = {}): FeeChargeFacts => ({
     lateCancellation: null,
     policyVersionId: 'v1',
   },
-  communicated: { suggestedFee: 50000, currency: 'COP' },
+  communicated: { suggestedFee: 50000, currency: 'VES' },
   existing: null,
   ...over,
 });
 
-const fmt = (n: number) => `${n} COP`;
+const fmt = (n: number) => `${n} VES`;
 
 describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
   describe('isFeeEligible', () => {
@@ -142,7 +142,7 @@ describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
       ).toBe('NO_FEE');
       expect(
         chargeBlockReason(
-          facts({ communicated: { suggestedFee: 0, currency: 'COP' } }),
+          facts({ communicated: { suggestedFee: 0, currency: 'VES' } }),
         ),
       ).toBe('NO_FEE');
     });
@@ -223,7 +223,7 @@ describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
       expect(resolveChargeAmount(50000.01, 50000, fmt)).toEqual({
         ok: false,
         message:
-          'El importe no puede superar el sugerido por la política comunicada (50000 COP).',
+          'El importe no puede superar el sugerido por la política comunicada (50000 VES).',
       });
     });
 
@@ -278,12 +278,12 @@ describe('cargo por inasistencia o cancelación tardía (DX-291)', () => {
       expect(voidPaymentsCheck([], 8_000_000)).toBe('CLEAR');
     });
 
-    it('plan COP, 50 USD (base 200.000 COP) con 100.000 por cobrar sin el cargo: ya cobrado', () => {
+    it('plan VES, 50 USD (base 200.000 VES) con 100.000 por cobrar sin el cargo: ya cobrado', () => {
       // La suma bruta (50 frente a 100.000) lo dejaba anular.
       expect(voidPaymentsCheck([20_000_000], 10_000_000)).toBe('PAID');
     });
 
-    it('plan USD, 40.000 COP (base 10 USD) con 30 USD por cobrar sin el cargo: se anula', () => {
+    it('plan USD, 40.000 VES (base 10 USD) con 30 USD por cobrar sin el cargo: se anula', () => {
       // La suma bruta (40.000 frente a 30) lo bloqueaba.
       expect(voidPaymentsCheck([1_000], 3_000)).toBe('CLEAR');
     });

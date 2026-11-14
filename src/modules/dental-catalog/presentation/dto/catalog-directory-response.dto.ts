@@ -22,4 +22,12 @@ export class CatalogDirectoryResponseDto {
 
   @ApiProperty()
   pageSize!: number;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502-ter: moneda del `defaultPrice` de los ítems (la que fijó la clínica en Ajustes o, sin ella, la común de sus sedes activas); null si no se sabe. La ven todos los roles que leen el catálogo.',
+  })
+  catalogCurrency!: string | null;
 }

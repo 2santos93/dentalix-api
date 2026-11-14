@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { EXCHANGE_RATE_SOURCE_MESSAGE } from '../../domain/exchange-rate-source';
+import { MANUAL_RATE_MAX_AGE_MESSAGE } from '../../domain/manual-rate-fallback';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { makeSettings } from '../__fixtures__/in-memory-exchange-settings';
 import { ExchangeSourceChangeHooks } from '../exchange-source-change-hooks';
@@ -51,6 +52,7 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
     ).resolves.toEqual({
       source: 'AUTOMATIC',
       manualSince: null,
+      manualRateMaxAgeDays: 3,
       baseCurrency: 'USD',
     });
   });
@@ -61,11 +63,13 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
     ).resolves.toEqual({
       source: 'MANUAL',
       manualSince: '2026-10-29',
+      manualRateMaxAgeDays: 3,
       baseCurrency: 'USD',
     });
     expect(settings.settingsOf(TENANT)).toEqual({
       source: 'MANUAL',
       manualSince: '2026-10-29',
+      manualRateMaxAgeDays: 3,
     });
     expect(audit.record).toHaveBeenCalledTimes(1);
     expect(audit.record).toHaveBeenCalledWith({
@@ -165,5 +169,87 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
     await expect(run).rejects.toThrow(EXCHANGE_RATE_SOURCE_MESSAGE);
     expect(settings.settingsOf(TENANT).source).toBe('AUTOMATIC');
     expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  // DX-384: el plazo de la última tasa registrada (0..30, 3 por defecto).
+  describe('plazo de la última tasa registrada (DX-384)', () => {
+    it('3 días por defecto', async () => {
+      await expect(
+        inClinic(() => new GetExchangeRateSettingsUseCase(settings).execute()),
+      ).resolves.toMatchObject({ manualRateMaxAgeDays: 3 });
+    });
+
+    it('se cambia solo, sin tocar la fuente ni su día de inicio', async () => {
+      await inClinic(() => update().execute({ source: 'MANUAL' }, ctx));
+      await expect(
+        inClinic(() => update().execute({ manualRateMaxAgeDays: 0 }, ctx)),
+      ).resolves.toMatchObject({
+        source: 'MANUAL',
+        manualSince: '2026-10-29',
+        manualRateMaxAgeDays: 0,
+      });
+      expect(settings.settingsOf(TENANT).manualRateMaxAgeDays).toBe(0);
+    });
+
+    it('cambiar la fuente conserva el plazo', async () => {
+      await inClinic(() => update().execute({ manualRateMaxAgeDays: 7 }, ctx));
+      await inClinic(() => update().execute({ source: 'MANUAL' }, ctx));
+      expect(settings.settingsOf(TENANT)).toMatchObject({
+        source: 'MANUAL',
+        manualRateMaxAgeDays: 7,
+      });
+    });
+
+    it('admite los dos a la vez', async () => {
+      await expect(
+        inClinic(() =>
+          update().execute({ source: 'MANUAL', manualRateMaxAgeDays: 30 }, ctx),
+        ),
+      ).resolves.toMatchObject({ source: 'MANUAL', manualRateMaxAgeDays: 30 });
+    });
+
+    it.each([-1, 31, 1.5, Number.NaN, '3' as never])(
+      'rechaza %p con 400 en español y no escribe',
+      async (bad) => {
+        const run = inClinic(() =>
+          update().execute({ manualRateMaxAgeDays: bad }, ctx),
+        );
+        await expect(run).rejects.toBeInstanceOf(BadRequestException);
+        await expect(run).rejects.toThrow(MANUAL_RATE_MAX_AGE_MESSAGE);
+        expect(settings.settingsOf(TENANT).manualRateMaxAgeDays).toBe(3);
+      },
+    );
+
+    it('sin ningún campo, 400', async () => {
+      await expect(
+        inClinic(() => update().execute({}, ctx)),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('un plazo inválido no cambia la fuente aunque vaya con ella', async () => {
+      await expect(
+        inClinic(() =>
+          update().execute({ source: 'MANUAL', manualRateMaxAgeDays: 99 }, ctx),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(settings.settingsOf(TENANT).source).toBe('AUTOMATIC');
+    });
+
+    it('si cambia, adelanta los reintentos de los abonos sin tasa; si no cambia, no', async () => {
+      let woke = 0;
+      hooks.registerAfterRatesChange(() => {
+        woke += 1;
+        return Promise.resolve();
+      });
+      await inClinic(() => update().execute({ manualRateMaxAgeDays: 3 }, ctx));
+      expect(woke).toBe(0);
+      await inClinic(() => update().execute({ manualRateMaxAgeDays: 5 }, ctx));
+      expect(woke).toBe(1);
+    });
+
+    it('un cambio solo del plazo no deja el evento de la fuente (el del plazo lo escribe el repositorio en la transacción)', async () => {
+      await inClinic(() => update().execute({ manualRateMaxAgeDays: 5 }, ctx));
+      expect(audit.record).not.toHaveBeenCalled();
+    });
   });
 });

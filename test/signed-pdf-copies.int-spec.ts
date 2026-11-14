@@ -6,6 +6,7 @@ import { InMemoryFileStorage } from '../src/shared/storage/__fixtures__/in-memor
 import { PrismaSignatureRequestRepository } from '../src/modules/signature-requests/infrastructure/prisma-signature-request.repository';
 import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
 import { PrismaSignedConsentPdfRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-consent-pdf.repository';
+import { PrismaEmailOutboxRepository } from '../src/modules/notifications/email/infrastructure/repositories/prisma-email-outbox.repository';
 import { PrismaSignedPdfCopyRepository } from '../src/modules/consents/infrastructure/repositories/prisma-signed-pdf-copy.repository';
 import { PdfkitSignedConsentPdfRenderer } from '../src/modules/consents/infrastructure/pdf/signed-consent-pdf.renderer';
 import {
@@ -14,9 +15,11 @@ import {
   SignedConsentPdfAudit,
   SignedConsentPdfQueue,
   signedConsentPdfJobKey,
+  signedConsentPdfUnicodeRetryJobKey,
 } from '../src/modules/consents/application/signed-consent-pdf.service';
 import {
   BackfillSignedConsentPdfs,
+  DownloadSignedPdfCopyUseCase,
   SIGNED_PDF_COPY_JOB,
   SendSignedPdfCopyJob,
   SignedPdfCopyQueue,
@@ -109,10 +112,14 @@ const emails: {
 const sender = new SignedPdfCopySender(
   copies,
   {
-    send: (input) => {
-      emails.push(input);
-      return Promise.resolve();
-    },
+    prepare: (input) =>
+      Promise.resolve({
+        insert: () => {
+          emails.push(input);
+          return Promise.resolve({ id: randomUUID() });
+        },
+        kick: () => undefined,
+      }),
   },
   { forTenant: () => Promise.resolve('http://int.localhost:3001') },
   tenantContext,
@@ -120,6 +127,14 @@ const sender = new SignedPdfCopySender(
   () => new Date(),
 );
 const sendJob = new SendSignedPdfCopyJob(copies, sender);
+/** DX-463: un outbox que falla al encolar. */
+const failingEmail = () => ({
+  prepare: () =>
+    Promise.resolve({
+      insert: () => Promise.reject(new Error('outbox caído')),
+      kick: () => undefined,
+    }),
+});
 const META = { requestId: null, ip: '203.0.113.9', userAgent: 'int-public' };
 
 const jobContext = (tenantId: string): JobContext => ({
@@ -332,6 +347,121 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
     ).toBe(4);
   });
 
+  // DX-463 (BE-059): si encolar el email del reenvío falla, el enlace
+  // anterior sigue sirviendo (antes se revocaba primero y el paciente se
+  // quedaba sin enlace ni email).
+  it('DX-463: si encolar el email del reenvío falla, el enlace anterior sigue válido y no queda uno nuevo', async () => {
+    const { consentId, token } = await readyWithCopy(a);
+    const target = await asClinic(a.tenantId, () =>
+      copies.loadTarget(consentId, a.patientId),
+    );
+    const failing = new SignedPdfCopySender(
+      copies,
+      failingEmail(),
+      { forTenant: () => Promise.resolve('http://int.localhost:3001') },
+      tenantContext,
+      { ttlHours: 168 },
+      () => new Date(),
+    );
+    await expect(
+      asClinic(a.tenantId, () => failing.send(target!, a.userId)),
+    ).rejects.toThrow('outbox caído');
+    const rows = await owner.signedConsentPdfLink.findMany({
+      where: { consentId },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ usedAt: null, revokedAt: null });
+    const old = await asClinic(a.tenantId, () =>
+      copies.findLinkByTokenHash(hashSignedPdfCopyToken(token)),
+    );
+    const outcome = await asClinic(a.tenantId, () =>
+      copies.consumeLink(old!.id, new Date(), META),
+    );
+    expect(outcome.kind).toBe('CONSUMED');
+  });
+
+  it('DX-463: el email se encola en la misma transacción que el enlace: si algo falla después de insertarlo, tampoco queda en el outbox', async () => {
+    const { consentId } = await readyWithCopy(a);
+    const outbox = new PrismaEmailOutboxRepository(prisma);
+    const issue = (fail: boolean) =>
+      asClinic(a.tenantId, () =>
+        copies.issueLink({
+          id: randomUUID(),
+          consentId,
+          patientId: a.patientId,
+          tokenHash: randomUUID().replace(/-/g, '').padEnd(64, '0'),
+          expiresAt: new Date(Date.now() + 3600_000),
+          createdById: a.userId,
+          now: new Date(),
+          enqueue: async (tx) => {
+            await outbox.insertInTx(tx, {
+              tenantId: a.tenantId,
+              template: 'signed-consent-copy',
+              toHash: 'a'.repeat(64),
+              toMasked: 'ma***@example.com',
+              referenceId: randomUUID(),
+              payload: Buffer.from('cifrado'),
+            });
+            if (fail) throw new Error('falló tras encolar');
+          },
+        }),
+      );
+    const outboxRows = () =>
+      owner.emailOutbox.count({
+        where: { tenantId: a.tenantId, toHash: 'a'.repeat(64) },
+      });
+    await expect(issue(true)).rejects.toThrow('falló tras encolar');
+    expect(await outboxRows()).toBe(0);
+    expect(
+      await owner.signedConsentPdfLink.count({
+        where: { consentId, usedAt: null, revokedAt: null },
+      }),
+    ).toBe(1);
+    await issue(false);
+    expect(await outboxRows()).toBe(1);
+  });
+
+  // DX-463 (BE-059): si la URL firmada no se pudo generar, el enlace no se
+  // gasta ni se audita la descarga: el paciente reintenta con el mismo enlace.
+  it('DX-463: si generar la URL de descarga falla, el enlace no se gasta ni se audita', async () => {
+    const { consentId, token } = await readyWithCopy(a);
+    const broken = new DownloadSignedPdfCopyUseCase(
+      copies,
+      tenantContext,
+      () => new Date(),
+      {
+        getSignedUrl: () => Promise.reject(new Error('storage caído')),
+      },
+    );
+    await expect(
+      asClinic(a.tenantId, () => broken.execute(token, META)),
+    ).rejects.toThrow('storage caído');
+    const link = await owner.signedConsentPdfLink.findFirstOrThrow({
+      where: { consentId },
+    });
+    expect(link.usedAt).toBeNull();
+    expect(
+      await owner.auditEvent.count({
+        where: { resourceId: consentId, action: 'EXPORT' },
+      }),
+    ).toBe(0);
+    const working = new DownloadSignedPdfCopyUseCase(
+      copies,
+      tenantContext,
+      () => new Date(),
+      { getSignedUrl: () => Promise.resolve('http://files.local/x?sig=1') },
+    );
+    const result = await asClinic(a.tenantId, () =>
+      working.execute(token, META),
+    );
+    expect(result.url).toBe('http://files.local/x?sig=1');
+    expect(
+      await owner.signedConsentPdfLink.findFirstOrThrow({
+        where: { consentId },
+      }),
+    ).toMatchObject({ usedAt: expect.any(Date) as Date });
+  });
+
   it('RLS: desde otra clínica el enlace y el consentimiento no existen', async () => {
     const { consentId, token } = await readyWithCopy(a);
     await expect(
@@ -449,7 +579,7 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
       await owner.signedConsentPdf.count({ where: { consentId: withPdf } }),
     ).toBe(1);
 
-    await expect(sweep.run()).resolves.toEqual({ queued: 0 });
+    await expect(sweep.run()).resolves.toEqual({ queued: 0, retried: 0 });
     expect(await owner.signedConsentPdf.count({ where: { consentId } })).toBe(
       1,
     );
@@ -467,5 +597,131 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
     expect(loaded).toMatchObject({ notifyPatient: false });
     await asClinic(b.tenantId, () => sendJob.handle({ consentId }));
     expect(emails).toHaveLength(emailsBefore);
+  });
+
+  it('DX-459: los FAILED por otro alfabeto (UNSUPPORTED_CHARACTERS) se regeneran READY una vez, sin escribir al paciente', async () => {
+    // Un consentimiento en griego/cirílico/CJK firmado ANTES de las fuentes
+    // Unicode: su PDF quedó FAILED con el código de entonces. Se firmó por el
+    // flujo normal (notifyPatient = true).
+    const consentId = await remoteSigned(b, {
+      title: 'Συγκατάθεση — Согласие — 同意书',
+      body: 'Ζωή Παπαδοπούλου\nМария Иванова\n山田花子',
+    });
+    await countersign(b, consentId, (tx) => pdfQueue.schedule(tx, consentId));
+    await asClinic(b.tenantId, () =>
+      pdfs.recordFailure(consentId, {
+        code: 'UNSUPPORTED_CHARACTERS',
+        final: true,
+      }),
+    );
+    // Otros FAILED no se tocan: uno sin glifo ni en las fuentes embebidas y
+    // uno del almacén (esos los reintenta la ficha).
+    const noGlyph = await remoteSigned(b);
+    await countersign(b, noGlyph, (tx) => pdfQueue.schedule(tx, noGlyph));
+    await asClinic(b.tenantId, () =>
+      pdfs.recordFailure(noGlyph, { code: 'UNSUPPORTED_GLYPHS', final: true }),
+    );
+    const storageFailed = await remoteSigned(b);
+    await countersign(b, storageFailed, (tx) =>
+      pdfQueue.schedule(tx, storageFailed),
+    );
+    await asClinic(b.tenantId, () =>
+      pdfs.recordFailure(storageFailed, { code: 'STORAGE_ERROR', final: true }),
+    );
+    const before = await owner.signedConsentPdf.findFirstOrThrow({
+      where: { consentId },
+    });
+    expect(before).toMatchObject({ status: 'FAILED', notifyPatient: true });
+
+    const sweep = new BackfillSignedConsentPdfs(copies, pdfQueue);
+    const first = await sweep.run();
+    expect(first.retried).toBe(1);
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({
+      status: 'PENDING',
+      lastErrorCode: null,
+      notifyPatient: false,
+      attempts: before.attempts,
+    });
+    expect(
+      await owner.job.count({
+        where: {
+          idempotencyKey: signedConsentPdfUnicodeRetryJobKey(consentId),
+        },
+      }),
+    ).toBe(1);
+    for (const [other, code] of [
+      [noGlyph, 'UNSUPPORTED_GLYPHS'],
+      [storageFailed, 'STORAGE_ERROR'],
+    ] as const) {
+      expect(
+        await owner.signedConsentPdf.findFirstOrThrow({
+          where: { consentId: other },
+        }),
+      ).toMatchObject({ status: 'FAILED', lastErrorCode: code });
+    }
+    // Repetir el barrido mientras está PENDING no lo vuelve a encolar.
+    await expect(sweep.run()).resolves.toMatchObject({ retried: 0 });
+
+    // El trabajo lo genera con las fuentes embebidas y lo archiva READY...
+    const emailsBefore = emails.length;
+    await asClinic(b.tenantId, () =>
+      generator.handle({ consentId }, jobContext(b.tenantId)),
+    );
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({ status: 'READY', lastErrorCode: null });
+    // ...SIN encolar la copia al paciente ni escribirle.
+    expect(
+      await owner.job.count({
+        where: { idempotencyKey: signedPdfCopyJobKey(consentId) },
+      }),
+    ).toBe(0);
+    await asClinic(b.tenantId, () => sendJob.handle({ consentId }));
+    expect(emails).toHaveLength(emailsBefore);
+
+    // Ya READY: el barrido no lo vuelve a tocar.
+    await expect(sweep.run()).resolves.toMatchObject({ retried: 0 });
+    expect(
+      await owner.job.count({
+        where: {
+          idempotencyKey: signedConsentPdfUnicodeRetryJobKey(consentId),
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('DX-459: uno FAILED por un texto que sigue sin poder pintarse (árabe, sin bidi) se reintenta UNA vez y queda UNSUPPORTED_GLYPHS, sin bucle', async () => {
+    const consentId = await remoteSigned(b, {
+      body: 'يوافق المريض على العلاج',
+    });
+    await countersign(b, consentId, (tx) => pdfQueue.schedule(tx, consentId));
+    await asClinic(b.tenantId, () =>
+      pdfs.recordFailure(consentId, {
+        code: 'UNSUPPORTED_CHARACTERS',
+        final: true,
+      }),
+    );
+    const sweep = new BackfillSignedConsentPdfs(copies, pdfQueue);
+    await expect(sweep.run()).resolves.toMatchObject({ retried: 1 });
+    await asClinic(b.tenantId, () =>
+      generator.handle({ consentId }, jobContext(b.tenantId)),
+    );
+    expect(
+      await owner.signedConsentPdf.findFirstOrThrow({ where: { consentId } }),
+    ).toMatchObject({
+      status: 'FAILED',
+      lastErrorCode: 'UNSUPPORTED_GLYPHS',
+      documentId: null,
+      notifyPatient: false,
+    });
+    // El código nuevo no lo vuelve a seleccionar el barrido.
+    await expect(sweep.run()).resolves.toMatchObject({ retried: 0 });
+    expect(
+      await owner.job.count({
+        where: { idempotencyKey: signedPdfCopyJobKey(consentId) },
+      }),
+    ).toBe(0);
   });
 });

@@ -22,7 +22,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -92,7 +92,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       .send({
         category: 'Papelería',
         amount: 100000,
-        currency: 'COP',
+        currency: 'VES',
         invoiceDate: '2026-10-01',
         locationId: loc1,
         ...patch,
@@ -119,7 +119,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       (
         await call('post', '/locations')
           .send(
-            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            locationBody(REGIONAL_CARACAS_FIXTURE, {
               name: 'Sede Norte',
               timeZone: 'Europe/Madrid',
             }),
@@ -164,17 +164,17 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
           deletedAt,
         },
       });
-    // Octubre en la sede principal (mediodía de Bogotá = 17:00 UTC).
-    await income(loc1, 1000000, 'COP', '2026-10-05T17:00:00Z');
-    await income(loc1, 500000.5, 'COP', '2026-10-20T17:00:00Z');
+    // Octubre en la sede principal (mediodía de la sede = 17:00 UTC).
+    await income(loc1, 1000000, 'VES', '2026-10-05T17:00:00Z');
+    await income(loc1, 500000.5, 'VES', '2026-10-20T17:00:00Z');
     // Anulado: no cuenta.
-    await income(loc1, 999999, 'COP', '2026-10-06T17:00:00Z', new Date());
-    // 2026-10-01 03:00Z = 30 sep 22:00 en Bogotá: es septiembre.
-    await income(loc1, 200000, 'COP', '2026-10-01T03:00:00Z');
+    await income(loc1, 999999, 'VES', '2026-10-06T17:00:00Z', new Date());
+    // 2026-10-01 03:00Z = 30 sep 22:00 en la zona de la sede: es septiembre.
+    await income(loc1, 200000, 'VES', '2026-10-01T03:00:00Z');
     // Otra sede y otra moneda.
     await income(loc2, 50.25, 'USD', '2026-10-10T17:00:00Z');
     // Sede Norte en Madrid: 23:30Z del 31 oct ya es 1 nov allí (UTC+1) y aún
-    // 31 oct en Bogotá, donde está la sede principal: dos zonas en una petición.
+    // 31 oct en la zona de la sede, donde está la sede principal: dos zonas en una petición.
     // G1: la zona es un campo real del alta: la propia sede queda en Madrid
     // (y su horario legado igual, R20), sin tocar el horario a mano.
     expect(
@@ -192,7 +192,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
     await income(loc2, 10, 'USD', '2026-10-31T23:30:00Z');
 
     await expense({
-      category: 'Arriendo',
+      category: 'Alquiler',
       amount: 400000,
       invoiceDate: '2026-10-02',
     });
@@ -213,7 +213,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       invoiceDate: '2026-10-21',
     });
     await expense({
-      category: 'Arriendo',
+      category: 'Alquiler',
       amount: 300000,
       invoiceDate: '2026-09-30',
     });
@@ -264,7 +264,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       } finally {
         await raw.location.update({
           where: { id: loc1 },
-          data: { timeZone: 'America/Bogota' },
+          data: { timeZone: 'America/Caracas' },
         });
       }
       await summary('from=2026-10-01&to=2026-10-31').expect(200);
@@ -273,15 +273,15 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
     it('agrupa por mes, sede y moneda con ingresos, gastos por categoría y neto', async () => {
       const rows = await rowsOf('from=2026-09-01&to=2026-10-31');
       expect(rows.map((r) => [r.month, r.locationName, r.currency])).toEqual([
-        ['2026-09', 'Sede principal', 'COP'],
+        ['2026-09', 'Sede principal', 'VES'],
         ['2026-10', 'Sede Norte', 'USD'],
-        ['2026-10', 'Sede principal', 'COP'],
+        ['2026-10', 'Sede principal', 'VES'],
       ]);
       const [sep, usd, oct] = rows;
       expect(sep).toMatchObject({
         locationId: loc1,
         income: 200000,
-        categories: [{ category: 'Arriendo', amount: 300000 }],
+        categories: [{ category: 'Alquiler', amount: 300000 }],
         expensesTotal: 300000,
         net: -100000,
       });
@@ -289,7 +289,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
         locationId: loc1,
         income: 1500000.5,
         categories: [
-          { category: 'Arriendo', amount: 400000 },
+          { category: 'Alquiler', amount: 400000 },
           { category: 'Papelería', amount: 150000 },
         ],
         expensesTotal: 550000,
@@ -308,7 +308,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       const rows = await rowsOf('from=2026-10-01&to=2026-10-31');
       expect(rows.map((r) => [r.month, r.currency, r.income])).toEqual([
         ['2026-10', 'USD', 50.25],
-        ['2026-10', 'COP', 1500000.5],
+        ['2026-10', 'VES', 1500000.5],
       ]);
     });
 
@@ -361,10 +361,10 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       const key = (r: SummaryRow) =>
         `${r.month} ${r.locationName} ${r.currency}`;
       const byKey = new Map(rows.map((r) => [key(r), r.income]));
-      // Norte (Madrid): 1 nov. La principal (Bogotá) sigue en octubre.
+      // Norte (Madrid): 1 nov. La principal (Caracas) sigue en octubre.
       expect(byKey.get('2026-11 Sede Norte USD')).toBe(10);
       expect(byKey.get('2026-10 Sede Norte USD')).toBe(50.25);
-      expect(byKey.get('2026-10 Sede principal COP')).toBe(1500000.5);
+      expect(byKey.get('2026-10 Sede principal VES')).toBe(1500000.5);
     });
 
     it('/expenses/summary no cae en :id (la ruta fija va antes)', async () => {
@@ -451,9 +451,9 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       const lines = text.slice(1).split('\r\n');
       expect(lines[0]).toBe('Mes,Sede,Moneda,Concepto,Categoría,Importe');
       expect(lines.at(-1)).toBe('');
-      // COP sin decimales (1 500 000,50 se redondea); USD a céntimos.
+      // Decimales de la moneda; USD y VES, a céntimos.
       expect(lines).toContain(
-        '2026-10,"Sede principal",COP,Ingresos,"",1500001',
+        '2026-10,"Sede principal",VES,Ingresos,"",1500000.50',
       );
       expect(lines).toContain('2026-10,"Sede Norte",USD,Ingresos,"",50.25');
       expect(lines).toContain(
@@ -485,7 +485,7 @@ describe('Resumen mensual y CSV de gastos (e2e, DX-274)', () => {
       const hyper = lines.find((l) => l.includes('HYPERLINK'))!;
       expect(hyper).toContain(`"'=HYPERLINK(""http://x"")"`);
       expect(hyper).toContain('"Resmas y sobres"');
-      expect(hyper).toMatch(/,COP,100000,30000,70000,Parcial,No$/);
+      expect(hyper).toMatch(/,VES,100000\.00,30000\.00,70000\.00,Parcial,No$/);
       expect(lines.some((l) => l.endsWith(',Anulado,No'))).toBe(true);
       expect(
         lines.some((l) => /,USD,20\.50,0\.00,20\.50,Pendiente,No$/.test(l)),

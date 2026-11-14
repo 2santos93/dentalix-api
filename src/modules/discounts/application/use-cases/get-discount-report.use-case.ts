@@ -6,6 +6,7 @@ import {
 import { discountPercent } from '../../domain/discount-policy';
 import {
   type AgreementReductionTotal,
+  type AgreementUnmeasuredTotal,
   DISCOUNT_REPORT_REPOSITORY,
   type DiscountReportQuery,
   type DiscountReportRepository,
@@ -54,6 +55,11 @@ export interface DiscountReport {
   totals: DiscountReportTotalView[];
   /** SEC-047: rebajas de convenio por moneda, aparte de `totals`. */
   agreementTotals: AgreementReductionTotal[];
+  /**
+   * DX-513-ter: líneas de convenio «sin referencia comparable» por moneda,
+   * sin importe. No suman en `agreementTotals`.
+   */
+  agreementUnmeasuredTotals: AgreementUnmeasuredTotal[];
   /** Líneas del detalle (descuentos y rebajas de convenio). */
   items: DiscountReportRowView[];
   total: number;
@@ -127,6 +133,7 @@ export class GetDiscountReportUseCase {
         percentOfGross: discountPercent(t.gross, t.discount),
       })),
       agreementTotals: summary.agreementTotals,
+      agreementUnmeasuredTotals: summary.agreementUnmeasuredTotals,
       items: rows.map(withPercent),
       total: summary.rows,
       page,
@@ -147,9 +154,13 @@ function withPercent(row: DiscountReportRow): DiscountReportRowView {
   return {
     ...row,
     percent: discountPercent(row.price + row.priceReduction, row.discount),
+    // DX-513-bis: con foto, sobre la base en la moneda del plan.
     agreementPercent:
-      row.basePrice === null
+      (row.basePriceInPlan ?? row.basePrice) === null
         ? 0
-        : discountPercent(row.basePrice, row.agreementReduction),
+        : discountPercent(
+            row.basePriceInPlan ?? row.basePrice ?? 0,
+            row.agreementReduction,
+          ),
   };
 }

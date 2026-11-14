@@ -24,6 +24,11 @@ export const SKIPPED_ANSWER = '[sin respuesta]';
 export type NotePromptType = 'ONE' | 'MULTI' | 'TEXT';
 
 export interface NotePromptDraft {
+  /**
+   * DX-231: id de la pregunta existente que esta conserva al editar la
+   * plantilla (upsert por id). Sin id, o con uno ajeno, es una pregunta nueva.
+   */
+  id?: string;
   label: string;
   type: NotePromptType;
   options: string[];
@@ -79,6 +84,8 @@ export function normalizeNoteTemplate(
     category: trimOrNull(draft.category),
     body: draft.body.trim(),
     prompts: draft.prompts.map((p) => ({
+      // Los ids de la BD van en minúsculas; un UUID en mayúsculas es el mismo.
+      ...(p.id !== undefined ? { id: p.id.toLowerCase() } : {}),
       label: p.label.trim(),
       type: p.type,
       options: p.options.map((o) => o.trim()),
@@ -151,7 +158,15 @@ export function noteTemplateError(raw: NoteTemplateDraft): string | null {
   }
 
   const keys = new Set<string>();
+  const ids = new Set<string>();
   for (const prompt of draft.prompts) {
+    // DX-231: un id repetido haría que dos preguntas se fundan en una fila.
+    if (prompt.id !== undefined) {
+      if (ids.has(prompt.id)) {
+        return 'Dos preguntas llevan el mismo id: cada pregunta existente aparece una sola vez';
+      }
+      ids.add(prompt.id);
+    }
     const error = promptError(prompt);
     if (error) return error;
     const key = promptKey(prompt.label);

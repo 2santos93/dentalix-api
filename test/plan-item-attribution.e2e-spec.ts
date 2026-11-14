@@ -33,9 +33,10 @@ import {
   REVERT_DONE_FORBIDDEN_MESSAGE,
 } from '../src/modules/treatment-plans/domain/plan-item-attribution';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 /**
  * DX-050 · Producción atribuible: quién realizó cada ítem del plan, dónde y
@@ -168,7 +169,7 @@ describe('DX-050 · ítem realizado con profesional, sede y hora (e2e)', () => {
       'post',
       '/locations',
       a.adminToken,
-      locationBody(REGIONAL_BOGOTA_FIXTURE, {
+      locationBody(REGIONAL_CARACAS_FIXTURE, {
         name: 'Sede Norte',
       }),
     ).expect(201);
@@ -191,6 +192,9 @@ describe('DX-050 · ítem realizado con profesional, sede y hora (e2e)', () => {
       sex: Sex.F,
     }).expect(201);
     patientId = (patient.body as { id: string }).id;
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, a.tenantId, 'USD');
     const catalog = await api('post', '/catalog/items', a.adminToken, {
       code: 'RESINA-050',
       kind: CatalogKind.PROCEDURE,

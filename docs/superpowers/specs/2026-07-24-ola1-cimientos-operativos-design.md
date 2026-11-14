@@ -31,13 +31,13 @@ al máximo lo que ya existe.
 - Invitación de personal por correo y cambio de contraseña obligado en el primer ingreso
   (dependen de la ola de notificaciones). V1 usa **alta directa con contraseña inicial**.
 - Cualquier cambio al contrato del endpoint `GET /dashboard` (se consume tal cual está).
-- Notificaciones, portal del paciente, cumplimiento DIAN/RIPS, IA (olas posteriores).
+- Notificaciones, portal del paciente, cumplimiento fiscal y de reporte sanitario, IA (olas posteriores).
 
 ## Decisiones tomadas (con el owner, 2026-07-24)
 
 - **Alta de personal**: alta directa — el OWNER/ADMIN escribe nombre, email, rol y una
   contraseña inicial; el miembro entra de inmediato.
-- **Moneda del dashboard**: **selector en la UI** (COP por defecto); reconsulta los totales
+- **Moneda del dashboard**: **selector en la UI** (VES por defecto); reconsulta los totales
   convertidos al cambiarla.
 
 ---
@@ -116,7 +116,7 @@ membresías activas con `role = OWNER`.
     tres tarjetas de ingresos (día/semana/mes) sin recomputar el resto tres veces.
 - Contenido:
   - **Tarjetas de ingresos** día / semana / mes (rangos calculados en cliente, hora local).
-  - **Selector de moneda** con opciones **COP y USD** en v1 (COP por defecto). Cambiarla
+  - **Selector de moneda** con opciones **VES y USD** en v1 (VES por defecto). Cambiarla
     reconsulta los totales convertidos. (Si `exchange` no soporta la conversión, el endpoint
     devuelve 400 y se muestra el error; no se amplía el catálogo de monedas en esta ola.)
   - **Citas de hoy**: `listAppointments({ from, to })` del día (todas las agendas), resolviendo

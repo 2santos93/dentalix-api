@@ -6,7 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Prisma, TreatmentPlanStatus } from '@prisma/client';
+import { CashSessionStatus, Prisma, TreatmentPlanStatus } from '@prisma/client';
 import {
   isPlanBillable,
   notBillableMessage,
@@ -26,6 +26,7 @@ import {
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   firstLocationWithRows,
+  loadLocationZones,
   loadPeriodLocationZones,
   resolveLocationTimeZones,
 } from '../../../../shared/locations/location-time-zone';
@@ -36,6 +37,11 @@ import {
 } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../../shared/format/currency-text';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import {
   CashRegisterPage,
@@ -46,13 +52,17 @@ import {
   ListCashRegisterParams,
   ListPaymentsReceivedInRangeParams,
   OpeningBalanceTarget,
+  PaymentProofRecord,
   PaymentRepository,
   PaymentVoidAudit,
   PaymentVoidTarget,
   ReceivedPayment,
   ReferenceMatch,
   SplitPaymentRecord,
+  ReceiptBalanceInTx,
 } from '../../domain/ports/payment-repository.port';
+import { netCreditIn } from '../credit/prisma-plan-credit-reader';
+import { readPlanBalanceSnapshotIn } from '../allocations/prisma-plan-allocation.repository';
 import { Payment } from '../../domain/entities/payment.entity';
 import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
 import {
@@ -61,7 +71,7 @@ import {
   manualRatesStillMatch,
 } from './frozen-exchange-rate.mapper';
 import { CashPayment } from '../../domain/entities/cash-payment.entity';
-import { formatReceiptNumber } from '../../domain/receipt-number';
+import { receiptNumberOf } from '../../domain/receipt-number';
 import {
   SPLIT_PAYMENT_BALANCE_CHANGED,
   SPLIT_PAYMENT_BALANCE_CHANGED_MESSAGE,
@@ -88,6 +98,17 @@ import {
   methodRefOf,
   type MethodCatalog,
 } from '../../../payment-methods/domain/method-catalog';
+import {
+  adjustmentLinesOf,
+  ADJUSTMENT_LINE_SELECT,
+  insertPaymentAdjustments,
+} from './payment-adjustments.persistence';
+import {
+  PROOF_ALREADY_USED_MESSAGE,
+  type PaymentProofAttachment,
+} from '../../domain/payment-proof';
+import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
+import { toCents } from '../../../../shared/money/money';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -101,6 +122,10 @@ const PAYMENT_INCLUDE = {
   splitHead: { select: { receipt: RECEIPT_NUMBER_SELECT } },
   // DX-377: el nombre del medio de pago del catálogo.
   paymentMethod: { select: { name: true } },
+  // DX-516: sus ajustes por medio de pago, en orden.
+  methodAdjustments: ADJUSTMENT_LINE_SELECT,
+  // DX-389: solo si tiene comprobante (la clave del almacén no se lee).
+  proof: { select: { id: true } },
 } satisfies Prisma.PaymentInclude;
 
 type PrismaPayment = Prisma.PaymentGetPayload<{
@@ -140,15 +165,22 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
-function receiptNumberOf(
-  receipt: { seriesPrefix: string; number: number } | null,
-): string | null {
-  return receipt
-    ? formatReceiptNumber(receipt.seriesPrefix, receipt.number)
-    : null;
+/**
+ * DX-389: la violación del único de la subida (`payment_proofs_tenant_upload_key`).
+ * Se reconoce por el índice (su nombre, o sus campos `tenantId, uploadId` según
+ * lo que dé el motor), no por «cualquier único de la tabla»: otro índice futuro
+ * no se contaría como «ya está adjunto».
+ */
+export function isProofUploadReuse(error: unknown): boolean {
+  if (!isUniqueViolation(error)) return false;
+  const meta = (error as Prisma.PrismaClientKnownRequestError).meta ?? {};
+  const target = (meta as { target?: unknown }).target;
+  if (Array.isArray(target)) return target.includes('uploadId');
+  return JSON.stringify(meta).includes('payment_proofs_tenant_upload_key');
 }
 
 function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
+  const adjustments = adjustmentLinesOf(payment.methodAdjustments);
   return {
     id: payment.id,
     tenantId: payment.tenantId,
@@ -164,6 +196,7 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     paymentMethodName: payment.paymentMethod?.name ?? null,
     reference: payment.reference,
     duplicateReferenceReason: payment.duplicateReferenceReason,
+    externalInvoiceNumber: payment.externalInvoiceNumber,
     notes: payment.notes,
     createdById: payment.createdById,
     createdAt: payment.createdAt,
@@ -180,6 +213,9 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
       exchangeRateCurrency: payment.exchangeRateCurrency,
       frozenRate: frozenRateOf(payment),
     }),
+    adjustments,
+    collectedAmount: collectedAmount(payment.amount.toNumber(), adjustments),
+    hasProof: payment.proof !== null,
   };
 }
 
@@ -198,6 +234,8 @@ const CASH_PAYMENT_SELECT = {
   method: true,
   paymentMethodId: true,
   reference: true,
+  // DX-515: nº de la factura fiscal externa.
+  externalInvoiceNumber: true,
   notes: true,
   location: { select: { id: true, name: true } },
   plan: {
@@ -219,12 +257,44 @@ const CASH_PAYMENT_SELECT = {
   // DX-390: el cobro dividido y cuántas líneas tiene (la línea 1 también se
   // apunta a sí misma), aunque el filtro de la caja deje ver solo una.
   splitId: true,
-  splitHead: { select: { _count: { select: { splitLines: true } } } },
+  splitHead: {
+    select: {
+      _count: { select: { splitLines: true } },
+      receipt: RECEIPT_NUMBER_SELECT,
+    },
+  },
+  // DX-414: el recibo del abono (o el de la línea 1 de su cobro dividido).
+  receipt: RECEIPT_NUMBER_SELECT,
+  // DX-389: ¿tiene comprobante del cobro? (la clave no se lee).
+  proof: { select: { id: true } },
+  // DX-516: sus ajustes por medio de pago, en orden.
+  methodAdjustments: ADJUSTMENT_LINE_SELECT,
 } satisfies Prisma.PaymentSelect;
 
 type PrismaCashPayment = Prisma.PaymentGetPayload<{
   select: typeof CASH_PAYMENT_SELECT;
 }>;
+
+/**
+ * SEC-043: el abono cuenta en una caja aún abierta, por su caja o por un
+ * ajuste de esa caja (LATE_PAYMENT, VOID), o entrará en la próxima que se
+ * abra en su sede (ajuste pendiente, `sessionId` null).
+ */
+const IN_OPEN_CASH_SESSION = {
+  OR: [
+    { cashSession: { is: { status: CashSessionStatus.OPEN } } },
+    {
+      cashAdjustments: {
+        some: {
+          OR: [
+            { session: { is: { status: CashSessionStatus.OPEN } } },
+            { sessionId: null },
+          ],
+        },
+      },
+    },
+  ],
+} satisfies Prisma.PaymentWhereInput;
 
 function mapToCashRow(
   row: PrismaCashPayment,
@@ -247,6 +317,7 @@ function mapToCashPayment(
   timeZone: string,
   catalog: MethodCatalog,
 ): CashPayment {
+  const adjustments = adjustmentLinesOf(row.methodAdjustments);
   return {
     id: row.id,
     createdById: row.createdById,
@@ -257,6 +328,7 @@ function mapToCashPayment(
     method: row.method,
     paymentMethod: methodRefOf(catalog, row.paymentMethodId, row.method),
     reference: row.reference,
+    externalInvoiceNumber: row.externalInvoiceNumber,
     notes: row.notes,
     location: { id: row.location.id, name: row.location.name },
     // `Payment.patientId` es la copia desnormalizada del paciente del plan (o
@@ -274,6 +346,12 @@ function mapToCashPayment(
       : null,
     splitId: row.splitId,
     splitLines: row.splitHead?._count.splitLines ?? null,
+    receiptNumber: receiptNumberOf(
+      row.receipt ?? row.splitHead?.receipt ?? null,
+    ),
+    adjustments,
+    collectedAmount: collectedAmount(row.amount.toNumber(), adjustments),
+    hasProof: row.proof !== null,
   };
 }
 
@@ -458,7 +536,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // fuera; si aquí ya no vale, el abono queda «sin tasa» y el saldo no
         // lo cuenta, así que el recibo sale sin saldo (como sin tasa).
         line.targetBalance ??
-          (line.rateInvalidated ? null : input.receiptPlanBalance),
+          (line.rateInvalidated
+            ? null
+            : await this.balanceForReceipt(
+                tx,
+                input.treatmentPlanId,
+                [line.entity.id],
+                input.receiptBalanceInTx,
+                input.receiptPlanBalance,
+              )),
       );
       return { ...line.entity, receiptNumber };
     });
@@ -512,11 +598,32 @@ export class PrismaPaymentRepository implements PaymentRepository {
     const splitId = randomUUID();
     return this.prisma.runWithTenant(async (tx) => {
       if (input.balanceGuard) {
-        await this.assertPlanPaymentsUnchanged(
+        await this.assertPlanMovementsUnchanged(
           tx,
           input.lines[0]?.treatmentPlanId ?? null,
-          input.balanceGuard.planPaymentsSeen,
+          input.balanceGuard.planMovementsSeen,
         );
+      }
+      // DX-463 (L4): con el plan ya bloqueado, lo pendiente de AHORA.
+      const guardedPlanId = input.lines[0]?.treatmentPlanId;
+      if (input.excessGuardInTx && guardedPlanId) {
+        const tenantId = this.requireTenantId();
+        const snapshot = await readPlanBalanceSnapshotIn(
+          tx,
+          tenantId,
+          guardedPlanId,
+        );
+        if (!snapshot) throw new NotFoundException('Treatment plan not found');
+        await input.excessGuardInTx({
+          planId: guardedPlanId,
+          snapshot,
+          creditMovements: await netCreditIn(
+            tx,
+            tenantId,
+            guardedPlanId,
+            snapshot.plan.currency,
+          ),
+        });
       }
       const lines: InsertedLine[] = [];
       for (const [index, line] of input.lines.entries()) {
@@ -552,13 +659,25 @@ export class PrismaPaymentRepository implements PaymentRepository {
               paymentMethodName: l.entity.paymentMethodName,
               reference: l.entity.reference,
               equivalentAmount: l.equivalentAmount,
+              // DX-516: los ajustes de cada línea, solo si los tiene.
+              ...(l.entity.adjustments.length > 0
+                ? { adjustments: l.entity.adjustments }
+                : {}),
             })),
             planCurrency: head.planCurrency,
           },
         },
         // Como en `insert`: si la tasa de alguna línea ya no vale aquí, esa
         // línea queda «sin tasa» y el recibo sale sin saldo.
-        lines.some((l) => l.rateInvalidated) ? null : input.receiptPlanBalance,
+        lines.some((l) => l.rateInvalidated)
+          ? null
+          : await this.balanceForReceipt(
+              tx,
+              head.entity.treatmentPlanId,
+              lines.map((l) => l.entity.id),
+              input.receiptBalanceInTx,
+              input.receiptPlanBalance,
+            ),
       );
       return {
         splitId,
@@ -579,8 +698,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
   ): Promise<InsertedLine> {
     const tenantId = this.requireTenantId();
     // DB-014: el plan se vuelve a validar DENTRO de la transacción del
-    // INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
-    // compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
+    // INSERT, vivo y con el paciente del abono, y queda bloqueado (FOR NO KEY
+    // UPDATE, DX-182) hasta el COMMIT: nadie puede retirarlo entre la
     // comprobación y el alta. La FK compuesta no mira `deletedAt`.
     //
     // DX-109 (BE-013): en el MISMO SELECT bloqueante se lee el estado: un
@@ -618,7 +737,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
     const freeze =
       frozen !== null &&
       frozen.currency === targetCurrency &&
-      frozen.date === civilDateIn(paidAt, timeZone) &&
+      (frozen.quotedOn ?? frozen.date) === civilDateIn(paidAt, timeZone) &&
       (await manualRatesStillMatch(tx, tenantId, input.currency, frozen))
         ? frozen
         : null;
@@ -659,19 +778,63 @@ export class PrismaPaymentRepository implements PaymentRepository {
       },
       include: { paymentMethod: { select: { name: true } } },
     });
+    // DX-516: los ajustes del medio, congelados con el abono (misma
+    // transacción, antes del recibo y del ajuste de caja tardío).
+    const methodAdjustments = await insertPaymentAdjustments(
+      tx,
+      { tenantId, paymentId: created.id },
+      input.adjustments ?? [],
+    );
+    // DX-389: el comprobante nace con el abono, en la misma transacción.
+    const proof = input.proof
+      ? await tx.paymentProof
+          .create({
+            data: {
+              tenantId,
+              paymentId: created.id,
+              uploadId: input.proof.uploadId,
+              key: input.proof.key,
+              mime: input.proof.mime,
+              size: input.proof.size,
+              sha256: input.proof.sha256,
+              name: input.proof.name,
+              createdById: input.createdById ?? null,
+            },
+            select: { id: true },
+          })
+          // La subida ya respalda otro abono (único por clínica): 400 en
+          // español, y la transacción entera se deshace.
+          .catch((error: unknown) => {
+            if (isProofUploadReuse(error)) {
+              throw new BadRequestException(PROOF_ALREADY_USED_MESSAGE);
+            }
+            throw error;
+          })
+      : null;
+    const entity = mapToEntity(
+      {
+        ...created,
+        receipt: null,
+        splitHead: null,
+        methodAdjustments,
+        proof: input.proof ? { id: proof?.id ?? '' } : null,
+      },
+      timeZone,
+    );
     // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
-    // caja abierta (o pendiente), con enlace a la cerrada.
+    // caja abierta (o pendiente), con enlace a la cerrada. DX-516: por lo
+    // cobrado (importe ± ajustes), que es lo que entra en el cajón.
     if (cash.late && created.createdById) {
       await recordLatePaymentAdjustment(
         tx,
-        { ...created, createdById: created.createdById },
+        {
+          ...created,
+          amount: new Prisma.Decimal(entity.collectedAmount),
+          createdById: created.createdById,
+        },
         cash.late,
       );
     }
-    const entity = mapToEntity(
-      { ...created, receipt: null, splitHead: null },
-      timeZone,
-    );
     // DX-051 (R4): la base del abono nace con él si se convirtió a la moneda
     // que el plan tiene con su fila bloqueada y con el día civil con que se
     // guardó; el plan queda encolado y el reparto corre tras el COMMIT. Si
@@ -726,15 +889,52 @@ export class PrismaPaymentRepository implements PaymentRepository {
         paidAt: created.paidAt,
         paidOn: entity.paidOn,
         createdById: created.createdById,
+        adjustments: entity.adjustments,
       },
     };
   }
 
   /**
+   * DX-182: el saldo del plan tras el abono para su recibo, calculado aquí,
+   * con el plan bloqueado por esta transacción (`lockPlan`) y el abono y su
+   * base ya insertados: los abonos al mismo plan se ponen en fila en ese
+   * bloqueo, así que la foto incluye exactamente los anteriores y este. Sin
+   * `compute` (o sin plan: saldo migrado) vale el calculado fuera.
+   */
+  private async balanceForReceipt(
+    tx: Prisma.TransactionClient,
+    planId: string | null | undefined,
+    paymentIds: readonly string[],
+    compute: ReceiptBalanceInTx | undefined,
+    fallback: ReceiptPlanBalance | null,
+  ): Promise<ReceiptPlanBalance | null> {
+    if (!compute || !planId) return fallback;
+    const tenantId = this.requireTenantId();
+    const snapshot = await readPlanBalanceSnapshotIn(tx, tenantId, planId);
+    if (!snapshot) return null;
+    return compute({
+      planId,
+      paymentIds,
+      snapshot,
+      creditMovements: await netCreditIn(
+        tx,
+        tenantId,
+        planId,
+        snapshot.plan.currency,
+      ),
+    });
+  }
+
+  /**
    * DB-014 / DX-109: el plan se vuelve a validar DENTRO de la transacción del
-   * INSERT, vivo y con el paciente del abono, y queda bloqueado en modo
-   * compartido (FOR SHARE) hasta el COMMIT: nadie puede retirarlo entre la
-   * comprobación y el alta (la FK compuesta no mira `deletedAt`). En el MISMO
+   * INSERT, vivo y con el paciente del abono, y queda bloqueado hasta el
+   * COMMIT: nadie puede retirarlo entre la comprobación y el alta (la FK
+   * compuesta no mira `deletedAt`). DX-182: FOR NO KEY UPDATE, no FOR SHARE:
+   * FOR SHARE no pone en fila a dos abonos al mismo plan, y el saldo del
+   * recibo de cada uno tiene que incluir a los anteriores. Es el primer
+   * bloqueo de la transacción (el orden «plan primero» de todo escritor de
+   * abonos, R6), así que no hay mejora de SHARE a UPDATE entre dos abonos que
+   * se crucen; no choca con el FOR KEY SHARE de las FK hacia el plan. En el MISMO
    * SELECT se lee el estado: un plan rechazado o cancelado no admite abonos
    * (409). COMPLETED sí. Devuelve la moneda del plan (DX-051: la de la base).
    */
@@ -749,7 +949,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
        WHERE "id" = ${input.treatmentPlanId}::uuid
          AND "patientId" = ${input.patientId}::uuid
          AND "deletedAt" IS NULL
-       FOR SHARE`;
+       FOR NO KEY UPDATE`;
     if (!plan) {
       throw new NotFoundException('Treatment plan not found');
     }
@@ -793,10 +993,10 @@ export class PrismaPaymentRepository implements PaymentRepository {
          AND "openingBalanceId" = ${input.openingBalanceId}::uuid
          AND "currency" = ${balance.currency}
          AND "deletedAt" IS NULL`;
-    const amountCents = Math.round(balance.amount.toNumber() * 100);
-    const paidCents = Math.round((paid?.toNumber() ?? 0) * 100);
+    const amountCents = toCents(balance.amount.toNumber());
+    const paidCents = toCents(paid?.toNumber() ?? 0);
     const pendingCents = amountCents - paidCents;
-    const thisCents = Math.round(input.amount * 100);
+    const thisCents = toCents(input.amount);
     if (thisCents > pendingCents) {
       throw new BadRequestException(
         pendingCents <= 0
@@ -805,6 +1005,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
               pendingCents / 100,
               balance.currency,
               await this.locationFormatIn(tx, balance.locationId),
+              await this.currencyTextsIn(tx),
             ),
       );
     }
@@ -820,6 +1021,21 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return this.prisma.runWithTenant((tx) =>
       this.locationFormatIn(tx, locationId),
     );
+  }
+
+  clinicCurrencyTexts(): Promise<CurrencyTexts> {
+    return this.prisma.runWithTenant((tx) => this.currencyTextsIn(tx));
+  }
+
+  /** DX-517-bis: el texto propio de cada moneda de la clínica, solo para pintar. */
+  private async currencyTextsIn(
+    tx: Prisma.TransactionClient,
+  ): Promise<CurrencyTexts> {
+    const tenant = await tx.tenant.findUnique({
+      where: { id: this.requireTenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
   }
 
   /** G1-B: formato de una sede (la del dato, R12), solo para pintar (I4). */
@@ -851,6 +1067,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
     });
   }
 
+  async siteToday(now: Date): Promise<string | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const locationId = await this.tenantContext.writeLocationId(tx);
+      const zones = await loadLocationZones(tx, tenantId, [locationId]);
+      const timeZone = zones.configured.get(locationId);
+      return timeZone === undefined ? null : civilDateIn(now, timeZone);
+    });
+  }
+
   async findById(id: string): Promise<Payment | null> {
     return this.prisma.runWithTenant(async (tx) =>
       this.toEntity(
@@ -861,6 +1087,43 @@ export class PrismaPaymentRepository implements PaymentRepository {
         }),
       ),
     );
+  }
+
+  async findProof(paymentId: string): Promise<PaymentProofRecord | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // RLS acota a la clínica: el abono de otra no existe aquí. Un abono
+      // anulado conserva su comprobante (es evidencia para conciliar).
+      const row = await tx.paymentProof.findFirst({
+        where: { tenantId, paymentId },
+        include: {
+          payment: { select: { patientId: true, locationId: true } },
+        },
+      });
+      if (!row) return null;
+      return {
+        paymentId: row.paymentId,
+        patientId: row.payment.patientId,
+        locationId: row.payment.locationId,
+        attachment: {
+          uploadId: row.uploadId,
+          key: row.key,
+          mime: row.mime as PaymentProofAttachment['mime'],
+          size: row.size,
+          sha256: row.sha256,
+          name: row.name,
+        },
+      };
+    });
+  }
+
+  async proofKeyInUse(key: string): Promise<boolean> {
+    const count = await this.prisma.runWithTenant((tx) =>
+      tx.paymentProof.count({
+        where: { tenantId: this.requireTenantId(), key },
+      }),
+    );
+    return count > 0;
   }
 
   async findByIdempotencyKey(
@@ -885,15 +1148,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
    * Revisión DX-390: la guarda del saldo a favor sin confirmar. Bloquea el
    * plan FOR NO KEY UPDATE ANTES que nada (el primer bloqueo de la
    * transacción, el mismo orden «plan primero» de todo escritor de abonos, R6):
-   * espera a cualquier abono en curso al plan (que lo tiene FOR SHARE) y pone
+   * espera a cualquier abono en curso al plan (que lo tiene FOR NO KEY UPDATE, DX-182) y pone
    * en fila otro cobro dividido. Con el plan bloqueado, la cuenta ve todo lo
    * confirmado: si creció desde la lectura de lo pendiente, 409. NO KEY: no
    * choca con el FOR KEY SHARE de las FK que apuntan al plan.
    */
-  private async assertPlanPaymentsUnchanged(
+  private async assertPlanMovementsUnchanged(
     tx: Prisma.TransactionClient,
     treatmentPlanId: string | null,
-    planPaymentsSeen: number,
+    planMovementsSeen: number,
   ): Promise<void> {
     if (!treatmentPlanId) return;
     const tenantId = this.requireTenantId();
@@ -901,10 +1164,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
       SELECT 1 FROM "treatment_plans"
        WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${treatmentPlanId}::uuid
          FOR NO KEY UPDATE`;
-    const count = await tx.payment.count({
-      where: { tenantId, treatmentPlanId },
-    });
-    if (count !== planPaymentsSeen) {
+    const count = await this.planMovements(tx, treatmentPlanId);
+    if (count !== planMovementsSeen) {
       throw new ConflictException({
         statusCode: 409,
         error: 'Conflict',
@@ -914,13 +1175,30 @@ export class PrismaPaymentRepository implements PaymentRepository {
     }
   }
 
-  async countPlanPayments(treatmentPlanId: string): Promise<number> {
-    // Vivos y anulados (un abono nunca se borra): la cuenta solo crece.
+  async countPlanMovements(treatmentPlanId: string): Promise<number> {
     return this.prisma.runWithTenant((tx) =>
-      tx.payment.count({
-        where: { tenantId: this.requireTenantId(), treatmentPlanId },
-      }),
+      this.planMovements(tx, treatmentPlanId),
     );
+  }
+
+  /**
+   * Abonos (vivos y anulados: un abono nunca se borra) más asientos de saldo
+   * a favor del plan (traspasos y devoluciones, DX-253: tampoco se borran).
+   * DX-463: un traspaso al plan a la vez que un cobro cambia lo pendiente sin
+   * ser un abono, así que también cuenta; la cuenta solo crece.
+   */
+  private async planMovements(
+    tx: Prisma.TransactionClient,
+    treatmentPlanId: string,
+  ): Promise<number> {
+    const tenantId = this.requireTenantId();
+    const payments = await tx.payment.count({
+      where: { tenantId, treatmentPlanId },
+    });
+    const entries = await tx.patientCreditEntry.count({
+      where: { tenantId, treatmentPlanId },
+    });
+    return payments + entries;
   }
 
   async findSplit(splitId: string): Promise<SplitPaymentRecord | null> {
@@ -1091,6 +1369,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
       );
       return {
         id: payment.id,
+        locationId: payment.locationId,
         createdById: payment.createdById,
         createdAt: payment.createdAt,
         timeZone: timeZoneOf(payment.locationId),
@@ -1238,16 +1517,31 @@ export class PrismaPaymentRepository implements PaymentRepository {
         // en esta misma foto; ver `periodScope` para los índices que la sirven.
         const scope = await this.periodScope(tx, params);
         const medium = params.paymentMethod;
+        // SEC-043: el ajuste de la clínica leído en esta misma foto.
+        const blindHidden =
+          params.blindViewer === true &&
+          (
+            await tx.tenant.findUniqueOrThrow({
+              where: { id: this.requireTenantId() },
+              select: { cashBlindClose: true },
+            })
+          ).cashBlindClose;
         const where: Prisma.PaymentWhereInput = {
           deletedAt: null,
           ...scope.where,
           ...(params.method ? { method: params.method } : {}),
-          // DX-395: el medio, y si es inicial también los abonos sin medio
-          // de su método (réplicas anteriores), como los nombra el resumen.
+          // DX-515: con o sin nº de factura externa (para cuadrar lo facturado).
+          ...(params.externalInvoice === 'WITH'
+            ? { externalInvoiceNumber: { not: null } }
+            : params.externalInvoice === 'WITHOUT'
+              ? { externalInvoiceNumber: null }
+              : {}),
           // En AND: `scope.where` ya trae su propio OR (una rama por sede).
-          ...(medium
-            ? {
-                AND: [
+          AND: [
+            // DX-395: el medio, y si es inicial también los abonos sin medio
+            // de su método (réplicas anteriores), como los nombra el resumen.
+            ...(medium
+              ? [
                   {
                     OR: [
                       { paymentMethodId: medium.id },
@@ -1261,18 +1555,25 @@ export class PrismaPaymentRepository implements PaymentRepository {
                         : []),
                     ],
                   },
-                ],
-              }
-            : {}),
+                ]
+              : []),
+          ],
         };
+        // SEC-043: el resumen no suma lo que cuenta en una caja abierta de
+        // cualquiera (también la de otra recepcionista, que podría pasarle la
+        // cifra): el abono de esa caja, el que llegó tarde (LATE_PAYMENT) y el
+        // anulado que la descuenta (VOID). Las filas sí salen, sin importe.
+        const summaryWhere: Prisma.PaymentWhereInput = blindHidden
+          ? { AND: [where, { NOT: IN_OPEN_CASH_SESSION }] }
+          : where;
 
         // Página, conteo, agregado y sede en la MISMA transacción REPEATABLE
         // READ: todas las sentencias ven la misma foto, así que un abono
         // registrado o anulado a mitad de camino no puede dejar un total que
         // describa otras filas que las devueltas (en READ COMMITTED, el nivel
         // por defecto, cada sentencia vería su propia foto).
-        const [rows, total, groups, scopeLocation, methods] = await Promise.all(
-          [
+        const [rows, total, groups, scopeLocation, methods, adjustmentGroups] =
+          await Promise.all([
             tx.payment.findMany({
               where,
               select: CASH_PAYMENT_SELECT,
@@ -1292,7 +1593,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
             tx.payment.count({ where }),
             tx.payment.groupBy({
               by: ['currency', 'method', 'paymentMethodId'],
-              where,
+              where: summaryWhere,
               _sum: { amount: true },
               _count: { _all: true },
               orderBy: [
@@ -1314,16 +1615,39 @@ export class PrismaPaymentRepository implements PaymentRepository {
             tx.clinicPaymentMethod.findMany({
               select: { id: true, name: true, legacyMethod: true },
             }),
-          ],
-        );
+            // DX-516: los ajustes de esos mismos abonos, por moneda y tipo.
+            tx.paymentAdjustment.groupBy({
+              by: ['currency', 'type'],
+              where: { payment: summaryWhere },
+              _sum: { amount: true },
+              _count: { _all: true },
+              orderBy: [{ currency: 'asc' }, { type: 'asc' }],
+            }),
+          ]);
         const catalog = catalogOf(methods);
+        // SEC-043: qué filas de la página cuentan en una caja abierta (el
+        // caso de uso les quita el importe), en esta misma foto.
+        const inOpenSession = blindHidden
+          ? new Set(
+              (
+                await tx.payment.findMany({
+                  where: {
+                    id: { in: rows.map((row) => row.id) },
+                    ...IN_OPEN_CASH_SESSION,
+                  },
+                  select: { id: true },
+                })
+              ).map((row) => row.id),
+            )
+          : new Set<string>();
 
         // La zona de cada sede ya se leyó para el período, en la misma foto:
         // el `canVoid` de cada fila usa el mismo "hoy" que la anulación.
         return {
-          items: rows.map((row) =>
-            mapToCashRow(row, scope.timeZoneOf, catalog),
-          ),
+          items: rows.map((row) => ({
+            ...mapToCashRow(row, scope.timeZoneOf, catalog),
+            inOpenCashSession: inOpenSession.has(row.id),
+          })),
           total,
           groups: groups.map((group) => ({
             currency: group.currency,
@@ -1336,7 +1660,14 @@ export class PrismaPaymentRepository implements PaymentRepository {
             total: group._sum.amount?.toNumber() ?? 0,
             count: group._count._all,
           })),
+          adjustmentGroups: adjustmentGroups.map((group) => ({
+            currency: group.currency,
+            type: group.type,
+            total: group._sum.amount?.toNumber() ?? 0,
+            count: group._count._all,
+          })),
           scopeLocation,
+          blindHidden,
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

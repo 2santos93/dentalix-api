@@ -1,3 +1,4 @@
+import { readClinicFiscal } from '../src/shared/clinic/clinic-fiscal';
 import { randomUUID } from 'node:crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -16,7 +17,8 @@ import {
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
+  REGIONAL_MADRID_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   locationBody,
@@ -117,6 +119,7 @@ async function hashOfStoredRow(
   });
   const input: StoredPrescriptionHashInput = {
     ...row,
+    clinicFiscal: readClinicFiscal(row.clinicFiscal),
     dispensationDate: dayOnly(row.dispensationDate),
     validUntil: dayOnly(row.validUntil),
     allergyMatches:
@@ -360,23 +363,23 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
   describe('emitir', () => {
     it('issuer carries the deprecated legacy country of its location (phase 1, old web)', async () => {
       // DX-312 (R6): la sede principal es de Nueva York, fuera de los dos
-      // valores legados, y el emisor da NULL; una sede de Bogotá da el suyo.
+      // valores legados, y el emisor da NULL; una sede con zona da el suyo.
       const main = await as(clinicA, dentistA.token)
         .get('/prescriptions/issuer')
         .expect(200);
       expect((main.body as { country: unknown }).country).toBeNull();
-      const bogota = (
+      const madrid = (
         await as(clinicA)
           .post(
             '/locations',
-            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            locationBody(REGIONAL_MADRID_FIXTURE, {
               name: 'Sede emisor',
               address: 'Sede emisor',
             }),
           )
           .expect(201)
       ).body as { id: string };
-      const res = await as(clinicA, dentistA.token, bogota.id)
+      const res = await as(clinicA, dentistA.token, madrid.id)
         .get('/prescriptions/issuer')
         .expect(200);
       const issuerBody = res.body as { locationId: string; country: unknown };
@@ -870,14 +873,16 @@ describe('Recetas — /patients/:id/prescriptions, /prescriptions, /prescription
         days: 30,
       });
       // Fase 1 (spec D1, R6): la fila sigue llevando las letras y la
-      // proyección del país de la sede para las réplicas anteriores: CO para
-      // una sede de Bogotá y NULL para Nueva York y Tokio, fuera de los dos
-      // valores de la columna antigua.
-      const siteC = await createSite(REGIONAL_BOGOTA_FIXTURE, 'Sede C');
+      // proyección del país de la sede para las réplicas anteriores: ES para
+      // una sede de Madrid y NULL para Nueva York, Tokio y Caracas, fuera de
+      // los dos valores de la columna antigua.
+      const siteC = await createSite(REGIONAL_CARACAS_FIXTURE, 'Sede C');
+      const siteD = await createSite(REGIONAL_MADRID_FIXTURE, 'Sede D');
       for (const [site, siteCode, projected] of [
         [siteA, REGIONAL_NEW_YORK_FIXTURE.country, null],
         [siteB, REGIONAL_TOKYO_FIXTURE.country, null],
-        [siteC, REGIONAL_BOGOTA_FIXTURE.country, 'CO'],
+        [siteC, REGIONAL_CARACAS_FIXTURE.country, null],
+        [siteD, REGIONAL_MADRID_FIXTURE.country, 'ES'],
       ] as const) {
         const res = await issueAt(site, noDocA).expect(201);
         const rx = res.body as RxBody;

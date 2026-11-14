@@ -410,10 +410,12 @@ describe('Elegibilidad para asignar un convenio (e2e, SEC-047)', () => {
 
   it('reproducción de la auditoría: ni el ASSISTANT asigna el 100 % sin cobertura ni el DENTIST presupuesta a 0', async () => {
     const patient = await createPatient(clinic, 'Conocido');
+    // DX-513: el plan en VES, la moneda de las sedes (y del catálogo): en otra
+    // moneda, bajar del catálogo no sería un descuento.
     const plan = await post(
       clinic,
       `/api/v1/patients/${patient}/treatment-plans`,
-      { currency: 'COP' },
+      { currency: 'VES' },
       tokens.DENTIST,
     );
     const item = (body: Record<string, unknown>) =>

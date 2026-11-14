@@ -26,8 +26,19 @@ const CTX: AuditRequestContext = {
   userAgent: 'jest',
 };
 
-function repoWith(retention: PatientRetentionState, pendingAppointments = 0) {
-  const state: PatientArchiveState = { ...retention, pendingAppointments };
+function repoWith(
+  retention: Partial<PatientRetentionState>,
+  pendingAppointments = 0,
+) {
+  const state: PatientArchiveState = {
+    lastAttentionAt: null,
+    retentionExtended: 'NONE',
+    retentionFloorUntil: null,
+    years: 15,
+    format: { id: 'loc-1', locale: 'es-VE', hourCycle: 'h23' },
+    ...retention,
+    pendingAppointments,
+  };
   const archived: string[] = [];
   const revocations: { now: Date; ctx: AuditRequestContext }[] = [];
   const repo = {
@@ -128,12 +139,14 @@ describe('PartiallySuppressPatientUseCase', () => {
       repo as unknown as PatientRepository,
       clock,
     ).execute('p1', {
-      reason: '  Reclamo del titular de los datos  ',
+      reason: '  Solicitud del paciente sobre sus datos  ',
       actorId: 'u1',
     });
     expect(repo.partiallySuppress).toHaveBeenCalledWith(
       'p1',
-      expect.objectContaining({ reason: 'Reclamo del titular de los datos' }),
+      expect.objectContaining({
+        reason: 'Solicitud del paciente sobre sus datos',
+      }),
     );
   });
 
@@ -146,7 +159,7 @@ describe('PartiallySuppressPatientUseCase', () => {
       new PartiallySuppressPatientUseCase(
         repo as unknown as PatientRepository,
         clock,
-      ).execute('p1', { reason: 'Reclamo del titular', actorId: 'u1' }),
+      ).execute('p1', { reason: 'Solicitud del paciente', actorId: 'u1' }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
 });
@@ -161,19 +174,41 @@ describe('SetRetentionExtensionUseCase', () => {
       repo as unknown as PatientRepository,
     ).execute('p1', {
       value: 'PERMANENT',
-      reason: ' Víctima de DIH (Ley 1448) ',
+      reason: ' Caso especial de la clínica ',
       actorId: 'u1',
     });
     expect(repo.setRetentionExtension).toHaveBeenCalledWith('p1', {
       value: 'PERMANENT',
-      reason: 'Víctima de DIH (Ley 1448)',
+      reason: 'Caso especial de la clínica',
       actorId: 'u1',
     });
   });
 });
 
+describe('ArchivePatientUseCase con el plazo de la clínica (DX-330)', () => {
+  it('una atención vencida con 15 no se archiva con 20 ni con suelo', async () => {
+    const lastAttentionAt = new Date('2010-06-15T00:00:00Z');
+    for (const retention of [
+      { lastAttentionAt, years: 20 },
+      {
+        lastAttentionAt,
+        retentionFloorUntil: new Date('2030-06-15T00:00:00Z'),
+      },
+    ]) {
+      const { repo, archived } = repoWith(retention);
+      await expect(
+        new ArchivePatientUseCase(
+          repo as unknown as PatientRepository,
+          clock,
+        ).execute('p1', CTX),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(archived).toEqual([]);
+    }
+  });
+});
+
 describe('ListRetentionExpiringUseCase', () => {
-  it('calcula los cortes de 15 y 30 años con el horizonte y topa la página', async () => {
+  it('pasa el día siguiente al horizonte, sin años, y topa la página', async () => {
     const { repo } = repoWith({
       lastAttentionAt: null,
       retentionExtended: 'NONE',
@@ -183,8 +218,7 @@ describe('ListRetentionExpiringUseCase', () => {
       clock,
     ).execute({ withinDays: 30, page: 2, pageSize: 500 });
     expect(repo.listRetentionExpiring).toHaveBeenCalledWith({
-      noneBefore: new Date('2011-11-16T00:00:00.000Z'),
-      doubleBefore: new Date('1996-11-16T00:00:00.000Z'),
+      horizonNext: new Date('2026-11-16T00:00:00.000Z'),
       skip: 50,
       take: 50,
     });

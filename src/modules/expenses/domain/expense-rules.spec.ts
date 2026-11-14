@@ -14,7 +14,6 @@ import {
   VOID_REASON_MESSAGE,
   expenseEditDenial,
   expenseStatus,
-  formatMoney,
   paymentCapDenial,
   toCents,
   validateAmount,
@@ -29,6 +28,13 @@ import {
   FROM_CASH_PAID_ON_MESSAGE,
   validateFromCashPayment,
 } from './expense-rules';
+import { expenseMoneyText } from './expense-money';
+
+// Datos de test: una sede de Venezuela (VES) y otras dos con formatos distintos.
+const venezuela = expenseMoneyText(
+  { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' },
+  'VES',
+);
 
 const messageOf = (fn: () => unknown): string | null => {
   try {
@@ -57,13 +63,6 @@ describe('reglas de un gasto (DX-274)', () => {
       expect(toCents(0.29)).toBe(29);
       expect(toCents(1.15)).toBe(115);
       expect(toCents(150000.1)).toBe(15000010);
-    });
-
-    it('da formato «1.234,50 COP»: miles con punto y coma solo con céntimos', () => {
-      expect(formatMoney(15000000, 'COP')).toBe('150.000 COP');
-      expect(formatMoney(123450, 'COP')).toBe('1.234,50 COP');
-      expect(formatMoney(5, 'USD')).toBe('0,05 USD');
-      expect(formatMoney(0, 'USD')).toBe('0 USD');
     });
   });
 
@@ -205,7 +204,7 @@ describe('reglas de un gasto (DX-274)', () => {
         amountCents: 15000000,
         liveCents,
         paymentCents,
-        currency: 'COP',
+        moneyText: venezuela,
       });
 
     it('admite hasta lo pendiente, justo', () => {
@@ -217,14 +216,104 @@ describe('reglas de un gasto (DX-274)', () => {
       const denial = cap(10000000, 5000001);
       expect(denial?.kind).toBe('INVALID');
       expect(denial?.message).toBe(
-        'El pago supera lo pendiente del gasto (50.000 COP).',
+        'El pago supera lo pendiente del gasto (VES\u00a050.000,00).',
       );
     });
 
     it('con todo pagado, lo pendiente es 0', () => {
       expect(cap(15000000, 1)?.message).toBe(
-        'El pago supera lo pendiente del gasto (0 COP).',
+        'El pago supera lo pendiente del gasto (VES\u00a00,00).',
       );
+    });
+  });
+
+  describe('importes con el formato de la sede (DX-354)', () => {
+    const capWith = (
+      location: { locale: string; hourCycle: string },
+      currency: string,
+    ) =>
+      paymentCapDenial({
+        amountCents: 123450,
+        liveCents: 0,
+        paymentCents: 123451,
+        moneyText: expenseMoneyText({ id: 'loc-1', ...location }, currency),
+      })?.message;
+
+    it('de-DE / EUR: «1.234,50 EUR»', () => {
+      expect(capWith({ locale: 'de-DE', hourCycle: 'h23' }, 'EUR')).toBe(
+        'El pago supera lo pendiente del gasto (1.234,50\u00a0EUR).',
+      );
+    });
+
+    it('en-US / USD: «USD 1,234.50», con el código y nunca «$»', () => {
+      const message = capWith({ locale: 'en-US', hourCycle: 'h12' }, 'USD');
+      expect(message).toBe(
+        'El pago supera lo pendiente del gasto (USD\u00a01,234.50).',
+      );
+      expect(message).not.toContain('$');
+    });
+
+    // DX-517-quater: el texto propio de la moneda de la clínica en vez del código.
+    it('con texto propio de la moneda: «Bs. 1.234,50», sin el código', () => {
+      const money = expenseMoneyText(
+        { id: 'loc-1', locale: 'es-VE', hourCycle: 'h12' },
+        'VES',
+        { VES: 'Bs.' },
+      );
+      expect(
+        paymentCapDenial({
+          amountCents: 123450,
+          liveCents: 0,
+          paymentCents: 123451,
+          moneyText: money,
+        })?.message,
+      ).toBe('El pago supera lo pendiente del gasto (Bs.\u00a01.234,50).');
+      expect(
+        expenseEditDenial({
+          current: {
+            amountCents: 10000,
+            locationId: 'loc-1',
+            currency: 'VES',
+            voided: false,
+          },
+          patch: { amountCents: 100 },
+          liveCents: 5000,
+          paymentCount: 1,
+          moneyText: money,
+        })?.message,
+      ).toBe('El importe no puede ser menor a lo ya pagado (Bs.\u00a050,00).');
+      // Una moneda sin texto sigue con el código.
+      expect(
+        expenseMoneyText(
+          { id: 'loc-1', locale: 'en-US', hourCycle: 'h12' },
+          'USD',
+          { VES: 'Bs.' },
+        )(5000),
+      ).toBe('USD\u00a050.00');
+    });
+
+    it('sede sin formato: 409 LOCATION_LOCALE_REQUIRED solo al escribir el importe', () => {
+      const money = expenseMoneyText(
+        { id: 'loc-1', locale: null, hourCycle: null },
+        'USD',
+      );
+      // Dentro del tope no hay mensaje: no se pide el formato.
+      expect(
+        paymentCapDenial({
+          amountCents: 100,
+          liveCents: 0,
+          paymentCents: 100,
+          moneyText: money,
+        }),
+      ).toBeNull();
+      expect(() =>
+        paymentCapDenial({
+          amountCents: 100,
+          liveCents: 0,
+          paymentCents: 101,
+          moneyText: money,
+        }),
+      ).toThrow('Configura el formato regional y el reloj de la sede');
     });
   });
 
@@ -232,7 +321,7 @@ describe('reglas de un gasto (DX-274)', () => {
     const current = {
       amountCents: 10000,
       locationId: 'loc-1',
-      currency: 'COP',
+      currency: 'VES',
       voided: false,
     };
     const edit = (
@@ -246,7 +335,7 @@ describe('reglas de un gasto (DX-274)', () => {
         patch,
         liveCents,
         paymentCount,
-        currency: 'COP',
+        moneyText: venezuela,
       });
 
     it('un gasto anulado no se edita', () => {
@@ -265,7 +354,7 @@ describe('reglas de un gasto (DX-274)', () => {
       );
       expect(edit({ currency: 'USD' }, 0, 1)?.kind).toBe('CONFLICT');
       // El mismo valor no es un cambio.
-      expect(edit({ locationId: 'loc-1', currency: 'COP' }, 0, 1)).toBeNull();
+      expect(edit({ locationId: 'loc-1', currency: 'VES' }, 0, 1)).toBeNull();
     });
 
     it('el importe cambia con pagos pero nunca por debajo de lo pagado', () => {
@@ -274,7 +363,7 @@ describe('reglas de un gasto (DX-274)', () => {
       const denial = edit({ amountCents: 5999 }, 6000, 1);
       expect(denial?.kind).toBe('CONFLICT');
       expect(denial?.message).toBe(
-        'El importe no puede ser menor a lo ya pagado (60 COP).',
+        'El importe no puede ser menor a lo ya pagado (VES\u00a060,00).',
       );
     });
 

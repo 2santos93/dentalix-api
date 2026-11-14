@@ -1,3 +1,4 @@
+import { EMPTY_CLINIC_FISCAL } from '../../../../shared/clinic/clinic-fiscal';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import {
@@ -11,17 +12,28 @@ import {
   AccountStatementRepository,
 } from '../../domain/ports/account-statement-repository.port';
 import type { StatementNoticeData } from '../../domain/ports/statement-family-repository.port';
+import type { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 
-// 2026-03-01 10:00 en Bogotá (UTC-5).
-const NOW = new Date('2026-03-01T15:00:00.000Z');
+// 2026-03-01 10:00 en la zona de la sede (UTC-4).
+const NOW = new Date('2026-03-01T14:00:00.000Z');
 const ADMIN: VoidActor = { userId: 'u-admin', role: ClinicRole.ADMIN };
 const RECEPTION: VoidActor = { userId: 'u-recep', role: ClinicRole.RECEPTION };
 // Alta de los abonos del fixture: hoy por la mañana en la sede.
-const CREATED_TODAY = new Date('2026-03-01T13:00:00.000Z');
+const CREATED_TODAY = new Date('2026-03-01T12:00:00.000Z');
+
+// Sin saldos conocidos el cálculo usa sus propias cifras (camino de la cartera).
+const noPlanBalances = {
+  computeMany: () => Promise.resolve(new Map()),
+} as unknown as GetPlanBalanceUseCase;
 
 function data(): AccountStatementData {
   return {
-    clinic: { name: 'Clínica Uno', logoUrl: null },
+    clinic: { name: 'Clínica Uno', logoUrl: null, fiscal: EMPTY_CLINIC_FISCAL },
+    regional: {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
     patient: {
       id: 'p-1',
       firstName: 'Ana',
@@ -30,12 +42,13 @@ function data(): AccountStatementData {
       docTypeLabel: null,
       docNumber: '123',
     },
+    planBalances: [],
     snapshot: {
       plans: [
         {
           id: 'tp-1',
           status: 'ACCEPTED',
-          currency: 'COP',
+          currency: 'USD',
           createdAt: new Date('2026-01-01'),
           billable: 1000,
         },
@@ -45,7 +58,7 @@ function data(): AccountStatementData {
           id: 'pay-1',
           treatmentPlanId: 'tp-1',
           amount: 100,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date('2026-01-10T00:00:00.000Z'),
           method: 'CASH',
           paymentMethod: null,
@@ -53,7 +66,7 @@ function data(): AccountStatementData {
           location: { id: 'l-1', name: 'Sede' },
           createdById: 'u-recep',
           createdAt: CREATED_TODAY,
-          timeZone: 'America/Bogota',
+          timeZone: 'America/Caracas',
           voidedAt: null,
           voidedBy: null,
           voidReason: null,
@@ -62,7 +75,7 @@ function data(): AccountStatementData {
           id: 'pay-2',
           treatmentPlanId: 'tp-1',
           amount: 200,
-          currency: 'COP',
+          currency: 'USD',
           paidAt: new Date('2026-02-10T00:00:00.000Z'),
           method: 'CARD',
           paymentMethod: null,
@@ -70,7 +83,7 @@ function data(): AccountStatementData {
           location: { id: 'l-1', name: 'Sede' },
           createdById: 'u-recep',
           createdAt: CREATED_TODAY,
-          timeZone: 'America/Bogota',
+          timeZone: 'America/Caracas',
           voidedAt: null,
           voidedBy: null,
           voidReason: null,
@@ -92,6 +105,7 @@ function makeUseCase(
   const repo: AccountStatementRepository = {
     load,
     loadBillablePlans: jest.fn(),
+    loadRegional: () => Promise.resolve(null),
   };
   const uc = new GetAccountStatementUseCase(
     repo,
@@ -101,6 +115,7 @@ function makeUseCase(
       loadFamily: jest.fn(),
     },
     names,
+    noPlanBalances,
   );
   return {
     load,
@@ -133,6 +148,16 @@ describe('GetAccountStatementUseCase', () => {
     expect(out.range).toEqual({ from: null, to: null });
     expect(out.summary[0]).toMatchObject({ budgeted: 1000, paid: 300 });
     expect(out.movements).toHaveLength(2);
+  });
+
+  it('DX-354: lleva la región de la sede del documento tal como la lee el repositorio', async () => {
+    const { useCase } = makeUseCase();
+    const out = await useCase.execute('p-1', {});
+    expect(out.regional).toEqual({
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    });
   });
 
   it('the statement carries the generic type, the label and the display name', async () => {
@@ -170,7 +195,8 @@ describe('GetAccountStatementUseCase', () => {
         emergencyContactName: null,
       },
       responsibles: [],
-      settings: { timeZone: 'America/Bogota', majorityAge: 18 },
+      majorityReview: null,
+      settings: { timeZone: 'America/Caracas', majorityAge: 18 },
     }).useCase.execute('p-1', {});
     expect(adult.addressee).toEqual({
       kind: 'PATIENT',
@@ -193,15 +219,64 @@ describe('GetAccountStatementUseCase', () => {
           isPayer: true,
           receivesNotices: true,
           optedOut: false,
+          createdAt: new Date('2026-10-01T12:00:00.000Z'),
         },
       ],
-      settings: { timeZone: 'America/Bogota', majorityAge: 18 },
+      majorityReview: null,
+      settings: { timeZone: 'America/Caracas', majorityAge: 18 },
     }).useCase.execute('p-1', {});
     // Se imprime y se entrega: aunque el responsable no tenga email.
     expect(minor.addressee).toEqual({
       kind: 'RESPONSIBLE',
       name: 'Claudia Navarro',
       email: null,
+    });
+  });
+
+  it('DX-342: came of age with a responsible from childhood, unreviewed: in the patient name; KEEP_RESPONSIBLE: the responsible', async () => {
+    // Cumplió 18 el 2026-01-15; la madre se dio de alta en 2015.
+    const notice = (
+      majorityReview: {
+        decision: 'KEEP_RESPONSIBLE';
+        majorityDate: string;
+      } | null,
+    ) => ({
+      patient: {
+        firstName: 'Ana',
+        birthDate: new Date('2008-01-15'),
+        email: null,
+        emergencyContactName: null,
+      },
+      responsibles: [
+        {
+          id: 'r-1',
+          name: 'Claudia Navarro',
+          email: 'claudia@example.com',
+          isPayer: true,
+          receivesNotices: true,
+          optedOut: false,
+          createdAt: new Date('2015-05-01T12:00:00.000Z'),
+        },
+      ],
+      majorityReview,
+      settings: { timeZone: 'America/Caracas', majorityAge: 18 },
+    });
+    const pending = await makeUseCase(data(), notice(null)).useCase.execute(
+      'p-1',
+      {},
+    );
+    expect(pending.addressee).toEqual({
+      kind: 'PATIENT',
+      name: 'Ana Pérez',
+      email: null,
+    });
+    const kept = await makeUseCase(
+      data(),
+      notice({ decision: 'KEEP_RESPONSIBLE', majorityDate: '2026-01-15' }),
+    ).useCase.execute('p-1', {});
+    expect(kept.addressee).toMatchObject({
+      kind: 'RESPONSIBLE',
+      name: 'Claudia Navarro',
     });
   });
 
@@ -222,9 +297,11 @@ describe('GetAccountStatementUseCase', () => {
           isPayer: true,
           receivesNotices: true,
           optedOut: false,
+          createdAt: new Date('2026-10-01T12:00:00.000Z'),
         },
       ],
-      settings: { timeZone: 'America/Bogota', majorityAge: 16 },
+      majorityReview: null,
+      settings: { timeZone: 'America/Caracas', majorityAge: 16 },
     }).useCase.execute('p-1', {});
     expect(out.addressee).toEqual({
       kind: 'PATIENT',
@@ -281,8 +358,8 @@ describe('GetAccountStatementUseCase', () => {
         withPayments(
           {},
           { createdById: 'u-otra' },
-          // 23:30 del 28/02 en Bogotá: ya es 1/03 en UTC, pero no "hoy".
-          { createdAt: new Date('2026-03-01T04:30:00.000Z') },
+          // 23:30 del 28/02 en la zona de la sede: ya es 1/03 en UTC, pero no "hoy".
+          { createdAt: new Date('2026-03-01T03:30:00.000Z') },
           { createdById: null },
           {
             voidedAt: NOW,

@@ -20,7 +20,7 @@ import { TenantContextService } from '../src/shared/tenancy/tenant-context.servi
 import { seedDemo } from '../prisma/seed-demo';
 import { purgeDemoTenants } from './support/demo-tenant-purge';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -132,7 +132,7 @@ async function seedOtherClinic(): Promise<typeof other> {
   });
   const tenantId = tenant.id;
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, { tenantId, name: 'Sede' }),
+    data: locationData(REGIONAL_CARACAS_FIXTURE, { tenantId, name: 'Sede' }),
   });
   const patient = await raw.patient.create({
     data: { tenantId, firstName: 'Ana', lastName: 'Heredada' },
@@ -321,7 +321,14 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
             amount: l.amount,
           })),
         },
-        adminId,
+        {
+          tenantId: demoId,
+          locationId: null,
+          actor: { userId: adminId, role: 'ADMIN' },
+          requestId: null,
+          ip: null,
+          userAgent: null,
+        },
       ),
     );
     const manualBefore = await raw.paymentAllocation.findMany({

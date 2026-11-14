@@ -1,6 +1,14 @@
+import type { CurrencyTexts } from '../../../../shared/format/currency-text';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 
 export const PATIENT_CREDIT_REPOSITORY = Symbol('PATIENT_CREDIT_REPOSITORY');
+
+/** Reloj inyectado (DX-462): el día civil del tope diario sale de aquí. */
+export const PATIENT_CREDIT_CLOCK = Symbol('PATIENT_CREDIT_CLOCK');
+export type PatientCreditClock = () => Date;
 
 /** Lo que el saldo a favor necesita de un plan (sumas en su moneda). */
 export interface PlanCreditState {
@@ -13,6 +21,11 @@ export interface PlanCreditState {
   paidCents: number;
   entriesCents: number;
   creditCents: number;
+  /**
+   * DX-472-bis: abonos vivos en otra moneda aún sin base (sin tasa congelada
+   * todavía): no cuentan en `paidCents` hasta que el barrido la cree.
+   */
+  pendingOtherCurrencyPayments?: number;
 }
 
 export interface CreditTransferRecord {
@@ -81,6 +94,8 @@ export interface CreditRefundRecord {
   createdById: string;
   createdAt: Date;
   snapshot: RefundReceiptSnapshot;
+  /** DX-354: región de la sede del comprobante; `null` si le falta algo. */
+  regional: DocumentRegionalDto | null;
   idempotencyFingerprint: string | null;
 }
 
@@ -105,17 +120,52 @@ export interface CreateRefundInput {
   userId: string;
   idempotencyKey?: string;
   fingerprint: string;
+  /**
+   * DX-462: solo para RECEPTION. Dentro del bloqueo por (clínica, sede,
+   * usuario, día de la sede) se suman sus devoluciones del día en esta moneda;
+   * si con esta pasan de `capCents` se lanza `DailyRefundCapExceededError`.
+   * El reloj se lee dentro del bloqueo (no es el `createdAt`: lo fija la BD).
+   */
+  dailyCap?: { capCents: number; clock: PatientCreditClock };
+}
+
+/** Un traspaso del listado (DX-432): con el nombre de quien lo hizo. */
+export interface CreditTransferMovement extends CreditTransferRecord {
+  /** `null` si ya no es (ni fue) miembro de la clínica. */
+  createdByName: string | null;
 }
 
 export interface PatientCreditMovements {
-  transfers: CreditTransferRecord[];
+  transfers: CreditTransferMovement[];
   refunds: CreditRefundRecord[];
 }
 
 export interface PatientCreditRepository {
   readPlanCredit(planId: string): Promise<PlanCreditState | null>;
   receptionCapCents(): Promise<number>;
-  updateReceptionCap(cents: number): Promise<number>;
+  /**
+   * Formato de la sede de referencia (la activa o, sin ella, la principal, R6)
+   * para pintar el tope de RECEPCIÓN. Perezoso: 409 `LOCATION_LOCALE_REQUIRED`
+   * si no tiene locale o reloj.
+   */
+  referenceLocationFormat(): Promise<RegionalFormat>;
+  /** Formato de una sede concreta (DX-462: la de la devolución rechazada). */
+  locationFormat(locationId: string): Promise<RegionalFormat>;
+  /**
+   * DX-517-quater: el texto propio de cada moneda de la clínica para pintar los
+   * importes de los 403 de tope (vacío = el código ISO). Lectura simple de
+   * `tenants`, sin bloqueo: se llama fuera de toda transacción con bloqueo.
+   */
+  currencyTexts(): Promise<CurrencyTexts>;
+  /**
+   * Cambia el tope con la fila del tenant bloqueada y escribe el evento con el
+   * antes y el después en la MISMA transacción (DX-432); sin evento si no
+   * cambia.
+   */
+  updateReceptionCap(
+    cents: number,
+    audit: AuditRequestContext,
+  ): Promise<number>;
   findTransferByKey(key: string): Promise<CreditTransferRecord | null>;
   findRefundByKey(key: string): Promise<CreditRefundRecord | null>;
   /**

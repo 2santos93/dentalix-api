@@ -4,6 +4,7 @@ import {
   noticeRecipient,
   type NoticeResponsible,
 } from '../../patients/domain/communication/notice-recipient';
+import type { MajorityReviewRecord } from '../../patients/domain/responsible-parties/majority-review';
 
 export const SIGNATURE_OPTED_OUT_MESSAGE =
   'El paciente dio de baja los envíos: fírmalo en la clínica.';
@@ -29,6 +30,10 @@ export interface SignatureRecipientInput {
   majorityAge: number;
   /** Día civil de la sede (YYYY-MM-DD). */
   today: string;
+  /** Zona de la sede (la de `today`). */
+  timeZone: string;
+  /** DX-342: última revisión del paso a la mayoría de edad. */
+  majorityReview: MajorityReviewRecord | null;
 }
 
 export type SignatureRecipient =
@@ -77,6 +82,8 @@ export function resolveSignatureRecipient(
     responsibles: input.responsibles,
     majorityAge: input.majorityAge,
     today: input.today,
+    timeZone: input.timeZone,
+    majorityReview: input.majorityReview,
     automatic: false,
   });
 

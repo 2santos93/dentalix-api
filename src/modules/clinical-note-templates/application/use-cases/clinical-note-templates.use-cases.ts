@@ -16,9 +16,18 @@ import {
   type NoteTemplateDraft,
 } from '../../domain/note-template-rules';
 import { SAMPLE_NOTE_TEMPLATES } from '../../domain/sample-templates';
-import { NOTE_TEMPLATE_NOT_FOUND_MESSAGE } from '../note-template-errors';
+import {
+  normalizeShortcut,
+  shortcutFormatError,
+} from '../../domain/note-template-shortcut';
+import {
+  NOTE_TEMPLATE_NOT_FOUND_MESSAGE,
+  staleNoteTemplate,
+} from '../note-template-errors';
 
 export interface NotePromptInput {
+  /** DX-231: id de la pregunta que se conserva al editar. */
+  id?: string;
   label: string;
   type: NotePromptType;
   options?: string[];
@@ -31,6 +40,10 @@ export interface NoteTemplateInput {
   body: string;
   prompts: NotePromptInput[];
   active?: boolean;
+  /** DX-455: atajo («#resina»); null o vacío = sin atajo. */
+  shortcut?: string | null;
+  /** DX-231: versión leída; si cambió, 409. Sin ella no se comprueba. */
+  version?: number;
 }
 
 function toDraft(input: {
@@ -44,12 +57,29 @@ function toDraft(input: {
     category: input.category ?? null,
     body: input.body,
     prompts: input.prompts.map((p) => ({
+      ...(p.id !== undefined ? { id: p.id } : {}),
       label: p.label,
       type: p.type,
       options: p.options ?? [],
       defaultValue: p.defaultValue ?? null,
     })),
   };
+}
+
+/**
+ * DX-455: atajo normalizado (recortado, NFC) o null si viene vacío; 400 en
+ * español si el formato no vale. `undefined` = no se toca.
+ */
+export function validShortcut(
+  raw: string | null | undefined,
+): string | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const shortcut = normalizeShortcut(raw);
+  if (shortcut === '') return null;
+  const error = shortcutFormatError(shortcut);
+  if (error !== null) throw new BadRequestException(error);
+  return shortcut;
 }
 
 /** Valida y normaliza; 400 en español con el primer problema. */
@@ -86,8 +116,9 @@ export class CreateNoteTemplateUseCase {
     createdById?: string,
   ): Promise<ClinicalNoteTemplate> {
     const draft = validDraft(toDraft(input));
+    const shortcut = validShortcut(input.shortcut) ?? null;
     const [created] = await this.repo.createMany([
-      { ...draft, active: input.active ?? true, createdById },
+      { ...draft, shortcut, active: input.active ?? true, createdById },
     ]);
     return created;
   }
@@ -112,6 +143,12 @@ export class UpdateNoteTemplateUseCase {
   ): Promise<ClinicalNoteTemplate> {
     const current = await this.repo.findById(id);
     if (!current) throw new NotFoundException(NOTE_TEMPLATE_NOT_FOUND_MESSAGE);
+    // DX-231: aviso rápido; la comprobación que cuenta es la atómica del repo.
+    if (input.version !== undefined && input.version !== current.version) {
+      throw staleNoteTemplate();
+    }
+    // DX-455: el atajo no toca el contenido; el choque lo mira el repositorio.
+    const shortcut = validShortcut(input.shortcut);
 
     const touchesContent =
       input.name !== undefined ||
@@ -119,7 +156,12 @@ export class UpdateNoteTemplateUseCase {
       input.body !== undefined ||
       input.prompts !== undefined;
     if (!touchesContent) {
-      return this.repo.update(id, { active: input.active, updatedById });
+      return this.repo.update(id, {
+        active: input.active,
+        shortcut,
+        updatedById,
+        expectedVersion: input.version,
+      });
     }
 
     const draft = validDraft(
@@ -137,7 +179,9 @@ export class UpdateNoteTemplateUseCase {
       body: draft.body,
       prompts: input.prompts !== undefined ? draft.prompts : undefined,
       active: input.active,
+      shortcut,
       updatedById,
+      expectedVersion: input.version,
     });
   }
 }

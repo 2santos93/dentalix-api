@@ -31,9 +31,28 @@ export interface TreatmentPlan {
   optionGroupId: string | null;
   /** "Opción A: implante"; `null` en un plan suelto sin etiqueta. */
   optionLabel: string | null;
+  /**
+   * DX-417: este plan es el presupuesto pendiente que dejó la aceptación
+   * PARCIAL de aquel (con los ítems no aceptados); `null` si no. El mapeo
+   * de Prisma lo pone siempre; opcional solo para los dobles de prueba.
+   */
+  splitFromPlanId?: string | null;
+  /**
+   * DX-417: este plan se aceptó en parte y lo no aceptado está en aquel plan
+   * pendiente; `null` si no. Solo en la lista y en el detalle (sale de la
+   * aceptación).
+   */
+  partialPendingPlanId?: string | null;
   /** Presentado al paciente: cuándo y en qué sede. */
   presentedAt: Date | null;
   presentedLocationId: string | null;
+  /**
+   * DX-379: validez del presupuesto (`YYYY-MM-DD`, días de la sede), fijada al
+   * presentarlo o al imprimirlo por primera vez; las dos o ninguna. `null` =
+   * plan anterior a DX-379 o borrador nunca impreso (nunca vencido).
+   */
+  quoteIssuedOn: string | null;
+  quoteValidUntil: string | null;
   /** Rechazado: cuándo, por qué y la nota del personal. */
   rejectedAt: Date | null;
   rejectionReason: TreatmentPlanRejectionReason | null;

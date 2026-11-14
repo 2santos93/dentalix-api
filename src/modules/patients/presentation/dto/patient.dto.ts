@@ -29,6 +29,16 @@ export class PatientDto {
   @ApiProperty({ format: 'uuid' })
   tenantId!: string;
 
+  @ApiProperty({
+    pattern: '^[1-9][0-9]*$',
+    example: '1042',
+    description:
+      'DX-484: código del paciente en su clínica (dígitos, sin ceros a la ' +
+      'izquierda). Lo asigna el sistema en el alta, es único en la clínica y ' +
+      'no cambia nunca, ni al archivar; es el que se da al software de imagen.',
+  })
+  patientCode!: string;
+
   @ApiProperty()
   firstName!: string;
 
@@ -159,8 +169,8 @@ export class PatientDto {
     enum: RetentionExtension,
     enumName: 'RetentionExtension',
     description:
-      'Retención extendida de la HC: NONE = 15 años desde la última ' +
-      'atención, DOUBLE = 30 años, PERMANENT = nunca se ' +
+      'Retención extendida de la HC: NONE = el plazo de la clínica desde la ' +
+      'última atención, DOUBLE = el doble de ese plazo, PERMANENT = nunca se ' +
       'libera. Solo ADMIN la cambia.',
   })
   retentionExtended!: RetentionExtension;
@@ -178,10 +188,25 @@ export class PatientDto {
 
   @ApiProperty({
     description:
-      'Si hoy la HC está en retención legal: archivar o borrar al paciente ' +
+      'Si hoy la HC está en retención: archivar o borrar al paciente ' +
       'responde 409 CLINICAL_RECORD_RETENTION.',
   })
   underRetention!: boolean;
+
+  @ApiProperty({
+    example: 15,
+    description:
+      'Plazo vigente de la clínica en años (NONE); DOUBLE es el doble. ' +
+      'PERMANENT no caduca.',
+  })
+  clinicRetentionYears!: number;
+
+  @ApiProperty({
+    description:
+      'La fecha de fin sale del plazo anterior de la clínica: se redujo y ' +
+      'esta historia ya estaba en retención (DX-330).',
+  })
+  retentionFromPreviousTerm!: boolean;
 
   @ApiProperty({
     format: 'date-time',
@@ -208,6 +233,15 @@ export class PatientDto {
       'DX-128: canal de los avisos automáticos (EMAIL, WHATSAPP o NONE). Detalle en GET /patients/:id/communication.',
   })
   contactChannel!: ContactChannel;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'en',
+    description:
+      'DX-497: idioma preferido (BCP 47); null = «Idioma de la clínica». Puede no estar ya en la lista de la clínica (se quitó): la ficha lo enseña «(no disponible)» y los envíos salen en el idioma de la clínica.',
+  })
+  preferredLanguage!: string | null;
 
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   whatsappOptInAt!: Date | null;

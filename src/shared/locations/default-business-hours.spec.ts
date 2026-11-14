@@ -3,16 +3,16 @@ import { fitsBusinessHours } from '../../modules/location-schedule/application/b
 
 // El horario por defecto se valida CONTRA el validador real, no contra una copia
 // de la expectativa: así estos tests fallan si alguno de los dos se desalinea.
-// La zona es dato de test (una sede de Bogotá): el horario no trae zona propia.
+// La zona es dato de test (una sede en UTC−4): el horario no trae zona propia.
 const hours = {
-  timezone: 'America/Bogota',
+  timezone: 'America/Caracas',
   ranges: DEFAULT_BUSINESS_HOURS,
 };
 
-/** Instante UTC para una hora local de Bogotá (UTC-5 fijo) en una fecha dada. */
-function bogota(dateIso: string, hour: number, minute = 0): Date {
+/** Instante UTC para una hora local de la sede (UTC-4 fijo) en una fecha dada. */
+function caracas(dateIso: string, hour: number, minute = 0): Date {
   return new Date(
-    `${dateIso}T${String(hour + 5).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00.000Z`,
+    `${dateIso}T${String(hour + 4).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00.000Z`,
   );
 }
 
@@ -48,15 +48,15 @@ describe('DEFAULT_BUSINESS_HOURS', () => {
   it('acepta una cita un lunes por la mañana y por la tarde', () => {
     expect(
       fitsBusinessHours(
-        bogota('2026-08-03', 10),
-        bogota('2026-08-03', 10, 30),
+        caracas('2026-08-03', 10),
+        caracas('2026-08-03', 10, 30),
         hours,
       ),
     ).toBe(true);
     expect(
       fitsBusinessHours(
-        bogota('2026-08-03', 16),
-        bogota('2026-08-03', 16, 30),
+        caracas('2026-08-03', 16),
+        caracas('2026-08-03', 16, 30),
         hours,
       ),
     ).toBe(true);
@@ -65,15 +65,15 @@ describe('DEFAULT_BUSINESS_HOURS', () => {
   it('rechaza el cierre de mediodía y la madrugada', () => {
     expect(
       fitsBusinessHours(
-        bogota('2026-08-03', 14),
-        bogota('2026-08-03', 14, 30),
+        caracas('2026-08-03', 14),
+        caracas('2026-08-03', 14, 30),
         hours,
       ),
     ).toBe(false);
     expect(
       fitsBusinessHours(
-        bogota('2026-08-03', 3),
-        bogota('2026-08-03', 3, 30),
+        caracas('2026-08-03', 3),
+        caracas('2026-08-03', 3, 30),
         hours,
       ),
     ).toBe(false);
@@ -82,22 +82,22 @@ describe('DEFAULT_BUSINESS_HOURS', () => {
   it('el sábado cierra a las 13:00 y el domingo no se atiende', () => {
     expect(
       fitsBusinessHours(
-        bogota('2026-08-01', 10),
-        bogota('2026-08-01', 10, 30),
+        caracas('2026-08-01', 10),
+        caracas('2026-08-01', 10, 30),
         hours,
       ),
     ).toBe(true);
     expect(
       fitsBusinessHours(
-        bogota('2026-08-01', 16),
-        bogota('2026-08-01', 16, 30),
+        caracas('2026-08-01', 16),
+        caracas('2026-08-01', 16, 30),
         hours,
       ),
     ).toBe(false);
     expect(
       fitsBusinessHours(
-        bogota('2026-08-02', 10),
-        bogota('2026-08-02', 10, 30),
+        caracas('2026-08-02', 10),
+        caracas('2026-08-02', 10, 30),
         hours,
       ),
     ).toBe(false);

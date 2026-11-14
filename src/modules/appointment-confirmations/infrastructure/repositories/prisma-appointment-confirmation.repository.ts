@@ -1,3 +1,7 @@
+import { isHourCycle } from '../../../../shared/locations/location-regional';
+import { DEFAULT_CALENDAR_ALARM_HOURS } from '../../../../shared/calendar/appointment-calendar';
+import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
+import { withClinicLogoUrl } from '../../../../shared/storage/clinic-logo-url';
 import { Injectable } from '@nestjs/common';
 import {
   AppointmentConfirmationResponse,
@@ -13,6 +17,7 @@ import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-even
 import {
   confirmationLinkAuditEvent,
   confirmationResponseAuditEvent,
+  earlierRequestAuditEvent,
 } from '../../domain/confirmation-audit';
 import {
   linkResponseBlock,
@@ -27,6 +32,8 @@ import {
   IssueConfirmationInput,
   RespondConfirmationInput,
   RespondOutcome,
+  SetWantsEarlierInput,
+  SetWantsEarlierOutcome,
 } from '../../domain/ports/appointment-confirmation-repository.port';
 import {
   AppointmentConfirmation,
@@ -40,11 +47,28 @@ const APPOINTMENT_SELECT = {
   start: true,
   end: true,
   status: true,
+  wantsEarlier: true,
+  earlierWindow: true,
+  updatedAt: true,
   providerId: true,
   locationId: true,
-  patient: { select: { firstName: true, phone: true } },
+  patient: {
+    select: { firstName: true, phone: true, preferredLanguage: true },
+  },
   // Sin filtrar `deletedAt` (DX-329, m17): la sede de la cita da el prefijo.
-  location: { select: { name: true, address: true, defaultPhoneRegion: true } },
+  location: {
+    select: {
+      name: true,
+      address: true,
+      defaultPhoneRegion: true,
+      // DX-354: la página pública pinta con el formato de la sede de la cita.
+      timeZone: true,
+      locale: true,
+      hourCycle: true,
+      // DX-469: la alarma del evento «Añadir a mi calendario».
+      reminderSettings: { select: { calendarAlarmHours: true } },
+    },
+  },
 } as const satisfies Prisma.AppointmentSelect;
 
 type SelectedAppointment = Prisma.AppointmentGetPayload<{
@@ -153,13 +177,25 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       start: a.start,
       end: a.end,
       status: a.status,
+      wantsEarlier: a.wantsEarlier,
+      earlierWindow: a.earlierWindow,
+      updatedAt: a.updatedAt,
+      calendarAlarmHours:
+        a.location.reminderSettings[0]?.calendarAlarmHours ??
+        DEFAULT_CALENDAR_ALARM_HOURS,
       patientFirstName: a.patient.firstName,
       patientPhone: a.patient.phone,
+      patientPreferredLanguage: a.patient.preferredLanguage,
       providerName: membership?.user.fullName ?? null,
       locationId: a.locationId,
       locationName: a.location.name,
       locationAddress: a.location.address,
       locationPhoneRegion: phoneRegionOrNull(a.location.defaultPhoneRegion),
+      locationTimeZone: a.location.timeZone,
+      locationLocale: a.location.locale,
+      locationHourCycle: isHourCycle(a.location.hourCycle)
+        ? a.location.hourCycle
+        : null,
     };
   }
 
@@ -266,10 +302,12 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
     // `tenants` no tiene RLS (igual que PrismaTenantBrandingRepository): se lee
     // por el id ya resuelto desde el host.
     const tenantId = this.requireTenantId();
-    return this.prisma.tenant.findFirst({
-      where: { id: tenantId, deletedAt: null },
-      select: { name: true, primaryColor: true, logoUrl: true },
-    });
+    return this.prisma.tenant
+      .findFirst({
+        where: { id: tenantId, deletedAt: null },
+        select: { name: true, primaryColor: true, logoKey: true },
+      })
+      .then((row) => withClinicLogoUrl(row));
   }
 
   /**
@@ -329,6 +367,58 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       locationId: appointment.locationId,
       notice: cancelling ? notice : null,
     };
+  }
+
+  async setWantsEarlier(
+    input: SetWantsEarlierInput,
+  ): Promise<SetWantsEarlierOutcome> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Misma serialización que `respond`: la fila de la cita, FOR UPDATE.
+      const [locked] = await tx.$queryRaw<
+        {
+          tenantId: string;
+          locationId: string;
+          status: AppointmentStatus;
+          start: Date;
+          deletedAt: Date | null;
+        }[]
+      >`SELECT "tenantId", "locationId", "status", "start", "deletedAt"
+          FROM "appointments" WHERE "id" = ${input.appointmentId}::uuid FOR UPDATE`;
+      if (
+        !locked ||
+        locked.deletedAt !== null ||
+        !MOVABLE_STATUSES.includes(locked.status) ||
+        locked.start.getTime() <= input.now.getTime()
+      ) {
+        return 'STALE';
+      }
+      await tx.appointment.update({
+        where: { id: input.appointmentId },
+        data: input.wantsEarlier
+          ? {
+              wantsEarlier: true,
+              earlierWindow: input.window ?? 'ANY',
+              earlierRequestedAt: input.now,
+            }
+          : {
+              wantsEarlier: false,
+              earlierWindow: null,
+              earlierRequestedAt: null,
+            },
+      });
+      // DX-437: el paciente lo pidió desde el enlace (origen PUBLIC_LINK), en
+      // el tenant de la cita leída bajo RLS; sin token ni URL.
+      await writeAuditEvent(
+        tx,
+        earlierRequestAuditEvent(input.request ?? null, {
+          tenantId: locked.tenantId,
+          appointmentId: input.appointmentId,
+          locationId: locked.locationId,
+          wantsEarlier: input.wantsEarlier,
+        }),
+      );
+      return 'OK';
+    });
   }
 
   async respond(input: RespondConfirmationInput): Promise<RespondOutcome> {

@@ -16,7 +16,10 @@ import {
   TreatmentPlan,
   TreatmentPlanWithItems,
 } from '../../domain/entities/treatment-plan.entity';
-import { TreatmentPlanItem } from '../../domain/entities/treatment-plan-item.entity';
+import {
+  TreatmentPlanItem,
+  TreatmentPlanItemUpdate,
+} from '../../domain/entities/treatment-plan-item.entity';
 import {
   AddTreatmentPlanItemRepoInput,
   DecideNewItem,
@@ -63,6 +66,8 @@ function fakeCatalogItem(
     defaultPrice: 200,
     allowDiscount: true,
     active: true,
+    clinicalNoteTemplateId: null,
+    suggestedClinicalNoteTemplateId: null,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -81,7 +86,13 @@ function fakeItem(
     catalogItemId: 'cat1',
     catalogPrice: null,
     basePrice: null,
+    catalogCurrency: null,
     priceSource: null,
+    referenceCurrency: null,
+    referencePriceInPlan: null,
+    basePriceInPlan: null,
+    referenceRate: null,
+    baseRate: null,
     agreementId: null,
     agreementName: null,
     pricingLocationId: null,
@@ -142,7 +153,7 @@ function makeRepo(
     },
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
-    updateItem: (): Promise<TreatmentPlanItem> =>
+    updateItem: (): Promise<TreatmentPlanItemUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
     softDeleteItem: (): Promise<void> =>
       Promise.reject(new Error('not implemented in this fake')),
@@ -368,5 +379,64 @@ describe('AddTreatmentPlanItemUseCase', () => {
       ToothSurface.MESIAL,
     ]);
     expect(captured?.notes).toBe('Caries profunda');
+  });
+
+  describe('DX-502: moneda del catálogo congelada en el ítem', () => {
+    async function addWith(
+      extra: Parameters<typeof catalogPricing>[1],
+      defaultPrice: number | null = 80000,
+    ) {
+      let captured: Omit<AddTreatmentPlanItemRepoInput, 'planId'> | undefined;
+      const repo = makeRepo({}, (input) => {
+        captured = input;
+      });
+      const catalogRepo = makeCatalogRepo({
+        findById: (): Promise<DentalCatalogItem | null> =>
+          Promise.resolve(fakeCatalogItem({ defaultPrice })),
+      });
+      const uc = new AddTreatmentPlanItemUseCase(
+        repo,
+        catalogPricing(catalogRepo, extra),
+        testDiscountPolicy(),
+        FIXED_CLOCK,
+      );
+      await uc.execute(
+        'plan1',
+        { toothNumber: '11', catalogItemId: 'cat1' },
+        ADMIN_ACTOR,
+      );
+      return captured;
+    }
+
+    it('plan en USD con el catálogo en VES: guarda VES con el precio de catálogo', async () => {
+      const captured = await addWith({
+        catalogCurrency: 'VES',
+        locationList: { price: 100.55, currency: 'USD' },
+      });
+      expect(captured?.price).toBe(100.55);
+      expect(captured?.pricing).toMatchObject({
+        basePrice: 80000,
+        catalogCurrency: 'VES',
+      });
+    });
+
+    it('sin moneda común de las sedes, la guarda vacía', async () => {
+      const captured = await addWith({ catalogCurrency: null });
+      expect(captured?.pricing.catalogCurrency).toBeNull();
+    });
+
+    it('sin precio de catálogo no guarda moneda', async () => {
+      const captured = await addWith(
+        {
+          catalogCurrency: 'VES',
+          locationList: { price: 100.55, currency: 'USD' },
+        },
+        null,
+      );
+      expect(captured?.pricing).toMatchObject({
+        basePrice: null,
+        catalogCurrency: null,
+      });
+    });
   });
 });

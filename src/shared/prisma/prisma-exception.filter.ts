@@ -254,7 +254,7 @@ const STATEMENT_TIMEOUT: ErrorBody = {
  * sin conexión para empezarla en `maxWait`. Otros P2028 («Transaction already
  * closed» por otro motivo) son fallos del código y siguen como 500.
  */
-const P2028_TIMEOUT_PATTERN =
+export const P2028_TIMEOUT_PATTERN =
   /expired transaction|Unable to start a transaction in the given time|timeout for this transaction/i;
 
 const INTERNAL_ERROR: ErrorBody = {
@@ -290,7 +290,7 @@ export const BY_SQLSTATE: Record<string, ErrorBody> = {
  *    `meta`; el SQLSTATE solo aparece en `message` (`PostgresError { code: "23514", ...`).
  *  - raw (`$executeRaw`): `PrismaClientKnownRequestError` P2010 con `meta.code`.
  */
-function sqlStateOf(
+export function sqlStateOf(
   exception:
     | Prisma.PrismaClientKnownRequestError
     | Prisma.PrismaClientUnknownRequestError,

@@ -16,16 +16,25 @@ import {
   REFRESH_REUSE_GRACE_MS,
   loadRefreshReuseGraceMs,
 } from './domain/refresh-rotation';
+import { clinicalRetentionConfigProvider } from '../patients/domain/retention/clinical-retention-config';
 import { PrismaAuthRepository } from './infrastructure/repositories/prisma-auth.repository';
 import { PasswordService } from '../../shared/crypto/password.service';
 import { TokenService } from '../../shared/crypto/token.service';
 import { EmailModule } from '../notifications/email/email.module';
 import { PasswordResetController } from './presentation/password-reset.controller';
 import { RequestPasswordResetUseCase } from './application/use-cases/request-password-reset.use-case';
+import {
+  PASSWORD_RESET_LIMITS,
+  loadPasswordResetLimits,
+} from './application/password-reset-limits';
 import { ResetPasswordUseCase } from './application/use-cases/reset-password.use-case';
 import { PASSWORD_RESET_REPOSITORY } from './domain/ports/password-reset-repository.port';
 import { PASSWORD_RESET_NOTIFIER } from './domain/ports/password-reset-notifier.port';
 import { PrismaPasswordResetRepository } from './infrastructure/repositories/prisma-password-reset.repository';
+import { EmailMfaNotifier } from './infrastructure/email-mfa.notifier';
+import { MFA_NOTIFIER } from './domain/ports/mfa-notifier.port';
+import { NEW_CLINIC_REQUIRES_ADMIN_MFA } from './domain/user-mfa';
+import { StaffMfaController } from './presentation/staff-mfa.controller';
 import { EmailPasswordResetNotifier } from './infrastructure/email-password-reset.notifier';
 import { REGISTRATION_REPOSITORY } from './domain/ports/registration-repository.port';
 import { REGISTRATION_NOTIFIER } from './domain/ports/registration-notifier.port';
@@ -40,6 +49,13 @@ import { BreakGlassService } from './application/break-glass.service';
 import { BREAK_GLASS_REPOSITORY } from './domain/ports/break-glass-repository.port';
 import { PrismaBreakGlassRepository } from './infrastructure/repositories/prisma-break-glass.repository';
 import { mfaSecretCipherProvider } from '../../shared/crypto/mfa-secret-cipher';
+import { UserMfaService } from './application/user-mfa.service';
+import { MfaChallengeService } from './application/mfa-challenge.service';
+import { CompleteMfaLoginUseCase } from './application/use-cases/complete-mfa-login.use-case';
+import { USER_MFA_REPOSITORY } from './domain/ports/user-mfa-repository.port';
+import { PrismaUserMfaRepository } from './infrastructure/repositories/prisma-user-mfa.repository';
+import { LoginMfaController } from './presentation/login-mfa.controller';
+import { SecurityPolicyController } from './presentation/security-policy.controller';
 import { COUNTRY_WHITELIST } from '../locations/domain/ports/country-whitelist.port';
 import { PrismaCountryWhitelist } from '../locations/infrastructure/adapters/prisma-country-whitelist.adapter';
 import { CURRENCY_WHITELIST } from '../treatment-plans/domain/ports/currency-whitelist.port';
@@ -57,6 +73,11 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     AuthController,
     PasswordResetController,
     PublicSubdomainsController,
+    // DX-021: segundo paso del login y política de MFA de la clínica.
+    LoginMfaController,
+    SecurityPolicyController,
+    // DX-021-bis: reseteo por otro ADMIN.
+    StaffMfaController,
   ],
   providers: [
     RegisterClinicUseCase,
@@ -77,11 +98,25 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     SessionCookieService,
     PasswordService,
     TokenService,
+    // DX-330: el mínimo de plataforma del plazo de la HC, que el alta escribe.
+    clinicalRetentionConfigProvider,
     { provide: AUTH_REPOSITORY, useClass: PrismaAuthRepository },
     // Acceso break-glass del superadmin a una clínica (SEC-008).
     BreakGlassService,
     { provide: BREAK_GLASS_REPOSITORY, useClass: PrismaBreakGlassRepository },
     mfaSecretCipherProvider,
+    // DX-021: verificación en dos pasos de los miembros (reutiliza SEC-008).
+    UserMfaService,
+    MfaChallengeService,
+    CompleteMfaLoginUseCase,
+    { provide: USER_MFA_REPOSITORY, useClass: PrismaUserMfaRepository },
+    { provide: MFA_NOTIFIER, useClass: EmailMfaNotifier },
+    {
+      provide: NEW_CLINIC_REQUIRES_ADMIN_MFA,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        config.get<string>('NEW_CLINIC_REQUIRE_ADMIN_MFA') !== 'false',
+    },
     // Registro con verificación del email (DX-029).
     {
       provide: REGISTRATION_REPOSITORY,
@@ -93,6 +128,13 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     { provide: COUNTRY_WHITELIST, useClass: PrismaCountryWhitelist },
     // Recuperar la contraseña por email (DX-010).
     RequestPasswordResetUseCase,
+    // DX-149-quater: concurrencia, cola y tope por usuario.
+    {
+      provide: PASSWORD_RESET_LIMITS,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        loadPasswordResetLimits((key) => config.get<string>(key)),
+    },
     ResetPasswordUseCase,
     {
       provide: PASSWORD_RESET_REPOSITORY,
@@ -109,6 +151,7 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
   // El cambio de contraseña (MeModule) vuelve a emitir el par de la sesión
   // con los claims ACTUALES, igual que /auth/refresh. Él y aceptar invitación
   // (InvitationsModule) entregan el par con la cookie de sesión (DX-062).
-  exports: [SessionClaimsService, SessionCookieService],
+  // DX-021: «Mi perfil» (MeModule) activa y desactiva el MFA del usuario.
+  exports: [SessionClaimsService, SessionCookieService, UserMfaService],
 })
 export class AuthModule {}

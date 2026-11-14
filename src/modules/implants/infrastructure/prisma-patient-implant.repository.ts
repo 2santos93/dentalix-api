@@ -1,3 +1,5 @@
+import { loadDocumentRegional } from '../../../shared/locations/document-regional';
+import type { DocumentRegionalDto } from '../../../shared/locations/document-regional.dto';
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
@@ -17,8 +19,8 @@ import type { ImplantCardLocation } from '../domain/implant-card';
 import {
   documentText,
   documentTypeName,
-  type ClinicDocumentTypeNames,
 } from '../../patients/domain/document-type';
+import type { DocumentTypeNamesBook } from '../../patients/domain/ports/document-type-names-repository.port';
 import type {
   CreatePatientImplantRepoInput,
   ImplantLotQuery,
@@ -93,6 +95,7 @@ interface LotRow {
   reference: string;
   lot: string;
   professionalName: string;
+  locationId: string;
   locationName: string;
   voided: boolean;
 }
@@ -129,7 +132,7 @@ export function implantLotSearchSql(
            p."documentType", p."docTypeLabel", p."docNumber", p."phone",
            i."placedOn", i."toothNumber", i."kind", i."manufacturer",
            i."system", i."reference", i."lot",
-           u."fullName" AS "professionalName", l."name" AS "locationName",
+           u."fullName" AS "professionalName", i."locationId", l."name" AS "locationName",
            (i."voidedAt" IS NOT NULL) AS "voided"
     FROM "patient_implants" i
     JOIN "patients" p ON p."tenantId" = i."tenantId" AND p."id" = i."patientId"
@@ -306,6 +309,19 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
     return tenant?.name ?? '';
   }
 
+  regional(
+    locationId: string | undefined,
+  ): Promise<DocumentRegionalDto | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant((tx) =>
+      loadDocumentRegional(
+        tx,
+        tenantId,
+        locationId ?? this.tenantContext.getLocationId() ?? null,
+      ),
+    );
+  }
+
   locations(ids: string[]): Promise<ImplantCardLocation[]> {
     return this.prisma.runWithTenant((tx) =>
       tx.location.findMany({
@@ -339,7 +355,7 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
   /** Ver `implantLotSearchSql`. */
   async searchByLot(
     query: ImplantLotQuery,
-    names: ClinicDocumentTypeNames,
+    names: DocumentTypeNamesBook,
   ): Promise<ImplantLotMatch[]> {
     const sql = implantLotSearchSql(this.requireTenantId(), query);
     const rows = await this.prisma.runWithTenant((tx) =>
@@ -350,7 +366,11 @@ export class PrismaPatientImplantRepository implements PatientImplantRepository 
       patientId: r.patientId,
       patientName: `${r.firstName} ${r.lastName}`.trim(),
       patientDocument: documentText(
-        documentTypeName(r.documentType, r.docTypeLabel, names),
+        documentTypeName(
+          r.documentType,
+          r.docTypeLabel,
+          names.forLocation(r.locationId),
+        ),
         r.docNumber,
       ),
       phone: r.phone,

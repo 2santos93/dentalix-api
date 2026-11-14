@@ -84,3 +84,29 @@ export function publicTokenRateLimitKey(
   const value = typeof token === 'string' ? token : '';
   return sha256(`${prefix}-token:${sha256(value)}`);
 }
+
+/**
+ * Balde `branding-host` (DX-555): IP + host YA NORMALIZADO (minúsculas, sin
+ * puerto ni punto final; `normalizeBrandingHost`), así `Clinica.Example:443`
+ * y `clinica.example` comparten balde. Un host mal formado (`null`) cae en un
+ * único balde «inválido» por IP: no abre una clave nueva por cada basura. La
+ * clave guarda hashes, nunca el host en claro.
+ */
+export function brandingHostRateLimitKey(
+  prefix: string,
+  ip: string,
+  normalizedHost: string | null,
+): string {
+  const host =
+    normalizedHost === null ? 'invalid' : `name:${sha256(normalizedHost)}`;
+  return sha256(`${prefix}-${ip}-host:${host}`);
+}
+
+/**
+ * Balde `branding-miss` (DX-555): los FALLOS de la marca por host, por IP.
+ * Lo usa `BrandingMissLimitInterceptor` (no el guard): un fallo solo se sabe
+ * tras la consulta.
+ */
+export function brandingMissRateLimitKey(prefix: string, ip: string): string {
+  return sha256(`${prefix}-miss:${ip}`);
+}

@@ -16,7 +16,7 @@ import { registerVerified } from './support/register-verified';
 import { CapturingMailer } from './support/capture-mailer';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
@@ -115,7 +115,7 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
   async function register(sub: string, email: string): Promise<void> {
     await registerVerified(
       app,
-      registerBody(REGIONAL_BOGOTA_FIXTURE, {
+      registerBody(REGIONAL_CARACAS_FIXTURE, {
         clinicName: `Clínica ${sub}`,
         subdomain: sub,
         email,

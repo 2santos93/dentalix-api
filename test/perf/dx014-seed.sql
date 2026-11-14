@@ -2,10 +2,10 @@
 -- ver docs/perf/DX-014.md). Corre como owner en una base DESECHABLE ya migrada
 -- (con la siembra de referencia: monedas). Determinista: sin random().
 --   Tenant "bench-reportes": 5 sedes con horario (lun-vie 9-13 y 15-19, sáb
---   9-13, Bogotá), 20 profesionales, 20.000 pacientes y 24 MESES de actividad
+--   9-13), 20 profesionales, 20.000 pacientes y 24 MESES de actividad
 --   (2024-10-25 → 2026-10-24) para poder comparar 12 meses con los 12
 --   anteriores: 24 citas por sede y día abierto (~75.000; 85 % atendidas, 7 %
---   no-show, el resto canceladas), un ítem realizado (COP; 1 de cada 10 en USD)
+--   no-show, el resto canceladas), un ítem realizado (VES; 1 de cada 10 en USD)
 --   y un abono por cada dos citas atendidas, y cierres de sede de un día al mes.
 \set ON_ERROR_STOP on
 BEGIN;
@@ -26,17 +26,17 @@ $$;
 INSERT INTO tenants (id, name, subdomain, "updatedAt") VALUES
   ('00000000-0000-4000-a000-0000000000d1', 'Bench reportes', 'bench-reportes', now());
 
--- G1: dato de bench (REGIONAL_BOGOTA_FIXTURE), no un default del producto.
+-- G1: dato de bench (REGIONAL_CARACAS_FIXTURE), no un default del producto.
 INSERT INTO locations (id, "tenantId", name, country, currency, "timeZone", locale, "createdAt", "updatedAt")
 SELECT ('00000000-0000-4000-b000-0000000000d' || s)::uuid,
        '00000000-0000-4000-a000-0000000000d1', 'Sede ' || s,
-       'CO', 'COP', 'America/Bogota', 'es-CO',
+       'VE', 'VES', 'America/Caracas', 'es-VE',
        timestamp '2024-01-01' + s * interval '1 minute', now()
   FROM generate_series(1, 5) AS s;
 
 INSERT INTO location_schedules (id, "tenantId", "locationId", timezone, "updatedAt")
 SELECT md5('sched:' || s)::uuid, '00000000-0000-4000-a000-0000000000d1',
-       ('00000000-0000-4000-b000-0000000000d' || s)::uuid, 'America/Bogota', now()
+       ('00000000-0000-4000-b000-0000000000d' || s)::uuid, 'America/Caracas', now()
   FROM generate_series(1, 5) AS s;
 
 INSERT INTO location_schedule_ranges (id, "tenantId", "scheduleId", weekday, "startMinute", "endMinute")
@@ -65,7 +65,7 @@ VALUES (md5('bench-cat')::uuid, '00000000-0000-4000-a000-0000000000d1', 'BENCH',
         'PROCEDURE', 'Resina', '#2A2B3C', now());
 
 -- Cada sede: 4 profesionales propios, 6 citas de 30 min por profesional y día
--- (9:00-12:00 Bogotá = 14:00-17:00 UTC). Lunes a sábado.
+-- (9:00-12:00 en UTC-4 = 14:00-17:00 UTC). Lunes a sábado.
 CREATE TEMP TABLE bench_appts ON COMMIT DROP AS
 SELECT row_number() OVER () AS n, s, d, p, k,
        timestamp '2024-10-25 14:00' + d * interval '1 day' + k * interval '30 minutes' AS start
@@ -93,7 +93,7 @@ SELECT md5('bench-appt:' || n)::uuid, '00000000-0000-4000-a000-0000000000d1',
 INSERT INTO treatment_plans (id, "tenantId", "patientId", status, currency, "updatedAt")
 SELECT md5('bench-plan:' || n)::uuid, '00000000-0000-4000-a000-0000000000d1',
        md5('bench-patient:' || (n % 20000))::uuid, 'ACCEPTED',
-       CASE WHEN n % 10 = 0 THEN 'USD' ELSE 'COP' END, now()
+       CASE WHEN n % 10 = 0 THEN 'USD' ELSE 'VES' END, now()
   FROM bench_appts WHERE n % 100 < 85 AND n % 2 = 0;
 
 INSERT INTO treatment_plan_items (id, "tenantId", "planId", "toothNumber", "catalogItemId",
@@ -115,7 +115,7 @@ SELECT md5('bench-pay:' || n)::uuid, '00000000-0000-4000-a000-0000000000d1',
        ('00000000-0000-4000-b000-0000000000d' || s)::uuid,
        md5('bench-plan:' || n)::uuid, md5('bench-patient:' || (n % 20000))::uuid,
        CASE WHEN n % 10 = 0 THEN 100 ELSE 120000 END,
-       CASE WHEN n % 10 = 0 THEN 'USD' ELSE 'COP' END,
+       CASE WHEN n % 10 = 0 THEN 'USD' ELSE 'VES' END,
        start + interval '40 minutes', now()
   FROM bench_appts WHERE n % 100 < 85 AND n % 2 = 0;
 

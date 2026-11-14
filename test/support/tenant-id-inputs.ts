@@ -28,6 +28,19 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   // --- auditoría (DX-009) ---
   'GET /audit-events ?actorUserId',
   'GET /audit-events ?patientId',
+  // --- recall (DX-015-bis) ---
+  'GET /recall/due ?recallTypeId',
+  'GET /recall/due/count ?recallTypeId',
+  // DX-015-bis (porción 3): la sede de A en «Sin recall configurado», el tipo
+  // de A en «Programar recall» y en el recall de la evolución.
+  'GET /recall/unconfigured ?locationId',
+  'POST /patients/:id/recalls/default body.recallTypeId',
+  'POST /patients/:id/recalls/default body.appointmentId',
+  'POST /patients/:patientId/clinical-entries body.recall.recallTypeId',
+  'PUT /recall-types/:id/triggers body.catalogItemIds[]',
+  // DX-015-bis (porción 4, D20): el tipo de cita al agendar.
+  'POST /recall-types body.appointmentTypeId',
+  'PATCH /recall-types/:id body.appointmentTypeId',
   // --- pacientes, cobertura y convenios (DX-105, DX-150, DX-153) ---
   'POST /patients body.dataConsents.policyVersionId',
   'GET /patients ?payerId',
@@ -46,6 +59,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'PATCH /price-lists/:id body.locationId',
   'PUT /price-lists/:id/items body.items[].catalogItemId',
   'GET /patients/:patientId/price-quote ?catalogItemId',
+  // DX-342: «Pasan a la mayoría de edad» filtrada por una sede.
+  'GET /patients/coming-of-age ?locationId',
   // --- historia clínica y odontograma ---
   'POST /patients/:patientId/clinical-entries body.answers[].promptId',
   'POST /patients/:patientId/clinical-entries body.appointmentId',
@@ -62,6 +77,7 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /appointments ?providerIds[]',
   'GET /appointments/openings ?locationId',
   'GET /appointments/openings ?patientId',
+  'GET /appointments/openings ?excludeAppointmentId',
   'GET /appointments/openings ?providerId',
   'PATCH /appointments/:id body.planItemIds[]',
   'PATCH /appointments/:id body.providerId',
@@ -104,9 +120,21 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'PUT /payments/:id/allocations body.allocations[].treatmentPlanItemId',
   'POST /treatment-plans/:id/items body.catalogItemId',
   'POST /treatment-plans/:id/items/bulk-discount body.itemIds[]',
+  // DX-379 (B): los ítems de la vista previa de «Actualizar precios».
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/preview body.itemIds[]',
+  // DX-417: los ítems que se aceptan en parte (vista previa y firma).
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance/partial-preview body.itemIds[]',
+  'POST /patients/:patientId/treatment-plans/:planId/acceptance body.partial.itemIds[]',
   'PATCH /treatment-plans/:id/items/:itemId body.performedById',
   'PATCH /treatment-plans/:id/items/:itemId body.performedLocationId',
   // --- reportes, cartera y caja (DX-027, DX-204) ---
+  'GET /reports/chair-occupancy ?locationId',
+  'GET /reports/chair-occupancy.csv ?locationId',
+  // DX-410: rentabilidad por sede, su CSV y el detalle de cada cifra.
+  'GET /reports/profitability ?locationId',
+  'GET /reports/profitability.csv ?locationId',
+  'GET /reports/profitability/lines ?locationId',
+  'GET /reports/patient-links ?locationId',
   'GET /reports/discounts ?locationId',
   'GET /reports/discounts ?professionalId',
   'GET /reports/discounts.csv ?locationId',
@@ -118,12 +146,19 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /reports/production-by-procedure/items ?catalogItemId',
   'GET /reports/production-by-procedure/items ?locationId',
   'GET /reports/production-by-procedure/items ?professionalId',
+  'GET /reports/recovered-slots ?locationId',
+  'GET /reports/recovered-slots ?providerId',
+  'GET /reports/recovered-slots.csv ?locationId',
+  'GET /reports/recovered-slots.csv ?providerId',
+  'GET /reports/unallocated-payments ?locationId',
+  'GET /reports/unallocated-payments.csv ?locationId',
   'GET /receivables/aging ?locationId',
   'GET /receivables/aging ?providerId',
   'GET /receivables/aging/summary ?locationId',
   'GET /receivables/aging/summary ?providerId',
   'GET /receivables/aging.csv ?locationId',
   'GET /receivables/aging.csv ?providerId',
+  'GET /receivables/credit-balances ?locationId',
   'GET /cash-sessions/current ?locationId',
   'POST /cash-sessions/open body.locationId',
   'GET /cash-sessions ?locationId',
@@ -141,6 +176,23 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-379 (B): «B aplica "Actualizar precios" a su plan con un ítem de A →
+  // 404 en español y nada cambia» (lleva Idempotency-Key: fuera de la matriz).
+  'POST /patients/:patientId/treatment-plans/:planId/reprice/apply body.itemIds[]':
+    'treatment-plan-repricing.e2e-spec.ts',
+  // DX-542: «B manda la sede o el sillón de A al listar, crear o editar un
+  // equipo → 404 en español y nada de A cambia».
+  'GET /equipment ?locationId': 'equipment.e2e-spec.ts',
+  'POST /equipment body.locationId': 'equipment.e2e-spec.ts',
+  'POST /equipment body.chairId': 'equipment.e2e-spec.ts',
+  'PATCH /equipment/:id body.locationId': 'equipment.e2e-spec.ts',
+  'PATCH /equipment/:id body.chairId': 'equipment.e2e-spec.ts',
+  // DX-231: el id de pregunta de otra clínica en un PATCH de plantilla no se
+  // adopta (es una pregunta nueva) y la ajena queda intacta.
+  'PATCH /clinical-note-templates/:id body.prompts[].id':
+    'clinical-note-templates.e2e-spec.ts',
+  'POST /clinical-note-templates body.prompts[].id':
+    'clinical-note-templates.e2e-spec.ts',
   // DX-211: «B manda el sillón, la sede o el profesional de A → 404/400 en
   // español (o 403 por la sede) y no se crea ni cambia nada».
   'GET /chairs ?locationId': 'chairs.e2e-spec.ts',
@@ -152,6 +204,10 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'POST /appointments body.chairId': 'chairs.e2e-spec.ts',
   'PATCH /appointments/:id body.chairId': 'chairs.e2e-spec.ts',
   'GET /appointments ?chairIds[]': 'chairs.e2e-spec.ts',
+  // DX-492: «Buscar hueco», «Atender sin cita» y «Agendar aquí» con sillón.
+  'GET /appointments/openings ?chairIds[]': 'chairs.e2e-spec.ts',
+  'POST /appointments/walk-in body.chairId': 'chairs.e2e-spec.ts',
+  'POST /waitlist/:id/schedule body.chairId': 'chairs.e2e-spec.ts',
   // DX-439: «B manda la sede, el profesional, la cita o el ítem de A → 403 o
   // lista sin filas de A, y 404 sin descarte».
   'GET /closing-queue ?locationId': 'closing-queue.e2e-spec.ts',
@@ -164,6 +220,9 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'POST /closing-queue/dismissals body.appointmentId':
     'closing-queue.e2e-spec.ts',
   'POST /closing-queue/dismissals body.planItemId': 'closing-queue.e2e-spec.ts',
+  // DX-015: «B registra un contacto de recall con la cita de A → 400 en
+  // español y no se crea nada».
+  'POST /recall/:recallId/contacts body.appointmentId': 'recall.e2e-spec.ts',
   // DX-243: «B manda la plantilla, el plan o el profesional de A → 404/400 y
   // no se crea nada».
   'POST /patients/:patientId/signature-requests body.templateId':
@@ -208,6 +267,12 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // «no se puede vincular a un paciente de otra clínica (404)».
   'POST /patients/:patientId/responsible-parties body.responsiblePatientId':
     'patient-responsible-parties.e2e-spec.ts',
+  // DX-455: «aislamiento: no se liga la plantilla de otra clínica (404)»,
+  // en el alta y en la edición del procedimiento.
+  'POST /catalog/items body.clinicalNoteTemplateId':
+    'note-template-shortcuts.e2e-spec.ts',
+  'PATCH /catalog/items/:id body.clinicalNoteTemplateId':
+    'note-template-shortcuts.e2e-spec.ts',
   // «un ítem … de otra clínica … dan 400» (procedimiento de otra clínica).
   'POST /post-op-templates body.catalogItemIds[]':
     'post-op-templates.e2e-spec.ts',
@@ -220,6 +285,14 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // «una subida de otra clínica no sirve de soporte de una salida (404)».
   'POST /cash-sessions/current/outflows body.attachmentUploadId':
     'expense-cash-outflows.e2e-spec.ts',
+  // DX-389: «la subida del comprobante de otra clínica es 404» (abono a un
+  // plan, a un saldo migrado y en cada línea de un cobro dividido).
+  'POST /treatment-plans/:id/payments body.proofUploadId':
+    'payment-proofs.e2e-spec.ts',
+  'POST /opening-balances/:id/payments body.proofUploadId':
+    'payment-proofs.e2e-spec.ts',
+  'POST /treatment-plans/:id/split-payments body.lines[].proofUploadId':
+    'payment-proofs.e2e-spec.ts',
   // Una sede ajena en la lista, el resumen y sus CSV no devuelve nada.
   'GET /expenses ?locationId': 'expenses-reports.e2e-spec.ts',
   'GET /expenses.csv ?locationId': 'expenses-reports.e2e-spec.ts',

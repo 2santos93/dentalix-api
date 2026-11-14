@@ -2,12 +2,23 @@ import {
   BadRequestException,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma, TreatmentPlanStatus } from '@prisma/client';
 import { CreatePaymentPlanUseCase } from './create-payment-plan.use-case';
 import { InMemoryPaymentPlanRepository } from './__fixtures__/in-memory-payment-plan.repository';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
+import { CurrencyDigitsTable } from '../../../../shared/money/currency-digits';
+import { PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE } from './create-payment-plan.use-case';
+import {
+  AMOUNT_NON_NEGATIVE_MESSAGE,
+  DOWN_PAYMENT_EXCEEDS_MESSAGE,
+  DOWN_PAYMENT_MESSAGE,
+  TOTAL_TO_FINANCE_MESSAGE,
+  TOTAL_TO_FINANCE_POSITIVE_MESSAGE,
+} from '../../../../shared/money/currency-messages';
 
 function makeDeps(
   overrides: {
@@ -50,6 +61,7 @@ function makeDeps(
     repo,
     getTreatmentPlan,
     getPlanBalance,
+    referenceCurrencyDigitsCatalog(),
   );
   return { repo, getTreatmentPlan, getPlanBalance, useCase };
 }
@@ -103,6 +115,9 @@ describe('CreatePaymentPlanUseCase', () => {
     await expect(
       useCase.execute('tp-1', { ...baseInput, downPayment: 600 }, 'u1'),
     ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      useCase.execute('tp-1', { ...baseInput, downPayment: 600 }, 'u1'),
+    ).rejects.toThrow(DOWN_PAYMENT_EXCEEDS_MESSAGE);
   });
 
   it('rejects a non-positive resolved totalToFinance', async () => {
@@ -110,6 +125,48 @@ describe('CreatePaymentPlanUseCase', () => {
     await expect(
       useCase.execute('tp-1', baseInput, 'u1'),
     ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(useCase.execute('tp-1', baseInput, 'u1')).rejects.toThrow(
+      TOTAL_TO_FINANCE_POSITIVE_MESSAGE,
+    );
+  });
+
+  // DX-517-quater: los importes inválidos, en español neutro (texto exacto).
+  it.each([-1, NaN, Infinity])(
+    'downPayment %s: 400 con el texto en español',
+    async (downPayment) => {
+      const { useCase } = makeDeps({ balance: 500 });
+      await expect(
+        useCase.execute('tp-1', { ...baseInput, downPayment }, 'u1'),
+      ).rejects.toThrow(DOWN_PAYMENT_MESSAGE);
+    },
+  );
+
+  it.each([-1, NaN, Infinity])(
+    'totalToFinance %s: 400 con el texto en español',
+    async (totalToFinance) => {
+      const { useCase } = makeDeps({ balance: 500 });
+      await expect(
+        useCase.execute('tp-1', { ...baseInput, totalToFinance }, 'u1'),
+      ).rejects.toThrow(TOTAL_TO_FINANCE_MESSAGE);
+    },
+  );
+
+  it('los textos exactos', () => {
+    expect(DOWN_PAYMENT_MESSAGE).toBe(
+      'El pago inicial tiene que ser un número mayor o igual que 0.',
+    );
+    expect(TOTAL_TO_FINANCE_MESSAGE).toBe(
+      'El total a financiar tiene que ser un número mayor o igual que 0.',
+    );
+    expect(TOTAL_TO_FINANCE_POSITIVE_MESSAGE).toBe(
+      'El total a financiar tiene que ser mayor que 0.',
+    );
+    expect(DOWN_PAYMENT_EXCEEDS_MESSAGE).toBe(
+      'El pago inicial no puede superar el total a financiar.',
+    );
+    expect(AMOUNT_NON_NEGATIVE_MESSAGE).toBe(
+      'El importe tiene que ser un número mayor o igual que 0.',
+    );
   });
 
   it('rejects an invalid startDate', async () => {
@@ -154,6 +211,7 @@ describe('CreatePaymentPlanUseCase', () => {
       repo,
       getTreatmentPlan,
       getPlanBalance,
+      referenceCurrencyDigitsCatalog(),
     );
     const plan = await useCase.execute(
       'tp-1',
@@ -166,6 +224,55 @@ describe('CreatePaymentPlanUseCase', () => {
       'u1',
     );
     expect(plan.totalToFinance).toBe(1200); // gross billable, NOT the 1000 net balance
+  });
+
+  it('DX-488: en JPY (0 dígitos de redondeo) reparte en yenes enteros: 10000 en 3 = 3333, 3333, 3334', async () => {
+    const { useCase } = makeDeps({ planCurrency: 'JPY', balance: 10000 });
+    const plan = await useCase.execute(
+      'tp-1',
+      { ...baseInput, installmentsCount: 3 },
+      'u1',
+    );
+    expect(plan.installments.map((i) => i.amount)).toEqual([3333, 3333, 3334]);
+  });
+
+  it('DX-488: en USD y VES (2 dígitos) sigue al céntimo: 100 en 3 = 33.33, 33.33, 33.34', async () => {
+    for (const planCurrency of ['USD', 'VES']) {
+      const { useCase } = makeDeps({ planCurrency, balance: 100 });
+      const plan = await useCase.execute(
+        'tp-1',
+        { ...baseInput, installmentsCount: 3 },
+        'u1',
+      );
+      expect(plan.installments.map((i) => i.amount)).toEqual([
+        33.33, 33.33, 33.34,
+      ]);
+    }
+  });
+
+  it('DX-488: una moneda del plan que no está en el catálogo es un 422 en español, sin escribir', async () => {
+    const { repo, getTreatmentPlan, getPlanBalance } = makeDeps({
+      planCurrency: 'VES',
+    });
+    const useCase = new CreatePaymentPlanUseCase(
+      repo,
+      getTreatmentPlan,
+      getPlanBalance,
+      {
+        table: () =>
+          Promise.resolve(
+            new CurrencyDigitsTable([
+              { code: 'USD', minorUnits: 2, roundingDigits: 2 },
+            ]),
+          ),
+      },
+    );
+    const attempt = useCase.execute('tp-1', baseInput, 'u1');
+    await expect(attempt).rejects.toBeInstanceOf(UnprocessableEntityException);
+    await expect(attempt).rejects.toThrow(
+      PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE('VES'),
+    );
+    expect(await repo.findActiveByPlan('tp-1')).toBeNull();
   });
 
   it('rejects installmentsCount > 600', async () => {
@@ -209,6 +316,7 @@ describe('CreatePaymentPlanUseCase', () => {
       repo,
       getTreatmentPlan,
       getPlanBalance,
+      referenceCurrencyDigitsCatalog(),
     );
     await expect(
       useCase.execute('tp-1', baseInput, 'u1'),

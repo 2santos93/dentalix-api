@@ -8,28 +8,28 @@ import {
 
 describe('void window', () => {
   it('formatea el día civil en la zona dada', () => {
-    const instant = new Date('2026-10-16T02:00:00.000Z');
+    const instant = new Date('2026-10-16T01:00:00.000Z');
     expect(civilDateIn(instant, 'UTC')).toBe('2026-10-16');
-    expect(civilDateIn(instant, 'America/Bogota')).toBe('2026-10-15');
+    expect(civilDateIn(instant, 'America/Caracas')).toBe('2026-10-15');
   });
 
   it('compara días de la sede, no días UTC', () => {
-    const a = new Date('2026-10-16T04:59:00.000Z'); // 23:59 del 15 en Bogotá
-    const b = new Date('2026-10-16T05:00:00.000Z'); // 00:00 del 16 en Bogotá
+    const a = new Date('2026-10-16T03:59:00.000Z'); // 23:59 del 15 en la zona de la sede
+    const b = new Date('2026-10-16T04:00:00.000Z'); // 00:00 del 16 en la zona de la sede
     expect(isSameCivilDay(a, b, 'UTC')).toBe(true);
-    expect(isSameCivilDay(a, b, 'America/Bogota')).toBe(false);
+    expect(isSameCivilDay(a, b, 'America/Caracas')).toBe(false);
   });
 });
 
 describe('voidDenial / canVoidPayment (regla de anulación, DX-057)', () => {
-  // 2026-10-16 10:00 en Bogotá (UTC-5).
-  const NOW = new Date('2026-10-16T15:00:00.000Z');
+  // 2026-10-16 10:00 en la zona de la sede (UTC-4).
+  const NOW = new Date('2026-10-16T14:00:00.000Z');
   const RECEPTION = { userId: 'u-recep', role: ClinicRole.RECEPTION };
   const ADMIN = { userId: 'u-admin', role: ClinicRole.ADMIN };
   const ownToday = {
     createdById: 'u-recep',
-    createdAt: new Date('2026-10-16T13:00:00.000Z'),
-    timeZone: 'America/Bogota',
+    createdAt: new Date('2026-10-16T12:00:00.000Z'),
+    timeZone: 'America/Caracas',
   };
 
   it('recepción puede anular un abono suyo registrado hoy en la sede', () => {
@@ -46,10 +46,10 @@ describe('voidDenial / canVoidPayment (regla de anulación, DX-057)', () => {
   });
 
   it('recepción no puede anular un abono suyo de otro día de la sede', () => {
-    // 23:30 del 15 en Bogotá: ya es 16 en UTC, pero no "hoy" en la sede.
+    // 23:30 del 15 en la zona de la sede: ya es 16 en UTC, pero no "hoy" en la sede.
     const yesterday = {
       ...ownToday,
-      createdAt: new Date('2026-10-16T04:30:00.000Z'),
+      createdAt: new Date('2026-10-16T03:30:00.000Z'),
     };
     expect(voidDenial(yesterday, RECEPTION, NOW)).toBe('NOT_SAME_DAY');
     expect(canVoidPayment(yesterday, RECEPTION, NOW)).toBe(false);
@@ -64,7 +64,7 @@ describe('voidDenial / canVoidPayment (regla de anulación, DX-057)', () => {
         {
           createdById: null,
           createdAt: new Date('2025-01-01T00:00:00.000Z'),
-          timeZone: 'America/Bogota',
+          timeZone: 'America/Caracas',
         },
         ADMIN,
         NOW,

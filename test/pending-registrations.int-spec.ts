@@ -9,7 +9,7 @@ import {
 } from '../src/modules/auth/application/registration-token';
 import type { ClinicLocationSettings } from '../src/modules/auth/domain/ports/auth-repository.port';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
 } from './support/location-fixtures';
@@ -25,12 +25,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const EMAIL = 'registro.int@dx029.test';
 // G1: la primera sede del pendiente; datos de test con nombre, no defaults.
-const BOGOTA_LOCATION: ClinicLocationSettings = {
-  country: REGIONAL_BOGOTA_FIXTURE.country,
-  currency: REGIONAL_BOGOTA_FIXTURE.currency,
-  timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
-  locale: REGIONAL_BOGOTA_FIXTURE.locale,
-  hourCycle: REGIONAL_BOGOTA_FIXTURE.hourCycle,
+const CARACAS_LOCATION: ClinicLocationSettings = {
+  country: REGIONAL_CARACAS_FIXTURE.country,
+  currency: REGIONAL_CARACAS_FIXTURE.currency,
+  timeZone: REGIONAL_CARACAS_FIXTURE.timeZone,
+  locale: REGIONAL_CARACAS_FIXTURE.locale,
+  hourCycle: REGIONAL_CARACAS_FIXTURE.hourCycle,
 };
 const TOKYO_LOCATION: ClinicLocationSettings = {
   country: REGIONAL_TOKYO_FIXTURE.country,
@@ -59,7 +59,7 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     token: string,
     subdomain = 'reg-int',
     replaceCreatedBefore = new Date(Date.now() + 60_000),
-    location: ClinicLocationSettings = BOGOTA_LOCATION,
+    location: ClinicLocationSettings = CARACAS_LOCATION,
   ) =>
     repo.savePending({
       replaceCreatedBefore,
@@ -252,14 +252,39 @@ describe('PrismaRegistrationRepository (int, DX-029)', () => {
     const row = await repo.findPendingByTokenHash(hashRegistrationToken(token));
 
     const results = await Promise.all([
-      repo.consumePending(row!.id),
-      repo.consumePending(row!.id),
+      repo.consumePending(row!.id, hashRegistrationToken(token)),
+      repo.consumePending(row!.id, hashRegistrationToken(token)),
     ]);
 
     expect(results.filter(Boolean)).toHaveLength(1);
     expect(
       await repo.findPendingByTokenHash(hashRegistrationToken(token)),
     ).toBeNull();
+  });
+
+  it('DX-149-bis: un registro que reemplaza al pendiente en su sitio (mismo id) deja al enlace viejo sin poder consumirlo', async () => {
+    const oldToken = generateRegistrationToken();
+    await save(oldToken);
+    const old = await repo.findPendingByTokenHash(
+      hashRegistrationToken(oldToken),
+    );
+    const newToken = generateRegistrationToken();
+    // Pasado el enfriamiento: reemplaza la fila (mismo id, otro token).
+    expect(await save(newToken, 'reg-int-nuevo')).toBe(true);
+    const replaced = await repo.findPendingByTokenHash(
+      hashRegistrationToken(newToken),
+    );
+    expect(replaced?.id).toBe(old!.id);
+
+    expect(
+      await repo.consumePending(old!.id, hashRegistrationToken(oldToken)),
+    ).toBe(false);
+    expect(
+      await repo.findPendingByTokenHash(hashRegistrationToken(newToken)),
+    ).not.toBeNull();
+    expect(
+      await repo.consumePending(old!.id, hashRegistrationToken(newToken)),
+    ).toBe(true);
   });
 
   it('guardar uno nuevo purga los caducados (guardan email y hash de contraseña)', async () => {

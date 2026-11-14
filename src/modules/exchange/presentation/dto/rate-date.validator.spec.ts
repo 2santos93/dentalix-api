@@ -11,7 +11,7 @@ const DTOS = [
   ['GetRatesQueryDto', (date: unknown) => ({ date }), GetRatesQueryDto],
   [
     'ConvertQueryDto',
-    (date: unknown) => ({ amount: '100', from: 'usd', to: 'cop', date }),
+    (date: unknown) => ({ amount: '100', from: 'usd', to: 'usd', date }),
     ConvertQueryDto,
   ],
 ] as const;

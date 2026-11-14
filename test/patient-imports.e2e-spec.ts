@@ -176,7 +176,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         firstName: 'Ya',
         lastName: 'Existía',
         sex: 'UNSPECIFIED',
-        phone: '3009999999',
+        phone: '4129999999',
       })
       .expect(201);
     existingId = (existing.body as { id: string }).id;
@@ -253,10 +253,10 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
   it('dry-run: totales, duplicados y errores por fila en español SIN escribir pacientes', async () => {
     const before = await livePatients();
     const bytes = csvOf([
-      'NATIONAL_ID;1.000.001;Ana;Nueva;03/05/1990;F;310 123 4567;ana@example.com;', // 2 válida
+      'NATIONAL_ID;1.000.001;Ana;Nueva;03/05/1990;F;414 123 4567;ana@example.com;', // 2 válida
       'NATIONAL_ID;1000002;Luis;Nuevo;;M;;;', // 3 válida
       'NATIONAL_ID;1000001;Ana;Repetida;;;;;', // 4 repetida en el archivo
-      'NATIONAL_ID;900900;Nombre;Distinto;1980-01-01;F;3001111111;ya@example.com;nota', // 5 ya existe
+      'NATIONAL_ID;900900;Nombre;Distinto;1980-01-01;F;4121111111;ya@example.com;nota', // 5 ya existe
       'NATIONAL_ID;700700;Choque;Tipo;;;;;', // 6 mismo nº con otro tipo
       ';;;SinNombre;31/02/1990;Q;abc;=HYPERLINK("http://x");', // 7 errores
       'NATIONAL_ID;1000003;Eva;Nueva;;;;;', // 8 válida
@@ -304,7 +304,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     ]);
     expect(firstBatch.preview[0].data).toMatchObject({
       docNumber: '1000001',
-      phone: '+573101234567',
+      phone: '+584141234567',
     });
     expect(await livePatients()).toBe(before);
     const [event] = await auditOf(firstBatch.id);
@@ -418,7 +418,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect(existing).toMatchObject({
       firstName: 'Ya',
       lastName: 'Existía',
-      phone: '3009999999',
+      phone: '4129999999',
       email: 'ya@example.com',
       sex: 'F',
       notes: 'nota',
@@ -534,7 +534,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
       csvOf([
         'NATIONAL_ID;2000001;Nuevo;Uno;;;;;',
         'NATIONAL_ID;2000002;Nuevo;Dos;;;;;',
-        'NATIONAL_ID;800800;X;Y;1970-07-07;;3105550000;relleno@example.com;',
+        'NATIONAL_ID;800800;X;Y;1970-07-07;;4145550000;relleno@example.com;',
       ]),
       'segundo.csv',
     ).expect(201);
@@ -626,7 +626,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         'Hoja',
         'Excel',
         { date: 32874 },
-        3101234567,
+        4141234567,
       ],
     ]);
     const res = await as(api().post('/api/v1/patient-imports'), a.adminToken)
@@ -640,7 +640,7 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
     expect((res.body as Batch).preview[0].data).toMatchObject({
       docNumber: '3000001',
       birthDate: '1990-01-01',
-      phone: '+573101234567',
+      phone: '+584141234567',
     });
   });
 
@@ -688,6 +688,74 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         bulkCsv(10_001, '6'),
         'muchas.csv',
       ).expect(409);
+      expect(unclocked.body).toMatchObject({
+        code: 'LOCATION_LOCALE_REQUIRED',
+        locationId: mainLocationId,
+      });
+    } finally {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: before,
+      });
+    }
+  });
+
+  it('DX-354: el tope de celdas del .xlsx dice su cifra con el formato de la sede, y sin reloj es 409', async () => {
+    // Una fila con más celdas que la última columna de Excel (XFD = 16.384).
+    const book = zip([
+      {
+        name: 'xl/workbook.xml',
+        data: Buffer.from(
+          '<workbook><sheets><sheet name="a" r:id="rId1"/></sheets></workbook>',
+        ),
+      },
+      {
+        name: 'xl/_rels/workbook.xml.rels',
+        data: Buffer.from(
+          '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+        ),
+      },
+      {
+        name: 'xl/worksheets/sheet1.xml',
+        data: Buffer.from(
+          `<worksheet><sheetData><row r="1">${'<c/>'.repeat(20_000)}</row></sheetData></worksheet>`,
+        ),
+      },
+    ]);
+    const send = () =>
+      as(api().post('/api/v1/patient-imports'), a.adminToken).attach(
+        'file',
+        book,
+        {
+          filename: 'ancho.xlsx',
+          contentType:
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      );
+    const before = await raw.location.findUniqueOrThrow({
+      where: { id: mainLocationId },
+      select: { locale: true, hourCycle: true },
+    });
+    const messageAt = async (locale: string, hourCycle: string) => {
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: { locale, hourCycle },
+      });
+      const res = await send().expect(400);
+      return (res.body as { message: string }).message.replace(
+        /[\u202f\u00a0]/g,
+        ' ',
+      );
+    };
+    try {
+      expect(await messageAt('en-US', 'h12')).toContain('más de 16,384 celdas');
+      expect(await messageAt('de-DE', 'h23')).toContain('más de 16.384 celdas');
+      expect(await messageAt('fr-FR', 'h23')).toContain('más de 16 384 celdas');
+      await raw.location.update({
+        where: { id: mainLocationId },
+        data: { hourCycle: null },
+      });
+      const unclocked = await send().expect(409);
       expect(unclocked.body).toMatchObject({
         code: 'LOCATION_LOCALE_REQUIRED',
         locationId: mainLocationId,
@@ -1008,6 +1076,47 @@ describe('Importación de pacientes — /patient-imports (DX-107, e2e)', () => {
         FROM "patients"
        WHERE "import_batch_id" = ${importBatchId}::uuid
        ORDER BY "docNumber"`;
+
+  it('DX-497: la columna opcional «idioma» acepta los de la lista de la clínica', async () => {
+    await as(api().put('/api/v1/patients/languages'), a.adminToken)
+      .send({ languages: ['es', 'en'] })
+      .expect(200);
+    const bytes = Buffer.from(
+      [
+        'tipo_documento;numero_documento;nombres;apellidos;idioma',
+        'NATIONAL_ID;RX-4971;Ana;Idioma;EN',
+        'NATIONAL_ID;RX-4972;Luis;Idioma;',
+        'NATIONAL_ID;RX-4973;Eva;Idioma;fr',
+      ].join('\n') + '\n',
+      'utf8',
+    );
+    const dry = (await upload('', bytes, 'idiomas.csv').expect(201))
+      .body as Batch;
+    expect(dry.issues).toEqual([
+      expect.objectContaining({
+        row: 4,
+        column: 'idioma',
+        kind: 'ERROR',
+        value: 'fr',
+      }),
+    ]);
+    await as(
+      api().post(`/api/v1/patient-imports/${dry.id}/confirm`),
+      a.adminToken,
+    )
+      .send({ duplicateMode: 'SKIP' })
+      .expect(200);
+    await drain();
+    const created = await raw.patient.findMany({
+      where: { importBatchId: dry.id },
+      select: { firstName: true, preferredLanguage: true },
+      orderBy: { firstName: 'asc' },
+    });
+    expect(created).toEqual([
+      { firstName: 'Ana', preferredLanguage: 'en' },
+      { firstName: 'Luis', preferredLanguage: null },
+    ]);
+  });
 
   it('a file with generic types imports every type and stores only the generic one', async () => {
     const bytes = csvOf([

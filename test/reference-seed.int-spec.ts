@@ -44,17 +44,17 @@ describe('reference seed', () => {
     await seedRaw.$disconnect();
   });
 
-  it('has USD and COP currencies with a symbol', async () => {
+  it('has USD and VES currencies with a symbol', async () => {
     const usd = await seedRaw.currency.findUnique({ where: { code: 'USD' } });
-    const cop = await seedRaw.currency.findUnique({ where: { code: 'COP' } });
+    const ves = await seedRaw.currency.findUnique({ where: { code: 'VES' } });
     expect(usd?.symbol).toBe('$');
-    expect(cop?.name).toMatch(/colombiano/i);
+    expect(ves?.name).toMatch(/venezolano/i);
   });
 
-  it('has Colombia and at least one Colombian city', async () => {
-    const co = await seedRaw.country.findUnique({ where: { code: 'CO' } });
-    expect(co?.name).toBe('Colombia');
-    const cities = await seedRaw.city.count({ where: { countryCode: 'CO' } });
+  it('has Venezuela and at least one Venezuelan city', async () => {
+    const ve = await seedRaw.country.findUnique({ where: { code: 'VE' } });
+    expect(ve?.name).toBe('Venezuela');
+    const cities = await seedRaw.city.count({ where: { countryCode: 'VE' } });
     expect(cities).toBeGreaterThan(0);
   });
 });

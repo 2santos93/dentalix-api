@@ -2,6 +2,7 @@ import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import {
   locationLocaleRequired,
+  locationRegionalOrNull,
   requireLocationFormat,
   resolveLocationRegional,
 } from './location-regional';
@@ -165,5 +166,41 @@ describe('resolveLocationRegional (estricto, la zona primero)', () => {
     const tx = txWith([]);
     await resolveLocationRegional(tx, TENANT, []);
     expect(tx.$queryRaw).not.toHaveBeenCalled();
+  });
+});
+
+describe('locationRegionalOrNull (DX-521, PF2)', () => {
+  it('devuelve zona, locale canónico y reloj de una sede con los tres ajustes válidos', () => {
+    expect(locationRegionalOrNull(NEW_YORK)).toEqual({
+      timeZone: 'America/New_York',
+      locale: 'en-US',
+      hourCycle: 'h12',
+    });
+  });
+
+  it('congela el locale canónico de Intl, no el texto crudo de la columna', () => {
+    expect(locationRegionalOrNull({ ...BERLIN, locale: 'de-de' })?.locale).toBe(
+      'de-DE',
+    );
+  });
+
+  it.each([
+    ['sin zona', { ...BERLIN, timeZone: null }],
+    ['zona vacía', { ...BERLIN, timeZone: '' }],
+    [
+      'zona que este runtime no conoce',
+      { ...BERLIN, timeZone: 'Mars/Olympus' },
+    ],
+    ['sin locale', { ...BERLIN, locale: null }],
+    ['locale no soportado', { ...BERLIN, locale: 'zz-ZZ-not-a-tag-!!' }],
+    ['sin reloj', { ...BERLIN, hourCycle: null }],
+    ['reloj inválido', { ...BERLIN, hourCycle: 'h11' }],
+  ])('%s: null, sin lanzar', (_label, row) => {
+    expect(locationRegionalOrNull(row)).toBeNull();
+  });
+
+  it('un valor ausente (undefined) también es null', () => {
+    expect(locationRegionalOrNull({})).toBeNull();
+    expect(locationRegionalOrNull(null)).toBeNull();
   });
 });

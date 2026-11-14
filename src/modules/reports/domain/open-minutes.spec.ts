@@ -9,7 +9,7 @@ const WEEK = [
   ...DEFAULT_WEEK,
   { weekday: 6, startMinute: 540, endMinute: 780 },
 ];
-const BOGOTA = 'America/Bogota';
+const CARACAS = 'America/Caracas';
 
 describe('openMinutes (DX-014)', () => {
   it('suma los tramos de cada día del período según su día de la semana', () => {
@@ -18,7 +18,7 @@ describe('openMinutes (DX-014)', () => {
       openMinutes({
         from: '2026-10-19',
         to: '2026-10-25',
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         ranges: WEEK,
         closures: [],
       }),
@@ -30,7 +30,7 @@ describe('openMinutes (DX-014)', () => {
       openMinutes({
         from: '2026-10-19',
         to: '2026-10-19',
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         ranges: [
           { weekday: 1, startMinute: 540, endMinute: 720 },
           { weekday: 1, startMinute: 660, endMinute: 780 },
@@ -41,13 +41,13 @@ describe('openMinutes (DX-014)', () => {
   });
 
   it('descuenta los cierres de toda la sede que caen en horario', () => {
-    // Lunes 2026-10-19, cierre de 12:00 a 16:00 (Bogotá = UTC-5): quita
+    // Lunes 2026-10-19, cierre de 12:00 a 16:00 (zona de la sede UTC-4): quita
     // 12-13 y 15-16 → 480 − 120.
     expect(
       openMinutes({
         from: '2026-10-19',
         to: '2026-10-19',
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         ranges: WEEK,
         closures: [
           {
@@ -64,7 +64,7 @@ describe('openMinutes (DX-014)', () => {
       openMinutes({
         from: '2026-10-19',
         to: '2026-10-20',
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         ranges: WEEK,
         closures: [
           // Todo el lunes, dos veces (vacaciones registradas por duplicado).
@@ -109,7 +109,7 @@ describe('openMinutes (DX-014)', () => {
       openMinutes({
         from: '2026-10-01',
         to: '2026-10-31',
-        timeZone: BOGOTA,
+        timeZone: CARACAS,
         ranges: [],
         closures: [],
       }),
@@ -129,7 +129,7 @@ describe('capacityMinutes (BE-042, DX-305)', () => {
     startMinute: 9 * 60,
     endMinute: 13 * 60,
   }));
-  const week = { from: '2026-10-19', to: '2026-10-23', timeZone: BOGOTA };
+  const week = { from: '2026-10-19', to: '2026-10-23', timeZone: CARACAS };
   const provider = (
     ranges: typeof WEEKDAYS_9_TO_17,
     extra: Partial<Parameters<typeof capacityMinutes>[0]['providers'][0]> = {},

@@ -31,7 +31,10 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { GetReceivablesAgingUseCase } from '../application/use-cases/get-receivables-aging.use-case';
+import { ListCreditBalancesUseCase } from '../application/use-cases/list-credit-balances.use-case';
 import { toReceivablesCsv } from '../application/receivables-csv';
+import { CreditBalancesQueryDto } from './dto/credit-balances-query.dto';
+import { CreditBalancesPageDto } from './dto/credit-balances.dto';
 import {
   ReceivablesAgingFiltersDto,
   ReceivablesAgingQueryDto,
@@ -68,6 +71,7 @@ const LOCATION_HEADER = {
 export class ReceivablesController {
   constructor(
     private readonly getAging: GetReceivablesAgingUseCase,
+    private readonly listCredit: ListCreditBalancesUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -75,7 +79,7 @@ export class ReceivablesController {
    * Sede explícita (DX-089: tiene que ser permitida, si no 403) o la del
    * request. Sin ninguna, el repositorio acota a las sedes permitidas.
    */
-  private locationOf(query: ReceivablesAgingFiltersDto): string | undefined {
+  private locationOf(query: { locationId?: string }): string | undefined {
     if (query.locationId) {
       this.tenantContext.assertLocationAllowed(query.locationId);
     }
@@ -83,14 +87,21 @@ export class ReceivablesController {
   }
 
   // Inicio (I1): solo los totales por moneda (pacientes, saldo, tramos), sin
-  // ninguna fila de paciente ni teléfono, así que no lleva @Audit (mismo
-  // criterio que GET /closing-queue/count). Mismos filtros, sede y roles que
-  // la lista: los totales son los mismos que pinta la cabecera de la cartera.
+  // ninguna fila de paciente ni teléfono. Mismos filtros, sede y roles que la
+  // lista: los totales son los mismos que pinta la cabecera de la cartera.
+  // SEC-043 (revisión M2): sí se audita. La diferencia del saldo total entre
+  // dos consultas aproxima lo abonado entre ellas (el esperado de una caja
+  // abierta con arqueo ciego): el ADMIN ve quién lo consultó y cuándo.
+  @Audit({
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_AGING_SUMMARY',
+  })
   @Get('aging/summary')
   @ApiOperation({
     summary: 'Totales de la cartera por antigüedad, sin pacientes',
     description:
-      'Los `totals` de GET /receivables/aging con los mismos filtros, sin filas. Por moneda, sin convertir.',
+      'Los `totals` de GET /receivables/aging con los mismos filtros, sin filas. Por moneda; lo abonado en otra moneda, convertido a la del plan (DX-472-bis).',
   })
   @ApiHeader(LOCATION_HEADER)
   @ApiOkResponse({ type: ReceivablesAgingSummaryDto })
@@ -111,7 +122,13 @@ export class ReceivablesController {
       page: 1,
       pageSize: 1,
     });
-    return { asOf: page.asOf, scope: page.scope, totals: page.totals };
+    return {
+      asOf: page.asOf,
+      scope: page.scope,
+      totals: page.totals,
+      paymentsWithoutRateCount: page.paymentsWithoutRateCount,
+      rateProviderTimedOut: page.rateProviderTimedOut,
+    };
   }
 
   @Audit({
@@ -127,8 +144,10 @@ export class ReceivablesController {
       'El saldo de cada paciente es el de su estado de cuenta (mismo cálculo), ' +
       'repartido por antigüedad: cada cuota desde su vencimiento; el saldo sin ' +
       'cuotas desde la aceptación (o presentación, o creación) del plan, con ' +
-      '`ageApproximate`. Días civiles de la zona de la sede. Por moneda, sin ' +
-      'convertir; el saldo a favor va aparte. Sin datos clínicos. DX-150: ' +
+      '`ageApproximate`. Días civiles de la zona de la sede. Por moneda; lo ' +
+      'abonado en otra moneda cuenta convertido a la del plan, como en el ' +
+      'estado de cuenta (DX-472-bis; avisos `paymentsWithoutRateCount` y ' +
+      '`rateProviderTimedOut`); el saldo a favor va aparte. Sin datos clínicos. DX-150: ' +
       'cada fila trae su última gestión de cobro y su último compromiso de ' +
       'pago; filtros `providerId` y `hasPromise`.',
   })
@@ -148,6 +167,46 @@ export class ReceivablesController {
       minAgeDays: query.minAgeDays,
       providerId: query.providerId,
       hasPromise: query.hasPromise,
+      page: query.page,
+      pageSize: query.pageSize,
+    });
+  }
+
+  // Saldo a favor por paciente (DX-430): dinero de varios pacientes que la
+  // clínica debe aplicar o devolver. Mismos roles, sede y auditoría que la
+  // lista de la cartera; el evento no lleva paciente (es una lista).
+  @Audit({
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_CREDIT_BALANCES',
+  })
+  @Get('credit-balances')
+  @ApiOperation({
+    summary: 'Pacientes con saldo a favor, por sede y moneda',
+    description:
+      'Una fila por paciente, sede y moneda, con el saldo a favor que dice su estado de ' +
+      'cuenta (mismo cálculo: lo abonado de más o en un plan cancelado o rechazado, ' +
+      'ya descontados traspasos y devoluciones; un plan con deuda no lo compensa; la ' +
+      'suma de las filas de un paciente en una moneda es la del estado de cuenta). La ' +
+      'sede es donde está el dinero: la del plan que lo originó o, sin ella, la del ' +
+      'abono que lo creó, no la de la última cita. `locationId` y las sedes del ' +
+      'miembro filtran por esa sede. Antigüedad: día civil del abono que originó el ' +
+      'saldo, en la zona de su sede. Orden: moneda (código ISO), importe descendente, ' +
+      'paciente. Paginada por desplazamiento como la cartera por antigüedad. Sin ' +
+      'datos clínicos. Solo administración y recepción.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: CreditBalancesPageDto })
+  @ApiBadRequestResponse({
+    description: 'Filtro inválido o sede que no es de esta clínica',
+  })
+  @ApiForbiddenResponse({ description: RECEIVABLES_FORBIDDEN_MESSAGE })
+  creditBalances(
+    @Query() query: CreditBalancesQueryDto,
+  ): Promise<CreditBalancesPageDto> {
+    return this.listCredit.execute({
+      locationId: this.locationOf(query),
+      currency: query.currency,
       page: query.page,
       pageSize: query.pageSize,
     });

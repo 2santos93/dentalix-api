@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
+import { PaymentAdjustmentLineDto } from './payment-adjustment-line.dto';
+import {
+  PaymentAdjustmentType,
+  PaymentMethod,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 
 // Forma de la respuesta de `GET /payments` (la caja). Existe solo para
 // documentar el contrato en Swagger —de ahí sale el tipo del cliente web vía
@@ -106,11 +111,27 @@ export class CashPaymentDto {
   })
   registeredToday!: boolean;
 
-  @ApiProperty({ example: 150000 })
-  amount!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 150000,
+    description: 'SEC-043: `null` con `amountHidden`.',
+  })
+  amount!: number | null;
 
-  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
-  currency!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Código ISO 4217 de 3 letras. SEC-043: `null` con `amountHidden`.',
+  })
+  currency!: string | null;
+
+  @ApiProperty({
+    description:
+      'SEC-043: rige el arqueo ciego, quien consulta no es ADMIN y el abono cuenta en una caja aún abierta. Va sin `amount`, `currency`, `collectedAmount`, `notes` ni `reference` (null) y sin `adjustments` (vacío), y no suma en el resumen. Recibo y anulación funcionan igual. Las cifras vuelven al cerrar la caja.',
+  })
+  amountHidden!: boolean;
 
   @ApiProperty({ enum: PaymentMethod, nullable: true })
   method!: PaymentMethod | null;
@@ -125,6 +146,14 @@ export class CashPaymentDto {
 
   @ApiProperty({ type: String, nullable: true })
   reference!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-515: nº de la factura fiscal emitida fuera de Dentalix; null si no se anotó.',
+  })
+  externalInvoiceNumber!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   notes!: string | null;
@@ -168,6 +197,39 @@ export class CashPaymentDto {
       'que el filtro no muestra); `null` en un abono suelto.',
   })
   splitLines!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'PRI-000123',
+    description:
+      'DX-414: número del recibo de caja del abono (DX-136); todas las líneas ' +
+      'de un cobro dividido llevan el de su recibo único. `null` en un abono ' +
+      'anterior a la numeración.',
+  })
+  receiptNumber!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-389: el abono tiene comprobante del cobro. Se ve con `GET /payments/:id/proof/url`.',
+  })
+  hasProof!: boolean;
+
+  @ApiProperty({
+    type: [PaymentAdjustmentLineDto],
+    description:
+      'DX-516: ajustes por medio de pago congelados en el abono (vacío sin ajustes).',
+  })
+  adjustments!: PaymentAdjustmentLineDto[];
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 103,
+    description:
+      'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe). El saldo del plan se mueve por `amount`. SEC-043: `null` con `amountHidden`.',
+  })
+  collectedAmount!: number | null;
 }
 
 export class CashCurrencyTotalDto {
@@ -223,6 +285,33 @@ export class CashPaymentMethodTotalDto {
   count!: number;
 }
 
+/** DX-516: total de los ajustes por medio de pago del período, por moneda y tipo. */
+export class CashAdjustmentTotalDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({
+    enum: PaymentAdjustmentType,
+    enumName: 'PaymentAdjustmentType',
+  })
+  type!: PaymentAdjustmentType;
+
+  @ApiProperty({ example: 3, description: 'Suma (en positivo) sin convertir.' })
+  total!: number;
+
+  @ApiProperty({ example: 1, description: 'Número de líneas de ajuste.' })
+  count!: number;
+}
+
+/** DX-516: lo cobrado del período en UNA moneda (abonos ± ajustes). */
+export class CashCollectedTotalDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({ example: 103 })
+  total!: number;
+}
+
 export class CashPaymentsSummaryDto {
   @ApiProperty({ description: 'Número de abonos del período' })
   count!: number;
@@ -245,6 +334,20 @@ export class CashPaymentsSummaryDto {
     description: 'DX-377: total por medio de pago de la clínica y moneda.',
   })
   byPaymentMethod!: CashPaymentMethodTotalDto[];
+
+  @ApiProperty({
+    type: [CashAdjustmentTotalDto],
+    description:
+      'DX-516: ajustes por medio de pago de los abonos del período, por moneda y tipo (vacío sin ajustes).',
+  })
+  adjustments!: CashAdjustmentTotalDto[];
+
+  @ApiProperty({
+    type: [CashCollectedTotalDto],
+    description:
+      'DX-516: lo cobrado por moneda: abonos + impuestos + recargos − descuentos (sin ajustes, igual que `byCurrency`).',
+  })
+  collected!: CashCollectedTotalDto[];
 }
 
 export class CashScopeDto {
@@ -286,4 +389,10 @@ export class CashPaymentsResponseDto {
     description: 'Resumen del período entero con los mismos filtros.',
   })
   summary!: CashPaymentsSummaryDto;
+
+  @ApiProperty({
+    description:
+      'SEC-043: rige el arqueo ciego y quien consulta no es ADMIN: el resumen no suma los abonos que cuentan en una caja aún abierta y esas filas van sin importe (`amountHidden`). Las cifras vuelven al cerrarla.',
+  })
+  blindHidden!: boolean;
 }

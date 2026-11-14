@@ -1,3 +1,4 @@
+import { ReferenceRateDto } from '../../../discounts/presentation/dto/reference-rate.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   DiscountReason,
@@ -52,12 +53,60 @@ export class TreatmentPlanItemDto {
   basePrice!: number | null;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-502: moneda de `basePrice`, la del catálogo (común a las sedes activas) al dar de alta el ítem, congelada. Null si no había una común o no hay precio de catálogo. Puede no ser la del plan: no se convierte.',
+  })
+  catalogCurrency!: string | null;
+
+  @ApiProperty({
     enum: PriceSource,
     nullable: true,
     description:
       'DX-105: de dónde salió `catalogPrice` (convenio por %, lista del convenio, lista de la sede o catálogo). Null en ítems anteriores a DX-105.',
   })
   priceSource!: PriceSource | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-513-bis: moneda de `catalogPrice` al escribir el ítem (la del plan para las listas, la del catálogo para el resto). Null si no se supo, en los libres y en los anteriores sin foto.',
+  })
+  referenceCurrency!: string | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `catalogPrice` en la moneda del plan, congelado al escribir el ítem (convertido con `referenceRate` si su moneda era otra). Es la referencia del descuento: un precio por debajo cuenta (tope por rol y motivo). Null en los libres y en los anteriores sin foto (se miden como en DX-513).',
+  })
+  referencePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-513-bis: `basePrice` en la moneda del plan, congelado con la referencia. DX-513-ter: en una lista de convenio con el catálogo en otra moneda, convertido con `baseRate`. Null si no hay o no había tasa para expresarlo.',
+  })
+  basePriceInPlan!: number | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-bis: la tasa (de la moneda del catálogo a la del plan) con que se convirtió la referencia (`catalogPrice` en `referenceCurrency`); null si no hizo falta. DX-513-ter: siempre null en las listas (`PRICE_LIST`, `AGREEMENT_PRICE_LIST`), cuya referencia ya está en la moneda del plan: su tasa va en `baseRate`.',
+  })
+  referenceRate!: ReferenceRateDto | null;
+
+  @ApiProperty({
+    type: () => ReferenceRateDto,
+    nullable: true,
+    description:
+      'DX-513-ter: en un ítem de lista de convenio con el catálogo en otra moneda, la tasa del día (de `catalogCurrency` a la del plan) con que se convirtió `basePrice` a `basePriceInPlan`, congelada al darlo de alta. Null si no hizo falta, si no había tasa ese día o si el ítem no es de lista.',
+  })
+  baseRate!: ReferenceRateDto | null;
 
   @ApiProperty({
     type: String,
@@ -184,4 +233,49 @@ export class TreatmentPlanItemDto {
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
+}
+
+/** DX-015-bis (D9): el tipo del recall que sustituye a uno desactivado. */
+export class RecallReplacementDto {
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+  @ApiProperty({ example: 'Mantenimiento periodontal' })
+  recallTypeName!: string;
+}
+
+/** DX-015-bis: un recall que movió el cambio del ítem. */
+export class ItemRecallUpdateDto {
+  @ApiProperty({ format: 'uuid' })
+  recallId!: string;
+  @ApiProperty({ format: 'uuid' })
+  recallTypeId!: string;
+  @ApiProperty({ example: 'Higiene' })
+  recallTypeName!: string;
+  @ApiProperty({
+    format: 'date',
+    example: '2027-10-10',
+    description: 'Vencimiento del recall tras el cambio (día civil)',
+  })
+  dueAt!: string;
+  @ApiProperty({
+    description:
+      'D9: la exclusión lo acaba de desactivar porque otro recall de un tipo del mismo grupo pasó a activo («Recall de Higiene desactivado: lo sustituye Mantenimiento periodontal»). Sigue ahí (inactivo): reactivarlo es un PUT o un DONE posterior de su procedimiento.',
+  })
+  deactivated!: boolean;
+  @ApiProperty({
+    type: RecallReplacementDto,
+    nullable: true,
+    description: 'El tipo que lo sustituye; null si no se desactivó',
+  })
+  replacedBy!: RecallReplacementDto | null;
+}
+
+/** DX-015-bis: respuesta del PATCH del ítem (el ítem y los recalls que movió). */
+export class UpdatedTreatmentPlanItemDto extends TreatmentPlanItemDto {
+  @ApiProperty({
+    type: [ItemRecallUpdateDto],
+    description:
+      'Recalls que creó, recalculó o reactivó el cambio (DONE, salida de DONE o corrección de fecha o sede de un procedimiento disparador) y, tras ellos, los que la exclusión desactivó (`deactivated: true`); vacío si ninguno',
+  })
+  recallUpdates!: ItemRecallUpdateDto[];
 }

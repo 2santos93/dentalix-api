@@ -1,16 +1,20 @@
 import {
-  AppointmentReminderEmailVars,
+  DEFAULT_EMAIL_LOCALE,
+  EMAIL_LOCALES,
   EmailBrand,
   EmailLocale,
   EmailTemplateName,
   EmailVarsByTemplate,
   EmailVerifyEmailVars,
   InvitationEmailVars,
+  MfaEnrollmentCodeEmailVars,
+  MfaNoticeEmailVars,
   PasswordResetEmailVars,
   PaymentReceiptEmailVars,
+  PaymentReceiptSummaryEmailVars,
   PostOpInstructionsEmailVars,
+  LOCALIZED_EMAIL_TEMPLATES,
   RegistrationNoticeEmailVars,
-  ReminderCancellationPolicyVars,
   RenderedEmail,
   SignatureBudgetAcceptedEmailVars,
   SignatureCodeEmailVars,
@@ -19,7 +23,10 @@ import {
   SignedConsentCopyEmailVars,
 } from '../../domain/email-message';
 import { EmailBlock, renderLayout } from './layout';
-import { endSentence } from '../../../../../shared/format/end-sentence';
+import { appointmentReminder } from './appointment-reminder.template';
+
+// DX-497: re-exportado para quien ya lo importaba de aquí (vista previa).
+export { cancellationPolicyText } from './appointment-reminder.template';
 
 const PRODUCT_NAME = 'Dentalix';
 
@@ -119,83 +126,6 @@ function registrationNotice(
   });
 }
 
-/**
- * DX-291: el texto de `{politica_cancelacion}` en el recordatorio: cuántas
- * horas de aviso pide la sede, el texto de la clínica y el cargo, si lo hay.
- */
-export function cancellationPolicyText(
-  policy: ReminderCancellationPolicyVars,
-): string {
-  const parts = [
-    `Política de cancelación: si no puedes asistir, avísanos con al menos ${policy.noticeHours} h de antelación.`,
-  ];
-  const text = policy.text.trim();
-  if (text) parts.push(text);
-  if (policy.feeLabel)
-    parts.push(
-      // Algunos símbolos de moneda ya acaban en punto («ج.م.»).
-      endSentence(
-        `La inasistencia o la cancelación con menos aviso puede tener un cargo de ${policy.feeLabel}`,
-      ),
-    );
-  return parts.join(' ');
-}
-
-function appointmentReminder(
-  vars: AppointmentReminderEmailVars,
-  brand: EmailBrand | null,
-): RenderedEmail {
-  const clinic = brand?.clinicName ?? PRODUCT_NAME;
-  const where = vars.locationAddress
-    ? `${vars.locationName} (${vars.locationAddress})`
-    : vars.locationName;
-  // DX-128: la de un menor va a su tutor: se le saluda y se nombra al paciente.
-  const guardian = vars.guardianName?.trim() || null;
-  const whose = guardian ? `la cita de ${vars.patientName}` : 'tu cita';
-  const blocks: EmailBlock[] = [
-    { kind: 'paragraph', text: `Te recordamos ${whose} en ${clinic}.` },
-    {
-      kind: 'paragraph',
-      text: `Fecha y hora: ${vars.startsAtLabel} (hora de la sede)`,
-    },
-    { kind: 'paragraph', text: `Sede: ${where}` },
-  ];
-  if (vars.providerName) {
-    blocks.push({
-      kind: 'paragraph',
-      text: `Profesional: ${vars.providerName}`,
-    });
-  }
-  blocks.push({
-    kind: 'note',
-    text: vars.confirmUrl
-      ? 'Usa el botón para confirmarla o avisarnos si no puedes asistir.'
-      : 'Si no puedes asistir, avísanos con tiempo para darle el espacio a otro paciente.',
-  });
-  if (vars.cancellationPolicy) {
-    blocks.push({
-      kind: 'note',
-      text: cancellationPolicyText(vars.cancellationPolicy),
-    });
-  }
-  return renderLayout({
-    brand,
-    subject: `Recordatorio de ${whose} en ${clinic}`,
-    heading: `Hola, ${guardian ?? vars.patientName}`,
-    blocks,
-    action: vars.confirmUrl
-      ? { label: 'Confirmar o cancelar', url: vars.confirmUrl }
-      : null,
-    footerLink: vars.unsubscribeUrl
-      ? {
-          lead: '¿No quieres recibir más recordatorios?',
-          label: 'Dejar de recibir recordatorios',
-          url: vars.unsubscribeUrl,
-        }
-      : null,
-  });
-}
-
 function paymentReceipt(
   vars: PaymentReceiptEmailVars,
   brand: EmailBrand | null,
@@ -205,6 +135,8 @@ function paymentReceipt(
     ? `${vars.locationName} (${vars.locationAddress})`
     : vars.locationName;
   const responsible = vars.responsibleName?.trim() || null;
+  // DX-515-bis: el título congelado en el recibo, o el de siempre.
+  const title = vars.title ?? 'Recibo de caja';
   const blocks: EmailBlock[] = [
     {
       kind: 'paragraph',
@@ -215,10 +147,12 @@ function paymentReceipt(
     {
       kind: 'paragraph',
       text: vars.legacy
-        ? `Recibo de caja N.º ${vars.reference} (abono anterior a la numeración consecutiva: sin serie).`
-        : `Recibo de caja N.º ${vars.reference}`,
+        ? `${title} N.º ${vars.reference} (abono anterior a la numeración consecutiva: sin serie).`
+        : `${title} N.º ${vars.reference}`,
     },
   ];
+  // DX-515-bis: la leyenda congelada, justo bajo el título (como en el papel).
+  if (vars.legend) blocks.push({ kind: 'paragraph', text: vars.legend });
   if (vars.voided) {
     blocks.push({
       kind: 'paragraph',
@@ -257,7 +191,66 @@ function paymentReceipt(
   );
   return renderLayout({
     brand,
-    subject: `Recibo de caja ${vars.reference}${vars.voided ? ' (ANULADO)' : ''} · ${clinic}`,
+    subject: `${title} ${vars.reference}${vars.voided ? ' (ANULADO)' : ''} · ${clinic}`,
+    heading: `Hola, ${responsible ?? vars.patientName}`,
+    blocks,
+    action: null,
+  });
+}
+
+/**
+ * DX-401: el resumen de abonos de un período. Una línea por forma de pago con
+ * su número de recibo (los anulados, marcados y fuera de los totales) y el
+ * total de cada moneda por separado: USD y VES nunca se suman.
+ */
+function paymentReceiptSummary(
+  vars: PaymentReceiptSummaryEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const clinic = brand?.clinicName ?? PRODUCT_NAME;
+  const responsible = vars.responsibleName?.trim() || null;
+  const blocks: EmailBlock[] = [
+    {
+      kind: 'paragraph',
+      text: responsible
+        ? `Te enviamos el resumen de los abonos de ${vars.patientName} en ${clinic} del ${vars.periodLabel}.`
+        : `Te enviamos el resumen de tus abonos en ${clinic} del ${vars.periodLabel}.`,
+    },
+  ];
+  if (vars.patientDocLabel) {
+    blocks.push({
+      kind: 'paragraph',
+      text: `Documento: ${vars.patientDocLabel}`,
+    });
+  }
+  for (const line of vars.lines) {
+    blocks.push({
+      kind: 'paragraph',
+      text:
+        `Recibo N.º ${line.receiptNumber} · ${line.dateLabel} · ${line.locationName} · ` +
+        `${line.methodLabel} · ${line.amountLabel}${line.voided ? ' (ANULADO)' : ''}`,
+    });
+  }
+  blocks.push({
+    kind: 'paragraph',
+    text:
+      vars.totalLabels.length > 0
+        ? `Total abonado: ${vars.totalLabels.join(' · ')}`
+        : 'Total abonado: sin abonos vigentes en el período',
+  });
+  if (vars.voidedCount > 0) {
+    blocks.push({
+      kind: 'paragraph',
+      text: `${plural(vars.voidedCount, 'recibo anulado', 'recibos anulados')}: no suman en el total.`,
+    });
+  }
+  blocks.push(
+    { kind: 'note', text: vars.fiscalLine ?? 'Datos fiscales pendientes' },
+    { kind: 'note', text: vars.notice },
+  );
+  return renderLayout({
+    brand,
+    subject: `Resumen de abonos del ${vars.periodLabel} · ${clinic}`,
     heading: `Hola, ${responsible ?? vars.patientName}`,
     blocks,
     action: null,
@@ -345,6 +338,77 @@ function signatureCode(
   });
 }
 
+/** DX-021-bis: solo el hecho; nunca códigos, secretos ni quién lo hizo. */
+function mfaNoticeText(vars: MfaNoticeEmailVars): {
+  subject: string;
+  body: string;
+  note: string;
+} {
+  switch (vars.kind) {
+    case 'ENABLED':
+      return {
+        subject: 'Se activó la verificación en dos pasos en tu cuenta',
+        body: `Acaban de activar la verificación en dos pasos de tu cuenta de ${PRODUCT_NAME}.`,
+        note: 'Si no fuiste tú, cambia tu contraseña ahora y avisa a la administración de tu clínica.',
+      };
+    case 'RECOVERY_CODE_USED':
+      return {
+        subject: 'Se usó un código de recuperación en tu cuenta',
+        body: `Acabas de entrar a ${PRODUCT_NAME} con un código de recuperación. Te ${vars.recoveryCodesRemaining === 1 ? 'queda' : 'quedan'} ${plural(vars.recoveryCodesRemaining ?? 0, 'código', 'códigos')}.`,
+        note: 'Si no fuiste tú, cambia tu contraseña ahora y genera códigos nuevos desde tu perfil.',
+      };
+    case 'RESET_BY_ADMIN':
+      return {
+        subject: 'Se restableció tu verificación en dos pasos',
+        body: `Un administrador de tu clínica restableció la verificación en dos pasos de tu cuenta de ${PRODUCT_NAME}. Tus códigos de recuperación y tus dispositivos de confianza ya no sirven, y tus sesiones se cerraron.`,
+        note: 'Vuelve a activarla desde tu perfil. Si no lo pediste, avisa a la administración de tu clínica.',
+      };
+    case 'ATTEMPTS_LOCKED':
+      return {
+        subject: 'Intentos fallidos en la verificación de tu cuenta',
+        body: `Alguien escribió tu contraseña de ${PRODUCT_NAME} correctamente y falló varias veces el código de verificación. Por seguridad, los códigos quedan en espera unos minutos.`,
+        note: 'Si no fuiste tú, cambia tu contraseña ahora: eso corta el intento y te deja entrar enseguida.',
+      };
+  }
+}
+
+function mfaNotice(
+  vars: MfaNoticeEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const { subject, body, note } = mfaNoticeText(vars);
+  return renderLayout({
+    brand,
+    subject,
+    heading: 'Aviso de seguridad',
+    blocks: [
+      { kind: 'paragraph', text: body },
+      { kind: 'note', text: note },
+    ],
+    action: null,
+  });
+}
+
+function mfaEnrollmentCode(
+  vars: MfaEnrollmentCodeEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: 'Tu código para activar la verificación en dos pasos',
+    heading: 'Activa la verificación en dos pasos',
+    blocks: [
+      { kind: 'paragraph', text: `Tu código es: ${vars.code}` },
+      { kind: 'paragraph', text: `Referencia: ${vars.ref}` },
+      {
+        kind: 'note',
+        text: `Vale solo para el intento que muestra esta referencia y admite 10 intentos. Caduca en ${plural(vars.expiresInMinutes, 'minuto', 'minutos')}. Se pidió con tu contraseña correcta: si no fuiste tú, tu contraseña está comprometida. No compartas el código y avisa al equipo de seguridad de ${PRODUCT_NAME}.`,
+      },
+    ],
+    action: null,
+  });
+}
+
 function signatureBudgetAccepted(
   vars: SignatureBudgetAcceptedEmailVars,
   brand: EmailBrand | null,
@@ -359,8 +423,10 @@ function signatureBudgetAccepted(
         text: `El ${vars.acceptedAtLabel} registramos tu aceptación del presupuesto que te envió ${vars.clinicName}.`,
       },
       {
+        // DX-514: nunca se manda a la página en la que firmó (ese enlace ya
+        // está usado y dice «Enlace no válido»); la copia la da la clínica.
         kind: 'paragraph',
-        text: 'La copia firmada la puedes guardar o imprimir desde la página en la que firmaste; la clínica también la tiene.',
+        text: `El enlace con el que firmaste ya no se puede volver a usar. Si necesitas una copia del presupuesto firmado, pídesela a ${vars.clinicName}.`,
       },
       {
         kind: 'note',
@@ -426,6 +492,7 @@ function signedConsentCopy(
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
+  locale: EmailLocale,
 ) => RenderedEmail;
 
 const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
@@ -435,27 +502,36 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'appointment-reminder': appointmentReminder,
   'registration-notice': registrationNotice,
   'payment-receipt': paymentReceipt,
+  'payment-receipt-summary': paymentReceiptSummary,
   'post-op-instructions': postOpInstructions,
   'signature-request': signatureRequest,
   'signature-code': signatureCode,
   'signature-budget-accepted': signatureBudgetAccepted,
   'slot-offer': slotOffer,
   'signed-consent-copy': signedConsentCopy,
+  'mfa-notice': mfaNotice,
+  'mfa-enrollment-code': mfaEnrollmentCode,
 };
 
 /**
- * Renderiza una plantilla en el idioma pedido (hoy solo `es`). La marca de la
- * clínica firma el email cuando hay tenant; sin ella firma Dentalix.
+ * Renderiza una plantilla en el idioma pedido. Solo las de
+ * `LOCALIZED_EMAIL_TEMPLATES` tienen catálogo por idioma (DX-497); las demás
+ * existen solo en el de la clínica. La marca de la clínica firma el email
+ * cuando hay tenant; sin ella firma Dentalix.
  */
 export function renderEmail<T extends EmailTemplateName>(
   template: T,
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
-  locale: EmailLocale = 'es',
+  locale: EmailLocale = DEFAULT_EMAIL_LOCALE,
 ): RenderedEmail {
-  if (locale !== 'es') {
+  if (
+    !EMAIL_LOCALES.includes(locale) ||
+    (locale !== DEFAULT_EMAIL_LOCALE &&
+      !LOCALIZED_EMAIL_TEMPLATES.includes(template))
+  ) {
     throw new Error(`Idioma de email no soportado: ${String(locale)}`);
   }
   const render = RENDERERS[template] as Renderer<T>;
-  return render(vars, brand);
+  return render(vars, brand, locale);
 }

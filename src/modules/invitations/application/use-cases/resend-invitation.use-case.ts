@@ -46,10 +46,20 @@ export class ResendInvitationUseCase {
       throw new NotFoundException(NOT_PENDING);
     }
     // Topes anti-abuso antes de regenerar: con 429 el enlace vigente sigue
-    // valiendo.
+    // valiendo. Es el aviso rápido; el que manda va en la transacción.
     await this.notifier.assertCanSend(pending.email);
 
     const token = generateInvitationToken();
+    // DX-149-bis: token nuevo y su email en UNA transacción, con el tope
+    // contado bajo candado: de N reenvíos a la vez, los que se pasan del tope
+    // reciben el 429 sin regenerar nada, y el email que sale lleva el token
+    // que queda guardado. (Mismo id, correo, nombre y rol que `pending`: el
+    // reenvío solo cambia token y caducidad.)
+    const email = await this.notifier.prepareInvitation({
+      invitation: pending,
+      token,
+      linkBase: input.linkBase,
+    });
     const invitation = await this.repo.reissue(
       input.id,
       {
@@ -57,17 +67,18 @@ export class ResendInvitationUseCase {
         expiresAt: new Date(Date.now() + INVITATION_TTL_MS),
       },
       ctx,
+      async (tx) => {
+        // El email pendiente anterior lleva el token que se sobrescribe: se
+        // cancela siempre, también si el nuevo no se pudo preparar.
+        await this.notifier.cancelPendingInTx(tx, [input.id]);
+        if (email) await email.insert(tx);
+      },
     );
     if (!invitation) {
       // Otra clínica (RLS), aceptada, revocada o inexistente: nada que reenviar.
       throw new NotFoundException(NOT_PENDING);
     }
-
-    const emailDelivery = await this.notifier.sendInvitation({
-      invitation,
-      token,
-      linkBase: input.linkBase,
-    });
-    return { invitation, token, emailDelivery };
+    email?.kick();
+    return { invitation, token, emailDelivery: email ? 'PENDING' : null };
   }
 }

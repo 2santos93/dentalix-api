@@ -22,18 +22,18 @@ import {
 
 /**
  * DX-014 · «Comparar sedes» por HTTP real, con actividad fija sembrada por
- * `raw` en tres sedes de la clínica A (Bogotá, UTC−5):
+ * `raw` en tres sedes de la clínica A (UTC−4):
  *
  *  - principal (con el horario por defecto del registro):
- *      octubre 2026 → producción 120.000 COP (100.000 + 30.000 − 10.000 de
- *      descuento), cobrado 90.000 COP y 50 USD, 9 atendidas + 1 no-show (10 %)
+ *      octubre 2026 → producción 120.000 VES (100.000 + 30.000 − 10.000 de
+ *      descuento), cobrado 90.000 VES y 50 USD, 9 atendidas + 1 no-show (10 %)
  *      de 3 pacientes, uno nuevo;
- *      31/08–30/09 → producción 100.000 COP, cobrado 75.000 COP (5.000 a las
- *      22:00 del 30/09 en Bogotá, que en UTC ya es 1/10), 23 atendidas + 2
+ *      31/08–30/09 → producción 100.000 VES, cobrado 75.000 VES (5.000 a las
+ *      22:00 del 30/09 en la zona de la sede, que en UTC ya es 1/10), 23 atendidas + 2
  *      no-show (8 %), dos pacientes nuevos;
  *  - Norte (sin horario): 200 USD de producción, 100 USD cobrados y 2
  *    atendidas en octubre;
- *  - Sur: 1.000.000 COP cobrados en octubre y la primera cita atendida (agosto)
+ *  - Sur: 1.000.000 VES cobrados en octubre y la primera cita atendida (agosto)
  *    de un paciente que en octubre vuelve a la principal (no es nuevo allí).
  *
  * Además un abono anulado (no cuenta) y la clínica B, que no ve nada de A.
@@ -117,20 +117,20 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
     // Producción.
     await seed.plan({
       patientId: p1,
-      currency: 'COP',
+      currency: 'VES',
       price: 100_000,
       done: { locationId: principal, at: at('2026-10-05T15:00:00Z') },
     });
     await seed.plan({
       patientId: p2,
-      currency: 'COP',
+      currency: 'VES',
       price: 30_000,
       discount: 10_000,
       done: { locationId: principal, at: at('2026-10-20T15:00:00Z') },
     });
     await seed.plan({
       patientId: p4,
-      currency: 'COP',
+      currency: 'VES',
       price: 100_000,
       done: { locationId: principal, at: at('2026-09-10T15:00:00Z') },
     });
@@ -141,9 +141,9 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       done: { locationId: norte, at: at('2026-10-12T15:00:00Z') },
     });
     // Aceptado y sin realizar: no es producción.
-    const copPlan = await seed.plan({
+    const vesPlan = await seed.plan({
       patientId: p1,
-      currency: 'COP',
+      currency: 'VES',
       price: 5_000_000,
     });
 
@@ -166,16 +166,16 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
         paidAt: at(paidAt),
         voided,
       });
-    await pay(principal, copPlan, p1, 'COP', 60_000, '2026-10-03T16:00:00Z');
-    // 18:00 del 31/10 en Bogotá (23:00 UTC): aún es octubre.
-    await pay(principal, copPlan, p1, 'COP', 30_000, '2026-10-31T23:00:00Z');
-    await pay(principal, copPlan, p1, 'COP', 999, '2026-10-04T16:00:00Z', true);
-    await pay(principal, copPlan, p1, 'USD', 50, '2026-10-10T16:00:00Z');
-    await pay(principal, copPlan, p1, 'COP', 70_000, '2026-09-15T16:00:00Z');
-    // 22:00 del 30/09 en Bogotá: del período anterior aunque en UTC sea 1/10.
-    await pay(principal, copPlan, p1, 'COP', 5_000, '2026-10-01T03:00:00Z');
+    await pay(principal, vesPlan, p1, 'VES', 60_000, '2026-10-03T16:00:00Z');
+    // 18:00 del 31/10 en la zona de la sede (23:00 UTC): aún es octubre.
+    await pay(principal, vesPlan, p1, 'VES', 30_000, '2026-10-31T23:00:00Z');
+    await pay(principal, vesPlan, p1, 'VES', 999, '2026-10-04T16:00:00Z', true);
+    await pay(principal, vesPlan, p1, 'USD', 50, '2026-10-10T16:00:00Z');
+    await pay(principal, vesPlan, p1, 'VES', 70_000, '2026-09-15T16:00:00Z');
+    // 22:00 del 30/09 en la zona de la sede: del período anterior aunque en UTC sea 1/10.
+    await pay(principal, vesPlan, p1, 'VES', 5_000, '2026-10-01T03:00:00Z');
     await pay(norte, usdPlan, p5, 'USD', 100, '2026-10-12T16:00:00Z');
-    await pay(sur, copPlan, p1, 'COP', 1_000_000, '2026-10-15T16:00:00Z');
+    await pay(sur, vesPlan, p1, 'VES', 1_000_000, '2026-10-15T16:00:00Z');
 
     // Citas.
     await seed.appointment({
@@ -306,7 +306,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
     const r = await report();
     const main = row(r, principal);
     expect(main.metrics.production).toContainEqual({
-      currency: 'COP',
+      currency: 'VES',
       value: 120_000,
       previous: 100_000,
       change: 20,
@@ -342,28 +342,28 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
     const main = row(await report(), principal);
     expect(main.metrics.collected).toEqual([
       {
-        currency: 'COP',
-        value: 90_000,
-        previous: 75_000,
-        change: 20,
-        trend: 'BETTER',
-      },
-      {
         currency: 'USD',
         value: 50,
         previous: 0,
         change: null,
         trend: 'BETTER',
       },
+      {
+        currency: 'VES',
+        value: 90_000,
+        previous: 75_000,
+        change: 20,
+        trend: 'BETTER',
+      },
     ]);
     expect(amounts(main.metrics.collectionRate)).toEqual([
-      ['COP', 75],
       ['USD', null],
+      ['VES', 75],
     ]);
     // 3 pacientes distintos atendidos en octubre.
     expect(amounts(main.metrics.averageTicket)).toEqual([
-      ['COP', 30_000],
       ['USD', 16.67],
+      ['VES', 30_000],
     ]);
   });
 
@@ -387,15 +387,15 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
     expect(r.total.metrics.occupancy.value).toBeNull();
   });
 
-  it('el total da un importe por moneda: nunca suma COP con USD', async () => {
+  it('el total da un importe por moneda: nunca suma VES con USD', async () => {
     const { total } = await report();
     expect(amounts(total.metrics.production)).toEqual([
-      ['COP', 120_000],
       ['USD', 200],
+      ['VES', 120_000],
     ]);
     expect(amounts(total.metrics.collected)).toEqual([
-      ['COP', 1_090_000],
       ['USD', 150],
+      ['VES', 1_090_000],
     ]);
     expect(total.metrics.completedAppointments.value).toBe(11);
     expect(total.metrics.newPatients.value).toBe(2);
@@ -423,7 +423,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       '2025-10-31',
     ]);
     expect(row(lastYear, principal).metrics.production).toContainEqual({
-      currency: 'COP',
+      currency: 'VES',
       value: 120_000,
       previous: 0,
       change: null,
@@ -443,8 +443,8 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       const r = await report(OCTOBER, restrictedAdmin);
       expect(r.locations.map((l) => l.locationId)).toEqual([principal, norte]);
       expect(amounts(r.total.metrics.collected)).toEqual([
-        ['COP', 90_000],
         ['USD', 150],
+        ['VES', 90_000],
       ]);
       expect(JSON.stringify(r)).not.toContain(sur);
     });
@@ -476,7 +476,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       expect(res.text).toContain('"Sede Norte"');
       expect(res.text).not.toContain('Sede Sur');
       expect(res.text).toContain(
-        '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Cobrado",COP,90000.00,75000.00,20.0,%,Mejora',
+        '2026-10-01 a 2026-10-31,2026-08-31 a 2026-09-30,"Total clínica","Cobrado",VES,90000.00,75000.00,20.0,%,Mejora',
       );
     });
   });
@@ -521,7 +521,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
       ],
       [
         { ...OCTOBER, currency: 'pesos' },
-        'currency debe ser un código ISO 4217 de 3 letras.',
+        'La moneda tiene que ser un código ISO 4217 de tres letras en mayúsculas.',
       ],
     ])('%j → %s', async (query, message) => {
       const res = await get(
@@ -571,7 +571,7 @@ describe('GET /reports/locations-comparison (DX-014)', () => {
         `"${principalName}","No-show %",,10.00,8.00,2.0,p.p.,Empeora`,
       );
       expect(res.text).toContain(
-        `"${principalName}","Producción",COP,120000.00,100000.00,20.0,%,Mejora`,
+        `"${principalName}","Producción",VES,120000.00,100000.00,20.0,%,Mejora`,
       );
     });
   });

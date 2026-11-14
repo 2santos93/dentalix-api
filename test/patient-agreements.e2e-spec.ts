@@ -493,6 +493,18 @@ describe('Convenio del paciente (e2e, DX-105)', () => {
         FROM audit_events
        WHERE "tenantId" = ${clinic.tenantId}::uuid AND "patientId" = ${p}::uuid`;
     expect(text[0].found).toBe(false);
+    // DX-105-bis: la asignación llevó cobertura (con nº de afiliado): la
+    // auditoría dice el motivo, pero ni el id de la cobertura ni el afiliado.
+    const assigned = withReason.find(
+      (e) => (e.metadata as { reason: string }).reason === 'AGREEMENT_ASSIGNED',
+    )!;
+    expect(assigned.metadata).not.toHaveProperty('coverageId');
+    expect(assigned.metadata).not.toHaveProperty('memberNumber');
+    const affiliate = await raw.$queryRaw<{ found: boolean }[]>`
+      SELECT bool_or(metadata::text ~ '1020304050') AS found
+        FROM audit_events
+       WHERE "tenantId" = ${clinic.tenantId}::uuid AND "patientId" = ${p}::uuid`;
+    expect(affiliate[0].found).toBe(false);
   });
 
   it('dos PUT simultáneos: queda una sola viva y ninguno da 500', async () => {

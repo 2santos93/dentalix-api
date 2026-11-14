@@ -7,6 +7,44 @@ import {
 } from './arqueo';
 
 describe('arqueo de caja (DX-027)', () => {
+  it('DX-516: los ajustes por medio de pago entran con su abono (impuestos y recargos suman, descuentos restan)', () => {
+    const [cash] = expectedLines({
+      floats: [{ currency: 'USD', cents: 1_000 }],
+      payments: [
+        // 100 con un impuesto de 3: entran 103.
+        {
+          currency: 'USD',
+          method: 'CASH',
+          cents: 10_000,
+          adjustmentCents: 300,
+        },
+        // 50 con un descuento de 2,50: entran 47,50.
+        {
+          currency: 'USD',
+          method: 'CASH',
+          cents: 5_000,
+          adjustmentCents: -250,
+        },
+        // Sin ajustes (o una réplica anterior): como siempre.
+        { currency: 'USD', method: 'CASH', cents: 2_000 },
+      ],
+      adjustments: [],
+      outflows: [],
+    });
+    expect(cash).toEqual({
+      currency: 'USD',
+      method: 'CASH',
+      openingCents: 1_000,
+      paymentsCents: 17_000,
+      paymentsCount: 3,
+      paymentAdjustmentsCents: 50,
+      adjustmentsCents: 0,
+      outflowsCents: 0,
+      outflowsCount: 0,
+      expectedCents: 18_050,
+    });
+  });
+
   it('pasa importes a céntimos exactos y de vuelta', () => {
     expect(centsOf(0.1 + 0.2)).toBe(30);
     expect(centsOf(150_000.55)).toBe(15_000_055);
@@ -21,59 +59,27 @@ describe('arqueo de caja (DX-027)', () => {
   it('esperado = fondo (solo efectivo) + abonos + ajustes, por moneda y método', () => {
     const lines = expectedLines({
       floats: [
-        { currency: 'COP', cents: 5_000_000 },
+        { currency: 'VES', cents: 5_000_000 },
         { currency: 'USD', cents: 0 },
       ],
       payments: [
-        { currency: 'COP', method: 'CASH', cents: 2_000_000 },
-        { currency: 'COP', method: 'CASH', cents: 1_000_000 },
-        { currency: 'COP', method: 'CARD', cents: 8_000_000 },
-        { currency: 'COP', method: null, cents: 100 },
+        { currency: 'VES', method: 'CASH', cents: 2_000_000 },
+        { currency: 'VES', method: 'CASH', cents: 1_000_000 },
+        { currency: 'VES', method: 'CARD', cents: 8_000_000 },
+        { currency: 'VES', method: null, cents: 100 },
         { currency: 'USD', method: 'TRANSFER', cents: 5_000 },
       ],
-      adjustments: [{ currency: 'COP', method: 'CASH', cents: -500_000 }],
+      adjustments: [{ currency: 'VES', method: 'CASH', cents: -500_000 }],
       outflows: [],
     });
     expect(lines).toEqual([
-      {
-        currency: 'COP',
-        method: 'CASH',
-        openingCents: 5_000_000,
-        paymentsCents: 3_000_000,
-        paymentsCount: 2,
-        adjustmentsCents: -500_000,
-        outflowsCents: 0,
-        outflowsCount: 0,
-        expectedCents: 7_500_000,
-      },
-      {
-        currency: 'COP',
-        method: 'CARD',
-        openingCents: 0,
-        paymentsCents: 8_000_000,
-        paymentsCount: 1,
-        adjustmentsCents: 0,
-        outflowsCents: 0,
-        outflowsCount: 0,
-        expectedCents: 8_000_000,
-      },
-      {
-        currency: 'COP',
-        method: 'OTHER',
-        openingCents: 0,
-        paymentsCents: 100,
-        paymentsCount: 1,
-        adjustmentsCents: 0,
-        outflowsCents: 0,
-        outflowsCount: 0,
-        expectedCents: 100,
-      },
       {
         currency: 'USD',
         method: 'CASH',
         openingCents: 0,
         paymentsCents: 0,
         paymentsCount: 0,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -85,42 +91,65 @@ describe('arqueo de caja (DX-027)', () => {
         openingCents: 0,
         paymentsCents: 5_000,
         paymentsCount: 1,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
         expectedCents: 5_000,
+      },
+      {
+        currency: 'VES',
+        method: 'CASH',
+        openingCents: 5_000_000,
+        paymentsCents: 3_000_000,
+        paymentsCount: 2,
+        paymentAdjustmentsCents: 0,
+        adjustmentsCents: -500_000,
+        outflowsCents: 0,
+        outflowsCount: 0,
+        expectedCents: 7_500_000,
+      },
+      {
+        currency: 'VES',
+        method: 'CARD',
+        openingCents: 0,
+        paymentsCents: 8_000_000,
+        paymentsCount: 1,
+        paymentAdjustmentsCents: 0,
+        adjustmentsCents: 0,
+        outflowsCents: 0,
+        outflowsCount: 0,
+        expectedCents: 8_000_000,
+      },
+      {
+        currency: 'VES',
+        method: 'OTHER',
+        openingCents: 0,
+        paymentsCents: 100,
+        paymentsCount: 1,
+        paymentAdjustmentsCents: 0,
+        adjustmentsCents: 0,
+        outflowsCents: 0,
+        outflowsCount: 0,
+        expectedCents: 100,
       },
     ]);
   });
 
   it('diferencia = contado − esperado; lo no contado es 0 y lo contado sin esperado también entra', () => {
     const expected = expectedLines({
-      floats: [{ currency: 'COP', cents: 1_000 }],
-      payments: [{ currency: 'COP', method: 'CARD', cents: 500 }],
+      floats: [{ currency: 'VES', cents: 1_000 }],
+      payments: [{ currency: 'VES', method: 'CARD', cents: 500 }],
       adjustments: [],
       outflows: [],
     });
     const result = arqueo(expected, [
-      { currency: 'COP', method: 'CASH', cents: 900 },
+      { currency: 'VES', method: 'CASH', cents: 900 },
       { currency: 'USD', method: 'CASH', cents: 0 },
     ]);
     expect(result).toEqual({
       hasDifference: true,
       lines: [
-        expect.objectContaining({
-          currency: 'COP',
-          method: 'CASH',
-          expectedCents: 1_000,
-          countedCents: 900,
-          differenceCents: -100,
-        }),
-        expect.objectContaining({
-          currency: 'COP',
-          method: 'CARD',
-          expectedCents: 500,
-          countedCents: 0,
-          differenceCents: -500,
-        }),
         expect.objectContaining({
           currency: 'USD',
           method: 'CASH',
@@ -128,79 +157,95 @@ describe('arqueo de caja (DX-027)', () => {
           countedCents: 0,
           differenceCents: 0,
         }),
+        expect.objectContaining({
+          currency: 'VES',
+          method: 'CASH',
+          expectedCents: 1_000,
+          countedCents: 900,
+          differenceCents: -100,
+        }),
+        expect.objectContaining({
+          currency: 'VES',
+          method: 'CARD',
+          expectedCents: 500,
+          countedCents: 0,
+          differenceCents: -500,
+        }),
       ],
     });
   });
 
   it('cuadrado: sin diferencia', () => {
     const expected = expectedLines({
-      floats: [{ currency: 'COP', cents: 1_000 }],
-      payments: [{ currency: 'COP', method: 'CASH', cents: 500 }],
+      floats: [{ currency: 'VES', cents: 1_000 }],
+      payments: [{ currency: 'VES', method: 'CASH', cents: 500 }],
       adjustments: [],
       outflows: [],
     });
     expect(
-      arqueo(expected, [{ currency: 'COP', method: 'CASH', cents: 1_500 }])
+      arqueo(expected, [{ currency: 'VES', method: 'CASH', cents: 1_500 }])
         .hasDifference,
     ).toBe(false);
   });
 
   it('las salidas de caja (DX-274) restan del efectivo de su moneda, aunque quede negativo', () => {
     const lines = expectedLines({
-      floats: [{ currency: 'COP', cents: 1_000_000 }],
+      floats: [{ currency: 'VES', cents: 1_000_000 }],
       payments: [
-        { currency: 'COP', method: 'CASH', cents: 200_000 },
-        { currency: 'COP', method: 'CARD', cents: 300_000 },
+        { currency: 'VES', method: 'CASH', cents: 200_000 },
+        { currency: 'VES', method: 'CARD', cents: 300_000 },
       ],
-      adjustments: [{ currency: 'COP', method: 'CASH', cents: 50_000 }],
+      adjustments: [{ currency: 'VES', method: 'CASH', cents: 50_000 }],
       outflows: [
-        { currency: 'COP', cents: 150_000 },
-        { currency: 'COP', cents: 25_000 },
+        { currency: 'VES', cents: 150_000 },
+        { currency: 'VES', cents: 25_000 },
         { currency: 'USD', cents: 1_000 },
       ],
     });
     expect(lines).toEqual([
-      {
-        currency: 'COP',
-        method: 'CASH',
-        openingCents: 1_000_000,
-        paymentsCents: 200_000,
-        paymentsCount: 1,
-        adjustmentsCents: 50_000,
-        outflowsCents: 175_000,
-        outflowsCount: 2,
-        expectedCents: 1_075_000,
-      },
-      expect.objectContaining({
-        currency: 'COP',
-        method: 'CARD',
-        outflowsCents: 0,
-        outflowsCount: 0,
-        expectedCents: 300_000,
-      }),
       {
         currency: 'USD',
         method: 'CASH',
         openingCents: 0,
         paymentsCents: 0,
         paymentsCount: 0,
+        paymentAdjustmentsCents: 0,
         adjustmentsCents: 0,
         outflowsCents: 1_000,
         outflowsCount: 1,
         expectedCents: -1_000,
       },
+      {
+        currency: 'VES',
+        method: 'CASH',
+        openingCents: 1_000_000,
+        paymentsCents: 200_000,
+        paymentsCount: 1,
+        paymentAdjustmentsCents: 0,
+        adjustmentsCents: 50_000,
+        outflowsCents: 175_000,
+        outflowsCount: 2,
+        expectedCents: 1_075_000,
+      },
+      expect.objectContaining({
+        currency: 'VES',
+        method: 'CARD',
+        outflowsCents: 0,
+        outflowsCount: 0,
+        expectedCents: 300_000,
+      }),
     ]);
   });
 
   it('una caja que cuadra con salidas: contado = esperado tras restarlas', () => {
     const expected = expectedLines({
-      floats: [{ currency: 'COP', cents: 100_000 }],
+      floats: [{ currency: 'VES', cents: 100_000 }],
       payments: [],
       adjustments: [],
-      outflows: [{ currency: 'COP', cents: 30_000 }],
+      outflows: [{ currency: 'VES', cents: 30_000 }],
     });
     const result = arqueo(expected, [
-      { currency: 'COP', method: 'CASH', cents: 70_000 },
+      { currency: 'VES', method: 'CASH', cents: 70_000 },
     ]);
     expect(result.hasDifference).toBe(false);
     expect(result.lines[0]).toMatchObject({
@@ -215,8 +260,8 @@ describe('arqueo de caja (DX-027)', () => {
       arqueo(
         [],
         [
-          { currency: 'COP', method: 'CASH', cents: 1 },
-          { currency: 'COP', method: 'CASH', cents: 2 },
+          { currency: 'VES', method: 'CASH', cents: 1 },
+          { currency: 'VES', method: 'CASH', cents: 2 },
         ],
       ),
     ).toThrow(RangeError);

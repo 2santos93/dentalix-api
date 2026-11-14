@@ -12,6 +12,15 @@ export const CHAIR_SORT_ORDER_MAX = 999;
 export const MAX_CHAIR_COLUMNS = 12;
 
 export const CHAIR_NOT_FOUND_MESSAGE = 'Sillón no encontrado';
+/**
+ * DX-492-bis: `chairId` que no es un id al agendar (también `null`, que no es
+ * «sin sillón»: sin sillón es no mandarlo).
+ */
+export const CHAIR_ID_INVALID_MESSAGE =
+  'El sillón no es válido: elige uno de la sede o deja la cita sin sillón';
+/** DX-492-bis: lo mismo al editar, donde `null` sí es «quitar el sillón». */
+export const CHAIR_ID_INVALID_ON_EDIT_MESSAGE =
+  'El sillón no es válido: elige uno de la sede o quítalo';
 export const DUPLICATE_CHAIR_NAME_MESSAGE =
   'Ya existe un sillón con ese nombre en esta sede.';
 
@@ -112,4 +121,31 @@ export function chairOverlapMessage(
     return `El sillón «${chairName}» ya está ocupado en ese horario`;
   }
   return `El sillón «${chairName}» ya está ocupado de ${occupied.from} a ${occupied.to}`;
+}
+
+/**
+ * DX-480: el sillón de una cita que nace (o se mueve) desde un enlace público.
+ * - `NO_CHAIRS`: la sede no tiene sillones activos; la cita va sin sillón,
+ *   como antes de DX-211.
+ * - `CHAIR`: el primer sillón activo libre en el orden de la agenda.
+ * - `ALL_BUSY`: todos ocupados en esa franja; el hueco no se ofrece.
+ */
+export type FreeChairChoice =
+  | { kind: 'NO_CHAIRS' }
+  | { kind: 'CHAIR'; chairId: string }
+  | { kind: 'ALL_BUSY' };
+
+/**
+ * `activeChairs` llega YA en el orden de las columnas de la agenda (orden y
+ * luego nombre, el de la lista de sillones); `busyChairIds`, los sillones que
+ * otra cita viva y no cancelada ocupa en la franja (un sobrecupo también).
+ */
+export function chooseFreeChair(
+  activeChairs: readonly { id: string }[],
+  busyChairIds: Iterable<string>,
+): FreeChairChoice {
+  if (activeChairs.length === 0) return { kind: 'NO_CHAIRS' };
+  const busy = new Set(busyChairIds);
+  const free = activeChairs.find((chair) => !busy.has(chair.id));
+  return free ? { kind: 'CHAIR', chairId: free.id } : { kind: 'ALL_BUSY' };
 }

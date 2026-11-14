@@ -1,16 +1,21 @@
+import { ConflictException } from '@nestjs/common';
 import type {
   PublicSignatureContext,
   SignatureRequestListRow,
   SignatureRequestRecord,
 } from '../../domain/entities/signature-request.entity';
 import {
+  type Prisma,
   type SignedConsentPdfStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
 import {
   RemoteBudgetChangedError,
   type BudgetSource,
+  type CreateSignatureRequestOptions,
   type CreateSignatureRequestRepoInput,
+  SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE,
+  budgetNotPresentedMessage,
   type LockedWrite,
   type PublicRequestEvidence,
   type PublicSignatureAuditEvent,
@@ -63,11 +68,13 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
   completed: { templateId: string; signedAt: Date }[] = [];
   clinic = { name: 'Clínica Demo', logoUrl: null, primaryColor: '#0E7490' };
   location = {
-    timeZone: 'America/Bogota',
-    locale: 'es-CO',
+    timeZone: 'America/Caracas',
+    locale: 'es-VE',
     hourCycle: 'h12',
   };
   private nextId = 1;
+  /** DX-425: la hora de la BD; los specs la igualan a su reloj. */
+  dbClock: () => Date = () => new Date();
 
   constructor(
     readonly recipients: Record<string, SignatureRecipientContext> = {},
@@ -104,29 +111,76 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     );
   }
 
-  create(
+  /** Ids de las solicitudes que se guardaron con su email (DX-149-ter). */
+  createdWithEmail: string[] = [];
+
+  /**
+   * Como la transacción de Prisma: si `enqueue` lanza, nada queda (ni la
+   * solicitud nueva ni la anulación de las anteriores).
+   */
+  async create(
     input: CreateSignatureRequestRepoInput,
+    enqueue?: (
+      tx: Prisma.TransactionClient,
+      supersededIds: string[],
+    ) => Promise<void>,
+    options: CreateSignatureRequestOptions = {},
   ): Promise<{ id: string; supersededIds: string[] }> {
-    const supersededIds: string[] = [];
-    for (const row of this.rows) {
-      if (
+    // DX-379 (M-3): como el de Prisma, guarda la validez de la foto en el
+    // plan si aún no tenía y sigue «Presentado» sin aceptar (409 si no, o si
+    // otro guardó otra validez entre medias).
+    const validity = options.planQuoteValidity;
+    const budget = input.treatmentPlanId
+      ? this.budgets.get(input.treatmentPlanId)
+      : undefined;
+    if (validity && budget) {
+      const { plan } = budget.quote;
+      if (plan.status !== 'PRESENTED' || budget.quote.acceptance) {
+        throw new ConflictException(
+          budgetNotPresentedMessage(
+            budget.quote.acceptance ? 'ACCEPTED' : plan.status,
+          ),
+        );
+      }
+      if (plan.quoteIssuedOn === null) {
+        budget.quote = {
+          ...budget.quote,
+          plan: {
+            ...plan,
+            quoteIssuedOn: validity.issuedOn,
+            quoteValidUntil: validity.validUntil,
+          },
+        };
+      } else if (
+        plan.quoteIssuedOn !== validity.issuedOn ||
+        plan.quoteValidUntil !== validity.validUntil
+      ) {
+        throw new ConflictException(SIGNATURE_BUDGET_VALIDITY_CHANGED_MESSAGE);
+      }
+    }
+    const superseded = this.rows.filter(
+      (row) =>
         row.patientId === input.patientId &&
         row.type === input.type &&
         (input.type === 'BUDGET'
           ? row.treatmentPlanId === input.treatmentPlanId
           : row.templateId === input.templateId) &&
         !row.signedAt &&
-        !row.revokedAt
-      ) {
-        row.revokedAt = input.createdAt;
-        supersededIds.push(row.id);
-      }
+        !row.revokedAt,
+    );
+    const supersededIds = superseded.map((row) => row.id);
+    const id =
+      input.id ??
+      `00000000-0000-4000-8000-${String(this.nextId++).padStart(12, '0')}`;
+    if (enqueue) {
+      await enqueue({} as Prisma.TransactionClient, supersededIds);
+      this.createdWithEmail.push(id);
     }
-    const id = `00000000-0000-4000-8000-${String(this.nextId++).padStart(12, '0')}`;
+    for (const row of superseded) row.revokedAt = input.createdAt;
     this.rows.push({
-      id,
       tenantId: 't1',
       ...input,
+      id,
       budgetContent: input.budgetContent ?? null,
       budgetContentHash: input.budgetContentHash ?? null,
       codeHash: null,
@@ -142,7 +196,7 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
       signedAt: null,
       revokedAt: null,
     });
-    return Promise.resolve({ id, supersededIds });
+    return { id, supersededIds };
   }
 
   private listRow(request: SignatureRequestRecord): SignatureRequestListRow {
@@ -215,14 +269,17 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
   withLockedRequest<T>(
     id: string,
     evidence: PublicRequestEvidence,
-    decide: (request: SignatureRequestRecord) => {
+    decide: (
+      request: SignatureRequestRecord,
+      dbNow: Date,
+    ) => {
       write: LockedWrite | null;
       result: T;
     },
   ): Promise<T | null> {
     const row = this.rows.find((r) => r.id === id);
     if (!row) return Promise.resolve(null);
-    const { write, result } = decide({ ...row });
+    const { write, result } = decide({ ...row }, this.dbClock());
     if (write?.budget) {
       const { stillMatches, ...acceptance } = write.budget;
       const budget = this.budgets.get(acceptance.planId);

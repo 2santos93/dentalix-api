@@ -23,10 +23,10 @@ function seed(repo: InMemoryPaymentPlanRepository, downPayment = 0) {
   });
 }
 
-function makeUseCase(paid: number) {
+function makeUseCase(paid: number, rateProviderTimedOut = false) {
   const repo = new InMemoryPaymentPlanRepository();
   const getPlanBalance = {
-    execute: jest.fn(() =>
+    executeWithItems: jest.fn(() =>
       Promise.resolve({
         planCurrency: 'USD',
         billable: 300,
@@ -34,6 +34,8 @@ function makeUseCase(paid: number) {
         balance: 300 - paid,
         creditMovements: 0,
         paymentsCount: 1,
+        paymentsWithoutRate: [],
+        rateProviderTimedOut,
       }),
     ),
   } as unknown as GetPlanBalanceUseCase;
@@ -65,6 +67,34 @@ describe('GetPaymentPlanUseCase', () => {
     expect(res.overdueCount).toBe(1);
     expect(res.overdueAmount).toBe(50);
     expect(res.nextDue).toMatchObject({ sequence: 2, amount: 100 });
+  });
+
+  it('expone las cifras de /balance tal cual (DX-472)', async () => {
+    const { repo, useCase } = makeUseCase(150);
+    await seed(repo);
+    const res = await useCase.execute('tp-1');
+    expect(res).toMatchObject({
+      billable: 300,
+      paid: 150,
+      creditMovements: 0,
+      balance: 150,
+      paymentsWithoutRate: [],
+      rateProviderTimedOut: false,
+    });
+  });
+
+  it('con el proveedor colgado ninguna cuota sale vencida por lo no convertido (DX-472)', async () => {
+    const { repo, useCase } = makeUseCase(150, true);
+    await seed(repo);
+    const res = await useCase.execute('tp-1');
+    expect(res.installments.map((i) => i.status)).toEqual([
+      'PAID',
+      'PARTIAL',
+      'PENDING',
+    ]);
+    expect(res.overdueCount).toBe(0);
+    expect(res.overdueAmount).toBe(0);
+    expect(res.rateProviderTimedOut).toBe(true);
   });
 
   it('allocates the down payment tramo first', async () => {

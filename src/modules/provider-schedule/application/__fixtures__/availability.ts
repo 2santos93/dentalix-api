@@ -10,11 +10,22 @@ import { InMemoryProviderScheduleRepository } from './in-memory-provider-schedul
  */
 export function inMemoryAvailability(
   repo = new InMemoryProviderScheduleRepository(),
-  timeZone = 'America/Bogota',
+  timeZone = 'America/Caracas',
+  format: { locale: string | null; hourCycle: string | null } = {
+    locale: 'de-DE',
+    hourCycle: 'h23',
+  },
 ): ProviderAvailabilityService {
   const locations = {
     findById: (id: string) =>
-      Promise.resolve({ id, name: 'Sede', timeZone, isActive: true }),
+      Promise.resolve({
+        id,
+        name: 'Sede',
+        timeZone,
+        // DX-354: los avisos escriben las horas con el formato y el reloj de la sede.
+        ...format,
+        isActive: true,
+      }),
   } as unknown as LocationRepository;
   return new ProviderAvailabilityService(repo, locations);
 }

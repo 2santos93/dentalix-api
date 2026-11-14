@@ -66,12 +66,6 @@ export interface AuditOptions {
    */
   coverage?: true;
   /**
-   * DX-051: reasignación de la imputación de un abono. La metadata guarda, de
-   * la respuesta, la moneda del plan, el modo y los importes por ítem antes y
-   * después (ids e importes; nada del paciente).
-   */
-  allocation?: true;
-  /**
    * DX-377: alta de un abono. Si la respuesta trae una referencia repetida
    * confirmada, la metadata guarda la confirmación y los ids de los abonos
    * repetidos; nunca la referencia ni el motivo.
@@ -83,4 +77,17 @@ export interface AuditOptions {
    * con `paymentReference`, la confirmación de SU referencia repetida.
    */
   splitPayment?: true;
+  /**
+   * SEC-044: estado de cuenta familiar. La respuesta trae al pagador y a cada
+   * dependiente (`members[].patient.id`): se registra UN evento por miembro
+   * (mismo request id y motivo), así el filtro por paciente de la auditoría
+   * encuentra la lectura. Sin importes ni nombres.
+   */
+  familyStatement?: true;
+  /**
+   * DX-224: «¿Quién llama?». La respuesta trae `matches` (los pacientes que
+   * tienen ese teléfono): se registra UN evento de lectura por paciente, con
+   * su `id` como recurso y paciente. Nada del número buscado va al evento.
+   */
+  perMatch?: true;
 }

@@ -3,21 +3,19 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Headers,
-  Inject,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
   Req,
   Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import {
-  CURRENCY_DIGITS_CATALOG,
-  type CurrencyDigitsCatalog,
-} from '../../../shared/money/currency-digits';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -28,12 +26,23 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiProduces,
+  ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { RecordPaymentDto } from './dto/record-payment.dto';
+import {
+  CreatePaymentProofUploadDto,
+  PaymentProofUploadDto,
+  PaymentProofUrlDto,
+  PaymentProofUrlQueryDto,
+} from './dto/payment-proof.dto';
+import { CreatePaymentProofUploadUseCase } from '../application/use-cases/create-payment-proof-upload.use-case';
+import { GetPaymentProofUrlUseCase } from '../application/use-cases/get-payment-proof-url.use-case';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { VoidPaymentDto } from './dto/void-payment.dto';
 import { PaymentDto } from './dto/payment.dto';
 import { PlanBalanceWithItemsDto } from './dto/plan-balance.dto';
@@ -81,6 +90,13 @@ import {
 } from '../../audit/presentation/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { SettlePaymentPromises } from '../../collections/application/settle-payment-promises';
+import { SetExternalInvoiceNumberUseCase } from '../application/use-cases/set-external-invoice-number.use-case';
+import type { ExternalInvoiceNumberResult } from '../domain/ports/external-invoice-repository.port';
+import {
+  ExternalInvoiceNumberDto,
+  ExternalInvoiceNumberResultDto,
+} from './dto/receipt-settings.dto';
+import { requireAuditRequestContext } from '../../audit/presentation/audit-request-context';
 
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
@@ -118,9 +134,11 @@ export class PaymentsController {
     private readonly recordSplitPayment: RecordSplitPaymentUseCase,
     // DX-390: el VOID de las otras líneas de un cobro dividido.
     private readonly audit: RecordAuditEventUseCase,
-    // DX-340: decimales de cada moneda (currencies.rounding_digits).
-    @Inject(CURRENCY_DIGITS_CATALOG)
-    private readonly currencyDigits: CurrencyDigitsCatalog,
+    // DX-515: nº de la factura fiscal emitida fuera de Dentalix.
+    private readonly setExternalInvoice: SetExternalInvoiceNumberUseCase,
+    // DX-389: comprobante del cobro (subida directa y URL firmada).
+    private readonly createProofUpload: CreatePaymentProofUploadUseCase,
+    private readonly proofUrlOf: GetPaymentProofUrlUseCase,
   ) {}
 
   /**
@@ -130,10 +148,62 @@ export class PaymentsController {
    * `X-Location-Id` (validada por TenantContextInterceptor); sin ella, la vista
    * consolidada de la clínica.
    */
+  // DX-389: comprobante del cobro. Mismos roles que el resto de pagos
+  // (ADMIN y RECEPTION; DENTIST/ASSISTANT 403). La subida no audita (como la
+  // de los gastos): nada se asocia a un abono hasta registrarlo.
+  @Post('payments/proofs/upload-url')
+  @RateLimit('direct-upload')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Autorización para subir el comprobante de un cobro al almacén',
+    description:
+      'POST prefirmado de pocos minutos para UN fichero (JPG, PNG, WebP o PDF de 1 B a 10 MB) con el SHA-256 declarado. El navegador envía `target.fields` y el fichero (campo `file`, al final) a `target.url` y después entrega el `uploadId` al registrar el abono (`proofUploadId`). El almacén es privado: el comprobante solo se ve con una URL firmada de corta vida.',
+  })
+  @ApiOkResponse({ type: PaymentProofUploadDto })
+  @ApiBadRequestResponse({
+    description:
+      'Tamaño (más de 10 MB), huella o tipo declarado no válidos, o archivo vacío',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })
+  proofUploadUrl(
+    @Body() dto: CreatePaymentProofUploadDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PaymentProofUploadDto> {
+    return this.createProofUpload.execute(dto, req.user.sub);
+  }
+
+  // Auditada en el caso de uso: VIEW si se abre en el navegador, EXPORT si se
+  // descarga (el decorador no puede elegir la acción por la query).
+  @Get('payments/:id/proof/url')
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary:
+      'URL firmada (5 min) para ver o descargar el comprobante del cobro',
+  })
+  @ApiOkResponse({ type: PaymentProofUrlDto })
+  @ApiNotFoundResponse({
+    description: 'Abono no encontrado en esta clínica o sin comprobante',
+  })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN y recepción' })
+  proofUrl(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: PaymentProofUrlQueryDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<PaymentProofUrlDto> {
+    return this.proofUrlOf.execute(
+      id,
+      query.disposition ?? 'inline',
+      auditRequestContext(req, this.tenantContext),
+    );
+  }
+
   @Audit({ action: 'VIEW', resource: 'PAYMENT' })
   @Get('payments')
   @ApiOperation({
     summary: 'Caja: abonos del período con resumen por moneda y método',
+    description:
+      'SEC-043: con «arqueo ciego», quien no es ADMIN recibe los abonos que cuentan en una caja aún abierta sin importe ni moneda (`amountHidden`), y el resumen no los suma: `blindHidden` lo indica. Recibo y anulación funcionan igual; las cifras vuelven al cerrarla.',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -157,6 +227,7 @@ export class PaymentsController {
         to: query.to,
         method: query.method,
         paymentMethodId: query.paymentMethodId,
+        externalInvoice: query.externalInvoice,
         page: query.page,
         pageSize: query.pageSize,
       },
@@ -174,11 +245,15 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Caja en CSV: abonos del período con medio y referencia',
     description:
-      'Mismos filtros que `GET /payments` (período, método y medio) y la ' +
+      'Mismos filtros que `GET /payments` (período, método, medio y nº de ' +
+      'factura externa) y la ' +
       'misma sede (`X-Location-Id`), sin paginar: hasta 10 000 abonos. UTF-8 ' +
       'con BOM y CRLF; celdas protegidas contra fórmulas; importes con los ' +
       'decimales de su moneda. Columnas: Fecha, Sede, Paciente, Destino, ' +
-      'Medio, Referencia, Moneda, Importe.',
+      'Medio, Referencia, Factura externa, Moneda, Importe. SEC-043: con ' +
+      '«arqueo ciego», quien no es ADMIN recibe los abonos de cajas aún ' +
+      'abiertas sin moneda ni ajustes, con «Oculto durante el arqueo» en ' +
+      'Importe y Total cobrado (no suman en una hoja de cálculo).',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -203,14 +278,12 @@ export class PaymentsController {
         to: query.to,
         method: query.method,
         paymentMethodId: query.paymentMethodId,
+        externalInvoice: query.externalInvoice,
       },
       { userId: req.user.sub, role: req.user.role },
     );
     sendCsv(res, `caja-${from}-${to}.csv`);
-    return toCashPaymentsCsv(
-      items,
-      await this.currencyDigits.table(items.map((i) => i.currency)),
-    );
+    return toCashPaymentsCsv(items);
   }
 
   @Audit({
@@ -236,15 +309,18 @@ export class PaymentsController {
   })
   @ApiBadRequestResponse({
     description:
+      'Id que no es UUID. ' +
       'DX-377: el medio pide referencia y no llegó, o el medio no es de la clínica o está desactivado. ' +
-      'DX-054: `paidAt` a más de 24 h en el futuro («La fecha del abono no puede estar más de 24 horas en el futuro.»).',
+      'DX-075: `paidAt` como día civil posterior a hoy en la sede («La fecha del abono no puede ser posterior a hoy en la sede.»). ' +
+      'DX-054: `paidAt` como instante a más de 24 h en el futuro («La fecha del abono no puede estar más de 24 horas en el futuro.»).',
   })
   @ApiUnprocessableEntityResponse({
     description:
       'La Idempotency-Key ya se usó con otro plan u otro cuerpo (DX-109): genera una clave nueva.',
   })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async create(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RecordPaymentDto,
     // Idempotency-Key (UUID) dedup header. Optional: absent → today's behavior
     // (no dedup, idempotencyKey stays NULL). Read from the header (never the
@@ -266,6 +342,7 @@ export class PaymentsController {
         paymentMethodId: dto.paymentMethodId,
         reference: dto.reference,
         duplicateReferenceReason: dto.duplicateReferenceReason,
+        proofUploadId: dto.proofUploadId,
         notes: dto.notes,
       },
       req.user.sub,
@@ -319,15 +396,16 @@ export class PaymentsController {
       '`duplicateReferenceReason`. `code: SPLIT_PAYMENT_EXCEEDS_BALANCE` (con `total`, `pending` —nunca bajo 0—, ' +
       '`excess` —lo que este cobro supera lo pendiente— y `currency`, la del plan) si el total supera lo pendiente: ' +
       'se confirma con `confirmCreditBalance`. ' +
-      '`code: SPLIT_PAYMENT_BALANCE_CHANGED` si, sin esa confirmación, otro abono entró al plan mientras ' +
-      'se registraba el cobro: no se registra nada y se repite la petición (misma clave). ' +
+      '`code: SPLIT_PAYMENT_BALANCE_CHANGED` si, sin esa confirmación, otro movimiento del plan (un abono, un traspaso o una devolución de saldo a favor) ' +
+      'entró mientras se registraba el cobro: no se registra nada y se repite la petición (misma clave). ' +
       'Sin caja abierta, si la clínica la exige para el efectivo (DX-027).',
   })
   @ApiBadRequestResponse({
     description:
       'Menos de 2 o más de 5 líneas, una línea sin medio, un medio de otra clínica o desactivado, ' +
       'una referencia que falta, o dos líneas con el mismo medio y referencia. ' +
-      'DX-054: `paidAt` a más de 24 h en el futuro.',
+      'DX-075: `paidAt` como día civil posterior a hoy en la sede. ' +
+      'DX-054: `paidAt` como instante a más de 24 h en el futuro.',
   })
   @ApiNotFoundResponse({
     description: 'El plan no existe o es de otra clínica',
@@ -335,6 +413,13 @@ export class PaymentsController {
   @ApiUnprocessableEntityResponse({
     description:
       'La Idempotency-Key ya se usó con otro plan, otro cuerpo o un abono suelto: genera una clave nueva.',
+  })
+  @ApiServiceUnavailableResponse({
+    description:
+      '`code: SPLIT_PAYMENT_BALANCE_UNAVAILABLE` (DX-463): sin `confirmCreditBalance`, no se pudo leer lo pendiente ' +
+      'del plan ANTES de la transacción (fallo de lectura o proveedor de tasas fuera de plazo), así que no se puede comprobar si el total ' +
+      'lo supera. No se registra nada: se repite la petición (misma clave) en un momento. ' +
+      'Un abono del plan «sin tasa» no lo provoca: el excedente se comprueba contra lo conocido.',
   })
   async createSplit(
     @Param('id', ParseUUIDPipe) id: string,
@@ -354,6 +439,7 @@ export class PaymentsController {
           paymentMethodId: line.paymentMethodId,
           reference: line.reference,
           duplicateReferenceReason: line.duplicateReferenceReason,
+          proofUploadId: line.proofUploadId,
         })),
       },
       req.user.sub,
@@ -386,7 +472,8 @@ export class PaymentsController {
   @ApiBadRequestResponse({
     description:
       'Otra moneda que la del saldo, o el abono supera lo pendiente (mensaje en español). ' +
-      'DX-054: `paidAt` a más de 24 h en el futuro.',
+      'DX-075: `paidAt` como día civil posterior a hoy en la sede. ' +
+      'DX-054: `paidAt` como instante a más de 24 h en el futuro.',
   })
   @ApiNotFoundResponse({ description: OPENING_BALANCE_NOT_FOUND_MESSAGE })
   @ApiUnprocessableEntityResponse({
@@ -409,6 +496,7 @@ export class PaymentsController {
         paymentMethodId: dto.paymentMethodId,
         reference: dto.reference,
         duplicateReferenceReason: dto.duplicateReferenceReason,
+        proofUploadId: dto.proofUploadId,
         notes: dto.notes,
       },
       req.user.sub,
@@ -429,7 +517,9 @@ export class PaymentsController {
   })
   @Get('treatment-plans/:id/payments')
   @ApiOkResponse({ type: [PaymentDto] })
-  list(@Param('id') id: string): Promise<Payment[]> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  list(@Param('id', ParseUUIDPipe) id: string): Promise<Payment[]> {
     return this.listPayments.execute(id);
   }
 
@@ -444,8 +534,50 @@ export class PaymentsController {
     description:
       'Saldo del plan. Un plan rechazado o cancelado tiene `billable` 0 (misma regla que el estado de cuenta, DX-109); sus abonos siguen en `paid`. Añade, por ítem, lo cobrado y lo pendiente (DX-051), y en el plan lo imputado y lo sin imputar. Solo ADMIN y recepción.',
   })
-  balance(@Param('id') id: string): Promise<GetPlanBalanceWithItemsResult> {
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  balance(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<GetPlanBalanceWithItemsResult> {
     return this.getPlanBalance.executeWithItems(id);
+  }
+
+  /**
+   * DX-515: el nº de la factura fiscal que la clínica emitió FUERA de
+   * Dentalix para este abono. Mismos roles que los pagos (ADMIN y RECEPTION).
+   * Texto libre sin formato; se puede poner o cambiar después de emitir el
+   * recibo, que no cambia. El caso de uso escribe el evento con el antes y el
+   * después en su transacción (sin evento si no cambia).
+   */
+  @Put('payments/:id/external-invoice-number')
+  @ApiOperation({
+    summary: 'Anotar el nº de la factura fiscal externa de un abono',
+    description:
+      'Texto libre (hasta 64 caracteres en una línea); null o vacío lo ' +
+      'quita. En un cobro dividido se guarda en todas sus líneas (un recibo, ' +
+      'una factura). El recibo emitido no cambia. Auditado con el antes y el después.',
+  })
+  @ApiOkResponse({ type: ExternalInvoiceNumberResultDto })
+  @ApiBadRequestResponse({
+    description: 'No es texto, tiene saltos de línea o pasa de 64 caracteres',
+  })
+  @ApiForbiddenResponse({
+    description: 'Rol sin acceso a pagos o abono de una sede no permitida',
+  })
+  @ApiNotFoundResponse({
+    description: 'El abono no existe o es de otra clínica',
+  })
+  @ApiConflictResponse({ description: 'El abono está anulado' })
+  updateExternalInvoiceNumber(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ExternalInvoiceNumberDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ExternalInvoiceNumberResult> {
+    return this.setExternalInvoice.execute(
+      id,
+      dto.externalInvoiceNumber,
+      requireAuditRequestContext(req, this.tenantContext),
+    );
   }
 
   @Audit({
@@ -459,7 +591,8 @@ export class PaymentsController {
     summary: 'Anular un abono (con motivo; queda quién y cuándo)',
     description:
       'Borrado lógico: el abono deja de sumar pero se conserva con ' +
-      '`voidedById`, `voidedAt` y `voidReason`. ADMIN anula cualquier abono; ' +
+      '`voidedById`, `voidedAt` y `voidReason`. Exige acceso a la sede persistida ' +
+      'del abono, también sin cabecera o en vista consolidada. ADMIN anula cualquier abono; ' +
       'RECEPTION solo los que registró ella misma el mismo día (calendario ' +
       'de la sede del abono). Si el abono contaba para un compromiso de ' +
       'pago cumplido del paciente en su moneda y ya no queda cubierto, el compromiso ' +
@@ -468,11 +601,13 @@ export class PaymentsController {
   })
   @ApiOkResponse({ description: 'Abono anulado (cuerpo vacío)' })
   @ApiBadRequestResponse({
-    description: 'Falta `reason` o no tiene 3–300 caracteres',
+    description:
+      'Id que no es UUID, o falta `reason` o no tiene 3–300 caracteres',
   })
   @ApiForbiddenResponse({
     description:
-      'Rol sin acceso a pagos, o RECEPTION anulando un abono de otro usuario ' +
+      'Sede del abono no permitida (LOCATION_NOT_ALLOWED), rol sin acceso a pagos, ' +
+      'o RECEPTION anulando un abono de otro usuario ' +
       'o de otro día',
   })
   @ApiNotFoundResponse({
@@ -484,8 +619,9 @@ export class PaymentsController {
       'una devolución de saldo a favor, o del plan ya se traspasó o devolvió ' +
       'saldo a favor y sin este abono quedaría al descubierto',
   })
+  @ApiParam({ name: 'id', format: 'uuid' })
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: VoidPaymentDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {

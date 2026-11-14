@@ -28,7 +28,8 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
       birthDate: null,
       emergencyContactName: null,
       responsibles: [],
-      noticeSettings: { timeZone: 'America/Bogota', majorityAge: 18 },
+      majorityReview: null,
+      noticeSettings: { timeZone: 'America/Caracas', majorityAge: 18 },
       countryCode: null,
       phone: null,
       email: 'ana@example.com',
@@ -38,6 +39,8 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
       whatsappOptInBy: null,
       reminderOptOutAt: null,
       reminderOptOutSource: null,
+      preferredLanguage: null,
+      patientLanguages: ['es'],
       ...over,
     };
     this.patients.set(patientId, state);
@@ -71,7 +74,11 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
     const patch = typeof update === 'function' ? update(current) : update;
     const changedFields = effectiveCommunicationChanges(current, patch);
     if (!changedFields.length)
-      return Promise.resolve({ state: { ...current }, changedFields });
+      return Promise.resolve({
+        state: { ...current },
+        previous: { ...current },
+        changedFields,
+      });
     this.updates.push(patch);
     const { whatsappOptInById, ...rest } = patch;
     const next: PatientCommunicationState = { ...current, ...rest };
@@ -84,6 +91,10 @@ export class FakePatientCommunicationRepository implements PatientCommunicationR
         : null;
     }
     this.patients.set(patientId, next);
-    return Promise.resolve({ state: { ...next }, changedFields });
+    return Promise.resolve({
+      state: { ...next },
+      previous: { ...current },
+      changedFields,
+    });
   }
 }

@@ -1,3 +1,4 @@
+import { ClinicFiscalDto } from '../../../../shared/clinic/clinic-fiscal.dto';
 /**
  * Excepción G5.3 (DX-334): recetas emitidas antes de DX-324. `country` es el
  * campo histórico de la plantilla legada; en la receta única viaja `null`.
@@ -186,6 +187,13 @@ export class PrescriptionDto {
   @ApiProperty({ type: String, nullable: true }) professionalEmail!:
     string | null;
   @ApiProperty() clinicName!: string;
+  @ApiProperty({
+    type: ClinicFiscalDto,
+    nullable: true,
+    description:
+      'DX-019: datos fiscales congelados al emitir; null = la receta se imprime sin ellos (nunca con los de hoy).',
+  })
+  clinicFiscal!: ClinicFiscalDto | null;
   @ApiProperty() locationName!: string;
   @ApiProperty({ type: String, nullable: true }) locationAddress!:
     string | null;
@@ -215,6 +223,13 @@ export class PrescriptionDto {
   safetyOverrideReason!: string | null;
   @ApiProperty({ description: 'SHA-256 (hex) del contenido emitido' })
   contentHash!: string;
+  @ApiProperty({
+    description:
+      'DX-467: código de verificación (12 símbolos de «23456789ABCDEFGHJKMNPQRSTUVWXYZ»). La impresión lo muestra agrupado de 4 en 4 con un QR hacia `/receta/<código>`; la página pública dice si la receta es válida o está anulada.',
+    example: 'K7M3QH9XRT2W',
+    pattern: '^[2-9A-HJKMNP-Z]{12}$',
+  })
+  verificationCode!: string;
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   voidedAt!: Date | null;
   @ApiProperty({ type: String, format: 'uuid', nullable: true }) voidedById!:

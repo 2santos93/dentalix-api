@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PaymentAdjustmentLineDto } from './payment-adjustment-line.dto';
 import { PaymentMethod, type DocumentType } from '@prisma/client';
 import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
 import {
@@ -28,6 +29,12 @@ export class ReceiptClinicDto {
     description: 'Identificador fiscal de la clínica (DX-019).',
   })
   taxId!: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Nombre que la clínica da a su identificador fiscal, congelado al emitir (DX-019). Ausente = el genérico.',
+  })
+  taxIdLabel?: string;
 
   @ApiProperty({ type: String, nullable: true })
   address!: string | null;
@@ -107,6 +114,13 @@ export class ReceiptPaymentDto {
 
   @ApiProperty({ example: '2026-10-17', description: 'Día civil en la sede.' })
   paidOn!: string;
+
+  @ApiPropertyOptional({
+    type: [PaymentAdjustmentLineDto],
+    description:
+      'DX-516: ajustes por medio de pago congelados al emitir; ausente sin ajustes, en los recibos anteriores y en un cobro dividido (van en cada línea).',
+  })
+  adjustments?: PaymentAdjustmentLineDto[];
 }
 
 export class ReceiptPlanDto {
@@ -183,6 +197,13 @@ export class ReceiptSplitLineDto {
       'La línea en la moneda del plan con su tasa congelada; null «sin tasa».',
   })
   equivalentAmount!: number | null;
+
+  @ApiPropertyOptional({
+    type: [PaymentAdjustmentLineDto],
+    description:
+      'DX-516: ajustes del medio de esta línea; ausente si no tiene ninguno.',
+  })
+  adjustments?: PaymentAdjustmentLineDto[];
 }
 
 /** DX-390: total del cobro dividido en la moneda del plan. */
@@ -269,6 +290,33 @@ export class ReceiptSnapshotDto {
 
   @ApiProperty({ example: 'Este documento no es factura' })
   legalNotice!: string;
+
+  @ApiPropertyOptional({
+    example: 'Recibo de pago',
+    description:
+      'DX-515: el título del recibo que configuró la clínica, congelado al ' +
+      'emitir. Ausente si no tenía (se imprime «Recibo de caja»).',
+  })
+  title?: string;
+
+  @ApiPropertyOptional({
+    example: 'Este recibo no es una factura',
+    description:
+      'DX-515: la leyenda de la clínica o de la sede, congelada al emitir. ' +
+      'Ausente si no había: no se imprime nada, también al reimprimir un ' +
+      'recibo anterior a que se configurara.',
+  })
+  legend?: string;
+
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: { type: 'string' },
+    description:
+      'DX-517: el texto propio de cada moneda que tenía la clínica al ' +
+      'emitir (código ISO → texto), congelado. Ausente si no tenía ninguno: ' +
+      'los importes llevan el código ISO, también al reimprimir.',
+  })
+  currencyTexts?: Record<string, string>;
 }
 
 /**
@@ -321,6 +369,27 @@ export class ReceiptSplitDto {
   total!: ReceiptSplitTotalDto;
 }
 
+export class ReceiptRegionalDto {
+  @ApiProperty({
+    example: 'America/Caracas',
+    description: 'Zona IANA de la sede.',
+  })
+  timeZone!: string;
+
+  @ApiProperty({
+    example: 'es-VE',
+    description: 'Locale canónico: separadores y orden de las fechas.',
+  })
+  locale!: string;
+
+  @ApiProperty({
+    enum: ['h12', 'h23'],
+    enumName: 'HourCycle',
+    description: 'Reloj de la sede: 12 h o 24 h.',
+  })
+  hourCycle!: 'h12' | 'h23';
+}
+
 export class PaymentReceiptDto {
   @ApiProperty({ format: 'uuid' })
   paymentId!: string;
@@ -370,6 +439,14 @@ export class PaymentReceiptDto {
       'DX-390: el cobro dividido del recibo (todas sus formas de pago, cada una con su tasa congelada, y el total en la moneda del plan); null en un abono suelto. El recibo de cualquier línea es el del cobro.',
   })
   split!: ReceiptSplitDto | null;
+
+  @ApiProperty({
+    type: ReceiptRegionalDto,
+    nullable: true,
+    description:
+      'DX-521: zona, locale y reloj con los que pintar las fechas y los importes del recibo. La región congelada en la foto al emitir; en un recibo anterior (o «sin serie»), la de hoy de su sede; null si la sede no tiene los tres ajustes válidos. La foto no la repite en `snapshot`.',
+  })
+  regional!: ReceiptRegionalDto | null;
 
   @ApiProperty({
     type: ReceiptSnapshotDto,

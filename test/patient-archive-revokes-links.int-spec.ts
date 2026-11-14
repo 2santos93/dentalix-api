@@ -29,7 +29,9 @@ const owner = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
-const patients = new PrismaPatientRepository(prisma, tenantContext);
+const patients = new PrismaPatientRepository(prisma, tenantContext, {
+  platformMinYears: 15,
+});
 const links = new PrismaPatientPublicLinksRepository(prisma, tenantContext);
 const requests = new PrismaSignatureRequestRepository(prisma, tenantContext);
 const consents = new PrismaPatientConsentRepository(prisma, tenantContext);
@@ -106,6 +108,7 @@ async function signatureRequest(
   patientId: string,
   type: SignatureRequestType,
   expiresAt: Date,
+  templateId: string = s.templateId,
 ): Promise<string> {
   const plan =
     type === 'BUDGET'
@@ -113,7 +116,7 @@ async function signatureRequest(
           data: {
             tenantId: s.tenantId,
             patientId,
-            currency: 'COP',
+            currency: 'USD',
           },
         })
       : null;
@@ -125,7 +128,7 @@ async function signatureRequest(
         patientId,
         type,
         channel: 'EMAIL',
-        templateId: type === 'CONSENT' ? s.templateId : null,
+        templateId: type === 'CONSENT' ? templateId : null,
         templateVersion: type === 'CONSENT' ? 1 : null,
         treatmentPlanId: plan?.id ?? null,
         title: 'Documento a distancia',
@@ -273,7 +276,18 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
     const live = await liveLinksFor(a, p);
     const expiredOffer = await slotOffer(a, p, inHours(-1));
     const phoneOffer = await slotOffer(a, p, inHours(24), 'PHONE');
-    const expiredConsent = await signatureRequest(a, p, 'CONSENT', inHours(-1));
+    // DX-425: dos enlaces sin anular de la misma plantilla no caben (un solo
+    // enlace vivo por documento); el caducado lleva otra plantilla.
+    const expiredTemplate = await owner.consentTemplate.create({
+      data: { tenantId: a.tenantId, title: 'Caducada', body: 'Texto' },
+    });
+    const expiredConsent = await signatureRequest(
+      a,
+      p,
+      'CONSENT',
+      inHours(-1),
+      expiredTemplate.id,
+    );
     const expiredAnamnesis = await anamnesis(a, p, inHours(-1));
     // Otro paciente de la clínica y otra clínica: intactos.
     const other = await newPatient(a, 'Vecina');

@@ -5,15 +5,12 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { ClinicRole, type PaymentMethod } from '@prisma/client';
 import {
-  CURRENCY_DIGITS_CATALOG,
-  type CurrencyDigitsCatalog,
-} from '../../../shared/money/currency-digits';
-import type { ClinicRole, PaymentMethod } from '@prisma/client';
-import {
-  CREDIT_AMOUNT_EXCEEDS_MESSAGE,
+  creditExceedsMessage,
   CREDIT_CURRENCY_MISMATCH_MESSAGE,
   CREDIT_IDEMPOTENCY_INVALID_MESSAGE,
   CREDIT_IDEMPOTENCY_REUSED_MESSAGE,
@@ -26,7 +23,9 @@ import {
   CREDIT_TARGET_CURRENCY_MESSAGE,
   CREDIT_TARGET_NOT_BILLABLE_MESSAGE,
   CREDIT_TARGET_OTHER_PATIENT_MESSAGE,
+  DailyRefundCapExceededError,
   canMoveCredit,
+  dailyRefundCapMessage,
   fromCents,
   normalizeReason,
   parseIdempotencyKey,
@@ -36,13 +35,16 @@ import {
   transferFingerprint,
 } from '../domain/patient-credit';
 import {
+  PATIENT_CREDIT_CLOCK,
   PATIENT_CREDIT_REPOSITORY,
+  type PatientCreditClock,
   type CreditRefundRecord,
   type CreditTransferRecord,
   type PatientCreditMovements,
   type PatientCreditRepository,
   type PlanCreditState,
 } from '../domain/ports/patient-credit-repository.port';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
 
 /** Quién actúa, del token (nunca del cuerpo). */
@@ -87,31 +89,33 @@ async function loadPlan(
  */
 async function checkAmount(
   repo: PatientCreditRepository,
-  currencyDigits: CurrencyDigitsCatalog,
   source: PlanCreditState,
   amount: number,
   currency: string,
   actor: CreditActor,
-): Promise<number> {
+): Promise<{ amountCents: number; capCents: number }> {
   if (currency.trim().toUpperCase() !== source.currency) {
     throw new BadRequestException(CREDIT_CURRENCY_MISMATCH_MESSAGE);
   }
   const amountCents = toCents(amount);
   const cap = await repo.receptionCapCents();
   if (!canMoveCredit(actor.role, amountCents, cap)) {
-    const digits = await currencyDigits.table([source.currency]);
+    // Perezoso (I4): el formato de la sede de referencia (R6) solo al
+    // rechazar; sin formato, 409 LOCATION_LOCALE_REQUIRED (DX-354b).
+    const fmt = await repo.referenceLocationFormat();
+    // DX-517-quater: el texto propio de la moneda, leído aquí (fuera de todo
+    // bloqueo) y solo al rechazar.
+    const texts = await repo.currencyTexts();
     throw new ForbiddenException(
-      receptionCapMessage(
-        cap,
-        source.currency,
-        digits.roundingDigits(source.currency),
-      ),
+      receptionCapMessage(cap, source.currency, fmt, texts),
     );
   }
   if (amountCents > source.creditCents) {
-    throw new BadRequestException(CREDIT_AMOUNT_EXCEEDS_MESSAGE);
+    throw new BadRequestException(
+      creditExceedsMessage(source.pendingOtherCurrencyPayments ?? 0),
+    );
   }
-  return amountCents;
+  return { amountCents, capCents: cap };
 }
 
 function keyOf(raw: string | undefined): string | undefined {
@@ -132,8 +136,6 @@ export class TransferCreditUseCase {
   constructor(
     @Inject(PATIENT_CREDIT_REPOSITORY)
     private readonly repo: PatientCreditRepository,
-    @Inject(CURRENCY_DIGITS_CATALOG)
-    private readonly currencyDigits: CurrencyDigitsCatalog,
   ) {}
 
   async execute(
@@ -175,9 +177,8 @@ export class TransferCreditUseCase {
     if (!isPlanBillable(target.status)) {
       throw new ConflictException(CREDIT_TARGET_NOT_BILLABLE_MESSAGE);
     }
-    const amountCents = await checkAmount(
+    const { amountCents } = await checkAmount(
       this.repo,
-      this.currencyDigits,
       source,
       input.amount,
       currency,
@@ -227,8 +228,9 @@ export class RefundCreditUseCase {
   constructor(
     @Inject(PATIENT_CREDIT_REPOSITORY)
     private readonly repo: PatientCreditRepository,
-    @Inject(CURRENCY_DIGITS_CATALOG)
-    private readonly currencyDigits: CurrencyDigitsCatalog,
+    @Optional()
+    @Inject(PATIENT_CREDIT_CLOCK)
+    private readonly clock: PatientCreditClock = () => new Date(),
   ) {}
 
   async execute(
@@ -270,25 +272,49 @@ export class RefundCreditUseCase {
       }
     }
     const source = await loadPlan(this.repo, planId);
-    const amountCents = await checkAmount(
+    const { amountCents, capCents } = await checkAmount(
       this.repo,
-      this.currencyDigits,
       source,
       input.amount,
       currency,
       actor,
     );
-    return this.repo.createRefund({
-      planId: source.planId,
-      amountCents,
-      currency: source.currency,
-      method: input.method,
-      reason,
-      paymentIds,
-      userId: actor.userId,
-      idempotencyKey: key,
-      fingerprint,
-    });
+    // DX-462: RECEPTION además tiene un tope DIARIO acumulado; se comprueba
+    // dentro del bloqueo del repositorio. ADMIN no tiene tope.
+    const dailyCap =
+      actor.role === ClinicRole.RECEPTION
+        ? { capCents, clock: this.clock }
+        : undefined;
+    try {
+      return await this.repo.createRefund({
+        planId: source.planId,
+        amountCents,
+        currency: source.currency,
+        method: input.method,
+        reason,
+        paymentIds,
+        userId: actor.userId,
+        idempotencyKey: key,
+        fingerprint,
+        ...(dailyCap ? { dailyCap } : {}),
+      });
+    } catch (error) {
+      if (error instanceof DailyRefundCapExceededError) {
+        const fmt = await this.repo.locationFormat(error.locationId);
+        // DX-517-quater: el bloqueo del repositorio ya se soltó (la
+        // transacción terminó con este error): lectura simple de `tenants`.
+        const texts = await this.repo.currencyTexts();
+        throw new ForbiddenException(
+          dailyRefundCapMessage(
+            error.remainingCents,
+            error.currency,
+            fmt,
+            texts,
+          ),
+        );
+      }
+      throw error;
+    }
   }
 }
 
@@ -321,7 +347,7 @@ export class ListPatientCreditUseCase {
 }
 
 export interface CreditPolicyView {
-  /** Tope de RECEPTION por operación (0 = no puede). ADMIN no tiene tope. */
+  /** Tope de RECEPTION (0 = no puede): por operación y, en devoluciones, también por día (DX-462). ADMIN no tiene tope. */
   receptionMaxAmount: number;
 }
 
@@ -338,9 +364,13 @@ export class CreditPolicyUseCases {
     };
   }
 
-  async update(receptionMaxAmount: number): Promise<CreditPolicyView> {
+  async update(
+    receptionMaxAmount: number,
+    audit: AuditRequestContext,
+  ): Promise<CreditPolicyView> {
     const cents = await this.repo.updateReceptionCap(
       toCents(receptionMaxAmount),
+      audit,
     );
     return { receptionMaxAmount: fromCents(cents) };
   }

@@ -32,6 +32,8 @@ describe('loadRateLimitConfig', () => {
     expect(cfg['patient-import']).toEqual({ limit: 10, ttlMs: 60_000 });
     // SEC-054: leer tasas, por clínica + usuario.
     expect(cfg['exchange-rates']).toEqual({ limit: 120, ttlMs: 60_000 });
+    // DX-224: «¿Quién llama?», por clínica + usuario.
+    expect(cfg['caller-lookup']).toEqual({ limit: 60, ttlMs: 60_000 });
     // DX-099: el cuestionario público de anamnesis, por IP y por token.
     expect(cfg.anamnesis).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['anamnesis-token']).toEqual({ limit: 10, ttlMs: 60_000 });
@@ -44,6 +46,25 @@ describe('loadRateLimitConfig', () => {
     // DX-443: la copia pública del PDF firmado, por IP y por token.
     expect(cfg['copy-link']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['copy-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-467: verificar una receta por su código, por IP.
+    expect(cfg['prescription-verify']).toEqual({ limit: 30, ttlMs: 60_000 });
+    // DX-555: la marca por host, fuera del global: aciertos por IP + host,
+    // fallos por IP.
+    expect(cfg['branding-host']).toEqual({ limit: 600, ttlMs: 60_000 });
+    expect(cfg['branding-miss']).toEqual({ limit: 60, ttlMs: 60_000 });
+  });
+
+  it('DX-555: lee RATE_LIMIT_BRANDING_HOST_* y RATE_LIMIT_BRANDING_MISS_*', () => {
+    const cfg = loadRateLimitConfig(
+      envOf({
+        RATE_LIMIT_BRANDING_HOST_LIMIT: '900',
+        RATE_LIMIT_BRANDING_HOST_TTL_MS: '30000',
+        RATE_LIMIT_BRANDING_MISS_LIMIT: '20',
+        RATE_LIMIT_BRANDING_MISS_TTL_MS: '120000',
+      }),
+    );
+    expect(cfg['branding-host']).toEqual({ limit: 900, ttlMs: 30_000 });
+    expect(cfg['branding-miss']).toEqual({ limit: 20, ttlMs: 120_000 });
   });
 
   it('SEC-046: lee RATE_LIMIT_PATIENT_IMPORT_LIMIT/_TTL_MS', () => {

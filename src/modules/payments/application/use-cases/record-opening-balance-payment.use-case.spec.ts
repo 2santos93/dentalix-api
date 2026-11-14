@@ -1,5 +1,10 @@
+import { buildPaymentProofKit } from '../__fixtures__/payment-proof-kit';
+import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../payment-method-gate';
-import { PAID_AT_IN_FUTURE_MESSAGE } from '../../domain/paid-at-window';
+import {
+  PAID_AT_AFTER_SITE_TODAY_MESSAGE,
+  PAID_AT_IN_FUTURE_MESSAGE,
+} from '../../domain/paid-at-window';
 import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import {
   BadRequestException,
@@ -10,17 +15,18 @@ import {
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { RecordOpeningBalancePaymentUseCase } from './record-opening-balance-payment.use-case';
 import type { CurrencyWhitelist } from '../../../treatment-plans/domain/ports/currency-whitelist.port';
+import { PAYMENT_AMOUNT_MESSAGE } from '../../../../shared/money/currency-messages';
 
 const whitelist: CurrencyWhitelist = {
-  has: (code) => Promise.resolve(['COP', 'USD'].includes(code)),
+  has: (code) => Promise.resolve(['VES', 'USD'].includes(code)),
 };
 
-function setup() {
+function setup(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
   const repo = new InMemoryPaymentRepository();
   repo.openingBalances.set('ob-1', {
     id: 'ob-1',
     patientId: 'pat-1',
-    currency: 'COP',
+    currency: 'VES',
     amount: 150000,
   });
   const uc = new RecordOpeningBalancePaymentUseCase(
@@ -32,30 +38,74 @@ function setup() {
         findByLegacyMethod: () => Promise.resolve(null),
       } as unknown as PaymentMethodRepository,
       repo,
+      referenceCurrencyDigitsCatalog(),
     ),
-    () => new Date('2026-10-31T15:00:00.000Z'),
+    buildPaymentProofKit(repo).proofs,
+    () => now,
   );
   return { repo, uc };
 }
 
 describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
-  it('DX-054: fecha a más de 24 h en el futuro → 400 en español y no se registra', async () => {
+  it('DX-054: un instante a más de 24 h en el futuro → 400 en español y no se registra', async () => {
     const { repo, uc } = setup();
     await expect(
       uc.execute('ob-1', {
         amount: 1000,
-        currency: 'COP',
-        paidAt: '2026-11-05',
+        currency: 'VES',
+        paidAt: '2026-11-05T12:00:00.000Z',
       }),
     ).rejects.toThrow(new BadRequestException(PAID_AT_IN_FUTURE_MESSAGE));
     expect(repo.lastCreateInput).toBeNull();
+  });
+
+  it('DX-075: mañana en la sede (Caracas, 15:00Z del 31) → 400 en español; hoy se registra', async () => {
+    const { repo, uc } = setup();
+    await expect(
+      uc.execute('ob-1', {
+        amount: 1000,
+        currency: 'VES',
+        paidAt: '2026-11-01',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+    );
+    expect(repo.lastCreateInput).toBeNull();
+    await uc.execute('ob-1', {
+      amount: 1000,
+      currency: 'VES',
+      paidAt: '2026-10-31',
+      method: 'CASH',
+    });
+    expect(repo.lastCreateInput).not.toBeNull();
+  });
+
+  it('DX-075: sede en Caracas cerca de medianoche (03:30Z del 5): el 4 se registra, el 5 → 400', async () => {
+    const { repo, uc } = setup(new Date('2026-11-05T03:30:00.000Z'));
+    await expect(
+      uc.execute('ob-1', {
+        amount: 1000,
+        currency: 'VES',
+        paidAt: '2026-11-05',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE),
+    );
+    expect(repo.lastCreateInput).toBeNull();
+    await uc.execute('ob-1', {
+      amount: 1000,
+      currency: 'VES',
+      paidAt: '2026-11-04',
+      method: 'CASH',
+    });
+    expect(repo.lastCreateInput).not.toBeNull();
   });
 
   it('registra el abono contra el saldo migrado, sin plan y con el paciente del saldo', async () => {
     const { repo, uc } = setup();
     const payment = await uc.execute(
       'ob-1',
-      { amount: 50000, currency: 'cop', paidAt: '2026-10-20', method: 'CASH' },
+      { amount: 50000, currency: 'ves', paidAt: '2026-10-20', method: 'CASH' },
       'u-recep',
     );
     expect(payment).toMatchObject({
@@ -63,7 +113,7 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
       openingBalanceId: 'ob-1',
       patientId: 'pat-1',
       amount: 50000,
-      currency: 'COP',
+      currency: 'VES',
     });
     expect(repo.lastCreateInput).toMatchObject({
       treatmentPlanId: null,
@@ -76,26 +126,26 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     const { uc } = setup();
     await uc.execute('ob-1', {
       amount: 100000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-10-20',
     });
     await expect(
       uc.execute('ob-1', {
         amount: 50000.01,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: '2026-10-20',
       }),
     ).rejects.toThrow(
-      // La sede del fake: es-CO/h23.
-      /^El abono supera lo pendiente del saldo migrado: quedan \$\s50\.000,00\.$/,
+      // La sede del fake: es-VE/h23.
+      /^El abono supera lo pendiente del saldo migrado: quedan VES\s50\.000,00\.$/,
     );
     await uc.execute('ob-1', {
       amount: 50000,
-      currency: 'COP',
+      currency: 'VES',
       paidAt: '2026-10-20',
     });
     await expect(
-      uc.execute('ob-1', { amount: 1, currency: 'COP', paidAt: '2026-10-20' }),
+      uc.execute('ob-1', { amount: 1, currency: 'VES', paidAt: '2026-10-20' }),
     ).rejects.toThrow(
       'Este saldo migrado ya está pagado: no admite más abonos.',
     );
@@ -111,11 +161,26 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     await expect(
       uc.execute('ob-1', {
         amount: 150001,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: '2026-10-20',
       }),
     ).rejects.toThrow(
-      'El abono supera lo pendiente del saldo migrado: quedan COP\u00a0150,000.00.',
+      'El abono supera lo pendiente del saldo migrado: quedan VES\u00a0150,000.00.',
+    );
+  });
+
+  it('DX-517-bis: el 400 de lo pendiente escribe la moneda con el texto propio de la clínica', async () => {
+    const { repo, uc } = setup();
+    repo.locations.set('loc-1', { locale: 'en-US', hourCycle: 'h12' });
+    repo.currencyTexts = { VES: 'Bs.' };
+    await expect(
+      uc.execute('ob-1', {
+        amount: 150001,
+        currency: 'VES',
+        paidAt: '2026-10-20',
+      }),
+    ).rejects.toThrow(
+      'El abono supera lo pendiente del saldo migrado: quedan Bs.\u00a0150,000.00.',
     );
   });
 
@@ -125,18 +190,18 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     await expect(
       uc.execute('ob-1', {
         amount: 150001,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: '2026-10-20',
       }),
     ).rejects.toThrow(
-      'El abono supera lo pendiente del saldo migrado: quedan COP\u00a0150,000.00.',
+      'El abono supera lo pendiente del saldo migrado: quedan VES\u00a0150,000.00.',
     );
     // Sin reloj: 409 solo al pintar; un abono válido se registra.
     repo.locations.set('loc-1', { locale: 'en-US', hourCycle: null });
     const err = await uc
       .execute('ob-1', {
         amount: 150001,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: '2026-10-20',
       })
       .catch((e: unknown) => e);
@@ -147,10 +212,19 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     await expect(
       uc.execute('ob-1', {
         amount: 1000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: '2026-10-20',
       }),
     ).resolves.toMatchObject({ amount: 1000 });
+  });
+
+  it('DX-517-bis: un importe no positivo o no finito es 400 en español', async () => {
+    const { uc } = setup();
+    for (const amount of [0, -10, Number.POSITIVE_INFINITY]) {
+      await expect(
+        uc.execute('ob-1', { amount, currency: 'VES', paidAt: '2026-10-20' }),
+      ).rejects.toThrow(new BadRequestException(PAYMENT_AMOUNT_MESSAGE));
+    }
   });
 
   it('otra moneda que la del saldo: 400; saldo inexistente o retirado: 404', async () => {
@@ -158,10 +232,10 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     await expect(
       uc.execute('ob-1', { amount: 10, currency: 'USD', paidAt: '2026-10-20' }),
     ).rejects.toThrow(
-      'El abono al saldo migrado tiene que ir en su moneda (COP).',
+      'El abono al saldo migrado tiene que ir en su moneda (VES).',
     );
     await expect(
-      uc.execute('ob-x', { amount: 10, currency: 'COP', paidAt: '2026-10-20' }),
+      uc.execute('ob-x', { amount: 10, currency: 'VES', paidAt: '2026-10-20' }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -170,11 +244,11 @@ describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
     repo.openingBalances.set('ob-2', {
       id: 'ob-2',
       patientId: 'pat-1',
-      currency: 'COP',
+      currency: 'VES',
       amount: 10,
     });
     const key = '7d0b0c6e-6f3a-4b62-9b2e-1c3a4f5e6d7c';
-    const body = { amount: 1000, currency: 'COP', paidAt: '2026-10-20' };
+    const body = { amount: 1000, currency: 'VES', paidAt: '2026-10-20' };
     const first = await uc.execute('ob-1', body, 'u', key);
     const again = await uc.execute('ob-1', body, 'u', key);
     expect(again.id).toBe(first.id);

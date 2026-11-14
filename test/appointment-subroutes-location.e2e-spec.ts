@@ -18,7 +18,7 @@ import {
   LOCATION_NOT_ALLOWED_MESSAGE,
 } from '../src/shared/tenancy/location-access';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationBody,
 } from './support/location-fixtures';
 
@@ -197,7 +197,10 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
       (
         (
           await admin()
-            .post('/locations', locationBody(REGIONAL_BOGOTA_FIXTURE, { name }))
+            .post(
+              '/locations',
+              locationBody(REGIONAL_CARACAS_FIXTURE, { name }),
+            )
             .expect(201)
         ).body as {
           id: string;
@@ -231,12 +234,12 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
         await admin()
           .post('/patients', {
             firstName: 'Lucía',
-            lastName: 'Restrepo',
+            lastName: 'Urdaneta',
             docType: 'NATIONAL_ID',
             docNumber: 'SEC045-1',
             sex: Sex.F,
             email: PATIENT_EMAIL,
-            phone: '+57 310 555 0145',
+            phone: '+58 414 555 0145',
           })
           .expect(201)
       ).body as { id: string }
@@ -353,7 +356,12 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
     it.each(MATRIX)(
       '%s · %s · cita de %s → %s',
       async (route, who, site, outcome) => {
-        const res = await ROUTES[route](members[who].token, appt[site]);
+        // DX-250: las indicaciones solo se entregan tras una cita atendida.
+        const target =
+          route === 'POST post-op-instructions/deliveries'
+            ? pastAppt[site]
+            : appt[site];
+        const res = await ROUTES[route](members[who].token, target);
         if (outcome === 'forbidden') {
           expectNotAllowed(res);
         } else {
@@ -363,15 +371,18 @@ describe('Subrutas de la cita y sede permitida (SEC-045)', () => {
     );
 
     it('acotado sobre su sede: la entrega por EMAIL se registra y encola el email', async () => {
-      const before = await effectsOn(appt.norte);
+      const before = await effectsOn(pastAppt.norte);
       const res = await api(members.restricted.token)
-        .post(`/appointments/${appt.norte}/post-op-instructions/deliveries`, {
-          templateId,
-          channel: 'EMAIL',
-        })
+        .post(
+          `/appointments/${pastAppt.norte}/post-op-instructions/deliveries`,
+          {
+            templateId,
+            channel: 'EMAIL',
+          },
+        )
         .expect(201);
       expect(res.body).toMatchObject({ emailQueued: true });
-      const after = await effectsOn(appt.norte);
+      const after = await effectsOn(pastAppt.norte);
       expect(after.deliveries).toBe(before.deliveries + 1);
       expect(after.outbox).toBe(before.outbox + 1);
     });

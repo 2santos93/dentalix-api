@@ -22,7 +22,7 @@ import {
   hashSlotOfferToken,
 } from '../src/modules/waitlist/domain/slot-offer-link';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -81,7 +81,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: `Clínica ${subdomain}`, subdomain },
   });
   const location = await owner.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede Centro',
     }),
@@ -152,7 +152,12 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
   async function offerToEntry(
     c: Clinic,
     patientIndex: number,
-    over: { expiresAt?: Date; slotStart?: Date; slotEnd?: Date } = {},
+    over: {
+      expiresAt?: Date;
+      slotStart?: Date;
+      slotEnd?: Date;
+      providerId?: string;
+    } = {},
   ): Promise<{ token: string; offerId: string; entryId: string }> {
     const entry = await owner.appointmentWaitlistEntry.create({
       data: {
@@ -170,7 +175,7 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
         locationId: c.locationId,
         slotStart: over.slotStart ?? at('15:00'),
         slotEnd: over.slotEnd ?? at('15:30'),
-        providerId: DOCTOR,
+        providerId: over.providerId ?? DOCTOR,
         patientId: c.patientIds[patientIndex],
         waitlistEntryId: entry.id,
         channel: 'LINK_EMAIL',
@@ -342,7 +347,7 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
         start: at('15:00'),
         end: at('15:30'),
         locationName: 'Sede Centro',
-        timeZone: REGIONAL_BOGOTA_FIXTURE.timeZone,
+        timeZone: REGIONAL_CARACAS_FIXTURE.timeZone,
       });
       const json = JSON.stringify(view);
       expect(json).not.toContain('Apellido0');
@@ -469,6 +474,61 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
         patientId: a.patientIds[0],
         metadata: { origin: 'PUBLIC_LINK', reason: 'SLOT_OFFER_ACCEPTED' },
       });
+    });
+
+    it('SEC-064: la oferta aceptada deja de enseñar el hueco 7 días después de la cita y responde como un enlace caducado, también al volver a pulsar', async () => {
+      const first = await offerToEntry(a, 0);
+      const won = await inClinic(a, () =>
+        acceptOffer.execute(first.token, META),
+      );
+      expect(won.state).toBe('ACCEPTED');
+      const DAY_MS = 24 * 60 * 60 * 1000;
+      const lateClock = (after: Date, plusMs: number) => () =>
+        new Date(after.getTime() + plusMs);
+      const cases = (clockFn: () => Date) => ({
+        get: new GetPublicSlotOfferUseCase(repo, clockFn, tenantContext),
+        accept: new AcceptSlotOfferUseCase(
+          repo,
+          noSchedule,
+          new PrismaScheduleBlockRepository(prisma, tenantContext),
+          availability,
+          clockFn,
+          tenantContext,
+        ),
+        decline: new DeclineSlotOfferUseCase(repo, clockFn, tenantContext),
+      });
+
+      // Dentro del plazo (6 días y 23 h tras terminar la cita): sin cambios.
+      const within = cases(lateClock(at('15:30'), 7 * DAY_MS - 60 * 60 * 1000));
+      const seen = await inClinic(a, () => within.get.execute(first.token));
+      expect(seen.state).toBe('ACCEPTED');
+      expect(seen.offer?.patientFirstName).toBeTruthy();
+
+      // Vencido el plazo: IGUAL que la respuesta de un enlace caducado de
+      // verdad (una oferta PENDING pasada su expiresAt), sin datos del hueco.
+      const lapsed = cases(lateClock(at('15:30'), 7 * DAY_MS));
+      const pendingOffer = await offerToEntry(a, 1);
+      await owner.waitlistOffer.update({
+        where: { id: pendingOffer.offerId },
+        data: { expiresAt: new Date(Date.now() - 60_000) },
+      });
+      const reference = await inClinic(a, () =>
+        lapsed.get.execute(pendingOffer.token),
+      );
+      expect(reference).toMatchObject({ state: 'EXPIRED', offer: null });
+      const expired = await inClinic(a, () => lapsed.get.execute(first.token));
+      expect(expired).toEqual(reference);
+      for (const run of [
+        () => lapsed.accept.execute(first.token, META),
+        () => lapsed.decline.execute(first.token, META),
+      ]) {
+        expect(await inClinic(a, run)).toEqual(reference);
+      }
+      // No se escribe nada: la oferta sigue ACCEPTED y la cita, una.
+      expect(await outcomeOf(first.offerId)).toBe('ACCEPTED');
+      expect(
+        await owner.appointment.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(1);
     });
 
     it('dos aceptaciones simultáneas: exactamente una gana y la otra recibe «ocupado», sin error', async () => {
@@ -674,6 +734,250 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
     });
   });
 
+  describe('DX-480: sillón de la cita del enlace, con dos aceptaciones a la vez', () => {
+    const OTHER_DOCTOR = randomUUID();
+
+    async function chairs(c: Clinic, names: string[]): Promise<string[]> {
+      const ids: string[] = [];
+      for (const [i, name] of names.entries()) {
+        const chair = await owner.chair.create({
+          data: {
+            tenantId: c.tenantId,
+            locationId: c.locationId,
+            name,
+            sortOrder: i,
+          },
+        });
+        ids.push(chair.id);
+      }
+      return ids;
+    }
+
+    /**
+     * Las dos aceptaciones (de profesionales distintos: no comparten el
+     * candado) eligen sillón ANTES de que ninguna escriba: así las dos van a
+     * por el primero y la EXCLUDE por sillón resuelve la carrera de verdad.
+     * Las llamadas siguientes (el reintento) no esperan.
+     */
+    function bothChooseBeforeWriting(): { calls: () => number } {
+      const target = repo as unknown as {
+        chairPlanIn: (...args: unknown[]) => Promise<unknown>;
+      };
+      const original = target.chairPlanIn.bind(repo);
+      let calls = 0;
+      let release!: () => void;
+      const together = new Promise<void>((resolve) => (release = resolve));
+      jest
+        .spyOn(target, 'chairPlanIn')
+        .mockImplementation(async (...args: unknown[]) => {
+          calls += 1;
+          const plan = await original(...args);
+          if (calls <= 2) {
+            if (calls === 2) release();
+            await together;
+          }
+          return plan;
+        });
+      return { calls: () => calls };
+    }
+
+    async function raceTwo(): Promise<
+      { state: string; chairId: string | null; patientId: string }[]
+    > {
+      const one = await offerToEntry(a, 0);
+      const two = await offerToEntry(a, 1, { providerId: OTHER_DOCTOR });
+      const results = await Promise.all([
+        inClinic(a, () => acceptOffer.execute(one.token, META)),
+        inClinic(a, () => acceptOffer.execute(two.token, META)),
+      ]);
+      const rows = await owner.appointment.findMany({
+        where: { tenantId: a.tenantId },
+        select: { chairId: true, patientId: true },
+      });
+      return results.map((r, i) => ({
+        state: r.state,
+        patientId: a.patientIds[i],
+        chairId:
+          rows.find((row) => row.patientId === a.patientIds[i])?.chairId ??
+          null,
+      }));
+    }
+
+    it('con 2 sillones, cada aceptación se queda uno distinto (la que pierde la carrera reintenta con el siguiente)', async () => {
+      const [first, second] = await chairs(a, ['Sillón 1', 'Sillón 2']);
+      const spy = bothChooseBeforeWriting();
+      const results = await raceTwo();
+      expect(results.map((r) => r.state)).toEqual(['ACCEPTED', 'ACCEPTED']);
+      expect(results.map((r) => r.chairId).sort()).toEqual(
+        [first, second].sort(),
+      );
+      // Las dos eligieron el primero; una perdió en la BD y volvió a elegir.
+      expect(spy.calls()).toBe(3);
+      expect(
+        await owner.appointment.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(2);
+    });
+
+    it('con 1 sillón, una gana y la otra ve «no disponible» sin error ni cita', async () => {
+      const [only] = await chairs(a, ['Sillón único']);
+      bothChooseBeforeWriting();
+      const results = await raceTwo();
+      expect(results.map((r) => r.state).sort()).toEqual([
+        'ACCEPTED',
+        'UNAVAILABLE',
+      ]);
+      const winner = results.find((r) => r.state === 'ACCEPTED')!;
+      expect(winner.chairId).toBe(only);
+      expect(
+        await owner.appointment.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(1);
+      // La que perdió sigue pendiente: el hueco no era suyo.
+      const outcomes = await owner.waitlistOffer.findMany({
+        where: { tenantId: a.tenantId },
+        select: { outcome: true },
+      });
+      expect(outcomes.map((o) => o.outcome).sort()).toEqual([
+        'ACCEPTED',
+        'PENDING',
+      ]);
+    });
+
+    it('sin la pausa, en varias rondas tampoco repiten sillón', async () => {
+      await chairs(a, ['Sillón 1', 'Sillón 2']);
+      for (let round = 0; round < 3; round++) {
+        const results = await raceTwo();
+        expect(results.map((r) => r.state)).toEqual(['ACCEPTED', 'ACCEPTED']);
+        expect(new Set(results.map((r) => r.chairId)).size).toBe(2);
+        expect(results.every((r) => r.chairId !== null)).toBe(true);
+        const where = { tenantId: a.tenantId };
+        await owner.auditEvent.deleteMany({ where });
+        await owner.waitlistOffer.deleteMany({ where });
+        await owner.appointmentWaitlistEntry.deleteMany({ where });
+        await owner.appointment.deleteMany({ where });
+      }
+    });
+
+    it('la cita «Adelantar si hay hueco» conserva su sillón; ocupado a la nueva hora, el hueco no se ofrece', async () => {
+      const [mine, other] = await chairs(a, ['Sillón 1', 'Sillón 2']);
+      const later = await owner.appointment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          patientId: a.patientIds[0],
+          providerId: DOCTOR,
+          chairId: other,
+          start: at('14:00', FAR),
+          end: at('14:30', FAR),
+          wantsEarlier: true,
+        },
+      });
+      const offerFor = async () => {
+        const token = generateSlotOfferToken();
+        await owner.waitlistOffer.create({
+          data: {
+            tenantId: a.tenantId,
+            locationId: a.locationId,
+            slotStart: at('15:00'),
+            slotEnd: at('15:30'),
+            providerId: DOCTOR,
+            patientId: a.patientIds[0],
+            appointmentId: later.id,
+            channel: 'LINK_WA_ME',
+            offerDay: new Date(`${DAY}T00:00:00.000Z`),
+            createdById: STAFF,
+            tokenHash: hashSlotOfferToken(token),
+            expiresAt: at('15:00'),
+          },
+        });
+        return token;
+      };
+      // Su sillón (el 2) ocupado a la nueva hora por otra cita: no se ofrece.
+      const blocker = await owner.appointment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          patientId: a.patientIds[2],
+          providerId: OTHER_DOCTOR,
+          chairId: other,
+          start: at('15:00'),
+          end: at('15:30'),
+        },
+      });
+      const blocked = await offerFor();
+      expect((await inClinic(a, () => getOffer.execute(blocked))).state).toBe(
+        'UNAVAILABLE',
+      );
+      expect(
+        (await inClinic(a, () => acceptOffer.execute(blocked, META))).state,
+      ).toBe('UNAVAILABLE');
+      expect(
+        await owner.appointment.findUniqueOrThrow({ where: { id: later.id } }),
+      ).toMatchObject({ start: at('14:00', FAR), chairId: other });
+      // Libre su sillón: se adelanta en él, aunque el 1 también esté libre.
+      await owner.appointment.delete({ where: { id: blocker.id } });
+      await owner.waitlistOffer.deleteMany({ where: { tenantId: a.tenantId } });
+      const free = await offerFor();
+      expect(
+        (await inClinic(a, () => acceptOffer.execute(free, META))).state,
+      ).toBe('ACCEPTED');
+      const moved = await owner.appointment.findUniqueOrThrow({
+        where: { id: later.id },
+      });
+      expect(moved).toMatchObject({ start: at('15:00'), chairId: other });
+      expect(moved.chairId).not.toBe(mine);
+      const [event] = await owner.auditEvent.findMany({
+        where: { resourceType: 'APPOINTMENT', resourceId: later.id },
+      });
+      expect(event.metadata).toMatchObject({
+        move: { from: { chairId: other }, to: { chairId: other } },
+      });
+    });
+
+    it('la cita «Adelantar si hay hueco» sin sillón recibe el primero libre (y queda en la auditoría)', async () => {
+      const [first] = await chairs(a, ['Sillón 1', 'Sillón 2']);
+      const later = await owner.appointment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          patientId: a.patientIds[0],
+          providerId: DOCTOR,
+          start: at('14:00', FAR),
+          end: at('14:30', FAR),
+          wantsEarlier: true,
+        },
+      });
+      const token = generateSlotOfferToken();
+      await owner.waitlistOffer.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          slotStart: at('15:00'),
+          slotEnd: at('15:30'),
+          providerId: DOCTOR,
+          patientId: a.patientIds[0],
+          appointmentId: later.id,
+          channel: 'LINK_WA_ME',
+          offerDay: new Date(`${DAY}T00:00:00.000Z`),
+          createdById: STAFF,
+          tokenHash: hashSlotOfferToken(token),
+          expiresAt: at('15:00'),
+        },
+      });
+      expect(
+        (await inClinic(a, () => acceptOffer.execute(token, META))).state,
+      ).toBe('ACCEPTED');
+      expect(
+        await owner.appointment.findUniqueOrThrow({ where: { id: later.id } }),
+      ).toMatchObject({ start: at('15:00'), chairId: first });
+      const [event] = await owner.auditEvent.findMany({
+        where: { resourceType: 'APPOINTMENT', resourceId: later.id },
+      });
+      expect(event.metadata).toMatchObject({
+        move: { from: { chairId: null }, to: { chairId: first } },
+      });
+    });
+  });
+
   describe('ocupado a mano, caducado y rechazado', () => {
     it('si recepción ocupa el hueco a mano, el enlace responde «ya no está disponible» y no crea nada', async () => {
       const { token, offerId } = await offerToEntry(a, 0);
@@ -699,6 +1003,32 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
         await owner.appointment.count({ where: { tenantId: a.tenantId } }),
       ).toBe(1);
       expect(await outcomeOf(offerId)).toBe('PENDING');
+    });
+
+    it('SEC-014: con la sede desactivada, el enlace dice «no disponible», aceptar no crea nada y la oferta sigue PENDING', async () => {
+      const { token, offerId } = await offerToEntry(a, 0);
+      const appointments = await owner.appointment.count({
+        where: { tenantId: a.tenantId },
+      });
+      await owner.location.update({
+        where: { id: a.locationId },
+        data: { isActive: false },
+      });
+      try {
+        const seen = await inClinic(a, () => getOffer.execute(token));
+        expect(seen).toMatchObject({ state: 'UNAVAILABLE', offer: null });
+        const tried = await inClinic(a, () => acceptOffer.execute(token, META));
+        expect(tried.state).toBe('UNAVAILABLE');
+        expect(
+          await owner.appointment.count({ where: { tenantId: a.tenantId } }),
+        ).toBe(appointments);
+        expect(await outcomeOf(offerId)).toBe('PENDING');
+      } finally {
+        await owner.location.update({
+          where: { id: a.locationId },
+          data: { isActive: true },
+        });
+      }
     });
 
     it('si la carrera la gana recepción (EXCLUDE 23P01), el paciente ve «no disponible», no un 500', async () => {

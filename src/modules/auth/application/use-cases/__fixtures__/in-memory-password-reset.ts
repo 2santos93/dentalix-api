@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import type { ClinicRole, Prisma } from '@prisma/client';
 import type {
   PasswordResetRepository,
   ResetRecipient,
@@ -7,7 +7,9 @@ import type {
 import type {
   PasswordResetEmail,
   PasswordResetNotifier,
+  PreparedPasswordResetEmail,
 } from '../../../domain/ports/password-reset-notifier.port';
+import { PasswordResetThrottledError } from '../../../domain/password-reset-throttled.error';
 
 interface Member {
   tenantId: string;
@@ -21,7 +23,7 @@ interface Member {
 /** Repositorio en memoria con la semántica del de Prisma. */
 export class InMemoryPasswordResetRepository implements PasswordResetRepository {
   members: Member[] = [];
-  tokens: (ResetTokenRecord & { tokenHash: string })[] = [];
+  tokens: (ResetTokenRecord & { tokenHash: string; createdAt: Date })[] = [];
   passwords = new Map<string, string>();
   tokenVersions = new Map<string, number>();
 
@@ -61,12 +63,50 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
     return Promise.resolve(m?.role ?? null);
   }
 
-  issue(input: {
+  /** DX-149-quater: el aviso temprano del tope por usuario (sin candado). */
+  countIssuedSince(userId: string, since: Date): Promise<number> {
+    return Promise.resolve(
+      this.tokens.filter(
+        (t) => t.userId === userId && t.createdAt.getTime() > since.getTime(),
+      ).length,
+    );
+  }
+
+  /** Clínicas de las transacciones que encolaron su email (DX-149-ter). */
+  issuedWithEmail: string[] = [];
+  /** Hace fallar la próxima `issue` antes de cambiar nada. */
+  failNextIssue: Error | null = null;
+
+  /**
+   * Como la transacción de Prisma: si `enqueue` lanza, nada de lo hecho
+   * queda (el token anterior sigue vivo).
+   */
+  async issue(input: {
+    tenantId: string;
     userId: string;
     tokenHash: string;
     expiresAt: Date;
     now: Date;
+    userDailyLimit: number;
+    enqueue?: (tx: Prisma.TransactionClient) => Promise<void>;
   }): Promise<void> {
+    if (this.failNextIssue) {
+      const error = this.failNextIssue;
+      this.failNextIssue = null;
+      throw error;
+    }
+    // DX-149-quater: el tope por usuario (todas sus clínicas) en 24 h.
+    const since = input.now.getTime() - 24 * 60 * 60 * 1000;
+    const issuedToday = this.tokens.filter(
+      (t) => t.userId === input.userId && t.createdAt.getTime() > since,
+    ).length;
+    if (issuedToday >= input.userDailyLimit) {
+      throw new PasswordResetThrottledError('USER_QUOTA');
+    }
+    if (input.enqueue) {
+      await input.enqueue({} as Prisma.TransactionClient);
+      this.issuedWithEmail.push(input.tenantId);
+    }
     for (const t of this.tokens) {
       if (t.userId === input.userId && !t.invalidatedAt) {
         t.invalidatedAt = input.now;
@@ -79,8 +119,8 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
       expiresAt: input.expiresAt,
       usedAt: null,
       invalidatedAt: null,
+      createdAt: input.now,
     });
-    return Promise.resolve();
   }
 
   findByHash(tokenHash: string): Promise<ResetTokenRecord | null> {
@@ -112,13 +152,26 @@ export class InMemoryPasswordResetRepository implements PasswordResetRepository 
 export class FakePasswordResetNotifier implements PasswordResetNotifier {
   sent: PasswordResetEmail[] = [];
   quotaOk = true;
+  /** El recuento bajo candado (en la transacción) ya no deja enviar. */
+  throttleInTx = false;
+  kicks = 0;
 
   withinQuota(): Promise<boolean> {
     return Promise.resolve(this.quotaOk);
   }
 
-  send(email: PasswordResetEmail): Promise<void> {
-    this.sent.push(email);
-    return Promise.resolve();
+  prepare(email: PasswordResetEmail): Promise<PreparedPasswordResetEmail> {
+    return Promise.resolve({
+      insert: () => {
+        if (this.throttleInTx) {
+          return Promise.reject(new PasswordResetThrottledError('QUOTA'));
+        }
+        this.sent.push(email);
+        return Promise.resolve();
+      },
+      kick: () => {
+        this.kicks += 1;
+      },
+    });
   }
 }

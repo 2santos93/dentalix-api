@@ -9,11 +9,20 @@ import {
   resolveLocationTimeZones,
 } from '../../../../shared/locations/location-time-zone';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import {
+  NO_CURRENCY_TEXTS,
+  readCurrencyTexts,
+  type CurrencyTexts,
+} from '../../../../shared/format/currency-text';
 import type {
   ExpenseAttachment,
   ExpenseDetail,
   ExpensePayment,
 } from '../../domain/entities/expense.entity';
+import {
+  expenseMoneyText,
+  type ExpenseMoneyText,
+} from '../../domain/expense-money';
 import { categoryKey } from '../../domain/expense-categories';
 import {
   ATTACHMENT_ALREADY_MESSAGE,
@@ -34,6 +43,7 @@ import {
   validateInvoiceDate,
 } from '../../domain/expense-rules';
 import type { ExpenseCashLink } from '../../domain/ports/expense-cash-link.port';
+import type { ResolvedExpenseLocation } from '../../domain/ports/expense-repository.port';
 import type {
   CreateExpensePaymentRepoInput,
   CreateExpenseRepoInput,
@@ -104,6 +114,11 @@ interface LockedExpense {
   currency: string;
   amountCents: bigint;
   voidedAt: Date | null;
+  /** DX-354: formato y reloj de la sede del gasto (null: sede sin barrer). */
+  locale?: string | null;
+  hourCycle?: string | null;
+  /** DX-517-quater: texto propio de cada moneda (JSON de `tenants`), sin bloqueo. */
+  currencyTexts?: unknown;
 }
 
 @Injectable()
@@ -123,7 +138,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   resolveLocation(
     requested: string | undefined,
     now: Date,
-  ): Promise<{ locationId: string; today: string }> {
+  ): Promise<ResolvedExpenseLocation> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       let locationId: string;
@@ -141,8 +156,31 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         locationId = await this.tenantContext.writeLocationId(tx);
       }
       const zoneOf = await resolveLocationTimeZones(tx, tenantId, [locationId]);
-      return { locationId, today: civilDateIn(now, zoneOf(locationId)) };
+      // DX-354: el formato de la sede, en crudo, para los importes de los mensajes.
+      const format = await tx.location.findFirst({
+        where: { tenantId, id: locationId },
+        select: { id: true, locale: true, hourCycle: true },
+      });
+      return {
+        locationId,
+        today: civilDateIn(now, zoneOf(locationId)),
+        format: format ?? { id: locationId, locale: null, hourCycle: null },
+        // DX-517-quater: lectura simple de `tenants` (sin bloqueo) para los
+        // importes del mensaje de tope de un gasto nuevo.
+        currencyTexts: await this.currencyTextsIn(tx),
+      };
     });
+  }
+
+  /** DX-517-quater: el texto propio de cada moneda de la clínica (`tenants`, sin RLS ni bloqueo). */
+  private async currencyTextsIn(
+    tx: Prisma.TransactionClient,
+  ): Promise<CurrencyTexts> {
+    const tenant = await tx.tenant.findUnique({
+      where: { id: this.requireTenantId() },
+      select: { currencyTexts: true },
+    });
+    return tenant ? readCurrencyTexts(tenant.currencyTexts) : NO_CURRENCY_TEXTS;
   }
 
   locationToday(locationId: string, now: Date): Promise<string> {
@@ -399,12 +437,40 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         : Prisma.sql`AND "locationId" = ANY(${scope}::uuid[])`;
     const rows = await tx.$queryRaw<LockedExpense[]>`
       SELECT "id", "locationId", "currency",
-             ("amount" * 100)::bigint AS "amountCents", "voidedAt"
+             ("amount" * 100)::bigint AS "amountCents", "voidedAt",
+             (SELECT l."locale" FROM "locations" l
+               WHERE l."id" = "expenses"."locationId"
+                 AND l."tenantId" = ${tenantId}::uuid) AS "locale",
+             (SELECT l."hourCycle" FROM "locations" l
+               WHERE l."id" = "expenses"."locationId"
+                 AND l."tenantId" = ${tenantId}::uuid) AS "hourCycle",
+             (SELECT t."currencyTexts" FROM "tenants" t
+               WHERE t."id" = ${tenantId}::uuid) AS "currencyTexts"
         FROM "expenses"
        WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${id}::uuid ${scopeSql}
        FOR UPDATE`;
     if (rows.length === 0) throw notFound();
     return rows[0];
+  }
+
+  /**
+   * DX-354: los importes de los mensajes del gasto bloqueado, con el formato
+   * de SU sede (leído con el bloqueo) y el código de su moneda o el texto
+   * propio que la clínica le dio (DX-517-quater: viaja en la MISMA consulta
+   * del bloqueo, como subconsulta de `tenants` sin `FOR UPDATE`: no toma ningún
+   * bloqueo más ni cambia el orden de los existentes). Perezoso: el formato se
+   * exige al escribir el primer importe (409 `LOCATION_LOCALE_REQUIRED`).
+   */
+  private moneyTextOf(locked: LockedExpense): ExpenseMoneyText {
+    return expenseMoneyText(
+      {
+        id: locked.locationId,
+        locale: locked.locale ?? null,
+        hourCycle: locked.hourCycle ?? null,
+      },
+      locked.currency,
+      readCurrencyTexts(locked.currencyTexts),
+    );
   }
 
   /** Σ de pagos vivos y nº de pagos (vivos o anulados), en céntimos. */
@@ -542,7 +608,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         },
         liveCents: totals.liveCents,
         paymentCount: totals.paymentCount,
-        currency: locked.currency,
+        moneyText: this.moneyTextOf(locked),
       });
       if (denial) throw denial;
       // El vencimiento contra la fecha de factura que quedará (el CHECK de la
@@ -663,7 +729,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
           amountCents: Number(locked.amountCents),
           liveCents,
           paymentCents: toCents(input.amount),
-          currency: locked.currency,
+          moneyText: this.moneyTextOf(locked),
         });
         if (denial) throw denial;
         await this.insertPayment(tx, locked, input);

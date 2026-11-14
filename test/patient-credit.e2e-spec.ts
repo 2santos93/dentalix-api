@@ -17,9 +17,16 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import { civilDateIn } from '../src/shared/time/civil-day';
-import { locationBody } from './support/location-fixtures';
-import { sedeTodayFixture } from './support/sede-clock';
+import { civilDateIn, civilDayRange } from '../src/shared/time/civil-day';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
+import {
+  holdPlanRowLock,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
 
 // DX-253 en HTTP real: un plan CANCELADO con 300.000 abonados traspasa 200.000
 // a un plan vivo del mismo paciente (el origen queda con 100.000 a favor, el
@@ -33,12 +40,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// DX-495 (TST-062): la sede usa la zona segura de DX-449 (Bogotá lejos de su
-// medianoche; si no, una zona en la que ahora es cerca del mediodía): el «hoy»
-// de los abonos y el de la API no se separan si la corrida cruza la
-// medianoche de Bogotá.
-const SEDE = sedeTodayFixture();
-const TODAY = civilDateIn(new Date(), SEDE.timeZone);
+const ZONE = 'America/Caracas';
+const TODAY = civilDateIn(new Date(), ZONE);
 
 interface TransferBody {
   id: string;
@@ -90,6 +93,32 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   let otherPayment: string;
 
   const api = () => request(app.getHttpServer());
+  /**
+   * DX-450: el plan retenido FOR NO KEY UPDATE por otra transacción; quien
+   * escriba sobre el saldo del plan espera aquí (visto en pg_locks, por PID).
+   */
+  const holdPlanLock = (planId: string) => holdPlanRowLock(raw, planId);
+  /** Lanza las peticiones, espera a que TODAS estén bloqueadas y suelta. */
+  const raceOnPlanLock = async (
+    planId: string,
+    launch: () => request.Test[],
+  ): Promise<request.Response[]> => {
+    const lock = await holdPlanLock(planId);
+    let attempts: ReturnType<typeof settle<request.Response>>[] = [];
+    try {
+      attempts = launch().map((test) =>
+        settle(test as unknown as Promise<request.Response>),
+      );
+      await waitForLockWaiters(raw, [lock.pid], attempts.length);
+    } finally {
+      lock.release();
+      await lock.done;
+    }
+    return (await Promise.all(attempts)).map((o) => {
+      if (o.status === 'rejected') throw o.reason;
+      return o.value;
+    });
+  };
   const as = (req: request.Test, clinic: Clinic, token = clinic.adminToken) => {
     const withAuth = req
       .set('X-Tenant-Host', clinic.host)
@@ -120,7 +149,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       token,
     );
     return (key ? req.set('Idempotency-Key', key) : req).send({
-      currency: 'COP',
+      currency: 'VES',
       method: 'CASH',
       reason: 'El paciente se muda de ciudad',
       paymentIds: [originPayment],
@@ -163,7 +192,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     const planId = (
       (
         await as(api().post(`/api/v1/patients/${patientId}/treatment-plans`), a)
-          .send({ notes: `Plan ${tag}`, currency: 'COP' })
+          .send({ notes: `Plan ${tag}`, currency: 'VES' })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -185,7 +214,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     return (
       (
         await as(api().post(`/api/v1/treatment-plans/${planId}/payments`), a)
-          .send({ amount, currency: 'COP', paidAt: TODAY, method: 'TRANSFER' })
+          .send({ amount, currency: 'VES', paidAt: TODAY, method: 'TRANSFER' })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -194,8 +223,8 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    a = await registerClinic(app, 'dx253-a', SEDE);
-    b = await registerClinic(app, 'dx253-b', SEDE);
+    a = await registerClinic(app, 'dx253-a');
+    b = await registerClinic(app, 'dx253-b');
     sede = (
       await raw.location.findFirstOrThrow({
         where: { tenantId: a.tenantId },
@@ -249,7 +278,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   it('DENTIST y ASSISTANT: 403 en español (API)', async () => {
     for (const token of [dentistA, assistantA]) {
       const res = await transfer(
-        { targetPlanId: target, amount: 1, currency: 'COP' },
+        { targetPlanId: target, amount: 1, currency: 'VES' },
         { token },
       ).expect(403);
       expect((res.body as { message: string }).message).toMatch(
@@ -261,7 +290,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
 
   it('RECEPTION con el tope por defecto (0): 403 en español y nada guardado', async () => {
     const res = await transfer(
-      { targetPlanId: target, amount: 1_000, currency: 'COP' },
+      { targetPlanId: target, amount: 1_000, currency: 'VES' },
       { token: receptionA },
     ).expect(403);
     expect((res.body as { message: string }).message).toMatch(
@@ -272,7 +301,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
 
   it('traspasa 200.000 del plan cancelado a un plan vivo: origen 100.000 a favor, destino −200.000, abonos intactos; Idempotency-Key', async () => {
     const key = randomUUID();
-    const body = { targetPlanId: target, amount: 200_000, currency: 'COP' };
+    const body = { targetPlanId: target, amount: 200_000, currency: 'VES' };
     const first = (await transfer(body, { key }).expect(201))
       .body as TransferBody;
     expect(first).toMatchObject({
@@ -284,6 +313,22 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     const again = (await transfer(body, { key }).expect(201))
       .body as TransferBody;
     expect(again.id).toBe(first.id);
+    // DX-432: la huella de idempotencia es interna; ni el alta ni la repetición.
+    const dtoKeys = [
+      'amount',
+      'createdAt',
+      'createdById',
+      'currency',
+      'id',
+      'locationId',
+      'patientId',
+      'reason',
+      'sourceCreditAfter',
+      'sourcePlanId',
+      'targetPlanId',
+    ];
+    expect(Object.keys(first).sort()).toEqual(dtoKeys);
+    expect(Object.keys(again).sort()).toEqual(dtoKeys);
     await transfer({ ...body, amount: 1 }, { key }).expect(422);
     expect(await counts()).toEqual({ transfers: 1, refunds: 0, entries: 2 });
 
@@ -341,7 +386,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       ).expect(200)
     ).body as { planCurrency: string; creditMovements: number };
     expect(balance).toMatchObject({
-      planCurrency: 'COP',
+      planCurrency: 'VES',
       creditMovements: 200_000,
     });
   });
@@ -350,13 +395,13 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     await transfer({
       targetPlanId: target,
       amount: 100_000.01,
-      currency: 'COP',
+      currency: 'VES',
     }).expect(400);
     await as(
       api().post(`/api/v1/treatment-plans/${target}/credit-transfers`),
       a,
     )
-      .send({ targetPlanId: origin, amount: 1, currency: 'COP' })
+      .send({ targetPlanId: origin, amount: 1, currency: 'VES' })
       .expect(409);
   });
 
@@ -382,7 +427,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   it('D1: con varias sedes, una devolución en efectivo sin sede explícita es 400 en español y no guarda nada', async () => {
     // Una segunda sede: sin cabecera ya no hay una única sede posible.
     await as(api().post('/api/v1/locations'), a)
-      .send(locationBody(SEDE, { name: 'Sede Norte' }))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Norte' }))
       .expect(201);
     const before = await counts();
     const res = await api()
@@ -391,7 +436,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       .set('Authorization', `Bearer ${a.adminToken}`)
       .send({
         amount: 1_000,
-        currency: 'COP',
+        currency: 'VES',
         method: 'CASH',
         reason: 'El paciente se muda de ciudad',
         paymentIds: [originPayment],
@@ -414,13 +459,15 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
   it('en efectivo con caja abierta es un egreso del arqueo y sale en el detalle; comprobante numerado', async () => {
     const session = (
       await as(api().post('/api/v1/cash-sessions/open'), a)
-        .send({ floats: [{ currency: 'COP', amount: 50_000 }] })
+        .send({ floats: [{ currency: 'VES', amount: 50_000 }] })
         .expect(201)
     ).body as { id: string };
     const key = randomUUID();
     const res = (await refund({ amount: 40_000 }, { key }).expect(201))
       .body as RefundBody;
     expect(res.number).toMatch(/^DEV-[A-Z0-9]+-000001$/);
+    // DX-432: ninguna huella ni interno de idempotencia en la respuesta.
+    expect(JSON.stringify(res)).not.toMatch(/idempotency/i);
     expect(res).toMatchObject({
       amount: 40_000,
       method: 'CASH',
@@ -448,7 +495,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       creditRefunds: { number: string; amount: number }[];
     };
     expect(
-      detail.expected.find((l) => l.currency === 'COP' && l.method === 'CASH')
+      detail.expected.find((l) => l.currency === 'VES' && l.method === 'CASH')
         ?.expected,
     ).toBe(10_000);
     expect(detail.creditRefunds).toEqual([
@@ -459,10 +506,46 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       await as(api().get(`/api/v1/credit-refunds/${res.id}`), a).expect(200)
     ).body as RefundBody;
     expect(receipt.snapshot.number).toBe(res.number);
+
+    // DX-354: el comprobante lleva la región de su sede (también en el
+    // listado de movimientos) y, sin reloj, `null` con 200.
+    const caracas = {
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h23',
+    };
+    const regionalOf = async () =>
+      (
+        (await as(api().get(`/api/v1/credit-refunds/${res.id}`), a).expect(200))
+          .body as { regional: unknown }
+      ).regional;
+    expect(await regionalOf()).toEqual(caracas);
+    expect((res as unknown as { regional: unknown }).regional).toEqual(caracas);
+    const movements = (
+      await as(
+        api().get(`/api/v1/patients/${patientId}/credit-movements`),
+        a,
+      ).expect(200)
+    ).body as { refunds: { id: string; regional: unknown }[] };
+    expect(movements.refunds.find((r) => r.id === res.id)?.regional).toEqual(
+      caracas,
+    );
+    await raw.location.update({
+      where: { id: sede },
+      data: { hourCycle: null },
+    });
+    try {
+      expect(await regionalOf()).toBeNull();
+    } finally {
+      await raw.location.update({
+        where: { id: sede },
+        data: { hourCycle: caracas.hourCycle },
+      });
+    }
   });
 
   it('dos devoluciones a la vez sobre el mismo saldo: una 201 y otra 409', async () => {
-    const [x, y] = await Promise.all([
+    const [x, y] = await raceOnPlanLock(origin, () => [
       refund({ amount: 40_000, method: 'TRANSFER' }),
       refund({ amount: 40_000, method: 'TRANSFER' }),
     ]);
@@ -489,6 +572,253 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       ).expect(201)
     ).body as RefundBody;
     expect(ok.number).toMatch(/-000003$/);
+  });
+
+  it('DX-432: el cambio del tope queda auditado con antes y después en la misma transacción; RECEPTION no lo cambia; sin cambio, sin evento', async () => {
+    const policyEvents = () =>
+      raw.auditEvent.findMany({
+        where: {
+          tenantId: a.tenantId,
+          resourceType: 'PATIENT_CREDIT',
+          metadata: { path: ['reason'], equals: 'POLICY' },
+        },
+        orderBy: { occurredAt: 'asc' },
+      });
+    const before = await policyEvents();
+    // RECEPTION y DENTIST: 403 y ni cambio ni evento.
+    for (const token of [receptionA, dentistA]) {
+      await as(api().put('/api/v1/patient-credit/policy'), a, token)
+        .send({ receptionMaxAmount: 777 })
+        .expect(403);
+    }
+    expect(
+      (await as(api().get('/api/v1/patient-credit/policy'), a).expect(200))
+        .body,
+    ).toEqual({ receptionMaxAmount: 10_000 });
+    // Valores inválidos: 400 y nada.
+    for (const bad of [-1, 'diez', 1.234]) {
+      await as(api().put('/api/v1/patient-credit/policy'), a)
+        .send({ receptionMaxAmount: bad })
+        .expect(400);
+    }
+    expect(await policyEvents()).toHaveLength(before.length);
+
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 2_500.5 })
+      .expect(200);
+    const events = await policyEvents();
+    expect(events).toHaveLength(before.length + 1);
+    expect(events[events.length - 1]).toMatchObject({
+      action: 'UPDATE',
+      actorUserId: a.adminUserId,
+      metadata: {
+        reason: 'POLICY',
+        changedFields: ['creditReceptionMaxAmount'],
+        configChange: {
+          before: { creditReceptionMaxAmount: 10_000 },
+          after: { creditReceptionMaxAmount: 2_500.5 },
+        },
+      },
+    });
+    // El mismo valor otra vez: 200 y sin evento nuevo.
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 2_500.5 })
+      .expect(200);
+    expect(await policyEvents()).toHaveLength(before.length + 1);
+    // Se deja como estaba para el resto de la suite.
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 10_000 })
+      .expect(200);
+  });
+
+  it('DX-432: el estado de cuenta dice por qué no se anula un abono de referencia de una devolución (y solo ese)', async () => {
+    const movements = (
+      await as(
+        api().get(`/api/v1/patients/${patientId}/account-statement`),
+        a,
+      ).expect(200)
+    ).body as {
+      movements: {
+        id: string;
+        canVoid: boolean;
+        voidBlockedReason: string | null;
+      }[];
+    };
+    const byId = new Map(movements.movements.map((m) => [m.id, m]));
+    expect(byId.get(originPayment)?.voidBlockedReason).toMatch(
+      /^No se puede anular: el abono es referencia de la devolución DEV-[A-Z0-9]+-\d{6}/,
+    );
+    expect(byId.get(otherPayment)?.voidBlockedReason).toBeNull();
+  });
+
+  it('DX-432: ni el alta, ni el comprobante, ni el listado exponen idempotencyFingerprint', async () => {
+    // Los de hasta aquí se crearon con la API (el alta ya se comprobó arriba).
+    const listed = (
+      await as(
+        api().get(`/api/v1/patients/${patientId}/credit-movements`),
+        a,
+      ).expect(200)
+    ).body as { transfers: object[]; refunds: { id: string }[] };
+    expect(listed.refunds.length).toBeGreaterThan(0);
+    const fetched = (
+      await as(
+        api().get(`/api/v1/credit-refunds/${listed.refunds[0].id}`),
+        a,
+      ).expect(200)
+    ).body as RefundBody;
+    for (const body of [fetched, ...listed.transfers, ...listed.refunds]) {
+      expect(JSON.stringify(body)).not.toMatch(/idempotency/i);
+    }
+  });
+
+  it('DX-517-quater: los 403 de tope dicen el importe con el texto propio de la moneda de la clínica', async () => {
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 100 })
+      .expect(200);
+    await raw.tenant.update({
+      where: { id: a.tenantId },
+      data: { currencyTexts: { VES: 'Bs.' } },
+    });
+    try {
+      const denied = await refund(
+        { amount: 100.01, method: 'TRANSFER' },
+        { token: receptionA },
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(
+        'Recepción puede mover hasta Bs.\u00a0100,00 por operación: pídeselo a administración.',
+      );
+    } finally {
+      await raw.tenant.update({
+        where: { id: a.tenantId },
+        data: { currencyTexts: {} },
+      });
+      await as(api().put('/api/v1/patient-credit/policy'), a)
+        .send({ receptionMaxAmount: 10_000 })
+        .expect(200);
+    }
+  });
+
+  it('el 403 del tope de RECEPCIÓN dice el importe con el formato de la sede (DX-354b); sin formato, 409', async () => {
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: 100 })
+      .expect(200);
+    try {
+      const before = await counts();
+      const denied = await refund(
+        { amount: 100.01, method: 'TRANSFER' },
+        { token: receptionA },
+      ).expect(403);
+      expect((denied.body as { message: string }).message).toBe(
+        'Recepción puede mover hasta VES\u00a0100,00 por operación: pídeselo a administración.',
+      );
+
+      const location = await raw.location.findUniqueOrThrow({
+        where: { id: sede },
+        select: { locale: true, hourCycle: true },
+      });
+      await raw.location.update({
+        where: { id: sede },
+        data: { locale: null, hourCycle: null },
+      });
+      try {
+        const none = await refund(
+          { amount: 100.01, method: 'TRANSFER' },
+          { token: receptionA },
+        ).expect(409);
+        expect(none.body).toMatchObject({
+          code: 'LOCATION_LOCALE_REQUIRED',
+          locationId: sede,
+        });
+      } finally {
+        await raw.location.update({ where: { id: sede }, data: location });
+      }
+      expect(await counts()).toEqual(before);
+    } finally {
+      await as(api().put('/api/v1/patient-credit/policy'), a)
+        .send({ receptionMaxAmount: 10_000 })
+        .expect(200);
+    }
+  });
+
+  it('DX-462: el tope de RECEPCIÓN se acumula por día y sede: lo ya devuelto hoy cuenta, la que pasa del tope es 403 con lo que queda; ADMIN 201', async () => {
+    // Estado propio: un plan cancelado con saldo a favor solo para este test.
+    const plan = await seedPlan(5_000, 'TOPE');
+    const payment = await pay(plan, 1_000);
+    await as(api().patch(`/api/v1/treatment-plans/${plan}`), a)
+      .send({ status: 'CANCELLED' })
+      .expect(200);
+    const refundOwn = (amount: number, token: string) =>
+      as(
+        api().post(`/api/v1/treatment-plans/${plan}/credit-refunds`),
+        a,
+        token,
+      ).send({
+        amount,
+        currency: 'VES',
+        method: 'TRANSFER',
+        reason: 'El paciente se muda de ciudad',
+        paymentIds: [payment],
+      });
+    // Lo que receptionA ya devolvió hoy en la sede (día civil de la sede).
+    const user = await raw.user.findFirstOrThrow({
+      where: { email: `reception@${a.subdomain}.test` },
+      select: { id: true },
+    });
+    const zone = (
+      await raw.location.findFirstOrThrow({
+        where: { id: sede },
+        select: { timeZone: true },
+      })
+    ).timeZone as string;
+    const range = civilDayRange(civilDateIn(new Date(), zone), zone);
+    const used = await raw.patientCreditRefund.aggregate({
+      where: {
+        tenantId: a.tenantId,
+        locationId: sede,
+        createdById: user.id,
+        currency: 'VES',
+        createdAt: { gte: range.start, lt: range.end },
+      },
+      _sum: { amount: true },
+    });
+    const usedToday = used._sum.amount?.toNumber() ?? 0;
+    // Tope = lo usado + 100: caben 60 y 40, y la segunda de 60 pasa.
+    await as(api().put('/api/v1/patient-credit/policy'), a)
+      .send({ receptionMaxAmount: usedToday + 100 })
+      .expect(200);
+    try {
+      await refundOwn(60, receptionA).expect(201);
+      const before = await counts();
+      const denied = await refundOwn(60, receptionA).expect(403);
+      expect((denied.body as { message: string }).message).toBe(
+        'Supera tu tope diario de devoluciones en esta sede. Te quedan VES\u00a040,00 hoy; pide a un administrador que la registre.',
+      );
+      expect(await counts()).toEqual(before);
+      // DX-517-quater: con el texto propio de la moneda de la clínica.
+      await raw.tenant.update({
+        where: { id: a.tenantId },
+        data: { currencyTexts: { VES: 'Bs.' } },
+      });
+      try {
+        const withText = await refundOwn(60, receptionA).expect(403);
+        expect((withText.body as { message: string }).message).toBe(
+          'Supera tu tope diario de devoluciones en esta sede. Te quedan Bs.\u00a040,00 hoy; pide a un administrador que la registre.',
+        );
+      } finally {
+        await raw.tenant.update({
+          where: { id: a.tenantId },
+          data: { currencyTexts: {} },
+        });
+      }
+      // Lo que queda sí se puede devolver.
+      await refundOwn(40, receptionA).expect(201);
+      // ADMIN no tiene tope diario.
+      await refundOwn(200, a.adminToken).expect(201);
+    } finally {
+      await as(api().put('/api/v1/patient-credit/policy'), a)
+        .send({ receptionMaxAmount: 10_000 })
+        .expect(200);
+    }
   });
 
   it('inmutable: la app no puede actualizar ni borrar un asiento', async () => {
@@ -519,12 +849,12 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       api().post(`/api/v1/treatment-plans/${origin}/credit-transfers`),
       b,
     )
-      .send({ targetPlanId: target, amount: 1, currency: 'COP' })
+      .send({ targetPlanId: target, amount: 1, currency: 'VES' })
       .expect(404);
     await as(api().post(`/api/v1/treatment-plans/${origin}/credit-refunds`), b)
       .send({
         amount: 1,
-        currency: 'COP',
+        currency: 'VES',
         method: 'CASH',
         reason: 'Intento ajeno',
         paymentIds: [originPayment],
@@ -556,7 +886,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       data: {
         tenantId: tenantB,
         patientId: patientB.id,
-        currency: 'COP',
+        currency: 'VES',
         status: 'ACCEPTED',
       },
     });
@@ -567,7 +897,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
         treatmentPlanId: planB.id,
         patientId: patientB.id,
         amount: 1_000,
-        currency: 'COP',
+        currency: 'VES',
         paidAt: new Date(),
         method: 'CASH',
       },
@@ -576,7 +906,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
     await transfer({
       targetPlanId: planB.id,
       amount: 1,
-      currency: 'COP',
+      currency: 'VES',
     }).expect(404);
     await refund({
       amount: 1,
@@ -592,9 +922,22 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
         api().get(`/api/v1/patients/${patientId}/credit-movements`),
         a,
       ).expect(200)
-    ).body as { transfers: unknown[]; refunds: unknown[] };
+    ).body as {
+      transfers: { createdById: string; createdByName: string | null }[];
+      refunds: unknown[];
+    };
     expect(res.transfers).toHaveLength(1);
-    expect(res.refunds).toHaveLength(3);
+    // DX-432: quién traspasó, con su nombre (el comprobante ya trae el de la devolución).
+    const admin = await raw.user.findUniqueOrThrow({
+      where: { id: a.adminUserId },
+      select: { fullName: true },
+    });
+    expect(res.transfers[0]).toMatchObject({
+      createdById: a.adminUserId,
+      createdByName: admin.fullName,
+    });
+    // 3 de antes + 3 del tope diario (DX-462: 60, 40 de RECEPCIÓN y 200 de ADMIN).
+    expect(res.refunds).toHaveLength(6);
     const events = await raw.auditEvent.count({
       where: {
         tenantId: a.tenantId,
@@ -622,7 +965,7 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
         .expect(200);
     const transferFrom = (planId: string, amount: number) =>
       as(api().post(`/api/v1/treatment-plans/${planId}/credit-transfers`), a)
-        .send({ targetPlanId: target, amount, currency: 'COP' })
+        .send({ targetPlanId: target, amount, currency: 'VES' })
         .expect(201);
 
     it('el abono de referencia de una devolución no se anula', async () => {
@@ -671,14 +1014,14 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
             lines: [
               {
                 amount: 30_000,
-                currency: 'COP',
+                currency: 'VES',
                 paymentMethodId: methods.find((m) => m.legacyMethod === 'CARD')!
                   .id,
                 reference: 'DX253-T1',
               },
               {
                 amount: 20_000,
-                currency: 'COP',
+                currency: 'VES',
                 paymentMethodId: methods.find(
                   (m) => m.legacyMethod === 'TRANSFER',
                 )!.id,
@@ -708,14 +1051,14 @@ describe('Saldo a favor: traspaso y devolución (e2e, DX-253)', () => {
       const plan = await seedPlan(100_000, 'CARRERA');
       const payment = await pay(plan, 30_000);
       await cancel(plan);
-      const [voided, refunded] = await Promise.all([
+      const [voided, refunded] = await raceOnPlanLock(plan, () => [
         voidPayment(payment),
         as(
           api().post(`/api/v1/treatment-plans/${plan}/credit-refunds`),
           a,
         ).send({
           amount: 30_000,
-          currency: 'COP',
+          currency: 'VES',
           method: 'TRANSFER',
           reason: 'Devolución en carrera',
           paymentIds: [payment],

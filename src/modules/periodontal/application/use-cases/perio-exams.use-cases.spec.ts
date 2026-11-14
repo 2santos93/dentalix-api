@@ -15,7 +15,7 @@ import {
   SavePerioMeasuresUseCase,
 } from './perio-exams.use-cases';
 
-// 03:00 UTC del 16 de octubre = 22:00 del 15 en Bogotá: la fecha por defecto
+// 03:00 UTC del 16 de octubre = 22:00 del 15 en la zona de la sede: la fecha por defecto
 // del examen es la del calendario de la clínica, no la UTC.
 const NOW = new Date('2026-10-16T03:00:00.000Z');
 
@@ -70,7 +70,7 @@ describe('CreatePerioExamUseCase', () => {
 
   it('«hoy» es el de la zona horaria de la sede activa (Europe/Madrid)', async () => {
     const { create, repo } = setup();
-    // 03:00 UTC del 16 = 05:00 del 16 en Madrid (en Bogotá aún sería el 15).
+    // 03:00 UTC del 16 = 05:00 del 16 en Madrid (en Caracas aún sería el 15).
     repo.timeZone = 'Europe/Madrid';
     const exam = await create.execute('p1', {}, 'd');
     expect(exam.examDate).toBe('2026-10-16');

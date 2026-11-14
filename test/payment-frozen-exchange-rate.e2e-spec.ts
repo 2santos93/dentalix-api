@@ -9,6 +9,7 @@ import { PaymentAllocationJobs } from '../src/modules/payments/application/payme
 import { addCivilDays } from '../src/shared/time/civil-day';
 import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
 import { fixedSedeDay } from './support/sede-clock';
+import { pinCatalogCurrency } from './support/catalog-currency';
 
 // DX-375 en HTTP real: cada abono congela la tasa que usó y su fuente. Dos
 // clínicas el MISMO día, una automática y otra manual, congelan cada una la
@@ -26,12 +27,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
  * «Hoy» FIJO de las dos clínicas: el día anterior al real, a mediodía de la
  * sede, que la API ve por su EXCHANGE_RATE_CLOCK. Los abonos «de hace un
  * momento» son de ese mediodía: ninguno cae en «ayer» aunque la suite cruce
- * la medianoche de Bogotá (DX-209, TST-049).
+ * la medianoche de la sede (DX-209, TST-049).
  */
 const SEDE_DAY = fixedSedeDay();
 const TODAY = SEDE_DAY.day;
 const YESTERDAY = addCivilDays(TODAY, -1);
-const PROVIDER = { COP: 4000, VES: 36.5 };
+const PROVIDER = { EUR: 4000, VES: 36.5 };
 const SETTINGS = '/api/v1/exchange/settings';
 const MANUAL_RATES = '/api/v1/exchange/manual-rates';
 
@@ -95,7 +96,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
     clinic: Clinic,
     amount: number,
     paidAt: string,
-    currency = 'COP',
+    currency = 'EUR',
   ): Promise<PaymentBody> =>
     (
       await as(
@@ -132,6 +133,9 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
         })
         .expect(201)
     ).body as { id: string };
+    // DX-513-bis: el catálogo en la moneda de los planes del spec (USD): sus
+    // ítems no necesitan tasa y sus importes no cambian (support/catalog-currency).
+    await pinCatalogCurrency(raw, clinic.tenantId, 'USD');
     const item = (
       await as(api().post('/api/v1/catalog/items'), clinic)
         .send({
@@ -203,7 +207,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
   });
 
   it('BE-047: un abono de hoy cobrado antes de pasar a MANUAL conserva su tasa automática', async () => {
-    // 40.000 COP a 4.000 = 10 USD, hoy, todavía en AUTOMATIC.
+    // 40.000 EUR a 4.000 = 10 USD, hoy, todavía en AUTOMATIC.
     const before = await pay(manual, 40000, SEDE_DAY.before(60).toISOString());
     expect(before).toMatchObject({
       exchangeRateStatus: 'FROZEN',
@@ -259,7 +263,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
         {
           paymentId: missing.id,
           amount: 41000,
-          currency: 'COP',
+          currency: 'EUR',
           paidOn: TODAY,
         },
       ],
@@ -267,7 +271,7 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
   });
 
   it('dos clínicas el mismo día con fuentes distintas congelan cada una su tasa', async () => {
-    await registerRate(manual, { date: TODAY, currency: 'COP', rate: 4100 });
+    await registerRate(manual, { date: TODAY, currency: 'EUR', rate: 4100 });
     // El barrido congela el «sin tasa» con la manual: 41.000 / 4.100 = 10.
     await app.get(PaymentAllocationJobs).sweep();
     await expect(balance(manual)).resolves.toMatchObject({
@@ -296,9 +300,9 @@ describe('Tasa congelada en cada abono (e2e, DX-375)', () => {
   });
 
   it('una tasa manual usada responde 409 en español al cambiarla y no cambia el saldo', async () => {
-    const [cop] = (await listRates(manual)).filter((r) => r.currency === 'COP');
-    expect(cop).toMatchObject({ date: TODAY, inUse: true });
-    const res = await as(api().put(`${MANUAL_RATES}/${cop.id}`), manual)
+    const [gbp] = (await listRates(manual)).filter((r) => r.currency === 'EUR');
+    expect(gbp).toMatchObject({ date: TODAY, inUse: true });
+    const res = await as(api().put(`${MANUAL_RATES}/${gbp.id}`), manual)
       .send({ rate: 4500 })
       .expect(409);
     expect(res.body).toMatchObject({

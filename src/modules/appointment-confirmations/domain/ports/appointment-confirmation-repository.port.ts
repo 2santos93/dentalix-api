@@ -1,6 +1,7 @@
 import {
   AppointmentConfirmationResponse,
   AppointmentStatus,
+  type EarlierWindow,
 } from '@prisma/client';
 import {
   AppointmentConfirmation,
@@ -65,6 +66,20 @@ export interface RespondConfirmationInput {
 export type RespondOutcome =
   'OK' | 'ALREADY_USED' | 'STALE' | 'POLICY_CHANGED' | 'ACK_REQUIRED';
 
+/** DX-437: «Avisarme si se libera un hueco antes» desde el enlace. */
+export interface SetWantsEarlierInput {
+  appointmentId: string;
+  wantsEarlier: boolean;
+  /** Solo con `wantsEarlier`; sin franja, ANY. */
+  window: EarlierWindow | null;
+  now: Date;
+  /** La cita solo se toca si sigue agendada o confirmada y en el futuro. */
+  request?: AuditRequestMeta | null;
+}
+
+/** OK; STALE = la cita ya no admite la marca (cambió bajo nuestros pies). */
+export type SetWantsEarlierOutcome = 'OK' | 'STALE';
+
 export interface ConfirmationLookup {
   confirmation: AppointmentConfirmation;
   /** `null` si la cita se borró (en blando). */
@@ -95,4 +110,12 @@ export interface AppointmentConfirmationRepository {
   findClinicBranding(): Promise<ClinicBranding | null>;
 
   respond(input: RespondConfirmationInput): Promise<RespondOutcome>;
+
+  /**
+   * DX-437: en una transacción, con la cita bloqueada: pone o quita la marca
+   * (con su franja y «lo pidió el paciente») y escribe el evento de auditoría
+   * (origen PUBLIC_LINK). Si la cita ya no está agendada/confirmada o ya pasó,
+   * STALE y no se toca nada.
+   */
+  setWantsEarlier(input: SetWantsEarlierInput): Promise<SetWantsEarlierOutcome>;
 }

@@ -17,12 +17,7 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
-import {
-  addCivilDays,
-  civilDateIn,
-  zonedStartOfDay,
-} from '../src/shared/time/civil-day';
-import { sedeTodayFixture } from './support/sede-clock';
+import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import { PAYMENT_CLOCK } from '../src/modules/payments/application/use-cases/void-payment.use-case';
 
 // DX-215 (BE-032) · abono → compromiso CUMPLIDO → anulación del abono →
@@ -35,12 +30,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 
-// DX-495 (TST-062): la clínica usa la zona segura de DX-449 (Bogotá lejos de
-// su medianoche; si no, una zona en la que ahora es cerca del mediodía): el
-// «hoy» de los abonos y el de la API no se separan si la corrida cruza la
-// medianoche de Bogotá.
-const SEDE = sedeTodayFixture();
-const today = (): string => civilDateIn(new Date(), SEDE.timeZone);
+const CARACAS = 'America/Caracas';
+const today = (): string => civilDateIn(new Date(), CARACAS);
 
 interface PromiseBody {
   id: string;
@@ -85,7 +76,7 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
       data: {
         tenantId: clinicA.tenantId,
         patientId: patient.id,
-        currency: 'COP',
+        currency: 'USD',
         status: TreatmentPlanStatus.ACCEPTED,
         items: {
           create: {
@@ -108,7 +99,7 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
       `/patients/${patientId}/payment-promises`,
       receptionToken,
     )
-      .send({ amount: 200000, currency: 'COP', dueDate })
+      .send({ amount: 200000, currency: 'USD', dueDate })
       .expect(201);
     return (res.body as { id: string }).id;
   }
@@ -122,7 +113,7 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
     )
       .send({
         amount,
-        currency: 'COP',
+        currency: 'USD',
         paidAt: new Date().toISOString(),
         method: 'CASH',
       })
@@ -172,8 +163,8 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
           .useValue(() => voidClock ?? new Date()),
     });
     await resetDatabase(raw);
-    clinicA = await registerClinic(app, 'reabre-a', SEDE);
-    clinicB = await registerClinic(app, 'reabre-b', SEDE);
+    clinicA = await registerClinic(app, 'reabre-a');
+    clinicB = await registerClinic(app, 'reabre-b');
     const catalog = await api(clinicA, 'post', '/catalog/items')
       .send({
         code: 'REABRE',
@@ -270,12 +261,9 @@ describe('Cobranza — un compromiso cumplido se reabre al anular su abono (e2e,
     const paymentId = await pay(d.planId);
     expect((await promiseOf(d.patientId)).status).toBe('KEPT');
 
-    // 00:30 del día siguiente a la fecha en la sede; solo ADMIN anula abonos
+    // 00:30 del día siguiente a la fecha en la zona de la sede; solo ADMIN anula abonos
     // de otro día.
-    voidClock = new Date(
-      zonedStartOfDay(addCivilDays(dueDate, 1), SEDE.timeZone).getTime() +
-        30 * 60_000,
-    );
+    voidClock = new Date(`${addCivilDays(dueDate, 1)}T05:30:00.000Z`);
     await voidPayment(paymentId).expect(403);
     await voidPayment(paymentId, clinicA.adminToken).expect(200);
 

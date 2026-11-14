@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -18,6 +19,8 @@ import type { StaffMember } from '../../../staff/domain/entities/staff-member.en
 import { attendsAt } from '../../../staff/domain/provider-location';
 import { ATTENDING_ROLES } from '../../../schedule-blocks/domain/schedule-block-rules';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { RegionalFormat } from '../../../../shared/format/regional-format';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import { isLocationAllowed } from '../../../../shared/tenancy/location-access';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
@@ -25,6 +28,7 @@ import type { AuditScheduleEntry } from '../../../audit/domain/audit-metadata';
 import {
   addCivilDays,
   civilDateIn,
+  civilDayRange,
   civilDaysInclusive,
   civilWeekday,
   parseCivilDate,
@@ -35,6 +39,8 @@ import {
 } from '../../domain/ports/provider-schedule-repository.port';
 import {
   OVERRIDE_WINDOW_DAYS,
+  appointmentsOutsideSchedule,
+  type LiveAppointment,
   crossLocationConflictOn,
   crossLocationMessage,
   overrideRangesError,
@@ -98,7 +104,60 @@ export interface ProviderLocationScheduleView {
   ranges: WeeklyRangeView[];
 }
 
+/** DX-267: las citas que el horario guardado deja fuera. No se tocan. */
+export interface AffectedAppointments {
+  total: number;
+  sample: {
+    id: string;
+    locationId: string;
+    start: Date;
+    end: Date;
+    patientName: string;
+  }[];
+}
+
+export const SCHEDULE_AFFECTS_APPOINTMENTS = 'SCHEDULE_AFFECTS_APPOINTMENTS';
+const AFFECTED_SAMPLE = 20;
+
+/**
+ * DX-267: si el horario deja citas fuera, pide confirmar (409 con el recuento y
+ * una muestra de las sedes del miembro); confirmado, las devuelve. Ninguna cita
+ * se mueve ni se cancela.
+ */
+function affectedSummary(outside: LiveAppointment[]): AffectedAppointments {
+  return {
+    total: outside.length,
+    sample: outside
+      .filter((a) => a.visible)
+      .slice(0, AFFECTED_SAMPLE)
+      .map(({ id, locationId, start, end, patientName }) => ({
+        id,
+        locationId,
+        start,
+        end,
+        patientName,
+      })),
+  };
+}
+
+function requireConfirmation(
+  summary: AffectedAppointments,
+  confirmed: boolean | undefined,
+): void {
+  if (summary.total === 0 || confirmed) return;
+  const citas = summary.total === 1 ? '1 cita' : `${summary.total} citas`;
+  throw new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: SCHEDULE_AFFECTS_APPOINTMENTS,
+    message: `Hay ${citas} fuera de ese horario. Las citas no se mueven: revísalas y confirma para guardar.`,
+    affectedAppointments: summary,
+  });
+}
+
 export interface ProviderScheduleView {
+  /** DX-267: solo si el horario guardado dejó citas fuera. */
+  affectedAppointments?: AffectedAppointments;
   providerId: string;
   /** false = sin horario: se le puede citar en cualquier horario de la sede. */
   configured: boolean;
@@ -202,6 +261,22 @@ async function locationsById(
   return new Map((await locations.list()).map((l) => [l.id, l]));
 }
 
+/**
+ * DX-354 (D4): el formato de la sede de la petición (`X-Location-Id`) o, en
+ * «Todas las sedes», el de la principal (la activa más antigua). Un mensaje con
+ * varias sedes del profesional usa este reloj para todos sus tramos. Sin
+ * formato o reloj: 409 `LOCATION_LOCALE_REQUIRED`.
+ */
+function requestFormat(
+  byId: ReadonlyMap<string, Location>,
+  ctx: AuditRequestContext,
+): RegionalFormat {
+  const requested = ctx.locationId ? byId.get(ctx.locationId) : undefined;
+  const principal = [...byId.values()].find((l) => l.isActive);
+  const location = requested ?? principal ?? [...byId.values()][0];
+  return requireLocationFormat(location);
+}
+
 function requireCivilDate(value: string): string {
   if (parseCivilDate(value) === null) {
     throw new BadRequestException(CIVIL_DATE_MESSAGE);
@@ -235,10 +310,12 @@ function toView(
   providerId: string,
   snapshot: ProviderScheduleSnapshot,
   byId: Map<string, Location>,
+  affected?: AffectedAppointments,
 ): ProviderScheduleView {
   const ids = [...new Set(snapshot.weekly.map((r) => r.locationId))];
   const zones = locationZonesOf([...byId.values()]);
   return {
+    ...(affected?.total ? { affectedAppointments: affected } : {}),
     providerId,
     configured: snapshot.configured,
     locations: ids.map((locationId) => {
@@ -298,6 +375,8 @@ export class GetProviderScheduleUseCase {
 
 export interface ReplaceProviderScheduleInput {
   locations: WeeklyLocationInput[];
+  /** DX-267: guardar aunque deje citas fuera (ya se revisaron). */
+  confirmAffected?: boolean;
 }
 
 /** PUT /providers/:providerId/schedule — todas sus sedes en un cuerpo. */
@@ -333,7 +412,10 @@ export class ReplaceProviderScheduleUseCase {
       }
     }
     const nameOf = (id: string) => byId.get(id)?.name ?? id;
-    const error = weeklyScheduleError(input.locations, nameOf);
+    // DX-354 (D4): las horas de los mensajes, con el reloj de la sede de la
+    // petición y el mismo para todos los tramos; se pide solo si hay mensaje.
+    const fmt = () => requestFormat(byId, ctx);
+    const error = weeklyScheduleError(input.locations, nameOf, fmt);
     if (error) throw new BadRequestException(error);
 
     // Una sede sin tramos es «no trabaja allí»: no se guarda fila.
@@ -345,10 +427,24 @@ export class ReplaceProviderScheduleUseCase {
     // su día: el semanal nuevo no puede pisarlas desde otra sede.
     const overridesFrom = addCivilDays(civilDateIn(this.clock(), 'UTC'), -1);
 
+    let affected: AffectedAppointments | undefined;
     const change = await this.repo.replaceWeekly({
       providerId,
       actorId: ctx.actor.userId,
       overridesFrom,
+      checkAppointments: {
+        from: this.clock(),
+        check: (appointments, current) => {
+          affected = affectedSummary(
+            appointmentsOutsideSchedule(
+              appointments,
+              { ...current, configured: kept.length > 0, weekly: newWeekly },
+              (id) => requireLocationTimeZone(byId.get(id)!),
+            ),
+          );
+          requireConfirmation(affected, input.confirmAffected);
+        },
+      },
       locations: kept.map((l) => ({
         locationId: l.locationId,
         timezone: requireLocationTimeZone(byId.get(l.locationId)!),
@@ -379,6 +475,7 @@ export class ReplaceProviderScheduleUseCase {
                   name: nameOf(conflict.otherLocationId),
                   range: conflict.theirs,
                 },
+                fmt(),
               ),
             );
           }
@@ -415,6 +512,7 @@ export class ReplaceProviderScheduleUseCase {
         overrides: [],
       },
       byId,
+      affected,
     );
   }
 }
@@ -491,6 +589,8 @@ export interface SetOverrideInput {
   date: string;
   ranges: MinuteRange[];
   note?: string | null;
+  /** DX-267: guardar aunque deje citas fuera (ya se revisaron). */
+  confirmAffected?: boolean;
 }
 
 /**
@@ -514,7 +614,12 @@ export class SetProviderOverrideUseCase {
     providerId: string,
     input: SetOverrideInput,
     ctx: AuditRequestContext,
-  ): Promise<ProviderOverrideView & { replaced: boolean }> {
+  ): Promise<
+    ProviderOverrideView & {
+      replaced: boolean;
+      affectedAppointments?: AffectedAppointments;
+    }
+  > {
     const member = await requireAttendingProvider(this.staff, providerId);
     const byId = await locationsById(this.locations);
     const location = byId.get(input.locationId);
@@ -536,15 +641,41 @@ export class SetProviderOverrideUseCase {
     if (note && note.length > 200) {
       throw new BadRequestException('La nota admite hasta 200 caracteres');
     }
-    const error = overrideRangesError(input.ranges);
+    // DX-354 (D4): el reloj de la sede de la petición; se pide solo si hay mensaje.
+    const fmt = () => requestFormat(byId, ctx);
+    const error = overrideRangesError(input.ranges, fmt);
     if (error) throw new BadRequestException(error);
     const ranges = [...input.ranges].sort(
       (a, b) => a.startMinute - b.startMinute,
     );
     const nameOf = (id: string) => byId.get(id)?.name ?? id;
 
+    let affected: AffectedAppointments | undefined;
+    const zone = requireLocationTimeZone(location);
+    const dayRange = civilDayRange(date, zone);
+    const now = this.clock();
     const change = await this.repo.upsertOverride({
       providerId,
+      checkAppointments: {
+        from: now > dayRange.start ? now : dayRange.start,
+        to: dayRange.end,
+        locationId: input.locationId,
+        check: (appointments, current) => {
+          const next: ProviderScheduleSnapshot = {
+            ...current,
+            overrides: [
+              ...current.overrides.filter(
+                (o) => o.locationId !== input.locationId || o.date !== date,
+              ),
+              { id: 'new', locationId: input.locationId, date, ranges, note },
+            ],
+          };
+          affected = affectedSummary(
+            appointmentsOutsideSchedule(appointments, next, () => zone),
+          );
+          requireConfirmation(affected, input.confirmAffected);
+        },
+      },
       locationId: input.locationId,
       date,
       ranges,
@@ -566,6 +697,7 @@ export class SetProviderOverrideUseCase {
                 name: nameOf(conflict.otherLocationId),
                 range: conflict.theirs,
               },
+              fmt(),
             ),
           );
         }
@@ -595,6 +727,7 @@ export class SetProviderOverrideUseCase {
     return {
       ...overrideView(providerId, change.after, byId),
       replaced: change.before !== null,
+      ...(affected?.total ? { affectedAppointments: affected } : {}),
     };
   }
 }
@@ -787,7 +920,9 @@ export class UpdateProviderScheduleSettingsUseCase {
     const label = (strict: boolean) => (strict ? 'STRICT' : 'WARN');
     await this.audit.record({
       tenantId: ctx.tenantId,
-      locationId: ctx.locationId,
+      // DX-363: ajuste de TODA la clínica, sin la sede activa de quien lo
+      // cambia; el registro lo pinta en la zona de la sede principal.
+      locationId: null,
       actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
       action: 'UPDATE',
       resourceType: 'PROVIDER_SCHEDULE',

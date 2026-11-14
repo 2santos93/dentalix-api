@@ -1,3 +1,4 @@
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { ConfigService } from '@nestjs/config';
 import { optOutPositiveInteger } from '../opt-out-config';
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -34,6 +35,8 @@ export interface PublicOptOutView {
   patientFirstName: string | null;
   optedOutAt: Date | null;
   clinic: OptOutClinicBranding | null;
+  /** DX-354: región de la sede principal de la clínica, para pintar `optedOutAt`. */
+  regional: DocumentRegionalDto | null;
 }
 
 export interface OptOutRequestMeta {
@@ -96,12 +99,14 @@ function toView(
   link: OptOutLinkLookup,
   optedOutAt: Date | null,
   clinic: OptOutClinicBranding | null,
+  regional: DocumentRegionalDto | null,
 ): PublicOptOutView {
   return {
     status: optedOutAt ? 'OPTED_OUT' : 'ACTIVE',
     patientFirstName: firstNameOnly(link.patientFirstName),
     optedOutAt,
     clinic,
+    regional,
   };
 }
 
@@ -126,7 +131,11 @@ export class GetPublicOptOutUseCase {
       token,
       this.clock.now(),
     );
-    return toView(link, link.optedOutAt, await this.repo.clinicBranding());
+    const [clinic, regional] = await Promise.all([
+      this.repo.clinicBranding(),
+      this.repo.principalRegional(),
+    ]);
+    return toView(link, link.optedOutAt, clinic, regional);
   }
 }
 
@@ -155,7 +164,10 @@ export class ConfirmPublicOptOutUseCase {
       token,
       this.clock.now(),
     );
-    const clinic = await this.repo.clinicBranding();
+    const [clinic, regional] = await Promise.all([
+      this.repo.clinicBranding(),
+      this.repo.principalRegional(),
+    ]);
 
     const now = this.clock.now();
     const registered = await this.repo.optOut(link.patientId, {
@@ -164,11 +176,12 @@ export class ConfirmPublicOptOutUseCase {
       linkId: link.linkId,
     });
     if (registered === null) throw new NotFoundException(LINK_NOT_FOUND);
-    if (!registered) return toView(link, link.optedOutAt ?? now, clinic);
+    if (!registered)
+      return toView(link, link.optedOutAt ?? now, clinic, regional);
     await this.audit.record(
       patientOptOutAudit(tenantId, link.patientId, 'LINK', meta),
     );
-    return toView(link, now, clinic);
+    return toView(link, now, clinic, regional);
   }
 }
 

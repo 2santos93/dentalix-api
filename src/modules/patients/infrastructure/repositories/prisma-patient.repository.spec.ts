@@ -19,6 +19,7 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
   return {
     id: 'p1',
     tenantId: 't1',
+    patientCode: 1042,
     firstName: 'Ana',
     lastName: 'Gomez',
     documentType: 'NATIONAL_ID',
@@ -27,6 +28,8 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
     birthDate: null,
     sex: 'F',
     phone: null,
+    phoneE164: null,
+    phoneE164CheckedAt: null,
     email: null,
     address: null,
     countryCode: null,
@@ -50,8 +53,10 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
     deletedAt: null,
     lastAttentionAt: null,
     retentionExtended: 'NONE',
+    retentionFloorUntil: null,
     partiallySuppressedAt: null,
     contactChannel: 'EMAIL',
+    preferredLanguage: null,
     whatsappOptInAt: null,
     whatsappOptInSource: null,
     whatsappOptInById: null,
@@ -62,17 +67,66 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
   };
 }
 
+const TERM = { years: 15 };
+
 describe('PrismaPatientRepository (DX-327)', () => {
   it('a patient row maps documentType and docTypeLabel', () => {
-    const patient = mapToEntity(row());
+    const patient = mapToEntity(row(), TERM);
     expect(patient.docType).toBe('NATIONAL_ID');
     expect(patient.docTypeLabel).toBe('ID local');
     expect(patient).not.toHaveProperty('documentType');
 
     const unlabelled = mapToEntity(
       row({ documentType: 'TAX_ID', docTypeLabel: null }),
+      TERM,
     );
     expect(unlabelled).toMatchObject({ docType: 'TAX_ID', docTypeLabel: null });
+  });
+
+  it('DX-484: the patient code goes out as decimal digits, without padding', () => {
+    expect(mapToEntity(row(), TERM).patientCode).toBe('1042');
+    expect(mapToEntity(row({ patientCode: 7 }), TERM).patientCode).toBe('7');
+  });
+
+  describe('retention (DX-330)', () => {
+    const last = new Date('2010-06-15T00:00:00.000Z');
+    const now = new Date('2026-11-01T12:00:00.000Z');
+
+    it('the date comes from the given term, with both new fields', () => {
+      const atFifteen = mapToEntity(row({ lastAttentionAt: last }), TERM, now);
+      expect(atFifteen).toMatchObject({
+        retentionUntil: '2025-06-15',
+        underRetention: false,
+        clinicRetentionYears: 15,
+        retentionFromPreviousTerm: false,
+      });
+      const atTwenty = mapToEntity(
+        row({ lastAttentionAt: last }),
+        { years: 20 },
+        now,
+      );
+      expect(atTwenty).toMatchObject({
+        retentionUntil: '2030-06-15',
+        underRetention: true,
+        clinicRetentionYears: 20,
+      });
+    });
+
+    it('a floor beyond the term shows as the previous term', () => {
+      const floored = mapToEntity(
+        row({
+          lastAttentionAt: last,
+          retentionFloorUntil: new Date('2035-06-15T00:00:00.000Z'),
+        }),
+        TERM,
+        now,
+      );
+      expect(floored).toMatchObject({
+        retentionUntil: '2035-06-15',
+        underRetention: true,
+        retentionFromPreviousTerm: true,
+      });
+    });
   });
 
   it.each(DOCUMENT_TYPES)(
@@ -106,6 +160,10 @@ describe('PrismaPatientRepository (DX-327)', () => {
           locks.push(sql.join('?'));
           return Promise.resolve([{ documentType: stored }]);
         },
+        tenant: {
+          findUniqueOrThrow: () =>
+            Promise.resolve({ clinicalRecordRetentionYears: 15 }),
+        },
         patient: {
           update: jest.fn(({ data }: { data: Record<string, unknown> }) => {
             updates.push(data);
@@ -120,6 +178,7 @@ describe('PrismaPatientRepository (DX-327)', () => {
       const repo = new PrismaPatientRepository(
         prisma as never,
         tenantContext as never,
+        { platformMinYears: 15 },
       );
       return { repo, updates, locks, tx };
     }

@@ -60,7 +60,7 @@ import {
   type ConfirmResult,
   type ImportedBalanceTotal,
 } from '../infrastructure/prisma-patient-import.repository';
-import { fromCents } from '../../../shared/money/money';
+import { fromCents, roundCents } from '../../../shared/money/money';
 
 export const PROCESS_IMPORT_JOB = 'patient-imports.process';
 /** Horas que vale un dry-run sin confirmar; después hay que volver a subirlo. */
@@ -252,7 +252,7 @@ function toAmounts(raw: unknown): BalanceCurrencyTotal[] {
   return ((raw ?? []) as CurrencyTotal[]).map((t) => ({
     currency: t.currency,
     rows: t.rows,
-    amount: fromCents(Math.round(t.cents)),
+    amount: fromCents(roundCents(t.cents)),
   }));
 }
 
@@ -377,6 +377,8 @@ export class PatientImportsService {
       defaultRegion: location.defaultPhoneRegion,
       today: civilDateIn(new Date(), location.timeZone),
       clinicNames,
+      // DX-497: la columna «idioma», contra la lista vigente de la clínica.
+      patientLanguages: await this.repo.patientLanguages(),
     };
 
     const issues: RowIssue[] = [];
@@ -598,10 +600,15 @@ export class PatientImportsService {
       throw fileErrorOf(err, location);
     }
     const timeZone = await this.repo.locationTimeZone(current.locationId);
+    const currencyTexts = await this.repo.currencyTexts();
     const ctx = {
       today: civilDateIn(new Date(), timeZone),
       currencies: new Set(await this.repo.currencyCodes()),
       format: parsed.format,
+      // DX-517-quater: el tope de una celda con el formato de la sede y el
+      // texto propio de la moneda de la fila.
+      regional: () => requireLocationFormat(location),
+      texts: currencyTexts,
     };
 
     const issues: RowIssue[] = [];
@@ -634,6 +641,8 @@ export class PatientImportsService {
       () => requireLocationFormat(location),
       existing,
       addToExisting,
+      // DX-517-bis: los importes de los avisos con el texto de la clínica.
+      currencyTexts,
     );
     issues.push(...aggregated.issues);
     issues.sort((x, y) => x.row - y.row);
@@ -833,7 +842,7 @@ export class PatientImportsService {
       imported: (imported.get(batch.id) ?? []).map((t) => ({
         currency: t.currency,
         count: t.count,
-        amount: fromCents(Math.round(t.cents)),
+        amount: fromCents(roundCents(t.cents)),
       })),
       progress: {
         processed: batch.balanceProcessedRows,

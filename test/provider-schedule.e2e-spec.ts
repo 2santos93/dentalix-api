@@ -13,7 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   legacyLocationInsert,
   locationBody,
 } from './support/location-fixtures';
@@ -27,12 +27,12 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const BOGOTA_MS = 5 * 60 * 60 * 1000;
+const CARACAS_MS = 5 * 60 * 60 * 1000;
 const H = (h: number) => h * 60;
 
-/** YYYY-MM-DD (Bogotá) del primer lunes a 7 días o más: siempre futuro. */
+/** YYYY-MM-DD (zona de la sede) del primer lunes a 7 días o más: siempre futuro. */
 function nextMonday(): string {
-  let t = Date.now() - BOGOTA_MS + 7 * DAY_MS;
+  let t = Date.now() - CARACAS_MS + 7 * DAY_MS;
   while (new Date(t).getUTCDay() !== 1) t += DAY_MS;
   return new Date(t).toISOString().slice(0, 10);
 }
@@ -41,9 +41,9 @@ function addDays(day: string, n: number): string {
     .toISOString()
     .slice(0, 10);
 }
-/** Hora de pared de Bogotá (UTC−5 fijo) como instante ISO. */
+/** Hora de pared de la sede (UTC−4 fijo) como instante ISO. */
 function local(day: string, hhmm: string): string {
-  return new Date(`${day}T${hhmm}:00-05:00`).toISOString();
+  return new Date(`${day}T${hhmm}:00-04:00`).toISOString();
 }
 
 const MON = nextMonday();
@@ -146,9 +146,9 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
     sedeA = await firstLocation(clinic);
     const created = await as(api().post('/api/v1/locations'), clinic.adminToken)
       .send(
-        locationBody(REGIONAL_BOGOTA_FIXTURE, {
+        locationBody(REGIONAL_CARACAS_FIXTURE, {
           name: 'Sede B',
-          country: 'CO',
+          country: 'VE',
         }),
       )
       .expect(201);
@@ -169,7 +169,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         .expect(201);
       patients.push((p.body as Body).id);
     }
-    // Las dos sedes abiertas de lunes a viernes de 7:00 a 20:00 (Bogotá).
+    // Las dos sedes abiertas de lunes a viernes de 7:00 a 20:00 (zona de la sede).
     for (const loc of [sedeA, sedeB]) {
       await as(api().put('/api/v1/locations/schedule'), clinic.adminToken)
         .set('X-Location-Id', loc)
@@ -223,6 +223,43 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       expect((res.body as { message: string }).message).toBe(
         'El tramo 08:00–13:00 en Sede principal se solapa el lunes con 12:00–15:00 en Sede B: un profesional no puede estar en dos sedes a la vez.',
       );
+    });
+
+    it('DX-354: el solape sale en 12 h con una sede de la petición h12, y 409 si esa sede no tiene reloj', async () => {
+      const body = ROTATION();
+      body.locations[1].ranges.push({
+        weekday: 1,
+        startMinute: H(12),
+        endMinute: H(15),
+      });
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: sedeB },
+        select: { locale: true, hourCycle: true },
+      });
+      try {
+        await raw.location.update({
+          where: { id: sedeB },
+          data: { locale: 'en-US', hourCycle: 'h12' },
+        });
+        const res = await putSchedule(body)
+          .set('X-Location-Id', sedeB)
+          .expect(400);
+        expect((res.body as { message: string }).message).toBe(
+          'El tramo 8:00 a. m.–1:00 p. m. en Sede principal se solapa el lunes con 12:00 p. m.–3:00 p. m. en Sede B: un profesional no puede estar en dos sedes a la vez.',
+        );
+        await raw.location.update({
+          where: { id: sedeB },
+          data: { hourCycle: null },
+        });
+        const noClock = await putSchedule(body)
+          .set('X-Location-Id', sedeB)
+          .expect(409);
+        expect((noClock.body as { code: string }).code).toBe(
+          'LOCATION_LOCALE_REQUIRED',
+        );
+      } finally {
+        await raw.location.update({ where: { id: sedeB }, data: before });
+      }
     });
 
     it('validación estricta: múltiplos de 5, ≤ 7 tramos, sede de otra clínica', async () => {
@@ -350,7 +387,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
           raw,
           clinic.tenantId,
           'Réplica antigua',
-          REGIONAL_BOGOTA_FIXTURE.country,
+          REGIONAL_CARACAS_FIXTURE.country,
         );
         try {
           const res = await roster().expect(200);
@@ -388,10 +425,10 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
               }
             ).locations.map((l) => [l.locationId, l.timeZone]),
           );
-          expect(zones).toEqual({ [sedeA]: 'America/Bogota', [sedeB]: null });
+          expect(zones).toEqual({ [sedeA]: 'America/Caracas', [sedeB]: null });
         } finally {
           await raw.$executeRaw`
-            UPDATE "locations" SET "timeZone" = 'America/Bogota' WHERE "id" = ${sedeB}::uuid`;
+            UPDATE "locations" SET "timeZone" = 'America/Caracas' WHERE "id" = ${sedeB}::uuid`;
         }
       });
     });
@@ -600,6 +637,80 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
       ]);
     });
 
+    it('DX-267: una excepción o un horario que dejan citas fuera piden confirmar; la cita no se toca', async () => {
+      const FAR_THU = addDays(THU, 21);
+      const created = await book(sedeB, FAR_THU, '15:00').expect(201);
+      const id = (created.body as Body).id;
+      const override = (body: object) =>
+        as(
+          api().post(`/api/v1/providers/${draX.userId}/schedule-overrides`),
+          clinic.adminToken,
+        ).send({ locationId: sedeB, date: FAR_THU, ...body });
+
+      const denied = await override({ ranges: [] }).expect(409);
+      expect(denied.body).toMatchObject({
+        code: 'SCHEDULE_AFFECTS_APPOINTMENTS',
+        message: expect.stringContaining(
+          'Hay 1 cita fuera de ese horario',
+        ) as string,
+        affectedAppointments: {
+          total: 1,
+          sample: [{ id, locationId: sedeB }],
+        },
+      });
+      // Otra franja que deja la cita dentro no pide nada.
+      await override({
+        ranges: [{ startMinute: H(14), endMinute: H(16) }],
+      }).expect(201);
+      const confirmed = await override({
+        ranges: [],
+        confirmAffected: true,
+      }).expect(201);
+      expect(confirmed.body).toMatchObject({
+        affectedAppointments: { total: 1 },
+      });
+      const after = await as(
+        api().get(`/api/v1/appointments/${id}`),
+        reception.token,
+      ).expect(200);
+      expect(after.body).toMatchObject({
+        status: 'SCHEDULED',
+        start: local(FAR_THU, '15:00'),
+      });
+
+      // El semanal, igual: sin jueves en la sede B la cita de otro jueves queda fuera.
+      const OTHER_THU = addDays(THU, 28);
+      const other = await book(sedeB, OTHER_THU, '15:00').expect(201);
+      const weekly = await as(
+        api().put(`/api/v1/providers/${draX.userId}/schedule`),
+        clinic.adminToken,
+      )
+        .send({
+          locations: [
+            {
+              locationId: sedeB,
+              ranges: [{ weekday: 5, startMinute: H(14), endMinute: H(19) }],
+            },
+          ],
+        })
+        .expect(409);
+      expect(weekly.body).toMatchObject({
+        code: 'SCHEDULE_AFFECTS_APPOINTMENTS',
+      });
+      for (const appointment of [id, (other.body as Body).id]) {
+        await as(
+          api().patch(`/api/v1/appointments/${appointment}`),
+          reception.token,
+        )
+          .send({
+            status: 'CANCELLED',
+            cancelledByKind: 'STAFF_FOR_PATIENT',
+            cancelReasonCode: 'ILLNESS',
+          })
+          .expect(200);
+      }
+    });
+
     it('con «no trabaja» el jueves no devuelve nada; con otro horario, el de la excepción', async () => {
       const off = await as(
         api().post(`/api/v1/providers/${draX.userId}/schedule-overrides`),
@@ -638,7 +749,7 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         warningCodes: ['PROVIDER_OFF_SCHEDULE'],
         warnings: [
           expect.stringMatching(
-            /^Fuera del horario del profesional: no trabaja en Sede principal el jueves \d{2}\/\d{2}\.$/,
+            /^Fuera del horario del profesional: no trabaja en Sede principal el jueves \d{1,2} de [a-záéíóú]+\.$/,
           ),
         ],
       });
@@ -668,10 +779,123 @@ describe('Horario de los profesionales por sede (e2e, DX-233)', () => {
         warningCodes: ['PROVIDER_OFF_SCHEDULE'],
         warnings: [
           expect.stringMatching(
-            /^Fuera del horario del profesional en Sede B \(jueves \d{2}\/\d{2}: 14:00–19:00\)\.$/,
+            /^Fuera del horario del profesional en Sede B \(jueves \d{1,2} de [a-záéíóú]+: 14:00–19:00\)\.$/,
           ),
         ],
       });
+    });
+
+    describe('DX-267-bis: reactivar una cita aplica las reglas de mover', () => {
+      const cancel = (id: string) =>
+        as(api().patch(`/api/v1/appointments/${id}`), reception.token)
+          .send({
+            status: 'CANCELLED',
+            cancelledByKind: 'STAFF_FOR_PATIENT',
+            cancelReasonCode: 'ILLNESS',
+          })
+          .expect(200);
+      const reactivate = (id: string) =>
+        as(api().patch(`/api/v1/appointments/${id}`), reception.token).send({
+          status: 'SCHEDULED',
+        });
+      const strictMode = (on: boolean) =>
+        as(api().put('/api/v1/schedule/settings'), clinic.adminToken)
+          .send({ strictProviderSchedule: on })
+          .expect(200);
+
+      it('fuera del horario del profesional: aviso; en modo estricto, 409 con el sufijo', async () => {
+        const LATER_THU = addDays(THU, 35);
+        const created = await book(sedeB, LATER_THU, '15:00').expect(201);
+        const id = (created.body as Body).id;
+        await cancel(id);
+        // Tras cancelarla, ese jueves deja de trabajar (sin citas vivas: 201).
+        await as(
+          api().post(`/api/v1/providers/${draX.userId}/schedule-overrides`),
+          clinic.adminToken,
+        )
+          .send({ locationId: sedeB, date: LATER_THU, ranges: [] })
+          .expect(201);
+
+        await strictMode(true);
+        try {
+          const strict = await reactivate(id).expect(409);
+          expect((strict.body as { message: string }).message).toMatch(
+            /^Fuera del horario del profesional: no trabaja en Sede B .*La clínica no permite citar fuera del horario del profesional\.$/,
+          );
+        } finally {
+          await strictMode(false);
+        }
+        const still = await as(
+          api().get(`/api/v1/appointments/${id}`),
+          reception.token,
+        ).expect(200);
+        expect(still.body).toMatchObject({ status: 'CANCELLED' });
+
+        const warned = await reactivate(id).expect(200);
+        expect(warned.body).toMatchObject({
+          status: 'SCHEDULED',
+          warningCodes: ['PROVIDER_OFF_SCHEDULE'],
+          warnings: [
+            expect.stringMatching(
+              /^Fuera del horario del profesional: no trabaja en Sede B el jueves/,
+            ),
+          ],
+        });
+        await cancel(id);
+      });
+
+      it('una cita que ya terminó: 409 APPOINTMENT_PAST y sigue cancelada', async () => {
+        const LATER_MON = addDays(MON, 35);
+        const created = await book(sedeA, LATER_MON, '09:00').expect(201);
+        const id = (created.body as Body).id;
+        await cancel(id);
+        // La cita «ya pasó»: se lleva a hace dos días (misma duración).
+        const twoDaysAgo = Date.now() - 2 * DAY_MS;
+        await raw.appointment.update({
+          where: { id },
+          data: {
+            start: new Date(twoDaysAgo),
+            end: new Date(twoDaysAgo + 30 * 60_000),
+          },
+        });
+        const res = await reactivate(id).expect(409);
+        expect(res.body).toEqual({
+          statusCode: 409,
+          error: 'Conflict',
+          code: 'APPOINTMENT_PAST',
+          message: 'La cita ya pasó: agenda una nueva',
+        });
+        const after = await raw.appointment.findUniqueOrThrow({
+          where: { id },
+        });
+        expect(after.status).toBe('CANCELLED');
+      });
+    });
+
+    it('DX-520-bis: con la sede en 12 h el aviso escribe las horas en 12 h, sin barras', async () => {
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: sedeB },
+        select: { locale: true, hourCycle: true },
+      });
+      await raw.location.update({
+        where: { id: sedeB },
+        data: { locale: 'en-US', hourCycle: 'h12' },
+      });
+      try {
+        const res = await as(
+          api().patch(`/api/v1/appointments/${thursdayAppointment}`),
+          reception.token,
+        )
+          .send({ start: local(THU, '19:30'), end: local(THU, '20:00') })
+          .expect(200);
+        const [warning] = (res.body as { warnings: string[] }).warnings;
+        expect(warning).toMatch(
+          /^Fuera del horario del profesional en Sede B \(jueves \d{1,2} de [a-záéíóú]+: 2:00 p\. m\.–7:00 p\. m\.\)\.$/,
+        );
+        expect(warning).not.toMatch(/\d{1,2}\/\d{1,2}/);
+      } finally {
+        await raw.location.update({ where: { id: sedeB }, data: before });
+      }
     });
 
     it('«Ocupar este hueco»: fuera del horario de su profesional no hay candidatos', async () => {

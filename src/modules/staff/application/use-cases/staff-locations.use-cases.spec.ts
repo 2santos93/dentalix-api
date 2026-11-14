@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type {
   ReplaceLocationsOutcome,
   StaffLocationsLookup,
@@ -15,6 +16,7 @@ import {
   ADMIN_HAS_ALL_LOCATIONS_MESSAGE,
   GetStaffLocationsUseCase,
   ReplaceStaffLocationsUseCase,
+  type ReplaceStaffLocationsInput,
   STAFF_MEMBER_NOT_FOUND_MESSAGE,
   UNKNOWN_LOCATION_MESSAGE,
 } from './staff-locations.use-cases';
@@ -24,6 +26,14 @@ const A1 = '11111111-1111-4111-8111-111111111111';
 const A2 = '22222222-2222-4222-8222-222222222222';
 const INACTIVE = '33333333-3333-4333-8333-333333333333';
 const ACTOR = 'admin-1';
+const AUDIT: AuditRequestContext = {
+  tenantId: 'tenant-1',
+  locationId: null,
+  actor: { userId: ACTOR, role: ClinicRole.ADMIN },
+  requestId: null,
+  ip: null,
+  userAgent: null,
+};
 
 /**
  * Repositorio en memoria con la misma semántica que el de Prisma: sin filas =
@@ -84,7 +94,10 @@ function setup() {
   return {
     repo,
     get: new GetStaffLocationsUseCase(port),
-    replace: new ReplaceStaffLocationsUseCase(port),
+    replace: {
+      execute: (input: ReplaceStaffLocationsInput) =>
+        new ReplaceStaffLocationsUseCase(port).execute(input, AUDIT),
+    },
     update: new UpdateStaffUseCase(port),
   };
 }
@@ -124,7 +137,7 @@ describe('sedes permitidas de un miembro (DX-089)', () => {
         actorUserId: ACTOR,
       }),
     ).resolves.toEqual({ all: false, locationIds: [A1] });
-    expect(spy).toHaveBeenCalledWith('rec-1', [A1], ACTOR);
+    expect(spy).toHaveBeenCalledWith('rec-1', [A1], ACTOR, AUDIT);
   });
 
   it('[] vuelve a dar todas las sedes', async () => {
@@ -186,7 +199,7 @@ describe('sedes permitidas de un miembro (DX-089)', () => {
       locationIds: [A2],
       actorUserId: ACTOR,
     });
-    expect(spy).toHaveBeenCalledWith('rec-1', [A2], ACTOR);
+    expect(spy).toHaveBeenCalledWith('rec-1', [A2], ACTOR, AUDIT);
   });
 
   it('ascender a ADMIN le devuelve todas las sedes', async () => {

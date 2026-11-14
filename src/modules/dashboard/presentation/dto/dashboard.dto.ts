@@ -46,6 +46,8 @@ export class DashboardIncomesDto {
   count!: number;
 
   @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'number' },
     description:
       "Breakdown of the ORIGINAL (unconverted) amounts grouped by each payment's own currency, keyed by its ISO 4217 code (3 letters).",
   })
@@ -109,6 +111,13 @@ export class DashboardUpcomingAppointmentDto {
 
   @ApiProperty({ enum: AppointmentStatus })
   status!: AppointmentStatus;
+
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Sede de la cita (DX-354b): la web formatea su hora con el reloj de esa sede.',
+  })
+  locationId!: string;
 }
 
 export class DashboardDto {

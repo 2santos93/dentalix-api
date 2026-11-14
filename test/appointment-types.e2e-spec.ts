@@ -200,6 +200,41 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
         .expect(409);
     });
 
+    // DX-133-bis: el único es sobre lower(btrim(name)) entre los vivos.
+    it('nombre repetido con otras mayúsculas o espacios: 409 en español, al crear y al renombrar', async () => {
+      await createType({ name: 'Blanqueamiento' });
+      const res = await as(
+        api().post('/api/v1/appointment-types'),
+        clinic.adminToken,
+      )
+        .send({
+          name: '  BLANQUEAMIENTO ',
+          durationMinutes: 30,
+          color: '#0E7490',
+        })
+        .expect(409);
+      expect(JSON.stringify(res.body)).toContain(
+        'Ya existe un tipo de cita con ese nombre.',
+      );
+
+      const other = await createType({ name: 'Profilaxis' });
+      await as(
+        api().patch(`/api/v1/appointment-types/${other.id}`),
+        clinic.adminToken,
+      )
+        .send({ name: 'blanqueamiento' })
+        .expect(409);
+    });
+
+    it('un nombre retirado (DELETE) se puede volver a usar con otras mayúsculas', async () => {
+      const retired = await createType({ name: 'Sellantes' });
+      await as(
+        api().delete(`/api/v1/appointment-types/${retired.id}`),
+        clinic.adminToken,
+      ).expect(204);
+      await createType({ name: 'SELLANTES' });
+    });
+
     it('un tipo de otra clínica no existe aquí (404)', async () => {
       const foreign = await as(
         api().post('/api/v1/appointment-types'),
@@ -346,7 +381,12 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
       const token = (link.body as { url: string }).url.split('/confirmar/')[1];
 
       // Desde aquí, en TODA la clínica, solo puede auditarse el movimiento.
-      const t0 = new Date();
+      // Por id y no por hora: el evento del enlace se escribe 1-2 ms antes y un
+      // corte con `new Date()` puede dejarlo dentro (`occurredAt` redondea a ms).
+      const before = await raw.auditEvent.findMany({
+        where: { tenantId: clinic.tenantId, resourceType: 'APPOINTMENT' },
+        select: { id: true },
+      });
       const moved = await as(
         api().patch(`/api/v1/appointments/${appt.id}`),
         reception.token,
@@ -372,13 +412,13 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
 
       // Desde DX-256 cada POST/PATCH deja además su traza HTTP genérica
       // (UPDATE con changedFields) junto al APPOINTMENT_MOVED con el antes y el
-      // después. Tras t0, en toda la clínica, solo esos dos y de esta cita:
+      // después. Desde entonces, en toda la clínica, solo esos dos y de esta cita:
       // nada atribuido a otra cita ni duplicado.
       const events = await raw.auditEvent.findMany({
         where: {
           tenantId: clinic.tenantId,
           resourceType: 'APPOINTMENT',
-          occurredAt: { gte: t0 },
+          id: { notIn: before.map((e) => e.id) },
         },
         orderBy: { occurredAt: 'asc' },
       });

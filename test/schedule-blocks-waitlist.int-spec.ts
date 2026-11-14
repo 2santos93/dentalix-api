@@ -19,9 +19,19 @@ import type { PatientRepository } from '../src/modules/patients/domain/ports/pat
 import type { RecordAuditEventUseCase } from '../src/modules/audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import {
+  backendPid,
+  holdLock,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
+import {
+  AffectedAppointmentsRaceError,
+  SCHEDULE_BLOCKED_RACE_MESSAGE,
+} from '../src/modules/schedule-blocks/domain/schedule-block-rules';
 
 /** DX-279: cancelar desde la agenda exige origen y motivo. */
 const FOR_PATIENT = {
@@ -62,7 +72,7 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
     data: { name: subdomain, subdomain },
   });
   const location = await raw.location.create({
-    data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede',
     }),
@@ -104,7 +114,7 @@ const noSchedule = {
   findForCurrentLocation: () => Promise.resolve(null),
 } as unknown as LocationScheduleRepository;
 const anyStaff = {
-  findById: (userId: string) => Promise.resolve({ userId }),
+  findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),
 } as unknown as StaffRepository;
 const anyPatient = {
   findById: (id: string) => Promise.resolve({ id }),
@@ -119,6 +129,15 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
   const appointments = new PrismaAppointmentRepository(prisma, tenantContext);
   const blocks = new PrismaScheduleBlockRepository(prisma, tenantContext);
   const waitlist = new PrismaWaitlistRepository(prisma, tenantContext);
+
+  // DX-161: `create` da `null` si el paciente ya tiene una OPEN; aquí no debe pasar.
+  const createEntry = async (
+    input: Parameters<typeof waitlist.create>[0],
+  ): Promise<NonNullable<Awaited<ReturnType<typeof waitlist.create>>>> => {
+    const entry = await waitlist.create(input);
+    if (!entry) throw new Error('El paciente ya tenía una entrada OPEN');
+    return entry;
+  };
   const types = new PrismaAppointmentTypeRepository(prisma, tenantContext);
   const create = new CreateAppointmentUseCase(
     appointments,
@@ -337,6 +356,114 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
       await raw.appointment.deleteMany({ where: { tenantId: a.tenantId } });
     });
 
+    it('DX-149: una cita y un bloqueo a la vez nunca acaban los dos confirmados', async () => {
+      // Se retiene el candado de la agenda de la doctora: la cita y el bloqueo
+      // llegan los dos a esperarlo y, al soltarlo, uno entra primero. El segundo
+      // ve al primero dentro de su transacción. Sin pausas: avanza por pg_locks.
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      let holding!: (pid: number) => void;
+      const held = new Promise<number>((resolve) => (holding = resolve));
+      const holder = raw.$transaction(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(
+            hashtext(${'dx_agenda_provider:' + a.tenantId}),
+            hashtext(${DOCTOR})
+          )`;
+          holding(await backendPid(tx));
+          await released;
+        },
+        { timeout: 20_000 },
+      );
+      const pid = await held;
+      const racing = Promise.allSettled([
+        newAppointment('10:00', '10:30'),
+        inA(() =>
+          blocks.create({
+            providerId: DOCTOR,
+            locationId: null,
+            start: at('09:00'),
+            end: at('12:00'),
+            kind: 'MEETING',
+            allowsBooking: false,
+            note: null,
+            createdById: DOCTOR,
+            recheckAffected: true,
+          }),
+        ),
+      ]);
+      await waitForLockWaiters(raw, [pid], 2);
+      release();
+      await holder;
+      const [appointment, block] = await racing;
+      expect(
+        [appointment, block].filter((r) => r.status === 'fulfilled'),
+      ).toHaveLength(1);
+      if (appointment.status === 'rejected') {
+        expect(appointment.reason).toBeInstanceOf(ConflictException);
+      }
+      if (block.status === 'rejected') {
+        expect(block.reason).toBeInstanceOf(AffectedAppointmentsRaceError);
+      }
+      const [appointments, liveBlocks] = await Promise.all([
+        raw.appointment.count({ where: { tenantId: a.tenantId } }),
+        raw.scheduleBlock.count({
+          where: { tenantId: a.tenantId, deletedAt: null },
+        }),
+      ]);
+      expect(appointments + liveBlocks).toBe(1);
+    });
+
+    it('DX-267-bis: reactivar con un bloqueo creado a la vez: 409 y la cita sigue cancelada', async () => {
+      const appt = await newAppointment('11:00', '11:30');
+      await inA(() =>
+        update.execute(appt.id, {
+          status: AppointmentStatus.CANCELLED,
+          cancellation: FOR_PATIENT,
+        }),
+      );
+      // La reactivación pasa el pre-check (aún no hay bloqueo) y espera el
+      // candado de la agenda; quien lo retiene crea el bloqueo y confirma.
+      const held = await holdLock(
+        raw,
+        (tx) => tx.$executeRaw`SELECT pg_advisory_xact_lock(
+          hashtext(${'dx_agenda_provider:' + a.tenantId}),
+          hashtext(${DOCTOR})
+        )`,
+        (tx) =>
+          tx.scheduleBlock.create({
+            data: {
+              tenantId: a.tenantId,
+              providerId: DOCTOR,
+              start: at('10:00'),
+              end: at('12:00'),
+              kind: 'MEETING',
+              allowsBooking: false,
+            },
+          }),
+      );
+      const reactivating = settle(
+        inA(() =>
+          update.execute(appt.id, { status: AppointmentStatus.SCHEDULED }),
+        ),
+      );
+      await waitForLockWaiters(raw, [held.pid]);
+      held.release();
+      await held.done;
+      const outcome = await reactivating;
+      expect(outcome.status).toBe('rejected');
+      if (outcome.status === 'rejected') {
+        expect(outcome.reason).toBeInstanceOf(ConflictException);
+        expect((outcome.reason as Error).message).toBe(
+          SCHEDULE_BLOCKED_RACE_MESSAGE,
+        );
+      }
+      const row = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+      });
+      expect(row.status).toBe(AppointmentStatus.CANCELLED);
+    });
+
     it('vacaciones de la doctora en todas las sedes: crear y mover a ese rango dan 409', async () => {
       await inA(() =>
         blocks.create({
@@ -396,6 +523,68 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
         where: { tenantId: a.tenantId },
       });
       await raw.appointment.deleteMany({ where: { tenantId: a.tenantId } });
+    });
+
+    it('DX-161: cancelar dos citas del mismo paciente deja una sola OPEN', async () => {
+      const first = await newAppointment('08:00', '08:30');
+      const second = await newAppointment('09:00', '09:30');
+      await Promise.all(
+        [first, second].map((appt) =>
+          inA(() =>
+            update.execute(appt.id, {
+              status: AppointmentStatus.CANCELLED,
+              cancellation: FOR_PATIENT,
+            }),
+          ),
+        ),
+      );
+      const open = await raw.appointmentWaitlistEntry.findMany({
+        where: { tenantId: a.tenantId, status: 'OPEN' },
+      });
+      expect(open).toHaveLength(1);
+      expect(open[0].patientId).toBe(a.patientIds[0]);
+    });
+
+    it('DX-161: dos altas manuales simultáneas del mismo paciente: una entrada', async () => {
+      const results = await Promise.all(
+        [0, 1].map(() =>
+          inA(() =>
+            waitlist.create({
+              locationId: a.locationId,
+              patientId: a.patientIds[1],
+              providerId: null,
+              appointmentTypeId: null,
+              durationMinutes: 30,
+              priority: 'NORMAL',
+              preferredWindow: null,
+              note: null,
+              createdById: DOCTOR,
+            }),
+          ),
+        ),
+      );
+      expect(results.filter((r) => r !== null)).toHaveLength(1);
+      await expect(
+        raw.appointmentWaitlistEntry.count({
+          where: {
+            tenantId: a.tenantId,
+            patientId: a.patientIds[1],
+            status: 'OPEN',
+          },
+        }),
+      ).resolves.toBe(1);
+    });
+
+    it('DX-161: el índice único impide una segunda OPEN aunque se salte la aplicación', async () => {
+      const row = {
+        tenantId: a.tenantId,
+        locationId: a.locationId,
+        patientId: a.patientIds[2] ?? a.patientIds[1],
+      };
+      await raw.appointmentWaitlistEntry.create({ data: row });
+      await expect(
+        raw.appointmentWaitlistEntry.create({ data: row }),
+      ).rejects.toMatchObject({ code: 'P2002' });
     });
 
     it('cancelar y luego no-show: una sola entrada OPEN con los datos de la cita', async () => {
@@ -546,7 +735,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
 
     it('dos «Agendar aquí» a la vez sobre la misma entrada: una cita y una 409', async () => {
       const entry = await inA(() =>
-        waitlist.create({
+        createEntry({
           patientId: a.patientIds[2],
           providerId: null,
           appointmentTypeId: null,
@@ -563,6 +752,7 @@ describe('bloqueos de agenda y pendientes por agendar (int, DX-122)', () => {
         create,
         noAudit,
         tenantContext,
+        new PrismaLocationRepository(prisma, tenantContext),
       );
       const results = await Promise.allSettled([
         inA(() =>

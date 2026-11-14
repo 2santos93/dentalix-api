@@ -9,7 +9,7 @@ import { RecordAuditEventUseCase } from '../src/modules/audit/application/record
 import { PrismaAuditEventRepository } from '../src/modules/audit/infrastructure/prisma-audit-event.repository';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 import {
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
 
@@ -29,14 +29,14 @@ const prisma = new PrismaService(tenantContext);
 
 const SUBDOMAIN = 'dx215-reabre-int';
 const EMAIL = 'recepcion@dx215-reabre-int.test';
-const BOGOTA = 'America/Bogota';
+const CARACAS = 'America/Caracas';
 const IMMUTABLE = /inalterable|no admite/;
 
 let tenantId: string;
 let locationId: string;
 let userId: string;
 
-const today = () => civilDateIn(new Date(), BOGOTA);
+const today = () => civilDateIn(new Date(), CARACAS);
 
 async function cleanup(): Promise<void> {
   const tenants = await raw.tenant.findMany({
@@ -76,14 +76,14 @@ async function debtor(name: string): Promise<Debtor> {
     data: {
       tenantId,
       patientId: patient.id,
-      currency: 'COP',
+      currency: 'VES',
       status: 'ACCEPTED',
     },
   });
   return { patientId: patient.id, planId: plan.id };
 }
 
-/** Compromiso de 200 000 COP; `kept` lo deja CUMPLIDO (como el barrido). */
+/** Compromiso de 200 000 VES; `kept` lo deja CUMPLIDO (como el barrido). */
 async function promiseFor(
   d: Debtor,
   dueDate: string,
@@ -95,7 +95,7 @@ async function promiseFor(
       patientId: d.patientId,
       locationId,
       amount: 200_000,
-      currency: 'COP',
+      currency: 'VES',
       dueDate: new Date(`${dueDate}T00:00:00.000Z`),
       createdById: userId,
     },
@@ -110,7 +110,7 @@ async function promiseFor(
 }
 
 /** Abono registrado AHORA (después del compromiso): su alta la pone la BD. */
-async function pay(d: Debtor, amount = 200_000, currency = 'COP') {
+async function pay(d: Debtor, amount = 200_000, currency = 'VES') {
   const row = await raw.payment.create({
     data: {
       tenantId,
@@ -221,10 +221,10 @@ describe('compromiso cumplido que se reabre al anular su abono (int, DX-215)', (
     ).id;
     locationId = (
       await raw.location.create({
-        data: locationData(REGIONAL_BOGOTA_FIXTURE, {
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
           tenantId,
           name: 'Sede',
-          country: 'CO',
+          country: 'VE',
         }),
       })
     ).id;
@@ -334,7 +334,7 @@ describe('compromiso cumplido que se reabre al anular su abono (int, DX-215)', (
       const id = await promiseFor(d, addCivilDays(today(), 5), 'KEPT');
       const paymentId = await pay(d);
       await asApp(async (tx) => {
-        await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE '${BOGOTA}'`);
+        await tx.$executeRawUnsafe(`SET LOCAL TIME ZONE '${CARACAS}'`);
         await tx.payment.update({
           where: { id: paymentId },
           data: { deletedAt: new Date(), voidedAt: new Date() },
@@ -453,7 +453,7 @@ describe('compromiso cumplido que se reabre al anular su abono (int, DX-215)', (
         where: { id },
         data: { status: 'KEPT', settledAt: new Date() },
       });
-      // 00:30 del día siguiente a la fecha en Bogotá.
+      // 00:30 del día siguiente a la fecha en la zona de la sede.
       const afterDue = new Date(`${addCivilDays(due, 1)}T05:30:00.000Z`);
 
       await voidPayment(paymentId, afterDue);
@@ -543,7 +543,7 @@ describe('compromiso cumplido que se reabre al anular su abono (int, DX-215)', (
           treatmentPlanId: d.planId,
           patientId: d.patientId,
           amount: 200_000,
-          currency: 'COP',
+          currency: 'VES',
           paidAt: new Date(`${addCivilDays(today(), 5)}T17:00:00.000Z`),
           createdById: userId,
         },

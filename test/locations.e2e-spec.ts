@@ -8,9 +8,10 @@ import { AppModule } from '../src/app.module';
 import { hostFor } from './support/tenant-host';
 import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
+import { LAST_ACTIVE_LOCATION_MESSAGE } from '../src/modules/locations/application/use-cases/manage-locations.use-cases';
 import {
   REGIONAL_BERLIN_FIXTURE,
-  REGIONAL_BOGOTA_FIXTURE,
+  REGIONAL_CARACAS_FIXTURE,
   REGIONAL_NEW_YORK_FIXTURE,
   REGIONAL_TOKYO_FIXTURE,
   g1LocationInsert,
@@ -46,7 +47,7 @@ async function registerAndLogin(
 ) {
   const register = await registerVerified(
     app,
-    registerBody(REGIONAL_BOGOTA_FIXTURE, {
+    registerBody(REGIONAL_CARACAS_FIXTURE, {
       ...opts,
       password: PASSWORD,
       fullName: 'Dr. Owner',
@@ -195,9 +196,9 @@ describe('Locations / multi-sede (e2e)', () => {
         request(app.getHttpServer())
           .post('/api/v1/locations')
           .send(
-            locationBody(REGIONAL_BOGOTA_FIXTURE, {
+            locationBody(REGIONAL_CARACAS_FIXTURE, {
               name: 'Sede Norte',
-              address: 'Cra 15',
+              address: 'Av. Bolívar 15',
             }),
           ),
       ).expect(201);
@@ -350,11 +351,14 @@ describe('Locations / multi-sede (e2e)', () => {
           .send({ isActive: false }),
       ).expect(200);
 
-      await auth(
+      const last = await auth(
         request(app.getHttpServer())
           .patch(`/api/v1/locations/${sedeA}`)
           .send({ isActive: false }),
       ).expect(409);
+      expect((last.body as { message: string }).message).toBe(
+        LAST_ACTIVE_LOCATION_MESSAGE,
+      );
     },
     30000,
   );
@@ -381,14 +385,14 @@ describe('Locations / multi-sede (e2e)', () => {
     const sede = (list.body as Array<LocationBody & { phone: unknown }>)[0];
     expect(sede.phone).toBeNull();
 
-    const saved = await patch(sede.id, { phone: '601 555 0101' }).expect(200);
-    expect((saved.body as { phone: unknown }).phone).toBe('601 555 0101');
+    const saved = await patch(sede.id, { phone: '212 555 0101' }).expect(200);
+    expect((saved.body as { phone: unknown }).phone).toBe('212 555 0101');
 
     // Sin `phone` en el cuerpo: el teléfono no cambia.
     const renamed = await patch(sede.id, { name: 'Sede Centro' }).expect(200);
     expect(renamed.body).toMatchObject({
       name: 'Sede Centro',
-      phone: '601 555 0101',
+      phone: '212 555 0101',
     });
 
     // `null` (lo que envía la web al vaciar el campo) lo quita.
@@ -511,7 +515,7 @@ describe('Locations / multi-sede (e2e)', () => {
         raw,
         tenantId,
         'Antigua',
-        REGIONAL_BOGOTA_FIXTURE.country,
+        REGIONAL_CARACAS_FIXTURE.country,
       );
       const res = await auth(
         request(app.getHttpServer()).get('/api/v1/locations'),
@@ -520,7 +524,7 @@ describe('Locations / multi-sede (e2e)', () => {
         (l) => l.id === legacyId,
       );
       expect(legacy).toMatchObject({
-        country: 'CO',
+        country: REGIONAL_CARACAS_FIXTURE.country,
         currency: null,
         timeZone: null,
         locale: null,
@@ -734,11 +738,11 @@ describe('Locations / multi-sede (e2e)', () => {
     it('POST /locations with another region stores it', async () => {
       const res = await post({
         ...withoutRegion('Otra región', 'VE'),
-        defaultPhoneRegion: ' co ',
+        defaultPhoneRegion: ' es ',
       }).expect(201);
       expect(res.body).toMatchObject({
         country: 'VE',
-        defaultPhoneRegion: 'CO',
+        defaultPhoneRegion: 'ES',
       });
     });
 
@@ -817,8 +821,8 @@ describe('Locations / multi-sede (e2e)', () => {
         (res.body as { defaultPhoneRegion: unknown }).defaultPhoneRegion,
       ).toBeNull();
       expect((await row(id)).regionalSettingsReviewedAt).toBeNull();
-      const empty = await patch(id, { defaultPhoneRegion: 'co' }).expect(200);
-      expect(empty.body).toMatchObject({ defaultPhoneRegion: 'CO' });
+      const empty = await patch(id, { defaultPhoneRegion: 'es' }).expect(200);
+      expect(empty.body).toMatchObject({ defaultPhoneRegion: 'ES' });
       expect((await row(id)).regionalSettingsReviewedAt).toBeNull();
       await patch(id, { defaultPhoneRegion: '' }).expect(200);
       expect((await row(id)).defaultPhoneRegion).toBeNull();
@@ -826,7 +830,7 @@ describe('Locations / multi-sede (e2e)', () => {
 
     it('the PATCH audit lists defaultPhoneRegion among the changed fields without values', async () => {
       const id = idOf(await post(withoutRegion('Auditada', 'VE')).expect(201));
-      await patch(id, { defaultPhoneRegion: 'CO' }).expect(200);
+      await patch(id, { defaultPhoneRegion: 'ES' }).expect(200);
       const events = await raw.auditEvent.findMany({
         where: { tenantId, action: 'UPDATE', resourceId: id },
       });
@@ -844,7 +848,7 @@ describe('Locations / multi-sede (e2e)', () => {
       await patch(id, { name: 'Marca renombrada' }).expect(200);
       expect((await row(id)).defaultPhoneRegionSetAt).toEqual(created);
       await new Promise((resolve) => setTimeout(resolve, 20));
-      await patch(id, { defaultPhoneRegion: 'CO' }).expect(200);
+      await patch(id, { defaultPhoneRegion: 'ES' }).expect(200);
       const edited = (await row(id)).defaultPhoneRegionSetAt!;
       expect(edited.getTime()).toBeGreaterThan(created!.getTime());
       await new Promise((resolve) => setTimeout(resolve, 20));

@@ -6,8 +6,10 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import {
   SignatureRequestChannel,
   SignatureRequestType,
@@ -23,10 +25,18 @@ import { usesVariable } from '../../../consents/domain/render-consent';
 import {
   composeQuoteContent,
   PLAN_NOT_FOUND_MESSAGE,
-  quoteIssuedOn,
+  PLAN_QUOTE_COMPOSITION,
+  firstIssueValidity,
+  quoteDayText,
+  quoteSourceExpiry,
+  quoteValidityOf,
 } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
-import { computeQuoteHash } from '../../../treatment-plans/domain/plan-quote';
-import { PLAN_STATUS_LABELS } from '../../../treatment-plans/domain/plan-status-machine';
+import { quoteExpiredConflict } from '../../../treatment-plans/application/quote-expiry';
+import { quoteExpiredRemoteMessage } from '../../../treatment-plans/domain/expired-quote-acceptance';
+import {
+  computeQuoteHash,
+  type QuoteComposition,
+} from '../../../treatment-plans/domain/plan-quote';
 import {
   documentText,
   documentTypeName,
@@ -44,6 +54,9 @@ import type {
 } from '../../domain/entities/signature-request.entity';
 import {
   SIGNATURE_REQUEST_REPOSITORY,
+  budgetNotPresentedMessage,
+  type CreateSignatureRequestOptions,
+  type CreateSignatureRequestRepoInput,
   type SignaturePlanOption,
   type SignatureProfessional,
   type SignatureRecipientContext,
@@ -74,9 +87,7 @@ export const SIGNATURE_BUDGET_ROLE_MESSAGE =
 export const SIGNATURE_BUDGET_EMPTY_MESSAGE =
   'El presupuesto no tiene ítems: agrega al menos un procedimiento antes de enviarlo.';
 /** 409: solo un presupuesto «Presentado» (y sin aceptar) se envía a aceptar. */
-export function budgetNotPresentedMessage(status: TreatmentPlanStatus): string {
-  return `Solo se envía a aceptar un presupuesto «Presentado»: este está «${PLAN_STATUS_LABELS[status]}».`;
-}
+export { budgetNotPresentedMessage };
 /** Título de la solicitud BUDGET (la ficha y la página pública). */
 export const BUDGET_REQUEST_TITLE = 'Presupuesto de tratamiento';
 /**
@@ -193,6 +204,8 @@ function decideRecipient(
     })),
     majorityAge: ctx.majorityAge,
     today: civilDateIn(now, ctx.timeZone),
+    timeZone: ctx.timeZone,
+    majorityReview: ctx.majorityReview,
   });
 }
 
@@ -326,8 +339,6 @@ export interface CreatedSignatureRequest extends SignatureRequestSummary {
  */
 @Injectable()
 export class CreateSignatureRequestUseCase {
-  private readonly logger = new Logger('SignatureRequests');
-
   constructor(
     @Inject(SIGNATURE_REQUEST_REPOSITORY)
     private readonly repo: SignatureRequestRepository,
@@ -337,6 +348,10 @@ export class CreateSignatureRequestUseCase {
     private readonly email: SignatureEmailSender,
     private readonly tenantContext: TenantContextService,
     @Inject(SIGNATURE_CLOCK) private readonly clock: SignatureClock,
+    // DX-502: v4, o como antes de DX-502 con PLAN_QUOTE_COMPOSE_V4=false.
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
   ) {}
 
   async execute(
@@ -381,7 +396,8 @@ export class CreateSignatureRequestUseCase {
     if (!ctx) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     const recipient = decideRecipient(
       ctx,
-      await this.documentTypeNames.get(),
+      // DX-524: el nombre de la sede del texto.
+      await this.documentTypeNames.get(prepared.context.location.id),
       prepared.document,
       now,
     );
@@ -395,41 +411,44 @@ export class CreateSignatureRequestUseCase {
     const token = generateSignatureToken();
     const expiresAt = signatureLinkExpiry(now);
     const destinationMasked = maskEmail(recipient.email);
-    const created = await this.repo.create({
-      locationId: prepared.context.location.id,
-      patientId,
-      type: input.type,
-      channel: input.channel,
-      templateId: prepared.template.id,
-      templateVersion: prepared.template.version,
-      treatmentPlanId: input.treatmentPlanId ?? null,
-      title: prepared.title,
-      body: prepared.body,
-      professionalUserId: professional.id,
-      professionalName: prepared.context.professionalName,
-      signerType: recipient.signerType,
-      signerName: recipient.signerName,
-      signerDocument: recipient.signerDocument,
-      destination: recipient.email,
-      destinationMasked,
-      tokenHash: hashSignatureToken(token),
-      expiresAt,
-      createdById: actor.userId,
-      createdAt: now,
-    });
-    return this.finishCreate(created, now, {
-      to: recipient.email,
-      vars: {
-        recipientFirstName: recipient.greetingName,
-        patientFirstName: recipient.patientFirstName,
-        clinicName: prepared.context.clinicName,
-        url: buildSignatureUrl(link.protocol, link.host, token),
-        expiresAtLabel: format.longDateTime(
-          expiresAt,
-          prepared.context.timeZone,
-        ),
+    return this.createAndSend(
+      {
+        locationId: prepared.context.location.id,
+        patientId,
+        type: input.type,
+        channel: input.channel,
+        templateId: prepared.template.id,
+        templateVersion: prepared.template.version,
+        treatmentPlanId: input.treatmentPlanId ?? null,
+        title: prepared.title,
+        body: prepared.body,
+        professionalUserId: professional.id,
+        professionalName: prepared.context.professionalName,
+        signerType: recipient.signerType,
+        signerName: recipient.signerName,
+        signerDocument: recipient.signerDocument,
+        destination: recipient.email,
+        destinationMasked,
+        tokenHash: hashSignatureToken(token),
+        expiresAt,
+        createdById: actor.userId,
+        createdAt: now,
       },
-    });
+      now,
+      {
+        to: recipient.email,
+        vars: {
+          recipientFirstName: recipient.greetingName,
+          patientFirstName: recipient.patientFirstName,
+          clinicName: prepared.context.clinicName,
+          url: buildSignatureUrl(link.protocol, link.host, token),
+          expiresAtLabel: format.longDateTime(
+            expiresAt,
+            prepared.context.timeZone,
+          ),
+        },
+      },
+    );
   }
 
   /**
@@ -475,11 +494,28 @@ export class CreateSignatureRequestUseCase {
     }
 
     const now = this.clock();
-    const names = await this.documentTypeNames.get();
+    // DX-379 (C): un presupuesto vencido no se envía a firmar a distancia (el
+    // paciente no puede elegir cómo aceptarlo): primero se actualizan sus
+    // precios («Actualizar precios» renueva la validez).
+    const expiry = quoteSourceExpiry(quote, now);
+    if (expiry.expired && expiry.validUntil !== null) {
+      throw quoteExpiredConflict(
+        expiry.validUntil,
+        quoteExpiredRemoteMessage(quoteDayText(quote, expiry.validUntil)),
+      );
+    }
+    // DX-524: el nombre de la sede del plan, como en el presupuesto.
+    const names = await this.documentTypeNames.get(quote.location.id);
+    // DX-379: la validez guardada del plan (fijada al presentarlo). Un plan
+    // sin ella (anterior a DX-379) la recibe ahora: enviarlo a firmar es
+    // emitirlo, con la misma regla que la primera impresión (M-3); se guarda
+    // en la transacción que crea la solicitud y la foto lleva esas fechas.
+    const firstIssue = firstIssueValidity(quote, now);
     const content = composeQuoteContent(
       quote,
-      quoteIssuedOn(quote, now),
+      firstIssue ?? quoteValidityOf(quote, now),
       names,
+      this.composition,
     );
     const recipient = decideRecipient(
       ctx,
@@ -495,85 +531,78 @@ export class CreateSignatureRequestUseCase {
 
     const token = generateSignatureToken();
     const expiresAt = signatureLinkExpiry(now);
-    const created = await this.repo.create({
-      locationId: quote.location.id,
-      patientId,
-      type: SignatureRequestType.BUDGET,
-      channel: input.channel,
-      templateId: null,
-      templateVersion: null,
-      treatmentPlanId: quote.plan.id,
-      title: BUDGET_REQUEST_TITLE,
-      body: BUDGET_ACCEPTANCE_TERMS,
-      budgetContent: content,
-      budgetContentHash: computeQuoteHash(content),
-      professionalUserId: actor.userId,
-      professionalName: (content.professionalName ?? content.clinicName).slice(
-        0,
-        200,
-      ),
-      signerType: recipient.signerType,
-      signerName: recipient.signerName,
-      signerDocument: recipient.signerDocument,
-      destination: recipient.email,
-      destinationMasked: maskEmail(recipient.email),
-      tokenHash: hashSignatureToken(token),
-      expiresAt,
-      createdById: actor.userId,
-      createdAt: now,
-    });
-    return this.finishCreate(created, now, {
-      to: recipient.email,
-      vars: {
-        recipientFirstName: recipient.greetingName,
-        patientFirstName: recipient.patientFirstName,
-        clinicName: content.clinicName,
-        url: buildSignatureUrl(link.protocol, link.host, token),
-        expiresAtLabel: format.longDateTime(expiresAt, quote.location.timeZone),
+    return this.createAndSend(
+      {
+        locationId: quote.location.id,
+        patientId,
+        type: SignatureRequestType.BUDGET,
+        channel: input.channel,
+        templateId: null,
+        templateVersion: null,
+        treatmentPlanId: quote.plan.id,
+        title: BUDGET_REQUEST_TITLE,
+        body: BUDGET_ACCEPTANCE_TERMS,
+        budgetContent: content,
+        budgetContentHash: computeQuoteHash(content),
+        professionalUserId: actor.userId,
+        professionalName: (
+          content.professionalName ?? content.clinicName
+        ).slice(0, 200),
+        signerType: recipient.signerType,
+        signerName: recipient.signerName,
+        signerDocument: recipient.signerDocument,
+        destination: recipient.email,
+        destinationMasked: maskEmail(recipient.email),
+        tokenHash: hashSignatureToken(token),
+        expiresAt,
+        createdById: actor.userId,
+        createdAt: now,
       },
-    });
+      now,
+      {
+        to: recipient.email,
+        vars: {
+          recipientFirstName: recipient.greetingName,
+          patientFirstName: recipient.patientFirstName,
+          clinicName: content.clinicName,
+          url: buildSignatureUrl(link.protocol, link.host, token),
+          expiresAtLabel: format.longDateTime(
+            expiresAt,
+            quote.location.timeZone,
+          ),
+        },
+      },
+      { planQuoteValidity: firstIssue ?? undefined },
+    );
   }
 
   /**
-   * Tras guardar: cancela los emails de las solicitudes anuladas y encola el
-   * del enlace. Un fallo del outbox no convierte la solicitud ya guardada en
-   * un 500 (un reintento duplicaría el envío); la ficha lo dice y se puede
-   * anular y enviar otra. Nunca se registra la URL ni el destinatario.
+   * DX-149-ter: guarda la solicitud y encola el email del enlace en UNA
+   * transacción (el email, preparado antes de abrirla, lleva ya el id de la
+   * solicitud). La misma transacción anula las anteriores del documento y
+   * cancela sus emails pendientes; el tope del destinatario se cuenta bajo su
+   * candado al encolar. Si no cabe (otro envío al mismo paciente ganó la
+   * carrera), 429 en español y no queda nada a medias: ni solicitud nueva ni
+   * la anterior anulada. El despachador se despierta tras el COMMIT. Nunca se
+   * registra la URL ni el destinatario.
    */
-  private async finishCreate(
-    created: { id: string; supersededIds: string[] },
+  private async createAndSend(
+    input: CreateSignatureRequestRepoInput,
     now: Date,
     link: { to: string; vars: SignatureRequestEmailVars },
+    options: CreateSignatureRequestOptions = {},
   ): Promise<CreatedSignatureRequest> {
-    for (const id of created.supersededIds) {
-      await this.cancelPendingEmail(id);
-    }
-    let emailQueued = false;
-    try {
-      await this.email.sendLink({ ...link, referenceId: created.id });
-      emailQueued = true;
-    } catch (err) {
-      this.logger.warn({
-        event: 'signature_request.email_not_enqueued',
-        signatureRequestId: created.id,
-        error: describeDeliveryError(err),
-      });
-    }
+    const id = randomUUID();
+    const mail = await this.email.prepareLink({ ...link, referenceId: id });
+    const created = await this.repo.create(
+      { ...input, id },
+      (tx, superseded) => mail.insert(tx, superseded),
+      options,
+    );
+    mail.kick();
     const row = await this.repo.findById(created.id);
     if (!row) throw new NotFoundException(SIGNATURE_REQUEST_NOT_FOUND_MESSAGE);
-    return { ...toSignatureRequestSummary(row, now), emailQueued };
-  }
-
-  private async cancelPendingEmail(id: string): Promise<void> {
-    try {
-      await this.email.cancelPendingLink(id);
-    } catch (err) {
-      this.logger.warn({
-        event: 'signature_request.supersede_failed',
-        signatureRequestId: id,
-        error: describeDeliveryError(err),
-      });
-    }
+    return { ...toSignatureRequestSummary(row, now), emailQueued: true };
   }
 }
 
