@@ -1,6 +1,8 @@
 import { deriveStatuses, ScheduleTramo } from './derive-statuses';
+import { civilDateIn } from '../../../../shared/time/civil-day';
 
-const today = new Date('2026-03-01T00:00:00.000Z');
+// DX-110: «hoy» es el día civil de la sede del plan (YYYY-MM-DD).
+const today = '2026-03-01';
 
 function inst(seq: number, iso: string, amount: number): ScheduleTramo {
   return { kind: 'INSTALLMENT', sequence: seq, dueDate: new Date(iso), amount };
@@ -109,6 +111,24 @@ describe('deriveStatuses', () => {
         today,
       );
       expect(out[0].status).toBe('OVERDUE');
+    });
+  });
+
+  describe('DX-110: «hoy» es el día civil de la sede del plan (America/Caracas)', () => {
+    const CARACAS = 'America/Caracas';
+    const dueToday = [inst(1, '2026-11-10', 100)];
+
+    it('vence hoy y son las 21:00 en Caracas (01:00Z de mañana) → NO vencida', () => {
+      const today = civilDateIn(new Date('2026-11-11T01:00:00.000Z'), CARACAS);
+      expect(today).toBe('2026-11-10');
+      expect(deriveStatuses(dueToday, 0, today)[0].status).toBe('PENDING');
+      expect(deriveStatuses(dueToday, 40, today)[0].status).toBe('PARTIAL');
+    });
+
+    it('al día siguiente a las 00:30 en Caracas → vencida', () => {
+      const today = civilDateIn(new Date('2026-11-11T04:30:00.000Z'), CARACAS);
+      expect(today).toBe('2026-11-11');
+      expect(deriveStatuses(dueToday, 40, today)[0].status).toBe('OVERDUE');
     });
   });
 });

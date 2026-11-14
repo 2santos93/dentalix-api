@@ -1,4 +1,5 @@
 import type { CivilPaidDay } from './ports/payment-repository.port';
+import { civilDateIn } from '../../../shared/time/civil-day';
 
 /** Margen de un abono «en el futuro»: relojes desfasados y zonas por delante. */
 export const PAID_AT_FUTURE_MARGIN_MS = 24 * 60 * 60 * 1000;
@@ -18,8 +19,8 @@ export const PAID_AT_AFTER_SITE_TODAY_MESSAGE =
  * (`YYYY-MM-DD`, DX-097) por su PRIMER instante posible en cualquier zona
  * (00:00 en UTC+14), así ningún día legítimo de una sede se rechaza por la
  * zona. Es el piso común: la aplican el abono suelto, el repartido y el del
- * saldo inicial. DX-075 lo afina para el día civil con
- * `isPaidAtAfterSiteToday` cuando se conoce la zona de la sede.
+ * saldo inicial. DX-075 y DX-110 lo afinan con el día civil de la sede
+ * (`isPaidAtAfterSiteToday`) cuando se conoce su zona.
  */
 export function isPaidAtTooFarInFuture(
   paidAt: Date | CivilPaidDay,
@@ -33,18 +34,33 @@ export function isPaidAtTooFarInFuture(
   return earliest > now.getTime() + PAID_AT_FUTURE_MARGIN_MS;
 }
 
+/** DX-110: el día civil de hoy en la sede del abono y la zona con que se mide. */
+export interface SiteToday {
+  /** Día civil (YYYY-MM-DD) de `now` en la zona de la sede. */
+  today: string;
+  /** Zona IANA de la sede donde se registra el abono. */
+  timeZone: string;
+}
+
 /**
- * DX-075: un abono con solo el día (`YYYY-MM-DD`) no puede ser posterior al
- * día civil de HOY en la sede donde se registra (400): «mañana» en la sede es
- * futuro aunque quede dentro de las 24 h de DX-054. `siteToday` es el día
- * civil de `now` en la zona de la sede, o `null` si la sede no tiene zona
- * (entonces solo rige la regla de 24 h). Un instante no se mira aquí: sigue
- * con la regla de 24 h.
+ * DX-075 y DX-110: un abono no puede caer en un día civil posterior al de
+ * HOY en la sede donde se registra (400): «mañana» en la sede es futuro aunque
+ * quede dentro de las 24 h de DX-054.
+ * - Un día (`YYYY-MM-DD`) se compara tal cual (DX-075).
+ * - Un instante se compara por SU día civil en la zona de la sede (DX-110):
+ *   mañana a las 10:00 en Caracas es 400 aunque falten menos de 24 h; hoy a
+ *   las 23:00 en Caracas pasa aunque en UTC ya sea mañana.
+ * `site` es `null` si la sede no tiene zona válida: entonces solo rige la
+ * regla de 24 h.
  */
 export function isPaidAtAfterSiteToday(
   paidAt: Date | CivilPaidDay,
-  siteToday: string | null,
+  site: SiteToday | null,
 ): boolean {
-  if (paidAt instanceof Date || siteToday === null) return false;
-  return paidAt.civilDate > siteToday;
+  if (site === null) return false;
+  const paidOn =
+    paidAt instanceof Date
+      ? civilDateIn(paidAt, site.timeZone)
+      : paidAt.civilDate;
+  return paidOn > site.today;
 }

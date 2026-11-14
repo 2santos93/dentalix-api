@@ -119,4 +119,58 @@ describe('GetPaymentPlanUseCase', () => {
     expect(res.remaining).toBe(0);
     expect(res.nextDue).toBeNull();
   });
+
+  describe('DX-110: vence por el día civil de la sede del plan (Caracas)', () => {
+    async function at(now: string) {
+      const repo = new InMemoryPaymentPlanRepository();
+      repo.timeZone = 'America/Caracas';
+      const getPlanBalance = {
+        executeWithItems: jest.fn(() =>
+          Promise.resolve({
+            planCurrency: 'USD',
+            billable: 300,
+            paid: 0,
+            balance: 300,
+            creditMovements: 0,
+            paymentsCount: 0,
+            paymentsWithoutRate: [],
+            rateProviderTimedOut: false,
+          }),
+        ),
+      } as unknown as GetPlanBalanceUseCase;
+      await repo.create({
+        treatmentPlanId: 'tp-1',
+        patientId: 'p1',
+        currency: 'USD',
+        totalToFinance: 300,
+        downPayment: 0,
+        installmentsCount: 3,
+        periodicity: 'MONTHLY',
+        startDate: new Date('2026-11-10'),
+        installments: [
+          { sequence: 1, dueDate: new Date('2026-11-10'), amount: 100 },
+          { sequence: 2, dueDate: new Date('2026-12-10'), amount: 100 },
+          { sequence: 3, dueDate: new Date('2027-01-10'), amount: 100 },
+        ],
+      });
+      return new GetPaymentPlanUseCase(
+        repo,
+        getPlanBalance,
+        () => new Date(now),
+      ).execute('tp-1');
+    }
+
+    it('cuota que vence hoy, a las 21:00 de Caracas (01:00Z de mañana) → no vencida', async () => {
+      const res = await at('2026-11-11T01:00:00.000Z');
+      expect(res.installments[0].status).toBe('PENDING');
+      expect(res.overdueCount).toBe(0);
+    });
+
+    it('al día siguiente a las 00:30 de Caracas → vencida', async () => {
+      const res = await at('2026-11-11T04:30:00.000Z');
+      expect(res.installments[0].status).toBe('OVERDUE');
+      expect(res.overdueCount).toBe(1);
+      expect(res.overdueAmount).toBe(100);
+    });
+  });
 });

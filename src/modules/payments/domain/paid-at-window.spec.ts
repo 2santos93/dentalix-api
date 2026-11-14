@@ -48,7 +48,7 @@ describe('abono con fecha futura (DX-054)', () => {
 
 describe('abono con día civil posterior a hoy en la sede (DX-075)', () => {
   // Caracas es UTC-4: a las 03:30Z del 5 aún es 4 de noviembre en la sede.
-  const SITE_TODAY = '2026-11-04';
+  const SITE_TODAY = { today: '2026-11-04', timeZone: 'America/Caracas' };
 
   it('hoy y días pasados en la sede valen; mañana en la sede es futuro', () => {
     expect(
@@ -62,12 +62,27 @@ describe('abono con día civil posterior a hoy en la sede (DX-075)', () => {
     ).toBe(true);
   });
 
-  it('sin zona en la sede no aplica; un instante sigue con la regla de 24 h', () => {
+  it('sin zona en la sede no aplica (rige la regla de 24 h)', () => {
     expect(isPaidAtAfterSiteToday({ civilDate: '2026-11-05' }, null)).toBe(
       false,
     );
     expect(
-      isPaidAtAfterSiteToday(new Date('2026-11-09T12:00:00.000Z'), SITE_TODAY),
+      isPaidAtAfterSiteToday(new Date('2026-11-09T12:00:00.000Z'), null),
+    ).toBe(false);
+  });
+
+  // DX-110: un instante también se mide por SU día civil en la sede.
+  it('DX-110: un instante de mañana en Caracas es futuro aunque falten menos de 24 h', () => {
+    // 10:00 del 5 en Caracas = 14:00Z del 5.
+    expect(
+      isPaidAtAfterSiteToday(new Date('2026-11-05T14:00:00.000Z'), SITE_TODAY),
+    ).toBe(true);
+  });
+
+  it('DX-110: hoy a las 23:00 en Caracas vale aunque en UTC ya sea mañana', () => {
+    // 23:00 del 4 en Caracas = 03:00Z del 5.
+    expect(
+      isPaidAtAfterSiteToday(new Date('2026-11-05T03:00:00.000Z'), SITE_TODAY),
     ).toBe(false);
   });
 
