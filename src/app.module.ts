@@ -77,6 +77,7 @@ import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
 import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
+import { PaymentLinksModule } from './modules/payment-links/payment-links.module';
 import { RecallModule } from './modules/recall/recall.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
 
@@ -182,6 +183,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     // de sus rutas (y cambiaría el orden del OpenAPI sin cambiar nada más).
     RecallModule,
     WorkQueuesModule,
+    // DX-569: el paciente reporta su pago por enlace.
+    PaymentLinksModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService, ShutdownState],
