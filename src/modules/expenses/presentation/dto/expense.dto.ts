@@ -179,3 +179,90 @@ export class ExpenseSummaryDto {
   })
   rows!: ExpenseSummaryRowDto[];
 }
+
+/** DX-411: lo que se debe en una moneda, por tramos de vencimiento. */
+export class PayableAmountsDto {
+  @ApiProperty({ description: 'Gastos abiertos (pendientes o parciales).' })
+  openCount!: number;
+  @ApiProperty({ description: 'Importe − pagos vivos de los gastos abiertos.' })
+  pending!: number;
+  @ApiProperty() overdueCount!: number;
+  @ApiProperty({
+    description: 'Pendiente con vencimiento anterior a hoy en su sede.',
+  })
+  overdue!: number;
+  @ApiProperty() dueIn7DaysCount!: number;
+  @ApiProperty({
+    description: 'Pendiente que vence entre hoy y hoy + 6 días (su sede).',
+  })
+  dueIn7Days!: number;
+  @ApiProperty() dueIn30DaysCount!: number;
+  @ApiProperty({
+    description:
+      'Pendiente que vence entre hoy y hoy + 29 días (incluye el de 7 días).',
+  })
+  dueIn30Days!: number;
+  @ApiProperty() noDueDateCount!: number;
+  @ApiProperty({
+    description: 'Pendiente sin vencimiento: nunca vencido ni en 7/30 días.',
+  })
+  noDueDate!: number;
+}
+
+export class PayableSupplierRowDto extends PayableAmountsDto {
+  @ApiProperty({
+    description:
+      'Proveedor normalizado (sin espacios de más, mayúsculas ni tildes); vacío = sin proveedor. Va a `GET /expenses/payables/expenses`.',
+  })
+  supplierKey!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Grafía del gasto abierto más reciente del grupo; null = sin proveedor.',
+  })
+  supplier!: string | null;
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description: 'Vencimiento más antiguo de sus gastos abiertos.',
+  })
+  oldestDueDate!: string | null;
+}
+
+export class PayableCurrencyTotalDto extends PayableAmountsDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+}
+
+export class ExpensePayablesDto {
+  @ApiProperty({
+    type: [PayableSupplierRowDto],
+    description:
+      'Una fila por proveedor × moneda; el vencimiento más antiguo primero.',
+  })
+  rows!: PayableSupplierRowDto[];
+  @ApiProperty({
+    type: [PayableCurrencyTotalDto],
+    description: 'Totales por moneda; las monedas nunca se suman.',
+  })
+  totals!: PayableCurrencyTotalDto[];
+}
+
+export class PayableExpensesDto {
+  @ApiProperty() supplierKey!: string;
+  @ApiProperty({ type: String, nullable: true })
+  supplier!: string | null;
+  @ApiProperty() currency!: string;
+  @ApiProperty({
+    type: [ExpenseDto],
+    description:
+      'Gastos abiertos por vencimiento (sin vencimiento al final); hasta 500.',
+  })
+  items!: ExpenseDto[];
+  @ApiProperty({ description: 'Gastos abiertos del grupo, sin el tope.' })
+  total!: number;
+}

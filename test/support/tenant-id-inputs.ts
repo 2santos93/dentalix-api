@@ -298,6 +298,10 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'GET /expenses.csv ?locationId': 'expenses-reports.e2e-spec.ts',
   'GET /expenses/summary ?locationId': 'expenses-reports.e2e-spec.ts',
   'GET /expenses/summary.csv ?locationId': 'expenses-reports.e2e-spec.ts',
+  // DX-411: una sede ajena en las cuentas por pagar no devuelve nada.
+  'GET /expenses/payables ?locationId': 'expense-payables.e2e-spec.ts',
+  'GET /expenses/payables.csv ?locationId': 'expense-payables.e2e-spec.ts',
+  'GET /expenses/payables/expenses ?locationId': 'expense-payables.e2e-spec.ts',
 };
 
 /** Ids por query/cuerpo de las rutas de clínica (`roles`) dadas. */
