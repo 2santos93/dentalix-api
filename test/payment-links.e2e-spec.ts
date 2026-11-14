@@ -1041,6 +1041,41 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
       expect(reject.body).toMatchObject({ code: 'PAYMENT_REPORT_NOT_PENDING' });
     });
 
+    it('confirmar con otra tasa: exige motivo y congela esa tasa (fuente MANUAL) del día del pago', async () => {
+      const { reportId } = await reported(a);
+      const noReason = await as(a)
+        .post(`/payment-reports/${reportId}/confirm`, { rateOverride: 260 })
+        .expect(400);
+      expect(messageOf(noReason)).toBe(
+        'Escribe el motivo para usar otra tasa (hasta 280 caracteres).',
+      );
+      const res = await as(a)
+        .post(`/payment-reports/${reportId}/confirm`, {
+          rateOverride: 260,
+          rateOverrideReason: 'Tasa del banco del paciente',
+        })
+        .expect(200);
+      const row = await raw.payment.findUniqueOrThrow({
+        where: { id: (res.body as { payment: { id: string } }).payment.id },
+      });
+      expect(row).toMatchObject({
+        currency: 'VES',
+        exchangeRateCurrency: 'USD',
+        exchangeRateSource: 'MANUAL',
+      });
+      expect(Number(row.exchangeRateFrom)).toBe(260);
+      expect(Number(row.exchangeRateTo)).toBe(1);
+      expect(row.exchangeRateDate?.toISOString().slice(0, 10)).toBe(today());
+      const event = await raw.auditEvent.findFirstOrThrow({
+        where: {
+          resourceType: 'PAYMENT_REPORT',
+          resourceId: reportId,
+          action: 'UPDATE',
+        },
+      });
+      expect(event.metadata).toMatchObject({ changedFields: ['rateOverride'] });
+    });
+
     it('confirmar con un medio de otra clínica es 400 y no crea abono', async () => {
       const { reportId } = await reported(a);
       const res = await as(a)

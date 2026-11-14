@@ -59,6 +59,8 @@ async function purge(): Promise<void> {
     await raw.paymentPlanAmount.deleteMany({ where });
     await raw.payment.deleteMany({ where });
     await raw.appointment.deleteMany({ where });
+    // DX-569: los enlaces de pago a un saldo migrado.
+    await raw.paymentLink.deleteMany({ where });
     await raw.openingBalance.deleteMany({ where });
     await raw.patientImportBalanceRow.deleteMany({ where });
     await raw.payment.deleteMany({ where });
@@ -825,6 +827,31 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
         }),
       ),
     ).rejects.toMatchObject({ code: 'P2003' });
+  });
+
+  it('DX-569: un enlace de pago al saldo migrado bloquea deshacer sus saldos (la tabla no tiene columna de retirada)', async () => {
+    const { batch, ob } = await importedOpening('2525', 90_000);
+    await raw.paymentLink.create({
+      data: {
+        tenantId: a.tenantId,
+        patientId: ob.patientId,
+        openingBalanceId: ob.id,
+        locationId: a.locationId,
+        amount: 50,
+        currency: 'VES',
+        concept: 'BALANCE',
+        tokenHash: 'e'.repeat(64),
+        expiresAt: new Date(Date.now() + 86_400_000),
+        createdById: a.userId,
+      },
+    });
+    await expect(
+      inA(() => repo.undoBalances(batch.id, a.userId)),
+    ).rejects.toMatchObject({ balances: 1 });
+    expect(
+      (await raw.openingBalance.findUniqueOrThrow({ where: { id: ob.id } }))
+        .voidedAt,
+    ).toBeNull();
   });
 
   it('deshacer se niega con abonos VIVOS al saldo migrado; uno anulado no cuenta (revisión C1, M4)', async () => {
