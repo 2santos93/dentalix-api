@@ -733,6 +733,42 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).not.toMatch(/https?:\/\//);
     });
 
+    it('el enlace de pago (DX-569): clínica, enlace y caducidad; sin importes ni tratamientos', () => {
+      const email = renderEmail(
+        'payment-link',
+        {
+          patientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          url: 'https://demo.dentalix.app/pago/abc',
+          expiresAtLabel: '21/11/2026 10:00',
+        },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Sonrisas del Norte te envía los datos para tu pago',
+      );
+      expect(email.text).toContain('Hola, Laura');
+      expect(email.text).toContain('21/11/2026 10:00');
+      expect(email.html).toContain('href="https://demo.dentalix.app/pago/abc"');
+      for (const body of [email.text, email.html]) {
+        expect(body).not.toMatch(/USD|VES|Bs\.|\$|tratamiento|plan de/i);
+      }
+    });
+
+    it('el pago reportado no confirmado (DX-569): sin el motivo ni importes', () => {
+      const email = renderEmail(
+        'payment-report-rejected',
+        { patientFirstName: null, clinicName: 'Sonrisas del Norte' },
+        brand,
+      );
+      expect(email.subject).toBe(
+        'Sonrisas del Norte no pudo confirmar tu pago',
+      );
+      expect(email.text).toContain('Hola');
+      expect(email.text).toContain('La clínica te contactará');
+      expect(email.html).not.toContain('href=');
+    });
+
     it('la oferta de hueco por enlace (DX-435): cuándo, dónde y con quién; sin nada clínico', () => {
       const email = renderEmail(
         'slot-offer',

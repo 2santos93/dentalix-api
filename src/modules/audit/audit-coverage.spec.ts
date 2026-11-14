@@ -79,6 +79,7 @@ import { DomainsController } from '../domains/presentation/domains.controller';
 import { PostOpTemplatesController } from '../post-op-instructions/presentation/post-op-templates.controller';
 import { AppointmentPostOpController } from '../post-op-instructions/presentation/appointment-post-op.controller';
 import { PatientPostOpDeliveriesController } from '../post-op-instructions/presentation/patient-post-op-deliveries.controller';
+import { PatientPaymentLinksController } from '../payment-links/presentation/patient-payment-links.controller';
 import {
   ImplantsController,
   PatientImplantsController,
@@ -1635,6 +1636,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'EXCHANGE_RATE',
     resourceId: { param: 'id' },
   },
+  // DX-569: crear (y enviar) el enlace de pago; ni la URL ni el token.
+  'POST /patients/:id/payment-links': {
+    action: 'CREATE',
+    resource: 'PAYMENT_LINK',
+    resourceId: RES,
+    patient: { param: 'id' },
+    reason: 'PAYMENT_LINK_CREATED',
+  },
   // DX-377: alta y cambio de un medio de pago de la clínica (solo ADMIN).
   'POST /payment-methods': {
     action: 'CREATE',
@@ -1667,6 +1676,19 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-569: datos para pagar de un medio, como configuración (DX-360) sin
+  // sus valores, en la transacción del cambio.
+  'PUT /payment-methods/:id/instructions': 'payment-links.e2e-spec.ts',
+  'DELETE /payment-methods/:id/instructions/:instructionId':
+    'payment-links.e2e-spec.ts',
+  // DX-569: el reporte del paciente (actor público, PUBLIC_LINK) en la
+  // transacción que gasta el enlace; confirmar (UPDATE del reporte y CREATE
+  // del abono) en la del abono; rechazar en la del rechazo.
+  'POST /public/payment-links/:token/report':
+    'payment-links.int-spec.ts y payment-links.e2e-spec.ts',
+  'POST /payment-reports/:id/confirm':
+    'payment-links.int-spec.ts y payment-links.e2e-spec.ts',
+  'POST /payment-reports/:id/reject': 'payment-links.e2e-spec.ts',
   // DX-399: PAYMENT_ALLOCATION / PAYMENT_REALLOCATED con las líneas antes y
   // después, en la MISMA transacción del cambio (si algo falla, se deshacen juntos).
   'PUT /payments/:id/allocations': 'payment-reallocation.e2e-spec.ts',
@@ -1991,6 +2013,13 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   // DX-424: igual para la anamnesis por enlace (`openedAt` del envío).
   'POST /public/medical-history/:token/opened':
     'marca la apertura del cuestionario; sin evento',
+  // DX-569: el enlace de pago.
+  'POST /public/payment-links/:token/opened':
+    'marca la apertura del enlace de pago; sin evento',
+  'POST /public/payment-links/:token/proof-upload':
+    'URL prefirmada; el reporte que la usa es la ruta auditada',
+  'POST /public/payment-links/:token/proof-upload/complete':
+    'prepara el comprobante; el reporte que lo usa es la ruta auditada',
 };
 
 const CONTROLLERS: Type[] = [
@@ -2070,6 +2099,8 @@ const CONTROLLERS: Type[] = [
   PostOpTemplatesController,
   AppointmentPostOpController,
   PatientPostOpDeliveriesController,
+  // DX-569: el enlace de pago del paciente.
+  PatientPaymentLinksController,
   ProviderScheduleController,
   ScheduleRosterController,
   ExchangeSettingsController,

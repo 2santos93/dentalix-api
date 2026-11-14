@@ -123,7 +123,8 @@ export function overrideFrozenRate(
   if (paymentCurrency !== BASE_CURRENCY && targetCurrency !== BASE_CURRENCY) {
     throw new BadRequestException(RATE_OVERRIDE_PAIR_MESSAGE);
   }
-  const rate = Number(perBase.toFixed(8));
+  // Con hasta 8 decimales (lo valida el DTO): cabe en Decimal(18,8).
+  const rate = perBase;
   return {
     currency: targetCurrency,
     fromPerBase: paymentCurrency === BASE_CURRENCY ? 1 : rate,

@@ -145,6 +145,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/signed-consent-copies/:token/download': PUBLIC_TENANT,
   // DX-467: verificar una receta por el código de su QR impreso.
   'GET /public/prescriptions/:code': PUBLIC_TENANT,
+  // DX-569: el enlace de pago del paciente (ver, apertura, comprobante y reporte).
+  'GET /public/payment-links/:token': PUBLIC_TENANT,
+  'POST /public/payment-links/:token/opened': PUBLIC_TENANT,
+  'POST /public/payment-links/:token/proof-upload': PUBLIC_TENANT,
+  'POST /public/payment-links/:token/proof-upload/complete': PUBLIC_TENANT,
+  'POST /public/payment-links/:token/report': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -551,6 +557,18 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-516: ajustes por medio de pago, solo ADMIN.
   'POST /payment-methods/:id/adjustments': ADMIN_ONLY,
   'PATCH /payment-methods/:id/adjustments/:adjustmentId': ADMIN_ONLY,
+  // DX-569: datos para pagar de cada medio (leer quien cobra, escribir ADMIN).
+  'GET /payment-methods/:id/instructions': BILLING,
+  'PUT /payment-methods/:id/instructions': ADMIN_ONLY,
+  'DELETE /payment-methods/:id/instructions/:instructionId': ADMIN_ONLY,
+  // DX-569: enlace de pago del paciente y la bandeja «Pagos por confirmar».
+  'POST /patients/:id/payment-links': BILLING,
+  'GET /patients/:id/payment-links': BILLING,
+  'GET /payment-reports': BILLING,
+  'GET /payment-reports/count': BILLING,
+  'GET /payment-reports/:id/proof-url': BILLING,
+  'POST /payment-reports/:id/confirm': BILLING,
+  'POST /payment-reports/:id/reject': BILLING,
   'DELETE /appointment-types/:id': ADMIN_ONLY,
   // DX-211: sillones de cada sede; leerlos quien agenda, escribirlos ADMIN.
   'GET /chairs': EVERY_ROLE,

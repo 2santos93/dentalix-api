@@ -258,6 +258,20 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // DX-395: «filtrar la caja (y su CSV) por un medio de otra clínica es 400».
   'GET /payments ?paymentMethodId': 'payment-method-statement.e2e-spec.ts',
   'GET /payments.csv ?paymentMethodId': 'payment-method-statement.e2e-spec.ts',
+  // DX-569: «el enlace de pago no acepta un plan ni un saldo migrado de otra
+  // clínica (404), los datos para pagar no se cuelgan de una sede de otra
+  // clínica (400), la bandeja filtrada por una sede de otra clínica sale
+  // vacía y confirmar con un medio de otra clínica es 400; nada cambia».
+  'POST /patients/:id/payment-links body.target.treatmentPlanId':
+    'payment-links.e2e-spec.ts',
+  'POST /patients/:id/payment-links body.target.openingBalanceId':
+    'payment-links.e2e-spec.ts',
+  'PUT /payment-methods/:id/instructions body.locationId':
+    'payment-links.e2e-spec.ts',
+  'GET /payment-reports ?locationId': 'payment-links.e2e-spec.ts',
+  'GET /payment-reports/count ?locationId': 'payment-links.e2e-spec.ts',
+  'POST /payment-reports/:id/confirm body.paymentMethodId':
+    'payment-links.e2e-spec.ts',
   // «la clínica B no puede usar la política de A para su propio paciente (409)».
   'POST /patients/:patientId/data-consents body.policyVersionId':
     'data-consents.e2e-spec.ts',
