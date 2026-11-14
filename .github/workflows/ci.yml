@@ -415,8 +415,8 @@ jobs:
           --health-retries 10
     env:
       # Valores SOLO de test, ficticios (como en el job de integración).
-      DATABASE_URL: postgresql://dentalix_app:dentalix_app@localhost:5432/dentalix_nosu?schema=public
-      DIRECT_URL: postgresql://dentalix_owner:dentalix_owner@localhost:5432/dentalix_nosu?schema=public
+      DATABASE_URL: postgresql://dentalix_app:dentalix_app@localhost:5432/dentalix_nosu_test?schema=public
+      DIRECT_URL: postgresql://dentalix_owner:dentalix_owner@localhost:5432/dentalix_nosu_test?schema=public
       # Admin del clúster: solo lo usan los specs owner-nosu para crear bases
       # desechables y cargar filas saltando la RLS.
       OWNER_NOSU_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
@@ -461,7 +461,7 @@ jobs:
           psql -v ON_ERROR_STOP=1 -h localhost -U postgres -d postgres <<'SQL'
           CREATE ROLE dentalix_owner LOGIN PASSWORD 'dentalix_owner'
             NOSUPERUSER NOBYPASSRLS CREATEROLE NOCREATEDB NOREPLICATION;
-          CREATE DATABASE dentalix_nosu OWNER dentalix_owner;
+          CREATE DATABASE dentalix_nosu_test OWNER dentalix_owner;
           SQL
           test "$(psql -h localhost -U postgres -d postgres -tAc \
             "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'dentalix_owner'")" = f
@@ -469,7 +469,7 @@ jobs:
       - name: Crear el rol de la app como el owner (docker/prod/create-app-role.sql)
         env:
           PGPASSWORD: dentalix_owner
-        run: psql -v ON_ERROR_STOP=1 -h localhost -U dentalix_owner -d dentalix_nosu -v app_password=dentalix_app -f docker/prod/create-app-role.sql
+        run: psql -v ON_ERROR_STOP=1 -h localhost -U dentalix_owner -d dentalix_nosu_test -v app_password=dentalix_app -f docker/prod/create-app-role.sql
 
       - name: Aplicar todas las migraciones desde cero con el owner
         run: npx prisma migrate deploy
@@ -482,7 +482,7 @@ jobs:
         env:
           PGPASSWORD: postgres
         run: |
-          total="$(psql -h localhost -U postgres -d dentalix_nosu -tAc 'SELECT count(*) FROM patients')"
+          total="$(psql -h localhost -U postgres -d dentalix_nosu_test -tAc 'SELECT count(*) FROM patients')"
           seen="$(psql "${DATABASE_URL%%\?*}" -tAc 'SELECT count(*) FROM patients')"
           echo "pacientes: $total en la base; dentalix_app sin clínica ve $seen"
           test "$total" -gt 0

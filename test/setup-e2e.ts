@@ -1,6 +1,11 @@
-import { config } from 'dotenv';
 import { installFakeNow } from './support/fake-now';
-config({ path: '.env.test' });
+import { loadTestEnvAndAssertDatabase } from './support/test-db-guard';
+
+// DX-071: carga `.env.test` (sobrescribe el entorno) y aborta si DATABASE_URL o
+// DIRECT_URL no apuntan a una base `*_test`. Va antes que todo lo demás: los
+// setupFiles corren antes de importar el spec, así que ningún cliente de
+// Prisma/pg (tampoco los creados a nivel de módulo en el spec) llega a abrirse.
+loadTestEnvAndAssertDatabase();
 
 // DX-460: E2E_FAKE_NOW mueve el reloj del proceso (ver support/fake-now.ts).
 installFakeNow();

@@ -1,5 +1,6 @@
 // @ts-check
 import eslint from '@eslint/js';
+import jestPlugin from 'eslint-plugin-jest';
 import eslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -57,6 +58,15 @@ export default tseslint.config(
       ],
       "prettier/prettier": ["error", { endOfLine: "auto" }],
       'no-restricted-syntax': ['error', prismaClientWithoutTypeArgs],
+    },
+  },
+  {
+    // DX-071: un `.only`/`fit`/`fdescribe` olvidado deja la suite en verde
+    // corriendo solo ese test (y el resto, sin vigilar). Error, no aviso.
+    files: ['src/**/*.spec.ts', 'test/**/*.ts'],
+    plugins: { jest: jestPlugin },
+    rules: {
+      'jest/no-focused-tests': 'error',
     },
   },
   {
