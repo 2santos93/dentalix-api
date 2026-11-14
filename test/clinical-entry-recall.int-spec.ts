@@ -18,6 +18,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
+import { civilDaysSince } from './support/sede-clock';
 import {
   type DefaultRecallTypes,
   seedDefaultRecallTypes,
@@ -213,7 +214,7 @@ describe('DX-015-bis · recall en la evolución (int)', () => {
 
   it('sin fecha ni cita: la base es hoy en la zona de la sede de la evolución', async () => {
     const patientId = await patient('Beatriz');
-    const before = new Date();
+    const started = Date.now();
     await createEntry(
       patientId,
       {
@@ -222,15 +223,12 @@ describe('DX-015-bis · recall en la evolución (int)', () => {
       },
       s.kiritimati,
     );
-    const after = new Date();
     const row = await raw.patientRecall.findFirstOrThrow({
       where: { patientId, recallTypeId: s.types.CHECKUP },
     });
-    const day = (d: Date) =>
-      new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Pacific/Kiritimati',
-      }).format(d);
-    expect([day(before), day(after)]).toContain(
+    // Los días de la sede que tocó la petición (dos si cruzó su medianoche).
+    const elapsed = Math.ceil((Date.now() - started) / 60_000);
+    expect(civilDaysSince(elapsed, 'Pacific/Kiritimati')).toContain(
       row.manualDoneAt?.toISOString().slice(0, 10),
     );
   });

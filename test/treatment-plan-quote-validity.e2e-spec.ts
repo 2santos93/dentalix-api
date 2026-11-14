@@ -545,7 +545,7 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
       });
     });
 
-    it('un plan anterior a DX-379 (sin fechas) nunca sale vencido y su presupuesto se compone como hoy', async () => {
+    it('un plan anterior a DX-379 (sin fechas) nunca sale vencido y su presupuesto se compone como hasta ahora', async () => {
       await setDays(15).expect(200);
       const planId = await draftPlan();
       await present(planId);

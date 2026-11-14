@@ -3,7 +3,10 @@
   "rootDir": "..",
   "testRegex": ".e2e-spec.ts$",
   "transform": { "^.+\\.(t|j)s$": "ts-jest" },
-  "setupFiles": ["<rootDir>/test/setup-e2e.ts"],
+  "setupFiles": [
+    "<rootDir>/test/setup-calendar-clock.ts",
+    "<rootDir>/test/setup-e2e.ts"
+  ],
   "testEnvironment": "node",
   "testTimeout": 30000
 }

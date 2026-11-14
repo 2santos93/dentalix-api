@@ -363,7 +363,7 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
       );
     });
 
-    it('la anestesia de la evolución usa el peso de hoy de la valoración, no el de la anamnesis', async () => {
+    it('la anestesia de la evolución usa el peso anotado en la valoración, no el de la anamnesis', async () => {
       const products = (
         await call(a, 'post', '/anesthetics/samples', a.adminToken).expect(201)
       ).body as { id: string; activeIngredient: string }[];

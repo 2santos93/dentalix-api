@@ -711,7 +711,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       .expect(200);
   });
 
-  it('DX-502: con PLAN_QUOTE_COMPOSE_V4=false el presupuesto sin aceptar se compone como v3 (DX-019), con los datos de hoy', async () => {
+  it('DX-502: con PLAN_QUOTE_COMPOSE_V4=false el presupuesto sin aceptar se compone como v3 (DX-019), con los datos vigentes', async () => {
     const legacy = await createLegacyQuoteApp();
     try {
       const quote = await request(legacy.getHttpServer())
@@ -730,7 +730,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
     }
   });
 
-  it('el estado de cuenta y el presupuesto sin aceptar llevan los datos de hoy', async () => {
+  it('el estado de cuenta y el presupuesto sin aceptar llevan los datos vigentes', async () => {
     const quote = await as(a)
       .get(`/patients/${patientA}/treatment-plans/${planA}/quote`)
       .expect(200);
@@ -854,7 +854,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       expect(rx.integrityOk).toBe(true);
     });
 
-    it('receta antigua sin foto: se reimprime sin datos fiscales, nunca con los de hoy', async () => {
+    it('receta antigua sin foto: se reimprime sin datos fiscales, nunca con los vigentes', async () => {
       // Como las emitidas antes de DX-019 (el trigger se salta por ser esta la conexión del dueño sin sede).
       const id = await issueRx();
       await raw.$executeRaw`ALTER TABLE "prescriptions" DISABLE TRIGGER "prescriptions_immutable"`;
@@ -894,7 +894,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
       expect(quote.acceptance?.integrityOk).toBe(true);
     });
 
-    it('presupuesto firmado antiguo (v2, sin foto): sin datos fiscales, nunca con los de hoy', async () => {
+    it('presupuesto firmado antiguo (v2, sin foto): sin datos fiscales, nunca con los vigentes', async () => {
       const plan = await signedPlan();
       const row = await raw.treatmentPlanAcceptance.findFirstOrThrow({
         where: { planId: plan },
@@ -922,7 +922,7 @@ describe('Ajustes › Datos de la clínica (e2e, DX-019)', () => {
           .body as SettingsBody
       ).logoUrl!;
 
-    it('DX-019-bis: receta y presupuesto firmado reimprimen el logo de la emisión aunque luego cambie o se quite; sin firmar, el de hoy', async () => {
+    it('DX-019-bis: receta y presupuesto firmado reimprimen el logo de la emisión aunque luego cambie o se quite; sin firmar, el vigente', async () => {
       const logoA = await uploadLogo(20);
       const rx = await issueRx();
       const plan = await signedPlan();

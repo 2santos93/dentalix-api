@@ -12,7 +12,13 @@ import {
   type CountryCode,
   parsePhoneNumberFromString,
 } from 'libphonenumber-js/max';
-import { ClinicRole, DocumentType, Prisma, PrismaClient } from '@prisma/client';
+import {
+  AppointmentStatus,
+  ClinicRole,
+  DocumentType,
+  Prisma,
+  PrismaClient,
+} from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { GetDoctorDashboardUseCase } from '../src/modules/dashboard/application/use-cases/get-doctor-dashboard.use-case';
 import { GetPatientUseCase } from '../src/modules/patients/application/use-cases/get-patient.use-case';
@@ -44,6 +50,7 @@ import {
   DEMO_PRICES,
   DEMO_PROFESSIONAL_LICENSES,
   DEMO_PROFESSIONAL_SPECIALTIES,
+  DEMO_RECALL,
   DEMO_RECALL_APPOINTMENT_TYPES,
   DEMO_SITE_PRICE_LISTS,
   type DemoLocationKey,
@@ -278,6 +285,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
   let outsideBefore: Counts;
   let usersBefore: string[];
   let seededBetween: { start: number; end: number };
+  // DX-495: el «hoy» de la primera siembra; el --reset lo reutiliza para que
+  // una corrida que cruce la medianoche no feche la demo nueva otro día.
+  let seedNow: Date;
 
   beforeAll(async () => {
     await purgeDemo();
@@ -377,7 +387,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
 
   it('la primera corrida crea la clínica demo completa', async () => {
     const start = Date.now();
-    const result = await seedDemo({ quiet: true });
+    seedNow = new Date(start);
+    const result = await seedDemo({ quiet: true, now: seedNow });
     seededBetween = { start, end: Date.now() };
     expect(result.status).toBe('created');
     expect(result.password).toBe(DEMO_PASSWORD);
@@ -405,8 +416,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-089: «Recepción Norte» y el dentista de cada sede propia tienen
     // sedes; el resto atiende en todas.
     expect(firstCounts.membership_locations).toBe(3);
-    // R3: 25 de las sedes de la rotación y 4 por cada sede propia.
-    expect(firstCounts.patients).toBe(33);
+    // R3: 25 de las sedes de la rotación y 4 por cada sede propia; DX-495:
+    // más el de «Sin recall configurado» (D19), fuera de la rotación.
+    expect(firstCounts.patients).toBe(34);
     // DX-203: la abuela paga a Sofía y a Mateo; la madre y el padre, contactos.
     expect(firstCounts.patient_responsible_parties).toBe(4);
     // DX-153: 7 pagadores y una cobertura por paciente con aseguradora;
@@ -1487,18 +1499,25 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       true,
     );
     // Fuera del calendario de ±15 días solo queda la historia de «Comparar
-    // sedes» (DX-014): citas ATENDIDAS de su día del mes anterior.
+    // sedes» (DX-014): citas ATENDIDAS de su día del mes anterior. DX-495: y
+    // la visita ATENDIDA de «Sin recall configurado» (D19), ~45 días atrás.
     const outsideCalendar = appointments.filter(
       (a) =>
         a.start.getTime() <= now - 15 * day ||
         a.start.getTime() >= now + 15 * day,
     );
+    const comparisonVisit = (a: (typeof appointments)[number]) =>
+      a.reason === DEMO_COMPARISON_HISTORY.reason &&
+      a.start.getTime() >= now - 35 * day;
+    const unconfiguredVisit = (a: (typeof appointments)[number]) =>
+      a.reason === DEMO_RECALL.unconfigured.reason &&
+      a.start.getTime() < now - (DEMO_RECALL.unconfigured.daysAgo - 1) * day &&
+      a.start.getTime() > now - (DEMO_RECALL.unconfigured.daysAgo + 15) * day;
     expect(
       outsideCalendar.filter(
         (a) =>
           a.status !== 'COMPLETED' ||
-          a.reason !== DEMO_COMPARISON_HISTORY.reason ||
-          a.start.getTime() < now - 35 * day,
+          !(comparisonVisit(a) || unconfiguredVisit(a)),
       ),
     ).toEqual([]);
 
@@ -2532,7 +2551,9 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(list.items.map((i) => i.patientId)).not.toContain(booked!.patientId);
 
     // D19: «Sin recall configurado» no sale vacía: un atendido sin recall ni
-    // cita futura.
+    // cita futura. DX-495: el paciente propio del ejemplo, fuera de la
+    // rotación, con su única cita atendida ~45 días atrás, sea cual sea la
+    // fecha de la siembra.
     const unconfigured = await demoUnconfiguredList(app);
     expect(unconfigured.total).toBeGreaterThanOrEqual(1);
     const withRecall = new Set(
@@ -2541,6 +2562,25 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     for (const item of unconfigured.items) {
       expect(withRecall.has(item.patientId)).toBe(false);
     }
+    const own = await raw.patient.findFirstOrThrow({
+      where: {
+        tenantId,
+        docNumber:
+          DEMO_PATIENTS[DEMO_RECALL.unconfigured.patientIndex].docNumber,
+      },
+      select: { id: true },
+    });
+    expect(unconfigured.items.map((i) => i.patientId)).toContain(own.id);
+    const ownVisits = await raw.appointment.findMany({
+      where: { tenantId, patientId: own.id, deletedAt: null },
+      select: { status: true, start: true },
+    });
+    expect(ownVisits.map((a) => a.status)).toEqual([
+      AppointmentStatus.COMPLETED,
+    ]);
+    const daysAgo = (Date.now() - ownVisits[0].start.getTime()) / 86_400_000;
+    expect(daysAgo).toBeGreaterThan(DEMO_RECALL.unconfigured.daysAgo - 1);
+    expect(daysAgo).toBeLessThan(DEMO_RECALL.unconfigured.daysAgo + 15);
   });
 
   it('DX-015-bis (D20): Higiene se agenda como «Limpieza» y Control como «Valoración», enlazados por el ADMIN (auditado)', async () => {
@@ -2619,7 +2659,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
 
   it('--reset retira la demo anterior en blando y la reconstruye igual', async () => {
     const oldId = await liveDemoTenantId();
-    const result = await seedDemo({ quiet: true, reset: true });
+    const result = await seedDemo({ quiet: true, reset: true, now: seedNow });
     expect(result.status).toBe('rebuilt');
     const newId = await liveDemoTenantId();
     expect(newId).not.toBe(oldId);

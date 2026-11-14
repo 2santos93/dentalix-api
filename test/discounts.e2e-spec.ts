@@ -1237,7 +1237,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       expect(await planItems(planId)).toHaveLength(0);
     });
 
-    it('plan en VES con el catálogo en VES: igual que hoy (403, 422 y en el informe), sin tasa', async () => {
+    it('plan en VES con el catálogo en VES: igual que hasta ahora (403, 422 y en el informe), sin tasa', async () => {
       const planId = await newPlan('VES');
       const denied = await addCrown(
         planId,
@@ -1267,7 +1267,7 @@ describe('Descuentos: tope por rol, motivo e informe (e2e, DX-204)', () => {
       });
     });
 
-    it('con una sede activa en USD la moneda del catálogo es NULL: cuenta como hoy (403, 422 y en el informe), sin tasa', async () => {
+    it('con una sede activa en USD la moneda del catálogo es NULL: cuenta como hasta ahora (403, 422 y en el informe), sin tasa', async () => {
       await as(clinicA)
         .post(
           '/locations',

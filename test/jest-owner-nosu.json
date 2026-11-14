@@ -3,5 +3,6 @@
   "rootDir": "..",
   "testRegex": ".owner-spec.ts$",
   "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+  "setupFiles": ["<rootDir>/test/setup-calendar-clock.ts"],
   "testEnvironment": "node"
 }

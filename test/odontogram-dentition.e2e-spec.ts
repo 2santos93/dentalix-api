@@ -1,5 +1,5 @@
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
-import { REGIONAL_CARACAS_FIXTURE } from './support/location-fixtures';
+import { sedeTodayFixture } from './support/sede-clock';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -58,21 +58,24 @@ interface GroupBody {
   records: RecordBody[];
 }
 
+// DX-495 (TST-062): las clínicas usan la zona segura de DX-449 (la de los
+// fixtures lejos de su medianoche; si no, una zona en la que ahora es cerca del
+// mediodía): el «hoy» del test y el de la API no se separan si la corrida
+// cruza la medianoche de la sede.
+const SEDE = sedeTodayFixture();
+
 /**
  * Día civil en la zona IANA de la sede (la de `registerClinic`) `daysAgo` días
- * atrás. Antes restaba 5 h fijas a UTC (Caracas es UTC−4) y entre las 04:00 y
- * las 05:00 UTC daba el día anterior.
+ * atrás. Antes restaba 5 h fijas a UTC y cerca de la medianoche daba el día
+ * anterior.
  */
-function caracasDay(daysAgo = 0): string {
-  return addCivilDays(
-    civilDateIn(new Date(), REGIONAL_CARACAS_FIXTURE.timeZone),
-    -daysAgo,
-  );
+function sedeDay(daysAgo = 0): string {
+  return addCivilDays(civilDateIn(new Date(), SEDE.timeZone), -daysAgo);
 }
 
 /** Fecha de nacimiento de alguien que tiene `years` años (y un mes) hoy. */
 function birthDateFor(years: number): string {
-  const [y, m, d] = caracasDay(31).split('-').map(Number);
+  const [y, m, d] = sedeDay(31).split('-').map(Number);
   return `${y - years}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
@@ -118,8 +121,8 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    a = await registerClinic(app, 'dx120-a');
-    b = await registerClinic(app, 'dx120-b');
+    a = await registerClinic(app, 'dx120-a', SEDE);
+    b = await registerClinic(app, 'dx120-b', SEDE);
     const dentist = await seedMember(raw, a, ClinicRole.DENTIST);
     dentistA = {
       userId: dentist.userId,
@@ -419,7 +422,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${adult}/odontogram?asOf=${caracasDay(5)}`,
+        `/patients/${adult}/odontogram?asOf=${sedeDay(5)}`,
       ).expect(200);
       const groups = res.body as GroupBody[];
       expect(groups.map((g) => g.toothNumber)).toEqual(['36']);
@@ -430,7 +433,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${adult}/odontogram?asOf=${caracasDay()}`,
+        `/patients/${adult}/odontogram?asOf=${sedeDay()}`,
       ).expect(200);
       expect((res.body as GroupBody[]).map((g) => g.toothNumber)).toEqual([
         '46',
@@ -441,10 +444,10 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       const res = await call(
         a,
         'get',
-        `/patients/${child}/dentition?asOf=${caracasDay(1)}`,
+        `/patients/${child}/dentition?asOf=${sedeDay(1)}`,
       ).expect(200);
       const body = res.body as DentitionBody;
-      expect(body.asOf).toBe(caracasDay(1));
+      expect(body.asOf).toBe(sedeDay(1));
       expect(body.positions.find((p) => p.position === '15')?.source).toBe(
         'AGE',
       );
@@ -460,7 +463,7 @@ describe('Odontograma fase 2: dentición, anulación y asOf (DX-120, e2e)', () =
       await call(
         a,
         'get',
-        `/patients/${adult}/dentition?asOf=${caracasDay(-3)}`,
+        `/patients/${adult}/dentition?asOf=${sedeDay(-3)}`,
       ).expect(400);
     });
   });

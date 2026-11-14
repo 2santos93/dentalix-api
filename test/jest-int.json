@@ -3,7 +3,10 @@
   "rootDir": "..",
   "testRegex": ".int-spec.ts$",
   "transform": { "^.+\\.(t|j)s$": "ts-jest" },
-  "setupFiles": ["<rootDir>/test/setup-int.ts"],
+  "setupFiles": [
+    "<rootDir>/test/setup-calendar-clock.ts",
+    "<rootDir>/test/setup-int.ts"
+  ],
   "testEnvironment": "node",
   "testTimeout": 30000
 }

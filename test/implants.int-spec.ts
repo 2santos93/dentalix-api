@@ -332,7 +332,7 @@ describe('patient_implants: FK, RLS, inalterabilidad y retención (DX-191, int)'
   });
 
   describe('retención (DX-039)', () => {
-    it('la colocación adelanta la última atención del paciente, sin pasar de hoy', async () => {
+    it('la colocación adelanta la última atención del paciente, sin pasar del momento actual', async () => {
       const patient = await raw.patient.findUniqueOrThrow({
         where: { id: a.patientId },
         select: { lastAttentionAt: true },

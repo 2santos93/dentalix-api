@@ -13,6 +13,7 @@ import {
 } from './support/e2e-fixtures';
 import { civilDateIn } from '../src/shared/time/civil-day';
 import { setLocationZone } from './support/location-fixtures';
+import { minutesIntoDay } from './support/sede-clock';
 
 // DX-170 en HTTP real: CRUD de plantillas de evolución por rol (solo ADMIN
 // escribe, recepción ni las lee), validación en español, plantillas de
@@ -680,9 +681,13 @@ describe('Plantillas de evolución ligadas a la cita (e2e, DX-170)', () => {
     });
 
     it('sin cita: una fecha futura (día civil de la sede) da 400; hoy y el pasado valen', async () => {
+      // Mañana en la sede; en su último minuto, pasado mañana: la medianoche
+      // podría caer entre el cálculo y la petición y «mañana» ser ya hoy.
+      const ahead =
+        minutesIntoDay(new Date(), SEDE_ZONE) >= 24 * 60 - 1 ? 2 : 1;
       const res = await postEntry({
         notes: 'Futura',
-        entryDate: `${dayAfter(sedeDay(), 1)}T00:00:00.000Z`,
+        entryDate: `${dayAfter(sedeDay(), ahead)}T00:00:00.000Z`,
       }).expect(400);
       expect(message(res)).toBe(
         'La fecha de atención no puede ser una fecha futura',

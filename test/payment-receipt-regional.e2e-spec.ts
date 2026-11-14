@@ -126,7 +126,7 @@ describe('Región del recibo (e2e, DX-521)', () => {
     }
   });
 
-  it('un recibo cuya foto no tiene `regional` sirve el de la sede de hoy y no reescribe la fila', async () => {
+  it('un recibo cuya foto no tiene `regional` sirve el de la sede en su estado actual y no reescribe la fila', async () => {
     const id = await pay();
     // La foto de antes de DX-521: sin la clave (no hay migración de datos).
     // Solo el superusuario, saltando el trigger de inmutabilidad.
