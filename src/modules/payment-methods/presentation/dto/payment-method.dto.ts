@@ -116,6 +116,12 @@ export class PaymentMethodDto {
   proofPolicy!: PaymentProofPolicy;
 
   @ApiProperty({
+    description:
+      'DX-569 «Permitir en el enlace de pago»: el paciente lo ve en su enlace si además está activo y tiene datos para pagar en la sede del enlace (o de toda la clínica).',
+  })
+  allowInPaymentLink!: boolean;
+
+  @ApiProperty({
     enum: PaymentMethod,
     enumName: 'PaymentMethod',
     nullable: true,
@@ -165,6 +171,14 @@ export class CreatePaymentMethodDto {
   @IsOptional()
   @IsEnum(PaymentProofPolicy)
   proofPolicy?: PaymentProofPolicy;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-569: «Permitir en el enlace de pago». Sin indicarlo, no se ofrece.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  allowInPaymentLink?: boolean;
 }
 
 export class UpdatePaymentMethodDto extends PartialType(

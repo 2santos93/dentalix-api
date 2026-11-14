@@ -71,6 +71,12 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // la BD). Cada cambio queda en audit_events (MFA_RECOVERY_CODES_REGENERATED
   // / MFA_DISABLED).
   'userMfaRecoveryCode',
+  // DX-569: los datos para pagar de un medio en una sede son configuración
+  // de cobro, sin datos de pacientes y sin nada que los referencie (el enlace
+  // de pago muestra los que rigen al abrirse). Quitar los de una sede vuelve
+  // a los de la clínica; el cambio queda en audit_events
+  // (PAYMENT_METHOD_INSTRUCTIONS_REMOVED).
+  'paymentMethodInstruction',
   // DX-021-bis: huellas de tokens de dispositivos de confianza ya caducados o
   // revocados; al guardar uno nuevo se borran los muertos del usuario.
   // Material de credencial sin datos de pacientes y sin nada que lo referencie.

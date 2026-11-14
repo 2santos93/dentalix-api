@@ -80,6 +80,7 @@ function medium(
     active: true,
     requiresReference: false,
     proofPolicy: 'NONE',
+    allowInPaymentLink: false,
     adjustments: [],
     legacyMethod: null,
     createdAt: METHOD_AT,

@@ -1,11 +1,14 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -17,8 +20,10 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
@@ -52,6 +57,16 @@ import type {
 } from '../domain/payment-method.entity';
 import { PAYMENT_METHODS_ADMIN_MESSAGE } from '../domain/payment-method-rules';
 import {
+  ListPaymentMethodInstructionsUseCase,
+  RemovePaymentMethodInstructionsUseCase,
+  SavePaymentMethodInstructionsUseCase,
+} from '../application/payment-method-instructions.use-cases';
+import type { PaymentMethodInstruction } from '../domain/payment-method-instructions';
+import {
+  PaymentMethodInstructionDto,
+  SavePaymentMethodInstructionsDto,
+} from './dto/payment-method-instruction.dto';
+import {
   CreatePaymentAdjustmentDto,
   CreatePaymentMethodDto,
   ListPaymentMethodsQueryDto,
@@ -81,6 +96,9 @@ export class PaymentMethodsController {
     private readonly updateMethod: UpdatePaymentMethodUseCase,
     private readonly createAdjustment: CreatePaymentAdjustmentUseCase,
     private readonly updateAdjustment: UpdatePaymentAdjustmentUseCase,
+    private readonly listInstructions: ListPaymentMethodInstructionsUseCase,
+    private readonly saveInstructions: SavePaymentMethodInstructionsUseCase,
+    private readonly removeInstructions: RemovePaymentMethodInstructionsUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -116,6 +134,7 @@ export class PaymentMethodsController {
         active: dto.active,
         requiresReference: dto.requiresReference,
         proofPolicy: dto.proofPolicy,
+        allowInPaymentLink: dto.allowInPaymentLink,
       },
       req.user.sub,
     );
@@ -150,6 +169,7 @@ export class PaymentMethodsController {
         active: dto.active,
         requiresReference: dto.requiresReference,
         proofPolicy: dto.proofPolicy,
+        allowInPaymentLink: dto.allowInPaymentLink,
       },
       req.user.sub,
     );
@@ -219,6 +239,90 @@ export class PaymentMethodsController {
         fixedCurrency: dto.fixedCurrency,
         active: dto.active,
       },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+  }
+
+  // DX-569: datos para pagar de cada medio (los que ve el paciente en su
+  // enlace de pago), de toda la clínica o de una sede. Leerlos: quien cobra;
+  // escribirlos: solo ADMIN, auditados en la transacción del cambio
+  // (PAYMENT_METHOD, PAYMENT_METHOD_INSTRUCTIONS_*, sin los valores).
+  @Get(':id/instructions')
+  @ApiOperation({
+    summary: 'Datos para pagar del medio (la clínica y cada sede)',
+    description:
+      'DX-569. La fila sin sede rige en toda la clínica; la de una sede gana en esa sede.',
+  })
+  @ApiOkResponse({ type: [PaymentMethodInstructionDto] })
+  @ApiNotFoundResponse({ description: 'Medio no encontrado en esta clínica' })
+  @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })
+  instructions(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PaymentMethodInstruction[]> {
+    return this.listInstructions.execute(id);
+  }
+
+  @Put(':id/instructions')
+  @Roles(...PAYMENT_METHOD_WRITE_ROLES)
+  @RolesDeniedMessage(PAYMENT_METHODS_ADMIN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Guarda los datos para pagar del medio en una sede o en la clínica',
+    description:
+      'DX-569. Sustituye la fila de ese ámbito (sin `locationId`, la de toda la clínica): un campo ausente o en blanco queda vacío y al menos uno tiene que llevar texto. Para una sede hace falta acceso a ella (403 LOCATION_NOT_ALLOWED). Auditado como PAYMENT_METHOD (solo qué campos cambiaron, nunca sus valores).',
+  })
+  @ApiOkResponse({ type: PaymentMethodInstructionDto })
+  @ApiBadRequestResponse({
+    description:
+      'Ningún dato con texto, un campo demasiado largo o con saltos de línea, o una sede que no es de la clínica',
+  })
+  @ApiNotFoundResponse({ description: 'Medio no encontrado en esta clínica' })
+  @ApiForbiddenResponse({
+    description: 'Solo ADMIN, o sede no permitida al usuario',
+  })
+  saveMethodInstructions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SavePaymentMethodInstructionsDto,
+    @Req() req: AuditableRequest,
+  ): Promise<PaymentMethodInstruction> {
+    return this.saveInstructions.execute(
+      id,
+      {
+        locationId: dto.locationId,
+        holderName: dto.holderName,
+        holderId: dto.holderId,
+        bankName: dto.bankName,
+        accountNumber: dto.accountNumber,
+        phone: dto.phone,
+        email: dto.email,
+        note: dto.note,
+      },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+  }
+
+  @Delete(':id/instructions/:instructionId')
+  @HttpCode(204)
+  @Roles(...PAYMENT_METHOD_WRITE_ROLES)
+  @RolesDeniedMessage(PAYMENT_METHODS_ADMIN_MESSAGE)
+  @ApiOperation({
+    summary: 'Quita los datos para pagar de una sede (o los de la clínica)',
+    description:
+      'DX-569. Sin los de la sede, en ella rigen los de la clínica. Auditado como PAYMENT_METHOD.',
+  })
+  @ApiNoContentResponse({ description: 'Quitados' })
+  @ApiNotFoundResponse({ description: 'Medio o datos no encontrados' })
+  @ApiForbiddenResponse({
+    description: 'Solo ADMIN, o sede no permitida al usuario',
+  })
+  async removeMethodInstructions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('instructionId', ParseUUIDPipe) instructionId: string,
+    @Req() req: AuditableRequest,
+  ): Promise<void> {
+    await this.removeInstructions.execute(
+      id,
+      instructionId,
       requireAuditRequestContext(req, this.tenantContext),
     );
   }

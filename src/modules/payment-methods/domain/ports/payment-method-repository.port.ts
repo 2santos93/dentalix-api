@@ -20,6 +20,8 @@ export interface PaymentMethodWriteInput {
   requiresReference?: boolean;
   /** DX-389 */
   proofPolicy?: PaymentProofPolicy;
+  /** DX-569 */
+  allowInPaymentLink?: boolean;
 }
 
 /** DX-516: un ajuste ya validado por el caso de uso (la forma completa). */
