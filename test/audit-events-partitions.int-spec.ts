@@ -388,10 +388,14 @@ describe('DX-102 · audit_events particionada (int)', () => {
         [...ids].sort(),
       );
 
+      // El evento se busca por su actor: justo después de un cambio de mes,
+      // los de arriba (hasta 7 min tras el inicio de mes, con id v4) quedan en
+      // el futuro y «el más reciente» sería uno de ellos (DX-495).
+      const actorUserId = randomUUID();
       await repo.insert({
         tenantId: tenantB,
         locationId: null,
-        actor: { kind: 'user', userId: randomUUID(), role: 'ADMIN' },
+        actor: { kind: 'user', userId: actorUserId, role: 'ADMIN' },
         action: 'VIEW',
         resourceType: 'PATIENT',
         resourceId: null,
@@ -402,11 +406,7 @@ describe('DX-102 · audit_events particionada (int)', () => {
         metadata: {},
       });
       const [latest] = await owner.auditEvent.findMany({
-        where: {
-          tenantId: tenantB,
-          occurredAt: { gte: new Date(Date.now() - 60_000) },
-        },
-        orderBy: { occurredAt: 'desc' },
+        where: { tenantId: tenantB, actorUserId },
         take: 1,
       });
       expect(latest.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-/);
