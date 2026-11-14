@@ -34,6 +34,9 @@
  * DX-431: plazos del servidor HTTP (`HTTP_KEEP_ALIVE_TIMEOUT_MS`,
  * `HTTP_HEADERS_TIMEOUT_MS`, `HTTP_REQUEST_TIMEOUT_MS`) y de las
  * transacciones interactivas (`TENANT_TX_TIMEOUT_MS`, `TENANT_TX_MAX_WAIT_MS`).
+ * DX-045: `JWT_ISSUER` / `JWT_AUDIENCE` (`iss`/`aud` de los JWT; defaults de
+ * desarrollo, obligatorias en producción) y, en producción, `CORS_ORIGINS`
+ * no vacío y solo con orígenes https.
  */
 
 import {
@@ -196,6 +199,42 @@ function jwtSecretProblems(env: Env, isProd: boolean): string[] {
   return problems;
 }
 
+/**
+ * Origen `https://host[:puerto]` tal como lo manda el navegador en `Origin`
+ * (minúsculas, sin ruta, barra final, query ni credenciales): CORS lo compara
+ * con igualdad exacta, así que cualquier otra forma nunca coincidiría.
+ */
+function isHttpsOrigin(origin: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === 'https:' &&
+    url.username === '' &&
+    url.password === '' &&
+    url.origin === origin
+  );
+}
+
+/** DX-045: `iss`/`aud` de los JWT; ver `shared/crypto/jwt-policy.ts`. */
+const JWT_SCOPE_PATTERN = /^[\x21-\x7e]{1,200}$/;
+
+function jwtScopeProblems(env: Env): string[] {
+  const problems: string[] = [];
+  for (const key of ['JWT_ISSUER', 'JWT_AUDIENCE']) {
+    const value = str(env, key);
+    if (value != null && !JWT_SCOPE_PATTERN.test(value)) {
+      problems.push(
+        `${key} debe ser un texto de 1 a 200 caracteres ASCII visibles, sin espacios (p. ej. una URL).`,
+      );
+    }
+  }
+  return problems;
+}
+
 function productionProblems(env: Env): string[] {
   const problems: string[] = [];
 
@@ -216,6 +255,35 @@ function productionProblems(env: Env): string[] {
     }
   }
 
+  // DX-045: sin CORS_ORIGINS la API cae en el default de desarrollo
+  // (http://localhost:3001); en producción cada origen explícito debe ser
+  // https (un origen http con credenciales expone la cookie de sesión).
+  const corsOrigins = (str(env, 'CORS_ORIGINS') ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  if (corsOrigins.length === 0) {
+    problems.push(
+      'CORS_ORIGINS es obligatorio en producción (p. ej. "https://dentalix.app"); su default "http://localhost:3001" es solo de desarrollo.',
+    );
+  } else {
+    const notHttps = corsOrigins.filter((origin) => !isHttpsOrigin(origin));
+    if (notHttps.length > 0) {
+      problems.push(
+        `CORS_ORIGINS solo admite orígenes https:// en producción, con la forma exacta "https://host[:puerto]" (sin ruta ni barra final); no valen: ${notHttps.join(', ')}.`,
+      );
+    }
+  }
+
+  // DX-045: iss/aud de los JWT por entorno; sus defaults son de desarrollo.
+  for (const key of ['JWT_ISSUER', 'JWT_AUDIENCE']) {
+    if (str(env, key) == null) {
+      problems.push(
+        `${key} es obligatorio en producción (p. ej. "${key === 'JWT_ISSUER' ? 'https://api.dentalix.app' : 'https://dentalix.app'}"): identifica el entorno en los tokens de sesión.`,
+      );
+    }
+  }
+
   const corsRoot = str(env, 'CORS_ROOT_DOMAIN');
   if (corsRoot == null) {
     problems.push(
@@ -228,7 +296,10 @@ function productionProblems(env: Env): string[] {
   }
 
   const tenantDomains = str(env, 'TENANT_BASE_DOMAINS');
-  if (tenantDomains == null) {
+  if (
+    tenantDomains == null ||
+    tenantDomains.split(',').every((d) => d.trim() === '')
+  ) {
     problems.push(
       'TENANT_BASE_DOMAINS es obligatorio en producción (p. ej. "dentalix.app"); su default "localhost" es solo de desarrollo.',
     );
@@ -748,6 +819,7 @@ export function validateEnv(env: Env): Env {
 
   const isProd = str(env, 'NODE_ENV') === 'production';
   problems.push(...jwtSecretProblems(env, isProd));
+  problems.push(...jwtScopeProblems(env));
   if (isProd) problems.push(...productionProblems(env));
   problems.push(...mailProblems(env, isProd));
   problems.push(...auditProblems(env));
