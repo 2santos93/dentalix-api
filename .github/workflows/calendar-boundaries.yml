@@ -10,8 +10,9 @@ name: Fronteras de calendario
 #   - fin-de-anio:     el 31 de diciembre, 23:59:30 UTC.
 # Las fechas salen de `calendarBoundary` (test/support/calendar-clock.ts).
 #
-# Cuándo corre: son tres jobs de ~20 min (la integración va en serie y ya es el
-# job más largo de «CI»). En cada PR triplicaría el tiempo de runner sin
+# Cuándo corre: son nueve jobs (tres fronteras por tres trozos de la
+# integración) que suman ~60 min de runner (la integración va en serie y ya es
+# el job más largo de «CI»). En cada PR triplicaría el tiempo de runner sin
 # acortar la espera, y lo que encuentra no depende del cambio del PR sino de la
 # fecha. Por eso corre en cada push a main (cada merge queda probado en las
 # tres fronteras), una vez al día (las fechas cambian con el mes aunque no
@@ -44,15 +45,18 @@ jobs:
   # Por eso, para `test:int`, se fija el reloj del runner, que comparten Node,
   # Prisma y el contenedor de Postgres, y se devuelve a su hora al final.
   calendar-boundaries:
-    name: Fronteras de calendario (${{ matrix.boundary }})
+    name: Fronteras de calendario (${{ matrix.boundary }}, ${{ matrix.shard }}/3)
     runs-on: ubuntu-24.04
-    # La unit tarda ~15 min y la integración 16–20 en main (ver «Integración» en
-    # ci.yml): con 40 min, una corrida lenta se cortaba a mitad de la int.
-    timeout-minutes: 60
+    # La integración va en 3 trozos (`--shard`): con el reloj del runner 47 días
+    # por delante (fin de año), el runner alojado de GitHub se apaga a los
+    # ~15 min («received a shutdown signal»), y la int entera tarda 16–20. Cada
+    # trozo dura ~6–7 min con el reloj movido. La unit va solo en el trozo 1.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         boundary: [fin-de-mes, medianoche-sede, fin-de-anio]
+        shard: [1, 2, 3]
     services:
       postgres:
         image: postgres:16
@@ -105,7 +109,7 @@ jobs:
           echo "Frontera ${{ matrix.boundary }}: $at"
 
       - name: Unit (npm test) con FAKE_NOW en la frontera
-        if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.prisma.outcome == 'success' && matrix.shard == 1 }}
         env:
           FAKE_NOW: ${{ steps.boundary.outputs.at }}
         run: npm test
@@ -146,9 +150,9 @@ jobs:
           date -u
           test "$(date -u +%Y-%m-%d)" = "$(echo '${{ steps.boundary.outputs.at }}' | cut -c1-10)"
 
-      - name: test:int con el reloj en la frontera
+      - name: test:int con el reloj en la frontera (trozo ${{ matrix.shard }}/3)
         if: ${{ !cancelled() && steps.clock.outcome == 'success' }}
-        run: npm run test:int
+        run: npm run test:int -- --shard=${{ matrix.shard }}/3
 
       - name: Devolver el reloj del runner a la hora real
         if: ${{ always() && steps.clock.outcome != 'skipped' }}
