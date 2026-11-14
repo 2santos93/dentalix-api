@@ -46,8 +46,9 @@ jobs:
   calendar-boundaries:
     name: Fronteras de calendario (${{ matrix.boundary }})
     runs-on: ubuntu-24.04
-    # La integración sola tarda 16–20 min en main (ver «Integración» en ci.yml).
-    timeout-minutes: 40
+    # La unit tarda ~15 min y la integración 16–20 en main (ver «Integración» en
+    # ci.yml): con 40 min, una corrida lenta se cortaba a mitad de la int.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
