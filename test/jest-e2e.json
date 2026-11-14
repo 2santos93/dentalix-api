@@ -3,6 +3,7 @@
   "rootDir": "..",
   "testRegex": ".e2e-spec.ts$",
   "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+  "globalSetup": "<rootDir>/test/global-setup-db-guard.ts",
   "setupFiles": [
     "<rootDir>/test/setup-calendar-clock.ts",
     "<rootDir>/test/setup-e2e.ts"
