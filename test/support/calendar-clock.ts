@@ -2,13 +2,16 @@
  * DX-495 (TST-062): reloj de las «fronteras de calendario».
  *
  * El cambio de mes del 31-10 al 01-11 tumbó la CI dos veces (DX-491, DX-466)
- * y la medianoche de la sede de los fixtures (05:00 UTC) ya lo había hecho
- * antes (DX-449): ningún job corría los tests con la hora en una frontera. Con
+ * y la medianoche de la sede de los fixtures ya lo había hecho antes
+ * (DX-449): ningún job corría los tests con la hora en una frontera. Con
  * `FAKE_NOW` (instante ISO con zona), `test/setup-calendar-clock.ts` sustituye
  * el `Date` de cada fichero de test por uno que ARRANCA en esa hora y avanza
  * con el reloj real. Es determinista y en proceso (sin libfaketime ni paquetes
  * del sistema). Solo cambia lo que lee `Date` dentro de jest: Postgres
  * (`now()`) y los timers siguen en la hora real.
+ *
+ * `E2E_FAKE_NOW` (DX-460, `test/support/fake-now.ts`) hace lo mismo para una
+ * suite suelta y se instala después: si están las dos, gana la de DX-460.
  */
 export const FAKE_NOW_ENV = 'FAKE_NOW';
 
@@ -72,16 +75,18 @@ function isCalendarBoundary(value: string): value is CalendarBoundary {
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
-const lastSecond = (year: number, month: number) =>
-  `${year}-${pad(month + 1)}-31T23:59:30Z`;
+
+/** El último día (28–31) del mes `month` (0–11) de `year`. */
+const lastDayOfMonth = (year: number, month: number) =>
+  new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
 
 /**
- * La hora de cada frontera, cerca de `today` para que el reloj de la app no se
- * aleje mucho del de Postgres:
- *  - fin-de-mes: el último día 31 ya empezado (sin diciembre, que es fin de año);
- *  - medianoche-sede: el día 1 del mes en curso a las 05:01 UTC (00:01 en
- *    Bogotá, la zona de los fixtures);
- *  - fin-de-anio: el 31 de diciembre más cercano.
+ * La hora de cada frontera en el mes en curso (UTC), para que el reloj de la
+ * app no se aleje del de Postgres:
+ *  - fin-de-mes: el último día del mes (el 31 si lo tiene) a las 23:59:30 UTC;
+ *  - medianoche-sede: el día 1 a las 05:01 UTC (un minuto después de la
+ *    medianoche de una sede en UTC−5; la de los fixtures, UTC−4, ya pasó);
+ *  - fin-de-anio: el 31 de diciembre del año en curso a las 23:59:30 UTC.
  */
 export function calendarBoundary(
   kind: CalendarBoundary,
@@ -91,17 +96,6 @@ export function calendarBoundary(
   const month = today.getUTCMonth();
   if (kind === 'medianoche-sede')
     return `${year}-${pad(month + 1)}-01T05:01:00Z`;
-  if (kind === 'fin-de-anio') {
-    const previous = Date.UTC(year - 1, 11, 31, 23, 59, 30);
-    const next = Date.UTC(year, 11, 31, 23, 59, 30);
-    const now = today.getTime();
-    return lastSecond(now - previous < next - now ? year - 1 : year, 11);
-  }
-  for (let back = 0; ; back++) {
-    const y = year + Math.floor((month - back) / 12);
-    const m = (((month - back) % 12) + 12) % 12;
-    const has31 = new Date(Date.UTC(y, m, 31)).getUTCDate() === 31;
-    const started = Date.UTC(y, m, 31) <= today.getTime();
-    if (m !== 11 && has31 && started) return lastSecond(y, m);
-  }
+  if (kind === 'fin-de-anio') return `${year}-12-31T23:59:30Z`;
+  return `${year}-${pad(month + 1)}-${pad(lastDayOfMonth(year, month))}T23:59:30Z`;
 }

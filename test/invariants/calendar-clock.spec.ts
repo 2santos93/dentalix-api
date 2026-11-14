@@ -80,10 +80,10 @@ describe('DX-495: reloj de las fronteras de calendario', () => {
     expect(() => parseFakeNow('mañana')).toThrow(FAKE_NOW_ENV);
   });
 
-  it('FAKE_NOW acepta el nombre de una frontera y la resuelve desde hoy', () => {
-    const today = new Date('2026-11-01T03:45:00Z');
+  it('FAKE_NOW acepta el nombre de una frontera y la resuelve en el mes en curso', () => {
+    const today = new Date('2026-11-14T03:45:00Z');
     expect(parseFakeNow('fin-de-mes', today)).toBe(
-      Date.parse('2026-10-31T23:59:30Z'),
+      Date.parse('2026-11-30T23:59:30Z'),
     );
     expect(parseFakeNow('medianoche-sede', today)).toBe(
       Date.parse('2026-11-01T05:01:00Z'),
@@ -94,35 +94,34 @@ describe('DX-495: reloj de las fronteras de calendario', () => {
   });
 
   describe('calendarBoundary', () => {
-    const today = new Date('2026-11-01T03:45:00Z');
-
-    it('fin de mes: el último día 31 ya empezado, sin diciembre', () => {
-      expect(calendarBoundary('fin-de-mes', today)).toBe(
-        '2026-10-31T23:59:30Z',
-      );
-      expect(
-        calendarBoundary('fin-de-mes', new Date('2027-01-15T00:00:00Z')),
-      ).toBe('2026-10-31T23:59:30Z');
-      expect(
-        calendarBoundary('fin-de-mes', new Date('2027-02-01T00:00:00Z')),
-      ).toBe('2027-01-31T23:59:30Z');
-    });
+    it.each([
+      ['2026-10-01T00:00:00Z', '2026-10-31T23:59:30Z'],
+      ['2026-11-14T12:00:00Z', '2026-11-30T23:59:30Z'],
+      ['2027-02-10T12:00:00Z', '2027-02-28T23:59:30Z'],
+      ['2028-02-10T12:00:00Z', '2028-02-29T23:59:30Z'],
+      ['2026-12-31T23:59:59Z', '2026-12-31T23:59:30Z'],
+    ])(
+      'fin de mes: el 31 si el mes lo tiene, si no su último día (%s)',
+      (today, expected) => {
+        expect(calendarBoundary('fin-de-mes', new Date(today))).toBe(expected);
+      },
+    );
 
     it('medianoche de la sede: el día 1 del mes en curso a las 05:01 UTC', () => {
-      expect(calendarBoundary('medianoche-sede', today)).toBe(
-        '2026-11-01T05:01:00Z',
-      );
+      expect(
+        calendarBoundary('medianoche-sede', new Date('2026-11-14T03:45:00Z')),
+      ).toBe('2026-11-01T05:01:00Z');
+      expect(
+        calendarBoundary('medianoche-sede', new Date('2027-01-31T23:00:00Z')),
+      ).toBe('2027-01-01T05:01:00Z');
     });
 
-    it('fin de año: el 31 de diciembre más cercano', () => {
-      expect(calendarBoundary('fin-de-anio', today)).toBe(
-        '2026-12-31T23:59:30Z',
-      );
+    it('fin de año: el 31 de diciembre del año en curso', () => {
       expect(
-        calendarBoundary('fin-de-anio', new Date('2027-03-01T00:00:00Z')),
+        calendarBoundary('fin-de-anio', new Date('2026-11-14T03:45:00Z')),
       ).toBe('2026-12-31T23:59:30Z');
       expect(
-        calendarBoundary('fin-de-anio', new Date('2027-08-01T00:00:00Z')),
+        calendarBoundary('fin-de-anio', new Date('2027-01-01T00:00:00Z')),
       ).toBe('2027-12-31T23:59:30Z');
     });
   });
