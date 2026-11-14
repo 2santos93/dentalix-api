@@ -68,7 +68,9 @@ docker run -d --name "$NAME" --network host \
   -e JWT_ACCESS_SECRET="$(openssl rand -hex 32)" \
   -e JWT_REFRESH_SECRET="$(openssl rand -hex 32)" \
   -e JWT_ACCESS_TTL=900s -e JWT_REFRESH_TTL=30d \
+  -e CORS_ORIGINS=https://dentalix.example \
   -e CORS_ROOT_DOMAIN=dentalix.example -e TENANT_BASE_DOMAINS=dentalix.example \
+  -e JWT_ISSUER=https://api.dentalix.example -e JWT_AUDIENCE=https://dentalix.example \
   -e FILES_PUBLIC_BASE_URL=https://api.dentalix.example/api/v1/files \
   -e MAIL_TRANSPORT=smtp -e SMTP_URL=smtps://humo:humo@smtp.dentalix.example:465 \
   -e MAIL_FROM=no-reply@dentalix.example \
