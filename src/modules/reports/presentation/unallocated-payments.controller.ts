@@ -1,3 +1,4 @@
+import { ExtraPermission } from '@prisma/client';
 import {
   Controller,
   Get,
@@ -22,6 +23,7 @@ import {
   Roles,
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import { UNALLOCATED_PAYMENTS_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
@@ -71,6 +73,7 @@ export class UnallocatedPaymentsController {
     resource: 'ACCOUNT_STATEMENT',
     reason: 'UNALLOCATED_PAYMENTS',
   })
+  @AllowPermissions(ExtraPermission.FINANCIAL_REPORTS_VIEW)
   @Get('unallocated-payments')
   @ApiOperation({
     summary: 'Cobrado sin imputar / a cuenta, por abono',
@@ -99,6 +102,7 @@ export class UnallocatedPaymentsController {
     resource: 'ACCOUNT_STATEMENT',
     reason: 'UNALLOCATED_PAYMENTS',
   })
+  @AllowPermissions(ExtraPermission.FINANCIAL_REPORTS_VIEW)
   @Get('unallocated-payments.csv')
   @ApiOperation({
     summary:

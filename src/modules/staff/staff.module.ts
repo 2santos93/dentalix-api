@@ -1,3 +1,4 @@
+import { ReplaceStaffPermissionsUseCase } from './application/use-cases/staff-permissions.use-cases';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { StaffController } from './presentation/staff.controller';
@@ -37,6 +38,7 @@ import { LoginLockoutService } from '../auth/application/login-lockout.service';
     UnlockStaffLoginUseCase,
     GetStaffLocationsUseCase,
     ReplaceStaffLocationsUseCase,
+    ReplaceStaffPermissionsUseCase,
     { provide: STAFF_LOGIN_LOCKS, useExisting: LoginLockoutService },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;

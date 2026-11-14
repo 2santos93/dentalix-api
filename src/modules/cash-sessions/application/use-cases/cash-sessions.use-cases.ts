@@ -67,6 +67,10 @@ const MAX_PAGE_SIZE = 100;
 const scopeFor = (actor: CashActor): CashSessionScope =>
   actor.isAdmin ? {} : { openedById: actor.userId };
 
+/** DX-090: para LEER (lista y detalle), también quien ve la caja en lectura. */
+const readScopeFor = (actor: CashActor): CashSessionScope =>
+  actor.isAdmin || actor.readsAll ? {} : { openedById: actor.userId };
+
 /**
  * SEC-043: el ajuste cuenta en una caja aún abierta o entrará en la próxima
  * que se abra (pendiente): su importe dejaría deducir ese esperado.
@@ -239,7 +243,7 @@ export class GetCashSessionUseCase {
 
   async execute(id: string, actor: CashActor): Promise<CashSessionDetail> {
     const [found, settings] = await Promise.all([
-      this.repo.detail(id, scopeFor(actor)),
+      this.repo.detail(id, readScopeFor(actor)),
       this.repo.getSettings(),
     ]);
     if (!found) throw new NotFoundException(SESSION_NOT_FOUND_MESSAGE);
@@ -473,7 +477,7 @@ export class ListCashSessionsUseCase {
     }
     const [result, settings] = await Promise.all([
       this.repo.list({
-        ...scopeFor(actor),
+        ...readScopeFor(actor),
         locationIds: input.locationId
           ? [input.locationId]
           : this.tenantContext.scopeLocationIds(),

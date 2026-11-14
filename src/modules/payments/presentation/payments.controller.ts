@@ -1,3 +1,4 @@
+import { ExtraPermission } from '@prisma/client';
 import {
   Body,
   Controller,
@@ -79,6 +80,7 @@ import { Payment } from '../domain/entities/payment.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
@@ -151,6 +153,7 @@ export class PaymentsController {
   // DX-389: comprobante del cobro. Mismos roles que el resto de pagos
   // (ADMIN y RECEPTION; DENTIST/ASSISTANT 403). La subida no audita (como la
   // de los gastos): nada se asocia a un abono hasta registrarlo.
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('payments/proofs/upload-url')
   @RateLimit('direct-upload')
   @HttpCode(200)
@@ -175,6 +178,7 @@ export class PaymentsController {
 
   // Auditada en el caso de uso: VIEW si se abre en el navegador, EXPORT si se
   // descarga (el decorador no puede elegir la acción por la query).
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Get('payments/:id/proof/url')
   @Header('Cache-Control', 'no-store')
   @ApiOperation({
@@ -199,6 +203,10 @@ export class PaymentsController {
   }
 
   @Audit({ action: 'VIEW', resource: 'PAYMENT' })
+  @AllowPermissions(
+    ExtraPermission.PAYMENT_REGISTER,
+    ExtraPermission.FINANCIAL_REPORTS_VIEW,
+  )
   @Get('payments')
   @ApiOperation({
     summary: 'Caja: abonos del período con resumen por moneda y método',
@@ -241,6 +249,10 @@ export class PaymentsController {
    * filtros que `GET /payments`, sin paginar. La descarga queda auditada.
    */
   @Audit({ action: 'EXPORT', resource: 'PAYMENT' })
+  @AllowPermissions(
+    ExtraPermission.PAYMENT_REGISTER,
+    ExtraPermission.FINANCIAL_REPORTS_VIEW,
+  )
   @Get('payments.csv')
   @ApiOperation({
     summary: 'Caja en CSV: abonos del período con medio y referencia',
@@ -295,6 +307,7 @@ export class PaymentsController {
     reason: 'RECEIPT_ISSUED',
     paymentReference: true,
   })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('treatment-plans/:id/payments')
   @ApiCreatedResponse({
     type: PaymentDto,
@@ -368,6 +381,7 @@ export class PaymentsController {
     paymentReference: true,
     splitPayment: true,
   })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('treatment-plans/:id/split-payments')
   @ApiOperation({
     summary:
@@ -462,6 +476,7 @@ export class PaymentsController {
     reason: 'RECEIPT_ISSUED',
     paymentReference: true,
   })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('opening-balances/:id/payments')
   @ApiOperation({
     summary: 'Abono contra el saldo migrado de un paciente (DX-262)',
@@ -515,6 +530,7 @@ export class PaymentsController {
     resource: 'PAYMENT',
     patient: { lookup: 'treatmentPlan', param: 'id' },
   })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Get('treatment-plans/:id/payments')
   @ApiOkResponse({ type: [PaymentDto] })
   @ApiBadRequestResponse({ description: 'Id que no es UUID' })
@@ -528,6 +544,7 @@ export class PaymentsController {
     resource: 'PAYMENT',
     patient: { lookup: 'treatmentPlan', param: 'id' },
   })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Get('treatment-plans/:id/balance')
   @ApiOkResponse({
     type: PlanBalanceWithItemsDto,

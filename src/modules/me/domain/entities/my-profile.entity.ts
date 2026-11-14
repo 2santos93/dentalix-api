@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 
 export interface MyProfileMembership {
   tenantId: string;
@@ -13,4 +13,9 @@ export interface MyProfile {
   avatarUrl: string | null;
   emailVerifiedAt: Date | null;
   memberships: MyProfileMembership[];
+  /**
+   * DX-090: lo que puede hacer en la clínica de la sesión, en términos del
+   * catálogo de permisos: los de serie de su rol más los extra concedidos.
+   */
+  effectivePermissions: ExtraPermission[];
 }

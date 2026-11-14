@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { StaffMember } from '../entities/staff-member.entity';
 import {
@@ -45,6 +45,16 @@ export type ReplaceLocationsOutcome =
   | { kind: 'NOT_FOUND' }
   | { kind: 'IS_ADMIN' }
   | { kind: 'UNKNOWN_LOCATION' };
+
+/**
+ * DX-090: resultado de sustituir los permisos extra de un miembro.
+ * `NOT_FOUND`: no hay membresía activa en esta clínica. `IS_ADMIN`: el ADMIN
+ * ya los tiene todos. En los dos casos no se ha escrito nada.
+ */
+export type ReplaceExtraPermissionsOutcome =
+  | { kind: 'UPDATED'; role: ClinicRole; extraPermissions: ExtraPermission[] }
+  | { kind: 'NOT_FOUND' }
+  | { kind: 'IS_ADMIN' };
 
 export type DeactivateStaffOutcome = 'DEACTIVATED' | 'NOT_FOUND' | 'LAST_ADMIN';
 
@@ -110,6 +120,19 @@ export interface StaffRepository {
     actorUserId: string,
     audit: AuditRequestContext,
   ): Promise<ReplaceLocationsOutcome>;
+
+  /**
+   * DX-090: sustituye los permisos extra del miembro activo `userId`
+   * (ya normalizados: sin duplicados, en el orden del catálogo). En UNA
+   * transacción: bloquea (FOR UPDATE) la membresía, comprueba que no sea
+   * ADMIN, escribe y deja el evento PERMISSIONS_CHANGED con el antes y el
+   * después (mismo conjunto → sin evento).
+   */
+  replaceExtraPermissions(
+    userId: string,
+    permissions: ExtraPermission[],
+    audit: AuditRequestContext,
+  ): Promise<ReplaceExtraPermissionsOutcome>;
 
   /**
    * Active clinic staff — non-deleted `ClinicMembership` rows joined to their

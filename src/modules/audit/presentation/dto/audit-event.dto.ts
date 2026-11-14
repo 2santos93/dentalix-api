@@ -1,5 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AuditAction, AuditResourceType, ClinicRole } from '@prisma/client';
+import {
+  AuditAction,
+  AuditResourceType,
+  ClinicRole,
+  ExtraPermission,
+} from '@prisma/client';
 import {
   AUDIT_CANCELLATION_KINDS,
   AUDIT_CANCELLATION_REASONS,
@@ -255,6 +260,14 @@ export class AuditStaffAccessSideDto {
 
   @ApiPropertyOptional({ type: String, nullable: true, maxLength: 80 })
   professionalSpecialty?: string | null;
+
+  @ApiPropertyOptional({
+    enum: ExtraPermission,
+    enumName: 'ExtraPermission',
+    isArray: true,
+    description: 'DX-090: permisos extra concedidos (PERMISSIONS_CHANGED).',
+  })
+  extraPermissions?: ExtraPermission[];
 }
 
 export class AuditStaffAccessChangeDto {

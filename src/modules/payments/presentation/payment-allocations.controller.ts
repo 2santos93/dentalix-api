@@ -1,3 +1,4 @@
+import { ExtraPermission } from '@prisma/client';
 import {
   Body,
   Controller,
@@ -22,6 +23,7 @@ import {
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import {
   PAYMENT_ALLOCATION_WRITE_ROLES,
   PAYMENT_ROLES,
@@ -80,6 +82,7 @@ export class PaymentAllocationsController {
   ) {}
 
   @Audit({ action: 'VIEW', resource: 'PAYMENT', ...PAYMENT_AUDIT })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Get()
   @ApiOperation({
     summary: 'A qué ítems del plan va un abono (DX-051)',

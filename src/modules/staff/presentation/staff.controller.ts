@@ -60,6 +60,14 @@ import {
   ReplaceStaffLocationsDto,
   StaffLocationsDto,
 } from './dto/staff-locations.dto';
+import {
+  ReplaceStaffPermissionsUseCase,
+  type StaffPermissions,
+} from '../application/use-cases/staff-permissions.use-cases';
+import {
+  ReplaceStaffPermissionsDto,
+  StaffPermissionsDto,
+} from './dto/staff-permissions.dto';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -95,6 +103,7 @@ export class StaffController {
     private readonly unlockLogin: UnlockStaffLoginUseCase,
     private readonly getStaffLocations: GetStaffLocationsUseCase,
     private readonly replaceStaffLocations: ReplaceStaffLocationsUseCase,
+    private readonly replaceStaffPermissions: ReplaceStaffPermissionsUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -264,6 +273,44 @@ export class StaffController {
         locationIds: dto.locationIds,
         actorUserId: req.user.sub,
       },
+      this.auditCtx(req),
+    );
+  }
+
+  // DX-090: permisos extra sobre el rol (catálogo cerrado). Solo ADMIN, nunca
+  // los propios (403), al ADMIN no (409), otra clínica → 404 bajo RLS. Rige en
+  // la siguiente petición del miembro: el guard lee la membresía vigente.
+  // Auditado en la transacción (PERMISSIONS_CHANGED con el antes y el después;
+  // sin evento si el conjunto no cambia).
+  @Put(':userId/permissions')
+  @Roles(...STAFF_WRITE_ROLES)
+  @ApiOperation({
+    summary: 'Concede o retira permisos extra a un miembro',
+    description:
+      'Sustituye la lista completa. PAYMENT_REGISTER: registrar abonos y operar su turno de caja como recepción (abrir, cerrar, cobrar), sin anular. ' +
+      'FINANCIAL_REPORTS_VIEW: ver los reportes financieros y la caja en lectura. ' +
+      'Rige en su siguiente petición. Queda en la auditoría (PERMISSIONS_CHANGED).',
+  })
+  @ApiOkResponse({ type: StaffPermissionsDto })
+  @ApiBadRequestResponse({
+    description: 'Algún permiso no existe en el catálogo, o hay más de dos',
+  })
+  @ApiForbiddenResponse({
+    description: 'Solo ADMIN, y nunca sobre sus propios permisos',
+  })
+  @ApiNotFoundResponse({
+    description: 'No es miembro activo de esta clínica',
+  })
+  @ApiConflictResponse({
+    description: 'Es ADMIN: ya tiene todos los permisos',
+  })
+  replacePermissions(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Body() dto: ReplaceStaffPermissionsDto,
+    @Req() req: AuditableRequest,
+  ): Promise<StaffPermissions> {
+    return this.replaceStaffPermissions.execute(
+      { userId, permissions: dto.permissions, actorUserId: req.user.sub },
       this.auditCtx(req),
     );
   }

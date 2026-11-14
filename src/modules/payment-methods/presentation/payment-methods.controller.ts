@@ -1,3 +1,4 @@
+import { ExtraPermission } from '@prisma/client';
 import {
   Body,
   Controller,
@@ -27,6 +28,7 @@ import {
   Roles,
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import {
   PAYMENT_METHOD_WRITE_ROLES,
   PAYMENT_ROLES,
@@ -84,6 +86,7 @@ export class PaymentMethodsController {
     private readonly tenantContext: TenantContextService,
   ) {}
 
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Get()
   @ApiOkResponse({ type: [PaymentMethodDto] })
   @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })

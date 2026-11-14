@@ -23,13 +23,14 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import {
   Roles,
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import {
   CASH_SESSION_ADMIN_ROLES,
   CASH_SESSION_ROLES,
@@ -81,11 +82,17 @@ export const CASH_SESSIONS_ADMIN_MESSAGE =
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
+  /** DX-090: lo deja RolesGuard en las rutas con `@AllowPermissions`. */
+  effectivePermissions?: ExtraPermission[];
 }
 
 const actorOf = (req: AuthenticatedRequest): CashActor => ({
   userId: req.user.sub,
   isAdmin: req.user.role === ClinicRole.ADMIN,
+  readsAll:
+    req.effectivePermissions?.includes(
+      ExtraPermission.FINANCIAL_REPORTS_VIEW,
+    ) ?? false,
 });
 
 const LOCATION_HEADER = {
@@ -120,6 +127,10 @@ export class CashSessionsController {
     private readonly addAdjustment: AddCashAdjustmentUseCase,
   ) {}
 
+  @AllowPermissions(
+    ExtraPermission.PAYMENT_REGISTER,
+    ExtraPermission.FINANCIAL_REPORTS_VIEW,
+  )
   @Get('settings')
   @ApiOperation({ summary: 'Ajustes de caja de la clínica' })
   @ApiOkResponse({ type: CashSettingsDto })
@@ -155,6 +166,10 @@ export class CashSessionsController {
     resource: 'CASH_SESSION',
     reason: 'CASH_SESSION_CURRENT',
   })
+  @AllowPermissions(
+    ExtraPermission.PAYMENT_REGISTER,
+    ExtraPermission.FINANCIAL_REPORTS_VIEW,
+  )
   @Get('current')
   @ApiOperation({
     summary: 'Mi caja abierta en la sede (o null) y los ajustes de caja',
@@ -175,6 +190,7 @@ export class CashSessionsController {
     resource: 'CASH_SESSION',
     resourceId: { response: 'id' },
   })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('open')
   @ApiOperation({
     summary: 'Abrir mi caja en la sede con el fondo inicial por moneda',
@@ -199,6 +215,10 @@ export class CashSessionsController {
   }
 
   @Audit({ action: 'VIEW', resource: 'CASH_SESSION' })
+  @AllowPermissions(
+    ExtraPermission.PAYMENT_REGISTER,
+    ExtraPermission.FINANCIAL_REPORTS_VIEW,
+  )
   @Get()
   @ApiOperation({
     summary: 'Turnos de caja (ADMIN: todos; RECEPTION: los suyos)',
@@ -231,6 +251,10 @@ export class CashSessionsController {
     resource: 'CASH_SESSION',
     resourceId: { param: 'id' },
   })
+  @AllowPermissions(
+    ExtraPermission.PAYMENT_REGISTER,
+    ExtraPermission.FINANCIAL_REPORTS_VIEW,
+  )
   @Get(':id')
   @ApiOperation({
     summary: 'Una caja: fondo, abonos, anulados, ajustes, arqueo y cierres',
@@ -256,6 +280,7 @@ export class CashSessionsController {
     resourceId: { param: 'id' },
     reason: 'CASH_SESSION_CLOSED',
   })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post(':id/close')
   @ApiOperation({
     summary: 'Cerrar la caja con el arqueo por moneda y método',

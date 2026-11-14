@@ -371,6 +371,17 @@ enum ClinicRole {
   ADMIN
 }
 
+/// DX-090: permisos que un ADMIN concede a un miembro además de su rol base,
+/// para clínicas sin recepcionista. Catálogo CERRADO: añadir uno es una
+/// decisión de producto (y una migración), no un dato.
+///   PAYMENT_REGISTER        registrar abonos y operar su turno de caja como
+///                           RECEPTION (abrir, cerrar, cobrar), sin anular.
+///   FINANCIAL_REPORTS_VIEW  ver los reportes financieros y la caja en lectura.
+enum ExtraPermission {
+  PAYMENT_REGISTER
+  FINANCIAL_REPORTS_VIEW
+}
+
 /// Sede/sucursal física de una clínica. La sede es una dimensión de filtrado
 /// DENTRO del tenant, no un nivel de aislamiento: el RLS por tenant sigue
 /// siendo la frontera dura. Pacientes, historia y catálogo NO llevan sede —
@@ -557,6 +568,9 @@ model ClinicMembership {
   professionalLicense   String?
   /// DX-324: especialidad del miembro; la receta la imprime si existe. CHECK 1..80.
   professionalSpecialty String?
+  /// DX-090: permisos extra sobre el rol base (catálogo cerrado). Solo los
+  /// cambia un ADMIN con PUT /staff/:userId/permissions; nunca uno mismo.
+  extraPermissions      ExtraPermission[]    @default([])
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   deletedAt             DateTime?
