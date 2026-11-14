@@ -27,9 +27,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -58,9 +58,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -156,9 +156,9 @@ jobs:
       # saltarse. `dentalix` es el superusuario del servicio postgres:16.
       REQUIRE_BACKUP_TESTS: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -211,6 +211,10 @@ jobs:
       - name: Comprobar FORCE tras migrar (db:check-force)
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
         run: npm run db:check-force
+      - name: Sin drift entre schema.prisma y las migraciones (DX-081)
+        # La diferencia esperada (objetos solo-SQL) está en prisma/drift-baseline.sql.
+        if: ${{ !cancelled() && steps.db.outcome == 'success' }}
+        run: scripts/prisma-drift.sh check
       - name: test:int
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
         run: npm run test:int
@@ -278,9 +282,9 @@ jobs:
       - name: Marcar el inicio del job
         run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -369,9 +373,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -431,9 +435,9 @@ jobs:
       STORAGE_DIR: ./storage-test
       FILES_PUBLIC_BASE_URL: http://localhost:3000/api/v1/files
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -537,7 +541,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: docker build (sin publicar)
         run: docker build -t dentalix-api:ci .
       - name: Sin .env, sin devDependencies y sin root en la imagen
