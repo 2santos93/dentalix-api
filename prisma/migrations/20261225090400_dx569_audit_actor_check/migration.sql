@@ -4,7 +4,7 @@
 -- audit_events es la UNIÓN del de main (20261223090400, DX-306, que ya une
 -- DX-468) y esa escritura, y solo ella.
 --
--- Más permisivo (NOT VALID; su VALIDATE va en 20261224090500, molde de
+-- Más permisivo (NOT VALID; su VALIDATE va en 20261225090500, molde de
 -- DX-361 / DX-435 / DX-443 / DX-437 / DX-467 / DX-468 / DX-306).
 -- lock_timeout evita quedar encolado tras una transacción larga.
 

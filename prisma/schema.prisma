@@ -2790,7 +2790,7 @@ model PaymentProof {
 
 // ---------------------------------------------------------------------------
 // DX-569: el paciente reporta su pago por enlace. Ver la migración
-// 20261224090300_dx569_payment_links (CHECK, FK compuestas, índices parciales
+// 20261225090300_dx569_payment_links (CHECK, FK compuestas, índices parciales
 // y RLS FORCE de las tres tablas).
 // ---------------------------------------------------------------------------
 
