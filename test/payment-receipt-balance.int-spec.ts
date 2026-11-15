@@ -1,7 +1,6 @@
 import { PaymentProofs } from '../src/modules/payments/application/payment-proofs';
 import { PaymentProofUploads } from '../src/modules/payments/application/payment-proof-uploads';
 import { InMemoryFileStorage } from '../src/shared/storage/__fixtures__/in-memory-file-storage';
-import { BadRequestException } from '@nestjs/common';
 import { Prisma, PrismaClient, TreatmentPlanStatus } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
@@ -28,6 +27,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
+import { UnsupportedCurrencyRateError } from '../src/modules/exchange/domain/missing-exchange-rate.error';
 
 // DX-182: el saldo impreso en cada recibo es el del plan TRAS SU abono, en el
 // orden en que se registraron, aunque varios abonos al mismo plan lleguen a la
@@ -83,7 +83,7 @@ const noRateReject = (input: { from: string; to: string }) =>
   input.from === input.to
     ? Promise.resolve({ ...input, result: 0, rateUsed: 1 })
     : Promise.reject(
-        new BadRequestException(`unsupported currency: ${input.from}`),
+        new UnsupportedCurrencyRateError(input.from, '2026-01-15'),
       );
 const noRateConvert = {
   execute: noRateReject,

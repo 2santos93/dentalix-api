@@ -1,4 +1,3 @@
-import { BadRequestException } from '@nestjs/common';
 import type { AmountConverter } from '../../exchange/application/use-cases/convert-amount.use-case';
 import { MissingExchangeRateError } from '../../exchange/domain/missing-exchange-rate.error';
 import { ExchangeRateUnavailableError } from '../../exchange/domain/ports/exchange-rate-provider.port';
@@ -15,6 +14,7 @@ import {
 } from '../../exchange/application/__fixtures__/in-memory-exchange-settings';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { UnsupportedCurrencyRateError } from '../../exchange/domain/missing-exchange-rate.error';
 
 const DAY = '2026-10-30';
 const FROZEN_AUTO: FrozenExchangeRate = {
@@ -155,7 +155,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
     it('anterior sin tasa de su día: null', async () => {
       const convert: AmountConverter = {
         execute: () =>
-          Promise.reject(new BadRequestException('unsupported currency: GBP')),
+          Promise.reject(new UnsupportedCurrencyRateError('GBP', '2026-01-15')),
         quote: () => Promise.reject(new Error('no')),
       };
       await expect(
@@ -208,7 +208,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
       ['tasa manual sin registrar', new MissingExchangeRateError('VES', DAY)],
       [
         'moneda que el proveedor no trae',
-        new BadRequestException('unsupported currency: VES'),
+        new UnsupportedCurrencyRateError('VES', '2026-01-15'),
       ],
       ['proveedor caído', new ExchangeRateUnavailableError('caído')],
     ])('sin tasa (%s) devuelve null', async (_label, error) => {

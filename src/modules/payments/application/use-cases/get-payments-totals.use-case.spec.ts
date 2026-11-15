@@ -1,11 +1,11 @@
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { BadRequestException } from '@nestjs/common';
 import { ClinicRole } from '@prisma/client';
 import { GetPaymentsTotalsUseCase } from './get-payments-totals.use-case';
 import { VoidPaymentUseCase } from './void-payment.use-case';
 import { InMemoryPaymentRepository } from './__fixtures__/in-memory-payment.repository';
 import { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import { round2 } from '../../../../shared/money/money';
+import { UnsupportedCurrencyRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 
 interface FakeConvertInput {
   amount: number;
@@ -70,7 +70,7 @@ class FakeConvertAmountUseCase {
     }
     if (this.failingFrom.has(input.from)) {
       return Promise.reject(
-        new BadRequestException(`unsupported currency: ${input.from}`),
+        new UnsupportedCurrencyRateError(input.from, '2026-01-15'),
       );
     }
     if (input.from === input.to) {

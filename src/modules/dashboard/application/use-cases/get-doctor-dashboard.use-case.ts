@@ -148,8 +148,8 @@ export class GetDoctorDashboardUseCase {
     }
 
     // Currency format/support itself is validated downstream by
-    // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (unsupported currency
-    // throws BadRequestException there) -- not duplicated here.
+    // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (a currency without a
+    // rate throws UnsupportedCurrencyRateError there) -- not duplicated here.
     //
     // Los ingresos van por días CIVILES, inclusive: `from`..`to - 1`, que cada
     // sede corta a medianoche de su zona (DX-097). Un período vacío no consulta.

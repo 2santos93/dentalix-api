@@ -96,7 +96,7 @@ export class ExchangeController {
   @ApiOkResponse({ type: ConvertResponseDto })
   @ApiTooManyRequestsResponse({ description: TOO_MANY_DESCRIPTION })
   @ApiBadRequestResponse({
-    description: `${DATE_ERRORS_DESCRIPTION} También: moneda sin tasa ese día, «unsupported currency» con el proveedor; con tasa manual, código EXCHANGE_RATE_MISSING y el mensaje en español.`,
+    description: `${DATE_ERRORS_DESCRIPTION} También: moneda sin tasa ese día, código EXCHANGE_RATE_UNSUPPORTED con el proveedor y EXCHANGE_RATE_MISSING con tasa manual, los dos con el mensaje en español.`,
   })
   convert(
     @Query() query: ConvertQueryDto,

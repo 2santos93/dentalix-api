@@ -6,7 +6,10 @@ import {
   type RatesLookup,
   type RatesLookupOptions,
 } from './get-rates-for-date.use-case';
-import { MissingExchangeRateError } from '../../domain/missing-exchange-rate.error';
+import {
+  MissingExchangeRateError,
+  UnsupportedCurrencyRateError,
+} from '../../domain/missing-exchange-rate.error';
 import { BASE_CURRENCY } from '../../domain/exchange-rate-source';
 import { AMOUNT_NON_NEGATIVE_MESSAGE } from '../../../../shared/money/currency-messages';
 import {
@@ -132,7 +135,7 @@ export class ConvertAmountUseCase implements AmountConverter {
       if (rate !== undefined) return rate;
       throw source === 'MANUAL'
         ? new MissingExchangeRateError(currency, date)
-        : new BadRequestException(`unsupported currency: ${currency}`);
+        : new UnsupportedCurrencyRateError(currency, date);
     };
     const fromPerBase = perBase(from);
     const toPerBase = perBase(to);

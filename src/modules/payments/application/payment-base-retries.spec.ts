@@ -1,4 +1,4 @@
-import { BadRequestException, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import type { ConvertAmountUseCase } from '../../exchange/application/use-cases/convert-amount.use-case';
 import { ExchangeRateUnavailableError } from '../../exchange/domain/ports/exchange-rate-provider.port';
 import { PaymentBaseRetries } from './payment-base-retries';
@@ -6,6 +6,7 @@ import { InMemoryPaymentBaseRetryRepository } from './__fixtures__/in-memory-pay
 import { InMemoryPlanAllocationRepository } from './__fixtures__/in-memory-plan-allocation.repository';
 import type { FrozenExchangeRate } from '../domain/payment-exchange-rate';
 import { PaymentRateBackupAudit } from './payment-rate-backup-audit';
+import { UnsupportedCurrencyRateError } from '../../exchange/domain/missing-exchange-rate.error';
 
 const MIN = 60_000;
 
@@ -16,7 +17,7 @@ const MIN = 60_000;
 function quoting(
   rates: Record<string, number>,
   fail: () => Error = () =>
-    new BadRequestException('unsupported currency: VES'),
+    new UnsupportedCurrencyRateError('VES', '2026-01-15'),
   backup?: { manualSince: string },
 ) {
   const quotes: string[] = [];
