@@ -280,7 +280,7 @@ describe('Citas futuras — hoja de citas del importador (DX-263, e2e)', () => {
       .set('X-Location-Id', mainLocationId)
       .expect(200);
     expect(res.headers['content-type']).toMatch(/text\/csv/);
-    const [header, example] = res.text.replace(/^﻿/, '').split('\r\n');
+    const [header, example] = res.text.replace(/^\uFEFF/, '').split('\r\n');
     expect(header).toBe(
       '"numero_documento","fecha","hora","duracion_min","email_profesional","sede","tipo_cita","motivo"',
     );
@@ -498,13 +498,10 @@ describe('Citas futuras — hoja de citas del importador (DX-263, e2e)', () => {
       canUndo: true,
       remindersEnabledAt: null,
     });
-    expect(done.appointmentIssues).toContainEqual(
-      expect.objectContaining({
-        row: 11,
-        kind: 'ERROR',
-        message: expect.stringMatching(/^Al importar: .*profesional/),
-      }),
+    const failed = done.appointmentIssues.find(
+      (i) => i.row === 11 && i.kind === 'ERROR',
     );
+    expect(failed?.message).toMatch(/^Al importar: .*profesional/);
 
     const ana = await raw.patient.findFirstOrThrow({
       where: { tenantId: a.tenantId, docNumber: '111111', deletedAt: null },
