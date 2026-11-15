@@ -319,6 +319,7 @@ describe('DX-294: deshacer 10.000 pacientes recién importados en < 3 s (int)', 
       undoneCreated: ROWS,
       undoneFilled: 0,
       undoneBalances: 0,
+      undoneAppointments: 0,
     });
     expect(undone.ms).toBeLessThan(UNDO_BUDGET_MS);
 

@@ -643,6 +643,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
       undoneCreated: 1,
       undoneFilled: 0,
       undoneBalances: 3,
+      undoneAppointments: 0,
     });
     expect(
       await raw.openingBalance.count({
@@ -708,6 +709,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
       undoneCreated: 0,
       undoneFilled: 0,
       undoneBalances: 1,
+      undoneAppointments: 0,
     });
   });
 
@@ -883,6 +885,7 @@ describe('hoja de saldos del lote: dry-run, importación por bloques y deshacer 
       undoneCreated: 1,
       undoneFilled: 0,
       undoneBalances: 1,
+      undoneAppointments: 0,
     });
     // M8: la hora de la retirada es UTC (la de la BD), como el resto.
     const voided = await raw.openingBalance.findUniqueOrThrow({
