@@ -8,16 +8,16 @@ import {
 import { Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { createE2eApp } from './support/create-e2e-app';
 import {
   type Clinic,
-  createE2eApp,
   registerClinic,
   resetDatabase,
 } from './support/e2e-fixtures';
 
 // SEC-069 (barrido completo): un `:id` que no es UUID da 400 con el cuerpo
-// estándar de `ParseUUIDPipe` (el mismo que `appointments.controller`), no un
-// 500 de Prisma. Un UUID válido que no es de la clínica sigue dando 404, como
+// de `ParseUUIDPipe` (DX-111: en español y con `code`, por el filtro global de
+// configureApp), no un 500 de Prisma. Un UUID válido que no es de la clínica sigue dando 404, como
 // antes, sin filtrar nada del recurso ajeno.
 //
 // DIRECT_URL (superusuario, sin RLS) solo para limpiar la base al final.
@@ -28,8 +28,9 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const NOT_A_UUID = 'no-es-un-uuid';
 const UUID_400 = {
   statusCode: 400,
-  message: 'Validation failed (uuid is expected)',
+  message: 'El identificador no es válido.',
   error: 'Bad Request',
+  code: 'INVALID_ID',
 };
 
 type Method = 'get' | 'post' | 'patch' | 'delete';

@@ -61,6 +61,13 @@ function makeHandlerThatReadsTenantContext(
   };
 }
 
+// DX-111: la cabecera X-Location-Id se valida como UUID antes de consultar.
+const LOC_1 = '00000000-0000-4000-8000-000000000001';
+const LOC_2 = '00000000-0000-4000-8000-000000000002';
+const LOC_AJENA = '00000000-0000-4000-8000-0000000000aa';
+const LOC_OTRA_CLINICA = '00000000-0000-4000-8000-0000000000bb';
+const LOC_OFF = '00000000-0000-4000-8000-0000000000ff';
+
 describe('TenantContextInterceptor', () => {
   it('runs with the host-resolved tenant when the JWT tenant matches', (done) => {
     const tenantContext = new TenantContextService();
@@ -127,7 +134,7 @@ describe('TenantContextInterceptor', () => {
     const tenantContext = new TenantContextService();
     const interceptor = new TenantContextInterceptor(
       tenantContext,
-      makePrisma(['loc-1']),
+      makePrisma([LOC_1]),
     );
     const ctx = makeCtx({
       tenantHost: { tenantId: 't-1' },
@@ -155,12 +162,12 @@ describe('TenantContextInterceptor', () => {
     const tenantContext = new TenantContextService();
     const interceptor = new TenantContextInterceptor(
       tenantContext,
-      makePrisma(['loc-1']),
+      makePrisma([LOC_1]),
     );
     const ctx = makeCtx({
       tenantHost: { tenantId: 't-1' },
       user: { tenantId: 't-1', sub: 'u', role: 'ADMIN' },
-      headers: { 'x-location-id': 'loc-1' },
+      headers: { 'x-location-id': LOC_1 },
     });
     const next: CallHandler = {
       handle: () =>
@@ -174,7 +181,7 @@ describe('TenantContextInterceptor', () => {
     interceptor.intercept(ctx, next).subscribe({
       next: (v) => seen.push(v as string | undefined),
       complete: () => {
-        expect(seen).toEqual(['loc-1']);
+        expect(seen).toEqual([LOC_1]);
         done();
       },
     });
@@ -186,12 +193,12 @@ describe('TenantContextInterceptor', () => {
     const tenantContext = new TenantContextService();
     const interceptor = new TenantContextInterceptor(
       tenantContext,
-      makePrisma(['loc-1']),
+      makePrisma([LOC_1]),
     );
     const ctx = makeCtx({
       tenantHost: { tenantId: 't-1' },
       user: { tenantId: 't-1', sub: 'u', role: 'ADMIN' },
-      headers: { 'x-location-id': 'loc-de-otra-clinica' },
+      headers: { 'x-location-id': LOC_OTRA_CLINICA },
     });
     const next: CallHandler = {
       handle: () => new Observable((sub) => sub.complete()),
@@ -200,6 +207,35 @@ describe('TenantContextInterceptor', () => {
     interceptor.intercept(ctx, next).subscribe({
       error: (err) => {
         expect(err).toBeInstanceOf(BadRequestException);
+        done();
+      },
+    });
+  });
+
+  it('DX-111: una cabecera que no es UUID → 400 en español sin consultar la base', (done) => {
+    const prisma = makePrisma([LOC_1]) as unknown as {
+      calls: { findFirst: number };
+    };
+    const interceptor = new TenantContextInterceptor(
+      new TenantContextService(),
+      prisma as never,
+    );
+    const ctx = makeCtx({
+      tenantHost: { tenantId: 't-1' },
+      user: { tenantId: 't-1', sub: 'u', role: 'ADMIN' },
+      headers: { 'x-location-id': 'no-es-uuid' },
+    });
+    const next: CallHandler = {
+      handle: () => new Observable((sub) => sub.complete()),
+    };
+
+    interceptor.intercept(ctx, next).subscribe({
+      error: (err: BadRequestException) => {
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect(err.message).toBe(
+          'La sede elegida no es válida. Vuelve a elegir la sede.',
+        );
+        expect(prisma.calls.findFirst).toBe(0);
         done();
       },
     });
@@ -223,7 +259,7 @@ describe('TenantContextInterceptor', () => {
     function runWith(
       user: { loc?: string[] },
       headers: Record<string, string> = {},
-      known = ['loc-1', 'loc-2'],
+      known = [LOC_1, LOC_2],
     ): Promise<unknown> {
       const tenantContext = new TenantContextService();
       const interceptor = new TenantContextInterceptor(
@@ -244,8 +280,8 @@ describe('TenantContextInterceptor', () => {
 
     it('cabecera con una sede NO permitida → 403 LOCATION_NOT_ALLOWED en español', async () => {
       const err = await runWith(
-        { loc: ['loc-1'] },
-        { 'x-location-id': 'loc-2' },
+        { loc: [LOC_1] },
+        { 'x-location-id': LOC_2 },
       ).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(ForbiddenException);
       expect((err as ForbiddenException).getResponse()).toEqual({
@@ -257,38 +293,37 @@ describe('TenantContextInterceptor', () => {
     });
 
     it('loc = [] rechaza cualquier cabecera', async () => {
-      const err = await runWith(
-        { loc: [] },
-        { 'x-location-id': 'loc-1' },
-      ).catch((e: unknown) => e);
+      const err = await runWith({ loc: [] }, { 'x-location-id': LOC_1 }).catch(
+        (e: unknown) => e,
+      );
       expect(err).toBeInstanceOf(ForbiddenException);
     });
 
     it('una sede de otra clínica sigue siendo 400 (antes que el 403)', async () => {
       const err = await runWith(
-        { loc: ['loc-1'] },
-        { 'x-location-id': 'loc-ajena' },
+        { loc: [LOC_1] },
+        { 'x-location-id': LOC_AJENA },
       ).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(BadRequestException);
     });
 
     it('cabecera con una sede permitida → la expone junto con la lista', async () => {
       await expect(
-        runWith({ loc: ['loc-1', 'loc-2'] }, { 'x-location-id': 'loc-2' }),
-      ).resolves.toEqual({ locationId: 'loc-2', allowed: ['loc-1', 'loc-2'] });
+        runWith({ loc: [LOC_1, LOC_2] }, { 'x-location-id': LOC_2 }),
+      ).resolves.toEqual({ locationId: LOC_2, allowed: [LOC_1, LOC_2] });
     });
 
     it('una sola sede y sin cabecera → se fija esa sede (auto-pin)', async () => {
-      await expect(runWith({ loc: ['loc-1'] })).resolves.toEqual({
-        locationId: 'loc-1',
-        allowed: ['loc-1'],
+      await expect(runWith({ loc: [LOC_1] })).resolves.toEqual({
+        locationId: LOC_1,
+        allowed: [LOC_1],
       });
     });
 
     it('varias sedes y sin cabecera → sin sede fija, solo la lista', async () => {
-      await expect(runWith({ loc: ['loc-1', 'loc-2'] })).resolves.toEqual({
+      await expect(runWith({ loc: [LOC_1, LOC_2] })).resolves.toEqual({
         locationId: undefined,
-        allowed: ['loc-1', 'loc-2'],
+        allowed: [LOC_1, LOC_2],
       });
     });
 
@@ -300,8 +335,8 @@ describe('TenantContextInterceptor', () => {
     });
 
     it('sin claim → igual que hoy: cualquier sede de la clínica y ALL', async () => {
-      await expect(runWith({}, { 'x-location-id': 'loc-2' })).resolves.toEqual({
-        locationId: 'loc-2',
+      await expect(runWith({}, { 'x-location-id': LOC_2 })).resolves.toEqual({
+        locationId: LOC_2,
         allowed: 'ALL',
       });
       await expect(runWith({})).resolves.toEqual({
@@ -318,10 +353,7 @@ describe('TenantContextInterceptor', () => {
       headers: Record<string, string> = {},
     ): { result: Promise<unknown>; calls: { findFirst: number } } {
       const tenantContext = new TenantContextService();
-      const prisma = makePrisma(
-        ['loc-1', 'loc-off'],
-        ['loc-off'],
-      ) as unknown as {
+      const prisma = makePrisma([LOC_1, LOC_OFF], [LOC_OFF]) as unknown as {
         calls: { findFirst: number };
       };
       const interceptor = new TenantContextInterceptor(
@@ -357,7 +389,7 @@ describe('TenantContextInterceptor', () => {
         message:
           'Esta sede está desactivada: puedes consultar su historial, pero no registrar cambios en ella. Elige una sede activa.',
         // Nombra la sede: el cliente suelta su cabecera solo si es esta.
-        locationId: 'loc-off',
+        locationId: LOC_OFF,
       });
     }
 
@@ -368,7 +400,7 @@ describe('TenantContextInterceptor', () => {
           method,
           {},
           {
-            'x-location-id': 'loc-off',
+            'x-location-id': LOC_OFF,
           },
         ).result.catch((e: unknown) => e);
         expectInactive(err);
@@ -379,17 +411,17 @@ describe('TenantContextInterceptor', () => {
       '%s con la cabecera de una sede desactivada → se lee su historial',
       async (method) => {
         await expect(
-          runWith(method, {}, { 'x-location-id': 'loc-off' }).result,
-        ).resolves.toBe('loc-off');
+          runWith(method, {}, { 'x-location-id': LOC_OFF }).result,
+        ).resolves.toBe(LOC_OFF);
       },
     );
 
     it('el 403 de una sede no permitida va antes que el 400 de desactivada', async () => {
       const err = await runWith(
         'POST',
-        { loc: ['loc-1'] },
+        { loc: [LOC_1] },
         {
-          'x-location-id': 'loc-off',
+          'x-location-id': LOC_OFF,
         },
       ).result.catch((e: unknown) => e);
       expect(err).toBeInstanceOf(ForbiddenException);
@@ -397,24 +429,24 @@ describe('TenantContextInterceptor', () => {
 
     it('auto-pin en una sede desactivada (token anterior): escribir → 400, leer sí', async () => {
       expectInactive(
-        await runWith('POST', { loc: ['loc-off'] }).result.catch(
+        await runWith('POST', { loc: [LOC_OFF] }).result.catch(
           (e: unknown) => e,
         ),
       );
-      await expect(runWith('GET', { loc: ['loc-off'] }).result).resolves.toBe(
-        'loc-off',
+      await expect(runWith('GET', { loc: [LOC_OFF] }).result).resolves.toBe(
+        LOC_OFF,
       );
     });
 
     it('una escritura en sede activa pasa con UNA sola consulta, y sin sede no consulta', async () => {
-      const header = runWith('POST', {}, { 'x-location-id': 'loc-1' });
-      await expect(header.result).resolves.toBe('loc-1');
+      const header = runWith('POST', {}, { 'x-location-id': LOC_1 });
+      await expect(header.result).resolves.toBe(LOC_1);
       expect(header.calls.findFirst).toBe(1);
-      const pinned = runWith('POST', { loc: ['loc-1'] });
-      await expect(pinned.result).resolves.toBe('loc-1');
+      const pinned = runWith('POST', { loc: [LOC_1] });
+      await expect(pinned.result).resolves.toBe(LOC_1);
       expect(pinned.calls.findFirst).toBe(1);
-      const pinnedRead = runWith('GET', { loc: ['loc-1'] });
-      await expect(pinnedRead.result).resolves.toBe('loc-1');
+      const pinnedRead = runWith('GET', { loc: [LOC_1] });
+      await expect(pinnedRead.result).resolves.toBe(LOC_1);
       expect(pinnedRead.calls.findFirst).toBe(0);
       const consolidated = runWith('POST', {});
       await expect(consolidated.result).resolves.toBeUndefined();

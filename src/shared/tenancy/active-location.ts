@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { isUUID } from 'class-validator';
 import type { PrismaService } from '../prisma/prisma.service';
 import { locationNotAllowed } from './location-access';
 
@@ -99,6 +100,13 @@ export async function assertBodyLocationWritable(
   if (location) assertLocationWritable(location);
 }
 
+/** DX-111: la cabecera `X-Location-Id` no es un UUID. */
+export const INVALID_LOCATION_HEADER_MESSAGE =
+  'La sede elegida no es válida. Vuelve a elegir la sede.';
+/** La cabecera nombra una sede que no es de esta clínica (o se borró). */
+export const UNKNOWN_LOCATION_MESSAGE =
+  'La sede elegida no existe en esta clínica. Vuelve a elegir la sede.';
+
 /**
  * Sede activa de una petición de clínica: cabecera `X-Location-Id`, VALIDADA
  * contra la clínica (una sede de otra clínica no se ignora en silencio: eso
@@ -130,6 +138,10 @@ export async function resolveActiveLocationId(
   const raw = headers?.['x-location-id'] ?? undefined;
   const headerLocationId = Array.isArray(raw) ? raw[0] : raw;
   if (headerLocationId) {
+    // DX-111: un id mal formado no llega a la base (sería un 500 por P2023).
+    if (!isUUID(headerLocationId)) {
+      throw new BadRequestException(INVALID_LOCATION_HEADER_MESSAGE);
+    }
     const location = await prisma.runWithTenant(tenantId, (tx) =>
       tx.location.findFirst({
         where: { id: headerLocationId, deletedAt: null },
@@ -137,7 +149,7 @@ export async function resolveActiveLocationId(
       }),
     );
     if (!location) {
-      throw new BadRequestException('Unknown location for this clinic');
+      throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);
     }
     if (allowed && !allowed.includes(location.id)) {
       throw locationNotAllowed();

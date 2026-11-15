@@ -123,4 +123,32 @@ describe('Entradas sin 500 y errores en español (DX-111)', () => {
       ).expect(200);
     });
   });
+
+  describe('ids mal formados (BE-019)', () => {
+    it('GET /patients/no-es-uuid → 400 INVALID_ID en español', async () => {
+      const res = await call('get', '/patients/no-es-uuid').expect(400);
+      expect(res.body).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'INVALID_ID',
+        message: 'El identificador no es válido.',
+      });
+    });
+
+    it('X-Location-Id que no es UUID → 400 en español, no 500', async () => {
+      const res = await call('get', '/patients')
+        .set('X-Location-Id', 'abc')
+        .expect(400);
+      expect((res.body as { message: string }).message).toBe(
+        'La sede elegida no es válida. Vuelve a elegir la sede.',
+      );
+    });
+
+    it('una ruta que no existe → 404 en español', async () => {
+      const res = await call('get', '/no-existe').expect(404);
+      expect((res.body as { message: string }).message).toBe(
+        'La ruta solicitada no existe.',
+      );
+    });
+  });
 });

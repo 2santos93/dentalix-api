@@ -33,6 +33,11 @@ import { stackWithoutMessage } from '../observability/safe-stack';
  * una sentencia cancelada por `statement_timeout` (57014) → 503
  * `STATEMENT_TIMEOUT`. Los dos con `Retry-After` y el request id, nunca el
  * 500 genérico. Cualquier otro P2028 sigue siendo un 500.
+ *
+ * DX-111 (BE-019): un identificador que no es un UUID válido y que llegó a la
+ * base sin pasar por `ParseUUIDPipe` (P2023 «Error creating UUID» del ORM o
+ * 22P02 `invalid_text_representation` de Postgres) → 400 `INVALID_ID`, nunca
+ * un 500. Es la red: las rutas ya validan sus `:id` (route-uuid-params.spec).
  */
 
 // Maps a Prisma unique-index name (or column list) in `meta.target` to a
@@ -257,6 +262,15 @@ const STATEMENT_TIMEOUT: ErrorBody = {
 export const P2028_TIMEOUT_PATTERN =
   /expired transaction|Unable to start a transaction in the given time|timeout for this transaction/i;
 
+// DX-111: un id mal formado que llegó a la base (ver el comentario de arriba).
+export const INVALID_ID_MESSAGE = 'Un identificador enviado no es válido.';
+const INVALID_ID: ErrorBody = {
+  statusCode: HttpStatus.BAD_REQUEST,
+  error: 'Bad Request',
+  code: 'INVALID_ID',
+  message: INVALID_ID_MESSAGE,
+};
+
 const INTERNAL_ERROR: ErrorBody = {
   statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
   error: 'Internal Server Error',
@@ -269,6 +283,7 @@ const INTERNAL_ERROR: ErrorBody = {
 export const BY_SQLSTATE: Record<string, ErrorBody> = {
   '23514': CHECK_VIOLATION, // check_violation
   '22003': NUMERIC_OVERFLOW, // numeric_value_out_of_range
+  '22P02': INVALID_ID, // invalid_text_representation (p. ej. uuid mal formado)
   '23503': FK_VIOLATION, // foreign_key_violation
   '23001': RESTRICT_VIOLATION, // restrict_violation (triggers de inmutabilidad)
   '40P01': CONCURRENCY_CONFLICT, // deadlock_detected
@@ -430,11 +445,13 @@ export class PrismaExceptionFilter implements ExceptionFilter {
     const generic =
       prismaCode === 'P2003'
         ? FK_VIOLATION
-        : prismaCode === 'P2034'
-          ? CONCURRENCY_CONFLICT
-          : sqlState
-            ? BY_SQLSTATE[sqlState]
-            : undefined;
+        : prismaCode === 'P2023'
+          ? INVALID_ID
+          : prismaCode === 'P2034'
+            ? CONCURRENCY_CONFLICT
+            : sqlState
+              ? BY_SQLSTATE[sqlState]
+              : undefined;
     if (generic) {
       // Una regla de la base que la validación de la app no cubrió: se
       // registra para poder cerrarla también en la DTO o el caso de uso.

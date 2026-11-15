@@ -187,6 +187,71 @@ describe('PrismaExceptionFilter', () => {
     logSpy.mockRestore();
   });
 
+  describe('DX-111: id mal formado que llega a la base → 400 INVALID_ID', () => {
+    const INVALID_ID_BODY = {
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'INVALID_ID',
+      message: 'Un identificador enviado no es válido.',
+    };
+
+    it('P2023 del ORM («Error creating UUID»)', () => {
+      const filter = new PrismaExceptionFilter();
+      const { host, status, json } = mockHost();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      filter.catch(
+        new Prisma.PrismaClientKnownRequestError(
+          'Inconsistent column data: Error creating UUID, invalid character: expected an optional prefix of `urn:uuid:` followed by [0-9a-fA-F-], found `n` at 1',
+          { code: 'P2023', clientVersion: '6.19.3', meta: {} },
+        ),
+        host,
+      );
+
+      expect(status).toHaveBeenCalledWith(400);
+      expect(bodyOf(json)).toEqual(INVALID_ID_BODY);
+      jest.restoreAllMocks();
+    });
+
+    it('22P02 de Postgres por el ORM, sin el texto de Postgres', () => {
+      const filter = new PrismaExceptionFilter();
+      const { host, status, json } = mockHost();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      filter.catch(
+        unknownPg(
+          '22P02',
+          'invalid input syntax for type uuid: \\"no-es-uuid\\"',
+          SECRET_DETAIL,
+        ),
+        host,
+      );
+
+      expect(status).toHaveBeenCalledWith(400);
+      expect(bodyOf(json)).toEqual(INVALID_ID_BODY);
+      expect(JSON.stringify(bodyOf(json))).not.toContain('no-es-uuid');
+      jest.restoreAllMocks();
+    });
+
+    it('22P02 de una consulta cruda (P2010 con meta.code)', () => {
+      const filter = new PrismaExceptionFilter();
+      const { host, status, json } = mockHost();
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      filter.catch(
+        new Prisma.PrismaClientKnownRequestError(
+          'Raw query failed. Code: `22P02`. Message: `ERROR: invalid input syntax for type uuid: "abc"`',
+          { code: 'P2010', clientVersion: '6.19.3', meta: { code: '22P02' } },
+        ),
+        host,
+      );
+
+      expect(status).toHaveBeenCalledWith(400);
+      expect(bodyOf(json)).toEqual(INVALID_ID_BODY);
+      jest.restoreAllMocks();
+    });
+  });
+
   it('turns a numeric overflow (22003) into a 400 instead of a 500', () => {
     const filter = new PrismaExceptionFilter();
     const { host, status, json } = mockHost();
