@@ -7,6 +7,7 @@ import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { applySecurity } from '../src/shared/security/apply-security';
 import { loadSecuritySettings } from '../src/shared/security/security-settings';
+import { VerifiedDomainOrigins } from '../src/shared/security/verified-domain-origins';
 import {
   REFRESH_COOKIE,
   SessionCookieService,
@@ -146,11 +147,14 @@ describe('Refresh en cookie HttpOnly (e2e, DX-062)', () => {
       imports: [AppModule],
     })
       .overrideProvider(SessionCookieService)
-      .useValue(
-        new SessionCookieService({
-          get: env,
-        } as unknown as ConfigService),
-      )
+      .useFactory({
+        inject: [VerifiedDomainOrigins],
+        factory: (origins: VerifiedDomainOrigins) =>
+          new SessionCookieService(
+            { get: env } as unknown as ConfigService,
+            origins,
+          ),
+      })
       .overrideProvider(MAILER)
       .useValue(mailer)
       .compile();

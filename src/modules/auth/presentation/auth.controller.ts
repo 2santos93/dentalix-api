@@ -116,13 +116,13 @@ export class AuthController {
    * migración de la web), si no el de la cookie. Usar la cookie exige un
    * `Origin` de la propia clínica (CSRF, además de SameSite=Strict).
    */
-  private refreshOf(
+  private async refreshOf(
     req: TenantHostRequest,
     fromBody: string | undefined,
-  ): { token: string | undefined; viaCookie: boolean } {
+  ): Promise<{ token: string | undefined; viaCookie: boolean }> {
     if (fromBody) return { token: fromBody, viaCookie: false };
     const fromCookie = this.cookie.read(req);
-    if (fromCookie) this.cookie.assertTrustedOrigin(req);
+    if (fromCookie) await this.cookie.assertTrustedOrigin(req);
     return { token: fromCookie, viaCookie: Boolean(fromCookie) };
   }
 
@@ -326,7 +326,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Body() dto: RefreshDto,
   ): Promise<DeliveredSession> {
-    const { token, viaCookie } = this.refreshOf(req, dto.refreshToken);
+    const { token, viaCookie } = await this.refreshOf(req, dto.refreshToken);
     if (!token) throw new UnauthorizedException('Missing refresh token');
     const hostTenantId = req.tenantHost?.tenantId ?? null;
     const cookieMode = viaCookie || this.cookie.wantsCookie(req);
@@ -358,7 +358,7 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
     @Body() dto: LogoutDto,
   ): Promise<void> {
-    const { token } = this.refreshOf(req, dto.refreshToken);
+    const { token } = await this.refreshOf(req, dto.refreshToken);
     if (token) await this.logout.execute({ refreshToken: token });
     this.cookie.clear(res);
   }
