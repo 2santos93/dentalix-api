@@ -1189,6 +1189,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     budgetSignatures: 0,
     signedPdfCopies: 1,
     anamnesis: 3,
+    prescriptionCopies: 2,
   };
 
   it('conserva el número de enlaces anulados por tipo', () => {

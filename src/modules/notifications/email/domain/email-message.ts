@@ -24,6 +24,7 @@ export const EMAIL_TEMPLATES = [
   'signature-budget-accepted',
   'slot-offer',
   'signed-consent-copy',
+  'prescription-copy',
   'mfa-notice',
   'mfa-enrollment-code',
 ] as const;
@@ -61,6 +62,7 @@ export const TENANT_DAILY_BUDGET: Readonly<
   'signature-budget-accepted': 'clinic',
   'slot-offer': 'clinic',
   'signed-consent-copy': 'clinic',
+  'prescription-copy': 'clinic',
   'mfa-notice': 'clinic',
   'mfa-enrollment-code': 'clinic',
 };
@@ -83,6 +85,8 @@ export const DEFAULT_EMAIL_LOCALE: EmailLocale = 'es';
  */
 export const LOCALIZED_EMAIL_TEMPLATES: readonly EmailTemplateName[] = [
   'appointment-reminder',
+  // DX-468: la copia de la receta, en el idioma del paciente.
+  'prescription-copy',
 ];
 
 /** Marca de la clínica que firma el email; `null` = email de plataforma. */
@@ -352,6 +356,23 @@ export interface SignedConsentCopyEmailVars {
   expiresAtLabel: string;
 }
 
+/**
+ * DX-468: la copia informativa de una receta emitida, con un enlace
+ * caducable. Nada clínico: quién la envía, para quién y el enlace (la receta
+ * se ve en la página tras validar el token).
+ */
+export interface PrescriptionCopyEmailVars {
+  /** Nombre de pila de quien la recibe (el paciente o su responsable). */
+  recipientFirstName: string | null;
+  /** Va al responsable de un menor: el nombre de pila del paciente. */
+  patientFirstName: string | null;
+  clinicName: string;
+  /** Enlace público (`/receta/copia/<token>`). */
+  url: string;
+  /** Caducidad del enlace, ya escrita con el formato de la sede. */
+  expiresAtLabel: string;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -368,6 +389,7 @@ export interface EmailVarsByTemplate {
   'signature-budget-accepted': SignatureBudgetAcceptedEmailVars;
   'slot-offer': SlotOfferEmailVars;
   'signed-consent-copy': SignedConsentCopyEmailVars;
+  'prescription-copy': PrescriptionCopyEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

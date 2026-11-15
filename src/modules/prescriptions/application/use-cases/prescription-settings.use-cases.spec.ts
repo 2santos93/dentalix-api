@@ -22,11 +22,18 @@ class InMemoryPrescriptionSettingsRepository implements PrescriptionSettingsRepo
   }
 
   set(
-    next: PrescriptionSettings,
+    next: Parameters<PrescriptionSettingsRepository['set']>[0],
   ): Promise<{ before: PrescriptionSettings; after: PrescriptionSettings }> {
     const before = this.settings;
-    this.settings = { ...next };
-    return Promise.resolve({ before, after: { ...next } });
+    // DX-468: sin pie en la entrada, se queda el que había.
+    this.settings = {
+      ...next,
+      patientCopyFooter:
+        next.patientCopyFooter === undefined
+          ? before.patientCopyFooter
+          : next.patientCopyFooter,
+    };
+    return Promise.resolve({ before, after: { ...this.settings } });
   }
 }
 
@@ -57,6 +64,7 @@ describe('Ajustes de la receta de la clínica (DX-324)', () => {
       printQuantityInWords: true,
       requireClinicalRecordNumber: true,
       validityDays: 7,
+      patientCopyFooter: null,
     };
     await expect(
       new GetPrescriptionSettingsUseCase(repo).execute(),
@@ -64,6 +72,7 @@ describe('Ajustes de la receta de la clínica (DX-324)', () => {
       printQuantityInWords: true,
       requireClinicalRecordNumber: true,
       validityDays: 7,
+      patientCopyFooter: null,
     });
   });
 
@@ -73,8 +82,11 @@ describe('Ajustes de la receta de la clínica (DX-324)', () => {
       requireClinicalRecordNumber: false,
       validityDays: 10,
     };
-    await expect(update().execute(next, ctx)).resolves.toEqual(next);
-    expect(repo.settings).toEqual(next);
+    await expect(update().execute(next, ctx)).resolves.toEqual({
+      ...next,
+      patientCopyFooter: null,
+    });
+    expect(repo.settings).toEqual({ ...next, patientCopyFooter: null });
     expect(audit.record).toHaveBeenCalledTimes(1);
     expect(audit.record).toHaveBeenCalledWith({
       tenantId: 't-1',
@@ -124,4 +136,44 @@ describe('Ajustes de la receta de la clínica (DX-324)', () => {
       expect(audit.record).not.toHaveBeenCalled();
     },
   );
+
+  describe('pie de la copia para el paciente (DX-468)', () => {
+    const base = {
+      printQuantityInWords: false,
+      requireClinicalRecordNumber: false,
+      validityDays: 30,
+    };
+
+    it('se guarda recortado y queda en changedFields (sin el texto en el evento)', async () => {
+      const saved = await update().execute(
+        { ...base, patientCopyFooter: '  Copia informativa.  ' },
+        ctx,
+      );
+      expect(saved.patientCopyFooter).toBe('Copia informativa.');
+      const calls = audit.record.mock.calls as unknown as [
+        { metadata: { changedFields: string[] } },
+      ][];
+      const event = calls[0][0];
+      expect(event.metadata.changedFields).toEqual(['patientCopyFooter']);
+      expect(JSON.stringify(event)).not.toContain('Copia informativa');
+    });
+
+    it('vacío vuelve al de plataforma (null); ausente no lo toca', async () => {
+      repo.settings = { ...base, patientCopyFooter: 'Texto anterior' };
+      await expect(update().execute(base, ctx)).resolves.toMatchObject({
+        patientCopyFooter: 'Texto anterior',
+      });
+      await expect(
+        update().execute({ ...base, patientCopyFooter: '   ' }, ctx),
+      ).resolves.toMatchObject({ patientCopyFooter: null });
+    });
+
+    it('más de 300 caracteres: 400 sin escribir', async () => {
+      const error = await update()
+        .execute({ ...base, patientCopyFooter: 'x'.repeat(301) }, ctx)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(repo.settings.patientCopyFooter).toBeNull();
+    });
+  });
 });

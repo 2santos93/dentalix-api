@@ -506,6 +506,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'payment_promises.patientId',
       'perio_exams.patientId',
       'post_op_instruction_deliveries.patientId',
+      // DX-468: un enlace de la copia de una receta; solo existe con una
+      // receta emitida (que ya bloquea el deshacer): bloquea igual.
+      'prescription_copy_links.patientId',
       'prescriptions.patientId',
       'recall_contacts.patientId',
       'reminder_opt_out_links.patientId',

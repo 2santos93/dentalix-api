@@ -34,6 +34,7 @@ export const TEST_PRESCRIPTION_SETTINGS: PrescriptionSettings = {
   printQuantityInWords: true,
   requireClinicalRecordNumber: true,
   validityDays: 30,
+  patientCopyFooter: null,
 };
 
 export function makeIssuer(

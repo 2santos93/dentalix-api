@@ -703,6 +703,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { lookup: 'prescription', param: 'id' },
   },
+  // DX-468: «Enviar al paciente» la copia de la receta (la apertura pública
+  // la audita el caso de uso: VIEW sin usuario, PRESCRIPTION_COPY_OPENED).
+  'POST /prescriptions/:id/patient-copy': {
+    action: 'SEND',
+    resource: 'PRESCRIPTION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'prescription', param: 'id' },
+    reason: 'PRESCRIPTION_COPY_SENT',
+  },
 
   // DX-191: registro de implantes, tarjeta y búsqueda por lote.
   'GET /patients/:patientId/implants': {
