@@ -64,6 +64,8 @@ import type { ColumnMapping } from '../domain/column-mapping';
 import { DOCUMENT_TYPES } from '../../patients/domain/document-type';
 import {
   ACTIVE_IMPORT_MESSAGE,
+  APPOINTMENTS_NOT_EDITABLE_MESSAGE,
+  APPOINTMENT_REPORT_GONE_MESSAGE,
   BALANCES_NOT_EDITABLE_MESSAGE,
   BALANCE_REPORT_GONE_MESSAGE,
   NOT_FOUND_MESSAGE,
@@ -231,6 +233,24 @@ export class PatientImportsController {
   @Header('Content-Disposition', 'attachment; filename="plantilla-saldos.csv"')
   balanceTemplate(): Promise<string> {
     return this.imports.balanceTemplate();
+  }
+
+  @Get('appointments-template')
+  @ApiOperation({
+    summary: 'Plantilla CSV de la hoja de citas futuras (DX-263)',
+    description:
+      'numero_documento, fecha (DD/MM/AAAA o AAAA-MM-DD), hora (HH:MM, 24 h, en la zona de la sede), duracion_min (5–480; opcional si viene tipo_cita), email_profesional, sede (opcional: la del lote), tipo_cita (opcional) y motivo (opcional). UTF-8 con BOM; una fila de ejemplo ficticia que hay que borrar.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'Plantilla CSV',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="plantilla-citas.csv"')
+  appointmentTemplate(): Promise<string> {
+    return this.imports.appointmentTemplate();
   }
 
   @Post('inspect')
@@ -521,6 +541,152 @@ export class PatientImportsController {
     action: 'UPDATE',
     resource: 'PATIENT_IMPORT_BATCH',
     resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENTS_VALIDATED',
+    importBatch: true,
+  })
+  @Post(':id/appointments')
+  @ApiOperation({
+    summary:
+      'Hoja de citas futuras del lote (DX-263): validar las citas (dry-run)',
+    description:
+      'Solo con el lote validado y sin confirmar; hasta 2.000 filas. Cada cita pasa por las MISMAS reglas que agendar a mano: futura y como mucho a 366 días, profesional del equipo por su email (uno desconocido es error de la fila: nunca se asigna a otro) que atiende en la sede, sede activa y permitida (por nombre; vacía, la del lote), horario de la sede, bloqueos, festivos de la sede (DX-316), solapes con la agenda (profesional y paciente) y entre las filas del propio archivo, tipo de cita activo y duración de 5 a 480 minutos (o la del tipo, con aviso). La fecha y la hora se leen en la zona de la sede de la cita. Las filas rechazadas salen con su motivo en español; NO crea ninguna cita: se crean al confirmar el lote, después de los pacientes y los saldos, sin recordatorios automáticos hasta activarlos (POST :id/appointments/reminders). Volver a subirla la reemplaza.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: FILE_BODY },
+    },
+  })
+  @ApiCreatedResponse({ type: PatientImportBatchDetailDto })
+  @ApiBadRequestResponse({
+    description:
+      'Archivo vacío, de otro formato, con más de 2.000 filas o sin las columnas de documento, fecha, hora o email del profesional',
+  })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: APPOINTMENTS_NOT_EDITABLE_MESSAGE })
+  @ApiPayloadTooLargeResponse({ description: FILE_TOO_LARGE_MESSAGE })
+  @ApiServiceUnavailableResponse(READ_BUSY_RESPONSE)
+  @RateLimit('patient-import')
+  @UseGuards(ImportUploadSlotGuard)
+  @UseInterceptors(
+    UploadSlotInterceptor,
+    FILE_INTERCEPTOR,
+    ImportReadSlotInterceptor,
+  )
+  async appointments(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ): Promise<BatchDetail> {
+    return this.imports.dryRunAppointments(id, await loadUpload(file));
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENTS_REMOVED',
+    importBatch: true,
+  })
+  @Delete(':id/appointments')
+  @ApiOperation({
+    summary: 'Quitar la hoja de citas de un lote aún sin confirmar (DX-263)',
+  })
+  @ApiOkResponse({ type: PatientImportBatchDetailDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: APPOINTMENTS_NOT_EDITABLE_MESSAGE })
+  removeAppointments(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<BatchDetail> {
+    return this.imports.removeAppointments(id);
+  }
+
+  @Audit({
+    action: 'EXPORT',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENT_ERRORS',
+  })
+  @Get(':id/appointments/errors.csv')
+  @ApiOperation({
+    summary: 'Informe de errores y avisos de la hoja de citas (CSV, DX-263)',
+    description:
+      'Fila, columna, tipo, motivo y valor, también las rechazadas al importar. UTF-8 con BOM; fórmulas neutralizadas (inyección CSV).',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'Fichero CSV',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiGoneResponse({ description: APPOINTMENT_REPORT_GONE_MESSAGE })
+  async appointmentErrors(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const report = await this.imports.appointmentErrorsCsv(id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${report.fileName}"`,
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    return report.csv;
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENTS_UNDONE',
+    importBatch: true,
+  })
+  @Post(':id/appointments/undo')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Retirar solo las citas importadas del lote (DX-263)',
+    description:
+      'Retira en blando las citas del lote que siguen programadas (SCHEDULED), aunque sus pacientes ya tengan actividad; las que cambiaron de estado (confirmadas, atendidas, canceladas…) se quedan. El lote sigue importado.',
+  })
+  @ApiOkResponse({ type: PatientImportBatchDetailDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: 'El lote no está terminado' })
+  undoAppointments(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<BatchDetail> {
+    return this.imports.undoAppointments(id);
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENT_REMINDERS_ENABLED',
+    importBatch: true,
+  })
+  @Post(':id/appointments/reminders')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Activar los recordatorios automáticos de las citas importadas (DX-263)',
+    description:
+      'Las citas importadas no reciben recordatorios automáticos (DX-128) hasta que un ADMIN los activa en su lote; desde ese momento el barrido las trata como a las demás. Idempotente.',
+  })
+  @ApiOkResponse({ type: PatientImportBatchDetailDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
+  @ApiConflictResponse({ description: 'El lote no está terminado' })
+  enableAppointmentReminders(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<BatchDetail> {
+    return this.imports.enableAppointmentReminders(id, req.user.sub);
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
     reason: 'IMPORT_CONFIRMED',
     importBatch: true,
   })
@@ -529,7 +695,7 @@ export class PatientImportsController {
   @ApiOperation({
     summary: 'Paso 3: confirmar e importar en segundo plano',
     description:
-      'Encola el trabajo que importa el lote por bloques (la clínica sigue trabajando): primero los pacientes y después, si el lote trae hoja de saldos, un «Saldo migrado» por paciente y moneda (DX-262). Una importación en curso por clínica. Los pacientes quedan SIN autorización de datos registrada: la ficha la marca pendiente.',
+      'Encola el trabajo que importa el lote por bloques (la clínica sigue trabajando): primero los pacientes, después, si el lote trae hoja de saldos, un «Saldo migrado» por paciente y moneda (DX-262) y, si trae hoja de citas, sus citas (DX-263), cada una revalidada con las reglas de agendar. Una importación en curso por clínica. Los pacientes quedan SIN autorización de datos registrada: la ficha la marca pendiente.',
   })
   @ApiOkResponse({ type: PatientImportBatchDetailDto })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })
@@ -556,7 +722,7 @@ export class PatientImportsController {
   @ApiOperation({
     summary: 'Deshacer el lote',
     description:
-      'Retira en blando SOLO los pacientes que creó el lote, revierte los campos que rellenó (si siguen con el valor del lote) y retira sus saldos migrados (DX-262). Se niega (409) si alguno de los creados ya tiene citas, historia clínica, planes, pagos, saldos de otra importación u otros datos, o si algún saldo migrado del lote tiene abonos imputados.',
+      'Retira en blando SOLO los pacientes que creó el lote, revierte los campos que rellenó (si siguen con el valor del lote), retira sus saldos migrados (DX-262) y sus citas importadas que siguen programadas (DX-263; las que cambiaron de estado se quedan). Se niega (409) si alguno de los creados ya tiene otras citas (o una importada que cambió de estado), historia clínica, planes, pagos, saldos de otra importación u otros datos, o si algún saldo migrado del lote tiene abonos imputados.',
   })
   @ApiOkResponse({ type: PatientImportBatchDetailDto })
   @ApiNotFoundResponse({ description: NOT_FOUND_MESSAGE })

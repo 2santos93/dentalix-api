@@ -5240,6 +5240,64 @@ los pacientes y antes de confirmar, se puede subir una **hoja de saldos**
   `balanceUndoneTotals` (lo retirado de verdad); totales AGREGADOS, nunca el
   de un paciente ni documentos.
 
+## Citas futuras en la importación (DX-263)
+
+Porción 3 de DX-107: la clínica que se cambia de programa ya tiene semanas de
+agenda dada. En el asistente de importación, después de validar los pacientes
+y antes de confirmar, se puede subir una **hoja de citas** (CSV o XLSX, 5 MB y
+hasta **2.000 filas**). Solo ADMIN.
+
+- **Columnas** (por sinónimos, sin tildes; plantilla en
+  `GET /patient-imports/appointments-template`, con una cita de ejemplo la
+  semana próxima): `numero_documento`, `fecha` (DD/MM/AAAA o AAAA-MM-DD),
+  `hora` (HH:MM de 24 h, también «9:30 pm», «14h30» o la fracción de día de
+  una celda de hora de Excel), `duracion_min` (5–480; opcional si viene el
+  tipo), `email_profesional`, `sede` (opcional: por nombre; vacía, la del
+  lote), `tipo_cita` (opcional, por nombre) y `motivo` (opcional, ≤ 1000).
+  La fecha y la hora son **hora de pared de la sede de la cita** (su zona,
+  `Location.timeZone`). Sin documento, fecha, hora o email: 400.
+- **Endpoints**: `POST /patient-imports/:id/appointments` (dry-run, lote
+  VALIDATED y vigente; volver a subirla la reemplaza), `DELETE
+  /patient-imports/:id/appointments`, `GET
+  /patient-imports/:id/appointments/errors.csv`, `POST
+  /patient-imports/:id/appointments/undo` (retirar solo las citas) y `POST
+  /patient-imports/:id/appointments/reminders` (activar sus recordatorios). El
+  lote (`GET /:id`) trae `appointments` (filas, preparadas, rechazadas,
+  progreso, programadas vivas, retiradas y si los recordatorios están
+  activos) y `appointmentIssues`.
+- **Validación (dry-run, sin escribir)**: cada fila se lee (formato, futura,
+  como mucho a 366 días) y se resuelve contra la clínica: sede activa y
+  permitida, profesional del equipo por su email (uno desconocido es error de
+  la fila: **nunca se asigna a otro**), tipo activo, paciente vivo de la
+  clínica o del archivo de pacientes del lote (uno ambiguo es error). Después
+  pasa por **`CreateAppointmentUseCase.validateImported`**, las mismas reglas
+  que agendar a mano (profesional que atiende en la sede y con agenda,
+  horario de la sede, horario del profesional —aviso, o 409 en modo
+  estricto—, bloqueos y huecos reservados, solapes del profesional y del
+  paciente), más los **festivos de la sede** (DX-316) y los **solapes entre
+  filas del propio archivo** (gana la anterior). Los avisos (fuera del horario
+  del profesional, un bloqueo que deja agendar, duración tomada del tipo) son
+  `WARNING` y la cita se importa.
+- **Importación**: el trabajo crea las citas después de los pacientes y los
+  saldos, una a una con `createImported` (las mismas reglas y las EXCLUDE de la
+  BD como respaldo), en estado `SCHEDULED` y con `appointments.import_batch_id`.
+  Lo que cambió desde el dry-run (una cita agendada a mano mientras importa, un
+  bloqueo, un festivo nuevo, el paciente que no llegó a crearse) rechaza solo
+  esa fila, con «Al importar: …» en el informe. Idempotente: una cita que un
+  intento anterior ya creó para la fila no se repite.
+- **Recordatorios**: el barrido (`dueCandidatesSql`) salta las citas de un lote
+  cuyo `appointmentRemindersEnabledAt` es NULL; el ADMIN los activa por lote.
+- **Deshacer**: «Deshacer lote» retira en blando las citas del lote que siguen
+  `SCHEDULED` (y no cuentan como actividad de los pacientes que creó el lote);
+  las que cambiaron de estado se quedan y, si son de un paciente creado por el
+  lote, lo bloquean como cualquier otra actividad. «Retirar citas importadas»
+  hace lo primero sin tocar los pacientes.
+- **Datos**: `patient_import_appointment_rows` (RLS FORCE, FK a tenants, al
+  lote y a la cita; sin FK a pacientes: la cita ya la lleva) guarda las citas
+  preparadas; se borran al caducar el dry-run o al purgar el informe (90 días).
+  La auditoría del lote lleva el hash de la hoja y contadores, nunca datos de
+  la cita.
+
 ## Marca por host para el render del servidor (DX-517-ter, DX-555)
 
 `GET /api/v1/public/tenant/branding/by-host?host=` la llama el servidor web

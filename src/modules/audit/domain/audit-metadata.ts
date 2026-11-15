@@ -537,6 +537,16 @@ export interface AuditImportBatch {
   balanceAddToExisting?: boolean;
   /** Saldos no creados porque el paciente ya tenía uno vivo (QA D1). */
   balancesExisting?: number;
+  /** DX-263: hoja de citas del lote (hash y contadores). */
+  appointmentFileSha256?: string;
+  appointmentRows?: number;
+  appointmentErrors?: number;
+  appointmentsPrepared?: number;
+  appointmentsCreated?: number;
+  appointmentsFailed?: number;
+  appointmentsUndone?: number;
+  /** Recordatorios automáticos de sus citas activados (DX-128). */
+  appointmentRemindersEnabled?: boolean;
 }
 
 /** Total por moneda de la hoja de saldos (DX-262): código, filas e importe. */
@@ -714,6 +724,12 @@ const IMPORT_COUNTS = [
   'balancesCreated',
   'balancesUndone',
   'balancesExisting',
+  'appointmentRows',
+  'appointmentErrors',
+  'appointmentsPrepared',
+  'appointmentsCreated',
+  'appointmentsFailed',
+  'appointmentsUndone',
 ] as const;
 const CURRENCY_CODE = /^[A-Z]{3}$/;
 const MAX_CURRENCY_TOTALS = 20;
@@ -764,6 +780,16 @@ function importBatch(value: unknown): AuditImportBatch | null {
   if (undone.length > 0) out.balanceUndoneTotals = undone;
   if (typeof value.balanceAddToExisting === 'boolean') {
     out.balanceAddToExisting = value.balanceAddToExisting;
+  }
+  const { appointmentFileSha256 } = value;
+  if (
+    typeof appointmentFileSha256 === 'string' &&
+    SHA256.test(appointmentFileSha256)
+  ) {
+    out.appointmentFileSha256 = appointmentFileSha256;
+  }
+  if (typeof value.appointmentRemindersEnabled === 'boolean') {
+    out.appointmentRemindersEnabled = value.appointmentRemindersEnabled;
   }
   return out;
 }

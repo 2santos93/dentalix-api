@@ -114,8 +114,18 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
       undoneCount?: unknown;
       undoneTotals?: unknown;
     } | null;
+    appointments?: {
+      fileSha256?: unknown;
+      totalRows?: unknown;
+      errorRows?: unknown;
+      preparedCount?: unknown;
+      progress?: Record<string, unknown>;
+      undoneCount?: unknown;
+      remindersEnabledAt?: unknown;
+    } | null;
   };
   const sheet = b.balances ?? undefined;
+  const agenda = b.appointments ?? undefined;
   return {
     fileSha256: b.fileSha256,
     mode: b.duplicateMode,
@@ -139,6 +149,16 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
     // QA D1: si se pidió añadir a quien ya tenía saldo, y cuántos no se crearon.
     balanceAddToExisting: sheet?.addToExisting,
     balancesExisting: sheet?.progress?.existing,
+    // DX-263: la hoja de citas (solo hash y contadores: ningún dato de la cita).
+    appointmentFileSha256: agenda?.fileSha256,
+    appointmentRows: agenda?.totalRows,
+    appointmentErrors: agenda?.errorRows,
+    appointmentsPrepared: agenda?.preparedCount,
+    appointmentsCreated: agenda?.progress?.created,
+    appointmentsFailed: agenda?.progress?.failed,
+    appointmentsUndone: agenda?.undoneCount,
+    appointmentRemindersEnabled:
+      agenda === undefined ? undefined : agenda.remindersEnabledAt != null,
   };
 }
 

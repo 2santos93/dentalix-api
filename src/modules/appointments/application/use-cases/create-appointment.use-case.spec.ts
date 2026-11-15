@@ -1703,3 +1703,145 @@ describe('CreateAppointmentUseCase: horario del profesional en la sede (DX-233)'
     expect(result).toMatchObject({ warnings: [], warningCodes: [] });
   });
 });
+
+// DX-263: citas de la hoja de citas del importador, con las mismas reglas.
+describe('CreateAppointmentUseCase — citas importadas (DX-263)', () => {
+  const start = at('10:00');
+  const end = at('10:30');
+  const make = (
+    repo: AppointmentRepository,
+    patients: PatientRepository = makePatients(),
+  ) =>
+    new CreateAppointmentUseCase(
+      repo,
+      patients,
+      makeStaff(),
+      makeSchedule(),
+      makeTypes(),
+      makeBlocks(),
+      new TenantContextService(),
+      inMemoryAvailability(),
+    );
+  const noWrite = () =>
+    Promise.reject(new Error('validateImported no escribe'));
+
+  it('validateImported no escribe y devuelve el fin y los avisos', async () => {
+    const uc = make(makeRepo({ create: noWrite }));
+    await expect(
+      uc.validateImported({
+        patientId: 'p1',
+        providerId: 'prov1',
+        locationId: 'loc1',
+        start,
+        end,
+      }),
+    ).resolves.toEqual({ warnings: [], warningCodes: [], end });
+  });
+
+  it('con un paciente que creará el lote (null) no mira el eje del paciente', async () => {
+    let patientChecked = false;
+    const uc = make(
+      makeRepo({
+        create: noWrite,
+        findOverlappingForPatient: () => {
+          patientChecked = true;
+          return Promise.resolve([fakeAppointment()]);
+        },
+      }),
+      makePatients(null),
+    );
+    await expect(
+      uc.validateImported({
+        patientId: null,
+        providerId: 'prov1',
+        locationId: 'loc1',
+        start,
+        end,
+      }),
+    ).resolves.toMatchObject({ end });
+    expect(patientChecked).toBe(false);
+  });
+
+  it('rechaza con el mismo 409 que a mano si el profesional ya tiene cita', async () => {
+    const uc = make(
+      makeRepo({
+        create: noWrite,
+        findOverlapping: () => Promise.resolve([fakeAppointment()]),
+      }),
+    );
+    await expect(
+      uc.validateImported({
+        patientId: null,
+        providerId: 'prov1',
+        locationId: 'loc1',
+        start,
+        end,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rechaza una cita en el pasado', async () => {
+    const uc = make(makeRepo({ create: noWrite }));
+    const past = new Date(Date.now() - 60 * 60 * 1000);
+    await expect(
+      uc.validateImported({
+        patientId: 'p1',
+        providerId: 'prov1',
+        locationId: 'loc1',
+        start: past,
+        end: new Date(past.getTime() + 30 * 60 * 1000),
+      }),
+    ).rejects.toThrow('No se puede agendar una cita en el pasado');
+  });
+
+  it('createImported escribe la cita ligada a su lote, en la sede de la fila', async () => {
+    let written: CreateAppointmentRepoInput | null = null;
+    const uc = make(
+      makeRepo({
+        create: (input) => {
+          written = input;
+          return Promise.resolve(fakeAppointment({ id: 'nueva' }));
+        },
+      }),
+    );
+    const created = await uc.createImported({
+      patientId: 'p1',
+      providerId: 'prov1',
+      locationId: 'loc1',
+      start,
+      end,
+      reason: 'Control',
+      importBatchId: 'lote-1',
+      createdById: 'admin-1',
+    });
+    expect(created.id).toBe('nueva');
+    expect(written).toMatchObject({
+      patientId: 'p1',
+      providerId: 'prov1',
+      locationId: 'loc1',
+      start,
+      end,
+      reason: 'Control',
+      importBatchId: 'lote-1',
+      createdById: 'admin-1',
+    });
+  });
+
+  it('createImported sí mira el eje del paciente (ya existe)', async () => {
+    const uc = make(
+      makeRepo({
+        findOverlappingForPatient: () => Promise.resolve([fakeAppointment()]),
+      }),
+    );
+    await expect(
+      uc.createImported({
+        patientId: 'p1',
+        providerId: 'prov1',
+        locationId: 'loc1',
+        start,
+        end,
+        importBatchId: 'lote-1',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+});

@@ -120,6 +120,8 @@ export async function loadSweepWindows(
  * cualquier plan (Index Scan o Bitmap) las pone en el Index Cond.
  *
  * Todos los estados: el handler registra el motivo si la cita ya no va.
+ * DX-263: sin las citas importadas de un lote cuyos recordatorios no activó
+ * el ADMIN (POST /patient-imports/:id/appointments/reminders).
  * DX-128: sin los pacientes con baja o con canal distinto de EMAIL (regla
  * de reminder-eligibility.ts): esos nunca entran en la cola. El paciente
  * se lee por su PK (tenantId, id) desde cada cita. Exportada (con
@@ -145,7 +147,12 @@ export function dueCandidatesSql(
        AND a."start" <= ${utc(w.hi)}
        AND a."deletedAt" IS NULL
        AND p."contactChannel" = 'EMAIL'
-       AND p."reminderOptOutAt" IS NULL`,
+       AND p."reminderOptOutAt" IS NULL
+       AND (a."import_batch_id" IS NULL OR EXISTS (
+             SELECT 1 FROM "patient_import_batches" b
+              WHERE b."tenantId" = a."tenantId"
+                AND b."id" = a."import_batch_id"
+                AND b."appointmentRemindersEnabledAt" IS NOT NULL))`,
   );
   return Prisma.sql`${Prisma.join(selects, '\n    UNION ALL')}
      ORDER BY "start"`;

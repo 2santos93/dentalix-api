@@ -500,6 +500,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patient-imports/:id/balances/undo': ADMIN_ONLY,
   'DELETE /patient-imports/:id/balances': ADMIN_ONLY,
   'GET /patient-imports/:id/balances/errors.csv': ADMIN_ONLY,
+  // DX-263: hoja de citas futuras del lote; solo gestión.
+  'GET /patient-imports/appointments-template': ADMIN_ONLY,
+  'POST /patient-imports/:id/appointments': ADMIN_ONLY,
+  'DELETE /patient-imports/:id/appointments': ADMIN_ONLY,
+  'GET /patient-imports/:id/appointments/errors.csv': ADMIN_ONLY,
+  'POST /patient-imports/:id/appointments/undo': ADMIN_ONLY,
+  'POST /patient-imports/:id/appointments/reminders': ADMIN_ONLY,
 
   // --- Catálogo dental -----------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-23-fase2c-role-matrix.md (lectura clínica,

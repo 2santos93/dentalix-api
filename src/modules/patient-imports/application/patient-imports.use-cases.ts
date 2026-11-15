@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   GoneException,
+  HttpException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -61,6 +62,23 @@ import {
   type ImportedBalanceTotal,
 } from '../infrastructure/prisma-patient-import.repository';
 import { fromCents, roundCents } from '../../../shared/money/money';
+import {
+  HOLIDAY_MESSAGE,
+  MAX_APPOINTMENT_ROWS,
+  TOO_MANY_APPOINTMENTS_MESSAGE,
+  appointmentTemplateCsv,
+  isLocationHoliday,
+  nameKey,
+  rejectInFileOverlaps,
+  resolveAppointmentColumns,
+  validateAppointmentRow,
+  type AppointmentCandidate,
+  type ResolvedAppointment,
+} from '../domain/appointment-sheet';
+import { CreateAppointmentUseCase } from '../../appointments/application/use-cases/create-appointment.use-case';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { isValidTimeZone, zonedWallTime } from '../../../shared/time/civil-day';
+import type { AppointmentCatalog } from '../infrastructure/prisma-patient-import.repository';
 
 export const PROCESS_IMPORT_JOB = 'patient-imports.process';
 /** Horas que vale un dry-run sin confirmar; después hay que volver a subirlo. */
@@ -89,6 +107,21 @@ export const BALANCES_NOT_EDITABLE_MESSAGE =
   'La hoja de saldos solo se puede cambiar antes de confirmar la importación.';
 export const BALANCE_REPORT_GONE_MESSAGE =
   'Este lote no tiene hoja de saldos o su informe ya no está disponible.';
+export const APPOINTMENTS_NOT_EDITABLE_MESSAGE =
+  'La hoja de citas solo se puede cambiar antes de confirmar la importación.';
+export const APPOINTMENT_REPORT_GONE_MESSAGE =
+  'Este lote no tiene hoja de citas o su informe ya no está disponible.';
+export const APPOINTMENT_PATIENT_MISSING_MESSAGE =
+  'Al importar, el paciente no existía en la clínica (su fila del archivo de pacientes no se importó) o varios pacientes tienen ese documento: la cita no se creó.';
+
+/** Texto de una excepción HTTP de la regla de agendar (DX-263). */
+export function httpMessage(err: HttpException): string {
+  const body = err.getResponse();
+  if (typeof body === 'string') return body;
+  const message = (body as { message?: unknown }).message;
+  if (Array.isArray(message)) return message.map(String).join(' ');
+  return typeof message === 'string' ? message : err.message;
+}
 
 /** Mensaje del deshacer bloqueado (pacientes con actividad o saldos con abonos). */
 export function undoBlockedMessage(
@@ -195,6 +228,32 @@ export interface BalancesView {
   canUndo: boolean;
 }
 
+/** Hoja de citas del lote (DX-263). */
+export interface AppointmentsView {
+  fileName: string;
+  fileFormat: PatientImportFileFormat;
+  fileSizeBytes: number;
+  fileSha256: string;
+  totalRows: number;
+  /** Citas que se importarán (las que pasaron todas las reglas). */
+  preparedCount: number;
+  /** Filas rechazadas por el dry-run. */
+  errorRows: number;
+  progress: {
+    processed: number;
+    created: number;
+    /** Rechazadas al importar: algo cambió desde el dry-run. */
+    failed: number;
+  };
+  /** Citas del lote que siguen programadas (se retirarían al deshacer). */
+  live: number;
+  undoneCount: number | null;
+  /** Recordatorios automáticos activados en el lote (DX-128); null: no. */
+  remindersEnabledAt: Date | null;
+  /** Hay citas programadas y el lote está terminado: se pueden retirar solas. */
+  canUndo: boolean;
+}
+
 export interface BatchView {
   id: string;
   status: PatientImportStatus;
@@ -237,6 +296,8 @@ export interface BatchView {
   reportAvailable: boolean;
   /** Hoja de saldos (DX-262); null si el lote no trae. */
   balances: BalancesView | null;
+  /** Hoja de citas (DX-263); null si el lote no trae. */
+  appointments: AppointmentsView | null;
 }
 
 export interface BatchDetail extends BatchView {
@@ -246,6 +307,9 @@ export interface BatchDetail extends BatchView {
   /** Errores y avisos de la hoja de saldos (los primeros). */
   balanceIssues: RowIssue[];
   balanceIssuesTotal: number;
+  /** Errores y avisos de la hoja de citas (los primeros, DX-263). */
+  appointmentIssues: RowIssue[];
+  appointmentIssuesTotal: number;
 }
 
 function toAmounts(raw: unknown): BalanceCurrencyTotal[] {
@@ -309,6 +373,9 @@ export class PatientImportsService {
     private readonly repo: PrismaPatientImportRepository,
     private readonly jobs: JobQueue,
     private readonly documentTypeNames: DocumentTypeNamesReader,
+    // DX-263: las citas importadas pasan por la MISMA regla que agendar a mano.
+    private readonly createAppointment: CreateAppointmentUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   template(): string {
@@ -438,6 +505,8 @@ export class PatientImportsService {
       ...view,
       balanceIssues: [],
       balanceIssuesTotal: 0,
+      appointmentIssues: [],
+      appointmentIssuesTotal: 0,
       issues: issues.slice(0, MAX_ISSUES_IN_RESPONSE),
       issuesTotal: issues.length,
       preview: prepared.slice(0, PREVIEW_ROWS).map((r) => ({
@@ -459,7 +528,8 @@ export class PatientImportsService {
     if (
       current.status === 'VALIDATED' &&
       current.preparedRows === 0 &&
-      current.balancePreparedRows === 0
+      current.balancePreparedRows === 0 &&
+      current.appointmentPreparedRows === 0
     ) {
       throw new ConflictException(NOTHING_TO_IMPORT_MESSAGE);
     }
@@ -531,8 +601,13 @@ export class PatientImportsService {
     const imported = await this.repo.importedBalanceTotalsByBatch(
       items.filter((b) => b.balanceFileSha256 !== null).map((b) => b.id),
     );
+    const liveAppointments = await this.repo.liveImportedAppointments(
+      items.filter((b) => b.appointmentFileSha256 !== null).map((b) => b.id),
+    );
     return {
-      items: items.map((b) => this.toView(b, names, imported)),
+      items: items.map((b) =>
+        this.toView(b, names, imported, liveAppointments),
+      ),
       total,
       page,
       pageSize,
@@ -677,6 +752,8 @@ export class PatientImportsService {
       preview: [],
       balanceIssues: issues.slice(0, MAX_ISSUES_IN_RESPONSE),
       balanceIssuesTotal: issues.length,
+      appointmentIssues: [],
+      appointmentIssuesTotal: 0,
     };
   }
 
@@ -724,13 +801,17 @@ export class PatientImportsService {
     };
   }
 
-  /** Solo un lote VALIDATED y vigente admite (o quita) su hoja de saldos. */
-  private assertBalancesEditable(batch: BatchRow): void {
+  /**
+   * Solo un lote VALIDATED y vigente admite (o quita) su hoja de saldos o de
+   * citas (DX-263).
+   */
+  private assertBalancesEditable(
+    batch: BatchRow,
+    notEditable = BALANCES_NOT_EDITABLE_MESSAGE,
+  ): void {
     if (batch.status !== 'VALIDATED') {
       throw new ConflictException(
-        batch.status === 'EXPIRED'
-          ? EXPIRED_MESSAGE
-          : BALANCES_NOT_EDITABLE_MESSAGE,
+        batch.status === 'EXPIRED' ? EXPIRED_MESSAGE : notEditable,
       );
     }
     if (
@@ -785,25 +866,439 @@ export class PatientImportsService {
     return this.get(id);
   }
 
+  // -------------------------------------------------------------------------
+  // Hoja de citas futuras (DX-263)
+  // -------------------------------------------------------------------------
+
+  /** Plantilla con una cita de ejemplo la semana próxima (zona de la sede). */
+  async appointmentTemplate(): Promise<string> {
+    const location = await this.batchLocation();
+    return appointmentTemplateCsv(civilDateIn(new Date(), location.timeZone));
+  }
+
+  /**
+   * Dry-run de la hoja de citas de un lote VALIDATED (antes de confirmar).
+   * Cada fila se lee (formato y topes), se resuelve contra la clínica (sede
+   * por nombre o la del lote, profesional por su email, tipo por nombre,
+   * paciente por su documento en la clínica o en el archivo de pacientes
+   * del lote) y pasa por las MISMAS reglas que agendar a mano
+   * (`CreateAppointmentUseCase.validateImported`: futura, sede permitida,
+   * profesional que atiende en ella, horario de la sede y del profesional,
+   * bloqueos y solapes con la agenda), más los festivos de la sede (DX-316)
+   * y los solapes dentro del propio archivo. NO crea ninguna cita: se crean
+   * al confirmar el lote, después de los pacientes y los saldos. Volver a
+   * subirla la reemplaza.
+   */
+  async dryRunAppointments(
+    id: string,
+    file: UploadedFile | undefined,
+  ): Promise<BatchDetail> {
+    const f = requireFile(file);
+    const current = await this.repo.findBatch(id);
+    if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    this.assertBalancesEditable(current, APPOINTMENTS_NOT_EDITABLE_MESSAGE);
+    const format = await this.repo.locationFormatSettings(current.locationId);
+    const parsed = await readFile(f, format);
+    if (parsed.table.rows.length > MAX_APPOINTMENT_ROWS) {
+      throw new BadRequestException(TOO_MANY_APPOINTMENTS_MESSAGE);
+    }
+    let cols;
+    try {
+      cols = resolveAppointmentColumns(parsed.table.headers);
+    } catch (err) {
+      throw fileErrorOf(err, format);
+    }
+    const batchZone = await this.repo.locationTimeZone(current.locationId);
+    const today = civilDateIn(new Date(), batchZone);
+
+    const issues: RowIssue[] = [];
+    const candidates: AppointmentCandidate[] = [];
+    let n = 0;
+    for (const row of parsed.table.rows) {
+      if (++n % YIELD_EVERY === 0) await yieldToEventLoop();
+      const validated = validateAppointmentRow(
+        row,
+        cols,
+        { today },
+        parsed.table.headers,
+      );
+      if (validated.candidate) candidates.push(validated.candidate);
+      else issues.push(...validated.issues);
+    }
+
+    const resolved = await this.resolveAppointments(
+      current,
+      candidates,
+      cols,
+      issues,
+    );
+    const inFile = rejectInFileOverlaps(resolved);
+    issues.push(...inFile.issues);
+    issues.sort((x, y) => x.row - y.row);
+    const errorRows = new Set(
+      issues.filter((i) => i.kind === 'ERROR').map((i) => i.row),
+    ).size;
+
+    let saved: BatchRow | null;
+    try {
+      saved = await this.repo.saveAppointments(id, {
+        fileName: safeFileName(f.originalname),
+        fileSha256: sha256(f.buffer),
+        fileFormat: parsed.format,
+        fileSizeBytes: f.size,
+        totalRows: parsed.table.rows.length,
+        errorRows,
+        issues,
+        prepared: inFile.kept.map((a) => ({
+          rowNumber: a.rowNumber,
+          docKey: a.docKey,
+          providerId: a.providerId,
+          locationId: a.locationId,
+          appointmentTypeId: a.appointmentTypeId,
+          start: a.start,
+          end: a.end,
+          reason: a.reason,
+        })),
+      });
+    } catch (err) {
+      if (err instanceof BatchStateError) {
+        throw new ConflictException(APPOINTMENTS_NOT_EDITABLE_MESSAGE);
+      }
+      throw err;
+    }
+    if (!saved) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    return {
+      ...(await this.view(saved)),
+      issues: [],
+      issuesTotal: 0,
+      preview: [],
+      balanceIssues: [],
+      balanceIssuesTotal: 0,
+      appointmentIssues: issues.slice(0, MAX_ISSUES_IN_RESPONSE),
+      appointmentIssuesTotal: issues.length,
+    };
+  }
+
+  /**
+   * Resuelve cada cita leída contra la clínica y la valida con la regla de
+   * agendar. Las que fallan dejan su error en `issues` (fila y motivo en
+   * español); las que pasan, sus avisos.
+   */
+  private async resolveAppointments(
+    batch: BatchRow,
+    candidates: AppointmentCandidate[],
+    cols: ReturnType<typeof resolveAppointmentColumns>,
+    issues: RowIssue[],
+  ): Promise<ResolvedAppointment[]> {
+    if (candidates.length === 0) return [];
+    const catalog = await this.repo.appointmentCatalog();
+    const locationsByName = groupByName(catalog.locations);
+    const typesByName = groupByName(catalog.types);
+    const locationById = new Map(catalog.locations.map((l) => [l.id, l]));
+    const staff = await this.repo.staffByEmail(
+      candidates.map((c) => c.providerEmail),
+    );
+    const patients = await this.repo.appointmentPatients(batch.id, [
+      ...new Set(candidates.map((c) => c.docKey)),
+    ]);
+    const holidays = await this.repo.locationHolidays(
+      catalog.locations.map((l) => l.id),
+    );
+    const allowed = this.tenantContext.getAllowedLocationIds();
+
+    const out: ResolvedAppointment[] = [];
+    let n = 0;
+    for (const c of candidates) {
+      if (++n % YIELD_EVERY === 0) await yieldToEventLoop();
+      const rowIssues: RowIssue[] = [];
+      const error = (
+        column: string | undefined | null,
+        message: string,
+        value: string | null,
+      ) =>
+        rowIssues.push({
+          row: c.rowNumber,
+          column: column ?? null,
+          kind: 'ERROR',
+          message,
+          value: value === null ? null : value.slice(0, 80),
+        });
+
+      // Sede: la de la fila por su nombre, o la del lote.
+      let location: AppointmentCatalog['locations'][number] | undefined;
+      if (c.locationName !== null) {
+        const found = locationsByName.get(nameKey(c.locationName)) ?? [];
+        if (found.length === 0) {
+          error(
+            cols.location,
+            `No hay ninguna sede activa llamada «${c.locationName}» en la clínica.`,
+            c.locationName,
+          );
+        } else if (found.length > 1) {
+          error(
+            cols.location,
+            `Hay varias sedes llamadas «${c.locationName}»: cambia el nombre de una en Ajustes y vuelve a subir la hoja.`,
+            c.locationName,
+          );
+        } else location = found[0];
+      } else {
+        location = locationById.get(batch.locationId);
+        if (!location) {
+          error(cols.location, LOCATION_MESSAGE, null);
+        }
+      }
+      // DX-089: un ADMIN restringido solo agenda en sus sedes.
+      if (location && allowed !== 'ALL' && !allowed.includes(location.id)) {
+        error(
+          cols.location,
+          `No tienes acceso a la sede «${location.name}»: no puedes importar citas en ella.`,
+          c.locationName,
+        );
+        location = undefined;
+      }
+      const zone =
+        location && location.timeZone && isValidTimeZone(location.timeZone)
+          ? location.timeZone
+          : null;
+      if (location && zone === null) {
+        error(
+          cols.location,
+          `La sede «${location.name}» no tiene zona horaria configurada: configúrala en Ajustes → Sedes.`,
+          c.locationName,
+        );
+      }
+
+      // Tipo de cita (opcional) y duración.
+      let type: AppointmentCatalog['types'][number] | undefined;
+      if (c.typeName !== null) {
+        const found = typesByName.get(nameKey(c.typeName)) ?? [];
+        if (found.length !== 1) {
+          error(
+            cols.appointmentType,
+            found.length === 0
+              ? `No hay ningún tipo de cita activo llamado «${c.typeName}».`
+              : `Hay varios tipos de cita llamados «${c.typeName}».`,
+            c.typeName,
+          );
+        } else type = found[0];
+      }
+      const duration = c.durationMinutes ?? type?.durationMinutes ?? null;
+
+      // Profesional: por su email, nunca otro.
+      const providerId = staff.get(c.providerEmail);
+      if (providerId === undefined) {
+        error(
+          cols.providerEmail,
+          `Nadie del equipo de la clínica tiene el email «${c.providerEmail}»: la cita no se asigna a otro profesional.`,
+          c.providerEmail,
+        );
+      }
+
+      // Paciente: en la clínica o en el archivo de pacientes del lote.
+      const patient = patients.get(c.docKey);
+      if (patient === undefined) {
+        error(
+          cols.docNumber,
+          'No hay ningún paciente con este documento en la clínica ni en el archivo de pacientes del lote.',
+          c.docNumber,
+        );
+      } else if (patient === 'AMBIGUOUS') {
+        error(
+          cols.docNumber,
+          'Varios pacientes de la clínica tienen este documento: fusiónalos o corrige el documento antes de importar la cita.',
+          c.docNumber,
+        );
+      }
+
+      if (rowIssues.length > 0 || !location || zone === null || !duration) {
+        issues.push(...rowIssues);
+        continue;
+      }
+
+      const start = zonedWallTime(c.date, c.minute, zone);
+      const end = new Date(start.getTime() + duration * 60_000);
+      if (start.getTime() < Date.now()) {
+        error(
+          cols.time,
+          'La cita ya pasó: solo se importan citas futuras.',
+          null,
+        );
+      } else if (isLocationHoliday(c.date, holidays.get(location.id) ?? [])) {
+        error(cols.date, HOLIDAY_MESSAGE, null);
+      }
+      if (rowIssues.length > 0) {
+        issues.push(...rowIssues);
+        continue;
+      }
+
+      const patientId =
+        patient && typeof patient === 'object' ? patient.id : null;
+      try {
+        const checked = await this.createAppointment.validateImported({
+          patientId,
+          providerId: providerId as string,
+          locationId: location.id,
+          start,
+          end,
+          appointmentTypeId: type?.id,
+          reason: c.reason ?? undefined,
+        });
+        if (c.durationMinutes === null && type) {
+          issues.push({
+            row: c.rowNumber,
+            column: cols.duration ?? null,
+            kind: 'WARNING',
+            message: `Sin duración en el archivo: se usan los ${type.durationMinutes} minutos del tipo «${type.name}».`,
+            value: null,
+          });
+        }
+        for (const warning of checked.warnings) {
+          issues.push({
+            row: c.rowNumber,
+            column: null,
+            kind: 'WARNING',
+            message: warning,
+            value: null,
+          });
+        }
+      } catch (err) {
+        if (!(err instanceof HttpException)) throw err;
+        error(null, httpMessage(err), null);
+        issues.push(...rowIssues);
+        continue;
+      }
+      out.push({
+        rowNumber: c.rowNumber,
+        docKey: c.docKey,
+        patientId,
+        providerId: providerId as string,
+        locationId: location.id,
+        appointmentTypeId: type?.id ?? null,
+        start,
+        end,
+        reason: c.reason,
+      });
+    }
+    return out;
+  }
+
+  /** Quita la hoja de citas de un lote aún sin confirmar. */
+  async removeAppointments(id: string): Promise<BatchDetail> {
+    const current = await this.repo.findBatch(id);
+    if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    this.assertBalancesEditable(current, APPOINTMENTS_NOT_EDITABLE_MESSAGE);
+    let cleared: BatchRow | null;
+    try {
+      cleared = await this.repo.clearAppointments(id);
+    } catch (err) {
+      if (err instanceof BatchStateError) {
+        throw new ConflictException(APPOINTMENTS_NOT_EDITABLE_MESSAGE);
+      }
+      throw err;
+    }
+    if (!cleared) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    return this.detail(cleared);
+  }
+
+  async appointmentErrorsCsv(
+    id: string,
+  ): Promise<{ fileName: string; csv: string }> {
+    const batch = await this.repo.findBatch(id);
+    if (!batch) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    if (
+      batch.appointmentFileName === null ||
+      batch.issuesPurgedAt ||
+      batch.status === 'EXPIRED'
+    ) {
+      throw new GoneException(APPOINTMENT_REPORT_GONE_MESSAGE);
+    }
+    const base =
+      batch.appointmentFileName
+        .replace(/\.[^.]*$/, '')
+        .replace(/[^\w.-]+/g, '_')
+        .slice(0, 80) || 'citas';
+    return {
+      fileName: `errores-${base}.csv`,
+      csv: issuesCsv(
+        ((await this.repo.allIssues(id, 'appointments')) ??
+          []) as unknown as RowIssue[],
+      ),
+    };
+  }
+
+  /**
+   * Retira SOLO las citas del lote que siguen programadas (las que cambiaron
+   * de estado se quedan), aunque sus pacientes ya tengan actividad.
+   */
+  async undoAppointments(id: string): Promise<BatchDetail> {
+    const current = await this.repo.findBatch(id);
+    if (!current) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    try {
+      await this.repo.undoAppointments(id);
+    } catch (err) {
+      if (err instanceof BatchStateError) {
+        throw new ConflictException(
+          STATE_MESSAGES[err.status] ?? EXPIRED_MESSAGE,
+        );
+      }
+      throw err;
+    }
+    return this.get(id);
+  }
+
+  /**
+   * Activa los recordatorios automáticos de las citas importadas del lote
+   * (DX-128): hasta entonces no se envía ninguno.
+   */
+  async enableAppointmentReminders(
+    id: string,
+    actorId: string,
+  ): Promise<BatchDetail> {
+    let batch: BatchRow | null;
+    try {
+      batch = await this.repo.enableAppointmentReminders(id, actorId);
+    } catch (err) {
+      if (err instanceof BatchStateError) {
+        throw new ConflictException(
+          STATE_MESSAGES[err.status] ?? EXPIRED_MESSAGE,
+        );
+      }
+      throw err;
+    }
+    if (!batch) throw new NotFoundException(NOT_FOUND_MESSAGE);
+    return this.detail(batch);
+  }
+
   private async view(batch: BatchRow): Promise<BatchView> {
-    const [names, imported] = await Promise.all([
+    const [names, imported, liveAppointments] = await Promise.all([
       this.repo.userNames([batch.createdById]),
       batch.balanceFileSha256 === null
         ? Promise.resolve(new Map<string, ImportedBalanceTotal[]>())
         : this.repo.importedBalanceTotalsByBatch([batch.id]),
+      batch.appointmentFileSha256 === null
+        ? Promise.resolve(new Map<string, number>())
+        : this.repo.liveImportedAppointments([batch.id]),
     ]);
-    return this.toView(batch, names, imported);
+    return this.toView(batch, names, imported, liveAppointments);
   }
 
   private async detail(batch: BatchRow): Promise<BatchDetail> {
     // Solo los primeros errores, recortados en SQL: la pantalla consulta el
     // lote cada 1,5 s mientras importa (revisión 2026-10-23, menor 2).
-    const [{ issues, total }, balanceIssues] = await Promise.all([
-      this.repo.batchIssues(batch.id, MAX_ISSUES_IN_RESPONSE),
-      batch.balanceFileSha256 === null
-        ? Promise.resolve({ issues: [], total: 0 })
-        : this.repo.batchIssues(batch.id, MAX_ISSUES_IN_RESPONSE, 'balances'),
-    ]);
+    const [{ issues, total }, balanceIssues, appointmentIssues] =
+      await Promise.all([
+        this.repo.batchIssues(batch.id, MAX_ISSUES_IN_RESPONSE),
+        batch.balanceFileSha256 === null
+          ? Promise.resolve({ issues: [], total: 0 })
+          : this.repo.batchIssues(batch.id, MAX_ISSUES_IN_RESPONSE, 'balances'),
+        batch.appointmentFileSha256 === null
+          ? Promise.resolve({ issues: [], total: 0 })
+          : this.repo.batchIssues(
+              batch.id,
+              MAX_ISSUES_IN_RESPONSE,
+              'appointments',
+            ),
+      ]);
     return {
       ...(await this.view(batch)),
       issues: issues as unknown as RowIssue[],
@@ -811,6 +1306,8 @@ export class PatientImportsService {
       preview: [],
       balanceIssues: balanceIssues.issues as unknown as RowIssue[],
       balanceIssuesTotal: balanceIssues.total,
+      appointmentIssues: appointmentIssues.issues as unknown as RowIssue[],
+      appointmentIssuesTotal: appointmentIssues.total,
     };
   }
 
@@ -859,13 +1356,55 @@ export class PatientImportsService {
     };
   }
 
+  private appointmentsOf(
+    batch: BatchRow,
+    live: Map<string, number>,
+  ): AppointmentsView | null {
+    if (
+      batch.appointmentFileName === null ||
+      batch.appointmentFileSha256 === null ||
+      batch.appointmentFileFormat === null ||
+      batch.appointmentFileSizeBytes === null
+    ) {
+      return null;
+    }
+    const liveCount = live.get(batch.id) ?? 0;
+    return {
+      fileName: batch.appointmentFileName,
+      fileFormat: batch.appointmentFileFormat,
+      fileSizeBytes: batch.appointmentFileSizeBytes,
+      fileSha256: batch.appointmentFileSha256,
+      totalRows: batch.appointmentTotalRows,
+      preparedCount: batch.appointmentPreparedRows,
+      errorRows: batch.appointmentErrorRows,
+      progress: {
+        processed: batch.appointmentProcessedRows,
+        created: batch.appointmentCreatedCount,
+        failed: batch.appointmentFailedCount,
+      },
+      live: liveCount,
+      undoneCount: batch.appointmentUndoneCount,
+      remindersEnabledAt: batch.appointmentRemindersEnabledAt,
+      canUndo:
+        (batch.status === 'COMPLETED' || batch.status === 'FAILED') &&
+        liveCount > 0,
+    };
+  }
+
   private toView(
     batch: BatchRow,
     names: Map<string, string>,
     imported: Map<string, ImportedBalanceTotal[]> = new Map(),
+    liveAppointments: Map<string, number> = new Map(),
   ): BatchView {
-    const toProcess = batch.preparedRows + batch.balancePreparedRows;
-    const processed = batch.processedRows + batch.balanceProcessedRows;
+    const toProcess =
+      batch.preparedRows +
+      batch.balancePreparedRows +
+      batch.appointmentPreparedRows;
+    const processed =
+      batch.processedRows +
+      batch.balanceProcessedRows +
+      batch.appointmentProcessedRows;
     const validUntil =
       batch.createdAt.getTime() + VALIDATION_TTL_HOURS * 3_600_000;
     return {
@@ -895,7 +1434,7 @@ export class PatientImportsService {
         updatedCount: batch.updatedCount,
         skippedCount: batch.skippedCount,
         failedCount: batch.failedCount,
-        // Pacientes y, después, saldos migrados (DX-262).
+        // Pacientes, saldos migrados (DX-262) y citas (DX-263).
         percent:
           toProcess === 0 ? 100 : Math.floor((processed / toProcess) * 100),
       },
@@ -914,6 +1453,17 @@ export class PatientImportsService {
       reportAvailable:
         batch.issuesPurgedAt === null && batch.status !== 'EXPIRED',
       balances: this.balancesOf(batch, imported),
+      appointments: this.appointmentsOf(batch, liveAppointments),
     };
   }
+}
+
+/** Nombre normalizado → filas con ese nombre (sede o tipo de cita). */
+function groupByName<T extends { name: string }>(rows: T[]): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = nameKey(row.name);
+    out.set(key, [...(out.get(key) ?? []), row]);
+  }
+  return out;
 }

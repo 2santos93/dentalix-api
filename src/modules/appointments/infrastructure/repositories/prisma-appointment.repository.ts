@@ -239,6 +239,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             appointmentTypeId: input.appointmentTypeId,
             wantsEarlier: input.wantsEarlier,
             chairId: input.chairId,
+            importBatchId: input.importBatchId,
           },
           include: INCLUDE_PATIENT_NAME,
         });

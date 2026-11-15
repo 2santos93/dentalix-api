@@ -394,6 +394,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       undoneCreated: 1,
       undoneFilled: 1,
       undoneBalances: 0,
+      undoneAppointments: 0,
     });
     const reverted = await raw.patient.findUniqueOrThrow({
       where: { id: before.id },
@@ -1018,6 +1019,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       undoneCreated: 1,
       undoneFilled: 0,
       undoneBalances: 0,
+      undoneAppointments: 0,
     });
     // El worker original sigue vivo y procesa otro bloque: aborta sin escribir.
     await expect(

@@ -1,3 +1,5 @@
+import type { CreateAppointmentUseCase } from '../../appointments/application/use-cases/create-appointment.use-case';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { BatchLocationError } from '../infrastructure/prisma-patient-import.repository';
 import type { PrismaPatientImportRepository } from '../infrastructure/prisma-patient-import.repository';
@@ -10,6 +12,8 @@ function makeUseCases(batchLocation: () => Promise<unknown>) {
     { batchLocation } as unknown as PrismaPatientImportRepository,
     {} as JobQueue,
     new FixedDocumentTypeNamesReader(),
+    {} as CreateAppointmentUseCase,
+    new TenantContextService(),
   );
 }
 

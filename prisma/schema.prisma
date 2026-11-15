@@ -254,6 +254,7 @@ model Tenant {
   paymentAllocationMovements              PaymentAllocationMovement[]
   // DX-262: hoja de saldos del importador y saldos migrados.
   patientImportBalanceRows                PatientImportBalanceRow[]
+  patientImportAppointmentRows            PatientImportAppointmentRow[]
   openingBalances                         OpeningBalance[]
   // DX-316: calendario de días hábiles y festivos de cada sede.
   locationWorkingCalendars                LocationWorkingCalendar[]
@@ -1573,6 +1574,11 @@ model Appointment {
   // cita cambia de hora o de profesional.
   idempotencyKey         String?
   idempotencyFingerprint String?
+  // DX-263: lote de importación que CREÓ la cita (NULL = agendada a mano).
+  // «Deshacer lote» retira en blando las suyas que siguen SCHEDULED, y el
+  // barrido de recordatorios las salta hasta que el ADMIN los active en el
+  // lote. FK compuesta por tenant (appointments_import_batch_fkey).
+  importBatchId          String?                 @map("import_batch_id") @db.Uuid
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   deletedAt              DateTime?
@@ -1609,14 +1615,18 @@ model Appointment {
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
   // en algún tenant" (las FK saltan la RLS), así que se podía agendar contra
   // un paciente de otra clínica.
-  patient         Patient                    @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  location        Location                   @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  patient         Patient                       @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  location        Location                      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
   // FK COMPUESTA (DX-121): el tipo tiene que ser del MISMO tenant.
-  appointmentType AppointmentType?           @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict)
+  appointmentType AppointmentType?              @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict)
   // FK COMPUESTA (DX-279): la versión comunicada es de la MISMA clínica.
-  policyVersion   CancellationPolicyVersion? @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict, map: "appointments_policy_version_fkey")
+  policyVersion   CancellationPolicyVersion?    @relation(fields: [tenantId, policyVersionId], references: [tenantId, id], onDelete: Restrict, map: "appointments_policy_version_fkey")
   // FK COMPUESTA (DX-211): el sillón es de la MISMA clínica y de la MISMA sede.
-  chair           Chair?                     @relation(fields: [tenantId, locationId, chairId], references: [tenantId, locationId, id], onDelete: Restrict, map: "appointments_chair_fkey")
+  chair           Chair?                        @relation(fields: [tenantId, locationId, chairId], references: [tenantId, locationId, id], onDelete: Restrict, map: "appointments_chair_fkey")
+  // DX-263: el lote de importación que la creó.
+  importBatch     PatientImportBatch?           @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "appointments_import_batch_fkey")
+  // DX-263: la fila de la hoja de citas que la creó.
+  importRows      PatientImportAppointmentRow[]
 
   // Destino de la FK compuesta (tenantId, appointmentId) de
   // appointment_confirmations (DX-005): la cita tiene que ser del MISMO tenant.
@@ -1663,6 +1673,10 @@ model Appointment {
   //     start) INCLUDE (status) WHERE "deletedAt" IS NULL AND status IN
   //     ('SCHEDULED', 'CONFIRMED', 'ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')
   //     -> DX-547: «tiene cita futura o está en la clínica» de la lista de recall.
+  //   appointments_tenant_import_batch_idx ("tenantId", "import_batch_id")
+  //     WHERE "import_batch_id" IS NOT NULL
+  //     -> DX-263: citas de un lote (deshacer, recordatorios) y lado hijo de
+  //        la FK compuesta al lote.
   @@map("appointments")
 }
 
@@ -6137,12 +6151,41 @@ model PatientImportBatch {
   /// Saldos no creados al importar porque el paciente ya tenía uno vivo (QA D1).
   balanceExistingCount  Int                      @default(0)
 
-  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  location        Location                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
+  // DX-263: hoja de citas futuras del lote, opcional. Se sube con el lote
+  // VALIDATED (dry-run propio, con las mismas reglas que agendar a mano) y se
+  // importa al confirmar, después de los pacientes y los saldos. El fichero
+  // tampoco se guarda: nombre, hash y totales.
+  appointmentFileName             String?
+  appointmentFileSha256           String?                  @db.Char(64)
+  appointmentFileFormat           PatientImportFileFormat?
+  appointmentFileSizeBytes        Int?
+  appointmentTotalRows            Int                      @default(0)
+  /// Filas rechazadas por el dry-run (dato inválido, solape, fuera de horario…).
+  appointmentErrorRows            Int                      @default(0)
+  /// Citas a crear al importar.
+  appointmentPreparedRows         Int                      @default(0)
+  appointmentProcessedRows        Int                      @default(0)
+  appointmentCreatedCount         Int                      @default(0)
+  /// Rechazadas al importar (algo cambió desde el dry-run: otra cita, un bloqueo…).
+  appointmentFailedCount          Int                      @default(0)
+  /// Errores y avisos por fila de la hoja de citas (mismo formato que `issues`).
+  appointmentIssues               Json                     @default("[]")
+  /// Citas del lote que retiró el deshacer (las que seguían programadas).
+  appointmentUndoneCount          Int?
+  /// Cuándo y quién activó los recordatorios automáticos de sus citas (DX-128):
+  /// hasta entonces el barrido no las mira.
+  appointmentRemindersEnabledAt   DateTime?
+  appointmentRemindersEnabledById String?                  @db.Uuid
+
+  tenant          Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location        Location                      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_batches_location_fkey")
   rows            PatientImportRow[]
   patients        Patient[]
   balanceRows     PatientImportBalanceRow[]
   openingBalances OpeningBalance[]
+  // DX-263: filas preparadas de la hoja de citas y las citas creadas.
+  appointmentRows PatientImportAppointmentRow[]
+  appointments    Appointment[]
 
   @@unique([tenantId, id], map: "patient_import_batches_tenant_id_key")
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)], map: "patient_import_batches_tenant_created_idx")
@@ -6208,6 +6251,40 @@ model PatientImportBalanceRow {
   @@index([tenantId, batchId, outcome, rowNumber], map: "patient_import_balance_rows_tenant_batch_outcome_idx")
   @@index([tenantId, patientId], map: "patient_import_balance_rows_tenant_patient_idx")
   @@map("patient_import_balance_rows")
+}
+
+/// DX-263: cita de la hoja de citas preparada por el dry-run (ya validada con
+/// las reglas de agendar a mano). El trabajo la crea al importar, buscando al
+/// paciente por `docKey`, y la vuelve a validar: si algo cambió (otra cita,
+/// un bloqueo), la fila queda FAILED con el motivo en `appointmentIssues`.
+/// SIN FK a pacientes a propósito: la cita creada ya la lleva.
+model PatientImportAppointmentRow {
+  id                String                  @id @default(uuid()) @db.Uuid
+  tenantId          String                  @db.Uuid
+  batchId           String                  @db.Uuid
+  /// Fila del fichero tal como la numera la hoja (1..1.048.576).
+  rowNumber         Int
+  /// Clave del documento del paciente (`docKey`: mayúsculas, solo letras y dígitos).
+  docKey            String
+  /// Ya resueltos por el dry-run (de esta clínica; se revalidan al importar).
+  providerId        String                  @db.Uuid
+  locationId        String                  @db.Uuid
+  appointmentTypeId String?                 @db.Uuid
+  start             DateTime
+  end               DateTime
+  reason            String?
+  outcome           PatientImportRowOutcome @default(PENDING)
+  appointmentId     String?                 @db.Uuid
+  processedAt       DateTime?
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  batch       PatientImportBatch @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_appointment_rows_batch_fkey")
+  appointment Appointment?       @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Restrict, map: "patient_import_appointment_rows_appointment_fkey")
+
+  @@unique([tenantId, batchId, rowNumber], map: "patient_import_appointment_rows_tenant_batch_row_key")
+  @@index([tenantId, batchId, outcome, rowNumber], map: "patient_import_appointment_rows_tenant_batch_outcome_idx")
+  @@index([tenantId, appointmentId], map: "patient_import_appointment_rows_tenant_appointment_idx")
+  @@map("patient_import_appointment_rows")
 }
 
 /// DX-262: saldo inicial «Saldo migrado» de un paciente en una moneda, traído

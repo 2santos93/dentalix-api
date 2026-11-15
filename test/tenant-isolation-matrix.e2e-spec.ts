@@ -4054,6 +4054,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'patient-import-appointments.e2e-spec.ts',
+      checks:
+        'B → 404 en la hoja de citas del lote de A: subirla, quitarla (sigue ahí), descargar sus errores, retirar sus citas y activar sus recordatorios (DX-263)',
+      routes: [
+        'POST /patient-imports/:id/appointments',
+        'DELETE /patient-imports/:id/appointments',
+        'GET /patient-imports/:id/appointments/errors.csv',
+        'POST /patient-imports/:id/appointments/undo',
+        'POST /patient-imports/:id/appointments/reminders',
+      ],
+    },
+    {
       spec: 'split-payments.e2e-spec.ts',
       checks:
         'B → 404 al cobrar dividido en el plan de A, y no ve su recibo (DX-390)',

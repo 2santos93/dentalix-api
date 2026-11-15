@@ -42,6 +42,8 @@ export interface CreateAppointmentRepoInput {
   wantsEarlier?: boolean;
   /** DX-211: sillón ya validado (de esta clínica, de la sede y activo). */
   chairId?: string;
+  /** DX-263: lote de importación que crea la cita. */
+  importBatchId?: string;
 }
 
 export interface UpdateAppointmentRepoInput {
