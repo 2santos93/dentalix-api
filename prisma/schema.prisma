@@ -128,6 +128,12 @@ model Tenant {
   /// DX-448: con menos de estos minutos de vida para el enlace no se ofrece
   /// el hueco por enlace (antes, 20 fijos). CHECK 5..240. 20 por defecto.
   slotOfferMinLeadMinutes                 Int                              @default(20)
+  /// DX-306: máximo de días de un certificado de reposo. CHECK 1..365. 30 de
+  /// plataforma. Solo ADMIN (PUT /certificates/settings, auditado).
+  certificateRestMaxDays                  Int                              @default(30)
+  /// DX-306: el certificado de reposo imprime el diagnóstico (y solo entonces
+  /// se recoge). false de plataforma. El justificante nunca lo lleva.
+  certificateRestPrintDiagnosis           Boolean                          @default(false)
   createdAt                               DateTime                         @default(now())
   updatedAt                               DateTime                         @updatedAt
   deletedAt                               DateTime?
@@ -261,6 +267,8 @@ model Tenant {
   creditRefundCounters     PatientCreditRefundCounter[]
   // DX-484: último código de paciente asignado en la clínica.
   patientCodeCounter       PatientCodeCounter?
+  // DX-306: certificados de los pacientes.
+  patientCertificates      PatientCertificate[]
 
   @@map("tenants")
 }
@@ -361,6 +369,9 @@ model User {
   signatureRequestsCreated          SignatureRequest[]               @relation("SignatureRequestCreatedBy")
   // DX-443: «Reenviar copia» del PDF firmado.
   signedConsentPdfLinksCreated      SignedConsentPdfLink[]
+  // DX-306: certificados que emitió y que anuló.
+  patientCertificatesIssued         PatientCertificate[]             @relation("PatientCertificateIssuedBy")
+  patientCertificatesVoided         PatientCertificate[]             @relation("PatientCertificateVoidedBy")
   // DX-468: «Enviar al paciente» la copia de una receta.
   prescriptionCopyLinksCreated      PrescriptionCopyLink[]
   signatureRequestsProfessional     SignatureRequest[]               @relation("SignatureRequestProfessional")
@@ -511,6 +522,8 @@ model Location {
   // DX-015: recalls fijados en la sede y contactos registrados en ella.
   patientRecalls             PatientRecall[]
   recallContacts             RecallContact[]
+  // DX-306: certificados emitidos en la sede (numerados por sede).
+  patientCertificates        PatientCertificate[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
   planItemDiscounts          TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
   // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
@@ -590,6 +603,8 @@ model ClinicMembership {
   manualExchangeRates   ManualExchangeRate[]
   // DX-211: sillones de los que es el profesional por defecto.
   defaultChairs         Chair[]
+  // DX-306: certificados en los que figura como profesional.
+  patientCertificates   PatientCertificate[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -832,6 +847,8 @@ model Patient {
   // DX-015: sus recalls (uno por tipo) y los contactos de recall.
   recalls                     PatientRecall[]
   recallContacts              RecallContact[]
+  // DX-306: justificantes y certificados de reposo.
+  certificates                PatientCertificate[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
   reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks         ReminderOptOutLink[]
@@ -1441,6 +1458,10 @@ model Appointment {
   arrivedAt              DateTime?
   seatedAt               DateTime?
   readyForCheckoutAt     DateTime?
+  /// DX-306: hora en que la cita pasó a COMPLETED (la salida). La pone el
+  /// trigger appointments_completed_at; la app no la escribe. NULL fuera de
+  /// COMPLETED y en las citas completadas antes de DX-306.
+  completedAt            DateTime?
   // DX-200: el estado (SCHEDULED o CONFIRMED) al que vuelve «Deshacer
   // llegada». Solo con la cita en ARRIVED.
   preArrivalStatus       AppointmentStatus?
@@ -1513,6 +1534,8 @@ model Appointment {
   appointmentReservedOverrides AppointmentReservedOverride[]
   // DX-015: contactos de recall que acabaron en esta cita.
   recallContacts               RecallContact[]
+  // DX-306: justificantes y certificados de reposo de la cita.
+  patientCertificates          PatientCertificate[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -4251,6 +4274,7 @@ enum AuditResourceType {
   RECALL_CONTACT
   // DX-015-bis: tipo de recall (alta, edición, retirada y disparadores).
   RECALL_TYPE
+  PATIENT_CERTIFICATE
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -4968,14 +4992,17 @@ model PatientDocument {
   voidReason   String?
   createdAt    DateTime                @default(now())
 
-  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant                Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // FK COMPUESTAS (SEC-004): paciente y sede del MISMO tenant.
-  patient          Patient           @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
-  location         Location          @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
-  uploadedBy       User              @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
-  voidedBy         User?             @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  patient               Patient              @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
+  location              Location             @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  uploadedBy            User                 @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  voidedBy              User?                @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
   // DX-422: el PDF firmado que archiva (si lo generó el servidor).
-  signedConsentPdf SignedConsentPdf?
+  signedConsentPdf      SignedConsentPdf?
+  // DX-306: el certificado cuyo PDF archiva (emitido o anulado).
+  certificatesIssuedPdf PatientCertificate[] @relation("PatientCertificateDocument")
+  certificatesVoidedPdf PatientCertificate[] @relation("PatientCertificateVoidedDocument")
 
   @@unique([tenantId, id], map: "patient_documents_tenant_id_key")
   @@index([tenantId, patientId, uploadedAt(sort: Desc)], map: "patient_documents_patient_uploaded_idx")
@@ -7346,4 +7373,81 @@ model RecallContact {
   @@index([tenantId, recallId, createdAt(sort: Desc), id(sort: Desc)], map: "recall_contacts_tenant_recall_created_idx")
   @@index([tenantId, patientId, createdAt(sort: Desc), id(sort: Desc)], map: "recall_contacts_tenant_patient_created_idx")
   @@map("recall_contacts")
+}
+
+// ---------------------------------------------------------------------------
+// Certificados del paciente (DX-306)
+// ---------------------------------------------------------------------------
+
+/// DX-306: ATTENDANCE = justificante de asistencia (sin datos clínicos);
+/// REST = certificado de reposo (días y, si la clínica lo imprime, diagnóstico).
+enum PatientCertificateKind {
+  ATTENDANCE
+  REST
+}
+
+/// DX-306: justificante de asistencia o certificado de reposo de una cita
+/// atendida. Foto inalterable (`snapshot`, ver
+/// src/modules/patient-certificates/domain/certificate-snapshot.ts) de
+/// paciente, profesional, sede y clínica al emitir. `number` correlativo por
+/// sede (lo pone el trigger bajo candado de la sede). Solo se enlaza su PDF y
+/// se anula una vez (trigger `patient_certificates_guard`); no se borra. RLS
+/// FORCE y FK compuestas por clínica (SEC-004). En SQL y no en Prisma
+/// (20261223090200): el único PARCIAL `patient_certificates_live_key` (un vivo
+/// por cita y tipo) y los CHECK de tipo, horas, diagnóstico y anulación.
+model PatientCertificate {
+  id                       String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId                 String                 @db.Uuid
+  patientId                String                 @db.Uuid
+  appointmentId            String                 @db.Uuid
+  locationId               String                 @db.Uuid
+  /// Membresía del profesional que figura: el de la cita (justificante) o
+  /// quien lo emite (reposo).
+  professionalMembershipId String                 @db.Uuid
+  /// Quien lo emite: sale del token, nunca del cuerpo.
+  issuedById               String                 @db.Uuid
+  kind                     PatientCertificateKind
+  /// Lo pone el trigger: siguiente número de la sede.
+  number                   Int
+  /// Hora del servidor (trigger).
+  issuedAt                 DateTime               @default(now())
+  /// Llegada y salida reales (`ACTUAL`) o el inicio y fin de la cita (`SCHEDULED`).
+  attendedFrom             DateTime
+  attendedUntil            DateTime
+  timesSource              String
+  restDays                 Int?
+  restStartDate            DateTime?              @db.Date
+  restEndDate              DateTime?              @db.Date
+  /// Solo en el reposo y solo si la clínica lo imprime. Dato de salud: nunca
+  /// en la auditoría ni en la vista de recepción.
+  diagnosis                String?
+  snapshot                 Json
+  /// PDF archivado en los documentos del paciente (REPORT) al emitir.
+  documentId               String?                @db.Uuid
+  voidedAt                 DateTime?
+  voidedById               String?                @db.Uuid
+  voidReason               String?
+  /// PDF con «ANULADO» archivado al anular.
+  voidedDocumentId         String?                @db.Uuid
+  createdAt                DateTime               @default(now())
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient        Patient          @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificates_patient_fkey")
+  appointment    Appointment      @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "patient_certificates_appointment_fkey")
+  location       Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificates_location_fkey")
+  membership     ClinicMembership @relation(fields: [tenantId, professionalMembershipId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificates_membership_fkey")
+  issuedBy       User             @relation("PatientCertificateIssuedBy", fields: [issuedById], references: [id], onDelete: Restrict, map: "patient_certificates_issued_by_fkey")
+  voidedBy       User?            @relation("PatientCertificateVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict, map: "patient_certificates_voided_by_fkey")
+  document       PatientDocument? @relation("PatientCertificateDocument", fields: [tenantId, documentId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificates_document_fkey")
+  voidedDocument PatientDocument? @relation("PatientCertificateVoidedDocument", fields: [tenantId, voidedDocumentId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificates_voided_document_fkey")
+
+  @@unique([tenantId, locationId, number], map: "patient_certificates_location_number_key")
+  @@index([tenantId, patientId, issuedAt(sort: Desc)], map: "patient_certificates_patient_idx")
+  @@index([tenantId, patientId, appointmentId], map: "patient_certificates_appointment_idx")
+  @@index([tenantId, professionalMembershipId], map: "patient_certificates_membership_idx")
+  @@index([issuedById], map: "patient_certificates_issued_by_idx")
+  @@index([voidedById], map: "patient_certificates_voided_by_idx")
+  @@index([tenantId, documentId], map: "patient_certificates_document_idx")
+  @@index([tenantId, voidedDocumentId], map: "patient_certificates_voided_document_idx")
+  @@map("patient_certificates")
 }

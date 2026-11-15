@@ -492,3 +492,15 @@ export const MAJORITY_REVIEW_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
   ClinicRole.RECEPTION,
 ];
+
+// Certificados del paciente (DX-306) — ver la lista, imprimir y emitir el
+// JUSTIFICANTE de asistencia: los cuatro roles (recepción lo entrega en el
+// mostrador). El certificado de REPOSO solo lo emiten DENTIST y ADMIN con
+// registro profesional, y su diagnóstico solo lo ven los roles clínicos y
+// quien lo emitió: lo decide el caso de uso. Ajustes: CLINIC_SETTINGS_WRITE_ROLES.
+export const CERTIFICATE_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];

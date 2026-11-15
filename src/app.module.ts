@@ -66,6 +66,7 @@ import { MedicalHistorySubmissionsModule } from './modules/medical-history-submi
 import { SignatureRequestsModule } from './modules/signature-requests/signature-requests.module';
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
+import { PatientCertificatesModule } from './modules/patient-certificates/patient-certificates.module';
 import { ImplantsModule } from './modules/implants/implants.module';
 import { PatientDocumentsModule } from './modules/patient-documents/patient-documents.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
@@ -167,6 +168,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     SignatureRequestsModule,
     PeriodontalModule,
     PrescriptionsModule,
+    PatientCertificatesModule,
     ImplantsModule,
     PatientDocumentsModule,
     // DX-107: importación de pacientes desde CSV/XLSX (trabajo en la cola).

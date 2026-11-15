@@ -427,6 +427,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /prescriptions/:id/void': PRESCRIBERS,
   // DX-468: «Enviar al paciente», con el mismo acceso que imprimirla.
   'POST /prescriptions/:id/patient-copy': CLINICAL,
+  // DX-306: certificados del paciente. Los cuatro roles por la ruta; el
+  // reposo (DENTIST/ADMIN) y el diagnóstico los acota el caso de uso.
+  'GET /patients/:patientId/certificates': EVERY_ROLE,
+  'POST /patients/:patientId/certificates': EVERY_ROLE,
+  'GET /patients/:patientId/certificates/appointments': EVERY_ROLE,
+  'GET /patients/:patientId/certificates/:id/pdf': EVERY_ROLE,
+  'POST /patients/:patientId/certificates/:id/void': EVERY_ROLE,
+  'GET /certificates/issuer': EVERY_ROLE,
+  'GET /certificates/settings': EVERY_ROLE,
+  'PUT /certificates/settings': ADMIN_ONLY,
 
   // --- Registro de implantes (DX-191) --------------------------------------
   // loop/informes/DX-191.md. Ver e imprimir la tarjeta: los 4 roles

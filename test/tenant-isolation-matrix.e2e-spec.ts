@@ -3964,6 +3964,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: ['POST /prescriptions/:id/patient-copy'],
     },
     {
+      spec: 'patient-certificates.e2e-spec.ts',
+      checks:
+        'B → 404 al listar, emitir, imprimir y anular certificados del paciente de A y al pedir sus citas atendidas; A sigue con su certificado vigente (DX-306)',
+      routes: [
+        'GET /patients/:patientId/certificates',
+        'POST /patients/:patientId/certificates',
+        'GET /patients/:patientId/certificates/appointments',
+        'GET /patients/:patientId/certificates/:id/pdf',
+        'POST /patients/:patientId/certificates/:id/void',
+      ],
+    },
+    {
       spec: 'implants.e2e-spec.ts',
       checks:
         'B → 404 sobre el paciente y el implante de A (lista, alta, tarjeta, impresión y anulación) y el implante sigue sin anular (DX-191)',

@@ -488,6 +488,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'medical_history_submissions.patientId',
       'medical_history_versions.patientId',
       'patient_agreements.patientId',
+      // DX-306: un certificado emitido (justificante o reposo) es un
+      // documento inalterable de una cita atendida: bloquea el deshacer.
+      'patient_certificates.patientId',
       // DX-243: la firma del profesional de uno firmado a distancia.
       'patient_consent_countersignatures.patientId',
       'patient_consents.patientId',
