@@ -78,7 +78,10 @@ export interface ClinicalRecordCopyRepository {
     audit: AuditRequestContext,
   ): Promise<ClinicalRecordCopySummary>;
 
-  /** Generaciones del paciente, la más reciente primero. */
+  /**
+   * Generaciones del paciente, la más reciente primero. Para un miembro
+   * restringido (DX-089), solo las de sus sedes permitidas.
+   */
   list(patientId: string): Promise<ClinicalRecordCopySummary[]>;
 
   /** Una generación del paciente, o null (de otro paciente o clínica). */

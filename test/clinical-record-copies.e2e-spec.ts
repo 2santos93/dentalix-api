@@ -441,6 +441,18 @@ describe('Copia de la historia clínica (e2e, DX-456)', () => {
       .get(`${copies()}/${foreign.id}/document`)
       .expect(403);
     expect((read.body as ErrorBody).code).toBe(LOCATION_NOT_ALLOWED_CODE);
+
+    // Ni la ve en la lista de la ficha (lleva «entregado a»); el ADMIN ve las
+    // de las dos sedes.
+    const listed = (await as(clinicA, token).get(copies()).expect(200))
+      .body as Summary[];
+    expect(listed.map((c) => c.id)).toContain(own.id);
+    expect(listed.map((c) => c.id)).not.toContain(foreign.id);
+    expect(listed.every((c) => c.location.id === locationA)).toBe(true);
+    const all = (await as(clinicA).get(copies()).expect(200)).body as Summary[];
+    expect(all.map((c) => c.id)).toEqual(
+      expect.arrayContaining([own.id, foreign.id]),
+    );
   });
 
   describe('otra clínica (B) no llega al paciente ni a sus copias (404)', () => {

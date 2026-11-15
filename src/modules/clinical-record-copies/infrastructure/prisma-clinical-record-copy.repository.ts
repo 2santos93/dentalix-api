@@ -184,9 +184,16 @@ export class PrismaClinicalRecordCopyRepository implements ClinicalRecordCopyRep
   }
 
   list(patientId: string): Promise<ClinicalRecordCopySummary[]> {
+    // DX-089: un miembro restringido solo ve las generaciones de SUS sedes
+    // (llevan «entregado a»). Las sedes permitidas, no la de la cabecera: un
+    // ADMIN o un miembro de varias sedes ve las de todas las suyas.
+    const allowed = this.tenantContext.getAllowedLocationIds();
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.clinicalRecordCopy.findMany({
-        where: { patientId },
+        where: {
+          patientId,
+          ...(allowed === 'ALL' ? {} : { locationId: { in: [...allowed] } }),
+        },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: SUMMARY_SELECT,
       });

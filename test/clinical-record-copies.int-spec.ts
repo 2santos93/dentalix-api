@@ -171,6 +171,28 @@ describe('clinical_record_copies (int, DX-456)', () => {
     ).resolves.toBeNull();
   });
 
+  it('un miembro restringido solo lista las generaciones de sus sedes (DX-089)', async () => {
+    const [mine] = await asClinic(a, () => repo.list(a.patientId));
+    const other = await owner.location.create({
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
+        tenantId: a.tenantId,
+        name: 'Sede Valencia',
+      }),
+    });
+    await expect(
+      tenantContext.run(a.tenantId, undefined, () => repo.list(a.patientId), [
+        other.id,
+      ]),
+    ).resolves.toEqual([]);
+    const own = await tenantContext.run(
+      a.tenantId,
+      undefined,
+      () => repo.list(a.patientId),
+      [a.locationId],
+    );
+    expect(own.map((c) => c.id)).toContain(mine.id);
+  });
+
   it('es append-only para la app: ni UPDATE ni DELETE', async () => {
     const [mine] = await asClinic(a, () => repo.list(a.patientId));
     await expect(
