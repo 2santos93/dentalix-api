@@ -1749,6 +1749,12 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-266: la fusión (PATIENT_MERGED en cada paciente, con lo movido por
+  // tabla) y «No es duplicado» (PATIENT_DUPLICATE_DISMISSED en los dos), en
+  // la transacción del cambio.
+  'POST /patient-duplicates/merge':
+    'patient-merge.e2e-spec.ts y patient-merge.int-spec.ts',
+  'POST /patient-duplicates/dismissals': 'patient-merge.e2e-spec.ts',
   // DX-569: datos para pagar de un medio, como configuración (DX-360) sin
   // sus valores, en la transacción del cambio.
   'PUT /payment-methods/:id/instructions': 'payment-links.e2e-spec.ts',
