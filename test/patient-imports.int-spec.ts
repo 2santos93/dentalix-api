@@ -481,6 +481,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'appointments.patientId',
       'clinical_entries.patientId',
       'clinical_entry_addenda.patientId',
+      // DX-456: una copia de la historia clínica generada (y quizá entregada)
+      // es un acto auditado sobre el paciente: bloquea el deshacer.
+      'clinical_record_copies.patientId',
       'collection_notes.patientId',
       'data_processing_consents.patientId',
       'medical_history_reviews.patientId',

@@ -62,5 +62,8 @@ import { ClinicalNoteTemplatesModule } from '../clinical-note-templates/clinical
       useClass: PrismaClinicalEntryAddendumRepository,
     },
   ],
+  // DX-456: la copia de la historia clínica lee las evoluciones con la MISMA
+  // consulta que la ficha.
+  exports: [ListClinicalEntriesUseCase],
 })
 export class ClinicalEntriesModule {}
