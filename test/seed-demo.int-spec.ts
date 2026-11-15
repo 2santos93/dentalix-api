@@ -4,7 +4,7 @@ import {
   nextMaintenanceOn,
 } from '../src/modules/equipment/domain/equipment-rules';
 import { join } from 'node:path';
-import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
+import { INestApplication, Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -68,6 +68,7 @@ import { tenantTablesInDeleteOrder } from './support/tenant-purge';
 import { hostFor } from './support/tenant-host';
 import { PAYER_TYPES } from '../src/modules/payers/domain/payer-type';
 import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // DX-021-bis: la política por defecto, la que tiene un `seed:demo` real.
 process.env.NEW_CLINIC_REQUIRE_ADMIN_MFA = 'true';
@@ -301,9 +302,7 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
   }, 60000);

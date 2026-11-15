@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test, TestingModuleBuilder } from '@nestjs/testing';
 import { ClinicRole, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -14,6 +14,7 @@ import {
   registerBody,
   type RegionalFixture,
 } from './location-fixtures';
+import { createAppValidationPipe } from '../../src/shared/validation/app-validation-pipe';
 
 // Fixtures compartidas por las matrices de DX-068 (role-matrix y
 // tenant-isolation-matrix).
@@ -44,7 +45,7 @@ export async function createE2eApp(
   const moduleRef = await builder.compile();
   const app = moduleRef.createNestApplication<INestApplication<App>>();
   app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalPipes(createAppValidationPipe());
   app.useGlobalFilters(new PrismaExceptionFilter());
   await app.init();
   // Reserve IPv4 before Supertest can bind :: and target a different listener.

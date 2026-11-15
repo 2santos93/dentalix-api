@@ -1,4 +1,8 @@
-import { ValidateBy, type ValidationOptions } from 'class-validator';
+import {
+  ValidateBy,
+  type ValidationArguments,
+  type ValidationOptions,
+} from 'class-validator';
 
 /**
  * DX-111 (BE-020, SEC-011): topes de largo de los textos y de tamaño de las
@@ -56,10 +60,10 @@ export function TextMaxLength(
       validator: {
         validate: (value: unknown) =>
           typeof value !== 'string' || value.length <= max,
-        defaultMessage: (args) =>
+        defaultMessage: (args?: ValidationArguments) =>
           options?.each
-            ? `Cada valor de ${args.property} no puede tener más de ${max} caracteres.`
-            : `${args.property} no puede tener más de ${max} caracteres.`,
+            ? `Cada valor de ${args?.property ?? 'El texto'} no puede tener más de ${max} caracteres.`
+            : `${args?.property ?? 'El texto'} no puede tener más de ${max} caracteres.`,
       },
     },
     options,

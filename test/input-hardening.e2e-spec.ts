@@ -201,4 +201,53 @@ describe('Entradas sin 500 y errores en español (DX-111)', () => {
       expect(res.body).toEqual({ count: 0 });
     });
   });
+
+  describe('validación en español con código por campo (BE-006, BE-020)', () => {
+    it('un nombre de paciente de más de 120 caracteres → 400 en español', async () => {
+      const res = await call('post', '/patients', {
+        firstName: 'A'.repeat(121),
+        lastName: 'Larga',
+        docType: 'NATIONAL_ID',
+        docNumber: 'DX111-0002',
+        sex: Sex.F,
+      }).expect(400);
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'VALIDATION_FAILED',
+        message: ['firstName no puede tener más de 120 caracteres.'],
+        fields: [
+          {
+            field: 'firstName',
+            code: 'textMaxLength',
+            message: 'firstName no puede tener más de 120 caracteres.',
+          },
+        ],
+      });
+    });
+
+    it('un mensaje por defecto de class-validator sale en español', async () => {
+      const res = await call('post', '/patients', {
+        firstName: 'Ana',
+        lastName: 'Pérez',
+        docType: 'NATIONAL_ID',
+        docNumber: 12345,
+        sex: Sex.F,
+      }).expect(400);
+      expect((res.body as { message: string[] }).message).toEqual([
+        'El campo «docNumber» debe ser un texto.',
+      ]);
+    });
+
+    it('un campo que el DTO no declara se descarta (modo strip por defecto)', async () => {
+      await call('post', '/patients', {
+        firstName: 'Ana',
+        lastName: 'Intrusa',
+        docType: 'NATIONAL_ID',
+        docNumber: 'DX111-0003',
+        sex: Sex.F,
+        campoQueNoExiste: 'x',
+      }).expect(201);
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -12,6 +12,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup/seed en
 // beforeAll — usa DIRECT_URL (rol owner `dentalix`, superuser), mismo patrón
@@ -57,9 +58,7 @@ describe('Public tenant branding (e2e)', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
     await resetDatabase(raw);

@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -20,6 +20,7 @@ import {
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenants } from './support/tenant-purge';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // SEC-021: política de orígenes en PRODUCCIÓN simulada. CORS y el check de
 // Origin del refresh por cookie se montan con NODE_ENV=production (sin tocar
@@ -106,9 +107,7 @@ describe('Política de orígenes en producción (e2e, SEC-021)', () => {
     app = moduleRef.createNestApplication();
     applySecurity(app, loadSecuritySettings(env));
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
 

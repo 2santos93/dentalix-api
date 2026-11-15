@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -10,6 +10,7 @@ import { registerVerified } from './support/register-verified';
 import { resetDatabase } from './support/e2e-fixtures';
 import { sedeTodayFixture } from './support/sede-clock';
 import { registerBody, setLocationZone } from './support/location-fixtures';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // SEC-013 — DELETE /payments/:id exige motivo, guarda quién/cuándo/por qué y
 // limita a recepción a sus propios abonos del día. DIRECT_URL (superusuario,
@@ -144,9 +145,7 @@ describe('Anulación de abonos con motivo y autor — DELETE /payments/:id (e2e)
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
     await cleanup();

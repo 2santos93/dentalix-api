@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -23,6 +23,7 @@ import { PLAN_QUOTE_CLOCK } from '../src/modules/treatment-plans/application/use
 import { TREATMENT_PLAN_CLOCK } from '../src/modules/treatment-plans/application/plan-clock';
 import { QUOTE_VALIDITY_DAYS_MESSAGE } from '../src/modules/treatment-plans/domain/quote-validity';
 import { QUOTE_SETTINGS_FORBIDDEN_MESSAGE } from '../src/modules/treatment-plans/presentation/quote-settings.controller';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // DX-379 (porción A) contra Postgres: el ajuste de días (solo ADMIN, auditado,
 // por clínica), presentar e imprimir fijan la validez, reimprimir otro día no
@@ -180,9 +181,7 @@ describe('Validez del presupuesto (e2e, DX-379 porción A)', () => {
       .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     applyBodyLimits(app);
     await app.init();
     await app.listen(0, '127.0.0.1');

@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -7,6 +7,7 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { applySecurity } from '../src/shared/security/apply-security';
 import { setupSwagger } from '../src/config/swagger';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // Construye la app igual que main.ts (applySecurity + Swagger) para verificar
 // las cabeceras HTTP de seguridad tal como salen en producción.
@@ -24,9 +25,7 @@ describe('Cabeceras de seguridad (e2e)', () => {
     app = moduleRef.createNestApplication();
     applySecurity(app);
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     setupSwagger(app);
     await app.init();
     await app.listen(0, '127.0.0.1');
