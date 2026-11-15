@@ -959,6 +959,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // --- Dashboard -----------------------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-dashboard.md (DASHBOARD_ROLES).
   'GET /dashboard': ADMIN_ONLY,
+  // DX-020: tarjeta «Pon en marcha tu clínica» del panel (ONBOARDING_ROLES).
+  'GET /onboarding/status': ADMIN_ONLY,
+  'POST /onboarding/dismiss': ADMIN_ONLY,
 
   // --- Sedes y horario de atención -----------------------------------------
   // dentalix-docs/docs/plans/2026-08-01-multi-sede.md y
