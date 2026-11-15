@@ -61,6 +61,11 @@
  * - copy-link:     las rutas públicas de la copia del PDF firmado (DX-443:
  *                  ver el enlace y descargar), por IP (enumeración de tokens).
  * - copy-token:    las mismas rutas, por TOKEN (sin IP), como slot-token.
+ * - payment-link:  las rutas públicas del enlace de pago (DX-569: ver,
+ *                  apertura, subir el comprobante y reportar), por IP
+ *                  (enumeración de tokens).
+ * - payment-link-token: las mismas rutas, por TOKEN (sin IP), como
+ *                  copy-token. Variables: RATE_LIMIT_PAYMENT_LINK_TOKEN_*.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -126,6 +131,8 @@ export type RateLimitPolicy =
   | 'slot-token'
   | 'copy-link'
   | 'copy-token'
+  | 'payment-link'
+  | 'payment-link-token'
   | 'prescription-verify'
   | 'branding-host'
   | 'branding-miss';
@@ -165,6 +172,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'slot-token': { limit: 10, ttlMs: MINUTE },
   'copy-link': { limit: 20, ttlMs: MINUTE },
   'copy-token': { limit: 10, ttlMs: MINUTE },
+  'payment-link': { limit: 20, ttlMs: MINUTE },
+  'payment-link-token': { limit: 10, ttlMs: MINUTE },
   'prescription-verify': { limit: 30, ttlMs: MINUTE },
   'branding-host': { limit: 600, ttlMs: MINUTE },
   'branding-miss': { limit: 60, ttlMs: MINUTE },
@@ -185,7 +194,8 @@ function positiveInt(env: EnvReader, key: string, fallback: number): number {
 
 export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
   const rule = (name: keyof RateLimitConfig): RateLimitRule => {
-    const prefix = `RATE_LIMIT_${name.toUpperCase().replace('-', '_')}`;
+    // Todos los guiones (DX-569: `payment-link-token` tiene dos).
+    const prefix = `RATE_LIMIT_${name.toUpperCase().replaceAll('-', '_')}`;
     const fallback = DEFAULT_RATE_LIMITS[name];
     return {
       limit: positiveInt(env, `${prefix}_LIMIT`, fallback.limit),
@@ -216,6 +226,8 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'slot-token': rule('slot-token'),
     'copy-link': rule('copy-link'),
     'copy-token': rule('copy-token'),
+    'payment-link': rule('payment-link'),
+    'payment-link-token': rule('payment-link-token'),
     'prescription-verify': rule('prescription-verify'),
     'branding-host': rule('branding-host'),
     'branding-miss': rule('branding-miss'),

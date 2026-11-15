@@ -27,6 +27,8 @@ export const EMAIL_TEMPLATES = [
   'prescription-copy',
   'mfa-notice',
   'mfa-enrollment-code',
+  'payment-link',
+  'payment-report-rejected',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -65,6 +67,8 @@ export const TENANT_DAILY_BUDGET: Readonly<
   'prescription-copy': 'clinic',
   'mfa-notice': 'clinic',
   'mfa-enrollment-code': 'clinic',
+  'payment-link': 'clinic',
+  'payment-report-rejected': 'clinic',
 };
 
 /** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
@@ -373,6 +377,29 @@ export interface PrescriptionCopyEmailVars {
   expiresAtLabel: string;
 }
 
+/**
+ * DX-569: el enlace para pagar y reportar el pago. Nada de importes,
+ * tratamientos ni salud (como el mensaje de WhatsApp): quién lo envía, a
+ * quién y el enlace.
+ */
+export interface PaymentLinkEmailVars {
+  patientFirstName: string | null;
+  clinicName: string;
+  /** Enlace público (`/pago/<token>`). */
+  url: string;
+  /** Caducidad del enlace, ya formateada en la zona y el formato de la sede. */
+  expiresAtLabel: string;
+}
+
+/**
+ * DX-569: la clínica no pudo confirmar el pago reportado. Nunca el motivo
+ * interno ni importes: que la clínica contactará.
+ */
+export interface PaymentReportRejectedEmailVars {
+  patientFirstName: string | null;
+  clinicName: string;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -390,6 +417,8 @@ export interface EmailVarsByTemplate {
   'slot-offer': SlotOfferEmailVars;
   'signed-consent-copy': SignedConsentCopyEmailVars;
   'prescription-copy': PrescriptionCopyEmailVars;
+  'payment-link': PaymentLinkEmailVars;
+  'payment-report-rejected': PaymentReportRejectedEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

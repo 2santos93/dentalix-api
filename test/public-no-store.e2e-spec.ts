@@ -99,6 +99,12 @@ describe('Rutas públicas con no-store (e2e, SEC-064)', () => {
       expect.arrayContaining([
         'GET /public/slot-offers/:token',
         'GET /public/signed-consent-copies/:token',
+        // DX-569: el enlace de pago, todas sus rutas.
+        'GET /public/payment-links/:token',
+        'POST /public/payment-links/:token/opened',
+        'POST /public/payment-links/:token/proof-upload',
+        'POST /public/payment-links/:token/proof-upload/complete',
+        'POST /public/payment-links/:token/report',
       ]),
     );
     const failures: string[] = [];
@@ -124,10 +130,11 @@ describe('Rutas públicas con no-store (e2e, SEC-064)', () => {
     expect(failures).toEqual([]);
   });
 
-  it('con una oferta o una copia que no existe (404) y con un host sin clínica', async () => {
+  it('con una oferta, una copia o un enlace de pago que no existe (404) y con un host sin clínica', async () => {
     for (const path of [
       `/api/v1/public/slot-offers/${FAKE_TOKEN}`,
       `/api/v1/public/signed-consent-copies/${FAKE_TOKEN}`,
+      `/api/v1/public/payment-links/${FAKE_TOKEN}`,
     ]) {
       for (const host of [hostFor(SUB), hostFor('sec064-no-existe')]) {
         const res = await http().get(path).set('X-Tenant-Host', host);

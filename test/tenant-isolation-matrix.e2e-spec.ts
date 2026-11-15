@@ -3796,6 +3796,21 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    */
   const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
     {
+      spec: 'payment-links.e2e-spec.ts',
+      checks:
+        'B → 404 al leer, guardar o quitar los datos para pagar del medio de A, al crear o listar enlaces de pago del paciente de A, y al ver el comprobante, confirmar o rechazar un reporte de A; nada de A cambia (DX-569)',
+      routes: [
+        'GET /payment-methods/:id/instructions',
+        'PUT /payment-methods/:id/instructions',
+        'DELETE /payment-methods/:id/instructions/:instructionId',
+        'POST /patients/:id/payment-links',
+        'GET /patients/:id/payment-links',
+        'GET /payment-reports/:id/proof-url',
+        'POST /payment-reports/:id/confirm',
+        'POST /payment-reports/:id/reject',
+      ],
+    },
+    {
       spec: 'treatment-plan-repricing.e2e-spec.ts',
       checks:
         'B → 404 al aplicar «Actualizar precios» al plan de A con una Idempotency-Key válida, y los precios de A no cambian (DX-379 B)',
@@ -4183,6 +4198,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * `COVERED_ELSEWHERE`).
    */
   const PUBLIC_TOKEN_COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'payment-links.e2e-spec.ts',
+      checks:
+        'B → 404 con el token del enlace de pago de A en su host, igual que uno inventado: ni apertura, ni subida, ni reporte, y el enlace de A sigue vivo (DX-569)',
+      routes: [
+        'GET /public/payment-links/:token',
+        'POST /public/payment-links/:token/opened',
+        'POST /public/payment-links/:token/proof-upload',
+        'POST /public/payment-links/:token/proof-upload/complete',
+        'POST /public/payment-links/:token/report',
+      ],
+    },
     {
       spec: 'reminder-opt-out.e2e-spec.ts',
       checks:

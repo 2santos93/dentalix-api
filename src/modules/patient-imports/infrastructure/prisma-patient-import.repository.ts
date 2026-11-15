@@ -1609,7 +1609,14 @@ export class PrismaPatientImportRepository {
         return Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
                             FROM ${Prisma.raw(quoteIdent(ref.table))}
                            WHERE ${Prisma.raw(quoteIdent(ref.column))} = ANY(${ids}::uuid[])
-                           ${Prisma.join(live, ' ', '', '')}`;
+                           ${
+                             // DX-569: una tabla sin columna de retirada
+                             // (payment_links) bloquea con cualquier fila;
+                             // `join([])` lanza.
+                             live.length > 0
+                               ? Prisma.join(live, ' ', '', '')
+                               : Prisma.empty
+                           }`;
       });
       const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
         SELECT count(DISTINCT id)::int AS n FROM (${Prisma.join(checks, ' UNION ALL ')}) a`;

@@ -195,6 +195,17 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
   // by class — same pattern as SalesModule exporting GetSalesTotalsUseCase.
   // GetPlanBalanceUseCase is also exported so PaymentPlansModule can inject it
   // (GetPaymentPlanUseCase reuses the same multi-currency "paid" math).
-  exports: [GetPaymentsTotalsUseCase, GetPlanBalanceUseCase],
+  // DX-569: confirmar el reporte del paciente registra el abono con los
+  // mismos casos de uso, y el enlace público sube su comprobante con la
+  // misma subida directa.
+  exports: [
+    GetPaymentsTotalsUseCase,
+    GetPlanBalanceUseCase,
+    RecordPaymentUseCase,
+    RecordOpeningBalancePaymentUseCase,
+    PaymentProofUploads,
+    PAYMENT_REPOSITORY,
+    PAYMENT_PROOF_URL_TTL,
+  ],
 })
 export class PaymentsModule {}

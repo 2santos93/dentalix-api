@@ -54,6 +54,9 @@ describe('Rutas públicas sin caché (SEC-064)', () => {
         'POST /public/slot-offers/:token/accept',
         'GET /public/signed-consent-copies/:token',
         'POST /public/signed-consent-copies/:token/download',
+        // DX-569: el enlace de pago.
+        'GET /public/payment-links/:token',
+        'POST /public/payment-links/:token/report',
         'GET /public/medical-history/:token',
         'GET /public/sign/:token',
         'POST /public/appointment-confirmations/:token',

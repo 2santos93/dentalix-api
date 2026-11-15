@@ -18,6 +18,7 @@ function method(
     active: true,
     requiresReference: false,
     proofPolicy: 'NONE',
+    allowInPaymentLink: false,
     adjustments: [],
     legacyMethod: 'CASH',
     createdAt: new Date(0),

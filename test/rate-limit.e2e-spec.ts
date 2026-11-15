@@ -42,6 +42,8 @@ const LOW_LIMITS: RateLimitConfig = {
   'slot-token': { limit: 2, ttlMs: 60_000 },
   'copy-link': { limit: 4, ttlMs: 60_000 },
   'copy-token': { limit: 2, ttlMs: 60_000 },
+  'payment-link': { limit: 4, ttlMs: 60_000 },
+  'payment-link-token': { limit: 2, ttlMs: 60_000 },
   'prescription-verify': { limit: 2, ttlMs: 60_000 },
   'branding-host': { limit: 4, ttlMs: 60_000 },
   'branding-miss': { limit: 4, ttlMs: 60_000 },

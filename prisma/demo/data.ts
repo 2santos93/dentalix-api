@@ -3248,6 +3248,39 @@ export const DEMO_COLLECTION_NOTES: readonly DemoCollectionNote[] = [
   },
 ];
 
+/**
+ * DX-569: datos para pagar de los dos medios del enlace de pago, de toda la
+ * clínica. INVENTADOS para la demo del piloto (VE): ni el banco, ni la
+ * cuenta, ni la identificación, ni el teléfono existen.
+ */
+export const DEMO_PAYMENT_INSTRUCTIONS = {
+  mobile: {
+    holderName: 'Clínica Dental Demo, C.A.',
+    holderId: 'J-00000000-0',
+    bankName: 'Banco Ejemplo (0000)',
+    phone: '0414-555-0100',
+    note: 'Indica en el concepto el nombre del paciente.',
+  },
+  transfer: {
+    holderName: 'Clínica Dental Demo, C.A.',
+    holderId: 'J-00000000-0',
+    bankName: 'Banco Ejemplo',
+    accountNumber: '0000-0000-00-0000000000',
+    email: 'pagos@demo.example',
+  },
+} as const;
+
+/**
+ * DX-569: el pago que reporta un paciente por su enlace (Pago móvil en
+ * bolívares, el equivalente de 40 USD a la tasa demo de hoy), pendiente de
+ * confirmar. Referencia inventada.
+ */
+export const DEMO_PAYMENT_REPORT = {
+  amountUsd: 40,
+  reference: '000123456789',
+  note: 'Pagué la cuota de este mes.',
+} as const;
+
 /** Compromiso abierto: importe en USD y días desde hoy (día de la sede). */
 export const DEMO_PAYMENT_PROMISE = {
   patientIndex: 8,

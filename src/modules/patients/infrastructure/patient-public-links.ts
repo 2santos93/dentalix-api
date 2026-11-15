@@ -101,6 +101,21 @@ function liveCertificateCopies({
   };
 }
 
+function livePaymentLinks({
+  tenantId,
+  patientId,
+  now,
+}: Scope): Prisma.PaymentLinkWhereInput {
+  // DX-569: sin reporte (usado), sin anular y sin caducar.
+  return {
+    tenantId,
+    patientId,
+    usedAt: null,
+    revokedAt: null,
+    expiresAt: { gt: now },
+  };
+}
+
 /** Enlaces vivos del paciente por tipo (todas las sedes). */
 export async function countLivePublicLinks(
   tx: Tx,
@@ -114,6 +129,7 @@ export async function countLivePublicLinks(
     anamnesis,
     prescriptionCopies,
     certificateCopies,
+    paymentLinks,
   ] = await Promise.all([
     tx.waitlistOffer.count({ where: liveSlotOffers(scope) }),
     tx.signatureRequest.count({ where: liveSignatures(scope, 'CONSENT') }),
@@ -124,6 +140,7 @@ export async function countLivePublicLinks(
     tx.patientCertificateCopyLink.count({
       where: liveCertificateCopies(scope),
     }),
+    tx.paymentLink.count({ where: livePaymentLinks(scope) }),
   ]);
   return {
     slotOffers,
@@ -133,6 +150,7 @@ export async function countLivePublicLinks(
     anamnesis,
     prescriptionCopies,
     certificateCopies,
+    paymentLinks,
   };
 }
 
@@ -142,7 +160,7 @@ export async function countLivePublicLinks(
  * módulo: la oferta pasa a EXPIRED, la solicitud de firma queda anulada por
  * quien archiva (sin código ni sesión vigentes), la copia del PDF invalidada,
  * la anamnesis EXPIRED y las copias de la receta (DX-468) y del certificado
- * (DX-306) invalidadas. Ninguna vuelve atrás: desarchivar no las reactiva.
+ * (DX-306) invalidadas y el enlace de pago anulado (DX-569). Ninguna vuelve atrás: desarchivar no las reactiva.
  */
 export async function revokeLivePublicLinks(
   tx: Tx,
@@ -185,6 +203,10 @@ export async function revokeLivePublicLinks(
     where: liveCertificateCopies(scope),
     data: { revokedAt: now },
   });
+  const paymentLinks = await tx.paymentLink.updateMany({
+    where: livePaymentLinks(scope),
+    data: { revokedAt: now },
+  });
   return {
     slotOffers: slotOffers.count,
     consentSignatures: consentSignatures.count,
@@ -193,5 +215,6 @@ export async function revokeLivePublicLinks(
     anamnesis: anamnesis.count,
     prescriptionCopies: prescriptionCopies.count,
     certificateCopies: certificateCopies.count,
+    paymentLinks: paymentLinks.count,
   };
 }

@@ -273,6 +273,11 @@ model Tenant {
   clinicalRecordCopies        ClinicalRecordCopy[]
   patientCertificateCopyLinks PatientCertificateCopyLink[]
 
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentMethodInstructions PaymentMethodInstruction[]
+  paymentLinks              PaymentLink[]
+  paymentReports            PaymentReport[]
+
   @@map("tenants")
 }
 
@@ -579,6 +584,11 @@ model Location {
   creditTransfers PatientCreditTransfer[]
   creditRefunds   PatientCreditRefund[]
 
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentMethodInstructions PaymentMethodInstruction[]
+  paymentLinks              PaymentLink[]
+  paymentReports            PaymentReport[]
+
   @@unique([tenantId, id], map: "locations_tenant_id_key")
   @@unique([tenantId, receiptPrefix], map: "locations_tenant_receipt_prefix_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
@@ -882,6 +892,9 @@ model Patient {
   signedConsentPdfs           SignedConsentPdf[]
   country                     Country?                         @relation(fields: [countryCode], references: [code])
   city                        City?                            @relation(fields: [cityId], references: [id])
+
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentLinks PaymentLink[]
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   // Requisito de las FK COMPUESTAS de Appointment, TreatmentPlan,
@@ -2086,6 +2099,9 @@ model TreatmentPlan {
   creditRefunds      PatientCreditRefund[]   @relation("CreditRefundPlan")
   creditEntries      PatientCreditEntry[]    @relation("CreditEntryPlan")
 
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentLinks PaymentLink[]
+
   @@unique([tenantId, id], map: "treatment_plans_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "treatment_plans_tenant_id_patient_key")
   @@index([tenantId, patientId])
@@ -2603,6 +2619,10 @@ model Currency {
   creditRefunds   PatientCreditRefund[]   @relation("CreditRefundCurrency")
   creditEntries   PatientCreditEntry[]    @relation("CreditEntryCurrency")
 
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentLinks   PaymentLink[]
+  paymentReports PaymentReport[]
+
   @@map("currencies")
 }
 
@@ -2707,24 +2727,30 @@ enum PaymentMethodKind {
 // a ellos se enlazan los abonos anteriores y los de una réplica o un cliente
 // que solo mandan `method`.
 model ClinicPaymentMethod {
-  id                String             @id @default(uuid()) @db.Uuid
-  tenantId          String             @db.Uuid
-  name              String
-  kind              PaymentMethodKind
-  active            Boolean            @default(true)
-  requiresReference Boolean            @default(false)
+  id                 String             @id @default(uuid()) @db.Uuid
+  tenantId           String             @db.Uuid
+  name               String
+  kind               PaymentMethodKind
+  active             Boolean            @default(true)
+  requiresReference  Boolean            @default(false)
   // DX-389: «Pide comprobante» (NONE por defecto).
-  proofPolicy       PaymentProofPolicy @default(NONE)
-  legacyMethod      PaymentMethod?
-  createdById       String?            @db.Uuid
-  updatedById       String?            @db.Uuid
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  proofPolicy        PaymentProofPolicy @default(NONE)
+  // DX-569: «Permitir en el enlace de pago». Solo se ofrece al paciente si
+  // además está activo y tiene datos para pagar en la sede del enlace.
+  allowInPaymentLink Boolean            @default(false)
+  legacyMethod       PaymentMethod?
+  createdById        String?            @db.Uuid
+  updatedById        String?            @db.Uuid
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
-  tenant      Tenant                    @relation(fields: [tenantId], references: [id])
-  payments    Payment[]
+  tenant         Tenant                     @relation(fields: [tenantId], references: [id])
+  payments       Payment[]
   // DX-516: sus ajustes (impuesto, recargo o descuento); ninguno por defecto.
-  adjustments PaymentMethodAdjustment[]
+  adjustments    PaymentMethodAdjustment[]
+  // DX-569: datos para pagar (de la clínica o de una sede) y reportes.
+  instructions   PaymentMethodInstruction[]
+  paymentReports PaymentReport[]
 
   // Destino de la FK compuesta de payments.paymentMethodId (SEC-004).
   @@unique([tenantId, id], map: "payment_methods_tenant_id_key")
@@ -2760,6 +2786,139 @@ model PaymentProof {
   @@unique([tenantId, uploadId], map: "payment_proofs_tenant_upload_key")
   @@unique([key], map: "payment_proofs_key_key")
   @@map("payment_proofs")
+}
+
+// ---------------------------------------------------------------------------
+// DX-569: el paciente reporta su pago por enlace. Ver la migración
+// 20261225090300_dx569_payment_links (CHECK, FK compuestas, índices parciales
+// y RLS FORCE de las tres tablas).
+// ---------------------------------------------------------------------------
+
+// Datos para pagar de un medio: de toda la clínica (`locationId` NULL) o de
+// una sede, que gana a la de la clínica. Campos neutros y opcionales (al menos
+// uno con texto, CHECK): ningún banco ni documento de un país. Único por
+// (clínica, medio, sede) con NULLS NOT DISTINCT (en la migración).
+model PaymentMethodInstruction {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  paymentMethodId String   @db.Uuid
+  locationId      String?  @db.Uuid
+  holderName      String?
+  holderId        String?
+  bankName        String?
+  accountNumber   String?
+  phone           String?
+  email           String?
+  note            String?
+  createdById     String   @db.Uuid
+  updatedById     String   @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  paymentMethod ClinicPaymentMethod @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payment_method_instructions_method_fkey")
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location      Location?           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "payment_method_instructions_location_fkey")
+
+  @@index([tenantId, locationId], map: "payment_method_instructions_location_idx")
+  @@map("payment_method_instructions")
+}
+
+// Estado del reporte de un pago hecho por el paciente (DX-569).
+enum PaymentReportStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+// Enlace de pago: cobra UN destino (un plan cobrable o un saldo migrado,
+// CHECK), con la foto de lo que se pidió (importe, moneda, sede y concepto).
+// Solo el hash del token. Un enlace vivo por paciente y destino (índice
+// parcial: crear otro anula el anterior en la misma transacción). Usado =
+// ya tiene reporte. Hasta 3 subidas de comprobante autorizadas; la última
+// completada queda «preparada» (`stagedProof*`) hasta el reporte.
+model PaymentLink {
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @db.Uuid
+  patientId           String    @db.Uuid
+  treatmentPlanId     String?   @db.Uuid
+  openingBalanceId    String?   @db.Uuid
+  locationId          String    @db.Uuid
+  amount              Decimal   @db.Decimal(14, 2)
+  currency            String
+  // INSTALLMENT (cuota del plan de pagos) o BALANCE (saldo pendiente).
+  concept             String
+  tokenHash           String    @unique(map: "payment_links_token_hash_key")
+  expiresAt           DateTime
+  // EMAIL, WHATSAPP o NULL (solo se copió la URL).
+  channel             String?
+  createdById         String    @db.Uuid
+  createdAt           DateTime  @default(now())
+  openedAt            DateTime?
+  usedAt              DateTime?
+  revokedAt           DateTime?
+  proofUploadsIssued  Int       @default(0)
+  stagedProofUploadId String?   @db.Uuid
+  stagedProofKey      String?
+  stagedProofMime     String?
+  stagedProofSize     Int?
+  stagedProofSha256   String?
+  stagedProofName     String?
+
+  report         PaymentReport?
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient        Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "payment_links_patient_fkey")
+  plan           TreatmentPlan?  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payment_links_plan_fkey")
+  openingBalance OpeningBalance? @relation(fields: [tenantId, openingBalanceId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payment_links_opening_balance_fkey")
+  location       Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "payment_links_location_fkey")
+  currencyRef    Currency        @relation(fields: [currency], references: [code], onDelete: Restrict, map: "payment_links_currency_fkey")
+
+  @@unique([tenantId, id, patientId], map: "payment_links_tenant_id_patient_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "payment_links_patient_idx")
+  @@map("payment_links")
+}
+
+// Reporte del paciente: uno por enlace. Nace PENDING; CONFIRMED lleva el
+// abono que creó (en la misma transacción) y REJECTED el motivo interno.
+// El comprobante (si lo hay) vive aquí hasta que se confirma y pasa a
+// PaymentProof del abono.
+model PaymentReport {
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @db.Uuid
+  linkId          String              @db.Uuid
+  patientId       String              @db.Uuid
+  locationId      String              @db.Uuid
+  paymentMethodId String              @db.Uuid
+  amount          Decimal             @db.Decimal(14, 2)
+  currency        String
+  reference       String?
+  paidOn          DateTime            @db.Date
+  note            String?
+  proofUploadId   String?             @db.Uuid
+  proofKey        String?
+  proofMime       String?
+  proofSize       Int?
+  proofSha256     String?
+  proofName       String?
+  status          PaymentReportStatus @default(PENDING)
+  paymentId       String?             @db.Uuid
+  rejectReason    String?
+  decidedById     String?             @db.Uuid
+  decidedAt       DateTime?
+  createdAt       DateTime            @default(now())
+
+  link          PaymentLink         @relation(fields: [tenantId, linkId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payment_reports_link_fkey")
+  paymentMethod ClinicPaymentMethod @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payment_reports_method_fkey")
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location      Location            @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "payment_reports_location_fkey")
+  payment       Payment?            @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "payment_reports_payment_fkey")
+  currencyRef   Currency            @relation(fields: [currency], references: [code], onDelete: Restrict, map: "payment_reports_currency_fkey")
+
+  @@unique([tenantId, linkId, patientId], map: "payment_reports_link_key")
+  @@index([tenantId, status, createdAt], map: "payment_reports_inbox_idx")
+  @@index([tenantId, patientId], map: "payment_reports_patient_idx")
+  @@index([tenantId, locationId], map: "payment_reports_location_idx")
+  @@index([tenantId, paymentMethodId], map: "payment_reports_method_idx")
+  @@map("payment_reports")
 }
 
 // DX-516: tipo genérico de un ajuste por medio de pago. Ninguno nombra un
@@ -2960,6 +3119,9 @@ model Payment {
   // recreates this as a full index.
   // DX-253: devoluciones que lo citan como abono de referencia.
   creditRefundRefs PatientCreditRefundPayment[]
+
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentReports PaymentReport[]
 
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   // DX-380: destino de la FK compuesta por clínica de `payment_base_retries`
@@ -4286,6 +4448,10 @@ enum AuditResourceType {
   // DX-015-bis: tipo de recall (alta, edición, retirada y disparadores).
   RECALL_TYPE
   PATIENT_CERTIFICATE
+  // DX-569: enlace de pago (crear y enviar) y el reporte del paciente
+  // (enviado por el enlace, confirmado, rechazado y ver su comprobante).
+  PAYMENT_LINK
+  PAYMENT_REPORT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -4365,6 +4531,9 @@ enum EmailTemplate {
   // DX-443: copia del PDF firmado con un enlace de un solo uso.
   SIGNED_CONSENT_COPY       @map("signed-consent-copy")
   PRESCRIPTION_COPY         @map("prescription-copy")
+  // DX-569: enlace de pago y aviso de reporte no confirmado.
+  PAYMENT_LINK              @map("payment-link")
+  PAYMENT_REPORT_REJECTED   @map("payment-report-rejected")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
@@ -6032,6 +6201,9 @@ model OpeningBalance {
   currencyRef Currency           @relation(fields: [currency], references: [code], onDelete: Restrict, map: "opening_balances_currency_fkey")
   /// Abonos registrados contra este saldo (vivos: `deletedAt` NULL).
   payments    Payment[]
+
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentLinks PaymentLink[]
 
   @@unique([tenantId, id], map: "opening_balances_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "opening_balances_tenant_id_patient_key")

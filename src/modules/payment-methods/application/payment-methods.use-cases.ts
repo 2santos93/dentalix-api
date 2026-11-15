@@ -54,6 +54,8 @@ export interface PaymentMethodInput {
   requiresReference?: boolean;
   /** DX-389: «Pide comprobante»; sin indicarlo, NONE. */
   proofPolicy?: PaymentProofPolicy;
+  /** DX-569: «Permitir en el enlace de pago»; sin indicarlo, no. */
+  allowInPaymentLink?: boolean;
 }
 
 function normalizedName(name: string): string {
@@ -99,6 +101,7 @@ export class CreatePaymentMethodUseCase {
         active: input.active ?? true,
         requiresReference: input.requiresReference ?? false,
         proofPolicy: input.proofPolicy ?? 'NONE',
+        allowInPaymentLink: input.allowInPaymentLink ?? false,
       },
       userId,
     );
@@ -132,6 +135,7 @@ export class UpdatePaymentMethodUseCase {
       active: input.active,
       requiresReference: input.requiresReference,
       proofPolicy: input.proofPolicy,
+      allowInPaymentLink: input.allowInPaymentLink,
     };
     if (input.name !== undefined) {
       data.name = normalizedName(input.name);

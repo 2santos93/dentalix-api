@@ -155,6 +155,14 @@ export interface AuditMetadata {
    */
   exchangeRate?: AuditExchangeRate;
   /**
+   * DX-569: al confirmar un pago reportado, la tasa que fijó recepción en vez
+   * de la del día (unidades de la moneda que no es USD por 1 USD, decimal en
+   * texto) y su motivo: texto de caja escrito por el personal (≤ 280, una
+   * línea, sin caracteres de control), no un dato clínico del paciente. Lo
+   * pide la revisión del PR #176: sin él, el motivo se perdía.
+   */
+  rateOverride?: AuditRateOverride;
+  /**
    * G1 (R13): moneda, zona y formato de una sede antes y después de una
    * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
    * 4217, IANA, BCP 47); un lado puede traer null (sede sin configurar).
@@ -418,6 +426,11 @@ export interface AuditExchangeRate {
   day: string;
   /** Unidades de `currency` por 1 USD, decimal en texto («0.91»). */
   rate: string;
+}
+
+export interface AuditRateOverride {
+  rate: string;
+  reason: string;
 }
 
 export interface AuditPaymentReference {
@@ -992,19 +1005,35 @@ function closingQueueDismissal(
 /** Tope de enlaces de un tipo en un evento: muy por encima de lo real. */
 const MAX_REVOKED_LINKS = 1_000_000;
 
+/**
+ * Tipos añadidos después de DX-461: los eventos anteriores no los traen (no
+ * existían) y se leen como 0 — las copias de la receta (DX-468) y del
+ * certificado (DX-306) y el enlace de pago (DX-569).
+ */
+const LINK_KINDS_ADDED_LATER: readonly string[] = [
+  'prescriptionCopies',
+  'certificateCopies',
+  'paymentLinks',
+];
+
 /** Exactamente los tipos de enlace, cada uno un natural acotado, o nada (DX-461). */
 function revokedLinks(value: unknown): LivePublicLinkCounts | null {
   if (!isRecord(value)) return null;
   const keys = Object.keys(value);
+  const required = LIVE_PUBLIC_LINK_KINDS.filter(
+    (k) => !LINK_KINDS_ADDED_LATER.includes(k),
+  );
   if (
-    keys.length !== LIVE_PUBLIC_LINK_KINDS.length ||
-    keys.some((k) => !(LIVE_PUBLIC_LINK_KINDS as readonly string[]).includes(k))
+    keys.some(
+      (k) => !(LIVE_PUBLIC_LINK_KINDS as readonly string[]).includes(k),
+    ) ||
+    required.some((k) => !keys.includes(k))
   ) {
     return null;
   }
   const out = {} as LivePublicLinkCounts;
   for (const kind of LIVE_PUBLIC_LINK_KINDS) {
-    const n = value[kind];
+    const n = kind in value ? value[kind] : 0;
     if (
       typeof n !== 'number' ||
       !Number.isInteger(n) ||
@@ -1477,6 +1506,28 @@ function exchangeRate(value: unknown): AuditExchangeRate | null {
   return { currency, day, rate };
 }
 
+export const MAX_AUDIT_RATE_OVERRIDE_REASON = 280;
+const RATE_OVERRIDE_REASON = new RegExp(
+  `^[^\\p{Cc}\\p{Cf}\\u2028\\u2029]{1,${MAX_AUDIT_RATE_OVERRIDE_REASON}}$`,
+  'u',
+);
+
+/** DX-569: tasa decimal y motivo en una línea; lo que no encaja se descarta. */
+function rateOverride(value: unknown): AuditRateOverride | null {
+  if (!isRecord(value)) return null;
+  const { rate, reason, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof rate !== 'string' ||
+    !RATE_TEXT.test(rate) ||
+    typeof reason !== 'string' ||
+    !RATE_OVERRIDE_REASON.test(reason)
+  ) {
+    return null;
+  }
+  return { rate, reason };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -1552,6 +1603,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (backup) out.exchangeRateBackup = backup;
   const rated = exchangeRate(input.exchangeRate);
   if (rated) out.exchangeRate = rated;
+  const fixedRate = rateOverride(input.rateOverride);
+  if (fixedRate) out.rateOverride = fixedRate;
   const covered = coverage(input.coverage);
   if (covered) out.coverage = covered;
   const validity = coverageValidity(input.coverageValidity);

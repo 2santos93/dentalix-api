@@ -34,6 +34,11 @@ export interface ClinicPaymentMethodEntity {
   requiresReference: boolean;
   /** DX-389: «Pide comprobante» del cobro: NONE (defecto), OPTIONAL o REQUIRED. */
   proofPolicy: PaymentProofPolicy;
+  /**
+   * DX-569: «Permitir en el enlace de pago». Se ofrece al paciente solo si
+   * además está activo y tiene datos para pagar en la sede del enlace.
+   */
+  allowInPaymentLink: boolean;
   /** Medio inicial equivalente a este método antiguo; `null` si es propio. */
   legacyMethod: PaymentMethod | null;
   /**

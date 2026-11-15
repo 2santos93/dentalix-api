@@ -7,6 +7,7 @@ import {
   CLINICAL_ROLES,
   CLOSING_QUEUE_ROLES,
   INVENTORY_ROLES,
+  PAYMENT_ROLES,
   RECALL_LIST_ROLES,
   RECEIVABLES_ROLES,
   TREATMENT_PLAN_FOLLOW_UP_ROLES,
@@ -61,6 +62,7 @@ describe('WORK_QUEUE_ROLES (DX-503)', () => {
   // la cuenta.
   const ENDPOINT_ROLES: Record<WorkQueueKey, readonly ClinicRole[]> = {
     CLOSING_QUEUE: CLOSING_QUEUE_ROLES,
+    PAYMENT_REPORTS: PAYMENT_ROLES,
     ANAMNESIS_REVIEW: CLINICAL_ROLES,
     QUOTE_FOLLOW_UP: TREATMENT_PLAN_FOLLOW_UP_ROLES,
     ACCEPTED_UNSCHEDULED: APPOINTMENT_ROLES,
@@ -84,6 +86,7 @@ describe('WORK_QUEUE_ROLES (DX-503)', () => {
     ]);
     expect(workQueuesFor(ClinicRole.RECEPTION)).toEqual([
       'CLOSING_QUEUE',
+      'PAYMENT_REPORTS',
       'QUOTE_FOLLOW_UP',
       'ACCEPTED_UNSCHEDULED',
       'WAITLIST',
@@ -139,11 +142,12 @@ describe('GetWorkQueuesSummaryUseCase (DX-503)', () => {
     const result = await useCase(src).execute(actor(ClinicRole.RECEPTION));
     expect(result.items).toEqual([
       { key: 'CLOSING_QUEUE', status: 'OK', count: 1 },
+      { key: 'PAYMENT_REPORTS', status: 'OK', count: 2 },
       { key: 'QUOTE_FOLLOW_UP', status: 'ERROR', count: null },
-      { key: 'ACCEPTED_UNSCHEDULED', status: 'OK', count: 4 },
-      { key: 'WAITLIST', status: 'OK', count: 5 },
-      { key: 'RECALL', status: 'OK', count: 6 },
-      { key: 'RECEIVABLES', status: 'OK', count: 7 },
+      { key: 'ACCEPTED_UNSCHEDULED', status: 'OK', count: 5 },
+      { key: 'WAITLIST', status: 'OK', count: 6 },
+      { key: 'RECALL', status: 'OK', count: 7 },
+      { key: 'RECEIVABLES', status: 'OK', count: 8 },
     ]);
   });
 

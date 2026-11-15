@@ -30,6 +30,7 @@ import {
   assertPaidAtWindow,
   normalizePaidAt,
   type RecordPaymentInput,
+  type RecordPaymentOptions,
 } from './record-payment.use-case';
 import { PaymentMethodGate } from '../payment-method-gate';
 import { PaymentProofs, attachmentOf } from '../payment-proofs';
@@ -69,6 +70,8 @@ export class RecordOpeningBalancePaymentUseCase {
     input: RecordPaymentInput,
     createdById?: string,
     idempotencyKey?: string,
+    /** DX-569: sin tasa (el saldo se abona en su moneda). */
+    options: Omit<RecordPaymentOptions, 'rateOverride'> = {},
   ): Promise<Payment> {
     const key = idempotencyKey?.trim() ? idempotencyKey.trim() : undefined;
     const target = paymentTargetKey({
@@ -133,10 +136,11 @@ export class RecordOpeningBalancePaymentUseCase {
       amount: input.amount,
       currency,
     });
-    const proof = await this.proofs.complete(
-      payMethod.proofUploadId,
-      createdById,
-    );
+    // DX-569: el comprobante del reporte ya está copiado y comprobado.
+    const proof =
+      options.proof === undefined
+        ? await this.proofs.complete(payMethod.proofUploadId, createdById)
+        : null;
     let payment: Payment;
     try {
       payment = await this.repo.create({
@@ -152,7 +156,8 @@ export class RecordOpeningBalancePaymentUseCase {
         referenceNormalized: payMethod.referenceNormalized,
         duplicateReferenceReason: payMethod.duplicateReferenceReason,
         adjustments: payMethod.adjustments,
-        proof: attachmentOf(proof),
+        proof:
+          options.proof === undefined ? attachmentOf(proof) : options.proof,
         notes: input.notes,
         createdById,
         idempotencyKey: key,
@@ -163,6 +168,7 @@ export class RecordOpeningBalancePaymentUseCase {
         planAmount: null,
         // Un saldo migrado se abona en su moneda: no hay tasa que congelar.
         frozenRate: null,
+        afterInsertInTx: options.afterInsertInTx,
       });
     } catch (error) {
       await this.proofs.settle([proof], false);

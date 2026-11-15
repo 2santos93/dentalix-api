@@ -43,6 +43,9 @@ describe('loadRateLimitConfig', () => {
     // DX-435: la oferta de hueco pública, por IP y por token.
     expect(cfg['slot-offer']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['slot-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-569: el enlace de pago público, por IP y por token.
+    expect(cfg['payment-link']).toEqual({ limit: 20, ttlMs: 60_000 });
+    expect(cfg['payment-link-token']).toEqual({ limit: 10, ttlMs: 60_000 });
     // DX-443: la copia pública del PDF firmado, por IP y por token.
     expect(cfg['copy-link']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['copy-token']).toEqual({ limit: 10, ttlMs: 60_000 });
@@ -109,6 +112,18 @@ describe('loadRateLimitConfig', () => {
     );
     expect(cfg.signature.limit).toBe(6);
     expect(cfg['signature-token']).toEqual({ limit: 2, ttlMs: 1000 });
+  });
+
+  it('DX-569: lee los baldes del enlace de pago (todos los guiones pasan a _)', () => {
+    const cfg = loadRateLimitConfig(
+      envOf({
+        RATE_LIMIT_PAYMENT_LINK_LIMIT: '7',
+        RATE_LIMIT_PAYMENT_LINK_TOKEN_LIMIT: '2',
+        RATE_LIMIT_PAYMENT_LINK_TOKEN_TTL_MS: '1000',
+      }),
+    );
+    expect(cfg['payment-link'].limit).toBe(7);
+    expect(cfg['payment-link-token']).toEqual({ limit: 2, ttlMs: 1000 });
   });
 
   it('lee límite y ventana de cada política desde el entorno', () => {
