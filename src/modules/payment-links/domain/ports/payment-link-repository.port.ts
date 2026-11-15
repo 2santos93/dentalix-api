@@ -6,6 +6,7 @@ import type {
   TreatmentPlanStatus,
 } from '@prisma/client';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import type { PaymentProofAttachment } from '../../../payments/domain/payment-proof';
 import type { PaymentInstructionFields } from '../../../payment-methods/domain/payment-method-instructions';
@@ -102,6 +103,8 @@ export interface PublicPaymentLinkRow {
   openingBalanceId: string | null;
   locationId: string;
   locationTimeZone: string | null;
+  /** DX-354: zona, locale y reloj de la sede del enlace; null si le falta algo. */
+  regional: DocumentRegionalDto | null;
   amount: number;
   currency: string;
   concept: PaymentLinkConcept;

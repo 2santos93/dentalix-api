@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import type { PaymentProofPolicy } from '@prisma/client';
 import { civilDateIn, parseCivilDate } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { GetRatesForDateUseCase } from '../../../exchange/application/use-cases/get-rates-for-date.use-case';
 import { BASE_CURRENCY } from '../../../exchange/domain/exchange-rate-source';
@@ -119,6 +120,11 @@ export interface PublicPaymentLinkView {
   status: 'LIVE';
   clinic: ClinicBrandingRow | null;
   patientFirstName: string | null;
+  /**
+   * DX-354: zona, locale y reloj de la sede del enlace para pintar importes,
+   * fechas y la caducidad; null si a la sede le falta algo.
+   */
+  regional: DocumentRegionalDto | null;
   concept: PaymentLinkConcept;
   conceptLabel: string;
   amount: number;
@@ -198,6 +204,7 @@ export class GetPublicPaymentLinkUseCase {
       status: 'LIVE',
       clinic: await this.repo.clinicBranding(),
       patientFirstName: firstNameOnly(link.patientFirstName),
+      regional: link.regional,
       concept: link.concept,
       conceptLabel: PAYMENT_LINK_CONCEPT_LABELS[link.concept],
       amount: link.amount,

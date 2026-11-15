@@ -653,6 +653,12 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
       expect(body).toMatchObject({
         status: 'LIVE',
         patientFirstName: 'Lucía',
+        // DX-354: la región de la sede del enlace, para pintar importes y fechas.
+        regional: {
+          timeZone: ZONE,
+          locale: FIXTURE.locale,
+          hourCycle: FIXTURE.hourCycle,
+        },
         amount: 40,
         currency: 'USD',
         currencies: ['USD', 'VES'],

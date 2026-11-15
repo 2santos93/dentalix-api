@@ -24,6 +24,7 @@ import {
 import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 import { MANUAL_RATE_MAX } from '../../../exchange/domain/exchange-rate-source';
 import { PaymentDto } from '../../../payments/presentation/dto/payment.dto';
+import { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import {
   REJECT_REASON_MAX,
   REPORT_NOTE_MAX,
@@ -229,6 +230,13 @@ export class PublicPaymentLinkDto {
     description: 'Solo el nombre de pila.',
   })
   patientFirstName!: string | null;
+  @ApiProperty({
+    type: DocumentRegionalDto,
+    nullable: true,
+    description:
+      'DX-354: zona, locale y reloj de la sede del enlace, para pintar el importe, las equivalencias, `rateDate`, `expiresAt` y los límites de la fecha. null si a la sede le falta algo: la página pinta «—».',
+  })
+  regional!: DocumentRegionalDto | null;
   @ApiProperty(CONCEPT) concept!: 'INSTALLMENT' | 'BALANCE';
   @ApiProperty({
     description: 'Concepto genérico, sin nombres de tratamiento.',

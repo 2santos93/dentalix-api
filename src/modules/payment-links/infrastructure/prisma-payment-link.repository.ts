@@ -4,6 +4,10 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
 import { withClinicLogoUrl } from '../../../shared/storage/clinic-logo-url';
+import {
+  DOCUMENT_REGIONAL_SELECT,
+  documentRegional,
+} from '../../../shared/locations/document-regional';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import type { PaymentProofAttachment } from '../../payments/domain/payment-proof';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
@@ -329,7 +333,7 @@ export class PrismaPaymentLinkRepository implements PaymentLinkRepository {
         }),
         tx.location.findFirst({
           where: { id: row.locationId },
-          select: { timeZone: true },
+          select: DOCUMENT_REGIONAL_SELECT,
         }),
       ]);
       if (!patient) return null;
@@ -341,6 +345,7 @@ export class PrismaPaymentLinkRepository implements PaymentLinkRepository {
         openingBalanceId: row.openingBalanceId,
         locationId: row.locationId,
         locationTimeZone: location?.timeZone ?? null,
+        regional: documentRegional(location),
         amount: row.amount.toNumber(),
         currency: row.currency,
         concept: row.concept as PaymentLinkConcept,
