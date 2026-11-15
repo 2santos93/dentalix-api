@@ -219,7 +219,9 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         breakGlassReason: REASON,
       }).expect(401);
       expect((res.body as Body).code).toBeUndefined();
-      expect((res.body as Body).message).toBe('Invalid credentials');
+      expect((res.body as Body).message).toBe(
+        'Correo o contraseña incorrectos.',
+      );
       expect(await raw.platformAccessAudit.count()).toBe(0);
     });
 
@@ -246,7 +248,7 @@ describe('Break-glass del superadmin (e2e, SEC-008)', () => {
         }).expect(401);
         expect(res.body).toEqual({
           statusCode: 401,
-          message: 'Invalid credentials',
+          message: 'Correo o contraseña incorrectos.',
           error: 'Unauthorized',
         });
       }

@@ -1,7 +1,7 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ClinicRole, ExtraPermission } from '@prisma/client';
-import { RolesGuard } from './roles.guard';
+import { ROLES_DENIED_DEFAULT_MESSAGE, RolesGuard } from './roles.guard';
 import { ROLES_DENIED_MESSAGE_KEY, ROLES_KEY } from './roles.decorator';
 import { ALLOW_PERMISSIONS_KEY } from './permissions.decorator';
 import type { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -122,6 +122,21 @@ describe('RolesGuard — DX-090: rol base O permiso extra', () => {
       granted: [],
     });
     await expect(guard.canActivate(ctx)).rejects.toThrow(ForbiddenException);
+  });
+
+  it('DX-111: sin @RolesDeniedMessage, el 403 dice en español que falta permiso', async () => {
+    const { guard, ctx } = permCtx({
+      role: ClinicRole.ASSISTANT,
+      roles: PAYMENT,
+      allowed: [ExtraPermission.PAYMENT_REGISTER],
+      granted: [],
+    });
+    await expect(guard.canActivate(ctx)).rejects.toThrow(
+      new ForbiddenException(ROLES_DENIED_DEFAULT_MESSAGE),
+    );
+    expect(ROLES_DENIED_DEFAULT_MESSAGE).toBe(
+      'No tienes permiso para hacer esto. Si lo necesitas, pide acceso a un administrador.',
+    );
   });
 
   it('ASSISTANT con PAYMENT_REGISTER concedido → pasa, y deja effectivePermissions', async () => {

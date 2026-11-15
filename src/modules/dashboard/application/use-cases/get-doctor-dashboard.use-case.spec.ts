@@ -484,7 +484,7 @@ describe('GetDoctorDashboardUseCase', () => {
         to: '2026-07-01',
         currency: 'USD',
       }),
-    ).rejects.toThrow(/from.*to|to.*from/i);
+    ).rejects.toThrow(/fecha inicial.*final/i);
   });
 
   it('rejects a blank currency with a clear error', async () => {

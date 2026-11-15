@@ -196,7 +196,10 @@ export class UserMfaService {
 
   async state(userId: string): Promise<UserMfaState> {
     const state = await this.repo.find(userId);
-    if (!state) throw new UnauthorizedException('Session is no longer valid');
+    if (!state)
+      throw new UnauthorizedException(
+        'Tu sesión ya no es válida. Vuelve a iniciar sesión.',
+      );
     return state;
   }
 
@@ -483,7 +486,7 @@ export class UserMfaService {
     userId: string,
   ): Promise<{ enabled: boolean; enabledAt: Date | null }> {
     if (!(await this.repo.findActiveMemberRole(tenantId, userId))) {
-      throw new NotFoundException('Staff member not found');
+      throw new NotFoundException('Miembro del personal no encontrado');
     }
     const { enabledAt } = await this.state(userId);
     return { enabled: enabledAt !== null, enabledAt };
@@ -513,7 +516,7 @@ export class UserMfaService {
       throw new ConflictException(MFA_MESSAGES.resetSelf);
     }
     if (!(await this.repo.findActiveMemberRole(ctx.tenantId, targetUserId))) {
-      throw new NotFoundException('Staff member not found');
+      throw new NotFoundException('Miembro del personal no encontrado');
     }
     const actor = await this.state(actorId);
     await this.assertPassword(actor, input.currentPassword);

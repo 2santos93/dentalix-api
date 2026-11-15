@@ -78,5 +78,9 @@ it('409 al desactivar al último ADMIN', async () => {
       },
       CTX,
     ),
-  ).rejects.toThrow(new ConflictException('Cannot deactivate the last admin'));
+  ).rejects.toThrow(
+    new ConflictException(
+      'No se puede desactivar al último administrador de la clínica.',
+    ),
+  );
 });

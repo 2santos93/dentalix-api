@@ -139,9 +139,21 @@ describe('Entradas sin 500 y errores en español (DX-111)', () => {
       const res = await call('get', '/patients')
         .set('X-Location-Id', 'abc')
         .expect(400);
-      expect((res.body as { message: string }).message).toBe(
-        'La sede elegida no es válida. Vuelve a elegir la sede.',
-      );
+      expect(res.body).toMatchObject({
+        code: 'LOCATION_INVALID',
+        message: 'La sede elegida no es válida. Vuelve a elegir la sede.',
+      });
+    });
+
+    it('X-Location-Id de una sede que no existe → 400 LOCATION_UNKNOWN', async () => {
+      const res = await call('get', '/patients')
+        .set('X-Location-Id', '00000000-0000-4000-8000-000000000000')
+        .expect(400);
+      expect(res.body).toMatchObject({
+        code: 'LOCATION_UNKNOWN',
+        message:
+          'La sede elegida no existe en esta clínica. Vuelve a elegir la sede.',
+      });
     });
 
     it('una ruta que no existe → 404 en español', async () => {

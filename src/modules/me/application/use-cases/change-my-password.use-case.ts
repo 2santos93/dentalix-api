@@ -60,11 +60,11 @@ export class ChangeMyPasswordUseCase {
     // Mensaje genérico: no revelar si el usuario existe. La longitud mínima
     // de newPassword la valida el DTO (@MinLength(8)).
     if (!hash) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('La contraseña actual no es correcta.');
     }
     const ok = await this.password.verify(input.currentPassword, hash);
     if (!ok) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('La contraseña actual no es correcta.');
     }
     const newHash = await this.password.hash(input.newPassword);
     const tv = await this.repo.updatePasswordAndRevokeSessions(

@@ -156,7 +156,9 @@ export async function checkSlotRules(
 
   if (!reactivating) {
     if (end <= start) {
-      throw new BadRequestException('End must be after start');
+      throw new BadRequestException(
+        'La hora de fin debe ser posterior a la de inicio.',
+      );
     }
 
     // DX-200: con el paciente en la clínica la cita sigue siendo de HOY:

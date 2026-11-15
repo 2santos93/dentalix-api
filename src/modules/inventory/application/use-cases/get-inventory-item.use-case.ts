@@ -16,7 +16,7 @@ export class GetInventoryItemUseCase {
       // Same rationale as GetTreatmentPlanUseCase: a missing row and a row
       // that belongs to another tenant are indistinguishable here (RLS
       // makes cross-tenant rows invisible), so both surface as NotFound.
-      throw new NotFoundException('Inventory item not found');
+      throw new NotFoundException('Insumo no encontrado');
     }
 
     const [movements, stock] = await Promise.all([

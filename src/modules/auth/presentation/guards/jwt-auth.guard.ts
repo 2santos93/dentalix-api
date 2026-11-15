@@ -17,7 +17,7 @@ export class JwtAuthGuard implements CanActivate {
     }>();
     const header = request.headers['authorization'];
     if (!header?.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
+      throw new UnauthorizedException('Falta la sesión: inicia sesión.');
     }
     try {
       request.user = await this.tokens.verifyAccess(
@@ -25,7 +25,9 @@ export class JwtAuthGuard implements CanActivate {
       );
       return true;
     } catch {
-      throw new UnauthorizedException('Invalid token');
+      throw new UnauthorizedException(
+        'La sesión no es válida o expiró. Vuelve a iniciar sesión.',
+      );
     }
   }
 }

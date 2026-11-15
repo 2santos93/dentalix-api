@@ -70,7 +70,12 @@ export function applySecurity(
             : // Un origen ajeno no llega al handler (ni recibe cabeceras
               // CORS): la petición se corta aquí con 403. Es también la
               // primera barrera CSRF del refresh por cookie (DX-062).
-              cb(new ForbiddenException('Origin not allowed'), false),
+              cb(
+                new ForbiddenException(
+                  'Este sitio no está autorizado para usar la API.',
+                ),
+                false,
+              ),
         // Sin base de datos no se sabe: error (500), nunca se deja pasar.
         (error: Error) => cb(error, false),
       );

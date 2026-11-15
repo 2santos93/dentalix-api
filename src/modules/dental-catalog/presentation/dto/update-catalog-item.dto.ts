@@ -68,7 +68,7 @@ export class UpdateCatalogItemDto {
   @IsOptional()
   @IsString()
   @Matches(HEX_COLOR_PATTERN, {
-    message: 'color must be a valid hex value (e.g. #1A2B3C)',
+    message: 'El color debe ser un valor hexadecimal válido (p. ej., #1A2B3C).',
   })
   color?: string;
 

@@ -98,7 +98,7 @@ const DEFAULT_SEARCH_TAKE = 20;
 
 type TxClient = Prisma.TransactionClient;
 
-const PATIENT_NOT_FOUND = 'Patient not found';
+const PATIENT_NOT_FOUND = 'Paciente no encontrado';
 
 /** El plazo vigente de la clínica, en años: lo que `mapToEntity` necesita. */
 export interface RetentionTerm {
@@ -590,7 +590,7 @@ export class PrismaPatientRepository implements PatientRepository {
          WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
          FOR UPDATE`;
       if (!existing) {
-        throw new NotFoundException('Patient not found');
+        throw new NotFoundException('Paciente no encontrado');
       }
       if (typeof patch.docNumber === 'string') {
         await assertDocFree(tx, this.requireTenantId(), patch.docNumber, id);

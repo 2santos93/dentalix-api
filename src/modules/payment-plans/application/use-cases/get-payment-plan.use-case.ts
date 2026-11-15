@@ -91,7 +91,7 @@ export class GetPaymentPlanUseCase {
     const plan = await this.repo.findActiveByPlan(treatmentPlanId);
     if (!plan) {
       throw new NotFoundException(
-        'No active payment plan for this treatment plan',
+        'Este plan de tratamiento no tiene un plan de cuotas activo.',
       );
     }
 

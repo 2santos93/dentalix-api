@@ -25,7 +25,10 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
-import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
+import {
+  ROLES_DENIED_DEFAULT_MESSAGE,
+  RolesGuard,
+} from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import {
@@ -60,7 +63,7 @@ interface AuthenticatedRequest extends AuditableRequest {
 
 function actorOf(req: AuthenticatedRequest) {
   if (!isTenantPayload(req.user)) {
-    throw new ForbiddenException('Insufficient role');
+    throw new ForbiddenException(ROLES_DENIED_DEFAULT_MESSAGE);
   }
   return { role: req.user.role, userId: req.user.sub };
 }

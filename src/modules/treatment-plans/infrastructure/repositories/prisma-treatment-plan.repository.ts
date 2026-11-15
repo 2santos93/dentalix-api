@@ -517,7 +517,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
     const item = await this.prisma.runWithTenant(async (tx) => {
       const plan = await lockedPlan(tx, planId);
       if (!plan) {
-        throw new NotFoundException('Treatment plan not found');
+        throw new NotFoundException('Plan de tratamiento no encontrado');
       }
       const input = decide(plan);
       return tx.treatmentPlanItem.create({
@@ -591,7 +591,9 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           })
         : null;
       if (!plan || !previous) {
-        throw new NotFoundException('Treatment plan item not found');
+        throw new NotFoundException(
+          'Ítem del plan de tratamiento no encontrado',
+        );
       }
 
       const { patch, mirror, attribution } = decide({
@@ -809,7 +811,9 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         },
       });
       if (!existing) {
-        throw new NotFoundException('Treatment plan item not found');
+        throw new NotFoundException(
+          'Ítem del plan de tratamiento no encontrado',
+        );
       }
 
       await tx.treatmentPlanItem.update({

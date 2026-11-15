@@ -29,19 +29,21 @@ export class CreateInventoryItemUseCase {
   ): Promise<InventoryItem> {
     const name = input.name.trim();
     if (!name) {
-      throw new BadRequestException('name is required');
+      throw new BadRequestException('El nombre es obligatorio.');
     }
 
     const unit = input.unit.trim();
     if (!unit) {
-      throw new BadRequestException('unit is required');
+      throw new BadRequestException('La unidad es obligatoria.');
     }
 
     // Omitted → default 0, same "resolve the default before it reaches the
     // repository" convention as AddTreatmentPlanItemUseCase resolving price.
     const minStock = input.minStock ?? 0;
     if (!Number.isFinite(minStock) || minStock < 0) {
-      throw new BadRequestException('minStock must be a number >= 0');
+      throw new BadRequestException(
+        'El stock mínimo debe ser un número mayor o igual a 0.',
+      );
     }
 
     const sku = input.sku?.trim();

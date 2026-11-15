@@ -47,7 +47,7 @@ function requireCivilDate(value: string, field: 'from' | 'to'): string {
   const day = parseCivilDate(value);
   if (day === null) {
     throw new BadRequestException(
-      `${field} must be a valid calendar date (YYYY-MM-DD)`,
+      `${field} debe ser una fecha válida (AAAA-MM-DD).`,
     );
   }
   return day;
@@ -83,7 +83,9 @@ export class GetAccountStatementUseCase {
     const to =
       input.to !== undefined ? requireCivilDate(input.to, 'to') : undefined;
     if (from && to && from > to) {
-      throw new BadRequestException('from must be on or before to');
+      throw new BadRequestException(
+        'La fecha inicial no puede ser posterior a la final.',
+      );
     }
 
     const [data, notice, names] = await Promise.all([

@@ -33,7 +33,7 @@ function makeDeps(
     execute: jest.fn((id: string) => {
       if (overrides.planThrows) {
         return Promise.reject(
-          new NotFoundException('Treatment plan not found'),
+          new NotFoundException('Plan de tratamiento no encontrado'),
         );
       }
       return Promise.resolve({
@@ -179,7 +179,7 @@ describe('CreatePaymentPlanUseCase', () => {
   it('propagates NotFound when the treatment plan is absent', async () => {
     const { useCase } = makeDeps({ planThrows: true });
     await expect(useCase.execute('missing', baseInput, 'u1')).rejects.toThrow(
-      'Treatment plan not found',
+      'Plan de tratamiento no encontrado',
     );
   });
 

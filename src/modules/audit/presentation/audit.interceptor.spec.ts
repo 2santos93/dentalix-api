@@ -189,7 +189,8 @@ describe('AuditInterceptor (DX-009)', () => {
           {
             handle: () =>
               throwError(
-                () => new UnauthorizedException('Invalid credentials'),
+                () =>
+                  new UnauthorizedException('Correo o contraseña incorrectos.'),
               ),
           },
           null,

@@ -138,7 +138,8 @@ function makeRepo(
       decide: DecideNewItem,
     ): Promise<TreatmentPlanItem> => {
       const plan = await repo.findPlanById(planId);
-      if (!plan) throw new NotFoundException('Treatment plan not found');
+      if (!plan)
+        throw new NotFoundException('Plan de tratamiento no encontrado');
       const input = decide(plan);
       capture?.(input);
       return fakeItem({

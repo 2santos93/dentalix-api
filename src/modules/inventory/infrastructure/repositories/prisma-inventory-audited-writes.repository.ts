@@ -57,7 +57,7 @@ export class PrismaInventoryAuditedWritesRepository implements InventoryAuditedW
     const row = await tx.inventoryItem.findFirst({
       where: { id, deletedAt: null },
     });
-    if (!row) throw new NotFoundException('Inventory item not found');
+    if (!row) throw new NotFoundException('Insumo no encontrado');
     return row;
   }
 
@@ -155,7 +155,7 @@ export class PrismaInventoryAuditedWritesRepository implements InventoryAuditedW
         where: { id: input.itemId, deletedAt: null },
         select: { locationId: true },
       });
-      if (!item) throw new NotFoundException('Inventory item not found');
+      if (!item) throw new NotFoundException('Insumo no encontrado');
       this.tenantContext.assertLocationAllowed(item.locationId);
 
       const row = await tx.inventoryMovement.create({

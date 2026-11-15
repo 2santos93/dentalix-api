@@ -69,11 +69,11 @@ export class ConfirmationLinksController {
     // host entero ANTES de emitir (un host manipulado no debe ni revocar el
     // enlace vigente). Ver SAFE_HOST en confirmation-url.ts.
     if (!req.tenantHost?.host) {
-      throw new NotFoundException('Appointment not found');
+      throw new NotFoundException('Cita no encontrada');
     }
     const host = safeLinkHost(req.tenantHost.host);
     if (!host) {
-      throw new BadRequestException('Invalid host');
+      throw new BadRequestException('El dominio de la solicitud no es válido.');
     }
     const result = await this.createLink.execute({
       appointmentId: id,

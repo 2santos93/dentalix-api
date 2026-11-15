@@ -70,7 +70,10 @@ import {
   TreatmentPlanItemUpdate,
 } from '../domain/entities/treatment-plan-item.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
-import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
+import {
+  ROLES_DENIED_DEFAULT_MESSAGE,
+  RolesGuard,
+} from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import {
   CLINICAL_ROLES,
@@ -118,7 +121,7 @@ const TRANSITION_CONFLICT =
 /** El rol de quien llama, del token (TenantContextInterceptor ya exige uno de clínica). */
 function actorRole(req: AuthenticatedRequest) {
   if (!isTenantPayload(req.user)) {
-    throw new ForbiddenException('Insufficient role');
+    throw new ForbiddenException(ROLES_DENIED_DEFAULT_MESSAGE);
   }
   return { role: req.user.role, userId: req.user.sub };
 }

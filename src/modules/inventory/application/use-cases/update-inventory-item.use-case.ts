@@ -39,14 +39,14 @@ export class UpdateInventoryItemUseCase {
       // Same rationale as UpdateTreatmentPlanUseCase: a missing row and a
       // row that belongs to another tenant are indistinguishable here (RLS
       // makes cross-tenant rows invisible), so both surface as NotFound.
-      throw new NotFoundException('Inventory item not found');
+      throw new NotFoundException('Insumo no encontrado');
     }
 
     let name: string | undefined;
     if (input.name !== undefined) {
       name = input.name.trim();
       if (!name) {
-        throw new BadRequestException('name must not be blank');
+        throw new BadRequestException('El nombre es obligatorio.');
       }
     }
 
@@ -54,7 +54,7 @@ export class UpdateInventoryItemUseCase {
     if (input.unit !== undefined) {
       unit = input.unit.trim();
       if (!unit) {
-        throw new BadRequestException('unit must not be blank');
+        throw new BadRequestException('La unidad es obligatoria.');
       }
     }
 
@@ -62,7 +62,9 @@ export class UpdateInventoryItemUseCase {
       input.minStock !== undefined &&
       (!Number.isFinite(input.minStock) || input.minStock < 0)
     ) {
-      throw new BadRequestException('minStock must be a number >= 0');
+      throw new BadRequestException(
+        'El stock mínimo debe ser un número mayor o igual a 0.',
+      );
     }
 
     try {

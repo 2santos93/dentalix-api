@@ -35,7 +35,7 @@ function setup(refreshError: Error) {
 describe('AuthController.refreshHandler (cookie, DX-062)', () => {
   it('un 401 borra la cookie muerta', async () => {
     const { controller, cookie, req, res } = setup(
-      new UnauthorizedException('Invalid refresh token'),
+      new UnauthorizedException('La sesión expiró. Vuelve a iniciar sesión.'),
     );
 
     await expect(
@@ -131,7 +131,7 @@ describe('AuthController.loginHandler (bloqueo por fallos, DX-048)', () => {
   });
 
   it('401: cuenta el fallo (cuenta + IP) y propaga el mismo error', async () => {
-    const error = new UnauthorizedException('Invalid credentials');
+    const error = new UnauthorizedException('Correo o contraseña incorrectos.');
     const { controller, lockout, req, res, dto } = loginSetup({
       loginError: error,
     });
@@ -165,7 +165,7 @@ describe('AuthController.loginHandler (bloqueo por fallos, DX-048)', () => {
   });
 
   it('el login de plataforma (apex) usa el mismo contador', async () => {
-    const error = new UnauthorizedException('Invalid credentials');
+    const error = new UnauthorizedException('Correo o contraseña incorrectos.');
     const { controller, login, lockout, req, res, dto } = loginSetup({
       tenantId: null,
       loginError: error,

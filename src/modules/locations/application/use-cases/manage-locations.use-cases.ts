@@ -276,7 +276,7 @@ export class UpdateLocationUseCase {
     },
   ): Promise<LocationUpdate> {
     const current = await this.repo.findById(id);
-    if (!current) throw new NotFoundException('Location not found');
+    if (!current) throw new NotFoundException('Sede no encontrada.');
 
     // Una clínica no puede quedarse sin ninguna sede activa: citas, pagos e
     // inventario EXIGEN sede, así que desactivar la última dejaría la clínica
@@ -349,7 +349,7 @@ export class UpdateLocationUseCase {
 
     if (!touchesRegional) {
       const updated = await this.repo.update(id, base);
-      if (!updated) throw new NotFoundException('Location not found');
+      if (!updated) throw new NotFoundException('Sede no encontrada.');
       return {
         location: updated,
         healthRegistration: healthRegistrationChange(current, updated),
@@ -457,7 +457,7 @@ export class UpdateLocationUseCase {
         };
       },
     );
-    if (!updated || !before) throw new NotFoundException('Location not found');
+    if (!updated || !before) throw new NotFoundException('Sede no encontrada.');
     return {
       location: updated,
       healthRegistration: healthRegistrationChange(current, updated),

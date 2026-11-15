@@ -26,7 +26,10 @@ import {
 } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
-import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
+import {
+  ROLES_DENIED_DEFAULT_MESSAGE,
+  RolesGuard,
+} from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
 import {
   TREATMENT_PLAN_DECISION_ROLES,
@@ -67,7 +70,7 @@ type AuthenticatedRequest = Request & {
 /** Usuario y rol del token de clínica (el rol cuenta para los topes de descuento). */
 function actorOf(req: AuthenticatedRequest) {
   if (!isTenantPayload(req.user)) {
-    throw new ForbiddenException('Insufficient role');
+    throw new ForbiddenException(ROLES_DENIED_DEFAULT_MESSAGE);
   }
   return { userId: req.user.sub, role: req.user.role };
 }

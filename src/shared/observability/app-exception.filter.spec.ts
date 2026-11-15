@@ -245,7 +245,10 @@ describe('AppExceptionFilter', () => {
 
   it('el 403 de CORS no se registra como error', () => {
     const { filter, lines, host, sent } = setup();
-    filter.catch(new ForbiddenException('Origin not allowed'), host());
+    filter.catch(
+      new ForbiddenException('Este sitio no está autorizado para usar la API.'),
+      host(),
+    );
     expect(sent.status).toBe(403);
     expect(lines).toEqual([]);
   });

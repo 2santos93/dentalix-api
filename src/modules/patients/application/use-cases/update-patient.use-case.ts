@@ -37,21 +37,21 @@ export class UpdatePatientUseCase {
       // Same rationale as GetPatientUseCase: a missing row and a row that
       // belongs to another tenant are indistinguishable here (RLS makes
       // cross-tenant rows invisible), so both surface as NotFound.
-      throw new NotFoundException('Patient not found');
+      throw new NotFoundException('Paciente no encontrado');
     }
 
     if (patch.cityId !== undefined) {
       if (!patch.countryCode) {
-        throw new BadRequestException(
-          'countryCode is required when cityId is set',
-        );
+        throw new BadRequestException('Indica el país de la ciudad elegida.');
       }
       const ok = await this.reference.cityBelongsToCountry(
         patch.cityId,
         patch.countryCode,
       );
       if (!ok) {
-        throw new BadRequestException('cityId does not belong to countryCode');
+        throw new BadRequestException(
+          'La ciudad elegida no pertenece a ese país.',
+        );
       }
     }
 

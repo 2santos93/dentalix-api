@@ -140,7 +140,12 @@ export async function resolveActiveLocationId(
   if (headerLocationId) {
     // DX-111: un id mal formado no llega a la base (sería un 500 por P2023).
     if (!isUUID(headerLocationId)) {
-      throw new BadRequestException(INVALID_LOCATION_HEADER_MESSAGE);
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'LOCATION_INVALID',
+        message: INVALID_LOCATION_HEADER_MESSAGE,
+      });
     }
     const location = await prisma.runWithTenant(tenantId, (tx) =>
       tx.location.findFirst({
@@ -149,7 +154,14 @@ export async function resolveActiveLocationId(
       }),
     );
     if (!location) {
-      throw new BadRequestException(UNKNOWN_LOCATION_MESSAGE);
+      // Con `code`: la web suelta la sede guardada al verlo (antes lo
+      // reconocía por el texto en inglés «Unknown location for this clinic»).
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'LOCATION_UNKNOWN',
+        message: UNKNOWN_LOCATION_MESSAGE,
+      });
     }
     if (allowed && !allowed.includes(location.id)) {
       throw locationNotAllowed();

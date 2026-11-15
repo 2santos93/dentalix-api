@@ -127,7 +127,9 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     execute: () =>
       plan
         ? Promise.resolve(plan)
-        : Promise.reject(new NotFoundException('Treatment plan not found')),
+        : Promise.reject(
+            new NotFoundException('Plan de tratamiento no encontrado'),
+          ),
   };
   const convert = new FakeConvertAmount();
   const balance = {
@@ -153,7 +155,9 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
   const getPlanBalance = {
     execute: () =>
       balance.notFound
-        ? Promise.reject(new NotFoundException('Treatment plan not found'))
+        ? Promise.reject(
+            new NotFoundException('Plan de tratamiento no encontrado'),
+          )
         : balance.unreadable
           ? Promise.reject(new Error('db down'))
           : Promise.resolve(current()),

@@ -30,10 +30,14 @@ export class PlatformAdminGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const { user } = context.switchToHttp().getRequest<{ user?: JwtPayload }>();
     if (!user || !isPlatformPayload(user) || !user.mfa) {
-      throw new ForbiddenException('Platform admin only');
+      throw new ForbiddenException(
+        'Solo la administración de la plataforma puede hacer esto.',
+      );
     }
     if (!(await this.repo.isPlatformAdmin(user.sub))) {
-      throw new ForbiddenException('Platform admin only');
+      throw new ForbiddenException(
+        'Solo la administración de la plataforma puede hacer esto.',
+      );
     }
     return true;
   }

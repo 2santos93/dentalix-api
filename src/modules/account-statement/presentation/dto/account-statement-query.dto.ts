@@ -16,7 +16,9 @@ export class AccountStatementQueryDto {
       'horaria de la sede de cada abono.',
   })
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from must match YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'from debe ser una fecha AAAA-MM-DD.',
+  })
   from?: string;
 
   @ApiPropertyOptional({
@@ -25,6 +27,8 @@ export class AccountStatementQueryDto {
       'Último día de los movimientos (YYYY-MM-DD), inclusive. Debe ser >= from.',
   })
   @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to must match YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'to debe ser una fecha AAAA-MM-DD.',
+  })
   to?: string;
 }

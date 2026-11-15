@@ -493,7 +493,7 @@ export class InMemoryTreatmentPlanRepository
   ): Promise<TreatmentPlanItem> {
     const plan = this.lockedPlan(planId);
     if (!plan) {
-      throw new NotFoundException('Treatment plan not found');
+      throw new NotFoundException('Plan de tratamiento no encontrado');
     }
     const input = await this.decided(() => decide(plan));
     const row: StoredItem = {
@@ -538,7 +538,7 @@ export class InMemoryTreatmentPlanRepository
     const row = this.items.find((i) => i.id === id && i.deletedAt === null);
     const plan = row && this.lockedPlan(row.planId);
     if (!row || !plan) {
-      throw new NotFoundException('Treatment plan item not found');
+      throw new NotFoundException('Ítem del plan de tratamiento no encontrado');
     }
     const { patch, mirror, attribution } = await this.decided(() =>
       decide({ plan, item: this.toItemEntity(row) }),

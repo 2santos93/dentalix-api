@@ -13,7 +13,7 @@ export class CancelPaymentPlanUseCase {
     const active = await this.repo.findActiveByPlan(treatmentPlanId);
     if (!active) {
       throw new NotFoundException(
-        'No active payment plan for this treatment plan',
+        'Este plan de tratamiento no tiene un plan de cuotas activo.',
       );
     }
     // cancel() is a check-and-set; a concurrent cancel that already won
@@ -21,7 +21,7 @@ export class CancelPaymentPlanUseCase {
     const cancelled = await this.repo.cancel(active.id);
     if (!cancelled) {
       throw new NotFoundException(
-        'No active payment plan for this treatment plan',
+        'Este plan de tratamiento no tiene un plan de cuotas activo.',
       );
     }
   }

@@ -20,7 +20,7 @@ export class ReactivateStaffUseCase {
     // que protege `deactivate`).
     const member = await this.repo.reactivateById(userId, ctx);
     if (!member) {
-      throw new NotFoundException('No inactive staff member to reactivate');
+      throw new NotFoundException('Esta persona ya tiene el acceso activo.');
     }
     return member;
   }

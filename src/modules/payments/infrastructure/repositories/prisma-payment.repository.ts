@@ -614,7 +614,8 @@ export class PrismaPaymentRepository implements PaymentRepository {
           tenantId,
           guardedPlanId,
         );
-        if (!snapshot) throw new NotFoundException('Treatment plan not found');
+        if (!snapshot)
+          throw new NotFoundException('Plan de tratamiento no encontrado');
         await input.excessGuardInTx({
           planId: guardedPlanId,
           snapshot,
@@ -952,7 +953,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
          AND "deletedAt" IS NULL
        FOR NO KEY UPDATE`;
     if (!plan) {
-      throw new NotFoundException('Treatment plan not found');
+      throw new NotFoundException('Plan de tratamiento no encontrado');
     }
     if (!isPlanBillable(plan.status)) {
       throw new ConflictException(notBillableMessage(plan.status));

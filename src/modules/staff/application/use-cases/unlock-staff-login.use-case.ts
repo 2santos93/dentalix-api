@@ -40,10 +40,11 @@ export class UnlockStaffLoginUseCase {
 
   async execute(userId: string, ctx: AuditRequestContext): Promise<void> {
     const member = await this.repo.findDetailById(userId);
-    if (!member) throw new NotFoundException('Staff member not found');
+    if (!member)
+      throw new NotFoundException('Miembro del personal no encontrado');
     if (member.status === 'INACTIVE') {
       await this.recordRefusal(userId, ctx);
-      throw new NotFoundException('Staff member not found');
+      throw new NotFoundException('Miembro del personal no encontrado');
     }
     if (await this.repo.hasOtherActiveMemberships(userId)) {
       await this.recordRefusal(userId, ctx);

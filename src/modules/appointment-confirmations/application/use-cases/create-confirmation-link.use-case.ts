@@ -67,7 +67,7 @@ export class CreateConfirmationLinkUseCase {
     // RLS: una cita de otra clínica es invisible, así que cae aquí como 404.
     const appointment = await this.repo.findAppointment(input.appointmentId);
     if (!appointment) {
-      throw new NotFoundException('Appointment not found');
+      throw new NotFoundException('Cita no encontrada');
     }
     // SEC-045 (DX-089): una cita de una sede no permitida es 403, antes de
     // revocar el enlace vigente o emitir otro. El recordatorio automático

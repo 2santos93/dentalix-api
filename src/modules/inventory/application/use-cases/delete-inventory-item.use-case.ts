@@ -17,7 +17,7 @@ export class DeleteInventoryItemUseCase {
   async execute(id: string, audit: AuditRequestContext): Promise<void> {
     const existing = await this.repo.findItemById(id);
     if (!existing) {
-      throw new NotFoundException('Inventory item not found');
+      throw new NotFoundException('Insumo no encontrado');
     }
 
     // Soft-delete only — never a hard delete on a domain table. Movements

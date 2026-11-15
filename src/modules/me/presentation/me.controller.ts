@@ -70,7 +70,9 @@ import {
  */
 function tenantUserOrThrow(user: JwtPayload): TenantJwtPayload {
   if (!isTenantPayload(user)) {
-    throw new UnauthorizedException('No tenant in context');
+    throw new UnauthorizedException(
+      'Esta acción requiere una sesión de clínica.',
+    );
   }
   return user;
 }
@@ -240,7 +242,7 @@ export class MeController {
     @UploadedFile() file: Express.Multer.File | undefined,
   ): Promise<{ avatarUrl: string }> {
     if (!file) {
-      throw new BadRequestException('Missing file');
+      throw new BadRequestException('Falta el archivo.');
     }
     return this.setMyAvatar.execute({
       userId: req.user.sub,

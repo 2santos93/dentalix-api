@@ -22,7 +22,8 @@ export class GetStaffDetailUseCase {
     // `findDetailById` (no `findById`): el perfil de un desactivado tiene que
     // poder abrirse, porque es desde donde se le reactiva.
     const member = await this.repo.findDetailById(userId);
-    if (!member) throw new NotFoundException('Staff member not found');
+    if (!member)
+      throw new NotFoundException('Miembro del personal no encontrado');
     // DX-213 (SEC-038): el contador es de la cuenta, no de la clínica. De un
     // desactivado no se dice nada (sus fallos pueden ser en otra clínica).
     const loginBlockedUntil =
