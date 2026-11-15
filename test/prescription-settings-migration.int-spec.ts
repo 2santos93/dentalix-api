@@ -354,6 +354,12 @@ describe('DX-324 · migraciones de la receta única y sus ajustes por clínica (
          AND column_name LIKE 'prescription%'
        ORDER BY column_name`;
     expect(rows).toEqual([
+      // DX-468: el pie de la copia para el paciente; NULL = el de plataforma.
+      {
+        column: 'prescriptionPatientCopyFooter',
+        nullable: 'YES',
+        columnDefault: null,
+      },
       {
         column: 'prescriptionPrintQuantityInWords',
         nullable: 'NO',

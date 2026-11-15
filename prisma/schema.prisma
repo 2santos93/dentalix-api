@@ -67,6 +67,8 @@ model Tenant {
   prescriptionRequireClinicalRecordNumber Boolean                          @default(false)
   /// DX-324: días que vale la receta desde la fecha de inicio. CHECK 1..365. 30 de plataforma.
   prescriptionValidityDays                Int                              @default(30)
+  /// DX-468: pie de la copia de la receta para el paciente (Ajustes › Recetas). NULL = el de plataforma («Copia para el paciente…»). CHECK 1..300 caracteres.
+  prescriptionPatientCopyFooter           String?
   /// DX-379: días que vale un presupuesto desde que se emite (presentar o primera impresión). CHECK 1..365. 30 de plataforma. Solo ADMIN (PUT /treatment-plan-settings, auditado). Cambiarlo no toca los presupuestos ya emitidos.
   quoteValidityDays                       Int                              @default(30)
   /// DX-540: avisar al firmar una evolución si el autor no tiene registro profesional (no bloquea). false al crear la clínica; ninguna regla lo deduce del país. Solo ADMIN (PUT /clinical-entries/settings, auditado).
@@ -212,6 +214,8 @@ model Tenant {
   signedConsentPdfs                       SignedConsentPdf[]
   // DX-443: enlaces de un solo uso de la copia del PDF firmado.
   signedConsentPdfLinks                   SignedConsentPdfLink[]
+  // DX-468: enlaces caducables de la copia de la receta para el paciente.
+  prescriptionCopyLinks                   PrescriptionCopyLink[]
   // DX-151: documentos de los pacientes.
   patientDocuments                        PatientDocument[]
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
@@ -357,6 +361,8 @@ model User {
   signatureRequestsCreated          SignatureRequest[]               @relation("SignatureRequestCreatedBy")
   // DX-443: «Reenviar copia» del PDF firmado.
   signedConsentPdfLinksCreated      SignedConsentPdfLink[]
+  // DX-468: «Enviar al paciente» la copia de una receta.
+  prescriptionCopyLinksCreated      PrescriptionCopyLink[]
   signatureRequestsProfessional     SignatureRequest[]               @relation("SignatureRequestProfessional")
   signatureRequestsRevoked          SignatureRequest[]               @relation("SignatureRequestRevokedBy")
   consentCountersignatures          PatientConsentCountersignature[]
@@ -794,6 +800,8 @@ model Patient {
   consents                    PatientConsent[]
   perioExams                  PerioExam[]
   prescriptions               Prescription[]
+  // DX-468: enlaces de la copia de sus recetas.
+  prescriptionCopyLinks       PrescriptionCopyLink[]
   // DX-191: implantes y demás componentes colocados.
   implants                    PatientImplant[]
   // DX-151: radiografías, fotos, remisiones, consentimientos firmados…
@@ -4009,11 +4017,13 @@ model Prescription {
   createdAt             DateTime           @default(now())
 
   // FK COMPUESTAS (SEC-004): paciente y sede del MISMO tenant.
-  patient      Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  location     Location           @relation(fields: [tenantId, locationId], references: [tenantId, id])
-  professional User               @relation("PrescriptionProfessional", fields: [professionalId], references: [id])
-  voidedBy     User?              @relation("PrescriptionVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  patient      Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  location     Location               @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  professional User                   @relation("PrescriptionProfessional", fields: [professionalId], references: [id])
+  voidedBy     User?                  @relation("PrescriptionVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
   items        PrescriptionItem[]
+  // DX-468: enlaces de la copia para el paciente.
+  copyLinks    PrescriptionCopyLink[]
 
   @@unique([tenantId, id], map: "prescriptions_tenant_id_key")
   // Lista del paciente, más reciente primero.
@@ -4022,6 +4032,40 @@ model Prescription {
   @@index([professionalId])
   @@index([voidedById])
   @@map("prescriptions")
+}
+
+/// DX-468: enlace caducable de la copia INFORMATIVA de una receta emitida para
+/// el paciente (o el responsable de un menor). Guarda SOLO el sha256 del token
+/// (la búsqueda pública es por hash, bajo la RLS de la clínica del host). Como
+/// mucho uno vivo (sin invalidar) por receta: reenviar invalida el anterior en
+/// la misma transacción (índice único parcial
+/// prescription_copy_links_live_key, en la migración; Prisma no lo expresa).
+/// Solo cambia `revokedAt`, una vez (trigger); no se borra. Nada clínico.
+model PrescriptionCopyLink {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String    @db.Uuid
+  patientId         String    @db.Uuid
+  prescriptionId    String    @db.Uuid
+  /// EMAIL (outbox) o WHATSAPP (la web abre wa.me). CHECK en la migración.
+  channel           String
+  /// A quién se envió, enmascarado («a***@…», «••• 4567»). Nunca el contacto entero.
+  destinationMasked String
+  tokenHash         String    @unique(map: "prescription_copy_links_token_hash_key")
+  expiresAt         DateTime
+  createdById       String    @db.Uuid
+  createdAt         DateTime  @default(now())
+  /// Invalidado al reenviar o al archivar al paciente (DX-461).
+  revokedAt         DateTime?
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient      Patient      @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "prescription_copy_links_patient_fkey")
+  prescription Prescription @relation(fields: [tenantId, prescriptionId], references: [tenantId, id], onDelete: Restrict, map: "prescription_copy_links_prescription_fkey")
+  createdBy    User         @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "prescription_copy_links_created_by_fkey")
+
+  @@index([tenantId, prescriptionId, createdAt], map: "prescription_copy_links_sent_idx")
+  @@index([tenantId, patientId], map: "prescription_copy_links_patient_idx")
+  @@index([createdById], map: "prescription_copy_links_created_by_idx")
+  @@map("prescription_copy_links")
 }
 
 model PrescriptionItem {
@@ -4271,6 +4315,7 @@ enum EmailTemplate {
   MFA_ENROLLMENT_CODE       @map("mfa-enrollment-code")
   // DX-443: copia del PDF firmado con un enlace de un solo uso.
   SIGNED_CONSENT_COPY       @map("signed-consent-copy")
+  PRESCRIPTION_COPY         @map("prescription-copy")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario

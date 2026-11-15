@@ -804,6 +804,53 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).toContain('Hola, Laura');
       expect(email.text).not.toContain('en nombre de');
     });
+
+    it('la copia de la receta (DX-468): enlace caducable, aviso de que no es la oficial y nada clínico', () => {
+      const email = renderEmail(
+        'prescription-copy',
+        {
+          recipientFirstName: 'Luis',
+          patientFirstName: 'Sofía',
+          clinicName: 'Sonrisas del Norte',
+          url: 'https://demo.dentalix.app/receta/copia/abc',
+          expiresAtLabel: '15/12/2026',
+        },
+        brand,
+      );
+      expect(email.subject).toBe('Tu copia de la receta de Sonrisas del Norte');
+      expect(email.text).toContain('Hola, Luis');
+      expect(email.text).toContain('copia de la receta de Sofía');
+      expect(email.text).toContain('caduca el 15/12/2026');
+      expect(email.text).toContain('receta impresa y firmada');
+      expect(email.html).toContain(
+        'href="https://demo.dentalix.app/receta/copia/abc"',
+      );
+      expect(email.text).not.toMatch(
+        /amoxicilina|ibuprofeno|mg|diagn|tratamiento|dosis/i,
+      );
+    });
+
+    it('la copia de la receta en inglés para un paciente con ese idioma (DX-497)', () => {
+      const email = renderEmail(
+        'prescription-copy',
+        {
+          recipientFirstName: 'Ana',
+          patientFirstName: null,
+          clinicName: 'Sonrisas del Norte',
+          url: 'https://demo.dentalix.app/receta/copia/abc',
+          expiresAtLabel: '15/12/2026',
+        },
+        brand,
+        'en',
+      );
+      expect(email.subject).toBe(
+        'Your prescription copy from Sonrisas del Norte',
+      );
+      expect(email.text).toContain('Hello Ana,');
+      expect(email.text).toContain('copy of your prescription');
+      expect(email.text).toContain('printed and signed prescription');
+      expect(email.html).toContain('lang="en"');
+    });
   });
 });
 

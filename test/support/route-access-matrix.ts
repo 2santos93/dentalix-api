@@ -145,6 +145,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/signed-consent-copies/:token/download': PUBLIC_TENANT,
   // DX-467: verificar una receta por el código de su QR impreso.
   'GET /public/prescriptions/:code': PUBLIC_TENANT,
+  // DX-468: la copia de la receta para el paciente, por enlace caducable.
+  'GET /public/prescription-copies/:token': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -402,6 +404,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /prescriptions/settings': ADMIN_ONLY,
   'GET /prescriptions/:id': CLINICAL,
   'POST /prescriptions/:id/void': PRESCRIBERS,
+  // DX-468: «Enviar al paciente», con el mismo acceso que imprimirla.
+  'POST /prescriptions/:id/patient-copy': CLINICAL,
 
   // --- Registro de implantes (DX-191) --------------------------------------
   // loop/informes/DX-191.md. Ver e imprimir la tarjeta: los 4 roles

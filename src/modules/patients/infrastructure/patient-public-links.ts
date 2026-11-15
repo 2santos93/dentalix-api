@@ -73,6 +73,20 @@ function liveAnamnesis({
   };
 }
 
+function livePrescriptionCopies({
+  tenantId,
+  patientId,
+  now,
+}: Scope): Prisma.PrescriptionCopyLinkWhereInput {
+  // DX-468: no se gasta al abrirse; vivo mientras no caduque ni se invalide.
+  return {
+    tenantId,
+    patientId,
+    revokedAt: null,
+    expiresAt: { gt: now },
+  };
+}
+
 /** Enlaces vivos del paciente por tipo (todas las sedes). */
 export async function countLivePublicLinks(
   tx: Tx,
@@ -84,12 +98,14 @@ export async function countLivePublicLinks(
     budgetSignatures,
     signedPdfCopies,
     anamnesis,
+    prescriptionCopies,
   ] = await Promise.all([
     tx.waitlistOffer.count({ where: liveSlotOffers(scope) }),
     tx.signatureRequest.count({ where: liveSignatures(scope, 'CONSENT') }),
     tx.signatureRequest.count({ where: liveSignatures(scope, 'BUDGET') }),
     tx.signedConsentPdfLink.count({ where: liveSignedPdfCopies(scope) }),
     tx.medicalHistorySubmission.count({ where: liveAnamnesis(scope) }),
+    tx.prescriptionCopyLink.count({ where: livePrescriptionCopies(scope) }),
   ]);
   return {
     slotOffers,
@@ -97,6 +113,7 @@ export async function countLivePublicLinks(
     budgetSignatures,
     signedPdfCopies,
     anamnesis,
+    prescriptionCopies,
   };
 }
 
@@ -104,8 +121,9 @@ export async function countLivePublicLinks(
  * Anula los enlaces vivos del paciente dentro de `tx` (la de archivar) y
  * devuelve cuántos de cada tipo. Cada anulación es la misma que ya usa su
  * módulo: la oferta pasa a EXPIRED, la solicitud de firma queda anulada por
- * quien archiva (sin código ni sesión vigentes), la copia del PDF invalidada
- * y la anamnesis EXPIRED. Ninguna vuelve atrás: desarchivar no las reactiva.
+ * quien archiva (sin código ni sesión vigentes), la copia del PDF invalidada,
+ * la anamnesis EXPIRED y la copia de la receta invalidada (DX-468). Ninguna
+ * vuelve atrás: desarchivar no las reactiva.
  */
 export async function revokeLivePublicLinks(
   tx: Tx,
@@ -140,11 +158,16 @@ export async function revokeLivePublicLinks(
     where: liveAnamnesis(scope),
     data: { status: 'EXPIRED', revokedAt: now },
   });
+  const prescriptionCopies = await tx.prescriptionCopyLink.updateMany({
+    where: livePrescriptionCopies(scope),
+    data: { revokedAt: now },
+  });
   return {
     slotOffers: slotOffers.count,
     consentSignatures: consentSignatures.count,
     budgetSignatures: budgetSignatures.count,
     signedPdfCopies: signedPdfCopies.count,
     anamnesis: anamnesis.count,
+    prescriptionCopies: prescriptionCopies.count,
   };
 }

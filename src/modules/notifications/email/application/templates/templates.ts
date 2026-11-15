@@ -21,7 +21,9 @@ import {
   SignatureRequestEmailVars,
   SlotOfferEmailVars,
   SignedConsentCopyEmailVars,
+  PrescriptionCopyEmailVars,
 } from '../../domain/email-message';
+import { PRESCRIPTION_COPY_CATALOG } from './catalog/prescription-copy.catalog';
 import { EmailBlock, renderLayout } from './layout';
 import { appointmentReminder } from './appointment-reminder.template';
 
@@ -489,6 +491,33 @@ function signedConsentCopy(
   });
 }
 
+/**
+ * DX-468: la copia informativa de la receta, en el idioma del paciente
+ * (catálogo por clave). Nada clínico en el email.
+ */
+function prescriptionCopy(
+  vars: PrescriptionCopyEmailVars,
+  brand: EmailBrand | null,
+  locale: EmailLocale,
+): RenderedEmail {
+  const t = PRESCRIPTION_COPY_CATALOG[locale];
+  return renderLayout({
+    brand,
+    chrome: t,
+    subject: t.subject(vars.clinicName),
+    heading: t.heading(vars.recipientFirstName),
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: t.intro(vars.clinicName, vars.patientFirstName),
+      },
+      { kind: 'paragraph', text: t.notOfficial },
+      { kind: 'note', text: t.note(vars.expiresAtLabel) },
+    ],
+    action: { label: t.action, url: vars.url },
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -509,6 +538,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'signature-budget-accepted': signatureBudgetAccepted,
   'slot-offer': slotOffer,
   'signed-consent-copy': signedConsentCopy,
+  'prescription-copy': prescriptionCopy,
   'mfa-notice': mfaNotice,
   'mfa-enrollment-code': mfaEnrollmentCode,
 };

@@ -6,7 +6,7 @@ export const PRESCRIPTION_SETTINGS_REPOSITORY = Symbol(
 
 /** Ajustes de la receta de la clínica del contexto (DX-324). */
 export interface PrescriptionSettingsRepository {
-  /** Los tres `tenants.prescription*` de la clínica del contexto. */
+  /** Los `tenants.prescription*` de la clínica del contexto. */
   get(): Promise<PrescriptionSettings>;
   /**
    * Escribe los tres ajustes y devuelve los de antes y los de después, leídos
@@ -14,6 +14,9 @@ export interface PrescriptionSettingsRepository {
    * dos ADMIN a la vez no dejan un «antes» que no fue real.
    */
   set(
-    next: PrescriptionSettings,
+    // DX-468: sin `patientCopyFooter`, el pie se queda como estaba.
+    next: Omit<PrescriptionSettings, 'patientCopyFooter'> & {
+      patientCopyFooter?: string | null;
+    },
   ): Promise<{ before: PrescriptionSettings; after: PrescriptionSettings }>;
 }

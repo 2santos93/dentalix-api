@@ -2,6 +2,8 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import {
+  PRESCRIPTION_COPY_FOOTER_MESSAGE,
+  normalizePatientCopyFooter,
   isValidPrescriptionValidityDays,
   prescriptionSettingsCode,
   PRESCRIPTION_VALIDITY_DAYS_MESSAGE,
@@ -17,7 +19,14 @@ const SETTINGS_FIELDS: readonly (keyof PrescriptionSettings)[] = [
   'printQuantityInWords',
   'requireClinicalRecordNumber',
   'validityDays',
+  'patientCopyFooter',
 ];
+
+/** Lo que manda el PUT: el pie es opcional (ausente = no cambia). */
+export type PrescriptionSettingsInput = Omit<
+  PrescriptionSettings,
+  'patientCopyFooter'
+> & { patientCopyFooter?: string | null };
 
 @Injectable()
 export class GetPrescriptionSettingsUseCase {
@@ -46,16 +55,25 @@ export class UpdatePrescriptionSettingsUseCase {
   ) {}
 
   async execute(
-    input: PrescriptionSettings,
+    input: PrescriptionSettingsInput,
     ctx: AuditRequestContext,
   ): Promise<PrescriptionSettings> {
     if (!isValidPrescriptionValidityDays(input.validityDays)) {
       throw new BadRequestException(PRESCRIPTION_VALIDITY_DAYS_MESSAGE);
     }
+    const footer =
+      input.patientCopyFooter === undefined
+        ? undefined
+        : normalizePatientCopyFooter(input.patientCopyFooter);
+    if (input.patientCopyFooter !== undefined && footer === undefined) {
+      throw new BadRequestException(PRESCRIPTION_COPY_FOOTER_MESSAGE);
+    }
     const { before, after } = await this.repo.set({
       printQuantityInWords: input.printQuantityInWords,
       requireClinicalRecordNumber: input.requireClinicalRecordNumber,
       validityDays: input.validityDays,
+      // DX-468: ausente = el que había (lo resuelve el repositorio bajo candado).
+      ...(footer === undefined ? {} : { patientCopyFooter: footer }),
     });
     const changedFields = SETTINGS_FIELDS.filter(
       (field) => before[field] !== after[field],

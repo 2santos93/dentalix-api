@@ -166,6 +166,13 @@ export class LivePublicLinksDto {
   })
   anamnesis!: number;
 
+  @ApiProperty({
+    minimum: 0,
+    description:
+      'Enlaces de la copia de una receta enviados al paciente y sin caducar (DX-468)',
+  })
+  prescriptionCopies!: number;
+
   @ApiProperty({ minimum: 0, description: 'Suma de todos los tipos' })
   total!: number;
 }

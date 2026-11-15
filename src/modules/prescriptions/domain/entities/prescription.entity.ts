@@ -137,7 +137,8 @@ export interface PrescriptionIssuer {
   clinicName: string;
   /** DX-019: los de hoy; la receta los congela al emitirse. */
   clinicFiscal: ClinicFiscalData;
-  settings: PrescriptionSettings;
+  /** Lo que decide la emisión (el pie de la copia, DX-468, no). */
+  settings: Omit<PrescriptionSettings, 'patientCopyFooter'>;
   /** Solo para la web anterior a DX-324; ninguna regla lo lee (R1). */
   phase1: Phase1IssuerCompat;
   professional: {
