@@ -88,7 +88,7 @@ export class AddTreatmentPlanItemUseCase {
     // plan, y se hace ANTES de la transacción del alta (solo lee).
     const current = await this.repo.findPlanById(planId);
     if (!current) {
-      throw new NotFoundException('Treatment plan not found');
+      throw new NotFoundException('Plan de tratamiento no encontrado');
     }
     // `catalogItemId` must resolve to a real, active-tenant catalog item —
     // a cross-tenant or made-up id must never silently succeed (that would

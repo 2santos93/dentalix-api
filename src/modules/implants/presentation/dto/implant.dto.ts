@@ -10,6 +10,12 @@ import {
   IsUUID,
   MaxLength,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_NOTES_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 
 // Sin tenant, paciente, profesional, sede ni hora: los pone el servidor.
 // Los obligatorios (diente, tipo, fabricante, REF, lote) son opcionales en la
@@ -23,6 +29,7 @@ export class RegisterImplantDto {
   })
   @IsOptional()
   @IsString({ message: 'El diente debe ser un texto (código FDI)' })
+  @TextMaxLength(INPUT_CODE_MAX)
   toothNumber?: string;
 
   @ApiProperty({ enum: PatientImplantKind })
@@ -35,6 +42,7 @@ export class RegisterImplantDto {
   @ApiProperty({ example: 'Straumann', maxLength: 120 })
   @IsOptional()
   @IsString({ message: 'El fabricante debe ser un texto' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   manufacturer?: string;
 
   @ApiPropertyOptional({
@@ -44,6 +52,7 @@ export class RegisterImplantDto {
   })
   @IsOptional()
   @IsString({ message: 'El sistema debe ser un texto' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   system?: string;
 
   @ApiProperty({
@@ -53,11 +62,13 @@ export class RegisterImplantDto {
   })
   @IsOptional()
   @IsString({ message: 'La referencia debe ser un texto' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   reference?: string;
 
   @ApiProperty({ example: 'LOT-AB12', maxLength: 80 })
   @IsOptional()
   @IsString({ message: 'El lote debe ser un texto' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   lot?: string;
 
   @ApiPropertyOptional({
@@ -66,6 +77,7 @@ export class RegisterImplantDto {
   })
   @IsOptional()
   @IsString({ message: 'El UDI debe ser un texto' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   udi?: string;
 
   @ApiPropertyOptional({ example: 4.1, description: 'Diámetro en mm' })
@@ -93,11 +105,13 @@ export class RegisterImplantDto {
   })
   @IsOptional()
   @IsString({ message: 'El registro sanitario debe ser un texto' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   sanitaryRegistration?: string;
 
   @ApiPropertyOptional({ maxLength: 1000 })
   @IsOptional()
   @IsString({ message: 'Las notas deben ser un texto' })
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({
@@ -110,6 +124,7 @@ export class RegisterImplantDto {
   @IsString({
     message: 'La fecha de colocación debe tener el formato AAAA-MM-DD',
   })
+  @TextMaxLength(INPUT_CODE_MAX)
   placedOn?: string;
 
   @ApiPropertyOptional({
@@ -142,6 +157,7 @@ export class PrintImplantCardDto {
   @ApiProperty({ format: 'date', example: '2026-10-17' })
   @IsOptional()
   @IsString({ message: 'La fecha debe tener el formato AAAA-MM-DD' })
+  @TextMaxLength(INPUT_CODE_MAX)
   date?: string;
 }
 

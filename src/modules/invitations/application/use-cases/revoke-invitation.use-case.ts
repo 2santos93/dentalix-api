@@ -21,7 +21,7 @@ export class RevokeInvitationUseCase {
     // either way, there's nothing left to revoke.
     const revoked = await this.repo.revokeById(id, ctx);
     if (!revoked) {
-      throw new NotFoundException('Invitation not found');
+      throw new NotFoundException('Invitación no encontrada');
     }
     // El email pendiente llevaría un enlace revocado (DX-088).
     await this.notifier.cancelPending(id);

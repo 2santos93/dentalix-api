@@ -187,7 +187,8 @@ export class GetPlanBalanceUseCase {
   ): Promise<GetPlanBalanceWithItemsResult> {
     const snapshot =
       await this.allocations.readPlanBalanceSnapshot(treatmentPlanId);
-    if (!snapshot) throw new NotFoundException('Treatment plan not found');
+    if (!snapshot)
+      throw new NotFoundException('Plan de tratamiento no encontrado');
     const { plan, payments } = snapshot;
     // BE-050: un abono con base de imputación cuenta en `paid` por su base
     // (convertida con su tasa congelada e inmutable), así lo cobrado y el

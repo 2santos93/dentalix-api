@@ -47,14 +47,14 @@ export class SetMyAvatarUseCase {
   private async set(input: SetMyAvatarInput): Promise<{ avatarUrl: string }> {
     const ext = EXT_BY_MIME[input.contentType];
     if (!ext) {
-      throw new BadRequestException('Unsupported image type');
+      throw new BadRequestException('Formato de imagen no admitido.');
     }
     // DX-084: el contenido debe ser de verdad el tipo declarado (la etiqueta
     // del multipart la pone el cliente y fija la extensión con la que se sirve).
     const head = await readLocalRange(input.filePath, 0, SNIFF_BYTES);
     if (sniffAvatarImage(head) !== input.contentType) {
       throw new BadRequestException(
-        'File content does not match the image type',
+        'El contenido del archivo no coincide con el tipo de imagen.',
       );
     }
     // DX-084: clave sin PII (el id del usuario) y es lo que va a la BD.

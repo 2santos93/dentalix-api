@@ -98,7 +98,7 @@ export async function replaceAppointmentPlanItems(
     tenantId,
     appointmentId,
   );
-  if (!current) throw new NotFoundException('Appointment not found');
+  if (!current) throw new NotFoundException('Cita no encontrada');
   // DX-271 (BE-039): los de una cita cerrada o pasada no se cambian.
   if (!planItemsEditable(before ?? current, current, new Date()))
     throw new ConflictException(

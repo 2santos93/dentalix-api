@@ -24,6 +24,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   CASH_DIFFERENCE_REASON_MAX,
   CASH_MAX_AMOUNT,
   CASH_MAX_CURRENCIES,
@@ -148,6 +152,7 @@ export class CloseCashSessionDto {
   @Length(CASH_REASON_MIN, CASH_DIFFERENCE_REASON_MAX, {
     message: `El motivo de la diferencia debe tener entre ${CASH_REASON_MIN} y ${CASH_DIFFERENCE_REASON_MAX} caracteres.`,
   })
+  @TextMaxLength(INPUT_REASON_MAX)
   differenceReason?: string | null;
 
   @ApiPropertyOptional({
@@ -174,6 +179,7 @@ export class ReopenCashSessionDto {
   @Length(CASH_REASON_MIN, CASH_REASON_MAX, {
     message: `El motivo debe tener entre ${CASH_REASON_MIN} y ${CASH_REASON_MAX} caracteres.`,
   })
+  @TextMaxLength(INPUT_REASON_MAX)
   reason!: string;
 }
 
@@ -204,6 +210,7 @@ export class CreateCashAdjustmentDto {
   @Length(CASH_REASON_MIN, CASH_REASON_MAX, {
     message: `El motivo debe tener entre ${CASH_REASON_MIN} y ${CASH_REASON_MAX} caracteres.`,
   })
+  @TextMaxLength(INPUT_REASON_MAX)
   reason!: string;
 }
 

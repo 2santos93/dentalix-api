@@ -99,7 +99,7 @@ function requireCivilDate(value: string, field: 'from' | 'to'): string {
   const day = typeof value === 'string' ? parseCivilDate(value) : null;
   if (day === null) {
     throw new BadRequestException(
-      `${field} must be a valid calendar date (YYYY-MM-DD)`,
+      `${field} debe ser una fecha válida (AAAA-MM-DD).`,
     );
   }
   return day;
@@ -131,7 +131,9 @@ export class GetDoctorDashboardUseCase {
     // `to` es exclusivo: from = to es un período vacío; from > to, un error.
     const days = civilDaysInclusive(from, to) - 1;
     if (days < 0) {
-      throw new BadRequestException('from must be <= to');
+      throw new BadRequestException(
+        'La fecha inicial no puede ser posterior a la final.',
+      );
     }
     if (!input.currency || !input.currency.trim()) {
       throw new BadRequestException(CURRENCY_REQUIRED_MESSAGE);
@@ -148,8 +150,8 @@ export class GetDoctorDashboardUseCase {
     }
 
     // Currency format/support itself is validated downstream by
-    // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (unsupported currency
-    // throws BadRequestException there) -- not duplicated here.
+    // GetPaymentsTotalsUseCase -> ConvertAmountUseCase (a currency without a
+    // rate throws UnsupportedCurrencyRateError there) -- not duplicated here.
     //
     // Los ingresos van por días CIVILES, inclusive: `from`..`to - 1`, que cada
     // sede corta a medianoche de su zona (DX-097). Un período vacío no consulta.

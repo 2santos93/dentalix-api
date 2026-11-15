@@ -286,7 +286,7 @@ export function civilRangeInZone(
   timeZone: string,
 ): InstantRange {
   if (civilDaysInclusive(from, to) < 1) {
-    throw new RangeError('from must be on or before to');
+    throw new RangeError('La fecha inicial no puede ser posterior a la final.');
   }
   return {
     start: zonedStartOfDay(from, timeZone),

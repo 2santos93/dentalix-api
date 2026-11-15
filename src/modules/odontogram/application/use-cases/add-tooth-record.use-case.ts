@@ -131,20 +131,20 @@ export class AddToothRecordUseCase {
   ): Promise<ToothRecord> {
     if (!isValidFdiToothNumber(input.toothNumber)) {
       throw new BadRequestException(
-        'toothNumber must be a valid FDI code (permanent 11-18/21-28/31-38/41-48 or primary 51-55/61-65/71-75/81-85)',
+        'El número de diente debe ser un código FDI válido (permanentes 11-18/21-28/31-38/41-48 o temporales 51-55/61-65/71-75/81-85).',
       );
     }
 
     const surfaces = input.surfaces ?? [];
     if (!areValidToothSurfaces(surfaces)) {
       throw new BadRequestException(
-        'surfaces must only contain valid ToothSurface values (MESIAL, DISTAL, OCCLUSAL, VESTIBULAR, LINGUAL)',
+        'Las superficies deben ser valores válidos (MESIAL, DISTAL, OCCLUSAL, VESTIBULAR, LINGUAL).',
       );
     }
 
     if (!isValidCatalogKind(input.kind)) {
       throw new BadRequestException(
-        'kind must be one of: DIAGNOSIS, PROCEDURE',
+        'El tipo debe ser diagnóstico (DIAGNOSIS) o procedimiento (PROCEDURE).',
       );
     }
 

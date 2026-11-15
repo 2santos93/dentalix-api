@@ -23,6 +23,10 @@ import {
   ValidateIf,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   RECALL_APPOINTMENT_TYPE_ID_MESSAGE,
   RECALL_EXCLUSION_GROUP,
   RECALL_EXCLUSION_GROUP_MESSAGE,
@@ -216,6 +220,7 @@ export class SetPatientRecallDto {
   })
   @IsOptional()
   @IsString({ message: 'lastDoneAt debe ser una fecha (AAAA-MM-DD).' })
+  @TextMaxLength(INPUT_CODE_MAX)
   lastDoneAt?: string;
 
   @ApiPropertyOptional({
@@ -235,6 +240,7 @@ export class SetPatientRecallDto {
   })
   @IsOptional()
   @IsString({ message: 'disabledUntil debe ser una fecha (AAAA-MM-DD).' })
+  @TextMaxLength(INPUT_CODE_MAX)
   disabledUntil?: string | null;
 
   @ApiPropertyOptional({

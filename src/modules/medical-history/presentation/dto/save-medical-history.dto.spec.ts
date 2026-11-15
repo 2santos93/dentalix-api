@@ -1,7 +1,8 @@
-import { ArgumentMetadata, ValidationPipe } from '@nestjs/common';
+import { ArgumentMetadata } from '@nestjs/common';
 import { SaveMedicalHistoryDto } from './save-medical-history.dto';
+import { createAppValidationPipe } from '../../../../shared/validation/app-validation-pipe';
 
-const pipe = new ValidationPipe({ whitelist: true, transform: true });
+const pipe = createAppValidationPipe();
 const meta: ArgumentMetadata = {
   type: 'body',
   metatype: SaveMedicalHistoryDto,

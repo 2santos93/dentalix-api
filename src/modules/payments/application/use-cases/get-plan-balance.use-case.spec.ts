@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import type {
   PlanBalanceItemsSnapshot,
@@ -19,13 +19,16 @@ import { TreatmentPlanDetail } from '../../../treatment-plans/domain/entities/tr
 import { TreatmentPlanItem } from '../../../treatment-plans/domain/entities/treatment-plan-item.entity';
 import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-cases/__fixtures__/in-memory-treatment-plan.repository';
 import { round2, toCents } from '../../../../shared/money/money';
+import { UnsupportedCurrencyRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 
 class FakeGetTreatmentPlanUseCase {
   public plan: TreatmentPlanDetail | null = null;
 
   execute(): Promise<TreatmentPlanDetail> {
     if (!this.plan) {
-      return Promise.reject(new NotFoundException('Treatment plan not found'));
+      return Promise.reject(
+        new NotFoundException('Plan de tratamiento no encontrado'),
+      );
     }
     return Promise.resolve(this.plan);
   }
@@ -121,7 +124,7 @@ class FakeConvertAmountUseCase {
     }
     if (this.failingFrom.has(input.from)) {
       return Promise.reject(
-        new BadRequestException(`unsupported currency: ${input.from}`),
+        new UnsupportedCurrencyRateError(input.from, '2026-01-15'),
       );
     }
     if (input.from === input.to) {

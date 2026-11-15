@@ -1,7 +1,8 @@
-import { BadRequestException, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import type { ConvertAmountUseCase } from '../../exchange/application/use-cases/convert-amount.use-case';
 import { PlanAllocationRebalancer } from './plan-allocation-rebalancer';
 import { InMemoryPlanAllocationRepository } from './__fixtures__/in-memory-plan-allocation.repository';
+import { UnsupportedCurrencyRateError } from '../../exchange/domain/missing-exchange-rate.error';
 
 const DAY = (d: number) => new Date(Date.UTC(2026, 9, d, 12));
 
@@ -12,7 +13,7 @@ function fakeConvert(rates: Record<string, number>) {
       const rate = input.from === input.to ? 1 : rates[input.from];
       if (rate === undefined) {
         return Promise.reject(
-          new BadRequestException(`unsupported currency: ${input.from}`),
+          new UnsupportedCurrencyRateError(input.from, '2026-01-15'),
         );
       }
       return Promise.resolve({ ...input, rateUsed: rate });
@@ -256,7 +257,7 @@ describe('PlanAllocationRebalancer', () => {
             perBase(input.to) === undefined
           ) {
             return Promise.reject(
-              new BadRequestException(`unsupported currency: ${input.from}`),
+              new UnsupportedCurrencyRateError(input.from, '2026-01-15'),
             );
           }
           return Promise.resolve({

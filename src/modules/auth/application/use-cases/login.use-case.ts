@@ -94,7 +94,7 @@ export class LoginUseCase {
       membership.passwordHash,
     );
     if (!ok) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Correo o contraseña incorrectos.');
     }
     // DX-021: con la contraseña correcta, el segundo factor. Activo → se pide
     // el código; obligatorio y sin activar → alta forzada. En ambos casos
@@ -204,7 +204,7 @@ export class LoginUseCase {
     }
     const ok = await this.password.verify(input.password, user.passwordHash);
     if (!ok) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Correo o contraseña incorrectos.');
     }
     // Contraseña correcta de un superadmin: a partir de aquí las respuestas
     // pueden pedir el paso siguiente (MFA / motivo) sin filtrar nada a quien
@@ -235,7 +235,7 @@ export class LoginUseCase {
     }
     const ok = await this.password.verify(input.password, user.passwordHash);
     if (!ok) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Correo o contraseña incorrectos.');
     }
     const mfa = await this.mfa.state(user.id);
     return this.challenge(
@@ -259,6 +259,6 @@ export class LoginUseCase {
    */
   private async rejectAfterDummyVerify(plain: string): Promise<never> {
     await this.password.verify(plain, DUMMY_PASSWORD_HASH);
-    throw new UnauthorizedException('Invalid credentials');
+    throw new UnauthorizedException('Correo o contraseña incorrectos.');
   }
 }

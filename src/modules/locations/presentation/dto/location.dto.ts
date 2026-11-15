@@ -16,6 +16,12 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { DocumentTypeNamesValuesDto } from '../../../patients/presentation/dto/document-type-names.dto';
 import {
   HEALTH_REGISTRATION_NUMBER_CHARS,
@@ -78,6 +84,7 @@ export class CreateLocationDto {
   @ApiProperty({ example: 'Sede Norte' })
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   name!: string;
 
   @ApiPropertyOptional({
@@ -86,16 +93,19 @@ export class CreateLocationDto {
   })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   address?: string;
 
   @ApiProperty(COUNTRY_DOC)
   @IsOptional()
   @IsString({ message: COUNTRY_MISSING })
+  @TextMaxLength(INPUT_CODE_MAX)
   country?: string;
 
   @ApiProperty({ type: String, description: CURRENCY_DOC })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.currencyMissing })
+  @TextMaxLength(INPUT_CODE_MAX)
   currency?: string;
 
   @ApiProperty({
@@ -105,11 +115,13 @@ export class CreateLocationDto {
   })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.timeZoneMissing })
+  @TextMaxLength(INPUT_CODE_MAX)
   timeZone?: string;
 
   @ApiProperty({ type: String, example: 'es-ES', description: LOCALE_DOC })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.localeMissing })
+  @TextMaxLength(INPUT_CODE_MAX)
   locale?: string;
 
   // Opcional SOLO en fase 1: la web de G1 no lo envía y la sede se crea con
@@ -122,6 +134,7 @@ export class CreateLocationDto {
   })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.hourCycleMissing })
+  @TextMaxLength(INPUT_CODE_MAX)
   hourCycle?: string;
 
   @ApiPropertyOptional({
@@ -150,16 +163,19 @@ export class UpdateLocationDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   name?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   address?: string;
 
   @ApiPropertyOptional(COUNTRY_DOC)
   @IsOptional()
   @IsString({ message: COUNTRY_MISSING })
+  @TextMaxLength(INPUT_CODE_MAX)
   country?: string;
 
   @ApiPropertyOptional({
@@ -230,6 +246,7 @@ export class UpdateLocationDto {
   // `null` se rechaza en el caso de uso (400 con el campo); ausente no cambia.
   @IsOptional()
   @IsString({ message: REGIONAL_NULL_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   currency?: string | null;
 
   @ApiPropertyOptional({
@@ -239,6 +256,7 @@ export class UpdateLocationDto {
   })
   @IsOptional()
   @IsString({ message: REGIONAL_NULL_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   timeZone?: string | null;
 
   @ApiPropertyOptional({
@@ -248,6 +266,7 @@ export class UpdateLocationDto {
   })
   @IsOptional()
   @IsString({ message: REGIONAL_NULL_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   locale?: string | null;
 
   @ApiPropertyOptional({
@@ -259,6 +278,7 @@ export class UpdateLocationDto {
   // `null` se rechaza en el caso de uso (400 con el campo); ausente no cambia.
   @IsOptional()
   @IsString({ message: REGIONAL_NULL_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   hourCycle?: string | null;
 
   @ApiPropertyOptional({

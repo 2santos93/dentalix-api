@@ -61,6 +61,7 @@ import { PLAN_CURRENCY_CHANGED_MESSAGE } from './add-treatment-plan-item.use-cas
 import { GetDiscountPolicyUseCase } from '../../../discounts/application/use-cases/discount-policy.use-cases';
 import { TREATMENT_PLAN_CLOCK, type PlanClock } from '../plan-clock';
 import { FEE_ITEM_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
+import { PLAN_ITEM_NOT_FOUND_MESSAGE } from '../../domain/treatment-plan-messages';
 
 export interface UpdateTreatmentPlanItemInput {
   price?: number;
@@ -151,10 +152,12 @@ export class UpdateTreatmentPlanItemUseCase {
     patch: UpdateTreatmentPlanItemInput,
     actor: DiscountActor,
     audit?: AuditRequestContext,
+    /** El `:id` de la ruta: un ítem de otro plan responde 404 (DX-111). */
+    planId?: string,
   ): Promise<TreatmentPlanItemUpdate> {
     const existing = await this.repo.findItemById(itemId);
-    if (!existing) {
-      throw new NotFoundException('Treatment plan item not found');
+    if (!existing || (planId !== undefined && existing.planId !== planId)) {
+      throw new NotFoundException(PLAN_ITEM_NOT_FOUND_MESSAGE);
     }
     // Lo que no puede leerse dentro de la transacción: la política (solo si el
     // precio o el descuento pueden cambiar) y el `kind` del catálogo para el

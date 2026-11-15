@@ -14,6 +14,7 @@ import {
   makeManualRates,
   makeSettings,
 } from '../__fixtures__/in-memory-exchange-settings';
+import { UnsupportedCurrencyRateError } from '../../domain/missing-exchange-rate.error';
 
 /** Sin tenant en el contexto: lectura del proveedor, como antes de DX-374. */
 function ratesUseCase(
@@ -145,6 +146,11 @@ describe('ConvertAmountUseCase', () => {
     await expect(
       uc.execute({ amount: 10, from: 'ZZZ', to: 'USD', date: DATE }),
     ).rejects.toBeInstanceOf(BadRequestException);
+
+    // DX-111: tipado, para que el saldo lo reconozca sin mirar el texto.
+    await expect(
+      uc.execute({ amount: 10, from: 'ZZZ', to: 'USD', date: DATE }),
+    ).rejects.toBeInstanceOf(UnsupportedCurrencyRateError);
   });
 
   it.each([-1, -0.01, NaN, Infinity, -Infinity])(

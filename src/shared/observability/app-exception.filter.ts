@@ -6,6 +6,10 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  translateFrameworkMessage,
+  translateHttpishMessage,
+} from '../http/framework-messages';
 import { PrismaExceptionFilter } from '../prisma/prisma-exception.filter';
 import { AppLogger } from './app-logger';
 import { currentRequestId } from './request-context';
@@ -63,6 +67,11 @@ function isHttpishError(value: unknown): value is HttpishError {
  *   diagnosticarlo bastan el tipo, el marco que lo lanzó y el request id.
  * - La respuesta de un 5xx solo añade el `requestId`, para que soporte lo
  *   encuentre en el log; el stack y el mensaje interno nunca salen.
+ * - DX-111: los mensajes que genera el framework en inglés («Validation
+ *   failed (uuid is expected)», «Forbidden resource», «Cannot GET /x», el
+ *   nombre del status) salen en español (`shared/http/framework-messages.ts`).
+ *   Los del parser del cuerpo nunca salen tal cual: son inglés técnico y
+ *   pueden citar el cuerpo.
  * - Prisma Known/Unknown: lo resuelve PrismaExceptionFilter (409/400 o un 500
  *   con el mensaje sin el DETAIL de Postgres), que también añade el request
  *   id a sus 500.
@@ -113,18 +122,32 @@ export class AppExceptionFilter implements ExceptionFilter {
       const status = exception.getStatus();
       const response = exception.getResponse();
       // Copia: el requestId no debe quedar pegado a la excepción.
-      return {
-        status,
-        body:
-          typeof response === 'string'
-            ? { statusCode: status, message: response }
-            : { ...response },
-      };
+      const body: Record<string, unknown> =
+        typeof response === 'string'
+          ? { statusCode: status, message: response }
+          : { ...response };
+      const translated =
+        typeof body.message === 'string'
+          ? translateFrameworkMessage(status, body.message)
+          : undefined;
+      if (translated) {
+        body.message = translated.message;
+        if (translated.code && body.code === undefined) {
+          body.code = translated.code;
+        }
+      }
+      return { status, body };
     }
     if (isHttpishError(exception) && exception.statusCode < 500) {
       return {
         status: exception.statusCode,
-        body: { statusCode: exception.statusCode, message: exception.message },
+        body: {
+          statusCode: exception.statusCode,
+          message: translateHttpishMessage(
+            exception.statusCode,
+            exception.message,
+          ),
+        },
       };
     }
     return {

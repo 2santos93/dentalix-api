@@ -100,7 +100,7 @@ export class BreakGlassService {
       step === null ||
       !(await this.repo.consumeTotpStep(input.user.id, step))
     ) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Correo o contraseña incorrectos.');
     }
     await this.lockout.clearMfa(input.user.id);
 

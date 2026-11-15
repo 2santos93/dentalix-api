@@ -25,7 +25,7 @@ export class GetMyProfileUseCase {
   async execute(input: GetMyProfileInput): Promise<MyProfile> {
     const user = await this.repo.findUserById(input.userId);
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException('Usuario no encontrado');
     }
     const [clinicName, extra] = await Promise.all([
       this.repo.findClinicName(input.tenantId).then((name) => name ?? ''),

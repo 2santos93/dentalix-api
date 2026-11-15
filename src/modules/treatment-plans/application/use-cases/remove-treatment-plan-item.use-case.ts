@@ -9,6 +9,7 @@ import type { TreatmentPlanRepository } from '../../domain/ports/treatment-plan-
 import { assertItemsEditable } from './signed-plan-lock';
 import { FEE_ITEM_LOCKED_MESSAGE } from '../../../cancellation-fees/domain/cancellation-fee';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { PLAN_ITEM_NOT_FOUND_MESSAGE } from '../../domain/treatment-plan-messages';
 
 @Injectable()
 export class RemoveTreatmentPlanItemUseCase {
@@ -17,11 +18,18 @@ export class RemoveTreatmentPlanItemUseCase {
     private readonly repo: TreatmentPlanRepository,
   ) {}
 
-  /** `audit`: para el evento del recall que mueva un DONE borrado (DX-015-bis). */
-  async execute(itemId: string, audit?: AuditRequestContext): Promise<void> {
+  /**
+   * `audit`: para el evento del recall que mueva un DONE borrado (DX-015-bis).
+   * `planId`: el `:id` de la ruta; un ítem de otro plan responde 404 (DX-111).
+   */
+  async execute(
+    itemId: string,
+    audit?: AuditRequestContext,
+    planId?: string,
+  ): Promise<void> {
     const existing = await this.repo.findItemById(itemId);
-    if (!existing) {
-      throw new NotFoundException('Treatment plan item not found');
+    if (!existing || (planId !== undefined && existing.planId !== planId)) {
+      throw new NotFoundException(PLAN_ITEM_NOT_FOUND_MESSAGE);
     }
     // SEC-050: quitar el ítem de un cargo vigente sería condonarlo sin permiso
     // ni motivo; se anula desde la cita. El trigger

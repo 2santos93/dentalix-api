@@ -46,9 +46,11 @@ export class UpdateStaffUseCase {
     // transacción (ver StaffRepository.updateById, DB-012).
     const outcome = await this.repo.updateById(input.userId, patch, ctx);
     if (outcome.kind === 'NOT_FOUND')
-      throw new NotFoundException('Staff member not found');
+      throw new NotFoundException('Miembro del personal no encontrado');
     if (outcome.kind === 'LAST_ADMIN')
-      throw new ConflictException('Cannot demote the last admin');
+      throw new ConflictException(
+        'No puedes quitar el rol de administrador al último administrador de la clínica.',
+      );
     return outcome.member;
   }
 }

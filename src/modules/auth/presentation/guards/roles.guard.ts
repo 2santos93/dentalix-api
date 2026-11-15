@@ -27,6 +27,13 @@ export interface PermissionAwareRequest {
   effectivePermissions?: ExtraPermission[];
 }
 
+/**
+ * DX-111 (DX-278): el 403 de un rol sin acceso, en español, cuando la ruta no
+ * declara su propio texto con `@RolesDeniedMessage`.
+ */
+export const ROLES_DENIED_DEFAULT_MESSAGE =
+  'No tienes permiso para hacer esto. Si lo necesitas, pide acceso a un administrador.';
+
 @Injectable()
 export class RolesGuard implements CanActivate {
   constructor(
@@ -114,7 +121,7 @@ export class RolesGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
     return new ForbiddenException(
-      typeof message === 'string' ? message : 'Insufficient role',
+      typeof message === 'string' ? message : ROLES_DENIED_DEFAULT_MESSAGE,
     );
   }
 }

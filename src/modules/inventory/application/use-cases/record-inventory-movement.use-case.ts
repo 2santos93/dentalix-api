@@ -44,7 +44,7 @@ export class RecordInventoryMovementUseCase {
   ): Promise<InventoryMovement> {
     const item = await this.repo.findItemById(input.itemId);
     if (!item) {
-      throw new NotFoundException('Inventory item not found');
+      throw new NotFoundException('Insumo no encontrado');
     }
 
     if (
@@ -53,7 +53,7 @@ export class RecordInventoryMovementUseCase {
       !(input.quantity > 0)
     ) {
       throw new BadRequestException(
-        'quantity must be > 0 for IN/OUT movements',
+        'La cantidad debe ser mayor que 0 en entradas y salidas.',
       );
     }
 
@@ -61,9 +61,7 @@ export class RecordInventoryMovementUseCase {
       input.type === InventoryMovementType.ADJUSTMENT &&
       input.quantity === 0
     ) {
-      throw new BadRequestException(
-        'quantity must be != 0 for ADJUSTMENT movements',
-      );
+      throw new BadRequestException('La cantidad de un ajuste no puede ser 0.');
     }
 
     return this.writes.createMovement(

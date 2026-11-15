@@ -435,7 +435,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           id,
         );
         if (!existing) {
-          throw new NotFoundException('Appointment not found');
+          throw new NotFoundException('Cita no encontrada');
         }
 
         // DX-149: mover (hora o profesional) con el candado de la agenda y

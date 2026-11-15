@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -12,6 +12,7 @@ import {
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // Disponibilidad de la dirección web en el registro: mismas reglas que
 // POST /auth/register (formato DNS, reservadas de la plataforma, ocupada
@@ -46,9 +47,7 @@ describe('GET /public/subdomains/:slug/availability (e2e)', () => {
       .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await cleanup();
     for (const sub of [TAKEN, RETIRED]) {

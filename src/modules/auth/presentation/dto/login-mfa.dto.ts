@@ -9,6 +9,10 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import {
+  INPUT_TOKEN_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 
 const stripSpaces = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.replace(/\s/g, '') : value;
@@ -72,6 +76,7 @@ export class VerifyLoginMfaDto extends SecondFactorDto {
   @ApiProperty({ description: 'El `mfaToken` que devolvió POST /auth/login.' })
   @IsString()
   @Length(1, 2048)
+  @TextMaxLength(INPUT_TOKEN_MAX)
   mfaToken!: string;
 
   @ApiPropertyOptional({
@@ -89,6 +94,7 @@ export class StartLoginMfaEnrollmentDto {
   })
   @IsString()
   @Length(1, 2048)
+  @TextMaxLength(INPUT_TOKEN_MAX)
   mfaToken!: string;
 
   @ApiPropertyOptional({

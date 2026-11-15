@@ -52,18 +52,18 @@ export class CreateCatalogItemUseCase {
   async execute(input: CreateCatalogItemInput): Promise<DentalCatalogItem> {
     if (!isValidHexColor(input.color)) {
       throw new BadRequestException(
-        'color must be a valid hex value (e.g. #1A2B3C)',
+        'El color debe ser un valor hexadecimal válido (p. ej., #1A2B3C).',
       );
     }
     if (!isValidCatalogKind(input.kind)) {
       throw new BadRequestException(
-        'kind must be one of: DIAGNOSIS, PROCEDURE',
+        'El tipo debe ser diagnóstico (DIAGNOSIS) o procedimiento (PROCEDURE).',
       );
     }
 
     const code = input.code.trim();
     if (code === '') {
-      throw new BadRequestException('code must not be blank');
+      throw new BadRequestException('El código es obligatorio.');
     }
     await assertLinkableNoteTemplate(
       this.noteTemplates,

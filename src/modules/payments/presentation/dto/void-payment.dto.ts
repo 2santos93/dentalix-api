@@ -1,6 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsString, Length } from 'class-validator';
+import {
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 
 function trim({ value }: { value: unknown }): unknown {
   return typeof value === 'string' ? value.trim() : value;
@@ -20,5 +24,6 @@ export class VoidPaymentDto {
   @Transform(trim)
   @IsString()
   @Length(3, 300)
+  @TextMaxLength(INPUT_REASON_MAX)
   reason!: string;
 }

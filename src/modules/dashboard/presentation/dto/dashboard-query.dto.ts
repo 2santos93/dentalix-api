@@ -29,7 +29,9 @@ export class DashboardQueryDto {
       'Primer día civil del período (YYYY-MM-DD), inclusive, desde la ' +
       'medianoche de la zona horaria de cada sede.',
   })
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'from must match YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'from debe ser una fecha AAAA-MM-DD.',
+  })
   from!: string;
 
   @ApiProperty({
@@ -39,7 +41,9 @@ export class DashboardQueryDto {
       '([from, to)). El corte es la medianoche de ese día en la zona horaria ' +
       'de cada sede. from = to da un período vacío.',
   })
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'to must match YYYY-MM-DD' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'to debe ser una fecha AAAA-MM-DD.',
+  })
   to!: string;
 
   @ApiProperty({

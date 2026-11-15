@@ -42,6 +42,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
+import { UnsupportedCurrencyRateError } from '../src/modules/exchange/domain/missing-exchange-rate.error';
 
 // DX-051 Task 3, contra Postgres con conexiones reales (rol dentalix_app vía
 // runWithTenant, RLS FORCE): el reparto automático (R5, R6, R9), el alta con
@@ -68,7 +69,7 @@ const convert: ConvertAmountUseCase = {
     const rate = input.from === input.to ? 1 : rates[input.from];
     if (rate === undefined) {
       return Promise.reject(
-        new BadRequestException(`unsupported currency: ${input.from}`),
+        new UnsupportedCurrencyRateError(input.from, '2026-01-15'),
       );
     }
     return Promise.resolve({ ...input, result: 0, rateUsed: rate });
@@ -78,7 +79,7 @@ const convert: ConvertAmountUseCase = {
     const rate = rates[input.from];
     if (rate === undefined) {
       return Promise.reject(
-        new BadRequestException(`unsupported currency: ${input.from}`),
+        new UnsupportedCurrencyRateError(input.from, '2026-01-15'),
       );
     }
     return Promise.resolve({

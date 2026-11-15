@@ -24,6 +24,17 @@ export const CHAIR_NOT_AT_LOCATION_MESSAGE = 'Algún sillón no es de esta sede'
 export const CHAIR_FILTER_NEEDS_LOCATION_MESSAGE =
   'Indica la sede para ver la agenda por sillón';
 
+/**
+ * DX-111 (OPS-026): rango máximo de `GET /appointments`. La vista Mes de la
+ * web pide la cuadrícula entera (6 semanas = 42 días, más el ajuste de zona);
+ * 62 deja margen sin permitir volcar la agenda de años en una petición.
+ */
+export const MAX_APPOINTMENT_RANGE_DAYS = 62;
+export const APPOINTMENT_RANGE_TOO_WIDE_MESSAGE = `El rango de fechas de la agenda no puede superar ${MAX_APPOINTMENT_RANGE_DAYS} días.`;
+export const APPOINTMENT_RANGE_INVERTED_MESSAGE =
+  'La fecha final del rango debe ser posterior a la inicial.';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /** DX-121: columnas de la vista Día como mucho (12 = scroll interno en web). */
 export const MAX_PROVIDER_COLUMNS = 12;
 
@@ -37,6 +48,28 @@ export interface ListAppointmentsInput {
   locationId?: string;
   /** DX-211: sillones de las columnas (de la sede objetivo). */
   chairIds?: string[];
+}
+
+/** DX-111: 400 en español antes de consultar si el rango es inválido. */
+function assertRange(from: Date, to: Date): void {
+  const span = to.getTime() - from.getTime();
+  if (span < 0) {
+    throw new BadRequestException({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'APPOINTMENT_RANGE_INVERTED',
+      message: APPOINTMENT_RANGE_INVERTED_MESSAGE,
+    });
+  }
+  if (span > MAX_APPOINTMENT_RANGE_DAYS * DAY_MS) {
+    throw new BadRequestException({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'APPOINTMENT_RANGE_TOO_WIDE',
+      message: APPOINTMENT_RANGE_TOO_WIDE_MESSAGE,
+      maxDays: MAX_APPOINTMENT_RANGE_DAYS,
+    });
+  }
 }
 
 @Injectable()
@@ -60,6 +93,7 @@ export class ListAppointmentsUseCase {
    * forwards the range + filters, after validating `providerIds`.
    */
   async execute(input: ListAppointmentsInput): Promise<Appointment[]> {
+    assertRange(input.from, input.to);
     // DX-089: una sede explícita fuera de las permitidas es 403.
     if (input.locationId) {
       this.tenantContext.assertLocationAllowed(input.locationId);

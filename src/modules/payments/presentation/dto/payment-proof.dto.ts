@@ -1,16 +1,23 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { MAX_PAYMENT_PROOF_BYTES } from '../../domain/payment-proof';
 
 export class CreatePaymentProofUploadDto {
   @ApiPropertyOptional({ example: 'captura-pago-movil.png' })
   @IsOptional()
   @IsString({ message: 'El nombre del archivo debe ser un texto.' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   name?: string;
 
   @ApiPropertyOptional({ example: 'image/png' })
   @IsOptional()
   @IsString({ message: 'El tipo del archivo debe ser un texto.' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   mimeType?: string;
 
   @ApiProperty({
@@ -27,6 +34,7 @@ export class CreatePaymentProofUploadDto {
       'SHA-256 del contenido en hex. El almacén rechaza un contenido con otra huella.',
   })
   @IsString({ message: 'La huella SHA-256 del comprobante no es válida.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   sha256!: string;
 }
 

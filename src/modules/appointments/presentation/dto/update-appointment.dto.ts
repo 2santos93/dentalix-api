@@ -17,6 +17,11 @@ import {
   IsUUID,
   MaxLength,
 } from 'class-validator';
+import {
+  INPUT_NOTES_MAX,
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
 import { CHAIR_ID_INVALID_ON_EDIT_MESSAGE } from '../../../chairs/domain/chair-rules';
 import {
@@ -148,11 +153,13 @@ export class UpdateAppointmentDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_REASON_MAX)
   reason?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({

@@ -11,6 +11,11 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import {
+  INPUT_NOTES_MAX,
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { CHAIR_ID_INVALID_MESSAGE } from '../../../chairs/domain/chair-rules';
 
 // NOTE: deliberately NO `tenantId`/`status`/`createdById` field — the tenant
@@ -82,11 +87,13 @@ export class CreateAppointmentDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_REASON_MAX)
   reason?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({

@@ -23,7 +23,7 @@ export class UpdateMyNameUseCase {
   ): Promise<void> {
     const fullName = input.fullName.trim();
     if (!fullName) {
-      throw new BadRequestException('Name cannot be empty');
+      throw new BadRequestException('El nombre no puede estar vacío.');
     }
     await this.repo.updateName(input.userId, fullName, ownNameAuditEvent(ctx));
   }

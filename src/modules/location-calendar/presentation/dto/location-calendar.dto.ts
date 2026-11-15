@@ -10,6 +10,11 @@ import {
   Matches,
   type ValidationArguments,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { HOLIDAY_MESSAGES } from '../../domain/holiday-rules';
 
 /**
@@ -85,10 +90,12 @@ export class CreateLocationHolidayDto {
     description: 'AAAA-MM-DD entre 2000-01-01 y 2100-12-31',
   })
   @IsString({ message: dateMessage })
+  @TextMaxLength(INPUT_CODE_MAX)
   date!: string;
 
   @ApiProperty({ maxLength: 120, example: 'Cierre anual' })
   @IsString({ message: HOLIDAY_MESSAGES.nameInvalid })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   name!: string;
 
   @ApiPropertyOptional({
@@ -106,11 +113,13 @@ export class UpdateLocationHolidayDto {
   @ApiPropertyOptional({ format: 'date', example: '2027-05-03' })
   @IsOptional()
   @IsString({ message: dateMessage })
+  @TextMaxLength(INPUT_CODE_MAX)
   date?: string;
 
   @ApiPropertyOptional({ maxLength: 120, example: 'Cierre anual' })
   @IsOptional()
   @IsString({ message: HOLIDAY_MESSAGES.nameInvalid })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   name?: string;
 
   @ApiPropertyOptional()

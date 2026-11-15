@@ -51,12 +51,12 @@ export class UpdateCatalogItemUseCase {
 
     if (patch.color !== undefined && !isValidHexColor(patch.color)) {
       throw new BadRequestException(
-        'color must be a valid hex value (e.g. #1A2B3C)',
+        'El color debe ser un valor hexadecimal válido (p. ej., #1A2B3C).',
       );
     }
     if (patch.kind !== undefined && !isValidCatalogKind(patch.kind)) {
       throw new BadRequestException(
-        'kind must be one of: DIAGNOSIS, PROCEDURE',
+        'El tipo debe ser diagnóstico (DIAGNOSIS) o procedimiento (PROCEDURE).',
       );
     }
 

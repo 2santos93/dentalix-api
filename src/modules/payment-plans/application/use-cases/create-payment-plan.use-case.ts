@@ -81,7 +81,7 @@ export class CreatePaymentPlanUseCase {
       input.installmentsCount > 600
     ) {
       throw new BadRequestException(
-        'installmentsCount must be between 1 and 600',
+        'El número de cuotas debe estar entre 1 y 600.',
       );
     }
     if (!isFiniteNonNegative(input.downPayment)) {
@@ -89,7 +89,7 @@ export class CreatePaymentPlanUseCase {
     }
     if (!PERIODICITIES.has(input.periodicity)) {
       throw new BadRequestException(
-        'periodicity must be WEEKLY, BIWEEKLY or MONTHLY',
+        'La periodicidad debe ser semanal (WEEKLY), quincenal (BIWEEKLY) o mensual (MONTHLY).',
       );
     }
     const startDate =
@@ -97,7 +97,7 @@ export class CreatePaymentPlanUseCase {
         ? input.startDate
         : new Date(input.startDate);
     if (Number.isNaN(startDate.getTime())) {
-      throw new BadRequestException('startDate must be a valid date');
+      throw new BadRequestException('La fecha de inicio no es válida.');
     }
     if (
       input.totalToFinance !== undefined &&
@@ -117,7 +117,7 @@ export class CreatePaymentPlanUseCase {
     const existing = await this.repo.findActiveByPlan(treatmentPlanId);
     if (existing) {
       throw new ConflictException(
-        'This treatment plan already has an active payment plan',
+        'Este plan de tratamiento ya tiene un plan de cuotas activo.',
       );
     }
 
@@ -181,7 +181,7 @@ export class CreatePaymentPlanUseCase {
         error.code === 'P2002'
       ) {
         throw new ConflictException(
-          'This treatment plan already has an active payment plan',
+          'Este plan de tratamiento ya tiene un plan de cuotas activo.',
         );
       }
       throw error;

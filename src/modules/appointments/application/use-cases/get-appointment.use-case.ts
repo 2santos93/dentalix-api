@@ -18,7 +18,7 @@ export class GetAppointmentUseCase {
       // Same rationale as GetPatientUseCase: a missing row and a row that
       // belongs to another tenant are indistinguishable here (RLS makes
       // cross-tenant rows invisible), so both surface as NotFound.
-      throw new NotFoundException('Appointment not found');
+      throw new NotFoundException('Cita no encontrada');
     }
     // DX-089: una cita de una sede no permitida es 403 (no 404: existe).
     this.tenantContext.assertLocationAllowed(appointment.locationId);

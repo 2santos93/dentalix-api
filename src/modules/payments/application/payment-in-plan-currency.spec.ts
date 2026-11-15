@@ -3,6 +3,7 @@ import type { ConvertAmountUseCase } from '../../exchange/application/use-cases/
 import { ExchangeRateUnavailableError } from '../../exchange/domain/ports/exchange-rate-provider.port';
 import { MissingExchangeRateError } from '../../exchange/domain/missing-exchange-rate.error';
 import { paymentInPlanCurrency } from './payment-in-plan-currency';
+import { UnsupportedCurrencyRateError } from '../../exchange/domain/missing-exchange-rate.error';
 
 const payment = {
   amount: 100,
@@ -62,7 +63,7 @@ describe('paymentInPlanCurrency', () => {
   it('null on unsupported currency', async () => {
     const execute = jest
       .fn()
-      .mockRejectedValue(new BadRequestException('unsupported currency: EUR'));
+      .mockRejectedValue(new UnsupportedCurrencyRateError('EUR', '2026-01-15'));
     expect(
       await paymentInPlanCurrency(convertMock(execute), payment),
     ).toBeNull();

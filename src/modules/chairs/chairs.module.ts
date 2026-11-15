@@ -10,6 +10,7 @@ import {
   ListChairsUseCase,
   ReorderChairsUseCase,
   SetChairActiveUseCase,
+  CountChairUpcomingAppointmentsUseCase,
   UpdateChairUseCase,
 } from './application/use-cases/chairs.use-cases';
 import { CHAIR_REPOSITORY } from './domain/ports/chair-repository.port';
@@ -28,6 +29,7 @@ import { PrismaChairRepository } from './infrastructure/repositories/prisma-chai
     CreateChairUseCase,
     UpdateChairUseCase,
     SetChairActiveUseCase,
+    CountChairUpcomingAppointmentsUseCase,
     ReorderChairsUseCase,
     TokenService,
     TenantContextInterceptor,

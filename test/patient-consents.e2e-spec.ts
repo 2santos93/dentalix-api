@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -26,6 +26,7 @@ import {
 } from './support/location-fixtures';
 import { pinCatalogCurrency } from './support/catalog-currency';
 import { makePng } from '../src/modules/clinic-settings/__fixtures__/logo-fixtures';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // DIRECT_URL (superusuario, sin RLS) solo para sembrar miembros con rol y
 // limpiar — mismo criterio que account-statement.e2e-spec.ts. El borrado de
@@ -239,9 +240,7 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     applyBodyLimits(app);
     await app.init();
     await app.listen(0, '127.0.0.1');

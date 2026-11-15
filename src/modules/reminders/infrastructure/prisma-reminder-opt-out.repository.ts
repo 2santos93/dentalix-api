@@ -66,7 +66,7 @@ export class PrismaReminderOptOutRepository implements ReminderOptOutRepository 
       // Mismo orden de bloqueo que consumo/reactivación: paciente, después enlace.
       const patient = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "patients" WHERE "id" = ${patientId}::uuid AND "deletedAt" IS NULL FOR UPDATE`;
-      if (!patient.length) throw new Error('Patient not found');
+      if (!patient.length) throw new Error('Paciente no encontrado');
       const createdAt = this.clock.now();
       await tx.reminderOptOutLink.create({
         data: {

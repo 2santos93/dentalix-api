@@ -1,8 +1,9 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { AppLogger } from '../shared/observability/app-logger';
 import { applyObservability } from '../shared/observability/apply-observability';
 import { applySecurity } from '../shared/security/apply-security';
 import { SecuritySettings } from '../shared/security/security-settings';
+import { createAppValidationPipe } from '../shared/validation/app-validation-pipe';
 import { applyBodyLimits } from './body-limits';
 import { applyAppHttpServerTimeouts } from './http-server-timeouts';
 
@@ -24,7 +25,8 @@ export interface ConfigureAppOptions {
  * 2. Seguridad: proxy de confianza, helmet y CORS.
  * 3. Tope de cuerpo ampliado solo para la firma de consentimientos (DX-006),
  *    antes de que Nest monte su parser en `init()`.
- * 4. Prefijo `api/v1` y ValidationPipe global.
+ * 4. Prefijo `api/v1` y ValidationPipe global (DX-111: 400 en español con
+ *    código por campo; ver shared/validation/app-validation-pipe.ts).
  * 5. Plazos del servidor HTTP (keep-alive, cabeceras y petición entera) del
  *    entorno: keep-alive más largo que el del proxy de la web (DX-284) y 408
  *    a los clientes lentos (DX-431). Ver http-server-timeouts.ts.
@@ -39,6 +41,6 @@ export function configureApp(
   applySecurity(app, options.securitySettings);
   applyBodyLimits(app);
   app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalPipes(createAppValidationPipe());
   applyAppHttpServerTimeouts(app);
 }

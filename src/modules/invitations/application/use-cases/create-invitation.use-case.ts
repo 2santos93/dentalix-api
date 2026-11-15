@@ -83,10 +83,12 @@ export class CreateInvitationUseCase {
     const email = input.email.trim().toLowerCase();
     const fullName = input.fullName.trim();
     if (fullName.length < 2) {
-      throw new BadRequestException('fullName must be at least 2 characters');
+      throw new BadRequestException(
+        'El nombre debe tener al menos 2 caracteres.',
+      );
     }
     if (!Object.values(ClinicRole).includes(input.role)) {
-      throw new BadRequestException('invalid role');
+      throw new BadRequestException('El rol no es válido.');
     }
 
     // Tope diario por clínica (DX-029, SEC-006): una clínica gratis no puede
@@ -109,7 +111,9 @@ export class CreateInvitationUseCase {
 
     const activeMembership = await this.repo.findActiveMembershipByEmail(email);
     if (activeMembership) {
-      throw new ConflictException('Email already an active member');
+      throw new ConflictException(
+        'Esa persona ya es miembro activo de la clínica.',
+      );
     }
 
     // "Reenviar" = superseder la invitación pendiente anterior, nunca

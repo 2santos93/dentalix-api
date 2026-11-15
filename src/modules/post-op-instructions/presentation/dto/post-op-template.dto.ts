@@ -11,6 +11,10 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { POSTOP_VARIABLES } from '../../domain/render-instructions';
 import type { PostOpTemplateView } from '../../domain/ports/post-op-template-repository.port';
 
@@ -82,6 +86,7 @@ export class CreatePostOpTemplateDto extends PostOpTemplateLinksDto {
       'De 2 a 20 letras, números o guiones; se guarda en mayúsculas (400 si no). Único en la clínica (409) y no se edita después.',
   })
   @IsString({ message: 'El código debe ser un texto.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   code!: string;
 
   @ApiProperty({ minLength: 1, maxLength: POSTOP_TITLE_MAX })

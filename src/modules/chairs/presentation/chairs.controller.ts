@@ -41,11 +41,13 @@ import {
   ListChairsUseCase,
   ReorderChairsUseCase,
   SetChairActiveUseCase,
+  CountChairUpcomingAppointmentsUseCase,
   UpdateChairUseCase,
 } from '../application/use-cases/chairs.use-cases';
 import type { Chair } from '../domain/entities/chair.entity';
 import {
   ChairDto,
+  ChairUpcomingAppointmentsDto,
   CreateChairDto,
   ListChairsQueryDto,
   ReorderChairsDto,
@@ -78,6 +80,7 @@ export class ChairsController {
     private readonly createChair: CreateChairUseCase,
     private readonly updateChair: UpdateChairUseCase,
     private readonly setChairActive: SetChairActiveUseCase,
+    private readonly countUpcoming: CountChairUpcomingAppointmentsUseCase,
     private readonly reorderChairs: ReorderChairsUseCase,
   ) {}
 
@@ -186,6 +189,24 @@ export class ChairsController {
       },
       req.user.sub,
     );
+  }
+
+  @Get(':id/upcoming-appointments')
+  @Roles(...CHAIR_WRITE_ROLES)
+  @RolesDeniedMessage(CHAIR_WRITE_FORBIDDEN_MESSAGE)
+  @ApiOkResponse({
+    type: ChairUpcomingAppointmentsDto,
+    description:
+      'DX-111: cuántas citas futuras conserva el sillón (el aviso antes de desactivarlo).',
+  })
+  @ApiNotFoundResponse({ description: 'Sillón no encontrado en esta clínica' })
+  @ApiForbiddenResponse({
+    description: `${CHAIR_WRITE_FORBIDDEN_MESSAGE} (o sede no permitida)`,
+  })
+  upcomingAppointments(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<ChairUpcomingAppointmentsDto> {
+    return this.countUpcoming.execute(id);
   }
 
   @Audit({

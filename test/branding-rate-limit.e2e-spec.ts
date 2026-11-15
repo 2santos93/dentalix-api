@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -18,6 +18,7 @@ import {
   REGIONAL_CARACAS_FIXTURE,
   registerBody,
 } from './support/location-fixtures';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // DX-555: la marca por host que pide el servidor web en el render. Todas sus
 // llamadas salen de UNA IP (la del servidor web): aquí cada «cliente» es una
@@ -72,9 +73,7 @@ describe('Marca por host: límites propios (DX-555, e2e)', () => {
       trustProxyHops: 1,
     });
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
 

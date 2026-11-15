@@ -194,18 +194,18 @@ export function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
   if (typeof value === 'string' && CIVIL_DATE_SHAPE.test(value)) {
     const civilDate = parseCivilDate(value);
     if (civilDate === null) {
-      throw new BadRequestException('paidAt must be a valid date');
+      throw new BadRequestException('La fecha del abono no es válida.');
     }
     return { civilDate };
   }
   if (typeof value === 'string' && !EXPLICIT_OFFSET.test(value.trim())) {
     throw new BadRequestException(
-      'paidAt with a time must include Z or a UTC offset',
+      'La fecha y hora del abono debe indicar la zona horaria (Z o un desfase UTC).',
     );
   }
   const instant = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(instant.getTime())) {
-    throw new BadRequestException('paidAt must be a valid date');
+    throw new BadRequestException('La fecha del abono no es válida.');
   }
   if (isUtcMidnight(instant)) {
     return { civilDate: instant.toISOString().slice(0, 10) };

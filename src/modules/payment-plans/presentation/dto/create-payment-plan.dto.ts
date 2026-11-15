@@ -9,6 +9,10 @@ import {
   Min,
 } from 'class-validator';
 import {
+  INPUT_NOTES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   IsNonNegativeMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
@@ -61,5 +65,6 @@ export class CreatePaymentPlanDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 }

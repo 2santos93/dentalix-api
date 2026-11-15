@@ -245,8 +245,57 @@ describe('AppExceptionFilter', () => {
 
   it('el 403 de CORS no se registra como error', () => {
     const { filter, lines, host, sent } = setup();
-    filter.catch(new ForbiddenException('Origin not allowed'), host());
+    filter.catch(
+      new ForbiddenException('Este sitio no está autorizado para usar la API.'),
+      host(),
+    );
     expect(sent.status).toBe(403);
     expect(lines).toEqual([]);
+  });
+
+  describe('DX-111: mensajes del framework en español', () => {
+    it('ParseUUIDPipe: 400 con INVALID_ID en vez de «Validation failed (uuid is expected)»', () => {
+      const { filter, host, sent } = setup();
+      filter.catch(
+        new BadRequestException('Validation failed (uuid is expected)'),
+        host(),
+      );
+      expect(sent.status).toBe(400);
+      expect(sent.body).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'INVALID_ID',
+        message: 'El identificador no es válido.',
+      });
+    });
+
+    it('un guard que niega: «Forbidden resource» → español', () => {
+      const { filter, host, sent } = setup();
+      filter.catch(new ForbiddenException(), host());
+      expect(sent.status).toBe(403);
+      expect(sent.body).toMatchObject({
+        message: 'No tienes permiso para hacer esto.',
+      });
+    });
+
+    it('un mensaje propio en español no se toca', () => {
+      const { filter, host, sent } = setup();
+      filter.catch(new BadRequestException('La fecha es obligatoria.'), host());
+      expect(sent.body).toMatchObject({ message: 'La fecha es obligatoria.' });
+    });
+
+    it('un JSON mal formado del parser: 400 sin el texto técnico', () => {
+      const { filter, host, sent } = setup();
+      const err = Object.assign(
+        new SyntaxError('Unexpected token } in JSON at position 12'),
+        { statusCode: 400, status: 400 },
+      );
+      filter.catch(err, host());
+      expect(sent.status).toBe(400);
+      expect(sent.body).toEqual({
+        statusCode: 400,
+        message: 'El cuerpo de la solicitud no es un JSON válido.',
+      });
+    });
   });
 });

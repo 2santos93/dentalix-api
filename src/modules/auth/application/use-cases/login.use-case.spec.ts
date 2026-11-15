@@ -420,7 +420,9 @@ describe('LoginUseCase', () => {
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'nadie@x.com', password: 'pw' }),
-      ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
+      ).rejects.toThrow(
+        new UnauthorizedException('Correo o contraseña incorrectos.'),
+      );
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy).toHaveBeenCalledWith('pw', DUMMY_PASSWORD_HASH);
       spy.mockRestore();
@@ -447,7 +449,9 @@ describe('LoginUseCase', () => {
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'otra@x.com', password: 'pw' }),
-      ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
+      ).rejects.toThrow(
+        new UnauthorizedException('Correo o contraseña incorrectos.'),
+      );
       expect(spy).toHaveBeenCalledTimes(1);
       expect(spy).toHaveBeenCalledWith('pw', DUMMY_PASSWORD_HASH);
       spy.mockRestore();
@@ -466,7 +470,9 @@ describe('LoginUseCase', () => {
       );
       await expect(
         uc.executePlatform({ email: 'nadie@x.com', password: 'pw' }),
-      ).rejects.toThrow(new UnauthorizedException('Invalid credentials'));
+      ).rejects.toThrow(
+        new UnauthorizedException('Correo o contraseña incorrectos.'),
+      );
       expect(spy).toHaveBeenCalledWith('pw', DUMMY_PASSWORD_HASH);
       spy.mockRestore();
     });

@@ -31,7 +31,7 @@ export interface CurrentSession {
  * silenciosa. Lo que sí cambia es el ROL y las SEDES permitidas (`loc`,
  * DX-089): salen de la membresía vigente.
  *
- * 401 ("Session is no longer valid", sin más detalle) si el usuario ya no existe, si
+ * 401 ("Tu sesión ya no es válida. Vuelve a iniciar sesión.", sin más detalle) si el usuario ya no existe, si
  * ya no es superadmin (sesión de plataforma), si ya no tiene membresía activa
  * en la clínica (sesión de clínica) o si la sesión es break-glass (SEC-008).
  */
@@ -80,5 +80,7 @@ function roleIn(state: SessionState): ClinicRole {
 }
 
 function invalid(): UnauthorizedException {
-  return new UnauthorizedException('Session is no longer valid');
+  return new UnauthorizedException(
+    'Tu sesión ya no es válida. Vuelve a iniciar sesión.',
+  );
 }

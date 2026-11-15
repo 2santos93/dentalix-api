@@ -1,9 +1,5 @@
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { TreatmentPlanStatus } from '@prisma/client';
 import type { ConvertAmountUseCase } from '../../../exchange/application/use-cases/convert-amount.use-case';
 import {
@@ -18,6 +14,7 @@ import type {
 import type { PlanAllocationRebalancer } from '../plan-allocation-rebalancer';
 import { GetPaymentAllocationsUseCase } from './get-payment-allocations.use-case';
 import { ReplacePaymentAllocationsUseCase } from './replace-payment-allocations.use-case';
+import { UnsupportedCurrencyRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 
 const VERSION = 'a'.repeat(64);
 
@@ -86,7 +83,9 @@ function makeUseCase(
       .fn()
       .mockImplementation(() =>
         opts.rate === undefined
-          ? Promise.reject(new BadRequestException('unsupported currency: USD'))
+          ? Promise.reject(
+              new UnsupportedCurrencyRateError('USD', '2026-01-15'),
+            )
           : Promise.resolve({ rateUsed: opts.rate }),
       ),
     quote: jest
@@ -95,7 +94,7 @@ function makeUseCase(
         (input: { from: string; to: string; date: string }) =>
           opts.rate === undefined
             ? Promise.reject(
-                new BadRequestException('unsupported currency: USD'),
+                new UnsupportedCurrencyRateError('USD', '2026-01-15'),
               )
             : Promise.resolve({
                 ...input,

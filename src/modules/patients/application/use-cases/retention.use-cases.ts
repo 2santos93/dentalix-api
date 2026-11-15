@@ -69,7 +69,7 @@ export class CountPatientLivePublicLinksUseCase {
 
   async execute(patientId: string): Promise<LivePublicLinksSummary> {
     const counts = await this.links.countLive(patientId, this.now());
-    if (!counts) throw new NotFoundException('Patient not found');
+    if (!counts) throw new NotFoundException('Paciente no encontrado');
     return { ...counts, total: totalLivePublicLinks(counts) };
   }
 }

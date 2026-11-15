@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -21,6 +21,7 @@ import {
 } from './support/location-fixtures';
 import { DOCUMENT_TYPES } from '../src/modules/patients/domain/document-type';
 import { DocumentTypeNamesReader } from '../src/modules/patients/domain/ports/document-type-names-repository.port';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // `raw` es una conexión de ADMINISTRACIÓN exclusiva para el cleanup en
 // beforeAll/afterAll — usa DIRECT_URL (rol owner `dentalix`, superuser)
@@ -110,9 +111,7 @@ describe('Patients (e2e)', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
     await resetDatabase(raw);

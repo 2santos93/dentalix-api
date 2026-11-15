@@ -17,7 +17,9 @@ class FakeGetTreatmentPlanUseCase {
 
   execute(): Promise<TreatmentPlanDetail> {
     if (!this.plan) {
-      return Promise.reject(new NotFoundException('Treatment plan not found'));
+      return Promise.reject(
+        new NotFoundException('Plan de tratamiento no encontrado'),
+      );
     }
     return Promise.resolve(this.plan);
   }

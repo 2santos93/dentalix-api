@@ -27,7 +27,9 @@ export class TenantContextInterceptor implements NestInterceptor {
     // The host is the authority for the active tenant.
     const hostTenantId = req.tenantHost?.tenantId;
     if (!hostTenantId) {
-      throw new UnauthorizedException('No tenant in context');
+      throw new UnauthorizedException(
+        'Esta acción requiere una sesión de clínica.',
+      );
     }
     // A token issued for another tenant must not be usable on this host. A
     // PLATFORM token (superadmin, no tenant) is likewise rejected here: it is
@@ -38,7 +40,9 @@ export class TenantContextInterceptor implements NestInterceptor {
       req.user &&
       (!isTenantPayload(req.user) || req.user.tenantId !== hostTenantId)
     ) {
-      throw new UnauthorizedException('Tenant mismatch');
+      throw new UnauthorizedException(
+        'La sesión no corresponde a esta clínica.',
+      );
     }
     // run() keeps the ALS store active through the handler's async execution,
     // because we subscribe to next.handle() INSIDE the run callback (enterWith

@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -21,6 +21,7 @@ import {
   registerBody,
 } from './support/location-fixtures';
 import { seedParProviderRates } from './support/par-provider-rates';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // DX-513-bis: ítems con el catálogo en otra moneda que el plan necesitan tasa.
 let dropParRates: (() => Promise<void>) | undefined;
@@ -273,9 +274,7 @@ describe('Estado de cuenta — GET /patients/:patientId/account-statement (e2e)'
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
     await cleanup();

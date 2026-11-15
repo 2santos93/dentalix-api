@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
@@ -15,6 +15,7 @@ import {
   registerBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // SEC-001 / SEC-002: el refresh revalida la sesión contra el estado ACTUAL
 // (membresía, rol, usuario, superadmin), es de un solo uso (rotación real) y
@@ -98,9 +99,7 @@ describe('Session revalidation on refresh (e2e)', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
     await cleanup();

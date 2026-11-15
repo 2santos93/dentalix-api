@@ -7,6 +7,12 @@ import {
   Matches,
   MinLength,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { CatalogKind } from '@prisma/client';
 import { NoteTemplateLinkField } from './note-template-link.field';
 import { HEX_COLOR_PATTERN } from '../../application/use-cases/create-catalog-item.use-case';
@@ -22,11 +28,13 @@ export class UpdateCatalogItemDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_CODE_MAX)
   code?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   category?: string;
 
   @ApiPropertyOptional({ enum: CatalogKind })
@@ -38,16 +46,19 @@ export class UpdateCatalogItemDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   labelEs?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   labelEn?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   labelPt?: string;
 
   @ApiPropertyOptional({
@@ -57,7 +68,7 @@ export class UpdateCatalogItemDto {
   @IsOptional()
   @IsString()
   @Matches(HEX_COLOR_PATTERN, {
-    message: 'color must be a valid hex value (e.g. #1A2B3C)',
+    message: 'El color debe ser un valor hexadecimal válido (p. ej., #1A2B3C).',
   })
   color?: string;
 

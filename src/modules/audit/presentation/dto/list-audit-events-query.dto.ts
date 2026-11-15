@@ -78,7 +78,9 @@ export class ListAuditEventsQueryDto {
   })
   @IsOptional()
   @MaxLength(200)
-  @Matches(/^[A-Za-z0-9_-]+$/, { message: 'cursor is not valid' })
+  @Matches(/^[A-Za-z0-9_-]+$/, {
+    message: 'El cursor de paginación no es válido.',
+  })
   cursor?: string;
 
   @ApiPropertyOptional({

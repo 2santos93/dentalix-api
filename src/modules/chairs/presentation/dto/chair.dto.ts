@@ -20,6 +20,16 @@ const NAME_MESSAGE = `El nombre del sillón no puede tener más de ${CHAIR_NAME_
 /** Tope de sillones por petición de orden (holgado: una sede tiene pocos). */
 const MAX_ORDER_IDS = 200;
 
+/** DX-111: citas futuras que conserva un sillón (aviso al desactivarlo). */
+export class ChairUpcomingAppointmentsDto {
+  @ApiProperty({
+    description:
+      'Citas vivas del sillón desde ahora, sin las canceladas ni las inasistencias.',
+    minimum: 0,
+  })
+  count!: number;
+}
+
 /** Respuesta de los endpoints de sillones (DX-211). */
 export class ChairDto {
   @ApiProperty({ format: 'uuid' })

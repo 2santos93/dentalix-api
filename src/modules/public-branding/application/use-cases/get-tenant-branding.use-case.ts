@@ -18,12 +18,12 @@ export class GetTenantBrandingUseCase {
     // means no tenant was ever put into context.
     const tenantId = this.tenantContext.getTenantId();
     if (!tenantId) {
-      throw new NotFoundException('Tenant not found');
+      throw new NotFoundException('Clínica no encontrada');
     }
 
     const branding = await this.repo.findById(tenantId);
     if (!branding) {
-      throw new NotFoundException('Tenant not found');
+      throw new NotFoundException('Clínica no encontrada');
     }
 
     return branding;

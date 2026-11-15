@@ -510,6 +510,12 @@ describe('Sillones por sede y anti-solape por sillón (e2e, DX-211)', () => {
           end: at('22:30'),
         }).expect(201)
       ).body as AppointmentBody;
+      // DX-111: el aviso antes de desactivarlo cuenta sus citas futuras.
+      const upcoming = await as(
+        api().get(`/api/v1/chairs/${chair.id}/upcoming-appointments`),
+        clinic.adminToken,
+      ).expect(200);
+      expect(upcoming.body).toEqual({ count: 1 });
       const off = await as(
         api().post(`/api/v1/chairs/${chair.id}/deactivate`),
         clinic.adminToken,

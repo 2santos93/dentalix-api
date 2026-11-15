@@ -96,16 +96,16 @@ export class CreatePatientUseCase {
 
     if (input.cityId !== undefined) {
       if (!input.countryCode) {
-        throw new BadRequestException(
-          'countryCode is required when cityId is set',
-        );
+        throw new BadRequestException('Indica el país de la ciudad elegida.');
       }
       const ok = await this.reference.cityBelongsToCountry(
         input.cityId,
         input.countryCode,
       );
       if (!ok) {
-        throw new BadRequestException('cityId does not belong to countryCode');
+        throw new BadRequestException(
+          'La ciudad elegida no pertenece a ese país.',
+        );
       }
     }
 

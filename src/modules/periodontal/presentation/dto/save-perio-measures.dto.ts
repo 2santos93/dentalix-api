@@ -12,6 +12,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   MAX_SITES_PER_REQUEST,
   MAX_TEETH_PER_REQUEST,
 } from '../../domain/perio-measures';
@@ -28,6 +32,7 @@ export class PerioSiteMeasureInputDto {
 
   @ApiProperty({ enum: PerioSite, enumName: 'PerioSite' })
   @IsString({ message: 'el sitio debe ser MB, B, DB, ML, L o DL' })
+  @TextMaxLength(INPUT_CODE_MAX)
   site!: PerioSite;
 
   @ApiPropertyOptional({

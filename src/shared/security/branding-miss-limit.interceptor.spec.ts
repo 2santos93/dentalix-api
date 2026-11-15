@@ -62,7 +62,7 @@ describe('BrandingMissLimitInterceptor (DX-555)', () => {
       handle: () =>
         normalizeBrandingHost(host) === REAL_HOST
           ? of({ name: 'Sonrisa Caracas' })
-          : throwError(() => new NotFoundException('Tenant not found')),
+          : throwError(() => new NotFoundException('Clínica no encontrada')),
     };
     const result = firstValueFrom(interceptor.intercept(context, next)).then(
       (body) => ({ status: 200, body, headers }),

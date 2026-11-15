@@ -73,7 +73,10 @@ export class AuditEventsController {
     @Query() query: ListAuditEventsQueryDto,
   ): Promise<ListAuditEventsOutput> {
     const tenantId = this.tenantContext.getTenantId();
-    if (!tenantId) throw new UnauthorizedException('No tenant in context');
+    if (!tenantId)
+      throw new UnauthorizedException(
+        'Esta acción requiere una sesión de clínica.',
+      );
     return this.listEvents.execute({
       tenantId,
       locationId: this.tenantContext.getLocationId(),

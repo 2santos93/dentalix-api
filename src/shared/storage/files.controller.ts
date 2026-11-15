@@ -106,7 +106,7 @@ export class FilesController {
     // isFileKey además rechaza `..` dentro del nombre, que el almacén no
     // acepta como clave (sería un 500 en vez de un 400).
     if (!SAFE_NAME.test(name) || !isFileKey(key)) {
-      throw new BadRequestException('Invalid file name');
+      throw new BadRequestException('El nombre del archivo no es válido.');
     }
     // El tipo sale de la extensión (la fija el caso de uso), no de lo
     // guardado: nunca se sirve como HTML algo subido como avatar.
@@ -127,7 +127,8 @@ export class FilesController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<StreamableFile | undefined> {
     const match = LOGO_NAME.exec(name);
-    if (!match) throw new BadRequestException('Invalid file name');
+    if (!match)
+      throw new BadRequestException('El nombre del archivo no es válido.');
     const key = `logos/${name}`;
     const type = LOGO_CONTENT_TYPE[match[1]];
     return this.servePublic(key, name, type, req, res);
@@ -149,7 +150,7 @@ export class FilesController {
     // ETag puesta y, sin cuerpo, el `send()` de Express responde 304.
     if (req.headers['if-none-match']) {
       const info = await this.storage.stat(key);
-      if (!info) throw new NotFoundException('File not found');
+      if (!info) throw new NotFoundException('Archivo no encontrado');
       if (info.etag) res.set('ETag', info.etag);
       if (info.etag && req.fresh) {
         res.set('Cache-Control', avatarCacheControl(name));
@@ -158,7 +159,7 @@ export class FilesController {
     }
     const file = await this.storage.openRead(key);
     if (!file) {
-      throw new NotFoundException('File not found');
+      throw new NotFoundException('Archivo no encontrado');
     }
     res.set('Cache-Control', avatarCacheControl(name));
     if (file.etag) res.set('ETag', file.etag);
@@ -238,11 +239,13 @@ export class FilesController {
         !isServableContentType(options.contentType)) ||
       !this.storage.verifySignedUrl(key, expires, signature, options)
     ) {
-      throw new ForbiddenException('Invalid or expired signature');
+      throw new ForbiddenException(
+        'El enlace del archivo no es válido o expiró.',
+      );
     }
     const file = await this.storage.openRead(key);
     if (!file) {
-      throw new NotFoundException('File not found');
+      throw new NotFoundException('Archivo no encontrado');
     }
     res.set('Content-Type', options?.contentType ?? contentTypeOf(key));
     if (options) {

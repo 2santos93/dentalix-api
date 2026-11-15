@@ -10,6 +10,13 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  INPUT_NOTES_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { Sex } from '@prisma/client';
 import { DOCUMENT_TYPES } from '../../domain/document-type';
 import {
@@ -39,12 +46,14 @@ export class UpdatePatientDto {
   @NotNullable()
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   firstName?: string;
 
   @ApiPropertyOptional({ minLength: 1 })
   @NotNullable()
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   lastName?: string;
 
   @ApiPropertyOptional({ enum: DOCUMENT_TYPES, enumName: 'DocType' })
@@ -57,11 +66,13 @@ export class UpdatePatientDto {
   @ApiPropertyOptional(DOC_TYPE_LABEL_PROPERTY)
   @IsOptional()
   @IsString({ message: 'docTypeLabel debe ser un texto.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   docTypeLabel?: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   docNumber?: string;
 
   @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
@@ -77,6 +88,7 @@ export class UpdatePatientDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   phone?: string;
 
   @ApiPropertyOptional({ nullable: true })
@@ -87,6 +99,7 @@ export class UpdatePatientDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   address?: string;
 
   @ApiPropertyOptional({
@@ -96,6 +109,7 @@ export class UpdatePatientDto {
   })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   countryCode?: string;
 
   @ApiPropertyOptional({
@@ -110,6 +124,7 @@ export class UpdatePatientDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   // Administrativos: `CreatePatientDto` ya los acepta, pero hasta ahora no se
@@ -118,11 +133,13 @@ export class UpdatePatientDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   maritalStatus?: string;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   occupation?: string;
 
   // DX-153/DX-322: el texto libre de aseguradora anterior a DX-153 ya no se
@@ -132,26 +149,31 @@ export class UpdatePatientDto {
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   physicianName?: string;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   physicianPhone?: string;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   emergencyContactName?: string;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   emergencyContactRelationship?: string;
 
   @ApiPropertyOptional({ nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   emergencyContactPhone?: string;
 
   // DX-203: guardianName/guardianDocNumber son de solo lectura (DEPRECADO):

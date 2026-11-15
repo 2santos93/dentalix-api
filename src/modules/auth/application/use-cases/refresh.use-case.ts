@@ -75,12 +75,16 @@ export class RefreshUseCase {
     try {
       payload = await this.tokens.verifyRefresh(input.refreshToken);
     } catch {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException(
+        'La sesión expiró. Vuelve a iniciar sesión.',
+      );
     }
     if (input.expectedTenantId !== undefined) {
       const tokenTenantId = isTenantPayload(payload) ? payload.tenantId : null;
       if (tokenTenantId !== input.expectedTenantId) {
-        throw new UnauthorizedException('Invalid refresh token');
+        throw new UnauthorizedException(
+          'La sesión expiró. Vuelve a iniciar sesión.',
+        );
       }
     }
 
@@ -88,7 +92,9 @@ export class RefreshUseCase {
     // Tokens anteriores al claim `tv` cuentan como versión 0.
     const tv = payload.tv ?? 0;
     if (tv !== tokenVersion) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException(
+        'La sesión expiró. Vuelve a iniciar sesión.',
+      );
     }
 
     // Se emite con la `tv` del token validado, no con la leída: si un cambio
@@ -129,9 +135,13 @@ export class RefreshUseCase {
           sid,
           userId: payload.sub,
         });
-        throw new UnauthorizedException('Invalid refresh token');
+        throw new UnauthorizedException(
+          'La sesión expiró. Vuelve a iniciar sesión.',
+        );
       case 'revoked':
-        throw new UnauthorizedException('Invalid refresh token');
+        throw new UnauthorizedException(
+          'La sesión expiró. Vuelve a iniciar sesión.',
+        );
     }
   }
 
@@ -145,7 +155,9 @@ export class RefreshUseCase {
       new Date(payload.exp * 1000),
     );
     if (!consumed) {
-      throw new UnauthorizedException('Invalid refresh token');
+      throw new UnauthorizedException(
+        'La sesión expiró. Vuelve a iniciar sesión.',
+      );
     }
     // El par nuevo ya nace en una familia (`sid` nuevo).
     return this.tokens.issue(issuable);

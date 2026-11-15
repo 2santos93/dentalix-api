@@ -13,6 +13,11 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { DocumentType, TriageFlag } from '@prisma/client';
 import { CHAIR_ID_INVALID_MESSAGE } from '../../../chairs/domain/chair-rules';
 import { DOCUMENT_TYPES } from '../../../patients/domain/document-type';
@@ -65,6 +70,7 @@ export class WalkInNewPatientDto {
   @ApiPropertyOptional(DOC_TYPE_LABEL_PROPERTY)
   @IsOptional()
   @IsString({ message: 'docTypeLabel debe ser un texto.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   docTypeLabel?: string | null;
 
   @ApiPropertyOptional({ maxLength: 40 })
@@ -150,6 +156,7 @@ export class CreateWalkInDto {
   })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_REASON_MAX)
   overbookReason?: string;
 }
 

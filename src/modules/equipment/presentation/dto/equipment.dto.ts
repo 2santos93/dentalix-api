@@ -14,6 +14,10 @@ import {
   ValidateIf,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   EQUIPMENT_CATEGORIES,
   EQUIPMENT_RISK_CLASSES,
   EQUIPMENT_STATUSES,
@@ -439,6 +443,7 @@ class EquipmentFieldsDto {
   })
   @IsOptional()
   @IsString({ message: DATE_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   acquiredOn?: string | null;
 
   @ApiPropertyOptional({
@@ -526,6 +531,7 @@ export class RetireEquipmentDto {
   })
   @IsOptional()
   @IsString({ message: DATE_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   retiredOn?: string;
 
   @ApiProperty({ minLength: 3, maxLength: REASON_MAX })
@@ -546,6 +552,7 @@ export class RecordMaintenanceDto {
 
   @ApiProperty({ ...DATE_DOC, description: 'No futura en la sede.' })
   @IsString({ message: DATE_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   performedOn!: string;
 
   @ApiPropertyOptional({
@@ -594,6 +601,7 @@ export class RecordMaintenanceDto {
   @IsString({
     message: CURRENCY_CODE_MESSAGE,
   })
+  @TextMaxLength(INPUT_CODE_MAX)
   currency?: string | null;
 
   @ApiPropertyOptional({
@@ -605,6 +613,7 @@ export class RecordMaintenanceDto {
   })
   @IsOptional()
   @IsString({ message: DATE_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   nextDueOn?: string | null;
 }
 

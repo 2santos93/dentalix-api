@@ -21,6 +21,7 @@ import { Appointment } from '../../../appointments/domain/entities/appointment.e
 import { CountPatientsUseCase } from '../../../patients/application/use-cases/count-patients.use-case';
 import { AppointmentStatus } from '@prisma/client';
 import { CURRENCY_REQUIRED_MESSAGE } from '../../../../shared/money/currency-messages';
+import { UnsupportedCurrencyRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 
 /**
  * Fakes for the 4 reused use cases -- same pattern as
@@ -483,7 +484,7 @@ describe('GetDoctorDashboardUseCase', () => {
         to: '2026-07-01',
         currency: 'USD',
       }),
-    ).rejects.toThrow(/from.*to|to.*from/i);
+    ).rejects.toThrow(/fecha inicial.*final/i);
   });
 
   it('rejects a blank currency with a clear error', async () => {
@@ -533,7 +534,7 @@ describe('GetDoctorDashboardUseCase', () => {
       execute(input: { amount: number; from: string; to: string }) {
         if (input.from === 'ZZZ') {
           return Promise.reject(
-            new BadRequestException('unsupported currency: ZZZ'),
+            new UnsupportedCurrencyRateError('ZZZ', '2026-01-15'),
           );
         }
         return Promise.resolve({

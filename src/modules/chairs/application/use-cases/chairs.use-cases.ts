@@ -241,6 +241,26 @@ export class SetChairActiveUseCase {
   }
 }
 
+/**
+ * DX-111: cuántas citas futuras conserva el sillón, para el aviso antes de
+ * desactivarlo. Antes la web lo contaba pidiendo `GET /appointments` con un
+ * rango de 5 años, que el tope de rango de la agenda ya no admite.
+ */
+@Injectable()
+export class CountChairUpcomingAppointmentsUseCase {
+  constructor(
+    @Inject(CHAIR_REPOSITORY) private readonly repo: ChairRepository,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  async execute(id: string): Promise<{ count: number }> {
+    await loadChair(this.repo, this.tenantContext, id);
+    return {
+      count: await this.repo.countUpcomingAppointments(id, new Date()),
+    };
+  }
+}
+
 @Injectable()
 export class ReorderChairsUseCase {
   constructor(

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsOptional,
@@ -7,6 +8,11 @@ import {
   IsUUID,
   Matches,
 } from 'class-validator';
+import {
+  INPUT_NOTES_MAX,
+  INPUT_SURFACES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import {
   CatalogKind,
   ToothRecordOrigin,
@@ -31,7 +37,7 @@ export class CreateToothRecordDto {
   @IsString()
   @Matches(FDI_TOOTH_NUMBER_PATTERN, {
     message:
-      'toothNumber must be a valid FDI code (permanent 11-18/21-28/31-38/41-48 or primary 51-55/61-65/71-75/81-85)',
+      'El número de diente debe ser un código FDI válido (permanentes 11-18/21-28/31-38/41-48 o temporales 51-55/61-65/71-75/81-85).',
   })
   toothNumber!: string;
 
@@ -43,6 +49,7 @@ export class CreateToothRecordDto {
   @IsOptional()
   @IsArray()
   @IsEnum(ToothSurface, { each: true })
+  @ArrayMaxSize(INPUT_SURFACES_MAX)
   surfaces?: ToothSurface[];
 
   @ApiProperty({ enum: CatalogKind })
@@ -65,6 +72,7 @@ export class CreateToothRecordDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })

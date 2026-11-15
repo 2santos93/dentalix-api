@@ -308,7 +308,7 @@ export class AppointmentsController {
   })
   @ApiBadRequestResponse({
     description:
-      'Más de 12 profesionales o alguno ajeno a la clínica; DX-211: más de 12 sillones, alguno de otra sede o clínica, o `chairIds` sin sede',
+      'Más de 12 profesionales o alguno ajeno a la clínica; DX-211: más de 12 sillones, alguno de otra sede o clínica, o `chairIds` sin sede; DX-111: rango de más de 62 días (`APPOINTMENT_RANGE_TOO_WIDE`, con `maxDays`) o `to` anterior a `from` (`APPOINTMENT_RANGE_INVERTED`)',
   })
   async list(
     @Query() query: ListAppointmentsQueryDto,

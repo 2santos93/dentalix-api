@@ -194,7 +194,9 @@ export class CreateAppointmentUseCase {
       throw new BadRequestException('Indica la hora de fin o un tipo de cita');
     }
     if (end <= input.start) {
-      throw new BadRequestException('End must be after start');
+      throw new BadRequestException(
+        'La hora de fin debe ser posterior a la de inicio.',
+      );
     }
     return { ...input, end };
   }

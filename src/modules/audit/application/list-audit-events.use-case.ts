@@ -69,14 +69,18 @@ export class ListAuditEventsUseCase {
     }
     if (!from) from = new Date(to.getTime() - defaultSpan);
     if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
-      throw new BadRequestException('from/to must be ISO 8601 instants');
+      throw new BadRequestException(
+        'Las fechas «from» y «to» deben ser instantes ISO 8601.',
+      );
     }
     if (from.getTime() >= to.getTime()) {
-      throw new BadRequestException('from must be before to');
+      throw new BadRequestException(
+        'La fecha inicial debe ser anterior a la final.',
+      );
     }
     if (to.getTime() - from.getTime() > MAX_RANGE_DAYS * DAY_MS) {
       throw new BadRequestException(
-        `The range cannot exceed ${MAX_RANGE_DAYS} days`,
+        `El rango no puede superar ${MAX_RANGE_DAYS} días.`,
       );
     }
     return { from, to };
@@ -86,7 +90,7 @@ export class ListAuditEventsUseCase {
     const { from, to } = this.range(input);
     const cursor = input.cursor ? decodeAuditCursor(input.cursor) : null;
     if (input.cursor && !cursor) {
-      throw new BadRequestException('Invalid cursor');
+      throw new BadRequestException('El cursor de paginación no es válido.');
     }
     const limit = Math.min(
       Math.max(input.limit ?? DEFAULT_LIMIT, 1),

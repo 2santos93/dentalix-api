@@ -1,0 +1,265 @@
+import { INestApplication } from '@nestjs/common';
+import { CatalogKind, Prisma, PrismaClient, Sex } from '@prisma/client';
+import request from 'supertest';
+import { App } from 'supertest/types';
+import { createE2eApp } from './support/create-e2e-app';
+import {
+  type Clinic,
+  registerClinic,
+  resetDatabase,
+} from './support/e2e-fixtures';
+
+/**
+ * DX-111: entradas que antes daban 500, se aceptaban sin tope o respondían en
+ * inglés. La app se monta como main.ts (configureApp: ValidationPipe y filtro
+ * global reales).
+ */
+const raw = new PrismaClient<Prisma.PrismaClientOptions>({
+  datasources: { db: { url: process.env.DIRECT_URL } },
+});
+
+type Method = 'get' | 'post' | 'patch' | 'put' | 'delete';
+
+describe('Entradas sin 500 y errores en español (DX-111)', () => {
+  let app: INestApplication<App>;
+  let clinic: Clinic;
+  let patientId: string;
+  let catalogItemId: string;
+
+  const call = (method: Method, path: string, body?: object) => {
+    const req = request(app.getHttpServer())
+      [method](`/api/v1${path}`)
+      .set('X-Tenant-Host', clinic.host)
+      .set('Authorization', `Bearer ${clinic.adminToken}`);
+    return body === undefined ? req : req.send(body);
+  };
+
+  async function planWithItem(): Promise<{ planId: string; itemId: string }> {
+    const plan = await call('post', `/patients/${patientId}/treatment-plans`, {
+      currency: 'VES',
+    }).expect(201);
+    const planId = (plan.body as { id: string }).id;
+    const item = await call('post', `/treatment-plans/${planId}/items`, {
+      toothNumber: '36',
+      catalogItemId,
+      price: 40,
+    }).expect(201);
+    return { planId, itemId: (item.body as { id: string }).id };
+  }
+
+  beforeAll(async () => {
+    await resetDatabase(raw);
+    app = await createE2eApp();
+    clinic = await registerClinic(app, 'dx111-entradas');
+    const patient = await call('post', '/patients', {
+      firstName: 'Lucía',
+      lastName: 'Entradas',
+      docType: 'NATIONAL_ID',
+      docNumber: 'DX111-0001',
+      sex: Sex.F,
+      phone: '+58 414 555 0111',
+    }).expect(201);
+    patientId = (patient.body as { id: string }).id;
+    const catalog = await call('post', '/catalog/items', {
+      code: 'DX111-RES',
+      kind: CatalogKind.PROCEDURE,
+      labelEs: 'Resina',
+      color: '#2A2B3C',
+      defaultPrice: 40,
+    }).expect(201);
+    catalogItemId = (catalog.body as { id: string }).id;
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await resetDatabase(raw);
+    await raw.$disconnect();
+  });
+
+  describe('ítems de plan bajo /treatment-plans/:id (BE-007)', () => {
+    it('PATCH de un ítem de OTRO plan → 404 y el ítem no cambia', async () => {
+      const a = await planWithItem();
+      const b = await planWithItem();
+      const res = await call(
+        'patch',
+        `/treatment-plans/${b.planId}/items/${a.itemId}`,
+        { price: 99 },
+      );
+      expect(res.status).toBe(404);
+      expect((res.body as { message: string }).message).toBe(
+        'No se encontró el ítem en este plan de tratamiento.',
+      );
+      const plan = await call('get', `/treatment-plans/${a.planId}`).expect(
+        200,
+      );
+      const items = (plan.body as { items: { id: string; price: number }[] })
+        .items;
+      expect(items.find((i) => i.id === a.itemId)?.price).toBe(40);
+    });
+
+    it('DELETE de un ítem de OTRO plan → 404 y el ítem sigue', async () => {
+      const a = await planWithItem();
+      const b = await planWithItem();
+      await call(
+        'delete',
+        `/treatment-plans/${b.planId}/items/${a.itemId}`,
+      ).expect(404);
+      const plan = await call('get', `/treatment-plans/${a.planId}`).expect(
+        200,
+      );
+      expect(
+        (plan.body as { items: { id: string }[] }).items.map((i) => i.id),
+      ).toContain(a.itemId);
+    });
+
+    it('con su propio plan sigue funcionando', async () => {
+      const a = await planWithItem();
+      await call('patch', `/treatment-plans/${a.planId}/items/${a.itemId}`, {
+        price: 55,
+      }).expect(200);
+      await call(
+        'delete',
+        `/treatment-plans/${a.planId}/items/${a.itemId}`,
+      ).expect(200);
+    });
+  });
+
+  describe('ids mal formados (BE-019)', () => {
+    it('GET /patients/no-es-uuid → 400 INVALID_ID en español', async () => {
+      const res = await call('get', '/patients/no-es-uuid').expect(400);
+      expect(res.body).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'INVALID_ID',
+        message: 'El identificador no es válido.',
+      });
+    });
+
+    it('X-Location-Id que no es UUID → 400 en español, no 500', async () => {
+      const res = await call('get', '/patients')
+        .set('X-Location-Id', 'abc')
+        .expect(400);
+      expect(res.body).toMatchObject({
+        code: 'LOCATION_INVALID',
+        message: 'La sede elegida no es válida. Vuelve a elegir la sede.',
+      });
+    });
+
+    it('X-Location-Id de una sede que no existe → 400 LOCATION_UNKNOWN', async () => {
+      const res = await call('get', '/patients')
+        .set('X-Location-Id', '00000000-0000-4000-8000-000000000000')
+        .expect(400);
+      expect(res.body).toMatchObject({
+        code: 'LOCATION_UNKNOWN',
+        message:
+          'La sede elegida no existe en esta clínica. Vuelve a elegir la sede.',
+      });
+    });
+
+    it('una ruta que no existe → 404 en español', async () => {
+      const res = await call('get', '/no-existe').expect(404);
+      expect((res.body as { message: string }).message).toBe(
+        'La ruta solicitada no existe.',
+      );
+    });
+  });
+
+  describe('tope de rango de GET /appointments (OPS-026)', () => {
+    const range = (from: string, to: string) =>
+      call('get', `/appointments?from=${from}&to=${to}`);
+
+    it('62 días (la vista Mes con margen) → 200', async () => {
+      await range(
+        '2027-03-01T00:00:00.000Z',
+        '2027-05-02T00:00:00.000Z',
+      ).expect(200);
+    });
+
+    it('más de 62 días → 400 en español con code y maxDays', async () => {
+      const res = await range(
+        '2027-01-01T00:00:00.000Z',
+        '2027-12-31T00:00:00.000Z',
+      ).expect(400);
+      expect(res.body).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'APPOINTMENT_RANGE_TOO_WIDE',
+        message: 'El rango de fechas de la agenda no puede superar 62 días.',
+        maxDays: 62,
+      });
+    });
+
+    it('to antes que from → 400 en español', async () => {
+      const res = await range(
+        '2027-03-10T00:00:00.000Z',
+        '2027-03-01T00:00:00.000Z',
+      ).expect(400);
+      expect((res.body as { code: string }).code).toBe(
+        'APPOINTMENT_RANGE_INVERTED',
+      );
+    });
+
+    it('GET /chairs/:id/upcoming-appointments cuenta las futuras (lo que la web pedía con 5 años)', async () => {
+      const locations = await call('get', '/locations').expect(200);
+      const locationId = (locations.body as { id: string }[])[0].id;
+      const chair = await call('post', '/chairs', {
+        locationId,
+        name: 'Sillón DX-111',
+      }).expect(201);
+      const res = await call(
+        'get',
+        `/chairs/${(chair.body as { id: string }).id}/upcoming-appointments`,
+      ).expect(200);
+      expect(res.body).toEqual({ count: 0 });
+    });
+  });
+
+  describe('validación en español con código por campo (BE-006, BE-020)', () => {
+    it('un nombre de paciente de más de 120 caracteres → 400 en español', async () => {
+      const res = await call('post', '/patients', {
+        firstName: 'A'.repeat(121),
+        lastName: 'Larga',
+        docType: 'NATIONAL_ID',
+        docNumber: 'DX111-0002',
+        sex: Sex.F,
+      }).expect(400);
+      expect(res.body).toMatchObject({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'VALIDATION_FAILED',
+        message: ['firstName no puede tener más de 120 caracteres.'],
+        fields: [
+          {
+            field: 'firstName',
+            code: 'textMaxLength',
+            message: 'firstName no puede tener más de 120 caracteres.',
+          },
+        ],
+      });
+    });
+
+    it('un mensaje por defecto de class-validator sale en español', async () => {
+      const res = await call('post', '/patients', {
+        firstName: 'Ana',
+        lastName: 'Pérez',
+        docType: 'NATIONAL_ID',
+        docNumber: 12345,
+        sex: Sex.F,
+      }).expect(400);
+      expect((res.body as { message: string[] }).message).toEqual([
+        'El campo «docNumber» debe ser un texto.',
+      ]);
+    });
+
+    it('un campo que el DTO no declara se descarta (modo strip por defecto)', async () => {
+      await call('post', '/patients', {
+        firstName: 'Ana',
+        lastName: 'Intrusa',
+        docType: 'NATIONAL_ID',
+        docNumber: 'DX111-0003',
+        sex: Sex.F,
+        campoQueNoExiste: 'x',
+      }).expect(201);
+    });
+  });
+});

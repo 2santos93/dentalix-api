@@ -1,4 +1,4 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -13,6 +13,7 @@ import {
   locationBody,
   registerBody,
 } from './support/location-fixtures';
+import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // DX-036 / DB-003: las EXCLUDE anti-solape de citas se evalúan SALTANDO la RLS.
 // Antes no incluían `tenantId`, así que un profesional que trabaja en dos
@@ -140,9 +141,7 @@ describe('Appointments: anti-solape aislado por clínica (e2e, DX-036)', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
-    app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, transform: true }),
-    );
+    app.useGlobalPipes(createAppValidationPipe());
     await app.init();
     await app.listen(0, '127.0.0.1');
     await cleanup();

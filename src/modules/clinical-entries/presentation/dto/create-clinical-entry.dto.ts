@@ -18,6 +18,12 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  INPUT_CLINICAL_NOTES_MAX,
+  INPUT_CODE_MAX,
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   RECALL_INTERVAL_MAX,
   RECALL_INTERVAL_MIN,
 } from '../../../recall/domain/recall-rules';
@@ -84,6 +90,7 @@ export class ClinicalEntryDiagnosisInputDto {
   })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   toothFdi?: string | null;
 }
 
@@ -132,6 +139,7 @@ export class CreateClinicalEntryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_REASON_MAX)
   reason?: string;
 
   @ApiPropertyOptional({
@@ -142,6 +150,7 @@ export class CreateClinicalEntryDto {
   @IsOptional()
   @IsString()
   @MinLength(1, { message: 'El texto de la evolución no puede estar vacío' })
+  @TextMaxLength(INPUT_CLINICAL_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({

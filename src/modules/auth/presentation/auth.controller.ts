@@ -259,7 +259,7 @@ export class AuthController {
     // Host SIN clínica (el apex): es la puerta del área de plataforma. Solo la
     // resuelve un superadmin, y recibe el paso del segundo factor (DX-021-bis);
     // el token de plataforma (sin tenant ni rol) sale tras él. Para cualquier otro usuario `executePlatform` lanza el mismo
-    // 'Invalid credentials', así que no se filtra si el email existe ni si es
+    // 'Correo o contraseña incorrectos.', así que no se filtra si el email existe ni si es
     // superadmin.
     let result: LoginResult;
     try {
@@ -327,7 +327,10 @@ export class AuthController {
     @Body() dto: RefreshDto,
   ): Promise<DeliveredSession> {
     const { token, viaCookie } = await this.refreshOf(req, dto.refreshToken);
-    if (!token) throw new UnauthorizedException('Missing refresh token');
+    if (!token)
+      throw new UnauthorizedException(
+        'Falta la sesión: vuelve a iniciar sesión.',
+      );
     const hostTenantId = req.tenantHost?.tenantId ?? null;
     const cookieMode = viaCookie || this.cookie.wantsCookie(req);
     try {

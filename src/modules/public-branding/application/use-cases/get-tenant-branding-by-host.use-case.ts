@@ -30,13 +30,13 @@ export class GetTenantBrandingByHostUseCase {
 
   async execute(rawHost: unknown): Promise<TenantBranding> {
     const host = normalizeBrandingHost(rawHost);
-    if (!host) throw new NotFoundException('Tenant not found');
+    if (!host) throw new NotFoundException('Clínica no encontrada');
 
     const tenantId = await this.resolver.resolve(host);
-    if (!tenantId) throw new NotFoundException('Tenant not found');
+    if (!tenantId) throw new NotFoundException('Clínica no encontrada');
 
     const branding = await this.repo.findById(tenantId);
-    if (!branding) throw new NotFoundException('Tenant not found');
+    if (!branding) throw new NotFoundException('Clínica no encontrada');
 
     return branding;
   }

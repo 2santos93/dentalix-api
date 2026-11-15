@@ -98,7 +98,9 @@ describe('UnlockStaffLoginUseCase (DX-048, DX-213)', () => {
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(NotFoundException);
     // Mismo 404 que un usuario que no es de la clínica.
-    expect((err as NotFoundException).message).toBe('Staff member not found');
+    expect((err as NotFoundException).message).toBe(
+      'Miembro del personal no encontrado',
+    );
     expect(s.unlock).not.toHaveBeenCalled();
     expect(s.hasOtherActiveMemberships).not.toHaveBeenCalled();
     expect(s.drafts).toEqual([

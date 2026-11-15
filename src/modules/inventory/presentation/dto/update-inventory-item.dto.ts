@@ -7,6 +7,12 @@ import {
   MinLength,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  INPUT_NOTES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   IsQuantity,
   QUANTITY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
@@ -21,17 +27,20 @@ export class UpdateInventoryItemDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   name?: string;
 
   @ApiPropertyOptional({ type: String, nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   sku?: string | null;
 
   @ApiPropertyOptional({ example: 'caja' })
   @IsOptional()
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   unit?: string;
 
   @ApiPropertyOptional({
@@ -49,5 +58,6 @@ export class UpdateInventoryItemDto {
   @ApiPropertyOptional({ type: String, nullable: true })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string | null;
 }

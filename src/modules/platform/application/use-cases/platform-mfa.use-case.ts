@@ -48,7 +48,10 @@ export class PlatformMfaUseCase {
 
   async status(userId: string): Promise<PlatformMfaStatus> {
     const state = await this.repo.find(userId);
-    if (!state) throw new ForbiddenException('Platform admin only');
+    if (!state)
+      throw new ForbiddenException(
+        'Solo la administración de la plataforma puede hacer esto.',
+      );
     const { enabledAt, recoveryCodesRemaining } = state;
     return {
       enabled: enabledAt !== null,

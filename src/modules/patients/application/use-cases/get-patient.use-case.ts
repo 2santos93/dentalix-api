@@ -15,7 +15,7 @@ export class GetPatientUseCase {
       // A missing repo result is indistinguishable from "exists but belongs
       // to another tenant" — RLS makes cross-tenant rows invisible, so both
       // cases surface as NotFound here (never leak that the row exists).
-      throw new NotFoundException('Patient not found');
+      throw new NotFoundException('Paciente no encontrado');
     }
     return patient;
   }

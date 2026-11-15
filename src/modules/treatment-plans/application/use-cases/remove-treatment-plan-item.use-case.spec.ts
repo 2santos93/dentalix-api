@@ -96,6 +96,25 @@ describe('RemoveTreatmentPlanItemUseCase', () => {
     );
   });
 
+  it('DX-111: un ítem de otro plan responde 404 y no se borra', async () => {
+    const existing = fakeItem({ planId: 'plan1' });
+    const repo = makeRepo({
+      findItemById: (): Promise<TreatmentPlanItem | null> =>
+        Promise.resolve(existing),
+      softDeleteItem: (): Promise<void> =>
+        Promise.reject(new Error('softDeleteItem should not be called')),
+    });
+    const uc = new RemoveTreatmentPlanItemUseCase(repo);
+
+    await expect(
+      uc.execute(existing.id, undefined, 'plan-otro'),
+    ).rejects.toThrow(
+      new NotFoundException(
+        'No se encontró el ítem en este plan de tratamiento.',
+      ),
+    );
+  });
+
   it('soft-deletes the item (calls repo.softDeleteItem with the id, not a hard delete)', async () => {
     const existing = fakeItem();
     let softDeletedId: string | undefined;

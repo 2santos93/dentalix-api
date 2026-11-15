@@ -82,7 +82,11 @@ it('409 al degradar al último ADMIN', async () => {
   const uc = new UpdateStaffUseCase(asRepo(repo));
   await expect(
     uc.execute({ userId: 'u1', role: ClinicRole.DENTIST }, CTX),
-  ).rejects.toThrow(new ConflictException('Cannot demote the last admin'));
+  ).rejects.toThrow(
+    new ConflictException(
+      'No puedes quitar el rol de administrador al último administrador de la clínica.',
+    ),
+  );
 });
 
 it('recorta el nombre antes de guardarlo', async () => {

@@ -46,7 +46,7 @@ export class VoidPaymentUseCase {
   async execute(input: VoidPaymentInput): Promise<string[]> {
     const target = await this.repo.findVoidTarget(input.paymentId);
     if (!target) {
-      throw new NotFoundException('Payment not found');
+      throw new NotFoundException('Abono no encontrado');
     }
 
     this.tenantContext.assertLocationAllowed(target.locationId);
@@ -77,7 +77,7 @@ export class VoidPaymentUseCase {
       request: input.request ?? null,
     });
     if (!voided) {
-      throw new NotFoundException('Payment not found');
+      throw new NotFoundException('Abono no encontrado');
     }
     return target.splitPaymentIds.filter((id) => id !== input.paymentId);
   }

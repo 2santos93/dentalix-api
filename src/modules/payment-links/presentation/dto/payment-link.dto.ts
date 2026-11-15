@@ -18,6 +18,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   IsPositiveMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
@@ -323,6 +327,7 @@ export class SubmitPaymentReportDto {
       ? value.trim()
       : value,
   )
+  @TextMaxLength(INPUT_CODE_MAX)
   paidOn!: string;
 
   @ApiPropertyOptional({
@@ -516,6 +521,7 @@ export class ConfirmPaymentReportDto {
   })
   @IsOptional()
   @IsString({ message: PAID_ON_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   paidOn?: string;
 
   @ApiPropertyOptional({
