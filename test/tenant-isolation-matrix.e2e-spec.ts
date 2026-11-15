@@ -4475,15 +4475,11 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     expect(await shotOfA()).not.toEqual(before);
   });
 
-  // BE-007 (abierto, T-BE-2): las rutas de ítems ignoran `:id` del plan. No es
-  // una fuga entre clínicas (la RLS lo impide, ver los casos de arriba), pero
-  // dentro de A un id de plan cualquiera modifica o borra el ítem de OTRO
-  // plan. Quedan como `it.failing` hasta que se corrija: cuando BE-007 se
-  // arregle, Jest avisará de que estos tests ya pasan y hay que quitar el
-  // `.failing`.
+  // BE-007 (corregido en DX-111): las rutas de ítems ignoraban `:id` del
+  // plan. No era una fuga entre clínicas (la RLS lo impide, ver los casos de
+  // arriba), pero dentro de A un id de plan cualquiera modificaba o borraba el
+  // ítem de OTRO plan. Ahora responden 404 sin tocarlo.
   describe('id de plan ajeno al ítem, dentro de la misma clínica (BE-007)', () => {
-    // La siembra va aquí y no dentro de cada `it.failing`: así un fallo de
-    // la siembra rompe la suite en vez de contar como "falla esperada".
     // Un ítem por test (el DELETE retira el suyo).
     let itemForPatch: string;
     let itemForDelete: string;
@@ -4507,44 +4503,38 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       itemForDelete = (await addItem('46')).id;
     });
 
-    it.failing(
-      'PATCH con el plan equivocado → 404 y el ítem intacto',
-      async () => {
-        const itemId = itemForPatch;
-        const before = await raw.treatmentPlanItem.findUniqueOrThrow({
+    it('PATCH con el plan equivocado → 404 y el ítem intacto', async () => {
+      const itemId = itemForPatch;
+      const before = await raw.treatmentPlanItem.findUniqueOrThrow({
+        where: { id: itemId },
+      });
+      const res = await api(
+        app,
+        clinicA,
+        'patch',
+        `/treatment-plans/${a.bareplanId}/items/${itemId}`,
+        { notes: 'Editado desde otro plan' },
+      );
+      expect(res.status).toBe(404);
+      expect(
+        await raw.treatmentPlanItem.findUniqueOrThrow({
           where: { id: itemId },
-        });
-        const res = await api(
-          app,
-          clinicA,
-          'patch',
-          `/treatment-plans/${a.bareplanId}/items/${itemId}`,
-          { notes: 'Editado desde otro plan' },
-        );
-        expect(res.status).toBe(404);
-        expect(
-          await raw.treatmentPlanItem.findUniqueOrThrow({
-            where: { id: itemId },
-          }),
-        ).toEqual(before);
-      },
-    );
+        }),
+      ).toEqual(before);
+    });
 
-    it.failing(
-      'DELETE con el plan equivocado → 404 y el ítem intacto',
-      async () => {
-        const itemId = itemForDelete;
-        const res = await api(
-          app,
-          clinicA,
-          'delete',
-          `/treatment-plans/${a.bareplanId}/items/${itemId}`,
-        );
-        expect(res.status).toBe(404);
-        expect(
-          await raw.treatmentPlanItem.findUnique({ where: { id: itemId } }),
-        ).toMatchObject({ id: itemId, deletedAt: null });
-      },
-    );
+    it('DELETE con el plan equivocado → 404 y el ítem intacto', async () => {
+      const itemId = itemForDelete;
+      const res = await api(
+        app,
+        clinicA,
+        'delete',
+        `/treatment-plans/${a.bareplanId}/items/${itemId}`,
+      );
+      expect(res.status).toBe(404);
+      expect(
+        await raw.treatmentPlanItem.findUnique({ where: { id: itemId } }),
+      ).toMatchObject({ id: itemId, deletedAt: null });
+    });
   });
 });
