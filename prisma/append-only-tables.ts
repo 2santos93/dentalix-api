@@ -47,6 +47,7 @@ export const NO_APP_UPDATE_DELETE = [
   'appointment_reserved_overrides',
   'audit_events',
   'cancellation_policy_versions',
+  'clinical_record_copies',
   'closing_queue_dismissals',
   'patient_credit_entries',
   'patient_credit_refund_payments',
