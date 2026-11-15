@@ -107,6 +107,13 @@ export const CLINICAL_NOTE_TEMPLATE_WRITE_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 
+// Plantillas de plan de tratamiento (DX-559) — crear, editar y desactivar:
+// solo gestión. Leerlas y aplicarlas a un plan: CLINICAL_ROLES; recepción no
+// arma planes.
+export const TREATMENT_PLAN_TEMPLATE_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+];
+
 // Bloqueos de agenda (DX-122) — crear/cambiar/retirar: recepción y ADMIN, que
 // gestionan la agenda de todos, y el odontólogo, solo la SUYA (lo comprueba el
 // caso de uso: 403 si toca otra agenda o la de toda la sede). La asistente los

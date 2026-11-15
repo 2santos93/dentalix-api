@@ -17,6 +17,7 @@ import { ClinicalEntriesModule } from './modules/clinical-entries/clinical-entri
 import { AnesthesiaModule } from './modules/anesthesia/anesthesia.module';
 import { SedationModule } from './modules/sedation/sedation.module';
 import { ClinicalNoteTemplatesModule } from './modules/clinical-note-templates/clinical-note-templates.module';
+import { TreatmentPlanTemplatesModule } from './modules/treatment-plan-templates/treatment-plan-templates.module';
 import { OdontogramModule } from './modules/odontogram/odontogram.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { AppointmentTypesModule } from './modules/appointment-types/appointment-types.module';
@@ -113,6 +114,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AnesthesiaModule,
     SedationModule,
     ClinicalNoteTemplatesModule,
+    // DX-559: plantillas de plan de tratamiento.
+    TreatmentPlanTemplatesModule,
     OdontogramModule,
     AppointmentsModule,
     AppointmentTypesModule,
