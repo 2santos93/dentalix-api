@@ -78,6 +78,7 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
   let b: Ctx;
   let seq = 0;
   let rateToday: number;
+  let seededRate = false;
 
   const http = () => request(app.getHttpServer());
   const as = (ctx: Ctx, role: ClinicRole = ClinicRole.RECEPTION) => {
@@ -296,10 +297,15 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
   beforeAll(async () => {
     app = await createE2eApp();
     await resetDatabase(raw);
-    await raw.exchangeRateSnapshot.createMany({
-      data: [{ date: today(), currency: 'VES', rate: 250 }],
-      skipDuplicates: true,
-    });
+    // La tabla de tasas sobrevive a resetDatabase: si la sembramos aquí, la quitamos en afterAll
+    // para no chocar con specs posteriores del mismo shard que siembran la par (ParRateConflictError).
+    seededRate =
+      (
+        await raw.exchangeRateSnapshot.createMany({
+          data: [{ date: today(), currency: 'VES', rate: 250 }],
+          skipDuplicates: true,
+        })
+      ).count === 1;
     rateToday = Number(
       (
         await raw.exchangeRateSnapshot.findUniqueOrThrow({
@@ -314,6 +320,11 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
   afterAll(async () => {
     await app.close();
     await resetDatabase(raw);
+    if (seededRate) {
+      await raw.exchangeRateSnapshot.deleteMany({
+        where: { date: today(), currency: 'VES', rate: 250 },
+      });
+    }
     await raw.$disconnect();
   });
 
