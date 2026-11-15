@@ -151,4 +151,54 @@ describe('Entradas sin 500 y errores en español (DX-111)', () => {
       );
     });
   });
+
+  describe('tope de rango de GET /appointments (OPS-026)', () => {
+    const range = (from: string, to: string) =>
+      call('get', `/appointments?from=${from}&to=${to}`);
+
+    it('62 días (la vista Mes con margen) → 200', async () => {
+      await range(
+        '2027-03-01T00:00:00.000Z',
+        '2027-05-02T00:00:00.000Z',
+      ).expect(200);
+    });
+
+    it('más de 62 días → 400 en español con code y maxDays', async () => {
+      const res = await range(
+        '2027-01-01T00:00:00.000Z',
+        '2027-12-31T00:00:00.000Z',
+      ).expect(400);
+      expect(res.body).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: 'APPOINTMENT_RANGE_TOO_WIDE',
+        message: 'El rango de fechas de la agenda no puede superar 62 días.',
+        maxDays: 62,
+      });
+    });
+
+    it('to antes que from → 400 en español', async () => {
+      const res = await range(
+        '2027-03-10T00:00:00.000Z',
+        '2027-03-01T00:00:00.000Z',
+      ).expect(400);
+      expect((res.body as { code: string }).code).toBe(
+        'APPOINTMENT_RANGE_INVERTED',
+      );
+    });
+
+    it('GET /chairs/:id/upcoming-appointments cuenta las futuras (lo que la web pedía con 5 años)', async () => {
+      const locations = await call('get', '/locations').expect(200);
+      const locationId = (locations.body as { id: string }[])[0].id;
+      const chair = await call('post', '/chairs', {
+        locationId,
+        name: 'Sillón DX-111',
+      }).expect(201);
+      const res = await call(
+        'get',
+        `/chairs/${(chair.body as { id: string }).id}/upcoming-appointments`,
+      ).expect(200);
+      expect(res.body).toEqual({ count: 0 });
+    });
+  });
 });

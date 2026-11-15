@@ -56,6 +56,13 @@ export class InMemoryChairRepository implements ChairRepository {
     return Promise.resolve(row ? { ...row } : null);
   }
 
+  /** Citas futuras por sillón que devuelve el doble (DX-111). */
+  readonly upcoming = new Map<string, number>();
+
+  countUpcomingAppointments(chairId: string): Promise<number> {
+    return Promise.resolve(this.upcoming.get(chairId) ?? 0);
+  }
+
   findByIds(ids: readonly string[]): Promise<Chair[]> {
     return Promise.resolve(
       this.rows.filter((r) => ids.includes(r.id)).map((r) => ({ ...r })),

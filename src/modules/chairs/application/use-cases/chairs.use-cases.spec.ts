@@ -7,6 +7,7 @@ import {
 import { ClinicRole } from '@prisma/client';
 import { InMemoryChairRepository } from '../__fixtures__/in-memory-chairs';
 import {
+  CountChairUpcomingAppointmentsUseCase,
   CreateChairUseCase,
   ListChairsUseCase,
   ReorderChairsUseCase,
@@ -76,6 +77,34 @@ describe('sillones (DX-211)', () => {
   }
 
   beforeEach(() => build());
+
+  describe('citas futuras (DX-111)', () => {
+    it('cuenta las del sillón y da 404 si no existe', async () => {
+      const chair = await create.execute(
+        { locationId: 'norte', name: 'Sillón 1' },
+        'admin',
+      );
+      repo.upcoming.set(chair.id, 7);
+      const count = new CountChairUpcomingAppointmentsUseCase(repo, ctx);
+      await expect(count.execute(chair.id)).resolves.toEqual({ count: 7 });
+      await expect(count.execute('no-existe')).rejects.toThrow(
+        'Sillón no encontrado',
+      );
+    });
+
+    it('un sillón de una sede no permitida → 403', async () => {
+      const chair = await create.execute(
+        { locationId: 'norte', name: 'Sillón 1' },
+        'admin',
+      );
+      build(['sur']);
+      const count = new CountChairUpcomingAppointmentsUseCase(repo, ctx);
+      repo.rows.push(chair);
+      await expect(count.execute(chair.id)).rejects.toMatchObject({
+        status: 403,
+      });
+    });
+  });
 
   describe('crear', () => {
     it('crea el sillón en la sede, recortado, al final del orden', async () => {

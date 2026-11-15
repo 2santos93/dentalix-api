@@ -1755,6 +1755,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 404,
     },
     {
+      name: 'GET /chairs/:id/upcoming-appointments',
+      verb: 'get',
+      path: () => `/chairs/${a.chairId}/upcoming-appointments`,
+      status: 404,
+    },
+    {
       name: 'POST /chairs/:id/deactivate',
       verb: 'post',
       path: () => `/chairs/${a.chairId}/deactivate`,

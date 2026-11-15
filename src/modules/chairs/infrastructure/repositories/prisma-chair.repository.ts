@@ -3,7 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AppointmentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { Chair } from '../../domain/entities/chair.entity';
@@ -108,6 +108,21 @@ export class PrismaChairRepository implements ChairRepository {
       const row = await tx.chair.findFirst({ where: { id } });
       return row ? mapToEntity(row) : null;
     });
+  }
+
+  countUpcomingAppointments(chairId: string, from: Date): Promise<number> {
+    return this.prisma.runWithTenant((tx) =>
+      tx.appointment.count({
+        where: {
+          chairId,
+          start: { gte: from },
+          deletedAt: null,
+          status: {
+            notIn: [AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
+          },
+        },
+      }),
+    );
   }
 
   findByIds(ids: readonly string[]): Promise<Chair[]> {

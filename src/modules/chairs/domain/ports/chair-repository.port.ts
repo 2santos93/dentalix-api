@@ -31,6 +31,11 @@ export interface ChairRepository {
   findById(id: string): Promise<Chair | null>;
   /** Varios por id (los que existan en esta clínica). */
   findByIds(ids: readonly string[]): Promise<Chair[]>;
+  /**
+   * DX-111: citas vivas del sillón que empiezan desde `from` y no están
+   * canceladas ni son inasistencias (el aviso antes de desactivarlo).
+   */
+  countUpcomingAppointments(chairId: string, from: Date): Promise<number>;
   /** 409 en español si el nombre ya existe en la sede (único de la BD). */
   create(input: CreateChairRepoInput): Promise<Chair>;
   update(id: string, input: UpdateChairRepoInput): Promise<Chair>;

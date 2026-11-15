@@ -599,6 +599,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /chairs': ADMIN_ONLY,
   'PUT /chairs/order': ADMIN_ONLY,
   'PATCH /chairs/:id': ADMIN_ONLY,
+  'GET /chairs/:id/upcoming-appointments': ADMIN_ONLY,
   'POST /chairs/:id/deactivate': ADMIN_ONLY,
   'POST /chairs/:id/reactivate': ADMIN_ONLY,
   // DX-542: equipos biomédicos por sede y su hoja de vida, solo ADMIN.
