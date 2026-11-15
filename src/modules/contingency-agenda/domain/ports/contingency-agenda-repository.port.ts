@@ -33,6 +33,8 @@ export interface ContingencyAppointmentRow {
   phone: string | null;
   professionalName: string | null;
   appointmentTypeName: string | null;
+  /** DX-405: nombre del sillón (gabinete) de la cita; null sin sillón. */
+  chairName: string | null;
   firstVisit: boolean;
   callbackRequested: boolean;
 }
