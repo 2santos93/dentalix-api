@@ -164,6 +164,12 @@ import { PrismaPatientConsentRepository } from './infrastructure/repositories/pr
     },
   ],
   // DX-243: la firma a distancia congela el texto con el mismo render.
-  exports: [ConsentDocumentRenderer, CONSENT_TEMPLATE_REPOSITORY],
+  // DX-456: la copia de la historia clínica lista los consentimientos firmados
+  // con el mismo caso de uso que la ficha.
+  exports: [
+    ConsentDocumentRenderer,
+    CONSENT_TEMPLATE_REPOSITORY,
+    ListPatientConsentsUseCase,
+  ],
 })
 export class ConsentsModule {}
