@@ -163,7 +163,7 @@ const MAX_NAME_LENGTH = 200;
 const TEMPLATE_HINT =
   'Usa la plantilla: numero_documento, fecha, hora, duracion_min, email_profesional, sede (opcional), tipo_cita (opcional) y motivo (opcional).';
 
-export const TOO_MANY_APPOINTMENTS_MESSAGE = `La hoja de citas tiene más de ${MAX_APPOINTMENT_ROWS.toLocaleString('es')} filas: divídela en varios lotes.`;
+export const TOO_MANY_APPOINTMENTS_MESSAGE = `La hoja de citas tiene más de ${MAX_APPOINTMENT_ROWS} filas: divídela en varios lotes.`;
 
 /** Cabeceras de la hoja → columna de cada dato (por sinónimos, sin tildes). */
 export function resolveAppointmentColumns(
@@ -222,7 +222,7 @@ export function parseTimeOfDay(raw: string): number | null {
   if (/^0?\.\d+$/.test(text) || /^0,\d+$/.test(text)) {
     const fraction = Number(text.replace(',', '.'));
     if (!(fraction >= 0 && fraction < 1)) return null;
-    const minute = Math.round(fraction * 24 * 60);
+    const minute = Math.floor(fraction * 24 * 60 + 0.5);
     return minute >= 24 * 60 ? null : minute;
   }
   const match =
