@@ -7,6 +7,11 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { PASSWORD_MAX_LENGTH } from '../../../../shared/security/password-policy';
+import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import {
   COUNTRY_MISSING,
   HOUR_CYCLES,
@@ -55,6 +60,7 @@ export class RegisterDto {
   @ApiProperty({ minLength: 8, format: 'password' })
   @IsString()
   @MinLength(8)
+  @TextMaxLength(PASSWORD_MAX_LENGTH)
   password!: string;
 
   @ApiProperty({ minLength: 2, maxLength: REGISTER_TEXT_MAX_LENGTH })
@@ -79,6 +85,7 @@ export class RegisterDto {
   })
   @IsOptional()
   @IsString({ message: COUNTRY_MISSING })
+  @TextMaxLength(INPUT_CODE_MAX)
   locationCountry?: string;
 
   @ApiPropertyOptional({
@@ -87,6 +94,7 @@ export class RegisterDto {
   })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.currencyMissing })
+  @TextMaxLength(INPUT_CODE_MAX)
   locationCurrency?: string;
 
   @ApiPropertyOptional({
@@ -96,6 +104,7 @@ export class RegisterDto {
   })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.timeZoneMissing })
+  @TextMaxLength(INPUT_CODE_MAX)
   locationTimeZone?: string;
 
   @ApiPropertyOptional({
@@ -105,6 +114,7 @@ export class RegisterDto {
   })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.localeMissing })
+  @TextMaxLength(INPUT_CODE_MAX)
   locationLocale?: string;
 
   // G1-B (DX-350, spec §4.3): reloj de la primera sede, validado por el caso
@@ -119,5 +129,6 @@ export class RegisterDto {
   })
   @IsOptional()
   @IsString({ message: REGIONAL_MESSAGES.hourCycleMissing })
+  @TextMaxLength(INPUT_CODE_MAX)
   locationHourCycle?: string;
 }

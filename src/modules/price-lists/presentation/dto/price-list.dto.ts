@@ -15,6 +15,11 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   IsMoney,
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
@@ -79,6 +84,7 @@ export class CreatePriceListDto {
   @Length(PRICE_LIST_NAME_MIN, PRICE_LIST_NAME_MAX, {
     message: PRICE_LIST_NAME_MESSAGE,
   })
+  @TextMaxLength(INPUT_NAME_MAX)
   name!: string;
 
   @ApiProperty({
@@ -86,6 +92,7 @@ export class CreatePriceListDto {
   })
   @IsString({ message: CURRENCY_MESSAGE })
   @Length(3, 3, { message: CURRENCY_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   currency!: string;
 
   @ApiPropertyOptional({
@@ -109,6 +116,7 @@ export class UpdatePriceListDto {
   @Length(PRICE_LIST_NAME_MIN, PRICE_LIST_NAME_MAX, {
     message: PRICE_LIST_NAME_MESSAGE,
   })
+  @TextMaxLength(INPUT_NAME_MAX)
   name?: string;
 
   @ApiPropertyOptional({
@@ -117,6 +125,7 @@ export class UpdatePriceListDto {
   @NotNullable()
   @IsString({ message: CURRENCY_MESSAGE })
   @Length(3, 3, { message: CURRENCY_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   currency?: string;
 
   @ApiPropertyOptional({

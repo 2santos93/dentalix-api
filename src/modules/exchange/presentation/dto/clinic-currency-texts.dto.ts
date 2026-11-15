@@ -7,6 +7,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   CURRENCY_TEXT_MAX,
   CURRENCY_TEXTS_MAX_ENTRIES,
 } from '../../../../shared/format/currency-text';
@@ -19,6 +23,7 @@ export class CurrencyTextEntryDto {
     description: 'Código ISO 4217 de una moneda del catálogo.',
   })
   @IsString({ message: CURRENCY_CODE_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   currency!: string;
 
   @ApiProperty({
@@ -26,6 +31,7 @@ export class CurrencyTextEntryDto {
     description: `Texto que sustituye al código en los importes: 1 a ${CURRENCY_TEXT_MAX} caracteres en una línea (se recorta).`,
   })
   @IsString({ message: 'El texto de la moneda debe ser un texto.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   text!: string;
 }
 

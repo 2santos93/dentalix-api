@@ -1,11 +1,20 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsArray,
   IsInt,
   IsOptional,
   IsString,
   MaxLength,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  INPUT_NOTES_MAX,
+  INPUT_REASON_MAX,
+  INPUT_TEETH_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { PatientDocumentCategory } from '@prisma/client';
 
 const CATEGORY_DOC =
@@ -25,6 +34,7 @@ export class UploadPatientDocumentDto {
   })
   @IsOptional()
   @IsString({ message: 'La categoría no es válida.' })
+  @TextMaxLength(INPUT_NAME_MAX)
   category?: string;
 
   @ApiPropertyOptional({
@@ -34,6 +44,7 @@ export class UploadPatientDocumentDto {
   })
   @IsOptional()
   @IsString({ message: 'La fecha clínica no es válida.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   clinicalDate?: string;
 
   @ApiPropertyOptional({
@@ -42,11 +53,13 @@ export class UploadPatientDocumentDto {
   })
   @IsOptional()
   @IsString({ message: 'Los dientes deben ir separados por comas.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   toothNumbers?: string;
 
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()
   @IsString({ message: 'Las notas deben ser un texto.' })
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 }
 
@@ -69,6 +82,7 @@ export class VoidPatientDocumentDto {
   @ApiProperty({ minLength: 3, maxLength: 500 })
   @IsOptional()
   @IsString({ message: 'El motivo debe ser un texto.' })
+  @TextMaxLength(INPUT_REASON_MAX)
   reason?: string;
 }
 
@@ -147,6 +161,7 @@ export class CreatePatientDocumentUploadDto {
       'SHA-256 del contenido en hex. El almacén rechaza un contenido con otra huella.',
   })
   @IsString({ message: 'La huella SHA-256 del archivo no es válida.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   sha256!: string;
 }
 
@@ -191,6 +206,7 @@ export class CompletePatientDocumentUploadDto {
   })
   @IsOptional()
   @IsString({ message: 'La categoría no es válida.' })
+  @TextMaxLength(INPUT_NAME_MAX)
   category?: string;
 
   @ApiPropertyOptional({
@@ -200,6 +216,7 @@ export class CompletePatientDocumentUploadDto {
   })
   @IsOptional()
   @IsString({ message: 'La fecha clínica no es válida.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   clinicalDate?: string;
 
   @ApiPropertyOptional({
@@ -210,11 +227,14 @@ export class CompletePatientDocumentUploadDto {
   @IsOptional()
   @IsArray({ message: 'Los dientes deben ir en una lista.' })
   @IsString({ each: true, message: 'Cada diente debe ser un texto.' })
+  @ArrayMaxSize(INPUT_TEETH_MAX)
+  @TextMaxLength(INPUT_CODE_MAX, { each: true })
   toothNumbers?: string[];
 
   @ApiPropertyOptional({ maxLength: 500 })
   @IsOptional()
   @IsString({ message: 'Las notas deben ser un texto.' })
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({ description: 'Nombre original (solo para mostrar)' })

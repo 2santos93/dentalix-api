@@ -1,5 +1,10 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_NOTES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 
 // NOTE: deliberately NO `tenantId`/`patientId`/`status`/`createdById` field —
@@ -18,10 +23,12 @@ export class CreateTreatmentPlanDto {
   })
   @IsOptional()
   @IsString({ message: CURRENCY_CODE_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   currency?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 }

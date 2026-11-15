@@ -14,6 +14,10 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+import {
+  INPUT_NAME_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { IsBoundedDecimal } from '../../../../shared/validation/bounded-decimal';
 import {
   AGREEMENT_DATE_FORMAT_MESSAGE,
@@ -139,6 +143,7 @@ export class CreateAgreementDto {
   @Length(AGREEMENT_NAME_MIN, AGREEMENT_NAME_MAX, {
     message: AGREEMENT_NAME_MESSAGE,
   })
+  @TextMaxLength(INPUT_NAME_MAX)
   name!: string;
 
   @ApiProperty({ format: 'uuid', description: 'Pagador vivo y activo.' })
@@ -218,6 +223,7 @@ export class UpdateAgreementDto {
   @Length(AGREEMENT_NAME_MIN, AGREEMENT_NAME_MAX, {
     message: AGREEMENT_NAME_MESSAGE,
   })
+  @TextMaxLength(INPUT_NAME_MAX)
   name?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })

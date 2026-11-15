@@ -7,6 +7,11 @@ import {
   Length,
   Matches,
 } from 'class-validator';
+import { PASSWORD_MAX_LENGTH } from '../../../../shared/security/password-policy';
+import {
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import {
   BREAK_GLASS_REASON_MAX,
   BREAK_GLASS_REASON_MIN,
@@ -22,6 +27,7 @@ export class LoginDto {
 
   @ApiProperty()
   @IsString()
+  @TextMaxLength(PASSWORD_MAX_LENGTH)
   password!: string;
 
   @ApiPropertyOptional({
@@ -45,5 +51,6 @@ export class LoginDto {
   @Length(BREAK_GLASS_REASON_MIN, BREAK_GLASS_REASON_MAX, {
     message: `El motivo debe tener entre ${BREAK_GLASS_REASON_MIN} y ${BREAK_GLASS_REASON_MAX} caracteres.`,
   })
+  @TextMaxLength(INPUT_REASON_MAX)
   breakGlassReason?: string;
 }

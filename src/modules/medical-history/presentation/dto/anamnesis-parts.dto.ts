@@ -11,6 +11,12 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_REASON_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import type {
   AllergySeverity,
   AllergyType,
@@ -45,6 +51,7 @@ const CONDITION_STATUSES = ['SI', 'NO', 'DESCONOCE'] as const;
 export class AllergyDto {
   @ApiProperty({ example: 'Penicilina' })
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   alergeno!: string;
 
   @ApiProperty({ enum: ALLERGY_TYPES })
@@ -54,6 +61,7 @@ export class AllergyDto {
   @ApiPropertyOptional({ example: 'Edema' })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   reaccion?: string;
 
   @ApiProperty({ enum: ALLERGY_SEVERITIES })
@@ -70,10 +78,12 @@ export class AllergyDto {
 export class ConditionDto {
   @ApiProperty({ example: 'HIPERTENSION' })
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   codigo!: string;
 
   @ApiProperty({ example: 'Hipertensión' })
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   etiqueta!: string;
 
   @ApiProperty({
@@ -91,27 +101,32 @@ export class ConditionDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_REASON_MAX)
   nota?: string;
 }
 
 export class MedicationDto {
   @ApiProperty({ example: 'Losartán' })
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   nombre!: string;
 
   @ApiPropertyOptional({ example: '50mg' })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   dosis?: string;
 
   @ApiPropertyOptional({ example: 'Cada 12 h' })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   frecuencia?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   motivo?: string;
 
   @ApiProperty()

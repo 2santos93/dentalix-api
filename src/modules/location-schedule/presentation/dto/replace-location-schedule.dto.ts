@@ -10,6 +10,10 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 
 export class ScheduleRangeDto {
   @ApiProperty({ minimum: 0, maximum: 6, description: '0=domingo .. 6=sábado' })
@@ -45,6 +49,7 @@ export class ReplaceLocationScheduleDto {
   })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   timezone?: string;
 
   @ApiProperty({

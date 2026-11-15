@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
+import {
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { InventoryMovementType } from '@prisma/client';
 import {
   IsQuantity,
@@ -42,5 +46,6 @@ export class RecordInventoryMovementDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_REASON_MAX)
   reason?: string;
 }

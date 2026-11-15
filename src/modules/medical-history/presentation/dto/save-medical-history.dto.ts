@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -10,6 +11,11 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_LIST_MAX,
+  INPUT_NOTES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import type {
   AnswerStatus,
   DentalHistory,
@@ -41,6 +47,7 @@ export class SaveMedicalHistoryDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AllergyDto)
+  @ArrayMaxSize(INPUT_LIST_MAX)
   allergies?: AllergyDto[];
 
   @ApiPropertyOptional({
@@ -52,6 +59,7 @@ export class SaveMedicalHistoryDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ConditionDto)
+  @ArrayMaxSize(INPUT_LIST_MAX)
   conditions?: ConditionDto[];
 
   @ApiPropertyOptional({ type: [MedicationDto] })
@@ -59,6 +67,7 @@ export class SaveMedicalHistoryDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => MedicationDto)
+  @ArrayMaxSize(INPUT_LIST_MAX)
   medications?: MedicationDto[];
 
   // Hábitos tri-estado, validados (los booleanos de un cliente anterior se
@@ -78,6 +87,7 @@ export class SaveMedicalHistoryDto {
   @ApiPropertyOptional({ type: [SurgeryDto] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(INPUT_LIST_MAX)
   surgeries?: Surgery[];
 
   @ApiPropertyOptional({ type: VitalSignsDto })
@@ -87,11 +97,13 @@ export class SaveMedicalHistoryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   familyHistory?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({

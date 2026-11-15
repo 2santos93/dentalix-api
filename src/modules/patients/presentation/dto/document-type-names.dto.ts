@@ -7,6 +7,10 @@ import {
   IsString,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_NAME_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { DOC_TYPE_NAME_MAX } from '../../domain/document-type-names';
 
 const NAME = {
@@ -29,26 +33,31 @@ export class DocumentTypeNamesValuesDto {
   @ApiProperty({ ...NAME, description: 'Documento nacional' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   NATIONAL_ID?: string | null;
 
   @ApiProperty({ ...NAME, description: 'Pasaporte' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   PASSPORT?: string | null;
 
   @ApiProperty({ ...NAME, description: 'Permiso de residencia' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   RESIDENCE_PERMIT?: string | null;
 
   @ApiProperty({ ...NAME, description: 'Identificación fiscal' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   TAX_ID?: string | null;
 
   @ApiProperty({ ...NAME, description: 'Otro documento' })
   @IsOptional()
   @IsString({ message: TEXT_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   OTHER?: string | null;
 }
 

@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsISO8601,
@@ -7,6 +8,11 @@ import {
   IsString,
   IsUUID,
 } from 'class-validator';
+import {
+  INPUT_NOTES_MAX,
+  INPUT_SURFACES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { ToothSurface, TreatmentPlanItemStatus } from '@prisma/client';
 import {
   IsNonNegativeMoney,
@@ -88,10 +94,12 @@ export class UpdateTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @IsOptional()
   @IsArray()
   @IsEnum(ToothSurface, { each: true })
+  @ArrayMaxSize(INPUT_SURFACES_MAX)
   surfaces?: ToothSurface[];
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 }

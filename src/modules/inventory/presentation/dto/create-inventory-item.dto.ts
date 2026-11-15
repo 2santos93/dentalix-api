@@ -7,6 +7,12 @@ import {
   MinLength,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  INPUT_NOTES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   IsQuantity,
   QUANTITY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
@@ -19,16 +25,19 @@ export class CreateInventoryItemDto {
   @ApiProperty({ example: 'Guantes de nitrilo' })
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   name!: string;
 
   @ApiPropertyOptional({ description: 'Optional item code' })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   sku?: string;
 
   @ApiProperty({ example: 'caja', description: 'e.g. "unidad", "caja", "ml"' })
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   unit!: string;
 
   @ApiPropertyOptional({
@@ -47,5 +56,6 @@ export class CreateInventoryItemDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 }

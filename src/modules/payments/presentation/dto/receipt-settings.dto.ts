@@ -1,6 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
 import {
+  INPUT_REASON_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   EXTERNAL_INVOICE_NUMBER_MAX,
   RECEIPT_LEGEND_MAX,
   RECEIPT_TITLE_MAX,
@@ -24,6 +29,7 @@ export class ReceiptSettingsDto {
   })
   @IsOptional()
   @IsString({ message: 'El título del recibo debe ser un texto.' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   title!: string | null;
 
   @ApiProperty({
@@ -35,6 +41,7 @@ export class ReceiptSettingsDto {
   })
   @IsOptional()
   @IsString({ message: 'La leyenda del recibo debe ser un texto.' })
+  @TextMaxLength(INPUT_REASON_MAX)
   legend!: string | null;
 }
 
@@ -56,6 +63,7 @@ export class LocationReceiptLegendDto {
   })
   @IsOptional()
   @IsString({ message: 'La leyenda del recibo debe ser un texto.' })
+  @TextMaxLength(INPUT_REASON_MAX)
   legend?: string | null;
 }
 
@@ -98,6 +106,7 @@ export class ExternalInvoiceNumberDto {
   })
   @IsOptional()
   @IsString({ message: 'El nº de factura externa debe ser un texto.' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   externalInvoiceNumber!: string | null;
 }
 

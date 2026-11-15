@@ -14,6 +14,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  INPUT_NOTES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   DUPLICATE_REFERENCE_REASON_MAX,
   DUPLICATE_REFERENCE_REASON_TOO_LONG_MESSAGE,
   REFERENCE_MAX,
@@ -131,6 +135,7 @@ export class RecordSplitPaymentDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 }
 

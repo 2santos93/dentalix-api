@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsOptional,
@@ -7,6 +8,11 @@ import {
   IsUUID,
   Matches,
 } from 'class-validator';
+import {
+  INPUT_NOTES_MAX,
+  INPUT_SURFACES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import {
   CatalogKind,
   ToothRecordOrigin,
@@ -43,6 +49,7 @@ export class CreateToothRecordDto {
   @IsOptional()
   @IsArray()
   @IsEnum(ToothSurface, { each: true })
+  @ArrayMaxSize(INPUT_SURFACES_MAX)
   surfaces?: ToothSurface[];
 
   @ApiProperty({ enum: CatalogKind })
@@ -65,6 +72,7 @@ export class CreateToothRecordDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({ format: 'uuid' })

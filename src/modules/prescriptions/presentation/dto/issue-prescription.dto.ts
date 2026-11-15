@@ -9,6 +9,10 @@ import {
   MaxLength,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { PrescriptionItemInputDto } from './prescription-item-input.dto';
 
 // Sin `tenantId`, profesional, sede, `issuedAt` ni hash: los pone el servidor.
@@ -33,6 +37,7 @@ export class IssuePrescriptionDto {
   @IsString({
     message: 'La fecha de dispensación debe tener el formato AAAA-MM-DD',
   })
+  @TextMaxLength(INPUT_CODE_MAX)
   dispensationDate?: string;
 
   @ApiPropertyOptional({

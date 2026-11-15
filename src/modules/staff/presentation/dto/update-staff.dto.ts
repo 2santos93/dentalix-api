@@ -6,6 +6,10 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import {
+  INPUT_NAME_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { ClinicRole } from '@prisma/client';
 
 export class UpdateStaffDto {
@@ -13,6 +17,7 @@ export class UpdateStaffDto {
   @IsOptional()
   @IsString()
   @MinLength(2)
+  @TextMaxLength(INPUT_NAME_MAX)
   fullName?: string;
   @ApiPropertyOptional({ enum: ClinicRole })
   @IsOptional()

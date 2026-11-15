@@ -14,6 +14,10 @@ import {
   ValidateIf,
 } from 'class-validator';
 import {
+  INPUT_NAME_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   PAYER_NAME_MAX,
   PAYER_NAME_MESSAGE,
   PAYER_NAME_MIN,
@@ -56,6 +60,7 @@ export class CreatePayerDto {
   @ApiProperty({ minLength: PAYER_NAME_MIN, maxLength: PAYER_NAME_MAX })
   @IsString({ message: PAYER_NAME_MESSAGE })
   @Length(PAYER_NAME_MIN, PAYER_NAME_MAX, { message: PAYER_NAME_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   name!: string;
 
   // Un campo que ya no existe en el cuerpo lo descarta `whitelist`, como
@@ -72,6 +77,7 @@ export class UpdatePayerDto extends PartialType(
   @NotNullable()
   @IsString({ message: PAYER_NAME_MESSAGE })
   @Length(PAYER_NAME_MIN, PAYER_NAME_MAX, { message: PAYER_NAME_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   name?: string;
 
   @ApiPropertyOptional({ enum: PAYER_TYPES, enumName: 'PayerType' })

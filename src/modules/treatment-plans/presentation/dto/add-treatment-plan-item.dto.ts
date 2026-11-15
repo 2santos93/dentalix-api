@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsOptional,
@@ -7,6 +8,11 @@ import {
   IsUUID,
   Matches,
 } from 'class-validator';
+import {
+  INPUT_NOTES_MAX,
+  INPUT_SURFACES_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { ToothSurface } from '@prisma/client';
 import { FDI_TOOTH_NUMBER_PATTERN } from '../../../odontogram/application/use-cases/add-tooth-record.use-case';
 import {
@@ -46,6 +52,7 @@ export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @IsOptional()
   @IsArray()
   @IsEnum(ToothSurface, { each: true })
+  @ArrayMaxSize(INPUT_SURFACES_MAX)
   surfaces?: ToothSurface[];
 
   @ApiProperty({ format: 'uuid' })
@@ -73,5 +80,6 @@ export class AddTreatmentPlanItemDto extends DiscountReasonFieldsDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 }

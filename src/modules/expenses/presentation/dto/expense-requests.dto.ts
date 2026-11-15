@@ -21,6 +21,13 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  INPUT_REASON_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { PaymentMethod } from '@prisma/client';
 import {
   IsMoney,
@@ -81,6 +88,7 @@ export class InitialExpensePaymentDto {
   })
   @IsOptional()
   @IsString({ message: PAID_ON_INVALID_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   paidOn?: string;
 
   @ApiPropertyOptional({
@@ -110,16 +118,19 @@ export class CreateExpenseDto {
       'Una predefinida o una propia activa de la clínica, sin distinguir mayúsculas ni tildes. El nombre anterior de una predefinida cuenta como el actual.',
   })
   @IsString({ message: CATEGORY_INVALID_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   category!: string;
 
   @ApiPropertyOptional({ type: String, maxLength: 200, nullable: true })
   @IsOptional()
   @IsString({ message: SUPPLIER_MESSAGE })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   supplier?: string | null;
 
   @ApiPropertyOptional({ type: String, maxLength: 500, nullable: true })
   @IsOptional()
   @IsString({ message: DESCRIPTION_MESSAGE })
+  @TextMaxLength(INPUT_REASON_MAX)
   description?: string | null;
 
   @ApiProperty(AMOUNT_DOC)
@@ -139,6 +150,7 @@ export class CreateExpenseDto {
     description: 'Día de la factura (no futuro en la sede).',
   })
   @IsString({ message: INVOICE_DATE_INVALID_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   invoiceDate!: string;
 
   @ApiPropertyOptional({
@@ -149,6 +161,7 @@ export class CreateExpenseDto {
   })
   @IsOptional()
   @IsString({ message: DUE_DATE_INVALID_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   dueDate?: string | null;
 
   @ApiPropertyOptional({
@@ -189,26 +202,31 @@ export class UpdateExpenseDto {
   @ApiPropertyOptional()
   @NotNullable()
   @IsString({ message: CATEGORY_INVALID_MESSAGE })
+  @TextMaxLength(INPUT_NAME_MAX)
   category?: string;
 
   @ApiPropertyOptional({ type: String, maxLength: 200, nullable: true })
   @IsOptional()
   @IsString({ message: SUPPLIER_MESSAGE })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   supplier?: string | null;
 
   @ApiPropertyOptional({ type: String, maxLength: 500, nullable: true })
   @IsOptional()
   @IsString({ message: DESCRIPTION_MESSAGE })
+  @TextMaxLength(INPUT_REASON_MAX)
   description?: string | null;
 
   @ApiPropertyOptional({ format: 'date' })
   @NotNullable()
   @IsString({ message: INVOICE_DATE_INVALID_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   invoiceDate?: string;
 
   @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
   @IsOptional()
   @IsString({ message: DUE_DATE_INVALID_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   dueDate?: string | null;
 
   @ApiPropertyOptional({
@@ -239,6 +257,7 @@ export class AddExpensePaymentDto extends InitialExpensePaymentDto {}
 export class VoidExpenseDto {
   @ApiProperty({ minLength: 5, maxLength: 500 })
   @IsString({ message: 'El motivo debe tener entre 5 y 500 caracteres.' })
+  @TextMaxLength(INPUT_REASON_MAX)
   reason!: string;
 }
 
@@ -328,11 +347,13 @@ export class CreateExpenseUploadDto {
   @ApiPropertyOptional({ example: 'factura-luz.pdf' })
   @IsOptional()
   @IsString({ message: 'El nombre del archivo debe ser un texto.' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   name?: string;
 
   @ApiPropertyOptional({ example: 'application/pdf' })
   @IsOptional()
   @IsString({ message: 'El tipo del archivo debe ser un texto.' })
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   mimeType?: string;
 
   @ApiProperty({
@@ -349,6 +370,7 @@ export class CreateExpenseUploadDto {
       'SHA-256 del contenido en hex. El almacén rechaza un contenido con otra huella.',
   })
   @IsString({ message: 'La huella SHA-256 del archivo no es válida.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   sha256!: string;
 }
 
@@ -372,6 +394,7 @@ export class CreateExpenseCategoryDto {
   @IsString({
     message: 'El nombre de la categoría debe tener entre 2 y 60 caracteres.',
   })
+  @TextMaxLength(INPUT_NAME_MAX)
   name!: string;
 }
 

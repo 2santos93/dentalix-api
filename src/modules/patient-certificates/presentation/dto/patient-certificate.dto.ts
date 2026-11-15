@@ -11,6 +11,11 @@ import {
   Min,
 } from 'class-validator';
 import {
+  INPUT_CODE_MAX,
+  INPUT_REASON_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
+import {
   CERTIFICATE_KINDS,
   CERTIFICATE_MESSAGES,
   DIAGNOSIS_MAX_LENGTH,
@@ -59,6 +64,7 @@ export class IssueCertificateDto {
   })
   @IsOptional()
   @IsString({ message: 'La fecha de inicio del reposo no es válida.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   restStartDate?: string;
 
   @ApiPropertyOptional({
@@ -70,6 +76,7 @@ export class IssueCertificateDto {
   })
   @IsOptional()
   @IsString({ message: 'El diagnóstico debe ser un texto.' })
+  @TextMaxLength(INPUT_REASON_MAX)
   diagnosis?: string | null;
 }
 

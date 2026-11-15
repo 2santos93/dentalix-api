@@ -13,6 +13,13 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  INPUT_NAME_MAX,
+  INPUT_NOTES_MAX,
+  INPUT_SHORT_TEXT_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { Sex } from '@prisma/client';
 import { DOCUMENT_TYPES } from '../../domain/document-type';
 import {
@@ -30,11 +37,13 @@ export class CreatePatientDto {
   @ApiProperty({ minLength: 1 })
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   firstName!: string;
 
   @ApiProperty({ minLength: 1 })
   @IsString()
   @MinLength(1)
+  @TextMaxLength(INPUT_NAME_MAX)
   lastName!: string;
 
   // DX-327: obligatorio, sin valor por defecto (R10). Los códigos anteriores
@@ -46,11 +55,13 @@ export class CreatePatientDto {
   @ApiPropertyOptional(DOC_TYPE_LABEL_PROPERTY)
   @IsOptional()
   @IsString({ message: 'docTypeLabel debe ser un texto.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   docTypeLabel?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   docNumber?: string;
 
   @ApiPropertyOptional({ type: String, format: 'date-time' })
@@ -65,6 +76,7 @@ export class CreatePatientDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   phone?: string;
 
   @ApiPropertyOptional()
@@ -75,11 +87,13 @@ export class CreatePatientDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   address?: string;
 
   @ApiPropertyOptional({ example: 'VE', description: 'ISO 3166-1 alpha-2' })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   countryCode?: string;
 
   @ApiPropertyOptional({
@@ -93,6 +107,7 @@ export class CreatePatientDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
 
   @ApiPropertyOptional({
@@ -121,16 +136,19 @@ export class CreatePatientDto {
   })
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   dataConsentPolicyVersion?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   maritalStatus?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   occupation?: string;
 
   @ApiPropertyOptional({
@@ -153,26 +171,31 @@ export class CreatePatientDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   physicianName?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   physicianPhone?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   emergencyContactName?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_NAME_MAX)
   emergencyContactRelationship?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @TextMaxLength(INPUT_CODE_MAX)
   emergencyContactPhone?: string;
 
   // DX-203: sin guardianName/guardianDocNumber. El tutor es ahora un

@@ -11,6 +11,10 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { CommunicationRecipientDto } from './patient-communication.dto';
 import { DOCUMENT_TYPES } from '../../domain/document-type';
 import {
@@ -55,6 +59,7 @@ class ResponsibleContactPatchDto {
   @ApiPropertyOptional(DOC_TYPE_LABEL_PROPERTY)
   @IsOptional()
   @IsString({ message: 'docTypeLabel debe ser un texto.' })
+  @TextMaxLength(INPUT_CODE_MAX)
   docTypeLabel?: string | null;
 
   @ApiPropertyOptional({

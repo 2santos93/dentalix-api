@@ -8,6 +8,10 @@ import {
   Max,
   Min,
 } from 'class-validator';
+import {
+  INPUT_CODE_MAX,
+  TextMaxLength,
+} from '../../../../shared/validation/input-limits';
 import { IsBoundedDecimal } from '../../../../shared/validation/bounded-decimal';
 import {
   MANUAL_RATE_CURRENCY_MESSAGE,
@@ -27,6 +31,7 @@ export class RegisterManualExchangeRateDto {
       'Día civil de la tasa (AAAA-MM-DD), desde 2000-01-01 y nunca posterior a hoy en la zona de la sede activa (o de la principal).',
   })
   @IsString({ message: MANUAL_RATE_DATE_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   date!: string;
 
   @ApiProperty({
@@ -34,6 +39,7 @@ export class RegisterManualExchangeRateDto {
       'Código ISO 4217 de la lista de monedas (GET /currencies). USD no: es la base.',
   })
   @IsString({ message: MANUAL_RATE_CURRENCY_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
   currency!: string;
 
   @ApiProperty({
