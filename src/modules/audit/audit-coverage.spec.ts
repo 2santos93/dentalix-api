@@ -890,6 +890,42 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     reason: 'IMPORT_BALANCE_ERRORS',
   },
+  // DX-263: hoja de citas del lote (dry-run, quitarla, su informe, retirar
+  // sus citas y activar sus recordatorios).
+  'POST /patient-imports/:id/appointments': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENTS_VALIDATED',
+    importBatch: true,
+  },
+  'DELETE /patient-imports/:id/appointments': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENTS_REMOVED',
+    importBatch: true,
+  },
+  'GET /patient-imports/:id/appointments/errors.csv': {
+    action: 'EXPORT',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENT_ERRORS',
+  },
+  'POST /patient-imports/:id/appointments/undo': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENTS_UNDONE',
+    importBatch: true,
+  },
+  'POST /patient-imports/:id/appointments/reminders': {
+    action: 'UPDATE',
+    resource: 'PATIENT_IMPORT_BATCH',
+    resourceId: { param: 'id' },
+    reason: 'IMPORT_APPOINTMENT_REMINDERS_ENABLED',
+    importBatch: true,
+  },
 
   // DX-151: documentos del paciente. Ver la URL en línea es VIEW y descargar
   // es EXPORT; la metadata solo lleva el código, nunca el nombre del fichero.

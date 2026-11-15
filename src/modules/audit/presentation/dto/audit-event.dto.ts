@@ -181,6 +181,24 @@ export class AuditImportBatchDto {
     description: 'DX-262: lo que retiró de verdad el deshacer, por moneda',
   })
   balanceUndoneTotals?: AuditCurrencyTotalDto[];
+  @ApiPropertyOptional({
+    description: 'DX-263: SHA-256 (hex) de la hoja de citas',
+  })
+  appointmentFileSha256?: string;
+  @ApiPropertyOptional() appointmentRows?: number;
+  @ApiPropertyOptional() appointmentErrors?: number;
+  @ApiPropertyOptional() appointmentsPrepared?: number;
+  @ApiPropertyOptional() appointmentsCreated?: number;
+  @ApiPropertyOptional({
+    description: 'DX-263: citas rechazadas al importar',
+  })
+  appointmentsFailed?: number;
+  @ApiPropertyOptional() appointmentsUndone?: number;
+  @ApiPropertyOptional({
+    description:
+      'DX-263: recordatorios automáticos de las citas del lote activados',
+  })
+  appointmentRemindersEnabled?: boolean;
 }
 
 /** Un lado de la atribución de un ítem realizado (DX-050). */

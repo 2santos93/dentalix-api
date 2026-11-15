@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { JobsModule } from '../jobs/jobs.module';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
+import { AppointmentsModule } from '../appointments/appointments.module';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { StorageModule } from '../../shared/storage/storage.module';
@@ -29,8 +30,8 @@ import { PrismaPatientImportRepository } from './infrastructure/prisma-patient-i
 /**
  * Importación de pacientes desde CSV/XLSX (DX-107): dry-run, confirmación en
  * la cola de DX-085 (por bloques, sin bloquear la clínica), informe de
- * errores, historial y deshacer. Lo reutilizarán el saldo inicial (DX-262) y
- * las citas futuras (DX-263).
+ * errores, historial y deshacer. Con la hoja de saldos (DX-262) y la de
+ * citas futuras (DX-263).
  */
 @Module({
   // JwtModule.register({}): JwtAuthGuard -> TokenService -> JwtService.
@@ -40,6 +41,8 @@ import { PrismaPatientImportRepository } from './infrastructure/prisma-patient-i
     StorageModule,
     // DX-327 (R19): el dry-run reconoce los nombres locales de la clínica.
     DocumentTypeNamesModule,
+    // DX-263: las citas importadas usan la regla de agendar a mano.
+    AppointmentsModule,
   ],
   controllers: [PatientImportsController],
   providers: [

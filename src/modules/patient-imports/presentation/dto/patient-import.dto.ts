@@ -216,17 +216,19 @@ export class ImportIssueDto {
       'DUPLICATE_EXISTING',
       'MERGED',
       'EXISTING_BALANCE',
+      'WARNING',
     ],
     enumName: 'PatientImportIssueKind',
     description:
-      'MERGED (DX-262): fila de la hoja de saldos sumada a otra del mismo paciente y moneda (aviso, no error). EXISTING_BALANCE (QA D1): el paciente ya tenía un saldo migrado vivo en esa moneda y se añade otro porque se marcó «Añadir aunque ya tenga saldo migrado» (aviso, no error).',
+      'MERGED (DX-262): fila de la hoja de saldos sumada a otra del mismo paciente y moneda (aviso, no error). EXISTING_BALANCE (QA D1): el paciente ya tenía un saldo migrado vivo en esa moneda y se añade otro porque se marcó «Añadir aunque ya tenga saldo migrado» (aviso, no error). WARNING (DX-263): aviso de una cita que sí se importa (fuera del horario del profesional, bloqueo que deja agendar, duración tomada del tipo).',
   })
   kind!:
     | 'ERROR'
     | 'DUPLICATE_FILE'
     | 'DUPLICATE_EXISTING'
     | 'MERGED'
-    | 'EXISTING_BALANCE';
+    | 'EXISTING_BALANCE'
+    | 'WARNING';
   @ApiProperty({ description: 'Motivo en español' }) message!: string;
   @ApiProperty({ nullable: true, type: String }) value!: string | null;
 }
@@ -353,6 +355,66 @@ export class PatientImportBalancesDto {
   canUndo!: boolean;
 }
 
+export class AppointmentProgressDto {
+  @ApiProperty() processed!: number;
+  @ApiProperty() created!: number;
+  @ApiProperty({
+    description:
+      'Rechazadas al importar: algo cambió desde el dry-run (otra cita a esa hora, un bloqueo, un festivo, el paciente no llegó a crearse)',
+  })
+  failed!: number;
+}
+
+/** Hoja de citas futuras del lote (DX-263). */
+export class PatientImportAppointmentsDto {
+  @ApiProperty() fileName!: string;
+  @ApiProperty({
+    enum: PatientImportFileFormat,
+    enumName: 'PatientImportFileFormat',
+  })
+  fileFormat!: PatientImportFileFormat;
+  @ApiProperty() fileSizeBytes!: number;
+  @ApiProperty({ description: 'SHA-256 (hex) de la hoja de citas' })
+  fileSha256!: string;
+  @ApiProperty({ description: 'Filas con datos' }) totalRows!: number;
+  @ApiProperty({
+    description:
+      'Citas que se crearán al confirmar: pasaron todas las reglas de la agenda',
+  })
+  preparedCount!: number;
+  @ApiProperty({
+    description:
+      'Filas rechazadas (dato inválido, solape, fuera de horario, bloqueo, festivo…): no se importan',
+  })
+  errorRows!: number;
+  @ApiProperty({ type: AppointmentProgressDto })
+  progress!: AppointmentProgressDto;
+  @ApiProperty({
+    description:
+      'Citas del lote que siguen programadas (las que retiraría el deshacer)',
+  })
+  live!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Citas que retiró el deshacer',
+  })
+  undoneCount!: number | null;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'Cuándo se activaron los recordatorios automáticos de sus citas (DX-128); null: no se envía ninguno',
+  })
+  remindersEnabledAt!: Date | null;
+  @ApiProperty({
+    description:
+      'Lote terminado con citas programadas: se pueden retirar solas (POST :id/appointments/undo)',
+  })
+  canUndo!: boolean;
+}
+
 export class PatientImportBatchDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ enum: PatientImportStatus, enumName: 'PatientImportStatus' })
@@ -406,6 +468,12 @@ export class PatientImportBatchDto {
     description: 'DX-262: hoja de saldos del lote; null si no trae',
   })
   balances!: PatientImportBalancesDto | null;
+  @ApiProperty({
+    type: PatientImportAppointmentsDto,
+    nullable: true,
+    description: 'DX-263: hoja de citas futuras del lote; null si no trae',
+  })
+  appointments!: PatientImportAppointmentsDto | null;
 }
 
 export class PatientImportBatchDetailDto extends PatientImportBatchDto {
@@ -427,6 +495,13 @@ export class PatientImportBatchDetailDto extends PatientImportBatchDto {
   })
   balanceIssues!: ImportIssueDto[];
   @ApiProperty() balanceIssuesTotal!: number;
+  @ApiProperty({
+    type: [ImportIssueDto],
+    description:
+      'DX-263: errores y avisos de la hoja de citas (los primeros 200; todos en appointments/errors.csv)',
+  })
+  appointmentIssues!: ImportIssueDto[];
+  @ApiProperty() appointmentIssuesTotal!: number;
 }
 
 export class PatientImportListDto {

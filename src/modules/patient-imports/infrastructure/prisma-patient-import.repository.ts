@@ -280,6 +280,8 @@ export interface UndoResult {
   undoneFilled: number;
   /** Saldos migrados del lote retirados (DX-262). */
   undoneBalances: number;
+  /** Citas del lote retiradas: las que seguían programadas (DX-263). */
+  undoneAppointments: number;
 }
 
 /** La hoja de saldos validada (dry-run) que se guarda en el lote (DX-262). */
@@ -310,6 +312,47 @@ export interface BalanceChunkResult {
   existing: number;
 }
 
+/** La hoja de citas validada (dry-run) que se guarda en el lote (DX-263). */
+export interface NewAppointmentSheet {
+  fileName: string;
+  fileSha256: string;
+  fileFormat: PatientImportFileFormat;
+  fileSizeBytes: number;
+  totalRows: number;
+  errorRows: number;
+  issues: RowIssue[];
+  prepared: Omit<PendingAppointmentRow, 'id'>[];
+}
+
+/** Una cita preparada (DX-263): lo que el trabajo creará. */
+export interface PendingAppointmentRow {
+  id: string;
+  rowNumber: number;
+  docKey: string;
+  providerId: string;
+  locationId: string;
+  appointmentTypeId: string | null;
+  start: Date;
+  end: Date;
+  reason: string | null;
+}
+
+/** Lo que el dry-run de la hoja de citas necesita saber de la clínica. */
+export interface AppointmentCatalog {
+  /** Sedes vivas y activas de la clínica. */
+  locations: { id: string; name: string; timeZone: string | null }[];
+  /** Tipos de cita activos. */
+  types: { id: string; name: string; durationMinutes: number }[];
+}
+
+/** Hoja del lote cuyos errores por fila se leen. */
+export type ImportSheet = 'patients' | 'balances' | 'appointments';
+const ISSUE_COLUMNS: Record<ImportSheet, string> = {
+  patients: '"issues"',
+  balances: '"balanceIssues"',
+  appointments: '"appointmentIssues"',
+};
+
 /** Saldos migrados vivos de un lote, por moneda (lo importado de verdad). */
 export interface ImportedBalanceTotal {
   currency: string;
@@ -337,8 +380,15 @@ export type ConfirmResult =
  * leen el sondeo del avance y el historial. Los errores, con `batchIssues`
  * (los primeros) o `allIssues` (el informe).
  */
-export type BatchRow = Omit<PatientImportBatch, 'issues' | 'balanceIssues'>;
-const WITHOUT_ISSUES = { issues: true, balanceIssues: true } as const;
+export type BatchRow = Omit<
+  PatientImportBatch,
+  'issues' | 'balanceIssues' | 'appointmentIssues'
+>;
+const WITHOUT_ISSUES = {
+  issues: true,
+  balanceIssues: true,
+  appointmentIssues: true,
+} as const;
 
 /**
  * ¿Es un fallo pasajero (BD caída, conexión cortada, interbloqueo, tiempo de
@@ -563,6 +613,7 @@ export class PrismaPatientImportRepository {
         status: 'EXPIRED',
         issues: [],
         balanceIssues: [],
+        appointmentIssues: [],
         issuesPurgedAt: new Date(),
       },
       select: { id: true },
@@ -578,6 +629,11 @@ export class PrismaPatientImportRepository {
     // DX-262: lo mismo con los saldos preparados de su hoja de saldos.
     // eslint-disable-next-line no-restricted-syntax -- saldos preparados de un dry-run caducado
     await tx.patientImportBalanceRow.deleteMany({
+      where: { batchId: { in: ids }, outcome: 'PENDING' },
+    });
+    // DX-263: y las citas preparadas de su hoja de citas.
+    // eslint-disable-next-line no-restricted-syntax -- citas preparadas de un dry-run caducado
+    await tx.patientImportAppointmentRow.deleteMany({
       where: { batchId: { in: ids }, outcome: 'PENDING' },
     });
     return ids.length;
@@ -612,7 +668,12 @@ export class PrismaPatientImportRepository {
             { status: 'UNDONE', undoneAt: { lt: before } },
           ],
         },
-        data: { issues: [], balanceIssues: [], issuesPurgedAt: new Date() },
+        data: {
+          issues: [],
+          balanceIssues: [],
+          appointmentIssues: [],
+          issuesPurgedAt: new Date(),
+        },
         select: { id: true },
       });
       // DX-262 (revisión M3): los saldos preparados llevan el documento del
@@ -621,6 +682,12 @@ export class PrismaPatientImportRepository {
       if (purged.length > 0) {
         // eslint-disable-next-line no-restricted-syntax -- datos del fichero caducados (allowlist en no-hard-delete.ts)
         await tx.patientImportBalanceRow.deleteMany({
+          where: { batchId: { in: purged.map((b) => b.id) } },
+        });
+        // DX-263: las citas preparadas llevan el documento y el motivo del
+        // fichero; lo importado ya está en appointments (con su lote).
+        // eslint-disable-next-line no-restricted-syntax -- datos del fichero caducados (allowlist en no-hard-delete.ts)
+        await tx.patientImportAppointmentRow.deleteMany({
           where: { batchId: { in: purged.map((b) => b.id) } },
         });
       }
@@ -683,11 +750,9 @@ export class PrismaPatientImportRepository {
   async batchIssues(
     id: string,
     limit: number,
-    sheet: 'patients' | 'balances' = 'patients',
+    sheet: ImportSheet = 'patients',
   ): Promise<{ issues: Prisma.JsonValue[]; total: number }> {
-    const column = Prisma.raw(
-      sheet === 'balances' ? '"balanceIssues"' : '"issues"',
-    );
+    const column = Prisma.raw(ISSUE_COLUMNS[sheet]);
     const rows = await this.prisma.runWithTenant(
       (tx) => tx.$queryRaw<{ issues: Prisma.JsonValue[]; total: number }[]>`
         SELECT jsonb_path_query_array(
@@ -703,17 +768,21 @@ export class PrismaPatientImportRepository {
   /** Todos los errores del lote o de su hoja de saldos (el informe). */
   async allIssues(
     id: string,
-    sheet: 'patients' | 'balances' = 'patients',
+    sheet: ImportSheet = 'patients',
   ): Promise<Prisma.JsonValue[] | null> {
     const row = await this.prisma.runWithTenant((tx) =>
       tx.patientImportBatch.findFirst({
         where: { id },
-        select: { issues: true, balanceIssues: true },
+        select: { issues: true, balanceIssues: true, appointmentIssues: true },
       }),
     );
     if (!row) return null;
     return (
-      sheet === 'balances' ? row.balanceIssues : row.issues
+      sheet === 'balances'
+        ? row.balanceIssues
+        : sheet === 'appointments'
+          ? row.appointmentIssues
+          : row.issues
     ) as Prisma.JsonValue[];
   }
 
@@ -1716,6 +1785,9 @@ export class PrismaPatientImportRepository {
         id,
         balanceReferences,
       );
+      // DX-263: las citas del lote que siguen programadas, bloqueadas antes
+      // de mirar la actividad de los pacientes (ninguna cambia a la vez).
+      const appointments = await this.lockUntouchedAppointments(tx, id);
 
       const created = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id" FROM "patients"
@@ -1729,11 +1801,18 @@ export class PrismaPatientImportRepository {
         // 10.000 pacientes y ~32 tablas eran 320.000 uuids en el bind y
         // ~160 ms de planificación (la selectividad de cada elemento por
         // tabla), segundos con la máquina cargada; así, ~15 ms.
-        const checks = references.map(
-          (ref) =>
-            Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
-                         FROM ${Prisma.raw(quoteIdent(ref.table))}
-                        WHERE ${Prisma.raw(quoteIdent(ref.column))} IN (SELECT id FROM batch_patients)`,
+        const checks = references.map((ref) =>
+          ref.table === 'appointments' && ref.column === 'patientId'
+            ? // DX-263: las citas que importó ESTE lote y siguen programadas
+              // se retiran con él: no son actividad. Una que cambió de
+              // estado (confirmada, atendida…) sí lo es.
+              Prisma.sql`SELECT "patientId" AS id FROM "appointments"
+                          WHERE "patientId" IN (SELECT id FROM batch_patients)
+                            AND NOT ("import_batch_id" IS NOT DISTINCT FROM ${id}::uuid
+                                     AND "status" = 'SCHEDULED' AND "deletedAt" IS NULL)`
+            : Prisma.sql`SELECT ${Prisma.raw(quoteIdent(ref.column))}::uuid AS id
+                           FROM ${Prisma.raw(quoteIdent(ref.table))}
+                          WHERE ${Prisma.raw(quoteIdent(ref.column))} IN (SELECT id FROM batch_patients)`,
         );
         // DX-262: un saldo migrado de OTRO lote también es actividad (los
         // del propio lote se retiran con él).
@@ -1749,6 +1828,7 @@ export class PrismaPatientImportRepository {
       }
 
       await this.retireBalances(tx, id, undoneById, balances);
+      await this.retireAppointments(tx, id, appointments);
       for (let i = 0; i < ids.length; i += UNDO_CHUNK) {
         await tx.$executeRaw`
           UPDATE "patients"
@@ -1805,7 +1885,412 @@ export class PrismaPatientImportRepository {
         undoneCreated: ids.length,
         undoneFilled,
         undoneBalances: balances.length,
+        undoneAppointments: appointments.length,
       };
     }, LONG_TX);
+  }
+
+  // -------------------------------------------------------------------------
+  // Hoja de citas (DX-263)
+  // -------------------------------------------------------------------------
+
+  /** Sedes activas y tipos de cita activos de la clínica (resolver por nombre). */
+  async appointmentCatalog(): Promise<AppointmentCatalog> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const [locations, types] = await Promise.all([
+        tx.location.findMany({
+          where: { deletedAt: null, isActive: true },
+          select: { id: true, name: true, timeZone: true },
+          orderBy: { name: 'asc' },
+        }),
+        tx.appointmentType.findMany({
+          where: { deletedAt: null, active: true },
+          select: { id: true, name: true, durationMinutes: true },
+          orderBy: { name: 'asc' },
+        }),
+      ]);
+      return { locations, types };
+    });
+  }
+
+  /**
+   * Profesionales del equipo VIVOS de la clínica por su email (en minúsculas):
+   * email → id de usuario. Un email que no es de nadie del equipo no sale
+   * (nunca se asigna la cita a otro profesional). Rol y sedes los comprueba
+   * la regla de agendar.
+   */
+  async staffByEmail(emails: string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(emails)];
+    if (unique.length === 0) return new Map();
+    const tenantId = this.tenantId();
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<{ userId: string; email: string }[]>`
+        SELECT m."userId", lower(u."email") AS "email"
+          FROM "clinic_memberships" m
+          JOIN "users" u ON u."id" = m."userId"
+         WHERE m."tenantId" = ${tenantId}::uuid
+           AND m."deletedAt" IS NULL
+           AND u."deletedAt" IS NULL
+           AND lower(u."email") = ANY(${unique}::text[])`,
+    );
+    return new Map(rows.map((r) => [r.email, r.userId]));
+  }
+
+  /**
+   * Pacientes de las citas por su clave de documento: los vivos de la clínica
+   * (uno = su id; varios = AMBIGUOUS) y, si no está en la clínica, los que
+   * creará el archivo de pacientes del lote (IN_FILE, sin id todavía).
+   */
+  async appointmentPatients(
+    batchId: string,
+    keys: string[],
+  ): Promise<Map<string, { id: string } | 'AMBIGUOUS' | 'IN_FILE'>> {
+    const out = new Map<string, { id: string } | 'AMBIGUOUS' | 'IN_FILE'>();
+    if (keys.length === 0) return out;
+    const tenantId = this.tenantId();
+    const [patients, inFile] = await this.prisma.runWithTenant(
+      (tx) =>
+        Promise.all([
+          tx.$queryRaw<{ id: string; docKey: string; n: number }[]>(
+            balancePatientsByDocSql(tenantId, keys),
+          ),
+          tx.$queryRaw<{ docKey: string }[]>(
+            knownDocsInFileSql(tenantId, batchId, keys),
+          ),
+        ]),
+      LONG_TX,
+    );
+    for (const r of inFile) out.set(r.docKey, 'IN_FILE');
+    for (const p of patients) {
+      out.set(p.docKey, p.n > 1 ? 'AMBIGUOUS' : { id: p.id });
+    }
+    return out;
+  }
+
+  /** Festivos vivos de esas sedes (DX-316), por sede. */
+  async locationHolidays(
+    locationIds: string[],
+  ): Promise<Map<string, { date: string; recurring: boolean }[]>> {
+    const out = new Map<string, { date: string; recurring: boolean }[]>();
+    const ids = [...new Set(locationIds)];
+    if (ids.length === 0) return out;
+    const rows = await this.prisma.runWithTenant((tx) =>
+      tx.locationHoliday.findMany({
+        where: { locationId: { in: ids }, deletedAt: null },
+        select: { locationId: true, date: true, recurring: true },
+      }),
+    );
+    for (const r of rows) {
+      const list = out.get(r.locationId) ?? [];
+      list.push({
+        date: r.date.toISOString().slice(0, 10),
+        recurring: r.recurring,
+      });
+      out.set(r.locationId, list);
+    }
+    return out;
+  }
+
+  /**
+   * Guarda (o reemplaza) la hoja de citas de un lote VALIDATED. `null` si el
+   * lote no es de la clínica; `BatchStateError` si ya no está VALIDATED.
+   */
+  async saveAppointments(
+    batchId: string,
+    input: NewAppointmentSheet,
+  ): Promise<BatchRow | null> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const status = await this.lockStatus(tx, batchId);
+      if (status === null) return null;
+      if (status !== 'VALIDATED') throw new BatchStateError(status);
+      await this.deletePreparedAppointments(tx, batchId);
+      for (let i = 0; i < input.prepared.length; i += INSERT_CHUNK) {
+        await tx.patientImportAppointmentRow.createMany({
+          data: input.prepared.slice(i, i + INSERT_CHUNK).map((a) => ({
+            tenantId,
+            batchId,
+            rowNumber: a.rowNumber,
+            docKey: a.docKey,
+            providerId: a.providerId,
+            locationId: a.locationId,
+            appointmentTypeId: a.appointmentTypeId,
+            start: a.start,
+            end: a.end,
+            reason: a.reason,
+          })),
+        });
+      }
+      return tx.patientImportBatch.update({
+        where: { id: batchId },
+        omit: WITHOUT_ISSUES,
+        data: {
+          appointmentFileName: input.fileName,
+          appointmentFileSha256: input.fileSha256,
+          appointmentFileFormat: input.fileFormat,
+          appointmentFileSizeBytes: input.fileSizeBytes,
+          appointmentTotalRows: input.totalRows,
+          appointmentErrorRows: input.errorRows,
+          appointmentPreparedRows: input.prepared.length,
+          appointmentIssues: input.issues as unknown as Prisma.InputJsonArray,
+        },
+      });
+    }, LONG_TX);
+  }
+
+  /** Quita la hoja de citas de un lote VALIDATED (`null` si no es de la clínica). */
+  async clearAppointments(batchId: string): Promise<BatchRow | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const status = await this.lockStatus(tx, batchId);
+      if (status === null) return null;
+      if (status !== 'VALIDATED') throw new BatchStateError(status);
+      await this.deletePreparedAppointments(tx, batchId);
+      return tx.patientImportBatch.update({
+        where: { id: batchId },
+        omit: WITHOUT_ISSUES,
+        data: {
+          appointmentFileName: null,
+          appointmentFileSha256: null,
+          appointmentFileFormat: null,
+          appointmentFileSizeBytes: null,
+          appointmentTotalRows: 0,
+          appointmentErrorRows: 0,
+          appointmentPreparedRows: 0,
+          appointmentIssues: [],
+        },
+      });
+    });
+  }
+
+  /** Citas preparadas de un dry-run que se reemplaza o se quita. */
+  private async deletePreparedAppointments(
+    tx: Tx,
+    batchId: string,
+  ): Promise<void> {
+    // Housekeeping (allowlist en no-hard-delete.ts): datos del fichero de un
+    // dry-run sin confirmar; nunca crearon una cita.
+    // eslint-disable-next-line no-restricted-syntax -- citas preparadas de un dry-run reemplazado
+    await tx.patientImportAppointmentRow.deleteMany({
+      where: { batchId, outcome: 'PENDING' },
+    });
+  }
+
+  /** Las siguientes citas preparadas PENDING del lote, en orden de fila. */
+  async pendingAppointmentRows(
+    batchId: string,
+    size: number,
+  ): Promise<PendingAppointmentRow[]> {
+    return this.prisma.runWithTenant((tx) =>
+      tx.patientImportAppointmentRow.findMany({
+        where: { batchId, outcome: 'PENDING' },
+        orderBy: { rowNumber: 'asc' },
+        take: size,
+        select: {
+          id: true,
+          rowNumber: true,
+          docKey: true,
+          providerId: true,
+          locationId: true,
+          appointmentTypeId: true,
+          start: true,
+          end: true,
+          reason: true,
+        },
+      }),
+    );
+  }
+
+  /**
+   * El paciente de una cita al importarla: el vivo de la clínica con esa
+   * clave (ya creado por el lote o anterior). Ninguno o varios: null.
+   */
+  async patientForAppointment(key: string): Promise<string | null> {
+    const tenantId = this.tenantId();
+    const rows = await this.prisma.runWithTenant((tx) =>
+      tx.$queryRaw<{ id: string; docKey: string; n: number }[]>(
+        balancePatientsByDocSql(tenantId, [key]),
+      ),
+    );
+    return rows.length === 1 && rows[0].n === 1 ? rows[0].id : null;
+  }
+
+  /**
+   * La cita que ESTE lote ya creó para esa fila (un intento anterior del
+   * trabajo la creó y murió antes de marcar la fila): idempotencia.
+   */
+  async importedAppointmentFor(
+    batchId: string,
+    row: { patientId: string; providerId: string; start: Date },
+  ): Promise<string | null> {
+    const found = await this.prisma.runWithTenant((tx) =>
+      tx.appointment.findFirst({
+        where: {
+          importBatchId: batchId,
+          patientId: row.patientId,
+          providerId: row.providerId,
+          start: row.start,
+          deletedAt: null,
+        },
+        select: { id: true },
+      }),
+    );
+    return found?.id ?? null;
+  }
+
+  /**
+   * Marca el resultado de una cita preparada (con el lote RUNNING, como los
+   * bloques de pacientes) y suma sus contadores; un rechazo añade su motivo
+   * a los errores de la hoja de citas.
+   */
+  async markAppointmentRow(
+    batchId: string,
+    rowId: string,
+    result:
+      | { outcome: 'CREATED'; appointmentId: string }
+      | { outcome: 'FAILED'; issue: RowIssue },
+  ): Promise<void> {
+    await this.prisma.runWithTenant(async (tx) => {
+      await this.assertRunning(tx, batchId);
+      const n = await tx.patientImportAppointmentRow.updateMany({
+        where: { id: rowId, outcome: 'PENDING' },
+        data: {
+          outcome: result.outcome,
+          appointmentId:
+            result.outcome === 'CREATED' ? result.appointmentId : null,
+          processedAt: new Date(),
+        },
+      });
+      if (n.count === 0) return;
+      if (result.outcome === 'FAILED') {
+        await tx.$executeRaw`
+          UPDATE "patient_import_batches"
+             SET "appointmentIssues" = "appointmentIssues" || ${JSON.stringify([result.issue])}::jsonb
+           WHERE "id" = ${batchId}::uuid`;
+      }
+      await tx.patientImportBatch.update({
+        where: { id: batchId },
+        data: {
+          appointmentProcessedRows: { increment: 1 },
+          ...(result.outcome === 'CREATED'
+            ? { appointmentCreatedCount: { increment: 1 } }
+            : { appointmentFailedCount: { increment: 1 } }),
+        },
+      });
+    });
+  }
+
+  /**
+   * Citas del lote que siguen como se importaron (SCHEDULED y vivas),
+   * bloqueadas FOR UPDATE: recepción no puede confirmarlas ni moverlas a la
+   * vez. Las que cambiaron de estado (confirmadas, atendidas, canceladas…)
+   * no salen: se quedan.
+   */
+  private async lockUntouchedAppointments(
+    tx: Tx,
+    batchId: string,
+  ): Promise<string[]> {
+    const tenantId = this.tenantId();
+    const rows = await tx.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "appointments"
+       WHERE "tenantId" = ${tenantId}::uuid AND "import_batch_id" = ${batchId}::uuid
+         AND "deletedAt" IS NULL AND "status" = 'SCHEDULED'
+       ORDER BY "id"
+       FOR UPDATE`;
+    return rows.map((r) => r.id);
+  }
+
+  /** Retira en blando esas citas del lote y suma cuántas al lote. */
+  private async retireAppointments(
+    tx: Tx,
+    batchId: string,
+    ids: string[],
+  ): Promise<void> {
+    if (ids.length === 0) return;
+    const tenantId = this.tenantId();
+    for (let i = 0; i < ids.length; i += UNDO_CHUNK) {
+      await tx.$executeRaw`
+        UPDATE "appointments"
+           SET "deletedAt" = timezone('UTC', now()), "updatedAt" = timezone('UTC', now())
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "id" = ANY(${ids.slice(i, i + UNDO_CHUNK)}::uuid[])
+           AND "status" = 'SCHEDULED' AND "deletedAt" IS NULL`;
+    }
+    const before = await tx.patientImportBatch.findUniqueOrThrow({
+      where: { id: batchId },
+      select: { appointmentUndoneCount: true },
+    });
+    await tx.patientImportBatch.update({
+      where: { id: batchId },
+      data: {
+        appointmentUndoneCount:
+          (before.appointmentUndoneCount ?? 0) + ids.length,
+      },
+    });
+  }
+
+  /**
+   * Retira SOLO las citas del lote que siguen programadas, aunque sus
+   * pacientes ya tengan actividad: el lote sigue importado (como «Retirar
+   * saldos migrados»).
+   */
+  async undoAppointments(id: string): Promise<{ undoneAppointments: number }> {
+    return this.prisma.runWithTenant(async (tx) => {
+      await customPlansForLargeArrays(tx);
+      const status = await this.lockStatus(tx, id);
+      if (status === null) throw new BatchStateError('EXPIRED');
+      if (status !== 'COMPLETED' && status !== 'FAILED')
+        throw new BatchStateError(status);
+      const ids = await this.lockUntouchedAppointments(tx, id);
+      await this.retireAppointments(tx, id, ids);
+      return { undoneAppointments: ids.length };
+    }, LONG_TX);
+  }
+
+  /** Citas vivas del lote (lo importado de verdad). */
+  async liveImportedAppointments(
+    batchIds: string[],
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (batchIds.length === 0) return out;
+    const tenantId = this.tenantId();
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<{ batchId: string; n: number }[]>`
+        SELECT "import_batch_id" AS "batchId", count(*)::int AS "n"
+          FROM "appointments"
+         WHERE "tenantId" = ${tenantId}::uuid
+           AND "import_batch_id" = ANY(${batchIds}::uuid[])
+           AND "deletedAt" IS NULL AND "status" = 'SCHEDULED'
+         GROUP BY "import_batch_id"`,
+    );
+    for (const r of rows) out.set(r.batchId, r.n);
+    return out;
+  }
+
+  /**
+   * Activa los recordatorios automáticos de las citas del lote (DX-128):
+   * desde ahora el barrido las mira como a las demás. Idempotente (la
+   * primera activación se conserva). `null` si el lote no es de la clínica.
+   */
+  async enableAppointmentReminders(
+    id: string,
+    actorId: string,
+  ): Promise<BatchRow | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const status = await this.lockStatus(tx, id);
+      if (status === null) return null;
+      if (status !== 'COMPLETED' && status !== 'FAILED')
+        throw new BatchStateError(status);
+      await tx.patientImportBatch.updateMany({
+        where: { id, appointmentRemindersEnabledAt: null },
+        data: {
+          appointmentRemindersEnabledAt: new Date(),
+          appointmentRemindersEnabledById: actorId,
+        },
+      });
+      return tx.patientImportBatch.findFirst({
+        where: { id },
+        omit: WITHOUT_ISSUES,
+      });
+    });
   }
 }

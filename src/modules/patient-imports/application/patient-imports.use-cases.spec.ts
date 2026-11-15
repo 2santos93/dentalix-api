@@ -1,3 +1,5 @@
+import type { CreateAppointmentUseCase } from '../../appointments/application/use-cases/create-appointment.use-case';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   BatchLocationError,
@@ -24,6 +26,8 @@ function makeUseCases(batchLocation: () => Promise<BatchLocation>) {
     { batchLocation } as unknown as PrismaPatientImportRepository,
     {} as JobQueue,
     new FixedDocumentTypeNamesReader(),
+    {} as CreateAppointmentUseCase,
+    new TenantContextService(),
   );
 }
 
@@ -138,11 +142,21 @@ describe('PatientImportsService: tipos de documento genéricos (DX-327)', () => 
           balanceProcessedRows: 0,
           balanceFileName: null,
           balanceFileSha256: null,
+          appointmentFileSha256: null,
+          appointmentFileName: null,
+          appointmentPreparedRows: 0,
+          appointmentProcessedRows: 0,
         });
       },
       userNames: () => Promise.resolve(new Map()),
     } as unknown as PrismaPatientImportRepository;
-    const uc = new PatientImportsService(repo, {} as JobQueue, names);
+    const uc = new PatientImportsService(
+      repo,
+      {} as JobQueue,
+      names,
+      {} as CreateAppointmentUseCase,
+      new TenantContextService(),
+    );
     const detail = await uc.dryRun(
       file(
         [

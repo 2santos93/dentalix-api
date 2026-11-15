@@ -58,6 +58,11 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // se reemplaza (otra hoja) o se quita. Solo los PENDING: nunca crearon un
   // saldo migrado y nada los referencia; el lote guarda hash y totales.
   'patientImportBalanceRow',
+  // DX-263: citas preparadas de la hoja de citas de un dry-run que caduca,
+  // se reemplaza o se quita (solo PENDING: nunca crearon una cita), y las de
+  // un lote cuyo informe se purga (llevan el documento y el motivo del
+  // fichero; la cita creada sigue en appointments con su lote).
+  'patientImportAppointmentRow',
   // DX-105: el precio de un procedimiento en una lista es configuración, sin
   // datos de pacientes y sin nada que lo referencie (el ítem del plan guarda
   // su propia foto del precio al crearse). «Quitar el precio» borra la fila

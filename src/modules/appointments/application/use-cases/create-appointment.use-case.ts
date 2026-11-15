@@ -45,7 +45,7 @@ import { assertAttendingRole } from '../../../staff/domain/attending';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { ProviderAvailabilityService } from '../../../provider-schedule/application/provider-availability.service';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
-import { collectWarnings } from '../appointment-warnings';
+import { collectWarnings, type Warnings } from '../appointment-warnings';
 import { ChairAssignmentService } from '../chair-assignment';
 import type { Chair } from '../../../chairs/domain/entities/chair.entity';
 import { resolveAppointmentProviderId } from '../../../chairs/domain/chair-rules';
@@ -88,10 +88,44 @@ export interface CreateAppointmentInput {
   overrideReason?: string;
   /** DX-211: sillón de la cita (de esta clínica, de su sede y activo). */
   chairId?: string;
+  /**
+   * DX-263: el lote de importación que crea la cita (`createImported`). No
+   * llega del cliente.
+   */
+  importBatchId?: string;
+}
+
+/**
+ * DX-263: una cita de la hoja de citas del importador. La sede, el
+ * profesional y el tipo ya vienen resueltos a ids (por nombre y email); el
+ * paciente puede no existir todavía (lo creará el mismo lote): `null`.
+ */
+export interface ImportedAppointmentInput {
+  patientId: string | null;
+  providerId: string;
+  locationId: string;
+  start: Date;
+  end?: Date;
+  appointmentTypeId?: string;
+  reason?: string;
 }
 
 /** La entrada con la hora de fin ya resuelta (explícita o por el tipo). */
 type ResolvedAppointmentInput = CreateAppointmentInput & { end: Date };
+
+/** Lo que `prepare` deja listo para `write`: la cita validada y sus avisos. */
+interface PreparedAppointment {
+  input: ResolvedAppointmentInput & { providerId: string };
+  chair: Chair | null;
+  warnings: Warnings;
+  blockCheck: Awaited<ReturnType<typeof checkScheduleBlocks>>;
+}
+
+/**
+ * DX-263: marcador del paciente que aún no existe en `validateImported`
+ * (nunca se consulta ni se escribe: `checkPatient` es false).
+ */
+const NO_PATIENT_YET = '00000000-0000-0000-0000-000000000000';
 
 export const APPOINTMENT_TYPE_UNAVAILABLE_MESSAGE =
   'El tipo de cita no existe o está desactivado';
@@ -147,11 +181,7 @@ export class CreateAppointmentUseCase {
     // Nota: esto aplica a CREAR; registrar/cerrar una cita YA pasada se hace
     // cambiando su estado (ver UpdateAppointmentUseCase, que solo valida el
     // pasado cuando se re-agenda).
-    if (resolved.start.getTime() < Date.now()) {
-      throw new BadRequestException(
-        'No se puede agendar una cita en el pasado',
-      );
-    }
+    this.assertFuture(resolved);
 
     return this.createChecked(resolved);
   }
@@ -167,6 +197,71 @@ export class CreateAppointmentUseCase {
     input: CreateAppointmentInput,
   ): Promise<AppointmentWriteResult> {
     return this.createChecked(await this.resolveEnd(input));
+  }
+
+  /**
+   * DX-263: valida una cita importada con EXACTAMENTE las reglas de agendar a
+   * mano (futura, tipo activo, sede permitida, profesional de la clínica que
+   * atiende en la sede, horario de la sede y del profesional, bloqueos y
+   * solapes de profesional y paciente) SIN escribir nada. Con `patientId`
+   * null (paciente que creará el lote) no se mira el eje del paciente: no
+   * tiene citas. Lanza la misma excepción HTTP que el alta manual; devuelve
+   * los avisos que no la impiden.
+   */
+  async validateImported(
+    input: ImportedAppointmentInput,
+  ): Promise<Warnings & { end: Date }> {
+    const resolved = await this.resolveEnd(this.importedInput(input));
+    this.assertFuture(resolved);
+    const prepared = await this.prepare(resolved, {
+      checkPatient: input.patientId !== null,
+    });
+    return { ...prepared.warnings, end: resolved.end };
+  }
+
+  /**
+   * DX-263: crea una cita importada (el trabajo del lote, con el paciente ya
+   * creado), con las mismas reglas que `execute` y el respaldo de las EXCLUDE
+   * de la BD. La cita queda ligada a su lote (`importBatchId`).
+   */
+  async createImported(
+    input: ImportedAppointmentInput & {
+      patientId: string;
+      importBatchId: string;
+      createdById?: string;
+    },
+  ): Promise<AppointmentWriteResult> {
+    const resolved = await this.resolveEnd({
+      ...this.importedInput(input),
+      importBatchId: input.importBatchId,
+      createdById: input.createdById,
+    });
+    this.assertFuture(resolved);
+    return this.createChecked(resolved);
+  }
+
+  private importedInput(
+    input: ImportedAppointmentInput,
+  ): CreateAppointmentInput {
+    return {
+      // El eje del paciente se salta con `checkPatient: false`: ningún id se
+      // inventa para él (el uuid nulo no es de nadie).
+      patientId: input.patientId ?? NO_PATIENT_YET,
+      providerId: input.providerId,
+      locationId: input.locationId,
+      start: input.start,
+      end: input.end,
+      appointmentTypeId: input.appointmentTypeId,
+      reason: input.reason,
+    };
+  }
+
+  private assertFuture(input: { start: Date }): void {
+    if (input.start.getTime() < Date.now()) {
+      throw new BadRequestException(
+        'No se puede agendar una cita en el pasado',
+      );
+    }
   }
 
   /**
@@ -204,6 +299,18 @@ export class CreateAppointmentUseCase {
   private async createChecked(
     input: ResolvedAppointmentInput,
   ): Promise<AppointmentWriteResult> {
+    return this.write(await this.prepare(input, { checkPatient: true }));
+  }
+
+  /**
+   * Todas las reglas de agendar, sin escribir: pertenencia del paciente (si
+   * `checkPatient`), sede, sillón, profesional, horario de la sede y del
+   * profesional, bloqueos y solapes. Lo que necesita `write`.
+   */
+  private async prepare(
+    input: ResolvedAppointmentInput,
+    opts: { checkPatient: boolean },
+  ): Promise<PreparedAppointment> {
     // `patientId` y `providerId` tienen que resolver a entidades REALES de ESTA
     // clínica, antes de mirar solapes (un id inválido hace que el solape no
     // signifique nada). Ambos repos filtran por tenant vía RLS, así que un
@@ -213,9 +320,11 @@ export class CreateAppointmentUseCase {
     // valida el tenant (las FK de Postgres se chequean saltando la RLS), así que
     // se podía agendar contra un paciente de OTRA clínica. Y `providerId` no
     // tenía ninguna validación: cualquier UUID pasaba como "profesional".
-    const patient = await this.patients.findById(input.patientId);
-    if (!patient) {
-      throw new NotFoundException('Paciente no encontrado');
+    if (opts.checkPatient) {
+      const patient = await this.patients.findById(input.patientId);
+      if (!patient) {
+        throw new NotFoundException('Paciente no encontrado');
+      }
     }
 
     // DX-089: la sede de la cita (la de pendientes, ya permitida, o la misma en
@@ -250,15 +359,16 @@ export class CreateAppointmentUseCase {
     assertAttendsAt(provider, target);
     // DX-161: recepción y asistencia no atienden: no se les agenda.
     assertAttendingRole(provider);
-    return this.createFor({ ...input, providerId }, target, chair);
+    return this.prepareFor({ ...input, providerId }, target, chair, opts);
   }
 
   /** El resto de reglas, con el profesional y el sillón ya resueltos. */
-  private async createFor(
+  private async prepareFor(
     input: ResolvedAppointmentInput & { providerId: string },
     target: string,
     chair: Chair | null,
-  ): Promise<AppointmentWriteResult> {
+    opts: { checkPatient: boolean },
+  ): Promise<PreparedAppointment> {
     // Horario de atención de la SEDE: la cita tiene que caber completa en un
     // tramo del día. Sede sin horario configurado => sin restricción (ver
     // fitsBusinessHours), así que esto no cambia nada hasta que la clínica lo
@@ -327,11 +437,13 @@ export class CreateAppointmentUseCase {
     // Mismo criterio, otro eje: el PACIENTE tampoco puede estar en dos citas a
     // la vez (aunque sean con profesionales distintos — no puede estar en dos
     // sillones). Antes solo se validaba el solape del profesional.
-    const patientOverlapping = await this.repo.findOverlappingForPatient(
-      input.patientId,
-      input.start,
-      input.end,
-    );
+    const patientOverlapping = opts.checkPatient
+      ? await this.repo.findOverlappingForPatient(
+          input.patientId,
+          input.start,
+          input.end,
+        )
+      : [];
     if (patientOverlapping.length > 0) {
       throw new ConflictException(OVERLAP_MESSAGES.patient);
     }
@@ -345,8 +457,17 @@ export class CreateAppointmentUseCase {
         end: input.end,
       });
     }
+    return { input, chair, warnings, blockCheck };
+  }
 
-    // The pre-checks above handle the common case with a friendly 409 WITHOUT
+  /** Escribe la cita ya validada por `prepare`. */
+  private async write({
+    input,
+    chair,
+    warnings,
+    blockCheck,
+  }: PreparedAppointment): Promise<AppointmentWriteResult> {
+    // The pre-checks in `prepare` handle the common case with a friendly 409 WITHOUT
     // hitting the DB. This try/catch is the race-proof backstop: if a
     // concurrent create slips past them, the DB's EXCLUDE constraints
     // (appointments_no_overlap_per_provider / ..._per_patient, SQLSTATE 23P01)
@@ -366,6 +487,7 @@ export class CreateAppointmentUseCase {
         wantsEarlier: input.wantsEarlier,
         planItemIds: input.planItemIds,
         chairId: chair?.id,
+        importBatchId: input.importBatchId,
       });
       // DX-273: un alta con ítems ya reservados en otra cita es 409; nunca avisa.
       return {

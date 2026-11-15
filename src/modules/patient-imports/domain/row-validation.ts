@@ -19,13 +19,16 @@ import type { TableRow } from './tabular-file';
 /**
  * `MERGED` (DX-262): fila de la hoja de saldos que se suma a otra del mismo
  * paciente y moneda (un saldo migrado por paciente y moneda). No es un error.
+ * `WARNING` (DX-263): aviso de una cita que sí se importa (fuera del horario
+ * del profesional, un bloqueo que deja agendar, duración tomada del tipo).
  */
 export type IssueKind =
   | 'ERROR'
   | 'DUPLICATE_FILE'
   | 'DUPLICATE_EXISTING'
   | 'MERGED'
-  | 'EXISTING_BALANCE';
+  | 'EXISTING_BALANCE'
+  | 'WARNING';
 
 /** Un problema de una fila, tal como sale en la pantalla y en errors.csv. */
 export interface RowIssue {
