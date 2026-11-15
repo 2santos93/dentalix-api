@@ -118,10 +118,11 @@ describe('decideReminder (DX-146)', () => {
     });
   });
 
-  it('un aviso con fecha posterior a hoy (reloj desajustado) no cuenta', () => {
+  it('un aviso con fecha posterior a hoy (reloj desajustado) cuenta como dado', () => {
     expect(decide(7, ['2026-11-16'])).toMatchObject({
-      due: true,
-      noticesSent: 0,
+      due: false,
+      noticesSent: 1,
+      lastNoticeOn: '2026-11-16',
     });
   });
 

@@ -368,9 +368,11 @@ export class PrismaCollectionsRepository implements CollectionsRepository {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         select: { createdAt: true },
       });
+      // Ya avisado hoy (o «después» de hoy, si el reloj de la app va por
+      // detrás del de la BD, que fecha la nota): no se repite.
       if (
         last &&
-        civilDateIn(last.createdAt, timeZone) === civilDateIn(now, timeZone)
+        civilDateIn(last.createdAt, timeZone) >= civilDateIn(now, timeZone)
       ) {
         return null;
       }

@@ -19,7 +19,10 @@ import {
   seedMember,
   SEEDED_PASSWORD,
 } from './support/e2e-fixtures';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { RECEIVABLES_CLOCK } from '../src/modules/receivables/application/use-cases/get-receivables-aging.use-case';
+import { COLLECTIONS_CLOCK } from '../src/modules/collections/application/collections-clock';
+import { fixedSedeDay } from './support/sede-clock';
 import { PasswordService } from '../src/shared/crypto/password.service';
 import {
   locationBody,
@@ -32,15 +35,15 @@ import {
 // no reaparece hoy y la política (solo ADMIN, auditada). Siembra de fechas
 // pasadas por DIRECT_URL; todo lo demás, por la API.
 //
-// Relojes REALES a propósito: la marca «avisado» la fecha la BD (trigger de
-// collection_notes) y el «hoy» de la lista tiene que ser el mismo. Las edades
-// sembradas aguantan un día de más (una corrida que cruce la medianoche de
-// Caracas): 10, 35 y 65 días siguen en el mismo tramo, y 3 sigue por debajo.
+// «Hoy» FIJO de la sede (DX-209/DX-460): el mediodía de ayer en Caracas, en
+// los relojes de la cartera y de la cobranza. La nota «avisado» la fecha la BD
+// con su reloj real (hoy o después): cuenta igual como dada, así que la
+// corrida puede cruzar la medianoche de Caracas sin cambiar nada.
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const CARACAS = 'America/Caracas';
-const today = (): string => civilDateIn(new Date(), CARACAS);
+const SEDE_DAY = fixedSedeDay();
+const today = (): string => SEDE_DAY.day;
 /** 13:00 de Caracas de hace `n` días. */
 const noonDaysAgo = (n: number): Date =>
   new Date(`${addCivilDays(today(), -n)}T17:00:00.000Z`);
@@ -172,7 +175,14 @@ describe('Cartera › Por avisar hoy (e2e, DX-146)', () => {
   }
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) =>
+        builder
+          .overrideProvider(RECEIVABLES_CLOCK)
+          .useValue(() => SEDE_DAY.at)
+          .overrideProvider(COLLECTIONS_CLOCK)
+          .useValue(() => SEDE_DAY.at),
+    });
     await resetDatabase(raw);
     clinicA = await registerClinic(app, 'avisos-a');
     clinicB = await registerClinic(app, 'avisos-b');
@@ -338,6 +348,14 @@ describe('Cartera › Por avisar hoy (e2e, DX-146)', () => {
     await api(clinicB, 'post', `/patients/${tramo1}/balance-reminders`)
       .send({})
       .expect(404);
+    const foreignSede = await api(
+      clinicB,
+      'get',
+      `/receivables/reminders?locationId=${principal}`,
+    ).expect(400);
+    expect((foreignSede.body as { message: string }).message).toBe(
+      'La sede no es de esta clínica.',
+    );
   });
 
   it('sedes permitidas: la recepción de Oeste solo ve y marca deudas de Oeste', async () => {
@@ -428,7 +446,8 @@ describe('Cartera › Por avisar hoy (e2e, DX-146)', () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0].metadata).toMatchObject({ reason: 'BALANCE_REMINDER' });
-    expect(JSON.stringify(events[0].metadata)).not.toMatch(/120/);
+    expect(Object.keys(events[0].metadata as object)).not.toContain('amount');
+    expect(JSON.stringify(events[0].metadata)).not.toMatch(/amount|USD/);
   });
 
   it('la nota genérica no admite REMINDER_SENT, y el canal se valida en español', async () => {

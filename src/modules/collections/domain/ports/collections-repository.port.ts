@@ -40,8 +40,9 @@ export interface CollectionsRepository {
   /**
    * DX-146: «Marcar avisado» — una nota REMINDER_SENT. En UNA transacción con
    * el candado de los avisos del paciente: 403 si la sede de su deuda no es de
-   * las del miembro; `null` si ya tiene un aviso HOY (día civil de la zona de
-   * la sede de su deuda, o de la principal si no tiene), sin escribir nada.
+   * las del miembro; `null` si ya tiene un aviso HOY o posterior (día civil
+   * de la zona de la sede de su deuda, o de la principal si no tiene), sin
+   * escribir nada.
    */
   createReminderNote(
     input: NewCollectionNote,

@@ -89,11 +89,10 @@ export function decideReminder(
     };
   }
   const debtSince = addCivilDays(input.today, -age);
-  // Solo los avisos de ESTA deuda (desde que venció su línea más antigua, sin
-  // los «del futuro» que daría un reloj desajustado).
-  const notices = input.noticeDays
-    .filter((day) => day >= debtSince && day <= input.today)
-    .sort();
+  // Solo los avisos de ESTA deuda (desde que venció su línea más antigua).
+  // Uno con día posterior a hoy (relojes desajustados entre la app y la BD,
+  // que fecha la nota) cuenta como dado: nunca se repite un aviso por eso.
+  const notices = input.noticeDays.filter((day) => day >= debtSince).sort();
   const lastNoticeOn = notices.length > 0 ? notices[notices.length - 1] : null;
   const stage = reminderStage(policy.days, age);
   const stageDays = stage > 0 ? policy.days[stage - 1] : null;

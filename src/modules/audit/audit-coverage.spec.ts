@@ -1250,6 +1250,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     reason: 'RECEIVABLES_CREDIT_BALANCES',
   },
+  // DX-146: «Por avisar hoy» (lista de deudores con teléfono e importes).
+  'GET /receivables/reminders': {
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_REMINDERS',
+  },
   // DX-204: política de descuentos (solo ADMIN) e informe de descuentos (lista
   // de muchos pacientes, sin paciente en el evento) y su CSV.
   'PUT /discount-policy': { action: 'UPDATE', resource: 'DISCOUNT_POLICY' },
@@ -1449,6 +1455,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'COLLECTION_NOTE',
     resourceId: RES,
     patient: { param: 'id' },
+  },
+  // DX-146: «Marcar avisado» (nota REMINDER_SENT), sin texto ni importes.
+  'POST /patients/:id/balance-reminders': {
+    action: 'CREATE',
+    resource: 'COLLECTION_NOTE',
+    resourceId: RES,
+    patient: { param: 'id' },
+    reason: 'BALANCE_REMINDER',
   },
   'POST /patients/:id/payment-promises': {
     action: 'CREATE',
@@ -1940,6 +1954,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // después, escrito por el repositorio en la transacción, sin sede (DX-363);
   // sin evento si nada cambió.
   'PUT /slot-offer-settings': 'slot-offer-settings.e2e-spec.ts',
+  // DX-146: CLINIC_SETTINGS con BALANCE_REMINDER_POLICY y configChange antes
+  // y después, escrito por el repositorio en la transacción, sin sede; sin
+  // evento si nada cambió.
+  'PUT /receivables/reminder-policy': 'receivables-reminders.e2e-spec.ts',
   // DX-374: CLINIC_SETTINGS con EXCHANGE_RATE_SOURCE y el antes y el después;
   // sin evento si no cambia. DX-384: el plazo de la última tasa registrada
   // deja EXCHANGE_RATE_MAX_AGE con configChange antes/después, escrito por el
