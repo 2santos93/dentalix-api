@@ -475,7 +475,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
           (tx) =>
             tx.$executeRaw`DELETE FROM "expense_payments" WHERE "id" = ${payment.id}::uuid`,
         ),
-      ).rejects.toThrow(/no admite/);
+      ).rejects.toThrow(/(?:no admite)|permission denied for table/);
       await expect(
         asA((tx) => tx.$executeRaw`TRUNCATE "expense_payments"`),
       ).rejects.toThrow(/permission denied|no admite/);
@@ -618,7 +618,7 @@ describe('gastos, pagos de gasto y salidas de caja: tablas, RLS e inmutabilidad 
           (tx) =>
             tx.$executeRaw`DELETE FROM "expenses" WHERE "id" = ${e.id}::uuid`,
         ),
-      ).rejects.toThrow(/no admite/);
+      ).rejects.toThrow(/(?:no admite)|permission denied for table/);
       await expect(
         asA((tx) => tx.$executeRaw`TRUNCATE "expenses"`),
       ).rejects.toThrow(/permission denied|no admite/);

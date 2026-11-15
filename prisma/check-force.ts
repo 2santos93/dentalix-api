@@ -28,6 +28,11 @@
  *     `ALTER ROLE`, `ALTER DATABASE`, por ese orden; sin ninguna también
  *     falla) y, si `DATABASE_URL` es de `dentalix_app`, el `SHOW TimeZone`
  *     de una sesión real suya.
+ *   - `app_delete`: `dentalix_app` tiene UPDATE, DELETE o TRUNCATE en una
+ *     tabla append-only (o en una partición de `audit_events`) de
+ *     prisma/append-only-tables.ts (DX-425, DX-148), o UPDATE de una columna
+ *     de `prescriptions` que no es de la anulación. Repetir
+ *     create-app-role.sql no los devuelve; un GRANT a mano sí.
  *
  *   npm run db:check-force
  *
@@ -37,6 +42,11 @@
  * imprime nombres de tablas y roles.
  */
 import { Prisma, PrismaClient } from '@prisma/client';
+import {
+  APP_UPDATE_COLUMNS_ONLY,
+  NO_APP_DELETE,
+  NO_APP_UPDATE_DELETE,
+} from './append-only-tables';
 
 /** Tablas de clínica sin RLS a propósito (mismo motivo que rls-catalog). */
 const RLS_EXEMPT = [
@@ -61,8 +71,24 @@ const READ_ONLY_REFERENCES = [
   'cities',
 ];
 
-/** DX-425 (DB-065): tablas en las que dentalix_app NO tiene DELETE. */
-const NO_APP_DELETE = ['signature_requests'];
+// DX-425 (DB-065) y DX-148: tablas append-only en las que dentalix_app no
+// tiene DELETE (NO_APP_DELETE) o ni UPDATE ni DELETE (NO_APP_UPDATE_DELETE,
+// también en las particiones de `audit_events`): prisma/append-only-tables.ts.
+// `prescriptions` (APP_UPDATE_COLUMNS_ONLY): ni DELETE ni UPDATE de tabla, y
+// UPDATE solo de las columnas de la anulación.
+const COLUMN_UPDATE_TABLES = Object.keys(APP_UPDATE_COLUMNS_ONLY);
+const COLUMN_UPDATE_ALLOWED = Object.entries(APP_UPDATE_COLUMNS_ONLY).flatMap(
+  ([table, columns]) => columns.map((column) => `${table}.${column}`),
+);
+const NO_APP_DELETE_ALL: string[] = [
+  ...NO_APP_DELETE,
+  ...NO_APP_UPDATE_DELETE,
+  ...COLUMN_UPDATE_TABLES,
+];
+const NO_APP_UPDATE: string[] = [
+  ...NO_APP_UPDATE_DELETE,
+  ...COLUMN_UPDATE_TABLES,
+];
 
 const TIMEZONE_MESSAGE =
   'La zona horaria de dentalix_app no es UTC: la hora del servidor tiene que ser UTC. ' +
@@ -177,11 +203,26 @@ async function main(): Promise<number> {
                   ELSE has_table_privilege(${APP_ROLE}, c.oid, p.privilege) END
        ORDER BY 1`;
     const appDelete = await prisma.$queryRaw<{ name: string }[]>`
-      SELECT c.relname || ':DELETE' AS name
+      SELECT c.relname || ':' || p.privilege AS name
         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE n.nspname = 'public' AND c.relname = ANY(${NO_APP_DELETE})
+        CROSS JOIN unnest(ARRAY['UPDATE', 'DELETE', 'TRUNCATE']) AS p(privilege)
+       WHERE n.nspname = 'public'
+         AND (c.relname = ANY(${NO_APP_DELETE_ALL})
+              OR (c.relispartition AND EXISTS (
+                    SELECT 1 FROM pg_inherits i JOIN pg_class pc ON pc.oid = i.inhparent
+                     WHERE i.inhrelid = c.oid AND pc.relname = ANY(${NO_APP_UPDATE}))))
+         AND (p.privilege <> 'UPDATE' OR c.relname = ANY(${NO_APP_UPDATE}) OR c.relispartition)
          AND CASE WHEN to_regrole(${APP_ROLE}) IS NULL THEN false
-                  ELSE has_table_privilege(${APP_ROLE}, c.oid, 'DELETE') END
+                  ELSE has_table_privilege(${APP_ROLE}, c.oid, p.privilege) END
+       ORDER BY 1`;
+    const columnUpdate = await prisma.$queryRaw<{ name: string }[]>`
+      SELECT c.relname || '.' || a.attname || ':UPDATE' AS name
+        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+       WHERE n.nspname = 'public' AND c.relname = ANY(${COLUMN_UPDATE_TABLES})
+         AND NOT (c.relname || '.' || a.attname) = ANY(${COLUMN_UPDATE_ALLOWED})
+         AND CASE WHEN to_regrole(${APP_ROLE}) IS NULL THEN false
+                  ELSE has_column_privilege(${APP_ROLE}, c.oid, a.attnum, 'UPDATE') END
        ORDER BY 1`;
     const timezone = new Set<string>();
     const configured = await catalogTimezone(prisma);
@@ -204,7 +245,7 @@ async function main(): Promise<number> {
       dispatcher_delete: dispatcherDelete.map((r) => r.name),
       timezone: [...timezone],
       reference_writes: referenceWrites.map((r) => r.name),
-      app_delete: appDelete.map((r) => r.name),
+      app_delete: [...appDelete, ...columnUpdate].map((r) => r.name),
     };
     if (Object.values(result).some((list) => list.length > 0)) {
       console.error(

@@ -145,6 +145,67 @@ BEGIN
 END;
 $$;
 
+-- DX-148: lo mismo con las tablas append-only (prisma/append-only-tables.ts;
+-- `db:check-force` lo vigila). Primera lista: ni UPDATE ni DELETE, también en
+-- las particiones de audit_events; segunda: sin DELETE (conservan UPDATE para
+-- anular, cerrar o bloquear la fila); y `prescriptions`, con UPDATE solo de
+-- las columnas de la anulación. No-op en una base vacía.
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'anesthesia_administrations', 'cash_session_closing_lines',
+    'cash_session_closings', 'cash_session_floats', 'cash_session_reopenings',
+    'clinical_entry_addenda', 'clinical_entry_diagnoses', 'collection_notes',
+    'data_processing_consents', 'medical_history_reviews',
+    'medical_history_versions', 'patient_consent_countersignatures',
+    'patient_consents', 'patient_dentition_events', 'patient_retention_actions',
+    'prescription_items', 'privacy_policy_versions', 'recall_contacts',
+    'reminder_opt_out_match_warnings', 'sedation_agent_administrations',
+    'sedation_checklists', 'sedation_discharges', 'sedation_vitals',
+    'tooth_records', 'treatment_plan_acceptances',
+    'appointment_reserved_overrides', 'audit_events',
+    'cancellation_policy_versions', 'closing_queue_dismissals',
+    'patient_credit_entries', 'patient_credit_refund_payments',
+    'patient_credit_refunds', 'patient_credit_transfers', 'payment_adjustments',
+    'payment_allocation_movements', 'platform_access_audit',
+    'platform_audit_events', 'treatment_plan_repricings'
+  ] LOOP
+    IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);
+    END IF;
+  END LOOP;
+  FOR t IN
+    SELECT c.relname FROM pg_catalog.pg_inherits i
+      JOIN pg_catalog.pg_class c ON c.oid = i.inhrelid
+     WHERE pg_catalog.to_regclass('public.audit_events') IS NOT NULL
+       AND i.inhparent = pg_catalog.to_regclass('public.audit_events')
+  LOOP
+    EXECUTE pg_catalog.format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);
+  END LOOP;
+  FOREACH t IN ARRAY ARRAY[
+    'cash_session_adjustments', 'cash_sessions', 'clinical_entries',
+    'expense_payments', 'expenses', 'medical_history_submissions',
+    'patient_documents', 'patient_implants', 'payment_promises',
+    'payment_receipt_counters', 'payment_receipts',
+    'equipment_maintenances', 'patient_certificate_copy_links',
+    'patient_certificates', 'prescription_copy_links', 'sedation_records',
+    'signature_requests', 'signed_consent_pdf_links', 'signed_consent_pdfs'
+  ] LOOP
+    IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
+      EXECUTE pg_catalog.format('REVOKE DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);
+    END IF;
+  END LOOP;
+  -- Recetas: UPDATE solo de las columnas de la anulación (DX-104).
+  IF pg_catalog.to_regclass('public.prescriptions') IS NOT NULL THEN
+    REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.prescriptions FROM dentalix_app;
+    GRANT UPDATE ("status", "voidedAt", "voidedById", "voidReason")
+      ON TABLE public.prescriptions TO dentalix_app;
+  END IF;
+END;
+$$;
+
 -- Las funciones del despachador de email (email_outbox_*: reclamar, cerrar,
 -- encolar de plataforma con su tope y purgar, DX-088/DX-113/DX-144) las
 -- concede a dentalix_app cada migración, y solo si el rol ya existía. Si esta

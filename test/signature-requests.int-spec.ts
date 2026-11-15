@@ -466,7 +466,7 @@ describe('firma a distancia en Postgres (DX-243)', () => {
             data: { body: 'x' },
           }),
         ),
-      ).rejects.toThrow(/inmutable/);
+      ).rejects.toThrow(/(?:inmutable)|permission denied for table/);
       const counter = await asApp(a, (tx) =>
         tx.patientConsentCountersignature.create({
           data: {
@@ -488,14 +488,14 @@ describe('firma a distancia en Postgres (DX-243)', () => {
             data: { professionalName: 'Otro' },
           }),
         ),
-      ).rejects.toThrow(/inalterable/);
+      ).rejects.toThrow(/(?:inalterable)|permission denied for table/);
       await expect(
         asApp(
           a,
           (tx) =>
             tx.$executeRaw`DELETE FROM "patient_consent_countersignatures" WHERE "id" = ${counter.id}::uuid`,
         ),
-      ).rejects.toThrow(/inalterable/);
+      ).rejects.toThrow(/(?:inalterable)|permission denied for table/);
       // Una segunda firma del profesional no cabe.
       await expect(
         asApp(a, (tx) =>
