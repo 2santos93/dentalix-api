@@ -20,6 +20,7 @@ import {
   type PaymentInstructionFields,
 } from '../../../payment-methods/domain/payment-method-instructions';
 import {
+  assertProofUploadRequest,
   PaymentProofUploads,
   type ProofUploadRequest,
   type ProofUploadTicket,
@@ -295,8 +296,8 @@ export class MarkPaymentLinkOpenedUseCase {
 /**
  * PÚBLICO (D6): autoriza UNA subida del comprobante con la misma subida
  * directa del abono (10 MB, JPG, PNG, WebP o PDF), con el enlace como
- * propietario. Como mucho 3 por enlace: la autorización se gasta antes de
- * firmar nada y se devuelve si la petición no vale.
+ * propietario. Como mucho 3 por enlace: la petición se comprueba antes y la
+ * autorización se gasta antes de firmar nada (nunca se devuelve).
  */
 @Injectable()
 export class AuthorizePaymentLinkProofUploadUseCase {
@@ -314,6 +315,9 @@ export class AuthorizePaymentLinkProofUploadUseCase {
   ): Promise<ProofUploadTicket> {
     const now = this.clock();
     const link = await findLiveLink(this.tenantContext, this.repo, token, now);
+    // Una petición que no vale (tamaño, huella, tipo) no gasta el cupo: se
+    // comprueba antes (las autorizaciones solo suben, guarda de la BD).
+    assertProofUploadRequest(request);
     if (!(await this.repo.reserveProofUpload(link.id, now))) {
       throw new ConflictException({
         statusCode: HttpStatus.CONFLICT,
@@ -322,18 +326,7 @@ export class AuthorizePaymentLinkProofUploadUseCase {
         message: PROOF_UPLOADS_EXHAUSTED_MESSAGE,
       });
     }
-    try {
-      return await this.uploads.authorize(
-        request,
-        paymentLinkUploadOwner(link.id),
-      );
-    } catch (error) {
-      // Una petición que no vale (tamaño, huella, tipo) no gasta el cupo.
-      if (error instanceof BadRequestException) {
-        await this.repo.releaseProofUpload(link.id);
-      }
-      throw error;
-    }
+    return this.uploads.authorize(request, paymentLinkUploadOwner(link.id));
   }
 }
 

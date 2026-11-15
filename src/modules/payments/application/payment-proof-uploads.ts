@@ -92,6 +92,35 @@ function contentRejected(message: string): BadRequestException {
   });
 }
 
+/**
+ * Las comprobaciones de una petición de subida (tamaño de 1 B a 10 MB, huella
+ * SHA-256 y una etiqueta que no descarte ya una imagen o un PDF), sin tocar el
+ * almacén: 400 en español si no vale. DX-569: el enlace de pago las hace
+ * antes de gastar una de sus autorizaciones. Devuelve la huella normalizada.
+ */
+export function assertProofUploadRequest(request: ProofUploadRequest): string {
+  const size = request.size;
+  if (typeof size !== 'number' || !Number.isInteger(size) || size < 0) {
+    throw new BadRequestException(INVALID_PROOF_SIZE_MESSAGE);
+  }
+  if (size > MAX_PAYMENT_PROOF_BYTES) {
+    throw new BadRequestException(PROOF_TOO_LARGE_MESSAGE);
+  }
+  if (size === 0) throw new BadRequestException(EMPTY_FILE_MESSAGE);
+  if (!isSha256Hex(request.sha256)) {
+    throw new BadRequestException(INVALID_PROOF_SHA256_MESSAGE);
+  }
+  if (
+    !declaredLooksLikeProof({
+      mimeType: request.mimeType,
+      name: request.name,
+    })
+  ) {
+    throw new BadRequestException(PROOF_TYPE_MESSAGE);
+  }
+  return request.sha256.trim().toLowerCase();
+}
+
 function decodeName(raw: string | undefined): string {
   try {
     return normalizeOriginalName(decodeURIComponent(raw ?? ''));
@@ -133,26 +162,8 @@ export class PaymentProofUploads {
     request: ProofUploadRequest,
     uploadedById: string,
   ): Promise<ProofUploadTicket> {
-    const size = request.size;
-    if (typeof size !== 'number' || !Number.isInteger(size) || size < 0) {
-      throw new BadRequestException(INVALID_PROOF_SIZE_MESSAGE);
-    }
-    if (size > MAX_PAYMENT_PROOF_BYTES) {
-      throw new BadRequestException(PROOF_TOO_LARGE_MESSAGE);
-    }
-    if (size === 0) throw new BadRequestException(EMPTY_FILE_MESSAGE);
-    if (!isSha256Hex(request.sha256)) {
-      throw new BadRequestException(INVALID_PROOF_SHA256_MESSAGE);
-    }
-    const sha256 = request.sha256.trim().toLowerCase();
-    if (
-      !declaredLooksLikeProof({
-        mimeType: request.mimeType,
-        name: request.name,
-      })
-    ) {
-      throw new BadRequestException(PROOF_TYPE_MESSAGE);
-    }
+    const sha256 = assertProofUploadRequest(request);
+    const size = request.size as number;
 
     const uploadId = randomUUID();
     const mime = /^[a-z0-9.+/-]{1,100}$/i.test(request.mimeType ?? '')

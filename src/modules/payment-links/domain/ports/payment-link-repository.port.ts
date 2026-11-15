@@ -238,8 +238,6 @@ export interface PaymentLinkRepository {
   markOpened(linkId: string, now: Date): Promise<void>;
   /** Gasta una de las autorizaciones de subida; `false` si no quedan o no está vivo. */
   reserveProofUpload(linkId: string, now: Date): Promise<boolean>;
-  /** Devuelve una autorización gastada por una petición que no valía. */
-  releaseProofUpload(linkId: string): Promise<void>;
   /**
    * Deja el comprobante completado como el preparado del enlace (vivo).
    * Devuelve la clave del que sustituye (para borrarla) o `undefined` si el

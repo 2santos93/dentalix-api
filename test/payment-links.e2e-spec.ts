@@ -24,6 +24,8 @@ import {
   PAYMENT_LINK_PLAN_NOT_FOUND_MESSAGE,
   PAYMENT_LINK_TARGET_REQUIRED_MESSAGE,
   PAYMENT_REPORT_NOT_FOUND_MESSAGE,
+  generatePaymentLinkToken,
+  hashPaymentLinkToken,
   paymentLinkWhatsAppMessage,
 } from '../src/modules/payment-links/domain/payment-link';
 import {
@@ -731,15 +733,26 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
     it('404 si no existe, caducó o se anuló; 410 «ya usado» con status REPORTED', async () => {
       await pub(a).get(FAKE_TOKEN).expect(404);
       await pub(a).get('corto').expect(404);
-      const expired = await linkFor(a);
-      await raw.paymentLink.update({
-        where: { id: expired.id },
+      // Un enlace caducado (la guarda no deja cambiar su caducidad: se
+      // siembra ya caducado).
+      const expiredToken = generatePaymentLinkToken();
+      const expiredPatient = await patient(a);
+      await raw.paymentLink.create({
         data: {
+          tenantId: a.clinic.tenantId,
+          patientId: expiredPatient,
+          treatmentPlanId: await plan(a, expiredPatient),
+          locationId: a.locationId,
+          amount: 40,
+          currency: 'USD',
+          concept: 'BALANCE',
+          tokenHash: hashPaymentLinkToken(expiredToken),
           createdAt: new Date(Date.now() - 9 * 86_400_000),
           expiresAt: new Date(Date.now() - 1000),
+          createdById: a.clinic.adminUserId,
         },
       });
-      const gone = await pub(a).get(expired.token).expect(404);
+      const gone = await pub(a).get(expiredToken).expect(404);
       expect(messageOf(gone)).toBe(PAYMENT_LINK_NOT_FOUND_MESSAGE);
       const used = await reported(a);
       const res = await pub(a).get(used.token).expect(410);

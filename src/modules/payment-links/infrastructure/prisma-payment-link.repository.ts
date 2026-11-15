@@ -474,15 +474,6 @@ export class PrismaPaymentLinkRepository implements PaymentLinkRepository {
     });
   }
 
-  async releaseProofUpload(linkId: string): Promise<void> {
-    await this.prisma.runWithTenant((tx) =>
-      tx.paymentLink.updateMany({
-        where: { id: linkId, proofUploadsIssued: { gt: 0 } },
-        data: { proofUploadsIssued: { decrement: 1 } },
-      }),
-    );
-  }
-
   stageProof(
     linkId: string,
     proof: PaymentProofAttachment,
