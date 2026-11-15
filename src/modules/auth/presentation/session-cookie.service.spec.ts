@@ -5,6 +5,7 @@ import {
   REFRESH_COOKIE_PATH,
   SessionCookieService,
 } from './session-cookie.service';
+import type { VerifiedDomainOrigins } from '../../../shared/security/verified-domain-origins';
 
 const EXP = Math.floor(Date.now() / 1000) + 3600;
 
@@ -26,6 +27,11 @@ const devConfig = configOf({
   CORS_ROOT_DOMAIN: 'localhost',
 });
 
+/** SEC-021: solo `citas.miclinica.com` está VERIFIED. */
+const verifiedDomains = {
+  isVerified: (host: string) => Promise.resolve(host === 'citas.miclinica.com'),
+} as unknown as VerifiedDomainOrigins;
+
 function fakeRes() {
   return { cookie: jest.fn(), clearCookie: jest.fn() };
 }
@@ -41,7 +47,7 @@ function req(
 }
 
 describe('SessionCookieService', () => {
-  const service = new SessionCookieService(devConfig);
+  const service = new SessionCookieService(devConfig, verifiedDomains);
 
   describe('read', () => {
     it('lee el refresh de la cookie de sesión entre otras cookies', () => {
@@ -103,6 +109,7 @@ describe('SessionCookieService', () => {
     it('marca la cookie Secure en producción', () => {
       const prod = new SessionCookieService(
         configOf({ NODE_ENV: 'production', CORS_ROOT_DOMAIN: 'dentalix.app' }),
+        verifiedDomains,
       );
       const res = fakeRes();
 
@@ -156,50 +163,91 @@ describe('SessionCookieService', () => {
   });
 
   describe('assertTrustedOrigin (CSRF)', () => {
-    it('acepta el origen de la web en el mismo host de la clínica', () => {
-      expect(() =>
-        service.assertTrustedOrigin(
-          req({ origin: 'http://demo.localhost:3001' }, 'demo.localhost:3001'),
-        ),
-      ).not.toThrow();
+    const accepts = (r: ReturnType<typeof req>, svc = service) =>
+      expect(svc.assertTrustedOrigin(r)).resolves.toBeUndefined();
+    const rejects = (r: ReturnType<typeof req>, svc = service) =>
+      expect(svc.assertTrustedOrigin(r)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+
+    it('acepta el origen de la web en el mismo host de la clínica', async () => {
+      await accepts(
+        req({ origin: 'http://demo.localhost:3001' }, 'demo.localhost:3001'),
+      );
     });
 
-    it('acepta el host sin distinguir mayúsculas', () => {
-      expect(() =>
-        service.assertTrustedOrigin(
-          req({ origin: 'http://Demo.localhost:3001' }, 'demo.LOCALHOST:3001'),
-        ),
-      ).not.toThrow();
+    it('acepta el host sin distinguir mayúsculas', async () => {
+      await accepts(
+        req({ origin: 'http://Demo.localhost:3001' }, 'demo.LOCALHOST:3001'),
+      );
     });
 
-    it('rechaza (403) una petición sin Origin', () => {
-      expect(() =>
-        service.assertTrustedOrigin(req({}, 'demo.localhost:3001')),
-      ).toThrow(ForbiddenException);
+    it('rechaza (403) una petición sin Origin', async () => {
+      await rejects(req({}, 'demo.localhost:3001'));
     });
 
-    it('rechaza (403) un origen ajeno', () => {
-      expect(() =>
-        service.assertTrustedOrigin(
-          req({ origin: 'https://evil.example' }, 'demo.localhost:3001'),
-        ),
-      ).toThrow(ForbiddenException);
+    it('rechaza (403) un origen ajeno', async () => {
+      await rejects(
+        req({ origin: 'https://evil.example' }, 'demo.localhost:3001'),
+      );
     });
 
-    it('rechaza (403) un origen permitido pero de OTRO host (otra clínica)', () => {
-      expect(() =>
-        service.assertTrustedOrigin(
-          req({ origin: 'http://otra.localhost:3001' }, 'demo.localhost:3001'),
-        ),
-      ).toThrow(ForbiddenException);
+    it('rechaza (403) un origen permitido pero de OTRO host (otra clínica)', async () => {
+      await rejects(
+        req({ origin: 'http://otra.localhost:3001' }, 'demo.localhost:3001'),
+      );
     });
 
-    it('rechaza (403) un Origin "null" o mal formado', () => {
+    it('rechaza (403) un Origin "null" o mal formado', async () => {
       for (const origin of ['null', 'no es una url']) {
-        expect(() =>
-          service.assertTrustedOrigin(req({ origin }, 'demo.localhost:3001')),
-        ).toThrow(ForbiddenException);
+        await rejects(req({ origin }, 'demo.localhost:3001'));
       }
+    });
+
+    describe('SEC-021 en producción', () => {
+      const prod = new SessionCookieService(
+        configOf({
+          NODE_ENV: 'production',
+          CORS_ORIGINS: 'https://dentalix.app',
+          CORS_ROOT_DOMAIN: 'dentalix.app',
+        }),
+        verifiedDomains,
+      );
+
+      it('acepta el dominio propio VERIFIED en su propio host', async () => {
+        await accepts(
+          req({ origin: 'https://citas.miclinica.com' }, 'citas.miclinica.com'),
+          prod,
+        );
+      });
+
+      it('acepta el subdominio https de la clínica', async () => {
+        await accepts(
+          req({ origin: 'https://demo.dentalix.app' }, 'demo.dentalix.app'),
+          prod,
+        );
+      });
+
+      it('rechaza (403) un dominio propio no VERIFIED (PENDING o desconocido)', async () => {
+        await rejects(
+          req({ origin: 'https://citas.pendiente.com' }, 'citas.pendiente.com'),
+          prod,
+        );
+      });
+
+      it('rechaza (403) el subdominio por http o con puerto no estándar', async () => {
+        await rejects(
+          req({ origin: 'http://demo.dentalix.app' }, 'demo.dentalix.app'),
+          prod,
+        );
+        await rejects(
+          req(
+            { origin: 'https://demo.dentalix.app:8443' },
+            'demo.dentalix.app:8443',
+          ),
+          prod,
+        );
+      });
     });
   });
 });

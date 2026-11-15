@@ -4,9 +4,24 @@ import type { Application } from 'express';
 import helmet from 'helmet';
 import {
   SecuritySettings,
+  VerifiedDomainLookup,
   isAllowedOrigin,
   loadSecuritySettings,
 } from './security-settings';
+import { VerifiedDomainOrigins } from './verified-domain-origins';
+
+/**
+ * La caché de dominios propios de la app (VerifiedDomainOriginsModule, en
+ * AppModule). Solo falta en apps de test montadas sin AppModule ni base de
+ * datos (p. ej. ficheros): ahí vale solo la regla estática.
+ */
+function verifiedDomainsOf(app: INestApplication): VerifiedDomainLookup | null {
+  try {
+    return app.get(VerifiedDomainOrigins, { strict: false });
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Seguridad HTTP de la app: IP real tras el proxy, cabeceras (helmet) y CORS.
@@ -20,6 +35,7 @@ export function applySecurity(
     app.get(ConfigService).get<string>(k),
   ),
 ): void {
+  const verifiedDomains = verifiedDomainsOf(app);
   const express = app.getHttpAdapter().getInstance() as Application;
   // `req.ip` (clave del rate limiting) sale de X-Forwarded-For solo si hay un
   // proxy de confianza; si no, de la IP del socket (no falseable).
@@ -47,11 +63,17 @@ export function applySecurity(
       cb: (err: Error | null, allow?: boolean) => void,
     ) => {
       if (!origin) return cb(null, true); // non-browser / same-origin / curl
-      if (isAllowedOrigin(origin, settings)) return cb(null, true);
-      // Un origen ajeno no llega al handler (ni recibe cabeceras CORS): la
-      // petición se corta aquí con 403. Es también la primera barrera CSRF
-      // del refresh por cookie (DX-062).
-      return cb(new ForbiddenException('Origin not allowed'), false);
+      isAllowedOrigin(origin, settings, verifiedDomains).then(
+        (allowed) =>
+          allowed
+            ? cb(null, true)
+            : // Un origen ajeno no llega al handler (ni recibe cabeceras
+              // CORS): la petición se corta aquí con 403. Es también la
+              // primera barrera CSRF del refresh por cookie (DX-062).
+              cb(new ForbiddenException('Origin not allowed'), false),
+        // Sin base de datos no se sabe: error (500), nunca se deja pasar.
+        (error: Error) => cb(error, false),
+      );
     },
     credentials: true,
     allowedHeaders: [

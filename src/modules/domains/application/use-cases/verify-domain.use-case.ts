@@ -20,6 +20,7 @@ import {
   verificationRecordName,
 } from '../../domain/rules/tenant-domain-rules';
 import { DomainClock } from '../domain-clock';
+import { VerifiedDomainOrigins } from '../../../../shared/security/verified-domain-origins';
 
 export const DOMAIN_NOT_FOUND = 'Dominio no encontrado.';
 export const DOMAIN_EXPIRED =
@@ -39,6 +40,7 @@ export class VerifyDomainUseCase {
     private readonly repo: TenantDomainRepository,
     @Inject(DNS_RESOLVER) private readonly dns: DnsResolver,
     private readonly clock: DomainClock,
+    private readonly origins: VerifiedDomainOrigins,
   ) {}
 
   async execute(input: { id: string }): Promise<{ status: TenantDomainState }> {
@@ -62,7 +64,12 @@ export class VerifyDomainUseCase {
     }
 
     const result = await this.repo.markVerified(domain.id, now);
-    if (result === 'verified') return { status: 'VERIFIED' };
+    if (result === 'verified') {
+      // SEC-021: su origen https vale para CORS y el refresh desde ya (sin
+      // esperar a que caduque una respuesta negativa cacheada).
+      this.origins.invalidate(domain.host);
+      return { status: 'VERIFIED' };
+    }
     if (result === 'taken') throw new ConflictException(DOMAIN_TAKEN);
     // Cambió entre la lectura y la escritura: se informa del estado actual.
     const current = await this.repo.findById(domain.id);

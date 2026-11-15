@@ -8,6 +8,7 @@ import {
   isAllowedOrigin,
   loadSecuritySettings,
 } from '../../../shared/security/security-settings';
+import { VerifiedDomainOrigins } from '../../../shared/security/verified-domain-origins';
 
 /** Nombre de la cookie que guarda el refresh token de la web. */
 export const REFRESH_COOKIE = 'dentalix_rt';
@@ -72,7 +73,10 @@ export class SessionCookieService {
   private readonly secure: boolean;
   private readonly security: SecuritySettings;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly verifiedDomains: VerifiedDomainOrigins,
+  ) {
     const env = (key: string) => config.get<string>(key);
     this.secure = env('NODE_ENV') === 'production';
     this.security = loadSecuritySettings(env);
@@ -152,10 +156,11 @@ export class SessionCookieService {
   /**
    * CSRF, además de SameSite=Strict: un refresh o logout que se autentica con
    * la COOKIE solo se acepta si el `Origin` es una web de Dentalix (misma
-   * regla que CORS) y es exactamente el host de la petición, es decir, la
-   * propia clínica. Sin `Origin` (o `null`) no hay forma de saberlo → 403.
+   * regla que CORS, con los dominios propios VERIFIED desde SEC-021) y es
+   * exactamente el host de la petición, es decir, la propia clínica. Sin
+   * `Origin` (o `null`) no hay forma de saberlo → 403.
    */
-  assertTrustedOrigin(req: TenantHostRequest): void {
+  async assertTrustedOrigin(req: TenantHostRequest): Promise<void> {
     const origin = headerOf(req, 'origin');
     const host = req.tenantHost?.host?.toLowerCase();
     let originHost: string | undefined;
@@ -169,7 +174,7 @@ export class SessionCookieService {
       !originHost ||
       !host ||
       originHost !== host ||
-      !isAllowedOrigin(origin, this.security)
+      !(await isAllowedOrigin(origin, this.security, this.verifiedDomains))
     ) {
       throw new ForbiddenException('Untrusted origin');
     }

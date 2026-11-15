@@ -76,6 +76,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
 import { OutboundMessagesModule } from './modules/notifications/outbound/outbound-messages.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
+import { VerifiedDomainOriginsModule } from './shared/security/verified-domain-origins.module';
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
 import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
 import { RecallModule } from './modules/recall/recall.module';
@@ -86,6 +87,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ConfigModule,
     SecurityModule,
     PrismaModule,
+    VerifiedDomainOriginsModule,
     // Global (DX-340): decimales por moneda de `currencies`.
     MoneyModule,
     TenantContextModule,

@@ -1,3 +1,4 @@
+import type { VerifiedDomainOrigins } from '../../../../shared/security/verified-domain-origins';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import type { TenantDomainRow } from '../../domain/entities/tenant-domain.entity';
@@ -293,5 +294,21 @@ class TenantView implements TenantDomainRepository {
       status: input.disable ? 'DISABLED' : 'VERIFIED',
       failedChecks: input.failedChecks,
     });
+  }
+}
+
+/**
+ * SEC-021: la caché de orígenes de dominios propios, solo para ver qué se
+ * invalidó (`undefined` = toda la caché).
+ */
+export class FakeVerifiedOrigins {
+  readonly invalidated: (string | undefined)[] = [];
+
+  invalidate(host?: string): void {
+    this.invalidated.push(host);
+  }
+
+  as(): VerifiedDomainOrigins {
+    return this as unknown as VerifiedDomainOrigins;
   }
 }

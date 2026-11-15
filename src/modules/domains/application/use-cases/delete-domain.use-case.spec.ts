@@ -1,7 +1,11 @@
 import { NotFoundException } from '@nestjs/common';
 import { DeleteDomainUseCase } from './delete-domain.use-case';
 import { ListDomainsUseCase } from './list-domains.use-case';
-import { FakeClock, InMemoryDomains } from '../__fixtures__/fake-domains';
+import {
+  FakeClock,
+  FakeVerifiedOrigins,
+  InMemoryDomains,
+} from '../__fixtures__/fake-domains';
 
 const A = 'tenant-a';
 const B = 'tenant-b';
@@ -13,10 +17,13 @@ describe('DeleteDomainUseCase (SEC-009)', () => {
     const rows = (['PENDING', 'VERIFIED', 'DISABLED'] as const).map(
       (status, i) => store.seed(A, { host: `d${i}.miclinica.com`, status }),
     );
-    const uc = new DeleteDomainUseCase(store.as(A), clock);
+    const origins = new FakeVerifiedOrigins();
+    const uc = new DeleteDomainUseCase(store.as(A), clock, origins.as());
     for (const row of rows) {
       await uc.execute({ id: row.id });
     }
+    // SEC-021: cada borrado vacía la caché de orígenes de este proceso.
+    expect(origins.invalidated).toEqual([undefined, undefined, undefined]);
     expect(
       store.rows.every(
         (r) => r.deletedAt?.getTime() === clock.current.getTime(),
@@ -30,17 +37,27 @@ describe('DeleteDomainUseCase (SEC-009)', () => {
   it('404 for a domain of another tenant (and it is left untouched)', async () => {
     const store = new InMemoryDomains();
     const other = store.seed(B, { host: 'citas.otra.com' });
-    const uc = new DeleteDomainUseCase(store.as(A), new FakeClock());
+    const origins = new FakeVerifiedOrigins();
+    const uc = new DeleteDomainUseCase(
+      store.as(A),
+      new FakeClock(),
+      origins.as(),
+    );
     await expect(uc.execute({ id: other.id })).rejects.toBeInstanceOf(
       NotFoundException,
     );
     expect(store.rows[0].deletedAt).toBeNull();
+    expect(origins.invalidated).toEqual([]);
   });
 
   it('404 for an already deleted domain', async () => {
     const store = new InMemoryDomains();
     const row = store.seed(A, { host: 'citas.miclinica.com' });
-    const uc = new DeleteDomainUseCase(store.as(A), new FakeClock());
+    const uc = new DeleteDomainUseCase(
+      store.as(A),
+      new FakeClock(),
+      new FakeVerifiedOrigins().as(),
+    );
     await uc.execute({ id: row.id });
     await expect(uc.execute({ id: row.id })).rejects.toBeInstanceOf(
       NotFoundException,
