@@ -337,7 +337,7 @@ describe('DX-247 · banderas médicas y «Sin cambios hoy» en la BD (int)', () 
           data: { reviewedById: randomUUID() },
         }),
       ),
-    ).rejects.toThrow(/inalterable/);
+    ).rejects.toThrow(/(?:inalterable)|permission denied for table/);
     await expect(
       prisma.runWithTenant(
         a.tenantId,
@@ -345,7 +345,7 @@ describe('DX-247 · banderas médicas y «Sin cambios hoy» en la BD (int)', () 
           // Por SQL: el cliente de la app ni siquiera expone el borrado duro.
           tx.$executeRaw`DELETE FROM "medical_history_reviews" WHERE "id" = ${created.id}::uuid`,
       ),
-    ).rejects.toThrow(/inalterable/);
+    ).rejects.toThrow(/(?:inalterable)|permission denied for table/);
   });
 
   it('la vigencia de la clínica va de 1 a 60 meses (CHECK) y devuelve antes y después', async () => {

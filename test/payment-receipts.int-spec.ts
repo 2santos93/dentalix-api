@@ -334,7 +334,7 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
             DELETE FROM "payment_receipt_counters"
              WHERE "tenantId" = ${a.tenantId}::uuid`,
         ),
-      ).rejects.toThrow(/nunca se reutiliza/);
+      ).rejects.toThrow(/(?:nunca se reutiliza)|permission denied for table/);
     });
   });
 
@@ -536,7 +536,7 @@ describe('DX-136 · recibo de caja numerado por sede (int)', () => {
           (tx) =>
             tx.$executeRaw`DELETE FROM "payment_receipts" WHERE "id" = ${receiptId}::uuid`,
         ),
-      ).rejects.toThrow(/no admite DELETE/);
+      ).rejects.toThrow(/(?:no admite DELETE)|permission denied for table/);
     });
 
     it('anular el abono marca el recibo ANULADO una sola vez y conserva su número', async () => {

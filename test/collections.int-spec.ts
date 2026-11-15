@@ -24,7 +24,7 @@ const prisma = new PrismaService(tenantContext);
 
 const SUBDOMAINS = ['dx150-int-a', 'dx150-int-b'];
 const FK_VIOLATION = { code: 'P2003' };
-const IMMUTABLE = /inalterable|no admite/;
+const IMMUTABLE = /(?:inalterable|no admite)|permission denied for table/;
 const CARACAS = 'America/Caracas';
 
 interface Clinic {

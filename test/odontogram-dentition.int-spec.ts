@@ -16,7 +16,8 @@ const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 
-const APPEND_ONLY = /append-only/;
+// DX-148: como la app, el privilegio (REVOKE) corta antes que el trigger.
+const APPEND_ONLY = /(?:append-only)|permission denied for table/;
 const FK_VIOLATION = { code: 'P2003' };
 const UNIQUE_VIOLATION = { code: 'P2002' };
 
