@@ -1315,6 +1315,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'locationId' },
     reason: 'CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED',
   },
+  // DX-405: la copia sin conexión de la agenda (mismos datos que el PDF) sale
+  // al navegador: cada lectura, con la sede.
+  'GET /locations/:locationId/contingency-agenda/offline': {
+    action: 'EXPORT',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CONTINGENCY_AGENDA_OFFLINE_SYNCED',
+  },
   // DX-015: recall. La lista (con teléfonos) se audita sin paciente; el
   // contacto, sin la nota; fijar o pausar el recall, con el paciente.
   'GET /recall/due': { action: 'VIEW', resource: 'PATIENT_RECALL' },

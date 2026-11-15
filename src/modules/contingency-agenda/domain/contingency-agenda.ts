@@ -57,6 +57,8 @@ export interface ContingencyAppointment {
   medicalAlert: boolean;
   /** Pidió que le llamen desde el enlace de confirmación (DX-005). */
   callbackRequested: boolean;
+  /** DX-405: gabinete (sillón) de la cita; null sin sillón. Solo la copia sin conexión lo usa. */
+  chairName?: string | null;
 }
 
 export interface ContingencySource {
@@ -182,4 +184,45 @@ export function buildContingencyAgenda(
     days,
     total: days.reduce((n, d) => n + d.rows.length, 0),
   };
+}
+
+/**
+ * DX-405: una cita de la copia SIN CONEXIÓN de la agenda (hoy y mañana) que la
+ * web guarda cifrada en el navegador. Los mismos datos que el PDF, sin textos
+ * formateados (la web los pinta con el reloj de la sede): hora, gabinete,
+ * profesional, paciente, teléfono, tipo, estado (confirmación) y la alerta
+ * médica como sí/no. Nunca notas, motivo ni nada de la historia clínica.
+ */
+export interface OfflineAgendaAppointment {
+  id: string;
+  start: Date;
+  end: Date;
+  status: AppointmentStatus;
+  chairName: string | null;
+  professionalName: string | null;
+  patientName: string;
+  phone: string | null;
+  appointmentTypeName: string | null;
+  medicalAlert: boolean;
+}
+
+/** Las citas esperadas (sin canceladas ni inasistencias), en el orden del PDF. */
+export function offlineAgendaAppointments(
+  appointments: readonly ContingencyAppointment[],
+): OfflineAgendaAppointment[] {
+  return appointments
+    .filter((a) => EXPECTED_STATUSES.has(a.status))
+    .sort(compare)
+    .map((a) => ({
+      id: a.appointmentId,
+      start: a.start,
+      end: a.end,
+      status: a.status,
+      chairName: a.chairName ?? null,
+      professionalName: a.professionalName,
+      patientName: a.patientName,
+      phone: a.phone,
+      appointmentTypeName: a.appointmentTypeName,
+      medicalAlert: a.medicalAlert,
+    }));
 }
