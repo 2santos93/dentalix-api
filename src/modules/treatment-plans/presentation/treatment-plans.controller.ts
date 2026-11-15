@@ -470,7 +470,7 @@ export class TreatmentPlansController {
   })
   @ApiNotFoundResponse({
     description:
-      'Ítem inexistente o de otra clínica; DX-050: `performedById` que no es miembro activo de esta clínica (otra clínica o desactivado)',
+      'Ítem inexistente, de otra clínica o de otro plan (DX-111: el ítem debe ser del plan `:id`); DX-050: `performedById` que no es miembro activo de esta clínica (otra clínica o desactivado)',
   })
   @ApiForbiddenResponse({
     description: `${DISCOUNT_FORBIDDEN}. DX-050: cambiar quién o cuándo de un ítem DONE (solo ADMIN); sacarlo de DONE (solo ADMIN o quien lo realizó)`,
@@ -480,6 +480,7 @@ export class TreatmentPlansController {
   })
   @ApiUnprocessableEntityResponse({ description: DISCOUNT_UNPROCESSABLE })
   updateItem(
+    @Param('id', ParseUUIDPipe) id: string,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Body() dto: UpdateTreatmentPlanItemDto,
     @Req() req: AuthenticatedRequest,
@@ -505,6 +506,7 @@ export class TreatmentPlansController {
       },
       actorRole(req),
       auditRequestContext(req, this.tenantContext),
+      id,
     );
   }
 
@@ -516,16 +518,22 @@ export class TreatmentPlansController {
   })
   @Delete('treatment-plans/:id/items/:itemId')
   @ApiOkResponse({ description: 'Item soft-deleted (deletedAt set)' })
+  @ApiNotFoundResponse({
+    description:
+      'Ítem inexistente, de otra clínica o de otro plan (DX-111: el ítem debe ser del plan `:id`)',
+  })
   @ApiConflictResponse({
     description: `${ITEMS_LOCKED_CONFLICT}; ${FEE_ITEM_CONFLICT}`,
   })
   removeItem(
+    @Param('id', ParseUUIDPipe) id: string,
     @Param('itemId', ParseUUIDPipe) itemId: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {
     return this.removeTreatmentPlanItem.execute(
       itemId,
       auditRequestContext(req, this.tenantContext),
+      id,
     );
   }
 }

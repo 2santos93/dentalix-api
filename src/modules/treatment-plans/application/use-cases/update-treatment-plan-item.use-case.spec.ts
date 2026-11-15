@@ -181,6 +181,36 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('DX-111: un ítem de otro plan responde 404 y no se toca', async () => {
+    const existing = fakeItem();
+    const repo = makeRepo({
+      findItemById: (): Promise<TreatmentPlanItem | null> =>
+        Promise.resolve(existing),
+      updateItem: (): Promise<TreatmentPlanItemUpdate> =>
+        Promise.reject(new Error('updateItem should not be called')),
+    });
+    const uc = new UpdateTreatmentPlanItemUseCase(
+      repo,
+      makeCatalogRepo(),
+      testDiscountPolicy(),
+      FIXED_CLOCK,
+    );
+
+    await expect(
+      uc.execute(
+        existing.id,
+        { price: 100 },
+        ADMIN_ACTOR,
+        undefined,
+        `${existing.planId}-otro`,
+      ),
+    ).rejects.toThrow(
+      new NotFoundException(
+        'No se encontró el ítem en este plan de tratamiento.',
+      ),
+    );
+  });
+
   it('changes price', async () => {
     const existing = fakeItem();
     let receivedPatch: UpdateTreatmentPlanItemRepoInput | undefined;
