@@ -20,7 +20,7 @@
 -- tests) puede borrar. SECURITY INVOKER y search_path fijado; sin consultas
 -- a otras tablas (solo OLD/NEW y el catálogo de roles al borrar).
 --
--- Tablas nuevas (DX-569, 20261220090300) que el código anterior no conoce.
+-- Tablas nuevas (DX-569, 20261224090300) que el código anterior no conoce.
 -- Vuelta atrás: DROP TRIGGER … y DROP FUNCTION de las dos guardas.
 
 SET LOCAL lock_timeout = '5s';

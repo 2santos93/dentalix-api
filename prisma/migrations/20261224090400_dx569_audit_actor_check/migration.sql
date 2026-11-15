@@ -1,12 +1,12 @@
 -- DX-569: el paciente reporta su pago por el enlace de pago, sin sesión: el
 -- alta del reporte se audita sin usuario (CREATE de PAYMENT_REPORT, origen
 -- PUBLIC_LINK, reason PAYMENT_REPORT_SUBMITTED). El CHECK de actor de
--- audit_events es la UNIÓN del de main (20261216090300, DX-467) y esa
--- escritura, y solo ella.
+-- audit_events es la UNIÓN del de main (20261223090400, DX-306, que ya une
+-- DX-468) y esa escritura, y solo ella.
 --
--- Más permisivo (NOT VALID; su VALIDATE va en 20261220090500, molde de
--- DX-361 / DX-435 / DX-443 / DX-437 / DX-467). lock_timeout evita quedar
--- encolado tras una transacción larga.
+-- Más permisivo (NOT VALID; su VALIDATE va en 20261224090500, molde de
+-- DX-361 / DX-435 / DX-443 / DX-437 / DX-467 / DX-468 / DX-306).
+-- lock_timeout evita quedar encolado tras una transacción larga.
 
 SET LOCAL lock_timeout = '5s';
 
@@ -131,6 +131,27 @@ ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
         AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
         AND "metadata" ->> 'reason' IN ('PRESCRIPTION_VERIFIED',
                                         'PRESCRIPTION_INTEGRITY_MISMATCH')) IS TRUE
+    -- DX-468: el paciente (o el responsable de un menor) abre la copia de su
+    -- receta desde el enlace caducable que le envió la clínica. Solo ids y el
+    -- motivo: el token no va en el evento.
+    OR ("action" = 'VIEW'
+        AND "resourceType" = 'PRESCRIPTION'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' = 'PRESCRIPTION_COPY_OPENED') IS TRUE
+    -- DX-306: el paciente (o el responsable de un menor) abre la copia de su
+    -- certificado (VIEW) o descarga su PDF (EXPORT) desde el enlace caducable
+    -- que le envió la clínica por WhatsApp. Solo ids y el motivo.
+    OR ("action" IN ('VIEW', 'EXPORT')
+        AND "resourceType" = 'PATIENT_CERTIFICATE'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND (("action" = 'VIEW' AND "metadata" ->> 'reason' = 'CERTIFICATE_COPY_OPENED')
+          OR ("action" = 'EXPORT' AND "metadata" ->> 'reason' = 'CERTIFICATE_COPY_DOWNLOADED'))) IS TRUE
     -- DX-569: el paciente (sin sesión) reporta su pago desde el enlace de
     -- pago: el alta del reporte. Solo ids y el motivo: ni importes ni la
     -- referencia van en el evento.
