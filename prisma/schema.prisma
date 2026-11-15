@@ -271,6 +271,11 @@ model Tenant {
   patientCertificates         PatientCertificate[]
   patientCertificateCopyLinks PatientCertificateCopyLink[]
 
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentMethodInstructions PaymentMethodInstruction[]
+  paymentLinks              PaymentLink[]
+  paymentReports            PaymentReport[]
+
   @@map("tenants")
 }
 
@@ -573,6 +578,11 @@ model Location {
   creditTransfers PatientCreditTransfer[]
   creditRefunds   PatientCreditRefund[]
 
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentMethodInstructions PaymentMethodInstruction[]
+  paymentLinks              PaymentLink[]
+  paymentReports            PaymentReport[]
+
   @@unique([tenantId, id], map: "locations_tenant_id_key")
   @@unique([tenantId, receiptPrefix], map: "locations_tenant_receipt_prefix_key")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
@@ -874,6 +884,9 @@ model Patient {
   signedConsentPdfs           SignedConsentPdf[]
   country                     Country?                         @relation(fields: [countryCode], references: [code])
   city                        City?                            @relation(fields: [cityId], references: [id])
+
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentLinks PaymentLink[]
 
   @@unique([tenantId, docNumber], map: "patients_tenant_doc_key")
   // Requisito de las FK COMPUESTAS de Appointment, TreatmentPlan,
@@ -2078,6 +2091,9 @@ model TreatmentPlan {
   creditRefunds      PatientCreditRefund[]   @relation("CreditRefundPlan")
   creditEntries      PatientCreditEntry[]    @relation("CreditEntryPlan")
 
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentLinks PaymentLink[]
+
   @@unique([tenantId, id], map: "treatment_plans_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "treatment_plans_tenant_id_patient_key")
   @@index([tenantId, patientId])
@@ -2595,6 +2611,10 @@ model Currency {
   creditRefunds   PatientCreditRefund[]   @relation("CreditRefundCurrency")
   creditEntries   PatientCreditEntry[]    @relation("CreditEntryCurrency")
 
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentLinks   PaymentLink[]
+  paymentReports PaymentReport[]
+
   @@map("currencies")
 }
 
@@ -2788,6 +2808,8 @@ model PaymentMethodInstruction {
   updatedAt       DateTime @updatedAt
 
   paymentMethod ClinicPaymentMethod @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payment_method_instructions_method_fkey")
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location      Location?           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "payment_method_instructions_location_fkey")
 
   @@index([tenantId, locationId], map: "payment_method_instructions_location_idx")
   @@map("payment_method_instructions")
@@ -2834,7 +2856,13 @@ model PaymentLink {
   stagedProofSha256   String?
   stagedProofName     String?
 
-  report PaymentReport?
+  report         PaymentReport?
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient        Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "payment_links_patient_fkey")
+  plan           TreatmentPlan?  @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payment_links_plan_fkey")
+  openingBalance OpeningBalance? @relation(fields: [tenantId, openingBalanceId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payment_links_opening_balance_fkey")
+  location       Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "payment_links_location_fkey")
+  currencyRef    Currency        @relation(fields: [currency], references: [code], onDelete: Restrict, map: "payment_links_currency_fkey")
 
   @@unique([tenantId, id, patientId], map: "payment_links_tenant_id_patient_key")
   @@index([tenantId, patientId, createdAt(sort: Desc)], map: "payment_links_patient_idx")
@@ -2872,10 +2900,16 @@ model PaymentReport {
 
   link          PaymentLink         @relation(fields: [tenantId, linkId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "payment_reports_link_fkey")
   paymentMethod ClinicPaymentMethod @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payment_reports_method_fkey")
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location      Location            @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "payment_reports_location_fkey")
+  payment       Payment?            @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "payment_reports_payment_fkey")
+  currencyRef   Currency            @relation(fields: [currency], references: [code], onDelete: Restrict, map: "payment_reports_currency_fkey")
 
   @@unique([tenantId, linkId, patientId], map: "payment_reports_link_key")
   @@index([tenantId, status, createdAt], map: "payment_reports_inbox_idx")
   @@index([tenantId, patientId], map: "payment_reports_patient_idx")
+  @@index([tenantId, locationId], map: "payment_reports_location_idx")
+  @@index([tenantId, paymentMethodId], map: "payment_reports_method_idx")
   @@map("payment_reports")
 }
 
@@ -3077,6 +3111,9 @@ model Payment {
   // recreates this as a full index.
   // DX-253: devoluciones que lo citan como abono de referencia.
   creditRefundRefs PatientCreditRefundPayment[]
+
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentReports PaymentReport[]
 
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   // DX-380: destino de la FK compuesta por clínica de `payment_base_retries`
@@ -6156,6 +6193,9 @@ model OpeningBalance {
   currencyRef Currency           @relation(fields: [currency], references: [code], onDelete: Restrict, map: "opening_balances_currency_fkey")
   /// Abonos registrados contra este saldo (vivos: `deletedAt` NULL).
   payments    Payment[]
+
+  // DX-569: enlace de pago y reporte del paciente.
+  paymentLinks PaymentLink[]
 
   @@unique([tenantId, id], map: "opening_balances_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "opening_balances_tenant_id_patient_key")
