@@ -1,3 +1,4 @@
+import type { SiteToday } from '../../domain/paid-at-window';
 import {
   BadRequestException,
   ConflictException,
@@ -1067,13 +1068,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
     });
   }
 
-  async siteToday(now: Date): Promise<string | null> {
+  async siteToday(now: Date): Promise<SiteToday | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
       const locationId = await this.tenantContext.writeLocationId(tx);
       const zones = await loadLocationZones(tx, tenantId, [locationId]);
       const timeZone = zones.configured.get(locationId);
-      return timeZone === undefined ? null : civilDateIn(now, timeZone);
+      return timeZone === undefined
+        ? null
+        : { today: civilDateIn(now, timeZone), timeZone };
     });
   }
 

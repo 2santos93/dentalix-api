@@ -202,7 +202,7 @@ describe('generateSchedule', () => {
       const out = deriveStatuses(
         rows.map((r) => ({ kind: 'INSTALLMENT' as const, ...r })),
         3333 + 3333,
-        new Date('2026-04-01T00:00:00.000Z'),
+        '2026-04-01',
         { roundingDigits: 0 },
       );
       expect(out.map((t) => [t.amount, t.covered, t.status])).toEqual([

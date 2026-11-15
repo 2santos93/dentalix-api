@@ -1,3 +1,4 @@
+import type { SiteToday } from '../../../domain/paid-at-window';
 import { collectedAmount } from '../../../../payment-methods/domain/payment-adjustments';
 import { Payment } from '../../../domain/entities/payment.entity';
 import type { PaymentProofAttachment } from '../../../domain/payment-proof';
@@ -179,8 +180,15 @@ export class InMemoryPaymentRepository implements PaymentRepository {
     );
   }
 
-  siteToday(now: Date): Promise<string | null> {
-    return Promise.resolve(civilDateIn(now, this.timeZone));
+  /** DX-110: `false` simula una sede sin zona válida (rige solo la regla de 24 h). */
+  siteHasZone = true;
+
+  siteToday(now: Date): Promise<SiteToday | null> {
+    if (!this.siteHasZone) return Promise.resolve(null);
+    return Promise.resolve({
+      today: civilDateIn(now, this.timeZone),
+      timeZone: this.timeZone,
+    });
   }
 
   create(input: CreatePaymentRepoInput): Promise<Payment> {

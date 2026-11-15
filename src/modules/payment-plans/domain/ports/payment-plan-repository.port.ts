@@ -35,6 +35,14 @@ export interface PaymentPlanRepository {
   ): Promise<PaymentPlanWithInstallments | null>;
 
   /**
+   * DX-110: la zona IANA de la sede del plan de tratamiento (la de su
+   * aceptación o, sin ella, la de su presentación; sin ninguna, la principal):
+   * su día civil es el «hoy» con que vencen las cuotas. Una sede sin zona
+   * válida da 409 `LOCATION_TIMEZONE_REQUIRED` (nunca otra zona).
+   */
+  planTimeZone(treatmentPlanId: string): Promise<string>;
+
+  /**
    * Atomically set status=CANCELLED + deletedAt ONLY if currently ACTIVE.
    * Returns true if THIS call cancelled it, false if already gone (never
    * throws — the use case decides 404). Never a hard delete.

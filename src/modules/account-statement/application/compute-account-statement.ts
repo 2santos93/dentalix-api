@@ -22,6 +22,7 @@ import {
   type VoidActor,
 } from '../../payments/domain/void-window';
 import { isPlanBillable } from '../../treatment-plans/domain/plan-status-machine';
+import { isDueDayPast } from '../../payment-plans/domain/installment-due';
 import type { GetPlanBalanceResult } from '../../payments/application/use-cases/get-plan-balance.use-case';
 import { voidRefundReferenceMessage } from '../../patient-credit/domain/patient-credit';
 import { fromCents, toCents } from '../../../shared/money/money';
@@ -35,7 +36,11 @@ import type { RoundingDigits } from '../../../shared/money/line-rounding';
 export type PlanBalances = ReadonlyMap<string, GetPlanBalanceResult>;
 
 export interface ComputeAccountStatementOptions {
-  /** "Hoy" para decidir qué cuota está vencida (inyectado, nunca el reloj). */
+  /**
+   * "Ahora" (inyectado, nunca el reloj). DX-110: qué cuota está vencida lo
+   * decide su día civil en la zona de la sede de su plan (`timeZone` de cada
+   * plan de pagos), no el día UTC de este instante.
+   */
   today: Date;
   /**
    * Quién consulta: decide `canVoid` de cada movimiento con la regla de
@@ -217,6 +222,17 @@ export function computeBalances(
   const creditOf = (planId: string, currency: string): number =>
     creditByPlan.get(planId)?.get(currency) ?? 0;
   const planById = new Map(snapshot.plans.map((p) => [p.id, p]));
+  // DX-110: el día civil de `today` por zona, una vez por zona (la cartera
+  // pasa por aquí con miles de planes por petición).
+  const todayByZone = new Map<string, string>();
+  const todayIn = (timeZone: string): string => {
+    let day = todayByZone.get(timeZone);
+    if (day === undefined) {
+      day = civilDateIn(today, timeZone);
+      todayByZone.set(timeZone, day);
+    }
+    return day;
+  };
 
   // --- Planes -------------------------------------------------------------
   const plans: StatementPlanLine[] = snapshot.plans.map((plan) => {
@@ -310,10 +326,12 @@ export function computeBalances(
             .get(paymentPlan.treatmentPlanId)
             ?.get(paymentPlan.currency) ?? 0)) +
       creditOf(paymentPlan.treatmentPlanId, paymentPlan.currency);
+    // DX-110: «hoy» es el día civil de la sede del plan.
+    const planToday = todayIn(paymentPlan.timeZone);
     const derived = deriveStatuses(
       buildTramos(paymentPlan),
       fromCents(paidCents),
-      today,
+      planToday,
       {
         paidIncomplete: known?.rateProviderTimedOut,
         // B4: un residuo de la conversión que la moneda no tiene no deja una
@@ -348,8 +366,7 @@ export function computeBalances(
       } else if (
         (tramo.status === 'PENDING' || tramo.status === 'PARTIAL') &&
         // DX-472: una cuota pasada sin marcar vencida no es la próxima.
-        tramo.dueDate.toISOString().slice(0, 10) >=
-          today.toISOString().slice(0, 10) &&
+        !isDueDayPast(tramo.dueDate, planToday) &&
         (currencyAcc.next === null ||
           tramo.dueDate.getTime() < currencyAcc.next.dueDate.getTime())
       ) {

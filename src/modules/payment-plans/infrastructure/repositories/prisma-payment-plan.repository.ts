@@ -15,6 +15,8 @@ import {
   PaymentPlanRepository,
 } from '../../domain/ports/payment-plan-repository.port';
 import { PaymentPlanWithInstallments } from '../../domain/entities/payment-plan.entity';
+import { paymentPlanLocationId } from '../../domain/installment-due';
+import { loadTenantZones } from '../../../../shared/locations/reference-location';
 
 type PrismaPaymentPlan = Prisma.PaymentPlanGetPayload<{
   include: { installments: true };
@@ -129,6 +131,18 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
       });
     });
     return row ? mapToEntity(row) : null;
+  }
+
+  async planTimeZone(treatmentPlanId: string): Promise<string> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const plan = await tx.treatmentPlan.findFirst({
+        where: { id: treatmentPlanId, tenantId },
+        select: { acceptedLocationId: true, presentedLocationId: true },
+      });
+      const zoneOf = await loadTenantZones(tx, tenantId);
+      return zoneOf(plan ? paymentPlanLocationId(plan) : null);
+    });
   }
 
   async cancel(id: string): Promise<boolean> {

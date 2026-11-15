@@ -20,6 +20,13 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
 export class InMemoryPaymentPlanRepository implements PaymentPlanRepository {
   private readonly plans: StoredPlan[] = [];
 
+  /** DX-110: zona de la sede de cada plan de tratamiento (por defecto, Caracas). */
+  timeZone = 'America/Caracas';
+
+  planTimeZone(): Promise<string> {
+    return Promise.resolve(this.timeZone);
+  }
+
   create(
     input: CreatePaymentPlanRepoInput,
   ): Promise<PaymentPlanWithInstallments> {
