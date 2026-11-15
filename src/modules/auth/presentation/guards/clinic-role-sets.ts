@@ -160,6 +160,10 @@ export const INVENTORY_ROLES: ClinicRole[] = [
 // ajustable).
 export const DASHBOARD_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// DX-020: tarjeta «Pon en marcha tu clínica» del panel (ver y descartar). La
+// configuración que resume (horario, catálogo, personal) es del ADMIN.
+export const ONBOARDING_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // Gestión de personal (crear/editar rol/desactivar): solo gestión.
 export const STAFF_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 

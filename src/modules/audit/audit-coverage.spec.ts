@@ -2098,6 +2098,9 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /auth/forgot-password': 'envía el email; no enumera cuentas',
   'POST /me/avatar': 'foto de perfil propia',
   'DELETE /me/avatar': 'foto de perfil propia',
+  // DX-020: solo esconde la ayuda del panel; no cambia ningún ajuste.
+  'POST /onboarding/dismiss':
+    'descarta la tarjeta «Pon en marcha tu clínica»; sin evento',
 
   // --- Citas y enlaces al paciente -----------------------------------------
   'POST /public/post-op-instructions/:token/opened':

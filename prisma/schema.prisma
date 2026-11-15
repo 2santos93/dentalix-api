@@ -134,6 +134,10 @@ model Tenant {
   /// DX-306: el certificado de reposo imprime el diagnóstico (y solo entonces
   /// se recoge). false de plataforma. El justificante nunca lo lleva.
   certificateRestPrintDiagnosis           Boolean                          @default(false)
+  /// DX-020: cuándo descartó el ADMIN la tarjeta «Pon en marcha tu clínica»
+  /// del panel. NULL = se muestra. Es lo único que se guarda: el estado de
+  /// cada paso se calcula con los datos (GET /onboarding/status).
+  onboardingDismissedAt                   DateTime?
   createdAt                               DateTime                         @default(now())
   updatedAt                               DateTime                         @updatedAt
   deletedAt                               DateTime?
