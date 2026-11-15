@@ -188,6 +188,9 @@ model Tenant {
   reminderOptOutMatchWarnings             ReminderOptOutMatchWarning[]
   reminderOptOutLinks                     ReminderOptOutLink[]
   clinicalNoteTemplates                   ClinicalNoteTemplate[]
+  // DX-559: plantillas de plan de tratamiento y sus líneas.
+  treatmentPlanTemplates                  TreatmentPlanTemplate[]
+  treatmentPlanTemplateLines              TreatmentPlanTemplateLine[]
   // DX-150: cobranza (notas y compromisos de pago).
   collectionNotes                         CollectionNote[]
   patientRecalls                          PatientRecall[]
@@ -1351,7 +1354,9 @@ model DentalCatalogItem {
   priceListItems       PriceListItem[]
   // DX-015-bis: tipos de recall a los que este procedimiento mueve el reloj.
   recallTriggers       RecallTypeTrigger[]
-  clinicalNoteTemplate ClinicalNoteTemplate? @relation(fields: [tenantId, clinicalNoteTemplateId], references: [tenantId, id], onDelete: Restrict, map: "dental_catalog_items_note_template_fkey")
+  // DX-559: líneas de plantillas de plan que usan este procedimiento.
+  planTemplateLines    TreatmentPlanTemplateLine[]
+  clinicalNoteTemplate ClinicalNoteTemplate?       @relation(fields: [tenantId, clinicalNoteTemplateId], references: [tenantId, id], onDelete: Restrict, map: "dental_catalog_items_note_template_fkey")
 
   @@unique([tenantId, code], map: "catalog_tenant_code_key")
   // DX-105: destino de la FK compuesta de `price_list_items`.
@@ -4510,6 +4515,8 @@ enum AuditResourceType {
   // (enviado por el enlace, confirmado, rechazado y ver su comprobante).
   PAYMENT_LINK
   PAYMENT_REPORT
+  // DX-559: plantillas de plan de tratamiento (alta, edición, desactivación).
+  TREATMENT_PLAN_TEMPLATE
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -7836,4 +7843,66 @@ model PatientCertificateCopyLink {
   @@index([tenantId, patientId], map: "patient_certificate_copy_links_patient_idx")
   @@index([createdById], map: "patient_certificate_copy_links_created_by_idx")
   @@map("patient_certificate_copy_links")
+}
+
+/// DX-559: plantilla de plan de tratamiento. Agrupa procedimientos del
+/// catálogo por visitas, con los intervalos mínimos entre ellas, para
+/// presupuestar un caso habitual en segundos. No guarda precios ni
+/// descuentos: al aplicarla, cada línea toma el precio vigente del paciente.
+/// No se borra (sin DELETE para la app): se desactiva. Cambiarla no toca los
+/// planes ya creados.
+model TreatmentPlanTemplate {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  /// 1–80 caracteres, único por clínica.
+  name           String
+  active         Boolean  @default(true)
+  /// Versión optimista: sube en 1 con cada edición.
+  version        Int      @default(1)
+  /// Misma forma que `TreatmentPlan.visitIntervals`: `{ "<N>": días }`, los
+  /// días mínimos tras la visita N-1 (N de 2 a 50, días de 0 a 3650).
+  visitIntervals Json     @default("{}")
+  createdById    String?  @db.Uuid
+  updatedById    String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lines  TreatmentPlanTemplateLine[]
+
+  // Destino de la FK compuesta de las líneas.
+  @@unique([tenantId, id], map: "treatment_plan_templates_tenant_id_key")
+  @@unique([tenantId, name], map: "treatment_plan_templates_tenant_name_key")
+  @@map("treatment_plan_templates")
+}
+
+/// DX-559: línea de una plantilla de plan (1 a 50 por plantilla). Se
+/// reemplazan enteras al editar la plantilla (borrado duro permitido, con la
+/// plantilla en la auditoría) y se van con ella (CASCADE).
+model TreatmentPlanTemplateLine {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  templateId    String   @db.Uuid
+  /// Orden dentro de la plantilla, 0..49.
+  position      Int
+  catalogItemId String   @db.Uuid
+  /// N ítems iguales al aplicar (1–20).
+  quantity      Int      @default(1)
+  /// Visita de la plantilla (1–50); al aplicar se desplaza tras la última
+  /// visita viva del plan.
+  visit         Int      @default(1)
+  visitLabel    String?  @db.VarChar(60)
+  /// La vista previa ofrece las superficies (opcionales). El diente se pide
+  /// siempre.
+  asksSurfaces  Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  template    TreatmentPlanTemplate @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Cascade, map: "treatment_plan_template_lines_template_fkey")
+  catalogItem DentalCatalogItem     @relation(fields: [tenantId, catalogItemId], references: [tenantId, id], onDelete: Restrict, map: "treatment_plan_template_lines_catalog_fkey")
+
+  @@unique([tenantId, id], map: "treatment_plan_template_lines_tenant_id_key")
+  @@unique([tenantId, templateId, position], map: "treatment_plan_template_lines_position_key")
+  @@index([tenantId, catalogItemId], map: "treatment_plan_template_lines_catalog_idx")
+  @@map("treatment_plan_template_lines")
 }

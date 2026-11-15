@@ -33,6 +33,7 @@ function fakeTx() {
     postOpInstructionTemplateLink: model('postOpInstructionTemplateLink'),
     priceListItem: model('priceListItem'),
     recallTypeTrigger: model('recallTypeTrigger'),
+    treatmentPlanTemplateLine: model('treatmentPlanTemplateLine'),
     $executeRaw: jest.fn(() => {
       calls.push('$executeRaw');
       return Promise.resolve(1);
@@ -137,5 +138,13 @@ describe('guardHardDeletes', () => {
 
     await guarded.priceListItem.deleteMany();
     expect(calls).toEqual(['priceListItem.deleteMany']);
+  });
+
+  it('deja borrar las líneas de una plantilla de plan (allowlist, DX-559)', async () => {
+    const { tx, calls } = fakeTx();
+    const guarded = guard(tx);
+
+    await guarded.treatmentPlanTemplateLine.deleteMany();
+    expect(calls).toEqual(['treatmentPlanTemplateLine.deleteMany']);
   });
 });
