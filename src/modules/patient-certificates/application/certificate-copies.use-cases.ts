@@ -292,7 +292,15 @@ export class GetPublicCertificateCopyUseCase {
     token: string,
     meta: AuditRequestMeta,
   ): Promise<PublicCertificateCopyView> {
-    const { certificate, expiresAt } = await this.resolve(token);
+    const resolved = await this.resolve(token);
+    const { expiresAt } = resolved;
+    // La copia pública nunca lleva el diagnóstico (dato de salud): sale
+    // anotado como omitido, igual que en el PDF de la copia.
+    const certificate: PatientCertificate = {
+      ...resolved.certificate,
+      diagnosis: null,
+      diagnosisHidden: resolved.certificate.diagnosis !== null,
+    };
     await this.copies.recordPublicAccess({
       action: 'VIEW',
       certificateId: certificate.id,
@@ -321,7 +329,8 @@ export class GetPublicCertificateCopyUseCase {
       );
     }
     const pdf = await this.renderer.render(
-      buildCertificatePdfModel(certificate),
+      // La copia pública nunca lleva el diagnóstico (dato de salud).
+      buildCertificatePdfModel(certificate, { withDiagnosis: false }),
     );
     await this.copies.recordPublicAccess({
       action: 'EXPORT',

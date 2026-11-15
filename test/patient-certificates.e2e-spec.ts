@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -159,6 +160,7 @@ describe('Certificados del paciente (e2e, DX-306)', () => {
         firstName: 'Mariela',
         lastName: 'Rondón',
         birthDate: '1985-06-20',
+        phone: '+58 412 1234567',
       })
       .expect(201);
     patientId = (created.body as { id: string }).id;
@@ -283,7 +285,7 @@ describe('Certificados del paciente (e2e, DX-306)', () => {
     await issue({ kind: 'ATTENDANCE', appointmentId: otherAppt }).expect(404);
   });
 
-  it('sede no permitida: 403 LOCATION_NOT_ALLOWED al emitir, imprimir y anular', async () => {
+  it('sede no permitida: 403 LOCATION_NOT_ALLOWED al emitir; su certificado no sale en la lista y es 404 al imprimir y anular', async () => {
     const otherLocation = (
       (
         await as(clinicA)
@@ -313,14 +315,35 @@ describe('Certificados del paciente (e2e, DX-306)', () => {
         clinicA.adminToken,
       ).expect(201)
     ).body as Certificate;
+    // Un usuario de la sede A no ve ni obtiene los certificados de la sede B.
+    const listed = (
+      await as(clinicA, token)
+        .get(`/patients/${patientId}/certificates`)
+        .expect(200)
+    ).body as Certificate[];
+    expect(listed.map((c) => c.id)).not.toContain(cert.id);
     await as(clinicA, token)
       .get(`/patients/${patientId}/certificates/${cert.id}/pdf`)
-      .expect(403);
+      .expect(404);
     await as(clinicA, token)
       .post(`/patients/${patientId}/certificates/${cert.id}/void`, {
         reason: 'Sede equivocada',
       })
-      .expect(403);
+      .expect(404);
+    expect(
+      (
+        await raw.patientCertificate.findUniqueOrThrow({
+          where: { id: cert.id },
+        })
+      ).voidedAt,
+    ).toBeNull();
+    // Quien sí tiene esa sede (recepción, sin restricción) lo ve.
+    const all = (
+      await as(clinicA, receptionToken)
+        .get(`/patients/${patientId}/certificates`)
+        .expect(200)
+    ).body as Certificate[];
+    expect(all.map((c) => c.id)).toContain(cert.id);
     // Las citas de la otra sede no salen en su selector.
     const eligible = await as(clinicA, token)
       .get(`/patients/${patientId}/certificates/appointments`)
@@ -421,16 +444,69 @@ describe('Certificados del paciente (e2e, DX-306)', () => {
           .expect(200)
       ).body as Certificate[];
       const forReception = seen.find((c) => c.id === cert.id)!;
+      // Recepción no llega al diagnóstico por ninguna vía: ni en la lista,
+      // ni los ids de sus documentos, ni el PDF, ni la copia pública, y el
+      // PDF archivado en Documentos va sin diagnóstico.
       expect(forReception).toMatchObject({
         diagnosis: null,
         hasDiagnosis: true,
+        documentId: null,
+        voidedDocumentId: null,
       });
+      expect(JSON.stringify(seen)).not.toContain('Alveolitis');
       await as(clinicA, receptionToken)
         .get(`/patients/${patientId}/certificates/${cert.id}/pdf`)
         .expect(403);
-      await as(clinicA, assistantToken)
-        .get(`/patients/${patientId}/certificates/${cert.id}/pdf`)
+      const docs = await as(clinicA, receptionToken)
+        .get(`/patients/${patientId}/documents`)
         .expect(200);
+      expect(JSON.stringify(docs.body)).not.toContain('Alveolitis');
+      const binary = (req: request.Test) =>
+        req.buffer(true).parse((r, cb) => {
+          const chunks: Buffer[] = [];
+          r.on('data', (c: Buffer) => chunks.push(c));
+          r.on('end', () => cb(null, Buffer.concat(chunks)));
+        });
+      const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+      const withDx = (
+        await binary(
+          as(clinicA, assistantToken).get(
+            `/patients/${patientId}/certificates/${cert.id}/pdf`,
+          ),
+        ).expect(200)
+      ).body as Buffer;
+
+      // La copia pública por WhatsApp: sin el diagnóstico.
+      const sent = await as(clinicA, dentistToken)
+        .post(`/patients/${patientId}/certificates/${cert.id}/patient-copy`)
+        .expect(200);
+      const copyToken = (
+        sent.body as { whatsapp: { url: string } }
+      ).whatsapp.url
+        .split('/')
+        .pop()!;
+      const publicView = await server()
+        .get(`/api/v1/public/certificate-copies/${copyToken}`)
+        .set('X-Tenant-Host', clinicA.host)
+        .expect(200);
+      expect(JSON.stringify(publicView.body)).not.toContain('Alveolitis');
+      expect(publicView.body).toMatchObject({
+        certificate: { diagnosis: null, diagnosisOmitted: true },
+      });
+      const publicPdf = (
+        await binary(
+          server()
+            .get(`/api/v1/public/certificate-copies/${copyToken}/pdf`)
+            .set('X-Tenant-Host', clinicA.host),
+        ).expect(200)
+      ).body as Buffer;
+      // El PDF es determinista: el archivado y el público son el mismo
+      // fichero SIN diagnóstico; el de la asistente (con él) es otro.
+      const archived = await raw.patientDocument.findUniqueOrThrow({
+        where: { id: cert.documentId! },
+      });
+      expect(archived.sha256).toBe(sha(publicPdf));
+      expect(sha(withDx)).not.toBe(archived.sha256);
 
       // El diagnóstico nunca va a la auditoría.
       const events = await raw.auditEvent.findMany({

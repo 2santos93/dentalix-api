@@ -274,6 +274,7 @@ describe('patient_certificates (int, DX-306)', () => {
       repo.voidCertificate(
         a.patientId,
         first.id,
+        undefined,
         { userId: a.userId, reason: 'Fecha equivocada' },
         () => undefined,
         archive,
@@ -294,6 +295,7 @@ describe('patient_certificates (int, DX-306)', () => {
       repo.voidCertificate(
         a.patientId,
         first.id,
+        undefined,
         { userId: a.userId, reason: 'Otra vez' },
         () => undefined,
         archive,
@@ -314,6 +316,7 @@ describe('patient_certificates (int, DX-306)', () => {
         repo.voidCertificate(
           a.patientId,
           cert.id,
+          undefined,
           { userId: b.userId, reason: 'Intrusa' },
           () => undefined,
           archive,

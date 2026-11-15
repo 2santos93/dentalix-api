@@ -133,9 +133,20 @@ export interface PatientCertificateRepository {
    * una transacción: si algo falla, no queda certificado sin PDF.
    */
   issue(input: NewCertificateInput, archive: ArchivePdf): Promise<IssueResult>;
-  /** null = el paciente no existe en la clínica. */
-  list(patientId: string): Promise<PatientCertificate[] | null>;
-  get(patientId: string, id: string): Promise<PatientCertificate | null>;
+  /**
+   * `locationIds`: sedes permitidas al usuario (DX-089); `undefined` = todas.
+   * Un certificado de otra sede no sale (ni en la lista ni por id).
+   * null = el paciente no existe en la clínica.
+   */
+  list(
+    patientId: string,
+    locationIds?: readonly string[],
+  ): Promise<PatientCertificate[] | null>;
+  get(
+    patientId: string,
+    id: string,
+    locationIds?: readonly string[],
+  ): Promise<PatientCertificate | null>;
   /**
    * Anula (una vez) con candado de la fila: `authorize` decide antes de
    * escribir (403). Anula el documento archivado y archiva el PDF anulado.
@@ -143,6 +154,7 @@ export interface PatientCertificateRepository {
   voidCertificate(
     patientId: string,
     id: string,
+    locationIds: readonly string[] | undefined,
     actor: { userId: string; reason: string },
     authorize: (certificate: PatientCertificate) => void,
     archive: ArchivePdf,

@@ -103,8 +103,9 @@ class PdfArchiver {
   ) {}
 
   readonly archive: ArchivePdf = async (certificate) => {
+    // La copia archivada la ven los 4 roles: nunca con el diagnóstico.
     const pdf = await this.renderer.render(
-      buildCertificatePdfModel(certificate),
+      buildCertificatePdfModel(certificate, { withDiagnosis: false }),
     );
     const documentId = randomUUID();
     const storageKey = storageKeyFor(
@@ -296,11 +297,24 @@ export class PatientCertificatesUseCases {
     patientId: string,
     viewer: CertificateActor,
   ): Promise<PatientCertificate[]> {
-    const certificates = await this.repo.list(patientId);
+    const certificates = await this.repo.list(
+      patientId,
+      this.allowedLocations(),
+    );
     if (certificates === null) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     }
     return certificates.map((c) => this.forViewer(c, viewer));
+  }
+
+  /**
+   * DX-089: sedes permitidas al usuario (claim `loc`); `undefined` = todas. No
+   * se usa la sede ACTIVA de la cabecera: la ficha enseña los certificados de
+   * todas las sedes a las que el usuario tiene acceso, como sus recetas.
+   */
+  private allowedLocations(): readonly string[] | undefined {
+    const allowed = this.tenantContext.getAllowedLocationIds();
+    return allowed === 'ALL' ? undefined : allowed;
   }
 
   /** Recepción no ve el diagnóstico (salvo que emitiera el reposo). */
@@ -320,18 +334,22 @@ export class PatientCertificatesUseCases {
     id: string,
     viewer: CertificateActor,
   ): Promise<CertificatePdf> {
-    const certificate = await this.repo.get(patientId, id);
+    const certificate = await this.repo.get(
+      patientId,
+      id,
+      this.allowedLocations(),
+    );
     if (!certificate)
       throw new NotFoundException(CERTIFICATE_MESSAGES.notFound);
-    this.tenantContext.assertLocationAllowed(certificate.locationId);
     if (
       certificate.diagnosis !== null &&
       !canSeeDiagnosis(viewer, certificate)
     ) {
       throw new ForbiddenException(CERTIFICATE_MESSAGES.diagnosisHidden);
     }
+    // Bajo demanda y solo para quien lo puede ver: con el diagnóstico.
     const pdf = await this.renderer.render(
-      buildCertificatePdfModel(certificate),
+      buildCertificatePdfModel(certificate, { withDiagnosis: true }),
     );
     return { pdf, fileName: pdfName(certificate) };
   }
@@ -356,9 +374,9 @@ export class PatientCertificatesUseCases {
       result = await this.repo.voidCertificate(
         patientId,
         id,
+        this.allowedLocations(),
         { userId: actor.userId, reason },
         (certificate) => {
-          this.tenantContext.assertLocationAllowed(certificate.locationId);
           if (!canVoid(actor, certificate)) {
             throw new ForbiddenException(CERTIFICATE_MESSAGES.voidForbidden);
           }

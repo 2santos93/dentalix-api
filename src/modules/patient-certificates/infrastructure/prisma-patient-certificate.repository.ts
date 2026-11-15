@@ -65,6 +65,13 @@ function toCertificate(row: CertificateRow): PatientCertificate {
   };
 }
 
+/** Filtro por las sedes permitidas; `undefined` = todas. */
+function locationFilter(locationIds: readonly string[] | undefined): {
+  locationId?: { in: string[] };
+} {
+  return locationIds ? { locationId: { in: [...locationIds] } } : {};
+}
+
 /** Violación del único parcial «un vivo por cita y tipo». */
 function isLiveDuplicate(error: unknown): boolean {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
@@ -307,7 +314,10 @@ export class PrismaPatientCertificateRepository implements PatientCertificateRep
     });
   }
 
-  list(patientId: string): Promise<PatientCertificate[] | null> {
+  list(
+    patientId: string,
+    locationIds?: readonly string[],
+  ): Promise<PatientCertificate[] | null> {
     return this.prisma.runWithTenant(async (tx) => {
       const patient = await tx.patient.findFirst({
         where: { id: patientId },
@@ -315,7 +325,7 @@ export class PrismaPatientCertificateRepository implements PatientCertificateRep
       });
       if (!patient) return null;
       const rows = await tx.patientCertificate.findMany({
-        where: { patientId },
+        where: { patientId, ...locationFilter(locationIds) },
         orderBy: [{ issuedAt: 'desc' }, { number: 'desc' }],
         include: CERTIFICATE_INCLUDE,
       });
@@ -323,10 +333,14 @@ export class PrismaPatientCertificateRepository implements PatientCertificateRep
     });
   }
 
-  get(patientId: string, id: string): Promise<PatientCertificate | null> {
+  get(
+    patientId: string,
+    id: string,
+    locationIds?: readonly string[],
+  ): Promise<PatientCertificate | null> {
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.patientCertificate.findFirst({
-        where: { id, patientId },
+        where: { id, patientId, ...locationFilter(locationIds) },
         include: CERTIFICATE_INCLUDE,
       });
       return row ? toCertificate(row) : null;
@@ -336,6 +350,7 @@ export class PrismaPatientCertificateRepository implements PatientCertificateRep
   voidCertificate(
     patientId: string,
     id: string,
+    locationIds: readonly string[] | undefined,
     actor: { userId: string; reason: string },
     authorize: (certificate: PatientCertificate) => void,
     archive: ArchivePdf,
@@ -349,6 +364,11 @@ export class PrismaPatientCertificateRepository implements PatientCertificateRep
          WHERE "id" = ${id}::uuid AND "patientId" = ${patientId}::uuid
          FOR UPDATE`;
       if (locked.length === 0) return { kind: 'NOT_FOUND' };
+      // DX-089: de una sede no permitida, como si no existiera.
+      const visible = await tx.patientCertificate.count({
+        where: { id, ...locationFilter(locationIds) },
+      });
+      if (visible === 0) return { kind: 'NOT_FOUND' };
       const row = await tx.patientCertificate.findFirstOrThrow({
         where: { id },
         include: CERTIFICATE_INCLUDE,

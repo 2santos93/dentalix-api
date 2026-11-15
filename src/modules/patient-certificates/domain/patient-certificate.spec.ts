@@ -1,6 +1,7 @@
 import { PdfkitCertificatePdfRenderer } from '../infrastructure/certificate-pdf.renderer';
 import type { CertificateSnapshot } from './certificate-snapshot';
 import {
+  DIAGNOSIS_OMITTED_NOTE,
   buildCertificatePdfModel,
   certificateFileName,
   type PatientCertificate,
@@ -60,7 +61,7 @@ const base: PatientCertificate = {
 
 describe('PDF del certificado (DX-306)', () => {
   it('justificante: «asistió a consulta» con las horas en la zona y el reloj de la sede, sin diagnóstico', () => {
-    const model = buildCertificatePdfModel(base);
+    const model = buildCertificatePdfModel(base, { withDiagnosis: true });
     expect(model.title).toBe('Justificante de asistencia');
     expect(model.numberLabel).toBe('Nº 000012');
     expect(model.header.lines).toEqual([
@@ -86,10 +87,13 @@ describe('PDF del certificado (DX-306)', () => {
   });
 
   it('horas programadas: lo dice en una nota', () => {
-    const model = buildCertificatePdfModel({
-      ...base,
-      timesSource: 'SCHEDULED',
-    });
+    const model = buildCertificatePdfModel(
+      {
+        ...base,
+        timesSource: 'SCHEDULED',
+      },
+      { withDiagnosis: true },
+    );
     expect(model.notes).toEqual([
       'Horas programadas de la cita: no constan las horas reales de llegada y salida.',
     ]);
@@ -103,31 +107,49 @@ describe('PDF del certificado (DX-306)', () => {
       restStartDate: '2026-11-16',
       restEndDate: '2026-11-18',
     };
-    const without = buildCertificatePdfModel(rest).paragraphs.join('\n');
+    const without = buildCertificatePdfModel(rest, {
+      withDiagnosis: true,
+    }).paragraphs.join('\n');
     expect(without).toContain('requiere reposo de 3 días');
     expect(without).toContain('desde el 16 de noviembre de 2026');
     expect(without).toContain('hasta el 18 de noviembre de 2026');
     expect(without).not.toContain('Diagnóstico');
-    const withDx = buildCertificatePdfModel({
-      ...rest,
-      diagnosis: 'Exodoncia del 38',
-    }).paragraphs;
+    const withDx = buildCertificatePdfModel(
+      {
+        ...rest,
+        diagnosis: 'Exodoncia del 38',
+      },
+      { withDiagnosis: true },
+    ).paragraphs;
     expect(withDx).toContain('Diagnóstico: Exodoncia del 38');
+    // La copia archivada y la pública: sin el diagnóstico, con la nota.
+    const redacted = buildCertificatePdfModel(
+      { ...rest, diagnosis: 'Exodoncia del 38' },
+      { withDiagnosis: false },
+    );
+    expect(JSON.stringify(redacted)).not.toContain('Exodoncia');
+    expect(redacted.notes).toEqual([DIAGNOSIS_OMITTED_NOTE]);
+    expect(
+      buildCertificatePdfModel(rest, { withDiagnosis: false }).notes,
+    ).toEqual([]);
   });
 
   it('sin datos fiscales ni registro, no imprime esas líneas', () => {
-    const model = buildCertificatePdfModel({
-      ...base,
-      snapshot: {
-        ...snapshot,
-        clinic: { ...snapshot.clinic, legalName: null, taxId: null },
-        location: {
-          ...snapshot.location,
-          address: null,
-          healthRegistrationNumber: null,
+    const model = buildCertificatePdfModel(
+      {
+        ...base,
+        snapshot: {
+          ...snapshot,
+          clinic: { ...snapshot.clinic, legalName: null, taxId: null },
+          location: {
+            ...snapshot.location,
+            address: null,
+            healthRegistrationNumber: null,
+          },
         },
       },
-    });
+      { withDiagnosis: true },
+    );
     expect(model.header.lines).toEqual(['Sede Chacao']);
   });
 
@@ -137,7 +159,7 @@ describe('PDF del certificado (DX-306)', () => {
       voidedAt: new Date('2026-11-17T14:00:00Z'),
       voidReason: 'Fecha equivocada',
     };
-    const model = buildCertificatePdfModel(voided);
+    const model = buildCertificatePdfModel(voided, { withDiagnosis: true });
     expect(model.voided?.stamp).toBe('ANULADO');
     expect(model.voided?.line).toMatch(
       /^ANULADO el 17\/11\/2026.*Motivo: Fecha equivocada$/,
@@ -161,8 +183,12 @@ describe('PDF del certificado (DX-306)', () => {
       voidedAt: new Date('2026-11-17T14:00:00Z'),
       voidReason: 'Duplicado',
     };
-    const a = await renderer.render(buildCertificatePdfModel(cert));
-    const b = await renderer.render(buildCertificatePdfModel(cert));
+    const a = await renderer.render(
+      buildCertificatePdfModel(cert, { withDiagnosis: true }),
+    );
+    const b = await renderer.render(
+      buildCertificatePdfModel(cert, { withDiagnosis: true }),
+    );
     expect(a.subarray(0, 5).toString()).toBe('%PDF-');
     expect(a.equals(b)).toBe(true);
     expect(a.toString('latin1')).toContain('NotoSans');

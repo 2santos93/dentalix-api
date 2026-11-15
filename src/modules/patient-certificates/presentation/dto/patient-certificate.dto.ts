@@ -280,9 +280,15 @@ export class PublicCertificateDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'Solo en un reposo cuya clínica imprime el diagnóstico.',
+    description:
+      'Siempre null: la copia pública no lleva el diagnóstico (ver `diagnosisOmitted`).',
   })
   diagnosis!: string | null;
+  @ApiProperty({
+    description:
+      'El reposo lleva diagnóstico en el certificado emitido, omitido en esta copia.',
+  })
+  diagnosisOmitted!: boolean;
   @ApiProperty({ type: CertificateSnapshotDto })
   snapshot!: CertificateSnapshotDto;
 }

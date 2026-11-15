@@ -141,22 +141,38 @@ class FakeRepo implements PatientCertificateRepository {
     return { kind: 'ISSUED', certificate: cert };
   }
 
-  list(): Promise<PatientCertificate[] | null> {
-    return Promise.resolve(this.rows);
+  private visible(locationIds?: readonly string[]): PatientCertificate[] {
+    return this.rows.filter(
+      (r) => !locationIds || locationIds.includes(r.locationId),
+    );
   }
 
-  get(_p: string, id: string): Promise<PatientCertificate | null> {
-    return Promise.resolve(this.rows.find((r) => r.id === id) ?? null);
+  list(
+    _p: string,
+    locationIds?: readonly string[],
+  ): Promise<PatientCertificate[] | null> {
+    return Promise.resolve(this.visible(locationIds));
+  }
+
+  get(
+    _p: string,
+    id: string,
+    locationIds?: readonly string[],
+  ): Promise<PatientCertificate | null> {
+    return Promise.resolve(
+      this.visible(locationIds).find((r) => r.id === id) ?? null,
+    );
   }
 
   async voidCertificate(
     _p: string,
     id: string,
+    locationIds: readonly string[] | undefined,
     actor: { userId: string; reason: string },
     authorize: (c: PatientCertificate) => void,
     archive: ArchivePdf,
   ): Promise<VoidResult> {
-    const row = this.rows.find((r) => r.id === id);
+    const row = this.visible(locationIds).find((r) => r.id === id);
     if (!row) return { kind: 'NOT_FOUND' };
     authorize(row);
     if (row.voidedAt) return { kind: 'ALREADY_VOIDED' };
@@ -429,6 +445,62 @@ describe('PatientCertificatesUseCases (DX-306)', () => {
     await expect(
       run(() => useCases.pdf('p1', cert.id, dentist)),
     ).resolves.toMatchObject({ fileName: 'certificado-reposo-000001.pdf' });
+  });
+
+  it('el PDF archivado en Documentos nunca lleva el diagnóstico; el de quien lo ve, sí', async () => {
+    const models: unknown[] = [];
+    useCases = new PatientCertificatesUseCases(
+      repo,
+      {
+        render: (model) => {
+          models.push(model);
+          return Promise.resolve(Buffer.from('%PDF'));
+        },
+      },
+      storage as unknown as FileStoragePort,
+      tenantContext,
+      new FixedDocumentTypeNamesReader(),
+    );
+    const cert = await run(() =>
+      useCases.issue(
+        'p1',
+        {
+          kind: 'REST',
+          appointmentId: 'a1',
+          restDays: 2,
+          diagnosis: 'Alveolitis',
+        },
+        dentist,
+      ),
+    );
+    // El archivado (el único render de la emisión).
+    expect(JSON.stringify(models)).not.toContain('Alveolitis');
+    await run(() => useCases.pdf('p1', cert.id, dentist));
+    expect(JSON.stringify(models[1])).toContain('Diagnóstico: Alveolitis');
+  });
+
+  it('sede no permitida: no sale en la lista ni por id (404 al imprimir y anular)', async () => {
+    const cert = await run(() =>
+      useCases.issue(
+        'p1',
+        { kind: 'ATTENDANCE', appointmentId: 'a1' },
+        reception,
+      ),
+    );
+    allowed = [OTRA_SEDE];
+    await expect(run(() => useCases.list('p1', reception))).resolves.toEqual(
+      [],
+    );
+    await expect(
+      run(() => useCases.pdf('p1', cert.id, reception)),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      run(() => useCases.void('p1', cert.id, 'Fecha equivocada', reception)),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    allowed = [SEDE];
+    await expect(
+      run(() => useCases.list('p1', reception)),
+    ).resolves.toHaveLength(1);
   });
 
   it('anular: motivo obligatorio; solo quien emitió o ADMIN; una vez', async () => {

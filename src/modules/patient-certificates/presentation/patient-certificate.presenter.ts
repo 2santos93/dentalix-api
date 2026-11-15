@@ -36,11 +36,13 @@ export function presentCertificate(
     diagnosis: c.diagnosis,
     hasDiagnosis: c.diagnosis !== null || c.diagnosisHidden === true,
     snapshot,
-    documentId: c.documentId,
+    // Quien no ve el diagnóstico tampoco recibe los ids de sus documentos
+    // archivados (aunque el archivado ya va sin diagnóstico).
+    documentId: c.diagnosisHidden ? null : c.documentId,
     voidedAt: c.voidedAt?.toISOString() ?? null,
     voidedByName: c.voidedByName,
     voidReason: c.voidReason,
-    voidedDocumentId: c.voidedDocumentId,
+    voidedDocumentId: c.diagnosisHidden ? null : c.voidedDocumentId,
   };
 }
 
@@ -95,7 +97,8 @@ export function presentPublicCopy(
             restDays: c.restDays,
             restStartDate: c.restStartDate,
             restEndDate: c.restEndDate,
-            diagnosis: c.diagnosis,
+            diagnosis: null,
+            diagnosisOmitted: c.diagnosisHidden === true,
             snapshot,
           }
         : null,

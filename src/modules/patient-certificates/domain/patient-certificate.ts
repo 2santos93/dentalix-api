@@ -84,8 +84,18 @@ const patientPhrase = (s: CertificateSnapshot): string =>
  * la zona, el locale y el reloj de la SEDE (congelados en la foto). El
  * justificante solo dice que asistió a consulta: nunca lleva diagnóstico.
  */
+/**
+ * `withDiagnosis`: el diagnóstico de un reposo solo se pinta en el PDF que se
+ * genera bajo demanda para quien puede verlo (roles clínicos o quien lo
+ * emitió). La copia ARCHIVADA en los documentos del paciente (que ven los 4
+ * roles) y la copia pública por WhatsApp van SIN él, con una nota.
+ */
+export const DIAGNOSIS_OMITTED_NOTE =
+  'El diagnóstico consta en el certificado emitido y no se incluye en esta copia.';
+
 export function buildCertificatePdfModel(
   certificate: PatientCertificate,
+  options: { withDiagnosis: boolean },
 ): CertificatePdfModel {
   const s = certificate.snapshot;
   const tz = s.location.timeZone;
@@ -132,8 +142,10 @@ export function buildCertificatePdfModel(
     paragraphs.push(
       `Se hace constar que ${patientPhrase(s)} recibió atención en consulta en ${s.location.name} el ${day} y requiere reposo de ${days} ${days === 1 ? 'día' : 'días'}, desde el ${start} hasta el ${end}, ambos incluidos.`,
     );
-    if (certificate.diagnosis) {
+    if (certificate.diagnosis && options.withDiagnosis) {
       paragraphs.push(`Diagnóstico: ${certificate.diagnosis}`);
+    } else if (certificate.diagnosis || certificate.diagnosisHidden) {
+      notes.push(DIAGNOSIS_OMITTED_NOTE);
     }
   }
   paragraphs.push(
