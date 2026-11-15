@@ -11,6 +11,9 @@ import type {
 import type { PrescriptionIssuerView } from '../application/use-cases/prescriptions.use-cases';
 import type { PrescriptionVerification } from '../domain/prescription-verification';
 import type { PublicPrescriptionVerificationDto } from './dto/public-prescription-verification.dto';
+import type { PublicPrescriptionCopyView } from '../application/use-cases/prescription-copies.use-cases';
+import type { PublicPrescriptionCopyDto } from './dto/prescription-copy.dto';
+import { civilDateIn, isValidTimeZone } from '../../../shared/time/civil-day';
 import type {
   PrescriptionDocumentDto,
   PrescriptionDto,
@@ -97,5 +100,61 @@ export function presentPublicVerification(
     patientInitials: v.patientInitials,
     locale: v.locale,
     hourCycle: v.hourCycle,
+  };
+}
+
+/** Día civil de un instante en la zona de la sede, o `null` sin zona válida. */
+function civilDayIn(
+  instant: Date | null,
+  timeZone: string | null,
+): string | null {
+  if (!instant || !timeZone || !isValidTimeZone(timeZone)) return null;
+  return civilDateIn(instant, timeZone);
+}
+
+/**
+ * DX-468: la respuesta pública de la copia, plana. La receta, solo vigente;
+ * sin las notas internas de seguridad (avisos, alergias cruzadas, motivo de
+ * la confirmación) ni los datos de una anulación: lo que el paciente necesita
+ * es lo que se imprime.
+ */
+export function presentPublicPrescriptionCopy(
+  view: PublicPrescriptionCopyView,
+): PublicPrescriptionCopyDto {
+  const base: PublicPrescriptionCopyDto = {
+    status: view.status,
+    clinic: view.clinic,
+    expiresAt: view.expiresAt,
+    footer: null,
+    prescription: null,
+    voidedOn: null,
+    locale: null,
+    hourCycle: null,
+  };
+  if (view.status === 'UNVERIFIABLE') return base;
+  if (view.status === 'VOIDED') {
+    return {
+      ...base,
+      voidedOn: civilDayIn(view.voidedAt, view.locationFormat.timeZone),
+      locale: view.locationFormat.locale,
+      hourCycle: view.locationFormat.hourCycle,
+    };
+  }
+  const doc = presentPrescriptionDocument(view.prescription);
+  return {
+    ...base,
+    footer: view.footer,
+    locale: doc.locationFormat.locale,
+    hourCycle: doc.locationFormat.hourCycle,
+    prescription: {
+      ...doc,
+      allergyMatches: [],
+      safetyAlerts: [],
+      safetyOverrideReason: null,
+      voidedAt: null,
+      voidedById: null,
+      voidedByName: null,
+      voidReason: null,
+    },
   };
 }

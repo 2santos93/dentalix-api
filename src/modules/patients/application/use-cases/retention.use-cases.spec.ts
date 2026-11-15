@@ -232,6 +232,7 @@ describe('CountPatientLivePublicLinksUseCase (DX-461)', () => {
     budgetSignatures: 2,
     signedPdfCopies: 0,
     anamnesis: 1,
+    prescriptionCopies: 2,
   };
 
   it('devuelve los enlaces vivos por tipo y el total, a la hora del reloj', async () => {
@@ -239,7 +240,7 @@ describe('CountPatientLivePublicLinksUseCase (DX-461)', () => {
     const reader: PatientPublicLinksReader = { countLive };
     await expect(
       new CountPatientLivePublicLinksUseCase(reader, clock).execute('p1'),
-    ).resolves.toEqual({ ...counts, total: 4 });
+    ).resolves.toEqual({ ...counts, total: 6 });
     expect(countLive).toHaveBeenCalledWith('p1', NOW);
   });
 

@@ -86,6 +86,8 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
   const api = () => request(app.getHttpServer());
   const as = (req: request.Test, token: string, host = clinic.host) =>
     req.set('X-Tenant-Host', host).set('Authorization', `Bearer ${token}`);
+  // DX-468: la respuesta trae también el pie de la copia (null = el de plataforma).
+  const withFooter = (body: object) => ({ ...body, patientCopyFooter: null });
   const put = (body: unknown, token = tokens.ADMIN) =>
     as(api().put(SETTINGS), token).send(body as object);
   const settings = async (
@@ -185,6 +187,7 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
       printQuantityInWords: false,
       requireClinicalRecordNumber: false,
       validityDays: 30,
+      patientCopyFooter: null,
     });
   });
 
@@ -195,6 +198,7 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
         prescriptionPrintQuantityInWords: true,
         prescriptionRequireClinicalRecordNumber: true,
         prescriptionValidityDays: true,
+        prescriptionPatientCopyFooter: true,
       },
     });
     expect({
@@ -202,6 +206,7 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
       requireClinicalRecordNumber:
         tenant.prescriptionRequireClinicalRecordNumber,
       validityDays: tenant.prescriptionValidityDays,
+      patientCopyFooter: tenant.prescriptionPatientCopyFooter,
     }).toEqual(PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS);
   });
 
@@ -222,6 +227,7 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
       printQuantityInWords: false,
       requireClinicalRecordNumber: false,
       validityDays: 30,
+      patientCopyFooter: null,
     });
     expect(await rxViews()).toBe(viewsBefore);
   });
@@ -252,8 +258,8 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
           requireClinicalRecordNumber,
           validityDays: 15,
         };
-        await put(next).expect(200).expect(next);
-        expect(await settings()).toEqual(next);
+        await put(next).expect(200).expect(withFooter(next));
+        expect(await settings()).toEqual(withFooter(next));
       }
     }
     const last = {
@@ -261,7 +267,7 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
       requireClinicalRecordNumber: true,
       validityDays: 7,
     };
-    await put(last).expect(200).expect(last);
+    await put(last).expect(200).expect(withFooter(last));
     const rx = await issue();
     expect(rx.clinicalRecordNumber).toBe('HC-324');
     expect(rx.items[0].quantityInWords).toBe('veintiuno');
@@ -322,11 +328,11 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
       delete partial[field];
       await put(partial).expect(400);
     }
-    expect(await settings()).toEqual(valid);
+    expect(await settings()).toEqual(withFooter(valid));
     for (const validityDays of [1, 365]) {
       await put({ ...valid, validityDays })
         .expect(200)
-        .expect({ ...valid, validityDays });
+        .expect(withFooter({ ...valid, validityDays }));
     }
     expect((await settings()).validityDays).toBe(365);
   });
@@ -338,8 +344,8 @@ describe('Ajustes de la receta de la clínica (e2e, DX-324)', () => {
       requireClinicalRecordNumber: false,
       validityDays: 365,
     };
-    await put(changed).expect(200).expect(changed);
-    expect(await settings()).toEqual(changed);
+    await put(changed).expect(200).expect(withFooter(changed));
+    expect(await settings()).toEqual(withFooter(changed));
     expect(await settings(other.adminToken, other.host)).toEqual(
       PLATFORM_DEFAULT_PRESCRIPTION_SETTINGS,
     );

@@ -8,18 +8,21 @@ const SETTINGS_SELECT = {
   prescriptionPrintQuantityInWords: true,
   prescriptionRequireClinicalRecordNumber: true,
   prescriptionValidityDays: true,
+  prescriptionPatientCopyFooter: true,
 } as const;
 
 interface SettingsRow {
   prescriptionPrintQuantityInWords: boolean;
   prescriptionRequireClinicalRecordNumber: boolean;
   prescriptionValidityDays: number;
+  prescriptionPatientCopyFooter: string | null;
 }
 
 const toSettings = (row: SettingsRow): PrescriptionSettings => ({
   printQuantityInWords: row.prescriptionPrintQuantityInWords,
   requireClinicalRecordNumber: row.prescriptionRequireClinicalRecordNumber,
   validityDays: row.prescriptionValidityDays,
+  patientCopyFooter: row.prescriptionPatientCopyFooter,
 });
 
 @Injectable()
@@ -46,7 +49,9 @@ export class PrismaPrescriptionSettingsRepository implements PrescriptionSetting
   }
 
   async set(
-    next: PrescriptionSettings,
+    next: Omit<PrescriptionSettings, 'patientCopyFooter'> & {
+      patientCopyFooter?: string | null;
+    },
   ): Promise<{ before: PrescriptionSettings; after: PrescriptionSettings }> {
     const id = this.tenantId();
     // Lectura con la fila bloqueada y escritura en la misma transacción.
@@ -54,7 +59,8 @@ export class PrismaPrescriptionSettingsRepository implements PrescriptionSetting
       const [locked] = await tx.$queryRaw<SettingsRow[]>`
         SELECT "prescriptionPrintQuantityInWords",
                "prescriptionRequireClinicalRecordNumber",
-               "prescriptionValidityDays"
+               "prescriptionValidityDays",
+               "prescriptionPatientCopyFooter"
           FROM "tenants" WHERE "id" = ${id}::uuid FOR UPDATE`;
       const tenant = await tx.tenant.update({
         where: { id },
@@ -63,6 +69,9 @@ export class PrismaPrescriptionSettingsRepository implements PrescriptionSetting
           prescriptionRequireClinicalRecordNumber:
             next.requireClinicalRecordNumber,
           prescriptionValidityDays: next.validityDays,
+          ...(next.patientCopyFooter === undefined
+            ? {}
+            : { prescriptionPatientCopyFooter: next.patientCopyFooter }),
         },
         select: SETTINGS_SELECT,
       });

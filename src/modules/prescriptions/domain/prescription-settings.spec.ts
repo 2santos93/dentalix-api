@@ -13,6 +13,7 @@ describe('prescription settings', () => {
       printQuantityInWords: false,
       requireClinicalRecordNumber: false,
       validityDays: 30,
+      patientCopyFooter: null,
     });
     expect([
       PRESCRIPTION_VALIDITY_DAYS_MIN,
@@ -44,6 +45,7 @@ describe('prescription settings', () => {
         printQuantityInWords: true,
         requireClinicalRecordNumber: false,
         validityDays: 30,
+        patientCopyFooter: null,
       }),
     ).toBe('RX_W1_H0_V30');
   });
@@ -54,6 +56,7 @@ describe('prescription settings', () => {
         printQuantityInWords: false,
         requireClinicalRecordNumber: true,
         validityDays: 365,
+        patientCopyFooter: 'Copia informativa',
       }),
     ).toBe('RX_W0_H1_V365');
   });
