@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 import { GetMyProfileUseCase } from './get-my-profile.use-case';
 import { UserProfileRepository } from '../../domain/ports/user-profile-repository.port';
 import { InMemoryFileStorage } from '../../../../shared/storage/__fixtures__/in-memory-file-storage';
@@ -17,6 +17,7 @@ function makeRepo(
         emailVerifiedAt: null,
       }),
     findClinicName: () => Promise.resolve('Clínica Sur'),
+    findExtraPermissions: () => Promise.resolve([]),
     getPasswordHash: () => Promise.resolve('h'),
     updateName: async () => {},
     updatePasswordAndRevokeSessions: () => Promise.resolve(1),
@@ -54,7 +55,37 @@ describe('GetMyProfileUseCase', () => {
       memberships: [
         { tenantId: 't1', clinicName: 'Clínica Sur', role: ClinicRole.DENTIST },
       ],
+      effectivePermissions: [],
     });
+  });
+
+  it('DX-090: effectivePermissions = permisos de serie del rol ∪ los extra de la membresía', async () => {
+    const uc = new GetMyProfileUseCase(
+      makeRepo({
+        findExtraPermissions: () =>
+          Promise.resolve([ExtraPermission.FINANCIAL_REPORTS_VIEW]),
+      }),
+      new InMemoryFileStorage(),
+    );
+    const reception = await uc.execute({
+      userId: 'u1',
+      tenantId: 't1',
+      role: ClinicRole.RECEPTION,
+    });
+    expect(reception.effectivePermissions).toEqual([
+      ExtraPermission.PAYMENT_REGISTER,
+      ExtraPermission.FINANCIAL_REPORTS_VIEW,
+    ]);
+    const assistant = await new GetMyProfileUseCase(
+      makeRepo({
+        findExtraPermissions: () =>
+          Promise.resolve([ExtraPermission.PAYMENT_REGISTER]),
+      }),
+      new InMemoryFileStorage(),
+    ).execute({ userId: 'u1', tenantId: 't1', role: ClinicRole.ASSISTANT });
+    expect(assistant.effectivePermissions).toEqual([
+      ExtraPermission.PAYMENT_REGISTER,
+    ]);
   });
 
   it('DX-084: cambiar FILES_PUBLIC_BASE_URL no rompe el avatar guardado (la URL se calcula al responder)', async () => {

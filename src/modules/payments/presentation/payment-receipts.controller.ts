@@ -1,3 +1,4 @@
+import { ExtraPermission } from '@prisma/client';
 import {
   Controller,
   Get,
@@ -25,6 +26,7 @@ import {
   Roles,
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
@@ -70,6 +72,7 @@ export class PaymentReceiptsController {
   ) {}
 
   @Audit({ action: 'VIEW', ...RECEIPT_AUDIT })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Get()
   @ApiOperation({ summary: 'Ver el recibo de caja de un abono' })
   @ApiOkResponse({ type: PaymentReceiptDto })
@@ -84,6 +87,7 @@ export class PaymentReceiptsController {
   }
 
   @Audit({ action: 'PRINT', ...RECEIPT_AUDIT })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('print')
   @HttpCode(200)
   @ApiOperation({
@@ -104,6 +108,7 @@ export class PaymentReceiptsController {
   }
 
   @Audit({ action: 'SEND', ...RECEIPT_AUDIT })
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('email')
   @HttpCode(202)
   @ApiOperation({

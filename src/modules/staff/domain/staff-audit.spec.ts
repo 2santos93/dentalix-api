@@ -1,8 +1,9 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { sanitizeAuditMetadata } from '../../audit/domain/audit-metadata';
 import {
   staffLocationsAuditEvent,
+  staffPermissionsAuditEvent,
   staffStatusAuditEvent,
   staffUpdateAuditEvent,
   type StaffAccessSnapshot,
@@ -157,5 +158,60 @@ describe('staffLocationsAuditEvent (DX-381)', () => {
     ).toBeNull();
     expect(staffLocationsAuditEvent(ctx, MEMBER, null, null)).toBeNull();
     expect(staffLocationsAuditEvent(ctx, MEMBER, [], [])).toBeNull();
+  });
+});
+
+describe('staffPermissionsAuditEvent (DX-090)', () => {
+  it('PERMISSIONS_CHANGED con el antes y el después, y sobrevive al saneado', () => {
+    const event = staffPermissionsAuditEvent(
+      ctx,
+      MEMBER,
+      [],
+      [ExtraPermission.PAYMENT_REGISTER],
+    );
+    expect(event).toMatchObject({
+      action: 'UPDATE',
+      resourceType: 'STAFF_MEMBER',
+      resourceId: MEMBER,
+      metadata: {
+        reason: 'PERMISSIONS_CHANGED',
+        staffAccess: {
+          before: { extraPermissions: [] },
+          after: { extraPermissions: [ExtraPermission.PAYMENT_REGISTER] },
+        },
+      },
+    });
+    expect(sanitizeAuditMetadata(event!.metadata)).toMatchObject({
+      staffAccess: {
+        before: { extraPermissions: [] },
+        after: { extraPermissions: [ExtraPermission.PAYMENT_REGISTER] },
+      },
+    });
+  });
+
+  it('mismo conjunto en otro orden → sin evento', () => {
+    expect(
+      staffPermissionsAuditEvent(
+        ctx,
+        MEMBER,
+        [
+          ExtraPermission.FINANCIAL_REPORTS_VIEW,
+          ExtraPermission.PAYMENT_REGISTER,
+        ],
+        [
+          ExtraPermission.PAYMENT_REGISTER,
+          ExtraPermission.FINANCIAL_REPORTS_VIEW,
+        ],
+      ),
+    ).toBeNull();
+  });
+
+  it('el saneado descarta un permiso fuera del catálogo', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'PERMISSIONS_CHANGED',
+        staffAccess: { after: { extraPermissions: ['PAYMENT_VOID'] } },
+      }),
+    ).not.toHaveProperty('staffAccess');
   });
 });

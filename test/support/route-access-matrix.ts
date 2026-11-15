@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 
 /**
  * Matriz de autorización ESPERADA de la API (DX-068, hallazgo TST-001).
@@ -28,8 +28,12 @@ export type RouteAccess =
   | { kind: 'authenticated' }
   /** JwtAuthGuard + PlatformAdminGuard: solo un token de plataforma. */
   | { kind: 'platform' }
-  /** JwtAuthGuard + RolesGuard + TenantContextInterceptor + @Roles. */
-  | { kind: 'roles'; roles: ClinicRole[] };
+  /**
+   * JwtAuthGuard + RolesGuard + TenantContextInterceptor + @Roles. DX-090:
+   * `permissions`, si la ruta admite además a quien tenga concedido alguno de
+   * esos permisos extra (`@AllowPermissions` en el handler).
+   */
+  | { kind: 'roles'; roles: ClinicRole[]; permissions?: ExtraPermission[] };
 
 type RoleName = keyof typeof ClinicRole;
 
@@ -48,6 +52,23 @@ export function sortRoles(roles: readonly ClinicRole[]): ClinicRole[] {
 
 function roles(...names: RoleName[]): RouteAccess {
   return { kind: 'roles', roles: sortRoles(names.map((n) => ClinicRole[n])) };
+}
+
+/**
+ * DX-090: el acceso `access` (de roles) más quien tenga concedido alguno de
+ * `names` (rol base O permiso extra).
+ */
+function orPermission(
+  access: RouteAccess,
+  ...names: (keyof typeof ExtraPermission)[]
+): RouteAccess {
+  if (access.kind !== 'roles') throw new Error('Solo rutas con @Roles');
+  return {
+    ...access,
+    permissions: Object.values(ExtraPermission).filter((p) =>
+      names.includes(p),
+    ),
+  };
 }
 
 const PUBLIC: RouteAccess = { kind: 'public', tenantScoped: false };
@@ -545,7 +566,7 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /appointment-types': ADMIN_ONLY,
   'PATCH /appointment-types/:id': ADMIN_ONLY,
   // DX-377: medios de pago; leerlos quien cobra, escribirlos solo ADMIN.
-  'GET /payment-methods': BILLING,
+  'GET /payment-methods': orPermission(BILLING, 'PAYMENT_REGISTER'),
   'POST /payment-methods': ADMIN_ONLY,
   'PATCH /payment-methods/:id': ADMIN_ONLY,
   // DX-516: ajustes por medio de pago, solo ADMIN.
@@ -644,33 +665,53 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // dentalix-docs/docs/plans/2026-07-24-payments-pivot.md (PAYMENT_ROLES),
   // 2026-07-30-payment-plans-cuotas.md; estado de cuenta: loop/informes/DX-011.md;
   // planes cobrables: loop/informes/DX-067.md.
-  'GET /payments': BILLING,
+  'GET /payments': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+    'FINANCIAL_REPORTS_VIEW',
+  ),
   // DX-395: la caja en CSV, mismos roles que la caja.
-  'GET /payments.csv': BILLING,
-  'POST /treatment-plans/:id/payments': BILLING,
+  'GET /payments.csv': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'POST /treatment-plans/:id/payments': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+  ),
   // DX-262: abono contra el saldo migrado (los mismos roles que cobran).
-  'POST /opening-balances/:id/payments': BILLING,
+  'POST /opening-balances/:id/payments': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+  ),
   // DX-390: cobro dividido (los mismos roles que cobran).
-  'POST /treatment-plans/:id/split-payments': BILLING,
-  'GET /treatment-plans/:id/payments': BILLING,
-  'GET /treatment-plans/:id/balance': BILLING,
+  'POST /treatment-plans/:id/split-payments': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+  ),
+  'GET /treatment-plans/:id/payments': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+  ),
+  'GET /treatment-plans/:id/balance': orPermission(BILLING, 'PAYMENT_REGISTER'),
   'DELETE /payments/:id': BILLING,
   // DX-389: comprobante del cobro (subida directa y URL firmada).
-  'POST /payments/proofs/upload-url': BILLING,
-  'GET /payments/:id/proof/url': BILLING,
+  'POST /payments/proofs/upload-url': orPermission(BILLING, 'PAYMENT_REGISTER'),
+  'GET /payments/:id/proof/url': orPermission(BILLING, 'PAYMENT_REGISTER'),
   // DX-515: el nº de la factura fiscal externa lo ponen los roles de cobro.
   'PUT /payments/:id/external-invoice-number': BILLING,
   // Recibo de caja (DX-136): loop/informes/DX-136.md.
-  'GET /payments/:id/receipt': BILLING,
-  'POST /payments/:id/receipt/print': BILLING,
-  'POST /payments/:id/receipt/email': BILLING,
+  'GET /payments/:id/receipt': orPermission(BILLING, 'PAYMENT_REGISTER'),
+  'POST /payments/:id/receipt/print': orPermission(BILLING, 'PAYMENT_REGISTER'),
+  'POST /payments/:id/receipt/email': orPermission(BILLING, 'PAYMENT_REGISTER'),
   // DX-401: resumen de los recibos de un período del paciente.
   'GET /patients/:patientId/payment-receipts/summary': BILLING,
   'POST /patients/:patientId/payment-receipts/summary/print': BILLING,
   'POST /patients/:patientId/payment-receipts/summary/email': BILLING,
   // DX-051: ver la imputación de un abono (ADMIN y recepción) y reasignarla
   // (solo ADMIN, spec R10).
-  'GET /payments/:id/allocations': BILLING,
+  'GET /payments/:id/allocations': orPermission(BILLING, 'PAYMENT_REGISTER'),
   'PUT /payments/:id/allocations': ADMIN_ONLY,
   // DX-380: aviso de abonos sin tasa de más de 24 h (lleva a la tasa de
   // cambio, que solo cambia el ADMIN).
@@ -693,8 +734,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /receivables/aging.csv': ADMIN_ONLY,
   // DX-399: cobrado sin imputar / a cuenta (lista de abonos de muchos
   // pacientes): ADMIN y recepción, también el CSV (sin teléfonos).
-  'GET /reports/unallocated-payments': BILLING,
-  'GET /reports/unallocated-payments.csv': BILLING,
+  'GET /reports/unallocated-payments': orPermission(
+    BILLING,
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/unallocated-payments.csv': orPermission(
+    BILLING,
+    'FINANCIAL_REPORTS_VIEW',
+  ),
   // Descuentos (loop/informes/DX-204.md): la política la leen quienes editan
   // ítems de plan y la cambia ADMIN; el informe y su CSV, solo ADMIN.
   // DX-253: saldo a favor (loop/informes/DX-253.md): financiero, ADMIN y
@@ -711,8 +758,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /reports/discounts.csv': ADMIN_ONLY,
   // Reportes (loop/informes/DX-014.md): «Comparar sedes» y su CSV, la mirada
   // del dueño sobre producción, cobros y citas de todas las sedes. Solo ADMIN.
-  'GET /reports/locations-comparison': ADMIN_ONLY,
-  'GET /reports/locations-comparison.csv': ADMIN_ONLY,
+  'GET /reports/locations-comparison': orPermission(
+    ADMIN_ONLY,
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/locations-comparison.csv': orPermission(
+    ADMIN_ONLY,
+    'FINANCIAL_REPORTS_VIEW',
+  ),
   // DX-423: producción por procedimiento. ADMIN ve todo el equipo; DENTIST,
   // solo lo suyo (lo acota el caso de uso). El detalle lleva pacientes.
   'GET /reports/production-by-procedure': roles('ADMIN', 'DENTIST'),
@@ -728,9 +781,18 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /reports/patient-links': ADMIN_ONLY,
   // DX-410: rentabilidad por sede, su CSV y el detalle de cada cifra
   // (PROFITABILITY_REPORT_ROLES).
-  'GET /reports/profitability': ADMIN_ONLY,
-  'GET /reports/profitability.csv': ADMIN_ONLY,
-  'GET /reports/profitability/lines': ADMIN_ONLY,
+  'GET /reports/profitability': orPermission(
+    ADMIN_ONLY,
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/profitability.csv': orPermission(
+    ADMIN_ONLY,
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/profitability/lines': orPermission(
+    ADMIN_ONLY,
+    'FINANCIAL_REPORTS_VIEW',
+  ),
   // DX-439: «Pendiente de cerrar». ADMIN todo; DENTIST evolución y
   // tratamiento de sus citas; RECEPTION el desenlace (lo acota el caso de uso).
   'GET /closing-queue': roles('ADMIN', 'DENTIST', 'RECEPTION'),
@@ -780,17 +842,33 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-027: caja por turno (loop/informes/DX-027.md). RECEPTION solo ve, abre
   // y cierra las suyas (lo decide el caso de uso); reabrir, corregir y los
   // ajustes de caja de la clínica, solo ADMIN.
-  'GET /cash-sessions/settings': BILLING,
+  'GET /cash-sessions/settings': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+    'FINANCIAL_REPORTS_VIEW',
+  ),
   'PUT /cash-sessions/settings': ADMIN_ONLY,
   // DX-515: título y leyenda del recibo (clínica y sede), solo ADMIN.
   'GET /payment-receipts/settings': ADMIN_ONLY,
   'PUT /payment-receipts/settings': ADMIN_ONLY,
   'PUT /payment-receipts/settings/locations/:locationId': ADMIN_ONLY,
-  'GET /cash-sessions/current': BILLING,
-  'POST /cash-sessions/open': BILLING,
-  'GET /cash-sessions': BILLING,
-  'GET /cash-sessions/:id': BILLING,
-  'POST /cash-sessions/:id/close': BILLING,
+  'GET /cash-sessions/current': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'POST /cash-sessions/open': orPermission(BILLING, 'PAYMENT_REGISTER'),
+  'GET /cash-sessions': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /cash-sessions/:id': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'POST /cash-sessions/:id/close': orPermission(BILLING, 'PAYMENT_REGISTER'),
   'POST /cash-sessions/:id/reopen': ADMIN_ONLY,
   'POST /cash-sessions/:id/adjustments': ADMIN_ONLY,
   // DX-274: salida de caja menor desde la caja abierta de quien llama (vive
@@ -894,6 +972,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /staff/:userId/mfa': ADMIN_ONLY,
   'POST /staff/:userId/mfa/reset': ADMIN_ONLY,
   // DX-089: sedes permitidas de un miembro.
+  // DX-090: permisos extra de un miembro (solo ADMIN; nunca los propios).
+  'PUT /staff/:userId/permissions': ADMIN_ONLY,
   'GET /staff/:userId/locations': ADMIN_ONLY,
   'PUT /staff/:userId/locations': ADMIN_ONLY,
   'DELETE /staff/:userId': ADMIN_ONLY,

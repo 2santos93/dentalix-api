@@ -1834,6 +1834,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // antes y después (null = todas); sin evento si el conjunto no cambia.
   'PUT /staff/:userId/locations':
     'staff-audit.spec.ts, staff-locations.use-cases.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-090: UPDATE STAFF_MEMBER PERMISSIONS_CHANGED con los permisos extra
+  // antes y después; sin evento si el conjunto no cambia.
+  'PUT /staff/:userId/permissions':
+    'staff-audit.spec.ts, staff-permissions.use-cases.spec.ts y staff-permissions.e2e-spec.ts',
   // STAFF_REACTIVATED / STAFF_DEACTIVATED con el estado antes y después.
   'POST /staff/:userId/reactivate':
     'staff-audit.spec.ts y staff-access-audit.e2e-spec.ts',

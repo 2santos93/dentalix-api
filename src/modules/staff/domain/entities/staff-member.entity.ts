@@ -1,4 +1,4 @@
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 
 /**
  * API-facing shape of an active clinic staff member (for the appointments
@@ -24,4 +24,6 @@ export interface StaffMember {
    * el perfil.
    */
   locationIds?: string[] | null;
+  /** DX-090: permisos extra concedidos. Solo lo trae el perfil (`findDetailById`). */
+  extraPermissions?: ExtraPermission[];
 }

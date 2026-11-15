@@ -1,4 +1,4 @@
-import type { ClinicRole } from '@prisma/client';
+import type { ClinicRole, ExtraPermission } from '@prisma/client';
 import type { AuditEventDraft } from '../../audit/domain/audit-event';
 import type { AuditStaffAccessSide } from '../../audit/domain/audit-metadata';
 import {
@@ -118,6 +118,35 @@ export function staffLocationsAuditEvent(
       staffAccess: {
         before: { locationIds: before },
         after: { locationIds: after },
+      },
+    },
+  });
+}
+
+/**
+ * DX-090: evento de `PUT /staff/:userId/permissions` con los permisos extra
+ * antes y después. Mismo conjunto, sin importar el orden → `null` (sin
+ * evento, como las sedes).
+ */
+export function staffPermissionsAuditEvent(
+  ctx: AuditRequestContext,
+  userId: string,
+  before: ExtraPermission[],
+  after: ExtraPermission[],
+): AuditEventDraft | null {
+  const left = new Set(before);
+  if (left.size === new Set(after).size && after.every((p) => left.has(p))) {
+    return null;
+  }
+  return auditDraftFromContext(ctx, {
+    action: 'UPDATE',
+    resourceType: 'STAFF_MEMBER',
+    resourceId: userId,
+    metadata: {
+      reason: 'PERMISSIONS_CHANGED',
+      staffAccess: {
+        before: { extraPermissions: before },
+        after: { extraPermissions: after },
       },
     },
   });
