@@ -71,6 +71,21 @@ async function seedClinic(subdomain: string): Promise<Clinic> {
   };
 }
 
+/**
+ * Purga las clínicas de este spec y sus usuarios: el usuario es global (sin
+ * tenant) y `purgeTenants` no lo borra; sin esto, la segunda corrida chocaba
+ * con el email único. Primero las clínicas (membresías, copias, auditoría) y
+ * luego los usuarios, que ya no tienen nada que los referencie.
+ */
+async function purge(): Promise<void> {
+  await purgeTenantsBySubdomain(owner, SUBDOMAINS);
+  await owner.user.deleteMany({
+    where: {
+      OR: SUBDOMAINS.map((s) => ({ email: { endsWith: `@${s}.test` } })),
+    },
+  });
+}
+
 const asClinic = <T>(clinic: Clinic, fn: () => Promise<T>): Promise<T> =>
   tenantContext.run(clinic.tenantId, fn);
 
@@ -89,13 +104,13 @@ describe('clinical_record_copies (int, DX-456)', () => {
 
   beforeAll(async () => {
     await prisma.onModuleInit();
-    await purgeTenantsBySubdomain(owner, SUBDOMAINS);
+    await purge();
     a = await seedClinic(SUBDOMAINS[0]);
     b = await seedClinic(SUBDOMAINS[1]);
   });
 
   afterAll(async () => {
-    await purgeTenantsBySubdomain(owner, SUBDOMAINS);
+    await purge();
     await prisma.onModuleDestroy();
     await owner.$disconnect();
   });
