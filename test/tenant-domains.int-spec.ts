@@ -19,6 +19,7 @@ import type { JobQueue } from '../src/modules/jobs/application/job-queue.service
 import {
   FakeClock,
   FakeDns,
+  FakeVerifiedOrigins,
 } from '../src/modules/domains/application/__fixtures__/fake-domains';
 
 // SEC-009, capa de BD: los índices únicos parciales nuevos, la caducidad de
@@ -48,7 +49,12 @@ let B: string;
 const clock = new FakeClock();
 const dns = new FakeDns();
 const register = new RegisterDomainUseCase(repo, config, clock);
-const verify = new VerifyDomainUseCase(repo, dns, clock);
+const verify = new VerifyDomainUseCase(
+  repo,
+  dns,
+  clock,
+  new FakeVerifiedOrigins().as(),
+);
 const list = new ListDomainsUseCase(repo, clock);
 
 // DX-360: el alta deja su evento; quién da igual aquí, la clínica no.

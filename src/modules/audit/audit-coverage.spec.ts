@@ -10,6 +10,7 @@ import { AuditInterceptor } from './presentation/audit.interceptor';
 import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
+import { PatientCertificatesController } from '../patient-certificates/presentation/patient-certificates.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
 import { CallerLookupController } from '../caller-lookup/presentation/caller-lookup.controller';
 import { PatientAgreementsController } from '../patient-agreements/presentation/patient-agreements.controller';
@@ -704,6 +705,52 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: { lookup: 'prescription', param: 'id' },
   },
+  // DX-468: «Enviar al paciente» la copia de la receta (la apertura pública
+  // la audita el caso de uso: VIEW sin usuario, PRESCRIPTION_COPY_OPENED).
+  'POST /prescriptions/:id/patient-copy': {
+    action: 'SEND',
+    resource: 'PRESCRIPTION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'prescription', param: 'id' },
+    reason: 'PRESCRIPTION_COPY_SENT',
+  },
+
+  // DX-306: certificados del paciente (justificante y reposo). Ni el
+  // diagnóstico ni el motivo de la anulación van al evento.
+  'GET /patients/:patientId/certificates': {
+    action: 'VIEW',
+    resource: 'PATIENT_CERTIFICATE',
+    patient: P,
+  },
+  'POST /patients/:patientId/certificates': {
+    action: 'CREATE',
+    resource: 'PATIENT_CERTIFICATE',
+    resourceId: RES,
+    patient: P,
+    reason: 'CERTIFICATE_ISSUED',
+  },
+  'GET /patients/:patientId/certificates/:id/pdf': {
+    action: 'PRINT',
+    resource: 'PATIENT_CERTIFICATE',
+    resourceId: { param: 'id' },
+    patient: P,
+  },
+  'POST /patients/:patientId/certificates/:id/void': {
+    action: 'VOID',
+    resource: 'PATIENT_CERTIFICATE',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'CERTIFICATE_VOIDED',
+  },
+  // «Enviar por WhatsApp» la copia (la apertura y la descarga públicas las
+  // audita el caso de uso: VIEW/EXPORT sin usuario, CERTIFICATE_COPY_*).
+  'POST /patients/:patientId/certificates/:id/patient-copy': {
+    action: 'SEND',
+    resource: 'PATIENT_CERTIFICATE',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'CERTIFICATE_COPY_SENT',
+  },
 
   // DX-191: registro de implantes, tarjeta y búsqueda por lote.
   'GET /patients/:patientId/implants': {
@@ -1307,6 +1354,14 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'locationId' },
     reason: 'CONTINGENCY_AGENDA_NIGHTLY_DOWNLOADED',
   },
+  // DX-405: la copia sin conexión de la agenda (mismos datos que el PDF) sale
+  // al navegador: cada lectura, con la sede.
+  'GET /locations/:locationId/contingency-agenda/offline': {
+    action: 'EXPORT',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CONTINGENCY_AGENDA_OFFLINE_SYNCED',
+  },
   // DX-015: recall. La lista (con teléfonos) se audita sin paciente; el
   // contacto, sin la nota; fijar o pausar el recall, con el paciente.
   'GET /recall/due': { action: 'VIEW', resource: 'PATIENT_RECALL' },
@@ -1808,6 +1863,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // y el antes y el después en códigos RX; sin evento si nada cambió.
   'PUT /prescriptions/settings':
     'prescription-settings.use-cases.spec.ts y prescription-settings.e2e-spec.ts',
+  // DX-306: CLINIC_SETTINGS con CERTIFICATE_SETTINGS y los campos cambiados;
+  // sin evento si nada cambió.
+  'PUT /certificates/settings':
+    'patient-certificates.use-cases.spec.ts y patient-certificates.e2e-spec.ts',
   // DX-379: CLINIC_SETTINGS con QUOTE_SETTINGS, el campo cambiado y el antes
   // y el después en códigos QT; sin evento si nada cambió.
   'PUT /treatment-plan-settings':
@@ -1856,6 +1915,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // antes y después (null = todas); sin evento si el conjunto no cambia.
   'PUT /staff/:userId/locations':
     'staff-audit.spec.ts, staff-locations.use-cases.spec.ts y staff-access-audit.e2e-spec.ts',
+  // DX-090: UPDATE STAFF_MEMBER PERMISSIONS_CHANGED con los permisos extra
+  // antes y después; sin evento si el conjunto no cambia.
+  'PUT /staff/:userId/permissions':
+    'staff-audit.spec.ts, staff-permissions.use-cases.spec.ts y staff-permissions.e2e-spec.ts',
   // STAFF_REACTIVATED / STAFF_DEACTIVATED con el estado antes y después.
   'POST /staff/:userId/reactivate':
     'staff-audit.spec.ts y staff-access-audit.e2e-spec.ts',
@@ -2024,6 +2087,7 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 
 const CONTROLLERS: Type[] = [
   AuthController,
+  PatientCertificatesController,
   PatientsController,
   CallerLookupController,
   PatientAnamnesisRequestsController,

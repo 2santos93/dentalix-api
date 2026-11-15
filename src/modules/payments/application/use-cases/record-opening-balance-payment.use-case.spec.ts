@@ -47,8 +47,9 @@ function setup(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
 }
 
 describe('RecordOpeningBalancePaymentUseCase (DX-262, revisión C1)', () => {
-  it('DX-054: un instante a más de 24 h en el futuro → 400 en español y no se registra', async () => {
+  it('DX-054: un instante a más de 24 h en el futuro (sede sin zona) → 400 en español y no se registra', async () => {
     const { repo, uc } = setup();
+    repo.siteHasZone = false;
     await expect(
       uc.execute('ob-1', {
         amount: 1000,

@@ -1189,6 +1189,8 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     budgetSignatures: 0,
     signedPdfCopies: 1,
     anamnesis: 3,
+    prescriptionCopies: 2,
+    certificateCopies: 0,
     paymentLinks: 2,
   };
 
@@ -1205,6 +1207,23 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     const { paymentLinks: _omit, ...before } = revokedLinks;
     expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
       revokedLinks: { ...before, paymentLinks: 0 },
+    });
+  });
+
+  it('un evento anterior a las copias de receta y certificado (DX-468, DX-306) se lee con 0', () => {
+    const {
+      prescriptionCopies: _p,
+      certificateCopies: _c,
+      paymentLinks: _l,
+      ...before
+    } = revokedLinks;
+    expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
+      revokedLinks: {
+        ...before,
+        prescriptionCopies: 0,
+        certificateCopies: 0,
+        paymentLinks: 0,
+      },
     });
   });
 

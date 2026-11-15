@@ -25,7 +25,10 @@ import { contentDispositionHeader } from '../../../shared/storage/file-storage.p
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
-import { CONTINGENCY_AGENDA_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import {
+  APPOINTMENT_ROLES,
+  CONTINGENCY_AGENDA_ROLES,
+} from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import {
   Roles,
@@ -37,8 +40,16 @@ import {
   ContingencyAgendaUseCases,
   type ContingencyPdf,
   type NightlyInfo,
+  type OfflineAgenda,
 } from '../application/contingency-agenda.use-cases';
-import { ContingencyNightlyInfoDto } from './dto/contingency-agenda.dto';
+import {
+  ContingencyNightlyInfoDto,
+  OfflineAgendaDto,
+} from './dto/contingency-agenda.dto';
+
+/** DX-405: la copia sin conexión es de quien ve la agenda (los cuatro roles). */
+export const OFFLINE_AGENDA_FORBIDDEN_MESSAGE =
+  'Tu rol no tiene acceso a la agenda.';
 
 const CONTENT =
   'Citas de HOY y MAÑANA de la sede (días civiles en su zona IANA; horas en su zona, locale y reloj), sin canceladas ni inasistencias: ' +
@@ -117,6 +128,51 @@ export class ContingencyAgendaController {
       this.tenantContext.getAllowedLocationIds(),
     );
     return sendPdf(res, result);
+  }
+
+  /**
+   * DX-405: la misma agenda en datos para la copia cifrada sin conexión de la
+   * web (PWA). La pide la agenda abierta, cada pocos minutos: queda auditada
+   * cada lectura, como la descarga del PDF.
+   */
+  @Audit({
+    action: 'EXPORT',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CONTINGENCY_AGENDA_OFFLINE_SYNCED',
+  })
+  @Get('offline')
+  @Roles(...APPOINTMENT_ROLES)
+  @RolesDeniedMessage(OFFLINE_AGENDA_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Agenda de hoy y mañana de la sede en datos, para la copia sin conexión (DX-405)',
+    description:
+      'Las citas de HOY y MAÑANA de la sede (días civiles en su zona IANA), sin canceladas ni inasistencias, con los datos del PDF de contingencia ' +
+      '(hora, gabinete, profesional, paciente, teléfono, tipo, estado y «alerta médica» como sí/no). Nunca notas, motivo ni historia clínica. ' +
+      'La web la guarda cifrada (AES-GCM) en el navegador y la borra al cerrar sesión, al cambiar de sede y a las 48 h. ' +
+      'Los cuatro roles de la agenda. Auditado: EXPORT · LOCATION · CONTINGENCY_AGENDA_OFFLINE_SYNCED.',
+  })
+  @ApiParam(LOCATION_PARAM)
+  @ApiOkResponse({ type: OfflineAgendaDto })
+  @ApiBadRequestResponse({ description: 'locationId no es un uuid' })
+  @ApiForbiddenResponse({
+    description: `${OFFLINE_AGENDA_FORBIDDEN_MESSAGE} / sede fuera de las permitidas al usuario (DX-089, code LOCATION_NOT_ALLOWED)`,
+  })
+  @ApiNotFoundResponse({ description: NOT_FOUND })
+  @ApiConflictResponse({
+    description:
+      'La sede no tiene zona horaria válida (LOCATION_TIMEZONE_REQUIRED) o formato regional y reloj (LOCATION_LOCALE_REQUIRED)',
+  })
+  offline(
+    @Param('locationId', ParseUUIDPipe) locationId: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<OfflineAgenda> {
+    res.set('Cache-Control', 'private, no-store');
+    return this.contingency.offlineAgenda(
+      locationId,
+      this.tenantContext.getAllowedLocationIds(),
+    );
   }
 
   @Get('nightly')

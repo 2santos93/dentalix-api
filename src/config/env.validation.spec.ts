@@ -37,8 +37,11 @@ const prodEnv = (
       'postgresql://dentalix_app:Zq8rT2vLm9xWp4Kz@db.internal:5432/dentalix?schema=public',
     DIRECT_URL:
       'postgresql://dentalix:Yh7nB3cQs6dFj1Mx@db.internal:5432/dentalix?schema=public',
+    CORS_ORIGINS: 'https://dentalix.app,https://admin.dentalix.app:8443',
     CORS_ROOT_DOMAIN: 'dentalix.app',
     TENANT_BASE_DOMAINS: 'dentalix.app',
+    JWT_ISSUER: 'https://api.dentalix.app',
+    JWT_AUDIENCE: 'https://dentalix.app',
     FILES_PUBLIC_BASE_URL: 'https://api.dentalix.app/api/v1/files',
     MAIL_TRANSPORT: 'smtp',
     SMTP_URL: 'smtps://mailer:Pq7sR2tVw9yBn4Hc@smtp.proveedor.com:465',
@@ -450,6 +453,103 @@ describe('validateEnv', () => {
       ).not.toThrow();
     });
   });
+
+  describe('producción: CORS, dominios de tenant y iss/aud de los JWT (DX-045)', () => {
+    it('la configuración de producción completa arranca', () => {
+      expect(() => validateEnv(prodEnv())).not.toThrow();
+    });
+
+    it.each([
+      ['ausente', undefined],
+      ['vacío', ''],
+      ['solo comas y espacios', ' , ,'],
+    ])(
+      'CORS_ORIGINS %s: no arranca y el mensaje nombra la variable',
+      (_, value) => {
+        expect(errorOf(prodEnv({ CORS_ORIGINS: value }))).toMatch(
+          /CORS_ORIGINS es obligatorio en producción/,
+        );
+      },
+    );
+
+    it.each([
+      'http://dentalix.app',
+      'http://localhost:3001',
+      'dentalix.app',
+      'https://dentalix.app/',
+      'https://dentalix.app/login',
+      'https://user:pw@dentalix.app',
+      'ftp://dentalix.app',
+      'no es una url',
+    ])('CORS_ORIGINS con un origen no https ("%s"): no arranca', (bad) => {
+      const msg = errorOf(
+        prodEnv({ CORS_ORIGINS: `https://dentalix.app,${bad}` }),
+      );
+      expect(msg).toContain('CORS_ORIGINS solo admite orígenes https://');
+      expect(msg).toContain(bad);
+      // El origen bueno no se señala.
+      expect(msg).not.toMatch(/no valen: https:\/\/dentalix\.app,/);
+    });
+
+    it.each([
+      ['ausente', undefined],
+      ['vacío', ''],
+      ['solo comas', ', ,'],
+    ])(
+      'TENANT_BASE_DOMAINS %s: no arranca y el mensaje nombra la variable',
+      (_, value) => {
+        expect(errorOf(prodEnv({ TENANT_BASE_DOMAINS: value }))).toContain(
+          'TENANT_BASE_DOMAINS es obligatorio en producción',
+        );
+      },
+    );
+
+    it.each(['JWT_ISSUER', 'JWT_AUDIENCE'])(
+      '%s es obligatorio en producción',
+      (key) => {
+        expect(errorOf(prodEnv({ [key]: undefined }))).toContain(
+          `${key} es obligatorio en producción`,
+        );
+      },
+    );
+
+    it.each(['JWT_ISSUER', 'JWT_AUDIENCE'])(
+      '%s con espacios o de más de 200 caracteres se rechaza en cualquier entorno',
+      (key) => {
+        expect(errorOf(baseEnv({ [key]: 'dentalix api' }))).toContain(key);
+        expect(errorOf(baseEnv({ [key]: 'x'.repeat(201) }))).toContain(key);
+      },
+    );
+
+    it('fuera de producción arranca con los valores de .env.example (CORS http, sin iss/aud)', () => {
+      for (const NODE_ENV of [undefined, 'development', 'test']) {
+        expect(() =>
+          validateEnv(
+            baseEnv({
+              NODE_ENV,
+              CORS_ORIGINS: 'http://localhost:3001',
+              CORS_ROOT_DOMAIN: 'dentalix.local',
+              TENANT_BASE_DOMAINS: 'dentalix.app,localhost',
+              JWT_ISSUER: 'dentalix-api',
+              JWT_AUDIENCE: 'dentalix-web',
+            }),
+          ),
+        ).not.toThrow();
+        expect(() =>
+          validateEnv(
+            baseEnv({
+              NODE_ENV,
+              CORS_ORIGINS: undefined,
+              TENANT_BASE_DOMAINS: undefined,
+              JWT_ISSUER: undefined,
+              JWT_AUDIENCE: undefined,
+            }),
+          ),
+        ).not.toThrow();
+      }
+    });
+  });
+
   describe('email transaccional (DX-088)', () => {
     it('fuera de producción no exige proveedor (usa ConsoleMailer)', () => {
       expect(() => validateEnv(baseEnv())).not.toThrow();

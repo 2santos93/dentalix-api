@@ -29,7 +29,17 @@ export interface VoidActor {
   role: ClinicRole;
 }
 
-export type VoidDenial = 'NOT_AUTHOR' | 'NOT_SAME_DAY';
+export type VoidDenial = 'NO_VOID_ROLE' | 'NOT_AUTHOR' | 'NOT_SAME_DAY';
+
+/**
+ * DX-090: los roles que anulan abonos (los de PAYMENT_ROLES). Una asistente
+ * con el permiso extra PAYMENT_REGISTER registra abonos pero NO anula: su
+ * `canVoid` es siempre `false` y la ruta de anular no admite el permiso.
+ */
+const VOID_ROLES: readonly ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
 
 /**
  * SEC-013: ADMIN anula cualquier abono. Cualquier otro rol con acceso a pagos
@@ -47,6 +57,9 @@ export function voidDenial(
 ): VoidDenial | null {
   if (actor.role === ClinicRole.ADMIN) {
     return null;
+  }
+  if (!VOID_ROLES.includes(actor.role)) {
+    return 'NO_VOID_ROLE';
   }
   if (subject.createdById === null || subject.createdById !== actor.userId) {
     return 'NOT_AUTHOR';

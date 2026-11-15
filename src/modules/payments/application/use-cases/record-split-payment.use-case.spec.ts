@@ -225,8 +225,9 @@ function twoLines(
 }
 
 describe('RecordSplitPaymentUseCase (DX-390)', () => {
-  it('DX-054: un instante a más de 24 h en el futuro → 400 en español y no se registra nada', async () => {
+  it('DX-054: un instante a más de 24 h en el futuro (sede sin zona) → 400 en español y no se registra nada', async () => {
     const { uc, repo } = makeUseCase();
+    repo.siteHasZone = false;
     await expect(
       uc.execute(
         'plan-1',

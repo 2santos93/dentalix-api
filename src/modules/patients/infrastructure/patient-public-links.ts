@@ -73,6 +73,34 @@ function liveAnamnesis({
   };
 }
 
+function livePrescriptionCopies({
+  tenantId,
+  patientId,
+  now,
+}: Scope): Prisma.PrescriptionCopyLinkWhereInput {
+  // DX-468: no se gasta al abrirse; vivo mientras no caduque ni se invalide.
+  return {
+    tenantId,
+    patientId,
+    revokedAt: null,
+    expiresAt: { gt: now },
+  };
+}
+
+function liveCertificateCopies({
+  tenantId,
+  patientId,
+  now,
+}: Scope): Prisma.PatientCertificateCopyLinkWhereInput {
+  // DX-306: como la copia de la receta, vivo mientras no caduque ni se invalide.
+  return {
+    tenantId,
+    patientId,
+    revokedAt: null,
+    expiresAt: { gt: now },
+  };
+}
+
 function livePaymentLinks({
   tenantId,
   patientId,
@@ -99,6 +127,8 @@ export async function countLivePublicLinks(
     budgetSignatures,
     signedPdfCopies,
     anamnesis,
+    prescriptionCopies,
+    certificateCopies,
     paymentLinks,
   ] = await Promise.all([
     tx.waitlistOffer.count({ where: liveSlotOffers(scope) }),
@@ -106,6 +136,10 @@ export async function countLivePublicLinks(
     tx.signatureRequest.count({ where: liveSignatures(scope, 'BUDGET') }),
     tx.signedConsentPdfLink.count({ where: liveSignedPdfCopies(scope) }),
     tx.medicalHistorySubmission.count({ where: liveAnamnesis(scope) }),
+    tx.prescriptionCopyLink.count({ where: livePrescriptionCopies(scope) }),
+    tx.patientCertificateCopyLink.count({
+      where: liveCertificateCopies(scope),
+    }),
     tx.paymentLink.count({ where: livePaymentLinks(scope) }),
   ]);
   return {
@@ -114,6 +148,8 @@ export async function countLivePublicLinks(
     budgetSignatures,
     signedPdfCopies,
     anamnesis,
+    prescriptionCopies,
+    certificateCopies,
     paymentLinks,
   };
 }
@@ -122,8 +158,9 @@ export async function countLivePublicLinks(
  * Anula los enlaces vivos del paciente dentro de `tx` (la de archivar) y
  * devuelve cuántos de cada tipo. Cada anulación es la misma que ya usa su
  * módulo: la oferta pasa a EXPIRED, la solicitud de firma queda anulada por
- * quien archiva (sin código ni sesión vigentes), la copia del PDF invalidada
- * la anamnesis EXPIRED y el enlace de pago anulado (DX-569). Ninguna vuelve atrás: desarchivar no las reactiva.
+ * quien archiva (sin código ni sesión vigentes), la copia del PDF invalidada,
+ * la anamnesis EXPIRED y las copias de la receta (DX-468) y del certificado
+ * (DX-306) invalidadas y el enlace de pago anulado (DX-569). Ninguna vuelve atrás: desarchivar no las reactiva.
  */
 export async function revokeLivePublicLinks(
   tx: Tx,
@@ -158,6 +195,14 @@ export async function revokeLivePublicLinks(
     where: liveAnamnesis(scope),
     data: { status: 'EXPIRED', revokedAt: now },
   });
+  const prescriptionCopies = await tx.prescriptionCopyLink.updateMany({
+    where: livePrescriptionCopies(scope),
+    data: { revokedAt: now },
+  });
+  const certificateCopies = await tx.patientCertificateCopyLink.updateMany({
+    where: liveCertificateCopies(scope),
+    data: { revokedAt: now },
+  });
   const paymentLinks = await tx.paymentLink.updateMany({
     where: livePaymentLinks(scope),
     data: { revokedAt: now },
@@ -168,6 +213,8 @@ export async function revokeLivePublicLinks(
     budgetSignatures: budgetSignatures.count,
     signedPdfCopies: signedPdfCopies.count,
     anamnesis: anamnesis.count,
+    prescriptionCopies: prescriptionCopies.count,
+    certificateCopies: certificateCopies.count,
     paymentLinks: paymentLinks.count,
   };
 }

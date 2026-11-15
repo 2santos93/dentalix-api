@@ -15,6 +15,7 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
 import { loadTenantZones } from '../../../shared/locations/reference-location';
+import { paymentPlanLocationId } from '../../payment-plans/domain/installment-due';
 import type {
   DebtorCollections,
   DebtorDetails,
@@ -115,11 +116,15 @@ interface LedgerSqlRow {
   ledger: string;
 }
 
-export function toLedger({
-  patientId,
-  locationId,
-  ledger: text,
-}: LedgerSqlRow): PatientLedger {
+/**
+ * Una fila de `patient_ledgers` leída. `planZoneOf` da la zona de la sede de
+ * cada plan de tratamiento con plan de pagos (DX-110): su día civil decide qué
+ * cuota está vencida. La resuelve `withPlanZones`; el `ledger` no la guarda.
+ */
+export function toLedger(
+  { patientId, locationId, ledger: text }: LedgerSqlRow,
+  planZoneOf: (treatmentPlanId: string) => string,
+): PatientLedger {
   const ledger = JSON.parse(text) as LedgerJson;
   const out: PatientLedger = {
     patientId,
@@ -156,6 +161,7 @@ export function toLedger({
           dueDate: new Date(dueMs),
           amount,
         })),
+        timeZone: planZoneOf(treatmentPlanId),
       }),
     ),
   };
@@ -247,6 +253,47 @@ function pendingPaymentOf([
 }
 
 /**
+ * DX-110: las filas leídas con la zona de la sede de cada plan de pagos (la
+ * de aceptación o presentación de su plan de tratamiento, o la principal),
+ * la MISMA regla que el estado de cuenta y `GET /payment-plan`. Una consulta
+ * por los planes de pagos vivos (de estos pacientes o, sin lista, de toda la
+ * clínica) y las zonas de la clínica, en la transacción del llamador. Una
+ * sede sin zona solo da 409 si un plan de pagos de estas filas es suyo.
+ */
+async function withPlanZones(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  rows: readonly LedgerSqlRow[],
+  patientIds?: readonly string[],
+): Promise<PatientLedger[]> {
+  if (rows.length === 0) return [];
+  const paymentPlans = await tx.paymentPlan.findMany({
+    where: {
+      tenantId,
+      deletedAt: null,
+      status: { not: 'CANCELLED' },
+      ...(patientIds ? { patientId: { in: [...patientIds] } } : {}),
+    },
+    select: {
+      treatmentPlanId: true,
+      plan: {
+        select: { acceptedLocationId: true, presentedLocationId: true },
+      },
+    },
+  });
+  const locationOf = new Map(
+    paymentPlans.map((pp) => [
+      pp.treatmentPlanId,
+      paymentPlanLocationId(pp.plan),
+    ]),
+  );
+  const zoneOf = await loadTenantZones(tx, tenantId);
+  const planZoneOf = (treatmentPlanId: string): string =>
+    zoneOf(locationOf.get(treatmentPlanId) ?? null);
+  return rows.map((row) => toLedger(row, planZoneOf));
+}
+
+/**
  * El resumen `patient_ledgers` (DX-155) de ESTOS pacientes con deuda, en UNA
  * consulta por la clave primaria (tenantId, patientId). La usan la marca
  * «Saldo vencido» de la agenda y de la ficha (DX-150): una consulta por lote,
@@ -265,7 +312,7 @@ export async function loadLedgersOf(
      WHERE l."tenantId" = ${tenantId}::uuid
        AND l."patientId" = ANY(${ids}::uuid[])
        AND l."owing"`;
-  return rows.map(toLedger);
+  return withPlanZones(tx, tenantId, rows, ids);
 }
 
 interface DebtorSqlRow {
@@ -380,16 +427,15 @@ export class PrismaReceivablesRepository
       ? Prisma.sql`AND l."locationId" = ANY(${scopeIds}::uuid[])`
       : Prisma.empty;
 
-    const rows = await this.prisma.runWithTenant(
-      (tx) =>
-        tx.$queryRaw<LedgerSqlRow[]>`
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.$queryRaw<LedgerSqlRow[]>`
           SELECT l."patientId", l."locationId", l."ledger"::text AS "ledger"
             FROM "patient_ledgers" l
            WHERE l."tenantId" = ${tenantId}::uuid
              AND l."owing"
-             ${locationFilter}`,
-    );
-    return rows.map(toLedger);
+             ${locationFilter}`;
+      return withPlanZones(tx, tenantId, rows);
+    });
   }
 
   /** Dos consultas fijas: pacientes con su último abono vivo, y zonas. */
@@ -581,9 +627,8 @@ export class PrismaReceivablesRepository
     const tenantId = this.tenantId();
     const nonBillable: string[] = [...NON_BILLABLE_PLAN_STATUSES];
 
-    const rows = await this.prisma.runWithTenant(
-      (tx) =>
-        tx.$queryRaw<LedgerSqlRow[]>`
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.$queryRaw<LedgerSqlRow[]>`
           SELECT l."patientId", l."locationId", l."ledger"::text AS "ledger"
             FROM "patient_ledgers" l
             JOIN "patients" pa
@@ -599,9 +644,9 @@ export class PrismaReceivablesRepository
                              THEN 0 ELSE (p."plan" ->> 5)::numeric END
                    OR jsonb_array_length(
                         COALESCE(NULLIF(p."plan" -> 9, 'null'::jsonb), '[]'::jsonb)
-                      ) > 0)`,
-    );
-    return rows.map(toLedger);
+                      ) > 0)`;
+      return withPlanZones(tx, tenantId, rows);
+    });
   }
 
   allowedLocationIds(): string[] | undefined {

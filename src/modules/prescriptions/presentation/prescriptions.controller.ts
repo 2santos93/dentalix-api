@@ -23,6 +23,8 @@ import {
   ApiOperation,
   ApiParam,
   ApiTags,
+  ApiTooManyRequestsResponse,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
@@ -36,6 +38,7 @@ import {
   PRESCRIPTION_ISSUE_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
+import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
@@ -75,6 +78,12 @@ import {
   presentPrescriptionDocument,
 } from './prescription.presenter';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { SendPrescriptionCopyUseCase } from '../application/use-cases/prescription-copies.use-cases';
+import { PRESCRIPTION_COPY_SENT_REASON } from '../domain/prescription-copy-link';
+import {
+  PrescriptionCopySentDto,
+  SendPrescriptionCopyDto,
+} from './dto/prescription-copy.dto';
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
@@ -223,6 +232,7 @@ export class PrescriptionsController {
     private readonly getSettings: GetPrescriptionSettingsUseCase,
     private readonly updateSettings: UpdatePrescriptionSettingsUseCase,
     private readonly tenantContext: TenantContextService,
+    private readonly sendCopy: SendPrescriptionCopyUseCase,
   ) {}
 
   // Declarada ANTES de `:id`: Express casa las rutas en orden.
@@ -278,6 +288,7 @@ export class PrescriptionsController {
         printQuantityInWords: dto.printQuantityInWords,
         requireClinicalRecordNumber: dto.requireClinicalRecordNumber,
         validityDays: dto.validityDays,
+        patientCopyFooter: dto.patientCopyFooter,
       },
       ctx,
     );
@@ -325,5 +336,55 @@ export class PrescriptionsController {
       role: req.user.role,
     });
     return presentPrescription(voided);
+  }
+
+  /**
+   * DX-468: «Enviar al paciente» la copia INFORMATIVA de una receta emitida
+   * (no la receta electrónica oficial). Mismo acceso que imprimirla: roles
+   * clínicos, y la sede de la receta tiene que estar permitida al usuario.
+   */
+  @Audit({
+    action: 'SEND',
+    resource: 'PRESCRIPTION',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'prescription', param: 'id' },
+    reason: PRESCRIPTION_COPY_SENT_REASON,
+  })
+  @Post(':id/patient-copy')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Enviar al paciente una copia de la receta',
+    description:
+      'Crea un enlace caducable (30 días por defecto; se guarda solo el hash del token) a una copia informativa de la receta EMITIDA; el enlace anterior de la receta deja de servir en la misma transacción. `EMAIL`: lo envía el outbox (DX-088) en el idioma del paciente (DX-497), sin nada clínico. `WHATSAPP`: devuelve el enlace y el texto (clínica y enlace, sin nada clínico) para que la web abra wa.me. Un menor la recibe por su responsable registrado que recibe avisos. Auditado como SEND de PRESCRIPTION, reason PRESCRIPTION_COPY_SENT.',
+  })
+  @ApiOkResponse({ type: PrescriptionCopySentDto })
+  @ApiBadRequestResponse({ description: 'Canal inválido' })
+  @ApiNotFoundResponse({ description: 'Receta no encontrada en esta clínica' })
+  @ApiForbiddenResponse({
+    description:
+      'Rol sin acceso clínico, o la sede de la receta no está permitida al usuario',
+  })
+  @ApiConflictResponse({
+    description:
+      'La receta está anulada, el paciente está archivado, la sede no tiene zona o formato, o no se pudo armar el enlace de la clínica',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'Sin a quién enviarla por ese canal: sin email o sin teléfono para WhatsApp, baja de los envíos, o un menor sin responsable con ese contacto',
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Tope de emails a esta persona o de la clínica',
+  })
+  sendPatientCopy(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SendPrescriptionCopyDto,
+    @Req() req: AuthenticatedRequest & TenantHostRequest,
+  ): Promise<PrescriptionCopySentDto> {
+    return this.sendCopy.execute(
+      id,
+      dto.channel,
+      req.user.sub,
+      req.tenantHost?.host,
+    );
   }
 }

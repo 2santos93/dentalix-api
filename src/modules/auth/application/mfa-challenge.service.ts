@@ -3,6 +3,12 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import {
+  jwtScopeFrom,
+  jwtSignOptions,
+  verifyJwt,
+  type JwtScope,
+} from '../../../shared/crypto/jwt-policy';
+import {
   MFA_CHALLENGE_TTL_SECONDS,
   MFA_MESSAGES,
   type MfaChallengePurpose,
@@ -33,11 +39,14 @@ export interface MfaChallengeClaims {
 @Injectable()
 export class MfaChallengeService {
   private readonly secret: string;
+  /** DX-045: misma política que las sesiones (HS256, `iss`/`aud`). */
+  private readonly scope: JwtScope;
 
   constructor(
     private readonly jwt: JwtService,
     config: ConfigService,
   ) {
+    this.scope = jwtScopeFrom(config);
     this.secret = Buffer.from(
       hkdfSync(
         'sha256',
@@ -64,6 +73,7 @@ export class MfaChallengeService {
         purpose: input.purpose,
       },
       {
+        ...jwtSignOptions(this.scope),
         secret: this.secret,
         expiresIn: MFA_CHALLENGE_TTL_SECONDS[input.purpose],
         jwtid: jti,
@@ -113,9 +123,12 @@ export class MfaChallengeService {
   ): Promise<MfaChallengeClaims> {
     let claims: MfaChallengeClaims;
     try {
-      claims = await this.jwt.verifyAsync<MfaChallengeClaims>(token, {
-        secret: this.secret,
-      });
+      claims = await verifyJwt<MfaChallengeClaims>(
+        this.jwt,
+        token,
+        this.secret,
+        this.scope,
+      );
     } catch {
       throw expired();
     }

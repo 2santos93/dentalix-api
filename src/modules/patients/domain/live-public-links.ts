@@ -8,6 +8,8 @@
  *   sin firmar ni bloquear (DX-243, DX-415).
  * - `signedPdfCopies`: copia del PDF firmado sin descargar (DX-443).
  * - `anamnesis`: cuestionario de salud sin responder (DX-099).
+ * - `prescriptionCopies`: copia de una receta enviada y sin caducar (DX-468).
+ * - `certificateCopies`: copia de un certificado enviada y sin caducar (DX-306).
  * - `paymentLinks`: enlace de pago sin reporte (DX-569).
  *
  * Fuera a propósito (ver el informe de DX-461): la confirmación de cita y las
@@ -21,6 +23,8 @@ export const LIVE_PUBLIC_LINK_KINDS = [
   'budgetSignatures',
   'signedPdfCopies',
   'anamnesis',
+  'prescriptionCopies',
+  'certificateCopies',
   'paymentLinks',
 ] as const;
 
@@ -34,6 +38,8 @@ export const NO_LIVE_PUBLIC_LINKS: LivePublicLinkCounts = {
   budgetSignatures: 0,
   signedPdfCopies: 0,
   anamnesis: 0,
+  prescriptionCopies: 0,
+  certificateCopies: 0,
   paymentLinks: 0,
 };
 

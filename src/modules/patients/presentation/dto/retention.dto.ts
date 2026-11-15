@@ -168,6 +168,20 @@ export class LivePublicLinksDto {
 
   @ApiProperty({
     minimum: 0,
+    description:
+      'Enlaces de la copia de una receta enviados al paciente y sin caducar (DX-468)',
+  })
+  prescriptionCopies!: number;
+
+  @ApiProperty({
+    minimum: 0,
+    description:
+      'Enlaces de la copia de un certificado enviados al paciente y sin caducar (DX-306)',
+  })
+  certificateCopies!: number;
+
+  @ApiProperty({
+    minimum: 0,
     description: 'Enlaces de pago sin reporte (DX-569)',
   })
   paymentLinks!: number;

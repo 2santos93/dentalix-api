@@ -4,6 +4,7 @@ import {
   EmailOutboxStatus,
   EmailTemplate,
   Prisma,
+  ExtraPermission,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -15,6 +16,7 @@ import {
 import {
   DeactivateStaffOutcome,
   ReplaceLocationsOutcome,
+  ReplaceExtraPermissionsOutcome,
   StaffLocationsLookup,
   StaffPatch,
   StaffRepository,
@@ -25,6 +27,7 @@ import type { AuditRequestContext } from '../../../audit/domain/audit-request-co
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import {
   staffLocationsAuditEvent,
+  staffPermissionsAuditEvent,
   staffStatusAuditEvent,
   staffUpdateAuditEvent,
   type StaffAccessSnapshot,
@@ -213,6 +216,8 @@ export class PrismaStaffRepository implements StaffRepository {
               membership.role,
               membership.locations,
             ),
+            // DX-090: los permisos extra concedidos (la ficha los muestra).
+            extraPermissions: membership.extraPermissions,
             status: membership.deletedAt
               ? ('INACTIVE' as const)
               : ('ACTIVE' as const),
@@ -368,6 +373,43 @@ export class PrismaStaffRepository implements StaffRepository {
       );
       if (event) await writeAuditEvent(tx, event);
       return { kind: 'UPDATED', locationIds: locations.map(({ id }) => id) };
+    });
+  }
+
+  async replaceExtraPermissions(
+    userId: string,
+    permissions: ExtraPermission[],
+    audit: AuditRequestContext,
+  ): Promise<ReplaceExtraPermissionsOutcome> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Bloquea la membresía ANTES de leer su rol (como las sedes): un PATCH
+      // que la asciende a ADMIN y este PUT se serializan.
+      await tx.$queryRaw`
+        SELECT "id" FROM "clinic_memberships"
+         WHERE "userId" = ${userId}::uuid AND "deletedAt" IS NULL
+         FOR UPDATE`;
+      const membership = await tx.clinicMembership.findFirst({
+        where: { userId, deletedAt: null, user: { deletedAt: null } },
+        select: { id: true, role: true, extraPermissions: true },
+      });
+      if (!membership) return { kind: 'NOT_FOUND' };
+      if (membership.role === ClinicRole.ADMIN) return { kind: 'IS_ADMIN' };
+      await tx.clinicMembership.update({
+        where: { id: membership.id },
+        data: { extraPermissions: { set: permissions } },
+      });
+      const event = staffPermissionsAuditEvent(
+        audit,
+        userId,
+        membership.extraPermissions,
+        permissions,
+      );
+      if (event) await writeAuditEvent(tx, event);
+      return {
+        kind: 'UPDATED',
+        role: membership.role,
+        extraPermissions: permissions,
+      };
     });
   }
 

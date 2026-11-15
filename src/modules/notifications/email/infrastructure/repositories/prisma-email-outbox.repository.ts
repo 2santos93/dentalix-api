@@ -33,10 +33,11 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'signature-budget-accepted': EmailTemplate.SIGNATURE_BUDGET_ACCEPTED,
   'slot-offer': EmailTemplate.SLOT_OFFER,
   'signed-consent-copy': EmailTemplate.SIGNED_CONSENT_COPY,
-  'mfa-notice': EmailTemplate.MFA_NOTICE,
-  'mfa-enrollment-code': EmailTemplate.MFA_ENROLLMENT_CODE,
+  'prescription-copy': EmailTemplate.PRESCRIPTION_COPY,
   'payment-link': EmailTemplate.PAYMENT_LINK,
   'payment-report-rejected': EmailTemplate.PAYMENT_REPORT_REJECTED,
+  'mfa-notice': EmailTemplate.MFA_NOTICE,
+  'mfa-enrollment-code': EmailTemplate.MFA_ENROLLMENT_CODE,
 };
 
 /**
@@ -240,10 +241,14 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
             ON o."template" = 'slot-offer' AND wo."id" = o."referenceId"
           LEFT JOIN "signed_consent_pdf_links" cl
             ON o."template" = 'signed-consent-copy' AND cl."id" = o."referenceId"
-          LEFT JOIN "payment_links" pl
-            ON o."template" = 'payment-link' AND pl."id" = o."referenceId"
+          -- DX-468: la copia de la receta, igual.
+          LEFT JOIN "prescription_copy_links" pl
+            ON o."template" = 'prescription-copy' AND pl."id" = o."referenceId"
+          -- DX-569: el enlace de pago, igual.
+          LEFT JOIN "payment_links" pyl
+            ON o."template" = 'payment-link' AND pyl."id" = o."referenceId"
           JOIN "patients" p
-            ON p."id" = COALESCE(sr."patientId", wo."patientId", cl."patientId", pl."patientId")
+            ON p."id" = COALESCE(sr."patientId", wo."patientId", cl."patientId", pl."patientId", pyl."patientId")
          WHERE o."id" = ${outboxId}::uuid AND p."deletedAt" IS NOT NULL`;
       return rows.length > 0;
     });

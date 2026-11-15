@@ -16,6 +16,7 @@ import {
   ScheduleTramo,
 } from '../schedule/derive-statuses';
 import { Inject } from '@nestjs/common';
+import { civilDateIn } from '../../../../shared/time/civil-day';
 import { round2 } from '../../../../shared/money/money';
 import { roundToDigits } from '../../../../shared/money/line-rounding';
 import {
@@ -107,7 +108,12 @@ export class GetPaymentPlanUseCase {
           plan.currency,
         )
       : 2;
-    const derived = deriveStatuses(tramos, paidTotal, this.now(), {
+    // DX-110: vence según el día civil de la sede del plan, no el día UTC.
+    const today = civilDateIn(
+      this.now(),
+      await this.repo.planTimeZone(treatmentPlanId),
+    );
+    const derived = deriveStatuses(tramos, paidTotal, today, {
       paidIncomplete: balance.rateProviderTimedOut,
       roundingDigits,
     });

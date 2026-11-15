@@ -1,3 +1,4 @@
+import type { SiteToday } from '../paid-at-window';
 import type { IdempotentPayment } from '../idempotency';
 import type { CurrencyTexts } from '../../../../shared/format/currency-text';
 import type { FrozenExchangeRate } from '../payment-exchange-rate';
@@ -432,12 +433,12 @@ export interface PaymentRepository {
   resolvePaidOn(paidAt: Date | CivilPaidDay): Promise<string>;
 
   /**
-   * DX-075: el día civil (YYYY-MM-DD) de `now` en la zona de la sede donde se
-   * va a registrar el abono (la misma de `resolvePaidOn`), o `null` si la sede
-   * no tiene zona válida: no lanza, la validación del abono cae entonces en la
-   * regla de 24 h.
+   * DX-075/DX-110: el día civil (YYYY-MM-DD) de `now` en la zona de la sede
+   * donde se va a registrar el abono (la misma de `resolvePaidOn`) y esa zona,
+   * o `null` si la sede no tiene zona válida: no lanza, la validación del
+   * abono cae entonces en la regla de 24 h.
    */
-  siteToday(now: Date): Promise<string | null>;
+  siteToday(now: Date): Promise<SiteToday | null>;
 
   /**
    * G1-B: el formato de una sede de la clínica (la del dato, R12), para

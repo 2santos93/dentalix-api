@@ -39,6 +39,7 @@ function schedule(
       dueDate: new Date(`${day}T00:00:00.000Z`),
       amount,
     })),
+    timeZone: CARACAS,
     ...overrides,
   };
 }
@@ -128,24 +129,48 @@ describe('computePatientAging', () => {
     },
   );
 
-  it('cuenta «hoy» en la zona de la sede: a las 22:00 de Caracas aún no venció la cuota de ese día', () => {
+  it('cuenta «hoy» en la zona de la sede DEL PLAN (DX-110): a las 22:00 de Caracas aún no venció la cuota de ese día', () => {
     // 03:00 UTC del 17 = 22:00 del 16 en Caracas = 05:00 del 17 en Madrid.
     const now = new Date('2026-10-17T03:00:00.000Z');
-    const input = ledger({
-      plans: [plan('p', { billable: 100 })],
-      paymentPlans: [schedule('p', [['2026-10-16', 100]])],
-    });
+    const inZone = (timeZone: string) =>
+      ledger({
+        plans: [plan('p', { billable: 100 })],
+        paymentPlans: [schedule('p', [['2026-10-16', 100]], { timeZone })],
+      });
 
-    const caracas = computePatientAging(input, { now, timeZone: CARACAS });
-    expect(caracas.currencies[0].buckets.current).toBe(100);
-    expect(caracas.currencies[0].oldestAgeDays).toBeNull();
-
-    const madrid = computePatientAging(input, {
+    // La zona de la deuda (la de la fila) no decide: la del plan, sí.
+    const caracas = computePatientAging(inZone(CARACAS), {
       now,
       timeZone: 'Europe/Madrid',
     });
+    expect(caracas.currencies[0].buckets.current).toBe(100);
+    expect(caracas.currencies[0].oldestAgeDays).toBeNull();
+
+    const madrid = computePatientAging(inZone('Europe/Madrid'), {
+      now,
+      timeZone: CARACAS,
+    });
     expect(madrid.currencies[0].buckets.days0to30).toBe(100);
     expect(madrid.currencies[0].oldestAgeDays).toBe(1);
+  });
+
+  it('DX-110: vence hoy y son las 21:00 en Caracas → por vencer; a las 00:30 del día siguiente → vencida', () => {
+    const input = ledger({
+      plans: [plan('p', { billable: 100 })],
+      paymentPlans: [schedule('p', [['2026-11-10', 100]])],
+    });
+    const at2100 = computePatientAging(input, {
+      now: new Date('2026-11-11T01:00:00.000Z'),
+      timeZone: CARACAS,
+    });
+    expect(at2100.currencies[0].oldestAgeDays).toBeNull();
+    expect(at2100.currencies[0].buckets.current).toBe(100);
+    const at0030 = computePatientAging(input, {
+      now: new Date('2026-11-11T04:30:00.000Z'),
+      timeZone: CARACAS,
+    });
+    expect(at0030.currencies[0].oldestAgeDays).toBe(1);
+    expect(at0030.currencies[0].buckets.days0to30).toBe(100);
   });
 
   it('la fecha del saldo sin cuotas es el día civil de la sede (aceptado a las 21:00 de Caracas)', () => {

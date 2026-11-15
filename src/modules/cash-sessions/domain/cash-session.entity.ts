@@ -320,4 +320,11 @@ export interface CashSessionDetail extends CashSessionSummary {
 export interface CashActor {
   userId: string;
   isAdmin: boolean;
+  /**
+   * DX-090: con el permiso extra FINANCIAL_REPORTS_VIEW, LEE las cajas de
+   * todos (lista y detalle), como un ADMIN, pero sin ninguno de sus poderes:
+   * el arqueo ciego le oculta lo mismo que a recepción y cerrar sigue siendo
+   * solo de la caja propia.
+   */
+  readsAll?: boolean;
 }

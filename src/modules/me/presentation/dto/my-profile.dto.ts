@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 
 export class MyProfileMembershipDto {
   @ApiProperty() tenantId!: string;
@@ -22,4 +22,12 @@ export class MyProfileDto {
     string | null;
   @ApiProperty({ type: [MyProfileMembershipDto] })
   memberships!: MyProfileMembershipDto[];
+  @ApiProperty({
+    enum: ExtraPermission,
+    enumName: 'ExtraPermission',
+    isArray: true,
+    description:
+      'DX-090: lo que puede hacer en la clínica de la sesión: los permisos de serie de su rol más los extra concedidos. Solo decide qué pinta la web; la frontera es cada ruta.',
+  })
+  effectivePermissions!: ExtraPermission[];
 }

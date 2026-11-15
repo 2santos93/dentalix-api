@@ -2,6 +2,7 @@ import { regionalFormat } from '../../../shared/format/regional-format';
 import {
   buildContingencyAgenda,
   contingencyWindow,
+  offlineAgendaAppointments,
   type ContingencyAppointment,
   type ContingencySource,
 } from './contingency-agenda';
@@ -223,5 +224,62 @@ describe('buildContingencyAgenda (DX-339)', () => {
       'time',
       'type',
     ]);
+  });
+});
+
+describe('offlineAgendaAppointments (DX-405)', () => {
+  it('solo las esperadas, en el orden del PDF, con gabinete y la alerta como sí/no', () => {
+    const rows = offlineAgendaAppointments([
+      appt({
+        start: '2026-11-02T14:00:00Z',
+        appointmentId: 'b',
+        status: 'CONFIRMED',
+      }),
+      appt({
+        start: '2026-11-02T13:00:00Z',
+        appointmentId: 'a',
+        chairName: 'Gabinete 2',
+        medicalAlert: true,
+      }),
+      appt({
+        start: '2026-11-02T12:00:00Z',
+        appointmentId: 'x',
+        status: 'CANCELLED',
+      }),
+      appt({
+        start: '2026-11-02T12:30:00Z',
+        appointmentId: 'y',
+        status: 'NO_SHOW',
+      }),
+    ]);
+    expect(rows.map((r) => r.id)).toEqual(['a', 'b']);
+    expect(rows[0]).toEqual({
+      id: 'a',
+      start: new Date('2026-11-02T13:00:00Z'),
+      end: new Date('2026-11-02T13:30:00Z'),
+      status: 'SCHEDULED',
+      chairName: 'Gabinete 2',
+      professionalName: 'Dra. Ana Gómez',
+      patientName: 'Laura Castro',
+      phone: '+58 412-1234567',
+      appointmentTypeName: 'Limpieza',
+      medicalAlert: true,
+    });
+    expect(rows[1].chairName).toBeNull();
+    // Nada más que esos campos: ni primera visita ni «pidió que le llamen».
+    expect(Object.keys(rows[1]).sort()).toEqual(
+      [
+        'appointmentTypeName',
+        'chairName',
+        'end',
+        'id',
+        'medicalAlert',
+        'patientName',
+        'phone',
+        'professionalName',
+        'start',
+        'status',
+      ].sort(),
+    );
   });
 });

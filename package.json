@@ -40,7 +40,9 @@
     "db:test:setup": "dotenv -e .env.test -- npx prisma migrate deploy && dotenv -e .env.test -- npx prisma db seed",
     "test:int": "dotenv -e .env.test -- jest --config ./test/jest-int.json --runInBand",
     "test:owner-nosu": "jest --config ./test/jest-owner-nosu.json --runInBand",
-    "db:check-force": "ts-node --transpile-only prisma/check-force.ts"
+    "db:check-force": "ts-node --transpile-only prisma/check-force.ts",
+    "db:drift:check": "dotenv -e .env.test -- scripts/prisma-drift.sh check",
+    "db:drift:update": "dotenv -e .env.test -- scripts/prisma-drift.sh update"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1146.0",
@@ -87,6 +89,7 @@
     "dotenv-cli": "^11.0.0",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-jest": "^29.17.1",
     "eslint-plugin-prettier": "^5.2.2",
     "fast-check": "^3.23.2",
     "globals": "^17.0.0",

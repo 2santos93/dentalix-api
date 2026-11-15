@@ -1,6 +1,15 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean, IsInt, Max, Min } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
+import {
+  PRESCRIPTION_COPY_FOOTER_MESSAGE,
   PRESCRIPTION_VALIDITY_DAYS_MAX,
   PRESCRIPTION_VALIDITY_DAYS_MESSAGE,
   PRESCRIPTION_VALIDITY_DAYS_MIN,
@@ -41,4 +50,19 @@ export class PrescriptionSettingsDto {
     message: PRESCRIPTION_VALIDITY_DAYS_MESSAGE,
   })
   validityDays!: number;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: 300,
+    example:
+      'Copia para el paciente. Para retirar el medicamento presente la receta impresa y firmada.',
+    description:
+      'DX-468: pie de la copia de la receta que se envía al paciente. null o vacío = el de plataforma. Ausente en el PUT = no cambia.',
+  })
+  @IsOptional()
+  @IsString({ message: PRESCRIPTION_COPY_FOOTER_MESSAGE })
+  // Antes de recortar: un texto enorme se rechaza sin procesarlo.
+  @MaxLength(2000, { message: PRESCRIPTION_COPY_FOOTER_MESSAGE })
+  patientCopyFooter?: string | null;
 }

@@ -336,6 +336,8 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       budgetSignatures: 1,
       signedPdfCopies: 1,
       anamnesis: 1,
+      prescriptionCopies: 0,
+      certificateCopies: 0,
       paymentLinks: 1,
     });
 
@@ -404,6 +406,8 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       budgetSignatures: 1,
       signedPdfCopies: 1,
       anamnesis: 1,
+      prescriptionCopies: 0,
+      certificateCopies: 0,
       paymentLinks: 1,
     });
     await expect(
@@ -453,6 +457,8 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       budgetSignatures: 0,
       signedPdfCopies: 0,
       anamnesis: 0,
+      prescriptionCopies: 0,
+      certificateCopies: 0,
       paymentLinks: 0,
     });
     const offer = await owner.waitlistOffer.findUniqueOrThrow({

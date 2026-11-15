@@ -14,6 +14,8 @@ import {
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import { loadDocumentRegional } from '../../../../shared/locations/document-regional';
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
+import { loadTenantZones } from '../../../../shared/locations/reference-location';
+import { paymentPlanLocationId } from '../../../payment-plans/domain/installment-due';
 import { BillablePlanRow } from '../../domain/entities/billable-plan.entity';
 import { NON_BILLABLE_PLAN_STATUSES } from '../../../treatment-plans/domain/plan-status-machine';
 import {
@@ -44,6 +46,11 @@ function netOf(sum: {
 }): number {
   const price = sum.price ?? new Prisma.Decimal(0);
   return price.minus(sum.discount ?? 0).toNumber();
+}
+
+/** Nunca se llama: sin planes de pagos no hay zona que buscar (DX-110). */
+function noPlanZone(): never {
+  throw new Error('Sin planes de pagos no hay zona de plan que resolver');
 }
 
 @Injectable()
@@ -220,6 +227,10 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 select: { sequence: true, dueDate: true, amount: true },
                 orderBy: { sequence: 'asc' },
               },
+              // DX-110: la sede del plan decide el «hoy» de sus cuotas.
+              plan: {
+                select: { acceptedLocationId: true, presentedLocationId: true },
+              },
             },
           }),
           // DX-262: saldos migrados vivos (los de un lote deshecho, fuera).
@@ -276,6 +287,14 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
         const voiderName = new Map(
           voiders.map((m) => [m.userId, m.user.fullName]),
         );
+
+        // DX-110: zona de la sede de cada plan de pagos (o de la principal):
+        // su día civil decide qué cuota está vencida. Sin planes de pagos no
+        // se consulta (ni se exige zona).
+        const planZoneOf =
+          paymentPlans.length === 0
+            ? noPlanZone
+            : await loadTenantZones(tx, tenantId);
 
         // Zona de cada sede de los abonos (UNA consulta): el `canVoid` de cada
         // movimiento usa el mismo "hoy" que la anulación (DX-057).
@@ -411,6 +430,7 @@ export class PrismaAccountStatementRepository implements AccountStatementReposit
                 dueDate: i.dueDate,
                 amount: i.amount.toNumber(),
               })),
+              timeZone: planZoneOf(paymentPlanLocationId(pp.plan)),
             })),
             openingBalances: openings.map((o) => ({
               ...o,

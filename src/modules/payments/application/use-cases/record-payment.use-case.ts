@@ -164,20 +164,18 @@ function isUtcMidnight(instant: Date): boolean {
 
 /**
  * La ventana de fecha de un abono, una sola vez para los tres caminos (suelto,
- * repartido y saldo inicial): un día civil no puede ser
- * posterior a hoy en la sede (DX-075; se mira primero, así que mañana, o dentro
- * de 3 días, da el mismo mensaje) y, para un instante o si la sede no tiene
- * zona, rige la ventana de 24 h por delante del reloj (DX-054).
+ * repartido y saldo inicial): ni un día civil (DX-075) ni un instante (DX-110,
+ * por su día civil en la zona de la sede) pueden caer después de hoy en la
+ * sede (se mira primero, así que mañana, o dentro de 3 días, da el mismo
+ * mensaje); y, si la sede no tiene zona, rige la ventana de 24 h por delante
+ * del reloj (DX-054), que además queda como piso común.
  */
 export async function assertPaidAtWindow(
   repo: Pick<PaymentRepository, 'siteToday'>,
   paidAt: Date | CivilPaidDay,
   now: Date,
 ): Promise<void> {
-  if (
-    !(paidAt instanceof Date) &&
-    isPaidAtAfterSiteToday(paidAt, await repo.siteToday(now))
-  ) {
+  if (isPaidAtAfterSiteToday(paidAt, await repo.siteToday(now))) {
     throw new BadRequestException(PAID_AT_AFTER_SITE_TODAY_MESSAGE);
   }
   if (isPaidAtTooFarInFuture(paidAt, now)) {

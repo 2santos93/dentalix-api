@@ -89,6 +89,11 @@ export class VoidPaymentUseCase {
     now: Date,
   ): void {
     const denial = voidDenial(target, actor, now);
+    if (denial === 'NO_VOID_ROLE') {
+      throw new ForbiddenException(
+        'Tu rol no anula abonos. Pide a un administrador que lo anule.',
+      );
+    }
     if (denial === 'NOT_AUTHOR') {
       throw new ForbiddenException(
         'Solo puedes anular abonos que registraste tú. Pide a un administrador que lo anule.',

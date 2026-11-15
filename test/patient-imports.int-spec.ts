@@ -488,6 +488,12 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'medical_history_submissions.patientId',
       'medical_history_versions.patientId',
       'patient_agreements.patientId',
+      // DX-306: un certificado emitido (justificante o reposo) es un
+      // documento inalterable de una cita atendida: bloquea el deshacer.
+      // DX-306: el enlace de la copia de un certificado solo existe con un
+      // certificado emitido (que ya bloquea el deshacer): bloquea igual.
+      'patient_certificate_copy_links.patientId',
+      'patient_certificates.patientId',
       // DX-243: la firma del profesional de uno firmado a distancia.
       'patient_consent_countersignatures.patientId',
       'patient_consents.patientId',
@@ -509,6 +515,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'payment_promises.patientId',
       'perio_exams.patientId',
       'post_op_instruction_deliveries.patientId',
+      // DX-468: un enlace de la copia de una receta; solo existe con una
+      // receta emitida (que ya bloquea el deshacer): bloquea igual.
+      'prescription_copy_links.patientId',
       'prescriptions.patientId',
       'recall_contacts.patientId',
       'reminder_opt_out_links.patientId',

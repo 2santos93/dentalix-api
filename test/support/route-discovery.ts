@@ -12,8 +12,9 @@ import {
   PATH_METADATA,
 } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 import { ROLES_KEY } from '../../src/modules/auth/presentation/guards/roles.decorator';
+import { ALLOW_PERMISSIONS_KEY } from '../../src/modules/auth/presentation/guards/permissions.decorator';
 
 /**
  * Recorrido estático de las rutas de un módulo raíz a partir de los
@@ -37,6 +38,8 @@ export interface DiscoveredRoute {
   guards: Guard[];
   interceptors: Interceptor[];
   roles: ClinicRole[] | undefined;
+  /** DX-090: `@AllowPermissions(...)` del handler (nunca de la clase). */
+  permissions: ExtraPermission[] | undefined;
 }
 
 const HTTP_METHODS: Partial<Record<RequestMethod, string>> = {
@@ -123,6 +126,10 @@ export function discoverRoutes(controllers: Controller[]): DiscoveredRoute[] {
         ROLES_KEY,
         [handler, controller],
       );
+      const permissions = reflector.get<ExtraPermission[] | undefined>(
+        ALLOW_PERMISSIONS_KEY,
+        handler as (...args: unknown[]) => unknown,
+      );
       for (const base of pathsOf(controller)) {
         for (const sub of pathsOf(handler)) {
           routes.push({
@@ -139,6 +146,7 @@ export function discoverRoutes(controllers: Controller[]): DiscoveredRoute[] {
               ...metadataList<Interceptor>(INTERCEPTORS_METADATA, handler),
             ],
             roles,
+            permissions,
           });
         }
       }

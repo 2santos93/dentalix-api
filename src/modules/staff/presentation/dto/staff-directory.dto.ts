@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 import { STAFF_DIRECTORY_STATUSES } from './list-staff-directory-query.dto';
 
 // Solo documentación para Swagger: el caso de uso ya devuelve exactamente esta
@@ -87,6 +87,15 @@ export class StaffMemberDetailDto {
       'Sedes activas en las que puede trabajar (DX-089). null = todas (sin restricción)',
   })
   locationIds!: string[] | null;
+
+  @ApiProperty({
+    enum: ExtraPermission,
+    enumName: 'ExtraPermission',
+    isArray: true,
+    description:
+      'DX-090: permisos extra concedidos sobre su rol (vacío = ninguno). Se cambian con PUT /staff/:userId/permissions.',
+  })
+  extraPermissions!: ExtraPermission[];
 
   @ApiProperty({
     type: String,

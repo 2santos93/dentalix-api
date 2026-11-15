@@ -7,7 +7,7 @@
 import { MAX_ALLOCATION_LINES } from '../../payments/domain/allocation-rules';
 import { MAX_HOLIDAYS_PER_FILE } from '../../location-calendar/domain/holiday-rules';
 import { parseCivilDate } from '../../../shared/time/civil-day';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
 import { round2 } from '../../../shared/money/money';
 import {
   LIVE_PUBLIC_LINK_KINDS,
@@ -295,6 +295,8 @@ export interface AuditStaffAccessSide {
   locationIds?: string[] | null;
   professionalLicense?: string | null;
   professionalSpecialty?: string | null;
+  /** DX-090: permisos extra concedidos (PERMISSIONS_CHANGED). */
+  extraPermissions?: ExtraPermission[];
 }
 
 export interface AuditStaffAccessChange {
@@ -966,10 +968,15 @@ function closingQueueDismissal(
 const MAX_REVOKED_LINKS = 1_000_000;
 
 /**
- * DX-569: los eventos anteriores a los enlaces de pago no traen
- * `paymentLinks` (no existían: se leen como 0).
+ * Tipos añadidos después de DX-461: los eventos anteriores no los traen (no
+ * existían) y se leen como 0 — las copias de la receta (DX-468) y del
+ * certificado (DX-306) y el enlace de pago (DX-569).
  */
-const LINK_KINDS_ADDED_LATER: readonly string[] = ['paymentLinks'];
+const LINK_KINDS_ADDED_LATER: readonly string[] = [
+  'prescriptionCopies',
+  'certificateCopies',
+  'paymentLinks',
+];
 
 /** Exactamente los tipos de enlace, cada uno un natural acotado, o nada (DX-461). */
 function revokedLinks(value: unknown): LivePublicLinkCounts | null {
@@ -1251,6 +1258,20 @@ function locationCalendar(value: unknown): AuditLocationCalendar | null {
 }
 
 const CLINIC_ROLES = Object.values(ClinicRole);
+const EXTRA_PERMISSION_VALUES: readonly string[] =
+  Object.values(ExtraPermission);
+
+/** DX-090: lista de permisos del catálogo; con uno desconocido se cae entera. */
+function extraPermissionList(value: unknown): ExtraPermission[] | undefined {
+  if (!Array.isArray(value) || value.length > EXTRA_PERMISSION_VALUES.length) {
+    return undefined;
+  }
+  const ok = value.filter(
+    (v): v is ExtraPermission =>
+      typeof v === 'string' && EXTRA_PERMISSION_VALUES.includes(v),
+  );
+  return ok.length === value.length ? ok : undefined;
+}
 
 /** Texto profesional del miembro con su formato, `null` o `undefined` (se cae). */
 function nullableText(value: unknown, pattern: RegExp) {
@@ -1287,6 +1308,8 @@ function staffAccessSide(value: unknown): AuditStaffAccessSide | null {
     PROFESSIONAL_SPECIALTY,
   );
   if (specialty !== undefined) out.professionalSpecialty = specialty;
+  const extraPermissions = extraPermissionList(value.extraPermissions);
+  if (extraPermissions !== undefined) out.extraPermissions = extraPermissions;
   return Object.keys(out).length > 0 ? out : null;
 }
 

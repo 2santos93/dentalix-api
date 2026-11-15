@@ -66,6 +66,7 @@ import { MedicalHistorySubmissionsModule } from './modules/medical-history-submi
 import { SignatureRequestsModule } from './modules/signature-requests/signature-requests.module';
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
+import { PatientCertificatesModule } from './modules/patient-certificates/patient-certificates.module';
 import { ImplantsModule } from './modules/implants/implants.module';
 import { PatientDocumentsModule } from './modules/patient-documents/patient-documents.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
@@ -75,6 +76,7 @@ import { JobsModule } from './modules/jobs/jobs.module';
 import { OutboundMessagesModule } from './modules/notifications/outbound/outbound-messages.module';
 import { RemindersModule } from './modules/reminders/reminders.module';
 import { SecurityModule } from './shared/security/security.module';
+import { VerifiedDomainOriginsModule } from './shared/security/verified-domain-origins.module';
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
 import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
 import { PaymentLinksModule } from './modules/payment-links/payment-links.module';
@@ -86,6 +88,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ConfigModule,
     SecurityModule,
     PrismaModule,
+    VerifiedDomainOriginsModule,
     // Global (DX-340): decimales por moneda de `currencies`.
     MoneyModule,
     TenantContextModule,
@@ -168,6 +171,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     SignatureRequestsModule,
     PeriodontalModule,
     PrescriptionsModule,
+    PatientCertificatesModule,
     ImplantsModule,
     PatientDocumentsModule,
     // DX-107: importación de pacientes desde CSV/XLSX (trabajo en la cola).

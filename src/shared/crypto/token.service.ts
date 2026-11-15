@@ -3,6 +3,12 @@ import { Injectable } from '@nestjs/common';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { ClinicRole } from '@prisma/client';
+import {
+  jwtScopeFrom,
+  jwtSignOptions,
+  verifyJwt,
+  type JwtScope,
+} from './jwt-policy';
 
 /** Sesión dentro de UNA clínica: la forma de siempre. */
 export interface TenantJwtPayload {
@@ -104,10 +110,15 @@ export function isTenantPayload(
 
 @Injectable()
 export class TokenService {
+  /** DX-045: `iss`/`aud` de este entorno (ver `jwt-policy.ts`). */
+  private readonly scope: JwtScope;
+
   constructor(
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    this.scope = jwtScopeFrom(config);
+  }
 
   async issue(
     payload: IssuablePayload,
@@ -116,6 +127,7 @@ export class TokenService {
     // expiresIn config values are human-readable ms durations ("900s", "30d").
     // jsonwebtoken accepts them at runtime; cast to satisfy its branded StringValue type.
     const accessToken = await this.jwt.signAsync(payload, {
+      ...jwtSignOptions(this.scope),
       secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
       expiresIn: this.config.getOrThrow<string>(
         'JWT_ACCESS_TTL',
@@ -131,6 +143,7 @@ export class TokenService {
         ...(fixedExp !== undefined ? { exp: fixedExp } : {}),
       },
       {
+        ...jwtSignOptions(this.scope),
         secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
         ...(fixedExp !== undefined
           ? {}
@@ -172,6 +185,7 @@ export class TokenService {
     ttlSeconds: number,
   ): Promise<{ accessToken: string; expiresAt: Date }> {
     const accessToken = await this.jwt.signAsync(payload, {
+      ...jwtSignOptions(this.scope),
       secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
       expiresIn: ttlSeconds,
     });
@@ -179,10 +193,15 @@ export class TokenService {
     return { accessToken, expiresAt: new Date(exp * 1000) };
   }
 
+  // DX-045: solo HS256 y con el `iss`/`aud` de este entorno (con la
+  // transición de `jwt-policy.ts` para los tokens anteriores, que no los traen).
   verifyAccess(token: string): Promise<JwtPayload> {
-    return this.jwt.verifyAsync<JwtPayload>(token, {
-      secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
-    });
+    return verifyJwt<JwtPayload>(
+      this.jwt,
+      token,
+      this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      this.scope,
+    );
   }
 
   // Verifies a refresh token against the SEPARATE refresh secret. Because
@@ -190,8 +209,11 @@ export class TokenService {
   // rejects an access token presented at the refresh endpoint (and vice
   // versa for `verifyAccess`).
   verifyRefresh(token: string): Promise<VerifiedRefreshPayload> {
-    return this.jwt.verifyAsync<VerifiedRefreshPayload>(token, {
-      secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
-    });
+    return verifyJwt<VerifiedRefreshPayload>(
+      this.jwt,
+      token,
+      this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      this.scope,
+    );
   }
 }

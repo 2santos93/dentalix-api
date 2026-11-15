@@ -190,6 +190,7 @@ describe('Agenda de contingencia por sede (DX-339, e2e)', () => {
       reason?: string;
       notes?: string;
       appointmentTypeId?: string;
+      chairId?: string;
     }) =>
       raw.appointment.create({
         data: {
@@ -203,13 +204,19 @@ describe('Agenda de contingencia por sede (DX-339, e2e)', () => {
           reason: data.reason,
           notes: data.notes,
           appointmentTypeId: data.appointmentTypeId,
+          chairId: data.chairId,
         },
       });
+    const gabinete = await raw.chair.create({
+      data: { tenantId: a.tenantId, locationId: principal, name: 'Gabinete 1' },
+      select: { id: true },
+    });
     await appointment({
       patientId: laura,
       start: at('2030-03-04', '09:00'),
       status: 'CONFIRMED',
       appointmentTypeId: limpieza.id,
+      chairId: gabinete.id,
     });
     await raw.appointment.create({
       data: {
@@ -356,6 +363,106 @@ describe('Agenda de contingencia por sede (DX-339, e2e)', () => {
           resourceId: norte,
         }),
       ]);
+    });
+  });
+
+  describe('copia sin conexión (DX-405)', () => {
+    it('los cuatro roles: hoy y mañana en datos, sin canceladas, notas ni motivo, sin caché', async () => {
+      for (const token of [
+        a.adminToken,
+        tokens.RECEPTION!,
+        tokens.DENTIST!,
+        tokens.ASSISTANT!,
+      ]) {
+        const res = await get(a, token, route(principal, '/offline')).expect(
+          200,
+        );
+        expect(res.headers['cache-control']).toBe('private, no-store');
+        const body = res.body as {
+          appointments: Record<string, unknown>[];
+        } & Record<string, unknown>;
+        expect(body).toMatchObject({
+          locationId: principal,
+          locationName: 'Sede Principal',
+          timeZone: 'America/Caracas',
+          days: ['2030-03-04', '2030-03-05'],
+          generatedAt: NOW.toISOString(),
+        });
+        expect(typeof body.locale).toBe('string');
+        expect(['h12', 'h23']).toContain(body.hourCycle);
+        expect(body.appointments).toEqual([
+          {
+            id: expect.any(String) as unknown,
+            start: at('2030-03-04', '09:00').toISOString(),
+            end: at('2030-03-04', '09:30').toISOString(),
+            status: 'CONFIRMED',
+            chairName: 'Gabinete 1',
+            professionalName: 'Miembro DENTIST',
+            patientName: 'Laura Castro',
+            phone: '+58 412 1234567',
+            appointmentTypeName: 'Limpieza',
+            medicalAlert: false,
+          },
+          {
+            id: expect.any(String) as unknown,
+            start: at('2030-03-05', '08:30').toISOString(),
+            end: at('2030-03-05', '09:00').toISOString(),
+            status: 'SCHEDULED',
+            chairName: null,
+            professionalName: 'Miembro DENTIST',
+            patientName: 'Marta Mañana',
+            phone: '+58 412 1112233',
+            appointmentTypeName: null,
+            medicalAlert: false,
+          },
+        ]);
+        const text = JSON.stringify(body);
+        expect(text).not.toContain('Dolor en la muela');
+        expect(text).not.toContain('ansiedad');
+        expect(text).not.toContain('Pedro Cancelado');
+      }
+    });
+
+    it('sede ajena, inexistente o no permitida: 404 / 403 como el PDF', async () => {
+      await get(a, a.adminToken, route(bLocation, '/offline')).expect(404);
+      await get(b, b.adminToken, route(principal, '/offline')).expect(404);
+      await get(a, a.adminToken, route('no-es-uuid', '/offline')).expect(400);
+      const res = await get(
+        a,
+        receptionNorteOnly,
+        route(principal, '/offline'),
+      ).expect(403);
+      expect(res.body).toMatchObject({ code: 'LOCATION_NOT_ALLOWED' });
+      const norteRes = await get(
+        a,
+        receptionNorteOnly,
+        route(norte, '/offline'),
+      ).expect(200);
+      expect(
+        (norteRes.body as { appointments: { patientName: string }[] })
+          .appointments,
+      ).toEqual([expect.objectContaining({ patientName: 'Nora Norteña' })]);
+    });
+
+    it('cada lectura correcta queda auditada (EXPORT · LOCATION · sede)', async () => {
+      const rows = await auditRows('CONTINGENCY_AGENDA_OFFLINE_SYNCED');
+      // 4 roles en la principal + la Norte del restringido.
+      expect(rows).toHaveLength(5);
+      expect(rows[0]).toEqual({
+        actorUserId: a.adminUserId,
+        actorRole: 'ADMIN',
+        action: 'EXPORT',
+        resourceType: 'LOCATION',
+        resourceId: principal,
+        patientId: null,
+        locationId: null,
+      });
+      expect(rows[4]).toEqual(
+        expect.objectContaining({
+          actorUserId: receptionUserId,
+          resourceId: norte,
+        }),
+      );
     });
   });
 

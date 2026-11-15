@@ -1239,6 +1239,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/locations/${a.locationId}/contingency-agenda/nightly/pdf`,
       status: 404,
     },
+    {
+      name: 'GET /locations/:locationId/contingency-agenda/offline',
+      verb: 'get',
+      path: () => `/locations/${a.locationId}/contingency-agenda/offline`,
+      status: 404,
+    },
     // --- política de cancelación y asistencia (DX-279) ---
     {
       name: 'GET /locations/:id/cancellation-policy',
@@ -2351,6 +2357,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       verb: 'put',
       path: () => `/staff/${a.dentistUserId}/locations`,
       body: () => ({ locationIds: [b.locationId] }),
+      status: 404,
+    },
+    {
+      // DX-090: conceder permisos extra a un miembro de A desde B.
+      name: 'PUT /staff/:userId/permissions',
+      verb: 'put',
+      path: () => `/staff/${a.dentistUserId}/permissions`,
+      body: () => ({ permissions: ['PAYMENT_REGISTER'] }),
       status: 404,
     },
     // --- invitations ---
@@ -3965,6 +3979,30 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'prescription-copies.e2e-spec.ts',
+      checks:
+        'B → 404 al enviar al paciente la copia de una receta de A, sin enlace ni email (DX-468)',
+      routes: ['POST /prescriptions/:id/patient-copy'],
+    },
+    {
+      spec: 'patient-certificates.e2e-spec.ts',
+      checks:
+        'B → 404 al listar, emitir, imprimir y anular certificados del paciente de A y al pedir sus citas atendidas; A sigue con su certificado vigente (DX-306)',
+      routes: [
+        'GET /patients/:patientId/certificates',
+        'POST /patients/:patientId/certificates',
+        'GET /patients/:patientId/certificates/appointments',
+        'GET /patients/:patientId/certificates/:id/pdf',
+        'POST /patients/:patientId/certificates/:id/void',
+      ],
+    },
+    {
+      spec: 'certificate-copies.e2e-spec.ts',
+      checks:
+        'B → 404 al enviar por WhatsApp la copia de un certificado de A, sin enlace (DX-306)',
+      routes: ['POST /patients/:patientId/certificates/:id/patient-copy'],
+    },
+    {
       spec: 'implants.e2e-spec.ts',
       checks:
         'B → 404 sobre el paciente y el implante de A (lista, alta, tarjeta, impresión y anulación) y el implante sigue sin anular (DX-191)',
@@ -4204,6 +4242,21 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         'POST /public/sign/:token/verify',
         'GET /public/sign/:token/document',
         'POST /public/sign/:token/sign',
+      ],
+    },
+    {
+      spec: 'prescription-copies.e2e-spec.ts',
+      checks:
+        'B → 404 con el enlace de la copia de la receta de A en su host, igual que uno inventado (DX-468)',
+      routes: ['GET /public/prescription-copies/:token'],
+    },
+    {
+      spec: 'certificate-copies.e2e-spec.ts',
+      checks:
+        'B → 404 con el enlace de la copia del certificado de A en su host (ver y descargar), igual que uno inventado (DX-306)',
+      routes: [
+        'GET /public/certificate-copies/:token',
+        'GET /public/certificate-copies/:token/pdf',
       ],
     },
     {

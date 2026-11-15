@@ -7,6 +7,7 @@ import { VerifyDomainUseCase } from './verify-domain.use-case';
 import {
   FakeClock,
   FakeDns,
+  FakeVerifiedOrigins,
   InMemoryDomains,
 } from '../__fixtures__/fake-domains';
 
@@ -20,25 +21,28 @@ function setup() {
   const store = new InMemoryDomains();
   const clock = new FakeClock();
   const dns = new FakeDns();
+  const origins = new FakeVerifiedOrigins();
   const verify = (tenantId: string) =>
-    new VerifyDomainUseCase(store.as(tenantId), dns, clock);
+    new VerifyDomainUseCase(store.as(tenantId), dns, clock, origins.as());
   const pending = (tenantId: string) =>
     store.seed(tenantId, {
       host: HOST,
       expiresAt: new Date(clock.current.getTime() + 72 * HOUR),
     });
-  return { store, clock, dns, verify, pending };
+  return { store, clock, dns, origins, verify, pending };
 }
 
 describe('VerifyDomainUseCase', () => {
   it('marks the domain VERIFIED when a matching TXT record exists', async () => {
-    const { dns, verify, pending, store } = setup();
+    const { dns, verify, pending, store, origins } = setup();
     const row = pending(A);
     dns.records.set(TXT, ['unrelated', row.verifyToken]);
 
     await expect(verify(A).execute({ id: row.id })).resolves.toEqual({
       status: 'VERIFIED',
     });
+    // SEC-021: su origen vale para CORS al momento.
+    expect(origins.invalidated).toEqual([HOST]);
     expect(dns.lookups).toEqual([TXT]);
     expect(store.rows[0]).toMatchObject({
       status: 'VERIFIED',
@@ -48,12 +52,13 @@ describe('VerifyDomainUseCase', () => {
   });
 
   it('stays PENDING when no TXT record matches', async () => {
-    const { dns, verify, pending } = setup();
+    const { dns, verify, pending, origins } = setup();
     const row = pending(A);
     dns.records.set(TXT, ['something-else']);
     await expect(verify(A).execute({ id: row.id })).resolves.toEqual({
       status: 'PENDING',
     });
+    expect(origins.invalidated).toEqual([]);
   });
 
   it('stays PENDING when the DNS cannot answer (SERVFAIL/timeout)', async () => {

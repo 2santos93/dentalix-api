@@ -1,16 +1,18 @@
-import { createHash, randomBytes } from 'node:crypto';
+import {
+  generatePublicLinkToken,
+  hashPublicLinkToken,
+  isWellFormedPublicLinkToken,
+} from '../../../shared/public-links/public-link-token';
 
 /**
  * DX-443: copia del PDF firmado (DX-422) para el paciente o su responsable,
  * por un enlace de un solo uso. Mismo esquema que los demás enlaces públicos
  * (DX-005, DX-435): 32 bytes aleatorios en base64url que viajan SOLO en el
- * email, y su SHA-256 en la BD.
+ * email, y su SHA-256 en la BD (`shared/public-links`, que DX-468 reutiliza
+ * para la copia de la receta).
  */
 
 const HOUR = 60 * 60_000;
-const TOKEN_BYTES = 32;
-// 32 bytes en base64url sin relleno = 43 caracteres URL-safe.
-const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 
 /** Ruta pública de la web (`/copia/<token>`). */
 export const SIGNED_PDF_COPY_PUBLIC_PATH = '/copia';
@@ -45,17 +47,17 @@ export function loadSignedPdfCopyConfig(
 
 /** Token del enlace en texto plano: viaja SOLO en la URL, nunca se guarda. */
 export function generateSignedPdfCopyToken(): string {
-  return randomBytes(TOKEN_BYTES).toString('base64url');
+  return generatePublicLinkToken();
 }
 
 /** Hash estable del token, para guardar y buscar sin el texto plano. */
 export function hashSignedPdfCopyToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex');
+  return hashPublicLinkToken(token);
 }
 
 /** Descarta en el acto lo que no puede ser un token (enumeración, enlaces truncados). */
 export function isWellFormedSignedPdfCopyToken(token: string): boolean {
-  return TOKEN_SHAPE.test(token);
+  return isWellFormedPublicLinkToken(token);
 }
 
 export function signedPdfCopyExpiresAt(now: Date, ttlHours: number): Date {
