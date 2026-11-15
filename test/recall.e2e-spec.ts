@@ -1342,7 +1342,9 @@ describe('Recall: lista de llamada (DX-015, e2e)', () => {
       })
       .expect(400);
     expect(messageOf(bad)).toEqual([
-      'recall.El intervalo del recall va de 1 a 36 meses.',
+      // DX-111: la exceptionFactory no antepone la ruta del campo anidado
+      // (va en `fields[].field`).
+      'El intervalo del recall va de 1 a 36 meses.',
     ]);
     // Auditado como el PUT, con la evolución.
     expect(

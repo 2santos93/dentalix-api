@@ -31,6 +31,11 @@ export interface ValidationErrorBody {
   code: typeof VALIDATION_FAILED_CODE;
   message: string[];
   fields: ValidationFieldError[];
+  /**
+   * El campo, cuando todos los errores son de UNO solo (como los 400 de regla
+   * de negocio que ya traen `field`): la web pone el mensaje junto a él.
+   */
+  field?: string;
 }
 
 /**
@@ -178,5 +183,7 @@ export function validationExceptionFactory(
     message: [...new Set(fields.map((f) => f.message))],
     fields,
   };
+  const distinct = new Set(fields.map((f) => f.field));
+  if (distinct.size === 1) body.field = fields[0].field;
   return new BadRequestException(body);
 }

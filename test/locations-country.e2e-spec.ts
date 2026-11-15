@@ -118,8 +118,15 @@ describe('País de la sede: cualquier código de la lista (DX-312, e2e)', () => 
       message: 'El país «XX» no está en la lista de países.',
       field: 'country',
     });
+    // DX-111: un texto de más de 100 caracteres lo para ya el tope del DTO.
     const long = await create('x'.repeat(500)).expect(400);
     expect(long.body).toMatchObject({
+      code: 'VALIDATION_FAILED',
+      message: ['country no puede tener más de 100 caracteres.'],
+      field: 'country',
+    });
+    const longish = await create('x'.repeat(60)).expect(400);
+    expect(longish.body).toMatchObject({
       message: 'El país indicado no está en la lista de países.',
       field: 'country',
     });

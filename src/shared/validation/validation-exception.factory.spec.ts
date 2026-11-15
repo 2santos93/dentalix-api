@@ -82,6 +82,7 @@ describe('exceptionFactory de la ValidationPipe (DX-111)', () => {
       ownerId: 'abc',
       color: 'VERDE',
     });
+    expect(body).not.toHaveProperty('field');
     expect(body).toMatchObject({
       statusCode: 400,
       error: 'Bad Request',
@@ -112,6 +113,8 @@ describe('exceptionFactory de la ValidationPipe (DX-111)', () => {
   it('deja tal cual los mensajes propios en español', async () => {
     const body = await badRequest({ name: 'ok', note: 5 });
     expect(body.message).toEqual(['La nota debe ser un texto.']);
+    // Un solo campo con error: va también en `field`, como en los 400 de regla.
+    expect(body.field).toBe('note');
   });
 
   it('los campos anidados llevan su ruta', async () => {

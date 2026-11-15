@@ -12,7 +12,7 @@ import {
 } from 'class-validator';
 import {
   INPUT_CODE_MAX,
-  INPUT_NAME_MAX,
+  INPUT_SHORT_TEXT_MAX,
   TextMaxLength,
 } from '../../../../shared/validation/input-limits';
 import { HOLIDAY_MESSAGES } from '../../domain/holiday-rules';
@@ -95,7 +95,7 @@ export class CreateLocationHolidayDto {
 
   @ApiProperty({ maxLength: 120, example: 'Cierre anual' })
   @IsString({ message: HOLIDAY_MESSAGES.nameInvalid })
-  @TextMaxLength(INPUT_NAME_MAX)
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   name!: string;
 
   @ApiPropertyOptional({
@@ -119,7 +119,7 @@ export class UpdateLocationHolidayDto {
   @ApiPropertyOptional({ maxLength: 120, example: 'Cierre anual' })
   @IsOptional()
   @IsString({ message: HOLIDAY_MESSAGES.nameInvalid })
-  @TextMaxLength(INPUT_NAME_MAX)
+  @TextMaxLength(INPUT_SHORT_TEXT_MAX)
   name?: string;
 
   @ApiPropertyOptional()
