@@ -155,6 +155,14 @@ export interface AuditMetadata {
    */
   exchangeRate?: AuditExchangeRate;
   /**
+   * DX-569: al confirmar un pago reportado, la tasa que fijó recepción en vez
+   * de la del día (unidades de la moneda que no es USD por 1 USD, decimal en
+   * texto) y su motivo: texto de caja escrito por el personal (≤ 280, una
+   * línea, sin caracteres de control), no un dato clínico del paciente. Lo
+   * pide la revisión del PR #176: sin él, el motivo se perdía.
+   */
+  rateOverride?: AuditRateOverride;
+  /**
    * G1 (R13): moneda, zona y formato de una sede antes y después de una
    * edición, y si quedó revisada. Códigos de configuración de la sede (ISO
    * 4217, IANA, BCP 47); un lado puede traer null (sede sin configurar).
@@ -393,6 +401,11 @@ export interface AuditExchangeRate {
   day: string;
   /** Unidades de `currency` por 1 USD, decimal en texto («0.91»). */
   rate: string;
+}
+
+export interface AuditRateOverride {
+  rate: string;
+  reason: string;
 }
 
 export interface AuditPaymentReference {
@@ -1447,6 +1460,28 @@ function exchangeRate(value: unknown): AuditExchangeRate | null {
   return { currency, day, rate };
 }
 
+export const MAX_AUDIT_RATE_OVERRIDE_REASON = 280;
+const RATE_OVERRIDE_REASON = new RegExp(
+  `^[^\\p{Cc}\\p{Cf}\\u2028\\u2029]{1,${MAX_AUDIT_RATE_OVERRIDE_REASON}}$`,
+  'u',
+);
+
+/** DX-569: tasa decimal y motivo en una línea; lo que no encaja se descarta. */
+function rateOverride(value: unknown): AuditRateOverride | null {
+  if (!isRecord(value)) return null;
+  const { rate, reason, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof rate !== 'string' ||
+    !RATE_TEXT.test(rate) ||
+    typeof reason !== 'string' ||
+    !RATE_OVERRIDE_REASON.test(reason)
+  ) {
+    return null;
+  }
+  return { rate, reason };
+}
+
 /**
  * Deja pasar solo lo que la lista admite, con el formato que admite. Lo que
  * no encaja se DESCARTA (no se trunca ni se escapa): así un valor clínico que
@@ -1522,6 +1557,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (backup) out.exchangeRateBackup = backup;
   const rated = exchangeRate(input.exchangeRate);
   if (rated) out.exchangeRate = rated;
+  const fixedRate = rateOverride(input.rateOverride);
+  if (fixedRate) out.rateOverride = fixedRate;
   const covered = coverage(input.coverage);
   if (covered) out.coverage = covered;
   const validity = coverageValidity(input.coverageValidity);

@@ -1086,7 +1086,73 @@ describe('Enlace de pago y «Pagos por confirmar» (e2e, DX-569)', () => {
           action: 'UPDATE',
         },
       });
-      expect(event.metadata).toMatchObject({ changedFields: ['rateOverride'] });
+      // Revisión del PR #176: la tasa fijada y su motivo quedan en el evento.
+      expect(event.metadata).toMatchObject({
+        changedFields: ['rateOverride'],
+        rateOverride: { rate: '260', reason: 'Tasa del banco del paciente' },
+      });
+    });
+
+    it('saldo migrado: solo en su moneda y sin equivalencias; ni otra moneda ni otra tasa al confirmar (422)', async () => {
+      const patientId = await patient(a, { email: `s${++seq}@example.com` });
+      const balanceId = await openingBalance(a, patientId);
+      const link = await createLink(a, patientId, {
+        openingBalanceId: balanceId,
+      });
+      const view = await pub(a).get(link.token).expect(200);
+      expect(view.body).toMatchObject({
+        currency: 'USD',
+        currencies: ['USD'],
+        equivalents: [],
+        rateDate: null,
+        equivalentsUnavailable: false,
+      });
+      const ves = await pub(a)
+        .post(`${link.token}/report`, reportBody(a))
+        .expect(422);
+      expect(ves.body).toMatchObject({
+        code: 'PAYMENT_REPORT_CURRENCY_NOT_ACCEPTED',
+      });
+      await pub(a)
+        .post(
+          `${link.token}/report`,
+          reportBody(a, { currency: 'USD', amount: 40 }),
+        )
+        .expect(201);
+      const report = await raw.paymentReport.findFirstOrThrow({
+        where: { linkId: link.id },
+      });
+      const currency = await as(a)
+        .post(`/payment-reports/${report.id}/confirm`, { currency: 'VES' })
+        .expect(422);
+      expect(currency.body).toMatchObject({
+        code: 'OPENING_BALANCE_CURRENCY_FIXED',
+      });
+      const rate = await as(a)
+        .post(`/payment-reports/${report.id}/confirm`, {
+          rateOverride: 250,
+          rateOverrideReason: 'Tasa del banco',
+        })
+        .expect(422);
+      expect(rate.body).toMatchObject({
+        code: 'RATE_OVERRIDE_NOT_FOR_OPENING_BALANCE',
+      });
+      // Nada se registró ni se auditó con esas correcciones.
+      expect(
+        await raw.payment.count({ where: { idempotencyKey: report.id } }),
+      ).toBe(0);
+      // Sin correcciones, en su moneda: se confirma contra el saldo.
+      const ok = await as(a)
+        .post(`/payment-reports/${report.id}/confirm`)
+        .expect(200);
+      const row = await raw.payment.findUniqueOrThrow({
+        where: { id: (ok.body as { payment: { id: string } }).payment.id },
+      });
+      expect(row).toMatchObject({
+        openingBalanceId: balanceId,
+        currency: 'USD',
+      });
+      expect(Number(row.amount)).toBe(40);
     });
 
     it('confirmar con un medio de otra clínica es 400 y no crea abono', async () => {

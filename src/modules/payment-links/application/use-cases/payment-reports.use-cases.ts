@@ -6,6 +6,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import type { PaymentReportStatus } from '@prisma/client';
 import {
@@ -41,6 +42,10 @@ import {
   PAYMENT_REPORT_NOT_PENDING_MESSAGE,
   PAYMENT_REPORT_NO_PROOF_MESSAGE,
   PAYMENT_REPORT_PROOF_VIEWED_REASON,
+  OPENING_BALANCE_CURRENCY_FIXED_CODE,
+  OPENING_BALANCE_CURRENCY_FIXED_MESSAGE,
+  RATE_OVERRIDE_NOT_FOR_OPENING_BALANCE_CODE,
+  RATE_OVERRIDE_NOT_FOR_OPENING_BALANCE_MESSAGE,
   RATE_OVERRIDE_REASON_MESSAGE,
   REJECT_REASON_MAX,
   REJECT_REASON_MESSAGE,
@@ -76,6 +81,20 @@ function reportScope(
     return [locationId];
   }
   return tenantContext.scopeLocationIds();
+}
+
+/** Una tasa como decimal en texto, sin ceros de más («250.5»). */
+function rateText(rate: number): string {
+  return rate.toFixed(8).replace(/\.?0+$/, '');
+}
+
+function unprocessable(code: string, message: string) {
+  return new UnprocessableEntityException({
+    statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+    error: 'Unprocessable Entity',
+    code,
+    message,
+  });
 }
 
 function notPending(): ConflictException {
@@ -268,6 +287,25 @@ export class ConfirmPaymentReportUseCase {
     if (report.status === 'CONFIRMED') return this.alreadyConfirmed(report);
     if (report.status !== 'PENDING') throw notPending();
 
+    // Un saldo migrado se abona en su moneda: ni otra moneda ni otra tasa
+    // (RecordOpeningBalancePayment solo admite la suya). 422 con código.
+    if (report.link.openingBalanceId) {
+      if (input.rateOverride !== undefined) {
+        throw unprocessable(
+          RATE_OVERRIDE_NOT_FOR_OPENING_BALANCE_CODE,
+          RATE_OVERRIDE_NOT_FOR_OPENING_BALANCE_MESSAGE,
+        );
+      }
+      if (
+        input.currency !== undefined &&
+        input.currency.trim().toUpperCase() !== report.link.currency
+      ) {
+        throw unprocessable(
+          OPENING_BALANCE_CURRENCY_FIXED_CODE,
+          OPENING_BALANCE_CURRENCY_FIXED_MESSAGE,
+        );
+      }
+    }
     const rateOverrideReason = input.rateOverrideReason?.trim() || null;
     if (
       input.rateOverride !== undefined &&
@@ -347,6 +385,15 @@ export class ConfirmPaymentReportUseCase {
           statusChange: { from: 'PENDING', to: 'CONFIRMED' },
           params: { paymentId: payment.id },
           ...(changedFields.length > 0 ? { changedFields } : {}),
+          // La tasa que fijó recepción y su motivo (revisión del PR #176).
+          ...(input.rateOverride !== undefined && rateOverrideReason
+            ? {
+                rateOverride: {
+                  rate: rateText(input.rateOverride),
+                  reason: rateOverrideReason,
+                },
+              }
+            : {}),
         },
       });
       await writeAuditEvent(tx, {

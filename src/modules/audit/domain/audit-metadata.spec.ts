@@ -1476,3 +1476,26 @@ describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
     });
   });
 });
+
+describe('sanitizeAuditMetadata — tasa fijada al confirmar un pago reportado (DX-569)', () => {
+  it('conserva la tasa decimal y el motivo de una línea', () => {
+    const rateOverride = {
+      rate: '250.5',
+      reason: 'Tasa del banco del paciente',
+    };
+    expect(sanitizeAuditMetadata({ rateOverride })).toEqual({ rateOverride });
+  });
+
+  it('descarta el bloque con una tasa que no es decimal, un motivo vacío, largo o con saltos, o claves de más', () => {
+    for (const bad of [
+      { rate: '1e3', reason: 'x' },
+      { rate: 250, reason: 'x' },
+      { rate: '250', reason: '' },
+      { rate: '250', reason: 'a'.repeat(281) },
+      { rate: '250', reason: 'línea\notra' },
+      { rate: '250', reason: 'x', amount: '40' },
+    ]) {
+      expect(sanitizeAuditMetadata({ rateOverride: bad })).toEqual({});
+    }
+  });
+});

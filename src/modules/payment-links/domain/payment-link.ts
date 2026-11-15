@@ -168,6 +168,22 @@ export const PAYMENT_REPORT_NOT_PENDING_CODE = 'PAYMENT_REPORT_NOT_PENDING';
 export const PAYMENT_REPORT_NO_PROOF_MESSAGE =
   'El reporte no tiene comprobante.';
 export const REJECT_REASON_MESSAGE = `Escribe el motivo (hasta ${REJECT_REASON_MAX} caracteres).`;
+/**
+ * Revisión del PR #176: un saldo migrado se cobra solo en su moneda (lo exige
+ * RecordOpeningBalancePayment). Cobrarlo en otra queda como seguimiento.
+ */
+export const REPORT_CURRENCY_NOT_ACCEPTED_CODE =
+  'PAYMENT_REPORT_CURRENCY_NOT_ACCEPTED';
+export const REPORT_OPENING_BALANCE_CURRENCY_MESSAGE =
+  'Este saldo solo se puede pagar en su moneda.';
+export const OPENING_BALANCE_CURRENCY_FIXED_CODE =
+  'OPENING_BALANCE_CURRENCY_FIXED';
+export const OPENING_BALANCE_CURRENCY_FIXED_MESSAGE =
+  'Un saldo migrado se abona en su moneda: no se puede corregir la moneda.';
+export const RATE_OVERRIDE_NOT_FOR_OPENING_BALANCE_CODE =
+  'RATE_OVERRIDE_NOT_FOR_OPENING_BALANCE';
+export const RATE_OVERRIDE_NOT_FOR_OPENING_BALANCE_MESSAGE =
+  'Un saldo migrado se abona en su moneda: no lleva tasa.';
 export const RATE_OVERRIDE_REASON_MESSAGE =
   'Escribe el motivo para usar otra tasa (hasta 280 caracteres).';
 

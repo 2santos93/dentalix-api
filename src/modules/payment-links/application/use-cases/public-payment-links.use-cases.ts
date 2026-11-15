@@ -6,6 +6,7 @@ import {
   Injectable,
   ConflictException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { PaymentProofPolicy } from '@prisma/client';
@@ -34,6 +35,8 @@ import {
   PROOF_UPLOADS_EXHAUSTED_CODE,
   PROOF_UPLOADS_EXHAUSTED_MESSAGE,
   REPORT_CURRENCY_MESSAGE,
+  REPORT_CURRENCY_NOT_ACCEPTED_CODE,
+  REPORT_OPENING_BALANCE_CURRENCY_MESSAGE,
   REPORT_METHOD_MESSAGE,
   REPORT_NOTE_MAX,
   REPORT_NOTE_TOO_LONG_MESSAGE,
@@ -158,7 +161,11 @@ async function linkOffer(
     repo.clinicCurrencies(),
   ]);
   const offered = offeredPaymentMethods(methods, instructions, link.locationId);
-  const currencies = [...new Set([link.currency, ...clinicCurrencies])].sort();
+  // Revisión del PR #176: un saldo migrado se abona solo en su moneda
+  // (RecordOpeningBalancePayment no admite otra), sin equivalencias.
+  const currencies = link.openingBalanceId
+    ? [link.currency]
+    : [...new Set([link.currency, ...clinicCurrencies])].sort();
   const timeZone = link.locationTimeZone ?? 'UTC';
   const linkCreatedOn = civilDateIn(link.createdAt, timeZone);
   const today = civilDateIn(now, timeZone);
@@ -243,9 +250,9 @@ export class GetPublicPaymentLinkUseCase {
     today: string,
   ): Promise<{
     items: { currency: string; amount: number }[];
-    rateDate: string;
+    rateDate: string | null;
   } | null> {
-    if (others.length === 0) return { items: [], rateDate: today };
+    if (others.length === 0) return { items: [], rateDate: null };
     const read = await this.rates.stored(today, {
       currencies: [link.currency, ...others],
     });
@@ -422,6 +429,14 @@ export class SubmitPaymentReportUseCase {
     )?.method;
     if (!method) throw new BadRequestException(REPORT_METHOD_MESSAGE);
     const currency = input.currency.trim().toUpperCase();
+    if (link.openingBalanceId && currency !== link.currency) {
+      throw new UnprocessableEntityException({
+        statusCode: HttpStatus.UNPROCESSABLE_ENTITY,
+        error: 'Unprocessable Entity',
+        code: REPORT_CURRENCY_NOT_ACCEPTED_CODE,
+        message: REPORT_OPENING_BALANCE_CURRENCY_MESSAGE,
+      });
+    }
     if (!currencies.includes(currency)) {
       throw new BadRequestException(REPORT_CURRENCY_MESSAGE);
     }

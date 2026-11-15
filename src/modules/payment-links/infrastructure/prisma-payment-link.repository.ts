@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma, type PaymentReportStatus } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -506,6 +506,21 @@ export class PrismaPaymentLinkRepository implements PaymentLinkRepository {
     const tenantId = this.tenantId();
     return this.prisma
       .runWithTenant(async (tx): Promise<SubmitReportOutcome> => {
+        // Revisión del PR #176: primero el paciente vivo, bajo candado y en el
+        // orden de archivar (paciente, luego sus enlaces), como `issueLink`:
+        // o el reporte termina antes de que archivar tome la fila, o espera a
+        // su COMMIT y ve el paciente archivado (404, como un enlace anulado).
+        const owner = await tx.paymentLink.findFirst({
+          where: { id: input.linkId },
+          select: { patientId: true },
+        });
+        if (!owner) return { kind: 'GONE' };
+        try {
+          await lockLivePatientOrConflict(tx, owner.patientId);
+        } catch (error) {
+          if (error instanceof ConflictException) throw new LinkGoneError();
+          throw error;
+        }
         // Uso único (D5): el UPDATE condicional decide entre dos reportes a la
         // vez; el segundo espera al COMMIT del primero, relee la fila y no la
         // cuenta. Paciente vivo (DX-461) y enlace sin anular ni caducar.
@@ -543,12 +558,6 @@ export class PrismaPaymentLinkRepository implements PaymentLinkRepository {
             ? { kind: 'PROOF_CHANGED' }
             : { kind: 'GONE' };
         }
-        const patient = await tx.patient.findFirst({
-          where: { id: link.patientId, deletedAt: null },
-          select: { id: true },
-        });
-        // Archivado entre la lectura y el UPDATE: se deshace (404 genérico).
-        if (!patient) throw new LinkGoneError();
         const proof = input.proof;
         await tx.paymentReport.create({
           data: {

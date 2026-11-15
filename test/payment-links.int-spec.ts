@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
@@ -16,6 +17,7 @@ import {
   PAYMENT_LINK_REPOSITORY,
   type PaymentLinkRepository,
 } from '../src/modules/payment-links/domain/ports/payment-link-repository.port';
+import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 
 // DX-569 contra Postgres: el reporte del paciente por enlace y su
 // confirmación. Un solo reporte por enlace aunque lleguen dos a la vez; dos
@@ -424,6 +426,45 @@ describe('enlace de pago y reporte del paciente (DX-569, int)', () => {
         ),
       ).rejects.toThrow(/permission denied/i);
     }
+  });
+
+  it('reporte y archivado a la vez: el reporte bloquea al paciente primero; archivado, el mismo 404 que un enlace anulado', async () => {
+    const target = await plan(a);
+    await link(a, target);
+    const row = await raw.paymentLink.findFirstOrThrow({
+      where: { patientId: target.patientId },
+    });
+    // Archivado sin anular sus enlaces (el reporte llegó a leer el enlace
+    // vivo antes): el repositorio lo ve bajo el candado del paciente.
+    await raw.patient.update({
+      where: { id: target.patientId },
+      data: { deletedAt: new Date() },
+    });
+    const repo = app.get<PaymentLinkRepository>(PAYMENT_LINK_REPOSITORY);
+    const context = app.get(TenantContextService);
+    const outcome = await context.run(a.clinic.tenantId, () =>
+      repo.submitReport({
+        id: randomUUID(),
+        linkId: row.id,
+        paymentMethodId: a.methodId,
+        amount: 40,
+        currency: 'USD',
+        reference: 'REF-ARCHIVADO',
+        paidOn: today(),
+        note: null,
+        proof: null,
+        now: new Date(),
+        meta: { requestId: null, ip: null, userAgent: null },
+      }),
+    );
+    expect(outcome).toEqual({ kind: 'GONE' });
+    const after = await raw.paymentLink.findUniqueOrThrow({
+      where: { id: row.id },
+    });
+    expect(after.usedAt).toBeNull();
+    expect(await raw.paymentReport.count({ where: { linkId: row.id } })).toBe(
+      0,
+    );
   });
 
   it('archivar al paciente anula su enlace de pago vivo: la página da 404', async () => {
