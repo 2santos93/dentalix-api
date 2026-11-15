@@ -5081,6 +5081,57 @@ WHERE "deletedAt" IS NULL AND "docNumber" IS NOT NULL`: bajo RLS FORCE es
 - **Probar a mano**: `prisma/demo/pacientes-importacion-ejemplo.csv` (25 filas
   con separador `;`, errores, un repetido y uno de la clínica demo).
 
+## Pacientes duplicados y fusión segura (DX-266)
+
+Solo ADMIN, en `patient-duplicates` (módulo `patient-merge`):
+
+| Ruta | Qué hace |
+| --- | --- |
+| `GET /patient-duplicates?locationId&page&pageSize` | Parejas de pacientes vivos con el mismo documento normalizado (`DOCUMENT`), el mismo nombre completo y fecha de nacimiento (`NAME_BIRTHDATE`) o el mismo teléfono (8 últimos dígitos) y el mismo primer nombre y primer apellido (`PHONE_NAME`). Cada motivo es un `GROUP BY` sobre una clave normalizada (`docKey`, `dx_search_normalize`, `phoneTail`; índices parciales, `patients_tenant_birth_name_live_idx` para el nombre + nacimiento) y solo se emparejan los de un grupo de 2 a 10: nada de comparar cada paciente con todos. Con `locationId`, las parejas con una cita o el saldo en esa sede. |
+| `POST /patient-duplicates/dismissals` | «No es duplicado»: la pareja (ordenada, A < B) va a `patient_duplicate_dismissals` (RLS FORCE, append-only para la app) y deja de salir. |
+| `GET /patient-duplicates/merge-preview?keptId&absorbedId` | Los dos campo a campo, cuánto tiene cada uno por categoría, lo que impide fusionar (`dx_patient_merge_blockers`) y los enlaces públicos vivos del absorbido. Deja un VIEW de cada ficha. |
+| `POST /patient-duplicates/merge` | La fusión (abajo). |
+
+**La fusión, en una transacción.** La API bloquea los dos pacientes (en orden
+de id), anula los enlaces públicos vivos del absorbido (los mismos que anula
+archivar, DX-461: receta, certificado, firma y presupuesto a distancia, PDF
+firmado, anamnesis, oferta de hueco, pago) y llama a
+`dx_merge_patients(absorbido, conservado, actor)`. Después escribe en el
+conservado los grupos de la ficha elegidos del absorbido (`fields`) y un
+`audit_event` en cada paciente (UPDATE de PATIENT, `PATIENT_MERGED`, con
+`metadata.patientMerge`: el otro paciente y cuántas filas se movieron por
+tabla; los grupos elegidos van por su nombre en `changedFields`).
+
+`dx_merge_patients` es `SECURITY DEFINER` con `search_path` fijo; la clínica
+sale de `app.current_tenant` (dos pacientes de clínicas distintas nunca se ven
+a la vez: `DX266_NOT_FOUND`). Rechaza lo que no se puede juntar solo
+(`DX266_OVERLAPPING_APPOINTMENTS`, `DX266_OPENING_BALANCE_CONFLICT`,
+`DX266_OPEN_PAYMENT_PROMISES`, 409), resuelve los «uno por paciente» a favor
+del conservado (lista de espera, convenio, cobertura principal, pagador,
+vínculos de responsable, documento repetido, recall del mismo tipo) y
+reasigna TODAS las columnas de `dx_patient_merge_tables()` en UNA sentencia
+(las FK compuestas con `ON UPDATE RESTRICT` entre tablas de la lista se
+comprueban al final de la sentencia). Renumera la anamnesis del conservado
+por fecha, conserva la retención más larga (DX-039), reapunta las fusiones
+previas y «No es duplicado», retira al absorbido (`deletedAt` +
+`mergedIntoId`) y recalcula la cartera de los dos: el saldo no cambia.
+
+**Tablas append-only e inmutables.** La app sigue sin UPDATE en ellas
+(DX-148). Cada guarda `BEFORE UPDATE` de una tabla de la lista empieza por la
+puerta `dx_patient_merge_gate`: deja pasar la fila solo dentro de la fusión
+(variable de transacción que fija la función), solo si quien escribe es el
+dueño de `dx_merge_patients` (la app nunca lo es, aunque fije la variable) y
+solo si no cambia nada más que el paciente (del absorbido al conservado),
+salvo el número de versión de la anamnesis y el recall de un contacto. Una
+tabla nueva con paciente hace fallar `test/patient-merge.int-spec.ts` hasta
+que se decida qué hace la fusión con ella (moverla y abrir la puerta en sus
+guardas, o justificar por qué no).
+
+**El absorbido.** `GET /patients/:id` responde 404 con `code:
+PATIENT_MERGED` y `mergedIntoId` (la web redirige) y la búsqueda por su
+nombre o documento antiguos devuelve, en la primera página, al conservado.
+No hay deshacer.
+
 ## Saldo inicial «Saldo migrado» (DX-262)
 
 Porción 2 de DX-107: la clínica que llega de Excel o de otro programa trae las
@@ -6828,7 +6879,8 @@ db:check-force` falla (`app_delete`) si la app recupera alguno.
   `medical_history_versions`, `patient_consent_countersignatures`,
   `patient_consents`, `patient_dentition_events`, `tooth_records`,
   `patient_retention_actions`, `prescription_items`, `recall_contacts`,
-  `reminder_opt_out_match_warnings`, `treatment_plan_acceptances`; y las que
+  `reminder_opt_out_match_warnings`, `treatment_plan_acceptances`,
+  `patient_duplicate_dismissals` (DX-266); y las que
   ya lo tenían de su migración (`audit_events` y sus particiones,
   `platform_access_audit`, `platform_audit_events`,
   `payment_allocation_movements`, `patient_credit_*`,

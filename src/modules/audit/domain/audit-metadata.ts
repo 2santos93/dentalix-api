@@ -13,6 +13,7 @@ import {
   LIVE_PUBLIC_LINK_KINDS,
   type LivePublicLinkCounts,
 } from '../../patients/domain/live-public-links';
+import { MERGE_TABLE_CATEGORY } from '../../patient-merge/domain/merge-categories';
 
 export interface AuditMetadata {
   /** Campos que traía la petición de escritura (nombres, nunca valores). */
@@ -247,7 +248,35 @@ export interface AuditMetadata {
    * (texto libre: queda en `clinical_record_copies`).
    */
   recordCopy?: AuditRecordCopy;
+  /**
+   * DX-266: una fusión de pacientes. Del otro paciente de la pareja, el id;
+   * de lo movido al que se conserva, cuántas filas por TABLA (nombres de
+   * tabla de `MERGE_TABLE_CATEGORY`, nunca su contenido) y cuántos «uno por
+   * paciente» se resolvieron (códigos fijos). Los grupos de la ficha que se
+   * tomaron del absorbido van por su nombre en `changedFields`.
+   */
+  patientMerge?: AuditPatientMerge;
 }
+
+export interface AuditPatientMerge {
+  /** Qué papel tiene el paciente del evento en la fusión. */
+  role: 'KEPT' | 'ABSORBED';
+  otherPatientId: string;
+  moved: Record<string, number>;
+  resolved: Record<string, number>;
+}
+
+/** Lo que `dx_merge_patients` resuelve antes de mover (ver la migración). */
+export const AUDIT_PATIENT_MERGE_RESOLVED = [
+  'waitlistDismissed',
+  'agreementsEnded',
+  'coveragesNoLongerPrimary',
+  'responsibleLinksBetweenPair',
+  'responsibleLinksDuplicated',
+  'responsiblePayersCleared',
+  'documentsDuplicatedVoided',
+  'recallsMerged',
+] as const;
 
 export const AUDIT_RECORD_COPY_SECTIONS = [
   'EVOLUTIONS',
@@ -1637,5 +1666,49 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (via) out.via = via;
   const copy = recordCopy(input.recordCopy);
   if (copy) out.recordCopy = copy;
+  const merged = patientMerge(input.patientMerge);
+  if (merged) out.patientMerge = merged;
   return out;
+}
+
+/** Recuentos con claves de una lista cerrada: cada uno, un natural acotado. */
+function countsOf(
+  value: unknown,
+  allowed: readonly string[],
+): Record<string, number> | null {
+  if (!isRecord(value)) return null;
+  const out: Record<string, number> = {};
+  for (const [key, n] of Object.entries(value)) {
+    if (
+      !allowed.includes(key) ||
+      typeof n !== 'number' ||
+      !Number.isSafeInteger(n) ||
+      n < 0
+    ) {
+      return null;
+    }
+    out[key] = n;
+  }
+  return out;
+}
+
+/** DX-266: la fusión, o nada si algo no encaja (nunca a medias). */
+function patientMerge(value: unknown): AuditPatientMerge | null {
+  if (!isRecord(value)) return null;
+  if (value.role !== 'KEPT' && value.role !== 'ABSORBED') return null;
+  if (
+    typeof value.otherPatientId !== 'string' ||
+    !UUID.test(value.otherPatientId)
+  ) {
+    return null;
+  }
+  const moved = countsOf(value.moved, Object.keys(MERGE_TABLE_CATEGORY));
+  const resolved = countsOf(value.resolved, AUDIT_PATIENT_MERGE_RESOLVED);
+  if (!moved || !resolved) return null;
+  return {
+    role: value.role,
+    otherPatientId: value.otherPatientId.toLowerCase(),
+    moved,
+    resolved,
+  };
 }

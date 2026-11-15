@@ -512,6 +512,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'patient_responsible_parties.patientId',
       'patient_responsible_parties.responsiblePatientId',
       'patient_retention_actions.patientId',
+      // DX-266: un paciente del lote que absorbió a otro en una fusión guarda
+      // la historia del otro: bloquea el deshacer.
+      'patients.mergedIntoId',
       // DX-569: un enlace de pago cobra un plan o un saldo del paciente (que
       // ya bloquean el deshacer): bloquea igual.
       'payment_links.patientId',

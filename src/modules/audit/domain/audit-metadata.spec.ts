@@ -1529,3 +1529,31 @@ describe('sanitizeAuditMetadata — tasa fijada al confirmar un pago reportado (
     }
   });
 });
+
+describe('sanitizeAuditMetadata — fusión de pacientes (DX-266)', () => {
+  const patientMerge = {
+    role: 'KEPT',
+    otherPatientId: 'aaaaaaaa-0000-4000-8000-000000000001',
+    moved: { appointments: 3, tooth_records: 12, payments: 2 },
+    resolved: { recallsMerged: 1 },
+  };
+
+  it('conserva el papel, el otro paciente y lo movido por tabla y cantidad', () => {
+    expect(
+      sanitizeAuditMetadata({ reason: 'PATIENT_MERGED', patientMerge }),
+    ).toEqual({ reason: 'PATIENT_MERGED', patientMerge });
+  });
+
+  it('descarta la fusión entera si trae una tabla desconocida, texto o un recuento raro', () => {
+    for (const bad of [
+      { ...patientMerge, moved: { notas_clinicas: 1 } },
+      { ...patientMerge, moved: { appointments: 'tres' } },
+      { ...patientMerge, moved: { appointments: -1 } },
+      { ...patientMerge, resolved: { alergias: 1 } },
+      { ...patientMerge, role: 'OTRO' },
+      { ...patientMerge, otherPatientId: 'María José Pérez' },
+    ]) {
+      expect(sanitizeAuditMetadata({ patientMerge: bad })).toEqual({});
+    }
+  });
+});

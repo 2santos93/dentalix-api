@@ -77,10 +77,14 @@ export const importJobKey = (batchId: string) => `patient-import:${batchId}`;
  * deshacer un lote: las filas del propio lote (pacientes y saldos), el
  * resumen de cartera (lo mantiene la BD) y los saldos migrados, que se miran
  * aparte (DX-262): los del propio lote se retiran con él y uno de OTRO lote
- * bloquea. Cualquier otra tabla que apunte a un paciente lo bloquea.
+ * bloquea. DX-266: tampoco «No es duplicado» (una decisión sobre la lista de
+ * duplicados, no actividad del paciente). Cualquier otra tabla que apunte a
+ * un paciente lo bloquea (también `patients.mergedIntoId`: un paciente del
+ * lote que absorbió a otro guarda la historia de ese otro).
  */
 export const UNDO_IGNORED_TABLES: ReadonlySet<string> = new Set([
   'opening_balances',
+  'patient_duplicate_dismissals',
   'patient_import_balance_rows',
   'patient_import_rows',
   'patient_ledgers',

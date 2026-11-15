@@ -93,6 +93,9 @@ export function patientUpdateData(
  */
 const MIN_INDEXED_QUERY_LENGTH = 2;
 
+/** DX-266: cuántos pacientes conservados añade la búsqueda por un absorbido. */
+const MERGED_SEARCH_HITS = 5;
+
 /** Página por defecto de la búsqueda si el llamador no fija `take`. */
 const DEFAULT_SEARCH_TAKE = 20;
 
@@ -197,7 +200,7 @@ export const DOC_TAKEN_MESSAGE =
  * candado del documento (el mismo de la importación) y busca por la clave
  * normalizada; el índice único solo compara el texto tal cual.
  */
-async function assertDocFree(
+export async function assertDocFree(
   tx: TxClient,
   tenantId: string,
   docNumber: string | null | undefined,
@@ -490,6 +493,17 @@ export class PrismaPatientRepository implements PatientRepository {
     });
   }
 
+  async findMergedInto(id: string): Promise<string | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.patient.findFirst({
+        where: { id, mergedIntoId: { not: null } },
+        select: { mergedInto: { select: { id: true, deletedAt: true } } },
+      });
+      const target = row?.mergedInto;
+      return target && target.deletedAt === null ? target.id : null;
+    });
+  }
+
   async list(params: ListPatientsParams): Promise<ListPatientsResult> {
     const query = params.query?.replace(/\s+/g, ' ').trim();
     // DX-153 (spec R9): las funciones `dx_patient_search_*` solo reciben texto,
@@ -558,10 +572,32 @@ export class PrismaPatientRepository implements PatientRepository {
         SELECT id FROM dx_patient_search_ids(${query}, ${take}::int, ${skip}::int)`;
       const [{ total }] = await tx.$queryRaw<{ total: bigint }[]>`
         SELECT dx_patient_search_count(${query}) AS total`;
-      if (idRows.length === 0) {
+      // DX-266: en la primera página, también el paciente en el que se
+      // fusionó uno que coincide (su nombre o documento antiguos): buscar
+      // al absorbido lleva al que se conserva. Pocos (índice parcial de los
+      // fusionados), al final y sin repetir.
+      const merged =
+        skip === 0
+          ? await tx.$queryRaw<{ id: string }[]>`
+              SELECT DISTINCT p."mergedIntoId" AS id
+                FROM "patients" p
+                JOIN "patients" t
+                  ON t."tenantId" = p."tenantId" AND t."id" = p."mergedIntoId"
+                 AND t."deletedAt" IS NULL
+               WHERE p."tenantId" = ${this.requireTenantId()}::uuid
+                 AND p."mergedIntoId" IS NOT NULL
+                 AND p.search_text LIKE '%' || replace(replace(replace(
+                       dx_search_normalize(${query}), '\\', '\\\\'), '%', '\\%'), '_', '\\_') || '%'
+               LIMIT ${MERGED_SEARCH_HITS}`
+          : [];
+      const direct = new Set(idRows.map((row) => row.id));
+      const redirected = merged
+        .map((row) => row.id)
+        .filter((id) => !direct.has(id));
+      if (idRows.length === 0 && redirected.length === 0) {
         return { items: [], total: Number(total) };
       }
-      const ids = idRows.map((row) => row.id);
+      const ids = [...idRows.map((row) => row.id), ...redirected];
       const rows = await tx.patient.findMany({
         where: { id: { in: ids }, deletedAt: null },
       });
@@ -571,7 +607,7 @@ export class PrismaPatientRepository implements PatientRepository {
         const row = byId.get(id);
         return row ? [mapToEntity(row, term)] : [];
       });
-      return { items, total: Number(total) };
+      return { items, total: Number(total) + redirected.length };
     });
   }
 

@@ -33,6 +33,10 @@ const WRITERS: Record<string, Writer> = {
     { kind: 'reconciles' },
   'modules/patient-imports/infrastructure/prisma-patient-import.repository.ts':
     { kind: 'reconciles' },
+  // DX-266: la fusión copia al conservado el teléfono elegido del absorbido.
+  'modules/patient-merge/infrastructure/prisma-patient-merge.repository.ts': {
+    kind: 'reconciles',
+  },
   'modules/patients/infrastructure/repositories/prisma-clinic-retention-settings.repository.ts':
     { kind: 'exempt', reason: 'solo retention_floor_until' },
   'modules/data-consents/infrastructure/record-consents-in-tx.ts': {
