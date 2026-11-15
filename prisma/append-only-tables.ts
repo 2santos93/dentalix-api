@@ -78,6 +78,10 @@ export const NO_APP_DELETE = [
   'equipment_maintenances',
   'patient_certificate_copy_links',
   'patient_certificates',
+  // DX-569: el enlace se abre, usa o anula y el reporte se decide (UPDATE
+  // limitado por payment_links_guard y payment_reports_guard).
+  'payment_links',
+  'payment_reports',
   'prescription_copy_links',
   'sedation_records',
   'signature_requests',
