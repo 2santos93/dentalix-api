@@ -185,7 +185,7 @@ describe('prescriptions: FK compuestas, RLS, inmutabilidad y CHECKs (DX-013, int
           (tx) =>
             tx.$executeRaw`UPDATE "prescriptions" SET "patientName" = 'Otra' WHERE "id" = ${rxA}::uuid`,
         ),
-      ).rejects.toThrow(/solo se puede anular/);
+      ).rejects.toThrow(/(?:solo se puede anular)|permission denied for table/);
       await expect(
         raw.$executeRaw`UPDATE "prescriptions" SET "professionalLicense" = 'X' WHERE "id" = ${rxA}::uuid`,
       ).rejects.toThrow(/solo se puede anular/);
@@ -205,7 +205,7 @@ describe('prescriptions: FK compuestas, RLS, inmutabilidad y CHECKs (DX-013, int
             },
           }),
         ),
-      ).rejects.toThrow(/solo se puede anular/);
+      ).rejects.toThrow(/(?:solo se puede anular)|permission denied for table/);
     });
 
     it('rechaza tocar, añadir o borrar medicamentos de una receta emitida', async () => {
@@ -214,7 +214,7 @@ describe('prescriptions: FK compuestas, RLS, inmutabilidad y CHECKs (DX-013, int
           (tx) =>
             tx.$executeRaw`UPDATE "prescription_items" SET "dose" = '2' WHERE "prescriptionId" = ${rxA}::uuid`,
         ),
-      ).rejects.toThrow(/no se modifican/);
+      ).rejects.toThrow(/(?:no se modifican)|permission denied for table/);
       await expect(
         asA((tx) =>
           tx.prescriptionItem.create({
@@ -232,7 +232,7 @@ describe('prescriptions: FK compuestas, RLS, inmutabilidad y CHECKs (DX-013, int
           (tx) =>
             tx.$executeRaw`DELETE FROM "prescription_items" WHERE "prescriptionId" = ${rxA}::uuid`,
         ),
-      ).rejects.toThrow(/no se borran/);
+      ).rejects.toThrow(/(?:no se borran)|permission denied for table/);
     });
 
     it('no cuela medicamentos anulando en la misma transacción (la anulación renueva el xmin)', async () => {
@@ -270,7 +270,7 @@ describe('prescriptions: FK compuestas, RLS, inmutabilidad y CHECKs (DX-013, int
           (tx) =>
             tx.$executeRaw`DELETE FROM "prescriptions" WHERE "id" = ${rxA}::uuid`,
         ),
-      ).rejects.toThrow(/no se borra/);
+      ).rejects.toThrow(/(?:no se borra)|permission denied for table/);
     });
 
     it('admite la anulación (ISSUED → VOIDED) y después nada más', async () => {

@@ -444,6 +444,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/certificates/:id/void': EVERY_ROLE,
   'POST /patients/:patientId/certificates/:id/patient-copy': EVERY_ROLE,
   'GET /certificates/issuer': EVERY_ROLE,
+  // DX-456: copia de la historia clínica; los mismos roles que la historia.
+  'GET /patients/:patientId/clinical-record-copies': CLINICAL,
+  'POST /patients/:patientId/clinical-record-copies': CLINICAL,
+  'GET /patients/:patientId/clinical-record-copies/:copyId/document': CLINICAL,
   'GET /certificates/settings': EVERY_ROLE,
   'PUT /certificates/settings': ADMIN_ONLY,
 

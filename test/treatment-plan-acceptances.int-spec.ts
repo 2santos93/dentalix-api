@@ -146,7 +146,8 @@ async function cleanup(seeds: Seeded[]): Promise<void> {
 
 const FK_VIOLATION = { code: 'P2003' };
 const UNIQUE_VIOLATION = { code: 'P2002' };
-const RESTRICT = /23001|aceptado y firmado|inmutable/;
+const RESTRICT =
+  /(?:23001|aceptado y firmado|inmutable)|permission denied for table/;
 const CHECK = /23514|check constraint/;
 
 describe('treatment_plan_acceptances: FK compuestas, RLS, inmutabilidad y congelado (DX-012, int)', () => {

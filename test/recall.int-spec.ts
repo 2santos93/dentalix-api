@@ -475,19 +475,25 @@ describe('recall en la BD (int, DX-551)', () => {
           where: { id: a.recalls.Ana },
           data: { intervalMonths: 12 },
         }),
-        contact: await tx.recallContact.updateMany({
-          where: { id: anaContact },
-          data: { note: 'Robado' },
-        }),
-        deleted: await tx.recallContact.deleteMany({
-          where: { id: anaContact },
-        }),
       }));
-      expect(changed).toEqual({
-        recall: { count: 0 },
-        contact: { count: 0 },
-        deleted: { count: 0 },
-      });
+      expect(changed).toEqual({ recall: { count: 0 } });
+      // DX-148: recall_contacts no da UPDATE ni DELETE a la app, ni siquiera
+      // sobre 0 filas.
+      await expect(
+        asTenant(b.tenantId, (tx) =>
+          tx.recallContact.updateMany({
+            where: { id: anaContact },
+            data: { note: 'Robado' },
+          }),
+        ),
+      ).rejects.toThrow(/permission denied for table recall_contacts/);
+      await expect(
+        asTenant(
+          b.tenantId,
+          (tx) =>
+            tx.$executeRaw`DELETE FROM "recall_contacts" WHERE "id" = ${anaContact}::uuid`,
+        ),
+      ).rejects.toThrow(/permission denied for table recall_contacts/);
       await expect(
         asTenant(b.tenantId, (tx) =>
           tx.patientRecall.create({
@@ -916,7 +922,7 @@ describe('recall en la BD (int, DX-551)', () => {
     const count = () =>
       raw.recallContact.count({ where: { tenantId: a.tenantId } });
 
-    it('la app tiene UPDATE y DELETE: lo que los impide es el trigger', async () => {
+    it('DX-148: la app no tiene UPDATE, DELETE ni TRUNCATE; el trigger queda detrás', async () => {
       const [row] = await raw.$queryRaw<
         { canUpdate: boolean; canDelete: boolean; canTruncate: boolean }[]
       >`
@@ -924,10 +930,28 @@ describe('recall en la BD (int, DX-551)', () => {
                has_table_privilege('dentalix_app', 'recall_contacts', 'DELETE') AS "canDelete",
                has_table_privilege('dentalix_app', 'recall_contacts', 'TRUNCATE') AS "canTruncate"`;
       expect(row).toEqual({
-        canUpdate: true,
-        canDelete: true,
+        canUpdate: false,
+        canDelete: false,
         canTruncate: false,
       });
+      // Con el permiso concedido (en una transacción que se deshace) salta
+      // el trigger.
+      await expect(
+        raw.$transaction(async (tx) => {
+          await tx.$executeRaw`GRANT UPDATE, DELETE ON "recall_contacts" TO dentalix_app`;
+          await tx.$executeRaw`SET LOCAL ROLE dentalix_app`;
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+          await tx.$executeRaw`UPDATE "recall_contacts" SET "note" = 'x' WHERE "id" = ${anaContact}::uuid`;
+        }),
+      ).rejects.toThrow(/inalterable/);
+      await expect(
+        raw.$transaction(async (tx) => {
+          await tx.$executeRaw`GRANT UPDATE, DELETE ON "recall_contacts" TO dentalix_app`;
+          await tx.$executeRaw`SET LOCAL ROLE dentalix_app`;
+          await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+          await tx.$executeRaw`DELETE FROM "recall_contacts" WHERE "id" = ${anaContact}::uuid`;
+        }),
+      ).rejects.toThrow(/inalterable/);
     });
 
     it('UPDATE de la app falla', async () => {
@@ -938,7 +962,7 @@ describe('recall en la BD (int, DX-551)', () => {
             data: { note: 'Cambiado' },
           }),
         ),
-      ).rejects.toThrow(/inalterable/);
+      ).rejects.toThrow(/permission denied for table recall_contacts/);
       await expect(
         asTenant(a.tenantId, (tx) =>
           tx.recallContact.updateMany({
@@ -946,7 +970,7 @@ describe('recall en la BD (int, DX-551)', () => {
             data: { outcome: 'DECLINED' },
           }),
         ),
-      ).rejects.toThrow(/inalterable/);
+      ).rejects.toThrow(/permission denied for table recall_contacts/);
     });
 
     it('DELETE de la app falla', async () => {
@@ -954,13 +978,13 @@ describe('recall en la BD (int, DX-551)', () => {
         asTenant(a.tenantId, (tx) =>
           tx.recallContact.delete({ where: { id: anaContact } }),
         ),
-      ).rejects.toThrow(/inalterable/);
+      ).rejects.toThrow(/permission denied for table recall_contacts/);
       await expect(
         asTenant(
           a.tenantId,
           (tx) => tx.$executeRaw`DELETE FROM "recall_contacts"`,
         ),
-      ).rejects.toThrow(/inalterable/);
+      ).rejects.toThrow(/permission denied for table recall_contacts/);
       await expect(
         raw.recallContact.findUnique({ where: { id: anaContact } }),
       ).resolves.not.toBeNull();

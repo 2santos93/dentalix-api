@@ -240,6 +240,31 @@ export interface AuditMetadata {
    * el intervalo fijado al registrar la evolución. Solo el código.
    */
   via?: AuditRecallVia;
+  /**
+   * DX-456: una «Copia de la historia clínica» generada: los CÓDIGOS de las
+   * secciones elegidas y si se anotó a quién se entregó. El período va en
+   * `period` y la fila en `params.copyId`; el texto de «entregado a» nunca
+   * (texto libre: queda en `clinical_record_copies`).
+   */
+  recordCopy?: AuditRecordCopy;
+}
+
+export const AUDIT_RECORD_COPY_SECTIONS = [
+  'EVOLUTIONS',
+  'DIAGNOSES',
+  'ANAMNESIS',
+  'ODONTOGRAM',
+  'ANESTHESIA_SEDATION',
+  'CONSENTS',
+  'PRESCRIPTIONS',
+  'APPOINTMENTS',
+] as const;
+export type AuditRecordCopySection =
+  (typeof AUDIT_RECORD_COPY_SECTIONS)[number];
+
+export interface AuditRecordCopy {
+  sections: AuditRecordCopySection[];
+  deliveredTo: boolean;
 }
 
 export const AUDIT_RECALL_VIAS = ['DEFAULT', 'CLINICAL_ENTRY'] as const;
@@ -1138,6 +1163,27 @@ function period(value: unknown): AuditPeriod | null {
   return validFrom <= validTo ? { from: validFrom, to: validTo } : null;
 }
 
+/** Secciones (códigos sin repetir, 1..8) y el booleano, o nada (DX-456). */
+function recordCopy(value: unknown): AuditRecordCopy | null {
+  if (!isRecord(value)) return null;
+  const { sections, deliveredTo, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof deliveredTo !== 'boolean' ||
+    !Array.isArray(sections) ||
+    sections.length === 0 ||
+    sections.length > AUDIT_RECORD_COPY_SECTIONS.length ||
+    new Set(sections).size !== sections.length
+  ) {
+    return null;
+  }
+  const valid = sections.map((s) =>
+    AUDIT_RECORD_COPY_SECTIONS.find((v) => v === s),
+  );
+  if (valid.some((s) => s === undefined)) return null;
+  return { sections: valid as AuditRecordCopySection[], deliveredTo };
+}
+
 /** Los dos lados con la forma admitida y el booleano, o nada (SEC-053). */
 function coverageValidity(value: unknown): AuditCoverageValidityChange | null {
   if (!isRecord(value)) return null;
@@ -1589,5 +1635,7 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (reviewed) out.majorityReview = reviewed;
   const via = AUDIT_RECALL_VIAS.find((v) => v === input.via);
   if (via) out.via = via;
+  const copy = recordCopy(input.recordCopy);
+  if (copy) out.recordCopy = copy;
   return out;
 }

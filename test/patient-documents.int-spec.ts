@@ -22,7 +22,8 @@ const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 
-const IMMUTABLE = /patient_documents es inalterable/;
+const IMMUTABLE =
+  /(?:patient_documents es inalterable)|permission denied for table/;
 const FK_VIOLATION = { code: 'P2003' };
 const UNIQUE_VIOLATION = { code: 'P2002' };
 

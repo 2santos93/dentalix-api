@@ -3997,6 +3997,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'clinical-record-copies.e2e-spec.ts',
+      checks:
+        'B → 404 al generar, listar y leer copias de la historia clínica del paciente de A, sin generación ni evento EXPORT (DX-456)',
+      routes: [
+        'POST /patients/:patientId/clinical-record-copies',
+        'GET /patients/:patientId/clinical-record-copies',
+        'GET /patients/:patientId/clinical-record-copies/:copyId/document',
+      ],
+    },
+    {
       spec: 'certificate-copies.e2e-spec.ts',
       checks:
         'B → 404 al enviar por WhatsApp la copia de un certificado de A, sin enlace (DX-306)',

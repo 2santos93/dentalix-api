@@ -11,6 +11,7 @@ import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
 import { PatientCertificatesController } from '../patient-certificates/presentation/patient-certificates.controller';
+import { ClinicalRecordCopiesController } from '../clinical-record-copies/presentation/clinical-record-copies.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
 import { CallerLookupController } from '../caller-lookup/presentation/caller-lookup.controller';
 import { PatientAgreementsController } from '../patient-agreements/presentation/patient-agreements.controller';
@@ -750,6 +751,23 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: P,
     reason: 'CERTIFICATE_COPY_SENT',
+  },
+
+  // DX-456: copia de la historia clínica. La generación (POST) la audita el
+  // caso de uso en su transacción (AUDITED_IN_USE_CASE).
+  'GET /patients/:patientId/clinical-record-copies': {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: { param: 'patientId' },
+    patient: P,
+    reason: 'CLINICAL_RECORD_COPIES_LISTED',
+  },
+  'GET /patients/:patientId/clinical-record-copies/:copyId/document': {
+    action: 'PRINT',
+    resource: 'PATIENT',
+    resourceId: { param: 'patientId' },
+    patient: P,
+    reason: 'CLINICAL_RECORD_COPY_PRINTED',
   },
 
   // DX-191: registro de implantes, tarjeta y búsqueda por lote.
@@ -1867,6 +1885,11 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // sin evento si nada cambió.
   'PUT /certificates/settings':
     'patient-certificates.use-cases.spec.ts y patient-certificates.e2e-spec.ts',
+  // DX-456: EXPORT · PATIENT · CLINICAL_RECORD_COPY_GENERATED con `copyId`,
+  // período y códigos de las secciones, en la MISMA transacción que la
+  // generación (nunca el «entregado a»).
+  'POST /patients/:patientId/clinical-record-copies':
+    'clinical-record-copies.int-spec.ts y clinical-record-copies.e2e-spec.ts',
   // DX-379: CLINIC_SETTINGS con QUOTE_SETTINGS, el campo cambiado y el antes
   // y el después en códigos QT; sin evento si nada cambió.
   'PUT /treatment-plan-settings':
@@ -2088,6 +2111,7 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 const CONTROLLERS: Type[] = [
   AuthController,
   PatientCertificatesController,
+  ClinicalRecordCopiesController,
   PatientsController,
   CallerLookupController,
   PatientAnamnesisRequestsController,

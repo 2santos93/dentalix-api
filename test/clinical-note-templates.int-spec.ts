@@ -22,7 +22,8 @@ const prisma = new PrismaService(tenantContext);
 
 const SUBDOMAINS = ['dx170-int-a', 'dx170-int-b'];
 const FK_VIOLATION = { code: 'P2003' };
-const IMMUTABLE = /inalterable/;
+// DX-148: como la app, el privilegio (REVOKE) corta antes que el trigger.
+const IMMUTABLE = /(?:inalterable)|permission denied for table/;
 
 interface Clinic {
   tenantId: string;

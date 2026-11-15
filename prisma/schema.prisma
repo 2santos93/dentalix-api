@@ -269,6 +269,8 @@ model Tenant {
   patientCodeCounter          PatientCodeCounter?
   // DX-306: certificados de los pacientes.
   patientCertificates         PatientCertificate[]
+  // DX-456: copias de la historia clínica generadas.
+  clinicalRecordCopies        ClinicalRecordCopy[]
   patientCertificateCopyLinks PatientCertificateCopyLink[]
 
   // DX-569: enlace de pago y reporte del paciente.
@@ -378,6 +380,8 @@ model User {
   // DX-306: certificados que emitió y que anuló.
   patientCertificatesIssued         PatientCertificate[]             @relation("PatientCertificateIssuedBy")
   patientCertificatesVoided         PatientCertificate[]             @relation("PatientCertificateVoidedBy")
+  // DX-456: copias de la historia clínica que generó.
+  clinicalRecordCopiesGenerated     ClinicalRecordCopy[]
   patientCertificateCopyLinks       PatientCertificateCopyLink[]
   // DX-468: «Enviar al paciente» la copia de una receta.
   prescriptionCopyLinksCreated      PrescriptionCopyLink[]
@@ -531,6 +535,8 @@ model Location {
   recallContacts             RecallContact[]
   // DX-306: certificados emitidos en la sede (numerados por sede).
   patientCertificates        PatientCertificate[]
+  // DX-456: copias de la historia clínica generadas en la sede.
+  clinicalRecordCopies       ClinicalRecordCopy[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
   planItemDiscounts          TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
   // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
@@ -861,6 +867,8 @@ model Patient {
   recallContacts              RecallContact[]
   // DX-306: justificantes y certificados de reposo, y los enlaces de su copia.
   certificates                PatientCertificate[]
+  // DX-456: generaciones de la copia de su historia clínica.
+  clinicalRecordCopies        ClinicalRecordCopy[]
   certificateCopyLinks        PatientCertificateCopyLink[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
   reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
@@ -7630,6 +7638,52 @@ model PatientCertificate {
   @@index([tenantId, documentId], map: "patient_certificates_document_idx")
   @@index([tenantId, voidedDocumentId], map: "patient_certificates_voided_document_idx")
   @@map("patient_certificates")
+}
+
+/// DX-456: una generación de la «Copia de la historia clínica» de un paciente:
+/// sede, período (días civiles de la sede, ambos inclusive), secciones, autor
+/// y, opcional, a quién se entregó. Sin contenido clínico: el documento se
+/// arma al leerlo con lo registrado hasta `createdAt`. «Entregado a» es texto
+/// libre: vive aquí, nunca en `audit_events` (que lleva `params.copyId`).
+/// Append-only (trigger + REVOKE), RLS FORCE.
+enum ClinicalRecordCopySection {
+  EVOLUTIONS
+  DIAGNOSES
+  ANAMNESIS
+  ODONTOGRAM
+  ANESTHESIA_SEDATION
+  CONSENTS
+  PRESCRIPTIONS
+  APPOINTMENTS
+}
+
+/// CHECKs en la migración 20261224094500_dx456_clinical_record_copies:
+///   clinical_record_copies_range_check: rangeFrom <= rangeTo.
+///   clinical_record_copies_sections_check: 1..8 secciones, sin NULL ni repetidas (trigger).
+///   clinical_record_copies_delivered_to_check: 1..120, sin espacios en los bordes ni caracteres de control.
+model ClinicalRecordCopy {
+  id            String                      @id @default(uuid()) @db.Uuid
+  tenantId      String                      @db.Uuid
+  patientId     String                      @db.Uuid
+  locationId    String                      @db.Uuid
+  rangeFrom     DateTime                    @db.Date
+  rangeTo       DateTime                    @db.Date
+  sections      ClinicalRecordCopySection[]
+  deliveredTo   String?                     @db.VarChar(120)
+  generatedById String                      @db.Uuid
+  /// Hora del servidor (trigger), en UTC.
+  createdAt     DateTime                    @default(now())
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient     Patient  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "clinical_record_copies_patient_fkey")
+  location    Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict, map: "clinical_record_copies_location_fkey")
+  generatedBy User     @relation(fields: [generatedById], references: [id], onDelete: Restrict, map: "clinical_record_copies_generated_by_fkey")
+
+  @@unique([tenantId, id], map: "clinical_record_copies_tenant_id_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "clinical_record_copies_tenant_patient_created_idx")
+  @@index([tenantId, locationId], map: "clinical_record_copies_tenant_location_idx")
+  @@index([generatedById], map: "clinical_record_copies_generated_by_idx")
+  @@map("clinical_record_copies")
 }
 
 /// DX-306: enlace caducable de la copia de un certificado para el paciente (o
