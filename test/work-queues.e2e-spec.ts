@@ -498,6 +498,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
       const rest = body.items.filter((i) => i.key !== 'QUOTE_FOLLOW_UP');
       expect(rest.map((i) => i.key)).toEqual([
         'CLOSING_QUEUE',
+        'PAYMENT_REPORTS',
         'ACCEPTED_UNSCHEDULED',
         'WAITLIST',
         'RECALL',
