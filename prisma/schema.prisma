@@ -259,16 +259,17 @@ model Tenant {
 
   // DX-253: tope de RECEPTION para traspasar o devolver saldo a favor (0 =
   // no puede; ADMIN no tiene tope).
-  creditReceptionMaxAmount Decimal                      @default(0) @db.Decimal(14, 2)
-  creditTransfers          PatientCreditTransfer[]
-  creditRefunds            PatientCreditRefund[]
-  creditRefundPayments     PatientCreditRefundPayment[]
-  creditEntries            PatientCreditEntry[]
-  creditRefundCounters     PatientCreditRefundCounter[]
+  creditReceptionMaxAmount    Decimal                      @default(0) @db.Decimal(14, 2)
+  creditTransfers             PatientCreditTransfer[]
+  creditRefunds               PatientCreditRefund[]
+  creditRefundPayments        PatientCreditRefundPayment[]
+  creditEntries               PatientCreditEntry[]
+  creditRefundCounters        PatientCreditRefundCounter[]
   // DX-484: último código de paciente asignado en la clínica.
-  patientCodeCounter       PatientCodeCounter?
+  patientCodeCounter          PatientCodeCounter?
   // DX-306: certificados de los pacientes.
-  patientCertificates      PatientCertificate[]
+  patientCertificates         PatientCertificate[]
+  patientCertificateCopyLinks PatientCertificateCopyLink[]
 
   @@map("tenants")
 }
@@ -372,6 +373,7 @@ model User {
   // DX-306: certificados que emitió y que anuló.
   patientCertificatesIssued         PatientCertificate[]             @relation("PatientCertificateIssuedBy")
   patientCertificatesVoided         PatientCertificate[]             @relation("PatientCertificateVoidedBy")
+  patientCertificateCopyLinks       PatientCertificateCopyLink[]
   // DX-468: «Enviar al paciente» la copia de una receta.
   prescriptionCopyLinksCreated      PrescriptionCopyLink[]
   signatureRequestsProfessional     SignatureRequest[]               @relation("SignatureRequestProfessional")
@@ -847,8 +849,9 @@ model Patient {
   // DX-015: sus recalls (uno por tipo) y los contactos de recall.
   recalls                     PatientRecall[]
   recallContacts              RecallContact[]
-  // DX-306: justificantes y certificados de reposo.
+  // DX-306: justificantes y certificados de reposo, y los enlaces de su copia.
   certificates                PatientCertificate[]
+  certificateCopyLinks        PatientCertificateCopyLink[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
   reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks         ReminderOptOutLink[]
@@ -7441,7 +7444,12 @@ model PatientCertificate {
   document       PatientDocument? @relation("PatientCertificateDocument", fields: [tenantId, documentId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificates_document_fkey")
   voidedDocument PatientDocument? @relation("PatientCertificateVoidedDocument", fields: [tenantId, voidedDocumentId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificates_voided_document_fkey")
 
+  /// DX-306: enlaces de «Enviar por WhatsApp».
+  copyLinks PatientCertificateCopyLink[]
+
   @@unique([tenantId, locationId, number], map: "patient_certificates_location_number_key")
+  // Destino de la FK compuesta de los enlaces de la copia (SEC-004).
+  @@unique([tenantId, id], map: "patient_certificates_tenant_id_key")
   @@index([tenantId, patientId, issuedAt(sort: Desc)], map: "patient_certificates_patient_idx")
   @@index([tenantId, patientId, appointmentId], map: "patient_certificates_appointment_idx")
   @@index([tenantId, professionalMembershipId], map: "patient_certificates_membership_idx")
@@ -7450,4 +7458,35 @@ model PatientCertificate {
   @@index([tenantId, documentId], map: "patient_certificates_document_idx")
   @@index([tenantId, voidedDocumentId], map: "patient_certificates_voided_document_idx")
   @@map("patient_certificates")
+}
+
+/// DX-306: enlace caducable de la copia de un certificado para el paciente (o
+/// el responsable de un menor), enviado por WhatsApp. Guarda SOLO el sha256 del
+/// token (la búsqueda pública es por hash, bajo la RLS de la clínica del host).
+/// Como mucho uno vivo por certificado: reenviar invalida el anterior en la
+/// misma transacción (único parcial patient_certificate_copy_links_live_key, en
+/// la migración). Solo cambia `revokedAt`, una vez (trigger); no se borra.
+model PatientCertificateCopyLink {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String    @db.Uuid
+  patientId         String    @db.Uuid
+  certificateId     String    @db.Uuid
+  /// «••• 4567»: nunca el número entero.
+  destinationMasked String
+  tokenHash         String    @unique(map: "patient_certificate_copy_links_token_hash_key")
+  expiresAt         DateTime
+  createdById       String    @db.Uuid
+  createdAt         DateTime  @default(now())
+  /// Invalidado al reenviar o al archivar al paciente (DX-461).
+  revokedAt         DateTime?
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient     Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificate_copy_links_patient_fkey")
+  certificate PatientCertificate @relation(fields: [tenantId, certificateId], references: [tenantId, id], onDelete: Restrict, map: "patient_certificate_copy_links_certificate_fkey")
+  createdBy   User               @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "patient_certificate_copy_links_created_by_fkey")
+
+  @@index([tenantId, certificateId, createdAt], map: "patient_certificate_copy_links_sent_idx")
+  @@index([tenantId, patientId], map: "patient_certificate_copy_links_patient_idx")
+  @@index([createdById], map: "patient_certificate_copy_links_created_by_idx")
+  @@map("patient_certificate_copy_links")
 }

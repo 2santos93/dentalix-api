@@ -2,8 +2,14 @@ import { formatCertificateNumber } from '../domain/certificate-rules';
 import type { PatientCertificate } from '../domain/patient-certificate';
 import type { EligibleAppointment } from '../domain/ports/patient-certificate-repository.port';
 import type {
+  CertificateCopySent,
+  PublicCertificateCopyView,
+} from '../application/certificate-copies.use-cases';
+import type {
+  CertificateCopySentDto,
   EligibleAppointmentDto,
   PatientCertificateDto,
+  PublicCertificateCopyDto,
 } from './dto/patient-certificate.dto';
 
 export function presentCertificate(
@@ -49,5 +55,49 @@ export function presentEligibleAppointment(
     end: a.end.toISOString(),
     providerName: a.providerName,
     liveKinds: a.liveKinds,
+  };
+}
+
+export function presentCopySent(
+  sent: CertificateCopySent,
+): CertificateCopySentDto {
+  return {
+    sentAt: sent.sentAt.toISOString(),
+    expiresAt: sent.expiresAt.toISOString(),
+    destinationMasked: sent.destinationMasked,
+    recipientKind: sent.recipientKind,
+    whatsapp: sent.whatsapp,
+  };
+}
+
+export function presentPublicCopy(
+  view: PublicCertificateCopyView,
+): PublicCertificateCopyDto {
+  const c = view.certificate;
+  const { timeZone, locale, hourCycle } = c.snapshot.location;
+  const { version: _version, ...snapshot } = c.snapshot;
+  return {
+    status: view.status,
+    clinic: view.clinic,
+    expiresAt: view.expiresAt.toISOString(),
+    voidedAt:
+      view.status === 'VOIDED' ? (view.voidedAt?.toISOString() ?? null) : null,
+    format: { timeZone, locale, hourCycle },
+    certificate:
+      view.status === 'AVAILABLE'
+        ? {
+            kind: c.kind,
+            numberLabel: formatCertificateNumber(c.number),
+            issuedAt: c.issuedAt.toISOString(),
+            attendedFrom: c.attendedFrom.toISOString(),
+            attendedUntil: c.attendedUntil.toISOString(),
+            timesSource: c.timesSource,
+            restDays: c.restDays,
+            restStartDate: c.restStartDate,
+            restEndDate: c.restEndDate,
+            diagnosis: c.diagnosis,
+            snapshot,
+          }
+        : null,
   };
 }

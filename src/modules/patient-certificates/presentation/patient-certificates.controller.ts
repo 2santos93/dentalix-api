@@ -25,9 +25,11 @@ import {
   ApiParam,
   ApiProduces,
   ApiTags,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
+import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { contentDispositionHeader } from '../../../shared/storage/file-storage.port';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -51,7 +53,10 @@ import {
   PatientCertificatesUseCases,
 } from '../application/patient-certificates.use-cases';
 import type { CertificateSettings } from '../domain/ports/patient-certificate-repository.port';
+import { SendCertificateCopyUseCase } from '../application/certificate-copies.use-cases';
+import { CERTIFICATE_COPY_SENT_REASON } from '../domain/certificate-copy-link';
 import {
+  CertificateCopySentDto,
   CertificateIssuerDto,
   CertificateSettingsDto,
   EligibleAppointmentDto,
@@ -61,6 +66,7 @@ import {
 } from './dto/patient-certificate.dto';
 import {
   presentCertificate,
+  presentCopySent,
   presentEligibleAppointment,
 } from './patient-certificate.presenter';
 
@@ -95,7 +101,10 @@ const PDF_SCHEMA = { type: 'string', format: 'binary' } as const;
 @ApiParam({ name: 'patientId', format: 'uuid' })
 @Controller('patients/:patientId/certificates')
 export class PatientCertificatesController {
-  constructor(private readonly certificates: PatientCertificatesUseCases) {}
+  constructor(
+    private readonly certificates: PatientCertificatesUseCases,
+    private readonly sendCopy: SendCertificateCopyUseCase,
+  ) {}
 
   @Audit({
     action: 'VIEW',
@@ -256,6 +265,50 @@ export class PatientCertificatesController {
   ): Promise<PatientCertificateDto> {
     return presentCertificate(
       await this.certificates.void(patientId, id, dto.reason, actorOf(req)),
+    );
+  }
+
+  @Audit({
+    action: 'SEND',
+    resource: 'PATIENT_CERTIFICATE',
+    resourceId: { param: 'id' },
+    patient: { param: 'patientId' },
+    reason: CERTIFICATE_COPY_SENT_REASON,
+  })
+  @Post(':id/patient-copy')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Enviar por WhatsApp una copia del certificado al paciente',
+    description:
+      'Crea un enlace caducable (30 días por defecto; se guarda solo el hash del token) a la copia de un certificado VIGENTE; el enlace anterior deja de servir en la misma transacción. Devuelve el número, el enlace y el texto (clínica y enlace, nada clínico) para que la web abra wa.me. Un menor la recibe por su responsable que recibe avisos. Auditado: SEND · PATIENT_CERTIFICATE · CERTIFICATE_COPY_SENT.',
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOkResponse({ type: CertificateCopySentDto })
+  @ApiNotFoundResponse({ description: NOT_FOUND })
+  @ApiForbiddenResponse({
+    description:
+      'La sede no está permitida, o un reposo con diagnóstico enviado por recepción',
+  })
+  @ApiConflictResponse({
+    description:
+      'El certificado está anulado, el paciente está archivado, la sede no tiene zona o formato, o no se pudo armar el enlace de la clínica',
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      'Sin a quién enviarlo: sin teléfono para WhatsApp, baja de los envíos, o un menor sin responsable con teléfono',
+  })
+  async sendPatientCopy(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: AuthenticatedRequest & TenantHostRequest,
+  ): Promise<CertificateCopySentDto> {
+    return presentCopySent(
+      await this.sendCopy.execute(
+        patientId,
+        id,
+        actorOf(req),
+        req.tenantHost?.host,
+      ),
     );
   }
 }

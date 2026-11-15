@@ -741,6 +741,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: P,
     reason: 'CERTIFICATE_VOIDED',
   },
+  // «Enviar por WhatsApp» la copia (la apertura y la descarga públicas las
+  // audita el caso de uso: VIEW/EXPORT sin usuario, CERTIFICATE_COPY_*).
+  'POST /patients/:patientId/certificates/:id/patient-copy': {
+    action: 'SEND',
+    resource: 'PATIENT_CERTIFICATE',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'CERTIFICATE_COPY_SENT',
+  },
 
   // DX-191: registro de implantes, tarjeta y búsqueda por lote.
   'GET /patients/:patientId/implants': {

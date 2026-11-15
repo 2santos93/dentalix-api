@@ -222,3 +222,88 @@ export class EligibleAppointmentDto {
   })
   liveKinds!: CertificateKind[];
 }
+
+export class CertificateWhatsAppDto {
+  @ApiProperty({
+    example: '584121234567',
+    description: 'Dígitos E.164 sin «+» para wa.me.',
+  })
+  phone!: string;
+  @ApiProperty({
+    description: 'Mensaje prellenado: clínica y enlace, nada clínico.',
+  })
+  text!: string;
+  @ApiProperty({
+    description:
+      'Enlace personal de la copia (solo aquí: la API guarda su hash).',
+  })
+  url!: string;
+}
+
+export class CertificateCopySentDto {
+  @ApiProperty({ format: 'date-time' }) sentAt!: string;
+  @ApiProperty({ format: 'date-time' }) expiresAt!: string;
+  @ApiProperty({ example: '••• 4567' }) destinationMasked!: string;
+  @ApiProperty({
+    enum: ['PATIENT', 'RESPONSIBLE'],
+    description: 'RESPONSIBLE = va al responsable de un menor.',
+  })
+  recipientKind!: 'PATIENT' | 'RESPONSIBLE';
+  @ApiProperty({ type: CertificateWhatsAppDto })
+  whatsapp!: CertificateWhatsAppDto;
+}
+
+export class PublicCertificateClinicDto {
+  @ApiProperty() name!: string;
+  @ApiProperty({ type: String, nullable: true }) primaryColor!: string | null;
+  @ApiProperty({ type: String, nullable: true }) logoUrl!: string | null;
+}
+
+export class PublicCertificateFormatDto {
+  @ApiProperty({ example: 'America/Caracas' }) timeZone!: string;
+  @ApiProperty({ example: 'es-VE' }) locale!: string;
+  @ApiProperty({ enum: ['h12', 'h23'] }) hourCycle!: 'h12' | 'h23';
+}
+
+export class PublicCertificateDto {
+  @ApiProperty({ enum: CERTIFICATE_KINDS, enumName: 'PatientCertificateKind' })
+  kind!: CertificateKind;
+  @ApiProperty({ example: '000123' }) numberLabel!: string;
+  @ApiProperty({ format: 'date-time' }) issuedAt!: string;
+  @ApiProperty({ format: 'date-time' }) attendedFrom!: string;
+  @ApiProperty({ format: 'date-time' }) attendedUntil!: string;
+  @ApiProperty({ enum: ['ACTUAL', 'SCHEDULED'] })
+  timesSource!: CertificateTimesSource;
+  @ApiProperty({ type: Number, nullable: true }) restDays!: number | null;
+  @ApiProperty({ type: String, nullable: true }) restStartDate!: string | null;
+  @ApiProperty({ type: String, nullable: true }) restEndDate!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Solo en un reposo cuya clínica imprime el diagnóstico.',
+  })
+  diagnosis!: string | null;
+  @ApiProperty({ type: CertificateSnapshotDto })
+  snapshot!: CertificateSnapshotDto;
+}
+
+export class PublicCertificateCopyDto {
+  @ApiProperty({
+    enum: ['AVAILABLE', 'VOIDED'],
+    description:
+      'AVAILABLE = el certificado y su descarga; VOIDED = anulado después del envío: sin contenido ni descarga.',
+  })
+  status!: 'AVAILABLE' | 'VOIDED';
+  @ApiProperty({ type: PublicCertificateClinicDto, nullable: true })
+  clinic!: PublicCertificateClinicDto | null;
+  @ApiProperty({ format: 'date-time' }) expiresAt!: string;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' })
+  voidedAt!: string | null;
+  @ApiProperty({
+    type: PublicCertificateFormatDto,
+    description: 'Zona, locale y reloj de la sede (para pintar las fechas).',
+  })
+  format!: PublicCertificateFormatDto;
+  @ApiProperty({ type: PublicCertificateDto, nullable: true })
+  certificate!: PublicCertificateDto | null;
+}

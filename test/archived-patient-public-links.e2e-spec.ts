@@ -357,6 +357,7 @@ describe('Paciente archivado: sus enlaces públicos ya no sirven (e2e, DX-461)',
       signedPdfCopies: 1,
       anamnesis: 1,
       prescriptionCopies: 0,
+      certificateCopies: 0,
       total: 5,
     });
 

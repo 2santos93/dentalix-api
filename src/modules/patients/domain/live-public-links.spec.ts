@@ -13,6 +13,7 @@ describe('enlaces públicos vivos de un paciente (DX-461)', () => {
       'signedPdfCopies',
       'anamnesis',
       'prescriptionCopies',
+      'certificateCopies',
     ]);
   });
 
@@ -26,7 +27,8 @@ describe('enlaces públicos vivos de un paciente (DX-461)', () => {
         signedPdfCopies: 4,
         anamnesis: 5,
         prescriptionCopies: 6,
+        certificateCopies: 7,
       }),
-    ).toBe(21);
+    ).toBe(28);
   });
 });
