@@ -30,7 +30,7 @@ const prisma = new PrismaService(tenantContext);
 const SUBDOMAIN = 'dx215-reabre-int';
 const EMAIL = 'recepcion@dx215-reabre-int.test';
 const CARACAS = 'America/Caracas';
-const IMMUTABLE = /inalterable|no admite/;
+const IMMUTABLE = /(?:inalterable|no admite)|permission denied for table/;
 
 let tenantId: string;
 let locationId: string;

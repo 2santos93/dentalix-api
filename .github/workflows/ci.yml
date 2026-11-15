@@ -49,6 +49,11 @@ jobs:
           else
             time npm run lint:check
           fi
+      # DX-148: migraciones nuevas sin bloqueos largos (README, «Migraciones en
+      # caliente»). Sin base de datos; corre aunque ESLint falle.
+      - name: db:lint-migrations
+        if: ${{ !cancelled() }}
+        run: npm run db:lint-migrations
 
   # Tipos, unit y build: cada paso corre aunque falle el anterior (solo
   # dependen de `npm ci` y `prisma generate`), así un rojo en uno no deja los

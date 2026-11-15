@@ -26,7 +26,10 @@ const prisma = new PrismaService(tenantContext);
 const SUBDOMAINS = ['dx027-int-a', 'dx027-int-b'];
 const EMAILS = ['dx027-int-1@example.com', 'dx027-int-2@example.com'];
 const FK_VIOLATION = { code: 'P2003' };
-const IMMUTABLE = /inalterable|no admite|solo se|solo entra|no cambia/;
+// DX-148: en las tablas append-only la app ya no tiene UPDATE/DELETE: el
+// privilegio corta antes que el trigger.
+const IMMUTABLE =
+  /inalterable|no admite|solo se|solo entra|no cambia|permission denied for table/;
 const TABLES = [
   'cash_sessions',
   'cash_session_floats',

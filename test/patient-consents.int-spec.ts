@@ -181,7 +181,7 @@ describe('patient_consents: FK compuestas, RLS, inmutabilidad y CHECKs (DX-006, 
           (tx) =>
             tx.$executeRaw`UPDATE "patient_consents" SET "body" = 'alterado' WHERE "id" = ${consentA}::uuid`,
         ),
-      ).rejects.toThrow(/inmutable/);
+      ).rejects.toThrow(/(?:inmutable)|permission denied for table/);
       await expect(
         raw.$executeRaw`UPDATE "patient_consents" SET "body" = 'alterado' WHERE "id" = ${consentA}::uuid`,
       ).rejects.toThrow(/inmutable/);
@@ -193,7 +193,7 @@ describe('patient_consents: FK compuestas, RLS, inmutabilidad y CHECKs (DX-006, 
           (tx) =>
             tx.$executeRaw`DELETE FROM "patient_consents" WHERE "id" = ${consentA}::uuid`,
         ),
-      ).rejects.toThrow(/inmutable/);
+      ).rejects.toThrow(/(?:inmutable)|permission denied for table/);
       const row = await raw.patientConsent.findUniqueOrThrow({
         where: { id: consentA },
       });

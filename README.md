@@ -6585,6 +6585,302 @@ FALSE`.
 npm run test:owner-nosu`. Los specs crean y borran sus propias bases y, el
   de clúster compartido, un segundo owner y un intruso con nombre único.
 
+## Migraciones en caliente (DX-148)
+
+Cómo escribir una migración que no deje a la API en cola detrás de un bloqueo,
+y el lint que lo vigila en la CI.
+
+**Lo que hace Prisma.** `prisma migrate deploy` manda cada `migration.sql` como
+UN mensaje de consulta simple. Con varias sentencias, Postgres las ejecuta en
+una sola transacción implícita: el bloqueo que toma cada sentencia sigue
+tomado hasta el final del fichero. Con UNA sola sentencia, va fuera de
+transacción; es la única forma de que `CREATE INDEX CONCURRENTLY` o un `DO`
+con `COMMIT` por lote funcionen desde Prisma (comprobado en PG16: `SET …;
+CREATE INDEX CONCURRENTLY …` en el mismo mensaje da _«CREATE INDEX
+CONCURRENTLY cannot run inside a transaction block»_).
+
+### Lint: `npm run db:lint-migrations`
+
+Corre en el job **Lint** de la CI, sin base de datos
+(`prisma/lint-migrations.ts`, reglas en `prisma/migration-lint.ts`). Analiza
+cada migración que no esté en `prisma/lint-migrations.baseline` y falla con
+fichero, línea y regla:
+
+| Regla | Falla si… |
+| --- | --- |
+| `validate-same-file` | un `VALIDATE CONSTRAINT` está en el mismo fichero que el `ADD CONSTRAINT … NOT VALID` de esa restricción. |
+| `lock-timeout` | hay DDL sobre una tabla que ya existía (`ALTER TABLE`, `CREATE INDEX` sin `CONCURRENTLY`, triggers, políticas, `DROP`, `TRUNCATE`, `LOCK`, `ALTER INDEX … ATTACH PARTITION`, una tabla nueva con FK o `PARTITION OF` hacia una existente) sin un `SET LOCAL lock_timeout` antes. |
+| `hot-table-index` | `CREATE INDEX` sin `CONCURRENTLY`, o `UNIQUE`/`PRIMARY KEY` sin `USING INDEX`, sobre una tabla caliente: `appointments`, `patients`, `payments`, `treatment_plan_items`, `tooth_records` o `audit_events`. En `audit_events` (particionada) se admite `ON ONLY` (ver abajo). |
+| `concurrently-alone` | un `CREATE/DROP INDEX CONCURRENTLY` comparte fichero con otra sentencia (Prisma fallaría). |
+| `unbatched-dml` | un `UPDATE`/`DELETE` de una tabla existente va en un fichero con DDL sobre tablas existentes: sin `WHERE` o en una sola sentencia, recorre la tabla con los bloqueos del DDL tomados. |
+
+- **Excepciones.** `prisma/lint-migrations.baseline` lista las migraciones que
+  ya estaban en `main` al entrar el lint (aplicadas: no se pueden editar sin
+  cambiar su checksum). Se genera con `npm run db:lint-migrations --
+  --write-baseline origin/main`, que solo admite migraciones anteriores a
+  `20261224100000` (lo comprueba `test/migrations/lint-migrations.spec.ts`):
+  **no añadas migraciones nuevas a la lista**. Si una migración nueva tiene un
+  motivo real para saltarse una regla (p. ej. un catálogo de 40 filas), lo
+  dice en su propio fichero, con motivo:
+  `-- lint-migrations: ignore unbatched-dml: catálogo de 40 filas, sin tráfico`.
+- **Límites.** El SQL dinámico (`EXECUTE` dentro de un `DO` o de una función)
+  no se analiza: los cuerpos entre `$…$` son opacos. Un `DO` de una sola
+  sentencia pasa el lint; revisa a mano lo que hace dentro.
+- `npm run db:lint-migrations -- ruta/migration.sql` analiza ficheros sueltos.
+
+### `lock_timeout` obligatorio
+
+Primera sentencia de toda migración con DDL sobre tablas existentes:
+
+```sql
+SET LOCAL lock_timeout = '5s';
+```
+
+Un `ALTER TABLE` pide ACCESS EXCLUSIVE; si una transacción larga tiene la
+tabla, espera, y detrás de él se encolan TODAS las lecturas y escrituras de la
+API. Con `lock_timeout` la migración falla a los 5 s y no deja nada a medias
+(una sola transacción). Recuperación: `npx prisma migrate resolve --rolled-back
+<migración>` y repetir `npx prisma migrate deploy` en un momento con menos
+tráfico.
+
+Los ficheros de una sola sentencia `CONCURRENTLY` no pueden llevarlo (el `SET`
+sería otra sentencia de la misma transacción) y no lo necesitan: solo toman
+SHARE UPDATE EXCLUSIVE, que no frena lecturas ni escrituras.
+
+### `NOT VALID` y el `VALIDATE` en una migración posterior
+
+```sql
+-- 20261230090000_x_payer_fk/migration.sql
+SET LOCAL lock_timeout = '5s';
+ALTER TABLE "payments" ADD CONSTRAINT "payments_payer_fkey"
+  FOREIGN KEY ("tenantId", "payerId") REFERENCES "payers"("tenantId", "id")
+  ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
+
+-- 20261230090100_x_payer_fk_validate/migration.sql
+SET LOCAL lock_timeout = '5s';
+ALTER TABLE "payments" VALIDATE CONSTRAINT "payments_payer_fkey";
+```
+
+El `ADD … NOT VALID` toma ACCESS EXCLUSIVE solo un instante (no recorre
+filas); el `VALIDATE`, en su propia transacción, recorre la tabla con SHARE
+UPDATE EXCLUSIVE, que deja leer y escribir. En el mismo fichero (como
+`20261017180000_dx120_dentition_and_record_origin`) el ACCESS EXCLUSIVE del
+ADD sigue tomado durante todo el VALIDATE y la ventaja desaparece. Para una FK
+cuya tabla tiene RLS FORCE y un owner sin superusuario, el `VALIDATE` sigue el
+patrón NO FORCE → VALIDATE → FORCE de DX-134 (p. ej.
+`20261215090100_dx015bis_recall_type_appointment_type_validate`).
+
+### Backfill por lotes, fuera de la migración de esquema
+
+Un `UPDATE` de toda la tabla junto al DDL que añade la columna la deja
+bloqueada mientras dura (DX-039: `patients` bloqueada también para lectura,
+4,6 s con 100k pacientes). El orden:
+
+1. Migración de esquema: la columna nueva, nullable o con `DEFAULT` constante
+   (en PG16 no reescribe la tabla). Sin `UPDATE`.
+2. El código nuevo escribe la columna en las filas nuevas (o un trigger la
+   rellena, como `phoneTail` en DX-225).
+3. Migración de datos aparte, con **una sola sentencia**: un `DO` que hace
+   `COMMIT` por lote. Al ser la única sentencia, Prisma no abre transacción y
+   cada lote solo bloquea sus filas hasta su `COMMIT`. Molde probado:
+   `20261020100200_dx225_patients_phone_tail_backfill` (60k pacientes en 30
+   lotes, sin ACCESS EXCLUSIVE):
+
+   ```sql
+   -- Relleno de patients."nickname" por lotes de 2.000, clínica a clínica.
+   -- Idempotente: si se corta, `prisma migrate resolve --rolled-back` y deploy.
+   DO $$
+   DECLARE
+     t uuid;
+     last_id uuid;
+     batch uuid[];
+   BEGIN
+     FOR t IN SELECT "id" FROM public."tenants" ORDER BY "id" LOOP
+       last_id := NULL;
+       LOOP
+         -- Tras cada COMMIT hay que volver a fijarlos: duran una transacción.
+         PERFORM pg_catalog.set_config('app.current_tenant', t::text, true);
+         PERFORM pg_catalog.set_config('lock_timeout', '5s', true);
+         SELECT pg_catalog.array_agg(s."id") INTO batch
+           FROM (SELECT p."id" FROM public."patients" p
+                  WHERE p."tenantId" = t AND (last_id IS NULL OR p."id" > last_id)
+                  ORDER BY p."id" LIMIT 2000) s;
+         EXIT WHEN batch IS NULL;
+         last_id := batch[pg_catalog.array_length(batch, 1)];
+         UPDATE public."patients" p SET "nickname" = p."firstName"
+          WHERE p."tenantId" = t AND p."id" = ANY (batch) AND p."nickname" IS NULL;
+         COMMIT;
+       END LOOP;
+     END LOOP;
+   END
+   $$;
+   ```
+
+   `app.current_tenant` por clínica en vez de `NO FORCE ROW LEVEL SECURITY`:
+   con un owner sin superusuario (DX-113) la RLS le aplica, y quitar FORCE
+   toma ACCESS EXCLUSIVE hasta el COMMIT. Un relleno muy largo o que dependa
+   del código va mejor en un script de `prisma/` por lotes (como
+   `npm run allocations:backfill`) que se ejecuta tras desplegar.
+4. Cuando todas las filas están rellenas, otra migración con la restricción
+   (`CHECK … NOT VALID` y su `VALIDATE` en una posterior; `SET NOT NULL` se
+   apoya en un CHECK ya validado y no recorre la tabla).
+
+### Índices
+
+- **Tabla caliente**, o grande: `CREATE INDEX CONCURRENTLY`, **solo** en su
+  fichero (sin `SET`, sin comentarios que importen: los comentarios no
+  cuentan como sentencia). Sin `IF NOT EXISTS`: si el primer intento deja un
+  índice INVALID, con `IF NOT EXISTS` el reintento lo daría por bueno.
+- **Único sobre una tabla caliente**: `CREATE UNIQUE INDEX CONCURRENTLY` en un
+  fichero y, en otro, `ALTER TABLE … ADD CONSTRAINT … UNIQUE USING INDEX …`
+  con `lock_timeout` (instantáneo).
+- **Tabla creada en la misma migración**: índice normal; no tiene filas.
+- **`audit_events` (particionada)**: `CREATE INDEX CONCURRENTLY` no se admite
+  en una tabla particionada, y el índice recursivo sobre el padre bloquea
+  TODOS los INSERT de auditoría mientras recorre todas las particiones. En una
+  sola migración: primero el índice de cada partición (la del mes en curso y
+  la DEFAULT, las únicas que reciben INSERT, las últimas), después el del
+  padre `ON ONLY` y el `ATTACH` de cada partición; el padre queda válido al
+  adjuntar la última. Los INSERT solo esperan lo que tarda la partición del
+  mes (las antiguas no reciben escrituras) y el padre, un instante al final:
+
+  ```sql
+  SET LOCAL lock_timeout = '5s';
+  DO $$
+  DECLARE
+    part regclass;
+  BEGIN
+    FOR part IN
+      SELECT i.inhrelid::regclass FROM pg_inherits i
+        JOIN pg_class c ON c.oid = i.inhrelid
+       WHERE i.inhparent = 'public.audit_events'::regclass
+       ORDER BY (c.relname = 'audit_events_default'
+                 OR c.relname >= 'audit_events_p' || to_char(now() AT TIME ZONE 'UTC', 'YYYYMM')),
+                c.relname
+    LOOP
+      EXECUTE format(
+        'CREATE INDEX IF NOT EXISTS %I ON %s ("tenantId", "occurredAt" DESC, "id" DESC) WHERE "resourceType" = %L',
+        replace('audit_events_resource_x_idx', 'audit_events', part::text), part, 'X');
+    END LOOP;
+  END $$;
+  CREATE INDEX IF NOT EXISTS "audit_events_resource_x_idx"
+    ON ONLY "audit_events" ("tenantId", "occurredAt" DESC, "id" DESC)
+    WHERE "resourceType" = 'X';
+  DO $$
+  DECLARE
+    part regclass;
+  BEGIN
+    FOR part IN SELECT inhrelid::regclass FROM pg_inherits
+                 WHERE inhparent = 'public.audit_events'::regclass LOOP
+      EXECUTE format('ALTER INDEX %I ATTACH PARTITION %I', 'audit_events_resource_x_idx',
+        replace('audit_events_resource_x_idx', 'audit_events', part::text));
+    END LOOP;
+  END $$;
+  ```
+
+  Probado en PG16 con las particiones de la base de test (el índice del padre
+  sale `indisvalid`). El nombre de cada índice de partición no puede pasar de
+  63 caracteres. Las particiones que se creen después heredan el índice solas.
+
+### Runbook: índice INVALID tras un `CONCURRENTLY` fallido
+
+Si `CREATE INDEX CONCURRENTLY` falla (un `lock_timeout`, una fila duplicada en
+un índice único, el despliegue cortado), deja el índice creado pero INVALID:
+no sirve para consultas, pero sí se mantiene en cada escritura. Prisma marca la
+migración como fallida (`P3009`/`P3018`) y no aplica ninguna más.
+
+1. Localizarlo, como el owner:
+
+   ```sql
+   SELECT c.relname AS indice, t.relname AS tabla
+     FROM pg_index i
+     JOIN pg_class c ON c.oid = i.indexrelid
+     JOIN pg_class t ON t.oid = i.indrelid
+    WHERE NOT i.indisvalid;
+   ```
+
+2. Quitarlo sin bloquear: `DROP INDEX CONCURRENTLY IF EXISTS "<indice>";`
+   (en su propia sesión de psql, fuera de `BEGIN`).
+3. Corregir la causa (p. ej. las filas duplicadas de un índice único).
+4. `npx prisma migrate resolve --rolled-back <migración>` y
+   `npx prisma migrate deploy` (vuelve a crearlo).
+
+Alternativa sin pasar por Prisma: `REINDEX INDEX CONCURRENTLY "<indice>";` y,
+si queda válido, `npx prisma migrate resolve --applied <migración>`.
+
+### Tablas append-only: la app no tiene UPDATE ni DELETE
+
+Desde `20261224100000_dx148_append_only_revoke`, la primera barrera de los
+registros que no se editan ni se borran es el privilegio, no solo el trigger:
+`dentalix_app` recibe _permission denied_ (42501) antes de llegar a él. El
+trigger se queda (también frena al owner). Listas en
+`prisma/append-only-tables.ts`; `docker/prod/create-app-role.sql` las vuelve a
+revocar si se repite el bootstrap sobre una base migrada y `npm run
+db:check-force` falla (`app_delete`) si la app recupera alguno.
+
+- **Ni UPDATE ni DELETE**: `anesthesia_administrations`, las 4 tablas hijas
+  de la sedación (`sedation_checklists`, `sedation_agent_administrations`,
+  `sedation_vitals`, `sedation_discharges`), `cash_session_closings`,
+  `cash_session_closing_lines`, `cash_session_floats`,
+  `cash_session_reopenings`, `clinical_entry_addenda`,
+  `clinical_entry_diagnoses`, `collection_notes`, `data_processing_consents`,
+  `privacy_policy_versions`, `medical_history_reviews`,
+  `medical_history_versions`, `patient_consent_countersignatures`,
+  `patient_consents`, `patient_dentition_events`, `tooth_records`,
+  `patient_retention_actions`, `prescription_items`, `recall_contacts`,
+  `reminder_opt_out_match_warnings`, `treatment_plan_acceptances`; y las que
+  ya lo tenían de su migración (`audit_events` y sus particiones,
+  `platform_access_audit`, `platform_audit_events`,
+  `payment_allocation_movements`, `patient_credit_*`,
+  `cancellation_policy_versions`, `closing_queue_dismissals`,
+  `appointment_reserved_overrides`, `payment_adjustments`,
+  `treatment_plan_repricings`).
+- **Sin DELETE, con UPDATE** (la app las anula, cierra o marca; el trigger
+  limita qué columnas cambian): `cash_sessions` (cierre y reapertura),
+  `cash_session_adjustments` (se unen a una caja), `expenses` y
+  `expense_payments` (anulación), `patient_documents` y `patient_implants`
+  (anulación; tarjeta del implante), `payment_promises` (cumplido o
+  incumplido), `payment_receipts` (anulación), `payment_receipt_counters`
+  (avanza), `medical_history_submissions` (revisión), y `clinical_entries`:
+  ninguna ruta la actualiza, pero la hoja de sedación la bloquea con `SELECT …
+  FOR UPDATE`, que exige UPDATE. Ya estaban así: `sedation_records` (mismo
+  motivo), `signature_requests`, `signed_consent_pdfs`,
+  `signed_consent_pdf_links`, `equipment_maintenances`,
+  `prescription_copy_links`, `patient_certificates` y
+  `patient_certificate_copy_links`.
+- **`prescriptions`**: sin DELETE ni UPDATE de tabla; UPDATE solo de
+  `status`, `voidedAt`, `voidedById` y `voidReason` (anular una receta).
+- **Fuera**, con trigger condicional (la app las edita mientras son borrador,
+  o el trigger deja borrar sin clínica en la sesión, para la purga):
+  `perio_exams` y sus medidas (borrador editable), `post_op_instruction_deliveries`
+  (marca la primera apertura), `opening_balances` (se retira),
+  `patient_ledgers` (lo mantiene la BD), `treatment_plan_items` y
+  `treatment_plans`.
+
+Al crear una tabla append-only nueva: su migración hace el `REVOKE UPDATE,
+DELETE, TRUNCATE … FROM dentalix_app` (o solo DELETE si se anula), y la tabla
+entra en `prisma/append-only-tables.ts` y en el bloque DX-148 de
+`create-app-role.sql` (`test/append-only-grants.int-spec.ts` compara las
+listas con el catálogo). Un test que compruebe el trigger «como la app» verá
+ahora _permission denied_: el trigger se prueba como el owner.
+
+### FK de `tenantId`: regla única
+
+Toda tabla de clínica nueva con columna `tenantId` lleva una FK directa
+`("tenantId") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE
+CASCADE`, además de las compuestas `(tenantId, x)` hacia sus padres (SEC-004),
+que son las que impiden mezclar clínicas. RESTRICT: borrar una clínica es la
+purga explícita del owner, que vacía antes sus tablas; nada clínico ni
+contable se va en cascada sin querer. CASCADE solo en datos operativos
+regenerables (colas, contadores, ajustes de envío), como ya hacen
+`email_outbox`, `jobs` o `appointment_reminders`. Es lo que ya cumplen 96 de
+las 138 tablas con `tenantId`; las 42 restantes (el núcleo antiguo:
+`patients`, `appointments`, `payments`, `locations`… y `audit_events`, que
+sobrevive a la clínica) están en una lista congelada de
+`test/tenant-fk-rule.int-spec.ts`, que falla si una tabla nueva no tiene la
+FK. Añadirla a las antiguas es DX-058 (con `NOT VALID` y `VALIDATE` aparte,
+como arriba).
+
 ## Copias de la BD y de los ficheros (DX-082)
 
 Runbook (restauración completa y de una clínica, RPO/RTO, claves, prueba

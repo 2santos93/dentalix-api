@@ -229,14 +229,14 @@ describe('DX-037 · autorizaciones de datos en la BD (int)', () => {
           (tx) =>
             tx.$executeRaw`DELETE FROM "data_processing_consents" WHERE "id" = ${consentA}::uuid`,
         ),
-      ).rejects.toThrow(/append-only/);
+      ).rejects.toThrow(/(?:append-only)|permission denied for table/);
       await expect(
         prisma.runWithTenant(
           tenantA,
           (tx) =>
             tx.$executeRaw`DELETE FROM "privacy_policy_versions" WHERE "id" = ${policyA}::uuid`,
         ),
-      ).rejects.toThrow(/append-only/);
+      ).rejects.toThrow(/(?:append-only)|permission denied for table/);
       expect(
         await owner.dataProcessingConsent.count({ where: { id: consentA } }),
       ).toBe(1);

@@ -286,7 +286,7 @@ describe('medical_history_submissions en Postgres (DX-099)', () => {
           (tx) =>
             tx.$executeRaw`DELETE FROM "medical_history_submissions" WHERE "id" = ${id}::uuid`,
         ),
-      ).rejects.toThrow(/inalterable/);
+      ).rejects.toThrow(/(?:inalterable)|permission denied for table/);
     });
   });
 

@@ -309,7 +309,7 @@ describe('SEC-032 · search_path fijo en funciones de trigger y SECURITY DEFINER
           'DELETE FROM "data_processing_consents" WHERE "id" = $1::uuid',
           s.consentId,
         ),
-      ).rejects.toThrow(/append-only/);
+      ).rejects.toThrow(/(?:append-only)|permission denied for table/);
     });
 
     it('data_processing_consents: rechaza el UPDATE aunque una tabla temporal suplante pg_roles', async () => {
@@ -320,7 +320,7 @@ describe('SEC-032 · search_path fijo en funciones de trigger y SECURITY DEFINER
           'UPDATE "data_processing_consents" SET "granted" = false WHERE "id" = $1::uuid',
           s.consentId,
         ),
-      ).rejects.toThrow(/append-only/);
+      ).rejects.toThrow(/(?:append-only)|permission denied for table/);
     });
 
     it('privacy_policy_versions: rechaza el DELETE aunque una tabla temporal suplante pg_roles', async () => {
@@ -332,7 +332,7 @@ describe('SEC-032 · search_path fijo en funciones de trigger y SECURITY DEFINER
           'DELETE FROM "privacy_policy_versions" WHERE "id" = $1::uuid',
           s.unusedPolicyId,
         ),
-      ).rejects.toThrow(/append-only/);
+      ).rejects.toThrow(/(?:append-only)|permission denied for table/);
     });
 
     it('las filas siguen intactas', async () => {

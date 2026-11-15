@@ -380,7 +380,7 @@ describe('retención de la HC (DX-039, int)', () => {
           data: { reason: 'Cambiado a escondidas' },
         }),
       ),
-    ).rejects.toThrow(/inalterable/);
+    ).rejects.toThrow(/(?:inalterable)|permission denied for table/);
     await expect(
       prisma.runWithTenant(tenantA, (tx) =>
         // Por SQL: el cliente de la app ya prohíbe deleteMany (no-hard-delete);
@@ -389,6 +389,6 @@ describe('retención de la HC (DX-039, int)', () => {
           `DELETE FROM "patient_retention_actions" WHERE "patientId" = '${p}'`,
         ),
       ),
-    ).rejects.toThrow(/inalterable/);
+    ).rejects.toThrow(/(?:inalterable)|permission denied for table/);
   });
 });

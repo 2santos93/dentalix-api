@@ -18,7 +18,7 @@ const appRole = new PrismaClient<Prisma.PrismaClientOptions>({
 const tenantContext = new TenantContextService();
 const prisma = new PrismaService(tenantContext);
 
-const IMMUTABLE = /inalterable/;
+const IMMUTABLE = /(?:inalterable)|permission denied for table/;
 
 interface Clinic {
   tenantId: string;
