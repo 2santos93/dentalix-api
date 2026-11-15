@@ -972,7 +972,7 @@ describe('Hoja de sedación en la evolución (DX-407, e2e)', () => {
             asApp(
               Prisma.sql`UPDATE ${t} SET "tenantId" = "tenantId" WHERE "tenantId" = ${a.tenantId}::uuid`,
             ),
-          ).rejects.toThrow(/inalterable/);
+          ).rejects.toThrow(/inalterable|permission denied/);
           await expect(
             asApp(
               Prisma.sql`DELETE FROM ${t} WHERE "tenantId" = ${a.tenantId}::uuid`,

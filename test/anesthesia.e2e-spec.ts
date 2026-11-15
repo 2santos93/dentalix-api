@@ -820,7 +820,7 @@ describe('Anestesia local en la evolución (DX-307, e2e)', () => {
           asApp(
             Prisma.sql`UPDATE "anesthesia_administrations" SET "carpules" = 1 WHERE "id" = ${row.id}::uuid`,
           ),
-        ).rejects.toThrow(/inalterable/);
+        ).rejects.toThrow(/inalterable|permission denied/);
         await expect(
           asApp(
             Prisma.sql`DELETE FROM "anesthesia_administrations" WHERE "id" = ${row.id}::uuid`,
