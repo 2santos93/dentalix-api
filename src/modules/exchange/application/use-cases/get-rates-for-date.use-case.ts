@@ -189,6 +189,9 @@ export interface RatesLookupOptions {
   manualBackup?: boolean;
 }
 
+/** DX-569: `stored` corta antes de llamar al proveedor. */
+class NotStoredRatesError extends Error {}
+
 /**
  * Antes de llamar al proveedor por un día que no está en caché: lanza si ese
  * día no se le puede pedir (SEC-054, solo las rutas de tasas).
@@ -281,6 +284,31 @@ export class GetRatesForDateUseCase {
       false,
       options.currencies,
     );
+  }
+
+  /**
+   * DX-569: las tasas de un día que la clínica YA tiene guardadas, sin pedir
+   * nada al proveedor: con MANUAL, las registradas (como el cobro de ese
+   * día); con AUTOMATIC, las de la caché del proveedor si ese día ya se pidió.
+   * `null` si no hay ninguna guardada. Es la lectura de una ruta pública (el
+   * enlace de pago): nunca puede gastar el presupuesto del proveedor.
+   */
+  async stored(
+    date: string,
+    options: RatesForOptions = {},
+  ): Promise<RatesForDate | null> {
+    try {
+      return await this.ratesWith(
+        date,
+        () => this.clinicSettings(),
+        () => Promise.reject(new NotStoredRatesError()),
+        false,
+        options.currencies,
+      );
+    } catch (error) {
+      if (error instanceof NotStoredRatesError) return null;
+      throw error;
+    }
   }
 
   /**

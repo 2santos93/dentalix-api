@@ -126,6 +126,8 @@ import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-
   // sepa la fuente de la tasa (el día de la del proveedor es el UTC).
   exports: [
     ConvertAmountUseCase,
+    // DX-569: las tasas ya guardadas del día (el enlace de pago público).
+    GetRatesForDateUseCase,
     ExchangeSourceChangeHooks,
     ProviderRatesCallerScope,
     GetExchangeRateSettingsUseCase,

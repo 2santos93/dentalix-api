@@ -176,6 +176,36 @@ async function pdfCopyLink(
   ).id;
 }
 
+/** DX-569: enlace de pago a un plan del paciente (usado si `usedAt`). */
+async function paymentLink(
+  s: Seeded,
+  patientId: string,
+  expiresAt: Date,
+  usedAt: Date | null = null,
+): Promise<string> {
+  const plan = await owner.treatmentPlan.create({
+    data: { tenantId: s.tenantId, patientId, currency: 'USD' },
+  });
+  return (
+    await owner.paymentLink.create({
+      data: {
+        tenantId: s.tenantId,
+        patientId,
+        treatmentPlanId: plan.id,
+        locationId: s.locationId,
+        amount: 40,
+        currency: 'USD',
+        concept: 'BALANCE',
+        tokenHash: hash(),
+        expiresAt,
+        createdById: s.userId,
+        createdAt: new Date(expiresAt.getTime() - 7 * 24 * HOUR),
+        usedAt,
+      },
+    })
+  ).id;
+}
+
 async function anamnesis(
   s: Seeded,
   patientId: string,
@@ -237,6 +267,7 @@ async function liveLinksFor(s: Seeded, patientId: string) {
     consent: await signatureRequest(s, patientId, 'CONSENT', inHours(48)),
     budget: await signatureRequest(s, patientId, 'BUDGET', inHours(48)),
     anamnesis: await anamnesis(s, patientId, inHours(24)),
+    payment: await paymentLink(s, patientId, inHours(24)),
   };
 }
 
@@ -273,6 +304,9 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
     const p = await newPatient(a, 'Archivada');
     // Lo que ya no vale (caducado, usado) o no lleva enlace no se toca.
     const usedPdf = await pdfCopyLink(a, p, inHours(72), new Date());
+    // DX-569: un enlace de pago ya usado (con reporte) y uno caducado.
+    const usedPayment = await paymentLink(a, p, inHours(24), new Date());
+    const expiredPayment = await paymentLink(a, p, inHours(-1));
     const live = await liveLinksFor(a, p);
     const expiredOffer = await slotOffer(a, p, inHours(-1));
     const phoneOffer = await slotOffer(a, p, inHours(24), 'PHONE');
@@ -304,6 +338,7 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       anamnesis: 1,
       prescriptionCopies: 0,
       certificateCopies: 0,
+      paymentLinks: 1,
     });
 
     const now = new Date();
@@ -354,6 +389,14 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
     });
     expect(forms.find((f) => f.id === expiredAnamnesis)?.revokedAt).toBeNull();
 
+    const payments = await owner.paymentLink.findMany({
+      where: { id: { in: [live.payment, usedPayment, expiredPayment] } },
+    });
+    const pay = (id: string) => payments.find((l) => l.id === id);
+    expect(pay(live.payment)?.revokedAt).toEqual(now);
+    expect(pay(usedPayment)?.revokedAt).toBeNull();
+    expect(pay(expiredPayment)?.revokedAt).toBeNull();
+
     // El vecino y la otra clínica conservan sus enlaces vivos.
     await expect(
       asClinic(a.tenantId, () => links.countLive(other, new Date())),
@@ -365,6 +408,7 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       anamnesis: 1,
       prescriptionCopies: 0,
       certificateCopies: 0,
+      paymentLinks: 1,
     });
     await expect(
       asClinic(b.tenantId, () => links.countLive(b.patientId, new Date())),
@@ -387,6 +431,7 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
           budgetSignatures: 1,
           signedPdfCopies: 1,
           anamnesis: 1,
+          paymentLinks: 1,
         },
       },
     });
@@ -414,6 +459,7 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       anamnesis: 0,
       prescriptionCopies: 0,
       certificateCopies: 0,
+      paymentLinks: 0,
     });
     const offer = await owner.waitlistOffer.findUniqueOrThrow({
       where: { id: live.offer },

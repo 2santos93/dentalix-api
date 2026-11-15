@@ -38,6 +38,9 @@ DROP INDEX "patient_implants_tenant_lot_key_idx";
 DROP INDEX "patient_implants_tenant_reference_key_idx";
 
 -- DropIndex
+DROP INDEX "payment_method_instructions_scope_key";
+
+-- DropIndex
 DROP INDEX "treatment_plan_items_tenant_id_key";
 
 -- AlterTable

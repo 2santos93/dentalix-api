@@ -1,4 +1,4 @@
-import { convertAtRate, toRateColumn } from './rate-conversion';
+import { convertAtRate, rateColumnText, toRateColumn } from './rate-conversion';
 import { roundToDigits } from './line-rounding';
 import { round2 } from './money';
 
@@ -72,5 +72,15 @@ describe('toRateColumn (DX-513-bis, como DX-375)', () => {
   it('deja la tasa con los 8 decimales de su columna', () => {
     expect(toRateColumn(880.123456789)).toBe(880.12345679);
     expect(toRateColumn(1)).toBe(1);
+  });
+});
+
+describe('rateColumnText (DX-569)', () => {
+  it('decimal en texto con hasta 8 decimales y sin ceros de más', () => {
+    expect(rateColumnText(250)).toBe('250');
+    expect(rateColumnText(100)).toBe('100');
+    expect(rateColumnText(250.5)).toBe('250.5');
+    expect(rateColumnText(0.12345678)).toBe('0.12345678');
+    expect(rateColumnText(1e-9)).toBe('0');
   });
 });

@@ -547,7 +547,11 @@ export class PrismaPaymentRepository implements PaymentRepository {
                 input.receiptPlanBalance,
               )),
       );
-      return { ...line.entity, receiptNumber };
+      const payment = { ...line.entity, receiptNumber };
+      // DX-569: lo último antes del COMMIT (confirmar el reporte que lo
+      // origina): si falla, no queda ni el abono ni su recibo.
+      await input.afterInsertInTx?.(tx, payment);
+      return payment;
     });
   }
 
@@ -739,7 +743,9 @@ export class PrismaPaymentRepository implements PaymentRepository {
       frozen !== null &&
       frozen.currency === targetCurrency &&
       (frozen.quotedOn ?? frozen.date) === civilDateIn(paidAt, timeZone) &&
-      (await manualRatesStillMatch(tx, tenantId, input.currency, frozen))
+      // DX-569: una tasa que fijó recepción no sale de las manuales.
+      (input.frozenRateOverride === true ||
+        (await manualRatesStillMatch(tx, tenantId, input.currency, frozen)))
         ? frozen
         : null;
     const cash = await assignPaymentToCashSession(tx, {

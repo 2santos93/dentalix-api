@@ -6846,8 +6846,9 @@ db:check-force` falla (`app_delete`) si la app recupera alguno.
   FOR UPDATE`, que exige UPDATE. Ya estaban así: `sedation_records` (mismo
   motivo), `signature_requests`, `signed_consent_pdfs`,
   `signed_consent_pdf_links`, `equipment_maintenances`,
-  `prescription_copy_links`, `patient_certificates` y
-  `patient_certificate_copy_links`.
+  `prescription_copy_links`, `patient_certificates`,
+  `patient_certificate_copy_links`, y (DX-569) `payment_links` (se abre, se
+  usa o se anula) y `payment_reports` (se confirma o se rechaza una vez).
 - **`prescriptions`**: sin DELETE ni UPDATE de tabla; UPDATE solo de
   `status`, `voidedAt`, `voidedById` y `voidReason` (anular una receta).
 - **Fuera**, con trigger condicional (la app las edita mientras son borrador,

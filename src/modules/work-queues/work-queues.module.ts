@@ -19,6 +19,8 @@ import { TreatmentPlansModule } from '../treatment-plans/treatment-plans.module'
 import { ListWaitlistUseCase } from '../waitlist/application/use-cases/waitlist.use-cases';
 import { WaitlistModule } from '../waitlist/waitlist.module';
 import { workQueueSources } from './application/work-queue-sources';
+import { CountPaymentReportsUseCase } from '../payment-links/application/use-cases/payment-reports.use-cases';
+import { PaymentLinksModule } from '../payment-links/payment-links.module';
 import {
   WORK_QUEUES_CACHE_TTL_MS,
   WorkQueuesSummaryCache,
@@ -47,6 +49,8 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
     RecallModule,
     ReceivablesModule,
     InventoryModule,
+    // DX-569: pagos reportados por enlace pendientes de confirmar.
+    PaymentLinksModule,
   ],
   controllers: [WorkQueuesController],
   providers: [
@@ -67,6 +71,7 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
       provide: WORK_QUEUE_SOURCES,
       inject: [
         ClosingQueueUseCases,
+        CountPaymentReportsUseCase,
         CountAnamnesisInboxUseCase,
         ListPendingFollowUpUseCase,
         PlanVisitsService,
@@ -78,6 +83,7 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
       ],
       useFactory: (
         closingQueue: ClosingQueueUseCases,
+        paymentReports: CountPaymentReportsUseCase,
         anamnesis: CountAnamnesisInboxUseCase,
         followUp: ListPendingFollowUpUseCase,
         visits: PlanVisitsService,
@@ -89,6 +95,7 @@ import { WorkQueuesController } from './presentation/work-queues.controller';
       ) =>
         workQueueSources({
           closingQueue,
+          paymentReports,
           anamnesis,
           followUp,
           visits,

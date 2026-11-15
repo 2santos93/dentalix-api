@@ -1126,6 +1126,49 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     ]);
   });
 
+  it('DX-569: Pago móvil y Transferencia en el enlace de pago, con datos para pagar, y un pago reportado pendiente', async () => {
+    const tenantId = await liveDemoTenantId();
+    const offered = await raw.clinicPaymentMethod.findMany({
+      where: { tenantId, allowInPaymentLink: true },
+      include: { instructions: true },
+      orderBy: { name: 'asc' },
+    });
+    expect(offered.map((m) => m.name)).toEqual(['Pago móvil', 'Transferencia']);
+    for (const method of offered) {
+      expect(method.instructions).toHaveLength(1);
+      expect(method.instructions[0].locationId).toBeNull();
+    }
+    const reports = await raw.paymentReport.findMany({
+      where: { tenantId },
+      include: { link: true, paymentMethod: true },
+    });
+    expect(reports).toHaveLength(1);
+    const [report] = reports;
+    expect(report).toMatchObject({
+      status: 'PENDING',
+      currency: 'VES',
+      reference: '000123456789',
+      proofKey: null,
+    });
+    expect(report.paymentMethod.name).toBe('Pago móvil');
+    expect(report.link.usedAt).not.toBeNull();
+    expect(report.link.currency).toBe('USD');
+    expect(Number(report.link.amount)).toBe(40);
+    // El reporte público queda auditado sin actor, origen PUBLIC_LINK.
+    const event = await raw.auditEvent.findFirst({
+      where: {
+        tenantId,
+        resourceType: 'PAYMENT_REPORT',
+        resourceId: report.id,
+      },
+    });
+    expect(event).toMatchObject({ action: 'CREATE', actorUserId: null });
+    expect(event?.metadata).toMatchObject({
+      origin: 'PUBLIC_LINK',
+      reason: 'PAYMENT_REPORT_SUBMITTED',
+    });
+  });
+
   it('deja «Urgencias» 15:00–15:30 reservado para «Consulta de urgencia» los próximos 5 días laborables, liberado a las 11:00 (DX-446)', async () => {
     const tenantId = await liveDemoTenantId();
     const urgent = await raw.appointmentType.findFirstOrThrow({

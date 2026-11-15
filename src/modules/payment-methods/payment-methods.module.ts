@@ -12,6 +12,13 @@ import {
 import { PAYMENT_METHOD_REPOSITORY } from './domain/ports/payment-method-repository.port';
 import { PrismaPaymentMethodRepository } from './infrastructure/prisma-payment-method.repository';
 import { PaymentMethodsController } from './presentation/payment-methods.controller';
+import {
+  ListPaymentMethodInstructionsUseCase,
+  RemovePaymentMethodInstructionsUseCase,
+  SavePaymentMethodInstructionsUseCase,
+} from './application/payment-method-instructions.use-cases';
+import { PAYMENT_METHOD_INSTRUCTION_REPOSITORY } from './domain/ports/payment-method-instruction-repository.port';
+import { PrismaPaymentMethodInstructionRepository } from './infrastructure/prisma-payment-method-instruction.repository';
 
 /**
  * Medios de pago de la clínica (DX-377). Exporta el repositorio para que el
@@ -27,13 +34,21 @@ import { PaymentMethodsController } from './presentation/payment-methods.control
     UpdatePaymentMethodUseCase,
     CreatePaymentAdjustmentUseCase,
     UpdatePaymentAdjustmentUseCase,
+    ListPaymentMethodInstructionsUseCase,
+    SavePaymentMethodInstructionsUseCase,
+    RemovePaymentMethodInstructionsUseCase,
     TokenService,
     TenantContextInterceptor,
     {
       provide: PAYMENT_METHOD_REPOSITORY,
       useClass: PrismaPaymentMethodRepository,
     },
+    {
+      provide: PAYMENT_METHOD_INSTRUCTION_REPOSITORY,
+      useClass: PrismaPaymentMethodInstructionRepository,
+    },
   ],
-  exports: [PAYMENT_METHOD_REPOSITORY],
+  // DX-569: también los datos para pagar (el enlace de pago los muestra).
+  exports: [PAYMENT_METHOD_REPOSITORY, PAYMENT_METHOD_INSTRUCTION_REPOSITORY],
 })
 export class PaymentMethodsModule {}

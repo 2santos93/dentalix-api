@@ -191,7 +191,8 @@ BEGIN
     'patient_documents', 'patient_implants', 'payment_promises',
     'payment_receipt_counters', 'payment_receipts',
     'equipment_maintenances', 'patient_certificate_copy_links',
-    'patient_certificates', 'prescription_copy_links', 'sedation_records',
+    'patient_certificates', 'payment_links', 'payment_reports',
+    'prescription_copy_links', 'sedation_records',
     'signature_requests', 'signed_consent_pdf_links', 'signed_consent_pdfs'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN

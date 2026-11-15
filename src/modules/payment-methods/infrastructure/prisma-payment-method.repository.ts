@@ -60,6 +60,7 @@ function mapToEntity(row: PrismaPaymentMethod): ClinicPaymentMethodEntity {
     active: row.active,
     requiresReference: row.requiresReference,
     proofPolicy: row.proofPolicy,
+    allowInPaymentLink: row.allowInPaymentLink,
     legacyMethod: row.legacyMethod,
     adjustments: row.adjustments.map(mapAdjustment),
     createdAt: row.createdAt,

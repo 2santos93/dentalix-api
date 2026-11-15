@@ -10,6 +10,8 @@ import { ClinicRole } from '@prisma/client';
  */
 export const WORK_QUEUE_KEYS = [
   'CLOSING_QUEUE',
+  // DX-569: pagos que reportaron los pacientes por enlace, por confirmar.
+  'PAYMENT_REPORTS',
   'ANAMNESIS_REVIEW',
   'QUOTE_FOLLOW_UP',
   'ACCEPTED_UNSCHEDULED',
@@ -32,6 +34,8 @@ export type WorkQueueKey = (typeof WORK_QUEUE_KEYS)[number];
 export const WORK_QUEUE_ROLES: Record<WorkQueueKey, readonly ClinicRole[]> = {
   // GET /closing-queue/count — CLOSING_QUEUE_ROLES.
   CLOSING_QUEUE: [ClinicRole.ADMIN, ClinicRole.DENTIST, ClinicRole.RECEPTION],
+  // GET /payment-reports/count — PAYMENT_ROLES (DX-569).
+  PAYMENT_REPORTS: [ClinicRole.ADMIN, ClinicRole.RECEPTION],
   // GET /medical-history/submissions/summary — CLINICAL_ROLES.
   ANAMNESIS_REVIEW: [
     ClinicRole.ADMIN,

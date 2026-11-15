@@ -68,6 +68,7 @@ const MEDIUM = (
   active: true,
   requiresReference: false,
   proofPolicy,
+  allowInPaymentLink: false,
   legacyMethod: null,
   adjustments: [],
   createdAt: NOW,

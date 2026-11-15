@@ -9,6 +9,7 @@ import { PlanVisitsService } from '../../treatment-plans/application/plan-visits
 import { ListPendingFollowUpUseCase } from '../../treatment-plans/application/use-cases/list-pending-follow-up.use-case';
 import { ListWaitlistUseCase } from '../../waitlist/application/use-cases/waitlist.use-cases';
 import type { OverdueAmount } from '../domain/work-queues';
+import { CountPaymentReportsUseCase } from '../../payment-links/application/use-cases/payment-reports.use-cases';
 import type { WorkQueueSources } from './work-queues-summary.use-case';
 
 /** Lo exigible ya vencido de una moneda: la deuda menos las cuotas que aún no vencen. */
@@ -36,6 +37,7 @@ export function overdueOf(buckets: {
  */
 export function workQueueSources(deps: {
   closingQueue: ClosingQueueUseCases;
+  paymentReports: CountPaymentReportsUseCase;
   anamnesis: CountAnamnesisInboxUseCase;
   followUp: ListPendingFollowUpUseCase;
   visits: PlanVisitsService;
@@ -57,6 +59,11 @@ export function workQueueSources(deps: {
       });
       return { count: r.total };
     },
+    // GET /payment-reports/count (DX-569): los pendientes, con la sede de
+    // la cabecera o las permitidas, como Caja.
+    PAYMENT_REPORTS: async () => ({
+      count: (await deps.paymentReports.execute()).pending,
+    }),
     // GET /medical-history/submissions/summary.
     ANAMNESIS_REVIEW: async () => ({
       count: (await deps.anamnesis.execute()).submitted,

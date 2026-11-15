@@ -1191,6 +1191,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     anamnesis: 3,
     prescriptionCopies: 2,
     certificateCopies: 0,
+    paymentLinks: 2,
   };
 
   it('conserva el número de enlaces anulados por tipo', () => {
@@ -1202,6 +1203,30 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     ).toEqual({ reason: 'PATIENT_ARCHIVED_LINKS_REVOKED', revokedLinks });
   });
 
+  it('DX-569: un evento anterior a los enlaces de pago se lee con paymentLinks 0', () => {
+    const { paymentLinks: _omit, ...before } = revokedLinks;
+    expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
+      revokedLinks: { ...before, paymentLinks: 0 },
+    });
+  });
+
+  it('un evento anterior a las copias de receta y certificado (DX-468, DX-306) se lee con 0', () => {
+    const {
+      prescriptionCopies: _p,
+      certificateCopies: _c,
+      paymentLinks: _l,
+      ...before
+    } = revokedLinks;
+    expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
+      revokedLinks: {
+        ...before,
+        prescriptionCopies: 0,
+        certificateCopies: 0,
+        paymentLinks: 0,
+      },
+    });
+  });
+
   it('descarta el bloque entero con tokens, claves ajenas o números raros', () => {
     for (const bad of [
       { ...revokedLinks, token: 'abc' },
@@ -1209,6 +1234,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
       { ...revokedLinks, anamnesis: 1.5 },
       { ...revokedLinks, consentSignatures: '2' },
       { ...revokedLinks, signedPdfCopies: 1_000_001 },
+      { ...revokedLinks, paymentLinks: -1 },
       { slotOffers: 1 },
       'muchos',
     ]) {
@@ -1478,5 +1504,28 @@ describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
         expect(sanitizeAuditMetadata({ recordCopy })).toEqual({});
       }
     });
+  });
+});
+
+describe('sanitizeAuditMetadata — tasa fijada al confirmar un pago reportado (DX-569)', () => {
+  it('conserva la tasa decimal y el motivo de una línea', () => {
+    const rateOverride = {
+      rate: '250.5',
+      reason: 'Tasa del banco del paciente',
+    };
+    expect(sanitizeAuditMetadata({ rateOverride })).toEqual({ rateOverride });
+  });
+
+  it('descarta el bloque con una tasa que no es decimal, un motivo vacío, largo o con saltos, o claves de más', () => {
+    for (const bad of [
+      { rate: '1e3', reason: 'x' },
+      { rate: 250, reason: 'x' },
+      { rate: '250', reason: '' },
+      { rate: '250', reason: 'a'.repeat(281) },
+      { rate: '250', reason: 'línea\notra' },
+      { rate: '250', reason: 'x', amount: '40' },
+    ]) {
+      expect(sanitizeAuditMetadata({ rateOverride: bad })).toEqual({});
+    }
   });
 });

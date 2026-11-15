@@ -10,6 +10,7 @@
  * - `anamnesis`: cuestionario de salud sin responder (DX-099).
  * - `prescriptionCopies`: copia de una receta enviada y sin caducar (DX-468).
  * - `certificateCopies`: copia de un certificado enviada y sin caducar (DX-306).
+ * - `paymentLinks`: enlace de pago sin reporte (DX-569).
  *
  * Fuera a propósito (ver el informe de DX-461): la confirmación de cita y las
  * indicaciones postoperatorias (archivar exige no tener citas abiertas ni HC
@@ -24,6 +25,7 @@ export const LIVE_PUBLIC_LINK_KINDS = [
   'anamnesis',
   'prescriptionCopies',
   'certificateCopies',
+  'paymentLinks',
 ] as const;
 
 export type LivePublicLinkKind = (typeof LIVE_PUBLIC_LINK_KINDS)[number];
@@ -38,6 +40,7 @@ export const NO_LIVE_PUBLIC_LINKS: LivePublicLinkCounts = {
   anamnesis: 0,
   prescriptionCopies: 0,
   certificateCopies: 0,
+  paymentLinks: 0,
 };
 
 export function totalLivePublicLinks(counts: LivePublicLinkCounts): number {

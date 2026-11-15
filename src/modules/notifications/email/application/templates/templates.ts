@@ -22,6 +22,8 @@ import {
   SlotOfferEmailVars,
   SignedConsentCopyEmailVars,
   PrescriptionCopyEmailVars,
+  PaymentLinkEmailVars,
+  PaymentReportRejectedEmailVars,
 } from '../../domain/email-message';
 import { PRESCRIPTION_COPY_CATALOG } from './catalog/prescription-copy.catalog';
 import { EmailBlock, renderLayout } from './layout';
@@ -518,6 +520,50 @@ function prescriptionCopy(
   });
 }
 
+function paymentLink(
+  vars: PaymentLinkEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: `${vars.clinicName} te envía los datos para tu pago`,
+    heading: vars.patientFirstName ? `Hola, ${vars.patientFirstName}` : 'Hola',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `En el enlace tienes los datos de ${vars.clinicName} para hacer tu pago. Cuando lo hagas, avísanos desde la misma página con la referencia y, si puedes, el comprobante.`,
+      },
+      {
+        kind: 'note',
+        text: `El enlace es personal, caduca el ${vars.expiresAtLabel} y solo sirve para un reporte. Si no esperabas este correo, no lo abras y avisa a la clínica.`,
+      },
+    ],
+    action: { label: 'Ver los datos para pagar', url: vars.url },
+  });
+}
+
+function paymentReportRejected(
+  vars: PaymentReportRejectedEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: `${vars.clinicName} no pudo confirmar tu pago`,
+    heading: vars.patientFirstName ? `Hola, ${vars.patientFirstName}` : 'Hola',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `${vars.clinicName} no pudo confirmar el pago que nos reportaste. La clínica te contactará para revisarlo.`,
+      },
+      {
+        kind: 'note',
+        text: 'Si tienes dudas, escribe o llama a la clínica.',
+      },
+    ],
+    action: null,
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -539,6 +585,8 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'slot-offer': slotOffer,
   'signed-consent-copy': signedConsentCopy,
   'prescription-copy': prescriptionCopy,
+  'payment-link': paymentLink,
+  'payment-report-rejected': paymentReportRejected,
   'mfa-notice': mfaNotice,
   'mfa-enrollment-code': mfaEnrollmentCode,
 };
