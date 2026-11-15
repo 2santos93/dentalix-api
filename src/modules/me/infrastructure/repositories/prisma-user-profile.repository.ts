@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { type Prisma, UserTokenPurpose } from '@prisma/client';
+import {
+  type ExtraPermission,
+  type Prisma,
+  UserTokenPurpose,
+} from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import {
   UserProfileRepository,
@@ -35,6 +39,21 @@ export class PrismaUserProfileRepository implements UserProfileRepository {
       select: { name: true },
     });
     return tenant?.name ?? null;
+  }
+
+  // La membresía tiene RLS: se lee dentro de runWithTenant con el tenant del
+  // token verificado.
+  async findExtraPermissions(
+    tenantId: string,
+    userId: string,
+  ): Promise<ExtraPermission[]> {
+    const membership = await this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.clinicMembership.findFirst({
+        where: { tenantId, userId, deletedAt: null },
+        select: { extraPermissions: true },
+      }),
+    );
+    return membership?.extraPermissions ?? [];
   }
 
   async getPasswordHash(userId: string): Promise<string | null> {

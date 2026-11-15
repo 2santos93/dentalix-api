@@ -1,3 +1,4 @@
+import type { ExtraPermission } from '@prisma/client';
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { OwnAccountAuditEvent } from '../own-account-audit';
 
@@ -15,6 +16,14 @@ export interface UserRecord {
 export interface UserProfileRepository {
   findUserById(userId: string): Promise<UserRecord | null>;
   findClinicName(tenantId: string): Promise<string | null>;
+  /**
+   * DX-090: permisos extra de la membresía ACTIVA de `userId` en `tenantId`
+   * (`[]` si no tiene, o si no hay membresía: break-glass).
+   */
+  findExtraPermissions(
+    tenantId: string,
+    userId: string,
+  ): Promise<ExtraPermission[]>;
   getPasswordHash(userId: string): Promise<string | null>;
   /**
    * DX-359: guarda el nombre y, si cambió, escribe `audit` en la MISMA

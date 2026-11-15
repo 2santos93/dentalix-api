@@ -2353,6 +2353,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ locationIds: [b.locationId] }),
       status: 404,
     },
+    {
+      // DX-090: conceder permisos extra a un miembro de A desde B.
+      name: 'PUT /staff/:userId/permissions',
+      verb: 'put',
+      path: () => `/staff/${a.dentistUserId}/permissions`,
+      body: () => ({ permissions: ['PAYMENT_REGISTER'] }),
+      status: 404,
+    },
     // --- invitations ---
     {
       name: 'DELETE /staff/invitations/:id',

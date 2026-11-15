@@ -1,3 +1,4 @@
+import { ExtraPermission } from '@prisma/client';
 import {
   Controller,
   Get,
@@ -22,6 +23,7 @@ import {
   Roles,
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import { REPORT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -75,6 +77,7 @@ export class LocationsComparisonController {
     });
   }
 
+  @AllowPermissions(ExtraPermission.FINANCIAL_REPORTS_VIEW)
   @Get('locations-comparison')
   @ApiOperation({
     summary: 'Comparar sedes: indicadores por sede frente a otro período',
@@ -89,6 +92,7 @@ export class LocationsComparisonController {
     return this.run(query);
   }
 
+  @AllowPermissions(ExtraPermission.FINANCIAL_REPORTS_VIEW)
   @Get('locations-comparison.csv')
   @ApiOperation({
     summary: 'Comparar sedes en CSV (mismos filtros)',

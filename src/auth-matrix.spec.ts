@@ -1,3 +1,4 @@
+import { ExtraPermission } from '@prisma/client';
 import { CanActivate, NestInterceptor, Type } from '@nestjs/common';
 import {
   ROUTE_ACCESS,
@@ -61,6 +62,11 @@ function effectiveAccess(route: DiscoveredRoute): RouteAccess {
   const hasRoles = route.roles !== undefined && route.roles.length > 0;
   const tenantScoped = hasInterceptor(route, TenantContextInterceptor);
 
+  if ((route.permissions?.length ?? 0) > 0 && !hasRoles) {
+    throw new Error(
+      `${where}: @AllowPermissions sin @Roles (el permiso amplía unos roles)`,
+    );
+  }
   if (jwt === -1) {
     if (rolesGuard !== -1 || platform !== -1 || hasRoles) {
       throw new Error(
@@ -108,7 +114,18 @@ function effectiveAccess(route: DiscoveredRoute): RouteAccess {
       `${where}: @Roles sin TenantContextInterceptor (el token no se ata al host)`,
     );
   }
-  return { kind: 'roles', roles: sortRoles(route.roles ?? []) };
+  // DX-090: el permiso extra solo existe sobre unos @Roles (rol base O
+  // permiso), y en el orden del catálogo para comparar.
+  const permissions = route.permissions ?? [];
+  return permissions.length > 0
+    ? {
+        kind: 'roles',
+        roles: sortRoles(route.roles ?? []),
+        permissions: Object.values(ExtraPermission).filter((p) =>
+          permissions.includes(p),
+        ),
+      }
+    : { kind: 'roles', roles: sortRoles(route.roles ?? []) };
 }
 
 /** `/a/:x/b` con un segmento fijo `b` lo captura antes `/a/:x` si va antes. */

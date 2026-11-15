@@ -1,3 +1,4 @@
+import { ExtraPermission } from '@prisma/client';
 import {
   Controller,
   Get,
@@ -22,6 +23,7 @@ import {
   Roles,
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import { PROFITABILITY_REPORT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -80,6 +82,7 @@ export class ProfitabilityController {
     };
   }
 
+  @AllowPermissions(ExtraPermission.FINANCIAL_REPORTS_VIEW)
   @Get('profitability')
   @ApiOperation({
     summary: 'Rentabilidad por sede: ingresos − gastos en base Caja o Devengo',
@@ -92,6 +95,7 @@ export class ProfitabilityController {
     return this.profitability.execute(this.input(query));
   }
 
+  @AllowPermissions(ExtraPermission.FINANCIAL_REPORTS_VIEW)
   @Get('profitability.csv')
   @ApiOperation({
     summary: 'Rentabilidad por sede en CSV (mismos filtros y definición)',
@@ -111,6 +115,7 @@ export class ProfitabilityController {
     return toProfitabilityCsv(report);
   }
 
+  @AllowPermissions(ExtraPermission.FINANCIAL_REPORTS_VIEW)
   @Get('profitability/lines')
   @ApiOperation({
     summary: 'Detalle de una cifra: los movimientos que la forman',

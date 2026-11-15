@@ -25,6 +25,8 @@ function makeRepo(overrides: Partial<StaffRepository> = {}): StaffRepository {
     hasOtherActiveMemberships: (): Promise<boolean> => Promise.resolve(false),
     getLocations: () => Promise.resolve({ kind: 'NOT_FOUND' as const }),
     replaceLocations: () => Promise.resolve({ kind: 'NOT_FOUND' as const }),
+    replaceExtraPermissions: () =>
+      Promise.resolve({ kind: 'NOT_FOUND' as const }),
     ...overrides,
   };
 }
