@@ -1,7 +1,10 @@
 import {
+  Body,
   Controller,
   Get,
+  Put,
   Query,
+  Req,
   Res,
   UseGuards,
   UseInterceptors,
@@ -24,9 +27,24 @@ import {
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
 import {
+  CLINIC_SETTINGS_WRITE_ROLES,
   RECEIVABLES_EXPORT_ROLES,
   RECEIVABLES_ROLES,
 } from '../../auth/presentation/guards/clinic-role-sets';
+import {
+  auditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import {
+  GetBalanceRemindersUseCase,
+  UpdateBalanceReminderPolicyUseCase,
+} from '../application/use-cases/balance-reminders.use-cases';
+import {
+  BalanceReminderPolicyDto,
+  BalanceRemindersPageDto,
+  BalanceRemindersQueryDto,
+  UpdateBalanceReminderPolicyDto,
+} from './dto/balance-reminders.dto';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
@@ -48,6 +66,8 @@ export const RECEIVABLES_FORBIDDEN_MESSAGE =
   'Tu rol no tiene acceso a la cartera: es para administración y recepción.';
 export const RECEIVABLES_EXPORT_FORBIDDEN_MESSAGE =
   'Solo la administración puede exportar la cartera.';
+export const REMINDER_POLICY_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede cambiar la política de avisos de saldo.';
 
 const LOCATION_HEADER = {
   name: 'X-Location-Id',
@@ -73,6 +93,8 @@ export class ReceivablesController {
     private readonly getAging: GetReceivablesAgingUseCase,
     private readonly listCredit: ListCreditBalancesUseCase,
     private readonly tenantContext: TenantContextService,
+    private readonly getReminders: GetBalanceRemindersUseCase,
+    private readonly updateReminderPolicy: UpdateBalanceReminderPolicyUseCase,
   ) {}
 
   /**
@@ -210,6 +232,75 @@ export class ReceivablesController {
       page: query.page,
       pageSize: query.pageSize,
     });
+  }
+
+  // «Por avisar hoy» (DX-146): la misma cartera (mismos roles, sede y
+  // auditoría que la lista; el evento no lleva paciente), filtrada por la
+  // política de avisos de la clínica. Marcar «avisado» es de cobranza:
+  // POST /patients/:id/balance-reminders.
+  @Audit({
+    action: 'VIEW',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_REMINDERS',
+  })
+  @Get('reminders')
+  @ApiOperation({
+    summary:
+      'Por avisar hoy: deudores a los que hoy toca avisar de su saldo vencido',
+    description:
+      'Deudores de la cartera (mismo cálculo y sede que GET /receivables/aging) ' +
+      'cuya deuda vencida más antigua alcanzó un tramo de la política de la ' +
+      'clínica (7, 30 y 60 días por defecto) que aún no se avisó, con como mucho ' +
+      '`maxNotices` avisos por deuda y `minGapDays` días entre avisos. Un aviso ' +
+      'es una gestión REMINDER_SENT; la deuda empieza el día en que venció su ' +
+      'línea exigible más antigua (días civiles de la sede, DX-110). Fuera: ' +
+      'compromiso de pago abierto y baja de los avisos (DX-128), contados en ' +
+      '`excluded` sin nombres. Más antigua primero.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiOkResponse({ type: BalanceRemindersPageDto })
+  @ApiBadRequestResponse({
+    description: 'Filtro inválido o sede que no es de esta clínica',
+  })
+  @ApiForbiddenResponse({ description: RECEIVABLES_FORBIDDEN_MESSAGE })
+  reminders(
+    @Query() query: BalanceRemindersQueryDto,
+  ): Promise<BalanceRemindersPageDto> {
+    return this.getReminders.execute({
+      locationId: this.locationOf(query),
+      page: query.page,
+      pageSize: query.pageSize,
+    });
+  }
+
+  @Put('reminder-policy')
+  @Roles(...CLINIC_SETTINGS_WRITE_ROLES)
+  @RolesDeniedMessage(REMINDER_POLICY_FORBIDDEN_MESSAGE)
+  @ApiOperation({
+    summary:
+      'Cambia la política de avisos de saldo vencido de la clínica (DX-146); queda en la auditoría',
+    description:
+      'Tramos (1 a 3 días crecientes entre 1 y 365), máximo de avisos por deuda (1..10) y mínimo de días entre avisos (1..90). Aplica desde la siguiente lectura de «Por avisar hoy». Si nada cambia, responde 200 sin evento de auditoría.',
+  })
+  @ApiOkResponse({ type: BalanceReminderPolicyDto })
+  @ApiBadRequestResponse({
+    description: 'Tramos, máximo o separación fuera de rango',
+  })
+  @ApiForbiddenResponse({ description: REMINDER_POLICY_FORBIDDEN_MESSAGE })
+  setReminderPolicy(
+    @Body() dto: UpdateBalanceReminderPolicyDto,
+    @Req() req: AuditableRequest,
+  ): Promise<BalanceReminderPolicyDto> {
+    const ctx = auditRequestContext(req, this.tenantContext);
+    if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
+    return this.updateReminderPolicy.execute(
+      {
+        days: dto.days,
+        maxNotices: dto.maxNotices,
+        minGapDays: dto.minGapDays,
+      },
+      ctx,
+    );
   }
 
   @Audit({

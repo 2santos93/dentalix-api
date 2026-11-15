@@ -62,6 +62,34 @@ export class CreateCollectionNoteDto {
   text?: string | null;
 }
 
+/** POST /patients/:id/balance-reminders (DX-146). */
+export class MarkBalanceReminderDto {
+  @ApiPropertyOptional({
+    enum: CollectionChannel,
+    enumName: 'CollectionChannel',
+    default: CollectionChannel.WHATSAPP_LINK,
+    description: 'Por dónde se le avisó; sin él, el enlace de WhatsApp',
+  })
+  @IsOptional()
+  @IsEnum(CollectionChannel, {
+    message: 'channel debe ser CALL, WHATSAPP_LINK, EMAIL o IN_PERSON.',
+  })
+  channel?: CollectionChannel;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: COLLECTION_NOTE_TEXT_MAX,
+    description: 'Nota administrativa opcional (sin datos clínicos)',
+  })
+  @IsOptional()
+  @IsString({ message: 'text debe ser un texto.' })
+  @MaxLength(COLLECTION_NOTE_TEXT_MAX, {
+    message: `La nota admite hasta ${COLLECTION_NOTE_TEXT_MAX} caracteres.`,
+  })
+  text?: string | null;
+}
+
 export class CreatePaymentPromiseDto {
   @ApiProperty({ minimum: 0.01, example: 200000 })
   @IsNumber(

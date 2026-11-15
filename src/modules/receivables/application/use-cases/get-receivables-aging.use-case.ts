@@ -131,10 +131,24 @@ export interface ReceivablesAgingTotals {
   totals: AgingTotal[];
 }
 
-interface ScopedRow {
+/** DX-146: un deudor del alcance con su antigüedad (sin contacto). */
+export interface DebtorAgingRow {
   patientId: string;
   locationId: string | null;
   aging: PatientAging;
+}
+
+/** DX-146: los deudores vencidos del alcance, con el «hoy» de cada sede. */
+export interface OverdueDebtors {
+  rows: DebtorAgingRow[];
+  /** «Hoy» (YYYY-MM-DD) en la zona de la sede del alcance. */
+  asOf: string;
+  scope: { location: { id: string; name: string } | null };
+  now: Date;
+  zoneOf: (locationId: string | null) => string;
+}
+
+interface ScopedRow extends DebtorAgingRow {
   /** Deuda total en centavos (clave de orden, calculada una vez). */
   debtCents: number;
 }
@@ -295,6 +309,39 @@ export class GetReceivablesAgingUseCase {
     return { totals: totalsOf(rows) };
   }
 
+  /**
+   * DX-146 («Por avisar hoy»): los deudores del alcance (sede pedida o las
+   * permitidas al miembro) con deuda exigible desde hace al menos
+   * `minAgeDays`, en el orden de la cartera (la más antigua primero). Mismo
+   * cálculo que la lista: lo que esta da por saldado no aparece.
+   */
+  async overdueDebtors(
+    filters: Pick<ReceivablesAgingFilters, 'locationId' | 'minAgeDays'>,
+  ): Promise<OverdueDebtors> {
+    const { rows, location, now, zoneOf } = await this.scopedRows({
+      locationId: filters.locationId,
+      minAgeDays: filters.minAgeDays,
+    });
+    return {
+      rows: rows.map(({ patientId, locationId, aging }) => ({
+        patientId,
+        locationId,
+        aging,
+      })),
+      asOf: civilDateIn(now, location?.timeZone ?? zoneOf(null)),
+      scope: {
+        location: location ? { id: location.id, name: location.name } : null,
+      },
+      now,
+      zoneOf,
+    };
+  }
+
+  /** DX-146: las filas de la cartera (contacto, abonos, cobranza) de estos deudores. */
+  details(rows: DebtorAgingRow[]): Promise<AgingRowView[]> {
+    return this.withDetails(rows);
+  }
+
   private async scopedRows(filters: ReceivablesAgingFilters) {
     const location = await this.locationOf(filters);
     const [ledgers, zoneOf] = await Promise.all([
@@ -408,7 +455,7 @@ export class GetReceivablesAgingUseCase {
     return out;
   }
 
-  private async withDetails(rows: ScopedRow[]): Promise<AgingRowView[]> {
+  private async withDetails(rows: DebtorAgingRow[]): Promise<AgingRowView[]> {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.patientId);
     const [debtors, collections, regionOf] = await Promise.all([

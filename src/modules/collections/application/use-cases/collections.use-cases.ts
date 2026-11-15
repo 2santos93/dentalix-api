@@ -35,6 +35,10 @@ export const PROMISE_IN_PAST_MESSAGE =
   'La fecha del compromiso no puede ser anterior a hoy.';
 export const PROMISE_TOO_FAR_MESSAGE =
   'La fecha del compromiso no puede estar a más de un año.';
+export const REMINDER_OUTCOME_RESERVED_MESSAGE =
+  'El aviso de saldo se registra con «Marcar avisado» en «Por avisar hoy».';
+export const REMINDER_ALREADY_TODAY_MESSAGE =
+  'Ya se marcó como avisado hoy: vuelve a aparecer en «Por avisar hoy» cuando le toque el siguiente aviso.';
 export const PROMISE_ALREADY_OPEN_MESSAGE =
   'El paciente ya tiene un compromiso de pago abierto: se cierra solo al cumplirse o al vencer.';
 
@@ -74,6 +78,11 @@ export class CreateCollectionNoteUseCase {
     input: CreateCollectionNoteInput,
     authorId: string,
   ): Promise<CollectionNoteView> {
+    // DX-146: el aviso cuenta para «Por avisar hoy» (tope por día y por
+    // deuda): solo entra por su ruta, con su candado.
+    if (input.outcome === 'REMINDER_SENT') {
+      throw new BadRequestException(REMINDER_OUTCOME_RESERVED_MESSAGE);
+    }
     const text = input.text?.trim() ? input.text.trim() : null;
     if (text !== null && text.length > COLLECTION_NOTE_TEXT_MAX) {
       throw new BadRequestException(NOTE_TEXT_TOO_LONG_MESSAGE);
@@ -89,6 +98,50 @@ export class CreateCollectionNoteUseCase {
       text,
       authorId,
     });
+  }
+}
+
+/**
+ * «Marcar avisado» de «Por avisar hoy» (DX-146): una gestión de cobranza
+ * REMINDER_SENT (append-only: no se desmarca; un error se corrige con otra
+ * nota). Un aviso por paciente y día civil de la sede de su deuda (409 si ya
+ * lo tiene); el día y el tramo de la deuda en que se dio deciden cuándo
+ * vuelve a la lista.
+ */
+@Injectable()
+export class MarkBalanceReminderUseCase {
+  constructor(
+    @Inject(COLLECTIONS_REPOSITORY)
+    private readonly repo: CollectionsRepository,
+    private readonly tenantContext: TenantContextService,
+    @Inject(COLLECTIONS_CLOCK) private readonly now: CollectionsClock,
+  ) {}
+
+  async execute(
+    patientId: string,
+    input: { channel: CollectionChannel; text?: string | null },
+    authorId: string,
+  ): Promise<CollectionNoteView> {
+    const text = input.text?.trim() ? input.text.trim() : null;
+    if (text !== null && text.length > COLLECTION_NOTE_TEXT_MAX) {
+      throw new BadRequestException(NOTE_TEXT_TOO_LONG_MESSAGE);
+    }
+    if (!(await this.repo.patientExists(patientId))) {
+      throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    }
+    const note = await this.repo.createReminderNote(
+      {
+        patientId,
+        locationId: this.tenantContext.getLocationId() ?? null,
+        channel: input.channel,
+        outcome: 'REMINDER_SENT',
+        text,
+        authorId,
+      },
+      this.now(),
+    );
+    if (!note) throw new ConflictException(REMINDER_ALREADY_TODAY_MESSAGE);
+    return note;
   }
 }
 
