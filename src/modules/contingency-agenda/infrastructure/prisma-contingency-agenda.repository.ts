@@ -23,6 +23,7 @@ interface AppointmentSqlRow {
   phone: string | null;
   professionalName: string | null;
   appointmentTypeName: string | null;
+  chairName: string | null;
   firstVisit: boolean;
   callbackRequested: boolean;
 }
@@ -87,6 +88,7 @@ export class PrismaContingencyAgendaRepository implements ContingencyAgendaRepos
         SELECT a."id" AS "appointmentId", a."patientId", a."start", a."end", a."status",
                p."firstName", p."lastName", p."phone",
                u."fullName" AS "professionalName", t."name" AS "appointmentTypeName",
+               c."name" AS "chairName",
                NOT EXISTS (
                  SELECT 1 FROM "appointments" prev
                   WHERE prev."tenantId" = a."tenantId"
@@ -101,6 +103,8 @@ export class PrismaContingencyAgendaRepository implements ContingencyAgendaRepos
           LEFT JOIN "users" u ON u."id" = a."providerId"
           LEFT JOIN "appointment_types" t
             ON t."tenantId" = a."tenantId" AND t."id" = a."appointmentTypeId"
+          LEFT JOIN "chairs" c
+            ON c."tenantId" = a."tenantId" AND c."id" = a."chairId"
          WHERE a."tenantId" = ${tenantId}::uuid
            AND a."locationId" = ${locationId}::uuid
            AND a."deletedAt" IS NULL

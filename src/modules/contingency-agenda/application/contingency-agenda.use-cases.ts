@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { phoneInternational } from '../../../shared/phone/phone-number';
@@ -23,6 +24,9 @@ import type { EnqueueOptions, EnqueueResult } from '../../jobs/domain/job';
 import {
   buildContingencyAgenda,
   contingencyWindow,
+  offlineAgendaAppointments,
+  type ContingencyAppointment,
+  type OfflineAgendaAppointment,
 } from '../domain/contingency-agenda';
 import {
   CONTINGENCY_AGENDA_CLOCK,
@@ -96,6 +100,19 @@ export interface ContingencyPdf {
   appointmentCount: number;
 }
 
+/** DX-405: la copia sin conexión de la agenda de una sede (hoy y mañana). */
+export interface OfflineAgenda {
+  locationId: string;
+  locationName: string;
+  timeZone: string;
+  locale: string;
+  hourCycle: string;
+  /** Hoy y mañana (YYYY-MM-DD) en la zona de la sede. */
+  days: [string, string];
+  generatedAt: Date;
+  appointments: OfflineAgendaAppointment[];
+}
+
 export interface NightlyInfo {
   available: boolean;
   /** La copia es la de hoy en la sede. */
@@ -138,9 +155,19 @@ export class ContingencyAgendaUseCases {
     return location;
   }
 
-  private async generate(
-    location: ContingencyLocation,
-  ): Promise<ContingencyPdf> {
+  /**
+   * Las citas de hoy y mañana de la sede con sus banderas médicas (solo el
+   * sí/no) y el teléfono internacional: lo que comparten el PDF y la copia
+   * sin conexión (DX-405).
+   */
+  private async windowAppointments(location: ContingencyLocation): Promise<{
+    timeZone: string;
+    fmt: RegionalFormat;
+    now: Date;
+    window: ReturnType<typeof contingencyWindow>;
+    appointments: ContingencyAppointment[];
+    phone: (text: string | null) => string | null;
+  }> {
     const timeZone = requireLocationTimeZone(location);
     const fmt = requireLocationFormat(location);
     const now = this.clock();
@@ -162,6 +189,32 @@ export class ContingencyAgendaUseCases {
       text === null
         ? null
         : (phoneInternational(text, location.defaultPhoneRegion) ?? text);
+    const appointments = rows.map((r): ContingencyAppointment => {
+      const f = flags.get(r.appointmentId);
+      return {
+        appointmentId: r.appointmentId,
+        start: r.start,
+        end: r.end,
+        status: r.status,
+        patientName: `${r.firstName} ${r.lastName}`.trim(),
+        phone: phone(r.phone),
+        professionalName: r.professionalName,
+        appointmentTypeName: r.appointmentTypeName,
+        chairName: r.chairName,
+        firstVisit: r.firstVisit,
+        medicalAlert:
+          f !== undefined && (f.hasCriticalAlert || f.requiresPremedication),
+        callbackRequested: r.callbackRequested,
+      };
+    });
+    return { timeZone, fmt, now, window, appointments, phone };
+  }
+
+  private async generate(
+    location: ContingencyLocation,
+  ): Promise<ContingencyPdf> {
+    const { timeZone, fmt, now, window, appointments, phone } =
+      await this.windowAppointments(location);
     const model = buildContingencyAgenda({
       clinicName: location.clinicName,
       locationName: location.name,
@@ -170,23 +223,7 @@ export class ContingencyAgendaUseCases {
       fmt,
       today: window.days[0],
       generatedAt: now,
-      appointments: rows.map((r) => {
-        const f = flags.get(r.appointmentId);
-        return {
-          appointmentId: r.appointmentId,
-          start: r.start,
-          end: r.end,
-          status: r.status,
-          patientName: `${r.firstName} ${r.lastName}`.trim(),
-          phone: phone(r.phone),
-          professionalName: r.professionalName,
-          appointmentTypeName: r.appointmentTypeName,
-          firstVisit: r.firstVisit,
-          medicalAlert:
-            f !== undefined && (f.hasCriticalAlert || f.requiresPremedication),
-          callbackRequested: r.callbackRequested,
-        };
-      }),
+      appointments,
     });
     return {
       pdf: await this.renderer.render(model),
@@ -194,6 +231,30 @@ export class ContingencyAgendaUseCases {
       forDate: window.days[0],
       generatedAt: now,
       appointmentCount: model.total,
+    };
+  }
+
+  /**
+   * DX-405: la agenda de hoy y mañana de la sede en datos (no PDF), para la
+   * copia cifrada que la web guarda y enseña sin conexión. Mismas reglas de
+   * acceso por sede que el PDF; el rol lo decide el controlador.
+   */
+  async offlineAgenda(
+    locationId: string,
+    allowed: AllowedLocations,
+  ): Promise<OfflineAgenda> {
+    const location = await this.location(locationId, allowed);
+    const { timeZone, now, window, appointments } =
+      await this.windowAppointments(location);
+    return {
+      locationId: location.id,
+      locationName: location.name,
+      timeZone,
+      locale: location.locale as string,
+      hourCycle: location.hourCycle as string,
+      days: window.days,
+      generatedAt: now,
+      appointments: offlineAgendaAppointments(appointments),
     };
   }
 

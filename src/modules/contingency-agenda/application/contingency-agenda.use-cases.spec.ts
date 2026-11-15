@@ -99,6 +99,7 @@ function row(
     phone: '04121234567',
     professionalName: 'Dra. Ana Gómez',
     appointmentTypeName: 'Limpieza',
+    chairName: null,
     firstVisit: false,
     callbackRequested: false,
     ...over,
@@ -217,6 +218,58 @@ describe('ContingencyAgendaUseCases (DX-339)', () => {
       expect((noFormat as ConflictException).getResponse()).toMatchObject({
         code: 'LOCATION_LOCALE_REQUIRED',
       });
+    });
+  });
+
+  describe('copia sin conexión (DX-405)', () => {
+    it('hoy y mañana en datos: zona, reloj, gabinete, teléfono internacional y alerta sí/no', async () => {
+      repo.rows = [
+        row({ chairName: 'Gabinete 1' }),
+        row({ appointmentId: 'a2', patientId: 'p2', status: 'CANCELLED' }),
+      ];
+      flags.set('a1', {
+        ...NO_ANAMNESIS_FLAGS,
+        hasCriticalAlert: true,
+        alerts: ['anticoagulantes'],
+      });
+      const agenda = await useCases.offlineAgenda(CENTRO, 'ALL');
+      expect(agenda).toEqual({
+        locationId: CENTRO,
+        locationName: 'Sede Centro',
+        timeZone: 'America/Caracas',
+        locale: 'es-VE',
+        hourCycle: 'h12',
+        days: ['2026-11-02', '2026-11-03'],
+        generatedAt: NOW,
+        appointments: [
+          {
+            id: 'a1',
+            start: new Date('2026-11-02T15:00:00Z'),
+            end: new Date('2026-11-02T15:30:00Z'),
+            status: 'CONFIRMED',
+            chairName: 'Gabinete 1',
+            professionalName: 'Dra. Ana Gómez',
+            patientName: 'Laura Castro',
+            phone: '+58 412 1234567',
+            appointmentTypeName: 'Limpieza',
+            medicalAlert: true,
+          },
+        ],
+      });
+      expect(JSON.stringify(agenda)).not.toContain('anticoagulantes');
+    });
+
+    it('las mismas reglas de sede que el PDF: 404, 403 y 409', async () => {
+      await expect(useCases.offlineAgenda(NORTE, 'ALL')).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(useCases.offlineAgenda(CENTRO, [NORTE])).rejects.toThrow(
+        ForbiddenException,
+      );
+      repo.locations.set(CENTRO, location({ timeZone: null }));
+      await expect(useCases.offlineAgenda(CENTRO, 'ALL')).rejects.toThrow(
+        ConflictException,
+      );
     });
   });
 

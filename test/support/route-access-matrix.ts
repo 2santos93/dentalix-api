@@ -830,6 +830,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'ADMIN',
     'RECEPTION',
   ),
+  // DX-405: la copia sin conexión de la agenda, quien ve la agenda.
+  'GET /locations/:locationId/contingency-agenda/offline': EVERY_ROLE,
   // DX-015: recall. La lista de llamada y sus contactos, el mostrador; fijar o
   // pausar el recall de un paciente, el personal clínico; leer el bloque de la
   // ficha (sin datos clínicos), los cuatro roles.
