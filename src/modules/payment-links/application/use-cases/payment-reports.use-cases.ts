@@ -14,6 +14,7 @@ import {
   type FileStoragePort,
 } from '../../../../shared/storage/file-storage.port';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { rateColumnText } from '../../../../shared/money/rate-conversion';
 import { currentRequestId } from '../../../../shared/observability/request-context';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
@@ -81,11 +82,6 @@ function reportScope(
     return [locationId];
   }
   return tenantContext.scopeLocationIds();
-}
-
-/** Una tasa como decimal en texto, sin ceros de más («250.5»). */
-function rateText(rate: number): string {
-  return rate.toFixed(8).replace(/\.?0+$/, '');
 }
 
 function unprocessable(code: string, message: string) {
@@ -389,7 +385,7 @@ export class ConfirmPaymentReportUseCase {
           ...(input.rateOverride !== undefined && rateOverrideReason
             ? {
                 rateOverride: {
-                  rate: rateText(input.rateOverride),
+                  rate: rateColumnText(input.rateOverride),
                   reason: rateOverrideReason,
                 },
               }

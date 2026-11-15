@@ -31,6 +31,17 @@ export function toRateColumn(rate: number): number {
 }
 
 /**
+ * Una tasa como decimal en texto con los 8 decimales de su columna, sin
+ * notación científica ni ceros de más («250.5»): la forma de la auditoría
+ * (DX-381 y DX-569).
+ */
+export function rateColumnText(rate: number): string {
+  return toRateColumn(rate)
+    .toFixed(8)
+    .replace(/\.?0+$/, '');
+}
+
+/**
  * `amount` de la moneda de origen en la de destino (`amount ÷ from × to`),
  * redondeado UNA sola vez a los `digits` de redondeo de la moneda de destino,
  * la mitad hacia arriba (DX-340), en enteros: sin `round2` intermedio (doble
