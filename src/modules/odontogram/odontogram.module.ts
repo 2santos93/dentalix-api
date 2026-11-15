@@ -47,5 +47,8 @@ import { PatientsModule } from '../patients/patients.module';
     },
     { provide: ODONTOGRAM_CLOCK, useValue: () => new Date() },
   ],
+  // DX-456: la copia de la historia clínica proyecta la carta con los mismos
+  // registros (y `activeRecords`) que la ficha.
+  exports: [TOOTH_RECORD_REPOSITORY],
 })
 export class OdontogramModule {}

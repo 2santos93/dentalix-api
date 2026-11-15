@@ -1449,4 +1449,34 @@ describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
       }
     });
   });
+  describe('recordCopy (DX-456)', () => {
+    it('conserva los códigos de las secciones y si hubo «entregado a»', () => {
+      expect(
+        sanitizeAuditMetadata({
+          recordCopy: {
+            sections: ['EVOLUTIONS', 'CONSENTS'],
+            deliveredTo: true,
+          },
+          period: { from: '2026-01-01', to: '2026-03-31' },
+        }),
+      ).toEqual({
+        recordCopy: { sections: ['EVOLUTIONS', 'CONSENTS'], deliveredTo: true },
+        period: { from: '2026-01-01', to: '2026-03-31' },
+      });
+    });
+
+    it('descarta el texto de «entregado a», secciones desconocidas o repetidas y formas raras', () => {
+      for (const recordCopy of [
+        { sections: ['EVOLUTIONS'], deliveredTo: 'María Pérez' },
+        { sections: ['EVOLUTIONS'], deliveredTo: true, name: 'María Pérez' },
+        { sections: ['NOTES'], deliveredTo: false },
+        { sections: ['EVOLUTIONS', 'EVOLUTIONS'], deliveredTo: false },
+        { sections: [], deliveredTo: false },
+        { sections: 'EVOLUTIONS', deliveredTo: false },
+        'EVOLUTIONS',
+      ]) {
+        expect(sanitizeAuditMetadata({ recordCopy })).toEqual({});
+      }
+    });
+  });
 });

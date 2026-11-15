@@ -118,5 +118,8 @@ import { VerifyPublicPrescriptionUseCase } from './application/use-cases/public-
       useClass: PrismaPrescriptionTemplateRepository,
     },
   ],
+  // DX-456: la copia de la historia clínica lista las recetas con el mismo
+  // caso de uso que la ficha.
+  exports: [ListPatientPrescriptionsUseCase],
 })
 export class PrescriptionsModule {}
