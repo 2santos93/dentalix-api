@@ -58,6 +58,9 @@ export const NO_APP_UPDATE_DELETE = [
   'platform_access_audit',
   'platform_audit_events',
   'treatment_plan_repricings',
+  // DX-266: «No es duplicado». La app solo inserta y lee; la fusión
+  // (dx_merge_patients, el dueño) pasa las del absorbido al conservado.
+  'patient_duplicate_dismissals',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */

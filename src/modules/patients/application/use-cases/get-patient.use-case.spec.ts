@@ -1,6 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { Sex } from '@prisma/client';
-import { GetPatientUseCase } from './get-patient.use-case';
+import { GetPatientUseCase, PATIENT_MERGED } from './get-patient.use-case';
 import { Patient } from '../../domain/entities/patient.entity';
 import {
   CreatePatientRepoInput,
@@ -110,5 +110,35 @@ describe('GetPatientUseCase', () => {
     await expect(uc.execute('missing-id')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+describe('GetPatientUseCase — paciente fusionado (DX-266)', () => {
+  it('un absorbido responde 404 con el código y el paciente que se conserva', async () => {
+    const repo = makeRepo({
+      findMergedInto: (id: string) =>
+        Promise.resolve(id === 'absorbido' ? 'conservado' : null),
+    });
+    const error = await new GetPatientUseCase(repo)
+      .execute('absorbido')
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect((error as NotFoundException).getResponse()).toMatchObject({
+      code: PATIENT_MERGED,
+      mergedIntoId: 'conservado',
+    });
+  });
+
+  it('uno que no existe (o de otra clínica) sigue siendo el 404 de siempre, sin pistas', async () => {
+    const repo = makeRepo({ findMergedInto: () => Promise.resolve(null) });
+    const error = await new GetPatientUseCase(repo)
+      .execute('nadie')
+      .catch((e: unknown) => e);
+    expect((error as NotFoundException).getResponse()).toMatchObject({
+      message: 'Paciente no encontrado',
+    });
+    expect(
+      JSON.stringify((error as NotFoundException).getResponse()),
+    ).not.toContain('mergedIntoId');
   });
 });

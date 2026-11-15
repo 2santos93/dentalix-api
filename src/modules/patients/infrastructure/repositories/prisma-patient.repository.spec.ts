@@ -63,6 +63,7 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
     reminderOptOutAt: null,
     reminderOptOutSource: null,
     importBatchId: null,
+    mergedIntoId: null,
     ...over,
   };
 }

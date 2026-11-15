@@ -28,6 +28,7 @@ import { PriceListsModule } from './modules/price-lists/price-lists.module';
 import { AgreementsModule } from './modules/agreements/agreements.module';
 import { PatientCoveragesModule } from './modules/patient-coverages/patient-coverages.module';
 import { PatientAgreementsModule } from './modules/patient-agreements/patient-agreements.module';
+import { PatientMergeModule } from './modules/patient-merge/patient-merge.module';
 import { ScheduleBlocksModule } from './modules/schedule-blocks/schedule-blocks.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
 import { AppointmentConfirmationsModule } from './modules/appointment-confirmations/appointment-confirmations.module';
@@ -123,6 +124,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     AgreementsModule,
     PatientCoveragesModule,
     PatientAgreementsModule,
+    // DX-266: posibles duplicados y fusión segura.
+    PatientMergeModule,
     ScheduleBlocksModule,
     WaitlistModule,
     AppointmentConfirmationsModule,

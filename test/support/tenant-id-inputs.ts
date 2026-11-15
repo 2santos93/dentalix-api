@@ -176,6 +176,17 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-266: «B lista duplicados con la sede de A, descarta, previsualiza o
+  // fusiona con pacientes de A → lista vacía o 404 en español y nada de A
+  // cambia».
+  'GET /patient-duplicates ?locationId': 'patient-merge.e2e-spec.ts',
+  'POST /patient-duplicates/dismissals body.patientIds[]':
+    'patient-merge.e2e-spec.ts',
+  'GET /patient-duplicates/merge-preview ?keptId': 'patient-merge.e2e-spec.ts',
+  'GET /patient-duplicates/merge-preview ?absorbedId':
+    'patient-merge.e2e-spec.ts',
+  'POST /patient-duplicates/merge body.keptId': 'patient-merge.e2e-spec.ts',
+  'POST /patient-duplicates/merge body.absorbedId': 'patient-merge.e2e-spec.ts',
   // DX-379 (B): «B aplica "Actualizar precios" a su plan con un ítem de A →
   // 404 en español y nada cambia» (lleva Idempotency-Key: fuera de la matriz).
   'POST /patients/:patientId/treatment-plans/:planId/reprice/apply body.itemIds[]':

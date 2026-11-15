@@ -183,6 +183,12 @@ export const PATIENT_REPOSITORY = Symbol('PATIENT_REPOSITORY');
 export interface PatientRepository {
   create(input: CreatePatientRepoInput): Promise<Patient>;
   findById(id: string): Promise<Patient | null>;
+  /**
+   * DX-266: el paciente vivo en el que se fusionó `id`, o null (no existe, es
+   * de otra clínica, está vivo o solo archivado). Para llevar un enlace
+   * antiguo al que se conserva. Opcional: los dobles de test no lo necesitan.
+   */
+  findMergedInto?(id: string): Promise<string | null>;
   /** Orden: (createdAt DESC, id DESC), estable entre páginas. */
   list(params: ListPatientsParams): Promise<ListPatientsResult>;
   /** Pacientes vivos del tenant del contexto, con un COUNT (sin listar). */

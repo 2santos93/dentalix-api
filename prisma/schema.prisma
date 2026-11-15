@@ -193,6 +193,8 @@ model Tenant {
   // DX-203: responsables de pago y avisos de los pacientes.
   patientResponsibleParties               PatientResponsibleParty[]
   patientMajorityReviews                  PatientMajorityReview[]
+  // DX-266: parejas descartadas de «Posibles duplicados».
+  patientDuplicateDismissals              PatientDuplicateDismissal[]
   // DX-153: pagadores de la clínica y coberturas de sus pacientes.
   payers                                  Payer[]
   patientCoverages                        PatientCoverage[]
@@ -824,8 +826,17 @@ model Patient {
   /// el alta se ignora y `patients_code_immutable` rechaza cambiarlo. La app
   /// solo lo lee. El DEFAULT 0 es solo del ADD COLUMN; CHECK en la BD: > 0.
   patientCode                  Int                   @default(dbgenerated("0"))
+  /// DX-266: el paciente que se conservó al fusionar este (que queda retirado,
+  /// `deletedAt`, CHECK en la BD). Lo escribe SOLO `dx_merge_patients`; la app
+  /// lo lee para llevar los enlaces y búsquedas antiguos al que se conserva.
+  mergedIntoId                 String?               @db.Uuid
 
   importBatch                 PatientImportBatch?              @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
+  // DX-266: fusión (FK compuesta por clínica) y parejas «No es duplicado».
+  mergedInto                  Patient?                         @relation("PatientMerges", fields: [tenantId, mergedIntoId], references: [tenantId, id], onDelete: Restrict, map: "patients_merged_into_fkey")
+  mergedPatients              Patient[]                        @relation("PatientMerges")
+  duplicateDismissalsAsA      PatientDuplicateDismissal[]      @relation("DuplicateDismissalA")
+  duplicateDismissalsAsB      PatientDuplicateDismissal[]      @relation("DuplicateDismissalB")
   // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
   importRows                  PatientImportRow[]
   // DX-262: saldos migrados y su hoja de saldos.
@@ -933,7 +944,36 @@ model Patient {
   //     -> paciente vivo por documento normalizado: alta y edición manual,
   //        importación y hoja de saldos (DX-107, DX-262, DX-287). No único:
   //        hay duplicados ambiguos anteriores a DX-107 («1.111» y «1111»).
+  //   patients_tenant_birth_name_live_idx ("tenantId", "birthDate",
+  //     dx_search_normalize("firstName" || ' ' || "lastName"))
+  //     WHERE "deletedAt" IS NULL AND "birthDate" IS NOT NULL
+  //     -> «Posibles duplicados» por nombre + fecha de nacimiento (DX-266).
+  //   patients_tenant_merged_into_idx ("tenantId", "mergedIntoId")
+  //     WHERE "mergedIntoId" IS NOT NULL
+  //     -> absorbidos de una fusión: lado hijo de su FK y búsqueda (DX-266).
   @@map("patients")
+}
+
+/// DX-266: «No es duplicado». La pareja (A < B, CHECK) deja de salir en
+/// «Posibles duplicados». Append-only para la app (SELECT e INSERT); la fusión
+/// (`dx_merge_patients`) pasa las del absorbido al conservado. RLS FORCE y FK
+/// compuestas por clínica.
+model PatientDuplicateDismissal {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  patientAId    String   @db.Uuid
+  patientBId    String   @db.Uuid
+  /// Puntero suave a User, como `PatientMajorityReview.reviewedById`.
+  dismissedById String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  tenant   Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patientA Patient @relation("DuplicateDismissalA", fields: [tenantId, patientAId], references: [tenantId, id], onDelete: Restrict, map: "patient_duplicate_dismissals_patient_a_fkey")
+  patientB Patient @relation("DuplicateDismissalB", fields: [tenantId, patientBId], references: [tenantId, id], onDelete: Restrict, map: "patient_duplicate_dismissals_patient_b_fkey")
+
+  @@unique([tenantId, patientAId, patientBId], map: "patient_duplicate_dismissals_pair_key")
+  @@index([tenantId, patientBId], map: "patient_duplicate_dismissals_patient_b_idx")
+  @@map("patient_duplicate_dismissals")
 }
 
 /// Respuesta tri-estado de la anamnesis (como `Condition.estado`).

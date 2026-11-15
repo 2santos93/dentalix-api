@@ -250,6 +250,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'DELETE /patients/:id': ADMIN_ONLY,
   // DX-461: cuántos enlaces públicos vivos anularía archivar.
   'GET /patients/:id/live-public-links': ADMIN_ONLY,
+  // DX-266: posibles duplicados y fusión segura: solo gestión.
+  'GET /patient-duplicates': ADMIN_ONLY,
+  'POST /patient-duplicates/dismissals': ADMIN_ONLY,
+  'GET /patient-duplicates/merge-preview': ADMIN_ONLY,
+  'POST /patient-duplicates/merge': ADMIN_ONLY,
   'PATCH /patients/:id/retention': ADMIN_ONLY,
   'POST /patients/:id/partial-suppression': ADMIN_ONLY,
   'GET /patients/retention/expiring': ADMIN_ONLY,
