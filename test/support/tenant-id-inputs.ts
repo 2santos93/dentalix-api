@@ -223,6 +223,10 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // DX-015: «B registra un contacto de recall con la cita de A → 400 en
   // español y no se crea nada».
   'POST /recall/:recallId/contacts body.appointmentId': 'recall.e2e-spec.ts',
+  // DX-306: «B emite un certificado de su paciente con la cita de A → 404 y
+  // no se crea ninguno».
+  'POST /patients/:patientId/certificates body.appointmentId':
+    'patient-certificates.e2e-spec.ts',
   // DX-243: «B manda la plantilla, el plan o el profesional de A → 404/400 y
   // no se crea nada».
   'POST /patients/:patientId/signature-requests body.templateId':

@@ -173,6 +173,13 @@ export class LivePublicLinksDto {
   })
   prescriptionCopies!: number;
 
+  @ApiProperty({
+    minimum: 0,
+    description:
+      'Enlaces de la copia de un certificado enviados al paciente y sin caducar (DX-306)',
+  })
+  certificateCopies!: number;
+
   @ApiProperty({ minimum: 0, description: 'Suma de todos los tipos' })
   total!: number;
 }

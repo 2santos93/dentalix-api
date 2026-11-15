@@ -31,6 +31,8 @@ const REVIEWED_CALLERS = [
   'modules/me/application/use-cases/set-my-avatar.use-case.ts',
   // Documento del paciente cuya fila no se llegó a crear.
   'modules/patient-documents/application/use-cases/patient-documents.use-cases.ts',
+  // DX-306: PDF de un certificado cuya emisión o anulación no se confirmó.
+  'modules/patient-certificates/application/patient-certificates.use-cases.ts',
 ];
 
 /** Los adaptadores implementan el puerto; no deciden qué se borra. */
