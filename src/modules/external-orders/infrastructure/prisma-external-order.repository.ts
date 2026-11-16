@@ -342,8 +342,10 @@ export class PrismaExternalOrderRepository implements ExternalOrderRepository {
       // primero el paciente, luego la orden y sus enlaces. Al revés, anular
       // (orden → enlaces → paciente por la FK del documento) y archivar
       // (paciente → enlaces) se interbloqueaban.
+      // De una sede no permitida, NOT_FOUND antes de tocar al paciente: un
+      // 409 de «archivado» revelaría que la orden existe.
       const owner = await tx.externalOrder.findFirst({
-        where: { id },
+        where: { id, ...locationFilter(locationIds) },
         select: { patientId: true },
       });
       if (!owner) return { kind: 'NOT_FOUND' };

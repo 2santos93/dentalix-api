@@ -564,6 +564,38 @@ describe('external_orders (int, DX-572)', () => {
     ).resolves.toMatchObject({ kind: 'LINKED' });
   });
 
+  it('anular una orden de una sede no permitida con el paciente archivado: NOT_FOUND, no el 409 de archivado', async () => {
+    const patientId = await freshPatient(a);
+    const order = await issue(a, { patientId, locationId: a.otherLocationId });
+    await owner.patient.update({
+      where: { id: patientId },
+      data: { deletedAt: new Date() },
+    });
+    await expect(
+      asClinic(a, () =>
+        repo.voidOrder(
+          order.id,
+          [a.locationId],
+          { userId: a.userId, reason: 'Estudio equivocado' },
+          () => undefined,
+          archive,
+        ),
+      ),
+    ).resolves.toEqual({ kind: 'NOT_FOUND' });
+    // Con la sede permitida, sí el 409 de archivado.
+    await expect(
+      asClinic(a, () =>
+        repo.voidOrder(
+          order.id,
+          undefined,
+          { userId: a.userId, reason: 'Estudio equivocado' },
+          () => undefined,
+          archive,
+        ),
+      ),
+    ).rejects.toThrow(/El paciente está archivado/);
+  });
+
   it('anular frente a archivar a la vez (con un enlace vivo): sin interbloqueo; archivar gana y anular da 409', async () => {
     const patientId = await freshPatient(a);
     const order = await issue(a, { patientId });
