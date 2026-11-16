@@ -6,6 +6,7 @@ import {
 import { patientsInClinic } from '../../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { InMemoryPerioExamRepository } from '../__fixtures__/in-memory-perio-exams';
 import type { PerioSiteMeasure } from '../../domain/entities/perio-exam.entity';
+import { PERIO_LIST_MAX } from '../../domain/perio-measures';
 import {
   CreatePerioExamUseCase,
   DeletePerioExamUseCase,
@@ -246,6 +247,18 @@ describe('ListPerioExamsUseCase', () => {
       sites6mmOrMore: 1,
     });
     expect(rows[0]).not.toHaveProperty('sites');
+  });
+
+  it('trae como mucho los PERIO_LIST_MAX más recientes (DX-103)', async () => {
+    const { create, list } = setup();
+    for (let i = 0; i <= PERIO_LIST_MAX; i += 1) {
+      const day = new Date(Date.UTC(2020, 0, 1 + i)).toISOString().slice(0, 10);
+      await create.execute('p1', { examDate: day }, 'd');
+    }
+    const rows = await list.execute('p1');
+    expect(rows).toHaveLength(PERIO_LIST_MAX);
+    // El que queda fuera es el más antiguo.
+    expect(rows.map((r) => r.examDate)).not.toContain('2020-01-01');
   });
 
   it('404 si el paciente es de otra clínica', async () => {

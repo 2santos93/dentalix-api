@@ -21,6 +21,11 @@ export const MOBILITY_MAX = 3;
 /** 32 dientes x 6 sitios. */
 export const MAX_SITES_PER_REQUEST = 192;
 export const MAX_TEETH_PER_REQUEST = 32;
+/**
+ * Tope del histórico (DX-103): los N exámenes más recientes. A dos o tres
+ * exámenes al año son décadas de historia; documentado en Swagger.
+ */
+export const PERIO_LIST_MAX = 100;
 
 /** Bitmask persistido en `perio_site_measures.flags`. */
 export const PERIO_FLAG = { BOP: 1, SUP: 2, PLAQ: 4, CALC: 8 } as const;
@@ -86,6 +91,56 @@ function percent(part: number, total: number): number {
 }
 
 /**
+ * Conteos de los que salen los índices. El listado (DX-103) los calcula en la
+ * base para no traer las medidas; el detalle, aquí con `countPerioSites`. Los
+ * porcentajes salen SIEMPRE de `indicesFromCounts`, así que los dos caminos
+ * redondean igual.
+ */
+export interface PerioSiteCounts {
+  /** Sitios con sondaje o alguna marca, sin dientes omitidos. */
+  sitesExamined: number;
+  bleedingSites: number;
+  plaqueSites: number;
+  sites4mmOrMore: number;
+  sites6mmOrMore: number;
+}
+
+/**
+ * Conteos del examen EXCLUYENDO los dientes omitidos (ausentes / no
+ * sondables). Un sitio cuenta si tiene sondaje o alguna marca.
+ */
+export function countPerioSites(
+  sites: readonly PerioSiteMeasure[],
+  teeth: readonly PerioToothMeasure[],
+): PerioSiteCounts {
+  const skipped = new Set(
+    teeth.filter((t) => t.skipped).map((t) => t.toothFdi),
+  );
+  const examined = sites.filter(
+    (s) => !skipped.has(s.toothFdi) && isExamined(s),
+  );
+  return {
+    sitesExamined: examined.length,
+    bleedingSites: examined.filter((s) => s.bleeding).length,
+    plaqueSites: examined.filter((s) => s.plaque).length,
+    sites4mmOrMore: examined.filter((s) => (s.probingMm ?? 0) >= 4).length,
+    sites6mmOrMore: examined.filter((s) => (s.probingMm ?? 0) >= 6).length,
+  };
+}
+
+/** % BOP y % placa (1 decimal) a partir de los conteos. */
+export function indicesFromCounts(counts: PerioSiteCounts): PerioIndices {
+  const total = counts.sitesExamined;
+  return {
+    sitesExamined: total,
+    bopPercent: percent(counts.bleedingSites, total),
+    plaquePercent: percent(counts.plaqueSites, total),
+    sites4mmOrMore: counts.sites4mmOrMore,
+    sites6mmOrMore: counts.sites6mmOrMore,
+  };
+}
+
+/**
  * Índices del examen: % BOP, % placa y nº de sitios con sondaje ≥4 y ≥6 mm,
  * EXCLUYENDO los dientes omitidos (ausentes / no sondables).
  */
@@ -93,20 +148,7 @@ export function computePerioIndices(
   sites: readonly PerioSiteMeasure[],
   teeth: readonly PerioToothMeasure[],
 ): PerioIndices {
-  const skipped = new Set(
-    teeth.filter((t) => t.skipped).map((t) => t.toothFdi),
-  );
-  const examined = sites.filter(
-    (s) => !skipped.has(s.toothFdi) && isExamined(s),
-  );
-  const total = examined.length;
-  return {
-    sitesExamined: total,
-    bopPercent: percent(examined.filter((s) => s.bleeding).length, total),
-    plaquePercent: percent(examined.filter((s) => s.plaque).length, total),
-    sites4mmOrMore: examined.filter((s) => (s.probingMm ?? 0) >= 4).length,
-    sites6mmOrMore: examined.filter((s) => (s.probingMm ?? 0) >= 6).length,
-  };
+  return indicesFromCounts(countPerioSites(sites, teeth));
 }
 
 function inRange(

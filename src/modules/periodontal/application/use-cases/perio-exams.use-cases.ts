@@ -13,8 +13,10 @@ import type {
   PerioToothMeasure,
 } from '../../domain/entities/perio-exam.entity';
 import {
+  PERIO_LIST_MAX,
   calMm,
   computePerioIndices,
+  indicesFromCounts,
   isEmptySite,
   isEmptyTooth,
   isValidCivilDate,
@@ -23,6 +25,7 @@ import {
 import {
   PERIO_EXAM_REPOSITORY,
   type PerioExamRepository,
+  type PerioExamSummaryRow,
   type PerioWriteResult,
 } from '../../domain/ports/perio-exam-repository.port';
 import {
@@ -66,9 +69,9 @@ function toDetail(record: PerioExamRecord): PerioExamDetail {
   };
 }
 
-function toSummary(record: PerioExamRecord): PerioExamSummary {
-  const { sites, teeth, ...header } = record;
-  return { ...header, indices: computePerioIndices(sites, teeth) };
+function toSummary(row: PerioExamSummaryRow): PerioExamSummary {
+  const { counts, ...header } = row;
+  return { ...header, indices: indicesFromCounts(counts) };
 }
 
 /** Traduce el resultado de una escritura a 404 / 409. */
@@ -100,11 +103,14 @@ export class ListPerioExamsUseCase {
     @Inject(PATIENT_REPOSITORY) private readonly patients: PatientRepository,
   ) {}
 
-  /** Histórico con índices; 404 (no lista vacía) si el paciente es de otra clínica. */
+  /**
+   * Histórico con índices y sin medidas, como mucho los `PERIO_LIST_MAX` más
+   * recientes; 404 (no lista vacía) si el paciente es de otra clínica.
+   */
   async execute(patientId: string): Promise<PerioExamSummary[]> {
     await assertPatientInClinic(this.patients, patientId);
-    const records = await this.exams.listByPatient(patientId);
-    return records.map(toSummary);
+    const rows = await this.exams.listSummaries(patientId, PERIO_LIST_MAX);
+    return rows.map(toSummary);
   }
 }
 
