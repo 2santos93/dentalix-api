@@ -266,6 +266,13 @@ DECLARE
   v_check_old boolean := false;
   v_check_new boolean := false;
 BEGIN
+  -- DX-266: la fusión de pacientes solo reasigna el paciente (el resto de
+  -- la fila no cambia): ver public.dx_patient_merge_gate.
+  IF TG_OP = 'UPDATE' AND TG_LEVEL = 'ROW' AND public.dx_patient_merge_active() THEN
+    IF public.dx_patient_merge_gate(TG_TABLE_NAME, pg_catalog.to_jsonb(OLD), pg_catalog.to_jsonb(NEW)) THEN
+      RETURN NEW;
+    END IF;
+  END IF;
   IF TG_OP = 'INSERT' THEN
     -- Un abono nace vigente (SEC-042 rechaza lo demás).
     v_check_new := NEW."deletedAt" IS NULL;

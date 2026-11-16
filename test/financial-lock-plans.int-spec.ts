@@ -291,7 +291,7 @@ describe('DX-091 · cierre contable en planes de cuotas (int)', () => {
           asApp(async (tx) => {
             await tx.$executeRaw`SELECT set_config('dentalix.financial_lock_override', ${pp}, true)`;
             await tx.$executeRaw`UPDATE "payment_plans" SET "status" = 'CANCELLED', "deletedAt" = now() WHERE "id" = ${other}::uuid`;
-          }) as unknown,
+          }),
         ),
       ).toBe('Q0910');
       expect(
