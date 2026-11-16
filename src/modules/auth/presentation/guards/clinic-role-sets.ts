@@ -426,6 +426,15 @@ export const QUOTE_FUNNEL_REPORT_ROLES: ClinicRole[] = [
 ];
 export const QUOTE_FUNNEL_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
+// «Producción agendada y previsión del mes» (DX-567): ADMIN ve toda la
+// clínica; un DENTIST, solo sus citas y lo que realizó (lo acota el caso de
+// uso). Quien tenga FINANCIAL_REPORTS_VIEW (DX-090, `@AllowPermissions` en
+// cada ruta) ve toda la clínica. Recepción y asistente no ven importes: nada.
+export const SCHEDULED_PRODUCTION_REPORT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+
 // «Cobrado sin imputar / a cuenta» (DX-399): los abonos que todavía no cubren
 // ningún ítem del plan, de muchos pacientes. Dato financiero como los abonos
 // (PAYMENT_ROLES): lo trabajan la administración y recepción (y recepción
