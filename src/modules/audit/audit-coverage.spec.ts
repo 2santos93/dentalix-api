@@ -1447,6 +1447,18 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN_ITEM',
     reason: 'PRODUCTION_REPORT',
   },
+  // DX-558: el detalle del embudo de presupuestos lleva el nombre de cada
+  // paciente; su CSV (solo agregados por profesional) sale de la clínica.
+  'GET /reports/quote-funnel/presentations': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    reason: 'QUOTE_FUNNEL_REPORT',
+  },
+  'GET /reports/quote-funnel.csv': {
+    action: 'EXPORT',
+    resource: 'TREATMENT_PLAN',
+    reason: 'QUOTE_FUNNEL_REPORT',
+  },
   // DX-436: el CSV de «Huecos recuperados» (solo agregados) sale de la
   // clínica: cada descarga queda auditada.
   'GET /reports/recovered-slots.csv': {

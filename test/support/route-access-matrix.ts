@@ -866,6 +866,18 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /reports/production-by-procedure': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure.csv': roles('ADMIN', 'DENTIST'),
   'GET /reports/production-by-procedure/items': roles('ADMIN', 'DENTIST'),
+  // DX-558: embudo de presupuestos. ADMIN y FINANCIAL_REPORTS_VIEW ven la
+  // clínica; DENTIST, solo lo que elaboró (lo acota el caso de uso). El
+  // detalle lleva pacientes; el CSV, solo ADMIN.
+  'GET /reports/quote-funnel': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/quote-funnel.csv': ADMIN_ONLY,
+  'GET /reports/quote-funnel/presentations': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
   // DX-436: «Huecos recuperados» y su CSV (auditado). Solo ADMIN.
   'GET /reports/recovered-slots': ADMIN_ONLY,
   'GET /reports/recovered-slots.csv': ADMIN_ONLY,
