@@ -116,6 +116,10 @@ async function cleanup(): Promise<void> {
   await owner.locationReminderSettings.deleteMany({ where });
   await owner.patient.deleteMany({ where });
   await owner.clinicMembership.deleteMany({ where });
+  // El spec arranca la app real con sus workers: el job de la agenda de
+  // contingencia (DX-339) puede dejar una foto de la sede mientras corre, y su
+  // FK impediría borrar la sede. Depende del reloj: por eso solo falla a veces.
+  await owner.contingencyAgendaSnapshot.deleteMany({ where });
   await owner.location.deleteMany({ where });
   await owner.job.deleteMany({ where });
   await owner.user.deleteMany({
