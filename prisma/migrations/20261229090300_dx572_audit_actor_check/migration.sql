@@ -1,0 +1,179 @@
+-- DX-572: el paciente abre la copia de su orden de estudios o referencia y
+-- descarga su PDF sin sesión: la apertura (VIEW) y la descarga (EXPORT) de
+-- EXTERNAL_ORDER se auditan sin usuario, origen PUBLIC_LINK, reason
+-- EXTERNAL_ORDER_COPY_OPENED / _DOWNLOADED. El CHECK de actor de audit_events
+-- es la UNIÓN del de main (20261225090400, DX-569) y esas dos escrituras, y
+-- solo ellas.
+--
+-- Más permisivo (NOT VALID; su VALIDATE va en 20261229090500, molde de
+-- DX-306 / DX-569). Va después de 20261229090000: usa el valor de enum
+-- EXTERNAL_ORDER, que no se puede usar en la transacción que lo crea.
+-- lock_timeout evita quedar encolado tras una transacción larga.
+
+SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE "audit_events" DROP CONSTRAINT "audit_events_actor_check";
+ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
+  CHECK (
+    "actorUserId" IS NOT NULL
+    OR "action" = 'LOGIN_FAILED'
+    -- IS TRUE: un CHECK que da NULL PASA.
+    OR ("action" = 'UPDATE'
+        AND "resourceType" = 'PATIENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" = "patientId"
+        AND "metadata" ->> 'reason' = 'REMINDER_OPT_OUT'
+        AND "metadata" ->> 'origin' IN ('LINK', 'MESSAGE')) IS TRUE
+    OR ("action" = 'UPDATE'
+        AND "resourceType" = 'PAYMENT_PROMISE'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'JOB'
+        AND "metadata" ->> 'reason' IN ('PROMISE_KEPT', 'PROMISE_BROKEN')) IS TRUE
+    OR ("action" = 'UPDATE'
+        AND "resourceType" = 'MEDICAL_HISTORY_SUBMISSION'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'LINK'
+        AND "metadata" ->> 'reason' = 'ANAMNESIS_SUBMITTED') IS TRUE
+    OR ("action" = 'CREATE'
+        AND "resourceType" = 'DATA_CONSENT'
+        AND "actorRole" IS NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'LINK'
+        AND "metadata" ->> 'reason' = 'ANAMNESIS_LINK') IS TRUE
+    -- DX-402: el barrido congeló una tasa de respaldo en un abono.
+    OR ("action" = 'UPDATE'
+        AND "resourceType" = 'PAYMENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'JOB'
+        AND "metadata" ->> 'reason' = 'EXCHANGE_RATE_BACKUP') IS TRUE
+    -- DX-243: el paciente abre el enlace de firma, pide el código, lo
+    -- verifica (o lo bloquea al fallar 5 veces) y firma.
+    OR ("resourceType" = 'SIGNATURE_REQUEST'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'LINK'
+        AND (("action" = 'VIEW' AND "metadata" ->> 'reason' = 'SIGNATURE_LINK_OPENED')
+          OR ("action" = 'SEND' AND "metadata" ->> 'reason' = 'SIGNATURE_CODE_SENT')
+          OR ("action" = 'UPDATE' AND "metadata" ->> 'reason' IN ('SIGNATURE_CODE_VERIFIED', 'SIGNATURE_LINK_LOCKED'))
+          OR ("action" = 'SIGN' AND "metadata" ->> 'reason' = 'SIGNATURE_PATIENT_SIGNED'))) IS TRUE
+    -- DX-361: el paciente confirma, cancela o pide que lo llamen desde el
+    -- enlace de confirmación de la cita.
+    OR ("action" = 'UPDATE'
+        AND "resourceType" = 'APPOINTMENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'LINK'
+        AND "metadata" ->> 'reason' IN ('CONFIRMATION_LINK_CONFIRMED',
+                                        'CONFIRMATION_LINK_CANCELLED',
+                                        'CONFIRMATION_LINK_CALL_REQUESTED')) IS TRUE
+    -- DX-422: el trabajo del PDF firmado encontró un consentimiento cuyo
+    -- hash no casa con lo guardado (no se archiva nada). Solo ids.
+    OR ("action" = 'VIEW'
+        AND "resourceType" = 'CONSENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'JOB'
+        AND "metadata" ->> 'reason' = 'SIGNED_PDF_INTEGRITY_MISMATCH') IS TRUE
+    -- DX-435: el paciente acepta o rechaza la oferta de hueco desde el
+    -- enlace, el enlace caduca o el hueco se lo queda otro paciente.
+    OR ("action" = 'UPDATE'
+        AND "resourceType" = 'WAITLIST_OFFER'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' IN ('SLOT_OFFER_ACCEPTED',
+                                        'SLOT_OFFER_DECLINED',
+                                        'SLOT_OFFER_EXPIRED',
+                                        'SLOT_OFFER_TAKEN_BY_OTHER')) IS TRUE
+    -- DX-435: la cita que crea (CREATE) o adelanta (UPDATE) la aceptación
+    -- desde el enlace, con el paciente de la cita.
+    OR ("action" IN ('CREATE', 'UPDATE')
+        AND "resourceType" = 'APPOINTMENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' = 'SLOT_OFFER_ACCEPTED') IS TRUE
+    -- DX-443: el paciente (o su responsable) descarga su copia del PDF
+    -- firmado desde el enlace de un solo uso del email. Solo ids.
+    OR ("action" = 'EXPORT'
+        AND "resourceType" = 'CONSENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' = 'SIGNED_PDF_COPY_DOWNLOADED') IS TRUE
+    -- DX-437: el paciente pide (o quita) «Avisarme si se libera un hueco
+    -- antes» desde el enlace de confirmación de la cita.
+    OR ("action" = 'UPDATE'
+        AND "resourceType" = 'APPOINTMENT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' IN ('CONFIRMATION_LINK_EARLIER_REQUESTED',
+                                        'CONFIRMATION_LINK_EARLIER_CLEARED')) IS TRUE
+    -- DX-467: alguien sin sesión (una farmacia, el propio paciente) comprueba
+    -- una receta por su código en la página pública: la consulta de una
+    -- receta encontrada (válida o anulada) y la que encuentra el hash
+    -- alterado. Solo ids y el motivo: el código no va en el evento.
+    OR ("action" = 'VIEW'
+        AND "resourceType" = 'PRESCRIPTION'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' IN ('PRESCRIPTION_VERIFIED',
+                                        'PRESCRIPTION_INTEGRITY_MISMATCH')) IS TRUE
+    -- DX-468: el paciente (o el responsable de un menor) abre la copia de su
+    -- receta desde el enlace caducable que le envió la clínica. Solo ids y el
+    -- motivo: el token no va en el evento.
+    OR ("action" = 'VIEW'
+        AND "resourceType" = 'PRESCRIPTION'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' = 'PRESCRIPTION_COPY_OPENED') IS TRUE
+    -- DX-306: el paciente (o el responsable de un menor) abre la copia de su
+    -- certificado (VIEW) o descarga su PDF (EXPORT) desde el enlace caducable
+    -- que le envió la clínica por WhatsApp. Solo ids y el motivo.
+    OR ("action" IN ('VIEW', 'EXPORT')
+        AND "resourceType" = 'PATIENT_CERTIFICATE'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND (("action" = 'VIEW' AND "metadata" ->> 'reason' = 'CERTIFICATE_COPY_OPENED')
+          OR ("action" = 'EXPORT' AND "metadata" ->> 'reason' = 'CERTIFICATE_COPY_DOWNLOADED'))) IS TRUE
+    -- DX-569: el paciente (sin sesión) reporta su pago desde el enlace de
+    -- pago: el alta del reporte. Solo ids y el motivo: ni importes ni la
+    -- referencia van en el evento.
+    OR ("action" = 'CREATE'
+        AND "resourceType" = 'PAYMENT_REPORT'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND "metadata" ->> 'reason' = 'PAYMENT_REPORT_SUBMITTED') IS TRUE
+    -- DX-572: el paciente (o el responsable de un menor) abre la copia de su
+    -- orden de estudios o referencia (VIEW) o descarga su PDF y gasta el
+    -- enlace de un solo uso (EXPORT). Solo ids y el motivo: ni el token, ni
+    -- los estudios, ni la nota van en el evento.
+    OR ("action" IN ('VIEW', 'EXPORT')
+        AND "resourceType" = 'EXTERNAL_ORDER'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
+        AND (("action" = 'VIEW' AND "metadata" ->> 'reason' = 'EXTERNAL_ORDER_COPY_OPENED')
+          OR ("action" = 'EXPORT' AND "metadata" ->> 'reason' = 'EXTERNAL_ORDER_COPY_DOWNLOADED'))) IS TRUE
+  ) NOT VALID;
