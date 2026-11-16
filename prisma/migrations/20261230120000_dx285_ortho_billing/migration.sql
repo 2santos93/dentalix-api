@@ -87,16 +87,28 @@ ALTER TABLE "ortho_cases"
   ADD COLUMN "feeAcceptedById" UUID,
   ADD COLUMN "feePaymentPlanId" UUID;
 
+-- FK bajo FORCE (DX-134): añadirla valida leyendo la hija con la RLS del
+-- owner, así que se quita FORCE a la hija (ortho_cases) y a la referenciada
+-- con RLS (payment_plans) y se devuelve al final de este bloque. Las columnas
+-- acaban de nacer en NULL: la validación no encuentra nada que comprobar.
+-- ACCESS EXCLUSIVE sobre las dos hasta el COMMIT (lock_timeout arriba);
+-- currencies no tiene RLS.
+ALTER TABLE "ortho_cases" NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE "payment_plans" NO FORCE ROW LEVEL SECURITY;
+
 -- La moneda existe en el catálogo (como la del plan, DX-042).
 ALTER TABLE "ortho_cases" ADD CONSTRAINT "ortho_cases_fee_currency_fkey"
   FOREIGN KEY ("feeCurrency") REFERENCES "currencies"("code")
-  ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
+  ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- Si al aceptar el plan ligado ya tenía un plan de cuotas ACTIVE, los cargos
 -- NO se crean (las cuotas ya cobran el tratamiento): la cuenta lo informa.
 ALTER TABLE "ortho_cases" ADD CONSTRAINT "ortho_cases_fee_payment_plan_fkey"
   FOREIGN KEY ("tenantId", "feePaymentPlanId") REFERENCES "payment_plans"("tenantId", "id")
-  ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
+  ON DELETE RESTRICT ON UPDATE CASCADE;
+
+ALTER TABLE "payment_plans" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "ortho_cases" FORCE ROW LEVEL SECURITY;
 
 -- Todo o nada, importes no negativos, total positivo y el reparto CUADRA
 -- (la API responde 400 en español antes). Aceptado solo con honorario.
