@@ -331,7 +331,7 @@ describe('DX-091 · cierre contable en la BD (int)', () => {
       response: expect.objectContaining({
         code: 'PERIOD_LOCKED',
         lockedThrough: '2026-09-30',
-      }),
+      }) as unknown,
     });
     expect(await septemberTotal()).toEqual(before);
   });

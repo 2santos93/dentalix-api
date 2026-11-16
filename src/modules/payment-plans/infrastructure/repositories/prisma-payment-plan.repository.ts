@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   ConflictException,
   Injectable,
@@ -19,6 +20,7 @@ import { dueDayOf, paymentPlanLocationId } from '../../domain/installment-due';
 import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import {
   guardFinancialLock,
+  openLockOverride,
   recordLockOverride,
 } from '../../../financial-lock/infrastructure/financial-lock-tx';
 import { loadTenantZones } from '../../../../shared/locations/reference-location';
@@ -118,8 +120,15 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
         now: new Date(),
         actor: input.lockActor ?? null,
       });
+      // El id se fija aquí: con la excepción, el trigger de `installments`
+      // tiene que reconocer el plan antes de que nazcan sus cuotas.
+      const paymentPlanId = randomUUID();
+      if (lock.decision.kind === 'override') {
+        await openLockOverride(tx, [paymentPlanId]);
+      }
       const created = await tx.paymentPlan.create({
         data: {
+          id: paymentPlanId,
           tenantId,
           treatmentPlanId: input.treatmentPlanId,
           patientId: input.patientId,
@@ -236,6 +245,9 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
         now: new Date(),
         actor: lockActor ?? null,
       });
+      if (lock.decision.kind === 'override') {
+        await openLockOverride(tx, [id]);
+      }
       const result = await tx.paymentPlan.updateMany({
         where: { id, status: 'ACTIVE', deletedAt: null },
         data: { status: 'CANCELLED', deletedAt: new Date() },

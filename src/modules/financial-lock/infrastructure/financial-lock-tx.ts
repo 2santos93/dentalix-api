@@ -62,6 +62,8 @@ export interface LockGuardInput {
     readonly LockedDayProbe[] | (() => Promise<readonly LockedDayProbe[]>);
   now: Date;
   actor: LockActor | null;
+  /** Texto del 409 si no es el de la operación. */
+  lockedMessage?: string;
 }
 
 export interface LockGuardResult {
@@ -95,20 +97,21 @@ export async function guardFinancialLock(
   }
   if (worst === null) return { decision: { kind: 'open' }, day: null };
   const decision = decideLock(worst.day, settings, worst.through, input.actor);
-  assertLockDecision(decision, input.operation);
+  assertLockDecision(decision, input.operation, input.lockedMessage);
   return { decision, day: worst.day };
 }
 
 /**
- * Abre la excepción de la BD para estos abonos hasta el final de la
+ * Abre la excepción de la BD para estos abonos (o planes de cuotas, por su id:
+ * los triggers de `payment_plans` e `installments` leen el mismo GUC) hasta el final de la
  * transacción (o hasta `closeLockOverride`). Solo tras `guardFinancialLock`
  * con decisión `override`, y siempre con su `recordLockOverride`.
  */
 export async function openLockOverride(
   tx: Prisma.TransactionClient,
-  paymentIds: readonly string[],
+  ids: readonly string[],
 ): Promise<void> {
-  await tx.$executeRaw`SELECT set_config(${LOCK_OVERRIDE_SETTING}, ${paymentIds.join(',')}, true)`;
+  await tx.$executeRaw`SELECT set_config(${LOCK_OVERRIDE_SETTING}, ${ids.join(',')}, true)`;
 }
 
 export async function closeLockOverride(

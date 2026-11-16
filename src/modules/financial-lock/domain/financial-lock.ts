@@ -79,6 +79,16 @@ export const PERIOD_LOCKED_MESSAGES: Record<FinancialLockOperation, string> = {
     'El plan de cuotas tiene cuotas vencidas en un período contable cerrado: ya no se puede cancelar. Pide a administración que lo revise.',
 };
 
+/**
+ * DX-091: cambiar el estado de un plan de tratamiento (cancelarlo, rechazarlo
+ * o aceptar otra opción de su grupo) cancela su plan de cuotas activo. Si ese
+ * plan de cuotas tiene cuotas vencidas en un período cerrado, el cambio se
+ * frena; la excepción del ADMIN va por la cancelación explícita del plan de
+ * cuotas (con motivo), no aquí.
+ */
+export const PERIOD_LOCKED_PLAN_STATUS_MESSAGE =
+  'El plan de cuotas de este plan de tratamiento tiene cuotas vencidas en un período contable cerrado: no se puede cancelar con él. Pide a administración que cancele primero el plan de cuotas indicando el motivo.';
+
 export const LOCK_OVERRIDE_REASON_MIN = 3;
 export const LOCK_OVERRIDE_REASON_MAX = 300;
 export const LOCK_OVERRIDE_REASON_REQUIRED_MESSAGE =
@@ -88,12 +98,13 @@ export const LOCK_OVERRIDE_REASON_REQUIRED_MESSAGE =
 export function periodLockedException(
   operation: FinancialLockOperation,
   through: string,
+  message?: string,
 ): ConflictException {
   return new ConflictException({
     statusCode: HttpStatus.CONFLICT,
     error: 'Conflict',
     code: PERIOD_LOCKED_CODE,
-    message: PERIOD_LOCKED_MESSAGES[operation],
+    message: message ?? PERIOD_LOCKED_MESSAGES[operation],
     lockedThrough: through,
   });
 }
@@ -147,13 +158,14 @@ export function decideLock(
   return { kind: 'override', through, reason };
 }
 
-/** La decisión como error: 409 si queda cerrado. */
+/** La decisión como error: 409 si queda cerrado (`message` cambia el texto). */
 export function assertLockDecision(
   decision: LockDecision,
   operation: FinancialLockOperation,
+  message?: string,
 ): void {
   if (decision.kind === 'locked') {
-    throw periodLockedException(operation, decision.through);
+    throw periodLockedException(operation, decision.through, message);
   }
 }
 
