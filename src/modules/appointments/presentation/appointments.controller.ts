@@ -96,7 +96,9 @@ import {
   Roles,
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
-import { ClinicRole } from '@prisma/client';
+import { ClinicRole, ExtraPermission } from '@prisma/client';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
+import type { PermissionAwareRequest } from '../../auth/presentation/guards/roles.guard';
 import { MoveToOpeningDto } from './dto/move-to-opening.dto';
 import {
   WANTS_EARLIER_FORBIDDEN_MESSAGE,
@@ -515,11 +517,15 @@ export class AppointmentsController {
     return this.getAppointment.execute(id);
   }
 
+  // DX-202-bis: la asistente con PAYMENT_REGISTER (DX-090) cobra en la salida
+  // como recepción: con el permiso, también ve el saldo. El permiso no abre la
+  // ruta (es de todos los roles de la agenda): solo deja `effectivePermissions`.
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Get(':id/checkout-checklist')
   @ApiOkResponse({
     type: CheckoutChecklistDto,
     description:
-      'DX-202: lo que recepción comprueba al despedir al paciente. El saldo solo para los roles de cobro.',
+      'DX-202: lo que recepción comprueba al despedir al paciente. El saldo (vencido y pendiente, DX-202-bis) solo para los roles de cobro o con PAYMENT_REGISTER.',
   })
   @ApiBadRequestResponse({ description: 'Id que no es UUID' })
   @ApiForbiddenResponse({
@@ -528,20 +534,31 @@ export class AppointmentsController {
   @ApiNotFoundResponse({ description: 'Cita no encontrada en esta clínica' })
   async getCheckoutChecklist(
     @Param('id', ParseUUIDPipe) id: string,
-    @Req() req: { user: JwtPayload },
+    @Req() req: PermissionAwareRequest & { user: JwtPayload },
   ): Promise<CheckoutChecklistDto> {
     const checklist = await this.checkoutChecklist.execute(id);
     const role = isTenantPayload(req.user) ? req.user.role : null;
-    if (!role || !PAYMENT_ROLES.includes(role)) {
-      return { ...checklist, balance: null };
+    const charges =
+      role !== null &&
+      (PAYMENT_ROLES.includes(role) ||
+        (req.effectivePermissions ?? []).includes(
+          ExtraPermission.PAYMENT_REGISTER,
+        ));
+    if (!charges) {
+      return { ...checklist, balance: null, pending: null };
     }
-    const flags = await this.balanceFlags.forPatients(
+    // El mismo saldo que «¿Quién llama?» y la cartera (DX-224, DX-145): lo
+    // vencido y lo pendiente hoy por moneda, sin otra cuenta.
+    const views = await this.balanceFlags.viewsForPatients(
       [checklist.patientId],
       role,
+      true,
     );
+    const view = views.get(checklist.patientId);
     return {
       ...checklist,
-      balance: flags.get(checklist.patientId) ?? NO_OVERDUE,
+      balance: view?.overdue ?? NO_OVERDUE,
+      pending: view?.pending ?? [],
     };
   }
 

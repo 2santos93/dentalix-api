@@ -1,5 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { OverdueBalanceDto } from '../../../collections/presentation/dto/collections.dto';
+import {
+  OverdueAmountDto,
+  OverdueBalanceDto,
+} from '../../../collections/presentation/dto/collections.dto';
 
 /** D16: un tipo de recall que la salida ofrece programar (D15). */
 export class CheckoutRecallTypeDto {
@@ -51,4 +54,12 @@ export class CheckoutChecklistDto {
       'Saldo vencido (`hasOverdue`, `overdueDays`, `amounts`); null si el rol no cobra.',
   })
   balance!: OverdueBalanceDto | null;
+
+  @ApiProperty({
+    type: [OverdueAmountDto],
+    nullable: true,
+    description:
+      'DX-202-bis: saldo pendiente hoy por moneda (lo que se debe menos el saldo a favor, solo si es positivo; el mismo de «¿Quién llama?»), vencido o no. Vacío si no debe nada; null si el rol no cobra.',
+  })
+  pending!: OverdueAmountDto[] | null;
 }
