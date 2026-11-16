@@ -588,3 +588,37 @@ export const ORTHO_SETTINGS_READ_ROLES: ClinicRole[] = [
   ...ORTHO_FOLLOW_UP_ROLES,
 ];
 export const ORTHO_SETTINGS_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Laboratorio dental (DX-017). El catálogo de laboratorios y servicios lo
+// leen los 4 roles (selectores) y solo ADMIN lo cambia (y ve el precio de
+// referencia). Las órdenes las leen los 4 (recepción sin color, material ni
+// instrucciones: datos de salud). Crean, cambian el contenido y anulan quienes
+// prescriben (ADMIN y DENTIST); envían y reciben también recepción, que
+// además puede cambiar solo la fecha prometida y la cita de colocación;
+// marcan «Revisada» ADMIN y DENTIST. La orden impresa (la prescripción
+// completa): los roles clínicos.
+export const LAB_CATALOG_READ_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+export const LAB_CATALOG_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+export const LAB_ORDER_READ_ROLES: ClinicRole[] = [...LAB_CATALOG_READ_ROLES];
+export const LAB_ORDER_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+/** PATCH: la ruta admite recepción; el caso de uso le limita los campos. */
+export const LAB_ORDER_PATCH_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+export const LAB_ORDER_SEND_ROLES: ClinicRole[] = [...LAB_ORDER_PATCH_ROLES];
+export const LAB_ORDER_RECEIVE_ROLES: ClinicRole[] = [...LAB_ORDER_PATCH_ROLES];
+export const LAB_ORDER_CHECK_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const LAB_ORDER_PRINT_ROLES: ClinicRole[] = [...CLINICAL_ROLES];

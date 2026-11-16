@@ -478,6 +478,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.prescription_items).toBe(2);
     // DX-191: implante + pilar de un paciente y otro paciente con el mismo lote.
     expect(firstCounts.patient_implants).toBe(3);
+    // DX-017: dos laboratorios con 4 servicios y 3 órdenes (una atrasada).
+    expect(firstCounts.dental_labs).toBe(2);
+    expect(firstCounts.dental_lab_services).toBe(4);
+    expect(firstCounts.dental_lab_orders).toBe(3);
     // DX-170: las 6 plantillas de evolución de ejemplo.
     expect(firstCounts.clinical_note_templates).toBe(6);
     // DX-150: tres gestiones de cobro y un compromiso abierto.

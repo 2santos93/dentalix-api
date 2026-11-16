@@ -1422,6 +1422,31 @@ describe('sanitizeAuditMetadata — cambio del plazo de la HC (DX-330)', () => {
     });
   });
 
+  describe('dueOn (DX-017)', () => {
+    it('conserva la fecha prometida antes y después (o null)', () => {
+      expect(
+        sanitizeAuditMetadata({
+          dueOn: { from: '2026-11-20', to: '2026-11-23' },
+        }),
+      ).toEqual({ dueOn: { from: '2026-11-20', to: '2026-11-23' } });
+      expect(
+        sanitizeAuditMetadata({ dueOn: { from: null, to: '2026-11-23' } }),
+      ).toEqual({ dueOn: { from: null, to: '2026-11-23' } });
+    });
+
+    it('descarta una fecha que no encaja, sin cambio o con campos de más', () => {
+      for (const dueOn of [
+        { from: '2026-11-20', to: '2026-11-20' },
+        { from: '2026-02-30', to: '2026-03-01' },
+        { from: '2026-11-20' },
+        { from: '2026-11-20', to: '2026-11-23', instructions: 'Corona' },
+        '2026-11-20..2026-11-23',
+      ]) {
+        expect(sanitizeAuditMetadata({ dueOn })).toEqual({});
+      }
+    });
+  });
+
   describe('majorityReview (DX-342)', () => {
     it('conserva la decisión, la fecha y el largo de la nota', () => {
       expect(

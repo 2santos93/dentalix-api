@@ -487,6 +487,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'clinical_record_copies.patientId',
       'collection_notes.patientId',
       'data_processing_consents.patientId',
+      // DX-017: una orden de laboratorio es la prescripción escrita de un
+      // producto a medida (nunca se borra, se anula): bloquea el deshacer.
+      'dental_lab_orders.patientId',
       // DX-572: una orden de estudios o referencia emitida es un documento
       // inalterable (con su PDF archivado): bloquea el deshacer. El enlace
       // de su copia solo existe con una orden emitida: bloquea igual.

@@ -85,6 +85,9 @@ const PRESCRIBERS = roles('ADMIN', 'DENTIST');
 const PLAN_DECIDERS = roles('ADMIN', 'DENTIST');
 const PLAN_REJECTERS = roles('ADMIN', 'DENTIST', 'RECEPTION');
 const ADMIN_ONLY = roles('ADMIN');
+// DX-017: envían y reciben trabajos de laboratorio (y recepción cambia la
+// fecha prometida y la cita).
+const LAB_HANDLERS = roles('ADMIN', 'DENTIST', 'RECEPTION');
 
 export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // --- Raíz, salud y ficheros estáticos -----------------------------------
@@ -521,6 +524,30 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patients/:patientId/ortho-cases/:caseId/aligner-series': PRESCRIBERS,
   'POST /patients/:patientId/ortho-cases/:caseId/aligner-series/:seriesId/deliveries':
     PRESCRIBERS,
+
+  // --- Laboratorio dental (DX-017) -------------------------------------------
+  // .planning/DX-017/CONTRACT.md. Catálogo: lo leen los 4 (selectores) y lo
+  // cambia ADMIN. Órdenes: las leen los 4 (recepción sin color, material ni
+  // instrucciones); crean y anulan odontólogo y ADMIN; el PATCH admite
+  // recepción (el caso de uso le limita los campos a dueOn y cita); envían y
+  // reciben odontólogo, recepción y ADMIN; revisan odontólogo y ADMIN; la
+  // impresión (prescripción completa), los roles clínicos.
+  'GET /dental-labs': EVERY_ROLE,
+  'POST /dental-labs': ADMIN_ONLY,
+  'PATCH /dental-labs/:labId': ADMIN_ONLY,
+  'POST /dental-labs/:labId/services': ADMIN_ONLY,
+  'PATCH /dental-labs/:labId/services/:serviceId': ADMIN_ONLY,
+  'GET /patients/:patientId/lab-orders': EVERY_ROLE,
+  'POST /patients/:patientId/lab-orders': PRESCRIBERS,
+  'GET /lab-orders': EVERY_ROLE,
+  'GET /lab-orders/due-date-suggestion': EVERY_ROLE,
+  'GET /lab-orders/:id': EVERY_ROLE,
+  'PATCH /lab-orders/:id': LAB_HANDLERS,
+  'POST /lab-orders/:id/send': LAB_HANDLERS,
+  'POST /lab-orders/:id/receive': LAB_HANDLERS,
+  'POST /lab-orders/:id/check': PRESCRIBERS,
+  'POST /lab-orders/:id/cancel': PRESCRIBERS,
+  'GET /lab-orders/:id/print': CLINICAL,
 
   // --- Documentos del paciente (DX-151) -------------------------------------
   // dentalix-docs/planning DX-151. Ver, descargar y subir: los 4 roles
