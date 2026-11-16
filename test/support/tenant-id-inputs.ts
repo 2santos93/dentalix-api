@@ -58,6 +58,12 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'POST /price-lists body.locationId',
   'PATCH /price-lists/:id body.locationId',
   'PUT /price-lists/:id/items body.items[].catalogItemId',
+  // --- plantillas de plan (DX-559) ---
+  'POST /treatment-plan-templates body.lines[].catalogItemId',
+  'PATCH /treatment-plan-templates/:id body.lines[].catalogItemId',
+  'POST /treatment-plans/:id/apply-template/preview body.templateId',
+  'POST /treatment-plans/:id/apply-template body.templateId',
+  'POST /treatment-plans/:id/apply-template body.lines[].lineId',
   'GET /patients/:patientId/price-quote ?catalogItemId',
   // DX-342: «Pasan a la mayoría de edad» filtrada por una sede.
   'GET /patients/coming-of-age ?locationId',

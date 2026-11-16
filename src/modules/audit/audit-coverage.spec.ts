@@ -74,6 +74,8 @@ import { ChairsController } from '../chairs/presentation/chairs.controller';
 import { EquipmentController } from '../equipment/presentation/equipment.controller';
 import { StaffController } from '../staff/presentation/staff.controller';
 import { ClinicalNoteTemplatesController } from '../clinical-note-templates/presentation/clinical-note-templates.controller';
+import { TreatmentPlanTemplatesController } from '../treatment-plan-templates/presentation/treatment-plan-templates.controller';
+import { PlanTemplateApplyController } from '../treatment-plans/presentation/plan-template-apply.controller';
 import { AnesthesiaController } from '../anesthesia/presentation/anesthesia.controller';
 import { AnestheticsController } from '../anesthesia/presentation/anesthetics.controller';
 import { SedationController } from '../sedation/presentation/sedation.controller';
@@ -2071,6 +2073,14 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'payment-method-adjustments.e2e-spec.ts',
   'POST /payers': 'config-audit.e2e-spec.ts',
   'PATCH /payers/:id': 'config-audit.e2e-spec.ts',
+  // DX-559: plantillas de plan (TREATMENT_PLAN_TEMPLATE con
+  // PLAN_TEMPLATE_CREATED/UPDATED; líneas e intervalos solo por nombre de
+  // campo). Aplicarla: UPDATE TREATMENT_PLAN PLAN_TEMPLATE_APPLIED con
+  // `params.templateId` y `params.itemsCreated`, en la transacción del alta.
+  'POST /treatment-plan-templates': 'config-audit.e2e-spec.ts',
+  'PATCH /treatment-plan-templates/:id': 'config-audit.e2e-spec.ts',
+  'POST /treatment-plans/:id/apply-template':
+    'apply-plan-template.use-case.spec.ts y treatment-plan-templates.e2e-spec.ts',
   'DELETE /payers/:id': 'config-audit.e2e-spec.ts',
   // Plantillas: CONSENT_TEMPLATE (el texto solo por nombre, con la versión)
   // y PRESCRIPTION_TEMPLATE (nombre y nº de medicamentos).
@@ -2100,6 +2110,9 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /locations/:id/holidays/import/preview':
     'vista previa de la importación; no escribe',
   'POST /patient-imports/inspect': 'no escribe nada ni crea lote',
+  // DX-559: la vista previa de una plantilla solo calcula precios y visitas.
+  'POST /treatment-plans/:id/apply-template/preview':
+    'vista previa de la plantilla; no escribe',
   'POST /patients/:patientId/documents/upload-url':
     'URL prefirmada; el alta del documento es la ruta auditada',
   'POST /expenses/attachments/upload-url':
@@ -2228,6 +2241,9 @@ const CONTROLLERS: Type[] = [
   EquipmentController,
   StaffController,
   ClinicalNoteTemplatesController,
+  // DX-559: sin @Audit; sus escrituras se auditan en la transacción.
+  TreatmentPlanTemplatesController,
+  PlanTemplateApplyController,
   DomainsController,
   PostOpTemplatesController,
   AppointmentPostOpController,

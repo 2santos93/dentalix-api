@@ -345,6 +345,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /clinical-note-templates': ADMIN_ONLY,
   'POST /clinical-note-templates/samples': ADMIN_ONLY,
   'PATCH /clinical-note-templates/:id': ADMIN_ONLY,
+  // DX-559: plantillas de plan. Leer, quien arma planes; escribir, solo ADMIN.
+  'GET /treatment-plan-templates': CLINICAL,
+  'GET /treatment-plan-templates/:id': CLINICAL,
+  'POST /treatment-plan-templates': ADMIN_ONLY,
+  'PATCH /treatment-plan-templates/:id': ADMIN_ONLY,
   // DX-222: plantillas de indicaciones postoperatorias. Leerlas, los cuatro
   // roles (recepción las entrega en el mostrador); crear, editar, desactivar y
   // cargar las de ejemplo, solo ADMIN. loop/informes/DX-222.md.
@@ -529,6 +534,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DENTIST: eso lo comprueba el caso de uso (403), no la ruta.
   'PATCH /treatment-plans/:id': CLINICAL,
   'POST /treatment-plans/:id/items': CLINICAL,
+  // DX-559: aplicar una plantilla, como añadir un ítem.
+  'POST /treatment-plans/:id/apply-template/preview': CLINICAL,
+  'POST /treatment-plans/:id/apply-template': CLINICAL,
   // DX-204: «Descuento %» en bloque; el tope por rol lo aplica el caso de uso.
   'POST /treatment-plans/:id/items/bulk-discount': CLINICAL,
   'PATCH /treatment-plans/:id/items/:itemId': CLINICAL,

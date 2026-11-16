@@ -178,7 +178,7 @@ export class TemplatePreviewDto {
   @ApiProperty({ minimum: 1 })
   templateVersion!: number;
 
-  @ApiProperty({ example: 'USD' })
+  @ApiProperty({ description: 'Moneda del plan (ISO 4217)' })
   currency!: string;
 
   @ApiProperty({ type: CurrencyDigitsDto })

@@ -536,6 +536,100 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
     });
   });
 
+  describe('plantillas de plan (DX-559)', () => {
+    it('POST/PATCH /treatment-plan-templates: nombre, activa y recuentos; las líneas e intervalos solo por su nombre de campo; PATCH sin cambios no deja evento', async () => {
+      const procedure = await as(clinicA)
+        .send('post', '/catalog/items')
+        .send({
+          code: 'END-DX559',
+          kind: 'PROCEDURE',
+          labelEs: 'Endodoncia',
+          color: '#2A2B3C',
+          defaultPrice: 120,
+        })
+        .expect(201);
+      const catalogItemId = (procedure.body as { id: string }).id;
+      const created = await as(clinicA)
+        .send('post', '/treatment-plan-templates')
+        .send({
+          name: 'Endodoncia + corona',
+          visitIntervals: { '2': 7 },
+          lines: [
+            { catalogItemId, visit: 1 },
+            { catalogItemId, visit: 2 },
+          ],
+        })
+        .expect(201);
+      const id = (created.body as { id: string }).id;
+      await as(clinicA)
+        .send('patch', `/treatment-plan-templates/${id}`)
+        .send({ active: false, version: 1 })
+        .expect(200);
+      // Sin cambios reales: sube la versión, pero no hay evento.
+      await as(clinicA)
+        .send('patch', `/treatment-plan-templates/${id}`)
+        .send({ name: 'Endodoncia + corona', version: 2 })
+        .expect(200);
+      await as(clinicA)
+        .send('patch', `/treatment-plan-templates/${id}`)
+        .send({
+          lines: [{ catalogItemId, quantity: 2 }],
+          visitIntervals: {},
+          version: 3,
+        })
+        .expect(200);
+
+      const events = await eventsOf(clinicA, 'TREATMENT_PLAN_TEMPLATE', {
+        resourceId: id,
+      });
+      expect(events.map((e) => [e.action, e.metadata])).toEqual([
+        [
+          'CREATE',
+          {
+            reason: 'PLAN_TEMPLATE_CREATED',
+            configChange: {
+              after: {
+                name: 'Endodoncia + corona',
+                active: true,
+                lineCount: 2,
+                visitCount: 2,
+              },
+            },
+          },
+        ],
+        [
+          'UPDATE',
+          {
+            reason: 'PLAN_TEMPLATE_UPDATED',
+            changedFields: ['active'],
+            configChange: {
+              before: { active: true },
+              after: { active: false },
+            },
+          },
+        ],
+        [
+          'UPDATE',
+          {
+            reason: 'PLAN_TEMPLATE_UPDATED',
+            changedFields: [
+              'lineCount',
+              'lines',
+              'visitCount',
+              'visitIntervals',
+            ],
+            configChange: {
+              before: { lineCount: 2, visitCount: 2 },
+              after: { lineCount: 1, visitCount: 1 },
+            },
+          },
+        ],
+      ]);
+      for (const event of events) expect(event).toMatchObject(byAdmin(clinicA));
+      expect(JSON.stringify(events)).not.toContain(catalogItemId);
+    });
+  });
+
   describe('inventario', () => {
     it('POST/PATCH/DELETE /inventory/items y POST movements: el artículo en su sede y el movimiento en la sede del movimiento, sin notas ni motivo', async () => {
       const created = await as(clinicA)
