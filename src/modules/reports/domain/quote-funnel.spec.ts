@@ -41,7 +41,9 @@ describe('Embudo de presupuestos: dominio (DX-558)', () => {
       [...QUOTE_FUNNEL_DEFINITION_KEYS].sort(),
     );
     for (const key of QUOTE_FUNNEL_STEPS) {
-      expect(QUOTE_FUNNEL_DEFINITIONS[key].howItIsCalculated.length).toBeGreaterThan(0);
+      expect(
+        QUOTE_FUNNEL_DEFINITIONS[key].howItIsCalculated.length,
+      ).toBeGreaterThan(0);
     }
     expect(QUOTE_FUNNEL_DEFINITION_LIST.map((d) => d.key)).toEqual([
       ...QUOTE_FUNNEL_DEFINITION_KEYS,
@@ -73,9 +75,9 @@ describe('Embudo de presupuestos: dominio (DX-558)', () => {
   it('planToCatalogAmount es la inversa de la tasa del ítem (catálogo → plan)', () => {
     const rate = { fromPerBase: 1, toPerBase: 36.5 };
     // 100 USD del catálogo son 3650 VES del plan; 4000 VES son 109,59 USD.
-    expect(
-      convertWithQuote(100, { from: 'USD', to: 'VES', ...rate }),
-    ).toBe(3650);
+    expect(convertWithQuote(100, { from: 'USD', to: 'VES', ...rate })).toBe(
+      3650,
+    );
     expect(planToCatalogAmount(3650, rate)).toBe(100);
     expect(round2(planToCatalogAmount(4000, rate))).toBe(109.59);
     // Entre dos monedas no base: × from ÷ to.
