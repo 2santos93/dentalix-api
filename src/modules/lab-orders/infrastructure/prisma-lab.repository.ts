@@ -708,8 +708,8 @@ export class PrismaLabRepository implements LabRepository {
       const rows = await tx.$queryRaw<{ id: string }[]>`
         SELECT o."id" FROM "dental_lab_orders" o
          WHERE ${where}
-         ORDER BY (o."dueOn" < ${query.today}::date AND o."receivedAt" IS NULL
-                   AND o."cancelledAt" IS NULL) DESC,
+         ORDER BY (o."dueOn" IS NOT NULL AND o."dueOn" < ${query.today}::date
+                   AND o."receivedAt" IS NULL AND o."cancelledAt" IS NULL) DESC,
                   o."dueOn" ASC NULLS LAST,
                   o."number" DESC
          LIMIT ${query.pageSize} OFFSET ${offset}`;
