@@ -97,6 +97,10 @@ import {
   OrthoController,
   PatientOrthoController,
 } from '../orthodontics/presentation/ortho.controller';
+import {
+  LabOrdersController,
+  PatientLabOrdersController,
+} from '../lab-orders/presentation/lab-orders.controller';
 import { PatientDocumentsController } from '../patient-documents/presentation/patient-documents.controller';
 import { ExpenseCategoriesController } from '../expenses/presentation/expense-categories.controller';
 import { ExpenseReportsController } from '../expenses/presentation/expense-reports.controller';
@@ -915,6 +919,32 @@ const EXPECTED: Record<string, AuditOptions> = {
       patient: P,
       reason: 'ORTHO_ALIGNER_DELIVERY',
     },
+
+  // DX-017: órdenes de laboratorio. La lista de la sede no lleva paciente
+  // (muchos, como la de recall); los pasos, la edición y la impresión los
+  // audita el caso de uso (AUDITED_IN_USE_CASE).
+  'GET /patients/:patientId/lab-orders': {
+    action: 'VIEW',
+    resource: 'DENTAL_LAB_ORDER',
+    patient: P,
+  },
+  'POST /patients/:patientId/lab-orders': {
+    action: 'CREATE',
+    resource: 'DENTAL_LAB_ORDER',
+    resourceId: RES,
+    patient: P,
+  },
+  'GET /lab-orders': {
+    action: 'VIEW',
+    resource: 'DENTAL_LAB_ORDER',
+    reason: 'DENTAL_LAB_ORDER_LIST',
+  },
+  'GET /lab-orders/:id': {
+    action: 'VIEW',
+    resource: 'DENTAL_LAB_ORDER',
+    resourceId: { param: 'id' },
+    patient: { response: 'patientId' },
+  },
 
   // DX-191: registro de implantes, tarjeta y búsqueda por lote.
   'GET /patients/:patientId/implants': {
@@ -1957,6 +1987,20 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-017: laboratorio dental. El catálogo (DENTAL_LAB con los nombres de
+  // los campos y, al desactivar, el estado) y la orden: edición (los campos
+  // y la fecha prometida antes y después), envío, recepción, revisión
+  // (statusChange), anulación (VOID, sin el motivo) e impresión (PRINT).
+  'POST /dental-labs': 'dental-lab-orders.e2e-spec.ts',
+  'PATCH /dental-labs/:labId': 'dental-lab-orders.e2e-spec.ts',
+  'POST /dental-labs/:labId/services': 'dental-lab-orders.e2e-spec.ts',
+  'PATCH /dental-labs/:labId/services/:serviceId':
+    'dental-lab-orders.e2e-spec.ts',
+  'PATCH /lab-orders/:id': 'dental-lab-orders.e2e-spec.ts',
+  'POST /lab-orders/:id/send': 'dental-lab-orders.e2e-spec.ts',
+  'POST /lab-orders/:id/receive': 'dental-lab-orders.e2e-spec.ts',
+  'POST /lab-orders/:id/check': 'dental-lab-orders.e2e-spec.ts',
+  'POST /lab-orders/:id/cancel': 'dental-lab-orders.e2e-spec.ts',
   // DX-190: el cambio de estado del caso (UPDATE ORTHO_CASE ORTHO_CASE_STATUS
   // con el estado antes y después, sin el motivo) y los ajustes de la clínica
   // (CLINIC_SETTINGS ORTHODONTICS_SETTINGS con los campos que cambiaron).
@@ -2403,6 +2447,8 @@ const CONTROLLERS: Type[] = [
   ImplantsController,
   PatientOrthoController,
   OrthoController,
+  PatientLabOrdersController,
+  LabOrdersController,
   PatientDocumentsController,
   PatientImportsController,
   PlanVisitsController,
