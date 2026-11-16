@@ -416,6 +416,16 @@ export const PRODUCTION_REPORT_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 
+// «Embudo de presupuestos» (DX-558): ADMIN ve toda la clínica; un DENTIST,
+// solo los presupuestos que elaboró (lo acota el caso de uso). Quien tenga
+// FINANCIAL_REPORTS_VIEW (DX-090, `@AllowPermissions` en cada ruta) ve toda
+// la clínica. El CSV, solo ADMIN (QUOTE_FUNNEL_CSV_ROLES).
+export const QUOTE_FUNNEL_REPORT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const QUOTE_FUNNEL_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
 // «Cobrado sin imputar / a cuenta» (DX-399): los abonos que todavía no cubren
 // ningún ítem del plan, de muchos pacientes. Dato financiero como los abonos
 // (PAYMENT_ROLES): lo trabajan la administración y recepción (y recepción

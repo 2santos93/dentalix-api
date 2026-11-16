@@ -46,6 +46,7 @@ import {
   DEMO_PAYERS,
   DEMO_PRESCRIPTION_SETTINGS,
   DEMO_PRICE_LISTS,
+  DEMO_QUOTE_FUNNEL,
   DEMO_CATALOG_CURRENCY,
   DEMO_PRICES,
   DEMO_PROFESSIONAL_LICENSES,
@@ -2434,6 +2435,42 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
         .map((i) => i.planId)
         .sort(),
     ).toEqual(options.map((p) => p.id).sort());
+  });
+
+  it('DX-558: el embudo de presupuestos de la demo no sale vacío (aceptado, rechazos con motivo y el A/B pendiente)', async () => {
+    const admin = DEMO_USERS.find((u) => u.role === ClinicRole.ADMIN);
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({ email: admin?.email, password: DEMO_PASSWORD })
+      .expect(201);
+    const token = (login.body as { accessToken: string }).accessToken;
+    const today = civilDateIn(new Date(), DEMO_LOCATIONS.principal.timeZone);
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/reports/quote-funnel')
+      .query({ from: addCivilDays(today, -60), to: today })
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const body = res.body as {
+      currency: string | null;
+      steps: { key: string; count: number }[];
+      outcomes: Record<string, { count: number }>;
+      rejectionReasons: { reason: string; count: number }[];
+      medianDaysToAccept: number | null;
+    };
+    expect(body.currency).toBe(DEMO_CATALOG_CURRENCY);
+    const presented = body.steps.find((s) => s.key === 'PRESENTED')!.count;
+    expect(presented).toBeGreaterThanOrEqual(DEMO_QUOTE_FUNNEL.length + 1);
+    expect(body.steps.find((s) => s.key === 'ACCEPTED')!.count).toBeGreaterThan(
+      0,
+    );
+    expect(body.outcomes.pending.count).toBeGreaterThan(0);
+    expect(body.rejectionReasons.map((r) => r.reason).sort()).toEqual([
+      'FEAR',
+      'PRICE',
+    ]);
+    expect(body.medianDaysToAccept).not.toBeNull();
   });
 
   it('el estado de cuenta demo enseña saldo y una cuota vencida (DX-011)', async () => {

@@ -98,6 +98,7 @@ import { UpdateTreatmentPlanUseCase } from '../src/modules/treatment-plans/appli
 import { RemoveTreatmentPlanItemUseCase } from '../src/modules/treatment-plans/application/use-cases/remove-treatment-plan-item.use-case';
 import { CreatePlanAlternativeUseCase } from '../src/modules/treatment-plans/application/use-cases/create-plan-alternative.use-case';
 import { PresentTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/present-treatment-plan.use-case';
+import { RejectTreatmentPlanUseCase } from '../src/modules/treatment-plans/application/use-cases/reject-treatment-plan.use-case';
 import {
   TREATMENT_PLAN_REPOSITORY,
   type TreatmentPlanRepository,
@@ -252,6 +253,7 @@ import {
   DEMO_PAYMENT_INSTRUCTIONS,
   DEMO_PAYMENT_REPORT,
   DEMO_PLAN_OPTIONS,
+  DEMO_QUOTE_FUNNEL,
   DEMO_CANCELLATION,
   DEMO_MEDICAL_ALERTS,
   DEMO_PRICES,
@@ -964,6 +966,14 @@ class DemoSeeder {
     );
 
     await this.createPlanOptions(
+      tenantId,
+      locations,
+      patientIds,
+      dentists,
+      catalog,
+    );
+
+    await this.createQuoteFunnelExamples(
       tenantId,
       locations,
       patientIds,
@@ -3957,6 +3967,75 @@ class DemoSeeder {
       await present.execute(a.id);
       await present.execute(b.id);
     });
+  }
+
+  /**
+   * DX-558: presupuestos presentados en la principal hace unos días y luego
+   * aceptados (hoy) o rechazados (con su motivo, en su día), por los casos de
+   * uso de la API con un reloj atrasado. Ver `DEMO_QUOTE_FUNNEL`.
+   */
+  private async createQuoteFunnelExamples(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    dentists: string[],
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const repo = this.app.get<TreatmentPlanRepository>(
+      TREATMENT_PLAN_REPOSITORY,
+      { strict: false },
+    );
+    const zone = DEMO_LOCATIONS.principal.timeZone;
+    for (const spec of DEMO_QUOTE_FUNNEL) {
+      const dentistId = dentists[spec.dentistIndex];
+      const dentist = { userId: dentistId, role: ClinicRole.DENTIST };
+      await this.inTenant(tenantId, locations.principal, async () => {
+        const plan = await this.use(CreateTreatmentPlanUseCase).execute({
+          patientId: patientIds[spec.patientIndex],
+          currency: DEMO_LOCATIONS.principal.currency,
+          notes: spec.notes,
+          createdById: dentistId,
+        });
+        for (const item of spec.items) {
+          await this.use(AddTreatmentPlanItemUseCase).execute(
+            plan.id,
+            {
+              toothNumber: item.tooth,
+              catalogItemId: catalogId(catalog, item.code),
+            },
+            dentist,
+          );
+        }
+        const presentedAt = daysAgoAt(
+          this.now,
+          spec.presentedDaysAgo,
+          10 * 60,
+          zone,
+        );
+        await new PresentTreatmentPlanUseCase(repo, () => presentedAt).execute(
+          plan.id,
+        );
+        if (spec.outcome.kind === 'ACCEPTED') {
+          await this.use(UpdateTreatmentPlanUseCase).execute(
+            plan.id,
+            { status: TreatmentPlanStatus.ACCEPTED },
+            { role: ClinicRole.DENTIST },
+          );
+        } else {
+          const rejectedAt = daysAgoAt(
+            this.now,
+            spec.outcome.daysAgo,
+            16 * 60,
+            zone,
+          );
+          await new RejectTreatmentPlanUseCase(repo, () => rejectedAt).execute(
+            plan.id,
+            { reason: spec.outcome.reason },
+            dentistId,
+          );
+        }
+      });
+    }
   }
 
   /**

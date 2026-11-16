@@ -2304,6 +2304,54 @@ export const DEMO_PLAN_OPTIONS = {
   ],
 } as const;
 
+/**
+ * DX-558: presupuestos PRESENTADOS (en la principal) y luego aceptados o
+ * rechazados, para que el «Embudo de presupuestos» de la demo enseñe tasa de
+ * aceptación, días hasta aceptar y motivos de rechazo (con el grupo A/B de
+ * arriba, que sigue pendiente). Ninguno queda PRESENTED: «Presupuestos por
+ * seguir» no cambia. Pacientes de las sedes de la rotación (USD) sin otros
+ * planes de la demo y que no buscan los e2e (API ni web): Ana María Zambrano,
+ * Gustavo Ríos y Paula Daniela Cortés.
+ */
+export const DEMO_QUOTE_FUNNEL: readonly {
+  patientIndex: number;
+  dentistIndex: number;
+  presentedDaysAgo: number;
+  notes: string;
+  items: readonly { code: string; tooth: string }[];
+  outcome:
+    | { kind: 'ACCEPTED' }
+    | { kind: 'REJECTED'; reason: 'PRICE' | 'FEAR'; daysAgo: number };
+}[] = [
+  {
+    patientIndex: 13,
+    dentistIndex: 0,
+    presentedDaysAgo: 20,
+    notes: 'Corona de 16 tras la endodoncia.',
+    items: [{ code: 'PROT-CORONA-LM', tooth: '16' }],
+    outcome: { kind: 'ACCEPTED' },
+  },
+  {
+    patientIndex: 16,
+    dentistIndex: 0,
+    presentedDaysAgo: 25,
+    notes: 'Implante en 26: lo pospone por el precio.',
+    items: [
+      { code: 'IMPL-IMPLANTE', tooth: '26' },
+      { code: 'IMPL-CORONA', tooth: '26' },
+    ],
+    outcome: { kind: 'REJECTED', reason: 'PRICE', daysAgo: 18 },
+  },
+  {
+    patientIndex: 21,
+    dentistIndex: 1,
+    presentedDaysAgo: 14,
+    notes: 'Endodoncia de 36: prefiere esperar.',
+    items: [{ code: 'ENDO-MULTI', tooth: '36' }],
+    outcome: { kind: 'REJECTED', reason: 'FEAR', daysAgo: 10 },
+  },
+];
+
 interface DemoInventoryItem {
   location: DemoLocationKey;
   name: string;
