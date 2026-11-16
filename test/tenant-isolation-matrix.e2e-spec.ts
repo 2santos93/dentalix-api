@@ -4206,6 +4206,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'ortho-billing.e2e-spec.ts',
+      checks:
+        'B → 404 al leer la cuenta, poner o aceptar el honorario, leer los alineadores, abrir una serie y registrar una entrega en el caso de A (y con la serie de A en su propio caso); A sin cargos, series ni entregas nuevas (DX-285)',
+      routes: [
+        'GET /patients/:patientId/ortho-cases/accounts',
+        'GET /patients/:patientId/ortho-cases/:caseId/account',
+        'PUT /patients/:patientId/ortho-cases/:caseId/fee',
+        'POST /patients/:patientId/ortho-cases/:caseId/fee/accept',
+        'GET /patients/:patientId/ortho-cases/:caseId/aligners',
+        'POST /patients/:patientId/ortho-cases/:caseId/aligner-series',
+        'POST /patients/:patientId/ortho-cases/:caseId/aligner-series/:seriesId/deliveries',
+      ],
+    },
+    {
       spec: 'implants.e2e-spec.ts',
       checks:
         'B → 404 sobre el paciente y el implante de A (lista, alta, tarjeta, impresión y anulación) y el implante sigue sin anular (DX-191)',
