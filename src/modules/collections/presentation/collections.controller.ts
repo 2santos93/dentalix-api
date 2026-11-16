@@ -35,7 +35,9 @@ import {
   CreateCollectionNoteUseCase,
   CreatePaymentPromiseUseCase,
   GetPatientCollectionsUseCase,
+  MarkBalanceReminderUseCase,
   PROMISE_ALREADY_OPEN_MESSAGE,
+  REMINDER_ALREADY_TODAY_MESSAGE,
 } from '../application/use-cases/collections.use-cases';
 import type {
   CollectionNoteView,
@@ -46,6 +48,7 @@ import {
   CollectionNoteDto,
   CreateCollectionNoteDto,
   CreatePaymentPromiseDto,
+  MarkBalanceReminderDto,
   PatientCollectionsDto,
   PaymentPromiseDto,
 } from './dto/collections.dto';
@@ -79,7 +82,46 @@ export class CollectionsController {
     private readonly createNote: CreateCollectionNoteUseCase,
     private readonly createPromise: CreatePaymentPromiseUseCase,
     private readonly getCollections: GetPatientCollectionsUseCase,
+    private readonly markReminder: MarkBalanceReminderUseCase,
   ) {}
+
+  // DX-146: «Marcar avisado» de «Por avisar hoy». Escritura de cobranza:
+  // COLLECTION_ROLES (ADMIN + RECEPTION), como el resto de gestiones; leer la
+  // cartera con un permiso extra (DX-090) no da para escribir en ella.
+  @Audit({
+    action: 'CREATE',
+    resource: 'COLLECTION_NOTE',
+    resourceId: { response: 'id' },
+    patient: { param: 'id' },
+    reason: 'BALANCE_REMINDER',
+  })
+  @Post('balance-reminders')
+  @ApiOperation({
+    summary: 'Marcar avisado del saldo vencido (DX-146)',
+    description:
+      'Crea una gestión de cobranza REMINDER_SENT (append-only; no se desmarca). Un aviso por paciente y día civil de la sede de su deuda: el paciente sale de «Por avisar hoy» hasta su siguiente tramo. Sin cuerpo del mensaje ni importes.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiCreatedResponse({ type: CollectionNoteDto })
+  @ApiBadRequestResponse({ description: 'Canal inválido o nota de más de 280' })
+  @ApiForbiddenResponse({
+    description: `${COLLECTIONS_FORBIDDEN_MESSAGE} O la deuda es de una sede a la que no tienes acceso.`,
+  })
+  @ApiNotFoundResponse({
+    description: 'Paciente de otra clínica o inexistente',
+  })
+  @ApiConflictResponse({ description: REMINDER_ALREADY_TODAY_MESSAGE })
+  balanceReminder(
+    @Param('id', ParseUUIDPipe) patientId: string,
+    @Body() dto: MarkBalanceReminderDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<CollectionNoteView> {
+    return this.markReminder.execute(
+      patientId,
+      { channel: dto.channel ?? 'WHATSAPP_LINK', text: dto.text },
+      req.user.sub,
+    );
+  }
 
   @Audit({
     action: 'CREATE',

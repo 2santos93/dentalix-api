@@ -182,6 +182,9 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-146: «B pide "Por avisar hoy" con la sede de A → 400 en español, y su
+  // lista no trae a nadie de A».
+  'GET /receivables/reminders ?locationId': 'receivables-reminders.e2e-spec.ts',
   // DX-266: «B lista duplicados con la sede de A, descarta, previsualiza o
   // fusiona con pacientes de A → lista vacía o 404 en español y nada de A
   // cambia».

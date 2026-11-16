@@ -13,7 +13,10 @@ import type {
 import {
   CreateCollectionNoteUseCase,
   CreatePaymentPromiseUseCase,
+  MarkBalanceReminderUseCase,
   NOTE_TEXT_TOO_LONG_MESSAGE,
+  REMINDER_ALREADY_TODAY_MESSAGE,
+  REMINDER_OUTCOME_RESERVED_MESSAGE,
   PROMISE_ALREADY_OPEN_MESSAGE,
   PROMISE_IN_PAST_MESSAGE,
   PROMISE_TOO_FAR_MESSAGE,
@@ -171,5 +174,80 @@ describe('CreatePaymentPromiseUseCase (DX-150)', () => {
     await expect(useCase.execute('p1', input, 'u1')).rejects.toThrow(
       new ConflictException(PROMISE_ALREADY_OPEN_MESSAGE),
     );
+  });
+});
+
+describe('DX-146: aviso de saldo («Marcar avisado»)', () => {
+  it('la nota genérica no admite REMINDER_SENT (solo entra por su ruta)', async () => {
+    const { repo, notes } = fakeRepo();
+    const useCase = new CreateCollectionNoteUseCase(repo, context());
+    await expect(
+      useCase.execute(
+        'p1',
+        { channel: 'WHATSAPP_LINK', outcome: 'REMINDER_SENT' },
+        'u1',
+      ),
+    ).rejects.toThrow(REMINDER_OUTCOME_RESERVED_MESSAGE);
+    expect(notes).toEqual([]);
+  });
+
+  it('crea la nota REMINDER_SENT con la sede activa, el canal y el reloj', async () => {
+    const calls: { input: NewCollectionNote; now: Date }[] = [];
+    const { repo } = fakeRepo({
+      createReminderNote: (input: NewCollectionNote, now: Date) => {
+        calls.push({ input, now });
+        return Promise.resolve({
+          id: 'n9',
+          ...input,
+          author: { id: input.authorId, fullName: 'Rita' },
+          createdAt: now,
+        });
+      },
+    });
+    const useCase = new MarkBalanceReminderUseCase(
+      repo,
+      context('loc-1'),
+      () => NOW,
+    );
+    const note = await useCase.execute(
+      'p1',
+      { channel: 'WHATSAPP_LINK', text: '  ' },
+      'u1',
+    );
+    expect(note.outcome).toBe('REMINDER_SENT');
+    expect(calls).toEqual([
+      {
+        input: {
+          patientId: 'p1',
+          locationId: 'loc-1',
+          channel: 'WHATSAPP_LINK',
+          outcome: 'REMINDER_SENT',
+          text: null,
+          authorId: 'u1',
+        },
+        now: NOW,
+      },
+    ]);
+  });
+
+  it('409 si ya se avisó hoy; 404 si el paciente no es de la clínica', async () => {
+    const { repo } = fakeRepo({
+      createReminderNote: () => Promise.resolve(null),
+    });
+    const useCase = new MarkBalanceReminderUseCase(repo, context(), () => NOW);
+    await expect(
+      useCase.execute('p1', { channel: 'CALL' }, 'u1'),
+    ).rejects.toThrow(new ConflictException(REMINDER_ALREADY_TODAY_MESSAGE));
+    await expect(
+      useCase.execute('otro', { channel: 'CALL' }, 'u1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('400 con una nota de más de 280', async () => {
+    const { repo } = fakeRepo();
+    const useCase = new MarkBalanceReminderUseCase(repo, context(), () => NOW);
+    await expect(
+      useCase.execute('p1', { channel: 'CALL', text: 'x'.repeat(281) }, 'u1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

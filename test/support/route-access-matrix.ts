@@ -791,6 +791,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /receivables/aging/summary': BILLING,
   // DX-430: saldo a favor por paciente, mismo dato financiero que la lista.
   'GET /receivables/credit-balances': BILLING,
+  // DX-146: «Por avisar hoy» (la misma cartera filtrada por la política) y la
+  // política de avisos, que solo cambia ADMIN.
+  'GET /receivables/reminders': BILLING,
+  'PUT /receivables/reminder-policy': ADMIN_ONLY,
   'GET /receivables/aging.csv': ADMIN_ONLY,
   // DX-399: cobrado sin imputar / a cuenta (lista de abonos de muchos
   // pacientes): ADMIN y recepción, también el CSV (sin teléfonos).
@@ -899,6 +903,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /recall-types/:id/triggers': ADMIN_ONLY,
   // DX-150: cobranza (gestiones y compromisos de pago), mismo dato financiero.
   'POST /patients/:id/collection-notes': BILLING,
+  // DX-146: «Marcar avisado» es una gestión de cobranza más.
+  'POST /patients/:id/balance-reminders': BILLING,
   'POST /patients/:id/payment-promises': BILLING,
   'GET /patients/:id/collections': BILLING,
   // DX-027: caja por turno (loop/informes/DX-027.md). RECEPTION solo ve, abre

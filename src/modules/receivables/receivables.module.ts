@@ -5,6 +5,12 @@ import {
   RECEIVABLES_CLOCK,
 } from './application/use-cases/get-receivables-aging.use-case';
 import { ListCreditBalancesUseCase } from './application/use-cases/list-credit-balances.use-case';
+import {
+  GetBalanceRemindersUseCase,
+  UpdateBalanceReminderPolicyUseCase,
+} from './application/use-cases/balance-reminders.use-cases';
+import { BALANCE_REMINDERS_REPOSITORY } from './domain/ports/balance-reminders-repository.port';
+import { PrismaBalanceRemindersRepository } from './infrastructure/prisma-balance-reminders.repository';
 import { CREDIT_BALANCES_REPOSITORY } from './domain/ports/credit-balances-repository.port';
 import { RECEIVABLES_REPOSITORY } from './domain/ports/receivables-repository.port';
 import { PrismaReceivablesRepository } from './infrastructure/prisma-receivables.repository';
@@ -27,6 +33,13 @@ import { PlanBalanceModule } from '../payments/plan-balance.module';
   providers: [
     GetReceivablesAgingUseCase,
     ListCreditBalancesUseCase,
+    // DX-146: «Por avisar hoy» y su política.
+    GetBalanceRemindersUseCase,
+    UpdateBalanceReminderPolicyUseCase,
+    {
+      provide: BALANCE_REMINDERS_REPOSITORY,
+      useClass: PrismaBalanceRemindersRepository,
+    },
     TokenService,
     TenantContextInterceptor,
     {

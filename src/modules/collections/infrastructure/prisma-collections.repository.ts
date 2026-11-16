@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { ClinicRole, PaymentPromiseStatus, Prisma } from '@prisma/client';
+import {
+  ClinicRole,
+  CollectionOutcome,
+  PaymentPromiseStatus,
+  Prisma,
+} from '@prisma/client';
+import { civilDateIn } from '../../../shared/time/civil-day';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveLocationTimeZones } from '../../../shared/locations/location-time-zone';
@@ -326,6 +332,56 @@ export class PrismaCollectionsRepository implements CollectionsRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.collectionNote.create({
         data: { tenantId, ...input },
+        select: NOTE_SELECT,
+      });
+      const names = await this.staffNames(tx, [row.authorId]);
+      return this.toNote(row, names);
+    });
+  }
+
+  createReminderNote(
+    input: NewCollectionNote,
+    now: Date,
+  ): Promise<CollectionNoteView | null> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // Candado propio de los avisos del paciente: dos «Marcar avisado» a la
+      // vez (doble clic, dos recepcionistas) no dejan dos avisos el mismo día.
+      await tx.$queryRaw`
+        SELECT 1 AS locked
+          FROM (SELECT pg_advisory_xact_lock(hashtextextended(${`balance_reminder:${tenantId}:${input.patientId}`}, 0))) l`;
+      const ledger = await tx.patientLedger.findFirst({
+        where: { tenantId, patientId: input.patientId },
+        select: { locationId: true },
+      });
+      const debtLocationId = ledger?.locationId ?? null;
+      // DX-089: un miembro acotado a sus sedes no avisa de la deuda de otra.
+      this.tenantContext.assertRecordLocationAllowed(debtLocationId);
+      const zoneOf = await loadTenantZones(tx, tenantId);
+      const timeZone = zoneOf(debtLocationId);
+      const last = await tx.collectionNote.findFirst({
+        where: {
+          tenantId,
+          patientId: input.patientId,
+          outcome: CollectionOutcome.REMINDER_SENT,
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: { createdAt: true },
+      });
+      // Ya avisado hoy (o «después» de hoy, si el reloj de la app va por
+      // detrás del de la BD, que fecha la nota): no se repite.
+      if (
+        last &&
+        civilDateIn(last.createdAt, timeZone) >= civilDateIn(now, timeZone)
+      ) {
+        return null;
+      }
+      const row = await tx.collectionNote.create({
+        data: {
+          tenantId,
+          ...input,
+          outcome: CollectionOutcome.REMINDER_SENT,
+        },
         select: NOTE_SELECT,
       });
       const names = await this.staffNames(tx, [row.authorId]);
