@@ -232,12 +232,13 @@ export class OrthoBillingUseCases {
     const base = {
       caseId: record.id,
       patientId: record.patientId,
+      locationId: record.locationId,
       status: record.status,
       startDate: record.startDate,
       plannedVisits: record.plannedVisits,
       visitsDone: facts.visitsDone,
       billing,
-      currency: fee?.currency ?? null,
+      currency: fee?.currency ?? (await this.proposedCurrency(record)),
       treatmentPlanId: record.treatmentPlanId,
       fee,
       overdueDays: settings.overdueDays,
@@ -277,6 +278,14 @@ export class OrthoBillingUseCases {
       visitsCharged: figures.visitsCharged,
       removedCharges: figures.removedCharges,
     };
+  }
+
+  /** Sin honorario: la moneda que tomaría (la del plan ligado o la de la sede). */
+  private async proposedCurrency(
+    record: OrthoCaseRecord,
+  ): Promise<string | null> {
+    const source = await this.repo.feeCurrencySource(record.id);
+    return source.planCurrency ?? source.locationCurrency;
   }
 
   /** El caso, abierto y de una sede permitida (como las escrituras de DX-190). */

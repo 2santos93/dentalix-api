@@ -168,6 +168,8 @@ export interface OrthoAccountPaymentPlan {
 export interface OrthoCaseAccount {
   caseId: string;
   patientId: string;
+  /** Sede del caso: la de sus fechas e importes. */
+  locationId: string;
   status: OrthoCaseStatus;
   startDate: string;
   plannedVisits: number;

@@ -661,6 +661,8 @@ export class OrthoAccountPaymentPlanDto {
 export class OrthoCaseAccountDto {
   @ApiProperty({ format: 'uuid' }) caseId!: string;
   @ApiProperty({ format: 'uuid' }) patientId!: string;
+  @ApiProperty({ format: 'uuid', description: 'Sede del caso' })
+  locationId!: string;
   @ApiProperty({ enum: OrthoCaseStatus }) status!: OrthoCaseStatus;
   @ApiProperty({ format: 'date' }) startDate!: string;
   @ApiProperty() plannedVisits!: number;
@@ -671,7 +673,13 @@ export class OrthoCaseAccountDto {
       'NONE: sin honorario. PENDING: honorario sin aceptar. PLAN_ITEMS: sus cargos están en el plan. PAYMENT_PLAN: el plan ya tenía cuotas; solo se informa',
   })
   billing!: 'NONE' | 'PENDING' | 'PLAN_ITEMS' | 'PAYMENT_PLAN';
-  @ApiProperty({ type: String, nullable: true }) currency!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'La del honorario; sin honorario, la que tomaría (la del plan ligado o la de la sede); null si la sede no tiene moneda',
+  })
+  currency!: string | null;
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   treatmentPlanId!: string | null;
   @ApiProperty({ type: OrthoFeeDto, nullable: true }) fee!: OrthoFeeDto | null;
