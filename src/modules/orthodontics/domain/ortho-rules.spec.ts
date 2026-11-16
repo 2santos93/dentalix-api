@@ -13,6 +13,7 @@ import {
   validateVisit,
   validateWireGauges,
   wholeMonthsBetween,
+  wholePercent,
 } from './ortho-rules';
 
 const TODAY = '2026-11-16';
@@ -43,6 +44,16 @@ describe('DX-190 · reglas de ortodoncia', () => {
           TODAY,
         ).percent,
       ).toBe(100);
+    });
+
+    it.each([
+      [0, 24, 0],
+      [3, 24, 12],
+      [23, 24, 95],
+      [24, 24, 100],
+      [30, 24, 100],
+    ])('%i de %i controles: %i %%', (part, whole, pct) => {
+      expect(wholePercent(part, whole)).toBe(pct);
     });
 
     it.each([

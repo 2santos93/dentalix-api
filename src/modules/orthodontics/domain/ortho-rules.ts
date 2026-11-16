@@ -529,6 +529,16 @@ export function wholeMonthsBetween(from: string, to: string): number {
   return Math.max(0, months);
 }
 
+/**
+ * Porcentaje entero hacia abajo (3 de 24 → 12), con tope 100. Aritmética
+ * entera: no es un importe y no pasa por los redondeos de dinero.
+ */
+export function wholePercent(part: number, whole: number): number {
+  if (whole <= 0 || part >= whole) return whole <= 0 ? 0 : 100;
+  const scaled = part * 100;
+  return (scaled - (scaled % whole)) / whole;
+}
+
 export interface OrthoProgress {
   visitsDone: number;
   plannedVisits: number;
@@ -548,8 +558,7 @@ export function caseProgress(
     plannedVisits: c.plannedVisits,
     monthsElapsed: wholeMonthsBetween(c.startDate, today),
     estimatedMonths: c.estimatedMonths,
-    // Por defecto hacia abajo: 3 de 24 es un 12 %, no un 13 % (no es dinero).
-    percent: Math.min(100, Math.floor((visitsDone / c.plannedVisits) * 100)),
+    percent: wholePercent(visitsDone, c.plannedVisits),
   };
 }
 
