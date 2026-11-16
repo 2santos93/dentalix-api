@@ -71,6 +71,7 @@ import { PrescriptionsModule } from './modules/prescriptions/prescriptions.modul
 import { PatientCertificatesModule } from './modules/patient-certificates/patient-certificates.module';
 import { ClinicalRecordCopiesModule } from './modules/clinical-record-copies/clinical-record-copies.module';
 import { ImplantsModule } from './modules/implants/implants.module';
+import { OrthodonticsModule } from './modules/orthodontics/orthodontics.module';
 import { PatientDocumentsModule } from './modules/patient-documents/patient-documents.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { PatientImportsModule } from './modules/patient-imports/patient-imports.module';
@@ -182,6 +183,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PatientCertificatesModule,
     ClinicalRecordCopiesModule,
     ImplantsModule,
+    // DX-190: caso de ortodoncia, control estructurado y lista de seguimiento.
+    OrthodonticsModule,
     PatientDocumentsModule,
     // DX-107: importación de pacientes desde CSV/XLSX (trabajo en la cola).
     PatientImportsModule,

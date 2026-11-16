@@ -73,6 +73,10 @@ model Tenant {
   quoteValidityDays                       Int                              @default(30)
   /// DX-540: avisar al firmar una evolución si el autor no tiene registro profesional (no bloquea). false al crear la clínica; ninguna regla lo deduce del país. Solo ADMIN (PUT /clinical-entries/settings, auditado).
   clinicalEntryLicenseWarning             Boolean                          @default(false)
+  /// DX-190: la clínica usa el módulo de ortodoncia (pestaña de la ficha y lista de la clínica). Apagado de fábrica; solo ADMIN (PUT /ortho/settings, auditado).
+  orthodonticsEnabled                     Boolean                          @default(false)
+  /// DX-190: calibres de arco que ofrece el control de ortodoncia (lista editable de la clínica; 1–40, CHECK tenants_ortho_wire_gauges_check). Un control guardado conserva el que se eligió aunque la lista cambie.
+  orthoWireGauges                         String[]                         @default(["0.012", "0.014", "0.016", "0.018", "0.020", "0.016x0.016", "0.016x0.022", "0.017x0.025", "0.018x0.025", "0.019x0.025"])
   /// DX-374: de dónde sale la tasa de cambio del día de la clínica: el
   /// proveedor (AUTOMATIC, lo de siempre) o las tasas manuales que registra
   /// el ADMIN (MANUAL). Lo cambia el ADMIN (PUT /exchange/settings, auditado).
@@ -198,6 +202,9 @@ model Tenant {
   clinicalNoteTemplates                   ClinicalNoteTemplate[]
   // DX-559: plantillas de plan de tratamiento y sus líneas.
   treatmentPlanTemplates                  TreatmentPlanTemplate[]
+  // DX-190: casos de ortodoncia y sus controles.
+  orthoCases                              OrthoCase[]
+  orthoVisits                             OrthoVisit[]
   treatmentPlanTemplateLines              TreatmentPlanTemplateLine[]
   // DX-150: cobranza (notas y compromisos de pago).
   collectionNotes                         CollectionNote[]
@@ -365,6 +372,11 @@ model User {
   appointmentReservedOverrides      AppointmentReservedOverride[]
   // DX-407: hoja de sedación (autor de cada parte; operador y monitor del egreso).
   sedationRecordsAuthored           SedationRecord[]
+  // DX-190: casos de ortodoncia (responsable, alta y cambio de estado) y controles.
+  orthoCasesResponsible             OrthoCase[]                      @relation("OrthoCaseProvider")
+  orthoCasesCreated                 OrthoCase[]                      @relation("OrthoCaseCreatedBy")
+  orthoCasesStatusChanged           OrthoCase[]                      @relation("OrthoCaseStatusChangedBy")
+  orthoVisitsAuthored               OrthoVisit[]
   sedationChecklists                SedationChecklist[]
   sedationAgentsAdministered        SedationAgentAdministration[]
   sedationVitalsTaken               SedationVitals[]
@@ -522,6 +534,8 @@ model Location {
   clinicalEntries            ClinicalEntry[]
   anesthesiaAdministrations  AnesthesiaAdministration[]
   sedationRecords            SedationRecord[]
+  // DX-190: casos de ortodoncia que lleva la sede.
+  orthoCases                 OrthoCase[]
   appointments               Appointment[]
   payments                   Payment[]
   inventoryItems             InventoryItem[]
@@ -866,6 +880,9 @@ model Patient {
   anesthesiaAdministrations   AnesthesiaAdministration[]
   // DX-407: hojas de sedación de sus evoluciones.
   sedationRecords             SedationRecord[]
+  // DX-190: casos de ortodoncia y sus controles.
+  orthoCases                  OrthoCase[]
+  orthoVisits                 OrthoVisit[]
   dentitionEvents             PatientDentitionEvent[]
   toothRecords                ToothRecord[]
   appointments                Appointment[]
@@ -1173,6 +1190,8 @@ model ClinicalEntry {
   anesthesia  AnesthesiaAdministration[]
   // DX-407: hoja de sedación de la evolución (una como mucho, append-only).
   sedation    SedationRecord[]
+  // DX-190: control de ortodoncia que documenta la evolución (uno como mucho).
+  orthoVisit  OrthoVisit[]
   // DX-212: diagnósticos CIE-10, creados en la misma transacción que la
   // evolución e inalterables como ella.
   diagnoses   ClinicalEntryDiagnosis[]
@@ -2180,6 +2199,8 @@ model TreatmentPlan {
   creditRefunds      PatientCreditRefund[]   @relation("CreditRefundPlan")
   creditEntries      PatientCreditEntry[]    @relation("CreditEntryPlan")
 
+  // DX-190: casos de ortodoncia ligados al plan (cobro: DX-285).
+  orthoCases   OrthoCase[]
   // DX-569: enlace de pago y reporte del paciente.
   paymentLinks PaymentLink[]
 
@@ -4535,6 +4556,9 @@ enum AuditResourceType {
   PAYMENT_REPORT
   // DX-559: plantillas de plan de tratamiento (alta, edición, desactivación).
   TREATMENT_PLAN_TEMPLATE
+  // DX-190: caso de ortodoncia (alta, cabecera y estado) y cada control.
+  ORTHO_CASE
+  ORTHO_VISIT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -7929,4 +7953,147 @@ model TreatmentPlanTemplateLine {
   @@unique([tenantId, templateId, position], map: "treatment_plan_template_lines_position_key")
   @@index([tenantId, catalogItemId], map: "treatment_plan_template_lines_catalog_idx")
   @@map("treatment_plan_template_lines")
+}
+
+// ---------------------------------------------------------------------------
+// DX-190: ortodoncia
+// ---------------------------------------------------------------------------
+
+enum OrthoTechnique {
+  METAL_BRACKETS
+  AESTHETIC_BRACKETS
+  SELF_LIGATING
+  ALIGNERS
+  REMOVABLE
+  OTHER
+}
+
+/// ACTIVE → RETENTION | FINISHED | ABANDONED; RETENTION → FINISHED | ABANDONED.
+/// FINISHED y ABANDONED cierran el caso (la guarda dx_ortho_cases_guard no deja
+/// cambiarlo después).
+enum OrthoCaseStatus {
+  ACTIVE
+  RETENTION
+  FINISHED
+  ABANDONED
+}
+
+enum OrthoWireMaterial {
+  NITI
+  STEEL
+  TMA
+  OTHER
+}
+
+enum OrthoElasticType {
+  CLASS_II
+  CLASS_III
+  CROSS
+  BOX
+  TRIANGLE
+  OTHER
+}
+
+enum OrthoElasticWear {
+  FULL_TIME
+  NIGHT
+  PART_TIME
+}
+
+enum OrthoIncident {
+  BRACKET_DEBONDED
+  BRACKET_BROKEN
+  WIRE_DAMAGED
+}
+
+/// Caso de ortodoncia de un paciente (DX-190). UNO activo por paciente
+/// (índice único parcial ortho_cases_one_active_key). Historia clínica: la app
+/// no lo borra; cerrado (FINISHED/ABANDONED) ya no cambia.
+model OrthoCase {
+  id                String          @id @default(uuid()) @db.Uuid
+  tenantId          String          @db.Uuid
+  patientId         String          @db.Uuid
+  locationId        String          @db.Uuid
+  /// Profesional responsable (miembro de la clínica que atiende pacientes).
+  providerId        String          @db.Uuid
+  treatmentPlanId   String?         @db.Uuid
+  technique         OrthoTechnique
+  /// Día civil de inicio (zona de la sede).
+  startDate         DateTime        @db.Date
+  estimatedMonths   Int             @db.SmallInt
+  plannedVisits     Int             @db.SmallInt
+  visitIntervalDays Int             @default(30) @db.SmallInt
+  status            OrthoCaseStatus @default(ACTIVE)
+  /// Motivo del último cambio de estado (obligatorio al abandonar).
+  statusReason      String?
+  statusChangedAt   DateTime?
+  statusChangedById String?         @db.Uuid
+  bondedOn          DateTime?       @db.Date
+  debondedOn        DateTime?       @db.Date
+  createdById       String          @db.Uuid
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient         Patient        @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "ortho_cases_patient_fkey")
+  location        Location       @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "ortho_cases_location_fkey")
+  treatmentPlan   TreatmentPlan? @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "ortho_cases_treatment_plan_fkey")
+  provider        User           @relation("OrthoCaseProvider", fields: [providerId], references: [id], onDelete: Restrict, map: "ortho_cases_provider_fkey")
+  createdBy       User           @relation("OrthoCaseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "ortho_cases_created_by_fkey")
+  statusChangedBy User?          @relation("OrthoCaseStatusChangedBy", fields: [statusChangedById], references: [id], onDelete: Restrict, map: "ortho_cases_status_changed_by_fkey")
+  visits          OrthoVisit[]
+
+  @@unique([tenantId, id], map: "ortho_cases_tenant_id_key")
+  // Destino de las FK compuestas de los controles (y de los cargos de DX-285).
+  @@unique([tenantId, patientId, id], map: "ortho_cases_tenant_patient_id_key")
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "ortho_cases_patient_created_idx")
+  @@index([tenantId, locationId], map: "ortho_cases_tenant_location_idx")
+  @@index([providerId], map: "ortho_cases_provider_idx")
+  @@index([createdById], map: "ortho_cases_created_by_idx")
+  // PARCIALES, no declarables en Prisma:
+  //   ortho_cases_one_active_key UNIQUE ("tenantId", "patientId") WHERE status = 'ACTIVE'
+  //   ortho_cases_active_location_idx ("tenantId", "locationId") WHERE status = 'ACTIVE'
+  //   ortho_cases_tenant_plan_idx ("tenantId", "treatmentPlanId", "patientId") WHERE "treatmentPlanId" IS NOT NULL
+  //   ortho_cases_status_changed_by_idx ("statusChangedById") WHERE "statusChangedById" IS NOT NULL
+  @@map("ortho_cases")
+}
+
+/// Control de ortodoncia (DX-190): cuelga 1:1 de una evolución creada en la
+/// misma transacción. INALTERABLE (trigger dx_ortho_visits_immutable, sin
+/// UPDATE ni DELETE para la app): se corrige con una adenda de su evolución.
+model OrthoVisit {
+  id                  String             @id @default(uuid()) @db.Uuid
+  tenantId            String             @db.Uuid
+  patientId           String             @db.Uuid
+  caseId              String             @db.Uuid
+  clinicalEntryId     String             @db.Uuid
+  /// Día civil del control (el de la evolución).
+  visitDate           DateTime           @db.Date
+  upperWireMaterial   OrthoWireMaterial?
+  upperWireGauge      String?
+  lowerWireMaterial   OrthoWireMaterial?
+  lowerWireGauge      String?
+  elasticsType        OrthoElasticType?
+  elasticsWear        OrthoElasticWear?
+  /// Aparatología añadida o retirada, texto corto.
+  applianceChanges    String?
+  incidents           OrthoIncident[]    @default([])
+  /// 1 (buena) – 4 (mala).
+  hygieneIndex        Int?               @db.SmallInt
+  nextVisitProposedOn DateTime?          @db.Date
+  authorId            String             @db.Uuid
+  createdAt           DateTime           @default(now())
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient Patient       @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "ortho_visits_patient_fkey")
+  case    OrthoCase     @relation(fields: [tenantId, patientId, caseId], references: [tenantId, patientId, id], onDelete: Restrict, map: "ortho_visits_case_fkey")
+  entry   ClinicalEntry @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id], onDelete: Restrict, map: "ortho_visits_clinical_entry_fkey")
+  author  User          @relation(fields: [authorId], references: [id], onDelete: Restrict, map: "ortho_visits_author_fkey")
+
+  @@unique([tenantId, patientId, clinicalEntryId], map: "ortho_visits_entry_key")
+  @@unique([tenantId, id], map: "ortho_visits_tenant_id_key")
+  @@unique([tenantId, patientId, id], map: "ortho_visits_tenant_patient_id_key")
+  @@index([tenantId, patientId, caseId, visitDate(sort: Desc), createdAt(sort: Desc)], map: "ortho_visits_case_date_idx")
+  @@index([authorId], map: "ortho_visits_author_idx")
+  @@map("ortho_visits")
 }

@@ -515,3 +515,25 @@ export const CERTIFICATE_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+
+// Ortodoncia (DX-190). El caso y sus controles son historia clínica: la
+// pestaña de la ficha la leen los roles clínicos (recepción no); abren,
+// editan y cierran el caso y registran controles quienes atienden (DENTIST y
+// ADMIN, como los implantes). La lista de seguimiento (atrasados y sin
+// próxima cita) es para llamar y agendar: los 4 roles. Los ajustes los leen
+// todos (la web decide si enseña el módulo) y solo ADMIN los cambia.
+export const ORTHO_READ_ROLES: ClinicRole[] = [...CLINICAL_ROLES];
+export const ORTHO_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const ORTHO_FOLLOW_UP_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+export const ORTHO_SETTINGS_READ_ROLES: ClinicRole[] = [
+  ...ORTHO_FOLLOW_UP_ROLES,
+];
+export const ORTHO_SETTINGS_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

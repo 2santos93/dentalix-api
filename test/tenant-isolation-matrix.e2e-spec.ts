@@ -4172,6 +4172,19 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: ['POST /patients/:patientId/certificates/:id/patient-copy'],
     },
     {
+      spec: 'orthodontics.e2e-spec.ts',
+      checks:
+        'B → 404 al listar, abrir, editar, cerrar y registrar controles en el caso de ortodoncia del paciente de A; el caso de A sigue igual y sin controles nuevos (DX-190)',
+      routes: [
+        'GET /patients/:patientId/ortho-cases',
+        'POST /patients/:patientId/ortho-cases',
+        'PATCH /patients/:patientId/ortho-cases/:caseId',
+        'POST /patients/:patientId/ortho-cases/:caseId/status',
+        'GET /patients/:patientId/ortho-cases/:caseId/visits',
+        'POST /patients/:patientId/ortho-cases/:caseId/visits',
+      ],
+    },
+    {
       spec: 'implants.e2e-spec.ts',
       checks:
         'B → 404 sobre el paciente y el implante de A (lista, alta, tarjeta, impresión y anulación) y el implante sigue sin anular (DX-191)',

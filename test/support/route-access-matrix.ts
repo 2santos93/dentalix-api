@@ -474,6 +474,21 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /implants/search.csv': ADMIN_ONLY,
   'POST /implants/:id/void': PRESCRIBERS,
 
+  // --- Ortodoncia (DX-190) ----------------------------------------------------
+  // .planning/DX-190. El caso y sus controles son historia clínica: los leen
+  // los roles clínicos; abren, editan, cierran y registran controles
+  // odontólogo y ADMIN. La lista de seguimiento (para llamar y agendar) y la
+  // lectura de los ajustes: los 4 roles. Cambiar los ajustes: solo ADMIN.
+  'GET /patients/:patientId/ortho-cases': CLINICAL,
+  'POST /patients/:patientId/ortho-cases': PRESCRIBERS,
+  'PATCH /patients/:patientId/ortho-cases/:caseId': PRESCRIBERS,
+  'POST /patients/:patientId/ortho-cases/:caseId/status': PRESCRIBERS,
+  'GET /patients/:patientId/ortho-cases/:caseId/visits': CLINICAL,
+  'POST /patients/:patientId/ortho-cases/:caseId/visits': PRESCRIBERS,
+  'GET /ortho/settings': EVERY_ROLE,
+  'PUT /ortho/settings': ADMIN_ONLY,
+  'GET /ortho/follow-up': EVERY_ROLE,
+
   // --- Documentos del paciente (DX-151) -------------------------------------
   // dentalix-docs/planning DX-151. Ver, descargar y subir: los 4 roles
   // (recepción escanea remisiones y consentimientos). Anular: la ruta admite

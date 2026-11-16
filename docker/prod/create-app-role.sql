@@ -172,7 +172,7 @@ BEGIN
     'patient_credit_refunds', 'patient_credit_transfers', 'payment_adjustments',
     'payment_allocation_movements', 'platform_access_audit',
     'platform_audit_events', 'treatment_plan_repricings',
-    'patient_duplicate_dismissals'
+    'patient_duplicate_dismissals', 'ortho_visits'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);
@@ -194,7 +194,8 @@ BEGIN
     'equipment_maintenances', 'patient_certificate_copy_links',
     'patient_certificates', 'payment_links', 'payment_reports',
     'prescription_copy_links', 'sedation_records',
-    'signature_requests', 'signed_consent_pdf_links', 'signed_consent_pdfs'
+    'signature_requests', 'signed_consent_pdf_links', 'signed_consent_pdfs',
+    'ortho_cases'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);

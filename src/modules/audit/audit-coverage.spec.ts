@@ -88,6 +88,10 @@ import {
   ImplantsController,
   PatientImplantsController,
 } from '../implants/presentation/implants.controller';
+import {
+  OrthoController,
+  PatientOrthoController,
+} from '../orthodontics/presentation/ortho.controller';
 import { PatientDocumentsController } from '../patient-documents/presentation/patient-documents.controller';
 import { ExpenseCategoriesController } from '../expenses/presentation/expense-categories.controller';
 import { ExpenseReportsController } from '../expenses/presentation/expense-reports.controller';
@@ -770,6 +774,43 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'patientId' },
     patient: P,
     reason: 'CLINICAL_RECORD_COPY_PRINTED',
+  },
+
+  // DX-190: caso de ortodoncia, controles y lista de seguimiento (sin
+  // paciente: muchos con teléfonos, como la de recall).
+  'GET /patients/:patientId/ortho-cases': {
+    action: 'VIEW',
+    resource: 'ORTHO_CASE',
+    patient: P,
+  },
+  'POST /patients/:patientId/ortho-cases': {
+    action: 'CREATE',
+    resource: 'ORTHO_CASE',
+    resourceId: RES,
+    patient: P,
+  },
+  'PATCH /patients/:patientId/ortho-cases/:caseId': {
+    action: 'UPDATE',
+    resource: 'ORTHO_CASE',
+    resourceId: { param: 'caseId' },
+    patient: P,
+    reason: 'ORTHO_CASE_UPDATED',
+  },
+  'GET /patients/:patientId/ortho-cases/:caseId/visits': {
+    action: 'VIEW',
+    resource: 'ORTHO_VISIT',
+    patient: P,
+  },
+  'POST /patients/:patientId/ortho-cases/:caseId/visits': {
+    action: 'CREATE',
+    resource: 'ORTHO_VISIT',
+    resourceId: RES,
+    patient: P,
+  },
+  'GET /ortho/follow-up': {
+    action: 'VIEW',
+    resource: 'ORTHO_CASE',
+    reason: 'ORTHO_FOLLOW_UP',
   },
 
   // DX-191: registro de implantes, tarjeta y búsqueda por lote.
@@ -1801,6 +1842,12 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-190: el cambio de estado del caso (UPDATE ORTHO_CASE ORTHO_CASE_STATUS
+  // con el estado antes y después, sin el motivo) y los ajustes de la clínica
+  // (CLINIC_SETTINGS ORTHODONTICS_SETTINGS con los campos que cambiaron).
+  'POST /patients/:patientId/ortho-cases/:caseId/status':
+    'orthodontics.e2e-spec.ts',
+  'PUT /ortho/settings': 'orthodontics.e2e-spec.ts',
   // DX-266: la fusión (PATIENT_MERGED en cada paciente, con lo movido por
   // tabla) y «No es duplicado» (PATIENT_DUPLICATE_DISMISSED en los dos), en
   // la transacción del cambio.
@@ -2216,6 +2263,8 @@ const CONTROLLERS: Type[] = [
   PrescriptionsController,
   PatientImplantsController,
   ImplantsController,
+  PatientOrthoController,
+  OrthoController,
   PatientDocumentsController,
   PatientImportsController,
   PlanVisitsController,

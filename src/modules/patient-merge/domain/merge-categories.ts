@@ -62,6 +62,9 @@ export const MERGE_TABLE_CATEGORY: Record<string, MergeCategory> = {
   clinical_entry_diagnoses: 'clinicalEntries',
   anesthesia_administrations: 'clinicalEntries',
   sedation_records: 'clinicalEntries',
+  // DX-190: el caso de ortodoncia y sus controles (cuelgan de evoluciones).
+  ortho_cases: 'clinicalEntries',
+  ortho_visits: 'clinicalEntries',
   clinical_record_copies: 'clinicalEntries',
   patient_retention_actions: 'clinicalEntries',
   tooth_records: 'odontogram',
