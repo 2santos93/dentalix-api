@@ -10,6 +10,10 @@ import type {
 } from '../src/modules/external-orders/domain/ports/external-order-repository.port';
 import type { ExternalOrderSnapshot } from '../src/modules/external-orders/domain/external-order';
 import {
+  countLivePublicLinks,
+  revokeLivePublicLinks,
+} from '../src/modules/patients/infrastructure/patient-public-links';
+import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
@@ -633,6 +637,53 @@ describe('external_orders (int, DX-572)', () => {
             tx.$executeRaw`DELETE FROM "external_order_copy_links" WHERE "id" = ${id}::uuid`,
         ),
       ).rejects.toThrow(/permission denied|no se borra/);
+    });
+
+    it('DX-461: archivar al paciente cuenta e invalida su enlace vivo (el usado no cuenta)', async () => {
+      const used = await issue(a, { patientId: a.otherPatientId });
+      const live = await issue(a, { patientId: a.otherPatientId });
+      const send = (orderId: string) =>
+        asClinic(a, () =>
+          copies.issueLink({
+            id: randomUUID(),
+            orderId,
+            patientId: a.otherPatientId,
+            channel: 'WHATSAPP',
+            destinationMasked: '••• 4567',
+            tokenHash: tokenHash(),
+            expiresAt: new Date(Date.now() + 3_600_000),
+            createdById: a.userId,
+            now: new Date(),
+          }),
+        );
+      await send(used.id);
+      await send(live.id);
+      const usedLink = await owner.externalOrderCopyLink.findFirstOrThrow({
+        where: { orderId: used.id },
+      });
+      expect((await consume(a, usedLink.id)).kind).toBe('DOWNLOADED');
+      const scope = {
+        tenantId: a.tenantId,
+        patientId: a.otherPatientId,
+        now: new Date(),
+      };
+      await expect(
+        asApp(a, (tx) => countLivePublicLinks(tx, scope)),
+      ).resolves.toMatchObject({ externalOrderCopies: 1 });
+      await expect(
+        asApp(a, (tx) =>
+          revokeLivePublicLinks(tx, { ...scope, actorId: a.userId }),
+        ),
+      ).resolves.toMatchObject({ externalOrderCopies: 1 });
+      const rows = await owner.externalOrderCopyLink.findMany({
+        where: { patientId: a.otherPatientId },
+      });
+      expect(
+        rows.map((r) => [r.orderId === live.id, r.revokedAt !== null]).sort(),
+      ).toEqual([
+        [false, false],
+        [true, true],
+      ]);
     });
 
     it('otra clínica no gasta ni ve el enlace de A', async () => {

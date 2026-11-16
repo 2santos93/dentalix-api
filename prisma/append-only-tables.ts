@@ -85,6 +85,8 @@ export const NO_APP_DELETE = [
   // gasta o se invalida (UPDATE limitado por external_orders_guard y
   // external_order_copy_links_guard).
   'external_order_copy_links',
+  // DX-572 (D7): la plantilla no se borra, se desactiva.
+  'external_order_templates',
   'external_orders',
   // DX-569: el enlace se abre, usa o anula y el reporte se decide (UPDATE
   // limitado por payment_links_guard y payment_reports_guard).

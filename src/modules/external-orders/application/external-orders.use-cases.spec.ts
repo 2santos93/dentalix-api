@@ -296,8 +296,10 @@ describe('ExternalOrdersUseCases (DX-572)', () => {
     );
   });
 
-  const issue = (actor = dentist, input = {}) =>
-    run(() => useCases.issue('p1', { ...content, ...input }, actor));
+  const issue = (
+    actor: { userId: string; role: ClinicRole } = dentist,
+    input = {},
+  ) => run(() => useCases.issue('p1', { ...content, ...input }, actor));
 
   it('emite con la foto (edad en el día de la sede), el logo de hoy y archiva el PDF SIN la nota', async () => {
     const order = await issue();
