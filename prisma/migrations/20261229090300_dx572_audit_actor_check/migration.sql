@@ -2,7 +2,7 @@
 -- descarga su PDF sin sesión: la apertura (VIEW) y la descarga (EXPORT) de
 -- EXTERNAL_ORDER se auditan sin usuario, origen PUBLIC_LINK, reason
 -- EXTERNAL_ORDER_COPY_OPENED / _DOWNLOADED. El CHECK de actor de audit_events
--- es la UNIÓN del de main (20261225090400, DX-569) y esas dos escrituras, y
+-- es la UNIÓN del de main (20261228120100, DX-290) y esas dos escrituras, y
 -- solo ellas.
 --
 -- Más permisivo (NOT VALID; su VALIDATE va en 20261229090500, molde de
@@ -164,6 +164,16 @@ ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
         AND "patientId" IS NOT NULL
         AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
         AND "metadata" ->> 'reason' = 'PAYMENT_REPORT_SUBMITTED') IS TRUE
+    -- DX-290: el recordatorio automático (trabajo de la cola, sin usuario)
+    -- crea el enlace de anamnesis de un paciente nuevo o con la anamnesis
+    -- caducada. Solo ids y el motivo: ni el token ni la URL van en el evento.
+    OR ("action" = 'CREATE'
+        AND "resourceType" = 'MEDICAL_HISTORY_SUBMISSION'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'JOB'
+        AND "metadata" ->> 'reason' = 'ANAMNESIS_LINK_SENT_WITH_REMINDER') IS TRUE
     -- DX-572: el paciente (o el responsable de un menor) abre la copia de su
     -- orden de estudios o referencia (VIEW) o descarga su PDF y gasta el
     -- enlace de un solo uso (EXPORT). Solo ids y el motivo: ni el token, ni
