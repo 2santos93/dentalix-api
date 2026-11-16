@@ -1,4 +1,5 @@
 import type { SiteToday } from '../paid-at-window';
+import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import type { IdempotentPayment } from '../idempotency';
 import type { CurrencyTexts } from '../../../../shared/format/currency-text';
 import type { FrozenExchangeRate } from '../payment-exchange-rate';
@@ -144,6 +145,12 @@ export interface CreatePaymentRepoInput {
   frozenRateOverride?: boolean;
   /** DX-569: ver `PaymentInsertHook` (solo el abono suelto). */
   afterInsertInTx?: PaymentInsertHook;
+  /**
+   * DX-091: quién registra (rol del token) y su motivo para hacerlo en un
+   * período contable cerrado. Sin él (p. ej. al confirmar un reporte del
+   * paciente) no hay excepción posible: un día cerrado es 409.
+   */
+  lockActor?: LockActor | null;
 }
 
 /**
@@ -357,6 +364,11 @@ export interface PaymentVoidAudit {
   reason: string;
   /** `null` fuera de una petición HTTP. */
   request: PaymentVoidRequest | null;
+  /**
+   * DX-091: motivo del ADMIN para anular un abono de un período contable
+   * cerrado (solo vale si la clínica admite la exención).
+   */
+  lockOverrideReason?: string | null;
 }
 
 export const PAYMENT_REPOSITORY = Symbol('PAYMENT_REPOSITORY');

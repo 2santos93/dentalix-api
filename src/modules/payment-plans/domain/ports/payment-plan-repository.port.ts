@@ -1,3 +1,4 @@
+import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import { Periodicity } from '../../application/schedule/generate-schedule';
 import { PaymentPlanWithInstallments } from '../entities/payment-plan.entity';
 
@@ -16,6 +17,11 @@ export interface CreatePaymentPlanRepoInput {
   notes?: string;
   createdById?: string;
   installments: { sequence: number; dueDate: Date; amount: number }[];
+  /**
+   * DX-091: quién crea el plan y su motivo para que alguna cuota venza en un
+   * período contable cerrado (solo ADMIN con la exención de la clínica).
+   */
+  lockActor?: LockActor | null;
 }
 
 export const PAYMENT_PLAN_REPOSITORY = Symbol('PAYMENT_PLAN_REPOSITORY');
@@ -46,6 +52,9 @@ export interface PaymentPlanRepository {
    * Atomically set status=CANCELLED + deletedAt ONLY if currently ACTIVE.
    * Returns true if THIS call cancelled it, false if already gone (never
    * throws — the use case decides 404). Never a hard delete.
+   *
+   * DX-091: un plan con cuotas que vencen en un período contable cerrado no
+   * se cancela (409 PERIOD_LOCKED), salvo la excepción del ADMIN con motivo.
    */
-  cancel(id: string): Promise<boolean>;
+  cancel(id: string, lockActor?: LockActor | null): Promise<boolean>;
 }

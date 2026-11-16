@@ -296,6 +296,14 @@ model Tenant {
   // SEC-058: contadores de la clínica en el presupuesto del proveedor de tasas.
   exchangeProviderClinicBudgets           ExchangeProviderClinicBudget[]
 
+  /// DX-091: cierre contable. Fecha fija (cerrado ese día y lo anterior) y/o
+  /// días abiertos hacia atrás (CHECK 0..365); rige el cierre más tardío, en
+  /// el día civil de la sede del abono. Exención: el ADMIN salta el cierre con
+  /// motivo (financial_lock_overrides). PATCH /clinic/settings/financial-lock.
+  financialLockDate           DateTime?                    @db.Date
+  financialLockDays           Int?
+  financialLockAdminExempt    Boolean                      @default(false)
+  financialLockOverrides      FinancialLockOverride[]
   // DX-253: tope de RECEPTION para traspasar o devolver saldo a favor (0 =
   // no puede; ADMIN no tiene tope).
   creditReceptionMaxAmount    Decimal                      @default(0) @db.Decimal(14, 2)
@@ -645,6 +653,8 @@ model Location {
   paymentMethodInstructions PaymentMethodInstruction[]
   paymentLinks              PaymentLink[]
   paymentReports            PaymentReport[]
+  // DX-091: excepciones al cierre contable de abonos de esta sede.
+  financialLockOverrides    FinancialLockOverride[]
 
   @@unique([tenantId, id], map: "locations_tenant_id_key")
   @@unique([tenantId, receiptPrefix], map: "locations_tenant_receipt_prefix_key")
@@ -3226,11 +3236,13 @@ model Payment {
   // numeración: conservan su referencia antigua REC-xxxxxxxx.
   receipt PaymentReceipt?
 
-  cashSession       CashSession?            @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, map: "payments_cash_session_fkey")
-  paymentMethod     ClinicPaymentMethod?    @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payments_payment_method_fkey")
-  cashAdjustments   CashSessionAdjustment[]
+  cashSession            CashSession?            @relation(fields: [tenantId, cashSessionId], references: [tenantId, id], onDelete: Restrict, map: "payments_cash_session_fkey")
+  paymentMethod          ClinicPaymentMethod?    @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payments_payment_method_fkey")
+  cashAdjustments        CashSessionAdjustment[]
   // DX-516: sus ajustes por medio de pago, congelados al registrarlo.
-  methodAdjustments PaymentAdjustment[]
+  methodAdjustments      PaymentAdjustment[]
+  // DX-091: excepciones al cierre contable sobre este abono.
+  financialLockOverrides FinancialLockOverride[]
 
   // DX-051: base en la moneda del plan (como mucho una, PK "paymentId";
   // Prisma la ve como lista porque la FK compuesta no apunta a un único de la
@@ -3353,10 +3365,12 @@ model PaymentPlan {
 
   // FK COMPUESTA (SEC-004): mismo criterio que Payment.plan (tenant + paciente
   // denormalizado coherentes con el plan de tratamiento).
-  plan         TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
-  installments Installment[]
+  plan                   TreatmentPlan           @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
+  installments           Installment[]
   // DX-285: casos de ortodoncia cuyo honorario se aceptó con estas cuotas.
-  orthoCases   OrthoCase[]
+  orthoCases             OrthoCase[]
+  // DX-091: excepciones al cierre contable sobre este plan de cuotas.
+  financialLockOverrides FinancialLockOverride[]
 
   // La moneda existe en el catálogo `currencies` (DX-042).
   currencyRef Currency @relation(fields: [currency], references: [code])
@@ -8449,4 +8463,43 @@ model OrthoAlignerDelivery {
   // PARCIAL, no declarable en Prisma:
   //   ortho_aligner_deliveries_visit_idx ("tenantId", "caseId", "visitId") WHERE "visitId" IS NOT NULL
   @@map("ortho_aligner_deliveries")
+}
+
+/// DX-091: las operaciones hechas sobre un período contable cerrado con la
+/// exención del ADMIN (tenants.financialLockAdminExempt): quién, cuándo
+/// (hora de la BD), por qué, qué operación y sobre qué abono o plan de
+/// cuotas, el día cerrado que tocó y el cierre vigente. Append-only (trigger
+/// y grants), RLS FORCE, FK compuestas por clínica. Sin datos clínicos.
+model FinancialLockOverride {
+  id            String                 @id @default(uuid()) @db.Uuid
+  tenantId      String                 @db.Uuid
+  locationId    String?                @db.Uuid
+  operation     FinancialLockOperation
+  paymentId     String?                @db.Uuid
+  paymentPlanId String?                @db.Uuid
+  businessDate  DateTime               @db.Date
+  lockedThrough DateTime               @db.Date
+  reason        String
+  /// Puntero suave a User, como payments.createdById.
+  actorUserId   String                 @db.Uuid
+  createdAt     DateTime               @default(now())
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location    Location?    @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "financial_lock_overrides_location_fkey")
+  payment     Payment?     @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "financial_lock_overrides_payment_fkey")
+  paymentPlan PaymentPlan? @relation(fields: [tenantId, paymentPlanId], references: [tenantId, id], onDelete: Restrict, map: "financial_lock_overrides_payment_plan_fkey")
+
+  @@index([tenantId, createdAt(sort: Desc)], map: "financial_lock_overrides_tenant_created_idx")
+  @@index([tenantId, paymentId], map: "financial_lock_overrides_payment_idx")
+  @@index([tenantId, paymentPlanId], map: "financial_lock_overrides_payment_plan_idx")
+  @@index([tenantId, locationId], map: "financial_lock_overrides_location_idx")
+  @@map("financial_lock_overrides")
+}
+
+/// DX-091: qué se hizo sobre el período cerrado.
+enum FinancialLockOperation {
+  PAYMENT_CREATE
+  PAYMENT_VOID
+  PAYMENT_PLAN_CREATE
+  PAYMENT_PLAN_CANCEL
 }

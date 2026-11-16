@@ -68,6 +68,9 @@ export const NO_APP_UPDATE_DELETE = [
   // bandejas: solo se añaden.
   'ortho_aligner_series',
   'ortho_aligner_deliveries',
+  // DX-091: el registro de excepciones al cierre contable (quién, cuándo y
+  // por qué; dx_financial_lock_override_guard).
+  'financial_lock_overrides',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */

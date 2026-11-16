@@ -1,3 +1,4 @@
+import { LockOverrideReason } from '../../../financial-lock/presentation/dto/lock-override-reason';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDateString,
@@ -67,4 +68,13 @@ export class CreatePaymentPlanDto {
   @IsString()
   @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
+
+  @LockOverrideReason()
+  lockOverrideReason?: string;
+}
+
+/** DX-091: cuerpo opcional de DELETE /treatment-plans/:id/payment-plan. */
+export class CancelPaymentPlanDto {
+  @LockOverrideReason()
+  lockOverrideReason?: string;
 }

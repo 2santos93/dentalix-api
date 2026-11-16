@@ -169,6 +169,7 @@ export class RecordOpeningBalancePaymentUseCase {
         // Un saldo migrado se abona en su moneda: no hay tasa que congelar.
         frozenRate: null,
         afterInsertInTx: options.afterInsertInTx,
+        lockActor: options.lockActor ?? null,
       });
     } catch (error) {
       await this.proofs.settle([proof], false);

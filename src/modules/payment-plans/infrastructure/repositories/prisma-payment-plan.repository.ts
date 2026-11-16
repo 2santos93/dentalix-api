@@ -15,8 +15,19 @@ import {
   PaymentPlanRepository,
 } from '../../domain/ports/payment-plan-repository.port';
 import { PaymentPlanWithInstallments } from '../../domain/entities/payment-plan.entity';
-import { paymentPlanLocationId } from '../../domain/installment-due';
+import { dueDayOf, paymentPlanLocationId } from '../../domain/installment-due';
+import type { LockActor } from '../../../financial-lock/domain/financial-lock';
+import {
+  guardFinancialLock,
+  recordLockOverride,
+} from '../../../financial-lock/infrastructure/financial-lock-tx';
 import { loadTenantZones } from '../../../../shared/locations/reference-location';
+
+/** DX-091: sede del plan (`null` = la principal) y su zona. */
+interface PlanSite {
+  locationId: string | null;
+  timeZone: string;
+}
 
 type PrismaPaymentPlan = Prisma.PaymentPlanGetPayload<{
   include: { installments: true };
@@ -89,7 +100,25 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
       if (!isPlanBillable(plan.status)) {
         throw new ConflictException(notBillableMessage(plan.status));
       }
-      return tx.paymentPlan.create({
+      // DX-091: ninguna cuota puede vencer en un período contable cerrado
+      // (antedatar cuotas mueve la cartera de meses ya cuadrados), salvo la
+      // excepción del ADMIN con motivo.
+      const site: { value?: PlanSite } = {};
+      const lock = await guardFinancialLock(tx, {
+        tenantId,
+        operation: 'PAYMENT_PLAN_CREATE',
+        probes: async () => {
+          site.value = await this.planSite(tx, tenantId, input.treatmentPlanId);
+          const { timeZone } = site.value;
+          return input.installments.map((i) => ({
+            day: dueDayOf(i.dueDate),
+            timeZone,
+          }));
+        },
+        now: new Date(),
+        actor: input.lockActor ?? null,
+      });
+      const created = await tx.paymentPlan.create({
         data: {
           tenantId,
           treatmentPlanId: input.treatmentPlanId,
@@ -117,8 +146,39 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
         },
         include: { installments: true },
       });
+      if (lock.decision.kind === 'override' && input.lockActor) {
+        await recordLockOverride(tx, {
+          tenantId,
+          locationId: site.value?.locationId ?? null,
+          operation: 'PAYMENT_PLAN_CREATE',
+          paymentPlanId: created.id,
+          businessDate: lock.day!,
+          lockedThrough: lock.decision.through,
+          reason: lock.decision.reason,
+          actorUserId: input.lockActor.userId,
+        });
+      }
+      return created;
     });
     return mapToEntity(row);
+  }
+
+  /**
+   * DX-091: la sede del plan de tratamiento (la de su aceptación o su
+   * presentación; `null` = la principal) y su zona, en la transacción.
+   */
+  private async planSite(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    treatmentPlanId: string,
+  ): Promise<PlanSite> {
+    const plan = await tx.treatmentPlan.findFirst({
+      where: { id: treatmentPlanId, tenantId },
+      select: { acceptedLocationId: true, presentedLocationId: true },
+    });
+    const locationId = plan ? paymentPlanLocationId(plan) : null;
+    const zoneOf = await loadTenantZones(tx, tenantId);
+    return { locationId, timeZone: zoneOf(locationId) };
   }
 
   async findActiveByPlan(
@@ -145,16 +205,55 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
     });
   }
 
-  async cancel(id: string): Promise<boolean> {
+  async cancel(id: string, lockActor?: LockActor | null): Promise<boolean> {
+    const tenantId = this.requireTenantId();
     // Atomic check-and-set (mirrors PrismaPaymentRepository.softDelete):
     // UPDATE ... WHERE id AND status=ACTIVE AND deletedAt IS NULL, so two
     // concurrent cancels can't both "win".
     return this.prisma.runWithTenant(async (tx) => {
+      // DX-091: cancelar deja sin efecto TODAS sus cuotas; si alguna venció
+      // en un período contable cerrado, eso cambia lo que se debía en él.
+      const plan = await tx.paymentPlan.findFirst({
+        where: { id, status: 'ACTIVE', deletedAt: null },
+        select: {
+          treatmentPlanId: true,
+          installments: { select: { dueDate: true } },
+        },
+      });
+      if (!plan) return false;
+      const site: { value?: PlanSite } = {};
+      const lock = await guardFinancialLock(tx, {
+        tenantId,
+        operation: 'PAYMENT_PLAN_CANCEL',
+        probes: async () => {
+          site.value = await this.planSite(tx, tenantId, plan.treatmentPlanId);
+          const { timeZone } = site.value;
+          return plan.installments.map((i) => ({
+            day: dueDayOf(i.dueDate),
+            timeZone,
+          }));
+        },
+        now: new Date(),
+        actor: lockActor ?? null,
+      });
       const result = await tx.paymentPlan.updateMany({
         where: { id, status: 'ACTIVE', deletedAt: null },
         data: { status: 'CANCELLED', deletedAt: new Date() },
       });
-      return result.count > 0;
+      if (result.count === 0) return false;
+      if (lock.decision.kind === 'override' && lockActor) {
+        await recordLockOverride(tx, {
+          tenantId,
+          locationId: site.value?.locationId ?? null,
+          operation: 'PAYMENT_PLAN_CANCEL',
+          paymentPlanId: id,
+          businessDate: lock.day!,
+          lockedThrough: lock.decision.through,
+          reason: lock.decision.reason,
+          actorUserId: lockActor.userId,
+        });
+      }
+      return true;
     });
   }
 }

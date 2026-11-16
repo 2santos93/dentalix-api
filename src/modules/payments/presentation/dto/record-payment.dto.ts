@@ -1,3 +1,4 @@
+import { LockOverrideReason } from '../../../financial-lock/presentation/dto/lock-override-reason';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
@@ -138,4 +139,7 @@ export class RecordPaymentDto {
   @IsString()
   @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
+
+  @LockOverrideReason()
+  lockOverrideReason?: string;
 }
