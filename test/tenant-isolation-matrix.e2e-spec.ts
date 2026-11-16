@@ -254,6 +254,9 @@ interface SeedA {
   holidayId: string;
   /** DX-015-bis: el tipo de recall «Higiene» de A (sembrado en el alta). */
   recallTypeId: string;
+  /** DX-559: una plantilla de plan de A y su línea. */
+  planTemplateId: string;
+  planTemplateLineId: string;
 }
 
 interface SeedB {
@@ -290,6 +293,12 @@ interface SeedB {
   scheduleBlockId: string;
   /** DX-015-bis: tipo de recall propio de B (B le pone un disparador de A). */
   recallTypeId: string;
+  /**
+   * DX-559: plantilla de plan propia de B y un plan de B en borrador (B le
+   * aplica una plantilla o una línea de A).
+   */
+  planTemplateId: string;
+  draftPlanId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -594,6 +603,12 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     },
   );
 
+  // DX-559: una plantilla de plan de A, con una línea de su catálogo.
+  const planTemplate = await create(app, a, '/treatment-plan-templates', {
+    name: 'Resina de A',
+    lines: [{ catalogItemId, visit: 1 }],
+  });
+
   // DX-170: una plantilla de evolución de A.
   const noteTemplate = await create(app, a, '/clinical-note-templates', {
     name: 'Resina de A',
@@ -731,6 +746,9 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   const notePrompt = await raw.clinicalNoteTemplatePrompt.findFirstOrThrow({
     where: { templateId: noteTemplate.id },
   });
+  const planTemplateLine = await raw.treatmentPlanTemplateLine.findFirstOrThrow(
+    { where: { templateId: planTemplate.id } },
+  );
   const recallType = await raw.recallType.findFirstOrThrow({
     where: { tenantId: a.tenantId, systemKey: 'HYGIENE' },
     select: { id: true },
@@ -777,6 +795,8 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     clinicalEntryId: clinicalEntry.id,
     privacyPolicyId: (policies.body as { current: IdBody }).current.id,
     notePromptId: notePrompt.id,
+    planTemplateId: planTemplate.id,
+    planTemplateLineId: planTemplateLine.id,
     confirmationToken: (link.body as { url: string }).url.split(
       '/confirmar/',
     )[1],
@@ -798,6 +818,8 @@ async function seedBExtras(
     | 'planItemId'
     | 'paymentId'
     | 'allocationVersion'
+    | 'planTemplateId'
+    | 'draftPlanId'
   >
 > {
   await api(app, b, 'put', '/locations/schedule', {
@@ -975,7 +997,24 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       paymentId: paymentB.id,
       allocationVersion: (allocationsB.body as { version: string }).version,
       ...(await seedBExtras(app, clinicB, dataB.patientId)),
+      // DX-559: se rellenan justo debajo.
+      planTemplateId: '',
+      draftPlanId: '',
     };
+    b.planTemplateId = (
+      await create(app, clinicB, '/treatment-plan-templates', {
+        name: 'Plantilla de B',
+        lines: [{ catalogItemId: dataB.catalogItemId, visit: 1 }],
+      })
+    ).id;
+    b.draftPlanId = (
+      await create(
+        app,
+        clinicB,
+        `/patients/${dataB.patientId}/treatment-plans`,
+        { currency: 'USD', notes: 'Plan de B para plantillas' },
+      )
+    ).id;
     tables = await clinicTables(raw);
     invitationTokenA = await mailer.invitationToken('invitada@a.test');
     const ownerA = `owner@${clinicA.subdomain}.test`;
@@ -1053,6 +1092,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-170: plantillas de evolución y sus preguntas.
       'clinical_note_templates',
       'clinical_note_template_prompts',
+      // DX-559: plantillas de plan y sus líneas.
+      'treatment_plan_templates',
+      'treatment_plan_template_lines',
       // DX-150: cobranza.
       'collection_notes',
       'payment_promises',
@@ -2100,6 +2142,109 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/clinical-note-templates/${a.noteTemplateId}`,
       body: () => ({ name: 'Hackeada', active: false, version: 1 }),
       status: 404,
+    },
+    // --- plantillas de plan (DX-559) ---
+    {
+      name: 'GET /treatment-plan-templates',
+      verb: 'get',
+      path: () => '/treatment-plan-templates?includeInactive=true',
+      status: 200,
+      expectBody: (body) => {
+        const ids = (body as IdBody[]).map((t) => t.id);
+        expect(ids).toEqual([b.planTemplateId]);
+      },
+    },
+    {
+      name: 'GET /treatment-plan-templates/:id',
+      verb: 'get',
+      path: () => `/treatment-plan-templates/${a.planTemplateId}`,
+      status: 404,
+      message: 'Plantilla de plan no encontrada en esta clínica.',
+    },
+    {
+      name: 'PATCH /treatment-plan-templates/:id',
+      verb: 'patch',
+      path: () => `/treatment-plan-templates/${a.planTemplateId}`,
+      body: () => ({ name: 'Hackeada', active: false, version: 1 }),
+      status: 404,
+      message: 'Plantilla de plan no encontrada en esta clínica.',
+    },
+    {
+      name: 'POST /treatment-plan-templates body.lines[].catalogItemId de A',
+      verb: 'post',
+      path: () => '/treatment-plan-templates',
+      body: () => ({
+        name: 'Con procedimiento ajeno',
+        lines: [{ catalogItemId: a.catalogItemId }],
+      }),
+      bodyIds: ['lines[].catalogItemId'],
+      status: 404,
+      message:
+        'El procedimiento de la línea 1 no existe en el catálogo de esta clínica.',
+    },
+    {
+      name: 'PATCH /treatment-plan-templates/:id body.lines[].catalogItemId de A',
+      verb: 'patch',
+      path: () => `/treatment-plan-templates/${b.planTemplateId}`,
+      body: () => ({
+        lines: [
+          { catalogItemId: b.catalogItemId },
+          { catalogItemId: a.catalogItemId },
+        ],
+        version: 1,
+      }),
+      bodyIds: ['lines[].catalogItemId'],
+      status: 404,
+      message:
+        'El procedimiento de la línea 2 no existe en el catálogo de esta clínica.',
+    },
+    {
+      name: 'POST /treatment-plans/:id/apply-template/preview',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.bareplanId}/apply-template/preview`,
+      body: () => ({ templateId: b.planTemplateId }),
+      status: 404,
+      message: 'Plan de tratamiento no encontrado',
+    },
+    {
+      name: 'POST /treatment-plans/:id/apply-template',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.bareplanId}/apply-template`,
+      body: () => ({ templateId: b.planTemplateId, toothNumber: '11' }),
+      status: 404,
+      message: 'Plan de tratamiento no encontrado',
+    },
+    {
+      name: 'POST /treatment-plans/:id/apply-template/preview body.templateId de A',
+      verb: 'post',
+      path: () => `/treatment-plans/${b.draftPlanId}/apply-template/preview`,
+      body: () => ({ templateId: a.planTemplateId }),
+      bodyIds: ['templateId'],
+      status: 404,
+      message: 'Plantilla de plan no encontrada en esta clínica.',
+    },
+    {
+      name: 'POST /treatment-plans/:id/apply-template body.templateId de A',
+      verb: 'post',
+      path: () => `/treatment-plans/${b.draftPlanId}/apply-template`,
+      body: () => ({ templateId: a.planTemplateId, toothNumber: '11' }),
+      bodyIds: ['templateId'],
+      status: 404,
+      message: 'Plantilla de plan no encontrada en esta clínica.',
+    },
+    {
+      name: 'POST /treatment-plans/:id/apply-template body.lines[].lineId de A',
+      verb: 'post',
+      path: () => `/treatment-plans/${b.draftPlanId}/apply-template`,
+      body: () => ({
+        templateId: b.planTemplateId,
+        toothNumber: '11',
+        lines: [{ lineId: a.planTemplateLineId, toothNumber: '12' }],
+      }),
+      bodyIds: ['lines[].lineId'],
+      status: 400,
+      message:
+        'Una de las líneas indicadas no es de esta plantilla: recarga la vista previa.',
     },
     // La evolución de B no puede colgarse de la cita ni de la plantilla de A
     // (contra el paciente de A: patient-tenant-fk.e2e-spec.ts).

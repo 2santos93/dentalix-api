@@ -21,7 +21,9 @@ import {
   DecideNewItem,
   DiscountStamp,
   DecidePlanChange,
+  DecideTemplateItems,
   DoneMirrorInput,
+  TemplateApplicationAudit,
   PaymentPlanCancellation,
   TreatmentPlanRepository,
 } from '../../../domain/ports/treatment-plan-repository.port';
@@ -101,6 +103,12 @@ export class InMemoryTreatmentPlanRepository
   /** Planes con asientos de saldo a favor (DX-438; son de otro módulo). */
   readonly creditEntryPlanIds = new Set<string>();
   /** Cancelaciones de planes de cuotas hechas junto a su plan (DX-109). */
+  /** DX-559: eventos PLAN_TEMPLATE_APPLIED que el repositorio real escribe. */
+  readonly templateApplications: {
+    planId: string;
+    templateId: string;
+    itemsCreated: number;
+  }[] = [];
   readonly paymentPlanCancellations: {
     planId: string;
     at: Date;
@@ -131,6 +139,9 @@ export class InMemoryTreatmentPlanRepository
       updatedAt: overrides.updatedAt ?? NOW,
       deletedAt: overrides.deletedAt ?? null,
       acceptance: overrides.acceptance ?? null,
+      ...(overrides.visitIntervals
+        ? { visitIntervals: overrides.visitIntervals }
+        : {}),
     };
     this.plans.push(row);
     return this.toPlanEntity(row);
@@ -175,6 +186,9 @@ export class InMemoryTreatmentPlanRepository
       createdAt: overrides.createdAt ?? NOW,
       updatedAt: overrides.updatedAt ?? NOW,
       deletedAt: overrides.deletedAt ?? null,
+      ...(overrides.visit !== undefined
+        ? { visit: overrides.visit, visitLabel: overrides.visitLabel ?? null }
+        : {}),
     };
     this.items.push(row);
     return this.toItemEntity(row);
@@ -203,6 +217,8 @@ export class InMemoryTreatmentPlanRepository
       rejectionNote: row.rejectionNote,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      // DX-559: solo si se fijaron (las specs anteriores no los usan).
+      ...(row.visitIntervals ? { visitIntervals: row.visitIntervals } : {}),
     };
   }
 
@@ -242,6 +258,9 @@ export class InMemoryTreatmentPlanRepository
       notes: row.notes,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      ...(row.visit !== undefined
+        ? { visit: row.visit, visitLabel: row.visitLabel ?? null }
+        : {}),
     };
   }
 
@@ -521,6 +540,57 @@ export class InMemoryTreatmentPlanRepository
     };
     this.items.push(row);
     return this.toItemEntity(row);
+  }
+
+  /** DX-559: como el real, todo o nada y con el plan releído «bloqueado». */
+  async addTemplateItems(
+    planId: string,
+    decide: DecideTemplateItems,
+    audit?: TemplateApplicationAudit,
+  ): Promise<TreatmentPlanItem[]> {
+    const plan = this.lockedPlan(planId);
+    if (!plan) {
+      throw new NotFoundException('Plan de tratamiento no encontrado');
+    }
+    const decision = await this.decided(() => decide(plan));
+    const rows: StoredItem[] = decision.items.map((input) => ({
+      id: `item-${++seq}`,
+      tenantId: 't1',
+      planId,
+      toothNumber: input.toothNumber,
+      surfaces: input.surfaces ?? [],
+      catalogItemId: input.catalogItemId,
+      catalogPrice: input.catalogPrice,
+      ...input.pricing,
+      ...input.pricing.reference,
+      price: input.price,
+      discount: input.discount ?? 0,
+      discountReason: input.discountReason ?? null,
+      discountReasonNote: input.discountReasonNote ?? null,
+      ...this.stampColumns(input.discountStamp ?? null),
+      status: TreatmentPlanItemStatus.PROPOSED,
+      ...NO_ATTRIBUTION,
+      cancellationFeeAppointmentId: null,
+      notes: input.notes ?? null,
+      visit: input.visit,
+      visitLabel: input.visitLabel,
+      createdAt: NOW,
+      updatedAt: NOW,
+      deletedAt: null,
+    }));
+    this.items.push(...rows);
+    if (decision.visitIntervals) {
+      const stored = this.plans.find((p) => p.id === planId);
+      if (stored) stored.visitIntervals = decision.visitIntervals;
+    }
+    if (audit) {
+      this.templateApplications.push({
+        planId,
+        templateId: audit.templateId,
+        itemsCreated: rows.length,
+      });
+    }
+    return rows.map((row) => this.toItemEntity(row));
   }
 
   findItemById(id: string): Promise<TreatmentPlanItem | null> {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -21,6 +22,8 @@ import {
   DecideItemChange,
   DecideNewItem,
   DecidePlanChange,
+  DecideTemplateItems,
+  TemplateApplicationAudit,
   DiscountStamp,
   DoneMirrorInput,
   CreateTreatmentPlanRepoInput,
@@ -554,6 +557,91 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       });
     });
     return mapItemToEntity(item);
+  }
+
+  async addTemplateItems(
+    planId: string,
+    decide: DecideTemplateItems,
+    audit?: TemplateApplicationAudit,
+  ): Promise<TreatmentPlanItem[]> {
+    const tenantId = this.requireTenantId();
+    const rows = await this.prisma.runWithTenant(async (tx) => {
+      // FOR UPDATE (no FOR SHARE como el alta de un ítem): esta transacción
+      // también escribe la fila del plan (`visitIntervals`), y así espera a
+      // una aceptación en curso y ve su resultado (D7, D8).
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "treatment_plans"
+         WHERE "id" = ${planId}::uuid AND "deletedAt" IS NULL
+         FOR UPDATE`;
+      const plan = locked.length > 0 ? await lockedPlan(tx, planId) : null;
+      if (!plan) {
+        throw new NotFoundException('Plan de tratamiento no encontrado');
+      }
+      const decision = decide(plan);
+      // Ids fijados aquí para devolver los ítems en el orden de la plantilla
+      // sin fiarse del orden de RETURNING.
+      const ids = decision.items.map(() => randomUUID());
+      const inserted = await tx.treatmentPlanItem.createManyAndReturn({
+        data: decision.items.map((input, i) => ({
+          id: ids[i],
+          tenantId,
+          planId,
+          toothNumber: input.toothNumber,
+          surfaces: input.surfaces ?? [],
+          catalogItemId: input.catalogItemId,
+          catalogPrice: input.catalogPrice,
+          basePrice: input.pricing.basePrice,
+          catalogCurrency: input.pricing.catalogCurrency,
+          priceSource: input.pricing.priceSource,
+          ...referenceColumns(input.pricing.reference),
+          agreementId: input.pricing.agreementId,
+          agreementName: input.pricing.agreementName,
+          pricingLocationId: input.pricing.pricingLocationId,
+          createdById: input.createdById,
+          price: input.price,
+          discount: input.discount ?? 0,
+          notes: input.notes,
+          visit: input.visit,
+          visitLabel: input.visitLabel,
+        })),
+      });
+      const byId = new Map(inserted.map((row) => [row.id, row]));
+      const created = ids.map((id) => byId.get(id)!);
+      if (decision.visitIntervals) {
+        await tx.treatmentPlan.update({
+          where: { id: planId },
+          data: { visitIntervals: decision.visitIntervals },
+        });
+      }
+      if (audit) {
+        const ctx = audit.context;
+        await writeAuditEvent(tx, {
+          tenantId: ctx.tenantId,
+          locationId: ctx.locationId,
+          actor: {
+            kind: 'user',
+            userId: ctx.actor.userId,
+            role: ctx.actor.role,
+          },
+          action: 'UPDATE',
+          resourceType: 'TREATMENT_PLAN',
+          resourceId: planId,
+          patient: { kind: 'patient', id: plan.patientId },
+          requestId: ctx.requestId,
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
+          metadata: {
+            reason: 'PLAN_TEMPLATE_APPLIED',
+            params: {
+              templateId: audit.templateId,
+              itemsCreated: String(created.length),
+            },
+          },
+        });
+      }
+      return created;
+    });
+    return rows.map(mapItemToEntity);
   }
 
   async findItemById(id: string): Promise<TreatmentPlanItem | null> {

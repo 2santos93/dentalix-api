@@ -49,6 +49,8 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     applyBulkDiscount: (): Promise<TreatmentPlanItem[]> =>
       Promise.reject(new Error('not implemented in this fake')),
+    addTemplateItems: (): Promise<TreatmentPlanItem[]> =>
+      Promise.reject(new Error('not implemented in this fake')),
     ...overrides,
   };
 }

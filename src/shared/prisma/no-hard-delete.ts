@@ -32,6 +32,12 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // compuesto). Editar la plantilla las sustituye en la misma transacción y
   // el cambio queda en audit_events.
   'clinicalNoteTemplatePrompt',
+  // DX-559: las líneas de una plantilla de plan son configuración, sin datos
+  // de pacientes y sin nada que las referencie (el plan guarda sus propios
+  // ítems, que no apuntan a la plantilla). Editar la plantilla las sustituye
+  // en la misma transacción y el cambio queda en audit_events
+  // (PLAN_TEMPLATE_UPDATED). La plantilla en sí no se borra: se desactiva.
+  'treatmentPlanTemplateLine',
   // DX-089: sedes permitidas de un miembro. Configuración de acceso, sin
   // datos de pacientes y sin nada que las referencie. El PUT las sustituye en
   // la misma transacción (y ascender a ADMIN las vacía) y el cambio queda en

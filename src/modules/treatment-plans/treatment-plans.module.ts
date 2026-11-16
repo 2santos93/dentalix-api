@@ -77,6 +77,9 @@ import { PriceQuoteController } from './presentation/price-quote.controller';
 import { ExchangeModule } from '../exchange/exchange.module';
 import { REFERENCE_RATE_SOURCE } from './domain/ports/reference-rate-source.port';
 import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-reference-rate-source';
+import { TreatmentPlanTemplatesModule } from '../treatment-plan-templates/treatment-plan-templates.module';
+import { ApplyPlanTemplateUseCase } from './application/use-cases/apply-plan-template.use-case';
+import { PlanTemplateApplyController } from './presentation/plan-template-apply.controller';
 
 @Module({
   // JwtModule.register({}) mirrors AppointmentsModule/OdontogramModule:
@@ -108,6 +111,8 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     // DX-513-bis: la tasa de la clínica para congelar la referencia de un
     // ítem en otra moneda (la misma lectura que los abonos).
     ExchangeModule,
+    // DX-559: la plantilla que se aplica a un plan.
+    TreatmentPlanTemplatesModule,
   ],
   // PlanFollowUpController va PRIMERO: su `GET treatment-plans/pending-follow-up`
   // quedaría tapado por `GET treatment-plans/:id` si se registrara después.
@@ -122,6 +127,8 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     QuoteSettingsController,
     // DX-379 (B): «Actualizar precios» (recotizar).
     PlanRepricingController,
+    // DX-559: vista previa y aplicación de una plantilla de plan.
+    PlanTemplateApplyController,
   ],
   providers: [
     PlanVisitsService,
@@ -134,6 +141,8 @@ import { ClinicReferenceRateSource } from './infrastructure/pricing/clinic-refer
     RemoveTreatmentPlanItemUseCase,
     // Acción «Descuento %» sobre varios ítems (DX-204).
     ApplyBulkDiscountUseCase,
+    // DX-559: plantillas de plan (vista previa y aplicar).
+    ApplyPlanTemplateUseCase,
     // Resolución del precio por convenio o lista (DX-105).
     { provide: PRICING_SOURCE, useClass: PrismaPricingSource },
     // DX-513-bis: tasa de hoy en la sede de escritura para la referencia.

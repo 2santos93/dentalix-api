@@ -13,6 +13,8 @@ const LOCKABLE_TABLES = [
   'prescription_templates',
   // DX-015-bis: tipos de recall (edición, retirada y disparadores).
   'recall_types',
+  // DX-559: plantillas de plan (edición con versión optimista).
+  'treatment_plan_templates',
 ] as const;
 
 export type LockableTable = (typeof LOCKABLE_TABLES)[number];

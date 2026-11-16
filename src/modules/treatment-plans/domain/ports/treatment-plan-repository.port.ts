@@ -159,6 +159,34 @@ export type DecideNewItem = (
 ) => Omit<AddTreatmentPlanItemRepoInput, 'planId'>;
 
 /**
+ * DX-559: un ítem que entra desde una plantilla. Es un ítem normal (D11), con
+ * su visita ya desplazada y la etiqueta de la visita de la plantilla.
+ */
+export interface TemplateItemInput extends Omit<
+  AddTreatmentPlanItemRepoInput,
+  'planId'
+> {
+  visit: number;
+  visitLabel: string | null;
+}
+
+/**
+ * DX-559: lo que entra al aplicar una plantilla, decidido con el plan
+ * bloqueado (FOR UPDATE): los N ítems y los `visitIntervals` del plan ya
+ * fusionados (null = no cambian). Si lanza, no se escribe nada.
+ */
+export type DecideTemplateItems = (plan: TreatmentPlanWithItems) => {
+  items: TemplateItemInput[];
+  visitIntervals: Record<string, number> | null;
+};
+
+/** DX-559 (D10): el evento del uso de la plantilla, en la misma transacción. */
+export interface TemplateApplicationAudit {
+  context: AuditRequestContext;
+  templateId: string;
+}
+
+/**
  * Quién da el descuento y cuándo (DX-204). La sede la pone el repositorio: la
  * del request (`X-Location-Id`) o, en la vista consolidada, la principal.
  * `null` en un cambio = el ítem se queda sin descuento (autor, hora y sede a
@@ -278,6 +306,21 @@ export interface TreatmentPlanRepository {
    * plan no existe o es de otra clínica.
    */
   addItem(planId: string, decide: DecideNewItem): Promise<TreatmentPlanItem>;
+
+  /**
+   * DX-559 (D8): aplica una plantilla en UNA transacción, todo o nada:
+   * bloquea el plan FOR UPDATE (se serializa con la aceptación, que también
+   * lo bloquea), lo relee y deja que `decide` valide su estado y calcule los
+   * ítems y los intervalos; crea los N ítems, guarda los intervalos y, con
+   * `audit`, escribe el evento UPDATE TREATMENT_PLAN PLAN_TEMPLATE_APPLIED.
+   * Devuelve los ítems creados, en orden. 404 si el plan no existe o es de
+   * otra clínica.
+   */
+  addTemplateItems(
+    planId: string,
+    decide: DecideTemplateItems,
+    audit?: TemplateApplicationAudit,
+  ): Promise<TreatmentPlanItem[]>;
 
   /** A single active (non-deleted) item, or `null` if absent/soft-deleted. */
   findItemById(id: string): Promise<TreatmentPlanItem | null>;
