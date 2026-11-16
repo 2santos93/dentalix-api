@@ -1,3 +1,4 @@
+import { MedicalHistorySubmissionsModule } from '../medical-history-submissions/medical-history-submissions.module';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfirmationLinksController } from './presentation/confirmation-links.controller';
@@ -20,7 +21,8 @@ import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tena
  * JwtAuthGuard, los dos interceptores de tenant como providers).
  */
 @Module({
-  imports: [JwtModule.register({})],
+  // DX-290: el enlace de anamnesis que acompaña al de confirmación.
+  imports: [JwtModule.register({}), MedicalHistorySubmissionsModule],
   controllers: [
     ConfirmationLinksController,
     PublicAppointmentConfirmationsController,

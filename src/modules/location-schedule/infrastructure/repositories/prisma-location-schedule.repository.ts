@@ -4,6 +4,7 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import {
+  LocationHolidays,
   LocationScheduleRepository,
   ReplaceScheduleInput,
   SCHEDULE_TIME_ZONE_MOVED,
@@ -115,6 +116,27 @@ export class PrismaLocationScheduleRepository implements LocationScheduleReposit
       });
       // Sede que no existe: sin formato (409 al formatear), nunca otro.
       return location ?? { id, locale: null, hourCycle: null };
+    });
+  }
+
+  async holidaysOf(locationId?: string): Promise<LocationHolidays> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const id = locationId ?? (await this.tenantContext.writeLocationId(tx));
+      const rows = await tx.locationHoliday.findMany({
+        where: { tenantId, locationId: id, deletedAt: null },
+        select: { date: true, name: true, recurring: true },
+      });
+      if (rows.length === 0) return { timeZone: null, holidays: [] };
+      return {
+        timeZone: await this.locationTimeZone(tx, tenantId, id),
+        // `@db.Date` llega como medianoche UTC: su día es el de la fila.
+        holidays: rows.map((r) => ({
+          date: r.date.toISOString().slice(0, 10),
+          name: r.name,
+          recurring: r.recurring,
+        })),
+      };
     });
   }
 

@@ -29,6 +29,11 @@ export interface EmailLayoutInput {
    */
   links?: { lead: string; items: { label: string; url: string }[] } | null;
   /**
+   * DX-290: un segundo llamado, bajo el botón y antes de `links` (p. ej. el
+   * cuestionario de salud del recordatorio): una frase y su enlace.
+   */
+  callout?: { lead: string; label: string; url: string } | null;
+  /**
    * DX-497: textos fijos del esqueleto (idioma del HTML, ayuda del botón y
    * pie) en el idioma del email. Ausente = los de la clínica (español).
    */
@@ -107,6 +112,15 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
           .join(' · ')}</p>`
       : '';
 
+  const calloutUrl = input.callout ? safeUrl(input.callout.url) : null;
+  if (input.callout && !calloutUrl) {
+    throw new Error('El enlace del email no es una URL http(s) válida');
+  }
+  const calloutHtml =
+    input.callout && calloutUrl
+      ? `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#1f2933">${escapeHtml(input.callout.lead)}<br /><a href="${escapeHtml(calloutUrl)}" style="color:${color};font-weight:600">${escapeHtml(input.callout.label)}</a></p>`
+      : '';
+
   const footerText = input.brand
     ? chrome.footerClinic(senderName, PRODUCT_NAME)
     : chrome.footerPlatform(PRODUCT_NAME);
@@ -128,6 +142,7 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
 <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1f2933">${escapeHtml(input.heading)}</h1>
 ${body}
 ${button}
+${calloutHtml}
 ${linksHtml}
 </td></tr>
 </table>
@@ -147,6 +162,13 @@ ${footerLink}
   ];
   if (input.action && actionUrl) {
     textParts.push('', `${singleLine(input.action.label)}: ${actionUrl}`);
+  }
+  if (input.callout && calloutUrl) {
+    textParts.push(
+      '',
+      singleLine(input.callout.lead),
+      `${singleLine(input.callout.label)}: ${calloutUrl}`,
+    );
   }
   if (input.links && links.length > 0) {
     textParts.push('', singleLine(input.links.lead));

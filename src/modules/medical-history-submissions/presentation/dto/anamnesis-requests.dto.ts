@@ -86,7 +86,20 @@ export class AnamnesisSubmissionSummaryDto {
   @ApiProperty(STATUS_PROPERTY) status!: MedicalHistorySubmissionStatus;
   @ApiProperty({ type: String, format: 'date-time' }) expiresAt!: Date;
   @ApiProperty({ type: String, format: 'date-time' }) createdAt!: Date;
-  @ApiProperty() createdByName!: string;
+  @ApiProperty({
+    enum: ['STAFF', 'REMINDER'],
+    enumName: 'MedicalHistorySubmissionOrigin',
+    description:
+      'DX-290: STAFF lo envió recepción; REMINDER salió con el recordatorio automático de la cita.',
+  })
+  origin!: 'STAFF' | 'REMINDER';
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'null = lo envió el recordatorio automático (origen REMINDER).',
+  })
+  createdByName!: string | null;
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   submittedAt!: Date | null;
   @ApiProperty({ type: String, format: 'date-time', nullable: true })

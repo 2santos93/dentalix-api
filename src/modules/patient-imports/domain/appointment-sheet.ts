@@ -1,4 +1,5 @@
 import { csv } from './import-csv';
+import { holidayOn } from '../../location-calendar/domain/holiday-rules';
 import { HEADER_KEYS, IMPORT_FIELDS } from './import-fields';
 import {
   EXTRA_CELLS_MESSAGE,
@@ -533,14 +534,15 @@ export function rejectInFileOverlaps(rows: readonly ResolvedAppointment[]): {
   return { kept, issues };
 }
 
-/** Festivo de la sede (DX-316): fecha exacta o, si es recurrente, mes y día. */
+/**
+ * Festivo de la sede (DX-316): fecha exacta o, si es recurrente, mes y día.
+ * DX-263-bis: la misma regla que agendar y mover a mano (`holidayOn`).
+ */
 export function isLocationHoliday(
   day: string,
   holidays: readonly { date: string; recurring: boolean }[],
 ): boolean {
-  return holidays.some((h) =>
-    h.recurring ? h.date.slice(5) === day.slice(5) : h.date === day,
-  );
+  return holidayOn(day, holidays) !== null;
 }
 
 export const HOLIDAY_MESSAGE =

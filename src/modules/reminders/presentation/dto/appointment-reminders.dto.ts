@@ -1,5 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { AppointmentReminderSkipReason } from '@prisma/client';
+import {
+  AppointmentReminderSkipReason,
+  MedicalHistorySubmissionStatus,
+} from '@prisma/client';
 
 const STATES = [
   'SENT',
@@ -94,6 +97,34 @@ export class AppointmentReminderItemDto {
   current!: boolean;
 }
 
+/** DX-290: el último enlace de anamnesis de la cita (sin respuestas). */
+export class AppointmentAnamnesisLinkDto {
+  @ApiProperty({
+    enum: ['STAFF', 'REMINDER'],
+    enumName: 'MedicalHistorySubmissionOrigin',
+    description:
+      'REMINDER: salió con el recordatorio automático («Anamnesis enviada con el recordatorio»). STAFF: la envió recepción.',
+  })
+  origin!: 'STAFF' | 'REMINDER';
+
+  @ApiProperty({
+    enum: MedicalHistorySubmissionStatus,
+    enumName: 'MedicalHistorySubmissionStatus',
+    description:
+      'Estado efectivo: un enlace sin usar cuya caducidad pasó es EXPIRED.',
+  })
+  status!: MedicalHistorySubmissionStatus;
+
+  @ApiProperty({ format: 'date-time' })
+  sentAt!: Date;
+
+  @ApiProperty({ format: 'date-time' })
+  expiresAt!: Date;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  submittedAt!: Date | null;
+}
+
 /** Estado de los recordatorios de una cita (DX-026). */
 export class AppointmentRemindersDto {
   @ApiProperty({ description: 'Recordatorios activos en la sede de la cita' })
@@ -113,4 +144,12 @@ export class AppointmentRemindersDto {
 
   @ApiProperty({ type: [AppointmentReminderItemDto] })
   items!: AppointmentReminderItemDto[];
+
+  @ApiProperty({
+    type: AppointmentAnamnesisLinkDto,
+    nullable: true,
+    description:
+      'DX-290: el último enlace de anamnesis ligado a la cita, o null si no se envió ninguno.',
+  })
+  anamnesis!: AppointmentAnamnesisLinkDto | null;
 }

@@ -172,6 +172,17 @@ export interface AppointmentReminderEmailVars {
    * política (o el email es anterior a DX-291) y el bloque no sale.
    */
   cancellationPolicy?: ReminderCancellationPolicyVars | null;
+  /**
+   * DX-290: enlace de un solo uso al cuestionario de salud (paciente nuevo o
+   * con la anamnesis caducada). Solo el enlace: el email no dice nada
+   * clínico. null/ausente = no lo lleva.
+   */
+  anamnesisUrl?: string | null;
+  /**
+   * DX-290: el paciente ya tiene un enlace vivo de un envío anterior (no se
+   * emite otro): el email solo le recuerda que lo use. Sin enlace.
+   */
+  anamnesisPending?: boolean;
 }
 
 /** DX-291: el bloque de la política de cancelación del recordatorio. */

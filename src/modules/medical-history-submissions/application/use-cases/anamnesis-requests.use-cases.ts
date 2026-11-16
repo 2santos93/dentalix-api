@@ -161,6 +161,7 @@ export class CreateAnamnesisRequestUseCase {
       tokenHash: hashAnamnesisToken(token),
       expiresAt: anamnesisLinkExpiry(now, appointmentStart),
       questionnaireVersion: ANAMNESIS_QUESTIONNAIRE_VERSION,
+      origin: 'STAFF',
       createdById,
     });
     const url = buildAnamnesisUrl(link.protocol, link.host, token);

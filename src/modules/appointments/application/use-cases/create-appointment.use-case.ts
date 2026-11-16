@@ -16,6 +16,7 @@ import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repositor
 import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
 import { AppointmentWriteResult } from '../../domain/entities/appointment.entity';
 import { checkScheduleBlocks } from '../schedule-block-check';
+import { assertNotOnHoliday } from '../holiday-check';
 import {
   SCHEDULE_BLOCK_CLOCK,
   systemScheduleBlockClock,
@@ -183,7 +184,7 @@ export class CreateAppointmentUseCase {
     // pasado cuando se re-agenda).
     this.assertFuture(resolved);
 
-    return this.createChecked(resolved);
+    return this.createChecked(resolved, { checkHoliday: true });
   }
 
   /**
@@ -192,18 +193,22 @@ export class CreateAppointmentUseCase {
    * pertenencia de paciente y profesional, horario de la sede, solapes 409 —
    * salvo "no agendar en el pasado", que solo tiene sentido para quien agenda
    * desde la UI. Deliberadamente NO lo expone ningún controlador.
+   * DX-263-bis: tampoco mira los festivos: una visita que YA ocurrió es un
+   * hecho (pudo atenderse un día que después se marcó festivo).
    */
   async registerHistorical(
     input: CreateAppointmentInput,
   ): Promise<AppointmentWriteResult> {
-    return this.createChecked(await this.resolveEnd(input));
+    return this.createChecked(await this.resolveEnd(input), {
+      checkHoliday: false,
+    });
   }
 
   /**
    * DX-263: valida una cita importada con EXACTAMENTE las reglas de agendar a
    * mano (futura, tipo activo, sede permitida, profesional de la clínica que
-   * atiende en la sede, horario de la sede y del profesional, bloqueos y
-   * solapes de profesional y paciente) SIN escribir nada. Con `patientId`
+   * atiende en la sede, horario de la sede y del profesional, festivos de la
+   * sede, bloqueos y solapes de profesional y paciente) SIN escribir nada. Con `patientId`
    * null (paciente que creará el lote) no se mira el eje del paciente: no
    * tiene citas. Lanza la misma excepción HTTP que el alta manual; devuelve
    * los avisos que no la impiden.
@@ -215,6 +220,7 @@ export class CreateAppointmentUseCase {
     this.assertFuture(resolved);
     const prepared = await this.prepare(resolved, {
       checkPatient: input.patientId !== null,
+      checkHoliday: true,
     });
     return { ...prepared.warnings, end: resolved.end };
   }
@@ -237,7 +243,7 @@ export class CreateAppointmentUseCase {
       createdById: input.createdById,
     });
     this.assertFuture(resolved);
-    return this.createChecked(resolved);
+    return this.createChecked(resolved, { checkHoliday: true });
   }
 
   private importedInput(
@@ -298,18 +304,22 @@ export class CreateAppointmentUseCase {
 
   private async createChecked(
     input: ResolvedAppointmentInput,
+    opts: { checkHoliday: boolean },
   ): Promise<AppointmentWriteResult> {
-    return this.write(await this.prepare(input, { checkPatient: true }));
+    return this.write(
+      await this.prepare(input, { checkPatient: true, ...opts }),
+    );
   }
 
   /**
    * Todas las reglas de agendar, sin escribir: pertenencia del paciente (si
-   * `checkPatient`), sede, sillón, profesional, horario de la sede y del
-   * profesional, bloqueos y solapes. Lo que necesita `write`.
+   * `checkPatient`), sede, sillón, profesional, horario de la sede, festivos
+   * de la sede (si `checkHoliday`), horario del profesional, bloqueos y
+   * solapes. Lo que necesita `write`.
    */
   private async prepare(
     input: ResolvedAppointmentInput,
-    opts: { checkPatient: boolean },
+    opts: { checkPatient: boolean; checkHoliday: boolean },
   ): Promise<PreparedAppointment> {
     // `patientId` y `providerId` tienen que resolver a entidades REALES de ESTA
     // clínica, antes de mirar solapes (un id inválido hace que el solape no
@@ -367,7 +377,7 @@ export class CreateAppointmentUseCase {
     input: ResolvedAppointmentInput & { providerId: string },
     target: string,
     chair: Chair | null,
-    opts: { checkPatient: boolean },
+    opts: { checkPatient: boolean; checkHoliday: boolean },
   ): Promise<PreparedAppointment> {
     // Horario de atención de la SEDE: la cita tiene que caber completa en un
     // tramo del día. Sede sin horario configurado => sin restricción (ver
@@ -389,6 +399,16 @@ export class CreateAppointmentUseCase {
           requireLocationFormat(source),
         ),
       );
+    }
+
+    // DX-263-bis: un festivo de la sede (DX-316), en su zona, es 409 con su
+    // nombre. Misma sede que el horario: la de pendientes o la del request.
+    if (opts.checkHoliday) {
+      await assertNotOnHoliday(this.schedule, {
+        locationId: input.locationId,
+        start: input.start,
+        end: input.end,
+      });
     }
 
     // DX-233: horario del profesional en la sede de la cita (`target`, la

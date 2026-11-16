@@ -20,7 +20,10 @@ import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointm
 import { InMemoryWaitlistRepository } from '../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
-import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
+import type {
+  LocationHolidays,
+  LocationScheduleRepository,
+} from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import type { BusinessHours } from '../../../location-schedule/application/business-hours';
 import { InMemoryAppointmentTypeRepository } from '../../../appointment-types/application/__fixtures__/in-memory-appointment-types';
 import type { AppointmentTypeRepository } from '../../../appointment-types/domain/ports/appointment-type-repository.port';
@@ -141,6 +144,8 @@ function makeSchedule(
     locale: 'de-DE',
     hourCycle: 'h23',
   },
+  // DX-263-bis: por defecto la sede no tiene festivos.
+  holidays: LocationHolidays = { timeZone: null, holidays: [] },
 ): LocationScheduleRepository {
   return {
     findByLocation: (): Promise<never> =>
@@ -152,6 +157,7 @@ function makeSchedule(
       Promise.resolve({ id: locationId, ...format }),
     replaceForCurrentLocation: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
+    holidaysOf: () => Promise.resolve(holidays),
   };
 }
 
@@ -557,6 +563,114 @@ describe('CreateAppointmentUseCase', () => {
       });
 
       expect(result.patientId).toBe('p1');
+    });
+  });
+
+  describe('DX-263-bis: festivos de la sede', () => {
+    // Un día civil futuro en Caracas (UTC−4) y su festivo puntual.
+    const day = new Date(Date.now() + 30 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const calendar = {
+      timeZone: 'America/Caracas',
+      holidays: [{ date: day, name: 'Día de la sede', recurring: false }],
+    };
+    // 10:00 de Caracas de ese día = 14:00Z.
+    const onHoliday = new Date(`${day}T14:00:00.000Z`);
+
+    function makeUc(holidaysOf: jest.Mock, repo = makeRepo()) {
+      const schedule = makeSchedule();
+      return new CreateAppointmentUseCase(
+        repo,
+        makePatients(),
+        makeStaff(),
+        { ...schedule, holidaysOf },
+        makeTypes(),
+        makeBlocks(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+    }
+
+    it('agendar en un festivo es 409 LOCATION_HOLIDAY con su nombre, sin escribir', async () => {
+      const create = jest.fn();
+      const uc = makeUc(
+        jest.fn().mockResolvedValue(calendar),
+        makeRepo({ create }),
+      );
+      const err = await uc
+        .execute({
+          patientId: 'p1',
+          providerId: 'prov1',
+          start: onHoliday,
+          end: new Date(onHoliday.getTime() + 30 * 60_000),
+        })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toEqual({
+        statusCode: 409,
+        error: 'Conflict',
+        code: 'LOCATION_HOLIDAY',
+        message:
+          'Ese día la sede está cerrada por festivo («Día de la sede»): elige otro día.',
+        holiday: { date: day, name: 'Día de la sede' },
+      });
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it('mira los festivos de la sede de la cita (la de pendientes) y no los de otra', async () => {
+      const holidaysOf = jest.fn().mockResolvedValue({
+        timeZone: null,
+        holidays: [],
+      });
+      const uc = makeUc(holidaysOf);
+      await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        locationId: 'loc-otra',
+        start: onHoliday,
+        end: new Date(onHoliday.getTime() + 30 * 60_000),
+      });
+      expect(holidaysOf).toHaveBeenCalledWith('loc-otra');
+    });
+
+    it('el día anterior, a las 23:30 de Caracas (ya el festivo en UTC), se agenda', async () => {
+      const uc = makeUc(jest.fn().mockResolvedValue(calendar));
+      // 23:30 de Caracas del día anterior = 03:30Z del festivo.
+      const lateEve = new Date(`${day}T03:30:00.000Z`);
+      const result = await uc.execute({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: lateEve,
+        end: new Date(lateEve.getTime() + 30 * 60_000),
+      });
+      expect(result.patientId).toBe('p1');
+    });
+
+    it('validateImported aplica la misma regla', async () => {
+      const uc = makeUc(jest.fn().mockResolvedValue(calendar));
+      await expect(
+        uc.validateImported({
+          patientId: null,
+          providerId: 'prov1',
+          locationId: 'loc1',
+          start: onHoliday,
+          end: new Date(onHoliday.getTime() + 30 * 60_000),
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('registerHistorical (una visita que ya ocurrió) no mira los festivos', async () => {
+      const holidaysOf = jest.fn().mockResolvedValue(calendar);
+      const uc = makeUc(holidaysOf);
+      const past = new Date(Date.now() - 2 * 86_400_000);
+      await uc.registerHistorical({
+        patientId: 'p1',
+        providerId: 'prov1',
+        start: past,
+        end: new Date(past.getTime() + 30 * 60_000),
+      });
+      expect(holidaysOf).not.toHaveBeenCalled();
     });
   });
 

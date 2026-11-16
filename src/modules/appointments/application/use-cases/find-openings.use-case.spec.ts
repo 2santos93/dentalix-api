@@ -27,9 +27,18 @@ const HOURS: BusinessHours = {
   ranges: [{ weekday: 2, startMinute: 9 * 60, endMinute: 13 * 60 }],
 };
 
-function schedule(hours: BusinessHours | null): LocationScheduleRepository {
+function schedule(
+  hours: BusinessHours | null,
+  // DX-263-bis: por defecto sin festivos en la sede.
+  holidays: { date: string; name: string; recurring: boolean }[] = [],
+): LocationScheduleRepository {
   return {
     findByLocation: () => Promise.resolve(hours),
+    holidaysOf: () =>
+      Promise.resolve({
+        timeZone: holidays.length ? 'America/Caracas' : null,
+        holidays,
+      }),
   } as unknown as LocationScheduleRepository;
 }
 const locations = {
@@ -57,10 +66,11 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     hours: BusinessHours | null = HOURS,
     providerSchedules = new InMemoryProviderScheduleRepository(),
     chairs = new InMemoryChairRepository(),
+    holidays: { date: string; name: string; recurring: boolean }[] = [],
   ) {
     return new FindOpeningsUseCase(
       appointments,
-      schedule(hours),
+      schedule(hours, holidays),
       blocks,
       locations,
       staff,
@@ -78,6 +88,38 @@ describe('FindOpeningsUseCase (DX-122)', () => {
     to: DAY,
     durationMinutes: 30,
   };
+
+  describe('DX-263-bis: festivos de la sede', () => {
+    it('el día de festivo no da huecos y vuelve en `holidays` con su nombre', async () => {
+      const uc = build(undefined, undefined, undefined, undefined, undefined, [
+        { date: DAY, name: 'Carnaval', recurring: false },
+      ]);
+      const view = await uc.execute(query);
+      expect(view.openings).toEqual([]);
+      expect(view.holidays).toEqual([{ date: DAY, name: 'Carnaval' }]);
+    });
+
+    it('un recurrente de otro día del rango solo cierra ese día', async () => {
+      // Rango de una semana: el martes siguiente es festivo de cada año.
+      const nextWeek = new Date(`${DAY}T12:00:00.000Z`);
+      nextWeek.setUTCDate(nextWeek.getUTCDate() + 7);
+      const closed = nextWeek.toISOString().slice(0, 10);
+      const uc = build(undefined, undefined, undefined, undefined, undefined, [
+        { date: `2001-${closed.slice(5)}`, name: 'Fiesta', recurring: true },
+      ]);
+      const view = await uc.execute({ ...query, to: closed });
+      expect(view.holidays).toEqual([{ date: closed, name: 'Fiesta' }]);
+      expect(view.openings.length).toBeGreaterThan(0);
+      for (const o of view.openings) {
+        expect(o.start.toISOString().slice(0, 10)).toBe(DAY);
+      }
+    });
+
+    it('sin festivos, `holidays` vacío', async () => {
+      const view = await build().execute(query);
+      expect(view.holidays).toEqual([]);
+    });
+  });
 
   describe('con sillón (DX-492, DX-509-ter)', () => {
     function withChairs() {

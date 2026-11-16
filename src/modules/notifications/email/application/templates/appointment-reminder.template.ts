@@ -63,6 +63,10 @@ export function appointmentReminder(
     kind: 'note',
     text: vars.confirmUrl ? t.noteWithLink : t.noteWithoutLink,
   });
+  // DX-290: ya tiene el enlace de un envío anterior (que sigue valiendo).
+  if (!vars.anamnesisUrl && vars.anamnesisPending) {
+    blocks.push({ kind: 'note', text: t.anamnesisPending });
+  }
   if (vars.cancellationPolicy) {
     blocks.push({
       kind: 'note',
@@ -76,6 +80,15 @@ export function appointmentReminder(
     heading: t.heading(guardian ?? vars.patientName),
     blocks,
     action: vars.confirmUrl ? { label: t.action, url: vars.confirmUrl } : null,
+    // DX-290: el cuestionario de salud de un paciente nuevo o con la
+    // anamnesis caducada. Solo el enlace, nada clínico.
+    callout: vars.anamnesisUrl
+      ? {
+          lead: t.anamnesisLead,
+          label: t.anamnesisLabel,
+          url: vars.anamnesisUrl,
+        }
+      : null,
     // DX-469: «Añadir a mi calendario» (.ics y Google Calendar).
     links: vars.calendar
       ? {

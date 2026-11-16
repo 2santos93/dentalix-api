@@ -96,6 +96,8 @@ const at = (time: string, day = DAY) => new Date(`${day}T${time}:00.000Z`);
 const noSchedule = {
   findByLocation: () => Promise.resolve(null),
   findForCurrentLocation: () => Promise.resolve(null),
+  // DX-263-bis: sin festivos en la sede.
+  holidaysOf: () => Promise.resolve({ timeZone: null, holidays: [] }),
 } as unknown as LocationScheduleRepository;
 const anyStaff = {
   findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),

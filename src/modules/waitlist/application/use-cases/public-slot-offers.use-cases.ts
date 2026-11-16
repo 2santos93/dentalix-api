@@ -6,6 +6,7 @@ import {
   type LocationScheduleRepository,
 } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import { fitsBusinessHours } from '../../../location-schedule/application/business-hours';
+import { findHolidayHit } from '../../../appointments/application/holiday-check';
 import {
   SCHEDULE_BLOCK_REPOSITORY,
   type ScheduleBlockRepository,
@@ -185,7 +186,7 @@ export class AcceptSlotOfferUseCase {
     return viewOf(this.repo, offer, result.state);
   }
 
-  /** Horario de la sede, del profesional y bloqueos, como al reagendar. */
+  /** Horario y festivos de la sede, del profesional y bloqueos, como al reagendar. */
   private async fitsAgenda(offer: PublicSlotOffer): Promise<boolean> {
     // SEC-014: el paciente no recibe un error; el hueco ya no está.
     if (!offer.locationActive) return false;
@@ -193,6 +194,13 @@ export class AcceptSlotOfferUseCase {
     const end = offer.appointmentEnd;
     const hours = await this.schedule.findByLocation(offer.locationId);
     if (!fitsBusinessHours(start, end, hours)) return false;
+    // DX-263-bis: un festivo de la sede añadido después de ofrecer el hueco.
+    const holiday = await findHolidayHit(this.schedule, {
+      locationId: offer.locationId,
+      start,
+      end,
+    });
+    if (holiday) return false;
     const day = civilDateIn(start, offer.timeZone);
     const canAttend = await this.availability.attendancePredicate(
       [offer.providerId],
