@@ -103,6 +103,11 @@ export const NO_APP_DELETE = [
   // DX-190: el caso de ortodoncia (cabecera y estado; dx_ortho_cases_guard no
   // deja tocar uno cerrado).
   'ortho_cases',
+  // DX-017: el laboratorio y sus servicios (se desactivan) y la orden de
+  // laboratorio (se anula con motivo; dx_dental_lab_orders_guard).
+  'dental_labs',
+  'dental_lab_services',
+  'dental_lab_orders',
 ] as const;
 
 /**
