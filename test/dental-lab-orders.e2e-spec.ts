@@ -549,9 +549,14 @@ describe('Laboratorio dental — /dental-labs, /patients/:id/lab-orders, /lab-or
         changedFields: ['dueOn', 'shade'],
         dueOn: { from: '2026-11-27', to: '2026-11-30' },
       });
-      expect(JSON.stringify(event.metadata)).not.toMatch(
-        /A3|chamfer|zirconio/i,
-      );
+      // Solo nombres de campos, la fecha y la ruta: ni el color ni el texto.
+      expect(Object.keys(event.metadata as object).sort()).toEqual([
+        'changedFields',
+        'dueOn',
+        'params',
+        'reason',
+      ]);
+      expect(JSON.stringify(event.metadata)).not.toMatch(/chamfer|zirconio/i);
     });
 
     it('recepción no toca el contenido (403) ni crea ni anula; sí cambia la fecha prometida', async () => {
