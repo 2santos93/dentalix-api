@@ -22,6 +22,7 @@ import {
   SlotOfferEmailVars,
   SignedConsentCopyEmailVars,
   PrescriptionCopyEmailVars,
+  ExternalOrderCopyEmailVars,
   PaymentLinkEmailVars,
   PaymentReportRejectedEmailVars,
 } from '../../domain/email-message';
@@ -564,6 +565,35 @@ function paymentReportRejected(
   });
 }
 
+/**
+ * DX-572: la copia de una orden de estudios o referencia, por un enlace de un
+ * solo uso. Nada clínico en el email: ni los estudios, ni el centro, ni la
+ * nota (van en el PDF tras abrir el enlace).
+ */
+function externalOrderCopy(
+  vars: ExternalOrderCopyEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const intro = vars.patientFirstName
+    ? `${vars.clinicName} te envía una copia de ${vars.documentLabel} de ${vars.patientFirstName}. Descárgala desde el enlace para llevarla al centro o al especialista.`
+    : `${vars.clinicName} te envía una copia de ${vars.documentLabel}. Descárgala desde el enlace para llevarla al centro o al especialista.`;
+  return renderLayout({
+    brand,
+    subject: `Tu copia de la orden de ${vars.clinicName}`,
+    heading: vars.recipientFirstName
+      ? `Hola, ${vars.recipientFirstName}`
+      : 'Hola',
+    blocks: [
+      { kind: 'paragraph', text: intro },
+      {
+        kind: 'note',
+        text: `El enlace es personal, sirve para una sola descarga y caduca el ${vars.expiresAtLabel}. Si no esperabas este correo, no lo abras y avisa a la clínica.`,
+      },
+    ],
+    action: { label: 'Descargar mi copia', url: vars.url },
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -587,6 +617,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'prescription-copy': prescriptionCopy,
   'payment-link': paymentLink,
   'payment-report-rejected': paymentReportRejected,
+  'external-order-copy': externalOrderCopy,
   'mfa-notice': mfaNotice,
   'mfa-enrollment-code': mfaEnrollmentCode,
 };

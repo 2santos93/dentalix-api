@@ -137,6 +137,7 @@ import { RecordInventoryMovementUseCase } from '../src/modules/inventory/applica
 import { CreateConsentTemplateUseCase } from '../src/modules/consents/application/use-cases/consent-templates.use-cases';
 import { SignPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
 import { CreatePrescriptionTemplateUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-templates.use-cases';
+import { ExternalOrderTemplatesUseCases } from '../src/modules/external-orders/application/external-order-templates.use-cases';
 import { IssuePrescriptionUseCase } from '../src/modules/prescriptions/application/use-cases/prescriptions.use-cases';
 import { UpdatePrescriptionSettingsUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-settings.use-cases';
 import { SetRetentionExtensionUseCase } from '../src/modules/patients/application/use-cases/retention.use-cases';
@@ -217,6 +218,7 @@ import {
   DEMO_IMPLANTS,
   DEMO_PRESCRIPTION,
   DEMO_PRESCRIPTION_TEMPLATES,
+  DEMO_EXTERNAL_ORDER_TEMPLATES,
   DEMO_PROFESSIONAL_LICENSES,
   DEMO_PROFESSIONAL_SPECIALTIES,
   DEMO_PRESCRIPTION_SETTINGS,
@@ -4122,6 +4124,19 @@ class DemoSeeder {
     for (const template of DEMO_PRESCRIPTION_TEMPLATES) {
       await this.use(CreatePrescriptionTemplateUseCase).execute(
         { name: template.name, notes: template.notes, items: template.items },
+        ownerCtx,
+      );
+    }
+    // DX-572: plantillas genéricas de órdenes externas (Ajustes › Órdenes
+    // externas), como las crearía el ADMIN.
+    for (const template of DEMO_EXTERNAL_ORDER_TEMPLATES) {
+      await this.use(ExternalOrderTemplatesUseCases).create(
+        {
+          name: template.name,
+          kind: template.kind,
+          recipient: template.recipient,
+          items: [...template.items],
+        },
         ownerCtx,
       );
     }

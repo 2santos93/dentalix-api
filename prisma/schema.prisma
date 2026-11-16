@@ -146,6 +146,10 @@ model Tenant {
   /// DX-306: el certificado de reposo imprime el diagnóstico (y solo entonces
   /// se recoge). false de plataforma. El justificante nunca lo lleva.
   certificateRestPrintDiagnosis           Boolean                          @default(false)
+  /// DX-572: días tras los que una orden de estudios o referencia sin
+  /// resultado sale «vencida» en «Órdenes sin resultado». CHECK 1..365. 15 de
+  /// plataforma. Solo ADMIN (PUT /external-orders/settings, auditado).
+  externalOrderOverdueDays                Int                              @default(15)
   /// DX-020: cuándo descartó el ADMIN la tarjeta «Pon en marcha tu clínica»
   /// del panel. NULL = se muestra. Es lo único que se guarda: el estado de
   /// cada paso se calcula con los datos (GET /onboarding/status).
@@ -206,6 +210,10 @@ model Tenant {
   orthoCases                              OrthoCase[]
   orthoVisits                             OrthoVisit[]
   treatmentPlanTemplateLines              TreatmentPlanTemplateLine[]
+  // DX-572: órdenes de estudios y referencias externas, plantillas y copias.
+  externalOrders                          ExternalOrder[]
+  externalOrderTemplates                  ExternalOrderTemplate[]
+  externalOrderCopyLinks                  ExternalOrderCopyLink[]
   // DX-150: cobranza (notas y compromisos de pago).
   collectionNotes                         CollectionNote[]
   patientRecalls                          PatientRecall[]
@@ -415,6 +423,12 @@ model User {
   patientCertificateCopyLinks       PatientCertificateCopyLink[]
   // DX-468: «Enviar al paciente» la copia de una receta.
   prescriptionCopyLinksCreated      PrescriptionCopyLink[]
+  // DX-572: órdenes externas que emitió, anuló o cuyo resultado ligó, y los
+  // envíos de su copia.
+  externalOrdersIssued              ExternalOrder[]                  @relation("ExternalOrderIssuedBy")
+  externalOrdersVoided              ExternalOrder[]                  @relation("ExternalOrderVoidedBy")
+  externalOrdersResultLinked        ExternalOrder[]                  @relation("ExternalOrderResultLinkedBy")
+  externalOrderCopyLinksCreated     ExternalOrderCopyLink[]
   signatureRequestsProfessional     SignatureRequest[]               @relation("SignatureRequestProfessional")
   signatureRequestsRevoked          SignatureRequest[]               @relation("SignatureRequestRevokedBy")
   consentCountersignatures          PatientConsentCountersignature[]
@@ -567,6 +581,8 @@ model Location {
   recallContacts             RecallContact[]
   // DX-306: certificados emitidos en la sede (numerados por sede).
   patientCertificates        PatientCertificate[]
+  // DX-572: órdenes externas emitidas en la sede (numeradas por sede).
+  externalOrders             ExternalOrder[]
   // DX-456: copias de la historia clínica generadas en la sede.
   clinicalRecordCopies       ClinicalRecordCopy[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
@@ -655,6 +671,8 @@ model ClinicMembership {
   defaultChairs         Chair[]
   // DX-306: certificados en los que figura como profesional.
   patientCertificates   PatientCertificate[]
+  // DX-572: órdenes externas en las que figura como profesional.
+  externalOrders        ExternalOrder[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -914,6 +932,9 @@ model Patient {
   // DX-456: generaciones de la copia de su historia clínica.
   clinicalRecordCopies        ClinicalRecordCopy[]
   certificateCopyLinks        PatientCertificateCopyLink[]
+  // DX-572: órdenes de estudios y referencias externas, y los enlaces de su copia.
+  externalOrders              ExternalOrder[]
+  externalOrderCopyLinks      ExternalOrderCopyLink[]
   // DX-128: enlaces de baja de los recordatorios enviados al paciente.
   reminderOptOutMatchWarnings ReminderOptOutMatchWarning[]
   reminderOptOutLinks         ReminderOptOutLink[]
@@ -1652,6 +1673,8 @@ model Appointment {
   recallContacts               RecallContact[]
   // DX-306: justificantes y certificados de reposo de la cita.
   patientCertificates          PatientCertificate[]
+  // DX-572: órdenes externas emitidas desde la cita.
+  externalOrders               ExternalOrder[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -4556,6 +4579,10 @@ enum AuditResourceType {
   PAYMENT_REPORT
   // DX-559: plantillas de plan de tratamiento (alta, edición, desactivación).
   TREATMENT_PLAN_TEMPLATE
+  // DX-572: órdenes de estudios y referencias externas (emitir, ver,
+  // imprimir, anular, ligar el resultado y enviar la copia) y sus plantillas.
+  EXTERNAL_ORDER
+  EXTERNAL_ORDER_TEMPLATE
   // DX-190: caso de ortodoncia (alta, cabecera y estado) y cada control.
   ORTHO_CASE
   ORTHO_VISIT
@@ -4641,6 +4668,8 @@ enum EmailTemplate {
   // DX-569: enlace de pago y aviso de reporte no confirmado.
   PAYMENT_LINK              @map("payment-link")
   PAYMENT_REPORT_REJECTED   @map("payment-report-rejected")
+  // DX-572: copia de la orden externa con un enlace de un solo uso.
+  EXTERNAL_ORDER_COPY       @map("external-order-copy")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
@@ -5282,17 +5311,22 @@ model PatientDocument {
   voidReason   String?
   createdAt    DateTime                @default(now())
 
-  tenant                Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant                  Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   // FK COMPUESTAS (SEC-004): paciente y sede del MISMO tenant.
-  patient               Patient              @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
-  location              Location             @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
-  uploadedBy            User                 @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
-  voidedBy              User?                @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  patient                 Patient              @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict)
+  location                Location             @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+  uploadedBy              User                 @relation("PatientDocumentUploadedBy", fields: [uploadedById], references: [id], onDelete: Restrict)
+  voidedBy                User?                @relation("PatientDocumentVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
   // DX-422: el PDF firmado que archiva (si lo generó el servidor).
-  signedConsentPdf      SignedConsentPdf?
+  signedConsentPdf        SignedConsentPdf?
   // DX-306: el certificado cuyo PDF archiva (emitido o anulado).
-  certificatesIssuedPdf PatientCertificate[] @relation("PatientCertificateDocument")
-  certificatesVoidedPdf PatientCertificate[] @relation("PatientCertificateVoidedDocument")
+  certificatesIssuedPdf   PatientCertificate[] @relation("PatientCertificateDocument")
+  certificatesVoidedPdf   PatientCertificate[] @relation("PatientCertificateVoidedDocument")
+  // DX-572: la orden externa cuyo PDF archiva (emitida o anulada) y las
+  // órdenes de las que es el resultado (una panorámica puede servir a varias).
+  externalOrdersIssuedPdf ExternalOrder[]      @relation("ExternalOrderDocument")
+  externalOrdersVoidedPdf ExternalOrder[]      @relation("ExternalOrderVoidedDocument")
+  externalOrdersResult    ExternalOrder[]      @relation("ExternalOrderResultDocument")
 
   @@unique([tenantId, id], map: "patient_documents_tenant_id_key")
   @@index([tenantId, patientId, uploadedAt(sort: Desc)], map: "patient_documents_patient_uploaded_idx")
@@ -7953,6 +7987,179 @@ model TreatmentPlanTemplateLine {
   @@unique([tenantId, templateId, position], map: "treatment_plan_template_lines_position_key")
   @@index([tenantId, catalogItemId], map: "treatment_plan_template_lines_catalog_idx")
   @@map("treatment_plan_template_lines")
+}
+
+// ---------------------------------------------------------------------------
+// Órdenes de estudios y referencias a especialistas externos (DX-572)
+// ---------------------------------------------------------------------------
+
+/// DX-572: IMAGING = estudios de imagen; LAB = laboratorio clínico;
+/// SPECIALIST = referencia a un especialista; OTHER = otra orden.
+enum ExternalOrderKind {
+  IMAGING
+  LAB
+  SPECIALIST
+  OTHER
+}
+
+/// DX-572: ISSUED = emitida, sin resultado; RESULT_RECEIVED = con su resultado
+/// ligado (un documento del paciente); VOIDED = anulada (definitivo).
+enum ExternalOrderStatus {
+  ISSUED
+  RESULT_RECEIVED
+  VOIDED
+}
+
+/// DX-572: plantilla de orden externa de la clínica (tipo, destinatario
+/// habitual y estudios). Sin semilla de ningún país. No se borra (sin DELETE
+/// para la app): se desactiva. Versión optimista como DX-559. CHECKs en la
+/// migración 20261229090200 (nombre 1–80, destinatario 1–120, 1–20 estudios
+/// de 1–200).
+model ExternalOrderTemplate {
+  id          String            @id @default(uuid()) @db.Uuid
+  tenantId    String            @db.Uuid
+  /// 1–80 caracteres, único por clínica (sin distinguir mayúsculas en la app).
+  name        String
+  kind        ExternalOrderKind
+  /// Destinatario habitual (centro o especialista), opcional.
+  recipient   String?
+  /// Estudios solicitados o motivo de la referencia (1–20 líneas).
+  items       String[]
+  active      Boolean           @default(true)
+  /// Versión optimista: sube en 1 con cada edición.
+  version     Int               @default(1)
+  createdById String?           @db.Uuid
+  updatedById String?           @db.Uuid
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  orders ExternalOrder[]
+
+  // Destino de la FK compuesta de las órdenes (SEC-004).
+  @@unique([tenantId, id], map: "external_order_templates_tenant_id_key")
+  @@unique([tenantId, name], map: "external_order_templates_tenant_name_key")
+  @@map("external_order_templates")
+}
+
+/// DX-572: orden de estudios (imagen, laboratorio) o referencia a un
+/// especialista externo, emitida desde la ficha o la cita. Foto inalterable
+/// (`snapshot`) de clínica, sede, profesional y paciente; `number` correlativo
+/// por sede (trigger bajo candado de la sede). Inmutable salvo: enlazar su PDF
+/// una vez, anularla (ISSUED → VOIDED) y ligar o desligar su resultado
+/// (ISSUED ↔ RESULT_RECEIVED). Trigger `external_orders_guard`; no se borra.
+/// RLS FORCE y FK compuestas por clínica. CHECKs y la coherencia del estado en
+/// la migración 20261229090200.
+model ExternalOrder {
+  id                       String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId                 String              @db.Uuid
+  patientId                String              @db.Uuid
+  locationId               String              @db.Uuid
+  /// Cita opcional, del MISMO paciente y de la MISMA sede.
+  appointmentId            String?             @db.Uuid
+  /// Membresía de quien emite (figura como profesional).
+  professionalMembershipId String              @db.Uuid
+  /// Quien emite: sale del token, nunca del cuerpo.
+  issuedById               String              @db.Uuid
+  kind                     ExternalOrderKind
+  /// Lo pone el trigger: siguiente número de la sede.
+  number                   Int
+  /// Hora del servidor (trigger).
+  issuedAt                 DateTime            @default(now())
+  status                   ExternalOrderStatus @default(ISSUED)
+  /// Centro o especialista (1–120).
+  recipient                String
+  /// Estudios solicitados o motivo de la referencia (1–20 líneas de 1–200).
+  items                    String[]
+  /// Dientes FDI (0–32).
+  toothNumbers             String[]            @default([])
+  /// Dato de salud: nunca en la auditoría ni en la vista de recepción.
+  clinicalNote             String?
+  /// Plantilla de la que salió (solo informativo).
+  templateId               String?             @db.Uuid
+  snapshot                 Json
+  /// DX-019-bis: clave del logo congelada al emitir (NULL = sin logo).
+  clinicLogoKey            String?
+  /// PDF archivado (sin la nota clínica) en los documentos del paciente.
+  documentId               String?             @db.Uuid
+  /// Resultado: un documento del paciente (radiografía, informe).
+  resultDocumentId         String?             @db.Uuid
+  resultLinkedAt           DateTime?
+  resultLinkedById         String?             @db.Uuid
+  voidedAt                 DateTime?
+  voidedById               String?             @db.Uuid
+  voidReason               String?
+  /// PDF con «ANULADA» archivado al anular.
+  voidedDocumentId         String?             @db.Uuid
+  createdAt                DateTime            @default(now())
+
+  tenant         Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient        Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "external_orders_patient_fkey")
+  appointment    Appointment?           @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "external_orders_appointment_fkey")
+  location       Location               @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "external_orders_location_fkey")
+  membership     ClinicMembership       @relation(fields: [tenantId, professionalMembershipId], references: [tenantId, id], onDelete: Restrict, map: "external_orders_membership_fkey")
+  issuedBy       User                   @relation("ExternalOrderIssuedBy", fields: [issuedById], references: [id], onDelete: Restrict, map: "external_orders_issued_by_fkey")
+  voidedBy       User?                  @relation("ExternalOrderVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict, map: "external_orders_voided_by_fkey")
+  resultLinkedBy User?                  @relation("ExternalOrderResultLinkedBy", fields: [resultLinkedById], references: [id], onDelete: Restrict, map: "external_orders_result_linked_by_fkey")
+  template       ExternalOrderTemplate? @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, map: "external_orders_template_fkey")
+  document       PatientDocument?       @relation("ExternalOrderDocument", fields: [tenantId, documentId], references: [tenantId, id], onDelete: Restrict, map: "external_orders_document_fkey")
+  voidedDocument PatientDocument?       @relation("ExternalOrderVoidedDocument", fields: [tenantId, voidedDocumentId], references: [tenantId, id], onDelete: Restrict, map: "external_orders_voided_document_fkey")
+  resultDocument PatientDocument?       @relation("ExternalOrderResultDocument", fields: [tenantId, resultDocumentId], references: [tenantId, id], onDelete: Restrict, map: "external_orders_result_document_fkey")
+
+  /// DX-572: enlaces de la copia para el paciente.
+  copyLinks ExternalOrderCopyLink[]
+
+  @@unique([tenantId, locationId, number], map: "external_orders_location_number_key")
+  // Destino de la FK compuesta de los enlaces de la copia (SEC-004).
+  @@unique([tenantId, id], map: "external_orders_tenant_id_key")
+  @@index([tenantId, patientId, issuedAt(sort: Desc)], map: "external_orders_patient_idx")
+  @@index([tenantId, locationId, status, issuedAt], map: "external_orders_pending_idx")
+  @@index([tenantId, issuedAt], map: "external_orders_issued_idx")
+  @@index([tenantId, patientId, appointmentId], map: "external_orders_appointment_idx")
+  @@index([tenantId, professionalMembershipId], map: "external_orders_membership_idx")
+  @@index([tenantId, templateId], map: "external_orders_template_idx")
+  @@index([issuedById], map: "external_orders_issued_by_idx")
+  @@index([voidedById], map: "external_orders_voided_by_idx")
+  @@index([resultLinkedById], map: "external_orders_result_linked_by_idx")
+  @@index([tenantId, documentId], map: "external_orders_document_idx")
+  @@index([tenantId, voidedDocumentId], map: "external_orders_voided_document_idx")
+  @@index([tenantId, resultDocumentId], map: "external_orders_result_document_idx")
+  @@map("external_orders")
+}
+
+/// DX-572: enlace de UN SOLO USO de la copia de una orden externa para el
+/// paciente (o el responsable de un menor), enviado por email (outbox) o por
+/// WhatsApp. Guarda SOLO el sha256 del token. Se gasta al descargar el PDF
+/// (`usedAt`), no al abrir la página. Como mucho uno vivo por orden (único
+/// parcial en la migración): reenviar, anular la orden o archivar al paciente
+/// lo invalidan (`revokedAt`). Cambia una vez (trigger); no se borra.
+model ExternalOrderCopyLink {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String    @db.Uuid
+  patientId         String    @db.Uuid
+  orderId           String    @db.Uuid
+  /// EMAIL o WHATSAPP. CHECK en la migración.
+  channel           String
+  /// «a***@…» o «••• 4567»: nunca el contacto entero.
+  destinationMasked String
+  tokenHash         String    @unique(map: "external_order_copy_links_token_hash_key")
+  expiresAt         DateTime
+  createdById       String    @db.Uuid
+  createdAt         DateTime  @default(now())
+  /// Gastado al descargar el PDF.
+  usedAt            DateTime?
+  /// Invalidado al reenviar, al anular la orden o al archivar al paciente.
+  revokedAt         DateTime?
+
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient   Patient       @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "external_order_copy_links_patient_fkey")
+  order     ExternalOrder @relation(fields: [tenantId, orderId], references: [tenantId, id], onDelete: Restrict, map: "external_order_copy_links_order_fkey")
+  createdBy User          @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "external_order_copy_links_created_by_fkey")
+
+  @@index([tenantId, orderId, createdAt], map: "external_order_copy_links_sent_idx")
+  @@index([tenantId, patientId], map: "external_order_copy_links_patient_idx")
+  @@index([createdById], map: "external_order_copy_links_created_by_idx")
+  @@map("external_order_copy_links")
 }
 
 // ---------------------------------------------------------------------------

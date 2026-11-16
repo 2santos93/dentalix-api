@@ -105,6 +105,15 @@ async function resolvePatientId(
           })
         )?.patientId ?? null
       );
+    case 'externalOrder':
+      return (
+        (
+          await tx.externalOrder.findFirst({
+            where,
+            select: { patientId: true },
+          })
+        )?.patientId ?? null
+      );
     case 'postOpDelivery':
       return (
         (

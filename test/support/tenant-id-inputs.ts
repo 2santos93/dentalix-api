@@ -264,6 +264,17 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // no se crea ninguno».
   'POST /patients/:patientId/certificates body.appointmentId':
     'patient-certificates.e2e-spec.ts',
+  // DX-572: «B emite una orden de su paciente con la cita o la plantilla de
+  // A → 404 y no se crea ninguna; B liga a su orden un documento de A → 404
+  // y su orden sigue sin resultado; B pide los pendientes de la sede de A →
+  // 404».
+  'POST /patients/:patientId/external-orders body.appointmentId':
+    'external-orders.e2e-spec.ts',
+  'POST /patients/:patientId/external-orders body.templateId':
+    'external-orders.e2e-spec.ts',
+  'POST /external-orders/:id/result body.documentId':
+    'external-orders.e2e-spec.ts',
+  'GET /external-orders/pending ?locationId': 'external-orders.e2e-spec.ts',
   // DX-243: «B manda la plantilla, el plan o el profesional de A → 404/400 y
   // no se crea nada».
   'POST /patients/:patientId/signature-requests body.templateId':

@@ -33,6 +33,8 @@ const REVIEWED_CALLERS = [
   'modules/patient-documents/application/use-cases/patient-documents.use-cases.ts',
   // DX-306: PDF de un certificado cuya emisión o anulación no se confirmó.
   'modules/patient-certificates/application/patient-certificates.use-cases.ts',
+  // DX-572: PDF de una orden externa cuya emisión o anulación no se confirmó.
+  'modules/external-orders/application/external-orders.use-cases.ts',
 ];
 
 /** Los adaptadores implementan el puerto; no deciden qué se borra. */

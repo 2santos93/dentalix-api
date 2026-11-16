@@ -170,6 +170,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /public/prescription-copies/:token': PUBLIC_TENANT,
   'GET /public/certificate-copies/:token': PUBLIC_TENANT,
   'GET /public/certificate-copies/:token/pdf': PUBLIC_TENANT,
+  // DX-572: copia de un solo uso de la orden externa (abrir no la gasta).
+  'GET /public/external-order-copies/:token': PUBLIC_TENANT,
+  'POST /public/external-order-copies/:token/download': PUBLIC_TENANT,
   // DX-569: el enlace de pago del paciente (ver, apertura, comprobante y reporte).
   'GET /public/payment-links/:token': PUBLIC_TENANT,
   'POST /public/payment-links/:token/opened': PUBLIC_TENANT,
@@ -460,6 +463,26 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/clinical-record-copies/:copyId/document': CLINICAL,
   'GET /certificates/settings': EVERY_ROLE,
   'PUT /certificates/settings': ADMIN_ONLY,
+
+  // --- Órdenes de estudios y referencias externas (DX-572) -----------------
+  // dentalix-docs/…/DX-572/SPEC.md (D3). Los cuatro roles por la ruta; emitir
+  // (DENTIST/ADMIN), anular, la nota clínica y desligar los acota el caso de
+  // uso. Plantillas, ajustes y sugerencias: leer los clínicos, escribir ADMIN.
+  'GET /patients/:patientId/external-orders': EVERY_ROLE,
+  'POST /patients/:patientId/external-orders': EVERY_ROLE,
+  'GET /external-orders/pending': EVERY_ROLE,
+  'GET /external-orders/recipients': CLINICAL,
+  'GET /external-orders/settings': CLINICAL,
+  'PUT /external-orders/settings': ADMIN_ONLY,
+  'GET /external-orders/:id': EVERY_ROLE,
+  'GET /external-orders/:id/pdf': EVERY_ROLE,
+  'POST /external-orders/:id/void': EVERY_ROLE,
+  'POST /external-orders/:id/result': EVERY_ROLE,
+  'POST /external-orders/:id/result/unlink': EVERY_ROLE,
+  'POST /external-orders/:id/patient-copy': EVERY_ROLE,
+  'GET /external-order-templates': CLINICAL,
+  'POST /external-order-templates': ADMIN_ONLY,
+  'PATCH /external-order-templates/:id': ADMIN_ONLY,
 
   // --- Registro de implantes (DX-191) --------------------------------------
   // loop/informes/DX-191.md. Ver e imprimir la tarjeta: los 4 roles

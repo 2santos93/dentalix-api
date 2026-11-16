@@ -83,6 +83,9 @@ export const MERGE_TABLE_CATEGORY: Record<string, MergeCategory> = {
   patient_documents: 'documents',
   patient_certificates: 'documents',
   patient_certificate_copy_links: 'documents',
+  // DX-572: órdenes de estudios y referencias, y los enlaces de su copia.
+  external_orders: 'documents',
+  external_order_copy_links: 'documents',
   prescriptions: 'prescriptions',
   prescription_copy_links: 'prescriptions',
   treatment_plans: 'treatmentPlans',

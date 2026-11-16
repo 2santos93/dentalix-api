@@ -866,6 +866,32 @@ describe('plantillas reservadas para otras tareas', () => {
       );
     });
 
+    it('la copia de la orden externa (DX-572): enlace de una sola descarga, sin adjunto y nada clínico', () => {
+      const email = renderEmail(
+        'external-order-copy',
+        {
+          recipientFirstName: 'Luis',
+          patientFirstName: 'Sofía',
+          clinicName: 'Sonrisas del Norte',
+          documentLabel: 'la orden de estudios de imagen',
+          url: 'https://demo.dentalix.app/orden/copia/abc',
+          expiresAtLabel: '23/11/2026 8:00 a. m.',
+        },
+        brand,
+      );
+      expect(email.subject).toBe('Tu copia de la orden de Sonrisas del Norte');
+      expect(email.text).toContain('Hola, Luis');
+      expect(email.text).toContain(
+        'copia de la orden de estudios de imagen de Sofía',
+      );
+      expect(email.text).toContain('una sola descarga');
+      expect(email.text).toContain('caduca el 23/11/2026 8:00 a. m.');
+      expect(email.html).toContain(
+        'href="https://demo.dentalix.app/orden/copia/abc"',
+      );
+      expect(email.text).not.toMatch(/panorámica|nota|diagn|diente/i);
+    });
+
     it('la copia de la receta en inglés para un paciente con ese idioma (DX-497)', () => {
       const email = renderEmail(
         'prescription-copy',

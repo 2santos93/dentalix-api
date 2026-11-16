@@ -36,6 +36,7 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'prescription-copy': EmailTemplate.PRESCRIPTION_COPY,
   'payment-link': EmailTemplate.PAYMENT_LINK,
   'payment-report-rejected': EmailTemplate.PAYMENT_REPORT_REJECTED,
+  'external-order-copy': EmailTemplate.EXTERNAL_ORDER_COPY,
   'mfa-notice': EmailTemplate.MFA_NOTICE,
   'mfa-enrollment-code': EmailTemplate.MFA_ENROLLMENT_CODE,
 };
@@ -247,8 +248,11 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
           -- DX-569: el enlace de pago, igual.
           LEFT JOIN "payment_links" pyl
             ON o."template" = 'payment-link' AND pyl."id" = o."referenceId"
+          -- DX-572: la copia de la orden externa, igual.
+          LEFT JOIN "external_order_copy_links" eol
+            ON o."template" = 'external-order-copy' AND eol."id" = o."referenceId"
           JOIN "patients" p
-            ON p."id" = COALESCE(sr."patientId", wo."patientId", cl."patientId", pl."patientId", pyl."patientId")
+            ON p."id" = COALESCE(sr."patientId", wo."patientId", cl."patientId", pl."patientId", pyl."patientId", eol."patientId")
          WHERE o."id" = ${outboxId}::uuid AND p."deletedAt" IS NOT NULL`;
       return rows.length > 0;
     });

@@ -24,7 +24,9 @@ export type AuditPatientRef = {
     // DX-099: el envío de anamnesis que se revisa o se anula.
     | 'medicalHistorySubmission'
     // DX-361: la cita del enlace de confirmación (borrada en blando incluida).
-    | 'appointment';
+    | 'appointment'
+    // DX-572: la orden de estudios o referencia externa.
+    | 'externalOrder';
   id: string;
 };
 

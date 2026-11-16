@@ -487,6 +487,11 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'clinical_record_copies.patientId',
       'collection_notes.patientId',
       'data_processing_consents.patientId',
+      // DX-572: una orden de estudios o referencia emitida es un documento
+      // inalterable (con su PDF archivado): bloquea el deshacer. El enlace
+      // de su copia solo existe con una orden emitida: bloquea igual.
+      'external_order_copy_links.patientId',
+      'external_orders.patientId',
       'medical_history_reviews.patientId',
       // DX-099: una anamnesis enviada por enlace también bloquea el deshacer.
       'medical_history_submissions.patientId',

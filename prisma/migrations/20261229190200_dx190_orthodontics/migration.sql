@@ -26,7 +26,8 @@
 --                       incidencias, índice de higiene 1–4 y próximo control
 --                       propuesto. INALTERABLE: se corrige con una adenda de
 --                       su evolución. Ni UPDATE ni DELETE para la app.
---   dx_patient_merge_tables()     + ortho_cases y ortho_visits (DX-266).
+--   dx_patient_merge_tables()     la de DX-572 (20261229090200) + ortho_cases y
+--                       ortho_visits (DX-266).
 --   dx_patient_merge_blockers()   + DX266_TWO_ACTIVE_ORTHO_CASES: dos casos
 --                       activos no se pueden juntar (el único parcial); la
 --                       clínica cierra uno antes de fusionar.
@@ -40,8 +41,9 @@
 -- search_path fijo y pg_temp al final (SEC-032). Grants: ALTER DEFAULT
 -- PRIVILEGES ya cubre a dentalix_app; aquí se le quita lo que no usa.
 --
--- Vuelta atrás: desplegar la API anterior, recrear dx_patient_merge_tables y
--- dx_patient_merge_blockers con la definición de 20261226140000 y
+-- Vuelta atrás: desplegar la API anterior, recrear dx_patient_merge_tables con
+-- la definición de 20261229090200, dx_patient_merge_blockers con la de
+-- 20261226140000 y
 --   DROP TABLE public."ortho_visits"; DROP TABLE public."ortho_cases";
 --   DROP FUNCTION public.dx_ortho_visits_immutable();
 --   DROP FUNCTION public.dx_ortho_cases_guard();
@@ -336,7 +338,8 @@ ALTER TABLE "ortho_visits" FORCE ROW LEVEL SECURITY;
 REVOKE UPDATE, DELETE, TRUNCATE ON "ortho_visits" FROM dentalix_app;
 
 -- ---------------------------------------------------------------------------
--- Fusión de pacientes (DX-266): definición de 20261226140000 + ortodoncia
+-- Fusión de pacientes (DX-266): la lista de 20261229090200 (DX-572) y los
+-- bloqueos de 20261226140000, + ortodoncia
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.dx_patient_merge_tables()
@@ -360,6 +363,8 @@ AS $$
     'closing_queue_dismissals.patientId',
     'collection_notes.patientId',
     'data_processing_consents.patientId',
+    'external_order_copy_links.patientId',
+    'external_orders.patientId',
     'medical_history_reviews.patientId',
     'medical_history_submissions.patientId',
     'medical_history_versions.patientId',
