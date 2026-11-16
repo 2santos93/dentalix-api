@@ -877,6 +877,43 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ORTHO_CASE',
     reason: 'ORTHO_FOLLOW_UP',
   },
+  // DX-285: cuenta del caso (los cuatro roles) y alineadores (sin importes
+  // ni datos clínicos en la metadata).
+  'GET /patients/:patientId/ortho-cases/accounts': {
+    action: 'VIEW',
+    resource: 'ORTHO_CASE',
+    patient: P,
+    reason: 'ORTHO_CASE_ACCOUNTS',
+  },
+  'GET /patients/:patientId/ortho-cases/:caseId/account': {
+    action: 'VIEW',
+    resource: 'ORTHO_CASE',
+    resourceId: { param: 'caseId' },
+    patient: P,
+    reason: 'ORTHO_CASE_ACCOUNT',
+  },
+  'GET /patients/:patientId/ortho-cases/:caseId/aligners': {
+    action: 'VIEW',
+    resource: 'ORTHO_CASE',
+    resourceId: { param: 'caseId' },
+    patient: P,
+    reason: 'ORTHO_ALIGNERS',
+  },
+  'POST /patients/:patientId/ortho-cases/:caseId/aligner-series': {
+    action: 'UPDATE',
+    resource: 'ORTHO_CASE',
+    resourceId: { param: 'caseId' },
+    patient: P,
+    reason: 'ORTHO_ALIGNER_SERIES',
+  },
+  'POST /patients/:patientId/ortho-cases/:caseId/aligner-series/:seriesId/deliveries':
+    {
+      action: 'UPDATE',
+      resource: 'ORTHO_CASE',
+      resourceId: { param: 'caseId' },
+      patient: P,
+      reason: 'ORTHO_ALIGNER_DELIVERY',
+    },
 
   // DX-191: registro de implantes, tarjeta y búsqueda por lote.
   'GET /patients/:patientId/implants': {
@@ -1913,6 +1950,12 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /patients/:patientId/ortho-cases/:caseId/status':
     'orthodontics.e2e-spec.ts',
   'PUT /ortho/settings': 'orthodontics.e2e-spec.ts',
+  // DX-285: el honorario (ORTHO_FEE_UPDATED con los nombres de lo que
+  // cambió, nunca importes) y su aceptación (ORTHO_FEE_ACCEPTED con el plan).
+  'PUT /patients/:patientId/ortho-cases/:caseId/fee':
+    'ortho-billing.e2e-spec.ts',
+  'POST /patients/:patientId/ortho-cases/:caseId/fee/accept':
+    'ortho-billing.e2e-spec.ts',
   // DX-266: la fusión (PATIENT_MERGED en cada paciente, con lo movido por
   // tabla) y «No es duplicado» (PATIENT_DUPLICATE_DISMISSED en los dos), en
   // la transacción del cambio.

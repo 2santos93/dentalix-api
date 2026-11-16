@@ -1,3 +1,4 @@
+import { OrthoBalanceFlagDto } from '../../../orthodontics/presentation/dto/ortho.dto';
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { TriageFlag } from '@prisma/client';
 import {
@@ -488,6 +489,13 @@ export class AppointmentListItemDto extends OmitType(AppointmentDto, [
 
   @ApiProperty({ type: CoverageSummaryDto })
   coverage!: CoverageSummaryDto;
+
+  @ApiProperty({
+    type: OrthoBalanceFlagDto,
+    description:
+      'DX-285: «Ortodoncia: saldo vencido»: un cargo de ortodoncia realizado y sin pagar de hace más de los días del ajuste de la clínica (30 de fábrica). Por lote, sin importe.',
+  })
+  orthoBalance!: OrthoBalanceFlagDto;
 
   @ApiProperty({
     type: MedicalAlertFlagsDto,

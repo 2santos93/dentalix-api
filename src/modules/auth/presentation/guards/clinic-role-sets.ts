@@ -554,6 +554,17 @@ export const ORTHO_FOLLOW_UP_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+/**
+ * DX-285: la cuenta del caso (honorario, realizado, pagado, saldo) no es
+ * historia clínica: la leen los cuatro roles (recepción cobra). Editar el
+ * honorario y registrar entregas de alineadores, ORTHO_WRITE_ROLES.
+ */
+export const ORTHO_ACCOUNT_READ_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
 export const ORTHO_SETTINGS_READ_ROLES: ClinicRole[] = [
   ...ORTHO_FOLLOW_UP_ROLES,
 ];

@@ -33,6 +33,7 @@ import {
   RolesDeniedMessage,
 } from '../../auth/presentation/guards/roles.decorator';
 import {
+  ORTHO_ACCOUNT_READ_ROLES,
   ORTHO_FOLLOW_UP_ROLES,
   ORTHO_READ_ROLES,
   ORTHO_SETTINGS_READ_ROLES,
@@ -54,14 +55,26 @@ import {
   OrthoSettingsUseCases,
   OrthoVisitUseCases,
 } from '../application/use-cases/ortho.use-cases';
+import {
+  OrthoAlignerUseCases,
+  OrthoBillingUseCases,
+} from '../application/use-cases/ortho-billing.use-cases';
+import { DrainAllocationRebalancesInterceptor } from '../../payments/presentation/drain-allocation-rebalances.interceptor';
 import type {
+  OrthoAlignersView,
+  OrthoCaseAccount,
   OrthoCaseView,
   OrthoFollowUpPage,
   OrthoSettings,
   OrthoVisitView,
 } from '../domain/entities';
 import {
+  AddOrthoAlignerDeliveryDto,
   ChangeOrthoCaseStatusDto,
+  CreateOrthoAlignerSeriesDto,
+  OrthoAlignersDto,
+  OrthoCaseAccountDto,
+  SetOrthoFeeDto,
   CreateOrthoCaseDto,
   OrthoCaseDto,
   OrthoFollowUpPageDto,
@@ -81,6 +94,10 @@ export const ORTHO_WRITE_FORBIDDEN_MESSAGE =
   'Solo el odontólogo o la administración abren casos de ortodoncia y registran sus controles.';
 export const ORTHO_READ_FORBIDDEN_MESSAGE =
   'El caso de ortodoncia es historia clínica: tu rol no lo consulta. La lista de seguimiento sí está en Pacientes › Ortodoncia.';
+export const ORTHO_FEE_FORBIDDEN_MESSAGE =
+  'Solo el odontólogo o la administración ponen y aceptan el honorario del caso. Recepción ve la cuenta del caso.';
+export const ORTHO_ALIGNER_FORBIDDEN_MESSAGE =
+  'Solo el odontólogo o la administración registran los alineadores y sus entregas.';
 export const ORTHO_SETTINGS_FORBIDDEN_MESSAGE =
   'Solo un administrador puede cambiar los ajustes de ortodoncia.';
 
@@ -99,7 +116,9 @@ const LOCATION_HEADER = {
 @ApiTags('orthodontics')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@UseInterceptors(TenantContextInterceptor)
+// DX-285: los cargos del plan (control realizado, honorario aceptado, retiro)
+// se reparten entre los abonos al terminar la escritura (DX-051).
+@UseInterceptors(TenantContextInterceptor, DrainAllocationRebalancesInterceptor)
 @Roles(...ORTHO_READ_ROLES)
 @RolesDeniedMessage(ORTHO_READ_FORBIDDEN_MESSAGE)
 @ApiParam({ name: 'patientId', format: 'uuid' })
@@ -108,8 +127,243 @@ export class PatientOrthoController {
   constructor(
     private readonly cases: OrthoCaseUseCases,
     private readonly visits: OrthoVisitUseCases,
+    private readonly billing: OrthoBillingUseCases,
+    private readonly aligners: OrthoAlignerUseCases,
     private readonly tenantContext: TenantContextService,
   ) {}
+
+  // -- DX-285: cuenta del caso (los cuatro roles; sin datos clínicos)
+
+  @Audit({
+    action: 'VIEW',
+    resource: 'ORTHO_CASE',
+    patient: { param: 'patientId' },
+    reason: 'ORTHO_CASE_ACCOUNTS',
+  })
+  @Get('accounts')
+  @Roles(...ORTHO_ACCOUNT_READ_ROLES)
+  @ApiOperation({
+    summary: 'Cuentas de los casos con honorario del paciente',
+    description:
+      'Para recepción, que no consulta el caso clínico: honorario, realizado, pagado, saldo y saldo vencido de cada caso con honorario, el más reciente primero.',
+  })
+  @ApiOkResponse({ type: [OrthoCaseAccountDto] })
+  @ApiNotFoundResponse({
+    description: 'Paciente no encontrado en esta clínica',
+  })
+  accounts(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+  ): Promise<OrthoCaseAccount[]> {
+    return this.billing.accounts(patientId);
+  }
+
+  @Audit({
+    action: 'VIEW',
+    resource: 'ORTHO_CASE',
+    resourceId: { param: 'caseId' },
+    patient: { param: 'patientId' },
+    reason: 'ORTHO_CASE_ACCOUNT',
+  })
+  @Get(':caseId/account')
+  @Roles(...ORTHO_ACCOUNT_READ_ROLES)
+  @ApiParam({ name: 'caseId', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Cuenta del caso: honorario, realizado, pagado y saldo vencido',
+    description:
+      'Realizado = cargos hechos (inicial al aceptar, control n.º k al registrarlo, retiro al pasar a retención o finalizar). Pagado = lo imputado a esos cargos (DX-051). Vencido = lo realizado y sin pagar de hace más de `overdueDays` días (ajuste de la clínica) en el día civil de la sede. Con cuotas en el plan (`billing` PAYMENT_PLAN) solo se informan.',
+  })
+  @ApiOkResponse({ type: OrthoCaseAccountDto })
+  @ApiNotFoundResponse({ description: 'Paciente o caso de otra clínica' })
+  account(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+  ): Promise<OrthoCaseAccount> {
+    return this.billing.account(patientId, caseId);
+  }
+
+  // Auditado en el caso de uso (UPDATE ORTHO_CASE ORTHO_FEE_UPDATED con los
+  // nombres de lo que cambió; nunca importes).
+  @Put(':caseId/fee')
+  @Roles(...ORTHO_WRITE_ROLES)
+  @RolesDeniedMessage(ORTHO_FEE_FORBIDDEN_MESSAGE)
+  @ApiParam({ name: 'caseId', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Pone o cambia el honorario del caso y su reparto',
+    description:
+      'total = inicial + importe por control × controles + retiro, al céntimo (si no, 400). Moneda: la del plan ligado o la de la sede del caso. Ya aceptado, 409.',
+  })
+  @ApiOkResponse({ type: OrthoCaseAccountDto })
+  @ApiBadRequestResponse({
+    description: 'El reparto no cuadra con el total o importes inválidos',
+  })
+  @ApiNotFoundResponse({ description: 'Paciente o caso de otra clínica' })
+  @ApiConflictResponse({
+    description: 'Caso cerrado, honorario ya aceptado o sede sin moneda',
+  })
+  @ApiForbiddenResponse({ description: ORTHO_FEE_FORBIDDEN_MESSAGE })
+  setFee(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+    @Body() dto: SetOrthoFeeDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<OrthoCaseAccount> {
+    return this.billing.setFee(
+      patientId,
+      caseId,
+      {
+        total: dto.total,
+        initial: dto.initial,
+        perVisit: dto.perVisit,
+        visitCount: dto.visitCount,
+        retention: dto.retention,
+      },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+  }
+
+  // Auditado en el caso de uso (UPDATE ORTHO_CASE ORTHO_FEE_ACCEPTED).
+  @Post(':caseId/fee/accept')
+  @HttpCode(200)
+  @Roles(...ORTHO_WRITE_ROLES)
+  @RolesDeniedMessage(ORTHO_FEE_FORBIDDEN_MESSAGE)
+  @ApiParam({ name: 'caseId', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Acepta el honorario: crea sus cargos en el plan ligado',
+    description:
+      'En el plan ligado (ACEPTADO y sin firma) o, sin plan, en uno nuevo «Ortodoncia» que se liga al caso: la cuota inicial (ya realizada), un ítem por control («Ortodoncia: control 3 de 24») y el retiro. Los controles ya registrados realizan sus cargos. Si el plan ligado ya tiene cuotas activas, no se crea ningún cargo (no se duplica): la cuenta las informa.',
+  })
+  @ApiOkResponse({ type: OrthoCaseAccountDto })
+  @ApiNotFoundResponse({ description: 'Paciente o caso de otra clínica' })
+  @ApiConflictResponse({
+    description:
+      'Sin honorario, ya aceptado, caso cerrado, o el plan ligado sin aceptar, firmado, cerrado o en otra moneda',
+  })
+  @ApiForbiddenResponse({ description: ORTHO_FEE_FORBIDDEN_MESSAGE })
+  acceptFee(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<OrthoCaseAccount> {
+    return this.billing.acceptFee(
+      patientId,
+      caseId,
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+  }
+
+  // -- DX-285: alineadores (historia clínica: lectura como el caso)
+
+  @Audit({
+    action: 'VIEW',
+    resource: 'ORTHO_CASE',
+    resourceId: { param: 'caseId' },
+    patient: { param: 'patientId' },
+    reason: 'ORTHO_ALIGNERS',
+  })
+  @Get(':caseId/aligners')
+  @ApiParam({ name: 'caseId', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Series de alineadores del caso con la bandeja actual por arcada',
+  })
+  @ApiOkResponse({ type: OrthoAlignersDto })
+  @ApiNotFoundResponse({ description: 'Paciente o caso de otra clínica' })
+  listAligners(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+  ): Promise<OrthoAlignersView> {
+    return this.aligners.list(patientId, caseId);
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'ORTHO_CASE',
+    resourceId: { param: 'caseId' },
+    patient: { param: 'patientId' },
+    reason: 'ORTHO_ALIGNER_SERIES',
+  })
+  @Post(':caseId/aligner-series')
+  @Roles(...ORTHO_WRITE_ROLES)
+  @RolesDeniedMessage(ORTHO_ALIGNER_FORBIDDEN_MESSAGE)
+  @ApiParam({ name: 'caseId', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Abre una serie de alineadores (o un refinamiento)',
+    description:
+      'Por arcada (superior, inferior o ambas): marca, n.º de bandejas y días por bandeja. Un refinamiento (`refinementOfId`) abre una serie nueva y la anterior se conserva.',
+  })
+  @ApiCreatedResponse({ type: OrthoAlignersDto })
+  @ApiBadRequestResponse({
+    description: 'Arcada, marca o bandejas fuera de rango; serie de otro caso',
+  })
+  @ApiNotFoundResponse({ description: 'Paciente o caso de otra clínica' })
+  @ApiConflictResponse({ description: 'Caso cerrado o módulo apagado' })
+  @ApiForbiddenResponse({ description: ORTHO_ALIGNER_FORBIDDEN_MESSAGE })
+  createAlignerSeries(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+    @Body() dto: CreateOrthoAlignerSeriesDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<OrthoAlignersView> {
+    return this.aligners.createSeries(
+      patientId,
+      caseId,
+      {
+        arch: dto.arch,
+        brand: dto.brand,
+        totalTrays: dto.totalTrays,
+        daysPerTray: dto.daysPerTray,
+        refinementOfId: dto.refinementOfId,
+      },
+      req.user.sub,
+    );
+  }
+
+  @Audit({
+    action: 'UPDATE',
+    resource: 'ORTHO_CASE',
+    resourceId: { param: 'caseId' },
+    patient: { param: 'patientId' },
+    reason: 'ORTHO_ALIGNER_DELIVERY',
+  })
+  @Post(':caseId/aligner-series/:seriesId/deliveries')
+  @Roles(...ORTHO_WRITE_ROLES)
+  @RolesDeniedMessage(ORTHO_ALIGNER_FORBIDDEN_MESSAGE)
+  @ApiParam({ name: 'caseId', format: 'uuid' })
+  @ApiParam({ name: 'seriesId', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Registra una entrega de bandejas (de la X a la Y)',
+    description:
+      'Seguida de la última entregada, dentro de la serie, con fecha no futura (sin fecha: el día del control `visitId` o hoy en la sede).',
+  })
+  @ApiCreatedResponse({ type: OrthoAlignersDto })
+  @ApiBadRequestResponse({
+    description:
+      'Bandejas no seguidas o más allá de la serie, fecha inválida o control de otro caso',
+  })
+  @ApiNotFoundResponse({
+    description: 'Paciente, caso o serie de otra clínica',
+  })
+  @ApiConflictResponse({ description: 'Caso cerrado o módulo apagado' })
+  @ApiForbiddenResponse({ description: ORTHO_ALIGNER_FORBIDDEN_MESSAGE })
+  addAlignerDelivery(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Param('caseId', ParseUUIDPipe) caseId: string,
+    @Param('seriesId', ParseUUIDPipe) seriesId: string,
+    @Body() dto: AddOrthoAlignerDeliveryDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<OrthoAlignersView> {
+    return this.aligners.addDelivery(
+      patientId,
+      caseId,
+      seriesId,
+      {
+        fromTray: dto.fromTray,
+        toTray: dto.toTray,
+        deliveredOn: dto.deliveredOn,
+        visitId: dto.visitId,
+      },
+      req.user.sub,
+    );
+  }
 
   @Audit({
     action: 'VIEW',
@@ -343,7 +597,8 @@ export class OrthoController {
   @Get('settings')
   @Roles(...ORTHO_SETTINGS_READ_ROLES)
   @ApiOperation({
-    summary: 'Ajustes de ortodoncia: módulo activo y calibres de arco',
+    summary:
+      'Ajustes de ortodoncia: módulo activo, calibres de arco y umbral del saldo vencido',
   })
   @ApiOkResponse({ type: OrthoSettingsDto })
   getSettings(): Promise<OrthoSettings> {
@@ -370,7 +625,11 @@ export class OrthoController {
     @Req() req: AuthenticatedRequest,
   ): Promise<OrthoSettings> {
     return this.settings.update(
-      { enabled: dto.enabled, wireGauges: dto.wireGauges },
+      {
+        enabled: dto.enabled,
+        wireGauges: dto.wireGauges,
+        overdueDays: dto.overdueDays,
+      },
       requireAuditRequestContext(req, this.tenantContext),
     );
   }

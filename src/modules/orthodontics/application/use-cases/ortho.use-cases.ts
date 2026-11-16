@@ -41,6 +41,10 @@ import {
   type OrthoCasePlan,
   type OrthoVisitInput,
 } from '../../domain/ortho-rules';
+import {
+  ORTHO_BILLING_MESSAGES,
+  validateOverdueDays,
+} from '../../domain/ortho-billing';
 
 export const ORTHO_DEFAULT_PAGE_SIZE = 50;
 export const ORTHO_MAX_PAGE_SIZE = 100;
@@ -71,7 +75,7 @@ export class OrthoSettingsUseCases {
    * nombres de lo que cambió; sin cambio, no hay evento.
    */
   async update(
-    input: { enabled?: unknown; wireGauges?: unknown },
+    input: { enabled?: unknown; wireGauges?: unknown; overdueDays?: unknown },
     ctx: AuditRequestContext,
   ): Promise<OrthoSettings> {
     const current = await this.repo.getSettings();
@@ -88,15 +92,23 @@ export class OrthoSettingsUseCases {
       if (!parsed.ok) throw new BadRequestException(parsed.message);
       wireGauges = parsed.value;
     }
+    let overdueDays = current.overdueDays;
+    if (input.overdueDays !== undefined) {
+      const parsed = validateOverdueDays(input.overdueDays);
+      if (!parsed.ok) throw new BadRequestException(parsed.message);
+      overdueDays = parsed.value;
+    }
     const { before, after } = await this.repo.setSettings({
       enabled,
       wireGauges,
+      overdueDays,
     });
     const changedFields = [
       ...(before.enabled !== after.enabled ? ['enabled'] : []),
       ...(before.wireGauges.join('\n') !== after.wireGauges.join('\n')
         ? ['wireGauges']
         : []),
+      ...(before.overdueDays !== after.overdueDays ? ['overdueDays'] : []),
     ];
     if (changedFields.length > 0) {
       await this.audit.record({
@@ -217,6 +229,13 @@ export class OrthoCaseUseCases {
       input.treatmentPlanId === undefined
         ? current.treatmentPlanId
         : input.treatmentPlanId;
+    // DX-285: aceptado el honorario, sus cargos viven en ese plan.
+    if (
+      current.fee?.acceptedAt &&
+      treatmentPlanId !== current.treatmentPlanId
+    ) {
+      throw conflict(ORTHO_BILLING_MESSAGES.feeLockedPlan);
+    }
     if (treatmentPlanId && treatmentPlanId !== current.treatmentPlanId) {
       await this.assertPlan(patientId, treatmentPlanId);
     }
@@ -414,6 +433,13 @@ export class OrthoVisitUseCases {
         });
         if (!inserted) throw conflict(ORTHO_MESSAGES.caseNotOpenForVisits);
         visitId = inserted.id;
+        // DX-285: el control n.º k realiza su cargo en el plan, en la MISMA
+        // transacción (si el control no se guarda, el cargo tampoco).
+        await this.repo.realizeVisitCharge(tx, {
+          caseId,
+          visitId: inserted.id,
+          authorId: actorId,
+        });
       },
     );
     const visit = visitId
