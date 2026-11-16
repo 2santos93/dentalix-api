@@ -2215,6 +2215,11 @@ model TreatmentPlan {
   @@index([tenantId, status, presentedAt])
   // Lado hijo de la FK a la sede de presentación (filtro por sede).
   @@index([tenantId, presentedLocationId])
+  // DX-558 (solo SQL, parcial): treatment_plans_tenant_presented_idx
+  // ("tenantId", "presentedAt") INCLUDE ("presentedLocationId",
+  // "optionGroupId", "createdById", "status") WHERE "deletedAt" IS NULL AND
+  // "splitFromPlanId" IS NULL AND "presentedAt" IS NOT NULL: el embudo de
+  // presupuestos (planes raíz presentados en un período).
   @@map("treatment_plans")
 }
 

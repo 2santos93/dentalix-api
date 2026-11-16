@@ -1,0 +1,12 @@
+-- DX-558: «Embudo de presupuestos» = planes RAÍZ (no los pendientes de una
+-- aceptación parcial, DX-417) vivos con "presentedAt" en el período. Sin este
+-- índice la consulta recorre todos los planes de la clínica aunque pida un
+-- mes: crece con la historia, no con la ventana. Parcial con el mismo
+-- predicado que la consulta y con lo que lee del plan en INCLUDE (sede de la
+-- presentación, grupo de opciones, quién lo elaboró y estado). También sirve
+-- la lista de profesionales del filtro (EXISTS por "createdById").
+-- CONCURRENTLY para no bloquear las escrituras de treatment_plans; única
+-- sentencia (no puede ir en transacción). Aditivo. Si se corta, deja un
+-- índice INVALID: el IF NOT EXISTS no lo repara; hay que `DROP INDEX
+-- CONCURRENTLY "treatment_plans_tenant_presented_idx"` y repetirla.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "treatment_plans_tenant_presented_idx" ON "treatment_plans" ("tenantId", "presentedAt") INCLUDE ("presentedLocationId", "optionGroupId", "createdById", "status") WHERE "deletedAt" IS NULL AND "splitFromPlanId" IS NULL AND "presentedAt" IS NOT NULL;
