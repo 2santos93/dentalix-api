@@ -2352,6 +2352,45 @@ export const DEMO_QUOTE_FUNNEL: readonly {
   },
 ];
 
+/**
+ * DX-567: presupuestos aceptados con citas FUTURAS en la principal que los
+ * llevan ligados, para que la «Producción agendada» de la agenda y la
+ * previsión del mes no salgan vacías en la demo (el resto de las citas de la
+ * demo no lleva tratamiento ligado y se ve como «sin tratamiento»). Pacientes
+ * de la principal (USD) sin otros planes de la demo y que no buscan los e2e
+ * (API ni web): Alejandro Fuentes Beltrán y Tomás Aguilar Reyes. La cita va
+ * el `weekday`-ésimo próximo día laborable (desde mañana) en el primer hueco
+ * libre de `minutes` (hora de la sede, 30 min) con la primera dentista.
+ */
+export const DEMO_SCHEDULED_PRODUCTION: readonly {
+  patientIndex: number;
+  weekday: number;
+  minutes: readonly number[];
+  notes: string;
+  items: readonly { code: string; tooth: string }[];
+}[] = [
+  {
+    patientIndex: 18,
+    weekday: 1,
+    minutes: [12 * 60 + 30, 10 * 60, 11 * 60, 17 * 60, 18 * 60],
+    notes: 'Resinas en 36 y 37.',
+    items: [
+      { code: 'OP-RESINA-2', tooth: '36' },
+      { code: 'OP-RESINA-1', tooth: '37' },
+    ],
+  },
+  {
+    patientIndex: 22,
+    weekday: 3,
+    minutes: [12 * 60 + 30, 10 * 60, 11 * 60, 17 * 60, 18 * 60],
+    notes: 'Endodoncia de 46 y corona provisional.',
+    items: [
+      { code: 'ENDO-MULTI', tooth: '46' },
+      { code: 'PROT-CORONA-PROV', tooth: '46' },
+    ],
+  },
+];
+
 interface DemoInventoryItem {
   location: DemoLocationKey;
   name: string;

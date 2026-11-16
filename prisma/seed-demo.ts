@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   ConflictException,
   INestApplicationContext,
   Type,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
@@ -250,6 +252,7 @@ import {
   DEMO_PAYMENT_REPORT,
   DEMO_PLAN_OPTIONS,
   DEMO_QUOTE_FUNNEL,
+  DEMO_SCHEDULED_PRODUCTION,
   DEMO_CANCELLATION,
   DEMO_MEDICAL_ALERTS,
   DEMO_PRICES,
@@ -974,6 +977,15 @@ class DemoSeeder {
       locations,
       patientIds,
       dentists,
+      catalog,
+    );
+
+    await this.createScheduledProductionExamples(
+      tenantId,
+      locations,
+      patientIds,
+      dentists,
+      receptionId,
       catalog,
     );
 
@@ -4024,6 +4036,86 @@ class DemoSeeder {
             { reason: spec.outcome.reason },
             dentistId,
           );
+        }
+      });
+    }
+  }
+
+  /**
+   * DX-567: presupuestos aceptados con una cita futura en la principal que
+   * los lleva ligados (`planItemIds`), por los casos de uso de la API. Ver
+   * `DEMO_SCHEDULED_PRODUCTION`. Si un hueco está ocupado, fuera del horario
+   * o en un festivo, el siguiente; luego, el siguiente día laborable.
+   */
+  private async createScheduledProductionExamples(
+    tenantId: string,
+    locations: Record<DemoLocationKey, string>,
+    patientIds: string[],
+    dentists: string[],
+    receptionId: string,
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const zone = DEMO_LOCATIONS.principal.timeZone;
+    // La segunda dentista rota (DX-233): quizá ese día no esté en la principal.
+    const providers = dentists.filter(
+      (_, index) => index !== DEMO_ROTATION.dentistIndex,
+    );
+    const weekdays = upcomingWeekdayOffsets(this.now, 15, zone).filter(
+      (offset) => offset > 0,
+    );
+    for (const spec of DEMO_SCHEDULED_PRODUCTION) {
+      const patientId = patientIds[spec.patientIndex];
+      await this.inTenant(tenantId, locations.principal, async () => {
+        const plan = await this.use(CreateTreatmentPlanUseCase).execute({
+          patientId,
+          currency: DEMO_LOCATIONS.principal.currency,
+          notes: spec.notes,
+          createdById: providers[0],
+        });
+        const planItemIds: string[] = [];
+        for (const item of spec.items) {
+          const added = await this.use(AddTreatmentPlanItemUseCase).execute(
+            plan.id,
+            {
+              toothNumber: item.tooth,
+              catalogItemId: catalogId(catalog, item.code),
+            },
+            { userId: providers[0], role: ClinicRole.DENTIST },
+          );
+          planItemIds.push(added.id);
+        }
+        await this.use(UpdateTreatmentPlanUseCase).execute(
+          plan.id,
+          { status: TreatmentPlanStatus.ACCEPTED },
+          { role: ClinicRole.DENTIST },
+        );
+        const create = this.use(CreateAppointmentUseCase);
+        for (const offset of weekdays.slice(spec.weekday - 1)) {
+          for (const minute of spec.minutes) {
+            for (const providerId of providers) {
+              const start = daysAgoAt(this.now, -offset, minute, zone);
+              try {
+                await create.execute({
+                  patientId,
+                  providerId,
+                  start,
+                  end: new Date(start.getTime() + 30 * 60_000),
+                  reason: 'Tratamiento del presupuesto',
+                  createdById: receptionId,
+                  planItemIds,
+                });
+                return;
+              } catch (error) {
+                if (!(
+                  error instanceof ConflictException ||
+                  error instanceof UnprocessableEntityException ||
+                  error instanceof BadRequestException
+                )) {
+                  throw error;
+                }
+              }
+            }
+          }
         }
       });
     }

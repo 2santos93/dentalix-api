@@ -47,6 +47,7 @@ import {
   DEMO_PRESCRIPTION_SETTINGS,
   DEMO_PRICE_LISTS,
   DEMO_QUOTE_FUNNEL,
+  DEMO_SCHEDULED_PRODUCTION,
   DEMO_CATALOG_CURRENCY,
   DEMO_PRICES,
   DEMO_PROFESSIONAL_LICENSES,
@@ -2467,6 +2468,41 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
       'PRICE',
     ]);
     expect(body.medianDaysToAccept).not.toBeNull();
+  });
+
+  it('DX-567: la producción agendada de la demo no sale vacía (citas futuras con tratamiento ligado y sin él)', async () => {
+    const admin = DEMO_USERS.find((u) => u.role === ClinicRole.ADMIN);
+    const login = await request(app.getHttpServer())
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .send({ email: admin?.email, password: DEMO_PASSWORD })
+      .expect(201);
+    const token = (login.body as { accessToken: string }).accessToken;
+    const today = civilDateIn(new Date(), DEMO_LOCATIONS.principal.timeZone);
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/reports/scheduled-production')
+      .query({ from: today, to: addCivilDays(today, 30) })
+      .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const body = res.body as {
+      currency: string | null;
+      totals: {
+        scheduledAmount: number | null;
+        appointments: number;
+        appointmentsWithoutItems: number;
+      };
+      byDayAndProfessional: { scheduledAmount: number | null }[];
+      forecast: { producedToDate: number | null };
+    };
+    expect(body.currency).toBe(DEMO_CATALOG_CURRENCY);
+    expect(body.totals.scheduledAmount).toBeGreaterThan(0);
+    expect(body.totals.appointmentsWithoutItems).toBeGreaterThan(0);
+    expect(
+      body.byDayAndProfessional.filter((r) => (r.scheduledAmount ?? 0) > 0)
+        .length,
+    ).toBeGreaterThanOrEqual(DEMO_SCHEDULED_PRODUCTION.length);
+    expect(body.forecast.producedToDate).not.toBeNull();
   });
 
   it('el estado de cuenta demo enseña saldo y una cuota vencida (DX-011)', async () => {
