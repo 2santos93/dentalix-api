@@ -68,10 +68,13 @@ function requiredName(value: string | undefined): string {
   return name;
 }
 
-/** Normaliza el precio a 2 decimales en texto; null si no hay. */
+/**
+ * El precio tal cual llega (la DTO ya exige un decimal ≥ 0 con hasta 2
+ * decimales): se guarda como numeric sin pasar por coma flotante.
+ */
 function priceText(value: string | null | undefined): string | null {
   if (value === null || value === undefined) return null;
-  return Number(value).toFixed(2);
+  return value.trim();
 }
 
 function changed<T extends object>(

@@ -138,6 +138,8 @@ import { CreateConsentTemplateUseCase } from '../src/modules/consents/applicatio
 import { SignPatientConsentUseCase } from '../src/modules/consents/application/use-cases/patient-consents.use-cases';
 import { CreatePrescriptionTemplateUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-templates.use-cases';
 import { ExternalOrderTemplatesUseCases } from '../src/modules/external-orders/application/external-order-templates.use-cases';
+import { LabCatalogUseCases } from '../src/modules/lab-orders/application/lab-catalog.use-cases';
+import { LabOrderUseCases } from '../src/modules/lab-orders/application/lab-orders.use-cases';
 import { IssuePrescriptionUseCase } from '../src/modules/prescriptions/application/use-cases/prescriptions.use-cases';
 import { UpdatePrescriptionSettingsUseCase } from '../src/modules/prescriptions/application/use-cases/prescription-settings.use-cases';
 import { SetRetentionExtensionUseCase } from '../src/modules/patients/application/use-cases/retention.use-cases';
@@ -216,6 +218,8 @@ import {
   DEMO_WAITLIST,
   DEMO_PERIO,
   DEMO_IMPLANTS,
+  DEMO_DENTAL_LABS,
+  DEMO_LAB_ORDERS,
   DEMO_PRESCRIPTION,
   DEMO_PRESCRIPTION_TEMPLATES,
   DEMO_EXTERNAL_ORDER_TEMPLATES,
@@ -1003,6 +1007,11 @@ class DemoSeeder {
 
     await this.inTenant(tenantId, undefined, () =>
       this.createImplants(patientIds, dentists),
+    );
+
+    // DX-017: dos laboratorios con sus servicios y tres órdenes (una atrasada).
+    await this.inTenant(tenantId, undefined, () =>
+      this.createLabOrders(ownerId, patientIds, dentists, receptionId),
     );
 
     // R13: dos pacientes con la retención de su historia ampliada, como la
@@ -4178,6 +4187,85 @@ class DemoSeeder {
         },
         dentists[spec.dentistIndex],
       );
+    }
+  }
+
+  /**
+   * DX-017: los laboratorios y sus servicios (los da de alta el ADMIN) y tres
+   * órdenes por los casos de uso de la API: la prescribe el odontólogo, la
+   * envía y la recibe recepción, la revisa el odontólogo. Sin X-Location-Id:
+   * la sede principal. La atrasada lleva la fecha prometida a mano en el
+   * pasado y queda enviada sin recibir.
+   */
+  private async createLabOrders(
+    ownerId: string,
+    patientIds: string[],
+    dentists: string[],
+    receptionId: string,
+  ): Promise<void> {
+    const admin = this.auditAs(ownerId, ClinicRole.ADMIN);
+    const reception = this.auditAs(receptionId, ClinicRole.RECEPTION);
+    const catalog = this.use(LabCatalogUseCases);
+    const orders = this.use(LabOrderUseCases);
+    const labs: { id: string; services: string[] }[] = [];
+    for (const spec of DEMO_DENTAL_LABS) {
+      const lab = await catalog.createLab(
+        {
+          name: spec.name,
+          contactName: spec.contactName,
+          phone: spec.phone,
+          email: spec.email,
+        },
+        admin,
+      );
+      const services: string[] = [];
+      for (const service of spec.services) {
+        const created = await catalog.createService(
+          lab.id,
+          {
+            name: service.name,
+            leadTimeBusinessDays: service.leadTimeBusinessDays,
+            referencePrice: service.referencePrice,
+            referenceCurrency: 'USD',
+          },
+          admin,
+        );
+        services.push(created.id);
+      }
+      labs.push({ id: lab.id, services });
+    }
+    const zone = DEMO_LOCATIONS.principal.timeZone;
+    for (const spec of DEMO_LAB_ORDERS) {
+      const dentist = this.auditAs(
+        dentists[spec.dentistIndex],
+        ClinicRole.DENTIST,
+      );
+      const lab = labs[spec.labIndex];
+      const order = await orders.create(
+        patientIds[spec.patientIndex],
+        {
+          labId: lab.id,
+          serviceId: lab.services[spec.serviceIndex],
+          description: spec.description,
+          toothNumbers: [...spec.toothNumbers],
+          shade: spec.shade,
+          material: spec.material,
+          instructions: spec.instructions,
+          dueOn:
+            spec.dueInDays === undefined
+              ? undefined
+              : civilDateIn(
+                  new Date(this.now.getTime() + spec.dueInDays * 86_400_000),
+                  zone,
+                ),
+        },
+        dentist,
+      );
+      for (const step of spec.steps) {
+        if (step === 'SEND') await orders.send(order.id, {}, reception);
+        if (step === 'RECEIVE') await orders.receive(order.id, reception);
+        if (step === 'CHECK') await orders.check(order.id, dentist);
+      }
     }
   }
 

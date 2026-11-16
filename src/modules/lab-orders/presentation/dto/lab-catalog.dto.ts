@@ -46,7 +46,6 @@ export class DentalLabServiceDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'USD',
     description: 'ISO 4217. Solo ADMIN; null para el resto.',
   })
   referenceCurrency!: string | null;
@@ -58,7 +57,7 @@ export class DentalLabDto {
   @ApiProperty({ example: 'Laboratorio Dental Caracas' }) name!: string;
   @ApiProperty({ type: String, nullable: true, example: 'Carmen Rondón' })
   contactName!: string | null;
-  @ApiProperty({ type: String, nullable: true, example: '+58 212 555 0142' })
+  @ApiProperty({ type: String, nullable: true })
   phone!: string | null;
   @ApiProperty({
     type: String,
@@ -254,7 +253,7 @@ export class CreateDentalLabServiceDto {
   })
   referencePrice?: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true, example: 'USD' })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @IsOptional()
   @IsString({ message: 'La moneda debe ser un código ISO 4217 de 3 letras' })
   @Matches(CURRENCY_PATTERN, {
@@ -297,7 +296,7 @@ export class UpdateDentalLabServiceDto {
   })
   referencePrice?: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true, example: 'USD' })
+  @ApiPropertyOptional({ type: String, nullable: true })
   @IsOptional()
   @IsString({ message: 'La moneda debe ser un código ISO 4217 de 3 letras' })
   @Matches(CURRENCY_PATTERN, {

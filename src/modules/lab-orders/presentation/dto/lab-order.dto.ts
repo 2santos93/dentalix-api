@@ -203,9 +203,13 @@ export class DueDateSuggestionDto {
 export class LabOrderPrintClinicDto {
   @ApiProperty() name!: string;
   @ApiProperty({ type: String, nullable: true }) legalName!: string | null;
-  @ApiProperty({ type: String, nullable: true, example: 'RIF' })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Nombre del identificador fiscal de la clínica',
+  })
   taxIdLabel!: string | null;
-  @ApiProperty({ type: String, nullable: true, example: 'J-12345678-9' })
+  @ApiProperty({ type: String, nullable: true })
   taxId!: string | null;
   @ApiProperty({ type: String, nullable: true }) phone!: string | null;
   @ApiProperty({ type: String, nullable: true }) email!: string | null;
@@ -241,7 +245,6 @@ export class LabOrderPrintPatientDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'Cédula V-12345678',
     description: '«{nombre del tipo} {número}» o null sin número',
   })
   document!: string | null;

@@ -11,6 +11,7 @@ import { loadLocationBusinessCalendar } from '../../../shared/locations/location
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { clinicLogoPublicUrl } from '../../../shared/storage/clinic-logo-url';
 import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
+import { amountText } from '../../../shared/money/money';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import { ageInYears } from '../../odontogram/domain/dentition';
 import {
@@ -58,7 +59,9 @@ function mapService(row: DentalLabService): DentalLabServiceView {
     labId: row.labId,
     name: row.name,
     leadTimeBusinessDays: row.leadTimeBusinessDays,
-    referencePrice: row.referencePrice ? row.referencePrice.toFixed(2) : null,
+    referencePrice: row.referencePrice
+      ? amountText(row.referencePrice.toNumber(), 2)
+      : null,
     referenceCurrency: row.referenceCurrency,
     active: row.active,
   };

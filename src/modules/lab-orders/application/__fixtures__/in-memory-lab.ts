@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { amountText } from '../../../../shared/money/money';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import type {
   DentalLabServiceView,
@@ -151,6 +152,10 @@ export class InMemoryLabRepository implements LabRepository {
       id: randomUUID(),
       labId,
       ...input,
+      referencePrice:
+        input.referencePrice === null
+          ? null
+          : amountText(Number(input.referencePrice), 2),
       active: true,
     };
     lab.services.push(service);
