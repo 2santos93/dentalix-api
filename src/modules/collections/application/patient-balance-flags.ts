@@ -67,10 +67,15 @@ export class PatientBalanceFlags {
    * llama?»). Como el importe vencido, el pendiente solo lo ven ADMIN y
    * RECEPTION (`pending` vacío para los demás). Las mismas consultas que
    * `forPatients`: la antigüedad se calcula una vez.
+   *
+   * DX-202-bis: `withAmounts` lo decide quien llama cuando el acceso no es
+   * solo del rol (la asistente con PAYMENT_REGISTER, DX-090, cobra en la
+   * salida del paciente). Sin él, la regla de siempre: OVERDUE_AMOUNT_ROLES.
    */
   async viewsForPatients(
     patientIds: readonly string[],
     role: ClinicRole | null,
+    withAmounts: boolean = role !== null && OVERDUE_AMOUNT_ROLES.includes(role),
   ): Promise<Map<string, PatientBalanceView>> {
     const out = new Map<string, PatientBalanceView>();
     const ids = [...new Set(patientIds)];
@@ -108,7 +113,6 @@ export class PatientBalanceFlags {
       ).catch(() => undefined),
     ]);
     const now = this.now();
-    const withAmounts = role !== null && OVERDUE_AMOUNT_ROLES.includes(role);
     for (const ledger of ledgers) {
       const timeZone = zoneOf(ledger.locationId);
       const aging = computePatientAging(ledger, {

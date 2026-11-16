@@ -35,6 +35,8 @@ import { BillablePlan } from '../domain/entities/billable-plan.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
+import { ExtraPermission } from '@prisma/client';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
@@ -134,6 +136,9 @@ export class AccountStatementController {
     resource: 'TREATMENT_PLAN',
     patient: { param: 'patientId' },
   })
+  // DX-202-bis: la asistente con PAYMENT_REGISTER (DX-090) ya registra abonos
+  // (`POST /treatment-plans/:id/payments`); elegir el plan es parte de cobrar.
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Get('patients/:patientId/billable-plans')
   @ApiOperation({
     summary:
@@ -150,7 +155,9 @@ export class AccountStatementController {
   @ApiParam({ name: 'patientId', format: 'uuid' })
   @ApiOkResponse({ type: [BillablePlanDto] })
   @ApiBadRequestResponse({ description: 'patientId no es UUID' })
-  @ApiForbiddenResponse({ description: 'Rol sin acceso a pagos' })
+  @ApiForbiddenResponse({
+    description: 'Rol sin acceso a pagos ni PAYMENT_REGISTER',
+  })
   @ApiNotFoundResponse({
     description:
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',

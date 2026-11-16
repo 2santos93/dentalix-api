@@ -446,6 +446,94 @@ describe('Flujo del paciente en la clínica (e2e, DX-200)', () => {
       expect((clinical.body as { balance: unknown }).balance).toBeNull();
     });
 
+    // DX-202-bis: lo pendiente de cobro hoy, no solo lo vencido; y la
+    // asistente con PAYMENT_REGISTER (DX-090) lo ve como recepción.
+    it('el saldo pendiente hoy viaja para quien cobra o tiene PAYMENT_REGISTER', async () => {
+      const appt = await book('Salida Saldo', mainId, 30);
+      const { patientId } = await raw.appointment.findUniqueOrThrow({
+        where: { id: appt.id },
+        select: { patientId: true },
+      });
+      const before = await checklist(appt.id, reception.token).expect(200);
+      expect(before.body).toMatchObject({
+        balance: { hasOverdue: false },
+        pending: [],
+      });
+
+      const catalog = await as(
+        api().post('/api/v1/catalog/items'),
+        clinic.adminToken,
+      )
+        .send({
+          code: 'DX202B',
+          kind: 'PROCEDURE',
+          labelEs: 'Limpieza DX-202-bis',
+          color: '#2A2B3C',
+          defaultPrice: 1,
+        })
+        .expect(201);
+      const plan = await as(
+        api().post(`/api/v1/patients/${patientId}/treatment-plans`),
+        clinic.adminToken,
+      )
+        // En la moneda del catálogo de la clínica (VES): otra pediría la tasa del día.
+        .send({ currency: 'VES' })
+        .expect(201);
+      const planId = (plan.body as { id: string }).id;
+      const item = await as(
+        api().post(`/api/v1/treatment-plans/${planId}/items`),
+        clinic.adminToken,
+      )
+        .send({
+          toothNumber: '36',
+          catalogItemId: (catalog.body as { id: string }).id,
+          price: 120,
+        })
+        .expect(201);
+      await as(
+        api().patch(
+          `/api/v1/treatment-plans/${planId}/items/${(item.body as { id: string }).id}`,
+        ),
+        clinic.adminToken,
+      )
+        .send({ status: 'ACCEPTED' })
+        .expect(200);
+
+      const due = await checklist(appt.id, reception.token).expect(200);
+      expect(due.body).toMatchObject({
+        balance: { hasOverdue: false },
+        pending: [{ currency: 'VES', amount: 120 }],
+      });
+
+      const plain = await checklist(appt.id, assistant.token).expect(200);
+      expect(plain.body).toMatchObject({ balance: null, pending: null });
+      await raw.clinicMembership.updateMany({
+        where: { tenantId: clinic.tenantId, userId: assistant.userId },
+        data: { extraPermissions: ['PAYMENT_REGISTER'] },
+      });
+      try {
+        const granted = await checklist(appt.id, assistant.token).expect(200);
+        expect(granted.body).toMatchObject({
+          balance: { hasOverdue: false },
+          pending: [{ currency: 'VES', amount: 120 }],
+        });
+        // Y puede elegir el plan del abono (`RecordPaymentModal`).
+        await as(
+          api().get(`/api/v1/patients/${patientId}/billable-plans`),
+          assistant.token,
+        ).expect(200);
+      } finally {
+        await raw.clinicMembership.updateMany({
+          where: { tenantId: clinic.tenantId, userId: assistant.userId },
+          data: { extraPermissions: [] },
+        });
+      }
+      await as(
+        api().get(`/api/v1/patients/${patientId}/billable-plans`),
+        assistant.token,
+      ).expect(403);
+    });
+
     it('una cita futura del paciente cuenta; las canceladas no', async () => {
       const appt = await book('Salida Futura', mainId, 120);
       const { patientId } = await raw.appointment.findUniqueOrThrow({

@@ -589,7 +589,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /appointments': EVERY_ROLE,
   'GET /appointments/:id': EVERY_ROLE,
   // DX-202: la salida del paciente; el saldo solo para los roles de cobro.
-  'GET /appointments/:id/checkout-checklist': EVERY_ROLE,
+  // DX-202-bis: el permiso no abre la ruta; con él la asistente ve el saldo.
+  'GET /appointments/:id/checkout-checklist': orPermission(
+    EVERY_ROLE,
+    'PAYMENT_REGISTER',
+  ),
   'PATCH /appointments/:id': EVERY_ROLE,
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
   // Estado de los recordatorios de la cita (DX-026): quien gestiona la agenda.
@@ -784,7 +788,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /patients/:patientId/account-statement': BILLING,
   // DX-203: estado de cuenta familiar del pagador, mismos roles.
   'GET /patients/:patientId/family-account-statement': BILLING,
-  'GET /patients/:patientId/billable-plans': BILLING,
+  // DX-202-bis: elegir el plan del abono, también con PAYMENT_REGISTER.
+  'GET /patients/:patientId/billable-plans': orPermission(
+    BILLING,
+    'PAYMENT_REGISTER',
+  ),
   // Cartera por antigüedad: loop/informes/DX-145.md. El CSV es un dato
   // personal de muchos pacientes: solo ADMIN.
   'GET /receivables/aging': BILLING,

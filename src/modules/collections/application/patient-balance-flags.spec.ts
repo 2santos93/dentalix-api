@@ -147,6 +147,15 @@ describe('PatientBalanceFlags.viewsForPatients (DX-224): saldo pendiente por mon
     }
   });
 
+  it('DX-202-bis: quien llama puede abrir los importes (la asistente con PAYMENT_REGISTER)', async () => {
+    const flags = new PatientBalanceFlags(repo, () => NOW, calculator);
+    const view = (
+      await flags.viewsForPatients(['pat-1'], ClinicRole.ASSISTANT, true)
+    ).get('pat-1');
+    expect(view?.pending).toEqual([{ currency: 'USD', amount: 100 }]);
+    expect(view?.overdue.amounts).toEqual([{ currency: 'USD', amount: 100 }]);
+  });
+
   it('un paciente sin deuda (o sin libro) trae la vista vacía', async () => {
     const empty = {
       ledgersOf: () => Promise.resolve([]),
