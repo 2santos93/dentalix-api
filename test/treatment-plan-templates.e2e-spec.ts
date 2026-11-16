@@ -649,7 +649,10 @@ describe('Plantillas de plan de tratamiento (e2e, DX-559)', () => {
         })
         .expect(200);
       const detail = await as().get(`/treatment-plans/${plan}`).expect(200);
-      const items = (detail.body as { items: Item[] }).items;
+      // GET /treatment-plans/:id no garantiza el orden de los ítems creados en un mismo INSERT.
+      const items = [...(detail.body as { items: Item[] }).items].sort(
+        (x, y) => x.visit - y.visit,
+      );
       expect(items.map((i) => [i.catalogItemId, i.visit, i.price])).toEqual([
         [endo, 1, 120],
         [post, 2, 40],
