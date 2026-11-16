@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import {
   ClinicalEntry,
   type CreatedClinicalEntryRecord,
@@ -14,6 +15,7 @@ import {
   type ClinicalEntrySettingsRepository,
 } from '../../domain/ports/clinical-entry-settings-repository.port';
 import { licenseSnapshot } from '../../domain/author-license';
+import { entryCivilDay } from '../../domain/entry-date-rules';
 
 /**
  * Repositorio de evoluciones en memoria con estado (append-only): `rows` es lo
@@ -29,6 +31,8 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
   readonly licenses = new Map<string, string>();
   /** DX-231: zona de la sede de escritura de los tests (Caracas, UTC−4). */
   writeTimeZone = 'America/Caracas';
+  /** DX-190: sede de escritura que recibe lo que cuelga de la evolución. */
+  writeLocationId = 'loc-1';
   /**
    * DX-015-bis (D18): el `recall` que recibió cada alta. Las reglas del recall
    * (crear, solo intervalo, exclusión, 422) las prueban los tests con BD.
@@ -42,7 +46,7 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
     return Promise.resolve(this.writeTimeZone);
   }
 
-  create(
+  async create(
     input: CreateClinicalEntryRepoInput,
   ): Promise<CreatedClinicalEntryRecord> {
     const row: ClinicalEntry = {
@@ -71,10 +75,19 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
         position: d.position,
       })),
     };
+    // DX-190: lo que cuelga de la evolución va antes de guardarla (misma
+    // transacción en el real): si lanza, no queda la evolución.
+    if (input.attach) {
+      await input.attach({} as Prisma.TransactionClient, {
+        id: row.id,
+        locationId: this.writeLocationId,
+        entryDay: entryCivilDay(row.entryDate, this.writeTimeZone),
+      });
+    }
     // Append-only: push a NEW row, never mutate/replace an existing one.
     this.rows.push(row);
     if (input.recall) this.recallRequests.push(input.recall);
-    return Promise.resolve({
+    return {
       ...structuredClone(row),
       recallUpdates: input.recall
         ? [
@@ -88,7 +101,7 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
             },
           ]
         : [],
-    });
+    };
   }
 
   authorLicense(userId: string): Promise<string | null> {

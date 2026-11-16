@@ -1,4 +1,4 @@
-import type { AppointmentStatus } from '@prisma/client';
+import type { AppointmentStatus, Prisma } from '@prisma/client';
 import {
   ClinicalEntry,
   type CreatedClinicalEntryRecord,
@@ -34,7 +34,31 @@ export interface CreateClinicalEntryRepoInput {
   recall?: { recallTypeId: string; intervalMonths: number };
   /** Quién escribe, para los eventos del recall (misma transacción). */
   audit?: AuditRequestContext;
+  /**
+   * DX-190: un registro estructurado que documenta esta evolución (el control
+   * de ortodoncia) y se inserta en la MISMA transacción: si falla, la
+   * evolución tampoco se guarda.
+   */
+  attach?: ClinicalEntryAttachment;
 }
+
+/** DX-190: la evolución recién insertada, para lo que cuelga de ella. */
+export interface AttachedClinicalEntry {
+  id: string;
+  locationId: string;
+  /** Día civil de la atención (`YYYY-MM-DD`, zona de su sede). */
+  entryDay: string;
+}
+
+/**
+ * DX-190: lo que se escribe con la evolución dentro de su transacción. Si
+ * lanza, se deshace todo (la evolución es inalterable: no puede quedar
+ * huérfana).
+ */
+export type ClinicalEntryAttachment = (
+  tx: Prisma.TransactionClient,
+  entry: AttachedClinicalEntry,
+) => Promise<void>;
 
 /** DX-170: lo que el alta necesita saber de la cita a la que se liga. */
 export interface ClinicalEntryAppointmentRef {

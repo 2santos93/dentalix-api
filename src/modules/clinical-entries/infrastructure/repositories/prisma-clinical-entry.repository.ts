@@ -198,14 +198,30 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
         },
       });
       const entry = mapToEntity(row, await providerNamesOf(tx, [row]));
-      if (!input.recall) return { ...entry, recallUpdates: [] };
-      // DX-015-bis (D18): el recall en la MISMA transacción; un 422 (tipo
-      // inexistente o retirado) deshace también la evolución. La base de un
-      // recall nuevo es el día civil de la evolución en la zona de su sede.
+      if (!input.recall && !input.attach)
+        return { ...entry, recallUpdates: [] };
+      // La zona de la sede decide el día civil de la evolución (recall y
+      // registros que cuelgan de ella).
       const location = await tx.location.findFirstOrThrow({
         where: { id: locationId },
         select: { id: true, timeZone: true },
       });
+      // DX-190: lo que documenta la evolución (control de ortodoncia), en la
+      // MISMA transacción: si falla, la evolución no se guarda.
+      if (input.attach) {
+        await input.attach(tx, {
+          id: row.id,
+          locationId,
+          entryDay: entryCivilDay(
+            row.entryDate,
+            requireLocationTimeZone(location),
+          ),
+        });
+      }
+      if (!input.recall) return { ...entry, recallUpdates: [] };
+      // DX-015-bis (D18): el recall en la MISMA transacción; un 422 (tipo
+      // inexistente o retirado) deshace también la evolución. La base de un
+      // recall nuevo es el día civil de la evolución en la zona de su sede.
       const recallUpdates = await recallFromClinicalEntry(tx, {
         tenantId,
         patientId: input.patientId,

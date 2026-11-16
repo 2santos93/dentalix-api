@@ -7,6 +7,7 @@ import {
 import { CLINICAL_ENTRY_REPOSITORY } from '../../domain/ports/clinical-entry-repository.port';
 import type {
   ClinicalEntryAppointmentRef,
+  ClinicalEntryAttachment,
   ClinicalEntryRepository,
 } from '../../domain/ports/clinical-entry-repository.port';
 import {
@@ -154,12 +155,17 @@ export class CreateClinicalEntryUseCase {
    * DX-540: el repositorio congela el registro profesional del autor en el
    * INSERT; si la clínica tiene el aviso activo y no lo había, la respuesta
    * lo dice (`warnings`). Nunca bloquea la firma.
+   *
+   * DX-190: `attach` escribe, en la misma transacción, el registro
+   * estructurado que documenta la evolución (el control de ortodoncia); no
+   * llega nunca del cliente.
    */
   async execute(
     patientId: string,
     input: CreateClinicalEntryInput,
     performedById: string,
     audit?: AuditRequestContext,
+    attach?: ClinicalEntryAttachment,
   ): Promise<CreatedClinicalEntry> {
     // DX-038: autoría obligatoria (la BD además exige performedById NOT NULL).
     const author = assertAuthor(performedById);
@@ -228,6 +234,7 @@ export class CreateClinicalEntryUseCase {
           }
         : undefined,
       audit,
+      attach,
     });
     return {
       ...created,

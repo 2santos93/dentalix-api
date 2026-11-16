@@ -166,7 +166,8 @@ export class PatientDuplicatesController {
       'Alguno ya está archivado o fusionado (`MERGE_PATIENT_INACTIVE`), tienen citas a la ' +
       'misma hora (`MERGE_OVERLAPPING_APPOINTMENTS`), saldos migrados del mismo lote ' +
       '(`MERGE_OPENING_BALANCE_CONFLICT`), dos compromisos de pago abiertos ' +
-      '(`MERGE_OPEN_PAYMENT_PROMISES`) o el documento elegido ya es de otro paciente.',
+      '(`MERGE_OPEN_PAYMENT_PROMISES`), dos casos de ortodoncia activos ' +
+      '(`MERGE_TWO_ACTIVE_ORTHO_CASES`) o el documento elegido ya es de otro paciente.',
   })
   merge(
     @Body() dto: MergePatientsDto,
