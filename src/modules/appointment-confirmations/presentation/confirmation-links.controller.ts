@@ -63,7 +63,7 @@ export class ConfirmationLinksController {
     summary:
       'Genera (o reenvía) el enlace de confirmación de la cita; el anterior deja de valer',
     description:
-      'DX-361: queda en la auditoría como UPDATE de APPOINTMENT (la cita), origen STAFF y `reason` CONFIRMATION_LINK_CREATED, o CONFIRMATION_LINK_RESENT si la cita ya tenía un enlace enviado. Sin el token ni la URL. DX-290: si la sede envía la anamnesis con el recordatorio y el paciente es nuevo o su anamnesis caduca el día de la cita, también emite su enlace de anamnesis (`anamnesisUrl`, para el mensaje de WhatsApp; anula el que aún esperaba respuesta) y lo audita como CREATE de MEDICAL_HISTORY_SUBMISSION (ANAMNESIS_LINK_CREATED).',
+      'DX-361: queda en la auditoría como UPDATE de APPOINTMENT (la cita), origen STAFF y `reason` CONFIRMATION_LINK_CREATED, o CONFIRMATION_LINK_RESENT si la cita ya tenía un enlace enviado. Sin el token ni la URL. DX-290: si la sede envía la anamnesis con el recordatorio y el paciente es nuevo o su anamnesis caduca el día de la cita, también emite su enlace de anamnesis (`anamnesisUrl`, para el mensaje de WhatsApp) si no tiene ya uno vivo; con uno vivo no emite otro ni lo anula (`anamnesisPending`) y lo audita como CREATE de MEDICAL_HISTORY_SUBMISSION (ANAMNESIS_LINK_CREATED).',
   })
   @ApiCreatedResponse({ type: ConfirmationLinkDto })
   async create(
@@ -103,6 +103,7 @@ export class ConfirmationLinksController {
       anamnesisUrl: anamnesis.issued
         ? buildAnamnesisUrl(this.protocol, host, anamnesis.token)
         : null,
+      anamnesisPending: !anamnesis.issued && anamnesis.reason === 'LIVE_LINK',
     };
   }
 }

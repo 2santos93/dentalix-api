@@ -52,6 +52,12 @@ export interface IssueRequestInput {
   origin: MedicalHistorySubmissionOrigin;
   createdById: string | null;
   /**
+   * DX-290: con él, el alta NO anula un enlace vivo (pendiente, sin anular y
+   * sin caducar en esta hora): lanza `LiveAnamnesisLinkError` y no escribe
+   * nada. Sin él (recepción, DX-099), el nuevo anula el anterior.
+   */
+  keepLiveLinkAt?: Date;
+  /**
    * DX-290: evento de auditoría a escribir en la MISMA transacción del alta
    * (los de recepción por la ruta propia los audita su interceptor).
    */
@@ -64,6 +70,8 @@ export interface ReminderAnamnesisFacts {
   settingEnabled: boolean;
   patientArchived: boolean;
   awaitingReview: boolean;
+  /** Enlace pendiente, sin anular y sin caducar en `now`. */
+  liveLink: boolean;
   /** Última versión o confirmación «Sin cambios hoy» (null = nunca). */
   lastReviewedAt: Date | null;
   validityMonths: number;
@@ -133,6 +141,7 @@ export interface MedicalHistorySubmissionRepository {
   loadReminderFacts(
     patientId: string,
     locationId: string,
+    now: Date,
   ): Promise<ReminderAnamnesisFacts | null>;
   /**
    * DX-290: el último envío ligado a la cita (para su panel), sin
@@ -186,6 +195,13 @@ export interface MedicalHistorySubmissionRepository {
   }): Promise<ReviewOutcome>;
   /** Anula un enlace que aún espera al paciente. */
   revoke(input: { id: string; now: Date }): Promise<ReviewOutcome>;
+}
+
+/** DX-290: el paciente ya tiene un enlace vivo y el alta pedía conservarlo. */
+export class LiveAnamnesisLinkError extends Error {
+  constructor() {
+    super('patient already has a live anamnesis link');
+  }
 }
 
 /** La política de datos cambió mientras el paciente llenaba el formulario. */

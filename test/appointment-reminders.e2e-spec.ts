@@ -730,20 +730,22 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
         origin: 'STAFF',
         status: 'PENDING_PATIENT',
       });
-      // Reenviar no deja dos enlaces vivos.
-      await as(
+      expect((res.body as { anamnesisPending: boolean }).anamnesisPending).toBe(
+        false,
+      );
+      // Reenviar no emite otro ni anula el vivo: el primero sigue valiendo.
+      const again = await as(
         api().post(`/api/v1/appointments/${id}/confirmation-link`),
         tokens[ClinicRole.RECEPTION],
       ).expect(201);
-      expect(
-        await raw.medicalHistorySubmission.count({
-          where: {
-            patientId: fresh,
-            status: 'PENDING_PATIENT',
-            revokedAt: null,
-          },
-        }),
-      ).toBe(1);
+      expect(again.body).toMatchObject({
+        anamnesisUrl: null,
+        anamnesisPending: true,
+      });
+      const live = await raw.medicalHistorySubmission.findMany({
+        where: { patientId: fresh, status: 'PENDING_PATIENT', revokedAt: null },
+      });
+      expect(live.map((r) => r.id)).toEqual([row.id]);
 
       const current = await createPatient('vigente@example.com', '29002');
       await raw.medicalHistoryVersion.create({

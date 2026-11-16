@@ -15,6 +15,7 @@ import {
   hashAnamnesisToken,
 } from '../domain/anamnesis-token';
 import {
+  LiveAnamnesisLinkError,
   MEDICAL_HISTORY_SUBMISSION_REPOSITORY,
   type MedicalHistorySubmissionRepository,
 } from '../domain/ports/medical-history-submission-repository.port';
@@ -60,9 +61,9 @@ export function anamnesisUrlFromBase(base: string, token: string): string {
  * paciente es nuevo o su anamnesis caducó el día de la cita
  * (`decideAnamnesisWithReminder`). Mismo enlace que el de recepción
  * (DX-099): un solo uso, hash en la BD, caduca a los 7 días o al inicio de
- * la cita, y emitirlo anula el que aún esperaba respuesta (un solo enlace
- * vivo por paciente). Va ligado a la cita: su panel muestra «Anamnesis
- * enviada».
+ * la cita. Si el paciente ya tiene uno vivo, NO emite otro ni lo anula
+ * (`LIVE_LINK`): el email solo recuerda que use el que se le envió. Va
+ * ligado a la cita: su panel muestra «Anamnesis enviada».
  */
 @Injectable()
 export class AnamnesisReminderLinks {
@@ -116,6 +117,7 @@ export class AnamnesisReminderLinks {
     const facts = await this.repo.loadReminderFacts(
       appointment.patientId,
       appointment.locationId,
+      now,
     );
     if (!facts) return { issued: false, reason: 'ARCHIVED' };
     const decision = decideAnamnesisWithReminder({
@@ -134,6 +136,8 @@ export class AnamnesisReminderLinks {
         tokenHash: hashAnamnesisToken(token),
         expiresAt: anamnesisLinkExpiry(now, appointment.start),
         questionnaireVersion: ANAMNESIS_QUESTIONNAIRE_VERSION,
+        // Nunca anula un enlace vivo (otro alta pudo colarse tras la lectura).
+        keepLiveLinkAt: now,
         origin: issuer.kind,
         createdById: issuer.kind === 'STAFF' ? issuer.audit.actor.userId : null,
         // Solo ids y el motivo: ni el token ni la URL van en el evento.
@@ -182,6 +186,9 @@ export class AnamnesisReminderLinks {
       // candado del paciente): el recordatorio sale igual, sin enlace.
       if (error instanceof ConflictException) {
         return { issued: false, reason: 'ARCHIVED' };
+      }
+      if (error instanceof LiveAnamnesisLinkError) {
+        return { issued: false, reason: 'LIVE_LINK' };
       }
       throw error;
     }

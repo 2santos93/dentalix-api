@@ -24,9 +24,13 @@ import {
  *    tiene publicada su política de datos (el formulario la pide antes, como
  *    en DX-099); sin política no hay qué pedirle y no se emite.
  *
- * Un enlace PENDIENTE no impide emitir otro: el token solo existe como hash
- * (no se puede reenviar el mismo), así que el nuevo ANULA el anterior en la
- * misma transacción (un solo enlace vivo por paciente, como DX-099).
+ * 6. El paciente NO tiene ya un enlace vivo (pendiente, sin anular y sin
+ *    caducar), sea de un recordatorio anterior o de recepción: el siguiente
+ *    recordatorio no emite otro ni anula el vivo (el del email de 48 h sigue
+ *    valiendo cuando sale el de 2 h); ese email solo recuerda «usa el enlace
+ *    que te enviamos». Se emite uno nuevo solo si no hay ninguno vivo (caducó,
+ *    se usó o se anuló). El alta lo vuelve a comprobar bajo el candado del
+ *    paciente.
  */
 export type AnamnesisReminderSkip =
   | 'DISABLED'
@@ -37,6 +41,8 @@ export type AnamnesisReminderSkip =
   | 'ARCHIVED'
   | 'AWAITING_REVIEW'
   | 'CURRENT'
+  /** Ya tiene un enlace vivo: no se emite otro (el email lo recuerda). */
+  | 'LIVE_LINK'
   | 'NO_POLICY';
 
 export interface AnamnesisReminderFacts {
@@ -44,6 +50,8 @@ export interface AnamnesisReminderFacts {
   patientArchived: boolean;
   /** Hay un envío del paciente en SUBMITTED (respondido, sin revisar). */
   awaitingReview: boolean;
+  /** Tiene un enlace pendiente, sin anular y sin caducar. */
+  liveLink: boolean;
   /** Última versión o confirmación «Sin cambios hoy»; null = nunca. */
   lastReviewedAt: Date | null;
   validityMonths: number;
@@ -71,6 +79,7 @@ export function decideAnamnesisWithReminder(
     facts.timeZone,
   );
   if (status === 'CURRENT') return { send: false, reason: 'CURRENT' };
+  if (facts.liveLink) return { send: false, reason: 'LIVE_LINK' };
   if (!facts.sensitiveHealthGranted && !facts.hasPrivacyPolicy) {
     return { send: false, reason: 'NO_POLICY' };
   }

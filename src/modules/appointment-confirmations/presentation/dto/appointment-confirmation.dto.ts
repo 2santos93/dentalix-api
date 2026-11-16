@@ -277,4 +277,10 @@ export class ConfirmationLinkDto {
       'DX-290: enlace de un solo uso al cuestionario de salud, para el mismo mensaje, si la sede envía la anamnesis con el recordatorio y el paciente es nuevo o su anamnesis caduca el día de la cita. Contiene el token en claro: se entrega solo aquí. null si no toca.',
   })
   anamnesisUrl!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-290: tocaba la anamnesis pero el paciente ya tiene un enlace vivo (de un recordatorio o de recepción): no se emite otro ni se anula; el mensaje puede recordarle que lo use.',
+  })
+  anamnesisPending!: boolean;
 }

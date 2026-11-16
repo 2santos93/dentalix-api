@@ -847,6 +847,23 @@ describe('SendAppointmentReminder · anamnesis con el recordatorio (DX-290)', ()
     );
   });
 
+  it('si ya tiene un enlace vivo, no se emite otro: el email solo lo recuerda', async () => {
+    const anamnesisLinks = {
+      issueFor: jest
+        .fn()
+        .mockResolvedValue({ issued: false, reason: 'LIVE_LINK' }),
+    };
+    const { repo, email, handler } = build(
+      'https://demo.dentalix.app',
+      anamnesisLinks,
+    );
+    repo.contexts.set(APPT, withSetting(true));
+    await handler.handle(payload);
+    const vars = email.enqueue.mock.calls[0][0].vars;
+    expect(vars).not.toHaveProperty('anamnesisUrl');
+    expect(vars.anamnesisPending).toBe(true);
+  });
+
   it('con el ajuste apagado no se emite nada', async () => {
     const anamnesisLinks = { issueFor: jest.fn() };
     const { repo, email, handler } = build(

@@ -63,6 +63,10 @@ export function appointmentReminder(
     kind: 'note',
     text: vars.confirmUrl ? t.noteWithLink : t.noteWithoutLink,
   });
+  // DX-290: ya tiene el enlace de un envío anterior (que sigue valiendo).
+  if (!vars.anamnesisUrl && vars.anamnesisPending) {
+    blocks.push({ kind: 'note', text: t.anamnesisPending });
+  }
   if (vars.cancellationPolicy) {
     blocks.push({
       kind: 'note',

@@ -15,6 +15,7 @@ function facts(
     settingEnabled: true,
     patientArchived: false,
     awaitingReview: false,
+    liveLink: false,
     lastReviewedAt: null,
     validityMonths: 12,
     appointmentDay: '2026-11-20',
@@ -91,6 +92,22 @@ describe('decideAnamnesisWithReminder (DX-290)', () => {
     expect(
       decideAnamnesisWithReminder(facts({ awaitingReview: true })),
     ).toEqual({ send: false, reason: 'AWAITING_REVIEW' });
+  });
+
+  it('con un enlace vivo (de un recordatorio anterior o de recepción) no emite otro', () => {
+    expect(decideAnamnesisWithReminder(facts({ liveLink: true }))).toEqual({
+      send: false,
+      reason: 'LIVE_LINK',
+    });
+    // Vigente manda antes: no hay nada que recordar.
+    expect(
+      decideAnamnesisWithReminder(
+        facts({
+          liveLink: true,
+          lastReviewedAt: new Date('2026-08-20T15:00:00Z'),
+        }),
+      ),
+    ).toEqual({ send: false, reason: 'CURRENT' });
   });
 
   it('sin autorización: solo si la clínica tiene política para pedirla', () => {

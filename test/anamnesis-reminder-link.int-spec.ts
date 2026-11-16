@@ -3,6 +3,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { AppModule } from '../src/app.module';
 import { AnamnesisReminderLinks } from '../src/modules/medical-history-submissions/application/anamnesis-reminder-links';
+import { allNoAnswers } from '../src/modules/medical-history-submissions/domain/__fixtures__/anamnesis-answers';
+import {
+  MEDICAL_HISTORY_SUBMISSION_REPOSITORY,
+  type MedicalHistorySubmissionRepository,
+} from '../src/modules/medical-history-submissions/domain/ports/medical-history-submission-repository.port';
 import { hashAnamnesisToken } from '../src/modules/medical-history-submissions/domain/anamnesis-token';
 import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
@@ -218,7 +223,11 @@ describe('DX-290 · el recordatorio lleva la anamnesis a nuevos o caducados (int
   interface Enqueued {
     outboundId: string;
     to: string;
-    vars: { anamnesisUrl?: string; guardianName?: string | null };
+    vars: {
+      anamnesisUrl?: string;
+      anamnesisPending?: boolean;
+      guardianName?: string | null;
+    };
   }
   const enqueued: Enqueued[] = [];
   async function reminderVars(appointmentId: string) {
@@ -350,12 +359,15 @@ describe('DX-290 · el recordatorio lleva la anamnesis a nuevos o caducados (int
     expect(email.vars.anamnesisUrl).toMatch(TOKEN_IN_URL);
   });
 
-  it('un segundo recordatorio no deja dos enlaces vivos: el nuevo anula el anterior', async () => {
+  it('dos recordatorios (48 h y 2 h): un solo enlace vivo y el del primero sigue valiendo', async () => {
     const patientId = await patient(clinicA);
     const start = nextStart();
     const appointmentId = await appointment(clinicA, patientId, start);
     await sendReminder(clinicA, appointmentId);
-    // Otra antelación de la misma cita (2 h antes), a su hora.
+    const [first] = await reminderVars(appointmentId);
+    const firstToken = TOKEN_IN_URL.exec(first.vars.anamnesisUrl ?? '')?.[1];
+    expect(firstToken).toBeDefined();
+    // La otra antelación de la misma cita (2 h antes), a su hora.
     clock.current = new Date(start.getTime() - 2 * HOUR);
     await run(clinicA.tenantId, () =>
       app.get(SendAppointmentReminder).handle({
@@ -366,13 +378,97 @@ describe('DX-290 · el recordatorio lleva la anamnesis a nuevos o caducados (int
     );
     const rows = await owner.medicalHistorySubmission.findMany({
       where: { patientId },
-      orderBy: { createdAt: 'asc' },
     });
-    expect(rows).toHaveLength(2);
-    expect(rows[0].status).toBe('EXPIRED');
-    expect(rows[0].revokedAt).not.toBeNull();
-    expect(rows[1].status).toBe('PENDING_PATIENT');
-    expect(rows[1].revokedAt).toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      status: 'PENDING_PATIENT',
+      revokedAt: null,
+      tokenHash: hashAnamnesisToken(firstToken ?? ''),
+    });
+    // El segundo email no trae otro enlace: recuerda usar el que tiene.
+    const [second] = await reminderVars(appointmentId);
+    expect(second).not.toBe(first);
+    expect(second.vars.anamnesisUrl).toBeUndefined();
+    expect(second.vars.anamnesisPending).toBe(true);
+  });
+
+  it('con el enlace anterior caducado (o anulado), el siguiente recordatorio emite uno nuevo', async () => {
+    const patientId = await patient(clinicA);
+    const appointmentId = await appointment(clinicA, patientId, nextStart());
+    for (const old of [
+      { expiresAt: new Date(Date.now() - HOUR), revokedAt: null },
+      { expiresAt: new Date(Date.now() + DAY), revokedAt: new Date() },
+    ]) {
+      await owner.medicalHistorySubmission.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          patientId,
+          locationId: clinicA.locationId,
+          tokenHash: hashAnamnesisToken(`viejo-${Math.random()}`),
+          questionnaireVersion: 'v',
+          origin: 'STAFF',
+          createdById: clinicA.providerId,
+          createdAt: new Date(Date.now() - 8 * DAY),
+          ...old,
+          status: old.revokedAt ? 'EXPIRED' : 'PENDING_PATIENT',
+        },
+      });
+    }
+    await sendReminder(clinicA, appointmentId);
+    const [email] = await reminderVars(appointmentId);
+    expect(email.vars.anamnesisUrl).toMatch(TOKEN_IN_URL);
+    expect(email.vars.anamnesisPending).toBeUndefined();
+    expect(
+      await owner.medicalHistorySubmission.count({
+        where: {
+          patientId,
+          status: 'PENDING_PATIENT',
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('al recibir la respuesta, ningún otro enlace del paciente queda vivo', async () => {
+    const patientId = await patient(clinicA);
+    const ids: string[] = [];
+    for (let i = 0; i < 2; i++) {
+      const row = await owner.medicalHistorySubmission.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          patientId,
+          locationId: clinicA.locationId,
+          tokenHash: hashAnamnesisToken(`par-${i}-${Math.random()}`),
+          questionnaireVersion: 'v',
+          origin: 'STAFF',
+          createdById: clinicA.providerId,
+          expiresAt: new Date(Date.now() + DAY),
+        },
+      });
+      ids.push(row.id);
+    }
+    const outcome = await run(clinicA.tenantId, () =>
+      app
+        .get<MedicalHistorySubmissionRepository>(
+          MEDICAL_HISTORY_SUBMISSION_REPOSITORY,
+        )
+        .submit({
+          id: ids[0],
+          patientId,
+          answers: allNoAnswers(),
+          now: new Date(),
+          consentPolicyVersionId: null,
+          evidence: { ipAddress: null, userAgent: null },
+          requestId: null,
+        }),
+    );
+    expect(outcome).toBe('SUBMITTED');
+    const other = await owner.medicalHistorySubmission.findUniqueOrThrow({
+      where: { id: ids[1] },
+    });
+    expect(other.status).toBe('EXPIRED');
+    expect(other.revokedAt).not.toBeNull();
   });
 
   it('un menor: el email (con el enlace) va a su responsable', async () => {

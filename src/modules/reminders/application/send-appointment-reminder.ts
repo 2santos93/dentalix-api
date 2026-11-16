@@ -214,7 +214,7 @@ export class SendAppointmentReminder {
     // caducada el día de la cita recibe su enlace (un solo uso; anula el que
     // aún esperaba respuesta). Sin host seguro no hay enlaces: tampoco este.
     // Va al mismo destinatario que el email (el responsable de un menor).
-    const anamnesisUrl = await this.anamnesisUrl(ctx, linkBase, now, signal);
+    const anamnesis = await this.anamnesisLink(ctx, linkBase, now, signal);
     // DX-497: el idioma del paciente si hay catálogo para él; si no, el de la
     // clínica, y el registro de envíos lo dice («sin traducción: ca → es»).
     // La fecha y la hora siguen el locale y la zona de la sede (DX-315).
@@ -299,7 +299,8 @@ export class SendAppointmentReminder {
             }
           : null,
         // DX-290: solo cuando lo lleva (el resto de emails, sin la clave).
-        ...(anamnesisUrl ? { anamnesisUrl } : {}),
+        ...(anamnesis.url ? { anamnesisUrl: anamnesis.url } : {}),
+        ...(anamnesis.pending ? { anamnesisPending: true } : {}),
         cancellationPolicy: reminderPolicyVars(
           ctx.cancellationPolicy,
           ctx.locationFormat,
@@ -312,14 +313,19 @@ export class SendAppointmentReminder {
     await this.finish(claim.id, outboundId, appointmentId, leadHours);
   }
 
-  private async anamnesisUrl(
+  /**
+   * `url`: el enlace recién emitido. `pending`: el paciente ya tenía uno vivo
+   * (DX-290: no se emite otro ni se anula): el email solo lo recuerda.
+   */
+  private async anamnesisLink(
     ctx: ReminderSendContext,
     linkBase: string | null,
     now: Date,
     signal?: AbortSignal,
-  ): Promise<string | null> {
+  ): Promise<{ url: string | null; pending: boolean }> {
+    const none = { url: null, pending: false };
     if (!linkBase || !this.anamnesisLinks || !ctx.settings?.sendAnamnesis) {
-      return null;
+      return none;
     }
     assertLeaseHeld(signal);
     const outcome = await this.anamnesisLinks.issueFor(
@@ -339,9 +345,14 @@ export class SendAppointmentReminder {
         appointmentId: ctx.appointment.id,
         reason: outcome.reason,
       });
-      return null;
+      return outcome.reason === 'LIVE_LINK'
+        ? { url: null, pending: true }
+        : none;
     }
-    return anamnesisUrlFromBase(linkBase, outcome.token);
+    return {
+      url: anamnesisUrlFromBase(linkBase, outcome.token),
+      pending: false,
+    };
   }
 
   private async finish(

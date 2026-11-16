@@ -120,6 +120,26 @@ describe('appointment-reminder · cuestionario de salud (DX-290)', () => {
     expect(email.text).toContain(`Fill in the health questionnaire: ${url}`);
   });
 
+  it('con un enlace vivo de antes, solo lo recuerda (sin enlace nuevo)', () => {
+    const es = renderEmail(
+      'appointment-reminder',
+      { ...vars, anamnesisPending: true },
+      brand,
+      'es',
+    );
+    expect(es.text).toContain(
+      'Si aún no completaste el cuestionario de salud, usa el enlace que te enviamos.',
+    );
+    expect(es.text).not.toContain('/anamnesis/');
+    const en = renderEmail(
+      'appointment-reminder',
+      { ...vars, anamnesisPending: true },
+      brand,
+      'en',
+    );
+    expect(en.text).toContain('please use the link we sent you');
+  });
+
   it('sin enlace, no hay bloque', () => {
     const email = renderEmail('appointment-reminder', vars, brand, 'es');
     expect(email.text).not.toContain('cuestionario de salud');

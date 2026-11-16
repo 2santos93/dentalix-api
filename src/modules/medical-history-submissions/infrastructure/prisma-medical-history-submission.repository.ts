@@ -27,6 +27,7 @@ import type {
 import {
   type AcceptInput,
   type IssueRequestInput,
+  LiveAnamnesisLinkError,
   type IssuedRequest,
   type MedicalHistorySubmissionRepository,
   OutdatedPolicyError,
@@ -98,6 +99,19 @@ function toSummary(row: SummaryRow): SubmissionSummary {
     reviewedByName: row.reviewedBy?.fullName ?? null,
     rejectReason: row.rejectReason,
     resultingVersionId: row.resultingVersionId,
+  };
+}
+
+/** DX-290: un enlace que el paciente aún puede abrir y enviar en `now`. */
+function liveLinkWhere(
+  patientId: string,
+  now: Date,
+): Prisma.MedicalHistorySubmissionWhereInput {
+  return {
+    patientId,
+    status: MedicalHistorySubmissionStatus.PENDING_PATIENT,
+    revokedAt: null,
+    expiresAt: { gt: now },
   };
 }
 
@@ -177,6 +191,7 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
   loadReminderFacts(
     patientId: string,
     locationId: string,
+    now: Date,
   ): Promise<ReminderAnamnesisFacts | null> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -187,44 +202,57 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
         select: { deletedAt: true },
       });
       if (!patient) return null;
-      const [setting, tenant, version, review, awaiting, granted, policy] =
-        await Promise.all([
-          tx.locationReminderSettings.findFirst({
-            where: { locationId },
-            select: { sendAnamnesis: true },
-          }),
-          // `tenants` es global (sin RLS): por el id del contexto.
-          tx.tenant.findUniqueOrThrow({
-            where: { id: tenantId },
-            select: { anamnesisValidityMonths: true },
-          }),
-          tx.medicalHistoryVersion.findFirst({
-            where: { patientId, deletedAt: null },
-            orderBy: { version: 'desc' },
-            select: { createdAt: true },
-          }),
-          tx.medicalHistoryReview.findFirst({
-            where: { patientId },
-            orderBy: { reviewedAt: 'desc' },
-            select: { reviewedAt: true },
-          }),
-          tx.medicalHistorySubmission.findFirst({
-            where: {
-              patientId,
-              status: MedicalHistorySubmissionStatus.SUBMITTED,
-            },
-            select: { id: true },
-          }),
-          sensitiveHealthGranted(tx, patientId),
-          tx.privacyPolicyVersion.findFirst({
-            where: { tenantId },
-            select: { id: true },
-          }),
-        ]);
+      const [
+        setting,
+        tenant,
+        version,
+        review,
+        awaiting,
+        live,
+        granted,
+        policy,
+      ] = await Promise.all([
+        tx.locationReminderSettings.findFirst({
+          where: { locationId },
+          select: { sendAnamnesis: true },
+        }),
+        // `tenants` es global (sin RLS): por el id del contexto.
+        tx.tenant.findUniqueOrThrow({
+          where: { id: tenantId },
+          select: { anamnesisValidityMonths: true },
+        }),
+        tx.medicalHistoryVersion.findFirst({
+          where: { patientId, deletedAt: null },
+          orderBy: { version: 'desc' },
+          select: { createdAt: true },
+        }),
+        tx.medicalHistoryReview.findFirst({
+          where: { patientId },
+          orderBy: { reviewedAt: 'desc' },
+          select: { reviewedAt: true },
+        }),
+        tx.medicalHistorySubmission.findFirst({
+          where: {
+            patientId,
+            status: MedicalHistorySubmissionStatus.SUBMITTED,
+          },
+          select: { id: true },
+        }),
+        tx.medicalHistorySubmission.findFirst({
+          where: liveLinkWhere(patientId, now),
+          select: { id: true },
+        }),
+        sensitiveHealthGranted(tx, patientId),
+        tx.privacyPolicyVersion.findFirst({
+          where: { tenantId },
+          select: { id: true },
+        }),
+      ]);
       return {
         settingEnabled: setting?.sendAnamnesis === true,
         patientArchived: patient.deletedAt !== null,
         awaitingReview: awaiting !== null,
+        liveLink: live !== null,
         // Misma regla que la agenda (DX-247): la más reciente entre la
         // versión vigente y la última confirmación «Sin cambios hoy».
         lastReviewedAt: version
@@ -299,6 +327,17 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
       // DX-476: primero el paciente vivo (el orden de archivar), 409 si ya
       // está archivado: nunca un enlace vivo de un paciente archivado.
       await lockLivePatientOrConflict(tx, input.patientId);
+      // DX-290: dos altas del mismo paciente a la vez (dos recordatorios,
+      // recordatorio y recepción) se serializan: la segunda ve el enlace de
+      // la primera.
+      await lockPatientAnamnesis(tx, tenantId, input.patientId);
+      if (input.keepLiveLinkAt) {
+        const live = await tx.medicalHistorySubmission.findFirst({
+          where: liveLinkWhere(input.patientId, input.keepLiveLinkAt),
+          select: { id: true },
+        });
+        if (live) throw new LiveAnamnesisLinkError();
+      }
       const locationId =
         input.locationId ?? (await this.tenantContext.writeLocationId(tx));
       // Un solo enlace vivo por paciente: emitir otro anula los que aún
@@ -488,6 +527,19 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
         },
       });
       if (count === 0) return 'GONE';
+      // DX-290: respondida la anamnesis, ningún otro enlace del paciente
+      // sigue vivo (no debería haberlo: uno solo por paciente).
+      await tx.medicalHistorySubmission.updateMany({
+        where: {
+          patientId: input.patientId,
+          id: { not: input.id },
+          status: MedicalHistorySubmissionStatus.PENDING_PATIENT,
+        },
+        data: {
+          status: MedicalHistorySubmissionStatus.EXPIRED,
+          revokedAt: input.now,
+        },
+      });
 
       const audit = {
         tenantId,
