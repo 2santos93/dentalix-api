@@ -345,7 +345,6 @@ export class QuoteFunnelReportDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'USD',
     description:
       'Moneda del catálogo de la clínica: la de todos los importes. null = no se resuelve (aviso NO_CATALOG_CURRENCY; importes null)',
   })
@@ -527,7 +526,6 @@ export class QuoteFunnelPresentationsDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'USD',
     description: 'Moneda de los importes (la del catálogo)',
   })
   currency!: string | null;
