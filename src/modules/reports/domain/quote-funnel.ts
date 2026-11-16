@@ -107,8 +107,8 @@ export const QUOTE_FUNNEL_DEFINITIONS: Readonly<
     key: 'ACCEPTED',
     label: 'Aceptados',
     howItIsCalculated: [
-      'Presentaciones con alguna opción aceptada (o ya completada), en cualquier fecha hasta hoy.',
-      'Importe: lo aceptado. Una aceptación parcial cuenta entera por número y solo lo aceptado por importe; si lo pendiente se acepta después, se suma entonces.',
+      'Presentaciones con alguna opción que el paciente aceptó, en cualquier fecha hasta hoy, aunque después se completara o se cancelara: un aceptado y luego cancelado sigue contando aquí, y la caída se ve en los pasos siguientes.',
+      'Importe: lo aceptado (los procedimientos vivos de las opciones aceptadas). Una aceptación parcial cuenta entera por número y solo lo aceptado por importe; si lo pendiente se acepta después, se suma entonces.',
     ],
   },
   SCHEDULED: {
@@ -156,8 +156,8 @@ export const QUOTE_FUNNEL_DEFINITIONS: Readonly<
     label: 'Lo no aceptado',
     howItIsCalculated: [
       'Pendientes: alguna opción sigue presentada, esperando respuesta.',
-      'Rechazados: todas las opciones se rechazaron o se cancelaron, y al menos una la rechazó el paciente.',
-      'Cancelados: el resto (la clínica las canceló).',
+      'Rechazados: ninguna opción se aceptó, todas se rechazaron o se cancelaron, y al menos una la rechazó el paciente.',
+      'Cancelados: el resto (la clínica las canceló sin que se aceptaran).',
     ],
   },
   REJECTION_REASONS: {

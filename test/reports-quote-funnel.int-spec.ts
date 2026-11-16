@@ -35,6 +35,7 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const MONTH = {
+  mar: { from: '2026-03-01', to: '2026-03-31' },
   apr: { from: '2026-04-01', to: '2026-04-30' },
   may: { from: '2026-05-01', to: '2026-05-31' },
   jun: { from: '2026-06-01', to: '2026-06-30' },
@@ -338,6 +339,37 @@ describe('Embudo de presupuestos en la BD (DX-558, int)', () => {
       acceptedAt: caracas('2026-06-15', '15:00'),
       locationId: null,
       items: [{ price: 10, status: 'ACCEPTED' }],
+    });
+
+    // Marzo: la opción B se aceptó (la A pasó a OTHER_OPTION_ACCEPTED) y
+    // después la clínica la canceló: se aceptó alguna vez, cuenta como
+    // aceptada. Y un plan suelto aceptado y cancelado, con un ítem realizado.
+    const gm = await plan(a, {
+      status: 'REJECTED',
+      presentedAt: caracas('2026-03-05'),
+      rejectedAt: caracas('2026-03-08'),
+      rejectionReason: 'OTHER_OPTION_ACCEPTED',
+      items: [{ price: 900 }],
+    });
+    await raw.treatmentPlan.update({
+      where: { id: gm.id },
+      data: { optionGroupId: gm.id },
+    });
+    await plan(a, {
+      status: 'CANCELLED',
+      presentedAt: caracas('2026-03-05'),
+      acceptedAt: caracas('2026-03-08'),
+      optionGroupId: gm.id,
+      items: [{ price: 400, status: 'ACCEPTED' }],
+    });
+    await plan(a, {
+      status: 'CANCELLED',
+      presentedAt: caracas('2026-03-10'),
+      acceptedAt: caracas('2026-03-11'),
+      items: [
+        { price: 150, status: 'DONE' },
+        { price: 50, status: 'ACCEPTED' },
+      ],
     });
 
     // Corte del día civil: 30/04 23:30 en Caracas es de abril (01/05 en UTC).
@@ -665,6 +697,21 @@ describe('Embudo de presupuestos en la BD (DX-558, int)', () => {
     const main = await report(a, MONTH.jun, { locationId: a.main });
     // Con una sede elegida, lo presentado sin sede no entra.
     expect(step(main, 'PRESENTED')).toMatchObject({ count: 2, amount: 400 });
+  });
+
+  it('aceptado y luego cancelado cuenta como aceptado (se aceptó alguna vez); la caída se ve después', async () => {
+    const r = await report(a, MONTH.mar);
+    expect(step(r, 'PRESENTED')).toMatchObject({ count: 2, amount: 900 + 200 });
+    expect(step(r, 'ACCEPTED')).toMatchObject({ count: 2, amount: 400 + 200 });
+    expect(step(r, 'DONE')).toMatchObject({ count: 1, amount: 150 });
+    expect(r.outcomes).toEqual({
+      pending: { count: 0, amount: 0 },
+      rejected: { count: 0, amount: 0 },
+      cancelled: { count: 0, amount: 0 },
+    });
+    expect(r.rejectionReasons).toEqual([]);
+    // 3 días y 1 día: mediana 2.
+    expect(r.medianDaysToAccept).toBe(2);
   });
 
   it('el período es civil en la zona de la sede', async () => {

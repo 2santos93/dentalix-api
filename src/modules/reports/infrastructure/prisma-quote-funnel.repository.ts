@@ -339,6 +339,12 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
              AND i."referenceRateTo" > 0
               THEN ${amount} * i."referenceRateFrom" / i."referenceRateTo"
           END)`;
+    // «Aceptado» = se aceptó alguna vez (DX-558): `acceptedAt` lo escribe
+    // toda aceptación (`acceptPlanInTx` y, si falta, el trigger
+    // dx256_plan_visits_guard; DX-256 lo rellenó en los ACCEPTED/COMPLETED
+    // anteriores) y cancelar no lo borra, así que un aceptado y luego
+    // cancelado sigue contando; los pasos siguientes enseñan la caída.
+    const accepted = Prisma.sql`(ch."acceptedAt" IS NOT NULL)`;
     const firstOf = (column: string) =>
       Prisma.raw(
         `(array_agg(o."${column}" ORDER BY o."rootPresentedAt", o."rootId"))[1]`,
@@ -394,11 +400,11 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
       ),
       "lines" AS (
         SELECT ch.*, i."id" AS "itemId", i."status" AS "itemStatus",
-               ch."status" IN ('ACCEPTED', 'COMPLETED') AS "planAccepted",
+               ${accepted} AS "planAccepted",
                ${toCatalog(Prisma.sql`(i."price" - i."discount")`)} AS "amount",
                al."inPlan" AS "allocatedInPlan",
                ${toCatalog(Prisma.sql`al."inPlan"`)} AS "allocated",
-               (ch."status" IN ('ACCEPTED', 'COMPLETED')
+               (${accepted}
                 AND (i."status" = 'DONE' OR EXISTS (
                   SELECT 1 FROM "appointment_plan_items" l
                     JOIN "appointments" a
@@ -422,7 +428,7 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
           LEFT JOIN LATERAL (
             SELECT sum(pa."amount") AS "inPlan"
               FROM "payment_allocations" pa
-             WHERE ch."status" IN ('ACCEPTED', 'COMPLETED')
+             WHERE ${accepted}
                AND pa."tenantId" = ${t} AND pa."treatmentPlanItemId" = i."id"
           ) al ON TRUE
       ),
