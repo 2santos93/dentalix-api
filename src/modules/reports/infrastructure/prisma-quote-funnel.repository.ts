@@ -251,7 +251,15 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
       async (ids) =>
         (
           await tx.treatmentPlan.findFirst({
-            where: { tenantId, presentedLocationId: { in: ids } },
+            // El predicado del índice: un plan borrado, un pendiente o uno
+            // sin presentar no hacen de una sede sin zona un 409 perpetuo.
+            where: {
+              tenantId,
+              presentedLocationId: { in: ids },
+              deletedAt: null,
+              splitFromPlanId: null,
+              presentedAt: { not: null },
+            },
             select: { presentedLocationId: true },
           })
         )?.presentedLocationId,
@@ -344,10 +352,10 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
     // dx256_plan_visits_guard; DX-256 lo rellenó en los ACCEPTED/COMPLETED
     // anteriores) y cancelar no lo borra, así que un aceptado y luego
     // cancelado sigue contando; los pasos siguientes enseñan la caída.
-    const accepted = Prisma.sql`(ch."acceptedAt" IS NOT NULL)`;
+    const accepted = Prisma.sql`(ch."acceptedAt" IS NOT NULL AND NOT ch."planDeleted")`;
     const firstOf = (column: string) =>
       Prisma.raw(
-        `(array_agg(o."${column}" ORDER BY o."rootPresentedAt", o."rootId"))[1]`,
+        `(array_agg(o."${column}" ORDER BY o."rootPresentedAt", o."rootId") FILTER (WHERE o."rootPresented"))[1]`,
       );
     return Prisma.sql`
       "cand" AS (
@@ -367,21 +375,32 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
       "roots" AS (
         SELECT c.*, c."id" AS "g" FROM "cand" c WHERE c."optionGroupId" IS NULL
         UNION ALL
+        -- Todas las opciones raíz vivas del grupo, también las que nunca se
+        -- presentaron (una alternativa en borrador aceptada sin presentar,
+        -- DRAFT → ACCEPTED): cuentan desde «aceptado»; fecha, sede, autor,
+        -- nº de opciones y lo presentado son solo de las presentadas.
         SELECT p."id", p."optionGroupId", p."patientId", p."status",
                p."currency", p."acceptedAt", p."presentedAt",
                p."presentedLocationId", p."createdById", p."rejectedAt",
                p."rejectionReason", p."optionGroupId" AS "g"
           FROM (SELECT DISTINCT c."optionGroupId" FROM "cand" c
                  WHERE c."optionGroupId" IS NOT NULL) og
+          -- Un grupo que abrió un PENDIENTE de una aceptación parcial (sus
+          -- alternativas, DX-040 sobre DX-417) no es una presentación: es
+          -- parte de la cadena del presupuesto original.
+          JOIN "treatment_plans" op
+            ON op."tenantId" = ${t} AND op."id" = og."optionGroupId"
+           AND op."splitFromPlanId" IS NULL
           JOIN "treatment_plans" p
             ON p."tenantId" = ${t} AND p."optionGroupId" = og."optionGroupId"
          WHERE p."deletedAt" IS NULL
            AND p."splitFromPlanId" IS NULL
-           AND p."presentedAt" IS NOT NULL
       ),
       "chain" AS (
         SELECT r."g", r."id" AS "rootId", r."id" AS "planId", r."status",
-               r."currency", r."acceptedAt", r."patientId",
+               r."currency", r."acceptedAt", FALSE AS "planDeleted",
+               FALSE AS "viaSplit", FALSE AS "alternative", r."patientId",
+               r."presentedAt" IS NOT NULL AS "rootPresented",
                r."status" AS "rootStatus", r."presentedAt" AS "rootPresentedAt",
                r."presentedLocationId" AS "rootLocationId",
                r."createdById" AS "rootCreatedById",
@@ -390,13 +409,50 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
           FROM "roots" r
         UNION ALL
         SELECT c."g", c."rootId", p."id", p."status", p."currency",
-               p."acceptedAt", c."patientId", c."rootStatus",
+               p."acceptedAt", p."deletedAt" IS NOT NULL, TRUE, FALSE,
+               c."patientId",
+               c."rootPresented", c."rootStatus",
                c."rootPresentedAt", c."rootLocationId", c."rootCreatedById",
                c."rootRejectedAt", c."rootReason"
           FROM "chain" c
+          -- Los pendientes de una aceptación parcial (DX-417), también los
+          -- BORRADOS: la cadena los atraviesa (sus descendientes vivos
+          -- siguen contando) pero no suma lo suyo.
           JOIN "treatment_plans" p
             ON p."tenantId" = ${t} AND p."splitFromPlanId" = c."planId"
-         WHERE p."deletedAt" IS NULL
+      ),
+      -- Las alternativas de un pendiente (DX-040 sobre DX-417) y sus propios
+      -- pendientes: parte de la presentación original, pero solo desde
+      -- «aceptado» (no suman a lo presentado ni son raíz).
+      "altChain" AS (
+        SELECT c."g", c."rootId", a."id" AS "planId", a."status",
+               a."currency", a."acceptedAt",
+               a."deletedAt" IS NOT NULL AS "planDeleted", FALSE AS "viaSplit",
+               TRUE AS "alternative", c."patientId", c."rootPresented",
+               c."rootStatus", c."rootPresentedAt", c."rootLocationId",
+               c."rootCreatedById", c."rootRejectedAt", c."rootReason"
+          FROM "chain" c
+          -- Por el índice (tenantId, optionGroupId) de cada pendiente (la
+          -- barrera OFFSET 0, como con los ítems: sin ella se lee la tabla).
+          CROSS JOIN LATERAL (
+            SELECT x.* FROM "treatment_plans" x
+             WHERE x."tenantId" = ${t} AND x."optionGroupId" = c."planId"
+               AND x."id" <> c."planId" AND x."splitFromPlanId" IS NULL
+            OFFSET 0
+          ) a
+         WHERE c."viaSplit"
+        UNION ALL
+        SELECT c."g", c."rootId", p."id", p."status", p."currency",
+               p."acceptedAt", p."deletedAt" IS NOT NULL, TRUE, TRUE,
+               c."patientId", c."rootPresented", c."rootStatus",
+               c."rootPresentedAt", c."rootLocationId", c."rootCreatedById",
+               c."rootRejectedAt", c."rootReason"
+          FROM "altChain" c
+          JOIN "treatment_plans" p
+            ON p."tenantId" = ${t} AND p."splitFromPlanId" = c."planId"
+      ),
+      "fullChain" AS (
+        SELECT * FROM "chain" UNION ALL SELECT * FROM "altChain"
       ),
       "lines" AS (
         SELECT ch.*, i."id" AS "itemId", i."status" AS "itemStatus",
@@ -412,14 +468,15 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
                    WHERE l."tenantId" = ${t} AND l."planItemId" = i."id"
                      AND l."deletedAt" IS NULL AND a."deletedAt" IS NULL)))
                  AS "scheduled"
-          FROM "chain" ch
+          FROM "fullChain" ch
           -- Los ítems de CADA plan de la cadena por el índice parcial de
           -- ítems vivos (tenantId, planId): las filas de una CTE se estiman a
           -- ciegas y, sin la barrera (OFFSET 0), el planificador prefiere
           -- leer todos los ítems de la clínica (crece con la historia).
           LEFT JOIN LATERAL (
             SELECT it.* FROM "treatment_plan_items" it
-             WHERE it."tenantId" = ${t} AND it."planId" = ch."planId"
+             WHERE NOT ch."planDeleted"
+               AND it."tenantId" = ${t} AND it."planId" = ch."planId"
                AND it."deletedAt" IS NULL
             OFFSET 0
           ) i ON TRUE
@@ -433,11 +490,16 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
           ) al ON TRUE
       ),
       "byOption" AS (
-        SELECT l."g", l."rootId", l."patientId", l."rootStatus",
-               l."rootPresentedAt", l."rootLocationId", l."rootCreatedById",
-               l."rootRejectedAt", l."rootReason",
-               coalesce(sum(l."amount"), 0) AS "total",
-               bool_or(l."itemId" IS NOT NULL AND l."amount" IS NULL) AS "missingRate",
+        SELECT l."g", l."rootId", l."patientId", l."rootPresented",
+               l."rootStatus", l."rootPresentedAt", l."rootLocationId",
+               l."rootCreatedById", l."rootRejectedAt", l."rootReason",
+               -- Lo presentado de la opción: su cadena sin las alternativas
+               -- de un pendiente.
+               coalesce(sum(l."amount") FILTER (WHERE NOT l."alternative"), 0) AS "total",
+               bool_or(l."itemId" IS NOT NULL AND l."amount" IS NULL
+                 AND NOT l."alternative") AS "missingRate",
+               bool_or(l."itemId" IS NOT NULL AND l."amount" IS NULL
+                 AND l."planAccepted") AS "missingAcceptedRate",
                bool_or(l."planAccepted") AS "accepted",
                min(l."acceptedAt") FILTER (WHERE l."planAccepted") AS "acceptedAt",
                sum(l."amount") FILTER (WHERE l."planAccepted") AS "acceptedAmount",
@@ -449,9 +511,9 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
                bool_or(l."planAccepted" AND l."allocatedInPlan" > 0) AS "collected",
                sum(l."allocated") FILTER (WHERE l."planAccepted") AS "collectedAmount"
           FROM "lines" l
-         GROUP BY l."g", l."rootId", l."patientId", l."rootStatus",
-                  l."rootPresentedAt", l."rootLocationId", l."rootCreatedById",
-                  l."rootRejectedAt", l."rootReason"
+         GROUP BY l."g", l."rootId", l."patientId", l."rootPresented",
+                  l."rootStatus", l."rootPresentedAt", l."rootLocationId",
+                  l."rootCreatedById", l."rootRejectedAt", l."rootReason"
       ),
       "byGroup" AS (
         SELECT o."g",
@@ -460,10 +522,14 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
                min(o."rootPresentedAt") AS "presentedAt",
                ${firstOf('rootLocationId')} AS "presentedLocationId",
                ${firstOf('rootCreatedById')} AS "createdById",
-               count(*)::int AS "optionCount",
+               (count(*) FILTER (WHERE o."rootPresented"))::int AS "optionCount",
+               -- Sin tasa: lo que cuenta de cada opción (todo lo presentado;
+               -- de una no presentada, solo lo aceptado).
                (${currency !== null}::boolean
-                 AND NOT bool_or(coalesce(o."missingRate", FALSE))) AS "withRate",
-               max(o."total") AS "presentedAmount",
+                 AND NOT bool_or(coalesce(CASE WHEN o."rootPresented"
+                   THEN o."missingRate" OR o."missingAcceptedRate"
+                   ELSE o."missingAcceptedRate" END, FALSE))) AS "withRate",
+               max(o."total") FILTER (WHERE o."rootPresented") AS "presentedAmount",
                bool_or(o."accepted") AS "accepted",
                min(o."acceptedAt") AS "acceptedAt",
                coalesce(sum(o."acceptedAmount"), 0) AS "acceptedAmount",
@@ -473,13 +539,13 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
                coalesce(sum(o."doneAmount"), 0) AS "doneAmount",
                bool_or(o."collected") AS "collected",
                coalesce(sum(o."collectedAmount"), 0) AS "collectedAmount",
-               bool_or(o."rootStatus" = 'PRESENTED') AS "pending",
-               bool_or(o."rootStatus" = 'REJECTED'
+               bool_or(o."rootPresented" AND o."rootStatus" = 'PRESENTED') AS "pending",
+               bool_or(o."rootPresented" AND o."rootStatus" = 'REJECTED'
                  AND o."rootReason" IS DISTINCT FROM 'OTHER_OPTION_ACCEPTED')
                  AS "rejected",
                (array_agg(o."rootReason"::text
                   ORDER BY o."rootRejectedAt" DESC NULLS LAST, o."rootId")
-                  FILTER (WHERE o."rootStatus" = 'REJECTED'
+                  FILTER (WHERE o."rootPresented" AND o."rootStatus" = 'REJECTED'
                     AND o."rootReason" IS DISTINCT FROM 'OTHER_OPTION_ACCEPTED'))[1]
                  AS "lastReason"
           FROM "byOption" o
@@ -632,7 +698,8 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
           SELECT f.*,
                  -- Los planes de la presentación, solo de la página.
                  (SELECT array_agg(DISTINCT ch."planId")
-                    FROM "chain" ch WHERE ch."g" = f."groupId") AS "planIds",
+                    FROM "fullChain" ch
+                   WHERE ch."g" = f."groupId" AND NOT ch."planDeleted") AS "planIds",
                  -- Un paciente eliminado no se nombra ni se enlaza.
                  pt."id" AS "patientId",
                  btrim(pt."firstName" || ' ' || pt."lastName") AS "patientName",

@@ -35,6 +35,10 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const MONTH = {
+  nov25: { from: '2025-11-01', to: '2025-11-30' },
+  dec25: { from: '2025-12-01', to: '2025-12-31' },
+  jan: { from: '2026-01-01', to: '2026-01-31' },
+  feb: { from: '2026-02-01', to: '2026-02-28' },
   mar: { from: '2026-03-01', to: '2026-03-31' },
   apr: { from: '2026-04-01', to: '2026-04-30' },
   may: { from: '2026-05-01', to: '2026-05-31' },
@@ -371,6 +375,95 @@ describe('Embudo de presupuestos en la BD (DX-558, int)', () => {
         { price: 50, status: 'ACCEPTED' },
       ],
     });
+
+    // Nov. 2025: alternativa C creada desde el PENDIENTE P de una aceptación
+    // parcial (P abre el grupo de C) y aceptada: no es otra presentación;
+    // cuenta desde «aceptado», no en lo presentado.
+    const nr = await plan(a, {
+      status: 'ACCEPTED',
+      presentedAt: caracas('2025-11-05'),
+      acceptedAt: caracas('2025-11-06'),
+      items: [{ price: 100, status: 'ACCEPTED' }],
+    });
+    const np = await plan(a, {
+      status: 'REJECTED',
+      presentedAt: caracas('2025-11-05'),
+      rejectedAt: caracas('2025-11-09'),
+      rejectionReason: 'OTHER_OPTION_ACCEPTED',
+      splitFromPlanId: nr.id,
+      items: [{ price: 500 }],
+    });
+    await raw.treatmentPlan.update({
+      where: { id: np.id },
+      data: { optionGroupId: np.id },
+    });
+    await plan(a, {
+      status: 'ACCEPTED',
+      presentedAt: caracas('2025-11-08'),
+      acceptedAt: caracas('2025-11-09'),
+      optionGroupId: np.id,
+      items: [{ price: 200, status: 'ACCEPTED' }],
+    });
+
+    // Dic. 2025: la alternativa B se creó en borrador y se aceptó SIN
+    // presentarse (DRAFT → ACCEPTED); la A presentada pasó a
+    // OTHER_OPTION_ACCEPTED.
+    const da = await plan(a, {
+      status: 'REJECTED',
+      presentedAt: caracas('2025-12-03'),
+      rejectedAt: caracas('2025-12-06'),
+      rejectionReason: 'OTHER_OPTION_ACCEPTED',
+      items: [{ price: 800 }],
+    });
+    await raw.treatmentPlan.update({
+      where: { id: da.id },
+      data: { optionGroupId: da.id },
+    });
+    await plan(a, {
+      status: 'ACCEPTED',
+      presentedAt: null,
+      locationId: null,
+      acceptedAt: caracas('2025-12-06'),
+      optionGroupId: da.id,
+      items: [{ price: 300, status: 'ACCEPTED' }],
+    });
+
+    // Ene. 2026: un pendiente BORRADO a mitad de la cadena (R → P1 borrado →
+    // P2 vivo): se atraviesa, P2 suma y P1 no.
+    const jr = await plan(a, {
+      status: 'ACCEPTED',
+      presentedAt: caracas('2026-01-10'),
+      acceptedAt: caracas('2026-01-11'),
+      items: [{ price: 100, status: 'ACCEPTED' }],
+    });
+    const jp1 = await plan(a, {
+      status: 'ACCEPTED',
+      presentedAt: caracas('2026-01-10'),
+      acceptedAt: caracas('2026-01-12'),
+      splitFromPlanId: jr.id,
+      deletedAt: caracas('2026-01-13'),
+      items: [{ price: 200, status: 'ACCEPTED' }],
+    });
+    await plan(a, {
+      status: 'PRESENTED',
+      presentedAt: caracas('2026-01-10'),
+      splitFromPlanId: jp1.id,
+      items: [{ price: 300 }],
+    });
+
+    // Feb. 2026: un ítem BORRADO de un plan vivo aceptado, con cita e
+    // imputación: no suma ni agenda ni cobra.
+    const fb = await plan(a, {
+      status: 'ACCEPTED',
+      presentedAt: caracas('2026-02-10'),
+      acceptedAt: caracas('2026-02-11'),
+      items: [
+        { price: 100, status: 'ACCEPTED' },
+        { price: 999, status: 'ACCEPTED', deletedAt: caracas('2026-02-12') },
+      ],
+    });
+    await scheduleItem(a, fb.items[1]);
+    await allocate(a, fb.id, fb.items[1], 500);
 
     // Corte del día civil: 30/04 23:30 en Caracas es de abril (01/05 en UTC).
     await plan(a, {
@@ -712,6 +805,63 @@ describe('Embudo de presupuestos en la BD (DX-558, int)', () => {
     expect(r.rejectionReasons).toEqual([]);
     // 3 días y 1 día: mediana 2.
     expect(r.medianDaysToAccept).toBe(2);
+  });
+
+  it('alternativa aceptada sin presentar (DRAFT → ACCEPTED): la presentación cuenta como aceptada', async () => {
+    const r = await report(a, MONTH.dec25);
+    expect(step(r, 'PRESENTED')).toMatchObject({ count: 1, amount: 800 });
+    expect(step(r, 'ACCEPTED')).toMatchObject({ count: 1, amount: 300 });
+    expect(r.outcomes.cancelled.count).toBe(0);
+    expect(r.medianDaysToAccept).toBe(3);
+    const detail = await context.run(a.tenantId, () =>
+      useCase.presentations({
+        ...MONTH.dec25,
+        actor: admin(a),
+        allowedLocationIds: 'ALL',
+        step: 'ACCEPTED',
+      }),
+    );
+    expect(detail.items).toEqual([
+      expect.objectContaining({
+        optionCount: 1,
+        presentedAmount: 800,
+        acceptedAmount: 300,
+        outcome: 'ACCEPTED',
+        locationId: a.main,
+      }),
+    ]);
+    expect(detail.items[0].planIds).toHaveLength(2);
+  });
+
+  it('alternativa de un pendiente (DX-417): misma presentación; cuenta desde aceptado, no en lo presentado', async () => {
+    const r = await report(a, MONTH.nov25);
+    expect(step(r, 'PRESENTED')).toMatchObject({ count: 1, amount: 600 });
+    expect(step(r, 'ACCEPTED')).toMatchObject({ count: 1, amount: 300 });
+    expect(r.outcomes.rejected.count).toBe(0);
+  });
+
+  it('pendiente borrado a mitad de la cadena: se atraviesa y solo suma lo vivo', async () => {
+    const r = await report(a, MONTH.jan);
+    expect(step(r, 'PRESENTED')).toMatchObject({ count: 1, amount: 400 });
+    expect(step(r, 'ACCEPTED')).toMatchObject({ count: 1, amount: 100 });
+    const detail = await context.run(a.tenantId, () =>
+      useCase.presentations({
+        ...MONTH.jan,
+        actor: admin(a),
+        allowedLocationIds: 'ALL',
+        step: 'PRESENTED',
+      }),
+    );
+    // El borrado no se lista.
+    expect(detail.items[0].planIds).toHaveLength(2);
+  });
+
+  it('ítem borrado de un plan vivo, con cita e imputación: ni suma, ni agenda, ni cobra', async () => {
+    const r = await report(a, MONTH.feb);
+    expect(step(r, 'PRESENTED')).toMatchObject({ count: 1, amount: 100 });
+    expect(step(r, 'ACCEPTED')).toMatchObject({ count: 1, amount: 100 });
+    expect(step(r, 'SCHEDULED')).toMatchObject({ count: 0, amount: 0 });
+    expect(step(r, 'COLLECTED')).toMatchObject({ count: 0, amount: 0 });
   });
 
   it('el período es civil en la zona de la sede', async () => {

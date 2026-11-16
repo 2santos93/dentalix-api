@@ -99,7 +99,7 @@ export const QUOTE_FUNNEL_DEFINITIONS: Readonly<
       'Una presentación es un presupuesto presentado al paciente en el período. Las opciones A/B de un mismo presupuesto cuentan una sola vez.',
       'Su fecha es la de la primera presentación, en el día civil de la sede donde se presentó.',
       'Importe: el de la opción más amplia (la de mayor total). Si el paciente elige una opción más barata, la tasa por importe lo refleja.',
-      'Una aceptación parcial no crea otra presentación: lo que quedó pendiente sigue siendo parte del presupuesto original.',
+      'Una aceptación parcial no crea otra presentación: lo que quedó pendiente sigue siendo parte del presupuesto original, también las alternativas que se crearon a partir de ese pendiente (estas cuentan desde «Aceptados», no en lo presentado).',
       'Los presupuestos que se aceptaron sin presentarse antes no entran en el embudo.',
     ],
   },
@@ -107,7 +107,7 @@ export const QUOTE_FUNNEL_DEFINITIONS: Readonly<
     key: 'ACCEPTED',
     label: 'Aceptados',
     howItIsCalculated: [
-      'Presentaciones con alguna opción que el paciente aceptó, en cualquier fecha hasta hoy, aunque después se completara o se cancelara: un aceptado y luego cancelado sigue contando aquí, y la caída se ve en los pasos siguientes.',
+      'Presentaciones con alguna opción que el paciente aceptó (también una alternativa aceptada sin presentarla antes), en cualquier fecha hasta hoy, aunque después se completara o se cancelara: un aceptado y luego cancelado sigue contando aquí, y la caída se ve en los pasos siguientes.',
       'Importe: lo aceptado (los procedimientos vivos de las opciones aceptadas). Una aceptación parcial cuenta entera por número y solo lo aceptado por importe; si lo pendiente se acepta después, se suma entonces.',
     ],
   },
@@ -133,6 +133,7 @@ export const QUOTE_FUNNEL_DEFINITIONS: Readonly<
     howItIsCalculated: [
       'Presentaciones aceptadas con algún abono imputado a sus procedimientos aceptados.',
       'Importe: lo imputado a esos procedimientos (no los abonos a cuenta sin imputar).',
+      'No depende de los pasos anteriores: un abono anticipado sin cita ni procedimiento realizado ya cuenta como cobrado, así que «Cobrados» puede superar a «Agendados» o «Realizados». Cada paso se mide por su lado sobre los presentados.',
     ],
   },
   ACCEPTANCE_RATE: {
