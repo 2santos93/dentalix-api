@@ -2,6 +2,8 @@ import {
   PERIO_FLAG,
   calMm,
   computePerioIndices,
+  countPerioSites,
+  indicesFromCounts,
   decodeFlags,
   encodeFlags,
   isPermanentFdi,
@@ -220,5 +222,30 @@ describe('validatePerioMeasures', () => {
       'Diente 16, sitio MB: está repetido',
       'Diente 16: está repetido',
     ]);
+  });
+});
+
+describe('countPerioSites / indicesFromCounts (DX-103)', () => {
+  it('los índices desde conteos (lista) son los mismos que desde las medidas (detalle)', () => {
+    const sites = [
+      site(16, 'MB', { probingMm: 6, bleeding: true }),
+      site(16, 'B', { probingMm: 4, plaque: true }),
+      site(16, 'DB', { suppuration: true }),
+      site(18, 'MB', { probingMm: 9, bleeding: true }),
+      site(21, 'L'),
+    ];
+    const teeth = [{ toothFdi: 18, mobility: null, skipped: true }];
+    const counts = countPerioSites(sites, teeth);
+    expect(counts).toEqual({
+      sitesExamined: 3,
+      bleedingSites: 1,
+      plaqueSites: 1,
+      sites4mmOrMore: 2,
+      sites6mmOrMore: 1,
+    });
+    expect(indicesFromCounts(counts)).toEqual(
+      computePerioIndices(sites, teeth),
+    );
+    expect(indicesFromCounts(counts).bopPercent).toBe(33.3);
   });
 });

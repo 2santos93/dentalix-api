@@ -4,10 +4,15 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { resolveReferenceLocation } from '../../../../shared/locations/reference-location';
 import type { PerioExamRecord } from '../../domain/entities/perio-exam.entity';
-import { decodeFlags, encodeFlags } from '../../domain/perio-measures';
+import {
+  PERIO_FLAG,
+  decodeFlags,
+  encodeFlags,
+} from '../../domain/perio-measures';
 import type {
   CreatePerioExamRepoInput,
   PerioExamRepository,
+  PerioExamSummaryRow,
   PerioWriteResult,
   SavePerioMeasuresRepoInput,
 } from '../../domain/ports/perio-exam-repository.port';
@@ -27,6 +32,26 @@ function toDateOnly(value: Date): string {
 
 function fromDateOnly(value: string): Date {
   return new Date(`${value}T00:00:00.000Z`);
+}
+
+/** Fila del resumen (DX-103): cabecera, autor y conteos, sin medidas. */
+interface SummarySqlRow {
+  id: string;
+  tenantId: string;
+  patientId: string;
+  providerId: string;
+  providerName: string;
+  examDate: Date;
+  notes: string | null;
+  status: PerioExamStatus;
+  finalizedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  sitesExamined: number;
+  bleedingSites: number;
+  plaqueSites: number;
+  sites4mmOrMore: number;
+  sites6mmOrMore: number;
 }
 
 function mapRow(row: ExamRow): PerioExamRecord {
@@ -89,15 +114,81 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
     return reference.timeZone;
   }
 
-  async listByPatient(patientId: string): Promise<PerioExamRecord[]> {
-    const rows = await this.prisma.runWithTenant((tx) =>
-      tx.perioExam.findMany({
-        where: { patientId, deletedAt: null },
-        orderBy: [{ examDate: 'desc' }, { createdAt: 'desc' }],
-        include: EXAM_INCLUDE,
-      }),
+  /**
+   * DX-103: el histórico sale de UNA consulta que pagina los exámenes y
+   * cuenta sus sitios en la base; las medidas no viajan (antes se traían las
+   * 224 celdas de cada examen para calcular cuatro números). Los porcentajes
+   * los redondea el caso de uso con la misma función que el detalle.
+   *
+   * La página se corta ANTES de contar (CTE con LIMIT) y cada conteo baja por
+   * el único (tenantId, examId, …) de las medidas. `tenantId` va explícito,
+   * del contexto, para que el índice del histórico sirva además de la RLS.
+   */
+  async listSummaries(
+    patientId: string,
+    limit: number,
+  ): Promise<PerioExamSummaryRow[]> {
+    const tenantId = this.requireTenantId();
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<SummarySqlRow[]>`
+        WITH page AS (
+          SELECT e."id", e."tenantId", e."patientId", e."providerId",
+                 e."examDate", e."notes", e."status"::text AS "status",
+                 e."finalizedAt", e."createdAt", e."updatedAt"
+          FROM "public"."perio_exams" e
+          WHERE e."tenantId" = ${tenantId}::uuid
+            AND e."patientId" = ${patientId}::uuid
+            AND e."deletedAt" IS NULL
+          ORDER BY e."examDate" DESC, e."createdAt" DESC
+          LIMIT ${limit}
+        )
+        SELECT p.*, u."fullName" AS "providerName",
+               c."sitesExamined", c."bleedingSites", c."plaqueSites",
+               c."sites4mmOrMore", c."sites6mmOrMore"
+        FROM page p
+        JOIN "public"."users" u ON u."id" = p."providerId"
+        CROSS JOIN LATERAL (
+          SELECT count(*)::int AS "sitesExamined",
+                 count(*) FILTER (WHERE s."flags" & ${PERIO_FLAG.BOP} <> 0)::int AS "bleedingSites",
+                 count(*) FILTER (WHERE s."flags" & ${PERIO_FLAG.PLAQ} <> 0)::int AS "plaqueSites",
+                 count(*) FILTER (WHERE s."probingMm" >= 4)::int AS "sites4mmOrMore",
+                 count(*) FILTER (WHERE s."probingMm" >= 6)::int AS "sites6mmOrMore"
+          FROM "public"."perio_site_measures" s
+          WHERE s."tenantId" = p."tenantId"
+            AND s."examId" = p."id"
+            -- Examinado = con sondaje o alguna marca (flags 0..15).
+            AND (s."probingMm" IS NOT NULL OR s."flags" <> 0)
+            -- Fuera los dientes omitidos (ausentes / no sondables).
+            AND NOT EXISTS (
+              SELECT 1 FROM "public"."perio_tooth_measures" t
+              WHERE t."tenantId" = s."tenantId"
+                AND t."examId" = s."examId"
+                AND t."toothFdi" = s."toothFdi"
+                AND t."skipped"
+            )
+        ) c
+        ORDER BY p."examDate" DESC, p."createdAt" DESC`,
     );
-    return rows.map(mapRow);
+    return rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenantId,
+      patientId: row.patientId,
+      providerId: row.providerId,
+      providerName: row.providerName,
+      examDate: toDateOnly(row.examDate),
+      notes: row.notes,
+      status: row.status,
+      finalizedAt: row.finalizedAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      counts: {
+        sitesExamined: row.sitesExamined,
+        bleedingSites: row.bleedingSites,
+        plaqueSites: row.plaqueSites,
+        sites4mmOrMore: row.sites4mmOrMore,
+        sites6mmOrMore: row.sites6mmOrMore,
+      },
+    }));
   }
 
   async findById(
@@ -149,11 +240,22 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
   }
 
   /**
-   * Una transacción: el UPDATE condicionado a DRAFT bloquea la fila del
-   * examen, así que un «finalizar» concurrente espera y no puede colarse entre
-   * la comprobación y la escritura. Después, upsert por (diente, sitio). Nada
-   * se borra en duro: una celda limpiada queda como fila vacía, que el caso de
-   * uso no muestra ni cuenta.
+   * Una transacción y, como mucho, seis sentencias (DX-103): BEGIN,
+   * set_config del tenant, el UPDATE de guarda, un INSERT … ON CONFLICT por
+   * tabla y COMMIT. Antes era un upsert por celda: ≈227 idas y vueltas, que con
+   * la latencia de un enlace inestable rozaban el tope de 5 s de la
+   * transacción.
+   *
+   * El UPDATE condicionado a DRAFT bloquea la fila del examen, así que un
+   * «finalizar» u otro guardado concurrente espera y no puede colarse entre la
+   * comprobación y la escritura. Después, upsert por conjuntos (unnest de
+   * arrays paralelos) por (diente, sitio); una celda que no cambia no se
+   * reescribe (`IS DISTINCT FROM`). Nada se borra en duro: una celda limpiada
+   * queda como fila vacía, que el caso de uso no muestra ni cuenta.
+   *
+   * El trigger de inmutabilidad de DX-007 sigue en pie como red: es de fila y
+   * mira el examen por su PK (`perio_exams_pkey`), una búsqueda de coste fijo
+   * que no depende de las estadísticas.
    */
   async saveMeasures(
     patientId: string,
@@ -168,45 +270,48 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
       });
       if (guard !== 'ok') return guard;
 
-      for (const s of input.sites) {
-        const values = {
-          probingMm: s.probingMm,
-          recessionMm: s.recessionMm,
-          furcation: s.furcation,
-          flags: encodeFlags(s),
-        };
-        await tx.perioSiteMeasure.upsert({
-          where: {
-            tenantId_examId_toothFdi_site: {
-              tenantId,
-              examId: id,
-              toothFdi: s.toothFdi,
-              site: s.site,
-            },
-          },
-          create: {
-            tenantId,
-            examId: id,
-            toothFdi: s.toothFdi,
-            site: s.site,
-            ...values,
-          },
-          update: values,
-        });
+      const { sites, teeth } = input;
+      if (sites.length > 0) {
+        await tx.$executeRaw`
+          INSERT INTO "public"."perio_site_measures" AS m
+            ("id", "tenantId", "examId", "toothFdi", "site",
+             "probingMm", "recessionMm", "furcation", "flags")
+          SELECT gen_random_uuid(), ${tenantId}::uuid, ${id}::uuid,
+                 u."toothFdi", u."site"::"public"."PerioSite",
+                 u."probingMm", u."recessionMm", u."furcation", u."flags"
+          FROM unnest(
+            ${sites.map((s) => s.toothFdi)}::smallint[],
+            ${sites.map((s) => s.site)}::text[],
+            ${sites.map((s) => s.probingMm)}::smallint[],
+            ${sites.map((s) => s.recessionMm)}::smallint[],
+            ${sites.map((s) => s.furcation)}::smallint[],
+            ${sites.map((s) => encodeFlags(s))}::smallint[]
+          ) AS u("toothFdi", "site", "probingMm", "recessionMm", "furcation", "flags")
+          ON CONFLICT ("tenantId", "examId", "toothFdi", "site") DO UPDATE SET
+            "probingMm" = EXCLUDED."probingMm",
+            "recessionMm" = EXCLUDED."recessionMm",
+            "furcation" = EXCLUDED."furcation",
+            "flags" = EXCLUDED."flags"
+          WHERE (m."probingMm", m."recessionMm", m."furcation", m."flags")
+            IS DISTINCT FROM
+            (EXCLUDED."probingMm", EXCLUDED."recessionMm", EXCLUDED."furcation", EXCLUDED."flags")`;
       }
-      for (const t of input.teeth) {
-        const values = { mobility: t.mobility, skipped: t.skipped };
-        await tx.perioToothMeasure.upsert({
-          where: {
-            tenantId_examId_toothFdi: {
-              tenantId,
-              examId: id,
-              toothFdi: t.toothFdi,
-            },
-          },
-          create: { tenantId, examId: id, toothFdi: t.toothFdi, ...values },
-          update: values,
-        });
+      if (teeth.length > 0) {
+        await tx.$executeRaw`
+          INSERT INTO "public"."perio_tooth_measures" AS m
+            ("id", "tenantId", "examId", "toothFdi", "mobility", "skipped")
+          SELECT gen_random_uuid(), ${tenantId}::uuid, ${id}::uuid,
+                 u."toothFdi", u."mobility", u."skipped"
+          FROM unnest(
+            ${teeth.map((t) => t.toothFdi)}::smallint[],
+            ${teeth.map((t) => t.mobility)}::smallint[],
+            ${teeth.map((t) => t.skipped)}::boolean[]
+          ) AS u("toothFdi", "mobility", "skipped")
+          ON CONFLICT ("tenantId", "examId", "toothFdi") DO UPDATE SET
+            "mobility" = EXCLUDED."mobility",
+            "skipped" = EXCLUDED."skipped"
+          WHERE (m."mobility", m."skipped")
+            IS DISTINCT FROM (EXCLUDED."mobility", EXCLUDED."skipped")`;
       }
       return 'ok';
     });

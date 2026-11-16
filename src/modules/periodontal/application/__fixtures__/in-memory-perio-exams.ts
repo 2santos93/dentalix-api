@@ -1,7 +1,9 @@
 import type { PerioExamRecord } from '../../domain/entities/perio-exam.entity';
+import { countPerioSites } from '../../domain/perio-measures';
 import type {
   CreatePerioExamRepoInput,
   PerioExamRepository,
+  PerioExamSummaryRow,
   PerioWriteResult,
   SavePerioMeasuresRepoInput,
 } from '../../domain/ports/perio-exam-repository.port';
@@ -21,11 +23,23 @@ export class InMemoryPerioExamRepository implements PerioExamRepository {
     return this.exams.find((e) => e.id === id && e.patientId === patientId);
   }
 
-  listByPatient(patientId: string): Promise<PerioExamRecord[]> {
+  private byPatient(patientId: string): PerioExamRecord[] {
+    return this.exams
+      .filter((e) => e.patientId === patientId)
+      .sort((a, b) => b.examDate.localeCompare(a.examDate));
+  }
+
+  listSummaries(
+    patientId: string,
+    limit: number,
+  ): Promise<PerioExamSummaryRow[]> {
     return Promise.resolve(
-      this.exams
-        .filter((e) => e.patientId === patientId)
-        .sort((a, b) => b.examDate.localeCompare(a.examDate)),
+      this.byPatient(patientId)
+        .slice(0, limit)
+        .map(({ sites, teeth, ...header }) => ({
+          ...header,
+          counts: countPerioSites(sites, teeth),
+        })),
     );
   }
 
@@ -33,9 +47,8 @@ export class InMemoryPerioExamRepository implements PerioExamRepository {
     return Promise.resolve(this.find(patientId, id) ?? null);
   }
 
-  async findLatest(patientId: string): Promise<PerioExamRecord | null> {
-    const [latest] = await this.listByPatient(patientId);
-    return latest ?? null;
+  findLatest(patientId: string): Promise<PerioExamRecord | null> {
+    return Promise.resolve(this.byPatient(patientId)[0] ?? null);
   }
 
   create(input: CreatePerioExamRepoInput): Promise<PerioExamRecord> {
