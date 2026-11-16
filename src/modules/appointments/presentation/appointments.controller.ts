@@ -60,6 +60,11 @@ import {
 } from '../../medical-history/domain/medical-alert-flags';
 import { OpeningsDto, OpeningsQueryDto } from './dto/openings.dto';
 import { InClinicQueryDto, InClinicViewDto } from './dto/in-clinic.dto';
+import {
+  NO_ORTHO_BALANCE,
+  OrthoBalanceFlags,
+} from '../../orthodontics/application/ortho-balance-flags';
+import type { OrthoBalanceFlag } from '../../orthodontics/domain/entities';
 import { CreateWalkInDto, WalkInResultDto } from './dto/walk-in.dto';
 import {
   CreateWalkInUseCase,
@@ -150,6 +155,7 @@ export class AppointmentsController {
     private readonly tenantContext: TenantContextService,
     // DX-150: marca «Saldo vencido» de las tarjetas de la agenda.
     private readonly balanceFlags: PatientBalanceFlags,
+    private readonly orthoBalanceFlags: OrthoBalanceFlags,
     // DX-153: resumen de cobertura del paciente en las tarjetas.
     private readonly coverageFlags: PatientCoverageFlags,
     // DX-247: banderas médicas mínimas (nunca la historia) en las tarjetas.
@@ -324,6 +330,7 @@ export class AppointmentsController {
       coverage: CoverageSummary;
       medicalAlerts: MedicalAlertFlags;
       attendance: PatientIncidentCounts;
+      orthoBalance: OrthoBalanceFlag;
     })[]
   > {
     const appointments = await this.listAppointments.execute({
@@ -343,6 +350,8 @@ export class AppointmentsController {
     // DX-247: el estado de la anamnesis el día civil de CADA cita en su sede.
     const medical = await this.medicalAlertFlags.forAppointments(appointments);
     const attendance = await this.attendanceFlags.forPatients(patientIds);
+    // DX-285: «Ortodoncia: saldo vencido», también por lote y sin importe.
+    const ortho = await this.orthoBalanceFlags.forPatients(patientIds);
     // DX-470: el triaje (datos de salud) no sale en la agenda: solo en GET
     // /appointments/:id y en el panel «En clínica».
     return appointments.map(
@@ -361,6 +370,7 @@ export class AppointmentsController {
         coverage: coverage.get(a.patientId) ?? NO_COVERAGE,
         medicalAlerts: medical.get(a.id) ?? NO_ANAMNESIS_FLAGS,
         attendance: attendance.get(a.patientId) ?? NO_INCIDENTS,
+        orthoBalance: ortho.get(a.patientId) ?? NO_ORTHO_BALANCE,
       }),
     );
   }
@@ -464,7 +474,12 @@ export class AppointmentsController {
     @Query() query: InClinicQueryDto,
     @Req() req: { user: JwtPayload },
   ): Promise<
-    InClinicView<InClinicItem & { medicalAlerts: MedicalAlertFlags }>
+    InClinicView<
+      InClinicItem & {
+        medicalAlerts: MedicalAlertFlags;
+        orthoBalance: OrthoBalanceFlag;
+      }
+    >
   > {
     const view = await this.listInClinic.execute({
       locationId: this.tenantContext.getLocationId(),
@@ -474,16 +489,22 @@ export class AppointmentsController {
     });
     // DX-247: la misma alerta que la agenda, en una sola lectura por lote,
     // evaluada el día del panel en la zona de la sede.
-    const medical = await this.medicalAlertFlags.forPatients(
-      [...view.waiting, ...view.inChair, ...view.readyForCheckout].map(
-        (i) => i.patientId,
-      ),
-      { date: view.date, timeZone: view.timeZone },
-    );
+    const panelPatients = [
+      ...view.waiting,
+      ...view.inChair,
+      ...view.readyForCheckout,
+    ].map((i) => i.patientId);
+    const medical = await this.medicalAlertFlags.forPatients(panelPatients, {
+      date: view.date,
+      timeZone: view.timeZone,
+    });
+    // DX-285: la misma marca de ortodoncia que la tarjeta de la agenda.
+    const ortho = await this.orthoBalanceFlags.forPatients(panelPatients);
     const withAlerts = (items: InClinicItem[]) =>
       items.map((i) => ({
         ...i,
         medicalAlerts: medical.get(i.patientId) ?? NO_ANAMNESIS_FLAGS,
+        orthoBalance: ortho.get(i.patientId) ?? NO_ORTHO_BALANCE,
       }));
     return {
       ...view,

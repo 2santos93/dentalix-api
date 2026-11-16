@@ -6,14 +6,24 @@ import { requireLocationTimeZone } from '../../../shared/locations/location-time
 import { civilDateIn } from '../../../shared/time/civil-day';
 import { ADDENDA_ORDER } from '../../clinical-entries/infrastructure/repositories/prisma-clinical-entry-addendum.repository';
 import type {
+  OrthoAlignerSeriesView,
+  OrthoBalanceFlag,
   OrthoCaseRecord,
   OrthoCaseView,
+  OrthoFee,
   OrthoFollowUpRow,
   OrthoSettings,
   OrthoVisitView,
 } from '../domain/entities';
 import type {
+  AcceptOrthoFeeInput,
+  AcceptOrthoFeeOutcome,
+  AddAlignerDeliveryInput,
+  AddAlignerDeliveryOutcome,
+  CreateAlignerSeriesInput,
   CreateOrthoCaseRepoInput,
+  OrthoAccountFacts,
+  OrthoFeeCurrencySource,
   InsertOrthoVisitInput,
   OrthoFollowUpQuery,
   OrthoRepository,
@@ -27,6 +37,17 @@ import {
   isOverdue,
   type OrthoWire,
 } from '../domain/ortho-rules';
+import { fromCents } from '../../../shared/money/money';
+import type { OrthoFeeSplit } from '../domain/ortho-billing';
+import {
+  acceptFeeIn,
+  accountFactsIn,
+  addAlignerDeliveryIn,
+  alignerSeriesViews,
+  overdueFlagsIn,
+  realizeRetentionIn,
+  realizeVisitChargeIn,
+} from './prisma-ortho-billing';
 
 /** Un `@db.Date` llega como medianoche UTC: su día civil es el de UTC. */
 const day = (value: Date): string => value.toISOString().slice(0, 10);
@@ -36,6 +57,32 @@ const dayOrNull = (value: Date | null): string | null =>
 const dateOf = (value: string): Date => new Date(`${value}T00:00:00.000Z`);
 const dateOrNull = (value: string | null): Date | null =>
   value ? dateOf(value) : null;
+
+function feeOf(row: OrthoCase): OrthoFee | null {
+  if (
+    row.feeCurrency === null ||
+    row.feeTotal === null ||
+    row.feeInitial === null ||
+    row.feePerVisit === null ||
+    row.feeVisitCount === null ||
+    row.feeRetention === null
+  ) {
+    return null;
+  }
+  return {
+    currency: row.feeCurrency,
+    total: row.feeTotal.toNumber(),
+    initial: row.feeInitial.toNumber(),
+    perVisit: row.feePerVisit.toNumber(),
+    visitCount: row.feeVisitCount,
+    retention: row.feeRetention.toNumber(),
+    updatedAt: row.feeUpdatedAt,
+    updatedById: row.feeUpdatedById,
+    acceptedAt: row.feeAcceptedAt,
+    acceptedById: row.feeAcceptedById,
+    paymentPlanId: row.feePaymentPlanId,
+  };
+}
 
 function mapCase(row: OrthoCase): OrthoCaseRecord {
   return {
@@ -58,6 +105,7 @@ function mapCase(row: OrthoCase): OrthoCaseRecord {
     createdById: row.createdById,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    fee: feeOf(row),
   };
 }
 
@@ -290,11 +338,16 @@ export class PrismaOrthoRepository implements OrthoRepository {
   async getSettings(): Promise<OrthoSettings> {
     const tenant = await this.prisma.tenant.findUniqueOrThrow({
       where: { id: this.tenantId() },
-      select: { orthodonticsEnabled: true, orthoWireGauges: true },
+      select: {
+        orthodonticsEnabled: true,
+        orthoWireGauges: true,
+        orthoOverdueDays: true,
+      },
     });
     return {
       enabled: tenant.orthodonticsEnabled,
       wireGauges: tenant.orthoWireGauges,
+      overdueDays: tenant.orthoOverdueDays,
     };
   }
 
@@ -305,22 +358,33 @@ export class PrismaOrthoRepository implements OrthoRepository {
     // Fila bloqueada: dos ADMIN a la vez no se pisan el «antes» de la auditoría.
     return this.prisma.$transaction(async (tx) => {
       const [locked] = await tx.$queryRaw<
-        { enabled: boolean; gauges: string[] }[]
-      >`SELECT "orthodonticsEnabled" AS enabled, "orthoWireGauges" AS gauges
+        { enabled: boolean; gauges: string[]; overdueDays: number }[]
+      >`SELECT "orthodonticsEnabled" AS enabled, "orthoWireGauges" AS gauges,
+               "orthoOverdueDays"::int AS "overdueDays"
           FROM "tenants" WHERE "id" = ${id}::uuid FOR UPDATE`;
       const after = await tx.tenant.update({
         where: { id },
         data: {
           orthodonticsEnabled: next.enabled,
           orthoWireGauges: next.wireGauges,
+          orthoOverdueDays: next.overdueDays,
         },
-        select: { orthodonticsEnabled: true, orthoWireGauges: true },
+        select: {
+          orthodonticsEnabled: true,
+          orthoWireGauges: true,
+          orthoOverdueDays: true,
+        },
       });
       return {
-        before: { enabled: locked.enabled, wireGauges: locked.gauges },
+        before: {
+          enabled: locked.enabled,
+          wireGauges: locked.gauges,
+          overdueDays: locked.overdueDays,
+        },
         after: {
           enabled: after.orthodonticsEnabled,
           wireGauges: after.orthoWireGauges,
+          overdueDays: after.orthoOverdueDays,
         },
       };
     });
@@ -526,9 +590,18 @@ export class PrismaOrthoRepository implements OrthoRepository {
         },
       });
       if (count === 0) return null;
-      return mapCase(
-        await tx.orthoCase.findUniqueOrThrow({ where: { id: caseId } }),
-      );
+      const row = await tx.orthoCase.findUniqueOrThrow({
+        where: { id: caseId },
+      });
+      // DX-285: el retiro se realiza al pasar a retención o finalizar.
+      if (input.to === 'RETENTION' || input.to === 'FINISHED') {
+        await realizeRetentionIn(tx, this.tenantId(), {
+          caseId,
+          authorId: input.actorId,
+          locationId: row.locationId,
+        });
+      }
+      return mapCase(row);
     });
   }
 
@@ -653,5 +726,192 @@ export class PrismaOrthoRepository implements OrthoRepository {
         ),
       };
     });
+  }
+
+  // -- DX-285: honorario y cuenta
+
+  async feeCurrencySource(caseId: string): Promise<OrthoFeeCurrencySource> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.orthoCase.findFirstOrThrow({
+        where: { id: caseId },
+        select: {
+          treatmentPlan: { select: { currency: true, deletedAt: true } },
+          location: { select: { currency: true } },
+        },
+      }),
+    );
+    return {
+      planCurrency:
+        row.treatmentPlan && row.treatmentPlan.deletedAt === null
+          ? row.treatmentPlan.currency
+          : null,
+      locationCurrency: row.location.currency,
+    };
+  }
+
+  async setFee(
+    caseId: string,
+    fee: { split: OrthoFeeSplit; currency: string } | null,
+    actorId: string,
+  ): Promise<OrthoCaseRecord | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // Condicional: un honorario ya aceptado no se toca (la guarda también).
+      const { count } = await tx.orthoCase.updateMany({
+        where: { id: caseId, feeAcceptedAt: null },
+        data: fee
+          ? {
+              feeCurrency: fee.currency,
+              feeTotal: fromCents(fee.split.totalCents),
+              feeInitial: fromCents(fee.split.initialCents),
+              feePerVisit: fromCents(fee.split.perVisitCents),
+              feeVisitCount: fee.split.visitCount,
+              feeRetention: fromCents(fee.split.retentionCents),
+              feeUpdatedAt: new Date(),
+              feeUpdatedById: actorId,
+            }
+          : {
+              feeCurrency: null,
+              feeTotal: null,
+              feeInitial: null,
+              feePerVisit: null,
+              feeVisitCount: null,
+              feeRetention: null,
+              feeUpdatedAt: new Date(),
+              feeUpdatedById: actorId,
+            },
+      });
+      if (count === 0) return null;
+      return mapCase(
+        await tx.orthoCase.findUniqueOrThrow({ where: { id: caseId } }),
+      );
+    });
+  }
+
+  acceptFee(input: AcceptOrthoFeeInput): Promise<AcceptOrthoFeeOutcome> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant((tx) => acceptFeeIn(tx, tenantId, input));
+  }
+
+  accountFacts(
+    patientId: string,
+    caseId: string,
+    now: Date,
+  ): Promise<OrthoAccountFacts | null> {
+    const tenantId = this.tenantId();
+    // Una foto: los cargos, lo imputado y los controles casan entre sí.
+    return this.prisma.runWithTenant(
+      (tx) => accountFactsIn(tx, tenantId, { patientId, caseId, now }),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
+  async casesWithFee(patientId: string): Promise<OrthoCaseRecord[]> {
+    const rows = await this.prisma.runWithTenant((tx) =>
+      tx.orthoCase.findMany({
+        where: { patientId, feeTotal: { not: null } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }),
+    );
+    return rows.map(mapCase);
+  }
+
+  realizeVisitCharge(
+    tx: Prisma.TransactionClient,
+    input: { caseId: string; visitId: string; authorId: string },
+  ): Promise<void> {
+    return realizeVisitChargeIn(tx, this.tenantId(), input);
+  }
+
+  overdueFlags(
+    patientIds: readonly string[],
+    now: Date,
+  ): Promise<Map<string, OrthoBalanceFlag>> {
+    if (patientIds.length === 0) {
+      return Promise.resolve(new Map<string, OrthoBalanceFlag>());
+    }
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant((tx) =>
+      overdueFlagsIn(tx, tenantId, patientIds, now),
+    );
+  }
+
+  // -- DX-285: alineadores
+
+  listAlignerSeries(
+    caseId: string,
+    today: string,
+  ): Promise<OrthoAlignerSeriesView[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.orthoAlignerSeries.findMany({
+        where: { caseId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        include: {
+          deliveries: {
+            orderBy: [{ fromTray: 'asc' }],
+            select: {
+              id: true,
+              fromTray: true,
+              toTray: true,
+              deliveredOn: true,
+              visitId: true,
+              createdById: true,
+              createdAt: true,
+            },
+          },
+        },
+      });
+      const names = await memberNames(
+        tx,
+        rows.flatMap((r) => [
+          r.createdById,
+          ...r.deliveries.map((d) => d.createdById),
+        ]),
+      );
+      return alignerSeriesViews(rows, names, today);
+    });
+  }
+
+  async seriesOfCase(caseId: string, seriesId: string): Promise<boolean> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.orthoAlignerSeries.findFirst({
+        where: { id: seriesId, caseId },
+        select: { id: true },
+      }),
+    );
+    return row !== null;
+  }
+
+  async visitOfCase(
+    caseId: string,
+    visitId: string,
+  ): Promise<{ visitDate: string } | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.orthoVisit.findFirst({
+        where: { id: visitId, caseId },
+        select: { visitDate: true },
+      }),
+    );
+    return row ? { visitDate: day(row.visitDate) } : null;
+  }
+
+  async createAlignerSeries(
+    input: CreateAlignerSeriesInput,
+  ): Promise<{ id: string }> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant((tx) =>
+      tx.orthoAlignerSeries.create({
+        data: { tenantId, ...input },
+        select: { id: true },
+      }),
+    );
+  }
+
+  addAlignerDelivery(
+    input: AddAlignerDeliveryInput,
+  ): Promise<AddAlignerDeliveryOutcome> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant((tx) =>
+      addAlignerDeliveryIn(tx, tenantId, input),
+    );
   }
 }

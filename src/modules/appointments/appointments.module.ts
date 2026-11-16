@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { OrthodonticsModule } from '../orthodontics/orthodontics.module';
 import { ProviderScheduleModule } from '../provider-schedule/provider-schedule.module';
 import { JwtModule } from '@nestjs/jwt';
 import { AppointmentsController } from './presentation/appointments.controller';
@@ -66,6 +67,8 @@ import { ChairAssignmentService } from './application/chair-assignment';
     MedicalHistoryModule,
     // DX-211: sillón de la cita (de la sede, activo y libre).
     ChairsModule,
+    // DX-285: «Ortodoncia: saldo vencido» de las tarjetas y de «En clínica».
+    OrthodonticsModule,
   ],
   controllers: [AppointmentsController, PatientAttendanceController],
   providers: [

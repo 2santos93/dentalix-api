@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  OrthoAlignerArch,
   OrthoCaseStatus,
   OrthoElasticType,
   OrthoElasticWear,
@@ -15,6 +16,7 @@ import {
   IsEnum,
   IsIn,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
@@ -38,6 +40,18 @@ import {
   ORTHO_VISITS_MAX,
   ORTHO_VISITS_MIN,
 } from '../../domain/ortho-rules';
+import {
+  ORTHO_BRAND_MAX,
+  ORTHO_DAYS_PER_TRAY_MAX,
+  ORTHO_DAYS_PER_TRAY_MIN,
+  ORTHO_FEE_PART_MAX,
+  ORTHO_FEE_TOTAL_MAX,
+  ORTHO_FEE_VISITS_MAX,
+  ORTHO_OVERDUE_DAYS_DEFAULT,
+  ORTHO_OVERDUE_DAYS_MAX,
+  ORTHO_OVERDUE_DAYS_MIN,
+  ORTHO_TRAYS_MAX,
+} from '../../domain/ortho-billing';
 
 // Fechas como texto AAAA-MM-DD: las valida el dominio (un solo 400 en español
 // con todos los fallos). Sin tenant, paciente, autor ni hora: los pone el
@@ -59,6 +73,15 @@ export class OrthoSettingsDto {
     description: 'Calibres de arco que ofrece el control (lista de la clínica)',
   })
   wireGauges!: string[];
+
+  @ApiProperty({
+    minimum: ORTHO_OVERDUE_DAYS_MIN,
+    maximum: ORTHO_OVERDUE_DAYS_MAX,
+    example: ORTHO_OVERDUE_DAYS_DEFAULT,
+    description:
+      'DX-285: días tras los que un cargo de ortodoncia realizado y sin pagar marca «Ortodoncia: saldo vencido»',
+  })
+  overdueDays!: number;
 }
 
 export class UpdateOrthoSettingsDto {
@@ -76,6 +99,17 @@ export class UpdateOrthoSettingsDto {
   @IsString({ each: true, message: 'Cada calibre debe ser un texto' })
   @TextMaxLength(ORTHO_GAUGE_MAX * 4, { each: true })
   wireGauges?: string[];
+
+  @ApiPropertyOptional({
+    minimum: ORTHO_OVERDUE_DAYS_MIN,
+    maximum: ORTHO_OVERDUE_DAYS_MAX,
+    example: ORTHO_OVERDUE_DAYS_DEFAULT,
+  })
+  @IsOptional()
+  @IsInt({
+    message: `El umbral del saldo vencido es un número entero de días de ${ORTHO_OVERDUE_DAYS_MIN} a ${ORTHO_OVERDUE_DAYS_MAX}`,
+  })
+  overdueDays?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +300,41 @@ export class OrthoProgressDto {
   @ApiProperty({ description: '0–100' }) percent!: number;
 }
 
+/** DX-285: honorario del caso y su reparto, en `currency`. */
+export class OrthoFeeDto {
+  @ApiProperty({
+    description: 'Código ISO 4217: la del plan ligado o la de la sede',
+  })
+  currency!: string;
+  @ApiProperty({ example: 3000 }) total!: number;
+  @ApiProperty({ example: 600 }) initial!: number;
+  @ApiProperty({ example: 90 }) perVisit!: number;
+  @ApiProperty({ example: 24, description: 'Controles que se cobran' })
+  visitCount!: number;
+  @ApiProperty({ example: 240 }) retention!: number;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  updatedAt!: Date | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  updatedById!: string | null;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Aceptado: sus cargos ya están en el plan y no cambia',
+  })
+  acceptedAt!: Date | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  acceptedById!: string | null;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'Cuotas ACTIVE que ya tenía el plan al aceptar: no se crearon cargos, solo se informan',
+  })
+  paymentPlanId!: string | null;
+}
+
 export class OrthoCaseDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) patientId!: string;
@@ -309,6 +378,8 @@ export class OrthoCaseDto {
       'Caso activo con el último control (o el inicio) hace más de intervalo + 15 días',
   })
   overdue!: boolean;
+  @ApiProperty({ type: OrthoFeeDto, nullable: true })
+  fee!: OrthoFeeDto | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,4 +578,288 @@ export class OrthoFollowUpPageDto {
   @ApiProperty() total!: number;
   @ApiProperty() page!: number;
   @ApiProperty() pageSize!: number;
+}
+
+// ---------------------------------------------------------------------------
+// DX-285: honorario y cuenta del caso
+// ---------------------------------------------------------------------------
+
+const AMOUNT = { allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 };
+
+export class SetOrthoFeeDto {
+  @ApiProperty({ minimum: 0.01, maximum: ORTHO_FEE_TOTAL_MAX, example: 3000 })
+  @Type(() => Number)
+  @IsNumber(AMOUNT, {
+    message: 'El honorario total debe ser un importe con hasta 2 decimales',
+  })
+  @Max(ORTHO_FEE_TOTAL_MAX, { message: 'El honorario total es demasiado alto' })
+  total!: number;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: ORTHO_FEE_PART_MAX,
+    example: 600,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber(AMOUNT, {
+    message: 'La cuota inicial debe ser un importe con hasta 2 decimales',
+  })
+  @Min(0, { message: 'La cuota inicial no puede ser negativa' })
+  @Max(ORTHO_FEE_PART_MAX, { message: 'La cuota inicial es demasiado alta' })
+  initial?: number;
+
+  @ApiPropertyOptional({ minimum: 0, maximum: ORTHO_FEE_PART_MAX, example: 90 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber(AMOUNT, {
+    message: 'El importe por control debe ser un importe con hasta 2 decimales',
+  })
+  @Min(0, { message: 'El importe por control no puede ser negativo' })
+  @Max(ORTHO_FEE_PART_MAX, {
+    message: 'El importe por control es demasiado alto',
+  })
+  perVisit?: number;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: ORTHO_FEE_VISITS_MAX,
+    example: 24,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt({ message: 'Los controles que se cobran deben ser un número entero' })
+  @Min(0, { message: 'Los controles que se cobran no pueden ser negativos' })
+  @Max(ORTHO_FEE_VISITS_MAX, {
+    message: `Como mucho se cobran ${ORTHO_FEE_VISITS_MAX} controles`,
+  })
+  visitCount?: number;
+
+  @ApiPropertyOptional({
+    minimum: 0,
+    maximum: ORTHO_FEE_PART_MAX,
+    example: 240,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber(AMOUNT, {
+    message: 'El retiro debe ser un importe con hasta 2 decimales',
+  })
+  @Min(0, { message: 'El retiro no puede ser negativo' })
+  @Max(ORTHO_FEE_PART_MAX, { message: 'El retiro es demasiado alto' })
+  retention?: number;
+}
+
+export class OrthoAccountPaymentPlanDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() status!: string;
+  @ApiProperty() installmentsCount!: number;
+  @ApiProperty() totalToFinance!: number;
+  @ApiProperty() currency!: string;
+}
+
+export class OrthoCaseAccountDto {
+  @ApiProperty({ format: 'uuid' }) caseId!: string;
+  @ApiProperty({ format: 'uuid' }) patientId!: string;
+  @ApiProperty({ enum: OrthoCaseStatus }) status!: OrthoCaseStatus;
+  @ApiProperty({ format: 'date' }) startDate!: string;
+  @ApiProperty() plannedVisits!: number;
+  @ApiProperty() visitsDone!: number;
+  @ApiProperty({
+    enum: ['NONE', 'PENDING', 'PLAN_ITEMS', 'PAYMENT_PLAN'],
+    description:
+      'NONE: sin honorario. PENDING: honorario sin aceptar. PLAN_ITEMS: sus cargos están en el plan. PAYMENT_PLAN: el plan ya tenía cuotas; solo se informa',
+  })
+  billing!: 'NONE' | 'PENDING' | 'PLAN_ITEMS' | 'PAYMENT_PLAN';
+  @ApiProperty({ type: String, nullable: true }) currency!: string | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  treatmentPlanId!: string | null;
+  @ApiProperty({ type: OrthoFeeDto, nullable: true }) fee!: OrthoFeeDto | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Realizado hasta hoy (cargos hechos)',
+  })
+  billed!: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Lo imputado (DX-051) a los cargos del caso',
+  })
+  paid!: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Realizado − pagado (negativo = pagado por adelantado)',
+  })
+  balance!: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Lo que falta por realizar del honorario',
+  })
+  remaining!: number | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Lo realizado y sin pagar de hace más de `overdueDays` días',
+  })
+  overdue!: number | null;
+  @ApiProperty({ type: String, format: 'date', nullable: true })
+  overdueSince!: string | null;
+  @ApiProperty() overdueAgeDays!: number;
+  @ApiProperty() hasOverdue!: boolean;
+  @ApiProperty({ description: 'Umbral de la clínica' }) overdueDays!: number;
+  @ApiProperty() visitsCharged!: number;
+  @ApiProperty({
+    description: 'Cargos cuyo ítem se retiró del plan (no cuentan)',
+  })
+  removedCharges!: number;
+  @ApiProperty({ type: OrthoAccountPaymentPlanDto, nullable: true })
+  paymentPlan!: OrthoAccountPaymentPlanDto | null;
+}
+
+/** «Ortodoncia: saldo vencido» del paciente de una cita (sin importe). */
+export class OrthoBalanceFlagDto {
+  @ApiProperty() hasOverdue!: boolean;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Días del cargo vencido más antiguo',
+  })
+  overdueDays!: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// DX-285: alineadores
+// ---------------------------------------------------------------------------
+
+export class CreateOrthoAlignerSeriesDto {
+  @ApiProperty({ enum: OrthoAlignerArch })
+  @IsEnum(OrthoAlignerArch, {
+    message: 'La arcada es superior, inferior o ambas',
+  })
+  arch!: OrthoAlignerArch;
+
+  @ApiProperty({ maxLength: ORTHO_BRAND_MAX, example: 'Marca del fabricante' })
+  @IsString({ message: 'La marca debe ser un texto' })
+  @TextMaxLength(ORTHO_BRAND_MAX * 2)
+  brand!: string;
+
+  @ApiProperty({ minimum: 1, maximum: ORTHO_TRAYS_MAX, example: 20 })
+  @Type(() => Number)
+  @IsInt({ message: 'El número de bandejas debe ser un número entero' })
+  totalTrays!: number;
+
+  @ApiProperty({
+    minimum: ORTHO_DAYS_PER_TRAY_MIN,
+    maximum: ORTHO_DAYS_PER_TRAY_MAX,
+    example: 14,
+  })
+  @Type(() => Number)
+  @IsInt({ message: 'Los días por bandeja deben ser un número entero' })
+  daysPerTray!: number;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'Refinamiento: la serie (de este caso) que continúa',
+  })
+  @IsOptional()
+  @IsUUID('4', { message: 'La serie que se refina no es válida' })
+  refinementOfId?: string;
+}
+
+export class AddOrthoAlignerDeliveryDto {
+  @ApiProperty({ minimum: 1, maximum: ORTHO_TRAYS_MAX, example: 5 })
+  @Type(() => Number)
+  @IsInt({ message: 'La primera bandeja debe ser un número entero' })
+  fromTray!: number;
+
+  @ApiProperty({ minimum: 1, maximum: ORTHO_TRAYS_MAX, example: 8 })
+  @Type(() => Number)
+  @IsInt({ message: 'La última bandeja debe ser un número entero' })
+  toTray!: number;
+
+  @ApiPropertyOptional({
+    format: 'date',
+    example: DATE_EXAMPLE,
+    description: 'Sin ella: el día del control (`visitId`) o hoy en la sede',
+  })
+  @IsOptional()
+  @IsString({ message: 'La fecha de la entrega debe ser una fecha AAAA-MM-DD' })
+  @TextMaxLength(INPUT_CODE_MAX)
+  deliveredOn?: string;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description: 'El control (de este caso) en el que se entregó',
+  })
+  @IsOptional()
+  @IsUUID('4', { message: 'El control no es válido' })
+  visitId?: string;
+}
+
+export class OrthoAlignerDeliveryDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() fromTray!: number;
+  @ApiProperty() toTray!: number;
+  @ApiProperty({ format: 'date' }) deliveredOn!: string;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  visitId!: string | null;
+  @ApiProperty({ format: 'uuid' }) createdById!: string;
+  @ApiProperty({ type: String, nullable: true }) createdByName!: string | null;
+  @ApiProperty() createdAt!: Date;
+}
+
+export class OrthoAlignerSeriesDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid' }) caseId!: string;
+  @ApiProperty({ enum: OrthoAlignerArch }) arch!: OrthoAlignerArch;
+  @ApiProperty() brand!: string;
+  @ApiProperty() totalTrays!: number;
+  @ApiProperty() daysPerTray!: number;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  refinementOfId!: string | null;
+  @ApiProperty({ description: '1 = la serie inicial; 2… los refinamientos' })
+  sequence!: number;
+  @ApiProperty({ format: 'uuid' }) createdById!: string;
+  @ApiProperty({ type: String, nullable: true }) createdByName!: string | null;
+  @ApiProperty() createdAt!: Date;
+  @ApiProperty({ type: [OrthoAlignerDeliveryDto] })
+  deliveries!: OrthoAlignerDeliveryDto[];
+  @ApiProperty({
+    enum: ['NOT_STARTED', 'IN_PROGRESS', 'NEEDS_DELIVERY', 'FINISHED'],
+    description:
+      'NEEDS_DELIVERY = ya tocaba la siguiente bandeja y no está entregada («Sin bandejas: entregar»)',
+  })
+  state!: 'NOT_STARTED' | 'IN_PROGRESS' | 'NEEDS_DELIVERY' | 'FINISHED';
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'La de hoy; nunca más allá de la última entregada',
+  })
+  currentTray!: number | null;
+  @ApiProperty({ type: String, format: 'date', nullable: true })
+  currentTrayStartedOn!: string | null;
+  @ApiProperty({ type: String, format: 'date', nullable: true })
+  nextChangeOn!: string | null;
+  @ApiProperty() lastDeliveredTray!: number;
+  @ApiProperty({ type: String, format: 'date', nullable: true })
+  estimatedEndOn!: string | null;
+}
+
+export class OrthoAlignersDto {
+  @ApiProperty({ format: 'date', description: 'Hoy en la sede del caso' })
+  today!: string;
+  @ApiProperty({ type: [OrthoAlignerSeriesDto] })
+  series!: OrthoAlignerSeriesDto[];
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'La serie vigente de la arcada superior',
+  })
+  upperSeriesId!: string | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  lowerSeriesId!: string | null;
 }

@@ -1,5 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import type {
+  OrthoAlignerSeriesView,
+  OrthoBalanceFlag,
   OrthoCaseRecord,
   OrthoCaseView,
   OrthoFollowUpRow,
@@ -7,7 +9,14 @@ import type {
   OrthoVisitView,
 } from '../../domain/entities';
 import type {
+  AcceptOrthoFeeInput,
+  AcceptOrthoFeeOutcome,
+  AddAlignerDeliveryInput,
+  AddAlignerDeliveryOutcome,
+  CreateAlignerSeriesInput,
   CreateOrthoCaseRepoInput,
+  OrthoAccountFacts,
+  OrthoFeeCurrencySource,
   InsertOrthoVisitInput,
   OrthoFollowUpQuery,
   OrthoRepository,
@@ -21,6 +30,13 @@ import {
   isOverdue,
 } from '../../domain/ortho-rules';
 import { civilDateIn } from '../../../../shared/time/civil-day';
+import { fromCents, toCents } from '../../../../shared/money/money';
+import {
+  plannedCharges,
+  type ChargeFacts,
+  type OrthoFeeSplit,
+} from '../../domain/ortho-billing';
+import { alignerSeriesViews } from '../../infrastructure/prisma-ortho-billing';
 
 /**
  * Repositorio de ortodoncia en memoria (tests unitarios). La lista de
@@ -31,6 +47,7 @@ export class InMemoryOrthoRepository implements OrthoRepository {
   settings: OrthoSettings = {
     enabled: true,
     wireGauges: [...ORTHO_DEFAULT_WIRE_GAUGES],
+    overdueDays: 30,
   };
   /** Zona de la sede de los tests (Caracas, UTC−4). */
   timeZone = 'America/Caracas';
@@ -145,6 +162,7 @@ export class InMemoryOrthoRepository implements OrthoRepository {
       createdById: input.createdById,
       createdAt: now,
       updatedAt: now,
+      fee: null,
     };
     this.cases.push(row);
     return Promise.resolve(structuredClone(row));
@@ -253,5 +271,231 @@ export class InMemoryOrthoRepository implements OrthoRepository {
       rows: this.followUpRows,
       total: this.followUpRows.length,
     });
+  }
+
+  // -- DX-285 (cobro y alineadores, en memoria)
+
+  feeSource: OrthoFeeCurrencySource = {
+    planCurrency: null,
+    locationCurrency: 'USD',
+  };
+  /** Resultado forzado de `acceptFee` (los casos del plan los prueba la BD). */
+  acceptOutcome: AcceptOrthoFeeOutcome['outcome'] = 'OK';
+  readonly charges: (ChargeFacts & {
+    caseId: string;
+    visitId: string | null;
+  })[] = [];
+  overdue = new Map<string, OrthoBalanceFlag>();
+  readonly series: (CreateAlignerSeriesInput & {
+    id: string;
+    createdAt: Date;
+    deliveries: {
+      id: string;
+      fromTray: number;
+      toTray: number;
+      deliveredOn: Date;
+      visitId: string | null;
+      createdById: string;
+      createdAt: Date;
+    }[];
+  })[] = [];
+
+  feeCurrencySource(): Promise<OrthoFeeCurrencySource> {
+    return Promise.resolve(this.feeSource);
+  }
+
+  setFee(
+    caseId: string,
+    fee: { split: OrthoFeeSplit; currency: string } | null,
+    actorId: string,
+  ): Promise<OrthoCaseRecord | null> {
+    const c = this.cases.find((x) => x.id === caseId);
+    if (!c || c.fee?.acceptedAt) return Promise.resolve(null);
+    c.fee = fee
+      ? {
+          currency: fee.currency,
+          total: fromCents(fee.split.totalCents),
+          initial: fromCents(fee.split.initialCents),
+          perVisit: fromCents(fee.split.perVisitCents),
+          visitCount: fee.split.visitCount,
+          retention: fromCents(fee.split.retentionCents),
+          updatedAt: new Date('2026-11-16T15:00:00.000Z'),
+          updatedById: actorId,
+          acceptedAt: null,
+          acceptedById: null,
+          paymentPlanId: null,
+        }
+      : null;
+    return Promise.resolve(structuredClone(c));
+  }
+
+  acceptFee(input: AcceptOrthoFeeInput): Promise<AcceptOrthoFeeOutcome> {
+    const c = this.cases.find((x) => x.id === input.caseId);
+    if (!c) return Promise.resolve({ outcome: 'NOT_FOUND' });
+    if (this.acceptOutcome !== 'OK') {
+      return Promise.resolve({
+        outcome: this.acceptOutcome,
+      } as AcceptOrthoFeeOutcome);
+    }
+    if (!c.fee) return Promise.resolve({ outcome: 'NO_FEE' });
+    const toCentsFee = toCents;
+    const planned = plannedCharges({
+      totalCents: toCentsFee(c.fee.total),
+      initialCents: toCentsFee(c.fee.initial),
+      perVisitCents: toCentsFee(c.fee.perVisit),
+      visitCount: c.fee.visitCount,
+      retentionCents: toCentsFee(c.fee.retention),
+    });
+    for (const p of planned) {
+      this.charges.push({
+        caseId: c.id,
+        kind: p.kind,
+        sequence: p.sequence,
+        billableCents: p.priceCents,
+        paidCents: 0,
+        done: p.kind === 'INITIAL',
+        removed: false,
+        realizedOn: p.kind === 'INITIAL' ? '2026-11-16' : null,
+        visitId: null,
+      });
+    }
+    c.fee.acceptedAt = new Date('2026-11-16T15:00:00.000Z');
+    c.fee.acceptedById = input.actorId;
+    c.treatmentPlanId ??= 'plan-ortho';
+    return Promise.resolve({
+      outcome: 'OK',
+      planId: c.treatmentPlanId,
+      chargesCreated: planned.length,
+      paymentPlanId: null,
+    });
+  }
+
+  accountFacts(
+    patientId: string,
+    caseId: string,
+    now: Date,
+  ): Promise<OrthoAccountFacts | null> {
+    const c = this.cases.find(
+      (x) => x.id === caseId && x.patientId === patientId,
+    );
+    if (!c) return Promise.resolve(null);
+    return Promise.resolve({
+      today: civilDateIn(now, this.timeZone),
+      visitsDone: this.visits.filter((v) => v.caseId === caseId).length,
+      paymentPlan: null,
+      charges: this.charges
+        .filter((ch) => ch.caseId === caseId)
+        .map(({ caseId: _c, visitId: _v, ...facts }) => facts),
+    });
+  }
+
+  casesWithFee(patientId: string): Promise<OrthoCaseRecord[]> {
+    return Promise.resolve(
+      structuredClone(
+        this.cases.filter((c) => c.patientId === patientId && c.fee !== null),
+      ),
+    );
+  }
+
+  realizeVisitCharge(
+    _tx: Prisma.TransactionClient,
+    input: { caseId: string; visitId: string; authorId: string },
+  ): Promise<void> {
+    if (this.charges.some((ch) => ch.visitId === input.visitId)) {
+      return Promise.resolve();
+    }
+    const next = this.charges
+      .filter(
+        (ch) =>
+          ch.caseId === input.caseId &&
+          ch.kind === 'VISIT' &&
+          ch.visitId === null,
+      )
+      .sort((a, b) => a.sequence - b.sequence)[0];
+    if (next) {
+      next.visitId = input.visitId;
+      next.done = true;
+      next.realizedOn = '2026-11-16';
+    }
+    return Promise.resolve();
+  }
+
+  overdueFlags(
+    patientIds: readonly string[],
+  ): Promise<Map<string, OrthoBalanceFlag>> {
+    return Promise.resolve(
+      new Map([...this.overdue].filter(([id]) => patientIds.includes(id))),
+    );
+  }
+
+  listAlignerSeries(
+    caseId: string,
+    today: string,
+  ): Promise<OrthoAlignerSeriesView[]> {
+    return Promise.resolve(
+      alignerSeriesViews(
+        this.series.filter((x) => x.caseId === caseId),
+        new Map(),
+        today,
+      ),
+    );
+  }
+
+  seriesOfCase(caseId: string, seriesId: string): Promise<boolean> {
+    return Promise.resolve(
+      this.series.some((x) => x.id === seriesId && x.caseId === caseId),
+    );
+  }
+
+  visitOfCase(
+    caseId: string,
+    visitId: string,
+  ): Promise<{ visitDate: string } | null> {
+    const v = this.visits.find((x) => x.id === visitId && x.caseId === caseId);
+    return Promise.resolve(v ? { visitDate: v.visitDate } : null);
+  }
+
+  createAlignerSeries(
+    input: CreateAlignerSeriesInput,
+  ): Promise<{ id: string }> {
+    const id = `series-${this.nextId++}`;
+    this.series.push({
+      ...input,
+      id,
+      createdAt: new Date(Date.UTC(2026, 10, 16, 15, 0, this.nextId)),
+      deliveries: [],
+    });
+    return Promise.resolve({ id });
+  }
+
+  addAlignerDelivery(
+    input: AddAlignerDeliveryInput,
+  ): Promise<AddAlignerDeliveryOutcome> {
+    const series = this.series.find(
+      (x) => x.id === input.seriesId && x.caseId === input.caseId,
+    );
+    if (!series) return Promise.resolve({ outcome: 'SERIES_NOT_FOUND' });
+    const checked = input.validate(
+      { totalTrays: series.totalTrays },
+      series.deliveries.map((d) => ({
+        fromTray: d.fromTray,
+        toTray: d.toTray,
+        deliveredOn: d.deliveredOn.toISOString().slice(0, 10),
+      })),
+    );
+    if (!checked.ok) {
+      return Promise.resolve({ outcome: 'INVALID', message: checked.message });
+    }
+    const id = `delivery-${this.nextId++}`;
+    series.deliveries.push({
+      id,
+      fromTray: checked.value.fromTray,
+      toTray: checked.value.toTray,
+      deliveredOn: new Date(`${checked.value.deliveredOn}T00:00:00.000Z`),
+      visitId: input.visitId,
+      createdById: input.createdById,
+      createdAt: new Date(Date.UTC(2026, 10, 16, 15, 0, this.nextId)),
+    });
+    return Promise.resolve({ outcome: 'OK', id });
   }
 }

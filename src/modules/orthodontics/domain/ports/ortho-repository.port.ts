@@ -1,5 +1,13 @@
-import type { OrthoCaseStatus, Prisma } from '@prisma/client';
 import type {
+  OrthoAlignerArch,
+  OrthoCaseStatus,
+  OrthoTechnique,
+  Prisma,
+} from '@prisma/client';
+import type {
+  OrthoAccountPaymentPlan,
+  OrthoAlignerSeriesView,
+  OrthoBalanceFlag,
   OrthoCaseRecord,
   OrthoCaseView,
   OrthoFollowUpFilter,
@@ -8,6 +16,83 @@ import type {
   OrthoVisitView,
 } from '../entities';
 import type { OrthoCasePlan, OrthoVisitData } from '../ortho-rules';
+import type {
+  AlignerDelivery,
+  ChargeFacts,
+  OrthoFeeSplit,
+} from '../ortho-billing';
+
+type Result<T> = { ok: true; value: T } | { ok: false; message: string };
+
+/** DX-285: la moneda que tomaría el honorario. */
+export interface OrthoFeeCurrencySource {
+  /** La del plan ligado, si lo hay. */
+  planCurrency: string | null;
+  /** La de la sede del caso (GLOBAL-G1; NULL solo en sedes antiguas). */
+  locationCurrency: string | null;
+}
+
+export type AcceptOrthoFeeOutcome =
+  | {
+      outcome: 'OK';
+      planId: string;
+      chargesCreated: number;
+      paymentPlanId: string | null;
+    }
+  | {
+      outcome:
+        | 'NOT_FOUND'
+        | 'CLOSED'
+        | 'NO_FEE'
+        | 'ALREADY_ACCEPTED'
+        | 'PLAN_NOT_ACCEPTED'
+        | 'PLAN_SIGNED'
+        | 'PLAN_CLOSED'
+        | 'PLAN_CURRENCY'
+        | 'NO_CURRENCY';
+    };
+
+export interface AcceptOrthoFeeInput {
+  patientId: string;
+  caseId: string;
+  actorId: string;
+  technique: OrthoTechnique;
+}
+
+/** Los hechos de la cuenta de un caso, en UNA lectura. */
+export interface OrthoAccountFacts {
+  today: string;
+  visitsDone: number;
+  charges: ChargeFacts[];
+  paymentPlan: OrthoAccountPaymentPlan | null;
+}
+
+export interface CreateAlignerSeriesInput {
+  caseId: string;
+  arch: OrthoAlignerArch;
+  brand: string;
+  totalTrays: number;
+  daysPerTray: number;
+  refinementOfId: string | null;
+  createdById: string;
+}
+
+export interface AddAlignerDeliveryInput {
+  caseId: string;
+  seriesId: string;
+  visitId: string | null;
+  createdById: string;
+  /** Valida la entrega con la serie y las anteriores, leídas con el caso bloqueado. */
+  validate: (
+    series: { totalTrays: number },
+    previous: AlignerDelivery[],
+  ) => Result<AlignerDelivery>;
+}
+
+export type AddAlignerDeliveryOutcome =
+  | { outcome: 'OK'; id: string }
+  | { outcome: 'SERIES_NOT_FOUND' | 'CASE_CLOSED' }
+  | { outcome: 'INVALID'; message: string };
 
 export const ORTHO_REPOSITORY = Symbol('ORTHO_REPOSITORY');
 export const ORTHO_CLOCK = Symbol('ORTHO_CLOCK');
@@ -100,4 +185,54 @@ export interface OrthoRepository {
   followUp(
     query: OrthoFollowUpQuery,
   ): Promise<{ rows: OrthoFollowUpRow[]; total: number }>;
+
+  // -- DX-285: honorario y cuenta
+
+  feeCurrencySource(caseId: string): Promise<OrthoFeeCurrencySource>;
+  /** null si el honorario ya estaba aceptado (otro lo aceptó a la vez). */
+  setFee(
+    caseId: string,
+    fee: { split: OrthoFeeSplit; currency: string } | null,
+    actorId: string,
+  ): Promise<OrthoCaseRecord | null>;
+  /**
+   * En UNA transacción con el caso bloqueado: crea los ítems en el plan
+   * ligado (o en uno nuevo «Ortodoncia»), los cargos, realiza la inicial y
+   * los controles ya registrados, y marca el honorario aceptado. Con cuotas
+   * ACTIVE en el plan ligado no crea cargos: solo apunta las cuotas.
+   */
+  acceptFee(input: AcceptOrthoFeeInput): Promise<AcceptOrthoFeeOutcome>;
+  accountFacts(
+    patientId: string,
+    caseId: string,
+    now: Date,
+  ): Promise<OrthoAccountFacts | null>;
+  /** Casos con honorario del paciente (para recepción, sin datos clínicos). */
+  casesWithFee(patientId: string): Promise<OrthoCaseRecord[]>;
+  /** El cargo del siguiente control sin realizar pasa a hecho (en `tx`). */
+  realizeVisitCharge(
+    tx: Prisma.TransactionClient,
+    input: { caseId: string; visitId: string; authorId: string },
+  ): Promise<void>;
+  /** Marca «Ortodoncia: saldo vencido» de un lote de pacientes, una consulta. */
+  overdueFlags(
+    patientIds: readonly string[],
+    now: Date,
+  ): Promise<Map<string, OrthoBalanceFlag>>;
+
+  // -- DX-285: alineadores
+
+  listAlignerSeries(
+    caseId: string,
+    today: string,
+  ): Promise<OrthoAlignerSeriesView[]>;
+  seriesOfCase(caseId: string, seriesId: string): Promise<boolean>;
+  visitOfCase(
+    caseId: string,
+    visitId: string,
+  ): Promise<{ visitDate: string } | null>;
+  createAlignerSeries(input: CreateAlignerSeriesInput): Promise<{ id: string }>;
+  addAlignerDelivery(
+    input: AddAlignerDeliveryInput,
+  ): Promise<AddAlignerDeliveryOutcome>;
 }
