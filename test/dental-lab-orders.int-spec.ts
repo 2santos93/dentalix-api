@@ -555,6 +555,28 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
       ).rejects.toThrow(/una orden anulada no se modifica/);
     });
 
+    it('control optimista: escribir con el updatedAt leído avanza la fila; con uno viejo no escribe', async () => {
+      const order = await asApp(a, (tx) =>
+        tx.dentalLabOrder.create({ data: orderData(a) }),
+      );
+      const read = await inContext(a, () => repo.findOrder(order.id));
+      await expect(
+        inContext(a, () =>
+          repo.updateOrder(order.id, read!.updatedAt, { dueOn: '2026-12-01' }),
+        ),
+      ).resolves.toBe(true);
+      const after = await inContext(a, () => repo.findOrder(order.id));
+      expect(after!.updatedAt.getTime()).toBeGreaterThan(
+        read!.updatedAt.getTime(),
+      );
+      await expect(
+        inContext(a, () =>
+          repo.updateOrder(order.id, read!.updatedAt, { dueOn: '2026-12-02' }),
+        ),
+      ).resolves.toBe(false);
+      expect(after!.dueOn).toBe('2026-12-01');
+    });
+
     it('un laboratorio no cambia de clínica', async () => {
       await expect(
         raw.dentalLab.update({

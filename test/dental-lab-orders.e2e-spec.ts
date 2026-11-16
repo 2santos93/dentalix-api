@@ -1093,10 +1093,8 @@ describe('Laboratorio dental — /dental-labs, /patients/:id/lab-orders, /lab-or
       ).toEqual(before);
     });
 
-    // ISOLATION_COVERS: GET /lab-orders ?locationId
-    // ISOLATION_COVERS: GET /lab-orders ?labId
-    // ISOLATION_COVERS: GET /lab-orders/due-date-suggestion ?locationId
-    // ISOLATION_COVERS: GET /lab-orders/due-date-suggestion ?serviceId
+    // DX-207 (tenant-id-inputs): GET /lab-orders ?locationId y ?labId,
+    // GET /lab-orders/due-date-suggestion ?locationId y ?serviceId.
     it('B lista o pide la fecha sugerida con la sede, el laboratorio o el servicio de A: 404 o una lista sin filas de A', async () => {
       await call(
         b,
