@@ -77,6 +77,8 @@ model Tenant {
   orthodonticsEnabled                     Boolean                          @default(false)
   /// DX-190: calibres de arco que ofrece el control de ortodoncia (lista editable de la clínica; 1–40, CHECK tenants_ortho_wire_gauges_check). Un control guardado conserva el que se eligió aunque la lista cambie.
   orthoWireGauges                         String[]                         @default(["0.012", "0.014", "0.016", "0.018", "0.020", "0.016x0.016", "0.016x0.022", "0.017x0.025", "0.018x0.025", "0.019x0.025"])
+  /// DX-285: días tras los que un cargo de ortodoncia realizado y sin pagar marca «Ortodoncia: saldo vencido» en la cita y en «En clínica» (1–365, CHECK tenants_ortho_overdue_days_check; 30 de fábrica). Solo ADMIN (PUT /ortho/settings).
+  orthoOverdueDays                        Int                              @default(30) @db.SmallInt
   /// DX-374: de dónde sale la tasa de cambio del día de la clínica: el
   /// proveedor (AUTOMATIC, lo de siempre) o las tasas manuales que registra
   /// el ADMIN (MANUAL). Lo cambia el ADMIN (PUT /exchange/settings, auditado).
@@ -213,6 +215,10 @@ model Tenant {
   dentalLabs                              DentalLab[]
   dentalLabServices                       DentalLabService[]
   dentalLabOrders                         DentalLabOrder[]
+  // DX-285: cargos del caso en el plan y alineadores.
+  orthoCaseCharges                        OrthoCaseCharge[]
+  orthoAlignerSeries                      OrthoAlignerSeries[]
+  orthoAlignerDeliveries                  OrthoAlignerDelivery[]
   treatmentPlanTemplateLines              TreatmentPlanTemplateLine[]
   // DX-572: órdenes de estudios y referencias externas, plantillas y copias.
   externalOrders                          ExternalOrder[]
@@ -395,6 +401,9 @@ model User {
   dentalLabOrdersChecked            DentalLabOrder[]                 @relation("DentalLabOrderCheckedBy")
   dentalLabOrdersCancelled          DentalLabOrder[]                 @relation("DentalLabOrderCancelledBy")
   orthoVisitsAuthored               OrthoVisit[]
+  // DX-285: series de alineadores y entregas registradas.
+  orthoAlignerSeriesCreated         OrthoAlignerSeries[]
+  orthoAlignerDeliveriesCreated     OrthoAlignerDelivery[]
   sedationChecklists                SedationChecklist[]
   sedationAgentsAdministered        SedationAgentAdministration[]
   sedationVitalsTaken               SedationVitals[]
@@ -2382,6 +2391,8 @@ model TreatmentPlanItem {
   // DX-051: imputaciones de abonos a este ítem y su historial.
   allocations           PaymentAllocation[]
   allocationMovements   PaymentAllocationMovement[]
+  // DX-285: el cargo de ortodoncia que es este ítem (si lo es).
+  orthoCharges          OrthoCaseCharge[]
 
   @@unique([tenantId, patientId, id], map: "treatment_plan_items_tenant_patient_id_key")
   // DX-051: destino de las FK de la imputación (el ítem es del plan del abono).
@@ -2769,6 +2780,8 @@ model Currency {
   // DX-569: enlace de pago y reporte del paciente.
   paymentLinks   PaymentLink[]
   paymentReports PaymentReport[]
+  // DX-285: honorarios de ortodoncia en esa moneda.
+  orthoCaseFees  OrthoCase[]
 
   @@map("currencies")
 }
@@ -3364,6 +3377,8 @@ model PaymentPlan {
   // denormalizado coherentes con el plan de tratamiento).
   plan         TreatmentPlan @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict)
   installments Installment[]
+  // DX-285: casos de ortodoncia cuyo honorario se aceptó con estas cuotas.
+  orthoCases   OrthoCase[]
 
   // La moneda existe en el catálogo `currencies` (DX-042).
   currencyRef Currency @relation(fields: [currency], references: [code])
@@ -8266,14 +8281,40 @@ model OrthoCase {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient         Patient        @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "ortho_cases_patient_fkey")
-  location        Location       @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "ortho_cases_location_fkey")
-  treatmentPlan   TreatmentPlan? @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "ortho_cases_treatment_plan_fkey")
-  provider        User           @relation("OrthoCaseProvider", fields: [providerId], references: [id], onDelete: Restrict, map: "ortho_cases_provider_fkey")
-  createdBy       User           @relation("OrthoCaseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "ortho_cases_created_by_fkey")
-  statusChangedBy User?          @relation("OrthoCaseStatusChangedBy", fields: [statusChangedById], references: [id], onDelete: Restrict, map: "ortho_cases_status_changed_by_fkey")
+  /// DX-285: honorario y su reparto, en `feeCurrency` (la del plan ligado o la
+  /// de la sede). Todo NULL o todo con valor, y total = inicial + porControl ×
+  /// feeVisitCount + retiro (CHECK ortho_cases_fee_check). Aceptado
+  /// (`feeAcceptedAt`) = sus cargos ya están en el plan ligado: desde entonces
+  /// ni el honorario ni el plan cambian (dx_ortho_cases_guard).
+  feeCurrency      String?   @db.Char(3)
+  feeTotal         Decimal?  @db.Decimal(14, 2)
+  feeInitial       Decimal?  @db.Decimal(12, 2)
+  feePerVisit      Decimal?  @db.Decimal(12, 2)
+  /// Controles que se cobran (la web propone los previstos).
+  feeVisitCount    Int?      @db.SmallInt
+  feeRetention     Decimal?  @db.Decimal(12, 2)
+  /// Puntero suave a User (como `createdById` de los planes).
+  feeUpdatedAt     DateTime?
+  feeUpdatedById   String?   @db.Uuid
+  feeAcceptedAt    DateTime?
+  feeAcceptedById  String?   @db.Uuid
+  /// El plan de cuotas ACTIVE que ya tenía el plan ligado al aceptar: los
+  /// cargos NO se crearon (las cuotas ya cobran el tratamiento) y la cuenta
+  /// solo lo informa.
+  feePaymentPlanId String?   @db.Uuid
+
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient         Patient              @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "ortho_cases_patient_fkey")
+  location        Location             @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "ortho_cases_location_fkey")
+  treatmentPlan   TreatmentPlan?       @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "ortho_cases_treatment_plan_fkey")
+  provider        User                 @relation("OrthoCaseProvider", fields: [providerId], references: [id], onDelete: Restrict, map: "ortho_cases_provider_fkey")
+  createdBy       User                 @relation("OrthoCaseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "ortho_cases_created_by_fkey")
+  statusChangedBy User?                @relation("OrthoCaseStatusChangedBy", fields: [statusChangedById], references: [id], onDelete: Restrict, map: "ortho_cases_status_changed_by_fkey")
   visits          OrthoVisit[]
+  feeCurrencyRef  Currency?            @relation(fields: [feeCurrency], references: [code], onDelete: Restrict, map: "ortho_cases_fee_currency_fkey")
+  feePaymentPlan  PaymentPlan?         @relation(fields: [tenantId, feePaymentPlanId], references: [tenantId, id], onDelete: Restrict, map: "ortho_cases_fee_payment_plan_fkey")
+  charges         OrthoCaseCharge[]
+  alignerSeries   OrthoAlignerSeries[]
 
   @@unique([tenantId, id], map: "ortho_cases_tenant_id_key")
   // Destino de las FK compuestas de los controles (y de los cargos de DX-285).
@@ -8283,6 +8324,7 @@ model OrthoCase {
   @@index([providerId], map: "ortho_cases_provider_idx")
   @@index([createdById], map: "ortho_cases_created_by_idx")
   // PARCIALES, no declarables en Prisma:
+  //   ortho_cases_fee_payment_plan_idx ("tenantId", "feePaymentPlanId") WHERE "feePaymentPlanId" IS NOT NULL
   //   ortho_cases_one_active_key UNIQUE ("tenantId", "patientId") WHERE status = 'ACTIVE'
   //   ortho_cases_active_location_idx ("tenantId", "locationId") WHERE status = 'ACTIVE'
   //   ortho_cases_tenant_plan_idx ("tenantId", "treatmentPlanId", "patientId") WHERE "treatmentPlanId" IS NOT NULL
@@ -8316,14 +8358,19 @@ model OrthoVisit {
   authorId            String             @db.Uuid
   createdAt           DateTime           @default(now())
 
-  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient Patient       @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "ortho_visits_patient_fkey")
-  case    OrthoCase     @relation(fields: [tenantId, patientId, caseId], references: [tenantId, patientId, id], onDelete: Restrict, map: "ortho_visits_case_fkey")
-  entry   ClinicalEntry @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id], onDelete: Restrict, map: "ortho_visits_clinical_entry_fkey")
-  author  User          @relation(fields: [authorId], references: [id], onDelete: Restrict, map: "ortho_visits_author_fkey")
+  tenant            Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient           Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "ortho_visits_patient_fkey")
+  case              OrthoCase              @relation(fields: [tenantId, patientId, caseId], references: [tenantId, patientId, id], onDelete: Restrict, map: "ortho_visits_case_fkey")
+  entry             ClinicalEntry          @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id], onDelete: Restrict, map: "ortho_visits_clinical_entry_fkey")
+  author            User                   @relation(fields: [authorId], references: [id], onDelete: Restrict, map: "ortho_visits_author_fkey")
+  // DX-285: el cargo que realizó y las entregas de alineadores en el control.
+  charges           OrthoCaseCharge[]
+  alignerDeliveries OrthoAlignerDelivery[]
 
   @@unique([tenantId, patientId, clinicalEntryId], map: "ortho_visits_entry_key")
   @@unique([tenantId, id], map: "ortho_visits_tenant_id_key")
+  // DX-285: destino de las FK que exigen un control del MISMO caso.
+  @@unique([tenantId, caseId, id], map: "ortho_visits_tenant_case_id_key")
   @@unique([tenantId, patientId, id], map: "ortho_visits_tenant_patient_id_key")
   @@index([tenantId, patientId, caseId, visitDate(sort: Desc), createdAt(sort: Desc)], map: "ortho_visits_case_date_idx")
   @@index([authorId], map: "ortho_visits_author_idx")
@@ -8473,4 +8520,103 @@ model DentalLabOrder {
   //   dental_lab_orders_pending_idx ("tenantId", "locationId", "dueOn")
   //     WHERE "receivedAt" IS NULL AND "cancelledAt" IS NULL
   @@map("dental_lab_orders")
+}
+
+/// DX-285: tipo de cargo de un caso de ortodoncia en su plan.
+enum OrthoChargeKind {
+  INITIAL
+  VISIT
+  RETENTION
+}
+
+/// DX-285: qué ítem del plan ligado es la inicial, el control n.º k o el
+/// retiro del caso, y qué control realizó el suyo. Un control realiza como
+/// mucho UN cargo (único parcial por `visitId`): una adenda no crea control,
+/// así que no vuelve a cobrar. Sin DELETE para la app.
+model OrthoCaseCharge {
+  id         String          @id @default(uuid()) @db.Uuid
+  tenantId   String          @db.Uuid
+  caseId     String          @db.Uuid
+  kind       OrthoChargeKind
+  /// N.º del control (1..240); 0 en la inicial y el retiro (CHECK).
+  sequence   Int             @db.SmallInt
+  planId     String          @db.Uuid
+  planItemId String          @db.Uuid
+  visitId    String?         @db.Uuid
+  createdAt  DateTime        @default(now())
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  case   OrthoCase         @relation(fields: [tenantId, caseId], references: [tenantId, id], onDelete: Restrict, map: "ortho_case_charges_case_fkey")
+  item   TreatmentPlanItem @relation(fields: [tenantId, planItemId, planId], references: [tenantId, id, planId], onDelete: Restrict, map: "ortho_case_charges_item_fkey")
+  visit  OrthoVisit?       @relation(fields: [tenantId, caseId, visitId], references: [tenantId, caseId, id], onDelete: Restrict, map: "ortho_case_charges_visit_fkey")
+
+  @@unique([tenantId, caseId, kind, sequence], map: "ortho_case_charges_case_kind_key")
+  @@unique([tenantId, planItemId], map: "ortho_case_charges_item_key")
+  // PARCIAL, no declarable en Prisma:
+  //   ortho_case_charges_visit_key UNIQUE ("tenantId", "visitId") WHERE "visitId" IS NOT NULL
+  @@map("ortho_case_charges")
+}
+
+/// DX-285: arcada de una serie de alineadores.
+enum OrthoAlignerArch {
+  UPPER
+  LOWER
+  BOTH
+}
+
+/// DX-285: serie de alineadores de un caso. Un refinamiento abre una serie
+/// nueva (`refinementOfId`, del MISMO caso) y la anterior se conserva.
+/// Append-only.
+model OrthoAlignerSeries {
+  id             String           @id @default(uuid()) @db.Uuid
+  tenantId       String           @db.Uuid
+  caseId         String           @db.Uuid
+  arch           OrthoAlignerArch
+  brand          String
+  totalTrays     Int              @db.SmallInt
+  daysPerTray    Int              @db.SmallInt
+  refinementOfId String?          @db.Uuid
+  createdById    String           @db.Uuid
+  createdAt      DateTime         @default(now())
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  case         OrthoCase              @relation(fields: [tenantId, caseId], references: [tenantId, id], onDelete: Restrict, map: "ortho_aligner_series_case_fkey")
+  refinementOf OrthoAlignerSeries?    @relation("OrthoAlignerRefinement", fields: [tenantId, caseId, refinementOfId], references: [tenantId, caseId, id], onDelete: Restrict, map: "ortho_aligner_series_refinement_fkey")
+  refinements  OrthoAlignerSeries[]   @relation("OrthoAlignerRefinement")
+  createdBy    User                   @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "ortho_aligner_series_created_by_fkey")
+  deliveries   OrthoAlignerDelivery[]
+
+  @@unique([tenantId, caseId, id], map: "ortho_aligner_series_tenant_case_id_key")
+  @@index([tenantId, caseId, createdAt], map: "ortho_aligner_series_case_created_idx")
+  @@index([createdById], map: "ortho_aligner_series_created_by_idx")
+  // PARCIAL, no declarable en Prisma:
+  //   ortho_aligner_series_refinement_idx ("tenantId", "caseId", "refinementOfId") WHERE "refinementOfId" IS NOT NULL
+  @@map("ortho_aligner_series")
+}
+
+/// DX-285: entrega de bandejas de una serie (de la X a la Y, seguidas), con
+/// su día civil y, si fue en un control, ese control. Append-only.
+model OrthoAlignerDelivery {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  caseId      String   @db.Uuid
+  seriesId    String   @db.Uuid
+  fromTray    Int      @db.SmallInt
+  toTray      Int      @db.SmallInt
+  deliveredOn DateTime @db.Date
+  visitId     String?  @db.Uuid
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  series    OrthoAlignerSeries @relation(fields: [tenantId, caseId, seriesId], references: [tenantId, caseId, id], onDelete: Restrict, map: "ortho_aligner_deliveries_series_fkey")
+  visit     OrthoVisit?        @relation(fields: [tenantId, caseId, visitId], references: [tenantId, caseId, id], onDelete: Restrict, map: "ortho_aligner_deliveries_visit_fkey")
+  createdBy User               @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "ortho_aligner_deliveries_created_by_fkey")
+
+  @@unique([tenantId, seriesId, fromTray], map: "ortho_aligner_deliveries_series_from_key")
+  @@index([tenantId, caseId, seriesId], map: "ortho_aligner_deliveries_case_series_idx")
+  @@index([createdById], map: "ortho_aligner_deliveries_created_by_idx")
+  // PARCIAL, no declarable en Prisma:
+  //   ortho_aligner_deliveries_visit_idx ("tenantId", "caseId", "visitId") WHERE "visitId" IS NOT NULL
+  @@map("ortho_aligner_deliveries")
 }

@@ -1,3 +1,4 @@
+import { OrthoBalanceFlagDto } from '../../../orthodontics/presentation/dto/ortho.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, Matches } from 'class-validator';
 import { TriageFlag } from '@prisma/client';
@@ -107,6 +108,12 @@ export class InClinicItemDto {
       'DX-247: la misma alerta médica que la tarjeta de la agenda (solo banderas).',
   })
   medicalAlerts!: MedicalAlertFlagsDto;
+  @ApiProperty({
+    type: OrthoBalanceFlagDto,
+    description:
+      'DX-285: la misma marca «Ortodoncia: saldo vencido» que la tarjeta de la agenda (sin importe).',
+  })
+  orthoBalance!: OrthoBalanceFlagDto;
   @ApiProperty({
     description:
       'DX-470: la cita es de un tipo de urgencia (insignia «Urgencia» en el panel).',

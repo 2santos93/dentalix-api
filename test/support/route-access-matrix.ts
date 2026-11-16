@@ -514,6 +514,16 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /ortho/settings': EVERY_ROLE,
   'PUT /ortho/settings': ADMIN_ONLY,
   'GET /ortho/follow-up': EVERY_ROLE,
+  // DX-285: la cuenta del caso la ven los cuatro roles (recepción cobra); el
+  // honorario y los alineadores, como el caso.
+  'GET /patients/:patientId/ortho-cases/accounts': EVERY_ROLE,
+  'GET /patients/:patientId/ortho-cases/:caseId/account': EVERY_ROLE,
+  'PUT /patients/:patientId/ortho-cases/:caseId/fee': PRESCRIBERS,
+  'POST /patients/:patientId/ortho-cases/:caseId/fee/accept': PRESCRIBERS,
+  'GET /patients/:patientId/ortho-cases/:caseId/aligners': CLINICAL,
+  'POST /patients/:patientId/ortho-cases/:caseId/aligner-series': PRESCRIBERS,
+  'POST /patients/:patientId/ortho-cases/:caseId/aligner-series/:seriesId/deliveries':
+    PRESCRIBERS,
 
   // --- Laboratorio dental (DX-017) -------------------------------------------
   // .planning/DX-017/CONTRACT.md. Catálogo: lo leen los 4 (selectores) y lo

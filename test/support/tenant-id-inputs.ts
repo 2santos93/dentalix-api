@@ -227,6 +227,11 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
     'orthodontics.e2e-spec.ts',
   'POST /patients/:patientId/ortho-cases/:caseId/visits body.appointmentId':
     'orthodontics.e2e-spec.ts',
+  // DX-285: B con la serie o el control de A en el cuerpo → 400.
+  'POST /patients/:patientId/ortho-cases/:caseId/aligner-series body.refinementOfId':
+    'ortho-billing.e2e-spec.ts',
+  'POST /patients/:patientId/ortho-cases/:caseId/aligner-series/:seriesId/deliveries body.visitId':
+    'ortho-billing.e2e-spec.ts',
   // DX-146: «B pide "Por avisar hoy" con la sede de A → 400 en español, y su
   // lista no trae a nadie de A».
   'GET /receivables/reminders ?locationId': 'receivables-reminders.e2e-spec.ts',
