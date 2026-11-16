@@ -62,6 +62,7 @@ import { CancellationPolicyController } from '../cancellation-policies/presentat
 import { CancellationFeeController } from '../cancellation-fees/presentation/cancellation-fee.controller';
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
+import { QuoteFunnelController } from '../reports/presentation/quote-funnel.controller';
 import { UnallocatedPaymentsController } from '../reports/presentation/unallocated-payments.controller';
 import { RecoveredSlotsController } from '../reports/presentation/recovered-slots.controller';
 import { ChairOccupancyController } from '../reports/presentation/chair-occupancy.controller';
@@ -2332,6 +2333,7 @@ const CONTROLLERS: Type[] = [
   CancellationFeeController,
   DiscountReportController,
   ProductionByProcedureController,
+  QuoteFunnelController,
   UnallocatedPaymentsController,
   RecoveredSlotsController,
   ChairOccupancyController,
