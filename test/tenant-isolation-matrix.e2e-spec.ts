@@ -2978,6 +2978,57 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           : []),
       ];
     }),
+    // DX-558: embudo de presupuestos (agregado, CSV y detalle). Una sede de
+    // A es 403 (el mismo rechazo que una sede no permitida); el profesional
+    // de A da un embudo vacío.
+    ...(
+      [
+        '/reports/quote-funnel',
+        '/reports/quote-funnel.csv',
+        '/reports/quote-funnel/presentations',
+      ] as const
+    ).flatMap((route): IsolationCase[] => {
+      const range = `from=${day(-30)}&to=${day(0)}&`;
+      const detail = route.endsWith('/presentations');
+      const extra = detail ? 'step=PRESENTED&' : '';
+      const empty = (body: unknown, text: string) => {
+        if (route.endsWith('.csv')) {
+          // Cabecera, columnas y solo la fila «Total», a cero.
+          const rows = text.trim().split('\r\n');
+          expect(rows).toHaveLength(9);
+          expect(rows[8]).toMatch(/^"Total",0,/);
+        } else if (detail) {
+          expect(body).toMatchObject({ items: [], total: 0 });
+        } else {
+          const funnel = body as {
+            steps: { key: string; count: number }[];
+          };
+          expect(funnel.steps.map((s) => s.count)).toEqual([0, 0, 0, 0, 0]);
+          expect(body).toMatchObject({
+            byProfessional: [],
+            rejectionReasons: [],
+          });
+        }
+      };
+      return [
+        {
+          name: `GET ${route} ?locationId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}${extra}locationId=${a.locationId}`,
+          queryIds: ['locationId'],
+          status: 403,
+          message: 'No tienes acceso a esta sede.',
+        },
+        {
+          name: `GET ${route} ?providerId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}${extra}providerId=${a.dentistUserId}`,
+          queryIds: ['providerId'],
+          status: 200,
+          expectBody: empty,
+        },
+      ];
+    }),
     // DX-436: huecos recuperados. Una sede de A es 403 (sin decir si
     // existe); el profesional de A da un informe sin filas suyas.
     ...(
