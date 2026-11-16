@@ -14,6 +14,12 @@ import {
   revokeLivePublicLinks,
 } from '../src/modules/patients/infrastructure/patient-public-links';
 import {
+  backendPid,
+  gate,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
+import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
 } from './support/location-fixtures';
@@ -74,6 +80,7 @@ async function cleanup(): Promise<void> {
   await owner.externalOrderCopyLink.deleteMany({ where });
   await owner.externalOrder.deleteMany({ where });
   await owner.externalOrderTemplate.deleteMany({ where });
+  await owner.patientCertificate.deleteMany({ where });
   await owner.$executeRaw`DELETE FROM "patient_documents" WHERE "tenantId" = ANY(${ids}::uuid[])`;
   await owner.appointment.deleteMany({ where });
   await owner.patient.deleteMany({ where });
@@ -471,6 +478,169 @@ describe('external_orders (int, DX-572)', () => {
         ),
       ).resolves.toEqual({ kind: 'NOT_ISSUED' });
     });
+  });
+
+  /** Un paciente propio para las pruebas que lo archivan. */
+  const freshPatient = async (clinic: Clinic) =>
+    (
+      await owner.patient.create({
+        data: {
+          tenantId: clinic.tenantId,
+          firstName: 'Carmen',
+          lastName: `Archivable ${randomUUID().slice(0, 8)}`,
+        },
+      })
+    ).id;
+
+  it('emitir bloquea al paciente vivo: archivado, 409 y no queda orden', async () => {
+    const patientId = await freshPatient(a);
+    await owner.patient.update({
+      where: { id: patientId },
+      data: { deletedAt: new Date() },
+    });
+    await expect(issue(a, { patientId })).rejects.toThrow(
+      'El paciente está archivado: no se emiten documentos nuevos a su nombre.',
+    );
+    expect(await owner.externalOrder.count({ where: { patientId } })).toBe(0);
+  });
+
+  it('el resultado no puede ser un PDF generado (de una orden, vivo o anulado, o de un certificado)', async () => {
+    const order = await issue(a);
+    const target = await issue(a);
+    await expect(
+      asClinic(a, () =>
+        repo.linkResult(target.id, undefined, order.documentId!, a.userId),
+      ),
+    ).resolves.toEqual({ kind: 'DOCUMENT_GENERATED' });
+    const voided = await asClinic(a, () =>
+      repo.voidOrder(
+        order.id,
+        undefined,
+        { userId: a.userId, reason: 'Estudio equivocado' },
+        () => undefined,
+        archive,
+      ),
+    );
+    if (voided.kind !== 'VOIDED') throw new Error(voided.kind);
+    await expect(
+      asClinic(a, () =>
+        repo.linkResult(
+          target.id,
+          undefined,
+          voided.order.voidedDocumentId!,
+          a.userId,
+        ),
+      ),
+    ).resolves.toEqual({ kind: 'DOCUMENT_GENERATED' });
+    // El PDF de un certificado del paciente, tampoco.
+    const certDoc = await document(a);
+    const start = new Date(Date.UTC(2026, 10, 4, 13, 0));
+    const appt = await owner.appointment.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: a.locationId,
+        patientId: a.patientId,
+        providerId: a.userId,
+        start,
+        end: new Date(start.getTime() + 30 * 60_000),
+      },
+    });
+    await owner.$executeRaw`INSERT INTO "patient_certificates"
+      ("tenantId","patientId","appointmentId","locationId","professionalMembershipId",
+       "issuedById","kind","number","attendedFrom","attendedUntil","timesSource","snapshot")
+      VALUES (${a.tenantId}::uuid, ${a.patientId}::uuid, ${appt.id}::uuid, ${a.locationId}::uuid,
+        ${a.membershipId}::uuid, ${a.userId}::uuid, 'ATTENDANCE', 0, now(), now(), 'SCHEDULED', '{}'::jsonb)`;
+    await owner.$executeRaw`UPDATE "patient_certificates" SET "documentId" = ${certDoc}::uuid
+      WHERE "appointmentId" = ${appt.id}::uuid`;
+    await expect(
+      asClinic(a, () =>
+        repo.linkResult(target.id, undefined, certDoc, a.userId),
+      ),
+    ).resolves.toEqual({ kind: 'DOCUMENT_GENERATED' });
+    // Un estudio subido sí.
+    const study = await document(a);
+    await expect(
+      asClinic(a, () => repo.linkResult(target.id, undefined, study, a.userId)),
+    ).resolves.toMatchObject({ kind: 'LINKED' });
+  });
+
+  it('anular frente a archivar a la vez (con un enlace vivo): sin interbloqueo; archivar gana y anular da 409', async () => {
+    const patientId = await freshPatient(a);
+    const order = await issue(a, { patientId });
+    await asClinic(a, () =>
+      copies.issueLink({
+        id: randomUUID(),
+        orderId: order.id,
+        patientId,
+        channel: 'WHATSAPP',
+        destinationMasked: '••• 4567',
+        tokenHash: createHash('sha256').update(randomUUID()).digest('hex'),
+        expiresAt: new Date(Date.now() + 3_600_000),
+        createdById: a.userId,
+        now: new Date(),
+      }),
+    );
+    // Archivar como la app: bloquea al paciente (FOR UPDATE) y, cuando se le
+    // dice, anula sus enlaces y lo archiva en la MISMA transacción.
+    const locked = gate<number>();
+    const proceed = gate();
+    const archiving = settle(
+      asApp(a, async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "patients"
+          WHERE "id" = ${patientId}::uuid FOR UPDATE`;
+        locked.open(await backendPid(tx));
+        await proceed.wait;
+        const now = new Date();
+        const revoked = await revokeLivePublicLinks(tx, {
+          tenantId: a.tenantId,
+          patientId,
+          now,
+          actorId: a.userId,
+        });
+        await tx.patient.update({
+          where: { id: patientId },
+          data: { deletedAt: now },
+        });
+        return revoked;
+      }),
+    );
+    const archivePid = await locked.wait;
+    const voiding = settle(
+      asClinic(a, () =>
+        repo.voidOrder(
+          order.id,
+          undefined,
+          { userId: a.userId, reason: 'Estudio equivocado' },
+          () => undefined,
+          archive,
+        ),
+      ),
+    );
+    // Anular espera al paciente que tiene archivar (señal de pg_locks).
+    await waitForLockWaiters(owner, [archivePid]);
+    proceed.open();
+    const [archived, voided] = await Promise.all([archiving, voiding]);
+    for (const outcome of [archived, voided]) {
+      if (outcome.status === 'rejected') {
+        expect(String(outcome.reason)).not.toMatch(/40P01|deadlock/i);
+      }
+    }
+    expect(archived).toMatchObject({
+      status: 'fulfilled',
+      value: { externalOrderCopies: 1 },
+    });
+    expect(voided.status).toBe('rejected');
+    if (voided.status === 'rejected') {
+      expect(String(voided.reason)).toMatch(/El paciente está archivado/);
+    }
+    const row = await owner.externalOrder.findUniqueOrThrow({
+      where: { id: order.id },
+    });
+    expect(row.status).toBe('ISSUED');
+    const links = await owner.externalOrderCopyLink.findMany({
+      where: { orderId: order.id },
+    });
+    expect(links.every((l) => l.revokedAt !== null)).toBe(true);
   });
 
   it('RLS FORCE: otra clínica no ve, no lee, no anula ni liga; no puede insertar con el tenant de A', async () => {

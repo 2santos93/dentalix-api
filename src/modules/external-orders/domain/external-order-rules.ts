@@ -95,6 +95,8 @@ export const EXTERNAL_ORDER_MESSAGES = {
   unlinkNotReceived: 'La orden no tiene un resultado ligado.',
   resultDocumentNotFound: 'El documento no existe o no es de este paciente.',
   resultDocumentVoided: 'El documento está anulado: elige otro.',
+  resultDocumentGenerated:
+    'Ese documento es el PDF de una orden o de un certificado; liga el estudio que llegó.',
   issuerMissing: 'No eres miembro de esta clínica.',
   templateNotFound: 'La plantilla no existe en esta clínica.',
   templateInactive:

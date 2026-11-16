@@ -438,6 +438,10 @@ export class ExternalOrdersUseCases {
         throw new ConflictException(
           EXTERNAL_ORDER_MESSAGES.resultDocumentVoided,
         );
+      case 'DOCUMENT_GENERATED':
+        throw new ConflictException(
+          EXTERNAL_ORDER_MESSAGES.resultDocumentGenerated,
+        );
       case 'LINKED':
         return this.forViewer(result.order, actor);
     }

@@ -491,6 +491,30 @@ describe('Órdenes de estudios y referencias externas (e2e, DX-572)', () => {
       .expect(200);
   });
 
+  it('el resultado no puede ser el PDF que generó la clínica (409); a un paciente ya archivado no se le emite (404; la carrera da 409, ver el int)', async () => {
+    const order = await issued();
+    const target = await issued();
+    const res = await as(clinicA, receptionToken)
+      .post(`/external-orders/${target.id}/result`, {
+        documentId: order.documentId,
+      })
+      .expect(409);
+    expect((res.body as ErrorBody).message).toBe(
+      'Ese documento es el PDF de una orden o de un certificado; liga el estudio que llegó.',
+    );
+    const archivedPatient = await raw.patient.create({
+      data: {
+        tenantId: clinicA.tenantId,
+        firstName: 'Rosa',
+        lastName: 'Archivada',
+        deletedAt: new Date(),
+      },
+    });
+    // Leído vivo y archivado después: el candado del paciente lo detiene.
+    // (Ya archivado al leer, el contexto lo da por no encontrado: 404.)
+    await issue({}, dentistToken, clinicA, archivedPatient.id).expect(404);
+  });
+
   it('el resultado es un documento vivo del MISMO paciente', async () => {
     const order = await issued();
     const other = await raw.patient.create({

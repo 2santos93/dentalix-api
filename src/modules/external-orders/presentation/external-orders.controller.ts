@@ -386,7 +386,7 @@ export class ExternalOrdersController {
   })
   @ApiConflictResponse({
     description:
-      'La orden está anulada o ya tiene resultado, o el documento está anulado',
+      'La orden está anulada o ya tiene resultado, el documento está anulado, o es el PDF de una orden o de un certificado',
   })
   async linkResult(
     @Param('id', ParseUUIDPipe) id: string,

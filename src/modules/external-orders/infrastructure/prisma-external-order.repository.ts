@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { EXTERNAL_ORDER_MESSAGES } from '../domain/external-order-rules';
 import {
   readExternalOrderSnapshot,
   type ExternalOrder,
@@ -210,6 +212,16 @@ export class PrismaExternalOrderRepository implements ExternalOrderRepository {
   ): Promise<ExternalOrder> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // Primer candado: el paciente vivo (el orden de archivar y fusionar,
+      // paciente → lo suyo). Archivado entre la lectura y aquí: 409.
+      try {
+        await lockLivePatientOrConflict(tx, input.patientId);
+      } catch (error) {
+        if (error instanceof ConflictException) {
+          throw new ConflictException(EXTERNAL_ORDER_MESSAGES.patientArchived);
+        }
+        throw error;
+      }
       const created = await tx.externalOrder.create({
         data: {
           tenantId,
@@ -326,6 +338,16 @@ export class PrismaExternalOrderRepository implements ExternalOrderRepository {
   ): Promise<VoidExternalOrderResult> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
+      // Candados en el orden de archivar y fusionar (lock-live-patient.ts):
+      // primero el paciente, luego la orden y sus enlaces. Al revés, anular
+      // (orden → enlaces → paciente por la FK del documento) y archivar
+      // (paciente → enlaces) se interbloqueaban.
+      const owner = await tx.externalOrder.findFirst({
+        where: { id },
+        select: { patientId: true },
+      });
+      if (!owner) return { kind: 'NOT_FOUND' };
+      await lockLivePatientOrConflict(tx, owner.patientId);
       const current = await this.lockOrder(tx, id, locationIds);
       if (!current) return { kind: 'NOT_FOUND' };
       authorize(current);
@@ -389,6 +411,19 @@ export class PrismaExternalOrderRepository implements ExternalOrderRepository {
       });
       if (!document) return { kind: 'DOCUMENT_NOT_FOUND' };
       if (document.voidedAt !== null) return { kind: 'DOCUMENT_VOIDED' };
+      // Un PDF que generó la clínica (de una orden o de un certificado, vivo
+      // o anulado) no es el estudio que llegó.
+      const [generated] = await tx.$queryRaw<{ found: boolean }[]>`
+        SELECT EXISTS (
+          SELECT 1 FROM "external_orders"
+           WHERE "documentId" = ${documentId}::uuid
+              OR "voidedDocumentId" = ${documentId}::uuid
+        ) OR EXISTS (
+          SELECT 1 FROM "patient_certificates"
+           WHERE "documentId" = ${documentId}::uuid
+              OR "voidedDocumentId" = ${documentId}::uuid
+        ) AS "found"`;
+      if (generated?.found) return { kind: 'DOCUMENT_GENERATED' };
       const row = await tx.externalOrder.update({
         where: { id },
         data: {

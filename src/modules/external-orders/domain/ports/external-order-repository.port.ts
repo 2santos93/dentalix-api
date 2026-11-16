@@ -94,7 +94,9 @@ export type LinkResultOutcome =
   | { kind: 'VOIDED' }
   | { kind: 'NOT_ISSUED' }
   | { kind: 'DOCUMENT_NOT_FOUND' }
-  | { kind: 'DOCUMENT_VOIDED' };
+  | { kind: 'DOCUMENT_VOIDED' }
+  /** El documento es el PDF de una orden o de un certificado. */
+  | { kind: 'DOCUMENT_GENERATED' };
 
 export type UnlinkResultOutcome =
   | { kind: 'UNLINKED'; order: ExternalOrder }
