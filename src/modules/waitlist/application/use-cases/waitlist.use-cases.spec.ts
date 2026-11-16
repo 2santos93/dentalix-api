@@ -59,6 +59,8 @@ const locations = {
 } as unknown as LocationRepository;
 const noSchedule = {
   findByLocation: () => Promise.resolve(null),
+  // DX-263-bis: sin festivos en la sede.
+  holidaysOf: () => Promise.resolve({ timeZone: null, holidays: [] }),
   findForCurrentLocation: () => Promise.resolve(null),
 } as unknown as LocationScheduleRepository;
 

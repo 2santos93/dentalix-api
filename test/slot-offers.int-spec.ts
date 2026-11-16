@@ -1,3 +1,4 @@
+import { civilDateIn } from '../src/shared/time/civil-day';
 import { randomUUID } from 'node:crypto';
 import { NotFoundException } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
@@ -16,6 +17,7 @@ import {
 } from '../src/modules/waitlist/application/use-cases/public-slot-offers.use-cases';
 import { ExpireSlotOffers } from '../src/modules/waitlist/application/expire-slot-offers';
 import type { LocationScheduleRepository } from '../src/modules/location-schedule/domain/ports/location-schedule-repository.port';
+import { PrismaLocationScheduleRepository } from '../src/modules/location-schedule/infrastructure/repositories/prisma-location-schedule.repository';
 import {
   SLOT_OFFER_NOT_FOUND_MESSAGE,
   generateSlotOfferToken,
@@ -42,8 +44,14 @@ const availability = new ProviderAvailabilityService(
   new PrismaProviderScheduleRepository(prisma, tenantContext),
   new PrismaLocationRepository(prisma, tenantContext),
 );
+// Sin horario de la sede; los festivos (DX-263-bis), los de verdad.
+const realSchedule = new PrismaLocationScheduleRepository(
+  prisma,
+  tenantContext,
+);
 const noSchedule = {
   findByLocation: () => Promise.resolve(null),
+  holidaysOf: (id?: string) => realSchedule.holidaysOf(id),
 } as unknown as LocationScheduleRepository;
 const clock = () => new Date();
 
@@ -811,8 +819,13 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       expect(results.map((r) => r.chairId).sort()).toEqual(
         [first, second].sort(),
       );
-      // Las dos eligieron el primero; una perdió en la BD y volvió a elegir.
-      expect(spy.calls()).toBe(3);
+      // Las dos eligieron el primero; al menos una perdió en la BD y volvió a
+      // elegir. DX-263-bis: no siempre una sola vez: según cuál de las dos
+      // tome Postgres como víctima (23P01 por sillón o un deadlock, ambos
+      // reintentables) puede haber un reintento más; pasaba igual en main
+      // (3 de 6 corridas en local). Lo que importa: dos citas, sillones
+      // distintos, las dos ACCEPTED.
+      expect(spy.calls()).toBeGreaterThanOrEqual(3);
       expect(
         await owner.appointment.count({ where: { tenantId: a.tenantId } }),
       ).toBe(2);
@@ -1028,6 +1041,33 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
           where: { id: a.locationId },
           data: { isActive: true },
         });
+      }
+    });
+
+    it('DX-263-bis: un festivo de la sede añadido después de ofrecer el hueco: «no disponible» y no crea nada', async () => {
+      const { token, offerId } = await offerToEntry(a, 0);
+      const location = await owner.location.findUniqueOrThrow({
+        where: { id: a.locationId },
+        select: { timeZone: true },
+      });
+      const day = civilDateIn(at('15:00'), location.timeZone!);
+      const holiday = await owner.locationHoliday.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          date: new Date(`${day}T00:00:00.000Z`),
+          name: 'Cierre por festivo',
+        },
+      });
+      try {
+        const tried = await inClinic(a, () => acceptOffer.execute(token, META));
+        expect(tried.state).toBe('UNAVAILABLE');
+        expect(
+          await owner.appointment.count({ where: { tenantId: a.tenantId } }),
+        ).toBe(0);
+        expect(await outcomeOf(offerId)).toBe('PENDING');
+      } finally {
+        await owner.locationHoliday.delete({ where: { id: holiday.id } });
       }
     });
 

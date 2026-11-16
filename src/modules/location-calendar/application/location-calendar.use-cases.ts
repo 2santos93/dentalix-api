@@ -3,6 +3,7 @@ import {
   HOLIDAY_MESSAGES,
   HolidayRuleError,
   assertRecurringAllowed,
+  holidayOn,
   normalizeWorkingWeekdays,
   validateHolidayDate,
   validateHolidayName,
@@ -58,7 +59,9 @@ export class GetLocationCalendarUseCase {
 
 /**
  * DX-358: ¿es festivo ese día en la sede? Lo consulta quien agenda (no solo
- * ADMIN) para avisar, nunca para bloquear. Respeta las sedes del miembro.
+ * ADMIN) para avisar ANTES de guardar. Desde DX-263-bis agendar o mover a un
+ * festivo es 409 `LOCATION_HOLIDAY` (la misma regla, `holidayOn`); esto solo
+ * adelanta el aviso. Respeta las sedes del miembro.
  */
 @Injectable()
 export class FindHolidayOnDayUseCase {
@@ -74,11 +77,7 @@ export class FindHolidayOnDayUseCase {
   ): Promise<{ date: string; name: string | null }> {
     this.tenantContext.assertLocationAllowed(locationId);
     const { holidays } = await this.repo.get(locationId);
-    const monthDay = date.slice(5);
-    const holiday = holidays.find(
-      (h) => h.date === date || (h.recurring && h.date.slice(5) === monthDay),
-    );
-    return { date, name: holiday?.name ?? null };
+    return { date, name: holidayOn(date, holidays)?.name ?? null };
   }
 }
 

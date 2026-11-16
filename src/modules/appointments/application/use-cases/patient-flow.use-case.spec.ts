@@ -34,6 +34,8 @@ const HOUR = 60 * 60 * 1000;
 
 const schedule = {
   findByLocation: () => Promise.resolve(null),
+  // DX-263-bis: sin festivos en la sede.
+  holidaysOf: () => Promise.resolve({ timeZone: null, holidays: [] }),
 } as unknown as LocationScheduleRepository;
 const staff = {
   findById: (userId: string) => Promise.resolve({ userId, role: 'DENTIST' }),

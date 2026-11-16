@@ -242,7 +242,7 @@ export class AppointmentsController {
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita (del profesional, del paciente o, DX-211, del sillón: «El sillón X ya está ocupado de HH:MM a HH:MM»), el horario está bloqueado para ese profesional o la sede (DX-122), o es un hueco reservado para otros tipos y aún sin liberar (DX-446: `code: RESERVED_SLOT`, `canOverride` dice si quien agenda puede reintentar con `overrideReason`)',
+      'Solape con otra cita (del profesional, del paciente o, DX-211, del sillón: «El sillón X ya está ocupado de HH:MM a HH:MM»), el horario está bloqueado para ese profesional o la sede (DX-122), o es un hueco reservado para otros tipos y aún sin liberar (DX-446: `code: RESERVED_SLOT`, `canOverride` dice si quien agenda puede reintentar con `overrideReason`). DX-263-bis: ese día la sede está cerrada por festivo (DX-316, en su zona): `code: LOCATION_HOLIDAY`, `holiday` con `date` y `name`, y el nombre en el mensaje',
   })
   @ApiUnprocessableEntityResponse({
     description: 'Fuera del horario de atención de la sede',
@@ -587,7 +587,7 @@ export class AppointmentsController {
   })
   @ApiConflictResponse({
     description:
-      'Solape con otra cita del profesional, del paciente o del sillón (DX-211, con su nombre y horas; también si otro movimiento ganó la carrera): cuerpo con `code: APPOINTMENT_OVERLAP` y `scope` (`provider` | `patient` | `chair`) para que la web ofrezca el siguiente hueco (DX-509-bis, DX-492-bis). El nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200). DX-509: `OVERBOOK_SLOT_TAKEN` (`canKeepOverbooked`) al reactivar una urgencia en sobrecupo cuya hora ya ocupa otra cita del profesional; se puede reintentar con `keepOverbooked: true`. DX-267-bis: reactivar (CANCELLED/NO_SHOW → SCHEDULED/CONFIRMED) aplica las reglas de mover a su misma hora y profesional (bloqueos, hueco reservado, horario del profesional en modo estricto, solapes); si la cita ya terminó, `code: APPOINTMENT_PAST` («La cita ya pasó: agenda una nueva»)',
+      'Solape con otra cita del profesional, del paciente o del sillón (DX-211, con su nombre y horas; también si otro movimiento ganó la carrera): cuerpo con `code: APPOINTMENT_OVERLAP` y `scope` (`provider` | `patient` | `chair`) para que la web ofrezca el siguiente hueco (DX-509-bis, DX-492-bis). El nuevo horario está bloqueado (DX-122) o reservado sin liberar (DX-446, `RESERVED_SLOT`), o un salto imposible del flujo en la clínica o la cita cambió mientras tanto (DX-200). DX-509: `OVERBOOK_SLOT_TAKEN` (`canKeepOverbooked`) al reactivar una urgencia en sobrecupo cuya hora ya ocupa otra cita del profesional; se puede reintentar con `keepOverbooked: true`. DX-267-bis: reactivar (CANCELLED/NO_SHOW → SCHEDULED/CONFIRMED) aplica las reglas de mover a su misma hora y profesional (bloqueos, hueco reservado, horario del profesional en modo estricto, solapes); si la cita ya terminó, `code: APPOINTMENT_PAST` («La cita ya pasó: agenda una nueva»). DX-263-bis: mover o reactivar a un día en que la sede está cerrada por festivo es `code: LOCATION_HOLIDAY` (`holiday` con `date` y `name`), salvo con el paciente ya en la clínica',
   })
   @ApiUnprocessableEntityResponse({
     description:

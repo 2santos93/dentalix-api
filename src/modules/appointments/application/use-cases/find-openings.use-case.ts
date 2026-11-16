@@ -35,12 +35,14 @@ import { ProviderAvailabilityService } from '../../../provider-schedule/applicat
 import { DEFAULT_BUSINESS_HOURS } from '../../../../shared/locations/default-business-hours';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import {
+  addCivilDays,
   civilDaysInclusive,
   civilRangeInZone,
   parseCivilDate,
 } from '../../../../shared/time/civil-day';
 import { assertAttendsAt } from '../../../staff/domain/provider-location';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { holidayOn } from '../../../location-calendar/domain/holiday-rules';
 
 export interface FindOpeningsInput {
   providerId: string;
@@ -68,6 +70,11 @@ export interface OpeningsView {
    * interfaz lo dice para que «no hay huecos a las 23:30» no parezca un fallo.
    */
   defaultHours: boolean;
+  /**
+   * DX-263-bis: los festivos de la sede (DX-316) dentro del rango, por día,
+   * con su nombre. Esos días no dan huecos: la sede está cerrada.
+   */
+  holidays: { date: string; name: string }[];
 }
 
 /**
@@ -193,6 +200,19 @@ export class FindOpeningsUseCase {
       input.to,
     );
 
+    // DX-263-bis: la sede cerrada por festivo no ofrece huecos ese día (la
+    // misma regla que agendar: `holidayOn`, en la zona de la sede).
+    const { holidays: calendar } = await this.schedule.holidaysOf(
+      input.locationId,
+    );
+    const holidays: OpeningsView['holidays'] = [];
+    for (let i = 0; i < days; i++) {
+      const day = addCivilDays(input.from, i);
+      const hit = holidayOn(day, calendar);
+      if (hit) holidays.push({ date: day, name: hit.name });
+    }
+    const closed = new Set(holidays.map((h) => h.date));
+
     const now = new Date();
     const openingsWith = (extraBusy: readonly Interval[]) =>
       findOpenings({
@@ -204,6 +224,7 @@ export class FindOpeningsUseCase {
         durationMinutes: input.durationMinutes,
         now,
         providerRangesOn,
+        isClosedDay: (day) => closed.has(day),
       });
 
     if (chairs.length === 0) {
@@ -211,6 +232,7 @@ export class FindOpeningsUseCase {
         timeZone,
         durationMinutes: input.durationMinutes,
         defaultHours,
+        holidays,
         ...openingsWith([]),
       };
     }
@@ -231,6 +253,7 @@ export class FindOpeningsUseCase {
       timeZone,
       durationMinutes: input.durationMinutes,
       defaultHours,
+      holidays,
       ...mergeChairOpenings(perChair),
     };
   }

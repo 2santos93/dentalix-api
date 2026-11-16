@@ -47,6 +47,11 @@ export interface OpeningsQuery {
    * como antes (solo el horario de la sede).
    */
   providerRangesOn?: (day: string) => readonly MinuteRange[] | null;
+  /**
+   * DX-263-bis: días civiles en los que la sede está cerrada (sus festivos,
+   * DX-316): no se propone ningún hueco ese día. Sin la función, ninguno.
+   */
+  isClosedDay?: (day: string) => boolean;
 }
 
 export interface OpeningsResult {
@@ -120,6 +125,7 @@ export function mergeChairOpenings<Chair>(
  * de cada día del rango —en la zona de la sede, con su
  * cambio de hora— menos lo ocupado (citas y bloqueos), sin el pasado y con
  * el inicio alineado a 5 min. Solo quedan los huecos donde cabe la duración.
+ * DX-263-bis: los días de festivo de la sede (`isClosedDay`) no dan huecos.
  *
  * Puro: sin reloj ni BD (los tests fijan `now`).
  */
@@ -135,6 +141,7 @@ export function findOpenings(query: OpeningsQuery): OpeningsResult {
 
   for (let i = 0; i < days; i++) {
     const day = addCivilDays(query.fromDay, i);
+    if (query.isClosedDay?.(day)) continue;
     const weekday = civilWeekday(day);
     const locationRanges = query.ranges
       .filter((r) => r.weekday === weekday)

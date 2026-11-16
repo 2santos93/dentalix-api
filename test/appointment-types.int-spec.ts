@@ -269,6 +269,8 @@ describe('tipos de cita y agenda en columnas (int, DX-121)', () => {
           await barrier;
           return null;
         },
+        // DX-263-bis: sin festivos en la sede.
+        holidaysOf: () => Promise.resolve({ timeZone: null, holidays: [] }),
       } as unknown as LocationScheduleRepository;
       const staff = {
         findById: (userId: string) =>

@@ -19,6 +19,22 @@ export interface ReplaceScheduleInput {
   legacyTimeZone?: string;
 }
 
+/** DX-263-bis: un festivo vivo de la sede (DX-316); `date` 'YYYY-MM-DD'. */
+export interface LocationHolidayEntry {
+  date: string;
+  name: string;
+  recurring: boolean;
+}
+
+/**
+ * DX-263-bis: los festivos vivos de una sede y la zona en la que se leen.
+ * `timeZone` es null solo si la sede no tiene festivos (no hace falta zona).
+ */
+export interface LocationHolidays {
+  timeZone: string | null;
+  holidays: LocationHolidayEntry[];
+}
+
 export interface LocationScheduleRepository {
   /**
    * El horario de la sede indicada, o `null` si esa sede no tiene horario
@@ -51,6 +67,15 @@ export interface LocationScheduleRepository {
    * que escribir.
    */
   formatSourceOf(locationId?: string): Promise<LocationFormatSource>;
+
+  /**
+   * DX-263-bis: los festivos vivos (DX-316) de la sede indicada o, con
+   * `locationId` indefinido, de la sede en contexto (la misma de
+   * `findForCurrentLocation`, donde se escribe la cita). Con festivos y sin
+   * zona válida, 409 `LOCATION_TIMEZONE_REQUIRED`; sin festivos no se pide
+   * la zona (no cambia nada para quien no usa el calendario).
+   */
+  holidaysOf(locationId?: string): Promise<LocationHolidays>;
 
   /**
    * Reemplaza TODA la semana de la sede en contexto (semántica atómica simple
