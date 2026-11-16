@@ -2730,6 +2730,27 @@ export const DEMO_PROFESSIONAL_SPECIALTIES: readonly string[] = [
 ];
 
 /**
+ * DX-572 (D7): dos plantillas genéricas de órdenes externas para la demo,
+ * con destinatarios inventados. Las clínicas reales no traen ninguna.
+ */
+export const DEMO_EXTERNAL_ORDER_TEMPLATES = [
+  {
+    name: 'Radiografía panorámica',
+    kind: 'IMAGING',
+    recipient: 'Centro de Imagen Odontológica Demo',
+    items: ['Radiografía panorámica (ortopantomografía)'],
+  },
+  {
+    name: 'Tomografía de haz cónico',
+    kind: 'IMAGING',
+    recipient: 'Centro de Imagen Odontológica Demo',
+    items: [
+      'Tomografía computarizada de haz cónico (CBCT) de la zona indicada',
+    ],
+  },
+] as const;
+
+/**
  * Ajustes de la receta de la demo (DX-324): cantidad en letras, nº de
  * historia clínica y 30 días, para que el A4 de ejemplo enseñe todo.
  */
