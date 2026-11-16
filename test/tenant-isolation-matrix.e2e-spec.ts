@@ -4156,6 +4156,27 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'external-orders.e2e-spec.ts',
+      checks:
+        'B → 404 al listar y emitir órdenes externas del paciente de A, leer, imprimir y anular su orden, ligarle o desligarle el resultado y editar la plantilla de A; la orden de A sigue igual (DX-572)',
+      routes: [
+        'GET /patients/:patientId/external-orders',
+        'POST /patients/:patientId/external-orders',
+        'GET /external-orders/:id',
+        'GET /external-orders/:id/pdf',
+        'POST /external-orders/:id/void',
+        'POST /external-orders/:id/result',
+        'POST /external-orders/:id/result/unlink',
+        'PATCH /external-order-templates/:id',
+      ],
+    },
+    {
+      spec: 'external-order-copies.e2e-spec.ts',
+      checks:
+        'B → 404 al enviar al paciente la copia de una orden de A, sin enlace (DX-572)',
+      routes: ['POST /external-orders/:id/patient-copy'],
+    },
+    {
       spec: 'clinical-record-copies.e2e-spec.ts',
       checks:
         'B → 404 al generar, listar y leer copias de la historia clínica del paciente de A, sin generación ni evento EXPORT (DX-456)',
@@ -4430,6 +4451,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       checks:
         'B → 404 con el enlace de la copia de la receta de A en su host, igual que uno inventado (DX-468)',
       routes: ['GET /public/prescription-copies/:token'],
+    },
+    {
+      spec: 'external-order-copies.e2e-spec.ts',
+      checks:
+        'B → 404 con el enlace de la copia de la orden de A en su host (abrir y descargar) y no se gasta (DX-572)',
+      routes: [
+        'GET /public/external-order-copies/:token',
+        'POST /public/external-order-copies/:token/download',
+      ],
     },
     {
       spec: 'certificate-copies.e2e-spec.ts',

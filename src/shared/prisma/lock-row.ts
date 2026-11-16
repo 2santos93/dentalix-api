@@ -4,6 +4,8 @@ import { Prisma } from '@prisma/client';
 const LOCKABLE_TABLES = [
   'appointment_types',
   'consent_templates',
+  // DX-572: plantillas de órdenes externas (edición con versión optimista).
+  'external_order_templates',
   'inventory_items',
   'location_schedules',
   'locations',

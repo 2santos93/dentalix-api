@@ -1192,6 +1192,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     prescriptionCopies: 2,
     certificateCopies: 0,
     paymentLinks: 2,
+    externalOrderCopies: 1,
   };
 
   it('conserva el número de enlaces anulados por tipo', () => {
@@ -1204,9 +1205,20 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
   });
 
   it('DX-569: un evento anterior a los enlaces de pago se lee con paymentLinks 0', () => {
-    const { paymentLinks: _omit, ...before } = revokedLinks;
+    const {
+      paymentLinks: _omit,
+      externalOrderCopies: _e,
+      ...before
+    } = revokedLinks;
     expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
-      revokedLinks: { ...before, paymentLinks: 0 },
+      revokedLinks: { ...before, paymentLinks: 0, externalOrderCopies: 0 },
+    });
+  });
+
+  it('DX-572: un evento anterior a las copias de las órdenes externas se lee con externalOrderCopies 0', () => {
+    const { externalOrderCopies: _omit, ...before } = revokedLinks;
+    expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
+      revokedLinks: { ...before, externalOrderCopies: 0 },
     });
   });
 
@@ -1215,6 +1227,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
       prescriptionCopies: _p,
       certificateCopies: _c,
       paymentLinks: _l,
+      externalOrderCopies: _e,
       ...before
     } = revokedLinks;
     expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
@@ -1223,6 +1236,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
         prescriptionCopies: 0,
         certificateCopies: 0,
         paymentLinks: 0,
+        externalOrderCopies: 0,
       },
     });
   });
