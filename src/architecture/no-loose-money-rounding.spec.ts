@@ -93,6 +93,13 @@ export const ALLOWED: readonly Allowed[] = [
       'tasa de enlaces del paciente (parte ÷ enviados) en % con 1 decimal (DX-424), no un importe',
   },
   {
+    file: 'src/modules/reports/domain/quote-funnel.ts',
+    text: 'Math.round(value * 10) / 10',
+    fn: 'const round1',
+    reason:
+      'tasas del embudo de presupuestos (%) y días hasta aceptar, con 1 decimal (DX-558); los importes usan round2',
+  },
+  {
     file: 'src/modules/reports/application/locations-comparison-csv.ts',
     text: 'value.toFixed(decimals)',
     reason:
