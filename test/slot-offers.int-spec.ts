@@ -819,8 +819,13 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       expect(results.map((r) => r.chairId).sort()).toEqual(
         [first, second].sort(),
       );
-      // Las dos eligieron el primero; una perdió en la BD y volvió a elegir.
-      expect(spy.calls()).toBe(3);
+      // Las dos eligieron el primero; al menos una perdió en la BD y volvió a
+      // elegir. DX-263-bis: no siempre una sola vez: según cuál de las dos
+      // tome Postgres como víctima (23P01 por sillón o un deadlock, ambos
+      // reintentables) puede haber un reintento más; pasaba igual en main
+      // (3 de 6 corridas en local). Lo que importa: dos citas, sillones
+      // distintos, las dos ACCEPTED.
+      expect(spy.calls()).toBeGreaterThanOrEqual(3);
       expect(
         await owner.appointment.count({ where: { tenantId: a.tenantId } }),
       ).toBe(2);
