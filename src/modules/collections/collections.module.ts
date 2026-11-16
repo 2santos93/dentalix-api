@@ -12,6 +12,7 @@ import {
   CreateCollectionNoteUseCase,
   CreatePaymentPromiseUseCase,
   GetPatientCollectionsUseCase,
+  MarkBalanceReminderUseCase,
 } from './application/use-cases/collections.use-cases';
 import { COLLECTIONS_REPOSITORY } from './domain/ports/collections-repository.port';
 import { PrismaCollectionsRepository } from './infrastructure/prisma-collections.repository';
@@ -31,6 +32,7 @@ import { CollectionsController } from './presentation/collections.controller';
     CreateCollectionNoteUseCase,
     CreatePaymentPromiseUseCase,
     GetPatientCollectionsUseCase,
+    MarkBalanceReminderUseCase,
     SettlePaymentPromises,
     PatientBalanceFlags,
     CollectionsJobs,

@@ -2074,6 +2074,14 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ channel: 'CALL', outcome: 'NO_ANSWER', text: 'Intrusa' }),
       status: 404,
     },
+    // DX-146: «avisado» de la lista «Por avisar hoy».
+    {
+      name: 'POST /patients/:id/balance-reminders',
+      verb: 'post',
+      path: () => `/patients/${a.patientId}/balance-reminders`,
+      body: () => ({}),
+      status: 404,
+    },
     {
       name: 'POST /patients/:id/payment-promises',
       verb: 'post',

@@ -92,6 +92,7 @@ const OUTCOME_LABELS: Record<CollectionOutcome, string> = {
   WILL_PAY_AT_APPOINTMENT: 'Pagará en la cita',
   DISPUTE: 'Disputa el saldo',
   WRONG_NUMBER: 'Número erróneo',
+  REMINDER_SENT: 'Avisado del saldo',
 };
 const PROMISE_STATUS_LABELS: Record<PaymentPromiseStatus, string> = {
   OPEN: 'Abierto',
