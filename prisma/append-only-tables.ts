@@ -110,6 +110,11 @@ export const NO_APP_DELETE = [
   // DX-285: los cargos del caso en el plan (se apunta el control que realiza
   // cada uno; nunca se borran).
   'ortho_case_charges',
+  // DX-017: el laboratorio y sus servicios (se desactivan) y la orden de
+  // laboratorio (se anula con motivo; dx_dental_lab_orders_guard).
+  'dental_labs',
+  'dental_lab_services',
+  'dental_lab_orders',
 ] as const;
 
 /**

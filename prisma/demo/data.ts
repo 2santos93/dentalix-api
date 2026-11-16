@@ -3600,3 +3600,117 @@ export const DEMO_RECALL_APPOINTMENT_TYPES = {
   HYGIENE: 'Limpieza',
   CHECKUP: 'Valoración',
 } as const satisfies Record<RecallKind, string>;
+
+// ---------------------------------------------------------------------------
+// DX-017: laboratorio dental. Dos laboratorios venezolanos con sus servicios
+// (plazo en días hábiles; precio de referencia en USD, solo lo ve ADMIN) y
+// tres órdenes: una enviada a tiempo, una ATRASADA (enviada, fecha prometida
+// vencida y sin recibir) y una recibida y revisada.
+// ---------------------------------------------------------------------------
+
+export interface DemoDentalLab {
+  name: string;
+  contactName: string;
+  phone: string;
+  email: string;
+  services: readonly {
+    name: string;
+    leadTimeBusinessDays: number;
+    referencePrice: string;
+  }[];
+}
+
+export const DEMO_DENTAL_LABS: readonly DemoDentalLab[] = [
+  {
+    name: 'Laboratorio Dental Caracas',
+    contactName: 'Carmen Rondón',
+    phone: '+58 212 555 0142',
+    email: 'pedidos@labdentalcaracas.com.ve',
+    services: [
+      {
+        name: 'Corona zirconio',
+        leadTimeBusinessDays: 5,
+        referencePrice: '180.00',
+      },
+      {
+        name: 'Prótesis parcial removible',
+        leadTimeBusinessDays: 10,
+        referencePrice: '320.00',
+      },
+    ],
+  },
+  {
+    name: 'ProtoLab Valencia',
+    contactName: 'Luis Guerra',
+    phone: '+58 241 555 0177',
+    email: 'casos@protolabvalencia.com.ve',
+    services: [
+      {
+        name: 'Férula de descarga',
+        leadTimeBusinessDays: 3,
+        referencePrice: '60.00',
+      },
+      {
+        name: 'Corona zirconio',
+        leadTimeBusinessDays: 7,
+        referencePrice: '150.00',
+      },
+    ],
+  },
+];
+
+export interface DemoLabOrder {
+  patientIndex: number;
+  dentistIndex: number;
+  labIndex: number;
+  serviceIndex: number;
+  description: string;
+  toothNumbers: readonly string[];
+  shade: string | null;
+  material: string | null;
+  instructions: string | null;
+  /** Fecha prometida a mano (días desde hoy, negativo = pasada); sin ella, la sugerida. */
+  dueInDays?: number;
+  steps: readonly ('SEND' | 'RECEIVE' | 'CHECK')[];
+}
+
+export const DEMO_LAB_ORDERS: readonly DemoLabOrder[] = [
+  {
+    patientIndex: 0,
+    dentistIndex: 0,
+    labIndex: 0,
+    serviceIndex: 0,
+    description: 'Corona de zirconio',
+    toothNumbers: ['16'],
+    shade: 'A2',
+    material: 'Zirconio monolítico',
+    instructions: 'Margen en chamfer; contacto proximal firme con 15 y 17.',
+    steps: ['SEND'],
+  },
+  {
+    patientIndex: 2,
+    dentistIndex: 1,
+    labIndex: 0,
+    serviceIndex: 1,
+    description: 'Prótesis parcial removible superior',
+    toothNumbers: ['14', '15', '24', '25'],
+    shade: 'A3',
+    material: 'Cromo-cobalto y acrílico',
+    instructions: 'Retenedores en 13 y 23; base acrílica rosada.',
+    // Enviada, prometida hace 3 días y sin recibir: sale atrasada.
+    dueInDays: -3,
+    steps: ['SEND'],
+  },
+  {
+    patientIndex: 3,
+    dentistIndex: 0,
+    labIndex: 1,
+    serviceIndex: 0,
+    description: 'Férula de descarga',
+    toothNumbers: [],
+    shade: null,
+    material: 'Acrílico termocurado',
+    instructions: 'Férula superior rígida de 2 mm.',
+    steps: ['SEND', 'RECEIVE', 'CHECK'],
+  },
+];

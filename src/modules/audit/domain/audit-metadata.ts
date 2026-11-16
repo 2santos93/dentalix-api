@@ -230,6 +230,11 @@ export interface AuditMetadata {
    */
   period?: AuditPeriod;
   /**
+   * DX-017: cambio de la fecha prometida de una orden de laboratorio (días
+   * civiles de la sede; null = sin fecha). Solo las dos fechas.
+   */
+  dueOn?: AuditDueOnChange;
+  /**
    * DX-342: revisión del paso a la mayoría de edad: la decisión, la fecha de
    * mayoría de edad revisada y el LARGO de la nota (nunca su texto).
    */
@@ -308,6 +313,12 @@ export interface AuditMajorityReview {
 export interface AuditPeriod {
   from: string;
   to: string;
+}
+
+/** DX-017: fecha prometida antes y después (días civiles o null). */
+export interface AuditDueOnChange {
+  from: string | null;
+  to: string | null;
 }
 
 export interface AuditRetentionTermChange {
@@ -1220,6 +1231,23 @@ function period(value: unknown): AuditPeriod | null {
   return validFrom <= validTo ? { from: validFrom, to: validTo } : null;
 }
 
+/** DX-017: las dos fechas (días civiles o null), distintas, o nada. */
+function dueOnChange(value: unknown): AuditDueOnChange | null {
+  if (!isRecord(value)) return null;
+  const { from, to, ...rest } = value;
+  const validFrom = civilDateOrNull(from);
+  const validTo = civilDateOrNull(to);
+  if (
+    Object.keys(rest).length > 0 ||
+    validFrom === undefined ||
+    validTo === undefined ||
+    validFrom === validTo
+  ) {
+    return null;
+  }
+  return { from: validFrom, to: validTo };
+}
+
 /** Secciones (códigos sin repetir, 1..8) y el booleano, o nada (DX-456). */
 function recordCopy(value: unknown): AuditRecordCopy | null {
   if (!isRecord(value)) return null;
@@ -1688,6 +1716,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (term) out.retentionTermChange = term;
   const range = period(input.period);
   if (range) out.period = range;
+  const due = dueOnChange(input.dueOn);
+  if (due) out.dueOn = due;
   const reviewed = majorityReview(input.majorityReview);
   if (reviewed) out.majorityReview = reviewed;
   const via = AUDIT_RECALL_VIAS.find((v) => v === input.via);

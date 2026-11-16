@@ -211,6 +211,10 @@ model Tenant {
   // DX-190: casos de ortodoncia y sus controles.
   orthoCases                              OrthoCase[]
   orthoVisits                             OrthoVisit[]
+  // DX-017: laboratorios dentales, sus servicios y las órdenes de laboratorio.
+  dentalLabs                              DentalLab[]
+  dentalLabServices                       DentalLabService[]
+  dentalLabOrders                         DentalLabOrder[]
   // DX-285: cargos del caso en el plan y alineadores.
   orthoCaseCharges                        OrthoCaseCharge[]
   orthoAlignerSeries                      OrthoAlignerSeries[]
@@ -390,6 +394,12 @@ model User {
   orthoCasesResponsible             OrthoCase[]                      @relation("OrthoCaseProvider")
   orthoCasesCreated                 OrthoCase[]                      @relation("OrthoCaseCreatedBy")
   orthoCasesStatusChanged           OrthoCase[]                      @relation("OrthoCaseStatusChangedBy")
+  // DX-017: órdenes de laboratorio (alta, envío, recepción, revisión y anulación).
+  dentalLabOrdersCreated            DentalLabOrder[]                 @relation("DentalLabOrderCreatedBy")
+  dentalLabOrdersSent               DentalLabOrder[]                 @relation("DentalLabOrderSentBy")
+  dentalLabOrdersReceived           DentalLabOrder[]                 @relation("DentalLabOrderReceivedBy")
+  dentalLabOrdersChecked            DentalLabOrder[]                 @relation("DentalLabOrderCheckedBy")
+  dentalLabOrdersCancelled          DentalLabOrder[]                 @relation("DentalLabOrderCancelledBy")
   orthoVisitsAuthored               OrthoVisit[]
   // DX-285: series de alineadores y entregas registradas.
   orthoAlignerSeriesCreated         OrthoAlignerSeries[]
@@ -559,6 +569,8 @@ model Location {
   sedationRecords            SedationRecord[]
   // DX-190: casos de ortodoncia que lleva la sede.
   orthoCases                 OrthoCase[]
+  // DX-017: órdenes de laboratorio de la sede.
+  dentalLabOrders            DentalLabOrder[]
   appointments               Appointment[]
   payments                   Payment[]
   inventoryItems             InventoryItem[]
@@ -682,6 +694,8 @@ model ClinicMembership {
   patientCertificates   PatientCertificate[]
   // DX-572: órdenes externas en las que figura como profesional.
   externalOrders        ExternalOrder[]
+  // DX-017: órdenes de laboratorio que prescribe.
+  dentalLabOrders       DentalLabOrder[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -910,6 +924,8 @@ model Patient {
   // DX-190: casos de ortodoncia y sus controles.
   orthoCases                  OrthoCase[]
   orthoVisits                 OrthoVisit[]
+  // DX-017: órdenes de laboratorio.
+  dentalLabOrders             DentalLabOrder[]
   dentitionEvents             PatientDentitionEvent[]
   toothRecords                ToothRecord[]
   appointments                Appointment[]
@@ -1684,6 +1700,8 @@ model Appointment {
   patientCertificates          PatientCertificate[]
   // DX-572: órdenes externas emitidas desde la cita.
   externalOrders               ExternalOrder[]
+  // DX-017: órdenes de laboratorio cuya colocación es esta cita.
+  dentalLabOrders              DentalLabOrder[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -2262,6 +2280,8 @@ model TreatmentPlanItem {
   cancellationFees     CancellationFee[]
   // DX-439: «sin marcar como hecho» descartado de «Pendiente de cerrar».
   closingDismissals    ClosingQueueDismissal[]
+  // DX-017: órdenes de laboratorio del ítem.
+  dentalLabOrders      DentalLabOrder[]
   id                   String                  @id @default(uuid()) @db.Uuid
   tenantId             String                  @db.Uuid
   planId               String                  @db.Uuid
@@ -2726,6 +2746,8 @@ model Currency {
   // DX-516: ajustes por medio de pago fijos en esa moneda, y los congelados.
   paymentMethodAdjustments    PaymentMethodAdjustment[]   @relation("PaymentMethodAdjustmentCurrency")
   paymentAdjustments          PaymentAdjustment[]         @relation("PaymentAdjustmentCurrency")
+  // DX-017: moneda del precio de referencia de un servicio de laboratorio.
+  dentalLabServices           DentalLabService[]
   paymentPlans                PaymentPlan[]
   // DX-150: compromisos de pago en esa moneda.
   paymentPromises             PaymentPromise[]
@@ -4606,6 +4628,9 @@ enum AuditResourceType {
   // DX-190: caso de ortodoncia (alta, cabecera y estado) y cada control.
   ORTHO_CASE
   ORTHO_VISIT
+  // DX-017: laboratorio dental (y sus servicios) y orden de laboratorio.
+  DENTAL_LAB
+  DENTAL_LAB_ORDER
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -8355,6 +8380,151 @@ model OrthoVisit {
   @@index([tenantId, patientId, caseId, visitDate(sort: Desc), createdAt(sort: Desc)], map: "ortho_visits_case_date_idx")
   @@index([authorId], map: "ortho_visits_author_idx")
   @@map("ortho_visits")
+}
+
+// ---------------------------------------------------------------------------
+// DX-017: laboratorio dental (protésico). Catálogo de laboratorios de la
+// clínica con sus servicios (plazo en días hábiles) y órdenes de laboratorio:
+// la prescripción escrita del producto a medida, ligada al ítem del plan y a
+// la cita de colocación. NO confundir con external_orders (DX-572: imagen,
+// análisis clínicos y especialistas).
+// ---------------------------------------------------------------------------
+
+/// Laboratorio de la clínica. Nunca se borra (sin DELETE para la app): se
+/// desactiva. Nombre único por clínica sin distinguir mayúsculas (índice de
+/// expresión dental_labs_tenant_name_key, solo en SQL).
+model DentalLab {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  notes       String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  services DentalLabService[]
+  orders   DentalLabOrder[]
+
+  // Destino de las FK compuestas de servicios y órdenes (SEC-004).
+  @@unique([tenantId, id], map: "dental_labs_tenant_id_key")
+  // DE EXPRESIÓN, no declarable en Prisma:
+  //   dental_labs_tenant_name_key UNIQUE ("tenantId", lower(btrim(name)))
+  @@map("dental_labs")
+}
+
+/// Servicio de un laboratorio con su plazo en días hábiles y un precio de
+/// referencia opcional (solo lo ve ADMIN). Nunca se borra: se desactiva.
+model DentalLabService {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @db.Uuid
+  labId                String   @db.Uuid
+  name                 String
+  leadTimeBusinessDays Int      @db.SmallInt
+  referencePrice       Decimal? @db.Decimal(12, 2)
+  referenceCurrency    String?  @db.Char(3)
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  tenant               Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lab                  DentalLab        @relation(fields: [tenantId, labId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_services_lab_fkey")
+  referenceCurrencyRef Currency?        @relation(fields: [referenceCurrency], references: [code], onDelete: Restrict, map: "dental_lab_services_currency_fkey")
+  orders               DentalLabOrder[]
+
+  // Destino de la FK compuesta de las órdenes: el servicio es del MISMO
+  // laboratorio y de la MISMA clínica. Su prefijo sirve la FK al laboratorio.
+  @@unique([tenantId, labId, id], map: "dental_lab_services_tenant_lab_id_key")
+  @@index([referenceCurrency], map: "dental_lab_services_currency_idx")
+  // DE EXPRESIÓN, no declarable en Prisma:
+  //   dental_lab_services_lab_name_key UNIQUE ("tenantId", "labId", lower(btrim(name)))
+  @@map("dental_lab_services")
+}
+
+/// Orden de laboratorio (DX-017). El estado se DERIVA de las fechas (nunca es
+/// columna): cancelledAt → Anulada; checkedAt → Revisada; receivedAt →
+/// Recibida; sentAt → Enviada; si no, Borrador. Número correlativo por
+/// clínica (trigger con candado consultivo). Guarda dx_dental_lab_orders_guard:
+/// nunca se borra (se anula con motivo), una anulada no cambia, tras «Enviada»
+/// el contenido no cambia (solo dueOn y la cita), las fechas puestas no
+/// cambian ni se quitan. `shade` e `instructions` son DATOS DE SALUD.
+model DentalLabOrder {
+  id                       String    @id @default(uuid()) @db.Uuid
+  tenantId                 String    @db.Uuid
+  locationId               String    @db.Uuid
+  patientId                String    @db.Uuid
+  /// Correlativo por clínica; lo pone el trigger al insertar.
+  number                   Int
+  /// Quien prescribe: la membresía de quien crea la orden.
+  professionalMembershipId String    @db.Uuid
+  labId                    String    @db.Uuid
+  serviceId                String?   @db.Uuid
+  treatmentPlanItemId      String?   @db.Uuid
+  /// Cita de colocación (del MISMO paciente).
+  appointmentId            String?   @db.Uuid
+  /// Orden anterior a la que esta corrige (del MISMO paciente).
+  replacesOrderId          String?   @db.Uuid
+  description              String
+  toothNumbers             String[]  @default([])
+  shade                    String?
+  material                 String?
+  instructions             String?
+  /// Fecha prometida: día civil de la sede.
+  dueOn                    DateTime? @db.Date
+  sentAt                   DateTime?
+  sentById                 String?   @db.Uuid
+  receivedAt               DateTime?
+  receivedById             String?   @db.Uuid
+  checkedAt                DateTime?
+  checkedById              String?   @db.Uuid
+  cancelledAt              DateTime?
+  cancelledById            String?   @db.Uuid
+  cancelReason             String?
+  createdById              String    @db.Uuid
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location          Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_orders_location_fkey")
+  patient           Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_orders_patient_fkey")
+  membership        ClinicMembership   @relation(fields: [tenantId, professionalMembershipId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_orders_membership_fkey")
+  lab               DentalLab          @relation(fields: [tenantId, labId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_orders_lab_fkey")
+  service           DentalLabService?  @relation(fields: [tenantId, labId, serviceId], references: [tenantId, labId, id], onDelete: Restrict, map: "dental_lab_orders_service_fkey")
+  treatmentPlanItem TreatmentPlanItem? @relation(fields: [tenantId, patientId, treatmentPlanItemId], references: [tenantId, patientId, id], onDelete: Restrict, map: "dental_lab_orders_plan_item_fkey")
+  appointment       Appointment?       @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "dental_lab_orders_appointment_fkey")
+  replacesOrder     DentalLabOrder?    @relation("DentalLabOrderReplaces", fields: [tenantId, replacesOrderId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_orders_replaces_fkey")
+  replacedBy        DentalLabOrder[]   @relation("DentalLabOrderReplaces")
+  createdBy         User               @relation("DentalLabOrderCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "dental_lab_orders_created_by_fkey")
+  sentBy            User?              @relation("DentalLabOrderSentBy", fields: [sentById], references: [id], onDelete: Restrict, map: "dental_lab_orders_sent_by_fkey")
+  receivedBy        User?              @relation("DentalLabOrderReceivedBy", fields: [receivedById], references: [id], onDelete: Restrict, map: "dental_lab_orders_received_by_fkey")
+  checkedBy         User?              @relation("DentalLabOrderCheckedBy", fields: [checkedById], references: [id], onDelete: Restrict, map: "dental_lab_orders_checked_by_fkey")
+  cancelledBy       User?              @relation("DentalLabOrderCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict, map: "dental_lab_orders_cancelled_by_fkey")
+
+  // Destino de la FK de la orden corregida (SEC-004).
+  @@unique([tenantId, id], map: "dental_lab_orders_tenant_id_key")
+  @@unique([tenantId, number], map: "dental_lab_orders_tenant_number_key")
+  // Órdenes del paciente, más recientes primero (y lado hijo de la FK al paciente).
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "dental_lab_orders_patient_created_idx")
+  // Lista de la sede por fecha prometida (y lado hijo de la FK a la sede).
+  @@index([tenantId, locationId, dueOn], map: "dental_lab_orders_location_due_idx")
+  // Lados hijos de las demás FK.
+  @@index([tenantId, professionalMembershipId], map: "dental_lab_orders_membership_idx")
+  @@index([tenantId, labId, serviceId], map: "dental_lab_orders_lab_service_idx")
+  @@index([tenantId, patientId, treatmentPlanItemId], map: "dental_lab_orders_plan_item_idx")
+  @@index([tenantId, patientId, appointmentId], map: "dental_lab_orders_appointment_idx")
+  @@index([tenantId, replacesOrderId], map: "dental_lab_orders_replaces_idx")
+  @@index([createdById], map: "dental_lab_orders_created_by_idx")
+  @@index([sentById], map: "dental_lab_orders_sent_by_idx")
+  @@index([receivedById], map: "dental_lab_orders_received_by_idx")
+  @@index([checkedById], map: "dental_lab_orders_checked_by_idx")
+  @@index([cancelledById], map: "dental_lab_orders_cancelled_by_idx")
+  // PARCIAL, no declarable en Prisma:
+  //   dental_lab_orders_pending_idx ("tenantId", "locationId", "dueOn")
+  //     WHERE "receivedAt" IS NULL AND "cancelledAt" IS NULL
+  @@map("dental_lab_orders")
 }
 
 /// DX-285: tipo de cargo de un caso de ortodoncia en su plan.
