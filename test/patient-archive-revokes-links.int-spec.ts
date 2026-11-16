@@ -339,6 +339,7 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       prescriptionCopies: 0,
       certificateCopies: 0,
       paymentLinks: 1,
+      externalOrderCopies: 0,
     });
 
     const now = new Date();
@@ -409,6 +410,7 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       prescriptionCopies: 0,
       certificateCopies: 0,
       paymentLinks: 1,
+      externalOrderCopies: 0,
     });
     await expect(
       asClinic(b.tenantId, () => links.countLive(b.patientId, new Date())),
@@ -460,6 +462,7 @@ describe('Archivar un paciente anula sus enlaces públicos (DX-461, Postgres)', 
       prescriptionCopies: 0,
       certificateCopies: 0,
       paymentLinks: 0,
+      externalOrderCopies: 0,
     });
     const offer = await owner.waitlistOffer.findUniqueOrThrow({
       where: { id: live.offer },

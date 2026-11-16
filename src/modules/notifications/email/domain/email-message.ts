@@ -29,6 +29,7 @@ export const EMAIL_TEMPLATES = [
   'mfa-enrollment-code',
   'payment-link',
   'payment-report-rejected',
+  'external-order-copy',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -69,6 +70,7 @@ export const TENANT_DAILY_BUDGET: Readonly<
   'mfa-enrollment-code': 'clinic',
   'payment-link': 'clinic',
   'payment-report-rejected': 'clinic',
+  'external-order-copy': 'clinic',
 };
 
 /** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
@@ -400,6 +402,25 @@ export interface PaymentReportRejectedEmailVars {
   clinicName: string;
 }
 
+/**
+ * DX-572: la copia de una orden de estudios o referencia, con un enlace de un
+ * solo uso. Nada clínico: quién la envía, para quién, qué documento (el tipo,
+ * nunca los estudios, el centro ni la nota) y el enlace.
+ */
+export interface ExternalOrderCopyEmailVars {
+  /** Nombre de pila de quien la recibe (el paciente o su responsable). */
+  recipientFirstName: string | null;
+  /** Va al responsable de un menor: el nombre de pila del paciente. */
+  patientFirstName: string | null;
+  clinicName: string;
+  /** «la orden de estudios de imagen», «la referencia al especialista». */
+  documentLabel: string;
+  /** Enlace público (`/orden/copia/<token>`). */
+  url: string;
+  /** Caducidad del enlace, ya escrita con el formato de la sede. */
+  expiresAtLabel: string;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -419,6 +440,7 @@ export interface EmailVarsByTemplate {
   'prescription-copy': PrescriptionCopyEmailVars;
   'payment-link': PaymentLinkEmailVars;
   'payment-report-rejected': PaymentReportRejectedEmailVars;
+  'external-order-copy': ExternalOrderCopyEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

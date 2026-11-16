@@ -186,6 +186,13 @@ export class LivePublicLinksDto {
   })
   paymentLinks!: number;
 
+  @ApiProperty({
+    minimum: 0,
+    description:
+      'Enlaces de un solo uso de la copia de una orden externa sin usar ni caducar (DX-572)',
+  })
+  externalOrderCopies!: number;
+
   @ApiProperty({ minimum: 0, description: 'Suma de todos los tipos' })
   total!: number;
 }

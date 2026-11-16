@@ -515,3 +515,24 @@ export const CERTIFICATE_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+
+// Órdenes de estudios y referencias externas (DX-572) — ver, imprimir sin la
+// nota, ligar y desligar el resultado y enviar la copia: los cuatro roles
+// (recepción suele subir la radiografía). Emitir (DENTIST/ADMIN), anular
+// (ADMIN o quien la emitió), ver la nota clínica (roles clínicos) y desligar
+// (roles clínicos o quien lo ligó): lo decide el caso de uso.
+export const EXTERNAL_ORDER_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];
+
+// DX-572: plantillas, ajustes y sugerencias de destinatario de las órdenes:
+// lectura para los roles clínicos; escritura de plantillas y ajustes, ADMIN.
+export const EXTERNAL_ORDER_CONFIG_READ_ROLES: ClinicRole[] = [
+  ...CLINICAL_ROLES,
+];
+export const EXTERNAL_ORDER_CONFIG_WRITE_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+];
