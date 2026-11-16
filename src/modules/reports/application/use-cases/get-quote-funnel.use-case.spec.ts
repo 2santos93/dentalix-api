@@ -67,67 +67,76 @@ const AGGREGATE: QuoteFunnelAggregate = {
 
 function fakeRepo() {
   const scopes: QuoteFunnelScope[] = [];
-  const repo: jest.Mocked<QuoteFunnelRepository> = {
-    listLocations: jest.fn((allowed) =>
+  const aggregate = jest.fn<
+    ReturnType<QuoteFunnelRepository['aggregate']>,
+    Parameters<QuoteFunnelRepository['aggregate']>
+  >((_period, scope) => {
+    scopes.push(scope);
+    return Promise.resolve(AGGREGATE);
+  });
+  const listPresentations = jest.fn<
+    ReturnType<QuoteFunnelRepository['listPresentations']>,
+    Parameters<QuoteFunnelRepository['listPresentations']>
+  >((_period, scope) => {
+    scopes.push(scope);
+    return Promise.resolve({
+      items: [
+        {
+          groupId: 'g',
+          planIds: ['g'],
+          firstPlanId: 'g',
+          patientId: null,
+          patientName: null,
+          presentedAt: new Date('2026-10-10T15:00:00Z'),
+          locationId: MAIN,
+          locationName: 'Sede principal',
+          timeZone: 'America/Caracas',
+          professionalId: ME,
+          professionalName: 'Dra. Pérez',
+          optionCount: 1,
+          presentedAmount: 100.006,
+          acceptedAmount: null,
+          scheduledAmount: null,
+          doneAmount: null,
+          collectedAmount: null,
+          outcome: 'PENDING',
+          rejectionReason: null,
+        },
+      ],
+      total: 1,
+    });
+  });
+  const repo: QuoteFunnelRepository = {
+    listLocations: (allowed) =>
       Promise.resolve(
         [
           { id: MAIN, name: 'Sede principal', isActive: true },
           { id: NORTE, name: 'Sede Norte', isActive: true },
         ].filter((l) => allowed === 'ALL' || allowed.includes(l.id)),
       ),
-    ),
-    locationInClinic: jest.fn((id) =>
-      Promise.resolve([MAIN, NORTE].includes(id)),
-    ),
-    listProfessionals: jest.fn(() =>
+    locationInClinic: (id) => Promise.resolve([MAIN, NORTE].includes(id)),
+    listProfessionals: () =>
       Promise.resolve([
         { userId: ME, fullName: 'Dra. Pérez' },
         { userId: OTHER, fullName: 'Dr. Otro' },
       ]),
-    ),
-    aggregate: jest.fn((_period, scope: QuoteFunnelScope) => {
-      scopes.push(scope);
-      return Promise.resolve(AGGREGATE);
-    }),
-    listPresentations: jest.fn((_period, scope: QuoteFunnelScope) => {
-      scopes.push(scope);
-      return Promise.resolve({
-        items: [
-          {
-            groupId: 'g',
-            planIds: ['g'],
-            firstPlanId: 'g',
-            patientId: null,
-            patientName: null,
-            presentedAt: new Date('2026-10-10T15:00:00Z'),
-            locationId: MAIN,
-            locationName: 'Sede principal',
-            timeZone: 'America/Caracas',
-            professionalId: ME,
-            professionalName: 'Dra. Pérez',
-            optionCount: 1,
-            presentedAmount: 100.006,
-            acceptedAmount: null,
-            scheduledAmount: null,
-            doneAmount: null,
-            collectedAmount: null,
-            outcome: 'PENDING',
-            rejectionReason: null,
-          },
-        ],
-        total: 1,
-      });
-    }),
+    aggregate,
+    listPresentations,
   };
-  return { repo, scopes };
+  return {
+    repo,
+    scopes,
+    aggregate,
+    listPresentations,
+  };
 }
 
 function build(currency: string | null = 'USD') {
-  const { repo, scopes } = fakeRepo();
-  const useCase = new GetQuoteFunnelUseCase(repo, {
+  const fake = fakeRepo();
+  const useCase = new GetQuoteFunnelUseCase(fake.repo, {
     current: () => Promise.resolve(currency),
   });
-  return { useCase, repo, scopes };
+  return { useCase, ...fake };
 }
 
 const actor = (
@@ -194,13 +203,13 @@ describe('GetQuoteFunnelUseCase (DX-558)', () => {
   });
 
   it('DENTIST pidiendo a otro profesional → 403 sin consultar', async () => {
-    const { useCase, repo } = build();
+    const { useCase, aggregate } = build();
     await expect(
       useCase.execute(
         input({ actor: actor(ClinicRole.DENTIST), providerId: OTHER }),
       ),
     ).rejects.toThrow(new ForbiddenException(QUOTE_FUNNEL_OWN_ONLY_MESSAGE));
-    expect(repo.aggregate).not.toHaveBeenCalled();
+    expect(aggregate).not.toHaveBeenCalled();
     // Pedirse a sí mismo vale.
     await expect(
       useCase.execute(
@@ -288,13 +297,13 @@ describe('GetQuoteFunnelUseCase (DX-558)', () => {
   });
 
   it('detalle: mismo alcance, paginado (25 por defecto) y redondeado', async () => {
-    const { useCase, repo, scopes } = build();
+    const { useCase, listPresentations, scopes } = build();
     const r = await useCase.presentations({
       ...input({ actor: actor(ClinicRole.DENTIST) }),
       step: 'PENDING',
     });
     expect(scopes[0].professionalId).toBe(ME);
-    expect(repo.listPresentations).toHaveBeenCalledWith(
+    expect(listPresentations).toHaveBeenCalledWith(
       OCTOBER,
       expect.any(Object),
       { step: 'PENDING' },
@@ -314,7 +323,7 @@ describe('GetQuoteFunnelUseCase (DX-558)', () => {
       page: 3,
       pageSize: 10,
     });
-    expect(repo.listPresentations).toHaveBeenLastCalledWith(
+    expect(listPresentations).toHaveBeenLastCalledWith(
       OCTOBER,
       expect.any(Object),
       { step: 'REJECTED', reason: 'PRICE' },

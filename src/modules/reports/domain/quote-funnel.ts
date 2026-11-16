@@ -29,7 +29,11 @@ export const QUOTE_FUNNEL_STEPS = [
 export type QuoteFunnelStep = (typeof QUOTE_FUNNEL_STEPS)[number];
 
 /** El estado de lo que NO se aceptó (hoy). */
-export const QUOTE_FUNNEL_OUTCOMES = ['PENDING', 'REJECTED', 'CANCELLED'] as const;
+export const QUOTE_FUNNEL_OUTCOMES = [
+  'PENDING',
+  'REJECTED',
+  'CANCELLED',
+] as const;
 export type QuoteFunnelOutcome = (typeof QUOTE_FUNNEL_OUTCOMES)[number];
 
 /** El desenlace de una presentación: aceptada o uno de los de arriba. */
