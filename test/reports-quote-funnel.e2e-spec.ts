@@ -228,6 +228,15 @@ describe('GET /reports/quote-funnel (DX-558)', () => {
       const r = await report({ providerId: dentistId }, tokens.RECEPTION);
       expect(r.scope).toBe('CLINIC');
       expect(count(r, 'PRESENTED')).toBe(2);
+      // El detalle también (toda la clínica, no solo lo suyo).
+      const detail = (
+        await get(
+          `${ROUTE}/presentations`,
+          { ...OCTOBER, step: 'PRESENTED' },
+          tokens.RECEPTION!,
+        ).expect(200)
+      ).body as QuoteFunnelPresentations;
+      expect(detail.total).toBe(3);
       // El CSV sigue siendo solo de ADMIN.
       const csv = await get(`${ROUTE}.csv`, OCTOBER, tokens.RECEPTION!).expect(
         403,
