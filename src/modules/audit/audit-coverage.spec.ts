@@ -63,6 +63,7 @@ import { CancellationFeeController } from '../cancellation-fees/presentation/can
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
 import { QuoteFunnelController } from '../reports/presentation/quote-funnel.controller';
+import { ScheduledProductionController } from '../reports/presentation/scheduled-production.controller';
 import { UnallocatedPaymentsController } from '../reports/presentation/unallocated-payments.controller';
 import { RecoveredSlotsController } from '../reports/presentation/recovered-slots.controller';
 import { ChairOccupancyController } from '../reports/presentation/chair-occupancy.controller';
@@ -1538,6 +1539,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN',
     reason: 'QUOTE_FUNNEL_REPORT',
   },
+  // DX-567: la lista de citas sin tratamiento ligado lleva el nombre de cada
+  // paciente; el agregado de la producción agendada, no.
+  'GET /reports/scheduled-production/unlinked': {
+    action: 'VIEW',
+    resource: 'APPOINTMENT',
+    reason: 'SCHEDULED_PRODUCTION_REPORT',
+  },
   // DX-436: el CSV de «Huecos recuperados» (solo agregados) sale de la
   // clínica: cada descarga queda auditada.
   'GET /reports/recovered-slots.csv': {
@@ -2426,6 +2434,7 @@ const CONTROLLERS: Type[] = [
   DiscountReportController,
   ProductionByProcedureController,
   QuoteFunnelController,
+  ScheduledProductionController,
   UnallocatedPaymentsController,
   RecoveredSlotsController,
   ChairOccupancyController,

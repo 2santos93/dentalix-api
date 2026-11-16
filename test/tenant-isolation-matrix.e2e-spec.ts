@@ -3029,6 +3029,46 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         },
       ];
     }),
+    // DX-567: producción agendada (agregado y lista sin tratamiento). Una
+    // sede de A es 403 (el mismo rechazo que una sede no permitida); el
+    // profesional de A da un informe sin citas.
+    ...(
+      [
+        '/reports/scheduled-production',
+        '/reports/scheduled-production/unlinked',
+      ] as const
+    ).flatMap((route): IsolationCase[] => {
+      const range = `from=${day(-30)}&to=${day(0)}&`;
+      const empty = (body: unknown) => {
+        if (route.endsWith('/unlinked')) {
+          expect(body).toMatchObject({ items: [], total: 0 });
+        } else {
+          expect(body).toMatchObject({
+            totals: { appointments: 0, appointmentsWithoutItems: 0 },
+            byProfessional: [],
+            byDayAndProfessional: [],
+          });
+        }
+      };
+      return [
+        {
+          name: `GET ${route} ?locationId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}locationId=${a.locationId}`,
+          queryIds: ['locationId'],
+          status: 403,
+          message: 'No tienes acceso a esta sede.',
+        },
+        {
+          name: `GET ${route} ?providerId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}providerId=${a.dentistUserId}`,
+          queryIds: ['providerId'],
+          status: 200,
+          expectBody: empty,
+        },
+      ];
+    }),
     // DX-436: huecos recuperados. Una sede de A es 403 (sin decir si
     // existe); el profesional de A da un informe sin filas suyas.
     ...(

@@ -903,6 +903,17 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     roles('ADMIN', 'DENTIST'),
     'FINANCIAL_REPORTS_VIEW',
   ),
+  // DX-567: producción agendada y previsión del mes. ADMIN y
+  // FINANCIAL_REPORTS_VIEW ven la clínica; DENTIST, solo lo suyo (lo acota el
+  // caso de uso); recepción y asistente, nada. La lista lleva pacientes.
+  'GET /reports/scheduled-production': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/scheduled-production/unlinked': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
   // DX-436: «Huecos recuperados» y su CSV (auditado). Solo ADMIN.
   'GET /reports/recovered-slots': ADMIN_ONLY,
   'GET /reports/recovered-slots.csv': ADMIN_ONLY,
