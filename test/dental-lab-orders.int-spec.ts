@@ -27,6 +27,8 @@ const repo = new PrismaLabRepository(prisma, tenantContext, {
 } as unknown as DocumentTypeNamesReader);
 
 const day = (d: string) => new Date(`${d}T00:00:00.000Z`);
+// Instante fijo (viernes 20-11-2026, 11:00 en Caracas): nada lee el reloj real.
+const T0 = new Date('2026-11-20T15:00:00.000Z');
 
 interface Clinic {
   tenantId: string;
@@ -380,7 +382,7 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
       await expect(
         asApp(a, (tx) =>
           tx.dentalLabOrder.create({
-            data: orderData(a, { sentAt: new Date(), sentById: a.userId }),
+            data: orderData(a, { sentAt: T0, sentById: a.userId }),
           }),
         ),
       ).rejects.toThrow(/una orden nace en borrador/);
@@ -410,7 +412,7 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
         asApp(a, (tx) =>
           tx.dentalLabOrder.update({
             where: { id: draft.id },
-            data: { receivedAt: new Date(), receivedById: a.userId },
+            data: { receivedAt: T0, receivedById: a.userId },
           }),
         ),
       ).rejects.toThrow(/dental_lab_orders_steps_check/);
@@ -418,7 +420,7 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
         asApp(a, (tx) =>
           tx.dentalLabOrder.update({
             where: { id: draft.id },
-            data: { sentAt: new Date() },
+            data: { sentAt: T0 },
           }),
         ),
       ).rejects.toThrow(/dental_lab_orders_pairs_check/);
@@ -426,7 +428,7 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
         asApp(a, (tx) =>
           tx.dentalLabOrder.update({
             where: { id: draft.id },
-            data: { cancelledAt: new Date(), cancelledById: a.userId },
+            data: { cancelledAt: T0, cancelledById: a.userId },
           }),
         ),
       ).rejects.toThrow(/dental_lab_orders_cancel_check/);
@@ -489,7 +491,7 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
       await asApp(a, (tx) =>
         tx.dentalLabOrder.update({
           where: { id: order.id },
-          data: { sentAt: new Date(), sentById: a.userId },
+          data: { sentAt: T0, sentById: a.userId },
         }),
       );
       for (const data of [
@@ -515,7 +517,7 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
         asApp(a, (tx) =>
           tx.dentalLabOrder.update({
             where: { id: order.id },
-            data: { sentAt: new Date(Date.now() + 1000) },
+            data: { sentAt: new Date(T0.getTime() + 1000) },
           }),
         ),
       ).rejects.toThrow(/no cambia ni se quita/);
@@ -537,7 +539,7 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
         tx.dentalLabOrder.update({
           where: { id: order.id },
           data: {
-            cancelledAt: new Date(),
+            cancelledAt: T0,
             cancelledById: a.userId,
             cancelReason: 'El paciente pospone el tratamiento',
           },
@@ -642,7 +644,7 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
     });
 
     it('la vista del ítem del plan lleva su procedimiento y la de la cita su hora', async () => {
-      const [view] = await inContext(a, () => repo.views([orderA], new Date()));
+      const [view] = await inContext(a, () => repo.views([orderA], T0));
       expect(view).toMatchObject({
         treatmentPlanItem: {
           id: a.itemId,

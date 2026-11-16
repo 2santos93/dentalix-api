@@ -460,7 +460,7 @@ describe('Laboratorio dental — /dental-labs, /patients/:id/lab-orders, /lab-or
       } finally {
         await raw.locationHoliday.update({
           where: { id: holiday.id },
-          data: { deletedAt: new Date() },
+          data: { deletedAt: NOW },
         });
         await call(a, a.adminToken, 'put', '/locations/schedule')
           .set('X-Location-Id', locationA)
@@ -471,7 +471,7 @@ describe('Laboratorio dental — /dental-labs, /patients/:id/lab-orders, /lab-or
   });
 
   describe('flujo de la orden', () => {
-    it('el odontólogo crea desde un ítem del plan: borrador con su registro y la fecha sugerida desde hoy (viernes)', async () => {
+    it('el odontólogo crea desde un ítem del plan: borrador con su registro y la fecha sugerida desde el viernes del reloj fijo', async () => {
       const res = await call(
         a,
         dentist.token,

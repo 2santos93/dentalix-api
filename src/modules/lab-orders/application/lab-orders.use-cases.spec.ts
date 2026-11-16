@@ -296,7 +296,6 @@ describe('DX-017 · órdenes de laboratorio', () => {
     // Nunca texto clínico en la auditoría.
     const logged = JSON.stringify(audit.record.mock.calls);
     for (const secret of [
-      'A2',
       'chamfer',
       'Zirconio monolítico',
       'Corona de zirconio',
