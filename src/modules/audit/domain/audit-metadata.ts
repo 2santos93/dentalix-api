@@ -1069,6 +1069,8 @@ const LINK_KINDS_ADDED_LATER: readonly string[] = [
   'prescriptionCopies',
   'certificateCopies',
   'paymentLinks',
+  // DX-572: la copia de una orden externa.
+  'externalOrderCopies',
 ];
 
 /** Exactamente los tipos de enlace, cada uno un natural acotado, o nada (DX-461). */

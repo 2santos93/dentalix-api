@@ -69,6 +69,7 @@ import { SignatureRequestsModule } from './modules/signature-requests/signature-
 import { PeriodontalModule } from './modules/periodontal/periodontal.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { PatientCertificatesModule } from './modules/patient-certificates/patient-certificates.module';
+import { ExternalOrdersModule } from './modules/external-orders/external-orders.module';
 import { ClinicalRecordCopiesModule } from './modules/clinical-record-copies/clinical-record-copies.module';
 import { ImplantsModule } from './modules/implants/implants.module';
 import { PatientDocumentsModule } from './modules/patient-documents/patient-documents.module';
@@ -180,6 +181,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PeriodontalModule,
     PrescriptionsModule,
     PatientCertificatesModule,
+    ExternalOrdersModule,
     ClinicalRecordCopiesModule,
     ImplantsModule,
     PatientDocumentsModule,

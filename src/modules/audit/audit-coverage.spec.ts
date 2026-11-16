@@ -11,6 +11,10 @@ import { AUDIT_OPTIONS, type AuditOptions } from './presentation/audit-options';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { AuthController } from '../auth/presentation/auth.controller';
 import { PatientCertificatesController } from '../patient-certificates/presentation/patient-certificates.controller';
+import {
+  ExternalOrdersController,
+  PatientExternalOrdersController,
+} from '../external-orders/presentation/external-orders.controller';
 import { ClinicalRecordCopiesController } from '../clinical-record-copies/presentation/clinical-record-copies.controller';
 import { PatientsController } from '../patients/presentation/patients.controller';
 import { CallerLookupController } from '../caller-lookup/presentation/caller-lookup.controller';
@@ -753,6 +757,67 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     patient: P,
     reason: 'CERTIFICATE_COPY_SENT',
+  },
+
+  // DX-572: órdenes de estudios y referencias externas. Ni la nota, ni los
+  // estudios, ni el destinatario, ni el motivo de la anulación van al evento.
+  'GET /patients/:patientId/external-orders': {
+    action: 'VIEW',
+    resource: 'EXTERNAL_ORDER',
+    patient: P,
+  },
+  'POST /patients/:patientId/external-orders': {
+    action: 'CREATE',
+    resource: 'EXTERNAL_ORDER',
+    resourceId: RES,
+    patient: P,
+    reason: 'EXTERNAL_ORDER_ISSUED',
+  },
+  'GET /external-orders/pending': {
+    action: 'VIEW',
+    resource: 'EXTERNAL_ORDER',
+  },
+  'GET /external-orders/:id': {
+    action: 'VIEW',
+    resource: 'EXTERNAL_ORDER',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'externalOrder', param: 'id' },
+  },
+  'GET /external-orders/:id/pdf': {
+    action: 'PRINT',
+    resource: 'EXTERNAL_ORDER',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'externalOrder', param: 'id' },
+  },
+  'POST /external-orders/:id/void': {
+    action: 'VOID',
+    resource: 'EXTERNAL_ORDER',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'externalOrder', param: 'id' },
+    reason: 'EXTERNAL_ORDER_VOIDED',
+  },
+  'POST /external-orders/:id/result': {
+    action: 'UPDATE',
+    resource: 'EXTERNAL_ORDER',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'externalOrder', param: 'id' },
+    reason: 'EXTERNAL_ORDER_RESULT_LINKED',
+  },
+  'POST /external-orders/:id/result/unlink': {
+    action: 'UPDATE',
+    resource: 'EXTERNAL_ORDER',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'externalOrder', param: 'id' },
+    reason: 'EXTERNAL_ORDER_RESULT_UNLINKED',
+  },
+  // La apertura y la descarga públicas las audita el caso de uso: VIEW/EXPORT
+  // sin usuario, EXTERNAL_ORDER_COPY_OPENED/_DOWNLOADED.
+  'POST /external-orders/:id/patient-copy': {
+    action: 'SEND',
+    resource: 'EXTERNAL_ORDER',
+    resourceId: { param: 'id' },
+    patient: { lookup: 'externalOrder', param: 'id' },
+    reason: 'EXTERNAL_ORDER_COPY_SENT',
   },
 
   // DX-456: copia de la historia clínica. La generación (POST) la audita el
@@ -2095,6 +2160,18 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // PLAN_TEMPLATE_CREATED/UPDATED; líneas e intervalos solo por nombre de
   // campo). Aplicarla: UPDATE TREATMENT_PLAN PLAN_TEMPLATE_APPLIED con
   // `params.templateId` y `params.itemsCreated`, en la transacción del alta.
+  // DX-572: plantillas de órdenes externas (EXTERNAL_ORDER_TEMPLATE con
+  // EXTERNAL_ORDER_TEMPLATE_CREATED/UPDATED; el destinatario y los estudios
+  // solo por nombre de campo), el plazo para «vencida» (CLINIC_SETTINGS
+  // EXTERNAL_ORDER_SETTINGS) y la descarga pública de la copia (EXPORT
+  // EXTERNAL_ORDER sin usuario, EXTERNAL_ORDER_COPY_DOWNLOADED, en la
+  // transacción que gasta el enlace).
+  'POST /external-order-templates': 'external-orders.e2e-spec.ts',
+  'PATCH /external-order-templates/:id': 'external-orders.e2e-spec.ts',
+  'PUT /external-orders/settings':
+    'external-orders.use-cases.spec.ts y external-orders.e2e-spec.ts',
+  'POST /public/external-order-copies/:token/download':
+    'external-order-copies.int-spec.ts y external-order-copies.e2e-spec.ts',
   'POST /treatment-plan-templates': 'config-audit.e2e-spec.ts',
   'PATCH /treatment-plan-templates/:id': 'config-audit.e2e-spec.ts',
   'POST /treatment-plans/:id/apply-template':
@@ -2187,6 +2264,8 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 const CONTROLLERS: Type[] = [
   AuthController,
   PatientCertificatesController,
+  PatientExternalOrdersController,
+  ExternalOrdersController,
   ClinicalRecordCopiesController,
   PatientsController,
   CallerLookupController,

@@ -235,6 +235,7 @@ describe('CountPatientLivePublicLinksUseCase (DX-461)', () => {
     prescriptionCopies: 2,
     certificateCopies: 0,
     paymentLinks: 0,
+    externalOrderCopies: 0,
   };
 
   it('devuelve los enlaces vivos por tipo y el total, a la hora del reloj', async () => {

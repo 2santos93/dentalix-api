@@ -5,7 +5,7 @@ import {
 } from './live-public-links';
 
 describe('enlaces públicos vivos de un paciente (DX-461)', () => {
-  it('cubre la oferta de hueco, las dos firmas a distancia, la copia del PDF, la anamnesis y las copias de la receta (DX-468) y del certificado (DX-306) y el enlace de pago (DX-569)', () => {
+  it('cubre la oferta de hueco, las dos firmas a distancia, la copia del PDF, la anamnesis y las copias de la receta (DX-468) y del certificado (DX-306) el enlace de pago (DX-569) y la copia de la orden externa (DX-572)', () => {
     expect([...LIVE_PUBLIC_LINK_KINDS]).toEqual([
       'slotOffers',
       'consentSignatures',
@@ -15,6 +15,7 @@ describe('enlaces públicos vivos de un paciente (DX-461)', () => {
       'prescriptionCopies',
       'certificateCopies',
       'paymentLinks',
+      'externalOrderCopies',
     ]);
   });
 
@@ -30,7 +31,8 @@ describe('enlaces públicos vivos de un paciente (DX-461)', () => {
         prescriptionCopies: 6,
         certificateCopies: 7,
         paymentLinks: 8,
+        externalOrderCopies: 9,
       }),
-    ).toBe(36);
+    ).toBe(45);
   });
 });
