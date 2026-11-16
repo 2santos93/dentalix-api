@@ -78,6 +78,8 @@ function setup(options: SetupOptions = {}) {
   const hours = options.hours ?? null;
   const schedule = {
     findByLocation: () => Promise.resolve(hours),
+    // DX-263-bis: sin festivos en la sede.
+    holidaysOf: () => Promise.resolve({ timeZone: null, holidays: [] }),
     formatSourceOf: (id: string) =>
       Promise.resolve({ id, locale: 'es-VE', hourCycle: 'h23' }),
   } as unknown as LocationScheduleRepository;

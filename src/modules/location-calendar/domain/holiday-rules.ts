@@ -2,6 +2,8 @@ import type { RegionalFormat } from '../../../shared/format/regional-format';
 import {
   PERIOD_DAY_MAX,
   PERIOD_DAY_MIN,
+  addCivilDays,
+  civilDateIn,
   parseCivilDate,
 } from '../../../shared/time/civil-day';
 import type { ParsedHolidayFile } from './holiday-file';
@@ -347,4 +349,59 @@ function compareRows(a: ClassifiedRow, b: ClassifiedRow): number {
   if (ad !== bd) return ad < bd ? -1 : 1;
   if (a.status !== b.status) return a.status < b.status ? -1 : 1;
   return 0;
+}
+
+/**
+ * DX-263-bis: el festivo de la sede de ese día civil ('YYYY-MM-DD'): el
+ * puntual de esa fecha o el recurrente de ese mes y día (R6). La única regla
+ * de «¿es festivo?»: la usan agendar, mover, «Buscar hueco», la importación
+ * de citas (DX-263) y el aviso de DX-358.
+ */
+export function holidayOn<H extends { date: string; recurring: boolean }>(
+  day: string,
+  holidays: readonly H[],
+): H | null {
+  const md = monthDay(day);
+  return (
+    holidays.find((h) =>
+      h.recurring ? monthDay(h.date) === md : h.date === day,
+    ) ?? null
+  );
+}
+
+/** Días civiles que se miran como mucho para una cita (nunca dura tanto). */
+const MAX_HOLIDAY_SPAN_DAYS = 31;
+
+/**
+ * DX-263-bis: el primer festivo de la sede que toca la cita [start, end), con
+ * sus días civiles EN LA ZONA DE LA SEDE (nunca en UTC: las 23:30 de Caracas
+ * del 31 de diciembre ya son 1 de enero en UTC). El fin es abierto: una cita
+ * que termina a las 00:00 del festivo no lo toca.
+ */
+export function holidayDuring<H extends { date: string; recurring: boolean }>(
+  start: Date,
+  end: Date,
+  timeZone: string,
+  holidays: readonly H[],
+): (H & { day: string }) | null {
+  if (holidays.length === 0) return null;
+  const first = civilDateIn(start, timeZone);
+  const lastInstant = new Date(Math.max(start.getTime(), end.getTime() - 1));
+  const last = civilDateIn(lastInstant, timeZone);
+  let day = first;
+  for (let i = 0; i < MAX_HOLIDAY_SPAN_DAYS; i++) {
+    const holiday = holidayOn(day, holidays);
+    if (holiday) return { ...holiday, day };
+    if (day >= last) break;
+    day = addCivilDays(day, 1);
+  }
+  return null;
+}
+
+/** DX-263-bis: código del 409 de agendar o mover a un festivo de la sede. */
+export const LOCATION_HOLIDAY_CODE = 'LOCATION_HOLIDAY';
+
+/** DX-263-bis: texto del 409, con el nombre del festivo. */
+export function appointmentOnHolidayMessage(name: string): string {
+  return `Ese día la sede está cerrada por festivo («${name}»): elige otro día.`;
 }

@@ -15,7 +15,10 @@ import {
   AppointmentRepository,
   UpdateAppointmentRepoInput,
 } from '../../domain/ports/appointment-repository.port';
-import type { LocationScheduleRepository } from '../../../location-schedule/domain/ports/location-schedule-repository.port';
+import type {
+  LocationHolidays,
+  LocationScheduleRepository,
+} from '../../../location-schedule/domain/ports/location-schedule-repository.port';
 import { InMemoryAppointmentRepository } from './__fixtures__/in-memory-appointment.repository';
 import { InMemoryWaitlistRepository } from '../../../waitlist/application/__fixtures__/in-memory-waitlist';
 import type { StaffRepository } from '../../../staff/domain/ports/staff-repository.port';
@@ -150,6 +153,8 @@ function makeSchedule(
     locale: 'de-DE',
     hourCycle: 'h23',
   },
+  // DX-263-bis: por defecto la sede no tiene festivos.
+  holidays: LocationHolidays = { timeZone: null, holidays: [] },
 ): LocationScheduleRepository {
   return {
     findByLocation: (): Promise<never> =>
@@ -161,6 +166,7 @@ function makeSchedule(
       Promise.resolve({ id: locationId, ...format }),
     replaceForCurrentLocation: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),
+    holidaysOf: () => Promise.resolve(holidays),
   };
 }
 
@@ -663,6 +669,104 @@ describe('UpdateAppointmentUseCase', () => {
       await expect(
         uc.execute('a1', { start: at('14:00'), end: at('14:30') }),
       ).rejects.toThrow('El paciente ya tiene otra cita en ese horario');
+    });
+  });
+
+  describe('DX-263-bis: festivos de la sede al mover', () => {
+    // El día de ANCHOR_DAY + 1 es festivo puntual en la sede de la cita.
+    const holidayDay = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const calendar = {
+      timeZone: 'America/Caracas',
+      holidays: [{ date: holidayDay, name: 'Carnaval', recurring: false }],
+    };
+    // 10:00 de Caracas = 14:00Z.
+    const onHoliday = new Date(`${holidayDay}T14:00:00.000Z`);
+
+    function makeUc(existing: Appointment, update = jest.fn()) {
+      const repo = makeRepo({
+        findById: (): Promise<Appointment | null> => Promise.resolve(existing),
+        update,
+      });
+      return new UpdateAppointmentUseCase(
+        repo,
+        makeSchedule(undefined, undefined, calendar),
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(),
+        makeLocations(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+      );
+    }
+
+    it('mover (o arrastrar) a un festivo es 409 LOCATION_HOLIDAY con su nombre, sin escribir', async () => {
+      const update = jest.fn();
+      const uc = makeUc(fakeAppointment(), update);
+      const err = await uc
+        .execute('a1', {
+          start: onHoliday,
+          end: new Date(onHoliday.getTime() + 30 * 60_000),
+        })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        code: 'LOCATION_HOLIDAY',
+        message:
+          'Ese día la sede está cerrada por festivo («Carnaval»): elige otro día.',
+        holiday: { date: holidayDay, name: 'Carnaval' },
+      });
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('reactivar una cancelada que quedó en un festivo creado después: 409', async () => {
+      const uc = makeUc(
+        fakeAppointment({
+          status: AppointmentStatus.CANCELLED,
+          start: onHoliday,
+          end: new Date(onHoliday.getTime() + 30 * 60_000),
+        }),
+      );
+      const err = await uc
+        .execute('a1', { status: AppointmentStatus.SCHEDULED })
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        code: 'LOCATION_HOLIDAY',
+      });
+    });
+
+    it('con el paciente ya en la clínica, moverla dentro de ese mismo día no lo mira (la sede está abierta)', async () => {
+      const existing = fakeAppointment({
+        status: AppointmentStatus.ARRIVED,
+        start: onHoliday,
+        end: new Date(onHoliday.getTime() + 30 * 60_000),
+      });
+      const later = new Date(onHoliday.getTime() + 60 * 60_000);
+      const update = jest.fn().mockResolvedValue({
+        ...existing,
+        start: later,
+        end: new Date(later.getTime() + 30 * 60_000),
+      });
+      const uc = makeUc(existing, update);
+      await uc.execute('a1', {
+        start: later,
+        end: new Date(later.getTime() + 30 * 60_000),
+      });
+      expect(update).toHaveBeenCalled();
+    });
+
+    it('cambiar solo notas de una cita que ya está en un festivo no lo mira', async () => {
+      const existing = fakeAppointment({
+        start: onHoliday,
+        end: new Date(onHoliday.getTime() + 30 * 60_000),
+      });
+      const uc = makeUc(
+        existing,
+        jest.fn().mockResolvedValue({ ...existing, notes: 'x' }),
+      );
+      await expect(uc.execute('a1', { notes: 'x' })).resolves.toBeDefined();
     });
   });
 

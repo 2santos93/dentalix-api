@@ -13,6 +13,7 @@ import {
   type ReservedOverride,
 } from './schedule-block-check';
 import { overlapConflict } from './appointment-overlap-error';
+import { assertNotOnHoliday } from './holiday-check';
 import { collectWarnings, type Warnings } from './appointment-warnings';
 import type { ScheduleBlockRepository } from '../../schedule-blocks/domain/ports/schedule-block-repository.port';
 import type { ScheduleBlockClock } from '../../schedule-blocks/application/schedule-block-clock';
@@ -130,13 +131,14 @@ export function appointmentPastConflict(): ConflictException {
  *    al mover solo si cambia (o si la cita sale de CANCELLED/NO_SHOW,
  *    `revalidateProvider`); al reactivar siempre (pudo cambiar desde que se
  *    canceló).
- * 5. Horario de la sede (422).
+ * 5. Horario de la sede (422) y, DX-263-bis, festivos de la sede (409
+ *    `LOCATION_HOLIDAY`, en su zona).
  * 6. Horario del profesional: aviso, o 409 en modo estricto.
  * 7. Bloqueos (409 / aviso) y hueco reservado (DX-446, `overrideReason`).
  * 8. Solape del profesional y 9. del paciente (409 `APPOINTMENT_OVERLAP`).
  *
  * Una urgencia (`walkIn`) que se reactiva tiene las excepciones de su alta
- * (`CreateWalkInUseCase`): sin horario de la sede, y el del profesional solo
+ * (`CreateWalkInUseCase`): sin horario ni festivos de la sede, y el del profesional solo
  * avisa, también en estricto. Un sobrecupo que se reactiva no pasa por el
  * solape del profesional: eso lo decide `overbookAtItsSlot` (DX-509).
  */
@@ -213,6 +215,16 @@ export async function checkSlotRules(
           requireLocationFormat(source),
         ),
       );
+    }
+    // DX-263-bis: mover (también arrastrar en la agenda) o reactivar a un
+    // festivo de la sede es 409. Con el paciente ya en la clínica no: la
+    // cita no sale de hoy (DX-200) y la sede está abierta de hecho.
+    if (!isInClinic(existing.status)) {
+      await assertNotOnHoliday(deps.schedule, {
+        locationId: existing.locationId,
+        start,
+        end,
+      });
     }
   }
 

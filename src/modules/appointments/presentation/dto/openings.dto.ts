@@ -112,6 +112,15 @@ export class OpeningDto {
   chair?: ChairSummaryDto;
 }
 
+/** DX-263-bis: un día del rango en que la sede está cerrada por festivo. */
+export class OpeningHolidayDto {
+  @ApiProperty({ example: '2027-01-01', description: 'Día civil de la sede.' })
+  date!: string;
+
+  @ApiProperty({ example: 'Año Nuevo' })
+  name!: string;
+}
+
 export class OpeningsDto {
   @ApiProperty({ example: 'UTC' })
   timeZone!: string;
@@ -132,4 +141,11 @@ export class OpeningsDto {
       'DX-533: la sede no tiene horario configurado y los huecos se buscaron en el horario de alta (lun–vie 9:00–13:00 y 15:00–19:00, sáb 9:00–13:00, hora de la sede). Reservar fuera de él sigue permitido.',
   })
   defaultHours!: boolean;
+
+  @ApiProperty({
+    type: [OpeningHolidayDto],
+    description:
+      'DX-263-bis: festivos de la sede (DX-316) dentro del rango. Esos días no dan huecos: la sede está cerrada.',
+  })
+  holidays!: OpeningHolidayDto[];
 }
