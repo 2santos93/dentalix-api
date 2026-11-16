@@ -348,6 +348,58 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
       .expect(204);
   });
 
+  // DX-103: el guardado va en un lote y la lista sale de un resumen en la base.
+  it('un periodontograma completo se guarda de una vez y la lista da sus índices sin medidas', async () => {
+    const created = await as(clinicA, dentistA.token)
+      .post(path(otherPatientA), { examDate: '2026-04-11' })
+      .expect(201);
+    const id = (created.body as ExamBody).id;
+    const teeth = [1, 2, 3, 4].flatMap((q) =>
+      [1, 2, 3, 4, 5, 6, 7, 8].map((d) => q * 10 + d),
+    );
+    const sites = teeth.flatMap((toothFdi, t) =>
+      (['MB', 'B', 'DB', 'ML', 'L', 'DL'] as const).map((site, i) => ({
+        toothFdi,
+        site,
+        probingMm: (t + i) % 9,
+        recessionMm: ((t * i) % 7) - 2,
+        bleeding: (t + i) % 3 === 0,
+        plaque: (t + i) % 4 === 0,
+        furcation: i === 0 ? t % 4 : null,
+      })),
+    );
+    const saved = await as(clinicA, assistantA)
+      .put(path(otherPatientA, `/${id}/measures`), {
+        sites,
+        teeth: teeth.map((toothFdi, t) => ({
+          toothFdi,
+          mobility: t % 5 === 0 ? 1 : null,
+          skipped: t % 11 === 0,
+        })),
+      })
+      .expect(200);
+    const detail = saved.body as ExamBody;
+    expect(detail.sites).toHaveLength(192);
+    expect(detail.indices.sitesExamined).toBeGreaterThan(150);
+
+    // El ayudante también lee la lista; la fila trae los mismos índices que
+    // el detalle y ninguna medida.
+    const list = await as(clinicA, assistantA)
+      .get(path(otherPatientA))
+      .expect(200);
+    const rows = list.body as Record<string, unknown>[];
+    const row = rows.find((r) => r.id === id);
+    expect(row).toBeDefined();
+    expect(row?.indices).toEqual(detail.indices);
+    for (const r of rows) {
+      expect(r).not.toHaveProperty('sites');
+      expect(r).not.toHaveProperty('teeth');
+    }
+    // La lista de patientA no lo incluye (acotada por paciente).
+    const listA = await as(clinicA).get(path(patientA)).expect(200);
+    expect((listA.body as ExamBody[]).map((r) => r.id)).not.toContain(id);
+  });
+
   it('finalizar deja el examen inmutable: 409 a cambios, a re-finalizar y a borrar', async () => {
     const res = await as(clinicA, dentistA.token)
       .post(path(patientA, `/${examId}/finalize`))

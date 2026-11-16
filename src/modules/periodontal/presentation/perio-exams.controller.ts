@@ -47,6 +47,7 @@ import { CreatePerioExamDto } from './dto/create-perio-exam.dto';
 import { PerioExamDetailDto, PerioExamSummaryDto } from './dto/perio-exam.dto';
 import { SavePerioMeasuresDto } from './dto/save-perio-measures.dto';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { PERIO_LIST_MAX } from '../domain/perio-measures';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
@@ -82,7 +83,10 @@ export class PerioExamsController {
     patient: { param: 'patientId' },
   })
   @Get()
-  @ApiOkResponse({ type: [PerioExamSummaryDto] })
+  @ApiOkResponse({
+    type: [PerioExamSummaryDto],
+    description: `Histórico del paciente por fecha de examen descendente, con sus índices y SIN las medidas (están en el detalle). Como máximo los ${PERIO_LIST_MAX} exámenes más recientes.`,
+  })
   @ApiNotFoundResponse({
     description: 'Paciente no encontrado en esta clínica',
   })
