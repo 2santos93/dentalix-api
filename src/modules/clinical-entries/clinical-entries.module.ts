@@ -64,6 +64,7 @@ import { ClinicalNoteTemplatesModule } from '../clinical-note-templates/clinical
   ],
   // DX-456: la copia de la historia clínica lee las evoluciones con la MISMA
   // consulta que la ficha.
-  exports: [ListClinicalEntriesUseCase],
+  // DX-190: el control de ortodoncia crea su evolución con la MISMA alta.
+  exports: [ListClinicalEntriesUseCase, CreateClinicalEntryUseCase],
 })
 export class ClinicalEntriesModule {}

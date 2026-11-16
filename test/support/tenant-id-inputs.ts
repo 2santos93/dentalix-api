@@ -188,6 +188,28 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-190: «B abre un caso, lo edita, registra un control o lista el
+  // seguimiento con la sede, el profesional, el plan o la cita de A → 400/404
+  // en español o una lista sin filas de A, y nada de A cambia».
+  'GET /ortho/follow-up ?locationId': 'orthodontics.e2e-spec.ts',
+  'GET /ortho/follow-up ?providerId': 'orthodontics.e2e-spec.ts',
+  'POST /patients/:patientId/ortho-cases body.locationId':
+    'orthodontics.e2e-spec.ts',
+  'POST /patients/:patientId/ortho-cases body.providerId':
+    'orthodontics.e2e-spec.ts',
+  'POST /patients/:patientId/ortho-cases body.treatmentPlanId':
+    'orthodontics.e2e-spec.ts',
+  'PATCH /patients/:patientId/ortho-cases/:caseId body.providerId':
+    'orthodontics.e2e-spec.ts',
+  'PATCH /patients/:patientId/ortho-cases/:caseId body.treatmentPlanId':
+    'orthodontics.e2e-spec.ts',
+  'POST /patients/:patientId/ortho-cases/:caseId/visits body.appointmentId':
+    'orthodontics.e2e-spec.ts',
+  // DX-285: B con la serie o el control de A en el cuerpo → 400.
+  'POST /patients/:patientId/ortho-cases/:caseId/aligner-series body.refinementOfId':
+    'ortho-billing.e2e-spec.ts',
+  'POST /patients/:patientId/ortho-cases/:caseId/aligner-series/:seriesId/deliveries body.visitId':
+    'ortho-billing.e2e-spec.ts',
   // DX-146: «B pide "Por avisar hoy" con la sede de A → 400 en español, y su
   // lista no trae a nadie de A».
   'GET /receivables/reminders ?locationId': 'receivables-reminders.e2e-spec.ts',

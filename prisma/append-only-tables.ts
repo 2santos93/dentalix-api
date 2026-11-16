@@ -61,6 +61,13 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-266: «No es duplicado». La app solo inserta y lee; la fusión
   // (dx_merge_patients, el dueño) pasa las del absorbido al conservado.
   'patient_duplicate_dismissals',
+  // DX-190: el control de ortodoncia (se corrige con una adenda de su
+  // evolución; dx_ortho_visits_immutable).
+  'ortho_visits',
+  // DX-285: series de alineadores (un refinamiento abre otra) y entregas de
+  // bandejas: solo se añaden.
+  'ortho_aligner_series',
+  'ortho_aligner_deliveries',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */
@@ -97,6 +104,12 @@ export const NO_APP_DELETE = [
   'signature_requests',
   'signed_consent_pdf_links',
   'signed_consent_pdfs',
+  // DX-190: el caso de ortodoncia (cabecera y estado; dx_ortho_cases_guard no
+  // deja tocar uno cerrado).
+  'ortho_cases',
+  // DX-285: los cargos del caso en el plan (se apunta el control que realiza
+  // cada uno; nunca se borran).
+  'ortho_case_charges',
 ] as const;
 
 /**

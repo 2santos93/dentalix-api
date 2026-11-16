@@ -14,6 +14,8 @@ export const MERGE_BLOCKER_CODES = [
   'DX266_OVERLAPPING_APPOINTMENTS',
   'DX266_OPENING_BALANCE_CONFLICT',
   'DX266_OPEN_PAYMENT_PROMISES',
+  // DX-190: un caso de ortodoncia activo por paciente.
+  'DX266_TWO_ACTIVE_ORTHO_CASES',
 ] as const;
 
 export type MergeBlockerCode = (typeof MERGE_BLOCKER_CODES)[number];
@@ -25,6 +27,8 @@ export const MERGE_BLOCKER_MESSAGES: Record<MergeBlockerCode, string> = {
     'Los dos pacientes tienen un saldo migrado del mismo lote de importación y en la misma moneda. Esos saldos no se pueden juntar.',
   DX266_OPEN_PAYMENT_PROMISES:
     'Los dos pacientes tienen un compromiso de pago abierto. Cierra uno de los dos antes de fusionar.',
+  DX266_TWO_ACTIVE_ORTHO_CASES:
+    'Los dos pacientes tienen un caso de ortodoncia activo. Finaliza, pasa a retención o da por abandonado uno de los dos antes de fusionar.',
 };
 
 /** Código del error de la API (en el cuerpo, `code`) de cada bloqueo. */
@@ -32,6 +36,7 @@ export const MERGE_BLOCKER_API_CODES: Record<MergeBlockerCode, string> = {
   DX266_OVERLAPPING_APPOINTMENTS: 'MERGE_OVERLAPPING_APPOINTMENTS',
   DX266_OPENING_BALANCE_CONFLICT: 'MERGE_OPENING_BALANCE_CONFLICT',
   DX266_OPEN_PAYMENT_PROMISES: 'MERGE_OPEN_PAYMENT_PROMISES',
+  DX266_TWO_ACTIVE_ORTHO_CASES: 'MERGE_TWO_ACTIVE_ORTHO_CASES',
 };
 
 export const MERGE_PATIENT_NOT_FOUND_MESSAGE = 'Paciente no encontrado';

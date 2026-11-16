@@ -496,6 +496,10 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       // DX-099: una anamnesis enviada por enlace también bloquea el deshacer.
       'medical_history_submissions.patientId',
       'medical_history_versions.patientId',
+      // DX-190: un caso de ortodoncia y sus controles son historia clínica:
+      // bloquean el deshacer.
+      'ortho_cases.patientId',
+      'ortho_visits.patientId',
       'patient_agreements.patientId',
       // DX-306: un certificado emitido (justificante o reposo) es un
       // documento inalterable de una cita atendida: bloquea el deshacer.
