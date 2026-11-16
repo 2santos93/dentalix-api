@@ -57,6 +57,9 @@ export class UpdateReminderSettingsUseCase {
         ...(input.calendarAlarmHours !== undefined
           ? { calendarAlarmHours: input.calendarAlarmHours }
           : {}),
+        ...(input.sendAnamnesis !== undefined
+          ? { sendAnamnesis: input.sendAnamnesis }
+          : {}),
       },
       audit,
     );

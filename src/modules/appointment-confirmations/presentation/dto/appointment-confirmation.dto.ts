@@ -269,4 +269,12 @@ export class ConfirmationLinkDto {
 
   @ApiProperty({ type: PublicConfirmationAppointmentDto })
   appointment!: PublicConfirmationAppointmentDto;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-290: enlace de un solo uso al cuestionario de salud, para el mismo mensaje, si la sede envía la anamnesis con el recordatorio y el paciente es nuevo o su anamnesis caduca el día de la cita. Contiene el token en claro: se entrega solo aquí. null si no toca.',
+  })
+  anamnesisUrl!: string | null;
 }

@@ -625,7 +625,169 @@ describe('Recordatorios de cita por email (e2e, DX-026)', () => {
         leadHours: [48, 2],
         patientBlocker: null,
         items: [],
+        anamnesis: null,
       });
+    });
+  });
+
+  // DX-290: «Enviar la anamnesis con el recordatorio» por sede (solo ADMIN),
+  // el enlace en el mensaje de WhatsApp del panel de confirmación y el
+  // estado en el panel de la cita. Por rol y por clínica.
+  describe('anamnesis con el recordatorio (DX-290)', () => {
+    const settingsUrl = () => `/api/v1/reminder-settings/${mainLocationId}`;
+
+    beforeAll(async () => {
+      await as(api().post('/api/v1/privacy-policies'), clinic.adminToken)
+        .send({
+          policyText: 'Política de tratamiento de datos de la clínica.',
+          generalText: 'Autorizo el tratamiento de mis datos personales.',
+          sensitiveHealthText:
+            'Autorizo el tratamiento de mis datos de salud para la atención odontológica.',
+          marketingText: 'Autorizo recibir comunicaciones comerciales.',
+        })
+        .expect(201);
+    });
+
+    it('por defecto apagado; ADMIN lo enciende, se conserva si no se manda y queda en la auditoría', async () => {
+      const list = await as(
+        api().get('/api/v1/reminder-settings'),
+        clinic.adminToken,
+      ).expect(200);
+      const main = (
+        list.body as (SettingsBody & { sendAnamnesis: boolean })[]
+      ).find((s) => s.locationId === mainLocationId);
+      expect(main?.sendAnamnesis).toBe(false);
+
+      const on = await as(api().put(settingsUrl()), clinic.adminToken)
+        .send({ enabled: true, leadHours: [48, 2], sendAnamnesis: true })
+        .expect(200);
+      expect((on.body as { sendAnamnesis: boolean }).sendAnamnesis).toBe(true);
+      // Sin el campo, se conserva.
+      const kept = await as(api().put(settingsUrl()), clinic.adminToken)
+        .send({ enabled: true, leadHours: [48, 2] })
+        .expect(200);
+      expect((kept.body as { sendAnamnesis: boolean }).sendAnamnesis).toBe(
+        true,
+      );
+      const event = await raw.auditEvent.findFirst({
+        where: {
+          tenantId: clinic.tenantId,
+          resourceType: 'REMINDER_SETTINGS',
+          resourceId: mainLocationId,
+        },
+        orderBy: { occurredAt: 'desc' },
+      });
+      expect(JSON.stringify(event?.metadata)).toContain('"sendAnamnesis":true');
+    });
+
+    it('un valor que no es sí/no da 400 en español; otro rol, 403; otra clínica, 404', async () => {
+      const bad = await as(api().put(settingsUrl()), clinic.adminToken)
+        .send({ enabled: true, leadHours: [48], sendAnamnesis: 'si' })
+        .expect(400);
+      expect(JSON.stringify(bad.body)).toContain(
+        'Indica si se envía la anamnesis con el recordatorio (sí o no).',
+      );
+      for (const role of [
+        ClinicRole.DENTIST,
+        ClinicRole.ASSISTANT,
+        ClinicRole.RECEPTION,
+      ]) {
+        const res = await as(api().put(settingsUrl()), tokens[role])
+          .send({ enabled: true, leadHours: [48], sendAnamnesis: false })
+          .expect(403);
+        expect((res.body as { message: string }).message).toBe(FORBIDDEN);
+      }
+      await as(api().put(settingsUrl()), other.adminToken, other.host)
+        .send({ enabled: true, leadHours: [48], sendAnamnesis: false })
+        .expect(404);
+      const still = await raw.locationReminderSettings.findFirstOrThrow({
+        where: { locationId: mainLocationId },
+      });
+      expect(still.sendAnamnesis).toBe(true);
+    });
+
+    it('paciente nuevo: el enlace de confirmación trae el de anamnesis y la cita lo muestra; con la anamnesis vigente, no', async () => {
+      const fresh = await createPatient('nuevo@example.com', '29001');
+      const id = await book(fresh, new Date(Date.now() + 7 * 24 * HOUR));
+      const res = await as(
+        api().post(`/api/v1/appointments/${id}/confirmation-link`),
+        tokens[ClinicRole.RECEPTION],
+      ).expect(201);
+      const body = res.body as { anamnesisUrl: string | null };
+      expect(body.anamnesisUrl).toMatch(
+        new RegExp(
+          `^https?://${clinic.host.replace(/\./g, '\\.')}/anamnesis/[A-Za-z0-9_-]{43}$`,
+        ),
+      );
+      const row = await raw.medicalHistorySubmission.findFirstOrThrow({
+        where: { patientId: fresh },
+      });
+      expect(row).toMatchObject({ origin: 'STAFF', appointmentId: id });
+      const panel = (await reminders(id)) as RemindersBody & {
+        anamnesis: { origin: string; status: string } | null;
+      };
+      expect(panel.anamnesis).toMatchObject({
+        origin: 'STAFF',
+        status: 'PENDING_PATIENT',
+      });
+      // Reenviar no deja dos enlaces vivos.
+      await as(
+        api().post(`/api/v1/appointments/${id}/confirmation-link`),
+        tokens[ClinicRole.RECEPTION],
+      ).expect(201);
+      expect(
+        await raw.medicalHistorySubmission.count({
+          where: {
+            patientId: fresh,
+            status: 'PENDING_PATIENT',
+            revokedAt: null,
+          },
+        }),
+      ).toBe(1);
+
+      const current = await createPatient('vigente@example.com', '29002');
+      await raw.medicalHistoryVersion.create({
+        data: {
+          tenantId: clinic.tenantId,
+          patientId: current,
+          version: 1,
+          safetyFlags: {},
+          hasCriticalAlert: false,
+          createdById: clinic.adminUserId,
+          createdAt: new Date(Date.now() - 90 * 24 * HOUR),
+        },
+      });
+      const other2 = await book(current, new Date(Date.now() + 8 * 24 * HOUR));
+      const none = await as(
+        api().post(`/api/v1/appointments/${other2}/confirmation-link`),
+        tokens[ClinicRole.RECEPTION],
+      ).expect(201);
+      expect(
+        (none.body as { anamnesisUrl: string | null }).anamnesisUrl,
+      ).toBeNull();
+      expect(
+        await raw.medicalHistorySubmission.count({
+          where: { patientId: current },
+        }),
+      ).toBe(0);
+    });
+
+    it('otra clínica no emite el enlace ni ve el estado de la cita (404)', async () => {
+      const patientId = await createPatient('ajeno@example.com', '29003');
+      const id = await book(patientId, new Date(Date.now() + 9 * 24 * HOUR));
+      await as(
+        api().post(`/api/v1/appointments/${id}/confirmation-link`),
+        other.adminToken,
+        other.host,
+      ).expect(404);
+      await as(
+        api().get(`/api/v1/appointments/${id}/reminders`),
+        other.adminToken,
+        other.host,
+      ).expect(404);
+      expect(
+        await raw.medicalHistorySubmission.count({ where: { patientId } }),
+      ).toBe(0);
     });
   });
 });

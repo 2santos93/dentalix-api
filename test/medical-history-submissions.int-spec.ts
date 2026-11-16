@@ -95,6 +95,7 @@ async function issue(clinic: Seeded): Promise<{ id: string; token: string }> {
       tokenHash: hashAnamnesisToken(token),
       expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       questionnaireVersion: '2026-10-v1',
+      origin: 'STAFF',
       createdById: clinic.userId,
     }),
   );

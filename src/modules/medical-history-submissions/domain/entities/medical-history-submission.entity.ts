@@ -1,7 +1,10 @@
-import type { MedicalHistorySubmissionStatus } from '@prisma/client';
+import type {
+  MedicalHistorySubmissionOrigin,
+  MedicalHistorySubmissionStatus,
+} from '@prisma/client';
 import type { AnamnesisAnswers } from '../anamnesis-questionnaire';
 
-export type { MedicalHistorySubmissionStatus };
+export type { MedicalHistorySubmissionOrigin, MedicalHistorySubmissionStatus };
 
 /**
  * Un envío de la anamnesis por enlace (DX-099). Del token solo existe el
@@ -26,7 +29,10 @@ export interface MedicalHistorySubmission {
   reviewedAt: Date | null;
   rejectReason: string | null;
   resultingVersionId: string | null;
-  createdById: string;
+  /** DX-290: STAFF (recepción) o REMINDER (el recordatorio, sin usuario). */
+  origin: MedicalHistorySubmissionOrigin;
+  /** null solo en los de origen REMINDER. */
+  createdById: string | null;
   createdAt: Date;
 }
 
@@ -39,7 +45,10 @@ export interface SubmissionSummary {
   status: MedicalHistorySubmissionStatus;
   expiresAt: Date;
   createdAt: Date;
-  createdByName: string;
+  /** DX-290: STAFF o REMINDER (enviado con el recordatorio). */
+  origin: MedicalHistorySubmissionOrigin;
+  /** null = lo envió el recordatorio automático (origen REMINDER). */
+  createdByName: string | null;
   submittedAt: Date | null;
   reviewedAt: Date | null;
   reviewedByName: string | null;

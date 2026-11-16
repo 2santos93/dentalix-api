@@ -9,6 +9,7 @@ import type { JobContext, JobPayload } from '../../jobs/domain/job';
 import {
   REMINDER_REPOSITORY,
   type ReminderRepository,
+  type ReminderSendContext,
 } from '../domain/ports/reminder-repository.port';
 import { decideReminder } from '../domain/reminder-window';
 import { startsAtLabel } from '../domain/starts-at-label';
@@ -18,6 +19,10 @@ import {
   CONFIRMATION_PATH,
 } from '../../appointment-confirmations/presentation/confirmation-url';
 import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
+import {
+  AnamnesisReminderLinks,
+  anamnesisUrlFromBase,
+} from '../../medical-history-submissions/application/anamnesis-reminder-links';
 import { ReminderClock } from './reminder-clock';
 import { OPT_OUT_PATH, ReminderOptOutLinks } from './reminder-opt-out-links';
 import { noticeRecipient } from '../../patients/domain/communication/notice-recipient';
@@ -90,6 +95,8 @@ export class SendAppointmentReminder {
     private readonly optOutLinks: ReminderOptOutLinks,
     // DX-517: opcional para los tests que construyen el caso a mano.
     @Optional() private readonly currencyTexts?: ClinicCurrencyTextsReader,
+    // DX-290: opcional por la misma razón.
+    @Optional() private readonly anamnesisLinks?: AnamnesisReminderLinks,
   ) {}
 
   async handle(payload: JobPayload, context?: JobContext): Promise<void> {
@@ -203,6 +210,11 @@ export class SendAppointmentReminder {
     const optOutToken = linkBase
       ? await this.optOutLinks.issue(ctx.patientId)
       : null;
+    // DX-290: con el ajuste de la sede, un paciente nuevo o con la anamnesis
+    // caducada el día de la cita recibe su enlace (un solo uso; anula el que
+    // aún esperaba respuesta). Sin host seguro no hay enlaces: tampoco este.
+    // Va al mismo destinatario que el email (el responsable de un menor).
+    const anamnesisUrl = await this.anamnesisUrl(ctx, linkBase, now, signal);
     // DX-497: el idioma del paciente si hay catálogo para él; si no, el de la
     // clínica, y el registro de envíos lo dice («sin traducción: ca → es»).
     // La fecha y la hora siguen el locale y la zona de la sede (DX-315).
@@ -286,6 +298,8 @@ export class SendAppointmentReminder {
               end: link.appointment.end.toISOString(),
             }
           : null,
+        // DX-290: solo cuando lo lleva (el resto de emails, sin la clave).
+        ...(anamnesisUrl ? { anamnesisUrl } : {}),
         cancellationPolicy: reminderPolicyVars(
           ctx.cancellationPolicy,
           ctx.locationFormat,
@@ -296,6 +310,38 @@ export class SendAppointmentReminder {
       },
     });
     await this.finish(claim.id, outboundId, appointmentId, leadHours);
+  }
+
+  private async anamnesisUrl(
+    ctx: ReminderSendContext,
+    linkBase: string | null,
+    now: Date,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    if (!linkBase || !this.anamnesisLinks || !ctx.settings?.sendAnamnesis) {
+      return null;
+    }
+    assertLeaseHeld(signal);
+    const outcome = await this.anamnesisLinks.issueFor(
+      {
+        id: ctx.appointment.id,
+        patientId: ctx.patientId,
+        locationId: ctx.locationId,
+        start: ctx.appointment.start,
+        timeZone: ctx.locationTimeZone,
+      },
+      { kind: 'REMINDER' },
+      now,
+    );
+    if (!outcome.issued) {
+      this.logger.log({
+        event: 'reminders.anamnesis_skipped',
+        appointmentId: ctx.appointment.id,
+        reason: outcome.reason,
+      });
+      return null;
+    }
+    return anamnesisUrlFromBase(linkBase, outcome.token);
   }
 
   private async finish(

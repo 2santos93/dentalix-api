@@ -62,6 +62,7 @@ const SETTINGS_SELECT = {
   enabled: true,
   leadHours: true,
   calendarAlarmHours: true,
+  sendAnamnesis: true,
   updatedAt: true,
 } as const satisfies Prisma.LocationReminderSettingsSelect;
 
@@ -191,6 +192,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           leadHours: s?.leadHours ?? [],
           calendarAlarmHours:
             s?.calendarAlarmHours ?? DEFAULT_CALENDAR_ALARM_HOURS,
+          sendAnamnesis: s?.sendAnamnesis ?? false,
           updatedAt: s?.updatedAt ?? null,
         };
       });
@@ -221,6 +223,7 @@ export class PrismaReminderRepository implements ReminderRepository {
               enabled: true,
               leadHours: true,
               calendarAlarmHours: true,
+              sendAnamnesis: true,
             },
           },
         },
@@ -232,6 +235,10 @@ export class PrismaReminderRepository implements ReminderRepository {
         // DX-469: sin valor en el PUT se conserva (o el por defecto al crear).
         ...(input.calendarAlarmHours !== undefined
           ? { calendarAlarmHours: input.calendarAlarmHours }
+          : {}),
+        // DX-290: ídem.
+        ...(input.sendAnamnesis !== undefined
+          ? { sendAnamnesis: input.sendAnamnesis }
           : {}),
         updatedById: audit.actor.userId,
       };
@@ -248,6 +255,7 @@ export class PrismaReminderRepository implements ReminderRepository {
           enabled: false,
           leadHours: [],
           calendarAlarmHours: DEFAULT_CALENDAR_ALARM_HOURS,
+          sendAnamnesis: false,
         },
         saved,
       );
@@ -315,7 +323,7 @@ export class PrismaReminderRepository implements ReminderRepository {
         await Promise.all([
           tx.locationReminderSettings.findFirst({
             where: { locationId: appointment.locationId },
-            select: { enabled: true, leadHours: true },
+            select: { enabled: true, leadHours: true, sendAnamnesis: true },
           }),
           loadNoticeResponsibles(tx, appointment.patient.id),
           loadMajorityReview(tx, appointment.patient.id),
@@ -359,6 +367,7 @@ export class PrismaReminderRepository implements ReminderRepository {
         responsibles,
         majorityReview,
         settings,
+        locationId: appointment.locationId,
         cancellationPolicy: policy
           ? {
               ...policy,

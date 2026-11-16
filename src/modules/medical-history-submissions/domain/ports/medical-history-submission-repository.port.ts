@@ -1,5 +1,9 @@
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
-import type { MedicalHistorySubmissionStatus } from '@prisma/client';
+import type {
+  MedicalHistorySubmissionOrigin,
+  MedicalHistorySubmissionStatus,
+} from '@prisma/client';
+import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { MedicalHistory } from '../../../medical-history/domain/entities/medical-history.entity';
 import type { MedicalHistoryVersionData } from '../../../medical-history/domain/ports/medical-history-repository.port';
 import type { AnamnesisAnswers } from '../anamnesis-questionnaire';
@@ -44,7 +48,27 @@ export interface IssueRequestInput {
   tokenHash: string;
   expiresAt: Date;
   questionnaireVersion: string;
-  createdById: string;
+  /** DX-290: STAFF con `createdById`; REMINDER sin él. */
+  origin: MedicalHistorySubmissionOrigin;
+  createdById: string | null;
+  /**
+   * DX-290: evento de auditoría a escribir en la MISMA transacción del alta
+   * (los de recepción por la ruta propia los audita su interceptor).
+   */
+  audit?: (submissionId: string) => AuditEventDraft;
+}
+
+/** DX-290: lo que decide si el recordatorio lleva el enlace de anamnesis. */
+export interface ReminderAnamnesisFacts {
+  /** `location_reminder_settings.sendAnamnesis` de la sede (false sin fila). */
+  settingEnabled: boolean;
+  patientArchived: boolean;
+  awaitingReview: boolean;
+  /** Última versión o confirmación «Sin cambios hoy» (null = nunca). */
+  lastReviewedAt: Date | null;
+  validityMonths: number;
+  sensitiveHealthGranted: boolean;
+  hasPrivacyPolicy: boolean;
 }
 
 export interface IssuedRequest {
@@ -102,6 +126,28 @@ export type ReviewOutcome =
 
 export interface MedicalHistorySubmissionRepository {
   loadRequestContext(patientId: string): Promise<RequestContext | null>;
+  /**
+   * DX-290: hechos para decidir si el recordatorio de una cita de la sede
+   * `locationId` lleva el enlace. null si el paciente no existe aquí.
+   */
+  loadReminderFacts(
+    patientId: string,
+    locationId: string,
+  ): Promise<ReminderAnamnesisFacts | null>;
+  /**
+   * DX-290: el último envío ligado a la cita (para su panel), sin
+   * respuestas; null si no hay.
+   */
+  /**
+   * DX-290: la cita (viva) con su paciente, sede, inicio, estado y la zona
+   * de la sede (null si no tiene una válida). null si no existe aquí.
+   */
+  findAppointmentForLink(
+    appointmentId: string,
+  ): Promise<(RequestAppointment & { timeZone: string | null }) | null>;
+  latestForAppointment(
+    appointmentId: string,
+  ): Promise<SubmissionSummary | null>;
   findAppointment(appointmentId: string): Promise<RequestAppointment | null>;
   /**
    * Emite el enlace y, en la MISMA transacción, anula los anteriores del

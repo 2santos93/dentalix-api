@@ -40,7 +40,8 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
     },
     responsibles: [],
     majorityReview: null,
-    settings: { enabled: true, leadHours: [48, 2] },
+    settings: { enabled: true, leadHours: [48, 2], sendAnamnesis: false },
+    locationId: '00000000-0000-4000-8000-0000000000aa',
     cancellationPolicy: null,
     ...over,
   };
@@ -679,7 +680,9 @@ describe('SendAppointmentReminder (DX-026)', () => {
     ],
     [
       'sede desactivada',
-      context({ settings: { enabled: false, leadHours: [2] } }),
+      context({
+        settings: { enabled: false, leadHours: [2], sendAnamnesis: false },
+      }),
       'DISABLED',
     ],
   ])(
@@ -738,5 +741,129 @@ describe('SendAppointmentReminder (DX-026)', () => {
         expect.objectContaining({ locale: 'es' }),
       );
     });
+  });
+});
+
+describe('SendAppointmentReminder · anamnesis con el recordatorio (DX-290)', () => {
+  const payload = {
+    appointmentId: APPT,
+    leadHours: 2,
+    start: START.toISOString(),
+  };
+
+  function build(
+    linkBase: string | null,
+    anamnesisLinks: { issueFor: jest.Mock },
+  ) {
+    const repo = new FakeReminderRepository();
+    const email = {
+      enqueue: jest.fn(
+        (input: { referenceId: string; vars: Record<string, unknown> }) => {
+          repo.queuedEmails.add(input.referenceId);
+          return Promise.resolve({ id: 'mail-1' });
+        },
+      ),
+    };
+    const handler = new SendAppointmentReminder(
+      repo,
+      {
+        execute: jest.fn().mockResolvedValue({
+          token: 'tok_123',
+          appointment: {
+            patientFirstName: 'Ana',
+            start: START,
+            end: new Date(START.getTime() + HOUR),
+            providerName: 'Dra. Gómez',
+            locationName: 'Sede Norte',
+            locationAddress: 'Av. Francisco de Miranda 93',
+          },
+        }),
+      } as never,
+      {
+        record: jest.fn().mockResolvedValue({ id: 'out-1' }),
+        settle: jest.fn().mockResolvedValue(true),
+      } as never,
+      email as never,
+      { forTenant: jest.fn().mockResolvedValue(linkBase) } as never,
+      { now: () => NOW },
+      { getTenantId: () => TENANT } as never,
+      { issue: jest.fn().mockResolvedValue('opt_tok') } as never,
+      undefined,
+      anamnesisLinks as never,
+    );
+    return { repo, email, handler };
+  }
+
+  const withSetting = (sendAnamnesis: boolean) =>
+    context({ settings: { enabled: true, leadHours: [2], sendAnamnesis } });
+
+  it('con el ajuste y un paciente que toca, el email lleva el enlace por el host de la clínica', async () => {
+    const anamnesisLinks = {
+      issueFor: jest.fn().mockResolvedValue({
+        issued: true,
+        submissionId: 'sub-1',
+        token: 'anam_tok',
+        expiresAt: START,
+      }),
+    };
+    const { repo, email, handler } = build(
+      'https://demo.dentalix.app',
+      anamnesisLinks,
+    );
+    repo.contexts.set(APPT, withSetting(true));
+    await handler.handle(payload);
+
+    expect(anamnesisLinks.issueFor).toHaveBeenCalledWith(
+      {
+        id: APPT,
+        patientId: PATIENT,
+        locationId: '00000000-0000-4000-8000-0000000000aa',
+        start: START,
+        timeZone: 'America/Caracas',
+      },
+      { kind: 'REMINDER' },
+      NOW,
+    );
+    const vars = email.enqueue.mock.calls[0][0].vars;
+    expect(vars.anamnesisUrl).toBe(
+      'https://demo.dentalix.app/anamnesis/anam_tok',
+    );
+  });
+
+  it('si no toca (vigente, por revisar…), el email sale sin la clave', async () => {
+    const anamnesisLinks = {
+      issueFor: jest
+        .fn()
+        .mockResolvedValue({ issued: false, reason: 'CURRENT' }),
+    };
+    const { repo, email, handler } = build(
+      'https://demo.dentalix.app',
+      anamnesisLinks,
+    );
+    repo.contexts.set(APPT, withSetting(true));
+    await handler.handle(payload);
+    expect(email.enqueue.mock.calls[0][0].vars).not.toHaveProperty(
+      'anamnesisUrl',
+    );
+  });
+
+  it('con el ajuste apagado no se emite nada', async () => {
+    const anamnesisLinks = { issueFor: jest.fn() };
+    const { repo, email, handler } = build(
+      'https://demo.dentalix.app',
+      anamnesisLinks,
+    );
+    repo.contexts.set(APPT, withSetting(false));
+    await handler.handle(payload);
+    expect(anamnesisLinks.issueFor).not.toHaveBeenCalled();
+    expect(email.enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin host seguro de la clínica no hay enlaces: tampoco el de anamnesis', async () => {
+    const anamnesisLinks = { issueFor: jest.fn() };
+    const { repo, handler } = build(null, anamnesisLinks);
+    repo.contexts.set(APPT, withSetting(true));
+    await handler.handle(payload);
+    expect(anamnesisLinks.issueFor).not.toHaveBeenCalled();
   });
 });

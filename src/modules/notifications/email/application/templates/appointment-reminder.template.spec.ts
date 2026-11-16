@@ -90,3 +90,49 @@ describe('appointment-reminder por idioma (DX-497)', () => {
     ).toThrow('Idioma de email no soportado');
   });
 });
+
+describe('appointment-reminder · cuestionario de salud (DX-290)', () => {
+  const url = 'https://demo.dentalix.app/anamnesis/tok_anam';
+
+  it('es: invita al cuestionario con su enlace, sin nada clínico', () => {
+    const email = renderEmail(
+      'appointment-reminder',
+      { ...vars, anamnesisUrl: url },
+      brand,
+      'es',
+    );
+    expect(email.text).toContain(
+      'Antes de la cita, responde el cuestionario de salud',
+    );
+    expect(email.text).toContain(`Responder el cuestionario de salud: ${url}`);
+    expect(email.html).toContain(`href="${url}"`);
+    // Solo el enlace: ni «anamnesis», ni «caducada», ni «historia».
+    expect(email.text).not.toMatch(/anamnesis caduc|historia cl[ií]nica/i);
+  });
+
+  it('en: el mismo bloque en inglés', () => {
+    const email = renderEmail(
+      'appointment-reminder',
+      { ...vars, anamnesisUrl: url },
+      brand,
+      'en',
+    );
+    expect(email.text).toContain(`Fill in the health questionnaire: ${url}`);
+  });
+
+  it('sin enlace, no hay bloque', () => {
+    const email = renderEmail('appointment-reminder', vars, brand, 'es');
+    expect(email.text).not.toContain('cuestionario de salud');
+  });
+
+  it('un enlace que no es http(s) no se pinta', () => {
+    expect(() =>
+      renderEmail(
+        'appointment-reminder',
+        { ...vars, anamnesisUrl: 'javascript:alert(1)' },
+        brand,
+        'es',
+      ),
+    ).toThrow('URL http(s)');
+  });
+});

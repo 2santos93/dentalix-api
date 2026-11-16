@@ -8,6 +8,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
+import { isValidTimeZone } from '../../../shared/time/civil-day';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
@@ -17,6 +18,7 @@ import {
   mapMedicalHistoryVersion,
 } from '../../medical-history/infrastructure/repositories/prisma-medical-history.repository';
 import { lockPatientAnamnesis } from '../../medical-history/infrastructure/repositories/anamnesis-lock';
+import { lastAnamnesisReview } from '../../medical-history/domain/medical-alert-flags';
 import type { AnamnesisAnswers } from '../domain/anamnesis-questionnaire';
 import type {
   MedicalHistorySubmission,
@@ -30,6 +32,7 @@ import {
   OutdatedPolicyError,
   type PublicSubmissionView,
   type RequestAppointment,
+  type ReminderAnamnesisFacts,
   type RequestContext,
   type ReviewOutcome,
   type SubmissionDetail,
@@ -68,6 +71,7 @@ function toEntity(row: Row): MedicalHistorySubmission {
     reviewedAt: row.reviewedAt,
     rejectReason: row.rejectReason,
     resultingVersionId: row.resultingVersionId,
+    origin: row.origin,
     createdById: row.createdById,
     createdAt: row.createdAt,
   };
@@ -87,7 +91,8 @@ function toSummary(row: SummaryRow): SubmissionSummary {
     status: row.status,
     expiresAt: row.expiresAt,
     createdAt: row.createdAt,
-    createdByName: row.createdBy.fullName,
+    origin: row.origin,
+    createdByName: row.createdBy?.fullName ?? null,
     submittedAt: row.submittedAt,
     reviewedAt: row.reviewedAt,
     reviewedByName: row.reviewedBy?.fullName ?? null,
@@ -169,6 +174,110 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
     });
   }
 
+  loadReminderFacts(
+    patientId: string,
+    locationId: string,
+  ): Promise<ReminderAnamnesisFacts | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      // Bajo RLS: un paciente de otra clínica no existe. Se leen también los
+      // archivados, para decir por qué no llevan enlace.
+      const patient = await tx.patient.findFirst({
+        where: { id: patientId },
+        select: { deletedAt: true },
+      });
+      if (!patient) return null;
+      const [setting, tenant, version, review, awaiting, granted, policy] =
+        await Promise.all([
+          tx.locationReminderSettings.findFirst({
+            where: { locationId },
+            select: { sendAnamnesis: true },
+          }),
+          // `tenants` es global (sin RLS): por el id del contexto.
+          tx.tenant.findUniqueOrThrow({
+            where: { id: tenantId },
+            select: { anamnesisValidityMonths: true },
+          }),
+          tx.medicalHistoryVersion.findFirst({
+            where: { patientId, deletedAt: null },
+            orderBy: { version: 'desc' },
+            select: { createdAt: true },
+          }),
+          tx.medicalHistoryReview.findFirst({
+            where: { patientId },
+            orderBy: { reviewedAt: 'desc' },
+            select: { reviewedAt: true },
+          }),
+          tx.medicalHistorySubmission.findFirst({
+            where: {
+              patientId,
+              status: MedicalHistorySubmissionStatus.SUBMITTED,
+            },
+            select: { id: true },
+          }),
+          sensitiveHealthGranted(tx, patientId),
+          tx.privacyPolicyVersion.findFirst({
+            where: { tenantId },
+            select: { id: true },
+          }),
+        ]);
+      return {
+        settingEnabled: setting?.sendAnamnesis === true,
+        patientArchived: patient.deletedAt !== null,
+        awaitingReview: awaiting !== null,
+        // Misma regla que la agenda (DX-247): la más reciente entre la
+        // versión vigente y la última confirmación «Sin cambios hoy».
+        lastReviewedAt: version
+          ? lastAnamnesisReview(version.createdAt, review?.reviewedAt ?? null)
+          : null,
+        validityMonths: tenant.anamnesisValidityMonths,
+        sensitiveHealthGranted: granted,
+        hasPrivacyPolicy: policy !== null,
+      };
+    });
+  }
+
+  async findAppointmentForLink(
+    appointmentId: string,
+  ): Promise<(RequestAppointment & { timeZone: string | null }) | null> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.appointment.findFirst({
+        where: { id: appointmentId, deletedAt: null },
+        select: {
+          id: true,
+          patientId: true,
+          locationId: true,
+          start: true,
+          status: true,
+          location: { select: { timeZone: true } },
+        },
+      }),
+    );
+    if (!row) return null;
+    const zone = row.location.timeZone;
+    return {
+      id: row.id,
+      patientId: row.patientId,
+      locationId: row.locationId,
+      start: row.start,
+      status: row.status,
+      timeZone: zone && isValidTimeZone(zone) ? zone : null,
+    };
+  }
+
+  latestForAppointment(
+    appointmentId: string,
+  ): Promise<SubmissionSummary | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.medicalHistorySubmission.findFirst({
+        where: { appointmentId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: SUMMARY_INCLUDE,
+      });
+      return row ? toSummary(row) : null;
+    });
+  }
+
   findAppointment(appointmentId: string): Promise<RequestAppointment | null> {
     return this.prisma.runWithTenant((tx) =>
       tx.appointment.findFirst({
@@ -213,9 +322,12 @@ export class PrismaMedicalHistorySubmissionRepository implements MedicalHistoryS
           tokenHash: input.tokenHash,
           expiresAt: input.expiresAt,
           questionnaireVersion: input.questionnaireVersion,
+          origin: input.origin,
           createdById: input.createdById,
         },
       });
+      // DX-290: el alta y su evento, juntos o ninguno.
+      if (input.audit) await writeAuditEvent(tx, input.audit(row.id));
       const location = await tx.location.findFirstOrThrow({
         where: { id: locationId },
         select: { defaultPhoneRegion: true },
