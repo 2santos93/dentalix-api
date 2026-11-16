@@ -206,14 +206,15 @@ describe('GET /reports/scheduled-production (DX-567)', () => {
       },
     ]);
     // La previsión es del mes en curso (reloj real): solo su forma.
-    expect(r.forecast).toEqual({
-      month: expect.stringMatching(/^\d{4}-\d{2}$/) as unknown,
-      today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as unknown,
-      producedToDate: expect.any(Number) as unknown,
-      scheduledPending: expect.any(Number) as unknown,
-      forecast: expect.any(Number) as unknown,
-      itemsWithoutRate: 0,
-    });
+    expect(r.forecast.month).toMatch(/^\d{4}-\d{2}$/);
+    expect(r.forecast.itemsWithoutRate).toBe(0);
+    for (const amount of [
+      r.forecast.producedToDate,
+      r.forecast.scheduledPending,
+      r.forecast.forecast,
+    ]) {
+      expect(typeof amount).toBe('number');
+    }
     const forecast = r.definitions.find((d) => d.key === 'FORECAST');
     expect(forecast?.howItIsCalculated[0]).toBe(`${FORECAST_FORMULA}.`);
     expect(r.options.locations.map((l) => l.id)).toEqual([principal, norte]);

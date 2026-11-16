@@ -269,7 +269,6 @@ export class ScheduledProductionReportDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    example: 'USD',
     description:
       'Moneda del catálogo de la clínica: la de todos los importes. null = no se resuelve (aviso NO_CATALOG_CURRENCY; importes null, los recuentos siguen)',
   })
