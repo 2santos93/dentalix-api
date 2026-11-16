@@ -4193,6 +4193,25 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: ['POST /patients/:patientId/certificates/:id/patient-copy'],
     },
     {
+      spec: 'dental-lab-orders.e2e-spec.ts',
+      checks:
+        'B → 404 al cambiar un laboratorio o un servicio de A, al listar o crear órdenes de laboratorio del paciente de A y al ver, editar, enviar, recibir, revisar, anular o imprimir una orden de A; el laboratorio y la orden de A siguen igual (DX-017)',
+      routes: [
+        'PATCH /dental-labs/:labId',
+        'POST /dental-labs/:labId/services',
+        'PATCH /dental-labs/:labId/services/:serviceId',
+        'GET /patients/:patientId/lab-orders',
+        'POST /patients/:patientId/lab-orders',
+        'GET /lab-orders/:id',
+        'PATCH /lab-orders/:id',
+        'POST /lab-orders/:id/send',
+        'POST /lab-orders/:id/receive',
+        'POST /lab-orders/:id/check',
+        'POST /lab-orders/:id/cancel',
+        'GET /lab-orders/:id/print',
+      ],
+    },
+    {
       spec: 'orthodontics.e2e-spec.ts',
       checks:
         'B → 404 al listar, abrir, editar, cerrar y registrar controles en el caso de ortodoncia del paciente de A; el caso de A sigue igual y sin controles nuevos (DX-190)',

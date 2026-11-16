@@ -182,6 +182,34 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-017: «B crea o edita una orden de laboratorio, lista o pide la fecha
+  // sugerida con el laboratorio, el servicio, la sede, el ítem del plan, la
+  // cita o la orden de A → 404/422 en español sin datos de A, o una lista sin
+  // filas de A, y nada de A cambia».
+  'GET /lab-orders ?labId': 'dental-lab-orders.e2e-spec.ts',
+  'GET /lab-orders ?locationId': 'dental-lab-orders.e2e-spec.ts',
+  'GET /lab-orders/due-date-suggestion ?locationId':
+    'dental-lab-orders.e2e-spec.ts',
+  'GET /lab-orders/due-date-suggestion ?serviceId':
+    'dental-lab-orders.e2e-spec.ts',
+  'PATCH /lab-orders/:id body.appointmentId': 'dental-lab-orders.e2e-spec.ts',
+  'PATCH /lab-orders/:id body.labId': 'dental-lab-orders.e2e-spec.ts',
+  'PATCH /lab-orders/:id body.replacesOrderId': 'dental-lab-orders.e2e-spec.ts',
+  'PATCH /lab-orders/:id body.serviceId': 'dental-lab-orders.e2e-spec.ts',
+  'PATCH /lab-orders/:id body.treatmentPlanItemId':
+    'dental-lab-orders.e2e-spec.ts',
+  'POST /patients/:patientId/lab-orders body.appointmentId':
+    'dental-lab-orders.e2e-spec.ts',
+  'POST /patients/:patientId/lab-orders body.labId':
+    'dental-lab-orders.e2e-spec.ts',
+  'POST /patients/:patientId/lab-orders body.locationId':
+    'dental-lab-orders.e2e-spec.ts',
+  'POST /patients/:patientId/lab-orders body.replacesOrderId':
+    'dental-lab-orders.e2e-spec.ts',
+  'POST /patients/:patientId/lab-orders body.serviceId':
+    'dental-lab-orders.e2e-spec.ts',
+  'POST /patients/:patientId/lab-orders body.treatmentPlanItemId':
+    'dental-lab-orders.e2e-spec.ts',
   // DX-190: «B abre un caso, lo edita, registra un control o lista el
   // seguimiento con la sede, el profesional, el plan o la cita de A → 400/404
   // en español o una lista sin filas de A, y nada de A cambia».

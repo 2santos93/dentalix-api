@@ -6,6 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { RecordAuditEventUseCase } from '../../audit/application/record-audit-event.use-case';
+import type { AuditEventDraft } from '../../audit/domain/audit-event';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { patientsInClinic } from '../../patients/application/__fixtures__/patients-in-clinic.fake';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
@@ -33,7 +34,7 @@ const reception = ctxOf('reception-1', 'RECEPTION');
 
 async function setup() {
   const repo = new InMemoryLabRepository();
-  const audit = { record: jest.fn() };
+  const audit = { record: jest.fn<Promise<void>, [AuditEventDraft]>() };
   const tenantContext = new TenantContextService();
   const catalog = new LabCatalogUseCases(
     repo,
@@ -121,18 +122,16 @@ describe('DX-017 · catálogo de laboratorios', () => {
       { active: false, notes: 'Cierra en diciembre' },
       admin,
     );
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'UPDATE',
-        resourceType: 'DENTAL_LAB',
-        resourceId: lab.id,
-        metadata: {
-          reason: 'DENTAL_LAB_UPDATED',
-          changedFields: ['notes', 'active'],
-          statusChange: { from: 'ACTIVE', to: 'INACTIVE' },
-        },
-      }),
-    );
+    expect(audit.record.mock.calls.at(-1)![0]).toMatchObject({
+      action: 'UPDATE',
+      resourceType: 'DENTAL_LAB',
+      resourceId: lab.id,
+      metadata: {
+        reason: 'DENTAL_LAB_UPDATED',
+        changedFields: ['notes', 'active'],
+        statusChange: { from: 'ACTIVE', to: 'INACTIVE' },
+      },
+    });
     expect(JSON.stringify(audit.record.mock.calls)).not.toContain('diciembre');
   });
 });
@@ -352,18 +351,16 @@ describe('DX-017 · órdenes de laboratorio', () => {
       reception,
     );
     expect(moved.dueOn).toBe('2026-11-30');
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: 'UPDATE',
-        resourceType: 'DENTAL_LAB_ORDER',
-        patient: { kind: 'patient', id: 'p1' },
-        metadata: expect.objectContaining({
-          reason: 'DENTAL_LAB_ORDER_UPDATED',
-          changedFields: ['dueOn', 'appointmentId'],
-          dueOn: { from: '2026-11-27', to: '2026-11-30' },
-        }),
-      }),
-    );
+    expect(audit.record.mock.calls.at(-1)![0]).toMatchObject({
+      action: 'UPDATE',
+      resourceType: 'DENTAL_LAB_ORDER',
+      patient: { kind: 'patient', id: 'p1' },
+      metadata: {
+        reason: 'DENTAL_LAB_ORDER_UPDATED',
+        changedFields: ['dueOn', 'appointmentId'],
+        dueOn: { from: '2026-11-27', to: '2026-11-30' },
+      },
+    });
     // La corrección: una orden nueva que referencia a la anterior.
     const fix = await orders.create(
       'p1',
@@ -503,13 +500,9 @@ describe('DX-017 · órdenes de laboratorio', () => {
       patient: { document: 'Cédula V-12345678' },
       printedAt: NOW,
     });
-    expect(audit.record).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        action: 'PRINT',
-        metadata: expect.objectContaining({
-          reason: 'DENTAL_LAB_ORDER_PRINTED',
-        }),
-      }),
-    );
+    expect(audit.record.mock.calls.at(-1)![0]).toMatchObject({
+      action: 'PRINT',
+      metadata: { reason: 'DENTAL_LAB_ORDER_PRINTED' },
+    });
   });
 });
