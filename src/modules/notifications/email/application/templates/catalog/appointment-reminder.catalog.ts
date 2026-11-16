@@ -37,6 +37,14 @@ export interface AppointmentReminderTexts {
   calendarDetails: string;
   unsubscribeLead: string;
   unsubscribeLabel: string;
+  /**
+   * DX-290: el bloque del cuestionario de salud. Sin nada clínico (ni «tu
+   * anamnesis caducó» ni preguntas): una invitación y el enlace.
+   */
+  anamnesisLead: string;
+  anamnesisLabel: string;
+  /** DX-290: ya tiene un enlace vivo; se le recuerda sin enviar otro. */
+  anamnesisPending: string;
   policyNotice: (noticeHours: number) => string;
   /** Sin el punto final: lo pone `endSentence` (hay monedas que acaban en punto). */
   policyFee: (feeLabel: string) => string;
@@ -73,6 +81,11 @@ export const APPOINTMENT_REMINDER_CATALOG: Readonly<
       'Si no puedes asistir, avisa a la clínica con tiempo para darle el espacio a otro paciente.',
     unsubscribeLead: '¿No quieres recibir más recordatorios?',
     unsubscribeLabel: 'Dejar de recibir recordatorios',
+    anamnesisLead:
+      'Antes de la cita, responde el cuestionario de salud: toma unos minutos y nos ayuda a atenderte de forma segura.',
+    anamnesisLabel: 'Responder el cuestionario de salud',
+    anamnesisPending:
+      'Si aún no completaste el cuestionario de salud, usa el enlace que te enviamos.',
     policyNotice: (hours) =>
       `Política de cancelación: si no puedes asistir, avísanos con al menos ${hours} h de antelación.`,
     policyFee: (fee) =>
@@ -109,6 +122,11 @@ export const APPOINTMENT_REMINDER_CATALOG: Readonly<
       'If you cannot make it, please let the clinic know in advance so they can offer the slot to another patient.',
     unsubscribeLead: 'Don’t want to receive more reminders?',
     unsubscribeLabel: 'Stop receiving reminders',
+    anamnesisLead:
+      'Before the appointment, please fill in the health questionnaire: it takes a few minutes and helps us treat you safely.',
+    anamnesisLabel: 'Fill in the health questionnaire',
+    anamnesisPending:
+      'If you have not filled in the health questionnaire yet, please use the link we sent you.',
     policyNotice: (hours) =>
       `Cancellation policy: if you cannot make it, please let us know at least ${hours} h in advance.`,
     policyFee: (fee) =>

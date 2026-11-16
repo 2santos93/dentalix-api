@@ -28,7 +28,12 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import type { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { auditRequestContext } from '../../audit/presentation/audit-request-context';
+import {
+  auditRequestContext,
+  requireAuditRequestContext,
+} from '../../audit/presentation/audit-request-context';
+import { AnamnesisReminderLinks } from '../../medical-history-submissions/application/anamnesis-reminder-links';
+import { buildAnamnesisUrl } from '../../medical-history-submissions/domain/anamnesis-token';
 
 type AuthenticatedRequest = TenantHostRequest & { user: JwtPayload };
 
@@ -47,6 +52,7 @@ export class ConfirmationLinksController {
   constructor(
     private readonly createLink: CreateConfirmationLinkUseCase,
     private readonly tenantContext: TenantContextService,
+    private readonly anamnesisLinks: AnamnesisReminderLinks,
     config: ConfigService,
   ) {
     this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
@@ -57,7 +63,7 @@ export class ConfirmationLinksController {
     summary:
       'Genera (o reenvía) el enlace de confirmación de la cita; el anterior deja de valer',
     description:
-      'DX-361: queda en la auditoría como UPDATE de APPOINTMENT (la cita), origen STAFF y `reason` CONFIRMATION_LINK_CREATED, o CONFIRMATION_LINK_RESENT si la cita ya tenía un enlace enviado. Sin el token ni la URL.',
+      'DX-361: queda en la auditoría como UPDATE de APPOINTMENT (la cita), origen STAFF y `reason` CONFIRMATION_LINK_CREATED, o CONFIRMATION_LINK_RESENT si la cita ya tenía un enlace enviado. Sin el token ni la URL. DX-290: si la sede envía la anamnesis con el recordatorio y el paciente es nuevo o su anamnesis caduca el día de la cita, también emite su enlace de anamnesis (`anamnesisUrl`, para el mensaje de WhatsApp) si no tiene ya uno vivo; con uno vivo no emite otro ni lo anula (`anamnesisPending`) y lo audita como CREATE de MEDICAL_HISTORY_SUBMISSION (ANAMNESIS_LINK_CREATED).',
   })
   @ApiCreatedResponse({ type: ConfirmationLinkDto })
   async create(
@@ -80,11 +86,24 @@ export class ConfirmationLinksController {
       createdById: req.user.sub,
       audit: auditRequestContext(req, this.tenantContext),
     });
+    // DX-290: el de anamnesis va en el mismo mensaje, por el mismo host.
+    const anamnesis = await this.anamnesisLinks.issueForAppointmentId(
+      id,
+      {
+        kind: 'STAFF',
+        audit: requireAuditRequestContext(req, this.tenantContext),
+      },
+      new Date(),
+    );
     return {
       url: buildConfirmationUrl(this.protocol, host, result.token),
       expiresAt: result.expiresAt,
       whatsappPhone: result.whatsappPhone,
       appointment: result.appointment,
+      anamnesisUrl: anamnesis.issued
+        ? buildAnamnesisUrl(this.protocol, host, anamnesis.token)
+        : null,
+      anamnesisPending: !anamnesis.issued && anamnesis.reason === 'LIVE_LINK',
     };
   }
 }

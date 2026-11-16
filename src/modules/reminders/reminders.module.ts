@@ -7,6 +7,7 @@ import { JobsModule } from '../jobs/jobs.module';
 import { EmailModule } from '../notifications/email/email.module';
 import { OutboundMessagesModule } from '../notifications/outbound/outbound-messages.module';
 import { AppointmentConfirmationsModule } from '../appointment-confirmations/appointment-confirmations.module';
+import { MedicalHistorySubmissionsModule } from '../medical-history-submissions/medical-history-submissions.module';
 import { ReminderSettingsController } from './presentation/reminder-settings.controller';
 import { AppointmentRemindersController } from './presentation/appointment-reminders.controller';
 import {
@@ -48,6 +49,8 @@ import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tena
     EmailModule,
     OutboundMessagesModule,
     AppointmentConfirmationsModule,
+    // DX-290: el enlace de anamnesis del recordatorio y su estado en la cita.
+    MedicalHistorySubmissionsModule,
   ],
   controllers: [
     ReminderSettingsController,

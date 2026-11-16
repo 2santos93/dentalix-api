@@ -27,6 +27,8 @@ export interface LocationReminderSettingsView {
   leadHours: number[];
   /** DX-469: horas antes de la alarma de «Añadir a mi calendario» (0 = sin alarma). */
   calendarAlarmHours: number;
+  /** DX-290: el recordatorio lleva la anamnesis a nuevos o caducados. */
+  sendAnamnesis: boolean;
   /** null = la sede nunca se configuró (desactivada por defecto). */
   updatedAt: Date | null;
 }
@@ -61,7 +63,14 @@ export interface ReminderSendContext {
   responsibles: NoticeResponsible[];
   /** DX-342: última revisión del paso a la mayoría de edad. */
   majorityReview: MajorityReviewRecord | null;
-  settings: { enabled: boolean; leadHours: number[] } | null;
+  /** DX-290: `sendAnamnesis` = el email lleva el enlace de anamnesis si toca. */
+  settings: {
+    enabled: boolean;
+    leadHours: number[];
+    sendAnamnesis: boolean;
+  } | null;
+  /** DX-290: sede de la cita (el ajuste y la sede del enlace de anamnesis). */
+  locationId: string;
   /** DX-291: política VIGENTE de la sede de la cita (`null` = sin política). */
   cancellationPolicy: LinkCancellationPolicy | null;
 }

@@ -1089,6 +1089,14 @@ enum MedicalHistorySubmissionStatus {
   EXPIRED
 }
 
+/// DX-290: quién emitió el enlace de anamnesis. STAFF: recepción (DX-099),
+/// con usuario. REMINDER: el recordatorio automático, sin usuario (CHECK
+/// medical_history_submissions_origin_creator_check).
+enum MedicalHistorySubmissionOrigin {
+  STAFF
+  REMINDER
+}
+
 /// DX-099: anamnesis previa a la cita por enlace seguro. Del token solo se
 /// guarda el hash; las respuestas (dato clínico, RLS) no cambian una vez
 /// enviadas y la HC no cambia hasta que un ADMIN o DENTIST las acepta, en una
@@ -1116,7 +1124,9 @@ model MedicalHistorySubmission {
   reviewedAt           DateTime?
   rejectReason         String?
   resultingVersionId   String?                        @db.Uuid
-  createdById          String                         @db.Uuid
+  /// DX-290: STAFF (con createdById) o REMINDER (sin él).
+  origin               MedicalHistorySubmissionOrigin @default(STAFF)
+  createdById          String?                        @db.Uuid
   createdAt            DateTime                       @default(now())
   updatedAt            DateTime                       @updatedAt
 
@@ -1125,7 +1135,7 @@ model MedicalHistorySubmission {
   appointment      Appointment?           @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "medical_history_submissions_appointment_fkey")
   location         Location               @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "medical_history_submissions_location_fkey")
   resultingVersion MedicalHistoryVersion? @relation(fields: [tenantId, patientId, resultingVersionId], references: [tenantId, patientId, id], onDelete: Restrict, map: "medical_history_submissions_version_fkey")
-  createdBy        User                   @relation("MedicalHistorySubmissionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "medical_history_submissions_created_by_fkey")
+  createdBy        User?                  @relation("MedicalHistorySubmissionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "medical_history_submissions_created_by_fkey")
   reviewedBy       User?                  @relation("MedicalHistorySubmissionReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict, map: "medical_history_submissions_reviewed_by_fkey")
 
   @@index([tenantId, status, locationId, submittedAt], map: "medical_history_submissions_inbox_idx")
@@ -4928,6 +4938,9 @@ model LocationReminderSettings {
   /// DX-469: horas antes de la cita de la alarma del evento «Añadir a mi
   /// calendario» (0 = sin alarma; 0..168, CHECK). Sin fila, 24.
   calendarAlarmHours Int      @default(24)
+  /// DX-290: el recordatorio lleva el enlace de anamnesis a los pacientes
+  /// nuevos o con la anamnesis caducada el día de la cita.
+  sendAnamnesis      Boolean  @default(false)
   updatedById        String?  @db.Uuid
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
