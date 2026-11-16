@@ -659,6 +659,12 @@ describe('Ortodoncia — /patients/:id/ortho-cases, /ortho (DX-190, e2e)', () =>
       );
     });
 
+    // ISOLATION_COVERS: GET /patients/:patientId/ortho-cases
+    // ISOLATION_COVERS: POST /patients/:patientId/ortho-cases
+    // ISOLATION_COVERS: PATCH /patients/:patientId/ortho-cases/:caseId
+    // ISOLATION_COVERS: POST /patients/:patientId/ortho-cases/:caseId/status
+    // ISOLATION_COVERS: GET /patients/:patientId/ortho-cases/:caseId/visits
+    // ISOLATION_COVERS: POST /patients/:patientId/ortho-cases/:caseId/visits
     it('B → 404 sobre el paciente y el caso de A, y el caso de A sigue igual', async () => {
       const before = await raw.orthoCase.findUniqueOrThrow({
         where: { id: case1 },
@@ -720,6 +726,13 @@ describe('Ortodoncia — /patients/:id/ortho-cases, /ortho (DX-190, e2e)', () =>
       );
     });
 
+    // Lista de B con la sede o el profesional de A (DX-207): vacía de A.
+    // ISOLATION_COVERS: POST /patients/:patientId/ortho-cases body.locationId
+    // ISOLATION_COVERS: POST /patients/:patientId/ortho-cases body.providerId
+    // ISOLATION_COVERS: POST /patients/:patientId/ortho-cases body.treatmentPlanId
+    // ISOLATION_COVERS: PATCH /patients/:patientId/ortho-cases/:caseId body.providerId
+    // ISOLATION_COVERS: PATCH /patients/:patientId/ortho-cases/:caseId body.treatmentPlanId
+    // ISOLATION_COVERS: POST /patients/:patientId/ortho-cases/:caseId/visits body.appointmentId
     it('B manda la sede, el profesional, el plan o la cita de A: 400/404 en español y nada de A cambia', async () => {
       const casesBefore = await raw.orthoCase.count();
       const r1 = await call(
