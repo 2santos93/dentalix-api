@@ -6,6 +6,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
 import { MEDICAL_HISTORY_REPOSITORY } from '../medical-history/domain/ports/medical-history-repository.port';
 import { PrismaMedicalHistoryRepository } from '../medical-history/infrastructure/repositories/prisma-medical-history.repository';
 import { ANAMNESIS_CLOCK } from './application/anamnesis-clock';
+import { AnamnesisReminderLinks } from './application/anamnesis-reminder-links';
 import {
   CreateAnamnesisRequestUseCase,
   ListPatientAnamnesisRequestsUseCase,
@@ -55,6 +56,7 @@ import { PublicMedicalHistoryController } from './presentation/public-medical-hi
     GetPublicAnamnesisUseCase,
     MarkPublicAnamnesisOpenedUseCase,
     SubmitPublicAnamnesisUseCase,
+    AnamnesisReminderLinks,
     { provide: ANAMNESIS_CLOCK, useValue: () => new Date() },
     {
       provide: MEDICAL_HISTORY_SUBMISSION_REPOSITORY,
@@ -69,6 +71,12 @@ import { PublicMedicalHistoryController } from './presentation/public-medical-hi
     PublicTenantContextInterceptor,
   ],
   // DX-503: «Mi día» cuenta la bandeja con el mismo caso de uso.
-  exports: [CountAnamnesisInboxUseCase],
+  // DX-290: el recordatorio y el enlace de confirmación emiten el de anamnesis
+  // y el panel de recordatorios de la cita lee el último envío.
+  exports: [
+    CountAnamnesisInboxUseCase,
+    AnamnesisReminderLinks,
+    MEDICAL_HISTORY_SUBMISSION_REPOSITORY,
+  ],
 })
 export class MedicalHistorySubmissionsModule {}

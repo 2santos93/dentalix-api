@@ -28,6 +28,7 @@ describe('ajustes de recordatorio por sede (DX-026)', () => {
       enabled: false,
       leadHours: [],
       calendarAlarmHours: 24,
+      sendAnamnesis: false,
       updatedAt: null,
     });
   });

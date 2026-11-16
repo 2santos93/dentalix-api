@@ -1,4 +1,18 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import type {
+  MedicalHistorySubmissionOrigin,
+  MedicalHistorySubmissionStatus,
+} from '@prisma/client';
+import {
+  MEDICAL_HISTORY_SUBMISSION_REPOSITORY,
+  type MedicalHistorySubmissionRepository,
+} from '../../../medical-history-submissions/domain/ports/medical-history-submission-repository.port';
+import { effectiveSubmissionStatus } from '../../../medical-history-submissions/domain/submission-status';
 import {
   REMINDER_REPOSITORY,
   type ReminderRepository,
@@ -32,6 +46,21 @@ export interface AppointmentReminders {
    */
   patientBlocker: PatientReminderBlocker | null;
   items: ReminderTimelineItem[];
+  /**
+   * DX-290: el último enlace de anamnesis ligado a la cita (con el
+   * recordatorio o por recepción) y su estado, sin respuestas; null si no
+   * se envió ninguno.
+   */
+  anamnesis: AppointmentAnamnesisLink | null;
+}
+
+export interface AppointmentAnamnesisLink {
+  origin: MedicalHistorySubmissionOrigin;
+  /** Estado efectivo (un enlace sin usar cuya hora pasó, EXPIRED). */
+  status: MedicalHistorySubmissionStatus;
+  sentAt: Date;
+  expiresAt: Date;
+  submittedAt: Date | null;
 }
 
 /** Estado de los recordatorios de una cita para su panel (DX-026). */
@@ -41,6 +70,10 @@ export class GetAppointmentRemindersUseCase {
     @Inject(REMINDER_REPOSITORY) private readonly repo: ReminderRepository,
     private readonly clock: ReminderClock,
     private readonly tenantContext: TenantContextService,
+    // DX-290: opcional para los tests que construyen el caso a mano.
+    @Optional()
+    @Inject(MEDICAL_HISTORY_SUBMISSION_REPOSITORY)
+    private readonly submissions?: MedicalHistorySubmissionRepository,
   ) {}
 
   async execute(appointmentId: string): Promise<AppointmentReminders> {
@@ -50,6 +83,10 @@ export class GetAppointmentRemindersUseCase {
     this.tenantContext.assertLocationAllowed(snapshot.locationId);
     const blocker = emailReminderBlocker(snapshot.contact);
     const patientBlocker = blocker === 'NO_EMAIL' ? null : blocker;
+    const now = this.clock.now();
+    const latest = this.submissions
+      ? await this.submissions.latestForAppointment(appointmentId)
+      : null;
     return {
       enabled: snapshot.settings?.enabled ?? false,
       leadHours: snapshot.settings?.leadHours ?? [],
@@ -57,8 +94,17 @@ export class GetAppointmentRemindersUseCase {
       items: buildReminderTimeline({
         ...snapshot,
         patientBlocked: patientBlocker !== null,
-        now: this.clock.now(),
+        now,
       }),
+      anamnesis: latest
+        ? {
+            origin: latest.origin,
+            status: effectiveSubmissionStatus(latest, now),
+            sentAt: latest.createdAt,
+            expiresAt: latest.expiresAt,
+            submittedAt: latest.submittedAt,
+          }
+        : null,
     };
   }
 }

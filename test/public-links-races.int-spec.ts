@@ -599,6 +599,7 @@ describe('enlaces públicos y ofertas sin carreras (int, DX-476)', () => {
             tokenHash: hashSignatureToken(generateSignatureToken()),
             expiresAt: new Date(Date.now() + 72 * HOUR),
             questionnaireVersion: 'v1',
+            origin: 'STAFF',
             createdById: clinic.userId,
           }),
         ),

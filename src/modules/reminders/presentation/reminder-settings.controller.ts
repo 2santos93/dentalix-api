@@ -75,7 +75,7 @@ export class ReminderSettingsController {
   @ApiOperation({
     summary: 'Reemplaza los ajustes de recordatorio de una sede',
     description:
-      'Queda en la auditoría (REMINDER_SETTINGS_UPDATED) con activado y antelaciones antes y después, en esa sede. Guardar lo mismo no deja evento.',
+      'Queda en la auditoría (REMINDER_SETTINGS_UPDATED) con activado, antelaciones, alarma del calendario y «enviar la anamnesis» antes y después, en esa sede. Guardar lo mismo no deja evento.',
   })
   @ApiOkResponse({ type: LocationReminderSettingsDto })
   @ApiBadRequestResponse({
@@ -102,6 +102,9 @@ export class ReminderSettingsController {
         leadHours: dto.leadHours,
         ...(dto.calendarAlarmHours !== undefined
           ? { calendarAlarmHours: dto.calendarAlarmHours }
+          : {}),
+        ...(dto.sendAnamnesis !== undefined
+          ? { sendAnamnesis: dto.sendAnamnesis }
           : {}),
       },
       requireAuditRequestContext(req, this.tenantContext),

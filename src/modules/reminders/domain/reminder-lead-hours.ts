@@ -28,6 +28,11 @@ export interface ReminderSettingsInput {
   leadHours: number[];
   /** DX-469: sin ella, se conserva la que tenía la sede (24 si no tenía). */
   calendarAlarmHours?: number;
+  /**
+   * DX-290: «Enviar la anamnesis con el recordatorio». Sin el campo, se
+   * conserva (apagado si la sede no tenía ajustes).
+   */
+  sendAnamnesis?: boolean;
 }
 
 export function leadHoursError(leadHours: number[]): string | null {

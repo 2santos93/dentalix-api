@@ -46,6 +46,12 @@ export class LocationReminderSettingsDto {
   calendarAlarmHours!: number;
 
   @ApiProperty({
+    description:
+      'DX-290: el recordatorio lleva el enlace de anamnesis a los pacientes nuevos (sin anamnesis) o con la anamnesis caducada el día de la cita (vigencia de la clínica, 12 meses por defecto). Por defecto, false.',
+  })
+  sendAnamnesis!: boolean;
+
+  @ApiProperty({
     type: String,
     format: 'date-time',
     nullable: true,
@@ -89,4 +95,15 @@ export class UpdateReminderSettingsDto {
   @Min(0, { message: CALENDAR_ALARM_RANGE_MESSAGE })
   @Max(MAX_CALENDAR_ALARM_HOURS, { message: CALENDAR_ALARM_RANGE_MESSAGE })
   calendarAlarmHours?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'DX-290: enviar el enlace de anamnesis con el recordatorio a pacientes nuevos o con la anamnesis caducada. Sin el campo, se conserva.',
+    example: true,
+  })
+  @IsOptional()
+  @IsBoolean({
+    message: 'Indica si se envía la anamnesis con el recordatorio (sí o no).',
+  })
+  sendAnamnesis?: boolean;
 }

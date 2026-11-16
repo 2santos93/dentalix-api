@@ -7,6 +7,8 @@ export interface ReminderSettingsSnapshot {
   leadHours: number[];
   /** DX-469: alarma del calendario (sin fila, 24). */
   calendarAlarmHours: number;
+  /** DX-290: enviar la anamnesis con el recordatorio (sin fila, false). */
+  sendAnamnesis: boolean;
 }
 
 /**
@@ -31,11 +33,13 @@ export function reminderSettingsAuditEvent(
       enabled: before.enabled,
       leadHours: before.leadHours,
       calendarAlarmHours: before.calendarAlarmHours,
+      sendAnamnesis: before.sendAnamnesis,
     },
     after: {
       enabled: after.enabled,
       leadHours: after.leadHours,
       calendarAlarmHours: after.calendarAlarmHours,
+      sendAnamnesis: after.sendAnamnesis,
     },
   });
 }
