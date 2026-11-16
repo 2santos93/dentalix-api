@@ -126,13 +126,13 @@ export class CreateOrthoCaseDto {
   })
   visitIntervalDays?: number;
 
-  @ApiPropertyOptional({ format: 'date', nullable: true })
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
   @IsOptional()
   @IsString({ message: 'La fecha de cementado debe ser una fecha AAAA-MM-DD' })
   @TextMaxLength(INPUT_CODE_MAX)
   bondedOn?: string | null;
 
-  @ApiPropertyOptional({ format: 'date', nullable: true })
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
   @IsOptional()
   @IsString({ message: 'La fecha de retiro debe ser una fecha AAAA-MM-DD' })
   @TextMaxLength(INPUT_CODE_MAX)
@@ -154,7 +154,7 @@ export class CreateOrthoCaseDto {
   @IsUUID('all', { message: 'La sede debe ser un identificador válido' })
   locationId?: string;
 
-  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
   @IsOptional()
   @IsUUID('all', {
     message: 'El plan de tratamiento debe ser un identificador válido',
@@ -194,13 +194,13 @@ export class UpdateOrthoCaseDto {
   })
   visitIntervalDays?: number;
 
-  @ApiPropertyOptional({ format: 'date', nullable: true })
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
   @IsOptional()
   @IsString({ message: 'La fecha de cementado debe ser una fecha AAAA-MM-DD' })
   @TextMaxLength(INPUT_CODE_MAX)
   bondedOn?: string | null;
 
-  @ApiPropertyOptional({ format: 'date', nullable: true })
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
   @IsOptional()
   @IsString({ message: 'La fecha de retiro debe ser una fecha AAAA-MM-DD' })
   @TextMaxLength(INPUT_CODE_MAX)
@@ -211,7 +211,7 @@ export class UpdateOrthoCaseDto {
   @IsUUID('all', { message: 'El profesional debe ser un identificador válido' })
   providerId?: string;
 
-  @ApiPropertyOptional({ format: 'uuid', nullable: true })
+  @ApiPropertyOptional({ type: String, format: 'uuid', nullable: true })
   @IsOptional()
   @IsUUID('all', {
     message: 'El plan de tratamiento debe ser un identificador válido',
@@ -353,7 +353,7 @@ export class RegisterOrthoVisitDto {
   @IsEnum(OrthoElasticWear, { message: 'El uso de los elásticos no es válido' })
   elasticsWear?: OrthoElasticWear | null;
 
-  @ApiPropertyOptional({ maxLength: 500, nullable: true })
+  @ApiPropertyOptional({ type: String, maxLength: 500, nullable: true })
   @IsOptional()
   @IsString({ message: 'La aparatología debe ser un texto' })
   @TextMaxLength(INPUT_REASON_MAX)
@@ -366,7 +366,7 @@ export class RegisterOrthoVisitDto {
   @IsEnum(OrthoIncident, { each: true, message: 'Una incidencia no es válida' })
   incidents?: OrthoIncident[];
 
-  @ApiPropertyOptional({ minimum: 1, maximum: 4, nullable: true })
+  @ApiPropertyOptional({ type: Number, minimum: 1, maximum: 4, nullable: true })
   @IsOptional()
   @Type(() => Number)
   @IsInt({ message: 'El índice de higiene va de 1 a 4' })
@@ -374,13 +374,13 @@ export class RegisterOrthoVisitDto {
   @Max(4, { message: 'El índice de higiene va de 1 a 4' })
   hygieneIndex?: number | null;
 
-  @ApiPropertyOptional({ maxLength: 2000, nullable: true })
+  @ApiPropertyOptional({ type: String, maxLength: 2000, nullable: true })
   @IsOptional()
   @IsString({ message: 'La nota debe ser un texto' })
   @TextMaxLength(INPUT_NOTES_MAX)
   note?: string | null;
 
-  @ApiPropertyOptional({ format: 'date', nullable: true })
+  @ApiPropertyOptional({ type: String, format: 'date', nullable: true })
   @IsOptional()
   @IsString({ message: 'El próximo control debe ser una fecha AAAA-MM-DD' })
   @TextMaxLength(INPUT_CODE_MAX)
