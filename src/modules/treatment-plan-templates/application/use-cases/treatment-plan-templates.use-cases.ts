@@ -162,6 +162,11 @@ export class UpdatePlanTemplateUseCase {
       input.visitIntervals !== undefined ||
       input.lines !== undefined;
     if (!touchesContent) {
+      // Nada que cambiar (solo `version`, o `active` igual al actual): ni
+      // sube la versión ni deja evento; la versión ya se comprobó arriba.
+      if (input.active === undefined || input.active === current.active) {
+        return current;
+      }
       const updated = await this.repo.update(
         id,
         { active: input.active, expectedVersion: input.version },

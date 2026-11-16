@@ -217,6 +217,25 @@ describe('CRUD de plantillas de plan (DX-559)', () => {
     expect(await list.execute({ includeInactive: true })).toHaveLength(1);
   });
 
+  it('un PATCH que no cambia nada no sube la versión ni deja evento, pero sigue exigiendo la versión', async () => {
+    const { repo, create, update } = setup();
+    const created = await create.execute(ENDO_CROWN, AUDIT_CTX);
+    for (const input of [{ version: 1 }, { active: true, version: 1 }]) {
+      const same = await update.execute(created.id, input, AUDIT_CTX);
+      expect(same.version).toBe(1);
+    }
+    expect(repo.rows[0].version).toBe(1);
+    expect(repo.events.map((e) => e.action)).toEqual(['CREATE']);
+    expect(
+      await codeOf(update.execute(created.id, { version: 2 }, AUDIT_CTX)),
+    ).toBe(PLAN_TEMPLATE_STALE);
+    expect(
+      await codeOf(
+        update.execute(created.id, { active: true, version: 7 }, AUDIT_CTX),
+      ),
+    ).toBe(PLAN_TEMPLATE_STALE);
+  });
+
   it('una plantilla inexistente da 404', async () => {
     const { get, update } = setup();
     await expect(get.execute('nope')).rejects.toBeInstanceOf(NotFoundException);

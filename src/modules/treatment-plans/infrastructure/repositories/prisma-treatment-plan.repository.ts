@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -577,8 +578,12 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         throw new NotFoundException('Plan de tratamiento no encontrado');
       }
       const decision = decide(plan);
-      const created = await tx.treatmentPlanItem.createManyAndReturn({
-        data: decision.items.map((input) => ({
+      // Ids fijados aquí para devolver los ítems en el orden de la plantilla
+      // sin fiarse del orden de RETURNING.
+      const ids = decision.items.map(() => randomUUID());
+      const inserted = await tx.treatmentPlanItem.createManyAndReturn({
+        data: decision.items.map((input, i) => ({
+          id: ids[i],
           tenantId,
           planId,
           toothNumber: input.toothNumber,
@@ -600,6 +605,8 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           visitLabel: input.visitLabel,
         })),
       });
+      const byId = new Map(inserted.map((row) => [row.id, row]));
+      const created = ids.map((id) => byId.get(id)!);
       if (decision.visitIntervals) {
         await tx.treatmentPlan.update({
           where: { id: planId },
@@ -634,7 +641,6 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
       }
       return created;
     });
-    // createManyAndReturn devuelve en el orden de `data` (un INSERT ... RETURNING).
     return rows.map(mapItemToEntity);
   }
 
