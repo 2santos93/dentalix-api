@@ -617,9 +617,6 @@ describe('Honorarios de odontólogos: regla, vista previa y cierre (e2e, DX-018)
 
   // ISOLATION_COVERS: PUT /commissions/rules/:userId
   // ISOLATION_COVERS: GET /commissions/settlements/:id
-  // ISOLATION_COVERS: GET /commissions/preview ?userId
-  // ISOLATION_COVERS: GET /commissions/settlements ?userId
-  // ISOLATION_COVERS: POST /commissions/settlements body.userId
   it('otra clínica: 404 al ver la liquidación y al cambiar la regla de un profesional de A', async () => {
     await as(b)
       .get(`/commissions/settlements/${septSettlement.id}`)
