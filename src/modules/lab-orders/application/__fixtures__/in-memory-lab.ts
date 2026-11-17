@@ -217,8 +217,14 @@ export class InMemoryLabRepository implements LabRepository {
     );
   }
 
-  orderOfPatient(patientId: string, orderId: string): Promise<boolean> {
-    return Promise.resolve(this.orders.get(orderId)?.patientId === patientId);
+  orderOfPatient(
+    patientId: string,
+    orderId: string,
+  ): Promise<{ locationId: string } | null> {
+    const order = this.orders.get(orderId);
+    return Promise.resolve(
+      order?.patientId === patientId ? { locationId: order.locationId } : null,
+    );
   }
 
   // -- Órdenes
@@ -267,7 +273,14 @@ export class InMemoryLabRepository implements LabRepository {
     return Promise.resolve(true);
   }
 
-  views(ids: string[], now: Date): Promise<LabOrderView[]> {
+  views(
+    ids: string[],
+    now: Date,
+    allowedLocationIds?: readonly string[],
+  ): Promise<LabOrderView[]> {
+    const visible = (orderId: string) =>
+      allowedLocationIds === undefined ||
+      allowedLocationIds.includes(this.orders.get(orderId)!.locationId);
     const today = civilDateIn(now, ZONE);
     const person = (userId: string | null) => {
       if (!userId) return null;
@@ -322,14 +335,15 @@ export class InMemoryLabRepository implements LabRepository {
           cancelReason: o.cancelReason,
           treatmentPlanItem: null,
           appointment: null,
-          replacesOrder: o.replacesOrderId
-            ? {
-                id: o.replacesOrderId,
-                number: this.orders.get(o.replacesOrderId)!.number,
-              }
-            : null,
+          replacesOrder:
+            o.replacesOrderId && visible(o.replacesOrderId)
+              ? {
+                  id: o.replacesOrderId,
+                  number: this.orders.get(o.replacesOrderId)!.number,
+                }
+              : null,
           replacedBy: [...this.orders.values()]
-            .filter((x) => x.replacesOrderId === o.id)
+            .filter((x) => x.replacesOrderId === o.id && visible(x.id))
             .map((x) => ({ id: x.id, number: x.number })),
           createdAt: o.createdAt,
           createdBy: person(o.createdById)!,

@@ -160,12 +160,28 @@ const ORDER_INCLUDE = {
     select: { id: true, planId: true, toothNumber: true, catalogItemId: true },
   },
   appointment: { select: { id: true, start: true } },
-  replacesOrder: { select: { id: true, number: true } },
+  replacesOrder: { select: { id: true, number: true, locationId: true } },
   replacedBy: {
-    select: { id: true, number: true },
+    select: { id: true, number: true, locationId: true },
     orderBy: { number: 'asc' },
   },
 } satisfies Prisma.DentalLabOrderInclude;
+
+/**
+ * Referencia `{ id, number }` a otra orden solo si su sede está permitida
+ * (DX-017-ter); `undefined` = todas. Nunca expone la sede.
+ */
+function linkOf(allowedLocationIds: readonly string[] | undefined) {
+  return (ref: {
+    id: string;
+    number: number;
+    locationId: string;
+  }): { id: string; number: number } | null =>
+    allowedLocationIds === undefined ||
+    allowedLocationIds.includes(ref.locationId)
+      ? { id: ref.id, number: ref.number }
+      : null;
+}
 
 /** Condición SQL de cada estado derivado (las mismas reglas que el dominio). */
 const STATUS_SQL: Record<LabOrderStatus, Prisma.Sql> = {
@@ -480,14 +496,16 @@ export class PrismaLabRepository implements LabRepository {
     return row !== null;
   }
 
-  async orderOfPatient(patientId: string, orderId: string): Promise<boolean> {
-    const row = await this.prisma.runWithTenant((tx) =>
+  orderOfPatient(
+    patientId: string,
+    orderId: string,
+  ): Promise<{ locationId: string } | null> {
+    return this.prisma.runWithTenant((tx) =>
       tx.dentalLabOrder.findFirst({
         where: { id: orderId, patientId },
-        select: { id: true },
+        select: { locationId: true },
       }),
     );
-    return row !== null;
   }
 
   // -------------------------------------------------------------------------
@@ -566,8 +584,13 @@ export class PrismaLabRepository implements LabRepository {
     }
   }
 
-  views(ids: string[], now: Date): Promise<LabOrderView[]> {
+  views(
+    ids: string[],
+    now: Date,
+    allowedLocationIds?: readonly string[],
+  ): Promise<LabOrderView[]> {
     if (ids.length === 0) return Promise.resolve([]);
+    const link = linkOf(allowedLocationIds);
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.dentalLabOrder.findMany({
         where: { id: { in: ids } },
@@ -663,8 +686,11 @@ export class PrismaLabRepository implements LabRepository {
             appointment: row.appointment
               ? { id: row.appointment.id, start: row.appointment.start }
               : null,
-            replacesOrder: row.replacesOrder,
-            replacedBy: row.replacedBy,
+            replacesOrder: row.replacesOrder ? link(row.replacesOrder) : null,
+            replacedBy: row.replacedBy.flatMap((r) => {
+              const ref = link(r);
+              return ref ? [ref] : [];
+            }),
             createdAt: row.createdAt,
             createdBy: person(row.createdById)!,
             updatedAt: row.updatedAt,
