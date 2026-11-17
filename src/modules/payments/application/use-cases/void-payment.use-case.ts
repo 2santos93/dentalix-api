@@ -27,6 +27,11 @@ export interface VoidPaymentInput {
    * `audit_event` del compromiso de pago que se reabre (DX-215).
    */
   request?: PaymentVoidRequest;
+  /**
+   * DX-091: motivo del ADMIN para anular en un período contable cerrado
+   * (solo si la clínica admite la exención; sin él, 400).
+   */
+  lockOverrideReason?: string | null;
 }
 
 @Injectable()
@@ -75,6 +80,7 @@ export class VoidPaymentUseCase {
       voidedAt: now,
       reason: input.reason,
       request: input.request ?? null,
+      lockOverrideReason: input.lockOverrideReason ?? null,
     });
     if (!voided) {
       throw new NotFoundException('Abono no encontrado');

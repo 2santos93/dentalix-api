@@ -81,6 +81,14 @@ export class CashPaymentDto {
   canVoid!: boolean;
 
   @ApiProperty({
+    description:
+      'DX-091: el día del abono (en su sede) está en un período contable cerrado. ' +
+      'Entonces `canVoid` es `false`, salvo para el ADMIN con la exención de la ' +
+      'clínica, que anula indicando `lockOverrideReason`.',
+  })
+  periodLocked!: boolean;
+
+  @ApiProperty({
     format: 'date-time',
     description:
       'Instante del pago. Un abono registrado solo con fecha (YYYY-MM-DD) se ' +

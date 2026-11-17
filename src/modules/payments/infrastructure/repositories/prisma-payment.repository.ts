@@ -7,6 +7,12 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import {
+  closeLockOverride,
+  guardFinancialLock,
+  openLockOverride,
+  recordLockOverride,
+} from '../../../financial-lock/infrastructure/financial-lock-tx';
 import { CashSessionStatus, Prisma, TreatmentPlanStatus } from '@prisma/client';
 import {
   isPlanBillable,
@@ -749,6 +755,19 @@ export class PrismaPaymentRepository implements PaymentRepository {
         (await manualRatesStillMatch(tx, tenantId, input.currency, frozen)))
         ? frozen
         : null;
+    // DX-091: el día civil del abono en su sede no puede estar cerrado (409
+    // PERIOD_LOCKED), salvo la excepción del ADMIN con motivo, que queda
+    // registrada. La BD lo repite (payments_financial_lock_guard): el id se
+    // fija aquí para abrirle la excepción solo a ESTE abono.
+    const paymentId = split?.id ?? randomUUID();
+    const paidOn = civilDateIn(paidAt, timeZone);
+    const lock = await guardFinancialLock(tx, {
+      tenantId,
+      operation: 'PAYMENT_CREATE',
+      probes: [{ day: paidOn, timeZone }],
+      now: new Date(),
+      actor: input.lockActor ?? null,
+    });
     const cash = await assignPaymentToCashSession(tx, {
       tenantId,
       locationId,
@@ -758,9 +777,12 @@ export class PrismaPaymentRepository implements PaymentRepository {
       timeZone,
       now: new Date(),
     });
+    if (lock.decision.kind === 'override') {
+      await openLockOverride(tx, [paymentId]);
+    }
     const created = await tx.payment.create({
       data: {
-        ...(split?.id ? { id: split.id } : {}),
+        id: paymentId,
         locationId,
         tenantId,
         cashSessionId: cash.cashSessionId,
@@ -786,6 +808,19 @@ export class PrismaPaymentRepository implements PaymentRepository {
       },
       include: { paymentMethod: { select: { name: true } } },
     });
+    if (lock.decision.kind === 'override' && input.lockActor) {
+      await closeLockOverride(tx);
+      await recordLockOverride(tx, {
+        tenantId,
+        locationId,
+        operation: 'PAYMENT_CREATE',
+        paymentId,
+        businessDate: paidOn,
+        lockedThrough: lock.decision.through,
+        reason: lock.decision.reason,
+        actorUserId: input.lockActor.userId,
+      });
+    }
     // DX-516: los ajustes del medio, congelados con el abono (misma
     // transacción, antes del recibo y del ajuste de caja tardío).
     const methodAdjustments = await insertPaymentAdjustments(
@@ -1419,6 +1454,41 @@ export class PrismaPaymentRepository implements PaymentRepository {
       // al descubierto saldo a favor ya traspasado o devuelto se anulan
       // (409). Bloquea sus planes como el traspaso y la devolución.
       await assertVoidKeepsPatientCredit(tx, tenantId, lineIds);
+      // DX-091: un abono de un período contable cerrado (su día civil en su
+      // sede) no se anula (409 PERIOD_LOCKED), tampoco desde Caja o Estado de
+      // cuenta (todos llegan aquí), salvo la excepción del ADMIN con motivo.
+      const lines = await tx.payment.findMany({
+        where: { tenantId, id: { in: lineIds } },
+        select: { id: true, paidAt: true, locationId: true },
+      });
+      const zoneOf = await resolveLocationTimeZones(
+        tx,
+        tenantId,
+        lines.map((line) => line.locationId),
+      );
+      const probes = lines.map((line) => {
+        const timeZone = zoneOf(line.locationId);
+        return {
+          id: line.id,
+          locationId: line.locationId,
+          day: civilDateIn(line.paidAt, timeZone),
+          timeZone,
+        };
+      });
+      const lock = await guardFinancialLock(tx, {
+        tenantId,
+        operation: 'PAYMENT_VOID',
+        probes,
+        now: audit.voidedAt,
+        actor: {
+          userId: audit.voidedById,
+          role: audit.voidedByRole,
+          overrideReason: audit.lockOverrideReason ?? null,
+        },
+      });
+      if (lock.decision.kind === 'override') {
+        await openLockOverride(tx, lineIds);
+      }
       // Siempre en el orden de las líneas: dos anulaciones simultáneas de
       // líneas del mismo cobro bloquean en el mismo orden (sin interbloqueo).
       // La que llega segunda no anula la línea pedida y responde 404.
@@ -1428,6 +1498,22 @@ export class PrismaPaymentRepository implements PaymentRepository {
         if (lineId === id) voided = done;
       }
       if (!voided) return false;
+      if (lock.decision.kind === 'override') {
+        const { through, reason } = lock.decision;
+        await closeLockOverride(tx);
+        for (const probe of probes.filter((p) => p.day <= through)) {
+          await recordLockOverride(tx, {
+            tenantId,
+            locationId: probe.locationId,
+            operation: 'PAYMENT_VOID',
+            paymentId: probe.id,
+            businessDate: probe.day,
+            lockedThrough: through,
+            reason,
+            actorUserId: audit.voidedById,
+          });
+        }
+      }
       // DX-136: el recibo conserva su número y queda marcado ANULADO con la
       // misma fecha, autor y motivo, en la misma transacción. Los abonos
       // anteriores a la numeración no tienen recibo (0 filas). DX-390: el de

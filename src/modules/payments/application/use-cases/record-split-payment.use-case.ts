@@ -1,3 +1,4 @@
+import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import {
   BadRequestException,
   ConflictException,
@@ -123,6 +124,8 @@ export class RecordSplitPaymentUseCase {
     input: RecordSplitPaymentInput,
     createdById?: string,
     idempotencyKey?: string,
+    /** DX-091: ver `RecordPaymentOptions.lockActor`. */
+    options: { lockActor?: LockActor | null } = {},
   ): Promise<SplitPaymentResult> {
     // Como el abono suelto: la repetición, ANTES de validar nada.
     const key = idempotencyKey?.trim() ? idempotencyKey.trim() : undefined;
@@ -232,6 +235,7 @@ export class RecordSplitPaymentUseCase {
             ? null
             : { planCurrency: plan.currency, amount, rateDate: paidOn },
         frozenRate,
+        lockActor: options.lockActor ?? null,
       };
     });
 

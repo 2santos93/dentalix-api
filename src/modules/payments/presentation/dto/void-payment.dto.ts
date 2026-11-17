@@ -1,3 +1,4 @@
+import { LockOverrideReason } from '../../../financial-lock/presentation/dto/lock-override-reason';
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsString, Length } from 'class-validator';
@@ -26,4 +27,7 @@ export class VoidPaymentDto {
   @Length(3, 300)
   @TextMaxLength(INPUT_REASON_MAX)
   reason!: string;
+
+  @LockOverrideReason()
+  lockOverrideReason?: string;
 }

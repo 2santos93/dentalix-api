@@ -20,7 +20,11 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import { CreatePaymentPlanDto } from './dto/create-payment-plan.dto';
+import {
+  CancelPaymentPlanDto,
+  CreatePaymentPlanDto,
+} from './dto/create-payment-plan.dto';
+import type { LockActor } from '../../financial-lock/domain/financial-lock';
 import { PaymentPlanDto } from './dto/payment-plan.dto';
 import { CreatePaymentPlanUseCase } from '../application/use-cases/create-payment-plan.use-case';
 import {
@@ -38,6 +42,24 @@ import { Audit } from '../../audit/presentation/audit.decorator';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
+}
+
+/**
+ * DX-091: quién crea o cancela (del token) y su motivo para un período
+ * contable cerrado. Un token de plataforma no tiene rol de clínica: nunca
+ * salta el cierre.
+ */
+function lockActorOf(
+  req: AuthenticatedRequest,
+  overrideReason: string | undefined,
+): LockActor | null {
+  const user = req.user;
+  if (!('role' in user)) return null;
+  return {
+    userId: user.sub,
+    role: user.role,
+    overrideReason: overrideReason ?? null,
+  };
 }
 
 // Financiero -> PAYMENT_ROLES (igual que PaymentsController). Rutas anidadas
@@ -65,7 +87,8 @@ export class PaymentPlansController {
   @ApiCreatedResponse({ type: PaymentPlanDto })
   @ApiConflictResponse({
     description:
-      'El plan ya tiene un plan de cuotas activo, o está rechazado o cancelado y no se financia (DX-109).',
+      'El plan ya tiene un plan de cuotas activo, o está rechazado o cancelado y no se financia (DX-109). ' +
+      'DX-091: `code: PERIOD_LOCKED` si alguna cuota vence en un período contable cerrado.',
   })
   @ApiBadRequestResponse({ description: 'Id que no es UUID' })
   @ApiParam({ name: 'id', format: 'uuid' })
@@ -83,6 +106,7 @@ export class PaymentPlansController {
         startDate: dto.startDate,
         totalToFinance: dto.totalToFinance,
         notes: dto.notes,
+        lockActor: lockActorOf(req, dto.lockOverrideReason),
       },
       req.user.sub,
     );
@@ -113,9 +137,21 @@ export class PaymentPlansController {
   @Delete('treatment-plans/:id/payment-plan')
   @HttpCode(204)
   @ApiOkResponse({ description: 'Payment plan cancelled' })
+  @ApiConflictResponse({
+    description:
+      'DX-091: `code: PERIOD_LOCKED` si el plan tiene cuotas vencidas en un período contable cerrado. ' +
+      'El ADMIN lo salta con `lockOverrideReason` si la clínica admite la exención.',
+  })
   @ApiBadRequestResponse({ description: 'Id que no es UUID' })
   @ApiParam({ name: 'id', format: 'uuid' })
-  remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.cancelPaymentPlan.execute(id);
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelPaymentPlanDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<void> {
+    return this.cancelPaymentPlan.execute(
+      id,
+      lockActorOf(req, dto.lockOverrideReason),
+    );
   }
 }
