@@ -71,6 +71,10 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-091: el registro de excepciones al cierre contable (quién, cuándo y
   // por qué; dx_financial_lock_override_guard).
   'financial_lock_overrides',
+  // DX-018: la liquidación de honorarios cerrada y su detalle (se corrige con
+  // ajustes en la siguiente; dx_commission_settlement_guard).
+  'commission_settlements',
+  'commission_settlement_lines',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */
@@ -118,6 +122,9 @@ export const NO_APP_DELETE = [
   'dental_labs',
   'dental_lab_services',
   'dental_lab_orders',
+  // DX-018: la regla de honorarios se desactiva, no se borra
+  // (dx_commission_rule_guard).
+  'commission_rules',
 ] as const;
 
 /**
