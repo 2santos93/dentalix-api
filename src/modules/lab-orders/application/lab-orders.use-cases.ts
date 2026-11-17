@@ -189,7 +189,11 @@ export class LabOrderUseCases {
       pageSize,
       this.allowedLocations(),
     );
-    const items = await this.repo.views(ids, this.now());
+    const items = await this.repo.views(
+      ids,
+      this.now(),
+      this.allowedLocations(),
+    );
     return {
       items: items.map((v) => redactForRole(v, role)),
       total,
@@ -237,7 +241,7 @@ export class LabOrderUseCases {
       page,
       pageSize,
     });
-    const items = await this.repo.views(ids, now);
+    const items = await this.repo.views(ids, now, this.allowedLocations());
     return {
       items: items.map((v) => redactForRole(v, role)),
       total,
@@ -540,7 +544,11 @@ export class LabOrderUseCases {
   // -- Apoyo
 
   private async view(orderId: string): Promise<LabOrderView> {
-    const [view] = await this.repo.views([orderId], this.now());
+    const [view] = await this.repo.views(
+      [orderId],
+      this.now(),
+      this.allowedLocations(),
+    );
     if (!view) throw new NotFoundException(LAB_MESSAGES.orderNotFound);
     return view;
   }
@@ -669,7 +677,12 @@ export class LabOrderUseCases {
     return service.leadTimeBusinessDays;
   }
 
-  /** Ítem, cita y orden corregida del MISMO paciente (422 genérico si no). */
+  /**
+   * Ítem, cita y orden corregida del MISMO paciente (422 genérico si no). La
+   * orden corregida, además, de una sede permitida al miembro (DX-017-ter):
+   * el mismo 403 `LOCATION_NOT_ALLOWED` que leerla o escribirla. Sin
+   * restricción de sede se puede corregir una orden de otra sede.
+   */
   private async assertLinks(
     patientId: string,
     links: {
@@ -692,11 +705,17 @@ export class LabOrderUseCases {
         LAB_MESSAGES.appointmentNotOfPatient,
       );
     }
-    if (
-      links.replacesOrderId &&
-      !(await this.repo.orderOfPatient(patientId, links.replacesOrderId))
-    ) {
-      throw new UnprocessableEntityException(LAB_MESSAGES.replacesNotOfPatient);
+    if (links.replacesOrderId) {
+      const replaced = await this.repo.orderOfPatient(
+        patientId,
+        links.replacesOrderId,
+      );
+      if (!replaced) {
+        throw new UnprocessableEntityException(
+          LAB_MESSAGES.replacesNotOfPatient,
+        );
+      }
+      this.tenantContext.assertRecordLocationAllowed(replaced.locationId);
     }
   }
 

@@ -139,7 +139,14 @@ export interface LabRepository {
     patientId: string,
     appointmentId: string,
   ): Promise<boolean>;
-  orderOfPatient(patientId: string, orderId: string): Promise<boolean>;
+  /**
+   * La sede de la orden si es de ese paciente, o null (DX-017-ter: «corrige
+   * a» comprueba que esa sede esté permitida al miembro).
+   */
+  orderOfPatient(
+    patientId: string,
+    orderId: string,
+  ): Promise<{ locationId: string } | null>;
 
   // -- Órdenes
   /** Inserta la orden (paciente vivo, con candado) y devuelve su id. */
@@ -154,8 +161,16 @@ export interface LabRepository {
     expectedUpdatedAt: Date,
     write: LabOrderWrite,
   ): Promise<boolean>;
-  /** Las vistas SIN redactar, en el orden de `ids`. */
-  views(ids: string[], now: Date): Promise<LabOrderView[]>;
+  /**
+   * Las vistas SIN redactar, en el orden de `ids`. `allowedLocationIds`
+   * (DX-017-ter): `replacesOrder` y `replacedBy` solo enlazan órdenes de esas
+   * sedes; `undefined` = todas.
+   */
+  views(
+    ids: string[],
+    now: Date,
+    allowedLocationIds?: readonly string[],
+  ): Promise<LabOrderView[]>;
   /**
    * Órdenes del paciente, más recientes primero. `allowedLocationIds`
    * (DX-017-bis): solo las de esas sedes, también en `total`; `undefined` =

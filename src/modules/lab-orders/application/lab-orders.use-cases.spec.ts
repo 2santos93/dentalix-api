@@ -572,6 +572,131 @@ describe('DX-017 · órdenes de laboratorio', () => {
       expect(none).toMatchObject({ items: [], total: 0 });
     });
 
+    it('DX-017-ter · crear con «corrige a» una orden de otra sede da el mismo 403 que las escrituras y no crea nada', async () => {
+      const { orders, repo, lab, inLoc2, onlyLoc1 } = await twoLocations();
+      const before = repo.orders.size;
+      const create = onlyLoc1(() =>
+        orders.create(
+          'p1',
+          {
+            labId: lab.id,
+            locationId: 'loc-1',
+            replacesOrderId: inLoc2.id,
+            ...CROWN,
+          },
+          dentist,
+        ),
+      );
+      const write = onlyLoc1(() =>
+        orders.update(inLoc2.id, { dueOn: '2026-12-01' }, dentist),
+      );
+      const [createError, writeError] = await Promise.all([
+        create.catch((e: unknown) => e),
+        write.catch((e: unknown) => e),
+      ]);
+      expect(createError).toBeInstanceOf(ForbiddenException);
+      expect((createError as ForbiddenException).getResponse()).toEqual(
+        (writeError as ForbiddenException).getResponse(),
+      );
+      expect(JSON.stringify(createError)).not.toContain(inLoc2.id);
+      expect(repo.orders.size).toBe(before);
+    });
+
+    it('DX-017-ter · editar «corrige a» hacia una orden de otra sede da 403 y no cambia la orden', async () => {
+      const { orders, audit, inLoc1, inLoc2, onlyLoc1 } = await twoLocations();
+      await expect(
+        onlyLoc1(() =>
+          orders.update(inLoc1.id, { replacesOrderId: inLoc2.id }, dentist),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(await orders.get(inLoc1.id, 'DENTIST')).toMatchObject({
+        replacesOrder: null,
+      });
+    });
+
+    it('DX-017-ter · «corrige a» hacia una orden de la propia sede sigue funcionando', async () => {
+      const { orders, lab, inLoc1, onlyLoc1 } = await twoLocations();
+      const fix = await onlyLoc1(() =>
+        orders.create(
+          'p1',
+          {
+            labId: lab.id,
+            locationId: 'loc-1',
+            replacesOrderId: inLoc1.id,
+            ...CROWN,
+          },
+          dentist,
+        ),
+      );
+      expect(fix.replacesOrder).toEqual({
+        id: inLoc1.id,
+        number: inLoc1.number,
+      });
+    });
+
+    it('DX-017-ter · sin restricción de sede se puede corregir una orden de otra sede', async () => {
+      const { orders, lab, inLoc2 } = await twoLocations();
+      const fix = await orders.create(
+        'p1',
+        {
+          labId: lab.id,
+          locationId: 'loc-1',
+          replacesOrderId: inLoc2.id,
+          ...CROWN,
+        },
+        dentist,
+      );
+      expect(fix.replacesOrder).toEqual({
+        id: inLoc2.id,
+        number: inLoc2.number,
+      });
+      expect(await orders.get(inLoc2.id, 'DENTIST')).toMatchObject({
+        replacedBy: [{ id: fix.id, number: fix.number }],
+      });
+    });
+
+    it('DX-017-ter · las vistas no enlazan órdenes corregidas o correctoras de otra sede', async () => {
+      const { orders, lab, inLoc1, inLoc2, onlyLoc1 } = await twoLocations();
+      // Sin restricción: la orden de la sede 1 corrige la de la sede 2, y otra
+      // de la sede 2 corrige la de la sede 1.
+      const fixInLoc1 = await orders.create(
+        'p1',
+        {
+          labId: lab.id,
+          locationId: 'loc-1',
+          replacesOrderId: inLoc2.id,
+          ...CROWN,
+        },
+        dentist,
+      );
+      const fixInLoc2 = await orders.create(
+        'p1',
+        {
+          labId: lab.id,
+          locationId: 'loc-2',
+          replacesOrderId: inLoc1.id,
+          ...CROWN,
+        },
+        dentist,
+      );
+      const seen = await onlyLoc1(() => orders.get(fixInLoc1.id, 'DENTIST'));
+      expect(seen.replacesOrder).toBeNull();
+      const original = await onlyLoc1(() => orders.get(inLoc1.id, 'DENTIST'));
+      expect(original.replacedBy).toEqual([]);
+      const page = await onlyLoc1(() =>
+        orders.listForPatient('p1', {}, 'DENTIST'),
+      );
+      const leaked = JSON.stringify(page);
+      expect(leaked).not.toContain(inLoc2.id);
+      expect(leaked).not.toContain(fixInLoc2.id);
+      const listed = await onlyLoc1(() =>
+        orders.list({ locationId: 'loc-1' }, 'DENTIST'),
+      );
+      expect(JSON.stringify(listed)).not.toContain(inLoc2.id);
+      expect(JSON.stringify(listed)).not.toContain(fixInLoc2.id);
+    });
+
     it('sin restricción de sede: get, print y la lista del paciente ven todas las sedes', async () => {
       const { orders, inLoc2 } = await twoLocations();
       await expect(orders.get(inLoc2.id, 'DENTIST')).resolves.toMatchObject({
