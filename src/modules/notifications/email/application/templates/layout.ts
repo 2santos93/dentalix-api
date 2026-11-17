@@ -11,6 +11,30 @@ export interface EmailBlock {
   text: string;
 }
 
+/** DX-568: una celda de una tabla del email (texto y, si lleva, su enlace). */
+export interface EmailTableCell {
+  text: string;
+  /** Enlace http(s) de la celda; sin él, solo texto. */
+  url?: string | null;
+}
+
+/** DX-568: una fila: sus celdas y, si lleva, un aviso bajo la primera. */
+export interface EmailTableRow {
+  cells: EmailTableCell[];
+  note?: string | null;
+}
+
+/**
+ * DX-568: una tabla de cifras (p. ej. una sede del resumen semanal). La
+ * primera columna es la etiqueta (a la izquierda); el resto, cifras (a la
+ * derecha). En el texto, columnas alineadas con espacios.
+ */
+export interface EmailTable {
+  title: string;
+  columns: string[];
+  rows: EmailTableRow[];
+}
+
 export interface EmailLayoutInput {
   brand: EmailBrand | null;
   subject: string;
@@ -33,6 +57,10 @@ export interface EmailLayoutInput {
    * cuestionario de salud del recordatorio): una frase y su enlace.
    */
   callout?: { lead: string; label: string; url: string } | null;
+  /** DX-568: tablas de cifras tras los párrafos y antes del botón. */
+  tables?: EmailTable[] | null;
+  /** DX-568: párrafos tras las tablas (definiciones y avisos de las cifras). */
+  closingBlocks?: EmailBlock[] | null;
   /**
    * DX-497: textos fijos del esqueleto (idioma del HTML, ayuda del botón y
    * pie) en el idioma del email. Ausente = los de la clínica (español).
@@ -54,6 +82,82 @@ const DEFAULT_CHROME: EmailLayoutChrome = {
     `Enviado por ${clinic} a través de ${product}.`,
   footerPlatform: (product) => `Enviado por ${product}.`,
 };
+
+/** La URL de una celda, validada: una que no sea http(s) es un error de quien llama. */
+function cellUrl(cell: EmailTableCell): string | null {
+  if (!cell.url) return null;
+  const url = safeUrl(cell.url);
+  if (!url) throw new Error('El enlace del email no es una URL http(s) válida');
+  return url;
+}
+
+function tableHtml(table: EmailTable, color: string): string {
+  const head = table.columns
+    .map(
+      (column, i) =>
+        `<th style="padding:6px 8px;border-bottom:1px solid #e4e7eb;font-size:12px;font-weight:600;color:#5b6472;text-align:${i === 0 ? 'left' : 'right'}">${escapeHtml(column)}</th>`,
+    )
+    .join('');
+  const rows = table.rows
+    .map((row) => {
+      const cells = row.cells
+        .map((cell, i) => {
+          const url = cellUrl(cell);
+          const text = escapeHtml(cell.text);
+          const content = url
+            ? `<a href="${escapeHtml(url)}" style="color:${color};text-decoration:none">${text}</a>`
+            : text;
+          const note =
+            i === 0 && row.note
+              ? `<br /><span style="font-size:12px;color:#b45309">${escapeHtml(row.note)}</span>`
+              : '';
+          return `<td style="padding:6px 8px;border-bottom:1px solid #f0f2f4;font-size:14px;line-height:1.4;color:#1f2933;text-align:${i === 0 ? 'left' : 'right'};${i === 0 ? '' : 'white-space:nowrap;'}vertical-align:top">${content}${note}</td>`;
+        })
+        .join('');
+      return `<tr>${cells}</tr>`;
+    })
+    .join('\n');
+  return `<h2 style="margin:24px 0 8px;font-size:16px;line-height:1.3;color:#1f2933">${escapeHtml(table.title)}</h2>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+<tr>${head}</tr>
+${rows}
+</table>`;
+}
+
+/** Ancho visible de un texto (por puntos de código: tildes y «–» cuentan uno). */
+function width(text: string): number {
+  return [...text].length;
+}
+
+function pad(text: string, size: number, right: boolean): string {
+  const fill = ' '.repeat(Math.max(0, size - width(text)));
+  return right ? fill + text : text + fill;
+}
+
+/** La tabla en texto: columnas alineadas, avisos y enlaces bajo cada fila. */
+function tableText(table: EmailTable): string[] {
+  const lines = [singleLine(table.title)];
+  const grid = [
+    table.columns.map((c) => singleLine(c)),
+    ...table.rows.map((row) => row.cells.map((c) => singleLine(c.text))),
+  ];
+  const sizes = table.columns.map((_, i) =>
+    Math.max(...grid.map((cells) => width(cells[i] ?? ''))),
+  );
+  const line = (cells: string[]) =>
+    cells
+      .map((cell, i) => pad(cell, sizes[i], i > 0))
+      .join('  ')
+      .trimEnd();
+  lines.push(line(grid[0]));
+  table.rows.forEach((row, r) => {
+    lines.push(line(grid[r + 1]));
+    if (row.note) lines.push(`  ${singleLine(row.note)}`);
+    const url = row.cells.map(cellUrl).find((u) => u !== null);
+    if (url) lines.push(`  ${url}`);
+  });
+  return lines;
+}
 
 /**
  * Esqueleto común de los emails: cabecera con la marca de la clínica (logo si
@@ -82,13 +186,12 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
     ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(senderName)}" style="max-height:48px;max-width:200px;border:0" />`
     : `<span style="font-size:20px;font-weight:600;color:${color}">${escapeHtml(senderName)}</span>`;
 
-  const body = input.blocks
-    .map((block) =>
-      block.kind === 'note'
-        ? `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#5b6472">${escapeHtml(block.text)}</p>`
-        : `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#1f2933">${escapeHtml(block.text)}</p>`,
-    )
-    .join('\n');
+  const blockHtml = (block: EmailBlock) =>
+    block.kind === 'note'
+      ? `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#5b6472">${escapeHtml(block.text)}</p>`
+      : `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#1f2933">${escapeHtml(block.text)}</p>`;
+  const body = input.blocks.map(blockHtml).join('\n');
+  const closing = input.closingBlocks ?? [];
 
   const button =
     input.action && actionUrl
@@ -121,6 +224,15 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
       ? `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#1f2933">${escapeHtml(input.callout.lead)}<br /><a href="${escapeHtml(calloutUrl)}" style="color:${color};font-weight:600">${escapeHtml(input.callout.label)}</a></p>`
       : '';
 
+  const tables = input.tables ?? [];
+  // Sin tablas, el HTML queda byte a byte como antes de DX-568.
+  const tablesHtml = [
+    ...tables.map((t) => tableHtml(t, color)),
+    ...closing.map(blockHtml),
+  ]
+    .map((html) => `${html}\n`)
+    .join('');
+
   const footerText = input.brand
     ? chrome.footerClinic(senderName, PRODUCT_NAME)
     : chrome.footerPlatform(PRODUCT_NAME);
@@ -141,7 +253,7 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
 <tr><td style="padding-top:20px">
 <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1f2933">${escapeHtml(input.heading)}</h1>
 ${body}
-${button}
+${tablesHtml}${button}
 ${calloutHtml}
 ${linksHtml}
 </td></tr>
@@ -160,6 +272,10 @@ ${footerLink}
     '',
     ...input.blocks.map((block) => singleLine(block.text)),
   ];
+  for (const table of tables) textParts.push('', ...tableText(table));
+  if (closing.length > 0) {
+    textParts.push('', ...closing.map((block) => singleLine(block.text)));
+  }
   if (input.action && actionUrl) {
     textParts.push('', `${singleLine(input.action.label)}: ${actionUrl}`);
   }

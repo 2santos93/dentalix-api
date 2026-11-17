@@ -25,9 +25,10 @@ import {
   ExternalOrderCopyEmailVars,
   PaymentLinkEmailVars,
   PaymentReportRejectedEmailVars,
+  WeeklyDigestEmailVars,
 } from '../../domain/email-message';
 import { PRESCRIPTION_COPY_CATALOG } from './catalog/prescription-copy.catalog';
-import { EmailBlock, renderLayout } from './layout';
+import { EmailBlock, EmailTable, renderLayout } from './layout';
 import { appointmentReminder } from './appointment-reminder.template';
 
 // DX-497: re-exportado para quien ya lo importaba de aquí (vista previa).
@@ -594,6 +595,73 @@ function externalOrderCopy(
   });
 }
 
+/** DX-568: las columnas de cada tabla del resumen semanal. */
+export const WEEKLY_DIGEST_COLUMNS = [
+  'Cifra',
+  'Esta semana',
+  'Semana anterior',
+  'Variación',
+] as const;
+
+/**
+ * DX-568: el resumen semanal para los ADMIN. Solo recuentos e importes por
+ * sede (ningún dato de pacientes); cada cifra enlaza al informe con el mismo
+ * filtro. La prueba lleva «[Prueba]» en el asunto y no lleva baja.
+ */
+function weeklyDigest(
+  vars: WeeklyDigestEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const hasLinks = vars.sections.some((s) => s.rows.some((r) => r.url));
+  const tables: EmailTable[] = vars.sections.map((section) => ({
+    title: section.title,
+    columns: [...WEEKLY_DIGEST_COLUMNS],
+    rows: section.rows.map((row) => ({
+      cells: [
+        { text: row.label },
+        { text: row.current, url: row.url },
+        { text: row.previous },
+        { text: row.change },
+      ],
+      note: row.note,
+    })),
+  }));
+  const blocks: EmailBlock[] = [
+    {
+      kind: 'paragraph',
+      text: `Estas son las cifras de ${vars.clinicName} de la semana ${vars.periodLongLabel}, por sede y para toda la clínica, frente a la semana anterior.${hasLinks ? ' Cada cifra abre el informe con la misma semana.' : ''}`,
+    },
+  ];
+  if (vars.isTest) {
+    blocks.push({
+      kind: 'note',
+      text: 'Es una prueba que pediste desde Ajustes: el resumen de verdad les llega a los destinatarios elegidos el día y a la hora configurados.',
+    });
+  }
+  return renderLayout({
+    brand,
+    subject: `${vars.isTest ? '[Prueba] ' : ''}Resumen semanal de ${vars.clinicName}: ${vars.periodLabel}`,
+    heading: 'Resumen semanal',
+    blocks,
+    tables,
+    closingBlocks: vars.notes.map((text) => ({ kind: 'note', text })),
+    action: null,
+    links: vars.settingsUrl
+      ? {
+          lead: 'Para cambiar el día, la hora o quién lo recibe:',
+          items: [{ label: 'Cambiar los ajustes', url: vars.settingsUrl }],
+        }
+      : null,
+    footerLink: vars.unsubscribeUrl
+      ? {
+          lead: 'Te llega porque eres administrador de la clínica.',
+          label: 'Dejar de recibir este resumen',
+          url: vars.unsubscribeUrl,
+        }
+      : null,
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -618,6 +686,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'payment-link': paymentLink,
   'payment-report-rejected': paymentReportRejected,
   'external-order-copy': externalOrderCopy,
+  'weekly-digest': weeklyDigest,
   'mfa-notice': mfaNotice,
   'mfa-enrollment-code': mfaEnrollmentCode,
 };

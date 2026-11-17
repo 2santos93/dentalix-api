@@ -129,6 +129,55 @@ export interface ReceivablesAgingPage {
  */
 export interface ReceivablesAgingTotals {
   totals: AgingTotal[];
+  /**
+   * DX-568: los mismos avisos de `ReceivablesAgingPage` sobre las mismas
+   * filas: abonos que no suman por falta de tasa y si el proveedor no
+   * respondió (con `offline`, todo abono que necesitaría la tasa del día).
+   */
+  paymentsWithoutRateCount: number;
+  rateProviderTimedOut: boolean;
+  /**
+   * DX-568 (revisión, n.º 5): los mismos avisos por moneda del plan, para
+   * marcar solo la cifra de la moneda afectada. Solo las monedas con aviso.
+   */
+  withoutRateByCurrency: {
+    currency: string;
+    paymentsWithoutRateCount: number;
+    rateProviderTimedOut: boolean;
+  }[];
+}
+
+/** DX-568: avisos de tasa por moneda de las filas (solo las que tienen). */
+function withoutRateByCurrencyOf(
+  rows: ScopedRow[],
+): ReceivablesAgingTotals['withoutRateByCurrency'] {
+  const byCurrency = new Map<string, { count: number; timedOut: boolean }>();
+  for (const row of rows) {
+    for (const c of row.aging.currencies) {
+      if (c.paymentsWithoutRateCount === 0 && !c.rateProviderTimedOut) continue;
+      const acc = byCurrency.get(c.currency) ?? { count: 0, timedOut: false };
+      acc.count += c.paymentsWithoutRateCount;
+      acc.timedOut ||= c.rateProviderTimedOut;
+      byCurrency.set(c.currency, acc);
+    }
+  }
+  return [...byCurrency.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, acc]) => ({
+      currency,
+      paymentsWithoutRateCount: acc.count,
+      rateProviderTimedOut: acc.timedOut,
+    }));
+}
+
+/** DX-568: opciones de `summary`. */
+export interface ReceivablesSummaryOptions {
+  /**
+   * Sin conversiones en vivo (`PlanBalanceOptions.offline`): nunca llama al
+   * proveedor de tasas. Para los trabajos en segundo plano (el resumen
+   * semanal), que no pueden esperarlo.
+   */
+  offline?: boolean;
 }
 
 /** DX-146: un deudor del alcance con su antigüedad (sin contacto). */
@@ -301,12 +350,21 @@ export class GetReceivablesAgingUseCase {
    */
   async summary(
     filters: Pick<ReceivablesAgingFilters, 'locationId'>,
+    options: ReceivablesSummaryOptions = {},
   ): Promise<ReceivablesAgingTotals> {
     const location = await this.locationOf(filters);
     const ledgers = await this.repo.loadLedgers({ locationId: location?.id });
     const zoneOf = await this.repo.locationTimeZones();
-    const { rows } = await this.debtorRows(ledgers, zoneOf, filters);
-    return { totals: totalsOf(rows) };
+    const { rows } = await this.debtorRows(ledgers, zoneOf, filters, options);
+    return {
+      totals: totalsOf(rows),
+      paymentsWithoutRateCount: rows.reduce(
+        (sum, r) => sum + r.aging.paymentsWithoutRateCount,
+        0,
+      ),
+      rateProviderTimedOut: rows.some((r) => r.aging.rateProviderTimedOut),
+      withoutRateByCurrency: withoutRateByCurrencyOf(rows),
+    };
   }
 
   /**
@@ -373,11 +431,15 @@ export class GetReceivablesAgingUseCase {
     ledgers: PatientLedger[],
     zoneOf: (locationId: string | null) => string,
     filters: ReceivablesAgingFilters,
+    { offline = false }: ReceivablesSummaryOptions = {},
   ): Promise<{ rows: ScopedRow[]; now: Date }> {
     // DX-472-bis: lo abonado en otra moneda, convertido como en `/balance`,
     // con UN plazo para toda la cartera; casi siempre sin red (tasa congelada).
+    // DX-568: `offline` (el resumen semanal) nunca llama al proveedor.
     const [planBalances, roundingDigitsOf] = await Promise.all([
-      this.planBalance.computeMany(ledgerPlanBalanceInputs(ledgers, zoneOf)),
+      this.planBalance.computeMany(ledgerPlanBalanceInputs(ledgers, zoneOf), {
+        offline,
+      }),
       roundingDigitsLookup(
         this.currencyDigits,
         ledgers.flatMap((l) => l.plans.map((p) => p.currency)),

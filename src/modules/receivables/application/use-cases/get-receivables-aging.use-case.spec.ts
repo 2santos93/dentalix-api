@@ -313,9 +313,30 @@ describe('GetReceivablesAgingUseCase', () => {
         });
         await expect(useCase.summary(filters)).resolves.toEqual({
           totals: page.totals,
+          paymentsWithoutRateCount: page.paymentsWithoutRateCount,
+          rateProviderTimedOut: page.rateProviderTimedOut,
+          withoutRateByCurrency: expect.any(Array) as unknown,
         });
       },
     );
+
+    it('DX-568: con `offline` no pide conversiones en vivo (nunca el proveedor)', async () => {
+      const calculator = planBalanceWithoutLiveRates();
+      const computeMany = jest.spyOn(calculator, 'computeMany');
+      const offlineUseCase = new GetReceivablesAgingUseCase(
+        repo,
+        () => NOW,
+        calculator,
+      );
+      await offlineUseCase.summary({}, { offline: true });
+      expect(computeMany).toHaveBeenCalledWith(expect.any(Array), {
+        offline: true,
+      });
+      await offlineUseCase.summary({});
+      expect(computeMany).toHaveBeenLastCalledWith(expect.any(Array), {
+        offline: false,
+      });
+    });
 
     it('no pide contactos ni cobranza de nadie', async () => {
       await useCase.summary({ locationId: NORTE.id });
