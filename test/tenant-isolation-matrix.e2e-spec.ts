@@ -754,6 +754,23 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     select: { id: true },
   });
 
+  // DX-568: el ADMIN de A recibe el resumen semanal (la fotografía cubre
+  // weekly_digest_recipients; envíos y entregas los crea el trabajo).
+  const digestSettings = await api(
+    app,
+    a,
+    'get',
+    '/clinic/weekly-digest-settings',
+  ).expect(200);
+  const [digestAdmin] = (
+    digestSettings.body as { candidates: { membershipId: string }[] }
+  ).candidates;
+  await api(app, a, 'put', '/clinic/weekly-digest-settings', {
+    enabled: false,
+    weekday: 1,
+    hour: 7,
+    recipientMembershipIds: [digestAdmin.membershipId],
+  }).expect(200);
   return {
     recallTypeId: recallType.id,
     patientId,
@@ -1123,6 +1140,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'expenses',
       'expense_payments',
       'expense_categories',
+      // DX-568: destinatarios del resumen semanal.
+      'weekly_digest_recipients',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {
@@ -4528,6 +4547,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * `COVERED_ELSEWHERE`).
    */
   const PUBLIC_TOKEN_COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'weekly-digest.e2e-spec.ts',
+      checks:
+        'B → 404 con el token de baja del resumen semanal de A en su host, igual que uno inventado, y A sigue entre los destinatarios (DX-568)',
+      routes: [
+        'GET /public/weekly-digest-unsubscribe/:token',
+        'POST /public/weekly-digest-unsubscribe/:token',
+      ],
+    },
     {
       spec: 'payment-links.e2e-spec.ts',
       checks:
