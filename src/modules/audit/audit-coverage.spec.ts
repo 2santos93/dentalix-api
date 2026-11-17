@@ -113,6 +113,7 @@ import {
 } from '../provider-schedule/presentation/provider-schedule.controller';
 import { ExchangeSettingsController } from '../exchange/presentation/exchange-settings.controller';
 import { PaymentMethodsController } from '../payment-methods/presentation/payment-methods.controller';
+import { CommissionsController } from '../commissions/presentation/commissions.controller';
 import { AppModule } from '../../app.module';
 import {
   collectControllers,
@@ -1568,6 +1569,19 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN',
     reason: 'QUOTE_FUNNEL_REPORT',
   },
+  // DX-018: la vista previa y el detalle de una liquidación de honorarios
+  // llevan el nombre de cada paciente (la lista, solo cabeceras y totales).
+  'GET /commissions/preview': {
+    action: 'VIEW',
+    resource: 'COMMISSION_SETTLEMENT',
+    reason: 'COMMISSION_PREVIEW',
+  },
+  'GET /commissions/settlements/:id': {
+    action: 'VIEW',
+    resource: 'COMMISSION_SETTLEMENT',
+    resourceId: { param: 'id' },
+    reason: 'COMMISSION_SETTLEMENT',
+  },
   // DX-436: el CSV de «Huecos recuperados» (solo agregados) sale de la
   // clínica: cada descarga queda auditada.
   'GET /reports/recovered-slots.csv': {
@@ -2148,6 +2162,13 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-091: CLINIC_SETTINGS FINANCIAL_LOCK con el antes y el después
   // (configAuditEvent), en la transacción del cambio; sin evento si no cambia.
   'PATCH /clinic/settings/financial-lock': 'financial-lock.e2e-spec.ts',
+  // DX-018: la regla de honorarios como CLINIC_SETTINGS COMMISSION_RULE con
+  // el antes y el después (base, modo, % y categorías; sin importes), y el
+  // cierre de la liquidación como CREATE COMMISSION_SETTLEMENT (período,
+  // base y nº de líneas) más el cierre contable que sube (CLINIC_SETTINGS
+  // FINANCIAL_LOCK), en la transacción del cierre.
+  'PUT /commissions/rules/:userId': 'commissions.e2e-spec.ts',
+  'POST /commissions/settlements': 'commissions.e2e-spec.ts',
   'POST /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   'DELETE /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
@@ -2412,6 +2433,7 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 };
 
 const CONTROLLERS: Type[] = [
+  CommissionsController,
   AuthController,
   PatientCertificatesController,
   PatientExternalOrdersController,

@@ -85,6 +85,8 @@ const PRESCRIBERS = roles('ADMIN', 'DENTIST');
 const PLAN_DECIDERS = roles('ADMIN', 'DENTIST');
 const PLAN_REJECTERS = roles('ADMIN', 'DENTIST', 'RECEPTION');
 const ADMIN_ONLY = roles('ADMIN');
+// DX-018: honorarios (el DENTIST, solo lo suyo).
+const COMMISSION_VIEWERS = roles('ADMIN', 'DENTIST');
 // DX-017: envían y reciben trabajos de laboratorio (y recepción cambia la
 // fecha prometida y la cita).
 const LAB_HANDLERS = roles('ADMIN', 'DENTIST', 'RECEPTION');
@@ -444,6 +446,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /clinic/settings/financial-lock': ADMIN_ONLY,
   'PATCH /clinic/settings/financial-lock': ADMIN_ONLY,
   'GET /payments/period-lock': orPermission(BILLING, 'PAYMENT_REGISTER'),
+  // DX-018: honorarios. ADMIN configura y cierra; el DENTIST solo ve lo suyo
+  // (lo acota el caso de uso).
+  'GET /commissions/rules': ADMIN_ONLY,
+  'PUT /commissions/rules/:userId': ADMIN_ONLY,
+  'GET /commissions/preview': COMMISSION_VIEWERS,
+  'POST /commissions/settlements': ADMIN_ONLY,
+  'GET /commissions/settlements': COMMISSION_VIEWERS,
+  'GET /commissions/settlements/:id': COMMISSION_VIEWERS,
   'POST /clinic/settings/logo': ADMIN_ONLY,
   'DELETE /clinic/settings/logo': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,
