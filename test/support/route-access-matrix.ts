@@ -898,6 +898,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /treatment-plans/:id/payment-plan': BILLING,
   'GET /treatment-plans/:id/payment-plan': BILLING,
   'DELETE /treatment-plans/:id/payment-plan': BILLING,
+  // DX-041: simular cuotas del presupuesto: quien lo imprime (el PDF las lleva).
+  'POST /treatment-plans/:id/installment-simulation': EVERY_ROLE,
   'GET /patients/:patientId/account-statement': BILLING,
   // DX-203: estado de cuenta familiar del pagador, mismos roles.
   'GET /patients/:patientId/family-account-statement': BILLING,

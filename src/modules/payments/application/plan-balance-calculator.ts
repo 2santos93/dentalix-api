@@ -61,6 +61,22 @@ const BILLABLE_STATUSES: ReadonlySet<TreatmentPlanItemStatus> = new Set([
 ]);
 
 /**
+ * Lo facturable de los ítems VIVOS de un plan cobrable: la suma exacta de las
+ * líneas aceptadas o realizadas (DX-340). Es la cifra `billable` del saldo y
+ * la que `PlanBalanceCalculator` usa; DX-041 la reutiliza para el saldo que
+ * se financia al aceptar con cuotas (nunca otra cuenta).
+ */
+export function billableTotal(
+  items: readonly {
+    status: TreatmentPlanItemStatus;
+    price: number;
+    discount: number;
+  }[],
+): number {
+  return linesTotal(items.filter((item) => BILLABLE_STATUSES.has(item.status)));
+}
+
+/**
  * El saldo de un plan (DX-472): lo facturable menos lo abonado, cada abono en
  * la moneda del plan por su base, su tasa congelada o, si es anterior a
  * DX-375 y aún sin congelar, la tasa de su día. Es la ÚNICA cuenta: la usan
@@ -148,10 +164,7 @@ export class PlanBalanceCalculator {
     const billable = !isPlanBillable(plan.status)
       ? 0
       : // DX-340: suma exacta de las líneas cobrables (regla única).
-        (input.billable ??
-        linesTotal(
-          input.items.filter((item) => BILLABLE_STATUSES.has(item.status)),
-        ));
+        (input.billable ?? billableTotal(input.items));
 
     let paid = input.paidKnown ?? 0;
     const paymentsWithoutRate: PaymentWithoutRate[] = [];

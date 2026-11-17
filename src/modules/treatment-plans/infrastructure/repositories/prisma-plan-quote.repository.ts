@@ -6,7 +6,7 @@ import {
   CLINIC_FISCAL_SELECT,
   clinicFiscalOf,
 } from '../../../../shared/clinic/clinic-fiscal';
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import {
   Prisma,
   TreatmentPlanRepricingSource,
@@ -22,6 +22,7 @@ import {
 import { resolveLocationTimeZones } from '../../../../shared/locations/location-time-zone';
 import { isValidTimeZone } from '../../../../shared/time/civil-day';
 import type {
+  AcceptInstallments,
   AcceptPartial,
   AcceptPlanOutcome,
   AcceptReprice,
@@ -49,6 +50,9 @@ import {
   type QuoteValidity,
 } from '../../domain/quote-validity';
 import { NO_EXPIRED_ACCEPTANCE } from '../../domain/expired-quote-acceptance';
+import { billableTotal } from '../../../payments/application/plan-balance-calculator';
+import { createPaymentPlanInTx } from '../../../payment-plans/infrastructure/repositories/prisma-payment-plan.repository';
+import { ACTIVE_PAYMENT_PLAN_MESSAGE } from '../../../payment-plans/application/use-cases/create-payment-plan.use-case';
 
 const PROCEDURE_FALLBACK = 'Procedimiento';
 
@@ -82,6 +86,54 @@ class DryRun extends Error {
 /** Una fecha `YYYY-MM-DD` como columna DATE. */
 const dateColumn = (day: string | null): Date | null =>
   day === null ? null : new Date(`${day}T00:00:00.000Z`);
+
+/**
+ * DX-041: crea el plan de cuotas de una aceptación con cuotas, con el plan ya
+ * aceptado y bloqueado. Lo facturable sale de los ítems releídos con la cuenta
+ * del saldo (`billableTotal`), la misma cifra que `POST …/payment-plan` usa por
+ * defecto; `build` la compara con la simulada y reparte las cuotas.
+ */
+async function createAcceptedInstallmentsInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  planId: string,
+  source: PlanQuoteSource,
+  installments: AcceptInstallments,
+): Promise<string> {
+  const active = await tx.paymentPlan.findFirst({
+    where: { treatmentPlanId: planId, status: 'ACTIVE', deletedAt: null },
+    select: { id: true },
+  });
+  if (active) throw new ConflictException(ACTIVE_PAYMENT_PLAN_MESSAGE);
+  const items = await tx.treatmentPlanItem.findMany({
+    where: { planId, deletedAt: null },
+    select: { status: true, price: true, discount: true },
+  });
+  const billable = billableTotal(
+    items.map((i) => ({
+      status: i.status,
+      price: i.price.toNumber(),
+      discount: i.discount.toNumber(),
+    })),
+  );
+  try {
+    const created = await createPaymentPlanInTx(
+      tx,
+      tenantId,
+      installments.build(billable, source),
+    );
+    return created.id;
+  } catch (error) {
+    // El índice parcial de un solo plan activo (carrera con un alta suelta).
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    ) {
+      throw new ConflictException(ACTIVE_PAYMENT_PLAN_MESSAGE);
+    }
+    throw error;
+  }
+}
 
 /**
  * Presupuesto y aceptación firmada (DX-012). Todo bajo `runWithTenant` (RLS):
@@ -135,6 +187,7 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
     ) => NewPlanAcceptance,
     reprice?: AcceptReprice,
     partial?: AcceptPartial,
+    installments?: AcceptInstallments,
   ): Promise<AcceptPlanOutcome> {
     const tenantId = this.requireTenantId();
     try {
@@ -271,6 +324,19 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           row.locationId,
         );
 
+        // DX-041: el plan de cuotas elegido, en esta misma transacción y con
+        // el plan ya aceptado (sus cuotas vencen en la sede de la aceptación;
+        // guarda DX-091 y triggers, los del alta normal).
+        const paymentPlanId = installments
+          ? await createAcceptedInstallmentsInTx(
+              tx,
+              tenantId,
+              planId,
+              signing,
+              installments,
+            )
+          : null;
+
         const accepted = await readPlanQuoteSource(
           tx,
           tenantId,
@@ -279,7 +345,7 @@ export class PrismaPlanQuoteRepository implements PlanQuoteRepository {
           locationId,
         );
         if (!accepted) throw new VanishedAfterWrite();
-        return { kind: 'ACCEPTED', source: accepted } as const;
+        return { kind: 'ACCEPTED', source: accepted, paymentPlanId } as const;
       });
     } catch (error) {
       if (error instanceof AlreadyAccepted) return { kind: 'ALREADY_ACCEPTED' };

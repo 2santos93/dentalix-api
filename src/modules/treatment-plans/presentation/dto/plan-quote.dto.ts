@@ -25,6 +25,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { RepricingPreviewDto } from './plan-repricing.dto';
+import { AcceptInstallmentPlanDto } from '../../../payment-plans/presentation/dto/installment-simulation.dto';
 import {
   PARTIAL_ITEMS_MAX,
   PARTIAL_NONE_CHOSEN_MESSAGE,
@@ -178,6 +179,20 @@ export class AcceptTreatmentPlanDto {
   @ValidateNested()
   @Type(() => PartialAcceptanceItemsDto)
   partial?: PartialAcceptanceItemsDto;
+
+  @ApiPropertyOptional({
+    type: AcceptInstallmentPlanDto,
+    description:
+      'DX-041: aceptar con el plan de cuotas de un escenario de POST /treatment-plans/:id/installment-simulation (sus condiciones y su `totalToFinance`). El plan de cuotas se crea en la MISMA transacción que la aceptación, con las cuotas y fechas de la simulación; si el saldo ya no es el simulado, 409 `INSTALLMENT_SIMULATION_STALE` y no se acepta nada. No se combina con `partial` (400). Las cuotas en un período contable cerrado dan 409 `PERIOD_LOCKED` (sin excepción en la firma).',
+  })
+  @IsOptional()
+  @IsObject({
+    message:
+      'installmentPlan debe ser un objeto con las condiciones del plan de cuotas.',
+  })
+  @ValidateNested()
+  @Type(() => AcceptInstallmentPlanDto)
+  installmentPlan?: AcceptInstallmentPlanDto;
 }
 
 export class PlanQuoteLocationDto {
@@ -526,6 +541,18 @@ export class PlanQuoteDocumentDto {
 
   @ApiProperty({ type: PlanQuoteAcceptanceDto, nullable: true })
   acceptance!: PlanQuoteAcceptanceDto | null;
+}
+
+/** DX-041: respuesta de POST …/acceptance: el presupuesto firmado y su plan de cuotas. */
+export class AcceptedPlanQuoteDocumentDto extends PlanQuoteDocumentDto {
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'El plan de cuotas creado en la aceptación (`installmentPlan`); null si se aceptó sin él.',
+  })
+  paymentPlanId!: string | null;
 }
 
 /**

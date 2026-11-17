@@ -56,6 +56,19 @@ const ROUTES: [Method, string, object][] = [
     { installmentsCount: 3, periodicity: 'MONTHLY', startDate: '2026-12-01' },
   ],
   ['get', '/treatment-plans/:id/payment-plan', {}],
+  [
+    'post',
+    '/treatment-plans/:id/installment-simulation',
+    {
+      scenarios: [
+        {
+          installmentsCount: 3,
+          periodicity: 'MONTHLY',
+          startDate: '2026-12-01',
+        },
+      ],
+    },
+  ],
   ['delete', '/treatment-plans/:id/payment-plan', {}],
   ['get', '/inventory/items/:id', {}],
   ['patch', '/inventory/items/:id', { name: 'Guantes' }],

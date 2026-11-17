@@ -1682,6 +1682,22 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/treatment-plans/${a.planId}/payment-plan`,
       status: 404,
     },
+    // DX-041: simular cuotas del presupuesto de otra clínica: 404, no 409.
+    {
+      name: 'POST /treatment-plans/:id/installment-simulation',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.bareplanId}/installment-simulation`,
+      body: () => ({
+        scenarios: [
+          {
+            installmentsCount: 2,
+            periodicity: 'MONTHLY',
+            startDate: futureAt(30, 12).slice(0, 10),
+          },
+        ],
+      }),
+      status: 404,
+    },
     // --- payments ---
     {
       name: 'POST /treatment-plans/:id/payments',
