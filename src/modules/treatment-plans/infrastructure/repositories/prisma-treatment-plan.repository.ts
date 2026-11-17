@@ -885,10 +885,21 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
     return data;
   }
 
-  async softDeleteItem(id: string, audit?: AuditRequestContext): Promise<void> {
+  async softDeleteItem(
+    id: string,
+    audit?: AuditRequestContext,
+    guard?: (plan: TreatmentPlanWithItems) => void,
+  ): Promise<void> {
     const tenantId = this.requireTenantId();
     await this.prisma.runWithTenant(async (tx) => {
-      await lockPlanOfItem(tx, id);
+      const planId = await lockPlanOfItem(tx, id);
+      // DX-123: el estado del plan, releído con su fila bloqueada: un cierre
+      // que confirmó mientras tanto ya está aquí (409 con su mensaje); uno
+      // posterior espera a este COMMIT.
+      if (guard && planId) {
+        const plan = await lockedPlan(tx, planId);
+        if (plan) guard(plan);
+      }
       const existing = await tx.treatmentPlanItem.findFirst({
         where: { id, deletedAt: null },
         select: {

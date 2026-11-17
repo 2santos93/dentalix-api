@@ -14,6 +14,7 @@ import {
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
   isSameRequest,
   paymentRequestFingerprint,
+  paymentRequestFingerprints,
   paymentTargetKey,
 } from '../../domain/idempotency';
 import {
@@ -85,7 +86,13 @@ export class RecordOpeningBalancePaymentUseCase {
       }
       const existing = await this.repo.findByIdempotencyKey(key);
       if (existing) {
-        if (!isSameRequest(existing, target, requestFingerprint)) {
+        if (
+          !isSameRequest(
+            existing,
+            target,
+            paymentRequestFingerprints(target, input),
+          )
+        ) {
           throw new UnprocessableEntityException(
             IDEMPOTENCY_KEY_REUSED_MESSAGE,
           );

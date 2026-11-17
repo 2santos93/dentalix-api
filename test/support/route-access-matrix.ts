@@ -889,6 +889,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /payments/rate-backlog/day': ADMIN_ONLY,
   'POST /treatment-plans/:id/payment-plan': BILLING,
   'GET /treatment-plans/:id/payment-plan': BILLING,
+  // DX-123: los planes de cuotas cancelados (con autor y motivo).
+  'GET /treatment-plans/:id/payment-plan/history': BILLING,
+  // DX-092: cancelar con motivo. Mismos roles que antes: no saca dinero del
+  // saldo (los abonos y lo facturable no cambian), a diferencia de anular un
+  // abono, donde RECEPTION solo anula los suyos del día.
   'DELETE /treatment-plans/:id/payment-plan': BILLING,
   // DX-041: simular cuotas del presupuesto: quien lo imprime (el PDF las lleva).
   'POST /treatment-plans/:id/installment-simulation': EVERY_ROLE,

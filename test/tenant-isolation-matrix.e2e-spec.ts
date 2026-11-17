@@ -1676,10 +1676,19 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/treatment-plans/${a.planId}/payment-plan`,
       status: 404,
     },
+    // DX-123: el historial de cancelados de un plan de A.
+    {
+      name: 'GET /treatment-plans/:id/payment-plan/history',
+      verb: 'get',
+      path: () => `/treatment-plans/${a.planId}/payment-plan/history`,
+      status: 404,
+    },
+    // DX-092: con un motivo válido, para que llegue al recurso (sin él, 400).
     {
       name: 'DELETE /treatment-plans/:id/payment-plan',
       verb: 'delete',
       path: () => `/treatment-plans/${a.planId}/payment-plan`,
+      body: () => ({ reason: 'Hackeado desde otra clínica' }),
       status: 404,
     },
     // DX-041: simular cuotas del presupuesto de otra clínica: 404, no 409.

@@ -11,6 +11,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { ClinicRole } from '@prisma/client';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -30,6 +31,7 @@ import { GetPatientDataConsentsUseCase } from '../application/use-cases/get-pati
 import { RecordDataConsentsUseCase } from '../application/use-cases/record-data-consents.use-case';
 import type { PatientDataConsents } from '../domain/entities/data-consent.entity';
 import { consentEvidenceFrom, EvidenceRequest } from './consent-evidence';
+import { consentsForViewer } from './consent-evidence-visibility';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -39,6 +41,11 @@ import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context
 import { Audit } from '../../audit/presentation/audit.decorator';
 
 type AuthenticatedRequest = EvidenceRequest & { user: JwtPayload };
+
+/** El rol de clínica del token (un token de plataforma no tiene). */
+function roleOf(req: AuthenticatedRequest): ClinicRole | undefined {
+  return 'role' in req.user ? req.user.role : undefined;
+}
 
 // Append-only: solo GET y POST. Revocar es un POST con `granted: false`; no
 // existe ruta de edición ni de borrado (y la BD rechaza UPDATE/DELETE).
@@ -70,10 +77,14 @@ export class PatientDataConsentsController {
     description:
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
   })
-  get(
+  async get(
     @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Req() req: AuthenticatedRequest,
   ): Promise<PatientDataConsents> {
-    return this.getConsents.execute(patientId);
+    return consentsForViewer(
+      await this.getConsents.execute(patientId),
+      roleOf(req),
+    );
   }
 
   @Audit({
@@ -100,16 +111,19 @@ export class PatientDataConsentsController {
     description:
       'La clínica no tiene política publicada o `policyVersionId` no es la vigente.',
   })
-  record(
+  async record(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: RecordDataConsentsDto,
     @Req() req: AuthenticatedRequest,
   ): Promise<PatientDataConsents> {
-    return this.recordConsents.execute(
-      patientId,
-      { policyVersionId: dto.policyVersionId, decisions: dto.decisions },
-      req.user.sub,
-      consentEvidenceFrom(req),
+    return consentsForViewer(
+      await this.recordConsents.execute(
+        patientId,
+        { policyVersionId: dto.policyVersionId, decisions: dto.decisions },
+        req.user.sub,
+        consentEvidenceFrom(req),
+      ),
+      roleOf(req),
     );
   }
 }

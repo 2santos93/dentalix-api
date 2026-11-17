@@ -6,6 +6,7 @@ import {
   CLOCK,
 } from './application/use-cases/get-payment-plan.use-case';
 import { CancelPaymentPlanUseCase } from './application/use-cases/cancel-payment-plan.use-case';
+import { ListCancelledPaymentPlansUseCase } from './application/use-cases/list-cancelled-payment-plans.use-case';
 import { SimulateInstallmentsUseCase } from './application/use-cases/simulate-installments.use-case';
 import { InstallmentSimulationController } from './presentation/installment-simulation.controller';
 import { PAYMENT_PLAN_REPOSITORY } from './domain/ports/payment-plan-repository.port';
@@ -26,6 +27,7 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     CreatePaymentPlanUseCase,
     GetPaymentPlanUseCase,
     CancelPaymentPlanUseCase,
+    ListCancelledPaymentPlansUseCase,
     SimulateInstallmentsUseCase,
     TokenService,
     TenantContextInterceptor,

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { buildPaymentProofKit } from '../__fixtures__/payment-proof-kit';
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../payment-method-gate';
@@ -140,6 +141,28 @@ class FakeConvertAmount {
 
 /** Reloj fijo de los abonos (DX-054): las fechas de este spec son anteriores. */
 const RECORD_NOW = new Date('2026-10-31T14:00:00.000Z');
+
+/** `null` llega así por JSON aunque el tipo de entrada no lo admita. */
+const JSON_NULL = null as unknown as string;
+
+/** La huella como se calculaba antes de DX-123 (notas tal cual). */
+function legacyFingerprint(
+  planId: string,
+  input: { amount: number; currency: string; paidAt: string; notes?: string },
+): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        planId.toLowerCase(),
+        input.amount.toFixed(2),
+        input.currency.trim().toUpperCase(),
+        input.paidAt,
+        null,
+        input.notes ?? null,
+      ]),
+    )
+    .digest('hex');
+}
 
 describe('RecordPaymentUseCase', () => {
   function makeUseCase(now: Date = RECORD_NOW) {
@@ -803,6 +826,49 @@ describe('RecordPaymentUseCase', () => {
       await expect(attempt).rejects.toThrow(/clave de idempotencia/);
       expect(await repo.listByPlan('plan-2')).toHaveLength(0);
       expect(await repo.listByPlan('plan-1')).toHaveLength(1);
+    });
+
+    it.each([
+      ['omitidas', 'vacías', {}, { notes: '' }],
+      ['vacías', 'omitidas', { notes: '' }, {}],
+      ['nulas', 'con espacios', { notes: JSON_NULL }, { notes: '   ' }],
+      ['con espacios', 'nulas', { notes: '   ' }, { notes: JSON_NULL }],
+    ])(
+      'DX-123 (R-6): notas %s y reintento con notas %s es la misma petición (el original, no 422)',
+      async (_first, _again, firstNotes, retryNotes) => {
+        const { repo, fakeGetPlan, uc } = makeUseCase();
+        fakeGetPlan.plan = makePlan();
+        const first = await uc.execute(
+          'plan-1',
+          { ...body, ...firstNotes },
+          'u1',
+          key,
+        );
+        const again = await uc.execute(
+          'plan-1',
+          { ...body, ...retryNotes },
+          'u1',
+          key,
+        );
+        expect(again.id).toBe(first.id);
+        expect(await repo.listByPlan('plan-1')).toHaveLength(1);
+      },
+    );
+
+    it('DX-123: una clave guardada antes de normalizar las notas (huella con "") sigue reconociendo su reintento', async () => {
+      const { repo, uc } = makeUseCase();
+      const legacy = repo.seedPayment({
+        treatmentPlanId: 'plan-1',
+        idempotencyKey: key,
+        requestFingerprint: legacyFingerprint('plan-1', { ...body, notes: '' }),
+      });
+      const replay = await uc.execute(
+        'plan-1',
+        { ...body, notes: '' },
+        'u1',
+        key,
+      );
+      expect(replay.id).toBe(legacy.id);
     });
 
     it('un abono anterior a DX-109 (sin huella) se sigue devolviendo si el plan coincide', async () => {

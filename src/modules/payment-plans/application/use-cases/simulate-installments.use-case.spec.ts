@@ -158,7 +158,11 @@ describe('DX-041 · SimulateInstallmentsUseCase', () => {
         })),
       );
       // Solo un plan activo: se cancela para probar el siguiente escenario.
-      await plan.repo.cancel(created.id);
+      await plan.repo.cancel(created.id, {
+        byId: 'u-1',
+        at: new Date(),
+        reason: 'Probar el siguiente escenario',
+      });
     }
   });
 

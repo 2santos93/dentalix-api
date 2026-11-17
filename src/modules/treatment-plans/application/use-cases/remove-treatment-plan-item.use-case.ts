@@ -40,7 +40,10 @@ export class RemoveTreatmentPlanItemUseCase {
     const plan = await this.repo.findPlanById(existing.planId);
     if (plan) assertItemsEditable(plan);
 
-    // Soft-delete only — never a hard delete on a domain table.
-    await this.repo.softDeleteItem(itemId, audit);
+    // Soft-delete only — never a hard delete on a domain table. DX-123: la
+    // misma regla otra vez con el plan bloqueado, dentro de la transacción:
+    // un plan que se cierra o se firma entre medias da su 409 específico, no
+    // el genérico del trigger.
+    await this.repo.softDeleteItem(itemId, audit, assertItemsEditable);
   }
 }
