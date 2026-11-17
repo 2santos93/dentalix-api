@@ -11,10 +11,7 @@ import type { GetTreatmentPlanUseCase } from '../../../treatment-plans/applicati
 import type { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
 import { billableTotal } from '../../../payments/application/plan-balance-calculator';
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
-import type {
-  CurrencyDigitsCatalog,
-  CurrencyDigitsTable,
-} from '../../../../shared/money/currency-digits';
+import type { CurrencyDigitsTable } from '../../../../shared/money/currency-digits';
 import { toCents } from '../../../../shared/money/money';
 
 type Item = {
@@ -34,8 +31,8 @@ function makePlan(
   items: Item[],
   {
     currency = 'USD',
-    status = TreatmentPlanStatus.PRESENTED as TreatmentPlanStatus,
-    digits = referenceCurrencyDigitsCatalog() as CurrencyDigitsCatalog,
+    status = TreatmentPlanStatus.PRESENTED,
+    digits = referenceCurrencyDigitsCatalog(),
   } = {},
 ) {
   const state = { status, items: items.map((i) => ({ ...i })) };
