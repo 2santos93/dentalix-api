@@ -125,5 +125,8 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
       useClass: PrismaCatalogCurrencyReader,
     },
   ],
+  // DX-568: el resumen semanal reutiliza Comparar sedes y el embudo de
+  // presupuestos para que sus cifras sean las del informe.
+  exports: [GetLocationsComparisonUseCase, GetQuoteFunnelUseCase],
 })
 export class ReportsModule {}

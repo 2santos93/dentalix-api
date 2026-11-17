@@ -152,6 +152,32 @@ describe('GetLocationsComparisonUseCase (DX-014)', () => {
       ...over,
     });
 
+  it('DX-568: el recuento de inasistencias por sede y total, sin cambiar el informe', async () => {
+    const input = {
+      from: '2026-10-01',
+      to: '2026-10-31',
+      compare: 'previous' as const,
+      allowedLocationIds: 'ALL' as const,
+    };
+    const { report, noShows } = await useCase.executeWithNoShows(input);
+    expect(report).toEqual(await useCase.execute(input));
+    expect(Object.keys(report.total.metrics)).not.toContain('noShows');
+    expect(noShows.byLocation.get(PRINCIPAL.id)).toEqual({
+      current: 5,
+      previous: 4,
+    });
+    expect(noShows.byLocation.get(NORTE.id)).toEqual({
+      current: 0,
+      previous: 0,
+    });
+    expect(noShows.total).toEqual({ current: 5, previous: 4 });
+    const none = await useCase.executeWithNoShows({
+      ...input,
+      compare: 'none',
+    });
+    expect(none.noShows.total).toEqual({ current: 5, previous: null });
+  });
+
   it('una fila por sede, en el orden de las sedes, y el período anterior', async () => {
     const report = await run();
     expect(report).toMatchObject({
