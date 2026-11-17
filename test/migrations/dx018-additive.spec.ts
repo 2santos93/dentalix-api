@@ -15,9 +15,9 @@ const code = (migration: string): string =>
     .replace(/--[^\n]*/g, '')
     .trim();
 
-const ENUM = '20270101090000_dx018_audit_enum';
-const INDEX = '20270101090100_dx018_audit_events_idx';
-const TABLES = '20270101090200_dx018_commissions';
+const ENUM = '20270103090000_dx018_audit_enum';
+const INDEX = '20270103090100_dx018_audit_events_idx';
+const TABLES = '20270103090200_dx018_commissions';
 const ALL = [ENUM, INDEX, TABLES];
 const NEW_TABLES = [
   'commission_rules',

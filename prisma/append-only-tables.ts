@@ -129,6 +129,11 @@ export const NO_APP_DELETE = [
   // DX-018: la regla de honorarios se desactiva, no se borra
   // (dx_commission_rule_guard).
   'commission_rules',
+  // DX-568: el envío semanal cierra su estado y la entrega marca el uso del
+  // enlace de baja; ninguno se borra (la unicidad por clínica y semana es la
+  // que impide un segundo envío).
+  'weekly_digest_runs',
+  'weekly_digest_deliveries',
 ] as const;
 
 /**

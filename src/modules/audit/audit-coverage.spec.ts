@@ -2210,6 +2210,16 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // después, escrito por el repositorio en la transacción, sin sede (DX-363);
   // sin evento si nada cambió.
   'PUT /slot-offer-settings': 'slot-offer-settings.e2e-spec.ts',
+  // DX-568: CLINIC_SETTINGS con WEEKLY_DIGEST_SETTINGS y configChange antes y
+  // después (destinatarios incluidos), escrito por el repositorio en la
+  // transacción, sin sede; sin evento si nada cambió. La prueba: VIEW de
+  // CLINIC_SETTINGS (WEEKLY_DIGEST_TEST_SENT) en la transacción que encola el
+  // email. La baja por enlace: UPDATE de CLINIC_SETTINGS
+  // (WEEKLY_DIGEST_UNSUBSCRIBED, origen LINK) con la persona del enlace de
+  // actor, solo si de verdad salió de la lista.
+  'PUT /clinic/weekly-digest-settings': 'weekly-digest.e2e-spec.ts',
+  'POST /clinic/weekly-digest/send-test': 'weekly-digest.e2e-spec.ts',
+  'POST /public/weekly-digest-unsubscribe/:token': 'weekly-digest.e2e-spec.ts',
   // DX-146: CLINIC_SETTINGS con BALANCE_REMINDER_POLICY y configChange antes
   // y después, escrito por el repositorio en la transacción, sin sede; sin
   // evento si nada cambió.

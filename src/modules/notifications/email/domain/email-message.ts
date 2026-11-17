@@ -30,6 +30,7 @@ export const EMAIL_TEMPLATES = [
   'payment-link',
   'payment-report-rejected',
   'external-order-copy',
+  'weekly-digest',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -71,6 +72,9 @@ export const TENANT_DAILY_BUDGET: Readonly<
   'payment-link': 'clinic',
   'payment-report-rejected': 'clinic',
   'external-order-copy': 'clinic',
+  // DX-568: lo dispara la clínica (su trabajo semanal o el ADMIN que pide la
+  // prueba): cuenta en el tope diario.
+  'weekly-digest': 'clinic',
 };
 
 /** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
@@ -432,6 +436,49 @@ export interface ExternalOrderCopyEmailVars {
   expiresAtLabel: string;
 }
 
+/** DX-568: una cifra del resumen semanal, ya escrita con el formato de la sede. */
+export interface WeeklyDigestEmailRow {
+  /** «Cobrado (USD)», «Citas atendidas». */
+  label: string;
+  /** Esta semana («USD 1.250,00», «12», «No disponible»). */
+  current: string;
+  /** Semana anterior («—» si no hay base). */
+  previous: string;
+  /** Variación («+12,5 %», «−3», «—»). */
+  change: string;
+  /** Aviso de la cifra («sin tasa (2)», «3 abiertas antes de hoy»). */
+  note: string | null;
+  /** Enlace al informe con el mismo filtro; null sin host de la clínica. */
+  url: string | null;
+}
+
+/** DX-568: el bloque de una sede (o el total de la clínica). */
+export interface WeeklyDigestEmailSection {
+  title: string;
+  rows: WeeklyDigestEmailRow[];
+}
+
+/**
+ * DX-568: resumen semanal para los ADMIN de la clínica. Solo recuentos e
+ * importes por sede: ni un nombre, documento ni dato de ningún paciente.
+ */
+export interface WeeklyDigestEmailVars {
+  clinicName: string;
+  /** «3 nov–9 nov». */
+  periodLabel: string;
+  /** «del lunes 3 al domingo 9 de noviembre de 2026». */
+  periodLongLabel: string;
+  /** La prueba que pide el ADMIN: asunto con «[Prueba]» y sin baja. */
+  isTest: boolean;
+  sections: WeeklyDigestEmailSection[];
+  /** Definiciones y avisos al pie de las tablas. */
+  notes: string[];
+  /** `/resumen/baja/<token>`; null en la prueba o sin host. */
+  unsubscribeUrl: string | null;
+  /** `/settings/resumen-semanal`; null sin host. */
+  settingsUrl: string | null;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -452,6 +499,7 @@ export interface EmailVarsByTemplate {
   'payment-link': PaymentLinkEmailVars;
   'payment-report-rejected': PaymentReportRejectedEmailVars;
   'external-order-copy': ExternalOrderCopyEmailVars;
+  'weekly-digest': WeeklyDigestEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

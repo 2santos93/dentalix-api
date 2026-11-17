@@ -51,6 +51,7 @@ import { PatientCreditModule } from './modules/patient-credit/patient-credit.mod
 import { ReportsModule } from './modules/reports/reports.module';
 import { ClosingQueueModule } from './modules/closing-queue/closing-queue.module';
 import { ContingencyAgendaModule } from './modules/contingency-agenda/contingency-agenda.module';
+import { WeeklyDigestModule } from './modules/weekly-digest/weekly-digest.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { CashSessionsModule } from './modules/cash-sessions/cash-sessions.module';
 import { DataConsentsModule } from './modules/data-consents/data-consents.module';
@@ -157,6 +158,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ReportsModule,
     ClosingQueueModule,
     ContingencyAgendaModule,
+    // DX-568: resumen semanal por email para el dueño.
+    WeeklyDigestModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).
     CollectionsModule,
     // DX-027: caja por turno (apertura, cierre con arqueo, reapertura).

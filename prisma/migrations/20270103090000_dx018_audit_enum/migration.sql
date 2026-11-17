@@ -4,7 +4,7 @@
 -- ADD VALUE va en su propio fichero: un valor nuevo no se puede usar en la
 -- misma transacción que lo crea.
 --
--- Fecha: posterior a la última migración existente (20261231100000, DX-091)
+-- Fecha: posterior a la última migración existente (20270102100200, DX-568)
 -- y al umbral del lint (DX-148).
 --
 -- Compatible hacia atrás: solo AÑADE un valor que el código anterior no usa.
