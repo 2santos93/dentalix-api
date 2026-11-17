@@ -4367,6 +4367,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'commissions.e2e-spec.ts',
+      checks:
+        'B → 404 al ver la liquidación de honorarios de A, al cambiar la regla de un profesional de A y al previsualizar la suya; la regla de A sigue igual (DX-018)',
+      routes: [
+        'PUT /commissions/rules/:userId',
+        'GET /commissions/settlements/:id',
+      ],
+    },
+    {
       spec: 'orthodontics.e2e-spec.ts',
       checks:
         'B → 404 al listar, abrir, editar, cerrar y registrar controles en el caso de ortodoncia del paciente de A; el caso de A sigue igual y sin controles nuevos (DX-190)',

@@ -343,6 +343,12 @@ model Tenant {
   paymentLinks              PaymentLink[]
   paymentReports            PaymentReport[]
 
+  // DX-018: honorarios de odontólogos (regla y liquidación congelada).
+  commissionRules           CommissionRule[]
+  commissionRuleCategories  CommissionRuleCategory[]
+  commissionSettlements     CommissionSettlement[]
+  commissionSettlementLines CommissionSettlementLine[]
+
   @@map("tenants")
 }
 
@@ -4667,6 +4673,8 @@ enum AuditResourceType {
   // DX-017: laboratorio dental (y sus servicios) y orden de laboratorio.
   DENTAL_LAB
   DENTAL_LAB_ORDER
+  // DX-018: liquidación de honorarios (cierre, detalle y vista previa).
+  COMMISSION_SETTLEMENT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -8701,6 +8709,150 @@ enum FinancialLockOperation {
   PAYMENT_VOID
   PAYMENT_PLAN_CREATE
   PAYMENT_PLAN_CANCEL
+}
+
+// ---------------------------------------------------------------------------
+// DX-018: honorarios de odontólogos a porcentaje
+// ---------------------------------------------------------------------------
+
+/// Sobre qué se calcula el honorario: lo cobrado (imputaciones de abonos a los
+/// ítems que realizó, DX-051) o lo producido (ítems realizados, DX-050).
+enum CommissionBasis {
+  COLLECTED
+  PRODUCED
+}
+
+/// Cuándo se libera: por prestación (realizada, y cobrada si la base es lo
+/// cobrado) o solo con el plan completo y pagado.
+enum CommissionReleaseMode {
+  PER_ITEM
+  PER_PLAN
+}
+
+/// Línea de una liquidación: devengo del período o ajuste de una línea de
+/// una liquidación anterior (abono anulado, descuento cambiado…).
+enum CommissionLineKind {
+  ACCRUAL
+  ADJUSTMENT
+}
+
+/// Regla de honorarios de un profesional (una por membresía). Las FK
+/// compuestas a la membresía (MISMO usuario) y a users van en SQL
+/// (20270103090200_dx018_commissions). Se desactiva, no se borra (trigger).
+model CommissionRule {
+  id           String                @id @default(uuid()) @db.Uuid
+  tenantId     String                @db.Uuid
+  membershipId String                @db.Uuid
+  userId       String                @db.Uuid
+  basis        CommissionBasis
+  releaseMode  CommissionReleaseMode @default(PER_ITEM)
+  percent      Decimal               @db.Decimal(5, 2)
+  active       Boolean               @default(true)
+  createdById  String                @db.Uuid
+  updatedById  String                @db.Uuid
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  tenant     Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  categories CommissionRuleCategory[]
+
+  @@unique([tenantId, membershipId], map: "commission_rules_tenant_membership_key")
+  @@unique([tenantId, id], map: "commission_rules_tenant_id_key")
+  @@index([tenantId, membershipId, userId], map: "commission_rules_membership_user_idx")
+  @@index([createdById], map: "commission_rules_created_by_idx")
+  @@index([updatedById], map: "commission_rules_updated_by_idx")
+  @@map("commission_rules")
+}
+
+/// % de una categoría del catálogo dentro de la regla (única por regla sin
+/// distinguir mayúsculas: índice por expresión en SQL).
+model CommissionRuleCategory {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String  @db.Uuid
+  ruleId   String  @db.Uuid
+  category String
+  percent  Decimal @db.Decimal(5, 2)
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  rule   CommissionRule @relation(fields: [tenantId, ruleId], references: [tenantId, id], onDelete: Restrict, map: "commission_rule_categories_rule_fkey")
+
+  @@map("commission_rule_categories")
+}
+
+/// Liquidación cerrada (APPEND-ONLY): foto de la regla, período y cierre
+/// contable antes/después. Sin solapes por profesional (EXCLUDE gist en SQL).
+model CommissionSettlement {
+  id               String                @id @default(uuid()) @db.Uuid
+  tenantId         String                @db.Uuid
+  membershipId     String                @db.Uuid
+  userId           String                @db.Uuid
+  periodFrom       DateTime              @db.Date
+  periodTo         DateTime              @db.Date
+  basis            CommissionBasis
+  releaseMode      CommissionReleaseMode
+  percent          Decimal               @db.Decimal(5, 2)
+  /// [{ category, percent }] de la regla al cerrar.
+  categoryPercents Json                  @default("[]")
+  lockDateBefore   DateTime?             @db.Date
+  lockDateAfter    DateTime              @db.Date
+  closedById       String                @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  closedAt         DateTime              @default(now())
+
+  tenant Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lines  CommissionSettlementLine[]
+
+  @@unique([tenantId, id, userId], map: "commission_settlements_tenant_id_user_key")
+  @@index([tenantId, userId, periodTo(sort: Desc)], map: "commission_settlements_user_period_idx")
+  @@index([tenantId, periodTo(sort: Desc)], map: "commission_settlements_tenant_period_idx")
+  @@index([tenantId, membershipId, userId], map: "commission_settlements_membership_user_idx")
+  @@index([closedById], map: "commission_settlements_closed_by_idx")
+  @@map("commission_settlements")
+}
+
+/// Línea congelada de una liquidación (APPEND-ONLY). En la moneda del plan
+/// del ítem. Las FK compuestas al ítem, al abono, a la sede y a las monedas
+/// van en SQL.
+model CommissionSettlementLine {
+  id                  String             @id @default(uuid()) @db.Uuid
+  tenantId            String             @db.Uuid
+  settlementId        String             @db.Uuid
+  userId              String             @db.Uuid
+  kind                CommissionLineKind
+  adjustsLineId       String?            @db.Uuid
+  treatmentPlanId     String             @db.Uuid
+  treatmentPlanItemId String             @db.Uuid
+  paymentId           String?            @db.Uuid
+  locationId          String?            @db.Uuid
+  catalogCode         String
+  catalogLabel        String
+  category            String?
+  toothNumber         String
+  completedAt         DateTime?
+  paidAt              DateTime?
+  paymentAmount       Decimal?           @db.Decimal(14, 2)
+  paymentCurrency     String?            @db.Char(3)
+  releasedAt          DateTime?
+  currency            String             @db.Char(3)
+  base                Decimal            @db.Decimal(14, 2)
+  percent             Decimal            @db.Decimal(5, 2)
+  amount              Decimal            @db.Decimal(14, 2)
+
+  tenant      Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  settlement  CommissionSettlement       @relation(fields: [tenantId, settlementId, userId], references: [tenantId, id, userId], onDelete: Restrict, map: "commission_settlement_lines_settlement_fkey")
+  adjusts     CommissionSettlementLine?  @relation("CommissionLineAdjustment", fields: [tenantId, adjustsLineId], references: [tenantId, id], onDelete: Restrict, map: "commission_settlement_lines_adjusts_fkey")
+  adjustments CommissionSettlementLine[] @relation("CommissionLineAdjustment")
+
+  @@unique([tenantId, id], map: "commission_settlement_lines_tenant_id_key")
+  @@index([tenantId, settlementId, userId], map: "commission_settlement_lines_settlement_idx")
+  @@index([tenantId, userId, treatmentPlanItemId], map: "commission_settlement_lines_user_item_idx")
+  @@index([tenantId, treatmentPlanItemId, treatmentPlanId], map: "commission_settlement_lines_item_idx")
+  @@index([tenantId, paymentId, treatmentPlanId], map: "commission_settlement_lines_payment_idx")
+  @@index([tenantId, adjustsLineId], map: "commission_settlement_lines_adjusts_idx")
+  @@index([tenantId, locationId], map: "commission_settlement_lines_location_idx")
+  @@index([currency], map: "commission_settlement_lines_currency_idx")
+  @@index([paymentCurrency], map: "commission_settlement_lines_payment_currency_idx")
+  @@map("commission_settlement_lines")
 }
 
 // ---------------------------------------------------------------------------

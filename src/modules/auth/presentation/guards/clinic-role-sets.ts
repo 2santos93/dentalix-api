@@ -622,3 +622,13 @@ export const LAB_ORDER_CHECK_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 export const LAB_ORDER_PRINT_ROLES: ClinicRole[] = [...CLINICAL_ROLES];
+
+// «Honorarios de odontólogos» (DX-018): datos financieros. ADMIN (con todas
+// las sedes) configura las reglas, previsualiza, cierra y consulta; un
+// DENTIST solo ve lo suyo (su vista previa y sus liquidaciones), y lo acota el
+// caso de uso. Asistente y recepción no.
+export const COMMISSION_READ_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const COMMISSION_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
