@@ -290,6 +290,7 @@ describe('Control postoperatorio (DX-566, e2e)', () => {
       expect(norteOnly.items.map((i) => i.id)).not.toContain(checkId);
     });
 
+    // ISOLATION_COVERS: POST /post-op-checks/:id/attempts
     it('otra clínica: la sede de A en ?locationId es 403 sin datos de A; su lista no trae nada de A', async () => {
       const res = await api(b, b.adminToken)
         .get(ROUTE, { locationId: principal })
@@ -304,6 +305,9 @@ describe('Control postoperatorio (DX-566, e2e)', () => {
       await api(b, b.adminToken)
         .post(`${ROUTE}/${checkId}/attempts`, { outcome: 'FINE' })
         .expect(404);
+      expect(await raw.postOpCheckAttempt.count({ where: { checkId } })).toBe(
+        0,
+      );
     });
 
     it('la lista queda auditada (VIEW POST_OP_CHECK_LIST); el contador no', async () => {

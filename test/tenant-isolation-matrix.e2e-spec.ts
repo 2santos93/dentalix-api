@@ -4357,6 +4357,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'post-op-checks.e2e-spec.ts',
+      checks:
+        'B → 404 al registrar el resultado de un control postoperatorio de A, sin intento nuevo; y 403 con la sede de A en la lista y el contador (DX-566)',
+      routes: ['POST /post-op-checks/:id/attempts'],
+    },
+    {
       spec: 'commissions.e2e-spec.ts',
       checks:
         'B → 404 al ver la liquidación de honorarios de A, al cambiar la regla de un profesional de A y al previsualizar la suya; la regla de A sigue igual (DX-018)',
