@@ -1,5 +1,8 @@
 import type { ConfirmationAppointment } from '../domain/entities/appointment-confirmation.entity';
-import { toPublicAppointmentView } from './public-confirmation-view';
+import {
+  preVisitInstructionsFor,
+  toPublicAppointmentView,
+} from './public-confirmation-view';
 
 function appointment(
   overrides: Partial<ConfirmationAppointment> = {},
@@ -24,6 +27,7 @@ function appointment(
     locationTimeZone: 'America/New_York',
     locationLocale: 'en-US',
     locationHourCycle: 'h12',
+    preVisitInstructions: {},
     ...overrides,
   };
 }
@@ -70,5 +74,40 @@ describe('toPublicAppointmentView (DX-354)', () => {
     expect(JSON.stringify(view)).not.toMatch(
       /location-sentinel-1|appointment-sentinel-1|414 555 0101/,
     );
+  });
+});
+
+describe('preVisitInstructionsFor (DX-564)', () => {
+  const now = new Date('2027-02-28T12:00:00.000Z');
+  const withText = appointment({
+    preVisitInstructions: { en: 'Come fasting.', es: 'Ven en ayunas.' },
+  });
+
+  it('cita futura y vigente: todas las variantes, español primero', () => {
+    for (const status of ['PENDING', 'RESPONDED'] as const) {
+      expect(preVisitInstructionsFor(status, withText, now)).toEqual([
+        { language: 'es', text: 'Ven en ayunas.' },
+        { language: 'en', text: 'Come fasting.' },
+      ]);
+    }
+  });
+
+  it('enlace caducado, cita cancelada o ya empezada: nada', () => {
+    expect(preVisitInstructionsFor('EXPIRED', withText, now)).toEqual([]);
+    expect(
+      preVisitInstructionsFor(
+        'RESPONDED',
+        { ...withText, status: 'CANCELLED' },
+        now,
+      ),
+    ).toEqual([]);
+    expect(
+      preVisitInstructionsFor('PENDING', withText, withText.start),
+    ).toEqual([]);
+    expect(preVisitInstructionsFor('PENDING', null, now)).toEqual([]);
+  });
+
+  it('tipo sin indicaciones: lista vacía', () => {
+    expect(preVisitInstructionsFor('PENDING', appointment(), now)).toEqual([]);
   });
 });

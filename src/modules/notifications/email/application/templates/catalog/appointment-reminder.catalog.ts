@@ -45,6 +45,8 @@ export interface AppointmentReminderTexts {
   anamnesisLabel: string;
   /** DX-290: ya tiene un enlace vivo; se le recuerda sin enviar otro. */
   anamnesisPending: string;
+  /** DX-564: rótulo de las indicaciones previas del tipo de cita. */
+  preVisitInstructionsLead: string;
   policyNotice: (noticeHours: number) => string;
   /** Sin el punto final: lo pone `endSentence` (hay monedas que acaban en punto). */
   policyFee: (feeLabel: string) => string;
@@ -86,6 +88,7 @@ export const APPOINTMENT_REMINDER_CATALOG: Readonly<
     anamnesisLabel: 'Responder el cuestionario de salud',
     anamnesisPending:
       'Si aún no completaste el cuestionario de salud, usa el enlace que te enviamos.',
+    preVisitInstructionsLead: 'Antes de tu cita:',
     policyNotice: (hours) =>
       `Política de cancelación: si no puedes asistir, avísanos con al menos ${hours} h de antelación.`,
     policyFee: (fee) =>
@@ -127,6 +130,7 @@ export const APPOINTMENT_REMINDER_CATALOG: Readonly<
     anamnesisLabel: 'Fill in the health questionnaire',
     anamnesisPending:
       'If you have not filled in the health questionnaire yet, please use the link we sent you.',
+    preVisitInstructionsLead: 'Before your appointment:',
     policyNotice: (hours) =>
       `Cancellation policy: if you cannot make it, please let us know at least ${hours} h in advance.`,
     policyFee: (fee) =>

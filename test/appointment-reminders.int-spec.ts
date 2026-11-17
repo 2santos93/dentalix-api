@@ -15,6 +15,8 @@ import {
 } from '../src/modules/appointment-confirmations/domain/ports/appointment-confirmation-repository.port';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
+import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
+import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { SendAppointmentReminder } from '../src/modules/reminders/application/send-appointment-reminder';
 import { hashConfirmationToken } from '../src/modules/appointment-confirmations/application/confirmation-token';
 import { randomUUID } from 'node:crypto';
@@ -111,6 +113,8 @@ async function cleanup(): Promise<void> {
   await owner.emailOutbox.deleteMany({ where });
   await owner.appointmentConfirmation.deleteMany({ where });
   await owner.appointment.deleteMany({ where });
+  // DX-564: los tipos con indicaciones previas.
+  await owner.appointmentType.deleteMany({ where });
   // DX-291: la versión de la política que llevó el recordatorio.
   await owner.cancellationPolicyVersion.deleteMany({ where });
   await owner.locationReminderSettings.deleteMany({ where });
@@ -353,6 +357,141 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       await expect(
         patient(clinicA, null, { preferredLanguage: 'English' }),
       ).rejects.toThrow(/patients_preferred_language_check/);
+    });
+  });
+
+  describe('DX-564: indicaciones previas del tipo de cita', () => {
+    afterEach(() =>
+      owner.reminderOptOutLink.deleteMany({
+        where: { tenantId: clinicA.tenantId },
+      }),
+    );
+
+    /** Cita a 2 h de un paciente con ese idioma y un tipo con esas indicaciones. */
+    async function typedAppointment(
+      preferredLanguage: string | null,
+      preVisitInstructions: Record<string, string>,
+    ): Promise<{ id: string; typeId: string; start: Date }> {
+      await configure(clinicA, [2]);
+      const type = await owner.appointmentType.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          name: `Tipo ${randomUUID()}`,
+          durationMinutes: 30,
+          color: '#0E7490',
+          preVisitInstructions,
+        },
+      });
+      const start = new Date(Date.now() + 2 * HOUR + 5 * MIN);
+      const id = await appointment(
+        clinicA,
+        await patient(clinicA, 'carolina.duque@example.com', {
+          preferredLanguage,
+        }),
+        start,
+      );
+      await owner.appointment.update({
+        where: { id },
+        data: { appointmentTypeId: type.id },
+      });
+      return { id, typeId: type.id, start };
+    }
+
+    async function sendOne(
+      preferredLanguage: string | null,
+      preVisitInstructions: Record<string, string>,
+    ) {
+      const { id } = await typedAppointment(
+        preferredLanguage,
+        preVisitInstructions,
+      );
+      await sweep();
+      await releaseDue(clinicA.tenantId);
+      await waitFor(() => mailer.sent.length === 1, 'el despachador entrega 1');
+      const outbound = await owner.outboundMessage.findFirstOrThrow({
+        where: { appointmentId: id },
+      });
+      return { email: mailer.sent[0], outbound };
+    }
+
+    it('en el idioma del paciente, con sus saltos de línea', async () => {
+      const { email } = await sendOne('en', {
+        es: 'Ven en ayunas.',
+        en: 'Come fasting.\nBring your X-rays.',
+      });
+      expect(email.text).toContain(
+        'Before your appointment:\nCome fasting.\nBring your X-rays.',
+      );
+      expect(email.html).toContain(
+        '<strong>Before your appointment:</strong><br />Come fasting.<br />Bring your X-rays.',
+      );
+      expect(email.text).not.toContain('Ven en ayunas');
+    });
+
+    it('paciente en inglés y texto solo en español: el email en inglés lleva el español', async () => {
+      const { email, outbound } = await sendOne('en', { es: 'Ven en ayunas.' });
+      expect(email.text).toContain('Before your appointment:\nVen en ayunas.');
+      // El email sí tiene catálogo en inglés: no hay caída que registrar.
+      expect(outbound).toMatchObject({
+        language: 'en',
+        languageFallbackFrom: null,
+      });
+    });
+
+    it('un «Control» sin indicaciones no añade nada', async () => {
+      const { email } = await sendOne(null, {});
+      expect(email.subject).toBe(
+        `Recordatorio de tu cita en Clínica ${SUBDOMAINS[0]}`,
+      );
+      expect(email.text).not.toContain('Antes de tu cita');
+      expect(email.html).not.toContain('Antes de tu cita');
+    });
+
+    it('congelado: cambiar el texto después de encolar no cambia el email', async () => {
+      const { id, typeId, start } = await typedAppointment(null, {
+        es: 'Texto al encolar.',
+      });
+      // El proveedor falla mientras tanto: el email queda en email_outbox,
+      // renderizado y cifrado, esperando su reintento.
+      const down = jest
+        .spyOn(mailer, 'send')
+        .mockRejectedValue(
+          Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' }),
+        );
+      try {
+        await a.get(TenantContextService).run(clinicA.tenantId, () =>
+          a.get(SendAppointmentReminder).handle({
+            appointmentId: id,
+            leadHours: 2,
+            start: start.toISOString(),
+          }),
+        );
+        await Promise.all([a, b].map((m) => m.get(EmailDispatcher).whenIdle()));
+        await owner.appointmentType.update({
+          where: { id: typeId },
+          data: { preVisitInstructions: { es: 'Texto cambiado después.' } },
+        });
+      } finally {
+        down.mockRestore();
+      }
+      const row = await owner.emailOutbox.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId, template: 'APPOINTMENT_REMINDER' },
+      });
+      expect(row.status).not.toBe('SENT');
+      expect(
+        a.get(EmailPayloadCipher).decrypt(Buffer.from(row.payload!)).text,
+      ).toContain('Antes de tu cita:\nTexto al encolar.');
+      // El reintento entrega lo renderizado al encolar, no el texto nuevo.
+      await owner.emailOutbox.update({
+        where: { id: row.id },
+        data: { nextAttemptAt: new Date(Date.now() - MIN) },
+      });
+      await a.get(EmailDispatcher).dispatchBatch();
+      await waitFor(() => mailer.sent.length === 1, 'el reintento entrega 1');
+      expect(mailer.sent[0].text).toContain(
+        'Antes de tu cita:\nTexto al encolar.',
+      );
+      expect(mailer.sent[0].text).not.toContain('Texto cambiado');
     });
   });
 

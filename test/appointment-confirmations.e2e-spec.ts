@@ -1094,6 +1094,119 @@ describe('Confirmación de cita por enlace (e2e)', () => {
     });
   });
 
+  describe('DX-564: indicaciones previas del tipo de la cita', () => {
+    interface InstructionVariant {
+      language: string;
+      text: string;
+    }
+
+    /** Cita futura de un paciente propio con un tipo con esas indicaciones. */
+    async function typedAppointment(
+      preVisitInstructions: Record<string, string>,
+      preferredLanguage: string | null = null,
+    ) {
+      const patientId = await createPatient(
+        clinicA,
+        `564${Math.floor(Math.random() * 1e6)}`,
+      );
+      if (preferredLanguage) {
+        await raw.patient.update({
+          where: { id: patientId },
+          data: { preferredLanguage },
+        });
+      }
+      const type = await raw.appointmentType.create({
+        data: {
+          tenantId: clinicA.tenantId,
+          name: `Tipo ${Math.random()}`,
+          durationMinutes: 30,
+          color: '#0E7490',
+          preVisitInstructions,
+        },
+      });
+      const appt = await createAppointment(clinicA, patientId);
+      await raw.appointment.update({
+        where: { id: appt.id },
+        data: { appointmentTypeId: type.id },
+      });
+      return appt;
+    }
+
+    const both = {
+      en: 'Come fasting.',
+      es: 'Ven en ayunas.\nTrae tus radiografías.',
+    };
+    const variants: InstructionVariant[] = [
+      { language: 'es', text: 'Ven en ayunas.\nTrae tus radiografías.' },
+      { language: 'en', text: 'Come fasting.' },
+    ];
+
+    it('el enlace para WhatsApp trae el idioma del paciente y todas las variantes', async () => {
+      const appt = await typedAppointment(both, 'en-GB');
+      const { body } = await newLink(clinicA, appt.id);
+      const link = body as LinkBody & {
+        patientLanguage: string | null;
+        preVisitInstructions: InstructionVariant[];
+      };
+      expect(link.patientLanguage).toBe('en-GB');
+      expect(link.preVisitInstructions).toEqual(variants);
+
+      // Sin preferencia ni tipo: null y lista vacía.
+      const plain = await newLink(
+        clinicA,
+        (await createAppointment(clinicA, patientA)).id,
+      );
+      expect(plain.body).toMatchObject({
+        patientLanguage: null,
+        preVisitInstructions: [],
+      });
+    });
+
+    it('la página pública trae todas las variantes; un tipo sin texto, lista vacía', async () => {
+      const appt = await typedAppointment(both);
+      const { token } = await newLink(clinicA, appt.id);
+      const body = (await view(clinicA.host, token).expect(200)).body as {
+        language: string;
+        preVisitInstructions: InstructionVariant[];
+      };
+      expect(body.language).toBe('es');
+      expect(body.preVisitInstructions).toEqual(variants);
+
+      const control = await typedAppointment({});
+      const other = await newLink(clinicA, control.id);
+      expect(
+        (
+          (await view(clinicA.host, other.token).expect(200)).body as {
+            preVisitInstructions: InstructionVariant[];
+          }
+        ).preVisitInstructions,
+      ).toEqual([]);
+    });
+
+    it('confirmada sigue mostrándolas; cancelada por el enlace, ya no', async () => {
+      const confirmed = await typedAppointment(both);
+      const c = await newLink(clinicA, confirmed.id);
+      await respond(clinicA.host, c.token, 'confirm').expect(200);
+      expect(
+        (
+          (await view(clinicA.host, c.token).expect(200)).body as {
+            preVisitInstructions: InstructionVariant[];
+          }
+        ).preVisitInstructions,
+      ).toEqual(variants);
+
+      const cancelled = await typedAppointment(both);
+      const x = await newLink(clinicA, cancelled.id);
+      await respond(clinicA.host, x.token, 'cancel').expect(200);
+      const body = (await view(clinicA.host, x.token).expect(200)).body as {
+        status: string;
+        preVisitInstructions: InstructionVariant[];
+      };
+      expect(body.status).toBe('RESPONDED');
+      expect(body.preVisitInstructions).toEqual([]);
+    });
+  });
+
   it('FK compuesta: no se puede atar un enlace del tenant A a una cita del tenant B', async () => {
     const apptB = await createAppointment(clinicB, patientB);
     await expect(

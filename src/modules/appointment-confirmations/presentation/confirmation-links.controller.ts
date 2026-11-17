@@ -100,6 +100,8 @@ export class ConfirmationLinksController {
       expiresAt: result.expiresAt,
       whatsappPhone: result.whatsappPhone,
       appointment: result.appointment,
+      patientLanguage: result.patientLanguage,
+      preVisitInstructions: result.preVisitInstructions,
       anamnesisUrl: anamnesis.issued
         ? buildAnamnesisUrl(this.protocol, host, anamnesis.token)
         : null,

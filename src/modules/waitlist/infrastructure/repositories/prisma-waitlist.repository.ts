@@ -1,3 +1,7 @@
+import {
+  APPOINTMENT_TYPE_SUMMARY_SELECT,
+  toAppointmentTypeSummary,
+} from '../../../appointment-types/infrastructure/appointment-type-summary';
 import { Injectable } from '@nestjs/common';
 import { Prisma, WaitlistStatus } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -17,9 +21,7 @@ import { lockPatientWaitlist } from '../waitlist-transitions';
 const INCLUDE_VIEW = {
   patient: { select: { firstName: true, lastName: true, phone: true } },
   sourceAppointment: { select: { start: true, end: true, status: true } },
-  appointmentType: {
-    select: { id: true, name: true, durationMinutes: true, color: true },
-  },
+  appointmentType: { select: APPOINTMENT_TYPE_SUMMARY_SELECT },
 } as const satisfies Prisma.AppointmentWaitlistEntryInclude;
 
 type Row = Prisma.AppointmentWaitlistEntryGetPayload<{
@@ -39,7 +41,7 @@ function mapToEntity(row: Row): WaitlistEntry {
     sourceAppointment: row.sourceAppointment,
     providerId: row.providerId,
     appointmentTypeId: row.appointmentTypeId,
-    appointmentType: row.appointmentType,
+    appointmentType: toAppointmentTypeSummary(row.appointmentType),
     durationMinutes: row.durationMinutes,
     priority: row.priority,
     preferredWindow: row.preferredWindow,

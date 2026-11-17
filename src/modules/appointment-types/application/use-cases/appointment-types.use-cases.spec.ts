@@ -4,6 +4,7 @@ import { InMemoryAppointmentTypeRepository } from '../__fixtures__/in-memory-app
 import {
   CreateAppointmentTypeUseCase,
   DeleteAppointmentTypeUseCase,
+  GetAppointmentTypeUseCase,
   ListAppointmentTypesUseCase,
   UpdateAppointmentTypeUseCase,
 } from './appointment-types.use-cases';
@@ -131,5 +132,111 @@ describe('tipo de urgencia (DX-446)', () => {
       (await update.execute(plain.id, { isUrgent: false }, TEST_AUDIT))
         .isUrgent,
     ).toBe(false);
+  });
+});
+
+describe('indicaciones previas (DX-564)', () => {
+  it('al crear, valida contra los idiomas de la clínica y guarda el mapa', async () => {
+    const repo = new InMemoryAppointmentTypeRepository();
+    repo.languages = ['es', 'en'];
+    const created = await new CreateAppointmentTypeUseCase(repo).execute(
+      {
+        name: 'Cirugía',
+        durationMinutes: 60,
+        color: '#0E7490',
+        preVisitInstructions: [
+          { language: 'es', text: ' Ven en ayunas. ' },
+          { language: 'en', text: 'Come fasting.' },
+        ],
+      },
+      TEST_AUDIT,
+    );
+    expect(created.preVisitInstructions).toEqual({
+      es: 'Ven en ayunas.',
+      en: 'Come fasting.',
+    });
+  });
+
+  it('sin el campo, crear deja {} y editar no toca lo guardado', async () => {
+    const repo = new InMemoryAppointmentTypeRepository();
+    const created = await new CreateAppointmentTypeUseCase(repo).execute(
+      { name: 'Control', durationMinutes: 30, color: '#0E7490' },
+      TEST_AUDIT,
+    );
+    expect(created.preVisitInstructions).toEqual({});
+
+    const type = repo.seed({ preVisitInstructions: { es: 'Ven en ayunas.' } });
+    const updated = await new UpdateAppointmentTypeUseCase(repo).execute(
+      type.id,
+      { name: 'Cirugía' },
+      TEST_AUDIT,
+    );
+    expect(updated.preVisitInstructions).toEqual({ es: 'Ven en ayunas.' });
+  });
+
+  it('editar con la lista la sustituye entera; vacía = sin indicaciones', async () => {
+    const repo = new InMemoryAppointmentTypeRepository();
+    repo.languages = ['es', 'en'];
+    const type = repo.seed({
+      preVisitInstructions: { es: 'A', en: 'B' },
+    });
+    const uc = new UpdateAppointmentTypeUseCase(repo);
+    expect(
+      (
+        await uc.execute(
+          type.id,
+          { preVisitInstructions: [{ language: 'es', text: 'C' }] },
+          TEST_AUDIT,
+        )
+      ).preVisitInstructions,
+    ).toEqual({ es: 'C' });
+    expect(
+      (await uc.execute(type.id, { preVisitInstructions: [] }, TEST_AUDIT))
+        .preVisitInstructions,
+    ).toEqual({});
+  });
+
+  it.each([
+    [[{ language: 'pt', text: 'x' }], /idiomas de los pacientes/],
+    [[{ language: 'es', text: 'https://x.test' }], /enlaces ni HTML/],
+    [
+      [
+        { language: 'es', text: 'a' },
+        { language: 'es', text: 'b' },
+      ],
+      /repetido/,
+    ],
+    [[{ language: 'es', text: 'a'.repeat(601) }], /600 caracteres/],
+  ])('rechaza %j con 400', async (entries, message) => {
+    const repo = new InMemoryAppointmentTypeRepository();
+    const type = repo.seed();
+    const call = new UpdateAppointmentTypeUseCase(repo).execute(
+      type.id,
+      { preVisitInstructions: entries },
+      TEST_AUDIT,
+    );
+    await expect(call).rejects.toThrow(BadRequestException);
+    await expect(call).rejects.toThrow(message);
+  });
+});
+
+describe('GetAppointmentTypeUseCase (DX-564)', () => {
+  it('devuelve el tipo aunque esté desactivado o retirado, con sus indicaciones', async () => {
+    const repo = new InMemoryAppointmentTypeRepository();
+    const retired = repo.seed({
+      active: false,
+      preVisitInstructions: { es: 'Ven en ayunas.' },
+    });
+    repo.deleted.add(retired.id);
+    const found = await new GetAppointmentTypeUseCase(repo).execute(retired.id);
+    expect(found.preVisitInstructions).toEqual({ es: 'Ven en ayunas.' });
+  });
+
+  it('uno que no existe (o de otra clínica) es 404', async () => {
+    await expect(
+      new GetAppointmentTypeUseCase(
+        new InMemoryAppointmentTypeRepository(),
+      ).execute('nope'),
+    ).rejects.toThrow(NotFoundException);
   });
 });
