@@ -1142,8 +1142,11 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
 
   /**
    * Tiempo de SERVIDOR de la consulta (planificación + ejecución de
-   * `EXPLAIN (ANALYZE)`), como dentalix_app bajo RLS y con `jit = off` igual
-   * que el repositorio: 1 de calentamiento y la mediana de 5.
+   * `EXPLAIN (ANALYZE, TIMING OFF)`), como dentalix_app bajo RLS y con
+   * `jit = off` igual que el repositorio: 1 de calentamiento y la mediana de 5.
+   * TIMING OFF (DX-558-bis): con el cronómetro por nodo, los miles de bucles
+   * de la consulta medían MÁS que el reloj de pared en los runners de la CI
+   * (mediana 518 ms frente a 477–524 de pared en main, 77cb52cc y 9db8d7b2).
    *
    * Por qué el servidor y no el reloj de pared del caso de uso (DX-396-ter):
    * con el mismo código y el mismo plan, el mínimo de 5 en reloj de pared fue
@@ -1167,7 +1170,7 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
               'Execution Time': number;
             }[];
           }[]
-        >(Prisma.sql`EXPLAIN (ANALYZE, FORMAT JSON) ${sql}`);
+        >(Prisma.sql`EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${sql}`);
         const [plan] = row['QUERY PLAN'];
         return plan['Planning Time'] + plan['Execution Time'];
       });
