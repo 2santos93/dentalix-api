@@ -621,6 +621,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
             },
             select: { id: true },
           });
+      // eslint-disable-next-line no-restricted-syntax -- los % por categoría son configuración de la regla y se sustituyen al guardarla (HARD_DELETE_ALLOWLIST, auditado).
       await tx.commissionRuleCategory.deleteMany({
         where: { tenantId, ruleId: rule.id },
       });
@@ -957,11 +958,11 @@ export class PrismaCommissionRepository implements CommissionRepository {
 /** 23P01: la EXCLUDE de commission_settlements (otra cerrada solapa). */
 function isExclusionViolation(error: unknown): boolean {
   const text = error instanceof Error ? error.message : '';
-  return (
-    (error instanceof Prisma.PrismaClientKnownRequestError &&
-      String(error.meta?.code ?? '') === '23P01') ||
-    text.includes('commission_settlements_no_overlap')
-  );
+  const code =
+    error instanceof Prisma.PrismaClientKnownRequestError
+      ? error.meta?.code
+      : undefined;
+  return code === '23P01' || text.includes('commission_settlements_no_overlap');
 }
 
 export function overlapConflict(): ConflictException {

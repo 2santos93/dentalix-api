@@ -51,6 +51,7 @@ function setup(allowed: 'ALL' | string[] = 'ALL') {
     zones: jest.fn(),
     today: jest.fn().mockResolvedValue('2026-11-05'),
   };
+  const listSettlements = jest.fn().mockResolvedValue([]);
   const repo: jest.Mocked<CommissionRepository> = {
     listProfessionals: jest.fn().mockResolvedValue([]),
     listCategories: jest.fn().mockResolvedValue([]),
@@ -58,9 +59,11 @@ function setup(allowed: 'ALL' | string[] = 'ALL') {
       Promise.resolve(userId === 'nadie' ? null : professional(userId)),
     ),
     saveRule: jest.fn(),
-    read: jest.fn((fn) => fn(reader)) as never,
+    read: jest.fn((fn: (r: CommissionReader) => Promise<unknown>) =>
+      fn(reader),
+    ) as never,
     close: jest.fn(),
-    listSettlements: jest.fn().mockResolvedValue([]),
+    listSettlements,
     getSettlement: jest.fn((id: string) =>
       Promise.resolve(
         id === 's-dra-x'
@@ -77,7 +80,7 @@ function setup(allowed: 'ALL' | string[] = 'ALL') {
     () => new Date(),
     tenantContext,
   );
-  return { useCases, repo };
+  return { useCases, repo, listSettlements };
 }
 
 const ctx = {} as AuditRequestContext;
@@ -95,10 +98,10 @@ describe('CommissionUseCases: permisos (DX-018)', () => {
   });
 
   it('un DENTIST solo lista sus liquidaciones aunque pida las de otro', async () => {
-    const { useCases, repo } = setup();
+    const { useCases, listSettlements } = setup();
     await expect(useCases.listSettlements(DRA_X, 'dr-y')).resolves.toEqual([]);
     await useCases.listSettlements(DRA_X, undefined);
-    expect(repo.listSettlements).toHaveBeenLastCalledWith({
+    expect(listSettlements).toHaveBeenLastCalledWith({
       userId: 'dra-x',
       limit: 200,
     });
