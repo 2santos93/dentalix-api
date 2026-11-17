@@ -600,6 +600,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /catalog/items': CLINICAL,
   'GET /catalog/items/directory': CLINICAL,
   'PATCH /catalog/items/:id': ADMIN_ONLY,
+  // DX-205: «Actualizar precios» en bloque e historial de precios: solo ADMIN.
+  'GET /catalog/items/:id/price-history': ADMIN_ONLY,
+  'POST /catalog/price-changes/preview': ADMIN_ONLY,
+  'POST /catalog/price-changes/apply': ADMIN_ONLY,
 
   // --- Planes de tratamiento -----------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-treatment-plans.md (CLINICAL_ROLES).

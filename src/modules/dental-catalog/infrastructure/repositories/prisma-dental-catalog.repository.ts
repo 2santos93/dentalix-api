@@ -204,12 +204,18 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
   async update(
     id: string,
     patch: UpdateDentalCatalogItemRepoInput,
+    actorUserId: string,
   ): Promise<DentalCatalogItem> {
+    const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      const existing = await tx.dentalCatalogItem.findFirst({
-        where: { id, deletedAt: null },
-        select: { id: true },
-      });
+      // FOR UPDATE: un lote de «Actualizar precios» (DX-205) que corra a la
+      // vez espera a esta edición (o al revés) y el historial queda en orden.
+      const [existing] = await tx.$queryRaw<
+        { id: string; defaultPrice: Prisma.Decimal | null }[]
+      >`
+        SELECT "id", "defaultPrice" FROM "dental_catalog_items"
+         WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
+         FOR UPDATE`;
       if (!existing) {
         throw new NotFoundException(
           'Prestación no encontrada en el catálogo de esta clínica.',
@@ -221,6 +227,25 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
         data: patch,
         include: WITH_NOTE_TEMPLATE,
       });
+      // DX-205: la edición suelta del precio por defecto queda en el historial
+      // (antes, después, autor y fecha). Comparado en Decimal, ya guardado.
+      const previous = existing.defaultPrice;
+      const next = item.defaultPrice;
+      const changed =
+        previous === null || next === null
+          ? previous !== next
+          : !new Prisma.Decimal(previous).equals(next);
+      if (patch.defaultPrice !== undefined && changed) {
+        await tx.catalogPriceHistory.create({
+          data: {
+            tenantId,
+            catalogItemId: id,
+            actorUserId,
+            previousPrice: previous,
+            newPrice: next,
+          },
+        });
+      }
       return mapToEntity(item);
     });
   }

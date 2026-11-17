@@ -29,6 +29,7 @@ import { MedicalHistorySubmissionsController } from '../medical-history-submissi
 import { ClinicalEntriesController } from '../clinical-entries/presentation/clinical-entries.controller';
 import { ClinicalEntrySettingsController } from '../clinical-entries/presentation/clinical-entry-settings.controller';
 import { DentalCatalogController } from '../dental-catalog/presentation/dental-catalog.controller';
+import { CatalogPriceChangesController } from '../dental-catalog/presentation/catalog-price-changes.controller';
 import { PriceListsController } from '../price-lists/presentation/price-lists.controller';
 import { AgreementsController } from '../agreements/presentation/agreements.controller';
 import { LocationsController } from '../locations/presentation/locations.controller';
@@ -500,6 +501,15 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'UPDATE',
     resource: 'DENTAL_CATALOG_ITEM',
     resourceId: { param: 'id' },
+  },
+  // DX-205: un lote de «Actualizar precios» deja UN evento UPDATE con el lote
+  // en `params.batchId` (el antes y el después de cada precio viven en
+  // catalog_price_history, sin importes en el evento). Se reutiliza el
+  // recurso DENTAL_CATALOG_ITEM de DX-212 en vez de crear CATALOG_ITEM.
+  'POST /catalog/price-changes/apply': {
+    action: 'UPDATE',
+    resource: 'DENTAL_CATALOG_ITEM',
+    reason: 'CATALOG_PRICES_BATCH',
   },
   // DX-105: listas de precios; el PUT de precios cuenta como UPDATE de la lista.
   'POST /price-lists': {
@@ -2355,6 +2365,9 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /locations/:id/holidays/import/preview':
     'vista previa de la importación; no escribe',
   'POST /patient-imports/inspect': 'no escribe nada ni crea lote',
+  // DX-205: la vista previa de «Actualizar precios» del catálogo solo calcula.
+  'POST /catalog/price-changes/preview':
+    'vista previa de la subida de precios del catálogo; no escribe',
   // DX-559: la vista previa de una plantilla solo calcula precios y visitas.
   'POST /treatment-plans/:id/apply-template/preview':
     'vista previa de la plantilla; no escribe',
@@ -2433,6 +2446,7 @@ const CONTROLLERS: Type[] = [
   AnestheticsController,
   SedationController,
   DentalCatalogController,
+  CatalogPriceChangesController,
   PriceListsController,
   AgreementsController,
   LocationsController,
