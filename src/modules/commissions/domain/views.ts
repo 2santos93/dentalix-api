@@ -1,5 +1,6 @@
 import type {
   ClinicRole,
+  PaymentMethod,
   CommissionBasis,
   CommissionLineKind,
   CommissionReleaseMode,
@@ -7,6 +8,10 @@ import type {
 import type { CurrencyTotal, SettlementPeriod } from './commission-calculator';
 import type { CommissionCategoryPercent } from './commission-rule';
 import type { CloseBlocker } from './settlement-period';
+import type {
+  CurrencyPaymentState,
+  SettlementPaymentStatus,
+} from './settlement-payments';
 
 /** DX-018: lo que devuelven las rutas de honorarios. */
 
@@ -77,6 +82,8 @@ export interface CommissionLineView {
   base: number;
   percent: number;
   amount: number;
+  /** DX-464: el pago (vivo) de la liquidación que cubre la línea; null en la vista previa o pendiente. */
+  paidInPaymentId: string | null;
 }
 
 export interface CommissionPreviewView {
@@ -107,9 +114,55 @@ export interface CommissionSettlementSummary {
   lockDateBefore: string | null;
   lockDateAfter: string;
   totals: CurrencyTotal[];
+  /** DX-464: estado de pago, por moneda y global (derivado de los pagos vivos). */
+  payment: SettlementPaymentSummaryView;
+}
+
+/** DX-464: «Pendiente», «Pagada parcialmente», «Pagada» o «Sin importe a pagar». */
+export interface SettlementPaymentSummaryView {
+  status: SettlementPaymentStatus;
+  currencies: CurrencyPaymentState[];
+}
+
+/** DX-464: la conformidad del profesional con un pago. */
+export type CommissionReceiptStatus = 'NONE' | 'PENDING' | 'EXPIRED' | 'SIGNED';
+
+export interface CommissionPaymentReceiptView {
+  status: CommissionReceiptStatus;
+  /** El último enlace pedido (vivo, caducado o firmado). */
+  requestedAt: Date | null;
+  expiresAt: Date | null;
+  signedAt: Date | null;
+  signerName: string | null;
+}
+
+/** DX-464: un pago de la liquidación y el gasto de la sede que lo refleja. */
+export interface CommissionPaymentView {
+  id: string;
+  settlementId: string;
+  currency: string;
+  amount: number;
+  method: PaymentMethod;
+  /** Día del pago (AAAA-MM-DD). */
+  paidOn: string;
+  reference: string | null;
+  location: { id: string; name: string };
+  expenseId: string;
+  /** Líneas de la liquidación que cubre. */
+  lineIds: string[];
+  createdAt: Date;
+  createdBy: { userId: string; name: string | null };
+  voidedAt: Date | null;
+  voidedBy: { userId: string; name: string | null } | null;
+  voidReason: string | null;
+  receipt: CommissionPaymentReceiptView;
 }
 
 export interface CommissionSettlementView extends CommissionSettlementSummary {
   categoryPercents: CommissionCategoryPercent[];
   lines: CommissionLineView[];
+  /** DX-464: pagos (vivos y anulados), del más reciente al más antiguo. */
+  payments: CommissionPaymentView[];
+  /** DX-464: email de la cuenta del profesional (para «Enviar» por email). */
+  professionalEmail: string | null;
 }

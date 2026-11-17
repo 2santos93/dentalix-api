@@ -348,6 +348,10 @@ model Tenant {
   commissionRuleCategories  CommissionRuleCategory[]
   commissionSettlements     CommissionSettlement[]
   commissionSettlementLines CommissionSettlementLine[]
+  // DX-464: pago de la liquidación (gasto de la sede) y conformidad.
+  commissionPayments        CommissionPayment[]
+  commissionPaymentLines    CommissionPaymentLine[]
+  commissionReceipts        CommissionReceiptRequest[]
 
   @@map("tenants")
 }
@@ -6597,10 +6601,12 @@ model Expense {
   idempotencyKey         String?
   idempotencyFingerprint String?
 
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  location    Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "expenses_location_fkey")
-  currencyRef Currency         @relation(fields: [currency], references: [code], map: "expenses_currency_fkey")
-  payments    ExpensePayment[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location           Location            @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "expenses_location_fkey")
+  currencyRef        Currency            @relation(fields: [currency], references: [code], map: "expenses_currency_fkey")
+  payments           ExpensePayment[]
+  /// DX-464: el pago de honorarios que refleja este gasto (como mucho uno).
+  commissionPayments CommissionPayment[]
 
   /// Destino de la FK de `expense_payments`: su sede y su moneda son las del gasto.
   @@unique([tenantId, id, locationId, currency], map: "expenses_tenant_id_location_currency_key")
@@ -8799,8 +8805,10 @@ model CommissionSettlement {
   /// La pone el servidor de BD (trigger), en UTC.
   closedAt         DateTime              @default(now())
 
-  tenant Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  lines  CommissionSettlementLine[]
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lines    CommissionSettlementLine[]
+  /// DX-464: pagos de la liquidación (el estado de pago se deriva de ellos).
+  payments CommissionPayment[]
 
   @@unique([tenantId, id, userId], map: "commission_settlements_tenant_id_user_key")
   @@index([tenantId, userId, periodTo(sort: Desc)], map: "commission_settlements_user_period_idx")
@@ -8838,10 +8846,12 @@ model CommissionSettlementLine {
   percent             Decimal            @db.Decimal(5, 2)
   amount              Decimal            @db.Decimal(14, 2)
 
-  tenant      Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  settlement  CommissionSettlement       @relation(fields: [tenantId, settlementId, userId], references: [tenantId, id, userId], onDelete: Restrict, map: "commission_settlement_lines_settlement_fkey")
-  adjusts     CommissionSettlementLine?  @relation("CommissionLineAdjustment", fields: [tenantId, adjustsLineId], references: [tenantId, id], onDelete: Restrict, map: "commission_settlement_lines_adjusts_fkey")
-  adjustments CommissionSettlementLine[] @relation("CommissionLineAdjustment")
+  tenant       Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  settlement   CommissionSettlement       @relation(fields: [tenantId, settlementId, userId], references: [tenantId, id, userId], onDelete: Restrict, map: "commission_settlement_lines_settlement_fkey")
+  adjusts      CommissionSettlementLine?  @relation("CommissionLineAdjustment", fields: [tenantId, adjustsLineId], references: [tenantId, id], onDelete: Restrict, map: "commission_settlement_lines_adjusts_fkey")
+  adjustments  CommissionSettlementLine[] @relation("CommissionLineAdjustment")
+  /// DX-464: en qué pagos (vivos o anulados) entró la línea.
+  paymentLines CommissionPaymentLine[]
 
   @@unique([tenantId, id], map: "commission_settlement_lines_tenant_id_key")
   @@index([tenantId, settlementId, userId], map: "commission_settlement_lines_settlement_idx")
@@ -8985,4 +8995,98 @@ model WeeklyDigestDelivery {
   @@unique([runId, membershipId], map: "weekly_digest_deliveries_run_membership_key")
   @@index([tenantId, membershipId], map: "weekly_digest_deliveries_membership_idx")
   @@map("weekly_digest_deliveries")
+}
+
+/// DX-464: pago de una liquidación de honorarios (DX-018), en UNA moneda, con
+/// el gasto de la sede que lo refleja (FK compuesta con su sede y su moneda).
+/// Se anula con motivo (una vez; trigger dx_commission_payment_guard); nunca se
+/// borra. El estado de pago de la liquidación se deriva de aquí.
+model CommissionPayment {
+  id           String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @db.Uuid
+  settlementId String        @db.Uuid
+  userId       String        @db.Uuid
+  locationId   String        @db.Uuid
+  currency     String
+  amount       Decimal       @db.Decimal(14, 2)
+  method       PaymentMethod
+  paidOn       DateTime      @db.Date
+  reference    String?
+  expenseId    String        @db.Uuid
+  /// Puntero a User (FK solo en SQL, como `closedById` de la liquidación).
+  createdById  String        @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt    DateTime      @default(now())
+  voidedAt     DateTime?
+  voidedById   String?       @db.Uuid
+  voidReason   String?
+
+  tenant     Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  settlement CommissionSettlement       @relation(fields: [tenantId, settlementId, userId], references: [tenantId, id, userId], onDelete: Restrict, map: "commission_payments_settlement_fkey")
+  expense    Expense                    @relation(fields: [tenantId, expenseId, locationId, currency], references: [tenantId, id, locationId, currency], onDelete: Restrict, onUpdate: Restrict, map: "commission_payments_expense_fkey")
+  lines      CommissionPaymentLine[]
+  receipts   CommissionReceiptRequest[]
+
+  @@unique([tenantId, expenseId], map: "commission_payments_tenant_expense_key")
+  @@unique([tenantId, id], map: "commission_payments_tenant_id_key")
+  @@index([tenantId, settlementId, userId], map: "commission_payments_settlement_idx")
+  @@index([tenantId, expenseId, locationId, currency], map: "commission_payments_expense_idx")
+  @@index([createdById], map: "commission_payments_created_by_idx")
+  @@index([voidedById], map: "commission_payments_voided_by_idx")
+  @@map("commission_payments")
+}
+
+/// DX-464: línea de la liquidación cubierta por un pago. Una línea solo en UN
+/// pago vivo (único parcial `commission_payment_lines_live_line_key` WHERE
+/// "voidedAt" IS NULL, solo en SQL); al anular el pago se copia `voidedAt`.
+model CommissionPaymentLine {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @db.Uuid
+  paymentId String    @db.Uuid
+  lineId    String    @db.Uuid
+  voidedAt  DateTime?
+
+  tenant  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  payment CommissionPayment        @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "commission_payment_lines_payment_fkey")
+  line    CommissionSettlementLine @relation(fields: [tenantId, lineId], references: [tenantId, id], onDelete: Restrict, map: "commission_payment_lines_line_fkey")
+
+  @@unique([tenantId, paymentId, lineId], map: "commission_payment_lines_payment_line_key")
+  @@index([tenantId, lineId], map: "commission_payment_lines_line_idx")
+  @@map("commission_payment_lines")
+}
+
+/// DX-464: enlace de conformidad («recibido conforme») de un pago: un solo
+/// uso, caducable, con la foto del recibo (`content`, solo iniciales de
+/// pacientes) y su SHA-256. Al firmar: nombre, firma PNG, IP, navegador y la
+/// huella; las horas las pone la BD. Parciales solo en SQL: un enlace vivo por
+/// pago (`commission_receipt_requests_live_key`) y una firma por pago
+/// (`commission_receipt_requests_signed_key`).
+model CommissionReceiptRequest {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  paymentId   String    @db.Uuid
+  tokenHash   String    @unique(map: "commission_receipt_requests_token_hash_key")
+  content     Json
+  contentHash String
+  expiresAt   DateTime
+  createdById String    @db.Uuid
+  createdAt   DateTime  @default(now())
+  openedAt    DateTime?
+  signedAt    DateTime?
+  signerName  String?
+  /// PNG en base64, sin prefijo `data:`.
+  signature   String?
+  ipAddress   String?
+  userAgent   String?
+  receiptHash String?
+  revokedAt   DateTime?
+  revokedById String?   @db.Uuid
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  payment CommissionPayment @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "commission_receipt_requests_payment_fkey")
+
+  @@index([tenantId, paymentId], map: "commission_receipt_requests_payment_idx")
+  @@index([createdById], map: "commission_receipt_requests_created_by_idx")
+  @@index([revokedById], map: "commission_receipt_requests_revoked_by_idx")
+  @@map("commission_receipt_requests")
 }

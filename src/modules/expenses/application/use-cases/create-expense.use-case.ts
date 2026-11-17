@@ -33,6 +33,7 @@ import {
   EXPENSE_REPOSITORY,
   type CreateExpensePaymentRepoInput,
   type ExpenseRepository,
+  type ExpenseTxHook,
 } from '../../domain/ports/expense-repository.port';
 import { ExpenseCategoryResolver } from '../expense-category-resolver';
 import { ExpenseReceiptUploads } from '../expense-receipt-uploads';
@@ -110,6 +111,7 @@ export class CreateExpenseUseCase {
     key: string | undefined,
     fingerprint: string | undefined,
     signals?: IdempotencySignals,
+    within?: ExpenseTxHook,
   ): Promise<ExpenseDetailView> {
     const now = this.clock();
     if (key) {
@@ -172,6 +174,7 @@ export class CreateExpenseUseCase {
           },
           payment,
           now,
+          within,
         ),
       );
     } catch (error) {

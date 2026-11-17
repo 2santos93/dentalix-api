@@ -7,6 +7,7 @@ import {
 import {
   EXPENSE_REPOSITORY,
   type ExpenseRepository,
+  type ExpenseTxHook,
 } from '../../domain/ports/expense-repository.port';
 import { EXPENSE_CLOCK, type ExpenseClock } from '../expense-tokens';
 import { type ExpenseDetailView, detailViewOf } from '../expense-view';
@@ -30,10 +31,18 @@ export class VoidExpenseUseCase {
     id: string,
     reason: string | undefined,
     voidedById: string,
+    within?: ExpenseTxHook,
   ): Promise<ExpenseDetailView> {
     const trimmed = rule(() => validateVoidReason(reason));
     const detail = await guarded(() =>
-      this.repo.void(id, trimmed, voidedById, this.clock(), this.cashLink),
+      this.repo.void(
+        id,
+        trimmed,
+        voidedById,
+        this.clock(),
+        this.cashLink,
+        within,
+      ),
     );
     return detailViewOf(this.repo, detail);
   }

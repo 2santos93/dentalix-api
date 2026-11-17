@@ -26,6 +26,7 @@ import type {
   CommissionRuleTerms,
 } from '../domain/commission-rule';
 import { lockDateAfterSettlement } from '../domain/settlement-period';
+import { settlementPaymentState } from '../domain/settlement-payments';
 import type {
   ClosedSettlement,
   CommissionProfessional,
@@ -466,8 +467,22 @@ async function readPatientNames(
   return new Map(rows.map((r) => [r.id, r.name]));
 }
 
+/** DX-464: las líneas con el pago vivo que las cubre (para el estado de pago). */
+const SETTLEMENT_LINES_SELECT = {
+  select: {
+    id: true,
+    kind: true,
+    currency: true,
+    amount: true,
+    paymentLines: {
+      where: { voidedAt: null },
+      select: { paymentId: true },
+    },
+  },
+} satisfies Prisma.CommissionSettlement$linesArgs;
+
 type SettlementRow = Prisma.CommissionSettlementGetPayload<{
-  include: { lines: { select: { kind: true; currency: true; amount: true } } };
+  include: { lines: typeof SETTLEMENT_LINES_SELECT };
 }>;
 
 @Injectable()
@@ -805,9 +820,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
         },
         orderBy: [{ periodTo: 'desc' }, { closedAt: 'desc' }],
         take: filter.limit,
-        include: {
-          lines: { select: { kind: true, currency: true, amount: true } },
-        },
+        include: { lines: SETTLEMENT_LINES_SELECT },
       });
       return this.summaries(tx, tenantId, rows);
     });
@@ -822,9 +835,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
     return this.prisma.runWithTenant(async (tx) => {
       const row = await tx.commissionSettlement.findFirst({
         where: { tenantId, id },
-        include: {
-          lines: { select: { kind: true, currency: true, amount: true } },
-        },
+        include: { lines: SETTLEMENT_LINES_SELECT },
       });
       if (!row) return null;
       const [summary] = await this.summaries(tx, tenantId, [row]);
@@ -852,6 +863,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
           base: Prisma.Decimal;
           percent: Prisma.Decimal;
           amount: Prisma.Decimal;
+          paidInPaymentId: string | null;
         }[]
       >`
         SELECT l."id", l."kind", l."adjustsLineId", i."patientId",
@@ -859,7 +871,10 @@ export class PrismaCommissionRepository implements CommissionRepository {
                l."treatmentPlanId", l."treatmentPlanItemId", l."locationId", l."catalogCode",
                l."catalogLabel", l."category", l."toothNumber", l."completedAt",
                l."paymentId", l."paidAt", l."paymentAmount", l."paymentCurrency",
-               l."releasedAt", l."currency", l."base", l."percent", l."amount"
+               l."releasedAt", l."currency", l."base", l."percent", l."amount",
+               (SELECT cpl."paymentId" FROM "commission_payment_lines" cpl
+                 WHERE cpl."tenantId" = l."tenantId" AND cpl."lineId" = l."id"
+                   AND cpl."voidedAt" IS NULL) AS "paidInPaymentId"
           FROM "commission_settlement_lines" l
           JOIN "treatment_plan_items" i
             ON i."tenantId" = l."tenantId" AND i."id" = l."treatmentPlanItemId"
@@ -898,6 +913,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
           base: dec(l.base),
           percent: dec(l.percent),
           amount: dec(l.amount),
+          paidInPaymentId: l.paidInPaymentId,
         })),
       };
     });
@@ -950,6 +966,14 @@ export class PrismaCommissionRepository implements CommissionRepository {
             kind: l.kind,
             currency: l.currency,
             amount: dec(l.amount),
+          })),
+        ),
+        payment: settlementPaymentState(
+          r.lines.map((l) => ({
+            id: l.id,
+            currency: l.currency,
+            amount: dec(l.amount),
+            paymentId: l.paymentLines[0]?.paymentId ?? null,
           })),
         ),
       };

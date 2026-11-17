@@ -203,7 +203,8 @@ BEGIN
     'signature_requests', 'signed_consent_pdf_links', 'signed_consent_pdfs',
     'ortho_cases', 'ortho_case_charges', 'dental_labs', 'dental_lab_services', 'dental_lab_orders',
     'commission_rules',
-    'weekly_digest_runs', 'weekly_digest_deliveries'
+    'weekly_digest_runs', 'weekly_digest_deliveries',
+    'commission_payments', 'commission_payment_lines', 'commission_receipt_requests'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);

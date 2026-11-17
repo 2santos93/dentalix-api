@@ -59,6 +59,12 @@ export const VOID_REASON_MESSAGE =
   'El motivo debe tener entre 5 y 500 caracteres.';
 export const EXPENSE_VOIDED_MESSAGE = 'El gasto está anulado.';
 export const EXPENSE_ALREADY_VOIDED_MESSAGE = 'El gasto ya está anulado.';
+/**
+ * DX-464: el gasto refleja el pago de una liquidación de honorarios; su
+ * importe, sus pagos y su anulación van con ese pago.
+ */
+export const EXPENSE_COMMISSION_LINKED_MESSAGE =
+  'Este gasto es el pago de una liquidación de honorarios: se corrige o se anula desde la liquidación (Honorarios).';
 export const EXPENSE_VOIDED_EDIT_MESSAGE =
   'El gasto está anulado y no se puede editar.';
 export const PAYMENT_ALREADY_VOIDED_MESSAGE = 'El pago ya está anulado.';

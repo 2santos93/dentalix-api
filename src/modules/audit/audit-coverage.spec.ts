@@ -116,6 +116,7 @@ import {
 import { ExchangeSettingsController } from '../exchange/presentation/exchange-settings.controller';
 import { PaymentMethodsController } from '../payment-methods/presentation/payment-methods.controller';
 import { CommissionsController } from '../commissions/presentation/commissions.controller';
+import { CommissionPaymentsController } from '../commissions/presentation/commission-payments.controller';
 import { AppModule } from '../../app.module';
 import {
   collectControllers,
@@ -1593,6 +1594,19 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     reason: 'COMMISSION_SETTLEMENT',
   },
+  // DX-464: los PDF de la liquidación y del recibo salen de la clínica.
+  'GET /commissions/settlements/:id/pdf': {
+    action: 'EXPORT',
+    resource: 'COMMISSION_SETTLEMENT',
+    resourceId: { param: 'id' },
+    reason: 'COMMISSION_SETTLEMENT_PDF',
+  },
+  'GET /commissions/payments/:paymentId/receipt/pdf': {
+    action: 'EXPORT',
+    resource: 'COMMISSION_SETTLEMENT',
+    resourceId: { param: 'paymentId' },
+    reason: 'COMMISSION_RECEIPT_PDF',
+  },
   // DX-567: la lista de citas sin tratamiento ligado lleva el nombre de cada
   // paciente; el agregado de la producción agendada, no.
   'GET /reports/scheduled-production/unlinked': {
@@ -2187,6 +2201,19 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // FINANCIAL_LOCK), en la transacción del cierre.
   'PUT /commissions/rules/:userId': 'commissions.e2e-spec.ts',
   'POST /commissions/settlements': 'commissions.e2e-spec.ts',
+  // DX-464: el pago (CREATE COMMISSION_PAYMENT_CREATED de la liquidación y
+  // CREATE del gasto) y su anulación (VOID de los dos) en la transacción del
+  // gasto; pedir la conformidad (SEND, sin URL ni token) en la de su enlace;
+  // la firma del profesional (SIGN, actor = su usuario sin rol, origen LINK)
+  // en la de la firma. Sin importes.
+  'POST /commissions/settlements/:id/payments':
+    'commission-payments.int-spec.ts y commission-payments.e2e-spec.ts',
+  'POST /commissions/payments/:paymentId/void':
+    'commission-payments.int-spec.ts y commission-payments.e2e-spec.ts',
+  'POST /commissions/payments/:paymentId/receipt-request':
+    'commission-payments.e2e-spec.ts',
+  'POST /public/commission-receipts/:token/sign':
+    'commission-payments.e2e-spec.ts',
   'POST /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   'DELETE /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
@@ -2457,6 +2484,9 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   // DX-569: el enlace de pago.
   'POST /public/payment-links/:token/opened':
     'marca la apertura del enlace de pago; sin evento',
+  // DX-464: el enlace de conformidad del profesional.
+  'POST /public/commission-receipts/:token/opened':
+    'marca la apertura del enlace de conformidad; sin evento',
   'POST /public/payment-links/:token/proof-upload':
     'URL prefirmada; el reporte que la usa es la ruta auditada',
   'POST /public/payment-links/:token/proof-upload/complete':
@@ -2465,6 +2495,7 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 
 const CONTROLLERS: Type[] = [
   CommissionsController,
+  CommissionPaymentsController,
   AuthController,
   PatientCertificatesController,
   PatientExternalOrdersController,
