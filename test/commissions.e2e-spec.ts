@@ -615,6 +615,11 @@ describe('Honorarios de odontólogos: regla, vista previa y cierre (e2e, DX-018)
     expect(views).toBeGreaterThan(0);
   });
 
+  // ISOLATION_COVERS: PUT /commissions/rules/:userId
+  // ISOLATION_COVERS: GET /commissions/settlements/:id
+  // ISOLATION_COVERS: GET /commissions/preview ?userId
+  // ISOLATION_COVERS: GET /commissions/settlements ?userId
+  // ISOLATION_COVERS: POST /commissions/settlements body.userId
   it('otra clínica: 404 al ver la liquidación y al cambiar la regla de un profesional de A', async () => {
     await as(b)
       .get(`/commissions/settlements/${septSettlement.id}`)
@@ -634,6 +639,19 @@ describe('Honorarios de odontólogos: regla, vista previa y cierre (e2e, DX-018)
     expect(
       (await as(b).get('/commissions/settlements').expect(200)).body,
     ).toEqual([]);
+    expect(
+      (
+        await as(b)
+          .get(`/commissions/settlements?userId=${draX.userId}`)
+          .expect(200)
+      ).body,
+    ).toEqual([]);
+    await as(b)
+      .post('/commissions/settlements', { userId: draX.userId, ...SEPT })
+      .expect(404);
+    expect(
+      await raw.commissionSettlement.count({ where: { tenantId: b.tenantId } }),
+    ).toBe(0);
     const rule = await raw.commissionRule.findFirstOrThrow({
       where: { tenantId: a.tenantId, userId: draX.userId },
       select: { percent: true },
