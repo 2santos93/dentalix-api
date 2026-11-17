@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { CatalogKind, Prisma } from '@prisma/client';
+import { decimalAmountText } from '../../../shared/money/decimal-text';
 
 /**
  * DX-205: subir (o bajar) en bloque el precio por defecto del catálogo.
@@ -181,12 +182,16 @@ export function canonicalCriteria(criteria: PriceChangeCriteria) {
       category: criteria.filters.category?.trim() || null,
       kind: criteria.filters.kind ?? null,
       activeOnly: criteria.filters.activeOnly === true,
-      priceBelow: criteria.filters.priceBelow?.toFixed(2) ?? null,
+      priceBelow: criteria.filters.priceBelow
+        ? decimalAmountText(criteria.filters.priceBelow)
+        : null,
     },
     mode: criteria.mode,
-    value: criteria.value.toFixed(2),
+    value: decimalAmountText(criteria.value),
     roundTo: criteria.roundTo,
-    minIncrement: criteria.minIncrement?.toFixed(2) ?? null,
+    minIncrement: criteria.minIncrement
+      ? decimalAmountText(criteria.minIncrement)
+      : null,
   };
 }
 
@@ -233,8 +238,8 @@ export function planPriceChange(
     canonicalCriteria(criteria),
     lines.map((line) => [
       line.item.id.toLowerCase(),
-      line.before.toFixed(2),
-      line.after.toFixed(2),
+      decimalAmountText(line.before),
+      decimalAmountText(line.after),
     ]),
   ]);
   return {

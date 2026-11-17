@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { CatalogKind, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import { decimalAmountText } from '../../../../shared/money/decimal-text';
 import type { PriceChangeCandidate } from '../../domain/price-change';
 import type {
   AppliedPriceBatch,
@@ -165,7 +166,7 @@ export class PrismaCatalogPriceChangeRepository implements CatalogPriceChangeRep
       // fila). Los precios viajan como texto y se convierten a numeric en la
       // base: el Decimal nunca pasa por un `number`.
       const ids = plan.lines.map((line) => line.item.id);
-      const prices = plan.lines.map((line) => line.after.toFixed(2));
+      const prices = plan.lines.map((line) => decimalAmountText(line.after));
       const updated = await tx.$executeRaw`
         UPDATE "dental_catalog_items" AS c
            SET "defaultPrice" = v.price,
