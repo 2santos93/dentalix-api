@@ -277,6 +277,19 @@ const INTERNAL_ERROR: ErrorBody = {
   message: 'Ocurrió un error procesando la solicitud.',
 };
 
+// DX-091: el trigger payments_financial_lock_guard rechazó escribir un abono
+// en un período contable cerrado (la app ya lo mira antes con su mensaje y
+// `lockedThrough`; esto es la red: otro camino, una réplica anterior o un
+// cierre que cambió a mitad de la petición).
+export const PERIOD_LOCKED_DB_MESSAGE =
+  'La operación toca un período contable cerrado y no se guardó.';
+const PERIOD_LOCKED_BY_DB: ErrorBody = {
+  statusCode: HttpStatus.CONFLICT,
+  error: 'Conflict',
+  code: 'PERIOD_LOCKED',
+  message: PERIOD_LOCKED_DB_MESSAGE,
+};
+
 /** SQLSTATE de Postgres → respuesta, para los que tienen una genérica. */
 // SQLSTATE propios del repo: clase de implementación (primer carácter I–Z o
 // 5–9). Las clases que empiezan por 0–4 o A–H las reserva el estándar SQL.
@@ -297,6 +310,7 @@ export const BY_SQLSTATE: Record<string, ErrorBody> = {
   Q3933: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3933),
   Q3934: conflict(EXPENSE_INTEGRITY_MESSAGES.Q3934),
   Q4270: CLINICAL_TIME_BEFORE_ENTRY, // propio (DX-427): hora clínica anterior a la evolución
+  Q0910: PERIOD_LOCKED_BY_DB, // propio (DX-091): payments_financial_lock_guard
 };
 
 /**

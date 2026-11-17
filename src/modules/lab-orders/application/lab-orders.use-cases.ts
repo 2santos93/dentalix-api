@@ -167,7 +167,7 @@ export class LabOrderUseCases {
   // -- Lecturas
 
   async get(orderId: string, role: ClinicRole | null): Promise<LabOrderView> {
-    return redactForRole(await this.view(orderId), role);
+    return redactForRole(await this.readable(orderId), role);
   }
 
   async listForPatient(
@@ -187,6 +187,7 @@ export class LabOrderUseCases {
       patientId,
       page,
       pageSize,
+      this.allowedLocations(),
     );
     const items = await this.repo.views(ids, this.now());
     return {
@@ -274,7 +275,7 @@ export class LabOrderUseCases {
     orderId: string,
     ctx: AuditRequestContext,
   ): Promise<LabOrderPrintView> {
-    const order = await this.view(orderId);
+    const order = await this.readable(orderId);
     const now = this.now();
     const headers = await this.repo.printHeaders(order, now);
     await this.record(ctx, order.patientId, orderId, 'PRINT', {
@@ -542,6 +543,26 @@ export class LabOrderUseCases {
     const [view] = await this.repo.views([orderId], this.now());
     if (!view) throw new NotFoundException(LAB_MESSAGES.orderNotFound);
     return view;
+  }
+
+  /**
+   * La vista de una orden de una sede permitida al miembro (DX-017-bis): la
+   * misma regla y el mismo 403 `LOCATION_NOT_ALLOWED` que las escrituras
+   * (`writable`), para que leer y escribir respondan igual.
+   */
+  private async readable(orderId: string): Promise<LabOrderView> {
+    const view = await this.view(orderId);
+    this.tenantContext.assertRecordLocationAllowed(view.locationId);
+    return view;
+  }
+
+  /**
+   * Sedes permitidas al miembro para las listas sin sede (la ficha del
+   * paciente); `undefined` = todas (sin restricción), como DX-572.
+   */
+  private allowedLocations(): readonly string[] | undefined {
+    const allowed = this.tenantContext.getAllowedLocationIds();
+    return allowed === 'ALL' ? undefined : allowed;
   }
 
   /** La orden (404 bajo RLS) de una sede permitida al miembro (SEC-014). */

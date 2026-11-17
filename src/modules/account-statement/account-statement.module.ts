@@ -1,3 +1,4 @@
+import { FinancialLockModule } from '../financial-lock/financial-lock.module';
 import { Module } from '@nestjs/common';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { JwtModule } from '@nestjs/jwt';
@@ -25,7 +26,13 @@ import { PaymentsModule } from '../payments/payments.module';
 @Module({
   // JwtModule.register({}): JwtAuthGuard -> TokenService -> JwtService, igual
   // que PaymentsModule.
-  imports: [JwtModule.register({}), DocumentTypeNamesModule, PaymentsModule],
+  imports: [
+    JwtModule.register({}),
+    DocumentTypeNamesModule,
+    PaymentsModule,
+    // DX-091: el cierre contable en el `canVoid` de cada movimiento.
+    FinancialLockModule,
+  ],
   controllers: [AccountStatementController],
   providers: [
     GetAccountStatementUseCase,

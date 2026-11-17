@@ -34,6 +34,7 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import type { LockActor } from '../../financial-lock/domain/financial-lock';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import {
   CreatePaymentProofUploadDto,
@@ -104,6 +105,18 @@ import { requireAuditRequestContext } from '../../audit/presentation/audit-reque
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
 interface AuthenticatedRequest extends AuditableRequest {
   user: TenantJwtPayload;
+}
+
+/** DX-091: quién registra (del token) y su motivo para un período cerrado. */
+function lockActorOf(
+  req: AuthenticatedRequest,
+  overrideReason: string | undefined,
+): LockActor {
+  return {
+    userId: req.user.sub,
+    role: req.user.role,
+    overrideReason: overrideReason ?? null,
+  };
 }
 
 // Pagos/abonos es dato FINANCIERO -> @Roles(...PAYMENT_ROLES) (ADMIN +
@@ -318,7 +331,8 @@ export class PaymentsController {
     description:
       'El plan está rechazado o cancelado: no admite abonos (DX-109). Un plan completado sí. ' +
       'DX-377: `code: PAYMENT_REFERENCE_DUPLICATE` si la referencia y el medio ya están en otro ' +
-      'abono vivo de ±90 días (`matches`); se confirma repitiendo con `duplicateReferenceReason`.',
+      'abono vivo de ±90 días (`matches`); se confirma repitiendo con `duplicateReferenceReason`. ' +
+      'DX-091: `code: PERIOD_LOCKED` (con `lockedThrough`) si el día del abono en la sede está en un período contable cerrado.',
   })
   @ApiBadRequestResponse({
     description:
@@ -360,6 +374,7 @@ export class PaymentsController {
       },
       req.user.sub,
       idempotencyKey,
+      { lockActor: lockActorOf(req, dto.lockOverrideReason) },
     );
     // DX-150: si con este abono se cumple el compromiso abierto del paciente,
     // pasa a KEPT ya (auditado con este usuario). Nunca falla la petición: el
@@ -412,7 +427,8 @@ export class PaymentsController {
       'se confirma con `confirmCreditBalance`. ' +
       '`code: SPLIT_PAYMENT_BALANCE_CHANGED` si, sin esa confirmación, otro movimiento del plan (un abono, un traspaso o una devolución de saldo a favor) ' +
       'entró mientras se registraba el cobro: no se registra nada y se repite la petición (misma clave). ' +
-      'Sin caja abierta, si la clínica la exige para el efectivo (DX-027).',
+      'Sin caja abierta, si la clínica la exige para el efectivo (DX-027). ' +
+      'DX-091: `code: PERIOD_LOCKED` si el día del cobro está en un período contable cerrado.',
   })
   @ApiBadRequestResponse({
     description:
@@ -458,6 +474,7 @@ export class PaymentsController {
       },
       req.user.sub,
       idempotencyKey,
+      { lockActor: lockActorOf(req, dto.lockOverrideReason) },
     );
     // DX-150: como un abono suelto, el cobro puede cumplir el compromiso.
     const context = auditRequestContext(req, this.tenantContext);
@@ -516,6 +533,7 @@ export class PaymentsController {
       },
       req.user.sub,
       idempotencyKey,
+      { lockActor: lockActorOf(req, dto.lockOverrideReason) },
     );
     // DX-150: un abono al saldo migrado también cuenta para el compromiso.
     const context = auditRequestContext(req, this.tenantContext);
@@ -619,7 +637,8 @@ export class PaymentsController {
   @ApiOkResponse({ description: 'Abono anulado (cuerpo vacío)' })
   @ApiBadRequestResponse({
     description:
-      'Id que no es UUID, o falta `reason` o no tiene 3–300 caracteres',
+      'Id que no es UUID, o falta `reason` o no tiene 3–300 caracteres. ' +
+      'DX-091: ADMIN con la exención activa anulando un abono de un período cerrado sin `lockOverrideReason` (3–300).',
   })
   @ApiForbiddenResponse({
     description:
@@ -634,7 +653,9 @@ export class PaymentsController {
     description:
       'DX-253: el abono (o una línea de su cobro dividido) es referencia de ' +
       'una devolución de saldo a favor, o del plan ya se traspasó o devolvió ' +
-      'saldo a favor y sin este abono quedaría al descubierto',
+      'saldo a favor y sin este abono quedaría al descubierto. ' +
+      'DX-091: `code: PERIOD_LOCKED` (con `lockedThrough`) si el día del abono en su sede está en un período contable cerrado ' +
+      '(también para RECEPTION desde Caja o Estado de cuenta). El ADMIN lo salta con `lockOverrideReason` si la clínica lo admite.',
   })
   @ApiParam({ name: 'id', format: 'uuid' })
   async remove(
@@ -649,6 +670,7 @@ export class PaymentsController {
       paymentId: id,
       reason: dto.reason,
       actor: { userId: req.user.sub, role: req.user.role },
+      lockOverrideReason: dto.lockOverrideReason ?? null,
       request: context && {
         locationId: context.locationId,
         requestId: context.requestId,

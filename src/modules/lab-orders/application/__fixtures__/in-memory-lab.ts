@@ -344,9 +344,15 @@ export class InMemoryLabRepository implements LabRepository {
     patientId: string,
     page: number,
     pageSize: number,
+    allowedLocationIds?: readonly string[],
   ): Promise<{ ids: string[]; total: number }> {
     const all = [...this.orders.values()]
       .filter((o) => o.patientId === patientId)
+      .filter(
+        (o) =>
+          allowedLocationIds === undefined ||
+          allowedLocationIds.includes(o.locationId),
+      )
       .sort((a, b) => b.number - a.number);
     return Promise.resolve({
       ids: all.slice((page - 1) * pageSize, page * pageSize).map((o) => o.id),

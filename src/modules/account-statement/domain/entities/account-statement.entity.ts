@@ -290,6 +290,8 @@ export interface StatementMovement {
    * `null` si nada lo impide.
    */
   voidBlockedReason: string | null;
+  /** DX-091: el día del abono en su sede está en un período contable cerrado. */
+  periodLocked: boolean;
   voided: boolean;
   voidedAt: Date | null;
   voidedBy: StatementVoidedBy | null;
