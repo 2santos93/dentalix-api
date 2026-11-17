@@ -213,6 +213,9 @@ model Tenant {
   orthoVisits                             OrthoVisit[]
   // DX-017: laboratorios dentales, sus servicios y las órdenes de laboratorio.
   dentalLabs                              DentalLab[]
+  // DX-205: lotes de cambio de precios del catálogo y su historial.
+  catalogPriceBatches                     CatalogPriceBatch[]
+  catalogPriceHistory                     CatalogPriceHistory[]
   dentalLabServices                       DentalLabService[]
   dentalLabOrders                         DentalLabOrder[]
   // DX-285: cargos del caso en el plan y alineadores.
@@ -390,6 +393,9 @@ model User {
   voidedPatientDocuments            PatientDocument[]                @relation("PatientDocumentVoidedBy")
   planAcceptancesRecorded           TreatmentPlanAcceptance[]
   planRepricings                    TreatmentPlanRepricing[]         @relation("TreatmentPlanRepricingActor")
+  // DX-205: quién aplicó un lote de precios y quién cambió cada precio.
+  catalogPriceBatches               CatalogPriceBatch[]              @relation("CatalogPriceBatchActor")
+  catalogPriceChanges               CatalogPriceHistory[]            @relation("CatalogPriceHistoryActor")
   tokens                            UserToken[]
   clinicalEntryAddenda              ClinicalEntryAddendum[]
   anesthesiaAdministrations         AnesthesiaAdministration[]
@@ -1449,6 +1455,8 @@ model DentalCatalogItem {
   recallTriggers       RecallTypeTrigger[]
   // DX-559: líneas de plantillas de plan que usan este procedimiento.
   planTemplateLines    TreatmentPlanTemplateLine[]
+  // DX-205: cada cambio de su precio por defecto (suelto o por lote).
+  priceHistory         CatalogPriceHistory[]
   clinicalNoteTemplate ClinicalNoteTemplate?       @relation(fields: [tenantId, clinicalNoteTemplateId], references: [tenantId, id], onDelete: Restrict, map: "dental_catalog_items_note_template_fkey")
 
   @@unique([tenantId, code], map: "catalog_tenant_code_key")
@@ -8677,4 +8685,67 @@ enum FinancialLockOperation {
   PAYMENT_VOID
   PAYMENT_PLAN_CREATE
   PAYMENT_PLAN_CANCEL
+}
+
+// ---------------------------------------------------------------------------
+// DX-205: subir precios del catálogo en bloque.
+// ---------------------------------------------------------------------------
+
+/// Un lote de «Actualizar precios» aplicado: los criterios (filtros, % o
+/// importe, redondeo e incremento mínimo), la huella de la vista previa, los
+/// totales y quién lo aplicó. Append-only (trigger
+/// `catalog_price_batches_append_only`; la app solo SELECT/INSERT), RLS FORCE.
+model CatalogPriceBatch {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  tenantId           String   @db.Uuid
+  actorUserId        String   @db.Uuid
+  /// Cabecera Idempotency-Key de /catalog/price-changes/apply (única por
+  /// clínica) y la huella de la petición (SHA-256 de criterios + vista previa).
+  idempotencyKey     String   @db.Uuid
+  requestFingerprint String   @db.Char(64)
+  previewHash        String   @db.Char(64)
+  /// Moneda del catálogo al aplicar; NULL si la clínica no la tiene definida.
+  currency           String?  @db.Char(3)
+  /// Los criterios canónicos (`canonicalCriteria`), sin importes de ítems.
+  criteria           Json
+  itemCount          Int
+  totalBefore        Decimal  @db.Decimal(16, 2)
+  totalAfter         Decimal  @db.Decimal(16, 2)
+  createdAt          DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant  Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  actor   User                  @relation("CatalogPriceBatchActor", fields: [actorUserId], references: [id], onDelete: Restrict, map: "catalog_price_batches_actor_fkey")
+  history CatalogPriceHistory[]
+
+  // Destino de la FK compuesta del historial (SEC-004).
+  @@unique([tenantId, id], map: "catalog_price_batches_tenant_id_key")
+  @@unique([tenantId, idempotencyKey], map: "catalog_price_batches_idempotency_key")
+  @@index([tenantId, createdAt], map: "catalog_price_batches_created_idx")
+  @@index([actorUserId], map: "catalog_price_batches_actor_idx")
+  @@map("catalog_price_batches")
+}
+
+/// Cada cambio del precio por defecto de un ítem del catálogo: antes, después,
+/// el lote (NULL = edición suelta), autor y fecha. Append-only (trigger
+/// `catalog_price_history_append_only`; la app solo SELECT/INSERT), RLS FORCE.
+model CatalogPriceHistory {
+  id            String   @id @default(uuid(7)) @db.Uuid
+  tenantId      String   @db.Uuid
+  catalogItemId String   @db.Uuid
+  batchId       String?  @db.Uuid
+  actorUserId   String   @db.Uuid
+  previousPrice Decimal? @db.Decimal(12, 2)
+  newPrice      Decimal? @db.Decimal(12, 2)
+  createdAt     DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  // FK COMPUESTAS (SEC-004): ítem y lote de la MISMA clínica.
+  item   DentalCatalogItem  @relation(fields: [tenantId, catalogItemId], references: [tenantId, id], onDelete: Restrict, map: "catalog_price_history_item_fkey")
+  batch  CatalogPriceBatch? @relation(fields: [tenantId, batchId], references: [tenantId, id], onDelete: Restrict, map: "catalog_price_history_batch_fkey")
+  actor  User               @relation("CatalogPriceHistoryActor", fields: [actorUserId], references: [id], onDelete: Restrict, map: "catalog_price_history_actor_fkey")
+
+  @@index([tenantId, catalogItemId, createdAt], map: "catalog_price_history_item_idx")
+  @@index([tenantId, batchId], map: "catalog_price_history_batch_idx")
+  @@index([actorUserId], map: "catalog_price_history_actor_idx")
+  @@map("catalog_price_history")
 }

@@ -818,7 +818,7 @@ class DemoSeeder {
     const hours = await this.readBusinessHours(tenantId, locations);
 
     const catalog = await this.inTenant(tenantId, undefined, () =>
-      this.priceCatalog(tenantId),
+      this.priceCatalog(tenantId, ownerId),
     );
 
     // DX-037: la política v1 la publica el ADMIN antes de dar de alta a nadie,
@@ -1391,7 +1391,10 @@ class DemoSeeder {
   }
 
   /** Tarifas (USD) en el catálogo por defecto; devuelve código → id. */
-  private async priceCatalog(tenantId: string): Promise<Map<string, string>> {
+  private async priceCatalog(
+    tenantId: string,
+    ownerId: string,
+  ): Promise<Map<string, string>> {
     const items = await this.prisma.runWithTenant(tenantId, (tx) =>
       tx.dentalCatalogItem.findMany({
         where: { deletedAt: null },
@@ -1405,6 +1408,8 @@ class DemoSeeder {
         {
           defaultPrice: price,
         },
+        // DX-205: el ADMIN queda como autor en el historial de precios.
+        ownerId,
       );
     }
     return byCode;

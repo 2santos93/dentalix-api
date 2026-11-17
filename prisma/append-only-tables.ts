@@ -71,6 +71,10 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-091: el registro de excepciones al cierre contable (quién, cuándo y
   // por qué; dx_financial_lock_override_guard).
   'financial_lock_overrides',
+  // DX-205: lotes de «Actualizar precios» del catálogo y el historial de
+  // precios de cada ítem (la app solo inserta y lee).
+  'catalog_price_batches',
+  'catalog_price_history',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */

@@ -29,6 +29,8 @@ const templates = new PrismaClinicalNoteTemplateRepository(
 const catalog = new PrismaDentalCatalogRepository(prisma, tenantContext);
 
 const SUBDOMAINS = ['dx455-int-a', 'dx455-int-b'];
+// DX-205: autor del historial de precios; estas ediciones no tocan el precio.
+const NO_PRICE_ACTOR = '00000000-0000-4000-8000-000000000205';
 
 let tenantA: string;
 let tenantB: string;
@@ -280,7 +282,11 @@ describe('atajos de plantillas y plantilla por procedimiento (int, DX-455)', () 
       const t = await create(tenantA, 'Resina', '#resina');
       const item = await procedure(tenantA, 'RES-01');
       const linked = await asTenant(tenantA, () =>
-        catalog.update(item.id, { clinicalNoteTemplateId: t.id }),
+        catalog.update(
+          item.id,
+          { clinicalNoteTemplateId: t.id },
+          NO_PRICE_ACTOR,
+        ),
       );
       expect(linked).toMatchObject({
         clinicalNoteTemplateId: t.id,
@@ -299,7 +305,11 @@ describe('atajos de plantillas y plantilla por procedimiento (int, DX-455)', () 
       });
 
       const unlinked = await asTenant(tenantA, () =>
-        catalog.update(item.id, { clinicalNoteTemplateId: null }),
+        catalog.update(
+          item.id,
+          { clinicalNoteTemplateId: null },
+          NO_PRICE_ACTOR,
+        ),
       );
       expect(unlinked).toMatchObject({
         clinicalNoteTemplateId: null,
@@ -322,7 +332,11 @@ describe('atajos de plantillas y plantilla por procedimiento (int, DX-455)', () 
       const t = await create(tenantA, 'Resina', null);
       const item = await procedure(tenantA, 'RES-03');
       await asTenant(tenantA, () =>
-        catalog.update(item.id, { clinicalNoteTemplateId: t.id }),
+        catalog.update(
+          item.id,
+          { clinicalNoteTemplateId: t.id },
+          NO_PRICE_ACTOR,
+        ),
       );
       await expect(
         raw.clinicalNoteTemplate.delete({ where: { id: t.id } }),

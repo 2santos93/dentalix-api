@@ -1434,6 +1434,13 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ labelEs: 'Hackeado', defaultPrice: 1 }),
       status: 404,
     },
+    // DX-205: historial de precios de un ítem.
+    {
+      name: 'GET /catalog/items/:id/price-history',
+      verb: 'get',
+      path: () => `/catalog/items/${a.catalogItemId}/price-history`,
+      status: 404,
+    },
     // --- inventory ---
     {
       name: 'GET /inventory/items/:id',

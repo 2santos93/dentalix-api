@@ -35,9 +35,14 @@ export class UpdateCatalogItemUseCase {
     private readonly noteTemplates: CatalogNoteTemplateReader,
   ) {}
 
+  /**
+   * `actorUserId`: quien edita (del token). Si cambia el precio por defecto,
+   * el repositorio deja la fila del historial de precios (DX-205) con él.
+   */
   async execute(
     id: string,
     patch: UpdateCatalogItemInput,
+    actorUserId: string,
   ): Promise<DentalCatalogItem> {
     const existing = await this.repo.findById(id);
     if (!existing) {
@@ -80,6 +85,6 @@ export class UpdateCatalogItemUseCase {
       normalizedPatch.code = normalizedPatch.code.trim();
     }
 
-    return this.repo.update(id, normalizedPatch);
+    return this.repo.update(id, normalizedPatch, actorUserId);
   }
 }

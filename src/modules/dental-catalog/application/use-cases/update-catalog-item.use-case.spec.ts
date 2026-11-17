@@ -9,6 +9,8 @@ import {
 } from '../../domain/ports/dental-catalog-repository.port';
 import type { CatalogNoteTemplateReader } from '../../domain/ports/catalog-note-template-reader.port';
 
+const ACTOR = '00000000-0000-4000-8000-0000000000aa';
+
 function fakeItem(
   overrides: Partial<DentalCatalogItem> = {},
 ): DentalCatalogItem {
@@ -76,10 +78,14 @@ describe('UpdateCatalogItemUseCase', () => {
     });
     const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
-    const result = await uc.execute(existing.id, {
-      labelEs: 'Caries profunda',
-      active: false,
-    });
+    const result = await uc.execute(
+      existing.id,
+      {
+        labelEs: 'Caries profunda',
+        active: false,
+      },
+      ACTOR,
+    );
 
     expect(result).toBe(updated);
     expect(receivedId).toBe(existing.id);
@@ -97,7 +103,7 @@ describe('UpdateCatalogItemUseCase', () => {
     const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     await expect(
-      uc.execute('missing-id', { active: false }),
+      uc.execute('missing-id', { active: false }, ACTOR),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -111,7 +117,7 @@ describe('UpdateCatalogItemUseCase', () => {
     const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
     await expect(
-      uc.execute(existing.id, { color: 'not-a-color' }),
+      uc.execute(existing.id, { color: 'not-a-color' }, ACTOR),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -129,7 +135,7 @@ describe('UpdateCatalogItemUseCase', () => {
     } as unknown as Parameters<typeof uc.execute>[1];
 
     await expect(
-      uc.execute(existing.id, maliciousPatch),
+      uc.execute(existing.id, maliciousPatch, ACTOR),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -146,7 +152,7 @@ describe('UpdateCatalogItemUseCase', () => {
     });
     const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
-    await uc.execute(existing.id, { category: 'X' });
+    await uc.execute(existing.id, { category: 'X' }, ACTOR);
 
     expect(receivedPatch).toEqual({ category: 'X' });
   });
@@ -164,7 +170,7 @@ describe('UpdateCatalogItemUseCase', () => {
     });
     const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
-    await uc.execute(existing.id, { code: '  CAR-002  ' });
+    await uc.execute(existing.id, { code: '  CAR-002  ' }, ACTOR);
 
     expect(receivedPatch?.code).toBe('CAR-002');
   });
@@ -184,7 +190,7 @@ describe('UpdateCatalogItemUseCase · allowDiscount (DX-105)', () => {
     });
     const uc = new UpdateCatalogItemUseCase(repo, noTemplates);
 
-    const result = await uc.execute('c1', { allowDiscount: false });
+    const result = await uc.execute('c1', { allowDiscount: false }, ACTOR);
 
     expect(received).toEqual({ allowDiscount: false });
     expect(result.allowDiscount).toBe(false);
@@ -217,7 +223,7 @@ describe('UpdateCatalogItemUseCase — plantilla de evolución (DX-455)', () => 
       repo,
       templates([{ id: 'tpl-1', name: 'Resina', active: true }]),
     );
-    await uc.execute('c1', { clinicalNoteTemplateId: 'tpl-1' });
+    await uc.execute('c1', { clinicalNoteTemplateId: 'tpl-1' }, ACTOR);
     expect(patches).toEqual([{ clinicalNoteTemplateId: 'tpl-1' }]);
   });
 
@@ -226,7 +232,7 @@ describe('UpdateCatalogItemUseCase — plantilla de evolución (DX-455)', () => 
     const uc = new UpdateCatalogItemUseCase(repo, {
       find: () => Promise.reject(new Error('no debe leerse')),
     });
-    await uc.execute('c1', { clinicalNoteTemplateId: null });
+    await uc.execute('c1', { clinicalNoteTemplateId: null }, ACTOR);
     expect(patches).toEqual([{ clinicalNoteTemplateId: null }]);
   });
 
@@ -234,7 +240,7 @@ describe('UpdateCatalogItemUseCase — plantilla de evolución (DX-455)', () => 
     const { repo, patches } = capture();
     const uc = new UpdateCatalogItemUseCase(repo, templates([]));
     await expect(
-      uc.execute('c1', { clinicalNoteTemplateId: 'tpl-x' }),
+      uc.execute('c1', { clinicalNoteTemplateId: 'tpl-x' }, ACTOR),
     ).rejects.toThrow(
       new NotFoundException(
         'Plantilla de evolución no encontrada en esta clínica',
@@ -250,7 +256,7 @@ describe('UpdateCatalogItemUseCase — plantilla de evolución (DX-455)', () => 
       templates([{ id: 'tpl-1', name: 'Resina', active: false }]),
     );
     await expect(
-      uc.execute('c1', { clinicalNoteTemplateId: 'tpl-1' }),
+      uc.execute('c1', { clinicalNoteTemplateId: 'tpl-1' }, ACTOR),
     ).rejects.toThrow(
       'La plantilla «Resina» está desactivada: actívala en Ajustes → Plantillas de evolución o elige otra.',
     );
@@ -265,7 +271,7 @@ describe('UpdateCatalogItemUseCase — plantilla de evolución (DX-455)', () => 
       reader,
     );
     await expect(
-      onDiagnosis.execute('c1', { clinicalNoteTemplateId: 'tpl-1' }),
+      onDiagnosis.execute('c1', { clinicalNoteTemplateId: 'tpl-1' }, ACTOR),
     ).rejects.toThrow(/Solo un procedimiento/);
 
     const linked = fakeItem({
@@ -277,7 +283,7 @@ describe('UpdateCatalogItemUseCase — plantilla de evolución (DX-455)', () => 
       reader,
     );
     await expect(
-      toDiagnosis.execute('c1', { kind: CatalogKind.DIAGNOSIS }),
+      toDiagnosis.execute('c1', { kind: CatalogKind.DIAGNOSIS }, ACTOR),
     ).rejects.toThrow(BadRequestException);
   });
 });
