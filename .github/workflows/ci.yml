@@ -230,6 +230,9 @@ jobs:
   # `timeout` son de un solo valor (no multiplican jobs) para que el número de
   # shards y el tope vivan en un único sitio. Tope: ~9 min por shard medidos →
   # 20 min deja más del 40 % de margen; el último paso avisa al pasar del 70 %.
+  # DX-396-bis (2026-11-17): con 3 shards ya iban a 14–20 min y el 1/3 se
+  # cancelaba en el tope (también en main). Se pasa a 4 en vez de subir el
+  # tope, para que el tope siga avisando del crecimiento.
   # `e2e-shards` comprueba que cada spec corre en exactamente un shard.
   e2e:
     name: E2E ${{ matrix.shard }}/${{ matrix.total }} (Postgres 16)
@@ -238,8 +241,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
-        total: [3]
+        shard: [1, 2, 3, 4]
+        total: [4]
         timeout: [20]
     services:
       postgres:
