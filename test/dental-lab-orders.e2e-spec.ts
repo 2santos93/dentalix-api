@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { LOCATION_NOT_ALLOWED_CODE } from '../src/shared/tenancy/location-access';
 import { createE2eApp } from './support/create-e2e-app';
 import {
   Clinic,
@@ -10,6 +11,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 import { LAB_CLOCK } from '../src/modules/lab-orders/domain/ports/lab-repository.port';
 import { LAB_MESSAGES } from '../src/modules/lab-orders/domain/lab-order-rules';
 import {
@@ -36,6 +41,7 @@ const NOW = new Date(`${FRIDAY}T12:00:00-04:00`);
 
 interface ErrorBody {
   message: string;
+  code?: string;
 }
 
 interface LabBody {
@@ -1125,6 +1131,127 @@ describe('Laboratorio dental — /dental-labs, /patients/:id/lab-orders, /lab-or
       expect(
         (own.body as PageBody).items.every((o) => o.locationId === locationB),
       ).toBe(true);
+    });
+  });
+
+  // DX-017-bis: lecturas por id y ficha del paciente acotadas a las sedes
+  // permitidas del miembro (DX-089, claim `loc`), como ya lo estaban las
+  // escrituras (SEC-014).
+  describe('sedes permitidas (DX-089) en las lecturas', () => {
+    let otherLocation: string;
+    let patient3: string;
+    let inMain: string;
+    let inOther: string;
+    let limited: string;
+
+    beforeAll(async () => {
+      otherLocation = idOf(
+        await call(
+          a,
+          a.adminToken,
+          'post',
+          '/locations',
+          locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Valencia' }),
+        ).expect(201),
+      );
+      patient3 = await createPatient(a, 'Mariana', '62000004');
+      inMain = idOf(
+        await call(
+          a,
+          dentist.token,
+          'post',
+          `/patients/${patient3}/lab-orders`,
+          {
+            labId: labA,
+            locationId: locationA,
+            ...CROWN,
+          },
+        ).expect(201),
+      );
+      inOther = idOf(
+        await call(
+          a,
+          dentist.token,
+          'post',
+          `/patients/${patient3}/lab-orders`,
+          {
+            labId: labA,
+            locationId: otherLocation,
+            ...CROWN,
+          },
+        ).expect(201),
+      );
+      // El mismo odontólogo, ahora limitado a la sede principal (último
+      // bloque del spec: nada después depende de él sin restricción).
+      await call(a, a.adminToken, 'put', `/staff/${dentist.userId}/locations`, {
+        locationIds: [locationA],
+      }).expect(200);
+      const dentistUser = await raw.user.findUniqueOrThrow({
+        where: { id: dentist.userId },
+      });
+      limited = await loginAs(app, a.host, dentistUser.email);
+    });
+
+    it('un odontólogo limitado a la sede principal no lee ni imprime la orden de otra sede: el mismo 403 que al escribirla', async () => {
+      const write = await call(a, limited, 'patch', `/lab-orders/${inOther}`, {
+        dueOn: '2026-12-15',
+      }).expect(403);
+      expect((write.body as ErrorBody).code).toBe(LOCATION_NOT_ALLOWED_CODE);
+      const read = await call(
+        a,
+        limited,
+        'get',
+        `/lab-orders/${inOther}`,
+      ).expect(403);
+      expect(read.body).toEqual(write.body);
+      const before = (await orderEvents(a, inOther)).length;
+      const print = await call(
+        a,
+        limited,
+        'get',
+        `/lab-orders/${inOther}/print`,
+      ).expect(403);
+      expect((print.body as ErrorBody).code).toBe(LOCATION_NOT_ALLOWED_CODE);
+      expect(await orderEvents(a, inOther)).toHaveLength(before);
+      // La de su sede, normal.
+      await call(a, limited, 'get', `/lab-orders/${inMain}`).expect(200);
+      await call(a, limited, 'get', `/lab-orders/${inMain}/print`).expect(200);
+    });
+
+    it('la ficha del paciente solo trae las órdenes de sus sedes (también en el total); sin restricción (ADMIN), todas', async () => {
+      const own = (
+        await call(
+          a,
+          limited,
+          'get',
+          `/patients/${patient3}/lab-orders`,
+        ).expect(200)
+      ).body as PageBody;
+      expect(own.items.map((o) => o.id)).toEqual([inMain]);
+      expect(own.total).toBe(1);
+      expect(own.items.every((o) => o.locationId === locationA)).toBe(true);
+      const all = (
+        await call(
+          a,
+          a.adminToken,
+          'get',
+          `/patients/${patient3}/lab-orders`,
+        ).expect(200)
+      ).body as PageBody;
+      expect(all.items.map((o) => o.id).sort()).toEqual(
+        [inMain, inOther].sort(),
+      );
+      expect(all.total).toBe(2);
+    });
+
+    it('la lista de la otra sede le da 403 LOCATION_NOT_ALLOWED', async () => {
+      const denied = await call(
+        a,
+        limited,
+        'get',
+        `/lab-orders?locationId=${otherLocation}`,
+      ).expect(403);
+      expect((denied.body as ErrorBody).code).toBe(LOCATION_NOT_ALLOWED_CODE);
     });
   });
 });

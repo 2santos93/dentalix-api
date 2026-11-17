@@ -62,7 +62,7 @@ async function setup() {
     admin,
   );
   audit.record.mockClear();
-  return { repo, audit, catalog, orders, lab, zirconia };
+  return { repo, audit, catalog, orders, lab, zirconia, tenantContext };
 }
 
 const CROWN = {
@@ -502,6 +502,84 @@ describe('DX-017 · órdenes de laboratorio', () => {
     expect(audit.record.mock.calls.at(-1)![0]).toMatchObject({
       action: 'PRINT',
       metadata: { reason: 'DENTAL_LAB_ORDER_PRINTED' },
+    });
+  });
+
+  describe('DX-017-bis · lecturas limitadas a las sedes permitidas (DX-089)', () => {
+    /** Una orden en cada sede del mismo paciente, creadas sin restricción. */
+    async function twoLocations() {
+      const ctx = await setup();
+      const inLoc1 = await ctx.orders.create(
+        'p1',
+        { labId: ctx.lab.id, locationId: 'loc-1', ...CROWN },
+        dentist,
+      );
+      const inLoc2 = await ctx.orders.create(
+        'p1',
+        { labId: ctx.lab.id, locationId: 'loc-2', ...CROWN },
+        dentist,
+      );
+      ctx.audit.record.mockClear();
+      const onlyLoc1 = <T>(fn: () => Promise<T>): Promise<T> =>
+        ctx.tenantContext.run('t1', undefined, fn, ['loc-1']);
+      return { ...ctx, inLoc1, inLoc2, onlyLoc1 };
+    }
+
+    it('get: la orden de otra sede da el mismo 403 que las escrituras; la de la suya, normal', async () => {
+      const { orders, inLoc1, inLoc2, onlyLoc1 } = await twoLocations();
+      const read = onlyLoc1(() => orders.get(inLoc2.id, 'DENTIST'));
+      await expect(read).rejects.toThrow(ForbiddenException);
+      const write = onlyLoc1(() =>
+        orders.update(inLoc2.id, { dueOn: '2026-12-01' }, dentist),
+      );
+      const [readError, writeError] = await Promise.all([
+        read.catch((e: unknown) => e),
+        write.catch((e: unknown) => e),
+      ]);
+      expect(writeError).toBeInstanceOf(ForbiddenException);
+      expect((readError as ForbiddenException).getResponse()).toEqual(
+        (writeError as ForbiddenException).getResponse(),
+      );
+      await expect(
+        onlyLoc1(() => orders.get(inLoc1.id, 'DENTIST')),
+      ).resolves.toMatchObject({ id: inLoc1.id, locationId: 'loc-1' });
+    });
+
+    it('print: la orden de otra sede da 403 y no deja evento de impresión', async () => {
+      const { orders, audit, inLoc1, inLoc2, onlyLoc1 } = await twoLocations();
+      await expect(
+        onlyLoc1(() => orders.print(inLoc2.id, dentist)),
+      ).rejects.toThrow(ForbiddenException);
+      expect(audit.record).not.toHaveBeenCalled();
+      await expect(
+        onlyLoc1(() => orders.print(inLoc1.id, dentist)),
+      ).resolves.toMatchObject({ order: { id: inLoc1.id } });
+    });
+
+    it('listForPatient: solo las órdenes de las sedes permitidas, también en el total', async () => {
+      const { orders, tenantContext, inLoc1, onlyLoc1 } = await twoLocations();
+      const page = await onlyLoc1(() =>
+        orders.listForPatient('p1', {}, 'DENTIST'),
+      );
+      expect(page.items.map((o) => o.id)).toEqual([inLoc1.id]);
+      expect(page.total).toBe(1);
+      const none = await tenantContext.run(
+        't1',
+        undefined,
+        () => orders.listForPatient('p1', {}, 'DENTIST'),
+        [],
+      );
+      expect(none).toMatchObject({ items: [], total: 0 });
+    });
+
+    it('sin restricción de sede: get, print y la lista del paciente ven todas las sedes', async () => {
+      const { orders, inLoc2 } = await twoLocations();
+      await expect(orders.get(inLoc2.id, 'DENTIST')).resolves.toMatchObject({
+        id: inLoc2.id,
+      });
+      await expect(orders.print(inLoc2.id, dentist)).resolves.toBeDefined();
+      const page = await orders.listForPatient('p1', {}, 'DENTIST');
+      expect(page.total).toBe(2);
     });
   });
 });

@@ -683,17 +683,24 @@ export class PrismaLabRepository implements LabRepository {
     patientId: string,
     page: number,
     pageSize: number,
+    allowedLocationIds?: readonly string[],
   ): Promise<{ ids: string[]; total: number }> {
+    const where: Prisma.DentalLabOrderWhereInput = {
+      patientId,
+      ...(allowedLocationIds !== undefined && {
+        locationId: { in: [...allowedLocationIds] },
+      }),
+    };
     return this.prisma.runWithTenant(async (tx) => {
       const [rows, total] = await Promise.all([
         tx.dentalLabOrder.findMany({
-          where: { patientId },
+          where,
           orderBy: [{ createdAt: 'desc' }, { number: 'desc' }],
           skip: (page - 1) * pageSize,
           take: pageSize,
           select: { id: true },
         }),
-        tx.dentalLabOrder.count({ where: { patientId } }),
+        tx.dentalLabOrder.count({ where }),
       ]);
       return { ids: rows.map((r) => r.id), total };
     });
