@@ -195,6 +195,31 @@ describe('postOpHistoryText', () => {
     );
   });
 
+  it('con cita, la nombra (la evolución nueva no se liga a ella)', () => {
+    expect(
+      postOpHistoryText({
+        status: 'DONE',
+        outcome: 'FINE',
+        procedureName: 'Extracción simple',
+        appointmentDate: '09/04/2027',
+        attempts: [
+          {
+            outcome: 'FINE',
+            note: null,
+            byName: 'Ana',
+            at: '12/04/2027 11:00',
+          },
+        ],
+      })
+        .split('\n')
+        .slice(0, 3),
+    ).toEqual([
+      'Control postoperatorio por llamada: Extracción simple.',
+      'Control de la cita del 09/04/2027.',
+      'Resultado: Bien.',
+    ]);
+  });
+
   it('No localizado tras tres intentos', () => {
     const at = '2026-11-17 09:00';
     const attempt = {

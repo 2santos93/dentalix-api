@@ -19,6 +19,11 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
+import {
+  holdLock,
+  settle,
+  waitForLockWaiters,
+} from './support/postgres-concurrency';
 
 // DX-566 · Control postoperatorio con el caso de uso del ítem, el repositorio
 // de planes y el de controles REALES sobre Postgres como dentalix_app (RLS
@@ -39,6 +44,7 @@ const checksRepo = new PrismaPostOpCheckRepository(
 const SUBDOMAIN = 'dx566-control-postop';
 const OTHER_SUBDOMAIN = 'dx566-control-postop-b';
 const EMAIL = `odontologa@${SUBDOMAIN}.test`;
+const COLLEAGUE_EMAIL = `colega@${SUBDOMAIN}.test`;
 /** Viernes 09/04/2027, 10:00 en Caracas. */
 const FRIDAY_DONE = new Date('2027-04-09T14:00:00.000Z');
 /** Lunes 12/04/2027, 11:00 en Caracas: el día de la llamada. */
@@ -50,6 +56,8 @@ interface Seeded {
   userId: string;
   sede: string;
   sinZona: string;
+  norte: string;
+  colegaId: string;
   extraction: DentalCatalogItem;
   resin: DentalCatalogItem;
   otherTenantId: string;
@@ -110,6 +118,22 @@ async function seed(): Promise<Seeded> {
       timeZone: null,
     }),
   });
+  const norte = await raw.location.create({
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
+      tenantId: tenant.id,
+      name: 'Sede Norte',
+    }),
+  });
+  const colega = await raw.user.create({
+    data: {
+      email: COLLEAGUE_EMAIL,
+      passwordHash: 'x',
+      fullName: 'Dr. Luis Méndez',
+    },
+  });
+  await raw.clinicMembership.create({
+    data: { tenantId: tenant.id, userId: colega.id, role: ClinicRole.DENTIST },
+  });
   // Lunes a viernes, sin festivos ni horario: el calendario más simple.
   await raw.locationWorkingCalendar.updateMany({
     where: { tenantId: tenant.id },
@@ -143,6 +167,8 @@ async function seed(): Promise<Seeded> {
     userId: user.id,
     sede: sede.id,
     sinZona: sinZona.id,
+    norte: norte.id,
+    colegaId: colega.id,
     extraction: await item('CIR-EXO-SIMPLE', 'Extracción simple', true),
     resin: await item('OP-RESINA-1', 'Resina de una superficie', false),
     otherTenantId: other.id,
@@ -231,6 +257,60 @@ async function appointmentFor(
   return { appointmentId: appointment.id, entryId: entry?.id ?? null };
 }
 
+/** Cita ligada al ítem a medida (la elección de la cita y el cierre DX-439). */
+async function linkedAppointment(
+  patientId: string,
+  itemId: string,
+  input: {
+    start: string;
+    locationId?: string;
+    status?: 'COMPLETED' | 'CANCELLED' | 'IN_CHAIR';
+    providerId?: string;
+  },
+): Promise<string> {
+  const start = new Date(input.start);
+  const appointment = await raw.appointment.create({
+    data: {
+      tenantId: s.tenantId,
+      locationId: input.locationId ?? s.sede,
+      patientId,
+      providerId: input.providerId ?? s.colegaId,
+      start,
+      end: new Date(start.getTime() + 30 * 60_000),
+      status: input.status ?? 'COMPLETED',
+      // En el sillón: la llegada y el paso al sillón van con la cita.
+      ...(input.status === 'IN_CHAIR'
+        ? { arrivedAt: start, seatedAt: start }
+        : {}),
+    },
+  });
+  await raw.appointmentPlanItem.create({
+    data: {
+      tenantId: s.tenantId,
+      patientId,
+      appointmentId: appointment.id,
+      planItemId: itemId,
+      active: true,
+    },
+  });
+  return appointment.id;
+}
+
+/** Una sede con zona y calendario de lunes a viernes (para casos aislados). */
+async function extraLocation(name: string): Promise<string> {
+  const location = await raw.location.create({
+    data: locationData(REGIONAL_CARACAS_FIXTURE, {
+      tenantId: s.tenantId,
+      name,
+    }),
+  });
+  await raw.locationWorkingCalendar.updateMany({
+    where: { locationId: location.id },
+    data: { workingWeekdays: [1, 2, 3, 4, 5] },
+  });
+  return location.id;
+}
+
 const done = (itemId: string, at = FRIDAY_DONE, sede = s.sede) =>
   inSede(
     () =>
@@ -264,13 +344,17 @@ describe('DX-566 · control postoperatorio (int)', () => {
   beforeAll(async () => {
     await prisma.onModuleInit();
     await purgeTenantsBySubdomain(raw, [SUBDOMAIN, OTHER_SUBDOMAIN]);
-    await raw.user.deleteMany({ where: { email: EMAIL } });
+    await raw.user.deleteMany({
+      where: { email: { in: [EMAIL, COLLEAGUE_EMAIL] } },
+    });
     s = await seed();
   }, 60_000);
 
   afterAll(async () => {
     await purgeTenantsBySubdomain(raw, [SUBDOMAIN, OTHER_SUBDOMAIN]);
-    await raw.user.deleteMany({ where: { email: EMAIL } });
+    await raw.user.deleteMany({
+      where: { email: { in: [EMAIL, COLLEAGUE_EMAIL] } },
+    });
     await Promise.all([raw.$disconnect(), prisma.$disconnect()]);
   });
 
@@ -398,15 +482,28 @@ describe('DX-566 · control postoperatorio (int)', () => {
     const patientId = await patient('Corregido');
     const itemId = await planItem(patientId);
     await done(itemId);
-    // Al martes 06/04/2027: la llamada pasa al miércoles 07.
-    await inSede(() =>
-      updateAt(MONDAY_CALL).execute(
-        itemId,
-        { completedAt: new Date('2027-04-06T15:00:00.000Z') },
-        ADMIN(),
-        audit(),
-      ),
-    );
+    // M1: el catálogo cambia sus días DESPUÉS del alta; el recálculo usa los
+    // que el control congeló (1), no los de hoy (5).
+    await raw.dentalCatalogItem.update({
+      where: { id: s.extraction.id },
+      data: { postOpCheckAfterDays: 5 },
+    });
+    try {
+      // Al martes 06/04/2027: la llamada pasa al miércoles 07.
+      await inSede(() =>
+        updateAt(MONDAY_CALL).execute(
+          itemId,
+          { completedAt: new Date('2027-04-06T15:00:00.000Z') },
+          ADMIN(),
+          audit(),
+        ),
+      );
+    } finally {
+      await raw.dentalCatalogItem.update({
+        where: { id: s.extraction.id },
+        data: { postOpCheckAfterDays: 1 },
+      });
+    }
     const [check] = await checksOf(itemId);
     expect(check).toMatchObject({
       status: 'PENDING',
@@ -534,7 +631,7 @@ describe('DX-566 · control postoperatorio (int)', () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
-  it('sin evolución en la cita: EVOLUCIÓN nueva ligada a la cita; tres «No contesta» = No localizado', async () => {
+  it('sin evolución en la cita: EVOLUCIÓN nueva SIN cita (nombra la cita en el texto) y la cita sigue en «Falta evolución»; tres «No contesta» = No localizado', async () => {
     const patientId = await patient('Evolucion');
     const itemId = await planItem(patientId);
     const { appointmentId } = await appointmentFor(patientId, itemId, false);
@@ -571,7 +668,7 @@ describe('DX-566 · control postoperatorio (int)', () => {
     });
     expect(entry).toMatchObject({
       patientId,
-      appointmentId,
+      appointmentId: null,
       reason: 'Control postoperatorio',
       performedById: s.userId,
       locationId: s.sede,
@@ -579,6 +676,10 @@ describe('DX-566 · control postoperatorio (int)', () => {
     expect(entry.notes).toContain(
       'Resultado: No localizado tras 3 intentos de llamada.',
     );
+    // «Control de la cita del 09/04/2027» (formato de la sede).
+    expect(entry.notes).toMatch(/Control de la cita del .*2027\./);
+    // La cita no queda documentada por la llamada: sigue sin evolución.
+    expect(await raw.clinicalEntry.count({ where: { appointmentId } })).toBe(0);
   });
 
   it('guardas de integridad como dentalix_app: identidad congelada, cerrado inmutable, sin DELETE; intentos append-only', async () => {
@@ -658,5 +759,214 @@ describe('DX-566 · control postoperatorio (int)', () => {
       ...before,
       patientId: kept,
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // Revisión independiente (I2)
+  // ---------------------------------------------------------------------
+
+  it('(a) DX-439: el DONE desde la cita atendida usa ESA cita aunque haya otra ligada más tarde', async () => {
+    const patientId = await patient('CierreCita');
+    const itemId = await planItem(patientId);
+    const closing = await linkedAppointment(patientId, itemId, {
+      start: '2027-04-09T20:00:00.000Z',
+    });
+    await linkedAppointment(patientId, itemId, {
+      start: '2027-04-09T21:00:00.000Z',
+    });
+    await inSede(() =>
+      updateAt(FRIDAY_DONE).execute(
+        itemId,
+        { status: 'DONE', appointmentId: closing },
+        ADMIN(),
+        audit(),
+      ),
+    );
+    const [check] = await checksOf(itemId);
+    expect(check).toMatchObject({
+      appointmentId: closing,
+      dueOn: DAY('2027-04-12'),
+    });
+  });
+
+  it('(b) la cita ligada elegida: la más tardía del mismo día civil en la sede, COMPLETED o en clínica; nunca otro día, otra sede ni CANCELLED', async () => {
+    const patientId = await patient('EleccionCita');
+    const itemId = await planItem(patientId);
+    // Candidatas descartadas (más tardías a propósito).
+    await linkedAppointment(patientId, itemId, {
+      start: '2027-04-10T14:30:00.000Z', // sábado: otro día
+    });
+    await linkedAppointment(patientId, itemId, {
+      start: '2027-04-09T22:30:00.000Z',
+      locationId: s.norte, // otra sede
+    });
+    await linkedAppointment(patientId, itemId, {
+      start: '2027-04-09T23:30:00.000Z',
+      status: 'CANCELLED',
+    });
+    // Válidas: gana la más tardía (en el sillón).
+    await linkedAppointment(patientId, itemId, {
+      start: '2027-04-09T19:30:00.000Z',
+    });
+    const latest = await linkedAppointment(patientId, itemId, {
+      start: '2027-04-09T21:30:00.000Z',
+      status: 'IN_CHAIR',
+    });
+    await done(itemId);
+    const [check] = await checksOf(itemId);
+    expect(check.appointmentId).toBe(latest);
+  });
+
+  it('(c) CORRECT de sede y profesional: el pendiente se muda a la sede y al profesional corregidos', async () => {
+    const patientId = await patient('CorrigeSede');
+    const itemId = await planItem(patientId);
+    await done(itemId);
+    await inSede(() =>
+      updateAt(MONDAY_CALL).execute(
+        itemId,
+        { performedLocationId: s.norte, performedById: s.colegaId },
+        ADMIN(),
+        audit(),
+      ),
+    );
+    const [check] = await checksOf(itemId);
+    expect(check).toMatchObject({
+      status: 'PENDING',
+      locationId: s.norte,
+      professionalId: s.colegaId,
+      dueOn: DAY('2027-04-12'),
+    });
+  });
+
+  it('(d) sede sin calendario: no se crea y el DONE sigue; horario con tramos solo el miércoles: la llamada cae el miércoles', async () => {
+    const sinCalendario = await extraLocation('Sede sin calendario');
+    await raw.locationWorkingCalendar.deleteMany({
+      where: { locationId: sinCalendario },
+    });
+    const p1 = await patient('SinCalendario');
+    const i1 = await planItem(p1);
+    const out = await done(i1, FRIDAY_DONE, sinCalendario);
+    expect(out.status).toBe('DONE');
+    expect(await checksOf(i1)).toEqual([]);
+
+    const soloMiercoles = await extraLocation('Sede solo miércoles');
+    const schedule = await raw.locationSchedule.create({
+      data: {
+        tenantId: s.tenantId,
+        locationId: soloMiercoles,
+        timezone: 'America/Caracas',
+      },
+    });
+    await raw.locationScheduleRange.create({
+      data: {
+        tenantId: s.tenantId,
+        scheduleId: schedule.id,
+        weekday: 3,
+        startMinute: 8 * 60,
+        endMinute: 17 * 60,
+      },
+    });
+    const p2 = await patient('SoloMiercoles');
+    const i2 = await planItem(p2);
+    await done(i2, FRIDAY_DONE, soloMiercoles);
+    const [check] = await checksOf(i2);
+    expect(check.dueOn).toEqual(DAY('2027-04-14'));
+  });
+
+  it('(e) carrera intento contra CLEAR: el CLEAR que llega antes anula y el intento recibe 409 sin dejar nada', async () => {
+    const patientId = await patient('Carrera');
+    const itemId = await planItem(patientId);
+    await done(itemId);
+    const [check] = await checksOf(itemId);
+    const held = await holdLock(
+      raw,
+      (tx) =>
+        tx.$queryRaw`SELECT 1 FROM "post_op_checks" WHERE "id" = ${check.id}::uuid FOR UPDATE`,
+    );
+    const clear = settle(
+      inSede(() =>
+        updateAt(FRIDAY_DONE).execute(
+          itemId,
+          { status: 'ACCEPTED' },
+          ADMIN(),
+          audit(),
+        ),
+      ),
+    );
+    await waitForLockWaiters(raw, [held.pid], 1);
+    const attempt = settle(
+      inSede(() =>
+        checksAt(MONDAY_CALL).recordAttempt(
+          check.id,
+          { outcome: 'FINE' },
+          ADMIN(),
+          audit(),
+        ),
+      ),
+    );
+    await waitForLockWaiters(raw, [held.pid], 2);
+    held.release();
+    await held.done;
+    expect(await clear).toMatchObject({ status: 'fulfilled' });
+    const failed = await attempt;
+    expect(failed).toMatchObject({ status: 'rejected' });
+    expect(JSON.stringify(failed)).toContain('ya está cerrado');
+    expect(
+      await raw.postOpCheck.findUniqueOrThrow({ where: { id: check.id } }),
+    ).toMatchObject({ status: 'CANCELLED', clinicalEntryId: null });
+    expect(
+      await raw.postOpCheckAttempt.count({ where: { checkId: check.id } }),
+    ).toBe(0);
+  });
+
+  it('(f) DONE tras CLEAR crea un PENDING nuevo (el anulado se queda)', async () => {
+    const patientId = await patient('RehechoTrasClear');
+    const itemId = await planItem(patientId);
+    await done(itemId);
+    await inSede(() =>
+      updateAt(FRIDAY_DONE).execute(
+        itemId,
+        { status: 'ACCEPTED' },
+        ADMIN(),
+        audit(),
+      ),
+    );
+    await done(itemId);
+    const checks = await checksOf(itemId);
+    expect(checks.map((c) => c.status)).toEqual(['CANCELLED', 'PENDING']);
+    expect(checks[1].id).not.toBe(checks[0].id);
+  });
+
+  it('(g) sede sin formato regional: cerrar da 409 LOCATION_LOCALE_REQUIRED y no queda nada', async () => {
+    const sinFormato = await extraLocation('Sede sin formato');
+    const patientId = await patient('SinFormato');
+    const itemId = await planItem(patientId);
+    await done(itemId, FRIDAY_DONE, sinFormato);
+    const [check] = await checksOf(itemId);
+    await raw.location.update({
+      where: { id: sinFormato },
+      data: { locale: null },
+    });
+    await expect(
+      inSede(
+        () =>
+          checksAt(MONDAY_CALL).recordAttempt(
+            check.id,
+            { outcome: 'FINE' },
+            ADMIN(),
+            audit(sinFormato),
+          ),
+        sinFormato,
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'LOCATION_LOCALE_REQUIRED' },
+    });
+    expect(
+      await raw.postOpCheck.findUniqueOrThrow({ where: { id: check.id } }),
+    ).toMatchObject({ status: 'PENDING' });
+    expect(
+      await raw.postOpCheckAttempt.count({ where: { checkId: check.id } }),
+    ).toBe(0);
   });
 });

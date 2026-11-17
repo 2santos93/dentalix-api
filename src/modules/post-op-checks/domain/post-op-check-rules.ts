@@ -134,6 +134,8 @@ export function postOpHistoryText(input: {
   status: 'DONE' | 'UNREACHABLE';
   outcome: PostOpCheckOutcomeCode | null;
   procedureName: string;
+  /** Fecha de la cita del procedimiento ya formateada; null si no hay cita. */
+  appointmentDate?: string | null;
   attempts: readonly HistoryAttempt[];
 }): string {
   const result =
@@ -143,6 +145,9 @@ export function postOpHistoryText(input: {
   const last = input.attempts[input.attempts.length - 1];
   const lines = [
     `Control postoperatorio por llamada: ${input.procedureName}.`,
+    ...(input.appointmentDate
+      ? [`Control de la cita del ${input.appointmentDate}.`]
+      : []),
     `Resultado: ${result}.`,
   ];
   if (last?.note) lines.push(`Nota: ${last.note}`);

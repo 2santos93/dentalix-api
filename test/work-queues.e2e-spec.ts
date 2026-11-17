@@ -285,6 +285,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
           professionalId: dentistId,
           catalogItemId: doneItem.catalogItemId,
           procedureName: 'Extracción simple',
+          afterDays: 1,
           dueOn: new Date(`${today()}T00:00:00Z`),
         },
       });

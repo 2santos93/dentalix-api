@@ -112,6 +112,9 @@ describe('DX-566: migraciones aditivas', () => {
     expect(sql).toContain(
       'CREATE UNIQUE INDEX "clinical_entry_addenda_tenant_patient_id_key" ON "clinical_entry_addenda"("tenantId", "patientId", "id");',
     );
+    // M1: los días del catálogo, congelados al crear el control.
+    expect(sql).toContain('"afterDays" SMALLINT NOT NULL,');
+    expect(sql).toContain('AND "afterDays" BETWEEN 1 AND 30');
   });
 
   it('la guarda abre la puerta de la fusión y la lista de la fusión incluye los controles', () => {

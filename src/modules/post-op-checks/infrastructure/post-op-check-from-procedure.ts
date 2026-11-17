@@ -166,13 +166,14 @@ export async function postOpCheckFromProcedure(
   const [created] = await tx.$queryRaw<{ id: string }[]>`
     INSERT INTO "post_op_checks"
       ("id", "tenantId", "patientId", "planItemId", "appointmentId", "locationId",
-       "professionalId", "catalogItemId", "procedureName", "dueOn", "status",
+       "professionalId", "catalogItemId", "procedureName", "afterDays", "dueOn", "status",
        "createdAt", "updatedAt")
     VALUES
       (gen_random_uuid(), ${tenantId}::uuid, ${item.patientId}::uuid, ${item.id}::uuid,
        ${appointmentId}::uuid, ${item.performedLocationId}::uuid,
        ${item.performedById}::uuid, ${item.catalogItemId}::uuid,
-       left(btrim(${catalog.procedureName}), 200), ${scheduling.dueOn}::date, 'PENDING',
+       left(btrim(${catalog.procedureName}), 200), ${catalog.afterDays}::smallint,
+       ${scheduling.dueOn}::date, 'PENDING',
        pg_catalog.timezone('UTC', pg_catalog.now()), pg_catalog.timezone('UTC', pg_catalog.now()))
     ON CONFLICT ("tenantId", "planItemId") WHERE "status" = 'PENDING' DO NOTHING
     RETURNING "id"`;
@@ -250,7 +251,8 @@ export async function cancelPendingPostOpCheck(
 /**
  * DX-566 · D4. Un ADMIN corrige un ítem DONE (CORRECT) con el control aún
  * PENDING: se recalculan el día de la llamada y la sede (y el profesional)
- * con la nueva fecha o sede. Si la sede nueva no tiene zona o calendario, el
+ * con la nueva fecha o sede y los días que el control congeló al crearse
+ * (`afterDays`), aunque el catálogo haya cambiado después. Si la sede nueva no tiene zona o calendario, el
  * control se queda como estaba (aviso en el log). Auditado si cambia algo.
  */
 export async function reschedulePendingPostOpCheck(
@@ -272,10 +274,8 @@ export async function reschedulePendingPostOpCheck(
     }[]
   >`
     SELECT c."id", c."dueOn", c."locationId", c."professionalId",
-           k."postOpCheckAfterDays"::int AS "afterDays"
+           c."afterDays"::int AS "afterDays"
       FROM "post_op_checks" c
-      JOIN "dental_catalog_items" k
-        ON k."tenantId" = c."tenantId" AND k."id" = c."catalogItemId"
      WHERE c."tenantId" = ${tenantId}::uuid
        AND c."planItemId" = ${item.id}::uuid
        AND c."status" = 'PENDING'

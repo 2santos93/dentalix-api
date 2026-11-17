@@ -20,7 +20,9 @@
 --                        control a su adenda (tabla no caliente, append-only).
 --   post_op_checks       el control. FK COMPUESTAS por clínica a sede,
 --                        paciente, ítem del plan y cita (los dos del MISMO
---                        paciente), procedimiento del catálogo, evolución y
+--                        paciente), procedimiento del catálogo (con sus
+--                        días congelados en "afterDays": el recálculo usa
+--                        los de la creación), evolución y
 --                        adenda (del MISMO paciente); FK a users del
 --                        profesional y de quien lo cierra. Uno PENDING por
 --                        ítem (único parcial: dos DONE no duplican). Estado y
@@ -100,6 +102,7 @@ CREATE TABLE "post_op_checks" (
     "professionalId" UUID NOT NULL,
     "catalogItemId" UUID NOT NULL,
     "procedureName" TEXT NOT NULL,
+    "afterDays" SMALLINT NOT NULL,
     "dueOn" DATE NOT NULL,
     "status" "PostOpCheckStatus" NOT NULL DEFAULT 'PENDING',
     "outcome" "PostOpCheckOutcome",
@@ -149,6 +152,7 @@ CREATE TABLE "post_op_checks" (
       FOREIGN KEY ("closedById") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "post_op_checks_values_check" CHECK (
       char_length(btrim("procedureName")) BETWEEN 1 AND 200
+      AND "afterDays" BETWEEN 1 AND 30
     ),
     -- Cada estado con sus columnas del cierre, y solo con ellas:
     --   PENDING      nada del cierre;

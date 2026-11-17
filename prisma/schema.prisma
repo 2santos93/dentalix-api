@@ -9083,6 +9083,9 @@ model PostOpCheck {
   catalogItemId   String                   @db.Uuid
   /// Nombre del procedimiento congelado al crear el control.
   procedureName   String
+  /// Días hábiles del catálogo al crear el control (1–30, CHECK): el
+  /// recálculo por una corrección del ítem usa estos, no los de hoy.
+  afterDays       Int                      @db.SmallInt
   /// Día civil de la llamada en la zona de la sede.
   dueOn           DateTime                 @db.Date
   status          PostOpCheckStatus        @default(PENDING)

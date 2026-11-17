@@ -32,9 +32,6 @@ import type {
 
 const dayOf = (d: Date): string => d.toISOString().slice(0, 10);
 
-/** Estados de cita en los que la evolución no se liga (como el alta normal). */
-const NOT_ATTENDED = new Set(['CANCELLED', 'NO_SHOW']);
-
 @Injectable()
 export class PrismaPostOpCheckRepository implements PostOpCheckRepository {
   constructor(
@@ -348,9 +345,9 @@ export class PrismaPostOpCheckRepository implements PostOpCheckRepository {
   /**
    * DX-566 · D6: el desenlace en la historia clínica, en la transacción del
    * cierre. Si la cita del control tiene evolución viva, ADENDA a la más
-   * reciente; si no (o no hay cita), EVOLUCIÓN nueva ligada a la cita (si se
-   * puede: viva y no cancelada ni «no asistió») y al paciente. Motivo fijo,
-   * autor = quien registra, inmutables (DX-038).
+   * reciente; si no (o no hay cita), EVOLUCIÓN nueva del paciente SIN cita,
+   * en la sede del control y con fecha de hoy (el texto nombra la cita).
+   * Motivo fijo, autor = quien registra, inmutables (DX-038).
    */
   private async writeHistory(
     tx: Prisma.TransactionClient,
@@ -387,10 +384,21 @@ export class PrismaPostOpCheckRepository implements PostOpCheckRepository {
         JOIN "users" u ON u."id" = t."byId"
        WHERE t."tenantId" = ${tenantId}::uuid AND t."checkId" = ${check.id}::uuid
        ORDER BY t."at", t."id"`;
+    // La cita del procedimiento, para nombrarla en el texto (la evolución
+    // nueva no se liga a ella: ver abajo).
+    const appointment = check.appointmentId
+      ? await tx.appointment.findFirst({
+          where: { id: check.appointmentId, patientId: check.patientId },
+          select: { start: true },
+        })
+      : null;
     const text = postOpHistoryText({
       status: input.status,
       outcome: input.outcome,
       procedureName: check.procedureName,
+      appointmentDate: appointment
+        ? fmt.date(appointment.start, timeZone)
+        : null,
       attempts: attempts.map((a) => ({
         outcome: a.outcome,
         note: a.note,
@@ -420,29 +428,22 @@ export class PrismaPostOpCheckRepository implements PostOpCheckRepository {
       }
     }
 
-    const appointment = check.appointmentId
-      ? await tx.appointment.findFirst({
-          where: {
-            id: check.appointmentId,
-            patientId: check.patientId,
-            deletedAt: null,
-          },
-          select: { id: true, status: true, locationId: true },
-        })
-      : null;
-    const linked =
-      appointment && !NOT_ATTENDED.has(appointment.status) ? appointment : null;
+    // Evolución nueva SUELTA (sin cita): es la llamada de hoy, no la
+    // atención de la cita. Ligada a una cita de otro día rompería la regla
+    // de la fecha de la evolución (ENTRY_DATE_OTHER_DAY) y la sacaría de
+    // «Falta evolución» en Pendiente de cerrar sin haberla documentado. El
+    // texto nombra la cita.
     const entry = await tx.clinicalEntry.create({
       data: {
         tenantId,
         patientId: check.patientId,
-        locationId: linked?.locationId ?? check.locationId,
+        locationId: check.locationId,
         entryDate: new Date(),
         reason: POST_OP_HISTORY_REASON,
         notes: text,
         performedById: input.actorId,
         authorProfessionalLicense: await membershipLicense(tx, input.actorId),
-        appointmentId: linked?.id ?? null,
+        appointmentId: null,
       },
       select: { id: true },
     });
