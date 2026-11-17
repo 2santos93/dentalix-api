@@ -439,6 +439,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-019: Ajustes › Datos de la clínica.
   'GET /clinic/settings': ADMIN_ONLY,
   'PATCH /clinic/settings': ADMIN_ONLY,
+  // DX-091: cierre contable (ajustes y excepciones), solo ADMIN; el vigente
+  // en la sede, quien registra abonos (también la asistente con el permiso).
+  'GET /clinic/settings/financial-lock': ADMIN_ONLY,
+  'PATCH /clinic/settings/financial-lock': ADMIN_ONLY,
+  'GET /payments/period-lock': orPermission(BILLING, 'PAYMENT_REGISTER'),
   'POST /clinic/settings/logo': ADMIN_ONLY,
   'DELETE /clinic/settings/logo': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,

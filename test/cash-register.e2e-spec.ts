@@ -436,6 +436,8 @@ describe('Caja — GET /payments (e2e)', () => {
       // SEC-043: sin arqueo ciego, nunca se oculta.
       amountHidden: false,
       canVoid: true,
+      // DX-091: sin cierre contable, nada está cerrado.
+      periodLocked: false,
       registeredOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) as string,
       registeredToday: true,
       paidAt: '2026-10-01T17:00:00.000Z',

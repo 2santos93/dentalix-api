@@ -454,11 +454,20 @@ export class AccountStatementMovementDto {
     nullable: true,
     description:
       'DX-432: por qué este abono no se anula aunque su rol pueda (es ' +
-      'referencia de una devolución, que no se deshace), con el texto del ' +
+      'referencia de una devolución, que no se deshace; DX-091: o es de un ' +
+      'período contable cerrado), con el texto del ' +
       '409 de `DELETE /payments/:id`. `null` si nada lo impide. La ' +
       'interfaz lo pinta como «Anular» deshabilitado con esta explicación.',
   })
   voidBlockedReason!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-091: el día del abono (en su sede) está en un período contable cerrado. ' +
+      'Entonces `canVoid` es `false` y `voidBlockedReason` lo explica, salvo para el ' +
+      'ADMIN con la exención de la clínica, que anula indicando `lockOverrideReason`.',
+  })
+  periodLocked!: boolean;
 
   @ApiProperty({ description: 'Abono anulado: se lista pero no suma.' })
   voided!: boolean;

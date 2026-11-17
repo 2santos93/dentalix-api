@@ -11,6 +11,13 @@ import {
   siblingRejectionBlockedMessage,
 } from '../../domain/plan-options';
 import type { PaymentPlanCancellation } from '../../domain/ports/treatment-plan-repository.port';
+import { PERIOD_LOCKED_PLAN_STATUS_MESSAGE } from '../../../financial-lock/domain/financial-lock';
+import { guardFinancialLock } from '../../../financial-lock/infrastructure/financial-lock-tx';
+import {
+  dueDayOf,
+  paymentPlanLocationId,
+} from '../../../payment-plans/domain/installment-due';
+import { loadTenantZones } from '../../../../shared/locations/reference-location';
 
 export const OTHER_OPTION_ALREADY_ACCEPTED_MESSAGE =
   'Otra opción de este grupo ya está aceptada: un grupo admite una sola opción elegida.';
@@ -143,6 +150,43 @@ export async function cancelActivePaymentPlans(
   cancellation: PaymentPlanCancellation,
 ): Promise<void> {
   if (planIds.length === 0) return;
+  // DX-091: cancelar un plan de cuotas deja sin efecto todas sus cuotas; si
+  // alguna venció en un período contable cerrado, eso cambia lo que se debía
+  // en él (la misma regla que DELETE …/payment-plan). Aquí no hay excepción
+  // del ADMIN: el cambio de estado del plan no trae motivo; la excepción va
+  // por la cancelación explícita del plan de cuotas. La BD lo repite
+  // (payment_plans_financial_lock_guard).
+  const active = await tx.paymentPlan.findMany({
+    where: {
+      treatmentPlanId: { in: [...planIds] },
+      status: 'ACTIVE',
+      deletedAt: null,
+    },
+    select: {
+      tenantId: true,
+      installments: { select: { dueDate: true } },
+      plan: { select: { acceptedLocationId: true, presentedLocationId: true } },
+    },
+  });
+  if (active.length === 0) return;
+  const tenantId = active[0].tenantId;
+  await guardFinancialLock(tx, {
+    tenantId,
+    operation: 'PAYMENT_PLAN_CANCEL',
+    probes: async () => {
+      const zoneOf = await loadTenantZones(tx, tenantId);
+      return active.flatMap((paymentPlan) => {
+        const timeZone = zoneOf(paymentPlanLocationId(paymentPlan.plan));
+        return paymentPlan.installments.map((i) => ({
+          day: dueDayOf(i.dueDate),
+          timeZone,
+        }));
+      });
+    },
+    now: new Date(),
+    actor: null,
+    lockedMessage: PERIOD_LOCKED_PLAN_STATUS_MESSAGE,
+  });
   await tx.paymentPlan.updateMany({
     where: {
       treatmentPlanId: { in: [...planIds] },

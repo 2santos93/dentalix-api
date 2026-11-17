@@ -36,6 +36,7 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
     collectedAmount: overrides.amount ?? 150000,
     amountHidden: false,
     canVoid: false,
+    periodLocked: false,
     registeredOn: '2026-10-15',
     registeredToday: false,
     ...overrides,

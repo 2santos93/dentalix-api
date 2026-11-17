@@ -7,6 +7,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { PaymentMethod } from '@prisma/client';
+import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../../shared/validation/idempotency-key';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import { PAYMENT_CLOCK, type PaymentClock } from './void-payment.use-case';
@@ -99,6 +100,12 @@ export interface RecordPaymentOptions {
   rateOverride?: number;
   /** Ver `PaymentInsertHook`. */
   afterInsertInTx?: PaymentInsertHook;
+  /**
+   * DX-091: quién registra y su motivo para hacerlo en un período contable
+   * cerrado (ver `CreatePaymentRepoInput.lockActor`). No entra en la huella
+   * de idempotencia, como el motivo de una referencia repetida.
+   */
+  lockActor?: LockActor | null;
 }
 
 export const RATE_OVERRIDE_PAIR_MESSAGE =
@@ -363,6 +370,7 @@ export class RecordPaymentUseCase {
       frozenRate,
       frozenRateOverride: options.rateOverride !== undefined,
       afterInsertInTx: options.afterInsertInTx,
+      lockActor: options.lockActor ?? null,
     };
 
     let payment: Payment;

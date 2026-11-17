@@ -1,4 +1,8 @@
 import {
+  FINANCIAL_LOCK_REPOSITORY,
+  type FinancialLockRepository,
+} from '../../../financial-lock/domain/ports/financial-lock-repository.port';
+import {
   BadRequestException,
   Inject,
   Injectable,
@@ -68,6 +72,10 @@ export class GetAccountStatementUseCase {
     @Optional()
     @Inject(CURRENCY_DIGITS_CATALOG)
     private readonly currencyDigits?: CurrencyDigitsCatalog,
+    // DX-091: el cierre contable decide `periodLocked` y quita `canVoid`.
+    @Optional()
+    @Inject(FINANCIAL_LOCK_REPOSITORY)
+    private readonly financialLock?: Pick<FinancialLockRepository, 'get'>,
   ) {}
 
   /** `actor` (del token) solo decide el `canVoid` de cada movimiento. */
@@ -112,6 +120,7 @@ export class GetAccountStatementUseCase {
       movementsFrom: from,
       movementsTo: to,
       planBalances,
+      financialLock: this.financialLock ? await this.financialLock.get() : null,
     });
 
     return {
