@@ -1,3 +1,4 @@
+import { localizedTextEntries } from '../../../../shared/i18n/localized-text';
 import {
   BadRequestException,
   ConflictException,
@@ -46,6 +47,13 @@ export interface CreateConfirmationLinkResult {
   whatsappPhone: string | null;
   /** Lo que el mensaje prellenado cuenta de la cita (sin nada clínico). */
   appointment: PublicAppointmentView;
+  /**
+   * DX-564: idioma preferido del paciente (BCP 47; null = el de la clínica),
+   * para que la web componga el mensaje de WhatsApp en su idioma.
+   */
+  patientLanguage: string | null;
+  /** DX-564: todas las variantes de las indicaciones previas del tipo. */
+  preVisitInstructions: { language: string; text: string }[];
 }
 
 /**
@@ -108,6 +116,10 @@ export class CreateConfirmationLinkUseCase {
         appointment.locationPhoneRegion,
       ),
       appointment: toPublicAppointmentView(appointment),
+      patientLanguage: appointment.patientPreferredLanguage,
+      preVisitInstructions: localizedTextEntries(
+        appointment.preVisitInstructions,
+      ),
     };
   }
 }

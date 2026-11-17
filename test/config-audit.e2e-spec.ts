@@ -318,6 +318,8 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
                 color: '#3366FF',
                 active: true,
                 isUrgent: false,
+                // DX-564: idiomas con indicaciones (el texto va oculto).
+                preVisitInstructionLanguages: [],
               },
             },
           },
@@ -344,6 +346,8 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
                 color: '#3366FF',
                 active: true,
                 isUrgent: false,
+                // DX-564: idiomas con indicaciones (el texto va oculto).
+                preVisitInstructionLanguages: [],
               },
             },
           },

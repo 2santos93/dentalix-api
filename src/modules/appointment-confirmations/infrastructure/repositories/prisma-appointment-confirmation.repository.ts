@@ -1,3 +1,4 @@
+import { localizedTextMapFromJson } from '../../../../shared/i18n/localized-text';
 import { isHourCycle } from '../../../../shared/locations/location-regional';
 import { DEFAULT_CALENDAR_ALARM_HOURS } from '../../../../shared/calendar/appointment-calendar';
 import { MOVABLE_STATUSES } from '../../../waitlist/domain/opening-candidates';
@@ -69,6 +70,9 @@ const APPOINTMENT_SELECT = {
       reminderSettings: { select: { calendarAlarmHours: true } },
     },
   },
+  // DX-564: las indicaciones previas de su tipo (texto general de la clínica,
+  // nada del paciente); aunque el tipo esté retirado, la cita lo conserva.
+  appointmentType: { select: { preVisitInstructions: true } },
 } as const satisfies Prisma.AppointmentSelect;
 
 type SelectedAppointment = Prisma.AppointmentGetPayload<{
@@ -196,6 +200,9 @@ export class PrismaAppointmentConfirmationRepository implements AppointmentConfi
       locationHourCycle: isHourCycle(a.location.hourCycle)
         ? a.location.hourCycle
         : null,
+      preVisitInstructions: localizedTextMapFromJson(
+        a.appointmentType?.preVisitInstructions,
+      ),
     };
   }
 

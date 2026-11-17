@@ -10,6 +10,7 @@ import {
   CLINIC_LANGUAGE,
   resolveCatalogLanguage,
 } from '../../../shared/i18n/patient-language';
+import { localizedTextEntries } from '../../../shared/i18n/localized-text';
 import {
   DEFAULT_EMAIL_LOCALE,
   EMAIL_LOCALES,
@@ -137,6 +138,40 @@ export interface PublicConfirmationView {
    * página lo avisa y cancelar exige `acknowledgePolicy`.
    */
   isLate: boolean;
+  /**
+   * DX-564: indicaciones previas del tipo de la cita, TODAS sus variantes
+   * (la página deja cambiar de idioma y elige con la regla de DX-497). Texto
+   * general de la clínica por tipo de cita, no dato del paciente: no rompe
+   * «nada clínico». Solo con el enlace vigente y la cita futura y no
+   * cancelada; si no, vacía.
+   */
+  preVisitInstructions: PreVisitInstructionView[];
+}
+
+/** DX-564: una variante de las indicaciones previas (texto plano). */
+export interface PreVisitInstructionView {
+  language: string;
+  text: string;
+}
+
+/** DX-564: las indicaciones solo se enseñan para una cita que aún va a ocurrir. */
+export function preVisitInstructionsFor(
+  status: ConfirmationState,
+  appointment: Pick<
+    ConfirmationAppointment,
+    'start' | 'status' | 'preVisitInstructions'
+  > | null,
+  now: Date,
+): PreVisitInstructionView[] {
+  if (
+    status === 'EXPIRED' ||
+    !appointment ||
+    appointment.status === 'CANCELLED' ||
+    appointment.start.getTime() <= now.getTime()
+  ) {
+    return [];
+  }
+  return localizedTextEntries(appointment.preVisitInstructions);
 }
 
 export function toPublicAppointmentView(
@@ -257,5 +292,6 @@ export function toPublicConfirmationView(
       pending && appointment
         ? isLateLinkCancellation(appointment.start, now, policy)
         : false,
+    preVisitInstructions: preVisitInstructionsFor(status, appointment, now),
   };
 }
