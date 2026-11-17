@@ -124,7 +124,7 @@ describe('Producción agendada y previsión del mes en la BD (DX-567, int)', () 
 
     // 11/11: sin tratamiento ligado (cuentan y se listan): sin vínculos,
     // con solo un vínculo borrado y con un ítem de un plan borrado. No
-    // cuentan: la cita borrada y la de un paciente eliminado.
+    // cuenta la cita borrada. (Los archivados, en «casos de borde».)
     await appointment(c, '2026-11-11');
     const [i999] = await plan(c, [{ price: 999 }]);
     await appointment(c, '2026-11-11', { deletedLinks: [i999] });
@@ -133,13 +133,6 @@ describe('Producción agendada y previsión del mes en la BD (DX-567, int)', () 
     });
     await appointment(c, '2026-11-11', { items: [i444] });
     await appointment(c, '2026-11-11', { deleted: true });
-    const gone = await c.seed.patient('Eliminado');
-    const [i333] = await plan(c, [{ price: 333 }], { patientId: gone });
-    await appointment(c, '2026-11-11', { items: [i333], patientId: gone });
-    await raw.patient.update({
-      where: { id: gone },
-      data: { deletedAt: caracas('2026-11-12') },
-    });
 
     // 12/11: una cita con un ítem PROPUESTO (ligada, 0) y una vencida sin
     // cerrar con un ítem de 80 que se reagendó al 19/11 (dos vínculos vivos):
@@ -529,6 +522,160 @@ describe('Producción agendada y previsión del mes en la BD (DX-567, int)', () 
         asB.run(b.tenantId, () => crossedRepo.forecast(NOW, scope, null)),
       ),
     ).rejects.toThrow(ConflictException);
+  });
+});
+
+describe('Producción agendada: casos de borde (DX-567, int)', () => {
+  const { context, prisma, useCase, fetchRates } = build(() => NOW);
+  let c: ScheduledClinic;
+  let archived: string;
+
+  const report = (extra: Partial<ScheduledProductionInput> = {}) =>
+    context.run(c.tenantId, () =>
+      useCase.execute({
+        ...NOVEMBER,
+        actor: {
+          userId: c.dentist.userId,
+          role: ClinicRole.ADMIN,
+          permissions: [],
+        },
+        allowedLocationIds: 'ALL',
+        ...extra,
+      }),
+    );
+
+  beforeAll(async () => {
+    await prisma.onModuleInit();
+    // Tasas AUTOMÁTICAS: sin la caché del proveedor de ese día, «sin tasa»
+    // (nunca se le llama). El 06/11 no tiene caché en esta base.
+    c = await clinic('dx567-edge', { rateSource: 'AUTOMATIC' });
+    await raw.exchangeRateSnapshot.deleteMany({
+      where: { date: '2026-11-06' },
+    });
+
+    // Paciente ARCHIVADO (deletedAt): sus citas siguen contando y la sin
+    // tratamiento se lista marcada.
+    archived = await c.seed.patient('Archivado');
+    const [i333] = await plan(c, [{ price: 333 }], { patientId: archived });
+    await appointment(c, '2026-11-03', { items: [i333], patientId: archived });
+    await appointment(c, '2026-11-04', { patientId: archived });
+    await raw.patient.update({
+      where: { id: archived },
+      data: { deletedAt: caracas('2026-11-12') },
+    });
+
+    // Reagendado a una cita nueva que luego se CANCELÓ: cuenta en la vieja.
+    const [i70] = await plan(c, [{ price: 70 }]);
+    await appointment(c, '2026-11-05', { items: [i70] });
+    await appointment(c, '2026-11-21', { items: [i70], status: 'CANCELLED' });
+
+    // Aceptado ligado a una cita de este mes y a una del siguiente: cuenta en
+    // la de diciembre (no es pendiente de noviembre).
+    const [i25] = await plan(c, [{ price: 25 }]);
+    await appointment(c, '2026-11-24', { items: [i25] });
+    await appointment(c, '2026-12-03', { items: [i25] });
+
+    // Bolívares sin tasa del día (AUTOMÁTICA, sin caché).
+    const [ves] = await plan(c, [{ price: 500 }], { currency: 'VES' });
+    await appointment(c, '2026-11-06', { items: [ves] });
+
+    // Realizado del mes SIN sede (ni quién): fuera de lo producido, avisado.
+    await plan(c, [
+      { price: 40, status: 'DONE', completedAt: caracas('2026-11-10') },
+    ]);
+  }, 60_000);
+
+  afterAll(async () => {
+    await prisma.onModuleDestroy();
+  });
+
+  it('las citas de un paciente archivado cuentan; la sin tratamiento se lista con patientArchived', async () => {
+    const r = await report();
+    expect(r.byDay.find((d) => d.date === '2026-11-03')).toEqual({
+      date: '2026-11-03',
+      scheduledAmount: 333,
+      appointments: 1,
+      appointmentsWithoutItems: 0,
+    });
+    expect(r.byDay.find((d) => d.date === '2026-11-04')).toMatchObject({
+      appointments: 1,
+      appointmentsWithoutItems: 1,
+    });
+    const list = await context.run(c.tenantId, () =>
+      useCase.unlinked({
+        ...NOVEMBER,
+        actor: {
+          userId: c.dentist.userId,
+          role: ClinicRole.ADMIN,
+          permissions: [],
+        },
+        allowedLocationIds: 'ALL',
+      }),
+    );
+    expect(list.total).toBe(1);
+    expect(list.items[0]).toMatchObject({
+      patientId: archived,
+      patientName: 'Paciente Archivado',
+      patientArchived: true,
+    });
+  });
+
+  it('reagendado a una cita nueva cancelada: cuenta en la vieja', async () => {
+    const r = await report();
+    expect(r.byDay.find((d) => d.date === '2026-11-05')?.scheduledAmount).toBe(
+      70,
+    );
+    expect(r.byDay.find((d) => d.date === '2026-11-21')).toMatchObject({
+      scheduledAmount: 0,
+      appointments: 0,
+    });
+  });
+
+  it('aceptado ligado a este mes y al siguiente: cuenta en diciembre y no es pendiente', async () => {
+    const r = await report();
+    expect(r.byDay.find((d) => d.date === '2026-11-24')).toMatchObject({
+      scheduledAmount: 0,
+      appointments: 1,
+      appointmentsWithoutItems: 0,
+    });
+    expect(r.forecast).toMatchObject({
+      producedToDate: 0,
+      scheduledPending: 0,
+      forecast: 0,
+    });
+    const december = await report({ from: '2026-12-01', to: '2026-12-05' });
+    expect(
+      december.byDay.find((d) => d.date === '2026-12-03')?.scheduledAmount,
+    ).toBe(25);
+    // 333 + 70 (los 500 VES, sin tasa); citas del 03, 04, 05, 06 y 24 (la
+    // cancelada del 21 y la de diciembre, no).
+    expect(r.totals).toEqual({
+      scheduledAmount: 403,
+      appointments: 5,
+      appointmentsWithoutItems: 1,
+    });
+  });
+
+  it('tasas AUTOMÁTICAS sin la del día: WITHOUT_RATE sin llamar al proveedor', async () => {
+    const r = await report();
+    expect(r.byDay.find((d) => d.date === '2026-11-06')).toMatchObject({
+      scheduledAmount: 0,
+      appointments: 1,
+    });
+    expect(r.withoutRate).toEqual({ appointments: 1, items: 1 });
+    expect(r.warnings).toContain('WITHOUT_RATE');
+    expect(fetchRates).not.toHaveBeenCalled();
+  });
+
+  it('realizado del mes sin sede: fuera de lo producido, en unattributedDone solo para quien ve todas', async () => {
+    const r = await report();
+    expect(r.unattributedDone).toBe(1);
+    expect(r.warnings).toContain('UNATTRIBUTED_DONE');
+    expect(r.forecast.producedToDate).toBe(0);
+    const restricted = await report({ allowedLocationIds: [c.main] });
+    expect(restricted.unattributedDone).toBe(0);
+    const chosen = await report({ locationId: c.main });
+    expect(chosen.unattributedDone).toBe(0);
   });
 });
 

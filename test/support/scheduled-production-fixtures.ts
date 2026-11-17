@@ -61,16 +61,24 @@ export function scheduledProductionSeeding(raw: PrismaClient) {
     );
   }
 
-  async function clinic(subdomain: string): Promise<ScheduledClinic> {
+  async function clinic(
+    subdomain: string,
+    opts: { rateSource?: 'MANUAL' | 'AUTOMATIC' } = {},
+  ): Promise<ScheduledClinic> {
+    const manual = (opts.rateSource ?? 'MANUAL') === 'MANUAL';
     const tenant = await raw.tenant.create({
       data: {
         name: subdomain,
         subdomain,
         catalogCurrency: 'USD',
-        exchangeRateSource: 'MANUAL',
-        manualExchangeRatesSince: new Date('2026-01-01T00:00:00Z'),
-        // Sin plazo: un día sin tasa propia no hereda la del anterior.
-        manualRateMaxAgeDays: 0,
+        exchangeRateSource: manual ? 'MANUAL' : 'AUTOMATIC',
+        ...(manual
+          ? {
+              manualExchangeRatesSince: new Date('2026-01-01T00:00:00Z'),
+              // Sin plazo: un día sin tasa propia no hereda la del anterior.
+              manualRateMaxAgeDays: 0,
+            }
+          : {}),
       },
     });
     const seed = new ReportSeeder(raw, tenant.id);
