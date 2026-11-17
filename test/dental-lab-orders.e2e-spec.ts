@@ -1143,6 +1143,13 @@ describe('Laboratorio dental — /dental-labs, /patients/:id/lab-orders, /lab-or
     let inMain: string;
     let inOther: string;
     let limited: string;
+    // DX-017-ter: «corrige a» entre sedes (otro paciente, para no tocar los
+    // totales de patient3).
+    let patient4: string;
+    let p4Main: string;
+    let p4Other: string;
+    let crossFix: string;
+    let p4OtherFix: string;
 
     beforeAll(async () => {
       otherLocation = idOf(
@@ -1181,6 +1188,28 @@ describe('Laboratorio dental — /dental-labs, /patients/:id/lab-orders, /lab-or
           },
         ).expect(201),
       );
+      patient4 = await createPatient(a, 'Rosa', '62000005');
+      const orderOf = async (body: Record<string, unknown>) =>
+        idOf(
+          await call(
+            a,
+            dentist.token,
+            'post',
+            `/patients/${patient4}/lab-orders`,
+            { labId: labA, ...CROWN, ...body },
+          ).expect(201),
+        );
+      p4Main = await orderOf({ locationId: locationA });
+      p4Other = await orderOf({ locationId: otherLocation });
+      // Sin restricción de sede, «corrige a» puede cruzar sedes.
+      crossFix = await orderOf({
+        locationId: locationA,
+        replacesOrderId: p4Other,
+      });
+      p4OtherFix = await orderOf({
+        locationId: otherLocation,
+        replacesOrderId: p4Main,
+      });
       // El mismo odontólogo, ahora limitado a la sede principal (último
       // bloque del spec: nada después depende de él sin restricción).
       await call(a, a.adminToken, 'put', `/staff/${dentist.userId}/locations`, {
@@ -1242,6 +1271,93 @@ describe('Laboratorio dental — /dental-labs, /patients/:id/lab-orders, /lab-or
         [inMain, inOther].sort(),
       );
       expect(all.total).toBe(2);
+    });
+
+    it('DX-017-ter · crear con «corrige a» una orden de otra sede: el mismo 403 que al escribirla, sin crear nada ni mostrar la orden', async () => {
+      const write = await call(a, limited, 'patch', `/lab-orders/${p4Other}`, {
+        dueOn: '2026-12-15',
+      }).expect(403);
+      const before = await raw.dentalLabOrder.count({
+        where: { patientId: patient4 },
+      });
+      const denied = await call(
+        a,
+        limited,
+        'post',
+        `/patients/${patient4}/lab-orders`,
+        {
+          labId: labA,
+          locationId: locationA,
+          replacesOrderId: p4Other,
+          ...CROWN,
+        },
+      ).expect(403);
+      expect((denied.body as ErrorBody).code).toBe(LOCATION_NOT_ALLOWED_CODE);
+      expect(denied.body).toEqual(write.body);
+      expect(JSON.stringify(denied.body)).not.toContain(p4Other);
+      expect(
+        await raw.dentalLabOrder.count({ where: { patientId: patient4 } }),
+      ).toBe(before);
+    });
+
+    it('DX-017-ter · editar «corrige a» hacia una orden de otra sede da 403 y la orden no cambia', async () => {
+      const denied = await call(a, limited, 'patch', `/lab-orders/${p4Main}`, {
+        replacesOrderId: p4Other,
+      }).expect(403);
+      expect((denied.body as ErrorBody).code).toBe(LOCATION_NOT_ALLOWED_CODE);
+      const row = await raw.dentalLabOrder.findUniqueOrThrow({
+        where: { id: p4Main },
+      });
+      expect(row.replacesOrderId).toBeNull();
+    });
+
+    it('DX-017-ter · «corrige a» hacia una orden de su sede sigue funcionando', async () => {
+      const fix = (
+        await call(a, limited, 'post', `/patients/${patient4}/lab-orders`, {
+          labId: labA,
+          locationId: locationA,
+          replacesOrderId: p4Main,
+          ...CROWN,
+        }).expect(201)
+      ).body as OrderBody;
+      expect(fix.replacesOrder?.id).toBe(p4Main);
+    });
+
+    it('DX-017-ter · las vistas no enlazan órdenes de otra sede (vista, ficha y lista); sin restricción (ADMIN), sí', async () => {
+      const seen = (
+        await call(a, limited, 'get', `/lab-orders/${crossFix}`).expect(200)
+      ).body as OrderBody;
+      expect(seen.replacesOrder).toBeNull();
+      const original = (
+        await call(a, limited, 'get', `/lab-orders/${p4Main}`).expect(200)
+      ).body as OrderBody;
+      expect(original.replacedBy.map((r) => r.id)).not.toContain(p4OtherFix);
+      const sheet = await call(
+        a,
+        limited,
+        'get',
+        `/patients/${patient4}/lab-orders`,
+      ).expect(200);
+      const listed = await call(
+        a,
+        limited,
+        'get',
+        `/lab-orders?locationId=${locationA}&pageSize=100`,
+      ).expect(200);
+      for (const body of [sheet.text, listed.text]) {
+        expect(body).not.toContain(p4Other);
+        expect(body).not.toContain(p4OtherFix);
+      }
+      const admin = (
+        await call(a, a.adminToken, 'get', `/lab-orders/${crossFix}`).expect(
+          200,
+        )
+      ).body as OrderBody;
+      expect(admin.replacesOrder?.id).toBe(p4Other);
+      const adminOriginal = (
+        await call(a, a.adminToken, 'get', `/lab-orders/${p4Main}`).expect(200)
+      ).body as OrderBody;
+      expect(adminOriginal.replacedBy.map((r) => r.id)).toContain(p4OtherFix);
     });
 
     it('la lista de la otra sede le da 403 LOCATION_NOT_ALLOWED', async () => {
