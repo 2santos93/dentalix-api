@@ -9,6 +9,7 @@ import {
 import type { ClinicRole } from '@prisma/client';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import { locationNotAllowed } from '../../../shared/tenancy/location-access';
 import {
   phoneRegionOrNull,
   whatsAppDigits,
@@ -149,15 +150,20 @@ export class PostOpChecksUseCases {
   ) {}
 
   /**
-   * Sedes del alcance (DX-089): la pedida (403 si no es de las permitidas);
-   * sin ella, la de la cabecera; sin cabecera, las permitidas (todas sin
-   * restricción).
+   * Sedes del alcance (DX-089): la pedida (403 si no es de las permitidas o
+   * no es de esta clínica: la misma respuesta, sin decir cuál); sin ella, la
+   * de la cabecera; sin cabecera, las permitidas (todas sin restricción).
    */
-  private scope(
+  private async scope(
     locationId: string | undefined,
     include: PostOpCheckInclude | undefined,
-  ): PostOpCheckScope {
-    if (locationId) this.tenantContext.assertLocationAllowed(locationId);
+  ): Promise<PostOpCheckScope> {
+    if (locationId) {
+      this.tenantContext.assertLocationAllowed(locationId);
+      if (!(await this.repo.locationExists(locationId))) {
+        throw locationNotAllowed();
+      }
+    }
     return {
       locationIds: locationId
         ? [locationId]
@@ -176,7 +182,7 @@ export class PostOpChecksUseCases {
       POST_OP_CHECK_MAX_PAGE_SIZE,
     );
     const result = await this.repo.list(
-      this.scope(query.locationId, query.include),
+      await this.scope(query.locationId, query.include),
       { page, pageSize },
     );
     const clinical = seesClinicalDetail(query.role);
@@ -189,11 +195,11 @@ export class PostOpChecksUseCases {
     };
   }
 
-  count(query: {
+  async count(query: {
     locationId?: string;
     include?: PostOpCheckInclude;
   }): Promise<PostOpCheckCountView> {
-    return this.repo.count(this.scope(query.locationId, query.include));
+    return this.repo.count(await this.scope(query.locationId, query.include));
   }
 
   /**

@@ -102,6 +102,8 @@ export interface PostOpCheckRepository {
     page: { page: number; pageSize: number },
   ): Promise<PostOpCheckPage>;
   count(scope: PostOpCheckScope): Promise<PostOpCheckCount>;
+  /** ¿Existe la sede en esta clínica (bajo RLS)? */
+  locationExists(locationId: string): Promise<boolean>;
   /**
    * En UNA transacción: bloquea el control (FOR UPDATE), deja que `decide`
    * compruebe la sede y el estado y decida, añade el intento y, si se cierra,

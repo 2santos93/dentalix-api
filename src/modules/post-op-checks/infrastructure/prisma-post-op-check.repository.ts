@@ -79,6 +79,16 @@ export class PrismaPostOpCheckRepository implements PostOpCheckRepository {
       due AS (SELECT d.* FROM d0 d WHERE ${day})`;
   }
 
+  async locationExists(locationId: string): Promise<boolean> {
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.location.findFirst({
+        where: { id: locationId, deletedAt: null },
+        select: { id: true },
+      }),
+    );
+    return row !== null;
+  }
+
   count(scope: PostOpCheckScope): Promise<PostOpCheckCount> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
