@@ -2357,10 +2357,13 @@ export const DEMO_QUOTE_FUNNEL: readonly {
  * llevan ligados, para que la «Producción agendada» de la agenda y la
  * previsión del mes no salgan vacías en la demo (el resto de las citas de la
  * demo no lleva tratamiento ligado y se ve como «sin tratamiento»). Pacientes
- * de la principal (USD) sin otros planes de la demo y que no buscan los e2e
- * (API ni web): Alejandro Fuentes Beltrán y Tomás Aguilar Reyes. La cita va
- * el `weekday`-ésimo próximo día laborable (desde mañana) en el primer hueco
- * libre de `minutes` (hora de la sede, 30 min) con la primera dentista.
+ * de la principal (USD) sin otros planes de la demo, fuera de la historia de
+ * «Comparar sedes» y que no buscan los e2e (API ni web): Diego Lozano Torres
+ * y Tomás Aguilar Reyes. Aceptados sin abonar: dejan un saldo de 0–30 días en
+ * la cartera, lo realista para un tratamiento aceptado y aún no cobrado. La
+ * cita va el `weekday`-ésimo próximo día laborable (desde mañana, dentro de
+ * los 15 días del calendario) en el primer hueco libre de `minutes` (hora de
+ * la sede, 30 min) con la primera dentista; si no cabe, el seed falla.
  */
 export const DEMO_SCHEDULED_PRODUCTION: readonly {
   patientIndex: number;
@@ -2370,7 +2373,7 @@ export const DEMO_SCHEDULED_PRODUCTION: readonly {
   items: readonly { code: string; tooth: string }[];
 }[] = [
   {
-    patientIndex: 18,
+    patientIndex: 20,
     weekday: 1,
     minutes: [12 * 60 + 30, 10 * 60, 11 * 60, 17 * 60, 18 * 60],
     notes: 'Resinas en 36 y 37.',

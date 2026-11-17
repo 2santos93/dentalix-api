@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   INestApplicationContext,
   Type,
@@ -4069,8 +4068,10 @@ class DemoSeeder {
     const providers = dentists.filter(
       (_, index) => index !== DEMO_ROTATION.dentistIndex,
     );
+    // Dentro del calendario de la demo (±15 días naturales: lo vigila
+    // seed-demo.int-spec), desde mañana.
     const weekdays = upcomingWeekdayOffsets(this.now, 15, zone).filter(
-      (offset) => offset > 0,
+      (offset) => offset > 0 && offset < 15,
     );
     for (const spec of DEMO_SCHEDULED_PRODUCTION) {
       const patientId = patientIds[spec.patientIndex];
@@ -4115,10 +4116,12 @@ class DemoSeeder {
                 });
                 return;
               } catch (error) {
+                // Solo «ese hueco no vale»: ocupado, bloqueado o festivo
+                // (409) o fuera del horario de la sede (422). Lo demás es un
+                // fallo de la demo.
                 if (!(
                   error instanceof ConflictException ||
-                  error instanceof UnprocessableEntityException ||
-                  error instanceof BadRequestException
+                  error instanceof UnprocessableEntityException
                 )) {
                   throw error;
                 }
@@ -4126,6 +4129,9 @@ class DemoSeeder {
             }
           }
         }
+        throw new Error(
+          `DX-567: sin hueco para la cita del presupuesto «${spec.notes}» en los próximos días laborables`,
+        );
       });
     }
   }
