@@ -156,3 +156,70 @@ describe('appointment-reminder · cuestionario de salud (DX-290)', () => {
     ).toThrow('URL http(s)');
   });
 });
+
+describe('appointment-reminder · indicaciones previas (DX-564)', () => {
+  const instructions =
+    'Ven en ayunas de 6 horas.\nTrae tus radiografías <recientes> & el informe.';
+
+  it('es: bloque con su rótulo y una línea por línea, escapado', () => {
+    const email = renderEmail(
+      'appointment-reminder',
+      { ...vars, preVisitInstructions: instructions },
+      brand,
+      'es',
+    );
+    expect(email.text).toContain(
+      'Antes de tu cita:\nVen en ayunas de 6 horas.\nTrae tus radiografías <recientes> & el informe.',
+    );
+    expect(email.html).toContain(
+      '<strong>Antes de tu cita:</strong><br />Ven en ayunas de 6 horas.<br />Trae tus radiografías &lt;recientes&gt; &amp; el informe.',
+    );
+    expect(email.html).not.toContain('<recientes>');
+  });
+
+  it('en: rótulo en inglés (el texto, tal como lo escribió la clínica)', () => {
+    const email = renderEmail(
+      'appointment-reminder',
+      { ...vars, preVisitInstructions: 'Come fasting.' },
+      brand,
+      'en',
+    );
+    expect(email.text).toContain('Before your appointment:\nCome fasting.');
+    expect(email.text).not.toContain('Antes de tu cita');
+  });
+
+  it('va después del profesional y antes de la nota del botón', () => {
+    const { text } = renderEmail(
+      'appointment-reminder',
+      { ...vars, preVisitInstructions: 'Ven en ayunas.' },
+      brand,
+      'es',
+    );
+    const provider = text.indexOf('Profesional: Dra. Laura Gómez');
+    const lead = text.indexOf('Antes de tu cita:');
+    const note = text.indexOf('Usa el botón para confirmarla');
+    expect(provider).toBeGreaterThan(-1);
+    expect(lead).toBeGreaterThan(provider);
+    expect(note).toBeGreaterThan(lead);
+  });
+
+  it.each(['es', 'en'] as const)(
+    '%s: sin indicaciones (null, vacío o ausente) el email es byte a byte el de antes',
+    (locale) => {
+      const before = renderEmail('appointment-reminder', vars, brand, locale);
+      for (const preVisitInstructions of [null, '', '  \n ', undefined]) {
+        expect(
+          renderEmail(
+            'appointment-reminder',
+            { ...vars, preVisitInstructions },
+            brand,
+            locale,
+          ),
+        ).toEqual(before);
+      }
+      expect(before.text).not.toMatch(
+        /Antes de tu cita|Before your appointment/,
+      );
+    },
+  );
+});
