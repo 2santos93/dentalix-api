@@ -1819,6 +1819,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     },
     // --- appointment-types (DX-121) ---
     {
+      name: 'GET /appointment-types/:id',
+      verb: 'get',
+      path: () => `/appointment-types/${a.appointmentTypeId}`,
+      status: 404,
+    },
+    {
       name: 'PATCH /appointment-types/:id',
       verb: 'patch',
       path: () => `/appointment-types/${a.appointmentTypeId}`,

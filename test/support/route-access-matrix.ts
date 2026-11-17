@@ -717,6 +717,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Tipos de cita (DX-121, loop/informes/DX-121.md): leerlos, quien agenda;
   // gestionarlos, solo ADMIN.
   'GET /appointment-types': EVERY_ROLE,
+  // DX-564: un tipo por id (también retirado), con sus indicaciones previas.
+  'GET /appointment-types/:id': EVERY_ROLE,
   'POST /appointment-types': ADMIN_ONLY,
   'PATCH /appointment-types/:id': ADMIN_ONLY,
   // DX-377: medios de pago; leerlos quien cobra, escribirlos solo ADMIN.

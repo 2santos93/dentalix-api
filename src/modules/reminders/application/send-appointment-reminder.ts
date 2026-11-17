@@ -1,3 +1,4 @@
+import { resolveLocalizedText } from '../../../shared/i18n/localized-text';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ClinicCurrencyTextsReader } from '../../../shared/money/clinic-currency-texts.reader';
 import { CreateConfirmationLinkUseCase } from '../../appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
@@ -231,6 +232,10 @@ export class SendAppointmentReminder {
         language,
       });
     }
+    const instructions = resolveLocalizedText(
+      ctx.preVisitInstructions,
+      ctx.preferredLanguage,
+    );
     const outboundId =
       claim.outboundMessageId ??
       (
@@ -298,6 +303,10 @@ export class SendAppointmentReminder {
               end: link.appointment.end.toISOString(),
             }
           : null,
+        // DX-564: las indicaciones del tipo de cita en el idioma del paciente
+        // (o en español); solo cuando las hay (el resto, sin la clave). Quedan
+        // congeladas: el email se renderiza al encolarlo.
+        ...(instructions ? { preVisitInstructions: instructions.text } : {}),
         // DX-290: solo cuando lo lleva (el resto de emails, sin la clave).
         ...(anamnesis.url ? { anamnesisUrl: anamnesis.url } : {}),
         ...(anamnesis.pending ? { anamnesisPending: true } : {}),

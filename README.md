@@ -7144,13 +7144,17 @@ su memoria máxima con `/usr/bin/time -v` y las reglas más lentas con
 `TIMING=1` en el log) y tipos, unit y build en otro, con cada paso
 `if: ${{ !cancelled() }}`: un rojo del lint o de tsc ya no deja los demás
 `skipped` (DX-338). `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
-su MinIO): un rojo en `test:int` no oculta la e2e. La e2e va repartida en 3
-shards (`jest --shard=i/3`, matriz `shard`/`total`/`timeout` del job `e2e`,
-tope de 20 min por shard, DX-396): cada shard publica su duración en el
+su MinIO): un rojo en `test:int` no oculta la e2e. La e2e va repartida en 4
+shards (`jest --shard=i/4`, matriz `shard`/`total`/`timeout` del job `e2e`,
+tope de 20 min por shard, DX-396/DX-396-bis) y la integración también, en 4
+(job `integration`, mismo patrón, DX-396-ter; `db:check-force` y el control
+de drift corren solo en el shard 1, porque la base migrada es la misma en
+todos): cada shard publica su duración en el
 resumen de la run y emite un `::warning::` al pasar del 70 % del tope
-(`.github/scripts/report-job-duration.sh`), y el job `e2e-shards` comprueba
-que la unión de las listas de los shards es `jest --listTests` completo sin
-repetidos (`.github/scripts/check-e2e-shards.sh`). Si un shard se acerca al
+(`.github/scripts/report-job-duration.sh`), y los jobs `e2e-shards` e
+`integration-shards` comprueban que la unión de las listas de los shards es
+`jest --listTests` completo sin repetidos (`.github/scripts/check-e2e-shards.sh`,
+con `SHARD_SUITE` para el nombre de la suite). Si un shard se acerca al
 tope, se sube `total` y se añade el número a `shard`. El MinIO de prueba es
 `cgr.dev/chainguard/minio` fijado por digest en `.github/scripts/start-test-s3.sh`
 y `docker-compose.yml` (`minio/minio` ya no se puede descargar de Docker Hub);

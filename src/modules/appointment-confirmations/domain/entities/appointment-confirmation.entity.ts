@@ -64,6 +64,12 @@ export interface ConfirmationAppointment {
   locationTimeZone: string | null;
   locationLocale: string | null;
   locationHourCycle: HourCycle | null;
+  /**
+   * DX-564: indicaciones previas del tipo de la cita, `{ idioma → texto }`
+   * (`{}` = sin tipo o sin indicaciones). Texto general de la clínica por
+   * tipo de cita, no dato del paciente.
+   */
+  preVisitInstructions: Readonly<Record<string, string>>;
 }
 
 export interface ClinicBranding {

@@ -73,6 +73,8 @@ describe('Enlace público de confirmación (Get + Respond)', () => {
         respondedAt: null,
         cancellationPolicy: null,
         isLate: false,
+        // DX-564: el tipo de la cita no tiene indicaciones.
+        preVisitInstructions: [],
       });
     });
 

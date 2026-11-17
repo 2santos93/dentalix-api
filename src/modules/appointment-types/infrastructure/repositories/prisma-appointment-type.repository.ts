@@ -12,7 +12,11 @@ import {
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { configAuditEvent } from '../../../audit/domain/config-audit';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
-import { appointmentTypeSnapshot } from '../../domain/appointment-type-audit';
+import {
+  APPOINTMENT_TYPE_HIDDEN_FIELDS,
+  appointmentTypeSnapshot,
+} from '../../domain/appointment-type-audit';
+import { localizedTextMapFromJson } from '../../../../shared/i18n/localized-text';
 
 const AUDIT_TARGET = { resourceType: 'APPOINTMENT_TYPE' } as const;
 
@@ -29,6 +33,9 @@ function mapToEntity(row: PrismaAppointmentType): AppointmentType {
     color: row.color,
     active: row.active,
     isUrgent: row.isUrgent,
+    preVisitInstructions: {
+      ...localizedTextMapFromJson(row.preVisitInstructions),
+    },
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -90,6 +97,13 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
     });
   }
 
+  findByIdIncludingRetired(id: string): Promise<AppointmentType | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.appointmentType.findFirst({ where: { id } });
+      return row ? mapToEntity(row) : null;
+    });
+  }
+
   async create(
     input: CreateAppointmentTypeRepoInput,
     audit: AuditRequestContext,
@@ -106,6 +120,7 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
               color: input.color,
               active: input.active,
               isUrgent: input.isUrgent ?? false,
+              preVisitInstructions: input.preVisitInstructions ?? {},
               createdById: input.createdById,
               updatedById: input.createdById,
             },
@@ -118,6 +133,7 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
             action: 'CREATE',
             resourceId: created.id,
             reason: 'APPOINTMENT_TYPE_CREATED',
+            hiddenFields: APPOINTMENT_TYPE_HIDDEN_FIELDS,
             after: appointmentTypeSnapshot(created),
           }),
         );
@@ -148,6 +164,7 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
               color: input.color,
               active: input.active,
               isUrgent: input.isUrgent,
+              preVisitInstructions: input.preVisitInstructions,
               updatedById: input.updatedById,
             },
           }),
@@ -157,6 +174,7 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
           action: 'UPDATE',
           resourceId: id,
           reason: 'APPOINTMENT_TYPE_UPDATED',
+          hiddenFields: APPOINTMENT_TYPE_HIDDEN_FIELDS,
           before: appointmentTypeSnapshot(before),
           after: appointmentTypeSnapshot(after),
         });
@@ -187,9 +205,18 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
           action: 'DELETE',
           resourceId: id,
           reason: 'APPOINTMENT_TYPE_DELETED',
+          hiddenFields: APPOINTMENT_TYPE_HIDDEN_FIELDS,
           before: appointmentTypeSnapshot(before),
         }),
       );
     });
+  }
+
+  async patientLanguages(): Promise<string[]> {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: this.requireTenantId() },
+      select: { patientLanguages: true },
+    });
+    return tenant.patientLanguages;
   }
 }

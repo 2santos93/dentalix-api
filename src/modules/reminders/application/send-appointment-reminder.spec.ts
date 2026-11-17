@@ -43,6 +43,7 @@ function context(over: Partial<ReminderSendContext> = {}): ReminderSendContext {
     settings: { enabled: true, leadHours: [48, 2], sendAnamnesis: false },
     locationId: '00000000-0000-4000-8000-0000000000aa',
     cancellationPolicy: null,
+    preVisitInstructions: {},
     ...over,
   };
 }
@@ -740,6 +741,64 @@ describe('SendAppointmentReminder (DX-026)', () => {
       expect(email.enqueue).toHaveBeenCalledWith(
         expect.objectContaining({ locale: 'es' }),
       );
+    });
+  });
+
+  describe('DX-564: indicaciones previas del tipo de cita', () => {
+    const vars = () =>
+      (
+        email.enqueue.mock.calls as [
+          [{ locale: string; vars: Record<string, unknown> }],
+        ]
+      )[0][0].vars;
+
+    it('van en el idioma del paciente', async () => {
+      repo.contexts.set(
+        APPT,
+        context({
+          preferredLanguage: 'en',
+          preVisitInstructions: {
+            es: 'Ven en ayunas.',
+            en: 'Come fasting.',
+          },
+        }),
+      );
+      await handler.handle(payload);
+      expect(vars().preVisitInstructions).toBe('Come fasting.');
+    });
+
+    it('paciente en inglés y texto solo en español: va el español', async () => {
+      repo.contexts.set(
+        APPT,
+        context({
+          preferredLanguage: 'en',
+          preVisitInstructions: {
+            es: 'Ven en ayunas.\nTrae tus radiografías.',
+          },
+        }),
+      );
+      await handler.handle(payload);
+      expect(vars().preVisitInstructions).toBe(
+        'Ven en ayunas.\nTrae tus radiografías.',
+      );
+    });
+
+    it('un tipo sin indicaciones no añade la clave (el email no cambia)', async () => {
+      repo.contexts.set(APPT, context());
+      await handler.handle(payload);
+      expect(vars()).not.toHaveProperty('preVisitInstructions');
+    });
+
+    it('sin texto en español ni en el idioma del paciente, nada', async () => {
+      repo.contexts.set(
+        APPT,
+        context({
+          preferredLanguage: 'pt',
+          preVisitInstructions: { en: 'Come fasting.' },
+        }),
+      );
+      await handler.handle(payload);
+      expect(vars()).not.toHaveProperty('preVisitInstructions');
     });
   });
 });

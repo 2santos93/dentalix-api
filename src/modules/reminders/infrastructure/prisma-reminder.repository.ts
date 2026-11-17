@@ -1,3 +1,4 @@
+import { localizedTextMapFromJson } from '../../../shared/i18n/localized-text';
 import { Injectable } from '@nestjs/common';
 import { DEFAULT_CALENDAR_ALARM_HOURS } from '../domain/reminder-lead-hours';
 import {
@@ -316,6 +317,9 @@ export class PrismaReminderRepository implements ReminderRepository {
               hourCycle: true,
             },
           },
+          // DX-564: las indicaciones previas de su tipo (aunque esté retirado:
+          // la cita lo conserva).
+          appointmentType: { select: { preVisitInstructions: true } },
         },
       });
       if (!appointment) return null;
@@ -377,6 +381,9 @@ export class PrismaReminderRepository implements ReminderRepository {
                   : policy.suggestedFee.toNumber(),
             }
           : null,
+        preVisitInstructions: localizedTextMapFromJson(
+          appointment.appointmentType?.preVisitInstructions,
+        ),
       };
     });
   }
