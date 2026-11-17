@@ -293,14 +293,37 @@ export class GetRatesForDateUseCase {
    * `null` si no hay ninguna guardada. Es la lectura de una ruta pública (el
    * enlace de pago): nunca puede gastar el presupuesto del proveedor.
    */
-  async stored(
+  stored(
     date: string,
     options: RatesForOptions = {},
+  ): Promise<RatesForDate | null> {
+    return this.storedWith(date, () => this.clinicSettings(), options);
+  }
+
+  /**
+   * DX-567: `stored()` para muchas lecturas de UNA petición (un informe que
+   * convierte día a día): los ajustes de la clínica se leen una sola vez.
+   * Igual que `stored()`, nunca llama al proveedor.
+   */
+  storedReader(): (
+    date: string,
+    options?: RatesForOptions,
+  ) => Promise<RatesForDate | null> {
+    let settings: Promise<ClinicExchangeSettings | null> | undefined;
+    const clinicSettings = () => (settings ??= this.clinicSettings());
+    return (date, options = {}) =>
+      this.storedWith(date, clinicSettings, options);
+  }
+
+  private async storedWith(
+    date: string,
+    clinicSettings: () => Promise<ClinicExchangeSettings | null>,
+    options: RatesForOptions,
   ): Promise<RatesForDate | null> {
     try {
       return await this.ratesWith(
         date,
-        () => this.clinicSettings(),
+        clinicSettings,
         () => Promise.reject(new NotStoredRatesError()),
         false,
         options.currencies,
