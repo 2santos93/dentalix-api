@@ -333,3 +333,24 @@ DROP TRIGGER "payments_financial_lock_guard" ON "payments";
 CREATE TRIGGER "payments_financial_lock_guard"
   BEFORE INSERT OR UPDATE OR DELETE ON "payments"
   FOR EACH ROW EXECUTE FUNCTION public.dx_payments_financial_lock_guard();
+
+-- «Hoy» de la sede a partir de la hora UTC de la BD (DX-226: ninguna función
+-- de public lee la hora con la zona de la sesión; el resultado es el mismo
+-- que timezone(p_zone, now())).
+CREATE OR REPLACE FUNCTION public.dx_financial_locked_through(p_tenant uuid, p_zone text)
+  RETURNS date
+  LANGUAGE sql
+  STABLE
+  SET search_path = pg_catalog, pg_temp
+AS $$
+  SELECT GREATEST(
+           t."financialLockDate",
+           CASE
+             WHEN t."financialLockDays" IS NULL OR p_zone IS NULL THEN NULL
+             ELSE (pg_catalog.timezone(p_zone,
+                     pg_catalog.timezone('UTC', pg_catalog.timezone('UTC', pg_catalog.now()))))::date
+                  - (t."financialLockDays" + 1)
+           END)
+    FROM public.tenants t
+   WHERE t."id" = p_tenant
+$$;
