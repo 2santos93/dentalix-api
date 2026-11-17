@@ -10,7 +10,8 @@ import {
   seedMember,
   type Clinic,
 } from './support/e2e-fixtures';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 import { PERIOD_LOCKED_MESSAGES } from '../src/modules/financial-lock/domain/financial-lock';
 import {
   INSTALLMENT_SIMULATION_STALE,
@@ -30,7 +31,6 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const SIGNATURE = `data:image/png;base64,${PNG}`;
-const ZONE = 'America/Caracas';
 
 interface Installment {
   sequence: number;
@@ -69,7 +69,9 @@ describe('Opciones de pago en cuotas del presupuesto (DX-041, e2e)', () => {
   let reception: string;
   let patient: string;
   let catalog: string;
-  const today = civilDateIn(new Date(), ZONE);
+  // El día de la sede al cargar el spec: las fechas van a ±10 días o más de
+  // él, lejos de cualquier medianoche.
+  const today = fixedSedeDay(0).day;
   const start = addCivilDays(today, 30);
 
   const call = (

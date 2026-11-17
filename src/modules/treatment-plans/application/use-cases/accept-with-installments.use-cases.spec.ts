@@ -16,6 +16,7 @@ import {
   parseInstallmentTerms,
   planInstallmentSchedule,
 } from '../../../payment-plans/application/schedule/installment-schedule';
+import { toCents } from '../../../../shared/money/money';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 
 const PNG =
@@ -98,9 +99,9 @@ describe('DX-041 · aceptar el presupuesto con un plan de cuotas', () => {
     });
     expect(created.installments).toEqual(simulated.installments);
     const sum =
-      created.installments.reduce((s, i) => s + i.amount * 100, 0) +
-      created.downPayment * 100;
-    expect(Math.round(sum)).toBe(TOTAL * 100);
+      created.installments.reduce((s, i) => s + toCents(i.amount), 0) +
+      toCents(created.downPayment);
+    expect(sum).toBe(toCents(TOTAL));
   });
 
   it('sin installmentPlan, como siempre: sin plan de cuotas', async () => {
