@@ -93,6 +93,11 @@ export interface CashPaymentView extends Omit<
   amountHidden: boolean;
   canVoid: boolean;
   /**
+   * DX-091: el día del abono en su sede está en un período contable cerrado
+   * (no se anula salvo la excepción del ADMIN con motivo).
+   */
+  periodLocked: boolean;
+  /**
    * Día civil (YYYY-MM-DD) en que se REGISTRÓ el abono, en la zona de su sede
    * (DX-067). Puede no coincidir con `paidAt`: un abono con fecha de pago
    * antigua registrado hoy es anulable hoy, porque la ventana de recepción

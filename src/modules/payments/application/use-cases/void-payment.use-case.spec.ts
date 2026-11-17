@@ -152,6 +152,7 @@ describe('VoidPaymentUseCase', () => {
     await uc.execute({ paymentId: payment.id, reason: REASON, actor: ADMIN });
 
     expect(repo.voidAuditOf(payment.id)).toEqual({
+      lockOverrideReason: null,
       voidedById: 'u-admin',
       voidedByRole: ClinicRole.ADMIN,
       voidedAt: NOW,

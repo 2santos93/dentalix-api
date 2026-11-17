@@ -1,5 +1,10 @@
 import { TreatmentPlanStatus } from '@prisma/client';
 import {
+  PERIOD_LOCKED_MESSAGES,
+  voidLockState,
+  type FinancialLockSettings,
+} from '../../financial-lock/domain/financial-lock';
+import {
   deriveStatuses,
   ScheduleTramo,
 } from '../../payment-plans/application/schedule/derive-statuses';
@@ -55,6 +60,12 @@ export interface ComputeAccountStatementOptions {
   planBalances?: PlanBalances;
   /** B4 (DX-472-bis): decimales de redondeo de cada moneda; sin ellos, 2. */
   roundingDigitsOf?: RoundingDigitsOf;
+  /**
+   * DX-091: el cierre contable de la clínica: un abono de un día cerrado no
+   * es anulable (`periodLocked`, `canVoid` false) salvo para el ADMIN con la
+   * exención. Sin él, nada está cerrado.
+   */
+  financialLock?: FinancialLockSettings | null;
 }
 
 /** Decimales de redondeo de una moneda (`currencies.rounding_digits`). */
@@ -457,6 +468,20 @@ export function computeAccountStatement(
       inRange(paidOn, options.movementsFrom, options.movementsTo),
     )
     .map(({ p, paidOn }) => ({
+      p,
+      paidOn,
+      lock: voidLockState(
+        options.financialLock,
+        p.paidAt,
+        p.timeZone,
+        options.today,
+        options.voidActor?.role,
+      ),
+      roleMayVoid:
+        options.voidActor !== undefined &&
+        canVoidPayment(p, options.voidActor, options.today),
+    }))
+    .map(({ p, paidOn, lock, roleMayVoid }) => ({
       id: p.id,
       paidAt: p.paidAt,
       paidOn,
@@ -474,17 +499,18 @@ export function computeAccountStatement(
       treatmentPlanId: p.treatmentPlanId,
       openingBalanceId: p.openingBalanceId ?? null,
       createdById: p.createdById,
-      canVoid:
-        p.voidedAt === null &&
-        options.voidActor !== undefined &&
-        canVoidPayment(p, options.voidActor, options.today),
+      canVoid: p.voidedAt === null && roleMayVoid && !lock.blocksVoid,
+      periodLocked: p.voidedAt === null && lock.periodLocked,
       voidBlockedReason:
         p.voidedAt === null &&
         (p.splitId ? splitRefund.get(p.splitId) : p.refundNumber)
           ? voidRefundReferenceMessage(
               (p.splitId ? splitRefund.get(p.splitId) : p.refundNumber)!,
             )
-          : null,
+          : // DX-091: su rol podría anularlo, pero el período está cerrado.
+            p.voidedAt === null && roleMayVoid && lock.blocksVoid
+            ? PERIOD_LOCKED_MESSAGES.PAYMENT_VOID
+            : null,
       voided: p.voidedAt !== null,
       voidedAt: p.voidedAt,
       voidedBy: p.voidedBy,
