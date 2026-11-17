@@ -94,6 +94,25 @@ export class ListAppointmentTypesUseCase {
   }
 }
 
+/**
+ * DX-564: un tipo por id, aunque esté desactivado o retirado: la cita lo
+ * conserva y sus indicaciones previas se siguen enviando, así que recepción
+ * tiene que poder ver lo que recibe el paciente. Fuera de la clínica, 404.
+ */
+@Injectable()
+export class GetAppointmentTypeUseCase {
+  constructor(
+    @Inject(APPOINTMENT_TYPE_REPOSITORY)
+    private readonly repo: AppointmentTypeRepository,
+  ) {}
+
+  async execute(id: string): Promise<AppointmentType> {
+    const type = await this.repo.findByIdIncludingRetired(id);
+    if (!type) throw new NotFoundException(APPOINTMENT_TYPE_NOT_FOUND_MESSAGE);
+    return type;
+  }
+}
+
 @Injectable()
 export class CreateAppointmentTypeUseCase {
   constructor(

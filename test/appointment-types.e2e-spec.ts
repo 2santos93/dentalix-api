@@ -679,11 +679,30 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
       ],
       [[{ language: 'es', text: 3 }], 'Las indicaciones deben ser un texto.'],
       [{ es: 'Hola' }, 'Las indicaciones deben ir en una lista.'],
+      // Revisión: `null` no es «sin el campo».
+      [null, 'Las indicaciones deben ir en una lista.'],
+      [
+        [{ language: 'es', text: 'Entra en ejemplo.com/login' }],
+        'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
+      ],
+      [
+        [{ language: 'es', text: 'Escribe a x@evil.com' }],
+        'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
+      ],
+      [
+        [
+          {
+            language: 'es',
+            text: `Entra en ejemplo${String.fromCharCode(0x200b)}.com`,
+          },
+        ],
+        'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
+      ],
     ])(
       'valida %j con 400 en español',
       async (preVisitInstructions, message) => {
         const type = await createType({
-          name: `Validación ${message.length}-${JSON.stringify(preVisitInstructions).length}`,
+          name: `Validación ${Math.random().toString(36).slice(2, 10)}`,
         });
         const res = await as(
           api().patch(`${types}/${type.id}`),
@@ -694,6 +713,48 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
         expect(JSON.stringify(res.body)).toContain(message);
       },
     );
+
+    it('GET /:id: los 4 roles ven un tipo retirado con sus indicaciones; de otra clínica o inexistente, 404', async () => {
+      const type = (
+        await as(api().post(types), clinic.adminToken)
+          .send({
+            name: 'Retirado DX-564',
+            durationMinutes: 30,
+            color: '#0E7490',
+            preVisitInstructions: [
+              { language: 'es', text: 'Ven en ayunas.\n\n\n\nTrae tu cédula.' },
+            ],
+          })
+          .expect(201)
+      ).body as InstructionsBody;
+      // Las líneas en blanco seguidas quedan en una.
+      expect(type.preVisitInstructions).toEqual([
+        { language: 'es', text: 'Ven en ayunas.\n\nTrae tu cédula.' },
+      ]);
+      await as(api().delete(`${types}/${type.id}`), clinic.adminToken).expect(
+        204,
+      );
+      for (const token of [clinic.adminToken, dentist.token, reception.token]) {
+        const body = (
+          await as(api().get(`${types}/${type.id}`), token).expect(200)
+        ).body as InstructionsBody & { active: boolean };
+        expect(body).toMatchObject({
+          id: type.id,
+          active: false,
+          preVisitInstructions: type.preVisitInstructions,
+        });
+      }
+      await as(
+        api().get(`${types}/${type.id}`),
+        other.adminToken,
+        other.host,
+      ).expect(404);
+      await as(
+        api().get(`${types}/00000000-0000-4000-8000-000000000000`),
+        clinic.adminToken,
+      ).expect(404);
+      await as(api().get(`${types}/no-uuid`), clinic.adminToken).expect(400);
+    });
 
     it('auditoría: el cambio dice qué idiomas cambiaron, nunca el texto', async () => {
       const type = (

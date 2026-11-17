@@ -97,6 +97,13 @@ export class PrismaAppointmentTypeRepository implements AppointmentTypeRepositor
     });
   }
 
+  findByIdIncludingRetired(id: string): Promise<AppointmentType | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.appointmentType.findFirst({ where: { id } });
+      return row ? mapToEntity(row) : null;
+    });
+  }
+
   async create(
     input: CreateAppointmentTypeRepoInput,
     audit: AuditRequestContext,

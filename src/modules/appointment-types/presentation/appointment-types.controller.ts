@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -41,6 +42,7 @@ import type { AuditRequestContext } from '../../audit/domain/audit-request-conte
 import {
   CreateAppointmentTypeUseCase,
   DeleteAppointmentTypeUseCase,
+  GetAppointmentTypeUseCase,
   ListAppointmentTypesUseCase,
   UpdateAppointmentTypeUseCase,
 } from '../application/use-cases/appointment-types.use-cases';
@@ -50,8 +52,23 @@ import {
   AppointmentTypeDto,
   CreateAppointmentTypeDto,
   ListAppointmentTypesQueryDto,
+  PreVisitInstructionDto,
   UpdateAppointmentTypeDto,
 } from './dto/appointment-type.dto';
+import { PRE_VISIT_INSTRUCTIONS_NOT_A_LIST_MESSAGE } from '../domain/appointment-type-rules';
+
+/**
+ * DX-564: la lista que llega, campo a campo. `null` es un 400 y no «sin el
+ * campo»: `PartialType` hace opcional (y salta `null`) toda regla del PATCH.
+ */
+function instructionsInput(
+  entries: PreVisitInstructionDto[] | null | undefined,
+): { language: string; text: string }[] | undefined {
+  if (entries === null) {
+    throw new BadRequestException(PRE_VISIT_INSTRUCTIONS_NOT_A_LIST_MESSAGE);
+  }
+  return entries?.map((e) => ({ language: e.language, text: e.text }));
+}
 
 /** La respuesta: el mapa de indicaciones como lista ordenada (DX-564). */
 function toDto(type: AppointmentType): AppointmentTypeDto {
@@ -80,6 +97,7 @@ function toDto(type: AppointmentType): AppointmentTypeDto {
 export class AppointmentTypesController {
   constructor(
     private readonly listTypes: ListAppointmentTypesUseCase,
+    private readonly getType: GetAppointmentTypeUseCase,
     private readonly createType: CreateAppointmentTypeUseCase,
     private readonly updateType: UpdateAppointmentTypeUseCase,
     private readonly deleteType: DeleteAppointmentTypeUseCase,
@@ -95,6 +113,19 @@ export class AppointmentTypesController {
       includeInactive: query.includeInactive,
     });
     return types.map(toDto);
+  }
+
+  @Get(':id')
+  @ApiOkResponse({
+    type: AppointmentTypeDto,
+    description:
+      'DX-564: un tipo por id, también desactivado o retirado (las citas lo conservan y sus indicaciones previas se siguen enviando). Los 4 roles.',
+  })
+  @ApiNotFoundResponse({ description: 'Tipo no encontrado en esta clínica' })
+  async get(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<AppointmentTypeDto> {
+    return toDto(await this.getType.execute(id));
   }
 
   @Post()
@@ -117,10 +148,7 @@ export class AppointmentTypesController {
         color: dto.color,
         active: dto.active,
         isUrgent: dto.isUrgent,
-        preVisitInstructions: dto.preVisitInstructions?.map((e) => ({
-          language: e.language,
-          text: e.text,
-        })),
+        preVisitInstructions: instructionsInput(dto.preVisitInstructions),
       },
       this.audit(req),
     );
@@ -147,10 +175,7 @@ export class AppointmentTypesController {
         color: dto.color,
         active: dto.active,
         isUrgent: dto.isUrgent,
-        preVisitInstructions: dto.preVisitInstructions?.map((e) => ({
-          language: e.language,
-          text: e.text,
-        })),
+        preVisitInstructions: instructionsInput(dto.preVisitInstructions),
       },
       this.audit(req),
     );

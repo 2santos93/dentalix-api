@@ -48,6 +48,11 @@ export class InMemoryAppointmentTypeRepository implements AppointmentTypeReposit
     return Promise.resolve(row ? { ...row } : null);
   }
 
+  findByIdIncludingRetired(id: string): Promise<AppointmentType | null> {
+    const row = this.rows.find((r) => r.id === id);
+    return Promise.resolve(row ? { ...row } : null);
+  }
+
   create(input: CreateAppointmentTypeRepoInput): Promise<AppointmentType> {
     return Promise.resolve(
       this.seed({

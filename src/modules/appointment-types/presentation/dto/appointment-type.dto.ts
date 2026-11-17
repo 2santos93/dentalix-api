@@ -11,6 +11,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import {
@@ -19,6 +20,7 @@ import {
   APPOINTMENT_TYPE_MIN_MINUTES,
   APPOINTMENT_TYPE_NAME_MAX,
   PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES,
+  PRE_VISIT_INSTRUCTIONS_NOT_A_LIST_MESSAGE,
   PRE_VISIT_INSTRUCTIONS_TEXT_MAX,
   PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE,
 } from '../../domain/appointment-type-rules';
@@ -158,14 +160,15 @@ export class CreateAppointmentTypeDto {
     description:
       'DX-564: la lista ENTERA de indicaciones previas (un idioma que no viene se quita; vacía = sin indicaciones). Sin el campo, no se tocan. Idiomas de la lista de la clínica y sin repetir; una entrada con texto vacío se descarta.',
   })
-  @IsOptional()
-  @IsArray({ message: 'Las indicaciones deben ir en una lista.' })
+  // `null` no es «sin el campo»: 400 (solo `undefined` lo deja sin tocar).
+  @ValidateIf((_, value) => value !== undefined)
+  @IsArray({ message: PRE_VISIT_INSTRUCTIONS_NOT_A_LIST_MESSAGE })
   @ArrayMaxSize(PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES, {
     message: PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE,
   })
   @ValidateNested({ each: true })
   @Type(() => PreVisitInstructionDto)
-  preVisitInstructions?: PreVisitInstructionDto[];
+  preVisitInstructions?: PreVisitInstructionDto[] | null;
 }
 
 export class UpdateAppointmentTypeDto extends PartialType(

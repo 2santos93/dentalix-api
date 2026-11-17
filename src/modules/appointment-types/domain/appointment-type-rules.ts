@@ -72,6 +72,8 @@ export const PRE_VISIT_INSTRUCTIONS_TOTAL_BYTES_MAX = 8000;
 
 export const PRE_VISIT_INSTRUCTIONS_TOO_LARGE_MESSAGE =
   'Las indicaciones son demasiado largas en conjunto: acorta alguno de los idiomas.';
+export const PRE_VISIT_INSTRUCTIONS_NOT_A_LIST_MESSAGE =
+  'Las indicaciones deben ir en una lista.';
 export const PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE = `Las indicaciones admiten como mucho ${PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES} idiomas.`;
 export const PRE_VISIT_INSTRUCTIONS_LANGUAGE_NOT_OFFERED_MESSAGE =
   'Ese idioma no está entre los idiomas de los pacientes de la clínica.';
@@ -84,22 +86,47 @@ export const PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE =
 /** `http://`, `https://`, `www.` o algo con aspecto de etiqueta (`<b>`, `</p>`, `<a href…>`, `<!--`). */
 const LINK_OR_HTML = /https?:\/\/|www\.|<\s*\/?\s*[a-z!][^<>]*>/i;
 
+/**
+ * Un dominio que WhatsApp, Gmail o iOS convertirían en enlace aunque no lleve
+ * `http`: una etiqueta de 2 o más caracteres que acaba en letra, un punto SIN
+ * espacio y un TLD de 2 o más letras minúsculas, seguido de fin, espacio, `/`
+ * o puntuación («ejemplo.com/login», «bit.ly», «ejemplo.com.ve»). No marca
+ * «6h.Trae» ni «Dr.Pérez» (mayúscula tras el punto), «10.30 h» (cifras),
+ * «a.m.» ni «p.ej.» (etiqueta de una letra).
+ */
+const BARE_DOMAIN = /[\p{L}\p{N}-]+\p{L}\.[a-z]{2,}(?=$|[\s/.,;:!?)\]}"'»…])/u;
+
+/** Una dirección de email («x@ejemplo.com»): también se convierte en enlace. */
+const EMAIL_ADDRESS = /\S+@\S+\.\S+/;
+
+/** U+200D (une los emojis compuestos): el único carácter de formato que queda. */
+const ZERO_WIDTH_JOINER = String.fromCharCode(0x200d);
+
 export interface PreVisitInstructionEntry {
   language: string;
   text: string;
 }
 
 /**
- * Un texto tal como se guarda: saltos de línea `\n`, tabuladores como espacio,
- * sin otros caracteres de control y recortado. Los saltos se conservan: el
- * recordatorio y la página los pintan.
+ * Un texto tal como se guarda: saltos de línea `\n` (como mucho dos seguidos),
+ * tabuladores como espacio, sin otros caracteres de control ni de formato
+ * (salvo U+200D) y recortado. Los saltos se conservan: el recordatorio y la
+ * página los pintan.
  */
 export function normalizePreVisitInstructionText(text: string): string {
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/\t/g, ' ')
-    .replace(/[\p{Cc}\u2028\u2029]/gu, (c) => (c === '\n' ? c : ''))
-    .trim();
+  return (
+    text
+      .replace(/\r\n?/g, '\n')
+      .replace(/\t/g, ' ')
+      .replace(/[\p{Cc}\u2028\u2029]/gu, (c) => (c === '\n' ? c : ''))
+      // Formato invisible (espacio de ancho cero, guion suave, U+202E…): sirve
+      // para colar un enlace partido.
+      .replace(/\p{Cf}/gu, (c) => (c === ZERO_WIDTH_JOINER ? c : ''))
+      // Sin espacios al final de línea y como mucho una línea en blanco seguida.
+      .replace(/[ \xa0]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
 }
 
 /**
@@ -145,7 +172,11 @@ export function preVisitInstructionsFromEntries(
     if ([...text].length > PRE_VISIT_INSTRUCTIONS_TEXT_MAX) {
       return { error: PRE_VISIT_INSTRUCTIONS_TOO_LONG_MESSAGE };
     }
-    if (LINK_OR_HTML.test(text)) {
+    if (
+      LINK_OR_HTML.test(text) ||
+      BARE_DOMAIN.test(text) ||
+      EMAIL_ADDRESS.test(text)
+    ) {
       return { error: PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE };
     }
     map[language] = text;

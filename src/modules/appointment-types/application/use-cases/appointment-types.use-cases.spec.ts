@@ -4,6 +4,7 @@ import { InMemoryAppointmentTypeRepository } from '../__fixtures__/in-memory-app
 import {
   CreateAppointmentTypeUseCase,
   DeleteAppointmentTypeUseCase,
+  GetAppointmentTypeUseCase,
   ListAppointmentTypesUseCase,
   UpdateAppointmentTypeUseCase,
 } from './appointment-types.use-cases';
@@ -216,5 +217,26 @@ describe('indicaciones previas (DX-564)', () => {
     );
     await expect(call).rejects.toThrow(BadRequestException);
     await expect(call).rejects.toThrow(message);
+  });
+});
+
+describe('GetAppointmentTypeUseCase (DX-564)', () => {
+  it('devuelve el tipo aunque esté desactivado o retirado, con sus indicaciones', async () => {
+    const repo = new InMemoryAppointmentTypeRepository();
+    const retired = repo.seed({
+      active: false,
+      preVisitInstructions: { es: 'Ven en ayunas.' },
+    });
+    repo.deleted.add(retired.id);
+    const found = await new GetAppointmentTypeUseCase(repo).execute(retired.id);
+    expect(found.preVisitInstructions).toEqual({ es: 'Ven en ayunas.' });
+  });
+
+  it('uno que no existe (o de otra clínica) es 404', async () => {
+    await expect(
+      new GetAppointmentTypeUseCase(
+        new InMemoryAppointmentTypeRepository(),
+      ).execute('nope'),
+    ).rejects.toThrow(NotFoundException);
   });
 });

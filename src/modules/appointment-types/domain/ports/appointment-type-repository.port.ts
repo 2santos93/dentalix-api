@@ -38,6 +38,11 @@ export interface AppointmentTypeRepository {
    */
   findById(id: string): Promise<AppointmentType | null>;
   /**
+   * DX-564: por id, también un tipo retirado (sus citas lo conservan y sus
+   * indicaciones se siguen enviando). Bajo RLS: de otra clínica, `null`.
+   */
+  findByIdIncludingRetired(id: string): Promise<AppointmentType | null>;
+  /**
    * DX-360: alta, cambio y retiro dejan su evento (APPOINTMENT_TYPE) en la
    * misma transacción; un cambio que no cambia nada, ninguno.
    */

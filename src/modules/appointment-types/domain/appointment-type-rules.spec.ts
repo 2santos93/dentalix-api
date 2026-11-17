@@ -223,3 +223,61 @@ describe('indicaciones previas (DX-564)', () => {
     );
   });
 });
+
+describe('indicaciones previas: enlaces sin http, formato invisible y líneas en blanco (DX-564, revisión)', () => {
+  const ctx = { patientLanguages: ['es'], current: {} };
+  const check = (text: string) =>
+    preVisitInstructionsFromEntries([{ language: 'es', text }], ctx);
+  const NO_LINKS =
+    'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.';
+  const ch = (code: number) => String.fromCharCode(code);
+
+  it.each([
+    'Entra en ejemplo.com/login',
+    'Mira bit.ly',
+    'Más en ejemplo.com.ve, gracias',
+    'Escribe a recepcion@ejemplo.com',
+    'Correo: x@evil.com.',
+  ])('rechaza dominios y emails sin http: %j', (text) => {
+    expect(check(text)).toEqual({ error: NO_LINKS });
+  });
+
+  it.each([
+    'Ven en ayunas de 6h.Trae tus radiografías.',
+    'Te atiende el Dr.Pérez.',
+    'Llega a las 10.30 h.',
+    'Ven a las 9 a.m. en punto.',
+    'Trae, p.ej. tus radiografías.',
+    'Si la presión es < 140 avísanos.',
+  ])('no marca texto corriente: %j', (text) => {
+    expect(check(text)).toEqual({ map: { es: text } });
+  });
+
+  it.each([
+    ['espacio de ancho cero', 0x200b],
+    ['guion suave', 0xad],
+    ['inversión de dirección (U+202E)', 0x202e],
+  ])('quita %s y detecta el dominio que partía', (_label, code) => {
+    expect(check(`Entra en ejemplo${ch(code)}.com`)).toEqual({
+      error: NO_LINKS,
+    });
+    expect(normalizePreVisitInstructionText(`Ven${ch(code)} en ayunas`)).toBe(
+      'Ven en ayunas',
+    );
+  });
+
+  it('conserva U+200D (emojis compuestos)', () => {
+    const family = `${ch(0xd83d)}${ch(0xdc68)}${ch(0x200d)}${ch(0xd83d)}${ch(0xdc67)}`;
+    expect(normalizePreVisitInstructionText(`Ven ${family}`)).toBe(
+      `Ven ${family}`,
+    );
+  });
+
+  it('3 o más saltos seguidos quedan en 2 (también con espacios en medio)', () => {
+    expect(normalizePreVisitInstructionText('A\n\n\n\n\nB')).toBe('A\n\nB');
+    expect(normalizePreVisitInstructionText('A \n \n  \nB\n\nC')).toBe(
+      'A\n\nB\n\nC',
+    );
+    expect(check(`A${'\n'.repeat(600)}B`)).toEqual({ map: { es: 'A\n\nB' } });
+  });
+});
