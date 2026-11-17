@@ -55,6 +55,7 @@ import { PaymentReceiptSummaryController } from '../payments/presentation/paymen
 import { ReceiptSettingsController } from '../payments/presentation/receipt-settings.controller';
 import { PaymentAllocationsController } from '../payments/presentation/payment-allocations.controller';
 import { PaymentPlansController } from '../payment-plans/presentation/payment-plans.controller';
+import { InstallmentSimulationController } from '../payment-plans/presentation/installment-simulation.controller';
 import { AccountStatementController } from '../account-statement/presentation/account-statement.controller';
 import { ReceivablesController } from '../receivables/presentation/receivables.controller';
 import { DiscountPolicyController } from '../discounts/presentation/discount-policy.controller';
@@ -1393,6 +1394,17 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PAYMENT_PLAN',
     patient: plan(),
   },
+  // DX-041: simular cuotas del presupuesto lee el plan (VIEW) y no escribe.
+  // Aceptar con cuotas pone `params.paymentPlanId` en el SIGN y el caso de uso
+  // escribe el alta del plan de cuotas (CREATE PAYMENT_PLAN, `reason`
+  // PLAN_ACCEPTED_WITH_INSTALLMENTS).
+  'POST /treatment-plans/:id/installment-simulation': {
+    action: 'VIEW',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+    reason: 'INSTALLMENT_SIMULATION',
+  },
 
   'GET /patients/:patientId/account-statement': {
     action: 'VIEW',
@@ -2488,6 +2500,7 @@ const CONTROLLERS: Type[] = [
   ReceiptSettingsController,
   PaymentAllocationsController,
   PaymentPlansController,
+  InstallmentSimulationController,
   AccountStatementController,
   ReceivablesController,
   DiscountPolicyController,

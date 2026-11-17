@@ -141,7 +141,7 @@ export class InstallmentSimulationDto {
   @ApiProperty({ format: 'uuid' })
   treatmentPlanId!: string;
 
-  @ApiProperty({ description: 'Moneda del plan (ISO 4217)', example: 'USD' })
+  @ApiProperty({ description: 'Moneda del plan (ISO 4217)' })
   currency!: string;
 
   @ApiProperty({
