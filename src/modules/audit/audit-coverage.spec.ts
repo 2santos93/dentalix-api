@@ -69,6 +69,7 @@ import { UnallocatedPaymentsController } from '../reports/presentation/unallocat
 import { RecoveredSlotsController } from '../reports/presentation/recovered-slots.controller';
 import { ChairOccupancyController } from '../reports/presentation/chair-occupancy.controller';
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
+import { PostOpChecksController } from '../post-op-checks/presentation/post-op-checks.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import {
@@ -1614,6 +1615,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'APPOINTMENT',
     reason: 'CHAIR_OCCUPANCY_REPORT',
   },
+  // DX-566: la lista de llamadas de control postoperatorio lleva el nombre y
+  // el teléfono de cada paciente; el contador, no.
+  'GET /post-op-checks': {
+    action: 'VIEW',
+    resource: 'POST_OP_CHECK',
+    reason: 'POST_OP_CHECK_LIST',
+  },
   // DX-439: «Pendiente de cerrar» lleva los nombres de muchos pacientes.
   'GET /closing-queue': {
     action: 'VIEW',
@@ -2019,6 +2027,11 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-566: el intento de llamada del control postoperatorio (UPDATE
+  // POST_OP_CHECK con el resultado como motivo, el cambio de estado y dónde
+  // quedó en la historia; nunca la nota), en la transacción del cierre.
+  'POST /post-op-checks/:id/attempts':
+    'post-op-checks.int-spec.ts y post-op-checks.e2e-spec.ts',
   // DX-017: laboratorio dental. El catálogo (DENTAL_LAB con los nombres de
   // los campos y, al desactivar, el estado) y la orden: edición (los campos
   // y la fecha prometida antes y después), envío, recepción, revisión
@@ -2534,6 +2547,7 @@ const CONTROLLERS: Type[] = [
   RecoveredSlotsController,
   ChairOccupancyController,
   ClosingQueueController,
+  PostOpChecksController,
   ContingencyAgendaController,
   CollectionsController,
   RecallController,

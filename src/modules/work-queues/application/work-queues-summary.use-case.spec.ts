@@ -8,6 +8,7 @@ import {
   CLOSING_QUEUE_ROLES,
   INVENTORY_ROLES,
   PAYMENT_ROLES,
+  POST_OP_CHECK_LIST_ROLES,
   RECALL_LIST_ROLES,
   RECEIVABLES_ROLES,
   TREATMENT_PLAN_FOLLOW_UP_ROLES,
@@ -64,6 +65,7 @@ describe('WORK_QUEUE_ROLES (DX-503)', () => {
     CLOSING_QUEUE: CLOSING_QUEUE_ROLES,
     PAYMENT_REPORTS: PAYMENT_ROLES,
     ANAMNESIS_REVIEW: CLINICAL_ROLES,
+    POST_OP_CHECKS: POST_OP_CHECK_LIST_ROLES,
     QUOTE_FOLLOW_UP: TREATMENT_PLAN_FOLLOW_UP_ROLES,
     ACCEPTED_UNSCHEDULED: APPOINTMENT_ROLES,
     WAITLIST: APPOINTMENT_ROLES,
@@ -83,10 +85,12 @@ describe('WORK_QUEUE_ROLES (DX-503)', () => {
     expect(workQueuesFor(ClinicRole.DENTIST)).toEqual([
       'CLOSING_QUEUE',
       'ANAMNESIS_REVIEW',
+      'POST_OP_CHECKS',
     ]);
     expect(workQueuesFor(ClinicRole.RECEPTION)).toEqual([
       'CLOSING_QUEUE',
       'PAYMENT_REPORTS',
+      'POST_OP_CHECKS',
       'QUOTE_FOLLOW_UP',
       'ACCEPTED_UNSCHEDULED',
       'WAITLIST',
@@ -95,6 +99,7 @@ describe('WORK_QUEUE_ROLES (DX-503)', () => {
     ]);
     expect(workQueuesFor(ClinicRole.ASSISTANT)).toEqual([
       'ANAMNESIS_REVIEW',
+      'POST_OP_CHECKS',
       'LOW_STOCK',
     ]);
   });
@@ -143,11 +148,12 @@ describe('GetWorkQueuesSummaryUseCase (DX-503)', () => {
     expect(result.items).toEqual([
       { key: 'CLOSING_QUEUE', status: 'OK', count: 1 },
       { key: 'PAYMENT_REPORTS', status: 'OK', count: 2 },
+      { key: 'POST_OP_CHECKS', status: 'OK', count: 4 },
       { key: 'QUOTE_FOLLOW_UP', status: 'ERROR', count: null },
-      { key: 'ACCEPTED_UNSCHEDULED', status: 'OK', count: 5 },
-      { key: 'WAITLIST', status: 'OK', count: 6 },
-      { key: 'RECALL', status: 'OK', count: 7 },
-      { key: 'RECEIVABLES', status: 'OK', count: 8 },
+      { key: 'ACCEPTED_UNSCHEDULED', status: 'OK', count: 6 },
+      { key: 'WAITLIST', status: 'OK', count: 7 },
+      { key: 'RECALL', status: 'OK', count: 8 },
+      { key: 'RECEIVABLES', status: 'OK', count: 9 },
     ]);
   });
 

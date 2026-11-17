@@ -48,17 +48,18 @@ const DAY_MS = 86_400_000;
 
 const EXPECTED_KEYS: Record<ClinicRole, WorkQueueKey[]> = {
   ADMIN: [...WORK_QUEUE_KEYS],
-  DENTIST: ['CLOSING_QUEUE', 'ANAMNESIS_REVIEW'],
+  DENTIST: ['CLOSING_QUEUE', 'ANAMNESIS_REVIEW', 'POST_OP_CHECKS'],
   RECEPTION: [
     'CLOSING_QUEUE',
     'PAYMENT_REPORTS',
+    'POST_OP_CHECKS',
     'QUOTE_FOLLOW_UP',
     'ACCEPTED_UNSCHEDULED',
     'WAITLIST',
     'RECALL',
     'RECEIVABLES',
   ],
-  ASSISTANT: ['ANAMNESIS_REVIEW', 'LOW_STOCK'],
+  ASSISTANT: ['ANAMNESIS_REVIEW', 'POST_OP_CHECKS', 'LOW_STOCK'],
 };
 
 interface Seeded {
@@ -124,6 +125,8 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
       case 'ANAMNESIS_REVIEW':
         return (await body('/medical-history/submissions/summary'))
           .submitted as number;
+      case 'POST_OP_CHECKS':
+        return (await body('/post-op-checks/count')).total as number;
       case 'QUOTE_FOLLOW_UP':
         return (await body('/treatment-plans/pending-follow-up/count'))
           .total as number;
