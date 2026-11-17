@@ -84,6 +84,7 @@ export class InMemoryAppointmentConfirmationRepository implements AppointmentCon
       locationTimeZone: 'America/Caracas',
       locationLocale: 'es-VE',
       locationHourCycle: 'h12' as const,
+      preVisitInstructions: {} as Readonly<Record<string, string>>,
       ...overrides,
       confirmationSentAt: null,
       callbackRequestedAt: null,
