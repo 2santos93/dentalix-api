@@ -5,6 +5,36 @@ ALTER TABLE "appointment_plan_items" DROP CONSTRAINT "appointment_plan_items_app
 ALTER TABLE "appointment_plan_items" DROP CONSTRAINT "appointment_plan_items_item_fkey";
 
 -- DropForeignKey
+ALTER TABLE "commission_rules" DROP CONSTRAINT "commission_rules_created_by_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_rules" DROP CONSTRAINT "commission_rules_membership_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_rules" DROP CONSTRAINT "commission_rules_updated_by_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_settlement_lines" DROP CONSTRAINT "commission_settlement_lines_currency_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_settlement_lines" DROP CONSTRAINT "commission_settlement_lines_item_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_settlement_lines" DROP CONSTRAINT "commission_settlement_lines_location_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_settlement_lines" DROP CONSTRAINT "commission_settlement_lines_payment_currency_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_settlement_lines" DROP CONSTRAINT "commission_settlement_lines_payment_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_settlements" DROP CONSTRAINT "commission_settlements_closed_by_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_settlements" DROP CONSTRAINT "commission_settlements_membership_fkey";
+
+-- DropForeignKey
 ALTER TABLE "patient_implants" DROP CONSTRAINT "patient_implants_tenantId_fkey";
 
 -- DropForeignKey

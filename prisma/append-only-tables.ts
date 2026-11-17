@@ -71,6 +71,10 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-091: el registro de excepciones al cierre contable (quién, cuándo y
   // por qué; dx_financial_lock_override_guard).
   'financial_lock_overrides',
+  // DX-018: la liquidación de honorarios cerrada y su detalle (se corrige con
+  // ajustes en la siguiente; dx_commission_settlement_guard).
+  'commission_settlements',
+  'commission_settlement_lines',
   // DX-205: lotes de «Actualizar precios» del catálogo y el historial de
   // precios de cada ítem (la app solo inserta y lee).
   'catalog_price_batches',
@@ -122,6 +126,9 @@ export const NO_APP_DELETE = [
   'dental_labs',
   'dental_lab_services',
   'dental_lab_orders',
+  // DX-018: la regla de honorarios se desactiva, no se borra
+  // (dx_commission_rule_guard).
+  'commission_rules',
   // DX-568: el envío semanal cierra su estado y la entrega marca el uso del
   // enlace de baja; ninguno se borra (la unicidad por clínica y semana es la
   // que impide un segundo envío).

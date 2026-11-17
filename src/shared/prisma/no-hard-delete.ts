@@ -60,6 +60,13 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // Ajustes › Recall sustituye el conjunto en la misma transacción y el
   // cambio queda en audit_events (RECALL_TYPE_TRIGGERS_UPDATED).
   'recallTypeTrigger',
+  // DX-018: los % por categoría de una regla de honorarios son configuración,
+  // sin datos de pacientes y sin nada que los referencie (la liquidación
+  // cerrada guarda su propia foto de la regla). Guardar la regla los sustituye
+  // en la misma transacción y el cambio queda en audit_events
+  // (COMMISSION_RULE con el antes y el después). La regla no se borra: se
+  // desactiva.
+  'commissionRuleCategory',
   // DX-107: filas preparadas de un dry-run de importación que CADUCÓ (nadie
   // lo confirmó o se subió otro fichero). Son datos del fichero que ya no
   // hacen falta, nunca crearon ni tocaron un paciente (outcome PENDING, sin
