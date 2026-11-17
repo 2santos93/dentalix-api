@@ -271,6 +271,8 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
         name: 'Endodoncia',
         durationMinutes: 90,
         color: '#7C3AED',
+        // DX-564: solo el indicador, nunca el texto.
+        hasPreVisitInstructions: false,
       });
 
       await as(
@@ -557,6 +559,194 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
           .send({ ranges: [] })
           .expect(200);
       }
+    });
+  });
+  describe('DX-564: indicaciones previas a la cita', () => {
+    interface InstructionsBody {
+      id: string;
+      preVisitInstructions: { language: string; text: string }[];
+    }
+    const types = '/api/v1/appointment-types';
+
+    beforeAll(async () => {
+      await as(api().put('/api/v1/patients/languages'), clinic.adminToken)
+        .send({ languages: ['es', 'en'] })
+        .expect(200);
+    });
+
+    it('ADMIN las escribe en es y en; salen ordenadas en la lista y el resumen de la cita solo lleva el indicador', async () => {
+      const created = (
+        await as(api().post(types), clinic.adminToken)
+          .send({
+            name: 'Cirugía de cordales',
+            durationMinutes: 60,
+            color: '#0E7490',
+            preVisitInstructions: [
+              { language: 'en', text: 'Come fasting for 6 hours.' },
+              {
+                language: 'ES',
+                text: '  Ven en ayunas de 6 horas.\r\nTrae tus radiografías. ',
+              },
+              { language: 'en-GB', text: '   ' },
+            ],
+          })
+          .expect(201)
+      ).body as InstructionsBody;
+      expect(created.preVisitInstructions).toEqual([
+        {
+          language: 'es',
+          text: 'Ven en ayunas de 6 horas.\nTrae tus radiografías.',
+        },
+        { language: 'en', text: 'Come fasting for 6 hours.' },
+      ]);
+
+      // Los 4 roles leen la lista con el texto.
+      for (const token of [dentist.token, reception.token]) {
+        const list = (await as(api().get(types), token).expect(200))
+          .body as InstructionsBody[];
+        expect(
+          list.find((t) => t.id === created.id)?.preVisitInstructions,
+        ).toEqual(created.preVisitInstructions);
+      }
+      // Un tipo sin indicaciones: lista vacía.
+      const plain = await createType({ name: 'Control DX-564' });
+      expect(
+        (plain as unknown as InstructionsBody).preVisitInstructions,
+      ).toEqual([]);
+
+      const appt = await book({
+        start: at('22:00'),
+        appointmentTypeId: created.id,
+      });
+      expect(appt.appointmentType).toEqual({
+        id: created.id,
+        name: 'Cirugía de cordales',
+        durationMinutes: 60,
+        color: '#0E7490',
+        hasPreVisitInstructions: true,
+      });
+      const rows = (
+        await as(
+          api().get('/api/v1/appointments').query({ from: FROM, to: TO }),
+          reception.token,
+        ).expect(200)
+      ).body as AppointmentBody[];
+      const row = rows.find((a) => a.id === appt.id);
+      expect(row?.appointmentType).toEqual(appt.appointmentType);
+      expect(JSON.stringify(rows)).not.toContain('ayunas');
+    });
+
+    it('los demás roles no las escriben (403)', async () => {
+      const type = await createType({ name: 'Profilaxis DX-564' });
+      for (const token of [dentist.token, reception.token]) {
+        await as(api().patch(`${types}/${type.id}`), token)
+          .send({ preVisitInstructions: [{ language: 'es', text: 'Hola' }] })
+          .expect(403);
+      }
+    });
+
+    it.each([
+      [
+        [{ language: 'pt', text: 'Venha em jejum.' }],
+        'Ese idioma no está entre los idiomas de los pacientes de la clínica.',
+      ],
+      [
+        [{ language: 'es', text: 'Lee https://example.com antes' }],
+        'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
+      ],
+      [
+        [{ language: 'es', text: 'Ven en <b>ayunas</b>' }],
+        'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
+      ],
+      [
+        [
+          { language: 'es', text: 'A' },
+          { language: 'es', text: 'B' },
+        ],
+        'Ese idioma está repetido en las indicaciones.',
+      ],
+      [
+        [{ language: 'es', text: 'a'.repeat(601) }],
+        'Las indicaciones no pueden tener más de 600 caracteres.',
+      ],
+      [
+        Array.from({ length: 11 }, () => ({ language: 'es', text: 'a' })),
+        'Las indicaciones admiten como mucho 10 idiomas.',
+      ],
+      [
+        [{ language: 'inglés', text: 'a' }],
+        'El idioma debe ser una etiqueta BCP 47',
+      ],
+      [[{ language: 'es', text: 3 }], 'Las indicaciones deben ser un texto.'],
+      [{ es: 'Hola' }, 'Las indicaciones deben ir en una lista.'],
+    ])(
+      'valida %j con 400 en español',
+      async (preVisitInstructions, message) => {
+        const type = await createType({
+          name: `Validación ${message.length}-${JSON.stringify(preVisitInstructions).length}`,
+        });
+        const res = await as(
+          api().patch(`${types}/${type.id}`),
+          clinic.adminToken,
+        )
+          .send({ preVisitInstructions })
+          .expect(400);
+        expect(JSON.stringify(res.body)).toContain(message);
+      },
+    );
+
+    it('auditoría: el cambio dice qué idiomas cambiaron, nunca el texto', async () => {
+      const type = (
+        await as(api().post(types), clinic.adminToken)
+          .send({
+            name: 'Implante DX-564',
+            durationMinutes: 60,
+            color: '#0E7490',
+            preVisitInstructions: [
+              { language: 'es', text: 'Texto secreto uno' },
+            ],
+          })
+          .expect(201)
+      ).body as InstructionsBody;
+      await as(api().patch(`${types}/${type.id}`), clinic.adminToken)
+        .send({
+          preVisitInstructions: [
+            { language: 'es', text: 'Texto secreto dos' },
+            { language: 'en', text: 'Secret text' },
+          ],
+        })
+        .expect(200);
+      // Sin el campo, nada cambia: ningún evento nuevo.
+      await as(api().patch(`${types}/${type.id}`), clinic.adminToken)
+        .send({ durationMinutes: 60 })
+        .expect(200);
+
+      const events = await raw.auditEvent.findMany({
+        where: {
+          tenantId: clinic.tenantId,
+          resourceType: 'APPOINTMENT_TYPE',
+          resourceId: type.id,
+        },
+        orderBy: { occurredAt: 'asc' },
+      });
+      const reasons = events.map(
+        (e) => (e.metadata as { reason?: string }).reason,
+      );
+      expect(reasons).toContain('APPOINTMENT_TYPE_CREATED');
+      const updates = events.filter(
+        (e) =>
+          (e.metadata as { reason?: string }).reason ===
+          'APPOINTMENT_TYPE_UPDATED',
+      );
+      expect(updates).toHaveLength(1);
+      expect(updates[0].metadata).toMatchObject({
+        changedFields: ['preVisitInstructionLanguages', 'preVisitInstructions'],
+        configChange: {
+          before: { preVisitInstructionLanguages: ['es'] },
+          after: { preVisitInstructionLanguages: ['es', 'en'] },
+        },
+      });
+      expect(JSON.stringify(events)).not.toMatch(/secreto|Secret text/);
     });
   });
 });

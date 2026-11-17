@@ -61,6 +61,17 @@ export const PRE_VISIT_INSTRUCTIONS_TEXT_MAX = 600;
 /** Idiomas por tipo (la lista de la clínica admite hasta 20; holgado para 10). */
 export const PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES = 10;
 
+/**
+ * Bytes del mapa en JSON (UTF-8). El CHECK de la BD admite 8192 de jsonb; un
+ * texto en una escritura de 3 bytes por carácter (chino, japonés…) en varios
+ * idiomas podría pasarlo con cada texto bajo 600, y eso sería un 500. Con 8000
+ * bytes de JSON el jsonb queda por debajo (lleva unos pocos bytes más por
+ * entrada, menos que las comillas y escapes del JSON).
+ */
+export const PRE_VISIT_INSTRUCTIONS_TOTAL_BYTES_MAX = 8000;
+
+export const PRE_VISIT_INSTRUCTIONS_TOO_LARGE_MESSAGE =
+  'Las indicaciones son demasiado largas en conjunto: acorta alguno de los idiomas.';
 export const PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE = `Las indicaciones admiten como mucho ${PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES} idiomas.`;
 export const PRE_VISIT_INSTRUCTIONS_LANGUAGE_NOT_OFFERED_MESSAGE =
   'Ese idioma no está entre los idiomas de los pacientes de la clínica.';
@@ -101,7 +112,8 @@ export function normalizePreVisitInstructionText(text: string): string {
  *  - el idioma debe estar en la lista de la clínica, salvo que su texto sea
  *    exactamente el ya guardado (la web puede devolver lo que leyó aunque la
  *    clínica haya retirado ese idioma después: retirarlo no borra el texto);
- *  - hasta 600 caracteres; sin enlaces ni HTML.
+ *  - hasta 600 caracteres; sin enlaces ni HTML;
+ *  - el mapa entero, hasta 8000 bytes de JSON (la red del CHECK).
  */
 export function preVisitInstructionsFromEntries(
   entries: readonly PreVisitInstructionEntry[],
@@ -137,6 +149,12 @@ export function preVisitInstructionsFromEntries(
       return { error: PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE };
     }
     map[language] = text;
+  }
+  if (
+    Buffer.byteLength(JSON.stringify(map), 'utf8') >
+    PRE_VISIT_INSTRUCTIONS_TOTAL_BYTES_MAX
+  ) {
+    return { error: PRE_VISIT_INSTRUCTIONS_TOO_LARGE_MESSAGE };
   }
   return { map };
 }

@@ -154,6 +154,29 @@ describe('indicaciones previas (DX-564)', () => {
     });
   });
 
+  it('el mapa entero no pasa de 8000 bytes (escrituras de 3 bytes por carácter)', () => {
+    const langs = ['es', 'en', 'zh', 'ja', 'ko'];
+    const context = { patientLanguages: langs, current: {} };
+    // 5 × 600 caracteres de 3 bytes = 9000 bytes: cada texto vale, el conjunto no.
+    expect(
+      ok(
+        langs.map((language) => ({ language, text: '歯'.repeat(600) })),
+        context,
+      ),
+    ).toEqual({
+      error:
+        'Las indicaciones son demasiado largas en conjunto: acorta alguno de los idiomas.',
+    });
+    expect(
+      ok(
+        langs
+          .slice(0, 4)
+          .map((language) => ({ language, text: '歯'.repeat(600) })),
+        context,
+      ),
+    ).toHaveProperty('map');
+  });
+
   it('más de 10 idiomas → error', () => {
     expect(
       ok(

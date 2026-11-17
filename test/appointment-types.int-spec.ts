@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { ConflictException } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -149,6 +149,20 @@ describe('tipos de cita y agenda en columnas (int, DX-121)', () => {
       ['duración no múltiplo de 5', { durationMinutes: 32 }],
       ['duración de más de 8 h', { durationMinutes: 485 }],
       ['nombre en blanco', { name: '   ' }],
+      // DX-564: indicaciones previas = objeto jsonb de hasta 8 KB.
+      ['indicaciones que no son un objeto', { preVisitInstructions: ['es'] }],
+      [
+        'indicaciones de más de 8 KB',
+        {
+          // Texto aleatorio: el jsonb comprimido seguiría por encima.
+          preVisitInstructions: Object.fromEntries(
+            Array.from({ length: 20 }, (_, i) => [
+              `l${i}`,
+              randomBytes(450).toString('base64'),
+            ]),
+          ),
+        },
+      ],
     ])('el CHECK rechaza %s', async (_label, override) => {
       await expect(
         asA((tx) =>
