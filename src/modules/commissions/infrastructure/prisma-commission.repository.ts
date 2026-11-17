@@ -837,6 +837,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
           patientName: string | null;
           treatmentPlanId: string;
           treatmentPlanItemId: string;
+          locationId: string | null;
           catalogCode: string;
           catalogLabel: string;
           category: string | null;
@@ -855,7 +856,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
       >`
         SELECT l."id", l."kind", l."adjustsLineId", i."patientId",
                btrim(pt."firstName" || ' ' || pt."lastName") AS "patientName",
-               l."treatmentPlanId", l."treatmentPlanItemId", l."catalogCode",
+               l."treatmentPlanId", l."treatmentPlanItemId", l."locationId", l."catalogCode",
                l."catalogLabel", l."category", l."toothNumber", l."completedAt",
                l."paymentId", l."paidAt", l."paymentAmount", l."paymentCurrency",
                l."releasedAt", l."currency", l."base", l."percent", l."amount"
@@ -875,6 +876,7 @@ export class PrismaCommissionRepository implements CommissionRepository {
           patient: { id: l.patientId, name: l.patientName },
           treatmentPlanId: l.treatmentPlanId,
           treatmentPlanItemId: l.treatmentPlanItemId,
+          locationId: l.locationId,
           catalogCode: l.catalogCode,
           catalogLabel: l.catalogLabel,
           category: l.category,

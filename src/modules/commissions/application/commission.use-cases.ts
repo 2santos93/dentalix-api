@@ -240,6 +240,7 @@ export class CommissionUseCases {
       patient: { id: l.patientId, name: names.get(l.patientId) ?? null },
       treatmentPlanId: l.planId,
       treatmentPlanItemId: l.itemId,
+      locationId: l.locationId,
       catalogCode: l.catalogCode,
       catalogLabel: l.catalogLabel,
       category: l.category,

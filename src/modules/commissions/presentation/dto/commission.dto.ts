@@ -282,6 +282,13 @@ export class CommissionLineDto {
   patient!: CommissionLinePatientDto;
   @ApiProperty({ format: 'uuid' }) treatmentPlanId!: string;
   @ApiProperty({ format: 'uuid' }) treatmentPlanItemId!: string;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'Sede donde se realizó el ítem (la de sus fechas e importes).',
+  })
+  locationId!: string | null;
   @ApiProperty() catalogCode!: string;
   @ApiProperty() catalogLabel!: string;
   @ApiProperty({ type: String, nullable: true }) category!: string | null;

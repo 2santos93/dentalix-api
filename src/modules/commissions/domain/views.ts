@@ -57,6 +57,8 @@ export interface CommissionLineView {
   patient: { id: string; name: string | null };
   treatmentPlanId: string;
   treatmentPlanItemId: string;
+  /** Sede donde se realizó el ítem: la de sus fechas e importes en pantalla. */
+  locationId: string | null;
   catalogCode: string;
   catalogLabel: string;
   category: string | null;
