@@ -197,6 +197,12 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'GET /commissions/preview ?userId': 'commissions.e2e-spec.ts',
   'GET /commissions/settlements ?userId': 'commissions.e2e-spec.ts',
   'POST /commissions/settlements body.userId': 'commissions.e2e-spec.ts',
+  // DX-464: B paga su liquidación con una línea de A (nada que pagar, 409) y
+  // A paga con la sede de B (400, sin gasto); la liquidación de A intacta.
+  'POST /commissions/settlements/:id/payments body.lineIds[]':
+    'commission-payments.e2e-spec.ts',
+  'POST /commissions/settlements/:id/payments body.locationId':
+    'commission-payments.e2e-spec.ts',
   // DX-568: «B guarda como destinatario del resumen semanal la membresía ADMIN
   // de A → 400 en español y ni los ajustes de B ni los de A cambian».
   'PUT /clinic/weekly-digest-settings body.recipientMembershipIds[]':

@@ -179,7 +179,7 @@ export class CommissionReceiptPublicUseCases {
         contentHash: record.contentHash,
         receiptHash: record.receiptHash,
       },
-      null,
+      record.content.format.timeZone ?? null,
       this.now(),
     );
     return {

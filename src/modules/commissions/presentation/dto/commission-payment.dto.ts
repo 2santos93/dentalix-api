@@ -231,6 +231,12 @@ export class PublicReceiptPeriodDto {
 export class PublicReceiptFormatDto {
   @ApiProperty({ type: String, nullable: true }) locale!: string | null;
   @ApiProperty({ type: String, nullable: true }) hourCycle!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Zona IANA de la sede principal (caducidad y hora de la firma).',
+  })
+  timeZone!: string | null;
 }
 
 export class PublicReceiptContentDto {

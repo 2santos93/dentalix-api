@@ -74,7 +74,12 @@ export interface CommissionReceiptContent {
     locationName: string;
   };
   lines: ReceiptLine[];
-  format: { locale: string | null; hourCycle: string | null };
+  /** Formato y zona de la sede principal (fechas y horas de la página y el PDF). */
+  format: {
+    locale: string | null;
+    hourCycle: string | null;
+    timeZone: string | null;
+  };
 }
 
 export function receiptLineOf(line: DocumentLine): ReceiptLine {
@@ -116,6 +121,7 @@ export function buildReceiptContent(
     format: {
       locale: source.format.locale,
       hourCycle: source.format.hourCycle,
+      timeZone: source.format.timeZone,
     },
   };
 }

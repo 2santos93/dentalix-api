@@ -4360,6 +4360,18 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'commission-payments.e2e-spec.ts',
+      checks:
+        'B → 404 al pagar la liquidación de honorarios de A, descargar su PDF o el recibo de un pago, pedir la conformidad y anular el pago; el estado de pago de A sigue igual (DX-464)',
+      routes: [
+        'POST /commissions/settlements/:id/payments',
+        'GET /commissions/settlements/:id/pdf',
+        'POST /commissions/payments/:paymentId/void',
+        'GET /commissions/payments/:paymentId/receipt/pdf',
+        'POST /commissions/payments/:paymentId/receipt-request',
+      ],
+    },
+    {
       spec: 'orthodontics.e2e-spec.ts',
       checks:
         'B → 404 al listar, abrir, editar, cerrar y registrar controles en el caso de ortodoncia del paciente de A; el caso de A sigue igual y sin controles nuevos (DX-190)',
@@ -4578,6 +4590,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * `COVERED_ELSEWHERE`).
    */
   const PUBLIC_TOKEN_COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'commission-payments.e2e-spec.ts',
+      checks:
+        'B → 404 con el enlace de conformidad de A en su host (ver, abrir, firmar y descargar), igual que uno inventado, y el pago de A sigue igual (DX-464)',
+      routes: [
+        'GET /public/commission-receipts/:token',
+        'POST /public/commission-receipts/:token/opened',
+        'POST /public/commission-receipts/:token/sign',
+        'GET /public/commission-receipts/:token/pdf',
+      ],
+    },
     {
       spec: 'weekly-digest.e2e-spec.ts',
       checks:
