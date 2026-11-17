@@ -270,6 +270,24 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
         price: 100,
         done: { locationId, at: new Date(Date.now() - 40 * DAY_MS) },
       });
+      // DX-566: el control postoperatorio de ese procedimiento hecho, para
+      // llamar hoy en esta sede (sin tocar el plan ni la cartera).
+      const doneItem = await raw.treatmentPlanItem.findFirstOrThrow({
+        where: { tenantId, patientId, status: 'DONE' },
+        select: { id: true, catalogItemId: true },
+      });
+      await raw.postOpCheck.create({
+        data: {
+          tenantId,
+          patientId,
+          planItemId: doneItem.id,
+          locationId,
+          professionalId: dentistId,
+          catalogItemId: doneItem.catalogItemId,
+          procedureName: 'Extracción simple',
+          dueOn: new Date(`${today()}T00:00:00Z`),
+        },
+      });
       // Lista de espera abierta.
       await raw.appointmentWaitlistEntry.create({
         data: { tenantId, locationId, patientId },
@@ -502,6 +520,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
       expect(rest.map((i) => i.key)).toEqual([
         'CLOSING_QUEUE',
         'PAYMENT_REPORTS',
+        'POST_OP_CHECKS',
         'ACCEPTED_UNSCHEDULED',
         'WAITLIST',
         'RECALL',
