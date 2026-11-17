@@ -7,7 +7,12 @@
 # Uso: check-e2e-shards.sh <lista-completa> <lista-shard-1> [<lista-shard-2> ...]
 # Rutas relativas a la raíz del repo, una por línea. Sale con 1 si sobra, falta
 # o se repite algún spec, o si un shard viene vacío.
+#
+# DX-396-ter: también comprueba el reparto de la integración. SHARD_SUITE da el
+# nombre de la suite en los mensajes (por defecto «e2e»).
 set -euo pipefail
+
+suite="${SHARD_SUITE:-e2e}"
 
 if [ "$#" -lt 2 ]; then
   echo "Uso: $0 <lista-completa> <lista-shard>..." >&2
@@ -18,14 +23,14 @@ full="$1"
 shift
 
 if [ ! -s "$full" ]; then
-  echo "::error title=Reparto de la e2e::La lista completa ($full) está vacía."
+  echo "::error title=Reparto de la ${suite}::La lista completa ($full) está vacía."
   exit 1
 fi
 
 status=0
 for shard in "$@"; do
   if [ ! -s "$shard" ]; then
-    echo "::error title=Reparto de la e2e::El shard $shard no tiene specs."
+    echo "::error title=Reparto de la ${suite}::El shard $shard no tiene specs."
     status=1
   fi
 done
@@ -41,23 +46,23 @@ missing="$(comm -23 "$expected" <(sort -u "$union"))"
 extra="$(comm -13 "$expected" <(sort -u "$union"))"
 
 if [ -n "$repeated" ]; then
-  echo "::error title=Reparto de la e2e::Specs en más de un shard:"
+  echo "::error title=Reparto de la ${suite}::Specs en más de un shard:"
   echo "$repeated"
   status=1
 fi
 if [ -n "$missing" ]; then
-  echo "::error title=Reparto de la e2e::Specs que no corre ningún shard:"
+  echo "::error title=Reparto de la ${suite}::Specs que no corre ningún shard:"
   echo "$missing"
   status=1
 fi
 if [ -n "$extra" ]; then
-  echo "::error title=Reparto de la e2e::Specs de los shards que no están en la lista completa:"
+  echo "::error title=Reparto de la ${suite}::Specs de los shards que no están en la lista completa:"
   echo "$extra"
   status=1
 fi
 
 if [ "$status" -eq 0 ]; then
-  echo "Reparto de la e2e correcto: $(wc -l <"$expected") specs en $# shards, cada uno una sola vez."
+  echo "Reparto de la ${suite} correcto: $(wc -l <"$expected") specs en $# shards, cada uno una sola vez."
   for shard in "$@"; do
     echo "  $(basename "$shard"): $(wc -l <"$shard") specs"
   done
