@@ -446,6 +446,94 @@ describe('DX-568 · resumen semanal por email (int)', () => {
     ]);
   });
 
+  it('las guardas: como dentalix_app, ni un envío cerrado ni una entrega usada cambian, y nada se borra', async () => {
+    const prisma = app.get(PrismaService);
+    const asApp = (sql: Prisma.Sql) =>
+      prisma.runWithTenant(a.tenantId, (tx) => tx.$executeRaw(sql));
+    const [run] = await owner.weeklyDigestRun.findMany({
+      where: { tenantId: a.tenantId, weekStart: new Date('2026-11-09') },
+    });
+    const forbidden = [
+      Prisma.sql`UPDATE "weekly_digest_runs" SET "status" = 'SENDING', "completedAt" = NULL WHERE "id" = ${run.id}::uuid`,
+      Prisma.sql`UPDATE "weekly_digest_runs" SET "recipientCount" = 9 WHERE "id" = ${run.id}::uuid`,
+      Prisma.sql`UPDATE "weekly_digest_runs" SET "receivablesSnapshot" = '{}'::jsonb WHERE "id" = ${run.id}::uuid`,
+      Prisma.sql`DELETE FROM "weekly_digest_runs" WHERE "id" = ${run.id}::uuid`,
+    ];
+    for (const sql of forbidden) {
+      await expect(asApp(sql)).rejects.toThrow(/weekly_digest_runs|permission/);
+    }
+
+    // Un envío en SENDING: solo se cierra a SENT/SKIPPED con su fecha.
+    const open = await owner.weeklyDigestRun.create({
+      data: { tenantId: a.tenantId, weekStart: new Date('2026-10-05') },
+    });
+    await expect(
+      asApp(
+        Prisma.sql`UPDATE "weekly_digest_runs" SET "weekStart" = '2026-10-12' WHERE "id" = ${open.id}::uuid`,
+      ),
+    ).rejects.toThrow(/weekly_digest_runs/);
+    await expect(
+      asApp(
+        Prisma.sql`UPDATE "weekly_digest_runs" SET "status" = 'SENT' WHERE "id" = ${open.id}::uuid`,
+      ),
+    ).rejects.toThrow(/weekly_digest_runs/);
+    await expect(
+      asApp(
+        Prisma.sql`UPDATE "weekly_digest_runs" SET "status" = 'SKIPPED', "completedAt" = now(), "skippedCount" = 1 WHERE "id" = ${open.id}::uuid`,
+      ),
+    ).resolves.toBe(1);
+
+    // Entrega: lo que la identifica no cambia; usedAt y el email solo de
+    // NULL a valor; usada, ya no cambia nada.
+    const delivery = await owner.weeklyDigestDelivery.create({
+      data: {
+        tenantId: a.tenantId,
+        runId: open.id,
+        membershipId: a.unverified.membershipId,
+        unsubscribeTokenHash: 'a'.repeat(64),
+        expiresAt: new Date(Date.now() + 86_400_000),
+      },
+    });
+    for (const sql of [
+      Prisma.sql`UPDATE "weekly_digest_deliveries" SET "expiresAt" = now() + interval '90 days' WHERE "id" = ${delivery.id}::uuid`,
+      Prisma.sql`UPDATE "weekly_digest_deliveries" SET "unsubscribeTokenHash" = ${'b'.repeat(64)} WHERE "id" = ${delivery.id}::uuid`,
+      Prisma.sql`UPDATE "weekly_digest_deliveries" SET "membershipId" = ${a.owner.membershipId}::uuid WHERE "id" = ${delivery.id}::uuid`,
+      Prisma.sql`DELETE FROM "weekly_digest_deliveries" WHERE "id" = ${delivery.id}::uuid`,
+    ]) {
+      await expect(asApp(sql)).rejects.toThrow(
+        /weekly_digest_deliveries|permission/,
+      );
+    }
+    const outboxId = '00000000-0000-4000-8000-000000000001';
+    await expect(
+      asApp(
+        Prisma.sql`UPDATE "weekly_digest_deliveries" SET "emailOutboxId" = ${outboxId}::uuid WHERE "id" = ${delivery.id}::uuid`,
+      ),
+    ).resolves.toBe(1);
+    await expect(
+      asApp(
+        Prisma.sql`UPDATE "weekly_digest_deliveries" SET "emailOutboxId" = gen_random_uuid() WHERE "id" = ${delivery.id}::uuid`,
+      ),
+    ).rejects.toThrow(/weekly_digest_deliveries/);
+    await expect(
+      asApp(
+        Prisma.sql`UPDATE "weekly_digest_deliveries" SET "usedAt" = now() WHERE "id" = ${delivery.id}::uuid`,
+      ),
+    ).resolves.toBe(1);
+    await expect(
+      asApp(
+        Prisma.sql`UPDATE "weekly_digest_deliveries" SET "usedAt" = now() + interval '1 day' WHERE "id" = ${delivery.id}::uuid`,
+      ),
+    ).rejects.toThrow(/weekly_digest_deliveries/);
+    // Tampoco el owner (no superusuario o sí) cambia una entrega usada.
+    await expect(
+      owner.weeklyDigestDelivery.update({
+        where: { id: delivery.id },
+        data: { usedAt: null },
+      }),
+    ).rejects.toThrow();
+  });
+
   it('la semana anterior de la variación del dinero es la de Reportes (W-1)', async () => {
     clock.now = MONDAY_8;
     const digest = await compose(a.tenantId);

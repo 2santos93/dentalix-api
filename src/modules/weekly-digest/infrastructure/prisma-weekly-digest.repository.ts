@@ -426,7 +426,6 @@ export class PrismaWeeklyDigestRepository implements WeeklyDigestRepository {
       await tx.$executeRaw`
         UPDATE "weekly_digest_runs"
            SET "status" = ${status}::"WeeklyDigestRunStatus",
-               "receivablesSnapshot" = ${snapshot}::jsonb,
                "recipientCount" = ${delivered.length},
                "skippedCount" = ${skipped},
                "completedAt" = timezone('UTC'::text, now())

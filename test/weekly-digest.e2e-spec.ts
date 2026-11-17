@@ -503,12 +503,19 @@ describe('Resumen semanal por email (e2e, DX-568)', () => {
     });
 
     it('un enlace caducado (60 días) es 404', async () => {
-      await raw.weeklyDigestDelivery.updateMany({
-        where: { membershipId: ownerMembershipId },
-        data: {
-          expiresAt: new Date(Date.now() - 1000),
-          createdAt: new Date(Date.now() - 2000),
-        },
+      // La guarda congela la caducidad (y la entrega ya está usada): el test
+      // la mueve como owner con los triggers apagados.
+      await raw.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          'SET LOCAL session_replication_role = replica',
+        );
+        await tx.weeklyDigestDelivery.updateMany({
+          where: { membershipId: ownerMembershipId },
+          data: {
+            expiresAt: new Date(Date.now() - 1000),
+            createdAt: new Date(Date.now() - 2000),
+          },
+        });
       });
       await pub(
         api().get(`/api/v1/public/weekly-digest-unsubscribe/${token}`),
