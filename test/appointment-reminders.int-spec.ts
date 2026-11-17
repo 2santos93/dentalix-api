@@ -15,6 +15,8 @@ import {
 } from '../src/modules/appointment-confirmations/domain/ports/appointment-confirmation-repository.port';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
+import { EmailPayloadCipher } from '../src/modules/notifications/email/infrastructure/email-payload-cipher';
+import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { SendAppointmentReminder } from '../src/modules/reminders/application/send-appointment-reminder';
 import { hashConfirmationToken } from '../src/modules/appointment-confirmations/application/confirmation-token';
 import { randomUUID } from 'node:crypto';
@@ -449,22 +451,43 @@ describe('DX-026 · recordatorios automáticos por email (int)', () => {
       const { id, typeId, start } = await typedAppointment(null, {
         es: 'Texto al encolar.',
       });
-      // El handler encola (renderiza y cifra); el despacho va aparte.
-      await a.get(TenantContextService).run(clinicA.tenantId, () =>
-        a.get(SendAppointmentReminder).handle({
-          appointmentId: id,
-          leadHours: 2,
-          start: start.toISOString(),
-        }),
-      );
-      expect(await reminderEmails(clinicA.tenantId)).toBe(1);
-      expect(mailer.sent).toHaveLength(0);
-      await owner.appointmentType.update({
-        where: { id: typeId },
-        data: { preVisitInstructions: { es: 'Texto cambiado después.' } },
+      // El proveedor falla mientras tanto: el email queda en email_outbox,
+      // renderizado y cifrado, esperando su reintento.
+      const down = jest
+        .spyOn(mailer, 'send')
+        .mockRejectedValue(
+          Object.assign(new Error('ECONNRESET'), { code: 'ECONNRESET' }),
+        );
+      try {
+        await a.get(TenantContextService).run(clinicA.tenantId, () =>
+          a.get(SendAppointmentReminder).handle({
+            appointmentId: id,
+            leadHours: 2,
+            start: start.toISOString(),
+          }),
+        );
+        await Promise.all([a, b].map((m) => m.get(EmailDispatcher).whenIdle()));
+        await owner.appointmentType.update({
+          where: { id: typeId },
+          data: { preVisitInstructions: { es: 'Texto cambiado después.' } },
+        });
+      } finally {
+        down.mockRestore();
+      }
+      const row = await owner.emailOutbox.findFirstOrThrow({
+        where: { tenantId: clinicA.tenantId, template: 'APPOINTMENT_REMINDER' },
       });
-      await drainBoth();
-      await waitFor(() => mailer.sent.length === 1, 'el despachador entrega 1');
+      expect(row.status).not.toBe('SENT');
+      expect(
+        a.get(EmailPayloadCipher).decrypt(Buffer.from(row.payload!)).text,
+      ).toContain('Antes de tu cita:\nTexto al encolar.');
+      // El reintento entrega lo renderizado al encolar, no el texto nuevo.
+      await owner.emailOutbox.update({
+        where: { id: row.id },
+        data: { nextAttemptAt: new Date(Date.now() - MIN) },
+      });
+      await a.get(EmailDispatcher).dispatchBatch();
+      await waitFor(() => mailer.sent.length === 1, 'el reintento entrega 1');
       expect(mailer.sent[0].text).toContain(
         'Antes de tu cita:\nTexto al encolar.',
       );
