@@ -59,6 +59,16 @@ export function appointmentReminder(
   if (vars.providerName) {
     blocks.push({ kind: 'paragraph', text: t.provider(vars.providerName) });
   }
+  // DX-564: las indicaciones del tipo de cita, con sus saltos de línea.
+  const instructions = vars.preVisitInstructions?.trim();
+  if (instructions) {
+    blocks.push({
+      kind: 'paragraph',
+      lead: t.preVisitInstructionsLead,
+      text: instructions,
+      multiline: true,
+    });
+  }
   blocks.push({
     kind: 'note',
     text: vars.confirmUrl ? t.noteWithLink : t.noteWithoutLink,

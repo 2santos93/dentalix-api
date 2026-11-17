@@ -161,6 +161,19 @@ export class PublicCancellationPolicyDto {
   currency!: string | null;
 }
 
+/** DX-564: una variante de las indicaciones previas del tipo de la cita. */
+export class PreVisitInstructionVariantDto {
+  @ApiProperty({ example: 'es', description: 'Idioma (BCP 47) del texto.' })
+  language!: string;
+
+  @ApiProperty({
+    example: 'Ven en ayunas de 6 horas y trae tus radiografías.',
+    description:
+      'Texto plano de la clínica (hasta 600 caracteres, con saltos de línea; sin enlaces ni HTML).',
+  })
+  text!: string;
+}
+
 // Respuesta de GET y POST /public/appointment-confirmations/:token.
 export class PublicAppointmentConfirmationDto {
   @ApiProperty({
@@ -220,6 +233,13 @@ export class PublicAppointmentConfirmationDto {
       'DX-291: cancelar ahora tendría menos aviso que la política: cancelar exige `acknowledgePolicy`.',
   })
   isLate!: boolean;
+
+  @ApiProperty({
+    type: [PreVisitInstructionVariantDto],
+    description:
+      'DX-564: indicaciones previas del tipo de la cita, todas sus variantes (español primero, luego alfabético), para que la página elija por idioma (exacto → base → español) y siga al cambiar de idioma. Texto general de la clínica por tipo de cita, no dato del paciente. Vacía si el tipo no tiene, si el enlace caducó o si la cita está cancelada o ya pasó.',
+  })
+  preVisitInstructions!: PreVisitInstructionVariantDto[];
 }
 
 export class RespondAppointmentConfirmationDto {
@@ -283,4 +303,20 @@ export class ConfirmationLinkDto {
       'DX-290: tocaba la anamnesis pero el paciente ya tiene un enlace vivo (de un recordatorio o de recepción): no se emite otro ni se anula; el mensaje puede recordarle que lo use.',
   })
   anamnesisPending!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'en',
+    description:
+      'DX-564: idioma preferido del paciente (BCP 47); null = el de la clínica. La web compone el mensaje de WhatsApp en ese idioma (sin catálogo para él, en español).',
+  })
+  patientLanguage!: string | null;
+
+  @ApiProperty({
+    type: [PreVisitInstructionVariantDto],
+    description:
+      'DX-564: indicaciones previas del tipo de la cita, todas sus variantes (español primero, luego alfabético). La web elige la del paciente (exacto → base → español; sin español ni coincidencia, ninguna) y la añade al mensaje («Antes de tu cita: …»). Vacía si el tipo no tiene.',
+  })
+  preVisitInstructions!: PreVisitInstructionVariantDto[];
 }

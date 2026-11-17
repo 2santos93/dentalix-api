@@ -6,6 +6,7 @@ import { AppointmentTypesController } from './presentation/appointment-types.con
 import {
   CreateAppointmentTypeUseCase,
   DeleteAppointmentTypeUseCase,
+  GetAppointmentTypeUseCase,
   ListAppointmentTypesUseCase,
   UpdateAppointmentTypeUseCase,
 } from './application/use-cases/appointment-types.use-cases';
@@ -22,6 +23,7 @@ import { PrismaAppointmentTypeRepository } from './infrastructure/repositories/p
   controllers: [AppointmentTypesController],
   providers: [
     ListAppointmentTypesUseCase,
+    GetAppointmentTypeUseCase,
     CreateAppointmentTypeUseCase,
     UpdateAppointmentTypeUseCase,
     DeleteAppointmentTypeUseCase,

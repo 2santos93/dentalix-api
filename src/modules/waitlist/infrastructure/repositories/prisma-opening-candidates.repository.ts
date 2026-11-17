@@ -1,3 +1,7 @@
+import {
+  APPOINTMENT_TYPE_SUMMARY_SELECT,
+  toAppointmentTypeSummary,
+} from '../../../appointment-types/infrastructure/appointment-type-summary';
 import { Injectable } from '@nestjs/common';
 import {
   Prisma,
@@ -39,9 +43,7 @@ const PATIENT_SELECT = {
   email: true,
 } as const satisfies Prisma.PatientSelect;
 
-const TYPE_SELECT = {
-  select: { id: true, name: true, durationMinutes: true, color: true },
-} as const;
+const TYPE_SELECT = { select: APPOINTMENT_TYPE_SUMMARY_SELECT } as const;
 
 type OfferRow = Prisma.WaitlistOfferGetPayload<Record<string, never>>;
 
@@ -115,7 +117,7 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
         createdAt: r.createdAt,
         sourceAppointment: r.sourceAppointment,
         patient: r.patient,
-        appointmentType: r.appointmentType,
+        appointmentType: toAppointmentTypeSummary(r.appointmentType),
         preferredWindow: r.preferredWindow,
         note: r.note,
       }));
@@ -157,7 +159,7 @@ export class PrismaOpeningCandidatesRepository implements OpeningCandidatesRepos
         earlierWindow: r.earlierWindow,
         createdAt: r.createdAt,
         patient: r.patient,
-        appointmentType: r.appointmentType,
+        appointmentType: toAppointmentTypeSummary(r.appointmentType),
         reason: r.reason,
       }));
     });

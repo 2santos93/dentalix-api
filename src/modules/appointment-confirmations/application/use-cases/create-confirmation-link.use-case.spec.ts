@@ -62,6 +62,24 @@ describe('CreateConfirmationLinkUseCase', () => {
       earlierWindow: null,
       earlierAllowed: true,
     });
+    // DX-564: sin preferencia ni indicaciones.
+    expect(result.patientLanguage).toBeNull();
+    expect(result.preVisitInstructions).toEqual([]);
+  });
+
+  it('DX-564: idioma del paciente y todas las variantes de las indicaciones del tipo', async () => {
+    const appointment = repo.addAppointment({
+      patientPreferredLanguage: 'en-GB',
+      preVisitInstructions: { en: 'Come fasting.', es: 'Ven en ayunas.' },
+    });
+
+    const result = await uc.execute({ appointmentId: appointment.id });
+
+    expect(result.patientLanguage).toBe('en-GB');
+    expect(result.preVisitInstructions).toEqual([
+      { language: 'es', text: 'Ven en ayunas.' },
+      { language: 'en', text: 'Come fasting.' },
+    ]);
   });
 
   it('el recordatorio automático (DX-026) pide conservar «pide llamada»; recepción, no', async () => {

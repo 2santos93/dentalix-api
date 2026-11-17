@@ -187,6 +187,12 @@ export interface AppointmentReminderEmailVars {
    * emite otro): el email solo le recuerda que lo use. Sin enlace.
    */
   anamnesisPending?: boolean;
+  /**
+   * DX-564: indicaciones previas del tipo de la cita, ya en el idioma del
+   * paciente (o en español si no hay texto en el suyo). Texto plano de la
+   * clínica con saltos de línea. null/ausente = no hay: el bloque no sale.
+   */
+  preVisitInstructions?: string | null;
 }
 
 /** DX-291: el bloque de la política de cancelación del recordatorio. */

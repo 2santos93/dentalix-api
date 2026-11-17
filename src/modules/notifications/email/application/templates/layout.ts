@@ -9,6 +9,40 @@ const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 export interface EmailBlock {
   kind: 'paragraph' | 'note';
   text: string;
+  /**
+   * DX-564: el texto conserva sus saltos de línea (texto libre de la clínica,
+   * p. ej. las indicaciones previas): en HTML, cada línea escapada y `<br />`
+   * entre ellas; en el texto plano, una línea por línea. Sin la opción, el
+   * bloque es una sola línea, como siempre.
+   */
+  multiline?: boolean;
+  /** DX-564: rótulo en su propia línea antes del texto («Antes de tu cita:»). */
+  lead?: string | null;
+}
+
+/** DX-564: el texto de un bloque, línea a línea (una si no es multilínea). */
+function textLines(block: EmailBlock): string[] {
+  return block.multiline
+    ? block.text.split(/\r\n|\r|\n/).map((line) => singleLine(line))
+    : [singleLine(block.text)];
+}
+
+/** Versión de texto de un bloque: el rótulo, si lo lleva, y sus líneas. */
+function blockLines(block: EmailBlock): string[] {
+  const lines = textLines(block);
+  return block.lead ? [singleLine(block.lead), ...lines] : lines;
+}
+
+/** El contenido HTML de un bloque (sin las opciones de DX-564, igual que antes). */
+function blockContent(block: EmailBlock): string {
+  if (!block.multiline && !block.lead) return escapeHtml(block.text);
+  const lines = block.multiline
+    ? textLines(block).map(escapeHtml)
+    : [escapeHtml(block.text)];
+  const lead = block.lead
+    ? [`<strong>${escapeHtml(singleLine(block.lead))}</strong>`]
+    : [];
+  return [...lead, ...lines].join('<br />');
 }
 
 /** DX-568: una celda de una tabla del email (texto y, si lleva, su enlace). */
@@ -188,8 +222,8 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
 
   const blockHtml = (block: EmailBlock) =>
     block.kind === 'note'
-      ? `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#5b6472">${escapeHtml(block.text)}</p>`
-      : `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#1f2933">${escapeHtml(block.text)}</p>`;
+      ? `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#5b6472">${blockContent(block)}</p>`
+      : `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#1f2933">${blockContent(block)}</p>`;
   const body = input.blocks.map(blockHtml).join('\n');
   const closing = input.closingBlocks ?? [];
 
@@ -270,11 +304,11 @@ ${footerLink}
     '',
     singleLine(input.heading),
     '',
-    ...input.blocks.map((block) => singleLine(block.text)),
+    ...input.blocks.flatMap(blockLines),
   ];
   for (const table of tables) textParts.push('', ...tableText(table));
   if (closing.length > 0) {
-    textParts.push('', ...closing.map((block) => singleLine(block.text)));
+    textParts.push('', ...closing.flatMap(blockLines));
   }
   if (input.action && actionUrl) {
     textParts.push('', `${singleLine(input.action.label)}: ${actionUrl}`);

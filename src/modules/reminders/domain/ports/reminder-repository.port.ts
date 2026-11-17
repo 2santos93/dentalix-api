@@ -73,6 +73,11 @@ export interface ReminderSendContext {
   locationId: string;
   /** DX-291: política VIGENTE de la sede de la cita (`null` = sin política). */
   cancellationPolicy: LinkCancellationPolicy | null;
+  /**
+   * DX-564: indicaciones previas del tipo de la cita, `{ idioma → texto }`
+   * (`{}` = sin tipo o sin indicaciones). Las vigentes al enviarse.
+   */
+  preVisitInstructions: Readonly<Record<string, string>>;
 }
 
 export interface ReminderClaim {

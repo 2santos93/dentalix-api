@@ -9,6 +9,8 @@ export interface CreateAppointmentTypeRepoInput {
   active: boolean;
   /** DX-446: por defecto, false. */
   isUrgent?: boolean;
+  /** DX-564: ya validado; por defecto, `{}`. */
+  preVisitInstructions?: Record<string, string>;
   createdById?: string;
 }
 
@@ -18,6 +20,8 @@ export interface UpdateAppointmentTypeRepoInput {
   color?: string;
   active?: boolean;
   isUrgent?: boolean;
+  /** DX-564: el mapa entero ya validado (sustituye al guardado). */
+  preVisitInstructions?: Record<string, string>;
   updatedById?: string;
 }
 
@@ -34,6 +38,11 @@ export interface AppointmentTypeRepository {
    */
   findById(id: string): Promise<AppointmentType | null>;
   /**
+   * DX-564: por id, también un tipo retirado (sus citas lo conservan y sus
+   * indicaciones se siguen enviando). Bajo RLS: de otra clínica, `null`.
+   */
+  findByIdIncludingRetired(id: string): Promise<AppointmentType | null>;
+  /**
    * DX-360: alta, cambio y retiro dejan su evento (APPOINTMENT_TYPE) en la
    * misma transacción; un cambio que no cambia nada, ninguno.
    */
@@ -48,4 +57,9 @@ export interface AppointmentTypeRepository {
   ): Promise<AppointmentType>;
   /** Borrado lógico: `deletedAt` y `active = false`. Las citas no cambian. */
   softDelete(id: string, audit: AuditRequestContext): Promise<void>;
+  /**
+   * DX-564: `tenants.patientLanguages` de la clínica en contexto (los idiomas
+   * en que se pueden escribir las indicaciones).
+   */
+  patientLanguages(): Promise<string[]>;
 }

@@ -14,6 +14,11 @@ export interface AppointmentType {
   active: boolean;
   /** DX-446: tipo de urgencia (los huecos reservados lo ofrecen primero). */
   isUrgent: boolean;
+  /**
+   * DX-564: indicaciones previas a la cita, `{ idioma BCP 47 → texto }`. `{}` =
+   * sin indicaciones. Texto general de la clínica, nunca dato de un paciente.
+   */
+  preVisitInstructions: Record<string, string>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,4 +29,9 @@ export interface AppointmentTypeSummary {
   name: string;
   durationMinutes: number;
   color: string;
+  /**
+   * DX-564: si el tipo tiene indicaciones previas en algún idioma. Solo el
+   * indicador: el texto se pide aparte para no inflar la agenda.
+   */
+  hasPreVisitInstructions: boolean;
 }

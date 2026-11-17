@@ -1,3 +1,10 @@
+import {
+  canonicalLanguageTag,
+  LANGUAGE_TAG_MESSAGE,
+} from '../../../shared/i18n/patient-language';
+import { localizedTextEntries } from '../../../shared/i18n/localized-text';
+import { LINK_TLDS } from './link-tlds';
+
 /**
  * Reglas de un tipo de cita (DX-121). Puras: las comparten el caso de uso (400
  * en español) y los tests; la migración repite cada una como CHECK, que es la
@@ -46,4 +53,162 @@ export function appointmentTypeNameError(name: string): string | null {
 /** Fin de una cita que empieza en `start` y dura `minutes`. */
 export function endFromDuration(start: Date, minutes: number): Date {
   return new Date(start.getTime() + minutes * 60_000);
+}
+
+/* ───────────── DX-564: indicaciones previas a la cita ───────────── */
+
+/** Caracteres de cada texto, tras recortar. */
+export const PRE_VISIT_INSTRUCTIONS_TEXT_MAX = 600;
+/** Idiomas por tipo (la lista de la clínica admite hasta 20; holgado para 10). */
+export const PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES = 10;
+
+/**
+ * Bytes del mapa en JSON (UTF-8). El CHECK de la BD admite 8192 de jsonb; un
+ * texto en una escritura de 3 bytes por carácter (chino, japonés…) en varios
+ * idiomas podría pasarlo con cada texto bajo 600, y eso sería un 500. Con 8000
+ * bytes de JSON el jsonb queda por debajo (lleva unos pocos bytes más por
+ * entrada, menos que las comillas y escapes del JSON).
+ */
+export const PRE_VISIT_INSTRUCTIONS_TOTAL_BYTES_MAX = 8000;
+
+export const PRE_VISIT_INSTRUCTIONS_TOO_LARGE_MESSAGE =
+  'Las indicaciones son demasiado largas en conjunto: acorta alguno de los idiomas.';
+export const PRE_VISIT_INSTRUCTIONS_NOT_A_LIST_MESSAGE =
+  'Las indicaciones deben ir en una lista.';
+export const PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE = `Las indicaciones admiten como mucho ${PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES} idiomas.`;
+export const PRE_VISIT_INSTRUCTIONS_LANGUAGE_NOT_OFFERED_MESSAGE =
+  'Ese idioma no está entre los idiomas de los pacientes de la clínica.';
+export const PRE_VISIT_INSTRUCTIONS_REPEATED_MESSAGE =
+  'Ese idioma está repetido en las indicaciones.';
+export const PRE_VISIT_INSTRUCTIONS_TOO_LONG_MESSAGE = `Las indicaciones no pueden tener más de ${PRE_VISIT_INSTRUCTIONS_TEXT_MAX} caracteres.`;
+export const PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE =
+  'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.';
+
+/** `http://`, `https://`, `www.` o algo con aspecto de etiqueta (`<b>`, `</p>`, `<a href…>`, `<!--`). */
+const LINK_OR_HTML = /https?:\/\/|www\.|<\s*\/?\s*[a-z!][^<>]*>/i;
+
+/**
+ * Un dominio que WhatsApp, Gmail o iOS convertirían en enlace aunque no lleve
+ * `http`: letra o cifra, un punto SIN espacio y una palabra de 2 o más letras
+ * seguida de fin, espacio, `/`, `:`, `#` o puntuación. Solo cuenta si esa
+ * palabra es un TLD de la lista cerrada (`LINK_TLDS`), sin distinguir
+ * mayúsculas: marca «ejemplo.com/login», «EJEMPLO.COM», «x.com», «bit.ly»,
+ * «tienda.com.ve»; no marca «6h.Trae», «Dr.Pérez», «Sr.García», «p.ej.»,
+ * «a.m.» (una letra), «10.30 h» ni «1.5 ml» (cifras). Ver `link-tlds.ts`.
+ */
+const DOT_WORD = /(?<=[\p{L}\p{N}])\.(\p{L}{2,})(?=$|[\s/:#?.,;!)\]}"'»…])/gu;
+
+function hasBareDomain(text: string): boolean {
+  for (const match of text.matchAll(DOT_WORD)) {
+    if (LINK_TLDS.has(match[1].toLowerCase())) return true;
+  }
+  return false;
+}
+
+/** Una IPv4 («192.168.0.1/login»): también se convierte en enlace. */
+const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/;
+
+/** Una dirección de email («x@ejemplo.com»): también se convierte en enlace. */
+const EMAIL_ADDRESS = /\S+@\S+\.\S+/;
+
+/** U+200D (une los emojis compuestos): el único carácter de formato que queda. */
+const ZERO_WIDTH_JOINER = String.fromCharCode(0x200d);
+
+export interface PreVisitInstructionEntry {
+  language: string;
+  text: string;
+}
+
+/**
+ * Un texto tal como se guarda: saltos de línea `\n` (como mucho dos seguidos),
+ * tabuladores como espacio, sin otros caracteres de control ni de formato
+ * (salvo U+200D) y recortado. Los saltos se conservan: el recordatorio y la
+ * página los pintan.
+ */
+export function normalizePreVisitInstructionText(text: string): string {
+  return (
+    text
+      .replace(/\r\n?/g, '\n')
+      .replace(/\t/g, ' ')
+      .replace(/[\p{Cc}\u2028\u2029]/gu, (c) => (c === '\n' ? c : ''))
+      // Formato invisible (espacio de ancho cero, guion suave, U+202E…): sirve
+      // para colar un enlace partido.
+      .replace(/\p{Cf}/gu, (c) => (c === ZERO_WIDTH_JOINER ? c : ''))
+      // Sin espacios al final de línea y como mucho una línea en blanco seguida.
+      .replace(/[ \xa0]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  );
+}
+
+/**
+ * Valida la lista que llega de la API y la convierte en el mapa que se guarda
+ * (`{ idioma: texto }`). La lista es el mapa entero: un idioma que no viene se
+ * quita. Reglas, en orden:
+ *  - etiqueta BCP 47 válida (se canoniza: «EN» → «en»);
+ *  - sin idiomas repetidos;
+ *  - texto vacío tras recortar → se descarta esa entrada;
+ *  - el idioma debe estar en la lista de la clínica, salvo que su texto sea
+ *    exactamente el ya guardado (la web puede devolver lo que leyó aunque la
+ *    clínica haya retirado ese idioma después: retirarlo no borra el texto);
+ *  - hasta 600 caracteres; sin enlaces ni HTML;
+ *  - el mapa entero, hasta 8000 bytes de JSON (la red del CHECK).
+ */
+export function preVisitInstructionsFromEntries(
+  entries: readonly PreVisitInstructionEntry[],
+  context: {
+    patientLanguages: readonly string[];
+    current: Readonly<Record<string, string>>;
+  },
+): { map: Record<string, string> } | { error: string } {
+  if (entries.length > PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES) {
+    return { error: PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE };
+  }
+  const map: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const language = canonicalLanguageTag(entry.language);
+    if (!language) return { error: LANGUAGE_TAG_MESSAGE };
+    if (seen.has(language)) {
+      return { error: PRE_VISIT_INSTRUCTIONS_REPEATED_MESSAGE };
+    }
+    seen.add(language);
+    const text = normalizePreVisitInstructionText(entry.text);
+    if (text === '') continue;
+    if (
+      !context.patientLanguages.includes(language) &&
+      context.current[language] !== text
+    ) {
+      return { error: PRE_VISIT_INSTRUCTIONS_LANGUAGE_NOT_OFFERED_MESSAGE };
+    }
+    if ([...text].length > PRE_VISIT_INSTRUCTIONS_TEXT_MAX) {
+      return { error: PRE_VISIT_INSTRUCTIONS_TOO_LONG_MESSAGE };
+    }
+    if (
+      LINK_OR_HTML.test(text) ||
+      hasBareDomain(text) ||
+      IPV4.test(text) ||
+      EMAIL_ADDRESS.test(text)
+    ) {
+      return { error: PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE };
+    }
+    map[language] = text;
+  }
+  if (
+    Buffer.byteLength(JSON.stringify(map), 'utf8') >
+    PRE_VISIT_INSTRUCTIONS_TOTAL_BYTES_MAX
+  ) {
+    return { error: PRE_VISIT_INSTRUCTIONS_TOO_LARGE_MESSAGE };
+  }
+  return { map };
+}
+
+/**
+ * Idiomas con texto (lo visible en la auditoría), en el orden de la API:
+ * español primero y luego alfabético.
+ */
+export function preVisitInstructionLanguages(
+  map: Readonly<Record<string, string>>,
+): string[] {
+  return localizedTextEntries(map).map((e) => e.language);
 }
