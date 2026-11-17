@@ -12,7 +12,7 @@ import {
 } from './support/e2e-fixtures';
 import { pinCatalogCurrency } from './support/catalog-currency';
 import { signaturePng } from './support/png-fixtures';
-import { civilDateIn } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 import { COMMISSION_PAYMENT_FORBIDDEN_MESSAGE } from '../src/modules/commissions/presentation/commission-payments.controller';
 import { COMMISSION_RECEIPT_LINK_INVALID_MESSAGE } from '../src/modules/commissions/application/commission-receipt-public.use-cases';
 import { EXPENSE_COMMISSION_LINKED_MESSAGE } from '../src/modules/expenses/domain/expense-rules';
@@ -64,7 +64,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
   let dentist: { userId: string; token: string; email: string };
   let reception: string;
   let settlementId: string;
-  let today: string;
+  let payDay: string;
   let firstPayment: Payment;
   let token: string;
 
@@ -126,12 +126,8 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
       a.host,
       (await seedMember(raw, a, ClinicRole.RECEPTION)).email,
     );
-    const location = await raw.location.findFirstOrThrow({
-      where: { tenantId: a.tenantId },
-      orderBy: { createdAt: 'asc' },
-      select: { timeZone: true },
-    });
-    today = civilDateIn(new Date(), location.timeZone ?? 'UTC');
+    // Ayer en la sede (DX-449): nunca futuro para la API, corra a la hora que corra.
+    payDay = fixedSedeDay(1).day;
 
     const patient = (
       await as(a)
@@ -221,7 +217,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
   });
 
   it('solo ADMIN paga, anula, descarga el PDF y pide la conformidad (403 en español)', async () => {
-    const body = { currency: 'USD', paidOn: today, method: 'CASH' };
+    const body = { currency: 'USD', paidOn: payDay, method: 'CASH' };
     for (const auth of [dentist.token, reception]) {
       const denied = await as(a, auth)
         .post(`/commissions/settlements/${settlementId}/payments`, body)
@@ -242,7 +238,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
       .post(`/commissions/settlements/${settlementId}/payments`, {
         currency: 'USD',
         lineIds: [line.id],
-        paidOn: today,
+        paidOn: payDay,
         method: 'TRANSFER',
         reference: 'TRF-0042',
       })
@@ -251,7 +247,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
     expect(firstPayment).toMatchObject({
       currency: 'USD',
       amount: 35,
-      paidOn: today,
+      paidOn: payDay,
       lineIds: [line.id],
       voidedAt: null,
       receipt: { status: 'NONE' },
@@ -281,7 +277,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
       .post(`/commissions/settlements/${settlementId}/payments`, {
         currency: 'USD',
         lineIds: [firstPayment.lineIds[0]],
-        paidOn: today,
+        paidOn: payDay,
         method: 'CASH',
       })
       .expect(409);
@@ -299,7 +295,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
     await as(a)
       .post(`/commissions/settlements/${settlementId}/payments`, {
         currency: 'usd!',
-        paidOn: today,
+        paidOn: payDay,
         method: 'CASH',
       })
       .expect(400);
@@ -320,7 +316,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
     await as(a)
       .post(`/commissions/settlements/${settlementId}/payments`, {
         currency: 'USD',
-        paidOn: today,
+        paidOn: payDay,
         method: 'CASH',
       })
       .expect(201);
@@ -328,7 +324,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
     const nothing = await as(a)
       .post(`/commissions/settlements/${settlementId}/payments`, {
         currency: 'USD',
-        paidOn: today,
+        paidOn: payDay,
         method: 'CASH',
       })
       .expect(409);
@@ -471,7 +467,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
     await as(b)
       .post(`/commissions/settlements/${settlementId}/payments`, {
         currency: 'USD',
-        paidOn: today,
+        paidOn: payDay,
         method: 'CASH',
       })
       .expect(404);
@@ -531,14 +527,14 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
       .post(`/commissions/settlements/${settlementB}/payments`, {
         currency: 'USD',
         lineIds: [lineOfA],
-        paidOn: today,
+        paidOn: payDay,
         method: 'CASH',
       })
       .expect(409);
     const payB = await as(b)
       .post(`/commissions/settlements/${settlementId}/payments`, {
         currency: 'USD',
-        paidOn: today,
+        paidOn: payDay,
         method: 'CASH',
         locationId: locationOfA.id,
       })
@@ -594,7 +590,7 @@ describe('Pago de la liquidación de honorarios (e2e, DX-464)', () => {
     await as(a)
       .post(`/commissions/settlements/${settlementId}/payments`, {
         currency: 'USD',
-        paidOn: today,
+        paidOn: payDay,
         method: 'CASH',
         locationId: locationOfB.id,
       })

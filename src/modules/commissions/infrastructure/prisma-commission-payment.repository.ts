@@ -5,6 +5,7 @@ import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { resolveDefaultLocationId } from '../../../shared/locations/default-location';
 import { civilDateIn } from '../../../shared/time/civil-day';
+import { amountText } from '../../../shared/money/money';
 import { currentRequestId } from '../../../shared/observability/request-context';
 import {
   auditDraftFromContext,
@@ -361,7 +362,7 @@ export class PrismaCommissionPaymentRepository implements CommissionPaymentRepos
         userId: payment.userId,
         locationId: payment.locationId,
         currency: payment.currency,
-        amount: new Prisma.Decimal(payment.amount.toFixed(2)),
+        amount: new Prisma.Decimal(amountText(payment.amount, 2)),
         method: payment.method,
         paidOn: asDate(payment.paidOn),
         reference: payment.reference,
@@ -567,6 +568,7 @@ export class PrismaCommissionPaymentRepository implements CommissionPaymentRepos
         lines,
         payments: await this.paymentsIn(tx, tenantId, settlementId, new Date()),
         format: {
+          id: main?.id ?? defaultLocationId ?? settlementId,
           locale: main?.locale ?? null,
           hourCycle: main?.hourCycle ?? null,
           timeZone: main?.timeZone ?? null,

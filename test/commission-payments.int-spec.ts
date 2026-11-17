@@ -3,7 +3,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { addCivilDays } from '../src/shared/time/civil-day';
 import { PrismaCommissionRepository } from '../src/modules/commissions/infrastructure/prisma-commission.repository';
 import { PrismaCommissionPaymentRepository } from '../src/modules/commissions/infrastructure/prisma-commission-payment.repository';
 import { PdfkitCommissionPdfRenderer } from '../src/modules/commissions/infrastructure/commission-pdf.renderer';
@@ -21,6 +21,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { purgeTenants, purgeTenantsBySubdomain } from './support/tenant-purge';
+import { fixedSedeDay } from './support/sede-clock';
 
 // DX-464, capa DB del pago de la liquidación: el pago parcial y el total
 // crean su gasto de la sede en la MISMA transacción (con su pago y la
@@ -67,9 +68,13 @@ interface Clinic {
 }
 
 const SUBDOMAINS = ['dx464-int-a', 'dx464-int-b'];
-const TODAY = civilDateIn(new Date(), 'America/Caracas');
-// Período ya terminado y relativo a hoy (FAKE_NOW de la CI incluido).
-const PERIOD = { from: addCivilDays(TODAY, -40), to: addCivilDays(TODAY, -10) };
+// Ayer en la sede (DX-449: nunca la medianoche), y un período ya terminado
+// antes (FAKE_NOW de la CI incluido).
+const PAY_DAY = fixedSedeDay(1).day;
+const PERIOD = {
+  from: addCivilDays(PAY_DAY, -40),
+  to: addCivilDays(PAY_DAY, -10),
+};
 
 async function seedClinic(subdomain: string): Promise<Clinic> {
   const tenant = await raw.tenant.create({
@@ -268,7 +273,7 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
         {
           currency: 'USD',
           lineIds: [first],
-          paidOn: TODAY,
+          paidOn: PAY_DAY,
           method: 'TRANSFER',
           reference: 'TRF-0042',
         },
@@ -280,7 +285,7 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
       currency: 'USD',
       amount: 35,
       method: 'TRANSFER',
-      paidOn: TODAY,
+      paidOn: PAY_DAY,
       reference: 'TRF-0042',
       lineIds: [first],
       location: { id: a.locationId, name: 'Sede Chacao' },
@@ -349,7 +354,12 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
         useCases.pay(
           ADMIN(a),
           settlementId,
-          { currency: 'USD', lineIds: [first], paidOn: TODAY, method: 'CASH' },
+          {
+            currency: 'USD',
+            lineIds: [first],
+            paidOn: PAY_DAY,
+            method: 'CASH',
+          },
           ctxOf(a),
         ),
       ),
@@ -399,7 +409,7 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
       useCases.pay(
         ADMIN(a),
         settlementId,
-        { currency: 'USD', paidOn: TODAY, method: 'CASH' },
+        { currency: 'USD', paidOn: PAY_DAY, method: 'CASH' },
         ctxOf(a),
       ),
     );
@@ -408,7 +418,7 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
       useCases.pay(
         ADMIN(a),
         settlementId,
-        { currency: 'VES', paidOn: TODAY, method: 'TRANSFER' },
+        { currency: 'VES', paidOn: PAY_DAY, method: 'TRANSFER' },
         ctxOf(a),
       ),
     );
@@ -428,7 +438,7 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
         useCases.pay(
           ADMIN(a),
           settlementId,
-          { currency: 'USD', paidOn: TODAY, method: 'CASH' },
+          { currency: 'USD', paidOn: PAY_DAY, method: 'CASH' },
           ctxOf(a),
         ),
       ),
@@ -480,7 +490,7 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
       useCases.pay(
         ADMIN(a),
         settlementId,
-        { currency: 'USD', paidOn: TODAY, method: 'CARD' },
+        { currency: 'USD', paidOn: PAY_DAY, method: 'CARD' },
         ctxOf(a),
       ),
     );
@@ -533,7 +543,7 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
         useCases.pay(
           ADMIN(b),
           settlementId,
-          { currency: 'USD', paidOn: TODAY, method: 'CASH' },
+          { currency: 'USD', paidOn: PAY_DAY, method: 'CASH' },
           ctxOf(b),
         ),
       ),
@@ -569,7 +579,7 @@ describe('Pago de la liquidación de honorarios (int, DX-464)', () => {
               currency: 'USD',
               amount: 1,
               method: 'CASH',
-              paidOn: new Date(`${TODAY}T00:00:00.000Z`),
+              paidOn: new Date(`${PAY_DAY}T00:00:00.000Z`),
               expenseId: randomUUID(),
               createdById: b.adminId,
             },

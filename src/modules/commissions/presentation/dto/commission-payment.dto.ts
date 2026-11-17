@@ -24,7 +24,6 @@ const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export class PayCommissionSettlementDto {
   @ApiProperty({
-    example: 'USD',
     description: 'Moneda del pago: cada moneda se paga aparte, sin convertir.',
   })
   @IsString()
@@ -234,7 +233,8 @@ export class PublicReceiptFormatDto {
   @ApiProperty({
     type: String,
     nullable: true,
-    description: 'Zona IANA de la sede principal (caducidad y hora de la firma).',
+    description:
+      'Zona IANA de la sede principal (caducidad y hora de la firma).',
   })
   timeZone!: string | null;
 }

@@ -1,8 +1,8 @@
 import type { PaymentMethod } from '@prisma/client';
-import {
-  regionalFormat,
-  type RegionalFormat,
-} from '../../../shared/format/regional-format';
+import type { RegionalFormat } from '../../../shared/format/regional-format';
+import { moneyWithCode } from '../../../shared/format/money-with-code';
+import { requireLocationFormat } from '../../../shared/locations/location-regional';
+import { fromCents, toCents } from '../../../shared/money/money';
 import { toWinAnsi } from '../../../shared/pdf/win-ansi';
 import type {
   DocumentFormat,
@@ -164,27 +164,25 @@ export interface CommissionDocumentModel {
   generatedAt: Date;
 }
 
-const FALLBACK_FORMAT = { locale: 'es', hourCycle: 'h23' as const };
-
-/** El formato de la sede o, si está sin barrer, español con reloj de 24 h. */
+/**
+ * El formato de la sede (DX-354): sin él, 409 `LOCATION_LOCALE_REQUIRED`
+ * como el resto de documentos. `id` solo identifica la sede en el error.
+ */
 export function documentFormat(format: {
+  id: string;
   locale: string | null;
   hourCycle: string | null;
 }): RegionalFormat {
-  if (
-    format.locale &&
-    (format.hourCycle === 'h12' || format.hourCycle === 'h23')
-  ) {
-    try {
-      return regionalFormat({
-        locale: format.locale,
-        hourCycle: format.hourCycle,
-      });
-    } catch {
-      // Locale inválido: el de reserva.
-    }
-  }
-  return regionalFormat(FALLBACK_FORMAT);
+  return requireLocationFormat(format);
+}
+
+/** Importe con el código ISO (DX-528: nunca con símbolo). */
+function moneyText(
+  fmt: RegionalFormat,
+  amount: number,
+  currency: string,
+): string {
+  return toWinAnsi(moneyWithCode(amount, currency, fmt, null));
 }
 
 function pdfText(text: string): string {
@@ -206,9 +204,9 @@ function rowsOf(
     patient: pdfText(line.patientInitials),
     procedure: pdfText(procedureOf(line)),
     date: line.day ? fmt.civilDate(line.day) : '—',
-    base: pdfText(fmt.money(line.base, currency)),
+    base: moneyText(fmt, line.base, currency),
     percent: pdfText(fmt.percent(line.percent)),
-    amount: pdfText(fmt.money(line.amount, currency)),
+    amount: moneyText(fmt, line.amount, currency),
   }));
 }
 
@@ -229,9 +227,9 @@ export function settlementDocumentModel(
   const currencies = [...new Set(source.lines.map((l) => l.currency))].sort();
   const sections: DocumentSection[] = currencies.map((currency) => {
     const lines = source.lines.filter((l) => l.currency === currency);
-    const money = (n: number) => pdfText(fmt.money(n, currency));
+    const money = (n: number) => moneyText(fmt, n, currency);
     const sum = (ls: DocumentLine[]) =>
-      Math.round(ls.reduce((s, l) => s + Math.round(l.amount * 100), 0)) / 100;
+      fromCents(ls.reduce((s, l) => s + toCents(l.amount), 0));
     const accrued = sum(lines.filter((l) => l.kind === 'ACCRUAL'));
     const adjustments = sum(lines.filter((l) => l.kind === 'ADJUSTMENT'));
     const cur = state.currencies.find((c) => c.currency === currency);
@@ -262,7 +260,7 @@ export function settlementDocumentModel(
     'Cada moneda se liquida y se paga por separado, sin convertir.',
     ...live.map((p) =>
       pdfText(
-        `Pago del ${fmt.civilDate(p.paidOn)}: ${fmt.money(p.amount, p.currency)} · ${PAYMENT_METHOD_LABELS[p.method]}${p.reference ? ` · Ref. ${p.reference}` : ''} · ${p.location.name}`,
+        `Pago del ${fmt.civilDate(p.paidOn)}: ${moneyWithCode(p.amount, p.currency, fmt, null)} · ${PAYMENT_METHOD_LABELS[p.method]}${p.reference ? ` · Ref. ${p.reference}` : ''} · ${p.location.name}`,
       ),
     ),
     'Pacientes identificados solo por sus iniciales.',
@@ -313,9 +311,9 @@ export function receiptDocumentModel(
   timeZone: string | null,
   now: Date,
 ): CommissionDocumentModel {
-  const fmt = documentFormat(content.format);
+  const fmt = documentFormat({ id: content.payment.id, ...content.format });
   const currency = content.payment.currency;
-  const money = (n: number) => pdfText(fmt.money(n, currency));
+  const money = (n: number) => moneyText(fmt, n, currency);
   const when = (d: Date) =>
     timeZone
       ? fmt.dateTime(d, timeZone)

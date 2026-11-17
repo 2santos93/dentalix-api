@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { PdfkitCommissionPdfRenderer } from '../infrastructure/commission-pdf.renderer';
 import {
   buildReceiptContent,
@@ -112,7 +113,12 @@ function source(
       },
     ],
     payments: [payment()],
-    format: { locale: 'es-VE', hourCycle: 'h12', timeZone: 'America/Caracas' },
+    format: {
+      id: 'loc',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+      timeZone: 'America/Caracas',
+    },
     ...over,
   };
 }
@@ -159,12 +165,15 @@ describe('PDF de la liquidación (DX-464)', () => {
     expect(a.equals(b)).toBe(true);
   });
 
-  it('una sede sin formato usa el de reserva en vez de fallar', () => {
-    const model = settlementDocumentModel(
-      source({ format: { locale: null, hourCycle: null, timeZone: null } }),
-      NOW,
-    );
-    expect(model.sections).toHaveLength(2);
+  it('una sede sin formato regional: 409 LOCATION_LOCALE_REQUIRED (DX-354)', () => {
+    expect(() =>
+      settlementDocumentModel(
+        source({
+          format: { id: 'loc', locale: null, hourCycle: null, timeZone: null },
+        }),
+        NOW,
+      ),
+    ).toThrow(ConflictException);
   });
 });
 

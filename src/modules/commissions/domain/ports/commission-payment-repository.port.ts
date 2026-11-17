@@ -69,6 +69,8 @@ export interface DocumentLine {
 
 /** Formato de una sede para los documentos (null: sin barrer). */
 export interface DocumentFormat {
+  /** La sede principal de la clínica (la de los documentos). */
+  id: string;
   locale: string | null;
   hourCycle: string | null;
   timeZone: string | null;
