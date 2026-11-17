@@ -88,13 +88,14 @@ describe('DX-205 · lote de precios del catálogo (int)', () => {
     ).id;
     await seedCatalog(tenantA, 'A', ITEMS);
     await seedCatalog(tenantB, 'B', 20);
-  }, 60_000);
+    // El TRUNCATE de resetDatabase depende del disco del Postgres compartido.
+  }, 180_000);
 
   afterAll(async () => {
     await resetDatabase(owner);
     await owner.$disconnect();
     await prisma.$disconnect();
-  });
+  }, 180_000);
 
   it('un fallo a mitad no deja nada: ni lote, ni precios, ni historial', async () => {
     const before = await pricesOf(tenantA);
