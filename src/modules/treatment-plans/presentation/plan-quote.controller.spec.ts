@@ -98,6 +98,25 @@ describe('acceptanceAuditMetadata (DX-379 C, DX-417)', () => {
       ),
     ).toEqual({ reason: 'QUOTE_EXPIRED_ORIGINAL_PRICES' });
   });
+
+  it('DX-041: con plan de cuotas, PLAN_ACCEPTED_WITH_INSTALLMENTS y su id; el vencido sigue mandando', () => {
+    const paymentPlanId = '44444444-4444-4444-8444-444444444444';
+    expect(
+      acceptanceAuditMetadata({ ...doc(acceptance()), paymentPlanId }),
+    ).toEqual({
+      reason: 'PLAN_ACCEPTED_WITH_INSTALLMENTS',
+      params: { paymentPlanId },
+    });
+    expect(
+      acceptanceAuditMetadata({
+        ...doc(acceptance({ expiredMode: 'ORIGINAL_PRICES' })),
+        paymentPlanId,
+      }),
+    ).toEqual({
+      reason: 'QUOTE_EXPIRED_ORIGINAL_PRICES',
+      params: { paymentPlanId },
+    });
+  });
 });
 
 describe('PlanQuoteController: vista previa parcial (DX-417)', () => {
@@ -204,6 +223,41 @@ describe('DTO de la aceptación parcial', () => {
         partial: { itemIds: [] },
       }),
     ).toEqual(['Elige al menos un procedimiento para aceptar.']);
+  });
+
+  it('DX-041: la firma valida `installmentPlan` anidado (objeto, condiciones y saldo)', async () => {
+    const base = {
+      signerName: 'Ana Pérez',
+      signature: 'iVBORw0KGgo=',
+      contentHash: 'a'.repeat(64),
+    };
+    const plan = {
+      installmentsCount: 6,
+      periodicity: 'MONTHLY',
+      startDate: '2026-12-01',
+      downPayment: 300,
+      totalToFinance: 1500,
+    };
+    expect(
+      await errorsOf(AcceptTreatmentPlanDto, {
+        ...base,
+        installmentPlan: plan,
+      }),
+    ).toEqual([]);
+    const bad = await validate(
+      plainToInstance(AcceptTreatmentPlanDto, {
+        ...base,
+        installmentPlan: { ...plan, installmentsCount: 0, totalToFinance: -1 },
+      }),
+    );
+    expect(bad.map((e) => e.property)).toEqual(['installmentPlan']);
+    const listed = await validate(
+      plainToInstance(AcceptTreatmentPlanDto, {
+        ...base,
+        installmentPlan: [plan],
+      }),
+    );
+    expect(listed.map((e) => e.property)).toEqual(['installmentPlan']);
   });
 
   it('M-1: `partial` como lista (vacía o con objetos) no pasa: 400, nunca aceptación entera', async () => {

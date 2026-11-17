@@ -6,6 +6,8 @@ import {
   CLOCK,
 } from './application/use-cases/get-payment-plan.use-case';
 import { CancelPaymentPlanUseCase } from './application/use-cases/cancel-payment-plan.use-case';
+import { SimulateInstallmentsUseCase } from './application/use-cases/simulate-installments.use-case';
+import { InstallmentSimulationController } from './presentation/installment-simulation.controller';
 import { PAYMENT_PLAN_REPOSITORY } from './domain/ports/payment-plan-repository.port';
 import { PrismaPaymentPlanRepository } from './infrastructure/repositories/prisma-payment-plan.repository';
 import { PaymentPlansController } from './presentation/payment-plans.controller';
@@ -19,11 +21,12 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
 // cross-módulo que PaymentsModule.
 @Module({
   imports: [JwtModule.register({}), PaymentsModule, TreatmentPlansModule],
-  controllers: [PaymentPlansController],
+  controllers: [PaymentPlansController, InstallmentSimulationController],
   providers: [
     CreatePaymentPlanUseCase,
     GetPaymentPlanUseCase,
     CancelPaymentPlanUseCase,
+    SimulateInstallmentsUseCase,
     TokenService,
     TenantContextInterceptor,
     { provide: PAYMENT_PLAN_REPOSITORY, useClass: PrismaPaymentPlanRepository },
