@@ -156,10 +156,16 @@ export interface LabRepository {
   ): Promise<boolean>;
   /** Las vistas SIN redactar, en el orden de `ids`. */
   views(ids: string[], now: Date): Promise<LabOrderView[]>;
+  /**
+   * Órdenes del paciente, más recientes primero. `allowedLocationIds`
+   * (DX-017-bis): solo las de esas sedes, también en `total`; `undefined` =
+   * todas.
+   */
   patientOrderIds(
     patientId: string,
     page: number,
     pageSize: number,
+    allowedLocationIds?: readonly string[],
   ): Promise<{ ids: string[]; total: number }>;
   listOrderIds(
     query: LabOrderListQuery,

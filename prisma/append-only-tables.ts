@@ -68,6 +68,9 @@ export const NO_APP_UPDATE_DELETE = [
   // bandejas: solo se añaden.
   'ortho_aligner_series',
   'ortho_aligner_deliveries',
+  // DX-091: el registro de excepciones al cierre contable (quién, cuándo y
+  // por qué; dx_financial_lock_override_guard).
+  'financial_lock_overrides',
   // DX-205: lotes de «Actualizar precios» del catálogo y el historial de
   // precios de cada ítem (la app solo inserta y lee).
   'catalog_price_batches',

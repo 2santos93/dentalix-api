@@ -1,3 +1,4 @@
+import { FinancialLockModule } from '../financial-lock/financial-lock.module';
 import { RecordSplitPaymentUseCase } from './application/use-cases/record-split-payment.use-case';
 import { RecordOpeningBalancePaymentUseCase } from './application/use-cases/record-opening-balance-payment.use-case';
 import { Module } from '@nestjs/common';
@@ -101,6 +102,8 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
     CollectionsModule,
     // DX-051: reparto de abonos entre ítems tras cada escritura.
     PaymentAllocationsModule,
+    // DX-091: el cierre contable en las listas de Caja (canVoid).
+    FinancialLockModule,
     // DX-377: el catálogo de medios de pago de la clínica.
     PaymentMethodsModule,
   ],

@@ -1,3 +1,4 @@
+import { LockOverrideReason } from '../../../financial-lock/presentation/dto/lock-override-reason';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -137,6 +138,9 @@ export class RecordSplitPaymentDto {
   @IsString()
   @TextMaxLength(INPUT_NOTES_MAX)
   notes?: string;
+
+  @LockOverrideReason()
+  lockOverrideReason?: string;
 }
 
 /** DX-390: el cobro dividido registrado. */

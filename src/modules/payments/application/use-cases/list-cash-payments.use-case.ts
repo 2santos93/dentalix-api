@@ -1,4 +1,17 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
+import {
+  voidLockState,
+  type FinancialLockSettings,
+} from '../../../financial-lock/domain/financial-lock';
+import {
+  FINANCIAL_LOCK_REPOSITORY,
+  type FinancialLockRepository,
+} from '../../../financial-lock/domain/ports/financial-lock-repository.port';
 import { ClinicRole, PaymentMethod } from '@prisma/client';
 import { PAYMENT_REPOSITORY } from '../../domain/ports/payment-repository.port';
 import type {
@@ -307,6 +320,10 @@ export class ListCashPaymentsUseCase {
     private readonly now: PaymentClock,
     @Inject(PAYMENT_METHOD_REPOSITORY)
     private readonly methods: PaymentMethodRepository,
+    // DX-091: el cierre contable decide `periodLocked` y quita `canVoid`.
+    @Optional()
+    @Inject(FINANCIAL_LOCK_REPOSITORY)
+    private readonly financialLock?: Pick<FinancialLockRepository, 'get'>,
   ) {}
 
   /**
@@ -337,7 +354,7 @@ export class ListCashPaymentsUseCase {
     });
 
     return {
-      items: this.viewsOf(result.items, actor),
+      items: this.viewsOf(result.items, actor, await this.lockSettings()),
       total: result.total,
       page,
       pageSize,
@@ -373,7 +390,7 @@ export class ListCashPaymentsUseCase {
       throw new BadRequestException(CASH_EXPORT_TOO_MANY_MESSAGE);
     }
     return {
-      items: this.viewsOf(result.items, actor),
+      items: this.viewsOf(result.items, actor, await this.lockSettings()),
       from: input.from,
       to: input.to,
       blindHidden: result.blindHidden ?? false,
@@ -415,9 +432,14 @@ export class ListCashPaymentsUseCase {
     return { id: found.id, legacyMethod: found.legacyMethod };
   }
 
+  private async lockSettings(): Promise<FinancialLockSettings | null> {
+    return this.financialLock ? this.financialLock.get() : null;
+  }
+
   private viewsOf(
     rows: CashRegisterPage['items'],
     actor: VoidActor,
+    lock: FinancialLockSettings | null,
   ): CashPaymentView[] {
     const now = this.now();
     return rows.map(({ payment, voidSubject, inOpenCashSession }) => {
@@ -425,10 +447,18 @@ export class ListCashPaymentsUseCase {
         voidSubject.createdAt,
         voidSubject.timeZone,
       );
+      const { periodLocked, blocksVoid } = voidLockState(
+        lock,
+        payment.paidAt,
+        voidSubject.timeZone,
+        now,
+        actor.role,
+      );
       return {
         ...payment,
         ...(inOpenCashSession ? HIDDEN_AMOUNT : { amountHidden: false }),
-        canVoid: canVoidPayment(voidSubject, actor, now),
+        canVoid: !blocksVoid && canVoidPayment(voidSubject, actor, now),
+        periodLocked,
         registeredOn,
         registeredToday:
           registeredOn === civilDateIn(now, voidSubject.timeZone),

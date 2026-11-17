@@ -2155,6 +2155,9 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // CLINIC_LOGO (clave del logo) con el antes y el después, en la
   // transacción del cambio; sin evento si nada cambia.
   'PATCH /clinic/settings': 'clinic-settings.e2e-spec.ts',
+  // DX-091: CLINIC_SETTINGS FINANCIAL_LOCK con el antes y el después
+  // (configAuditEvent), en la transacción del cambio; sin evento si no cambia.
+  'PATCH /clinic/settings/financial-lock': 'financial-lock.e2e-spec.ts',
   'POST /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   'DELETE /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados

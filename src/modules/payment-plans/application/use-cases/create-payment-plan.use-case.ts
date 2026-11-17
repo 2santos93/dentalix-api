@@ -6,6 +6,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import { PAYMENT_PLAN_REPOSITORY } from '../../domain/ports/payment-plan-repository.port';
 import type { PaymentPlanRepository } from '../../domain/ports/payment-plan-repository.port';
 import { PaymentPlanWithInstallments } from '../../domain/entities/payment-plan.entity';
@@ -41,6 +42,8 @@ export interface CreatePaymentPlanInput {
   startDate: string | Date;
   totalToFinance?: number;
   notes?: string;
+  /** DX-091: ver `CreatePaymentPlanRepoInput.lockActor`. */
+  lockActor?: LockActor | null;
 }
 
 /**
@@ -169,6 +172,7 @@ export class CreatePaymentPlanUseCase {
         notes: input.notes,
         createdById,
         installments,
+        lockActor: input.lockActor ?? null,
       });
     } catch (error) {
       // Backstop for the check-then-act race above: two concurrent POSTs can

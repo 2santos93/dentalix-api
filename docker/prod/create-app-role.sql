@@ -174,6 +174,7 @@ BEGIN
     'platform_audit_events', 'treatment_plan_repricings',
     'patient_duplicate_dismissals', 'ortho_visits',
     'ortho_aligner_series', 'ortho_aligner_deliveries',
+    'financial_lock_overrides',
     'catalog_price_batches', 'catalog_price_history'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
