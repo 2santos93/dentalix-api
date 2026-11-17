@@ -26,6 +26,8 @@ function fakeItem(
     color: '#FF0000',
     defaultPrice: null,
     allowDiscount: true,
+    requiresPostOpCheck: false,
+    postOpCheckAfterDays: 1,
     active: true,
     clinicalNoteTemplateId: null,
     suggestedClinicalNoteTemplateId: null,
@@ -284,6 +286,57 @@ describe('UpdateCatalogItemUseCase — plantilla de evolución (DX-455)', () => 
     );
     await expect(
       toDiagnosis.execute('c1', { kind: CatalogKind.DIAGNOSIS }, ACTOR),
+    ).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe('UpdateCatalogItemUseCase · control postoperatorio (DX-566)', () => {
+  function capture(existing: DentalCatalogItem) {
+    const patches: UpdateDentalCatalogItemRepoInput[] = [];
+    const repo = makeRepo({
+      findById: () => Promise.resolve(existing),
+      update: (_id, patch) => {
+        patches.push(patch);
+        return Promise.resolve({ ...existing, ...patch } as DentalCatalogItem);
+      },
+    });
+    return { uc: new UpdateCatalogItemUseCase(repo, noTemplates), patches };
+  }
+
+  it('un procedimiento lo activa con sus días', async () => {
+    const { uc, patches } = capture(fakeItem({ kind: CatalogKind.PROCEDURE }));
+    await uc.execute(
+      'c1',
+      { requiresPostOpCheck: true, postOpCheckAfterDays: 3 },
+      ACTOR,
+    );
+    expect(patches).toEqual([
+      { requiresPostOpCheck: true, postOpCheckAfterDays: 3 },
+    ]);
+  });
+
+  it('en un diagnóstico: 400', async () => {
+    const { uc, patches } = capture(fakeItem());
+    await expect(
+      uc.execute('c1', { requiresPostOpCheck: true }, ACTOR),
+    ).rejects.toThrow(BadRequestException);
+    expect(patches).toEqual([]);
+  });
+
+  it('un procedimiento con control que pasa a diagnóstico deja de pedirlo', async () => {
+    const { uc, patches } = capture(
+      fakeItem({ kind: CatalogKind.PROCEDURE, requiresPostOpCheck: true }),
+    );
+    await uc.execute('c1', { kind: CatalogKind.DIAGNOSIS }, ACTOR);
+    expect(patches).toEqual([
+      { kind: CatalogKind.DIAGNOSIS, requiresPostOpCheck: false },
+    ]);
+  });
+
+  it('días fuera de 1–30: 400', async () => {
+    const { uc } = capture(fakeItem({ kind: CatalogKind.PROCEDURE }));
+    await expect(
+      uc.execute('c1', { postOpCheckAfterDays: 31 }, ACTOR),
     ).rejects.toThrow(BadRequestException);
   });
 });
