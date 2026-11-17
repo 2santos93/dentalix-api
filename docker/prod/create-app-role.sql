@@ -175,7 +175,8 @@ BEGIN
     'patient_duplicate_dismissals', 'ortho_visits',
     'ortho_aligner_series', 'ortho_aligner_deliveries',
     'financial_lock_overrides',
-    'commission_settlements', 'commission_settlement_lines'
+    'commission_settlements', 'commission_settlement_lines',
+    'catalog_price_batches', 'catalog_price_history'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);

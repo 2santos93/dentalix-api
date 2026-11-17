@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -15,6 +16,9 @@ import {
   ApiBearerAuth,
   ApiCreatedResponse,
   ApiOkResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiOperation,
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
@@ -44,6 +48,13 @@ import {
 } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import type { JwtPayload } from '../../../shared/crypto/token.service';
+import { GetCatalogPriceHistoryUseCase } from '../application/use-cases/catalog-price-change.use-cases';
+import { CatalogPriceHistoryEntryDto } from './dto/catalog-price-change.dto';
+
+interface AuthenticatedRequest {
+  user: JwtPayload;
+}
 
 @ApiTags('catalog')
 @ApiBearerAuth()
@@ -57,6 +68,7 @@ export class DentalCatalogController {
     private readonly listCatalogItems: ListCatalogItemsUseCase,
     private readonly listCatalogDirectory: ListCatalogDirectoryUseCase,
     private readonly updateCatalogItem: UpdateCatalogItemUseCase,
+    private readonly priceHistory: GetCatalogPriceHistoryUseCase,
   ) {}
 
   // DX-212: altas y cambios del catálogo quedan auditados (campos cambiados,
@@ -120,7 +132,40 @@ export class DentalCatalogController {
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCatalogItemDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<DentalCatalogItem> {
-    return this.updateCatalogItem.execute(id, dto);
+    // DX-205: quien edita queda como autor en el historial de precios.
+    return this.updateCatalogItem.execute(id, dto, req.user.sub);
+  }
+
+  // DX-205: «Historial de precios» del ítem. Solo ADMIN, como «Actualizar
+  // precios»: los demás roles reciben 403 y la pantalla no muestra la pestaña.
+  @Get(':id/price-history')
+  @Roles(...CATALOG_WRITE_ROLES)
+  @ApiOperation({
+    summary: 'Historial del precio por defecto de un ítem del catálogo',
+    description:
+      'Cada cambio (edición suelta o lote de «Actualizar precios») con el precio anterior, el nuevo, el lote, el autor y la fecha, del más reciente al más antiguo (como mucho 200).',
+  })
+  @ApiOkResponse({ type: [CatalogPriceHistoryEntryDto] })
+  @ApiBadRequestResponse({ description: 'Id que no es UUID' })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  @ApiNotFoundResponse({
+    description: 'El ítem no existe en el catálogo de esta clínica',
+  })
+  @ApiParam({ name: 'id', format: 'uuid' })
+  async listPriceHistory(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<CatalogPriceHistoryEntryDto[]> {
+    const entries = await this.priceHistory.execute(id);
+    return entries.map((entry) => ({
+      id: entry.id,
+      previousPrice: entry.previousPrice?.toNumber() ?? null,
+      newPrice: entry.newPrice?.toNumber() ?? null,
+      batchId: entry.batchId,
+      actorUserId: entry.actorUserId,
+      actorName: entry.actorName,
+      createdAt: entry.createdAt.toISOString(),
+    }));
   }
 }

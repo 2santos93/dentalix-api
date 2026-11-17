@@ -1,6 +1,14 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { DentalCatalogController } from './presentation/dental-catalog.controller';
+import { CatalogPriceChangesController } from './presentation/catalog-price-changes.controller';
+import {
+  ApplyCatalogPriceChangeUseCase,
+  GetCatalogPriceHistoryUseCase,
+  PreviewCatalogPriceChangeUseCase,
+} from './application/use-cases/catalog-price-change.use-cases';
+import { CATALOG_PRICE_CHANGE_REPOSITORY } from './domain/ports/catalog-price-change-repository.port';
+import { PrismaCatalogPriceChangeRepository } from './infrastructure/repositories/prisma-catalog-price-change.repository';
 import { CreateCatalogItemUseCase } from './application/use-cases/create-catalog-item.use-case';
 import { ListCatalogItemsUseCase } from './application/use-cases/list-catalog-items.use-case';
 import { ListCatalogDirectoryUseCase } from './application/use-cases/list-catalog-directory.use-case';
@@ -19,12 +27,20 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
   // TokenService, which depends on JwtService — must be available here since
   // the guard is applied on this module's controller.
   imports: [JwtModule.register({})],
-  controllers: [DentalCatalogController],
+  controllers: [DentalCatalogController, CatalogPriceChangesController],
   providers: [
     CreateCatalogItemUseCase,
     ListCatalogItemsUseCase,
     ListCatalogDirectoryUseCase,
     UpdateCatalogItemUseCase,
+    // DX-205: «Actualizar precios» en bloque e historial de precios.
+    PreviewCatalogPriceChangeUseCase,
+    ApplyCatalogPriceChangeUseCase,
+    GetCatalogPriceHistoryUseCase,
+    {
+      provide: CATALOG_PRICE_CHANGE_REPOSITORY,
+      useClass: PrismaCatalogPriceChangeRepository,
+    },
     TokenService,
     // TenantContextInterceptor only depends on the @Global TenantContextService;
     // listing it here makes it resolvable for @UseInterceptors on DentalCatalogController.

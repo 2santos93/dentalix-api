@@ -610,6 +610,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /catalog/items': CLINICAL,
   'GET /catalog/items/directory': CLINICAL,
   'PATCH /catalog/items/:id': ADMIN_ONLY,
+  // DX-205: «Actualizar precios» en bloque e historial de precios: solo ADMIN.
+  'GET /catalog/items/:id/price-history': ADMIN_ONLY,
+  'POST /catalog/price-changes/preview': ADMIN_ONLY,
+  'POST /catalog/price-changes/apply': ADMIN_ONLY,
 
   // --- Planes de tratamiento -----------------------------------------------
   // dentalix-docs/docs/plans/2026-07-24-treatment-plans.md (CLINICAL_ROLES).
@@ -942,6 +946,17 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   ),
   'GET /reports/quote-funnel.csv': ADMIN_ONLY,
   'GET /reports/quote-funnel/presentations': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  // DX-567: producción agendada y previsión del mes. ADMIN y
+  // FINANCIAL_REPORTS_VIEW ven la clínica; DENTIST, solo lo suyo (lo acota el
+  // caso de uso); recepción y asistente, nada. La lista lleva pacientes.
+  'GET /reports/scheduled-production': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/scheduled-production/unlinked': orPermission(
     roles('ADMIN', 'DENTIST'),
     'FINANCIAL_REPORTS_VIEW',
   ),

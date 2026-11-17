@@ -77,8 +77,14 @@ export interface DentalCatalogRepository {
    * otra clínica, inexistentes o retirados simplemente no aparecen, así que
    * quien llama compara tamaños para detectar ajenos sin leer nada de ellos. */
   findByIds(ids: string[]): Promise<DentalCatalogItem[]>;
+  /**
+   * Si `patch.defaultPrice` cambia el precio, en la MISMA transacción deja la
+   * fila de `catalog_price_history` (DX-205: edición suelta, sin lote) con
+   * `actorUserId` como autor.
+   */
   update(
     id: string,
     patch: UpdateDentalCatalogItemRepoInput,
+    actorUserId: string,
   ): Promise<DentalCatalogItem>;
 }

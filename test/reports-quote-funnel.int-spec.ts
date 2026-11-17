@@ -1096,9 +1096,12 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
     run: () => Promise<T>,
   ): Promise<{ ms: number[]; result: T }> {
     // La primera llamada abre las conexiones del pool: no es lo que se mide.
+    // Cinco medidas y no tres: en los runners compartidos de la CI una corrida
+    // suelta pasó de 531 ms con el mismo plan (ruido del vecino, no regresión);
+    // el mínimo de cinco mide la consulta, no la máquina. El tope sigue en 500.
     let result = await run();
     const ms: number[] = [];
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const started = performance.now();
       result = await run();
       ms.push(performance.now() - started);

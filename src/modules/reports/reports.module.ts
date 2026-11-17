@@ -37,6 +37,14 @@ import { GetQuoteFunnelUseCase } from './application/use-cases/get-quote-funnel.
 import { QUOTE_FUNNEL_REPOSITORY } from './domain/ports/quote-funnel-repository.port';
 import { PrismaQuoteFunnelRepository } from './infrastructure/prisma-quote-funnel.repository';
 import { QuoteFunnelController } from './presentation/quote-funnel.controller';
+import {
+  GetScheduledProductionUseCase,
+  SCHEDULED_PRODUCTION_CLOCK,
+} from './application/use-cases/get-scheduled-production.use-case';
+import { SCHEDULED_PRODUCTION_REPOSITORY } from './domain/ports/scheduled-production-repository.port';
+import { PrismaScheduledProductionRepository } from './infrastructure/prisma-scheduled-production.repository';
+import { ScheduledProductionController } from './presentation/scheduled-production.controller';
+import { ExchangeModule } from '../exchange/exchange.module';
 import { CATALOG_CURRENCY_READER } from '../dental-catalog/domain/ports/catalog-currency-reader.port';
 import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/prisma-catalog-currency-reader';
 
@@ -45,10 +53,12 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
 // «Cobrado sin imputar» (DX-399, ADMIN y recepción) y «Huecos recuperados»
 // (DX-436), «Ocupación por sillón» (DX-481), «Enlaces del paciente»
 // (DX-424), «Rentabilidad por sede» (DX-410) y «Embudo de presupuestos»
-// (DX-558, con la moneda del catálogo de DX-502-ter); las
-// siguientes se añaden como controladores bajo el mismo prefijo `reports`.
+// (DX-558, con la moneda del catálogo de DX-502-ter) y «Producción agendada
+// y previsión del mes» (DX-567, con la tasa GUARDADA del día de
+// ExchangeModule: `GetRatesForDateUseCase.stored`); las siguientes se añaden
+// como controladores bajo el mismo prefijo `reports`.
 @Module({
-  imports: [JwtModule.register({})],
+  imports: [JwtModule.register({}), ExchangeModule],
   controllers: [
     LocationsComparisonController,
     ProductionByProcedureController,
@@ -58,6 +68,7 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     PatientLinksController,
     ProfitabilityController,
     QuoteFunnelController,
+    ScheduledProductionController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
@@ -68,6 +79,7 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     GetPatientLinksUseCase,
     GetProfitabilityUseCase,
     GetQuoteFunnelUseCase,
+    GetScheduledProductionUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -103,6 +115,11 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
       provide: QUOTE_FUNNEL_REPOSITORY,
       useClass: PrismaQuoteFunnelRepository,
     },
+    {
+      provide: SCHEDULED_PRODUCTION_REPOSITORY,
+      useClass: PrismaScheduledProductionRepository,
+    },
+    { provide: SCHEDULED_PRODUCTION_CLOCK, useValue: () => new Date() },
     {
       provide: CATALOG_CURRENCY_READER,
       useClass: PrismaCatalogCurrencyReader,
