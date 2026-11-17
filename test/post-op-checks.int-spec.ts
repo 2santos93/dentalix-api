@@ -9,7 +9,10 @@ import type { DentalCatalogItem } from '../src/modules/dental-catalog/domain/ent
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import { PrismaClinicalEntryAddendumRepository } from '../src/modules/clinical-entries/infrastructure/repositories/prisma-clinical-entry-addendum.repository';
 import { PrismaPostOpCheckRepository } from '../src/modules/post-op-checks/infrastructure/prisma-post-op-check.repository';
-import { PostOpChecksUseCases } from '../src/modules/post-op-checks/application/post-op-checks.use-cases';
+import {
+  PostOpChecksUseCases,
+  type PostOpCheckView,
+} from '../src/modules/post-op-checks/application/post-op-checks.use-cases';
 import { postOpCheckFromProcedure } from '../src/modules/post-op-checks/infrastructure/post-op-check-from-procedure';
 import {
   REGIONAL_CARACAS_FIXTURE,
@@ -133,7 +136,7 @@ async function seed(): Promise<Seeded> {
       ...row,
       defaultPrice: 40,
       suggestedClinicalNoteTemplateId: null,
-    } as DentalCatalogItem;
+    };
   };
   return {
     tenantId: tenant.id,
@@ -508,10 +511,11 @@ describe('DX-566 · control postoperatorio (int)', () => {
       metadata: {
         reason: 'POST_OP_CHECK_DISCOMFORT',
         statusChange: { from: 'PENDING', to: 'DONE' },
-        params: expect.objectContaining({
+        params: {
+          attemptId: closed.attemptId,
           clinicalEntryId: entryId,
           addendumId: closed.addendumId,
-        }),
+        },
       },
     });
     expect(JSON.stringify(events)).not.toContain('analgésico');
@@ -537,17 +541,25 @@ describe('DX-566 · control postoperatorio (int)', () => {
     await done(itemId);
     const [check] = await checksOf(itemId);
     const useCases = checksAt(MONDAY_CALL);
-    let last;
+    const results: PostOpCheckView[] = [];
     for (let i = 0; i < 3; i++) {
-      last = await inSede(() =>
-        useCases.recordAttempt(
-          check.id,
-          { outcome: 'NO_ANSWER' },
-          ADMIN(),
-          audit(),
+      results.push(
+        await inSede(() =>
+          useCases.recordAttempt(
+            check.id,
+            { outcome: 'NO_ANSWER' },
+            ADMIN(),
+            audit(),
+          ),
         ),
       );
     }
+    const last = results[2];
+    expect(results.map((r) => r.status)).toEqual([
+      'PENDING',
+      'PENDING',
+      'UNREACHABLE',
+    ]);
     expect(last).toMatchObject({
       status: 'UNREACHABLE',
       outcome: null,
@@ -555,7 +567,7 @@ describe('DX-566 · control postoperatorio (int)', () => {
       attemptsCount: 3,
     });
     const entry = await raw.clinicalEntry.findUniqueOrThrow({
-      where: { id: last!.clinicalEntryId! },
+      where: { id: last.clinicalEntryId as string },
     });
     expect(entry).toMatchObject({
       patientId,

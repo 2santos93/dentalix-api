@@ -297,7 +297,7 @@ describe('UpdateCatalogItemUseCase · control postoperatorio (DX-566)', () => {
       findById: () => Promise.resolve(existing),
       update: (_id, patch) => {
         patches.push(patch);
-        return Promise.resolve({ ...existing, ...patch } as DentalCatalogItem);
+        return Promise.resolve({ ...existing, ...patch });
       },
     });
     return { uc: new UpdateCatalogItemUseCase(repo, noTemplates), patches };

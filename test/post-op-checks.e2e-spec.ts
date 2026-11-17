@@ -218,7 +218,7 @@ describe('Control postoperatorio (DX-566, e2e)', () => {
           requiresPostOpCheck: true,
         })
         .expect(400);
-      expect(res.body.message).toBe(
+      expect((res.body as { message: string }).message).toBe(
         'Solo un procedimiento puede pedir control postoperatorio.',
       );
     });
@@ -270,7 +270,9 @@ describe('Control postoperatorio (DX-566, e2e)', () => {
       const res = await api(a, tokens.RECEPTION!)
         .post(`${ROUTE}/${checkId}/attempts`, { outcome: 'FINE' })
         .expect(403);
-      expect(res.body.message).toBe(POST_OP_MESSAGES.forbidden);
+      expect((res.body as { message: string }).message).toBe(
+        POST_OP_MESSAGES.forbidden,
+      );
       expect(await raw.postOpCheckAttempt.count({ where: { checkId } })).toBe(
         0,
       );
@@ -365,7 +367,9 @@ describe('Control postoperatorio (DX-566, e2e)', () => {
         attemptsCount: 2,
         addendumId: null,
       });
-      expect(res.body.clinicalEntryId).toEqual(expect.any(String));
+      expect((res.body as { clinicalEntryId: string }).clinicalEntryId).toEqual(
+        expect.any(String),
+      );
       expect((await count(tokens.DENTIST!)).total).toBe(before - 1);
 
       // «Mi día» de quien aún no lo había pedido (sin caché): el mismo número.
@@ -379,7 +383,9 @@ describe('Control postoperatorio (DX-566, e2e)', () => {
       const again = await api(a, tokens.DENTIST!)
         .post(`${ROUTE}/${checkId}/attempts`, { outcome: 'FINE' })
         .expect(409);
-      expect(again.body.message).toBe(POST_OP_MESSAGES.closed);
+      expect((again.body as { message: string }).message).toBe(
+        POST_OP_MESSAGES.closed,
+      );
 
       const events = await raw.auditEvent.findMany({
         where: {
@@ -415,7 +421,9 @@ describe('Control postoperatorio (DX-566, e2e)', () => {
           outcome: 'FINE',
         })
         .expect(404);
-      expect(missing.body.message).toBe(POST_OP_MESSAGES.notFound);
+      expect((missing.body as { message: string }).message).toBe(
+        POST_OP_MESSAGES.notFound,
+      );
     });
   });
 });
