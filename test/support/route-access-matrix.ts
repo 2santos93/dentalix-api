@@ -147,6 +147,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-128: baja de los recordatorios desde el enlace del email (el paciente).
   'GET /public/reminder-opt-outs/:token': PUBLIC_TENANT,
   'POST /public/reminder-opt-outs/:token': PUBLIC_TENANT,
+  // DX-568: dejar de recibir el resumen semanal desde el enlace del email
+  // (el ADMIN destinatario, sin sesión).
+  'GET /public/weekly-digest-unsubscribe/:token': PUBLIC_TENANT,
+  'POST /public/weekly-digest-unsubscribe/:token': PUBLIC_TENANT,
   // DX-222: indicaciones postoperatorias desde el enlace del email/WhatsApp.
   'GET /public/post-op-instructions/:token': PUBLIC_TENANT,
   'POST /public/post-op-instructions/:token/opened': PUBLIC_TENANT,
@@ -652,6 +656,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // leen los roles de la agenda; la cambia solo ADMIN.
   'GET /slot-offer-settings': EVERY_ROLE,
   'PUT /slot-offer-settings': ADMIN_ONLY,
+  // DX-568: resumen semanal por email para el dueño: ajustes, destinatarios
+  // y la prueba, solo ADMIN (las cifras son las de Reportes, solo ADMIN).
+  'GET /clinic/weekly-digest-settings': ADMIN_ONLY,
+  'PUT /clinic/weekly-digest-settings': ADMIN_ONLY,
+  'POST /clinic/weekly-digest/send-test': ADMIN_ONLY,
   // Alternativas A/B, presentar, rechazar y presupuestos por seguir:
   // loop/informes/DX-040.md. Crear una alternativa es preparar el plan
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,

@@ -156,6 +156,13 @@ model Tenant {
   /// del panel. NULL = se muestra. Es lo único que se guarda: el estado de
   /// cada paso se calcula con los datos (GET /onboarding/status).
   onboardingDismissedAt                   DateTime?
+  /// DX-568: resumen semanal por email para el dueño. Desactivado por
+  /// defecto. Día (0 = domingo … 6 = sábado, CHECK 0..6) y hora (0..23, CHECK)
+  /// de la sede principal en que sale, desde el lunes de la semana. Solo
+  /// ADMIN (PUT /clinic/weekly-digest-settings, auditado).
+  weeklyDigestEnabled                     Boolean                          @default(false)
+  weeklyDigestWeekday                     Int                              @default(1)
+  weeklyDigestHour                        Int                              @default(7)
   createdAt                               DateTime                         @default(now())
   updatedAt                               DateTime                         @updatedAt
   deletedAt                               DateTime?
@@ -216,6 +223,10 @@ model Tenant {
   // DX-205: lotes de cambio de precios del catálogo y su historial.
   catalogPriceBatches                     CatalogPriceBatch[]
   catalogPriceHistory                     CatalogPriceHistory[]
+  // DX-568: destinatarios, envíos semanales y entregas del resumen semanal.
+  weeklyDigestRecipients                  WeeklyDigestRecipient[]
+  weeklyDigestRuns                        WeeklyDigestRun[]
+  weeklyDigestDeliveries                  WeeklyDigestDelivery[]
   dentalLabServices                       DentalLabService[]
   dentalLabOrders                         DentalLabOrder[]
   // DX-285: cargos del caso en el plan y alineadores.
@@ -682,36 +693,39 @@ model Location {
 }
 
 model ClinicMembership {
-  id                    String               @id @default(uuid()) @db.Uuid
-  tenantId              String               @db.Uuid
-  userId                String               @db.Uuid
-  role                  ClinicRole
+  id                     String                 @id @default(uuid()) @db.Uuid
+  tenantId               String                 @db.Uuid
+  userId                 String                 @db.Uuid
+  role                   ClinicRole
   /// Nº de registro profesional del miembro en esta clínica. Lo exige la receta.
-  professionalLicense   String?
+  professionalLicense    String?
   /// DX-324: especialidad del miembro; la receta la imprime si existe. CHECK 1..80.
-  professionalSpecialty String?
+  professionalSpecialty  String?
   /// DX-090: permisos extra sobre el rol base (catálogo cerrado). Solo los
   /// cambia un ADMIN con PUT /staff/:userId/permissions; nunca uno mismo.
-  extraPermissions      ExtraPermission[]    @default([])
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  deletedAt             DateTime?
-  tenant                Tenant               @relation(fields: [tenantId], references: [id])
-  user                  User                 @relation(fields: [userId], references: [id])
+  extraPermissions       ExtraPermission[]      @default([])
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  deletedAt              DateTime?
+  tenant                 Tenant                 @relation(fields: [tenantId], references: [id])
+  user                   User                   @relation(fields: [userId], references: [id])
   // DX-089: sedes a las que se restringe el miembro (sin filas = todas).
-  locations             MembershipLocation[]
+  locations              MembershipLocation[]
   // DX-050: procedimientos del plan que realizó.
-  performedPlanItems    TreatmentPlanItem[]
+  performedPlanItems     TreatmentPlanItem[]
   // DX-374: tasas de cambio manuales que registró.
-  manualExchangeRates   ManualExchangeRate[]
+  manualExchangeRates    ManualExchangeRate[]
   // DX-211: sillones de los que es el profesional por defecto.
-  defaultChairs         Chair[]
+  defaultChairs          Chair[]
   // DX-306: certificados en los que figura como profesional.
-  patientCertificates   PatientCertificate[]
+  patientCertificates    PatientCertificate[]
   // DX-572: órdenes externas en las que figura como profesional.
-  externalOrders        ExternalOrder[]
+  externalOrders         ExternalOrder[]
   // DX-017: órdenes de laboratorio que prescribe.
-  dentalLabOrders       DentalLabOrder[]
+  dentalLabOrders        DentalLabOrder[]
+  // DX-568: recibe el resumen semanal (solo ADMIN) y sus entregas.
+  weeklyDigestRecipient  WeeklyDigestRecipient?
+  weeklyDigestDeliveries WeeklyDigestDelivery[]
 
   // PARTIAL unique (WHERE "deletedAt" IS NULL) — a soft-deleted membership must
   // NOT block re-adding the same user. The predicate lives in migration
@@ -4737,6 +4751,8 @@ enum EmailTemplate {
   PAYMENT_REPORT_REJECTED   @map("payment-report-rejected")
   // DX-572: copia de la orden externa con un enlace de un solo uso.
   EXTERNAL_ORDER_COPY       @map("external-order-copy")
+  // DX-568: resumen semanal para el dueño.
+  WEEKLY_DIGEST             @map("weekly-digest")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
@@ -8748,4 +8764,73 @@ model CatalogPriceHistory {
   @@index([tenantId, batchId], map: "catalog_price_history_batch_idx")
   @@index([actorUserId], map: "catalog_price_history_actor_idx")
   @@map("catalog_price_history")
+}
+
+/// DX-568: estado del envío semanal de una clínica.
+enum WeeklyDigestRunStatus {
+  SENDING
+  SENT
+  /// Activado pero sin ningún destinatario válido: no salió ningún email.
+  SKIPPED
+}
+
+/// DX-568: ADMIN que recibe el resumen semanal. Solo memberships ADMIN (lo
+/// valida la API al guardar y otra vez al enviar). La baja por enlace borra
+/// la fila (configuración, sin datos de pacientes; queda en la auditoría).
+model WeeklyDigestRecipient {
+  tenantId     String   @db.Uuid
+  membershipId String   @db.Uuid
+  createdAt    DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  // FK COMPUESTA (SEC-004): la membresía es de la MISMA clínica.
+  membership ClinicMembership @relation(fields: [tenantId, membershipId], references: [tenantId, id], onDelete: Restrict, map: "weekly_digest_recipients_membership_fkey")
+
+  @@id([tenantId, membershipId])
+  @@map("weekly_digest_recipients")
+}
+
+/// DX-568: un envío semanal (semana de lunes `weekStart` a domingo) de una
+/// clínica. UNIQUE (clínica, semana): dos workers no envían dos veces.
+/// `receivablesSnapshot`: el saldo vencido por sede y moneda en el momento
+/// del envío, base de la variación de la semana siguiente.
+model WeeklyDigestRun {
+  id                  String                @id @default(uuid(7)) @db.Uuid
+  tenantId            String                @db.Uuid
+  weekStart           DateTime              @db.Date
+  status              WeeklyDigestRunStatus @default(SENDING)
+  receivablesSnapshot Json?
+  recipientCount      Int                   @default(0)
+  skippedCount        Int                   @default(0)
+  createdAt           DateTime              @default(dbgenerated("timezone('UTC'::text, now())"))
+  completedAt         DateTime?
+
+  tenant     Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  deliveries WeeklyDigestDelivery[]
+
+  @@unique([tenantId, id], map: "weekly_digest_runs_tenant_id_key")
+  @@unique([tenantId, weekStart], map: "weekly_digest_runs_tenant_week_key")
+  @@map("weekly_digest_runs")
+}
+
+/// DX-568: el email de un envío a un destinatario, con el enlace de baja
+/// (token aleatorio; aquí solo su SHA-256) y el email encolado.
+model WeeklyDigestDelivery {
+  id                   String    @id @default(uuid(7)) @db.Uuid
+  tenantId             String    @db.Uuid
+  runId                String    @db.Uuid
+  membershipId         String    @db.Uuid
+  unsubscribeTokenHash String    @unique(map: "weekly_digest_deliveries_token_key") @db.Char(64)
+  expiresAt            DateTime
+  usedAt               DateTime?
+  emailOutboxId        String?   @db.Uuid
+  createdAt            DateTime  @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  run        WeeklyDigestRun  @relation(fields: [tenantId, runId], references: [tenantId, id], onDelete: Restrict, map: "weekly_digest_deliveries_run_fkey")
+  membership ClinicMembership @relation(fields: [tenantId, membershipId], references: [tenantId, id], onDelete: Restrict, map: "weekly_digest_deliveries_membership_fkey")
+
+  @@unique([runId, membershipId], map: "weekly_digest_deliveries_run_membership_key")
+  @@index([tenantId, membershipId], map: "weekly_digest_deliveries_membership_idx")
+  @@map("weekly_digest_deliveries")
 }

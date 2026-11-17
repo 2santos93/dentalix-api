@@ -121,6 +121,18 @@ export interface LocationsComparison {
   previousPeriodUnattributed: boolean;
 }
 
+/** DX-568: recuento de inasistencias del período y del comparado. */
+export interface NoShowCount {
+  current: number;
+  /** null sin comparación. */
+  previous: number | null;
+}
+
+export interface LocationsComparisonWithNoShows {
+  report: LocationsComparison;
+  noShows: { byLocation: Map<string, NoShowCount>; total: NoShowCount };
+}
+
 /**
  * Monedas del período comparado cuya producción no es base (BE-045): todas
  * (`ALL`) o las de la lista. Sin comparación, ninguna.
@@ -296,6 +308,43 @@ export class GetLocationsComparisonUseCase {
   }
 
   async execute(input: LocationsComparisonInput): Promise<LocationsComparison> {
+    return (await this.compute(input)).report;
+  }
+
+  /**
+   * DX-568: el MISMO informe y, aparte, el recuento de inasistencias de cada
+   * sede y del total (el del período y el del comparado). Comparar sedes solo
+   * muestra el % (`noShowRate`); el resumen semanal muestra también el
+   * número, sacado de las mismas sumas, sin añadir un indicador visible.
+   */
+  async executeWithNoShows(
+    input: LocationsComparisonInput,
+  ): Promise<LocationsComparisonWithNoShows> {
+    const { report, locations, current, previous } = await this.compute(input);
+    const pair = (pick: (a: PeriodAggregation) => PeriodAggregates) => ({
+      current: pick(current).noShow,
+      previous: previous ? pick(previous).noShow : null,
+    });
+    return {
+      report,
+      noShows: {
+        byLocation: new Map(
+          locations.map((l) => [
+            l.id,
+            pair((a) => a.byLocation.get(l.id) ?? EMPTY_AGGREGATES),
+          ]),
+        ),
+        total: pair((a) => this.totalOf(locations, a)),
+      },
+    };
+  }
+
+  private async compute(input: LocationsComparisonInput): Promise<{
+    report: LocationsComparison;
+    locations: ComparisonLocation[];
+    current: PeriodAggregation;
+    previous: PeriodAggregation | undefined;
+  }> {
     const period = this.validated(input.from, input.to);
     const previousPeriod = comparisonPeriod(
       period.from,
@@ -337,7 +386,7 @@ export class GetLocationsComparisonUseCase {
       previousPeriodUnattributed: anyUnattributed(totalUnattributed),
       metrics: metricsOf(totalNow, totalBefore, totalUnattributed),
     };
-    return {
+    const report: LocationsComparison = {
       from: period.from,
       to: period.to,
       compare: input.compare,
@@ -352,6 +401,7 @@ export class GetLocationsComparisonUseCase {
         total.previousPeriodUnattributed ||
         rows.some((r) => r.previousPeriodUnattributed),
     };
+    return { report, locations, current, previous };
   }
 
   private row(

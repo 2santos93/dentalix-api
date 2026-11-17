@@ -192,6 +192,10 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-568: «B guarda como destinatario del resumen semanal la membresía ADMIN
+  // de A → 400 en español y ni los ajustes de B ni los de A cambian».
+  'PUT /clinic/weekly-digest-settings body.recipientMembershipIds[]':
+    'weekly-digest.e2e-spec.ts',
   // DX-017: «B crea o edita una orden de laboratorio, lista o pide la fecha
   // sugerida con el laboratorio, el servicio, la sede, el ítem del plan, la
   // cita o la orden de A → 404/422 en español sin datos de A, o una lista sin

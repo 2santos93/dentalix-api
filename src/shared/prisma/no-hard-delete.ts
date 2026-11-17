@@ -43,6 +43,11 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // la misma transacción (y ascender a ADMIN las vacía) y el cambio queda en
   // audit_events.
   'membershipLocation',
+  // DX-568: quién recibe el resumen semanal. Configuración, sin datos de
+  // pacientes; las entregas guardan su propia membresía. El PUT de Ajustes
+  // sustituye el conjunto y la baja por enlace quita la fila, en la misma
+  // transacción que su evento de audit_events.
+  'weeklyDigestRecipient',
   // DX-222: los vínculos de una plantilla de indicaciones (procedimiento o
   // tipo de cita que la sugiere) son configuración, sin datos de pacientes y
   // sin nada que los referencie (la entrega guarda su propia copia del texto).
