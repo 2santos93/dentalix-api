@@ -73,11 +73,48 @@ export function dueDigestWeek(
   schedule: DigestSchedule,
   timeZone: string,
 ): DigestWeek | null {
+  return dueDigest(now, schedule, timeZone)?.week ?? null;
+}
+
+/** Como `dueDigestWeek`, con el instante en que venció (para el payload). */
+export function dueDigest(
+  now: Date,
+  schedule: DigestSchedule,
+  timeZone: string,
+): { week: DigestWeek; dueAt: Date } | null {
   const today = civilDateIn(now, timeZone);
-  if (now.getTime() < dueInstant(today, schedule, timeZone).getTime()) {
-    return null;
+  const dueAt = dueInstant(today, schedule, timeZone);
+  if (now.getTime() < dueAt.getTime()) return null;
+  return { week: previousFullWeek(today), dueAt };
+}
+
+/** Plazo para enviar una semana vencida (reintentos, cola atrasada). */
+export const DIGEST_LATE_LIMIT_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * ¿Se puede enviar `weekStart` ahora? (revisión DX-568, n.º 1) Si el trabajo
+ * trae el momento en que venció (`dueAt`, lo pone el barrido), la semana es la
+ * de ESE momento, mientras no haya pasado más de un día: un trabajo que venció
+ * el domingo a las 23:00 y corre el lunes a las 00:05 envía su semana. Sin
+ * `dueAt` (trabajos de antes), la semana anterior a la de hoy. Fuera de eso,
+ * `null` (la semana ya no toca).
+ */
+export function sendableWeek(
+  weekStart: string,
+  now: Date,
+  timeZone: string,
+  dueAt: Date | null,
+): DigestWeek | null {
+  if (
+    dueAt &&
+    dueAt.getTime() <= now.getTime() &&
+    now.getTime() - dueAt.getTime() <= DIGEST_LATE_LIMIT_MS
+  ) {
+    const week = previousFullWeek(civilDateIn(dueAt, timeZone));
+    if (week.weekStart === weekStart) return week;
   }
-  return previousFullWeek(today);
+  const week = previousFullWeek(civilDateIn(now, timeZone));
+  return week.weekStart === weekStart ? week : null;
 }
 
 const MONTHS = [

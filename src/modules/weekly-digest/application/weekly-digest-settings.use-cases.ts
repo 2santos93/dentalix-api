@@ -26,7 +26,10 @@ import {
   WEEKDAY_MIN,
   previousFullWeek,
 } from '../domain/weekly-digest-schedule';
-import { WeeklyDigestComposer } from './weekly-digest-composer';
+import {
+  isPrincipalConfigured,
+  WeeklyDigestComposer,
+} from './weekly-digest-composer';
 
 export const WEEKLY_DIGEST_WEEKDAY_MESSAGE =
   'El día tiene que ser un número de 0 (domingo) a 6 (sábado).';
@@ -44,8 +47,15 @@ export const WEEKLY_DIGEST_TEST_ADMIN_ONLY_MESSAGE =
 /** Una prueba por persona cada 5 minutos (D1). */
 export const WEEKLY_DIGEST_TEST_COOLDOWN_SECONDS = 5 * 60;
 
-/** Aviso del PUT: activado pero sin destinatarios (no sale nada). */
-export type WeeklyDigestWarning = 'NO_RECIPIENTS';
+/**
+ * Avisos de Ajustes:
+ * - `NO_RECIPIENTS`: activado pero sin destinatarios (no sale nada).
+ * - `PRINCIPAL_LOCATION_UNCONFIGURED`: la sede principal no tiene zona u
+ *   formato (o no hay sede activa): el resumen no puede salir hasta
+ *   configurarla (revisión DX-568, n.º 2).
+ */
+export type WeeklyDigestWarning =
+  'NO_RECIPIENTS' | 'PRINCIPAL_LOCATION_UNCONFIGURED';
 
 export interface WeeklyDigestCandidate {
   membershipId: string;
@@ -94,6 +104,13 @@ export class GetWeeklyDigestSettingsUseCase {
     settings: WeeklyDigestSettings,
   ): Promise<WeeklyDigestSettingsView> {
     const admins = await this.repo.activeAdmins();
+    const warnings: WeeklyDigestWarning[] = [];
+    if (settings.enabled && settings.recipientMembershipIds.length === 0) {
+      warnings.push('NO_RECIPIENTS');
+    }
+    if (!isPrincipalConfigured(await this.repo.clinic())) {
+      warnings.push('PRINCIPAL_LOCATION_UNCONFIGURED');
+    }
     return {
       ...settings,
       candidates: admins.map((a) => ({
@@ -102,10 +119,7 @@ export class GetWeeklyDigestSettingsUseCase {
         email: maskEmail(a.email),
         verified: a.verified,
       })),
-      warnings:
-        settings.enabled && settings.recipientMembershipIds.length === 0
-          ? ['NO_RECIPIENTS']
-          : [],
+      warnings,
     };
   }
 }

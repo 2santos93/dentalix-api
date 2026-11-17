@@ -253,6 +253,15 @@ export class WeeklyDigestSources {
         .filter((t) => t.amount !== 0),
       paymentsWithoutRateCount: summary.paymentsWithoutRateCount,
       rateProviderTimedOut: summary.rateProviderTimedOut,
+      withoutRateByCurrency: Object.fromEntries(
+        summary.withoutRateByCurrency.map((w) => [
+          w.currency,
+          {
+            count: w.paymentsWithoutRateCount,
+            timedOut: w.rateProviderTimedOut,
+          },
+        ]),
+      ),
     };
   }
 

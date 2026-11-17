@@ -63,6 +63,7 @@ function scope(over: Partial<DigestScopeSources> = {}): DigestScopeSources {
         overdue: [{ currency: 'USD', amount: 800 }],
         paymentsWithoutRateCount: 2,
         rateProviderTimedOut: true,
+        withoutRateByCurrency: { USD: { count: 2, timedOut: true } },
       },
     },
     cash: { ok: true, value: { open: 2, openBeforeToday: 1 } },
@@ -138,6 +139,8 @@ describe('composeWeeklyDigest (DX-568, D5)', () => {
       amount: { current: 1200, previous: 900 },
       withoutRate: 1,
     });
+    // La marca va solo en los presentados.
+    expect(find(centro.metrics, 'quotesAccepted').withoutRate).toBe(0);
     expect(find(centro.metrics, 'openCashSessions')).toMatchObject({
       current: 2,
       previous: null,
@@ -165,6 +168,15 @@ describe('composeWeeklyDigest (DX-568, D5)', () => {
       byLocation: { 'l-centro': { USD: 1000, VES: 50 } },
       total: { USD: 1000 },
     });
+    // La marca «sin tasa» va solo en la moneda afectada (USD), no en VES.
+    expect(
+      after.sections[0].metrics
+        .filter((m) => m.key === 'overdueBalance')
+        .map((m) => [m.currency, m.withoutRate]),
+    ).toEqual([
+      ['USD', 2],
+      ['VES', 0],
+    ]);
     const overdue = after.sections[0].metrics.filter(
       (m) => m.key === 'overdueBalance',
     );

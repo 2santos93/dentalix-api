@@ -22,6 +22,7 @@ import type {
   WeeklyDigestRepository,
   WeeklyDigestSettings,
 } from '../domain/ports/weekly-digest-repository.port';
+import { uuidV7 } from '../domain/uuid-v7';
 import {
   readReceivablesSnapshot,
   type ReceivablesSnapshot,
@@ -349,10 +350,11 @@ export class PrismaWeeklyDigestRepository implements WeeklyDigestRepository {
         where: {
           tenantId_weekStart: { tenantId, weekStart: dateColumn(weekStart) },
         },
-        select: { status: true },
+        select: { id: true },
       }),
     );
-    return run !== null && run.status !== 'SENDING';
+    // El envío se crea y se cierra en la misma transacción: si existe, terminó.
+    return run !== null;
   }
 
   private async eligibleIn(
@@ -390,7 +392,7 @@ export class PrismaWeeklyDigestRepository implements WeeklyDigestRepository {
       // serializa y el segundo ve el envío ya cerrado.
       await tx.$executeRaw`
         INSERT INTO "weekly_digest_runs" ("id", "tenantId", "weekStart", "status", "receivablesSnapshot")
-        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${input.weekStart}::date, 'SENDING', ${snapshot}::jsonb)
+        VALUES (${uuidV7()}::uuid, ${tenantId}::uuid, ${input.weekStart}::date, 'SENDING', ${snapshot}::jsonb)
         ON CONFLICT ("tenantId", "weekStart") DO NOTHING`;
       const [run] = await tx.$queryRaw<{ id: string; status: string }[]>`
         SELECT "id", "status"::text AS "status" FROM "weekly_digest_runs"
@@ -545,6 +547,8 @@ export class PrismaWeeklyDigestRepository implements WeeklyDigestRepository {
               id: true,
               role: true,
               userId: true,
+              deletedAt: true,
+              user: { select: { deletedAt: true } },
               weeklyDigestRecipient: { select: { membershipId: true } },
             },
           },
@@ -556,7 +560,13 @@ export class PrismaWeeklyDigestRepository implements WeeklyDigestRepository {
         membershipId: delivery.membership.id,
         userId: delivery.membership.userId,
         role: delivery.membership.role,
-        subscribed: delivery.membership.weeklyDigestRecipient !== null,
+        // Revisión DX-568, n.º 6: solo lo sigue recibiendo si la fila existe
+        // Y la membresía sigue siendo ADMIN activa (si no, no le llega).
+        subscribed:
+          delivery.membership.weeklyDigestRecipient !== null &&
+          delivery.membership.role === ClinicRole.ADMIN &&
+          delivery.membership.deletedAt === null &&
+          delivery.membership.user.deletedAt === null,
       };
     });
   }

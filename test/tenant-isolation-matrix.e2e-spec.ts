@@ -755,7 +755,7 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
   });
 
   // DX-568: el ADMIN de A recibe el resumen semanal (la fotografía cubre
-  // weekly_digest_recipients; envíos y entregas los crea el trabajo).
+  // destinatarios, envíos y entregas).
   const digestSettings = await api(
     app,
     a,
@@ -771,6 +771,26 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     hour: 7,
     recipientMembershipIds: [digestAdmin.membershipId],
   }).expect(200);
+  // Un envío cerrado y su entrega (los crea el trabajo; aquí, por `raw`).
+  const digestRun = await raw.weeklyDigestRun.create({
+    data: {
+      tenantId: a.tenantId,
+      weekStart: new Date('2026-11-09T00:00:00Z'),
+      status: 'SENT',
+      completedAt: new Date(),
+      recipientCount: 1,
+      receivablesSnapshot: { version: 1, byLocation: {}, total: null },
+    },
+  });
+  await raw.weeklyDigestDelivery.create({
+    data: {
+      tenantId: a.tenantId,
+      runId: digestRun.id,
+      membershipId: digestAdmin.membershipId,
+      unsubscribeTokenHash: 'c'.repeat(64),
+      expiresAt: new Date(Date.now() + 60 * 86_400_000),
+    },
+  });
   return {
     recallTypeId: recallType.id,
     patientId,
@@ -1140,8 +1160,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'expenses',
       'expense_payments',
       'expense_categories',
-      // DX-568: destinatarios del resumen semanal.
+      // DX-568: destinatarios, envíos y entregas del resumen semanal.
       'weekly_digest_recipients',
+      'weekly_digest_runs',
+      'weekly_digest_deliveries',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {

@@ -112,11 +112,11 @@ export class WeeklyDigestSettingsDto {
 
   @ApiProperty({
     type: [String],
-    enum: ['NO_RECIPIENTS'],
+    enum: ['NO_RECIPIENTS', 'PRINCIPAL_LOCATION_UNCONFIGURED'],
     description:
-      '`NO_RECIPIENTS`: activado sin ningún destinatario (no sale nada).',
+      '`NO_RECIPIENTS`: activado sin ningún destinatario (no sale nada). `PRINCIPAL_LOCATION_UNCONFIGURED`: la sede principal no tiene zona horaria o formato (o no hay sede activa); el resumen no sale hasta configurarla en Ajustes › Sedes.',
   })
-  warnings!: 'NO_RECIPIENTS'[];
+  warnings!: ('NO_RECIPIENTS' | 'PRINCIPAL_LOCATION_UNCONFIGURED')[];
 }
 
 /** POST /clinic/weekly-digest/send-test. */

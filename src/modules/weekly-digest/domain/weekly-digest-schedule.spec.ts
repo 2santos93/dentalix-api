@@ -1,5 +1,7 @@
 import {
+  dueDigest,
   dueDigestWeek,
+  sendableWeek,
   dueInstant,
   mondayOf,
   previousFullWeek,
@@ -108,6 +110,51 @@ describe('semana del resumen (DX-568, D3)', () => {
         dueDigestWeek(new Date('2026-11-02T12:00:00Z'), MONDAY_7, NEW_YORK),
       ).toEqual({ weekStart: '2026-10-26', weekEnd: '2026-11-01' });
     });
+  });
+
+  it('la semana que se puede enviar: la del momento en que venció, hasta un día tarde', () => {
+    const sunday23 = { weekday: 0, hour: 23 };
+    const due = dueDigest(new Date('2026-11-16T03:10:00Z'), sunday23, CARACAS);
+    expect(due).toEqual({
+      week: { weekStart: '2026-11-02', weekEnd: '2026-11-08' },
+      dueAt: new Date('2026-11-16T03:00:00Z'),
+    });
+    const dueAt = due!.dueAt;
+    // Corre el lunes 00:05 en Caracas: ya es otra semana, pero se envía.
+    expect(
+      sendableWeek(
+        '2026-11-02',
+        new Date('2026-11-16T04:05:00Z'),
+        CARACAS,
+        dueAt,
+      ),
+    ).toEqual({ weekStart: '2026-11-02', weekEnd: '2026-11-08' });
+    // Más de un día después, ya no.
+    expect(
+      sendableWeek(
+        '2026-11-02',
+        new Date('2026-11-17T03:00:01Z'),
+        CARACAS,
+        dueAt,
+      ),
+    ).toBeNull();
+    // Sin `dueAt`, la semana anterior a la de hoy.
+    expect(
+      sendableWeek(
+        '2026-11-09',
+        new Date('2026-11-16T04:05:00Z'),
+        CARACAS,
+        null,
+      ),
+    ).toEqual({ weekStart: '2026-11-09', weekEnd: '2026-11-15' });
+    expect(
+      sendableWeek(
+        '2026-11-02',
+        new Date('2026-11-16T04:05:00Z'),
+        CARACAS,
+        null,
+      ),
+    ).toBeNull();
   });
 
   it('las etiquetas del asunto y del cuerpo', () => {

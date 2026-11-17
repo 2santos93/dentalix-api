@@ -136,6 +136,38 @@ export interface ReceivablesAgingTotals {
    */
   paymentsWithoutRateCount: number;
   rateProviderTimedOut: boolean;
+  /**
+   * DX-568 (revisión, n.º 5): los mismos avisos por moneda del plan, para
+   * marcar solo la cifra de la moneda afectada. Solo las monedas con aviso.
+   */
+  withoutRateByCurrency: {
+    currency: string;
+    paymentsWithoutRateCount: number;
+    rateProviderTimedOut: boolean;
+  }[];
+}
+
+/** DX-568: avisos de tasa por moneda de las filas (solo las que tienen). */
+function withoutRateByCurrencyOf(
+  rows: ScopedRow[],
+): ReceivablesAgingTotals['withoutRateByCurrency'] {
+  const byCurrency = new Map<string, { count: number; timedOut: boolean }>();
+  for (const row of rows) {
+    for (const c of row.aging.currencies) {
+      if (c.paymentsWithoutRateCount === 0 && !c.rateProviderTimedOut) continue;
+      const acc = byCurrency.get(c.currency) ?? { count: 0, timedOut: false };
+      acc.count += c.paymentsWithoutRateCount;
+      acc.timedOut ||= c.rateProviderTimedOut;
+      byCurrency.set(c.currency, acc);
+    }
+  }
+  return [...byCurrency.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, acc]) => ({
+      currency,
+      paymentsWithoutRateCount: acc.count,
+      rateProviderTimedOut: acc.timedOut,
+    }));
 }
 
 /** DX-568: opciones de `summary`. */
@@ -331,6 +363,7 @@ export class GetReceivablesAgingUseCase {
         0,
       ),
       rateProviderTimedOut: rows.some((r) => r.aging.rateProviderTimedOut),
+      withoutRateByCurrency: withoutRateByCurrencyOf(rows),
     };
   }
 

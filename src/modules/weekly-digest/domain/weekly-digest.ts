@@ -62,6 +62,11 @@ export interface ReceivablesFigures {
   /** Abonos en otra moneda que no suman por falta de tasa. */
   paymentsWithoutRateCount: number;
   rateProviderTimedOut: boolean;
+  /**
+   * Los mismos avisos por moneda del plan: la marca va solo en la cifra de
+   * esa moneda. Solo las monedas con aviso.
+   */
+  withoutRateByCurrency: Record<string, { count: number; timedOut: boolean }>;
 }
 
 /** Turnos de caja abiertos ahora y cuántos se abrieron antes de hoy. */
@@ -252,10 +257,15 @@ function quoteMetrics(source: SourceResult<QuoteFigures>): DigestMetric[] {
       current: currency === null ? null : pick(current).amount,
       previous: currency === null ? null : pick(previous).amount,
     },
-    withoutRate: current.withoutRate,
+    withoutRate: 0,
   });
+  // La marca «sin tasa» va solo en los presentados: los aceptados son parte
+  // de ellos y repetirla no añade nada.
   return [
-    step('quotesPresented', (w) => w.presented),
+    {
+      ...step('quotesPresented', (w) => w.presented),
+      withoutRate: current.withoutRate,
+    },
     step('quotesAccepted', (w) => w.accepted),
   ];
 }
@@ -265,11 +275,16 @@ function receivablesMetrics(
   previous: Record<string, number> | null,
 ): DigestMetric[] {
   if (!source.ok) return [unavailable('overdueBalance')];
-  const { overdue, paymentsWithoutRateCount, rateProviderTimedOut } =
-    source.value;
+  const { overdue, withoutRateByCurrency } = source.value;
   const now = new Map(overdue.map((o) => [o.currency, round2(o.amount)]));
+  // Una moneda con aviso de tasa sale aunque no tenga nada vencido: su deuda
+  // puede estar sin sumar (o, sin respuesta del proveedor, «por vencer»).
   const currencies = [
-    ...new Set([...now.keys(), ...Object.keys(previous ?? {})]),
+    ...new Set([
+      ...now.keys(),
+      ...Object.keys(previous ?? {}),
+      ...Object.keys(withoutRateByCurrency),
+    ]),
   ].sort();
   if (currencies.length === 0) {
     return [
@@ -280,14 +295,14 @@ function receivablesMetrics(
         current: 0,
         previous: previous === null ? null : 0,
         change: previous === null ? null : 0,
-        withoutRate: paymentsWithoutRateCount,
-        rateProviderTimedOut,
+        withoutRate: 0,
       },
     ];
   }
   return currencies.map((currency) => {
     const current = now.get(currency) ?? 0;
     const before = previous === null ? null : (previous[currency] ?? 0);
+    const flags = withoutRateByCurrency[currency];
     return {
       key: 'overdueBalance',
       currency,
@@ -295,8 +310,8 @@ function receivablesMetrics(
       current,
       previous: before,
       change: changePercent(current, before),
-      withoutRate: paymentsWithoutRateCount,
-      rateProviderTimedOut,
+      withoutRate: flags?.count ?? 0,
+      ...(flags?.timedOut ? { rateProviderTimedOut: true } : {}),
     };
   });
 }

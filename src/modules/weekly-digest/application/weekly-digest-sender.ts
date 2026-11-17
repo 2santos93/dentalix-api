@@ -1,11 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   generatePublicLinkToken,
   hashPublicLinkToken,
 } from '../../../shared/public-links/public-link-token';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
-import { civilDateIn, parseCivilDate } from '../../../shared/time/civil-day';
+import { parseCivilDate } from '../../../shared/time/civil-day';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
 import type { EnqueueOptions, EnqueueResult } from '../../jobs/domain/job';
 import {
@@ -17,12 +16,16 @@ import {
 } from '../domain/ports/weekly-digest-repository.port';
 import { weeklyDigestEmailVars } from '../domain/weekly-digest-email';
 import {
-  dueDigestWeek,
+  dueDigest,
   mondayOf,
-  previousFullWeek,
+  sendableWeek,
   type DigestWeek,
 } from '../domain/weekly-digest-schedule';
-import { WeeklyDigestComposer } from './weekly-digest-composer';
+import { uuidV7 } from '../domain/uuid-v7';
+import {
+  isPrincipalConfigured,
+  WeeklyDigestComposer,
+} from './weekly-digest-composer';
 
 export const WEEKLY_DIGEST_SEND_JOB = 'weekly-digest.send';
 export const WEEKLY_DIGEST_SWEEP_JOB = 'weekly-digest.sweep';
@@ -45,7 +48,7 @@ export const WEEKLY_DIGEST_JOB_QUEUE = Symbol('WEEKLY_DIGEST_JOB_QUEUE');
 export interface WeeklyDigestJobQueue {
   enqueue(
     name: string,
-    payload: { weekStart: string },
+    payload: { weekStart: string; dueAt: string },
     options: EnqueueOptions,
   ): Promise<EnqueueResult>;
 }
@@ -81,23 +84,31 @@ export class WeeklyDigestSender {
     tenantId: string,
     weekStart: string,
     signal?: AbortSignal,
+    dueAt: string | null = null,
   ): Promise<WeeklyDigestSendResult> {
+    const due = dueAt === null ? null : new Date(dueAt);
     if (
       parseCivilDate(weekStart) === null ||
-      mondayOf(weekStart) !== weekStart
+      mondayOf(weekStart) !== weekStart ||
+      (due !== null && Number.isNaN(due.getTime()))
     ) {
       throw new Error(`${WEEKLY_DIGEST_SEND_JOB}: payload inválido`);
     }
     const clinic = await this.repo.clinic();
-    if (!clinic) return 'NO_LOCATION';
+    // Sin sede principal con zona y formato no hay email (el barrido ya la
+    // salta; esto cubre un cambio entre el barrido y el trabajo).
+    if (!clinic || !isPrincipalConfigured(clinic)) return 'NO_LOCATION';
     if (!clinic.enabled) return 'DISABLED';
-    // Nunca una semana que ya no es «la anterior» (el trabajo se quedó
-    // esperando hasta la semana siguiente): esa la encola el barrido nuevo.
+    // La semana del momento en que venció (hasta un día tarde: reintentos o
+    // cola atrasada); nunca una que ya no toca.
     const now = this.clock();
-    const week: DigestWeek = previousFullWeek(
-      civilDateIn(now, clinic.principal.timeZone),
+    const week: DigestWeek | null = sendableWeek(
+      weekStart,
+      now,
+      clinic.principal.timeZone,
+      due,
     );
-    if (week.weekStart !== weekStart) return 'STALE';
+    if (!week) return 'STALE';
     if (await this.repo.runDone(week.weekStart)) return 'ALREADY_DONE';
 
     const composed = await this.composer.compose(clinic, week);
@@ -107,7 +118,7 @@ export class WeeklyDigestSender {
     );
     const deliveries: PreparedDelivery[] = [];
     for (const admin of eligible) {
-      const id = randomUUID();
+      const id = uuidV7(now.getTime());
       const token = generatePublicLinkToken();
       deliveries.push({
         id,
@@ -190,18 +201,29 @@ export class WeeklyDigestSweep {
         const clinic = await this.tenantContext.run(tenantId, () =>
           this.repo.clinic(),
         );
-        if (!clinic || !clinic.enabled) continue;
-        const week = dueDigestWeek(
+        if (clinic && !clinic.enabled) continue;
+        if (!clinic || !isPrincipalConfigured(clinic)) {
+          // Sin zona o sin formato no hay email: el trabajo fallaría cada
+          // semana. Se avisa y se salta hasta que el ADMIN la configure
+          // (Ajustes lo dice con PRINCIPAL_LOCATION_UNCONFIGURED).
+          this.logger.warn({
+            event: 'weekly_digest.clinic_unconfigured',
+            tenantId,
+          });
+          continue;
+        }
+        const due = dueDigest(
           now,
           { weekday: clinic.weekday, hour: clinic.hour },
           clinic.principal.timeZone,
         );
-        if (!week || (await this.repo.runExists(tenantId, week.weekStart))) {
+        if (!due || (await this.repo.runExists(tenantId, due.week.weekStart))) {
           continue;
         }
+        const { week } = due;
         const { created } = await this.queue.enqueue(
           WEEKLY_DIGEST_SEND_JOB,
-          { weekStart: week.weekStart },
+          { weekStart: week.weekStart, dueAt: due.dueAt.toISOString() },
           {
             tenantId,
             idempotencyKey: weeklyDigestJobKey(tenantId, week.weekStart),

@@ -322,6 +322,48 @@ describe('Resumen semanal por email (e2e, DX-568)', () => {
           ),
         );
     });
+
+    it('más de 50 destinatarios: 400 en español', async () => {
+      const ids = Array.from(
+        { length: 51 },
+        (_, n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`,
+      );
+      const res = await putSettings({
+        enabled: true,
+        weekday: 1,
+        hour: 7,
+        recipientMembershipIds: ids,
+      }).expect(400);
+      expect(
+        JSON.stringify((res.body as { message: unknown }).message),
+      ).toContain(WEEKLY_DIGEST_RECIPIENT_IDS_MESSAGE);
+    });
+
+    it('sede principal sin formato: el GET avisa PRINCIPAL_LOCATION_UNCONFIGURED', async () => {
+      const before = await raw.location.findUniqueOrThrow({
+        where: { id: locationId },
+        select: { locale: true },
+      });
+      await raw.location.update({
+        where: { id: locationId },
+        data: { locale: null },
+      });
+      try {
+        const res = await getSettings().expect(200);
+        expect((res.body as SettingsBody).warnings).toContain(
+          'PRINCIPAL_LOCATION_UNCONFIGURED',
+        );
+      } finally {
+        await raw.location.update({
+          where: { id: locationId },
+          data: { locale: before.locale },
+        });
+      }
+      const res = await getSettings().expect(200);
+      expect((res.body as SettingsBody).warnings).not.toContain(
+        'PRINCIPAL_LOCATION_UNCONFIGURED',
+      );
+    });
   });
 
   describe('Enviarme una prueba', () => {

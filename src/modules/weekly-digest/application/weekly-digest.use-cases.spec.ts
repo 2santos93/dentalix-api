@@ -250,6 +250,48 @@ describe('WeeklyDigestSender (DX-568, D3/D4)', () => {
     expect(repo.sendRunInputs).toHaveLength(0);
   });
 
+  it('un trabajo que venció el domingo 23:00 y corre el lunes 00:05 envía su semana; más de un día tarde, no', async () => {
+    const sunday = { ...CLINIC, weekday: 0, hour: 23 };
+    repo.clinicValue = sunday;
+    // Domingo 2026-11-15 23:00 en Caracas = lunes 03:00Z; corre a las 04:05Z
+    // (lunes 00:05 en Caracas, ya en la semana siguiente).
+    const late = new WeeklyDigestSender(
+      repo as unknown as WeeklyDigestRepository,
+      fakeComposer(),
+      mail.outbox,
+      () => new Date('2026-11-16T04:05:00Z'),
+    );
+    await expect(
+      late.send(TENANT, '2026-11-02', undefined, '2026-11-16T03:00:00.000Z'),
+    ).resolves.toBe('SENT');
+    expect(repo.sendRunInputs.at(-1)?.weekStart).toBe('2026-11-02');
+    // Sin `dueAt` (trabajo de antes de la revisión) esa semana ya no toca.
+    await expect(late.send(TENANT, '2026-11-02')).resolves.toBe('STALE');
+    const tooLate = new WeeklyDigestSender(
+      repo as unknown as WeeklyDigestRepository,
+      fakeComposer(),
+      mail.outbox,
+      () => new Date('2026-11-17T03:01:00Z'),
+    );
+    await expect(
+      tooLate.send(TENANT, '2026-11-02', undefined, '2026-11-16T03:00:00.000Z'),
+    ).resolves.toBe('STALE');
+    await expect(
+      late.send(TENANT, '2026-11-09', undefined, 'no-es-fecha'),
+    ).rejects.toThrow('payload inválido');
+  });
+
+  it('sede principal sin formato: no envía (NO_LOCATION) en vez de fallar', async () => {
+    repo.clinicValue = {
+      ...CLINIC,
+      principal: { ...CLINIC.principal, hourCycle: null },
+    };
+    await expect(sender.send(TENANT, '2026-11-09')).resolves.toBe(
+      'NO_LOCATION',
+    );
+    expect(repo.sendRunInputs).toHaveLength(0);
+  });
+
   it('con la reserva perdida no llega a encolar nada', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -270,18 +312,21 @@ describe('WeeklyDigestSender (DX-568, D3/D4)', () => {
 describe('WeeklyDigestSweep (DX-568, D3)', () => {
   it('encola por clínica la semana que toca con su clave; salta las enviadas, las que no tocan y sigue tras un fallo', async () => {
     const repo = new FakeRepo();
-    repo.enabled = ['t-a', 't-b', 't-c', 't-d'];
+    repo.enabled = ['t-a', 't-b', 't-c', 't-d', 't-e', 't-f'];
     repo.existing.add('t-b:2026-11-09');
-    const clinics: Record<string, DigestClinic | Error> = {
+    const clinics: Record<string, DigestClinic | Error | null> = {
       't-a': CLINIC,
       't-b': CLINIC,
       // Martes 9:00: aún no toca.
       't-c': { ...CLINIC, weekday: 2, hour: 9 },
       't-d': new Error('BD caída'),
+      // Sede principal con zona pero sin formato: se salta (n.º 2).
+      't-e': { ...CLINIC, principal: { ...CLINIC.principal, locale: null } },
     };
+    // 't-f': sin sede principal con zona (clinic() = null): también se salta.
     const tenantContext = new TenantContextService();
     repo.clinic = () => {
-      const value = clinics[tenantContext.getTenantId()!];
+      const value = clinics[tenantContext.getTenantId()!] ?? null;
       return value instanceof Error
         ? Promise.reject(value)
         : Promise.resolve(value);
@@ -304,7 +349,8 @@ describe('WeeklyDigestSweep (DX-568, D3)', () => {
     expect(enqueued).toEqual([
       {
         name: WEEKLY_DIGEST_SEND_JOB,
-        payload: { weekStart: '2026-11-09' },
+        // Lunes 07:00 en Caracas: el momento en que venció.
+        payload: { weekStart: '2026-11-09', dueAt: '2026-11-16T11:00:00.000Z' },
         options: {
           tenantId: 't-a',
           idempotencyKey: weeklyDigestJobKey('t-a', '2026-11-09'),
@@ -349,6 +395,21 @@ describe('Ajustes del resumen (DX-568, D1)', () => {
         },
       ],
       warnings: ['NO_RECIPIENTS'],
+    });
+  });
+
+  it('avisa PRINCIPAL_LOCATION_UNCONFIGURED si la sede principal no tiene zona o formato', async () => {
+    repo.clinicValue = {
+      ...CLINIC,
+      principal: { ...CLINIC.principal, locale: null },
+    };
+    await expect(get.execute()).resolves.toMatchObject({
+      warnings: ['PRINCIPAL_LOCATION_UNCONFIGURED'],
+    });
+    repo.clinicValue = null;
+    repo.settings = { ...repo.settings, enabled: true };
+    await expect(get.execute()).resolves.toMatchObject({
+      warnings: ['NO_RECIPIENTS', 'PRINCIPAL_LOCATION_UNCONFIGURED'],
     });
   });
 

@@ -15,6 +15,21 @@ import {
 import { weekBefore, type DigestWeek } from '../domain/weekly-digest-schedule';
 import { WeeklyDigestSources } from './weekly-digest-sources';
 
+/**
+ * ¿La sede principal tiene zona Y formato? (revisión DX-568, n.º 2) Sin
+ * formato no hay email que escribir: el barrido salta la clínica y Ajustes
+ * avisa con `PRINCIPAL_LOCATION_UNCONFIGURED`.
+ */
+export function isPrincipalConfigured(clinic: DigestClinic | null): boolean {
+  if (!clinic) return false;
+  try {
+    requireLocationFormat(clinic.principal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Lo que hace falta para escribir el email de una clínica. */
 export interface ComposedDigest {
   digest: WeeklyDigest;

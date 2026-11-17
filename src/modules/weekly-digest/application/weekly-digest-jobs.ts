@@ -38,10 +38,13 @@ export class WeeklyDigestJobs implements OnModuleInit {
         if (!context.tenantId) {
           throw new Error(`${WEEKLY_DIGEST_SEND_JOB}: trabajo sin clínica`);
         }
+        const { dueAt } = payload;
         await this.sender.send(
           context.tenantId,
           weekStartOf(payload),
           context.signal,
+          // Trabajos encolados antes de la revisión: sin `dueAt`.
+          typeof dueAt === 'string' ? dueAt : null,
         );
       },
     });

@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
 import { AppModule } from '../src/app.module';
+import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
+import { GetPublicWeeklyDigestUnsubscribeUseCase } from '../src/modules/weekly-digest/application/weekly-digest-unsubscribe.use-cases';
+import { uuidV7 } from '../src/modules/weekly-digest/domain/uuid-v7';
+import { hashPublicLinkToken } from '../src/shared/public-links/public-link-token';
 import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
@@ -327,7 +332,11 @@ describe('DX-568 · resumen semanal por email (int)', () => {
         .map((c) => ({
           tenantId: c.tenantId,
           idempotencyKey: `weekly-digest:${c.tenantId}:${WEEK.weekStart}`,
-          payload: { weekStart: WEEK.weekStart },
+          // El momento en que venció: lunes 07:00 en Caracas.
+          payload: {
+            weekStart: WEEK.weekStart,
+            dueAt: '2026-11-16T11:00:00.000Z',
+          },
         }))
         .sort((x, y) => x.tenantId.localeCompare(y.tenantId)),
     );
@@ -365,6 +374,18 @@ describe('DX-568 · resumen semanal por email (int)', () => {
     expect(emails).toHaveLength(1);
     expect(emails[0].referenceId).toBe(deliveries[0].id);
     expect(deliveries[0].emailOutboxId).toBe(emails[0].id);
+    // El enlace de baja caduca a los 60 días del envío (reloj del trabajo).
+    expect(deliveries[0].expiresAt.getTime() - MONDAY_8.getTime()).toBe(
+      60 * 86_400_000,
+    );
+    expect(deliveries[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
+    expect(
+      (
+        await owner.weeklyDigestRun.findFirstOrThrow({
+          where: { tenantId: a.tenantId },
+        })
+      ).id,
+    ).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
     // La fila de la degradada sigue: si vuelve a ser ADMIN, lo recibe.
     expect(
       await owner.weeklyDigestRecipient.count({
@@ -444,6 +465,149 @@ describe('DX-568 · resumen semanal por email (int)', () => {
       { weekStart: new Date(`${WEEK.weekStart}T00:00:00Z`) },
       { weekStart: new Date(`${nextWeek.weekStart}T00:00:00Z`) },
     ]);
+  });
+
+  it('la carrera de verdad: dos sendRun bloqueados en el mismo INSERT dan un envío y un email', async () => {
+    const weekStart = '2026-10-12';
+    const prepare = async () => {
+      const id = uuidV7();
+      return {
+        id,
+        membershipId: a.owner.membershipId,
+        tokenHash: randomBytes(32).toString('hex'),
+        expiresAt: new Date(Date.now() + 86_400_000),
+        email: await app.get(EmailOutbox).prepareInTx({
+          tenantId: a.tenantId,
+          to: a.owner.email,
+          template: 'weekly-digest',
+          referenceId: id,
+          vars: {
+            clinicName: 'Carrera',
+            periodLabel: '12 oct–18 oct',
+            periodLongLabel: 'del lunes 12 al domingo 18 de octubre de 2026',
+            isTest: false,
+            sections: [],
+            notes: [],
+            unsubscribeUrl: null,
+            settingsUrl: null,
+          },
+        }),
+      };
+    };
+    const send = async () =>
+      inTenant(a.tenantId, async () =>
+        repo().sendRun({
+          weekStart,
+          snapshot: { version: 1, byLocation: {}, total: null },
+          deliveries: [await prepare()],
+          configuredRecipients: 3,
+        }),
+      );
+    // Una transacción del owner ocupa la clave (clínica, semana) sin
+    // confirmar: los dos INSERT … ON CONFLICT esperan a la vez sobre ella.
+    const digestEmails = () =>
+      owner.emailOutbox.count({
+        where: { tenantId: a.tenantId, template: 'WEEKLY_DIGEST' },
+      });
+    const emailsBefore = await digestEmails();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    const blocker = owner
+      .$transaction(
+        async (tx) => {
+          await tx.$executeRaw`
+            INSERT INTO "weekly_digest_runs" ("id", "tenantId", "weekStart")
+            VALUES (gen_random_uuid(), ${a.tenantId}::uuid, ${weekStart}::date)`;
+          holding();
+          await released;
+          throw new Error('rollback');
+        },
+        { timeout: 60_000 },
+      )
+      .catch(() => undefined);
+    await held;
+    const both = Promise.all([send(), send()]);
+    // Espera a que los dos estén bloqueados en el candado de la clave.
+    let waitingSeen = 0;
+    for (let i = 0; i < 200; i++) {
+      const [{ waiting }] = await owner.$queryRaw<{ waiting: number }[]>`
+        SELECT count(*)::int AS waiting FROM pg_stat_activity
+         WHERE datname = current_database() AND wait_event_type = 'Lock'
+           AND query ILIKE '%INSERT INTO "weekly_digest_runs"%'`;
+      waitingSeen = waiting;
+      if (waiting >= 2) break;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // La carrera se forzó de verdad: los dos esperaban a la vez.
+    expect(waitingSeen).toBe(2);
+    release();
+    await blocker;
+    const outcomes = await both;
+    expect(outcomes.map((o) => o.kind).sort()).toEqual([
+      'ALREADY_DONE',
+      'SENT',
+    ]);
+    const run = await owner.weeklyDigestRun.findFirstOrThrow({
+      where: {
+        tenantId: a.tenantId,
+        weekStart: new Date(`${weekStart}T00:00:00Z`),
+      },
+      include: { deliveries: true },
+    });
+    expect(run).toMatchObject({ status: 'SENT', recipientCount: 1 });
+    expect(run.deliveries).toHaveLength(1);
+    expect(
+      await owner.emailOutbox.count({
+        where: { tenantId: a.tenantId, referenceId: run.deliveries[0].id },
+      }),
+    ).toBe(1);
+    // El email de la entrega perdedora nunca se encoló: uno solo de más.
+    expect(await digestEmails()).toBe(emailsBefore + 1);
+  });
+
+  it('la baja pública dice ALREADY_OUT si la fila sigue pero ya no es ADMIN activa', async () => {
+    const token = 'D'.repeat(43);
+    const [run] = await owner.weeklyDigestRun.findMany({
+      where: { tenantId: a.tenantId },
+      take: 1,
+    });
+    await owner.weeklyDigestDelivery.create({
+      data: {
+        tenantId: a.tenantId,
+        runId: run.id,
+        membershipId: a.demoted.membershipId,
+        unsubscribeTokenHash: hashPublicLinkToken(token),
+        // Lejos de cualquier reloj de prueba de este spec.
+        expiresAt: new Date('2027-06-01T00:00:00Z'),
+      },
+    });
+    // La fila de destinatario de la degradada existe (D2).
+    expect(
+      await owner.weeklyDigestRecipient.count({
+        where: { membershipId: a.demoted.membershipId },
+      }),
+    ).toBe(1);
+    await expect(
+      inTenant(a.tenantId, () =>
+        app.get(GetPublicWeeklyDigestUnsubscribeUseCase).execute(token),
+      ),
+    ).resolves.toEqual({ clinicName: 'dx568-int-a', status: 'ALREADY_OUT' });
+    // Vuelve a ser ADMIN: lo vuelve a recibir y el enlace lo dice.
+    await owner.clinicMembership.update({
+      where: { id: a.demoted.membershipId },
+      data: { role: ClinicRole.ADMIN },
+    });
+    await expect(
+      inTenant(a.tenantId, () =>
+        app.get(GetPublicWeeklyDigestUnsubscribeUseCase).execute(token),
+      ),
+    ).resolves.toMatchObject({ status: 'ACTIVE' });
+    await owner.clinicMembership.update({
+      where: { id: a.demoted.membershipId },
+      data: { role: ClinicRole.DENTIST },
+    });
   });
 
   it('las guardas: como dentalix_app, ni un envío cerrado ni una entrega usada cambian, y nada se borra', async () => {

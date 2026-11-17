@@ -315,6 +315,7 @@ describe('GetReceivablesAgingUseCase', () => {
           totals: page.totals,
           paymentsWithoutRateCount: page.paymentsWithoutRateCount,
           rateProviderTimedOut: page.rateProviderTimedOut,
+          withoutRateByCurrency: expect.any(Array) as unknown,
         });
       },
     );
