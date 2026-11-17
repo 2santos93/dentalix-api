@@ -181,7 +181,10 @@ function count(key: DigestMetricKey, pair: CountPair): DigestMetric {
   };
 }
 
-function money(key: DigestMetricKey, pairs: CurrencyPair[]): DigestMetric[] {
+function moneyMetrics(
+  key: DigestMetricKey,
+  pairs: CurrencyPair[],
+): DigestMetric[] {
   // Sin movimientos en ninguna moneda: una fila sin moneda, en cero.
   if (pairs.length === 0) {
     return [
@@ -223,8 +226,8 @@ function comparisonMetrics(
   }
   const f = source.value;
   return [
-    ...money('collected', f.collected),
-    ...money('production', f.production),
+    ...moneyMetrics('collected', f.collected),
+    ...moneyMetrics('production', f.production),
     count('completedAppointments', f.completedAppointments),
     { ...count('noShows', f.noShows), rate: f.noShowRate },
     count('newPatients', f.newPatients),
