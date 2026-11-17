@@ -1,4 +1,9 @@
 import {
+  APPOINTMENT_TYPE_SUMMARY_SELECT,
+  toAppointmentTypeSummary,
+  type AppointmentTypeSummaryRow,
+} from '../../../appointment-types/infrastructure/appointment-type-summary';
+import {
   claimPlanItemInTx,
   findPlanItemsReservedElsewhere,
   isPlanItemConflict,
@@ -88,9 +93,7 @@ export const INCLUDE_PATIENT_NAME = {
   patient: { select: { firstName: true, lastName: true } },
   // DX-121: el tipo embebido, aunque esté desactivado o retirado (la cita no
   // cambia por eso). La FK compuesta garantiza que es de la misma clínica.
-  appointmentType: {
-    select: { id: true, name: true, durationMinutes: true, color: true },
-  },
+  appointmentType: { select: APPOINTMENT_TYPE_SUMMARY_SELECT },
   // DX-211: el sillón embebido, aunque esté desactivado (la cita lo conserva).
   // La FK compuesta garantiza que es de la misma clínica y sede.
   chair: { select: { id: true, name: true, active: true } },
@@ -104,12 +107,7 @@ export const INCLUDE_PATIENT_NAME = {
 type PrismaAppointmentWithPatient = PrismaAppointment & {
   planItems?: { planItemId: string }[];
   patient?: { firstName: string; lastName: string };
-  appointmentType?: {
-    id: string;
-    name: string;
-    durationMinutes: number;
-    color: string;
-  } | null;
+  appointmentType?: AppointmentTypeSummaryRow | null;
   chair?: { id: string; name: string; active: boolean } | null;
 };
 
@@ -132,7 +130,7 @@ export function mapToEntity(
     notes: appointment.notes,
     createdById: appointment.createdById,
     appointmentTypeId: appointment.appointmentTypeId,
-    appointmentType: appointment.appointmentType ?? null,
+    appointmentType: toAppointmentTypeSummary(appointment.appointmentType),
     confirmationSentAt: appointment.confirmationSentAt,
     callbackRequestedAt: appointment.callbackRequestedAt,
     wantsEarlier: appointment.wantsEarlier,
@@ -952,12 +950,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       return appointments.map(({ appointmentType, ...a }) => ({
         ...mapToEntity({
           ...a,
-          appointmentType: appointmentType && {
-            id: appointmentType.id,
-            name: appointmentType.name,
-            durationMinutes: appointmentType.durationMinutes,
-            color: appointmentType.color,
-          },
+          appointmentType,
         }),
         providerName: names.get(a.providerId) ?? null,
         urgent: appointmentType?.isUrgent ?? false,

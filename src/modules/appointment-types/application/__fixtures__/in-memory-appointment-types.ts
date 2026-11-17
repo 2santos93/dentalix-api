@@ -12,6 +12,8 @@ import {
 export class InMemoryAppointmentTypeRepository implements AppointmentTypeRepository {
   readonly rows: AppointmentType[] = [];
   readonly deleted = new Set<string>();
+  /** DX-564: `tenants.patientLanguages` de la clínica. */
+  languages: string[] = ['es'];
   private nextId = 1;
 
   seed(partial: Partial<AppointmentType> = {}): AppointmentType {
@@ -23,6 +25,7 @@ export class InMemoryAppointmentTypeRepository implements AppointmentTypeReposit
       color: '#7C3AED',
       active: true,
       isUrgent: false,
+      preVisitInstructions: {},
       createdAt: new Date('2026-10-01T00:00:00.000Z'),
       updatedAt: new Date('2026-10-01T00:00:00.000Z'),
       ...partial,
@@ -53,6 +56,7 @@ export class InMemoryAppointmentTypeRepository implements AppointmentTypeReposit
         color: input.color,
         active: input.active,
         isUrgent: input.isUrgent ?? false,
+        preVisitInstructions: input.preVisitInstructions ?? {},
       }),
     );
   }
@@ -70,6 +74,9 @@ export class InMemoryAppointmentTypeRepository implements AppointmentTypeReposit
     if (input.color !== undefined) row.color = input.color;
     if (input.active !== undefined) row.active = input.active;
     if (input.isUrgent !== undefined) row.isUrgent = input.isUrgent;
+    if (input.preVisitInstructions !== undefined) {
+      row.preVisitInstructions = input.preVisitInstructions;
+    }
     return Promise.resolve({ ...row });
   }
 
@@ -78,5 +85,9 @@ export class InMemoryAppointmentTypeRepository implements AppointmentTypeReposit
     const row = this.rows.find((r) => r.id === id);
     if (row) row.active = false;
     return Promise.resolve();
+  }
+
+  patientLanguages(): Promise<string[]> {
+    return Promise.resolve([...this.languages]);
   }
 }

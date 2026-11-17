@@ -14,6 +14,8 @@ import {
   appointmentTypeDurationError,
   appointmentTypeNameError,
   normalizeAppointmentTypeColor,
+  preVisitInstructionsFromEntries,
+  type PreVisitInstructionEntry,
 } from '../../domain/appointment-type-rules';
 
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
@@ -27,17 +29,22 @@ export interface AppointmentTypeInput {
   active?: boolean;
   /** DX-446: tipo de urgencia. */
   isUrgent?: boolean;
+  /** DX-564: la lista entera (vacía = sin indicaciones). */
+  preVisitInstructions?: PreVisitInstructionEntry[];
 }
+
+type NormalizedInput = Omit<
+  Partial<AppointmentTypeInput>,
+  'preVisitInstructions'
+>;
 
 function assertValid(error: string | null): void {
   if (error !== null) throw new BadRequestException(error);
 }
 
 /** Valida y normaliza solo los campos presentes (crear los trae todos). */
-function normalize(
-  input: Partial<AppointmentTypeInput>,
-): Partial<AppointmentTypeInput> {
-  const out: Partial<AppointmentTypeInput> = {
+function normalize(input: Partial<AppointmentTypeInput>): NormalizedInput {
+  const out: NormalizedInput = {
     active: input.active,
     isUrgent: input.isUrgent,
   };
@@ -54,6 +61,24 @@ function normalize(
     out.color = normalizeAppointmentTypeColor(input.color);
   }
   return out;
+}
+
+/**
+ * DX-564: valida las indicaciones contra los idiomas de la clínica y devuelve
+ * el mapa que se guarda; `undefined` si no vinieron (no se tocan).
+ */
+async function preVisitInstructions(
+  repo: AppointmentTypeRepository,
+  entries: PreVisitInstructionEntry[] | undefined,
+  current: Readonly<Record<string, string>>,
+): Promise<Record<string, string> | undefined> {
+  if (entries === undefined) return undefined;
+  const result = preVisitInstructionsFromEntries(entries, {
+    patientLanguages: entries.length > 0 ? await repo.patientLanguages() : [],
+    current,
+  });
+  if ('error' in result) throw new BadRequestException(result.error);
+  return result.map;
 }
 
 @Injectable()
@@ -80,7 +105,12 @@ export class CreateAppointmentTypeUseCase {
     input: AppointmentTypeInput,
     audit: AuditRequestContext,
   ): Promise<AppointmentType> {
-    const valid = normalize(input) as AppointmentTypeInput;
+    const valid = normalize(input) as Required<NormalizedInput>;
+    const instructions = await preVisitInstructions(
+      this.repo,
+      input.preVisitInstructions,
+      {},
+    );
     return this.repo.create(
       {
         name: valid.name,
@@ -88,6 +118,7 @@ export class CreateAppointmentTypeUseCase {
         color: valid.color,
         active: input.active ?? true,
         isUrgent: input.isUrgent ?? false,
+        preVisitInstructions: instructions ?? {},
         createdById: audit.actor.userId,
       },
       audit,
@@ -116,9 +147,19 @@ export class UpdateAppointmentTypeUseCase {
     if (!current) {
       throw new NotFoundException(APPOINTMENT_TYPE_NOT_FOUND_MESSAGE);
     }
+    const valid = normalize(input);
+    const instructions = await preVisitInstructions(
+      this.repo,
+      input.preVisitInstructions,
+      current.preVisitInstructions,
+    );
     return this.repo.update(
       id,
-      { ...normalize(input), updatedById: audit.actor.userId },
+      {
+        ...valid,
+        preVisitInstructions: instructions,
+        updatedById: audit.actor.userId,
+      },
       audit,
     );
   }

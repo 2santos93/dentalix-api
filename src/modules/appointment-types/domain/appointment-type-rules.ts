@@ -1,3 +1,9 @@
+import {
+  canonicalLanguageTag,
+  LANGUAGE_TAG_MESSAGE,
+} from '../../../shared/i18n/patient-language';
+import { localizedTextEntries } from '../../../shared/i18n/localized-text';
+
 /**
  * Reglas de un tipo de cita (DX-121). Puras: las comparten el caso de uso (400
  * en español) y los tests; la migración repite cada una como CHECK, que es la
@@ -46,4 +52,101 @@ export function appointmentTypeNameError(name: string): string | null {
 /** Fin de una cita que empieza en `start` y dura `minutes`. */
 export function endFromDuration(start: Date, minutes: number): Date {
   return new Date(start.getTime() + minutes * 60_000);
+}
+
+/* ───────────── DX-564: indicaciones previas a la cita ───────────── */
+
+/** Caracteres de cada texto, tras recortar. */
+export const PRE_VISIT_INSTRUCTIONS_TEXT_MAX = 600;
+/** Idiomas por tipo (la lista de la clínica admite hasta 20; holgado para 10). */
+export const PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES = 10;
+
+export const PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE = `Las indicaciones admiten como mucho ${PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES} idiomas.`;
+export const PRE_VISIT_INSTRUCTIONS_LANGUAGE_NOT_OFFERED_MESSAGE =
+  'Ese idioma no está entre los idiomas de los pacientes de la clínica.';
+export const PRE_VISIT_INSTRUCTIONS_REPEATED_MESSAGE =
+  'Ese idioma está repetido en las indicaciones.';
+export const PRE_VISIT_INSTRUCTIONS_TOO_LONG_MESSAGE = `Las indicaciones no pueden tener más de ${PRE_VISIT_INSTRUCTIONS_TEXT_MAX} caracteres.`;
+export const PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE =
+  'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.';
+
+/** `http://`, `https://`, `www.` o algo con aspecto de etiqueta (`<b>`, `</p>`, `<a href…>`, `<!--`). */
+const LINK_OR_HTML = /https?:\/\/|www\.|<\s*\/?\s*[a-z!][^<>]*>/i;
+
+export interface PreVisitInstructionEntry {
+  language: string;
+  text: string;
+}
+
+/**
+ * Un texto tal como se guarda: saltos de línea `\n`, tabuladores como espacio,
+ * sin otros caracteres de control y recortado. Los saltos se conservan: el
+ * recordatorio y la página los pintan.
+ */
+export function normalizePreVisitInstructionText(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\t/g, ' ')
+    .replace(/[\p{Cc}\u2028\u2029]/gu, (c) => (c === '\n' ? c : ''))
+    .trim();
+}
+
+/**
+ * Valida la lista que llega de la API y la convierte en el mapa que se guarda
+ * (`{ idioma: texto }`). La lista es el mapa entero: un idioma que no viene se
+ * quita. Reglas, en orden:
+ *  - etiqueta BCP 47 válida (se canoniza: «EN» → «en»);
+ *  - sin idiomas repetidos;
+ *  - texto vacío tras recortar → se descarta esa entrada;
+ *  - el idioma debe estar en la lista de la clínica, salvo que su texto sea
+ *    exactamente el ya guardado (la web puede devolver lo que leyó aunque la
+ *    clínica haya retirado ese idioma después: retirarlo no borra el texto);
+ *  - hasta 600 caracteres; sin enlaces ni HTML.
+ */
+export function preVisitInstructionsFromEntries(
+  entries: readonly PreVisitInstructionEntry[],
+  context: {
+    patientLanguages: readonly string[];
+    current: Readonly<Record<string, string>>;
+  },
+): { map: Record<string, string> } | { error: string } {
+  if (entries.length > PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES) {
+    return { error: PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE };
+  }
+  const map: Record<string, string> = {};
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const language = canonicalLanguageTag(entry.language);
+    if (!language) return { error: LANGUAGE_TAG_MESSAGE };
+    if (seen.has(language)) {
+      return { error: PRE_VISIT_INSTRUCTIONS_REPEATED_MESSAGE };
+    }
+    seen.add(language);
+    const text = normalizePreVisitInstructionText(entry.text);
+    if (text === '') continue;
+    if (
+      !context.patientLanguages.includes(language) &&
+      context.current[language] !== text
+    ) {
+      return { error: PRE_VISIT_INSTRUCTIONS_LANGUAGE_NOT_OFFERED_MESSAGE };
+    }
+    if ([...text].length > PRE_VISIT_INSTRUCTIONS_TEXT_MAX) {
+      return { error: PRE_VISIT_INSTRUCTIONS_TOO_LONG_MESSAGE };
+    }
+    if (LINK_OR_HTML.test(text)) {
+      return { error: PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE };
+    }
+    map[language] = text;
+  }
+  return { map };
+}
+
+/**
+ * Idiomas con texto (lo visible en la auditoría), en el orden de la API:
+ * español primero y luego alfabético.
+ */
+export function preVisitInstructionLanguages(
+  map: Readonly<Record<string, string>>,
+): string[] {
+  return localizedTextEntries(map).map((e) => e.language);
 }

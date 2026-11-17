@@ -45,12 +45,29 @@ import {
   UpdateAppointmentTypeUseCase,
 } from '../application/use-cases/appointment-types.use-cases';
 import { AppointmentType } from '../domain/entities/appointment-type.entity';
+import { localizedTextEntries } from '../../../shared/i18n/localized-text';
 import {
   AppointmentTypeDto,
   CreateAppointmentTypeDto,
   ListAppointmentTypesQueryDto,
   UpdateAppointmentTypeDto,
 } from './dto/appointment-type.dto';
+
+/** La respuesta: el mapa de indicaciones como lista ordenada (DX-564). */
+function toDto(type: AppointmentType): AppointmentTypeDto {
+  return {
+    id: type.id,
+    tenantId: type.tenantId,
+    name: type.name,
+    durationMinutes: type.durationMinutes,
+    color: type.color,
+    active: type.active,
+    isUrgent: type.isUrgent,
+    preVisitInstructions: localizedTextEntries(type.preVisitInstructions),
+    createdAt: type.createdAt,
+    updatedAt: type.updatedAt,
+  };
+}
 
 // Tipos de cita (DX-121). Leerlos: quien agenda (los 4 roles, para el selector
 // del formulario). Crear, editar, desactivar y retirar: solo ADMIN.
@@ -71,34 +88,43 @@ export class AppointmentTypesController {
 
   @Get()
   @ApiOkResponse({ type: [AppointmentTypeDto] })
-  list(
+  async list(
     @Query() query: ListAppointmentTypesQueryDto,
-  ): Promise<AppointmentType[]> {
-    return this.listTypes.execute({ includeInactive: query.includeInactive });
+  ): Promise<AppointmentTypeDto[]> {
+    const types = await this.listTypes.execute({
+      includeInactive: query.includeInactive,
+    });
+    return types.map(toDto);
   }
 
   @Post()
   @Roles(...APPOINTMENT_TYPE_WRITE_ROLES)
   @ApiCreatedResponse({ type: AppointmentTypeDto })
   @ApiBadRequestResponse({
-    description: 'Nombre vacío, duración fuera de rango o color no #RRGGBB',
+    description:
+      'Nombre vacío, duración fuera de rango, color no #RRGGBB o indicaciones previas inválidas (idioma no ofrecido o repetido, más de 600 caracteres, enlaces o HTML)',
   })
   @ApiConflictResponse({ description: 'Ya existe un tipo con ese nombre' })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
-  create(
+  async create(
     @Body() dto: CreateAppointmentTypeDto,
     @Req() req: AuditableRequest,
-  ): Promise<AppointmentType> {
-    return this.createType.execute(
+  ): Promise<AppointmentTypeDto> {
+    const created = await this.createType.execute(
       {
         name: dto.name,
         durationMinutes: dto.durationMinutes,
         color: dto.color,
         active: dto.active,
         isUrgent: dto.isUrgent,
+        preVisitInstructions: dto.preVisitInstructions?.map((e) => ({
+          language: e.language,
+          text: e.text,
+        })),
       },
       this.audit(req),
     );
+    return toDto(created);
   }
 
   @Patch(':id')
@@ -108,12 +134,12 @@ export class AppointmentTypesController {
   @ApiNotFoundResponse({ description: 'Tipo no encontrado en esta clínica' })
   @ApiConflictResponse({ description: 'Ya existe un tipo con ese nombre' })
   @ApiForbiddenResponse({ description: 'Solo ADMIN' })
-  update(
+  async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAppointmentTypeDto,
     @Req() req: AuditableRequest,
-  ): Promise<AppointmentType> {
-    return this.updateType.execute(
+  ): Promise<AppointmentTypeDto> {
+    const updated = await this.updateType.execute(
       id,
       {
         name: dto.name,
@@ -121,9 +147,14 @@ export class AppointmentTypesController {
         color: dto.color,
         active: dto.active,
         isUrgent: dto.isUrgent,
+        preVisitInstructions: dto.preVisitInstructions?.map((e) => ({
+          language: e.language,
+          text: e.text,
+        })),
       },
       this.audit(req),
     );
+    return toDto(updated);
   }
 
   @Delete(':id')
