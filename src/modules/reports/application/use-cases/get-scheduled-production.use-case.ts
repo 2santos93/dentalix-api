@@ -64,7 +64,7 @@ export const SCHEDULED_PRODUCTION_CLOCK = Symbol('SCHEDULED_PRODUCTION_CLOCK');
 export type ScheduledProductionClock = () => Date;
 
 /** Solo la lectura de las tasas YA guardadas: nunca el proveedor externo. */
-export type StoredRatesReader = Pick<GetRatesForDateUseCase, 'stored'>;
+export type StoredRatesReader = Pick<GetRatesForDateUseCase, 'storedReader'>;
 
 export interface ScheduledProductionActor {
   userId: string;
@@ -142,7 +142,7 @@ export class GetScheduledProductionUseCase {
     // La moneda del catálogo (DX-502-ter): la de todos los importes.
     @Inject(CATALOG_CURRENCY_READER)
     private readonly catalogCurrency: CatalogCurrencyReader,
-    // DX-569: solo `stored()`, la tasa ya guardada del día (sin proveedor).
+    // DX-569: solo `storedReader()`, la tasa ya guardada del día (sin proveedor).
     @Inject(GetRatesForDateUseCase)
     private readonly rates: StoredRatesReader,
     @Inject(SCHEDULED_PRODUCTION_CLOCK)
@@ -232,9 +232,12 @@ export class GetScheduledProductionUseCase {
   private ratesReader(
     catalog: string,
   ): (day: string, currency: string) => Promise<StoredRates | null> {
+    // Los ajustes de la clínica, una vez por petición; cada (día, moneda),
+    // una vez (memo).
+    const stored = this.rates.storedReader();
     return memoizedDailyRates(async (day, currency) => {
       const currencies = [currency, catalog].filter((c) => c !== BASE_CURRENCY);
-      const read = await this.rates.stored(day, { currencies });
+      const read = await stored(day, { currencies });
       return read?.rates ?? null;
     });
   }

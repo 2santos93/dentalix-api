@@ -92,13 +92,13 @@ const COUNTS_HERE = (tenantId: Prisma.Sql) => Prisma.sql`NOT EXISTS (
      AND (a2."start" > a."start" OR (a2."start" = a."start" AND a2."id" > a."id")))`;
 
 /**
- * El paciente de la cita `a`, vivo o archivado (D1): las citas de un paciente
- * eliminado (o fusionado en otro) no cuentan ni se listan.
+ * El paciente de la cita `a`, vivo o archivado (D1): archivar es `deletedAt`
+ * y sus citas siguen contando (lo agendado del pasado no cambia al archivar,
+ * igual que lo producido). Los fusionados no conservan citas.
  */
-const LIVE_PATIENT = Prisma.sql`
+const APPOINTMENT_PATIENT = Prisma.sql`
   JOIN "patients" pt
-    ON pt."tenantId" = a."tenantId" AND pt."id" = a."patientId"
-   AND pt."deletedAt" IS NULL`;
+    ON pt."tenantId" = a."tenantId" AND pt."id" = a."patientId"`;
 
 /** Los vínculos vivos de la cita `a` a ítems vivos de planes vivos. */
 const LINKED_ITEMS = (tenantId: Prisma.Sql) => Prisma.sql`
@@ -231,7 +231,6 @@ export class PrismaScheduledProductionRepository implements ScheduledProductionR
              ${civilDay(Prisma.sql`a."start"`, Prisma.sql`lo."timeZone"`)} AS "day"
         FROM "appointments" a
         JOIN "locations" lo ON lo."tenantId" = a."tenantId" AND lo."id" = a."locationId"
-        ${LIVE_PATIENT}
        WHERE a."tenantId" = ${t}
          AND ${ELIGIBLE('a')}
          AND a."start" >= ${utcTimestamp(window.start)}
@@ -542,13 +541,14 @@ export class PrismaScheduledProductionRepository implements ScheduledProductionR
           SELECT a."id" AS "appointmentId", a."start", a."end", a."status",
                  pt."id" AS "patientId",
                  btrim(pt."firstName" || ' ' || pt."lastName") AS "patientName",
+                 (pt."deletedAt" IS NOT NULL) AS "patientArchived",
                  ty."name" AS "appointmentTypeName",
                  a."providerId" AS "professionalId", u."fullName" AS "professionalName",
                  a."locationId", lo."name" AS "locationName", lo."timeZone",
                  count(*) OVER () AS "total"
             FROM "appointments" a
             JOIN "locations" lo ON lo."tenantId" = a."tenantId" AND lo."id" = a."locationId"
-            ${LIVE_PATIENT}
+            ${APPOINTMENT_PATIENT}
             LEFT JOIN "appointment_types" ty
               ON ty."tenantId" = a."tenantId" AND ty."id" = a."appointmentTypeId"
             LEFT JOIN "users" u ON u."id" = a."providerId"
@@ -590,6 +590,7 @@ export class PrismaScheduledProductionRepository implements ScheduledProductionR
             status: r.status,
             patientId: r.patientId,
             patientName: r.patientName,
+            patientArchived: r.patientArchived,
             appointmentTypeName: r.appointmentTypeName,
             professionalId: r.professionalId,
             professionalName: r.professionalName,

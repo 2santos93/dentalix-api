@@ -368,12 +368,18 @@ export class UnlinkedAppointmentDto {
   @ApiProperty({
     format: 'uuid',
     description:
-      'Paciente vivo o archivado (las citas de un paciente eliminado no cuentan)',
+      'Paciente vivo o archivado (las citas de un archivado también cuentan)',
   })
   patientId!: string;
 
   @ApiProperty({ example: 'María Fernández' })
   patientName!: string;
+
+  @ApiProperty({
+    description:
+      'true = paciente archivado: se nombra, pero no se enlaza a su ficha',
+  })
+  patientArchived!: boolean;
 
   @ApiProperty({ type: String, nullable: true, example: 'Control' })
   appointmentTypeName!: string | null;

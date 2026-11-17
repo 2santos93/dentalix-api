@@ -329,6 +329,7 @@ describe('GET /reports/scheduled-production (DX-567)', () => {
     expect(body.items[0]).toMatchObject({
       status: 'SCHEDULED',
       patientName: 'Paciente Agendado',
+      patientArchived: false,
       professionalId: dentistId,
       locationId: principal,
       locationName: expect.any(String) as unknown,

@@ -58,7 +58,7 @@ export const SCHEDULED_PRODUCTION_DEFINITIONS: Readonly<
     label: 'Agendado',
     howItIsCalculated: [
       'La suma de los procedimientos aceptados o ya realizados de un presupuesto que están ligados a las citas del día: precio − descuento, en la moneda del catálogo de la clínica.',
-      'Cuentan las citas de cualquier estado salvo las canceladas y las inasistencias (también las ya completadas y las que pasaron sin cerrarse). Cancelar una cita o marcar la inasistencia deja de sumar.',
+      'Cuentan las citas de cualquier estado salvo las canceladas y las inasistencias (también las ya completadas, las que pasaron sin cerrarse y las de pacientes archivados). Cancelar una cita o marcar la inasistencia deja de sumar.',
       'El día es el de la hora de inicio de la cita en la zona horaria de su sede; el profesional, el de la cita.',
       'Un procedimiento ligado a varias citas cuenta una sola vez: en la de inicio más reciente (así, uno que se reagendó sin cerrar la cita anterior cuenta en la nueva).',
     ],

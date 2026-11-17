@@ -126,7 +126,7 @@ export class ScheduledProductionController {
   @Get('scheduled-production/unlinked')
   @ApiOperation({
     summary: 'Citas sin tratamiento ligado del período',
-    description: `Mismos filtros y alcance que la producción agendada: las citas que cuentan (ni canceladas ni inasistencias) sin ningún procedimiento de un presupuesto ligado, con paciente, tipo, profesional y sede, por inicio (asc; \`page\`/\`pageSize\`, 25 por defecto, máx. 100). Lleva el nombre del paciente: auditado (VIEW).`,
+    description: `Mismos filtros y alcance que la producción agendada: las citas que cuentan (ni canceladas ni inasistencias) sin ningún procedimiento de un presupuesto ligado, con paciente (\`patientArchived\`: archivado, sin enlace a su ficha), tipo, profesional y sede, por inicio (asc; \`page\`/\`pageSize\`, 25 por defecto, máx. 100). Lleva el nombre del paciente: auditado (VIEW).`,
   })
   @ApiOkResponse({ type: ScheduledProductionUnlinkedDto })
   @ApiBadRequestResponse({ description: BAD_REQUEST })

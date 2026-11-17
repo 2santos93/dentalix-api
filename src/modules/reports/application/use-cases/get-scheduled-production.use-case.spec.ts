@@ -172,10 +172,8 @@ function setup(
       },
     ),
   };
-  const stored = jest.fn<
-    ReturnType<StoredRatesReader['stored']>,
-    Parameters<StoredRatesReader['stored']>
-  >((date) =>
+  type Stored = ReturnType<StoredRatesReader['storedReader']>;
+  const stored = jest.fn<ReturnType<Stored>, Parameters<Stored>>((date) =>
     Promise.resolve(
       RATES[date]
         ? {
@@ -187,14 +185,16 @@ function setup(
         : null,
     ),
   );
+  // Una lectura de los ajustes por petición: un lector por `execute`.
+  const storedReader = jest.fn(() => stored);
   const currency = options.currency === undefined ? 'USD' : options.currency;
   const useCase = new GetScheduledProductionUseCase(
     repo,
     { current: () => Promise.resolve(currency) },
-    { stored },
+    { storedReader },
     () => NOW,
   );
-  return { useCase, repo, scopes, stored };
+  return { useCase, repo, scopes, stored, storedReader };
 }
 
 const actor = (
@@ -213,7 +213,7 @@ const input = (
 
 describe('GetScheduledProductionUseCase (DX-567)', () => {
   it('ADMIN: toda la clínica, convertido con la tasa guardada del día (futuro: la de hoy) y sin tasa fuera', async () => {
-    const { useCase, scopes, stored, repo } = setup();
+    const { useCase, scopes, stored, storedReader, repo } = setup();
     const r = await useCase.execute(input());
     expect(r).toMatchObject({
       period: NOVEMBER,
@@ -267,6 +267,7 @@ describe('GetScheduledProductionUseCase (DX-567)', () => {
       ]),
     );
     expect(stored).toHaveBeenCalledTimes(3);
+    expect(storedReader).toHaveBeenCalledTimes(1);
     expect(repo.forecast.mock.calls).toEqual([[NOW, scopes[0], null]]);
     expect(r.options.professionals.map((p) => p.userId)).toEqual([OTHER, ME]);
   });

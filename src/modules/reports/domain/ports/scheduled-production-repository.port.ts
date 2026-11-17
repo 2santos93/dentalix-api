@@ -73,9 +73,11 @@ export interface UnlinkedAppointmentRow {
   start: Date;
   end: Date;
   status: AppointmentStatus;
-  /** Vivo o archivado: las citas de un paciente eliminado no cuentan. */
+  /** Vivo o archivado: las citas de un archivado también cuentan. */
   patientId: string;
   patientName: string;
+  /** Paciente archivado: la web no enlaza a su ficha. */
+  patientArchived: boolean;
   appointmentTypeName: string | null;
   professionalId: string;
   professionalName: string | null;
