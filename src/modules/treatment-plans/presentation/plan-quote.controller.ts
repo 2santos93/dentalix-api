@@ -56,6 +56,7 @@ import {
   AcceptTreatmentPlanDto,
   PartialAcceptancePreviewDto,
   PartialAcceptancePreviewRequestDto,
+  AcceptedPlanQuoteDocumentDto,
   PlanQuoteDocumentDto,
 } from './dto/plan-quote.dto';
 import { Audit } from '../../audit/presentation/audit.decorator';
@@ -92,18 +93,22 @@ const LOCATION_HEADER = {
  * PLAN_PARTIALLY_ACCEPTED (con vencido manda el `reason` de DX-379 C).
  */
 export function acceptanceAuditMetadata(
-  doc: PlanQuoteDocument,
+  doc: PlanQuoteDocument & { paymentPlanId?: string | null },
 ): Record<string, unknown> | undefined {
   const acceptance = doc.acceptance;
   if (!acceptance) return undefined;
   const params: Record<string, string> = {};
   if (acceptance.repricingId) params.repricingId = acceptance.repricingId;
   if (acceptance.pendingPlanId) params.pendingPlanId = acceptance.pendingPlanId;
+  // DX-041: el plan de cuotas nacido en la firma (tiene su propio CREATE).
+  if (doc.paymentPlanId) params.paymentPlanId = doc.paymentPlanId;
   const reason = acceptance.expiredMode
     ? expiredAcceptanceAuditReason(acceptance.expiredMode)
     : acceptance.pendingPlanId
       ? 'PLAN_PARTIALLY_ACCEPTED'
-      : undefined;
+      : doc.paymentPlanId
+        ? 'PLAN_ACCEPTED_WITH_INSTALLMENTS'
+        : undefined;
   if (!reason) return undefined;
   return {
     reason,
@@ -205,13 +210,13 @@ export class PlanQuoteController {
   @Post('acceptance')
   @Roles(...TREATMENT_PLAN_DECISION_ROLES)
   @ApiCreatedResponse({
-    type: PlanQuoteDocumentDto,
+    type: AcceptedPlanQuoteDocumentDto,
     description:
-      'Plan aceptado: ACCEPTED, sus ítems propuestos pasan a aceptados y quedan congelados; las demás opciones abiertas de su grupo pasan a REJECTED (otra opción aceptada) en la misma transacción. DX-417: con `partial`, el plan queda ACCEPTED solo con los elegidos (lo firmado es su presupuesto) y los demás pasan a un plan nuevo PRESENTED, fuera del grupo de opciones, enlazado (`splitFromPlanId`) y con la misma presentación, validez, moneda y profesional; `acceptance.pendingPlanId`, `pendingItemIds` y `pendingTotal` lo dicen',
+      'DX-041: con `installmentPlan`, el plan de cuotas nace en la misma transacción (`paymentPlanId`). Plan aceptado: ACCEPTED, sus ítems propuestos pasan a aceptados y quedan congelados; las demás opciones abiertas de su grupo pasan a REJECTED (otra opción aceptada) en la misma transacción. DX-417: con `partial`, el plan queda ACCEPTED solo con los elegidos (lo firmado es su presupuesto) y los demás pasan a un plan nuevo PRESENTED, fuera del grupo de opciones, enlazado (`splitFromPlanId`) y con la misma presentación, validez, moneda y profesional; `acceptance.pendingPlanId`, `pendingItemIds` y `pendingTotal` lo dicen',
   })
   @ApiBadRequestResponse({
     description:
-      'Sin firma, firma no PNG o de más de 200 KB, sin nombre de quien firma, o plan sin ítems. DX-379 (C): `expired` con un presupuesto no vencido; ORIGINAL_PRICES sin motivo, OTHER sin nota, nota de más de 200; REPRICE sin `repricePreviewHash` o con motivo. DX-417: `partial` sin elegir ninguno, eligiendo todos («Has elegido todos los procedimientos: acéptalo entero.»), más de 100, o dejando fuera uno ya aceptado o realizado',
+      'Sin firma, firma no PNG o de más de 200 KB, sin nombre de quien firma, o plan sin ítems. DX-379 (C): `expired` con un presupuesto no vencido; ORIGINAL_PRICES sin motivo, OTHER sin nota, nota de más de 200; REPRICE sin `repricePreviewHash` o con motivo. DX-417: `partial` sin elegir ninguno, eligiendo todos («Has elegido todos los procedimientos: acéptalo entero.»), más de 100, o dejando fuera uno ya aceptado o realizado. DX-041: `installmentPlan` con condiciones no válidas (cuotas, periodicidad, fecha, cuota inicial mayor que el saldo) o junto a `partial`',
   })
   @ApiNotFoundResponse({
     description:
@@ -219,7 +224,7 @@ export class PlanQuoteController {
   })
   @ApiConflictResponse({
     description:
-      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash). DX-379 (C): la sede de la presentación del plan sin zona válida → `LOCATION_TIMEZONE_REQUIRED` (también con un presupuesto no vencido si tiene validez guardada); `code: QUOTE_EXPIRED` («El presupuesto venció el {fecha}. Actualiza los precios o acepta con los precios originales indicando el motivo.», con `quoteValidUntil`) si está vencido y no llega `expired`; con REPRICE, `REPRICE_PREVIEW_STALE` (los precios vigentes cambiaron desde la vista previa), `REPRICE_INCOMPLETE` (algún propuesto sin precio vigente o sin tasa), `REPRICE_NOTHING_TO_APPLY` o el plan no se recotiza (abonos, plan de cuotas, saldo a favor); nada se escribe. DX-417 con `partial`: `PARTIAL_PLAN_NOT_PRESENTED` (solo un presupuesto presentado se acepta en parte), `PARTIAL_PLAN_ALREADY_ACCEPTED`, o el plan tiene abonos, plan de cuotas activo o saldo a favor',
+      'Ya estaba aceptado y firmado, el plan está rechazado, cancelado o completado, otra opción de su grupo ya está aceptada, o el presupuesto cambió desde que se mostró (contentHash). DX-379 (C): la sede de la presentación del plan sin zona válida → `LOCATION_TIMEZONE_REQUIRED` (también con un presupuesto no vencido si tiene validez guardada); `code: QUOTE_EXPIRED` («El presupuesto venció el {fecha}. Actualiza los precios o acepta con los precios originales indicando el motivo.», con `quoteValidUntil`) si está vencido y no llega `expired`; con REPRICE, `REPRICE_PREVIEW_STALE` (los precios vigentes cambiaron desde la vista previa), `REPRICE_INCOMPLETE` (algún propuesto sin precio vigente o sin tasa), `REPRICE_NOTHING_TO_APPLY` o el plan no se recotiza (abonos, plan de cuotas, saldo a favor); nada se escribe. DX-417 con `partial`: `PARTIAL_PLAN_NOT_PRESENTED` (solo un presupuesto presentado se acepta en parte), `PARTIAL_PLAN_ALREADY_ACCEPTED`, o el plan tiene abonos, plan de cuotas activo o saldo a favor. DX-041 con `installmentPlan`: `INSTALLMENT_SIMULATION_STALE` (el saldo a financiar ya no es el simulado), el plan ya tiene un plan de cuotas activo, o `PERIOD_LOCKED` (alguna cuota vence en un período contable cerrado); nada se escribe',
   })
   @ApiForbiddenResponse({
     description:
@@ -230,7 +235,7 @@ export class PlanQuoteController {
     @Param('planId', ParseUUIDPipe) planId: string,
     @Body() dto: AcceptTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
-  ): Promise<PlanQuoteDocumentDto> {
+  ): Promise<AcceptedPlanQuoteDocumentDto> {
     const userAgent = req.get('user-agent');
     const actor = actorOf(req);
     const doc = await this.acceptPlan.execute(
@@ -242,6 +247,15 @@ export class PlanQuoteController {
         contentHash: dto.contentHash,
         expired: dto.expired,
         partial: dto.partial ? { itemIds: dto.partial.itemIds } : undefined,
+        installmentPlan: dto.installmentPlan
+          ? {
+              downPayment: dto.installmentPlan.downPayment ?? 0,
+              installmentsCount: dto.installmentPlan.installmentsCount,
+              periodicity: dto.installmentPlan.periodicity,
+              startDate: dto.installmentPlan.startDate,
+              totalToFinance: dto.installmentPlan.totalToFinance,
+            }
+          : undefined,
       },
       {
         acceptedById: actor.userId,
@@ -254,7 +268,7 @@ export class PlanQuoteController {
     );
     const audit = acceptanceAuditMetadata(doc);
     if (audit) req.auditMetadata = audit;
-    return toDto(doc);
+    return { ...toDto(doc), paymentPlanId: doc.paymentPlanId };
   }
 
   // DX-379 (C): la vista previa de «actualizar los precios» al aceptar un

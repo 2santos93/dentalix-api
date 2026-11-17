@@ -1,3 +1,4 @@
+import type { CreatePaymentPlanRepoInput } from '../../../payment-plans/domain/ports/payment-plan-repository.port';
 import type { DocumentRegionalDto } from '../../../../shared/locations/document-regional.dto';
 import type { ClinicFiscalData } from '../../../../shared/clinic/clinic-fiscal';
 import type {
@@ -182,6 +183,17 @@ export interface AcceptPartial {
 }
 
 /**
+ * DX-041: aceptar con un plan de cuotas. Tras aceptar (plan ACCEPTED, ítems
+ * aceptados), en la MISMA transacción, el repositorio relee lo facturable del
+ * plan con la cuenta del saldo y pide aquí el plan de cuotas a crear. Si
+ * lanza (saldo distinto del simulado, condiciones no válidas), nada se
+ * escribe.
+ */
+export interface AcceptInstallments {
+  build(billable: number, source: PlanQuoteSource): CreatePaymentPlanRepoInput;
+}
+
+/**
  * DX-379 (C): recotizar en la MISMA transacción de la firma, antes de firmar
  * (aceptar un presupuesto vencido «actualizando los precios»).
  */
@@ -205,7 +217,12 @@ export interface AcceptRepriced {
 export type AcceptPlanOutcome =
   | { kind: 'NOT_FOUND' }
   | { kind: 'ALREADY_ACCEPTED' }
-  | { kind: 'ACCEPTED'; source: PlanQuoteSource };
+  | {
+      kind: 'ACCEPTED';
+      source: PlanQuoteSource;
+      /** DX-041: el plan de cuotas creado en la aceptación; null sin él. */
+      paymentPlanId: string | null;
+    };
 
 /** DX-417: el presupuesto y lo que la partición necesita saber del plan. */
 export interface PartialAcceptanceRead {
@@ -256,6 +273,7 @@ export interface PlanQuoteRepository {
     ) => NewPlanAcceptance,
     reprice?: AcceptReprice,
     partial?: AcceptPartial,
+    installments?: AcceptInstallments,
   ): Promise<AcceptPlanOutcome>;
 
   /**

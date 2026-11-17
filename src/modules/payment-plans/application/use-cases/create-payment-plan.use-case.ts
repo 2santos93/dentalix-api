@@ -16,24 +16,17 @@ import {
 } from '../../../treatment-plans/domain/plan-status-machine';
 import { GetTreatmentPlanUseCase } from '../../../treatment-plans/application/use-cases/get-treatment-plan.use-case';
 import { GetPlanBalanceUseCase } from '../../../payments/application/use-cases/get-plan-balance.use-case';
-import { generateSchedule, Periodicity } from '../schedule/generate-schedule';
-import { round2 } from '../../../../shared/money/money';
+import type { Periodicity } from '../schedule/generate-schedule';
 import {
-  DOWN_PAYMENT_EXCEEDS_MESSAGE,
-  DOWN_PAYMENT_MESSAGE,
-  TOTAL_TO_FINANCE_MESSAGE,
-  TOTAL_TO_FINANCE_POSITIVE_MESSAGE,
-} from '../../../../shared/money/currency-messages';
+  parseInstallmentTerms,
+  planInstallmentSchedule,
+} from '../schedule/installment-schedule';
+import { round2 } from '../../../../shared/money/money';
+import { TOTAL_TO_FINANCE_MESSAGE } from '../../../../shared/money/currency-messages';
 import {
   CURRENCY_DIGITS_CATALOG,
   type CurrencyDigitsCatalog,
 } from '../../../../shared/money/currency-digits';
-
-const PERIODICITIES: ReadonlySet<Periodicity> = new Set([
-  'WEEKLY',
-  'BIWEEKLY',
-  'MONTHLY',
-]);
 
 export interface CreatePaymentPlanInput {
   downPayment: number;
@@ -52,6 +45,9 @@ export interface CreatePaymentPlanInput {
  */
 export const PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE = (code: string): string =>
   `La moneda ${code} del plan no está en el catálogo de monedas: no se pueden repartir las cuotas.`;
+
+export const ACTIVE_PAYMENT_PLAN_MESSAGE =
+  'Este plan de tratamiento ya tiene un plan de cuotas activo.';
 
 function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
@@ -78,30 +74,8 @@ export class CreatePaymentPlanUseCase {
     input: CreatePaymentPlanInput,
     createdById?: string,
   ): Promise<PaymentPlanWithInstallments> {
-    if (
-      !Number.isInteger(input.installmentsCount) ||
-      input.installmentsCount < 1 ||
-      input.installmentsCount > 600
-    ) {
-      throw new BadRequestException(
-        'El número de cuotas debe estar entre 1 y 600.',
-      );
-    }
-    if (!isFiniteNonNegative(input.downPayment)) {
-      throw new BadRequestException(DOWN_PAYMENT_MESSAGE);
-    }
-    if (!PERIODICITIES.has(input.periodicity)) {
-      throw new BadRequestException(
-        'La periodicidad debe ser semanal (WEEKLY), quincenal (BIWEEKLY) o mensual (MONTHLY).',
-      );
-    }
-    const startDate =
-      input.startDate instanceof Date
-        ? input.startDate
-        : new Date(input.startDate);
-    if (Number.isNaN(startDate.getTime())) {
-      throw new BadRequestException('La fecha de inicio no es válida.');
-    }
+    // DX-041: la validación y el reparto son los de la simulación.
+    const terms = parseInstallmentTerms(input);
     if (
       input.totalToFinance !== undefined &&
       !isFiniteNonNegative(input.totalToFinance)
@@ -119,9 +93,7 @@ export class CreatePaymentPlanUseCase {
 
     const existing = await this.repo.findActiveByPlan(treatmentPlanId);
     if (existing) {
-      throw new ConflictException(
-        'Este plan de tratamiento ya tiene un plan de cuotas activo.',
-      );
+      throw new ConflictException(ACTIVE_PAYMENT_PLAN_MESSAGE);
     }
 
     let totalToFinance: number;
@@ -136,42 +108,31 @@ export class CreatePaymentPlanUseCase {
       totalToFinance = round2(balance.billable);
     }
 
-    if (totalToFinance <= 0) {
-      throw new BadRequestException(TOTAL_TO_FINANCE_POSITIVE_MESSAGE);
-    }
-    const downPayment = round2(input.downPayment);
-    if (downPayment > totalToFinance) {
-      throw new BadRequestException(DOWN_PAYMENT_EXCEEDS_MESSAGE);
-    }
-
     const digits = await this.currencyDigits.table([plan.currency]);
     if (!digits.has(plan.currency)) {
       throw new UnprocessableEntityException(
         PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE(plan.currency),
       );
     }
-    const installments = generateSchedule({
+    const schedule = planInstallmentSchedule(
+      terms,
       totalToFinance,
-      downPayment,
-      installmentsCount: input.installmentsCount,
-      periodicity: input.periodicity,
-      startDate,
-      roundingDigits: digits.roundingDigits(plan.currency),
-    });
+      digits.roundingDigits(plan.currency),
+    );
 
     try {
       return await this.repo.create({
         treatmentPlanId,
         patientId: plan.patientId,
         currency: plan.currency,
-        totalToFinance,
-        downPayment,
-        installmentsCount: input.installmentsCount,
-        periodicity: input.periodicity,
-        startDate,
+        totalToFinance: schedule.totalToFinance,
+        downPayment: schedule.downPayment,
+        installmentsCount: schedule.installmentsCount,
+        periodicity: schedule.periodicity,
+        startDate: schedule.startDate,
         notes: input.notes,
         createdById,
-        installments,
+        installments: schedule.installments,
         lockActor: input.lockActor ?? null,
       });
     } catch (error) {
@@ -184,9 +145,7 @@ export class CreatePaymentPlanUseCase {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        throw new ConflictException(
-          'Este plan de tratamiento ya tiene un plan de cuotas activo.',
-        );
+        throw new ConflictException(ACTIVE_PAYMENT_PLAN_MESSAGE);
       }
       throw error;
     }

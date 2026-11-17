@@ -2,7 +2,10 @@ import { EMPTY_CLINIC_FISCAL } from '../../../../../shared/clinic/clinic-fiscal'
 import { TreatmentPlanItemStatus, TreatmentPlanStatus } from '@prisma/client';
 import type { QuoteValidity } from '../../../domain/quote-validity';
 import { NO_EXPIRED_ACCEPTANCE } from '../../../domain/expired-quote-acceptance';
+import type { CreatePaymentPlanRepoInput } from '../../../../payment-plans/domain/ports/payment-plan-repository.port';
+import { linesTotal } from '../../../../../shared/money/line-rounding';
 import type {
+  AcceptInstallments,
   AcceptPartial,
   AcceptPlanOutcome,
   AcceptReprice,
@@ -109,6 +112,8 @@ export function quoteSource(
 export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
   readonly sources = new Map<string, PlanQuoteSource>();
   readonly inserted: NewPlanAcceptance[] = [];
+  /** DX-041: los planes de cuotas creados en la aceptación. */
+  readonly paymentPlans: (CreatePaymentPlanRepoInput & { id: string })[] = [];
   acceptedByName = 'Dra. Gómez';
 
   add(source: PlanQuoteSource): void {
@@ -215,6 +220,7 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
     ) => NewPlanAcceptance,
     reprice?: AcceptReprice,
     partial?: AcceptPartial,
+    installments?: AcceptInstallments,
   ): Promise<AcceptPlanOutcome> {
     const found = this.find(patientId, planId);
     if (!found) return Promise.resolve({ kind: 'NOT_FOUND' });
@@ -225,6 +231,7 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
     let row: NewPlanAcceptance;
     let split: PartialSplit | null = null;
     let pending: PlanQuoteSource | null = null;
+    let paymentPlan: CreatePaymentPlanRepoInput | null = null;
     try {
       if (reprice) {
         if (!this.subjectFor) throw new Error('subjectFor sin configurar');
@@ -257,6 +264,11 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
         if (partial.contentHashOf(source) !== row.contentHash) {
           throw new Error('el presupuesto releído no es el que se firma');
         }
+      }
+      // DX-041: como el de Prisma, con el plan ya aceptado: todos sus ítems
+      // vivos son facturables.
+      if (installments) {
+        paymentPlan = installments.build(linesTotal(source.items), source);
       }
     } catch (error) {
       return Promise.reject(
@@ -297,7 +309,16 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
       },
     };
     this.sources.set(planId, accepted);
-    return Promise.resolve({ kind: 'ACCEPTED', source: accepted });
+    let paymentPlanId: string | null = null;
+    if (paymentPlan) {
+      paymentPlanId = `payment-plan-${this.paymentPlans.length + 1}`;
+      this.paymentPlans.push({ id: paymentPlanId, ...paymentPlan });
+    }
+    return Promise.resolve({
+      kind: 'ACCEPTED',
+      source: accepted,
+      paymentPlanId,
+    });
   }
 
   /** Como el de Prisma: recotiza, relee y no deja nada escrito. */

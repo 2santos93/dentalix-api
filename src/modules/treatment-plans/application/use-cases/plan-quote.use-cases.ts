@@ -7,6 +7,7 @@ import {
   Injectable,
   NotFoundException,
   Optional,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   ClinicRole,
@@ -57,6 +58,7 @@ import {
 } from '../../domain/quote-validity';
 import {
   PLAN_QUOTE_REPOSITORY,
+  type AcceptInstallments,
   type AcceptPartial,
   type AcceptReprice,
   type NewPlanAcceptance,
@@ -75,6 +77,18 @@ import {
 } from '../../../patients/domain/document-type';
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
+import {
+  parseInstallmentTerms,
+  planInstallmentSchedule,
+  type InstallmentTerms,
+  type InstallmentTermsInput,
+} from '../../../payment-plans/application/schedule/installment-schedule';
+import { PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE } from '../../../payment-plans/application/use-cases/create-payment-plan.use-case';
+import {
+  CURRENCY_DIGITS_CATALOG,
+  type CurrencyDigitsCatalog,
+} from '../../../../shared/money/currency-digits';
+import { toCents } from '../../../../shared/money/money';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 export type PlanQuoteClock = () => Date;
@@ -127,6 +141,13 @@ export interface PlanQuoteAcceptanceView {
   pendingTotal: number | null;
 }
 
+/** DX-041: códigos y textos de la aceptación con cuotas. */
+export const INSTALLMENT_SIMULATION_STALE = 'INSTALLMENT_SIMULATION_STALE';
+export const INSTALLMENT_SIMULATION_STALE_MESSAGE =
+  'El saldo a financiar cambió desde la simulación: vuelve a simular las cuotas con el paciente antes de firmar.';
+export const INSTALLMENTS_WITH_PARTIAL_MESSAGE =
+  'Las cuotas se eligen al aceptar el presupuesto entero: acepta esta parte y crea el plan de cuotas después.';
+
 /** El presupuesto para verlo o imprimirlo. */
 export interface PlanQuoteDocument extends QuoteContent {
   visitOrganization?: PlanQuoteSource['visitOrganization'];
@@ -136,6 +157,12 @@ export interface PlanQuoteDocument extends QuoteContent {
   regional: DocumentRegionalDto | null;
   contentHash: string;
   acceptance: PlanQuoteAcceptanceView | null;
+}
+
+/** DX-041: lo que devuelve aceptar: el presupuesto firmado y su plan de cuotas. */
+export interface AcceptedPlanQuote extends PlanQuoteDocument {
+  /** El plan de cuotas creado en la aceptación; null si se aceptó sin él. */
+  paymentPlanId: string | null;
 }
 
 export interface AcceptTreatmentPlanInput {
@@ -155,6 +182,13 @@ export interface AcceptTreatmentPlanInput {
    * previa de la aceptación parcial).
    */
   partial?: { itemIds: string[] };
+  /**
+   * DX-041: aceptar con el plan de cuotas de un escenario simulado (POST
+   * /treatment-plans/:id/installment-simulation). `totalToFinance` es el
+   * saldo que mostró la simulación: si al aceptar es otro, 409
+   * `INSTALLMENT_SIMULATION_STALE` y no se acepta.
+   */
+  installmentPlan?: InstallmentTermsInput & { totalToFinance: number };
 }
 
 /** Lo que pone el servidor, nunca el cliente. */
@@ -575,6 +609,10 @@ export class AcceptTreatmentPlanUseCase {
     private readonly repricer?: AcceptanceRepricer,
     @Optional()
     private readonly audit?: RecordAuditEventUseCase,
+    // DX-041: las cuotas se reparten en unidades de la moneda del plan.
+    @Optional()
+    @Inject(CURRENCY_DIGITS_CATALOG)
+    private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
   /**
@@ -599,7 +637,7 @@ export class AcceptTreatmentPlanUseCase {
     planId: string,
     input: AcceptTreatmentPlanInput,
     meta: AcceptTreatmentPlanMeta,
-  ): Promise<PlanQuoteDocument> {
+  ): Promise<AcceptedPlanQuote> {
     // Las validaciones baratas, antes de tocar la base. La firma va aquí y
     // no tras comprobar el plan (como en los consentimientos, SEC-026): esa
     // comprobación ocurre dentro de la transacción de `accept`, con la fila
@@ -617,6 +655,13 @@ export class AcceptTreatmentPlanUseCase {
       );
     }
     const choice = parseExpiredChoice(input.expired);
+    // DX-041: el escenario de cuotas, validado como el alta (400 aquí).
+    if (input.installmentPlan && input.partial) {
+      throw new BadRequestException(INSTALLMENTS_WITH_PARTIAL_MESSAGE);
+    }
+    const installments = input.installmentPlan
+      ? await this.installmentsStep(input.installmentPlan, meta)
+      : undefined;
     const acceptedAt = this.now();
     // Fuera de la transacción del plan (spec §4.6): si el ADMIN cambia un
     // nombre entre el GET y la firma, el hash vivo cambia → 409 (R18).
@@ -718,6 +763,7 @@ export class AcceptTreatmentPlanUseCase {
       },
       reprice,
       partial,
+      installments,
     );
     if (outcome.kind === 'NOT_FOUND') {
       throw new NotFoundException(PLAN_NOT_FOUND_MESSAGE);
@@ -731,12 +777,109 @@ export class AcceptTreatmentPlanUseCase {
       outcome.source.acceptance?.partial?.pendingPlanId ?? null,
       meta.audit,
     );
-    return toDocument(
-      outcome.source,
-      acceptedAt,
-      book.forLocation(outcome.source.location.id),
-      this.composition,
+    await this.recordPaymentPlanCreated(
+      patientId,
+      planId,
+      outcome.paymentPlanId,
+      meta.audit,
     );
+    return {
+      ...toDocument(
+        outcome.source,
+        acceptedAt,
+        book.forLocation(outcome.source.location.id),
+        this.composition,
+      ),
+      paymentPlanId: outcome.paymentPlanId,
+    };
+  }
+
+  /**
+   * DX-041: el plan de cuotas que crea la aceptación. Las condiciones se
+   * validan antes de la transacción; dentro, con el plan ya aceptado, se
+   * reparte sobre lo facturable releído con la MISMA función que el alta
+   * (`planInstallmentSchedule`) y, si ese saldo no es el simulado, 409.
+   */
+  private async installmentsStep(
+    plan: NonNullable<AcceptTreatmentPlanInput['installmentPlan']>,
+    meta: AcceptTreatmentPlanMeta,
+  ): Promise<AcceptInstallments> {
+    const terms: InstallmentTerms = parseInstallmentTerms(plan);
+    const expectedCents = toCents(plan.totalToFinance);
+    if (!this.currencyDigits) {
+      throw new Error('El catálogo de monedas no está configurado');
+    }
+    // Todas las monedas del catálogo (pocas filas): la del plan se sabe
+    // dentro de la transacción.
+    const digits = await this.currencyDigits.table();
+    return {
+      build: (billable, source) => {
+        if (toCents(billable) !== expectedCents) {
+          throw new ConflictException({
+            statusCode: 409,
+            error: 'Conflict',
+            code: INSTALLMENT_SIMULATION_STALE,
+            message: INSTALLMENT_SIMULATION_STALE_MESSAGE,
+          });
+        }
+        const currency = source.plan.currency;
+        if (!digits.has(currency)) {
+          throw new UnprocessableEntityException(
+            PLAN_CURRENCY_NOT_IN_CATALOG_MESSAGE(currency),
+          );
+        }
+        const schedule = planInstallmentSchedule(
+          terms,
+          billable,
+          digits.roundingDigits(currency),
+        );
+        return {
+          treatmentPlanId: source.plan.id,
+          patientId: source.plan.patientId,
+          currency,
+          totalToFinance: schedule.totalToFinance,
+          downPayment: schedule.downPayment,
+          installmentsCount: schedule.installmentsCount,
+          periodicity: schedule.periodicity,
+          startDate: schedule.startDate,
+          createdById: meta.acceptedById,
+          installments: schedule.installments,
+          // Sin excepción del cierre contable en la firma: PERIOD_LOCKED.
+          lockActor: null,
+        };
+      },
+    };
+  }
+
+  /**
+   * DX-041: el plan de cuotas nacido en la aceptación tiene su propio evento
+   * de alta (CREATE PAYMENT_PLAN, `reason` PLAN_ACCEPTED_WITH_INSTALLMENTS,
+   * `params.treatmentPlanId`), como el de POST …/payment-plan. El SIGN del
+   * plan lo escribe el @Audit de la ruta con `params.paymentPlanId`.
+   */
+  private async recordPaymentPlanCreated(
+    patientId: string,
+    planId: string,
+    paymentPlanId: string | null,
+    ctx: AuditRequestContext | undefined,
+  ): Promise<void> {
+    if (!paymentPlanId || !ctx || !this.audit) return;
+    await this.audit.record({
+      tenantId: ctx.tenantId,
+      locationId: ctx.locationId,
+      actor: { kind: 'user', userId: ctx.actor.userId, role: ctx.actor.role },
+      action: 'CREATE',
+      resourceType: 'PAYMENT_PLAN',
+      resourceId: paymentPlanId,
+      patient: { kind: 'patient', id: patientId },
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      metadata: {
+        reason: 'PLAN_ACCEPTED_WITH_INSTALLMENTS',
+        params: { treatmentPlanId: planId },
+      },
+    });
   }
 
   /**
