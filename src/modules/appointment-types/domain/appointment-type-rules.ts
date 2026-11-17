@@ -3,6 +3,7 @@ import {
   LANGUAGE_TAG_MESSAGE,
 } from '../../../shared/i18n/patient-language';
 import { localizedTextEntries } from '../../../shared/i18n/localized-text';
+import { LINK_TLDS } from './link-tlds';
 
 /**
  * Reglas de un tipo de cita (DX-121). Puras: las comparten el caso de uso (400
@@ -88,13 +89,24 @@ const LINK_OR_HTML = /https?:\/\/|www\.|<\s*\/?\s*[a-z!][^<>]*>/i;
 
 /**
  * Un dominio que WhatsApp, Gmail o iOS convertirían en enlace aunque no lleve
- * `http`: una etiqueta de 2 o más caracteres que acaba en letra, un punto SIN
- * espacio y un TLD de 2 o más letras minúsculas, seguido de fin, espacio, `/`
- * o puntuación («ejemplo.com/login», «bit.ly», «ejemplo.com.ve»). No marca
- * «6h.Trae» ni «Dr.Pérez» (mayúscula tras el punto), «10.30 h» (cifras),
- * «a.m.» ni «p.ej.» (etiqueta de una letra).
+ * `http`: letra o cifra, un punto SIN espacio y una palabra de 2 o más letras
+ * seguida de fin, espacio, `/`, `:`, `#` o puntuación. Solo cuenta si esa
+ * palabra es un TLD de la lista cerrada (`LINK_TLDS`), sin distinguir
+ * mayúsculas: marca «ejemplo.com/login», «EJEMPLO.COM», «x.com», «bit.ly»,
+ * «tienda.com.ve»; no marca «6h.Trae», «Dr.Pérez», «Sr.García», «p.ej.»,
+ * «a.m.» (una letra), «10.30 h» ni «1.5 ml» (cifras). Ver `link-tlds.ts`.
  */
-const BARE_DOMAIN = /[\p{L}\p{N}-]+\p{L}\.[a-z]{2,}(?=$|[\s/.,;:!?)\]}"'»…])/u;
+const DOT_WORD = /(?<=[\p{L}\p{N}])\.(\p{L}{2,})(?=$|[\s/:#?.,;!)\]}"'»…])/gu;
+
+function hasBareDomain(text: string): boolean {
+  for (const match of text.matchAll(DOT_WORD)) {
+    if (LINK_TLDS.has(match[1].toLowerCase())) return true;
+  }
+  return false;
+}
+
+/** Una IPv4 («192.168.0.1/login»): también se convierte en enlace. */
+const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/;
 
 /** Una dirección de email («x@ejemplo.com»): también se convierte en enlace. */
 const EMAIL_ADDRESS = /\S+@\S+\.\S+/;
@@ -174,7 +186,8 @@ export function preVisitInstructionsFromEntries(
     }
     if (
       LINK_OR_HTML.test(text) ||
-      BARE_DOMAIN.test(text) ||
+      hasBareDomain(text) ||
+      IPV4.test(text) ||
       EMAIL_ADDRESS.test(text)
     ) {
       return { error: PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE };

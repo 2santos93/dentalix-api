@@ -686,6 +686,18 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
         'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
       ],
       [
+        [{ language: 'es', text: 'Entra en EJEMPLO.COM' }],
+        'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
+      ],
+      [
+        [{ language: 'es', text: 'Síguenos en x.com' }],
+        'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
+      ],
+      [
+        [{ language: 'es', text: 'Abre 192.168.0.1/login' }],
+        'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
+      ],
+      [
         [{ language: 'es', text: 'Escribe a x@evil.com' }],
         'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.',
       ],
@@ -754,6 +766,18 @@ describe('Tipos de cita y agenda en columnas (e2e, DX-121)', () => {
         clinic.adminToken,
       ).expect(404);
       await as(api().get(`${types}/no-uuid`), clinic.adminToken).expect(400);
+    });
+
+    it('texto corriente con puntos pegados no cuenta como enlace (200)', async () => {
+      const type = await createType({ name: 'Falsos positivos DX-564' });
+      const text =
+        'Ven en ayunas de 6h.Trae tu cédula; te atiende el Dr.Pérez o el Sr.García. Toma 1.5 ml a las 10.30 h (a.m.), p.ej. con agua.';
+      const body = (
+        await as(api().patch(`${types}/${type.id}`), clinic.adminToken)
+          .send({ preVisitInstructions: [{ language: 'es', text }] })
+          .expect(200)
+      ).body as InstructionsBody;
+      expect(body.preVisitInstructions).toEqual([{ language: 'es', text }]);
     });
 
     it('auditoría: el cambio dice qué idiomas cambiaron, nunca el texto', async () => {

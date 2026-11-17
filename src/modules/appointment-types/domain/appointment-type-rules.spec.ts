@@ -238,6 +238,14 @@ describe('indicaciones previas: enlaces sin http, formato invisible y líneas en
     'Más en ejemplo.com.ve, gracias',
     'Escribe a recepcion@ejemplo.com',
     'Correo: x@evil.com.',
+    // Sin distinguir mayúsculas, etiqueta de una letra e IPv4.
+    'Entra en EJEMPLO.COM',
+    'Entra en Ejemplo.Com/login',
+    'Síguenos en x.com',
+    'Abre 192.168.0.1/login',
+    'Abre 10.0.0.1',
+    'Tienda: tienda.com.VE.',
+    'Puerto: ejemplo.io:8080',
   ])('rechaza dominios y emails sin http: %j', (text) => {
     expect(check(text)).toEqual({ error: NO_LINKS });
   });
@@ -248,6 +256,10 @@ describe('indicaciones previas: enlaces sin http, formato invisible y líneas en
     'Llega a las 10.30 h.',
     'Ven a las 9 a.m. en punto.',
     'Trae, p.ej. tus radiografías.',
+    'Te atiende el Sr.García.',
+    'Toma 1.5 ml del jarabe.',
+    'Llega a las 10.30 h y trae 2.5 cm de gasa.',
+    'Ven a las 9 p.m.',
     'Si la presión es < 140 avísanos.',
   ])('no marca texto corriente: %j', (text) => {
     expect(check(text)).toEqual({ map: { es: text } });
@@ -279,5 +291,23 @@ describe('indicaciones previas: enlaces sin http, formato invisible y líneas en
       'A\n\nB\n\nC',
     );
     expect(check(`A${'\n'.repeat(600)}B`)).toEqual({ map: { es: 'A\n\nB' } });
+  });
+});
+
+describe('falso positivo aceptado del filtro de enlaces (DX-564)', () => {
+  it('«ayunas.No coma» se marca (.no es TLD); con un espacio pasa', () => {
+    const ctx = { patientLanguages: ['es'], current: {} };
+    expect(
+      preVisitInstructionsFromEntries(
+        [{ language: 'es', text: 'Ven en ayunas.No comas nada.' }],
+        ctx,
+      ),
+    ).toHaveProperty('error');
+    expect(
+      preVisitInstructionsFromEntries(
+        [{ language: 'es', text: 'Ven en ayunas. No comas nada.' }],
+        ctx,
+      ),
+    ).toHaveProperty('map');
   });
 });
