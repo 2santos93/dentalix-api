@@ -106,15 +106,25 @@ jobs:
   # DX-251 (TST-028): integración y e2e en jobs SEPARADOS, cada uno con su
   # Postgres y su S3: un rojo en `test:int` ya no impide ver la e2e, y los dos
   # informan su resultado en cada run.
+  # DX-396-ter (2026-11-17): `test:int` en serie llegó a 26 min (28,5 con la
+  # preparación) y se cancelaba en el tope de 30 sin fallo. Va repartida con
+  # `jest --shard` en una matriz, igual que la e2e (DX-396): cada shard tiene
+  # su Postgres, su MinIO y su `db:test:setup`. Medido en main (0405e725), los
+  # 239 specs suman ~26 min; el reparto por hash de ruta deja el shard más
+  # cargado en ~9 min de tests + ~2,5 de preparación → tope 20 con más del
+  # 40 % de margen. Si un shard se acerca al tope (aviso al 70 %), se sube
+  # `total` y se añade el número a `shard` en vez de subir el tope.
+  # `integration-shards` comprueba que cada spec corre en exactamente un shard.
   integration:
-    name: Integración (Postgres 16)
+    name: Integración ${{ matrix.shard }}/${{ matrix.total }} (Postgres 16)
     runs-on: ubuntu-24.04
-    # 30 (antes 20): `test:int` va en serie (--runInBand) y en main ya tardaba
-    # 16–18 min; con la preparación del job (~2 min) varias runs de main se
-    # cancelaban por el tope sin ningún fallo (2 de 6 el 2026-11-11). DX-015-bis
-    # suma la int de carga de recall (60.000 pacientes, ~2 min). Repartirla en
-    # shards como la e2e (DX-396) es la solución de fondo.
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+        timeout: [20]
     services:
       postgres:
         image: postgres:16
@@ -161,6 +171,10 @@ jobs:
       # saltarse. `dentalix` es el superusuario del servicio postgres:16.
       REQUIRE_BACKUP_TESTS: '1'
     steps:
+      # Epoch del arranque: lo lee el paso final que publica la duración.
+      - name: Marcar el inicio del job
+        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
@@ -170,6 +184,23 @@ jobs:
 
       - run: npm ci
       - run: npx prisma generate
+
+      # La lista de specs de ESTE shard (rutas relativas, una por línea), para
+      # que `integration-shards` compruebe la unión. Se sube aunque fallen los
+      # tests.
+      - name: Specs del shard
+        run: |
+          npx jest --config ./test/jest-int.json --listTests \
+            --shard=${{ matrix.shard }}/${{ matrix.total }} \
+            | sed "s|^$GITHUB_WORKSPACE/||" | sort > int-shard-${{ matrix.shard }}.txt
+          echo "Shard ${{ matrix.shard }}/${{ matrix.total }}: $(wc -l < int-shard-${{ matrix.shard }}.txt) specs"
+          cat int-shard-${{ matrix.shard }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: int-shard-${{ matrix.shard }}
+          path: int-shard-${{ matrix.shard }}.txt
+          if-no-files-found: error
+          retention-days: 7
 
       # DX-082: age cifra las copias; no viene en el runner (pg_dump y
       # pg_restore 16 sí).
@@ -213,16 +244,52 @@ jobs:
         if: ${{ !cancelled() && (success() || steps.s3.outcome == 'failure') }}
         run: npm run db:test:setup
       # DX-134: la comprobación del runbook tras desplegar (README).
+      # DX-396-ter: este paso y el de drift miran la base recién migrada, que
+      # es idéntica en todos los shards; corren solo en el 1 para que un rojo
+      # salga una vez y no repetido en cada shard.
       - name: Comprobar FORCE tras migrar (db:check-force)
-        if: ${{ !cancelled() && steps.db.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.db.outcome == 'success' && matrix.shard == 1 }}
         run: npm run db:check-force
       - name: Sin drift entre schema.prisma y las migraciones (DX-081)
         # La diferencia esperada (objetos solo-SQL) está en prisma/drift-baseline.sql.
-        if: ${{ !cancelled() && steps.db.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.db.outcome == 'success' && matrix.shard == 1 }}
         run: scripts/prisma-drift.sh check
-      - name: test:int
+      - name: test:int (shard ${{ matrix.shard }}/${{ matrix.total }})
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
-        run: npm run test:int
+        run: npm run test:int -- --shard=${{ matrix.shard }}/${{ matrix.total }}
+
+      - name: Duración del shard
+        if: ${{ always() }}
+        run: .github/scripts/report-job-duration.sh "Integración ${{ matrix.shard }}/${{ matrix.total }}" ${{ matrix.timeout }}
+
+  # DX-396-ter: como `e2e-shards`, cada int-spec corre en exactamente un shard.
+  integration-shards:
+    name: Integración, reparto de specs entre shards
+    needs: integration
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: int-shard-*
+          path: int-shards
+          merge-multiple: true
+      - name: Cada int-spec en exactamente un shard
+        env:
+          SHARD_SUITE: integración
+        run: |
+          npx jest --config ./test/jest-int.json --listTests \
+            | sed "s|^$GITHUB_WORKSPACE/||" | sort > int-all.txt
+          .github/scripts/check-e2e-shards.sh int-all.txt int-shards/int-shard-*.txt
 
   # DX-396 (TST-044): la e2e en serie pasaba de 18 min y GitHub la cancelaba a
   # los 20, y «cancelled» escondía rojos. Ahora va repartida con `jest --shard`

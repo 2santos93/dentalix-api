@@ -3,7 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// DX-396 (TST-044): los dos scripts de la e2e repartida en shards de la CI.
+// DX-396 (TST-044): los dos scripts de la e2e repartida en shards de la CI
+// (desde DX-396-ter, también la integración).
 // - check-e2e-shards.sh: cada spec en exactamente un shard.
 // - report-job-duration.sh: publica la duración y avisa al pasar del 70 %.
 
@@ -76,6 +77,31 @@ describe('check-e2e-shards.sh (DX-396)', () => {
     expect(r.out).toContain('no tiene specs');
     expect(r.out).toMatch(
       /no están en la lista completa:\ntest\/z\.e2e-spec\.ts/,
+    );
+  });
+
+  it('nombra la suite con SHARD_SUITE (integración, DX-396-ter)', () => {
+    const ints = ['test/a.int-spec.ts', 'test/b.int-spec.ts'];
+    const ok = run(
+      'check-e2e-shards.sh',
+      [
+        list('all.txt', ints),
+        list('s1.txt', ['test/a.int-spec.ts']),
+        list('s2.txt', ['test/b.int-spec.ts']),
+      ],
+      { SHARD_SUITE: 'integración' },
+    );
+    expect(ok.status).toBe(0);
+    expect(ok.out).toMatch(/Reparto de la integración correcto: +2 specs/);
+
+    const bad = run(
+      'check-e2e-shards.sh',
+      [list('all.txt', ints), list('s1.txt', ['test/a.int-spec.ts'])],
+      { SHARD_SUITE: 'integración' },
+    );
+    expect(bad.status).toBe(1);
+    expect(bad.out).toContain(
+      '::error title=Reparto de la integración::Specs que no corre ningún shard:',
     );
   });
 });
