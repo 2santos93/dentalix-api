@@ -81,6 +81,21 @@ async function purge(): Promise<void> {
   );
 }
 
+/**
+ * DX-220-bis: la hora de la BD en ms. La cola compara `runAt` con el `now()`
+ * de Postgres (claim, failExhausted, backoff, stats), así que los instantes
+ * que el spec escribe o compara salen de aquí y no de `Date.now()`: con el
+ * reloj de Node desfasado del de la BD (reproducido con E2E_FAKE_NOW ±2 min:
+ * 6 y 2 tests en rojo), una fila «vencida hace 60 s» con la hora de Node
+ * podía no estar vencida para la BD, y claim() devolvía una fila de menos
+ * (Integración 2/4 del PR #206, run 44201320943).
+ */
+async function dbNow(): Promise<number> {
+  const [{ now }] = await owner.$queryRaw<{ now: Date }[]>`
+    SELECT timezone('utc', now()) AS "now"`;
+  return now.getTime();
+}
+
 const jobsNamed = (name: string) =>
   owner.job.findMany({ where: { name }, orderBy: { createdAt: 'asc' } });
 
@@ -420,11 +435,11 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       await started.promise;
 
       // La reserva «vence» (como si el handler llevara más de lo pactado).
-      const expired = new Date(Date.now() - 1000);
+      const expired = new Date((await dbNow()) - 1000);
       await owner.job.update({ where: { id }, data: { runAt: expired } });
       await waitFor(async () => {
         const row = await owner.job.findUniqueOrThrow({ where: { id } });
-        return row.runAt.getTime() > Date.now();
+        return row.runAt.getTime() > (await dbNow());
       }, 'el latido renueva la reserva');
 
       await b.worker.runOnce();
@@ -499,13 +514,15 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
         where: { name: schedule },
       });
       expect(synced.cron).toBe('* * * * *');
-      expect(synced.nextRunAt.getTime()).toBeGreaterThan(Date.now() - 1000);
+      expect(synced.nextRunAt.getTime()).toBeGreaterThan(
+        (await dbNow()) - 1000,
+      );
       expect(synced.nextRunAt.getUTCSeconds()).toBe(0);
       expect(runs).toBe(0);
 
       // Llega el tick (se adelanta el reloj de la tarea, no se duerme).
       for (const tick of [1, 2]) {
-        const due = new Date(Date.now() - tick * 60_000);
+        const due = new Date((await dbNow()) - tick * 60_000);
         due.setUTCSeconds(0, 0);
         await owner.jobSchedule.update({
           where: { name: schedule },
@@ -524,7 +541,9 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
           where: { name: schedule },
         });
         expect(after.lastRunAt).toEqual(due);
-        expect(after.nextRunAt.getTime()).toBeGreaterThan(Date.now() - 1000);
+        expect(after.nextRunAt.getTime()).toBeGreaterThan(
+          (await dbNow()) - 1000,
+        );
         const jobs = await jobsNamed(job);
         expect(jobs).toHaveLength(tick);
         expect(jobs[tick - 1].idempotencyKey).toBe(
@@ -547,7 +566,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       a.registry.schedule({ name: schedule, cron: '* * * * *', job });
       await a.worker.runOnce();
       // La réplica nueva ya sincronizó otro cron.
-      const due = new Date(Date.now() - 60_000);
+      const due = new Date((await dbNow()) - 60_000);
       due.setUTCSeconds(0, 0);
       await owner.jobSchedule.update({
         where: { name: schedule },
@@ -611,7 +630,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
         [1, 60_000],
         [2, 120_000],
       ] as const) {
-        const before = Date.now();
+        const before = await dbNow();
         await a.worker.runOnce();
         const row = await owner.job.findUniqueOrThrow({ where: { id } });
         expect(row).toMatchObject({
@@ -627,7 +646,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
           before + delay - 2000,
         );
         expect(row.runAt.getTime()).toBeLessThanOrEqual(
-          Date.now() + delay + 2000,
+          (await dbNow()) + delay + 2000,
         );
 
         // Antes de su hora nadie lo coge.
@@ -636,7 +655,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
         // Llega su hora.
         await owner.job.update({
           where: { id },
-          data: { runAt: new Date(Date.now() - 1000) },
+          data: { runAt: new Date((await dbNow()) - 1000) },
         });
       }
 
@@ -653,7 +672,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       // Fallido: ya no se reintenta solo.
       await owner.job.update({
         where: { id },
-        data: { runAt: new Date(Date.now() - 1000) },
+        data: { runAt: new Date((await dbNow()) - 1000) },
       });
       await Promise.all([a.worker.runOnce(), b.worker.runOnce()]);
       expect(runs).toBe(3);
@@ -690,7 +709,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
           state: 'RUNNING',
           attempts: 1,
           lockedBy: 'muerto:1:00000000',
-          runAt: new Date(Date.now() - 1000),
+          runAt: new Date((await dbNow()) - 1000),
         },
       });
       await owner.job.update({
@@ -699,7 +718,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
           state: 'RUNNING',
           attempts: 2,
           lockedBy: 'muerto:1:00000000',
-          runAt: new Date(Date.now() - 1000),
+          runAt: new Date((await dbNow()) - 1000),
         },
       });
 
@@ -747,8 +766,8 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
   it('la purga borra los terminados más antiguos que la retención y nada más', async () => {
     const name = `${PREFIX}.purge`;
     onBoth(name, () => Promise.resolve());
-    const old = new Date(Date.now() - 20 * 86_400_000);
-    const recent = new Date(Date.now() - 86_400_000);
+    const old = new Date((await dbNow()) - 20 * 86_400_000);
+    const recent = new Date((await dbNow()) - 86_400_000);
     const ids = await Promise.all(
       [
         { state: 'COMPLETED' as const, finishedAt: old },
@@ -763,7 +782,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
     );
 
     const purged = await a.repo.purgeFinished(
-      new Date(Date.now() - 14 * 86_400_000),
+      new Date((await dbNow()) - 14 * 86_400_000),
     );
 
     expect(purged).toBeGreaterThanOrEqual(2);
@@ -783,7 +802,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
         data: {
           state: 'RUNNING',
           lockedBy: 'muerto:1:00000000',
-          runAt: data.runAt ?? new Date(Date.now() - 60_000),
+          runAt: data.runAt ?? new Date((await dbNow()) - 60_000),
           attempts: data.attempts,
           maxAttempts: data.maxAttempts,
         },
@@ -802,7 +821,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       const poison = await abandoned(name, {
         attempts: 3,
         maxAttempts: 2,
-        runAt: new Date(Date.now() - 3_600_000),
+        runAt: new Date((await dbNow()) - 3_600_000),
       });
       const healthy = await Promise.all(
         [1, 2, 3].map(async (n) => (await a.queue.enqueue(name, { n })).id),
@@ -837,7 +856,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       const poison = await abandoned(name, {
         attempts: 3,
         maxAttempts: 2,
-        runAt: new Date(Date.now() - 3_600_000),
+        runAt: new Date((await dbNow()) - 3_600_000),
       });
       const last = await abandoned(name, { attempts: 2, maxAttempts: 2 });
       const { id: fresh } = await a.queue.enqueue(name, {});
@@ -862,7 +881,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       const alive = await abandoned(name, {
         attempts: 2,
         maxAttempts: 2,
-        runAt: new Date(Date.now() + 300_000),
+        runAt: new Date((await dbNow()) + 300_000),
       });
 
       const closed = await a.repo.failExhausted(100);
@@ -924,11 +943,11 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
         data: {
           id: 'int:viejo:00000000',
           role: 'worker',
-          lastBeatAt: new Date(Date.now() - 8 * 86_400_000),
+          lastBeatAt: new Date((await dbNow()) - 8 * 86_400_000),
         },
       });
       const purged = await a.repo.purgeStaleWorkers(
-        new Date(Date.now() - 7 * 86_400_000),
+        new Date((await dbNow()) - 7 * 86_400_000),
       );
       expect(purged).toBeGreaterThanOrEqual(1);
       const left = await owner.jobWorker.findMany({
@@ -956,18 +975,22 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
       const { id: due } = await a.queue.enqueue(name, {});
       await owner.job.update({
         where: { id: due },
-        data: { runAt: new Date(Date.now() - 10 * 60_000) },
+        data: { runAt: new Date((await dbNow()) - 10 * 60_000) },
       });
       await a.queue.enqueue(
         name,
         {},
-        { runAt: new Date(Date.now() + 3_600_000) },
+        { runAt: new Date((await dbNow()) + 3_600_000) },
       );
       await abandoned(name, { attempts: 1, maxAttempts: 3 });
       const { id: failed } = await a.queue.enqueue(name, {});
       await owner.job.update({
         where: { id: failed },
-        data: { state: 'FAILED', finishedAt: new Date(), attempts: 3 },
+        data: {
+          state: 'FAILED',
+          finishedAt: new Date(await dbNow()),
+          attempts: 3,
+        },
       });
       await owner.jobWorker.createMany({
         data: [
@@ -975,7 +998,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
           {
             id: 'int:caido:00000000',
             role: 'worker',
-            lastBeatAt: new Date(Date.now() - 120_000),
+            lastBeatAt: new Date((await dbNow()) - 120_000),
           },
         ],
       });
@@ -1075,7 +1098,7 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
           lockedBy: null,
           idempotencyKey: `${PREFIX}:retry:1`,
         });
-        expect(row.runAt.getTime()).toBeLessThanOrEqual(Date.now() + 2000);
+        expect(row.runAt.getTime()).toBeLessThanOrEqual((await dbNow()) + 2000);
 
         fail = false;
         await a.worker.runOnce();
@@ -1128,7 +1151,11 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
         const { id } = await a.queue.enqueue(name, {});
         await owner.job.update({
           where: { id },
-          data: { state: 'FAILED', finishedAt: new Date(), attempts: 5 },
+          data: {
+            state: 'FAILED',
+            finishedAt: new Date(await dbNow()),
+            attempts: 5,
+          },
         });
         const purges: Promise<number>[] = [];
         // Lo mismo que hace retryFailed: FOR UPDATE y a PENDING, sin confirmar
@@ -1139,7 +1166,9 @@ describe('DX-085 · cola de trabajos en Postgres (int)', () => {
             await tx.$executeRaw`
               UPDATE "jobs" SET "state" = 'PENDING', "attempts" = 0, "finishedAt" = NULL
                WHERE "id" = ${id}::uuid`;
-            purges.push(a.repo.purgeFinished(new Date(Date.now() + 60_000)));
+            purges.push(
+              a.repo.purgeFinished(new Date((await dbNow()) + 60_000)),
+            );
             await waitFor(async () => {
               const [{ n }] = await b.prisma.$queryRaw<{ n: number }[]>`
                 SELECT count(*)::int AS "n" FROM pg_stat_activity
