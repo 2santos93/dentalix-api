@@ -20,6 +20,10 @@ import {
 } from './support/e2e-fixtures';
 import type { Clinic } from './support/e2e-fixtures';
 import { seedParProviderRates } from './support/par-provider-rates';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  locationData,
+} from './support/location-fixtures';
 import { signaturePng } from './support/png-fixtures';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import {
@@ -89,24 +93,23 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
   let seq = 0;
 
   const server = () => app.getHttpServer();
-  const staff = (clinic: Clinic) => ({
-    post: (path: string, body: object = {}) =>
-      request(server())
-        .post(`/api/v1${path}`)
+  const staff = (
+    clinic: Clinic,
+    opts: { token?: string; locationId?: string } = {},
+  ) => {
+    const set = (r: request.Test) => {
+      const req = r
         .set('X-Tenant-Host', clinic.host)
-        .set('Authorization', `Bearer ${clinic.adminToken}`)
-        .send(body),
-    get: (path: string) =>
-      request(server())
-        .get(`/api/v1${path}`)
-        .set('X-Tenant-Host', clinic.host)
-        .set('Authorization', `Bearer ${clinic.adminToken}`),
-    delete: (path: string) =>
-      request(server())
-        .delete(`/api/v1${path}`)
-        .set('X-Tenant-Host', clinic.host)
-        .set('Authorization', `Bearer ${clinic.adminToken}`),
-  });
+        .set('Authorization', `Bearer ${opts.token ?? clinic.adminToken}`);
+      return opts.locationId ? req.set('X-Location-Id', opts.locationId) : req;
+    };
+    return {
+      post: (path: string, body: object = {}) =>
+        set(request(server()).post(`/api/v1${path}`)).send(body),
+      get: (path: string) => set(request(server()).get(`/api/v1${path}`)),
+      delete: (path: string) => set(request(server()).delete(`/api/v1${path}`)),
+    };
+  };
 
   async function patient(
     clinic: Clinic,
@@ -144,13 +147,21 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
   async function plan(
     clinic: Clinic,
     patientId: string,
-    opts: { present?: boolean; price?: number } = {},
+    opts: {
+      present?: boolean;
+      price?: number;
+      /** Quién lo crea (token del personal); por defecto, el dueño. */
+      token?: string;
+      /** Sede desde la que se presenta (X-Location-Id). */
+      locationId?: string;
+    } = {},
   ): Promise<string> {
-    const res = await staff(clinic)
+    const as = staff(clinic, { token: opts.token });
+    const res = await as
       .post(`/patients/${patientId}/treatment-plans`, { currency: 'USD' })
       .expect(201);
     const id = (res.body as { id: string }).id;
-    await staff(clinic)
+    await as
       .post(`/treatment-plans/${id}/items`, {
         toothNumber: '36',
         catalogItemId: catalogA,
@@ -158,7 +169,9 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
       })
       .expect(201);
     if (opts.present !== false) {
-      await staff(clinic).post(`/treatment-plans/${id}/present`).expect(200);
+      await staff(clinic, opts)
+        .post(`/treatment-plans/${id}/present`)
+        .expect(200);
     }
     return id;
   }
@@ -245,13 +258,57 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
       });
 
   /** Un paciente con su enlace, su sesión y un plan presentado. */
-  async function scene(email?: string) {
+  async function scene(email?: string, price?: number) {
     const patientId = await patient(a, email);
-    const planId = await plan(a, patientId);
+    const planId = await plan(a, patientId, { price });
     const access = await link(a, patientId);
     const cookie = await session(a, access.token);
     const { contentHash } = await shown(a, cookie, planId);
     return { patientId, planId, access, cookie, contentHash };
+  }
+
+  /**
+   * DX-415: el personal envía el presupuesto a firmar y el paciente verifica
+   * el código: la solicitud queda viva, con sesión, lista para firmar.
+   */
+  async function liveSignatureRequest(
+    patientId: string,
+    email: string,
+    planId: string,
+  ) {
+    const sign = (path: string, body: object = {}, sessionToken?: string) => {
+      const req = request(server())
+        .post(`/api/v1/public/sign/${path}`)
+        .set('X-Tenant-Host', a.host);
+      return (
+        sessionToken ? req.set('X-Signature-Session', sessionToken) : req
+      ).send(body);
+    };
+    mailer.clear();
+    const sent = await staff(a)
+      .post(`/patients/${patientId}/signature-requests`, {
+        type: 'BUDGET',
+        channel: 'EMAIL',
+        treatmentPlanId: planId,
+      })
+      .expect(201);
+    await dispatcher.whenIdle();
+    const token = (
+      await mailer.waitFor(email, /\/firmar\/([A-Za-z0-9_-]{43})/)
+    )[1];
+    mailer.clear();
+    await sign(`${token}/code`).expect(200);
+    await dispatcher.whenIdle();
+    const code = (
+      await mailer.waitFor(email, /Tu código de verificación es: (\d{6})/)
+    )[1];
+    const verified = await sign(`${token}/verify`, { code }).expect(200);
+    return {
+      requestId: (sent.body as { id: string }).id,
+      token,
+      session: (verified.body as { sessionToken: string }).sessionToken,
+      sign,
+    };
   }
 
   beforeAll(async () => {
@@ -804,7 +861,8 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
 
   it('email de confirmación: al paciente adulto, con la variante de portal y sin importes', async () => {
     const email = `maria.portal${++seq}@example.com`;
-    const { planId, cookie, contentHash } = await scene(email);
+    // Centinela largo (DX-496): un importe que no aparece por azar.
+    const { planId, cookie, contentHash } = await scene(email, 987654.32);
     mailer.clear();
     await accept(a, cookie, planId, { contentHash }).expect(200);
     const mails = await raw.emailOutbox.findMany({
@@ -817,7 +875,9 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
       .input;
     expect(mail).toContain('Lo verás como aceptado en tu portal de paciente');
     expect(mail).toContain('Hola, María');
-    expect(mail).not.toMatch(/420|USD|zirconio/);
+    for (const leak of ['987654', '987.654', 'USD', 'zirconio']) {
+      expect(mail).not.toContain(leak);
+    }
   });
 
   it('email de confirmación de un MENOR: a su responsable (como DX-415), nunca al email de la ficha del menor', async () => {
@@ -871,37 +931,11 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
     const email = `marta.rios${++seq}@example.com`;
     const patientId = await patient(a, email);
     const planId = await plan(a, patientId);
-    mailer.clear();
-    const sent = await staff(a)
-      .post(`/patients/${patientId}/signature-requests`, {
-        type: 'BUDGET',
-        channel: 'EMAIL',
-        treatmentPlanId: planId,
-      })
-      .expect(201);
-    const requestId = (sent.body as { id: string }).id;
-    await dispatcher.whenIdle();
-    const token = (
-      await mailer.waitFor(email, /\/firmar\/([A-Za-z0-9_-]{43})/)
-    )[1];
-    const sign = (path: string, body: object = {}, sessionToken?: string) => {
-      const req = request(server())
-        .post(`/api/v1/public/sign/${path}`)
-        .set('X-Tenant-Host', a.host);
-      return (
-        sessionToken ? req.set('X-Signature-Session', sessionToken) : req
-      ).send(body);
-    };
-    // El paciente abre el enlace y verifica el código (sesión viva).
-    mailer.clear();
-    await sign(`${token}/code`).expect(200);
-    await dispatcher.whenIdle();
-    const code = (
-      await mailer.waitFor(email, /Tu código de verificación es: (\d{6})/)
-    )[1];
-    const verified = await sign(`${token}/verify`, { code }).expect(200);
-    const signatureSession = (verified.body as { sessionToken: string })
-      .sessionToken;
+    const live = await liveSignatureRequest(patientId, email, planId);
+    const requestId = live.requestId;
+    const sign = live.sign;
+    const token = live.token;
+    const signatureSession = live.session;
 
     // Entretanto acepta desde el portal.
     const access = await link(a, patientId);
@@ -936,5 +970,238 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
         })
       ).signedAt,
     ).toBeNull();
+  });
+
+  it('dos sedes: presentado en la sede B (no la más antigua), la aceptación del portal queda en B (plan, aceptación, evento y foto) y el hash cuadra', async () => {
+    const sedeB = await raw.location.create({
+      data: locationData(REGIONAL_CARACAS_FIXTURE, {
+        tenantId: a.tenantId,
+        name: `Sede Las Mercedes ${++seq}`,
+        address: 'Av. Principal de Las Mercedes',
+      }),
+      select: { id: true, name: true },
+    });
+    const patientId = await patient(a);
+    const planId = await plan(a, patientId, { locationId: sedeB.id });
+    expect(
+      (await raw.treatmentPlan.findUniqueOrThrow({ where: { id: planId } }))
+        .presentedLocationId,
+    ).toBe(sedeB.id);
+    const access = await link(a, patientId);
+    const cookie = await session(a, access.token);
+    const res = await me(a, cookie).expect(200);
+    const shownPlan = (
+      res.body as {
+        plans: (PortalPlan & { quote: { location: { name: string } } })[];
+      }
+    ).plans.find((p) => p.id === planId)!;
+    expect(shownPlan.quote.location.name).toBe(sedeB.name);
+    await accept(a, cookie, planId, {
+      contentHash: shownPlan.contentHash,
+    }).expect(200);
+
+    const after = await raw.treatmentPlan.findUniqueOrThrow({
+      where: { id: planId },
+    });
+    expect(after.acceptedLocationId).toBe(sedeB.id);
+    const row = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+      where: { planId },
+    });
+    expect(row.locationId).toBe(sedeB.id);
+    expect(row.contentHash).toBe(shownPlan.contentHash);
+    expect(
+      (parseQuoteContent(row.content) as { location: { id: string } }).location
+        .id,
+    ).toBe(sedeB.id);
+    const event = await raw.auditEvent.findFirstOrThrow({
+      where: {
+        resourceType: 'TREATMENT_PLAN',
+        resourceId: planId,
+        action: 'SIGN',
+      },
+    });
+    expect(event.locationId).toBe(sedeB.id);
+  });
+
+  it('A y B a la vez por el portal: una sola aceptación en el grupo; la otra, el 409 genérico; nunca 500', async () => {
+    const patientId = await patient(a);
+    const { a: optionA, b: optionB } = await optionsAB(a, patientId);
+    const access = await link(a, patientId);
+    const cookie = await session(a, access.token);
+    const viewA = await shown(a, cookie, optionA);
+    const viewB = await shown(a, cookie, optionB);
+    const results = await Promise.all([
+      accept(a, cookie, optionA, { contentHash: viewA.contentHash }),
+      accept(a, cookie, optionB, { contentHash: viewB.contentHash }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(results.find((r) => r.status === 409)!.body).toMatchObject(
+      NOT_ACCEPTABLE,
+    );
+    expect(
+      await raw.treatmentPlanAcceptance.count({
+        where: { planId: { in: [optionA, optionB] } },
+      }),
+    ).toBe(1);
+    const statuses = (
+      await raw.treatmentPlan.findMany({
+        where: { id: { in: [optionA, optionB] } },
+        select: { status: true },
+      })
+    ).map((p) => p.status);
+    expect(statuses.sort()).toEqual(['ACCEPTED', 'REJECTED']);
+  });
+
+  it('portal y enlace DX-415 a la vez sobre el mismo plan: una sola aceptación, sin 500', async () => {
+    const email = `ana.mora${++seq}@example.com`;
+    const patientId = await patient(a, email);
+    const planId = await plan(a, patientId);
+    const live = await liveSignatureRequest(patientId, email, planId);
+    const access = await link(a, patientId);
+    const cookie = await session(a, access.token);
+    const { contentHash } = await shown(a, cookie, planId);
+    const [portalRes, signRes] = await Promise.all([
+      accept(a, cookie, planId, { contentHash }),
+      live.sign(
+        `${live.token}/sign`,
+        { signature: `data:image/png;base64,${PNG}`, accepted: true },
+        live.session,
+      ),
+    ]);
+    expect(portalRes.status).toBeLessThan(500);
+    expect(signRes.status).toBeLessThan(500);
+    // Gana exactamente uno de los dos.
+    const portalWon = portalRes.status === 200;
+    expect([portalRes.status, signRes.status]).toEqual(
+      portalWon ? [200, 404] : [409, 200],
+    );
+    if (!portalWon) expect(portalRes.body).toMatchObject(NOT_ACCEPTABLE);
+    const rows = await raw.treatmentPlanAcceptance.findMany({
+      where: { planId },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].patientAccessLinkId !== null).toBe(portalWon);
+    expect(rows[0].signatureRequestId !== null).toBe(!portalWon);
+  });
+
+  it('plan presentado sin validez guardada (anterior a DX-379): verlo en el portal la fija y aceptarlo al día siguiente sella esas fechas', async () => {
+    const { patientId, planId, access } = await (async () => {
+      const p = await patient(a);
+      const id = await plan(a, p);
+      return { patientId: p, planId: id, access: await link(a, p) };
+    })();
+    // Un plan antiguo: presentado sin fechas guardadas.
+    await raw.$executeRaw`
+      UPDATE "treatment_plans" SET "quoteIssuedOn" = NULL, "quoteValidUntil" = NULL
+       WHERE "id" = ${planId}::uuid`;
+    const cookie = await session(a, access.token);
+    await shown(a, cookie, planId);
+    // Mostrarlo en el portal lo «emite» (como imprimirlo o enviarlo).
+    const fixed = await raw.treatmentPlan.findUniqueOrThrow({
+      where: { id: planId },
+    });
+    expect(fixed.quoteIssuedOn).not.toBeNull();
+    expect(fixed.quoteValidUntil).not.toBeNull();
+    // Como si se hubiera mostrado AYER antes de medianoche: el hash depende
+    // de las fechas guardadas, no del reloj de hoy.
+    await raw.$executeRaw`
+      UPDATE "treatment_plans"
+         SET "quoteIssuedOn" = "quoteIssuedOn" - 1,
+             "quoteValidUntil" = "quoteValidUntil" - 1
+       WHERE "id" = ${planId}::uuid`;
+    const yesterday = await raw.treatmentPlan.findUniqueOrThrow({
+      where: { id: planId },
+    });
+    const { contentHash } = await shown(a, cookie, planId);
+    await accept(a, cookie, planId, { contentHash }).expect(200);
+    const row = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+      where: { planId, patientId },
+    });
+    const content = parseQuoteContent(row.content) as {
+      issuedOn: string;
+      validUntil: string;
+    };
+    const day = (d: Date | null) => d!.toISOString().slice(0, 10);
+    expect(content.issuedOn).toBe(day(yesterday.quoteIssuedOn));
+    expect(content.validUntil).toBe(day(yesterday.quoteValidUntil));
+    expect(day(row.quoteValidUntil)).toBe(day(yesterday.quoteValidUntil));
+  });
+
+  it('acceptedById: quien compartió el portal dado de baja (users.deletedAt) → el creador del plan; ninguno activo → quien compartió (último recurso)', async () => {
+    const reception = await seedMember(raw, a, 'RECEPTION');
+    const receptionToken = await loginAs(app, a.host, reception.email);
+    const dentist = await seedMember(raw, a, 'DENTIST');
+    const dentistToken = await loginAs(app, a.host, dentist.email);
+    const patientId = await patient(a);
+    const first = await plan(a, patientId, { token: dentistToken });
+    const second = await plan(a, patientId, { token: dentistToken });
+    const res = await staff(a, { token: receptionToken })
+      .post(`/patients/${patientId}/access-links`, { scopes: ['PLANS'] })
+      .expect(201);
+    const access = res.body as { id: string; url: string };
+    const cookie = await session(a, access.url.split('/mi-clinica/')[1]);
+
+    // 1. Recepción dada de baja como usuario (la membresía sigue viva).
+    await raw.user.update({
+      where: { id: reception.userId },
+      data: { deletedAt: new Date() },
+    });
+    const h1 = (await shown(a, cookie, first)).contentHash;
+    await accept(a, cookie, first, { contentHash: h1 }).expect(200);
+    expect(
+      (
+        await raw.treatmentPlanAcceptance.findFirstOrThrow({
+          where: { planId: first },
+        })
+      ).acceptedById,
+    ).toBe(dentist.userId);
+
+    // 2. Y el creador del plan deja la clínica: último recurso, recepción.
+    await raw.clinicMembership.updateMany({
+      where: { tenantId: a.tenantId, userId: dentist.userId },
+      data: { deletedAt: new Date() },
+    });
+    const h2 = (await shown(a, cookie, second)).contentHash;
+    await accept(a, cookie, second, { contentHash: h2 }).expect(200);
+    expect(
+      (
+        await raw.treatmentPlanAcceptance.findFirstOrThrow({
+          where: { planId: second },
+        })
+      ).acceptedById,
+    ).toBe(reception.userId);
+  });
+
+  it('fusión de pacientes (DX-266): una aceptación del portal del absorbido pasa al conservado con su enlace', async () => {
+    const kept = await patient(a);
+    const {
+      patientId: absorbed,
+      planId,
+      access,
+      cookie,
+      contentHash,
+    } = await scene();
+    await accept(a, cookie, planId, { contentHash }).expect(200);
+    const merged = await staff(a)
+      .post('/patient-duplicates/merge', { keptId: kept, absorbedId: absorbed })
+      .expect((r) => {
+        if (r.status !== 201) throw new Error(JSON.stringify(r.body));
+      });
+    expect(merged.status).toBe(201);
+    const row = await raw.treatmentPlanAcceptance.findFirstOrThrow({
+      where: { planId },
+    });
+    expect(row).toMatchObject({
+      patientId: kept,
+      patientAccessLinkId: access.id,
+    });
+    const linkRow = await raw.patientAccessLink.findUniqueOrThrow({
+      where: { id: access.id },
+    });
+    expect(linkRow.patientId).toBe(kept);
+    expect(
+      (await raw.treatmentPlan.findUniqueOrThrow({ where: { id: planId } }))
+        .patientId,
+    ).toBe(kept);
   });
 });

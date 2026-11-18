@@ -115,6 +115,12 @@ export interface PortalPlanRef {
   quoteValidUntil: string | null;
   quoteTimeZone: string | null;
   siblingChosen: boolean;
+  /**
+   * DX-101-bis: la sede con la que se compone el presupuesto (la de su
+   * presentación si sigue activa; null = la de escritura del contexto). La
+   * misma con la que se acepta: así el hash cuadra.
+   */
+  quoteLocationId: string | null;
 }
 
 /** DX-101-bis: lo que el caso de uso decide con el plan bloqueado. */
@@ -141,7 +147,12 @@ export interface PortalAcceptanceInput {
   meta: AuditRequestMeta;
   decide: (
     source: PlanQuoteSource,
-    ctx: { dbNow: Date; siblingChosen: boolean },
+    ctx: {
+      dbNow: Date;
+      siblingChosen: boolean;
+      optionGroupId: string | null;
+      optionLabel: string | null;
+    },
   ) => PortalAcceptanceSeal;
 }
 

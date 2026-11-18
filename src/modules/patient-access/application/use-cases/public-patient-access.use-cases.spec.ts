@@ -335,6 +335,7 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
             quoteValidUntil: '2026-12-01',
             quoteTimeZone: 'America/Caracas',
             siblingChosen: false,
+            quoteLocationId: null,
             ...plan,
           },
         ]),
@@ -346,11 +347,13 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
     const getStatement = {
       execute: jest.fn(() => Promise.resolve(staffStatement())),
     };
+    const tenantContext = new TenantContextService();
     const useCase = new GetPatientPortalUseCase(
       repo as unknown as PatientAccessRepository,
       getQuote as never,
       getStatement as never,
       () => NOW,
+      tenantContext,
     );
     const principal: PatientAccessPrincipal = {
       linkId: LINK_ID,
@@ -358,8 +361,24 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
       scopes,
       sessionExpiresAt: NOW,
     };
-    return { useCase, principal, repo, getQuote, getStatement };
+    return { useCase, principal, repo, getQuote, getStatement, tenantContext };
   }
+
+  it('DX-101-bis: el presupuesto se compone en la sede de su presentación (la misma con la que se acepta)', async () => {
+    const quote = { ...staffQuote(), acceptance: null };
+    const { useCase, principal, getQuote, tenantContext } = portal(
+      ['PLANS'],
+      { quoteLocationId: 'sede-b' },
+      quote,
+    );
+    const seen: (string | undefined)[] = [];
+    getQuote.execute.mockImplementation(() => {
+      seen.push(tenantContext.getLocationId());
+      return Promise.resolve(quote);
+    });
+    await tenantContext.run(TENANT, () => useCase.execute(principal));
+    expect(seen).toEqual(['sede-b']);
+  });
 
   it('un apartado no compartido es null y no se consulta', async () => {
     const { useCase, principal, repo, getQuote, getStatement } = portal([

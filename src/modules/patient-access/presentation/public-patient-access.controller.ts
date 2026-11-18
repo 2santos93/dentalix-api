@@ -196,7 +196,7 @@ export class PublicPatientAccessController {
   @ApiOkResponse({ type: PortalPlanDto })
   @ApiBadRequestResponse({
     description:
-      'Nombre vacío o largo, firma no válida, hash mal formado o sin `consent: true`.',
+      'Nombre vacío, largo o con caracteres de control o de dirección («Escribe tu nombre sin caracteres especiales.»), firma no válida, hash mal formado o sin `consent: true`.',
   })
   @ApiUnauthorizedResponse({ description: SESSION })
   @ApiForbiddenResponse({

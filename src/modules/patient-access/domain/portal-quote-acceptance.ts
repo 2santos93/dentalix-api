@@ -31,6 +31,10 @@ export const PORTAL_QUOTE_CHANGED_MESSAGE =
 /** Motivo del evento de auditoría (SIGN de TREATMENT_PLAN, PUBLIC_LINK). */
 export const PORTAL_QUOTE_ACCEPTED_REASON = 'PORTAL_QUOTE_ACCEPTED';
 
+/** 400: el nombre trae caracteres de control o de dirección (bidi). */
+export const PORTAL_SIGNER_NAME_INVALID_MESSAGE =
+  'Escribe tu nombre sin caracteres especiales.';
+
 /** Largo máximo del nombre de quien firma (tras recortar). */
 export const PORTAL_SIGNER_NAME_MAX = 120;
 

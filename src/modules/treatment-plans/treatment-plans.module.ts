@@ -214,6 +214,8 @@ import { PlanTemplateApplyController } from './presentation/plan-template-apply.
     GetTreatmentPlanUseCase,
     // DX-101: el presupuesto en el portal del paciente.
     GetPlanQuoteUseCase,
+    // DX-101-bis: el portal lo «emite» (fija la validez de un plan sin ella).
+    IssuePlanQuoteUseCase,
     ListPendingFollowUpUseCase,
     PlanVisitsService,
   ],

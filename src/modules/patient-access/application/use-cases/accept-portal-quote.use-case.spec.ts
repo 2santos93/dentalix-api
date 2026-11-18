@@ -74,6 +74,7 @@ interface Setup {
   repoError?: Error;
   scopes?: PatientAccessScope[];
   emailFails?: boolean;
+  reread?: 'missing' | 'fails';
 }
 
 function setup(opts: Setup = {}) {
@@ -90,6 +91,8 @@ function setup(opts: Setup = {}) {
           input.decide(source, {
             dbNow: DB_NOW,
             siblingChosen: opts.siblingChosen ?? false,
+            optionGroupId: 'grupo-1',
+            optionLabel: 'Opción B',
           }),
         );
         if (opts.repoError) return Promise.reject(opts.repoError);
@@ -116,7 +119,15 @@ function setup(opts: Setup = {}) {
   const names = {
     book: jest.fn(() => Promise.resolve({ forLocation: () => NAMES })),
   };
-  const portal = { plan: jest.fn(() => Promise.resolve(VIEW)) };
+  const portal = {
+    plan: jest.fn((): Promise<PortalPlanView | null> =>
+      opts.reread === 'missing'
+        ? Promise.resolve(null)
+        : opts.reread === 'fails'
+          ? Promise.reject(new Error('plan retirado entre medias'))
+          : Promise.resolve(VIEW),
+    ),
+  };
   const sendBudgetAccepted = jest.fn(() =>
     opts.emailFails
       ? Promise.reject(new Error('outbox caído'))
@@ -219,6 +230,62 @@ describe('AcceptPortalQuoteUseCase (DX-101-bis)', () => {
       }),
     );
   });
+
+  it.each([
+    ['salto de línea', 'María\nPérez'],
+    ['tabulador', 'María\tPérez'],
+    ['control C1', 'María\u0085Pérez'],
+    ['inversión bidi (U+202E)', 'María \u202EzeréP'],
+    ['aislado bidi (U+2066)', '\u2066María Pérez'],
+    ['marca de dirección (U+200F)', 'María\u200FPérez'],
+  ])(
+    'nombre con %s: 400 «sin caracteres especiales» sin tocar la base',
+    async (_name, signerName) => {
+      const { accept, repo } = setup();
+      const res = await failure(accept({ signerName }));
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain(
+        'Escribe tu nombre sin caracteres especiales.',
+      );
+      expect(repo.acceptPlan).not.toHaveBeenCalled();
+    },
+  );
+
+  it('acepta nombres con tildes, eñes, apóstrofos y guiones', async () => {
+    const { accept } = setup();
+    await expect(accept({ signerName: "Ñángara D'Ávila-Muñoz" })).resolves.toBe(
+      VIEW,
+    );
+  });
+
+  it.each(['missing', 'fails'] as const)(
+    'si la relectura tras el COMMIT no ve el plan (%s): 200 con lo sellado, nunca 500',
+    async (reread) => {
+      const { accept, seals, source } = setup({ reread });
+      const view = await accept({ signerName: 'María José Pérez' });
+      expect(view).toMatchObject({
+        id: PLAN,
+        status: 'ACCEPTED',
+        optionGroupId: 'grupo-1',
+        optionLabel: 'Opción B',
+        acceptable: false,
+        validUntil: '2026-11-30',
+        contentHash: seals[0].contentHash,
+        acceptedAt: DB_NOW,
+      });
+      expect(view.quote).toMatchObject({
+        contentHash: seals[0].contentHash,
+        validUntil: '2026-11-30',
+        clinicName: source.clinic.name,
+        acceptance: {
+          signerName: 'María José Pérez',
+          signature: `data:image/png;base64,${PNG}`,
+          acceptedAt: DB_NOW,
+        },
+      });
+      expect(view.quote.items).toHaveLength(2);
+    },
+  );
 
   it('sin el apartado de presupuestos: 403 sin tocar la base', async () => {
     const { accept, repo } = setup({ scopes: ['ACCOUNT'] });

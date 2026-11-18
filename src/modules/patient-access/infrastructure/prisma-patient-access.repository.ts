@@ -514,8 +514,16 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
           ? []
           : await tx.location.findMany({
               where: { id: { in: locationIds } },
-              select: { id: true, timeZone: true },
+              select: {
+                id: true,
+                timeZone: true,
+                isActive: true,
+                deletedAt: true,
+              },
             });
+      const usable = new Set(
+        zones.filter((l) => l.isActive && !l.deletedAt).map((l) => l.id),
+      );
       const zoneOf = new Map(
         zones.map((l) => [
           l.id,
@@ -534,6 +542,10 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
         siblingChosen: chosen.some(
           (c) => c.optionGroupId === r.optionGroupId && c.id !== r.id,
         ),
+        quoteLocationId:
+          r.presentedLocationId && usable.has(r.presentedLocationId)
+            ? r.presentedLocationId
+            : null,
       }));
     });
   }
@@ -551,7 +563,13 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
       if (live.length === 0) return { kind: 'GONE' };
       const plan = await tx.treatmentPlan.findFirst({
         where: { id: planId, patientId, deletedAt: null },
-        select: { id: true, createdById: true },
+        select: {
+          id: true,
+          createdById: true,
+          presentedLocationId: true,
+          optionGroupId: true,
+          optionLabel: true,
+        },
       });
       if (!plan) return { kind: 'NOT_FOUND' };
       // El enlace RELEÍDO en esta transacción (el guard lo leyó antes): FOR
@@ -585,10 +603,14 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
       const dbNow = link.dbNow;
       const acceptedById = await this.portalAcceptedBy(
         tx,
+        tenantId,
         link.createdById,
         plan.createdById,
       );
-      const locationId = await this.tenantContext.writeLocationId(tx);
+      const locationId = await this.quoteLocationId(
+        tx,
+        plan.presentedLocationId,
+      );
       const source = await acceptBudgetInTx(tx, {
         tenantId,
         patientId,
@@ -607,7 +629,12 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
                 },
               })) > 0
             : false;
-          const seal = input.decide(src, { dbNow, siblingChosen });
+          const seal = input.decide(src, {
+            dbNow,
+            siblingChosen,
+            optionGroupId: plan.optionGroupId,
+            optionLabel: plan.optionLabel,
+          });
           return {
             signerName: input.signerName,
             signature: input.signature,
@@ -708,23 +735,56 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
   }
 
   /**
+   * DX-101-bis: la sede del presupuesto del portal, la MISMA al mostrarlo y
+   * al aceptarlo (si no, el hash no cuadra): la de su presentación si sigue
+   * activa (como DX-415 usa la sede desde la que se envió); si no, la de
+   * escritura del contexto público (la por defecto de la clínica).
+   */
+  private async quoteLocationId(
+    tx: Prisma.TransactionClient,
+    presentedLocationId: string | null,
+  ): Promise<string> {
+    if (presentedLocationId) {
+      const live = await tx.location.findFirst({
+        where: { id: presentedLocationId, isActive: true, deletedAt: null },
+        select: { id: true },
+      });
+      if (live) return live.id;
+    }
+    return this.tenantContext.writeLocationId(tx);
+  }
+
+  /**
    * DX-101-bis: a nombre de quién queda la aceptación del portal (el
-   * paciente no es un usuario; la columna es NOT NULL a users): quien le
-   * compartió el portal si sigue siendo miembro de la clínica; si no, quien
-   * creó el plan; sin él, quien compartió el portal igualmente (la FK a
-   * users solo exige que exista, y los usuarios no se borran).
+   * paciente no es un usuario; la columna es NOT NULL a users). Un usuario
+   * ACTIVO es un usuario no dado de baja con su membresía viva en esta
+   * clínica:
+   *  1. quien le compartió el portal, si está activo;
+   *  2. si no, quien creó el plan, si está activo;
+   *  3. último recurso: quien compartió el portal aunque ya no esté activo
+   *     (la FK a users solo exige que exista y los usuarios no se borran; la
+   *     ficha mostrará su nombre como quien hizo llegar el presupuesto).
    */
   private async portalAcceptedBy(
     tx: Prisma.TransactionClient,
+    tenantId: string,
     linkCreatedById: string,
     planCreatedById: string | null,
   ): Promise<string> {
-    const member = await tx.clinicMembership.findFirst({
-      where: { userId: linkCreatedById, deletedAt: null },
+    const candidates = [linkCreatedById, planCreatedById].filter(
+      (id): id is string => id !== null,
+    );
+    const active = await tx.clinicMembership.findMany({
+      where: {
+        tenantId,
+        userId: { in: candidates },
+        deletedAt: null,
+        user: { deletedAt: null },
+      },
       select: { userId: true },
     });
-    if (member) return linkCreatedById;
-    return planCreatedById ?? linkCreatedById;
+    const isActive = new Set(active.map((m) => m.userId));
+    return candidates.find((id) => isActive.has(id)) ?? linkCreatedById;
   }
 
   findConfirmableAppointment(

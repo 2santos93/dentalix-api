@@ -800,6 +800,18 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
       .set('Cookie', cookie)
       .send({ ...body, consent: false })
       .expect(400);
+    // Nombre con caracteres de control o de dirección (bidi): 400.
+    for (const signerName of ['Carmen\u202ERondón', 'Carmen\nRondón']) {
+      const bad = await request(server())
+        .post(path)
+        .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+        .set('Cookie', cookie)
+        .send({ ...body, signerName })
+        .expect(400);
+      expect(JSON.stringify(bad.body)).toContain(
+        'Escribe tu nombre sin caracteres especiales.',
+      );
+    }
 
     const res = await request(server())
       .post(path)

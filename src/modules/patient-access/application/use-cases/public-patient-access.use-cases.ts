@@ -25,16 +25,20 @@ import { CreateConfirmationLinkUseCase } from '../../../appointment-confirmation
 import { RespondConfirmationUseCase } from '../../../appointment-confirmations/application/use-cases/respond-confirmation.use-case';
 import { isMinor } from '../../../patients/domain/responsible-parties/majority-age';
 import {
-  GetPlanQuoteUseCase,
+  IssuePlanQuoteUseCase,
   PLAN_QUOTE_COMPOSITION,
+  type PlanQuoteDocument,
   composeQuoteContent,
   quoteValidityOf,
 } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
 import {
   computeAcceptanceHash,
   computeQuoteHash,
+  withListPriceCurrencies,
   type QuoteComposition,
+  type QuoteContent,
 } from '../../../treatment-plans/domain/plan-quote';
+import type { PlanQuoteSource } from '../../../treatment-plans/domain/ports/plan-quote-repository.port';
 import {
   parseSignaturePng,
   SignatureImageError,
@@ -75,6 +79,7 @@ import {
   PORTAL_QUOTE_NOT_ACCEPTABLE_CODE,
   PORTAL_QUOTE_NOT_ACCEPTABLE_MESSAGE,
   PORTAL_QUOTE_NOT_FOUND_MESSAGE,
+  PORTAL_SIGNER_NAME_INVALID_MESSAGE,
   PORTAL_SIGNER_NAME_MAX,
   PortalQuoteChangedError,
   PortalQuoteNotAcceptableError,
@@ -293,9 +298,17 @@ export class GetPatientPortalUseCase {
   constructor(
     @Inject(PATIENT_ACCESS_REPOSITORY)
     private readonly repo: PatientAccessRepository,
-    private readonly getQuote: GetPlanQuoteUseCase,
+    /**
+     * DX-101-bis: «emitir» el presupuesto (DX-379 D-2, como imprimirlo o
+     * enviarlo a firmar): un plan presentado sin validez guardada (anterior a
+     * DX-379) la fija la primera vez que se muestra, así el hash que ve el
+     * paciente no cambia a medianoche y la aceptación sella esas fechas.
+     * Idempotente; en lo demás, lo mismo que el GET del presupuesto.
+     */
+    private readonly getQuote: IssuePlanQuoteUseCase,
     private readonly getStatement: GetAccountStatementUseCase,
     @Inject(PATIENT_ACCESS_CLOCK) private readonly clock: PatientAccessClock,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   async execute(principal: PatientAccessPrincipal): Promise<PatientPortalView> {
@@ -375,7 +388,15 @@ export class GetPatientPortalUseCase {
     ref: PortalPlanRef,
     now: Date,
   ): Promise<PortalPlanView> {
-    const quote = toPortalQuote(await this.getQuote.execute(patientId, ref.id));
+    // DX-101-bis: compuesto en la sede de su presentación, la MISMA con la
+    // que se acepta (si no, el hash no cuadraría).
+    const load = () => this.getQuote.execute(patientId, ref.id);
+    const tenantId = this.tenantContext.getTenantId();
+    const doc =
+      ref.quoteLocationId && tenantId
+        ? await this.tenantContext.run(tenantId, ref.quoteLocationId, load)
+        : await load();
+    const quote = toPortalQuote(doc);
     return {
       id: ref.id,
       status: ref.status,
@@ -409,6 +430,50 @@ export interface AcceptPortalQuoteInput {
   signature: string;
   /** El `contentHash` del presupuesto que mostró el portal. */
   contentHash: string;
+}
+
+/** C0/C1 y los de dirección (bidi) que cambian cómo se lee un nombre. */
+const HIDDEN_CHARACTERS = /[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
+
+export function hasHiddenCharacters(text: string): boolean {
+  return HIDDEN_CHARACTERS.test(text);
+}
+
+/**
+ * DX-101-bis: el plan del portal recién aceptado construido con lo que se
+ * selló en la transacción (la foto, su hash y la firma), para cuando la
+ * relectura tras el COMMIT ya no lo ve.
+ */
+export function sealedView(
+  planId: string,
+  sealed: {
+    source: PlanQuoteSource;
+    content: QuoteContent;
+    contentHash: string;
+    optionGroupId: string | null;
+    optionLabel: string | null;
+  },
+  acceptance: { signerName: string; signature: string; acceptedAt: Date },
+): PortalPlanView {
+  const { source, content, contentHash } = sealed;
+  const doc = {
+    ...withListPriceCurrencies(content, source.items),
+    clinicLogoUrl: source.clinic.logoUrl,
+    regional: source.regional,
+    contentHash,
+    acceptance,
+  } as unknown as PlanQuoteDocument;
+  return {
+    id: planId,
+    status: 'ACCEPTED',
+    optionGroupId: sealed.optionGroupId,
+    optionLabel: sealed.optionLabel,
+    acceptable: false,
+    validUntil: content.validUntil,
+    contentHash,
+    acceptedAt: acceptance.acceptedAt,
+    quote: toPortalQuote(doc),
+  };
 }
 
 function portalConflict(code: string, message: string): ConflictException {
@@ -476,6 +541,11 @@ export class AcceptPortalQuoteUseCase {
         `El nombre admite hasta ${PORTAL_SIGNER_NAME_MAX} caracteres.`,
       );
     }
+    // Lo escribe el paciente y se sella, sale en la ficha y en la copia: sin
+    // caracteres de control ni de dirección (bidi) que cambien cómo se lee.
+    if (hasHiddenCharacters(signerName)) {
+      throw new BadRequestException(PORTAL_SIGNER_NAME_INVALID_MESSAGE);
+    }
     let signature: string;
     try {
       signature = parseSignaturePng(input.signature, 'tu firma');
@@ -489,6 +559,14 @@ export class AcceptPortalQuoteUseCase {
     // ellos compone el presupuesto el portal (`GetPlanQuoteUseCase`).
     const book = await this.documentTypeNames.book();
 
+    // Lo sellado, para responder aunque la relectura posterior no vea el plan.
+    let sealed: {
+      source: PlanQuoteSource;
+      content: QuoteContent;
+      contentHash: string;
+      optionGroupId: string | null;
+      optionLabel: string | null;
+    } | null = null;
     let outcome;
     try {
       outcome = await this.repo.acceptPlan({
@@ -498,7 +576,10 @@ export class AcceptPortalQuoteUseCase {
         signerName,
         signature,
         meta,
-        decide: (source, { dbNow, siblingChosen }) => {
+        decide: (
+          source,
+          { dbNow, siblingChosen, optionGroupId, optionLabel },
+        ) => {
           if (
             !isPortalQuoteAcceptable(
               {
@@ -527,6 +608,7 @@ export class AcceptPortalQuoteUseCase {
           if (contentHash !== input.contentHash) {
             throw new PortalQuoteChangedError();
           }
+          sealed = { source, content, contentHash, optionGroupId, optionLabel };
           return {
             content,
             contentHash,
@@ -574,10 +656,29 @@ export class AcceptPortalQuoteUseCase {
       outcome.acceptedAt,
       outcome.confirmation,
     );
-    const view = await this.portal.plan(principal, planId);
-    // Recién aceptado: siempre está entre los compartidos.
-    if (!view) throw new Error(`Plan ${planId} aceptado y no visible`);
-    return view;
+    // La aceptación ya está confirmada: nunca un 500 por la relectura (el
+    // personal pudo cambiar o retirar el plan justo después). Sin ella, el
+    // plan como se selló.
+    try {
+      const view = await this.portal.plan(principal, planId);
+      if (view) return view;
+      this.logger.error({
+        event: 'patient_access.portal_acceptance_reread_missing',
+        treatmentPlanId: planId,
+      });
+    } catch (error) {
+      this.logger.error({
+        event: 'patient_access.portal_acceptance_reread_failed',
+        treatmentPlanId: planId,
+        error: error instanceof Error ? error.name : 'unknown',
+      });
+    }
+    if (!sealed) throw new Error(`Plan ${planId} aceptado sin lo sellado`);
+    return sealedView(planId, sealed, {
+      signerName,
+      signature,
+      acceptedAt: outcome.acceptedAt,
+    });
   }
 
   /**
