@@ -150,6 +150,7 @@ export function mapToEntity(
     triageFlags: appointment.triageFlags,
     triageNote: appointment.triageNote,
     walkIn: appointment.walkIn,
+    origin: appointment.origin,
     overbooked: appointment.overbooked,
     chairId: appointment.chairId,
     chair: appointment.chair ?? null,
@@ -238,6 +239,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             wantsEarlier: input.wantsEarlier,
             chairId: input.chairId,
             importBatchId: input.importBatchId,
+            origin: input.origin,
           },
           include: INCLUDE_PATIENT_NAME,
         });
@@ -262,6 +264,12 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             created.id,
             input.planItemIds,
           );
+        // DX-016: la reserva online deja su fila y su auditoría aquí dentro.
+        if (input.inTransaction)
+          await input.inTransaction(tx, {
+            id: created.id,
+            locationId: created.locationId,
+          });
         return tx.appointment.findUniqueOrThrow({
           where: { id: created.id },
           include: INCLUDE_PATIENT_NAME,

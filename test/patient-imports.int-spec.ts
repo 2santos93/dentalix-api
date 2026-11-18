@@ -499,6 +499,10 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       // DX-099: una anamnesis enviada por enlace también bloquea el deshacer.
       'medical_history_submissions.patientId',
       'medical_history_versions.patientId',
+      // DX-016: la solicitud o reserva online y su código; una ficha importada
+      // que ya reservó online tiene actividad propia: bloquea.
+      'online_booking_requests.patientId',
+      'online_booking_verifications.patientId',
       // DX-190: un caso de ortodoncia y sus controles son historia clínica:
       // bloquean el deshacer.
       'ortho_cases.patientId',

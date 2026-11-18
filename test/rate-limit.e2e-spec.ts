@@ -47,6 +47,8 @@ const LOW_LIMITS: RateLimitConfig = {
   'prescription-verify': { limit: 2, ttlMs: 60_000 },
   'branding-host': { limit: 4, ttlMs: 60_000 },
   'branding-miss': { limit: 4, ttlMs: 60_000 },
+  'online-booking': { limit: 4, ttlMs: 60_000 },
+  'online-booking-write': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -254,6 +256,28 @@ describe('Rate limiting (e2e)', () => {
         .post(`/api/v1/public/sign/${tokenA}/verify`)
         .send({ code: '000000' });
       expect(verify.status).not.toBe(429);
+    });
+
+    it('public/booking (DX-016): 429 por IP en lecturas y escrituras (balde por ruta)', async () => {
+      const config = () =>
+        request(app.getHttpServer()).get('/api/v1/public/booking');
+      for (let i = 0; i < LOW_LIMITS['online-booking'].limit; i++) {
+        expect((await config()).status).not.toBe(429);
+      }
+      expectTooMany(await config());
+      const code = () =>
+        request(app.getHttpServer())
+          .post('/api/v1/public/booking/verification')
+          .send({});
+      for (let i = 0; i < LOW_LIMITS['online-booking-write'].limit; i++) {
+        expect((await code()).status).not.toBe(429);
+      }
+      expectTooMany(await code());
+      // Reservar tiene su propio balde.
+      const book = await request(app.getHttpServer())
+        .post('/api/v1/public/booking')
+        .send({});
+      expect(book.status).not.toBe(429);
     });
 
     it('recuperar la contraseña (DX-010): 429 por IP en pedir, comprobar y restablecer (balde por ruta)', async () => {
