@@ -1,9 +1,10 @@
-import {
-  canonicalLanguageTag,
-  LANGUAGE_TAG_MESSAGE,
-} from '../../../shared/i18n/patient-language';
 import { localizedTextEntries } from '../../../shared/i18n/localized-text';
-import { LINK_TLDS } from './link-tlds';
+import {
+  normalizePatientPlainText,
+  patientPlainTextFromEntries,
+  type PatientPlainTextEntry,
+  type PatientPlainTextRules,
+} from '../../../shared/i18n/patient-plain-text';
 
 /**
  * Reglas de un tipo de cita (DX-121). Puras: las comparten el caso de uso (400
@@ -84,67 +85,34 @@ export const PRE_VISIT_INSTRUCTIONS_TOO_LONG_MESSAGE = `Las indicaciones no pued
 export const PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE =
   'Las indicaciones no admiten enlaces ni HTML: escríbelas como texto.';
 
-/** `http://`, `https://`, `www.` o algo con aspecto de etiqueta (`<b>`, `</p>`, `<a href…>`, `<!--`). */
-const LINK_OR_HTML = /https?:\/\/|www\.|<\s*\/?\s*[a-z!][^<>]*>/i;
-
-/**
- * Un dominio que WhatsApp, Gmail o iOS convertirían en enlace aunque no lleve
- * `http`: letra o cifra, un punto SIN espacio y una palabra de 2 o más letras
- * seguida de fin, espacio, `/`, `:`, `#` o puntuación. Solo cuenta si esa
- * palabra es un TLD de la lista cerrada (`LINK_TLDS`), sin distinguir
- * mayúsculas: marca «ejemplo.com/login», «EJEMPLO.COM», «x.com», «bit.ly»,
- * «tienda.com.ve»; no marca «6h.Trae», «Dr.Pérez», «Sr.García», «p.ej.»,
- * «a.m.» (una letra), «10.30 h» ni «1.5 ml» (cifras). Ver `link-tlds.ts`.
- */
-const DOT_WORD = /(?<=[\p{L}\p{N}])\.(\p{L}{2,})(?=$|[\s/:#?.,;!)\]}"'»…])/gu;
-
-function hasBareDomain(text: string): boolean {
-  for (const match of text.matchAll(DOT_WORD)) {
-    if (LINK_TLDS.has(match[1].toLowerCase())) return true;
-  }
-  return false;
-}
-
-/** Una IPv4 («192.168.0.1/login»): también se convierte en enlace. */
-const IPV4 = /\b\d{1,3}(?:\.\d{1,3}){3}\b/;
-
-/** Una dirección de email («x@ejemplo.com»): también se convierte en enlace. */
-const EMAIL_ADDRESS = /\S+@\S+\.\S+/;
-
-/** U+200D (une los emojis compuestos): el único carácter de formato que queda. */
-const ZERO_WIDTH_JOINER = String.fromCharCode(0x200d);
-
-export interface PreVisitInstructionEntry {
-  language: string;
-  text: string;
-}
+export type PreVisitInstructionEntry = PatientPlainTextEntry;
 
 /**
  * Un texto tal como se guarda: saltos de línea `\n` (como mucho dos seguidos),
  * tabuladores como espacio, sin otros caracteres de control ni de formato
  * (salvo U+200D) y recortado. Los saltos se conservan: el recordatorio y la
- * página los pintan.
+ * página los pintan. DX-560: la regla vive en `shared/i18n/patient-plain-text`.
  */
-export function normalizePreVisitInstructionText(text: string): string {
-  return (
-    text
-      .replace(/\r\n?/g, '\n')
-      .replace(/\t/g, ' ')
-      .replace(/[\p{Cc}\u2028\u2029]/gu, (c) => (c === '\n' ? c : ''))
-      // Formato invisible (espacio de ancho cero, guion suave, U+202E…): sirve
-      // para colar un enlace partido.
-      .replace(/\p{Cf}/gu, (c) => (c === ZERO_WIDTH_JOINER ? c : ''))
-      // Sin espacios al final de línea y como mucho una línea en blanco seguida.
-      .replace(/[ \xa0]+\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim()
-  );
-}
+export const normalizePreVisitInstructionText = normalizePatientPlainText;
+
+const PRE_VISIT_INSTRUCTIONS_RULES: PatientPlainTextRules = {
+  textMax: PRE_VISIT_INSTRUCTIONS_TEXT_MAX,
+  maxLanguages: PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES,
+  totalBytesMax: PRE_VISIT_INSTRUCTIONS_TOTAL_BYTES_MAX,
+  messages: {
+    tooMany: PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE,
+    repeated: PRE_VISIT_INSTRUCTIONS_REPEATED_MESSAGE,
+    languageNotOffered: PRE_VISIT_INSTRUCTIONS_LANGUAGE_NOT_OFFERED_MESSAGE,
+    tooLong: PRE_VISIT_INSTRUCTIONS_TOO_LONG_MESSAGE,
+    noLinks: PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE,
+    tooLarge: PRE_VISIT_INSTRUCTIONS_TOO_LARGE_MESSAGE,
+  },
+};
 
 /**
  * Valida la lista que llega de la API y la convierte en el mapa que se guarda
  * (`{ idioma: texto }`). La lista es el mapa entero: un idioma que no viene se
- * quita. Reglas, en orden:
+ * quita. Reglas (las de `patientPlainTextFromEntries`), en orden:
  *  - etiqueta BCP 47 válida (se canoniza: «EN» → «en»);
  *  - sin idiomas repetidos;
  *  - texto vacío tras recortar → se descarta esa entrada;
@@ -161,46 +129,11 @@ export function preVisitInstructionsFromEntries(
     current: Readonly<Record<string, string>>;
   },
 ): { map: Record<string, string> } | { error: string } {
-  if (entries.length > PRE_VISIT_INSTRUCTIONS_MAX_LANGUAGES) {
-    return { error: PRE_VISIT_INSTRUCTIONS_TOO_MANY_MESSAGE };
-  }
-  const map: Record<string, string> = {};
-  const seen = new Set<string>();
-  for (const entry of entries) {
-    const language = canonicalLanguageTag(entry.language);
-    if (!language) return { error: LANGUAGE_TAG_MESSAGE };
-    if (seen.has(language)) {
-      return { error: PRE_VISIT_INSTRUCTIONS_REPEATED_MESSAGE };
-    }
-    seen.add(language);
-    const text = normalizePreVisitInstructionText(entry.text);
-    if (text === '') continue;
-    if (
-      !context.patientLanguages.includes(language) &&
-      context.current[language] !== text
-    ) {
-      return { error: PRE_VISIT_INSTRUCTIONS_LANGUAGE_NOT_OFFERED_MESSAGE };
-    }
-    if ([...text].length > PRE_VISIT_INSTRUCTIONS_TEXT_MAX) {
-      return { error: PRE_VISIT_INSTRUCTIONS_TOO_LONG_MESSAGE };
-    }
-    if (
-      LINK_OR_HTML.test(text) ||
-      hasBareDomain(text) ||
-      IPV4.test(text) ||
-      EMAIL_ADDRESS.test(text)
-    ) {
-      return { error: PRE_VISIT_INSTRUCTIONS_NO_LINKS_MESSAGE };
-    }
-    map[language] = text;
-  }
-  if (
-    Buffer.byteLength(JSON.stringify(map), 'utf8') >
-    PRE_VISIT_INSTRUCTIONS_TOTAL_BYTES_MAX
-  ) {
-    return { error: PRE_VISIT_INSTRUCTIONS_TOO_LARGE_MESSAGE };
-  }
-  return { map };
+  return patientPlainTextFromEntries(
+    entries,
+    context,
+    PRE_VISIT_INSTRUCTIONS_RULES,
+  );
 }
 
 /**
