@@ -18,6 +18,10 @@ import {
 import type { ItemAttributionChange } from '../plan-item-attribution';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { ReferenceSnapshot } from '../../../discounts/domain/reference-in-plan';
+import type {
+  IdempotencyRequest,
+  IdempotentRecord,
+} from '../../../../shared/validation/idempotent-create';
 
 // NOTE: deliberately NO `tenantId`/`id`/`status` field — the tenant comes
 // from the guarded request context (never the client, same convention as
@@ -275,7 +279,24 @@ export interface DoneMirrorInput {
 export const TREATMENT_PLAN_REPOSITORY = Symbol('TREATMENT_PLAN_REPOSITORY');
 
 export interface TreatmentPlanRepository {
-  createPlan(input: CreateTreatmentPlanRepoInput): Promise<TreatmentPlan>;
+  createPlan(
+    input: CreateTreatmentPlanRepoInput,
+    /** DX-574: clave y huella del alta; un choque del único deshace todo. */
+    idempotency?: IdempotencyRequest,
+  ): Promise<TreatmentPlan>;
+
+  /**
+   * DX-574: el plan que creó esta Idempotency-Key en la clínica (también si
+   * se retiró después), con la huella de su petición, o null.
+   */
+  findPlanByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<TreatmentPlan> | null>;
+
+  /** DX-574: igual para el ítem que creó la clave. */
+  findItemByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<TreatmentPlanItem> | null>;
 
   /**
    * The plan plus its active (non-deleted) items, or `null` if the plan is
@@ -305,7 +326,12 @@ export interface TreatmentPlanRepository {
    * deja que `decide` valide su estado y calcule el ítem (BE-036). 404 si el
    * plan no existe o es de otra clínica.
    */
-  addItem(planId: string, decide: DecideNewItem): Promise<TreatmentPlanItem>;
+  addItem(
+    planId: string,
+    decide: DecideNewItem,
+    /** DX-574: clave y huella del alta del ítem. */
+    idempotency?: IdempotencyRequest,
+  ): Promise<TreatmentPlanItem>;
 
   /**
    * DX-559 (D8): aplica una plantilla en UNA transacción, todo o nada:

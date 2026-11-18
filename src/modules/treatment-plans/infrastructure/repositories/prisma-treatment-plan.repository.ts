@@ -72,6 +72,10 @@ import {
   postOpCheckFromProcedure,
   reschedulePendingPostOpCheck,
 } from '../../../post-op-checks/infrastructure/post-op-check-from-procedure';
+import type {
+  IdempotencyRequest,
+  IdempotentRecord,
+} from '../../../../shared/validation/idempotent-create';
 
 type PrismaTreatmentPlan = Prisma.TreatmentPlanGetPayload<
   Record<string, never>
@@ -391,6 +395,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
 
   async createPlan(
     input: CreateTreatmentPlanRepoInput,
+    idempotency?: IdempotencyRequest,
   ): Promise<TreatmentPlan> {
     const tenantId = this.requireTenantId();
     const plan = await this.prisma.runWithTenant(async (tx) => {
@@ -401,10 +406,42 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           currency: input.currency,
           notes: input.notes,
           createdById: input.createdById,
+          idempotencyKey: idempotency?.key ?? null,
+          idempotencyFingerprint: idempotency?.fingerprint ?? null,
         },
       });
     });
     return mapToEntity(plan);
+  }
+
+  async findPlanByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<TreatmentPlan> | null> {
+    const tenantId = this.requireTenantId();
+    const plan = await this.prisma.runWithTenant((tx) =>
+      tx.treatmentPlan.findFirst({ where: { tenantId, idempotencyKey: key } }),
+    );
+    return plan
+      ? { fingerprint: plan.idempotencyFingerprint, value: mapToEntity(plan) }
+      : null;
+  }
+
+  async findItemByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<TreatmentPlanItem> | null> {
+    const tenantId = this.requireTenantId();
+    const item = await this.prisma.runWithTenant((tx) =>
+      tx.treatmentPlanItem.findFirst({
+        where: { tenantId, idempotencyKey: key },
+        include: ITEM_ATTRIBUTION_INCLUDE,
+      }),
+    );
+    return item
+      ? {
+          fingerprint: item.idempotencyFingerprint,
+          value: mapItemToEntity(item),
+        }
+      : null;
   }
 
   async findPlanById(id: string): Promise<TreatmentPlanWithItems | null> {
@@ -520,6 +557,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
   async addItem(
     planId: string,
     decide: DecideNewItem,
+    idempotency?: IdempotencyRequest,
   ): Promise<TreatmentPlanItem> {
     const tenantId = this.requireTenantId();
     const item = await this.prisma.runWithTenant(async (tx) => {
@@ -558,6 +596,8 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
             input.discountStamp ?? undefined,
             this.tenantContext,
           )),
+          idempotencyKey: idempotency?.key ?? null,
+          idempotencyFingerprint: idempotency?.fingerprint ?? null,
         },
       });
     });

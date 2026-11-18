@@ -264,7 +264,54 @@ export class InMemoryTreatmentPlanRepository
     };
   }
 
-  createPlan(input: CreateTreatmentPlanRepoInput): Promise<TreatmentPlan> {
+  /** DX-574: Idempotency-Key → id del plan o del ítem y huella. */
+  readonly idempotencyKeys = new Map<
+    string,
+    { id: string; fingerprint: string }
+  >();
+
+  private claimKey(
+    idempotency: { key: string; fingerprint: string } | undefined,
+    id: string,
+  ): void {
+    if (!idempotency) return;
+    if (this.idempotencyKeys.has(idempotency.key)) {
+      throw new Error('P2002 tenant_idempotency_key');
+    }
+    this.idempotencyKeys.set(idempotency.key, {
+      id,
+      fingerprint: idempotency.fingerprint,
+    });
+  }
+
+  findPlanByIdempotencyKey(
+    key: string,
+  ): Promise<{ fingerprint: string | null; value: TreatmentPlan } | null> {
+    const stored = this.idempotencyKeys.get(key);
+    const row = stored && this.plans.find((p) => p.id === stored.id);
+    return Promise.resolve(
+      row && stored
+        ? { fingerprint: stored.fingerprint, value: this.toPlanEntity(row) }
+        : null,
+    );
+  }
+
+  findItemByIdempotencyKey(
+    key: string,
+  ): Promise<{ fingerprint: string | null; value: TreatmentPlanItem } | null> {
+    const stored = this.idempotencyKeys.get(key);
+    const row = stored && this.items.find((i) => i.id === stored.id);
+    return Promise.resolve(
+      row && stored
+        ? { fingerprint: stored.fingerprint, value: this.toItemEntity(row) }
+        : null,
+    );
+  }
+
+  createPlan(
+    input: CreateTreatmentPlanRepoInput,
+    idempotency?: { key: string; fingerprint: string },
+  ): Promise<TreatmentPlan> {
     const row: StoredPlan = {
       id: `plan-${++seq}`,
       tenantId: 't1',
@@ -287,6 +334,7 @@ export class InMemoryTreatmentPlanRepository
       deletedAt: null,
       acceptance: null,
     };
+    this.claimKey(idempotency, row.id);
     this.plans.push(row);
     return Promise.resolve(this.toPlanEntity(row));
   }
@@ -509,6 +557,7 @@ export class InMemoryTreatmentPlanRepository
   async addItem(
     planId: string,
     decide: DecideNewItem,
+    idempotency?: { key: string; fingerprint: string },
   ): Promise<TreatmentPlanItem> {
     const plan = this.lockedPlan(planId);
     if (!plan) {
@@ -538,6 +587,7 @@ export class InMemoryTreatmentPlanRepository
       updatedAt: NOW,
       deletedAt: null,
     };
+    this.claimKey(idempotency, row.id);
     this.items.push(row);
     return this.toItemEntity(row);
   }

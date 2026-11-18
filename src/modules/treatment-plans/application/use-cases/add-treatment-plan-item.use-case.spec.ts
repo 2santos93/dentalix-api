@@ -155,6 +155,8 @@ function makeRepo(
         notes: input.notes ?? null,
       });
     },
+    findPlanByIdempotencyKey: () => Promise.resolve(null),
+    findItemByIdempotencyKey: () => Promise.resolve(null),
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
     updateItem: (): Promise<TreatmentPlanItemUpdate> =>
