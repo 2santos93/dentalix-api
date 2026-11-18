@@ -6,6 +6,11 @@ import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
 import { EmailOutbox } from '../src/modules/notifications/email/application/email-outbox.service';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
+import {
+  loadMailConfig,
+  MAIL_CONFIG,
+} from '../src/modules/notifications/email/infrastructure/mail-config';
+import { TenantLinkBaseService } from '../src/shared/tenancy/tenant-link-base.service';
 import { GetQuoteFollowUpReportUseCase } from '../src/modules/quote-follow-up/application/quote-follow-up-report.use-case';
 import {
   QUOTE_FOLLOW_UP_SEND_JOB,
@@ -210,6 +215,16 @@ describe('DX-561 · seguimiento automático de presupuestos (int)', () => {
       .useValue(() => new Date(clock.now))
       .overrideProvider(MAILER)
       .useValue(mailer)
+      // Tope diario de la clínica holgado (el cupo del seguimiento es la mitad:
+      // 500); el enfriamiento por destinatario sigue siendo el de verdad.
+      .overrideProvider(MAIL_CONFIG)
+      .useValue({
+        ...loadMailConfig((key) => process.env[key]),
+        quotas: {
+          ...loadMailConfig((key) => process.env[key]).quotas,
+          tenantDaily: 1000,
+        },
+      })
       .compile();
     await app.init();
   });
@@ -372,9 +387,21 @@ describe('DX-561 · seguimiento automático de presupuestos (int)', () => {
     expect(sent[0].text).not.toContain('implante');
   });
 
-  it('el enlace vivo del plan (enviado por la clínica) se anula sin usuario y queda solo el del aviso', async () => {
+  it('el aviso siguiente anula sin usuario el enlace del aviso anterior y cancela su email si sigue pendiente', async () => {
     const g = await group(a);
     expect(await send(a, g, 1)).toBe('SENT');
+    const [first] = await messages(g);
+    // El email del paso 1 aún sin salir.
+    await app.get(EmailDispatcher).whenIdle();
+    await owner.emailOutbox.updateMany({
+      where: { referenceId: first.id },
+      data: {
+        status: 'PENDING',
+        // Un pendiente lleva su payload cifrado (CHECK); no llega a salir.
+        payload: Buffer.from('pendiente'),
+        nextAttemptAt: plusDays(new Date(), 1),
+      },
+    });
     clock.now = DAY10;
     await daysLater();
     expect(await send(a, g, 2)).toBe('SENT');
@@ -386,6 +413,196 @@ describe('DX-561 · seguimiento automático de presupuestos (int)', () => {
     });
     expect(requests[0].revokedAt).not.toBeNull();
     expect(requests[1]).toMatchObject({ revokedAt: null });
+    expect(
+      await owner.emailOutbox.findFirstOrThrow({
+        where: { referenceId: first.id },
+        select: { status: true, lastError: true },
+      }),
+    ).toEqual({ status: 'FAILED', lastError: 'Superseded' });
+  });
+
+  /** Un enlace de presupuesto enviado por la clínica (origin STAFF), con su email pendiente. */
+  async function staffLink(g: Group, expiresAt: Date): Promise<string> {
+    const createdAt = new Date(expiresAt.getTime() - 72 * 60 * 60 * 1000);
+    const request = await owner.signatureRequest.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: a.main,
+        patientId: g.patientId,
+        type: 'BUDGET',
+        channel: 'EMAIL',
+        treatmentPlanId: g.planIds[0],
+        title: 'Presupuesto de tratamiento',
+        body: 'Condiciones',
+        budgetContent: { version: 1 },
+        budgetContentHash: 'a'.repeat(64),
+        professionalUserId: a.dentist.userId,
+        professionalName: 'Dra. Reportes',
+        signerType: 'PATIENT',
+        signerName: 'Ana María',
+        destination: g.email,
+        destinationMasked: 'an***@seguimiento.test',
+        tokenHash: randomUUID().replace(/-/g, '').repeat(2),
+        expiresAt,
+        createdById: a.dentist.userId,
+        createdAt,
+      },
+    });
+    await owner.emailOutbox.create({
+      data: {
+        tenantId: a.tenantId,
+        template: 'SIGNATURE_REQUEST',
+        toHash: 'b'.repeat(64),
+        payload: Buffer.from('pendiente'),
+        toMasked: 'an***@seguimiento.test',
+        referenceId: request.id,
+        status: 'PENDING',
+        nextAttemptAt: plusDays(new Date(), 1),
+        createdAt: plusDays(new Date(), -3),
+      },
+    });
+    return request.id;
+  }
+
+  it('un enlace de la clínica vigente no se reemplaza: el paso se aplaza sin registrar nada', async () => {
+    const g = await group(a);
+    const staffId = await staffLink(g, plusDays(DAY3, 2));
+    expect(await send(a, g, 1)).toBe('DEFERRED');
+    expect(await messages(g)).toHaveLength(0);
+    expect(await followUpRequests(g)).toHaveLength(0);
+    expect(
+      await owner.reminderOptOutLink.count({
+        where: { patientId: g.patientId },
+      }),
+    ).toBe(0);
+    expect(
+      await owner.signatureRequest.findUniqueOrThrow({
+        where: { id: staffId },
+      }),
+    ).toMatchObject({ revokedAt: null });
+  });
+
+  it('un enlace de la clínica caducado sí se anula (sin usuario) y su email pendiente se cancela', async () => {
+    const g = await group(a);
+    const staffId = await staffLink(g, plusDays(DAY3, -1));
+    expect(await send(a, g, 1)).toBe('SENT');
+    expect(
+      await owner.signatureRequest.findUniqueOrThrow({
+        where: { id: staffId },
+      }),
+    ).toMatchObject({ revokedById: null, revokedByFollowUp: true });
+    expect(
+      await owner.emailOutbox.findFirstOrThrow({
+        where: { referenceId: staffId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: 'FAILED' });
+  });
+
+  it('sin dirección web de la clínica para los enlaces: NO_LINK_HOST', async () => {
+    const g = await group(a);
+    const spy = jest
+      .spyOn(app.get(TenantLinkBaseService), 'forTenant')
+      .mockResolvedValueOnce(null);
+    expect(await send(a, g, 1)).toBe('SKIPPED');
+    spy.mockRestore();
+    expect((await messages(g))[0]).toMatchObject({
+      status: 'SKIPPED',
+      reason: 'NO_LINK_HOST',
+    });
+  });
+
+  it('opciones presentadas en sedes distintas: un solo aviso, en la sede del primer presupuesto', async () => {
+    const g = await group(a, { options: 2 });
+    await owner.treatmentPlan.update({
+      where: { id: g.planIds[1] },
+      data: { presentedLocationId: a.norte },
+    });
+    expect(await send(a, g, 1)).toBe('SENT');
+    const [row] = await messages(g);
+    expect(row).toMatchObject({ locationId: a.main, planIds: g.planIds });
+    expect((await followUpRequests(g)).map((r) => r.locationId)).toEqual([
+      a.main,
+      a.main,
+    ]);
+  });
+
+  it('cupo propio del seguimiento (la mitad del tope diario de la clínica): no encola ni registra lo que no cabe', async () => {
+    const c = await seed.clinic('dx561-int-cupo');
+    await settings(c);
+    const g = await group(c);
+    // 500 avisos en las últimas 24 h = el cupo (1000 × 0,5).
+    await owner.emailOutbox.createMany({
+      data: Array.from({ length: 500 }, () => ({
+        tenantId: c.tenantId,
+        template: 'QUOTE_FOLLOW_UP' as const,
+        toHash: 'c'.repeat(64),
+        toMasked: 'x***@seguimiento.test',
+        status: 'SENT' as const,
+      })),
+    });
+    await app.get(QuoteFollowUpSweep).run();
+    expect(
+      await owner.job.count({
+        where: {
+          name: QUOTE_FOLLOW_UP_SEND_JOB,
+          payload: { path: ['groupId'], equals: g.groupId },
+        },
+      }),
+    ).toBe(0);
+    expect(await send(c, g, 1)).toBe('QUOTA');
+    expect(await messages(g)).toHaveLength(0);
+    expect(await followUpRequests(g)).toHaveLength(0);
+    // Al día siguiente (fuera de las 24 h) sale.
+    await owner.$executeRaw`
+      UPDATE "email_outbox" SET "createdAt" = "createdAt" - interval '2 days'
+       WHERE "tenantId" = ${c.tenantId}::uuid`;
+    await app.get(QuoteFollowUpSweep).run();
+    expect(
+      await owner.job.count({
+        where: {
+          name: QUOTE_FOLLOW_UP_SEND_JOB,
+          payload: { path: ['groupId'], equals: g.groupId },
+        },
+      }),
+    ).toBe(1);
+    expect(await send(c, g, 1)).toBe('SENT');
+  });
+
+  it('el barrido no encola un grupo en pausa ni uno con cita antes del primer aviso', async () => {
+    const paused = await group(a);
+    await owner.treatmentPlan.update({
+      where: { id: paused.groupId },
+      data: {
+        quoteFollowUpPausedAt: new Date(),
+        quoteFollowUpPausedById: a.dentist.userId,
+      },
+    });
+    const waiting = await group(a);
+    await seed.withoutTriggers((tx) =>
+      tx.appointment.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.main,
+          patientId: waiting.patientId,
+          providerId: a.dentist.userId,
+          start: day(36, '09:00'),
+          end: day(36, '09:30'),
+          status: 'SCHEDULED',
+        },
+      }),
+    );
+    await app.get(QuoteFollowUpSweep).run();
+    for (const g of [paused, waiting]) {
+      expect(
+        await owner.job.count({
+          where: {
+            name: QUOTE_FOLLOW_UP_SEND_JOB,
+            payload: { path: ['groupId'], equals: g.groupId },
+          },
+        }),
+      ).toBe(0);
+    }
   });
 
   it('aceptar, rechazar o agendar detienen: la parada se registra una vez y no sale nada más', async () => {
@@ -611,6 +828,9 @@ describe('DX-561 · seguimiento automático de presupuestos (int)', () => {
     await app.get(EmailDispatcher).whenIdle();
     expect(mailer.sent.some((m) => m.to === g.email)).toBe(false);
     const email = mailer.sent.filter((m) => m.to === guardian).at(-1)!;
+    expect(email.subject).toBe(
+      'Hay un presupuesto de Ana pendiente en dx561-int-a',
+    );
     expect(email.text).toContain('Hola, Carmen');
     expect(email.text).toContain('Hay un presupuesto de Ana pendiente');
     expect((await followUpRequests(g))[0]).toMatchObject({
@@ -639,6 +859,12 @@ describe('DX-561 · seguimiento automático de presupuestos (int)', () => {
     expect(await send(a, g, 1)).toBe('QUOTA');
     expect(await messages(g)).toHaveLength(0);
     expect(await followUpRequests(g)).toHaveLength(0);
+    // La baja va en la transacción del aviso: no queda ningún enlace suelto.
+    expect(
+      await owner.reminderOptOutLink.count({
+        where: { patientId: g.patientId },
+      }),
+    ).toBe(0);
     // La pasada siguiente (otra hora, otra clave) lo vuelve a encolar.
     await owner.emailOutbox.deleteMany({
       where: { template: 'PAYMENT_REPORT_REJECTED' },

@@ -22,6 +22,10 @@ import {
 import { QUOTE_FOLLOW_UP_REPORT_FORBIDDEN_MESSAGE } from '../src/modules/quote-follow-up/presentation/quote-follow-up-report.controller';
 import { QUOTE_FOLLOW_UP_SETTINGS_FORBIDDEN_MESSAGE } from '../src/modules/quote-follow-up/presentation/quote-follow-up-settings.controller';
 import { addCivilDays } from '../src/shared/time/civil-day';
+import {
+  locationData,
+  REGIONAL_CARACAS_FIXTURE,
+} from './support/location-fixtures';
 import { fixedSedeDay } from './support/sede-clock';
 import {
   Clinic,
@@ -288,6 +292,44 @@ describe('Seguimiento automático de presupuestos (e2e, DX-561)', () => {
       ).toMatchObject(body);
     });
 
+    it('activar una sede sin zona horaria: 409 LOCATION_TIMEZONE_REQUIRED; apagarla sí se guarda', async () => {
+      const sede = await raw.location.create({
+        data: {
+          ...locationData(REGIONAL_CARACAS_FIXTURE, {
+            tenantId: clinic.tenantId,
+            name: 'Sede sin zona',
+          }),
+          timeZone: null,
+        },
+      });
+      const res = await putSettings(
+        { enabled: true, offsetsDays: [3], sendFromHour: 9, sendUntilHour: 19 },
+        clinic.adminToken,
+        sede.id,
+      ).expect(409);
+      expect(res.body).toMatchObject({
+        code: 'LOCATION_TIMEZONE_REQUIRED',
+        message:
+          'Configura una zona horaria válida para la sede y vuelve a intentarlo.',
+        locationId: sede.id,
+      });
+      expect(
+        await raw.locationQuoteFollowUpSettings.count({
+          where: { locationId: sede.id },
+        }),
+      ).toBe(0);
+      await putSettings(
+        {
+          enabled: false,
+          offsetsDays: [3],
+          sendFromHour: 9,
+          sendUntilHour: 19,
+        },
+        clinic.adminToken,
+        sede.id,
+      ).expect(200);
+    });
+
     it('PUT de una sede que no existe: 404 «Sede no encontrada»', async () => {
       const res = await putSettings(
         { enabled: true, offsetsDays: [3], sendFromHour: 9, sendUntilHour: 19 },
@@ -379,6 +421,61 @@ describe('Seguimiento automático de presupuestos (e2e, DX-561)', () => {
       expect((twice.body as { message: string }).message).toBe(
         FOLLOW_UP_NOT_PAUSED_MESSAGE,
       );
+    });
+
+    it('un miembro restringido a otra sede no pausa (403), tampoco si el ancla no tiene sede y la alternativa sí la tiene', async () => {
+      const norte = await raw.location.create({
+        data: locationData(REGIONAL_CARACAS_FIXTURE, {
+          tenantId: clinic.tenantId,
+          name: 'Sede Norte',
+        }),
+      });
+      const user = await raw.user.create({
+        data: {
+          email: `recepcion-norte@${clinic.subdomain}.test`,
+          passwordHash: (
+            await raw.user.findUniqueOrThrow({
+              where: { id: clinic.adminUserId },
+              select: { passwordHash: true },
+            })
+          ).passwordHash,
+          fullName: 'Recepción Norte',
+          emailVerifiedAt: new Date('2026-01-01T00:00:00Z'),
+        },
+      });
+      const membership = await raw.clinicMembership.create({
+        data: { tenantId: clinic.tenantId, userId: user.id, role: 'RECEPTION' },
+      });
+      await raw.membershipLocation.create({
+        data: {
+          tenantId: clinic.tenantId,
+          membershipId: membership.id,
+          locationId: norte.id,
+        },
+      });
+      const token = await loginAs(app, clinic.host, user.email);
+      const g = await presented(2);
+      await pause(g.planIds[0], token).expect(403);
+      // El ancla (rechazada, de antes de guardar la sede) sin sede: cuenta la
+      // de la alternativa, que sigue presentada.
+      await raw.treatmentPlan.update({
+        where: { id: g.planIds[0] },
+        data: {
+          status: 'REJECTED',
+          rejectedAt: new Date(),
+          rejectionReason: 'PRICE',
+          presentedLocationId: null,
+        },
+      });
+      await pause(g.planIds[0], token).expect(403);
+      expect(
+        await raw.treatmentPlan.count({
+          where: {
+            id: { in: g.planIds },
+            quoteFollowUpPausedAt: { not: null },
+          },
+        }),
+      ).toBe(0);
     });
 
     it('DENTIST y ASSISTANT no pausan (403); un plan aceptado es 409 y uno que no existe, 404', async () => {
