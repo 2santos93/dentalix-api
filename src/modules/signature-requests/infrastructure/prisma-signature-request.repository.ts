@@ -125,6 +125,7 @@ function toRecord(
     signedAt: row.signedAt,
     revokedAt: row.revokedAt,
     createdById: row.createdById,
+    origin: row.origin,
     createdAt: row.createdAt,
     budgetContent: row.budgetContent,
     budgetContentHash: row.budgetContentHash,
@@ -135,7 +136,8 @@ function toListRow(row: ListRow): SignatureRequestListRow {
   const { createdBy, consent, budgetAcceptance, ...request } = row;
   return {
     request: toRecord(request),
-    sentByName: createdBy.fullName,
+    // DX-561: las del seguimiento automático no tienen usuario.
+    sentByName: createdBy?.fullName ?? null,
     consent: consent
       ? {
           id: consent.id,

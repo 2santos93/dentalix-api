@@ -1,6 +1,7 @@
 import type {
   ConsentSignerType,
   SignatureRequestChannel,
+  SignatureRequestOrigin,
   SignatureRequestType,
   SignedConsentPdfStatus,
 } from '@prisma/client';
@@ -44,7 +45,10 @@ export interface SignatureRequestRecord {
   verifiedAt: Date | null;
   signedAt: Date | null;
   revokedAt: Date | null;
-  createdById: string;
+  /** DX-561: null solo en las del seguimiento automático (origin FOLLOW_UP). */
+  createdById: string | null;
+  /** DX-561: STAFF (la clínica) o FOLLOW_UP (el seguimiento automático). */
+  origin: SignatureRequestOrigin;
   createdAt: Date;
   /** DX-415 (BUDGET): la foto del presupuesto enviado (JSONB, plan-quote.ts). */
   budgetContent: unknown;
@@ -72,7 +76,10 @@ export interface SignatureRequestSummary {
   professionalName: string;
   status: SignatureRequestStatus;
   sentAt: Date;
+  /** null en las del seguimiento automático (sin usuario). */
   sentByName: string | null;
+  /** DX-561: STAFF (la clínica) o FOLLOW_UP (el seguimiento automático). */
+  origin: SignatureRequestOrigin;
   expiresAt: Date;
   openedAt: Date | null;
   verifiedAt: Date | null;

@@ -195,6 +195,7 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
       verifiedAt: null,
       signedAt: null,
       revokedAt: null,
+      origin: 'STAFF',
     });
     return { id, supersededIds };
   }

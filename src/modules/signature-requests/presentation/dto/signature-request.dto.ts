@@ -99,7 +99,20 @@ export class SignatureRequestDto {
   })
   status!: (typeof SIGNATURE_REQUEST_STATUSES)[number];
   @ApiProperty({ format: 'date-time' }) sentAt!: Date;
-  @ApiProperty({ type: String, nullable: true }) sentByName!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Quién la envió; null en las del seguimiento automático (origin FOLLOW_UP)',
+  })
+  sentByName!: string | null;
+  @ApiProperty({
+    enum: ['STAFF', 'FOLLOW_UP'],
+    enumName: 'SignatureRequestOrigin',
+    description:
+      'DX-561: STAFF = la envió la clínica; FOLLOW_UP = el seguimiento automático de presupuestos (sin usuario)',
+  })
+  origin!: 'STAFF' | 'FOLLOW_UP';
   @ApiProperty({ format: 'date-time' }) expiresAt!: Date;
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
   openedAt!: Date | null;

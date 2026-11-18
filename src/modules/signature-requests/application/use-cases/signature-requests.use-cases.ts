@@ -159,6 +159,7 @@ export function toSignatureRequestSummary(
     ),
     sentAt: request.createdAt,
     sentByName: row.sentByName,
+    origin: request.origin,
     expiresAt: request.expiresAt,
     openedAt: request.openedAt,
     verifiedAt: request.verifiedAt,
