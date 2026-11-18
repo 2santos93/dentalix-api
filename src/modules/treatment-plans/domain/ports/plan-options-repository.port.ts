@@ -56,6 +56,20 @@ export interface PendingFollowUpRow {
   /** Σ (precio − descuento) de los ítems vivos, en `currency`. */
   total: number;
   itemCount: number;
+  /** DX-561: el seguimiento automático del grupo (el mismo en sus opciones). */
+  followUp: PendingFollowUpState;
+}
+
+/** DX-561: el último paso registrado del seguimiento y si está en pausa. */
+export interface PendingFollowUpState {
+  /** 1..3, o null si aún no salió ni se omitió ningún aviso. */
+  lastStep: number | null;
+  /** Cuándo salió el último aviso ENVIADO (null si ninguno). */
+  lastSentAt: Date | null;
+  lastStatus: 'SENT' | 'SKIPPED' | null;
+  /** El motivo si el último paso se omitió. */
+  lastReason: string | null;
+  paused: boolean;
 }
 
 export const PLAN_OPTIONS_REPOSITORY = Symbol('PLAN_OPTIONS_REPOSITORY');

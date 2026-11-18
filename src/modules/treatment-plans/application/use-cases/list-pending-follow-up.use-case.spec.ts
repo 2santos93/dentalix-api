@@ -23,6 +23,13 @@ function row(overrides: Partial<PendingFollowUpRow> = {}): PendingFollowUpRow {
     currency: 'USD',
     total: 3400000,
     itemCount: 2,
+    followUp: {
+      lastStep: null,
+      lastSentAt: null,
+      lastStatus: null,
+      lastReason: null,
+      paused: false,
+    },
     ...overrides,
   };
 }
@@ -82,6 +89,13 @@ describe('ListPendingFollowUpUseCase (DX-040)', () => {
           currency: 'USD',
           total: 3400000,
           itemCount: 2,
+          followUp: {
+            lastStep: null,
+            lastSentAt: null,
+            lastStatus: null,
+            lastReason: null,
+            paused: false,
+          },
         },
       ],
       total: 1,

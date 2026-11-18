@@ -26,8 +26,10 @@ import {
   PaymentLinkEmailVars,
   PaymentReportRejectedEmailVars,
   WeeklyDigestEmailVars,
+  QuoteFollowUpEmailVars,
 } from '../../domain/email-message';
 import { PRESCRIPTION_COPY_CATALOG } from './catalog/prescription-copy.catalog';
+import { QUOTE_FOLLOW_UP_CATALOG } from './catalog/quote-follow-up.catalog';
 import { EmailBlock, EmailTable, renderLayout } from './layout';
 import { appointmentReminder } from './appointment-reminder.template';
 
@@ -662,6 +664,56 @@ function weeklyDigest(
   });
 }
 
+/** DX-561: letra de cada opción del aviso (A, B, C), por su orden. */
+const OPTION_LETTERS = ['A', 'B', 'C'] as const;
+
+/**
+ * DX-561: el aviso de seguimiento de un presupuesto presentado, en el idioma
+ * del paciente. Una opción: un botón. Varias (A/B): un enlace por opción con
+ * su letra, nunca su etiqueta (puede nombrar el tratamiento). La baja, al pie.
+ */
+function quoteFollowUp(
+  vars: QuoteFollowUpEmailVars,
+  brand: EmailBrand | null,
+  locale: EmailLocale,
+): RenderedEmail {
+  if (vars.urls.length < 1 || vars.urls.length > OPTION_LETTERS.length) {
+    throw new Error('El aviso de seguimiento lleva de 1 a 3 enlaces');
+  }
+  const t = QUOTE_FOLLOW_UP_CATALOG[locale];
+  const single = vars.urls.length === 1;
+  return renderLayout({
+    brand,
+    chrome: t,
+    subject: t.subject(vars.clinicName),
+    heading: t.heading(vars.recipientFirstName),
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: t.intro(vars.clinicName, vars.patientFirstName),
+      },
+      { kind: 'note', text: t.note },
+    ],
+    action: single ? { label: t.action, url: vars.urls[0] } : null,
+    links: single
+      ? null
+      : {
+          lead: t.optionsLead,
+          items: vars.urls.map((url, i) => ({
+            label: t.option(OPTION_LETTERS[i]),
+            url,
+          })),
+        },
+    footerLink: vars.unsubscribeUrl
+      ? {
+          lead: t.unsubscribeLead,
+          label: t.unsubscribeLabel,
+          url: vars.unsubscribeUrl,
+        }
+      : null,
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -687,6 +739,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'payment-report-rejected': paymentReportRejected,
   'external-order-copy': externalOrderCopy,
   'weekly-digest': weeklyDigest,
+  'quote-follow-up': quoteFollowUp,
   'mfa-notice': mfaNotice,
   'mfa-enrollment-code': mfaEnrollmentCode,
 };

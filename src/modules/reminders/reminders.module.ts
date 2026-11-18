@@ -80,6 +80,7 @@ import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tena
     },
   ],
   // El webhook de WhatsApp de DX-126 registrará la baja con este caso de uso.
-  exports: [OptOutByMessageUseCase],
+  // DX-561: el aviso de seguimiento de presupuestos lleva la misma baja.
+  exports: [OptOutByMessageUseCase, ReminderOptOutLinks],
 })
 export class RemindersModule {}
