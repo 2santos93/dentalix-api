@@ -26,6 +26,12 @@ export interface DentalCatalogItem {
   requiresPostOpCheck: boolean;
   /** DX-566: días hábiles de la sede tras el procedimiento (1–30). */
   postOpCheckAfterDays: number;
+  /**
+   * DX-560: «Descripción para el paciente» por idioma, como lista ordenada
+   * (español primero y luego alfabético). Vacía = sin descripción: el
+   * paciente lee el nombre del catálogo en su idioma.
+   */
+  patientDescription: { language: string; text: string }[];
   active: boolean;
   /**
    * DX-455: plantilla de evolución ligada al procedimiento (el vínculo

@@ -101,6 +101,11 @@ export interface CreateSignatureRequestRepoInput {
   /** BUDGET (DX-415): la foto del presupuesto y su hash; CONSENT: sin ellos. */
   budgetContent?: object;
   budgetContentHash?: string;
+  /**
+   * DX-560 (BUDGET): la presentación al paciente congelada, fuera de lo
+   * sellado (`BudgetPresentation`); CONSENT: sin ella.
+   */
+  budgetPresentation?: object;
   professionalUserId: string;
   professionalName: string;
   signerType: ConsentSignerType;

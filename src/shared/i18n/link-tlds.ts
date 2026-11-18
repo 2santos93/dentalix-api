@@ -1,8 +1,10 @@
 /**
  * DX-564: dominios de primer nivel (TLD) públicos que WhatsApp, Gmail o iOS
  * convierten en enlace aunque el texto no lleve `http://` («ejemplo.com»,
- * «bit.ly», «x.com», «tienda.com.ve»). Las indicaciones previas a la cita no
- * admiten enlaces: un «palabra.tld» con uno de estos TLD cuenta como enlace.
+ * «bit.ly», «x.com», «tienda.com.ve»). Los textos para el paciente
+ * (indicaciones previas a la cita, DX-564; descripción del catálogo, DX-560)
+ * no admiten enlaces: un «palabra.tld» con uno de estos TLD cuenta como
+ * enlace.
  *
  * Lista CERRADA a propósito, en minúsculas (la comparación no distingue
  * mayúsculas): con «cualquier palabra tras un punto» se marcaría texto
@@ -13,7 +15,7 @@
  * Noruega); el mensaje pide escribirlo como texto y basta con un espacio.
  *
  * Para añadir uno: en minúsculas, aquí, y un caso en
- * `appointment-type-rules.spec.ts`.
+ * `patient-plain-text.spec.ts`.
  */
 export const LINK_TLDS: ReadonlySet<string> = new Set([
   // Genéricos.

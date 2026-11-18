@@ -119,6 +119,7 @@ async function seed(): Promise<Seeded> {
       ...row,
       defaultPrice: 40,
       suggestedClinicalNoteTemplateId: null,
+      patientDescription: [],
     } as DentalCatalogItem;
   };
   // Los códigos del catálogo semilla: la siembra liga los disparadores.

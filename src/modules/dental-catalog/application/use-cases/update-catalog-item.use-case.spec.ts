@@ -31,6 +31,7 @@ function fakeItem(
     active: true,
     clinicalNoteTemplateId: null,
     suggestedClinicalNoteTemplateId: null,
+    patientDescription: [],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
@@ -297,7 +298,8 @@ describe('UpdateCatalogItemUseCase · control postoperatorio (DX-566)', () => {
       findById: () => Promise.resolve(existing),
       update: (_id, patch) => {
         patches.push(patch);
-        return Promise.resolve({ ...existing, ...patch });
+        const { patientDescription: _description, ...rest } = patch;
+        return Promise.resolve({ ...existing, ...rest });
       },
     });
     return { uc: new UpdateCatalogItemUseCase(repo, noTemplates), patches };
@@ -338,5 +340,67 @@ describe('UpdateCatalogItemUseCase · control postoperatorio (DX-566)', () => {
     await expect(
       uc.execute('c1', { postOpCheckAfterDays: 31 }, ACTOR),
     ).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe('UpdateCatalogItemUseCase · descripción para el paciente (DX-560)', () => {
+  function capture(existing: DentalCatalogItem, languages: string[]) {
+    const patches: UpdateDentalCatalogItemRepoInput[] = [];
+    const repo = makeRepo({
+      findById: () => Promise.resolve(existing),
+      update: (_id, patch) => {
+        patches.push(patch);
+        const { patientDescription: _description, ...rest } = patch;
+        return Promise.resolve({ ...existing, ...rest });
+      },
+    });
+    const uc = new UpdateCatalogItemUseCase(repo, noTemplates, {
+      list: () => Promise.resolve(languages),
+    });
+    return { uc, patches };
+  }
+
+  it('la lista es el mapa entero: un idioma que no viene se quita', async () => {
+    const { uc, patches } = capture(
+      fakeItem({
+        patientDescription: [
+          { language: 'es', text: 'Antes.' },
+          { language: 'en', text: 'Before.' },
+        ],
+      }),
+      ['es', 'en'],
+    );
+    await uc.execute(
+      'c1',
+      { patientDescription: [{ language: 'es', text: 'Después.' }] },
+      ACTOR,
+    );
+    expect(patches[0].patientDescription).toEqual({ es: 'Después.' });
+  });
+
+  it('un idioma retirado de la clínica se conserva si su texto no cambia', async () => {
+    const { uc, patches } = capture(
+      fakeItem({ patientDescription: [{ language: 'pt', text: 'Limpeza.' }] }),
+      ['es'],
+    );
+    await uc.execute(
+      'c1',
+      { patientDescription: [{ language: 'pt', text: 'Limpeza.' }] },
+      ACTOR,
+    );
+    expect(patches[0].patientDescription).toEqual({ pt: 'Limpeza.' });
+    await expect(
+      uc.execute(
+        'c1',
+        { patientDescription: [{ language: 'pt', text: 'Outra.' }] },
+        ACTOR,
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('sin el campo no se toca', async () => {
+    const { uc, patches } = capture(fakeItem(), ['es']);
+    await uc.execute('c1', { labelEs: 'Otra' }, ACTOR);
+    expect('patientDescription' in patches[0]).toBe(false);
   });
 });

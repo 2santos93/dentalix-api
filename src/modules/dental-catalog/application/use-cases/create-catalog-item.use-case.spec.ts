@@ -30,6 +30,7 @@ function fakeItemFrom(
     active: input.active ?? true,
     clinicalNoteTemplateId: input.clinicalNoteTemplateId ?? null,
     suggestedClinicalNoteTemplateId: input.clinicalNoteTemplateId ?? null,
+    patientDescription: [],
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   };
@@ -352,5 +353,68 @@ describe('CreateCatalogItemUseCase · control postoperatorio (DX-566)', () => {
         postOpCheckAfterDays: days,
       }),
     ).rejects.toThrow(BadRequestException);
+  });
+});
+
+describe('CreateCatalogItemUseCase · descripción para el paciente (DX-560)', () => {
+  const languages = { list: () => Promise.resolve(['es', 'en']) };
+  const base = {
+    code: 'PER-010',
+    kind: CatalogKind.PROCEDURE,
+    labelEs: 'Tartrectomía',
+    color: '#00AA00',
+  };
+
+  it('guarda el mapa validado', async () => {
+    const inputs: CreateDentalCatalogItemRepoInput[] = [];
+    const repo = makeRepo({
+      create: (input) => {
+        inputs.push(input);
+        return Promise.resolve(fakeItemFrom('c1', input));
+      },
+    });
+    await new CreateCatalogItemUseCase(repo, noTemplates, languages).execute({
+      ...base,
+      patientDescription: [
+        { language: 'es', text: ' Limpieza profunda de las encías. ' },
+        { language: 'en', text: 'Deep cleaning of the gums.' },
+      ],
+    });
+    expect(inputs[0].patientDescription).toEqual({
+      es: 'Limpieza profunda de las encías.',
+      en: 'Deep cleaning of the gums.',
+    });
+  });
+
+  it('400 con un idioma que la clínica no ofrece o con un enlace', async () => {
+    const uc = new CreateCatalogItemUseCase(makeRepo(), noTemplates, languages);
+    await expect(
+      uc.execute({
+        ...base,
+        patientDescription: [{ language: 'pt', text: 'Limpeza.' }],
+      }),
+    ).rejects.toThrow(
+      'Ese idioma no está entre los idiomas de los pacientes de la clínica.',
+    );
+    await expect(
+      uc.execute({
+        ...base,
+        patientDescription: [{ language: 'es', text: 'Ver www.clinica.com' }],
+      }),
+    ).rejects.toThrow(
+      'La descripción para el paciente no admite enlaces ni HTML: escríbela como texto.',
+    );
+  });
+
+  it('sin el campo no lee los idiomas', async () => {
+    const inputs: CreateDentalCatalogItemRepoInput[] = [];
+    const repo = makeRepo({
+      create: (input) => {
+        inputs.push(input);
+        return Promise.resolve(fakeItemFrom('c1', input));
+      },
+    });
+    await new CreateCatalogItemUseCase(repo, noTemplates).execute(base);
+    expect(inputs[0].patientDescription).toBeUndefined();
   });
 });

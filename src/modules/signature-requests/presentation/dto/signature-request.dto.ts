@@ -7,7 +7,8 @@ import {
   SignedConsentPdfStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
-import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsUUID, Matches } from 'class-validator';
+import { SECOND_CURRENCY_FORMAT_MESSAGE } from '../../application/budget-presentation';
 import { SIGNATURE_REQUEST_STATUSES } from '../../domain/signature-request-status';
 
 const TYPE_PROPERTY = {
@@ -59,6 +60,15 @@ export class CreateSignatureRequestDto {
   @IsOptional()
   @IsUUID()
   professionalId?: string;
+
+  @ApiPropertyOptional({
+    pattern: '^[A-Z]{3}$',
+    description:
+      'DX-560 (solo BUDGET): segunda moneda orientativa del enlace (ISO 4217), que elige quien envía. Regla: (a) esta, si viene: distinta de la moneda del plan (400 «La segunda moneda debe ser distinta de la del presupuesto.») y del catálogo de monedas (400 «La segunda moneda no está en el catálogo de monedas.»); (b) sin ella, la moneda de la sede del envío si es distinta de la del plan; (c) si no, sin segunda moneda. La tasa es la que la clínica ya tiene guardada ese día en la zona de la sede (nunca el proveedor); sin tasa guardada, el enlace va sin segunda moneda. En CONSENT, 400. Los avisos del seguimiento automático (DX-561) solo usan (b)/(c).',
+  })
+  @IsOptional()
+  @Matches(/^[A-Z]{3}$/, { message: SECOND_CURRENCY_FORMAT_MESSAGE })
+  secondCurrency?: string;
 }
 
 export class SignatureRequestDto {

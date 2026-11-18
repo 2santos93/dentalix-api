@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import {
   SignatureRequestChannel,
   SignatureRequestType,
@@ -41,6 +41,12 @@ import {
   BUDGET_ACCEPTANCE_TERMS,
   BUDGET_REQUEST_TITLE,
 } from './use-cases/signature-requests.use-cases';
+import {
+  BUDGET_SECOND_CURRENCY_SOURCE,
+  composeBudgetPresentation,
+  NO_SECOND_CURRENCY,
+  type BudgetSecondCurrencySource,
+} from './budget-presentation';
 
 /** Una opción lista para su solicitud de firma (sin el id: lo pone quien llama). */
 export interface FollowUpBudgetOption {
@@ -102,6 +108,11 @@ export class FollowUpBudgetLinks {
     private readonly documentTypeNames: DocumentTypeNamesReader,
     @Inject(PLAN_QUOTE_COMPOSITION)
     private readonly composition: QuoteComposition,
+    // DX-560: la segunda moneda de la sede y su tasa guardada (nunca el
+    // proveedor); sin ella (tests), sin segunda moneda.
+    @Optional()
+    @Inject(BUDGET_SECOND_CURRENCY_SOURCE)
+    private readonly secondCurrency: BudgetSecondCurrencySource = NO_SECOND_CURRENCY,
   ) {}
 
   async prepare(input: {
@@ -164,6 +175,13 @@ export class FollowUpBudgetLinks {
         if (!decided.ok) return { ok: false, reason: 'NO_EMAIL' };
         signer = decided;
       }
+      // DX-560: la misma presentación congelada que un envío de la clínica.
+      const presentation = await composeBudgetPresentation(
+        quote,
+        content,
+        this.secondCurrency,
+        now,
+      );
       const token = generateSignatureToken();
       options.push({
         planId: option.planId,
@@ -181,6 +199,7 @@ export class FollowUpBudgetLinks {
           body: BUDGET_ACCEPTANCE_TERMS,
           budgetContent: content,
           budgetContentHash: computeQuoteHash(content),
+          budgetPresentation: presentation,
           professionalUserId: option.professionalUserId,
           professionalName: (
             content.professionalName ?? content.clinicName

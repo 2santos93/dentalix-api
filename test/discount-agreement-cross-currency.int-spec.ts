@@ -221,6 +221,7 @@ async function seedClinic(subdomain: string): Promise<Seeded> {
     ...item,
     defaultPrice: 3600,
     suggestedClinicalNoteTemplateId: null,
+    patientDescription: [],
   };
   return {
     tenantId: tenant.id,

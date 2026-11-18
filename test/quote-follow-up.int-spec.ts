@@ -337,6 +337,36 @@ describe('DX-561 · seguimiento automático de presupuestos (int)', () => {
     });
   });
 
+  it('DX-560: la solicitud del seguimiento congela la presentación al paciente, fuera de lo sellado', async () => {
+    await owner.dentalCatalogItem.updateMany({
+      where: { tenantId: a.tenantId },
+      data: { patientDescription: { es: 'Limpieza profunda de las encías.' } },
+    });
+    try {
+      const g = await group(a);
+      expect(await send(a, g, 1)).toBe('SENT');
+      const [request] = await followUpRequests(g);
+      const content = request.budgetContent as { items: unknown[] };
+      expect(request.budgetPresentation).toMatchObject({
+        language: 'es',
+        items: content.items.map((_, index) => ({
+          index,
+          visit: 1,
+          label: 'Limpieza profunda de las encías.',
+        })),
+        visitOrganization: [{ visit: 1, label: null, minDaysAfterPrevious: 0 }],
+      });
+      expect(JSON.stringify(request.budgetContent)).not.toContain(
+        'Limpieza profunda',
+      );
+    } finally {
+      await owner.dentalCatalogItem.updateMany({
+        where: { tenantId: a.tenantId },
+        data: { patientDescription: {} },
+      });
+    }
+  });
+
   it('dos ejecuciones a la vez del mismo paso: un registro, una solicitud y un email', async () => {
     const g = await group(a);
     const results = await Promise.all([send(a, g, 1), send(a, g, 1)]);

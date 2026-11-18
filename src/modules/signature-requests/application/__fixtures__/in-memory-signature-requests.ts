@@ -183,6 +183,7 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
       id,
       budgetContent: input.budgetContent ?? null,
       budgetContentHash: input.budgetContentHash ?? null,
+      budgetPresentation: input.budgetPresentation ?? null,
       codeHash: null,
       codeExpiresAt: null,
       codeSentAt: null,

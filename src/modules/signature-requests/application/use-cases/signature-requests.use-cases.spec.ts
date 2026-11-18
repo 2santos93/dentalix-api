@@ -24,6 +24,7 @@ import {
 } from '../../../treatment-plans/domain/plan-quote';
 import { composeQuoteContent } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
 import { RemoteBudgetCheck, budgetStillMatches } from '../remote-budget';
+import type { BudgetSecondCurrencySource } from '../budget-presentation';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import type { SignatureRecipientContext } from '../../domain/ports/signature-request-repository.port';
 import { deriveSignatureCodeKey } from '../../domain/signature-code';
@@ -92,7 +93,10 @@ function recipient(
   };
 }
 
-function setup(composition?: QuoteComposition) {
+function setup(
+  composition?: QuoteComposition,
+  secondCurrency?: BudgetSecondCurrencySource,
+) {
   let now = SENT_AT;
   const clock = () => now;
   const templates = new InMemoryConsentTemplateRepository();
@@ -194,6 +198,7 @@ function setup(composition?: QuoteComposition) {
       tenantContext,
       clock,
       composition,
+      secondCurrency,
     ),
     list: new ListPatientSignatureRequestsUseCase(repo, clock),
     revoke: new RevokeSignatureRequestUseCase(
@@ -1446,5 +1451,175 @@ describe('presupuesto a distancia (DX-415)', () => {
     expect(ctx.repo.acceptances).toHaveLength(0);
     expect(ctx.repo.rows[0].signedAt).toBeNull();
     expect(ctx.confirmations).toHaveLength(0);
+  });
+});
+
+describe('DX-560: presentación congelada del enlace', () => {
+  function withVes(rates: Record<string, number> | null) {
+    const calls: { date: string; currencies: readonly string[] }[] = [];
+    const source: BudgetSecondCurrencySource = {
+      currencyExists: (code) => Promise.resolve(code !== 'XXX'),
+      stored: (date, currencies) => {
+        calls.push({ date, currencies });
+        return Promise.resolve(
+          rates ? { source: 'MANUAL', rates, rateDate: date } : null,
+        );
+      },
+    };
+    return { source, calls };
+  }
+
+  /** Envía el presupuesto con la segunda moneda elegida. */
+  function sendWith(ctx: Ctx, secondCurrency?: string) {
+    return ctx.create.execute(
+      'p1',
+      {
+        type: 'BUDGET',
+        channel: 'EMAIL',
+        treatmentPlanId: 'plan-1',
+        secondCurrency,
+      },
+      DENTIST,
+      LINK,
+    );
+  }
+
+  it('congela textos y visitas sin tocar la foto ni su hash; sin segunda moneda por defecto', async () => {
+    const ctx = setup();
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      presentation: {
+        language: 'en',
+        items: budget.quote.items.map((i, n) => ({
+          itemId: i.id,
+          visit: n + 1,
+          label: `Patient text ${n + 1}`,
+          language: n === 0 ? 'en' : 'es',
+        })),
+      },
+      visitOrganization: budget.quote.items.map((i, n) => ({
+        itemId: i.id,
+        visit: n + 1,
+        label: n === 0 ? 'Urgencia' : null,
+        minDaysAfterPrevious: n === 0 ? 0 : 15,
+      })),
+    };
+    await sendBudget(ctx);
+    const [row] = ctx.repo.rows;
+    expect(row.budgetPresentation).toEqual({
+      language: 'en',
+      items: [
+        { index: 0, visit: 1, label: 'Patient text 1', language: 'en' },
+        { index: 1, visit: 2, label: 'Patient text 2', language: 'es' },
+      ],
+      visitOrganization: [
+        { visit: 1, label: 'Urgencia', minDaysAfterPrevious: 0 },
+        { visit: 2, label: null, minDaysAfterPrevious: 15 },
+      ],
+    });
+    expect(JSON.stringify(row.budgetContent)).not.toContain('Patient text');
+    expect(row.budgetContentHash).toBe(
+      computeQuoteHash(row.budgetContent as never),
+    );
+  });
+
+  it('elegida VES en un plan USD con tasa guardada: bloque VES con la tasa del día de la sede', async () => {
+    const ves = withVes({ VES: 40.5 });
+    const ctx = setup(undefined, ves.source);
+    presentedBudget(ctx);
+    await sendWith(ctx, 'VES');
+    expect(ves.calls).toEqual([
+      { date: '2026-10-30', currencies: ['USD', 'VES'] },
+    ]);
+    expect(ctx.repo.rows[0].budgetPresentation).toMatchObject({
+      secondCurrency: {
+        currency: 'VES',
+        fromPerBase: 1,
+        toPerBase: 40.5,
+        source: 'MANUAL',
+        date: '2026-10-30',
+      },
+    });
+  });
+
+  it('sin elegir: la de la sede si es distinta del plan; sede en USD → sin bloque', async () => {
+    const ves = withVes({ VES: 40.5 });
+    const ctx = setup(undefined, ves.source);
+    const budget = presentedBudget(ctx);
+    budget.quote = {
+      ...budget.quote,
+      location: { ...budget.quote.location, currency: 'VES' },
+    };
+    await sendWith(ctx);
+    expect(ctx.repo.rows[0].budgetPresentation).toMatchObject({
+      secondCurrency: { currency: 'VES' },
+    });
+
+    const usd = setup(undefined, withVes({ VES: 40.5 }).source);
+    const other = presentedBudget(usd);
+    other.quote = {
+      ...other.quote,
+      location: { ...other.quote.location, currency: 'USD' },
+    };
+    await sendWith(usd);
+    expect(usd.repo.rows[0].budgetPresentation).not.toHaveProperty(
+      'secondCurrency',
+    );
+  });
+
+  it('elegida igual a la del plan o fuera del catálogo: 400 y no se crea nada; en CONSENT, 400', async () => {
+    const ctx = setup(undefined, withVes({ VES: 40.5 }).source);
+    presentedBudget(ctx);
+    await expect(sendWith(ctx, 'USD')).rejects.toThrow(
+      'La segunda moneda debe ser distinta de la del presupuesto.',
+    );
+    await expect(sendWith(ctx, 'XXX')).rejects.toThrow(
+      'La segunda moneda no está en el catálogo de monedas.',
+    );
+    expect(ctx.repo.rows).toHaveLength(0);
+    await expect(
+      ctx.create.execute(
+        'p1',
+        { type: 'CONSENT', channel: 'EMAIL', secondCurrency: 'VES' },
+        DENTIST,
+        LINK,
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('sin tasa guardada ese día, sin bloque de segunda moneda', async () => {
+    const ctx = setup(undefined, withVes(null).source);
+    presentedBudget(ctx);
+    await sendWith(ctx, 'VES');
+    expect(ctx.repo.rows[0].budgetPresentation).not.toHaveProperty(
+      'secondCurrency',
+    );
+    expect(ctx.repo.rows[0].budgetPresentation).toHaveProperty('items');
+  });
+
+  it('el documento público la expone; un enlace anterior a DX-560 da null', async () => {
+    const ctx = setup(undefined, withVes({ VES: 40.5 }).source);
+    presentedBudget(ctx);
+    ctx.repo.budgets.get('plan-1')!.quote.location.currency = 'VES';
+    const { token, session } = await verifiedBudget(ctx);
+    const doc = await ctx.inTenant(() => ctx.document.execute(token, session));
+    expect(doc.presentation).toMatchObject({
+      language: 'es',
+      items: [
+        { index: 0, visit: 1 },
+        { index: 1, visit: 1 },
+      ],
+      visitOrganization: [{ visit: 1, label: null, minDaysAfterPrevious: 0 }],
+      secondCurrency: { currency: 'VES', toPerBase: 40.5 },
+    });
+    expect(doc.presentation?.items.map((i) => i.label)).toEqual(
+      doc.budget?.items.map((i) => i.procedure),
+    );
+
+    ctx.repo.rows[0].budgetPresentation = null;
+    const old = await ctx.inTenant(() => ctx.document.execute(token, session));
+    expect(old.presentation).toBeNull();
+    expect(old.budget).toEqual(doc.budget);
   });
 });
