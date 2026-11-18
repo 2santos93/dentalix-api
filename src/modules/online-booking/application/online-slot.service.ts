@@ -37,6 +37,7 @@ import {
   type OnlineBookingSettings,
 } from '../domain/online-booking-settings';
 import type { BookableCatalog } from '../domain/ports/online-booking-repository.port';
+import { OnlineChairService } from './online-chair.service';
 
 /** Un profesional que la página puede ofrecer. */
 export interface PublicProvider {
@@ -90,6 +91,8 @@ export class OnlineSlotService {
     @Inject(STAFF_REPOSITORY)
     private readonly staff: StaffRepository,
     private readonly availability: ProviderAvailabilityService,
+    // DX-583: en una sede con sillones, solo huecos con alguno libre.
+    private readonly chairs: OnlineChairService,
   ) {}
 
   /** Profesionales activos con rol que atiende, con sus sedes resueltas. */
@@ -223,6 +226,12 @@ export class OnlineSlotService {
         ).map((i) => ({ start: i.start, end: i.end }))
       : [];
 
+    const chairBusy = await this.chairs.busyByChair(
+      choice.location.id,
+      range.start,
+      range.end,
+    );
+
     const result = computeOnlineSlots({
       fromDay: window.fromDay,
       toDay: window.toDay,
@@ -231,6 +240,7 @@ export class OnlineSlotService {
       isClosedDay: (day) => holidayOn(day, holidays) !== null,
       providers: agendas,
       patientBusy,
+      chairBusy,
       durationMinutes,
       stepMinutes: settings.slotStepMinutes,
       now: query.now,

@@ -26,6 +26,7 @@ import {
 } from '../../domain/ports/online-booking-repository.port';
 import { OnlineBookingEmail } from '../online-booking-email';
 import { OnlineSlotService } from '../online-slot.service';
+import { OnlineChairService } from '../online-chair.service';
 
 /** Ajustes de la reserva online (los lee la agenda; los cambia el ADMIN). */
 @Injectable()
@@ -115,6 +116,7 @@ export class OnlineBookingRequestsUseCases {
     private readonly tenantContext: TenantContextService,
     private readonly createAppointment: CreateAppointmentUseCase,
     private readonly email: OnlineBookingEmail,
+    private readonly chairs: OnlineChairService,
   ) {}
 
   list(
@@ -156,31 +158,42 @@ export class OnlineBookingRequestsUseCases {
     requestHost: string | undefined,
   ): Promise<OnlineRequestView> {
     const request = await this.pending(id);
-    const created = await this.createAppointment.execute({
-      patientId: request.patient.id,
-      providerId: request.provider.id,
-      locationId: request.location.id,
-      appointmentTypeId: request.appointmentType.id,
-      start: request.start,
-      end: request.end,
-      createdById: ctx.actor.userId,
-      actorRole: ctx.actor.role,
-      origin: 'ONLINE',
-      inTransaction: async (tx, appointment) => {
-        const ok = await this.repo.acceptInTx(
-          tx,
-          id,
-          appointment.id,
-          ctx,
-          request.patient.id,
-        );
-        if (!ok) {
-          throw new ConflictException(
-            ONLINE_BOOKING_MESSAGES.requestNotPending,
-          );
-        }
+    // DX-583: la cita nace con sillón libre (regla DX-480), en la MISMA alta.
+    const created = await this.chairs.withFreeChair(
+      {
+        locationId: request.location.id,
+        start: request.start,
+        end: request.end,
       },
-    });
+      (chairId) =>
+        this.createAppointment.execute({
+          patientId: request.patient.id,
+          providerId: request.provider.id,
+          locationId: request.location.id,
+          appointmentTypeId: request.appointmentType.id,
+          start: request.start,
+          end: request.end,
+          chairId,
+          createdById: ctx.actor.userId,
+          actorRole: ctx.actor.role,
+          origin: 'ONLINE',
+          inTransaction: async (tx, appointment) => {
+            const ok = await this.repo.acceptInTx(
+              tx,
+              id,
+              appointment.id,
+              ctx,
+              request.patient.id,
+            );
+            if (!ok) {
+              throw new ConflictException(
+                ONLINE_BOOKING_MESSAGES.requestNotPending,
+              );
+            }
+          },
+        }),
+      () => new ConflictException(ONLINE_BOOKING_MESSAGES.noFreeChair),
+    );
     const manageUrl = await this.email.manageUrl(
       ctx.tenantId,
       created.id,

@@ -34,6 +34,9 @@ export const ONLINE_BOOKING_MESSAGES = {
     'Para reservar como paciente nuevo tienes que aceptar el tratamiento de tus datos.',
   requestNotFound: 'Solicitud no encontrada',
   requestNotPending: 'Esta solicitud ya se resolvió.',
+  // DX-583: aceptar desde la bandeja cuando todos los sillones están ocupados.
+  noFreeChair:
+    'No queda ningún sillón libre en la sede a esa hora. Libera uno en la agenda o rechaza la solicitud.',
 } as const;
 
 /** Código del 409 de dos reservas del mismo hueco a la vez. */

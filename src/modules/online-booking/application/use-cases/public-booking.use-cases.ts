@@ -19,6 +19,7 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import type { HourCycle } from '../../../../shared/format/regional-format';
 import { civilDateIn, parseCivilDate } from '../../../../shared/time/civil-day';
 import { CreateAppointmentUseCase } from '../../../appointments/application/use-cases/create-appointment.use-case';
+import { OnlineChairService } from '../online-chair.service';
 import { OVERLAP_MESSAGES } from '../../../appointments/application/appointment-overlap-error';
 import {
   BOOKING_CODE_MAX_ATTEMPTS,
@@ -645,6 +646,7 @@ export class CreatePublicBookingUseCase extends PublicBookingBase {
     config: ConfigService,
     private readonly createAppointment: CreateAppointmentUseCase,
     private readonly email: OnlineBookingEmail,
+    private readonly chairs: OnlineChairService,
   ) {
     super(repo, tenantContext, slotService, clock, challenge, config);
   }
@@ -798,23 +800,31 @@ export class CreatePublicBookingUseCase extends PublicBookingBase {
     }
     let appointmentId: string;
     try {
-      const created = await this.createAppointment.execute({
-        patientId: patientId!,
-        providerId: slot.providerId,
-        locationId: choice.location.id,
-        appointmentTypeId: choice.type.appointmentTypeId,
-        start: slot.start,
-        end: slot.end,
-        actorRole: null,
-        origin: 'ONLINE',
-        inTransaction: async (tx, appointment) => {
-          await this.repo.insertBookedInTx(
-            tx,
-            { ...row(patientId!), appointmentId: appointment.id },
-            meta,
-          );
-        },
-      });
+      // DX-583: con sillón libre (regla DX-480), en la MISMA alta.
+      const created = await this.chairs.withFreeChair(
+        { locationId: choice.location.id, start: slot.start, end: slot.end },
+        (chairId) =>
+          this.createAppointment.execute({
+            patientId: patientId!,
+            providerId: slot.providerId,
+            locationId: choice.location.id,
+            appointmentTypeId: choice.type.appointmentTypeId,
+            start: slot.start,
+            end: slot.end,
+            chairId,
+            actorRole: null,
+            origin: 'ONLINE',
+            inTransaction: async (tx, appointment) => {
+              await this.repo.insertBookedInTx(
+                tx,
+                { ...row(patientId!), appointmentId: appointment.id },
+                meta,
+              );
+            },
+          }),
+        // Sin nombres de sillón en la página pública: «hueco ocupado».
+        () => new ConflictException(ONLINE_BOOKING_MESSAGES.slotTaken),
+      );
       appointmentId = created.id;
     } catch (error) {
       throw await this.bookingConflict(
