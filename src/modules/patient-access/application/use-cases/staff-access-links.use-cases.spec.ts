@@ -13,7 +13,16 @@ import {
 const NOW = new Date('2026-11-18T15:00:00.000Z');
 const LINK = { protocol: 'https', host: 'sonrisa.dentalix.app' };
 
-function setup(patient: Partial<AccessLinkPatient> | null = {}) {
+function setup(
+  patient: Partial<AccessLinkPatient> | null = {},
+  responsibles: {
+    id: string;
+    name: string;
+    phone: string | null;
+    isPayer: boolean;
+    receivesNotices: boolean;
+  }[] = [],
+) {
   const issued: IssueAccessLinkInput[] = [];
   const repo = {
     findPatient: jest.fn(() =>
@@ -39,6 +48,7 @@ function setup(patient: Partial<AccessLinkPatient> | null = {}) {
         timeZone: 'America/Caracas',
       }),
     ),
+    responsibles: jest.fn(() => Promise.resolve(responsibles)),
     issue: jest.fn((input: IssueAccessLinkInput) => {
       issued.push(input);
       return Promise.resolve();
@@ -103,6 +113,48 @@ describe('CreateAccessLinkUseCase (DX-101)', () => {
     const { create } = setup({ phone: null });
     const out = await create.execute('p1', { scopes: ['PLANS'] }, 'u1', LINK);
     expect(out.whatsapp).toBeNull();
+  });
+
+  it('menor con responsable con teléfono: el WhatsApp va al responsable y lo dice', async () => {
+    const { create } = setup(
+      { birthDate: new Date('2015-01-10T00:00:00.000Z') },
+      [
+        {
+          id: 'r1',
+          name: 'Ana Rondón',
+          phone: '0414-555-0202',
+          isPayer: true,
+          receivesNotices: true,
+        },
+      ],
+    );
+    const out = await create.execute('p1', { scopes: ['PLANS'] }, 'u1', LINK);
+    expect(out.minor).toBe(true);
+    expect(out.whatsapp).toMatchObject({
+      phone: '584145550202',
+      recipient: { kind: 'RESPONSIBLE', name: 'Ana Rondón' },
+    });
+    expect(out.whatsapp?.text).toContain('Hola Ana');
+    expect(out.whatsapp?.text).toContain('los presupuestos de Luis');
+  });
+
+  it('menor sin responsable: al teléfono del paciente', async () => {
+    const { create, repo } = setup({
+      birthDate: new Date('2015-01-10T00:00:00.000Z'),
+    });
+    const out = await create.execute('p1', { scopes: ['PLANS'] }, 'u1', LINK);
+    expect(repo.responsibles).toHaveBeenCalledWith('p1');
+    expect(out.whatsapp).toMatchObject({
+      phone: '584125551234',
+      recipient: { kind: 'PATIENT', name: null },
+    });
+  });
+
+  it('adulto: ni se consultan los responsables', async () => {
+    const { create, repo } = setup();
+    const out = await create.execute('p1', { scopes: ['PLANS'] }, 'u1', LINK);
+    expect(repo.responsibles).not.toHaveBeenCalled();
+    expect(out.whatsapp?.recipient).toEqual({ kind: 'PATIENT', name: null });
   });
 
   it('un menor de edad lo marca para el aviso al personal', async () => {

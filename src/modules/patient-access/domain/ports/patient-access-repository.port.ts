@@ -4,7 +4,10 @@ import type {
   AuditRequestMeta,
 } from '../../../audit/domain/audit-request-context';
 import type { HourCycle } from '../../../../shared/format/regional-format';
-import type { VerifyDecision } from '../patient-access';
+import type {
+  VerifyDecision,
+  WhatsAppResponsibleCandidate,
+} from '../patient-access';
 
 export const PATIENT_ACCESS_REPOSITORY = Symbol('PATIENT_ACCESS_REPOSITORY');
 
@@ -108,6 +111,11 @@ export interface PatientAccessRepository {
   // --- personal ------------------------------------------------------------
   findPatient(patientId: string): Promise<AccessLinkPatient | null>;
   clinicContext(): Promise<AccessLinkClinicContext>;
+  /**
+   * Responsables VIVOS del paciente (DX-342) con su teléfono (el del contacto
+   * o el de la ficha del paciente responsable), por orden de alta.
+   */
+  responsibles(patientId: string): Promise<WhatsAppResponsibleCandidate[]>;
   /** Alta del enlace (409 si el paciente se archivó entre medias). */
   issue(input: IssueAccessLinkInput): Promise<void>;
   /** Vivos del paciente (ni revocados ni caducados); `null` si no existe. */

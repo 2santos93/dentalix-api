@@ -83,6 +83,22 @@ export class CreateAccessLinkDto {
   ttlDays?: number;
 }
 
+export class AccessLinkWhatsAppRecipientDto {
+  @ApiProperty({
+    enum: ['PATIENT', 'RESPONSIBLE'],
+    description:
+      'RESPONSIBLE: paciente menor con un responsable que recibe avisos y tiene teléfono (DX-342); PATIENT: el teléfono del paciente.',
+  })
+  kind!: 'PATIENT' | 'RESPONSIBLE';
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Nombre del responsable (null si va al paciente).',
+  })
+  name!: string | null;
+}
+
 export class AccessLinkWhatsAppDto {
   @ApiProperty({ description: 'Dígitos para wa.me (sin +).' })
   phone!: string;
@@ -92,6 +108,9 @@ export class AccessLinkWhatsAppDto {
       'Mensaje prellenado: nombre de pila, clínica, apartados, caducidad y URL; sin importes.',
   })
   text!: string;
+
+  @ApiProperty({ type: AccessLinkWhatsAppRecipientDto })
+  recipient!: AccessLinkWhatsAppRecipientDto;
 }
 
 export class CreatedAccessLinkDto {

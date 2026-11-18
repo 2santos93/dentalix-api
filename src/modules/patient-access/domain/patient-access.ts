@@ -188,16 +188,28 @@ const SCOPE_WORDS: Record<PatientAccessScope, string> = {
   ACCOUNT: 'tu estado de cuenta',
 };
 
+/** Las mismas palabras cuando el mensaje va al responsable de un menor. */
+const SCOPE_WORDS_OF: Record<PatientAccessScope, string> = {
+  APPOINTMENTS: 'las citas',
+  PLANS: 'los presupuestos',
+  ACCOUNT: 'el estado de cuenta',
+};
+
 /** «tus citas, tus presupuestos y tu estado de cuenta» según lo compartido. */
-export function scopesSentence(scopes: readonly PatientAccessScope[]): string {
-  const words = normalizeScopes(scopes).map((s) => SCOPE_WORDS[s]);
+export function scopesSentence(
+  scopes: readonly PatientAccessScope[],
+  ofOther = false,
+): string {
+  const dict = ofOther ? SCOPE_WORDS_OF : SCOPE_WORDS;
+  const words = normalizeScopes(scopes).map((s) => dict[s]);
   if (words.length <= 1) return words[0] ?? '';
   return `${words.slice(0, -1).join(', ')} y ${words[words.length - 1]}`;
 }
 
 /**
  * Texto de WhatsApp: el nombre de pila, la clínica y qué se comparte, sin
- * importes ni tratamientos (el mensaje puede verlo otra persona).
+ * importes ni tratamientos (el mensaje puede verlo otra persona). Si va al
+ * responsable de un menor, se le habla a él y se nombra al paciente.
  */
 export function patientAccessWhatsAppMessage(input: {
   firstName: string | null;
@@ -205,7 +217,68 @@ export function patientAccessWhatsAppMessage(input: {
   scopes: readonly PatientAccessScope[];
   url: string;
   expiresAtLabel: string;
+  /** Nombre de pila del paciente cuando el mensaje va a su responsable. */
+  patientFirstName?: string | null;
 }): string {
   const greeting = input.firstName ? `Hola ${input.firstName}` : 'Hola';
-  return `${greeting}, te saludamos de ${input.clinicName}. En este enlace personal puedes ver ${scopesSentence(input.scopes)}; para abrirlo te pediremos la fecha de nacimiento del paciente. Vale hasta el ${input.expiresAtLabel}: ${input.url}`;
+  const forResponsible = input.patientFirstName !== undefined;
+  const what = forResponsible
+    ? `${scopesSentence(input.scopes, true)} de ${input.patientFirstName ?? 'tu representado'}`
+    : scopesSentence(input.scopes);
+  return `${greeting}, te saludamos de ${input.clinicName}. En este enlace personal puedes ver ${what}; para abrirlo te pediremos la fecha de nacimiento del paciente. Vale hasta el ${input.expiresAtLabel}: ${input.url}`;
+}
+
+export interface WhatsAppResponsibleCandidate {
+  id: string;
+  /** Nombre completo del responsable. */
+  name: string;
+  phone: string | null;
+  isPayer: boolean;
+  receivesNotices: boolean;
+}
+
+export type WhatsAppTarget =
+  | { kind: 'PATIENT'; phone: string }
+  | {
+      kind: 'RESPONSIBLE';
+      phone: string;
+      responsiblePartyId: string;
+      name: string;
+    };
+
+/**
+ * DX-101: a qué número va «Compartir por WhatsApp». Un MENOR con un
+ * responsable que recibe avisos y tiene un teléfono válido: a ese responsable
+ * (primero el pagador principal, luego por orden de alta, como DX-203). Si
+ * no, al teléfono del paciente (y la UI avisa del menor). Sin número válido
+ * en ninguno, null. `digits` normaliza un teléfono para wa.me o da null.
+ */
+export function whatsAppTarget(input: {
+  minor: boolean;
+  patientPhone: string | null;
+  responsibles: readonly WhatsAppResponsibleCandidate[];
+  digits: (phone: string | null) => string | null;
+}): WhatsAppTarget | null {
+  if (input.minor) {
+    const ordered = input.responsibles
+      .filter((r) => r.receivesNotices)
+      .map((r, index) => ({ r, index }))
+      .sort(
+        (a, b) =>
+          Number(b.r.isPayer) - Number(a.r.isPayer) || a.index - b.index,
+      );
+    for (const { r } of ordered) {
+      const phone = input.digits(r.phone);
+      if (phone) {
+        return {
+          kind: 'RESPONSIBLE',
+          phone,
+          responsiblePartyId: r.id,
+          name: r.name,
+        };
+      }
+    }
+  }
+  const own = input.digits(input.patientPhone);
+  return own ? { kind: 'PATIENT', phone: own } : null;
 }

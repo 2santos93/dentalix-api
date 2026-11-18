@@ -19,6 +19,7 @@ import {
   retryAfterSeconds,
   scopesSentence,
   storedBirthDate,
+  whatsAppTarget,
 } from './patient-access';
 
 const NOW = new Date('2026-11-18T15:00:00.000Z');
@@ -174,5 +175,113 @@ describe('apartados, caducidad y mensaje (DX-101)', () => {
     expect(text).toContain('fecha de nacimiento');
     expect(text).toContain('https://sonrisa.dentalix.app/mi-clinica/abc');
     expect(text).not.toMatch(/\d+[.,]\d{2}|USD|VES|Bs/);
+  });
+});
+
+describe('whatsAppTarget (DX-101): a quién va «Compartir por WhatsApp»', () => {
+  const digits = (phone: string | null) =>
+    phone && /\d{7,}/.test(phone.replace(/\D/g, ''))
+      ? phone.replace(/\D/g, '')
+      : null;
+  const resp = (
+    over: Partial<{
+      id: string;
+      name: string;
+      phone: string | null;
+      isPayer: boolean;
+      receivesNotices: boolean;
+    }>,
+  ) => ({
+    id: 'r1',
+    name: 'Ana Rondón',
+    phone: '+58 414 555 0202',
+    isPayer: false,
+    receivesNotices: true,
+    ...over,
+  });
+
+  it('menor con responsable con teléfono: al responsable', () => {
+    expect(
+      whatsAppTarget({
+        minor: true,
+        patientPhone: '+58 412 555 0101',
+        responsibles: [resp({})],
+        digits,
+      }),
+    ).toEqual({
+      kind: 'RESPONSIBLE',
+      phone: '584145550202',
+      responsiblePartyId: 'r1',
+      name: 'Ana Rondón',
+    });
+  });
+
+  it('primero el pagador principal; se salta al que no recibe avisos o no tiene teléfono válido', () => {
+    const target = whatsAppTarget({
+      minor: true,
+      patientPhone: null,
+      responsibles: [
+        resp({ id: 'a', phone: '+58 414 000 0001' }),
+        resp({ id: 'b', isPayer: true, phone: 'sin número' }),
+        resp({
+          id: 'c',
+          isPayer: true,
+          receivesNotices: false,
+          phone: '+58 414 000 0003',
+        }),
+        resp({ id: 'd', isPayer: true, phone: '+58 414 000 0004' }),
+      ],
+      digits,
+    });
+    expect(target).toMatchObject({
+      kind: 'RESPONSIBLE',
+      responsiblePartyId: 'd',
+    });
+  });
+
+  it('menor sin responsable útil: al teléfono del paciente (la UI avisa)', () => {
+    expect(
+      whatsAppTarget({
+        minor: true,
+        patientPhone: '+58 412 555 0101',
+        responsibles: [resp({ phone: null })],
+        digits,
+      }),
+    ).toEqual({ kind: 'PATIENT', phone: '584125550101' });
+  });
+
+  it('adulto: siempre su teléfono, aunque tenga responsables', () => {
+    expect(
+      whatsAppTarget({
+        minor: false,
+        patientPhone: '+58 412 555 0101',
+        responsibles: [resp({ isPayer: true })],
+        digits,
+      }),
+    ).toEqual({ kind: 'PATIENT', phone: '584125550101' });
+  });
+
+  it('sin ningún teléfono válido: null', () => {
+    expect(
+      whatsAppTarget({
+        minor: true,
+        patientPhone: null,
+        responsibles: [],
+        digits,
+      }),
+    ).toBeNull();
+  });
+
+  it('el mensaje al responsable le habla a él y nombra al paciente', () => {
+    const text = patientAccessWhatsAppMessage({
+      firstName: 'Ana',
+      clinicName: 'Clínica Sonrisa Caracas',
+      scopes: ['APPOINTMENTS', 'ACCOUNT'],
+      url: 'https://x/mi-clinica/t',
+      expiresAtLabel: '2 de diciembre de 2026',
+      patientFirstName: 'Luis',
+    });
+    expect(text).toContain('Hola Ana');
+    expect(text).toContain('las citas y el estado de cuenta de Luis');
   });
 });

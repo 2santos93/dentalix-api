@@ -45,7 +45,11 @@ interface CreatedLink {
   url: string;
   expiresAt: string;
   scopes: string[];
-  whatsapp: { phone: string; text: string } | null;
+  whatsapp: {
+    phone: string;
+    text: string;
+    recipient: { kind: string; name: string | null };
+  } | null;
   minor: boolean;
 }
 
@@ -681,6 +685,28 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
     });
     const link = await createLink(clinicA, minor, { scopes: ['PLANS'] });
     expect(link.minor).toBe(true);
+    // Sin responsable: al teléfono del paciente.
+    expect(link.whatsapp).toMatchObject({
+      phone: '584125550101',
+      recipient: { kind: 'PATIENT', name: null },
+    });
+    // Con su madre como responsable con teléfono (DX-342): a ella.
+    await raw.patientResponsibleParty.create({
+      data: {
+        tenantId: clinicA.tenantId,
+        patientId: minor,
+        fullName: 'Ana Rondón',
+        phone: '+58 414 555 0202',
+        relationship: 'MOTHER',
+        isPayer: true,
+      },
+    });
+    const toMother = await createLink(clinicA, minor, { scopes: ['PLANS'] });
+    expect(toMother.whatsapp).toMatchObject({
+      phone: '584145550202',
+      recipient: { kind: 'RESPONSIBLE', name: 'Ana Rondón' },
+    });
+    expect(toMother.whatsapp?.text).toContain('Hola Ana');
   });
 
   it('un presupuesto aceptado: de la aceptación solo quién firmó, la firma y cuándo (ni IP, ni navegador, ni quién registró)', async () => {

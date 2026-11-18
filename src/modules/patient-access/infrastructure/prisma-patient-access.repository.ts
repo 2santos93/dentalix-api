@@ -14,6 +14,7 @@ import {
   PATIENT_ACCESS_LOCKED_REASON,
   PATIENT_ACCESS_VERIFIED_REASON,
   type VerifyDecision,
+  type WhatsAppResponsibleCandidate,
 } from '../domain/patient-access';
 import type {
   AccessLinkClinicContext,
@@ -99,6 +100,42 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
         majorityAge: settings.majorityAge,
         timeZone: settings.timeZone,
       };
+    });
+  }
+
+  responsibles(patientId: string): Promise<WhatsAppResponsibleCandidate[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.patientResponsibleParty.findMany({
+        where: { patientId, deletedAt: null },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          fullName: true,
+          phone: true,
+          isPayer: true,
+          receivesNotices: true,
+          responsiblePatient: {
+            select: {
+              firstName: true,
+              lastName: true,
+              phone: true,
+              deletedAt: true,
+            },
+          },
+        },
+      });
+      return rows
+        .filter((r) => !r.responsiblePatient?.deletedAt)
+        .map((r) => {
+          const p = r.responsiblePatient;
+          return {
+            id: r.id,
+            name: p ? `${p.firstName} ${p.lastName}` : (r.fullName ?? ''),
+            phone: p ? p.phone : r.phone,
+            isPayer: r.isPayer,
+            receivesNotices: r.receivesNotices,
+          };
+        });
     });
   }
 

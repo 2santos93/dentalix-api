@@ -31,6 +31,7 @@ import {
   normalizeScopes,
   patientAccessExpiresAt,
   patientAccessWhatsAppMessage,
+  whatsAppTarget,
 } from '../../domain/patient-access';
 import {
   PATIENT_ACCESS_REPOSITORY,
@@ -54,8 +55,17 @@ export interface CreatedAccessLink {
   url: string;
   expiresAt: Date;
   scopes: PatientAccessScope[];
-  /** Número para `wa.me` y el texto, sin importes; null sin teléfono válido. */
-  whatsapp: { phone: string; text: string } | null;
+  /**
+   * Número para `wa.me` y el texto, sin importes; null sin teléfono válido.
+   * `recipient`: a quién va (el responsable de un menor, con su nombre, o el
+   * paciente).
+   */
+  whatsapp: {
+    phone: string;
+    text: string;
+    recipient:
+      { kind: 'RESPONSIBLE'; name: string } | { kind: 'PATIENT'; name: null };
+  } | null;
   /**
    * El paciente es menor de edad: el enlace lo recibe su responsable (los
    * datos del responsable en el portal dependen de C1; la UI avisa).
@@ -131,29 +141,53 @@ export class CreateAccessLinkUseCase {
       createdById,
     });
 
-    const phone = whatsAppDigits(patient.phone, clinic.phoneRegion);
+    const minor = isMinor(
+      patient.birthDate,
+      clinic.majorityAge,
+      civilDateIn(now, clinic.timeZone),
+    );
+    // DX-342: un menor con responsable que recibe avisos y teléfono válido →
+    // el WhatsApp va al responsable; si no, al teléfono del paciente.
+    const target = whatsAppTarget({
+      minor,
+      patientPhone: patient.phone,
+      responsibles: minor ? await this.repo.responsibles(patientId) : [],
+      digits: (phone) => whatsAppDigits(phone, clinic.phoneRegion),
+    });
+    const patientFirstName = firstNameOnly(patient.firstName);
+    const expiresAtLabel = format.longDateTime(expiresAt, clinic.timeZone);
     return {
       id,
       url,
       expiresAt,
       scopes,
-      whatsapp: phone
+      whatsapp: target
         ? {
-            phone,
-            text: patientAccessWhatsAppMessage({
-              firstName: firstNameOnly(patient.firstName),
-              clinicName: clinic.clinicName,
-              scopes,
-              url,
-              expiresAtLabel: format.longDateTime(expiresAt, clinic.timeZone),
-            }),
+            phone: target.phone,
+            recipient:
+              target.kind === 'RESPONSIBLE'
+                ? { kind: 'RESPONSIBLE', name: target.name }
+                : { kind: 'PATIENT', name: null },
+            text:
+              target.kind === 'RESPONSIBLE'
+                ? patientAccessWhatsAppMessage({
+                    firstName: firstNameOnly(target.name),
+                    clinicName: clinic.clinicName,
+                    scopes,
+                    url,
+                    expiresAtLabel,
+                    patientFirstName,
+                  })
+                : patientAccessWhatsAppMessage({
+                    firstName: patientFirstName,
+                    clinicName: clinic.clinicName,
+                    scopes,
+                    url,
+                    expiresAtLabel,
+                  }),
           }
         : null,
-      minor: isMinor(
-        patient.birthDate,
-        clinic.majorityAge,
-        civilDateIn(now, clinic.timeZone),
-      ),
+      minor,
     };
   }
 }
