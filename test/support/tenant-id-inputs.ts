@@ -313,6 +313,20 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // DX-566: la sede de otra clínica en la lista de controles
   // postoperatorios y en su contador → 403 sin datos de A.
   'GET /post-op-checks ?locationId': 'post-op-checks.e2e-spec.ts',
+  // DX-556: prospectos. B manda la sede de A (403 sin datos de A), el
+  // usuario de A como responsable (400 «responsable no válido», o la lista
+  // sin filas de A) o el paciente de A al convertir (400: no es candidato).
+  'GET /leads ?locationId': 'leads.e2e-spec.ts',
+  'GET /leads ?ownerId': 'leads.e2e-spec.ts',
+  'GET /leads/board ?locationId': 'leads.e2e-spec.ts',
+  'GET /leads/board ?ownerId': 'leads.e2e-spec.ts',
+  'GET /leads/count ?locationId': 'leads.e2e-spec.ts',
+  'GET /leads/report ?locationId': 'leads.e2e-spec.ts',
+  'PATCH /leads/:id body.locationId': 'leads.e2e-spec.ts',
+  'PATCH /leads/:id body.ownerId': 'leads.e2e-spec.ts',
+  'POST /leads body.locationId': 'leads.e2e-spec.ts',
+  'POST /leads body.ownerId': 'leads.e2e-spec.ts',
+  'POST /leads/:id/convert body.patientId': 'leads.e2e-spec.ts',
   'GET /post-op-checks/count ?locationId': 'post-op-checks.e2e-spec.ts',
   'GET /closing-queue ?locationId': 'closing-queue.e2e-spec.ts',
   // DX-439: marcar DONE «desde» la cita atendida de A con el ítem de B → 409.

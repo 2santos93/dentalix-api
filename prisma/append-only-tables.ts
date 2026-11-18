@@ -158,6 +158,10 @@ export const NO_APP_DELETE = [
   'location_quote_follow_up_settings',
   // DX-137: el enlace «No fui yo» solo se marca usado (dx_session_alert_guard).
   'session_alerts',
+  // DX-556: el prospecto se marca perdido y se anonimiza, nunca se borra
+  // (dx_leads_guard); los motivos propios se retiran con borrado lógico.
+  'leads',
+  'lead_reasons',
 ] as const;
 
 /**

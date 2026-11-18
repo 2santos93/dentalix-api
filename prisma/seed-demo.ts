@@ -224,6 +224,7 @@ import {
   DEMO_DENTAL_LABS,
   DEMO_LAB_ORDERS,
   DEMO_POST_OP_CHECK,
+  DEMO_LEADS,
   DEMO_PRESCRIPTION,
   DEMO_PRESCRIPTION_TEMPLATES,
   DEMO_EXTERNAL_ORDER_TEMPLATES,
@@ -1091,7 +1092,72 @@ class DemoSeeder {
       this.createPostOpCheck(tenantId, ownerId, patientIds, catalog),
     );
 
+    // DX-556: la bandeja de prospectos (antes de ser paciente).
+    await this.createLeads(tenantId, receptionId);
+
     return this.requestConfirmations(tenantId, receptionId);
+  }
+
+  /**
+   * DX-556: los prospectos de `DEMO_LEADS` en la sede principal, llevados por
+   * recepción. El alta pasa por el disparador (nace NUEVO, con la hora de la
+   * BD); la etapa, los hitos y la nota se ponen después, relativos a la hora
+   * de la BD. Idempotente: con algún prospecto en la clínica no hace nada.
+   */
+  private async createLeads(
+    tenantId: string,
+    receptionId: string,
+  ): Promise<void> {
+    await this.prisma.runWithTenant(tenantId, async (tx) => {
+      if ((await tx.lead.count()) > 0) return;
+      const location = await tx.location.findFirstOrThrow({
+        where: { deletedAt: null },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true },
+      });
+      for (const demo of DEMO_LEADS) {
+        const lead = await tx.lead.create({
+          data: {
+            tenantId,
+            locationId: location.id,
+            fullName: demo.fullName,
+            phone: demo.phone,
+            phoneE164: demo.phone.replace(/[^+\d]/g, ''),
+            channel: demo.channel,
+            interestReason: demo.interestReason,
+            ownerId: receptionId,
+            createdById: receptionId,
+          },
+          select: { id: true },
+        });
+        const now = Prisma.sql`pg_catalog.timezone('UTC', pg_catalog.now())`;
+        if (demo.stage === 'CONTACTED') {
+          await tx.$executeRaw`
+            UPDATE "leads" SET "stage" = 'CONTACTED',
+              "lastContactAt" = ${now} - (${demo.lastContactHoursAgo ?? 0}::int * interval '1 hour'),
+              "nextActionAt" = CASE WHEN ${demo.nextActionInHours ?? null}::int IS NULL THEN NULL
+                ELSE ${now} + (${demo.nextActionInHours ?? 0}::int * interval '1 hour') END,
+              "nextActionNote" = ${demo.nextActionNote ?? null},
+              "updatedAt" = ${now}
+            WHERE "id" = ${lead.id}::uuid`;
+        } else if (demo.stage === 'LOST') {
+          await tx.$executeRaw`
+            UPDATE "leads" SET "stage" = 'LOST', "lostReason" = ${demo.lostReason ?? 'Precio'},
+              "lostAt" = ${now}, "updatedAt" = ${now}
+            WHERE "id" = ${lead.id}::uuid`;
+        }
+        if (demo.note) {
+          await tx.leadNote.create({
+            data: {
+              tenantId,
+              leadId: lead.id,
+              body: demo.note,
+              authorId: receptionId,
+            },
+          });
+        }
+      }
+    });
   }
 
   /**

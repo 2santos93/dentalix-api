@@ -1,3 +1,4 @@
+import { leadsOnAppointmentCreatedInTx } from '../../../leads/infrastructure/lead-from-appointment';
 import { ConflictException, Injectable } from '@nestjs/common';
 import {
   AppointmentStatus,
@@ -186,6 +187,15 @@ export class PrismaWalkInRepository implements WalkInRepository {
           idempotencyFingerprint: idempotency?.fingerprint ?? null,
         },
         include: INCLUDE_PATIENT_NAME,
+      });
+
+      // DX-556: un prospecto convertido que llega sin cita: «Cita agendada»
+      // (y «Asistió» al completarla, como cualquier cita).
+      await leadsOnAppointmentCreatedInTx(tx, {
+        tenantId,
+        patientId,
+        appointmentId: appointment.id,
+        actor: ctx,
       });
 
       // Sin las señales ni la nota: solo los nombres de campo (DX-009).

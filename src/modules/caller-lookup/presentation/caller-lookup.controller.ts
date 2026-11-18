@@ -22,6 +22,11 @@ import { PATIENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import {
+  requireAuditRequestContext,
+  type AuditableRequest,
+} from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import {
   CALLER_PHONE_TOO_SHORT_MESSAGE,
@@ -33,7 +38,9 @@ import {
   CallerLookupResponseDto,
 } from './dto/caller-lookup.dto';
 
-type AuthenticatedRequest = { user: TenantJwtPayload };
+interface AuthenticatedRequest extends AuditableRequest {
+  user: TenantJwtPayload;
+}
 
 const iso = (d: Date) => d.toISOString();
 
@@ -68,6 +75,7 @@ function present(result: CallerLookupResult) {
         ? {}
         : { hasCriticalAlert: m.hasCriticalAlert }),
     })),
+    ...(result.leads === undefined ? {} : { leads: result.leads }),
   };
 }
 
@@ -82,7 +90,10 @@ function present(result: CallerLookupResult) {
 @RateLimit('caller-lookup')
 @Controller('patients')
 export class CallerLookupController {
-  constructor(private readonly lookup: CallerLookupUseCase) {}
+  constructor(
+    private readonly lookup: CallerLookupUseCase,
+    private readonly tenantContext: TenantContextService,
+  ) {}
 
   @Audit({
     action: 'VIEW',
@@ -103,7 +114,9 @@ export class CallerLookupController {
       'número (grupo familiar) salen todos, hasta 20 (`truncated` avisa si hay más). Cada uno trae su próxima ' +
       'cita, su última visita (solo de las sedes del miembro) y su saldo. ' +
       '`hasCriticalAlert` solo para los roles clínicos. Un evento de lectura ' +
-      'por paciente; el número no se registra.',
+      'por paciente; el número no se registra. DX-556: ADMIN y RECEPTION ' +
+      'reciben además `leads`, los prospectos con ese número en sus sedes, ' +
+      'con un evento de lectura por prospecto (VIEW LEAD, LEAD_CALLER_LOOKUP).',
   })
   @ApiOkResponse({ type: CallerLookupResponseDto })
   @ApiBadRequestResponse({
@@ -111,6 +124,12 @@ export class CallerLookupController {
   })
   @ApiForbiddenResponse({ description: 'Rol sin acceso a pacientes' })
   async find(@Body() dto: CallerLookupDto, @Req() req: AuthenticatedRequest) {
-    return present(await this.lookup.execute(dto.phone, req.user.role));
+    return present(
+      await this.lookup.execute(
+        dto.phone,
+        req.user.role,
+        requireAuditRequestContext(req, this.tenantContext),
+      ),
+    );
   }
 }

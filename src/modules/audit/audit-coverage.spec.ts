@@ -72,6 +72,8 @@ import { RecoveredSlotsController } from '../reports/presentation/recovered-slot
 import { ChairOccupancyController } from '../reports/presentation/chair-occupancy.controller';
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
 import { PostOpChecksController } from '../post-op-checks/presentation/post-op-checks.controller';
+import { LeadsController } from '../leads/presentation/leads.controller';
+import { LeadReasonsController } from '../leads/presentation/lead-reasons.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import {
@@ -188,7 +190,10 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: RES,
   },
   // DX-224: «¿Quién llama?», una lectura por paciente encontrado (`perMatch`);
-  // el número buscado nunca va al evento.
+  // el número buscado nunca va al evento. DX-556: los prospectos devueltos
+  // (ADMIN y RECEPTION, sus sedes) dejan además, desde el caso de uso, un
+  // VIEW LEAD (LEAD_CALLER_LOOKUP) cada uno: leads.int-spec.ts y
+  // leads.e2e-spec.ts.
   'POST /patients/lookup-by-phone': {
     action: 'VIEW',
     resource: 'PATIENT',
@@ -1664,6 +1669,37 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'APPOINTMENT',
     reason: 'CHAIR_OCCUPANCY_REPORT',
   },
+  // DX-556: la lista, el tablero y la ficha de los prospectos llevan nombres y
+  // teléfonos; el contador, el informe (solo números) y los responsables, no.
+  'GET /leads': { action: 'VIEW', resource: 'LEAD', reason: 'LEAD_LIST' },
+  'GET /leads/board': {
+    action: 'VIEW',
+    resource: 'LEAD',
+    reason: 'LEAD_BOARD',
+  },
+  'GET /leads/:id': {
+    action: 'VIEW',
+    resource: 'LEAD',
+    resourceId: { param: 'id' },
+    reason: 'LEAD_VIEWED',
+  },
+  // DX-556: la retención de los perdidos (configuración, solo ADMIN) y los
+  // motivos propios (sin resourceId: el id de un motivo no es un prospecto).
+  'PUT /leads/settings': {
+    action: 'UPDATE',
+    resource: 'LEAD',
+    reason: 'LEAD_RETENTION_UPDATED',
+  },
+  'POST /lead-reasons': {
+    action: 'CREATE',
+    resource: 'LEAD',
+    reason: 'LEAD_REASON_ADDED',
+  },
+  'DELETE /lead-reasons/:id': {
+    action: 'DELETE',
+    resource: 'LEAD',
+    reason: 'LEAD_REASON_REMOVED',
+  },
   // DX-566: la lista de llamadas de control postoperatorio lleva el nombre y
   // el teléfono de cada paciente; el contador, no.
   'GET /post-op-checks': {
@@ -2084,6 +2120,16 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-556: prospectos. Alta (CREATE LEAD), edición (UPDATE con los nombres
+  // de campo), etapa (UPDATE con la etapa antes y después), nota (UPDATE sin
+  // el texto) y conversión (CREATE PATIENT + UPDATE LEAD, LEAD_CONVERTED o
+  // LEAD_LINKED), en la transacción de cada escritura; nunca el nombre, el
+  // teléfono ni las notas.
+  'POST /leads': 'leads.int-spec.ts y leads.e2e-spec.ts',
+  'PATCH /leads/:id': 'leads.e2e-spec.ts',
+  'POST /leads/:id/stage': 'leads.int-spec.ts y leads.e2e-spec.ts',
+  'POST /leads/:id/notes': 'leads.e2e-spec.ts',
+  'POST /leads/:id/convert': 'leads.int-spec.ts y leads.e2e-spec.ts',
   // DX-561: ajustes del seguimiento automático por sede (UPDATE
   // CLINIC_SETTINGS, QUOTE_FOLLOW_UP_SETTINGS_UPDATED, antes y después; sin
   // evento si nada cambia), en la transacción del guardado.
@@ -2588,6 +2634,8 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 };
 
 const CONTROLLERS: Type[] = [
+  LeadsController,
+  LeadReasonsController,
   CommissionsController,
   CommissionPaymentsController,
   AuthController,

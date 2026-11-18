@@ -602,6 +602,27 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /post-op-checks/count': EVERY_ROLE,
   'POST /post-op-checks/:id/attempts': CLINICAL,
 
+  // --- Prospectos (DX-556) ---------------------------------------------------
+  // .planning/DX-556/PROGRESS.md. La bandeja comercial (datos personales sin
+  // relación asistencial): ADMIN y recepción. La retención y los motivos
+  // propios: solo ADMIN (leerlos para los selectores, los dos).
+  'GET /leads': BILLING,
+  'GET /leads/board': BILLING,
+  'GET /leads/count': BILLING,
+  'GET /leads/report': BILLING,
+  'GET /leads/owners': BILLING,
+  'GET /leads/settings': BILLING,
+  'PUT /leads/settings': ADMIN_ONLY,
+  'POST /leads': BILLING,
+  'GET /leads/:id': BILLING,
+  'PATCH /leads/:id': BILLING,
+  'POST /leads/:id/stage': BILLING,
+  'POST /leads/:id/notes': BILLING,
+  'POST /leads/:id/convert': BILLING,
+  'GET /lead-reasons': BILLING,
+  'POST /lead-reasons': ADMIN_ONLY,
+  'DELETE /lead-reasons/:id': ADMIN_ONLY,
+
   // --- Documentos del paciente (DX-151) -------------------------------------
   // dentalix-docs/planning DX-151. Ver, descargar y subir: los 4 roles
   // (recepción escanea remisiones y consentimientos). Anular: la ruta admite

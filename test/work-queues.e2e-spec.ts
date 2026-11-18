@@ -53,6 +53,7 @@ const EXPECTED_KEYS: Record<ClinicRole, WorkQueueKey[]> = {
     'CLOSING_QUEUE',
     'PAYMENT_REPORTS',
     'POST_OP_CHECKS',
+    'LEADS_UNCONTACTED',
     'QUOTE_FOLLOW_UP',
     'ACCEPTED_UNSCHEDULED',
     'WAITLIST',
@@ -127,6 +128,8 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
           .submitted as number;
       case 'POST_OP_CHECKS':
         return (await body('/post-op-checks/count')).total as number;
+      case 'LEADS_UNCONTACTED':
+        return (await body('/leads/count')).stale as number;
       case 'QUOTE_FOLLOW_UP':
         return (await body('/treatment-plans/pending-follow-up/count'))
           .total as number;
@@ -289,6 +292,28 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
           dueOn: new Date(`${today()}T00:00:00Z`),
         },
       });
+      // DX-556: un prospecto de esta sede sin contactar desde hace 30 h
+      // (el alta la fecha el disparador: se mueve con ellos apagados).
+      const leadDigits = String(1000000 + Math.floor(Math.random() * 8999999));
+      const lead = await raw.lead.create({
+        data: {
+          tenantId,
+          locationId,
+          fullName: `Prospecto ${locationId.slice(0, 4)}-${i}`,
+          phone: `+58 412 ${leadDigits}`,
+          phoneE164: `+58412${leadDigits}`,
+          channel: 'WHATSAPP',
+          createdById: dentistId,
+        },
+        select: { id: true },
+      });
+      await raw.$transaction([
+        raw.$executeRawUnsafe('SET LOCAL session_replication_role = replica'),
+        raw.$executeRawUnsafe(
+          `UPDATE "leads" SET "createdAt" = timezone('UTC', now()) - interval '30 hours' WHERE "id" = $1::uuid`,
+          lead.id,
+        ),
+      ]);
       // Lista de espera abierta.
       await raw.appointmentWaitlistEntry.create({
         data: { tenantId, locationId, patientId },
@@ -522,6 +547,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
         'CLOSING_QUEUE',
         'PAYMENT_REPORTS',
         'POST_OP_CHECKS',
+        'LEADS_UNCONTACTED',
         'ACCEPTED_UNSCHEDULED',
         'WAITLIST',
         'RECALL',
