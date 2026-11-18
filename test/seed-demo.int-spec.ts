@@ -98,8 +98,15 @@ type Counts = Record<string, number>;
  * Tablas de clínica que se comparan: todas las del catálogo (DX-396) menos el
  * registro de auditoría y la cola de correo, que crecen o se vacían con cada
  * acción (login, reset, despacho) sin que eso sea duplicar datos de la demo.
+ * DX-137: tampoco las sesiones abiertas (`clinic_sessions`) ni los avisos de
+ * inicio de sesión nuevo (`session_alerts`): cada login las crea.
  */
-const NOT_SEED_DATA = new Set(['audit_events', 'email_outbox']);
+const NOT_SEED_DATA = new Set([
+  'audit_events',
+  'email_outbox',
+  'clinic_sessions',
+  'session_alerts',
+]);
 
 async function seedDataTables(): Promise<string[]> {
   return (await tenantTablesInDeleteOrder(raw)).filter(

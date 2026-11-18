@@ -1,7 +1,10 @@
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { ClinicRole, Prisma } from '@prisma/client';
 import type { HourCycle } from '../../../locations/domain/regional-settings';
-import type { RefreshRotationDecision } from '../refresh-rotation';
+import type {
+  RefreshIdlePolicy,
+  RefreshRotationDecision,
+} from '../refresh-rotation';
 
 /** G1: país, moneda, zona y formato regional de la primera sede, ya validados. */
 export interface ClinicLocationSettings {
@@ -85,6 +88,8 @@ export interface SessionState {
     membershipRole: ClinicRole | null;
     /** DX-089: igual que `MembershipRecord.allowedLocationIds`. */
     allowedLocationIds: string[] | null;
+    /** DX-137: cierre por inactividad de la clínica (minutos). */
+    sessionIdleMinutes: number;
   } | null;
 }
 
@@ -98,7 +103,18 @@ export interface RotateRefreshSessionInput {
   /** `jti`/`exp` del token nuevo, ya firmado, si se rota. */
   nextJti: string;
   nextExpiresAt: Date;
+  /** DX-137: `tv` del token (ya comprobada contra la del usuario). */
+  tokenVersion: number;
   graceMs: number;
+  /** DX-137: cierre por inactividad (`null` = sin él: sesión de plataforma). */
+  idle: RefreshIdlePolicy | null;
+  /**
+   * DX-137: clínica de la sesión (`null` = plataforma). Una familia que aún no
+   * tiene su fila de clínica (nacida antes de DX-137 o por la ruta sin `sid`)
+   * la recibe aquí, bajo la RLS del tenant: así «cerrar todas» y el ADMIN la
+   * alcanzan.
+   */
+  tenantId: string | null;
 }
 
 /**

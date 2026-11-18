@@ -1,3 +1,4 @@
+import { MySessionsController } from './presentation/my-sessions.controller';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { MeController } from './presentation/me.controller';
@@ -19,7 +20,8 @@ import { AuthModule } from '../auth/auth.module';
 // aporta SessionClaimsService (el cambio de contraseña re-emite la sesión).
 @Module({
   imports: [JwtModule.register({}), StorageModule, AuthModule],
-  controllers: [MeController, MyMfaController],
+  // DX-137: «Mi perfil › Sesiones».
+  controllers: [MeController, MyMfaController, MySessionsController],
   providers: [
     GetMyProfileUseCase,
     UpdateMyNameUseCase,

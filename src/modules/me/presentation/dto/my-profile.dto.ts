@@ -30,4 +30,11 @@ export class MyProfileDto {
       'DX-090: lo que puede hacer en la clínica de la sesión: los permisos de serie de su rol más los extra concedidos. Solo decide qué pinta la web; la frontera es cada ruta.',
   })
   effectivePermissions!: ExtraPermission[];
+  @ApiProperty({
+    minimum: 15,
+    maximum: 240,
+    description:
+      'DX-137: minutos sin actividad tras los que la web cierra la sesión de esta clínica («Sesión cerrada por inactividad»).',
+  })
+  sessionIdleMinutes!: number;
 }

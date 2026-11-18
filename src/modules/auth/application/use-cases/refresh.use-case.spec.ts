@@ -35,7 +35,11 @@ function activeMember(
   return {
     tokenVersion,
     isPlatformAdmin: false,
-    tenant: { membershipRole: role, allowedLocationIds },
+    tenant: {
+      membershipRole: role,
+      allowedLocationIds,
+      sessionIdleMinutes: 60,
+    },
   };
 }
 
@@ -64,7 +68,9 @@ function setup(opts: {
       sid: 'fam-1',
       jti: 'jti-2',
       expiresAt: new Date((EXP + 60) * 1000),
+      tokenVersion: 0,
     }),
+    accessTtlMs: jest.fn().mockReturnValue(900_000),
   };
   const repo = {
     findSessionState: jest.fn().mockResolvedValue(opts.state),
@@ -73,13 +79,15 @@ function setup(opts: {
       .fn()
       .mockResolvedValue(opts.rotation ?? { decision: 'rotate' }),
   };
+  const userSessions = { openSession: jest.fn().mockResolvedValue(undefined) };
   const uc = new RefreshUseCase(
     tokens as never,
     repo as never,
     new SessionClaimsService(repo as unknown as AuthRepository),
+    userSessions as never,
     30_000,
   );
-  return { uc, tokens, repo };
+  return { uc, tokens, repo, userSessions };
 }
 
 describe('RefreshUseCase', () => {
@@ -173,7 +181,11 @@ describe('RefreshUseCase', () => {
       state: {
         tokenVersion: 0,
         isPlatformAdmin: false,
-        tenant: { membershipRole: null, allowedLocationIds: null },
+        tenant: {
+          membershipRole: null,
+          allowedLocationIds: null,
+          sessionIdleMinutes: 60,
+        },
       },
     });
 
@@ -209,7 +221,11 @@ describe('RefreshUseCase', () => {
       state: {
         tokenVersion: 0,
         isPlatformAdmin: true,
-        tenant: { membershipRole: null, allowedLocationIds: null },
+        tenant: {
+          membershipRole: null,
+          allowedLocationIds: null,
+          sessionIdleMinutes: 60,
+        },
       },
     });
 
@@ -401,7 +417,12 @@ describe('RefreshUseCase', () => {
         presentedExpiresAt: new Date(EXP * 1000),
         nextJti: 'jti-2',
         nextExpiresAt: new Date((EXP + 60) * 1000),
+        tokenVersion: 0,
+        // DX-137: la clínica, para enlazar la familia si aún no lo está.
+        tenantId: 't1',
         graceMs: 30_000,
+        // DX-137: el cierre por inactividad de la clínica + un TTL de access.
+        idle: { idleMinutes: 60, accessTtlMs: 900_000 },
       });
       // La denylist es solo para los refresh anteriores a las familias.
       expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
@@ -443,6 +464,22 @@ describe('RefreshUseCase', () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
+    it('DX-137: idle → 401 SESSION_IDLE («Sesión cerrada por inactividad»)', async () => {
+      const { uc } = setup({
+        payload: familyPayload,
+        state: activeMember(ClinicRole.ADMIN),
+        rotation: { decision: 'idle' },
+      });
+
+      const error = await uc
+        .execute({ refreshToken: 'old-ref' })
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect((error as UnauthorizedException).getResponse()).toMatchObject({
+        code: 'SESSION_IDLE',
+      });
+    });
+
     it('no toca la familia si la sesión ya no vale (tv o membresía)', async () => {
       const { uc, repo } = setup({
         payload: familyPayload,
@@ -456,12 +493,17 @@ describe('RefreshUseCase', () => {
     });
 
     it('un refresh sin sid (anterior a las familias) usa la denylist y el par nuevo ya nace en una familia', async () => {
-      const { uc, tokens, repo } = setup({
+      const { uc, tokens, repo, userSessions } = setup({
         state: activeMember(ClinicRole.ADMIN),
       });
 
       await uc.execute({ refreshToken: 'old-ref' });
 
+      // DX-137: la familia nueva queda registrada YA, con su clínica, para
+      // que «cerrar todas» y el ADMIN la alcancen antes de su primer refresh.
+      expect(userSessions.openSession).toHaveBeenCalledWith(
+        expect.objectContaining({ sid: 'fam-1', userId: 'u1', tenantId: 't1' }),
+      );
       expect(repo.consumeRefreshToken).toHaveBeenCalled();
       expect(repo.rotateRefreshSession).not.toHaveBeenCalled();
       // Sin opciones: TokenService firma con un sid nuevo.

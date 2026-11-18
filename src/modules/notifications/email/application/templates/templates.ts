@@ -9,6 +9,7 @@ import {
   InvitationEmailVars,
   MfaEnrollmentCodeEmailVars,
   MfaNoticeEmailVars,
+  NewLoginEmailVars,
   PasswordResetEmailVars,
   PaymentReceiptEmailVars,
   PaymentReceiptSummaryEmailVars,
@@ -397,6 +398,35 @@ function mfaNotice(
   });
 }
 
+/** DX-137: inicio de sesión desde un dispositivo nuevo, con «No fui yo». */
+function newLogin(
+  vars: NewLoginEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const where = vars.ipPrefix ? ` (red ${vars.ipPrefix})` : '';
+  const when = vars.whenLabel ? ` el ${vars.whenLabel}` : '';
+  return renderLayout({
+    brand,
+    subject: `Nuevo inicio de sesión en ${vars.clinicName}`,
+    heading: `Hola, ${vars.userName}`,
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `Se inició sesión con tu cuenta en ${vars.clinicName}${when} desde un dispositivo que no habíamos visto: ${vars.deviceLabel}${where}.`,
+      },
+      {
+        kind: 'paragraph',
+        text: 'Si fuiste tú, no tienes que hacer nada.',
+      },
+      {
+        kind: 'note',
+        text: `Si no fuiste tú, pulsa «No fui yo»: cerramos todas tus sesiones y te llevamos a cambiar la contraseña. El enlace vale ${plural(vars.expiresInHours, 'hora', 'horas')} y una sola vez.`,
+      },
+    ],
+    action: { label: 'No fui yo', url: vars.notMeUrl },
+  });
+}
+
 function mfaEnrollmentCode(
   vars: MfaEnrollmentCodeEmailVars,
   brand: EmailBrand | null,
@@ -741,6 +771,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'external-order-copy': externalOrderCopy,
   'weekly-digest': weeklyDigest,
   'quote-follow-up': quoteFollowUp,
+  'new-login': newLogin,
   'mfa-notice': mfaNotice,
   'mfa-enrollment-code': mfaEnrollmentCode,
 };

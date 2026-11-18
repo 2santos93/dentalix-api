@@ -2407,6 +2407,19 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'user-mfa.service (MFA_TRUSTED_DEVICES_REVOKED) y mfa-bis.e2e-spec.ts',
   'DELETE /me/mfa/trusted-devices/:id':
     'user-mfa.service (MFA_TRUSTED_DEVICES_REVOKED) y mfa-bis.e2e-spec.ts',
+  // DX-137: DELETE SESSION en la transacción que cierra (con `reason` y
+  // `sessionsClosed`, IP truncada y navegador resumido); sin evento si no
+  // cerró ninguna. «No fui yo»: SESSION_NOT_ME con el titular como actor.
+  'DELETE /me/sessions/:sessionId':
+    'user-sessions.service (SESSION_REVOKED_BY_SELF) y user-sessions.e2e-spec.ts',
+  'POST /me/sessions/revoke-others':
+    'user-sessions.service (OTHER_SESSIONS_REVOKED) y user-sessions.e2e-spec.ts',
+  'DELETE /staff/:userId/sessions/:sessionId':
+    'user-sessions.service (SESSION_REVOKED_BY_ADMIN) y user-sessions.e2e-spec.ts',
+  'POST /staff/:userId/sessions/revoke-all':
+    'user-sessions.service (MEMBER_SESSIONS_REVOKED_BY_ADMIN) y user-sessions.e2e-spec.ts',
+  'POST /auth/session-alerts/not-me':
+    'user-sessions.service (SESSION_NOT_ME, en la transacción que cierra todo) y user-sessions.e2e-spec.ts',
   'POST /staff/:userId/mfa/reset':
     'user-mfa.service (MFA_RESET_<motivo> / MFA_RESET_REFUSED, en la transacción del reseteo) y mfa-bis.e2e-spec.ts',
   // DX-439: CREATE CLOSING_QUEUE_DISMISSAL (CLOSING_QUEUE_DISMISSED) en la

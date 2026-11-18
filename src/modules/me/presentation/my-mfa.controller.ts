@@ -1,3 +1,4 @@
+import { UserSessionsService } from '../../auth/application/user-sessions.service';
 import {
   BadRequestException,
   Body,
@@ -100,6 +101,7 @@ export class MyMfaController {
     private readonly tokens: TokenService,
     private readonly cookie: SessionCookieService,
     private readonly tenantContext: TenantContextService,
+    private readonly userSessions: UserSessionsService,
   ) {}
 
   private context(req: AuditableRequest): {
@@ -123,6 +125,16 @@ export class MyMfaController {
   ): Promise<DeliveredSession> {
     const { claims } = await this.sessions.current(req.user);
     const pair = await this.tokens.issue({ ...claims, tv });
+    // DX-137: la sesión nueva de este mismo navegador, en la lista (sin aviso).
+    const { ctx } = this.context(req);
+    await this.userSessions.open({
+      refreshToken: pair.refreshToken,
+      userId: ctx.actor.userId,
+      tenantId: ctx.tenantId,
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+      kind: 'CONTINUATION',
+    });
     return this.cookie.deliver(res, pair, this.cookie.wantsCookie(req));
   }
 

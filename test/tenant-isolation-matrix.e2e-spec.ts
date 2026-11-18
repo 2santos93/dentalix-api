@@ -4671,6 +4671,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         'DELETE /me/mfa/trusted-devices/:id',
       ],
     },
+    {
+      spec: 'user-sessions.e2e-spec.ts',
+      checks:
+        'B → 404 al ver y cerrar las sesiones de un miembro de A (también la de la misma persona en B desde A), y al cerrar una sesión propia que no es de esta clínica (DX-137)',
+      routes: [
+        'GET /staff/:userId/sessions',
+        'DELETE /staff/:userId/sessions/:sessionId',
+        'POST /staff/:userId/sessions/revoke-all',
+        'DELETE /me/sessions/:sessionId',
+      ],
+    },
   ];
 
   /** `MÉTODO /ruta` de un caso (las dos primeras palabras de su nombre). */

@@ -11,6 +11,10 @@ import {
 import { TestPasswordHasher } from '../../../../shared/testing/test-password-hasher';
 import { IssuablePayload } from '../../../../shared/crypto/token.service';
 
+const sessionsStub = {
+  open: jest.fn().mockResolvedValue(undefined),
+} as never;
+
 const password = new TestPasswordHasher();
 
 /**
@@ -87,6 +91,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         {} as never,
         {} as never,
         {} as never,
+        sessionsStub,
       );
 
       const result = await uc.execute({
@@ -135,6 +140,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         {} as never,
         {} as never,
         {} as never,
+        sessionsStub,
       );
 
       await expect(
@@ -157,6 +163,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         {} as never,
         {} as never,
         {} as never,
+        sessionsStub,
       );
 
       await expect(
@@ -210,6 +217,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
             return Promise.resolve(accepted);
           },
         } as never,
+        sessionsStub,
       );
       return { uc, issued, sent };
     }
@@ -303,6 +311,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         {} as never,
         {} as never,
         {} as never,
+        sessionsStub,
       );
 
       await expect(
@@ -322,6 +331,7 @@ describe('LoginUseCase — superadmin de plataforma', () => {
         {} as never,
         {} as never,
         {} as never,
+        sessionsStub,
       );
 
       await expect(

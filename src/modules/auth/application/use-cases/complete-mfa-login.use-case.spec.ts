@@ -16,6 +16,10 @@ import type {
   SessionState,
 } from '../../domain/ports/auth-repository.port';
 
+const sessionsStub = {
+  open: jest.fn().mockResolvedValue(undefined),
+} as never;
+
 /**
  * SEC-066: el alta forzada del MFA de un miembro de clínica exige, además de la
  * contraseña (el `mfaToken`), el código de un solo uso enviado a su correo: el
@@ -34,7 +38,11 @@ function member(role: ClinicRole): SessionState {
   return {
     tokenVersion: 3,
     isPlatformAdmin: false,
-    tenant: { membershipRole: role, allowedLocationIds: null },
+    tenant: {
+      membershipRole: role,
+      allowedLocationIds: null,
+      sessionIdleMinutes: 60,
+    },
   };
 }
 
@@ -89,6 +97,7 @@ function setup() {
     audit as never,
     lockout,
     mfaRepo as never,
+    sessionsStub,
   );
   const issue = async (userId = 'u1', tenantId = 't1') => {
     const { token, jti } = await challenges.issue({

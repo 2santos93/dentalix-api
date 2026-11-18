@@ -48,7 +48,15 @@ export interface PlatformJwtPayload {
   mfa?: true;
 }
 
-export type JwtPayload = TenantJwtPayload | PlatformJwtPayload;
+export type JwtPayload = (TenantJwtPayload | PlatformJwtPayload) & {
+  /**
+   * DX-137: familia de refresh (inicio de sesión) del ACCESS token: marca
+   * «este dispositivo» en «Mi perfil › Sesiones». La pone `issue` (la misma
+   * que la del refresh); ausente en los tokens anteriores y en el break-glass
+   * (sin refresh).
+   */
+  sid?: string;
+};
 
 /**
  * Claim `tv`: la `User.tokenVersion` vigente al emitir. /auth/refresh exige
@@ -126,20 +134,25 @@ export class TokenService {
   ): Promise<{ accessToken: string; refreshToken: string }> {
     // expiresIn config values are human-readable ms durations ("900s", "30d").
     // jsonwebtoken accepts them at runtime; cast to satisfy its branded StringValue type.
-    const accessToken = await this.jwt.signAsync(payload, {
-      ...jwtSignOptions(this.scope),
-      secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
-      expiresIn: this.config.getOrThrow<string>(
-        'JWT_ACCESS_TTL',
-      ) as JwtSignOptions['expiresIn'],
-    });
+    // DX-137: el access lleva la familia del refresh que sale con él.
+    const sid = refresh.sid ?? randomUUID();
+    const accessToken = await this.jwt.signAsync(
+      { ...payload, sid },
+      {
+        ...jwtSignOptions(this.scope),
+        secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        expiresIn: this.config.getOrThrow<string>(
+          'JWT_ACCESS_TTL',
+        ) as JwtSignOptions['expiresIn'],
+      },
+    );
     const fixedExp = refresh.expiresAt
       ? Math.floor(refresh.expiresAt.getTime() / 1000)
       : undefined;
     const refreshToken = await this.jwt.signAsync(
       {
         ...payload,
-        sid: refresh.sid ?? randomUUID(),
+        sid,
         ...(fixedExp !== undefined ? { exp: fixedExp } : {}),
       },
       {
@@ -161,18 +174,37 @@ export class TokenService {
     return { accessToken, refreshToken };
   }
 
+  /**
+   * DX-137: lo que dura un access token que la propia API acaba de firmar
+   * (`exp - iat`, en ms): el margen del cierre por inactividad en el refresh.
+   */
+  accessTtlMs(accessToken: string): number {
+    const { exp, iat } = this.jwt.decode<{ exp: number; iat: number }>(
+      accessToken,
+    );
+    return Math.max(0, exp - iat) * 1000;
+  }
+
   /** `sid`/`jti`/`exp` de un refresh que la propia API acaba de firmar. */
   refreshClaims(refreshToken: string): {
     sid: string;
     jti: string;
     expiresAt: Date;
+    /** DX-137: la `tokenVersion` con la que se firmó (0 si no la lleva). */
+    tokenVersion: number;
   } {
-    const { sid, jti, exp } = this.jwt.decode<{
+    const { sid, jti, exp, tv } = this.jwt.decode<{
       sid: string;
       jti: string;
       exp: number;
+      tv?: number;
     }>(refreshToken);
-    return { sid, jti, expiresAt: new Date(exp * 1000) };
+    return {
+      sid,
+      jti,
+      expiresAt: new Date(exp * 1000),
+      tokenVersion: tv ?? 0,
+    };
   }
 
   /**
