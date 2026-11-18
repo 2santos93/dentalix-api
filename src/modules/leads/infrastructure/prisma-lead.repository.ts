@@ -6,13 +6,13 @@ import type { AuditRequestContext } from '../../audit/domain/audit-request-conte
 import type { AuditEventDraft } from '../../audit/domain/audit-event';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import { insertPatientRowInTx } from '../../patients/infrastructure/repositories/prisma-patient.repository';
-import { phoneTakenError } from '../application/lead-errors';
 import {
   LEAD_MESSAGES,
   LEAD_STAGES,
   type LeadReasonKindCode,
   type LeadStageCode,
 } from '../domain/lead-rules';
+import { LeadPhoneRaceError } from '../domain/lead-repository.port';
 import type {
   ConvertDecision,
   ConvertResult,
@@ -255,13 +255,8 @@ export class PrismaLeadRepository implements LeadRepository {
       });
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
-      // Otra alta con el mismo número ganó la carrera (leads_tenant_phone_key).
-      const owners = await this.phoneOwners(input.phoneE164);
-      throw phoneTakenError({
-        kind: 'LEAD',
-        id: owners.lead?.id ?? null,
-        name: owners.lead?.fullName ?? null,
-      });
+      // Otra alta con el mismo número ganó la carrera: el caso de uso redacta.
+      throw new LeadPhoneRaceError();
     }
   }
 
@@ -316,12 +311,7 @@ export class PrismaLeadRepository implements LeadRepository {
       });
     } catch (error) {
       if (!isUniqueViolation(error) || !patch.phoneE164) throw error;
-      const owners = await this.phoneOwners(patch.phoneE164, id);
-      throw phoneTakenError({
-        kind: 'LEAD',
-        id: owners.lead?.id ?? null,
-        name: owners.lead?.fullName ?? null,
-      });
+      throw new LeadPhoneRaceError();
     }
   }
 
@@ -651,6 +641,27 @@ export class PrismaLeadRepository implements LeadRepository {
         },
       }),
     );
+  }
+
+  async auditPhoneLookup(
+    leadIds: readonly string[],
+    audit: AuditRequestContext,
+  ): Promise<void> {
+    if (leadIds.length === 0) return;
+    await this.prisma.runWithTenant(async (tx) => {
+      for (const id of leadIds) {
+        await writeAuditEvent(
+          tx,
+          userDraft(audit, {
+            action: 'VIEW',
+            resourceType: 'LEAD',
+            resourceId: id,
+            patient: null,
+            metadata: { reason: 'LEAD_CALLER_LOOKUP' },
+          }),
+        );
+      }
+    });
   }
 
   reasons(kind?: LeadReasonKindCode): Promise<LeadReasonRow[]> {

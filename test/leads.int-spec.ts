@@ -718,10 +718,76 @@ describe('DX-556 · prospectos sobre Postgres (RLS FORCE)', () => {
       const board = await onlyNorte(() => leads.board({}));
       const ids = board.columns.flatMap((c) => c.items.map((i) => i.id));
       expect(ids).not.toContain(chacao.id);
-      // «¿Quién llama?»: solo los de sus sedes.
+      // «¿Quién llama?»: solo los de sus sedes, y cada uno devuelto queda
+      // auditado (VIEW LEAD_CALLER_LOOKUP); el que no ve, no.
+      const lookups = () =>
+        raw.auditEvent.count({
+          where: {
+            resourceType: 'LEAD',
+            resourceId: chacao.id,
+            action: 'VIEW',
+            metadata: { path: ['reason'], equals: 'LEAD_CALLER_LOOKUP' },
+          },
+        });
       await expect(
-        onlyNorte(() => leads.byPhones([`+${chacao.whatsAppDigits}`])),
+        onlyNorte(() => leads.byPhones([`+${chacao.whatsAppDigits}`], audit())),
       ).resolves.toEqual([]);
+      expect(await lookups()).toBe(0);
+      await expect(
+        asA(() => leads.byPhones([`+${chacao.whatsAppDigits}`], audit())),
+      ).resolves.toEqual([expect.objectContaining({ id: chacao.id })]);
+      expect(await lookups()).toBe(1);
+    });
+
+    it('carrera del teléfono único: el 409 se redacta por sedes igual que sin carrera (alta y edición)', async () => {
+      // Repositorio que «no ve» al dueño en la comprobación previa: la
+      // escritura choca con leads_tenant_phone_key (el camino de la carrera).
+      let blind = true;
+      const racy = Object.create(repo) as PrismaLeadRepository;
+      racy.phoneOwners = (phoneE164: string, exclude?: string) => {
+        if (blind) {
+          blind = false;
+          return Promise.resolve({ patients: [], lead: null });
+        }
+        return repo.phoneOwners(phoneE164, exclude);
+      };
+      const racyLeads = new LeadsUseCases(racy, tenantContext);
+      const phone = nextPhone();
+      const owner = await create({ phone, locationId: s.chacao });
+      const restricted = <T>(fn: () => Promise<T>) => asA(fn, [s.norte]);
+      await expect(
+        restricted(() =>
+          racyLeads.create(
+            { fullName: 'X', phone, channel: 'PHONE', locationId: s.norte },
+            audit(),
+          ),
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          code: 'LEAD_PHONE_TAKEN',
+          existing: { kind: 'LEAD', id: null, name: null },
+        },
+      });
+      // Sin restricción, el mismo camino sí dice cuál.
+      blind = true;
+      await expect(
+        asA(() =>
+          racyLeads.create(
+            { fullName: 'X', phone, channel: 'PHONE', locationId: s.norte },
+            audit(),
+          ),
+        ),
+      ).rejects.toMatchObject({
+        response: { existing: { kind: 'LEAD', id: owner.id } },
+      });
+      // Edición: un prospecto de Norte toma el número del de Chacao.
+      const mine = await create({ locationId: s.norte });
+      blind = true;
+      await expect(
+        restricted(() => racyLeads.update(mine.id, { phone }, audit())),
+      ).rejects.toMatchObject({
+        response: { existing: { kind: 'LEAD', id: null, name: null } },
+      });
     });
   });
 

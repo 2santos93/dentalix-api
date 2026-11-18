@@ -190,7 +190,10 @@ const EXPECTED: Record<string, AuditOptions> = {
     patient: RES,
   },
   // DX-224: «¿Quién llama?», una lectura por paciente encontrado (`perMatch`);
-  // el número buscado nunca va al evento.
+  // el número buscado nunca va al evento. DX-556: los prospectos devueltos
+  // (ADMIN y RECEPTION, sus sedes) dejan además, desde el caso de uso, un
+  // VIEW LEAD (LEAD_CALLER_LOOKUP) cada uno: leads.int-spec.ts y
+  // leads.e2e-spec.ts.
   'POST /patients/lookup-by-phone': {
     action: 'VIEW',
     resource: 'PATIENT',

@@ -36,6 +36,7 @@ import {
   type LeadRepository,
   type LeadRow,
   type LockedLead,
+  LeadPhoneRaceError,
   type UpdateLeadPatch,
 } from '../domain/lead-repository.port';
 import { phoneTakenError } from './lead-errors';
@@ -269,6 +270,24 @@ export class LeadsUseCases {
    * 409 si el número ya es de un paciente vivo o de otro prospecto. Del
    * prospecto de una sede no permitida no se dice cuál (sin id ni nombre).
    */
+  /**
+   * Ejecuta una escritura que puede perder la carrera del teléfono único y,
+   * si la pierde, da el 409 con la misma redacción por sedes que sin carrera.
+   */
+  private async onPhoneRace<T>(
+    write: () => Promise<T>,
+    phoneE164: string | undefined,
+    exclude?: { leadId: string; patientId: string | null },
+  ): Promise<T> {
+    try {
+      return await write();
+    } catch (error) {
+      if (!(error instanceof LeadPhoneRaceError) || !phoneE164) throw error;
+      await this.assertPhoneFree(phoneE164, exclude);
+      throw phoneTakenError({ kind: 'LEAD', id: null, name: null });
+    }
+  }
+
   private async assertPhoneFree(
     phoneE164: string,
     exclude?: { leadId: string; patientId: string | null },
@@ -351,22 +370,35 @@ export class LeadsUseCases {
     }
     const { phone, phoneE164 } = await this.readPhone(input.phone, locationId);
     await this.assertPhoneFree(phoneE164);
-    const row = await this.repo.create(
-      {
-        locationId,
-        fullName,
-        phone,
-        phoneE164,
-        channel: input.channel,
-        interestReason: await this.reasonOf('INTEREST', input.interestReason),
-        // Sin responsable elegido, quien lo da de alta.
-        ownerId: await this.ownerOf(
-          input.ownerId === undefined ? audit.actor.userId : input.ownerId,
+    const interestReason = await this.reasonOf(
+      'INTEREST',
+      input.interestReason,
+    );
+    // Sin responsable elegido, quien lo da de alta.
+    const ownerId = await this.ownerOf(
+      input.ownerId === undefined ? audit.actor.userId : input.ownerId,
+    );
+    const nextAction = this.nextAction(
+      input.nextActionAt,
+      input.nextActionNote,
+    );
+    const row = await this.onPhoneRace(
+      () =>
+        this.repo.create(
+          {
+            locationId,
+            fullName,
+            phone,
+            phoneE164,
+            channel: input.channel,
+            interestReason,
+            ownerId,
+            ...nextAction,
+            createdById: audit.actor.userId,
+          },
+          audit,
         ),
-        ...this.nextAction(input.nextActionAt, input.nextActionNote),
-        createdById: audit.actor.userId,
-      },
-      audit,
+      phoneE164,
     );
     return toLeadView(row);
   }
@@ -448,12 +480,17 @@ export class LeadsUseCases {
       changed.push('nextAction');
     }
 
-    const row = await this.repo.update(
-      id,
-      patch,
-      (locked) => this.assertWritable(locked),
-      changed,
-      audit,
+    const row = await this.onPhoneRace(
+      () =>
+        this.repo.update(
+          id,
+          patch,
+          (locked) => this.assertWritable(locked),
+          changed,
+          audit,
+        ),
+      patch.phoneE164,
+      { leadId: id, patientId: current.convertedPatientId },
     );
     if (!row) throw new NotFoundException(LEAD_MESSAGES.notFound);
     return toLeadView(row);
@@ -696,12 +733,22 @@ export class LeadsUseCases {
    * «¿Quién llama?» (DX-224 + DX-556): los prospectos vivos con alguno de
    * esos E.164 en las sedes del usuario. Sin número válido, ninguno.
    */
-  async byPhones(e164s: readonly string[]): Promise<CallerLeadMatch[]> {
+  async byPhones(
+    e164s: readonly string[],
+    audit: AuditRequestContext,
+  ): Promise<CallerLeadMatch[]> {
     if (e164s.length === 0) return [];
-    return this.repo.findByPhoneE164(
+    const found = await this.repo.findByPhoneE164(
       e164s,
       this.tenantContext.scopeLocationIds(),
     );
+    // Como los pacientes de «¿Quién llama?»: una lectura auditada por
+    // prospecto devuelto (solo de las sedes del usuario), sin el número.
+    await this.repo.auditPhoneLookup(
+      found.map((l) => l.id),
+      audit,
+    );
+    return found;
   }
 
   owners(): Promise<{ userId: string; fullName: string; role: string }[]> {

@@ -54,6 +54,15 @@ const noBalance: PatientBalanceView = {
   pending: [],
 };
 
+const AUDIT = {
+  tenantId: 't',
+  locationId: null,
+  actor: { userId: 'u', role: ClinicRole.RECEPTION },
+  requestId: null,
+  ip: null,
+  userAgent: null,
+};
+
 const LEAD_MATCH = {
   id: '9a8b7c6d-0000-4000-8000-000000000556',
   fullName: 'Rosa Medina',
@@ -88,7 +97,7 @@ function build(repo: FakeRepo, over: Partial<PatientBalanceView> = {}) {
   } as unknown as PatientMedicalAlertFlags;
   return {
     useCase: new CallerLookupUseCase(repo, balances, alerts, () => NOW, {
-      byPhones: (e164s: readonly string[]) => {
+      byPhones: (e164s: readonly string[], _audit: unknown) => {
         leadCalls.push(e164s);
         return Promise.resolve(e164s.length ? [LEAD_MATCH] : []);
       },
@@ -136,13 +145,13 @@ describe('CallerLookupUseCase (DX-224)', () => {
   it('un número que no es un número válido: sin coincidencias y sin consulta', async () => {
     const repo = new FakeRepo();
     const { useCase } = build(repo);
-    await expect(useCase.execute('1234567', ClinicRole.ADMIN)).resolves.toEqual(
-      {
-        matches: [],
-        truncated: false,
-        leads: [],
-      },
-    );
+    await expect(
+      useCase.execute('1234567', ClinicRole.ADMIN, AUDIT),
+    ).resolves.toEqual({
+      matches: [],
+      truncated: false,
+      leads: [],
+    });
     expect(repo.seen).toEqual([]);
   });
 
@@ -162,7 +171,7 @@ describe('CallerLookupUseCase (DX-224)', () => {
     const repo = new FakeRepo();
     const { useCase } = build(repo);
     await expect(
-      useCase.execute('0412 1234567', ClinicRole.ADMIN),
+      useCase.execute('0412 1234567', ClinicRole.ADMIN, AUDIT),
     ).resolves.toEqual({ matches: [], truncated: false, leads: [LEAD_MATCH] });
   });
 
@@ -172,10 +181,15 @@ describe('CallerLookupUseCase (DX-224)', () => {
     const reception = await useCase.execute(
       '0412 1234567',
       ClinicRole.RECEPTION,
+      AUDIT,
     );
     expect(reception.leads).toEqual([LEAD_MATCH]);
     expect(leadCalls).toEqual([['+584121234567']]);
-    const dentist = await useCase.execute('0412 1234567', ClinicRole.DENTIST);
+    const dentist = await useCase.execute(
+      '0412 1234567',
+      ClinicRole.DENTIST,
+      AUDIT,
+    );
     expect(dentist).not.toHaveProperty('leads');
     expect(leadCalls).toHaveLength(1);
   });

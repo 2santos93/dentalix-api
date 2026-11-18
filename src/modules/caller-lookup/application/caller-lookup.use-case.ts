@@ -16,6 +16,7 @@ import {
   type PatientBalanceView,
 } from '../../collections/application/patient-balance-flags';
 import { PatientMedicalAlertFlags } from '../../medical-history/application/patient-medical-alert-flags';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import {
   CLINICAL_ROLES,
   LEAD_ROLES,
@@ -74,12 +75,18 @@ export class CallerLookupUseCase {
     result: CallerLookupResult,
     e164s: readonly string[],
     role: ClinicRole,
+    audit: AuditRequestContext | null,
   ): Promise<CallerLookupResult> {
-    if (!LEAD_ROLES.includes(role)) return result;
-    return { ...result, leads: await this.leads.byPhones(e164s) };
+    if (!LEAD_ROLES.includes(role) || !audit) return result;
+    return { ...result, leads: await this.leads.byPhones(e164s, audit) };
   }
 
-  async execute(phone: string, role: ClinicRole): Promise<CallerLookupResult> {
+  async execute(
+    phone: string,
+    role: ClinicRole,
+    /** DX-556: quién busca, para auditar cada prospecto devuelto. */
+    audit: AuditRequestContext | null = null,
+  ): Promise<CallerLookupResult> {
     const region = await this.repo.defaultPhoneRegion();
     const candidates = callerPhoneCandidates(phone, region);
     if (candidates.status === 'TOO_SHORT') {
@@ -92,7 +99,7 @@ export class CallerLookupUseCase {
       });
     }
     if (candidates.status === 'NONE') {
-      return this.withLeads({ matches: [], truncated: false }, [], role);
+      return this.withLeads({ matches: [], truncated: false }, [], role, audit);
     }
 
     const { matches: found, truncated } = await this.repo.findByPhoneE164(
@@ -103,6 +110,7 @@ export class CallerLookupUseCase {
         { matches: [], truncated: false },
         candidates.e164s,
         role,
+        audit,
       );
     }
     const ids = found.map((m) => m.patientId);
@@ -144,6 +152,7 @@ export class CallerLookupUseCase {
       },
       candidates.e164s,
       role,
+      audit,
     );
   }
 }

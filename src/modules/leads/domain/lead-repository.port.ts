@@ -7,6 +7,18 @@ import type {
 
 export const LEAD_REPOSITORY = Symbol('LEAD_REPOSITORY');
 
+/**
+ * Otra escritura con el mismo E.164 ganó la carrera (leads_tenant_phone_key).
+ * Sin datos: el caso de uso vuelve a mirar quién tiene el número y lo redacta
+ * con la MISMA regla de sedes que sin carrera (un solo sitio).
+ */
+export class LeadPhoneRaceError extends Error {
+  constructor() {
+    super('leads_tenant_phone_key');
+    this.name = 'LeadPhoneRaceError';
+  }
+}
+
 /** Sedes del alcance (DX-089): `undefined` = sin restricción (todas). */
 export type LeadLocationScope = readonly string[] | undefined;
 
@@ -234,6 +246,11 @@ export interface LeadRepository {
     locationIds: LeadLocationScope,
   ): Promise<LeadPhoneMatch[]>;
 
+  /** Un evento VIEW LEAD (LEAD_CALLER_LOOKUP) por prospecto devuelto; nunca el número. */
+  auditPhoneLookup(
+    leadIds: readonly string[],
+    audit: AuditRequestContext,
+  ): Promise<void>;
   reasons(kind?: LeadReasonKindCode): Promise<LeadReasonRow[]>;
   createReason(
     kind: LeadReasonKindCode,

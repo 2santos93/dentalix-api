@@ -426,6 +426,17 @@ describe('Prospectos (DX-556, e2e)', () => {
         .post(`/leads/${other.id}/stage`, { stage: 'CONTACTED' })
         .expect(403);
       await restricted.post(`/leads/${other.id}/convert`, {}).expect(403);
+      // El teléfono de un prospecto de la principal: avisa sin decir cuál.
+      const taken = await restricted
+        .post('/leads', {
+          fullName: 'Y',
+          phone: `+${other.whatsAppDigits}`,
+          channel: 'PHONE',
+        })
+        .expect(409);
+      expect(taken.body).toMatchObject({
+        existing: { kind: 'LEAD', id: null, name: null },
+      });
       await restricted.get('/leads', { locationId: principal }).expect(403);
       await restricted
         .post('/leads', {
@@ -579,6 +590,17 @@ describe('Prospectos (DX-556, e2e)', () => {
         matches: [],
         leads: [{ id: lead.id, fullName: 'Yelitza Mora', stage: 'NEW' }],
       });
+      // Cada prospecto devuelto deja su lectura (sin el número).
+      const reads = await raw.auditEvent.findMany({
+        where: { resourceType: 'LEAD', resourceId: lead.id, action: 'VIEW' },
+        select: { actorUserId: true, metadata: true },
+      });
+      expect(reads).toEqual([
+        {
+          actorUserId: ids.RECEPTION,
+          metadata: { reason: 'LEAD_CALLER_LOOKUP' },
+        },
+      ]);
       const dentist = await as(a, tokens.DENTIST!)
         .post('/patients/lookup-by-phone', { phone: number })
         .expect(200);
