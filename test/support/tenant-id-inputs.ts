@@ -93,6 +93,9 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'POST /appointments/walk-in body.patientId',
   'POST /appointments/walk-in body.providerId',
   'PUT /staff/:userId/locations body.locationIds[]',
+  // DX-016: profesionales y sedes de un tipo en la reserva online.
+  'PUT /online-booking/types/:appointmentTypeId body.locationIds[]',
+  'PUT /online-booking/types/:appointmentTypeId body.providerIds[]',
   'GET /schedule-blocks ?locationId',
   'GET /schedule-blocks ?providerIds[]',
   'GET /schedule-blocks/affected-appointments ?locationId',

@@ -59,6 +59,9 @@ export const MERGE_TABLE_CATEGORY: Record<string, MergeCategory> = {
   post_op_instruction_deliveries: 'appointments',
   // DX-566: controles postoperatorios (la llamada tras el procedimiento).
   post_op_checks: 'appointments',
+  // DX-016: solicitudes y códigos de la reserva online.
+  online_booking_requests: 'appointments',
+  online_booking_verifications: 'appointments',
   clinical_entries: 'clinicalEntries',
   clinical_entry_addenda: 'clinicalEntries',
   clinical_entry_diagnoses: 'clinicalEntries',

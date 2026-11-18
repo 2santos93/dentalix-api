@@ -258,6 +258,28 @@ describe('Rate limiting (e2e)', () => {
       expect(verify.status).not.toBe(429);
     });
 
+    it('public/booking (DX-016): 429 por IP en lecturas y escrituras (balde por ruta)', async () => {
+      const config = () =>
+        request(app.getHttpServer()).get('/api/v1/public/booking');
+      for (let i = 0; i < LOW_LIMITS['online-booking'].limit; i++) {
+        expect((await config()).status).not.toBe(429);
+      }
+      expectTooMany(await config());
+      const code = () =>
+        request(app.getHttpServer())
+          .post('/api/v1/public/booking/verification')
+          .send({});
+      for (let i = 0; i < LOW_LIMITS['online-booking-write'].limit; i++) {
+        expect((await code()).status).not.toBe(429);
+      }
+      expectTooMany(await code());
+      // Reservar tiene su propio balde.
+      const book = await request(app.getHttpServer())
+        .post('/api/v1/public/booking')
+        .send({});
+      expect(book.status).not.toBe(429);
+    });
+
     it('recuperar la contraseña (DX-010): 429 por IP en pedir, comprobar y restablecer (balde por ruta)', async () => {
       const post = (path: string, body: object) => () =>
         request(app.getHttpServer()).post(`/api/v1/auth/${path}`).send(body);
