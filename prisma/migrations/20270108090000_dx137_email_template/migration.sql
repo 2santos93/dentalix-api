@@ -7,7 +7,7 @@
 -- ADD VALUE va en su propio fichero (molde de DX-568): un valor nuevo no se
 -- puede usar en la misma transacción que lo crea.
 --
--- Fecha: posterior a la última migración de main (20270107090000, DX-464).
+-- Fecha: posterior a la última migración de main (20270107140300, DX-561).
 --
 -- Compatible hacia atrás: solo AÑADE un valor que el código anterior no usa.
 

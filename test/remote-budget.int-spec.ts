@@ -240,7 +240,7 @@ function signBudget(
             contentHash: r.budgetContentHash!,
             acceptanceHash: HASH,
             acceptedAt: at,
-            acceptedById: r.createdById,
+            acceptedById: r.createdById!,
             ipAddress: '203.0.113.7',
             userAgent: 'int',
             remoteChannel: 'EMAIL',

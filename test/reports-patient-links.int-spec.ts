@@ -170,6 +170,24 @@ describe('Enlaces del paciente en la BD (DX-424, int)', () => {
       expiresAt: day(17),
       signedAt: plusHours(day(10), 5),
     });
+    // DX-561: dos enlaces del seguimiento automático (uno firmado, otro
+    // anulado por el aviso siguiente): no cuentan, los mide su informe.
+    await signature(a, {
+      locationId: a.main,
+      type: 'BUDGET',
+      origin: 'FOLLOW_UP',
+      createdAt: day(11),
+      expiresAt: day(14),
+      signedAt: plusHours(day(11), 2),
+    });
+    await signature(a, {
+      locationId: a.main,
+      type: 'BUDGET',
+      origin: 'FOLLOW_UP',
+      createdAt: day(13),
+      expiresAt: day(16),
+      revokedAt: day(14),
+    });
     // Sede Norte: firmado a las 10 h.
     await signature(a, {
       locationId: a.norte,

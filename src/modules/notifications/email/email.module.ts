@@ -65,6 +65,7 @@ import { JobsModule } from '../../jobs/jobs.module';
     PrismaEmailOutboxRetentionRepository,
     EmailOutboxMaintenance,
   ],
-  exports: [EmailOutbox, EmailDispatcher],
+  // DX-561: el seguimiento de presupuestos calcula su cupo con MAIL_CONFIG.
+  exports: [EmailOutbox, EmailDispatcher, MAIL_CONFIG],
 })
 export class EmailModule {}
