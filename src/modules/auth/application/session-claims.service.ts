@@ -17,6 +17,11 @@ export interface CurrentSession {
   claims: JwtPayload;
   /** `User.tokenVersion` actual. */
   tokenVersion: number;
+  /**
+   * DX-137: cierre por inactividad de la clínica de la sesión, en minutos
+   * (`null` en plataforma: no tiene clínica).
+   */
+  idleMinutes: number | null;
 }
 
 /**
@@ -54,6 +59,7 @@ export class SessionClaimsService {
       return {
         claims: { sub: session.sub, platform: true, mfa: true },
         tokenVersion: state.tokenVersion,
+        idleMinutes: null,
       };
     }
     const role = roleIn(state);
@@ -65,6 +71,7 @@ export class SessionClaimsService {
         ...locationClaim(role, state.tenant!.allowedLocationIds),
       },
       tokenVersion: state.tokenVersion,
+      idleMinutes: state.tenant!.sessionIdleMinutes,
     };
   }
 }

@@ -85,6 +85,9 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-561: los avisos del seguimiento automático de presupuestos (enviados u
   // omitidos; la app solo inserta y lee; dx_quote_follow_up_messages_guard).
   'quote_follow_up_messages',
+  // DX-137: a qué clínica pertenece una familia de refresh (solo se crea; se
+  // va con su familia por la cascada).
+  'clinic_sessions',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */
@@ -153,6 +156,8 @@ export const NO_APP_DELETE = [
   // DX-561: ajustes del seguimiento automático por sede. Apagar es
   // enabled = false; la fila no se borra (el upsert la bloquea al guardar).
   'location_quote_follow_up_settings',
+  // DX-137: el enlace «No fui yo» solo se marca usado (dx_session_alert_guard).
+  'session_alerts',
 ] as const;
 
 /**

@@ -32,6 +32,7 @@ export const EMAIL_TEMPLATES = [
   'external-order-copy',
   'weekly-digest',
   'quote-follow-up',
+  'new-login',
   'online-booking-code',
   'online-booking-received',
 ] as const;
@@ -81,6 +82,9 @@ export const TENANT_DAILY_BUDGET: Readonly<
   // DX-561: lo dispara la clínica (su trabajo de seguimiento): cuenta en el
   // tope diario y, al encolarse con tope, se frena al pasarlo.
   'quote-follow-up': 'clinic',
+  // DX-137: aviso de seguridad del inicio de sesión de un miembro en la
+  // clínica, como `mfa-notice` (se encola sin tope: no se calla).
+  'new-login': 'clinic',
   // DX-016: los pide la propia persona desde la página PÚBLICA de reserva
   // (como el restablecimiento): si contaran, un tercero agotaría el cupo de la
   // clínica. Los acotan el tope por destinatario, el rate limit de la página,
@@ -508,6 +512,24 @@ export interface WeeklyDigestEmailSection {
  * DX-568: resumen semanal para los ADMIN de la clínica. Solo recuentos e
  * importes por sede: ni un nombre, documento ni dato de ningún paciente.
  */
+/**
+ * DX-137: alguien entró a la cuenta desde un dispositivo que no se vio en 90
+ * días. Solo lo resumido: navegador y sistema y la red (IP truncada).
+ */
+export interface NewLoginEmailVars {
+  userName: string;
+  clinicName: string;
+  /** «Chrome en Windows». */
+  deviceLabel: string;
+  /** «190.202.15.0/24», o `null` si no se supo. */
+  ipPrefix: string | null;
+  /** Cuándo, en la zona y el formato de la clínica, o `null` si no los tiene. */
+  whenLabel: string | null;
+  /** Enlace «No fui yo» (`/no-fui-yo/<token>`). */
+  notMeUrl: string;
+  expiresInHours: number;
+}
+
 export interface WeeklyDigestEmailVars {
   clinicName: string;
   /** «3 nov–9 nov». */
@@ -567,6 +589,7 @@ export interface EmailVarsByTemplate {
   'external-order-copy': ExternalOrderCopyEmailVars;
   'weekly-digest': WeeklyDigestEmailVars;
   'quote-follow-up': QuoteFollowUpEmailVars;
+  'new-login': NewLoginEmailVars;
   'online-booking-code': OnlineBookingCodeEmailVars;
   'online-booking-received': OnlineBookingReceivedEmailVars;
 }
