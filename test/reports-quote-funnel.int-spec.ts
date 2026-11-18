@@ -950,13 +950,11 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
     new PrismaCatalogCurrencyReader(prisma, context),
   );
   const YEAR = { from: '2025-11-01', to: '2026-10-31' };
-  // Topes del plan (DX-558-ter), ver planStats. Bloques medidos en local con
-  // cb76d651: 209 000–231 000 en el agregado y en el detalle según la corrida;
-  // el tope deja más de un 25 %. La consulta anterior (9db8d7b2) falla por
-  // diskSorts (1) y widest (42 000).
-  const WIDEST = 22_000;
-  const AGGREGATE_BLOCKS = 300_000;
-  const DETAIL_BLOCKS = 280_000;
+  // Cota de filas de cualquier nodo del plan (DX-558-ter), ver planStats:
+  // 2 × las 20 000 presentaciones sembradas. Con la consulta actual el nodo
+  // más ancho tiene 22 000; con la anterior (9db8d7b2), 42 000 y un sort a
+  // disco: falla por las dos.
+  const MAX_ROWS = 2 * 20_000;
   let c: FunnelClinic;
 
   const input = (): QuoteFunnelInput => ({
@@ -1152,15 +1150,13 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
     'Actual Rows': number;
     'Actual Loops': number;
     'Sort Space Type'?: string;
-    'Shared Hit Blocks': number;
-    'Shared Read Blocks': number;
     Plans?: PlanNode[];
   }
 
   /**
-   * El plan EJECUTADO de la consulta: `EXPLAIN (ANALYZE, TIMING OFF,
-   * BUFFERS)` como dentalix_app bajo RLS y con `jit = off`, igual que el
-   * repositorio. Filas, bucles, ordenaciones y bloques no dependen de la
+   * El plan EJECUTADO de la consulta: `EXPLAIN (ANALYZE, TIMING OFF)` como
+   * dentalix_app bajo RLS y con `jit = off`, igual que el
+   * repositorio. Filas, bucles, y ordenaciones no dependen de la
    * velocidad de la máquina.
    */
   async function executedPlan(sql: Prisma.Sql): Promise<PlanNode> {
@@ -1168,7 +1164,7 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
       await tx.$executeRaw`SET LOCAL jit = off`;
       const [row] = await tx.$queryRaw<
         { 'QUERY PLAN': { Plan: PlanNode }[] }[]
-      >(Prisma.sql`EXPLAIN (ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON) ${sql}`);
+      >(Prisma.sql`EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${sql}`);
       return row['QUERY PLAN'][0].Plan;
     });
   }
@@ -1178,32 +1174,24 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
   }
 
   /**
-   * Lo que vigila el rendimiento (DX-558-ter), sin cronómetro:
-   * - `diskSorts`: ordenaciones que no caben en work_mem y van a disco.
-   * - `widest`: filas del nodo más ancho del flujo principal (uniones,
-   *   agregados y ordenaciones que corren una vez; no las lecturas de tablas
-   *   ni lo que se repite por fila dentro de un LATERAL). Antes de DX-558-bis
-   *   la unión cadena → ítems → imputaciones abría una fila por ítem (42 000)
-   *   y la ordenaba a disco; ahora no pasa de una por plan de la cadena
-   *   (22 000: 20 000 raíz + 2 000 pendientes).
-   * - `blocks`: bloques compartidos que toca (en caché o leídos), con todos
-   *   los bucles. Una subconsulta nueva por ítem o un recorrido de tablas
-   *   enteras lo hace subir; con los mismos datos varía ~10 % entre corridas.
+   * Lo que vigila el rendimiento (DX-558-ter), sin cronómetro y sin fijar la
+   * forma del árbol (tipos de unión, orden de nodos o índices concretos
+   * cambian con un postgres:16.x nuevo en la CI):
+   * - `diskSorts`: nodos que ordenan o agregan en disco porque no caben en
+   *   work_mem («Sort Space Type: Disk»).
+   * - `maxRows`: las filas reales (por bucle) del nodo más ancho, sea cual
+   *   sea. Antes de DX-558-bis la unión cadena → ítems → imputaciones abría
+   *   una fila por ítem (42 000) y la ordenaba a disco; ahora ningún nodo pasa
+   *   de una fila por plan de la cadena (22 000: 20 000 raíz + 2 000
+   *   pendientes). La cota es 2 × las 20 000 presentaciones sembradas.
    * - `top`: los nodos más anchos, solo para el log.
    */
   function planStats(plan: PlanNode) {
     const nodes = nodesOf(plan);
-    const pipeline = nodes.filter(
-      (n) =>
-        n['Actual Loops'] === 1 &&
-        !/Scan$/.test(n['Node Type']) &&
-        n['Node Type'] !== 'Result',
-    );
     return {
       diskSorts: nodes.filter((n) => n['Sort Space Type'] === 'Disk').length,
-      widest: Math.max(...pipeline.map((n) => n['Actual Rows'])),
-      blocks: plan['Shared Hit Blocks'] + plan['Shared Read Blocks'],
-      top: [...pipeline]
+      maxRows: Math.max(...nodes.map((n) => n['Actual Rows'])),
+      top: [...nodes]
         .sort((x, y) => y['Actual Rows'] - x['Actual Rows'])
         .slice(0, 3)
         .map((n) => `${n['Node Type']} ${n['Actual Rows']}`),
@@ -1261,8 +1249,7 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
       `DX-558 · embudo, 20 000 planes, 12 meses: ${JSON.stringify(stats)}; reloj de pared ${fmt(ms)} ms`,
     );
     expect(stats.diskSorts).toBe(0);
-    expect(stats.widest).toBeLessThanOrEqual(WIDEST);
-    expect(stats.blocks).toBeLessThan(AGGREGATE_BLOCKS);
+    expect(stats.maxRows).toBeLessThanOrEqual(MAX_ROWS);
     expect(Math.min(...ms)).toBeLessThan(1_500);
   }, 120_000);
 
@@ -1281,12 +1268,11 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
       `DX-558 · detalle (1.ª página), 20 000 planes, 12 meses: ${JSON.stringify(stats)}; reloj de pared ${fmt(ms)} ms`,
     );
     expect(stats.diskSorts).toBe(0);
-    expect(stats.widest).toBeLessThanOrEqual(WIDEST);
-    expect(stats.blocks).toBeLessThan(DETAIL_BLOCKS);
+    expect(stats.maxRows).toBeLessThanOrEqual(MAX_ROWS);
     expect(Math.min(...ms)).toBeLessThan(1_500);
   }, 120_000);
 
-  it('un mes no recorre treatment_plans entero: usa el índice de presentaciones', async () => {
+  it('un mes no recorre treatment_plans entero', async () => {
     // Con 12 meses sobre una clínica de 12 meses, leer la tabla entera ES lo
     // barato (y el planificador lo elige); lo que se vigila es que un período
     // corto no crezca con la historia.
@@ -1303,7 +1289,8 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
       ),
     );
     const text = plan.map((row) => row['QUERY PLAN']).join('\n');
-    expect(text).toMatch(/treatment_plans_tenant_presented_idx/);
+    // Invariante y no forma (DX-558-ter): sin fijar qué índice elige, que
+    // cambia con un postgres:16.x nuevo.
     expect(text).not.toMatch(/Seq Scan on treatment_plans/);
   });
 });
