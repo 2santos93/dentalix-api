@@ -634,6 +634,50 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
     });
   });
 
+  describe('presentación congelada del presupuesto (DX-560)', () => {
+    const presentation = {
+      language: 'es',
+      items: [{ index: 0, visit: 1, label: 'Limpieza', language: 'es' }],
+      visitOrganization: [{ visit: 1, label: null, minDaysAfterPrevious: 0 }],
+    };
+
+    it('una vez creada no cambia: el guard rechaza el UPDATE (app y superusuario)', async () => {
+      const { id } = await insertRaw(a, {
+        ...budgetInput(a, a.planId),
+        budgetPresentation: presentation,
+      });
+      await expect(
+        asApp(a, (tx) =>
+          tx.signatureRequest.update({
+            where: { id },
+            data: { budgetPresentation: { ...presentation, language: 'en' } },
+          }),
+        ),
+      ).rejects.toThrow(/no cambia, ni su documento/);
+      await expect(
+        owner.$executeRaw`UPDATE "signature_requests" SET "budgetPresentation" = NULL WHERE "id" = ${id}::uuid`,
+      ).rejects.toThrow(/no cambia, ni su documento/);
+      const row = await owner.signatureRequest.findUniqueOrThrow({
+        where: { id },
+        select: { budgetPresentation: true },
+      });
+      expect(row.budgetPresentation).toEqual(presentation);
+    });
+
+    it('el CHECK solo la admite en BUDGET y como objeto', async () => {
+      await expect(
+        insertRaw(a, { ...consentInput(a), budgetPresentation: presentation }),
+      ).rejects.toThrow(/signature_requests_budget_presentation_check/);
+      await expect(
+        insertRaw(a, {
+          ...budgetInput(a, a.planId),
+          budgetPresentation: [presentation],
+        }),
+      ).rejects.toThrow(/signature_requests_budget_presentation_check/);
+      expect(await liveCount(a)).toBe(0);
+    });
+  });
+
   describe('sin borrado para la app (DB-065)', () => {
     it('dentalix_app no tiene DELETE y el intento falla por permisos', async () => {
       const id = await fresh(a);
