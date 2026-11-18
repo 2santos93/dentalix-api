@@ -43,6 +43,7 @@ function makeRepo(
     findAppointment: () => Promise.resolve(null),
     writeLocationTimeZone: () => Promise.resolve('America/Caracas'),
     existingIcd10Codes: () => Promise.resolve(new Set<string>()),
+    findByIdempotencyKey: () => Promise.resolve(null),
     ...overrides,
   };
 }
@@ -65,6 +66,10 @@ class InMemoryClinicalEntryRepository implements ClinicalEntryRepository {
 
   create(): Promise<CreatedClinicalEntryRecord> {
     return Promise.reject(new Error('not implemented in this fake'));
+  }
+
+  findByIdempotencyKey(): Promise<null> {
+    return Promise.resolve(null);
   }
 
   writeLocationTimeZone(): Promise<string> {

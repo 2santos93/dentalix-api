@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   MethodNotAllowedException,
   Param,
@@ -19,6 +20,7 @@ import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiHeader,
   ApiMethodNotAllowedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -56,9 +58,16 @@ import {
   type AuditableRequest,
 } from '../../audit/presentation/audit-request-context';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
+import {
+  CLINICAL_IDEMPOTENCY_HEADER,
+  CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION,
+  type IdempotencySignals,
+} from '../../../shared/validation/idempotent-create';
 
 interface AuthenticatedRequest extends AuditableRequest {
   user: JwtPayload;
+  /** DX-574: la repetición de un alta idempotente no escribe: no se audita. */
+  skipAudit?: boolean;
 }
 
 /** Respuesta a cualquier intento de editar o borrar una evolución (DX-038). */
@@ -97,9 +106,9 @@ export class ClinicalEntriesController {
     description:
       'DX-170: con `templateId`, el texto compuesto se guarda en `notes` (enviado ya revisado, o compuesto por el servidor con `answers`). Con `appointmentId`, la evolución queda ligada a la cita. DX-540: congela el registro profesional del autor (`authorProfessionalLicense`) y, si la clínica tiene el aviso activo y el autor no lo tiene, responde `warnings: [{ code: PROFESSIONAL_LICENSE_MISSING }]` sin bloquear la firma. DX-015-bis (D18): con `recall`, fija el intervalo del recall de ese tipo en la misma transacción (`recallUpdates`).',
   })
+  @ApiHeader(CLINICAL_IDEMPOTENCY_HEADER)
   @ApiUnprocessableEntityResponse({
-    description:
-      'DX-015-bis (D18): el tipo de `recall` no existe en esta clínica o se retiró; no se guarda la evolución.',
+    description: `DX-015-bis (D18): el tipo de \`recall\` no existe en esta clínica o se retiró; no se guarda la evolución. ${CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION}`,
   })
   @ApiCreatedResponse({ type: CreatedClinicalEntryDto })
   @ApiBadRequestResponse({
@@ -110,12 +119,14 @@ export class ClinicalEntriesController {
     description:
       'Paciente, cita o plantilla no encontrados en esta clínica (inexistentes o de otra clínica).',
   })
-  create(
+  async create(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateClinicalEntryDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<CreatedClinicalEntry> {
-    return this.createClinicalEntry.execute(
+    const signals: IdempotencySignals = {};
+    const created = await this.createClinicalEntry.execute(
       patientId,
       {
         entryDate: dto.entryDate ? new Date(dto.entryDate) : undefined,
@@ -144,7 +155,12 @@ export class ClinicalEntriesController {
       // D18: los eventos del recall (PATIENT_RECALL, `via: CLINICAL_ENTRY`)
       // van en la transacción del alta.
       auditRequestContext(req, this.tenantContext),
+      undefined,
+      { idempotencyKey, signals },
     );
+    // DX-574: un reintento con la misma clave no escribió nada.
+    if (signals.replayed) req.skipAudit = true;
+    return created;
   }
 
   @Audit({

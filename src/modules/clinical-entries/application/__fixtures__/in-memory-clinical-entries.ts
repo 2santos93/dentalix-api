@@ -40,7 +40,19 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
   readonly recallRequests: NonNullable<
     CreateClinicalEntryRepoInput['recall']
   >[] = [];
+  /** DX-574: clave y huella de cada alta con Idempotency-Key (id → huella). */
+  readonly idempotency = new Map<string, { id: string; fingerprint: string }>();
   private nextId = 1;
+
+  findByIdempotencyKey(
+    key: string,
+  ): Promise<{ fingerprint: string | null; value: ClinicalEntry } | null> {
+    const stored = this.idempotency.get(key);
+    const row = stored && this.rows.find((r) => r.id === stored.id);
+    return Promise.resolve(
+      row && stored ? { fingerprint: stored.fingerprint, value: row } : null,
+    );
+  }
 
   writeLocationTimeZone(): Promise<string> {
     return Promise.resolve(this.writeTimeZone);
@@ -84,8 +96,18 @@ export class InMemoryClinicalEntryRepository implements ClinicalEntryRepository 
         entryDay: entryCivilDay(row.entryDate, this.writeTimeZone),
       });
     }
+    // DX-574: el único parcial (tenantId, idempotencyKey) del real.
+    if (input.idempotency && this.idempotency.has(input.idempotency.key)) {
+      throw new Error('P2002 clinical_entries_tenant_idempotency_key');
+    }
     // Append-only: push a NEW row, never mutate/replace an existing one.
     this.rows.push(row);
+    if (input.idempotency) {
+      this.idempotency.set(input.idempotency.key, {
+        id: row.id,
+        fingerprint: input.idempotency.fingerprint,
+      });
+    }
     if (input.recall) this.recallRequests.push(input.recall);
     return {
       ...structuredClone(row),

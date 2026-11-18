@@ -5,6 +5,10 @@ import {
 } from '../entities/clinical-entry.entity';
 import type { ValidDiagnosis } from '../diagnosis-rules';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type {
+  IdempotencyRequest,
+  IdempotentRecord,
+} from '../../../../shared/validation/idempotent-create';
 
 // NOTE: deliberately NO `tenantId`/`id`/`createdAt` field — the tenant comes
 // from the guarded request context (never the client, same convention as
@@ -40,6 +44,8 @@ export interface CreateClinicalEntryRepoInput {
    * evolución tampoco se guarda.
    */
   attach?: ClinicalEntryAttachment;
+  /** DX-574: clave y huella del alta; un choque del único deshace todo. */
+  idempotency?: IdempotencyRequest;
 }
 
 /** DX-190: la evolución recién insertada, para lo que cuelga de ella. */
@@ -99,6 +105,14 @@ export interface ClinicalEntryRepository {
    * (recortado), o null si no lo tiene o no es miembro.
    */
   authorLicense(userId: string): Promise<string | null>;
+
+  /**
+   * DX-574: la evolución que creó esta Idempotency-Key en la clínica, con la
+   * huella de su petición, o null.
+   */
+  findByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<ClinicalEntry> | null>;
 
   /**
    * DX-170: cita viva por id, de cualquier paciente de la clínica. Bajo RLS,
