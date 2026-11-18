@@ -25,6 +25,8 @@ import {
  *   (9:00, 9:15…), y cabe entero (`durationMinutes`).
  * Varios profesionales: un inicio sale una vez, con el primero libre en el
  * orden recibido (determinista: la reserva elige ese mismo).
+ * DX-583: en una sede con sillones, además, al menos un sillón libre en el
+ * intervalo entero (el sillón se elige al reservar, con la regla de DX-480).
  */
 
 export const MAX_ONLINE_SLOT_DAYS = 14;
@@ -55,6 +57,12 @@ export interface OnlineSlotsQuery {
   providers: readonly ProviderAgenda[];
   /** Citas del propio paciente (existente): tampoco puede estar en dos. */
   patientBusy?: readonly Interval[];
+  /**
+   * DX-583: lo ocupado de cada sillón ACTIVO de la sede (uno por sillón). Un
+   * inicio solo sale si al menos un sillón está libre en `[start, end)`.
+   * Vacío o sin él = sede sin sillones: sin restricción (como antes).
+   */
+  chairBusy?: readonly (readonly Interval[])[];
   durationMinutes: number;
   stepMinutes: number;
   now: Date;
@@ -120,6 +128,12 @@ export function computeOnlineSlots(query: OnlineSlotsQuery): OnlineSlotsResult {
   const latest = latestOnlineStart(query.now, query.maxAdvanceDays).getTime();
   const durationMs = query.durationMinutes * MINUTE;
   const byStart = new Map<number, OnlineSlot>();
+  const chairBusy = query.chairBusy ?? [];
+  const someChairFree = (start: number, end: number): boolean =>
+    chairBusy.length === 0 ||
+    chairBusy.some((busy) =>
+      busy.every((b) => b.end.getTime() <= start || b.start.getTime() >= end),
+    );
 
   for (const provider of query.providers) {
     const { openings } = findOpenings({
@@ -143,7 +157,7 @@ export function computeOnlineSlots(query: OnlineSlotsQuery): OnlineSlotsResult {
         latest,
       )) {
         const key = start.getTime();
-        if (!byStart.has(key)) {
+        if (!byStart.has(key) && someChairFree(key, key + durationMs)) {
           byStart.set(key, {
             start,
             end: new Date(key + durationMs),

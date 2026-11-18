@@ -10,6 +10,7 @@ import { LocationScheduleModule } from '../location-schedule/location-schedule.m
 import { ScheduleBlocksModule } from '../schedule-blocks/schedule-blocks.module';
 import { ProviderScheduleModule } from '../provider-schedule/provider-schedule.module';
 import { StaffModule } from '../staff/staff.module';
+import { ChairsModule } from '../chairs/chairs.module';
 import { EmailModule } from '../notifications/email/email.module';
 import { ONLINE_BOOKING_REPOSITORY } from './domain/ports/online-booking-repository.port';
 import {
@@ -18,6 +19,7 @@ import {
 } from './domain/booking-security';
 import { PrismaOnlineBookingRepository } from './infrastructure/prisma-online-booking.repository';
 import { OnlineSlotService } from './application/online-slot.service';
+import { OnlineChairService } from './application/online-chair.service';
 import { OnlineBookingEmail } from './application/online-booking-email';
 import {
   CreatePublicBookingUseCase,
@@ -50,6 +52,7 @@ import { OnlineBookingController } from './presentation/online-booking.controlle
     ScheduleBlocksModule,
     ProviderScheduleModule,
     StaffModule,
+    ChairsModule,
     EmailModule,
   ],
   controllers: [PublicBookingController, OnlineBookingController],
@@ -65,6 +68,7 @@ import { OnlineBookingController } from './presentation/online-booking.controlle
     // PENDIENTE (decisión del dueño): proveedor de captcha. Hoy no se exige.
     { provide: BOT_CHALLENGE_VERIFIER, useClass: NoBotChallengeVerifier },
     OnlineSlotService,
+    OnlineChairService,
     OnlineBookingEmail,
     GetPublicBookingConfigUseCase,
     ListPublicSlotsUseCase,

@@ -198,3 +198,44 @@ describe('clampOnlineDays', () => {
     );
   });
 });
+
+describe('computeOnlineSlots con sillones (DX-583)', () => {
+  const busy = (from: string, to: string) => ({
+    start: at(`2026-11-23T${from}:00`),
+    end: at(`2026-11-23T${to}:00`),
+  });
+
+  it('sin sillones (lista vacía) no cambia nada', () => {
+    expect(starts(query({ chairBusy: [] }))).toEqual(starts(query()));
+  });
+
+  it('con un solo sillón, nunca un hueco en el que está ocupado (también un solape parcial)', () => {
+    // Ocupado 9:45–10:30: caen 9:30 (termina 10:00) y 10:00.
+    expect(starts(query({ chairBusy: [[busy('09:45', '10:30')]] }))).toEqual([
+      '13:00',
+      '14:30',
+      '15:00',
+      '15:30',
+    ]);
+  });
+
+  it('con dos sillones basta con que uno esté libre', () => {
+    expect(
+      starts(
+        query({
+          chairBusy: [[busy('09:00', '12:00')], [busy('10:00', '11:00')]],
+        }),
+      ),
+    ).toEqual(['13:00', '13:30', '15:00', '15:30']);
+  });
+
+  it('todos los sillones ocupados todo el día: ningún hueco aunque el profesional esté libre', () => {
+    expect(
+      starts(
+        query({
+          chairBusy: [[busy('09:00', '12:00')], [busy('08:00', '13:00')]],
+        }),
+      ),
+    ).toEqual([]);
+  });
+});
