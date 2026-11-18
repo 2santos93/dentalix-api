@@ -78,6 +78,8 @@ export function staffQuote(): PlanQuoteDocument {
       acceptanceHash: 'b'.repeat(64),
       integrityOk: true,
       remote: { signatureRequestId: 'sr-1', destinationMasked: 'c***@x' },
+      // DX-101-bis: la evidencia del portal tampoco sale al paciente.
+      portal: { patientAccessLinkId: 'pal-interno-1' },
       ipAddress: '203.0.113.7',
       userAgent: 'Mozilla/5.0',
       quoteValidUntil: '2026-12-01',

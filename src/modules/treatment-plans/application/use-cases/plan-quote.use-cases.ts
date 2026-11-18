@@ -64,6 +64,7 @@ import {
   type NewPlanAcceptance,
   type PlanQuoteRepository,
   type PlanAcceptanceRemoteEvidence,
+  type PlanAcceptancePortalEvidence,
   type PlanPresentation,
   type PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
@@ -121,6 +122,8 @@ export interface PlanQuoteAcceptanceView {
   integrityOk: boolean;
   /** DX-415: aceptado a distancia por enlace con código (evidencias). */
   remote: PlanAcceptanceRemoteEvidence | null;
+  /** DX-101-bis: aceptado por el paciente desde su portal. */
+  portal: PlanAcceptancePortalEvidence | null;
   ipAddress: string | null;
   userAgent: string | null;
   /**
@@ -449,6 +452,7 @@ function toDocument(
       acceptanceHash: stored.acceptanceHash,
       integrityOk,
       remote: stored.remote,
+      portal: stored.portal,
       ipAddress: stored.ipAddress,
       userAgent: stored.userAgent,
       quoteValidUntil: stored.expiry.quoteValidUntil,

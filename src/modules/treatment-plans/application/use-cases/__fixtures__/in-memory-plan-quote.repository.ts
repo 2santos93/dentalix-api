@@ -296,6 +296,7 @@ export class InMemoryPlanQuoteRepository implements PlanQuoteRepository {
         ipAddress: row.ipAddress,
         userAgent: row.userAgent,
         remote: null,
+        portal: null,
         // Como el de Prisma: el logo del instante de la firma.
         clinicLogoUrl: source.clinic.logoUrl,
         expiry: row.expiry ?? {

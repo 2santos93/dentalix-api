@@ -678,6 +678,7 @@ describe('assertPlanRepriceable (D-11)', () => {
             signerName: 'Ana',
             acceptedAt: AT,
             remote: null,
+            portal: null,
           },
         },
         none,

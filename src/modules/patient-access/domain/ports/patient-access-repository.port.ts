@@ -4,6 +4,7 @@ import type {
   AuditRequestMeta,
 } from '../../../audit/domain/audit-request-context';
 import type { HourCycle } from '../../../../shared/format/regional-format';
+import type { PlanQuoteSource } from '../../../treatment-plans/domain/ports/plan-quote-repository.port';
 import type {
   VerifyDecision,
   WhatsAppResponsibleCandidate,
@@ -105,7 +106,85 @@ export interface PortalPlanRef {
   status: 'PRESENTED' | 'ACCEPTED';
   optionGroupId: string | null;
   optionLabel: string | null;
+  /**
+   * DX-101-bis: para decidir si se puede aceptar desde el portal. El último
+   * día válido guardado (`YYYY-MM-DD`, null si no vence), la zona VÁLIDA de
+   * la sede de la presentación (null si no la tiene) y si otra opción de su
+   * grupo ya está aceptada o completada.
+   */
+  quoteValidUntil: string | null;
+  quoteTimeZone: string | null;
+  siblingChosen: boolean;
+  /**
+   * DX-101-bis: la sede con la que se compone el presupuesto (la de su
+   * presentación si sigue activa; null = la de escritura del contexto). La
+   * misma con la que se acepta: así el hash cuadra.
+   */
+  quoteLocationId: string | null;
 }
+
+/** DX-101-bis: lo que el caso de uso decide con el plan bloqueado. */
+export interface PortalAcceptanceSeal {
+  content: object;
+  contentHash: string;
+  acceptanceHash: string;
+}
+
+/**
+ * DX-101-bis: aceptar un presupuesto desde el portal. `decide` recibe el
+ * presupuesto releído con el plan y su grupo bloqueados, la hora de la BD de
+ * la transacción y si otra opción del grupo ya está elegida; comprueba que se
+ * puede aceptar y que es el mostrado (si no, LANZA) y devuelve lo que se
+ * sella.
+ */
+export interface PortalAcceptanceInput {
+  linkId: string;
+  patientId: string;
+  planId: string;
+  signerName: string;
+  /** PNG en base64, sin prefijo `data:`, ya validado. */
+  signature: string;
+  meta: AuditRequestMeta;
+  decide: (
+    source: PlanQuoteSource,
+    ctx: {
+      dbNow: Date;
+      siblingChosen: boolean;
+      optionGroupId: string | null;
+      optionLabel: string | null;
+    },
+  ) => PortalAcceptanceSeal;
+}
+
+/** Para el email de confirmación, tras el COMMIT (sin nada clínico). */
+export interface PortalAcceptanceConfirmation {
+  /**
+   * El destinatario de la firma a distancia (`resolveSignatureRecipient`,
+   * como DX-415/DX-561): el paciente adulto o, si es menor, su responsable;
+   * null = no se envía (sin email o con la baja de envíos).
+   */
+  to: string | null;
+  /** Nombre de pila con el que se le saluda (el del destinatario). */
+  greetingName: string | null;
+  clinicName: string;
+  location: {
+    id: string;
+    locale: string | null;
+    hourCycle: string | null;
+    timeZone: string;
+  };
+}
+
+export type PortalAcceptanceOutcome =
+  /** El plan no existe o no es de este paciente. */
+  | { kind: 'NOT_FOUND' }
+  /** Enlace revocado o caducado, o paciente archivado (como el guard). */
+  | { kind: 'GONE' }
+  | {
+      kind: 'ACCEPTED';
+      acceptedAt: Date;
+      confirmation: PortalAcceptanceConfirmation;
+    };
 
 export interface PatientAccessRepository {
   // --- personal ------------------------------------------------------------
@@ -153,8 +232,21 @@ export interface PatientAccessRepository {
     patientId: string,
     now: Date,
   ): Promise<PortalAppointment[]>;
-  /** Planes PRESENTED o ACCEPTED del paciente, del más reciente al más antiguo. */
-  sharedPlans(patientId: string): Promise<PortalPlanRef[]>;
+  /**
+   * Planes PRESENTED o ACCEPTED del paciente, del más reciente al más
+   * antiguo. Con `planId` (DX-101-bis), solo ese.
+   */
+  sharedPlans(patientId: string, planId?: string): Promise<PortalPlanRef[]>;
+  /**
+   * DX-101-bis: en UNA transacción, con el paciente vivo (FOR KEY SHARE, el
+   * orden de archivar), el plan del paciente, el enlace RELEÍDO (FOR SHARE:
+   * una revocación espera o ya se ve) y el plan y su grupo bloqueados
+   * (núcleo compartido con DX-415): la aceptación con la evidencia PORTAL, el
+   * plan aceptado y el evento de auditoría con actor paciente. Los errores de
+   * `decide`, el de otra aceptación simultánea
+   * (`PortalQuoteNotAcceptableError`) y los 409 de DX-109 se propagan.
+   */
+  acceptPlan(input: PortalAcceptanceInput): Promise<PortalAcceptanceOutcome>;
   /** ¿Es una cita futura, confirmable, de ESTE paciente? */
   findConfirmableAppointment(
     patientId: string,

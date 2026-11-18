@@ -17,6 +17,10 @@ import {
 } from './rate-limit.keys';
 import { RateLimitGuard } from './rate-limit.guard';
 import { normalizeBrandingHost } from '../../modules/public-branding/application/branding-host';
+import {
+  PATIENT_ACCESS_COOKIE,
+  readCookie,
+} from '../../modules/patient-access/domain/patient-access-session';
 
 // Proveedor propio para la configuración: así un test puede sustituirla
 // (`overrideProvider(RATE_LIMIT_CONFIG)`) sin tocar variables de entorno. Lo
@@ -150,6 +154,17 @@ function throttlers(
         publicTokenRateLimitKey(
           routePrefix(context, name),
           request(context).params?.token,
+        ),
+    },
+    {
+      // DX-101-bis: aceptar un presupuesto desde el portal, por SESIÓN (el
+      // valor de la cookie del portal, hasheado; sin IP). Sin cookie, un
+      // balde común: esas peticiones acaban en 401 en el guard.
+      ...strict('patient-access-accept'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          readCookie(request(context).headers.cookie, PATIENT_ACCESS_COOKIE),
         ),
     },
     // DX-467: verificar una receta por el código de su QR, por IP.
