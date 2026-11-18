@@ -16,7 +16,8 @@ import { QUOTE_FOLLOW_UP_CLOCK } from '../src/modules/quote-follow-up/domain/por
 import { ListPendingFollowUpUseCase } from '../src/modules/treatment-plans/application/use-cases/list-pending-follow-up.use-case';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 import { CapturingMailer } from './support/capture-mailer';
 import { resetDatabase } from './support/e2e-fixtures';
 import {
@@ -41,7 +42,7 @@ const owner = new PrismaClient<Prisma.PrismaClientOptions>({
 // trabajo; con fechas fijas en el pasado, `expiresAt > createdAt` fallaría.
 // Presentado mañana a las 10:00 de Caracas; el paso 1 (3 días) vence 3 días
 // civiles después.
-const D0 = addCivilDays(civilDateIn(new Date(), 'America/Caracas'), 1);
+const D0 = addCivilDays(fixedSedeDay(0).day, 1);
 const day = (offset: number, hhmm = '10:00') =>
   caracas(addCivilDays(D0, offset), hhmm);
 const PRESENTED = day(0);
@@ -808,7 +809,7 @@ describe('DX-561 · seguimiento automático de presupuestos (int)', () => {
     await settings(c);
     // La lista mide «presentado hace más de N días» con el reloj real: esta
     // presentación es de hace 3 días civiles de verdad.
-    const today = civilDateIn(new Date(), 'America/Caracas');
+    const today = fixedSedeDay(0).day;
     const g = await group(c, {
       options: 2,
       presentedAt: caracas(addCivilDays(today, -3), '10:00'),

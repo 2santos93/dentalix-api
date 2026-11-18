@@ -21,7 +21,8 @@ import {
 } from '../src/modules/quote-follow-up/domain/quote-follow-up-settings';
 import { QUOTE_FOLLOW_UP_REPORT_FORBIDDEN_MESSAGE } from '../src/modules/quote-follow-up/presentation/quote-follow-up-report.controller';
 import { QUOTE_FOLLOW_UP_SETTINGS_FORBIDDEN_MESSAGE } from '../src/modules/quote-follow-up/presentation/quote-follow-up-settings.controller';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { addCivilDays } from '../src/shared/time/civil-day';
+import { fixedSedeDay } from './support/sede-clock';
 import {
   Clinic,
   createE2eApp,
@@ -104,7 +105,7 @@ describe('Seguimiento automático de presupuestos (e2e, DX-561)', () => {
         email: `ana-${Math.random().toString(36).slice(2, 8)}@seguimiento.test`,
       },
     });
-    const today = civilDateIn(new Date(), 'America/Caracas');
+    const today = fixedSedeDay(0).day;
     const root = await seed.plan(
       { ...funnel, patientId: patient.id },
       {
@@ -400,7 +401,7 @@ describe('Seguimiento automático de presupuestos (e2e, DX-561)', () => {
   });
 
   describe('informe de efectividad', () => {
-    const today = civilDateIn(new Date(), 'America/Caracas');
+    const today = fixedSedeDay(0).day;
     const range = `from=${addCivilDays(today, -30)}&to=${today}`;
 
     it('ADMIN ve la clínica; DENTIST, lo suyo; RECEPTION y ASSISTANT, 403', async () => {
