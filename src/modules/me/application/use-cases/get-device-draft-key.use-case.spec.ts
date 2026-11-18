@@ -18,17 +18,18 @@ const USER = {
 };
 
 function useCase(live: number | null, secret: string | undefined = SECRET) {
-  const gate: DraftKeyGate = { liveTokenVersion: jest.fn(async () => live) };
+  const liveTokenVersion = jest.fn(() => Promise.resolve(live));
+  const gate: DraftKeyGate = { liveTokenVersion };
   const config = new ConfigService({ DEVICE_DRAFT_KEY_SECRET: secret });
-  return { uc: new GetDeviceDraftKeyUseCase(gate, config), gate };
+  return { uc: new GetDeviceDraftKeyUseCase(gate, config), liveTokenVersion };
 }
 
 describe('GetDeviceDraftKeyUseCase (DX-574)', () => {
   it('con la sesión viva y la versión vigente entrega 32 bytes', async () => {
-    const { uc, gate } = useCase(2);
+    const { uc, liveTokenVersion } = useCase(2);
     const res = await uc.execute(USER);
     expect(Buffer.from(res.key, 'base64')).toHaveLength(32);
-    expect(gate.liveTokenVersion).toHaveBeenCalledWith({
+    expect(liveTokenVersion).toHaveBeenCalledWith({
       userId: USER.sub,
       tenantId: USER.tenantId,
       sessionId: USER.sid,
