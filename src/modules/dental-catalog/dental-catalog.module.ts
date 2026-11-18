@@ -18,6 +18,8 @@ import { CATALOG_CURRENCY_READER } from './domain/ports/catalog-currency-reader.
 import { PrismaCatalogCurrencyReader } from './infrastructure/prisma-catalog-currency-reader';
 import { CATALOG_NOTE_TEMPLATE_READER } from './domain/ports/catalog-note-template-reader.port';
 import { PrismaCatalogNoteTemplateReader } from './infrastructure/prisma-catalog-note-template-reader';
+import { CATALOG_PATIENT_LANGUAGES_READER } from './domain/ports/catalog-patient-languages-reader.port';
+import { PrismaCatalogPatientLanguagesReader } from './infrastructure/prisma-catalog-patient-languages-reader';
 import { PrismaDentalCatalogRepository } from './infrastructure/repositories/prisma-dental-catalog.repository';
 import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
@@ -56,6 +58,11 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
     {
       provide: CATALOG_NOTE_TEMPLATE_READER,
       useClass: PrismaCatalogNoteTemplateReader,
+    },
+    // DX-560: idiomas de los pacientes para validar la descripción.
+    {
+      provide: CATALOG_PATIENT_LANGUAGES_READER,
+      useClass: PrismaCatalogPatientLanguagesReader,
     },
   ],
   // Exported so other modules (TreatmentPlansModule ->

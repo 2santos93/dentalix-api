@@ -11,6 +11,8 @@ import {
   UpdateDentalCatalogItemRepoInput,
 } from '../../domain/ports/dental-catalog-repository.port';
 import { DentalCatalogItem } from '../../domain/entities/dental-catalog-item.entity';
+import { localizedTextMapFromJson } from '../../../../shared/i18n/localized-text';
+import { patientDescriptionEntries } from '../../domain/patient-description';
 
 /**
  * DX-455: si la plantilla ligada está activa, para `suggestedClinicalNoteTemplateId`.
@@ -39,6 +41,9 @@ function mapToEntity(item: PrismaDentalCatalogItem): DentalCatalogItem {
     allowDiscount: item.allowDiscount,
     requiresPostOpCheck: item.requiresPostOpCheck,
     postOpCheckAfterDays: item.postOpCheckAfterDays,
+    patientDescription: patientDescriptionEntries(
+      localizedTextMapFromJson(item.patientDescription),
+    ),
     active: item.active,
     clinicalNoteTemplateId: item.clinicalNoteTemplateId,
     suggestedClinicalNoteTemplateId:
@@ -93,6 +98,7 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
           allowDiscount: input.allowDiscount,
           requiresPostOpCheck: input.requiresPostOpCheck,
           postOpCheckAfterDays: input.postOpCheckAfterDays,
+          patientDescription: input.patientDescription ?? {},
           active: input.active,
           clinicalNoteTemplateId: input.clinicalNoteTemplateId,
         },
