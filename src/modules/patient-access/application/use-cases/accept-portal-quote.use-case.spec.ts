@@ -99,6 +99,7 @@ function setup(opts: Setup = {}) {
             acceptedAt: DB_NOW,
             confirmation: {
               to: 'maria@example.com',
+              greetingName: 'María',
               clinicName: 'Clínica Sonrisa Caracas',
               location: {
                 id: 'loc-1',
@@ -304,7 +305,7 @@ describe('AcceptPortalQuoteUseCase (DX-101-bis)', () => {
     });
   });
 
-  it('email de confirmación (variante de portal) al email de la ficha, sin importes', async () => {
+  it('email de confirmación (variante de portal) al destinatario de la firma, sin importes', async () => {
     const { accept, sendBudgetAccepted } = setup();
     await accept();
     expect(sendBudgetAccepted).toHaveBeenCalledWith({
@@ -319,13 +320,14 @@ describe('AcceptPortalQuoteUseCase (DX-101-bis)', () => {
     });
   });
 
-  it('sin email en la ficha no se envía; si el outbox falla, la aceptación sigue valiendo', async () => {
+  it('sin destinatario no se envía; si el outbox falla, la aceptación sigue valiendo', async () => {
     const noEmail = setup({
       outcome: {
         kind: 'ACCEPTED',
         acceptedAt: DB_NOW,
         confirmation: {
           to: null,
+          greetingName: null,
           clinicName: 'Clínica',
           location: {
             id: 'loc-1',

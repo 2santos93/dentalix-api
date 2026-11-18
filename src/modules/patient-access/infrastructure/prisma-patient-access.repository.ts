@@ -9,8 +9,17 @@ import type {
   AuditRequestContext,
   AuditRequestMeta,
 } from '../../audit/domain/audit-request-context';
-import { loadNoticeSettings } from '../../patients/infrastructure/notices/notice-context';
-import { isValidTimeZone } from '../../../shared/time/civil-day';
+import {
+  loadMajorityReview,
+  loadNoticeResponsibles,
+  loadNoticeSettings,
+  loadTenantMajorityAge,
+} from '../../patients/infrastructure/notices/notice-context';
+import {
+  resolveSignatureRecipient,
+  type SignatureRecipient,
+} from '../../signature-requests/domain/signature-recipient';
+import { civilDateIn, isValidTimeZone } from '../../../shared/time/civil-day';
 import { acceptBudgetInTx } from '../../treatment-plans/infrastructure/repositories/budget-acceptance';
 import { civilDayOf } from '../../treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
 import {
@@ -535,8 +544,8 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
     return this.prisma.runWithTenant(async (tx) => {
       // DX-461: primero el paciente vivo (FOR KEY SHARE), en el orden de
       // archivar (paciente → lo demás): archivar a la vez espera o ya se ve.
-      const live = await tx.$queryRaw<{ id: string; email: string | null }[]>`
-        SELECT "id", "email" FROM "patients"
+      const live = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "patients"
          WHERE "id" = ${patientId}::uuid AND "deletedAt" IS NULL
          FOR KEY SHARE`;
       if (live.length === 0) return { kind: 'GONE' };
@@ -631,11 +640,19 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
           reason: PORTAL_QUOTE_ACCEPTED_REASON,
         },
       });
+      const recipient = await this.confirmationRecipient(
+        tx,
+        tenantId,
+        patientId,
+        dbNow,
+        source.location.timeZone,
+      );
       return {
         kind: 'ACCEPTED',
         acceptedAt: dbNow,
         confirmation: {
-          to: live[0].email,
+          to: recipient.ok ? recipient.email : null,
+          greetingName: recipient.ok ? recipient.greetingName : null,
           clinicName: source.clinic.name,
           location: {
             id: source.location.id,
@@ -645,6 +662,48 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
           },
         },
       };
+    });
+  }
+
+  /**
+   * DX-101-bis: a quién va el email de confirmación, con la MISMA regla que
+   * el enlace de firma (DX-415) y el seguimiento (DX-561): un adulto, a su
+   * email; un menor, a su responsable registrado que recibe avisos (nunca al
+   * email de la ficha del menor); con la baja de envíos o sin email, a nadie.
+   */
+  private async confirmationRecipient(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    patientId: string,
+    now: Date,
+    timeZone: string,
+  ): Promise<SignatureRecipient> {
+    const [patient, responsibles, majorityReview, majorityAge] =
+      await Promise.all([
+        tx.patient.findFirstOrThrow({
+          where: { id: patientId },
+          select: {
+            firstName: true,
+            lastName: true,
+            birthDate: true,
+            email: true,
+            emergencyContactName: true,
+            reminderOptOutAt: true,
+            contactChannel: true,
+          },
+        }),
+        loadNoticeResponsibles(tx, patientId),
+        loadMajorityReview(tx, patientId),
+        loadTenantMajorityAge(tx, tenantId),
+      ]);
+    return resolveSignatureRecipient({
+      // El documento solo cuenta para firmar por el enlace: aquí no se usa.
+      patient: { ...patient, document: null },
+      responsibles: responsibles.map((r) => ({ ...r, documentText: null })),
+      majorityAge,
+      today: civilDateIn(now, timeZone),
+      timeZone,
+      majorityReview,
     });
   }
 

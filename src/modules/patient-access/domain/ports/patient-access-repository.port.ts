@@ -147,8 +147,14 @@ export interface PortalAcceptanceInput {
 
 /** Para el email de confirmación, tras el COMMIT (sin nada clínico). */
 export interface PortalAcceptanceConfirmation {
-  /** Email del paciente en su ficha; null = no se envía. */
+  /**
+   * El destinatario de la firma a distancia (`resolveSignatureRecipient`,
+   * como DX-415/DX-561): el paciente adulto o, si es menor, su responsable;
+   * null = no se envía (sin email o con la baja de envíos).
+   */
   to: string | null;
+  /** Nombre de pila con el que se le saluda (el del destinatario). */
+  greetingName: string | null;
   clinicName: string;
   location: {
     id: string;

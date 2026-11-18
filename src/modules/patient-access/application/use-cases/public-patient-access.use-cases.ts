@@ -427,8 +427,9 @@ function portalConflict(code: string, message: string): ConflictException {
  * foto del presupuesto vivo con su hash, firma, hora de la BD y un segundo
  * hash que lo sella; el plan pasa a ACCEPTED y las demás opciones abiertas
  * del grupo a REJECTED (DX-040, DX-109). Evidencia: el enlace de acceso de la
- * sesión, la IP y el navegador. Después, el email de confirmación si el
- * paciente tiene email en su ficha.
+ * sesión, la IP y el navegador. Después, el email de confirmación al
+ * destinatario de la firma a distancia (el paciente o, si es menor, su
+ * responsable), si lo hay.
  *
  * Reglas, en orden: apartado de presupuestos (403); el plan del paciente del
  * enlace (404); el enlace releído en la transacción (410, como el guard); se
@@ -590,6 +591,7 @@ export class AcceptPortalQuoteUseCase {
     acceptedAt: Date,
     confirmation: {
       to: string | null;
+      greetingName: string | null;
       clinicName: string;
       location: {
         id: string;
@@ -610,7 +612,10 @@ export class AcceptPortalQuoteUseCase {
         to: confirmation.to,
         referenceId: planId,
         vars: {
-          recipientFirstName: firstNameOnly(signerName) ?? signerName,
+          recipientFirstName:
+            confirmation.greetingName ??
+            firstNameOnly(signerName) ??
+            signerName,
           clinicName: confirmation.clinicName,
           acceptedAtLabel: format.longDateTime(
             acceptedAt,

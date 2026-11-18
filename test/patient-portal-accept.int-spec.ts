@@ -3,8 +3,16 @@ import { INestApplication } from '@nestjs/common';
 import { CatalogKind, Prisma, PrismaClient, Sex } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { createE2eApp } from './support/create-e2e-app';
+import { CapturingMailer } from './support/capture-mailer';
+import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import {
-  createE2eApp,
+  MAIL_CONFIG,
+  loadMailConfig,
+} from '../src/modules/notifications/email/infrastructure/mail-config';
+import { EmailDispatcher } from '../src/modules/notifications/email/application/email-dispatcher.service';
+import { SIGNATURE_LINK_INVALID_MESSAGE } from '../src/modules/signature-requests/application/use-cases/public-signature.use-cases';
+import {
   loginAs,
   registerClinic,
   resetDatabase,
@@ -76,6 +84,8 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
   let b: Clinic;
   let catalogA: string;
   let dropParRates: (() => Promise<void>) | undefined;
+  let dispatcher: EmailDispatcher;
+  const mailer = new CapturingMailer();
   let seq = 0;
 
   const server = () => app.getHttpServer();
@@ -98,7 +108,11 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
         .set('Authorization', `Bearer ${clinic.adminToken}`),
   });
 
-  async function patient(clinic: Clinic, email?: string): Promise<string> {
+  async function patient(
+    clinic: Clinic,
+    email?: string,
+    birthDate = BIRTH_DATE,
+  ): Promise<string> {
     const res = await staff(clinic)
       .post('/patients', {
         firstName: 'María José',
@@ -106,7 +120,7 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
         docType: 'NATIONAL_ID',
         docNumber: `V-77${seq}`,
         sex: Sex.F,
-        birthDate: BIRTH_DATE,
+        birthDate,
         ...(email ? { email } : {}),
       })
       .expect(201);
@@ -177,11 +191,15 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
   }
 
   /** Verifica la fecha y devuelve la cookie de la sesión. */
-  async function session(clinic: Clinic, token: string): Promise<string> {
+  async function session(
+    clinic: Clinic,
+    token: string,
+    birthDate = BIRTH_DATE,
+  ): Promise<string> {
     const res = await request(server())
       .post(`/api/v1/public/patient-access/${token}/verify`)
       .set('X-Tenant-Host', clinic.host)
-      .send({ birthDate: BIRTH_DATE })
+      .send({ birthDate })
       .expect(200);
     const cookies = ([] as string[]).concat(res.headers['set-cookie'] ?? []);
     const mine = cookies.find((c) => c.startsWith(`${COOKIE}=`));
@@ -237,7 +255,20 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
   }
 
   beforeAll(async () => {
-    app = await createE2eApp();
+    app = await createE2eApp({
+      override: (builder) => {
+        builder.overrideProvider(MAILER).useValue(mailer);
+        builder.overrideProvider(MAIL_CONFIG).useValue({
+          ...loadMailConfig((key) => process.env[key]),
+          quotas: {
+            recipientCooldownSeconds: 0,
+            recipientDaily: 1000,
+            tenantDaily: 1000,
+          },
+        });
+      },
+    });
+    dispatcher = app.get(EmailDispatcher);
     await resetDatabase(raw);
     // Catálogo en VES y planes en USD: la tasa de referencia (DX-204).
     dropParRates = await seedParProviderRates(raw);
@@ -771,15 +802,139 @@ describe('aceptar el presupuesto desde el portal (DX-101-bis, int)', () => {
     ).rejects.toThrow(/audit_events_actor_check/);
   });
 
-  it('email de confirmación: al email de la ficha, con la variante de portal', async () => {
-    const { planId, cookie, contentHash } = await scene(
-      `maria.portal${++seq}@example.com`,
-    );
+  it('email de confirmación: al paciente adulto, con la variante de portal y sin importes', async () => {
+    const email = `maria.portal${++seq}@example.com`;
+    const { planId, cookie, contentHash } = await scene(email);
+    mailer.clear();
     await accept(a, cookie, planId, { contentHash }).expect(200);
     const mails = await raw.emailOutbox.findMany({
       where: { tenantId: a.tenantId, referenceId: planId },
     });
     expect(mails).toHaveLength(1);
     expect(mails[0].template).toBe('SIGNATURE_BUDGET_ACCEPTED');
+    await dispatcher.whenIdle();
+    const mail = (await mailer.waitFor(email, /registramos tu aceptación/))
+      .input;
+    expect(mail).toContain('Lo verás como aceptado en tu portal de paciente');
+    expect(mail).toContain('Hola, María');
+    expect(mail).not.toMatch(/420|USD|zirconio/);
+  });
+
+  it('email de confirmación de un MENOR: a su responsable (como DX-415), nunca al email de la ficha del menor', async () => {
+    const MINOR_BIRTH = '2015-02-11';
+    const minorEmail = `sofia.ortiz${++seq}@example.com`;
+    const guardianEmail = `claudia.navarro${seq}@example.com`;
+    const minor = await patient(a, minorEmail, MINOR_BIRTH);
+    await staff(a)
+      .post(`/patients/${minor}/responsible-parties`, {
+        fullName: 'Claudia Navarro',
+        email: guardianEmail,
+        relationship: 'MOTHER',
+        isPayer: false,
+        documentType: 'NATIONAL_ID',
+        docNumber: `C-${seq}`,
+      })
+      .expect(201);
+    const planId = await plan(a, minor);
+    const access = await link(a, minor);
+    const cookie = await session(a, access.token, MINOR_BIRTH);
+    const { contentHash } = await shown(a, cookie, planId);
+    mailer.clear();
+    await accept(a, cookie, planId, {
+      contentHash,
+      signerName: 'Claudia Navarro',
+    }).expect(200);
+    await dispatcher.whenIdle();
+    const text = (
+      await mailer.waitFor(guardianEmail, /registramos tu aceptación/)
+    ).input;
+    expect(text).toContain('Hola, Claudia');
+    expect(mailer.sent.map((m) => m.to)).toEqual([guardianEmail]);
+    expect(
+      await raw.emailOutbox.count({
+        where: { tenantId: a.tenantId, referenceId: planId },
+      }),
+    ).toBe(1);
+  });
+
+  it('sin destinatario (adulto sin email): se acepta y no se encola ningún email', async () => {
+    const { planId, cookie, contentHash } = await scene();
+    await accept(a, cookie, planId, { contentHash }).expect(200);
+    expect(
+      await raw.emailOutbox.count({
+        where: { tenantId: a.tenantId, referenceId: planId },
+      }),
+    ).toBe(0);
+  });
+
+  it('DX-415 vivo: aceptado desde el portal, firmar después la solicitud viva da «Enlace no válido» (404), sin 500 ni segunda aceptación', async () => {
+    const email = `marta.rios${++seq}@example.com`;
+    const patientId = await patient(a, email);
+    const planId = await plan(a, patientId);
+    mailer.clear();
+    const sent = await staff(a)
+      .post(`/patients/${patientId}/signature-requests`, {
+        type: 'BUDGET',
+        channel: 'EMAIL',
+        treatmentPlanId: planId,
+      })
+      .expect(201);
+    const requestId = (sent.body as { id: string }).id;
+    await dispatcher.whenIdle();
+    const token = (
+      await mailer.waitFor(email, /\/firmar\/([A-Za-z0-9_-]{43})/)
+    )[1];
+    const sign = (path: string, body: object = {}, sessionToken?: string) => {
+      const req = request(server())
+        .post(`/api/v1/public/sign/${path}`)
+        .set('X-Tenant-Host', a.host);
+      return (
+        sessionToken ? req.set('X-Signature-Session', sessionToken) : req
+      ).send(body);
+    };
+    // El paciente abre el enlace y verifica el código (sesión viva).
+    mailer.clear();
+    await sign(`${token}/code`).expect(200);
+    await dispatcher.whenIdle();
+    const code = (
+      await mailer.waitFor(email, /Tu código de verificación es: (\d{6})/)
+    )[1];
+    const verified = await sign(`${token}/verify`, { code }).expect(200);
+    const signatureSession = (verified.body as { sessionToken: string })
+      .sessionToken;
+
+    // Entretanto acepta desde el portal.
+    const access = await link(a, patientId);
+    const cookie = await session(a, access.token);
+    const { contentHash } = await shown(a, cookie, planId);
+    await accept(a, cookie, planId, { contentHash }).expect(200);
+
+    // La solicitud viva ya no sirve: el error de DX-415 para un presupuesto
+    // que ya no se puede aceptar, sin 500.
+    const res = await sign(
+      `${token}/sign`,
+      {
+        signature: `data:image/png;base64,${PNG}`,
+        accepted: true,
+      },
+      signatureSession,
+    );
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({ message: SIGNATURE_LINK_INVALID_MESSAGE });
+    const rows = await raw.treatmentPlanAcceptance.findMany({
+      where: { planId },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      patientAccessLinkId: access.id,
+      signatureRequestId: null,
+    });
+    expect(
+      (
+        await raw.signatureRequest.findUniqueOrThrow({
+          where: { id: requestId },
+        })
+      ).signedAt,
+    ).toBeNull();
   });
 });
