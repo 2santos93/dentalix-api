@@ -13,7 +13,10 @@ import {
 } from '../../../schedule-blocks/domain/schedule-block-rules';
 import type { ClinicRole } from '@prisma/client';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
-import type { AppointmentRepository } from '../../domain/ports/appointment-repository.port';
+import type {
+  AppointmentRepository,
+  CreateAppointmentRepoInput,
+} from '../../domain/ports/appointment-repository.port';
 import { AppointmentWriteResult } from '../../domain/entities/appointment.entity';
 import { checkScheduleBlocks } from '../schedule-block-check';
 import { assertNotOnHoliday } from '../holiday-check';
@@ -94,6 +97,10 @@ export interface CreateAppointmentInput {
    * llega del cliente.
    */
   importBatchId?: string;
+  /** DX-016: la crea la reserva online (marca «Online»). No llega del cliente. */
+  origin?: CreateAppointmentRepoInput['origin'];
+  /** DX-016: trabajo en la misma transacción del alta (ver el repositorio). */
+  inTransaction?: CreateAppointmentRepoInput['inTransaction'];
 }
 
 /**
@@ -508,6 +515,8 @@ export class CreateAppointmentUseCase {
         planItemIds: input.planItemIds,
         chairId: chair?.id,
         importBatchId: input.importBatchId,
+        origin: input.origin,
+        inTransaction: input.inTransaction,
       });
       // DX-273: un alta con ítems ya reservados en otra cita es 409; nunca avisa.
       return {

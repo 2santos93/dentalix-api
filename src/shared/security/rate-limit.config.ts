@@ -107,6 +107,12 @@
  *                  `BrandingMissLimitInterceptor`. Enumerar es una ristra de
  *                  fallos y choca aquí; una clínica real es un acierto, nunca
  *                  lo gasta ni lo ve agotado.
+ * - online-booking: las lecturas de la página pública de reserva (DX-016:
+ *                  configuración y huecos), por IP y por ruta. 60/min deja
+ *                  navegar días y profesionales; un barrido de la agenda no.
+ * - online-booking-write: las escrituras de esa página (pedir y verificar el
+ *                  código, reservar), por IP y por ruta: 10/min. El código
+ *                  tiene además su tope de 5 fallos y de 5 envíos por hora.
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -135,7 +141,9 @@ export type RateLimitPolicy =
   | 'payment-link-token'
   | 'prescription-verify'
   | 'branding-host'
-  | 'branding-miss';
+  | 'branding-miss'
+  | 'online-booking'
+  | 'online-booking-write';
 
 export interface RateLimitRule {
   limit: number;
@@ -177,6 +185,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'prescription-verify': { limit: 30, ttlMs: MINUTE },
   'branding-host': { limit: 600, ttlMs: MINUTE },
   'branding-miss': { limit: 60, ttlMs: MINUTE },
+  'online-booking': { limit: 60, ttlMs: MINUTE },
+  'online-booking-write': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -231,5 +241,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'prescription-verify': rule('prescription-verify'),
     'branding-host': rule('branding-host'),
     'branding-miss': rule('branding-miss'),
+    'online-booking': rule('online-booking'),
+    'online-booking-write': rule('online-booking-write'),
   };
 }

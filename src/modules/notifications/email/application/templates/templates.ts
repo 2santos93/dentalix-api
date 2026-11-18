@@ -20,6 +20,8 @@ import {
   SignatureCodeEmailVars,
   SignatureRequestEmailVars,
   SlotOfferEmailVars,
+  OnlineBookingCodeEmailVars,
+  OnlineBookingReceivedEmailVars,
   SignedConsentCopyEmailVars,
   PrescriptionCopyEmailVars,
   ExternalOrderCopyEmailVars,
@@ -443,6 +445,76 @@ function signatureBudgetAccepted(
   });
 }
 
+/** DX-016: el código de un solo uso de la reserva online. */
+function onlineBookingCode(
+  vars: OnlineBookingCodeEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  return renderLayout({
+    brand,
+    subject: `Tu código para reservar en ${vars.clinicName}`,
+    heading: `Hola, ${vars.recipientFirstName}`,
+    blocks: [
+      { kind: 'paragraph', text: `Tu código de verificación es: ${vars.code}` },
+      {
+        kind: 'note',
+        text: `Caduca en ${plural(vars.expiresInMinutes, 'minuto', 'minutos')} y solo sirve una vez. No lo compartas con nadie: la clínica nunca te lo pedirá. Si no lo pediste tú, ignora este correo.`,
+      },
+    ],
+    action: null,
+  });
+}
+
+/** DX-016: acuse de la reserva o de la solicitud online. */
+function onlineBookingReceived(
+  vars: OnlineBookingReceivedEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const withProvider = vars.providerName ? ` con ${vars.providerName}` : '';
+  const when = `el ${vars.slotLabel} en ${vars.locationName}${withProvider}`;
+  if (vars.state === 'REQUESTED') {
+    return renderLayout({
+      brand,
+      subject: `${vars.clinicName} recibió tu solicitud de cita`,
+      heading: `Hola, ${vars.recipientFirstName}`,
+      blocks: [
+        {
+          kind: 'paragraph',
+          text: `Recibimos tu solicitud de cita para ${when}.`,
+        },
+        {
+          kind: 'paragraph',
+          text: 'La clínica la revisará y te escribirá para confirmarla. Hasta entonces la hora no queda reservada.',
+        },
+        {
+          kind: 'note',
+          text: 'Si no pediste esta cita, ignora este correo.',
+        },
+      ],
+      action: null,
+    });
+  }
+  return renderLayout({
+    brand,
+    subject: `Tu cita en ${vars.clinicName} está reservada`,
+    heading: `Hola, ${vars.recipientFirstName}`,
+    blocks: [
+      { kind: 'paragraph', text: `Tu cita quedó reservada para ${when}.` },
+      {
+        kind: 'paragraph',
+        text: 'Desde el enlace puedes confirmarla o, si no puedes ir, cancelarla para que otra persona aproveche la hora.',
+      },
+      {
+        kind: 'note',
+        text: 'El enlace es personal: no lo compartas. Si no pediste esta cita, avisa a la clínica.',
+      },
+    ],
+    action: vars.manageUrl
+      ? { label: 'Ver mi cita', url: vars.manageUrl }
+      : null,
+  });
+}
+
 function slotOffer(
   vars: SlotOfferEmailVars,
   brand: EmailBrand | null,
@@ -689,6 +761,8 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'weekly-digest': weeklyDigest,
   'mfa-notice': mfaNotice,
   'mfa-enrollment-code': mfaEnrollmentCode,
+  'online-booking-code': onlineBookingCode,
+  'online-booking-received': onlineBookingReceived,
 };
 
 /**

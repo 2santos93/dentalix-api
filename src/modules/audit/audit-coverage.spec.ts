@@ -2268,6 +2268,14 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // después, escrito por el repositorio en la transacción, sin sede (DX-363);
   // sin evento si nada cambió.
   'PUT /slot-offer-settings': 'slot-offer-settings.e2e-spec.ts',
+  // DX-016: la reserva online se audita en el repositorio, en su transacción.
+  'POST /public/booking/verification': 'online-booking.e2e-spec.ts',
+  'POST /public/booking/verification/:id/verify': 'online-booking.e2e-spec.ts',
+  'POST /public/booking': 'online-booking.e2e-spec.ts',
+  'PUT /online-booking/settings': 'online-booking.e2e-spec.ts',
+  'PUT /online-booking/types/:appointmentTypeId': 'online-booking.e2e-spec.ts',
+  'POST /online-booking/requests/:id/accept': 'online-booking.e2e-spec.ts',
+  'POST /online-booking/requests/:id/decline': 'online-booking.e2e-spec.ts',
   // DX-568: CLINIC_SETTINGS con WEEKLY_DIGEST_SETTINGS y configChange antes y
   // después (destinatarios incluidos), escrito por el repositorio en la
   // transacción, sin sede; sin evento si nada cambió. La prueba: VIEW de

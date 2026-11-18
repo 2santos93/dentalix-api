@@ -31,6 +31,8 @@ export const EMAIL_TEMPLATES = [
   'payment-report-rejected',
   'external-order-copy',
   'weekly-digest',
+  'online-booking-code',
+  'online-booking-received',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -75,6 +77,12 @@ export const TENANT_DAILY_BUDGET: Readonly<
   // DX-568: lo dispara la clínica (su trabajo semanal o el ADMIN que pide la
   // prueba): cuenta en el tope diario.
   'weekly-digest': 'clinic',
+  // DX-016: los pide la propia persona desde la página PÚBLICA de reserva
+  // (como el restablecimiento): si contaran, un tercero agotaría el cupo de la
+  // clínica. Los acotan el tope por destinatario, el rate limit de la página,
+  // el tope de códigos por paciente y la protección anti-bots.
+  'online-booking-code': 'self-service',
+  'online-booking-received': 'self-service',
 };
 
 /** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
@@ -354,6 +362,32 @@ export interface SignatureBudgetAcceptedEmailVars {
  * DX-435: un hueco libre con enlace para aceptarlo (el primero que acepta se
  * lo queda). Cuándo, dónde y con quién; nada clínico.
  */
+/** DX-016: el código de la reserva online. Nada clínico. */
+export interface OnlineBookingCodeEmailVars {
+  recipientFirstName: string;
+  clinicName: string;
+  code: string;
+  expiresInMinutes: number;
+}
+
+/**
+ * DX-016: acuse de la reserva online. `BOOKED`/`ACCEPTED` = la cita está
+ * agendada (con el enlace DX-005 para confirmarla o cancelarla); `REQUESTED`
+ * = solicitud recibida, la clínica la confirmará. Sin motivo ni tratamiento
+ * más allá del nombre del tipo de cita que eligió el propio paciente.
+ */
+export interface OnlineBookingReceivedEmailVars {
+  recipientFirstName: string;
+  clinicName: string;
+  state: 'BOOKED' | 'ACCEPTED' | 'REQUESTED';
+  /** Inicio, ya formateado en la zona y el formato de la sede. */
+  slotLabel: string;
+  locationName: string;
+  providerName: string | null;
+  /** Enlace `/confirmar/<token>`; `null` en una solicitud. */
+  manageUrl: string | null;
+}
+
 export interface SlotOfferEmailVars {
   patientFirstName: string;
   clinicName: string;
@@ -506,6 +540,8 @@ export interface EmailVarsByTemplate {
   'payment-report-rejected': PaymentReportRejectedEmailVars;
   'external-order-copy': ExternalOrderCopyEmailVars;
   'weekly-digest': WeeklyDigestEmailVars;
+  'online-booking-code': OnlineBookingCodeEmailVars;
+  'online-booking-received': OnlineBookingReceivedEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */
