@@ -19,6 +19,10 @@ import {
 import { CatalogKind } from '@prisma/client';
 import { NoteTemplateLinkField } from './note-template-link.field';
 import {
+  PatientDescriptionDto,
+  PatientDescriptionField,
+} from './patient-description.dto';
+import {
   HEX_COLOR_PATTERN,
   POST_OP_CHECK_AFTER_DAYS_MAX,
   POST_OP_CHECK_AFTER_DAYS_MESSAGE,
@@ -126,4 +130,7 @@ export class UpdateCatalogItemDto {
 
   @NoteTemplateLinkField()
   clinicalNoteTemplateId?: string | null;
+
+  @PatientDescriptionField()
+  patientDescription?: PatientDescriptionDto[];
 }

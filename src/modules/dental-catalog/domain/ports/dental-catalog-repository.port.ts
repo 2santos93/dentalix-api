@@ -15,6 +15,8 @@ export interface CreateDentalCatalogItemRepoInput {
   requiresPostOpCheck?: boolean;
   /** DX-566: 1–30 días hábiles. */
   postOpCheckAfterDays?: number;
+  /** DX-560: el mapa ya validado (idioma → texto); sin él, '{}'. */
+  patientDescription?: Record<string, string>;
   active?: boolean;
   /** DX-455: ya comprobada (de esta clínica y activa). */
   clinicalNoteTemplateId?: string | null;
@@ -34,6 +36,8 @@ export interface UpdateDentalCatalogItemRepoInput {
   requiresPostOpCheck?: boolean;
   /** DX-566: 1–30 días hábiles. */
   postOpCheckAfterDays?: number;
+  /** DX-560: el mapa ENTERO ya validado; undefined = no cambia. */
+  patientDescription?: Record<string, string>;
   active?: boolean;
   /** DX-455: undefined = no cambia; null = quitar el vínculo. */
   clinicalNoteTemplateId?: string | null;

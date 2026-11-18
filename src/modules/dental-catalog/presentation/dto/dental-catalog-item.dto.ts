@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CatalogKind } from '@prisma/client';
+import { PatientDescriptionDto } from './patient-description.dto';
 
 // Response shape for DentalCatalogItem endpoints — documents the
 // DentalCatalogItem entity contract for Swagger (same convention as
@@ -57,6 +58,13 @@ export class DentalCatalogItemDto {
       'DX-566: días HÁBILES de la sede tras el procedimiento en los que se llama.',
   })
   postOpCheckAfterDays!: number;
+
+  @ApiProperty({
+    type: [PatientDescriptionDto],
+    description:
+      'DX-560: descripción para el paciente por idioma, el español primero y luego en orden alfabético. Vacía = sin descripción: el paciente lee el nombre del catálogo en su idioma.',
+  })
+  patientDescription!: PatientDescriptionDto[];
 
   @ApiPropertyOptional({
     type: String,

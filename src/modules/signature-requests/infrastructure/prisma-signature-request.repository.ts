@@ -84,12 +84,23 @@ const LIST_INCLUDE = {
   budgetAcceptance: { select: { id: true, ipAddress: true } },
 } satisfies Prisma.SignatureRequestInclude;
 
+/**
+ * DX-560: los listados de la ficha no leen la presentación congelada (solo
+ * la usa la página pública).
+ */
+const LIST_OMIT = {
+  budgetPresentation: true,
+} as const satisfies Prisma.SignatureRequestOmit;
+
 type ListRow = Prisma.SignatureRequestGetPayload<{
   include: typeof LIST_INCLUDE;
+  omit: typeof LIST_OMIT;
 }>;
 
 function toRecord(
-  row: Prisma.SignatureRequestGetPayload<object>,
+  row: Omit<Prisma.SignatureRequestGetPayload<object>, 'budgetPresentation'> & {
+    budgetPresentation?: Prisma.JsonValue;
+  },
 ): SignatureRequestRecord {
   return {
     id: row.id,
@@ -129,6 +140,8 @@ function toRecord(
     createdAt: row.createdAt,
     budgetContent: row.budgetContent,
     budgetContentHash: row.budgetContentHash,
+    // DX-560: null en los listados (no la leen).
+    budgetPresentation: row.budgetPresentation ?? null,
   };
 }
 
@@ -219,6 +232,7 @@ export async function insertFollowUpSignatureRequestsInTx(
         ...row.input,
         id: row.id,
         budgetContent: row.input.budgetContent as Prisma.InputJsonValue,
+        budgetPresentation: row.input.budgetPresentation,
         origin: 'FOLLOW_UP',
         createdById: null,
       },
@@ -538,7 +552,11 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         });
       }
       const created = await tx.signatureRequest.create({
-        data: { tenantId, ...input },
+        data: {
+          tenantId,
+          ...input,
+          budgetPresentation: input.budgetPresentation,
+        },
         select: { id: true },
       });
       // DX-149-ter: el email del enlace (y la cancelación de los de las
@@ -559,6 +577,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         include: LIST_INCLUDE,
+        omit: LIST_OMIT,
       }),
     );
     return rows.map(toListRow);
@@ -566,7 +585,11 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
 
   async findById(id: string): Promise<SignatureRequestListRow | null> {
     const row = await this.prisma.runWithTenant((tx) =>
-      tx.signatureRequest.findFirst({ where: { id }, include: LIST_INCLUDE }),
+      tx.signatureRequest.findFirst({
+        where: { id },
+        include: LIST_INCLUDE,
+        omit: LIST_OMIT,
+      }),
     );
     return row ? toListRow(row) : null;
   }

@@ -109,6 +109,7 @@ async function seed(): Promise<Seeded> {
     ...item,
     defaultPrice: 1000000,
     suggestedClinicalNoteTemplateId: null,
+    patientDescription: [],
   };
   return {
     tenantId: tenant.id,

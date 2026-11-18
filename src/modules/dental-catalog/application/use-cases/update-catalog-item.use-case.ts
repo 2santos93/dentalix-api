@@ -3,6 +3,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { CatalogKind } from '@prisma/client';
 import { DENTAL_CATALOG_REPOSITORY } from '../../domain/ports/dental-catalog-repository.port';
@@ -24,8 +25,26 @@ import {
   isValidCatalogKind,
   isValidHexColor,
 } from './create-catalog-item.use-case';
+import {
+  CATALOG_PATIENT_LANGUAGES_READER,
+  type CatalogPatientLanguagesReader,
+} from '../../domain/ports/catalog-patient-languages-reader.port';
+import {
+  patientDescriptionMap,
+  type PatientDescriptionEntry,
+} from '../../domain/patient-description';
+import {
+  MISSING_PATIENT_LANGUAGES_READER,
+  patientDescriptionInput,
+} from '../patient-description-input';
 
-export type UpdateCatalogItemInput = UpdateDentalCatalogItemRepoInput;
+export type UpdateCatalogItemInput = Omit<
+  UpdateDentalCatalogItemRepoInput,
+  'patientDescription'
+> & {
+  /** DX-560: la lista ENTERA; sin el campo, no se toca. */
+  patientDescription?: PatientDescriptionEntry[];
+};
 
 @Injectable()
 export class UpdateCatalogItemUseCase {
@@ -34,6 +53,9 @@ export class UpdateCatalogItemUseCase {
     private readonly repo: DentalCatalogRepository,
     @Inject(CATALOG_NOTE_TEMPLATE_READER)
     private readonly noteTemplates: CatalogNoteTemplateReader,
+    @Optional()
+    @Inject(CATALOG_PATIENT_LANGUAGES_READER)
+    private readonly patientLanguages: CatalogPatientLanguagesReader = MISSING_PATIENT_LANGUAGES_READER,
   ) {}
 
   /**
@@ -85,7 +107,18 @@ export class UpdateCatalogItemUseCase {
     // diagnóstico deja de pedirlo (como pierde su plantilla, pero sin 400 si
     // no lo manda: el CHECK de la BD no admite un diagnóstico con control).
     assertPostOpCheckFields(kind, patch);
-    const normalizedPatch: UpdateDentalCatalogItemRepoInput = { ...patch };
+    const { patientDescription: descriptionEntries, ...rest } = patch;
+    const normalizedPatch: UpdateDentalCatalogItemRepoInput = { ...rest };
+    // DX-560: un idioma ya retirado de la clínica se conserva si su texto no
+    // cambia (la web devuelve lo que leyó).
+    const patientDescription = await patientDescriptionInput(
+      this.patientLanguages,
+      descriptionEntries,
+      patientDescriptionMap(existing.patientDescription),
+    );
+    if (patientDescription !== undefined) {
+      normalizedPatch.patientDescription = patientDescription;
+    }
     if (
       kind !== CatalogKind.PROCEDURE &&
       patch.requiresPostOpCheck === undefined &&

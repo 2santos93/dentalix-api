@@ -73,6 +73,7 @@ function catalogItem(
     active: true,
     clinicalNoteTemplateId: null,
     suggestedClinicalNoteTemplateId: null,
+    patientDescription: [],
     createdAt: NOW,
     updatedAt: NOW,
     ...overrides,
