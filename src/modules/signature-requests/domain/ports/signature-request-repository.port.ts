@@ -283,6 +283,12 @@ export interface SignatureRequestRepository {
 
   findById(id: string): Promise<SignatureRequestListRow | null>;
 
+  /**
+   * DX-561: el aviso de seguimiento que envió esta solicitud (origin
+   * FOLLOW_UP), para cancelar su email si sigue pendiente; null si no hay.
+   */
+  followUpMessageIdOf(signatureRequestId: string): Promise<string | null>;
+
   /** Anula una solicitud sin firmar ni anular. */
   revoke(input: {
     id: string;

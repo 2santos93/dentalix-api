@@ -82,6 +82,9 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-566: los intentos de llamada del control postoperatorio (solo se
   // añaden; dx_post_op_check_attempts_immutable).
   'post_op_check_attempts',
+  // DX-561: los avisos del seguimiento automático de presupuestos (enviados u
+  // omitidos; la app solo inserta y lee; dx_quote_follow_up_messages_guard).
+  'quote_follow_up_messages',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */
@@ -147,6 +150,9 @@ export const NO_APP_DELETE = [
   // DX-566: el control postoperatorio se cierra o se anula, nunca se borra
   // (dx_post_op_checks_guard).
   'post_op_checks',
+  // DX-561: ajustes del seguimiento automático por sede. Apagar es
+  // enabled = false; la fila no se borra (el upsert la bloquea al guardar).
+  'location_quote_follow_up_settings',
 ] as const;
 
 /**

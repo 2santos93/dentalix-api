@@ -17,7 +17,7 @@
 --                          (salvo el paciente en la fusión), uno revocado es
 --                          inmutable y solo cambian contador, bloqueo, último
 --                          acceso y revocación. Sin DELETE para la app.
---   dx_patient_merge_tables()  la de DX-566 (20270105090200) +
+--   dx_patient_merge_tables()  la de DX-561 (20270107140100) +
 --                          patient_access_links.patientId (lista cerrada de
 --                          DX-266).
 --
@@ -28,7 +28,7 @@
 -- le quita lo que no usa.
 --
 -- Vuelta atrás: desplegar la API anterior, recrear dx_patient_merge_tables con
--- la definición de 20270105090200 y
+-- la definición de 20270107140100 y
 --   DROP TABLE public."patient_access_links";
 --   DROP FUNCTION public.dx_patient_access_links_before_insert();
 --   DROP FUNCTION public.dx_patient_access_links_guard();
@@ -181,7 +181,7 @@ ALTER TABLE "patient_access_links" FORCE ROW LEVEL SECURITY;
 REVOKE DELETE, TRUNCATE ON "patient_access_links" FROM dentalix_app;
 
 -- ---------------------------------------------------------------------------
--- Fusión de pacientes (DX-266): la lista de 20270105090200 (DX-566) +
+-- Fusión de pacientes (DX-266): la lista de 20270107140100 (DX-561) +
 -- patient_access_links
 -- ---------------------------------------------------------------------------
 
@@ -243,6 +243,7 @@ AS $$
     'post_op_instruction_deliveries.patientId',
     'prescription_copy_links.patientId',
     'prescriptions.patientId',
+    'quote_follow_up_messages.patientId',
     'recall_contacts.patientId',
     'reminder_opt_out_links.patientId',
     'reminder_opt_out_match_warnings.patientId',

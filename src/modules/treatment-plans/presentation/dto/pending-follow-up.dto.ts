@@ -72,6 +72,38 @@ export class PendingFollowUpQueryDto {
   pageSize?: number;
 }
 
+/** DX-561: el seguimiento automático del grupo de la fila. */
+export class PendingFollowUpStateDto {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: 'Último paso registrado (1..3); null si aún no hubo ninguno',
+  })
+  lastStep!: number | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Cuándo salió el último aviso ENVIADO; null si ninguno',
+  })
+  lastSentAt!: Date | null;
+
+  @ApiProperty({ enum: ['SENT', 'SKIPPED'], nullable: true })
+  lastStatus!: 'SENT' | 'SKIPPED' | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Motivo si el último paso se omitió (QuoteFollowUpReason: OPTED_OUT, NO_EMAIL, STOPPED_ACCEPTED…)',
+  })
+  lastReason!: string | null;
+
+  @ApiProperty({ description: 'El seguimiento del presupuesto está en pausa' })
+  paused!: boolean;
+}
+
 export class PendingFollowUpItemDto {
   @ApiProperty({ format: 'uuid' })
   planId!: string;
@@ -141,6 +173,13 @@ export class PendingFollowUpItemDto {
 
   @ApiProperty()
   itemCount!: number;
+
+  @ApiProperty({
+    type: PendingFollowUpStateDto,
+    description:
+      'DX-561: el seguimiento automático del grupo (el mismo en todas sus opciones)',
+  })
+  followUp!: PendingFollowUpStateDto;
 }
 
 export class PendingFollowUpPageDto {

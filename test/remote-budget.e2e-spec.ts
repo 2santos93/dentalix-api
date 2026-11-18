@@ -294,7 +294,7 @@ describe('Presupuesto a distancia (e2e, DX-415)', () => {
     expect(
       (quote.body as { acceptance: { acceptedByName: string } }).acceptance
         .acceptedByName,
-    ).toBe(sender.createdBy.fullName);
+    ).toBe(sender.createdBy!.fullName);
 
     const detail = await as(clinicA)
       .get(`/treatment-plans/${planId}`)

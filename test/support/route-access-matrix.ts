@@ -709,6 +709,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /treatment-plans/:id/visits': PLAN_DECIDERS,
   'POST /treatment-plans/:id/present': PLAN_DECIDERS,
   'POST /treatment-plans/:id/reject': PLAN_REJECTERS,
+  // DX-561: pausar o reanudar el seguimiento (los de la lista por seguir).
+  'POST /treatment-plans/:id/follow-up/pause': BILLING,
+  'POST /treatment-plans/:id/follow-up/resume': BILLING,
   'POST /treatment-plans/:id/alternatives': CLINICAL,
 
   // --- Agenda --------------------------------------------------------------
@@ -993,6 +996,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'FINANCIAL_REPORTS_VIEW',
   ),
   'GET /reports/quote-funnel.csv': ADMIN_ONLY,
+  // DX-561: efectividad del seguimiento automático, con el alcance del embudo.
+  'GET /reports/quote-follow-up': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
   'GET /reports/quote-funnel/presentations': orPermission(
     roles('ADMIN', 'DENTIST'),
     'FINANCIAL_REPORTS_VIEW',
@@ -1184,6 +1192,9 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // Ajustes → Recordatorios por sede (DX-026): solo ADMIN, también para leer.
   'GET /reminder-settings': ADMIN_ONLY,
   'PUT /reminder-settings/:locationId': ADMIN_ONLY,
+  // DX-561: seguimiento automático de presupuestos por sede.
+  'GET /quote-follow-up-settings': ADMIN_ONLY,
+  'PUT /quote-follow-up-settings/:locationId': ADMIN_ONLY,
   // Ajustes → Sedes → Política de cancelación (DX-279): solo ADMIN, también
   // para leer; guardar crea la versión siguiente.
   'GET /locations/:id/cancellation-policy': ADMIN_ONLY,

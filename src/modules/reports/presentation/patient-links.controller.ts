@@ -36,7 +36,7 @@ import { REPORTS_FORBIDDEN_MESSAGE } from './locations-comparison.controller';
 const SCOPE =
   'Por tipo de enlace y sede: los ENVIADOS en el período (fecha de envío en la zona de la sede del enlace, DX-097) y, de esos mismos, los abiertos, los completados y los caducados sin abrir, mirados ahora (`asOf`). ' +
   'Tasas = parte ÷ enviados, en % con 1 decimal; sin envíos, null. Mediana de horas del envío al completado. ' +
-  'Anamnesis: abierta = la página avisó de la apertura o se envió; completada = enviada. Firma (consentimiento o presupuesto): abierta = pidió el código, lo verificó o firmó; completada = firmada. ' +
+  'Anamnesis: abierta = la página avisó de la apertura o se envió; completada = enviada. Firma (consentimiento o presupuesto): solo las que envió la clínica (las del seguimiento automático de presupuestos tienen su informe, DX-561); abierta = pidió el código, lo verificó o firmó; completada = firmada. ' +
   'Confirmación de cita: completada = respondida (confirmar, cancelar o «llámenme»); no guarda la apertura, así que abiertos y caducados sin abrir van en null. ' +
   'Indicaciones postoperatorias (solo email y WhatsApp): abierta = primera apertura; no tienen paso de completar (null). ' +
   'Caducado sin abrir: pasó su caducidad sin abrirse ni completarse; un enlace anulado o reemplazado no cuenta. Sede: la del enlace; en la confirmación, la de la cita. ' +

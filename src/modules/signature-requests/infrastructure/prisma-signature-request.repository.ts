@@ -125,6 +125,7 @@ function toRecord(
     signedAt: row.signedAt,
     revokedAt: row.revokedAt,
     createdById: row.createdById,
+    origin: row.origin,
     createdAt: row.createdAt,
     budgetContent: row.budgetContent,
     budgetContentHash: row.budgetContentHash,
@@ -135,7 +136,8 @@ function toListRow(row: ListRow): SignatureRequestListRow {
   const { createdBy, consent, budgetAcceptance, ...request } = row;
   return {
     request: toRecord(request),
-    sentByName: createdBy.fullName,
+    // DX-561: las del seguimiento automático no tienen usuario.
+    sentByName: createdBy?.fullName ?? null,
     consent: consent
       ? {
           id: consent.id,
@@ -152,6 +154,78 @@ function toListRow(row: ListRow): SignatureRequestListRow {
       : null,
     budgetAcceptance,
   };
+}
+
+/** DX-561: una solicitud de aceptación del seguimiento automático. */
+export interface FollowUpSignatureRequestInsert {
+  id: string;
+  input: Omit<CreateSignatureRequestRepoInput, 'createdById' | 'id'>;
+  /** DX-379 (M-3): la validez de la primera emisión, si el plan no la tenía. */
+  planQuoteValidity: QuoteValidity | null;
+}
+
+/**
+ * DX-561: dentro de la transacción del aviso (con el paciente, los enlaces
+ * vivos y el grupo ya bloqueados por quien llama), por cada opción: fija la
+ * validez de la primera emisión si hace falta (409 si el plan dejó de estar
+ * presentado), anula el enlace vivo del plan («un solo enlace vivo por
+ * documento», DX-425) sin usuario (`revokedByFollowUp`) y crea el nuevo con
+ * origen FOLLOW_UP y sin `createdById`. Devuelve las anuladas (para cancelar
+ * sus emails pendientes en la misma transacción).
+ */
+export async function insertFollowUpSignatureRequestsInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  rows: readonly FollowUpSignatureRequestInsert[],
+  now: Date,
+): Promise<{ supersededIds: string[] }> {
+  const supersededIds: string[] = [];
+  for (const row of rows) {
+    const planId = row.input.treatmentPlanId;
+    if (row.input.type !== SignatureRequestType.BUDGET || !planId) {
+      throw new Error('El seguimiento solo envía presupuestos');
+    }
+    if (row.planQuoteValidity) {
+      await fixPlanQuoteValidity(tx, planId, row.planQuoteValidity);
+    }
+    const live = await tx.signatureRequest.findMany({
+      where: {
+        patientId: row.input.patientId,
+        type: SignatureRequestType.BUDGET,
+        treatmentPlanId: planId,
+        signedAt: null,
+        revokedAt: null,
+      },
+      select: { id: true },
+    });
+    const ids = live.map((l) => l.id);
+    if (ids.length > 0) {
+      await tx.signatureRequest.updateMany({
+        where: { id: { in: ids }, signedAt: null, revokedAt: null },
+        data: {
+          revokedAt: now,
+          revokedByFollowUp: true,
+          sessionHash: null,
+          sessionExpiresAt: null,
+          codeHash: null,
+          codeExpiresAt: null,
+        },
+      });
+      supersededIds.push(...ids);
+    }
+    await tx.signatureRequest.create({
+      data: {
+        tenantId,
+        ...row.input,
+        id: row.id,
+        budgetContent: row.input.budgetContent as Prisma.InputJsonValue,
+        origin: 'FOLLOW_UP',
+        createdById: null,
+      },
+      select: { id: true },
+    });
+  }
+  return { supersededIds };
 }
 
 /**
@@ -495,6 +569,19 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
       tx.signatureRequest.findFirst({ where: { id }, include: LIST_INCLUDE }),
     );
     return row ? toListRow(row) : null;
+  }
+
+  async followUpMessageIdOf(
+    signatureRequestId: string,
+  ): Promise<string | null> {
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "quote_follow_up_messages"
+         WHERE "status" = 'SENT'
+           AND ${signatureRequestId}::uuid = ANY("signatureRequestIds")
+         LIMIT 1`,
+    );
+    return rows[0]?.id ?? null;
   }
 
   revoke(input: {

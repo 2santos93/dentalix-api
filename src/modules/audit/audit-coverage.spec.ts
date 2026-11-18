@@ -49,6 +49,7 @@ import { QuoteSettingsController } from '../treatment-plans/presentation/quote-s
 import { SlotOfferSettingsController } from '../waitlist/presentation/slot-offer-settings.controller';
 import { PlanRepricingController } from '../treatment-plans/presentation/plan-repricing.controller';
 import { PlanFollowUpController } from '../treatment-plans/presentation/plan-follow-up.controller';
+import { QuoteFollowUpPauseController } from '../quote-follow-up/presentation/quote-follow-up-pause.controller';
 import { PaymentsController } from '../payments/presentation/payments.controller';
 import { PaymentReceiptsController } from '../payments/presentation/payment-receipts.controller';
 import { PaymentReceiptSummaryController } from '../payments/presentation/payment-receipt-summary.controller';
@@ -1305,6 +1306,21 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'VIEW',
     resource: 'TREATMENT_PLAN',
   },
+  // DX-561: pausar o reanudar el seguimiento automático del presupuesto.
+  'POST /treatment-plans/:id/follow-up/pause': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+    reason: 'QUOTE_FOLLOW_UP_PAUSED',
+  },
+  'POST /treatment-plans/:id/follow-up/resume': {
+    action: 'UPDATE',
+    resource: 'TREATMENT_PLAN',
+    resourceId: { param: 'id' },
+    patient: plan(),
+    reason: 'QUOTE_FOLLOW_UP_RESUMED',
+  },
 
   'GET /payments': { action: 'VIEW', resource: 'PAYMENT' },
   // DX-395: descargar la caja en CSV (con medio y referencia).
@@ -2068,6 +2084,10 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-561: ajustes del seguimiento automático por sede (UPDATE
+  // CLINIC_SETTINGS, QUOTE_FOLLOW_UP_SETTINGS_UPDATED, antes y después; sin
+  // evento si nada cambia), en la transacción del guardado.
+  'PUT /quote-follow-up-settings/:locationId': 'quote-follow-up.e2e-spec.ts',
   // DX-566: el intento de llamada del control postoperatorio (UPDATE
   // POST_OP_CHECK con el resultado como motivo, el cambio de estado y dónde
   // quedó en la historia; nunca la nota), en la transacción del cierre.
@@ -2592,6 +2612,7 @@ const CONTROLLERS: Type[] = [
   PlanVisitsController,
   AppointmentsController,
   PlanFollowUpController,
+  QuoteFollowUpPauseController,
   TreatmentPlansController,
   PlanQuoteController,
   PriceQuoteController,

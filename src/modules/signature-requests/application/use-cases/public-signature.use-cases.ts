@@ -783,7 +783,8 @@ export class SignPublicSignatureUseCase {
               patientSignature: signature,
               contentHash,
               signedAt: dbNow,
-              recordedById: request.createdById,
+              // Un consentimiento siempre es de la clínica (origin STAFF, CHECK).
+              recordedById: request.createdById ?? request.professionalUserId,
               ipAddress: evidence.ipAddress,
               userAgent,
               remoteChannel: request.channel,
@@ -881,7 +882,10 @@ export class SignPublicSignatureUseCase {
                 contentHash: request.budgetContentHash,
                 acceptanceHash,
                 acceptedAt: dbNow,
-                acceptedById: request.createdById,
+                // DX-561: el del seguimiento automático no tiene usuario: la
+                // aceptación queda a nombre del profesional del presupuesto
+                // (el que lo elaboró, validado al enviarlo).
+                acceptedById: request.createdById ?? request.professionalUserId,
                 ipAddress: evidence.ipAddress,
                 userAgent: evidence.userAgent?.slice(0, 512) ?? null,
                 remoteChannel: request.channel,

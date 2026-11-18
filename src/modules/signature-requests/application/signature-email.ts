@@ -55,6 +55,8 @@ export interface SignatureEmailSender {
   }): Promise<void>;
   /** Cancela el email del enlace aún pendiente (al anular la solicitud). */
   cancelPendingLink(referenceId: string): Promise<void>;
+  /** DX-561: cancela el email pendiente del aviso de seguimiento `referenceId`. */
+  cancelPendingFollowUp(referenceId: string): Promise<void>;
 }
 
 function tenantIdOf(tenantContext: TenantContextService): string {
@@ -132,6 +134,14 @@ export class OutboxSignatureEmailSender implements SignatureEmailSender {
       vars: input.vars,
       referenceId: input.referenceId,
     });
+  }
+
+  async cancelPendingFollowUp(referenceId: string): Promise<void> {
+    await this.outbox.supersedePending(
+      tenantIdOf(this.tenantContext),
+      referenceId,
+      'quote-follow-up',
+    );
   }
 
   async cancelPendingLink(referenceId: string): Promise<void> {
