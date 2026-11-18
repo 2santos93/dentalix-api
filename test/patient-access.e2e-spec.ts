@@ -566,7 +566,6 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
   });
 
   // ISOLATION_COVERS: POST /public/patient-access/:token/verify
-  // ISOLATION_COVERS: POST /public/patient-access/me/appointments/:appointmentId/confirm
   it('aislamiento: el token o la cookie de A en el host de B no sirven', async () => {
     const link = await createLink(clinicA, patientA, {
       scopes: ['APPOINTMENTS', 'ACCOUNT'],

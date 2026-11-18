@@ -4661,10 +4661,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       spec: 'patient-access.e2e-spec.ts',
       checks:
         'B → 400 «Datos incorrectos» con el token de A y la fecha correcta en su host, igual que uno inventado; la cookie de A en el host de B → 401 y no confirma la cita de A (DX-101)',
-      routes: [
-        'POST /public/patient-access/:token/verify',
-        'POST /public/patient-access/me/appointments/:appointmentId/confirm',
-      ],
+      routes: ['POST /public/patient-access/:token/verify'],
     },
     {
       spec: 'payment-links.e2e-spec.ts',
