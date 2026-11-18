@@ -40,6 +40,21 @@ describe('DiskFileStorage · URL firmada (DX-084)', () => {
     expect(storage.verifySignedUrl(key, expires, signature)).toBe(false);
   });
 
+  it('DX-581: firmada en x,999 s con ttl = 1, vale todavía al segundo (la caducidad redondea hacia arriba)', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-19T12:00:00.999Z') });
+    const storage = new DiskFileStorage(CFG);
+    const url = new URL(await storage.getSignedUrl('clinical/x.pdf', 1));
+    const [key, expires, signature] = ['key', 'expires', 'signature'].map(
+      (name) => url.searchParams.get(name) ?? '',
+    );
+    // Truncando (floor(ahora) + ttl) caducaba en 12:00:01, a 1 ms de firmar.
+    expect(Number(expires)).toBe(Date.parse('2026-10-19T12:00:02Z') / 1000);
+    jest.setSystemTime(new Date('2026-10-19T12:00:01.999Z'));
+    expect(storage.verifySignedUrl(key, expires, signature)).toBe(true);
+    jest.setSystemTime(new Date('2026-10-19T12:00:02.001Z'));
+    expect(storage.verifySignedUrl(key, expires, signature)).toBe(false);
+  });
+
   it('rechaza firmas manipuladas, de otra clave o de otra instancia', async () => {
     const storage = new DiskFileStorage(CFG);
     const url = new URL(await storage.getSignedUrl('clinical/x.pdf', 60));
@@ -177,6 +192,24 @@ describe('DiskFileStorage · subida directa (DX-259)', () => {
     expect(
       new DiskFileStorage({ ...CFG, root }).verifyDirectUpload(target.fields),
     ).toBeNull();
+  });
+
+  it('DX-581: firmada en x,999 s, vale al menos ttl segundos y expiresAt es el instante firmado', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-21T12:00:00.999Z') });
+    const target = await storage.createDirectUpload(
+      'patient-documents/pending/t/d',
+      policy(Buffer.from('x')),
+    );
+    const ttlMs = Date.parse('2026-10-21T12:01:00.999Z') - Date.now();
+    expect(target.expiresAt.getTime()).toBe(
+      Number(target.fields.expires) * 1000,
+    );
+    expect(target.expiresAt.getTime() - Date.now()).toBeGreaterThanOrEqual(
+      ttlMs,
+    );
+    jest.setSystemTime(new Date('2026-10-21T12:01:00.999Z'));
+    expect(storage.verifyDirectUpload(target.fields)).not.toBeNull();
+    jest.useRealTimers();
   });
 
   it('caduca a los ttl segundos', async () => {
