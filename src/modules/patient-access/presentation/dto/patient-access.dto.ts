@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  OmitType,
+  PickType,
+} from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -13,8 +18,20 @@ import {
   Min,
 } from 'class-validator';
 import { AppointmentStatus, PatientAccessScope } from '@prisma/client';
-import { AccountStatementDto } from '../../../account-statement/presentation/dto/account-statement.dto';
-import { PlanQuoteDocumentDto } from '../../../treatment-plans/presentation/dto/plan-quote.dto';
+import {
+  AccountStatementAddresseeDto,
+  AccountStatementDto,
+  AccountStatementMovementDto,
+  AccountStatementOpeningBalanceDto,
+  AccountStatementPatientDto,
+  AccountStatementPlanDto,
+} from '../../../account-statement/presentation/dto/account-statement.dto';
+import {
+  PlanQuoteAcceptanceDto,
+  PlanQuoteDocumentDto,
+  PlanQuoteItemDto,
+  PlanQuoteLocationDto,
+} from '../../../treatment-plans/presentation/dto/plan-quote.dto';
 import {
   PATIENT_ACCESS_MAX_TTL_DAYS,
   PATIENT_ACCESS_MIN_TTL_DAYS,
@@ -219,6 +236,112 @@ export class PortalAppointmentDto {
   confirmable!: boolean;
 }
 
+// --- Proyecciones del portal (lista blanca, DX-101) --------------------------
+
+export class PortalQuoteLocationDto extends PickType(PlanQuoteLocationDto, [
+  'name',
+  'address',
+] as const) {}
+
+export class PortalQuoteItemDto extends OmitType(PlanQuoteItemDto, [
+  'id',
+] as const) {}
+
+/** De la aceptación, SOLO quién firmó, la firma (data URL) y cuándo. */
+export class PortalQuoteAcceptanceDto extends PickType(PlanQuoteAcceptanceDto, [
+  'signerName',
+  'signature',
+  'acceptedAt',
+] as const) {}
+
+export class PortalQuoteDto extends OmitType(PlanQuoteDocumentDto, [
+  'planId',
+  'patientId',
+  'planStatus',
+  'location',
+  'items',
+  'acceptance',
+] as const) {
+  @ApiProperty({ type: PortalQuoteLocationDto })
+  location!: PortalQuoteLocationDto;
+
+  @ApiProperty({ type: [PortalQuoteItemDto] })
+  items!: PortalQuoteItemDto[];
+
+  @ApiProperty({ type: PortalQuoteAcceptanceDto, nullable: true })
+  acceptance!: PortalQuoteAcceptanceDto | null;
+}
+
+export class PortalAccountPatientDto extends OmitType(
+  AccountStatementPatientDto,
+  ['id'] as const,
+) {}
+
+export class PortalAccountAddresseeDto extends OmitType(
+  AccountStatementAddresseeDto,
+  ['email'] as const,
+) {}
+
+export class PortalAccountPlanDto extends OmitType(AccountStatementPlanDto, [
+  'paymentsWithoutRate',
+] as const) {}
+
+export class PortalAccountOpeningBalanceDto extends OmitType(
+  AccountStatementOpeningBalanceDto,
+  ['importBatchId'] as const,
+) {}
+
+/** Un abono como lo ve el paciente: sin ids internos, autores ni motivos de anulación. */
+export class PortalAccountMovementDto extends PickType(
+  AccountStatementMovementDto,
+  [
+    'paidAt',
+    'paidOn',
+    'amount',
+    'currency',
+    'method',
+    'reference',
+    'externalInvoiceNumber',
+    'splitLines',
+    'receiptNumber',
+    'treatmentPlanId',
+    'openingBalanceId',
+    'voided',
+    'voidedAt',
+  ] as const,
+) {
+  @ApiProperty({ type: String, nullable: true })
+  paymentMethodName!: string | null;
+
+  @ApiProperty({ description: 'Sede del abono' })
+  locationName!: string;
+}
+
+export class PortalAccountDto extends PickType(AccountStatementDto, [
+  'issuedAt',
+  'clinic',
+  'regional',
+  'range',
+  'summary',
+  'installments',
+  'rateProviderTimedOut',
+] as const) {
+  @ApiProperty({ type: PortalAccountPatientDto })
+  patient!: PortalAccountPatientDto;
+
+  @ApiProperty({ type: PortalAccountAddresseeDto })
+  addressee!: PortalAccountAddresseeDto;
+
+  @ApiProperty({ type: [PortalAccountPlanDto] })
+  plans!: PortalAccountPlanDto[];
+
+  @ApiProperty({ type: [PortalAccountMovementDto] })
+  movements!: PortalAccountMovementDto[];
+
+  @ApiProperty({ type: [PortalAccountOpeningBalanceDto] })
+  openingBalances!: PortalAccountOpeningBalanceDto[];
+}
+
 export class PortalPlanDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -239,11 +362,11 @@ export class PortalPlanDto {
   optionLabel!: string | null;
 
   @ApiProperty({
-    type: PlanQuoteDocumentDto,
+    type: PortalQuoteDto,
     description:
-      'El presupuesto de DX-012 (ítems y totales), el mismo del PDF.',
+      'El presupuesto de DX-012 (ítems y totales) tal como se imprime para el paciente; de la aceptación, solo quién firmó, la firma y cuándo.',
   })
-  quote!: PlanQuoteDocumentDto;
+  quote!: PortalQuoteDto;
 }
 
 export class PatientPortalDto {
@@ -282,12 +405,12 @@ export class PatientPortalDto {
   plans!: PortalPlanDto[] | null;
 
   @ApiProperty({
-    type: AccountStatementDto,
+    type: PortalAccountDto,
     nullable: true,
     description:
       'El estado de cuenta de DX-011 con los mismos importes que ve el personal, sin datos internos (quién registró o anuló, si se puede anular); null si no se compartió.',
   })
-  account!: AccountStatementDto | null;
+  account!: PortalAccountDto | null;
 }
 
 export class PortalAppointmentConfirmedDto {

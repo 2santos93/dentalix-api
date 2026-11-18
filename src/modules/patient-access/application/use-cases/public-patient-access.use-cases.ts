@@ -17,14 +17,16 @@ import { TenantContextService } from '../../../../shared/tenancy/tenant-context.
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { GetAccountStatementUseCase } from '../../../account-statement/application/use-cases/get-account-statement.use-case';
-import type { AccountStatement } from '../../../account-statement/domain/entities/account-statement.entity';
 import { CreateConfirmationLinkUseCase } from '../../../appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { RespondConfirmationUseCase } from '../../../appointment-confirmations/application/use-cases/respond-confirmation.use-case';
 import { isMinor } from '../../../patients/domain/responsible-parties/majority-age';
+import { GetPlanQuoteUseCase } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
 import {
-  GetPlanQuoteUseCase,
-  type PlanQuoteDocument,
-} from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
+  toPortalAccount,
+  toPortalQuote,
+  type PortalAccount,
+  type PortalQuote,
+} from '../portal-projection';
 import {
   PATIENT_ACCESS_APPOINTMENT_NOT_FOUND_MESSAGE,
   PATIENT_ACCESS_FAILURE_FLOOR_MS,
@@ -212,7 +214,7 @@ export interface PortalPlanView {
   status: PortalPlanRef['status'];
   optionGroupId: string | null;
   optionLabel: string | null;
-  quote: PlanQuoteDocument;
+  quote: PortalQuote;
 }
 
 export interface PatientPortalView {
@@ -225,7 +227,7 @@ export interface PatientPortalView {
   /** null = el apartado no se compartió. */
   appointments: PortalAppointmentView[] | null;
   plans: PortalPlanView[] | null;
-  account: AccountStatement | null;
+  account: PortalAccount | null;
 }
 
 /** Quien «consulta» el estado de cuenta desde el portal: nunca puede anular. */
@@ -233,26 +235,6 @@ const PORTAL_VOID_ACTOR = {
   userId: '00000000-0000-0000-0000-000000000000',
   role: 'ASSISTANT',
 } as const;
-
-/**
- * El estado de cuenta del personal (DX-011) tal cual en importes (al céntimo,
- * DX-098), sin lo que solo sirve al personal: quién registró o anuló un abono,
- * el motivo interno de la anulación y si se puede anular.
- */
-export function forPatient(statement: AccountStatement): AccountStatement {
-  return {
-    ...statement,
-    movements: statement.movements.map((m) => ({
-      ...m,
-      createdById: null,
-      canVoid: false,
-      voidBlockedReason: null,
-      periodLocked: false,
-      voidedBy: null,
-      voidReason: null,
-    })),
-  };
-}
 
 /** PÚBLICO (con sesión): solo los apartados compartidos, solo del paciente del enlace. */
 @Injectable()
@@ -276,8 +258,21 @@ export class GetPatientPortalUseCase {
     const [appointments, plans, account] = await Promise.all([
       has('APPOINTMENTS')
         ? this.repo.upcomingAppointments(patientId, now).then((rows) =>
+            // Lista blanca: ni notas, ni motivo, ni ids de profesional o sede.
             rows.map((a) => ({
-              ...a,
+              id: a.id,
+              start: a.start,
+              end: a.end,
+              status: a.status,
+              typeName: a.typeName,
+              providerName: a.providerName,
+              location: {
+                name: a.location.name,
+                address: a.location.address,
+                timeZone: a.location.timeZone,
+                locale: a.location.locale,
+                hourCycle: a.location.hourCycle,
+              },
               confirmable: a.status === 'SCHEDULED',
             })),
           )
@@ -286,7 +281,7 @@ export class GetPatientPortalUseCase {
       has('ACCOUNT')
         ? this.getStatement
             .execute(patientId, {}, PORTAL_VOID_ACTOR)
-            .then(forPatient)
+            .then(toPortalAccount)
         : Promise.resolve(null),
     ]);
 
@@ -312,8 +307,11 @@ export class GetPatientPortalUseCase {
     // En serie: pocas y cada una ya hace varias lecturas.
     for (const ref of refs) {
       views.push({
-        ...ref,
-        quote: await this.getQuote.execute(patientId, ref.id),
+        id: ref.id,
+        status: ref.status,
+        optionGroupId: ref.optionGroupId,
+        optionLabel: ref.optionLabel,
+        quote: toPortalQuote(await this.getQuote.execute(patientId, ref.id)),
       });
     }
     return views;

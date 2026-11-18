@@ -13,6 +13,10 @@ import {
 } from './support/location-fixtures';
 import { seedParProviderRates } from './support/par-provider-rates';
 import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
+import {
+  PORTAL_RESPONSE_KEYS,
+  keysOutside,
+} from './support/patient-portal-keys';
 
 // DX-101 de punta a punta: el personal crea el enlace de acceso del paciente,
 // el paciente lo abre con su fecha de nacimiento (cookie propia), ve SOLO lo
@@ -25,6 +29,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 
 const BIRTH_DATE = '1988-03-14';
+const PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const COOKIE = 'dentalix_pa';
 
 interface Session {
@@ -367,15 +373,17 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
       patientFirstName: string;
       clinicName: string;
       appointments: { id: string; confirmable: boolean }[];
-      plans: { id: string; status: string; quote: { planId: string } }[];
+      plans: {
+        id: string;
+        status: string;
+        quote: { items: { procedure: string; unitPrice: number }[] };
+      }[];
       account: {
         summary: unknown;
         installments: unknown;
         plans: unknown;
         movements: {
           amount: number;
-          createdById: unknown;
-          canVoid: boolean;
         }[];
       };
     };
@@ -385,7 +393,11 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
     expect(body.plans.map((p) => [p.id, p.status])).toEqual([
       [presentedPlan, 'PRESENTED'],
     ]);
-    expect(body.plans[0].quote.planId).toBe(presentedPlan);
+    expect(body.plans[0].quote.items).toEqual([
+      expect.objectContaining({ procedure: 'Resina', unitPrice: 80.25 }),
+    ]);
+    // Lista blanca: ninguna clave fuera de lo decidido para el paciente.
+    expect(keysOutside(me.body, PORTAL_RESPONSE_KEYS)).toEqual([]);
     // Nada del otro paciente de la clínica.
     expect(JSON.stringify(body)).not.toContain(patientOther);
     expect(JSON.stringify(body)).not.toContain(otherAppointmentId);
@@ -397,12 +409,16 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
     const staffBody = staff.body as typeof body.account;
     expect(body.account.summary).toEqual(staffBody.summary);
     expect(body.account.installments).toEqual(staffBody.installments);
-    expect(body.account.plans).toEqual(staffBody.plans);
+    expect(body.account.plans).toEqual(
+      (staffBody.plans as { paymentsWithoutRate?: unknown }[]).map(
+        ({ paymentsWithoutRate: _omit, ...rest }) => rest,
+      ),
+    );
     expect(body.account.movements.map((m) => m.amount)).toEqual([100.15]);
-    expect(body.account.movements[0]).toMatchObject({
-      createdById: null,
-      canVoid: false,
-    });
+    // Sin autores, ids internos ni «se puede anular».
+    expect(JSON.stringify(body.account.movements)).not.toMatch(
+      /createdById|canVoid|voidedBy|voidReason|splitId/,
+    );
 
     // Último acceso visible para el personal.
     const after = await as(clinicA)
@@ -665,6 +681,45 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
     });
     const link = await createLink(clinicA, minor, { scopes: ['PLANS'] });
     expect(link.minor).toBe(true);
+  });
+
+  it('un presupuesto aceptado: de la aceptación solo quién firmó, la firma y cuándo (ni IP, ni navegador, ni quién registró)', async () => {
+    const quote = await as(clinicA)
+      .get(`/patients/${patientA}/treatment-plans/${presentedPlan}/quote`)
+      .expect(200);
+    await request(server())
+      .post(
+        `/api/v1/patients/${patientA}/treatment-plans/${presentedPlan}/acceptance`,
+      )
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Authorization', `Bearer ${clinicA.accessToken}`)
+      .set('User-Agent', 'NavegadorDelPersonal/9.9')
+      .send({
+        signerName: 'Carmen Rondón',
+        signature: `data:image/png;base64,${PNG}`,
+        contentHash: (quote.body as { contentHash: string }).contentHash,
+      })
+      .expect(201);
+    const link = await createLink(clinicA, patientA, { scopes: ['PLANS'] });
+    const cookie = await openPortal(clinicA, link);
+    const me = await portal(clinicA, cookie).me().expect(200);
+    expect(keysOutside(me.body, PORTAL_RESPONSE_KEYS)).toEqual([]);
+    const plan = (
+      me.body as {
+        plans: { id: string; status: string; quote: { acceptance: unknown } }[];
+      }
+    ).plans.find((p) => p.id === presentedPlan);
+    expect(plan?.status).toBe('ACCEPTED');
+    expect(Object.keys(plan!.quote.acceptance as object).sort()).toEqual([
+      'acceptedAt',
+      'signature',
+      'signerName',
+    ]);
+    const json = JSON.stringify(me.body);
+    expect(json).not.toContain('NavegadorDelPersonal');
+    expect(json).not.toMatch(
+      /ipAddress|userAgent|acceptedByName|acceptanceHash/,
+    );
   });
 
   it('archivar al paciente revoca sus enlaces: la sesión abierta da 410', async () => {

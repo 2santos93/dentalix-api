@@ -2,7 +2,6 @@ import { HttpException } from '@nestjs/common';
 import type { PatientAccessScope } from '@prisma/client';
 import { hashPublicLinkToken } from '../../../../shared/public-links/public-link-token';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import type { AccountStatement } from '../../../account-statement/domain/entities/account-statement.entity';
 import {
   PATIENT_ACCESS_FAILURE_FLOOR_MS,
   type VerifyDecision,
@@ -17,11 +16,15 @@ import type {
   VerifyAttemptOutcome,
 } from '../../domain/ports/patient-access-repository.port';
 import { UnknownTokenAttempts } from '../unknown-token-attempts';
+import { staffQuote, staffStatement } from '../__fixtures__/staff-documents';
+import {
+  PORTAL_RESPONSE_KEYS,
+  keysOutside,
+} from '../../../../../test/support/patient-portal-keys';
 import {
   ConfirmPortalAppointmentUseCase,
   GetPatientPortalUseCase,
   VerifyPatientAccessUseCase,
-  forPatient,
   type PatientAccessPrincipal,
 } from './public-patient-access.use-cases';
 
@@ -270,44 +273,27 @@ describe('VerifyPatientAccessUseCase (DX-101)', () => {
   });
 });
 
-function statement(): AccountStatement {
+/** Una cita del repositorio con campos de más (los que no deben salir). */
+function appointmentRow(id: string, status: 'SCHEDULED' | 'CONFIRMED') {
   return {
-    movements: [
-      {
-        id: 'm1',
-        amount: 40.15,
-        currency: 'USD',
-        createdById: 'u-staff',
-        canVoid: true,
-        voidBlockedReason: 'NOT_SAME_DAY',
-        periodLocked: true,
-        voided: true,
-        voidedAt: NOW,
-        voidedBy: { id: 'u-admin', fullName: 'Admin Clínica' },
-        voidReason: 'error de caja interno',
-      },
-    ],
-    summary: [{ currency: 'USD', balance: 59.85 }],
-  } as unknown as AccountStatement;
+    id,
+    start: NOW,
+    end: NOW,
+    status,
+    typeName: 'Control',
+    providerName: 'Dra. Owner',
+    providerId: 'prov-1',
+    notes: 'nota interna',
+    location: {
+      id: 'loc-1',
+      name: 'Sede Altamira',
+      address: null,
+      timeZone: 'America/Caracas',
+      locale: 'es-VE',
+      hourCycle: 'h12',
+    },
+  };
 }
-
-describe('forPatient (DX-101): el estado de cuenta del personal sin lo interno', () => {
-  it('mismos importes; sin quién registró o anuló, ni motivo interno, ni anular', () => {
-    const out = forPatient(statement());
-    expect(out.summary).toEqual([{ currency: 'USD', balance: 59.85 }]);
-    expect(out.movements[0]).toMatchObject({
-      amount: 40.15,
-      voided: true,
-      voidedAt: NOW,
-      createdById: null,
-      canVoid: false,
-      voidBlockedReason: null,
-      periodLocked: false,
-      voidedBy: null,
-      voidReason: null,
-    });
-  });
-});
 
 describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del paciente', () => {
   function portal(scopes: PatientAccessScope[]) {
@@ -329,8 +315,8 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
       ),
       upcomingAppointments: jest.fn(() =>
         Promise.resolve([
-          { id: 'a1', status: 'SCHEDULED' },
-          { id: 'a2', status: 'CONFIRMED' },
+          appointmentRow('a1', 'SCHEDULED'),
+          appointmentRow('a2', 'CONFIRMED'),
         ]),
       ),
       sharedPlans: jest.fn(() =>
@@ -345,10 +331,10 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
       ),
     };
     const getQuote = {
-      execute: jest.fn(() => Promise.resolve({ planId: 'p1' })),
+      execute: jest.fn(() => Promise.resolve(staffQuote())),
     };
     const getStatement = {
-      execute: jest.fn(() => Promise.resolve(statement())),
+      execute: jest.fn(() => Promise.resolve(staffStatement())),
     };
     const useCase = new GetPatientPortalUseCase(
       repo as unknown as PatientAccessRepository,
@@ -370,7 +356,7 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
       'APPOINTMENTS',
     ]);
     const view = await useCase.execute(principal);
-    expect(view.appointments).toEqual([
+    expect(view.appointments).toMatchObject([
       { id: 'a1', status: 'SCHEDULED', confirmable: true },
       { id: 'a2', status: 'CONFIRMED', confirmable: false },
     ]);
@@ -390,22 +376,25 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
     expect(repo.upcomingAppointments).not.toHaveBeenCalled();
     expect(view.appointments).toBeNull();
     expect(getQuote.execute).toHaveBeenCalledWith(PATIENT, 'p1');
-    expect(view.plans).toEqual([
-      {
-        id: 'p1',
-        status: 'PRESENTED',
-        optionGroupId: 'p1',
-        optionLabel: 'A',
-        quote: { planId: 'p1' },
-      },
+    expect(view.plans).toMatchObject([
+      { id: 'p1', status: 'PRESENTED', optionGroupId: 'p1', optionLabel: 'A' },
     ]);
+    expect(view.plans![0].quote.items[0].procedure).toBe('Resina');
     expect(getStatement.execute).toHaveBeenCalledWith(
       PATIENT,
       {},
       expect.objectContaining({ role: 'ASSISTANT' }),
     );
-    expect(view.account!.movements[0].canVoid).toBe(false);
-    expect(view.account!.movements[0].voidedBy).toBeNull();
+    expect(view.account!.movements[0].amount).toBe(100.15);
+    // Serializada, la respuesta entera solo lleva claves de la lista blanca.
+    expect(keysOutside(view, PORTAL_RESPONSE_KEYS)).toEqual([]);
+  });
+
+  it('las citas solo llevan su lista blanca (ni notas, ni ids de profesional o sede)', async () => {
+    const { useCase, principal } = portal(['APPOINTMENTS']);
+    const view = await useCase.execute(principal);
+    expect(keysOutside(view, PORTAL_RESPONSE_KEYS)).toEqual([]);
+    expect(JSON.stringify(view)).not.toMatch(/nota interna|prov-1|loc-1/);
   });
 
   it('solo el nombre de pila; menor de edad según la clínica', async () => {

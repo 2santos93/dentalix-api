@@ -30,8 +30,6 @@ import { currentRequestId } from '../../../shared/observability/request-context'
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
 import type { AuditRequestMeta } from '../../audit/domain/audit-request-context';
-import type { AccountStatement } from '../../account-statement/domain/entities/account-statement.entity';
-import { toPlanQuoteDocumentDto } from '../../treatment-plans/presentation/plan-quote.controller';
 import {
   ConfirmPortalAppointmentUseCase,
   GetPatientPortalUseCase,
@@ -145,20 +143,9 @@ export class PublicPatientAccessController {
   @ApiOkResponse({ type: PatientPortalDto })
   @ApiUnauthorizedResponse({ description: SESSION })
   @ApiGoneResponse({ description: GONE })
-  async me(
-    @Req() req: PatientAccessRequest,
-  ): Promise<
-    Omit<PatientPortalDto, 'account'> & { account: AccountStatement | null }
-  > {
-    const view = await this.portal.execute(principalOf(req));
-    return {
-      ...view,
-      plans:
-        view.plans?.map((p) => ({
-          ...p,
-          quote: toPlanQuoteDocumentDto(p.quote),
-        })) ?? null,
-    };
+  me(@Req() req: PatientAccessRequest): Promise<PatientPortalDto> {
+    // La vista ya es la proyección de lista blanca (portal-projection.ts).
+    return this.portal.execute(principalOf(req));
   }
 
   @Post('me/appointments/:appointmentId/confirm')
