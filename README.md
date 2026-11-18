@@ -7144,9 +7144,9 @@ su memoria máxima con `/usr/bin/time -v` y las reglas más lentas con
 `TIMING=1` en el log) y tipos, unit y build en otro, con cada paso
 `if: ${{ !cancelled() }}`: un rojo del lint o de tsc ya no deja los demás
 `skipped` (DX-338). `integration` y `e2e` son jobs separados (cada uno con su Postgres 16 y
-su MinIO): un rojo en `test:int` no oculta la e2e. La e2e va repartida en 4
-shards (`jest --shard=i/4`, matriz `shard`/`total`/`timeout` del job `e2e`,
-tope de 20 min por shard, DX-396/DX-396-bis) y la integración también, en 4
+su MinIO): un rojo en `test:int` no oculta la e2e. La e2e va repartida en 7
+shards (`jest --shard=i/7`, matriz `shard`/`total`/`timeout` del job `e2e`,
+tope de 20 min por shard, DX-396/DX-396-bis/DX-396-quater) y la integración, en 4
 (job `integration`, mismo patrón, DX-396-ter; `db:check-force` y el control
 de drift corren solo en el shard 1, porque la base migrada es la misma en
 todos): cada shard publica su duración en el
