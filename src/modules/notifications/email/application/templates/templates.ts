@@ -692,6 +692,7 @@ function quoteFollowUp(
         kind: 'paragraph',
         text: t.intro(vars.clinicName, vars.patientFirstName),
       },
+      { kind: 'note', text: t.expires(vars.expiresInHours) },
       { kind: 'note', text: t.note },
     ],
     action: single ? { label: t.action, url: vars.urls[0] } : null,

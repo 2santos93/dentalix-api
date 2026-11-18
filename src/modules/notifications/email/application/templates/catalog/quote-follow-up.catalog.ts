@@ -19,6 +19,8 @@ export interface QuoteFollowUpTexts {
   optionsLead: string;
   option: (letter: string) => string;
   note: string;
+  /** Caducidad del enlace en horas (SIGNATURE_LINK_TTL_HOURS). */
+  expires: (hours: number) => string;
   unsubscribeLead: string;
   unsubscribeLabel: string;
   buttonFallback: string;
@@ -41,6 +43,7 @@ export const QUOTE_FOLLOW_UP_CATALOG: Readonly<
     optionsLead: 'Elige la opción que quieres revisar:',
     option: (letter) => `Opción ${letter}`,
     note: 'El enlace es personal. Si tienes dudas o prefieres hablarlo, responde a la clínica por su canal habitual. Si no esperabas este correo, ignóralo.',
+    expires: (hours) => `El enlace caduca en ${hours} horas.`,
     unsubscribeLead: '¿No quieres recibir más avisos de la clínica?',
     unsubscribeLabel: 'Dejar de recibir avisos',
     buttonFallback:
@@ -61,6 +64,7 @@ export const QUOTE_FOLLOW_UP_CATALOG: Readonly<
     optionsLead: 'Choose the option you want to review:',
     option: (letter) => `Option ${letter}`,
     note: 'The link is personal. If you have questions or would rather talk it over, contact the clinic through its usual channel. If you were not expecting this email, ignore it.',
+    expires: (hours) => `The link expires in ${hours} hours.`,
     unsubscribeLead: 'Don’t want to receive more notices from the clinic?',
     unsubscribeLabel: 'Stop receiving notices',
     buttonFallback:

@@ -1,3 +1,4 @@
+import { SIGNATURE_LINK_TTL_HOURS } from '../../../../signature-requests/domain/signature-token';
 import { renderEmail } from './templates';
 
 const brand = {
@@ -19,6 +20,7 @@ describe('plantilla quote-follow-up (DX-561)', () => {
         recipientFirstName: 'Ana',
         patientFirstName: null,
         clinicName: 'Sonrisas del Norte',
+        expiresInHours: SIGNATURE_LINK_TTL_HOURS,
         urls: ['https://demo.dentalix.app/firmar/abc'],
         unsubscribeUrl: 'https://demo.dentalix.app/baja/xyz',
       },
@@ -37,6 +39,8 @@ describe('plantilla quote-follow-up (DX-561)', () => {
     expect(email.html).toContain('href="https://demo.dentalix.app/firmar/abc"');
     expect(email.html).toContain('href="https://demo.dentalix.app/baja/xyz"');
     expect(email.text).toContain('Dejar de recibir avisos');
+    expect(email.text).toContain('El enlace caduca en 72 horas.');
+    expect(email.html).toContain('El enlace caduca en 72 horas.');
     expect(email.text).not.toMatch(FORBIDDEN);
     expect(email.html.replace(/<[^>]+>/g, ' ')).not.toMatch(FORBIDDEN);
   });
@@ -48,6 +52,7 @@ describe('plantilla quote-follow-up (DX-561)', () => {
         recipientFirstName: 'Luis',
         patientFirstName: 'Sofía',
         clinicName: 'Sonrisas del Norte',
+        expiresInHours: SIGNATURE_LINK_TTL_HOURS,
         urls: [
           'https://demo.dentalix.app/firmar/a',
           'https://demo.dentalix.app/firmar/b',
@@ -72,6 +77,7 @@ describe('plantilla quote-follow-up (DX-561)', () => {
         recipientFirstName: 'Ana',
         patientFirstName: null,
         clinicName: 'Sonrisas del Norte',
+        expiresInHours: SIGNATURE_LINK_TTL_HOURS,
         urls: ['https://demo.dentalix.app/firmar/abc'],
         unsubscribeUrl: 'https://demo.dentalix.app/baja/xyz',
       },
@@ -83,6 +89,7 @@ describe('plantilla quote-follow-up (DX-561)', () => {
     );
     expect(email.text).toContain('View and accept the quote');
     expect(email.text).toContain('Stop receiving notices');
+    expect(email.text).toContain('The link expires in 72 hours.');
     expect(email.html).toContain('lang="en"');
   });
 
@@ -92,6 +99,7 @@ describe('plantilla quote-follow-up (DX-561)', () => {
       patientFirstName: null,
       clinicName: 'X',
       unsubscribeUrl: null,
+      expiresInHours: SIGNATURE_LINK_TTL_HOURS,
     };
     expect(() =>
       renderEmail('quote-follow-up', { ...base, urls: [] }, brand),
@@ -101,6 +109,7 @@ describe('plantilla quote-follow-up (DX-561)', () => {
         'quote-follow-up',
         {
           ...base,
+          expiresInHours: SIGNATURE_LINK_TTL_HOURS,
           urls: ['https://a/1', 'https://a/2', 'https://a/3', 'https://a/4'],
         },
         brand,

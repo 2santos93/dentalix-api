@@ -347,6 +347,7 @@ describe('DX-561 · seguimiento automático de presupuestos (int)', () => {
       /Ver y aceptar el presupuesto: https?:\/\/dx561-int-a\.[^/\s]+\/firmar\/[A-Za-z0-9_-]{20,}/,
     );
     expect(email.text).toMatch(/\/baja\/[A-Za-z0-9_-]{20,}/);
+    expect(email.text).toContain('El enlace caduca en 72 horas.');
     expect(email.text).not.toMatch(FORBIDDEN);
     expect(email.html.replace(/<[^>]+>/g, ' ')).not.toMatch(FORBIDDEN);
   });

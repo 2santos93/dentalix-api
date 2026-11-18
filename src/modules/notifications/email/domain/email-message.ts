@@ -505,6 +505,8 @@ export interface QuoteFollowUpEmailVars {
   clinicName: string;
   /** Un enlace `/firmar/<token>` por opción, en orden (A, B, C). 1–3. */
   urls: string[];
+  /** Horas que vale el enlace (SIGNATURE_LINK_TTL_HOURS). */
+  expiresInHours: number;
   /** Enlace de baja de los avisos (DX-128), si se emitió uno. */
   unsubscribeUrl: string | null;
 }

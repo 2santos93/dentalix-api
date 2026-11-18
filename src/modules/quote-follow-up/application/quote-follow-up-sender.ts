@@ -15,6 +15,7 @@ import {
   ReminderOptOutLinks,
 } from '../../reminders/application/reminder-opt-out-links';
 import { FollowUpBudgetLinks } from '../../signature-requests/application/follow-up-budget-links';
+import { SIGNATURE_LINK_TTL_HOURS } from '../../signature-requests/domain/signature-token';
 import { uuidV7 } from '../../weekly-digest/domain/uuid-v7';
 import {
   QUOTE_FOLLOW_UP_CLOCK,
@@ -223,6 +224,7 @@ export class QuoteFollowUpSender {
           : null,
         clinicName: prepared.clinicName,
         urls: prepared.options.map((o) => o.url),
+        expiresInHours: SIGNATURE_LINK_TTL_HOURS,
         unsubscribeUrl: `${linkBase}${OPT_OUT_PATH}/${optOutToken}`,
       },
     });
