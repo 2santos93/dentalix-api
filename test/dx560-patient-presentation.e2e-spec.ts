@@ -135,13 +135,17 @@ describe('Presentación del plan al paciente (e2e, DX-560)', () => {
     return { planId, items };
   }
 
-  async function sendAndOpen(planId: string): Promise<DocumentBody> {
+  async function sendAndOpen(
+    planId: string,
+    secondCurrency?: string,
+  ): Promise<DocumentBody> {
     mailer.clear();
     await as()
       .post(`/patients/${patientId}/signature-requests`, {
         type: 'BUDGET',
         channel: 'EMAIL',
         treatmentPlanId: planId,
+        ...(secondCurrency ? { secondCurrency } : {}),
       })
       .expect(201);
     await dispatcher.whenIdle();
@@ -394,7 +398,7 @@ describe('Presentación del plan al paciente (e2e, DX-560)', () => {
       .expect(200);
   });
 
-  it('sede en la moneda del plan: la segunda es la única otra moneda de sus abonos recientes; con varias, ninguna', async () => {
+  it('sede en la moneda del plan: sin elegir no hay bloque; la segunda elegida (VES) sí, y una inválida es 400', async () => {
     const location = await raw.location.findFirstOrThrow({
       where: { tenantId: clinic.tenantId, deletedAt: null },
       select: { id: true, currency: true },
@@ -404,39 +408,33 @@ describe('Presentación del plan al paciente (e2e, DX-560)', () => {
       data: { currency: 'USD' },
     });
     try {
-      const target = (await presentedPlan()).planId;
-      const none = await sendAndOpen(target);
+      const none = await sendAndOpen((await presentedPlan()).planId);
       expect(none.presentation).not.toHaveProperty('secondCurrency');
 
-      await raw.payment.create({
-        data: {
-          tenantId: clinic.tenantId,
-          locationId: location.id,
-          treatmentPlanId: target,
-          patientId,
-          currency: 'VES',
-          amount: 1500,
-          paidAt: new Date(),
-        },
-      });
-      const ves = await sendAndOpen((await presentedPlan()).planId);
+      const ves = await sendAndOpen((await presentedPlan()).planId, 'VES');
       expect(ves.presentation?.secondCurrency).toMatchObject({
         currency: 'VES',
+        fromPerBase: 1,
+        toPerBase: 1,
       });
 
-      await raw.payment.create({
-        data: {
-          tenantId: clinic.tenantId,
-          locationId: location.id,
-          treatmentPlanId: target,
-          patientId,
-          currency: 'EUR',
-          amount: 20,
-          paidAt: new Date(),
-        },
-      });
-      const ambiguous = await sendAndOpen((await presentedPlan()).planId);
-      expect(ambiguous.presentation).not.toHaveProperty('secondCurrency');
+      const { planId } = await presentedPlan();
+      const post = (secondCurrency: string) =>
+        as().post(`/patients/${patientId}/signature-requests`, {
+          type: 'BUDGET',
+          channel: 'EMAIL',
+          treatmentPlanId: planId,
+          secondCurrency,
+        });
+      expect(JSON.stringify((await post('USD').expect(400)).body)).toContain(
+        'La segunda moneda debe ser distinta de la del presupuesto.',
+      );
+      expect(JSON.stringify((await post('XXX').expect(400)).body)).toContain(
+        'La segunda moneda no está en el catálogo de monedas.',
+      );
+      expect(JSON.stringify((await post('ves').expect(400)).body)).toContain(
+        'La segunda moneda debe ser un código ISO 4217',
+      );
     } finally {
       await raw.location.update({
         where: { id: location.id },

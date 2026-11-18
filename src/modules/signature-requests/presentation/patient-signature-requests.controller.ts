@@ -166,6 +166,7 @@ export class PatientSignatureRequestsController {
         templateId: dto.templateId,
         treatmentPlanId: dto.treatmentPlanId,
         professionalId: dto.professionalId,
+        secondCurrency: dto.secondCurrency,
       },
       actorOf(req),
       { protocol: this.protocol, host: safeLinkHost(req.tenantHost?.host) },

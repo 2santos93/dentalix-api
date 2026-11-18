@@ -4,6 +4,10 @@ import {
   budgetPresentationItems,
   composeBudgetPresentation,
   parseBudgetPresentation,
+  requestedSecondCurrencyError,
+  SECOND_CURRENCY_SAME_MESSAGE,
+  SECOND_CURRENCY_UNKNOWN_MESSAGE,
+  secondCurrencyFor,
   type BudgetSecondCurrencySource,
 } from './budget-presentation';
 
@@ -12,7 +16,7 @@ const NOW = new Date('2026-11-18T03:30:00.000Z'); // 17 nov, 23:30 en Caracas
 function source(overrides: Partial<BudgetSecondCurrencySource> = {}) {
   const stored: { date: string; currencies: readonly string[] }[] = [];
   const port: BudgetSecondCurrencySource = {
-    currencyFor: () => Promise.resolve('VES'),
+    currencyExists: (code) => Promise.resolve(code !== 'XXX'),
     stored: (date, currencies) => {
       stored.push({ date, currencies });
       return Promise.resolve({
@@ -26,12 +30,16 @@ function source(overrides: Partial<BudgetSecondCurrencySource> = {}) {
   return { port, stored };
 }
 
-function sample(currency = 'USD') {
+function sample(currency = 'USD', locationCurrency: string | null = 'VES') {
   const base = quoteSource();
   const quote = {
     ...base,
     plan: { ...base.plan, currency },
-    location: { ...base.location, timeZone: 'America/Caracas' },
+    location: {
+      ...base.location,
+      timeZone: 'America/Caracas',
+      currency: locationCurrency,
+    },
   };
   const content = composeQuoteContent(
     quote,
@@ -58,20 +66,66 @@ describe('budget presentation (DX-560)', () => {
     });
   });
 
-  it('sin segunda moneda, la misma que la del plan o sin tasa de una de las dos: sin bloque y sin leer de más', async () => {
-    const { quote, content } = sample('USD');
-    const none = source({ currencyFor: () => Promise.resolve(null) });
+  it('regla: la elegida; si no, la de la sede si es distinta del plan; si no, ninguna', () => {
+    expect(
+      secondCurrencyFor({
+        requested: 'EUR',
+        locationCurrency: 'VES',
+        planCurrency: 'USD',
+      }),
+    ).toBe('EUR');
+    expect(
+      secondCurrencyFor({ locationCurrency: 'VES', planCurrency: 'USD' }),
+    ).toBe('VES');
+    expect(
+      secondCurrencyFor({ locationCurrency: 'USD', planCurrency: 'USD' }),
+    ).toBeNull();
+    expect(
+      secondCurrencyFor({ locationCurrency: null, planCurrency: 'USD' }),
+    ).toBeNull();
+  });
+
+  it('la elegida: 400 si es la del plan o no está en el catálogo de monedas', async () => {
+    const { port } = source();
+    expect(await requestedSecondCurrencyError(port, 'USD', 'USD')).toBe(
+      SECOND_CURRENCY_SAME_MESSAGE,
+    );
+    expect(await requestedSecondCurrencyError(port, 'XXX', 'USD')).toBe(
+      SECOND_CURRENCY_UNKNOWN_MESSAGE,
+    );
+    expect(await requestedSecondCurrencyError(port, 'VES', 'USD')).toBeNull();
+  });
+
+  it('elegida VES en un plan USD con la sede en USD: bloque VES', async () => {
+    const { quote, content } = sample('USD', 'USD');
+    const { port } = source();
+    const out = await composeBudgetPresentation(
+      quote,
+      content,
+      port,
+      NOW,
+      'VES',
+    );
+    expect(out.secondCurrency).toMatchObject({
+      currency: 'VES',
+      toPerBase: 45,
+    });
+  });
+
+  it('sin elegir y la sede en la moneda del plan, o sin tasa: sin bloque y sin leer de más', async () => {
+    const { quote, content } = sample('USD', 'USD');
+    const none = source();
     expect(
       await composeBudgetPresentation(quote, content, none.port, NOW),
     ).not.toHaveProperty('secondCurrency');
     expect(none.stored).toEqual([]);
-    const same = source({ currencyFor: () => Promise.resolve('USD') });
+    const missing = source({ stored: () => Promise.resolve(null) });
     expect(
-      await composeBudgetPresentation(quote, content, same.port, NOW),
+      await composeBudgetPresentation(quote, content, missing.port, NOW, 'GBP'),
     ).not.toHaveProperty('secondCurrency');
-    const missing = source({ currencyFor: () => Promise.resolve('GBP') });
+    const noRate = source();
     expect(
-      await composeBudgetPresentation(quote, content, missing.port, NOW),
+      await composeBudgetPresentation(quote, content, noRate.port, NOW, 'GBP'),
     ).not.toHaveProperty('secondCurrency');
   });
 

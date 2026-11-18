@@ -83,6 +83,8 @@ import {
   BUDGET_SECOND_CURRENCY_SOURCE,
   composeBudgetPresentation,
   NO_SECOND_CURRENCY,
+  requestedSecondCurrencyError,
+  SECOND_CURRENCY_ONLY_BUDGET_MESSAGE,
   type BudgetSecondCurrencySource,
 } from '../budget-presentation';
 
@@ -324,6 +326,12 @@ export interface CreateSignatureRequestInput {
   templateId?: string;
   treatmentPlanId?: string;
   professionalId?: string;
+  /**
+   * DX-560 (solo BUDGET): segunda moneda orientativa que elige quien envía
+   * (ISO 4217, distinta de la del plan y del catálogo de monedas). Sin ella,
+   * la de la sede si es distinta de la del plan; si no, ninguna.
+   */
+  secondCurrency?: string;
 }
 
 export interface CreatedSignatureRequest extends SignatureRequestSummary {
@@ -374,6 +382,9 @@ export class CreateSignatureRequestUseCase {
   ): Promise<CreatedSignatureRequest> {
     if (input.type === SignatureRequestType.BUDGET) {
       return this.createBudget(patientId, input, actor, link);
+    }
+    if (input.secondCurrency !== undefined) {
+      throw new BadRequestException(SECOND_CURRENCY_ONLY_BUDGET_MESSAGE);
     }
     if (!input.templateId) {
       throw new BadRequestException(SIGNATURE_TEMPLATE_REQUIRED_MESSAGE);
@@ -504,6 +515,15 @@ export class CreateSignatureRequestUseCase {
     if (quote.items.length === 0) {
       throw new BadRequestException(SIGNATURE_BUDGET_EMPTY_MESSAGE);
     }
+    // DX-560: la segunda moneda elegida, distinta de la del plan y existente.
+    if (input.secondCurrency !== undefined) {
+      const error = await requestedSecondCurrencyError(
+        this.secondCurrency,
+        input.secondCurrency,
+        quote.plan.currency,
+      );
+      if (error) throw new BadRequestException(error);
+    }
 
     const now = this.clock();
     // DX-379 (C): un presupuesto vencido no se envía a firmar a distancia (el
@@ -546,6 +566,7 @@ export class CreateSignatureRequestUseCase {
       content,
       this.secondCurrency,
       now,
+      input.secondCurrency,
     );
 
     const token = generateSignatureToken();

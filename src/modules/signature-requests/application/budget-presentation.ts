@@ -51,18 +51,12 @@ export interface StoredDayRates {
 }
 
 /**
- * Puerto de la segunda moneda: cuál es la de la sede y las tasas que la
- * clínica YA tiene guardadas (nunca llama al proveedor de tasas).
+ * Puerto de la segunda moneda: si una moneda existe en el catálogo de
+ * monedas y las tasas que la clínica YA tiene guardadas (nunca llama al
+ * proveedor de tasas).
  */
 export interface BudgetSecondCurrencySource {
-  /** La segunda moneda de la sede para un plan en `planCurrency`, o `null`. */
-  currencyFor(input: {
-    locationId: string;
-    locationCurrency: string | null;
-    planCurrency: string;
-    now: Date;
-    timeZone: string;
-  }): Promise<string | null>;
+  currencyExists(code: string): Promise<boolean>;
   stored(
     date: string,
     currencies: readonly string[],
@@ -73,11 +67,53 @@ export const BUDGET_SECOND_CURRENCY_SOURCE = Symbol(
   'BUDGET_SECOND_CURRENCY_SOURCE',
 );
 
-/** Sin fuente configurada (tests que no la usan): nunca hay segunda moneda. */
+/** Sin fuente configurada (tests que no la usan): nunca hay tasa guardada. */
 export const NO_SECOND_CURRENCY: BudgetSecondCurrencySource = {
-  currencyFor: () => Promise.resolve(null),
+  currencyExists: () => Promise.resolve(true),
   stored: () => Promise.resolve(null),
 };
+
+export const SECOND_CURRENCY_SAME_MESSAGE =
+  'La segunda moneda debe ser distinta de la del presupuesto.';
+export const SECOND_CURRENCY_UNKNOWN_MESSAGE =
+  'La segunda moneda no está en el catálogo de monedas.';
+export const SECOND_CURRENCY_FORMAT_MESSAGE =
+  'La segunda moneda debe ser un código ISO 4217 de 3 letras en mayúsculas (por ejemplo, USD).';
+export const SECOND_CURRENCY_ONLY_BUDGET_MESSAGE =
+  'La segunda moneda solo se elige al enviar un presupuesto.';
+
+/**
+ * DX-560: la segunda moneda del enlace de aceptación.
+ *  a. la que elige quien envía (solo en el envío manual de DX-415; ya
+ *     validada: distinta de la del plan y del catálogo de monedas);
+ *  b. si no la eligió, la moneda de la sede del envío (`locations.currency`)
+ *     si es distinta de la del plan;
+ *  c. si no, ninguna.
+ * El seguimiento automático (DX-561) no elige: solo b/c.
+ */
+export function secondCurrencyFor(input: {
+  requested?: string | null;
+  locationCurrency: string | null;
+  planCurrency: string;
+}): string | null {
+  if (input.requested) return input.requested;
+  return input.locationCurrency && input.locationCurrency !== input.planCurrency
+    ? input.locationCurrency
+    : null;
+}
+
+/** 400 si la moneda elegida no vale para un plan en `planCurrency`; si vale, null. */
+export async function requestedSecondCurrencyError(
+  source: BudgetSecondCurrencySource,
+  requested: string,
+  planCurrency: string,
+): Promise<string | null> {
+  if (requested === planCurrency) return SECOND_CURRENCY_SAME_MESSAGE;
+  if (!(await source.currencyExists(requested))) {
+    return SECOND_CURRENCY_UNKNOWN_MESSAGE;
+  }
+  return null;
+}
 
 const BASE_CURRENCY = 'USD';
 
@@ -140,24 +176,24 @@ export function budgetPresentationItems(
 }
 
 /**
- * La presentación congelada de una solicitud nueva: ítems y visitas y, si la
- * sede tiene una segunda moneda con tasa guardada HOY en la zona de la sede
- * (o la del plazo de la tasa manual, DX-384), esa moneda y su tasa.
+ * La presentación congelada de una solicitud nueva: ítems y visitas y, si hay
+ * segunda moneda (`secondCurrencyFor`) con tasa guardada HOY en la zona de la
+ * sede (o la del plazo de la tasa manual, DX-384), esa moneda y su tasa. Sin
+ * tasa guardada, sin bloque.
  */
 export async function composeBudgetPresentation(
   quote: PlanQuoteSource,
   content: QuoteContent,
   source: BudgetSecondCurrencySource,
   now: Date,
+  requested?: string | null,
 ): Promise<BudgetPresentation> {
   const base = budgetPresentationItems(quote, content);
   const planCurrency = content.currency;
-  const second = await source.currencyFor({
-    locationId: quote.location.id,
+  const second = secondCurrencyFor({
+    requested,
     locationCurrency: quote.location.currency ?? null,
     planCurrency,
-    now,
-    timeZone: quote.location.timeZone,
   });
   if (!second || second === planCurrency) return base;
   const today = civilDateIn(now, quote.location.timeZone);
