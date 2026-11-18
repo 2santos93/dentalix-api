@@ -57,6 +57,8 @@ export const MERGE_TABLE_CATEGORY: Record<string, MergeCategory> = {
   cancellation_fees: 'appointments',
   closing_queue_dismissals: 'appointments',
   post_op_instruction_deliveries: 'appointments',
+  // DX-566: controles postoperatorios (la llamada tras el procedimiento).
+  post_op_checks: 'appointments',
   clinical_entries: 'clinicalEntries',
   clinical_entry_addenda: 'clinicalEntries',
   clinical_entry_diagnoses: 'clinicalEntries',

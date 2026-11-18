@@ -2,9 +2,12 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
+  Min,
   MinLength,
 } from 'class-validator';
 import {
@@ -15,7 +18,12 @@ import {
 } from '../../../../shared/validation/input-limits';
 import { CatalogKind } from '@prisma/client';
 import { NoteTemplateLinkField } from './note-template-link.field';
-import { HEX_COLOR_PATTERN } from '../../application/use-cases/create-catalog-item.use-case';
+import {
+  HEX_COLOR_PATTERN,
+  POST_OP_CHECK_AFTER_DAYS_MAX,
+  POST_OP_CHECK_AFTER_DAYS_MESSAGE,
+  POST_OP_CHECK_AFTER_DAYS_MIN,
+} from '../../application/use-cases/create-catalog-item.use-case';
 import {
   IsNonNegativeMoney,
   MONEY_MAX,
@@ -85,6 +93,32 @@ export class CreateCatalogItemDto {
   @IsOptional()
   @IsBoolean()
   allowDiscount?: boolean;
+
+  @ApiPropertyOptional({
+    default: false,
+    description:
+      'DX-566: al marcarlo hecho se crea un control postoperatorio (llamada al paciente). Solo en PROCEDURE: en un diagnóstico, 400.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  requiresPostOpCheck?: boolean;
+
+  @ApiPropertyOptional({
+    default: 1,
+    minimum: POST_OP_CHECK_AFTER_DAYS_MIN,
+    maximum: POST_OP_CHECK_AFTER_DAYS_MAX,
+    description:
+      'DX-566: días HÁBILES de la sede tras el procedimiento en los que se llama (1–30).',
+  })
+  @IsOptional()
+  @IsInt({ message: POST_OP_CHECK_AFTER_DAYS_MESSAGE })
+  @Min(POST_OP_CHECK_AFTER_DAYS_MIN, {
+    message: POST_OP_CHECK_AFTER_DAYS_MESSAGE,
+  })
+  @Max(POST_OP_CHECK_AFTER_DAYS_MAX, {
+    message: POST_OP_CHECK_AFTER_DAYS_MESSAGE,
+  })
+  postOpCheckAfterDays?: number;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()

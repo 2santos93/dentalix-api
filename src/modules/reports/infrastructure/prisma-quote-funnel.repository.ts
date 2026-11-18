@@ -454,40 +454,56 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
       "fullChain" AS (
         SELECT * FROM "chain" UNION ALL SELECT * FROM "altChain"
       ),
+      -- Una fila por plan de la cadena con lo de sus ítems ya sumado (DX-558-bis):
+      -- antes se abría una fila por ítem (42 000 con 20 000 planes) y se
+      -- ordenaba entera, a disco, para agruparla por opción. Los ítems de CADA
+      -- plan van por el índice parcial de ítems vivos (tenantId, planId): las
+      -- filas de una CTE se estiman a ciegas y, sin la barrera del LATERAL, el
+      -- planificador prefiere leer todos los ítems de la clínica (crece con la
+      -- historia). El agregado sin GROUP BY deja una fila también en un plan
+      -- sin ítems (o borrado), con sumas NULL y, tras el coalesce, FALSE.
       "lines" AS (
-        SELECT ch.*, i."id" AS "itemId", i."status" AS "itemStatus",
-               ${accepted} AS "planAccepted",
-               ${toCatalog(Prisma.sql`(i."price" - i."discount")`)} AS "amount",
-               al."inPlan" AS "allocatedInPlan",
-               ${toCatalog(Prisma.sql`al."inPlan"`)} AS "allocated",
-               (${accepted}
-                AND (i."status" = 'DONE' OR EXISTS (
-                  SELECT 1 FROM "appointment_plan_items" l
-                    JOIN "appointments" a
-                      ON a."tenantId" = l."tenantId" AND a."id" = l."appointmentId"
-                   WHERE l."tenantId" = ${t} AND l."planItemId" = i."id"
-                     AND l."deletedAt" IS NULL AND a."deletedAt" IS NULL)))
-                 AS "scheduled"
+        SELECT ch.*, ${accepted} AS "planAccepted", it.*
           FROM "fullChain" ch
-          -- Los ítems de CADA plan de la cadena por el índice parcial de
-          -- ítems vivos (tenantId, planId): las filas de una CTE se estiman a
-          -- ciegas y, sin la barrera (OFFSET 0), el planificador prefiere
-          -- leer todos los ítems de la clínica (crece con la historia).
-          LEFT JOIN LATERAL (
-            SELECT it.* FROM "treatment_plan_items" it
-             WHERE NOT ch."planDeleted"
-               AND it."tenantId" = ${t} AND it."planId" = ch."planId"
-               AND it."deletedAt" IS NULL
-            OFFSET 0
-          ) i ON TRUE
-          -- Lo imputado a cada ítem, solo en los planes aceptados (los únicos
-          -- que cuentan como cobrados).
-          LEFT JOIN LATERAL (
-            SELECT sum(pa."amount") AS "inPlan"
-              FROM "payment_allocations" pa
-             WHERE ${accepted}
-               AND pa."tenantId" = ${t} AND pa."treatmentPlanItemId" = i."id"
-          ) al ON TRUE
+          CROSS JOIN LATERAL (
+            SELECT sum(x."amount") AS "amount",
+                   coalesce(bool_or(x."amount" IS NULL), FALSE) AS "missingRate",
+                   coalesce(bool_or(x."scheduled"), FALSE) AS "scheduled",
+                   sum(x."amount") FILTER (WHERE x."scheduled") AS "scheduledAmount",
+                   coalesce(bool_or(x."status" = 'DONE'), FALSE) AS "anyDone",
+                   sum(x."amount") FILTER (WHERE x."status" = 'DONE') AS "doneAmount",
+                   coalesce(bool_or(x."inPlan" > 0), FALSE) AS "anyCollected",
+                   sum(x."allocated") AS "allocated"
+              FROM (
+                SELECT i."id", i."status",
+                       ${toCatalog(Prisma.sql`(i."price" - i."discount")`)} AS "amount",
+                       al."inPlan",
+                       ${toCatalog(Prisma.sql`al."inPlan"`)} AS "allocated",
+                       (${accepted}
+                        AND (i."status" = 'DONE' OR EXISTS (
+                          SELECT 1 FROM "appointment_plan_items" l
+                            JOIN "appointments" a
+                              ON a."tenantId" = l."tenantId" AND a."id" = l."appointmentId"
+                           WHERE l."tenantId" = ${t} AND l."planItemId" = i."id"
+                             AND l."deletedAt" IS NULL AND a."deletedAt" IS NULL)))
+                         AS "scheduled"
+                  FROM "treatment_plan_items" i
+                  -- Lo imputado a cada ítem, solo en los planes aceptados (los
+                  -- únicos que cuentan como cobrados).
+                  LEFT JOIN LATERAL (
+                    SELECT sum(pa."amount") AS "inPlan"
+                      FROM "payment_allocations" pa
+                     WHERE ${accepted}
+                       AND pa."tenantId" = ${t} AND pa."treatmentPlanItemId" = i."id"
+                  ) al ON TRUE
+                 WHERE NOT ch."planDeleted"
+                   AND i."tenantId" = ${t} AND i."planId" = ch."planId"
+                   AND i."deletedAt" IS NULL
+                -- Barrera: sin ella el planificador repite la subconsulta de
+                -- «agendado» en cada agregado que la lee.
+                OFFSET 0
+              ) x
+          ) it
       ),
       "byOption" AS (
         SELECT l."g", l."rootId", l."patientId", l."rootPresented",
@@ -496,19 +512,16 @@ export class PrismaQuoteFunnelRepository implements QuoteFunnelRepository {
                -- Lo presentado de la opción: su cadena sin las alternativas
                -- de un pendiente.
                coalesce(sum(l."amount") FILTER (WHERE NOT l."alternative"), 0) AS "total",
-               bool_or(l."itemId" IS NOT NULL AND l."amount" IS NULL
-                 AND NOT l."alternative") AS "missingRate",
-               bool_or(l."itemId" IS NOT NULL AND l."amount" IS NULL
-                 AND l."planAccepted") AS "missingAcceptedRate",
+               bool_or(l."missingRate" AND NOT l."alternative") AS "missingRate",
+               bool_or(l."missingRate" AND l."planAccepted") AS "missingAcceptedRate",
                bool_or(l."planAccepted") AS "accepted",
                min(l."acceptedAt") FILTER (WHERE l."planAccepted") AS "acceptedAt",
                sum(l."amount") FILTER (WHERE l."planAccepted") AS "acceptedAmount",
-               bool_or(coalesce(l."scheduled", FALSE)) AS "scheduled",
-               sum(l."amount") FILTER (WHERE l."scheduled") AS "scheduledAmount",
-               bool_or(l."planAccepted" AND l."itemStatus" = 'DONE') AS "done",
-               sum(l."amount") FILTER (
-                 WHERE l."planAccepted" AND l."itemStatus" = 'DONE') AS "doneAmount",
-               bool_or(l."planAccepted" AND l."allocatedInPlan" > 0) AS "collected",
+               bool_or(l."scheduled") AS "scheduled",
+               sum(l."scheduledAmount") AS "scheduledAmount",
+               bool_or(l."planAccepted" AND l."anyDone") AS "done",
+               sum(l."doneAmount") FILTER (WHERE l."planAccepted") AS "doneAmount",
+               bool_or(l."planAccepted" AND l."anyCollected") AS "collected",
                sum(l."allocated") FILTER (WHERE l."planAccepted") AS "collectedAmount"
           FROM "lines" l
          GROUP BY l."g", l."rootId", l."patientId", l."rootPresented",

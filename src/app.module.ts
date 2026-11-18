@@ -76,6 +76,7 @@ import { ClinicalRecordCopiesModule } from './modules/clinical-record-copies/cli
 import { ImplantsModule } from './modules/implants/implants.module';
 import { OrthodonticsModule } from './modules/orthodontics/orthodontics.module';
 import { LabOrdersModule } from './modules/lab-orders/lab-orders.module';
+import { PostOpChecksModule } from './modules/post-op-checks/post-op-checks.module';
 import { CommissionsModule } from './modules/commissions/commissions.module';
 import { PatientDocumentsModule } from './modules/patient-documents/patient-documents.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
@@ -196,6 +197,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     OrthodonticsModule,
     // DX-017: laboratorio dental (laboratorios, servicios y órdenes).
     LabOrdersModule,
+    // DX-566: control postoperatorio (llamada tras los procedimientos marcados).
+    PostOpChecksModule,
     CommissionsModule,
     PatientDocumentsModule,
     // DX-107: importación de pacientes desde CSV/XLSX (trabajo en la cola).

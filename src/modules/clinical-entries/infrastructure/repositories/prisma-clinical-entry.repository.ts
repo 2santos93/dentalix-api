@@ -25,7 +25,7 @@ import { licenseSnapshot } from '../../domain/author-license';
  * DX-540: registro profesional vigente del usuario en la clínica de `tx` (la
  * membresía tiene RLS: solo la de esta clínica), recortado o null.
  */
-async function membershipLicense(
+export async function membershipLicense(
   tx: Prisma.TransactionClient,
   userId: string,
 ): Promise<string | null> {

@@ -25,6 +25,8 @@ function fakeItemFrom(
     color: input.color,
     defaultPrice: input.defaultPrice ?? null,
     allowDiscount: input.allowDiscount ?? true,
+    requiresPostOpCheck: input.requiresPostOpCheck ?? false,
+    postOpCheckAfterDays: input.postOpCheckAfterDays ?? 1,
     active: input.active ?? true,
     clinicalNoteTemplateId: input.clinicalNoteTemplateId ?? null,
     suggestedClinicalNoteTemplateId: input.clinicalNoteTemplateId ?? null,
@@ -291,5 +293,64 @@ describe('CreateCatalogItemUseCase — plantilla de evolución (DX-455)', () => 
         clinicalNoteTemplateId: 'tpl-1',
       }),
     ).rejects.toThrow(/está desactivada/);
+  });
+});
+
+describe('CreateCatalogItemUseCase · control postoperatorio (DX-566)', () => {
+  const procedure = {
+    code: 'EXO-001',
+    kind: CatalogKind.PROCEDURE,
+    labelEs: 'Extracción simple',
+    color: '#00FF00',
+  };
+
+  it('un procedimiento lo pide con sus días; llegan al repositorio', async () => {
+    const captured: CreateDentalCatalogItemRepoInput[] = [];
+    const repo = makeRepo({
+      create: (input) => {
+        captured.push(input);
+        return Promise.resolve(fakeItemFrom('c4', input));
+      },
+    });
+    const uc = new CreateCatalogItemUseCase(repo, noTemplates);
+
+    const result = await uc.execute({
+      ...procedure,
+      requiresPostOpCheck: true,
+      postOpCheckAfterDays: 2,
+    });
+
+    expect(captured[0]).toMatchObject({
+      requiresPostOpCheck: true,
+      postOpCheckAfterDays: 2,
+    });
+    expect(result.requiresPostOpCheck).toBe(true);
+    expect(result.postOpCheckAfterDays).toBe(2);
+  });
+
+  it('un diagnóstico no lo pide: 400 y no se crea', async () => {
+    const create = jest.fn();
+    const uc = new CreateCatalogItemUseCase(makeRepo({ create }), noTemplates);
+    await expect(
+      uc.execute({
+        ...procedure,
+        kind: CatalogKind.DIAGNOSIS,
+        requiresPostOpCheck: true,
+      }),
+    ).rejects.toThrow(
+      'Solo un procedimiento puede pedir control postoperatorio.',
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 31, 1.5])('días fuera de 1–30 (%p): 400', async (days) => {
+    const uc = new CreateCatalogItemUseCase(makeRepo(), noTemplates);
+    await expect(
+      uc.execute({
+        ...procedure,
+        requiresPostOpCheck: true,
+        postOpCheckAfterDays: days,
+      }),
+    ).rejects.toThrow(BadRequestException);
   });
 });

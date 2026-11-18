@@ -11,6 +11,10 @@ export interface CreateDentalCatalogItemRepoInput {
   color: string;
   defaultPrice?: number;
   allowDiscount?: boolean;
+  /** DX-566: pide control postoperatorio (solo PROCEDURE). */
+  requiresPostOpCheck?: boolean;
+  /** DX-566: 1–30 días hábiles. */
+  postOpCheckAfterDays?: number;
   active?: boolean;
   /** DX-455: ya comprobada (de esta clínica y activa). */
   clinicalNoteTemplateId?: string | null;
@@ -26,6 +30,10 @@ export interface UpdateDentalCatalogItemRepoInput {
   color?: string;
   defaultPrice?: number | null;
   allowDiscount?: boolean;
+  /** DX-566: pide control postoperatorio (solo PROCEDURE). */
+  requiresPostOpCheck?: boolean;
+  /** DX-566: 1–30 días hábiles. */
+  postOpCheckAfterDays?: number;
   active?: boolean;
   /** DX-455: undefined = no cambia; null = quitar el vínculo. */
   clinicalNoteTemplateId?: string | null;

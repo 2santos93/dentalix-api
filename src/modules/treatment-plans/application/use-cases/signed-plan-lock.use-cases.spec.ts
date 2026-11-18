@@ -35,6 +35,8 @@ const CATALOG_ITEM: DentalCatalogItem = {
   color: '#FFFFFF',
   defaultPrice: 200,
   allowDiscount: true,
+  requiresPostOpCheck: false,
+  postOpCheckAfterDays: 1,
   active: true,
   clinicalNoteTemplateId: null,
   suggestedClinicalNoteTemplateId: null,
