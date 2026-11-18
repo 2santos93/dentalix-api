@@ -35,6 +35,11 @@ interface FollowUpSqlRow {
   currency: string;
   total: Prisma.Decimal;
   itemCount: number;
+  followUpLastStep: number | null;
+  followUpLastStatus: 'SENT' | 'SKIPPED' | null;
+  followUpLastReason: string | null;
+  followUpLastSentAt: Date | null;
+  followUpPaused: boolean;
 }
 
 /**
@@ -231,32 +236,68 @@ export class PrismaPlanOptionsRepository implements PlanOptionsRepository {
                  to_char(p."quoteValidUntil", 'YYYY-MM-DD') AS "quoteValidUntil",
                  p."currency",
                  coalesce(sum(i."price" - i."discount"), 0) AS "total",
-                 count(i."id")::int AS "itemCount"
+                 count(i."id")::int AS "itemCount",
+                 -- DX-561: el último paso del seguimiento del grupo y la pausa.
+                 fu."step"::int AS "followUpLastStep",
+                 fu."status"::text AS "followUpLastStatus",
+                 fu."reason"::text AS "followUpLastReason",
+                 (SELECT max(m."sentAt") FROM "quote_follow_up_messages" m
+                   WHERE m."groupId" = g."groupKey" AND m."status" = 'SENT')
+                   AS "followUpLastSentAt",
+                 EXISTS (SELECT 1 FROM "treatment_plans" pp
+                          WHERE coalesce(pp."optionGroupId", pp."id") = g."groupKey"
+                            AND pp."deletedAt" IS NULL
+                            AND pp."quoteFollowUpPausedAt" IS NOT NULL)
+                   AS "followUpPaused"
             FROM "treatment_plans" p
             JOIN "groups" g ON g."groupKey" = ${groupKey}
+            LEFT JOIN LATERAL (
+              SELECT m."step", m."status", m."reason"
+                FROM "quote_follow_up_messages" m
+               WHERE m."groupId" = g."groupKey"
+               ORDER BY m."step" DESC
+               LIMIT 1
+            ) fu ON true
             JOIN "patients" pa ON pa."id" = p."patientId"
             -- La sede de la presentación, también si se retiró (DX-329, m17).
             LEFT JOIN "locations" lo ON lo."id" = p."presentedLocationId"
             LEFT JOIN "treatment_plan_items" i
               ON i."planId" = p."id" AND i."deletedAt" IS NULL
            WHERE ${where}
-           GROUP BY p."id", pa."id", lo."id", g."groupKey", g."firstPresentedAt"
+           GROUP BY p."id", pa."id", lo."id", g."groupKey", g."firstPresentedAt",
+                    fu."step", fu."status", fu."reason"
            ORDER BY g."firstPresentedAt" ASC, g."groupKey" ASC,
                     p."presentedAt" ASC, p."id" ASC`;
         return {
           total,
-          rows: rows.map((row) => ({
-            ...row,
-            presentedLocationPhoneRegion: phoneRegionOrNull(
-              row.presentedLocationPhoneRegion,
-            ),
-            presentedLocationTimeZone:
-              row.presentedLocationTimeZone &&
-              isValidTimeZone(row.presentedLocationTimeZone)
-                ? row.presentedLocationTimeZone
-                : null,
-            total: row.total.toNumber(),
-          })),
+          rows: rows.map(
+            ({
+              followUpLastStep,
+              followUpLastStatus,
+              followUpLastReason,
+              followUpLastSentAt,
+              followUpPaused,
+              ...row
+            }) => ({
+              ...row,
+              followUp: {
+                lastStep: followUpLastStep,
+                lastSentAt: followUpLastSentAt,
+                lastStatus: followUpLastStatus,
+                lastReason: followUpLastReason,
+                paused: followUpPaused,
+              },
+              presentedLocationPhoneRegion: phoneRegionOrNull(
+                row.presentedLocationPhoneRegion,
+              ),
+              presentedLocationTimeZone:
+                row.presentedLocationTimeZone &&
+                isValidTimeZone(row.presentedLocationTimeZone)
+                  ? row.presentedLocationTimeZone
+                  : null,
+              total: row.total.toNumber(),
+            }),
+          ),
         };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },

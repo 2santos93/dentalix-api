@@ -232,6 +232,9 @@ model Tenant {
   // DX-566: controles postoperatorios y sus intentos de llamada.
   postOpChecks                            PostOpCheck[]
   postOpCheckAttempts                     PostOpCheckAttempt[]
+  // DX-561: seguimiento automático de presupuestos (ajustes y avisos).
+  quoteFollowUpSettings                   LocationQuoteFollowUpSettings[]
+  quoteFollowUpMessages                   QuoteFollowUpMessage[]
   // DX-285: cargos del caso en el plan y alineadores.
   orthoCaseCharges                        OrthoCaseCharge[]
   orthoAlignerSeries                      OrthoAlignerSeries[]
@@ -499,6 +502,9 @@ model User {
   externalOrderCopyLinksCreated     ExternalOrderCopyLink[]
   signatureRequestsProfessional     SignatureRequest[]               @relation("SignatureRequestProfessional")
   signatureRequestsRevoked          SignatureRequest[]               @relation("SignatureRequestRevokedBy")
+  // DX-561: quién cambió los ajustes del seguimiento y quién lo pausó.
+  quoteFollowUpSettingsUpdated      LocationQuoteFollowUpSettings[]
+  treatmentPlansFollowUpPaused      TreatmentPlan[]                  @relation("TreatmentPlanFollowUpPausedBy")
   consentCountersignatures          PatientConsentCountersignature[]
   // DX-016: reserva online.
   onlineBookingSettingsUpdated      OnlineBookingSettings[]          @relation("OnlineBookingSettingsUpdatedBy")
@@ -650,6 +656,9 @@ model Location {
   waitlistEntries            AppointmentWaitlistEntry[]
   waitlistOffers             WaitlistOffer[]
   reminderSettings           LocationReminderSettings[]
+  // DX-561: ajustes y avisos del seguimiento automático de presupuestos.
+  quoteFollowUpSettings      LocationQuoteFollowUpSettings[]
+  quoteFollowUpMessages      QuoteFollowUpMessage[]
   paymentReceipts            PaymentReceipt[]
   collectionNotes            CollectionNote[]
   paymentPromises            PaymentPromise[]
@@ -663,11 +672,11 @@ model Location {
   // DX-456: copias de la historia clínica generadas en la sede.
   clinicalRecordCopies       ClinicalRecordCopy[]
   // DX-204: sede donde se dio el descuento de un ítem de plan.
-  planItemDiscounts          TreatmentPlanItem[]         @relation("TreatmentPlanItemDiscountLocation")
+  planItemDiscounts          TreatmentPlanItem[]             @relation("TreatmentPlanItemDiscountLocation")
   // DX-105: ítems de plan cuyo precio se resolvió con esta sede.
-  planItemPricings           TreatmentPlanItem[]         @relation("TreatmentPlanItemPricingLocation")
+  planItemPricings           TreatmentPlanItem[]             @relation("TreatmentPlanItemPricingLocation")
   // DX-050: ítems de plan realizados en esta sede.
-  planItemsPerformed         TreatmentPlanItem[]         @relation("TreatmentPlanItemPerformedLocation")
+  planItemsPerformed         TreatmentPlanItem[]             @relation("TreatmentPlanItemPerformedLocation")
   // DX-027: cajas por turno de la sede y sus ajustes.
   cashSessions               CashSession[]
   cashAdjustments            CashSessionAdjustment[]
@@ -699,9 +708,9 @@ model Location {
   // DX-339: última copia nocturna de la agenda de contingencia (1:1).
   contingencyAgendaSnapshot  ContingencyAgendaSnapshot?
   // GLOBAL-G1: moneda de la sede (locations_currency_fkey; admite NULL en fase 1).
-  currencyRef                Currency?                   @relation(fields: [currency], references: [code], onDelete: Restrict, map: "locations_currency_fkey")
+  currencyRef                Currency?                       @relation(fields: [currency], references: [code], onDelete: Restrict, map: "locations_currency_fkey")
   // DX-312: país de la sede (locations_country_code_fkey).
-  countryRef                 Country                     @relation(fields: [country], references: [code], onDelete: Restrict, map: "locations_country_code_fkey")
+  countryRef                 Country                         @relation(fields: [country], references: [code], onDelete: Restrict, map: "locations_country_code_fkey")
 
   // Destino de las FK compuestas (tenantId, locationId) de citas, pagos e
   // inventario: la sede tiene que ser del MISMO tenant (SEC-004).
@@ -991,6 +1000,8 @@ model Patient {
   dentalLabOrders             DentalLabOrder[]
   // DX-566: controles postoperatorios.
   postOpChecks                PostOpCheck[]
+  // DX-561: avisos del seguimiento automático de presupuestos.
+  quoteFollowUpMessages       QuoteFollowUpMessage[]
   // DX-016: reserva online (solicitudes y códigos).
   onlineBookingRequests       OnlineBookingRequest[]
   onlineBookingVerifications  OnlineBookingVerification[]
@@ -2286,23 +2297,23 @@ model TreatmentPlan {
   // Alternativas A/B (DX-040). `optionGroupId` es el id del plan que abrió el
   // grupo (ese plan apunta a sí mismo); null = plan suelto. `optionLabel`
   // ("Opción A: implante") distingue las opciones ante el paciente.
-  optionGroupId       String?                       @db.Uuid
-  optionLabel         String?
+  optionGroupId           String?                       @db.Uuid
+  optionLabel             String?
   // Presentado al paciente: cuándo y en qué sede (la del request o la
   // principal). La lista de presupuestos por seguir filtra por esa sede.
-  presentedAt         DateTime?
-  presentedLocationId String?                       @db.Uuid
+  presentedAt             DateTime?
+  presentedLocationId     String?                       @db.Uuid
   // Rechazado: cuándo, por qué (catálogo) y la nota (obligatoria con OTHER).
-  rejectedAt          DateTime?
-  rejectionReason     TreatmentPlanRejectionReason?
-  rejectionNote       String?
+  rejectedAt              DateTime?
+  rejectionReason         TreatmentPlanRejectionReason?
+  rejectionNote           String?
   // DX-379: validez del presupuesto, días civiles de la sede. Se fijan al
   // presentar (siempre) o al imprimir por primera vez (solo si están vacías);
   // editar ítems no las mueve. Las dos o ninguna (CHECK) y vence después de
   // emitirse. NULL = plan anterior a DX-379 o borrador nunca impreso: nunca
   // vencido, y su presupuesto se compone como hoy (hoy + ajuste).
-  quoteIssuedOn       DateTime?                     @db.Date
-  quoteValidUntil     DateTime?                     @db.Date
+  quoteIssuedOn           DateTime?                     @db.Date
+  quoteValidUntil         DateTime?                     @db.Date
   /// DX-417: el plan cuya aceptación PARCIAL dejó este presupuesto pendiente
   /// (con los ítems no aceptados, movidos con su mismo id). Se escribe al
   /// crearlo y no cambia (trigger treatment_plans_split_from_immutable).
@@ -2310,7 +2321,12 @@ model TreatmentPlan {
   /// treatment_plans_split_from_key ("tenantId", "splitFromPlanId") WHERE
   /// "splitFromPlanId" IS NOT NULL (lado hijo de la FK) y CHECK
   /// treatment_plans_split_from_check (no apunta a sí mismo).
-  splitFromPlanId     String?                       @db.Uuid
+  splitFromPlanId         String?                       @db.Uuid
+  /// DX-561: seguimiento automático pausado (se escribe en todos los planes
+  /// del grupo de opciones). Los dos o ninguno (CHECK
+  /// treatment_plans_quote_follow_up_pause_check).
+  quoteFollowUpPausedAt   DateTime?
+  quoteFollowUpPausedById String?                       @db.Uuid
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
@@ -2355,9 +2371,12 @@ model TreatmentPlan {
   creditEntries      PatientCreditEntry[]    @relation("CreditEntryPlan")
 
   // DX-190: casos de ortodoncia ligados al plan (cobro: DX-285).
-  orthoCases   OrthoCase[]
+  orthoCases            OrthoCase[]
   // DX-569: enlace de pago y reporte del paciente.
-  paymentLinks PaymentLink[]
+  paymentLinks          PaymentLink[]
+  // DX-561: quién pausó el seguimiento y los avisos del grupo (en el plan raíz).
+  quoteFollowUpPausedBy User?                  @relation("TreatmentPlanFollowUpPausedBy", fields: [quoteFollowUpPausedById], references: [id], onDelete: Restrict, map: "treatment_plans_quote_follow_up_paused_by_fkey")
+  quoteFollowUpMessages QuoteFollowUpMessage[]
 
   @@unique([tenantId, id], map: "treatment_plans_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "treatment_plans_tenant_id_patient_key")
@@ -4130,6 +4149,12 @@ enum SignatureRequestType {
   BUDGET
 }
 
+/// DX-561: quién creó la solicitud: la clínica o el seguimiento automático.
+enum SignatureRequestOrigin {
+  STAFF
+  FOLLOW_UP
+}
+
 enum SignatureRequestChannel {
   EMAIL
 }
@@ -4176,7 +4201,14 @@ model SignatureRequest {
   signedAt           DateTime?
   revokedAt          DateTime?
   revokedById        String?                 @db.Uuid
-  createdById        String                  @db.Uuid
+  /// DX-561: anulado por el seguimiento automático (sin usuario) al enviar un
+  /// enlace nuevo del mismo plan. CHECK signature_requests_revoked_check:
+  /// anulado ⇔ exactamente uno de revokedById o revokedByFollowUp.
+  revokedByFollowUp  Boolean                 @default(false)
+  /// NULL solo en los de origen FOLLOW_UP (CHECK signature_requests_origin_check).
+  createdById        String?                 @db.Uuid
+  /// DX-561: STAFF (la clínica) o FOLLOW_UP (el seguimiento, solo BUDGET).
+  origin             SignatureRequestOrigin  @default(STAFF)
   createdAt          DateTime                @default(now())
   updatedAt          DateTime                @updatedAt
   /// DX-415 (BUDGET): la foto exacta del presupuesto enviado (plan-quote.ts)
@@ -4190,7 +4222,7 @@ model SignatureRequest {
   template         ConsentTemplate?         @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_template_fkey")
   treatmentPlan    TreatmentPlan?           @relation(fields: [tenantId, treatmentPlanId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "signature_requests_plan_fkey")
   professional     User                     @relation("SignatureRequestProfessional", fields: [professionalUserId], references: [id], onDelete: Restrict, map: "signature_requests_professional_fkey")
-  createdBy        User                     @relation("SignatureRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "signature_requests_created_by_fkey")
+  createdBy        User?                    @relation("SignatureRequestCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "signature_requests_created_by_fkey")
   revokedBy        User?                    @relation("SignatureRequestRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "signature_requests_revoked_by_fkey")
   consent          PatientConsent?
   budgetAcceptance TreatmentPlanAcceptance?
@@ -4836,6 +4868,8 @@ enum EmailTemplate {
   EXTERNAL_ORDER_COPY       @map("external-order-copy")
   // DX-568: resumen semanal para el dueño.
   WEEKLY_DIGEST             @map("weekly-digest")
+  // DX-561: aviso de seguimiento de un presupuesto presentado.
+  QUOTE_FOLLOW_UP           @map("quote-follow-up")
   // DX-016: código de la reserva online y acuse de la reserva o solicitud.
   ONLINE_BOOKING_CODE       @map("online-booking-code")
   ONLINE_BOOKING_RECEIVED   @map("online-booking-received")
@@ -9292,6 +9326,95 @@ model PostOpCheckAttempt {
   @@index([tenantId, checkId, at], map: "post_op_check_attempts_check_idx")
   @@index([byId], map: "post_op_check_attempts_by_idx")
   @@map("post_op_check_attempts")
+}
+
+/// DX-561: seguimiento automático de presupuestos presentados, por sede. Sin
+/// fila = apagado. Días de cada aviso tras el día civil de la presentación
+/// (1–3, estrictamente crecientes, 1–90) y franja horaria local [desde, hasta)
+/// (CHECK). Sin DELETE para la app.
+model LocationQuoteFollowUpSettings {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  locationId    String   @db.Uuid
+  enabled       Boolean  @default(false)
+  offsetsDays   Int[]
+  sendFromHour  Int
+  sendUntilHour Int
+  updatedById   String?  @db.Uuid
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location  Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "location_quote_follow_up_settings_location_fkey")
+  updatedBy User?    @relation(fields: [updatedById], references: [id], onDelete: Restrict, map: "location_quote_follow_up_settings_updated_by_fkey")
+
+  @@unique([tenantId, locationId], map: "location_quote_follow_up_settings_tenant_location_key")
+  // PARCIAL, no declarable en Prisma:
+  //   location_quote_follow_up_settings_updated_by_idx ("updatedById") WHERE "updatedById" IS NOT NULL
+  @@map("location_quote_follow_up_settings")
+}
+
+enum QuoteFollowUpStatus {
+  SENT
+  SKIPPED
+}
+
+/// DX-561: por qué un paso del seguimiento no se envió.
+enum QuoteFollowUpReason {
+  /// Había un paso posterior ya vencido: se manda solo el último.
+  SUPERSEDED
+  /// Vencido hace más de 7 días sin enviarse.
+  TOO_LATE
+  STOPPED_ACCEPTED
+  STOPPED_REJECTED
+  STOPPED_SCHEDULED
+  /// El presupuesto venció (quoteValidUntil en la zona de la sede).
+  EXPIRED
+  OPTED_OUT
+  CHANNEL_NONE
+  CHANNEL_WHATSAPP
+  NO_EMAIL
+  NO_CONSENT
+  NO_LINK_HOST
+  NO_PROFESSIONAL
+}
+
+/// DX-561: un paso del seguimiento de una presentación (grupo de opciones):
+/// enviado (con las solicitudes de firma de cada opción y el email) u omitido
+/// con su motivo. UNIQUE (tenantId, groupId, step). Inmutable (trigger
+/// dx_quote_follow_up_messages_guard; la fusión solo reasigna el paciente);
+/// sin UPDATE ni DELETE para la app.
+model QuoteFollowUpMessage {
+  id                   String               @id @db.Uuid
+  tenantId             String               @db.Uuid
+  /// coalesce(optionGroupId, id) del plan: el plan raíz del grupo.
+  groupId              String               @db.Uuid
+  patientId            String               @db.Uuid
+  /// Sede de la presentación (la de sus ajustes y su zona).
+  locationId           String               @db.Uuid
+  step                 Int                  @db.SmallInt
+  status               QuoteFollowUpStatus
+  reason               QuoteFollowUpReason?
+  /// Opciones enviadas (en el orden de signatureRequestIds) u omitidas.
+  planIds              String[]             @default([]) @db.Uuid
+  signatureRequestIds  String[]             @default([]) @db.Uuid
+  recipientMasked      String?
+  language             String?
+  languageFallbackFrom String?
+  emailOutboxId        String?              @db.Uuid
+  sentAt               DateTime?
+  decidedAt            DateTime             @default(now())
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient  Patient       @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "quote_follow_up_messages_patient_fkey")
+  group    TreatmentPlan @relation(fields: [tenantId, groupId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "quote_follow_up_messages_group_fkey")
+  location Location      @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "quote_follow_up_messages_location_fkey")
+
+  @@unique([tenantId, groupId, step], map: "quote_follow_up_messages_group_step_key")
+  @@index([tenantId, locationId, decidedAt], map: "quote_follow_up_messages_location_idx")
+  @@index([tenantId, patientId], map: "quote_follow_up_messages_patient_idx")
+  @@index([tenantId, groupId, patientId], map: "quote_follow_up_messages_group_idx")
+  @@map("quote_follow_up_messages")
 }
 
 // ---------------------------------------------------------------------------

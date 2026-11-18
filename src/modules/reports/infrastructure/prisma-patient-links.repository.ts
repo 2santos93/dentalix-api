@@ -39,7 +39,8 @@ interface AggregateRow {
  *  - CONSENT_SIGNATURE / BUDGET_SIGNATURE — `signature_requests` por `type`:
  *    enviado `createdAt`; sede `locationId` (desde la que se envía); abierto
  *    `openedAt`, `verifiedAt` o `signedAt`; completado `signedAt`; anulado
- *    `revokedAt`.
+ *    `revokedAt`. Solo los de origen STAFF (DX-561: los del seguimiento
+ *    automático tienen su informe, `GET /reports/quote-follow-up`).
  *  - APPOINTMENT_CONFIRMATION — `appointment_confirmations`: enviado
  *    `createdAt`; sede la de la CITA; completado `respondedAt` (confirmar,
  *    cancelar o «llámenme»). No guarda la apertura.
@@ -157,6 +158,9 @@ export class PrismaPatientLinksRepository implements PatientLinksRepository {
                     AND s."expiresAt" <= ${now})
               FROM "signature_requests" s
              WHERE s."tenantId" = ${t}
+               -- DX-561: solo los que envió la clínica; los del seguimiento
+               -- automático los mide su propio informe.
+               AND s."origin" = 'STAFF'
                AND ${inPeriod(Prisma.sql`s."locationId"`, Prisma.sql`s."createdAt"`, branches)}
             UNION ALL
             SELECT 'APPOINTMENT_CONFIRMATION', a."locationId", c."createdAt",

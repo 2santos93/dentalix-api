@@ -38,6 +38,7 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'payment-report-rejected': EmailTemplate.PAYMENT_REPORT_REJECTED,
   'external-order-copy': EmailTemplate.EXTERNAL_ORDER_COPY,
   'weekly-digest': EmailTemplate.WEEKLY_DIGEST,
+  'quote-follow-up': EmailTemplate.QUOTE_FOLLOW_UP,
   'online-booking-code': EmailTemplate.ONLINE_BOOKING_CODE,
   'online-booking-received': EmailTemplate.ONLINE_BOOKING_RECEIVED,
   'mfa-notice': EmailTemplate.MFA_NOTICE,

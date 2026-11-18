@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   PLAN_OPTIONS_REPOSITORY,
+  type PendingFollowUpState,
   type PlanOptionsRepository,
 } from '../../domain/ports/plan-options-repository.port';
 import { daysSince } from '../../domain/plan-options';
@@ -39,6 +40,8 @@ export interface PendingFollowUpItem {
   currency: string;
   total: number;
   itemCount: number;
+  /** DX-561: último aviso del seguimiento automático del grupo y su pausa. */
+  followUp: PendingFollowUpState;
 }
 
 export interface PendingFollowUpPage {
@@ -117,6 +120,7 @@ export class ListPendingFollowUpUseCase {
         currency: row.currency,
         total: row.total,
         itemCount: row.itemCount,
+        followUp: row.followUp,
       })),
       total,
       page,

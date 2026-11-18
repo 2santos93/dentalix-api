@@ -93,6 +93,13 @@ export const ALLOWED: readonly Allowed[] = [
       'tasa de enlaces del paciente (parte ÷ enviados) en % con 1 decimal (DX-424), no un importe',
   },
   {
+    file: 'src/modules/quote-follow-up/domain/quote-follow-up-report.ts',
+    text: 'Math.round((part / whole) * 1000) / 10',
+    fn: 'function percent',
+    reason:
+      'tasas de apertura y de aceptación del seguimiento automático (avisos ÷ enviados) en % con 1 decimal (DX-561), no un importe',
+  },
+  {
     file: 'src/modules/reports/domain/quote-funnel.ts',
     text: 'Math.round(value * 10) / 10',
     fn: 'const round1',

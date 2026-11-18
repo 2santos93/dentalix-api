@@ -1,7 +1,7 @@
 -- DX-016: la reserva online escribe sin usuario (actor público, origen
 -- ONLINE_BOOKING): código enviado/verificado/bloqueado, solicitud o reserva
 -- creada, y la ficha, el consentimiento y la cita que crea. El CHECK de actor
--- de audit_events es la UNIÓN del de main (20261229090300, DX-572) y esas
+-- de audit_events es la UNIÓN del de main (20270107140200, DX-561) y esas
 -- escrituras, y solo ellas.
 --
 -- Más permisivo (NOT VALID; su VALIDATE va en 20270109090500, molde de
@@ -184,6 +184,16 @@ ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
         AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
         AND (("action" = 'VIEW' AND "metadata" ->> 'reason' = 'EXTERNAL_ORDER_COPY_OPENED')
           OR ("action" = 'EXPORT' AND "metadata" ->> 'reason' = 'EXTERNAL_ORDER_COPY_DOWNLOADED'))) IS TRUE
+    -- DX-561: el seguimiento automático de presupuestos (trabajo de la cola,
+    -- sin usuario) envía al paciente un enlace de aceptación nuevo por opción.
+    -- Solo ids, el paso y el motivo: ni el token, ni la URL, ni importes.
+    OR ("action" = 'SEND'
+        AND "resourceType" = 'SIGNATURE_REQUEST'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'JOB'
+        AND "metadata" ->> 'reason' = 'QUOTE_FOLLOW_UP_SENT') IS TRUE
     -- DX-016: la página pública de reserva online (sin sesión): el código
     -- del email enviado, verificado o bloqueado; la solicitud o reserva
     -- creada; y, en la misma transacción, la ficha nueva del paciente, su

@@ -71,9 +71,12 @@ export function patientLinkSeeding(raw: PrismaClient) {
       openedAt?: Date;
       signedAt?: Date;
       revokedAt?: Date;
+      /** DX-561: un enlace del seguimiento automático (sin usuario). */
+      origin?: 'STAFF' | 'FOLLOW_UP';
     },
   ): Promise<void> {
     const patientId = await c.seed.patient(`firma-${randomUUID()}`);
+    const followUp = input.origin === 'FOLLOW_UP';
     const type = input.type ?? 'CONSENT';
     const budget =
       type === 'BUDGET'
@@ -114,8 +117,10 @@ export function patientLinkSeeding(raw: PrismaClient) {
           verifiedAt: input.signedAt ?? null,
           signedAt: input.signedAt ?? null,
           revokedAt: input.revokedAt ?? null,
-          revokedById: input.revokedAt ? c.userId : null,
-          createdById: c.userId,
+          revokedById: input.revokedAt && !followUp ? c.userId : null,
+          revokedByFollowUp: Boolean(input.revokedAt && followUp),
+          createdById: followUp ? null : c.userId,
+          origin: input.origin ?? 'STAFF',
         },
       }),
     );

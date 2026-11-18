@@ -1,9 +1,9 @@
 -- DX-016: la lista cerrada de la fusión de pacientes (DX-266) con las dos
 -- tablas nuevas de la reserva online que referencian a patients:
 -- online_booking_requests.patientId y online_booking_verifications.patientId.
--- Es la de 20270105090200 (DX-566) + esas dos, en orden alfabético.
+-- Es la de 20270107140100 (DX-561) + esas dos, en orden alfabético.
 --
--- Vuelta atrás: recrear la función con la definición de 20270105090200.
+-- Vuelta atrás: recrear la función con la definición de 20270107140100.
 
 CREATE OR REPLACE FUNCTION public.dx_patient_merge_tables()
 RETURNS text[]
@@ -64,6 +64,7 @@ AS $$
     'post_op_instruction_deliveries.patientId',
     'prescription_copy_links.patientId',
     'prescriptions.patientId',
+    'quote_follow_up_messages.patientId',
     'recall_contacts.patientId',
     'reminder_opt_out_links.patientId',
     'reminder_opt_out_match_warnings.patientId',

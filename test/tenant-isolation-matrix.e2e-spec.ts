@@ -793,6 +793,27 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
       expiresAt: new Date(Date.now() + 60 * 86_400_000),
     },
   });
+  // DX-561: seguimiento automático en la sede nueva de A (apagado) y un paso
+  // registrado de su plan (lo crea el trabajo; aquí, por `raw`).
+  await api(app, a, 'put', `/quote-follow-up-settings/${location.id}`, {
+    enabled: false,
+    offsetsDays: [3, 10, 21],
+    sendFromHour: 9,
+    sendUntilHour: 19,
+  }).expect(200);
+  await raw.quoteFollowUpMessage.create({
+    data: {
+      id: randomUUID(),
+      tenantId: a.tenantId,
+      groupId: plan.id,
+      patientId,
+      locationId: location.id,
+      step: 1,
+      status: 'SKIPPED',
+      reason: 'NO_EMAIL',
+      planIds: [plan.id],
+    },
+  });
   return {
     recallTypeId: recallType.id,
     patientId,
@@ -1175,6 +1196,9 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'weekly_digest_recipients',
       'weekly_digest_runs',
       'weekly_digest_deliveries',
+      // DX-561: ajustes del seguimiento y un paso registrado.
+      'location_quote_follow_up_settings',
+      'quote_follow_up_messages',
       // La siembra de A por la API ya deja eventos de auditoría (DX-009).
       'audit_events',
     ]) {
@@ -1478,6 +1502,20 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       body: () => ({ enabled: false, leadHours: [] }),
       status: 404,
     },
+    // DX-561: seguimiento automático de presupuestos por sede.
+    {
+      name: 'PUT /quote-follow-up-settings/:locationId',
+      verb: 'put',
+      path: () => `/quote-follow-up-settings/${a.locationId}`,
+      body: () => ({
+        enabled: true,
+        offsetsDays: [1],
+        sendFromHour: 0,
+        sendUntilHour: 24,
+      }),
+      status: 404,
+      message: 'Sede no encontrada',
+    },
     // --- dental-catalog ---
     {
       name: 'PATCH /catalog/items/:id',
@@ -1661,6 +1699,21 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       path: () => `/treatment-plans/${a.planId}/reject`,
       body: () => ({ reason: 'PRICE', note: 'Hackeado' }),
       status: 404,
+    },
+    // DX-561: pausar o reanudar el seguimiento del plan de A.
+    {
+      name: 'POST /treatment-plans/:id/follow-up/pause',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.planId}/follow-up/pause`,
+      status: 404,
+      message: 'Plan de tratamiento no encontrado',
+    },
+    {
+      name: 'POST /treatment-plans/:id/follow-up/resume',
+      verb: 'post',
+      path: () => `/treatment-plans/${a.planId}/follow-up/resume`,
+      status: 404,
+      message: 'Plan de tratamiento no encontrado',
     },
     {
       name: 'POST /treatment-plans/:id/alternatives',
@@ -3068,6 +3121,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           : []),
       ];
     }),
+    // DX-561: efectividad del seguimiento. Una sede de A es 403 (el mismo
+    // rechazo que una sede no permitida).
+    {
+      name: 'GET /reports/quote-follow-up ?locationId de A',
+      verb: 'get',
+      path: () =>
+        `/reports/quote-follow-up?from=${day(-30)}&to=${day(0)}&locationId=${a.locationId}`,
+      queryIds: ['locationId'],
+      status: 403,
+      message: 'No tienes acceso a esta sede.',
+    },
     // DX-558: embudo de presupuestos (agregado, CSV y detalle). Una sede de
     // A es 403 (el mismo rechazo que una sede no permitida); el profesional
     // de A da un embudo vacío.

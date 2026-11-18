@@ -99,6 +99,8 @@ export const MERGE_TABLE_CATEGORY: Record<string, MergeCategory> = {
   treatment_plan_items: 'treatmentPlans',
   treatment_plan_acceptances: 'treatmentPlans',
   treatment_plan_repricings: 'treatmentPlans',
+  // DX-561: avisos del seguimiento automático de presupuestos.
+  quote_follow_up_messages: 'treatmentPlans',
   payments: 'payments',
   payment_plans: 'payments',
   payment_links: 'payments',
