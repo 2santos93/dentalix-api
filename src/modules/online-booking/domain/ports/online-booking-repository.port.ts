@@ -156,12 +156,31 @@ export interface OnlineBookingRepository {
     afterInsert?: (tx: Prisma.TransactionClient) => Promise<void>,
   ): Promise<void>;
   findVerification(id: string): Promise<VerificationRow | null>;
-  /** Un fallo más (atómico); bloquea al llegar al tope. Devuelve si bloqueó. */
-  recordFailedAttempt(
+  /**
+   * Cuenta un intento ANTES de comparar (atómico): devuelve la fila solo si
+   * seguía viva (sin verificar, sin bloquear, sin caducar y bajo el tope).
+   */
+  claimAttempt(
+    id: string,
+    maxAttempts: number,
+    now: Date,
+  ): Promise<VerificationRow | null>;
+  /** Bloquea (y audita) si el intento contado llegó al tope. */
+  lockIfExhausted(
     row: VerificationRow,
     maxAttempts: number,
     meta: AuditRequestMeta,
-  ): Promise<{ locked: boolean }>;
+  ): Promise<boolean>;
+  /**
+   * Tras responder: liga la verificación al paciente que casó, con el HMAC
+   * del código real, y audita el envío. `false` si ya no estaba libre.
+   */
+  attachPatient(
+    id: string,
+    patientId: string,
+    codeHmac: string,
+    meta: AuditRequestMeta,
+  ): Promise<boolean>;
   /** Gasta el código y abre la sesión (solo si sigue sin usar). */
   markVerified(
     row: VerificationRow,

@@ -464,25 +464,41 @@ export class PrismaOnlineBookingRepository implements OnlineBookingRepository {
     );
   }
 
-  async recordFailedAttempt(
+  async claimAttempt(
+    id: string,
+    maxAttempts: number,
+    now: Date,
+  ): Promise<VerificationRow | null> {
+    // TOCTOU: el intento se cuenta ANTES de comparar y de forma atómica; solo
+    // se compara si la fila vuelve. N peticiones a la vez nunca hacen más de
+    // `maxAttempts` comparaciones.
+    const [row] = await this.prisma.runWithTenant(
+      (tx) =>
+        tx.$queryRaw<VerificationRow[]>`
+        UPDATE "online_booking_verifications"
+           SET "attempts" = "attempts" + 1, "updatedAt" = now()
+         WHERE "id" = ${id}::uuid
+           AND "verifiedAt" IS NULL AND "lockedAt" IS NULL
+           AND "attempts" < ${maxAttempts}
+           AND "codeExpiresAt" > ${now}
+        RETURNING "id", "patientId", "patientKind", "codeHmac", "codeExpiresAt",
+                  "attempts", "verifiedAt", "lockedAt"`,
+    );
+    return row ?? null;
+  }
+
+  async lockIfExhausted(
     row: VerificationRow,
     maxAttempts: number,
     meta: AuditRequestMeta,
-  ): Promise<{ locked: boolean }> {
+  ): Promise<boolean> {
+    if (row.attempts < maxAttempts) return false;
     return this.prisma.runWithTenant(async (tx) => {
-      // Atómico: dos fallos a la vez cuentan dos.
-      const [updated] = await tx.$queryRaw<
-        { attempts: number; lockedAt: Date | null }[]
-      >`
-        UPDATE "online_booking_verifications"
-           SET "attempts" = LEAST("attempts" + 1, ${maxAttempts}),
-               "lockedAt" = CASE WHEN "attempts" + 1 >= ${maxAttempts}
-                                 THEN COALESCE("lockedAt", now()) ELSE "lockedAt" END,
-               "updatedAt" = now()
-         WHERE "id" = ${row.id}::uuid AND "verifiedAt" IS NULL AND "lockedAt" IS NULL
-        RETURNING "attempts", "lockedAt"`;
-      const locked = updated?.lockedAt != null;
-      if (locked && row.patientId) {
+      const { count } = await tx.onlineBookingVerification.updateMany({
+        where: { id: row.id, verifiedAt: null, lockedAt: null },
+        data: { lockedAt: new Date() },
+      });
+      if (count > 0 && row.patientId) {
         await writeAuditEvent(
           tx,
           this.publicEvent(row.patientId, meta, {
@@ -493,7 +509,32 @@ export class PrismaOnlineBookingRepository implements OnlineBookingRepository {
           }),
         );
       }
-      return { locked };
+      return count > 0;
+    });
+  }
+
+  async attachPatient(
+    id: string,
+    patientId: string,
+    codeHmac: string,
+    meta: AuditRequestMeta,
+  ): Promise<boolean> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const { count } = await tx.onlineBookingVerification.updateMany({
+        where: { id, patientId: null, verifiedAt: null, lockedAt: null },
+        data: { patientId, codeHmac },
+      });
+      if (count === 0) return false;
+      await writeAuditEvent(
+        tx,
+        this.publicEvent(patientId, meta, {
+          action: 'SEND',
+          resourceType: 'ONLINE_BOOKING',
+          resourceId: id,
+          reason: ONLINE_BOOKING_AUDIT_REASONS.CODE_SENT,
+        }),
+      );
+      return true;
     });
   }
 

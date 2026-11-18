@@ -473,33 +473,81 @@ describe('Reserva online (e2e, DX-016)', () => {
     expect((again.body as { code: string }).code).toBe('ONLINE_SLOT_GONE');
   });
 
-  it('un «nuevo» parecido a una ficha no la duplica: queda como solicitud por revisar', async () => {
-    const [slot] = await slotsOn();
-    const res = await pub(clinic.host)
-      .book({
-        locationId,
-        appointmentTypeId: typeId,
-        start: slot.start,
-        newPatient: newPatient({
-          email: 'otro.email@example.com',
-          phone: '04145550199',
-        }),
-        formToken: await formToken(),
-      })
-      .expect(201);
-    expect((res.body as { status: string }).status).toBe('REQUESTED');
+  it('un «nuevo» parecido a una ficha responde igual que uno sin parecido (no revela quién es paciente) y queda marcado para fusionar', async () => {
+    // Directa (como está la clínica): mismo estado y misma forma.
+    const slots = await slotsOn();
+    const book = async (start: string, over: object) =>
+      pub(clinic.host)
+        .book({
+          locationId,
+          appointmentTypeId: typeId,
+          start,
+          newPatient: newPatient(over),
+          formToken: await formToken(),
+        })
+        .expect(201);
+    const lookalike = await book(slots[0].start, {
+      email: 'otro.email@example.com',
+      phone: '04145550199',
+    });
+    // Otro hueco que no se solape con el primero (60 min cada 30).
+    const next = slots.find(
+      (x) => new Date(x.start).getTime() >= new Date(slots[0].end).getTime(),
+    )!;
+    const stranger = await book(next.start, {
+      firstName: 'Carmen',
+      lastName: 'Briceño',
+      birthDate: '1975-11-30',
+      email: 'carmen.briceno@example.com',
+      phone: '04245550142',
+    });
+    const shape = (b: Record<string, unknown>) => ({
+      keys: Object.keys(b).sort(),
+      status: b.status,
+      hasManageUrl: typeof b.manageUrl === 'string',
+    });
+    expect(shape(lookalike.body as Record<string, unknown>)).toEqual(
+      shape(stranger.body as Record<string, unknown>),
+    );
+    // Se crea la ficha nueva (nunca se escribe a la de la ficha existente)
+    // y la reserva queda marcada para que recepción la fusione (DX-266).
     expect(
       await raw.patient.count({
         where: { tenantId: clinic.tenantId, lastName: 'Rodríguez' },
       }),
-    ).toBe(1);
-    const request = await raw.onlineBookingRequest.findFirstOrThrow({
+    ).toBe(2);
+    const marked = await raw.onlineBookingRequest.findFirstOrThrow({
+      where: {
+        tenantId: clinic.tenantId,
+        contactEmail: 'otro.email@example.com',
+      },
+    });
+    expect(marked).toMatchObject({ possibleDuplicate: true, status: 'BOOKED' });
+    expect(
+      mailer.sent.some(
+        (m) =>
+          m.to === 'luis.rodriguez@example.com' &&
+          /otro|04145550199/.test(m.text),
+      ),
+    ).toBe(false);
+    await mailer.waitFor('otro.email@example.com', /quedó reservada/);
+
+    // En modo solicitud, la reserva marcada queda pendiente para recepción.
+    await enable({ newPatientMode: 'REQUEST' });
+    const [later] = await slotsOn();
+    const requested = await book(later.start, {
+      email: 'tercer.email@example.com',
+      phone: '04165550177',
+    });
+    expect((requested.body as { status: string }).status).toBe('REQUESTED');
+    const pending = await raw.onlineBookingRequest.findFirstOrThrow({
       where: { tenantId: clinic.tenantId, status: 'PENDING' },
     });
-    expect(request).toMatchObject({
+    expect(pending).toMatchObject({
       possibleDuplicate: true,
-      contactEmail: 'otro.email@example.com',
+      contactEmail: 'tercer.email@example.com',
     });
+    await enable();
   });
 
   it('paciente existente: el código por email (sin revelar si existe), la sesión, la solicitud y recepción la acepta', async () => {

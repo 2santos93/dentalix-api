@@ -11,6 +11,7 @@ import {
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { ONLINE_BOOKING_CLOCK } from '../src/modules/online-booking/application/use-cases/public-booking.use-cases';
 import { OnlineSlotService } from '../src/modules/online-booking/application/online-slot.service';
+import * as bookingSecurity from '../src/modules/online-booking/domain/booking-security';
 
 // DX-016 contra Postgres real: (1) dos (o más) reservas del MISMO hueco a la
 // vez → solo una lo consigue, la BD lo arbitra (EXCLUDE por profesional) y
@@ -289,6 +290,68 @@ describe('Reserva online contra Postgres (int, DX-016)', () => {
         },
       }),
     ).toBe(1);
+  });
+
+  it('verificar el código: con 12 intentos a la vez nunca hay más de 5 comparaciones, y queda bloqueado', async () => {
+    const patient = await raw.patient.create({
+      data: {
+        tenantId: a.tenantId,
+        firstName: 'Rosa',
+        lastName: 'Paralela',
+        birthDate: new Date('1985-03-02T00:00:00Z'),
+        email: 'rosa.paralela@example.com',
+      },
+    });
+    const sent = await server()
+      .post('/api/v1/public/booking/verification')
+      .set('X-Tenant-Host', a.host)
+      .send({
+        firstName: 'Rosa',
+        lastName: 'Paralela',
+        birthDate: '1985-03-02',
+        email: 'rosa.paralela@example.com',
+        formToken: await formToken(a.host),
+      })
+      .expect(200);
+    const { verificationId } = sent.body as { verificationId: string };
+    // El código se liga a la ficha tras responder.
+    const deadline = Date.now() + 5000;
+    while (
+      (
+        await raw.onlineBookingVerification.findUniqueOrThrow({
+          where: { id: verificationId },
+        })
+      ).patientId !== patient.id
+    ) {
+      if (Date.now() > deadline) throw new Error('la verificación no se ligó');
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const compare = jest.spyOn(bookingSecurity, 'bookingCodeMatches');
+    try {
+      const results = await Promise.all(
+        Array.from({ length: 12 }, () =>
+          server()
+            .post(
+              `/api/v1/public/booking/verification/${verificationId}/verify`,
+            )
+            .set('X-Tenant-Host', a.host)
+            .send({ code: '000000' }),
+        ),
+      );
+      expect(compare.mock.calls.length).toBeGreaterThan(0);
+      expect(compare.mock.calls.length).toBeLessThanOrEqual(5);
+      // Ninguno abre sesión con un código inventado salvo que acierte por azar.
+      expect(
+        results.filter((r) => r.status === 200).length,
+      ).toBeLessThanOrEqual(1);
+    } finally {
+      compare.mockRestore();
+    }
+    const row = await raw.onlineBookingVerification.findUniqueOrThrow({
+      where: { id: verificationId },
+    });
+    expect(row.attempts).toBe(5);
+    if (!row.verifiedAt) expect(row.lockedAt).not.toBeNull();
   });
 
   it('RLS FORCE: desde la clínica B no se ve ni se escribe nada de la reserva online de A', async () => {

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
   UnprocessableEntityException,
@@ -459,6 +460,7 @@ export class ListPublicSlotsUseCase extends PublicBookingBase {
 @Injectable()
 export class RequestBookingCodeUseCase extends PublicBookingBase {
   private readonly codeKey: Buffer;
+  private readonly logger = new Logger(RequestBookingCodeUseCase.name);
 
   constructor(
     @Inject(ONLINE_BOOKING_REPOSITORY) repo: OnlineBookingRepository,
@@ -494,48 +496,75 @@ export class RequestBookingCodeUseCase extends PublicBookingBase {
       birthDate: cleanBirthDate(input.birthDate, now),
       email: cleanEmail(input.email),
     };
-    const matches = await this.repo.findExistingPatients(identity);
-    // Solo con UNA ficha que casa, y sin pasar el tope por hora, se envía.
-    let patientId: string | null = matches.length === 1 ? matches[0] : null;
-    if (
-      patientId &&
-      (await this.repo.countCodesSince(
-        patientId,
-        new Date(now.getTime() - 60 * 60_000),
-      )) >= BOOKING_CODES_PER_HOUR
-    ) {
-      patientId = null;
-    }
+    // Enumeración por tiempo: la respuesta hace SIEMPRE el mismo trabajo
+    // (una verificación sin paciente y con un código que nadie conoce). La
+    // búsqueda de la ficha y el envío del código van DESPUÉS de responder.
     const id = randomUUID();
-    const code = generateBookingCode();
     const expiresAt = new Date(
       now.getTime() + BOOKING_CODE_TTL_MINUTES * 60_000,
     );
     await this.repo.createVerification(
       {
         id,
-        patientId,
-        codeHmac: hmacBookingCode(this.codeKey, id, code),
+        patientId: null,
+        codeHmac: hmacBookingCode(this.codeKey, id, generateBookingCode()),
         codeExpiresAt: expiresAt,
       },
       meta,
     );
-    if (patientId) {
-      const { catalog } = await this.offer();
-      await this.email.sendCode({
-        tenantId: this.tenantId(),
-        to: identity.email,
-        referenceId: id,
-        firstName: identity.firstName,
-        clinicName: catalog.clinicName,
-        code,
-      });
-    }
+    const tenantId = this.tenantId();
+    setImmediate(() => {
+      void this.tenantContext.run(tenantId, () =>
+        this.deliver(id, identity, now, meta).catch((error: unknown) =>
+          this.logger.warn(
+            `No se pudo resolver el código de la reserva online ${id}: ${(error as Error).name}`,
+          ),
+        ),
+      );
+    });
     return {
       verificationId: id,
       expiresAt,
       message: ONLINE_BOOKING_MESSAGES.codeSent,
     };
+  }
+
+  /**
+   * Tras responder: si los datos casan con UNA ficha (y no pasó el tope por
+   * hora), se le liga la verificación con un código nuevo y se envía a ese
+   * email. Si no, la verificación sigue sin paciente: ningún código vale.
+   */
+  async deliver(
+    id: string,
+    identity: PatientIdentity,
+    now: Date,
+    meta: AuditRequestMeta,
+  ): Promise<void> {
+    const matches = await this.repo.findExistingPatients(identity);
+    if (matches.length !== 1) return;
+    const patientId = matches[0];
+    const recent = await this.repo.countCodesSince(
+      patientId,
+      new Date(now.getTime() - 60 * 60_000),
+    );
+    if (recent >= BOOKING_CODES_PER_HOUR) return;
+    const code = generateBookingCode();
+    const attached = await this.repo.attachPatient(
+      id,
+      patientId,
+      hmacBookingCode(this.codeKey, id, code),
+      meta,
+    );
+    if (!attached) return;
+    const catalog = await this.repo.catalog();
+    await this.email.sendCode({
+      tenantId: this.tenantId(),
+      to: identity.email,
+      referenceId: id,
+      firstName: identity.firstName,
+      clinicName: catalog.clinicName,
+      code,
+    });
   }
 }
 
@@ -568,22 +597,20 @@ export class VerifyBookingCodeUseCase extends PublicBookingBase {
     const invalid = () =>
       new BadRequestException(ONLINE_BOOKING_MESSAGES.codeInvalid);
     if (!isWellFormedBookingCode(code)) throw invalid();
-    const row = await this.repo.findVerification(verificationId);
     const now = this.clock();
-    if (
-      !row ||
-      row.verifiedAt !== null ||
-      row.lockedAt !== null ||
-      !row.codeExpiresAt ||
-      row.codeExpiresAt.getTime() <= now.getTime()
-    ) {
-      throw invalid();
-    }
+    // El intento se cuenta (atómico) ANTES de comparar: con N peticiones a la
+    // vez nunca hay más de BOOKING_CODE_MAX_ATTEMPTS comparaciones.
+    const row = await this.repo.claimAttempt(
+      verificationId,
+      BOOKING_CODE_MAX_ATTEMPTS,
+      now,
+    );
+    if (!row) throw invalid();
     if (
       !row.patientId ||
       !bookingCodeMatches(this.codeKey, row.id, code, row.codeHmac)
     ) {
-      await this.repo.recordFailedAttempt(row, BOOKING_CODE_MAX_ATTEMPTS, meta);
+      await this.repo.lockIfExhausted(row, BOOKING_CODE_MAX_ATTEMPTS, meta);
       throw invalid();
     }
     const sessionToken = generateSessionToken();
@@ -676,22 +703,19 @@ export class CreatePublicBookingUseCase extends PublicBookingBase {
       };
       contact = { email: newPatient.email, phone: newPatient.phone };
       patientKind = 'NEW';
-      // Una ficha parecida: no se crea otra; recepción comprueba.
-      const candidate = await this.repo.findDuplicateCandidate(newPatient);
-      if (candidate) {
-        patientId = candidate;
-        possibleDuplicate = true;
-        newPatient = null;
-      }
+      // Una ficha parecida: se crea la ficha nueva igualmente y la reserva
+      // queda marcada para que recepción la fusione (DX-266). La respuesta y
+      // el correo (a la dirección que escribió) son idénticos con o sin
+      // parecido: no revelan si esa persona ya es paciente.
+      possibleDuplicate =
+        (await this.repo.findDuplicateCandidate(newPatient)) !== null;
     }
 
     // El hueco tiene que salir del MISMO cálculo (su día, sus reglas).
     const slot = await this.findSlot(settings, choice, {
       start: input.start,
       patientKind,
-      // Con una ficha «parecida» no se miran sus citas: no se revela nada de
-      // otro paciente (la solicitud no crea cita).
-      patientId: possibleDuplicate ? null : patientId,
+      patientId,
       providerId: input.providerId,
       now,
     });
@@ -704,9 +728,7 @@ export class CreatePublicBookingUseCase extends PublicBookingBase {
       });
     }
     const provider = choice.providers.find((p) => p.id === slot.providerId)!;
-    const mode: OnlineBookingMode = possibleDuplicate
-      ? 'REQUEST'
-      : modeFor(settings, patientKind);
+    const mode: OnlineBookingMode = modeFor(settings, patientKind);
     const row = (pid: string): RequestRowInput => ({
       locationId: choice.location.id,
       providerId: slot.providerId,
