@@ -3769,3 +3769,70 @@ export const DEMO_POST_OP_CHECK = {
   afterDays: 1,
   patientIndex: 1,
 } as const;
+
+/**
+ * DX-556: prospectos de la demo (la bandeja comercial antes de ser paciente),
+ * en la sede principal y llevados por recepción. Uno nuevo, dos contactados
+ * (uno sin contacto desde hace 2 días ni próxima acción: sale en «Mi día»; el
+ * otro con la próxima acción mañana y una nota), uno perdido por precio y otro
+ * nuevo de Facebook. Teléfonos +58 que no son de ningún paciente de la demo.
+ * Solo datos comerciales: nunca datos de salud.
+ */
+export interface DemoLead {
+  fullName: string;
+  phone: string;
+  channel: 'WHATSAPP' | 'INSTAGRAM' | 'FACEBOOK' | 'PHONE' | 'REFERRAL';
+  interestReason: string;
+  stage: 'NEW' | 'CONTACTED' | 'LOST';
+  /** Horas desde el último contacto (solo CONTACTED). */
+  lastContactHoursAgo?: number;
+  /** Próxima acción a tantas horas de ahora. */
+  nextActionInHours?: number;
+  nextActionNote?: string;
+  lostReason?: string;
+  note?: string;
+}
+
+export const DEMO_LEADS: readonly DemoLead[] = [
+  {
+    fullName: 'Daniela Fuentes',
+    phone: '+58 416 555 0701',
+    channel: 'WHATSAPP',
+    interestReason: 'Ortodoncia',
+    stage: 'NEW',
+  },
+  {
+    fullName: 'Jesús Rangel',
+    phone: '+58 416 555 0702',
+    channel: 'INSTAGRAM',
+    interestReason: 'Blanqueamiento',
+    stage: 'CONTACTED',
+    lastContactHoursAgo: 48,
+  },
+  {
+    fullName: 'Mariana Colmenares',
+    phone: '+58 416 555 0703',
+    channel: 'PHONE',
+    interestReason: 'Implantes',
+    stage: 'CONTACTED',
+    lastContactHoursAgo: 3,
+    nextActionInHours: 24,
+    nextActionNote: 'Enviar el presupuesto en USD y confirmar horario',
+    note: 'Pidió el precio del implante y si se puede pagar en cuotas.',
+  },
+  {
+    fullName: 'Ricardo Peña',
+    phone: '+58 416 555 0704',
+    channel: 'REFERRAL',
+    interestReason: 'Limpieza',
+    stage: 'LOST',
+    lostReason: 'Precio',
+  },
+  {
+    fullName: 'Valentina Suárez',
+    phone: '+58 416 555 0705',
+    channel: 'FACEBOOK',
+    interestReason: 'Valoración general',
+    stage: 'NEW',
+  },
+];

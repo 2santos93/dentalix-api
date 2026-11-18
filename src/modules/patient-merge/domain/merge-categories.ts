@@ -121,4 +121,6 @@ export const MERGE_TABLE_CATEGORY: Record<string, MergeCategory> = {
   patient_majority_reviews: 'other',
   // DX-101: enlaces de acceso del paciente (citas, presupuestos y cuenta).
   patient_access_links: 'other',
+  // DX-556: prospectos convertidos en (o enlazados a) el paciente.
+  leads: 'other',
 };

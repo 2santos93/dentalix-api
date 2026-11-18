@@ -12,6 +12,7 @@ import type { OverdueAmount } from '../domain/work-queues';
 import { CountPaymentReportsUseCase } from '../../payment-links/application/use-cases/payment-reports.use-cases';
 import type { WorkQueueSources } from './work-queues-summary.use-case';
 import { PostOpChecksUseCases } from '../../post-op-checks/application/post-op-checks.use-cases';
+import { LeadsUseCases } from '../../leads/application/leads.use-cases';
 
 /** Lo exigible ya vencido de una moneda: la deuda menos las cuotas que aún no vencen. */
 export function overdueOf(buckets: {
@@ -40,6 +41,7 @@ export function workQueueSources(deps: {
   closingQueue: ClosingQueueUseCases;
   paymentReports: CountPaymentReportsUseCase;
   postOpChecks: PostOpChecksUseCases;
+  leads: LeadsUseCases;
   anamnesis: CountAnamnesisInboxUseCase;
   followUp: ListPendingFollowUpUseCase;
   visits: PlanVisitsService;
@@ -74,6 +76,11 @@ export function workQueueSources(deps: {
     // cabecera o las permitidas.
     POST_OP_CHECKS: async () => ({
       count: (await deps.postOpChecks.count({})).total,
+    }),
+    // GET /leads/count (DX-556): los «sin contactar hace más de 24 h», con la
+    // sede de la cabecera o las permitidas.
+    LEADS_UNCONTACTED: async () => ({
+      count: (await deps.leads.count({})).stale,
     }),
     // GET /treatment-plans/pending-follow-up/count.
     QUOTE_FOLLOW_UP: async () => ({
