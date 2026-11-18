@@ -129,6 +129,9 @@ function toDto(doc: PlanQuoteDocument): PlanQuoteDocumentDto {
   };
 }
 
+/** DX-101: el mismo presupuesto en el portal del paciente. */
+export const toPlanQuoteDocumentDto = toDto;
+
 // Presupuesto imprimible y aceptación firmada (DX-012). Sin @Patch ni @Delete
 // A PROPÓSITO: una aceptación firmada es inmutable (trigger de la base,
 // 20261016213000_treatment_plan_acceptances).

@@ -25,6 +25,11 @@ export interface AuditMetadata {
   /** DX-021-bis: sesiones que cerró endurecer la política de MFA (un recuento). */
   sessionsClosed?: number;
   /**
+   * DX-101: fallos de verificación de un enlace de acceso del paciente,
+   * agregados (0..5) en el acierto o en el bloqueo. Nunca la fecha introducida.
+   */
+  failedAttempts?: number;
+  /**
    * DX-121: cita movida — hora y profesional antes y después. Solo instantes
    * ISO y uuids: ni paciente, ni motivo, ni notas.
    */
@@ -1082,6 +1087,8 @@ const LINK_KINDS_ADDED_LATER: readonly string[] = [
   'paymentLinks',
   // DX-572: la copia de una orden externa.
   'externalOrderCopies',
+  // DX-101: el enlace de acceso del paciente.
+  'patientAccessLinks',
 ];
 
 /** Exactamente los tipos de enlace, cada uno un natural acotado, o nada (DX-461). */
@@ -1657,6 +1664,14 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
     input.sessionsClosed >= 0
   ) {
     out.sessionsClosed = input.sessionsClosed;
+  }
+  if (
+    typeof input.failedAttempts === 'number' &&
+    Number.isInteger(input.failedAttempts) &&
+    input.failedAttempts >= 0 &&
+    input.failedAttempts <= 5
+  ) {
+    out.failedAttempts = input.failedAttempts;
   }
   const move = appointmentMove(input.move);
   if (move) out.move = move;

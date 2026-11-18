@@ -66,6 +66,11 @@
  *                  (enumeración de tokens).
  * - payment-link-token: las mismas rutas, por TOKEN (sin IP), como
  *                  copy-token. Variables: RATE_LIMIT_PAYMENT_LINK_TOKEN_*.
+ * - patient-access: el portal del paciente (DX-101: verificar la fecha de
+ *                  nacimiento, ver sus datos, confirmar una cita y salir),
+ *                  por IP. Los 5 fallos de fecha son aparte (BD y espejo).
+ * - patient-access-token: la verificación, por TOKEN (sin IP), como
+ *                  payment-link-token.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -133,6 +138,8 @@ export type RateLimitPolicy =
   | 'copy-token'
   | 'payment-link'
   | 'payment-link-token'
+  | 'patient-access'
+  | 'patient-access-token'
   | 'prescription-verify'
   | 'branding-host'
   | 'branding-miss';
@@ -174,6 +181,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'copy-token': { limit: 10, ttlMs: MINUTE },
   'payment-link': { limit: 20, ttlMs: MINUTE },
   'payment-link-token': { limit: 10, ttlMs: MINUTE },
+  'patient-access': { limit: 30, ttlMs: MINUTE },
+  'patient-access-token': { limit: 10, ttlMs: MINUTE },
   'prescription-verify': { limit: 30, ttlMs: MINUTE },
   'branding-host': { limit: 600, ttlMs: MINUTE },
   'branding-miss': { limit: 60, ttlMs: MINUTE },
@@ -228,6 +237,8 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'copy-token': rule('copy-token'),
     'payment-link': rule('payment-link'),
     'payment-link-token': rule('payment-link-token'),
+    'patient-access': rule('patient-access'),
+    'patient-access-token': rule('patient-access-token'),
     'prescription-verify': rule('prescription-verify'),
     'branding-host': rule('branding-host'),
     'branding-miss': rule('branding-miss'),

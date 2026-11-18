@@ -90,6 +90,7 @@ import { VerifiedDomainOriginsModule } from './shared/security/verified-domain-o
 import { SupportAccessesModule } from './modules/support-accesses/support-accesses.module';
 import { WorkQueuesModule } from './modules/work-queues/work-queues.module';
 import { PaymentLinksModule } from './modules/payment-links/payment-links.module';
+import { PatientAccessModule } from './modules/patient-access/patient-access.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { RecallModule } from './modules/recall/recall.module';
 import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
@@ -216,6 +217,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     WorkQueuesModule,
     // DX-569: el paciente reporta su pago por enlace.
     PaymentLinksModule,
+    // DX-101: estado de cuenta del paciente por enlace seguro.
+    PatientAccessModule,
     // DX-020: tarjeta «Pon en marcha tu clínica» del panel del ADMIN.
     OnboardingModule,
   ],

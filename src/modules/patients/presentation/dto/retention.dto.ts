@@ -193,6 +193,13 @@ export class LivePublicLinksDto {
   })
   externalOrderCopies!: number;
 
+  @ApiProperty({
+    minimum: 0,
+    description:
+      'Enlaces de acceso del paciente (citas, presupuestos y cuenta) sin revocar ni caducar (DX-101)',
+  })
+  patientAccessLinks!: number;
+
   @ApiProperty({ minimum: 0, description: 'Suma de todos los tipos' })
   total!: number;
 }

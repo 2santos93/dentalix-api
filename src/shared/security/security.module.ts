@@ -141,6 +141,17 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-101: el portal del paciente (verificar la fecha y sus datos), por IP
+    // y, la verificación, por token.
+    strict('patient-access'),
+    {
+      ...strict('patient-access-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
     // DX-467: verificar una receta por el código de su QR, por IP.
     strict('prescription-verify'),
     {

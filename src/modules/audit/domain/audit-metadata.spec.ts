@@ -1193,6 +1193,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     certificateCopies: 0,
     paymentLinks: 2,
     externalOrderCopies: 1,
+    patientAccessLinks: 1,
   };
 
   it('conserva el número de enlaces anulados por tipo', () => {
@@ -1208,17 +1209,34 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
     const {
       paymentLinks: _omit,
       externalOrderCopies: _e,
+      patientAccessLinks: _a,
       ...before
     } = revokedLinks;
     expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
-      revokedLinks: { ...before, paymentLinks: 0, externalOrderCopies: 0 },
+      revokedLinks: {
+        ...before,
+        paymentLinks: 0,
+        externalOrderCopies: 0,
+        patientAccessLinks: 0,
+      },
     });
   });
 
   it('DX-572: un evento anterior a las copias de las órdenes externas se lee con externalOrderCopies 0', () => {
-    const { externalOrderCopies: _omit, ...before } = revokedLinks;
+    const {
+      externalOrderCopies: _omit,
+      patientAccessLinks: _a,
+      ...before
+    } = revokedLinks;
     expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
-      revokedLinks: { ...before, externalOrderCopies: 0 },
+      revokedLinks: { ...before, externalOrderCopies: 0, patientAccessLinks: 0 },
+    });
+  });
+
+  it('DX-101: un evento anterior a los enlaces de acceso se lee con patientAccessLinks 0', () => {
+    const { patientAccessLinks: _omit, ...before } = revokedLinks;
+    expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
+      revokedLinks: { ...before, patientAccessLinks: 0 },
     });
   });
 
@@ -1228,6 +1246,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
       certificateCopies: _c,
       paymentLinks: _l,
       externalOrderCopies: _e,
+      patientAccessLinks: _a,
       ...before
     } = revokedLinks;
     expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
@@ -1237,6 +1256,7 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
         certificateCopies: 0,
         paymentLinks: 0,
         externalOrderCopies: 0,
+        patientAccessLinks: 0,
       },
     });
   });

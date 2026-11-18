@@ -12,6 +12,8 @@
  * - `certificateCopies`: copia de un certificado enviada y sin caducar (DX-306).
  * - `paymentLinks`: enlace de pago sin reporte (DX-569).
  * - `externalOrderCopies`: copia de una orden externa sin descargar (DX-572).
+ * - `patientAccessLinks`: enlace de acceso a citas, presupuestos y cuenta sin
+ *   revocar ni caducar (DX-101).
  *
  * Fuera a propósito (ver el informe de DX-461): la confirmación de cita y las
  * indicaciones postoperatorias (archivar exige no tener citas abiertas ni HC
@@ -28,6 +30,7 @@ export const LIVE_PUBLIC_LINK_KINDS = [
   'certificateCopies',
   'paymentLinks',
   'externalOrderCopies',
+  'patientAccessLinks',
 ] as const;
 
 export type LivePublicLinkKind = (typeof LIVE_PUBLIC_LINK_KINDS)[number];
@@ -44,6 +47,7 @@ export const NO_LIVE_PUBLIC_LINKS: LivePublicLinkCounts = {
   certificateCopies: 0,
   paymentLinks: 0,
   externalOrderCopies: 0,
+  patientAccessLinks: 0,
 };
 
 export function totalLivePublicLinks(counts: LivePublicLinkCounts): number {
