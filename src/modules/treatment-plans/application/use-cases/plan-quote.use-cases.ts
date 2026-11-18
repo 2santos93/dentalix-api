@@ -64,6 +64,7 @@ import {
   type NewPlanAcceptance,
   type PlanQuoteRepository,
   type PlanAcceptanceRemoteEvidence,
+  type PlanPresentation,
   type PlanQuoteSource,
 } from '../../domain/ports/plan-quote-repository.port';
 import {
@@ -90,6 +91,7 @@ import {
 } from '../../../../shared/money/currency-digits';
 import { toCents } from '../../../../shared/money/money';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { CLINIC_LANGUAGE } from '../../../../shared/i18n/patient-language';
 
 export type PlanQuoteClock = () => Date;
 export const PLAN_QUOTE_CLOCK = Symbol('PLAN_QUOTE_CLOCK');
@@ -151,6 +153,11 @@ export const INSTALLMENTS_WITH_PARTIAL_MESSAGE =
 /** El presupuesto para verlo o imprimirlo. */
 export interface PlanQuoteDocument extends QuoteContent {
   visitOrganization?: PlanQuoteSource['visitOrganization'];
+  /**
+   * DX-560: el texto para el paciente de cada ítem en su idioma, fuera del
+   * contenido sellado (no cambia el hash ni la versión).
+   */
+  presentation: PlanPresentation;
   planStatus: TreatmentPlanStatus;
   clinicLogoUrl: string | null;
   /** DX-354: región de la sede del documento; fuera del contenido firmado. */
@@ -350,6 +357,25 @@ export function composeQuoteContent(
 }
 
 /**
+ * DX-560: la presentación al paciente del plan leído. Sin ella (una lectura
+ * que no la compone), el nombre de cada ítem del presupuesto en español.
+ */
+export function planPresentationOf(source: PlanQuoteSource): PlanPresentation {
+  if (source.presentation) return source.presentation;
+  const visits = new Map(
+    (source.visitOrganization ?? []).map((v) => [v.itemId, v.visit]),
+  );
+  return {
+    language: CLINIC_LANGUAGE,
+    items: source.items.map((i) => ({
+      itemId: i.id,
+      visit: visits.get(i.id) ?? 1,
+      label: i.procedure,
+    })),
+  };
+}
+
+/**
  * Un plan aceptado se imprime con la FOTO firmada (lo que vio y firmó el
  * paciente), nunca con el plan vivo; `integrityOk` recalcula los dos hashes.
  * DX-502: una foto v4 lleva la moneda de cada precio de lista; a una v1/v2/v3
@@ -372,6 +398,7 @@ function toDocument(
         label: null,
         minDaysAfterPrevious: 0,
       })),
+    presentation: planPresentationOf(source),
     planStatus: source.plan.status,
     regional: source.regional,
   };
@@ -444,6 +471,10 @@ function sourceWithItems(
     visitOrganization: source.visitOrganization?.filter((v) =>
       keep.has(v.itemId),
     ),
+    presentation: source.presentation && {
+      ...source.presentation,
+      items: source.presentation.items.filter((i) => keep.has(i.itemId)),
+    },
   };
 }
 

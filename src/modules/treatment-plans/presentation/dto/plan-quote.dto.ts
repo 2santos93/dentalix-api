@@ -447,12 +447,47 @@ export class PlanQuoteVisitDto {
   @ApiProperty({ type: String, nullable: true }) label!: string | null;
   @ApiProperty() minDaysAfterPrevious!: number;
 }
+/** DX-560: un ítem tal como lo lee el paciente. */
+export class PlanPresentationItemDto {
+  @ApiProperty({ format: 'uuid' }) itemId!: string;
+  @ApiProperty() visit!: number;
+  @ApiProperty({
+    description:
+      'Texto para el paciente en su idioma: la descripción del catálogo (idioma exacto → base → es) o, sin ella, el nombre del catálogo en ese idioma (labelEn/labelPt si existe, si no labelEs). Nunca un código ni un id; sin catálogo, «Procedimiento».',
+    example: 'Limpieza profunda de las encías.',
+  })
+  label!: string;
+}
+
+/** DX-560: la presentación del plan al paciente, fuera del contenido firmado. */
+export class PlanPresentationDto {
+  @ApiProperty({
+    example: 'es',
+    description:
+      'Idioma del paciente (`patients.preferredLanguage`) o, sin él, `es`.',
+  })
+  language!: string;
+
+  @ApiProperty({
+    type: [PlanPresentationItemDto],
+    description: 'Un elemento por ítem del presupuesto, en su orden.',
+  })
+  items!: PlanPresentationItemDto[];
+}
+
 export class PlanQuoteDocumentDto {
   @ApiPropertyOptional({
     type: [PlanQuoteVisitDto],
     description: 'Organización clínica actual; separada del contenido firmado.',
   })
   visitOrganization?: PlanQuoteVisitDto[];
+
+  @ApiProperty({
+    type: PlanPresentationDto,
+    description:
+      'DX-560: texto para el paciente de cada ítem en su idioma, separado del contenido firmado (no cambia `contentHash`). Presentarlo no emite el presupuesto.',
+  })
+  presentation!: PlanPresentationDto;
 
   @ApiProperty({
     enum: [1, 2, 3, 4],

@@ -53,6 +53,11 @@ import { NO_EXPIRED_ACCEPTANCE } from '../../domain/expired-quote-acceptance';
 import { billableTotal } from '../../../payments/application/plan-balance-calculator';
 import { createPaymentPlanInTx } from '../../../payment-plans/infrastructure/repositories/prisma-payment-plan.repository';
 import { ACTIVE_PAYMENT_PLAN_MESSAGE } from '../../../payment-plans/application/use-cases/create-payment-plan.use-case';
+import { localizedTextMapFromJson } from '../../../../shared/i18n/localized-text';
+import {
+  patientProcedureLabel,
+  presentationLanguage,
+} from '../../../dental-catalog/domain/patient-description';
 
 const PROCEDURE_FALLBACK = 'Procedimiento';
 
@@ -660,6 +665,8 @@ export async function readPlanQuoteSource(
           docTypeLabel: true,
           docNumber: true,
           deletedAt: true,
+          // DX-560: el idioma de la presentación.
+          preferredLanguage: true,
         },
       },
       items: {
@@ -723,6 +730,8 @@ export async function readPlanQuoteSource(
         id: true,
         name: true,
         address: true,
+        // DX-560: la segunda moneda orientativa del enlace.
+        currency: true,
         ...DOCUMENT_REGIONAL_SELECT,
       },
     }),
@@ -743,11 +752,21 @@ export async function readPlanQuoteSource(
       : Promise.resolve(null),
     tx.dentalCatalogItem.findMany({
       where: { id: { in: plan.items.map((i) => i.catalogItemId) } },
-      select: { id: true, labelEs: true },
+      // DX-560: también la descripción y los nombres en otros idiomas, para
+      // el texto que lee el paciente.
+      select: {
+        id: true,
+        labelEs: true,
+        labelEn: true,
+        labelPt: true,
+        patientDescription: true,
+      },
     }),
     resolveLocationTimeZones(tx, tenantId, [locationId]),
   ]);
   const labels = new Map(catalog.map((c) => [c.id, c.labelEs]));
+  const catalogById = new Map(catalog.map((c) => [c.id, c]));
+  const patientLanguage = plan.patient.preferredLanguage;
   // DX-379 (C): el vencimiento se decide con el día de la sede de la
   // presentación (como `quoteExpired`, D-13) y su fecha se escribe con el
   // formato de esa misma sede; sin presentar, con los de esta. Tolerante: una
@@ -793,6 +812,27 @@ export async function readPlanQuoteSource(
       : documentRegional(location);
 
   return {
+    presentation: {
+      language: presentationLanguage(patientLanguage),
+      items: plan.items.map((i) => {
+        const entry = catalogById.get(i.catalogItemId);
+        return {
+          itemId: i.id,
+          visit: i.visit,
+          label: patientProcedureLabel(
+            entry
+              ? {
+                  ...entry,
+                  patientDescription: localizedTextMapFromJson(
+                    entry.patientDescription,
+                  ),
+                }
+              : null,
+            patientLanguage,
+          ),
+        };
+      }),
+    },
     visitOrganization: plan.items.map((i) => ({
       itemId: i.id,
       visit: i.visit,
@@ -850,6 +890,7 @@ export async function readPlanQuoteSource(
       name: location.name,
       address: location.address,
       timeZone: zoneOf(location.id),
+      currency: location.currency,
     },
     regional,
     professionalName: plan.createdById

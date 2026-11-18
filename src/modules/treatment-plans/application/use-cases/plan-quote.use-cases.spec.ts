@@ -81,6 +81,50 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
     expect(doc.contentHash).toBe(computeQuoteHash(doc));
   });
 
+  it('DX-560: la presentación al paciente va fuera del contenido sellado', async () => {
+    const plain = new InMemoryPlanQuoteRepository();
+    plain.add(quoteSource());
+    const before = await new GetPlanQuoteUseCase(
+      plain,
+      () => NOW,
+      names,
+    ).execute('patient-1', 'plan-1');
+    // Sin presentación compuesta: el nombre del presupuesto, en español.
+    expect(before.presentation).toEqual({
+      language: 'es',
+      items: before.items.map((i) => ({
+        itemId: i.id,
+        visit: 1,
+        label: i.procedure,
+      })),
+    });
+
+    const repo = new InMemoryPlanQuoteRepository();
+    const source = quoteSource();
+    const presentation = {
+      language: 'en',
+      items: source.items.map((i, index) => ({
+        itemId: i.id,
+        visit: index + 1,
+        label: `Patient text ${index + 1}`,
+      })),
+    };
+    Object.assign(source, { presentation });
+    repo.add(source);
+    const doc = await new GetPlanQuoteUseCase(repo, () => NOW, names).execute(
+      'patient-1',
+      'plan-1',
+    );
+    expect(doc.presentation).toEqual(presentation);
+    // Ni el hash ni la versión cambian con la presentación.
+    expect(doc.contentHash).toBe(before.contentHash);
+    expect(doc.version).toBe(before.version);
+    // La foto no lleva el texto para el paciente.
+    expect(JSON.stringify(composeQuoteContent(source, doc, {}))).not.toContain(
+      'Patient text',
+    );
+  });
+
   it('compone el presupuesto con la fecha de hoy en la zona de la sede y su hash', async () => {
     const { get } = setup();
     // 23:30 del 15 en la zona de la sede = 03:30 UTC del 16: el presupuesto es del 15.

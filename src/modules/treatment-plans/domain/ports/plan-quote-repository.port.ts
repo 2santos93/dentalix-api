@@ -72,6 +72,19 @@ export interface PlanAcceptanceRemoteEvidence {
 }
 
 /**
+ * DX-560: cómo se presenta el plan al paciente, FUERA del contenido sellado
+ * (como `visitOrganization`): el texto para el paciente de cada ítem en su
+ * idioma (la descripción del catálogo o, sin ella, el nombre del catálogo en
+ * ese idioma; nunca un código ni un id). Presentarlo no emite el presupuesto.
+ */
+export interface PlanPresentation {
+  /** Idioma del paciente (`patients.preferredLanguage`) o, sin él, `es`. */
+  language: string;
+  /** En el orden de los ítems del presupuesto. */
+  items: { itemId: string; visit: number; label: string }[];
+}
+
+/**
  * Todo lo que el presupuesto de un plan necesita, leído bajo la RLS de la
  * clínica en contexto. La sede es la del request (`X-Location-Id`) o, en la
  * vista consolidada, la principal.
@@ -83,6 +96,11 @@ export interface PlanQuoteSource {
     label: string | null;
     minDaysAfterPrevious: number;
   }[];
+  /**
+   * DX-560: la presentación al paciente. Sin ella (lecturas que no la
+   * componen), cada ítem lleva el nombre del presupuesto.
+   */
+  presentation?: PlanPresentation;
   plan: {
     id: string;
     patientId: string;
@@ -133,7 +151,11 @@ export interface PlanQuoteSource {
     /** DX-379: días de validez del ajuste de hoy (para un plan sin fechas guardadas). */
     quoteValidityDays: number;
   };
-  location: QuoteLocation & { timeZone: string };
+  /**
+   * DX-560: `currency`, la moneda de la sede (`locations.currency`, null en
+   * una sede sin configurar): la segunda moneda orientativa del enlace.
+   */
+  location: QuoteLocation & { timeZone: string; currency?: string | null };
   /** DX-354: región de la sede del presupuesto; `null` si le falta algo. No entra en el contenido firmado ni en su hash. */
   regional: DocumentRegionalDto | null;
   /** Quien creó el plan; `null` si no consta. */
