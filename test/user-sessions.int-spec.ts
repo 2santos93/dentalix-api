@@ -86,7 +86,7 @@ describe('DX-137 · sesiones (int)', () => {
     await cleanup();
     prisma = new PrismaService(new TenantContextService());
     repo = new PrismaUserSessionsRepository(prisma);
-    auth = new PrismaAuthRepository(prisma);
+    auth = new PrismaAuthRepository(prisma, { platformMinYears: 20 }, false);
     const [a, b] = await Promise.all(
       SUBDOMAINS.map((subdomain) =>
         raw.tenant.create({
