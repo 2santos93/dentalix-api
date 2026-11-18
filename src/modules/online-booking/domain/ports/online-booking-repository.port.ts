@@ -25,6 +25,9 @@ export interface BookableCatalog {
     name: string;
     address: string | null;
     timeZone: string | null;
+    /** Formato de la sede (BCP 47 y reloj): la página escribe horas con él. */
+    locale: string | null;
+    hourCycle: string | null;
   }[];
   /** Tipos visibles online, activos y no retirados. */
   types: (OnlineTypeSettings & { name: string; durationMinutes: number })[];

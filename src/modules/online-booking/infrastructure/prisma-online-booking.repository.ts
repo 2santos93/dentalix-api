@@ -310,7 +310,14 @@ export class PrismaOnlineBookingRepository implements OnlineBookingRepository {
       const locations = await tx.location.findMany({
         where: { isActive: true, deletedAt: null },
         orderBy: [{ createdAt: 'asc' }, { name: 'asc' }],
-        select: { id: true, name: true, address: true, timeZone: true },
+        select: {
+          id: true,
+          name: true,
+          address: true,
+          timeZone: true,
+          locale: true,
+          hourCycle: true,
+        },
       });
       const types = await tx.appointmentTypeOnlineSettings.findMany({
         where: {

@@ -15,6 +15,7 @@ import type {
 } from '@prisma/client';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import type { HourCycle } from '../../../../shared/format/regional-format';
 import { civilDateIn, parseCivilDate } from '../../../../shared/time/civil-day';
 import { CreateAppointmentUseCase } from '../../../appointments/application/use-cases/create-appointment.use-case';
 import { OVERLAP_MESSAGES } from '../../../appointments/application/appointment-overlap-error';
@@ -96,6 +97,8 @@ export interface PublicBookingConfig {
     name: string;
     address: string | null;
     timeZone: string;
+    locale: string | null;
+    hourCycle: HourCycle | null;
   }[];
   types: {
     id: string;
@@ -160,8 +163,16 @@ export interface BookingResult {
   locationName: string;
   providerName: string;
   appointmentTypeName: string;
+  /** Formato de la sede para escribir la fecha y la hora. */
+  locale: string | null;
+  hourCycle: HourCycle | null;
   /** Enlace de gestión (DX-005) de una reserva directa; `null` si no. */
   manageUrl: string | null;
+}
+
+/** El reloj de la sede si es uno conocido; si no, `null` (la web no inventa uno). */
+function hourCycleOf(value: string | null): HourCycle | null {
+  return value === 'h12' || value === 'h23' ? value : null;
 }
 
 const NAME_MAX = 80;
@@ -376,6 +387,8 @@ export class GetPublicBookingConfigUseCase extends PublicBookingBase {
           name: l.name,
           address: l.address,
           timeZone: l.timeZone,
+          locale: l.locale,
+          hourCycle: hourCycleOf(l.hourCycle),
         })),
       types,
       providers: providers
@@ -718,6 +731,8 @@ export class CreatePublicBookingUseCase extends PublicBookingBase {
       locationName: choice.location.name,
       providerName: provider.fullName,
       appointmentTypeName: choice.type.name,
+      locale: choice.location.locale,
+      hourCycle: hourCycleOf(choice.location.hourCycle),
       manageUrl,
     });
 

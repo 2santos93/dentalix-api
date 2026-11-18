@@ -260,7 +260,12 @@ describe('Reserva online (e2e, DX-016)', () => {
   it('la página ofrece sede, tipo, profesional y la política; nada de la agenda', async () => {
     const res = await pub(clinic.host).config().expect(200);
     const body = res.body as {
-      locations: { id: string; timeZone: string }[];
+      locations: {
+        id: string;
+        timeZone: string;
+        locale: string | null;
+        hourCycle: string | null;
+      }[];
       types: {
         id: string;
         durationNewMinutes: number;
@@ -272,6 +277,9 @@ describe('Reserva online (e2e, DX-016)', () => {
     };
     expect(body.locations.map((l) => l.id)).toEqual([locationId]);
     expect(body.locations[0].timeZone).toBe('America/Caracas');
+    // Con el formato de la sede: la página escribe las horas con él.
+    expect(typeof body.locations[0].locale).toBe('string');
+    expect(body.locations[0].hourCycle).toMatch(/^h(12|23)$/);
     expect(body.types).toEqual([
       expect.objectContaining({
         id: typeId,

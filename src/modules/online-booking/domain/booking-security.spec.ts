@@ -27,7 +27,12 @@ describe('seguridad de la reserva online (DX-016)', () => {
     expect(bookingCodeMatches(key, 'v1', code, null)).toBe(false);
     // Otra clave (otro propósito) no vale.
     expect(
-      bookingCodeMatches(deriveBookingKey('secreto-de-prueba', 'form'), 'v1', code, stored),
+      bookingCodeMatches(
+        deriveBookingKey('secreto-de-prueba', 'form'),
+        'v1',
+        code,
+        stored,
+      ),
     ).toBe(false);
   });
 
@@ -44,23 +49,46 @@ describe('seguridad de la reserva online (DX-016)', () => {
     const after = (s: number) => new Date(issued.getTime() + s * 1000);
 
     it('demasiado rápido, a tiempo y caducado', () => {
-      expect(checkFormToken(formKey, 'tenant-a', token, after(1))).toBe('TOO_FAST');
+      expect(checkFormToken(formKey, 'tenant-a', token, after(1))).toBe(
+        'TOO_FAST',
+      );
       expect(
-        checkFormToken(formKey, 'tenant-a', token, after(FORM_MIN_FILL_SECONDS)),
+        checkFormToken(
+          formKey,
+          'tenant-a',
+          token,
+          after(FORM_MIN_FILL_SECONDS),
+        ),
       ).toBe('OK');
       expect(
-        checkFormToken(formKey, 'tenant-a', token, after(FORM_MAX_AGE_SECONDS + 1)),
+        checkFormToken(
+          formKey,
+          'tenant-a',
+          token,
+          after(FORM_MAX_AGE_SECONDS + 1),
+        ),
       ).toBe('EXPIRED');
     });
 
     it('el de otra clínica, alterado o con otra forma no vale', () => {
-      expect(checkFormToken(formKey, 'tenant-b', token, after(10))).toBe('INVALID');
+      expect(checkFormToken(formKey, 'tenant-b', token, after(10))).toBe(
+        'INVALID',
+      );
       const [ts, mac] = token.split('.');
       expect(
-        checkFormToken(formKey, 'tenant-a', `${Number(ts) - 60_000}.${mac}`, after(10)),
+        checkFormToken(
+          formKey,
+          'tenant-a',
+          `${Number(ts) - 60_000}.${mac}`,
+          after(10),
+        ),
       ).toBe('INVALID');
-      expect(checkFormToken(formKey, 'tenant-a', undefined, after(10))).toBe('INVALID');
-      expect(checkFormToken(formKey, 'tenant-a', 'a.b.c', after(10))).toBe('INVALID');
+      expect(checkFormToken(formKey, 'tenant-a', undefined, after(10))).toBe(
+        'INVALID',
+      );
+      expect(checkFormToken(formKey, 'tenant-a', 'a.b.c', after(10))).toBe(
+        'INVALID',
+      );
     });
   });
 

@@ -315,10 +315,11 @@ export class OnlinePendingCountDto {
 /** Campos anti-bots de todos los formularios públicos. */
 class AntiBotDto {
   @ApiPropertyOptional({
+    type: String,
     description: 'Campo trampa: SIEMPRE vacío (oculto para las personas).',
   })
   @IsOptional()
-  website?: unknown;
+  website?: string;
 
   @ApiProperty({
     description:
@@ -419,6 +420,19 @@ class PublicLocationDto {
   address!: string | null;
   @ApiProperty({ example: 'America/Caracas' })
   timeZone!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'es-VE',
+    description: 'Idioma y región del formato de la sede (BCP 47).',
+  })
+  locale!: string | null;
+  @ApiProperty({
+    enum: ['h12', 'h23'],
+    nullable: true,
+    description: 'Reloj de la sede.',
+  })
+  hourCycle!: 'h12' | 'h23' | null;
 }
 
 class PublicTypeDto {
@@ -561,7 +575,11 @@ export class NewPatientDto {
   @MaxLength(254, { message: BAD })
   email!: string;
 
-  @ApiProperty({ maxLength: 40, description: 'Teléfono de contacto (con prefijo internacional si es de otro país).' })
+  @ApiProperty({
+    maxLength: 40,
+    description:
+      'Teléfono de contacto (con prefijo internacional si es de otro país).',
+  })
   @IsString({ message: BAD })
   @MaxLength(40, { message: BAD })
   phone!: string;
@@ -638,6 +656,10 @@ export class PublicBookingResultDto {
   providerName!: string;
   @ApiProperty()
   appointmentTypeName!: string;
+  @ApiProperty({ type: String, nullable: true, example: 'es-VE' })
+  locale!: string | null;
+  @ApiProperty({ enum: ['h12', 'h23'], nullable: true })
+  hourCycle!: 'h12' | 'h23' | null;
   @ApiProperty({
     type: String,
     nullable: true,

@@ -27,9 +27,7 @@ function query(overrides: Partial<OnlineSlotsQuery> = {}): OnlineSlotsQuery {
 }
 
 const starts = (q: OnlineSlotsQuery) =>
-  computeOnlineSlots(q).slots.map((s) =>
-    s.start.toISOString().slice(11, 16),
-  );
+  computeOnlineSlots(q).slots.map((s) => s.start.toISOString().slice(11, 16));
 
 describe('computeOnlineSlots (DX-016)', () => {
   it('ofrece los inicios del horario de la sede alineados al paso, con la duración entera dentro', () => {
@@ -58,7 +56,9 @@ describe('computeOnlineSlots (DX-016)', () => {
   it('un día cerrado (festivo) o sin tramos no da huecos', () => {
     expect(starts(query({ isClosedDay: () => true }))).toEqual([]);
     expect(
-      starts(query({ ranges: [{ weekday: 2, startMinute: 540, endMinute: 720 }] })),
+      starts(
+        query({ ranges: [{ weekday: 2, startMinute: 540, endMinute: 720 }] }),
+      ),
     ).toEqual([]);
   });
 
@@ -68,7 +68,10 @@ describe('computeOnlineSlots (DX-016)', () => {
         {
           providerId: 'p1',
           busy: [
-            { start: at('2026-11-23T09:30:00'), end: at('2026-11-23T10:15:00') },
+            {
+              start: at('2026-11-23T09:30:00'),
+              end: at('2026-11-23T10:15:00'),
+            },
           ],
         },
       ],
@@ -85,7 +88,10 @@ describe('computeOnlineSlots (DX-016)', () => {
         {
           providerId: 'p1',
           busy: [
-            { start: at('2026-11-23T09:00:00'), end: at('2026-11-23T09:05:00') },
+            {
+              start: at('2026-11-23T09:00:00'),
+              end: at('2026-11-23T09:05:00'),
+            },
           ],
         },
       ],
@@ -116,7 +122,9 @@ describe('computeOnlineSlots (DX-016)', () => {
         {
           providerId: 'p1',
           busy: [],
-          rangesOn: () => [{ startMinute: 10 * 60 + 30, endMinute: 11 * 60 + 30 }],
+          rangesOn: () => [
+            { startMinute: 10 * 60 + 30, endMinute: 11 * 60 + 30 },
+          ],
         },
       ],
     });
@@ -138,7 +146,10 @@ describe('computeOnlineSlots (DX-016)', () => {
         {
           providerId: 'p1',
           busy: [
-            { start: at('2026-11-23T09:00:00'), end: at('2026-11-23T11:00:00') },
+            {
+              start: at('2026-11-23T09:00:00'),
+              end: at('2026-11-23T11:00:00'),
+            },
           ],
         },
         { providerId: 'p2', busy: [] },
