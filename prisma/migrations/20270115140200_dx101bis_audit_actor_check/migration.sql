@@ -1,7 +1,7 @@
 -- DX-101-bis: el paciente (o el responsable de un menor) acepta con su firma
 -- un presupuesto desde el portal del paciente: SIGN de TREATMENT_PLAN, reason
 -- PORTAL_QUOTE_ACCEPTED, origen PUBLIC_LINK, sin usuario. El CHECK de actor
--- de audit_events es la UNIÓN EXACTA del de main (20270111090300, DX-101) y
+-- de audit_events es la UNIÓN EXACTA del de main (20270114090300, DX-556) y
 -- esa escritura, y solo ella.
 --
 -- Más permisivo (NOT VALID; su VALIDATE va en 20270115140300, molde de
@@ -229,6 +229,15 @@ ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
         AND "metadata" ->> 'origin' = 'PUBLIC_LINK'
         AND (("action" = 'VIEW' AND "metadata" ->> 'reason' = 'PATIENT_ACCESS_VERIFIED')
           OR ("action" = 'UPDATE' AND "metadata" ->> 'reason' = 'PATIENT_ACCESS_LOCKED'))) IS TRUE
+    -- DX-556: la retención anonimiza un prospecto perdido (el trabajo
+    -- programado, sin usuario). Solo el id y el motivo.
+    OR ("action" = 'UPDATE'
+        AND "resourceType" = 'LEAD'
+        AND "actorRole" IS NULL
+        AND "resourceId" IS NOT NULL
+        AND "patientId" IS NULL
+        AND "metadata" ->> 'origin' = 'JOB'
+        AND "metadata" ->> 'reason' = 'LEAD_ANONYMIZED') IS TRUE
     -- DX-101-bis: el paciente (o el responsable de un menor) acepta con su
     -- firma un presupuesto desde el portal (SIGN del plan). Solo ids y el
     -- motivo: ni la firma, ni importes, ni el enlace van en el evento.

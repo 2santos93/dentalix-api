@@ -5,7 +5,7 @@ import { join } from 'node:path';
 // la columna de evidencia con su FK compuesta NOT VALID, el índice único
 // destino de la FK y el CHECK de evidencias redefinido NOT VALID; sus
 // VALIDATE aparte (con NO FORCE en las dos tablas, DX-134); y el CHECK de
-// actor de audit_events como UNIÓN EXACTA del de DX-101 más la cláusula del
+// actor de audit_events como UNIÓN EXACTA del de main (DX-556) más la cláusula del
 // portal, con su VALIDATE aparte. Ni enum nuevo, ni datos que se recorran.
 
 const migrations = join(__dirname, '../../prisma/migrations');
@@ -22,7 +22,7 @@ const SCHEMA_VALIDATE = '20270115140100_dx101bis_portal_acceptance_validate';
 const ACTOR = '20270115140200_dx101bis_audit_actor_check';
 const ACTOR_VALIDATE = '20270115140300_dx101bis_audit_actor_validate';
 const ALL = [SCHEMA, SCHEMA_VALIDATE, ACTOR, ACTOR_VALIDATE];
-const PREVIOUS_ACTOR = '20270111090300_dx101_audit_actor_check';
+const PREVIOUS_ACTOR = '20270114090300_dx556_audit_actor_check';
 
 /** El cuerpo del CHECK de actor (de `ADD CONSTRAINT` al `NOT VALID`). */
 function actorCheck(m: string): string {
@@ -91,7 +91,7 @@ describe('DX-101-bis: migraciones', () => {
     );
   });
 
-  it('el CHECK de actor es la UNIÓN EXACTA del de DX-101 y la cláusula del portal', () => {
+  it('el CHECK de actor es la UNIÓN EXACTA del de main (DX-556) y la cláusula del portal', () => {
     const clause = `OR ("action" = 'SIGN' AND "resourceType" = 'TREATMENT_PLAN' AND "actorRole" IS NULL AND "resourceId" IS NOT NULL AND "patientId" IS NOT NULL AND "metadata" ->> 'origin' = 'PUBLIC_LINK' AND "metadata" ->> 'reason' = 'PORTAL_QUOTE_ACCEPTED') IS TRUE`;
     expect(actorCheck(ACTOR)).toBe(`${actorCheck(PREVIOUS_ACTOR)} ${clause}`);
     expect(flat(ACTOR)).toMatch(/\) NOT VALID;$/);
