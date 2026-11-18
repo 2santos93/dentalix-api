@@ -1,6 +1,10 @@
 import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import { Periodicity } from '../../application/schedule/generate-schedule';
-import { PaymentPlanWithInstallments } from '../entities/payment-plan.entity';
+import {
+  CancelledPaymentPlan,
+  PaymentPlanCancellation,
+  PaymentPlanWithInstallments,
+} from '../entities/payment-plan.entity';
 
 // NOTE: deliberately NO `tenantId`/`id` — tenant comes from request context,
 // never the client (same convention as CreatePaymentRepoInput). `patientId`
@@ -41,6 +45,18 @@ export interface PaymentPlanRepository {
   ): Promise<PaymentPlanWithInstallments | null>;
 
   /**
+   * DX-123: ¿existe el plan de tratamiento (vivo, de esta clínica)? Distingue
+   * «sin plan de cuotas» (200 null) de «plan inexistente» (404).
+   */
+  treatmentPlanExists(treatmentPlanId: string): Promise<boolean>;
+
+  /**
+   * DX-123 (O-2): los planes de cuotas CANCELADOS del plan de tratamiento, del
+   * más reciente al más antiguo, con quién, cuándo y por qué.
+   */
+  findCancelledByPlan(treatmentPlanId: string): Promise<CancelledPaymentPlan[]>;
+
+  /**
    * DX-110: la zona IANA de la sede del plan de tratamiento (la de su
    * aceptación o, sin ella, la de su presentación; sin ninguna, la principal):
    * su día civil es el «hoy» con que vencen las cuotas. Una sede sin zona
@@ -53,8 +69,14 @@ export interface PaymentPlanRepository {
    * Returns true if THIS call cancelled it, false if already gone (never
    * throws — the use case decides 404). Never a hard delete.
    *
+   * DX-092 (SEC-029): guarda quién, cuándo y por qué en la misma escritura.
+   *
    * DX-091: un plan con cuotas que vencen en un período contable cerrado no
    * se cancela (409 PERIOD_LOCKED), salvo la excepción del ADMIN con motivo.
    */
-  cancel(id: string, lockActor?: LockActor | null): Promise<boolean>;
+  cancel(
+    id: string,
+    cancellation: PaymentPlanCancellation,
+    lockActor?: LockActor | null,
+  ): Promise<boolean>;
 }

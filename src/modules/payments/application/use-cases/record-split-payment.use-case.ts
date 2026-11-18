@@ -23,6 +23,7 @@ import {
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
   isSameRequest,
   splitPaymentRequestFingerprint,
+  splitPaymentRequestFingerprints,
 } from '../../domain/idempotency';
 import {
   SPLIT_LINE_METHOD_REQUIRED_MESSAGE,
@@ -140,7 +141,7 @@ export class RecordSplitPaymentUseCase {
       const replay = await this.replay(
         key,
         treatmentPlanId,
-        requestFingerprint,
+        splitPaymentRequestFingerprints(treatmentPlanId, input),
       );
       if (replay) return replay;
     }
@@ -279,14 +280,15 @@ export class RecordSplitPaymentUseCase {
   private async replay(
     key: string,
     treatmentPlanId: string,
-    requestFingerprint: string,
+    /** DX-123: la huella canónica y, con notas en blanco, la anterior. */
+    requestFingerprints: readonly string[],
   ): Promise<SplitPaymentResult | null> {
     const existing = await this.repo.findByIdempotencyKey(key);
     if (!existing) return null;
     const head = existing.payment;
     const split =
       head.splitId === head.id &&
-      isSameRequest(existing, treatmentPlanId, requestFingerprint)
+      isSameRequest(existing, treatmentPlanId, requestFingerprints)
         ? await this.repo.findSplit(head.id)
         : null;
     if (!split) {

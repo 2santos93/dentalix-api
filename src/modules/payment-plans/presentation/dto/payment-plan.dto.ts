@@ -188,3 +188,67 @@ export class PaymentPlanDto {
   @ApiProperty({ example: false, description: 'true si remaining <= 0' })
   isFullyPaid!: boolean;
 }
+
+/** DX-123: autor de una cancelación (`fullName` null si ya no es de la clínica). */
+export class PaymentPlanActorDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ type: String, nullable: true, example: 'Ana Rodríguez' })
+  fullName!: string | null;
+}
+
+/**
+ * DX-123 (O-2): un plan de cuotas cancelado del historial de
+ * `GET /treatment-plans/:id/payment-plan/history`.
+ */
+export class CancelledPaymentPlanDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ description: 'Código ISO 4217 de la moneda del plan' })
+  currency!: string;
+
+  @ApiProperty({ example: 1200 })
+  totalToFinance!: number;
+
+  @ApiProperty({ example: 200 })
+  downPayment!: number;
+
+  @ApiProperty({ example: 6 })
+  installmentsCount!: number;
+
+  @ApiProperty({ enum: ['WEEKLY', 'BIWEEKLY', 'MONTHLY'] })
+  periodicity!: 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY';
+
+  @ApiProperty({ type: String, format: 'date-time' })
+  startDate!: Date;
+
+  @ApiProperty({ type: String, format: 'date-time' })
+  createdAt!: Date;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    description:
+      'Cuándo se canceló (hora del servidor). En los cancelados antes de DX-109, la del borrado lógico.',
+  })
+  cancelledAt!: Date;
+
+  @ApiProperty({
+    type: PaymentPlanActorDto,
+    nullable: true,
+    description:
+      'Quién lo canceló; `null` en los cancelados antes de DX-109, que no lo guardaban.',
+  })
+  cancelledBy!: PaymentPlanActorDto | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'El paciente pagará el saldo de contado',
+    description:
+      'Motivo. Al cancelar o rechazar el plan de tratamiento, el que pone el sistema. `null` antes de DX-109.',
+  })
+  cancelReason!: string | null;
+}

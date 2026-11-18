@@ -35,6 +35,22 @@ function normalizeCurrency(currency: unknown): unknown {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
+ * DX-123 (R-6): unas notas vacías, solo espacios, `null` u omitidas son la
+ * misma petición («sin notas»): un cliente que reintenta con `""` en vez de
+ * omitirlas recibe el abono original, no un 422. Las notas con texto cuentan
+ * tal cual.
+ */
+function normalizeNotes(notes: unknown): unknown {
+  if (notes === undefined || notes === null) return null;
+  return typeof notes === 'string' && notes.trim() === '' ? null : notes;
+}
+
+/** ¿Normalizar las notas cambia la huella respecto a la anterior a DX-123? */
+function blankNotesString(notes: unknown): boolean {
+  return typeof notes === 'string' && notes.trim() === '';
+}
+
+/**
  * Forma canónica de `paidAt`, la misma que aplica `RecordPaymentUseCase`: el
  * mismo instante escrito de dos formas ISO es la misma petición, y una
  * medianoche UTC exacta (`2026-10-16T00:00:00Z`, clientes anteriores a DX-097)
@@ -66,13 +82,25 @@ export function paymentRequestFingerprint(
   treatmentPlanId: string,
   input: PaymentRequestShape,
 ): string {
+  return paymentFingerprintWithNotes(
+    treatmentPlanId,
+    input,
+    normalizeNotes(input.notes),
+  );
+}
+
+function paymentFingerprintWithNotes(
+  treatmentPlanId: string,
+  input: PaymentRequestShape,
+  notes: unknown,
+): string {
   const normalized = [
     treatmentPlanId.toLowerCase(),
     normalizeAmount(input.amount),
     normalizeCurrency(input.currency),
     normalizePaidAt(input.paidAt),
     input.method ?? null,
-    input.notes ?? null,
+    notes,
     // DX-377: solo si vienen, para que las huellas anteriores sigan valiendo.
     ...(input.paymentMethodId || input.reference
       ? [input.paymentMethodId ?? null, input.reference?.trim() ?? null]
@@ -111,11 +139,23 @@ export function splitPaymentRequestFingerprint(
   treatmentPlanId: string,
   input: SplitPaymentRequestShape,
 ): string {
+  return splitFingerprintWithNotes(
+    treatmentPlanId,
+    input,
+    normalizeNotes(input.notes),
+  );
+}
+
+function splitFingerprintWithNotes(
+  treatmentPlanId: string,
+  input: SplitPaymentRequestShape,
+  notes: unknown,
+): string {
   const normalized = [
     'split',
     treatmentPlanId.toLowerCase(),
     normalizePaidAt(input.paidAt),
-    input.notes ?? null,
+    notes,
     input.lines.map((line) => [
       normalizeAmount(line.amount),
       normalizeCurrency(line.currency),
@@ -127,6 +167,39 @@ export function splitPaymentRequestFingerprint(
     ]),
   ];
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+
+/**
+ * DX-123: las huellas con que una petición reconoce su abono. La primera es la
+ * canónica (la que se guarda). Una clave guardada ANTES de normalizar las
+ * notas con `""` (o espacios) llevaba esas notas tal cual: su reintento
+ * idéntico sigue reconociéndose por esa huella antigua.
+ */
+export function paymentRequestFingerprints(
+  treatmentPlanId: string,
+  input: PaymentRequestShape,
+): string[] {
+  const canonical = paymentRequestFingerprint(treatmentPlanId, input);
+  return blankNotesString(input.notes)
+    ? [
+        canonical,
+        paymentFingerprintWithNotes(treatmentPlanId, input, input.notes),
+      ]
+    : [canonical];
+}
+
+/** DX-123: `paymentRequestFingerprints` para un cobro dividido. */
+export function splitPaymentRequestFingerprints(
+  treatmentPlanId: string,
+  input: SplitPaymentRequestShape,
+): string[] {
+  const canonical = splitPaymentRequestFingerprint(treatmentPlanId, input);
+  return blankNotesString(input.notes)
+    ? [
+        canonical,
+        splitFingerprintWithNotes(treatmentPlanId, input, input.notes),
+      ]
+    : [canonical];
 }
 
 /**
@@ -153,11 +226,14 @@ export function isSameRequest(
   stored: IdempotentPayment,
   /** `paymentTargetKey` de la petición (el id del plan para un plan). */
   treatmentPlanId: string,
-  requestFingerprint: string,
+  /** La huella de la petición, o todas las que la reconocen (DX-123). */
+  requestFingerprint: string | readonly string[],
 ): boolean {
   if (paymentTargetKey(stored.payment) !== treatmentPlanId) return false;
-  return (
-    stored.requestFingerprint === null ||
-    stored.requestFingerprint === requestFingerprint
-  );
+  if (stored.requestFingerprint === null) return true;
+  const accepted =
+    typeof requestFingerprint === 'string'
+      ? [requestFingerprint]
+      : requestFingerprint;
+  return accepted.includes(stored.requestFingerprint);
 }

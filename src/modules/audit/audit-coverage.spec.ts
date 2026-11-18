@@ -1392,6 +1392,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PAYMENT_PLAN',
     patient: plan(),
   },
+  // DX-123: el historial de planes de cuotas cancelados.
+  'GET /treatment-plans/:id/payment-plan/history': {
+    action: 'VIEW',
+    resource: 'PAYMENT_PLAN',
+    patient: plan(),
+  },
   'DELETE /treatment-plans/:id/payment-plan': {
     action: 'DELETE',
     resource: 'PAYMENT_PLAN',

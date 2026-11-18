@@ -467,17 +467,22 @@ describe('Cierre contable: abonos, anulaciones y planes de cuotas (e2e, DX-091)'
     await setLock({ lockDate: LOCK, adminExempt: true }).expect(200);
 
     const cancel = await as(a, receptionA)
-      .delete(`/treatment-plans/${planA}/payment-plan`)
+      .delete(`/treatment-plans/${planA}/payment-plan`, {
+        reason: 'El paciente abandonó el tratamiento',
+      })
       .expect(409);
     expect(cancel.body).toMatchObject({
       code: 'PERIOD_LOCKED',
       message: PERIOD_LOCKED_MESSAGES.PAYMENT_PLAN_CANCEL,
     });
     await as(a)
-      .delete(`/treatment-plans/${planA}/payment-plan`, {})
+      .delete(`/treatment-plans/${planA}/payment-plan`, {
+        reason: 'El paciente abandonó el tratamiento',
+      })
       .expect(400);
     await as(a)
       .delete(`/treatment-plans/${planA}/payment-plan`, {
+        reason: 'El paciente abandonó el tratamiento',
         lockOverrideReason: 'El paciente abandonó el tratamiento en septiembre',
       })
       .expect(204);

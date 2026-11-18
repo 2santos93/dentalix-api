@@ -31,6 +31,7 @@ import {
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
   isSameRequest,
   paymentRequestFingerprint,
+  paymentRequestFingerprints,
 } from '../../domain/idempotency';
 import {
   isPlanBillable,
@@ -299,7 +300,13 @@ export class RecordPaymentUseCase {
       if (existing) {
         // DX-109 (BE-017): solo la MISMA petición recibe el abono original;
         // otro plan u otro cuerpo con la misma clave es un error del cliente.
-        if (!isSameRequest(existing, treatmentPlanId, requestFingerprint)) {
+        if (
+          !isSameRequest(
+            existing,
+            treatmentPlanId,
+            paymentRequestFingerprints(treatmentPlanId, input),
+          )
+        ) {
           throw new UnprocessableEntityException(
             IDEMPOTENCY_KEY_REUSED_MESSAGE,
           );

@@ -69,7 +69,12 @@ const ROUTES: [Method, string, object][] = [
       ],
     },
   ],
-  ['delete', '/treatment-plans/:id/payment-plan', {}],
+  ['get', '/treatment-plans/:id/payment-plan/history', {}],
+  [
+    'delete',
+    '/treatment-plans/:id/payment-plan',
+    { reason: 'Pagará de contado' },
+  ],
   ['get', '/inventory/items/:id', {}],
   ['patch', '/inventory/items/:id', { name: 'Guantes' }],
   ['delete', '/inventory/items/:id', {}],
@@ -83,6 +88,7 @@ const NOT_FOUND_ROUTES: [Method, string][] = [
   ['patch', '/locations/:id'],
   ['patch', '/catalog/items/:id'],
   ['get', '/treatment-plans/:id/payment-plan'],
+  ['get', '/treatment-plans/:id/payment-plan/history'],
   ['get', '/inventory/items/:id'],
 ];
 
