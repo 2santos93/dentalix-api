@@ -542,6 +542,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       // receta emitida (que ya bloquea el deshacer): bloquea igual.
       'prescription_copy_links.patientId',
       'prescriptions.patientId',
+      // DX-561: un aviso del seguimiento de presupuestos solo existe con un
+      // plan presentado (que ya bloquea el deshacer): bloquea igual.
+      'quote_follow_up_messages.patientId',
       'recall_contacts.patientId',
       'reminder_opt_out_links.patientId',
       // DX-214: el aviso auditable es actividad durable y debe bloquear undo.

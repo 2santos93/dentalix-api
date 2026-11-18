@@ -152,6 +152,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /reports/production-by-procedure/items ?catalogItemId',
   'GET /reports/production-by-procedure/items ?locationId',
   'GET /reports/production-by-procedure/items ?professionalId',
+  // DX-561: efectividad del seguimiento automático.
+  'GET /reports/quote-follow-up ?locationId',
   'GET /reports/quote-funnel ?locationId',
   'GET /reports/quote-funnel ?providerId',
   'GET /reports/quote-funnel.csv ?locationId',

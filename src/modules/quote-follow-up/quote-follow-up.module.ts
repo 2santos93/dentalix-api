@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { TokenService } from '../../shared/crypto/token.service';
 import { JobQueue } from '../jobs/application/job-queue.service';
 import { JobsModule } from '../jobs/jobs.module';
 import { EmailModule } from '../notifications/email/email.module';
@@ -33,7 +35,13 @@ import { QuoteFollowUpSettingsController } from './presentation/quote-follow-up-
  * efectividad.
  */
 @Module({
-  imports: [JobsModule, EmailModule, RemindersModule, SignatureRequestsModule],
+  imports: [
+    JwtModule.register({}),
+    JobsModule,
+    EmailModule,
+    RemindersModule,
+    SignatureRequestsModule,
+  ],
   controllers: [
     QuoteFollowUpSettingsController,
     QuoteFollowUpPauseController,
@@ -47,6 +55,7 @@ import { QuoteFollowUpSettingsController } from './presentation/quote-follow-up-
     QuoteFollowUpSender,
     QuoteFollowUpSweep,
     QuoteFollowUpJobs,
+    TokenService,
     TenantContextInterceptor,
     {
       provide: QUOTE_FOLLOW_UP_REPOSITORY,
