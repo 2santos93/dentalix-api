@@ -950,6 +950,11 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
     new PrismaCatalogCurrencyReader(prisma, context),
   );
   const YEAR = { from: '2025-11-01', to: '2026-10-31' };
+  // Cota de filas de cualquier nodo del plan (DX-558-ter), ver planStats:
+  // 2 × las 20 000 presentaciones sembradas. Con la consulta actual el nodo
+  // más ancho tiene 22 000; con la anterior (9db8d7b2), 42 000 y un sort a
+  // disco: falla por las dos.
+  const MAX_ROWS = 2 * 20_000;
   let c: FunnelClinic;
 
   const input = (): QuoteFunnelInput => ({
@@ -1140,52 +1145,62 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
     return captured;
   }
 
-  /**
-   * Tiempo de SERVIDOR de la consulta (planificación + ejecución de
-   * `EXPLAIN (ANALYZE, TIMING OFF)`), como dentalix_app bajo RLS y con
-   * `jit = off` igual que el repositorio: 1 de calentamiento y la mediana de 5.
-   * TIMING OFF (DX-558-bis): con el cronómetro por nodo, los miles de bucles
-   * de la consulta medían MÁS que el reloj de pared en los runners de la CI
-   * (mediana 518 ms frente a 477–524 de pared en main, 77cb52cc y 9db8d7b2).
-   *
-   * Por qué el servidor y no el reloj de pared del caso de uso (DX-396-ter):
-   * con el mismo código y el mismo plan, el mínimo de 5 en reloj de pared fue
-   * 324, 346, 313 y 457 ms en cuatro runs de main (4f69cfe9, fa15abae,
-   * 2892a526, 0405e725) y 529 ms en la Integración 3/4 del PR #205. Es la
-   * velocidad del runner compartido, no la consulta (ese runner también fue
-   * más lento en recall-due-load y en la siembra), y el tope de 500 ms se
-   * quedaba con un 8 % de margen en los lentos. En local (BD recién sembrada,
-   * el spec primero) da 255–360 ms. El tope de 500 ms sigue siendo el del
-   * criterio, ahora sobre lo que cuesta la consulta en Postgres, como en
-   * recall-due-load (DX-015-bis).
-   */
-  async function serverMs(sql: Prisma.Sql): Promise<number[]> {
-    const once = () =>
-      prisma.runWithTenant(c.tenantId, async (tx) => {
-        await tx.$executeRaw`SET LOCAL jit = off`;
-        const [row] = await tx.$queryRaw<
-          {
-            'QUERY PLAN': {
-              'Planning Time': number;
-              'Execution Time': number;
-            }[];
-          }[]
-        >(Prisma.sql`EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${sql}`);
-        const [plan] = row['QUERY PLAN'];
-        return plan['Planning Time'] + plan['Execution Time'];
-      });
-    await once();
-    const ms: number[] = [];
-    for (let i = 0; i < 5; i++) ms.push(await once());
-    return ms;
+  interface PlanNode {
+    'Node Type': string;
+    'Actual Rows': number;
+    'Actual Loops': number;
+    'Sort Space Type'?: string;
+    Plans?: PlanNode[];
   }
 
-  const median = (values: number[]) =>
-    [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  /**
+   * El plan EJECUTADO de la consulta: `EXPLAIN (ANALYZE, TIMING OFF)` como
+   * dentalix_app bajo RLS y con `jit = off`, igual que el
+   * repositorio. Filas, bucles, y ordenaciones no dependen de la
+   * velocidad de la máquina.
+   */
+  async function executedPlan(sql: Prisma.Sql): Promise<PlanNode> {
+    return prisma.runWithTenant(c.tenantId, async (tx) => {
+      await tx.$executeRaw`SET LOCAL jit = off`;
+      const [row] = await tx.$queryRaw<
+        { 'QUERY PLAN': { Plan: PlanNode }[] }[]
+      >(Prisma.sql`EXPLAIN (ANALYZE, TIMING OFF, FORMAT JSON) ${sql}`);
+      return row['QUERY PLAN'][0].Plan;
+    });
+  }
+
+  function nodesOf(node: PlanNode): PlanNode[] {
+    return [node, ...(node.Plans ?? []).flatMap(nodesOf)];
+  }
 
   /**
-   * Reloj de pared del caso de uso completo (Prisma, red, mapeo): tope amplio
-   * de 1,5 s, para no perder de vista el coste fuera de Postgres.
+   * Lo que vigila el rendimiento (DX-558-ter), sin cronómetro y sin fijar la
+   * forma del árbol (tipos de unión, orden de nodos o índices concretos
+   * cambian con un postgres:16.x nuevo en la CI):
+   * - `diskSorts`: nodos que ordenan o agregan en disco porque no caben en
+   *   work_mem («Sort Space Type: Disk»).
+   * - `maxRows`: las filas reales (por bucle) del nodo más ancho, sea cual
+   *   sea. Antes de DX-558-bis la unión cadena → ítems → imputaciones abría
+   *   una fila por ítem (42 000) y la ordenaba a disco; ahora ningún nodo pasa
+   *   de una fila por plan de la cadena (22 000: 20 000 raíz + 2 000
+   *   pendientes). La cota es 2 × las 20 000 presentaciones sembradas.
+   * - `top`: los nodos más anchos, solo para el log.
+   */
+  function planStats(plan: PlanNode) {
+    const nodes = nodesOf(plan);
+    return {
+      diskSorts: nodes.filter((n) => n['Sort Space Type'] === 'Disk').length,
+      maxRows: Math.max(...nodes.map((n) => n['Actual Rows'])),
+      top: [...nodes]
+        .sort((x, y) => y['Actual Rows'] - x['Actual Rows'])
+        .slice(0, 3)
+        .map((n) => `${n['Node Type']} ${n['Actual Rows']}`),
+    };
+  }
+
+  /**
+   * Reloj de pared del caso de uso completo (Prisma, red, mapeo), mínimo de 5
+   * tras 1 de calentamiento.
    */
   async function wallMs<T>(
     run: () => Promise<T>,
@@ -1203,7 +1218,21 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
 
   const fmt = (ms: number[]) => ms.map((v) => v.toFixed(0)).join(' / ');
 
-  it('el embudo de 12 meses sale en menos de 500 ms como dentalix_app', async () => {
+  /*
+   * Por qué el plan y no un tope de tiempo (DX-558-ter). El criterio de
+   * DX-558 (< 500 ms con 20 000 planes en 12 meses) se medía en tiempo, y en
+   * los runners compartidos de la CI el tiempo depende de la máquina más que
+   * de la consulta: con el MISMO código (cb76d651) y el mismo plan, la mediana
+   * en el servidor fue 321/328 ms (agregado/detalle) en el PR #208 y 518/547
+   * en el PR #206; antes, el mínimo en reloj de pared iba de 313 a 529 ms entre
+   * runs de main y el 3/4 del PR #205. Ningún tope absoluto en ms deja margen
+   * en los lentos y sigue detectando una regresión en los rápidos. Lo que sí
+   * es determinista con los mismos datos es el plan ejecutado: se vigila lo
+   * que hacía cara la consulta (filas multiplicadas, sort a disco, recorrer
+   * la historia). En local, con este plan, 240–300 ms. El reloj de pared queda
+   * solo como red contra lo catastrófico (< 1 500 ms).
+   */
+  it('el embudo de 12 meses: plan acotado y sin sort a disco', async () => {
     const run = () => context.run(c.tenantId, () => useCase.execute(input()));
     const { ms, result } = await wallMs(run);
     // 20 000 planes raíz; las parejas A/B (8 y 9) son una presentación.
@@ -1215,15 +1244,16 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
     expect(result.byProfessional).toHaveLength(2);
     const captured = await captureFunnelSql(run);
     expect(captured).toHaveLength(1);
-    const server = await serverMs(captured[0]);
+    const stats = planStats(await executedPlan(captured[0]));
     console.info(
-      `DX-558 · embudo, 20 000 planes, 12 meses: servidor ${fmt(server)} ms (mediana ${median(server).toFixed(0)}); reloj de pared ${fmt(ms)} ms`,
+      `DX-558 · embudo, 20 000 planes, 12 meses: ${JSON.stringify(stats)}; reloj de pared ${fmt(ms)} ms`,
     );
-    expect(median(server)).toBeLessThan(500);
+    expect(stats.diskSorts).toBe(0);
+    expect(stats.maxRows).toBeLessThanOrEqual(MAX_ROWS);
     expect(Math.min(...ms)).toBeLessThan(1_500);
   }, 120_000);
 
-  it('la 1.ª página del detalle sale en menos de 500 ms como dentalix_app', async () => {
+  it('la 1.ª página del detalle: plan acotado y sin sort a disco', async () => {
     const run = () =>
       context.run(c.tenantId, () =>
         useCase.presentations({ ...input(), step: 'ACCEPTED' }),
@@ -1233,15 +1263,16 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
     expect(result.items).toHaveLength(25);
     const captured = await captureFunnelSql(run);
     expect(captured).toHaveLength(1);
-    const server = await serverMs(captured[0]);
+    const stats = planStats(await executedPlan(captured[0]));
     console.info(
-      `DX-558 · detalle (1.ª página), 20 000 planes, 12 meses: servidor ${fmt(server)} ms (mediana ${median(server).toFixed(0)}); reloj de pared ${fmt(ms)} ms`,
+      `DX-558 · detalle (1.ª página), 20 000 planes, 12 meses: ${JSON.stringify(stats)}; reloj de pared ${fmt(ms)} ms`,
     );
-    expect(median(server)).toBeLessThan(500);
+    expect(stats.diskSorts).toBe(0);
+    expect(stats.maxRows).toBeLessThanOrEqual(MAX_ROWS);
     expect(Math.min(...ms)).toBeLessThan(1_500);
   }, 120_000);
 
-  it('un mes no recorre treatment_plans entero: usa el índice de presentaciones', async () => {
+  it('un mes no recorre treatment_plans entero', async () => {
     // Con 12 meses sobre una clínica de 12 meses, leer la tabla entera ES lo
     // barato (y el planificador lo elige); lo que se vigila es que un período
     // corto no crezca con la historia.
@@ -1258,7 +1289,8 @@ describe('Embudo de presupuestos con 20 000 planes en 12 meses (DX-558, int)', (
       ),
     );
     const text = plan.map((row) => row['QUERY PLAN']).join('\n');
-    expect(text).toMatch(/treatment_plans_tenant_presented_idx/);
+    // Invariante y no forma (DX-558-ter): sin fijar qué índice elige, que
+    // cambia con un postgres:16.x nuevo.
     expect(text).not.toMatch(/Seq Scan on treatment_plans/);
   });
 });
