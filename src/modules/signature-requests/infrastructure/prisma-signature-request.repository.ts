@@ -84,12 +84,23 @@ const LIST_INCLUDE = {
   budgetAcceptance: { select: { id: true, ipAddress: true } },
 } satisfies Prisma.SignatureRequestInclude;
 
+/**
+ * DX-560: los listados de la ficha no leen la presentación congelada (solo
+ * la usa la página pública).
+ */
+const LIST_OMIT = {
+  budgetPresentation: true,
+} as const satisfies Prisma.SignatureRequestOmit;
+
 type ListRow = Prisma.SignatureRequestGetPayload<{
   include: typeof LIST_INCLUDE;
+  omit: typeof LIST_OMIT;
 }>;
 
 function toRecord(
-  row: Prisma.SignatureRequestGetPayload<object>,
+  row: Omit<Prisma.SignatureRequestGetPayload<object>, 'budgetPresentation'> & {
+    budgetPresentation?: Prisma.JsonValue;
+  },
 ): SignatureRequestRecord {
   return {
     id: row.id,
@@ -129,7 +140,8 @@ function toRecord(
     createdAt: row.createdAt,
     budgetContent: row.budgetContent,
     budgetContentHash: row.budgetContentHash,
-    budgetPresentation: row.budgetPresentation,
+    // DX-560: null en los listados (no la leen).
+    budgetPresentation: row.budgetPresentation ?? null,
   };
 }
 
@@ -565,6 +577,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit,
         include: LIST_INCLUDE,
+        omit: LIST_OMIT,
       }),
     );
     return rows.map(toListRow);
@@ -572,7 +585,11 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
 
   async findById(id: string): Promise<SignatureRequestListRow | null> {
     const row = await this.prisma.runWithTenant((tx) =>
-      tx.signatureRequest.findFirst({ where: { id }, include: LIST_INCLUDE }),
+      tx.signatureRequest.findFirst({
+        where: { id },
+        include: LIST_INCLUDE,
+        omit: LIST_OMIT,
+      }),
     );
     return row ? toListRow(row) : null;
   }
