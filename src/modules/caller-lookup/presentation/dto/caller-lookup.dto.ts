@@ -86,6 +86,20 @@ export class CallerMatchDto {
   hasCriticalAlert?: boolean;
 }
 
+/** DX-556: un prospecto con ese número. */
+export class CallerLeadMatchDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() fullName!: string;
+  @ApiProperty({
+    enum: ['NEW', 'CONTACTED', 'SCHEDULED', 'ATTENDED', 'LOST'],
+    enumName: 'LeadStage',
+  })
+  stage!: 'NEW' | 'CONTACTED' | 'SCHEDULED' | 'ATTENDED' | 'LOST';
+  @ApiProperty({ format: 'uuid' }) locationId!: string;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  convertedPatientId!: string | null;
+}
+
 export class CallerLookupResponseDto {
   @ApiProperty({ type: [CallerMatchDto] }) matches!: CallerMatchDto[];
   @ApiProperty({
@@ -93,4 +107,10 @@ export class CallerLookupResponseDto {
       'Hay más pacientes con ese número que los 20 devueltos: afinar la búsqueda.',
   })
   truncated!: boolean;
+  @ApiPropertyOptional({
+    type: [CallerLeadMatchDto],
+    description:
+      'DX-556: prospectos con ese número en las sedes del usuario (hasta 5). Solo ADMIN y RECEPTION; los demás roles no reciben la clave.',
+  })
+  leads?: CallerLeadMatchDto[];
 }

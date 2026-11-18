@@ -642,3 +642,14 @@ export const POST_OP_CHECK_LIST_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
   ClinicRole.ADMIN,
 ];
+
+// Prospectos (DX-556): la bandeja comercial de interesados antes de ser
+// paciente — alta, etapas, notas, conversión, informe y el catálogo de
+// motivos para el selector: ADMIN y recepción. Datos personales sin
+// relación asistencial: los roles clínicos no los ven.
+export const LEAD_ROLES: ClinicRole[] = [
+  ClinicRole.ADMIN,
+  ClinicRole.RECEPTION,
+];
+// Ajustes de prospectos (retención) y motivos propios: solo ADMIN.
+export const LEAD_ADMIN_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

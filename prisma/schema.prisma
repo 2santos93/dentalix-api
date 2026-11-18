@@ -84,6 +84,8 @@ model Tenant {
   orthoWireGauges                         String[]                         @default(["0.012", "0.014", "0.016", "0.018", "0.020", "0.016x0.016", "0.016x0.022", "0.017x0.025", "0.018x0.025", "0.019x0.025"])
   /// DX-285: días tras los que un cargo de ortodoncia realizado y sin pagar marca «Ortodoncia: saldo vencido» en la cita y en «En clínica» (1–365, CHECK tenants_ortho_overdue_days_check; 30 de fábrica). Solo ADMIN (PUT /ortho/settings).
   orthoOverdueDays                        Int                              @default(30) @db.SmallInt
+  /// DX-556: meses tras los que un prospecto PERDIDO se anonimiza (1–120, CHECK tenants_lead_lost_retention_months_check; 12 de fábrica). Solo ADMIN (PUT /leads/settings).
+  leadLostRetentionMonths                 Int                              @default(12) @db.SmallInt
   /// DX-374: de dónde sale la tasa de cambio del día de la clínica: el
   /// proveedor (AUTOMATIC, lo de siempre) o las tasas manuales que registra
   /// el ADMIN (MANUAL). Lo cambia el ADMIN (PUT /exchange/settings, auditado).
@@ -237,6 +239,10 @@ model Tenant {
   // DX-566: controles postoperatorios y sus intentos de llamada.
   postOpChecks                            PostOpCheck[]
   postOpCheckAttempts                     PostOpCheckAttempt[]
+  // DX-556: prospectos, sus notas y los motivos propios.
+  leads                                   Lead[]
+  leadNotes                               LeadNote[]
+  leadReasons                             LeadReason[]
   patientAccessLinks                      PatientAccessLink[]
   // DX-561: seguimiento automático de presupuestos (ajustes y avisos).
   quoteFollowUpSettings                   LocationQuoteFollowUpSettings[]
@@ -462,6 +468,12 @@ model User {
   postOpChecksPerformed             PostOpCheck[]                    @relation("PostOpCheckProfessional")
   postOpChecksClosed                PostOpCheck[]                    @relation("PostOpCheckClosedBy")
   postOpCheckAttempts               PostOpCheckAttempt[]
+  // DX-556: prospectos que lleva, que creó y que convirtió; notas y motivos.
+  leadsOwned                        Lead[]                           @relation("LeadOwner")
+  leadsCreated                      Lead[]                           @relation("LeadCreatedBy")
+  leadsConverted                    Lead[]                           @relation("LeadConvertedBy")
+  leadNotes                         LeadNote[]
+  leadReasons                       LeadReason[]
   patientAccessLinksCreated         PatientAccessLink[]              @relation("PatientAccessLinkCreatedBy")
   patientAccessLinksRevoked         PatientAccessLink[]              @relation("PatientAccessLinkRevokedBy")
   orthoVisitsAuthored               OrthoVisit[]
@@ -645,6 +657,8 @@ model Location {
   dentalLabOrders            DentalLabOrder[]
   // DX-566: controles postoperatorios de la sede.
   postOpChecks               PostOpCheck[]
+  // DX-556: prospectos de la sede.
+  leads                      Lead[]
   appointments               Appointment[]
   payments                   Payment[]
   inventoryItems             InventoryItem[]
@@ -1012,6 +1026,8 @@ model Patient {
   dentalLabOrders             DentalLabOrder[]
   // DX-566: controles postoperatorios.
   postOpChecks                PostOpCheck[]
+  // DX-556: prospectos convertidos en (o enlazados a) este paciente.
+  leads                       Lead[]
   // DX-101: enlaces de acceso del paciente (estado de cuenta por enlace).
   patientAccessLinks          PatientAccessLink[]
   // DX-561: avisos del seguimiento automático de presupuestos.
@@ -1829,6 +1845,8 @@ model Appointment {
   dentalLabOrders              DentalLabOrder[]
   // DX-566: controles postoperatorios del procedimiento hecho en esta cita.
   postOpChecks                 PostOpCheck[]
+  // DX-556: prospectos cuya primera cita es esta.
+  leads                        Lead[]
   // DX-016: la solicitud o reserva online que creó esta cita.
   onlineBookingRequest         OnlineBookingRequest?
 
@@ -4879,6 +4897,9 @@ enum AuditResourceType {
   // DX-016: reserva online (código enviado, verificado o bloqueado; solicitud
   // o reserva creada; aceptada o rechazada por recepción).
   ONLINE_BOOKING
+  // DX-556: prospecto (alta, edición, etapa, notas, conversión, lecturas de
+  // la lista y anonimización de la retención).
+  LEAD
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -9704,4 +9725,145 @@ model OnlineBookingVerification {
   @@unique([tenantId, sessionTokenHash], map: "online_booking_verifications_session_key")
   @@index([tenantId, patientId, createdAt], map: "online_booking_verifications_patient_idx")
   @@map("online_booking_verifications")
+}
+
+// ---------------------------------------------------------------------------
+// DX-556 · Prospectos: interesados antes de ser paciente
+// ---------------------------------------------------------------------------
+
+/// Etapa del prospecto (DX-556). SCHEDULED y ATTENDED solo por la cita.
+enum LeadStage {
+  NEW
+  CONTACTED
+  SCHEDULED
+  ATTENDED
+  LOST
+}
+
+/// Canal de entrada del prospecto (DX-556).
+enum LeadChannel {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  PHONE
+  WALK_IN
+  REFERRAL
+  WEBSITE
+  OTHER
+}
+
+/// Tipo de motivo del catálogo de prospectos (DX-556).
+enum LeadReasonKind {
+  INTEREST
+  LOSS
+}
+
+/// Motivo PROPIO de la clínica (DX-556): de interés o de pérdida. Los
+/// predefinidos son constantes de la API. Borrado lógico (sin DELETE para la
+/// app); nombre único entre los vivos de su tipo (sin distinguir mayúsculas).
+model LeadReason {
+  id          String         @id @default(uuid()) @db.Uuid
+  tenantId    String         @db.Uuid
+  kind        LeadReasonKind
+  /// 2 a 60 caracteres, sin espacios a los lados.
+  name        String
+  createdById String         @db.Uuid
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy User   @relation(fields: [createdById], references: [id], onDelete: Restrict, map: "lead_reasons_created_by_fkey")
+
+  @@index([createdById], map: "lead_reasons_created_by_idx")
+  // POR EXPRESIÓN Y PARCIAL, no declarable en Prisma:
+  //   lead_reasons_tenant_kind_name_key UNIQUE ("tenantId", kind, lower(name)) WHERE "deletedAt" IS NULL
+  @@map("lead_reasons")
+}
+
+/// Prospecto (DX-556): dato personal SIN relación asistencial (nombre,
+/// teléfono, canal y notas comerciales; nunca datos de salud). RLS FORCE;
+/// FK compuestas por clínica. Guarda `dx_leads_guard`: sin DELETE para la
+/// app, anonimizado inmutable, la conversión y la primera cita se fijan una
+/// vez (la fusión reasigna el paciente). CHECKs de coherencia por etapa.
+model Lead {
+  id                 String      @id @default(uuid()) @db.Uuid
+  tenantId           String      @db.Uuid
+  locationId         String      @db.Uuid
+  /// 1 a 120 caracteres. «Anonimizado» tras la retención.
+  fullName           String
+  /// El teléfono en formato internacional; NULL solo anonimizado.
+  phone              String?
+  /// E.164; único entre los no anonimizados de la clínica. NULL solo anonimizado.
+  phoneE164          String?
+  channel            LeadChannel
+  /// Foto del motivo de interés (catálogo predefinido o propio).
+  interestReason     String?
+  stage              LeadStage   @default(NEW)
+  /// Foto del motivo de pérdida; obligatorio en LOST y solo en LOST.
+  lostReason         String?
+  /// Responsable del seguimiento (ADMIN o RECEPTION de la clínica).
+  ownerId            String?     @db.Uuid
+  nextActionAt       DateTime?
+  nextActionNote     String?
+  /// Último contacto: pasar a CONTACTED o añadir una nota.
+  lastContactAt      DateTime?
+  /// Hitos (no se borran al retroceder: el informe cuenta quien llegó).
+  scheduledAt        DateTime?
+  attendedAt         DateTime?
+  lostAt             DateTime?
+  /// El paciente en que se convirtió (o al que se enlazó). Columna "patientId": la reasigna la fusión (DX-266).
+  convertedPatientId String?     @map("patientId") @db.Uuid
+  convertedAt        DateTime?
+  convertedById      String?     @db.Uuid
+  firstAppointmentId String?     @db.Uuid
+  anonymizedAt       DateTime?
+  createdById        String      @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location         Location     @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "leads_location_fkey")
+  convertedPatient Patient?     @relation(fields: [tenantId, convertedPatientId], references: [tenantId, id], onDelete: Restrict, map: "leads_patient_fkey")
+  firstAppointment Appointment? @relation(fields: [tenantId, firstAppointmentId], references: [tenantId, id], onDelete: Restrict, map: "leads_first_appointment_fkey")
+  owner            User?        @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: Restrict, map: "leads_owner_fkey")
+  createdBy        User         @relation("LeadCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "leads_created_by_fkey")
+  convertedBy      User?        @relation("LeadConvertedBy", fields: [convertedById], references: [id], onDelete: Restrict, map: "leads_converted_by_fkey")
+  notes            LeadNote[]
+
+  // Destino de la FK compuesta de las notas (SEC-004).
+  @@unique([tenantId, id], map: "leads_tenant_id_key")
+  @@index([tenantId, locationId, stage, createdAt(sort: Desc)], map: "leads_location_stage_idx")
+  @@index([tenantId, createdAt(sort: Desc)], map: "leads_created_idx")
+  @@index([createdById], map: "leads_created_by_idx")
+  // PARCIALES, no declarables en Prisma:
+  //   leads_tenant_phone_key UNIQUE ("tenantId", "phoneE164") WHERE "phoneE164" IS NOT NULL
+  //   leads_open_idx ("tenantId", "locationId") WHERE stage IN ('NEW', 'CONTACTED')
+  //   leads_lost_retention_idx ("tenantId", "lostAt") WHERE stage = 'LOST' AND "anonymizedAt" IS NULL
+  //   leads_patient_idx ("tenantId", "patientId") WHERE "patientId" IS NOT NULL
+  //   leads_first_appointment_idx ("tenantId", "firstAppointmentId") WHERE "firstAppointmentId" IS NOT NULL
+  //   leads_owner_idx ("ownerId") WHERE "ownerId" IS NOT NULL
+  //   leads_converted_by_idx ("convertedById") WHERE "convertedById" IS NOT NULL
+  @@map("leads")
+}
+
+/// Nota comercial de un prospecto (DX-556), solo de añadir (≤ 1000): sin
+/// UPDATE; DELETE solo de las de un prospecto anonimizado (la retención).
+model LeadNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  leadId    String   @db.Uuid
+  body      String
+  authorId  String   @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lead   Lead   @relation(fields: [tenantId, leadId], references: [tenantId, id], onDelete: Restrict, map: "lead_notes_lead_fkey")
+  author User   @relation(fields: [authorId], references: [id], onDelete: Restrict, map: "lead_notes_author_fkey")
+
+  @@index([tenantId, leadId, createdAt], map: "lead_notes_lead_idx")
+  @@index([authorId], map: "lead_notes_author_idx")
+  @@map("lead_notes")
 }

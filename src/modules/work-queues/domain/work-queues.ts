@@ -15,6 +15,8 @@ export const WORK_QUEUE_KEYS = [
   'ANAMNESIS_REVIEW',
   // DX-566: llamadas de control postoperatorio de hoy (y vencidas).
   'POST_OP_CHECKS',
+  // DX-556: prospectos sin contactar hace más de 24 h.
+  'LEADS_UNCONTACTED',
   'QUOTE_FOLLOW_UP',
   'ACCEPTED_UNSCHEDULED',
   'WAITLIST',
@@ -52,6 +54,8 @@ export const WORK_QUEUE_ROLES: Record<WorkQueueKey, readonly ClinicRole[]> = {
     ClinicRole.ASSISTANT,
     ClinicRole.RECEPTION,
   ],
+  // GET /leads/count (stale) — LEAD_ROLES (DX-556).
+  LEADS_UNCONTACTED: [ClinicRole.ADMIN, ClinicRole.RECEPTION],
   // GET /treatment-plans/pending-follow-up/count — TREATMENT_PLAN_FOLLOW_UP_ROLES.
   QUOTE_FOLLOW_UP: [ClinicRole.ADMIN, ClinicRole.RECEPTION],
   // GET /treatment-plans/unscheduled/count — los 4 roles; lo agenda el mostrador.

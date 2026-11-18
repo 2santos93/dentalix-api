@@ -4,6 +4,7 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { CollectionsModule } from '../collections/collections.module';
 import { MedicalHistoryModule } from '../medical-history/medical-history.module';
+import { LeadsModule } from '../leads/leads.module';
 import { CALLER_LOOKUP_CLOCK } from './application/caller-lookup-clock';
 import { CallerLookupUseCase } from './application/caller-lookup.use-case';
 import { CALLER_LOOKUP_REPOSITORY } from './domain/caller-lookup-repository.port';
@@ -17,7 +18,13 @@ import { CallerLookupController } from './presentation/caller-lookup.controller'
  */
 @Module({
   // JwtModule.register({}): JwtAuthGuard depende de TokenService (como PatientsModule).
-  imports: [JwtModule.register({}), CollectionsModule, MedicalHistoryModule],
+  imports: [
+    JwtModule.register({}),
+    CollectionsModule,
+    MedicalHistoryModule,
+    // DX-556: los prospectos con ese número.
+    LeadsModule,
+  ],
   controllers: [CallerLookupController],
   providers: [
     CallerLookupUseCase,

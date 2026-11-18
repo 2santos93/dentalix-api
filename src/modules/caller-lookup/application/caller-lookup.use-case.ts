@@ -16,7 +16,15 @@ import {
   type PatientBalanceView,
 } from '../../collections/application/patient-balance-flags';
 import { PatientMedicalAlertFlags } from '../../medical-history/application/patient-medical-alert-flags';
-import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
+import {
+  CLINICAL_ROLES,
+  LEAD_ROLES,
+} from '../../auth/presentation/guards/clinic-role-sets';
+import {
+  LeadsUseCases,
+  type CallerLeadMatch,
+} from '../../leads/application/leads.use-cases';
 import { CALLER_LOOKUP_CLOCK } from './caller-lookup-clock';
 
 export const CALLER_PHONE_TOO_SHORT_CODE = 'CALLER_PHONE_TOO_SHORT';
@@ -38,6 +46,11 @@ export interface CallerLookupResult {
   matches: CallerLookupMatch[];
   /** Hay más pacientes con ese número que los devueltos: afinar la búsqueda. */
   truncated: boolean;
+  /**
+   * DX-556: prospectos con ese número en las sedes del usuario. Solo para
+   * ADMIN y RECEPTION; los demás roles no reciben la clave.
+   */
+  leads?: CallerLeadMatch[];
 }
 
 /**
@@ -54,9 +67,26 @@ export class CallerLookupUseCase {
     private readonly balances: PatientBalanceFlags,
     private readonly alerts: PatientMedicalAlertFlags,
     @Inject(CALLER_LOOKUP_CLOCK) private readonly now: () => Date,
+    private readonly leads: LeadsUseCases,
   ) {}
 
-  async execute(phone: string, role: ClinicRole): Promise<CallerLookupResult> {
+  /** DX-556: la clave `leads` solo para los roles de prospectos. */
+  private async withLeads(
+    result: CallerLookupResult,
+    e164s: readonly string[],
+    role: ClinicRole,
+    audit: AuditRequestContext | null,
+  ): Promise<CallerLookupResult> {
+    if (!LEAD_ROLES.includes(role) || !audit) return result;
+    return { ...result, leads: await this.leads.byPhones(e164s, audit) };
+  }
+
+  async execute(
+    phone: string,
+    role: ClinicRole,
+    /** DX-556: quién busca, para auditar cada prospecto devuelto. */
+    audit: AuditRequestContext | null = null,
+  ): Promise<CallerLookupResult> {
     const region = await this.repo.defaultPhoneRegion();
     const candidates = callerPhoneCandidates(phone, region);
     if (candidates.status === 'TOO_SHORT') {
@@ -68,12 +98,21 @@ export class CallerLookupUseCase {
         minDigits: MIN_CALLER_DIGITS,
       });
     }
-    if (candidates.status === 'NONE') return { matches: [], truncated: false };
+    if (candidates.status === 'NONE') {
+      return this.withLeads({ matches: [], truncated: false }, [], role, audit);
+    }
 
     const { matches: found, truncated } = await this.repo.findByPhoneE164(
       candidates.e164s,
     );
-    if (found.length === 0) return { matches: [], truncated: false };
+    if (found.length === 0) {
+      return this.withLeads(
+        { matches: [], truncated: false },
+        candidates.e164s,
+        role,
+        audit,
+      );
+    }
     const ids = found.map((m) => m.patientId);
     const now = this.now();
     const clinical = CLINICAL_ROLES.includes(role);
@@ -89,26 +128,31 @@ export class CallerLookupUseCase {
         : Promise.resolve(null),
     ]);
 
-    return {
-      truncated,
-      matches: found.map((m) => ({
-        id: m.patientId,
-        firstName: m.firstName,
-        lastName: m.lastName,
-        matchedBy: m.matchedBy,
-        nextAppointment: next.get(m.patientId) ?? null,
-        lastVisit: last.get(m.patientId) ?? null,
-        balance: balances.get(m.patientId) ?? {
-          overdue: { hasOverdue: false, overdueDays: null },
-          pending: [],
-        },
-        ...(alerts
-          ? {
-              hasCriticalAlert:
-                alerts.get(m.patientId)?.hasCriticalAlert ?? false,
-            }
-          : {}),
-      })),
-    };
+    return this.withLeads(
+      {
+        truncated,
+        matches: found.map((m) => ({
+          id: m.patientId,
+          firstName: m.firstName,
+          lastName: m.lastName,
+          matchedBy: m.matchedBy,
+          nextAppointment: next.get(m.patientId) ?? null,
+          lastVisit: last.get(m.patientId) ?? null,
+          balance: balances.get(m.patientId) ?? {
+            overdue: { hasOverdue: false, overdueDays: null },
+            pending: [],
+          },
+          ...(alerts
+            ? {
+                hasCriticalAlert:
+                  alerts.get(m.patientId)?.hasCriticalAlert ?? false,
+              }
+            : {}),
+        })),
+      },
+      candidates.e164s,
+      role,
+      audit,
+    );
   }
 }

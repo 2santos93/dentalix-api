@@ -208,7 +208,8 @@ BEGIN
     'weekly_digest_runs', 'weekly_digest_deliveries',
     'commission_payments', 'commission_payment_lines', 'commission_receipt_requests',
     'post_op_checks',
-    'location_quote_follow_up_settings', 'session_alerts'
+    'location_quote_follow_up_settings', 'session_alerts',
+    'leads', 'lead_reasons'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);
