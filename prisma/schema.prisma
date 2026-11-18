@@ -1509,6 +1509,11 @@ model DentalCatalogItem {
   // false en DIAGNOSIS).
   requiresPostOpCheck    Boolean     @default(false)
   postOpCheckAfterDays   Int         @default(1) @db.SmallInt
+  // DX-560: «Descripción para el paciente», mapa idioma BCP 47 → texto (≤ 300
+  // caracteres, sin enlaces ni HTML; lo valida la API). '{}' = sin descripción:
+  // el paciente lee el nombre del catálogo en su idioma. CHECK
+  // dental_catalog_items_patient_description_check: objeto y ≤ 8192 bytes.
+  patientDescription     Json        @default("{}")
   active                 Boolean     @default(true)
   // DX-455: plantilla de evolución que se sugiere al marcar hecho este
   // procedimiento; NULL = ninguna. FK compuesta: de la MISMA clínica (SEC-004).
@@ -4261,6 +4266,13 @@ model SignatureRequest {
   /// y su SHA-256. Si el plan vivo deja de coincidir, el enlace no sirve.
   budgetContent      Json?
   budgetContentHash  String?
+  /// DX-560 (BUDGET): cómo se le presenta al paciente, congelado al crear la
+  /// solicitud y FUERA de lo sellado (la firma cubre solo `budgetContent`): el
+  /// texto para el paciente de cada ítem en su idioma, las visitas y, si la
+  /// sede tiene una segunda moneda con tasa guardada ese día, esa moneda y su
+  /// tasa. NULL en las anteriores a DX-560 y en CONSENT (CHECK
+  /// signature_requests_budget_presentation_check).
+  budgetPresentation Json?
 
   tenant           Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   patient          Patient                  @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "signature_requests_patient_fkey")
