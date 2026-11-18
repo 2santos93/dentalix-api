@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   Param,
   Post,
   Put,
@@ -16,10 +17,12 @@ import {
   ApiCreatedResponse,
   ApiExtraModels,
   ApiForbiddenResponse,
+  ApiHeader,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiParam,
   ApiTags,
+  ApiUnprocessableEntityResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
 import { SaveMedicalHistoryDto } from './dto/save-medical-history.dto';
@@ -37,9 +40,16 @@ import { CLINICAL_ROLES } from '../../auth/presentation/guards/clinic-role-sets'
 import { JwtPayload } from '../../../shared/crypto/token.service';
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import {
+  CLINICAL_IDEMPOTENCY_HEADER,
+  CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION,
+  type IdempotencySignals,
+} from '../../../shared/validation/idempotent-create';
 
 interface AuthenticatedRequest {
   user: JwtPayload;
+  /** DX-574: la repetición de un guardado idempotente no escribe: no se audita. */
+  skipAudit?: boolean;
 }
 
 @ApiTags('medical-history')
@@ -90,17 +100,31 @@ export class MedicalHistoryController {
     patient: { param: 'patientId' },
   })
   @Put()
+  @ApiHeader(CLINICAL_IDEMPOTENCY_HEADER)
   @ApiOkResponse({ type: MedicalHistoryDto })
+  @ApiUnprocessableEntityResponse({
+    description: CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION,
+  })
   @ApiNotFoundResponse({
     description:
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
   })
-  save(
+  async save(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: SaveMedicalHistoryDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<MedicalHistory> {
-    return this.saveMedicalHistory.execute(patientId, dto, req.user.sub);
+    const signals: IdempotencySignals = {};
+    const saved = await this.saveMedicalHistory.execute(
+      patientId,
+      dto,
+      req.user.sub,
+      { idempotencyKey, signals },
+    );
+    // DX-574: un reintento con la misma clave no escribió nada.
+    if (signals.replayed) req.skipAudit = true;
+    return saved;
   }
 
   // DX-247 «Sin cambios hoy»: el paciente dice que nada cambió desde la
