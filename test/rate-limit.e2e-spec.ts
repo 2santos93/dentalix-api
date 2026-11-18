@@ -44,6 +44,8 @@ const LOW_LIMITS: RateLimitConfig = {
   'copy-token': { limit: 2, ttlMs: 60_000 },
   'payment-link': { limit: 4, ttlMs: 60_000 },
   'payment-link-token': { limit: 2, ttlMs: 60_000 },
+  'patient-access': { limit: 4, ttlMs: 60_000 },
+  'patient-access-token': { limit: 2, ttlMs: 60_000 },
   'prescription-verify': { limit: 2, ttlMs: 60_000 },
   'branding-host': { limit: 4, ttlMs: 60_000 },
   'branding-miss': { limit: 4, ttlMs: 60_000 },
@@ -256,6 +258,27 @@ describe('Rate limiting (e2e)', () => {
         .post(`/api/v1/public/sign/${tokenA}/verify`)
         .send({ code: '000000' });
       expect(verify.status).not.toBe(429);
+    });
+
+    it('public/patient-access/:token/verify (DX-101): 429 por token y por IP (balde por ruta)', async () => {
+      const verify = (token: string) =>
+        request(app.getHttpServer())
+          .post(`/api/v1/public/patient-access/${token}/verify`)
+          .send({ birthDate: '1990-01-01' });
+      const tokenA = 'P'.repeat(43);
+      // Por token: el mismo enlace admite 2 y el tercero es 429…
+      for (let i = 0; i < LOW_LIMITS['patient-access-token'].limit; i++) {
+        expect((await verify(tokenA)).status).toBe(400);
+      }
+      expectTooMany(await verify(tokenA));
+      // …pero otro token (misma IP) sigue pasando hasta el tope por IP (4).
+      expect((await verify('Q'.repeat(43))).status).toBe(400);
+      expectTooMany(await verify('R'.repeat(43)));
+      // Las rutas con sesión tienen su propio balde (por IP): 401 sin cookie.
+      const me = await request(app.getHttpServer()).get(
+        '/api/v1/public/patient-access/me',
+      );
+      expect(me.status).toBe(401);
     });
 
     it('public/booking (DX-016): 429 por IP en lecturas y escrituras (balde por ruta)', async () => {

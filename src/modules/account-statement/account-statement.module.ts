@@ -51,5 +51,7 @@ import { PaymentsModule } from '../payments/payments.module';
     },
     { provide: ACCOUNT_STATEMENT_CLOCK, useValue: () => new Date() },
   ],
+  // DX-101: el estado de cuenta en el portal del paciente.
+  exports: [GetAccountStatementUseCase],
 })
 export class AccountStatementModule {}

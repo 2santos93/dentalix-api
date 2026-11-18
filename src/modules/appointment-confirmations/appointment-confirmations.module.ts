@@ -43,6 +43,7 @@ import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tena
   ],
   // Los recordatorios automáticos (DX-026) emiten el enlace con el MISMO caso
   // de uso que recepción.
-  exports: [CreateConfirmationLinkUseCase],
+  // DX-101: el portal del paciente confirma por este mismo flujo.
+  exports: [CreateConfirmationLinkUseCase, RespondConfirmationUseCase],
 })
 export class AppointmentConfirmationsModule {}

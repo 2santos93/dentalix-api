@@ -131,6 +131,21 @@ function liveExternalOrderCopies({
   };
 }
 
+function livePatientAccessLinks({
+  tenantId,
+  patientId,
+  now,
+}: Scope): Prisma.PatientAccessLinkWhereInput {
+  // DX-101: vivo mientras no se revoque ni caduque (el bloqueo de 30 min
+  // pasa solo: sigue vivo).
+  return {
+    tenantId,
+    patientId,
+    revokedAt: null,
+    expiresAt: { gt: now },
+  };
+}
+
 /** Enlaces vivos del paciente por tipo (todas las sedes). */
 export async function countLivePublicLinks(
   tx: Tx,
@@ -146,6 +161,7 @@ export async function countLivePublicLinks(
     certificateCopies,
     paymentLinks,
     externalOrderCopies,
+    patientAccessLinks,
   ] = await Promise.all([
     tx.waitlistOffer.count({ where: liveSlotOffers(scope) }),
     tx.signatureRequest.count({ where: liveSignatures(scope, 'CONSENT') }),
@@ -160,6 +176,7 @@ export async function countLivePublicLinks(
     tx.externalOrderCopyLink.count({
       where: liveExternalOrderCopies(scope),
     }),
+    tx.patientAccessLink.count({ where: livePatientAccessLinks(scope) }),
   ]);
   return {
     slotOffers,
@@ -171,6 +188,7 @@ export async function countLivePublicLinks(
     certificateCopies,
     paymentLinks,
     externalOrderCopies,
+    patientAccessLinks,
   };
 }
 
@@ -181,7 +199,8 @@ export async function countLivePublicLinks(
  * quien archiva (sin código ni sesión vigentes), la copia del PDF invalidada,
  * la anamnesis EXPIRED y las copias de la receta (DX-468) y del certificado
  * (DX-306) invalidadas, el enlace de pago anulado (DX-569) y la copia de la
- * orden externa invalidada (DX-572). Ninguna vuelve atrás: desarchivar no las reactiva.
+ * orden externa invalidada (DX-572) y el enlace de acceso del paciente
+ * revocado por quien archiva (DX-101). Ninguna vuelve atrás: desarchivar no las reactiva.
  */
 export async function revokeLivePublicLinks(
   tx: Tx,
@@ -232,6 +251,10 @@ export async function revokeLivePublicLinks(
     where: liveExternalOrderCopies(scope),
     data: { revokedAt: now },
   });
+  const patientAccessLinks = await tx.patientAccessLink.updateMany({
+    where: livePatientAccessLinks(scope),
+    data: { revokedAt: now, revokedById: actorId },
+  });
   return {
     slotOffers: slotOffers.count,
     consentSignatures: consentSignatures.count,
@@ -242,5 +265,6 @@ export async function revokeLivePublicLinks(
     certificateCopies: certificateCopies.count,
     paymentLinks: paymentLinks.count,
     externalOrderCopies: externalOrderCopies.count,
+    patientAccessLinks: patientAccessLinks.count,
   };
 }

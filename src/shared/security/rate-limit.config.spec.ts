@@ -46,6 +46,9 @@ describe('loadRateLimitConfig', () => {
     // DX-569: el enlace de pago público, por IP y por token.
     expect(cfg['payment-link']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['payment-link-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-101: el portal del paciente, por IP y la verificación por token.
+    expect(cfg['patient-access']).toEqual({ limit: 30, ttlMs: 60_000 });
+    expect(cfg['patient-access-token']).toEqual({ limit: 10, ttlMs: 60_000 });
     // DX-443: la copia pública del PDF firmado, por IP y por token.
     expect(cfg['copy-link']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['copy-token']).toEqual({ limit: 10, ttlMs: 60_000 });
@@ -124,6 +127,18 @@ describe('loadRateLimitConfig', () => {
     );
     expect(cfg['payment-link'].limit).toBe(7);
     expect(cfg['payment-link-token']).toEqual({ limit: 2, ttlMs: 1000 });
+  });
+
+  it('DX-101: el portal del paciente se ajusta por entorno', () => {
+    const cfg = loadRateLimitConfig(
+      envOf({
+        RATE_LIMIT_PATIENT_ACCESS_LIMIT: '9',
+        RATE_LIMIT_PATIENT_ACCESS_TOKEN_LIMIT: '3',
+        RATE_LIMIT_PATIENT_ACCESS_TOKEN_TTL_MS: '2000',
+      }),
+    );
+    expect(cfg['patient-access'].limit).toBe(9);
+    expect(cfg['patient-access-token']).toEqual({ limit: 3, ttlMs: 2000 });
   });
 
   it('lee límite y ventana de cada política desde el entorno', () => {

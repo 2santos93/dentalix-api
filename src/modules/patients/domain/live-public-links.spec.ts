@@ -16,6 +16,7 @@ describe('enlaces públicos vivos de un paciente (DX-461)', () => {
       'certificateCopies',
       'paymentLinks',
       'externalOrderCopies',
+      'patientAccessLinks',
     ]);
   });
 
@@ -32,7 +33,8 @@ describe('enlaces públicos vivos de un paciente (DX-461)', () => {
         certificateCopies: 7,
         paymentLinks: 8,
         externalOrderCopies: 9,
+        patientAccessLinks: 10,
       }),
-    ).toBe(45);
+    ).toBe(55);
   });
 });

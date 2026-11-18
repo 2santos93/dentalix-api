@@ -212,6 +212,8 @@ import { PlanTemplateApplyController } from './presentation/plan-template-apply.
   // con los mismos casos de uso que sus `/count`.
   exports: [
     GetTreatmentPlanUseCase,
+    // DX-101: el presupuesto en el portal del paciente.
+    GetPlanQuoteUseCase,
     ListPendingFollowUpUseCase,
     PlanVisitsService,
   ],

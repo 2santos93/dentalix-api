@@ -507,6 +507,9 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       // bloquean el deshacer.
       'ortho_cases.patientId',
       'ortho_visits.patientId',
+      // DX-101: un enlace de acceso del paciente es un acto auditado sobre
+      // él (compartir saldo y presupuestos): bloquea el deshacer.
+      'patient_access_links.patientId',
       'patient_agreements.patientId',
       // DX-306: un certificado emitido (justificante o reposo) es un
       // documento inalterable de una cita atendida: bloquea el deshacer.

@@ -237,6 +237,7 @@ model Tenant {
   // DX-566: controles postoperatorios y sus intentos de llamada.
   postOpChecks                            PostOpCheck[]
   postOpCheckAttempts                     PostOpCheckAttempt[]
+  patientAccessLinks                      PatientAccessLink[]
   // DX-561: seguimiento automático de presupuestos (ajustes y avisos).
   quoteFollowUpSettings                   LocationQuoteFollowUpSettings[]
   quoteFollowUpMessages                   QuoteFollowUpMessage[]
@@ -461,6 +462,8 @@ model User {
   postOpChecksPerformed             PostOpCheck[]                    @relation("PostOpCheckProfessional")
   postOpChecksClosed                PostOpCheck[]                    @relation("PostOpCheckClosedBy")
   postOpCheckAttempts               PostOpCheckAttempt[]
+  patientAccessLinksCreated         PatientAccessLink[]              @relation("PatientAccessLinkCreatedBy")
+  patientAccessLinksRevoked         PatientAccessLink[]              @relation("PatientAccessLinkRevokedBy")
   orthoVisitsAuthored               OrthoVisit[]
   // DX-285: series de alineadores y entregas registradas.
   orthoAlignerSeriesCreated         OrthoAlignerSeries[]
@@ -1009,6 +1012,8 @@ model Patient {
   dentalLabOrders             DentalLabOrder[]
   // DX-566: controles postoperatorios.
   postOpChecks                PostOpCheck[]
+  // DX-101: enlaces de acceso del paciente (estado de cuenta por enlace).
+  patientAccessLinks          PatientAccessLink[]
   // DX-561: avisos del seguimiento automático de presupuestos.
   quoteFollowUpMessages       QuoteFollowUpMessage[]
   // DX-016: reserva online (solicitudes y códigos).
@@ -4868,6 +4873,9 @@ enum AuditResourceType {
   // DX-566: control postoperatorio (alta al marcar hecho, intentos, cierre,
   // anulación, recálculo y la lista del día).
   POST_OP_CHECK
+  // DX-101: enlace de acceso del paciente (alta, verificación, bloqueo y
+  // revocación).
+  PATIENT_ACCESS_LINK
   // DX-016: reserva online (código enviado, verificado o bloqueado; solicitud
   // o reserva creada; aceptada o rechazada por recepción).
   ONLINE_BOOKING
@@ -9417,6 +9425,42 @@ model PostOpCheckAttempt {
   @@index([tenantId, checkId, at], map: "post_op_check_attempts_check_idx")
   @@index([byId], map: "post_op_check_attempts_by_idx")
   @@map("post_op_check_attempts")
+}
+
+// DX-101: los apartados que un enlace de acceso deja ver al paciente.
+enum PatientAccessScope {
+  APPOINTMENTS
+  PLANS
+  ACCOUNT
+}
+
+// DX-101: enlace de solo lectura del paciente (citas, presupuestos y estado de
+// cuenta) con segundo factor (fecha de nacimiento). Solo el hash del token;
+// 5 fallos bloquean 30 min; revocar corta también la sesión abierta.
+model PatientAccessLink {
+  id             String               @id @db.Uuid
+  tenantId       String               @db.Uuid
+  patientId      String               @db.Uuid
+  tokenHash      String               @unique(map: "patient_access_links_token_hash_key")
+  scopes         PatientAccessScope[]
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  revokedById    String?              @db.Uuid
+  failedAttempts Int                  @default(0)
+  lockedUntil    DateTime?
+  lastViewedAt   DateTime?
+  createdById    String               @db.Uuid
+  createdAt      DateTime             @default(now())
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient   Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_access_links_patient_fkey")
+  createdBy User    @relation("PatientAccessLinkCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "patient_access_links_created_by_fkey")
+  revokedBy User?   @relation("PatientAccessLinkRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "patient_access_links_revoked_by_fkey")
+
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "patient_access_links_patient_idx")
+  @@index([createdById], map: "patient_access_links_created_by_idx")
+  @@index([revokedById], map: "patient_access_links_revoked_by_idx")
+  @@map("patient_access_links")
 }
 
 /// DX-561: seguimiento automático de presupuestos presentados, por sede. Sin
