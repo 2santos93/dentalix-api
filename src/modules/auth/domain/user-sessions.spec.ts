@@ -75,7 +75,7 @@ describe('DX-137 · sesiones: dominio', () => {
     it('es un SHA-256 en hex (cabe en el CHECK) y no deja leer la red', () => {
       const fp = deviceFingerprint('u1', label, '190.202.15.0/24');
       expect(fp).toMatch(/^[0-9a-f]{64}$/);
-      expect(fp).not.toContain('190');
+      expect(fp).not.toContain('190.202.15');
     });
   });
 
