@@ -14,6 +14,10 @@ const MAIL_KEY =
 const MFA_KEY =
   'c4e6a8b0d2f4a6c8e0b2d4f6a8c0e2f43f9c1e7a5b2d4f6081a9c3e5d7b9f1a2';
 
+// DX-574: secreto de la clave de los borradores del dispositivo.
+const DRAFTS =
+  '7b1d4f8a2c6e0b3d5f9a1c4e7b0d3f6a8c2e5b9d1f4a7c0e3b6d9f2a5c8e1b4d';
+
 const baseEnv = (
   overrides: Record<string, string | undefined> = {},
 ): Record<string, unknown> => ({
@@ -48,6 +52,7 @@ const prodEnv = (
     MAIL_FROM: 'Dentalix <no-reply@dentalix.app>',
     MAIL_ENCRYPTION_KEY: MAIL_KEY,
     MFA_ENCRYPTION_KEY: MFA_KEY,
+    DEVICE_DRAFT_KEY_SECRET: DRAFTS,
     STORAGE_DRIVER: 's3',
     S3_BUCKET: 'dentalix-files',
     ...overrides,
@@ -75,6 +80,40 @@ describe('validateEnv', () => {
         'PLAN_QUOTE_COMPOSE_V4 debe ser "true" o "false".',
       );
     }
+  });
+
+  describe('DEVICE_DRAFT_KEY_SECRET (DX-574)', () => {
+    it('producción la exige; fuera de producción es opcional', () => {
+      expect(
+        errorOf(prodEnv({ DEVICE_DRAFT_KEY_SECRET: undefined })),
+      ).toContain('DEVICE_DRAFT_KEY_SECRET es obligatoria en producción');
+      expect(() => validateEnv(baseEnv())).not.toThrow();
+    });
+
+    it('rechaza un valor corto, de ejemplo, de CI en producción o igual a un secreto JWT', () => {
+      expect(errorOf(baseEnv({ DEVICE_DRAFT_KEY_SECRET: 'corto' }))).toContain(
+        'DEVICE_DRAFT_KEY_SECRET es demasiado corto',
+      );
+      expect(
+        errorOf(
+          baseEnv({
+            DEVICE_DRAFT_KEY_SECRET: 'change-me-drafts-secret-0123456789abcdef',
+          }),
+        ),
+      ).toContain('valor conocido o de ejemplo');
+      expect(
+        errorOf(
+          prodEnv({
+            DEVICE_DRAFT_KEY_SECRET:
+              'solo-test-ci-drafts-6d2f9a1c4e7b0358d1a4c7e0b3f6a9d2',
+          }),
+        ),
+      ).toContain('secreto ficticio de CI');
+      expect(errorOf(baseEnv({ DEVICE_DRAFT_KEY_SECRET: ACCESS }))).toContain(
+        'DEVICE_DRAFT_KEY_SECRET no puede ser igual a JWT_ACCESS_SECRET',
+      );
+      expect(() => validateEnv(prodEnv())).not.toThrow();
+    });
   });
 
   describe('MFA de plataforma y break-glass (SEC-008)', () => {

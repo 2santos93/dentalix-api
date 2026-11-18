@@ -61,7 +61,7 @@ ALTER TABLE "treatment_plan_items"
   ADD COLUMN "idempotencyFingerprint" TEXT;
 
 -- El único de "treatment_plan_items" (tabla caliente) va CONCURRENTLY en
--- 20270113090100_dx574_plan_items_idempotency_idx.
+-- 20270115090100_dx574_plan_items_idempotency_idx.
 
 ALTER TABLE "prescriptions"
   ADD COLUMN "idempotencyKey" TEXT,

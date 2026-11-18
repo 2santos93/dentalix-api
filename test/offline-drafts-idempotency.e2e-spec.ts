@@ -12,6 +12,7 @@ import {
   registerBody as clinicRegisterBody,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
+import { PasswordService } from '../src/shared/crypto/password.service';
 import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // DX-574: las altas que la web reintenta tras un corte de red (evolución,
@@ -30,6 +31,7 @@ const PASSWORD = 'S3cret!!';
 const RUN = randomUUID().slice(0, 8);
 
 interface Session {
+  email: string;
   tenantId: string;
   userId: string;
   token: string;
@@ -81,6 +83,7 @@ describe('DX-574 · Idempotency-Key de las altas clínicas (e2e)', () => {
       .expect(201);
     const body = reg.body as { tenantId: string; userId: string };
     return {
+      email,
       tenantId: body.tenantId,
       userId: body.userId,
       token: (login.body as { accessToken: string }).accessToken,
@@ -311,6 +314,28 @@ describe('DX-574 · Idempotency-Key de las altas clínicas (e2e)', () => {
     });
   });
 
+  async function login(subdomain: string, email: string): Promise<string> {
+    const res = await http()
+      .post('/api/v1/auth/login')
+      .set('X-Tenant-Host', hostFor(subdomain))
+      .send({ email, password: PASSWORD })
+      .expect(201);
+    return (res.body as { accessToken: string }).accessToken;
+  }
+
+  const sidOf = (token: string): string =>
+    (
+      JSON.parse(
+        Buffer.from(token.split('.')[1], 'base64url').toString('utf8'),
+      ) as { sid: string }
+    ).sid;
+
+  const draftKey = (s: Session, token: string) =>
+    http()
+      .get('/api/v1/me/draft-key')
+      .set('X-Tenant-Host', hostFor(s.subdomain))
+      .set('Authorization', `Bearer ${token}`);
+
   describe('GET /me/draft-key', () => {
     it('32 bytes, la misma al volver a pedirla, distinta en otra clínica, sin caché', async () => {
       const first = await as(a).get('/me/draft-key').expect(200);
@@ -322,6 +347,53 @@ describe('DX-574 · Idempotency-Key de las altas clínicas (e2e)', () => {
       expect((again.body as { key: string }).key).toBe(key);
       expect((other.body as { key: string }).key).not.toBe(key);
       expect(first.headers['cache-control']).toContain('no-store');
+    });
+
+    it('sesión revocada (cerrada desde «Sesiones» o por «No fui yo»): 401 aunque el access token no haya caducado', async () => {
+      const token = await login(a.subdomain, a.email);
+      await draftKey(a, token).expect(200);
+      await raw.refreshSession.update({
+        where: { id: sidOf(token) },
+        data: { revokedAt: new Date() },
+      });
+      await draftKey(a, token).expect(401);
+    });
+
+    it('membresía retirada: 401', async () => {
+      const email = `dentista-${RUN}@${a.subdomain}.com`;
+      const user = await raw.user.create({
+        data: {
+          email,
+          fullName: 'Dr. José Hernández',
+          passwordHash: await new PasswordService().hash(PASSWORD),
+          emailVerifiedAt: new Date(),
+        },
+      });
+      const membership = await raw.clinicMembership.create({
+        data: { tenantId: a.tenantId, userId: user.id, role: 'DENTIST' },
+      });
+      const token = await login(a.subdomain, email);
+      await draftKey(a, token).expect(200);
+      await raw.clinicMembership.update({
+        where: { id: membership.id },
+        data: { deletedAt: new Date() },
+      });
+      await draftKey(a, token).expect(401);
+    });
+
+    it('tokenVersion nueva (contraseña o MFA): el token viejo da 401 y la sesión nueva recibe OTRA clave', async () => {
+      const token = await login(b.subdomain, b.email);
+      const before = await draftKey(b, token).expect(200);
+      await raw.user.update({
+        where: { id: b.userId },
+        data: { tokenVersion: { increment: 1 } },
+      });
+      await draftKey(b, token).expect(401);
+      const fresh = await login(b.subdomain, b.email);
+      const after = await draftKey(b, fresh).expect(200);
+      expect((after.body as { key: string }).key).not.toBe(
+        (before.body as { key: string }).key,
+      );
     });
 
     it('sin sesión: 401', async () => {

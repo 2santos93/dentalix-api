@@ -80,6 +80,8 @@ jobs:
       DIRECT_URL: postgresql://dentalix:dentalix@localhost:5432/dentalix_test?schema=public
       JWT_ACCESS_SECRET: solo-test-ci-access-4f1d9b2e7a6c3058e1b4d7a0c9f2e6b3
       JWT_REFRESH_SECRET: solo-test-ci-refresh-8c2a5e9f1b7d4063a2e5c8f1b4d7a0e9
+      # DX-574: clave de los borradores del dispositivo (ficticia, solo test).
+      DEVICE_DRAFT_KEY_SECRET: solo-test-ci-drafts-6d2f9a1c4e7b0358d1a4c7e0b3f6a9d2
       JWT_ACCESS_TTL: 900s
       JWT_REFRESH_TTL: 30d
       EXCHANGE_APP_ID: ''
@@ -125,7 +127,7 @@ jobs:
       - name: Generar .env.test
         if: ${{ !cancelled() && steps.role.outcome == 'success' }}
         run: |
-          for k in DATABASE_URL DIRECT_URL JWT_ACCESS_SECRET JWT_REFRESH_SECRET \
+          for k in DATABASE_URL DIRECT_URL JWT_ACCESS_SECRET JWT_REFRESH_SECRET DEVICE_DRAFT_KEY_SECRET \
                    JWT_ACCESS_TTL JWT_REFRESH_TTL EXCHANGE_APP_ID EXCHANGE_BASE_URL \
                    TENANT_BASE_DOMAINS TRUST_PROXY STORAGE_DIR FILES_PUBLIC_BASE_URL; do
             printf '%s="%s"\n' "$k" "${!k}"
