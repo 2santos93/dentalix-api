@@ -50,6 +50,7 @@ interface Seeded {
   userId: string;
   patientId: string;
   catalogItemId: string;
+  locationId: string;
 }
 let s: Seeded;
 
@@ -64,7 +65,7 @@ async function seed(): Promise<Seeded> {
       fullName: 'Dra Cierre',
     },
   });
-  await raw.location.create({
+  const location = await raw.location.create({
     data: locationData(REGIONAL_CARACAS_FIXTURE, {
       tenantId: tenant.id,
       name: 'Sede principal',
@@ -93,6 +94,7 @@ async function seed(): Promise<Seeded> {
     userId: user.id,
     patientId: patient.id,
     catalogItemId: item.id,
+    locationId: location.id,
   };
 }
 
@@ -165,6 +167,7 @@ describe('DX-123 · cerrar el plan mientras se edita o quita un ítem (int)', ()
 
   afterAll(async () => {
     const where = { tenantId: s.tenantId };
+    await raw.postOpCheck.deleteMany({ where });
     await raw.treatmentPlanItem.deleteMany({ where });
     await raw.treatmentPlan.deleteMany({ where });
     await raw.patientLedger.deleteMany({ where });
@@ -216,6 +219,38 @@ describe('DX-123 · cerrar el plan mientras se edita o quita un ítem (int)', ()
       expect(item.deletedAt).toBeNull();
     },
   );
+
+  it('DX-566: el 409 del plan cerrado llega ANTES de anular el control postoperatorio pendiente: el control sigue PENDING', async () => {
+    const { planId, itemId } = await draftPlanWithItem();
+    const check = await raw.postOpCheck.create({
+      data: {
+        tenantId: s.tenantId,
+        patientId: s.patientId,
+        planItemId: itemId,
+        locationId: s.locationId,
+        professionalId: s.userId,
+        catalogItemId: s.catalogItemId,
+        procedureName: 'Resina',
+        afterDays: 2,
+        dueOn: new Date('2099-01-12T00:00:00.000Z'),
+      },
+    });
+    const outcome = await whileClosing(
+      planId,
+      TreatmentPlanStatus.CANCELLED,
+      () => remove.execute(itemId, undefined, planId),
+    );
+    expect(outcome).toBeInstanceOf(ConflictException);
+    const after = await raw.postOpCheck.findUniqueOrThrow({
+      where: { id: check.id },
+    });
+    expect(after.status).toBe('PENDING');
+    expect(after.cancelledReason).toBeNull();
+    const item = await raw.treatmentPlanItem.findUniqueOrThrow({
+      where: { id: itemId },
+    });
+    expect(item.deletedAt).toBeNull();
+  });
 
   it('con el plan abierto, quitar el ítem sigue funcionando', async () => {
     const { planId, itemId } = await draftPlanWithItem();
