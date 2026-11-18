@@ -462,12 +462,20 @@ function signatureBudgetAccepted(
         kind: 'paragraph',
         text: `El ${vars.acceptedAtLabel} registramos tu aceptación del presupuesto que te envió ${vars.clinicName}.`,
       },
-      {
-        // DX-514: nunca se manda a la página en la que firmó (ese enlace ya
-        // está usado y dice «Enlace no válido»); la copia la da la clínica.
-        kind: 'paragraph',
-        text: `El enlace con el que firmaste ya no se puede volver a usar. Si necesitas una copia del presupuesto firmado, pídesela a ${vars.clinicName}.`,
-      },
+      vars.viaPortal
+        ? {
+            // DX-101-bis: el portal sigue abierto mientras el enlace viva;
+            // sin enlace en el email (como el resto).
+            kind: 'paragraph',
+            text: `Lo verás como aceptado en tu portal de paciente mientras el enlace que te compartió la clínica siga activo. Si necesitas una copia del presupuesto firmado, pídesela a ${vars.clinicName}.`,
+          }
+        : {
+            // DX-514: nunca se manda a la página en la que firmó (ese enlace
+            // ya está usado y dice «Enlace no válido»); la copia la da la
+            // clínica.
+            kind: 'paragraph',
+            text: `El enlace con el que firmaste ya no se puede volver a usar. Si necesitas una copia del presupuesto firmado, pídesela a ${vars.clinicName}.`,
+          },
       {
         kind: 'note',
         text: 'Si no fuiste tú, avisa a la clínica cuanto antes.',

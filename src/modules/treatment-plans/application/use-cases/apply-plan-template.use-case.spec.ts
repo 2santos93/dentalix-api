@@ -415,6 +415,7 @@ describe('ApplyPlanTemplateUseCase (DX-559)', () => {
         signerName: 'Paciente',
         acceptedAt: new Date(),
         remote: null,
+        portal: null,
       },
     });
     const template = await templates.create(

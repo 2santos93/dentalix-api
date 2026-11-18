@@ -358,6 +358,7 @@ describe('referencia convertida a la moneda del plan (DX-513-bis)', () => {
           signerName: 'Ana Pérez',
           acceptedAt: new Date('2026-10-16T15:00:00.000Z'),
           remote: null,
+          portal: null,
         },
       });
       await expect(

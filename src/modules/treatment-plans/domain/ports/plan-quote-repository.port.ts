@@ -30,6 +30,11 @@ export interface StoredPlanAcceptance {
   /** DX-415: aceptado por el paciente a distancia; `null` en la clínica. */
   remote: PlanAcceptanceRemoteEvidence | null;
   /**
+   * DX-101-bis: aceptado por el paciente desde su portal; `null` en la
+   * clínica o por el enlace de firma. Nunca a la vez que `remote` (CHECK).
+   */
+  portal: PlanAcceptancePortalEvidence | null;
+  /**
    * DX-019-bis (B): el logo congelado al firmar (columna propia, fuera del
    * contenido y de sus hashes); `null` = se firmó sin logo y se imprime sin él.
    */
@@ -53,6 +58,12 @@ export interface PlanAcceptancePartial {
   pendingItemIds: string[];
   /** En la moneda del plan. */
   pendingTotal: number;
+}
+
+/** DX-101-bis: la aceptación desde el portal del paciente (su evidencia). */
+export interface PlanAcceptancePortalEvidence {
+  /** El enlace de acceso con el que entró al portal. */
+  patientAccessLinkId: string;
 }
 
 /** Evidencias de la aceptación a distancia, congeladas al firmar (DX-415). */

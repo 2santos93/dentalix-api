@@ -2783,15 +2783,21 @@ model TreatmentPlanAcceptance {
   pendingPlanId           String?                       @db.Uuid
   pendingItemIds          String[]                      @db.Uuid
   pendingTotal            Decimal?                      @db.Decimal(14, 2)
+  /// DX-101-bis: aceptada por el paciente desde su portal: el enlace de acceso
+  /// de la sesión (FK compuesta: MISMA clínica y MISMO paciente). Con él,
+  /// ninguna evidencia del enlace de firma (CHECK
+  /// treatment_plan_acceptances_remote_check).
+  patientAccessLinkId     String?                       @db.Uuid
 
   // FK COMPUESTAS (SEC-004): plan del MISMO tenant y del MISMO paciente; sede
   // del MISMO tenant.
-  plan             TreatmentPlan           @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
-  pendingPlan      TreatmentPlan?          @relation("TreatmentPlanAcceptancePending", fields: [tenantId, pendingPlanId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, onUpdate: NoAction, map: "treatment_plan_acceptances_pending_plan_fkey")
-  repricing        TreatmentPlanRepricing? @relation(fields: [tenantId, repricingId, planId, patientId], references: [tenantId, id, planId, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_repricing_fkey")
-  signatureRequest SignatureRequest?       @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_signature_request_fkey")
-  location         Location                @relation(fields: [tenantId, locationId], references: [tenantId, id])
-  acceptedBy       User                    @relation(fields: [acceptedById], references: [id])
+  plan              TreatmentPlan           @relation(fields: [tenantId, planId, patientId], references: [tenantId, id, patientId])
+  pendingPlan       TreatmentPlan?          @relation("TreatmentPlanAcceptancePending", fields: [tenantId, pendingPlanId, patientId], references: [tenantId, id, patientId], onDelete: NoAction, onUpdate: NoAction, map: "treatment_plan_acceptances_pending_plan_fkey")
+  repricing         TreatmentPlanRepricing? @relation(fields: [tenantId, repricingId, planId, patientId], references: [tenantId, id, planId, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_repricing_fkey")
+  signatureRequest  SignatureRequest?       @relation(fields: [tenantId, signatureRequestId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_signature_request_fkey")
+  patientAccessLink PatientAccessLink?      @relation(fields: [tenantId, patientAccessLinkId, patientId], references: [tenantId, id, patientId], onDelete: Restrict, map: "treatment_plan_acceptances_patient_access_link_fkey")
+  location          Location                @relation(fields: [tenantId, locationId], references: [tenantId, id])
+  acceptedBy        User                    @relation(fields: [acceptedById], references: [id])
 
   // Una aceptación por plan (volver a firmar: 409).
   @@unique([tenantId, planId, patientId], map: "treatment_plan_acceptances_plan_key")
@@ -2799,6 +2805,7 @@ model TreatmentPlanAcceptance {
   @@index([tenantId, patientId])
   @@index([tenantId, locationId])
   @@index([acceptedById])
+  @@index([tenantId, patientAccessLinkId, patientId], map: "treatment_plan_acceptances_patient_access_link_idx")
   @@map("treatment_plan_acceptances")
 }
 
@@ -9473,11 +9480,15 @@ model PatientAccessLink {
   createdById    String               @db.Uuid
   createdAt      DateTime             @default(now())
 
-  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient   Patient @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_access_links_patient_fkey")
-  createdBy User    @relation("PatientAccessLinkCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "patient_access_links_created_by_fkey")
-  revokedBy User?   @relation("PatientAccessLinkRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "patient_access_links_revoked_by_fkey")
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient         Patient                   @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "patient_access_links_patient_fkey")
+  createdBy       User                      @relation("PatientAccessLinkCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "patient_access_links_created_by_fkey")
+  revokedBy       User?                     @relation("PatientAccessLinkRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict, map: "patient_access_links_revoked_by_fkey")
+  /// DX-101-bis: presupuestos aceptados desde el portal con este enlace.
+  planAcceptances TreatmentPlanAcceptance[]
 
+  // DX-101-bis: destino de la FK compuesta de treatment_plan_acceptances.
+  @@unique([tenantId, id, patientId], map: "patient_access_links_tenant_id_patient_key")
   @@index([tenantId, patientId, createdAt(sort: Desc)], map: "patient_access_links_patient_idx")
   @@index([createdById], map: "patient_access_links_created_by_idx")
   @@index([revokedById], map: "patient_access_links_revoked_by_idx")

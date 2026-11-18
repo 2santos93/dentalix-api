@@ -46,6 +46,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'payment-link-token': { limit: 2, ttlMs: 60_000 },
   'patient-access': { limit: 4, ttlMs: 60_000 },
   'patient-access-token': { limit: 2, ttlMs: 60_000 },
+  'patient-access-accept': { limit: 2, ttlMs: 60_000 },
   'prescription-verify': { limit: 2, ttlMs: 60_000 },
   'branding-host': { limit: 4, ttlMs: 60_000 },
   'branding-miss': { limit: 4, ttlMs: 60_000 },
@@ -279,6 +280,24 @@ describe('Rate limiting (e2e)', () => {
         '/api/v1/public/patient-access/me',
       );
       expect(me.status).toBe(401);
+    });
+
+    it('public/patient-access/me/plans/:planId/accept (DX-101-bis): 429 por sesión (cookie), otra sesión sigue', async () => {
+      const accept = (session: string) =>
+        request(app.getHttpServer())
+          .post(
+            '/api/v1/public/patient-access/me/plans/7a1c2e3f-4b5d-4e6f-8a9b-0c1d2e3f4a5b/accept',
+          )
+          .set('Cookie', `dentalix_pa=${session}`)
+          .send({});
+      // La cookie no es válida (401 en el guard), pero el limitador va antes
+      // y cuenta por su valor: la misma sesión admite 2 y la tercera es 429…
+      for (let i = 0; i < LOW_LIMITS['patient-access-accept'].limit; i++) {
+        expect((await accept('sesion-a')).status).toBe(401);
+      }
+      expectTooMany(await accept('sesion-a'));
+      // …y otra sesión (misma IP) sigue pasando.
+      expect((await accept('sesion-b')).status).toBe(401);
     });
 
     it('public/booking (DX-016): 429 por IP en lecturas y escrituras (balde por ruta)', async () => {

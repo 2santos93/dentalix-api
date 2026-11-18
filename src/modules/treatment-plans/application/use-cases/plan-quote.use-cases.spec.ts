@@ -350,6 +350,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
       integrityOk: true,
       // Firmada en la clínica: sin evidencias del enlace (DX-415).
       remote: null,
+      portal: null,
       ipAddress: '10.0.0.1',
       userAgent: 'jest',
       // DX-379 (C): sin validez guardada ni vencimiento.
@@ -469,6 +470,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
           ipAddress: null,
           userAgent: null,
           remote: null,
+          portal: null,
           clinicLogoUrl: null,
           expiry: NO_EXPIRED_ACCEPTANCE,
           acceptanceHash: computeAcceptanceHash({
@@ -658,6 +660,7 @@ describe('DX-502: plan en EUR con el catálogo en VES', () => {
         ipAddress: null,
         userAgent: null,
         remote: null,
+        portal: null,
         clinicLogoUrl: null,
         expiry: NO_EXPIRED_ACCEPTANCE,
         acceptanceHash: computeAcceptanceHash({

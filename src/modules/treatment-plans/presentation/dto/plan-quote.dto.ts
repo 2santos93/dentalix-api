@@ -349,6 +349,14 @@ export class PlanQuoteAcceptanceDto {
   remote!: PlanQuoteRemoteAcceptanceDto | null;
 
   @ApiProperty({
+    type: () => PlanQuotePortalAcceptanceDto,
+    nullable: true,
+    description:
+      'DX-101-bis: «Aceptado desde el portal del paciente» (con su firma, en su sesión del portal); null si se firmó en la clínica o por el enlace con código.',
+  })
+  portal!: PlanQuotePortalAcceptanceDto | null;
+
+  @ApiProperty({
     type: String,
     format: 'date',
     nullable: true,
@@ -412,6 +420,15 @@ export class PlanQuoteAcceptanceDto {
       'DX-417: total de lo pendiente al firmar, en la moneda del plan. Línea del documento: «Aceptación parcial: N procedimientos ({moneda} {pendingTotal}) quedan en un presupuesto pendiente.». null si se aceptó entero.',
   })
   pendingTotal!: number | null;
+}
+
+/** DX-101-bis: la aceptación desde el portal del paciente. */
+export class PlanQuotePortalAcceptanceDto {
+  @ApiProperty({
+    format: 'uuid',
+    description: 'El enlace de acceso al portal con el que entró el paciente.',
+  })
+  patientAccessLinkId!: string;
 }
 
 /** Evidencias de la aceptación a distancia (DX-415), congeladas al firmar. */

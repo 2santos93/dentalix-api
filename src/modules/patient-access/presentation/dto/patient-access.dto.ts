@@ -3,11 +3,14 @@ import {
   ArrayMaxSize,
   ArrayMinSize,
   ArrayUnique,
+  Equals,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -27,6 +30,8 @@ import {
   PlanQuoteItemDto,
   PlanQuoteLocationDto,
 } from '../../../treatment-plans/presentation/dto/plan-quote.dto';
+import { SIGNATURE_MAX_CHARS } from '../../../consents/presentation/dto/sign-patient-consent.dto';
+import { PORTAL_SIGNER_NAME_MAX } from '../../domain/portal-quote-acceptance';
 import {
   PATIENT_ACCESS_MAX_TTL_DAYS,
   PATIENT_ACCESS_MIN_TTL_DAYS,
@@ -422,6 +427,34 @@ export class PortalPlanDto {
   optionLabel!: string | null;
 
   @ApiProperty({
+    description:
+      'DX-101-bis: se puede aceptar desde el portal («Aceptar presupuesto»; con opciones A/B, «Elegir esta opción»): presentado, sin firmar, con ítems, no vencido y sin otra opción del grupo elegida.',
+  })
+  acceptable!: boolean;
+
+  @ApiProperty({
+    example: '2026-12-18',
+    description:
+      'Último día válido del presupuesto (AAAA-MM-DD), el de `quote.validUntil`.',
+  })
+  validUntil!: string;
+
+  @ApiProperty({
+    pattern: '^[0-9a-f]{64}$',
+    description:
+      'El hash del presupuesto mostrado (el de `quote.contentHash`): se manda tal cual al aceptar.',
+  })
+  contentHash!: string;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'Aceptado: la hora del servidor de la firma; si no, null.',
+  })
+  acceptedAt!: Date | null;
+
+  @ApiProperty({
     type: PortalQuoteDto,
     description:
       'El presupuesto de DX-012 (ítems y totales) tal como se imprime para el paciente; de la aceptación, solo quién firmó, la firma y cuándo.',
@@ -471,6 +504,49 @@ export class PatientPortalDto {
       'El estado de cuenta de DX-011 con los mismos importes que ve el personal, sin datos internos (quién registró o anuló, si se puede anular); null si no se compartió.',
   })
   account!: PortalAccountDto | null;
+}
+
+export class AcceptPortalQuoteDto {
+  @ApiProperty({
+    maxLength: PORTAL_SIGNER_NAME_MAX,
+    example: 'María José Pérez',
+    description:
+      'Nombre de quien firma (el paciente o el responsable de un menor), 1–120 caracteres tras recortar.',
+  })
+  @IsString({ message: 'Escribe tu nombre para firmar.' })
+  @MaxLength(PORTAL_SIGNER_NAME_MAX, {
+    message: `El nombre admite hasta ${PORTAL_SIGNER_NAME_MAX} caracteres.`,
+  })
+  signerName!: string;
+
+  @ApiProperty({
+    description:
+      'Firma en PNG (data:image/png;base64,… o base64), máx. 200 KB: la misma validación que la firma a distancia.',
+  })
+  @IsString()
+  @MaxLength(SIGNATURE_MAX_CHARS)
+  signature!: string;
+
+  @ApiProperty({
+    pattern: '^[0-9a-f]{64}$',
+    description:
+      'El `contentHash` del presupuesto que mostró el portal. Si cambió desde entonces: 409 PORTAL_QUOTE_CHANGED.',
+  })
+  @IsString()
+  @Matches(/^[0-9a-f]{64}$/, {
+    message: 'contentHash debe ser un SHA-256 en hexadecimal',
+  })
+  contentHash!: string;
+
+  @ApiProperty({
+    description:
+      'Confirma que leyó el presupuesto y lo acepta (debe ser true).',
+  })
+  @IsBoolean()
+  @Equals(true, {
+    message: 'Confirma que leíste el presupuesto y lo aceptas.',
+  })
+  consent!: boolean;
 }
 
 export class PortalAppointmentConfirmedDto {

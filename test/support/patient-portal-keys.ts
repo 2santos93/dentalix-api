@@ -188,11 +188,26 @@ export const PORTAL_RESPONSE_KEYS: ReadonlySet<string> = new Set([
   'plans[].status',
   'plans[].optionGroupId',
   'plans[].optionLabel',
+  // DX-101-bis: aceptar desde el portal.
+  'plans[].acceptable',
+  'plans[].validUntil',
+  'plans[].contentHash',
+  'plans[].acceptedAt',
   'plans[].quote',
   ...QUOTE.map((k) => `plans[].quote.${k}`),
   'account',
   ...ACCOUNT.map((k) => `account.${k}`),
 ]);
+
+/**
+ * DX-101-bis: la respuesta de aceptar (`POST …/me/plans/:planId/accept`): un
+ * plan del portal, con la misma lista blanca que `plans[]` de `GET me`.
+ */
+export const PORTAL_PLAN_KEYS: ReadonlySet<string> = new Set(
+  [...PORTAL_RESPONSE_KEYS]
+    .filter((k) => k.startsWith('plans[].'))
+    .map((k) => k.slice('plans[].'.length)),
+);
 
 /** Todas las rutas de claves de un valor JSON (`a.b[].c`). */
 export function keyPaths(value: unknown, prefix = ''): Set<string> {

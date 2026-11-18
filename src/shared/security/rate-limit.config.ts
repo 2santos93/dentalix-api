@@ -71,6 +71,10 @@
  *                  por IP. Los 5 fallos de fecha son aparte (BD y espejo).
  * - patient-access-token: la verificación, por TOKEN (sin IP), como
  *                  payment-link-token.
+ * - patient-access-accept: aceptar un presupuesto desde el portal
+ *                  (DX-101-bis), por SESIÓN (la cookie del portal, sin IP),
+ *                  además de `patient-access` por IP. Variables:
+ *                  RATE_LIMIT_PATIENT_ACCESS_ACCEPT_*.
  * - public-files:  servir los avatares (`GET /files/avatars/:name`), por IP
  *                  (DX-259). Ruta anónima que llega al bucket; con la caché
  *                  del navegador (clave versionada, `immutable`) el uso
@@ -146,6 +150,7 @@ export type RateLimitPolicy =
   | 'payment-link-token'
   | 'patient-access'
   | 'patient-access-token'
+  | 'patient-access-accept'
   | 'prescription-verify'
   | 'branding-host'
   | 'branding-miss'
@@ -191,6 +196,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'payment-link-token': { limit: 10, ttlMs: MINUTE },
   'patient-access': { limit: 30, ttlMs: MINUTE },
   'patient-access-token': { limit: 10, ttlMs: MINUTE },
+  'patient-access-accept': { limit: 10, ttlMs: MINUTE },
   'prescription-verify': { limit: 30, ttlMs: MINUTE },
   'branding-host': { limit: 600, ttlMs: MINUTE },
   'branding-miss': { limit: 60, ttlMs: MINUTE },
@@ -249,6 +255,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'payment-link-token': rule('payment-link-token'),
     'patient-access': rule('patient-access'),
     'patient-access-token': rule('patient-access-token'),
+    'patient-access-accept': rule('patient-access-accept'),
     'prescription-verify': rule('prescription-verify'),
     'branding-host': rule('branding-host'),
     'branding-miss': rule('branding-miss'),

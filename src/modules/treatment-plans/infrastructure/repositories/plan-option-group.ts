@@ -22,7 +22,7 @@ import { loadTenantZones } from '../../../../shared/locations/reference-location
 export const OTHER_OPTION_ALREADY_ACCEPTED_MESSAGE =
   'Otra opción de este grupo ya está aceptada: un grupo admite una sola opción elegida.';
 
-interface LockedPlanRow {
+export interface LockedPlanRow {
   id: string;
   optionGroupId: string | null;
 }
