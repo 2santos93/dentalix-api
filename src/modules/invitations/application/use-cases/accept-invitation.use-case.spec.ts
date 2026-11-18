@@ -16,6 +16,10 @@ import { TokenService } from '../../../../shared/crypto/token.service';
 import { hashInvitationToken } from '../invitation-token';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 
+const sessionsStub = {
+  open: jest.fn().mockResolvedValue(undefined),
+} as never;
+
 function makePassword(overrides: Partial<PasswordService> = {}) {
   return {
     hash: jest.fn().mockResolvedValue('NEW_HASH'),
@@ -71,6 +75,7 @@ describe('AcceptInvitationUseCase', () => {
       new TenantContextService(),
       makeAudit(),
       noSecondFactor,
+      sessionsStub,
     );
 
     // Deliberately NOT wrapped in ctx.run(...): mirrors a request that hit an
@@ -101,6 +106,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       makeAudit(),
       noSecondFactor,
+      sessionsStub,
     );
 
     const result = await ctx.run('t1', () =>
@@ -135,6 +141,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       makeAudit(),
       { needsSecondFactor: () => Promise.resolve(true) } as never,
+      sessionsStub,
     );
     const result = await ctx.run('t1', () =>
       uc.execute({ token: 'tok-mfa', password: 'longenough1' }),
@@ -160,6 +167,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       audit,
       noSecondFactor,
+      sessionsStub,
     );
 
     await ctx.run('t1', () =>
@@ -234,6 +242,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       makeAudit(),
       noSecondFactor,
+      sessionsStub,
     );
 
     const result = await ctx.run('t1', () =>
@@ -271,6 +280,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       makeAudit(),
       noSecondFactor,
+      sessionsStub,
     );
 
     await expect(
@@ -311,6 +321,7 @@ describe('AcceptInvitationUseCase', () => {
         ctx,
         makeAudit(),
         noSecondFactor,
+        sessionsStub,
       );
 
       await expect(
@@ -330,6 +341,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       makeAudit(),
       noSecondFactor,
+      sessionsStub,
     );
 
     await expect(
@@ -350,6 +362,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       makeAudit(),
       noSecondFactor,
+      sessionsStub,
     );
 
     await expect(
@@ -382,6 +395,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       makeAudit(),
       noSecondFactor,
+      sessionsStub,
     );
 
     await expect(
@@ -413,6 +427,7 @@ describe('AcceptInvitationUseCase', () => {
       ctx,
       makeAudit(),
       noSecondFactor,
+      sessionsStub,
     );
 
     await ctx.run('tenant-from-context', () =>
@@ -441,6 +456,7 @@ describe('AcceptInvitationUseCase', () => {
         ctx,
         makeAudit(),
         noSecondFactor,
+        sessionsStub,
       );
 
       await ctx.run('t1', () =>
@@ -476,6 +492,7 @@ describe('AcceptInvitationUseCase', () => {
         ctx,
         audit,
         noSecondFactor,
+        sessionsStub,
       );
 
       await ctx.run('t1', () =>
@@ -523,6 +540,7 @@ describe('AcceptInvitationUseCase', () => {
         ctx,
         audit,
         noSecondFactor,
+        sessionsStub,
       );
 
       await ctx.run('t1', () =>
@@ -548,6 +566,7 @@ describe('AcceptInvitationUseCase', () => {
         ctx,
         makeAudit(),
         noSecondFactor,
+        sessionsStub,
       );
 
       await expect(
@@ -569,6 +588,7 @@ describe('AcceptInvitationUseCase', () => {
         ctx,
         makeAudit(),
         noSecondFactor,
+        sessionsStub,
       );
 
       await expect(
@@ -612,6 +632,7 @@ describe('AcceptInvitationUseCase', () => {
           ctx,
           audit,
           noSecondFactor,
+          sessionsStub,
         ),
         audit,
         password,
@@ -767,6 +788,7 @@ describe('AcceptInvitationUseCase', () => {
         ctx,
         makeAudit(),
         noSecondFactor,
+        sessionsStub,
       );
       await ctx.run('t1', () =>
         uc.execute({ token: 'tok-loc', password: 'longenough1' }),

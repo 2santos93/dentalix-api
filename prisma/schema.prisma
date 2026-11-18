@@ -34,6 +34,11 @@ model Tenant {
   requireAdminMfa                         Boolean                          @default(false)
   // DX-021-bis: la exige a TODOS los miembros (implica `requireAdminMfa`).
   requireAllMfa                           Boolean                          @default(false)
+  // DX-137: minutos sin actividad tras los que se cierra la sesión (en la web
+  // y en /auth/refresh). CHECK 15..240 en la BD. PUT /security-policy (ADMIN).
+  sessionIdleMinutes                      Int                              @default(60)
+  clinicSessions                          ClinicSession[]
+  sessionAlerts                           SessionAlert[]
   // DX-247: meses que vale una anamnesis (o su última confirmación «Sin
   // cambios hoy») antes de salir «Anamnesis caducada». CHECK 1..60 en la BD.
   anamnesisValidityMonths                 Int                              @default(12)
@@ -394,6 +399,10 @@ model User {
   mfaRecoveryCodes        UserMfaRecoveryCode[]
   // DX-021-bis: dispositivos que no piden el código durante 30 días.
   trustedDevices          UserTrustedDevice[]
+  // DX-137: dispositivos ya vistos (aviso de inicio de sesión nuevo) y los
+  // enlaces «No fui yo».
+  loginDevices            UserLoginDevice[]
+  sessionAlerts           SessionAlert[]
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   deletedAt               DateTime?
@@ -3629,18 +3638,86 @@ model RevokedToken {
 /// Tabla GLOBAL (sin tenant ni RLS), como `revoked_tokens`; se purga cuando
 /// vence el último token de la familia (`expiresAt`).
 model RefreshSession {
-  id          String    @id @db.Uuid
-  userId      String    @db.Uuid
-  currentJti  String
-  previousJti String?
-  rotatedAt   DateTime?
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  createdAt   DateTime  @default(now())
+  id           String    @id @db.Uuid
+  userId       String    @db.Uuid
+  currentJti   String
+  previousJti  String?
+  rotatedAt    DateTime?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  /// DX-137: navegador y sistema ya resumidos («Chrome en Windows»); nunca el
+  /// user-agent. NULL en familias anteriores o sin user-agent.
+  deviceLabel  String?
+  /// DX-137: IP truncada (/24 IPv4, /48 IPv6); nunca la IP completa (CHECK).
+  ipPrefix     String?
+  /// DX-137: último refresh (NULL = ninguno aún: cuenta desde `createdAt`).
+  lastSeenAt   DateTime?
+  /// DX-137: `tokenVersion` del token vigente. Si ya no es la del usuario
+  /// (cambio de contraseña, MFA, «No fui yo»), la familia está muerta: no se
+  /// lista. NULL en las anteriores hasta su próximo refresh.
+  tokenVersion Int?
+
+  clinicSession ClinicSession?
 
   @@index([expiresAt])
   @@index([userId])
   @@map("refresh_sessions")
+}
+
+/// DX-137: a qué clínica pertenece una familia de refresh (una por login en el
+/// host de la clínica; la cookie es host-only). Tabla de CLÍNICA con RLS
+/// FORCE: la lista de sesiones (propia y del ADMIN) se lee bajo la RLS. La
+/// fila no cambia; desaparece con su familia (CASCADE).
+model ClinicSession {
+  sessionId String   @id @db.Uuid
+  tenantId  String   @db.Uuid
+  createdAt DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  session RefreshSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("clinic_sessions")
+}
+
+/// DX-137: enlace «No fui yo» del aviso de inicio de sesión nuevo. Solo el
+/// SHA-256 del token; un solo uso (`usedAt`, guarda en la BD), 24 h. Tabla de
+/// CLÍNICA con RLS: el enlace solo vale en el host de la clínica donde se
+/// entró. La app nunca lo borra.
+model SessionAlert {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId  String    @db.Uuid
+  userId    String    @db.Uuid
+  /// Familia que disparó el aviso (sin FK: el aviso sobrevive a su purga).
+  sessionId String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId])
+  @@map("session_alerts")
+}
+
+/// DX-137: huella de un dispositivo desde el que el usuario ya entró
+/// (SHA-256 de usuario + navegador y SO + prefijo de IP). Un login cuya huella
+/// no se vio en 90 días dispara el aviso. Tabla GLOBAL del usuario, sin RLS
+/// (como `user_trusted_devices`); se purga a los 90 días sin uso.
+model UserLoginDevice {
+  userId      String   @db.Uuid
+  fingerprint String
+  firstSeenAt DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+  lastSeenAt  DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, fingerprint])
+  @@index([lastSeenAt])
+  @@map("user_login_devices")
 }
 
 /// Configuración de horario de atención de una SEDE (una fila por sede).
@@ -4802,6 +4879,8 @@ enum EmailTemplate {
   EXTERNAL_ORDER_COPY       @map("external-order-copy")
   // DX-568: resumen semanal para el dueño.
   WEEKLY_DIGEST             @map("weekly-digest")
+  // DX-137: aviso de inicio de sesión desde un dispositivo nuevo.
+  NEW_LOGIN                 @map("new-login")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario

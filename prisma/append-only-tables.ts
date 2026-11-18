@@ -82,6 +82,9 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-566: los intentos de llamada del control postoperatorio (solo se
   // añaden; dx_post_op_check_attempts_immutable).
   'post_op_check_attempts',
+  // DX-137: a qué clínica pertenece una familia de refresh (solo se crea; se
+  // va con su familia por la cascada).
+  'clinic_sessions',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */
@@ -147,6 +150,8 @@ export const NO_APP_DELETE = [
   // DX-566: el control postoperatorio se cierra o se anula, nunca se borra
   // (dx_post_op_checks_guard).
   'post_op_checks',
+  // DX-137: el enlace «No fui yo» solo se marca usado (dx_session_alert_guard).
+  'session_alerts',
 ] as const;
 
 /**

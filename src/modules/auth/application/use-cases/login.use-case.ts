@@ -25,6 +25,7 @@ import {
 import { currentRequestId } from '../../../../shared/observability/request-context';
 import { MfaChallengeService } from '../mfa-challenge.service';
 import { UserMfaService } from '../user-mfa.service';
+import { UserSessionsService } from '../user-sessions.service';
 
 export interface PlatformLoginInput {
   email: string;
@@ -76,6 +77,7 @@ export class LoginUseCase {
     private readonly mfa: UserMfaService,
     private readonly challenges: MfaChallengeService,
     @Inject(MFA_NOTIFIER) private readonly notifier: MfaNotifier,
+    private readonly sessions: UserSessionsService,
   ) {}
 
   async execute(input: LoginInput): Promise<LoginResult> {
@@ -133,13 +135,24 @@ export class LoginUseCase {
         input.ip ?? null,
       );
     }
-    return this.tokens.issue({
+    const pair = await this.tokens.issue({
       sub: membership.userId,
       tenantId: input.tenantId,
       role: membership.role,
       tv: membership.tokenVersion,
       ...locationClaim(membership.role, membership.allowedLocationIds),
     });
+    // DX-137: la sesión, con su dispositivo, en «Mi perfil › Sesiones»; y el
+    // aviso si entra desde uno que no se vio en 90 días.
+    await this.sessions.open({
+      refreshToken: pair.refreshToken,
+      userId: membership.userId,
+      tenantId: input.tenantId,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+      kind: 'LOGIN',
+    });
+    return pair;
   }
 
   /**

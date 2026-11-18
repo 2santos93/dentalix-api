@@ -31,6 +31,7 @@ export const EMAIL_TEMPLATES = [
   'payment-report-rejected',
   'external-order-copy',
   'weekly-digest',
+  'new-login',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -75,6 +76,9 @@ export const TENANT_DAILY_BUDGET: Readonly<
   // DX-568: lo dispara la clínica (su trabajo semanal o el ADMIN que pide la
   // prueba): cuenta en el tope diario.
   'weekly-digest': 'clinic',
+  // DX-137: aviso de seguridad del inicio de sesión de un miembro en la
+  // clínica, como `mfa-notice` (se encola sin tope: no se calla).
+  'new-login': 'clinic',
 };
 
 /** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
@@ -468,6 +472,24 @@ export interface WeeklyDigestEmailSection {
  * DX-568: resumen semanal para los ADMIN de la clínica. Solo recuentos e
  * importes por sede: ni un nombre, documento ni dato de ningún paciente.
  */
+/**
+ * DX-137: alguien entró a la cuenta desde un dispositivo que no se vio en 90
+ * días. Solo lo resumido: navegador y sistema y la red (IP truncada).
+ */
+export interface NewLoginEmailVars {
+  userName: string;
+  clinicName: string;
+  /** «Chrome en Windows». */
+  deviceLabel: string;
+  /** «190.202.15.0/24», o `null` si no se supo. */
+  ipPrefix: string | null;
+  /** Cuándo, en la zona y el formato de la clínica, o `null` si no los tiene. */
+  whenLabel: string | null;
+  /** Enlace «No fui yo» (`/no-fui-yo/<token>`). */
+  notMeUrl: string;
+  expiresInHours: number;
+}
+
 export interface WeeklyDigestEmailVars {
   clinicName: string;
   /** «3 nov–9 nov». */
@@ -506,6 +528,7 @@ export interface EmailVarsByTemplate {
   'payment-report-rejected': PaymentReportRejectedEmailVars;
   'external-order-copy': ExternalOrderCopyEmailVars;
   'weekly-digest': WeeklyDigestEmailVars;
+  'new-login': NewLoginEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

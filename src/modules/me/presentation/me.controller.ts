@@ -1,3 +1,4 @@
+import { UserSessionsService } from '../../auth/application/user-sessions.service';
 import {
   BadRequestException,
   Body,
@@ -107,6 +108,7 @@ export class MeController {
     private readonly setMyAvatar: SetMyAvatarUseCase,
     private readonly removeMyAvatar: RemoveMyAvatarUseCase,
     private readonly cookie: SessionCookieService,
+    private readonly userSessions: UserSessionsService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -131,13 +133,20 @@ export class MeController {
 
   @Get()
   @ApiOkResponse({ type: MyProfileDto })
-  me(@Req() req: AuthenticatedRequest): Promise<MyProfile> {
+  async me(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<MyProfile & { sessionIdleMinutes: number }> {
     const user = tenantUserOrThrow(req.user);
-    return this.getMyProfile.execute({
+    const profile = await this.getMyProfile.execute({
       userId: user.sub,
       tenantId: user.tenantId,
       role: user.role,
     });
+    // DX-137: la web cierra la sesión tras estos minutos sin actividad.
+    return {
+      ...profile,
+      sessionIdleMinutes: await this.userSessions.idleMinutes(user.tenantId),
+    };
   }
 
   // DX-359: la sesión se comprueba ANTES de escribir (un token de plataforma

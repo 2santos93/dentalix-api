@@ -127,6 +127,7 @@ describe('TokenService', () => {
       sid: 'fam-1',
       jti: decoded.jti,
       expiresAt: new Date(decoded.exp * 1000),
+      tokenVersion: payload.tv,
     });
   });
 
@@ -143,11 +144,18 @@ describe('TokenService', () => {
     expect(decoded.jti).toBe(original.jti);
     expect(decoded.exp).toBe(original.exp);
     expect(decoded.sid).toBe('fam-1');
-    // El access token sí es nuevo (y no lleva familia).
-    const access = (await svc.verifyAccess(again.accessToken)) as {
-      sid?: string;
-    };
-    expect(access.sid).toBeUndefined();
+    // El access token sí es nuevo; DX-137: lleva la MISMA familia (marca
+    // «este dispositivo» en la lista de sesiones).
+    const access = await svc.verifyAccess(again.accessToken);
+    expect(access.sid).toBe('fam-1');
+  });
+
+  it('DX-137: access y refresh de un login nuevo comparten familia', async () => {
+    const pair = await svc.issue(payload);
+    const access = await svc.verifyAccess(pair.accessToken);
+    const refresh = await svc.verifyRefresh(pair.refreshToken);
+    expect(access.sid).toBe(refresh.sid);
+    expect(svc.accessTtlMs(pair.accessToken)).toBeGreaterThan(0);
   });
 });
 

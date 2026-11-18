@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { KNOWN_DEVICE_WINDOW_DAYS } from '../../domain/user-sessions';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import type {
   PurgedTokens,
@@ -39,7 +40,11 @@ export class PrismaTokenMaintenanceRepository implements TokenMaintenanceReposit
       DELETE FROM "login_throttles"
        WHERE "lastFailureAt" < ${now} - make_interval(secs => ${loginThrottleStaleMs / 1000}::double precision)
          AND ("blockedUntil" IS NULL OR "blockedUntil" <= ${now})`;
+    const loginDevices = await this.prisma.$executeRaw`
+      DELETE FROM "user_login_devices"
+       WHERE "lastSeenAt" < ${now} - make_interval(days => ${KNOWN_DEVICE_WINDOW_DAYS}::int)`;
     return {
+      loginDevices,
       revokedTokens,
       refreshSessions,
       userTokens,

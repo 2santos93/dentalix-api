@@ -177,7 +177,7 @@ BEGIN
     'financial_lock_overrides',
     'commission_settlements', 'commission_settlement_lines',
     'catalog_price_batches', 'catalog_price_history',
-    'post_op_check_attempts'
+    'post_op_check_attempts', 'clinic_sessions'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);
@@ -206,7 +206,7 @@ BEGIN
     'commission_rules',
     'weekly_digest_runs', 'weekly_digest_deliveries',
     'commission_payments', 'commission_payment_lines', 'commission_receipt_requests',
-    'post_op_checks'
+    'post_op_checks', 'session_alerts'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);

@@ -127,6 +127,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /auth/forgot-password': PUBLIC_TENANT,
   'POST /auth/reset-password/check': PUBLIC_TENANT,
   'POST /auth/reset-password': PUBLIC_TENANT,
+  // DX-137: el enlace «No fui yo» del aviso de inicio de sesión nuevo.
+  'POST /auth/session-alerts/not-me': PUBLIC_TENANT,
   // GLOBAL-G1 (spec §3.5, R18): monedas para el formulario anónimo de
   // registro; la misma lista global de GET /currencies, con el límite de
   // POST /auth/register.
@@ -202,6 +204,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /me/password': AUTHENTICATED,
   // DX-021: verificación en dos pasos de la cuenta propia (sesión de clínica).
   'GET /me/mfa': EVERY_ROLE,
+  // DX-137: «Mi perfil › Sesiones».
+  'GET /me/sessions': EVERY_ROLE,
+  'DELETE /me/sessions/:sessionId': EVERY_ROLE,
+  'POST /me/sessions/revoke-others': EVERY_ROLE,
   'POST /me/mfa/enrollment': EVERY_ROLE,
   'POST /me/mfa/enrollment/confirm': EVERY_ROLE,
   'POST /me/mfa/disable': EVERY_ROLE,
@@ -1204,6 +1210,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-021-bis: la verificación en dos pasos de otro miembro.
   'GET /staff/:userId/mfa': ADMIN_ONLY,
   'POST /staff/:userId/mfa/reset': ADMIN_ONLY,
+  // DX-137: sesiones de un miembro.
+  'GET /staff/:userId/sessions': ADMIN_ONLY,
+  'DELETE /staff/:userId/sessions/:sessionId': ADMIN_ONLY,
+  'POST /staff/:userId/sessions/revoke-all': ADMIN_ONLY,
   // DX-089: sedes permitidas de un miembro.
   // DX-090: permisos extra de un miembro (solo ADMIN; nunca los propios).
   'PUT /staff/:userId/permissions': ADMIN_ONLY,

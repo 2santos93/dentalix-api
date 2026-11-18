@@ -35,7 +35,11 @@ function activeMember(
   return {
     tokenVersion,
     isPlatformAdmin: false,
-    tenant: { membershipRole: role, allowedLocationIds },
+    tenant: {
+      membershipRole: role,
+      allowedLocationIds,
+      sessionIdleMinutes: 60,
+    },
   };
 }
 
@@ -64,7 +68,9 @@ function setup(opts: {
       sid: 'fam-1',
       jti: 'jti-2',
       expiresAt: new Date((EXP + 60) * 1000),
+      tokenVersion: 0,
     }),
+    accessTtlMs: jest.fn().mockReturnValue(900_000),
   };
   const repo = {
     findSessionState: jest.fn().mockResolvedValue(opts.state),
@@ -173,7 +179,11 @@ describe('RefreshUseCase', () => {
       state: {
         tokenVersion: 0,
         isPlatformAdmin: false,
-        tenant: { membershipRole: null, allowedLocationIds: null },
+        tenant: {
+          membershipRole: null,
+          allowedLocationIds: null,
+          sessionIdleMinutes: 60,
+        },
       },
     });
 
@@ -209,7 +219,11 @@ describe('RefreshUseCase', () => {
       state: {
         tokenVersion: 0,
         isPlatformAdmin: true,
-        tenant: { membershipRole: null, allowedLocationIds: null },
+        tenant: {
+          membershipRole: null,
+          allowedLocationIds: null,
+          sessionIdleMinutes: 60,
+        },
       },
     });
 
@@ -401,7 +415,10 @@ describe('RefreshUseCase', () => {
         presentedExpiresAt: new Date(EXP * 1000),
         nextJti: 'jti-2',
         nextExpiresAt: new Date((EXP + 60) * 1000),
+        tokenVersion: 0,
         graceMs: 30_000,
+        // DX-137: el cierre por inactividad de la clínica + un TTL de access.
+        idle: { idleMinutes: 60, accessTtlMs: 900_000 },
       });
       // La denylist es solo para los refresh anteriores a las familias.
       expect(repo.consumeRefreshToken).not.toHaveBeenCalled();
@@ -441,6 +458,22 @@ describe('RefreshUseCase', () => {
       await expect(
         uc.execute({ refreshToken: 'old-ref' }),
       ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('DX-137: idle → 401 SESSION_IDLE («Sesión cerrada por inactividad»)', async () => {
+      const { uc } = setup({
+        payload: familyPayload,
+        state: activeMember(ClinicRole.ADMIN),
+        rotation: { decision: 'idle' },
+      });
+
+      const error = await uc
+        .execute({ refreshToken: 'old-ref' })
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect((error as UnauthorizedException).getResponse()).toMatchObject({
+        code: 'SESSION_IDLE',
+      });
     });
 
     it('no toca la familia si la sesión ya no vale (tv o membresía)', async () => {
