@@ -137,6 +137,13 @@ export const NO_APP_DELETE = [
   // que impide un segundo envío).
   'weekly_digest_runs',
   'weekly_digest_deliveries',
+  // DX-464: el pago de una liquidación y sus líneas se anulan con motivo; el
+  // enlace de conformidad se abre, firma o revoca una vez; nada se borra
+  // (dx_commission_payment_guard, dx_commission_payment_line_guard y
+  // dx_commission_receipt_request_guard).
+  'commission_payments',
+  'commission_payment_lines',
+  'commission_receipt_requests',
   // DX-566: el control postoperatorio se cierra o se anula, nunca se borra
   // (dx_post_op_checks_guard).
   'post_op_checks',

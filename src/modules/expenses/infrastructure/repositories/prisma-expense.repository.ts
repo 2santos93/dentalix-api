@@ -27,6 +27,7 @@ import { categoryKey } from '../../domain/expense-categories';
 import {
   ATTACHMENT_ALREADY_MESSAGE,
   EXPENSE_ALREADY_VOIDED_MESSAGE,
+  EXPENSE_COMMISSION_LINKED_MESSAGE,
   EXPENSE_NOT_FOUND_MESSAGE,
   EXPENSE_VOIDED_MESSAGE,
   IDEMPOTENCY_KEY_REUSED_MESSAGE,
@@ -48,6 +49,7 @@ import type {
   CreateExpensePaymentRepoInput,
   CreateExpenseRepoInput,
   ExpenseList,
+  ExpenseTxHook,
   ExpenseListFilters,
   ExpenseRepository,
   IdempotentWrite,
@@ -119,6 +121,15 @@ interface LockedExpense {
   hourCycle?: string | null;
   /** DX-517-quater: texto propio de cada moneda (JSON de `tenants`), sin bloqueo. */
   currencyTexts?: unknown;
+  /** DX-464: refleja un pago de honorarios vivo (se toca desde la liquidación). */
+  commissionLinked?: boolean;
+}
+
+/** DX-464: 409 si el gasto es el de un pago de honorarios vivo. */
+function denyCommissionLinked(locked: LockedExpense): void {
+  if (locked.commissionLinked) {
+    throw conflict(EXPENSE_COMMISSION_LINKED_MESSAGE);
+  }
 }
 
 @Injectable()
@@ -445,7 +456,11 @@ export class PrismaExpenseRepository implements ExpenseRepository {
                WHERE l."id" = "expenses"."locationId"
                  AND l."tenantId" = ${tenantId}::uuid) AS "hourCycle",
              (SELECT t."currencyTexts" FROM "tenants" t
-               WHERE t."id" = ${tenantId}::uuid) AS "currencyTexts"
+               WHERE t."id" = ${tenantId}::uuid) AS "currencyTexts",
+             EXISTS (SELECT 1 FROM "commission_payments" cp
+                      WHERE cp."tenantId" = ${tenantId}::uuid
+                        AND cp."expenseId" = "expenses"."id"
+                        AND cp."voidedAt" IS NULL) AS "commissionLinked"
         FROM "expenses"
        WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${id}::uuid ${scopeSql}
        FOR UPDATE`;
@@ -529,6 +544,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     input: CreateExpenseRepoInput,
     payment: CreateExpensePaymentRepoInput | undefined,
     now: Date,
+    within?: ExpenseTxHook,
   ): Promise<IdempotentWrite> {
     try {
       return await this.prisma.runWithTenant(async (tx) => {
@@ -554,6 +570,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
           },
         });
         if (payment) await this.insertPayment(tx, coreOfRow(row), payment);
+        if (within) await within(tx, coreOfRow(row));
         return {
           detail: await this.requireDetail(tx, row.id, now),
           created: true,
@@ -588,6 +605,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
   ): Promise<ExpenseDetail> {
     return this.prisma.runWithTenant(async (tx) => {
       const locked = await this.lockExpense(tx, id);
+      denyCommissionLinked(locked);
       const tenantId = this.requireTenantId();
       const current = await tx.expense.findUniqueOrThrow({
         where: { id, tenantId },
@@ -687,10 +705,12 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     by: string,
     now: Date,
     cashLink?: ExpenseCashLink,
+    within?: ExpenseTxHook,
   ): Promise<ExpenseDetail> {
     return this.prisma.runWithTenant(async (tx) => {
       const locked = await this.lockExpense(tx, id);
       if (locked.voidedAt) throw conflict(EXPENSE_ALREADY_VOIDED_MESSAGE);
+      if (!within) denyCommissionLinked(locked);
       const tenantId = this.requireTenantId();
       const live = await tx.expensePayment.findMany({
         where: { tenantId, expenseId: id, voidedAt: null },
@@ -704,6 +724,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
         where: { id, tenantId },
         data: { voidedAt: now, voidedById: by, voidReason: reason },
       });
+      if (within) await within(tx, locked);
       return this.requireDetail(tx, id, now);
     });
   }
@@ -724,6 +745,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
           : null;
         if (replay) return replay;
         if (locked.voidedAt) throw conflict(EXPENSE_VOIDED_MESSAGE);
+        denyCommissionLinked(locked);
         const { liveCents } = await this.paymentTotals(tx, expenseId);
         const denial = paymentCapDenial({
           amountCents: Number(locked.amountCents),
@@ -760,7 +782,7 @@ export class PrismaExpenseRepository implements ExpenseRepository {
     cashLink?: ExpenseCashLink,
   ): Promise<ExpenseDetail> {
     return this.prisma.runWithTenant(async (tx) => {
-      await this.lockExpense(tx, expenseId);
+      denyCommissionLinked(await this.lockExpense(tx, expenseId));
       const payment = await tx.expensePayment.findFirst({
         where: { tenantId: this.requireTenantId(), id: paymentId, expenseId },
         select: { id: true, voidedAt: true },

@@ -188,6 +188,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/payment-links/:token/proof-upload': PUBLIC_TENANT,
   'POST /public/payment-links/:token/proof-upload/complete': PUBLIC_TENANT,
   'POST /public/payment-links/:token/report': PUBLIC_TENANT,
+  // DX-464: el enlace de conformidad del profesional (recibo de honorarios).
+  'GET /public/commission-receipts/:token': PUBLIC_TENANT,
+  'POST /public/commission-receipts/:token/opened': PUBLIC_TENANT,
+  'POST /public/commission-receipts/:token/sign': PUBLIC_TENANT,
+  'GET /public/commission-receipts/:token/pdf': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -458,6 +463,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /commissions/settlements': ADMIN_ONLY,
   'GET /commissions/settlements': COMMISSION_VIEWERS,
   'GET /commissions/settlements/:id': COMMISSION_VIEWERS,
+  // DX-464: pagar, anular, PDF y conformidad: solo ADMIN.
+  'POST /commissions/settlements/:id/payments': ADMIN_ONLY,
+  'POST /commissions/payments/:paymentId/void': ADMIN_ONLY,
+  'GET /commissions/settlements/:id/pdf': ADMIN_ONLY,
+  'GET /commissions/payments/:paymentId/receipt/pdf': ADMIN_ONLY,
+  'POST /commissions/payments/:paymentId/receipt-request': ADMIN_ONLY,
   'POST /clinic/settings/logo': ADMIN_ONLY,
   'DELETE /clinic/settings/logo': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,
