@@ -139,6 +139,64 @@ export class PublicBudgetDto {
   totals!: PublicBudgetTotalDto[];
 }
 
+/** DX-560: una línea del presupuesto tal como la lee el paciente. */
+class PublicPresentationItemDto {
+  @ApiProperty({ description: 'Posición del ítem en `budget.items`' })
+  index!: number;
+  @ApiProperty() visit!: number;
+  @ApiProperty({
+    description:
+      'Texto para el paciente en su idioma (descripción del catálogo o, sin ella, su nombre en ese idioma); nunca un código ni un id.',
+    example: 'Limpieza profunda de las encías.',
+  })
+  label!: string;
+}
+
+/** DX-560: una visita del plan. */
+class PublicPresentationVisitDto {
+  @ApiProperty() visit!: number;
+  @ApiProperty({ type: String, nullable: true }) label!: string | null;
+  @ApiProperty() minDaysAfterPrevious!: number;
+}
+
+/** DX-560: la segunda moneda de la sede, orientativa, con la tasa del envío. */
+class PublicPresentationSecondCurrencyDto {
+  @ApiProperty({ example: 'VES', description: 'ISO 4217' })
+  currency!: string;
+  @ApiProperty({ description: 'Unidades de la moneda del plan por 1 USD' })
+  fromPerBase!: number;
+  @ApiProperty({ description: 'Unidades de `currency` por 1 USD' })
+  toPerBase!: number;
+  @ApiProperty({
+    example: 'MANUAL',
+    description: 'Fuente de la tasa (ExchangeRateSource)',
+  })
+  source!: string;
+  @ApiProperty({
+    example: '2026-11-18',
+    description: 'Día de la tasa (YYYY-MM-DD)',
+  })
+  date!: string;
+}
+
+/**
+ * DX-560: la presentación al paciente congelada al enviar el enlace, fuera de
+ * lo firmado (la firma cubre solo `budget`).
+ */
+export class PublicBudgetPresentationDto {
+  @ApiProperty({ example: 'es' }) language!: string;
+  @ApiProperty({ type: [PublicPresentationItemDto] })
+  items!: PublicPresentationItemDto[];
+  @ApiProperty({ type: [PublicPresentationVisitDto] })
+  visitOrganization!: PublicPresentationVisitDto[];
+  @ApiPropertyOptional({
+    type: PublicPresentationSecondCurrencyDto,
+    description:
+      'Solo si la sede tiene una segunda moneda con tasa guardada ese día.',
+  })
+  secondCurrency?: PublicPresentationSecondCurrencyDto;
+}
+
 export class PublicSignatureDocumentDto {
   @ApiProperty({ enum: SignatureRequestType, enumName: 'SignatureRequestType' })
   type!: SignatureRequestType;
@@ -168,6 +226,13 @@ export class PublicSignatureDocumentDto {
       'BUDGET: el presupuesto que se acepta (el texto `body` son sus condiciones); CONSENT: null',
   })
   budget!: PublicBudgetDto | null;
+  @ApiProperty({
+    type: PublicBudgetPresentationDto,
+    nullable: true,
+    description:
+      'DX-560 (BUDGET): cómo se presenta al paciente (visitas, textos para el paciente y la segunda moneda), congelado al enviarlo; null en CONSENT y en los enlaces anteriores a DX-560.',
+  })
+  presentation!: PublicBudgetPresentationDto | null;
 }
 
 export class SignPublicSignatureDto {

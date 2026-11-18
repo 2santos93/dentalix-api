@@ -79,6 +79,12 @@ import {
   type SignatureEmailSender,
 } from '../signature-email';
 import type { SignatureRequestEmailVars } from '../../../notifications/email/domain/email-message';
+import {
+  BUDGET_SECOND_CURRENCY_SOURCE,
+  composeBudgetPresentation,
+  NO_SECOND_CURRENCY,
+  type BudgetSecondCurrencySource,
+} from '../budget-presentation';
 
 export const SIGNATURE_BUDGET_PLAN_REQUIRED_MESSAGE =
   'Elige el presupuesto que quieres enviar a aceptar.';
@@ -353,6 +359,11 @@ export class CreateSignatureRequestUseCase {
     @Optional()
     @Inject(PLAN_QUOTE_COMPOSITION)
     private readonly composition: QuoteComposition = 'current',
+    // DX-560: la segunda moneda de la sede y su tasa guardada (nunca el
+    // proveedor). Sin ella (tests), el enlace va sin segunda moneda.
+    @Optional()
+    @Inject(BUDGET_SECOND_CURRENCY_SOURCE)
+    private readonly secondCurrency: BudgetSecondCurrencySource = NO_SECOND_CURRENCY,
   ) {}
 
   async execute(
@@ -529,6 +540,13 @@ export class CreateSignatureRequestUseCase {
     }
     const format = requireLocationFormat(budget.location);
     await this.email.assertCanSend(recipient.email);
+    // DX-560: cómo lo verá el paciente, congelado con la solicitud.
+    const presentation = await composeBudgetPresentation(
+      quote,
+      content,
+      this.secondCurrency,
+      now,
+    );
 
     const token = generateSignatureToken();
     const expiresAt = signatureLinkExpiry(now);
@@ -545,6 +563,7 @@ export class CreateSignatureRequestUseCase {
         body: BUDGET_ACCEPTANCE_TERMS,
         budgetContent: content,
         budgetContentHash: computeQuoteHash(content),
+        budgetPresentation: presentation,
         professionalUserId: actor.userId,
         professionalName: (
           content.professionalName ?? content.clinicName

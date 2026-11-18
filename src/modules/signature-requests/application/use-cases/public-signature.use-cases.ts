@@ -66,6 +66,10 @@ import {
   SIGNATURE_EMAIL_SENDER,
   type SignatureEmailSender,
 } from '../signature-email';
+import {
+  parseBudgetPresentation,
+  type BudgetPresentation,
+} from '../budget-presentation';
 
 /**
  * Lo único que dice un enlace que no sirve: desconocido, de otra clínica,
@@ -546,6 +550,12 @@ export interface PublicSignatureDocument {
   location: PublicSignatureContext['location'];
   /** BUDGET (DX-415): el presupuesto que se acepta; CONSENT: null. */
   budget: PublicBudgetView | null;
+  /**
+   * DX-560 (BUDGET): cómo se le presenta, congelado al enviarlo y fuera de lo
+   * firmado; null en CONSENT y en los enlaces anteriores a DX-560 (la página
+   * pinta la lista de siempre).
+   */
+  presentation: BudgetPresentation | null;
 }
 
 /**
@@ -578,6 +588,9 @@ function documentOf(
     clinic: ctx.clinic,
     location: ctx.location,
     budget: budget ? budgetViewOf(budget) : null,
+    presentation: budget
+      ? parseBudgetPresentation(request.budgetPresentation, budget.items.length)
+      : null,
   };
 }
 

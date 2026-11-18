@@ -9,6 +9,9 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
 import { ConsentsModule } from '../consents/consents.module';
 import { DocumentTypeNamesModule } from '../document-type-names/document-type-names.module';
 import { EmailModule } from '../notifications/email/email.module';
+import { ExchangeModule } from '../exchange/exchange.module';
+import { BUDGET_SECOND_CURRENCY_SOURCE } from './application/budget-presentation';
+import { PrismaBudgetSecondCurrency } from './infrastructure/prisma-budget-second-currency';
 import {
   SIGNATURE_CLOCK,
   SIGNATURE_CODE_KEY,
@@ -51,6 +54,8 @@ import { PublicSignatureController } from './presentation/public-signature.contr
     ConsentsModule,
     DocumentTypeNamesModule,
     EmailModule,
+    // DX-560: tasas ya guardadas (`stored()`) para la segunda moneda.
+    ExchangeModule,
   ],
   controllers: [PatientSignatureRequestsController, PublicSignatureController],
   providers: [
@@ -65,6 +70,10 @@ import { PublicSignatureController } from './presentation/public-signature.contr
     SignPublicSignatureUseCase,
     RemoteBudgetCheck,
     FollowUpBudgetLinks,
+    {
+      provide: BUDGET_SECOND_CURRENCY_SOURCE,
+      useClass: PrismaBudgetSecondCurrency,
+    },
     { provide: SIGNATURE_CLOCK, useValue: () => new Date() },
     // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).
     {

@@ -129,6 +129,7 @@ function toRecord(
     createdAt: row.createdAt,
     budgetContent: row.budgetContent,
     budgetContentHash: row.budgetContentHash,
+    budgetPresentation: row.budgetPresentation,
   };
 }
 
@@ -219,6 +220,7 @@ export async function insertFollowUpSignatureRequestsInTx(
         ...row.input,
         id: row.id,
         budgetContent: row.input.budgetContent as Prisma.InputJsonValue,
+        budgetPresentation: row.input.budgetPresentation,
         origin: 'FOLLOW_UP',
         createdById: null,
       },
@@ -538,7 +540,11 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
         });
       }
       const created = await tx.signatureRequest.create({
-        data: { tenantId, ...input },
+        data: {
+          tenantId,
+          ...input,
+          budgetPresentation: input.budgetPresentation,
+        },
         select: { id: true },
       });
       // DX-149-ter: el email del enlace (y la cancelación de los de las

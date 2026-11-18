@@ -54,6 +54,11 @@ export interface SignatureRequestRecord {
   budgetContent: unknown;
   /** SHA-256 de esa foto (`computeQuoteHash`). */
   budgetContentHash: string | null;
+  /**
+   * DX-560 (BUDGET): la presentación al paciente congelada al crearla (JSONB,
+   * `BudgetPresentation`), fuera de lo sellado; null en las anteriores.
+   */
+  budgetPresentation: unknown;
 }
 
 /** Lo que ve la ficha: estado y evidencias, sin texto, destino ni hashes. */
