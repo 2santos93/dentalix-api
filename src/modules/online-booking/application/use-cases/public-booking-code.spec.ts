@@ -25,15 +25,17 @@ const NOW = new Date('2026-11-20T12:00:00Z');
 function setup(repo: Partial<OnlineBookingRepository>) {
   const tenantContext = new TenantContextService();
   const config = { getOrThrow: () => SECRET } as unknown as ConfigService;
+  const createVerification = jest.fn().mockResolvedValue(undefined);
+  const sendCode = jest.fn();
   const full = {
     getSettings: jest.fn().mockResolvedValue({
       ...DEFAULT_ONLINE_BOOKING_SETTINGS,
       enabled: true,
     }),
-    createVerification: jest.fn().mockResolvedValue(undefined),
+    createVerification,
     ...repo,
   } as unknown as OnlineBookingRepository;
-  const email = { sendCode: jest.fn() } as unknown as OnlineBookingEmail;
+  const email = { sendCode } as unknown as OnlineBookingEmail;
   const slots = {} as OnlineSlotService;
   const clock = () => NOW;
   const request = new RequestBookingCodeUseCase(
@@ -58,7 +60,14 @@ function setup(repo: Partial<OnlineBookingRepository>) {
     TENANT,
     new Date(NOW.getTime() - 10_000),
   );
-  return { tenantContext, request, verify, full, email, formToken };
+  return {
+    tenantContext,
+    request,
+    verify,
+    createVerification,
+    sendCode,
+    formToken,
+  };
 }
 
 const meta = { requestId: null, ip: null, userAgent: null };
@@ -72,7 +81,7 @@ const who = {
 describe('pedir el código de la reserva online (DX-016)', () => {
   it('responde sin esperar a la búsqueda de la ficha, con una verificación sin paciente, exista o no', async () => {
     let lookups = 0;
-    const { tenantContext, request, full, formToken } = setup({
+    const { tenantContext, request, createVerification, formToken } = setup({
       // Una búsqueda que nunca acaba: la respuesta no puede depender de ella.
       findExistingPatients: jest.fn(() => {
         lookups++;
@@ -88,7 +97,7 @@ describe('pedir el código de la reserva online (DX-016)', () => {
       'verificationId',
     ]);
     expect(lookups).toBe(0);
-    expect(full.createVerification).toHaveBeenCalledWith(
+    expect(createVerification).toHaveBeenCalledWith(
       expect.objectContaining({ patientId: null }),
       meta,
     );
@@ -114,7 +123,7 @@ describe('pedir el código de la reserva online (DX-016)', () => {
 
   it('tras responder, solo con UNA ficha que casa se liga y se envía el código a ese email', async () => {
     const attachPatient = jest.fn().mockResolvedValue(true);
-    const { tenantContext, request, email } = setup({
+    const { tenantContext, request, sendCode } = setup({
       findExistingPatients: jest
         .fn()
         .mockResolvedValue(['22222222-2222-4222-8222-222222222222']),
@@ -128,7 +137,7 @@ describe('pedir el código de la reserva online (DX-016)', () => {
       request.deliver('v1', who, NOW, meta),
     );
     expect(attachPatient).toHaveBeenCalled();
-    expect(email.sendCode).toHaveBeenCalledWith(
+    expect(sendCode).toHaveBeenCalledWith(
       expect.objectContaining({ to: 'maria.perez@example.com' }),
     );
   });
