@@ -300,6 +300,13 @@ jobs:
   # DX-396-bis (2026-11-17): con 3 shards ya iban a 14–20 min y el 1/3 se
   # cancelaba en el tope (también en main). Se pasa a 4 en vez de subir el
   # tope, para que el tope siga avisando del crecimiento.
+  # DX-396-quater (2026-11-18): con 4, el 2/4 iba a ~17 min (87 % del tope) en
+  # 3 de 5 runs: le tocaban tenant-isolation-matrix (~3 min), mfa-bis y
+  # patient-imports-load. Con las duraciones por spec de 3 runs (243 specs,
+  # ~43 min en total) y el reparto por hash de `jest --shard`, 5 shards dejaban
+  # el más cargado en ~12,6 min de tests y 6 en ~10,5; con 7 queda en ~8,8
+  # (tenant-isolation-matrix en el 2/7, las otras dos en el 3/7) → ~11 min de
+  # job con la preparación, más del 40 % de margen sobre el tope de 20.
   # `e2e-shards` comprueba que cada spec corre en exactamente un shard.
   e2e:
     name: E2E ${{ matrix.shard }}/${{ matrix.total }} (Postgres 16)
@@ -308,8 +315,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
-        total: [4]
+        shard: [1, 2, 3, 4, 5, 6, 7]
+        total: [7]
         timeout: [20]
     services:
       postgres:
