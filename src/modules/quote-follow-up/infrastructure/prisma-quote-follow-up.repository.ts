@@ -6,13 +6,15 @@ import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-pa
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import type { AllowedLocations } from '../../../shared/tenancy/location-access';
 import { isValidTimeZone } from '../../../shared/time/civil-day';
+import { locationTimeZoneRequired } from '../../../shared/locations/location-time-zone';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import { insertFollowUpSignatureRequestsInTx } from '../../signature-requests/infrastructure/prisma-signature-request.repository';
 import { lockPlanGroup } from '../../treatment-plans/infrastructure/repositories/plan-option-group';
 import { uuidV7 } from '../../weekly-digest/domain/uuid-v7';
-import type {
-  FollowUpGroupSnapshot,
+import {
+  FollowUpQuotaExceededError,
+  type FollowUpGroupSnapshot,
   FollowUpReportRow,
   FollowUpReportScope,
   LocationQuoteFollowUpSettingsView,
@@ -75,6 +77,29 @@ interface ContactRow {
   deletedAt: Date | null;
   preferredLanguage: string | null;
   consentRevoked: boolean;
+}
+
+/**
+ * SOLO el UNIQUE (grupo, paso) de quote_follow_up_messages: otro worker ya
+ * registró el paso. Cualquier otra violación (p. ej. el enlace vivo por plan
+ * de DX-425) es un cambio entre la lectura y la escritura.
+ */
+export function isStepAlreadyRecorded(error: unknown): boolean {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+    error.code !== 'P2002'
+  ) {
+    return false;
+  }
+  const target = (error.meta as { target?: unknown } | undefined)?.target;
+  if (typeof target === 'string') {
+    return target.includes('quote_follow_up_messages_group_step_key');
+  }
+  return (
+    Array.isArray(target) &&
+    ['tenantId', 'groupId', 'step'].every((f) => target.includes(f)) &&
+    error.message.includes('quoteFollowUpMessage')
+  );
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -150,10 +175,18 @@ export class PrismaQuoteFollowUpRepository implements QuoteFollowUpRepository {
         select: {
           id: true,
           name: true,
+          timeZone: true,
           quoteFollowUpSettings: { select: SETTINGS_SELECT },
         },
       });
       if (!location) return null;
+      // Sin zona no hay «hoy» ni franja: no se activa (409 con código).
+      if (
+        input.enabled &&
+        !(location.timeZone && isValidTimeZone(location.timeZone))
+      ) {
+        throw locationTimeZoneRequired(locationId);
+      }
       const before = location.quoteFollowUpSettings[0] ?? DEFAULT_SETTINGS;
       const data = {
         enabled: input.enabled,
@@ -227,6 +260,7 @@ export class PrismaQuoteFollowUpRepository implements QuoteFollowUpRepository {
     tenantId: string,
     locationId: string,
     presentedSince: Date,
+    now: Date,
   ): Promise<SweepCandidate[]> {
     return this.prisma.runWithTenant(tenantId, async (tx) => {
       // Grupos con alguna presentación reciente; su ancla es el primer plan
@@ -283,6 +317,29 @@ export class PrismaQuoteFollowUpRepository implements QuoteFollowUpRepository {
               WHERE m."tenantId" = ${tenantId}::uuid
                 AND m."groupId" = a."groupId"
                 AND m."reason"::text = ANY(${TERMINAL}::text[]))
+           -- M6: en pausa, nada (no consume pasos)…
+           AND NOT EXISTS (
+             SELECT 1 FROM "treatment_plans" p
+              WHERE p."tenantId" = ${tenantId}::uuid
+                AND ${GROUP_KEY} = a."groupId"
+                AND p."deletedAt" IS NULL
+                AND p."quoteFollowUpPausedAt" IS NOT NULL)
+           -- …y con cita futura o en la clínica, solo si la secuencia ya
+           -- empezó (se registra su parada una vez); sin avisos, espera.
+           AND (
+             EXISTS (
+               SELECT 1 FROM "quote_follow_up_messages" m
+                WHERE m."tenantId" = ${tenantId}::uuid
+                  AND m."groupId" = a."groupId" AND m."status" = 'SENT')
+             OR NOT EXISTS (
+               SELECT 1 FROM "appointments" ap
+                 JOIN "treatment_plans" r ON r."id" = a."groupId"
+                WHERE ap."tenantId" = ${tenantId}::uuid
+                  AND ap."patientId" = r."patientId"
+                  AND ap."deletedAt" IS NULL
+                  AND ((ap."status" IN ('SCHEDULED', 'CONFIRMED') AND ap."start" > ${now})
+                       OR ap."status" IN ('ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT')))
+           )
            AND (SELECT count(*) FROM "quote_follow_up_messages" m
                  WHERE m."tenantId" = ${tenantId}::uuid
                    AND m."groupId" = a."groupId") < ${MAX_FOLLOW_UP_STEPS}
@@ -548,13 +605,61 @@ export class PrismaQuoteFollowUpRepository implements QuoteFollowUpRepository {
       if (!snapshot) return 'CHANGED';
       if (this.alreadyRecorded(snapshot, [input.step])) return 'ALREADY_DONE';
       if (!input.stillHolds(snapshot)) return 'CHANGED';
+      // I2: un enlace de la clínica aún vigente (sin firmar, sin anular y sin
+      // caducar) no se reemplaza: el paso se aplaza (ni se envía ni se
+      // registra). Solo se anulan los caducados y los del propio seguimiento.
+      const planIds = input.requests.map(
+        (r) => r.input.treatmentPlanId as string,
+      );
+      const staffLive = await tx.signatureRequest.count({
+        where: {
+          treatmentPlanId: { in: planIds },
+          type: 'BUDGET',
+          origin: 'STAFF',
+          signedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: input.now },
+        },
+      });
+      if (staffLive > 0) return 'DEFERRED';
+      // I1: el cupo propio del seguimiento (la mitad del tope diario de la
+      // clínica), contado bajo un candado por clínica.
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(hashtextextended(${`dx561-follow-up-quota:${tenantId}`}, 0))`;
+      if ((await this.countFollowUpEmails(tx, tenantId)) >= input.dailyCap) {
+        throw new FollowUpQuotaExceededError();
+      }
       const { supersededIds } = await insertFollowUpSignatureRequestsInTx(
         tx,
         tenantId,
         input.requests,
         input.now,
       );
-      await input.cancelSuperseded(tx, supersededIds);
+      // M2: el email del aviso anterior que llevaba esos enlaces, si sigue
+      // pendiente, tampoco sale.
+      const supersededMessages =
+        supersededIds.length === 0
+          ? []
+          : await tx.$queryRaw<{ id: string }[]>`
+              SELECT "id" FROM "quote_follow_up_messages"
+               WHERE "tenantId" = ${tenantId}::uuid AND "status" = 'SENT'
+                 AND "signatureRequestIds" && ${supersededIds}::uuid[]`;
+      await input.cancelSuperseded(tx, {
+        signatureRequestIds: supersededIds,
+        followUpMessageIds: supersededMessages.map((m) => m.id),
+      });
+      // I1 (b): la baja del email, en la MISMA transacción (si el aviso no
+      // sale, no queda un enlace de baja suelto).
+      await tx.reminderOptOutLink.create({
+        data: {
+          tenantId,
+          patientId: snapshot.facts.patientId,
+          tokenHash: input.optOut.tokenHash,
+          createdAt: input.now,
+          expiresAt: input.optOut.expiresAt,
+        },
+        select: { id: true },
+      });
       // El email AL FINAL: sus candados del tope son lo último que se toma y,
       // si el tope no deja, se deshace todo (no queda nada registrado).
       const { id: emailOutboxId } = await input.email.insert(tx);
@@ -601,6 +706,24 @@ export class PrismaQuoteFollowUpRepository implements QuoteFollowUpRepository {
     });
   }
 
+  private async countFollowUpEmails(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+  ): Promise<number> {
+    const [{ n }] = await tx.$queryRaw<{ n: number }[]>`
+      SELECT count(*)::int AS "n" FROM "email_outbox"
+       WHERE "tenantId" = ${tenantId}::uuid
+         AND "template" = 'quote-follow-up'
+         AND "createdAt" >= (pg_catalog.now() AT TIME ZONE 'UTC') - interval '24 hours'`;
+    return n;
+  }
+
+  followUpEmailsLast24h(tenantId: string): Promise<number> {
+    return this.prisma.runWithTenant(tenantId, (tx) =>
+      this.countFollowUpEmails(tx, tenantId),
+    );
+  }
+
   /** UNIQUE (grupo, paso) tras el candado: la segunda barrera. */
   private async write(
     fn: (tx: Prisma.TransactionClient) => Promise<WriteOutcome>,
@@ -608,7 +731,8 @@ export class PrismaQuoteFollowUpRepository implements QuoteFollowUpRepository {
     try {
       return await this.prisma.runWithTenant(fn);
     } catch (error) {
-      if (isUniqueViolation(error)) return 'ALREADY_DONE';
+      if (isStepAlreadyRecorded(error)) return 'ALREADY_DONE';
+      if (isUniqueViolation(error)) return 'CHANGED';
       throw error;
     }
   }
@@ -622,7 +746,7 @@ export class PrismaQuoteFollowUpRepository implements QuoteFollowUpRepository {
     paused: boolean;
     userId: string;
     now: Date;
-    assertLocation: (locationId: string | null) => void;
+    assertLocation: (locationIds: string[]) => void;
   }): Promise<PauseOutcome> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -652,7 +776,15 @@ export class PrismaQuoteFollowUpRepository implements QuoteFollowUpRepository {
            AND p."deletedAt" IS NULL AND p."splitFromPlanId" IS NULL
          ORDER BY p."presentedAt" NULLS LAST, p."id"`;
       const anchor = plans.find((p) => p.presentedAt !== null);
-      input.assertLocation(anchor?.presentedLocationId ?? null);
+      // M5 (SEC-045): la sede de la presentación o, si el ancla no la tiene,
+      // las de las demás opciones del grupo; sin ninguna, quien llama decide.
+      input.assertLocation([
+        ...new Set(
+          plans
+            .map((p) => p.presentedLocationId)
+            .filter((id): id is string => id !== null),
+        ),
+      ]);
       const open =
         plans.some((p) => p.status === 'PRESENTED') &&
         !plans.some((p) => p.accepted || p.status === 'ACCEPTED');

@@ -4,7 +4,6 @@ import { TokenService } from '../../shared/crypto/token.service';
 import { JobQueue } from '../jobs/application/job-queue.service';
 import { JobsModule } from '../jobs/jobs.module';
 import { EmailModule } from '../notifications/email/email.module';
-import { RemindersModule } from '../reminders/reminders.module';
 import { SignatureRequestsModule } from '../signature-requests/signature-requests.module';
 import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.interceptor';
 import { QuoteFollowUpJobs } from './application/quote-follow-up-jobs';
@@ -39,7 +38,6 @@ import { QuoteFollowUpSettingsController } from './presentation/quote-follow-up-
     JwtModule.register({}),
     JobsModule,
     EmailModule,
-    RemindersModule,
     SignatureRequestsModule,
   ],
   controllers: [

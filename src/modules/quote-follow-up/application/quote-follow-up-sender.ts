@@ -10,14 +10,22 @@ import {
   DEFAULT_EMAIL_LOCALE,
   EMAIL_LOCALES,
 } from '../../notifications/email/domain/email-message';
+import { ConfigService } from '@nestjs/config';
 import {
-  OPT_OUT_PATH,
-  ReminderOptOutLinks,
-} from '../../reminders/application/reminder-opt-out-links';
+  generateConfirmationToken,
+  hashConfirmationToken,
+} from '../../appointment-confirmations/application/confirmation-token';
+import {
+  MAIL_CONFIG,
+  type MailConfig,
+} from '../../notifications/email/infrastructure/mail-config';
+import { optOutPositiveInteger } from '../../reminders/application/opt-out-config';
+import { OPT_OUT_PATH } from '../../reminders/application/reminder-opt-out-links';
 import { FollowUpBudgetLinks } from '../../signature-requests/application/follow-up-budget-links';
 import { SIGNATURE_LINK_TTL_HOURS } from '../../signature-requests/domain/signature-token';
 import { uuidV7 } from '../../weekly-digest/domain/uuid-v7';
 import {
+  FollowUpQuotaExceededError,
   QUOTE_FOLLOW_UP_CLOCK,
   QUOTE_FOLLOW_UP_REPOSITORY,
   type FollowUpGroupSnapshot,
@@ -73,8 +81,26 @@ export function assertLeaseHeld(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error('Intento abortado');
 }
 
+/**
+ * I1: el seguimiento gasta como mucho la MITAD del tope diario de emails de
+ * la clínica (`MAIL_TENANT_DAILY_LIMIT`), contando sus propios emails de las
+ * últimas 24 h: nunca se come el cupo del personal.
+ */
+export const FOLLOW_UP_DAILY_SHARE = 0.5;
+export function followUpDailyCap(config: MailConfig): number {
+  return Math.floor(config.quotas.tenantDaily * FOLLOW_UP_DAILY_SHARE);
+}
+
+/** DEFERRED (I2): el plan tiene un enlace de la clínica vigente. */
 export type QuoteFollowUpSendResult =
-  'SENT' | 'SKIPPED' | 'NOOP' | 'STALE' | 'ALREADY_DONE' | 'CHANGED' | 'QUOTA';
+  | 'SENT'
+  | 'SKIPPED'
+  | 'NOOP'
+  | 'STALE'
+  | 'ALREADY_DONE'
+  | 'CHANGED'
+  | 'DEFERRED'
+  | 'QUOTA';
 
 function sameDecision(a: FollowUpDecision, b: FollowUpDecision): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -96,11 +122,21 @@ export class QuoteFollowUpSender {
     @Inject(QUOTE_FOLLOW_UP_REPOSITORY)
     private readonly repo: QuoteFollowUpRepository,
     private readonly budgetLinks: FollowUpBudgetLinks,
-    private readonly optOutLinks: ReminderOptOutLinks,
     private readonly linkBases: TenantLinkBaseService,
     private readonly email: EmailOutbox,
     @Inject(QUOTE_FOLLOW_UP_CLOCK) private readonly clock: QuoteFollowUpClock,
-  ) {}
+    @Inject(MAIL_CONFIG) private readonly mailConfig: MailConfig,
+    config: ConfigService,
+  ) {
+    // El mismo TTL que el enlace de baja del recordatorio (DX-128).
+    this.optOutTtlDays = optOutPositiveInteger(
+      config,
+      'REMINDER_OPT_OUT_LINK_TTL_DAYS',
+      60,
+    );
+  }
+
+  private readonly optOutTtlDays: number;
 
   async send(
     tenantId: string,
@@ -202,7 +238,9 @@ export class QuoteFollowUpSender {
       EMAIL_LOCALES,
       DEFAULT_EMAIL_LOCALE,
     );
-    const optOutToken = await this.optOutLinks.issue(snapshot.facts.patientId);
+    // La baja (DX-128): el token solo viaja en el email; su hash se guarda en
+    // la transacción del aviso.
+    const optOutToken = generateConfirmationToken();
     const id = uuidV7(now.getTime());
     const requests = prepared.options.map((o) => ({
       id: uuidV7(now.getTime()),
@@ -244,19 +282,36 @@ export class QuoteFollowUpSender {
         language,
         languageFallbackFrom: fallbackFrom,
         stillHolds,
-        cancelSuperseded: async (tx, ids) => {
-          for (const requestId of ids) {
+        dailyCap: followUpDailyCap(this.mailConfig),
+        optOut: {
+          tokenHash: hashConfirmationToken(optOutToken),
+          expiresAt: new Date(
+            now.getTime() + this.optOutTtlDays * 24 * 60 * 60 * 1000,
+          ),
+        },
+        cancelSuperseded: async (tx, superseded) => {
+          for (const requestId of superseded.signatureRequestIds) {
             await this.email.supersedePendingInTx(
               tx,
               requestId,
               'signature-request',
             );
           }
+          for (const messageId of superseded.followUpMessageIds) {
+            await this.email.supersedePendingInTx(
+              tx,
+              messageId,
+              'quote-follow-up',
+            );
+          }
         },
       });
       if (written !== 'DONE') return { outcome: written };
     } catch (error) {
-      if (error instanceof EmailQuotaExceededError) {
+      if (
+        error instanceof EmailQuotaExceededError ||
+        error instanceof FollowUpQuotaExceededError
+      ) {
         return { outcome: 'QUOTA' };
       }
       throw error;
@@ -283,6 +338,7 @@ export class QuoteFollowUpSweep {
     private readonly queue: QuoteFollowUpJobQueue,
     @Inject(QUOTE_FOLLOW_UP_CLOCK) private readonly clock: QuoteFollowUpClock,
     private readonly tenantContext: TenantContextService,
+    @Inject(MAIL_CONFIG) private readonly mailConfig: MailConfig,
   ) {}
 
   async run(): Promise<{ queued: number }> {
@@ -314,6 +370,15 @@ export class QuoteFollowUpSweep {
 
   private async planTenant(tenantId: string, now: Date): Promise<number> {
     let queued = 0;
+    // I1: lo que queda del cupo del seguimiento; lo que no cabe ni se encola
+    // ni se registra (sale en pasadas posteriores).
+    let room =
+      followUpDailyCap(this.mailConfig) -
+      (await this.repo.followUpEmailsLast24h(tenantId));
+    if (room <= 0) {
+      this.logger.warn({ event: 'quote_follow_up.daily_cap', tenantId });
+      return 0;
+    }
     for (const { locationId, settings } of await this.repo.sweepLocations(
       tenantId,
     )) {
@@ -339,8 +404,10 @@ export class QuoteFollowUpSweep {
         tenantId,
         locationId,
         since,
+        now,
       );
       for (const c of candidates) {
+        if (room <= 0) break;
         const plan = planNextStep({
           presentedDay: civilDateIn(c.presentedAt, timeZone),
           offsetsDays: settings.offsetsDays,
@@ -358,6 +425,7 @@ export class QuoteFollowUpSweep {
           },
         );
         if (created) queued += 1;
+        room -= 1;
       }
     }
     return queued;

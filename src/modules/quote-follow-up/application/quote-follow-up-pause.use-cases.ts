@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { locationNotAllowed } from '../../../shared/tenancy/location-access';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import {
   QUOTE_FOLLOW_UP_CLOCK,
@@ -57,8 +58,17 @@ export class SetQuoteFollowUpPausedUseCase {
       paused,
       userId,
       now: this.clock(),
-      assertLocation: (locationId) => {
-        if (locationId) this.tenantContext.assertLocationAllowed(locationId);
+      assertLocation: (locationIds) => {
+        for (const id of locationIds) {
+          this.tenantContext.assertLocationAllowed(id);
+        }
+        // Sin ninguna sede en el grupo, solo quien ve toda la clínica.
+        if (
+          locationIds.length === 0 &&
+          this.tenantContext.getAllowedLocationIds() !== 'ALL'
+        ) {
+          throw locationNotAllowed();
+        }
       },
     });
     switch (outcome.kind) {

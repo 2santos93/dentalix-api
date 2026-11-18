@@ -74,14 +74,23 @@ export interface SendInput {
   language: string;
   languageFallbackFrom: string | null;
   stillHolds: (snapshot: FollowUpGroupSnapshot) => boolean;
-  /** Cancela los emails aún pendientes de los enlaces que el aviso anula. */
+  /**
+   * Cancela los emails aún pendientes de los enlaces que el aviso anula: el
+   * del enlace (signature-request) y el del aviso anterior que lo llevaba
+   * (quote-follow-up).
+   */
   cancelSuperseded: (
     tx: Prisma.TransactionClient,
-    signatureRequestIds: string[],
+    superseded: { signatureRequestIds: string[]; followUpMessageIds: string[] },
   ) => Promise<void>;
+  /** I1: cupo de emails del seguimiento en 24 h por clínica. */
+  dailyCap: number;
+  /** I1 (b): el enlace de baja, que se guarda en la misma transacción. */
+  optOut: { tokenHash: string; expiresAt: Date };
 }
 
-export type WriteOutcome = 'DONE' | 'ALREADY_DONE' | 'CHANGED';
+/** DEFERRED (I2): el plan tiene un enlace de la clínica vigente: se aplaza. */
+export type WriteOutcome = 'DONE' | 'ALREADY_DONE' | 'CHANGED' | 'DEFERRED';
 
 export interface PauseOutcome {
   kind: 'OK' | 'NOT_FOUND' | 'NOT_OPEN' | 'ALREADY';
@@ -124,7 +133,10 @@ export interface QuoteFollowUpRepository {
     tenantId: string,
     locationId: string,
     presentedSince: Date,
+    now: Date,
   ): Promise<SweepCandidate[]>;
+  /** I1: emails `quote-follow-up` de la clínica en las últimas 24 h. */
+  followUpEmailsLast24h(tenantId: string): Promise<number>;
 
   /** La foto del grupo (clínica del contexto); null si no existe o nunca se presentó. */
   loadGroup(groupId: string, now: Date): Promise<FollowUpGroupSnapshot | null>;
@@ -136,8 +148,8 @@ export interface QuoteFollowUpRepository {
     paused: boolean;
     userId: string;
     now: Date;
-    /** SEC-045: la sede de la presentación (403 si el miembro no la ve), bajo candado. */
-    assertLocation: (locationId: string | null) => void;
+    /** SEC-045: las sedes de presentación del grupo (403 si el miembro no ve alguna), bajo candado. */
+    assertLocation: (locationIds: string[]) => void;
   }): Promise<PauseOutcome>;
 
   reportRows(scope: FollowUpReportScope): Promise<FollowUpReportRow[]>;
@@ -149,4 +161,12 @@ export interface ReportLocation {
   id: string;
   name: string;
   timeZone: string | null;
+}
+
+/** I1: el seguimiento superó su cupo de emails de 24 h en la clínica. */
+export class FollowUpQuotaExceededError extends Error {
+  constructor() {
+    super('Cupo diario del seguimiento de presupuestos agotado');
+    this.name = 'FollowUpQuotaExceededError';
+  }
 }
