@@ -2140,6 +2140,11 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'patient-access.int-spec.ts y patient-access.e2e-spec.ts',
   'POST /public/patient-access/me/appointments/:appointmentId/confirm':
     'patient-access.e2e-spec.ts',
+  // DX-101-bis: aceptar un presupuesto desde el portal: SIGN de
+  // TREATMENT_PLAN, actor paciente (sin usuario), PUBLIC_LINK y
+  // PORTAL_QUOTE_ACCEPTED, en la transacción de la aceptación.
+  'POST /public/patient-access/me/plans/:planId/accept':
+    'patient-portal-accept.int-spec.ts y patient-access.e2e-spec.ts',
   // DX-569: el reporte del paciente (actor público, PUBLIC_LINK) en la
   // transacción que gasta el enlace; confirmar (UPDATE del reporte y CREATE
   // del abono) en la del abono; rechazar en la del rechazo.

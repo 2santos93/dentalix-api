@@ -26,6 +26,7 @@ const INTERNAL = [
   'pay-9',
   'c@x.example',
   'futureSecret',
+  'pal-interno-1',
 ];
 
 describe('proyección del portal (DX-101): lista blanca', () => {

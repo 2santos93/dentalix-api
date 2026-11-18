@@ -49,6 +49,7 @@ describe('loadRateLimitConfig', () => {
     // DX-101: el portal del paciente, por IP y la verificación por token.
     expect(cfg['patient-access']).toEqual({ limit: 30, ttlMs: 60_000 });
     expect(cfg['patient-access-token']).toEqual({ limit: 10, ttlMs: 60_000 });
+    expect(cfg['patient-access-accept']).toEqual({ limit: 10, ttlMs: 60_000 });
     // DX-443: la copia pública del PDF firmado, por IP y por token.
     expect(cfg['copy-link']).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['copy-token']).toEqual({ limit: 10, ttlMs: 60_000 });

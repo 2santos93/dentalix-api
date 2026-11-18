@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  GoneException,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -14,7 +15,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCookieAuth,
+  ApiForbiddenResponse,
   ApiGoneResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
@@ -31,6 +34,7 @@ import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { PublicTenantContextInterceptor } from '../../../shared/tenancy/public-tenant-context.interceptor';
 import type { AuditRequestMeta } from '../../audit/domain/audit-request-context';
 import {
+  AcceptPortalQuoteUseCase,
   ConfirmPortalAppointmentUseCase,
   GetPatientPortalUseCase,
   VerifyPatientAccessUseCase,
@@ -38,9 +42,11 @@ import {
 } from '../application/use-cases/public-patient-access.use-cases';
 import { PATIENT_ACCESS_COOKIE } from '../domain/patient-access-session';
 import {
+  AcceptPortalQuoteDto,
   PatientAccessSessionDto,
   PatientPortalDto,
   PortalAppointmentConfirmedDto,
+  PortalPlanDto,
   VerifyPatientAccessDto,
 } from './dto/patient-access.dto';
 import { patientAccessCookieOptions } from './patient-access-cookie';
@@ -94,6 +100,7 @@ export class PublicPatientAccessController {
     private readonly verify: VerifyPatientAccessUseCase,
     private readonly portal: GetPatientPortalUseCase,
     private readonly confirm: ConfirmPortalAppointmentUseCase,
+    private readonly acceptQuote: AcceptPortalQuoteUseCase,
     config: ConfigService,
   ) {
     this.secure = config.get<string>('NODE_ENV') === 'production';
@@ -174,6 +181,68 @@ export class PublicPatientAccessController {
       appointmentId,
       requestMeta(req),
     );
+  }
+
+  @Post('me/plans/:planId/accept')
+  @HttpCode(200)
+  @UseGuards(PatientAccessSessionGuard)
+  @RateLimit('patient-access', 'patient-access-accept')
+  @ApiCookieAuth(PATIENT_ACCESS_COOKIE)
+  @ApiOperation({
+    summary: 'Aceptar con firma un presupuesto compartido (DX-101-bis)',
+    description:
+      'La misma aceptación que la del enlace de firma (DX-415): foto del presupuesto con su hash, firma, hora del servidor y evidencias (enlace de acceso, IP y navegador); el plan pasa a aceptado y las demás opciones abiertas del grupo, a rechazadas. Auditado (SIGN de TREATMENT_PLAN, PORTAL_QUOTE_ACCEPTED). Email de confirmación si el paciente tiene email. Devuelve el plan como en `GET me`, ya aceptado. 10/min por sesión.',
+  })
+  @ApiOkResponse({ type: PortalPlanDto })
+  @ApiBadRequestResponse({
+    description:
+      'Nombre vacío o largo, firma no válida, hash mal formado o sin `consent: true`.',
+  })
+  @ApiUnauthorizedResponse({ description: SESSION })
+  @ApiForbiddenResponse({
+    description:
+      'PATIENT_ACCESS_SCOPE_REQUIRED: el enlace no comparte los presupuestos.',
+  })
+  @ApiNotFoundResponse({
+    description:
+      '«No encontramos ese presupuesto.»: no existe o es de otro paciente.',
+  })
+  @ApiGoneResponse({ description: GONE })
+  @ApiConflictResponse({
+    description:
+      'PORTAL_QUOTE_NOT_ACCEPTABLE («Este presupuesto ya no se puede aceptar desde aquí. Contacta con la clínica.»): aceptado, rechazado, vencido, otra opción elegida u otra aceptación a la vez, sin decir cuál. PORTAL_QUOTE_CHANGED («El presupuesto ha cambiado. Recarga la página para ver la versión actual.»): el presupuesto no es el mostrado.',
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Más de 10 por minuto en la sesión.',
+  })
+  async acceptPlan(
+    @Param('planId', ParseUUIDPipe) planId: string,
+    @Body() dto: AcceptPortalQuoteDto,
+    @Req() req: PublicRequest,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<PortalPlanDto> {
+    try {
+      return await this.acceptQuote.execute(
+        principalOf(req),
+        planId,
+        {
+          signerName: dto.signerName,
+          signature: dto.signature,
+          contentHash: dto.contentHash,
+        },
+        requestMeta(req),
+      );
+    } catch (error) {
+      // Revocado o caducado entre el guard y la aceptación: como el guard,
+      // se borra la cookie.
+      if (error instanceof GoneException) {
+        res.clearCookie(
+          PATIENT_ACCESS_COOKIE,
+          patientAccessCookieOptions(this.secure),
+        );
+      }
+      throw error;
+    }
   }
 
   @Post('me/logout')

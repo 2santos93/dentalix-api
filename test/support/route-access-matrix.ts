@@ -196,6 +196,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /public/patient-access/me': PUBLIC_TENANT,
   'POST /public/patient-access/me/appointments/:appointmentId/confirm':
     PUBLIC_TENANT,
+  // DX-101-bis: aceptar un presupuesto con firma desde el portal (cookie).
+  'POST /public/patient-access/me/plans/:planId/accept': PUBLIC_TENANT,
   'POST /public/patient-access/me/logout': PUBLIC_TENANT,
   // DX-464: el enlace de conformidad del profesional (recibo de honorarios).
   'GET /public/commission-receipts/:token': PUBLIC_TENANT,

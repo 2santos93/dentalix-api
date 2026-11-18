@@ -1,11 +1,15 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   GoneException,
   HttpException,
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import type { PatientAccessScope } from '@prisma/client';
 import { performance } from 'node:perf_hooks';
@@ -20,7 +24,25 @@ import { GetAccountStatementUseCase } from '../../../account-statement/applicati
 import { CreateConfirmationLinkUseCase } from '../../../appointment-confirmations/application/use-cases/create-confirmation-link.use-case';
 import { RespondConfirmationUseCase } from '../../../appointment-confirmations/application/use-cases/respond-confirmation.use-case';
 import { isMinor } from '../../../patients/domain/responsible-parties/majority-age';
-import { GetPlanQuoteUseCase } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
+import {
+  GetPlanQuoteUseCase,
+  PLAN_QUOTE_COMPOSITION,
+  composeQuoteContent,
+  quoteValidityOf,
+} from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
+import {
+  computeAcceptanceHash,
+  computeQuoteHash,
+  type QuoteComposition,
+} from '../../../treatment-plans/domain/plan-quote';
+import {
+  parseSignaturePng,
+  SignatureImageError,
+} from '../../../consents/domain/signature-image';
+import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
+import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
+import { describeDeliveryError } from '../../../notifications/email/application/retry-policy';
+import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import {
   toPortalAccount,
   toPortalQuote,
@@ -46,11 +68,28 @@ import {
 } from '../../domain/patient-access';
 import { signPatientAccessSession } from '../../domain/patient-access-session';
 import {
+  PORTAL_PLANS_SCOPE_REQUIRED_CODE,
+  PORTAL_PLANS_SCOPE_REQUIRED_MESSAGE,
+  PORTAL_QUOTE_CHANGED_CODE,
+  PORTAL_QUOTE_CHANGED_MESSAGE,
+  PORTAL_QUOTE_NOT_ACCEPTABLE_CODE,
+  PORTAL_QUOTE_NOT_ACCEPTABLE_MESSAGE,
+  PORTAL_QUOTE_NOT_FOUND_MESSAGE,
+  PORTAL_SIGNER_NAME_MAX,
+  PortalQuoteChangedError,
+  PortalQuoteNotAcceptableError,
+  isPortalQuoteAcceptable,
+} from '../../domain/portal-quote-acceptance';
+import {
   PATIENT_ACCESS_REPOSITORY,
   type PatientAccessRepository,
   type PortalAppointment,
   type PortalPlanRef,
 } from '../../domain/ports/patient-access-repository.port';
+import {
+  PORTAL_ACCEPTANCE_EMAIL,
+  type PortalAcceptanceEmail,
+} from '../portal-acceptance-email';
 import {
   PATIENT_ACCESS_CLOCK,
   PATIENT_ACCESS_SESSION_KEY,
@@ -214,6 +253,18 @@ export interface PortalPlanView {
   status: PortalPlanRef['status'];
   optionGroupId: string | null;
   optionLabel: string | null;
+  /**
+   * DX-101-bis: «Aceptar presupuesto» desde el portal (presentado, sin
+   * firmar, con ítems, no vencido, sin otra opción del grupo elegida y con
+   * el apartado de presupuestos compartido).
+   */
+  acceptable: boolean;
+  /** Último día válido del presupuesto (`YYYY-MM-DD`), el de `quote`. */
+  validUntil: string;
+  /** El hash que se manda al aceptar (el de `quote`). */
+  contentHash: string;
+  /** Aceptado: cuándo (hora del servidor); si no, null. */
+  acceptedAt: Date | null;
   quote: PortalQuote;
 }
 
@@ -277,7 +328,7 @@ export class GetPatientPortalUseCase {
             })),
           )
         : Promise.resolve(null),
-      has('PLANS') ? this.plans(patientId) : Promise.resolve(null),
+      has('PLANS') ? this.plans(patientId, now) : Promise.resolve(null),
       has('ACCOUNT')
         ? this.getStatement
             .execute(patientId, {}, PORTAL_VOID_ACTOR)
@@ -301,20 +352,280 @@ export class GetPatientPortalUseCase {
     };
   }
 
-  private async plans(patientId: string): Promise<PortalPlanView[]> {
+  private async plans(patientId: string, now: Date): Promise<PortalPlanView[]> {
     const refs = await this.repo.sharedPlans(patientId);
     const views: PortalPlanView[] = [];
     // En serie: pocas y cada una ya hace varias lecturas.
-    for (const ref of refs) {
-      views.push({
-        id: ref.id,
-        status: ref.status,
-        optionGroupId: ref.optionGroupId,
-        optionLabel: ref.optionLabel,
-        quote: toPortalQuote(await this.getQuote.execute(patientId, ref.id)),
+    for (const ref of refs)
+      views.push(await this.planView(patientId, ref, now));
+    return views;
+  }
+
+  /** DX-101-bis: un plan compartido del paciente, como en `GET me`. */
+  async plan(
+    principal: PatientAccessPrincipal,
+    planId: string,
+  ): Promise<PortalPlanView | null> {
+    const [ref] = await this.repo.sharedPlans(principal.patientId, planId);
+    return ref ? this.planView(principal.patientId, ref, this.clock()) : null;
+  }
+
+  private async planView(
+    patientId: string,
+    ref: PortalPlanRef,
+    now: Date,
+  ): Promise<PortalPlanView> {
+    const quote = toPortalQuote(await this.getQuote.execute(patientId, ref.id));
+    return {
+      id: ref.id,
+      status: ref.status,
+      optionGroupId: ref.optionGroupId,
+      optionLabel: ref.optionLabel,
+      // Solo se ve con el apartado de presupuestos: siempre compartido aquí.
+      acceptable: isPortalQuoteAcceptable(
+        {
+          status: ref.status,
+          accepted: quote.acceptance !== null,
+          siblingChosen: ref.siblingChosen,
+          itemCount: quote.items.length,
+          validUntil: ref.quoteValidUntil,
+          // La sede de la presentación; sin zona válida, la del presupuesto
+          // (la misma regla que al aceptar).
+          timeZone: ref.quoteTimeZone ?? quote.regional?.timeZone ?? null,
+        },
+        now,
+      ),
+      validUntil: quote.validUntil,
+      contentHash: quote.contentHash,
+      acceptedAt: quote.acceptance?.acceptedAt ?? null,
+      quote,
+    };
+  }
+}
+
+export interface AcceptPortalQuoteInput {
+  signerName: string;
+  /** `data:image/png;base64,…` o base64 pelado. */
+  signature: string;
+  /** El `contentHash` del presupuesto que mostró el portal. */
+  contentHash: string;
+}
+
+function portalConflict(code: string, message: string): ConflictException {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code,
+    message,
+  });
+}
+
+/**
+ * PÚBLICO (con sesión, DX-101-bis): el paciente (o el responsable de un
+ * menor) acepta con su firma un presupuesto compartido en el portal. Es la
+ * MISMA aceptación que la del enlace de firma (DX-415, núcleo compartido):
+ * foto del presupuesto vivo con su hash, firma, hora de la BD y un segundo
+ * hash que lo sella; el plan pasa a ACCEPTED y las demás opciones abiertas
+ * del grupo a REJECTED (DX-040, DX-109). Evidencia: el enlace de acceso de la
+ * sesión, la IP y el navegador. Después, el email de confirmación si el
+ * paciente tiene email en su ficha.
+ *
+ * Reglas, en orden: apartado de presupuestos (403); el plan del paciente del
+ * enlace (404); el enlace releído en la transacción (410, como el guard); se
+ * puede aceptar (409 genérico, sin decir por qué); es el presupuesto mostrado
+ * (409 «ha cambiado»). Dos aceptaciones a la vez: una sola gana; la otra, 409.
+ */
+@Injectable()
+export class AcceptPortalQuoteUseCase {
+  private readonly logger = new Logger(AcceptPortalQuoteUseCase.name);
+
+  constructor(
+    @Inject(PATIENT_ACCESS_REPOSITORY)
+    private readonly repo: PatientAccessRepository,
+    private readonly documentTypeNames: DocumentTypeNamesReader,
+    private readonly portal: GetPatientPortalUseCase,
+    @Inject(PORTAL_ACCEPTANCE_EMAIL)
+    private readonly email: PortalAcceptanceEmail,
+    @Optional()
+    @Inject(PLAN_QUOTE_COMPOSITION)
+    private readonly composition: QuoteComposition = 'current',
+  ) {}
+
+  async execute(
+    principal: PatientAccessPrincipal,
+    planId: string,
+    input: AcceptPortalQuoteInput,
+    meta: AuditRequestMeta,
+  ): Promise<PortalPlanView> {
+    if (!principal.scopes.includes('PLANS')) {
+      throw new ForbiddenException({
+        statusCode: HttpStatus.FORBIDDEN,
+        error: 'Forbidden',
+        code: PORTAL_PLANS_SCOPE_REQUIRED_CODE,
+        message: PORTAL_PLANS_SCOPE_REQUIRED_MESSAGE,
       });
     }
-    return views;
+    // Lo barato, antes de tocar la base (como la aceptación en la clínica).
+    const signerName = input.signerName.trim();
+    if (signerName === '') {
+      throw new BadRequestException('Escribe tu nombre para firmar.');
+    }
+    if (signerName.length > PORTAL_SIGNER_NAME_MAX) {
+      throw new BadRequestException(
+        `El nombre admite hasta ${PORTAL_SIGNER_NAME_MAX} caracteres.`,
+      );
+    }
+    let signature: string;
+    try {
+      signature = parseSignaturePng(input.signature, 'tu firma');
+    } catch (error) {
+      if (error instanceof SignatureImageError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+    // Los nombres de los documentos de la clínica (DX-524), por sede: con
+    // ellos compone el presupuesto el portal (`GetPlanQuoteUseCase`).
+    const book = await this.documentTypeNames.book();
+
+    let outcome;
+    try {
+      outcome = await this.repo.acceptPlan({
+        linkId: principal.linkId,
+        patientId: principal.patientId,
+        planId,
+        signerName,
+        signature,
+        meta,
+        decide: (source, { dbNow, siblingChosen }) => {
+          if (
+            !isPortalQuoteAcceptable(
+              {
+                status: source.plan.status,
+                accepted: source.acceptance !== null,
+                siblingChosen,
+                itemCount: source.items.length,
+                validUntil: source.plan.quoteValidUntil,
+                timeZone:
+                  source.plan.quoteRegional.timeZone ??
+                  source.location.timeZone,
+              },
+              dbNow,
+            )
+          ) {
+            throw new PortalQuoteNotAcceptableError();
+          }
+          // El presupuesto vivo, compuesto como lo mostró el portal.
+          const content = composeQuoteContent(
+            source,
+            quoteValidityOf(source, dbNow),
+            book.forLocation(source.location.id),
+            this.composition,
+          );
+          const contentHash = computeQuoteHash(content);
+          if (contentHash !== input.contentHash) {
+            throw new PortalQuoteChangedError();
+          }
+          return {
+            content,
+            contentHash,
+            acceptanceHash: computeAcceptanceHash({
+              contentHash,
+              signerName,
+              signature,
+              acceptedAt: dbNow,
+            }),
+          };
+        },
+      });
+    } catch (error) {
+      if (error instanceof PortalQuoteChangedError) {
+        throw portalConflict(
+          PORTAL_QUOTE_CHANGED_CODE,
+          PORTAL_QUOTE_CHANGED_MESSAGE,
+        );
+      }
+      // Ya aceptado, rechazado, vencido, otra opción elegida, otra aceptación
+      // simultánea o una hermana cobrada (DX-109): el mismo 409, sin detalles.
+      if (
+        error instanceof PortalQuoteNotAcceptableError ||
+        error instanceof ConflictException
+      ) {
+        throw portalConflict(
+          PORTAL_QUOTE_NOT_ACCEPTABLE_CODE,
+          PORTAL_QUOTE_NOT_ACCEPTABLE_MESSAGE,
+        );
+      }
+      throw error;
+    }
+    if (outcome.kind === 'NOT_FOUND') {
+      throw new NotFoundException({
+        statusCode: HttpStatus.NOT_FOUND,
+        error: 'Not Found',
+        message: PORTAL_QUOTE_NOT_FOUND_MESSAGE,
+      });
+    }
+    if (outcome.kind === 'GONE') throw linkGone();
+
+    await this.confirm(
+      planId,
+      signerName,
+      outcome.acceptedAt,
+      outcome.confirmation,
+    );
+    const view = await this.portal.plan(principal, planId);
+    // Recién aceptado: siempre está entre los compartidos.
+    if (!view) throw new Error(`Plan ${planId} aceptado y no visible`);
+    return view;
+  }
+
+  /**
+   * Email de confirmación (la plantilla de DX-415, variante de portal). La
+   * aceptación ya está registrada: si el outbox falla, queda en el log (sin
+   * destinatario) y el paciente ya la ve en el portal.
+   */
+  private async confirm(
+    planId: string,
+    signerName: string,
+    acceptedAt: Date,
+    confirmation: {
+      to: string | null;
+      clinicName: string;
+      location: {
+        id: string;
+        locale: string | null;
+        hourCycle: string | null;
+        timeZone: string;
+      };
+    },
+  ): Promise<void> {
+    if (!confirmation.to) return;
+    try {
+      const format = requireLocationFormat({
+        id: confirmation.location.id,
+        locale: confirmation.location.locale,
+        hourCycle: confirmation.location.hourCycle,
+      });
+      await this.email.sendBudgetAccepted({
+        to: confirmation.to,
+        referenceId: planId,
+        vars: {
+          recipientFirstName: firstNameOnly(signerName) ?? signerName,
+          clinicName: confirmation.clinicName,
+          acceptedAtLabel: format.longDateTime(
+            acceptedAt,
+            confirmation.location.timeZone,
+          ),
+          viaPortal: true,
+        },
+      });
+    } catch (err) {
+      this.logger.warn({
+        event: 'patient_access.portal_acceptance_confirmation_not_enqueued',
+        treatmentPlanId: planId,
+        error: describeDeliveryError(err),
+      });
+    }
   }
 }
 

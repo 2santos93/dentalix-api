@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
@@ -9,6 +10,13 @@ import type {
   AuditRequestMeta,
 } from '../../audit/domain/audit-request-context';
 import { loadNoticeSettings } from '../../patients/infrastructure/notices/notice-context';
+import { isValidTimeZone } from '../../../shared/time/civil-day';
+import { acceptBudgetInTx } from '../../treatment-plans/infrastructure/repositories/budget-acceptance';
+import { civilDayOf } from '../../treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
+import {
+  PORTAL_QUOTE_ACCEPTED_REASON,
+  PortalQuoteNotAcceptableError,
+} from '../domain/portal-quote-acceptance';
 import {
   PATIENT_ACCESS_LINK_REVOKED_REASON,
   PATIENT_ACCESS_LOCKED_REASON,
@@ -22,6 +30,8 @@ import type {
   AccessLinkRow,
   IssueAccessLinkInput,
   PatientAccessRepository,
+  PortalAcceptanceInput,
+  PortalAcceptanceOutcome,
   PortalAppointment,
   PortalPatient,
   PortalPlanRef,
@@ -444,10 +454,11 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
     });
   }
 
-  sharedPlans(patientId: string): Promise<PortalPlanRef[]> {
+  sharedPlans(patientId: string, planId?: string): Promise<PortalPlanRef[]> {
     return this.prisma.runWithTenant(async (tx) => {
       const rows = await tx.treatmentPlan.findMany({
         where: {
+          ...(planId ? { id: planId } : {}),
           patientId,
           deletedAt: null,
           status: { in: ['PRESENTED', 'ACCEPTED'] },
@@ -459,15 +470,202 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
           status: true,
           optionGroupId: true,
           optionLabel: true,
+          quoteValidUntil: true,
+          presentedLocationId: true,
         },
       });
+      // DX-101-bis: grupos con una opción ya elegida (aceptada o completada,
+      // también fuera de los 20 de la lista) y la zona de cada sede de
+      // presentación, en dos consultas (no una por plan).
+      const groupIds = [
+        ...new Set(
+          rows.flatMap((r) => (r.optionGroupId ? [r.optionGroupId] : [])),
+        ),
+      ];
+      const chosen =
+        groupIds.length === 0
+          ? []
+          : await tx.treatmentPlan.findMany({
+              where: {
+                optionGroupId: { in: groupIds },
+                deletedAt: null,
+                status: { in: ['ACCEPTED', 'COMPLETED'] },
+              },
+              select: { id: true, optionGroupId: true },
+            });
+      const locationIds = [
+        ...new Set(
+          rows.flatMap((r) =>
+            r.presentedLocationId ? [r.presentedLocationId] : [],
+          ),
+        ),
+      ];
+      const zones =
+        locationIds.length === 0
+          ? []
+          : await tx.location.findMany({
+              where: { id: { in: locationIds } },
+              select: { id: true, timeZone: true },
+            });
+      const zoneOf = new Map(
+        zones.map((l) => [
+          l.id,
+          l.timeZone && isValidTimeZone(l.timeZone) ? l.timeZone : null,
+        ]),
+      );
       return rows.map((r) => ({
         id: r.id,
         status: r.status as PortalPlanRef['status'],
         optionGroupId: r.optionGroupId,
         optionLabel: r.optionLabel,
+        quoteValidUntil: civilDayOf(r.quoteValidUntil),
+        quoteTimeZone: r.presentedLocationId
+          ? (zoneOf.get(r.presentedLocationId) ?? null)
+          : null,
+        siblingChosen: chosen.some(
+          (c) => c.optionGroupId === r.optionGroupId && c.id !== r.id,
+        ),
       }));
     });
+  }
+
+  acceptPlan(input: PortalAcceptanceInput): Promise<PortalAcceptanceOutcome> {
+    const tenantId = this.tenantId();
+    const { linkId, patientId, planId, meta } = input;
+    return this.prisma.runWithTenant(async (tx) => {
+      // DX-461: primero el paciente vivo (FOR KEY SHARE), en el orden de
+      // archivar (paciente → lo demás): archivar a la vez espera o ya se ve.
+      const live = await tx.$queryRaw<{ id: string; email: string | null }[]>`
+        SELECT "id", "email" FROM "patients"
+         WHERE "id" = ${patientId}::uuid AND "deletedAt" IS NULL
+         FOR KEY SHARE`;
+      if (live.length === 0) return { kind: 'GONE' };
+      const plan = await tx.treatmentPlan.findFirst({
+        where: { id: planId, patientId, deletedAt: null },
+        select: { id: true, createdById: true },
+      });
+      if (!plan) return { kind: 'NOT_FOUND' };
+      // El enlace RELEÍDO en esta transacción (el guard lo leyó antes): FOR
+      // SHARE hace esperar a una revocación simultánea (FOR UPDATE) hasta el
+      // COMMIT; una revocación ya confirmada se ve aquí (410).
+      const [link] = await tx.$queryRaw<
+        {
+          patientId: string;
+          scopes: string[];
+          expiresAt: Date;
+          revokedAt: Date | null;
+          createdById: string;
+          dbNow: Date;
+        }[]
+      >`
+        SELECT "patientId", "scopes"::text[] AS "scopes", "expiresAt",
+               "revokedAt", "createdById",
+               timezone('UTC', now())::timestamp(3) AS "dbNow"
+          FROM "patient_access_links"
+         WHERE "id" = ${linkId}::uuid
+         FOR SHARE`;
+      if (
+        !link ||
+        link.patientId !== patientId ||
+        link.revokedAt !== null ||
+        link.expiresAt.getTime() <= link.dbNow.getTime() ||
+        !link.scopes.includes('PLANS')
+      ) {
+        return { kind: 'GONE' };
+      }
+      const dbNow = link.dbNow;
+      const acceptedById = await this.portalAcceptedBy(
+        tx,
+        link.createdById,
+        plan.createdById,
+      );
+      const locationId = await this.tenantContext.writeLocationId(tx);
+      const source = await acceptBudgetInTx(tx, {
+        tenantId,
+        patientId,
+        planId,
+        locationId,
+        // Plan retirado entre medias u otra aceptación que llegó antes.
+        changed: () => new PortalQuoteNotAcceptableError(),
+        decide: async (src, locked) => {
+          const siblingChosen = locked.optionGroupId
+            ? (await tx.treatmentPlan.count({
+                where: {
+                  optionGroupId: locked.optionGroupId,
+                  id: { not: locked.id },
+                  deletedAt: null,
+                  status: { in: ['ACCEPTED', 'COMPLETED'] },
+                },
+              })) > 0
+            : false;
+          const seal = input.decide(src, { dbNow, siblingChosen });
+          return {
+            signerName: input.signerName,
+            signature: input.signature,
+            content: seal.content,
+            contentHash: seal.contentHash,
+            acceptanceHash: seal.acceptanceHash,
+            acceptedAt: dbNow,
+            acceptedById,
+            ipAddress: meta.ip,
+            userAgent: meta.userAgent?.slice(0, 512) ?? null,
+            evidence: { channel: 'PORTAL', patientAccessLinkId: linkId },
+          };
+        },
+      });
+      // Actor paciente (sin usuario), en la transacción de la aceptación:
+      // solo ids y el motivo; ni la firma, ni importes, ni el enlace.
+      await writeAuditEvent(tx, {
+        tenantId,
+        locationId,
+        actor: { kind: 'public' },
+        action: 'SIGN',
+        resourceType: 'TREATMENT_PLAN',
+        resourceId: planId,
+        patient: { kind: 'patient', id: patientId },
+        requestId: meta.requestId,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+        metadata: {
+          origin: 'PUBLIC_LINK',
+          reason: PORTAL_QUOTE_ACCEPTED_REASON,
+        },
+      });
+      return {
+        kind: 'ACCEPTED',
+        acceptedAt: dbNow,
+        confirmation: {
+          to: live[0].email,
+          clinicName: source.clinic.name,
+          location: {
+            id: source.location.id,
+            locale: source.regional?.locale ?? null,
+            hourCycle: source.regional?.hourCycle ?? null,
+            timeZone: source.location.timeZone,
+          },
+        },
+      };
+    });
+  }
+
+  /**
+   * DX-101-bis: a nombre de quién queda la aceptación del portal (el
+   * paciente no es un usuario; la columna es NOT NULL a users): quien le
+   * compartió el portal si sigue siendo miembro de la clínica; si no, quien
+   * creó el plan; sin él, quien compartió el portal igualmente (la FK a
+   * users solo exige que exista, y los usuarios no se borran).
+   */
+  private async portalAcceptedBy(
+    tx: Prisma.TransactionClient,
+    linkCreatedById: string,
+    planCreatedById: string | null,
+  ): Promise<string> {
+    const member = await tx.clinicMembership.findFirst({
+      where: { userId: linkCreatedById, deletedAt: null },
+      select: { userId: true },
+    });
+    if (member) return linkCreatedById;
+    return planCreatedById ?? linkCreatedById;
   }
 
   findConfirmableAppointment(

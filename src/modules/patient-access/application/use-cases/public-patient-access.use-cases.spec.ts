@@ -12,9 +12,11 @@ import {
 } from '../../domain/patient-access-session';
 import type {
   PatientAccessRepository,
+  PortalPlanRef,
   SessionLink,
   VerifyAttemptOutcome,
 } from '../../domain/ports/patient-access-repository.port';
+import type { PlanQuoteDocument } from '../../../treatment-plans/application/use-cases/plan-quote.use-cases';
 import { UnknownTokenAttempts } from '../unknown-token-attempts';
 import { staffQuote, staffStatement } from '../__fixtures__/staff-documents';
 import {
@@ -296,7 +298,11 @@ function appointmentRow(id: string, status: 'SCHEDULED' | 'CONFIRMED') {
 }
 
 describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del paciente', () => {
-  function portal(scopes: PatientAccessScope[]) {
+  function portal(
+    scopes: PatientAccessScope[],
+    plan: Partial<PortalPlanRef> = {},
+    quote: PlanQuoteDocument = staffQuote(),
+  ) {
     const repo = {
       portalPatient: jest.fn(() =>
         Promise.resolve({
@@ -326,12 +332,16 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
             status: 'PRESENTED',
             optionGroupId: 'p1',
             optionLabel: 'A',
+            quoteValidUntil: '2026-12-01',
+            quoteTimeZone: 'America/Caracas',
+            siblingChosen: false,
+            ...plan,
           },
         ]),
       ),
     };
     const getQuote = {
-      execute: jest.fn(() => Promise.resolve(staffQuote())),
+      execute: jest.fn(() => Promise.resolve(quote)),
     };
     const getStatement = {
       execute: jest.fn(() => Promise.resolve(staffStatement())),
@@ -387,6 +397,32 @@ describe('GetPatientPortalUseCase (DX-101): solo lo compartido y solo del pacien
     );
     expect(view.account!.movements[0].amount).toBe(100.15);
     // Serializada, la respuesta entera solo lleva claves de la lista blanca.
+    expect(keysOutside(view, PORTAL_RESPONSE_KEYS)).toEqual([]);
+  });
+
+  it('DX-101-bis: un presupuesto ya firmado no es aceptable; lleva validez, hash y hora de aceptación', async () => {
+    const { useCase, principal } = portal(['PLANS']);
+    const [plan] = (await useCase.execute(principal)).plans!;
+    expect(plan).toMatchObject({
+      acceptable: false,
+      validUntil: '2026-12-01',
+      contentHash: 'a'.repeat(64),
+      acceptedAt: NOW,
+    });
+  });
+
+  it.each<[string, Partial<PortalPlanRef>, boolean]>([
+    ['presentado, sin firmar y vigente', {}, true],
+    ['otra opción del grupo ya elegida', { siblingChosen: true }, false],
+    ['vencido en la sede del plan', { quoteValidUntil: '2026-11-17' }, false],
+    ['vence hoy', { quoteValidUntil: '2026-11-18' }, true],
+    ['sin validez guardada', { quoteValidUntil: null }, true],
+    ['aceptado', { status: 'ACCEPTED' }, false],
+  ])('DX-101-bis: aceptable — %s', async (_name, plan, acceptable) => {
+    const quote = { ...staffQuote(), acceptance: null };
+    const { useCase, principal } = portal(['PLANS'], plan, quote);
+    const view = await useCase.execute(principal);
+    expect(view.plans![0]).toMatchObject({ acceptable, acceptedAt: null });
     expect(keysOutside(view, PORTAL_RESPONSE_KEYS)).toEqual([]);
   });
 
