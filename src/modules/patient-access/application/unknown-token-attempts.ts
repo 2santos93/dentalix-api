@@ -53,11 +53,13 @@ export class UnknownTokenAttempts {
 
   private remember(key: string, state: AttemptState): void {
     // Reinsertar mueve la clave al final: se expulsa la menos reciente.
+    // eslint-disable-next-line no-restricted-syntax -- Map en memoria, no una tabla
     this.entries.delete(key);
     this.entries.set(key, state);
     while (this.entries.size > MAX_ENTRIES) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
+      // eslint-disable-next-line no-restricted-syntax -- Map en memoria, no una tabla
       this.entries.delete(oldest);
     }
   }
@@ -71,6 +73,7 @@ export class UnknownTokenAttempts {
         state.lockedUntil !== null &&
         state.lockedUntil.getTime() + PATIENT_ACCESS_LOCK_MINUTES * 60_000 <
           now.getTime();
+      // eslint-disable-next-line no-restricted-syntax -- Map en memoria, no una tabla
       if (stale) this.entries.delete(key);
     }
   }

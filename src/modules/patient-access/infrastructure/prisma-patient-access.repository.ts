@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import type { PatientAccessScope } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
@@ -21,7 +22,9 @@ import { firstNameOnly } from '../../../appointment-confirmations/application/co
 import {
   PATIENT_ACCESS_DEFAULT_TTL_DAYS,
   PATIENT_ACCESS_LINK_NOT_FOUND_MESSAGE,
+  PATIENT_ACCESS_NO_BIRTH_DATE_CODE,
   PATIENT_ACCESS_NO_BIRTH_DATE_MESSAGE,
+  PATIENT_ACCESS_PATIENT_ARCHIVED_CODE,
   PATIENT_ACCESS_NO_HOST_MESSAGE,
   buildPatientAccessUrl,
   normalizeScopes,
@@ -81,10 +84,21 @@ export class CreateAccessLinkUseCase {
   ): Promise<CreatedAccessLink> {
     const patient = await this.repo.findPatient(patientId);
     if (!patient) throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
-    if (patient.deletedAt)
-      throw new ConflictException(PATIENT_ARCHIVED_MESSAGE);
+    if (patient.deletedAt) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: PATIENT_ACCESS_PATIENT_ARCHIVED_CODE,
+        message: PATIENT_ARCHIVED_MESSAGE,
+      });
+    }
     if (!patient.birthDate) {
-      throw new ConflictException(PATIENT_ACCESS_NO_BIRTH_DATE_MESSAGE);
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: PATIENT_ACCESS_NO_BIRTH_DATE_CODE,
+        message: PATIENT_ACCESS_NO_BIRTH_DATE_MESSAGE,
+      });
     }
     // El host entero se valida antes de escribir nada (safeLinkHost en el
     // controlador): uno manipulado no arma un enlace hacia otro sitio.

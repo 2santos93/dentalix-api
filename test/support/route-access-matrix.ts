@@ -188,6 +188,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/payment-links/:token/proof-upload': PUBLIC_TENANT,
   'POST /public/payment-links/:token/proof-upload/complete': PUBLIC_TENANT,
   'POST /public/payment-links/:token/report': PUBLIC_TENANT,
+  // DX-101: el portal del paciente (verificar la fecha y, con la cookie
+  // propia del portal, ver, confirmar una cita y salir). Sin JwtAuthGuard.
+  'POST /public/patient-access/:token/verify': PUBLIC_TENANT,
+  'GET /public/patient-access/me': PUBLIC_TENANT,
+  'POST /public/patient-access/me/appointments/:appointmentId/confirm':
+    PUBLIC_TENANT,
+  'POST /public/patient-access/me/logout': PUBLIC_TENANT,
   // DX-464: el enlace de conformidad del profesional (recibo de honorarios).
   'GET /public/commission-receipts/:token': PUBLIC_TENANT,
   'POST /public/commission-receipts/:token/opened': PUBLIC_TENANT,
@@ -752,6 +759,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /payment-methods/:id/instructions': ADMIN_ONLY,
   'DELETE /payment-methods/:id/instructions/:instructionId': ADMIN_ONLY,
   // DX-569: enlace de pago del paciente y la bandeja «Pagos por confirmar».
+  // DX-101: enlace de acceso del paciente (expone saldo: quien cobra).
+  'POST /patients/:id/access-links': BILLING,
+  'GET /patients/:id/access-links': BILLING,
+  'DELETE /patients/:id/access-links/:linkId': BILLING,
   'POST /patients/:id/payment-links': BILLING,
   'GET /patients/:id/payment-links': BILLING,
   'GET /payment-reports': BILLING,

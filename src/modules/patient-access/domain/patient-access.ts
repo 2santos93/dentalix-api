@@ -47,6 +47,8 @@ export const PATIENT_ACCESS_SESSION_REQUIRED_MESSAGE =
 export const PATIENT_ACCESS_GONE_CODE = 'PATIENT_ACCESS_GONE';
 export const PATIENT_ACCESS_GONE_MESSAGE =
   'Este enlace ya no está disponible. Pide uno nuevo a la clínica.';
+export const PATIENT_ACCESS_NO_BIRTH_DATE_CODE = 'PATIENT_ACCESS_NO_BIRTH_DATE';
+export const PATIENT_ACCESS_PATIENT_ARCHIVED_CODE = 'PATIENT_ARCHIVED';
 export const PATIENT_ACCESS_NO_BIRTH_DATE_MESSAGE =
   'El paciente no tiene fecha de nacimiento registrada: añádela en su ficha antes de compartir el enlace (es lo que se le pedirá para abrirlo).';
 export const PATIENT_ACCESS_NO_HOST_MESSAGE =

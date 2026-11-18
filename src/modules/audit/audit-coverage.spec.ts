@@ -93,6 +93,7 @@ import { PostOpTemplatesController } from '../post-op-instructions/presentation/
 import { AppointmentPostOpController } from '../post-op-instructions/presentation/appointment-post-op.controller';
 import { PatientPostOpDeliveriesController } from '../post-op-instructions/presentation/patient-post-op-deliveries.controller';
 import { PatientPaymentLinksController } from '../payment-links/presentation/patient-payment-links.controller';
+import { PatientAccessLinksController } from '../patient-access/presentation/patient-access-links.controller';
 import {
   ImplantsController,
   PatientImplantsController,
@@ -2019,6 +2020,22 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'EXCHANGE_RATE',
     resourceId: { param: 'id' },
   },
+  // DX-101: crear y revocar el enlace de acceso del paciente; ni la URL ni
+  // el token.
+  'POST /patients/:id/access-links': {
+    action: 'CREATE',
+    resource: 'PATIENT_ACCESS_LINK',
+    resourceId: RES,
+    patient: { param: 'id' },
+    reason: 'PATIENT_ACCESS_LINK_CREATED',
+  },
+  'DELETE /patients/:id/access-links/:linkId': {
+    action: 'DELETE',
+    resource: 'PATIENT_ACCESS_LINK',
+    resourceId: { param: 'linkId' },
+    patient: { param: 'id' },
+    reason: 'PATIENT_ACCESS_LINK_REVOKED',
+  },
   // DX-569: crear (y enviar) el enlace de pago; ni la URL ni el token.
   'POST /patients/:id/payment-links': {
     action: 'CREATE',
@@ -2101,6 +2118,14 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'PUT /payment-methods/:id/instructions': 'payment-links.e2e-spec.ts',
   'DELETE /payment-methods/:id/instructions/:instructionId':
     'payment-links.e2e-spec.ts',
+  // DX-101: el acceso verificado (VIEW) y el bloqueo al quinto fallo
+  // (UPDATE), actor público PUBLIC_LINK, en la transacción del contador;
+  // confirmar una cita desde el portal deja el evento del flujo de DX-005
+  // (CONFIRMATION_LINK_CONFIRMED) en la transacción de la respuesta.
+  'POST /public/patient-access/:token/verify':
+    'patient-access.int-spec.ts y patient-access.e2e-spec.ts',
+  'POST /public/patient-access/me/appointments/:appointmentId/confirm':
+    'patient-access.e2e-spec.ts',
   // DX-569: el reporte del paciente (actor público, PUBLIC_LINK) en la
   // transacción que gasta el enlace; confirmar (UPDATE del reporte y CREATE
   // del abono) en la del abono; rechazar en la del rechazo.
@@ -2512,6 +2537,9 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   // DX-424: igual para la anamnesis por enlace (`openedAt` del envío).
   'POST /public/medical-history/:token/opened':
     'marca la apertura del cuestionario; sin evento',
+  // DX-101: salir del portal del paciente solo borra la cookie.
+  'POST /public/patient-access/me/logout':
+    'borra la cookie de la sesión del portal; sin evento',
   // DX-569: el enlace de pago.
   'POST /public/payment-links/:token/opened':
     'marca la apertura del enlace de pago; sin evento',
@@ -2621,6 +2649,7 @@ const CONTROLLERS: Type[] = [
   PatientPostOpDeliveriesController,
   // DX-569: el enlace de pago del paciente.
   PatientPaymentLinksController,
+  PatientAccessLinksController,
   ProviderScheduleController,
   ScheduleRosterController,
   ExchangeSettingsController,

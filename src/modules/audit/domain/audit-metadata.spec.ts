@@ -1229,7 +1229,11 @@ describe('sanitizeAuditMetadata — enlaces anulados al archivar (DX-461)', () =
       ...before
     } = revokedLinks;
     expect(sanitizeAuditMetadata({ revokedLinks: before })).toEqual({
-      revokedLinks: { ...before, externalOrderCopies: 0, patientAccessLinks: 0 },
+      revokedLinks: {
+        ...before,
+        externalOrderCopies: 0,
+        patientAccessLinks: 0,
+      },
     });
   });
 
@@ -1613,6 +1617,29 @@ describe('sanitizeAuditMetadata — fusión de pacientes (DX-266)', () => {
       { ...patientMerge, otherPatientId: 'María José Pérez' },
     ]) {
       expect(sanitizeAuditMetadata({ patientMerge: bad })).toEqual({});
+    }
+  });
+});
+
+describe('sanitizeAuditMetadata — fallos de un enlace de acceso (DX-101)', () => {
+  it('conserva el número de fallos agregados (0..5) y nada más', () => {
+    expect(
+      sanitizeAuditMetadata({
+        origin: 'PUBLIC_LINK',
+        reason: 'PATIENT_ACCESS_VERIFIED',
+        failedAttempts: 2,
+        birthDate: '1990-05-21',
+      }),
+    ).toEqual({
+      origin: 'PUBLIC_LINK',
+      reason: 'PATIENT_ACCESS_VERIFIED',
+      failedAttempts: 2,
+    });
+  });
+
+  it('descarta un recuento fuera de rango o que no es entero', () => {
+    for (const bad of [-1, 6, 1.5, '3', null]) {
+      expect(sanitizeAuditMetadata({ failedAttempts: bad })).toEqual({});
     }
   });
 });
