@@ -14,6 +14,7 @@ import {
 import { seedParProviderRates } from './support/par-provider-rates';
 import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 import {
+  PORTAL_PLAN_KEYS,
   PORTAL_RESPONSE_KEYS,
   keysOutside,
 } from './support/patient-portal-keys';
@@ -746,6 +747,105 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
     expect(json).not.toMatch(
       /ipAddress|userAgent|acceptedByName|acceptanceHash/,
     );
+  });
+
+  it('DX-101-bis: verificar → ver → aceptar con la cookie; la respuesta es la lista blanca de un plan y el personal lo ve «desde el portal»', async () => {
+    const created = await as(clinicA)
+      .post(`/patients/${patientA}/treatment-plans`, { currency: 'USD' })
+      .expect(201);
+    const planId = (created.body as { id: string }).id;
+    await as(clinicA)
+      .post(`/treatment-plans/${planId}/items`, {
+        toothNumber: '11',
+        catalogItemId,
+        price: 120.5,
+      })
+      .expect(201);
+    await as(clinicA).post(`/treatment-plans/${planId}/present`).expect(200);
+
+    const link = await createLink(clinicA, patientA, { scopes: ['PLANS'] });
+    const cookie = await openPortal(clinicA, link);
+    const before = await portal(clinicA, cookie).me().expect(200);
+    expect(keysOutside(before.body, PORTAL_RESPONSE_KEYS)).toEqual([]);
+    const shown = (
+      before.body as {
+        plans: {
+          id: string;
+          acceptable: boolean;
+          contentHash: string;
+          validUntil: string;
+          acceptedAt: string | null;
+        }[];
+      }
+    ).plans.find((p) => p.id === planId)!;
+    expect(shown).toMatchObject({ acceptable: true, acceptedAt: null });
+    expect(shown.validUntil).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const path = `/api/v1/public/patient-access/me/plans/${planId}/accept`;
+    const body = {
+      signerName: 'Carmen Rondón',
+      signature: `data:image/png;base64,${PNG}`,
+      contentHash: shown.contentHash,
+      consent: true,
+    };
+    // Sin cookie: 401; sin `consent: true`: 400.
+    await request(server())
+      .post(path)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .send(body)
+      .expect(401);
+    await request(server())
+      .post(path)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Cookie', cookie)
+      .send({ ...body, consent: false })
+      .expect(400);
+
+    const res = await request(server())
+      .post(path)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Cookie', cookie)
+      .set('User-Agent', 'NavegadorDelPaciente/1.0')
+      .send(body)
+      .expect(200);
+    expect(res.headers['cache-control']).toContain('no-store');
+    expect(keysOutside(res.body, PORTAL_PLAN_KEYS)).toEqual([]);
+    expect(res.body).toMatchObject({
+      id: planId,
+      status: 'ACCEPTED',
+      acceptable: false,
+      contentHash: shown.contentHash,
+      quote: { acceptance: { signerName: 'Carmen Rondón' } },
+    });
+    expect(JSON.stringify(res.body)).not.toMatch(
+      /NavegadorDelPaciente|ipAddress|patientAccessLinkId|acceptedByName/,
+    );
+
+    // El personal: aceptado desde el portal, con el evento del paciente.
+    const detail = await as(clinicA)
+      .get(`/treatment-plans/${planId}`)
+      .expect(200);
+    expect(
+      (detail.body as { acceptance: { portal: unknown } }).acceptance.portal,
+    ).not.toBeNull();
+    const events = await raw.auditEvent.findMany({
+      where: { resourceType: 'TREATMENT_PLAN', resourceId: planId },
+      select: { action: true, actorUserId: true, metadata: true },
+    });
+    expect(events).toContainEqual({
+      action: 'SIGN',
+      actorUserId: null,
+      metadata: { origin: 'PUBLIC_LINK', reason: 'PORTAL_QUOTE_ACCEPTED' },
+    });
+
+    // Otra vez: el 409 genérico.
+    const again = await request(server())
+      .post(path)
+      .set('X-Tenant-Host', hostFor(clinicA.subdomain))
+      .set('Cookie', cookie)
+      .send(body)
+      .expect(409);
+    expect(again.body).toMatchObject({ code: 'PORTAL_QUOTE_NOT_ACCEPTABLE' });
   });
 
   it('archivar al paciente revoca sus enlaces: la sesión abierta da 410', async () => {
