@@ -244,6 +244,15 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     return Promise.resolve(row ? this.listRow(row) : null);
   }
 
+  /** DX-561: solicitud → aviso de seguimiento que la envió. */
+  readonly followUpMessages = new Map<string, string>();
+
+  followUpMessageIdOf(signatureRequestId: string): Promise<string | null> {
+    return Promise.resolve(
+      this.followUpMessages.get(signatureRequestId) ?? null,
+    );
+  }
+
   revoke(input: {
     id: string;
     revokedById: string;

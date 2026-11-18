@@ -571,6 +571,19 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
     return row ? toListRow(row) : null;
   }
 
+  async followUpMessageIdOf(
+    signatureRequestId: string,
+  ): Promise<string | null> {
+    const rows = await this.prisma.runWithTenant(
+      (tx) => tx.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "quote_follow_up_messages"
+         WHERE "status" = 'SENT'
+           AND ${signatureRequestId}::uuid = ANY("signatureRequestIds")
+         LIMIT 1`,
+    );
+    return rows[0]?.id ?? null;
+  }
+
   revoke(input: {
     id: string;
     revokedById: string;

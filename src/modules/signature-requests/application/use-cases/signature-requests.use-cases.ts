@@ -668,6 +668,12 @@ export class RevokeSignatureRequestUseCase {
     }
     try {
       await this.email.cancelPendingLink(id);
+      // DX-561: el enlace iba en un aviso de seguimiento: si su email sigue
+      // pendiente, tampoco sale.
+      if (found.request.origin === 'FOLLOW_UP') {
+        const messageId = await this.repo.followUpMessageIdOf(id);
+        if (messageId) await this.email.cancelPendingFollowUp(messageId);
+      }
     } catch (err) {
       this.logger.warn({
         event: 'signature_request.supersede_failed',
