@@ -19,6 +19,13 @@ export interface DentalCatalogItem {
   defaultPrice: number | null;
   /** DX-105: false = la prestación no admite descuentos (ni % de convenio ni discrecionales). */
   allowDiscount: boolean;
+  /**
+   * DX-566: al marcarlo hecho se crea un control postoperatorio (llamada al
+   * paciente). Solo en PROCEDURE.
+   */
+  requiresPostOpCheck: boolean;
+  /** DX-566: días hábiles de la sede tras el procedimiento (1–30). */
+  postOpCheckAfterDays: number;
   active: boolean;
   /**
    * DX-455: plantilla de evolución ligada al procedimiento (el vínculo

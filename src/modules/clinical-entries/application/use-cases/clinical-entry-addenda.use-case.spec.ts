@@ -59,6 +59,14 @@ class InMemoryAddendumRepository implements ClinicalEntryAddendumRepository {
     return Promise.resolve(row);
   }
 
+  createInTransaction(
+    _tx: unknown,
+    _tenantId: string,
+    input: CreateClinicalEntryAddendumRepoInput,
+  ): Promise<ClinicalEntryAddendum> {
+    return this.create(input);
+  }
+
   listByEntry(
     patientId: string,
     entryId: string,

@@ -44,6 +44,20 @@ export class DentalCatalogItemDto {
   })
   allowDiscount!: boolean;
 
+  @ApiProperty({
+    description:
+      'DX-566: al marcarlo hecho se crea un control postoperatorio (llamada al paciente). Solo en PROCEDURE.',
+  })
+  requiresPostOpCheck!: boolean;
+
+  @ApiProperty({
+    minimum: 1,
+    maximum: 30,
+    description:
+      'DX-566: días HÁBILES de la sede tras el procedimiento en los que se llama.',
+  })
+  postOpCheckAfterDays!: number;
+
   @ApiPropertyOptional({
     type: String,
     nullable: true,

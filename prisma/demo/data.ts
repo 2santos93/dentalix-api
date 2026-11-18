@@ -3756,3 +3756,16 @@ export const DEMO_LAB_ORDERS: readonly DemoLabOrder[] = [
     steps: ['SEND', 'RECEIVE', 'CHECK'],
   },
 ];
+
+/**
+ * DX-566: el control postoperatorio de la demo. La exodoncia ya hecha del plan
+ * de rehabilitación del 36 (paciente 1, que no lee ningún e2e) pide control a
+ * 1 día; su control queda pendiente para HOY (en la sede del procedimiento)
+ * para que la lista de llamadas del día no salga vacía. Sin cambiar el plan,
+ * los cobros ni la agenda.
+ */
+export const DEMO_POST_OP_CHECK = {
+  catalogCode: 'CX-EXO-SIMPLE',
+  afterDays: 1,
+  patientIndex: 1,
+} as const;

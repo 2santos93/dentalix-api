@@ -20,6 +20,8 @@ function fakeItem(code: string): DentalCatalogItem {
     color: '#0E7490',
     defaultPrice: null,
     allowDiscount: true,
+    requiresPostOpCheck: false,
+    postOpCheckAfterDays: 1,
     active: true,
     clinicalNoteTemplateId: null,
     suggestedClinicalNoteTemplateId: null,

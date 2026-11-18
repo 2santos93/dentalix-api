@@ -67,6 +67,11 @@ import {
   recallsFromProcedure,
 } from '../../../recall/infrastructure/recall-from-procedure';
 import { auditExclusions } from '../../../recall/infrastructure/recall-exclusion';
+import {
+  cancelPendingPostOpCheck,
+  postOpCheckFromProcedure,
+  reschedulePendingPostOpCheck,
+} from '../../../post-op-checks/infrastructure/post-op-check-from-procedure';
 
 type PrismaTreatmentPlan = Prisma.TreatmentPlanGetPayload<
   Record<string, never>
@@ -763,6 +768,29 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         plan.patientId,
         audit,
       );
+
+      // DX-566: el control postoperatorio, en esta misma transacción. Al
+      // pasar a DONE se crea (si el procedimiento lo pide); al salir de DONE
+      // se anula el pendiente; al corregir fecha o sede se recalcula.
+      if (becameDone) {
+        await postOpCheckFromProcedure(tx, {
+          tenantId,
+          item,
+          appointmentId:
+            attribution?.kind === 'SET' ? attribution.appointmentId : null,
+          audit,
+        });
+      } else if (leftDone) {
+        await cancelPendingPostOpCheck(tx, {
+          tenantId,
+          itemId: item.id,
+          reason: 'PROCEDURE_REVERTED',
+          actorId: audit?.actor.userId ?? previous.performedById,
+          audit,
+        });
+      } else if (corrected) {
+        await reschedulePendingPostOpCheck(tx, { tenantId, item, audit });
+      }
       return {
         ...mapItemToEntity(item),
         recallUpdates: procedureRecallUpdates(recalls),
@@ -896,6 +924,7 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           status: true,
           catalogItemId: true,
           patientId: true,
+          performedById: true,
         },
       });
       if (!existing) {
@@ -927,6 +956,14 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
           audit,
         );
       }
+      // DX-566: el control pendiente de un ítem borrado se anula.
+      await cancelPendingPostOpCheck(tx, {
+        tenantId,
+        itemId: id,
+        reason: 'ITEM_DELETED',
+        actorId: audit?.actor.userId ?? existing.performedById,
+        audit,
+      });
     });
   }
 

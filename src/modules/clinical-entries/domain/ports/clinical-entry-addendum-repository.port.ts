@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { ClinicalEntryAddendum } from '../entities/clinical-entry-addendum.entity';
 
 // Sin `tenantId`/`id`/`createdAt`: el tenant sale del contexto de la petición
@@ -32,6 +33,17 @@ export interface ClinicalEntryAddendumRepository {
 
   /** Append-only: siempre INSERTA. No hay método de edición ni de borrado. */
   create(
+    input: CreateClinicalEntryAddendumRepoInput,
+  ): Promise<ClinicalEntryAddendum>;
+
+  /**
+   * DX-566: la misma alta DENTRO de la transacción de quien llama (`tx`, bajo
+   * su RLS), para que la adenda vaya junto a lo que la origina (el cierre de
+   * un control postoperatorio): si algo falla, no queda ninguna de las dos.
+   */
+  createInTransaction(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
     input: CreateClinicalEntryAddendumRepoInput,
   ): Promise<ClinicalEntryAddendum>;
 

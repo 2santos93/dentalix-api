@@ -632,3 +632,13 @@ export const COMMISSION_READ_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 export const COMMISSION_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// Control postoperatorio (DX-566) — la lista de llamadas del día y su
+// contador: los 4 roles (recepción llama, sin procedimiento, intentos ni
+// notas). Registrar el desenlace (queda en la historia): CLINICAL_ROLES.
+export const POST_OP_CHECK_LIST_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ASSISTANT,
+  ClinicRole.RECEPTION,
+  ClinicRole.ADMIN,
+];

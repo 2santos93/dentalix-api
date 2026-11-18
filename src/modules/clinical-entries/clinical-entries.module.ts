@@ -65,6 +65,12 @@ import { ClinicalNoteTemplatesModule } from '../clinical-note-templates/clinical
   // DX-456: la copia de la historia clínica lee las evoluciones con la MISMA
   // consulta que la ficha.
   // DX-190: el control de ortodoncia crea su evolución con la MISMA alta.
-  exports: [ListClinicalEntriesUseCase, CreateClinicalEntryUseCase],
+  // DX-566: el repositorio de adendas, para el cierre del control
+  // postoperatorio (adenda en su transacción).
+  exports: [
+    ListClinicalEntriesUseCase,
+    CreateClinicalEntryUseCase,
+    CLINICAL_ENTRY_ADDENDUM_REPOSITORY,
+  ],
 })
 export class ClinicalEntriesModule {}
