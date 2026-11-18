@@ -359,6 +359,9 @@ export function composeQuoteContent(
 /**
  * DX-560: la presentación al paciente del plan leído. Sin ella (una lectura
  * que no la compone), el nombre de cada ítem del presupuesto en español.
+ * En un plan ACEPTADO sale del catálogo de HOY, no de la foto firmada:
+ * congelar los textos en la aceptación queda fuera de alcance (la foto
+ * firmada sigue siendo `items[].procedure`).
  */
 export function planPresentationOf(source: PlanQuoteSource): PlanPresentation {
   if (source.presentation) return source.presentation;
