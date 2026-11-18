@@ -1,4 +1,8 @@
 import {
+  leadsOnAppointmentCompletedInTx,
+  leadsOnAppointmentCreatedInTx,
+} from '../../../leads/infrastructure/lead-from-appointment';
+import {
   APPOINTMENT_TYPE_SUMMARY_SELECT,
   toAppointmentTypeSummary,
   type AppointmentTypeSummaryRow,
@@ -264,6 +268,25 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             created.id,
             input.planItemIds,
           );
+        // DX-556: la primera cita del paciente de un prospecto lo pasa a
+        // «Cita agendada» (solo con usuario: la reserva online no lo mueve).
+        await leadsOnAppointmentCreatedInTx(tx, {
+          tenantId,
+          patientId: input.patientId,
+          appointmentId: created.id,
+          actor: input.createdById
+            ? {
+                actor: {
+                  userId: input.createdById,
+                  role: input.actorRole ?? null,
+                },
+                locationId: created.locationId,
+                requestId: null,
+                ip: null,
+                userAgent: null,
+              }
+            : null,
+        });
         // DX-016: la reserva online deja su fila y su auditoría aquí dentro.
         if (input.inTransaction)
           await input.inTransaction(tx, {
@@ -608,6 +631,18 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
                 minimumsBefore,
               )
             : undefined;
+        // DX-556: atendida → el prospecto del paciente pasa a «Asistió».
+        if (
+          appointment.status === AppointmentStatus.COMPLETED &&
+          existing.status !== AppointmentStatus.COMPLETED
+        ) {
+          await leadsOnAppointmentCompletedInTx(tx, {
+            tenantId: this.requireTenantId(),
+            patientId: appointment.patientId,
+            appointmentId: id,
+            actor: audit ?? null,
+          });
+        }
         // Completada: el tratamiento se hizo aquí; no vuelve a otra cita.
         if (
           reservedBefore.length > 0 &&

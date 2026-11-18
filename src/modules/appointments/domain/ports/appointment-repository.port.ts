@@ -1,3 +1,4 @@
+import type { ClinicRole } from '@prisma/client';
 import {
   AppointmentOrigin,
   AppointmentStatus,
@@ -27,6 +28,8 @@ export interface CreateAppointmentRepoInput {
   reason?: string;
   notes?: string;
   createdById?: string;
+  /** DX-556: rol de quien la crea (la auditoría del prospecto que mueve). */
+  actorRole?: ClinicRole | null;
   /** DX-121: tipo ya validado (de esta clínica y activo) por el use-case. */
   appointmentTypeId?: string;
   /**

@@ -68,6 +68,7 @@ function present(result: CallerLookupResult) {
         ? {}
         : { hasCriticalAlert: m.hasCriticalAlert }),
     })),
+    ...(result.leads === undefined ? {} : { leads: result.leads }),
   };
 }
 
@@ -103,7 +104,8 @@ export class CallerLookupController {
       'número (grupo familiar) salen todos, hasta 20 (`truncated` avisa si hay más). Cada uno trae su próxima ' +
       'cita, su última visita (solo de las sedes del miembro) y su saldo. ' +
       '`hasCriticalAlert` solo para los roles clínicos. Un evento de lectura ' +
-      'por paciente; el número no se registra.',
+      'por paciente; el número no se registra. DX-556: ADMIN y RECEPTION ' +
+      'reciben además `leads`, los prospectos con ese número en sus sedes.',
   })
   @ApiOkResponse({ type: CallerLookupResponseDto })
   @ApiBadRequestResponse({

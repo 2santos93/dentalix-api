@@ -508,6 +508,7 @@ export class CreateAppointmentUseCase {
         reason: input.reason,
         notes: input.notes,
         createdById: input.createdById,
+        actorRole: input.actorRole ?? null,
         appointmentTypeId: input.appointmentTypeId,
         locationId: input.locationId,
         waitlistEntryId: input.waitlistEntryId,

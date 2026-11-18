@@ -31,6 +31,7 @@ describe('workQueueSources (DX-503)', () => {
       }),
     },
     inventory: { execute: jest.fn().mockResolvedValue({ total: 7 }) },
+    leads: { count: jest.fn().mockResolvedValue({ open: 9, stale: 4 }) },
     tenantContext,
   };
   const sources = workQueueSources(deps as never);
@@ -74,6 +75,11 @@ describe('workQueueSources (DX-503)', () => {
     });
     await expect(sources.RECALL(actor)).resolves.toEqual({ count: 8 });
     expect(deps.recall.execute).toHaveBeenCalledWith({ page: 1, pageSize: 1 });
+    // DX-556: los «sin contactar», sin filtros (sede de la cabecera o permitidas).
+    await expect(sources.LEADS_UNCONTACTED(actor)).resolves.toEqual({
+      count: 4,
+    });
+    expect(deps.leads.count).toHaveBeenCalledWith({});
     await expect(sources.LOW_STOCK(actor)).resolves.toEqual({ count: 7 });
     expect(deps.inventory.execute).toHaveBeenCalledWith({
       page: 1,
