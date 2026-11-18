@@ -222,7 +222,7 @@ async function sendAndSign(c: Clinic, planId: string): Promise<void> {
             contentHash: r.budgetContentHash!,
             acceptanceHash: 'c'.repeat(64),
             acceptedAt: now,
-            acceptedById: r.createdById,
+            acceptedById: r.createdById!,
             ipAddress: '203.0.113.7',
             userAgent: 'int',
             remoteChannel: 'EMAIL',

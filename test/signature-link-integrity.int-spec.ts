@@ -496,7 +496,7 @@ describe('integridad del enlace de firma en la BD (DX-425)', () => {
                           patientSignature: 'iVBORw0KGgo=',
                           contentHash: 'b'.repeat(64),
                           signedAt: dbNow,
-                          recordedById: r.createdById,
+                          recordedById: r.createdById!,
                           ipAddress: '203.0.113.7',
                           userAgent: 'int',
                           remoteChannel: 'EMAIL' as const,

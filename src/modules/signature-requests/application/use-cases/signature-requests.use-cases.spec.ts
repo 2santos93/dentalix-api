@@ -156,6 +156,10 @@ function setup(composition?: QuoteComposition) {
       cancelled.push(id);
       return Promise.resolve();
     },
+    cancelPendingFollowUp: (id) => {
+      cancelled.push(`follow-up:${id}`);
+      return Promise.resolve();
+    },
   };
   const tenantContext = new TenantContextService();
   const key = deriveSignatureCodeKey(
@@ -1135,6 +1139,19 @@ describe('presupuesto a distancia (DX-415)', () => {
     await sendBudget(ctx);
     expect(ctx.repo.rows[0].revokedAt).not.toBeNull();
     expect(ctx.cancelled).toEqual([ctx.repo.rows[0].id]);
+  });
+
+  it('DX-561: anular un enlace del seguimiento cancela también el email pendiente de su aviso', async () => {
+    const ctx = setup();
+    presentedBudget(ctx);
+    await sendBudget(ctx);
+    const row = ctx.repo.rows[0];
+    row.origin = 'FOLLOW_UP';
+    row.createdById = null;
+    ctx.repo.followUpMessages.set(row.id, 'aviso-1');
+    ctx.cancelled.length = 0;
+    await ctx.revoke.execute(row.patientId, row.id, 'u-recepcion');
+    expect(ctx.cancelled).toEqual([row.id, 'follow-up:aviso-1']);
   });
 
   it('tras verificar el código el paciente ve ítems, totales y condiciones del presupuesto enviado', async () => {

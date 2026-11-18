@@ -31,6 +31,7 @@ export const EMAIL_TEMPLATES = [
   'payment-report-rejected',
   'external-order-copy',
   'weekly-digest',
+  'quote-follow-up',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -75,6 +76,9 @@ export const TENANT_DAILY_BUDGET: Readonly<
   // DX-568: lo dispara la clínica (su trabajo semanal o el ADMIN que pide la
   // prueba): cuenta en el tope diario.
   'weekly-digest': 'clinic',
+  // DX-561: lo dispara la clínica (su trabajo de seguimiento): cuenta en el
+  // tope diario y, al encolarse con tope, se frena al pasarlo.
+  'quote-follow-up': 'clinic',
 };
 
 /** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
@@ -97,6 +101,8 @@ export const LOCALIZED_EMAIL_TEMPLATES: readonly EmailTemplateName[] = [
   'appointment-reminder',
   // DX-468: la copia de la receta, en el idioma del paciente.
   'prescription-copy',
+  // DX-561: el aviso de seguimiento del presupuesto.
+  'quote-follow-up',
 ];
 
 /** Marca de la clínica que firma el email; `null` = email de plataforma. */
@@ -485,6 +491,26 @@ export interface WeeklyDigestEmailVars {
   settingsUrl: string | null;
 }
 
+/**
+ * DX-561: aviso de seguimiento de un presupuesto presentado. SOLO el nombre
+ * de la clínica, el saludo, un texto neutro, los enlaces de aceptación (uno
+ * por opción, sin su etiqueta: puede nombrar el tratamiento) y la baja. Ni
+ * importes, ni tratamientos, ni el profesional.
+ */
+export interface QuoteFollowUpEmailVars {
+  /** Nombre de pila de quien lo recibe (el paciente o su responsable). */
+  recipientFirstName: string | null;
+  /** Va al responsable de un menor: el nombre de pila del paciente. */
+  patientFirstName: string | null;
+  clinicName: string;
+  /** Un enlace `/firmar/<token>` por opción, en orden (A, B, C). 1–3. */
+  urls: string[];
+  /** Horas que vale el enlace (SIGNATURE_LINK_TTL_HOURS). */
+  expiresInHours: number;
+  /** Enlace de baja de los avisos (DX-128), si se emitió uno. */
+  unsubscribeUrl: string | null;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -506,6 +532,7 @@ export interface EmailVarsByTemplate {
   'payment-report-rejected': PaymentReportRejectedEmailVars;
   'external-order-copy': ExternalOrderCopyEmailVars;
   'weekly-digest': WeeklyDigestEmailVars;
+  'quote-follow-up': QuoteFollowUpEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

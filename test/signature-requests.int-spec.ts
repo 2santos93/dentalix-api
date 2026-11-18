@@ -161,7 +161,7 @@ async function signed(
             patientSignature: PNG,
             contentHash: HASH,
             signedAt: at,
-            recordedById: r.createdById,
+            recordedById: r.createdById!,
             ipAddress: '203.0.113.7',
             userAgent: 'int',
             remoteChannel: 'EMAIL',

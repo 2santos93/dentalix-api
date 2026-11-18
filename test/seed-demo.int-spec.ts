@@ -486,6 +486,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // paciente 1), sin intentos.
     expect(firstCounts.post_op_checks).toBe(1);
     expect(firstCounts.post_op_check_attempts).toBe(0);
+    // DX-561: el seguimiento automático de presupuestos queda APAGADO en la
+    // demo (sin ajustes por sede): sembrar no envía ningún aviso.
+    expect(firstCounts.location_quote_follow_up_settings).toBe(0);
+    expect(firstCounts.quote_follow_up_messages).toBe(0);
     // DX-170: las 6 plantillas de evolución de ejemplo.
     expect(firstCounts.clinical_note_templates).toBe(6);
     // DX-150: tres gestiones de cobro y un compromiso abierto.

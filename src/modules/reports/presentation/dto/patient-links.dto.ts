@@ -37,7 +37,7 @@ export class PatientLinkMetricsDto {
     enum: PATIENT_LINK_TYPES,
     enumName: 'PatientLinkType',
     description:
-      'ANAMNESIS = cuestionario de salud por enlace; CONSENT_SIGNATURE = firma a distancia de un consentimiento; BUDGET_SIGNATURE = aceptación a distancia de un presupuesto; APPOINTMENT_CONFIRMATION = confirmar, cancelar o «llámenme» de una cita; POST_OP_INSTRUCTIONS = indicaciones postoperatorias por email o WhatsApp (las impresas no cuentan).',
+      'ANAMNESIS = cuestionario de salud por enlace; CONSENT_SIGNATURE = firma a distancia de un consentimiento; BUDGET_SIGNATURE = aceptación a distancia de un presupuesto enviada por la clínica (las del seguimiento automático, DX-561, no cuentan); APPOINTMENT_CONFIRMATION = confirmar, cancelar o «llámenme» de una cita; POST_OP_INSTRUCTIONS = indicaciones postoperatorias por email o WhatsApp (las impresas no cuentan).',
   })
   linkType!: (typeof PATIENT_LINK_TYPES)[number];
 

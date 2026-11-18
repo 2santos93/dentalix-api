@@ -14,6 +14,7 @@ import {
   SIGNATURE_CODE_KEY,
 } from './application/signature-clock';
 import { RemoteBudgetCheck } from './application/remote-budget';
+import { FollowUpBudgetLinks } from './application/follow-up-budget-links';
 import {
   OutboxSignatureEmailSender,
   SIGNATURE_EMAIL_SENDER,
@@ -63,6 +64,7 @@ import { PublicSignatureController } from './presentation/public-signature.contr
     GetPublicSignatureDocumentUseCase,
     SignPublicSignatureUseCase,
     RemoteBudgetCheck,
+    FollowUpBudgetLinks,
     { provide: SIGNATURE_CLOCK, useValue: () => new Date() },
     // DX-502: v4 o, con PLAN_QUOTE_COMPOSE_V4=false, como antes (v2/v3).
     {
@@ -88,5 +90,7 @@ import { PublicSignatureController } from './presentation/public-signature.contr
     TenantContextInterceptor,
     PublicTenantContextInterceptor,
   ],
+  // DX-561: el seguimiento automático de presupuestos compone sus enlaces.
+  exports: [FollowUpBudgetLinks],
 })
 export class SignatureRequestsModule {}
