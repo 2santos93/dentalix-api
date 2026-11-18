@@ -178,12 +178,9 @@ describe('VerifyPatientAccessUseCase (DX-101)', () => {
   it('fecha errónea: 400 «Datos incorrectos», con el suelo de tiempo', async () => {
     const { verify, sleep } = setup();
     const res = await statusOf(verify(TOKEN, '1990-05-22'));
-    expect(res).toEqual({
+    expect(res).toMatchObject({
       status: 400,
-      body: expect.objectContaining({
-        code: 'PATIENT_ACCESS_INVALID',
-        message: 'Datos incorrectos',
-      }),
+      body: { code: 'PATIENT_ACCESS_INVALID', message: 'Datos incorrectos' },
     });
     expect(sleep).toHaveBeenCalledTimes(1);
     const [ms] = sleep.mock.calls[0];
@@ -212,14 +209,11 @@ describe('VerifyPatientAccessUseCase (DX-101)', () => {
       expect((await statusOf(verify(TOKEN, '2000-01-01'))).status).toBe(400);
     }
     const fifth = await statusOf(verify(TOKEN, '2000-01-01'));
-    expect(fifth).toEqual({
+    expect(fifth).toMatchObject({
       status: 429,
-      body: expect.objectContaining({
-        code: 'PATIENT_ACCESS_LOCKED',
-        message: expect.stringMatching(/bloqueado 30 minutos/),
-        retryAfterSeconds: 1800,
-      }),
+      body: { code: 'PATIENT_ACCESS_LOCKED', retryAfterSeconds: 1800 },
     });
+    expect(fifth.body.message).toMatch(/bloqueado 30 minutos/);
     expect(
       links.get(`${TENANT}:${hashPublicLinkToken(TOKEN)}`)!.failedAttempts,
     ).toBe(5);

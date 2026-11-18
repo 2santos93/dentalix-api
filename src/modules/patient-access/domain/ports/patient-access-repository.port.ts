@@ -1,5 +1,8 @@
 import type { AppointmentStatus, PatientAccessScope } from '@prisma/client';
-import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
+import type {
+  AuditRequestContext,
+  AuditRequestMeta,
+} from '../../../audit/domain/audit-request-context';
 import type { HourCycle } from '../../../../shared/format/regional-format';
 import type { VerifyDecision } from '../patient-access';
 
@@ -109,10 +112,14 @@ export interface PatientAccessRepository {
   issue(input: IssueAccessLinkInput): Promise<void>;
   /** Vivos del paciente (ni revocados ni caducados); `null` si no existe. */
   listLive(patientId: string, now: Date): Promise<AccessLinkRow[] | null>;
+  /**
+   * Revoca y, SOLO si de verdad revoca, deja el DELETE de auditoría en la
+   * misma transacción (revocar otra vez no deja otro evento).
+   */
   revoke(
     patientId: string,
     linkId: string,
-    revokedById: string,
+    audit: AuditRequestContext,
   ): Promise<RevokeOutcome>;
 
   // --- público -------------------------------------------------------------

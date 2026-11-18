@@ -4,9 +4,13 @@ import { TenantContextService } from '../../../shared/tenancy/tenant-context.ser
 import { lockLivePatientOrConflict } from '../../../shared/patients/lock-live-patient';
 import type { HourCycle } from '../../../shared/format/regional-format';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
-import type { AuditRequestMeta } from '../../audit/domain/audit-request-context';
+import type {
+  AuditRequestContext,
+  AuditRequestMeta,
+} from '../../audit/domain/audit-request-context';
 import { loadNoticeSettings } from '../../patients/infrastructure/notices/notice-context';
 import {
+  PATIENT_ACCESS_LINK_REVOKED_REASON,
   PATIENT_ACCESS_LOCKED_REASON,
   PATIENT_ACCESS_VERIFIED_REASON,
   type VerifyDecision,
@@ -153,7 +157,7 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
   revoke(
     patientId: string,
     linkId: string,
-    revokedById: string,
+    audit: AuditRequestContext,
   ): Promise<RevokeOutcome> {
     return this.prisma.runWithTenant(async (tx) => {
       const [row] = await tx.$queryRaw<{ revokedAt: Date | null }[]>`
@@ -165,8 +169,25 @@ export class PrismaPatientAccessRepository implements PatientAccessRepository {
       // La hora la pone el servidor (guarda de la tabla).
       await tx.patientAccessLink.update({
         where: { id: linkId },
-        data: { revokedAt: new Date(), revokedById },
+        data: { revokedAt: new Date(), revokedById: audit.actor.userId },
         select: { id: true },
+      });
+      await writeAuditEvent(tx, {
+        tenantId: audit.tenantId,
+        locationId: audit.locationId,
+        actor: {
+          kind: 'user',
+          userId: audit.actor.userId,
+          role: audit.actor.role,
+        },
+        action: 'DELETE',
+        resourceType: 'PATIENT_ACCESS_LINK',
+        resourceId: linkId,
+        patient: { kind: 'patient', id: patientId },
+        requestId: audit.requestId,
+        ip: audit.ip,
+        userAgent: audit.userAgent,
+        metadata: { reason: PATIENT_ACCESS_LINK_REVOKED_REASON },
       });
       return 'REVOKED';
     });

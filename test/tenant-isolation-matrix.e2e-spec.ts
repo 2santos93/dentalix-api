@@ -4119,6 +4119,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    */
   const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
     {
+      spec: 'patient-access.e2e-spec.ts',
+      checks:
+        'B → 404 al crear, listar o revocar enlaces de acceso del paciente de A (o el enlace de A con un paciente de B); el enlace de A sigue vivo y su paciente sigue viendo sus datos (DX-101)',
+      routes: [
+        'POST /patients/:id/access-links',
+        'GET /patients/:id/access-links',
+        'DELETE /patients/:id/access-links/:linkId',
+      ],
+    },
+    {
       spec: 'payment-links.e2e-spec.ts',
       checks:
         'B → 404 al leer, guardar o quitar los datos para pagar del medio de A, al crear o listar enlaces de pago del paciente de A, y al ver el comprobante, confirmar o rechazar un reporte de A; nada de A cambia (DX-569)',
@@ -4645,6 +4655,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: [
         'GET /public/weekly-digest-unsubscribe/:token',
         'POST /public/weekly-digest-unsubscribe/:token',
+      ],
+    },
+    {
+      spec: 'patient-access.e2e-spec.ts',
+      checks:
+        'B → 400 «Datos incorrectos» con el token de A y la fecha correcta en su host, igual que uno inventado; la cookie de A en el host de B → 401 y no confirma la cita de A (DX-101)',
+      routes: [
+        'POST /public/patient-access/:token/verify',
+        'POST /public/patient-access/me/appointments/:appointmentId/confirm',
       ],
     },
     {

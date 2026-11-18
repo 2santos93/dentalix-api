@@ -33,6 +33,8 @@ import {
 import { TenantContextInterceptor } from '../../../shared/tenancy/tenant-context.interceptor';
 import type { TenantHostRequest } from '../../../shared/tenancy/tenant-host-request';
 import { Audit } from '../../audit/presentation/audit.decorator';
+import { requireAuditRequestContext } from '../../audit/presentation/audit-request-context';
+import { TenantContextService } from '../../../shared/tenancy/tenant-context.service';
 import { PAYMENT_ROLES } from '../../auth/presentation/guards/clinic-role-sets';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -42,10 +44,7 @@ import {
   ListAccessLinksUseCase,
   RevokeAccessLinkUseCase,
 } from '../application/use-cases/staff-access-links.use-cases';
-import {
-  PATIENT_ACCESS_LINK_CREATED_REASON,
-  PATIENT_ACCESS_LINK_REVOKED_REASON,
-} from '../domain/patient-access';
+import { PATIENT_ACCESS_LINK_CREATED_REASON } from '../domain/patient-access';
 import {
   AccessLinkDto,
   CreateAccessLinkDto,
@@ -73,6 +72,7 @@ export class PatientAccessLinksController {
     private readonly createLink: CreateAccessLinkUseCase,
     private readonly listLinks: ListAccessLinksUseCase,
     private readonly revokeLink: RevokeAccessLinkUseCase,
+    private readonly tenantContext: TenantContextService,
     config: ConfigService,
   ) {
     this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
@@ -128,13 +128,7 @@ export class PatientAccessLinksController {
     return this.listLinks.execute(patientId);
   }
 
-  @Audit({
-    action: 'DELETE',
-    resource: 'PATIENT_ACCESS_LINK',
-    resourceId: { param: 'linkId' },
-    patient: { param: 'id' },
-    reason: PATIENT_ACCESS_LINK_REVOKED_REASON,
-  })
+  // Auditado en la transacción de la revocación (solo si revoca).
   @Delete(':linkId')
   @HttpCode(204)
   @ApiParam({ name: 'linkId', format: 'uuid' })
@@ -152,6 +146,10 @@ export class PatientAccessLinksController {
     @Param('linkId', ParseUUIDPipe) linkId: string,
     @Req() req: AuthenticatedRequest,
   ): Promise<void> {
-    await this.revokeLink.execute(patientId, linkId, req.user.sub);
+    await this.revokeLink.execute(
+      patientId,
+      linkId,
+      requireAuditRequestContext(req, this.tenantContext),
+    );
   }
 }

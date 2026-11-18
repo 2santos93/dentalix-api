@@ -118,9 +118,9 @@ describe('CreateAccessLinkUseCase (DX-101)', () => {
     const err = await errorOf(
       create.execute('p1', { scopes: ['PLANS'] }, 'u1', LINK),
     );
-    expect(err).toEqual({
+    expect(err).toMatchObject({
       status: 409,
-      body: expect.objectContaining({ code: 'PATIENT_ACCESS_NO_BIRTH_DATE' }),
+      body: { code: 'PATIENT_ACCESS_NO_BIRTH_DATE' },
     });
     expect(repo.issue).not.toHaveBeenCalled();
   });
@@ -172,9 +172,17 @@ describe('RevokeAccessLinkUseCase (DX-101)', () => {
     const revoke = new RevokeAccessLinkUseCase(
       repo as unknown as PatientAccessRepository,
     );
-    await expect(revoke.execute('p1', 'l1', 'u1')).resolves.toBeUndefined();
-    await expect(revoke.execute('p1', 'l1', 'u1')).resolves.toBeUndefined();
-    expect((await errorOf(revoke.execute('p1', 'l9', 'u1'))).status).toBe(404);
-    expect(repo.revoke).toHaveBeenCalledWith('p1', 'l1', 'u1');
+    const audit = {
+      tenantId: 't1',
+      locationId: null,
+      actor: { userId: 'u1', role: 'RECEPTION' as const },
+      requestId: 'r1',
+      ip: null,
+      userAgent: null,
+    };
+    await expect(revoke.execute('p1', 'l1', audit)).resolves.toBeUndefined();
+    await expect(revoke.execute('p1', 'l1', audit)).resolves.toBeUndefined();
+    expect((await errorOf(revoke.execute('p1', 'l9', audit))).status).toBe(404);
+    expect(repo.revoke).toHaveBeenCalledWith('p1', 'l1', audit);
   });
 });

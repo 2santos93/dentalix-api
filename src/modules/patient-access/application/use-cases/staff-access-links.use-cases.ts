@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { PatientAccessScope } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import {
   generatePublicLinkToken,
   hashPublicLinkToken,
@@ -188,9 +189,9 @@ export class RevokeAccessLinkUseCase {
   async execute(
     patientId: string,
     linkId: string,
-    revokedById: string,
+    audit: AuditRequestContext,
   ): Promise<void> {
-    const outcome = await this.repo.revoke(patientId, linkId, revokedById);
+    const outcome = await this.repo.revoke(patientId, linkId, audit);
     if (outcome === 'NOT_FOUND') {
       throw new NotFoundException(PATIENT_ACCESS_LINK_NOT_FOUND_MESSAGE);
     }

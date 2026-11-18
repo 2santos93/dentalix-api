@@ -2020,21 +2020,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'EXCHANGE_RATE',
     resourceId: { param: 'id' },
   },
-  // DX-101: crear y revocar el enlace de acceso del paciente; ni la URL ni
-  // el token.
+  // DX-101: crear el enlace de acceso del paciente; ni la URL ni el token.
   'POST /patients/:id/access-links': {
     action: 'CREATE',
     resource: 'PATIENT_ACCESS_LINK',
     resourceId: RES,
     patient: { param: 'id' },
     reason: 'PATIENT_ACCESS_LINK_CREATED',
-  },
-  'DELETE /patients/:id/access-links/:linkId': {
-    action: 'DELETE',
-    resource: 'PATIENT_ACCESS_LINK',
-    resourceId: { param: 'linkId' },
-    patient: { param: 'id' },
-    reason: 'PATIENT_ACCESS_LINK_REVOKED',
   },
   // DX-569: crear (y enviar) el enlace de pago; ni la URL ni el token.
   'POST /patients/:id/payment-links': {
@@ -2122,6 +2114,8 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // (UPDATE), actor público PUBLIC_LINK, en la transacción del contador;
   // confirmar una cita desde el portal deja el evento del flujo de DX-005
   // (CONFIRMATION_LINK_CONFIRMED) en la transacción de la respuesta.
+  'DELETE /patients/:id/access-links/:linkId':
+    'patient-access.e2e-spec.ts (solo si revoca: revocar otra vez no deja evento)',
   'POST /public/patient-access/:token/verify':
     'patient-access.int-spec.ts y patient-access.e2e-spec.ts',
   'POST /public/patient-access/me/appointments/:appointmentId/confirm':
