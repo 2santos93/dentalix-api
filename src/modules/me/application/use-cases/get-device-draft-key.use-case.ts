@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -39,10 +40,19 @@ export interface DeviceDraftKey {
  */
 @Injectable()
 export class GetDeviceDraftKeyUseCase {
+  private readonly logger = new Logger(GetDeviceDraftKeyUseCase.name);
+
   constructor(
     @Inject(DRAFT_KEY_GATE) private readonly gate: DraftKeyGate,
     private readonly config: ConfigService,
-  ) {}
+  ) {
+    // Se construye al arrancar: sin secreto, un aviso claro y la API sigue.
+    if (!this.config.get<string>(DEVICE_DRAFT_KEY_SECRET_ENV)?.trim()) {
+      this.logger.warn(
+        `${DEVICE_DRAFT_KEY_SECRET_ENV} no está configurada: los borradores cifrados en el dispositivo (DX-574) están desactivados y GET /me/draft-key responde 503. Genera una con \`openssl rand -hex 32\`.`,
+      );
+    }
+  }
 
   async execute(
     user: TenantJwtPayload & { sid?: string; tv?: number },

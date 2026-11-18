@@ -203,19 +203,16 @@ function jwtSecretProblems(env: Env, isProd: boolean): string[] {
 
 /**
  * DX-574: `DEVICE_DRAFT_KEY_SECRET` deriva la clave de los borradores cifrados
- * en el dispositivo. Obligatoria en producción; si está, con las mismas reglas
- * que los secretos JWT y distinta de ellos (no se reutiliza ningún secreto).
+ * en el dispositivo. Es una función accesoria: si FALTA (también en
+ * producción) la API arranca igual, avisa en el log al iniciar
+ * (`GetDeviceDraftKeyUseCase`) y `GET /me/draft-key` da 503, así que la web no
+ * guarda borradores. Si está y es débil (corta, de ejemplo, de CI en
+ * producción o igual a un secreto JWT), el arranque falla.
  */
 function deviceDraftKeyProblems(env: Env, isProd: boolean): string[] {
   const key = 'DEVICE_DRAFT_KEY_SECRET';
   const value = str(env, key)?.trim();
-  if (value == null || value === '') {
-    return isProd
-      ? [
-          `${key} es obligatoria en producción: cifra los borradores de los formularios clínicos en el dispositivo. ${HOW_TO_GENERATE}`,
-        ]
-      : [];
-  }
+  if (value == null || value === '') return [];
   const normalized = value.toLowerCase();
   if (
     KNOWN_INSECURE_SECRETS.has(normalized) ||

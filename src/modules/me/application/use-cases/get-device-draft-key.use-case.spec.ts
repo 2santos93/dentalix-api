@@ -1,5 +1,6 @@
 import {
   ForbiddenException,
+  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -62,6 +63,20 @@ describe('GetDeviceDraftKeyUseCase (DX-574)', () => {
     await expect(
       useCase(2).uc.execute({ ...USER, breakGlass: true }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('sin secreto configurado: avisa al construirse (arranque) y el endpoint da 503', async () => {
+    const warn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+    const { uc } = useCase(2, '');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('DEVICE_DRAFT_KEY_SECRET no está configurada'),
+    );
+    warn.mockRestore();
+    await expect(uc.execute(USER)).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
   });
 
   it('sin secreto configurado: 503', async () => {

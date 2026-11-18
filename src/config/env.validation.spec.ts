@@ -83,10 +83,10 @@ describe('validateEnv', () => {
   });
 
   describe('DEVICE_DRAFT_KEY_SECRET (DX-574)', () => {
-    it('producción la exige; fuera de producción es opcional', () => {
-      expect(
-        errorOf(prodEnv({ DEVICE_DRAFT_KEY_SECRET: undefined })),
-      ).toContain('DEVICE_DRAFT_KEY_SECRET es obligatoria en producción');
+    it('si falta, la API arranca igual, también en producción (la función se desactiva)', () => {
+      expect(() =>
+        validateEnv(prodEnv({ DEVICE_DRAFT_KEY_SECRET: undefined })),
+      ).not.toThrow();
       expect(() => validateEnv(baseEnv())).not.toThrow();
     });
 
