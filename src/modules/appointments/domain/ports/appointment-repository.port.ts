@@ -1,7 +1,9 @@
 import {
+  AppointmentOrigin,
   AppointmentStatus,
   CancellationByKind,
   CancellationReasonCode,
+  Prisma,
 } from '@prisma/client';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { CurrentPolicyRef } from '../../../cancellation-policies/domain/cancellation-policy';
@@ -44,6 +46,17 @@ export interface CreateAppointmentRepoInput {
   chairId?: string;
   /** DX-263: lote de importación que crea la cita. */
   importBatchId?: string;
+  /** DX-016: ONLINE = la crea la reserva online (por defecto STAFF). */
+  origin?: AppointmentOrigin;
+  /**
+   * DX-016: trabajo extra en la MISMA transacción que el alta, tras crear la
+   * cita (la fila de la reserva online y su auditoría). Si lanza, no se crea
+   * nada.
+   */
+  inTransaction?: (
+    tx: Prisma.TransactionClient,
+    appointment: { id: string; locationId: string },
+  ) => Promise<void>;
 }
 
 export interface UpdateAppointmentRepoInput {

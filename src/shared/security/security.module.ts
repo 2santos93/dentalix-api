@@ -143,6 +143,9 @@ function throttlers(
     },
     // DX-467: verificar una receta por el código de su QR, por IP.
     strict('prescription-verify'),
+    // DX-016: la página pública de reserva online, por IP (lecturas y escrituras).
+    strict('online-booking'),
+    strict('online-booking-write'),
     {
       ...strict('direct-upload'),
       generateKey: (context, _ip, name) =>

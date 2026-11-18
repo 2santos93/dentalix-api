@@ -1,4 +1,5 @@
 import {
+  AppointmentOrigin,
   AppointmentStatus,
   CancellationByKind,
   CancellationReasonCode,
@@ -98,6 +99,11 @@ export interface Appointment {
   triageNote: string | null;
   /** DX-470: nació en «Atender sin cita». */
   walkIn: boolean;
+  /**
+   * DX-016: STAFF (la agendó el personal) u ONLINE (reserva online del
+   * paciente: la marca «Online» de la agenda). Ausente = STAFF.
+   */
+  origin?: AppointmentOrigin;
   /** DX-470: sobrecupo anotado (no ocupa el hueco del profesional). */
   overbooked: boolean;
   /** DX-211: sillón de la cita; null = sin sillón. */
