@@ -42,6 +42,10 @@ import type {
   VoidPrescriptionOutcome,
   VoidPrescriptionRepoInput,
 } from '../../domain/ports/prescription-repository.port';
+import type {
+  IdempotencyRequest,
+  IdempotentRecord,
+} from '../../../../shared/validation/idempotent-create';
 
 const INCLUDE = {
   items: { orderBy: { position: 'asc' } },
@@ -379,10 +383,17 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
    * intento; si choca con el de otra receta (índice único global), la
    * transacción entera se deshace y se repite con otro.
    */
-  async create(input: CreatePrescriptionRepoInput): Promise<Prescription> {
+  async create(
+    input: CreatePrescriptionRepoInput,
+    idempotency?: IdempotencyRequest,
+  ): Promise<Prescription> {
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.insert(input, generatePrescriptionVerificationCode());
+        return await this.insert(
+          input,
+          generatePrescriptionVerificationCode(),
+          idempotency,
+        );
       } catch (error) {
         if (
           attempt >= VERIFICATION_CODE_ATTEMPTS ||
@@ -397,6 +408,7 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
   private async insert(
     input: CreatePrescriptionRepoInput,
     verificationCode: string,
+    idempotency: IdempotencyRequest | undefined,
   ): Promise<Prescription> {
     const tenantId = this.requireTenantId();
     const {
@@ -436,6 +448,9 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
             Prisma.DbNull,
           country: legacyClinicCountry(country),
           verificationCode,
+          // DX-574: inalterables como el resto de la receta sellada.
+          idempotencyKey: idempotency?.key ?? null,
+          idempotencyFingerprint: idempotency?.fingerprint ?? null,
           tenantId,
           dispensationDate: fromDateOnly(dispensationDate),
           validUntil: fromDateOnly(validUntil),
@@ -447,6 +462,21 @@ export class PrismaPrescriptionRepository implements PrescriptionRepository {
       });
     });
     return mapRow(row);
+  }
+
+  async findByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<Prescription> | null> {
+    const tenantId = this.requireTenantId();
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.prescription.findFirst({
+        where: { tenantId, idempotencyKey: key },
+        include: INCLUDE,
+      }),
+    );
+    return row
+      ? { fingerprint: row.idempotencyFingerprint, value: mapRow(row) }
+      : null;
   }
 
   async listByPatient(patientId: string): Promise<Prescription[]> {

@@ -9,6 +9,10 @@ import type {
   PrescriptionLocationFormat,
   PrescriptionPatient,
 } from '../entities/prescription.entity';
+import type {
+  IdempotencyRequest,
+  IdempotentRecord,
+} from '../../../../shared/validation/idempotent-create';
 
 /**
  * Lo que el caso de uso sella y lo que se inserta: el mismo objeto. Sin
@@ -99,7 +103,19 @@ export interface PrescriptionRepository {
    * contenido en este puerto (la base también lo impide). En fase 1 copia en
    * la fila, en esa misma transacción, el país actual de la sede como dato.
    */
-  create(input: CreatePrescriptionRepoInput): Promise<Prescription>;
+  create(
+    input: CreatePrescriptionRepoInput,
+    /** DX-574: clave y huella de la emisión (fuera del sello: no es contenido). */
+    idempotency?: IdempotencyRequest,
+  ): Promise<Prescription>;
+
+  /**
+   * DX-574: la receta que emitió esta Idempotency-Key en la clínica, con la
+   * huella de su petición, o null.
+   */
+  findByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<Prescription> | null>;
 
   /** Del paciente, más reciente primero, con medicamentos. */
   listByPatient(patientId: string): Promise<Prescription[]>;

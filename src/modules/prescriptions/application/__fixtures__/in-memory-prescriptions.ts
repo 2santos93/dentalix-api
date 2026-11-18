@@ -120,7 +120,30 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
     return Promise.resolve();
   }
 
-  create(input: CreatePrescriptionRepoInput): Promise<Prescription> {
+  /** DX-574: Idempotency-Key → id de la receta y huella. */
+  keys = new Map<string, { id: string; fingerprint: string }>();
+
+  findByIdempotencyKey(
+    key: string,
+  ): Promise<{ fingerprint: string | null; value: Prescription } | null> {
+    const stored = this.keys.get(key);
+    const row = stored && this.rows.find((r) => r.id === stored.id);
+    return Promise.resolve(
+      row && stored
+        ? { fingerprint: stored.fingerprint, value: structuredClone(row) }
+        : null,
+    );
+  }
+
+  create(
+    input: CreatePrescriptionRepoInput,
+    idempotency?: { key: string; fingerprint: string },
+  ): Promise<Prescription> {
+    if (idempotency && this.keys.has(idempotency.key)) {
+      return Promise.reject(
+        new Error('P2002 prescriptions_tenant_idempotency_key'),
+      );
+    }
     this.lastCreateInput = structuredClone(input);
     this.seq += 1;
     const id = `00000000-0000-4000-8000-${String(this.seq).padStart(12, '0')}`;
@@ -138,6 +161,12 @@ export class InMemoryPrescriptionRepository implements PrescriptionRepository {
       items: input.items.map((item, i) => ({ ...item, id: `${id}-${i}` })),
     };
     this.rows.push(row);
+    if (idempotency) {
+      this.keys.set(idempotency.key, {
+        id,
+        fingerprint: idempotency.fingerprint,
+      });
+    }
     return Promise.resolve(structuredClone(row));
   }
 
