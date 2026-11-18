@@ -24,9 +24,8 @@ export class SecurityPolicyDto {
   @ApiPropertyOptional({
     minimum: SESSION_IDLE_MIN_MINUTES,
     maximum: SESSION_IDLE_MAX_MINUTES,
-    default: 60,
     description:
-      'DX-137: minutos sin actividad tras los que la web cierra la sesión («Sesión cerrada por inactividad») y /auth/refresh deja de renovarla. Sin indicarlo, se conserva. Auditado (`SESSION_IDLE_POLICY`).',
+      'DX-137: minutos sin actividad (por defecto 60) tras los que la web cierra la sesión («Sesión cerrada por inactividad») y /auth/refresh deja de renovarla. Sin indicarlo, se conserva. Auditado (`SESSION_IDLE_POLICY`).',
   })
   @IsOptional()
   @IsInt()
