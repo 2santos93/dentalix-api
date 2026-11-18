@@ -64,6 +64,9 @@ describe('plantilla quote-follow-up (DX-561)', () => {
     expect(email.text).toContain(
       'Hay un presupuesto de Sofía pendiente de revisar en Sonrisas del Norte.',
     );
+    expect(email.subject).toBe(
+      'Hay un presupuesto de Sofía pendiente en Sonrisas del Norte',
+    );
     expect(email.html).toContain('>Opción A</a>');
     expect(email.html).toContain('>Opción B</a>');
     expect(email.html).toContain('href="https://demo.dentalix.app/firmar/b"');

@@ -685,7 +685,7 @@ function quoteFollowUp(
   return renderLayout({
     brand,
     chrome: t,
-    subject: t.subject(vars.clinicName),
+    subject: t.subject(vars.clinicName, vars.patientFirstName),
     heading: t.heading(vars.recipientFirstName),
     blocks: [
       {

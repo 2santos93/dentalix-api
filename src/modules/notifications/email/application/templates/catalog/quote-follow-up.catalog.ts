@@ -9,7 +9,8 @@ import type { EmailLocale } from '../../../domain/email-message';
  */
 export interface QuoteFollowUpTexts {
   htmlLang: string;
-  subject: (clinic: string) => string;
+  /** `patient`: el nombre de pila del menor si escribe a su responsable. */
+  subject: (clinic: string, patient: string | null) => string;
   heading: (name: string | null) => string;
   /** `patient`: el nombre de pila del menor si escribe a su responsable. */
   intro: (clinic: string, patient: string | null) => string;
@@ -33,7 +34,10 @@ export const QUOTE_FOLLOW_UP_CATALOG: Readonly<
 > = {
   es: {
     htmlLang: 'es',
-    subject: (clinic) => `Tienes un presupuesto pendiente en ${clinic}`,
+    subject: (clinic, patient) =>
+      patient
+        ? `Hay un presupuesto de ${patient} pendiente en ${clinic}`
+        : `Tienes un presupuesto pendiente en ${clinic}`,
     heading: (name) => (name ? `Hola, ${name}` : 'Hola'),
     intro: (clinic, patient) =>
       patient
@@ -54,7 +58,10 @@ export const QUOTE_FOLLOW_UP_CATALOG: Readonly<
   },
   en: {
     htmlLang: 'en',
-    subject: (clinic) => `You have a pending quote at ${clinic}`,
+    subject: (clinic, patient) =>
+      patient
+        ? `There is a pending quote for ${patient} at ${clinic}`
+        : `You have a pending quote at ${clinic}`,
     heading: (name) => (name ? `Hello ${name},` : 'Hello,'),
     intro: (clinic, patient) =>
       patient
