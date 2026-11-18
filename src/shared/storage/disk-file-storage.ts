@@ -71,6 +71,18 @@ const isMissing = (err: unknown): boolean =>
  * metadatos del objeto van en `STORAGE_DIR/.meta/<clave>.json` (`.meta` no
  * puede ser el primer segmento de una clave).
  */
+/**
+ * DX-581: segundo epoch en que caduca un enlace que debe valer al menos
+ * `ttlSeconds` desde ahora. La verificación rechaza cuando
+ * `expires * 1000 < Date.now()`; con `floor(ahora) + ttl` la vida real
+ * quedaba entre ttl − 1 y ttl segundos (con ttl = 1, un enlace firmado en
+ * x,9 s caducaba a los 100 ms). Redondeando hacia arriba dura entre ttl y
+ * ttl + 1.
+ */
+export function expiresAtLeast(ttlSeconds: number, now = Date.now()): number {
+  return Math.ceil((now + ttlSeconds * 1000) / 1000);
+}
+
 export class DiskFileStorage implements FileStoragePort {
   private readonly signingKey = randomBytes(32);
 
@@ -247,10 +259,14 @@ export class DiskFileStorage implements FileStoragePort {
   ): Promise<DirectUploadTarget> {
     return Promise.resolve().then(() => {
       assertFileKey(key);
-      const expiresAt = new Date(Date.now() + policy.ttlSeconds * 1000);
+      // DX-581: el instante firmado va en segundos y se redondea hacia
+      // ARRIBA: la subida vale al menos ttlSeconds (truncando, un enlace
+      // firmado en x,9 s perdía casi un segundo).
+      const expiresSeconds = expiresAtLeast(policy.ttlSeconds);
+      const expiresAt = new Date(expiresSeconds * 1000);
       const fields = {
         key,
-        expires: String(Math.floor(expiresAt.getTime() / 1000)),
+        expires: String(expiresSeconds),
         max: String(policy.maxBytes),
         sha256: policy.sha256Base64,
         meta: JSON.stringify(policy.metadata),
@@ -422,7 +438,8 @@ export class DiskFileStorage implements FileStoragePort {
       assertFileKey(key);
       assertSignedUrlTtl(ttlSeconds);
       assertSignedUrlOptions(options);
-      const expires = String(Math.floor(Date.now() / 1000) + ttlSeconds);
+      // DX-581: al menos ttlSeconds de vida (ver expiresAtLeast).
+      const expires = String(expiresAtLeast(ttlSeconds));
       // Nombre o tipo vacíos no viajan en la URL, así que tampoco se firman.
       const signed: SignedUrlOptions | undefined = options && {
         disposition: options.disposition,
