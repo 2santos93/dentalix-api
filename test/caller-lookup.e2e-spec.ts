@@ -283,7 +283,8 @@ describe('¿Quién llama? (e2e, DX-224)', () => {
 
   it('sin coincidencias, 200 con la lista vacía', async () => {
     const res = await lookup('0426 7771122').expect(200);
-    expect(res.body).toEqual({ matches: [], truncated: false });
+    // DX-556: ADMIN y RECEPTION reciben además los prospectos (ninguno aquí).
+    expect(res.body).toEqual({ matches: [], truncated: false, leads: [] });
   });
 
   it('menos de 7 dígitos: 400 «Escribe el número completo»', async () => {

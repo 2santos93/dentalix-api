@@ -73,7 +73,7 @@ export const PREDEFINED_LEAD_REASONS: Record<
 export const LEAD_MESSAGES = {
   notFound: 'Prospecto no encontrado',
   phoneInvalid:
-    'El teléfono no es válido. Escríbelo con el prefijo del país (p. ej. +58 412 1234567).',
+    'El teléfono no es válido. Escríbelo completo, con el prefijo del país si no es el de la sede.',
   phoneTaken: 'Ese teléfono ya es de un paciente o de otro prospecto.',
   lostReasonRequired:
     'Para marcarlo como perdido elige un motivo del catálogo.',
@@ -203,8 +203,7 @@ export function matchCatalogReason(
   return catalog.find((r) => r.toLocaleLowerCase('es') === wanted) ?? null;
 }
 
-/** Tasa de un paso (0..1 con 4 decimales); 0 si no hay base. */
+/** Tasa de un paso (0..1, sin redondear: la pinta la web); 0 si no hay base. */
 export function stepRate(part: number, base: number): number {
-  if (base <= 0) return 0;
-  return Math.round((part / base) * 10_000) / 10_000;
+  return base > 0 ? part / base : 0;
 }

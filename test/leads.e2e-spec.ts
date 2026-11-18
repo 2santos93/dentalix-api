@@ -442,6 +442,11 @@ describe('Prospectos (DX-556, e2e)', () => {
       expect(list.items.map((i) => i.id)).toContain(mine.id);
     });
 
+    // ISOLATION_COVERS: GET /leads/:id
+    // ISOLATION_COVERS: PATCH /leads/:id
+    // ISOLATION_COVERS: POST /leads/:id/stage
+    // ISOLATION_COVERS: POST /leads/:id/notes
+    // ISOLATION_COVERS: POST /leads/:id/convert
     it('otra clínica no ve nada: 404 por id, sus listas sin filas de A, y la sede, el responsable y el paciente de A no le valen', async () => {
       const lead = await createLead();
       const fromB = as(b, b.adminToken);
@@ -617,6 +622,7 @@ describe('Prospectos (DX-556, e2e)', () => {
         .expect(400);
     });
 
+    // ISOLATION_COVERS: DELETE /lead-reasons/:id
     it('catálogo de motivos: ADMIN añade y retira los propios; recepción los lee', async () => {
       const created = await as(a, a.adminToken)
         .post('/lead-reasons', { kind: 'LOSS', name: 'Se mudó a Valencia' })

@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../shared/prisma/prisma.service';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import { LEAD_ANONYMIZED_NAME } from '../domain/lead-rules';

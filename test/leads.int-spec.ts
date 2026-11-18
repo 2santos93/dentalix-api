@@ -855,6 +855,10 @@ describe('DX-556 · prospectos sobre Postgres (RLS FORCE)', () => {
           line.scheduled,
         );
       }
+      // «Sin responsable» también cuadra (unowned).
+      const unowned = report.byOwner.find((l) => l.key === null);
+      expect(unowned?.leads).toBeGreaterThanOrEqual(1);
+      expect(await total({ unowned: true })).toBe(unowned?.leads);
       expect(report.totals.leads).toBe(await total({}));
       expect(report.byOwner.reduce((acc, l) => acc + l.leads, 0)).toBe(
         report.totals.leads,

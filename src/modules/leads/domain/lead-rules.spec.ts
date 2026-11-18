@@ -161,8 +161,8 @@ describe('textos y catálogo (DX-556)', () => {
     }
   });
 
-  it('stepRate: 4 decimales y 0 sin base', () => {
-    expect(stepRate(1, 3)).toBe(0.3333);
+  it('stepRate: la proporción y 0 sin base', () => {
+    expect(stepRate(1, 3)).toBeCloseTo(1 / 3);
     expect(stepRate(2, 2)).toBe(1);
     expect(stepRate(0, 0)).toBe(0);
   });

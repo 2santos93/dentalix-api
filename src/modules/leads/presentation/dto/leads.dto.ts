@@ -42,14 +42,13 @@ const HEALTH_HINT =
 // ---------------------------------------------------------------------------
 
 export class CreateLeadDto {
-  @ApiProperty({ maxLength: LEAD_NAME_MAX, example: 'María Pérez' })
+  @ApiProperty({ maxLength: LEAD_NAME_MAX })
   @IsString({ message: 'Escribe el nombre del prospecto.' })
   @TextMaxLength(LEAD_NAME_MAX)
   fullName!: string;
 
   @ApiProperty({
     maxLength: LEAD_PHONE_INPUT_MAX,
-    example: '+58 412 1234567',
     description:
       'En cualquier formato; sin «+», con el prefijo de la sede. Se guarda en E.164. Si ya es de un paciente o de otro prospecto: 409 `LEAD_PHONE_TAKEN` con `existing`.',
   })
@@ -254,6 +253,16 @@ export class LeadFilterQueryDto extends LeadScopeQueryDto {
   @IsOptional()
   @IsUUID('all', { message: 'ownerId debe ser un UUID.' })
   ownerId?: string;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description:
+      'Solo los que no tienen responsable (la fila «Sin responsable» del informe). Se ignora con `ownerId`.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  unowned?: boolean;
 
   @ApiPropertyOptional({
     maxLength: LEAD_NAME_MAX,

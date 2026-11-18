@@ -53,6 +53,8 @@ export interface LeadListFilter {
   stage?: LeadStageCode;
   channel?: LeadChannelCode;
   ownerId?: string;
+  /** Solo los que no tienen responsable (la fila «Sin responsable» del informe). */
+  unowned?: boolean;
   /** Busca en el nombre (sin tildes ni mayúsculas) o en los dígitos del teléfono. */
   q?: string;
   createdFrom?: Date;

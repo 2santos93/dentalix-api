@@ -132,6 +132,7 @@ export interface LeadQuery {
   stage?: LeadStageCode;
   channel?: LeadChannelCode;
   ownerId?: string;
+  unowned?: boolean;
   q?: string;
   createdFrom?: Date;
   createdTo?: Date;
@@ -593,6 +594,7 @@ export class LeadsUseCases {
       stage: query.stage,
       channel: query.channel,
       ownerId: query.ownerId,
+      unowned: query.unowned,
       q: query.q,
       createdFrom: query.createdFrom,
       createdTo: query.createdTo,

@@ -165,7 +165,7 @@ export class PrismaLeadRepository implements LeadRepository {
         .map((r) => ({
           userId: r.userId,
           fullName: r.user.fullName,
-          role: r.role as string,
+          role: r.role,
         }))
         .sort((a, b) => a.fullName.localeCompare(b.fullName, 'es'));
     });
@@ -501,6 +501,8 @@ export class PrismaLeadRepository implements LeadRepository {
     }
     if (filter.ownerId) {
       conds.push(Prisma.sql`l."ownerId" = ${filter.ownerId}::uuid`);
+    } else if (filter.unowned) {
+      conds.push(Prisma.sql`l."ownerId" IS NULL`);
     }
     if (filter.createdFrom) {
       conds.push(Prisma.sql`l."createdAt" >= ${filter.createdFrom}`);
