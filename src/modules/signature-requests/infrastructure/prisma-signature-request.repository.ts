@@ -17,10 +17,7 @@ import { TenantContextService } from '../../../shared/tenancy/tenant-context.ser
 import { resolveReferenceLocation } from '../../../shared/locations/reference-location';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
-import {
-  acceptPlanInTx,
-  lockPlanGroup,
-} from '../../treatment-plans/infrastructure/repositories/plan-option-group';
+import { acceptBudgetInTx } from '../../treatment-plans/infrastructure/repositories/budget-acceptance';
 import { readPlanQuoteSource } from '../../treatment-plans/infrastructure/repositories/prisma-plan-quote.repository';
 import {
   loadNoticeResponsibles,
@@ -789,27 +786,17 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
     request: SignatureRequestRecord,
     budget: RemoteBudgetAcceptanceInsert,
   ): Promise<void> {
-    const locked = await lockPlanGroup(tx, budget.planId);
-    if (!locked) throw new RemoteBudgetChangedError();
-    const source = await readPlanQuoteSource(
-      tx,
+    // DX-101-bis: el núcleo compartido con el portal del paciente; aquí, con
+    // la comprobación de la foto enviada y las evidencias del enlace.
+    await acceptBudgetInTx(tx, {
       tenantId,
-      request.patientId,
-      budget.planId,
-      budget.locationId,
-    );
-    if (!source || !budget.stillMatches(source)) {
-      throw new RemoteBudgetChangedError();
-    }
-    const { planId, locationId } = budget;
-    try {
-      await tx.treatmentPlanAcceptance.create({
-        data: {
-          tenantId,
-          planId,
-          patientId: request.patientId,
-          locationId,
-          signatureRequestId: request.id,
+      patientId: request.patientId,
+      planId: budget.planId,
+      locationId: budget.locationId,
+      changed: () => new RemoteBudgetChangedError(),
+      decide: (source) => {
+        if (!budget.stillMatches(source)) throw new RemoteBudgetChangedError();
+        return {
           signerName: budget.signerName,
           signature: budget.signature,
           content: budget.content,
@@ -819,37 +806,17 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           acceptedById: budget.acceptedById,
           ipAddress: budget.ipAddress,
           userAgent: budget.userAgent,
-          remoteChannel: budget.remoteChannel,
-          remoteDestinationMasked: budget.remoteDestinationMasked,
-          remoteSentAt: budget.remoteSentAt,
-          remoteOpenedAt: budget.remoteOpenedAt,
-          remoteVerifiedAt: budget.remoteVerifiedAt,
-          // DX-019-bis (B): el logo del instante de la firma (no el del envío:
-          // no está en la foto enviada, así que cambiarlo no anula el enlace).
-          clinicLogoKey: source.clinic.logoKey,
-          // DX-379 (C): copia del último día válido del presupuesto (nunca
-          // vencido: `stillMatches` lo comprobó con el plan bloqueado).
-          quoteValidUntil: source.plan.quoteValidUntil
-            ? new Date(`${source.plan.quoteValidUntil}T00:00:00.000Z`)
-            : null,
-        },
-      });
-    } catch (error) {
-      // Otra firma (en la clínica o por otro enlace) llegó antes.
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
-      ) {
-        throw new RemoteBudgetChangedError();
-      }
-      throw error;
-    }
-    await acceptPlanInTx(
-      tx,
-      locked,
-      budget.acceptedAt,
-      budget.acceptedById,
-      locationId,
-    );
+          evidence: {
+            channel: 'REMOTE_LINK',
+            signatureRequestId: request.id,
+            remoteChannel: budget.remoteChannel,
+            remoteDestinationMasked: budget.remoteDestinationMasked,
+            remoteSentAt: budget.remoteSentAt,
+            remoteOpenedAt: budget.remoteOpenedAt,
+            remoteVerifiedAt: budget.remoteVerifiedAt,
+          },
+        };
+      },
+    });
   }
 }
