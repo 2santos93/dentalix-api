@@ -497,7 +497,7 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'external_orders.patientId',
       // DX-556: un prospecto convertido en (o enlazado a) el paciente es
       // actividad comercial propia de la ficha: bloquea el deshacer.
-      'leads.convertedPatientId',
+      'leads.patientId',
       'medical_history_reviews.patientId',
       // DX-099: una anamnesis enviada por enlace también bloquea el deshacer.
       'medical_history_submissions.patientId',

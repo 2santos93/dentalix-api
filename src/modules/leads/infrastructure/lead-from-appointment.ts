@@ -78,7 +78,7 @@ export async function leadsOnAppointmentCreatedInTx(
     WITH old AS (
       SELECT "id", "stage"::text AS "from" FROM "leads"
        WHERE "tenantId" = ${input.tenantId}::uuid
-         AND "convertedPatientId" = ${input.patientId}::uuid
+         AND "patientId" = ${input.patientId}::uuid
          AND "stage" IN ('NEW', 'CONTACTED')
          AND "anonymizedAt" IS NULL
        FOR UPDATE
@@ -118,7 +118,7 @@ export async function leadsOnAppointmentCompletedInTx(
     WITH old AS (
       SELECT "id", "stage"::text AS "from" FROM "leads"
        WHERE "tenantId" = ${input.tenantId}::uuid
-         AND "convertedPatientId" = ${input.patientId}::uuid
+         AND "patientId" = ${input.patientId}::uuid
          AND "stage" = 'SCHEDULED'
          AND "anonymizedAt" IS NULL
        FOR UPDATE

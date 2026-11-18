@@ -4510,6 +4510,19 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'leads.e2e-spec.ts',
+      checks:
+        'B → 404 al leer, editar, cambiar de etapa, anotar o convertir un prospecto de A y al retirar un motivo propio de A; 403 con la sede de A en la lista, el tablero, el contador y el informe (DX-556)',
+      routes: [
+        'GET /leads/:id',
+        'PATCH /leads/:id',
+        'POST /leads/:id/stage',
+        'POST /leads/:id/notes',
+        'POST /leads/:id/convert',
+        'DELETE /lead-reasons/:id',
+      ],
+    },
+    {
       spec: 'post-op-checks.e2e-spec.ts',
       checks:
         'B → 404 al registrar el resultado de un control postoperatorio de A, sin intento nuevo; y 403 con la sede de A en la lista y el contador (DX-566)',

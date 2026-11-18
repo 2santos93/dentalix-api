@@ -23,13 +23,15 @@
 --                        convierte. CHECKs de coherencia por etapa. Guarda:
 --                        nace NUEVO y sin conversión; el paciente enlazado no
 --                        cambia (salvo la fusión); anonimizado es inmutable.
+--                        El paciente enlazado va en "patientId" (el nombre
+--                        que reasigna dx_merge_patients).
 --                        Sin DELETE para la app. Abre la puerta de la fusión
 --                        (DX-266).
 --   lead_notes           hilo de notas comerciales, solo de añadir: sin
 --                        UPDATE; DELETE solo de las notas de un prospecto ya
 --                        anonimizado (la retención).
 --   dx_patient_merge_tables()  la de DX-101 (20270111090200) +
---                        leads.convertedPatientId (lista cerrada de DX-266).
+--                        leads.patientId (lista cerrada de DX-266).
 --
 -- Un prospecto es un dato personal sin relación asistencial: nombre,
 -- teléfono, canal y notas comerciales; nunca datos de salud (la API limita
@@ -134,7 +136,7 @@ CREATE TABLE "leads" (
     "scheduledAt" TIMESTAMP(3),
     "attendedAt" TIMESTAMP(3),
     "lostAt" TIMESTAMP(3),
-    "convertedPatientId" UUID,
+    "patientId" UUID,
     "convertedAt" TIMESTAMP(3),
     "convertedById" UUID,
     "firstAppointmentId" UUID,
@@ -151,8 +153,8 @@ CREATE TABLE "leads" (
       ON DELETE RESTRICT ON UPDATE CASCADE,
     -- El paciente y la primera cita, de la MISMA clínica (SEC-004). Con la
     -- columna NULL la FK no se comprueba.
-    CONSTRAINT "leads_converted_patient_fkey"
-      FOREIGN KEY ("tenantId", "convertedPatientId") REFERENCES "patients"("tenantId", "id")
+    CONSTRAINT "leads_patient_fkey"
+      FOREIGN KEY ("tenantId", "patientId") REFERENCES "patients"("tenantId", "id")
       ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "leads_first_appointment_fkey"
       FOREIGN KEY ("tenantId", "firstAppointmentId") REFERENCES "appointments"("tenantId", "id")
@@ -183,12 +185,12 @@ CREATE TABLE "leads" (
             THEN "lostReason" IS NOT NULL AND "lostAt" IS NOT NULL
             ELSE "lostReason" IS NULL AND "lostAt" IS NULL END)
       AND ("stage" NOT IN ('SCHEDULED', 'ATTENDED')
-           OR ("convertedPatientId" IS NOT NULL AND "scheduledAt" IS NOT NULL))
+           OR ("patientId" IS NOT NULL AND "scheduledAt" IS NOT NULL))
       AND ("stage" <> 'ATTENDED' OR "attendedAt" IS NOT NULL)
       AND ("attendedAt" IS NULL OR "scheduledAt" IS NOT NULL)
-      AND (("convertedPatientId" IS NULL) = ("convertedAt" IS NULL)
-           AND ("convertedPatientId" IS NULL) = ("convertedById" IS NULL))
-      AND ("firstAppointmentId" IS NULL OR "convertedPatientId" IS NOT NULL)
+      AND (("patientId" IS NULL) = ("convertedAt" IS NULL)
+           AND ("patientId" IS NULL) = ("convertedById" IS NULL))
+      AND ("firstAppointmentId" IS NULL OR "patientId" IS NOT NULL)
     ),
     -- Anonimizado: perdido, sin teléfono ni nota de próxima acción. Vivo:
     -- con teléfono y su E.164.
@@ -220,8 +222,8 @@ CREATE INDEX "leads_lost_retention_idx"
   ON "leads"("tenantId", "lostAt")
   WHERE "stage" = 'LOST' AND "anonymizedAt" IS NULL;
 -- Lados hijos de las demás FK.
-CREATE INDEX "leads_converted_patient_idx"
-  ON "leads"("tenantId", "convertedPatientId") WHERE "convertedPatientId" IS NOT NULL;
+CREATE INDEX "leads_patient_idx"
+  ON "leads"("tenantId", "patientId") WHERE "patientId" IS NOT NULL;
 CREATE INDEX "leads_first_appointment_idx"
   ON "leads"("tenantId", "firstAppointmentId") WHERE "firstAppointmentId" IS NOT NULL;
 CREATE INDEX "leads_owner_idx" ON "leads"("ownerId") WHERE "ownerId" IS NOT NULL;
@@ -236,7 +238,7 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
   IF NEW."stage" IS DISTINCT FROM 'NEW'
-     OR NEW."convertedPatientId" IS NOT NULL
+     OR NEW."patientId" IS NOT NULL
      OR NEW."firstAppointmentId" IS NOT NULL
      OR NEW."anonymizedAt" IS NOT NULL
      OR NEW."scheduledAt" IS NOT NULL
@@ -292,8 +294,8 @@ BEGIN
     RAISE EXCEPTION 'leads: la identidad del prospecto no cambia (DX-556)'
       USING ERRCODE = 'restrict_violation';
   END IF;
-  IF OLD."convertedPatientId" IS NOT NULL AND (
-       NEW."convertedPatientId" IS DISTINCT FROM OLD."convertedPatientId"
+  IF OLD."patientId" IS NOT NULL AND (
+       NEW."patientId" IS DISTINCT FROM OLD."patientId"
        OR NEW."convertedAt" IS DISTINCT FROM OLD."convertedAt"
        OR NEW."convertedById" IS DISTINCT FROM OLD."convertedById") THEN
     RAISE EXCEPTION 'leads: la conversión en paciente se fija una vez (DX-556)'
@@ -417,7 +419,7 @@ ALTER TABLE "lead_notes" FORCE ROW LEVEL SECURITY;
 
 -- ---------------------------------------------------------------------------
 -- Fusión de pacientes (DX-266): la lista de 20270111090200 (DX-101) +
--- leads.convertedPatientId
+-- leads.patientId
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.dx_patient_merge_tables()
@@ -444,7 +446,7 @@ AS $$
     'dental_lab_orders.patientId',
     'external_order_copy_links.patientId',
     'external_orders.patientId',
-    'leads.convertedPatientId',
+    'leads.patientId',
     'medical_history_reviews.patientId',
     'medical_history_submissions.patientId',
     'medical_history_versions.patientId',

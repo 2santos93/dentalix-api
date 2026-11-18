@@ -50,7 +50,7 @@ const ROW_COLUMNS = Prisma.sql`
   l."phoneE164", l."channel"::text AS "channel", l."interestReason",
   l."stage"::text AS "stage", l."lostReason", l."ownerId", u."fullName" AS "ownerName",
   l."nextActionAt", l."nextActionNote", l."lastContactAt", l."scheduledAt",
-  l."attendedAt", l."lostAt", l."convertedPatientId", l."convertedAt",
+  l."attendedAt", l."lostAt", l."patientId" AS "convertedPatientId", l."convertedAt",
   l."firstAppointmentId", l."anonymizedAt", l."createdById", l."createdAt",
   l."updatedAt", ${STALE} AS "stale"`;
 
@@ -210,7 +210,7 @@ export class PrismaLeadRepository implements LeadRepository {
   private async lock(tx: Tx, id: string): Promise<LockedLead | null> {
     const [row] = await tx.$queryRaw<LockedLead[]>`
       SELECT "id", "locationId", "stage"::text AS "stage", "phone", "phoneE164",
-             "fullName", "convertedPatientId", "anonymizedAt"
+             "fullName", "patientId" AS "convertedPatientId", "anonymizedAt"
         FROM "leads" WHERE "id" = ${id}::uuid
        FOR UPDATE`;
     return row ?? null;
@@ -460,7 +460,7 @@ export class PrismaLeadRepository implements LeadRepository {
       }
       await tx.$executeRaw`
         UPDATE "leads" SET
-          "convertedPatientId" = ${patientId}::uuid,
+          "patientId" = ${patientId}::uuid,
           "convertedAt" = ${NOW},
           "convertedById" = ${audit.actor.userId}::uuid,
           "updatedAt" = ${NOW}

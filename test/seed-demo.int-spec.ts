@@ -492,6 +492,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     // DX-566: un control postoperatorio pendiente (la exodoncia hecha del
     // paciente 1), sin intentos.
     expect(firstCounts.post_op_checks).toBe(1);
+    // DX-556: cinco prospectos (uno con nota) y ningún motivo propio.
+    expect(firstCounts.leads).toBe(5);
+    expect(firstCounts.lead_notes).toBe(1);
+    expect(firstCounts.lead_reasons).toBe(0);
     expect(firstCounts.post_op_check_attempts).toBe(0);
     // DX-561: el seguimiento automático de presupuestos queda APAGADO en la
     // demo (sin ajustes por sede): sembrar no envía ningún aviso.

@@ -9812,7 +9812,8 @@ model Lead {
   scheduledAt        DateTime?
   attendedAt         DateTime?
   lostAt             DateTime?
-  convertedPatientId String?     @db.Uuid
+  /// El paciente en que se convirtió (o al que se enlazó). Columna "patientId": la reasigna la fusión (DX-266).
+  convertedPatientId String?     @map("patientId") @db.Uuid
   convertedAt        DateTime?
   convertedById      String?     @db.Uuid
   firstAppointmentId String?     @db.Uuid
@@ -9824,7 +9825,7 @@ model Lead {
 
   tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   location         Location     @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "leads_location_fkey")
-  convertedPatient Patient?     @relation(fields: [tenantId, convertedPatientId], references: [tenantId, id], onDelete: Restrict, map: "leads_converted_patient_fkey")
+  convertedPatient Patient?     @relation(fields: [tenantId, convertedPatientId], references: [tenantId, id], onDelete: Restrict, map: "leads_patient_fkey")
   firstAppointment Appointment? @relation(fields: [tenantId, firstAppointmentId], references: [tenantId, id], onDelete: Restrict, map: "leads_first_appointment_fkey")
   owner            User?        @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: Restrict, map: "leads_owner_fkey")
   createdBy        User         @relation("LeadCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "leads_created_by_fkey")
@@ -9840,7 +9841,7 @@ model Lead {
   //   leads_tenant_phone_key UNIQUE ("tenantId", "phoneE164") WHERE "phoneE164" IS NOT NULL
   //   leads_open_idx ("tenantId", "locationId") WHERE stage IN ('NEW', 'CONTACTED')
   //   leads_lost_retention_idx ("tenantId", "lostAt") WHERE stage = 'LOST' AND "anonymizedAt" IS NULL
-  //   leads_converted_patient_idx ("tenantId", "convertedPatientId") WHERE "convertedPatientId" IS NOT NULL
+  //   leads_patient_idx ("tenantId", "patientId") WHERE "patientId" IS NOT NULL
   //   leads_first_appointment_idx ("tenantId", "firstAppointmentId") WHERE "firstAppointmentId" IS NOT NULL
   //   leads_owner_idx ("ownerId") WHERE "ownerId" IS NOT NULL
   //   leads_converted_by_idx ("convertedById") WHERE "convertedById" IS NOT NULL
