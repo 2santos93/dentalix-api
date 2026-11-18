@@ -5,8 +5,8 @@
 -- es la UNIÓN del de main (20270109090400, DX-016) y esas dos escrituras, y
 -- solo ellas. Ni la fecha introducida ni el token van en el evento.
 --
--- Más permisivo (NOT VALID; su VALIDATE va en 20270110090400, molde de
--- DX-306 / DX-569). Va después de 20270110090000: usa el valor de enum
+-- Más permisivo (NOT VALID; su VALIDATE va en 20270111090400, molde de
+-- DX-306 / DX-569). Va después de 20270111090000: usa el valor de enum
 -- PATIENT_ACCESS_LINK, que no se puede usar en la transacción que lo crea.
 -- lock_timeout evita quedar encolado tras una transacción larga.
 

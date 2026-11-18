@@ -3,7 +3,7 @@
 -- DX-102 (audit_events particionada) exige un índice parcial
 -- "audit_events_resource_<valor>_idx" por cada valor de "AuditResourceType".
 -- Va en su PROPIA migración: el valor se añadió en
--- 20270110090000_dx101_audit_enum y Postgres no deja usar un valor de enum
+-- 20270111090000_dx101_audit_enum y Postgres no deja usar un valor de enum
 -- nuevo en la misma transacción que lo crea.
 --
 -- DX-148 («Migraciones en caliente», README): CREATE INDEX CONCURRENTLY no
@@ -15,7 +15,7 @@
 -- que se creen después heredan el índice.
 --
 -- lock_timeout 5 s: acota la ESPERA del bloqueo. Si falla: `npx prisma migrate
--- resolve --rolled-back 20270110090100_dx101_audit_events_idx` y repetir
+-- resolve --rolled-back 20270111090100_dx101_audit_events_idx` y repetir
 -- `migrate deploy`.
 --
 -- Aditiva. IF NOT EXISTS: idempotente.

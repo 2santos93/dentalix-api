@@ -1,9 +1,4 @@
-import {
-  ApiProperty,
-  ApiPropertyOptional,
-  OmitType,
-  PickType,
-} from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -262,8 +257,17 @@ export class PortalQuoteLocationDto extends PickType(PlanQuoteLocationDto, [
   'address',
 ] as const) {}
 
-export class PortalQuoteItemDto extends OmitType(PlanQuoteItemDto, [
-  'id',
+export class PortalQuoteItemDto extends PickType(PlanQuoteItemDto, [
+  'toothNumber',
+  'surfaces',
+  'procedure',
+  'quantity',
+  'unitPrice',
+  'discount',
+  'subtotal',
+  'listPrice',
+  'agreementName',
+  'listPriceCurrency',
 ] as const) {}
 
 /** De la aceptación, SOLO quién firmó, la firma (data URL) y cuándo. */
@@ -273,13 +277,23 @@ export class PortalQuoteAcceptanceDto extends PickType(PlanQuoteAcceptanceDto, [
   'acceptedAt',
 ] as const) {}
 
-export class PortalQuoteDto extends OmitType(PlanQuoteDocumentDto, [
-  'planId',
-  'patientId',
-  'planStatus',
-  'location',
-  'items',
-  'acceptance',
+// PickType (no OmitType): un campo nuevo del presupuesto del personal no
+// entra solo en el contrato del portal (DX-560 añadió `presentation`).
+export class PortalQuoteDto extends PickType(PlanQuoteDocumentDto, [
+  'version',
+  'currency',
+  'clinicName',
+  'clinicLogoUrl',
+  'clinicFiscal',
+  'regional',
+  'patient',
+  'professionalName',
+  'agreement',
+  'issuedOn',
+  'validUntil',
+  'validityDays',
+  'totals',
+  'contentHash',
 ] as const) {
   @ApiProperty({ type: PortalQuoteLocationDto })
   location!: PortalQuoteLocationDto;
@@ -291,23 +305,50 @@ export class PortalQuoteDto extends OmitType(PlanQuoteDocumentDto, [
   acceptance!: PortalQuoteAcceptanceDto | null;
 }
 
-export class PortalAccountPatientDto extends OmitType(
+export class PortalAccountPatientDto extends PickType(
   AccountStatementPatientDto,
-  ['id'] as const,
+  [
+    'firstName',
+    'lastName',
+    'docType',
+    'docTypeLabel',
+    'docTypeName',
+    'docNumber',
+  ] as const,
 ) {}
 
-export class PortalAccountAddresseeDto extends OmitType(
+export class PortalAccountAddresseeDto extends PickType(
   AccountStatementAddresseeDto,
-  ['email'] as const,
+  ['kind', 'name'] as const,
 ) {}
 
-export class PortalAccountPlanDto extends OmitType(AccountStatementPlanDto, [
-  'paymentsWithoutRate',
+export class PortalAccountPlanDto extends PickType(AccountStatementPlanDto, [
+  'id',
+  'status',
+  'currency',
+  'createdAt',
+  'budgeted',
+  'billable',
+  'countsTowardsBalance',
+  'paid',
+  'creditMovements',
+  'paidOtherCurrencies',
+  'balance',
+  'rateProviderTimedOut',
 ] as const) {}
 
-export class PortalAccountOpeningBalanceDto extends OmitType(
+export class PortalAccountOpeningBalanceDto extends PickType(
   AccountStatementOpeningBalanceDto,
-  ['importBatchId'] as const,
+  [
+    'id',
+    'currency',
+    'amount',
+    'asOfDate',
+    'asOfDateApproximate',
+    'concept',
+    'paid',
+    'pending',
+  ] as const,
 ) {}
 
 /** Un abono como lo ve el paciente: sin ids internos, autores ni motivos de anulación. */
