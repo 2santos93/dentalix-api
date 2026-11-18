@@ -76,6 +76,11 @@ export interface TreatmentPlanAcceptanceSummary {
     verifiedAt: Date;
     ipAddress: string | null;
   } | null;
+  /**
+   * DX-101-bis: el paciente lo aceptó desde su portal; la IP de la firma.
+   * `null` en la clínica o por el enlace con código.
+   */
+  portal: { ipAddress: string | null } | null;
 }
 
 /**

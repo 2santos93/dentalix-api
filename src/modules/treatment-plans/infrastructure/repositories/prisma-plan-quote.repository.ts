@@ -706,6 +706,7 @@ export async function readPlanQuoteSource(
           remoteSentAt: true,
           remoteOpenedAt: true,
           remoteVerifiedAt: true,
+          patientAccessLinkId: true,
           clinicLogoKey: true,
           quoteValidUntil: true,
           expiredMode: true,
@@ -905,6 +906,10 @@ export async function readPlanQuoteSource(
           ipAddress: acceptance.ipAddress,
           userAgent: acceptance.userAgent,
           remote: remoteEvidenceOf(acceptance),
+          // DX-101-bis: desde el portal del paciente.
+          portal: acceptance.patientAccessLinkId
+            ? { patientAccessLinkId: acceptance.patientAccessLinkId }
+            : null,
           // DX-019-bis (B): el congelado al firmar, nunca el de hoy.
           clinicLogoUrl: clinicLogoPublicUrl(acceptance.clinicLogoKey),
           expiry: {

@@ -89,6 +89,8 @@ export const ACCEPTANCE_SUMMARY = {
     remoteSentAt: true,
     remoteOpenedAt: true,
     remoteVerifiedAt: true,
+    // DX-101-bis: aceptada desde el portal del paciente.
+    patientAccessLinkId: true,
     // DX-417: el pendiente de una aceptación parcial.
     pendingPlanId: true,
   },
@@ -125,6 +127,9 @@ export function toAcceptanceSummary(
             ipAddress: acceptance.ipAddress,
           }
         : null,
+    portal: acceptance.patientAccessLinkId
+      ? { ipAddress: acceptance.ipAddress }
+      : null,
   };
 }
 

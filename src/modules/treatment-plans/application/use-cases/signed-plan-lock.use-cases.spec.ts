@@ -67,6 +67,7 @@ const SIGNED = {
   signerName: 'Ana Pérez',
   acceptedAt: new Date('2026-10-16T15:00:00.000Z'),
   remote: null,
+  portal: null,
 };
 
 function setup(acceptance: typeof SIGNED | null, status?: TreatmentPlanStatus) {

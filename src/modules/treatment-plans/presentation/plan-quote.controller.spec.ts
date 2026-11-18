@@ -35,6 +35,7 @@ function acceptance(
     acceptanceHash: 'a'.repeat(64),
     integrityOk: true,
     remote: null,
+    portal: null,
     ipAddress: null,
     userAgent: null,
     quoteValidUntil: '2026-10-20',

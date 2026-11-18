@@ -733,6 +733,31 @@ describe('plantillas reservadas para otras tareas', () => {
       expect(email.text).not.toMatch(/https?:\/\//);
     });
 
+    it('DX-101-bis: aceptado desde el portal, no dice que el enlace se gastó (HTML y texto)', () => {
+      const email = renderEmail(
+        'signature-budget-accepted',
+        {
+          recipientFirstName: 'Laura',
+          clinicName: 'Sonrisas del Norte',
+          acceptedAtLabel: '31/10/2026 9:30 a. m.',
+          viaPortal: true,
+        },
+        brand,
+      );
+      expect(email.subject).toBe('Sonrisas del Norte recibió tu aceptación');
+      for (const body of [email.text, email.html]) {
+        expect(body).toContain(
+          'El 31/10/2026 9:30 a. m. registramos tu aceptación',
+        );
+        expect(body).toContain(
+          'Lo verás como aceptado en tu portal de paciente',
+        );
+        expect(body).not.toMatch(/ya no se puede volver a usar/);
+      }
+      expect(email.html).not.toContain('href=');
+      expect(email.text).not.toMatch(/https?:\/\/|\$|implante|tratamiento/i);
+    });
+
     it('el enlace de pago (DX-569): clínica, enlace y caducidad; sin importes ni tratamientos', () => {
       const email = renderEmail(
         'payment-link',

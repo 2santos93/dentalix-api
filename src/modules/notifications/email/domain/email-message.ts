@@ -366,6 +366,12 @@ export interface SignatureBudgetAcceptedEmailVars {
   clinicName: string;
   /** Hora de la aceptación, ya formateada en la zona y el formato de la sede. */
   acceptedAtLabel: string;
+  /**
+   * DX-101-bis: aceptado desde el portal del paciente (su enlace de acceso
+   * sigue sirviendo hasta que caduque). Ausente: por el enlace de firma
+   * (DX-415), que ya no se puede volver a usar.
+   */
+  viaPortal?: boolean;
 }
 
 /**

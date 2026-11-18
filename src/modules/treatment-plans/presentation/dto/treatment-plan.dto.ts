@@ -22,6 +22,16 @@ export class TreatmentPlanRemoteAcceptanceDto {
   ipAddress!: string | null;
 }
 
+/** DX-101-bis: la aceptación desde el portal del paciente. */
+export class TreatmentPlanPortalAcceptanceDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'IP desde la que firmó',
+  })
+  ipAddress!: string | null;
+}
+
 export class TreatmentPlanAcceptanceSummaryDto {
   @ApiProperty()
   signerName!: string;
@@ -36,6 +46,14 @@ export class TreatmentPlanAcceptanceSummaryDto {
       '«Aceptado a distancia» (DX-415): el paciente firmó por el enlace con código; null si se firmó en la clínica.',
   })
   remote!: TreatmentPlanRemoteAcceptanceDto | null;
+
+  @ApiProperty({
+    type: TreatmentPlanPortalAcceptanceDto,
+    nullable: true,
+    description:
+      '«Aceptado desde el portal del paciente» (DX-101-bis); null si se firmó en la clínica o por el enlace con código.',
+  })
+  portal!: TreatmentPlanPortalAcceptanceDto | null;
 }
 
 // Response shape for TreatmentPlan endpoints — documents the
