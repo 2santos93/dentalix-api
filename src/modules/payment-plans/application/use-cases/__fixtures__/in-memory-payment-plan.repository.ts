@@ -1,5 +1,7 @@
 import {
+  CancelledPaymentPlan,
   Installment,
+  PaymentPlanCancellation,
   PaymentPlanWithInstallments,
 } from '../../../domain/entities/payment-plan.entity';
 import {
@@ -7,7 +9,10 @@ import {
   PaymentPlanRepository,
 } from '../../../domain/ports/payment-plan-repository.port';
 
-type StoredPlan = PaymentPlanWithInstallments & { deletedAt: Date | null };
+type StoredPlan = PaymentPlanWithInstallments & {
+  deletedAt: Date | null;
+  cancellation: PaymentPlanCancellation | null;
+};
 
 let seq = 0;
 const NOW = new Date('2026-01-01T00:00:00.000Z');
@@ -19,6 +24,12 @@ const NOW = new Date('2026-01-01T00:00:00.000Z');
  */
 export class InMemoryPaymentPlanRepository implements PaymentPlanRepository {
   private readonly plans: StoredPlan[] = [];
+
+  /** DX-123: planes de tratamiento que existen (por defecto, todos). */
+  existingTreatmentPlans: Set<string> | null = null;
+
+  /** DX-123: nombre de cada usuario (las membresías de la clínica). */
+  userNames = new Map<string, string>();
 
   /** DX-110: zona de la sede de cada plan de tratamiento (por defecto, Caracas). */
   timeZone = 'America/Caracas';
@@ -54,6 +65,7 @@ export class InMemoryPaymentPlanRepository implements PaymentPlanRepository {
       createdAt: NOW,
       updatedAt: NOW,
       deletedAt: null,
+      cancellation: null,
       installments,
     };
     this.plans.push(row);
@@ -72,7 +84,44 @@ export class InMemoryPaymentPlanRepository implements PaymentPlanRepository {
     return Promise.resolve(row ? this.toEntity(row) : null);
   }
 
-  cancel(id: string): Promise<boolean> {
+  treatmentPlanExists(treatmentPlanId: string): Promise<boolean> {
+    return Promise.resolve(
+      this.existingTreatmentPlans === null ||
+        this.existingTreatmentPlans.has(treatmentPlanId),
+    );
+  }
+
+  findCancelledByPlan(
+    treatmentPlanId: string,
+  ): Promise<CancelledPaymentPlan[]> {
+    const rows = this.plans
+      .filter(
+        (p) =>
+          p.treatmentPlanId === treatmentPlanId && p.status === 'CANCELLED',
+      )
+      .map((p) => {
+        const by = p.cancellation?.byId ?? null;
+        return {
+          id: p.id,
+          currency: p.currency,
+          totalToFinance: p.totalToFinance,
+          downPayment: p.downPayment,
+          installmentsCount: p.installmentsCount,
+          periodicity: p.periodicity,
+          startDate: p.startDate,
+          createdAt: p.createdAt,
+          cancelledAt: p.cancellation?.at ?? p.deletedAt ?? p.updatedAt,
+          cancelledBy: by
+            ? { id: by, fullName: this.userNames.get(by) ?? null }
+            : null,
+          cancelReason: p.cancellation?.reason ?? null,
+        };
+      })
+      .sort((a, b) => b.cancelledAt.getTime() - a.cancelledAt.getTime());
+    return Promise.resolve(rows);
+  }
+
+  cancel(id: string, cancellation: PaymentPlanCancellation): Promise<boolean> {
     const row = this.plans.find(
       (p) => p.id === id && p.status === 'ACTIVE' && p.deletedAt === null,
     );
@@ -80,12 +129,13 @@ export class InMemoryPaymentPlanRepository implements PaymentPlanRepository {
       return Promise.resolve(false);
     }
     row.status = 'CANCELLED';
-    row.deletedAt = NOW;
+    row.deletedAt = cancellation.at;
+    row.cancellation = cancellation;
     return Promise.resolve(true);
   }
 
   private toEntity(row: StoredPlan): PaymentPlanWithInstallments {
-    const { deletedAt: _deletedAt, ...rest } = row;
+    const { deletedAt: _deletedAt, cancellation: _cancellation, ...rest } = row;
     return {
       ...rest,
       installments: row.installments.map((i) => ({ ...i })),

@@ -52,6 +52,25 @@ describe('GetPaymentPlanUseCase', () => {
     );
   });
 
+  it('DX-123 (B-4): find → null (no 404) si el plan de tratamiento existe sin plan de cuotas', async () => {
+    const { useCase } = makeUseCase(0);
+    await expect(useCase.find('tp-1')).resolves.toBeNull();
+  });
+
+  it('DX-123: find → 404 si el plan de tratamiento no existe o es de otra clínica', async () => {
+    const { repo, useCase } = makeUseCase(0);
+    repo.existingTreatmentPlans = new Set(['tp-otro']);
+    await expect(useCase.find('tp-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('DX-123: find devuelve el mismo plan derivado que execute', async () => {
+    const { repo, useCase } = makeUseCase(150);
+    await seed(repo);
+    expect(await useCase.find('tp-1')).toEqual(await useCase.execute('tp-1'));
+  });
+
   it('derives installment statuses from the paid total', async () => {
     const { repo, useCase } = makeUseCase(150);
     await seed(repo);

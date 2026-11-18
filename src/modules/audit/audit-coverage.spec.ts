@@ -70,6 +70,7 @@ import { UnallocatedPaymentsController } from '../reports/presentation/unallocat
 import { RecoveredSlotsController } from '../reports/presentation/recovered-slots.controller';
 import { ChairOccupancyController } from '../reports/presentation/chair-occupancy.controller';
 import { ClosingQueueController } from '../closing-queue/presentation/closing-queue.controller';
+import { PostOpChecksController } from '../post-op-checks/presentation/post-op-checks.controller';
 import { ContingencyAgendaController } from '../contingency-agenda/presentation/contingency-agenda.controller';
 import { CollectionsController } from '../collections/presentation/collections.controller';
 import {
@@ -117,6 +118,7 @@ import {
 import { ExchangeSettingsController } from '../exchange/presentation/exchange-settings.controller';
 import { PaymentMethodsController } from '../payment-methods/presentation/payment-methods.controller';
 import { CommissionsController } from '../commissions/presentation/commissions.controller';
+import { CommissionPaymentsController } from '../commissions/presentation/commission-payments.controller';
 import { AppModule } from '../../app.module';
 import {
   collectControllers,
@@ -1390,6 +1392,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PAYMENT_PLAN',
     patient: plan(),
   },
+  // DX-123: el historial de planes de cuotas cancelados.
+  'GET /treatment-plans/:id/payment-plan/history': {
+    action: 'VIEW',
+    resource: 'PAYMENT_PLAN',
+    patient: plan(),
+  },
   'DELETE /treatment-plans/:id/payment-plan': {
     action: 'DELETE',
     resource: 'PAYMENT_PLAN',
@@ -1605,6 +1613,19 @@ const EXPECTED: Record<string, AuditOptions> = {
     resourceId: { param: 'id' },
     reason: 'COMMISSION_SETTLEMENT',
   },
+  // DX-464: los PDF de la liquidación y del recibo salen de la clínica.
+  'GET /commissions/settlements/:id/pdf': {
+    action: 'EXPORT',
+    resource: 'COMMISSION_SETTLEMENT',
+    resourceId: { param: 'id' },
+    reason: 'COMMISSION_SETTLEMENT_PDF',
+  },
+  'GET /commissions/payments/:paymentId/receipt/pdf': {
+    action: 'EXPORT',
+    resource: 'COMMISSION_SETTLEMENT',
+    resourceId: { param: 'paymentId' },
+    reason: 'COMMISSION_RECEIPT_PDF',
+  },
   // DX-567: la lista de citas sin tratamiento ligado lleva el nombre de cada
   // paciente; el agregado de la producción agendada, no.
   'GET /reports/scheduled-production/unlinked': {
@@ -1625,6 +1646,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'EXPORT',
     resource: 'APPOINTMENT',
     reason: 'CHAIR_OCCUPANCY_REPORT',
+  },
+  // DX-566: la lista de llamadas de control postoperatorio lleva el nombre y
+  // el teléfono de cada paciente; el contador, no.
+  'GET /post-op-checks': {
+    action: 'VIEW',
+    resource: 'POST_OP_CHECK',
+    reason: 'POST_OP_CHECK_LIST',
   },
   // DX-439: «Pendiente de cerrar» lleva los nombres de muchos pacientes.
   'GET /closing-queue': {
@@ -2031,6 +2059,11 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-566: el intento de llamada del control postoperatorio (UPDATE
+  // POST_OP_CHECK con el resultado como motivo, el cambio de estado y dónde
+  // quedó en la historia; nunca la nota), en la transacción del cierre.
+  'POST /post-op-checks/:id/attempts':
+    'post-op-checks.int-spec.ts y post-op-checks.e2e-spec.ts',
   // DX-017: laboratorio dental. El catálogo (DENTAL_LAB con los nombres de
   // los campos y, al desactivar, el estado) y la orden: edición (los campos
   // y la fecha prometida antes y después), envío, recepción, revisión
@@ -2199,6 +2232,19 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // FINANCIAL_LOCK), en la transacción del cierre.
   'PUT /commissions/rules/:userId': 'commissions.e2e-spec.ts',
   'POST /commissions/settlements': 'commissions.e2e-spec.ts',
+  // DX-464: el pago (CREATE COMMISSION_PAYMENT_CREATED de la liquidación y
+  // CREATE del gasto) y su anulación (VOID de los dos) en la transacción del
+  // gasto; pedir la conformidad (SEND, sin URL ni token) en la de su enlace;
+  // la firma del profesional (SIGN, actor = su usuario sin rol, origen LINK)
+  // en la de la firma. Sin importes.
+  'POST /commissions/settlements/:id/payments':
+    'commission-payments.int-spec.ts y commission-payments.e2e-spec.ts',
+  'POST /commissions/payments/:paymentId/void':
+    'commission-payments.int-spec.ts y commission-payments.e2e-spec.ts',
+  'POST /commissions/payments/:paymentId/receipt-request':
+    'commission-payments.e2e-spec.ts',
+  'POST /public/commission-receipts/:token/sign':
+    'commission-payments.e2e-spec.ts',
   'POST /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   'DELETE /clinic/settings/logo': 'clinic-settings.e2e-spec.ts',
   // DX-324: CLINIC_SETTINGS con PRESCRIPTION_SETTINGS, los campos cambiados
@@ -2469,6 +2515,9 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   // DX-569: el enlace de pago.
   'POST /public/payment-links/:token/opened':
     'marca la apertura del enlace de pago; sin evento',
+  // DX-464: el enlace de conformidad del profesional.
+  'POST /public/commission-receipts/:token/opened':
+    'marca la apertura del enlace de conformidad; sin evento',
   'POST /public/payment-links/:token/proof-upload':
     'URL prefirmada; el reporte que la usa es la ruta auditada',
   'POST /public/payment-links/:token/proof-upload/complete':
@@ -2477,6 +2526,7 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 
 const CONTROLLERS: Type[] = [
   CommissionsController,
+  CommissionPaymentsController,
   AuthController,
   PatientCertificatesController,
   PatientExternalOrdersController,
@@ -2547,6 +2597,7 @@ const CONTROLLERS: Type[] = [
   RecoveredSlotsController,
   ChairOccupancyController,
   ClosingQueueController,
+  PostOpChecksController,
   ContingencyAgendaController,
   CollectionsController,
   RecallController,

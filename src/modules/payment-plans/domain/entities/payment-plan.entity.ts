@@ -30,3 +30,29 @@ export interface PaymentPlan {
 export interface PaymentPlanWithInstallments extends PaymentPlan {
   installments: Installment[];
 }
+
+/** DX-092 (SEC-029): quién cancela un plan de cuotas, cuándo y por qué. */
+export interface PaymentPlanCancellation {
+  byId: string;
+  at: Date;
+  reason: string;
+}
+
+/**
+ * DX-123 (O-2): un plan de cuotas cancelado, para el historial de la ficha.
+ * Los cancelados antes de DX-109 no guardaron autor ni motivo (`null`); su
+ * fecha es la del borrado lógico.
+ */
+export interface CancelledPaymentPlan {
+  id: string;
+  currency: string;
+  totalToFinance: number;
+  downPayment: number;
+  installmentsCount: number;
+  periodicity: Periodicity;
+  startDate: Date;
+  createdAt: Date;
+  cancelledAt: Date;
+  cancelledBy: { id: string; fullName: string | null } | null;
+  cancelReason: string | null;
+}

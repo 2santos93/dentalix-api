@@ -15,7 +15,11 @@ import {
   CreatePaymentPlanRepoInput,
   PaymentPlanRepository,
 } from '../../domain/ports/payment-plan-repository.port';
-import { PaymentPlanWithInstallments } from '../../domain/entities/payment-plan.entity';
+import {
+  CancelledPaymentPlan,
+  PaymentPlanCancellation,
+  PaymentPlanWithInstallments,
+} from '../../domain/entities/payment-plan.entity';
 import { dueDayOf, paymentPlanLocationId } from '../../domain/installment-due';
 import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import {
@@ -227,6 +231,84 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
     return row ? mapToEntity(row) : null;
   }
 
+  async treatmentPlanExists(treatmentPlanId: string): Promise<boolean> {
+    const plan = await this.prisma.runWithTenant((tx) =>
+      tx.treatmentPlan.findFirst({
+        where: { id: treatmentPlanId, deletedAt: null },
+        select: { id: true },
+      }),
+    );
+    return plan !== null;
+  }
+
+  async findCancelledByPlan(
+    treatmentPlanId: string,
+  ): Promise<CancelledPaymentPlan[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.paymentPlan.findMany({
+        where: { treatmentPlanId, status: 'CANCELLED' },
+        orderBy: [
+          { cancelledAt: 'desc' },
+          { deletedAt: 'desc' },
+          { id: 'asc' },
+        ],
+        select: {
+          id: true,
+          currency: true,
+          totalToFinance: true,
+          downPayment: true,
+          installmentsCount: true,
+          periodicity: true,
+          startDate: true,
+          createdAt: true,
+          updatedAt: true,
+          deletedAt: true,
+          cancelledAt: true,
+          cancelledById: true,
+          cancelReason: true,
+        },
+      });
+      // Puntero suave a users (como `createdById`): el nombre sale de una
+      // membresía de ESTA clínica (bajo RLS, la de otra no existe), en una
+      // sola consulta para todo el historial.
+      const authorIds = [
+        ...new Set(
+          rows.flatMap((r) => (r.cancelledById ? [r.cancelledById] : [])),
+        ),
+      ];
+      const memberships = authorIds.length
+        ? await tx.clinicMembership.findMany({
+            where: { userId: { in: authorIds } },
+            orderBy: { createdAt: 'desc' },
+            select: { userId: true, user: { select: { fullName: true } } },
+          })
+        : [];
+      const nameOf = new Map<string, string>();
+      for (const m of memberships) {
+        if (!nameOf.has(m.userId)) nameOf.set(m.userId, m.user.fullName);
+      }
+      return rows.map((r) => ({
+        id: r.id,
+        currency: r.currency,
+        totalToFinance: r.totalToFinance.toNumber(),
+        downPayment: r.downPayment.toNumber(),
+        installmentsCount: r.installmentsCount,
+        periodicity: r.periodicity,
+        startDate: r.startDate,
+        createdAt: r.createdAt,
+        // Antes de DX-109 solo quedaba el borrado lógico.
+        cancelledAt: r.cancelledAt ?? r.deletedAt ?? r.updatedAt,
+        cancelledBy: r.cancelledById
+          ? {
+              id: r.cancelledById,
+              fullName: nameOf.get(r.cancelledById) ?? null,
+            }
+          : null,
+        cancelReason: r.cancelReason,
+      }));
+    });
+  }
+
   async planTimeZone(treatmentPlanId: string): Promise<string> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
@@ -239,7 +321,11 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
     });
   }
 
-  async cancel(id: string, lockActor?: LockActor | null): Promise<boolean> {
+  async cancel(
+    id: string,
+    cancellation: PaymentPlanCancellation,
+    lockActor?: LockActor | null,
+  ): Promise<boolean> {
     const tenantId = this.requireTenantId();
     // Atomic check-and-set (mirrors PrismaPaymentRepository.softDelete):
     // UPDATE ... WHERE id AND status=ACTIVE AND deletedAt IS NULL, so two
@@ -275,7 +361,15 @@ export class PrismaPaymentPlanRepository implements PaymentPlanRepository {
       }
       const result = await tx.paymentPlan.updateMany({
         where: { id, status: 'ACTIVE', deletedAt: null },
-        data: { status: 'CANCELLED', deletedAt: new Date() },
+        // DX-092 (SEC-029): quién, cuándo y por qué, en la misma escritura
+        // (como `cancelActivePaymentPlans` al cancelar el tratamiento).
+        data: {
+          status: 'CANCELLED',
+          deletedAt: cancellation.at,
+          cancelledAt: cancellation.at,
+          cancelledById: cancellation.byId,
+          cancelReason: cancellation.reason,
+        },
       });
       if (result.count === 0) return false;
       if (lock.decision.kind === 'override' && lockActor) {

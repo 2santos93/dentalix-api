@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
@@ -380,19 +381,80 @@ describe('Payment plans / cuotas (e2e)', () => {
       expect(getPlanBody2.installments[0].covered).toBe(100);
       expect(getPlanBody2.installments[0].status).toBe('PAID');
 
-      // --- 8. Cancel: DELETE -> 204; GET -> 404; a fresh POST is allowed
-      // again -> 201 (cancel + re-create, no reconciliation needed).
-      await request(app.getHttpServer())
-        .delete(`/api/v1/treatment-plans/${plan.id}/payment-plan`)
-        .set('X-Tenant-Host', hostFor(subdomain))
-        .set('Authorization', `Bearer ${clinic.accessToken}`)
-        .expect(204);
-
+      // --- 8. Cancel. DX-092 (SEC-029): sin motivo (o con menos de 3
+      // caracteres) -> 400 y el plan sigue activo; con motivo -> 204, y quedan
+      // quién, cuándo y por qué.
+      for (const body of [undefined, {}, { reason: '  a ' }]) {
+        const noReason = request(app.getHttpServer())
+          .delete(`/api/v1/treatment-plans/${plan.id}/payment-plan`)
+          .set('X-Tenant-Host', hostFor(subdomain))
+          .set('Authorization', `Bearer ${clinic.accessToken}`);
+        await (body ? noReason.send(body) : noReason).expect(400);
+      }
       await request(app.getHttpServer())
         .get(`/api/v1/treatment-plans/${plan.id}/payment-plan`)
         .set('X-Tenant-Host', hostFor(subdomain))
         .set('Authorization', `Bearer ${clinic.accessToken}`)
-        .expect(404);
+        .expect(200);
+
+      const beforeCancel = Date.now();
+      await request(app.getHttpServer())
+        .delete(`/api/v1/treatment-plans/${plan.id}/payment-plan`)
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .send({ reason: '  El paciente pasa a 6 cuotas  ' })
+        .expect(204);
+      const stored = await raw.paymentPlan.findUniqueOrThrow({
+        where: { id: paymentPlan.id },
+      });
+      expect(stored).toMatchObject({
+        status: 'CANCELLED',
+        cancelledById: clinic.userId,
+        cancelReason: 'El paciente pasa a 6 cuotas',
+      });
+      expect(stored.cancelledAt!.getTime()).toBeGreaterThanOrEqual(
+        beforeCancel - 1000,
+      );
+
+      // DX-123 (B-4): sin plan de cuotas activo, GET -> 200 con cuerpo
+      // vacío (null), nunca 404.
+      const afterCancel = await request(app.getHttpServer())
+        .get(`/api/v1/treatment-plans/${plan.id}/payment-plan`)
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .expect(200);
+      expect(afterCancel.text).toBe('');
+
+      // DX-123 (O-2): el cancelado sale en el historial con fecha, autor y
+      // motivo.
+      const history = await request(app.getHttpServer())
+        .get(`/api/v1/treatment-plans/${plan.id}/payment-plan/history`)
+        .set('X-Tenant-Host', hostFor(subdomain))
+        .set('Authorization', `Bearer ${clinic.accessToken}`)
+        .expect(200);
+      expect(history.body).toEqual([
+        expect.objectContaining({
+          id: paymentPlan.id,
+          currency: 'USD',
+          installmentsCount: 12,
+          cancelledAt: stored.cancelledAt!.toISOString(),
+          cancelledBy: {
+            id: clinic.userId,
+            fullName: expect.any(String) as unknown,
+          },
+          cancelReason: 'El paciente pasa a 6 cuotas',
+        }),
+      ]);
+      // Un plan de tratamiento que no existe sigue siendo 404 (GET e historial).
+      for (const path of ['payment-plan', 'payment-plan/history']) {
+        await request(app.getHttpServer())
+          .get(`/api/v1/treatment-plans/${randomUUID()}/${path}`)
+          .set('X-Tenant-Host', hostFor(subdomain))
+          .set('Authorization', `Bearer ${clinic.accessToken}`)
+          .expect(404);
+      }
+
+      // A fresh POST is allowed again -> 201 (cancel + re-create).
 
       const recreate = await request(app.getHttpServer())
         .post(`/api/v1/treatment-plans/${plan.id}/payment-plan`)

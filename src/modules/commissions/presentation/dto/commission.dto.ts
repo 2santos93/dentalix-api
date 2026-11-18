@@ -25,6 +25,10 @@ import {
   COMMISSION_RULE_MESSAGES,
 } from '../../domain/commission-rule';
 import { SETTLEMENT_PERIOD_MAX_DAYS } from '../../domain/settlement-period';
+import {
+  CommissionPaymentDto,
+  SettlementPaymentSummaryDto,
+} from './commission-payment.dto';
 
 const CIVIL_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const PERIOD_FROM = 'from debe ser una fecha AAAA-MM-DD.';
@@ -315,6 +319,14 @@ export class CommissionLineDto {
     description: 'Honorario en la moneda de la línea (un ajuste, con signo).',
   })
   amount!: number;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-464: el pago vivo de la liquidación que cubre la línea; null en la vista previa o si está pendiente.',
+  })
+  paidInPaymentId!: string | null;
 }
 
 export class CommissionCurrencyTotalDto {
@@ -399,10 +411,24 @@ export class CommissionSettlementSummaryDto {
   lockDateAfter!: string;
   @ApiProperty({ type: [CommissionCurrencyTotalDto] })
   totals!: CommissionCurrencyTotalDto[];
+  @ApiProperty({ type: SettlementPaymentSummaryDto })
+  payment!: SettlementPaymentSummaryDto;
 }
 
 export class CommissionSettlementDto extends CommissionSettlementSummaryDto {
   @ApiProperty({ type: [CommissionCategoryPercentViewDto] })
   categoryPercents!: CommissionCategoryPercentViewDto[];
   @ApiProperty({ type: [CommissionLineDto] }) lines!: CommissionLineDto[];
+  @ApiProperty({
+    type: [CommissionPaymentDto],
+    description:
+      'DX-464: pagos (vivos y anulados), del más reciente al más antiguo.',
+  })
+  payments!: CommissionPaymentDto[];
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'DX-464: email de la cuenta del profesional (para «Enviar»).',
+  })
+  professionalEmail!: string | null;
 }

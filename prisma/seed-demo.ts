@@ -52,6 +52,7 @@ import {
   GetPatientAgreementUseCase,
 } from '../src/modules/patient-agreements/application/use-cases/patient-agreements.use-cases';
 import { UpdateCatalogItemUseCase } from '../src/modules/dental-catalog/application/use-cases/update-catalog-item.use-case';
+import { postOpCheckFromProcedure } from '../src/modules/post-op-checks/infrastructure/post-op-check-from-procedure';
 import { CreatePatientUseCase } from '../src/modules/patients/application/use-cases/create-patient.use-case';
 import { CreateResponsiblePartyUseCase } from '../src/modules/patients/application/use-cases/responsible-parties.use-cases';
 import { PublishPrivacyPolicyUseCase } from '../src/modules/data-consents/application/use-cases/publish-privacy-policy.use-case';
@@ -222,6 +223,7 @@ import {
   DEMO_IMPLANTS,
   DEMO_DENTAL_LABS,
   DEMO_LAB_ORDERS,
+  DEMO_POST_OP_CHECK,
   DEMO_PRESCRIPTION,
   DEMO_PRESCRIPTION_TEMPLATES,
   DEMO_EXTERNAL_ORDER_TEMPLATES,
@@ -1083,7 +1085,67 @@ class DemoSeeder {
       typeByReason,
     );
 
+    // DX-566 al final: con todos los realizados ya fechados, un control
+    // postoperatorio pendiente para hoy.
+    await this.inTenant(tenantId, undefined, () =>
+      this.createPostOpCheck(tenantId, ownerId, patientIds, catalog),
+    );
+
     return this.requestConfirmations(tenantId, receptionId);
+  }
+
+  /**
+   * DX-566: la exodoncia del catálogo pide control a 1 día (lo activa el ADMIN
+   * por el caso de uso del catálogo) y la ya hecha del paciente de
+   * `DEMO_POST_OP_CHECK` recibe su control por el mismo enganche que el DONE
+   * de la API; la fecha de la llamada se pone a mano en HOY de su sede (como
+   * la fecha prometida atrasada del laboratorio). Idempotente: con algún
+   * control en la clínica no hace nada.
+   */
+  private async createPostOpCheck(
+    tenantId: string,
+    ownerId: string,
+    patientIds: string[],
+    catalog: Map<string, string>,
+  ): Promise<void> {
+    const catalogItemId = catalogId(catalog, DEMO_POST_OP_CHECK.catalogCode);
+    await this.use(UpdateCatalogItemUseCase).execute(
+      catalogItemId,
+      {
+        requiresPostOpCheck: true,
+        postOpCheckAfterDays: DEMO_POST_OP_CHECK.afterDays,
+      },
+      ownerId,
+    );
+    await this.prisma.runWithTenant(tenantId, async (tx) => {
+      if ((await tx.postOpCheck.count()) > 0) return;
+      const item = await tx.treatmentPlanItem.findFirst({
+        where: {
+          catalogItemId,
+          patientId: patientIds[DEMO_POST_OP_CHECK.patientIndex],
+          status: TreatmentPlanItemStatus.DONE,
+          deletedAt: null,
+          completedAt: { not: null },
+          performedLocationId: { not: null },
+        },
+        orderBy: { completedAt: 'desc' },
+      });
+      if (!item) return;
+      const checkId = await postOpCheckFromProcedure(tx, { tenantId, item });
+      if (!checkId) return;
+      const location = await tx.location.findUniqueOrThrow({
+        where: { id: item.performedLocationId as string },
+        select: { timeZone: true },
+      });
+      await tx.postOpCheck.update({
+        where: { id: checkId },
+        data: {
+          dueOn: new Date(
+            `${civilDateIn(this.now, location.timeZone as string)}T00:00:00.000Z`,
+          ),
+        },
+      });
+    });
   }
 
   /**

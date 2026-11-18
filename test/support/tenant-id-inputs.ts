@@ -197,6 +197,12 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'GET /commissions/preview ?userId': 'commissions.e2e-spec.ts',
   'GET /commissions/settlements ?userId': 'commissions.e2e-spec.ts',
   'POST /commissions/settlements body.userId': 'commissions.e2e-spec.ts',
+  // DX-464: B paga su liquidación con una línea de A (nada que pagar, 409) y
+  // A paga con la sede de B (400, sin gasto); la liquidación de A intacta.
+  'POST /commissions/settlements/:id/payments body.lineIds[]':
+    'commission-payments.e2e-spec.ts',
+  'POST /commissions/settlements/:id/payments body.locationId':
+    'commission-payments.e2e-spec.ts',
   // DX-568: «B guarda como destinatario del resumen semanal la membresía ADMIN
   // de A → 400 en español y ni los ajustes de B ni los de A cambian».
   'PUT /clinic/weekly-digest-settings body.recipientMembershipIds[]':
@@ -299,6 +305,10 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'POST /waitlist/:id/schedule body.chairId': 'chairs.e2e-spec.ts',
   // DX-439: «B manda la sede, el profesional, la cita o el ítem de A → 403 o
   // lista sin filas de A, y 404 sin descarte».
+  // DX-566: la sede de otra clínica en la lista de controles
+  // postoperatorios y en su contador → 403 sin datos de A.
+  'GET /post-op-checks ?locationId': 'post-op-checks.e2e-spec.ts',
+  'GET /post-op-checks/count ?locationId': 'post-op-checks.e2e-spec.ts',
   'GET /closing-queue ?locationId': 'closing-queue.e2e-spec.ts',
   // DX-439: marcar DONE «desde» la cita atendida de A con el ítem de B → 409.
   'PATCH /treatment-plans/:id/items/:itemId body.appointmentId':

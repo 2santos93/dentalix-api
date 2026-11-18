@@ -79,6 +79,9 @@ export const NO_APP_UPDATE_DELETE = [
   // precios de cada ítem (la app solo inserta y lee).
   'catalog_price_batches',
   'catalog_price_history',
+  // DX-566: los intentos de llamada del control postoperatorio (solo se
+  // añaden; dx_post_op_check_attempts_immutable).
+  'post_op_check_attempts',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */
@@ -134,6 +137,16 @@ export const NO_APP_DELETE = [
   // que impide un segundo envío).
   'weekly_digest_runs',
   'weekly_digest_deliveries',
+  // DX-464: el pago de una liquidación y sus líneas se anulan con motivo; el
+  // enlace de conformidad se abre, firma o revoca una vez; nada se borra
+  // (dx_commission_payment_guard, dx_commission_payment_line_guard y
+  // dx_commission_receipt_request_guard).
+  'commission_payments',
+  'commission_payment_lines',
+  'commission_receipt_requests',
+  // DX-566: el control postoperatorio se cierra o se anula, nunca se borra
+  // (dx_post_op_checks_guard).
+  'post_op_checks',
 ] as const;
 
 /**

@@ -229,6 +229,9 @@ model Tenant {
   weeklyDigestDeliveries                  WeeklyDigestDelivery[]
   dentalLabServices                       DentalLabService[]
   dentalLabOrders                         DentalLabOrder[]
+  // DX-566: controles postoperatorios y sus intentos de llamada.
+  postOpChecks                            PostOpCheck[]
+  postOpCheckAttempts                     PostOpCheckAttempt[]
   // DX-285: cargos del caso en el plan y alineadores.
   orthoCaseCharges                        OrthoCaseCharge[]
   orthoAlignerSeries                      OrthoAlignerSeries[]
@@ -348,6 +351,10 @@ model Tenant {
   commissionRuleCategories  CommissionRuleCategory[]
   commissionSettlements     CommissionSettlement[]
   commissionSettlementLines CommissionSettlementLine[]
+  // DX-464: pago de la liquidación (gasto de la sede) y conformidad.
+  commissionPayments        CommissionPayment[]
+  commissionPaymentLines    CommissionPaymentLine[]
+  commissionReceipts        CommissionReceiptRequest[]
 
   @@map("tenants")
 }
@@ -431,6 +438,11 @@ model User {
   dentalLabOrdersReceived           DentalLabOrder[]                 @relation("DentalLabOrderReceivedBy")
   dentalLabOrdersChecked            DentalLabOrder[]                 @relation("DentalLabOrderCheckedBy")
   dentalLabOrdersCancelled          DentalLabOrder[]                 @relation("DentalLabOrderCancelledBy")
+  // DX-566: controles postoperatorios (quien hizo el procedimiento, quien
+  // cerró el control) y los intentos de llamada registrados.
+  postOpChecksPerformed             PostOpCheck[]                    @relation("PostOpCheckProfessional")
+  postOpChecksClosed                PostOpCheck[]                    @relation("PostOpCheckClosedBy")
+  postOpCheckAttempts               PostOpCheckAttempt[]
   orthoVisitsAuthored               OrthoVisit[]
   // DX-285: series de alineadores y entregas registradas.
   orthoAlignerSeriesCreated         OrthoAlignerSeries[]
@@ -602,6 +614,8 @@ model Location {
   orthoCases                 OrthoCase[]
   // DX-017: órdenes de laboratorio de la sede.
   dentalLabOrders            DentalLabOrder[]
+  // DX-566: controles postoperatorios de la sede.
+  postOpChecks               PostOpCheck[]
   appointments               Appointment[]
   payments                   Payment[]
   inventoryItems             InventoryItem[]
@@ -962,6 +976,8 @@ model Patient {
   orthoVisits                 OrthoVisit[]
   // DX-017: órdenes de laboratorio.
   dentalLabOrders             DentalLabOrder[]
+  // DX-566: controles postoperatorios.
+  postOpChecks                PostOpCheck[]
   dentitionEvents             PatientDentitionEvent[]
   toothRecords                ToothRecord[]
   appointments                Appointment[]
@@ -1266,23 +1282,25 @@ model ClinicalEntry {
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
   // SEC-004, 20261015130000_tenant_composite_fks).
-  patient     Patient                    @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  addenda     ClinicalEntryAddendum[]
+  patient      Patient                    @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  addenda      ClinicalEntryAddendum[]
   // DX-307: anestesia local registrada en la evolución (append-only).
-  anesthesia  AnesthesiaAdministration[]
+  anesthesia   AnesthesiaAdministration[]
   // DX-407: hoja de sedación de la evolución (una como mucho, append-only).
-  sedation    SedationRecord[]
+  sedation     SedationRecord[]
   // DX-190: control de ortodoncia que documenta la evolución (uno como mucho).
-  orthoVisit  OrthoVisit[]
+  orthoVisit   OrthoVisit[]
+  // DX-566: controles postoperatorios cuyo desenlace quedó en esta evolución.
+  postOpChecks PostOpCheck[]
   // DX-212: diagnósticos CIE-10, creados en la misma transacción que la
   // evolución e inalterables como ella.
-  diagnoses   ClinicalEntryDiagnosis[]
+  diagnoses    ClinicalEntryDiagnosis[]
   // DX-170: FK COMPUESTA con el paciente: la cita tiene que ser de la MISMA
   // clínica Y del MISMO paciente. RESTRICT en las dos acciones: la evolución
   // es inalterable (DX-038) y nada puede reescribirla en cascada.
-  appointment Appointment?               @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict)
-  location    Location?                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
-  template    ClinicalNoteTemplate?      @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  appointment  Appointment?               @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, onUpdate: Restrict)
+  location     Location?                  @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
+  template     ClinicalNoteTemplate?      @relation(fields: [tenantId, templateId], references: [tenantId, id], onDelete: Restrict, onUpdate: Restrict)
 
   // DX-038: INALTERABLE en la BD (trigger: ni UPDATE ni DELETE para el rol de
   // la app), `createdAt` lo fija el servidor de BD en el INSERT y
@@ -1380,11 +1398,16 @@ model ClinicalEntryAddendum {
   authorId        String   @db.Uuid
   createdAt       DateTime @default(now())
 
-  tenant  Tenant        @relation(fields: [tenantId], references: [id])
-  patient Patient       @relation(fields: [tenantId, patientId], references: [tenantId, id])
-  entry   ClinicalEntry @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id])
-  author  User          @relation(fields: [authorId], references: [id])
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  patient      Patient       @relation(fields: [tenantId, patientId], references: [tenantId, id])
+  entry        ClinicalEntry @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id])
+  author       User          @relation(fields: [authorId], references: [id])
+  // DX-566: el control postoperatorio cuyo desenlace dejó esta adenda.
+  postOpChecks PostOpCheck[]
 
+  // DX-566: destino de la FK compuesta de post_op_checks (misma clínica y
+  // paciente; la fusión la mueve en cascada).
+  @@unique([tenantId, patientId, id], map: "clinical_entry_addenda_tenant_patient_id_key")
   @@index([tenantId, patientId, clinicalEntryId, createdAt], map: "clinical_entry_addenda_entry_created_idx")
   @@map("clinical_entry_addenda")
 }
@@ -1460,6 +1483,12 @@ model DentalCatalogItem {
   defaultPrice           Decimal?    @db.Decimal(12, 2)
   // DX-105: false = el procedimiento no recibe convenio ni descuento porcentual.
   allowDiscount          Boolean     @default(true)
+  // DX-566: al marcarlo hecho se crea un control postoperatorio (llamada al
+  // paciente) para dentro de `postOpCheckAfterDays` días hábiles de la sede.
+  // Solo en PROCEDURE (CHECK dental_catalog_items_post_op_check: 1..30 y
+  // false en DIAGNOSIS).
+  requiresPostOpCheck    Boolean     @default(false)
+  postOpCheckAfterDays   Int         @default(1) @db.SmallInt
   active                 Boolean     @default(true)
   // DX-455: plantilla de evolución que se sugiere al marcar hecho este
   // procedimiento; NULL = ninguna. FK compuesta: de la MISMA clínica (SEC-004).
@@ -1477,6 +1506,8 @@ model DentalCatalogItem {
   planTemplateLines    TreatmentPlanTemplateLine[]
   // DX-205: cada cambio de su precio por defecto (suelto o por lote).
   priceHistory         CatalogPriceHistory[]
+  // DX-566: controles postoperatorios creados al hacer este procedimiento.
+  postOpChecks         PostOpCheck[]
   clinicalNoteTemplate ClinicalNoteTemplate?       @relation(fields: [tenantId, clinicalNoteTemplateId], references: [tenantId, id], onDelete: Restrict, map: "dental_catalog_items_note_template_fkey")
 
   @@unique([tenantId, code], map: "catalog_tenant_code_key")
@@ -1740,6 +1771,8 @@ model Appointment {
   externalOrders               ExternalOrder[]
   // DX-017: órdenes de laboratorio cuya colocación es esta cita.
   dentalLabOrders              DentalLabOrder[]
+  // DX-566: controles postoperatorios del procedimiento hecho en esta cita.
+  postOpChecks                 PostOpCheck[]
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -2323,6 +2356,8 @@ model TreatmentPlanItem {
   closingDismissals    ClosingQueueDismissal[]
   // DX-017: órdenes de laboratorio del ítem.
   dentalLabOrders      DentalLabOrder[]
+  // DX-566: controles postoperatorios del procedimiento.
+  postOpChecks         PostOpCheck[]
   id                   String                  @id @default(uuid()) @db.Uuid
   tenantId             String                  @db.Uuid
   planId               String                  @db.Uuid
@@ -4678,6 +4713,9 @@ enum AuditResourceType {
   DENTAL_LAB_ORDER
   // DX-018: liquidación de honorarios (cierre, detalle y vista previa).
   COMMISSION_SETTLEMENT
+  // DX-566: control postoperatorio (alta al marcar hecho, intentos, cierre,
+  // anulación, recálculo y la lista del día).
+  POST_OP_CHECK
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -6600,10 +6638,12 @@ model Expense {
   idempotencyKey         String?
   idempotencyFingerprint String?
 
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  location    Location         @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "expenses_location_fkey")
-  currencyRef Currency         @relation(fields: [currency], references: [code], map: "expenses_currency_fkey")
-  payments    ExpensePayment[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location           Location            @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "expenses_location_fkey")
+  currencyRef        Currency            @relation(fields: [currency], references: [code], map: "expenses_currency_fkey")
+  payments           ExpensePayment[]
+  /// DX-464: el pago de honorarios que refleja este gasto (como mucho uno).
+  commissionPayments CommissionPayment[]
 
   /// Destino de la FK de `expense_payments`: su sede y su moneda son las del gasto.
   @@unique([tenantId, id, locationId, currency], map: "expenses_tenant_id_location_currency_key")
@@ -8802,8 +8842,10 @@ model CommissionSettlement {
   /// La pone el servidor de BD (trigger), en UTC.
   closedAt         DateTime              @default(now())
 
-  tenant Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  lines  CommissionSettlementLine[]
+  tenant   Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  lines    CommissionSettlementLine[]
+  /// DX-464: pagos de la liquidación (el estado de pago se deriva de ellos).
+  payments CommissionPayment[]
 
   @@unique([tenantId, id, userId], map: "commission_settlements_tenant_id_user_key")
   @@index([tenantId, userId, periodTo(sort: Desc)], map: "commission_settlements_user_period_idx")
@@ -8841,10 +8883,12 @@ model CommissionSettlementLine {
   percent             Decimal            @db.Decimal(5, 2)
   amount              Decimal            @db.Decimal(14, 2)
 
-  tenant      Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  settlement  CommissionSettlement       @relation(fields: [tenantId, settlementId, userId], references: [tenantId, id, userId], onDelete: Restrict, map: "commission_settlement_lines_settlement_fkey")
-  adjusts     CommissionSettlementLine?  @relation("CommissionLineAdjustment", fields: [tenantId, adjustsLineId], references: [tenantId, id], onDelete: Restrict, map: "commission_settlement_lines_adjusts_fkey")
-  adjustments CommissionSettlementLine[] @relation("CommissionLineAdjustment")
+  tenant       Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  settlement   CommissionSettlement       @relation(fields: [tenantId, settlementId, userId], references: [tenantId, id, userId], onDelete: Restrict, map: "commission_settlement_lines_settlement_fkey")
+  adjusts      CommissionSettlementLine?  @relation("CommissionLineAdjustment", fields: [tenantId, adjustsLineId], references: [tenantId, id], onDelete: Restrict, map: "commission_settlement_lines_adjusts_fkey")
+  adjustments  CommissionSettlementLine[] @relation("CommissionLineAdjustment")
+  /// DX-464: en qué pagos (vivos o anulados) entró la línea.
+  paymentLines CommissionPaymentLine[]
 
   @@unique([tenantId, id], map: "commission_settlement_lines_tenant_id_key")
   @@index([tenantId, settlementId, userId], map: "commission_settlement_lines_settlement_idx")
@@ -8988,4 +9032,227 @@ model WeeklyDigestDelivery {
   @@unique([runId, membershipId], map: "weekly_digest_deliveries_run_membership_key")
   @@index([tenantId, membershipId], map: "weekly_digest_deliveries_membership_idx")
   @@map("weekly_digest_deliveries")
+}
+
+/// DX-464: pago de una liquidación de honorarios (DX-018), en UNA moneda, con
+/// el gasto de la sede que lo refleja (FK compuesta con su sede y su moneda).
+/// Se anula con motivo (una vez; trigger dx_commission_payment_guard); nunca se
+/// borra. El estado de pago de la liquidación se deriva de aquí.
+model CommissionPayment {
+  id           String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @db.Uuid
+  settlementId String        @db.Uuid
+  userId       String        @db.Uuid
+  locationId   String        @db.Uuid
+  currency     String
+  amount       Decimal       @db.Decimal(14, 2)
+  method       PaymentMethod
+  paidOn       DateTime      @db.Date
+  reference    String?
+  expenseId    String        @db.Uuid
+  /// Puntero a User (FK solo en SQL, como `closedById` de la liquidación).
+  createdById  String        @db.Uuid
+  /// La pone el servidor de BD (trigger), en UTC.
+  createdAt    DateTime      @default(now())
+  voidedAt     DateTime?
+  voidedById   String?       @db.Uuid
+  voidReason   String?
+
+  tenant     Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  settlement CommissionSettlement       @relation(fields: [tenantId, settlementId, userId], references: [tenantId, id, userId], onDelete: Restrict, map: "commission_payments_settlement_fkey")
+  expense    Expense                    @relation(fields: [tenantId, expenseId, locationId, currency], references: [tenantId, id, locationId, currency], onDelete: Restrict, onUpdate: Restrict, map: "commission_payments_expense_fkey")
+  lines      CommissionPaymentLine[]
+  receipts   CommissionReceiptRequest[]
+
+  @@unique([tenantId, expenseId], map: "commission_payments_tenant_expense_key")
+  @@unique([tenantId, id], map: "commission_payments_tenant_id_key")
+  @@index([tenantId, settlementId, userId], map: "commission_payments_settlement_idx")
+  @@index([tenantId, expenseId, locationId, currency], map: "commission_payments_expense_idx")
+  @@index([createdById], map: "commission_payments_created_by_idx")
+  @@index([voidedById], map: "commission_payments_voided_by_idx")
+  @@map("commission_payments")
+}
+
+/// DX-464: línea de la liquidación cubierta por un pago. Una línea solo en UN
+/// pago vivo (único parcial `commission_payment_lines_live_line_key` WHERE
+/// "voidedAt" IS NULL, solo en SQL); al anular el pago se copia `voidedAt`.
+model CommissionPaymentLine {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @db.Uuid
+  paymentId String    @db.Uuid
+  lineId    String    @db.Uuid
+  voidedAt  DateTime?
+
+  tenant  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  payment CommissionPayment        @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "commission_payment_lines_payment_fkey")
+  line    CommissionSettlementLine @relation(fields: [tenantId, lineId], references: [tenantId, id], onDelete: Restrict, map: "commission_payment_lines_line_fkey")
+
+  @@unique([tenantId, paymentId, lineId], map: "commission_payment_lines_payment_line_key")
+  @@index([tenantId, lineId], map: "commission_payment_lines_line_idx")
+  @@map("commission_payment_lines")
+}
+
+/// DX-464: enlace de conformidad («recibido conforme») de un pago: un solo
+/// uso, caducable, con la foto del recibo (`content`, solo iniciales de
+/// pacientes) y su SHA-256. Al firmar: nombre, firma PNG, IP, navegador y la
+/// huella; las horas las pone la BD. Parciales solo en SQL: un enlace vivo por
+/// pago (`commission_receipt_requests_live_key`) y una firma por pago
+/// (`commission_receipt_requests_signed_key`).
+model CommissionReceiptRequest {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  paymentId   String    @db.Uuid
+  tokenHash   String    @unique(map: "commission_receipt_requests_token_hash_key")
+  content     Json
+  contentHash String
+  expiresAt   DateTime
+  createdById String    @db.Uuid
+  createdAt   DateTime  @default(now())
+  openedAt    DateTime?
+  signedAt    DateTime?
+  signerName  String?
+  /// PNG en base64, sin prefijo `data:`.
+  signature   String?
+  ipAddress   String?
+  userAgent   String?
+  receiptHash String?
+  revokedAt   DateTime?
+  revokedById String?   @db.Uuid
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  payment CommissionPayment @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "commission_receipt_requests_payment_fkey")
+
+  @@index([tenantId, paymentId], map: "commission_receipt_requests_payment_idx")
+  @@index([createdById], map: "commission_receipt_requests_created_by_idx")
+  @@index([revokedById], map: "commission_receipt_requests_revoked_by_idx")
+  @@map("commission_receipt_requests")
+}
+
+// ---------------------------------------------------------------------------
+// DX-566: control postoperatorio. Al marcar hecho un procedimiento del
+// catálogo con `requiresPostOpCheck`, se crea la llamada de control para el
+// n-ésimo día hábil de la sede; la lista del día la trabaja la clínica y el
+// desenlace queda en la historia clínica (adenda o evolución nueva).
+// ---------------------------------------------------------------------------
+
+/// Estado del control: PENDING → DONE (con desenlace) | UNREACHABLE (tres
+/// «No contesta») | CANCELLED (el procedimiento dejó de estar hecho o se
+/// borró). Cerrado = inmutable (guarda dx_post_op_checks_guard).
+enum PostOpCheckStatus {
+  PENDING
+  DONE
+  UNREACHABLE
+  CANCELLED
+}
+
+/// Desenlace de un control cerrado como DONE.
+enum PostOpCheckOutcome {
+  FINE
+  DISCOMFORT
+  NEEDS_APPOINTMENT
+}
+
+/// Resultado de un intento de llamada.
+enum PostOpAttemptOutcome {
+  FINE
+  DISCOMFORT
+  NEEDS_APPOINTMENT
+  NO_ANSWER
+}
+
+/// Por qué se anuló un control pendiente.
+enum PostOpCheckCancelReason {
+  PROCEDURE_REVERTED
+  ITEM_DELETED
+}
+
+/// Control postoperatorio (DX-566): una llamada al paciente tras un
+/// procedimiento marcado. Uno PENDING por ítem del plan (único parcial
+/// post_op_checks_pending_item_key). Guarda dx_post_op_checks_guard: la
+/// identidad (clínica, paciente salvo la fusión, ítem, cita, procedimiento y
+/// alta) no cambia; mientras está PENDING solo cambian la fecha, la sede y el
+/// profesional (CORRECT del ítem); se cierra una vez y queda inmutable. Sin
+/// DELETE para la app.
+model PostOpCheck {
+  id              String                   @id @default(uuid()) @db.Uuid
+  tenantId        String                   @db.Uuid
+  patientId       String                   @db.Uuid
+  planItemId      String                   @db.Uuid
+  /// La cita en la que se hizo (la del cierre o la ligada del mismo día); NULL si no hay.
+  appointmentId   String?                  @db.Uuid
+  /// Sede del procedimiento (la de su calendario y su «hoy»).
+  locationId      String                   @db.Uuid
+  /// Quien hizo el procedimiento (`performedById` del ítem).
+  professionalId  String                   @db.Uuid
+  catalogItemId   String                   @db.Uuid
+  /// Nombre del procedimiento congelado al crear el control.
+  procedureName   String
+  /// Días hábiles del catálogo al crear el control (1–30, CHECK): el
+  /// recálculo por una corrección del ítem usa estos, no los de hoy.
+  afterDays       Int                      @db.SmallInt
+  /// Día civil de la llamada en la zona de la sede.
+  dueOn           DateTime                 @db.Date
+  status          PostOpCheckStatus        @default(PENDING)
+  outcome         PostOpCheckOutcome?
+  closedAt        DateTime?
+  closedById      String?                  @db.Uuid
+  cancelledReason PostOpCheckCancelReason?
+  /// Dónde quedó el desenlace en la historia: la evolución (nueva o la que
+  /// recibió la adenda) y, si fue adenda, la adenda.
+  clinicalEntryId String?                  @db.Uuid
+  addendumId      String?                  @db.Uuid
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient       Patient                @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "post_op_checks_patient_fkey")
+  planItem      TreatmentPlanItem      @relation(fields: [tenantId, patientId, planItemId], references: [tenantId, patientId, id], onDelete: Restrict, map: "post_op_checks_plan_item_fkey")
+  appointment   Appointment?           @relation(fields: [tenantId, patientId, appointmentId], references: [tenantId, patientId, id], onDelete: Restrict, map: "post_op_checks_appointment_fkey")
+  location      Location               @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "post_op_checks_location_fkey")
+  professional  User                   @relation("PostOpCheckProfessional", fields: [professionalId], references: [id], onDelete: Restrict, map: "post_op_checks_professional_fkey")
+  catalogItem   DentalCatalogItem      @relation(fields: [tenantId, catalogItemId], references: [tenantId, id], onDelete: Restrict, map: "post_op_checks_catalog_item_fkey")
+  closedBy      User?                  @relation("PostOpCheckClosedBy", fields: [closedById], references: [id], onDelete: Restrict, map: "post_op_checks_closed_by_fkey")
+  clinicalEntry ClinicalEntry?         @relation(fields: [tenantId, patientId, clinicalEntryId], references: [tenantId, patientId, id], onDelete: Restrict, map: "post_op_checks_clinical_entry_fkey")
+  addendum      ClinicalEntryAddendum? @relation(fields: [tenantId, patientId, addendumId], references: [tenantId, patientId, id], onDelete: Restrict, map: "post_op_checks_addendum_fkey")
+  attempts      PostOpCheckAttempt[]
+
+  // Destino de la FK compuesta de los intentos (SEC-004).
+  @@unique([tenantId, id], map: "post_op_checks_tenant_id_key")
+  // Controles del paciente (y lado hijo de la FK al paciente).
+  @@index([tenantId, patientId, createdAt(sort: Desc)], map: "post_op_checks_patient_idx")
+  // Lados hijos de las demás FK.
+  @@index([tenantId, patientId, planItemId], map: "post_op_checks_plan_item_idx")
+  @@index([tenantId, locationId, dueOn], map: "post_op_checks_location_due_idx")
+  @@index([tenantId, catalogItemId], map: "post_op_checks_catalog_item_idx")
+  @@index([professionalId], map: "post_op_checks_professional_idx")
+  // PARCIALES, no declarables en Prisma:
+  //   post_op_checks_pending_item_key UNIQUE ("tenantId", "planItemId") WHERE status = 'PENDING'
+  //   post_op_checks_pending_idx ("tenantId", "locationId", "dueOn") WHERE status = 'PENDING'
+  //   post_op_checks_appointment_idx ("tenantId", "patientId", "appointmentId") WHERE "appointmentId" IS NOT NULL
+  //   post_op_checks_closed_by_idx ("closedById") WHERE "closedById" IS NOT NULL
+  //   post_op_checks_clinical_entry_idx ("tenantId", "patientId", "clinicalEntryId") WHERE "clinicalEntryId" IS NOT NULL
+  //   post_op_checks_addendum_idx ("tenantId", "patientId", "addendumId") WHERE "addendumId" IS NOT NULL
+  @@map("post_op_checks")
+}
+
+/// Intento de llamada de un control (DX-566). Append-only: sin UPDATE ni
+/// DELETE para la app (trigger dx_post_op_check_attempts_immutable). La nota
+/// es DATO DE SALUD (≤ 1000).
+model PostOpCheckAttempt {
+  id       String               @id @default(uuid()) @db.Uuid
+  tenantId String               @db.Uuid
+  checkId  String               @db.Uuid
+  outcome  PostOpAttemptOutcome
+  note     String?
+  byId     String               @db.Uuid
+  /// La pone el servidor de BD (trigger).
+  at       DateTime             @default(now())
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  check  PostOpCheck @relation(fields: [tenantId, checkId], references: [tenantId, id], onDelete: Restrict, map: "post_op_check_attempts_check_fkey")
+  by     User        @relation(fields: [byId], references: [id], onDelete: Restrict, map: "post_op_check_attempts_by_fkey")
+
+  @@index([tenantId, checkId, at], map: "post_op_check_attempts_check_idx")
+  @@index([byId], map: "post_op_check_attempts_by_idx")
+  @@map("post_op_check_attempts")
 }

@@ -68,6 +68,11 @@ export interface GetPaymentPlanResult {
   isFullyPaid: boolean;
 }
 
+export const NO_ACTIVE_PAYMENT_PLAN_MESSAGE =
+  'Este plan de tratamiento no tiene un plan de cuotas activo.';
+export const TREATMENT_PLAN_NOT_FOUND_MESSAGE =
+  'Plan de tratamiento no encontrado';
+
 // Injectable clock so specs pass a fixed "today"; production uses the real one.
 export type Clock = () => Date;
 export const CLOCK = Symbol('CLOCK');
@@ -87,14 +92,34 @@ export class GetPaymentPlanUseCase {
     private readonly currencyDigits?: CurrencyDigitsCatalog,
   ) {}
 
+  /** El plan de cuotas activo; 404 si no hay (el alta lo acaba de crear). */
   async execute(treatmentPlanId: string): Promise<GetPaymentPlanResult> {
     const plan = await this.repo.findActiveByPlan(treatmentPlanId);
     if (!plan) {
-      throw new NotFoundException(
-        'Este plan de tratamiento no tiene un plan de cuotas activo.',
-      );
+      throw new NotFoundException(NO_ACTIVE_PAYMENT_PLAN_MESSAGE);
     }
+    return this.derive(treatmentPlanId, plan);
+  }
 
+  /**
+   * DX-123 (B-4): `GET` — el plan de cuotas activo o `null` si el plan de
+   * tratamiento no tiene: es un estado normal, no un error (sin 404 en la
+   * consola del navegador). Un plan de tratamiento que no existe o es de otra
+   * clínica sigue siendo 404.
+   */
+  async find(treatmentPlanId: string): Promise<GetPaymentPlanResult | null> {
+    const plan = await this.repo.findActiveByPlan(treatmentPlanId);
+    if (plan) return this.derive(treatmentPlanId, plan);
+    if (!(await this.repo.treatmentPlanExists(treatmentPlanId))) {
+      throw new NotFoundException(TREATMENT_PLAN_NOT_FOUND_MESSAGE);
+    }
+    return null;
+  }
+
+  private async derive(
+    treatmentPlanId: string,
+    plan: PaymentPlanWithInstallments,
+  ): Promise<GetPaymentPlanResult> {
     // DX-472: el MISMO cálculo que `/balance` (también por la base de cada
     // abono), para que las dos respuestas den las mismas cifras.
     const balance = await this.getPlanBalance.executeWithItems(treatmentPlanId);

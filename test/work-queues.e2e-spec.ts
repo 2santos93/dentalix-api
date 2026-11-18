@@ -48,17 +48,18 @@ const DAY_MS = 86_400_000;
 
 const EXPECTED_KEYS: Record<ClinicRole, WorkQueueKey[]> = {
   ADMIN: [...WORK_QUEUE_KEYS],
-  DENTIST: ['CLOSING_QUEUE', 'ANAMNESIS_REVIEW'],
+  DENTIST: ['CLOSING_QUEUE', 'ANAMNESIS_REVIEW', 'POST_OP_CHECKS'],
   RECEPTION: [
     'CLOSING_QUEUE',
     'PAYMENT_REPORTS',
+    'POST_OP_CHECKS',
     'QUOTE_FOLLOW_UP',
     'ACCEPTED_UNSCHEDULED',
     'WAITLIST',
     'RECALL',
     'RECEIVABLES',
   ],
-  ASSISTANT: ['ANAMNESIS_REVIEW', 'LOW_STOCK'],
+  ASSISTANT: ['ANAMNESIS_REVIEW', 'POST_OP_CHECKS', 'LOW_STOCK'],
 };
 
 interface Seeded {
@@ -124,6 +125,8 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
       case 'ANAMNESIS_REVIEW':
         return (await body('/medical-history/submissions/summary'))
           .submitted as number;
+      case 'POST_OP_CHECKS':
+        return (await body('/post-op-checks/count')).total as number;
       case 'QUOTE_FOLLOW_UP':
         return (await body('/treatment-plans/pending-follow-up/count'))
           .total as number;
@@ -266,6 +269,25 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
         currency: 'USD',
         price: 100,
         done: { locationId, at: new Date(Date.now() - 40 * DAY_MS) },
+      });
+      // DX-566: el control postoperatorio de ese procedimiento hecho, para
+      // llamar hoy en esta sede (sin tocar el plan ni la cartera).
+      const doneItem = await raw.treatmentPlanItem.findFirstOrThrow({
+        where: { tenantId, patientId, status: 'DONE' },
+        select: { id: true, catalogItemId: true },
+      });
+      await raw.postOpCheck.create({
+        data: {
+          tenantId,
+          patientId,
+          planItemId: doneItem.id,
+          locationId,
+          professionalId: dentistId,
+          catalogItemId: doneItem.catalogItemId,
+          procedureName: 'Extracción simple',
+          afterDays: 1,
+          dueOn: new Date(`${today()}T00:00:00Z`),
+        },
       });
       // Lista de espera abierta.
       await raw.appointmentWaitlistEntry.create({
@@ -499,6 +521,7 @@ describe('«Mi día»: GET /work-queues/summary (DX-503, e2e)', () => {
       expect(rest.map((i) => i.key)).toEqual([
         'CLOSING_QUEUE',
         'PAYMENT_REPORTS',
+        'POST_OP_CHECKS',
         'ACCEPTED_UNSCHEDULED',
         'WAITLIST',
         'RECALL',

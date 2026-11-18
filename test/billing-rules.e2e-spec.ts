@@ -274,7 +274,14 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
     await as(clinic)
       .patch(`/treatment-plans/${planId}`, { status: 'CANCELLED' })
       .expect(200);
-    await as(clinic).get(`/treatment-plans/${planId}/payment-plan`).expect(404);
+    // DX-123: sin plan de cuotas activo, 200 con cuerpo vacío (no 404).
+    expect(
+      (
+        await as(clinic)
+          .get(`/treatment-plans/${planId}/payment-plan`)
+          .expect(200)
+      ).text,
+    ).toBe('');
     const stored = await raw.paymentPlan.findFirstOrThrow({
       where: { treatmentPlanId: planId },
     });
@@ -410,7 +417,14 @@ describe('Reglas de cobro (e2e, DX-109)', () => {
     await as(clinic)
       .post(`/treatment-plans/${planId}/reject`, { reason: 'PRICE' })
       .expect(200);
-    await as(clinic).get(`/treatment-plans/${planId}/payment-plan`).expect(404);
+    // DX-123: sin plan de cuotas activo, 200 con cuerpo vacío (no 404).
+    expect(
+      (
+        await as(clinic)
+          .get(`/treatment-plans/${planId}/payment-plan`)
+          .expect(200)
+      ).text,
+    ).toBe('');
     const stored = await raw.paymentPlan.findFirstOrThrow({
       where: { treatmentPlanId: planId },
     });

@@ -63,7 +63,11 @@ interface ConsentRow {
 }
 
 interface ConsentsBody {
-  current: { scope: string; granted: boolean | null }[];
+  current: {
+    scope: string;
+    granted: boolean | null;
+    latest: ConsentRow | null;
+  }[];
   history: ConsentRow[];
 }
 
@@ -328,6 +332,46 @@ describe('Autorización de datos — /privacy-policies y /patients/:id/data-cons
       expect(patient.dataConsentAt).toBe(
         body.history.find((r) => r.scope === 'GENERAL')?.recordedAt,
       );
+    });
+
+    it('DX-092 (SEC-027): la IP y el user-agent del personal solo los ve ADMIN (GET y POST)', async () => {
+      const policy = (await currentPolicy(clinicA)) as PolicyBody;
+      const patient = await createPatient(clinicA, 'IP-SOLO-ADMIN');
+      const recorded = await as(clinicA, receptionA)
+        .post(`/patients/${patient.id}/data-consents`, {
+          policyVersionId: policy.id,
+          decisions: [{ scope: 'GENERAL', granted: true }],
+        })
+        .expect(201);
+      const hidden = (body: ConsentsBody) => {
+        expect(body.history).toHaveLength(1);
+        expect(body.history[0]).toMatchObject({
+          recordedBy: { id: receptionAId },
+          ipAddress: null,
+          userAgent: null,
+        });
+        expect(
+          body.current.find((c) => c.scope === 'GENERAL')?.latest,
+        ).toMatchObject({ ipAddress: null, userAgent: null });
+      };
+      hidden(recorded.body as ConsentsBody);
+      for (const token of [receptionA, dentistA]) {
+        hidden(
+          (
+            await as(clinicA, token)
+              .get(`/patients/${patient.id}/data-consents`)
+              .expect(200)
+          ).body as ConsentsBody,
+        );
+      }
+      // ADMIN las ve; en la base están siempre.
+      const admin = (
+        await as(clinicA)
+          .get(`/patients/${patient.id}/data-consents`)
+          .expect(200)
+      ).body as ConsentsBody;
+      expect(admin.history[0].ipAddress).toBeTruthy();
+      expect(admin.history[0].userAgent).toBe(USER_AGENT);
     });
 
     it('la IP sale de req.ip: X-Forwarded-For solo cuenta con TRUST_PROXY', async () => {

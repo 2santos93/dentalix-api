@@ -5,6 +5,18 @@ ALTER TABLE "appointment_plan_items" DROP CONSTRAINT "appointment_plan_items_app
 ALTER TABLE "appointment_plan_items" DROP CONSTRAINT "appointment_plan_items_item_fkey";
 
 -- DropForeignKey
+ALTER TABLE "commission_payments" DROP CONSTRAINT "commission_payments_created_by_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_payments" DROP CONSTRAINT "commission_payments_voided_by_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_receipt_requests" DROP CONSTRAINT "commission_receipt_requests_created_by_fkey";
+
+-- DropForeignKey
+ALTER TABLE "commission_receipt_requests" DROP CONSTRAINT "commission_receipt_requests_revoked_by_fkey";
+
+-- DropForeignKey
 ALTER TABLE "commission_rules" DROP CONSTRAINT "commission_rules_created_by_fkey";
 
 -- DropForeignKey

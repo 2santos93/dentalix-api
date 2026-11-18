@@ -359,8 +359,16 @@ export interface TreatmentPlanRepository {
    * Soft-delete: sets `deletedAt`. Never a hard delete. DX-015-bis: si el
    * ítem estaba DONE, recalcula en la misma transacción el recall de los
    * tipos que dispara y lo audita con `audit`.
+   *
+   * DX-123: `guard` recibe el plan RELEÍDO con su fila bloqueada, dentro de la
+   * transacción (como `updateItem`): si se cerró entre medias, su 409 con el
+   * mensaje de plan cerrado, no el genérico del trigger.
    */
-  softDeleteItem(id: string, audit?: AuditRequestContext): Promise<void>;
+  softDeleteItem(
+    id: string,
+    audit?: AuditRequestContext,
+    guard?: (plan: TreatmentPlanWithItems) => void,
+  ): Promise<void>;
 
   /**
    * Acción «Descuento %» (DX-204): en UNA transacción bloquea el plan (FOR

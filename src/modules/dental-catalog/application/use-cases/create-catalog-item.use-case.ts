@@ -22,6 +22,37 @@ export function isValidCatalogKind(kind: unknown): kind is CatalogKind {
   return kind === CatalogKind.DIAGNOSIS || kind === CatalogKind.PROCEDURE;
 }
 
+/** DX-566: el control postoperatorio solo lo pide un procedimiento. */
+export const POST_OP_CHECK_DIAGNOSIS_MESSAGE =
+  'Solo un procedimiento puede pedir control postoperatorio.';
+/** DX-566: tope de los días del control (también en el DTO y en el CHECK). */
+export const POST_OP_CHECK_AFTER_DAYS_MIN = 1;
+export const POST_OP_CHECK_AFTER_DAYS_MAX = 30;
+export const POST_OP_CHECK_AFTER_DAYS_MESSAGE = `Los días del control postoperatorio van de ${POST_OP_CHECK_AFTER_DAYS_MIN} a ${POST_OP_CHECK_AFTER_DAYS_MAX}.`;
+
+/**
+ * DX-566: «Pide control postoperatorio» solo en un PROCEDURE (400 en un
+ * diagnóstico) y los días, enteros de 1 a 30 (el DTO ya lo valida; aquí es la
+ * red del caso de uso, como el CHECK de la BD).
+ */
+export function assertPostOpCheckFields(
+  kind: CatalogKind,
+  fields: { requiresPostOpCheck?: boolean; postOpCheckAfterDays?: number },
+): void {
+  if (fields.requiresPostOpCheck === true && kind !== CatalogKind.PROCEDURE) {
+    throw new BadRequestException(POST_OP_CHECK_DIAGNOSIS_MESSAGE);
+  }
+  const days = fields.postOpCheckAfterDays;
+  if (
+    days !== undefined &&
+    (!Number.isInteger(days) ||
+      days < POST_OP_CHECK_AFTER_DAYS_MIN ||
+      days > POST_OP_CHECK_AFTER_DAYS_MAX)
+  ) {
+    throw new BadRequestException(POST_OP_CHECK_AFTER_DAYS_MESSAGE);
+  }
+}
+
 // NOTE: deliberately NO `tenantId` field — the tenant comes from the guarded
 // request context, never from the client (same convention as patients).
 export interface CreateCatalogItemInput {
@@ -35,6 +66,10 @@ export interface CreateCatalogItemInput {
   defaultPrice?: number;
   /** DX-105: por defecto true. */
   allowDiscount?: boolean;
+  /** DX-566: pide control postoperatorio; solo PROCEDURE (400 si no). */
+  requiresPostOpCheck?: boolean;
+  /** DX-566: días hábiles tras el procedimiento (1–30, por defecto 1). */
+  postOpCheckAfterDays?: number;
   active?: boolean;
   /** DX-455: plantilla sugerida al marcarlo hecho (de esta clínica, activa). */
   clinicalNoteTemplateId?: string | null;
@@ -61,6 +96,8 @@ export class CreateCatalogItemUseCase {
       );
     }
 
+    assertPostOpCheckFields(input.kind, input);
+
     const code = input.code.trim();
     if (code === '') {
       throw new BadRequestException('El código es obligatorio.');
@@ -81,6 +118,8 @@ export class CreateCatalogItemUseCase {
       color: input.color,
       defaultPrice: input.defaultPrice,
       allowDiscount: input.allowDiscount,
+      requiresPostOpCheck: input.requiresPostOpCheck,
+      postOpCheckAfterDays: input.postOpCheckAfterDays,
       active: input.active,
       clinicalNoteTemplateId: input.clinicalNoteTemplateId ?? undefined,
     });

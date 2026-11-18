@@ -68,6 +68,8 @@ function catalogItem(
     color: '#FFFFFF',
     defaultPrice: 100,
     allowDiscount: true,
+    requiresPostOpCheck: false,
+    postOpCheckAfterDays: 1,
     active: true,
     clinicalNoteTemplateId: null,
     suggestedClinicalNoteTemplateId: null,

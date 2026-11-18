@@ -70,20 +70,28 @@ export class PrismaClinicalEntryAddendumRepository implements ClinicalEntryAdden
     input: CreateClinicalEntryAddendumRepoInput,
   ): Promise<ClinicalEntryAddendum> {
     const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant((tx) =>
+      this.createInTransaction(tx, tenantId, input),
+    );
+  }
+
+  async createInTransaction(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    input: CreateClinicalEntryAddendumRepoInput,
+  ): Promise<ClinicalEntryAddendum> {
     // Append-only: un INSERT. `createdAt` lo sobrescribe el trigger
     // `clinical_entry_addenda_server_timestamp` con la hora del servidor.
-    const row = await this.prisma.runWithTenant((tx) =>
-      tx.clinicalEntryAddendum.create({
-        data: {
-          tenantId,
-          patientId: input.patientId,
-          clinicalEntryId: input.clinicalEntryId,
-          reason: input.reason,
-          text: input.text,
-          authorId: input.authorId,
-        },
-      }),
-    );
+    const row = await tx.clinicalEntryAddendum.create({
+      data: {
+        tenantId,
+        patientId: input.patientId,
+        clinicalEntryId: input.clinicalEntryId,
+        reason: input.reason,
+        text: input.text,
+        authorId: input.authorId,
+      },
+    });
     return mapAddendum(row);
   }
 

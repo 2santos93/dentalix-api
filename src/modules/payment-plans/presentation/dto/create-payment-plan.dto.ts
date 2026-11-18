@@ -1,16 +1,19 @@
 import { LockOverrideReason } from '../../../financial-lock/presentation/dto/lock-override-reason';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import {
   IsDateString,
   IsIn,
   IsInt,
   IsOptional,
   IsString,
+  Length,
   Max,
   Min,
 } from 'class-validator';
 import {
   INPUT_NOTES_MAX,
+  INPUT_REASON_MAX,
   TextMaxLength,
 } from '../../../../shared/validation/input-limits';
 import {
@@ -73,8 +76,37 @@ export class CreatePaymentPlanDto {
   lockOverrideReason?: string;
 }
 
-/** DX-091: cuerpo opcional de DELETE /treatment-plans/:id/payment-plan. */
+/** Mismos límites que el motivo de anular un abono (`VoidPaymentDto`). */
+export const CANCEL_REASON_MIN = 3;
+export const CANCEL_REASON_MAX = 300;
+
+function trim({ value }: { value: unknown }): unknown {
+  return typeof value === 'string' ? value.trim() : value;
+}
+
+/**
+ * Cuerpo de DELETE /treatment-plans/:id/payment-plan. DX-092 (SEC-029): el
+ * motivo es obligatorio, como al anular un abono (DX-049); quién cancela sale
+ * del token y cuándo, del reloj del servidor — nunca del cliente.
+ */
 export class CancelPaymentPlanDto {
+  @ApiProperty({
+    minLength: CANCEL_REASON_MIN,
+    maxLength: CANCEL_REASON_MAX,
+    example: 'El paciente pagará el saldo de contado',
+    description:
+      'Motivo de la cancelación (3–300 caracteres tras quitar espacios). Queda ' +
+      'guardado junto a quién y cuándo canceló.',
+  })
+  @Transform(trim)
+  @IsString({ message: 'Indica el motivo de la cancelación.' })
+  @Length(CANCEL_REASON_MIN, CANCEL_REASON_MAX, {
+    message: `El motivo de la cancelación debe tener entre ${CANCEL_REASON_MIN} y ${CANCEL_REASON_MAX} caracteres.`,
+  })
+  @TextMaxLength(INPUT_REASON_MAX)
+  reason!: string;
+
+  /** DX-091: motivo del ADMIN para cancelarlo en un período cerrado. */
   @LockOverrideReason()
   lockOverrideReason?: string;
 }

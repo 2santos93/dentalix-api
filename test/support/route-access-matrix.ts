@@ -188,6 +188,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/payment-links/:token/proof-upload': PUBLIC_TENANT,
   'POST /public/payment-links/:token/proof-upload/complete': PUBLIC_TENANT,
   'POST /public/payment-links/:token/report': PUBLIC_TENANT,
+  // DX-464: el enlace de conformidad del profesional (recibo de honorarios).
+  'GET /public/commission-receipts/:token': PUBLIC_TENANT,
+  'POST /public/commission-receipts/:token/opened': PUBLIC_TENANT,
+  'POST /public/commission-receipts/:token/sign': PUBLIC_TENANT,
+  'GET /public/commission-receipts/:token/pdf': PUBLIC_TENANT,
 
   // --- Cualquier sesión (sin rol de clínica) -------------------------------
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
@@ -458,6 +463,12 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /commissions/settlements': ADMIN_ONLY,
   'GET /commissions/settlements': COMMISSION_VIEWERS,
   'GET /commissions/settlements/:id': COMMISSION_VIEWERS,
+  // DX-464: pagar, anular, PDF y conformidad: solo ADMIN.
+  'POST /commissions/settlements/:id/payments': ADMIN_ONLY,
+  'POST /commissions/payments/:paymentId/void': ADMIN_ONLY,
+  'GET /commissions/settlements/:id/pdf': ADMIN_ONLY,
+  'GET /commissions/payments/:paymentId/receipt/pdf': ADMIN_ONLY,
+  'POST /commissions/payments/:paymentId/receipt-request': ADMIN_ONLY,
   'POST /clinic/settings/logo': ADMIN_ONLY,
   'DELETE /clinic/settings/logo': ADMIN_ONLY,
   'GET /exchange/manual-rates': ADMIN_ONLY,
@@ -567,6 +578,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /lab-orders/:id/check': PRESCRIBERS,
   'POST /lab-orders/:id/cancel': PRESCRIBERS,
   'GET /lab-orders/:id/print': CLINICAL,
+
+  // --- Control postoperatorio (DX-566) ---------------------------------------
+  // .planning/DX-566/SPEC.md (D5, D6). La lista del día y su contador, los 4
+  // roles (recepción sin procedimiento, intentos ni notas); registrar el
+  // desenlace (queda en la historia clínica), los roles clínicos.
+  'GET /post-op-checks': EVERY_ROLE,
+  'GET /post-op-checks/count': EVERY_ROLE,
+  'POST /post-op-checks/:id/attempts': CLINICAL,
 
   // --- Documentos del paciente (DX-151) -------------------------------------
   // dentalix-docs/planning DX-151. Ver, descargar y subir: los 4 roles
@@ -889,6 +908,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /payments/rate-backlog/day': ADMIN_ONLY,
   'POST /treatment-plans/:id/payment-plan': BILLING,
   'GET /treatment-plans/:id/payment-plan': BILLING,
+  // DX-123: los planes de cuotas cancelados (con autor y motivo).
+  'GET /treatment-plans/:id/payment-plan/history': BILLING,
+  // DX-092: cancelar con motivo. Mismos roles que antes: no saca dinero del
+  // saldo (los abonos y lo facturable no cambian), a diferencia de anular un
+  // abono, donde RECEPTION solo anula los suyos del día.
   'DELETE /treatment-plans/:id/payment-plan': BILLING,
   // DX-041: simular cuotas del presupuesto: quien lo imprime (el PDF las lleva).
   'POST /treatment-plans/:id/installment-simulation': EVERY_ROLE,

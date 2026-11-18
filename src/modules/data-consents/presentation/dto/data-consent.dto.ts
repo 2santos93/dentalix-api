@@ -103,10 +103,20 @@ export class DataConsentRecordDto {
   })
   recordedBy!: UserRefDto | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'IP de la petición que la registró. Solo para ADMIN (DX-092): para el resto de roles, siempre `null`.',
+  })
   ipAddress!: string | null;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'User-agent de la petición que la registró. Solo para ADMIN (DX-092): para el resto de roles, siempre `null`.',
+  })
   userAgent!: string | null;
 }
 

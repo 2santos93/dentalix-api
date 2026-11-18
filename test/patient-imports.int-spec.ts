@@ -533,6 +533,10 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       'payment_links.patientId',
       'payment_promises.patientId',
       'perio_exams.patientId',
+      // DX-566: un control postoperatorio cuelga de un procedimiento hecho
+      // (que ya bloquea el deshacer) y puede tener su desenlace en la
+      // historia: bloquea igual.
+      'post_op_checks.patientId',
       'post_op_instruction_deliveries.patientId',
       // DX-468: un enlace de la copia de una receta; solo existe con una
       // receta emitida (que ya bloquea el deshacer): bloquea igual.

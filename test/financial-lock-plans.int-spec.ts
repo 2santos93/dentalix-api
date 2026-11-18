@@ -331,7 +331,15 @@ describe('DX-091 · cierre contable en planes de cuotas (int)', () => {
         const pp = await paymentPlan(cancelPlan, [CLOSED_DAY]);
         await expect(
           tenantContext.run(tenantId, caracas, () =>
-            planRepo.cancel(pp, admin),
+            planRepo.cancel(
+              pp,
+              {
+                byId: admin.userId,
+                at: new Date(),
+                reason: 'Plan migrado del sistema anterior',
+              },
+              admin,
+            ),
           ),
         ).resolves.toBe(true);
         expect(await statusOf(pp)).toBe('CANCELLED');
