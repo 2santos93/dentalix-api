@@ -305,6 +305,10 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'POST /waitlist/:id/schedule body.chairId': 'chairs.e2e-spec.ts',
   // DX-439: «B manda la sede, el profesional, la cita o el ítem de A → 403 o
   // lista sin filas de A, y 404 sin descarte».
+  // DX-566: la sede de otra clínica en la lista de controles
+  // postoperatorios y en su contador → 403 sin datos de A.
+  'GET /post-op-checks ?locationId': 'post-op-checks.e2e-spec.ts',
+  'GET /post-op-checks/count ?locationId': 'post-op-checks.e2e-spec.ts',
   'GET /closing-queue ?locationId': 'closing-queue.e2e-spec.ts',
   // DX-439: marcar DONE «desde» la cita atendida de A con el ítem de B → 409.
   'PATCH /treatment-plans/:id/items/:itemId body.appointmentId':

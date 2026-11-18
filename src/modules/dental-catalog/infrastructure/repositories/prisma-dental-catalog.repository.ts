@@ -37,6 +37,8 @@ function mapToEntity(item: PrismaDentalCatalogItem): DentalCatalogItem {
     color: item.color,
     defaultPrice: item.defaultPrice ? item.defaultPrice.toNumber() : null,
     allowDiscount: item.allowDiscount,
+    requiresPostOpCheck: item.requiresPostOpCheck,
+    postOpCheckAfterDays: item.postOpCheckAfterDays,
     active: item.active,
     clinicalNoteTemplateId: item.clinicalNoteTemplateId,
     suggestedClinicalNoteTemplateId:
@@ -89,6 +91,8 @@ export class PrismaDentalCatalogRepository implements DentalCatalogRepository {
           color: input.color,
           defaultPrice: input.defaultPrice,
           allowDiscount: input.allowDiscount,
+          requiresPostOpCheck: input.requiresPostOpCheck,
+          postOpCheckAfterDays: input.postOpCheckAfterDays,
           active: input.active,
           clinicalNoteTemplateId: input.clinicalNoteTemplateId,
         },

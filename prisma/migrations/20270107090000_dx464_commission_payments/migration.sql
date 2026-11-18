@@ -29,8 +29,8 @@
 -- política NULLIF (DX-251). Funciones con search_path fijo y pg_temp al final
 -- (SEC-032). La app no borra nada de esto (NO_APP_DELETE, DX-148).
 --
--- Fecha: posterior a DX-018 (20270103…) y a la reservada para DX-041
--- (20270104…).
+-- Fecha: posterior a todo lo de main (DX-018 20270103…, DX-564 20270104…,
+-- DX-566 20270105…).  Renumerada desde 20270105090000 por choque con DX-566.
 --
 -- Vuelta atrás: desplegar la API anterior y
 --   DROP TABLE public."commission_receipt_requests";

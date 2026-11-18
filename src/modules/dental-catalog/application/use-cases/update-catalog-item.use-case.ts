@@ -20,6 +20,7 @@ import {
   LINK_TEMPLATE_DIAGNOSIS_MESSAGE,
 } from '../note-template-link';
 import {
+  assertPostOpCheckFields,
   isValidCatalogKind,
   isValidHexColor,
 } from './create-catalog-item.use-case';
@@ -80,7 +81,18 @@ export class UpdateCatalogItemUseCase {
       throw new BadRequestException(LINK_TEMPLATE_DIAGNOSIS_MESSAGE);
     }
 
+    // DX-566: el control lo pide solo un procedimiento. Uno que pasa a
+    // diagnóstico deja de pedirlo (como pierde su plantilla, pero sin 400 si
+    // no lo manda: el CHECK de la BD no admite un diagnóstico con control).
+    assertPostOpCheckFields(kind, patch);
     const normalizedPatch: UpdateDentalCatalogItemRepoInput = { ...patch };
+    if (
+      kind !== CatalogKind.PROCEDURE &&
+      patch.requiresPostOpCheck === undefined &&
+      existing.requiresPostOpCheck
+    ) {
+      normalizedPatch.requiresPostOpCheck = false;
+    }
     if (normalizedPatch.code !== undefined) {
       normalizedPatch.code = normalizedPatch.code.trim();
     }

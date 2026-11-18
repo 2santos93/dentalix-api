@@ -176,7 +176,8 @@ BEGIN
     'ortho_aligner_series', 'ortho_aligner_deliveries',
     'financial_lock_overrides',
     'commission_settlements', 'commission_settlement_lines',
-    'catalog_price_batches', 'catalog_price_history'
+    'catalog_price_batches', 'catalog_price_history',
+    'post_op_check_attempts'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);
@@ -204,7 +205,8 @@ BEGIN
     'ortho_cases', 'ortho_case_charges', 'dental_labs', 'dental_lab_services', 'dental_lab_orders',
     'commission_rules',
     'weekly_digest_runs', 'weekly_digest_deliveries',
-    'commission_payments', 'commission_payment_lines', 'commission_receipt_requests'
+    'commission_payments', 'commission_payment_lines', 'commission_receipt_requests',
+    'post_op_checks'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);

@@ -11,6 +11,7 @@ import { ListWaitlistUseCase } from '../../waitlist/application/use-cases/waitli
 import type { OverdueAmount } from '../domain/work-queues';
 import { CountPaymentReportsUseCase } from '../../payment-links/application/use-cases/payment-reports.use-cases';
 import type { WorkQueueSources } from './work-queues-summary.use-case';
+import { PostOpChecksUseCases } from '../../post-op-checks/application/post-op-checks.use-cases';
 
 /** Lo exigible ya vencido de una moneda: la deuda menos las cuotas que aún no vencen. */
 export function overdueOf(buckets: {
@@ -38,6 +39,7 @@ export function overdueOf(buckets: {
 export function workQueueSources(deps: {
   closingQueue: ClosingQueueUseCases;
   paymentReports: CountPaymentReportsUseCase;
+  postOpChecks: PostOpChecksUseCases;
   anamnesis: CountAnamnesisInboxUseCase;
   followUp: ListPendingFollowUpUseCase;
   visits: PlanVisitsService;
@@ -67,6 +69,11 @@ export function workQueueSources(deps: {
     // GET /medical-history/submissions/summary.
     ANAMNESIS_REVIEW: async () => ({
       count: (await deps.anamnesis.execute()).submitted,
+    }),
+    // GET /post-op-checks/count (DX-566): hoy y vencidos, con la sede de la
+    // cabecera o las permitidas.
+    POST_OP_CHECKS: async () => ({
+      count: (await deps.postOpChecks.count({})).total,
     }),
     // GET /treatment-plans/pending-follow-up/count.
     QUOTE_FOLLOW_UP: async () => ({

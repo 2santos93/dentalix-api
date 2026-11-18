@@ -579,6 +579,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /lab-orders/:id/cancel': PRESCRIBERS,
   'GET /lab-orders/:id/print': CLINICAL,
 
+  // --- Control postoperatorio (DX-566) ---------------------------------------
+  // .planning/DX-566/SPEC.md (D5, D6). La lista del día y su contador, los 4
+  // roles (recepción sin procedimiento, intentos ni notas); registrar el
+  // desenlace (queda en la historia clínica), los roles clínicos.
+  'GET /post-op-checks': EVERY_ROLE,
+  'GET /post-op-checks/count': EVERY_ROLE,
+  'POST /post-op-checks/:id/attempts': CLINICAL,
+
   // --- Documentos del paciente (DX-151) -------------------------------------
   // dentalix-docs/planning DX-151. Ver, descargar y subir: los 4 roles
   // (recepción escanea remisiones y consentimientos). Anular: la ruta admite

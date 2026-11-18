@@ -482,6 +482,10 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     expect(firstCounts.dental_labs).toBe(2);
     expect(firstCounts.dental_lab_services).toBe(4);
     expect(firstCounts.dental_lab_orders).toBe(3);
+    // DX-566: un control postoperatorio pendiente (la exodoncia hecha del
+    // paciente 1), sin intentos.
+    expect(firstCounts.post_op_checks).toBe(1);
+    expect(firstCounts.post_op_check_attempts).toBe(0);
     // DX-170: las 6 plantillas de evolución de ejemplo.
     expect(firstCounts.clinical_note_templates).toBe(6);
     // DX-150: tres gestiones de cobro y un compromiso abierto.

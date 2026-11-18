@@ -13,6 +13,8 @@ export const WORK_QUEUE_KEYS = [
   // DX-569: pagos que reportaron los pacientes por enlace, por confirmar.
   'PAYMENT_REPORTS',
   'ANAMNESIS_REVIEW',
+  // DX-566: llamadas de control postoperatorio de hoy (y vencidas).
+  'POST_OP_CHECKS',
   'QUOTE_FOLLOW_UP',
   'ACCEPTED_UNSCHEDULED',
   'WAITLIST',
@@ -41,6 +43,14 @@ export const WORK_QUEUE_ROLES: Record<WorkQueueKey, readonly ClinicRole[]> = {
     ClinicRole.ADMIN,
     ClinicRole.DENTIST,
     ClinicRole.ASSISTANT,
+  ],
+  // GET /post-op-checks/count — POST_OP_CHECK_LIST_ROLES (DX-566): llama
+  // quien esté (recepción sin el detalle clínico).
+  POST_OP_CHECKS: [
+    ClinicRole.ADMIN,
+    ClinicRole.DENTIST,
+    ClinicRole.ASSISTANT,
+    ClinicRole.RECEPTION,
   ],
   // GET /treatment-plans/pending-follow-up/count — TREATMENT_PLAN_FOLLOW_UP_ROLES.
   QUOTE_FOLLOW_UP: [ClinicRole.ADMIN, ClinicRole.RECEPTION],
