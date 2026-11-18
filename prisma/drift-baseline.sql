@@ -116,6 +116,9 @@ CREATE UNIQUE INDEX "clinic_invitations_pending_key" ON "clinic_invitations"("te
 CREATE UNIQUE INDEX "clinic_memberships_tenantId_userId_key" ON "clinic_memberships"("tenantId", "userId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "clinical_entries_tenant_idempotency_key" ON "clinical_entries"("tenantId", "idempotencyKey");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "catalog_tenant_code_key" ON "dental_catalog_items"("tenantId", "code");
 
 -- CreateIndex
@@ -123,6 +126,9 @@ CREATE INDEX "equipment_tenant_active_location_idx" ON "equipment"("tenantId", "
 
 -- CreateIndex
 CREATE INDEX "expense_payments_tenant_location_paid_on_idx" ON "expense_payments"("tenantId", "locationId", "paidOn");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "medical_history_versions_tenant_idempotency_key" ON "medical_history_versions"("tenantId", "idempotencyKey");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "mhv_tenant_patient_version_key" ON "medical_history_versions"("tenantId", "patientId", "version");
@@ -167,6 +173,9 @@ CREATE UNIQUE INDEX "payments_tenant_split_line_key" ON "payments"("tenantId", "
 CREATE UNIQUE INDEX "prescription_templates_tenant_name_key" ON "prescription_templates"("tenantId", "name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "prescriptions_tenant_idempotency_key" ON "prescriptions"("tenantId", "idempotencyKey");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "price_lists_tenant_name_key" ON "price_lists"("tenantId", "name");
 
 -- CreateIndex
@@ -192,6 +201,12 @@ CREATE UNIQUE INDEX "tooth_records_source_plan_item_key" ON "tooth_records"("ten
 
 -- CreateIndex
 CREATE UNIQUE INDEX "tooth_records_void_once_key" ON "tooth_records"("tenantId", "voidsRecordId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "treatment_plan_items_tenant_idempotency_key" ON "treatment_plan_items"("tenantId", "idempotencyKey");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "treatment_plans_tenant_idempotency_key" ON "treatment_plans"("tenantId", "idempotencyKey");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
