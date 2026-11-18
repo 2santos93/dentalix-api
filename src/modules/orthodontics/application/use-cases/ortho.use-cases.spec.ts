@@ -26,6 +26,19 @@ import {
 // Reloj fijo: 16-11-2026 11:00 en Caracas (UTC−4).
 const NOW = new Date('2026-11-16T15:00:00.000Z');
 
+// DX-190-bis: la evolución de cada control usa `new Date()` (isFutureEntryDate),
+// no el reloj inyectado. Con FAKE_NOW en otra fecha (CI «Fronteras de
+// calendario») las fechas de atención de estos casos salían «futuras».
+beforeEach(() => {
+  jest.useFakeTimers({
+    doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+  });
+  jest.setSystemTime(NOW);
+});
+afterEach(() => {
+  jest.useRealTimers();
+});
+
 const ctx: AuditRequestContext = {
   tenantId: 't1',
   locationId: null,
