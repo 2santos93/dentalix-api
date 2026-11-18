@@ -161,7 +161,7 @@ class PublicPresentationVisitDto {
 
 /** DX-560: la segunda moneda de la sede, orientativa, con la tasa del envío. */
 class PublicPresentationSecondCurrencyDto {
-  @ApiProperty({ example: 'VES', description: 'ISO 4217' })
+  @ApiProperty({ description: 'Moneda ISO 4217' })
   currency!: string;
   @ApiProperty({ description: 'Unidades de la moneda del plan por 1 USD' })
   fromPerBase!: number;

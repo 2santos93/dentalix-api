@@ -69,7 +69,7 @@ describe('budget presentation (DX-560)', () => {
     expect(
       await composeBudgetPresentation(quote, content, same.port, NOW),
     ).not.toHaveProperty('secondCurrency');
-    const missing = source({ currencyFor: () => Promise.resolve('COP') });
+    const missing = source({ currencyFor: () => Promise.resolve('GBP') });
     expect(
       await composeBudgetPresentation(quote, content, missing.port, NOW),
     ).not.toHaveProperty('secondCurrency');
