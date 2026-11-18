@@ -698,6 +698,21 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // leen los roles de la agenda; la cambia solo ADMIN.
   'GET /slot-offer-settings': EVERY_ROLE,
   'PUT /slot-offer-settings': ADMIN_ONLY,
+  // DX-016: reserva online. La página pública (clínica por host) y, para el
+  // personal, ajustes y tipos (los cambia el ADMIN) y la bandeja.
+  'GET /public/booking': PUBLIC_TENANT,
+  'GET /public/booking/slots': PUBLIC_TENANT,
+  'POST /public/booking/verification': PUBLIC_TENANT,
+  'POST /public/booking/verification/:id/verify': PUBLIC_TENANT,
+  'POST /public/booking': PUBLIC_TENANT,
+  'GET /online-booking/settings': EVERY_ROLE,
+  'PUT /online-booking/settings': ADMIN_ONLY,
+  'GET /online-booking/types': EVERY_ROLE,
+  'PUT /online-booking/types/:appointmentTypeId': ADMIN_ONLY,
+  'GET /online-booking/requests': EVERY_ROLE,
+  'GET /online-booking/requests/pending-count': EVERY_ROLE,
+  'POST /online-booking/requests/:id/accept': EVERY_ROLE,
+  'POST /online-booking/requests/:id/decline': EVERY_ROLE,
   // DX-568: resumen semanal por email para el dueño: ajustes, destinatarios
   // y la prueba, solo ADMIN (las cifras son las de Reportes, solo ADMIN).
   'GET /clinic/weekly-digest-settings': ADMIN_ONLY,

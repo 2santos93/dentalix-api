@@ -299,6 +299,8 @@ interface SeedB {
    */
   planTemplateId: string;
   draftPlanId: string;
+  /** DX-016: tipo de cita propio de B (B lo ofrece online con ids de A). */
+  onlineTypeId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -878,6 +880,7 @@ async function seedBExtras(
     | 'allocationVersion'
     | 'planTemplateId'
     | 'draftPlanId'
+    | 'onlineTypeId'
   >
 > {
   await api(app, b, 'put', '/locations/schedule', {
@@ -1058,7 +1061,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       // DX-559: se rellenan justo debajo.
       planTemplateId: '',
       draftPlanId: '',
+      onlineTypeId: '',
     };
+    b.onlineTypeId = (
+      await create(app, clinicB, '/appointment-types', {
+        name: 'Tipo online de B',
+        durationMinutes: 30,
+        color: '#0E7490',
+      })
+    ).id;
     b.planTemplateId = (
       await create(app, clinicB, '/treatment-plan-templates', {
         name: 'Plantilla de B',
@@ -3681,6 +3692,39 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       message: 'Profesional no encontrado',
     },
     {
+      // DX-016: ofrecer online el tipo de B en una sede de A.
+      name: 'PUT /online-booking/types/:appointmentTypeId body.locationIds[] de A',
+      verb: 'put',
+      path: () => `/online-booking/types/${b.onlineTypeId}`,
+      body: () => ({
+        visibleOnline: true,
+        durationNewMinutes: null,
+        durationExistingMinutes: null,
+        providerIds: [],
+        locationIds: [a.locationId],
+      }),
+      bodyIds: ['locationIds[]'],
+      status: 400,
+      message: 'Alguna sede no existe o está desactivada.',
+    },
+    {
+      // DX-016: ofrecer online el tipo de B con un profesional de A.
+      name: 'PUT /online-booking/types/:appointmentTypeId body.providerIds[] de A',
+      verb: 'put',
+      path: () => `/online-booking/types/${b.onlineTypeId}`,
+      body: () => ({
+        visibleOnline: true,
+        durationNewMinutes: null,
+        durationExistingMinutes: null,
+        providerIds: [a.dentistUserId],
+        locationIds: [],
+      }),
+      bodyIds: ['providerIds[]'],
+      status: 400,
+      message:
+        'Algún profesional no es de la clínica o su rol no atiende pacientes.',
+    },
+    {
       name: 'PUT /staff/:userId/locations body.locationIds[] de A',
       verb: 'put',
       path: () => `/staff/${b.dentistUserId}/locations`,
@@ -4190,6 +4234,16 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         'POST /patients/:id/access-links',
         'GET /patients/:id/access-links',
         'DELETE /patients/:id/access-links/:linkId',
+      ],
+    },
+    {
+      spec: 'online-booking.e2e-spec.ts',
+      checks:
+        'B → 404 al configurar online el tipo de cita de A y al aceptar o rechazar una solicitud online de A; nada de A cambia (DX-016)',
+      routes: [
+        'PUT /online-booking/types/:appointmentTypeId',
+        'POST /online-booking/requests/:id/accept',
+        'POST /online-booking/requests/:id/decline',
       ],
     },
     {

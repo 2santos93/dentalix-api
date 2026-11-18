@@ -365,6 +365,12 @@ model Tenant {
   commissionPaymentLines    CommissionPaymentLine[]
   commissionReceipts        CommissionReceiptRequest[]
 
+  // DX-016: reserva online (ajustes, tipos reservables, solicitudes y códigos).
+  onlineBookingSettings      OnlineBookingSettings?
+  appointmentTypeOnline      AppointmentTypeOnlineSettings[]
+  onlineBookingRequests      OnlineBookingRequest[]
+  onlineBookingVerifications OnlineBookingVerification[]
+
   @@map("tenants")
 }
 
@@ -512,6 +518,11 @@ model User {
   quoteFollowUpSettingsUpdated      LocationQuoteFollowUpSettings[]
   treatmentPlansFollowUpPaused      TreatmentPlan[]                  @relation("TreatmentPlanFollowUpPausedBy")
   consentCountersignatures          PatientConsentCountersignature[]
+  // DX-016: reserva online.
+  onlineBookingSettingsUpdated      OnlineBookingSettings[]          @relation("OnlineBookingSettingsUpdatedBy")
+  appointmentTypeOnlineUpdated      AppointmentTypeOnlineSettings[]  @relation("AppointmentTypeOnlineUpdatedBy")
+  onlineBookingRequestsProvider     OnlineBookingRequest[]           @relation("OnlineBookingRequestProvider")
+  onlineBookingRequestsDecided      OnlineBookingRequest[]           @relation("OnlineBookingRequestDecidedBy")
 
   @@map("users")
 }
@@ -725,6 +736,8 @@ model Location {
   paymentReports            PaymentReport[]
   // DX-091: excepciones al cierre contable de abonos de esta sede.
   financialLockOverrides    FinancialLockOverride[]
+  // DX-016: solicitudes de la reserva online.
+  onlineBookingRequests     OnlineBookingRequest[]
 
   @@unique([tenantId, id], map: "locations_tenant_id_key")
   @@unique([tenantId, receiptPrefix], map: "locations_tenant_receipt_prefix_key")
@@ -1003,6 +1016,9 @@ model Patient {
   patientAccessLinks          PatientAccessLink[]
   // DX-561: avisos del seguimiento automático de presupuestos.
   quoteFollowUpMessages       QuoteFollowUpMessage[]
+  // DX-016: reserva online (solicitudes y códigos).
+  onlineBookingRequests       OnlineBookingRequest[]
+  onlineBookingVerifications  OnlineBookingVerification[]
   dentitionEvents             PatientDentitionEvent[]
   toothRecords                ToothRecord[]
   appointments                Appointment[]
@@ -1666,6 +1682,12 @@ enum AppointmentStatus {
   READY_FOR_CHECKOUT
 }
 
+/// DX-016: origen de la cita (la agenda marca las ONLINE).
+enum AppointmentOrigin {
+  STAFF
+  ONLINE
+}
+
 /// DX-437: franja en la que el paciente quiere adelantar su cita («Avisarme si
 /// se libera un hueco antes» desde el enlace de confirmación). ANY = cualquiera.
 enum EarlierWindow {
@@ -1761,6 +1783,10 @@ model Appointment {
   // barrido de recordatorios las salta hasta que el ADMIN los active en el
   // lote. FK compuesta por tenant (appointments_import_batch_fkey).
   importBatchId          String?                 @map("import_batch_id") @db.Uuid
+  // DX-016: de dónde salió la cita: el personal (STAFF) o la reserva online
+  // del paciente (ONLINE, la marca «Online» de la agenda). Inmutable de hecho:
+  // ningún caso de uso la cambia.
+  origin                 AppointmentOrigin       @default(STAFF)
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   deletedAt              DateTime?
@@ -1798,6 +1824,8 @@ model Appointment {
   dentalLabOrders              DentalLabOrder[]
   // DX-566: controles postoperatorios del procedimiento hecho en esta cita.
   postOpChecks                 PostOpCheck[]
+  // DX-016: la solicitud o reserva online que creó esta cita.
+  onlineBookingRequest         OnlineBookingRequest?
 
   // FK COMPUESTA a propósito: exige que el paciente sea del MISMO tenant.
   // Antes era `[patientId] -> [id]`, que solo garantizaba "el paciente existe
@@ -1893,13 +1921,16 @@ model AppointmentType {
   updatedAt            DateTime  @updatedAt
   deletedAt            DateTime?
 
-  tenant              Tenant                          @relation(fields: [tenantId], references: [id])
-  appointments        Appointment[]
-  waitlistEntries     AppointmentWaitlistEntry[]
+  tenant                Tenant                          @relation(fields: [tenantId], references: [id])
+  appointments          Appointment[]
+  waitlistEntries       AppointmentWaitlistEntry[]
   // DX-222: plantillas de indicaciones sugeridas para este tipo de cita.
-  postOpTemplateLinks PostOpInstructionTemplateLink[]
+  postOpTemplateLinks   PostOpInstructionTemplateLink[]
   // DX-015-bis (D20): tipos de recall que se agendan con este tipo de cita.
-  recallTypes         RecallType[]
+  recallTypes           RecallType[]
+  // DX-016: configuración de la reserva online del tipo.
+  onlineSettings        AppointmentTypeOnlineSettings?
+  onlineBookingRequests OnlineBookingRequest[]
 
   // Destino de la FK compuesta de appointments.appointmentTypeId.
   @@unique([tenantId, id], map: "appointment_types_tenant_id_key")
@@ -4833,6 +4864,9 @@ enum AuditResourceType {
   // DX-101: enlace de acceso del paciente (alta, verificación, bloqueo y
   // revocación).
   PATIENT_ACCESS_LINK
+  // DX-016: reserva online (código enviado, verificado o bloqueado; solicitud
+  // o reserva creada; aceptada o rechazada por recepción).
+  ONLINE_BOOKING
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -4923,6 +4957,9 @@ enum EmailTemplate {
   QUOTE_FOLLOW_UP           @map("quote-follow-up")
   // DX-137: aviso de inicio de sesión desde un dispositivo nuevo.
   NEW_LOGIN                 @map("new-login")
+  // DX-016: código de la reserva online y acuse de la reserva o solicitud.
+  ONLINE_BOOKING_CODE       @map("online-booking-code")
+  ONLINE_BOOKING_RECEIVED   @map("online-booking-received")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
@@ -9501,4 +9538,158 @@ model QuoteFollowUpMessage {
   @@index([tenantId, patientId], map: "quote_follow_up_messages_patient_idx")
   @@index([tenantId, groupId, patientId], map: "quote_follow_up_messages_group_idx")
   @@map("quote_follow_up_messages")
+}
+
+// ---------------------------------------------------------------------------
+// DX-016: reserva online
+// ---------------------------------------------------------------------------
+
+/// DX-016: cómo entra una reserva online: SOLICITUD (recepción la acepta) o
+/// reserva DIRECTA (la cita se crea al momento).
+enum OnlineBookingMode {
+  REQUEST
+  DIRECT
+}
+
+/// DX-016: estado de un envío de la página pública.
+/// PENDING = solicitud por revisar; BOOKED = reserva directa con su cita;
+/// ACCEPTED = solicitud aceptada (con su cita); DECLINED = rechazada.
+enum OnlineBookingStatus {
+  PENDING
+  BOOKED
+  ACCEPTED
+  DECLINED
+}
+
+/// DX-016: paciente nuevo (ficha creada desde la página) o existente
+/// (identificado con el código del email).
+enum OnlineBookingPatientKind {
+  NEW
+  EXISTING
+}
+
+/// DX-016: ajustes de la reserva online de la clínica (una fila; sin fila =
+/// desactivada). Topes por CHECK en la migración.
+model OnlineBookingSettings {
+  tenantId               String            @id @db.Uuid
+  enabled                Boolean           @default(false)
+  newPatientMode         OnlineBookingMode @default(REQUEST)
+  existingPatientMode    OnlineBookingMode @default(REQUEST)
+  /// Antelación mínima en minutos (0–10080) para nuevos y existentes.
+  minLeadMinutesNew      Int               @default(120)
+  minLeadMinutesExisting Int               @default(120)
+  /// Hasta cuántos días adelante se ofrecen huecos (1–365).
+  maxAdvanceDays         Int               @default(60)
+  /// Cada cuántos minutos empieza un hueco ofrecido (5–60, múltiplo de 5).
+  slotStepMinutes        Int               @default(15)
+  updatedById            String?           @db.Uuid
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  updatedBy User?  @relation("OnlineBookingSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict, map: "online_booking_settings_updated_by_fkey")
+
+  @@index([updatedById], map: "online_booking_settings_updated_by_idx")
+  @@map("online_booking_settings")
+}
+
+/// DX-016: un tipo de cita del catálogo (DX-121) en la reserva online: si se
+/// ve, su duración para nuevos y existentes (null = la del tipo) y con qué
+/// profesionales y en qué sedes (vacío = todos / todas).
+model AppointmentTypeOnlineSettings {
+  tenantId                String   @db.Uuid
+  appointmentTypeId       String   @db.Uuid
+  visibleOnline           Boolean  @default(false)
+  durationNewMinutes      Int?
+  durationExistingMinutes Int?
+  providerIds             String[] @default([]) @db.Uuid
+  locationIds             String[] @default([]) @db.Uuid
+  updatedById             String?  @db.Uuid
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  appointmentType AppointmentType @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict, map: "appointment_type_online_settings_type_fkey")
+  updatedBy       User?           @relation("AppointmentTypeOnlineUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict, map: "appointment_type_online_settings_updated_by_fkey")
+
+  @@id([tenantId, appointmentTypeId])
+  @@index([updatedById], map: "appointment_type_online_settings_updated_by_idx")
+  @@map("appointment_type_online_settings")
+}
+
+/// DX-016: cada envío de la página pública /reservar: la bandeja «Solicitudes
+/// online» de recepción y la huella de las reservas directas.
+model OnlineBookingRequest {
+  id                String                   @id @default(uuid()) @db.Uuid
+  tenantId          String                   @db.Uuid
+  locationId        String                   @db.Uuid
+  providerId        String                   @db.Uuid
+  appointmentTypeId String                   @db.Uuid
+  patientId         String                   @db.Uuid
+  patientKind       OnlineBookingPatientKind
+  mode              OnlineBookingMode
+  status            OnlineBookingStatus
+  start             DateTime
+  end               DateTime
+  /// Un paciente «nuevo» que se parece a una ficha (nombre y nacimiento, o
+  /// email y nacimiento): no se creó otra; recepción comprueba.
+  possibleDuplicate Boolean                  @default(false)
+  /// Lo que escribió en la página (no toca la ficha).
+  contactEmail      String?                  @db.VarChar(254)
+  contactPhone      String?                  @db.VarChar(40)
+  appointmentId     String?                  @db.Uuid
+  decidedById       String?                  @db.Uuid
+  decidedAt         DateTime?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location        Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "online_booking_requests_location_fkey")
+  patient         Patient         @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "online_booking_requests_patient_fkey")
+  appointmentType AppointmentType @relation(fields: [tenantId, appointmentTypeId], references: [tenantId, id], onDelete: Restrict, map: "online_booking_requests_type_fkey")
+  appointment     Appointment?    @relation(fields: [tenantId, appointmentId], references: [tenantId, id], onDelete: Restrict, map: "online_booking_requests_appointment_fkey")
+  provider        User            @relation("OnlineBookingRequestProvider", fields: [providerId], references: [id], onDelete: Restrict, map: "online_booking_requests_provider_fkey")
+  decidedBy       User?           @relation("OnlineBookingRequestDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict, map: "online_booking_requests_decided_by_fkey")
+
+  // Una cita, una solicitud (también es el lado hijo de su FK).
+  @@unique([tenantId, appointmentId], map: "online_booking_requests_appointment_key")
+  // La bandeja: por estado y sede, las más nuevas primero.
+  @@index([tenantId, status, locationId, createdAt(sort: Desc)], map: "online_booking_requests_inbox_idx")
+  @@index([tenantId, patientId], map: "online_booking_requests_patient_idx")
+  @@index([tenantId, locationId], map: "online_booking_requests_location_idx")
+  @@index([tenantId, appointmentTypeId], map: "online_booking_requests_type_idx")
+  @@index([providerId], map: "online_booking_requests_provider_idx")
+  // PARCIAL, no declarable en Prisma:
+  //   online_booking_requests_decided_by_idx ("decidedById") WHERE "decidedById" IS NOT NULL
+  @@map("online_booking_requests")
+}
+
+/// DX-016: código de un solo uso al email del paciente existente (o la
+/// sesión de reintento de un paciente nuevo ya creado). `patientId` NULL =
+/// los datos no casaron: no se envió nada y ningún código vale.
+model OnlineBookingVerification {
+  id               String                   @id @default(uuid()) @db.Uuid
+  tenantId         String                   @db.Uuid
+  patientId        String?                  @db.Uuid
+  patientKind      OnlineBookingPatientKind
+  /// HMAC-SHA256 (hex) del código; null en una sesión sin código.
+  codeHmac         String?
+  codeExpiresAt    DateTime?
+  attempts         Int                      @default(0)
+  verifiedAt       DateTime?
+  lockedAt         DateTime?
+  /// SHA-256 (hex) del token de sesión (el token solo lo ve el paciente).
+  sessionTokenHash String?
+  sessionExpiresAt DateTime?
+  /// La sesión ya reservó: no vale para otra.
+  consumedAt       DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient Patient? @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "online_booking_verifications_patient_fkey")
+
+  @@unique([tenantId, sessionTokenHash], map: "online_booking_verifications_session_key")
+  @@index([tenantId, patientId, createdAt], map: "online_booking_verifications_patient_idx")
+  @@map("online_booking_verifications")
 }

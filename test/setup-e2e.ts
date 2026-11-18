@@ -42,6 +42,8 @@ for (const policy of [
   'PRESCRIPTION_VERIFY',
   'BRANDING_HOST',
   'BRANDING_MISS',
+  'ONLINE_BOOKING',
+  'ONLINE_BOOKING_WRITE',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

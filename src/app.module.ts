@@ -32,6 +32,7 @@ import { PatientAgreementsModule } from './modules/patient-agreements/patient-ag
 import { PatientMergeModule } from './modules/patient-merge/patient-merge.module';
 import { ScheduleBlocksModule } from './modules/schedule-blocks/schedule-blocks.module';
 import { WaitlistModule } from './modules/waitlist/waitlist.module';
+import { OnlineBookingModule } from './modules/online-booking/online-booking.module';
 import { AppointmentConfirmationsModule } from './modules/appointment-confirmations/appointment-confirmations.module';
 import { TreatmentPlansModule } from './modules/treatment-plans/treatment-plans.module';
 import { StaffModule } from './modules/staff/staff.module';
@@ -141,6 +142,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PatientMergeModule,
     ScheduleBlocksModule,
     WaitlistModule,
+    // DX-016: reserva online (página pública /reservar y bandeja).
+    OnlineBookingModule,
     AppointmentConfirmationsModule,
     TreatmentPlansModule,
     StaffModule,

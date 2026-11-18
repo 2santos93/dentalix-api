@@ -2,7 +2,7 @@
 -- acceso con su fecha de nacimiento (VIEW, reason PATIENT_ACCESS_VERIFIED) o
 -- lo bloquea al quinto fallo (UPDATE, reason PATIENT_ACCESS_LOCKED), sin
 -- sesión: origen PUBLIC_LINK, sin usuario. El CHECK de actor de audit_events
--- es la UNIÓN del de main (20270107140200, DX-561) y esas dos escrituras, y
+-- es la UNIÓN del de main (20270109090400, DX-016) y esas dos escrituras, y
 -- solo ellas. Ni la fecha introducida ni el token van en el evento.
 --
 -- Más permisivo (NOT VALID; su VALIDATE va en 20270110090400, molde de
@@ -196,6 +196,31 @@ ALTER TABLE "audit_events" ADD CONSTRAINT "audit_events_actor_check"
         AND "patientId" IS NOT NULL
         AND "metadata" ->> 'origin' = 'JOB'
         AND "metadata" ->> 'reason' = 'QUOTE_FOLLOW_UP_SENT') IS TRUE
+    -- DX-016: la página pública de reserva online (sin sesión): el código
+    -- del email enviado, verificado o bloqueado; la solicitud o reserva
+    -- creada; y, en la misma transacción, la ficha nueva del paciente, su
+    -- consentimiento de datos y la cita. Solo ids y el motivo.
+    OR ("actorRole" IS NULL
+        AND "patientId" IS NOT NULL
+        AND "metadata" ->> 'origin' = 'ONLINE_BOOKING'
+        AND (("resourceType" = 'ONLINE_BOOKING'
+              AND "resourceId" IS NOT NULL
+              AND (("action" = 'SEND' AND "metadata" ->> 'reason' = 'ONLINE_BOOKING_CODE_SENT')
+                OR ("action" = 'UPDATE' AND "metadata" ->> 'reason' IN ('ONLINE_BOOKING_CODE_VERIFIED',
+                                                                       'ONLINE_BOOKING_CODE_LOCKED'))
+                OR ("action" = 'CREATE' AND "metadata" ->> 'reason' IN ('ONLINE_BOOKING_REQUESTED',
+                                                                       'ONLINE_BOOKING_BOOKED'))))
+          OR ("action" = 'CREATE'
+              AND "resourceType" = 'PATIENT'
+              AND "resourceId" = "patientId"
+              AND "metadata" ->> 'reason' = 'ONLINE_BOOKING_PATIENT_CREATED')
+          OR ("action" = 'CREATE'
+              AND "resourceType" = 'DATA_CONSENT'
+              AND "metadata" ->> 'reason' = 'ONLINE_BOOKING_CONSENT')
+          OR ("action" = 'CREATE'
+              AND "resourceType" = 'APPOINTMENT'
+              AND "resourceId" IS NOT NULL
+              AND "metadata" ->> 'reason' = 'ONLINE_BOOKING_BOOKED'))) IS TRUE
     -- DX-101: el paciente verifica el enlace de acceso (VIEW) o lo bloquea
     -- al quinto fallo (UPDATE). Solo ids, el motivo y el número de fallos.
     OR ("resourceType" = 'PATIENT_ACCESS_LINK'

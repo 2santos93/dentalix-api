@@ -107,6 +107,11 @@ import { ChairAssignmentService } from './application/chair-assignment';
   // ListUpcomingAppointmentsUseCase exportado para las «próximas citas» del
   // dashboard: la BD devuelve ya cortado en `limit` (DX-043, DB-008).
   // DX-122: «Agendar aquí» desde pendientes reutiliza CreateAppointmentUseCase.
-  exports: [ListUpcomingAppointmentsUseCase, CreateAppointmentUseCase],
+  // DX-016: la reserva online calcula huecos con el mismo repositorio.
+  exports: [
+    ListUpcomingAppointmentsUseCase,
+    CreateAppointmentUseCase,
+    APPOINTMENT_REPOSITORY,
+  ],
 })
 export class AppointmentsModule {}

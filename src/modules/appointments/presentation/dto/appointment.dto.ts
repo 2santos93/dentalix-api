@@ -1,6 +1,6 @@
 import { OrthoBalanceFlagDto } from '../../../orthodontics/presentation/dto/ortho.dto';
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
-import { TriageFlag } from '@prisma/client';
+import { AppointmentOrigin, TriageFlag } from '@prisma/client';
 import {
   AppointmentStatus,
   CancellationByKind,
@@ -236,6 +236,14 @@ export class AppointmentDto {
 
   @ApiProperty({ description: 'DX-470: nació en «Atender sin cita».' })
   walkIn!: boolean;
+
+  @ApiProperty({
+    enum: AppointmentOrigin,
+    enumName: 'AppointmentOrigin',
+    description:
+      'DX-016: STAFF = la agendó el personal; ONLINE = reserva online del paciente (marca «Online» en la agenda).',
+  })
+  origin!: AppointmentOrigin;
 
   @ApiProperty({
     description:

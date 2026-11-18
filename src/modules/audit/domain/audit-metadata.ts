@@ -611,6 +611,8 @@ export const AUDIT_ORIGINS = [
   'JOB',
   // DX-435: el paciente desde el enlace público de la oferta de hueco.
   'PUBLIC_LINK',
+  // DX-016: la página pública de reserva online (sin sesión).
+  'ONLINE_BOOKING',
 ] as const;
 export type AuditOrigin = (typeof AUDIT_ORIGINS)[number];
 

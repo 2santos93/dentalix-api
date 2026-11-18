@@ -171,6 +171,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       triageFlags: row.triageFlags,
       triageNote: row.triageNote,
       walkIn: row.walkIn,
+      origin: row.origin,
       overbooked: row.overbooked,
       chairId: row.chairId,
       chair:
@@ -235,6 +236,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       triageFlags: [],
       triageNote: null,
       walkIn: false,
+      origin: input.origin ?? 'STAFF',
       overbooked: false,
       chairId: input.chairId ?? null,
       preArrivalStatus: null,
