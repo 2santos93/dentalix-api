@@ -739,6 +739,42 @@ describe('DX-556 · prospectos sobre Postgres (RLS FORCE)', () => {
       expect(await lookups()).toBe(1);
     });
 
+    it('dos altas concurrentes del mismo teléfono: si pierde la restringida a otra sede, existing va sin id ni nombre', async () => {
+      for (let round = 0; round < 5; round++) {
+        const phone = nextPhone();
+        const [open, restricted] = await Promise.all([
+          settle(create({ phone, locationId: s.chacao, fullName: 'Chacao' })),
+          settle(
+            asA(
+              () =>
+                leads.create(
+                  {
+                    fullName: 'Norte',
+                    phone,
+                    channel: 'PHONE',
+                    locationId: s.norte,
+                  },
+                  audit(),
+                ),
+              [s.norte],
+            ),
+          ),
+        ]);
+        // Una sola fila con ese número, gane quien gane.
+        expect(
+          await raw.lead.count({ where: { phoneE164: e164Of(phone) } }),
+        ).toBe(1);
+        if (restricted.status === 'rejected' && open.status === 'fulfilled') {
+          expect(
+            (restricted.reason as ConflictException).getResponse(),
+          ).toMatchObject({
+            code: 'LEAD_PHONE_TAKEN',
+            existing: { kind: 'LEAD', id: null, name: null },
+          });
+        }
+      }
+    });
+
     it('carrera del teléfono único: el 409 se redacta por sedes igual que sin carrera (alta y edición)', async () => {
       // Repositorio que «no ve» al dueño en la comprobación previa: la
       // escritura choca con leads_tenant_phone_key (el camino de la carrera).
@@ -835,7 +871,7 @@ describe('DX-556 · prospectos sobre Postgres (RLS FORCE)', () => {
         locationId: s.norte,
         ownerId: s.adminId,
       });
-      await create({ channel: 'PHONE', locationId: s.norte, ownerId: null });
+      await create({ channel: 'FACEBOOK', locationId: s.norte, ownerId: null });
       for (const [i, lead] of [a, b].entries()) {
         const { patientId } = await asA(() =>
           leads.convert(lead.id, { lastName: 'Prueba' }, audit()),
@@ -890,7 +926,7 @@ describe('DX-556 · prospectos sobre Postgres (RLS FORCE)', () => {
         attendedRate: 0.5,
         conversionRate: 0.5,
       });
-      expect(report.byChannel.find((r) => r.key === 'PHONE')).toMatchObject({
+      expect(report.byChannel.find((r) => r.key === 'FACEBOOK')).toMatchObject({
         leads: 1,
         scheduled: 0,
         attended: 0,
@@ -906,7 +942,7 @@ describe('DX-556 · prospectos sobre Postgres (RLS FORCE)', () => {
           }),
         ).then((l) => l.total);
       for (const line of report.byChannel) {
-        const channel = line.key as 'INSTAGRAM' | 'PHONE';
+        const channel = line.key as 'INSTAGRAM' | 'FACEBOOK';
         expect(await total({ channel })).toBe(line.leads);
         expect(await total({ channel, reached: 'SCHEDULED' })).toBe(
           line.scheduled,
