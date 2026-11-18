@@ -1,3 +1,4 @@
+import { UserSessionsService } from '../../../auth/application/user-sessions.service';
 import {
   BadRequestException,
   ConflictException,
@@ -93,6 +94,7 @@ export class AcceptInvitationUseCase {
     private readonly tenantContext: TenantContextService,
     private readonly audit: RecordAuditEventUseCase,
     private readonly mfa: UserMfaService,
+    private readonly sessions: UserSessionsService,
   ) {}
 
   async execute(input: AcceptInvitationInput): Promise<AcceptInvitationResult> {
@@ -231,13 +233,24 @@ export class AcceptInvitationUseCase {
     // El rol viene de la invitación (`invitation.role`), NUNCA de `input` —
     // que ni siquiera lo acepta. `tenantId` ya se validó al principio. Las
     // sedes (DX-089), de la membresía: una reactivada conserva su restricción.
-    return this.tokens.issue({
+    const pair = await this.tokens.issue({
       sub: userId,
       tenantId,
       role: invitation.role,
       tv: tokenVersion,
       ...locationClaim(invitation.role, allowedLocationIds),
     });
+    // DX-137: su primera sesión en la clínica, en la lista; el dispositivo se
+    // aprende sin aviso (lo abrió el propio dueño del enlace del email).
+    await this.sessions.open({
+      refreshToken: pair.refreshToken,
+      userId,
+      tenantId,
+      ip: input.meta?.ip ?? null,
+      userAgent: input.meta?.userAgent ?? null,
+      kind: 'CONTINUATION',
+    });
+    return pair;
   }
 
   /** Sin email ni token: solo ids (DX-143). */

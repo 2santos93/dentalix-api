@@ -6,6 +6,10 @@ import { UserProfileRepository } from '../../domain/ports/user-profile-repositor
 import type { SessionClaimsService } from '../../../auth/application/session-claims.service';
 import type { TenantJwtPayload } from '../../../../shared/crypto/token.service';
 
+const sessionsStub = {
+  open: jest.fn().mockResolvedValue(undefined),
+} as never;
+
 const password = new TestPasswordHasher();
 
 // DX-359: desde dónde llega el cambio.
@@ -45,6 +49,7 @@ function setup(hash: string | null) {
     claims as unknown as SessionClaimsService,
     tokens as never,
     { clearAttempts: jest.fn().mockResolvedValue(undefined) } as never,
+    sessionsStub,
   );
   return { uc, repo, claims, tokens, sink };
 }

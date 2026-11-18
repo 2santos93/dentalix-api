@@ -259,7 +259,7 @@ export class PrismaAuthRepository implements AuthRepository {
     }
     const tenant = await this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, sessionIdleMinutes: true },
     });
     if (!tenant) {
       return { ...user, tenant: null };
@@ -277,6 +277,7 @@ export class PrismaAuthRepository implements AuthRepository {
         allowedLocationIds: membership
           ? activeLocationIds(membership.locations)
           : null,
+        sessionIdleMinutes: tenant.sessionIdleMinutes,
       },
     };
   }
@@ -318,7 +319,13 @@ export class PrismaAuthRepository implements AuthRepository {
     // Un solo reloj (el de la API, el mismo que firma `exp`) para guardar
     // `rotatedAt` y para medir la gracia.
     const now = new Date();
-    return this.prisma.$transaction(async (tx) => {
+    // DX-137: con clínica, la transacción va bajo su RLS (crea la fila de
+    // clinic_sessions si falta); sin ella (plataforma), como siempre.
+    const run = <T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      input.tenantId
+        ? this.prisma.runWithTenant(input.tenantId, fn)
+        : this.prisma.$transaction(fn);
+    return run(async (tx) => {
       // Primer refresh de la familia: nace con el token presentado como
       // vigente (el del login). Si ya existe, no se toca aquí
       // (skipDuplicates = ON CONFLICT DO NOTHING).
@@ -329,6 +336,7 @@ export class PrismaAuthRepository implements AuthRepository {
             userId: input.userId,
             currentJti: input.presentedJti,
             expiresAt: input.presentedExpiresAt,
+            tokenVersion: input.tokenVersion,
           },
         ],
         skipDuplicates: true,
@@ -336,7 +344,8 @@ export class PrismaAuthRepository implements AuthRepository {
       // FOR UPDATE: un segundo refresh de la misma familia espera a que este
       // termine y decide con la rotación ya guardada.
       const rows = await tx.$queryRaw<RefreshSessionRow[]>`
-        SELECT "userId", "currentJti", "previousJti", "rotatedAt", "expiresAt", "revokedAt"
+        SELECT "userId", "currentJti", "previousJti", "rotatedAt", "expiresAt", "revokedAt",
+               COALESCE("lastSeenAt", "createdAt") AS "lastActivityAt"
           FROM "refresh_sessions"
          WHERE "id" = ${input.sid}::uuid
          FOR UPDATE`;
@@ -344,11 +353,20 @@ export class PrismaAuthRepository implements AuthRepository {
       // Un `sid` de otro usuario no es de esta sesión: se rechaza sin tocar la
       // familia ajena (no debería pasar: el token va firmado).
       if (!row || row.userId !== input.userId) return { decision: 'reused' };
+      // DX-137: toda familia de clínica queda enlazada a su clínica (las
+      // anteriores a DX-137 y las de la ruta sin `sid` no lo estaban).
+      if (input.tenantId) {
+        await tx.clinicSession.createMany({
+          data: [{ sessionId: input.sid, tenantId: input.tenantId }],
+          skipDuplicates: true,
+        });
+      }
       const decision = decideRefreshRotation(
         row,
         input.presentedJti,
         now,
         input.graceMs,
+        input.idle,
       );
       if (decision === 'rotate') {
         await tx.refreshSession.update({
@@ -357,6 +375,10 @@ export class PrismaAuthRepository implements AuthRepository {
             previousJti: row.currentJti,
             currentJti: input.nextJti,
             rotatedAt: now,
+            // DX-137: la actividad que mide el cierre por inactividad, y la
+            // versión con la que sigue viva (la lista filtra por ella).
+            lastSeenAt: now,
+            tokenVersion: input.tokenVersion,
             // Nunca encoge: la fila vive hasta que vence el ÚLTIMO token de la
             // familia (si no, la purga dejaría renacer una familia con un
             // token viejo aún vigente).
@@ -375,7 +397,9 @@ export class PrismaAuthRepository implements AuthRepository {
           currentExpiresAt: row.expiresAt,
         };
       }
-      if (decision === 'reused') {
+      // DX-137: también la familia inactiva se cierra para siempre (aunque
+      // luego llegue el token vigente).
+      if (decision === 'reused' || decision === 'idle') {
         await tx.refreshSession.update({
           where: { id: input.sid },
           data: { revokedAt: now },
@@ -422,4 +446,5 @@ interface RefreshSessionRow {
   rotatedAt: Date | null;
   expiresAt: Date;
   revokedAt: Date | null;
+  lastActivityAt: Date;
 }

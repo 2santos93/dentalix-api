@@ -54,6 +54,13 @@ import { MfaChallengeService } from './application/mfa-challenge.service';
 import { CompleteMfaLoginUseCase } from './application/use-cases/complete-mfa-login.use-case';
 import { USER_MFA_REPOSITORY } from './domain/ports/user-mfa-repository.port';
 import { PrismaUserMfaRepository } from './infrastructure/repositories/prisma-user-mfa.repository';
+import { UserSessionsService } from './application/user-sessions.service';
+import { USER_SESSIONS_REPOSITORY } from './domain/ports/user-sessions-repository.port';
+import { PrismaUserSessionsRepository } from './infrastructure/repositories/prisma-user-sessions.repository';
+import { NEW_LOGIN_NOTIFIER } from './domain/ports/new-login-notifier.port';
+import { EmailNewLoginNotifier } from './infrastructure/email-new-login.notifier';
+import { StaffSessionsController } from './presentation/staff-sessions.controller';
+import { SessionAlertsController } from './presentation/session-alerts.controller';
 import { LoginMfaController } from './presentation/login-mfa.controller';
 import { SecurityPolicyController } from './presentation/security-policy.controller';
 import { COUNTRY_WHITELIST } from '../locations/domain/ports/country-whitelist.port';
@@ -78,6 +85,9 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
     SecurityPolicyController,
     // DX-021-bis: reseteo por otro ADMIN.
     StaffMfaController,
+    // DX-137: sesiones de un miembro (ADMIN) y el enlace «No fui yo».
+    StaffSessionsController,
+    SessionAlertsController,
   ],
   providers: [
     RegisterClinicUseCase,
@@ -147,11 +157,25 @@ import { PrismaCurrencyWhitelist } from '../treatment-plans/infrastructure/adapt
       useClass: PrismaTokenMaintenanceRepository,
     },
     TokenMaintenanceJobs,
+    // DX-137: sesiones visibles, aviso de inicio nuevo y «No fui yo».
+    UserSessionsService,
+    {
+      provide: USER_SESSIONS_REPOSITORY,
+      useClass: PrismaUserSessionsRepository,
+    },
+    { provide: NEW_LOGIN_NOTIFIER, useClass: EmailNewLoginNotifier },
   ],
   // El cambio de contraseña (MeModule) vuelve a emitir el par de la sesión
   // con los claims ACTUALES, igual que /auth/refresh. Él y aceptar invitación
   // (InvitationsModule) entregan el par con la cookie de sesión (DX-062).
   // DX-021: «Mi perfil» (MeModule) activa y desactiva el MFA del usuario.
-  exports: [SessionClaimsService, SessionCookieService, UserMfaService],
+  // DX-137: «Mi perfil › Sesiones» (MeModule) y las reemisiones de sesión
+  // (contraseña, MFA, invitación) registran la familia con su dispositivo.
+  exports: [
+    SessionClaimsService,
+    SessionCookieService,
+    UserMfaService,
+    UserSessionsService,
+  ],
 })
 export class AuthModule {}

@@ -11,6 +11,12 @@ import type { VerifiedRefreshPayload } from '../../../../shared/crypto/token.ser
 import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
 import { SessionClaimsService } from '../session-claims.service';
+import { SESSION_MESSAGES } from '../../domain/user-sessions';
+import { trustedDeviceLabel } from '../../domain/user-mfa';
+import {
+  USER_SESSIONS_REPOSITORY,
+  type UserSessionsRepository,
+} from '../../domain/ports/user-sessions-repository.port';
 import {
   DEFAULT_REFRESH_REUSE_GRACE_SECONDS,
   REFRESH_REUSE_GRACE_MS,
@@ -46,6 +52,8 @@ export interface RefreshInput {
  *    copia del vigente (la respuesta del refresh se perdió: recarga con el
  *    refresh en vuelo); cualquier otro token ya rotado es REUSO → se revoca
  *    la familia entera y 401. Familia cerrada con /auth/logout → 401.
+ *    DX-137: familia sin refresh durante más que el cierre por inactividad de
+ *    su clínica (+ un TTL de access) → revocada y 401 `SESSION_IDLE`.
  *    Los refresh anteriores al claim `sid` siguen por la denylist de un solo
  *    uso (SEC-002: el `jti` se inserta de forma atómica; reusarlo → 401) y
  *    el par que reciben ya nace en una familia.
@@ -63,6 +71,8 @@ export class RefreshUseCase {
     private readonly tokens: TokenService,
     @Inject(AUTH_REPOSITORY) private readonly repo: AuthRepository,
     private readonly sessions: SessionClaimsService,
+    @Inject(USER_SESSIONS_REPOSITORY)
+    private readonly userSessions: UserSessionsRepository,
     @Optional() @Inject(REFRESH_REUSE_GRACE_MS) graceMs?: number,
   ) {
     this.graceMs = graceMs ?? DEFAULT_REFRESH_REUSE_GRACE_SECONDS * 1000;
@@ -88,7 +98,8 @@ export class RefreshUseCase {
       }
     }
 
-    const { claims, tokenVersion } = await this.sessions.current(payload);
+    const { claims, tokenVersion, idleMinutes } =
+      await this.sessions.current(payload);
     // Tokens anteriores al claim `tv` cuentan como versión 0.
     const tv = payload.tv ?? 0;
     if (tv !== tokenVersion) {
@@ -113,7 +124,16 @@ export class RefreshUseCase {
       presentedExpiresAt: new Date(payload.exp * 1000),
       nextJti: nextClaims.jti,
       nextExpiresAt: nextClaims.expiresAt,
+      tokenVersion: tv,
+      tenantId: isTenantPayload(payload) ? payload.tenantId : null,
       graceMs: this.graceMs,
+      idle:
+        idleMinutes === null
+          ? null
+          : {
+              idleMinutes,
+              accessTtlMs: this.tokens.accessTtlMs(next.accessToken),
+            },
     });
     switch (rotation.decision) {
       case 'rotate':
@@ -142,6 +162,16 @@ export class RefreshUseCase {
         throw new UnauthorizedException(
           'La sesión expiró. Vuelve a iniciar sesión.',
         );
+      case 'idle':
+        // DX-137: sin refresh durante más que el cierre por inactividad de la
+        // clínica. La familia queda revocada (ya lo hizo el repositorio).
+        this.logger.log({ event: 'auth.session_idle_closed', sid });
+        throw new UnauthorizedException({
+          statusCode: 401,
+          error: 'Unauthorized',
+          code: 'SESSION_IDLE',
+          message: SESSION_MESSAGES.idle,
+        });
     }
   }
 
@@ -159,7 +189,21 @@ export class RefreshUseCase {
         'La sesión expiró. Vuelve a iniciar sesión.',
       );
     }
-    // El par nuevo ya nace en una familia (`sid` nuevo).
-    return this.tokens.issue(issuable);
+    // El par nuevo ya nace en una familia (`sid` nuevo). DX-137: registrada
+    // desde ya, con su clínica, para que «cerrar todas» y el ADMIN la
+    // alcancen antes de su primer refresh.
+    const pair = await this.tokens.issue(issuable);
+    const claims = this.tokens.refreshClaims(pair.refreshToken);
+    await this.userSessions.openSession({
+      sid: claims.sid,
+      userId: payload.sub,
+      jti: claims.jti,
+      expiresAt: claims.expiresAt,
+      tokenVersion: claims.tokenVersion,
+      deviceLabel: trustedDeviceLabel(null),
+      ipPrefix: null,
+      tenantId: isTenantPayload(issuable) ? issuable.tenantId : null,
+    });
+    return pair;
   }
 }

@@ -6,7 +6,9 @@ import { PasswordService } from '../../../../shared/crypto/password.service';
 import {
   JwtPayload,
   TokenService,
+  isTenantPayload,
 } from '../../../../shared/crypto/token.service';
+import { UserSessionsService } from '../../../auth/application/user-sessions.service';
 import { SessionClaimsService } from '../../../auth/application/session-claims.service';
 import type { AuditRequestMeta } from '../../../audit/domain/audit-request-context';
 import { passwordChangeAuditEvent } from '../../domain/own-account-audit';
@@ -41,6 +43,7 @@ export class ChangeMyPasswordUseCase {
     private readonly sessions: SessionClaimsService,
     private readonly tokens: TokenService,
     private readonly mfa: UserMfaService,
+    private readonly userSessions: UserSessionsService,
   ) {}
 
   /**
@@ -75,6 +78,16 @@ export class ChangeMyPasswordUseCase {
     // DX-021-bis: quien fallaba códigos con la contraseña vieja ya no puede
     // seguir: el dueño no tiene por qué esperar la espera que él provocó.
     await this.mfa.clearAttempts(userId);
-    return this.tokens.issue({ ...claims, tv });
+    const pair = await this.tokens.issue({ ...claims, tv });
+    // DX-137: la sesión nueva de este mismo navegador, en la lista (sin aviso).
+    await this.userSessions.open({
+      refreshToken: pair.refreshToken,
+      userId,
+      tenantId: isTenantPayload(claims) ? claims.tenantId : null,
+      ip: request.ip,
+      userAgent: request.userAgent,
+      kind: 'CONTINUATION',
+    });
+    return pair;
   }
 }

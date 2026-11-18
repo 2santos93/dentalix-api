@@ -1,3 +1,5 @@
+import { isSessionIdle } from './user-sessions';
+
 /**
  * Rotación de refresh tokens por FAMILIA (una por inicio de sesión, claim
  * `sid`), con detección de reuso y una gracia corta para el token anterior.
@@ -21,8 +23,12 @@
  *   Se revoca la familia ENTERA (ladrón y víctima vuelven a /login), en vez
  *   de solo rechazar ese token y dejar viva la cadena del que rotó primero.
  * - Familia revocada (logout o reuso) → 401.
+ * - DX-137: familia sin refresh durante más que el cierre por inactividad de
+ *   su clínica (ver `isSessionIdle`) → se revoca y 401 («Sesión cerrada por
+ *   inactividad»), sea cual sea el token presentado.
  */
-export type RefreshRotationDecision = 'rotate' | 'grace' | 'reused' | 'revoked';
+export type RefreshRotationDecision =
+  'rotate' | 'grace' | 'reused' | 'revoked' | 'idle';
 
 export interface RefreshSessionState {
   currentJti: string;
@@ -30,6 +36,14 @@ export interface RefreshSessionState {
   rotatedAt: Date | null;
   expiresAt: Date;
   revokedAt: Date | null;
+  /** DX-137: último refresh, o el login si aún no hubo ninguno. */
+  lastActivityAt?: Date;
+}
+
+/** DX-137: cierre por inactividad de la clínica de la sesión. */
+export interface RefreshIdlePolicy {
+  idleMinutes: number;
+  accessTtlMs: number;
 }
 
 /** Gracia por defecto para el token anterior (JWT_REFRESH_REUSE_GRACE_SECONDS). */
@@ -44,8 +58,16 @@ export function decideRefreshRotation(
   presentedJti: string,
   now: Date,
   graceMs: number,
+  idle: RefreshIdlePolicy | null = null,
 ): RefreshRotationDecision {
   if (state.revokedAt) return 'revoked';
+  if (
+    idle &&
+    state.lastActivityAt &&
+    isSessionIdle({ lastActivityAt: state.lastActivityAt, now, ...idle })
+  ) {
+    return 'idle';
+  }
   if (presentedJti === state.currentJti) return 'rotate';
   if (
     presentedJti === state.previousJti &&

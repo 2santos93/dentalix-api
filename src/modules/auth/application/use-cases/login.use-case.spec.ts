@@ -5,6 +5,10 @@ import { AuthRepository } from '../../domain/ports/auth-repository.port';
 import { DUMMY_PASSWORD_HASH } from '../../../../shared/crypto/password.service';
 import { TestPasswordHasher } from '../../../../shared/testing/test-password-hasher';
 
+const sessionsStub = {
+  open: jest.fn().mockResolvedValue(undefined),
+} as never;
+
 // Un miembro de la clínica nunca pasa por el break-glass (SEC-008).
 const unusedBreakGlass = {
   open: () => Promise.reject(new Error('break-glass no esperado')),
@@ -62,6 +66,7 @@ describe('LoginUseCase', () => {
       noMfa,
       unusedChallenges,
       {} as never,
+      sessionsStub,
     );
     const result = await uc.execute({
       tenantId: 't1',
@@ -91,6 +96,7 @@ describe('LoginUseCase', () => {
       noMfa,
       unusedChallenges,
       {} as never,
+      sessionsStub,
     );
     await uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'S3cret!' });
     expect(issue).toHaveBeenCalledWith({
@@ -125,6 +131,7 @@ describe('LoginUseCase', () => {
         noMfa,
         unusedChallenges,
         {} as never,
+        sessionsStub,
       );
       await uc.execute({
         tenantId: 't1',
@@ -201,6 +208,7 @@ describe('LoginUseCase', () => {
         mfa as never,
         challenges as never,
         {} as never,
+        sessionsStub,
       );
       const result = await uc.execute({
         tenantId: 't1',
@@ -257,6 +265,7 @@ describe('LoginUseCase', () => {
         mfa as never,
         enrollChallenges as never,
         notifier as never,
+        sessionsStub,
       );
       return { uc, sent, enrollChallenges };
     }
@@ -336,6 +345,7 @@ describe('LoginUseCase', () => {
         mfa as never,
         challenges as never,
         { sendEnrollmentCode } as never,
+        sessionsStub,
       );
       const result = await uc.execute({
         tenantId: 't1',
@@ -356,6 +366,7 @@ describe('LoginUseCase', () => {
         { state, isRequired: jest.fn() } as never,
         challenges as never,
         {} as never,
+        sessionsStub,
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'mala' }),
@@ -374,6 +385,7 @@ describe('LoginUseCase', () => {
       noMfa,
       unusedChallenges,
       {} as never,
+      sessionsStub,
     );
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'x' }),
@@ -397,6 +409,7 @@ describe('LoginUseCase', () => {
       noMfa,
       unusedChallenges,
       {} as never,
+      sessionsStub,
     );
     await expect(
       uc.execute({ tenantId: 't1', email: 'a@b.com', password: 'wrong' }),
@@ -417,6 +430,7 @@ describe('LoginUseCase', () => {
         noMfa,
         unusedChallenges,
         {} as never,
+        sessionsStub,
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'nadie@x.com', password: 'pw' }),
@@ -446,6 +460,7 @@ describe('LoginUseCase', () => {
         noMfa,
         unusedChallenges,
         {} as never,
+        sessionsStub,
       );
       await expect(
         uc.execute({ tenantId: 't1', email: 'otra@x.com', password: 'pw' }),
@@ -467,6 +482,7 @@ describe('LoginUseCase', () => {
         noMfa,
         unusedChallenges,
         {} as never,
+        sessionsStub,
       );
       await expect(
         uc.executePlatform({ email: 'nadie@x.com', password: 'pw' }),

@@ -863,7 +863,11 @@ describe('Verificación en dos pasos, ampliación (e2e, DX-021-bis)', () => {
       )
         .send({ requireAdminMfa: false, requireAllMfa: true })
         .expect(200);
-      expect(res.body).toEqual({ requireAdminMfa: true, requireAllMfa: true });
+      expect(res.body).toEqual({
+        requireAdminMfa: true,
+        requireAllMfa: true,
+        sessionIdleMinutes: 60,
+      });
 
       await refresh(site.host, (session.body as Body).refreshToken!).expect(
         401,

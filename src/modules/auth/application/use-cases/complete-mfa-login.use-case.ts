@@ -28,6 +28,7 @@ import {
   type UserMfaRepository,
 } from '../../domain/ports/user-mfa-repository.port';
 import { LoginLockoutService } from '../login-lockout.service';
+import { UserSessionsService } from '../user-sessions.service';
 import {
   MfaChallengeService,
   expired,
@@ -75,6 +76,7 @@ export class CompleteMfaLoginUseCase {
     private readonly audit: RecordAuditEventUseCase,
     private readonly lockout: LoginLockoutService,
     @Inject(USER_MFA_REPOSITORY) private readonly mfaRepo: UserMfaRepository,
+    private readonly sessions: UserSessionsService,
   ) {}
 
   async verify(input: {
@@ -115,7 +117,7 @@ export class CompleteMfaLoginUseCase {
       });
     }
     await this.consume(session.claims);
-    const pair = await this.issue(session, state.tokenVersion);
+    const pair = await this.issue(session, state.tokenVersion, input.request);
     await this.record(
       session,
       'LOGIN',
@@ -180,7 +182,7 @@ export class CompleteMfaLoginUseCase {
       this.context(session, input.request),
     );
     await this.consume(session.claims);
-    const pair = await this.issue(session, enabled.tokenVersion);
+    const pair = await this.issue(session, enabled.tokenVersion, input.request);
     await this.record(session, 'LOGIN', 'MFA_ENROLLED', input.request);
     return { ...pair, recoveryCodes: enabled.recoveryCodes };
   }
@@ -261,7 +263,31 @@ export class CompleteMfaLoginUseCase {
       : this.clinicContext(session, request);
   }
 
-  private issue(session: ChallengeSession, tv: number): Promise<SessionPair> {
+  /**
+   * El par de la sesión y, DX-137, su registro con el dispositivo (y el aviso
+   * de inicio de sesión nuevo en una clínica).
+   */
+  private async issue(
+    session: ChallengeSession,
+    tv: number,
+    request: AuditRequestMeta,
+  ): Promise<SessionPair> {
+    const pair = await this.issuePair(session, tv);
+    await this.sessions.open({
+      refreshToken: pair.refreshToken,
+      userId: session.claims.sub,
+      tenantId: session.role === null ? null : session.claims.tenantId,
+      ip: request.ip,
+      userAgent: request.userAgent,
+      kind: 'LOGIN',
+    });
+    return pair;
+  }
+
+  private issuePair(
+    session: ChallengeSession,
+    tv: number,
+  ): Promise<SessionPair> {
     if (session.role === null) {
       this.logger.warn({
         event: 'platform_session.opened',
