@@ -4,7 +4,9 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
+  Header,
   HttpCode,
   Patch,
   Post,
@@ -22,6 +24,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiServiceUnavailableResponse,
@@ -61,6 +64,12 @@ import {
   DeliveredSession,
   SessionCookieService,
 } from '../../auth/presentation/session-cookie.service';
+import { ConfigService } from '@nestjs/config';
+import {
+  DEVICE_DRAFT_KEY_VERSION,
+  deviceDraftKeyFor,
+} from '../../../shared/crypto/device-draft-key';
+import { DraftKeyDto } from './dto/draft-key.dto';
 
 /**
  * `/me` describe el perfil DENTRO de una clínica (tenant + rol), y este
@@ -110,7 +119,39 @@ export class MeController {
     private readonly cookie: SessionCookieService,
     private readonly userSessions: UserSessionsService,
     private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * DX-574: la clave con la que la web cifra en el dispositivo los borradores
+   * de los formularios clínicos. Se pide tras iniciar sesión y vive solo en la
+   * memoria de la pestaña. Un acceso de soporte (break-glass) no la recibe:
+   * no deja datos de salud en el equipo de soporte.
+   */
+  @Get('draft-key')
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Clave de los borradores cifrados en el dispositivo (DX-574)',
+  })
+  @ApiOkResponse({ type: DraftKeyDto })
+  @ApiUnauthorizedResponse({ description: 'Sin sesión de clínica' })
+  @ApiForbiddenResponse({
+    description: 'Acceso de soporte (break-glass): sin borradores locales',
+  })
+  draftKey(@Req() req: AuthenticatedRequest): DraftKeyDto {
+    const user = tenantUserOrThrow(req.user);
+    if (user.breakGlass) {
+      throw new ForbiddenException(
+        'Un acceso de soporte no guarda borradores en el dispositivo.',
+      );
+    }
+    return {
+      key: deviceDraftKeyFor(this.config, user.tenantId, user.sub).toString(
+        'base64',
+      ),
+      version: DEVICE_DRAFT_KEY_VERSION,
+    };
+  }
 
   /**
    * DX-359: sede activa del actor para su evento de auditoría, con las mismas
