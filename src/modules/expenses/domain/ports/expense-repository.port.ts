@@ -1,6 +1,6 @@
 import type { CurrencyTexts } from '../../../../shared/format/currency-text';
 import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
-import type { PaymentMethod } from '@prisma/client';
+import type { PaymentMethod, Prisma } from '@prisma/client';
 import type {
   Expense,
   ExpenseAttachment,
@@ -10,6 +10,16 @@ import type {
 import type { ExpenseCashLink } from './expense-cash-link.port';
 
 export const EXPENSE_REPOSITORY = Symbol('EXPENSE_REPOSITORY');
+
+/**
+ * DX-464: escritura de otro módulo en la MISMA transacción del alta o de la
+ * anulación del gasto (el pago de una liquidación de honorarios). Si lanza,
+ * no queda nada: ni el gasto ni lo suyo.
+ */
+export type ExpenseTxHook = (
+  tx: Prisma.TransactionClient,
+  expense: { id: string; locationId: string; currency: string },
+) => Promise<void>;
 
 /** `OPEN` = pendiente + parcial (lo que todavía se debe). */
 export type ExpenseStatusFilter = ExpenseStatus | 'OPEN';
@@ -154,6 +164,7 @@ export interface ExpenseRepository {
     input: CreateExpenseRepoInput,
     payment: CreateExpensePaymentRepoInput | undefined,
     now: Date,
+    within?: ExpenseTxHook,
   ): Promise<IdempotentWrite>;
 
   /**
@@ -168,7 +179,9 @@ export interface ExpenseRepository {
 
   /**
    * Anula el gasto y todos sus pagos vivos en una transacción (los de caja
-   * pasan por `cashLink.onPaymentVoided`). Lanza `ExpenseRuleError`.
+   * pasan por `cashLink.onPaymentVoided`). Lanza `ExpenseRuleError`. DX-464:
+   * el gasto de un pago de honorarios solo se anula con `within` (la
+   * anulación de ese pago, en la misma transacción).
    */
   void(
     id: string,
@@ -176,6 +189,7 @@ export interface ExpenseRepository {
     by: string,
     now: Date,
     cashLink?: ExpenseCashLink,
+    within?: ExpenseTxHook,
   ): Promise<ExpenseDetail>;
 
   /**

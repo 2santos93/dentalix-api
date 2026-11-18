@@ -39,6 +39,10 @@ import {
   type CommissionRepository,
   type CommissionRuleRecord,
 } from '../domain/ports/commission-repository.port';
+import {
+  COMMISSION_PAYMENT_REPOSITORY,
+  type CommissionPaymentRepository,
+} from '../domain/ports/commission-payment-repository.port';
 import type {
   CommissionLineView,
   CommissionPreviewView,
@@ -115,7 +119,31 @@ export class CommissionUseCases {
     @Inject(COMMISSION_REPOSITORY) private readonly repo: CommissionRepository,
     @Inject(COMMISSION_CLOCK) private readonly now: CommissionClock,
     private readonly tenantContext: TenantContextService,
+    @Inject(COMMISSION_PAYMENT_REPOSITORY)
+    private readonly payments: Pick<
+      CommissionPaymentRepository,
+      'payments' | 'header'
+    >,
   ) {}
+
+  /** DX-464: la liquidación con sus pagos y el email del profesional. */
+  private async withPayments(found: {
+    summary: CommissionSettlementSummary;
+    categoryPercents: CommissionSettlementView['categoryPercents'];
+    lines: CommissionLineView[];
+  }): Promise<CommissionSettlementView> {
+    const [payments, header] = await Promise.all([
+      this.payments.payments(found.summary.id),
+      this.payments.header(found.summary.id),
+    ]);
+    return {
+      ...found.summary,
+      categoryPercents: found.categoryPercents,
+      lines: found.lines,
+      payments,
+      professionalEmail: header?.professionalEmail ?? null,
+    };
+  }
 
   /** El ADMIN ve toda la clínica: sin restricción de sedes (DX-089). */
   private assertClinicWide(actor: CommissionActor): void {
@@ -263,6 +291,7 @@ export class CommissionUseCases {
       base: l.base,
       percent: l.percent,
       amount: l.amount,
+      paidInPaymentId: null,
     }));
   }
 
@@ -347,11 +376,7 @@ export class CommissionUseCases {
     const view = await this.repo.getSettlement(closed.id);
     if (!view)
       throw new NotFoundException(COMMISSION_MESSAGES.settlementNotFound);
-    return {
-      ...view.summary,
-      categoryPercents: view.categoryPercents,
-      lines: view.lines,
-    };
+    return this.withPayments(view);
   }
 
   async listSettlements(
@@ -382,10 +407,6 @@ export class CommissionUseCases {
     ) {
       throw new NotFoundException(COMMISSION_MESSAGES.settlementNotFound);
     }
-    return {
-      ...found.summary,
-      categoryPercents: found.categoryPercents,
-      lines: found.lines,
-    };
+    return this.withPayments(found);
   }
 }

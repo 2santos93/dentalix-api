@@ -205,6 +205,7 @@ BEGIN
     'ortho_cases', 'ortho_case_charges', 'dental_labs', 'dental_lab_services', 'dental_lab_orders',
     'commission_rules',
     'weekly_digest_runs', 'weekly_digest_deliveries',
+    'commission_payments', 'commission_payment_lines', 'commission_receipt_requests',
     'post_op_checks'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN

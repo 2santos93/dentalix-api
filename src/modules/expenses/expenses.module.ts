@@ -109,5 +109,8 @@ import { ExpensesController } from './presentation/expenses.controller';
       useClass: PrismaExpenseCategoryRepository,
     },
   ],
+  // DX-464: el pago de una liquidación de honorarios crea y anula su gasto
+  // con las mismas reglas (categoría, sede, fecha, caja) y en su transacción.
+  exports: [CreateExpenseUseCase, VoidExpenseUseCase],
 })
 export class ExpensesModule {}

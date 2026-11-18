@@ -37,6 +37,7 @@ const summary = (userId: string) => ({
   lockDateBefore: null,
   lockDateAfter: '2026-10-31',
   totals: [],
+  payment: { status: 'NOTHING_TO_PAY' as const, currencies: [] },
 });
 
 function setup(allowed: 'ALL' | string[] = 'ALL') {
@@ -79,6 +80,10 @@ function setup(allowed: 'ALL' | string[] = 'ALL') {
     repo,
     () => new Date(),
     tenantContext,
+    {
+      payments: jest.fn().mockResolvedValue([]),
+      header: jest.fn().mockResolvedValue(null),
+    },
   );
   return { useCases, repo, listSettlements };
 }
