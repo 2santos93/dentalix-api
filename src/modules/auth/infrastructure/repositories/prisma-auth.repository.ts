@@ -319,7 +319,13 @@ export class PrismaAuthRepository implements AuthRepository {
     // Un solo reloj (el de la API, el mismo que firma `exp`) para guardar
     // `rotatedAt` y para medir la gracia.
     const now = new Date();
-    return this.prisma.$transaction(async (tx) => {
+    // DX-137: con clínica, la transacción va bajo su RLS (crea la fila de
+    // clinic_sessions si falta); sin ella (plataforma), como siempre.
+    const run = <T>(fn: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      input.tenantId
+        ? this.prisma.runWithTenant(input.tenantId, fn)
+        : this.prisma.$transaction(fn);
+    return run(async (tx) => {
       // Primer refresh de la familia: nace con el token presentado como
       // vigente (el del login). Si ya existe, no se toca aquí
       // (skipDuplicates = ON CONFLICT DO NOTHING).
@@ -347,6 +353,14 @@ export class PrismaAuthRepository implements AuthRepository {
       // Un `sid` de otro usuario no es de esta sesión: se rechaza sin tocar la
       // familia ajena (no debería pasar: el token va firmado).
       if (!row || row.userId !== input.userId) return { decision: 'reused' };
+      // DX-137: toda familia de clínica queda enlazada a su clínica (las
+      // anteriores a DX-137 y las de la ruta sin `sid` no lo estaban).
+      if (input.tenantId) {
+        await tx.clinicSession.createMany({
+          data: [{ sessionId: input.sid, tenantId: input.tenantId }],
+          skipDuplicates: true,
+        });
+      }
       const decision = decideRefreshRotation(
         row,
         input.presentedJti,

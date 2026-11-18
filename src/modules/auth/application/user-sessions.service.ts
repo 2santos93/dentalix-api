@@ -38,11 +38,8 @@ import {
   NEW_LOGIN_NOTIFIER,
   type NewLoginNotifier,
 } from '../domain/ports/new-login-notifier.port';
-import {
-  generatePasswordResetToken,
-  hashPasswordResetToken,
-  passwordResetExpiresAt,
-} from './password-reset-token';
+import { TenantLinkBaseService } from '../../../shared/tenancy/tenant-link-base.service';
+import { RequestPasswordResetUseCase } from './use-cases/request-password-reset.use-case';
 
 export const USER_SESSIONS_CLOCK = Symbol('USER_SESSIONS_CLOCK');
 
@@ -70,10 +67,9 @@ export interface SessionActor extends AuditRequestContext {
   currentSessionId: string | null;
 }
 
-/** Lo que devuelve «No fui yo»: el enlace de restablecimiento, si cabe. */
+/** Lo que devuelve «No fui yo»: un mensaje fijo, sin tokens ni datos de la cuenta. */
 export interface NotMeResult {
-  /** Token del enlace `/restablecer/<token>` (`null` = ya no es miembro). */
-  passwordResetToken: string | null;
+  message: string;
 }
 
 function hashAlertToken(token: string): string {
@@ -101,6 +97,8 @@ export class UserSessionsService {
     private readonly repo: UserSessionsRepository,
     private readonly tokens: TokenService,
     @Inject(NEW_LOGIN_NOTIFIER) private readonly notifier: NewLoginNotifier,
+    private readonly passwordReset: RequestPasswordResetUseCase,
+    private readonly links: TenantLinkBaseService,
     config: ConfigService,
     @Optional() @Inject(USER_SESSIONS_CLOCK) clock?: () => Date,
   ) {
@@ -390,20 +388,16 @@ export class UserSessionsService {
     tenantId: string,
     token: string,
     request: AuditRequestMeta,
+    host?: string,
   ): Promise<NotMeResult> {
     if (!ALERT_TOKEN_SHAPE.test(token)) {
       throw new NotFoundException(SESSION_MESSAGES.alertInvalid);
     }
     const now = this.clock();
-    const resetToken = generatePasswordResetToken();
     const outcome = await this.repo.consumeSessionAlert({
       tenantId,
       tokenHash: hashAlertToken(token),
       now,
-      passwordReset: {
-        tokenHash: hashPasswordResetToken(resetToken),
-        expiresAt: passwordResetExpiresAt(now),
-      },
       audit: ({ userId, role, sessionsClosed }) =>
         sessionAudit(
           {
@@ -427,7 +421,37 @@ export class UserSessionsService {
       userId: outcome.userId,
       sessionsClosed: outcome.sessionsClosed,
     });
-    return { passwordResetToken: outcome.role ? resetToken : null };
+    // El enlace para cambiar la contraseña va al EMAIL de la cuenta, nunca en
+    // la respuesta: quien tenga (o intercepte) el enlace del aviso no puede
+    // quedarse con la cuenta. Es el flujo de «¿Olvidaste tu contraseña?».
+    if (outcome.role)
+      await this.sendPasswordReset(tenantId, outcome.userId, host);
+    return { message: SESSION_MESSAGES.notMeDone };
+  }
+
+  private async sendPasswordReset(
+    tenantId: string,
+    userId: string,
+    host: string | undefined,
+  ): Promise<void> {
+    try {
+      const recipient = await this.repo.findRecipient(userId);
+      const linkBase = await this.links.forTenant(tenantId, host);
+      if (!recipient || !linkBase) return;
+      await this.passwordReset.execute({
+        tenantId,
+        email: recipient.email,
+        linkBase,
+      });
+    } catch (err) {
+      // Las sesiones ya están cerradas: el email es lo único que falla.
+      this.logger.warn({
+        event: 'user_sessions.not_me_reset_failed',
+        tenantId,
+        userId,
+        error: err instanceof Error ? err.constructor.name : typeof err,
+      });
+    }
   }
 }
 

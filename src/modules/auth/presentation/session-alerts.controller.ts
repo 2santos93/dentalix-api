@@ -42,7 +42,7 @@ export class SessionAlertsController {
   @ApiOperation({
     summary: '«No fui yo»: cierra todas las sesiones de la cuenta del aviso',
     description:
-      'Queda auditado (SESSION, DELETE, `SESSION_NOT_ME`) con cuántas sesiones se cerraron. La respuesta no lleva el email ni el nombre de la cuenta.',
+      'Cierra todas las sesiones de la cuenta, deja sin valor los enlaces de restablecimiento vivos y envía uno nuevo al email de la cuenta (como «¿Olvidaste tu contraseña?»). Queda auditado (SESSION, DELETE, `SESSION_NOT_ME`) con cuántas sesiones se cerraron. La respuesta no lleva tokens, email ni nombre.',
   })
   @ApiOkResponse({ type: NotMeResultDto })
   @ApiNotFoundResponse({ description: SESSION_MESSAGES.alertInvalid })
@@ -53,10 +53,16 @@ export class SessionAlertsController {
     const tenantId = req.tenantHost?.tenantId;
     if (!tenantId) throw new NotFoundException(SESSION_MESSAGES.alertInvalid);
     const userAgent = req.headers['user-agent'];
-    return this.sessions.notMe(tenantId, dto.token, {
-      requestId: currentRequestId() ?? null,
-      ip: req.ip ?? null,
-      userAgent: (Array.isArray(userAgent) ? userAgent[0] : userAgent) ?? null,
-    });
+    return this.sessions.notMe(
+      tenantId,
+      dto.token,
+      {
+        requestId: currentRequestId() ?? null,
+        ip: req.ip ?? null,
+        userAgent:
+          (Array.isArray(userAgent) ? userAgent[0] : userAgent) ?? null,
+      },
+      req.tenantHost?.host,
+    );
   }
 }

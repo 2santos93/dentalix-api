@@ -35,6 +35,8 @@ export const SESSION_MESSAGES = {
   memberNotFound: 'Miembro del personal no encontrado',
   breakGlass:
     'Las sesiones se gestionan desde una sesión propia de la clínica.',
+  notMeDone:
+    'Cerramos todas tus sesiones. Si tu cuenta sigue activa en esta clínica, te enviamos al correo un enlace para elegir una contraseña nueva.',
   idleRange: `El cierre por inactividad va de ${SESSION_IDLE_MIN_MINUTES} a ${SESSION_IDLE_MAX_MINUTES} minutos.`,
 } as const;
 

@@ -12,6 +12,11 @@ import { AUTH_REPOSITORY } from '../../domain/ports/auth-repository.port';
 import type { AuthRepository } from '../../domain/ports/auth-repository.port';
 import { SessionClaimsService } from '../session-claims.service';
 import { SESSION_MESSAGES } from '../../domain/user-sessions';
+import { trustedDeviceLabel } from '../../domain/user-mfa';
+import {
+  USER_SESSIONS_REPOSITORY,
+  type UserSessionsRepository,
+} from '../../domain/ports/user-sessions-repository.port';
 import {
   DEFAULT_REFRESH_REUSE_GRACE_SECONDS,
   REFRESH_REUSE_GRACE_MS,
@@ -66,6 +71,8 @@ export class RefreshUseCase {
     private readonly tokens: TokenService,
     @Inject(AUTH_REPOSITORY) private readonly repo: AuthRepository,
     private readonly sessions: SessionClaimsService,
+    @Inject(USER_SESSIONS_REPOSITORY)
+    private readonly userSessions: UserSessionsRepository,
     @Optional() @Inject(REFRESH_REUSE_GRACE_MS) graceMs?: number,
   ) {
     this.graceMs = graceMs ?? DEFAULT_REFRESH_REUSE_GRACE_SECONDS * 1000;
@@ -118,6 +125,7 @@ export class RefreshUseCase {
       nextJti: nextClaims.jti,
       nextExpiresAt: nextClaims.expiresAt,
       tokenVersion: tv,
+      tenantId: isTenantPayload(payload) ? payload.tenantId : null,
       graceMs: this.graceMs,
       idle:
         idleMinutes === null
@@ -181,7 +189,21 @@ export class RefreshUseCase {
         'La sesión expiró. Vuelve a iniciar sesión.',
       );
     }
-    // El par nuevo ya nace en una familia (`sid` nuevo).
-    return this.tokens.issue(issuable);
+    // El par nuevo ya nace en una familia (`sid` nuevo). DX-137: registrada
+    // desde ya, con su clínica, para que «cerrar todas» y el ADMIN la
+    // alcancen antes de su primer refresh.
+    const pair = await this.tokens.issue(issuable);
+    const claims = this.tokens.refreshClaims(pair.refreshToken);
+    await this.userSessions.openSession({
+      sid: claims.sid,
+      userId: payload.sub,
+      jti: claims.jti,
+      expiresAt: claims.expiresAt,
+      tokenVersion: claims.tokenVersion,
+      deviceLabel: trustedDeviceLabel(null),
+      ipPrefix: null,
+      tenantId: isTenantPayload(issuable) ? issuable.tenantId : null,
+    });
+    return pair;
   }
 }

@@ -139,6 +139,7 @@ describe('DX-137 · sesiones (int)', () => {
       tokenVersion: 0,
       graceMs: 30_000,
       idle: { idleMinutes: 60, accessTtlMs: 900_000 },
+      tenantId: tenantA,
     });
     expect(rotation.decision).toBe('revoked');
   });
@@ -159,6 +160,7 @@ describe('DX-137 · sesiones (int)', () => {
       tokenVersion: 0,
       graceMs: 30_000,
       idle: { idleMinutes: 60, accessTtlMs: 900_000 },
+      tenantId: tenantA,
     });
     expect(rotated.decision).toBe('rotate');
     expect(
@@ -179,8 +181,46 @@ describe('DX-137 · sesiones (int)', () => {
       tokenVersion: 0,
       graceMs: 30_000,
       idle: { idleMinutes: 60, accessTtlMs: 900_000 },
+      tenantId: tenantA,
     });
     expect(idle.decision).toBe('idle');
+    expect(
+      (await raw.refreshSession.findUniqueOrThrow({ where: { id: sid } }))
+        .revokedAt,
+    ).not.toBeNull();
+  });
+
+  it('una familia sin fila de clínica (anterior a DX-137) la recibe en su refresh y «cerrar todas» la alcanza', async () => {
+    const sid = randomUUID();
+    const jti = randomUUID();
+    // Como las nacidas antes de DX-137: solo refresh_sessions, sin clínica.
+    await raw.refreshSession.create({
+      data: { id: sid, userId, currentJti: jti, expiresAt: FAR },
+    });
+    const rotated = await auth.rotateRefreshSession({
+      sid,
+      userId,
+      presentedJti: jti,
+      presentedExpiresAt: FAR,
+      nextJti: randomUUID(),
+      nextExpiresAt: FAR,
+      tokenVersion: 0,
+      graceMs: 30_000,
+      idle: { idleMinutes: 60, accessTtlMs: 900_000 },
+      tenantId: tenantA,
+    });
+    expect(rotated.decision).toBe('rotate');
+    expect(
+      await raw.clinicSession.findUnique({ where: { sessionId: sid } }),
+    ).toMatchObject({ tenantId: tenantA });
+    const closed = await repo.revokeClinicSessions({
+      tenantId: tenantA,
+      userId,
+      selection: { kind: 'all-except', sessionId: null },
+      now: new Date(),
+      audit: audit(tenantA, userId),
+    });
+    expect(closed).toBeGreaterThanOrEqual(1);
     expect(
       (await raw.refreshSession.findUniqueOrThrow({ where: { id: sid } }))
         .revokedAt,
@@ -292,15 +332,19 @@ describe('DX-137 · sesiones (int)', () => {
       },
     });
     const inB = await open(tenantB, 'Chrome en Android');
+    await raw.userToken.create({
+      data: {
+        userId,
+        purpose: 'PASSWORD_RESET',
+        tokenHash: 'b'.repeat(64),
+        expiresAt: new Date(Date.now() + 1_800_000),
+      },
+    });
     const consume = () =>
       repo.consumeSessionAlert({
         tenantId: tenantA,
         tokenHash,
         now: new Date(),
-        passwordReset: {
-          tokenHash: 'b'.repeat(64),
-          expiresAt: new Date(Date.now() + 1_800_000),
-        },
         audit: ({ sessionsClosed }) => ({
           ...audit(tenantA, userId)(sessionsClosed),
           metadata: { reason: 'SESSION_NOT_ME', sessionsClosed },
@@ -312,7 +356,6 @@ describe('DX-137 · sesiones (int)', () => {
         tenantId: tenantB,
         tokenHash,
         now: new Date(),
-        passwordReset: { tokenHash: 'c'.repeat(64), expiresAt: FAR },
         audit: () => audit(tenantB, userId)(0),
       }),
     ).resolves.toBeNull();
@@ -324,11 +367,11 @@ describe('DX-137 · sesiones (int)', () => {
       (await raw.refreshSession.findUniqueOrThrow({ where: { id: inB } }))
         .revokedAt,
     ).not.toBeNull();
+    // El enlace de restablecimiento que pudo pedir quien entró ya no vale, y
+    // el repositorio no emite ninguno (lo envía el caso de uso por email).
     expect(
-      await raw.userToken.count({
-        where: { userId, tokenHash: 'b'.repeat(64), invalidatedAt: null },
-      }),
-    ).toBe(1);
+      await raw.userToken.count({ where: { userId, invalidatedAt: null } }),
+    ).toBe(0);
     // La guarda de la BD: un enlace usado no se vuelve a tocar.
     await expect(
       raw.sessionAlert.update({

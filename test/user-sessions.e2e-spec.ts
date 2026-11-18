@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
@@ -48,6 +50,12 @@ interface SessionBody {
   firstSeenAt: string;
   lastSeenAt: string;
   current: boolean;
+}
+
+function claimsOf(jwt: string): Record<string, unknown> {
+  return JSON.parse(
+    Buffer.from(jwt.split('.')[1], 'base64url').toString('utf8'),
+  ) as Record<string, unknown>;
 }
 
 async function cleanup(): Promise<void> {
@@ -409,9 +417,9 @@ describe('DX-137 · sesiones (e2e)', () => {
       .set('X-Tenant-Host', hostFor(SUB_A))
       .send({ token })
       .expect(200);
-    const resetToken = (res.body as { passwordResetToken: string | null })
-      .passwordResetToken;
-    expect(resetToken).toEqual(expect.any(String));
+    // Ningún token en la respuesta: solo un mensaje fijo.
+    expect(Object.keys(res.body as object)).toEqual(['message']);
+    expect(JSON.stringify(res.body)).not.toMatch(/[A-Za-z0-9_-]{40,}/);
     expect(JSON.stringify(res.body)).not.toContain(fresh.email);
 
     // Todas sus sesiones, cerradas.
@@ -422,11 +430,19 @@ describe('DX-137 · sesiones (e2e)', () => {
       .set('X-Tenant-Host', hostFor(SUB_A))
       .send({ token })
       .expect(404);
-    // El enlace de restablecimiento vale.
+    // El enlace para cambiar la contraseña llega al EMAIL de la cuenta.
+    const reset = await mailer.waitFor(
+      fresh.email,
+      /\/restablecer\/([A-Za-z0-9_-]{43})/,
+    );
+    const resetMails = await raw.emailOutbox.count({
+      where: { tenantId: tenantA, template: 'PASSWORD_RESET' },
+    });
+    expect(resetMails).toBeGreaterThanOrEqual(1);
     const check = await http()
       .post('/api/v1/auth/reset-password/check')
       .set('X-Tenant-Host', hostFor(SUB_A))
-      .send({ token: resetToken })
+      .send({ token: reset[1] })
       .expect(200);
     expect((check.body as { status: string }).status).toBe('VALID');
 
@@ -435,6 +451,35 @@ describe('DX-137 · sesiones (e2e)', () => {
     expect(events[0].actorUserId).toBe(fresh.userId);
     expect(events[0].ip).toBe('127.0.0.0/24');
     expect(Number(events[0].metadata.sessionsClosed)).toBeGreaterThanOrEqual(2);
+  });
+
+  it('un refresh sin `sid` (anterior a las familias) queda en la lista y «cerrar todas las demás» lo corta', async () => {
+    const legacyUser = await seedMember(tenantA, 'legado');
+    const keep = await login(SUB_A, legacyUser.email, CHROME_WINDOWS);
+    const other = await login(SUB_A, legacyUser.email, FIREFOX_LINUX);
+    const {
+      sid: _sid,
+      iat: _iat,
+      jti: _jti,
+      ...legacyClaims
+    } = claimsOf(other.refreshToken);
+    const legacy = await new JwtService({}).signAsync(legacyClaims, {
+      secret: process.env.JWT_REFRESH_SECRET,
+      jwtid: randomUUID(),
+    });
+    // Revoca la familia de la que salió, para que solo quede la del legado.
+    await authed('post', '/me/sessions/revoke-others', keep.accessToken).expect(
+      200,
+    );
+    const renewed = (await refresh(SUB_A, legacy).expect(201)).body as Tokens;
+    const before = await authed('get', '/me/sessions', keep.accessToken).expect(
+      200,
+    );
+    expect((before.body as SessionBody[]).length).toBe(2);
+    await authed('post', '/me/sessions/revoke-others', keep.accessToken).expect(
+      200,
+    );
+    await refresh(SUB_A, renewed.refreshToken).expect(401);
   });
 
   it('un token mal formado o inventado da el mismo 404', async () => {

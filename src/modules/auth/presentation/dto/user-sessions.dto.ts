@@ -48,10 +48,8 @@ export class NotMeDto {
 
 export class NotMeResultDto {
   @ApiProperty({
-    type: String,
-    nullable: true,
     description:
-      'Token del enlace de restablecimiento (`/restablecer/<token>`) para cambiar la contraseña ya. `null` si la cuenta ya no es miembro activo de esta clínica (las sesiones se cerraron igual).',
+      'Mensaje fijo: las sesiones se cerraron y, si la cuenta sigue activa en la clínica, se envió al EMAIL de la cuenta un enlace para elegir contraseña. La respuesta nunca lleva tokens ni datos de la cuenta.',
   })
-  passwordResetToken!: string | null;
+  message!: string;
 }

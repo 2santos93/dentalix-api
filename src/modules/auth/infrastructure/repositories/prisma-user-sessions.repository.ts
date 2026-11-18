@@ -219,26 +219,16 @@ export class PrismaUserSessionsRepository implements UserSessionsRepository {
         select: { role: true },
       });
       const role = membership?.role ?? null;
-      if (role) {
-        // Como «¿Olvidaste tu contraseña?»: solo vale el último enlace.
-        await tx.userToken.updateMany({
-          where: {
-            userId,
-            purpose: UserTokenPurpose.PASSWORD_RESET,
-            invalidatedAt: null,
-          },
-          data: { invalidatedAt: input.now },
-        });
-        await tx.userToken.create({
-          data: {
-            userId,
-            purpose: UserTokenPurpose.PASSWORD_RESET,
-            tokenHash: input.passwordReset.tokenHash,
-            expiresAt: input.passwordReset.expiresAt,
-            createdAt: input.now,
-          },
-        });
-      }
+      // Un enlace de restablecimiento que pidió quien entró deja de valer; el
+      // nuevo lo envía el caso de uso al email de la cuenta.
+      await tx.userToken.updateMany({
+        where: {
+          userId,
+          purpose: UserTokenPurpose.PASSWORD_RESET,
+          invalidatedAt: null,
+        },
+        data: { invalidatedAt: input.now },
+      });
       const outcome = { userId, role, sessionsClosed };
       await writeAuditEvent(tx, input.audit(outcome));
       return outcome;

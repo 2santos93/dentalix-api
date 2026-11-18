@@ -108,6 +108,13 @@ export interface RotateRefreshSessionInput {
   graceMs: number;
   /** DX-137: cierre por inactividad (`null` = sin él: sesión de plataforma). */
   idle: RefreshIdlePolicy | null;
+  /**
+   * DX-137: clínica de la sesión (`null` = plataforma). Una familia que aún no
+   * tiene su fila de clínica (nacida antes de DX-137 o por la ruta sin `sid`)
+   * la recibe aquí, bajo la RLS del tenant: así «cerrar todas» y el ADMIN la
+   * alcanzan.
+   */
+  tenantId: string | null;
 }
 
 /**

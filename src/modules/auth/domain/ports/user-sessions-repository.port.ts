@@ -79,11 +79,6 @@ export interface ConsumeSessionAlertInput {
   tenantId: string;
   tokenHash: string;
   now: Date;
-  /**
-   * Enlace de restablecimiento (solo su hash) que se emite en la MISMA
-   * transacción si sigue siendo miembro activo de la clínica.
-   */
-  passwordReset: { tokenHash: string; expiresAt: Date };
   audit: (outcome: NotMeOutcome) => AuditEventDraft;
 }
 
@@ -118,8 +113,8 @@ export interface UserSessionsRepository {
   /**
    * Canjea el enlace «No fui yo» (un solo uso, vivo, de esta clínica) y en la
    * MISMA transacción cierra TODAS las sesiones del usuario (`tokenVersion`
-   * +1 y familias revocadas), deja el enlace de restablecimiento si sigue
-   * siendo miembro y audita. `null` = el enlace no vale.
+   * +1 y familias revocadas), deja sin valor los enlaces de restablecimiento
+   * vivos (pudo pedirlos quien entró) y audita. `null` = el enlace no vale.
    */
   consumeSessionAlert(
     input: ConsumeSessionAlertInput,

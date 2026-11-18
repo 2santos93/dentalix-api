@@ -79,13 +79,15 @@ function setup(opts: {
       .fn()
       .mockResolvedValue(opts.rotation ?? { decision: 'rotate' }),
   };
+  const userSessions = { openSession: jest.fn().mockResolvedValue(undefined) };
   const uc = new RefreshUseCase(
     tokens as never,
     repo as never,
     new SessionClaimsService(repo as unknown as AuthRepository),
+    userSessions as never,
     30_000,
   );
-  return { uc, tokens, repo };
+  return { uc, tokens, repo, userSessions };
 }
 
 describe('RefreshUseCase', () => {
@@ -416,6 +418,8 @@ describe('RefreshUseCase', () => {
         nextJti: 'jti-2',
         nextExpiresAt: new Date((EXP + 60) * 1000),
         tokenVersion: 0,
+        // DX-137: la clínica, para enlazar la familia si aún no lo está.
+        tenantId: 't1',
         graceMs: 30_000,
         // DX-137: el cierre por inactividad de la clínica + un TTL de access.
         idle: { idleMinutes: 60, accessTtlMs: 900_000 },
@@ -489,12 +493,17 @@ describe('RefreshUseCase', () => {
     });
 
     it('un refresh sin sid (anterior a las familias) usa la denylist y el par nuevo ya nace en una familia', async () => {
-      const { uc, tokens, repo } = setup({
+      const { uc, tokens, repo, userSessions } = setup({
         state: activeMember(ClinicRole.ADMIN),
       });
 
       await uc.execute({ refreshToken: 'old-ref' });
 
+      // DX-137: la familia nueva queda registrada YA, con su clínica, para
+      // que «cerrar todas» y el ADMIN la alcancen antes de su primer refresh.
+      expect(userSessions.openSession).toHaveBeenCalledWith(
+        expect.objectContaining({ sid: 'fam-1', userId: 'u1', tenantId: 't1' }),
+      );
       expect(repo.consumeRefreshToken).toHaveBeenCalled();
       expect(repo.rotateRefreshSession).not.toHaveBeenCalled();
       // Sin opciones: TokenService firma con un sid nuevo.
