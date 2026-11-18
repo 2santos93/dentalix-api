@@ -45,14 +45,19 @@ interface QuoteBody {
   items: { id: string; procedure: string }[];
   presentation: {
     language: string;
-    items: { itemId: string; visit: number; label: string }[];
+    items: {
+      itemId: string;
+      visit: number;
+      label: string;
+      language: string;
+    }[];
   };
 }
 interface DocumentBody {
   budget: { items: { procedure: string }[] } | null;
   presentation: {
     language: string;
-    items: { index: number; visit: number; label: string }[];
+    items: { index: number; visit: number; label: string; language: string }[];
     visitOrganization: {
       visit: number;
       label: string | null;
@@ -138,6 +143,7 @@ describe('Presentación del plan al paciente (e2e, DX-560)', () => {
   async function sendAndOpen(
     planId: string,
     secondCurrency?: string,
+    beforeOpening?: () => Promise<void>,
   ): Promise<DocumentBody> {
     mailer.clear();
     await as()
@@ -150,6 +156,7 @@ describe('Presentación del plan al paciente (e2e, DX-560)', () => {
       .expect(201);
     await dispatcher.whenIdle();
     const token = (await mailer.waitFor(EMAIL, TOKEN_IN_TEXT))[1];
+    await beforeOpening?.();
     mailer.clear();
     await pub.post(`${token}/code`).expect(200);
     await dispatcher.whenIdle();
@@ -310,11 +317,12 @@ describe('Presentación del plan al paciente (e2e, DX-560)', () => {
     expect(es.presentation).toEqual({
       language: 'es',
       items: [
-        { itemId: items[0], visit: 1, label: DESCRIPTION_ES },
+        { itemId: items[0], visit: 1, label: DESCRIPTION_ES, language: 'es' },
         {
           itemId: items[1],
           visit: 2,
           label: 'Restauración con resina compuesta',
+          language: 'es',
         },
       ],
     });
@@ -333,9 +341,19 @@ describe('Presentación del plan al paciente (e2e, DX-560)', () => {
       expect(en.presentation).toEqual({
         language: 'en',
         items: [
-          { itemId: items[0], visit: 1, label: DESCRIPTION_EN },
+          {
+            itemId: items[0],
+            visit: 1,
+            label: DESCRIPTION_EN,
+            language: 'en',
+          },
           // Sin descripción: el nombre del catálogo en inglés.
-          { itemId: items[1], visit: 2, label: 'Composite filling' },
+          {
+            itemId: items[1],
+            visit: 2,
+            label: 'Composite filling',
+            language: 'en',
+          },
         ],
       });
       expect(en.contentHash).toBe(es.contentHash);
@@ -348,54 +366,60 @@ describe('Presentación del plan al paciente (e2e, DX-560)', () => {
     }
   });
 
-  it('el enlace de aceptación congela la presentación con la segunda moneda de la sede (VES) y su tasa guardada', async () => {
+  it('el enlace de aceptación congela la presentación con la segunda moneda de la sede (VES) y su tasa guardada; editar el catálogo tras enviar no lo invalida ni cambia el texto', async () => {
     const { planId } = await presentedPlan();
-    const doc = await sendAndOpen(planId);
-    expect(doc.presentation).toMatchObject({
-      language: 'es',
-      items: [
-        { index: 0, visit: 1, label: DESCRIPTION_ES },
-        { index: 1, visit: 2, label: 'Restauración con resina compuesta' },
-      ],
-      visitOrganization: [
-        { visit: 1, label: null, minDaysAfterPrevious: 0 },
-        { visit: 2, label: null, minDaysAfterPrevious: 0 },
-      ],
-      secondCurrency: {
-        currency: 'VES',
-        fromPerBase: 1,
-        toPerBase: 1,
-        source: 'AUTOMATIC',
-      },
+    // Entre el envío y la apertura, la clínica cambia la descripción: el
+    // enlace sigue valiendo (budgetStillMatches: no está en lo sellado) y el
+    // paciente ve el texto congelado.
+    const doc = await sendAndOpen(planId, undefined, async () => {
+      await as()
+        .patch(`/catalog/items/${describedId}`, {
+          patientDescription: [{ language: 'es', text: 'Otro texto.' }],
+        })
+        .expect(200);
     });
-    expect(doc.presentation?.secondCurrency?.date).toMatch(
-      /^\d{4}-\d{2}-\d{2}$/,
-    );
-    // La foto firmada no cambia: sigue con el nombre del catálogo.
-    expect(doc.budget?.items.map((i) => i.procedure)).toEqual([
-      'Tartrectomía',
-      'Restauración con resina compuesta',
-    ]);
-
-    // Congelada: cambiar el catálogo después no cambia lo que ve el paciente.
-    await as()
-      .patch(`/catalog/items/${describedId}`, {
-        patientDescription: [{ language: 'es', text: 'Otro texto.' }],
-      })
-      .expect(200);
-    const row = await raw.signatureRequest.findFirstOrThrow({
-      where: { treatmentPlanId: planId, revokedAt: null },
-      select: { budgetPresentation: true },
-    });
-    expect(JSON.stringify(row.budgetPresentation)).toContain(DESCRIPTION_ES);
-    await as()
-      .patch(`/catalog/items/${describedId}`, {
-        patientDescription: [
-          { language: 'es', text: DESCRIPTION_ES },
-          { language: 'en', text: DESCRIPTION_EN },
+    try {
+      expect(doc.presentation).toMatchObject({
+        language: 'es',
+        items: [
+          { index: 0, visit: 1, label: DESCRIPTION_ES, language: 'es' },
+          {
+            index: 1,
+            visit: 2,
+            label: 'Restauración con resina compuesta',
+            language: 'es',
+          },
         ],
-      })
-      .expect(200);
+        visitOrganization: [
+          { visit: 1, label: null, minDaysAfterPrevious: 0 },
+          { visit: 2, label: null, minDaysAfterPrevious: 0 },
+        ],
+        secondCurrency: {
+          currency: 'VES',
+          fromPerBase: 1,
+          toPerBase: 1,
+          source: 'AUTOMATIC',
+        },
+      });
+      expect(JSON.stringify(doc.presentation)).not.toContain('Otro texto');
+      expect(doc.presentation?.secondCurrency?.date).toMatch(
+        /^\d{4}-\d{2}-\d{2}$/,
+      );
+      // La foto firmada no cambia: sigue con el nombre del catálogo.
+      expect(doc.budget?.items.map((i) => i.procedure)).toEqual([
+        'Tartrectomía',
+        'Restauración con resina compuesta',
+      ]);
+    } finally {
+      await as()
+        .patch(`/catalog/items/${describedId}`, {
+          patientDescription: [
+            { language: 'es', text: DESCRIPTION_ES },
+            { language: 'en', text: DESCRIPTION_EN },
+          ],
+        })
+        .expect(200);
+    }
   });
 
   it('sede en la moneda del plan: sin elegir no hay bloque; la segunda elegida (VES) sí, y una inválida es 400', async () => {

@@ -137,6 +137,7 @@ describe('budget presentation (DX-560)', () => {
         index,
         visit: 1,
         label: item.procedure,
+        language: 'es',
       })),
     );
   });
@@ -149,7 +150,11 @@ describe('budget presentation (DX-560)', () => {
     };
 
     it('acepta la forma guardada (con o sin segunda moneda)', () => {
-      expect(parseBudgetPresentation(good, 1)).toEqual(good);
+      // Sin `items[].language` (guardada antes): el de la presentación.
+      expect(parseBudgetPresentation(good, 1)).toEqual({
+        ...good,
+        items: [{ index: 0, visit: 1, label: 'Limpieza', language: 'es' }],
+      });
       const withSecond = {
         ...good,
         secondCurrency: {
@@ -160,7 +165,11 @@ describe('budget presentation (DX-560)', () => {
           date: '2026-11-17',
         },
       };
-      expect(parseBudgetPresentation(withSecond, 1)).toEqual(withSecond);
+      const withLanguage = {
+        ...withSecond,
+        items: [{ index: 0, visit: 1, label: 'Limpieza', language: 'en' }],
+      };
+      expect(parseBudgetPresentation(withLanguage, 1)).toEqual(withLanguage);
     });
 
     it.each([

@@ -816,21 +816,18 @@ export async function readPlanQuoteSource(
       language: presentationLanguage(patientLanguage),
       items: plan.items.map((i) => {
         const entry = catalogById.get(i.catalogItemId);
-        return {
-          itemId: i.id,
-          visit: i.visit,
-          label: patientProcedureLabel(
-            entry
-              ? {
-                  ...entry,
-                  patientDescription: localizedTextMapFromJson(
-                    entry.patientDescription,
-                  ),
-                }
-              : null,
-            patientLanguage,
-          ),
-        };
+        const { label, language } = patientProcedureLabel(
+          entry
+            ? {
+                ...entry,
+                patientDescription: localizedTextMapFromJson(
+                  entry.patientDescription,
+                ),
+              }
+            : null,
+          patientLanguage,
+        );
+        return { itemId: i.id, visit: i.visit, label, language };
       }),
     },
     visitOrganization: plan.items.map((i) => ({

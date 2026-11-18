@@ -100,36 +100,65 @@ describe('patientProcedureLabel (DX-560)', () => {
     },
   };
 
-  it('la descripción en el idioma exacto, si no en el base, si no en español', () => {
-    expect(patientProcedureLabel(item, 'pt-BR')).toBe(
-      'Limpeza profunda das gengivas.',
-    );
-    expect(patientProcedureLabel(item, 'en')).toBe(
-      'Limpieza profunda de las encías.',
-    );
+  it('1. la descripción en el idioma exacto', () => {
+    expect(patientProcedureLabel(item, 'pt-BR')).toEqual({
+      label: 'Limpeza profunda das gengivas.',
+      language: 'pt-BR',
+    });
+  });
+
+  it('2. la descripción en el idioma base', () => {
     expect(
       patientProcedureLabel(
         { ...item, patientDescription: { en: 'Deep cleaning.' } },
         'en-GB',
       ),
-    ).toBe('Deep cleaning.');
-    expect(patientProcedureLabel(item, null)).toBe(
-      'Limpieza profunda de las encías.',
-    );
+    ).toEqual({ label: 'Deep cleaning.', language: 'en' });
   });
 
-  it('sin descripción: el nombre del catálogo en su idioma, si no labelEs', () => {
+  it('3. el nombre del catálogo en su idioma gana a la descripción en español', () => {
+    expect(patientProcedureLabel(item, 'en')).toEqual({
+      label: 'Scaling',
+      language: 'en',
+    });
+    expect(patientProcedureLabel(item, 'en-US')).toEqual({
+      label: 'Scaling',
+      language: 'en',
+    });
+  });
+
+  it('4. sin nombre en su idioma, la descripción en español', () => {
+    expect(patientProcedureLabel(item, 'pt')).toEqual({
+      label: 'Limpieza profunda de las encías.',
+      language: 'es',
+    });
+    expect(patientProcedureLabel({ ...item, labelEn: '  ' }, 'en')).toEqual({
+      label: 'Limpieza profunda de las encías.',
+      language: 'es',
+    });
+    expect(patientProcedureLabel(item, null)).toEqual({
+      label: 'Limpieza profunda de las encías.',
+      language: 'es',
+    });
+  });
+
+  it('5. sin descripción en español, labelEs', () => {
     const bare = { ...item, patientDescription: {} };
-    expect(patientProcedureLabel(bare, 'en-US')).toBe('Scaling');
-    expect(patientProcedureLabel(bare, 'pt')).toBe('Tartrectomía');
-    expect(patientProcedureLabel(bare, 'es')).toBe('Tartrectomía');
-    expect(patientProcedureLabel({ ...bare, labelEn: '  ' }, 'en')).toBe(
-      'Tartrectomía',
-    );
+    expect(patientProcedureLabel(bare, 'fr')).toEqual({
+      label: 'Tartrectomía',
+      language: 'es',
+    });
+    expect(patientProcedureLabel(bare, 'es-419')).toEqual({
+      label: 'Tartrectomía',
+      language: 'es',
+    });
   });
 
-  it('nunca un código ni un id: sin ítem, «Procedimiento»', () => {
-    expect(patientProcedureLabel(null, 'es')).toBe(PATIENT_LABEL_FALLBACK);
+  it('6. nunca un código ni un id: sin ítem, «Procedimiento»', () => {
+    expect(patientProcedureLabel(null, 'es')).toEqual({
+      label: PATIENT_LABEL_FALLBACK,
+      language: 'es',
+    });
     expect(PATIENT_LABEL_FALLBACK).toBe('Procedimiento');
   });
 

@@ -2,6 +2,7 @@ import { planPresentationOf } from '../../treatment-plans/application/use-cases/
 import type { QuoteContent } from '../../treatment-plans/domain/plan-quote';
 import type { PlanQuoteSource } from '../../treatment-plans/domain/ports/plan-quote-repository.port';
 import { civilDateIn } from '../../../shared/time/civil-day';
+import { CLINIC_LANGUAGE } from '../../../shared/i18n/patient-language';
 
 /**
  * DX-560: cómo se presenta al paciente el presupuesto de un enlace de
@@ -14,8 +15,11 @@ import { civilDateIn } from '../../../shared/time/civil-day';
 export interface BudgetPresentation {
   /** Idioma del paciente o, sin él, `es`. */
   language: string;
-  /** `index`: posición del ítem en `budgetContent.items`. */
-  items: { index: number; visit: number; label: string }[];
+  /**
+   * `index`: posición del ítem en `budgetContent.items`; `language`: idioma
+   * en que sale `label`.
+   */
+  items: { index: number; visit: number; label: string; language: string }[];
   /** Una fila por visita, en orden: su etiqueta y los días tras la anterior. */
   visitOrganization: {
     visit: number;
@@ -138,6 +142,7 @@ export function budgetPresentationItems(
       index,
       visit: shown?.visit ?? 1,
       label: shown?.label ?? item.procedure,
+      language: shown?.language ?? CLINIC_LANGUAGE,
     };
   });
   const organization = new Map<
@@ -245,6 +250,8 @@ export function parseBudgetPresentation(
       index: item.index as number,
       visit: item.visit as number,
       label: item.label,
+      // Guardadas antes de `items[].language`: el idioma de la presentación.
+      language: typeof item.language === 'string' ? item.language : language,
     });
   }
   // Un ítem por línea de la foto, en su orden: si no, no describe lo enviado.

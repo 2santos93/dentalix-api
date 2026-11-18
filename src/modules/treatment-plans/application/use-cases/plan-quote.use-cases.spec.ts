@@ -96,6 +96,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
         itemId: i.id,
         visit: 1,
         label: i.procedure,
+        language: 'es',
       })),
     });
 
@@ -107,6 +108,7 @@ describe('GetPlanQuoteUseCase (DX-012)', () => {
         itemId: i.id,
         visit: index + 1,
         label: `Patient text ${index + 1}`,
+        language: 'en',
       })),
     };
     Object.assign(source, { presentation });

@@ -1,11 +1,10 @@
 import {
   localizedTextEntries,
-  resolveLocalizedText,
   type LocalizedTextMap,
 } from '../../../shared/i18n/localized-text';
 import {
   CLINIC_LANGUAGE,
-  resolveCatalogLanguage,
+  primaryLanguage,
 } from '../../../shared/i18n/patient-language';
 import {
   patientPlainTextFromEntries,
@@ -106,34 +105,64 @@ export interface PatientLabelSource {
 /** «Procedimiento»: un ítem sin catálogo (nunca un código ni un id). */
 export const PATIENT_LABEL_FALLBACK = 'Procedimiento';
 
+/** El texto para el paciente y el idioma en que sale (etiqueta BCP 47). */
+export interface PatientProcedureLabel {
+  label: string;
+  language: string;
+}
+
+/** El nombre del catálogo en otro idioma que el español, si lo tiene. */
+function catalogLabelIn(
+  item: PatientLabelSource,
+  language: string,
+): string | null {
+  const label =
+    language === 'en' ? item.labelEn : language === 'pt' ? item.labelPt : null;
+  const trimmed = label?.trim();
+  return trimmed ? trimmed : null;
+}
+
 /**
- * El texto que lee el paciente para un procedimiento, en su idioma:
- *  1. la descripción para el paciente en su idioma exacto, si no en su idioma
- *     base (`en-GB` → `en`), si no en español (la regla de DX-497/DX-564);
- *  2. si no hay ninguna, el nombre del catálogo en su idioma con la misma
- *     regla (`labelEn` / `labelPt` si existen; si no `labelEs`).
- * Nunca un código ni un id: sin ítem de catálogo, «Procedimiento».
+ * El texto que lee el paciente para un procedimiento, con el idioma en que
+ * sale (DX-560, revisión: el nombre en su idioma gana a la descripción en
+ * otro):
+ *  1. la descripción en su idioma exacto (`pt-BR`);
+ *  2. la descripción en su idioma base (`en-GB` → `en`);
+ *  3. el nombre del catálogo en ese idioma (`labelEn` / `labelPt`), si existe;
+ *  4. la descripción en español;
+ *  5. `labelEs`;
+ *  6. «Procedimiento» (sin ítem de catálogo). Nunca un código ni un id.
+ * Sin idioma preferido, el del paciente es el español (4 → 5 → 6).
  */
 export function patientProcedureLabel(
   item: PatientLabelSource | null | undefined,
   patientLanguage: string | null | undefined,
-): string {
-  if (!item) return PATIENT_LABEL_FALLBACK;
-  const described = resolveLocalizedText(
-    item.patientDescription,
-    patientLanguage,
-  );
-  if (described) return described.text;
-  const labels: Record<string, string> = { [CLINIC_LANGUAGE]: item.labelEs };
-  if (item.labelEn?.trim()) labels.en = item.labelEn;
-  if (item.labelPt?.trim()) labels.pt = item.labelPt;
-  const { language } = resolveCatalogLanguage(
-    patientLanguage,
-    Object.keys(labels),
-    CLINIC_LANGUAGE,
-  );
-  const label = labels[language]?.trim();
-  return label ? label : item.labelEs.trim() || PATIENT_LABEL_FALLBACK;
+): PatientProcedureLabel {
+  if (!item) {
+    return { label: PATIENT_LABEL_FALLBACK, language: CLINIC_LANGUAGE };
+  }
+  const description = (language: string): string | null => {
+    const text = item.patientDescription[language];
+    return typeof text === 'string' && text.trim() !== '' ? text : null;
+  };
+  if (patientLanguage && patientLanguage !== CLINIC_LANGUAGE) {
+    const exact = description(patientLanguage);
+    if (exact) return { label: exact, language: patientLanguage };
+    const base = primaryLanguage(patientLanguage);
+    if (base !== CLINIC_LANGUAGE) {
+      const baseText = base !== patientLanguage ? description(base) : null;
+      if (baseText) return { label: baseText, language: base };
+      const named = catalogLabelIn(item, base);
+      if (named) return { label: named, language: base };
+    }
+  }
+  const spanish = description(CLINIC_LANGUAGE);
+  if (spanish) return { label: spanish, language: CLINIC_LANGUAGE };
+  const labelEs = item.labelEs.trim();
+  return {
+    label: labelEs || PATIENT_LABEL_FALLBACK,
+    language: CLINIC_LANGUAGE,
+  };
 }
 
 /** El idioma de la presentación: el del paciente o, sin preferencia, el de la clínica. */

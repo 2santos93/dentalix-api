@@ -146,10 +146,15 @@ class PublicPresentationItemDto {
   @ApiProperty() visit!: number;
   @ApiProperty({
     description:
-      'Texto para el paciente en su idioma (descripción del catálogo o, sin ella, su nombre en ese idioma); nunca un código ni un id.',
+      'Texto para el paciente (descripción en su idioma, nombre del catálogo en su idioma, descripción en español o labelEs); nunca un código ni un id.',
     example: 'Limpieza profunda de las encías.',
   })
   label!: string;
+  @ApiProperty({
+    example: 'es',
+    description: 'Idioma en que sale `label` (BCP 47)',
+  })
+  language!: string;
 }
 
 /** DX-560: una visita del plan. */
@@ -184,7 +189,12 @@ class PublicPresentationSecondCurrencyDto {
  * lo firmado (la firma cubre solo `budget`).
  */
 export class PublicBudgetPresentationDto {
-  @ApiProperty({ example: 'es' }) language!: string;
+  @ApiProperty({
+    example: 'es',
+    description:
+      'Idioma preferido del paciente; el de cada texto va en `items[].language`.',
+  })
+  language!: string;
   @ApiProperty({ type: [PublicPresentationItemDto] })
   items!: PublicPresentationItemDto[];
   @ApiProperty({ type: [PublicPresentationVisitDto] })

@@ -78,10 +78,16 @@ export interface PlanAcceptanceRemoteEvidence {
  * ese idioma; nunca un código ni un id). Presentarlo no emite el presupuesto.
  */
 export interface PlanPresentation {
-  /** Idioma del paciente (`patients.preferredLanguage`) o, sin él, `es`. */
+  /**
+   * Idioma PREFERIDO del paciente (`patients.preferredLanguage`) o, sin él,
+   * `es`. El idioma en que sale cada texto es `items[].language`.
+   */
   language: string;
-  /** En el orden de los ítems del presupuesto. */
-  items: { itemId: string; visit: number; label: string }[];
+  /**
+   * En el orden de los ítems del presupuesto. `language`: idioma en que sale
+   * `label` (puede caer a `es` aunque el paciente prefiera otro).
+   */
+  items: { itemId: string; visit: number; label: string; language: string }[];
 }
 
 /**

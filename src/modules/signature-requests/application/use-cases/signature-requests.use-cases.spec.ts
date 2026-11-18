@@ -1495,6 +1495,7 @@ describe('DX-560: presentación congelada del enlace', () => {
           itemId: i.id,
           visit: n + 1,
           label: `Patient text ${n + 1}`,
+          language: n === 0 ? 'en' : 'es',
         })),
       },
       visitOrganization: budget.quote.items.map((i, n) => ({
@@ -1509,8 +1510,8 @@ describe('DX-560: presentación congelada del enlace', () => {
     expect(row.budgetPresentation).toEqual({
       language: 'en',
       items: [
-        { index: 0, visit: 1, label: 'Patient text 1' },
-        { index: 1, visit: 2, label: 'Patient text 2' },
+        { index: 0, visit: 1, label: 'Patient text 1', language: 'en' },
+        { index: 1, visit: 2, label: 'Patient text 2', language: 'es' },
       ],
       visitOrganization: [
         { visit: 1, label: 'Urgencia', minDaysAfterPrevious: 0 },

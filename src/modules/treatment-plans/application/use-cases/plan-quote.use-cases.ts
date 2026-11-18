@@ -371,6 +371,7 @@ export function planPresentationOf(source: PlanQuoteSource): PlanPresentation {
       itemId: i.id,
       visit: visits.get(i.id) ?? 1,
       label: i.procedure,
+      language: CLINIC_LANGUAGE,
     })),
   };
 }
