@@ -1,4 +1,12 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  RECALL_LIST_FORBIDDEN_MESSAGE,
+  canRecordRecallContacts,
+} from '../domain/recall-access';
 import type { Prisma, RecallContactChannel } from '@prisma/client';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
@@ -76,9 +84,9 @@ export const BOOKING_RECALL_NOT_OF_PATIENT_MESSAGE =
  * DX-465: agendar desde la lista de recall. Para ESE recall el «Agendó» lleva
  * el canal y la nota de recepción y se escribe aunque su tipo no cierre con
  * el de la cita (como el POST suelto de antes). Se valida aquí, en la
- * transacción: del paciente (400), existente y de un tipo vivo (404) y de
- * una sede permitida (`assertLocationAllowed`, 403); si lanza, no se crea la
- * cita.
+ * transacción: rol que registra contactos de recall (403), recall activo,
+ * existente y de un tipo vivo (404), del paciente (400) y de una sede
+ * permitida (`assertLocationAllowed`, 403); si lanza, no se crea la cita.
  */
 export interface RequestedRecallContact {
   recallId: string;
@@ -106,7 +114,13 @@ export async function recallOnAppointmentBookedInTx(
 ): Promise<number> {
   const requested = input.actor ? input.requested : undefined;
   let requestedHome: string | null = null;
-  if (requested) {
+  if (requested && input.actor) {
+    // Revisión de seguridad: el «Agendó» con canal y nota es un contacto de
+    // recall: solo quien los registra (ADMIN, RECEPTION), con el mismo 403
+    // que /recall, antes de mirar el recall (no revela si existe).
+    if (!canRecordRecallContacts(input.actor.actor.role)) {
+      throw new ForbiddenException(RECALL_LIST_FORBIDDEN_MESSAGE);
+    }
     const rows = await tx.$queryRaw<
       { id: string; patientId: string; homeLocationId: string }[]
     >`
@@ -122,7 +136,8 @@ export async function recallOnAppointmentBookedInTx(
           ON lo."tenantId" = pr."tenantId"
          AND lo."id" = coalesce(pr."visitLocationId", pr."locationId")
        WHERE pr."tenantId" = ${input.tenantId}::uuid
-         AND pr."id" = ${requested.recallId}::uuid`;
+         AND pr."id" = ${requested.recallId}::uuid
+         AND pr."active"`;
     const row = rows[0];
     if (!row) throw new NotFoundException(BOOKING_RECALL_NOT_FOUND_MESSAGE);
     if (row.patientId !== input.patientId) {

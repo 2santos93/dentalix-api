@@ -167,7 +167,7 @@ export class CreateAppointmentDto {
   @ApiPropertyOptional({
     type: AppointmentRecallContactDto,
     description:
-      'DX-465: agendar desde la lista de recall. En la MISMA transacción, el «Agendó» de ese recall con este canal y esta nota (y el ciclo de intentos cerrado), aunque su tipo no cierre con el tipo de esta cita. El recall tiene que ser del paciente (si no, 400; inexistente, 404) y de una sede permitida (403). Los demás recalls que cierre la cita siguen con el canal del último contacto y sin nota.',
+      'DX-465: agendar desde la lista de recall. En la MISMA transacción, el «Agendó» de ese recall con este canal y esta nota (y el ciclo de intentos cerrado), aunque su tipo no cierre con el tipo de esta cita. Solo ADMIN y RECEPTION (los que registran contactos de recall; si no, 403 «Tu rol no gestiona la lista de recall: es para administración y recepción.»). El recall tiene que estar activo y existir (si no, 404), ser del paciente (si no, 400) y de una sede permitida (403). En cualquier caso, no se crea la cita. Los demás recalls que cierre la cita siguen con el canal del último contacto y sin nota.',
   })
   @IsOptional()
   @ValidateNested()

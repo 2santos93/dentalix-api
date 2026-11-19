@@ -34,6 +34,7 @@ import {
 import { ClinicRole, RecallKind } from '@prisma/client';
 import type { Response } from 'express';
 import { RateLimit } from '../../../shared/security/rate-limit.decorator';
+import { RECALL_LIST_FORBIDDEN_MESSAGE } from '../domain/recall-access';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import {
@@ -111,8 +112,7 @@ import {
   UpdateRecallTypeDto,
 } from './dto/recall.dto';
 
-export const RECALL_LIST_FORBIDDEN_MESSAGE =
-  'Tu rol no gestiona la lista de recall: es para administración y recepción.';
+export { RECALL_LIST_FORBIDDEN_MESSAGE };
 export const RECALL_INTERVAL_FORBIDDEN_MESSAGE =
   'Solo el personal clínico fija o pausa el recall de un paciente.';
 export const RECALL_DEFAULT_FORBIDDEN_MESSAGE =

@@ -805,6 +805,63 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
           message: 'Recall no encontrado.',
         });
       }
+      // Revisión de seguridad: un recall inactivo (retirado) tampoco.
+      const inactive = await seedRecall(a);
+      await raw.patientRecall.update({
+        where: { id: inactive.recallId },
+        data: { active: false },
+      });
+      const apptInactive = await appointmentOf(
+        a,
+        inactive.patientId,
+        a.appointmentTypeId,
+      );
+      await expect(
+        bookFromRecall(
+          a,
+          inactive.patientId,
+          apptInactive,
+          a.appointmentTypeId,
+          {
+            recallId: inactive.recallId,
+            channel: 'CALL',
+            note: 'No debería quedar',
+          },
+        ),
+      ).rejects.toMatchObject({
+        status: 404,
+        message: 'Recall no encontrado.',
+      });
+      // Y un rol que no registra contactos de recall: 403 antes de mirar nada.
+      await expect(
+        inClinic(a, () =>
+          prisma.runWithTenant((tx) =>
+            recallOnAppointmentBookedInTx(tx, {
+              tenantId: a.tenantId,
+              patientId: otherPatient.patientId,
+              appointmentId: appt,
+              appointmentTypeId: a.appointmentTypeId,
+              actor: {
+                actor: { userId: a.authorId, role: 'DENTIST' },
+                locationId: a.locationId,
+                requestId: null,
+                ip: null,
+                userAgent: null,
+              },
+              requested: {
+                recallId: otherPatient.recallId,
+                channel: 'CALL',
+                note: 'No debería quedar',
+                assertLocationAllowed: () => undefined,
+              },
+            }),
+          ),
+        ),
+      ).rejects.toMatchObject({
+        status: 403,
+        message:
+          'Tu rol no gestiona la lista de recall: es para administración y recepción.',
+      });
       const seen: string[] = [];
       await expect(
         bookFromRecall(

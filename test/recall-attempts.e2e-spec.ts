@@ -710,6 +710,24 @@ describe('Recall con intentos (DX-465, e2e)', () => {
       const res = await book({ recallContact }).expect(400);
       expect(messageOf(res)).toContain(message);
     }
+    // Revisión de seguridad: quien agenda pero no registra contactos de recall
+    // (odontólogo, asistente) recibe el 403 de /recall y no se crea la cita.
+    for (const role of [ClinicRole.DENTIST, ClinicRole.ASSISTANT]) {
+      const denied = await http(role, 'post', '/appointments', principal)
+        .send({
+          patientId,
+          providerId: ids.DENTIST,
+          appointmentTypeId,
+          start: at(day),
+          end: at(day, 10 * 60 + 30),
+          recallContact: { recallId, channel: 'CALL', note: 'Por odontología' },
+        })
+        .expect(403);
+      expect(messageOf(denied)).toBe(
+        'Tu rol no gestiona la lista de recall: es para administración y recepción.',
+      );
+    }
+    expect(await count()).toBe(0);
     // El recall de otro paciente: 400 y la cita no se crea.
     const wrong = await book({
       recallContact: { recallId: otherRecall.recallId, channel: 'CALL' },
