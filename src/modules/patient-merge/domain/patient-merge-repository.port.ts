@@ -76,6 +76,34 @@ export interface MergeResult {
   fieldsFromAbsorbed: MergeFieldGroup[];
 }
 
+/**
+ * DX-266-bis: un paciente ya fusionado en el conservado al que le llegó algo
+ * tarde (una escritura que validó al paciente justo antes de la fusión y
+ * confirmó justo después).
+ */
+export interface MergeLeftover {
+  absorbedPatientId: string;
+  patientCode: string;
+  firstName: string;
+  lastName: string;
+  /** Cuándo se fusionó (lo retiró la fusión). */
+  mergedAt: Date;
+  /** Filas por tabla de la base (`patients`: a quienes recomendó, DX-172). */
+  tables: { table: string; count: number }[];
+  /** Lo mismo agrupado como la vista previa de la fusión. */
+  categories: { category: MergeCategory; count: number }[];
+  total: number;
+}
+
+export interface MergeLeftoversResult {
+  patientId: string;
+  absorbedPatientId: string;
+  /** Vacío si no había nada que mover (y entonces no se audita nada). */
+  moved: { table: string; count: number }[];
+  resolved: { kind: string; count: number }[];
+  revokedLinks: LivePublicLinkCounts & { total: number };
+}
+
 export interface PatientMergeRepository {
   listDuplicates(
     params: ListDuplicatesParams,
@@ -97,4 +125,15 @@ export interface PatientMergeRepository {
     now: Date,
     ctx: AuditRequestContext,
   ): Promise<MergeResult>;
+  /**
+   * DX-266-bis: los absorbidos por `keptId` con algo pendiente (solo los que
+   * tienen algo). null si el conservado no existe o no está vivo.
+   */
+  leftovers(keptId: string): Promise<MergeLeftover[] | null>;
+  /** DX-266-bis: vuelve a pasar al conservado lo que llegó tarde. */
+  moveLeftovers(
+    absorbedId: string,
+    now: Date,
+    ctx: AuditRequestContext,
+  ): Promise<MergeLeftoversResult>;
 }

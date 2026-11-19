@@ -289,6 +289,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /patient-duplicates/dismissals': ADMIN_ONLY,
   'GET /patient-duplicates/merge-preview': ADMIN_ONLY,
   'POST /patient-duplicates/merge': ADMIN_ONLY,
+  'GET /patient-duplicates/merge-leftovers': ADMIN_ONLY,
+  'POST /patient-duplicates/merge-leftovers': ADMIN_ONLY,
   'PATCH /patients/:id/retention': ADMIN_ONLY,
   'POST /patients/:id/partial-suppression': ADMIN_ONLY,
   'GET /patients/retention/expiring': ADMIN_ONLY,

@@ -22,6 +22,7 @@ import {
 import {
   MERGE_CATEGORIES,
   MERGE_CATEGORY_PRIMARY_TABLE,
+  MERGE_TABLE_CATEGORY,
   type MergeCategory,
 } from '../domain/merge-categories';
 import {
@@ -30,6 +31,7 @@ import {
   isMergeBlockerCode,
   mergeHttpError,
   MERGE_PATIENT_NOT_FOUND_MESSAGE,
+  notMergedException,
   type MergeBlockerCode,
 } from '../domain/merge-errors';
 import {
@@ -44,6 +46,8 @@ import type {
   DuplicatePatientSummary,
   ListDuplicatesParams,
   MergeInput,
+  MergeLeftover,
+  MergeLeftoversResult,
   MergePreview,
   MergeResult,
   MergeSide,
@@ -119,6 +123,47 @@ interface SummaryRow {
   email: string | null;
   createdAt: Date;
   lastAttentionAt: Date | null;
+}
+
+interface LeftoverRow {
+  id: string;
+  patientCode: number;
+  firstName: string;
+  lastName: string;
+  mergedAt: Date;
+  pending: Record<string, number>;
+}
+
+type MergeOutcome = {
+  moved: Record<string, number>;
+  resolved: Record<string, number>;
+};
+
+/** `{tabla: n}` → lista ordenada por tabla. */
+function tableCounts(
+  counts: Record<string, number>,
+): { table: string; count: number }[] {
+  return Object.entries(counts)
+    .map(([table, count]) => ({ table, count: Number(count) }))
+    .sort((x, y) => x.table.localeCompare(y.table));
+}
+
+/**
+ * Por categoría de la vista previa, en su orden. `patients` (los recomendados
+ * del absorbido, DX-172) y cualquier tabla sin categoría van a «otros».
+ */
+function categoryCounts(
+  counts: Record<string, number>,
+): { category: MergeCategory; count: number }[] {
+  const totals = new Map<MergeCategory, number>();
+  for (const [table, count] of Object.entries(counts)) {
+    const category = MERGE_TABLE_CATEGORY[table] ?? 'other';
+    totals.set(category, (totals.get(category) ?? 0) + Number(count));
+  }
+  return MERGE_CATEGORIES.filter((c) => totals.has(c)).map((category) => ({
+    category,
+    count: totals.get(category)!,
+  }));
 }
 
 function civilDay(date: Date | null): string | null {
@@ -518,6 +563,131 @@ export class PrismaPatientMergeRepository implements PatientMergeRepository {
           total: totalLivePublicLinks(revokedLinks),
         },
         fieldsFromAbsorbed: groups,
+      };
+    });
+  }
+
+  /**
+   * DX-266-bis: los absorbidos por `keptId` a los que les quedó algo. Primero
+   * los fusionados en él (índice parcial de `mergedIntoId`); solo de esos se
+   * cuentan las filas (`dx_patient_merge_pending`, la lista cerrada de la
+   * fusión). Sin fusionados, una sola consulta.
+   */
+  async leftovers(keptId: string): Promise<MergeLeftover[] | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      if ((await this.liveCount(tx, [keptId])) !== 1) return null;
+      const rows = await tx.$queryRaw<LeftoverRow[]>`
+        SELECT p."id", p."patientCode", p."firstName", p."lastName",
+               p."deletedAt" AS "mergedAt",
+               dx_patient_merge_pending(p."id") AS "pending"
+          FROM "patients" p
+         WHERE p."mergedIntoId" = ${keptId}::uuid AND p."deletedAt" IS NOT NULL
+         ORDER BY p."deletedAt", p."id"`;
+      return rows
+        .filter((r) => Object.keys(r.pending).length > 0)
+        .map((r) => {
+          const tables = tableCounts(r.pending);
+          return {
+            absorbedPatientId: r.id,
+            patientCode: String(r.patientCode),
+            firstName: r.firstName,
+            lastName: r.lastName,
+            mergedAt: r.mergedAt,
+            tables,
+            categories: categoryCounts(r.pending),
+            total: tables.reduce((sum, t) => sum + t.count, 0),
+          };
+        });
+    });
+  }
+
+  async moveLeftovers(
+    absorbedId: string,
+    now: Date,
+    ctx: AuditRequestContext,
+  ): Promise<MergeLeftoversResult> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const [target] = await tx.$queryRaw<{ mergedIntoId: string | null }[]>`
+        SELECT "mergedIntoId" FROM "patients" WHERE "id" = ${absorbedId}::uuid`;
+      if (!target) throw new NotFoundException(MERGE_PATIENT_NOT_FOUND_MESSAGE);
+      if (!target.mergedIntoId) throw notMergedException();
+      const keptId = target.mergedIntoId;
+      // El orden de bloqueo de la fusión: el conservado y DESPUÉS el
+      // absorbido (una fusión bloquea a su pareja y después, al reapuntar
+      // `mergedIntoId`, a los absorbidos de los dos). Con una fusión del
+      // conservado o con otra vuelta a la vez, se ponen en cola.
+      await tx.$queryRaw`
+        SELECT 1 FROM "patients" WHERE "id" = ${keptId}::uuid FOR UPDATE`;
+      const [absorbedRow] = await tx.$queryRaw<
+        { mergedIntoId: string | null }[]
+      >`
+        SELECT "mergedIntoId" FROM "patients"
+         WHERE "id" = ${absorbedId}::uuid FOR UPDATE`;
+      // Mientras esperaba, el conservado se fusionó con otro (el absorbido
+      // ya apunta a ese): que recargue.
+      if (absorbedRow?.mergedIntoId !== keptId) throw inactiveException();
+
+      // Un enlace público creado tarde para el absorbido se anula, como en
+      // la fusión (DX-461): se generó con la identidad del absorbido.
+      const revokedLinks = await revokeLivePublicLinks(tx, {
+        tenantId,
+        patientId: absorbedId,
+        now,
+        actorId: ctx.actor.userId,
+      });
+
+      let outcome: MergeOutcome;
+      try {
+        const [row] = await tx.$queryRaw<{ result: MergeOutcome }[]>`
+          SELECT dx_merge_patients_late(${absorbedId}::uuid,
+                                        ${ctx.actor.userId}::uuid) AS result`;
+        outcome = row.result;
+      } catch (error) {
+        const code = dx266Code(error);
+        if (code) throw mergeHttpError(code);
+        throw error;
+      }
+
+      // Nada que mover: nada que auditar (idempotente). Los recomendados
+      // (DX-172) cuentan en `resolved` (referralsMoved).
+      const changed =
+        Object.keys(outcome.moved).length +
+        Object.keys(outcome.resolved).length;
+      if (changed > 0) {
+        for (const [patientId, otherPatientId, role] of [
+          [keptId, absorbedId, 'KEPT'],
+          [absorbedId, keptId, 'ABSORBED'],
+        ] as const) {
+          await writeAuditEvent(
+            tx,
+            this.draft(ctx, patientId, {
+              reason: 'PATIENT_MERGE_LEFTOVERS_MOVED',
+              ...(role === 'ABSORBED' && totalLivePublicLinks(revokedLinks) > 0
+                ? { revokedLinks }
+                : {}),
+              patientMerge: {
+                role,
+                otherPatientId,
+                moved: outcome.moved,
+                resolved: outcome.resolved,
+              },
+            }),
+          );
+        }
+      }
+
+      return {
+        patientId: keptId,
+        absorbedPatientId: absorbedId,
+        moved: tableCounts(outcome.moved),
+        resolved: Object.entries(outcome.resolved)
+          .map(([kind, count]) => ({ kind, count }))
+          .sort((x, y) => x.kind.localeCompare(y.kind)),
+        revokedLinks: {
+          ...revokedLinks,
+          total: totalLivePublicLinks(revokedLinks),
+        },
       };
     });
   }

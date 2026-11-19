@@ -5,7 +5,9 @@ import { TenantContextInterceptor } from '../../shared/tenancy/tenant-context.in
 import {
   DismissDuplicatePairUseCase,
   ListDuplicatePatientsUseCase,
+  ListMergeLeftoversUseCase,
   MergePatientsUseCase,
+  MoveMergeLeftoversUseCase,
   PATIENT_MERGE_CLOCK,
   PreviewPatientMergeUseCase,
 } from './application/patient-merge.use-cases';
@@ -26,6 +28,8 @@ import { PatientDuplicatesController } from './presentation/patient-duplicates.c
     DismissDuplicatePairUseCase,
     PreviewPatientMergeUseCase,
     MergePatientsUseCase,
+    ListMergeLeftoversUseCase,
+    MoveMergeLeftoversUseCase,
     TokenService,
     TenantContextInterceptor,
     { provide: PATIENT_MERGE_CLOCK, useValue: () => new Date() },

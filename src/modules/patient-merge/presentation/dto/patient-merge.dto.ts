@@ -410,3 +410,71 @@ export class MergeResultDto {
   })
   fieldsFromAbsorbed!: MergeFieldGroup[];
 }
+
+/** DX-266-bis: lo que quedó en los fusionados en un paciente. */
+export class MergeLeftoversQueryDto {
+  @ApiProperty({
+    format: 'uuid',
+    description: 'El paciente que se conservó en la fusión.',
+  })
+  @IsUUID('4', { message: 'keptId debe ser un UUID.' })
+  keptId!: string;
+}
+
+export class MergeLeftoverDto {
+  @ApiProperty({ format: 'uuid', description: 'El paciente absorbido.' })
+  absorbedPatientId!: string;
+  @ApiProperty({ description: 'Código corto del absorbido (DX-484).' })
+  patientCode!: string;
+  @ApiProperty() firstName!: string;
+  @ApiProperty() lastName!: string;
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    description: 'Cuándo se fusionó.',
+  })
+  mergedAt!: Date;
+  @ApiProperty({
+    type: [MergeMovedDto],
+    description:
+      'Filas que quedaron en el absorbido, por tabla de la base (`patients`: pacientes que recomendó).',
+  })
+  tables!: MergeMovedDto[];
+  @ApiProperty({
+    type: [MergeCategoryCountDto],
+    description: 'Lo mismo agrupado como la vista previa de la fusión.',
+  })
+  categories!: MergeCategoryCountDto[];
+  @ApiProperty({ description: 'Total de filas pendientes.' }) total!: number;
+}
+
+export class MergeLeftoverListDto {
+  @ApiProperty({
+    type: [MergeLeftoverDto],
+    description: 'Solo los absorbidos con algo pendiente; vacío casi siempre.',
+  })
+  items!: MergeLeftoverDto[];
+}
+
+export class MoveMergeLeftoversDto {
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'El paciente absorbido (ya fusionado): lo suyo pasa al paciente en el que se fusionó.',
+  })
+  @IsUUID('4', { message: 'absorbedId debe ser un UUID.' })
+  absorbedId!: string;
+}
+
+export class MergeLeftoversResultDto {
+  @ApiProperty({ format: 'uuid', description: 'El paciente que se conserva.' })
+  patientId!: string;
+  @ApiProperty({ format: 'uuid' }) absorbedPatientId!: string;
+  @ApiProperty({
+    type: [MergeMovedDto],
+    description: 'Vacío si no había nada que mover.',
+  })
+  moved!: MergeMovedDto[];
+  @ApiProperty({ type: [MergeResolvedDto] }) resolved!: MergeResolvedDto[];
+  @ApiProperty({ type: LivePublicLinksDto }) revokedLinks!: LivePublicLinksDto;
+}

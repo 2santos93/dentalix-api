@@ -4,7 +4,9 @@ import type { PatientMergeRepository } from '../domain/patient-merge-repository.
 import {
   DismissDuplicatePairUseCase,
   ListDuplicatePatientsUseCase,
+  ListMergeLeftoversUseCase,
   MergePatientsUseCase,
+  MoveMergeLeftoversUseCase,
   PreviewPatientMergeUseCase,
 } from './patient-merge.use-cases';
 
@@ -19,6 +21,8 @@ function repo() {
     dismiss: jest.fn().mockResolvedValue(true),
     preview: jest.fn().mockResolvedValue(null),
     merge: jest.fn().mockResolvedValue({ patientId: A }),
+    leftovers: jest.fn().mockResolvedValue([]),
+    moveLeftovers: jest.fn().mockResolvedValue({ moved: [] }),
   };
   return { ...fns, port: fns as unknown as PatientMergeRepository };
 }
@@ -87,5 +91,22 @@ describe('casos de uso de la fusión (DX-266)', () => {
       NOW,
       ctx,
     );
+  });
+
+  it('DX-266-bis: lo que quedó del conservado (404 si no está vivo) y volver a pasarlo con la hora del reloj', async () => {
+    const r = repo();
+    await expect(
+      new ListMergeLeftoversUseCase(r.port).execute(A.toUpperCase()),
+    ).resolves.toEqual({ items: [] });
+    expect(r.leftovers).toHaveBeenCalledWith(A);
+    r.leftovers.mockResolvedValue(null);
+    await expect(
+      new ListMergeLeftoversUseCase(r.port).execute(A),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await new MoveMergeLeftoversUseCase(r.port, () => NOW).execute(
+      B.toUpperCase(),
+      ctx,
+    );
+    expect(r.moveLeftovers).toHaveBeenCalledWith(B, NOW, ctx);
   });
 });

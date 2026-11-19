@@ -45,6 +45,10 @@ export const MERGE_SAME_PATIENT_MESSAGE =
 export const MERGE_INACTIVE_MESSAGE =
   'Uno de los dos pacientes ya está archivado o se fusionó con otro. Recarga la lista.';
 export const MERGE_INACTIVE_CODE = 'MERGE_PATIENT_INACTIVE';
+/** DX-266-bis: volver a pasar lo tardío de un paciente que no está fusionado. */
+export const MERGE_NOT_MERGED_MESSAGE =
+  'Este paciente no está fusionado con otro: no hay nada que volver a pasar.';
+export const MERGE_NOT_MERGED_CODE = 'MERGE_PATIENT_NOT_MERGED';
 
 export function isMergeBlockerCode(code: string): code is MergeBlockerCode {
   return (MERGE_BLOCKER_CODES as readonly string[]).includes(code);
@@ -68,6 +72,15 @@ export function inactiveException(): ConflictException {
   });
 }
 
+export function notMergedException(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: MERGE_NOT_MERGED_CODE,
+    message: MERGE_NOT_MERGED_MESSAGE,
+  });
+}
+
 /** El código DX266_* de un error de la BD, si lo es. */
 export function dx266Code(error: unknown): string | null {
   const text =
@@ -87,6 +100,8 @@ export function mergeHttpError(code: string): HttpException {
       return new BadRequestException(MERGE_SAME_PATIENT_MESSAGE);
     case 'DX266_PATIENT_INACTIVE':
       return inactiveException();
+    case 'DX266_NOT_MERGED':
+      return notMergedException();
     default:
       return new ConflictException(
         'No se pudo fusionar a los pacientes. Vuelve a intentarlo.',
