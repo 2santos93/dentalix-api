@@ -624,22 +624,26 @@ describe('Recall con intentos (DX-465, e2e)', () => {
     const requestIdSpy = jest
       .spyOn(requestContextModule, 'currentRequestId')
       .mockReturnValue('req-dx465-agendo');
-    const appt = await http(
-      ClinicRole.RECEPTION,
-      'post',
-      '/appointments',
-      principal,
-    )
-      .set('User-Agent', 'dx465-e2e-recepcion')
-      .send({
-        patientId,
-        providerId: ids.DENTIST,
-        appointmentTypeId,
-        start: at(day),
-        end: at(day, 10 * 60 + 30),
-      })
-      .expect(201)
-      .finally(() => requestIdSpy.mockRestore());
+    let appt: Awaited<ReturnType<ReturnType<typeof http>['send']>>;
+    try {
+      appt = await http(
+        ClinicRole.RECEPTION,
+        'post',
+        '/appointments',
+        principal,
+      )
+        .set('User-Agent', 'dx465-e2e-recepcion')
+        .send({
+          patientId,
+          providerId: ids.DENTIST,
+          appointmentTypeId,
+          start: at(day),
+          end: at(day, 10 * 60 + 30),
+        })
+        .expect(201);
+    } finally {
+      requestIdSpy.mockRestore();
+    }
     const appointmentId = (appt.body as { id: string }).id;
     const booked = await raw.recallContact.findMany({
       where: { recallId, outcome: 'BOOKED' },
