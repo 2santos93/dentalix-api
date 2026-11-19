@@ -1,5 +1,7 @@
 import { civilDateIn } from '../src/shared/time/civil-day';
 import { randomUUID } from 'node:crypto';
+import { seedDefaultRecallTypes } from './support/recall-types';
+import { purgeTenantsBySubdomain } from './support/tenant-purge';
 import { NotFoundException } from '@nestjs/common';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
@@ -121,9 +123,8 @@ async function cleanup(): Promise<void> {
   await owner.appointmentWaitlistEntry.deleteMany({ where });
   await owner.appointment.deleteMany({ where });
   await owner.chair.deleteMany({ where });
-  await owner.patient.deleteMany({ where });
-  await owner.location.deleteMany({ where });
-  await owner.tenant.deleteMany({ where: { id: where.tenantId } });
+  // DX-465: los tipos de recall y de cita que siembra el cierre al agendar.
+  await purgeTenantsBySubdomain(owner, SUBDOMAINS);
 }
 
 const inClinic = <T>(c: Clinic, fn: () => Promise<T>): Promise<T> =>
@@ -537,6 +538,68 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       expect(
         await owner.appointment.count({ where: { tenantId: a.tenantId } }),
       ).toBe(1);
+    });
+
+    it('DX-465 (D6): aceptar un hueco del tipo de un recall en su ciclo lo cierra sin «Agendó» ni evento (no hay usuario)', async () => {
+      const types = await seedDefaultRecallTypes(owner, a.tenantId);
+      const type = await owner.appointmentType.create({
+        data: {
+          tenantId: a.tenantId,
+          name: 'Limpieza DX-465',
+          durationMinutes: 30,
+          color: '#0EA5E9',
+        },
+      });
+      await owner.recallType.update({
+        where: { id: types.HYGIENE },
+        data: { appointmentTypeId: type.id },
+      });
+      const recall = await owner.patientRecall.create({
+        data: {
+          tenantId: a.tenantId,
+          patientId: a.patientIds[0],
+          recallTypeId: types.HYGIENE,
+          intervalMonths: 6,
+          lastDoneAt: new Date('2025-01-01T00:00:00.000Z'),
+          locationId: a.locationId,
+          createdById: STAFF,
+          updatedById: STAFF,
+          attemptCount: 2,
+          lastAttemptAt: new Date(),
+          cycleDueAt: new Date('2025-07-01T00:00:00.000Z'),
+        },
+      });
+      try {
+        const offer = await offerToEntry(a, 0);
+        await owner.appointmentWaitlistEntry.update({
+          where: { id: offer.entryId },
+          data: { appointmentTypeId: type.id },
+        });
+        const won = await inClinic(a, () =>
+          acceptOffer.execute(offer.token, META),
+        );
+        expect(won.state).toBe('ACCEPTED');
+        await expect(
+          owner.patientRecall.findUniqueOrThrow({
+            where: { id: recall.id },
+            select: { attemptCount: true, lastAttemptAt: true },
+          }),
+        ).resolves.toEqual({ attemptCount: 0, lastAttemptAt: null });
+        await expect(
+          owner.recallContact.count({ where: { recallId: recall.id } }),
+        ).resolves.toBe(0);
+        await expect(
+          owner.auditEvent.count({
+            where: { tenantId: a.tenantId, resourceType: 'RECALL_CONTACT' },
+          }),
+        ).resolves.toBe(0);
+      } finally {
+        await owner.patientRecall.delete({ where: { id: recall.id } });
+        await owner.recallType.update({
+          where: { id: types.HYGIENE },
+          data: { appointmentTypeId: null },
+        });
+      }
     });
 
     it('dos aceptaciones simultáneas: exactamente una gana y la otra recibe «ocupado», sin error', async () => {
