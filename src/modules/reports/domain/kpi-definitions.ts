@@ -214,6 +214,23 @@ function percent(numerator: number, denominator: number): number | null {
     : null;
 }
 
+/** Las citas que entran en el no-show % (DX-279: las tardías cuentan). */
+export interface AttendanceCounts {
+  completed: number;
+  noShow: number;
+  lateCancellations: number;
+}
+
+/**
+ * No-show % (`KPI_DEFINITIONS.noShowRate`): no asistió ÷ (atendidas + no
+ * asistió + cancelaciones tardías), 2 decimales; null sin citas que cuenten.
+ * La ÚNICA fórmula: la usan «Comparar sedes», «Profesionales» e
+ * «Inasistencias» (DX-304).
+ */
+export function noShowRateOf(c: AttendanceCounts): number | null {
+  return percent(c.noShow, c.completed + c.noShow + c.lateCancellations);
+}
+
 /**
  * Los ocho indicadores de unas sumas. `currencies` fija qué monedas salen en
  * los de dinero (las del período Y las del anterior, para que una moneda que
@@ -239,7 +256,7 @@ export function computeKpis(
       ),
     })),
     completedAppointments: a.completed,
-    noShowRate: percent(a.noShow, a.completed + a.noShow + a.lateCancellations),
+    noShowRate: noShowRateOf(a),
     newPatients: a.newPatients,
     averageTicket: currencies.map((currency) => ({
       currency,
