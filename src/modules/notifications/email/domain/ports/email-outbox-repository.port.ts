@@ -192,6 +192,16 @@ export interface EmailOutboxRepository {
     template: EmailTemplateName,
   ): Promise<number>;
 
+  /**
+   * DX-565: el texto (asunto y cuerpo) que la clínica guardó para la
+   * plantilla de email `key` en `language`, o `null` (= el de siempre).
+   */
+  findMessageTemplate(
+    tenantId: string,
+    key: string,
+    language: string,
+  ): Promise<{ subject: string | null; body: string } | null>;
+
   /** Marca de la clínica (tabla global `tenants`), o `null` si no existe. */
   findBrand(tenantId: string): Promise<{
     name: string;

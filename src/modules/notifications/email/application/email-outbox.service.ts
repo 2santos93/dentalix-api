@@ -22,6 +22,8 @@ import { EmailQuotaExceededError } from '../domain/email-quota-exceeded.error';
 import { maskEmail } from '../../../../shared/privacy/mask-email';
 import { EmailDispatcher } from './email-dispatcher.service';
 import { renderEmail } from './templates/templates';
+import { isEditableEmailTemplate } from './templates/editable-text';
+import type { MessageText } from '../../../message-templates/domain/message-catalog';
 
 /** Email de plataforma (sin clínica): firma Dentalix y tiene tope propio. */
 export interface EnqueuePlatformEmailInput<T extends EmailTemplateName> {
@@ -33,9 +35,21 @@ export interface EnqueuePlatformEmailInput<T extends EmailTemplateName> {
   referenceId?: string;
 }
 
-export interface EnqueueEmailInput<
-  T extends EmailTemplateName,
-> extends EnqueuePlatformEmailInput<T> {
+/** DX-565: el texto de la clínica con el que se renderiza (solo plantillas editables). */
+export interface EmailTextChoice {
+  /**
+   * Sin el campo: el que la clínica guardó para la plantilla y el idioma (se
+   * lee al encolar, en el mismo momento que la marca), o el de siempre.
+   * `null`: el de siempre. Un texto (el borrador de la vista previa o de la
+   * prueba): ese, tal cual.
+   */
+  messageText?: MessageText | null;
+  /** «[Prueba] » delante del asunto (la prueba de Ajustes › Mensajes). */
+  subjectPrefix?: string;
+}
+
+export interface EnqueueEmailInput<T extends EmailTemplateName>
+  extends EnqueuePlatformEmailInput<T>, EmailTextChoice {
   /** Clínica que envía (marca y RLS). Sin clínica: `enqueuePlatform`. */
   tenantId: string;
   /**
@@ -169,7 +183,8 @@ export class EmailOutbox {
     input: EnqueueEmailInput<T>,
   ): Promise<{ id: string }> {
     const brand = await this.brandOf(input.tenantId);
-    const row = this.prepare(input, brand);
+    const text = await this.clinicTextOf(input.tenantId, input);
+    const row = this.prepare(input, brand, text, input.subjectPrefix);
     const { guard, scope } = this.guardOf(input);
     const { id } = await this.repo.insert(
       { ...row, tenantId: input.tenantId },
@@ -192,7 +207,11 @@ export class EmailOutbox {
     input: EnqueueEmailInput<T>,
   ): Promise<PreparedEmail> {
     const brand = await this.brandOf(input.tenantId);
-    const row = { ...this.prepare(input, brand), tenantId: input.tenantId };
+    const text = await this.clinicTextOf(input.tenantId, input);
+    const row = {
+      ...this.prepare(input, brand, text, input.subjectPrefix),
+      tenantId: input.tenantId,
+    };
     const { guard, scope } = this.guardOf(input);
     let outboxId: string | null = null;
     return {
@@ -218,13 +237,45 @@ export class EmailOutbox {
   /**
    * DX-291: el email tal como saldría para la clínica (asunto, HTML y texto
    * con su marca), SIN encolarlo ni registrarlo: la vista previa de Ajustes.
+   * DX-565: con el texto que la clínica guardó (o el borrador de `choice`).
    */
   async preview<T extends EmailTemplateName>(
     tenantId: string,
     template: T,
     vars: EmailVarsByTemplate[T],
+    options: EmailTextChoice & { locale?: EmailLocale } = {},
   ): Promise<RenderedEmail> {
-    return renderEmail(template, vars, await this.brandOf(tenantId));
+    const brand = await this.brandOf(tenantId);
+    const locale = options.locale ?? 'es';
+    const text = await this.clinicTextOf(tenantId, {
+      template,
+      locale,
+      ...('messageText' in options ? { messageText: options.messageText } : {}),
+    });
+    return renderEmail(template, vars, brand, locale, text);
+  }
+
+  /**
+   * DX-565: el texto de la clínica para (plantilla, idioma), leído AL
+   * ENCOLAR: cambiarlo afecta a los siguientes envíos, nunca a lo ya
+   * encolado (el payload guarda el email ya renderizado).
+   */
+  private async clinicTextOf(
+    tenantId: string,
+    input: {
+      template: EmailTemplateName;
+      locale?: EmailLocale;
+    } & EmailTextChoice,
+  ): Promise<MessageText | null> {
+    if (!isEditableEmailTemplate(input.template)) return null;
+    if ('messageText' in input && input.messageText !== undefined) {
+      return input.messageText;
+    }
+    return this.repo.findMessageTemplate(
+      tenantId,
+      input.template,
+      input.locale ?? 'es',
+    );
   }
 
   /**
@@ -295,13 +346,19 @@ export class EmailOutbox {
   private prepare<T extends EmailTemplateName>(
     input: EnqueuePlatformEmailInput<T>,
     brand: EmailBrand | null,
+    text: MessageText | null = null,
+    subjectPrefix?: string,
   ) {
-    const rendered = renderEmail(
+    const email = renderEmail(
       input.template,
       input.vars,
       brand,
       input.locale ?? 'es',
+      text,
     );
+    const rendered = subjectPrefix
+      ? { ...email, subject: `${subjectPrefix}${email.subject}` }
+      : email;
     const to = input.to.trim();
     return {
       template: input.template,

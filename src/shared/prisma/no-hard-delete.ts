@@ -104,6 +104,12 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // revocados; al guardar uno nuevo se borran los muertos del usuario.
   // Material de credencial sin datos de pacientes y sin nada que lo referencie.
   'userTrustedDevice',
+  // DX-565: el texto de un mensaje al paciente reescrito por la clínica es
+  // configuración, sin datos de pacientes y sin nada que lo referencie (cada
+  // email se guarda ya renderizado en el outbox). «Restablecer» borra la fila
+  // para volver al texto del código, en la misma transacción que su evento de
+  // audit_events (MESSAGE_TEMPLATE_RESET, con el antes).
+  'messageTemplate',
 ]);
 
 const FORBIDDEN_OPERATIONS: ReadonlySet<string> = new Set([

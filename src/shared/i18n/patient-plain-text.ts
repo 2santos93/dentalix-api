@@ -59,8 +59,17 @@ export function normalizePatientPlainText(text: string): string {
   );
 }
 
+/**
+ * DX-565 (H11): puntos que se parecen a «.» (ideográfico 。, de ancho
+ * completo ．, de media anchura ｡, pequeño ﹒, uno ․) y que algunos clientes
+ * convierten en punto al enlazar. Para DETECTAR, cuentan como punto; el texto
+ * guardado no cambia.
+ */
+const LOOKALIKE_DOTS = /[\u3002\uFF0E\uFF61\uFE52\u2024]/g;
+
 /** ¿Lleva el texto (ya normalizado) un enlace, un dominio, una IP, un email o HTML? */
-export function hasLinkOrHtml(text: string): boolean {
+export function hasLinkOrHtml(raw: string): boolean {
+  const text = raw.normalize('NFKC').replace(LOOKALIKE_DOTS, '.');
   return (
     LINK_OR_HTML.test(text) ||
     hasBareDomain(text) ||

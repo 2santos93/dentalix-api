@@ -798,6 +798,11 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
       expiresAt: new Date(Date.now() + 60 * 86_400_000),
     },
   });
+  // DX-565: A reescribe el texto del recordatorio (Ajustes › Mensajes).
+  await api(app, a, 'put', '/message-templates/appointment-reminder/EMAIL/es', {
+    subject: 'Tu cita en {clinica}',
+    body: 'Hola {paciente}, te esperamos el {fecha} a las {hora}.',
+  }).expect(200);
   // DX-561: seguimiento automático en la sede nueva de A (apagado) y un paso
   // registrado de su plan (lo crea el trabajo; aquí, por `raw`).
   await api(app, a, 'put', `/quote-follow-up-settings/${location.id}`, {
@@ -1233,6 +1238,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       'weekly_digest_recipients',
       'weekly_digest_runs',
       'weekly_digest_deliveries',
+      // DX-565: el texto del recordatorio reescrito por A.
+      'message_templates',
       // DX-561: ajustes del seguimiento y un paso registrado.
       'location_quote_follow_up_settings',
       'quote_follow_up_messages',
@@ -4381,6 +4388,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * Una PR que sube el número de exenciones lo justifica en su descripción.
    */
   const COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'message-templates.e2e-spec.ts',
+      checks:
+        'B → con la misma clave, canal e idioma guarda, prueba, previsualiza y restablece SOLO su texto: el de A sigue igual, B no lo ve en su catálogo ni le llega en su prueba (DX-565)',
+      routes: [
+        'PUT /message-templates/:key/:channel/:language',
+        'DELETE /message-templates/:key/:channel/:language',
+        'POST /message-templates/:key/:channel/:language/preview',
+        'POST /message-templates/:key/:channel/:language/test',
+      ],
+    },
     {
       spec: 'patient-access.e2e-spec.ts',
       checks:

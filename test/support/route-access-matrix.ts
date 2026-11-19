@@ -751,6 +751,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /clinic/weekly-digest-settings': ADMIN_ONLY,
   'PUT /clinic/weekly-digest-settings': ADMIN_ONLY,
   'POST /clinic/weekly-digest/send-test': ADMIN_ONLY,
+  // DX-565: Ajustes › Mensajes (textos de los mensajes al paciente): solo
+  // ADMIN, como el resto de ajustes de la clínica.
+  'GET /message-templates': ADMIN_ONLY,
+  'PUT /message-templates/:key/:channel/:language': ADMIN_ONLY,
+  'DELETE /message-templates/:key/:channel/:language': ADMIN_ONLY,
+  'POST /message-templates/:key/:channel/:language/preview': ADMIN_ONLY,
+  'POST /message-templates/:key/:channel/:language/test': ADMIN_ONLY,
   // Alternativas A/B, presentar, rechazar y presupuestos por seguir:
   // loop/informes/DX-040.md. Crear una alternativa es preparar el plan
   // (CLINICAL); presentarlo, quien lo decide; rechazarlo, además recepción,

@@ -29,6 +29,8 @@ export interface SignatureRecipientContext {
     emergencyContactName: string | null;
     reminderOptOutAt: Date | null;
     contactChannel: ContactChannel;
+    /** DX-565: idioma preferido (BCP 47) para el email del enlace; null = el de la clínica. */
+    preferredLanguage?: string | null;
   };
   /** Responsables VIVOS (DX-203) con su documento, para firmar como tutor. */
   responsibles: (NoticeResponsible & {

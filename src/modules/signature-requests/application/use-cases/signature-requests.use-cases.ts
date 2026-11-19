@@ -45,6 +45,12 @@ import {
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
 import { PATIENT_NOT_FOUND_MESSAGE } from '../../../patients/application/assert-patient-in-clinic';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
+import { resolveCatalogLanguage } from '../../../../shared/i18n/patient-language';
+import {
+  DEFAULT_EMAIL_LOCALE,
+  EMAIL_LOCALES,
+  type EmailLocale,
+} from '../../../notifications/email/domain/email-message';
 import { maskEmail } from '../../../../shared/privacy/mask-email';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
@@ -460,6 +466,7 @@ export class CreateSignatureRequestUseCase {
       now,
       {
         to: recipient.email,
+        locale: signatureEmailLocale(ctx.patient.preferredLanguage),
         vars: {
           recipientFirstName: recipient.greetingName,
           patientFirstName: recipient.patientFirstName,
@@ -602,6 +609,7 @@ export class CreateSignatureRequestUseCase {
       now,
       {
         to: recipient.email,
+        locale: signatureEmailLocale(ctx.patient.preferredLanguage),
         vars: {
           recipientFirstName: recipient.greetingName,
           patientFirstName: recipient.patientFirstName,
@@ -630,7 +638,7 @@ export class CreateSignatureRequestUseCase {
   private async createAndSend(
     input: CreateSignatureRequestRepoInput,
     now: Date,
-    link: { to: string; vars: SignatureRequestEmailVars },
+    link: { to: string; vars: SignatureRequestEmailVars; locale?: EmailLocale },
     options: CreateSignatureRequestOptions = {},
   ): Promise<CreatedSignatureRequest> {
     const id = randomUUID();
@@ -726,4 +734,19 @@ export class RevokeSignatureRequestUseCase {
       throw new NotFoundException(SIGNATURE_REQUEST_NOT_FOUND_MESSAGE);
     return toSignatureRequestSummary(fresh, now);
   }
+}
+
+/**
+ * DX-565: el email del enlace sale en el idioma del paciente si hay catálogo
+ * para él (es/en); si no, en el de la clínica. Lo lee el responsable de un
+ * menor en el idioma del menor, como el recordatorio.
+ */
+function signatureEmailLocale(
+  preferredLanguage: string | null | undefined,
+): EmailLocale {
+  return resolveCatalogLanguage(
+    preferredLanguage ?? null,
+    EMAIL_LOCALES,
+    DEFAULT_EMAIL_LOCALE,
+  ).language;
 }

@@ -1,5 +1,6 @@
 import { MedicalHistorySubmissionsModule } from '../medical-history-submissions/medical-history-submissions.module';
 import { Module } from '@nestjs/common';
+import { MessageTemplatesModule } from '../message-templates/message-templates.module';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfirmationLinksController } from './presentation/confirmation-links.controller';
 import { PublicAppointmentConfirmationsController } from './presentation/public-appointment-confirmations.controller';
@@ -22,7 +23,12 @@ import { PublicTenantContextInterceptor } from '../../shared/tenancy/public-tena
  */
 @Module({
   // DX-290: el enlace de anamnesis que acompaña al de confirmación.
-  imports: [JwtModule.register({}), MedicalHistorySubmissionsModule],
+  imports: [
+    JwtModule.register({}),
+    MedicalHistorySubmissionsModule,
+    // DX-565: el texto de la clínica para el wa.me de la confirmación.
+    MessageTemplatesModule,
+  ],
   controllers: [
     ConfirmationLinksController,
     PublicAppointmentConfirmationsController,

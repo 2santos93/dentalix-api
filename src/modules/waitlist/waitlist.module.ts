@@ -1,3 +1,4 @@
+import { MessageTemplatesModule } from '../message-templates/message-templates.module';
 import { Module } from '@nestjs/common';
 import { ProviderScheduleModule } from '../provider-schedule/provider-schedule.module';
 import { ConfigService } from '@nestjs/config';
@@ -88,6 +89,8 @@ import { PrismaWaitlistRepository } from './infrastructure/repositories/prisma-w
     JobsModule,
     LocationScheduleModule,
     ScheduleBlocksModule,
+    // DX-565: el texto de la clínica para el wa.me de la oferta con enlace.
+    MessageTemplatesModule,
   ],
   controllers: [
     WaitlistController,

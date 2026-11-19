@@ -195,7 +195,7 @@ export class OpeningCandidatesController {
       { ...base, channel, outcome: dto.outcome },
       ctx,
     );
-    return { ...created, url: null, whatsappPhone: null };
+    return { ...created, url: null, whatsappPhone: null, whatsappText: null };
   }
 
   @Patch('offers/:id')

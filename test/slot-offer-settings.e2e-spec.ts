@@ -59,6 +59,7 @@ interface OfferBody {
   id: string;
   expiresAt: string | null;
   url: string | null;
+  whatsappText: string | null;
 }
 
 describe('Ajustes de la oferta de hueco por enlace (e2e, DX-448)', () => {
@@ -247,6 +248,11 @@ describe('Ajustes de la oferta de hueco por enlace (e2e, DX-448)', () => {
     const sent = (await linkOffer(0, slotA).expect(201)).body as OfferBody;
     expect(new Date(sent.expiresAt!)).toEqual(slotA);
     expect(sent.url).toMatch(/\/hueco\/[A-Za-z0-9_-]{43}$/);
+    // DX-565: el texto de wa.me ya compuesto por la API (el de siempre).
+    expect(sent.whatsappText).toMatch(
+      /^Hola \S+, te escribimos de .+\. Se liberó un hueco el .+ a las .+\. Si te viene bien, acéptalo aquí \(se lo queda el primero que lo acepte\): /,
+    );
+    expect(sent.whatsappText!.endsWith(sent.url!)).toBe(true);
 
     const res = await putSettings({
       expiryLeadMinutes: 60,
@@ -259,8 +265,17 @@ describe('Ajustes de la oferta de hueco por enlace (e2e, DX-448)', () => {
       defaultMinLeadMinutes: 20,
     });
 
+    // DX-565: con la plantilla de la clínica, la oferta siguiente la usa.
+    await as(
+      api().put('/api/v1/message-templates/slot-offer/WHATSAPP/es'),
+      clinic.adminToken,
+    )
+      .send({ body: 'Hueco para {paciente} hasta {caduca}: {enlace}' })
+      .expect(200);
     const slotB = local(TUE, '11:00');
     const fresh = (await linkOffer(1, slotB).expect(201)).body as OfferBody;
+    expect(fresh.whatsappText).toMatch(/^Hueco para \S+ hasta .+ a las .+: /);
+    expect(fresh.whatsappText!.endsWith(fresh.url!)).toBe(true);
     expect(new Date(fresh.expiresAt!)).toEqual(
       new Date(slotB.getTime() - 60 * MIN),
     );

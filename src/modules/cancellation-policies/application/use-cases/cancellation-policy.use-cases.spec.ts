@@ -248,6 +248,11 @@ describe('Política de cancelación por sede (DX-279)', () => {
       );
       expect(rendered.text).toContain('50.000');
       expect(rendered.text).not.toContain('Primera versión.');
+      // DX-565 (H3): el botón de ejemplo va a un dominio reservado.
+      expect(rendered.html).toContain(
+        'href="https://example.com/dentalix/vista-previa"',
+      );
+      expect(rendered.text).not.toContain('dentalix.app');
     });
 
     it('DX-350: hora y cargo con el formato y el reloj de la sede', async () => {
