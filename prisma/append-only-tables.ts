@@ -162,6 +162,9 @@ export const NO_APP_DELETE = [
   // (dx_leads_guard); los motivos propios se retiran con borrado lógico.
   'leads',
   'lead_reasons',
+  // DX-562: la serie de citas no se borra (sus citas la referencian con
+  // RESTRICT); cancelar «esta y las siguientes» la marca cancelada.
+  'appointment_series',
 ] as const;
 
 /**
