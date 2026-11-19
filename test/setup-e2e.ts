@@ -44,6 +44,7 @@ for (const policy of [
   'BRANDING_MISS',
   'ONLINE_BOOKING',
   'ONLINE_BOOKING_WRITE',
+  'APPOINTMENT_SERIES',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

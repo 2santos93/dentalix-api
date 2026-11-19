@@ -1643,3 +1643,60 @@ describe('sanitizeAuditMetadata — fallos de un enlace de acceso (DX-101)', () 
     }
   });
 });
+
+describe('sanitizeAuditMetadata — serie de citas (DX-562)', () => {
+  const seriesId = '0190f2a4-7b1c-7d2e-8f3a-123456789abc';
+  const a = '0190f2a4-7b1c-7d2e-8f3a-cba987654321';
+  const b = '0190f2a4-7b1c-7d2e-8f3a-cba987654322';
+  const dates = ['2027-01-18T13:00:00.000Z', '2027-01-25T13:00:00.000Z'];
+
+  it('guarda la serie, las citas, sus inicios y el intervalo', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'APPOINTMENT_SERIES_CREATED',
+        appointmentSeries: {
+          seriesId,
+          appointmentIds: [a, b],
+          dates,
+          intervalWeeks: 4,
+        },
+      }),
+    ).toEqual({
+      reason: 'APPOINTMENT_SERIES_CREATED',
+      appointmentSeries: {
+        seriesId,
+        appointmentIds: [a, b],
+        dates,
+        intervalWeeks: 4,
+      },
+    });
+  });
+
+  it('sin fechas ni intervalo (cancelar) también vale', () => {
+    expect(
+      sanitizeAuditMetadata({
+        appointmentSeries: { seriesId, appointmentIds: [b] },
+      }),
+    ).toEqual({ appointmentSeries: { seriesId, appointmentIds: [b] } });
+  });
+
+  it('texto libre, más de 26 citas, fechas que no casan o claves extra: no queda nada', () => {
+    const many = Array.from(
+      { length: 27 },
+      (_, i) => `0190f2a4-7b1c-7d2e-8f3a-${String(i).padStart(12, '0')}`,
+    );
+    for (const appointmentSeries of [
+      { seriesId, appointmentIds: [a], notes: 'Ortodoncia de Ana' },
+      { seriesId, appointmentIds: many },
+      { seriesId, appointmentIds: [] },
+      { seriesId: 'no-uuid', appointmentIds: [a] },
+      { seriesId, appointmentIds: ['no-uuid'] },
+      { seriesId, appointmentIds: [a, b], dates: [dates[0]] },
+      { seriesId, appointmentIds: [a], dates: ['lunes 18'] },
+      { seriesId, appointmentIds: [a], intervalWeeks: 13 },
+      { seriesId, appointmentIds: [a], intervalWeeks: 1.5 },
+    ]) {
+      expect(sanitizeAuditMetadata({ appointmentSeries })).toEqual({});
+    }
+  });
+});

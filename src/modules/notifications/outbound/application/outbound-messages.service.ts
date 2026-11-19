@@ -53,26 +53,75 @@ export class OutboundMessages {
     input: RecordOutboundMessage,
     attach?: AttachOutboundMessage,
   ): Promise<{ id: string }> {
-    const recipientMasked = maskRecipient(input.channel, input.recipient);
     const { id, tenantId } = await this.prisma.runWithTenant(async (tx) => {
-      const [recorded] = await tx.$queryRaw<{ id: string; tenantId: string }[]>`
-        INSERT INTO "outbound_messages"
-          ("id", "tenantId", "channel", "template", "recipientMasked",
-           "recipientKind", "appointmentId", "language",
-           "languageFallbackFrom", "updatedAt")
-        VALUES
-          (gen_random_uuid(), current_setting('app.current_tenant', true)::uuid,
-           ${input.channel}::"OutboundChannel", ${input.template},
-           ${recipientMasked},
-           ${input.recipientKind ?? 'PATIENT'}::"OutboundRecipientKind",
-           ${input.appointmentId ?? null}::uuid,
-           ${input.language ?? null}, ${input.languageFallbackFrom ?? null},
-           CURRENT_TIMESTAMP)
-        RETURNING "id", "tenantId"`;
+      const recorded = await this.insert(tx, input);
       // Fallar la asociación revierte también el INSERT, en cada intento.
       await attach?.(recorded.id, tx);
       return recorded;
     });
+    this.logged(id, tenantId, input);
+    return { id };
+  }
+
+  /**
+   * DX-562: el registro DENTRO de la transacción de quien llama (el aviso de
+   * una serie de citas, encolado en la misma transacción que la serie): con
+   * el id ya elegido (el `referenceId` del email) y el estado con el que
+   * nace (QUEUED si el email ya está en email_outbox). Quien llama registra
+   * en el log con `logRecorded` tras el COMMIT.
+   */
+  async recordInTx(
+    tx: Prisma.TransactionClient,
+    input: RecordOutboundMessage & {
+      id: string;
+      status: Extract<OutboundMessageStatus, 'PENDING' | 'QUEUED'>;
+    },
+  ): Promise<{ id: string }> {
+    return { id: (await this.insert(tx, input)).id };
+  }
+
+  /** Tras el COMMIT de `recordInTx`: el log solo afirma lo que quedó. */
+  logRecorded(
+    id: string,
+    tenantId: string,
+    input: RecordOutboundMessage,
+  ): void {
+    this.logged(id, tenantId, input);
+  }
+
+  private async insert(
+    tx: Prisma.TransactionClient,
+    input: RecordOutboundMessage & {
+      id?: string;
+      status?: OutboundMessageStatus;
+    },
+  ): Promise<{ id: string; tenantId: string }> {
+    const recipientMasked = maskRecipient(input.channel, input.recipient);
+    const [recorded] = await tx.$queryRaw<{ id: string; tenantId: string }[]>`
+      INSERT INTO "outbound_messages"
+        ("id", "tenantId", "channel", "template", "recipientMasked",
+         "recipientKind", "appointmentId", "language",
+         "languageFallbackFrom", "status", "updatedAt")
+      VALUES
+        (coalesce(${input.id ?? null}::uuid, gen_random_uuid()),
+         current_setting('app.current_tenant', true)::uuid,
+         ${input.channel}::"OutboundChannel", ${input.template},
+         ${recipientMasked},
+         ${input.recipientKind ?? 'PATIENT'}::"OutboundRecipientKind",
+         ${input.appointmentId ?? null}::uuid,
+         ${input.language ?? null}, ${input.languageFallbackFrom ?? null},
+         ${input.status ?? 'PENDING'}::"OutboundMessageStatus",
+         CURRENT_TIMESTAMP)
+      RETURNING "id", "tenantId"`;
+    return recorded;
+  }
+
+  private logged(
+    id: string,
+    tenantId: string,
+    input: RecordOutboundMessage,
+  ): void {
+    const recipientMasked = maskRecipient(input.channel, input.recipient);
     this.logger.log({
       event: 'outbound.recorded',
       outboundId: id,
@@ -85,7 +134,6 @@ export class OutboundMessages {
       language: input.language ?? null,
       languageFallbackFrom: input.languageFallbackFrom ?? null,
     });
-    return { id };
   }
 
   /**

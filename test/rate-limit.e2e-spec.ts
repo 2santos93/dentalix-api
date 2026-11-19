@@ -52,6 +52,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'branding-miss': { limit: 4, ttlMs: 60_000 },
   'online-booking': { limit: 4, ttlMs: 60_000 },
   'online-booking-write': { limit: 2, ttlMs: 60_000 },
+  'appointment-series': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -453,6 +454,31 @@ describe('Rate limiting (e2e)', () => {
       }
       expectTooMany(await ask('cl-1', 'clinica-1'));
       expect((await ask('cl-2', 'clinica-1')).status).toBe(401);
+    });
+
+    it('DX-562: citas en serie, UN balde por clínica+usuario para todas sus rutas', async () => {
+      const bearer = (sub: string, tenantId: string): string =>
+        'Bearer ' +
+        [
+          Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+          Buffer.from(JSON.stringify({ sub, tenantId })).toString('base64url'),
+          'firma-invalida',
+        ].join('.');
+      const preview = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .post('/api/v1/appointments/series/preview')
+          .set('Authorization', bearer(sub, tenantId))
+          .send({});
+      const create = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .post('/api/v1/appointments/series')
+          .set('Authorization', bearer(sub, tenantId))
+          .send({});
+      expect((await preview('as-1', 'clinica-1')).status).toBe(401);
+      expect((await create('as-1', 'clinica-1')).status).toBe(401);
+      // El tercero, aunque sea otra ruta de series, ya no cabe.
+      expectTooMany(await preview('as-1', 'clinica-1'));
+      expect((await create('as-2', 'clinica-1')).status).toBe(401);
     });
 
     it('health nunca se limita (@SkipThrottle)', async () => {

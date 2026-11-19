@@ -88,6 +88,9 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-137: a qué clínica pertenece una familia de refresh (solo se crea; se
   // va con su familia por la cascada).
   'clinic_sessions',
+  // DX-562: la serie de citas solo se crea (su estado sale de sus citas; sus
+  // citas la referencian con RESTRICT).
+  'appointment_series',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */

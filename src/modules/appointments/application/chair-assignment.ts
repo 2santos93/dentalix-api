@@ -61,15 +61,27 @@ export class ChairAssignmentService {
    */
   async assertFree(
     chair: Chair,
-    slot: { locationId: string; start: Date; end: Date; excludeId?: string },
+    slot: {
+      locationId: string;
+      start: Date;
+      end: Date;
+      excludeId?: string;
+      /**
+       * DX-562: también estas citas (las de la serie que se mueven a la vez:
+       * dejan su hora) se ignoran.
+       */
+      alsoExcludeIds?: readonly string[];
+    },
     opts: { moving?: boolean } = {},
   ): Promise<void> {
-    const [occupied] = await this.appointments.findOverlappingForChair(
-      chair.id,
-      slot.start,
-      slot.end,
-      slot.excludeId,
-    );
+    const occupied = (
+      await this.appointments.findOverlappingForChair(
+        chair.id,
+        slot.start,
+        slot.end,
+        slot.excludeId,
+      )
+    ).find((a) => !slot.alsoExcludeIds?.includes(a.id));
     if (occupied) {
       throw conflict(
         await this.message(chair.name, slot.locationId, occupied),

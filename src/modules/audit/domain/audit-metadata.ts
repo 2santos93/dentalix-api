@@ -206,6 +206,13 @@ export interface AuditMetadata {
    */
   reservedSlotOverride?: AuditReservedSlotOverride;
   /**
+   * DX-562: una serie de citas creada, cancelada o movida «esta y las
+   * siguientes» en UN evento: la serie, las citas que tocó (≤ 26) y, al
+   * crear o mover, su inicio (instantes ISO en el mismo orden). Al crear,
+   * además, el intervalo en semanas. Ni paciente, ni motivo, ni notas.
+   */
+  appointmentSeries?: AuditAppointmentSeries;
+  /**
    * DX-461: enlaces públicos vivos que se anularon al archivar al paciente,
    * cuántos de cada tipo. Solo números: ni tokens, ni destinatarios, ni ids.
    */
@@ -359,6 +366,16 @@ export const AUDIT_CLOSING_DISMISSAL_REASONS = [
 export interface AuditClosingQueueDismissal {
   section: (typeof AUDIT_CLOSING_QUEUE_SECTIONS)[number];
   reasonCode: (typeof AUDIT_CLOSING_DISMISSAL_REASONS)[number];
+}
+
+/** DX-562: las citas de una serie que tocó una operación. */
+export interface AuditAppointmentSeries {
+  seriesId: string;
+  appointmentIds: string[];
+  /** Inicio de cada cita (al crear o mover), en el orden de `appointmentIds`. */
+  dates?: string[];
+  /** Al crear: cada cuántas semanas (1–12). */
+  intervalWeeks?: number;
 }
 
 /** Hueco reservado saltado con permiso (DX-446). */
@@ -648,6 +665,8 @@ const PROFESSIONAL_SPECIALTY = /^[^\p{Cc}\p{Cf}\u2028\u2029]{1,80}$/u;
 /** Tope de sedes por lado: las de una clínica, con holgura. */
 const MAX_STAFF_LOCATIONS = 200;
 const MAX_OVERRIDE_BLOCKS = 20;
+/** DX-562: citas de una serie (SERIES_MAX_OCCURRENCES). */
+const MAX_SERIES_APPOINTMENTS = 26;
 const MAX_FIELDS = 50;
 /** Tope de tramos por lado (7 días × 7 tramos × varias sedes). */
 const MAX_SCHEDULE_ENTRIES = 500;
@@ -1650,6 +1669,49 @@ function reservedSlotOverride(
   };
 }
 
+/**
+ * DX-562: la serie, sus citas (uuids, 1–26) y, si vienen, sus inicios
+ * (instantes ISO, tantos como citas) y el intervalo (1–12); o nada.
+ */
+function appointmentSeries(value: unknown): AuditAppointmentSeries | null {
+  if (!isRecord(value)) return null;
+  const { seriesId, appointmentIds, dates, intervalWeeks, ...rest } = value;
+  if (
+    Object.keys(rest).length > 0 ||
+    typeof seriesId !== 'string' ||
+    !UUID.test(seriesId) ||
+    !Array.isArray(appointmentIds) ||
+    appointmentIds.length === 0 ||
+    appointmentIds.length > MAX_SERIES_APPOINTMENTS ||
+    !appointmentIds.every((id) => typeof id === 'string' && UUID.test(id))
+  ) {
+    return null;
+  }
+  if (
+    dates !== undefined &&
+    (!Array.isArray(dates) ||
+      dates.length !== appointmentIds.length ||
+      !dates.every((d) => typeof d === 'string' && ISO_INSTANT.test(d)))
+  ) {
+    return null;
+  }
+  if (
+    intervalWeeks !== undefined &&
+    (typeof intervalWeeks !== 'number' ||
+      !Number.isInteger(intervalWeeks) ||
+      intervalWeeks < 1 ||
+      intervalWeeks > 12)
+  ) {
+    return null;
+  }
+  return {
+    seriesId: seriesId.toLowerCase(),
+    appointmentIds: (appointmentIds as string[]).map((id) => id.toLowerCase()),
+    ...(dates !== undefined ? { dates: dates as string[] } : {}),
+    ...(intervalWeeks !== undefined ? { intervalWeeks } : {}),
+  };
+}
+
 export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (!isRecord(input)) return {};
   const out: AuditMetadata = {};
@@ -1725,6 +1787,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (dismissed) out.closingQueueDismissal = dismissed;
   const overridden = reservedSlotOverride(input.reservedSlotOverride);
   if (overridden) out.reservedSlotOverride = overridden;
+  const series = appointmentSeries(input.appointmentSeries);
+  if (series) out.appointmentSeries = series;
   const revoked = revokedLinks(input.revokedLinks);
   if (revoked) out.revokedLinks = revoked;
   const config = configChange(input.configChange);
