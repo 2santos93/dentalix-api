@@ -688,6 +688,8 @@ describe('Origen del paciente y captación (DX-172, e2e)', () => {
   });
 
   describe('aislamiento entre clínicas', () => {
+    // ISOLATION_COVERS: PATCH /patient-sources/:id
+    // ISOLATION_COVERS: GET /patients/:id/acquisition
     it('B no renombra ni desactiva una fuente de A, ni lee la captación de un paciente de A (404)', async () => {
       const ana = await createPatient({ lastName: 'De A' });
       await as(b, b.adminToken)
