@@ -48,7 +48,7 @@ describe('DX-562: migraciones aditivas', () => {
     );
   });
 
-  it('la serie: sin paciente ni profesional, FK directa a tenants, topes, RLS FORCE con NULLIF y sin DELETE para la app', () => {
+  it('la serie: sin paciente ni profesional, solo se crea, FK directa a tenants, topes, RLS FORCE con NULLIF y sin UPDATE ni DELETE para la app', () => {
     const sql = code(TABLES).replace(/\s+/g, ' ');
     expect(sql).toContain('CREATE TABLE "appointment_series"');
     const table = /CREATE TABLE "appointment_series" \((.*?)\);/.exec(sql)![1];
@@ -58,9 +58,7 @@ describe('DX-562: migraciones aditivas', () => {
     );
     expect(table).toContain('CHECK ("intervalWeeks" BETWEEN 1 AND 12)');
     expect(table).toContain('CHECK ("occurrences" BETWEEN 1 AND 26)');
-    expect(table).toContain(
-      'CHECK (("cancelledAt" IS NULL) = ("cancelledById" IS NULL))',
-    );
+    expect(table).not.toMatch(/cancelled/);
     expect(sql).toContain(
       'CREATE UNIQUE INDEX "appointment_series_tenant_id_key" ON "appointment_series"("tenantId", "id");',
     );
@@ -76,7 +74,7 @@ describe('DX-562: migraciones aditivas', () => {
       )!.length,
     ).toBe(2);
     expect(sql).toContain(
-      'REVOKE DELETE, TRUNCATE ON "appointment_series" FROM dentalix_app;',
+      'REVOKE UPDATE, DELETE, TRUNCATE ON "appointment_series" FROM dentalix_app;',
     );
     // No entra en la lista cerrada de la fusión (no tiene paciente).
     expect(sql).not.toContain('dx_patient_merge_tables');
