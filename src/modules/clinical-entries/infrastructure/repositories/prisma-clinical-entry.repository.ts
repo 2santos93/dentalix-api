@@ -20,6 +20,7 @@ import {
   mapAddendum,
 } from './prisma-clinical-entry-addendum.repository';
 import { licenseSnapshot } from '../../domain/author-license';
+import type { IdempotentRecord } from '../../../../shared/validation/idempotent-create';
 
 /**
  * DX-540: registro profesional vigente del usuario en la clínica de `tx` (la
@@ -177,6 +178,9 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
           // de este paciente; la plantilla, de esta clínica.
           appointmentId: input.appointmentId,
           templateId: input.templateId,
+          // DX-574: inalterables como el resto de la fila (trigger DX-038).
+          idempotencyKey: input.idempotency?.key ?? null,
+          idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
           // DX-212: en la MISMA transacción que la evolución (un trigger
           // rechaza un diagnóstico añadido a una evolución ya guardada).
           diagnoses: input.diagnoses?.length
@@ -237,6 +241,27 @@ export class PrismaClinicalEntryRepository implements ClinicalEntryRepository {
         audit: input.audit,
       });
       return { ...entry, recallUpdates };
+    });
+  }
+
+  findByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<ClinicalEntry> | null> {
+    const tenantId = this.requireTenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      const row = await tx.clinicalEntry.findFirst({
+        where: { tenantId, idempotencyKey: key },
+        include: {
+          addenda: { orderBy: ADDENDA_ORDER },
+          appointment: APPOINTMENT_SUMMARY,
+          diagnoses: DIAGNOSES,
+        },
+      });
+      if (!row) return null;
+      return {
+        fingerprint: row.idempotencyFingerprint,
+        value: mapToEntity(row, await providerNamesOf(tx, [row])),
+      };
     });
   }
 

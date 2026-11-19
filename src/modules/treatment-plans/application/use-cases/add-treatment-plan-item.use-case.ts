@@ -35,6 +35,12 @@ import {
   type ReferenceRateSource,
 } from '../../domain/ports/reference-rate-source.port';
 import { freezeWithRate, withAgreementBase } from './reference-rate';
+import {
+  idempotencyRequest,
+  idempotentCreate,
+  type IdempotencyRequest,
+  type IdempotencySignals,
+} from '../../../../shared/validation/idempotent-create';
 
 /** 409 si la moneda del plan cambió entre la resolución del precio y el alta. */
 export const PLAN_CURRENCY_CHANGED_MESSAGE =
@@ -56,6 +62,10 @@ export interface AddTreatmentPlanItemInput {
   discountReasonNote?: string;
   notes?: string;
 }
+
+/** DX-574: 422 de una Idempotency-Key repetida con otro ítem. */
+export const ITEM_IDEMPOTENCY_KEY_REUSED_MESSAGE =
+  'Este tratamiento ya se añadió al plan con otros datos. Revisa el plan antes de volver a intentarlo.';
 
 @Injectable()
 export class AddTreatmentPlanItemUseCase {
@@ -83,6 +93,28 @@ export class AddTreatmentPlanItemUseCase {
     planId: string,
     input: AddTreatmentPlanItemInput,
     actor: DiscountActor,
+    idempotency?: { idempotencyKey?: string; signals?: IdempotencySignals },
+  ): Promise<TreatmentPlanItem> {
+    // DX-574: un reintento tras un corte de red con la misma clave devuelve
+    // el ítem ya añadido, antes de volver a resolver precios y tasas.
+    const request = idempotencyRequest(idempotency?.idempotencyKey, [
+      'TREATMENT_PLAN_ITEM',
+      planId,
+      input,
+    ]);
+    return idempotentCreate(request, {
+      find: (key) => this.repo.findItemByIdempotencyKey(key),
+      create: () => this.add(planId, input, actor, request),
+      reusedMessage: ITEM_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+      signals: idempotency?.signals,
+    });
+  }
+
+  private async add(
+    planId: string,
+    input: AddTreatmentPlanItemInput,
+    actor: DiscountActor,
+    idempotency: IdempotencyRequest | undefined,
   ): Promise<TreatmentPlanItem> {
     // DX-105: la resolución del precio necesita el paciente y la moneda del
     // plan, y se hace ANTES de la transacción del alta (solo lee).
@@ -153,38 +185,42 @@ export class AddTreatmentPlanItemUseCase {
 
     // BE-036: el estado del plan se valida con su fila bloqueada, dentro de
     // la transacción del alta.
-    return this.repo.addItem(planId, (plan) => {
-      assertItemsEditable(plan);
-      // Después del bloqueo: un plan firmado responde 409 antes que este 400.
-      assertDiscountAllowed(resolved.allowDiscount, discountInput);
-      if (plan.currency !== current.currency) {
-        throw new ConflictException(PLAN_CURRENCY_CHANGED_MESSAGE);
-      }
-      let decision = NO_DISCOUNT;
-      if (policy) {
-        assertPlanDiscountable(plan);
-        decision = decideDiscount(policy, actor, discountInput, at);
-      }
-      return {
-        toothNumber: input.toothNumber,
-        surfaces: input.surfaces,
-        catalogItemId: input.catalogItemId,
-        catalogPrice: resolved.price,
-        pricing: {
-          basePrice: resolved.basePrice,
-          catalogCurrency,
-          priceSource: resolved.source,
-          agreementId: resolved.agreementId,
-          agreementName: resolved.agreementName,
-          pricingLocationId: context.locationId,
-          reference,
-        },
-        price,
-        discount,
-        notes: input.notes,
-        createdById: actor.userId,
-        ...decision,
-      };
-    });
+    return this.repo.addItem(
+      planId,
+      (plan) => {
+        assertItemsEditable(plan);
+        // Después del bloqueo: un plan firmado responde 409 antes que este 400.
+        assertDiscountAllowed(resolved.allowDiscount, discountInput);
+        if (plan.currency !== current.currency) {
+          throw new ConflictException(PLAN_CURRENCY_CHANGED_MESSAGE);
+        }
+        let decision = NO_DISCOUNT;
+        if (policy) {
+          assertPlanDiscountable(plan);
+          decision = decideDiscount(policy, actor, discountInput, at);
+        }
+        return {
+          toothNumber: input.toothNumber,
+          surfaces: input.surfaces,
+          catalogItemId: input.catalogItemId,
+          catalogPrice: resolved.price,
+          pricing: {
+            basePrice: resolved.basePrice,
+            catalogCurrency,
+            priceSource: resolved.source,
+            agreementId: resolved.agreementId,
+            agreementName: resolved.agreementName,
+            pricingLocationId: context.locationId,
+            reference,
+          },
+          price,
+          discount,
+          notes: input.notes,
+          createdById: actor.userId,
+          ...decision,
+        };
+      },
+      idempotency,
+    );
   }
 }

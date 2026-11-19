@@ -245,6 +245,11 @@ describe('Idiomas de los pacientes (e2e, DX-497)', () => {
       .expect(200);
     const start = new Date(Date.now() + 3 * 24 * 3_600_000);
     start.setUTCHours(14, 0, 0, 0);
+    // Un día laborable: un jueves, +3 días caía en domingo y la sede cerrada
+    // daba 422 (fuera de horario).
+    while (start.getUTCDay() === 0 || start.getUTCDay() === 6) {
+      start.setUTCDate(start.getUTCDate() + 1);
+    }
     const appt = await as(api().post('/api/v1/appointments'), tokens.ADMIN)
       .send({
         patientId,

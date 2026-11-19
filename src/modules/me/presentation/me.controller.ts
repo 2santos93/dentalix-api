@@ -5,6 +5,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Patch,
   Post,
@@ -22,6 +23,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiConsumes,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiServiceUnavailableResponse,
@@ -61,6 +63,8 @@ import {
   DeliveredSession,
   SessionCookieService,
 } from '../../auth/presentation/session-cookie.service';
+import { GetDeviceDraftKeyUseCase } from '../application/use-cases/get-device-draft-key.use-case';
+import { DraftKeyDto } from './dto/draft-key.dto';
 
 /**
  * `/me` describe el perfil DENTRO de una clínica (tenant + rol), y este
@@ -110,7 +114,35 @@ export class MeController {
     private readonly cookie: SessionCookieService,
     private readonly userSessions: UserSessionsService,
     private readonly prisma: PrismaService,
+    private readonly getDeviceDraftKey: GetDeviceDraftKeyUseCase,
   ) {}
+
+  /**
+   * DX-574: la clave con la que la web cifra en el dispositivo los borradores
+   * de los formularios clínicos. Exige la sesión VIVA en la BD (familia de
+   * refresh sin revocar, `tokenVersion` vigente, membresía y clínica activas):
+   * ver `GetDeviceDraftKeyUseCase`. Vive solo en la memoria de la pestaña.
+   */
+  @Get('draft-key')
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({
+    summary: 'Clave de los borradores cifrados en el dispositivo (DX-574)',
+  })
+  @ApiOkResponse({ type: DraftKeyDto })
+  @ApiUnauthorizedResponse({
+    description:
+      'Sin sesión de clínica, o la sesión ya no está viva: revocada o caducada, `tokenVersion` cambiada (contraseña o MFA), membresía retirada o clínica dada de baja',
+  })
+  @ApiForbiddenResponse({
+    description: 'Acceso de soporte (break-glass): sin borradores locales',
+  })
+  @ApiServiceUnavailableResponse({
+    description:
+      'El servidor no tiene DEVICE_DRAFT_KEY_SECRET (fuera de producción)',
+  })
+  draftKey(@Req() req: AuthenticatedRequest): Promise<DraftKeyDto> {
+    return this.getDeviceDraftKey.execute(tenantUserOrThrow(req.user));
+  }
 
   /**
    * DX-359: sede activa del actor para su evento de auditoría, con las mismas

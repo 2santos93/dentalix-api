@@ -51,6 +51,12 @@ import {
   type ClinicDocumentTypeNames,
 } from '../../../patients/domain/document-type';
 import { DocumentTypeNamesReader } from '../../../patients/domain/ports/document-type-names-repository.port';
+import {
+  idempotencyRequest,
+  idempotentCreate,
+  type IdempotencyRequest,
+  type IdempotencySignals,
+} from '../../../../shared/validation/idempotent-create';
 
 export type PrescriptionClock = () => Date;
 export const PRESCRIPTION_CLOCK = Symbol('PRESCRIPTION_CLOCK');
@@ -242,6 +248,10 @@ export class GetPrescriptionIssuerUseCase {
   }
 }
 
+/** DX-574: 422 de una Idempotency-Key repetida con otra receta. */
+export const PRESCRIPTION_IDEMPOTENCY_KEY_REUSED_MESSAGE =
+  'Esta receta ya se emitió con otros medicamentos o con otros datos. Revisa las recetas del paciente antes de volver a intentarlo.';
+
 @Injectable()
 export class IssuePrescriptionUseCase {
   constructor(
@@ -264,6 +274,29 @@ export class IssuePrescriptionUseCase {
     patientId: string,
     input: IssuePrescriptionInput,
     professionalUserId: string,
+    idempotency?: { idempotencyKey?: string; signals?: IdempotencySignals },
+  ): Promise<Prescription> {
+    // DX-574: un reintento tras un corte de red con la misma clave devuelve
+    // la receta ya emitida, ANTES de recalcular los avisos (la anamnesis pudo
+    // cambiar entre medias y daría un 409 sobre una receta que ya existe).
+    const request = idempotencyRequest(idempotency?.idempotencyKey, [
+      'PRESCRIPTION',
+      patientId,
+      input,
+    ]);
+    return idempotentCreate(request, {
+      find: (key) => this.repo.findByIdempotencyKey(key),
+      create: () => this.issue(patientId, input, professionalUserId, request),
+      reusedMessage: PRESCRIPTION_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+      signals: idempotency?.signals,
+    });
+  }
+
+  private async issue(
+    patientId: string,
+    input: IssuePrescriptionInput,
+    professionalUserId: string,
+    idempotency: IdempotencyRequest | undefined,
   ): Promise<Prescription> {
     const patient = await this.repo.loadPatient(patientId);
     if (!patient) {
@@ -364,10 +397,13 @@ export class IssuePrescriptionUseCase {
       safetyOverrideReason: hasBlockingAlerts(safety.alerts) ? reason : null,
       items,
     };
-    const created = await this.repo.create({
-      ...content,
-      contentHash: computePrescriptionHash(content),
-    });
+    const created = await this.repo.create(
+      {
+        ...content,
+        contentHash: computePrescriptionHash(content),
+      },
+      idempotency,
+    );
 
     if (providedLicense) {
       await this.repo.saveProfessionalLicense(

@@ -14,6 +14,12 @@ import {
   locationRequired,
 } from '../../../../shared/locations/reference-location';
 import { UNKNOWN_CURRENCY_MESSAGE } from '../../../../shared/money/currency-messages';
+import {
+  idempotencyRequest,
+  idempotentCreate,
+  type IdempotencyRequest,
+  type IdempotencySignals,
+} from '../../../../shared/validation/idempotent-create';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and a
@@ -24,6 +30,10 @@ export interface CreateTreatmentPlanInput {
   notes?: string;
   createdById?: string;
 }
+
+/** DX-574: 422 de una Idempotency-Key repetida con otro plan. */
+export const PLAN_IDEMPOTENCY_KEY_REUSED_MESSAGE =
+  'Este plan ya se creó con otros datos (otro paciente u otra moneda). Revisa los planes del paciente antes de volver a intentarlo.';
 
 @Injectable()
 export class CreateTreatmentPlanUseCase {
@@ -42,7 +52,31 @@ export class CreateTreatmentPlanUseCase {
     private readonly planCurrency: PlanCurrencySource,
   ) {}
 
-  async execute(input: CreateTreatmentPlanInput): Promise<TreatmentPlan> {
+  /**
+   * DX-574: con Idempotency-Key, un reintento tras un corte de red devuelve
+   * el plan que ya creó (sin otro borrador vacío).
+   */
+  async execute(
+    input: CreateTreatmentPlanInput,
+    idempotency?: { idempotencyKey?: string; signals?: IdempotencySignals },
+  ): Promise<TreatmentPlan> {
+    const request = idempotencyRequest(idempotency?.idempotencyKey, [
+      'TREATMENT_PLAN',
+      input.patientId,
+      { currency: input.currency, notes: input.notes },
+    ]);
+    return idempotentCreate(request, {
+      find: (key) => this.repo.findPlanByIdempotencyKey(key),
+      create: () => this.create(input, request),
+      reusedMessage: PLAN_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+      signals: idempotency?.signals,
+    });
+  }
+
+  private async create(
+    input: CreateTreatmentPlanInput,
+    idempotency: IdempotencyRequest | undefined,
+  ): Promise<TreatmentPlan> {
     // Sin `currency`: la de la sede activa o la común de la clínica (R14). Se
     // valida contra la tabla `currencies` en ambos casos, así que un cliente no
     // puede forzar un código desconocido ni por omisión ni con un valor erróneo.
@@ -55,12 +89,15 @@ export class CreateTreatmentPlanUseCase {
 
     await assertPatientInClinic(this.patients, input.patientId);
 
-    return this.repo.createPlan({
-      patientId: input.patientId,
-      currency,
-      notes: input.notes,
-      createdById: input.createdById,
-    });
+    return this.repo.createPlan(
+      {
+        patientId: input.patientId,
+        currency,
+        notes: input.notes,
+        createdById: input.createdById,
+      },
+      idempotency,
+    );
   }
 
   private async defaultCurrency(): Promise<string> {

@@ -47,6 +47,7 @@ function makeRepo(
     getLatest: (): Promise<MedicalHistory | null> => Promise.resolve(null),
     createVersion: (): Promise<MedicalHistory> =>
       Promise.reject(new Error('not implemented in this fake')),
+    findByIdempotencyKey: () => Promise.resolve(null),
     ...overrides,
   };
 }

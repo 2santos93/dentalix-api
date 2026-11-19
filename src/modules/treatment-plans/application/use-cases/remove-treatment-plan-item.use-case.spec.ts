@@ -69,6 +69,8 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     addItem: (): Promise<TreatmentPlanItem> =>
       Promise.reject(new Error('not implemented in this fake')),
+    findPlanByIdempotencyKey: () => Promise.resolve(null),
+    findItemByIdempotencyKey: () => Promise.resolve(null),
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
     updateItem: (): Promise<TreatmentPlanItemUpdate> =>
@@ -86,6 +88,8 @@ function makeRepo(
 describe('RemoveTreatmentPlanItemUseCase', () => {
   it('throws NotFoundException when the item does not exist (or belongs to another tenant)', async () => {
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: (): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(null),
       softDeleteItem: (): Promise<void> =>
@@ -101,6 +105,8 @@ describe('RemoveTreatmentPlanItemUseCase', () => {
   it('DX-111: un ítem de otro plan responde 404 y no se borra', async () => {
     const existing = fakeItem({ planId: 'plan1' });
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: (): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(existing),
       softDeleteItem: (): Promise<void> =>
@@ -121,6 +127,8 @@ describe('RemoveTreatmentPlanItemUseCase', () => {
     const existing = fakeItem();
     let softDeletedId: string | undefined;
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: (id: string): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(id === existing.id ? existing : null),
       softDeleteItem: (id: string): Promise<void> => {
@@ -159,6 +167,8 @@ describe('RemoveTreatmentPlanItemUseCase', () => {
   it('SEC-050: el ítem de un cargo por inasistencia vigente no se quita (409) y no se toca', async () => {
     const existing = fakeItem({ cancellationFeeAppointmentId: 'appt-1' });
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: () => Promise.resolve(existing),
       softDeleteItem: (): Promise<void> =>
         Promise.reject(new Error('softDeleteItem should not be called')),

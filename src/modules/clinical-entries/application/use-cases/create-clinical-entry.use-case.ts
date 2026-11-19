@@ -57,6 +57,22 @@ import {
   signingWarnings,
   type ClinicalEntryWarning,
 } from '../../domain/author-license';
+import {
+  idempotencyRequest,
+  idempotentCreate,
+  type IdempotencyRequest,
+  type IdempotencySignals,
+} from '../../../../shared/validation/idempotent-create';
+
+/** DX-574: 422 de una Idempotency-Key repetida con otra evolución. */
+export const ENTRY_IDEMPOTENCY_KEY_REUSED_MESSAGE =
+  'Esta evolución ya se guardó con otro texto o con otros datos. Revisa la historia clínica antes de volver a intentarlo.';
+
+/** DX-574: la Idempotency-Key del alta (reintento tras un corte de red). */
+export interface ClinicalEntryIdempotency {
+  idempotencyKey?: string;
+  signals?: IdempotencySignals;
+}
 
 export const ENTRY_APPOINTMENT_NOT_FOUND_MESSAGE =
   'Cita no encontrada en esta clínica';
@@ -166,6 +182,53 @@ export class CreateClinicalEntryUseCase {
     performedById: string,
     audit?: AuditRequestContext,
     attach?: ClinicalEntryAttachment,
+    idempotency?: ClinicalEntryIdempotency,
+  ): Promise<CreatedClinicalEntry> {
+    // DX-574: repetir la MISMA petición con la misma clave devuelve la
+    // evolución original (sin otra fila ni otro recall); se mira antes de
+    // validar para que un reintento tardío (p. ej. la cita ya pasó) no falle.
+    const request = idempotencyRequest(idempotency?.idempotencyKey, [
+      'CLINICAL_ENTRY',
+      patientId,
+      input,
+    ]);
+    return idempotentCreate(request, {
+      find: async (key) => {
+        const stored = await this.repo.findByIdempotencyKey(key);
+        if (!stored) return null;
+        // Mismo paciente o 422: la huella lleva el paciente de la ruta.
+        return {
+          fingerprint: stored.fingerprint,
+          value: await this.replayed(stored.value),
+        };
+      },
+      create: () =>
+        this.create(patientId, input, performedById, audit, attach, request),
+      reusedMessage: ENTRY_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+      signals: idempotency?.signals,
+    });
+  }
+
+  /** DX-574: la evolución original, con los avisos de su firma y sin recall. */
+  private async replayed(entry: ClinicalEntry): Promise<CreatedClinicalEntry> {
+    const { warnMissingProfessionalLicense } = await this.settings.get();
+    return {
+      ...entry,
+      warnings: signingWarnings({
+        warnMissingProfessionalLicense,
+        professionalLicense: entry.authorProfessionalLicense,
+      }),
+      recallUpdates: [],
+    };
+  }
+
+  private async create(
+    patientId: string,
+    input: CreateClinicalEntryInput,
+    performedById: string,
+    audit: AuditRequestContext | undefined,
+    attach: ClinicalEntryAttachment | undefined,
+    idempotency: IdempotencyRequest | undefined,
   ): Promise<CreatedClinicalEntry> {
     // DX-038: autoría obligatoria (la BD además exige performedById NOT NULL).
     const author = assertAuthor(performedById);
@@ -235,6 +298,7 @@ export class CreateClinicalEntryUseCase {
         : undefined,
       audit,
       attach,
+      idempotency,
     });
     return {
       ...created,
