@@ -53,7 +53,24 @@ import {
   RECALL_NOT_FOUND_MESSAGE,
   RECALL_TYPE_NOT_FOUND_MESSAGE,
   SetPatientRecallUseCase,
+  BATCH_DUPLICATE_MESSAGE,
+  BATCH_EMPTY_MESSAGE,
+  BATCH_NO_BOOKED_MESSAGE,
+  BATCH_NOT_FOUND_MESSAGE,
+  BATCH_TOO_MANY_MESSAGE,
+  ClearPhoneReviewUseCase,
+  CreateRecallContactsBatchUseCase,
+  RECALL_SETTINGS_LOCATION_NOT_FOUND_MESSAGE,
+  UpdateRecallSettingsUseCase,
 } from './recall.use-cases';
+import {
+  CALLBACK_ON_ONLY_CALL_BACK_MESSAGE,
+  CALLBACK_ON_PAST_MESSAGE,
+  CALLBACK_ON_REQUIRED_MESSAGE,
+  CALLBACK_ON_TOO_FAR_MESSAGE,
+  RECALL_SETTINGS_HIDE_DAYS_MESSAGE,
+} from '../../domain/recall-cycle';
+import { ConflictException } from '@nestjs/common';
 
 // DX-551 (TST-065): los casos de uso del recall con un doble del repositorio
 // en memoria. El reloj va fijo: 12:00 en Caracas del 6 de noviembre de 2026.
@@ -1688,5 +1705,336 @@ describe('CreateDefaultRecallUseCase (DX-015-bis, D15)', () => {
         appointmentId: 'cita-hoy',
       }),
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DX-465: intentos con desenlace, lote, ajustes por sede y teléfono por revisar
+// ---------------------------------------------------------------------------
+
+const AUDIT: AuditRequestContext = {
+  tenantId: 'clinica-a',
+  locationId: null,
+  actor: { userId: 'recepcion', role: 'RECEPTION' },
+  requestId: 'req-1',
+  ip: null,
+  userAgent: null,
+};
+
+describe('CreateRecallContactUseCase · «Llamar luego» y «Agendó» repetido (DX-465)', () => {
+  let repo: InMemoryRecallRepository;
+  let recallId: string;
+
+  beforeEach(() => {
+    repo = new InMemoryRecallRepository();
+    recallId = repo.seedRecall({ patientId: 'pac-1' }).id;
+    repo.appointments.push({
+      id: 'cita-pac-1',
+      patientId: 'pac-1',
+      locationId: NORTE,
+      day: '2026-11-20',
+      status: 'SCHEDULED',
+    });
+  });
+
+  const create = (
+    input: Parameters<CreateRecallContactUseCase['execute']>[1],
+  ) => {
+    const { ctx, inRequest } = requestContext();
+    const useCase = new CreateRecallContactUseCase(repo, ctx, clock);
+    return inRequest(() => useCase.execute(recallId, input, 'recepcion'));
+  };
+
+  it('CALL_BACK con fecha de hoy a 90 días (hoy de la sede del paciente) la pasa al repositorio', async () => {
+    await create({
+      channel: 'CALL',
+      outcome: 'CALL_BACK',
+      callbackOn: SEDE_DAY,
+    });
+    await create({
+      channel: 'CALL',
+      outcome: 'CALL_BACK',
+      callbackOn: '2027-02-04',
+    });
+    expect(repo.createdContacts.map((c) => c.callbackOn)).toEqual([
+      SEDE_DAY,
+      '2027-02-04',
+    ]);
+  });
+
+  it('CALL_BACK sin fecha sigue valiendo (contrato de DX-015): oculta los días de la sede', async () => {
+    await create({ channel: 'CALL', outcome: 'CALL_BACK' });
+    expect(repo.createdContacts[0].callbackOn).toBeNull();
+  });
+
+  it.each<[string, string, string]>([
+    ['ayer', '2026-11-05', CALLBACK_ON_PAST_MESSAGE],
+    ['a 91 días', '2027-02-05', CALLBACK_ON_TOO_FAR_MESSAGE],
+  ])(
+    'CALL_BACK con fecha %s da 400 y no escribe',
+    async (_label, day, message) => {
+      await expect(
+        create({ channel: 'CALL', outcome: 'CALL_BACK', callbackOn: day }),
+      ).rejects.toThrow(new BadRequestException(message));
+      expect(repo.createdContacts).toEqual([]);
+    },
+  );
+
+  it('una fecha con otro desenlace da 400', async () => {
+    await expect(
+      create({
+        channel: 'CALL',
+        outcome: 'NO_ANSWER',
+        callbackOn: '2026-11-10',
+      }),
+    ).rejects.toThrow(
+      new BadRequestException(CALLBACK_ON_ONLY_CALL_BACK_MESSAGE),
+    );
+  });
+
+  it('con fecha y la sede sin zona: 409 LOCATION_TIMEZONE_REQUIRED, sin escribir', async () => {
+    repo.zoneOf.set(NORTE, null);
+    const error = await create({
+      channel: 'CALL',
+      outcome: 'CALL_BACK',
+      callbackOn: SEDE_DAY,
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: 'LOCATION_TIMEZONE_REQUIRED',
+    });
+    expect(repo.createdContacts).toEqual([]);
+    // Sin fecha no hace falta el «hoy» de la sede.
+    await expect(
+      create({ channel: 'CALL', outcome: 'NO_ANSWER' }),
+    ).resolves.toMatchObject({ replayed: false });
+  });
+
+  it('«Agendó» de una cita que ya lo tiene en este recall: el existente con replayed', async () => {
+    const first = await create({
+      channel: 'CALL',
+      outcome: 'BOOKED',
+      appointmentId: 'cita-pac-1',
+    });
+    const again = await create({
+      channel: 'WHATSAPP_LINK',
+      outcome: 'BOOKED',
+      appointmentId: 'cita-pac-1',
+    });
+    expect(first.replayed).toBe(false);
+    expect(again).toEqual({ contact: first.contact, replayed: true });
+    expect(repo.contacts).toHaveLength(1);
+  });
+});
+
+describe('CreateRecallContactsBatchUseCase (DX-465, D5)', () => {
+  let repo: InMemoryRecallRepository;
+  let ids: string[];
+
+  beforeEach(() => {
+    repo = new InMemoryRecallRepository();
+    ids = [
+      repo.seedRecall({ patientId: 'pac-1' }).id,
+      repo.seedRecall({ patientId: 'pac-2', locationId: SUR }).id,
+      repo.seedRecall({ patientId: 'pac-3' }).id,
+    ];
+  });
+
+  const batch = (
+    input: Partial<Parameters<CreateRecallContactsBatchUseCase['execute']>[0]>,
+    allowed?: readonly string[],
+  ) => {
+    const { ctx, inRequest } = requestContext(allowed);
+    const useCase = new CreateRecallContactsBatchUseCase(repo, ctx, clock);
+    return inRequest(() =>
+      useCase.execute(
+        {
+          recallIds: ids,
+          channel: 'CALL',
+          outcome: 'NO_ANSWER',
+          ...input,
+        },
+        'recepcion',
+        AUDIT,
+      ),
+    );
+  };
+
+  it('registra uno por recall, en el orden del cuerpo, con la sede de cada paciente y la nota recortada', async () => {
+    const out = await batch({ note: '  Sin respuesta  ' });
+    expect(out.map((c) => [c.recallId, c.locationId, c.note])).toEqual([
+      [ids[0], NORTE, 'Sin respuesta'],
+      [ids[1], SUR, 'Sin respuesta'],
+      [ids[2], NORTE, 'Sin respuesta'],
+    ]);
+    expect(repo.batches).toHaveLength(1);
+    expect(repo.batches[0].audit).toBe(AUDIT);
+    expect(repo.batches[0].data).toMatchObject({
+      channel: 'CALL',
+      outcome: 'NO_ANSWER',
+      authorId: 'recepcion',
+      callbackOn: null,
+    });
+  });
+
+  it.each<
+    [
+      string,
+      Partial<Parameters<CreateRecallContactsBatchUseCase['execute']>[0]>,
+      string,
+    ]
+  >([
+    ['vacía', { recallIds: [] }, BATCH_EMPTY_MESSAGE],
+    [
+      'de más de 50',
+      { recallIds: Array.from({ length: 51 }, (_, i) => `r-${i}`) },
+      BATCH_TOO_MANY_MESSAGE,
+    ],
+    [
+      'con un repetido',
+      { recallIds: ['recall-1', 'RECALL-1'] },
+      BATCH_DUPLICATE_MESSAGE,
+    ],
+    ['con «Agendó»', { outcome: 'BOOKED' }, BATCH_NO_BOOKED_MESSAGE],
+    [
+      '«Llamar luego» sin fecha',
+      { outcome: 'CALL_BACK' },
+      CALLBACK_ON_REQUIRED_MESSAGE,
+    ],
+    [
+      'fecha con otro desenlace',
+      { callbackOn: '2026-11-10' },
+      CALLBACK_ON_ONLY_CALL_BACK_MESSAGE,
+    ],
+    [
+      '«Llamar luego» con fecha pasada',
+      { outcome: 'CALL_BACK', callbackOn: '2026-11-01' },
+      CALLBACK_ON_PAST_MESSAGE,
+    ],
+  ])('lista %s: 400 sin escribir', async (_label, input, message) => {
+    await expect(batch(input)).rejects.toThrow(
+      new BadRequestException(message),
+    );
+    expect(repo.batches).toEqual([]);
+  });
+
+  it('404 con los ids que faltan; no escribe ninguno', async () => {
+    const error = await batch({
+      recallIds: [ids[0], 'no-existe'],
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect((error as NotFoundException).getResponse()).toMatchObject({
+      message: BATCH_NOT_FOUND_MESSAGE,
+      recallIds: ['no-existe'],
+    });
+    expect(repo.batches).toEqual([]);
+  });
+
+  it('un paciente de una sede no permitida: 403 y no se registra ninguno', async () => {
+    const error = await batch({}, [NORTE]).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ForbiddenException);
+    expect(repo.batches).toEqual([]);
+    await expect(
+      batch({ recallIds: [ids[0], ids[2]] }, [NORTE]),
+    ).resolves.toHaveLength(2);
+  });
+
+  it('«Llamar luego» con fecha válida para todos', async () => {
+    await batch({ outcome: 'CALL_BACK', callbackOn: '2026-11-20' });
+    expect(repo.batches[0].data.callbackOn).toBe('2026-11-20');
+  });
+});
+
+describe('Ajustes de intentos por sede (DX-465, D2)', () => {
+  it('valida antes de guardar y 404 si la sede no es de la clínica', async () => {
+    const repo = new InMemoryRecallRepository();
+    const update = new UpdateRecallSettingsUseCase(repo);
+    await expect(
+      update.execute(NORTE, { hideDays: 0, maxAttempts: 3 }, AUDIT),
+    ).rejects.toThrow(
+      new BadRequestException(RECALL_SETTINGS_HIDE_DAYS_MESSAGE),
+    );
+    expect(repo.calls).toEqual([]);
+    await expect(
+      update.execute('otra-sede', { hideDays: 5, maxAttempts: 2 }, AUDIT),
+    ).rejects.toThrow(
+      new NotFoundException(RECALL_SETTINGS_LOCATION_NOT_FOUND_MESSAGE),
+    );
+    await expect(
+      update.execute(NORTE, { hideDays: 5, maxAttempts: 2 }, AUDIT),
+    ).resolves.toMatchObject({ hideDays: 5, maxAttempts: 2 });
+  });
+});
+
+describe('Ficha: el ciclo de cada recall (DX-465)', () => {
+  it('intentos, tope, oculto hasta y «Llamar luego» con el «hoy» de la sede; un ciclo de otro vencimiento no cuenta', async () => {
+    const repo = new InMemoryRecallRepository();
+    const at = new Date('2026-11-05T03:30:00.000Z'); // 23:30 del 04/11 en la sede
+    const recall = repo.seedRecall({
+      patientId: 'pac-1',
+      lastDoneAt: '2026-04-01',
+      intervalMonths: 6,
+      cycle: {
+        attemptCount: 3,
+        lastAttemptAt: at,
+        callbackOn: null,
+        skipUntil: null,
+        cycleDueAt: '2026-10-01',
+      },
+    });
+    repo.seedRecall({
+      patientId: 'pac-1',
+      kind: 'HYGIENE',
+      lastDoneAt: '2026-04-01',
+      cycle: {
+        attemptCount: 2,
+        lastAttemptAt: at,
+        callbackOn: '2026-11-20',
+        skipUntil: null,
+        cycleDueAt: '2025-01-01',
+      },
+    });
+    repo.settings = { hideDays: 7, maxAttempts: 3 };
+    const out = await new GetPatientRecallsUseCase(repo, clock).execute(
+      'pac-1',
+    );
+    expect(out.recalls.find((r) => r.id === recall.id)).toMatchObject({
+      attempts: 3,
+      maxAttempts: 3,
+      exhausted: true,
+      lastAttemptAt: at,
+      hiddenUntil: '2026-11-11',
+      callbackOn: null,
+    });
+    expect(out.recalls.find((r) => r.kind === 'HYGIENE')).toMatchObject({
+      attempts: 0,
+      exhausted: false,
+      lastAttemptAt: null,
+      hiddenUntil: null,
+      callbackOn: null,
+    });
+  });
+});
+
+describe('ClearPhoneReviewUseCase (DX-465, D4)', () => {
+  it('404 si el paciente no existe; si no, si se quitó o no había nada', async () => {
+    const repo = new InMemoryRecallRepository();
+    const clear = new ClearPhoneReviewUseCase(repo);
+    await expect(clear.execute('nadie', AUDIT)).rejects.toThrow(
+      new NotFoundException(PATIENT_NOT_FOUND_MESSAGE),
+    );
+    repo.patients.add('pac-1');
+    repo.phoneReview.set('pac-1', {
+      flaggedAt: NOW,
+      flaggedBy: { id: 'recepcion', fullName: 'Recepción' },
+    });
+    await expect(clear.execute('pac-1', AUDIT)).resolves.toEqual({
+      patientId: 'pac-1',
+      cleared: true,
+    });
+    await expect(clear.execute('pac-1', AUDIT)).resolves.toEqual({
+      patientId: 'pac-1',
+      cleared: false,
+    });
   });
 });
