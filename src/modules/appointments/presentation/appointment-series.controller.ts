@@ -84,7 +84,7 @@ export class AppointmentSeriesController {
   })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos (como al agendar), intervalo fuera de 1–12, sin `count` ni `until` (o los dos), `count` fuera de 2–26, `until` inválido, anterior a la base, a más de un año o con más de 26 citas, o la cita base en el pasado',
+      'Datos inválidos (como al agendar), intervalo fuera de 1–12, sin `count` ni `until` (o los dos), `count` fuera de 2–26, o `until` inválido, anterior a la base, a más de un año o con más de 26 citas. Una fecha en el pasado no es 400: sale como `CONFLICT` con `PAST`',
   })
   @ApiForbiddenResponse({ description: 'Sede no permitida al usuario' })
   @ApiNotFoundResponse({
