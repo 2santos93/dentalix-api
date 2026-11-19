@@ -76,7 +76,7 @@ import {
   ConfirmStatementDto,
   CreateBankAccountDto,
   CreateBankMatchDto,
-  IdDto,
+  BankMatchIdDto,
   MovementCandidatesDto,
   PreviewStatementDto,
   ReconciliationItemsDto,
@@ -483,7 +483,7 @@ export class BankReconciliationController {
     summary:
       'Deshacer un emparejado (queda en la historia; el movimiento vuelve a «Sin abono»)',
   })
-  @ApiOkResponse({ type: IdDto })
+  @ApiOkResponse({ type: BankMatchIdDto })
   @ApiNotFoundResponse({ description: 'No existe ese emparejado.' })
   @ApiConflictResponse({ description: 'BANK_MATCH_ALREADY_ENDED' })
   unmatch(

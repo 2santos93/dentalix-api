@@ -70,7 +70,12 @@ export interface BankAccountView {
   amountTolerance: number;
   active: boolean;
   columnMapping: unknown;
-  paymentMethods: { id: string; name: string; kind: PaymentMethodKind }[];
+  paymentMethods: {
+    id: string;
+    name: string;
+    kind: PaymentMethodKind;
+    requiresReference: boolean;
+  }[];
   lastImport: BankImportView | null;
   createdAt: Date;
 }
@@ -346,7 +351,11 @@ const ACCOUNT_SELECT = {
   columnMapping: true,
   createdAt: true,
   paymentMethods: {
-    select: { paymentMethod: { select: { id: true, name: true, kind: true } } },
+    select: {
+      paymentMethod: {
+        select: { id: true, name: true, kind: true, requiresReference: true },
+      },
+    },
     orderBy: { createdAt: 'asc' },
   },
   imports: {

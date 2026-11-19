@@ -225,9 +225,11 @@ export class BankAccountMethodDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;
   @ApiProperty({ enum: PaymentMethodKind }) kind!: PaymentMethodKind;
+  @ApiProperty({ description: 'El medio pide referencia (DX-377).' })
+  requiresReference!: boolean;
 }
 
-class UserRefDto {
+class BankUserRefDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;
 }
@@ -253,7 +255,7 @@ export class BankStatementImportDto {
   @ApiProperty({ type: String, nullable: true, example: '2026-10-31' })
   periodTo!: string | null;
   @ApiProperty() createdAt!: Date;
-  @ApiProperty({ type: UserRefDto }) createdBy!: UserRefDto;
+  @ApiProperty({ type: BankUserRefDto }) createdBy!: BankUserRefDto;
 }
 
 export class BankAccountDto {
@@ -375,12 +377,12 @@ export class BankMovementDto {
   @ApiProperty({ type: String, nullable: true }) description!: string | null;
 }
 
-class RefNameDto {
+class BankRefNameDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;
 }
 
-class PatientRefDto {
+class BankPatientRefDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() fullName!: string;
 }
@@ -397,20 +399,20 @@ export class ReconciliationPaymentDto {
   collectedAmount!: number;
   @ApiProperty() currency!: string;
   @ApiProperty({ type: String, nullable: true }) reference!: string | null;
-  @ApiProperty({ type: RefNameDto, nullable: true })
-  paymentMethod!: RefNameDto | null;
+  @ApiProperty({ type: BankRefNameDto, nullable: true })
+  paymentMethod!: BankRefNameDto | null;
   @ApiProperty({ type: String, nullable: true }) receiptNumber!: string | null;
   @ApiProperty({
     description: 'Tiene comprobante (GET /payments/:id/proof/url).',
   })
   hasProof!: boolean;
-  @ApiProperty({ type: PatientRefDto }) patient!: PatientRefDto;
-  @ApiProperty({ type: RefNameDto }) location!: RefNameDto;
+  @ApiProperty({ type: BankPatientRefDto }) patient!: BankPatientRefDto;
+  @ApiProperty({ type: BankRefNameDto }) location!: BankRefNameDto;
   @ApiProperty({ type: String, nullable: true, format: 'uuid' })
   treatmentPlanId!: string | null;
 }
 
-class MatchRefDto {
+class BankMatchRefDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ enum: BankReconciliationMatchKind })
   kind!: BankReconciliationMatchKind;
@@ -423,8 +425,8 @@ export class ReconciliationItemDto {
   movement!: BankMovementDto | null;
   @ApiProperty({ type: ReconciliationPaymentDto, nullable: true })
   payment!: ReconciliationPaymentDto | null;
-  @ApiProperty({ type: MatchRefDto, nullable: true })
-  match!: MatchRefDto | null;
+  @ApiProperty({ type: BankMatchRefDto, nullable: true })
+  match!: BankMatchRefDto | null;
 }
 
 export class ReconciliationItemsDto extends ReconciliationSummaryDto {
@@ -446,8 +448,8 @@ export class CandidateReportDto {
   @ApiProperty() currency!: string;
   @ApiProperty({ type: String, nullable: true }) reference!: string | null;
   @ApiProperty() paidOn!: string;
-  @ApiProperty({ type: RefNameDto }) paymentMethod!: RefNameDto;
-  @ApiProperty({ type: PatientRefDto }) patient!: PatientRefDto;
+  @ApiProperty({ type: BankRefNameDto }) paymentMethod!: BankRefNameDto;
+  @ApiProperty({ type: BankPatientRefDto }) patient!: BankPatientRefDto;
   @ApiProperty() referenceMatches!: boolean;
 }
 
@@ -476,6 +478,6 @@ export class AutoMatchResultDto {
   @ApiProperty() matched!: number;
 }
 
-export class IdDto {
+export class BankMatchIdDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
 }
