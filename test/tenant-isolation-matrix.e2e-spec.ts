@@ -4398,6 +4398,23 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'bank-reconciliation.e2e-spec.ts',
+      checks:
+        'B → 404 en las listas, el resumen, el historial, la edición, «Volver a emparejar», la inspección, la vista previa y la importación de la cuenta de A, en los candidatos de un movimiento de A y al deshacer un emparejado de A; el extracto de B con la misma referencia empareja SOLO su abono y la cuenta y el emparejado de A siguen igual (DX-571)',
+      routes: [
+        'PATCH /bank-reconciliation/accounts/:id',
+        'GET /bank-reconciliation/accounts/:id/statements',
+        'POST /bank-reconciliation/accounts/:id/statements/inspect',
+        'POST /bank-reconciliation/accounts/:id/statements/preview',
+        'POST /bank-reconciliation/accounts/:id/statements',
+        'GET /bank-reconciliation/accounts/:id/summary',
+        'GET /bank-reconciliation/accounts/:id/items',
+        'POST /bank-reconciliation/accounts/:id/auto-match',
+        'GET /bank-reconciliation/movements/:id/candidates',
+        'DELETE /bank-reconciliation/matches/:id',
+      ],
+    },
+    {
       spec: 'message-templates.e2e-spec.ts',
       checks:
         'B → con la misma clave, canal e idioma guarda, prueba, previsualiza y restablece SOLO su texto: el de A sigue igual, B no lo ve en su catálogo ni le llega en su prueba (DX-565)',

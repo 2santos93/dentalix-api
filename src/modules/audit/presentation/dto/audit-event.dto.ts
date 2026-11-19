@@ -150,6 +150,10 @@ export class AuditImportBatchDto {
   @ApiPropertyOptional() errors?: number;
   @ApiPropertyOptional() created?: number;
   @ApiPropertyOptional() updated?: number;
+  @ApiPropertyOptional({
+    description: 'DX-571: emparejados solos al importar un extracto del banco.',
+  })
+  matched?: number;
   @ApiPropertyOptional() undoneCreated?: number;
   @ApiPropertyOptional() undoneFilled?: number;
   @ApiPropertyOptional({

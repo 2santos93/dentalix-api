@@ -123,17 +123,27 @@ function importBatchOf(body: unknown): Record<string, unknown> | null {
       undoneCount?: unknown;
       remindersEnabledAt?: unknown;
     } | null;
+    // DX-571: la importación de un extracto del banco trae sus contadores
+    // planos (filas, entradas válidas, repetidas, con error, nuevas y
+    // emparejadas solas).
+    rows?: unknown;
+    valid?: unknown;
+    duplicates?: unknown;
+    errors?: unknown;
+    created?: unknown;
+    matched?: unknown;
   };
   const sheet = b.balances ?? undefined;
   const agenda = b.appointments ?? undefined;
   return {
     fileSha256: b.fileSha256,
     mode: b.duplicateMode,
-    rows: b.totals?.totalRows,
-    valid: b.totals?.validRows,
-    duplicates: b.totals?.duplicateRows,
-    errors: b.totals?.errorRows,
-    created: b.progress?.createdCount,
+    rows: b.totals?.totalRows ?? b.rows,
+    valid: b.totals?.validRows ?? b.valid,
+    duplicates: b.totals?.duplicateRows ?? b.duplicates,
+    errors: b.totals?.errorRows ?? b.errors,
+    created: b.progress?.createdCount ?? b.created,
+    matched: b.matched,
     updated: b.progress?.updatedCount,
     undoneCreated: b.undoneCreated,
     undoneFilled: b.undoneFilled,

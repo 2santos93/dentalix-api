@@ -355,6 +355,12 @@ model Tenant {
   creditRefunds               PatientCreditRefund[]
   // DX-570: líneas de vuelto de los abonos.
   paymentChangeLines          PaymentChangeLine[]
+  // DX-571: conciliación contra el extracto del banco.
+  bankAccounts                BankAccount[]
+  bankAccountPaymentMethods   BankAccountPaymentMethod[]
+  bankStatementImports        BankStatementImport[]
+  bankMovements               BankMovement[]
+  bankReconciliationMatches   BankReconciliationMatch[]
   creditRefundPayments        PatientCreditRefundPayment[]
   creditEntries               PatientCreditEntry[]
   creditRefundCounters        PatientCreditRefundCounter[]
@@ -488,6 +494,11 @@ model User {
   appointmentSeriesCreated          AppointmentSeries[]              @relation("AppointmentSeriesCreatedBy")
   // DX-565: textos de mensajes al paciente que guardó por última vez.
   messageTemplatesUpdated           MessageTemplate[]                @relation("MessageTemplateUpdatedBy")
+  // DX-571: conciliación bancaria.
+  bankAccountsCreated               BankAccount[]                    @relation("BankAccountCreatedBy")
+  bankStatementImportsCreated       BankStatementImport[]            @relation("BankStatementImportCreatedBy")
+  bankMatchesMade                   BankReconciliationMatch[]        @relation("BankMatchMatchedBy")
+  bankMatchesEnded                  BankReconciliationMatch[]        @relation("BankMatchEndedBy")
   patientAccessLinksCreated         PatientAccessLink[]              @relation("PatientAccessLinkCreatedBy")
   patientAccessLinksRevoked         PatientAccessLink[]              @relation("PatientAccessLinkRevokedBy")
   orthoVisitsAuthored               OrthoVisit[]
@@ -3086,6 +3097,8 @@ model Currency {
   creditRefunds      PatientCreditRefund[]   @relation("CreditRefundCurrency")
   // DX-570: líneas de vuelto en esta moneda.
   paymentChangeLines PaymentChangeLine[]     @relation("PaymentChangeLineCurrency")
+  bankAccounts       BankAccount[]           @relation("BankAccountCurrency")
+  bankMovements      BankMovement[]          @relation("BankMovementCurrency")
   creditEntries      PatientCreditEntry[]    @relation("CreditEntryCurrency")
 
   // DX-569: enlace de pago y reporte del paciente.
@@ -3215,15 +3228,17 @@ model ClinicPaymentMethod {
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
-  tenant         Tenant                     @relation(fields: [tenantId], references: [id])
-  payments       Payment[]
+  tenant          Tenant                     @relation(fields: [tenantId], references: [id])
+  payments        Payment[]
   // DX-516: sus ajustes (impuesto, recargo o descuento); ninguno por defecto.
-  adjustments    PaymentMethodAdjustment[]
+  adjustments     PaymentMethodAdjustment[]
   // DX-569: datos para pagar (de la clínica o de una sede) y reportes.
-  instructions   PaymentMethodInstruction[]
-  paymentReports PaymentReport[]
+  instructions    PaymentMethodInstruction[]
+  paymentReports  PaymentReport[]
   // DX-570: líneas de vuelto entregadas por este medio.
-  changeLines    PaymentChangeLine[]
+  changeLines     PaymentChangeLine[]
+  // DX-571: la cuenta en la que liquida (una como mucho).
+  bankAccountLink BankAccountPaymentMethod?
 
   // Destino de la FK compuesta de payments.paymentMethodId (SEC-004).
   @@unique([tenantId, id], map: "payment_methods_tenant_id_key")
@@ -3608,6 +3623,8 @@ model Payment {
 
   // DX-570: las líneas del vuelto (solo con `tenderedAmount`).
   changeLines PaymentChangeLine[]
+  // DX-571: emparejados con movimientos del extracto (historia; activo = endedAt null).
+  bankMatches BankReconciliationMatch[]
 
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   // DX-380: destino de la FK compuesta por clínica de `payment_base_retries`
@@ -5063,6 +5080,10 @@ enum AuditResourceType {
   // DX-556: prospecto (alta, edición, etapa, notas, conversión, lecturas de
   // la lista y anonimización de la retención).
   LEAD
+  // DX-571: conciliación bancaria.
+  BANK_ACCOUNT
+  BANK_STATEMENT_IMPORT
+  BANK_RECONCILIATION_MATCH
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -10171,4 +10192,161 @@ model PatientSource {
   // POR EXPRESIÓN, no declarable en Prisma:
   //   patient_sources_tenant_name_key UNIQUE ("tenantId", lower(name))
   @@map("patient_sources")
+}
+
+// ---------------------------------------------------------------------------
+// Conciliación bancaria (DX-571)
+// ---------------------------------------------------------------------------
+
+enum BankReconciliationMatchKind {
+  AUTO
+  MANUAL
+}
+
+enum BankReconciliationMatchEndReason {
+  UNMATCHED
+  PAYMENT_VOIDED
+}
+
+/// DX-571: cuenta que recibe transferencias y pagos móviles. `columnMapping`
+/// es el mapeo guardado del extracto de ese banco (cabecera por campo, orden
+/// de la fecha y separador decimal). Nunca se borra (`active`).
+model BankAccount {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  name            String
+  currency        String
+  amountTolerance Decimal  @default(0) @db.Decimal(14, 2)
+  columnMapping   Json?
+  active          Boolean  @default(true)
+  createdById     String   @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant         Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  currencyRef    Currency                   @relation("BankAccountCurrency", fields: [currency], references: [code], map: "bank_accounts_currency_fkey")
+  createdBy      User                       @relation("BankAccountCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "bank_accounts_created_by_fkey")
+  paymentMethods BankAccountPaymentMethod[]
+  imports        BankStatementImport[]
+  movements      BankMovement[]
+
+  @@unique([tenantId, name], map: "bank_accounts_tenant_name_key")
+  @@unique([tenantId, id], map: "bank_accounts_tenant_id_key")
+  @@index([currency], map: "bank_accounts_currency_idx")
+  @@index([createdById], map: "bank_accounts_created_by_idx")
+  @@map("bank_accounts")
+}
+
+/// DX-571: medio del catálogo que liquida en la cuenta. Un medio, una cuenta.
+model BankAccountPaymentMethod {
+  tenantId        String   @db.Uuid
+  bankAccountId   String   @db.Uuid
+  paymentMethodId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  account       BankAccount         @relation(fields: [tenantId, bankAccountId], references: [tenantId, id], onDelete: Restrict, map: "bank_account_payment_methods_account_fkey")
+  paymentMethod ClinicPaymentMethod @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "bank_account_payment_methods_method_fkey")
+
+  @@id([tenantId, bankAccountId, paymentMethodId])
+  @@unique([tenantId, paymentMethodId], map: "bank_account_payment_methods_method_key")
+  @@map("bank_account_payment_methods")
+}
+
+/// DX-571: importación confirmada de un extracto. Solo el hash del fichero y
+/// los contadores: ni el fichero ni su nombre. Append-only; `createdAt` la
+/// pone la BD (trigger).
+model BankStatementImport {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @db.Uuid
+  bankAccountId String    @db.Uuid
+  fileSha256    String    @db.Char(64)
+  fileFormat    String
+  totalRows     Int
+  creditRows    Int
+  createdRows   Int
+  duplicateRows Int
+  ignoredRows   Int
+  errorRows     Int
+  matchedRows   Int
+  periodFrom    DateTime? @db.Date
+  periodTo      DateTime? @db.Date
+  createdById   String    @db.Uuid
+  createdAt     DateTime  @default(now())
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  account   BankAccount    @relation(fields: [tenantId, bankAccountId], references: [tenantId, id], onDelete: Restrict, map: "bank_statement_imports_account_fkey")
+  createdBy User           @relation("BankStatementImportCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "bank_statement_imports_created_by_fkey")
+  movements BankMovement[]
+
+  @@unique([tenantId, id], map: "bank_statement_imports_tenant_id_key")
+  @@index([tenantId, bankAccountId, createdAt(sort: Desc)], map: "bank_statement_imports_account_created_idx")
+  @@index([createdById], map: "bank_statement_imports_created_by_idx")
+  @@map("bank_statement_imports")
+}
+
+/// DX-571: movimiento de ENTRADA del extracto. Datos de terceros: solo fecha,
+/// referencia, importe y descripción truncada (140). `naturalKey` =
+/// sha256(fecha|referencia normalizada|céntimos|ordinal), única por cuenta:
+/// el mismo extracto dos veces no duplica. Append-only.
+model BankMovement {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid
+  bankAccountId       String   @db.Uuid
+  importId            String   @db.Uuid
+  bookedOn            DateTime @db.Date
+  reference           String?
+  referenceNormalized String?
+  amount              Decimal  @db.Decimal(14, 2)
+  currency            String
+  description         String?
+  naturalKey          String   @db.Char(64)
+  createdAt           DateTime @default(now())
+
+  tenant      Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  account     BankAccount               @relation(fields: [tenantId, bankAccountId], references: [tenantId, id], onDelete: Restrict, map: "bank_movements_account_fkey")
+  statement   BankStatementImport       @relation(fields: [tenantId, importId], references: [tenantId, id], onDelete: Restrict, map: "bank_movements_import_fkey")
+  currencyRef Currency                  @relation("BankMovementCurrency", fields: [currency], references: [code], map: "bank_movements_currency_fkey")
+  matches     BankReconciliationMatch[]
+
+  @@unique([tenantId, bankAccountId, naturalKey], map: "bank_movements_account_key_key")
+  @@unique([tenantId, id], map: "bank_movements_tenant_id_key")
+  @@index([tenantId, bankAccountId, bookedOn], map: "bank_movements_account_booked_idx")
+  @@index([tenantId, importId], map: "bank_movements_import_idx")
+  @@index([currency], map: "bank_movements_currency_idx")
+  @@map("bank_movements")
+}
+
+/// DX-571: emparejado movimiento ↔ abono, con historia. Activo = `endedAt`
+/// null; únicos PARCIALES por movimiento y por abono entre los activos (solo
+/// en la migración 20270122090200: NO aceptes un diff de migrate dev que los
+/// declare completos). Trigger: solo se cierra un emparejado abierto.
+model BankReconciliationMatch {
+  id            String                            @id @default(uuid()) @db.Uuid
+  tenantId      String                            @db.Uuid
+  movementId    String                            @db.Uuid
+  paymentId     String                            @db.Uuid
+  /// Copias que pone el trigger (del movimiento y del abono) para leer los
+  /// activos por rango: cuenta + día, o paidAt.
+  bankAccountId String                            @db.Uuid
+  bookedOn      DateTime                          @db.Date
+  paidAt        DateTime
+  kind          BankReconciliationMatchKind
+  matchedById   String                            @db.Uuid
+  createdAt     DateTime                          @default(now())
+  endedAt       DateTime?
+  endedById     String?                           @db.Uuid
+  endReason     BankReconciliationMatchEndReason?
+
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  movement  BankMovement @relation(fields: [tenantId, movementId], references: [tenantId, id], onDelete: Restrict, map: "bank_reconciliation_matches_movement_fkey")
+  payment   Payment      @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "bank_reconciliation_matches_payment_fkey")
+  matchedBy User         @relation("BankMatchMatchedBy", fields: [matchedById], references: [id], onDelete: Restrict, map: "bank_reconciliation_matches_matched_by_fkey")
+  endedBy   User?        @relation("BankMatchEndedBy", fields: [endedById], references: [id], onDelete: Restrict, map: "bank_reconciliation_matches_ended_by_fkey")
+
+  @@index([tenantId, movementId], map: "bank_reconciliation_matches_movement_idx")
+  @@index([tenantId, paymentId], map: "bank_reconciliation_matches_payment_idx")
+  @@index([matchedById], map: "bank_reconciliation_matches_matched_by_idx")
+  @@index([endedById], map: "bank_reconciliation_matches_ended_by_idx")
+  @@map("bank_reconciliation_matches")
 }

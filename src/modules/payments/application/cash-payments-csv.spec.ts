@@ -32,6 +32,7 @@ function row(overrides: Partial<CashPaymentView> = {}): CashPaymentView {
     splitLines: null,
     receiptNumber: null,
     hasProof: false,
+    reconciled: false,
     adjustments: [],
     collectedAmount: overrides.amount ?? 150000,
     amountHidden: false,

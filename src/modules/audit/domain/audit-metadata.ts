@@ -590,6 +590,8 @@ export interface AuditImportBatch {
   errors?: number;
   created?: number;
   updated?: number;
+  /** DX-571: emparejados automáticos al importar un extracto del banco. */
+  matched?: number;
   undoneCreated?: number;
   undoneFilled?: number;
   /** DX-262: hoja de saldos del lote. */
@@ -789,6 +791,7 @@ const IMPORT_COUNTS = [
   'errors',
   'created',
   'updated',
+  'matched',
   'undoneCreated',
   'undoneFilled',
   'balanceRows',

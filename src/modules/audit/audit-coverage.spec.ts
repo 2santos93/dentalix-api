@@ -120,6 +120,7 @@ import { ExpenseReportsController } from '../expenses/presentation/expense-repor
 import { ExpensesController } from '../expenses/presentation/expenses.controller';
 import { CashOutflowsController } from '../expenses/presentation/cash-outflows.controller';
 import { PatientImportsController } from '../patient-imports/presentation/patient-imports.controller';
+import { BankReconciliationController } from '../bank-reconciliation/presentation/bank-reconciliation.controller';
 import {
   ProviderScheduleController,
   ScheduleRosterController,
@@ -156,6 +157,61 @@ const RES = { response: 'id' } as const;
 const plan = (param = 'id') => ({ lookup: 'treatmentPlan', param }) as const;
 
 const EXPECTED: Record<string, AuditOptions> = {
+  // DX-571: conciliación con el extracto del banco. La cuenta (alta, cambios,
+  // las listas con nombres de pacientes y «Volver a emparejar»), la
+  // importación (hash y contadores, nunca el contenido) y el emparejado a mano.
+  'POST /bank-reconciliation/accounts': {
+    action: 'CREATE',
+    resource: 'BANK_ACCOUNT',
+    resourceId: RES,
+  },
+  'PATCH /bank-reconciliation/accounts/:id': {
+    action: 'UPDATE',
+    resource: 'BANK_ACCOUNT',
+    resourceId: { param: 'id' },
+  },
+  'POST /bank-reconciliation/accounts/:id/statements': {
+    action: 'CREATE',
+    resource: 'BANK_STATEMENT_IMPORT',
+    resourceId: RES,
+    reason: 'IMPORT_CONFIRMED',
+    importBatch: true,
+  },
+  'GET /bank-reconciliation/accounts/:id/summary': {
+    action: 'VIEW',
+    resource: 'BANK_ACCOUNT',
+    resourceId: { param: 'id' },
+    reason: 'RECONCILIATION_SUMMARY',
+  },
+  'GET /bank-reconciliation/accounts/:id/items': {
+    action: 'VIEW',
+    resource: 'BANK_ACCOUNT',
+    resourceId: { param: 'id' },
+    reason: 'RECONCILIATION_ITEMS',
+  },
+  'POST /bank-reconciliation/accounts/:id/auto-match': {
+    action: 'UPDATE',
+    resource: 'BANK_ACCOUNT',
+    resourceId: { param: 'id' },
+    reason: 'AUTO_MATCH',
+  },
+  'GET /bank-reconciliation/movements/:id/candidates': {
+    action: 'VIEW',
+    resource: 'BANK_ACCOUNT',
+    reason: 'RECONCILIATION_CANDIDATES',
+  },
+  'POST /bank-reconciliation/matches': {
+    action: 'CREATE',
+    resource: 'BANK_RECONCILIATION_MATCH',
+    resourceId: RES,
+    reason: 'MANUAL_MATCH',
+  },
+  'DELETE /bank-reconciliation/matches/:id': {
+    action: 'DELETE',
+    resource: 'BANK_RECONCILIATION_MATCH',
+    resourceId: { param: 'id' },
+    reason: 'MANUAL_UNMATCH',
+  },
   'GET /treatment-plans/unscheduled': {
     action: 'VIEW',
     resource: 'TREATMENT_PLAN',
@@ -2646,6 +2702,12 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /appointments/series/:id/move/preview':
     'vista previa de mover las citas de la serie; no escribe',
   'POST /patient-imports/inspect': 'no escribe nada ni crea lote',
+  // DX-571: inspección y vista previa del extracto no escriben (como
+  // `inspect` de DX-107).
+  'POST /bank-reconciliation/accounts/:id/statements/inspect':
+    'no escribe nada',
+  'POST /bank-reconciliation/accounts/:id/statements/preview':
+    'no escribe nada',
   // DX-205: la vista previa de «Actualizar precios» del catálogo solo calcula.
   'POST /catalog/price-changes/preview':
     'vista previa de la subida de precios del catálogo; no escribe',
@@ -2759,6 +2821,7 @@ const CONTROLLERS: Type[] = [
   LabOrdersController,
   PatientDocumentsController,
   PatientImportsController,
+  BankReconciliationController,
   PlanVisitsController,
   AppointmentsController,
   PlanFollowUpController,

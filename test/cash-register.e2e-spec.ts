@@ -467,6 +467,8 @@ describe('Caja — GET /payments (e2e)', () => {
       receiptNumber: null,
       // DX-389: sembrado sin comprobante del cobro.
       hasProof: false,
+      // DX-571: sin conciliar con el extracto.
+      reconciled: false,
       // DX-516: sin ajustes por medio de pago, lo cobrado es el importe.
       adjustments: [],
       collectedAmount: 100000,
