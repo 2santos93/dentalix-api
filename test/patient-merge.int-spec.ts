@@ -593,6 +593,75 @@ describe('DX-266 · concurrencia', () => {
     return [await make('Uno'), await make('Dos')];
   }
 
+  it('DX-465 (ruling 4): con el teléfono del absorbido, el conservado hereda su marca de «teléfono por revisar»; con el suyo, no', async () => {
+    const [absorbed, kept] = await freshPair();
+    const flaggedAt = new Date('2026-11-01T15:00:00.000Z');
+    // El teléfono antes que la marca: cambiarlo la anula (trigger).
+    await owner.patient.update({
+      where: { id: absorbed },
+      data: { phone: '+58 412 555 0909' },
+    });
+    await owner.patient.update({
+      where: { id: absorbed },
+      data: {
+        phoneReviewFlaggedAt: flaggedAt,
+        phoneReviewFlaggedById: demoAdmin,
+      },
+    });
+    await owner.patient.update({
+      where: { id: kept },
+      data: { phone: '+58 414 555 0101' },
+    });
+    await inTenant(demoTenant, () =>
+      repo.merge(
+        { keptId: kept, absorbedId: absorbed, choices: { phone: 'ABSORBED' } },
+        new Date(),
+        ctx(),
+      ),
+    );
+    await expect(
+      owner.patient.findUniqueOrThrow({
+        where: { id: kept },
+        select: {
+          phone: true,
+          phoneReviewFlaggedAt: true,
+          phoneReviewFlaggedById: true,
+        },
+      }),
+    ).resolves.toEqual({
+      phone: '+58 412 555 0909',
+      phoneReviewFlaggedAt: flaggedAt,
+      phoneReviewFlaggedById: demoAdmin,
+    });
+    // Con su propio teléfono, el conservado no recibe la marca del otro.
+    const [absorbed2, kept2] = await freshPair();
+    // El teléfono antes que la marca: cambiarlo la anula (trigger).
+    await owner.patient.update({
+      where: { id: absorbed2 },
+      data: { phone: '+58 412 555 0808' },
+    });
+    await owner.patient.update({
+      where: { id: absorbed2 },
+      data: {
+        phoneReviewFlaggedAt: flaggedAt,
+        phoneReviewFlaggedById: demoAdmin,
+      },
+    });
+    await inTenant(demoTenant, () =>
+      repo.merge(
+        { keptId: kept2, absorbedId: absorbed2, choices: {} },
+        new Date(),
+        ctx(),
+      ),
+    );
+    await expect(
+      owner.patient.findUniqueOrThrow({
+        where: { id: kept2 },
+        select: { phoneReviewFlaggedAt: true },
+      }),
+    ).resolves.toEqual({ phoneReviewFlaggedAt: null });
+  });
+
   it('dos fusiones a la vez del mismo absorbido: una gana, la otra responde 409 y el absorbido apunta a un solo paciente', async () => {
     const [absorbed, keptA] = await freshPair();
     const [keptB] = await freshPair();

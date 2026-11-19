@@ -662,6 +662,13 @@ describe('Recall con intentos (DX-465, e2e)', () => {
     await expect(
       raw.recallContact.count({ where: { recallId, outcome: 'BOOKED' } }),
     ).resolves.toBe(1);
+    // Revisión (ruling 5): el evento del «Agendó» del servidor lleva la
+    // traza de la petición que creó la cita.
+    const [bookedEvent] = await raw.auditEvent.findMany({
+      where: { resourceType: 'RECALL_CONTACT', resourceId: booked[0].id },
+    });
+    expect(bookedEvent.requestId).toEqual(expect.any(String));
+    expect(bookedEvent.ip).not.toBeNull();
   });
 
   it('agendar desde recall (`recallContact`): el «Agendó» lleva el canal y la nota de recepción y la web después recibe ese mismo; validado en la transacción', async () => {
@@ -830,6 +837,12 @@ describe('Recall con intentos (DX-465, e2e)', () => {
       .send({ appointmentTypeId: urgentId })
       .expect(200);
     const { patientId, recallId } = await dueRecall('Sin Cita');
+    // Revisión (ruling 6): aunque el último intento fuera por WhatsApp, el
+    // que llega sin cita agenda «en persona».
+    await attempt(recallId, {
+      channel: 'WHATSAPP_LINK',
+      outcome: 'NO_ANSWER',
+    }).expect(201);
     const walk = await http(
       ClinicRole.RECEPTION,
       'post',

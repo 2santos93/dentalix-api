@@ -12,6 +12,7 @@ import {
 } from '../src/modules/recall/application/use-cases/recall.use-cases';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { nextDueAfter } from '../src/modules/recall/domain/recall-cycle';
 import {
   REGIONAL_CARACAS_FIXTURE,
   locationData,
@@ -922,6 +923,239 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
     });
   });
 
+  describe('revisión independiente (rulings 1, 2, 3, 10)', () => {
+    it('ruling 1: un «Llamar luego» que llega al tope no está agotado: oculto hasta su día y ese día sale por defecto (y en el recuento de «Mi día»)', async () => {
+      const r = await seedRecall(a);
+      await record(a, r.recallId, { channel: 'CALL', outcome: 'NO_ANSWER' });
+      await record(a, r.recallId, { channel: 'CALL', outcome: 'NO_ANSWER' });
+      const today = civilDateIn(new Date(), ZONE);
+      const callbackOn = addCivilDays(today, 5);
+      await record(
+        a,
+        r.recallId,
+        { channel: 'CALL', outcome: 'CALL_BACK', callbackOn },
+        noonOf(today),
+      );
+      expect(
+        (await listIds(a, noonOf(addCivilDays(today, 4)))).has(r.recallId),
+      ).toBe(false);
+      expect(
+        (
+          await listIds(a, noonOf(addCivilDays(today, 4)), { exhausted: true })
+        ).has(r.recallId),
+      ).toBe(false);
+      expect((await listIds(a, noonOf(callbackOn))).get(r.recallId)).toEqual({
+        attempts: 3,
+        hiddenUntil: null,
+      });
+      // El recuento («Mi día») es el mismo caso de uso sin filtros: lo cuenta.
+      const count = async (now: Date) =>
+        (
+          await inClinic(a, () =>
+            new ListDueRecallsUseCase(repository, () => now).execute({
+              page: 1,
+              pageSize: 1,
+            }),
+          )
+        ).total;
+      expect(await count(noonOf(callbackOn))).toBe(
+        (await count(noonOf(addCivilDays(today, 4)))) + 1,
+      );
+    });
+
+    it('ruling 2: un agotado vuelve en el vencimiento de su serie siguiente al último intento, con el contador a 0', async () => {
+      // Vence el 01/07/2025 (base 01/01/2025, 6 meses): el siguiente
+      // vencimiento posterior a hoy es el primero de la serie tras hoy.
+      const r = await seedRecall(a);
+      for (let i = 0; i < 3; i += 1) {
+        await record(a, r.recallId, { channel: 'CALL', outcome: 'NO_ANSWER' });
+      }
+      const day = await contactDay(r.recallId);
+      const ends = nextDueAfter(r.dueAt, 6, day);
+      const before = addCivilDays(ends, -1);
+      expect(
+        (await listIds(a, noonOf(before), { exhausted: true })).get(r.recallId),
+      ).toEqual({ attempts: 3, hiddenUntil: null });
+      expect((await listIds(a, noonOf(before))).has(r.recallId)).toBe(false);
+      expect((await listIds(a, noonOf(ends))).get(r.recallId)).toEqual({
+        attempts: 0,
+        hiddenUntil: null,
+      });
+    });
+
+    it('dx_recall_next_due_after coincide con nextDueAfter (fin de mes, 29/02, antes y después del vencimiento)', async () => {
+      const cases: [string, number, string][] = [];
+      const dues = [
+        '2024-01-31',
+        '2024-02-29',
+        '2025-08-31',
+        '2025-07-01',
+        '2026-03-15',
+      ];
+      const afters = [
+        '2024-02-28',
+        '2025-02-28',
+        '2025-03-31',
+        '2026-11-19',
+        '2027-02-28',
+        '2023-12-01',
+      ];
+      for (const due of dues)
+        for (const months of [1, 3, 6, 12, 36])
+          for (const after of afters) cases.push([due, months, after]);
+      const rows = await raw.$queryRaw<{ i: number; d: Date }[]>`
+        SELECT c.i::int AS i,
+               public.dx_recall_next_due_after(c.due::date, c.months::int, c.after::date) AS d
+          FROM unnest(${cases.map((c) => c[0])}::text[], ${cases.map((c) => c[1])}::int[],
+                      ${cases.map((c) => c[2])}::text[]) WITH ORDINALITY AS c(due, months, after, i)`;
+      for (const row of rows) {
+        const [due, months, after] = cases[row.i - 1];
+        expect({
+          due,
+          months,
+          after,
+          sql: row.d.toISOString().slice(0, 10),
+        }).toEqual({
+          due,
+          months,
+          after,
+          sql: nextDueAfter(due, months, after),
+        });
+      }
+    });
+
+    it('ruling 10: al corregir el teléfono (o «Ya está corregido»), sus recalls vuelven a 0 intentos y sin la ocultación del «Número equivocado»', async () => {
+      const r = await seedRecall(a);
+      for (let i = 0; i < 3; i += 1) {
+        await record(a, r.recallId, {
+          channel: 'CALL',
+          outcome: 'WRONG_NUMBER',
+        });
+      }
+      const day = await contactDay(r.recallId);
+      expect(
+        (await listIds(a, noonOf(day), { exhausted: true })).has(r.recallId),
+      ).toBe(true);
+      // Cambiar el teléfono (cualquier escritor: la ficha, la fusión, la
+      // importación al rellenar o deshacer) pasa por el trigger.
+      await raw.patient.update({
+        where: { id: r.patientId },
+        data: { phone: '+58 424 555 0303' },
+      });
+      await expect(
+        raw.patientRecall.findUniqueOrThrow({
+          where: { id: r.recallId },
+          select: { attemptCount: true, lastAttemptAt: true },
+        }),
+      ).resolves.toEqual({ attemptCount: 0, lastAttemptAt: null });
+      expect((await listIds(a, noonOf(day))).get(r.recallId)).toEqual({
+        attempts: 0,
+        hiddenUntil: null,
+      });
+      // Vaciar el teléfono también la quita.
+      await record(a, r.recallId, { channel: 'CALL', outcome: 'WRONG_NUMBER' });
+      await raw.patient.update({
+        where: { id: r.patientId },
+        data: { phone: null },
+      });
+      await expect(
+        raw.patient.findUniqueOrThrow({
+          where: { id: r.patientId },
+          select: { phoneReviewFlaggedAt: true },
+        }),
+      ).resolves.toEqual({ phoneReviewFlaggedAt: null });
+      // «Ya está corregido» (sin tocar el número): igual; si el último fue
+      // otro desenlace, su ocultación se queda.
+      const r2 = await seedRecall(a);
+      await record(a, r2.recallId, {
+        channel: 'CALL',
+        outcome: 'WRONG_NUMBER',
+      });
+      await record(a, r2.recallId, { channel: 'CALL', outcome: 'NO_ANSWER' });
+      await inClinic(a, () =>
+        repository.clearPhoneReview(r2.patientId, actorOf(a)),
+      );
+      const state = await raw.patientRecall.findUniqueOrThrow({
+        where: { id: r2.recallId },
+        select: { attemptCount: true, lastAttemptAt: true },
+      });
+      expect(state.attemptCount).toBe(0);
+      expect(state.lastAttemptAt).toBeInstanceOf(Date);
+    });
+
+    it('ruling 3: lotes cruzados con «Número equivocado» y un intento a la vez que se agenda la cita: sin interbloqueos ni errores', async () => {
+      for (let round = 0; round < 6; round += 1) {
+        const p1 = await seedRecall(a);
+        const p2 = await seedRecall(a);
+        // Un segundo recall de cada paciente (otro tipo), para cruzar lotes.
+        const extra = async (patientId: string) =>
+          (
+            await raw.patientRecall.create({
+              data: {
+                tenantId: a.tenantId,
+                patientId,
+                recallTypeId: a.checkupTypeId,
+                intervalMonths: 12,
+                lastDoneAt: DAY('2025-01-01'),
+                locationId: a.locationId,
+                createdById: a.authorId,
+                updatedById: a.authorId,
+              },
+              select: { id: true },
+            })
+          ).id;
+        const q1 = await extra(p1.patientId);
+        const q2 = await extra(p2.patientId);
+        const refs = await inClinic(a, () =>
+          repository.findRecalls([p1.recallId, p2.recallId, q1, q2]),
+        );
+        const ref = (id: string) => refs.find((x) => x.id === id)!;
+        const batch = (ids: string[]) =>
+          inClinic(a, () =>
+            repository.createContactsBatch(
+              {
+                recalls: ids.map(ref),
+                channel: 'CALL',
+                outcome: 'WRONG_NUMBER',
+                note: null,
+                callbackOn: null,
+                authorId: a.authorId,
+              },
+              actorOf(a),
+            ),
+          );
+        const appt = await appointmentOf(a, p1.patientId, a.appointmentTypeId);
+        const outcomes = await Promise.allSettled([
+          batch([p1.recallId, q2]),
+          batch([p2.recallId, q1]),
+          record(a, p1.recallId, { channel: 'CALL', outcome: 'NO_ANSWER' }),
+          inClinic(a, () =>
+            prisma.runWithTenant((tx) =>
+              recallOnAppointmentBookedInTx(tx, {
+                tenantId: a.tenantId,
+                patientId: p1.patientId,
+                appointmentId: appt,
+                appointmentTypeId: a.appointmentTypeId,
+                actor: {
+                  actor: { userId: a.authorId, role: 'RECEPTION' },
+                  locationId: a.locationId,
+                  requestId: null,
+                  ip: null,
+                  userAgent: null,
+                },
+              }),
+            ),
+          ),
+        ]);
+        expect(
+          outcomes
+            .filter((o) => o.status === 'rejected')
+            .map((o) => String(o.reason)),
+        ).toEqual([]);
+      }
+    }, 120_000);
+  });
+
   it('location_recall_settings: RLS FORCE, sin DELETE para la app, y B no ve los de A', async () => {
     await raw.locationRecallSettings.upsert({
       where: {
@@ -1013,6 +1247,12 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
       ),
       'utf8',
     );
+    // Un «Llamar luego» con fecha que ya escribió la API nueva: repetir el
+    // relleno no lo pisa (su último contacto es ese CALL_BACK).
+    await raw.patientRecall.update({
+      where: { id: plain.recallId },
+      data: { callbackOn: DAY('2027-03-01') },
+    });
     for (let run = 0; run < 2; run += 1) {
       await raw.$executeRawUnsafe(sql);
       const rows = await raw.patientRecall.findMany({
@@ -1030,6 +1270,7 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
           id: true,
           attemptCount: true,
           lastAttemptAt: true,
+          callbackOn: true,
           skipUntil: true,
           cycleDueAt: true,
           dueAt: true,
@@ -1037,14 +1278,19 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
       });
       const by = new Map(rows.map((x) => [x.id, x]));
       expect(by.get(plain.recallId)).toMatchObject({
+        callbackOn: DAY('2027-03-01'),
         attemptCount: 2,
         skipUntil: null,
         cycleDueAt: DAY(plain.dueAt),
       });
       expect(by.get(plain.recallId)!.lastAttemptAt).toBeInstanceOf(Date);
+      // El vencimiento de la serie siguiente al día del «Rechaza» (no uno ya
+      // pasado, como el 01/02/2026 de dueAt + intervalo).
       expect(by.get(declined.recallId)).toMatchObject({
         attemptCount: 0,
-        skipUntil: DAY('2026-02-01'),
+        skipUntil: DAY(
+          nextDueAfter(declined.dueAt, 6, civilDateIn(new Date(), 'UTC')),
+        ),
       });
       expect(by.get(declined.recallId)!.lastAttemptAt).toBeInstanceOf(Date);
       expect(by.get(afterDecline.recallId)).toMatchObject({
