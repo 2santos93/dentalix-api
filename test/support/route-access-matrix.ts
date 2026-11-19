@@ -771,6 +771,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'PAYMENT_REGISTER',
   ),
   'PATCH /appointments/:id': EVERY_ROLE,
+  // DX-562: citas en serie, los roles de agendar; cancelar y mover aplican
+  // por cita las reglas de cancelarla o moverla suelta (403 del caso de uso).
+  'POST /appointments/series/preview': EVERY_ROLE,
+  'POST /appointments/series': EVERY_ROLE,
+  'POST /appointments/series/:id/cancel': EVERY_ROLE,
+  'POST /appointments/series/:id/move/preview': EVERY_ROLE,
+  'POST /appointments/series/:id/move': EVERY_ROLE,
   'POST /appointments/:id/confirmation-link': EVERY_ROLE,
   // Estado de los recordatorios de la cita (DX-026): quien gestiona la agenda.
   'GET /appointments/:id/reminders': EVERY_ROLE,

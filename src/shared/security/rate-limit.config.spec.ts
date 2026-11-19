@@ -34,6 +34,8 @@ describe('loadRateLimitConfig', () => {
     expect(cfg['exchange-rates']).toEqual({ limit: 120, ttlMs: 60_000 });
     // DX-224: «¿Quién llama?», por clínica + usuario.
     expect(cfg['caller-lookup']).toEqual({ limit: 60, ttlMs: 60_000 });
+    // DX-562: citas en serie, por clínica + usuario (un balde).
+    expect(cfg['appointment-series']).toEqual({ limit: 30, ttlMs: 60_000 });
     // DX-099: el cuestionario público de anamnesis, por IP y por token.
     expect(cfg.anamnesis).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['anamnesis-token']).toEqual({ limit: 10, ttlMs: 60_000 });
@@ -82,6 +84,16 @@ describe('loadRateLimitConfig', () => {
       }),
     );
     expect(cfg['patient-import']).toEqual({ limit: 3, ttlMs: 30_000 });
+  });
+
+  it('DX-562: lee RATE_LIMIT_APPOINTMENT_SERIES_LIMIT/_TTL_MS', () => {
+    const cfg = loadRateLimitConfig(
+      envOf({
+        RATE_LIMIT_APPOINTMENT_SERIES_LIMIT: '5',
+        RATE_LIMIT_APPOINTMENT_SERIES_TTL_MS: '30000',
+      }),
+    );
+    expect(cfg['appointment-series']).toEqual({ limit: 5, ttlMs: 30_000 });
   });
 
   it('SEC-054: lee RATE_LIMIT_EXCHANGE_RATES_LIMIT/_TTL_MS', () => {

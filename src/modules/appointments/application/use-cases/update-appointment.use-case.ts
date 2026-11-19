@@ -82,6 +82,7 @@ import {
   planItemsClosedMessage,
   planItemsEditable,
 } from '../../domain/plan-item-reservation';
+import { attemptRule, type SlotRuleCollector } from '../slot-rule-failure';
 import {
   OVERBOOK_AUDIT_REASONS,
   OVERBOOK_SLOT_TAKEN_CODE,
@@ -304,6 +305,126 @@ export class UpdateAppointmentUseCase {
         noticeHours: policy?.noticeHours ?? null,
         attended: attendedStatus(existing.status),
       }),
+    };
+  }
+
+  /**
+   * DX-562 (D5): lo que el repositorio escribe al cancelar UNA cita de una
+   * serie («esta y las siguientes»), con EXACTAMENTE las reglas de cancelarla
+   * suelta (`PATCH` a CANCELLED): la máquina del flujo y sus permisos, origen
+   * y motivo obligatorios (400), la hora del servidor, el aviso contra la
+   * política de su sede (lo calcula el repositorio con la fila bloqueada) y
+   * la limpieza de la confirmación. A propósito SIN «Pendientes por agendar»:
+   * cancelar las siguientes es un cambio de plan deliberado, no 25 huecos
+   * que reagendar. La auditoría la lleva el evento único de la serie.
+   */
+  async planSeriesCancellation(
+    existing: Appointment,
+    request: CancellationRequest,
+    auditContext: AppointmentAuditContext,
+  ): Promise<UpdateAppointmentRepoInput> {
+    this.tenantContext.assertLocationAllowed(existing.locationId);
+    const to = AppointmentStatus.CANCELLED;
+    const flowPatch = await this.checkFlow(existing, to, auditContext);
+    const cancellationPatch = this.cancellationPatch(
+      existing.status,
+      to,
+      request,
+    );
+    return {
+      status: to,
+      ...flowPatch,
+      ...cancellationPatch,
+      confirmationSentAt: null,
+      callbackRequestedAt: null,
+      audit: auditContext,
+    };
+  }
+
+  /**
+   * DX-562 (D6): las reglas de mover UNA cita de una serie a `slot` («esta y
+   * las siguientes»): las de reagendarla suelta (`checkSlotRules` en modo
+   * `move` y su sillón, libre y activo), sin pararse en la primera que falla
+   * (`collect`) y sin contar como ocupadas las otras citas de la serie que se
+   * mueven a la vez (`movingIds`: dejan su hora). Devuelve los avisos.
+   */
+  async checkSeriesMove(
+    existing: Appointment,
+    slot: { start: Date; end: Date },
+    movingIds: readonly string[],
+    auditContext: AppointmentAuditContext,
+    collect: SlotRuleCollector,
+  ): Promise<Warnings> {
+    this.tenantContext.assertLocationAllowed(existing.locationId);
+    const others = (list: Appointment[]) =>
+      list.filter((a) => !movingIds.includes(a.id));
+    const deps: SlotRulesDeps = {
+      ...this.slotRulesDeps(),
+      repo: {
+        findOverlapping: async (...args) =>
+          others(await this.repo.findOverlapping(...args)),
+        findOverlappingForPatient: async (...args) =>
+          others(await this.repo.findOverlappingForPatient(...args)),
+      },
+    };
+    const { reservedOverride: _none, ...warnings } = await checkSlotRules(
+      deps,
+      {
+        mode: 'move',
+        appointment: existing,
+        providerId: existing.providerId,
+        start: slot.start,
+        end: slot.end,
+        actorRole: auditContext.actor.role,
+        collect,
+      },
+    );
+    if (existing.chairId !== null) {
+      // Un sillón desactivado o de otra sede no depende de la hora: 400.
+      const chair = await this.requireChairs().load(existing.chairId, {
+        locationId: existing.locationId,
+        requireActive: true,
+      });
+      await attemptRule(
+        collect,
+        'CHAIR_OVERLAP',
+        () =>
+          this.requireChairs().assertFree(
+            chair,
+            {
+              locationId: existing.locationId,
+              start: slot.start,
+              end: slot.end,
+              excludeId: existing.id,
+              alsoExcludeIds: movingIds,
+            },
+            { moving: true },
+          ),
+        undefined,
+      );
+    }
+    return warnings;
+  }
+
+  /**
+   * DX-562 (D6): lo que el repositorio escribe al mover UNA cita de una serie
+   * a `slot`: lo mismo que reagendarla suelta (anula la confirmación y sus
+   * enlaces sin responder; un sobrecupo deja de serlo), con el candado de la
+   * agenda y el bloqueo duro dentro de la transacción (`updateInTx`).
+   */
+  planSeriesMove(
+    existing: Appointment,
+    slot: { start: Date; end: Date },
+    auditContext: AppointmentAuditContext,
+  ): UpdateAppointmentRepoInput {
+    return {
+      start: slot.start,
+      end: slot.end,
+      confirmationSentAt: null,
+      callbackRequestedAt: null,
+      revokeConfirmations: true,
+      ...(existing.overbooked ? { overbooked: false as const } : {}),
+      audit: auditContext,
     };
   }
 
