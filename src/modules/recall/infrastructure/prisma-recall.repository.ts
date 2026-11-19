@@ -282,7 +282,7 @@ export interface RecallDueSqlParams extends RecallDueQuery {
  * "lastDoneAt" + intervalo), que ya no depende de la última visita. En orden:
  * 0. `locs`: las sedes de la clínica con su «hoy» (2–20 filas, una vez).
  * 1. `c`: los recall ACTIVOS de la clínica que pueden salir: un RANGO SOLO de
- *    índice sobre `patient_recalls_tenant_due_visit_idx` ("dueAt" <= el «hoy»
+ *    índice sobre `patient_recalls_tenant_due_attempts_idx` ("dueAt" <= el «hoy»
  *    más adelantado de las sedes de la clínica + la ventana; `maxToday` es un
  *    InitPlan, así que la cota va en el propio recorrido del índice). «Hoy»
  *    en la sede del paciente nunca pasa de `maxToday`, así que la cota solo
