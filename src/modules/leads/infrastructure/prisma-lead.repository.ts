@@ -5,6 +5,7 @@ import { TenantContextService } from '../../../shared/tenancy/tenant-context.ser
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import type { AuditEventDraft } from '../../audit/domain/audit-event';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
+import { leadChannelSourceInTx } from '../../patient-sources/infrastructure/lead-channel-source';
 import { insertPatientRowInTx } from '../../patients/infrastructure/repositories/prisma-patient.repository';
 import {
   LEAD_MESSAGES,
@@ -210,7 +211,8 @@ export class PrismaLeadRepository implements LeadRepository {
   private async lock(tx: Tx, id: string): Promise<LockedLead | null> {
     const [row] = await tx.$queryRaw<LockedLead[]>`
       SELECT "id", "locationId", "stage"::text AS "stage", "phone", "phoneE164",
-             "fullName", "patientId" AS "convertedPatientId", "anonymizedAt"
+             "fullName", "channel"::text AS "channel",
+             "patientId" AS "convertedPatientId", "anonymizedAt"
         FROM "leads" WHERE "id" = ${id}::uuid
        FOR UPDATE`;
     return row ?? null;
@@ -418,7 +420,14 @@ export class PrismaLeadRepository implements LeadRepository {
       if (decision.kind === 'CREATE') {
         // La ficha mínima: nombre y teléfono, sin datos clínicos (como la
         // reserva online). El teléfono se lee con el prefijo de la sede del
-        // prospecto.
+        // prospecto. DX-172: con la fuente que corresponde a su canal, si
+        // la hay y está activa (WhatsApp o teléfono son el medio, no cómo
+        // nos conoció: sin fuente).
+        const sourceId = await leadChannelSourceInTx(
+          tx,
+          tenantId,
+          locked.channel,
+        );
         const created = await insertPatientRowInTx(
           tx,
           tenantId,
@@ -430,6 +439,7 @@ export class PrismaLeadRepository implements LeadRepository {
             sex: Sex.UNSPECIFIED,
             phone: locked.phone ?? undefined,
             createdById: audit.actor.userId,
+            ...(sourceId ? { acquisition: { sourceId } } : {}),
           },
           undefined,
           locked.locationId,

@@ -19,6 +19,7 @@ import {
 import { normalizeMobile } from '../../domain/communication/mobile-number';
 import { whatsappMobileRequiredError } from './patient-communication.use-cases';
 import { docTypeLabelInput } from '../doc-type-label-input';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 
 export type UpdatePatientInput = UpdatePatientRepoInput;
 
@@ -31,7 +32,11 @@ export class UpdatePatientUseCase {
     private readonly communication: PatientCommunicationRepository,
   ) {}
 
-  async execute(id: string, patch: UpdatePatientInput): Promise<Patient> {
+  async execute(
+    id: string,
+    patch: UpdatePatientInput,
+    audit?: AuditRequestContext,
+  ): Promise<Patient> {
     const existing = await this.repo.findById(id);
     if (!existing) {
       // Same rationale as GetPatientUseCase: a missing row and a row that
@@ -80,6 +85,6 @@ export class UpdatePatientUseCase {
       normalizedPatch.docTypeLabel = docTypeLabelInput(patch.docTypeLabel);
     }
 
-    return this.repo.update(id, normalizedPatch);
+    return this.repo.update(id, normalizedPatch, audit);
   }
 }

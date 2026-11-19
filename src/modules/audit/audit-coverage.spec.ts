@@ -66,6 +66,11 @@ import { CancellationFeeController } from '../cancellation-fees/presentation/can
 import { DiscountReportController } from '../discounts/presentation/discount-report.controller';
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
 import { QuoteFunnelController } from '../reports/presentation/quote-funnel.controller';
+import { AcquisitionController } from '../reports/presentation/acquisition.controller';
+import {
+  PatientAcquisitionController,
+  PatientSourcesController,
+} from '../patient-sources/presentation/patient-sources.controller';
 import { ScheduledProductionController } from '../reports/presentation/scheduled-production.controller';
 import { UnallocatedPaymentsController } from '../reports/presentation/unallocated-payments.controller';
 import { RecoveredSlotsController } from '../reports/presentation/recovered-slots.controller';
@@ -1622,6 +1627,26 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'TREATMENT_PLAN',
     reason: 'QUOTE_FUNNEL_REPORT',
   },
+  // DX-172: la captación lleva el nombre de los pacientes que más
+  // recomiendan; su CSV (solo agregados por fuente) sale de la clínica. La
+  // captación de la ficha, como la ficha.
+  'GET /reports/acquisition': {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    reason: 'ACQUISITION_REPORT',
+  },
+  'GET /reports/acquisition.csv': {
+    action: 'EXPORT',
+    resource: 'PATIENT',
+    reason: 'ACQUISITION_REPORT',
+  },
+  'GET /patients/:id/acquisition': {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    resourceId: { param: 'id' },
+    patient: { param: 'id' },
+    reason: 'PATIENT_ACQUISITION',
+  },
   // DX-018: la vista previa y el detalle de una liquidación de honorarios
   // llevan el nombre de cada paciente (la lista, solo cabeceras y totales).
   'GET /commissions/preview': {
@@ -2120,6 +2145,11 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-172: el catálogo «¿Cómo nos conoció?» (CREATE/UPDATE CLINIC_SETTINGS,
+  // PATIENT_SOURCE_CREATED/UPDATED, antes y después; sin evento si nada
+  // cambia), en la transacción del guardado.
+  'POST /patient-sources': 'patient-acquisition.e2e-spec.ts',
+  'PATCH /patient-sources/:id': 'patient-acquisition.e2e-spec.ts',
   // DX-562: citas en serie. UN evento por operación, escrito en su
   // transacción: CREATE APPOINTMENT APPOINTMENT_SERIES_CREATED (la serie, sus
   // citas, sus fechas y el intervalo), UPDATE APPOINTMENT
@@ -2656,6 +2686,9 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 };
 
 const CONTROLLERS: Type[] = [
+  AcquisitionController,
+  PatientSourcesController,
+  PatientAcquisitionController,
   LeadsController,
   LeadReasonsController,
   CommissionsController,

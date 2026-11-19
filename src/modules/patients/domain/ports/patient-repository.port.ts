@@ -1,3 +1,4 @@
+import type { PatientAcquisitionInput } from '../patient-acquisition';
 import type { LocationFormatSource } from '../../../../shared/locations/location-regional';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { DocumentType, RetentionExtension, Sex } from '@prisma/client';
@@ -63,6 +64,8 @@ export interface CreatePatientRepoInput {
     safetyFlags: SafetyFlags;
     hasCriticalAlert: boolean;
   };
+  /** DX-172: «¿Cómo nos conoció?»; la decide el repositorio en la transacción. */
+  acquisition?: PatientAcquisitionInput;
 }
 
 export interface UpdatePatientRepoInput {
@@ -91,6 +94,13 @@ export interface UpdatePatientRepoInput {
   emergencyContactName?: string | null;
   emergencyContactRelationship?: string | null;
   emergencyContactPhone?: string | null;
+  /**
+   * DX-172: «¿Cómo nos conoció?» (ausente = no tocar, null = vaciar). La decide
+   * el repositorio con la fila bloqueada (`decideAcquisition`).
+   */
+  sourceId?: string | null;
+  referredByPatientId?: string | null;
+  referredByName?: string | null;
 }
 
 export interface ListPatientsParams {
@@ -193,7 +203,15 @@ export interface PatientRepository {
   list(params: ListPatientsParams): Promise<ListPatientsResult>;
   /** Pacientes vivos del tenant del contexto, con un COUNT (sin listar). */
   count(): Promise<number>;
-  update(id: string, patch: UpdatePatientRepoInput): Promise<Patient>;
+  /**
+   * `audit`: el contexto de la petición, para el evento con antes/después de
+   * la captación (DX-172) si cambia. Opcional: los dobles de test no lo usan.
+   */
+  update(
+    id: string,
+    patch: UpdatePatientRepoInput,
+    audit?: AuditRequestContext,
+  ): Promise<Patient>;
   /**
    * Archiva (borrado blando) el paciente vivo `id`. En UNA transacción con el
    * paciente bloqueado (FOR UPDATE: una evolución concurrente mueve

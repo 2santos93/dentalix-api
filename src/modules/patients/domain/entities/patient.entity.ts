@@ -86,4 +86,10 @@ export interface Patient {
   reminderOptOutSource: ReminderOptOutSource | null;
   createdAt: Date;
   updatedAt: Date;
+  /** DX-172: «¿Cómo nos conoció?» (catálogo de la clínica); null = sin dato. */
+  sourceId: string | null;
+  /** DX-172: el paciente que lo recomendó (fuente de tipo PATIENT). */
+  referredByPatientId: string | null;
+  /** DX-172: el profesional externo que lo derivó (fuente EXTERNAL_PROFESSIONAL). */
+  referredByName: string | null;
 }
