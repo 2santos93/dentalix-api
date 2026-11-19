@@ -72,6 +72,13 @@ export interface AuditOptions {
    */
   paymentReference?: true;
   /**
+   * DX-570: alta de un abono en efectivo con vuelto. Si la respuesta trae
+   * `cashChange`, la metadata guarda lo recibido, la diferencia sumada al
+   * abono y cada línea del vuelto (moneda, importe, método base, equivalente
+   * y si llevaba referencia); nunca la referencia.
+   */
+  cashChange?: true;
+  /**
    * DX-390: cobro dividido. La respuesta trae `payments` (un abono por
    * línea): se registra UN evento por línea, con su id como `resourceId` y,
    * con `paymentReference`, la confirmación de SU referencia repetida.

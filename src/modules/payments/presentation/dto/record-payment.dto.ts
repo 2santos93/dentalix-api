@@ -1,14 +1,23 @@
 import { LockOverrideReason } from '../../../financial-lock/presentation/dto/lock-override-reason';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
 import {
+  ApiHideProperty,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
+import { Transform, Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsBoolean,
   IsDateString,
+  IsEmpty,
   IsEnum,
   IsISO4217CurrencyCode,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
+  ValidateNested,
 } from 'class-validator';
 import {
   INPUT_NOTES_MAX,
@@ -26,6 +35,11 @@ import {
   MONEY_MAX,
 } from '../../../../shared/validation/bounded-decimal';
 import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
+import {
+  CASH_CHANGE_NOT_HERE_MESSAGE,
+  CHANGE_LINES_LIMIT_MESSAGE,
+  CHANGE_LINES_MAX,
+} from '../../domain/cash-change';
 
 // Uppercase-normalizes ISO 4217 codes, same convention as ConvertQueryDto
 // (exchange module) / the deleted CreateSaleDto -- snapshots/rates are always
@@ -142,4 +156,109 @@ export class RecordPaymentDto {
 
   @LockOverrideReason()
   lockOverrideReason?: string;
+}
+
+/** DX-570: una línea del vuelto de un abono en efectivo. */
+export class CashChangeLineDto {
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'Medio ACTIVO del catálogo de la clínica por el que se entrega el vuelto (efectivo, transferencia inmediata…).',
+  })
+  @IsUUID('all', { message: 'El medio del vuelto no es válido.' })
+  paymentMethodId!: string;
+
+  @ApiProperty({
+    description: 'Código ISO 4217 de 3 letras: la moneda en que se entrega.',
+  })
+  @Transform(toUpperCase)
+  @IsISO4217CurrencyCode({ message: CURRENCY_CODE_MESSAGE })
+  currency!: string;
+
+  @ApiProperty({
+    example: 182.5,
+    description:
+      'Importe entregado, en su moneda, con los decimales de redondeo de la moneda (DX-340).',
+    maximum: MONEY_MAX,
+  })
+  @IsPositiveMoney()
+  amount!: number;
+
+  @ApiPropertyOptional({
+    maxLength: REFERENCE_MAX,
+    description:
+      'Referencia de la entrega. Obligatoria si el medio la pide (400).',
+  })
+  @IsOptional()
+  @IsString({ message: 'La referencia tiene que ser texto.' })
+  @MaxLength(REFERENCE_MAX, { message: REFERENCE_TOO_LONG_MESSAGE })
+  reference?: string;
+}
+
+/**
+ * Abono a un plan (`POST /treatment-plans/:id/payments`): el de siempre y,
+ * DX-570, lo recibido y el vuelto de un cobro en efectivo. El abono al saldo
+ * migrado sigue con `RecordPaymentDto` (sin vuelto).
+ */
+export class RecordPlanPaymentDto extends RecordPaymentDto {
+  @ApiPropertyOptional({
+    example: 50,
+    maximum: MONEY_MAX,
+    description:
+      'DX-570: «Recibido», lo que entrega el paciente en la moneda del abono. Solo con un medio de tipo efectivo (400). ' +
+      'Tiene que cubrir lo cobrado (importe ± ajustes por medio de pago, DX-516; 400). Sin él, el cobro es el de siempre.',
+  })
+  @IsOptional()
+  @IsPositiveMoney()
+  tendered?: number;
+
+  @ApiPropertyOptional({
+    type: [CashChangeLineDto],
+    maxItems: CHANGE_LINES_MAX,
+    description:
+      `DX-570: el vuelto, de 1 a ${CHANGE_LINES_MAX} líneas (medio, moneda, importe, referencia). Cada línea en otra moneda ` +
+      'congela la tasa del día del abono en su sede (422 si no la hay). El vuelto en la moneda del abono no puede superar ' +
+      'lo recibido menos lo cobrado (422). Requiere `tendered` (400).',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(CHANGE_LINES_MAX, { message: CHANGE_LINES_LIMIT_MESSAGE })
+  @ValidateNested({ each: true })
+  @Type(() => CashChangeLineDto)
+  change?: CashChangeLineDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'DX-570: confirma que la diferencia no devuelta (lo recibido − lo cobrado − el vuelto) se suma al abono; si supera lo ' +
+      'pendiente queda como saldo a favor. Sin ella, esa diferencia es 422 `CASH_CHANGE_REMAINDER` con `remainder` y `currency`. ' +
+      'No se admite si el medio tiene ajustes (422).',
+  })
+  @IsOptional()
+  @IsBoolean({ message: 'La confirmación del resto tiene que ser sí o no.' })
+  changeRemainderToCredit?: boolean;
+}
+
+/**
+ * DX-570: el vuelto solo va en el abono suelto a un plan. En el cobro
+ * dividido y en el abono al saldo migrado, mandarlo es 400 en español: si se
+ * descartara en silencio, recepción creería registrado un vuelto que la caja
+ * no espera y el arqueo descuadraría sin aviso.
+ */
+export function RejectCashChange(): PropertyDecorator {
+  return (target, key) => {
+    ApiHideProperty()(target, key);
+    IsEmpty({ message: CASH_CHANGE_NOT_HERE_MESSAGE })(target, key);
+  };
+}
+
+/** Abono al saldo migrado (DX-262): el de siempre, sin vuelto (400). */
+export class RecordOpeningBalancePaymentDto extends RecordPaymentDto {
+  @RejectCashChange()
+  tendered?: unknown;
+
+  @RejectCashChange()
+  change?: unknown;
+
+  @RejectCashChange()
+  changeRemainderToCredit?: unknown;
 }

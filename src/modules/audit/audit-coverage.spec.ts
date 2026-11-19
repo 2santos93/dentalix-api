@@ -1344,6 +1344,8 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'RECEIPT_ISSUED',
     // DX-377: confirmación de referencia repetida (ids, nunca el motivo).
     paymentReference: true,
+    // DX-570: lo recibido y las líneas del vuelto (nunca la referencia).
+    cashChange: true,
   },
   'GET /treatment-plans/:id/payments': {
     action: 'VIEW',

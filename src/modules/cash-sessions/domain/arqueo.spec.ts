@@ -38,6 +38,9 @@ describe('arqueo de caja (DX-027)', () => {
       paymentsCents: 17_000,
       paymentsCount: 3,
       paymentAdjustmentsCents: 50,
+      changeInCents: 0,
+      changeOutCents: 0,
+      changeOutCount: 0,
       adjustmentsCents: 0,
       outflowsCents: 0,
       outflowsCount: 0,
@@ -80,6 +83,9 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 0,
         paymentsCount: 0,
         paymentAdjustmentsCents: 0,
+        changeInCents: 0,
+        changeOutCents: 0,
+        changeOutCount: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -92,6 +98,9 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 5_000,
         paymentsCount: 1,
         paymentAdjustmentsCents: 0,
+        changeInCents: 0,
+        changeOutCents: 0,
+        changeOutCount: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -104,6 +113,9 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 3_000_000,
         paymentsCount: 2,
         paymentAdjustmentsCents: 0,
+        changeInCents: 0,
+        changeOutCents: 0,
+        changeOutCount: 0,
         adjustmentsCents: -500_000,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -116,6 +128,9 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 8_000_000,
         paymentsCount: 1,
         paymentAdjustmentsCents: 0,
+        changeInCents: 0,
+        changeOutCents: 0,
+        changeOutCount: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -128,6 +143,9 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 100,
         paymentsCount: 1,
         paymentAdjustmentsCents: 0,
+        changeInCents: 0,
+        changeOutCents: 0,
+        changeOutCount: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,
@@ -210,6 +228,9 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 0,
         paymentsCount: 0,
         paymentAdjustmentsCents: 0,
+        changeInCents: 0,
+        changeOutCents: 0,
+        changeOutCount: 0,
         adjustmentsCents: 0,
         outflowsCents: 1_000,
         outflowsCount: 1,
@@ -222,6 +243,9 @@ describe('arqueo de caja (DX-027)', () => {
         paymentsCents: 200_000,
         paymentsCount: 1,
         paymentAdjustmentsCents: 0,
+        changeInCents: 0,
+        changeOutCents: 0,
+        changeOutCount: 0,
         adjustmentsCents: 50_000,
         outflowsCents: 175_000,
         outflowsCount: 2,
@@ -265,5 +289,71 @@ describe('arqueo de caja (DX-027)', () => {
         ],
       ),
     ).toThrow(RangeError);
+  });
+
+  describe('DX-570: vuelto en otra moneda o por otro medio', () => {
+    it('45 USD cobrados con 50 y 5 USD devueltos en VES por transferencia: +50 USD en efectivo, −182,50 VES por transferencia', () => {
+      const lines = expectedLines({
+        floats: [{ currency: 'VES', cents: 100_000 }],
+        payments: [
+          {
+            currency: 'USD',
+            method: 'CASH',
+            cents: 4_500,
+            adjustmentCents: 0,
+            changeInCents: 500,
+          },
+          { currency: 'VES', method: 'TRANSFER', cents: 50_000 },
+        ],
+        changeOut: [{ currency: 'VES', method: 'TRANSFER', cents: 18_250 }],
+        adjustments: [],
+        outflows: [],
+      });
+      const byKey = Object.fromEntries(
+        lines.map((l) => [`${l.currency}|${l.method}`, l]),
+      );
+      expect(byKey['USD|CASH']).toMatchObject({
+        paymentsCents: 4_500,
+        changeInCents: 500,
+        changeOutCents: 0,
+        expectedCents: 5_000,
+      });
+      expect(byKey['VES|TRANSFER']).toMatchObject({
+        paymentsCents: 50_000,
+        changeOutCents: 18_250,
+        changeOutCount: 1,
+        expectedCents: 31_750,
+      });
+      // El fondo en VES efectivo no se toca: el vuelto salió por otro medio.
+      expect(byKey['VES|CASH'].expectedCents).toBe(100_000);
+    });
+
+    it('vuelto en la misma moneda y en efectivo: el grupo suma lo cobrado', () => {
+      const [line] = expectedLines({
+        floats: [],
+        payments: [
+          { currency: 'USD', method: 'CASH', cents: 4_500, changeInCents: 500 },
+        ],
+        changeOut: [{ currency: 'USD', method: 'CASH', cents: 500 }],
+        adjustments: [],
+        outflows: [],
+      });
+      expect(line.expectedCents).toBe(4_500);
+    });
+
+    it('un vuelto sin cobros en su grupo deja el esperado negativo (sin oráculo para el ciego)', () => {
+      const lines = expectedLines({
+        floats: [],
+        payments: [
+          { currency: 'USD', method: 'CASH', cents: 4_500, changeInCents: 500 },
+        ],
+        changeOut: [{ currency: 'VES', method: 'CASH', cents: 18_250 }],
+        adjustments: [],
+        outflows: [],
+      });
+      expect(lines.find((l) => l.currency === 'VES')?.expectedCents).toBe(
+        -18_250,
+      );
+    });
   });
 });

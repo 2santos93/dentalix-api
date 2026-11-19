@@ -186,6 +186,8 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     gate,
     buildPaymentProofKit(repo).proofs,
     () => now,
+    // DX-570: sin vuelto en estas pruebas.
+    null as never,
   );
   const uc = new RecordSplitPaymentUseCase(
     repo,

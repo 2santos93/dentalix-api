@@ -179,6 +179,39 @@ function paymentReferenceOf(body: unknown): Record<string, unknown> | null {
   };
 }
 
+/** DX-570: lo recibido y el vuelto del abono, si los hubo (sin referencias). */
+function cashChangeOf(body: unknown): Record<string, unknown> | null {
+  if (typeof body !== 'object' || body === null) return null;
+  const b = body as { currency?: unknown; cashChange?: unknown };
+  const change = b.cashChange as
+    | {
+        tendered?: unknown;
+        remainderToCredit?: unknown;
+        lines?: {
+          currency?: unknown;
+          amount?: unknown;
+          method?: unknown;
+          equivalentAmount?: unknown;
+          reference?: unknown;
+        }[];
+      }
+    | null
+    | undefined;
+  if (!change || typeof change !== 'object') return null;
+  return {
+    currency: b.currency,
+    tendered: change.tendered,
+    remainderToCredit: change.remainderToCredit,
+    lines: (Array.isArray(change.lines) ? change.lines : []).map((l) => ({
+      currency: l?.currency,
+      amount: l?.amount,
+      method: l?.method,
+      equivalentAmount: l?.equivalentAmount,
+      hasReference: typeof l?.reference === 'string' && l.reference !== '',
+    })),
+  };
+}
+
 /**
  * DX-300: códigos de los avisos de la receta emitida y si se confirmaron.
  * DX-307: la anestesia de una evolución trae lo mismo con `overrideReason`.
@@ -332,6 +365,7 @@ export function buildAuditDraft(
       ...(options.paymentReference
         ? { paymentReference: paymentReferenceOf(responseBody) }
         : {}),
+      ...(options.cashChange ? { cashChange: cashChangeOf(responseBody) } : {}),
     }),
   };
 }

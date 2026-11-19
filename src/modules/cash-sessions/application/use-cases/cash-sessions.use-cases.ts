@@ -134,6 +134,9 @@ function hideOpenSessionAmounts(record: CashSessionRecord): CashSessionRecord {
               payments: null,
               paymentsCount: null,
               paymentAdjustments: null,
+              changeIn: null,
+              changeOut: null,
+              changeOutCount: null,
               adjustments: null,
               outflows: null,
               outflowsCount: null,
@@ -149,7 +152,13 @@ function hideOpenSessionAmounts(record: CashSessionRecord): CashSessionRecord {
     voidedPayments:
       record.voidedPayments?.map((p) =>
         hiddenPayments.has(p.id)
-          ? { ...p, amount: null, collectedAmount: null, amountHidden: true }
+          ? {
+              ...p,
+              amount: null,
+              collectedAmount: null,
+              cashChange: null,
+              amountHidden: true,
+            }
           : p,
       ) ?? null,
     voidedOutflows: record.voidedOutflows.map((o) =>

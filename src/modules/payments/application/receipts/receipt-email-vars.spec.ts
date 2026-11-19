@@ -401,4 +401,57 @@ describe('receiptEmailVars (DX-136)', () => {
     expect(without.amountLabel).toBe('VES\u00a01.234,50');
     expect(without.balanceLabel).not.toContain('$');
   });
+
+  it('DX-570: recibido, aplicado y vuelto con su tasa y su día', () => {
+    const withChange = forView(
+      buildReceiptSnapshot(
+        {
+          ...SNAPSHOT_INPUT,
+          payment: { ...SNAPSHOT_INPUT.payment, amount: 45, currency: 'USD' },
+          cashChange: {
+            currency: 'USD',
+            tendered: 50,
+            applied: 45,
+            collected: 45,
+            remainderToCredit: 0,
+            lines: [
+              {
+                line: 1,
+                paymentMethodName: 'Pago móvil',
+                method: 'TRANSFER',
+                currency: 'VES',
+                amount: 182.5,
+                reference: '0412',
+                equivalentAmount: 5,
+                rate: {
+                  fromPerBase: 36.5,
+                  toPerBase: 1,
+                  source: 'MANUAL',
+                  date: '2026-10-17',
+                },
+              },
+            ],
+          },
+        },
+        NO_LOCAL_NAMES,
+      ),
+    );
+    const vars = receiptEmailVars(
+      view({ snapshot: withChange }),
+      SEDE_ZONE,
+      SEDE_FMT,
+    );
+    expect(vars.cashChange).toEqual({
+      tenderedLabel: moneyWithCode(50, 'USD', SEDE_FMT, undefined),
+      appliedLabel: moneyWithCode(45, 'USD', SEDE_FMT, undefined),
+      changeLines: [
+        `Pago móvil · ${moneyWithCode(182.5, 'VES', SEDE_FMT, undefined)} (${moneyWithCode(5, 'USD', SEDE_FMT, undefined)}; tasa 1 USD = 36,5 VES del 17/10/2026)`,
+      ],
+      remainderLabel: null,
+    });
+    // Sin vuelto, el email es el de antes.
+    expect(receiptEmailVars(view(), SEDE_ZONE, SEDE_FMT)).not.toHaveProperty(
+      'cashChange',
+    );
+  });
 });

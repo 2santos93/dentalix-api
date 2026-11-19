@@ -228,6 +228,82 @@ export class ReceiptSnapshotSplitDto {
   total!: ReceiptSplitTotalDto;
 }
 
+/** DX-570: la tasa del día con que se convirtió una línea del vuelto. */
+export class ReceiptChangeRateDto {
+  @ApiProperty({ description: 'Unidades de la moneda de la línea por 1 USD.' })
+  fromPerBase!: number;
+
+  @ApiProperty({ description: 'Unidades de la moneda del abono por 1 USD.' })
+  toPerBase!: number;
+
+  @ApiProperty({
+    enum: ['AUTOMATIC', 'MANUAL'],
+    enumName: 'ExchangeRateSource',
+  })
+  source!: string;
+
+  @ApiProperty({ example: '2026-11-19', description: 'Día civil de la tasa.' })
+  date!: string;
+}
+
+/** DX-570: una línea del vuelto en el recibo. */
+export class ReceiptChangeLineDto {
+  @ApiProperty({ minimum: 1, maximum: 3 })
+  line!: number;
+
+  @ApiProperty({ example: 'Pago móvil' })
+  paymentMethodName!: string;
+
+  @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
+  method!: PaymentMethod;
+
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({ example: 182.5 })
+  amount!: number;
+
+  @ApiProperty({ type: String, nullable: true })
+  reference!: string | null;
+
+  @ApiProperty({ example: 5, description: 'En la moneda del abono.' })
+  equivalentAmount!: number;
+
+  @ApiProperty({
+    type: ReceiptChangeRateDto,
+    nullable: true,
+    description: 'null en la misma moneda del abono.',
+  })
+  rate!: ReceiptChangeRateDto | null;
+}
+
+/** DX-570: recibido, aplicado y vuelto de un cobro en efectivo. */
+export class ReceiptCashChangeDto {
+  @ApiProperty({ description: 'Moneda del abono (la de recibido y aplicado).' })
+  currency!: string;
+
+  @ApiProperty({ example: 50 })
+  tendered!: number;
+
+  @ApiProperty({ example: 45, description: 'Lo acreditado al plan.' })
+  applied!: number;
+
+  @ApiProperty({
+    example: 45,
+    description: 'Lo cobrado: importe ± ajustes por medio de pago (DX-516).',
+  })
+  collected!: number;
+
+  @ApiProperty({
+    example: 0,
+    description: 'La diferencia no devuelta que se sumó al abono (0 si nada).',
+  })
+  remainderToCredit!: number;
+
+  @ApiProperty({ type: [ReceiptChangeLineDto] })
+  lines!: ReceiptChangeLineDto[];
+}
+
 export class ReceiptSnapshotDto {
   @ApiProperty({ enum: [1] })
   version!: 1;
@@ -287,6 +363,13 @@ export class ReceiptSnapshotDto {
       'DX-390: las formas de pago del cobro dividido y su total al emitir; ausente o null en un abono suelto (`payment` es entonces su línea 1).',
   })
   split?: ReceiptSnapshotSplitDto | null;
+
+  @ApiPropertyOptional({
+    type: ReceiptCashChangeDto,
+    description:
+      'DX-570: recibido, aplicado y vuelto (con su tasa y su día) de un cobro en efectivo; ausente sin vuelto.',
+  })
+  cashChange?: ReceiptCashChangeDto;
 
   @ApiProperty({ example: 'Este documento no es factura' })
   legalNotice!: string;

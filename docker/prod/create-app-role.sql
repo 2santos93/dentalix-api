@@ -179,7 +179,7 @@ BEGIN
     'catalog_price_batches', 'catalog_price_history',
     'post_op_check_attempts',
     'quote_follow_up_messages', 'clinic_sessions',
-    'appointment_series'
+    'appointment_series', 'payment_change_lines'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);

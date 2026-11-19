@@ -1,3 +1,4 @@
+import type { PaymentCashChange } from '../cash-change';
 import type { SiteToday } from '../paid-at-window';
 import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import type { IdempotentPayment } from '../idempotency';
@@ -151,6 +152,12 @@ export interface CreatePaymentRepoInput {
    * paciente) no hay excepción posible: un día cerrado es 409.
    */
   lockActor?: LockActor | null;
+  /**
+   * DX-570: lo recibido y las líneas del vuelto, ya validados y convertidos
+   * por el caso de uso (`amount` ya lleva el resto confirmado). Solo en un
+   * abono suelto en efectivo a un plan; `null`/ausente sin vuelto.
+   */
+  cashChange?: PaymentCashChange | null;
 }
 
 /**

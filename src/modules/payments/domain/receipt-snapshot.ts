@@ -87,6 +87,43 @@ export interface ReceiptSplit {
   total: { currency: string; amount: number | null };
 }
 
+/**
+ * DX-570: una línea del vuelto tal como sale en el recibo: medio, moneda,
+ * importe, referencia, su equivalente en la moneda del abono y la tasa del
+ * día con que se convirtió (`null` en la misma moneda).
+ */
+export interface ReceiptChangeLine {
+  line: number;
+  paymentMethodName: string;
+  method: PaymentMethod;
+  currency: string;
+  amount: number;
+  reference: string | null;
+  equivalentAmount: number;
+  rate: {
+    fromPerBase: number;
+    toPerBase: number;
+    source: string;
+    date: string;
+  } | null;
+}
+
+/**
+ * DX-570: recibido, aplicado y vuelto de un cobro en efectivo. `applied` es
+ * lo acreditado al plan (el importe, con el resto confirmado ya dentro);
+ * `collected`, lo cobrado (importe ± ajustes, DX-516); `remainderToCredit`,
+ * la diferencia no devuelta que se sumó al abono (0 si nada). Recibido =
+ * cobrado + Σ equivalentes del vuelto.
+ */
+export interface ReceiptCashChange {
+  currency: string;
+  tendered: number;
+  applied: number;
+  collected: number;
+  remainderToCredit: number;
+  lines: ReceiptChangeLine[];
+}
+
 /** Lo que se lee, en la transacción del abono, para congelar el recibo. */
 export interface ReceiptSnapshotInput {
   clinic: ReceiptClinicInput;
@@ -125,6 +162,8 @@ export interface ReceiptSnapshotInput {
   cashier: { id: string; fullName: string } | null;
   /** DX-390: las líneas de un cobro dividido (ausente en un abono suelto). */
   split?: { lines: ReceiptSplitLine[]; planCurrency: string } | null;
+  /** DX-570: lo recibido y el vuelto (ausente o `null` sin vuelto). */
+  cashChange?: ReceiptCashChange | null;
   /**
    * DX-515: título y leyenda configurados al emitir (la leyenda, ya resuelta
    * entre la de la clínica y la de la sede). Ausente o `null` = sin ellos.
@@ -197,6 +236,11 @@ export interface ReceiptSnapshot {
    * recibos anteriores; `payment` es entonces su línea 1.
    */
   split?: ReceiptSplit | null;
+  /**
+   * DX-570: recibido, aplicado y vuelto de un cobro en efectivo, con la tasa
+   * y el día de cada línea. AUSENTE sin vuelto (la foto es la de antes).
+   */
+  cashChange?: ReceiptCashChange;
   legalNotice: string;
   /**
    * DX-515: el título del recibo que configuró la clínica, congelado al
@@ -304,6 +348,8 @@ export function buildReceiptSnapshot(
     planBalance: input.planBalance,
     cashier: input.cashier,
     ...(input.split ? { split: receiptSplit(input.split) } : {}),
+    // DX-570: solo con vuelto.
+    ...(input.cashChange ? { cashChange: input.cashChange } : {}),
     legalNotice: RECEIPT_LEGAL_NOTICE,
     // DX-515: solo si están configurados, para no cambiar la foto de antes.
     ...(input.texts?.title ? { title: input.texts.title } : {}),

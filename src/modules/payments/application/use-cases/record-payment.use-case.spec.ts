@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { buildPaymentProofKit } from '../__fixtures__/payment-proof-kit';
 import { referenceCurrencyDigitsCatalog } from '../../../../shared/money/__fixtures__/reference-currency-digits';
 import { PaymentMethodGate } from '../payment-method-gate';
+import { CashChangePreparer } from '../cash-change-preparer';
 import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import { MissingExchangeRateError } from '../../../exchange/domain/missing-exchange-rate.error';
 import {
@@ -164,6 +165,22 @@ function legacyFingerprint(
     .digest('hex');
 }
 
+/** DX-570: medio digital del catálogo para el vuelto (pide referencia). */
+const MOBILE_MEDIUM = {
+  id: '00000000-0000-4000-8000-0000000000a1',
+  tenantId: 't1',
+  name: 'Pago móvil',
+  kind: 'DIGITAL',
+  active: true,
+  requiresReference: true,
+  proofPolicy: 'NONE',
+  allowInPaymentLink: false,
+  legacyMethod: null,
+  adjustments: [],
+  createdAt: new Date(0),
+  updatedAt: new Date(0),
+} as const;
+
 describe('RecordPaymentUseCase', () => {
   function makeUseCase(now: Date = RECORD_NOW) {
     const repo = new InMemoryPaymentRepository();
@@ -186,6 +203,16 @@ describe('RecordPaymentUseCase', () => {
       ),
       buildPaymentProofKit(repo).proofs,
       () => now,
+      // DX-570: el vuelto, con un medio de la clínica que pide referencia.
+      new CashChangePreparer(
+        {
+          findById: (id: string) =>
+            Promise.resolve(id === MOBILE_MEDIUM.id ? MOBILE_MEDIUM : null),
+        } as unknown as PaymentMethodRepository,
+        makeWhitelist(),
+        referenceCurrencyDigitsCatalog(),
+        convert as unknown as ConvertAmountUseCase,
+      ),
     );
     return { repo, fakeGetPlan, uc, receiptBalance, convert };
   }
@@ -883,6 +910,124 @@ describe('RecordPaymentUseCase', () => {
       await expect(
         uc.execute('plan-2', body, 'u1', key),
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    });
+  });
+
+  describe('DX-570: lo recibido y el vuelto', () => {
+    const CASH_BODY = {
+      amount: 45,
+      currency: 'USD',
+      paidAt: '2026-10-30',
+      method: 'CASH' as const,
+    };
+
+    it('45 USD con 50 recibidos y 5 USD en VES por pago móvil: el plan recibe 45 y el vuelto viaja al repositorio', async () => {
+      const { repo, fakeGetPlan, uc, convert } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      convert.perBase = { VES: 36.5 };
+      const payment = await uc.execute('plan-1', {
+        ...CASH_BODY,
+        tendered: 50,
+        change: [
+          {
+            paymentMethodId: MOBILE_MEDIUM.id,
+            currency: 'VES',
+            amount: 182.5,
+            reference: '0412-5551234',
+          },
+        ],
+      });
+      expect(payment.amount).toBe(45);
+      expect(repo.lastCreateInput).toMatchObject({
+        amount: 45,
+        method: 'CASH',
+        planAmount: { planCurrency: 'USD', amount: 45 },
+        cashChange: {
+          tendered: 50,
+          remainderToCredit: 0,
+          lines: [
+            {
+              method: 'TRANSFER',
+              currency: 'VES',
+              amount: 182.5,
+              equivalentAmount: 5,
+              rate: { fromPerBase: 36.5, toPerBase: 1 },
+            },
+          ],
+        },
+      });
+    });
+
+    it('sin «Recibido», el cobro es el de hoy (sin vuelto en el repositorio)', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await uc.execute('plan-1', CASH_BODY);
+      expect(repo.lastCreateInput?.cashChange).toBeNull();
+    });
+
+    it('diferencia confirmada: el importe y la base suben con ella (saldo a favor)', async () => {
+      const { repo, fakeGetPlan, uc, receiptBalance } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await uc.execute('plan-1', {
+        ...CASH_BODY,
+        tendered: 50,
+        changeRemainderToCredit: true,
+      });
+      expect(repo.lastCreateInput).toMatchObject({
+        amount: 50,
+        planAmount: { amount: 50 },
+        cashChange: { tendered: 50, remainderToCredit: 5, lines: [] },
+      });
+      // El saldo del recibo se calcula con lo que de verdad se aplica.
+      expect(receiptBalance.calls.at(-1)?.convertedAmount).toBe(50);
+    });
+
+    it('vuelto mayor que lo recibido menos lo aplicado: 422 y no se registra nada', async () => {
+      const { repo, fakeGetPlan, uc, convert } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      convert.perBase = { VES: 36.5 };
+      await expect(
+        uc.execute('plan-1', {
+          ...CASH_BODY,
+          tendered: 50,
+          change: [
+            {
+              paymentMethodId: MOBILE_MEDIUM.id,
+              currency: 'VES',
+              amount: 200,
+              reference: '1',
+            },
+          ],
+        }),
+      ).rejects.toThrow(UnprocessableEntityException);
+      expect(repo.lastCreateInput).toBeNull();
+    });
+
+    it('vuelto sin recibido: 400 antes de leer el plan', async () => {
+      const { repo, fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await expect(
+        uc.execute('plan-1', {
+          ...CASH_BODY,
+          change: [
+            { paymentMethodId: MOBILE_MEDIUM.id, currency: 'USD', amount: 5 },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(fakeGetPlan.calls).toEqual([]);
+      expect(repo.lastCreateInput).toBeNull();
+    });
+
+    it('«Recibido» en un abono por transferencia: 400', async () => {
+      const { fakeGetPlan, uc } = makeUseCase();
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      await expect(
+        uc.execute('plan-1', {
+          ...CASH_BODY,
+          method: 'TRANSFER',
+          tendered: 50,
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

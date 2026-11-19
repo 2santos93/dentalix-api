@@ -274,6 +274,18 @@ export interface PaymentReceiptEmailVars {
   title?: string;
   /** DX-515-bis: la leyenda congelada en la foto; ausente = ninguna. */
   legend?: string;
+  /**
+   * DX-570: recibido, aplicado y vuelto de un cobro en efectivo, ya
+   * formateados (cada línea con su medio, su importe, su equivalente y la
+   * tasa con su día). Ausente sin vuelto: el email es el de antes.
+   */
+  cashChange?: {
+    tenderedLabel: string;
+    appliedLabel: string;
+    changeLines: string[];
+    /** La diferencia no devuelta que se sumó al abono; null si no hubo. */
+    remainderLabel: string | null;
+  };
 }
 
 /**

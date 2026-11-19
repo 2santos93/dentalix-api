@@ -192,6 +192,25 @@ function paymentReceipt(
       text: `${vars.toOpeningBalance ? 'Concepto' : 'Plan'}: ${vars.planLabel}`,
     },
   );
+  // DX-570: recibido, aplicado y vuelto (con su tasa y su día).
+  if (vars.cashChange) {
+    blocks.push(
+      {
+        kind: 'paragraph',
+        text: `Recibido: ${vars.cashChange.tenderedLabel} · Aplicado: ${vars.cashChange.appliedLabel}`,
+      },
+      ...vars.cashChange.changeLines.map((line): EmailBlock => ({
+        kind: 'paragraph',
+        text: `Vuelto: ${line}`,
+      })),
+    );
+    if (vars.cashChange.remainderLabel) {
+      blocks.push({
+        kind: 'paragraph',
+        text: `Sin devolver, sumado al abono: ${vars.cashChange.remainderLabel}`,
+      });
+    }
+  }
   if (vars.balanceLabel) {
     blocks.push({
       kind: 'paragraph',

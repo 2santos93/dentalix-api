@@ -5,6 +5,7 @@ import { civilDateIn } from '../../../../shared/time/civil-day';
 import { documentText } from '../../../patients/domain/document-type';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import { moneyWithCode } from '../../../../shared/format/money-with-code';
+import { changeRateText } from '../../domain/cash-change';
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: 'Efectivo',
@@ -118,5 +119,36 @@ export function receiptEmailVars(
     // DX-515-bis: solo si la foto los tiene; las variables de antes no cambian.
     ...(snapshot.title ? { title: snapshot.title } : {}),
     ...(snapshot.legend ? { legend: snapshot.legend } : {}),
+    // DX-570: igual, solo con vuelto.
+    ...(snapshot.cashChange
+      ? { cashChange: cashChangeVars(snapshot.cashChange, money, fmt) }
+      : {}),
+  };
+}
+
+/** DX-570: recibido, aplicado y cada línea del vuelto, formateados. */
+function cashChangeVars(
+  change: NonNullable<PaymentReceiptView['snapshot']['cashChange']>,
+  money: (amount: number, currency: string) => string,
+  fmt: RegionalFormat,
+): NonNullable<PaymentReceiptEmailVars['cashChange']> {
+  return {
+    tenderedLabel: money(change.tendered, change.currency),
+    appliedLabel: money(change.applied, change.currency),
+    changeLines: change.lines.map((line) => {
+      const amount = money(line.amount, line.currency);
+      if (!line.rate) return `${line.paymentMethodName} · ${amount}`;
+      const rate = changeRateText(
+        line.rate,
+        line.currency,
+        change.currency,
+        (value) => fmt.number(value, { max: 4 }),
+      );
+      return `${line.paymentMethodName} · ${amount} (${money(line.equivalentAmount, change.currency)}; tasa ${rate} del ${fmt.civilDate(line.rate.date)})`;
+    }),
+    remainderLabel:
+      change.remainderToCredit > 0
+        ? money(change.remainderToCredit, change.currency)
+        : null,
   };
 }

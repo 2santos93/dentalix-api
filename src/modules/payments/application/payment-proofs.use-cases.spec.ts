@@ -125,6 +125,8 @@ function build() {
     ),
     kit.proofs,
     () => NOW,
+    // DX-570: sin vuelto en estas pruebas.
+    null as never,
   );
   return { repo, kit, uc };
 }

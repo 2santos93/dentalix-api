@@ -4,6 +4,7 @@ import { RecordOpeningBalancePaymentUseCase } from './application/use-cases/reco
 import { Module } from '@nestjs/common';
 import { PaymentMethodsModule } from '../payment-methods/payment-methods.module';
 import { PaymentMethodGate } from './application/payment-method-gate';
+import { CashChangePreparer } from './application/cash-change-preparer';
 import { PaymentProofUploads } from './application/payment-proof-uploads';
 import { PaymentProofs } from './application/payment-proofs';
 import {
@@ -125,6 +126,8 @@ import { PrismaExternalInvoiceRepository } from './infrastructure/repositories/p
     // DX-262: abono contra el saldo migrado.
     RecordOpeningBalancePaymentUseCase,
     PaymentMethodGate,
+    // DX-570: lo recibido y el vuelto de un abono en efectivo.
+    CashChangePreparer,
     // DX-389: comprobante del cobro (subida directa al almacén privado).
     PaymentProofUploads,
     PaymentProofs,

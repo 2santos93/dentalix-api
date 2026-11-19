@@ -1,3 +1,4 @@
+import type { PaymentCashChange } from '../cash-change';
 import type { PaymentAdjustmentLine } from '../payment-adjustment-line';
 import { PaymentMethod } from '@prisma/client';
 import type {
@@ -85,4 +86,9 @@ export interface Payment {
    * la clave del almacén no sale nunca; se ve con `GET /payments/:id/proof/url`.
    */
   hasProof: boolean;
+  /**
+   * DX-570: lo recibido y el vuelto de un abono en efectivo; `null` sin
+   * vuelto. Ausente en las entidades que no lo leen (dobles de test).
+   */
+  cashChange?: PaymentCashChange | null;
 }

@@ -351,6 +351,8 @@ model Tenant {
   creditReceptionMaxAmount    Decimal                      @default(0) @db.Decimal(14, 2)
   creditTransfers             PatientCreditTransfer[]
   creditRefunds               PatientCreditRefund[]
+  // DX-570: líneas de vuelto de los abonos.
+  paymentChangeLines          PaymentChangeLine[]
   creditRefundPayments        PatientCreditRefundPayment[]
   creditEntries               PatientCreditEntry[]
   creditRefundCounters        PatientCreditRefundCounter[]
@@ -3067,9 +3069,11 @@ model Currency {
   // DX-374: tasas manuales de las clínicas en esa moneda.
   manualExchangeRates         ManualExchangeRate[]
 
-  creditTransfers PatientCreditTransfer[] @relation("CreditTransferCurrency")
-  creditRefunds   PatientCreditRefund[]   @relation("CreditRefundCurrency")
-  creditEntries   PatientCreditEntry[]    @relation("CreditEntryCurrency")
+  creditTransfers    PatientCreditTransfer[] @relation("CreditTransferCurrency")
+  creditRefunds      PatientCreditRefund[]   @relation("CreditRefundCurrency")
+  // DX-570: líneas de vuelto en esta moneda.
+  paymentChangeLines PaymentChangeLine[]     @relation("PaymentChangeLineCurrency")
+  creditEntries      PatientCreditEntry[]    @relation("CreditEntryCurrency")
 
   // DX-569: enlace de pago y reporte del paciente.
   paymentLinks   PaymentLink[]
@@ -3205,6 +3209,8 @@ model ClinicPaymentMethod {
   // DX-569: datos para pagar (de la clínica o de una sede) y reportes.
   instructions   PaymentMethodInstruction[]
   paymentReports PaymentReport[]
+  // DX-570: líneas de vuelto entregadas por este medio.
+  changeLines    PaymentChangeLine[]
 
   // Destino de la FK compuesta de payments.paymentMethodId (SEC-004).
   @@unique([tenantId, id], map: "payment_methods_tenant_id_key")
@@ -3523,6 +3529,14 @@ model Payment {
   // también después de emitir el recibo (auditado con antes y después); el
   // recibo emitido no cambia. En un cobro dividido va en todas sus líneas.
   externalInvoiceNumber    String?
+  // DX-570: lo que entregó el paciente («Recibido») en un abono en efectivo
+  // con vuelto, en la moneda del abono. NULL = cobro sin vuelto. CHECK
+  // payments_tendered_check: > 0, solo CASH, abono suelto a un plan. Cuadra al
+  // COMMIT con importe + ajustes + vuelto (trigger payments_change_balance).
+  tenderedAmount           Decimal?            @db.Decimal(14, 2)
+  // DX-570: la diferencia no devuelta que, confirmada, se sumó a `amount`
+  // (saldo a favor si supera lo pendiente). NULL si el vuelto cubrió todo.
+  changeRemainder          Decimal?            @db.Decimal(14, 2)
 
   // FK COMPUESTAS (SEC-004): el plan y la sede tienen que ser del MISMO tenant,
   // y `patientId` (denormalizado) tiene que ser el paciente del plan. Por
@@ -3578,6 +3592,9 @@ model Payment {
 
   // DX-569: enlace de pago y reporte del paciente.
   paymentReports PaymentReport[]
+
+  // DX-570: las líneas del vuelto (solo con `tenderedAmount`).
+  changeLines PaymentChangeLine[]
 
   @@unique([tenantId, idempotencyKey], map: "payments_tenant_idempotency_key")
   // DX-380: destino de la FK compuesta por clínica de `payment_base_retries`
@@ -6284,6 +6301,10 @@ enum CashAdjustmentKind {
   // DX-274: anulación, con la caja ya cerrada, de una salida de caja menor
   // (suma: devuelve el efectivo que la salida había restado).
   OUTFLOW_VOID
+  // DX-570: vuelto de un abono tardío (resta) y su devolución al anular el
+  // abono con la caja ya cerrada (suma). Con `paymentChangeLineId`.
+  CHANGE_LATE
+  CHANGE_VOID
 }
 
 /// Turno de caja de UN usuario en UNA sede. Una sola abierta por (sede,
@@ -6396,34 +6417,41 @@ model CashSessionClosingLine {
 /// hasta la siguiente que se abra en la sede. `originalSessionId`: la caja
 /// cerrada de la que viene.
 model CashSessionAdjustment {
-  id                String             @id @default(uuid()) @db.Uuid
-  tenantId          String             @db.Uuid
-  locationId        String             @db.Uuid
-  sessionId         String?            @db.Uuid
-  kind              CashAdjustmentKind
-  paymentId         String?            @db.Uuid
+  id                  String             @id @default(uuid()) @db.Uuid
+  tenantId            String             @db.Uuid
+  locationId          String             @db.Uuid
+  sessionId           String?            @db.Uuid
+  kind                CashAdjustmentKind
+  paymentId           String?            @db.Uuid
   /// DX-274: solo en `OUTFLOW_VOID`, la salida de caja anulada.
-  expensePaymentId  String?            @db.Uuid
-  originalSessionId String?            @db.Uuid
-  currency          String
-  method            PaymentMethod
-  amount            Decimal            @db.Decimal(14, 2)
-  reason            String?
+  expensePaymentId    String?            @db.Uuid
+  /// DX-570: solo en `CHANGE_LATE`/`CHANGE_VOID`, la línea de vuelto (y por
+  /// ella su abono: `paymentId` va NULL en esas filas).
+  paymentChangeLineId String?            @db.Uuid
+  originalSessionId   String?            @db.Uuid
+  currency            String
+  method              PaymentMethod
+  amount              Decimal            @db.Decimal(14, 2)
+  reason              String?
   /// Puntero suave a User, como `Payment.createdById`.
-  createdById       String             @db.Uuid
+  createdById         String             @db.Uuid
   /// La pone el servidor de BD (trigger).
-  createdAt         DateTime           @default(now())
+  createdAt           DateTime           @default(now())
 
-  location        Location        @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_location_fkey")
-  session         CashSession?    @relation("CashAdjustmentSession", fields: [tenantId, sessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_session_fkey")
-  originalSession CashSession?    @relation("CashAdjustmentOriginal", fields: [tenantId, originalSessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_original_fkey")
-  payment         Payment?        @relation(fields: [paymentId], references: [id], onDelete: Restrict, map: "cash_session_adjustments_payment_fkey")
-  currencyRef     Currency        @relation(fields: [currency], references: [code], map: "cash_session_adjustments_currency_fkey")
-  expensePayment  ExpensePayment? @relation(fields: [tenantId, expensePaymentId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_expense_payment_fkey")
+  location        Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_location_fkey")
+  session         CashSession?       @relation("CashAdjustmentSession", fields: [tenantId, sessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_session_fkey")
+  originalSession CashSession?       @relation("CashAdjustmentOriginal", fields: [tenantId, originalSessionId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_original_fkey")
+  payment         Payment?           @relation(fields: [paymentId], references: [id], onDelete: Restrict, map: "cash_session_adjustments_payment_fkey")
+  currencyRef     Currency           @relation(fields: [currency], references: [code], map: "cash_session_adjustments_currency_fkey")
+  expensePayment  ExpensePayment?    @relation(fields: [tenantId, expensePaymentId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_expense_payment_fkey")
+  changeLine      PaymentChangeLine? @relation(fields: [tenantId, paymentChangeLineId], references: [tenantId, id], onDelete: Restrict, map: "cash_session_adjustments_change_line_fkey")
 
   // Solo SQL (Prisma no expresa los parciales), DX-274:
   //   cash_session_adjustments_expense_payment_kind_key  UNIQUE ("expensePaymentId", "kind") WHERE "expensePaymentId" IS NOT NULL
   //   cash_session_adjustments_kind_check                CHECK reescrito con OUTFLOW_VOID
+  // DX-570:
+  //   cash_session_adjustments_change_line_kind_key      UNIQUE ("paymentChangeLineId", "kind") WHERE "paymentChangeLineId" IS NOT NULL
+  //   cash_session_adjustments_kind_check                reescrito con CHANGE_LATE y CHANGE_VOID
   @@index([tenantId, locationId, createdAt], map: "cash_session_adjustments_tenant_location_idx")
   @@map("cash_session_adjustments")
 }
@@ -6446,6 +6474,44 @@ model CashSessionReopening {
   @@unique([tenantId, sessionId, sequence], map: "cash_session_reopenings_session_sequence_key")
   @@index([tenantId, closingId], map: "cash_session_reopenings_tenant_closing_idx")
   @@map("cash_session_reopenings")
+}
+
+/// DX-570: una línea del vuelto de un abono en efectivo (1–3), append-only:
+/// el medio del catálogo y su tipo base antiguo (el del arqueo), la moneda, el
+/// importe, la referencia (si el medio la pide), su equivalente en la moneda
+/// del abono y la tasa del día congelada (las 4 columnas juntas; ninguna en la
+/// misma moneda). Trigger en 20270120090100: sin UPDATE ni DELETE; nace con
+/// un abono vivo con «Recibido».
+model PaymentChangeLine {
+  id                  String              @id @default(uuid()) @db.Uuid
+  tenantId            String              @db.Uuid
+  paymentId           String              @db.Uuid
+  line                Int                 @db.SmallInt
+  paymentMethodId     String              @db.Uuid
+  method              PaymentMethod
+  currency            String
+  amount              Decimal             @db.Decimal(14, 2)
+  reference           String?
+  referenceNormalized String?
+  equivalentAmount    Decimal             @db.Decimal(14, 2)
+  exchangeRateFrom    Decimal?            @db.Decimal(18, 8)
+  exchangeRateTo      Decimal?            @db.Decimal(18, 8)
+  exchangeRateSource  ExchangeRateSource?
+  exchangeRateDate    DateTime?           @db.Date
+  /// La pone el servidor de BD (trigger).
+  createdAt           DateTime            @default(now())
+
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  payment         Payment                 @relation(fields: [tenantId, paymentId], references: [tenantId, id], onDelete: Restrict, map: "payment_change_lines_payment_fkey")
+  paymentMethod   ClinicPaymentMethod     @relation(fields: [tenantId, paymentMethodId], references: [tenantId, id], onDelete: Restrict, map: "payment_change_lines_payment_method_fkey")
+  currencyRef     Currency                @relation("PaymentChangeLineCurrency", fields: [currency], references: [code], map: "payment_change_lines_currency_fkey")
+  cashAdjustments CashSessionAdjustment[]
+
+  @@unique([tenantId, paymentId, line], map: "payment_change_lines_tenant_payment_line_key")
+  @@unique([tenantId, id], map: "payment_change_lines_tenant_id_key")
+  @@index([tenantId, paymentMethodId], map: "payment_change_lines_tenant_method_idx")
+  @@index([currency], map: "payment_change_lines_currency_idx")
+  @@map("payment_change_lines")
 }
 
 // ---------------------------------------------------------------------------

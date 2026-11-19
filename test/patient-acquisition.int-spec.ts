@@ -174,11 +174,14 @@ function row(r: AcquisitionReport, name: string) {
   return found;
 }
 
+// La purga de los 12 000 pacientes del invariante de plan pasa de los 30 s
+// por defecto en un runner lento (Integración 2/4 de #227): mismo margen que
+// opening-balances.
 afterAll(async () => {
   await purgeTenants(raw, tenants);
   await raw.$disconnect();
   await prisma.$disconnect();
-});
+}, 180_000);
 
 describe('DX-172 · catálogo de fuentes en la BD', () => {
   let a: Clinic;

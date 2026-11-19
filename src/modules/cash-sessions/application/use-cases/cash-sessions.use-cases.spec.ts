@@ -60,6 +60,9 @@ function record(extra: Partial<CashSessionRecord> = {}): CashSessionRecord {
         payments: 20_000,
         paymentsCount: 1,
         paymentAdjustments: 0,
+        changeIn: 0,
+        changeOut: 0,
+        changeOutCount: 0,
         adjustments: 0,
         outflows: 0,
         outflowsCount: 0,
@@ -169,6 +172,18 @@ describe('GetCashSessionUseCase (DX-027)', () => {
     patient: { id: 'pt-1', fullName: 'Ana' },
     createdBy: null,
     collectedAmount: 5_000,
+    // DX-570: con vuelto, para ver que el ciego también lo oculta.
+    cashChange: {
+      tendered: 6_000,
+      lines: [
+        {
+          currency: 'VES',
+          method: 'TRANSFER' as const,
+          paymentMethodName: 'Pago móvil',
+          amount: 36_500,
+        },
+      ],
+    },
     voidedAt: NOW,
     voidedBy: null,
     voidReason: 'Error',
@@ -395,7 +410,12 @@ describe('GetCashSessionUseCase (DX-027)', () => {
           );
           expect(voidedById[`p-${key}`]).toMatchObject(
             hides
-              ? { amount: null, collectedAmount: null, amountHidden: true }
+              ? {
+                  amount: null,
+                  collectedAmount: null,
+                  cashChange: null,
+                  amountHidden: true,
+                }
               : { amount: 40, amountHidden: false },
           );
         }
@@ -677,6 +697,9 @@ describe('CloseCashSessionUseCase (DX-027)', () => {
         paymentsCents: 2_000_000,
         paymentsCount: 1,
         paymentAdjustmentsCents: 0,
+        changeInCents: 0,
+        changeOutCents: 0,
+        changeOutCount: 0,
         adjustmentsCents: 0,
         outflowsCents: 0,
         outflowsCount: 0,

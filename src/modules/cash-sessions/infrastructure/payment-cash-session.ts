@@ -138,9 +138,17 @@ export async function assignPaymentToCashSession(
   return { cashSessionId: sessionId, late: null };
 }
 
+/** DX-570: una línea de vuelto como la necesitan sus ajustes de caja. */
+export interface ChangeLineForCash {
+  id: string;
+  line: { currency: string; method: PaymentMethod; amount: number };
+}
+
 /**
  * El ajuste del abono tardío, tras insertar el abono (misma transacción).
  * DX-516: `amount` es lo cobrado (importe ± ajustes por medio de pago).
+ * DX-570: con vuelto, `amount` es lo recibido y cada línea es un ajuste
+ * CHANGE_LATE (resta) en la misma caja de destino (o pendiente).
  */
 export async function recordLatePaymentAdjustment(
   tx: Prisma.TransactionClient,
@@ -154,6 +162,7 @@ export async function recordLatePaymentAdjustment(
     createdById: string;
   },
   late: NonNullable<PaymentCashAssignment['late']>,
+  changeLines: readonly ChangeLineForCash[] = [],
 ): Promise<void> {
   await tx.cashSessionAdjustment.create({
     data: {
@@ -169,6 +178,22 @@ export async function recordLatePaymentAdjustment(
       createdById: payment.createdById,
     },
   });
+  for (const change of changeLines) {
+    await tx.cashSessionAdjustment.create({
+      data: {
+        tenantId: payment.tenantId,
+        locationId: payment.locationId,
+        sessionId: late.sessionId,
+        kind: 'CHANGE_LATE',
+        paymentChangeLineId: change.id,
+        originalSessionId: late.originalSessionId,
+        currency: change.line.currency,
+        method: change.line.method,
+        amount: new Prisma.Decimal(change.line.amount).negated(),
+        createdById: payment.createdById,
+      },
+    });
+  }
 }
 
 /**
@@ -194,6 +219,12 @@ export async function recordVoidAdjustment(
       amount: true,
       // DX-516: la anulación compensa lo cobrado (importe ± ajustes).
       methodAdjustments: { select: { type: true, amount: true } },
+      // DX-570: con vuelto, lo recibido entra y el vuelto sale.
+      tenderedAmount: true,
+      changeLines: {
+        select: { id: true, currency: true, method: true, amount: true },
+        orderBy: { line: 'asc' },
+      },
     },
   });
   if (!payment) return;
@@ -238,16 +269,37 @@ export async function recordVoidAdjustment(
       originalSessionId,
       currency: payment.currency,
       method: methodBucket(payment.method),
-      amount: new Prisma.Decimal(
-        collectedAmount(
-          payment.amount.toNumber(),
-          payment.methodAdjustments.map((a) => ({
-            type: a.type,
-            amount: a.amount.toNumber(),
-          })),
-        ),
+      amount: (
+        payment.tenderedAmount ??
+        new Prisma.Decimal(
+          collectedAmount(
+            payment.amount.toNumber(),
+            payment.methodAdjustments.map((a) => ({
+              type: a.type,
+              amount: a.amount.toNumber(),
+            })),
+          ),
+        )
       ).negated(),
       createdById: input.voidedById,
     },
   });
+  // DX-570 (DX-345: mismos bloqueos, misma caja de destino): anular el abono
+  // revierte su vuelto; cada línea vuelve a su grupo (suma).
+  for (const line of payment.changeLines) {
+    await tx.cashSessionAdjustment.create({
+      data: {
+        tenantId: input.tenantId,
+        locationId: payment.locationId,
+        sessionId: targetSessionId,
+        kind: 'CHANGE_VOID',
+        paymentChangeLineId: line.id,
+        originalSessionId,
+        currency: line.currency,
+        method: line.method,
+        amount: line.amount,
+        createdById: input.voidedById,
+      },
+    });
+  }
 }
