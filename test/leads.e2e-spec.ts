@@ -346,7 +346,14 @@ describe('Prospectos (DX-556, e2e)', () => {
       });
 
       // La primera cita desde la agenda (recepción, con el paciente del prospecto).
-      const start = new Date(Date.now() + 15 * 60_000);
+      // Se agenda pasado mañana a mediodía en la sede (UTC−4) y se trae a HOY
+      // por `raw`, como patient-flow: «ahora + 15 min» cruzaba la medianoche de
+      // la sede de madrugada (UTC) y el horario daba 422; la llegada solo vale hoy.
+      const caracasToday = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Caracas',
+      }).format(new Date());
+      const midnight = new Date(`${caracasToday}T00:00:00-04:00`).getTime();
+      const start = new Date(midnight + 2 * 24 * 3_600_000 + 12 * 3_600_000);
       const appt = await as(a, tokens.RECEPTION!, principal)
         .post('/appointments', {
           patientId: first.patientId,
@@ -356,6 +363,13 @@ describe('Prospectos (DX-556, e2e)', () => {
         })
         .expect(201);
       const apptId = (appt.body as { id: string }).id;
+      await raw.appointment.update({
+        where: { id: apptId },
+        data: {
+          start: new Date(midnight + 30 * 60_000),
+          end: new Date(midnight + 60 * 60_000),
+        },
+      });
       let row = (await reception().get(`/leads/${lead.id}`).expect(200))
         .body as LeadView;
       expect(row).toMatchObject({
