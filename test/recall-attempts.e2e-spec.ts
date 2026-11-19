@@ -11,10 +11,15 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { ReportSeeder } from './support/reports-fixtures';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import { safeTodayZone } from './support/sede-clock';
+import {
+  addCivilDays,
+  civilDateIn,
+  zonedStartOfDay,
+} from '../src/shared/time/civil-day';
 
 /**
- * DX-465 · Recall con intentos por HTTP real (Caracas, UTC−4):
+ * DX-465 · Recall con intentos por HTTP real (sede de `safeTodayZone`):
  *  - un intento oculta al paciente los días de la sede; «Incluir contactados»
  *    lo muestra; el tope de la sede lo deja en «Intentos agotados»; el
  *    recuento y la cola de «Mi día» bajan con la lista;
@@ -29,7 +34,8 @@ import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
-const ZONE = 'America/Caracas';
+// DX-449: la zona de las sedes, lejos de su medianoche (Caracas casi siempre).
+const ZONE = safeTodayZone();
 const DAY_MS = 86_400_000;
 const today = () => civilDateIn(new Date(), ZONE);
 const messageOf = (res: { body: unknown }) =>
@@ -133,7 +139,7 @@ describe('Recall con intentos (DX-465, e2e)', () => {
       body,
     );
 
-  // El lunes de dentro de al menos una semana, 10:00 de Caracas (14:00Z).
+  // El lunes de dentro de al menos una semana, a las 10:00 de la sede.
   const monday = (weeks: number) => {
     const day = new Date(Date.now() + 7 * DAY_MS);
     day.setUTCDate(day.getUTCDate() + ((8 - day.getUTCDay()) % 7 || 7));
@@ -141,7 +147,10 @@ describe('Recall con intentos (DX-465, e2e)', () => {
       .toISOString()
       .slice(0, 10);
   };
-  const at = (day: string, hhmm = '14:00') => `${day}T${hhmm}:00.000Z`;
+  const at = (day: string, minutes = 10 * 60) =>
+    new Date(
+      zonedStartOfDay(day, ZONE).getTime() + minutes * 60_000,
+    ).toISOString();
 
   beforeAll(async () => {
     app = await createE2eApp();
@@ -619,7 +628,7 @@ describe('Recall con intentos (DX-465, e2e)', () => {
         providerId: ids.DENTIST,
         appointmentTypeId,
         start: at(day),
-        end: at(day, '14:30'),
+        end: at(day, 10 * 60 + 30),
       })
       .expect(201);
     const appointmentId = (appt.body as { id: string }).id;
@@ -662,7 +671,7 @@ describe('Recall con intentos (DX-465, e2e)', () => {
       providerId: ids.DENTIST,
       appointmentTypeId,
       start: at(monday(3)),
-      end: at(monday(3), '14:30'),
+      end: at(monday(3), 10 * 60 + 30),
       intervalWeeks: 1,
       count: 3,
     };
