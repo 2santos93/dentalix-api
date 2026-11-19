@@ -799,16 +799,10 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     },
   });
   // DX-565: A reescribe el texto del recordatorio (Ajustes › Mensajes).
-  await api(
-    app,
-    a,
-    'put',
-    '/message-templates/appointment-reminder/EMAIL/es',
-    {
-      subject: 'Tu cita en {clinica}',
-      body: 'Hola {paciente}, te esperamos el {fecha} a las {hora}.',
-    },
-  ).expect(200);
+  await api(app, a, 'put', '/message-templates/appointment-reminder/EMAIL/es', {
+    subject: 'Tu cita en {clinica}',
+    body: 'Hola {paciente}, te esperamos el {fecha} a las {hora}.',
+  }).expect(200);
   // DX-561: seguimiento automático en la sede nueva de A (apagado) y un paso
   // registrado de su plan (lo crea el trabajo; aquí, por `raw`).
   await api(app, a, 'put', `/quote-follow-up-settings/${location.id}`, {
