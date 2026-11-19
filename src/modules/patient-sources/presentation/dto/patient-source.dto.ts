@@ -71,7 +71,7 @@ export class UpdatePatientSourceDto {
   isActive?: boolean;
 }
 
-export class AcquisitionSourceDto {
+export class PatientAcquisitionSourceDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() name!: string;
   @ApiProperty({ enum: PatientSourceKind, enumName: 'PatientSourceKind' })
@@ -79,35 +79,35 @@ export class AcquisitionSourceDto {
   @ApiProperty() isActive!: boolean;
 }
 
-export class AcquisitionReferrerDto {
+export class PatientAcquisitionReferrerDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() fullName!: string;
   @ApiProperty() patientCode!: string;
 }
 
-export class AcquisitionReferralDto {
+export class PatientAcquisitionReferralDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() fullName!: string;
   @ApiProperty({ format: 'date-time' }) createdAt!: Date;
 }
 
-export class AcquisitionReferralsDto {
+export class PatientAcquisitionReferralsDto {
   @ApiProperty({ description: 'Pacientes vivos que este recomendó.' })
   count!: number;
   @ApiProperty({
-    type: [AcquisitionReferralDto],
+    type: [PatientAcquisitionReferralDto],
     description: 'Los más recientes (hasta 10).',
   })
-  recent!: AcquisitionReferralDto[];
+  recent!: PatientAcquisitionReferralDto[];
 }
 
 export class PatientAcquisitionDto {
-  @ApiProperty({ type: AcquisitionSourceDto, nullable: true })
-  source!: AcquisitionSourceDto | null;
-  @ApiProperty({ type: AcquisitionReferrerDto, nullable: true })
-  referredByPatient!: AcquisitionReferrerDto | null;
+  @ApiProperty({ type: PatientAcquisitionSourceDto, nullable: true })
+  source!: PatientAcquisitionSourceDto | null;
+  @ApiProperty({ type: PatientAcquisitionReferrerDto, nullable: true })
+  referredByPatient!: PatientAcquisitionReferrerDto | null;
   @ApiProperty({ type: String, nullable: true })
   referredByName!: string | null;
-  @ApiProperty({ type: AcquisitionReferralsDto })
-  referrals!: AcquisitionReferralsDto;
+  @ApiProperty({ type: PatientAcquisitionReferralsDto })
+  referrals!: PatientAcquisitionReferralsDto;
 }

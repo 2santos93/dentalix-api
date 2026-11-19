@@ -217,6 +217,7 @@ export class CreatePatientDto {
 
   // DX-172: «¿Cómo nos conoció?». Dato personal: solo el personal de la clínica.
   @ApiPropertyOptional({
+    type: String,
     format: 'uuid',
     nullable: true,
     description:
@@ -227,6 +228,7 @@ export class CreatePatientDto {
   sourceId?: string | null;
 
   @ApiPropertyOptional({
+    type: String,
     format: 'uuid',
     nullable: true,
     description:
@@ -237,6 +239,7 @@ export class CreatePatientDto {
   referredByPatientId?: string | null;
 
   @ApiPropertyOptional({
+    type: String,
     nullable: true,
     maxLength: REFERRED_BY_NAME_MAX,
     description:
