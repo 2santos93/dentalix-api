@@ -625,6 +625,14 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /lead-reasons': ADMIN_ONLY,
   'DELETE /lead-reasons/:id': ADMIN_ONLY,
 
+  // --- «¿Cómo nos conoció?» (DX-172) ---------------------------------------
+  // El catálogo lo lee quien da de alta o edita pacientes; lo cambia ADMIN.
+  // La captación de la ficha, como la ficha.
+  'GET /patient-sources': EVERY_ROLE,
+  'POST /patient-sources': ADMIN_ONLY,
+  'PATCH /patient-sources/:id': ADMIN_ONLY,
+  'GET /patients/:id/acquisition': EVERY_ROLE,
+
   // --- Documentos del paciente (DX-151) -------------------------------------
   // dentalix-docs/planning DX-151. Ver, descargar y subir: los 4 roles
   // (recepción escanea remisiones y consentimientos). Anular: la ruta admite
@@ -1042,6 +1050,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'FINANCIAL_REPORTS_VIEW',
   ),
   'GET /reports/quote-funnel.csv': ADMIN_ONLY,
+  // DX-172: captación (pacientes nuevos y lo cobrado por fuente). ADMIN o
+  // FINANCIAL_REPORTS_VIEW; el CSV, solo ADMIN.
+  'GET /reports/acquisition': orPermission(
+    roles('ADMIN'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/acquisition.csv': ADMIN_ONLY,
   // DX-561: efectividad del seguimiento automático, con el alcance del embudo.
   'GET /reports/quote-follow-up': orPermission(
     roles('ADMIN', 'DENTIST'),

@@ -4523,6 +4523,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'patient-acquisition.e2e-spec.ts',
+      checks:
+        'B → 404 al renombrar o desactivar una fuente de A y al leer la captación de un paciente de A; 400 con la fuente o el referente de A en el alta y la edición; 403 con la sede de A en el informe y su CSV (DX-172)',
+      routes: ['PATCH /patient-sources/:id', 'GET /patients/:id/acquisition'],
+    },
+    {
       spec: 'post-op-checks.e2e-spec.ts',
       checks:
         'B → 404 al registrar el resultado de un control postoperatorio de A, sin intento nuevo; y 403 con la sede de A en la lista y el contador (DX-566)',

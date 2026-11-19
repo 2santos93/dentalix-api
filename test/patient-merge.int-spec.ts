@@ -50,6 +50,9 @@ const NOT_MOVED: Record<string, string> = {
   'patient_duplicate_dismissals.patientBId': 'reapuntado aparte',
   // Fusiones anteriores: la fusión reapunta las que apuntaban al absorbido.
   'patients.mergedIntoId': 'reapuntado aparte',
+  // DX-172: quién lo recomendó. Los recomendados del absorbido pasan al
+  // conservado (y el conservado nunca queda recomendado por sí mismo).
+  'patients.referredByPatientId': 'reapuntado aparte',
 };
 
 const SAME_PAIR_ALLOWED_CHANGES: Record<string, string[]> = {
@@ -463,6 +466,100 @@ describe('DX-266 · nunca entre clínicas (RLS)', () => {
       { deletedAt: null, mergedIntoId: null },
       { deletedAt: null, mergedIntoId: null },
     ]);
+  });
+
+  it('DX-172: los recomendados del absorbido pasan al conservado, nadie queda recomendado por sí mismo y, sin fuente, el conservado hereda la del absorbido', async () => {
+    await rolledBack(demoTenant, async (tx) => {
+      await tx.$queryRaw`SELECT dx_patient_sources_ensure(${demoTenant}::uuid)`;
+      const sources = await tx.patientSource.findMany({
+        where: { tenantId: demoTenant },
+        select: { id: true, systemKey: true },
+      });
+      const key = (k: string) => sources.find((s) => s.systemKey === k)!.id;
+      const referral = key('PATIENT_REFERRAL');
+      const instagram = key('INSTAGRAM');
+      const make = (
+        lastName: string,
+        data: Partial<{
+          sourceId: string;
+          referredByPatientId: string;
+          referredByName: string;
+        }> = {},
+      ) =>
+        tx.patient
+          .create({
+            data: {
+              tenantId: demoTenant,
+              firstName: 'DX172',
+              lastName,
+              ...data,
+            },
+            select: { id: true },
+          })
+          .then((p) => p.id);
+      const read = (id: string) =>
+        tx.patient.findUniqueOrThrow({
+          where: { id },
+          select: {
+            sourceId: true,
+            referredByPatientId: true,
+            referredByName: true,
+          },
+        });
+
+      // 1. El conservado ya tiene fuente: la conserva; su vínculo con el
+      //    absorbido (que lo recomendó) se vacía; el tercero pasa al conservado.
+      const absorbed = await make('Absorbido', { sourceId: instagram });
+      const kept = await make('Conservado', {
+        sourceId: referral,
+        referredByPatientId: absorbed,
+      });
+      const third = await make('Tercero', {
+        sourceId: referral,
+        referredByPatientId: absorbed,
+      });
+      const [{ result }] = await tx.$queryRaw<
+        { result: { resolved: Record<string, number> } }[]
+      >`
+        SELECT dx_merge_patients(${absorbed}::uuid, ${kept}::uuid, ${demoAdmin}::uuid) AS result`;
+      expect(result.resolved).toMatchObject({
+        referralsMoved: 1,
+        selfReferralCleared: 1,
+      });
+      expect(await read(kept)).toEqual({
+        sourceId: referral,
+        referredByPatientId: null,
+        referredByName: null,
+      });
+      expect((await read(third)).referredByPatientId).toBe(kept);
+
+      // 2. El conservado sin fuente hereda la del absorbido (con su referente).
+      const referrer = await make('Referente');
+      const absorbed2 = await make('Absorbido2', {
+        sourceId: referral,
+        referredByPatientId: referrer,
+      });
+      const kept2 = await make('Conservado2');
+      await tx.$queryRaw`SELECT dx_merge_patients(${absorbed2}::uuid, ${kept2}::uuid, ${demoAdmin}::uuid)`;
+      expect(await read(kept2)).toEqual({
+        sourceId: referral,
+        referredByPatientId: referrer,
+        referredByName: null,
+      });
+
+      // 3. …salvo que el referente heredado sea el propio conservado.
+      const kept3 = await make('Conservado3');
+      const absorbed3 = await make('Absorbido3', {
+        sourceId: referral,
+        referredByPatientId: kept3,
+      });
+      await tx.$queryRaw`SELECT dx_merge_patients(${absorbed3}::uuid, ${kept3}::uuid, ${demoAdmin}::uuid)`;
+      expect(await read(kept3)).toEqual({
+        sourceId: referral,
+        referredByPatientId: null,
+        referredByName: null,
+      });
+    });
   });
 
   it('sin clínica en la sesión la función se niega', async () => {

@@ -32,7 +32,7 @@ export class AcquisitionQueryDto {
 }
 
 export class AcquisitionAmountDto {
-  @ApiProperty({ example: 'USD' }) currency!: string;
+  @ApiProperty() currency!: string;
   @ApiProperty({ example: 100000 }) amount!: number;
 }
 
