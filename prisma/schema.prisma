@@ -1124,6 +1124,10 @@ model Patient {
   // DX-484: el código del paciente no se repite en la clínica (tampoco con
   // los archivados: un código no se reutiliza).
   @@unique([tenantId, patientCode], map: "patients_tenant_patient_code_key")
+  // DX-172: informe de captación (pacientes nuevos por fuente y período). NO
+  // parcial: uno con "deletedAt" IS NULL competiría con el trigram de la
+  // búsqueda (patient-search.int-spec).
+  @@index([tenantId, sourceId, createdAt], map: "patients_tenant_source_created_idx")
   // DX-043 (DB-017): sin @@index([tenantId]); era prefijo exacto de
   // patients_tenant_id_key y se retiró en 20261017114000.
   // Índices PARCIALES (WHERE "deletedAt" IS NULL) de DX-043 que Prisma no
@@ -1134,8 +1138,6 @@ model Patient {
   //     -> búsqueda (dx_patient_search_ids/_count).
   //   patients_tenant_last_attention_live_idx ("tenantId", last_attention_at)
   //     -> historias que salen de retención (DX-039).
-  //   patients_tenant_source_created_idx ("tenantId", "sourceId", "createdAt")
-  //     -> informe de captación (DX-172).
   //   patients_tenant_referred_by_idx ("tenantId", "referredByPatientId")
   //     WHERE "referredByPatientId" IS NOT NULL
   //     -> «Ha recomendado a N», fusión, supresión y lado hijo de la FK (DX-172).
