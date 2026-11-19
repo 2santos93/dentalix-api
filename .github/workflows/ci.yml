@@ -103,6 +103,23 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: test -f dist/main.js
 
+      # DX-208: la matriz de autorización (test/support/route-access-matrix.ts)
+      # en JSON, para consultarla sin leer TypeScript y para el contrato de
+      # roles de la web. La E2E de la web no descarga este artefacto: lo genera
+      # con el mismo script desde su checkout de la API (`api_ref`).
+      - name: Exportar la matriz de roles (route-access.json)
+        id: matrix-export
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: npm run matrix:export -- dist/route-access.json
+      - name: Subir route-access.json
+        if: ${{ !cancelled() && steps.matrix-export.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: route-access
+          path: dist/route-access.json
+          if-no-files-found: error
+          retention-days: 30
+
   # DX-251 (TST-028): integración y e2e en jobs SEPARADOS, cada uno con su
   # Postgres y su S3: un rojo en `test:int` ya no impide ver la e2e, y los dos
   # informan su resultado en cada run.
