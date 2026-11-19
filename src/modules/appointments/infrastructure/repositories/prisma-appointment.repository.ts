@@ -101,6 +101,8 @@ export const INCLUDE_PATIENT_NAME = {
   // DX-211: el sillón embebido, aunque esté desactivado (la cita lo conserva).
   // La FK compuesta garantiza que es de la misma clínica y sede.
   chair: { select: { id: true, name: true, active: true } },
+  // DX-562: cuántas citas creó su serie («Serie · 3 de 6»).
+  series: { select: { occurrences: true } },
 } as const;
 
 /**
@@ -113,6 +115,7 @@ type PrismaAppointmentWithPatient = PrismaAppointment & {
   patient?: { firstName: string; lastName: string };
   appointmentType?: AppointmentTypeSummaryRow | null;
   chair?: { id: string; name: string; active: boolean } | null;
+  series?: { occurrences: number } | null;
 };
 
 export function mapToEntity(
@@ -158,6 +161,16 @@ export function mapToEntity(
     overbooked: appointment.overbooked,
     chairId: appointment.chairId,
     chair: appointment.chair ?? null,
+    // DX-562: solo en las citas de una serie (las demás, sin la clave).
+    ...(appointment.seriesId !== null && appointment.seriesIndex !== null
+      ? {
+          series: {
+            id: appointment.seriesId,
+            index: appointment.seriesIndex,
+            total: appointment.series?.occurrences ?? null,
+          },
+        }
+      : {}),
     createdAt: appointment.createdAt,
     updatedAt: appointment.updatedAt,
   };
@@ -457,256 +470,268 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
     patch: UpdateAppointmentRepoInput,
   ): Promise<AppointmentUpdate> {
     return this.prisma
-      .runWithTenant(async (tx) => {
-        // Incluso PATCH solo planItemIds debe bloquear: Prisma puede omitir un UPDATE vacío.
-        const existing = await lockAppointmentForPlanItems(
-          tx,
-          this.requireTenantId(),
-          id,
-        );
-        if (!existing) {
-          throw new NotFoundException('Cita no encontrada');
-        }
-
-        // DX-149: mover (hora o profesional) con el candado de la agenda y
-        // volviendo a mirar los bloqueos dentro de esta transacción.
-        // DX-267-bis: reactivar en su hora (`recheckSlot`), igual.
-        if (
-          patch.start !== undefined ||
-          patch.end !== undefined ||
-          patch.providerId !== undefined ||
-          patch.recheckSlot
-        ) {
-          const slot = await tx.appointment.findUniqueOrThrow({
-            where: { id },
-            select: {
-              providerId: true,
-              locationId: true,
-              start: true,
-              end: true,
-            },
-          });
-          const moved = {
-            providerId: patch.providerId ?? slot.providerId,
-            locationId: slot.locationId,
-            start: patch.start ?? slot.start,
-            end: patch.end ?? slot.end,
-          };
-          await lockAgenda(tx, this.requireTenantId(), moved);
-          if (await hardBlockOver(tx, moved)) {
-            throw new ScheduleBlockedRaceError();
-          }
-        }
-
-        const {
-          planItemIds,
-          revokeConfirmations,
-          enqueueWaitlist,
-          resolveWaitlist,
-          requireWantsEarlier,
-          expectStatus,
-          completedExit,
-          audit,
-          cancel,
-          clearCancellation,
-          recheckSlot: _recheckSlot,
-          ...rest
-        } = patch;
-        // DX-279: los datos de la cancelación van en la MISMA sentencia que el
-        // estado (la CHECK appointments_cancellation_check se mira por fila).
-        const data: Prisma.AppointmentUncheckedUpdateManyInput = {
-          ...rest,
-          // DX-437: quitar la marca «Adelantar» borra la franja y quién la pidió.
-          ...(rest.wantsEarlier === false
-            ? { earlierWindow: null, earlierRequestedAt: null }
-            : {}),
-          ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
-          ...(clearCancellation ? CLEARED_CANCELLATION : {}),
-        };
-        // DX-273 (revisión I1): lo que esta cita reserva ANTES del cambio; si
-        // deja de reservarlo, una cita en la clínica puede recuperarlo.
-        const reservedBefore = (
-          await tx.appointmentPlanItem.findMany({
-            where: { appointmentId: id, active: true, deletedAt: null },
-            select: { planItemId: true },
-          })
-        ).map((l) => l.planItemId);
-        // DX-273: el mínimo de la visita siguiente ANTES de sacar la cita de
-        // COMPLETED (con la fila bloqueada), para dejar claro qué cambia.
-        const minimumsBefore =
-          completedExit && existing.status === AppointmentStatus.COMPLETED
-            ? await this.visitMinimums(tx, id)
-            : null;
-        // DX-271 (BE-039): con la fila bloqueada, los ítems de una cita que
-        // sigue cerrada (antes y después de este PATCH) no se tocan; nada de
-        // la petición se escribe.
-        if (
-          planItemIds !== undefined &&
-          !planItemsEditable(
-            existing,
-            {
-              status: rest.status ?? existing.status,
-              start: rest.start ?? existing.start,
-            },
-            new Date(),
-          )
-        ) {
-          throw new ConflictException(
-            planItemsClosedMessage(existing, new Date()),
-          );
-        }
-        // Retirar excluidos ANTES de reactivar/reagendar: el trigger no debe
-        // intentar reservar los vínculos antiguos que esta misma petición quita.
-        if (planItemIds !== undefined) {
-          await tx.appointmentPlanItem.updateMany({
-            where: {
-              appointmentId: id,
-              deletedAt: null,
-              planItemId: { notIn: planItemIds },
-            },
-            data: { deletedAt: new Date() },
-          });
-        }
-        // DX-200: paso del flujo en la clínica. Condición (el estado leído) y
-        // cambio en la MISMA sentencia: el UPDATE bloquea la fila, así que si dos
-        // personas cambian el estado a la vez la segunda no cumple la condición.
-        // Todo el cambio va junto: la CHECK de horas se mira por sentencia.
-        if (expectStatus !== undefined) {
-          const { count } = await tx.appointment.updateMany({
-            where: { id, deletedAt: null, status: expectStatus },
-            data,
-          });
-          if (count === 0) {
-            throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
-          }
-        }
-        // DX-210: «Asignar» un hueco a una cita marcada. El UPDATE condicional
-        // bloquea la fila: si dos personas la mueven a la vez, la segunda
-        // re-evalúa la condición tras el COMMIT de la primera y no la cumple.
-        if (requireWantsEarlier) {
-          const { count } = await tx.appointment.updateMany({
-            where: {
-              id,
-              deletedAt: null,
-              wantsEarlier: true,
-              status: { in: [...MOVABLE_STATUSES] },
-            },
-            data: {
-              wantsEarlier: false,
-              earlierWindow: null,
-              earlierRequestedAt: null,
-            },
-          });
-          if (count === 0) {
-            throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
-          }
-        }
-        const appointment =
-          expectStatus !== undefined
-            ? await tx.appointment.findFirstOrThrow({
-                where: { id },
-                include: INCLUDE_PATIENT_NAME,
-              })
-            : await tx.appointment.update({
-                where: { id },
-                data,
-                include: INCLUDE_PATIENT_NAME,
-              });
-        if (planItemIds !== undefined) {
-          await replaceAppointmentPlanItems(
-            tx,
-            this.requireTenantId(),
-            appointment.patientId,
-            id,
-            planItemIds,
-            existing,
-          );
-        }
-        const exit =
-          completedExit && minimumsBefore
-            ? await this.recordCompletedExit(
-                tx,
-                appointment,
-                completedExit,
-                minimumsBefore,
-              )
-            : undefined;
-        // DX-556: atendida → el prospecto del paciente pasa a «Asistió».
-        if (
-          appointment.status === AppointmentStatus.COMPLETED &&
-          existing.status !== AppointmentStatus.COMPLETED
-        ) {
-          await leadsOnAppointmentCompletedInTx(tx, {
-            tenantId: this.requireTenantId(),
-            patientId: appointment.patientId,
-            appointmentId: id,
-            actor: audit ?? null,
-          });
-        }
-        // Completada: el tratamiento se hizo aquí; no vuelve a otra cita.
-        if (
-          reservedBefore.length > 0 &&
-          appointment.status !== AppointmentStatus.COMPLETED
-        ) {
-          const still = new Set(
-            (
-              await tx.appointmentPlanItem.findMany({
-                where: { appointmentId: id, active: true, deletedAt: null },
-                select: { planItemId: true },
-              })
-            ).map((l) => l.planItemId),
-          );
-          await recoverReservationsInTx(
-            tx,
-            this.requireTenantId(),
-            id,
-            reservedBefore.filter((p) => !still.has(p)),
-            audit,
-          );
-        }
-        if (revokeConfirmations) {
-          await tx.appointmentConfirmation.updateMany({
-            where: { appointmentId: id, revokedAt: null, respondedAt: null },
-            data: { revokedAt: new Date() },
-          });
-        }
-        // DX-122: cancelada o no-show → «Pendientes por agendar», en esta misma
-        // transacción (si algo falla, ni la cita cambia ni aparece la entrada).
-        const enqueued = enqueueWaitlist
-          ? await enqueueWaitlistFromAppointment(
-              tx,
-              id,
-              enqueueWaitlist.createdById,
-            )
-          : null;
-        // DX-122 (revisión H1): reactivada → su entrada sale de la lista.
-        const resolvedWaitlistEntryId = resolveWaitlist
-          ? await resolveWaitlistForReactivated(
-              tx,
-              id,
-              resolveWaitlist.resolvedById,
-            )
-          : null;
-        return {
-          appointment: mapToEntity(
-            await tx.appointment.findUniqueOrThrow({
-              where: { id },
-              include: INCLUDE_PATIENT_NAME,
-            }),
-          ),
-          waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
-          reopenedWaitlistEntryId:
-            enqueued && enqueued.reopened ? enqueued.id : null,
-          resolvedWaitlistEntryId,
-          ...(exit ? { completedExit: exit } : {}),
-        };
-      })
+      .runWithTenant((tx) => this.updateInTx(tx, id, patch))
       .catch((error: unknown) =>
         // DX-271: un cambio de estado del día ya no choca (el trigger deja la
         // reserva en la otra cita); esto es el alta o edición explícita de
         // `planItemIds`, reagendar o reactivar.
         this.rethrowPlanItemConflict(error, patch.planItemIds, id),
       );
+  }
+
+  /**
+   * El cambio de UNA cita dentro de la transacción de quien llama (DX-562:
+   * cancelar o mover «esta y las siguientes» de una serie en una sola
+   * transacción). Es el cuerpo de `update`, tal cual: candado de la agenda y
+   * bloqueo duro si mueve, datos de la cancelación, ítems del plan, flujo,
+   * confirmaciones, «Pendientes por agendar». Sin el 409 de ítems
+   * reservados: eso lo pone `update`.
+   */
+  async updateInTx(
+    tx: Prisma.TransactionClient,
+    id: string,
+    patch: UpdateAppointmentRepoInput,
+  ): Promise<AppointmentUpdate> {
+    // Incluso PATCH solo planItemIds debe bloquear: Prisma puede omitir un UPDATE vacío.
+    const existing = await lockAppointmentForPlanItems(
+      tx,
+      this.requireTenantId(),
+      id,
+    );
+    if (!existing) {
+      throw new NotFoundException('Cita no encontrada');
+    }
+
+    // DX-149: mover (hora o profesional) con el candado de la agenda y
+    // volviendo a mirar los bloqueos dentro de esta transacción.
+    // DX-267-bis: reactivar en su hora (`recheckSlot`), igual.
+    if (
+      patch.start !== undefined ||
+      patch.end !== undefined ||
+      patch.providerId !== undefined ||
+      patch.recheckSlot
+    ) {
+      const slot = await tx.appointment.findUniqueOrThrow({
+        where: { id },
+        select: {
+          providerId: true,
+          locationId: true,
+          start: true,
+          end: true,
+        },
+      });
+      const moved = {
+        providerId: patch.providerId ?? slot.providerId,
+        locationId: slot.locationId,
+        start: patch.start ?? slot.start,
+        end: patch.end ?? slot.end,
+      };
+      await lockAgenda(tx, this.requireTenantId(), moved);
+      if (await hardBlockOver(tx, moved)) {
+        throw new ScheduleBlockedRaceError();
+      }
+    }
+
+    const {
+      planItemIds,
+      revokeConfirmations,
+      enqueueWaitlist,
+      resolveWaitlist,
+      requireWantsEarlier,
+      expectStatus,
+      completedExit,
+      audit,
+      cancel,
+      clearCancellation,
+      recheckSlot: _recheckSlot,
+      ...rest
+    } = patch;
+    // DX-279: los datos de la cancelación van en la MISMA sentencia que el
+    // estado (la CHECK appointments_cancellation_check se mira por fila).
+    const data: Prisma.AppointmentUncheckedUpdateManyInput = {
+      ...rest,
+      // DX-437: quitar la marca «Adelantar» borra la franja y quién la pidió.
+      ...(rest.wantsEarlier === false
+        ? { earlierWindow: null, earlierRequestedAt: null }
+        : {}),
+      ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
+      ...(clearCancellation ? CLEARED_CANCELLATION : {}),
+    };
+    // DX-273 (revisión I1): lo que esta cita reserva ANTES del cambio; si
+    // deja de reservarlo, una cita en la clínica puede recuperarlo.
+    const reservedBefore = (
+      await tx.appointmentPlanItem.findMany({
+        where: { appointmentId: id, active: true, deletedAt: null },
+        select: { planItemId: true },
+      })
+    ).map((l) => l.planItemId);
+    // DX-273: el mínimo de la visita siguiente ANTES de sacar la cita de
+    // COMPLETED (con la fila bloqueada), para dejar claro qué cambia.
+    const minimumsBefore =
+      completedExit && existing.status === AppointmentStatus.COMPLETED
+        ? await this.visitMinimums(tx, id)
+        : null;
+    // DX-271 (BE-039): con la fila bloqueada, los ítems de una cita que
+    // sigue cerrada (antes y después de este PATCH) no se tocan; nada de
+    // la petición se escribe.
+    if (
+      planItemIds !== undefined &&
+      !planItemsEditable(
+        existing,
+        {
+          status: rest.status ?? existing.status,
+          start: rest.start ?? existing.start,
+        },
+        new Date(),
+      )
+    ) {
+      throw new ConflictException(planItemsClosedMessage(existing, new Date()));
+    }
+    // Retirar excluidos ANTES de reactivar/reagendar: el trigger no debe
+    // intentar reservar los vínculos antiguos que esta misma petición quita.
+    if (planItemIds !== undefined) {
+      await tx.appointmentPlanItem.updateMany({
+        where: {
+          appointmentId: id,
+          deletedAt: null,
+          planItemId: { notIn: planItemIds },
+        },
+        data: { deletedAt: new Date() },
+      });
+    }
+    // DX-200: paso del flujo en la clínica. Condición (el estado leído) y
+    // cambio en la MISMA sentencia: el UPDATE bloquea la fila, así que si dos
+    // personas cambian el estado a la vez la segunda no cumple la condición.
+    // Todo el cambio va junto: la CHECK de horas se mira por sentencia.
+    if (expectStatus !== undefined) {
+      const { count } = await tx.appointment.updateMany({
+        where: { id, deletedAt: null, status: expectStatus },
+        data,
+      });
+      if (count === 0) {
+        throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+      }
+    }
+    // DX-210: «Asignar» un hueco a una cita marcada. El UPDATE condicional
+    // bloquea la fila: si dos personas la mueven a la vez, la segunda
+    // re-evalúa la condición tras el COMMIT de la primera y no la cumple.
+    if (requireWantsEarlier) {
+      const { count } = await tx.appointment.updateMany({
+        where: {
+          id,
+          deletedAt: null,
+          wantsEarlier: true,
+          status: { in: [...MOVABLE_STATUSES] },
+        },
+        data: {
+          wantsEarlier: false,
+          earlierWindow: null,
+          earlierRequestedAt: null,
+        },
+      });
+      if (count === 0) {
+        throw new ConflictException(WANTS_EARLIER_GONE_MESSAGE);
+      }
+    }
+    const appointment =
+      expectStatus !== undefined
+        ? await tx.appointment.findFirstOrThrow({
+            where: { id },
+            include: INCLUDE_PATIENT_NAME,
+          })
+        : await tx.appointment.update({
+            where: { id },
+            data,
+            include: INCLUDE_PATIENT_NAME,
+          });
+    if (planItemIds !== undefined) {
+      await replaceAppointmentPlanItems(
+        tx,
+        this.requireTenantId(),
+        appointment.patientId,
+        id,
+        planItemIds,
+        existing,
+      );
+    }
+    const exit =
+      completedExit && minimumsBefore
+        ? await this.recordCompletedExit(
+            tx,
+            appointment,
+            completedExit,
+            minimumsBefore,
+          )
+        : undefined;
+    // DX-556: atendida → el prospecto del paciente pasa a «Asistió».
+    if (
+      appointment.status === AppointmentStatus.COMPLETED &&
+      existing.status !== AppointmentStatus.COMPLETED
+    ) {
+      await leadsOnAppointmentCompletedInTx(tx, {
+        tenantId: this.requireTenantId(),
+        patientId: appointment.patientId,
+        appointmentId: id,
+        actor: audit ?? null,
+      });
+    }
+    // Completada: el tratamiento se hizo aquí; no vuelve a otra cita.
+    if (
+      reservedBefore.length > 0 &&
+      appointment.status !== AppointmentStatus.COMPLETED
+    ) {
+      const still = new Set(
+        (
+          await tx.appointmentPlanItem.findMany({
+            where: { appointmentId: id, active: true, deletedAt: null },
+            select: { planItemId: true },
+          })
+        ).map((l) => l.planItemId),
+      );
+      await recoverReservationsInTx(
+        tx,
+        this.requireTenantId(),
+        id,
+        reservedBefore.filter((p) => !still.has(p)),
+        audit,
+      );
+    }
+    if (revokeConfirmations) {
+      await tx.appointmentConfirmation.updateMany({
+        where: { appointmentId: id, revokedAt: null, respondedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+    // DX-122: cancelada o no-show → «Pendientes por agendar», en esta misma
+    // transacción (si algo falla, ni la cita cambia ni aparece la entrada).
+    const enqueued = enqueueWaitlist
+      ? await enqueueWaitlistFromAppointment(
+          tx,
+          id,
+          enqueueWaitlist.createdById,
+        )
+      : null;
+    // DX-122 (revisión H1): reactivada → su entrada sale de la lista.
+    const resolvedWaitlistEntryId = resolveWaitlist
+      ? await resolveWaitlistForReactivated(
+          tx,
+          id,
+          resolveWaitlist.resolvedById,
+        )
+      : null;
+    return {
+      appointment: mapToEntity(
+        await tx.appointment.findUniqueOrThrow({
+          where: { id },
+          include: INCLUDE_PATIENT_NAME,
+        }),
+      ),
+      waitlistEntryId: enqueued && !enqueued.reopened ? enqueued.id : null,
+      reopenedWaitlistEntryId:
+        enqueued && enqueued.reopened ? enqueued.id : null,
+      resolvedWaitlistEntryId,
+      ...(exit ? { completedExit: exit } : {}),
+    };
   }
 
   /**
