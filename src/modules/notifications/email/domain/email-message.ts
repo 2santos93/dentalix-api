@@ -35,6 +35,7 @@ export const EMAIL_TEMPLATES = [
   'new-login',
   'online-booking-code',
   'online-booking-received',
+  'appointment-series',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -91,6 +92,10 @@ export const TENANT_DAILY_BUDGET: Readonly<
   // el tope de códigos por paciente y la protección anti-bots.
   'online-booking-code': 'self-service',
   'online-booking-received': 'self-service',
+  // DX-562: lo dispara el personal al crear la serie: cuenta en el tope
+  // diario, pero se encola sin tope (en la transacción de la serie: el tope
+  // no puede deshacer las citas).
+  'appointment-series': 'clinic',
 };
 
 /** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
@@ -115,6 +120,8 @@ export const LOCALIZED_EMAIL_TEMPLATES: readonly EmailTemplateName[] = [
   'prescription-copy',
   // DX-561: el aviso de seguimiento del presupuesto.
   'quote-follow-up',
+  // DX-562: el aviso de una serie de citas.
+  'appointment-series',
 ];
 
 /** Marca de la clínica que firma el email; `null` = email de plataforma. */
@@ -416,6 +423,25 @@ export interface OnlineBookingReceivedEmailVars {
   manageUrl: string | null;
 }
 
+/**
+ * DX-562: aviso ÚNICO al crear una serie de citas, con todas sus fechas. Va a
+ * quien recibe los recordatorios (un menor → su responsable). Sin motivo,
+ * notas, tratamiento ni importes.
+ */
+export interface AppointmentSeriesEmailVars {
+  /** Nombre de pila de quien lo recibe (el paciente o su responsable). */
+  recipientFirstName: string | null;
+  /** Va al responsable de un menor: el nombre de pila del paciente. */
+  patientFirstName: string | null;
+  clinicName: string;
+  locationName: string;
+  providerName: string | null;
+  /** Inicio de cada cita, ya formateado en la zona y el formato de la sede. 2–26. */
+  dateLabels: string[];
+  /** Enlace de baja de los avisos (DX-128), si se emitió uno. */
+  unsubscribeUrl: string | null;
+}
+
 export interface SlotOfferEmailVars {
   patientFirstName: string;
   clinicName: string;
@@ -610,6 +636,7 @@ export interface EmailVarsByTemplate {
   'new-login': NewLoginEmailVars;
   'online-booking-code': OnlineBookingCodeEmailVars;
   'online-booking-received': OnlineBookingReceivedEmailVars;
+  'appointment-series': AppointmentSeriesEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

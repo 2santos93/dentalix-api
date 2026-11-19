@@ -18,6 +18,29 @@ import { HOUR_CYCLES } from '../../../../shared/locations/location-regional';
 import type { HourCycle } from '../../../../shared/format/regional-format';
 import { ChairSummaryDto } from '../../../chairs/presentation/dto/chair.dto';
 
+/** DX-562: la serie de una cita («Serie · 3 de 6»). */
+export class AppointmentSeriesRefDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({
+    minimum: 1,
+    maximum: 26,
+    description:
+      'Posición de la cita en la serie (1..n, por fecha al crearla).',
+  })
+  index!: number;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    minimum: 1,
+    maximum: 26,
+    description: 'Citas que se crearon con la serie.',
+  })
+  total!: number | null;
+}
+
 // Response shape for Appointment endpoints — documents the Appointment
 // entity contract for Swagger (same convention as BrandingDto /
 // StaffMemberDto / PatientDto). The use cases already return values shaped
@@ -266,6 +289,13 @@ export class AppointmentDto {
       'DX-211: el sillón embebido (nombre y si sigue activo), aunque se haya desactivado después.',
   })
   chair!: ChairSummaryDto | null;
+
+  @ApiPropertyOptional({
+    type: () => AppointmentSeriesRefDto,
+    description:
+      'DX-562: la serie («cada N semanas») que creó la cita, con su posición y el total. Ausente si no es de una serie. Mover o cancelar la cita suelta (`PATCH /appointments/:id`) no la saca de la serie; «esta y las siguientes» van por `/appointments/series/:id/…`.',
+  })
+  series?: AppointmentSeriesRefDto;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

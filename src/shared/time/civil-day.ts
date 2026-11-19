@@ -345,6 +345,18 @@ export function civilWeekday(day: string): number {
 }
 
 /**
+ * DX-562: hora de PARED de `instant` en `timeZone`, en milisegundos desde las
+ * 00:00 de su día civil (sin el desfase: las 10:00 son 36 000 000 todo el
+ * año, haya o no cambio de hora). Con `zonedWallTime` repite la misma hora de
+ * pared otro día.
+ */
+export function wallMillisOfDay(instant: Date, timeZone: string): number {
+  const w = wallClockIn(instant, timeZone);
+  const ms = ((instant.getTime() % 1000) + 1000) % 1000;
+  return ((w.hour * 60 + w.minute) * 60 + w.second) * 1000 + ms;
+}
+
+/**
  * Instante de la hora de PARED `minute` (minutos desde las 00:00, hasta 1440)
  * del día civil `day` en `timeZone` (DX-122: los tramos del horario de la sede
  * son hora de pared). Se resuelve con el desfase que la zona tiene ESE día, así

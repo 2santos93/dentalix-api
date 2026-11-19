@@ -122,6 +122,11 @@
  * - online-booking-write: las escrituras de esa página (pedir y verificar el
  *                  código, reservar), por IP y por ruta: 10/min. El código
  *                  tiene además su tope de 5 fallos y de 5 envíos por hora.
+ * - appointment-series: las citas en serie (DX-562: vista previa, crear,
+ *                  cancelar y mover «esta y las siguientes»), por clínica +
+ *                  usuario y con UN balde para todas las rutas: cada petición
+ *                  revisa hasta 26 fechas (unas 10 consultas cada una). 30/min
+ *                  sobra para quien arma una serie y ajusta la vista previa.
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -155,7 +160,8 @@ export type RateLimitPolicy =
   | 'branding-host'
   | 'branding-miss'
   | 'online-booking'
-  | 'online-booking-write';
+  | 'online-booking-write'
+  | 'appointment-series';
 
 export interface RateLimitRule {
   limit: number;
@@ -202,6 +208,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'branding-miss': { limit: 60, ttlMs: MINUTE },
   'online-booking': { limit: 60, ttlMs: MINUTE },
   'online-booking-write': { limit: 10, ttlMs: MINUTE },
+  'appointment-series': { limit: 30, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -261,5 +268,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'branding-miss': rule('branding-miss'),
     'online-booking': rule('online-booking'),
     'online-booking-write': rule('online-booking-write'),
+    'appointment-series': rule('appointment-series'),
   };
 }

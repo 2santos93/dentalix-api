@@ -35,6 +35,7 @@ import { civilDateIn } from '../../../shared/time/civil-day';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
 import { requireLocationTimeZone } from '../../../shared/locations/location-time-zone';
 import { assertLocationWritable } from '../../../shared/tenancy/active-location';
+import { attemptRule, type SlotRuleCollector } from './slot-rule-failure';
 
 /**
  * DX-267-bis (BE-039): código del 409 al reactivar una cita que ya terminó.
@@ -87,6 +88,13 @@ export interface SlotRulesInput {
    * revisa siempre.
    */
   revalidateProvider?: boolean;
+  /**
+   * DX-562 (mover «esta y las siguientes»): no pararse en la primera regla
+   * del hueco que falla (pasado, horarios, festivo, bloqueos, solapes): cada
+   * fallo HTTP va aquí. Lo que no depende de la hora (sede, profesional)
+   * sigue lanzando.
+   */
+  collect?: SlotRuleCollector;
 }
 
 export interface SlotRulesResult extends Warnings {
@@ -178,9 +186,19 @@ export async function checkSlotRules(
     // o editarle notas/motivo — bloquear eso haría imposible cerrar la agenda
     // del día. Con el reloj inyectable del caso de uso, el mismo que decide
     // «ya pasó» al reactivar (en producción, la hora del sistema).
-    if (start.getTime() < deps.clock().getTime()) {
-      throw new BadRequestException('No se puede reagendar una cita al pasado');
-    }
+    await attemptRule(
+      input.collect,
+      'PAST',
+      () => {
+        if (start.getTime() < deps.clock().getTime()) {
+          throw new BadRequestException(
+            'No se puede reagendar una cita al pasado',
+          );
+        }
+        return Promise.resolve();
+      },
+      undefined,
+    );
   } else if (end.getTime() <= deps.clock().getTime()) {
     throw appointmentPastConflict();
   }
@@ -206,25 +224,40 @@ export async function checkSlotRules(
   // o cancelar. 422: la petición es válida, pero el hueco no existe (DX-121).
   if (!walkInRules) {
     const hours = await deps.schedule.findByLocation(existing.locationId);
-    if (!fitsBusinessHours(start, end, hours)) {
-      // DX-354: formato y reloj de la sede de la cita, pedido solo si el
-      // mensaje lleva horas.
-      const source = await deps.schedule.formatSourceOf(existing.locationId);
-      throw new UnprocessableEntityException(
-        businessHoursErrorMessage(start, end, hours!, () =>
-          requireLocationFormat(source),
-        ),
-      );
-    }
+    await attemptRule(
+      input.collect,
+      'BUSINESS_HOURS',
+      async () => {
+        if (!fitsBusinessHours(start, end, hours)) {
+          // DX-354: formato y reloj de la sede de la cita, pedido solo si el
+          // mensaje lleva horas.
+          const source = await deps.schedule.formatSourceOf(
+            existing.locationId,
+          );
+          throw new UnprocessableEntityException(
+            businessHoursErrorMessage(start, end, hours!, () =>
+              requireLocationFormat(source),
+            ),
+          );
+        }
+      },
+      undefined,
+    );
     // DX-263-bis: mover (también arrastrar en la agenda) o reactivar a un
     // festivo de la sede es 409. Con el paciente ya en la clínica no: la
     // cita no sale de hoy (DX-200) y la sede está abierta de hecho.
     if (!isInClinic(existing.status)) {
-      await assertNotOnHoliday(deps.schedule, {
-        locationId: existing.locationId,
-        start,
-        end,
-      });
+      await attemptRule(
+        input.collect,
+        'LOCATION_HOLIDAY',
+        () =>
+          assertNotOnHoliday(deps.schedule, {
+            locationId: existing.locationId,
+            start,
+            end,
+          }),
+        undefined,
+      );
     }
   }
 
@@ -236,22 +269,33 @@ export async function checkSlotRules(
     offSchedule =
       message === null ? null : { code: PROVIDER_OFF_SCHEDULE, message };
   } else {
-    offSchedule = await deps.availability.warnOrReject(slot);
+    offSchedule = await attemptRule(
+      input.collect,
+      'PROVIDER_OFF_SCHEDULE',
+      () => deps.availability.warnOrReject(slot),
+      null,
+    );
   }
 
   // DX-122: bloqueos del profesional en la sede de la cita. Cancelar o
   // completar una cita que quedó dentro de un bloqueo creado después tiene
   // que seguir siendo posible: por eso solo al mover o reactivar.
   // DX-446: con el tipo de la cita, el reloj y el rol de quien mueve.
-  const blockCheck = await checkScheduleBlocks(
-    deps.blocks,
-    { providerId, start, end, locationId: existing.locationId },
-    {
-      appointmentTypeId: existing.appointmentTypeId,
-      now: deps.clock(),
-      actorRole: input.actorRole,
-      overrideReason: input.overrideReason,
-    },
+  const blockCheck = await attemptRule(
+    input.collect,
+    'SCHEDULE_BLOCK',
+    () =>
+      checkScheduleBlocks(
+        deps.blocks,
+        { providerId, start, end, locationId: existing.locationId },
+        {
+          appointmentTypeId: existing.appointmentTypeId,
+          now: deps.clock(),
+          actorRole: input.actorRole,
+          overrideReason: input.overrideReason,
+        },
+      ),
+    { warnings: [], override: null },
   );
 
   // Re-check overlap EXCLUDING this appointment's own id — otherwise an
@@ -259,28 +303,42 @@ export async function checkSlotRules(
   // profesional DESTINO. DX-509: un sobrecupo reactivado lo decide
   // `overbookAtItsSlot` (409 `OVERBOOK_SLOT_TAKEN` con `canKeepOverbooked`).
   if (!(reactivating && existing.overbooked)) {
-    const overlapping = await deps.repo.findOverlapping(
-      providerId,
-      start,
-      end,
-      existing.id,
+    await attemptRule(
+      input.collect,
+      'PROVIDER_OVERLAP',
+      async () => {
+        const overlapping = await deps.repo.findOverlapping(
+          providerId,
+          start,
+          end,
+          existing.id,
+        );
+        if (overlapping.length > 0) {
+          throw overlapConflict('provider');
+        }
+      },
+      undefined,
     );
-    if (overlapping.length > 0) {
-      throw overlapConflict('provider');
-    }
   }
 
   // Mismo criterio, otro eje: el paciente tampoco puede quedar con dos
   // citas solapadas.
-  const patientOverlapping = await deps.repo.findOverlappingForPatient(
-    existing.patientId,
-    start,
-    end,
-    existing.id,
+  await attemptRule(
+    input.collect,
+    'PATIENT_OVERLAP',
+    async () => {
+      const patientOverlapping = await deps.repo.findOverlappingForPatient(
+        existing.patientId,
+        start,
+        end,
+        existing.id,
+      );
+      if (patientOverlapping.length > 0) {
+        throw overlapConflict('patient');
+      }
+    },
+    undefined,
   );
-  if (patientOverlapping.length > 0) {
-    throw overlapConflict('patient');
-  }
 
   return {
     ...collectWarnings(blockCheck.warnings, offSchedule),
