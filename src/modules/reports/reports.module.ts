@@ -48,6 +48,11 @@ import { GetAcquisitionUseCase } from './application/use-cases/get-acquisition.u
 import { ACQUISITION_REPOSITORY } from './domain/ports/acquisition-repository.port';
 import { PrismaAcquisitionRepository } from './infrastructure/prisma-acquisition.repository';
 import { AcquisitionController } from './presentation/acquisition.controller';
+import { GetProfessionalProductivityUseCase } from './application/use-cases/get-professional-productivity.use-case';
+import { GetNoShowsUseCase } from './application/use-cases/get-no-shows.use-case';
+import { PROFESSIONAL_REPORTS_REPOSITORY } from './domain/ports/professional-reports-repository.port';
+import { PrismaProfessionalReportsRepository } from './infrastructure/prisma-professional-reports.repository';
+import { ProfessionalReportsController } from './presentation/professional-reports.controller';
 import { ExchangeModule } from '../exchange/exchange.module';
 import { CATALOG_CURRENCY_READER } from '../dental-catalog/domain/ports/catalog-currency-reader.port';
 import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/prisma-catalog-currency-reader';
@@ -75,6 +80,8 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     ScheduledProductionController,
     // DX-172: «Captación» (pacientes nuevos y lo cobrado por fuente).
     AcquisitionController,
+    // DX-304: «Profesionales» e «Inasistencias».
+    ProfessionalReportsController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
@@ -87,6 +94,8 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     GetQuoteFunnelUseCase,
     GetScheduledProductionUseCase,
     GetAcquisitionUseCase,
+    GetProfessionalProductivityUseCase,
+    GetNoShowsUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -128,6 +137,10 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     },
     { provide: SCHEDULED_PRODUCTION_CLOCK, useValue: () => new Date() },
     { provide: ACQUISITION_REPOSITORY, useClass: PrismaAcquisitionRepository },
+    {
+      provide: PROFESSIONAL_REPORTS_REPOSITORY,
+      useClass: PrismaProfessionalReportsRepository,
+    },
     {
       provide: CATALOG_CURRENCY_READER,
       useClass: PrismaCatalogCurrencyReader,

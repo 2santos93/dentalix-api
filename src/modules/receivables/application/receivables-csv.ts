@@ -4,7 +4,7 @@ import type {
   PaymentPromiseStatus,
 } from '@prisma/client';
 import type { AgingCsvRow } from './use-cases/get-receivables-aging.use-case';
-import { csvAmount } from '../../../shared/csv/csv-cells';
+import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
 
 /*
  * CSV de la cartera (DX-145): una línea por paciente y moneda, con los mismos
@@ -156,4 +156,85 @@ export function toReceivablesCsv(rows: readonly AgingCsvRow[]): string {
     }
   }
   return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
+/*
+ * DX-304: CSV de la pestaña «Cartera» de Reportes. Solo los totales por
+ * moneda y tramo (los de GET /receivables/aging/summary), sin ninguna fila de
+ * paciente: la lista con nombres y teléfonos es `toReceivablesCsv`. Monedas
+ * nunca sumadas entre sí. Mismo formato (BOM, CRLF, `csvText`).
+ */
+export const RECEIVABLES_SUMMARY_CSV_HEADER = [
+  'Moneda',
+  'Deudores',
+  'Deuda',
+  'Por vencer',
+  '0-30 días',
+  '31-60 días',
+  '61-90 días',
+  'Más de 90 días',
+  'Saldo a favor',
+  'Saldo neto',
+] as const;
+
+export interface ReceivablesSummaryCsvInput {
+  asOf: string;
+  locationName: string | null;
+  totals: readonly {
+    currency: string;
+    patients: number;
+    balance: number;
+    debt: number;
+    credit: number;
+    buckets: {
+      current: number;
+      days0to30: number;
+      days31to60: number;
+      days61to90: number;
+      over90: number;
+    };
+  }[];
+  paymentsWithoutRateCount: number;
+  rateProviderTimedOut: boolean;
+}
+
+export function toReceivablesSummaryCsv(
+  input: ReceivablesSummaryCsvInput,
+): string {
+  const lines: string[][] = [
+    [csvText('Cartera por antigüedad')],
+    [csvText('Al día'), csvText(input.asOf)],
+    [csvText('Sede'), csvText(input.locationName ?? 'Todas tus sedes')],
+    [csvText('Importes'), csvText('Por moneda, sin convertir')],
+    ...(input.paymentsWithoutRateCount > 0 || input.rateProviderTimedOut
+      ? [
+          [
+            csvText('Aviso'),
+            csvText(
+              input.paymentsWithoutRateCount > 0
+                ? `${input.paymentsWithoutRateCount} abonos en otra moneda aún no cuentan (sin tasa del día): las cifras pueden estar incompletas.`
+                : 'El proveedor de tasas no respondió a tiempo: las cifras pueden estar incompletas.',
+            ),
+          ],
+        ]
+      : []),
+    [],
+    RECEIVABLES_SUMMARY_CSV_HEADER.map(csvText),
+  ];
+  for (const t of input.totals) {
+    const amount = (value: number) => csvAmount(value, t.currency);
+    lines.push([
+      csvText(t.currency),
+      String(t.patients),
+      amount(t.debt),
+      amount(t.buckets.current),
+      amount(t.buckets.days0to30),
+      amount(t.buckets.days31to60),
+      amount(t.buckets.days61to90),
+      amount(t.buckets.over90),
+      amount(t.credit),
+      amount(t.balance),
+    ]);
+  }
+  return csvDocument(lines.map((cells) => cells.join(',')));
 }
