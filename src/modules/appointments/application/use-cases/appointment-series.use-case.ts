@@ -906,19 +906,19 @@ export function closestStart(
     const last = opening.end.getTime() - durationMs;
     if (last < first) continue;
     const clamped = Math.min(Math.max(wanted.getTime(), first), last);
-    // Alineado a 5 min, sin salirse del hueco.
-    let candidate = Math.round(clamped / STEP) * STEP;
-    if (candidate < first) candidate += STEP;
-    if (candidate > last) candidate -= STEP;
-    if (candidate < first || candidate > last) continue;
-    const distance = Math.abs(candidate - wanted.getTime());
-    const bestDistance =
-      best === null ? Infinity : Math.abs(best - wanted.getTime());
-    if (
-      distance < bestDistance ||
-      (distance === bestDistance && best !== null && candidate > best)
-    ) {
-      best = candidate;
+    // Alineado a 5 min (el de abajo o el de arriba), sin salirse del hueco.
+    const down = clamped - (((clamped % STEP) + STEP) % STEP);
+    for (const candidate of [down, down + STEP]) {
+      if (candidate < first || candidate > last) continue;
+      const distance = Math.abs(candidate - wanted.getTime());
+      const bestDistance =
+        best === null ? Infinity : Math.abs(best - wanted.getTime());
+      if (
+        distance < bestDistance ||
+        (distance === bestDistance && best !== null && candidate > best)
+      ) {
+        best = candidate;
+      }
     }
   }
   return best === null
