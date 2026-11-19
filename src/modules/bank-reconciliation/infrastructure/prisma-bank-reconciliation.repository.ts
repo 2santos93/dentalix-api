@@ -14,6 +14,7 @@ import { loadLocationZones } from '../../../shared/locations/location-time-zone'
 import { civilDateIn } from '../../../shared/time/civil-day';
 import type { LocationFormatSource } from '../../../shared/locations/location-regional';
 import { collectedAmount } from '../../payment-methods/domain/payment-adjustments';
+import { toCents } from '../../../shared/money/money';
 import { normalizeReference } from '../../payment-methods/domain/payment-method-rules';
 import { receiptNumberOf } from '../../payments/domain/receipt-number';
 import {
@@ -1069,14 +1070,14 @@ export class PrismaBankReconciliationRepository {
         locationId: r.locationId,
         paidAt: r.paidAt,
         referenceNormalized: r.referenceNormalized,
-        collectedCents: Math.round(
+        collectedCents: toCents(
           collectedOf({
             amount: r.amount,
             methodAdjustments: r.adjustments.map((x) => ({
               type: x.type,
               amount: new Prisma.Decimal(x.amount),
             })),
-          }) * 100,
+          }),
         ),
       });
     }

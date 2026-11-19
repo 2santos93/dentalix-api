@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { fromCents, toCents } from '../../../shared/money/money';
 import { normalizeReference } from '../../payment-methods/domain/payment-method-rules';
 import type { ParsedTable } from '../../patient-imports/domain/tabular-file';
 import type {
@@ -97,9 +98,10 @@ export function parseAmountCents(
   if (xlsx && /^-?\d+(\.\d+)?(e-?\d+)?$/i.test(s)) {
     const n = Number(s);
     if (!Number.isFinite(n)) return null;
-    const cents = Math.round(n * 100);
-    // Un .xlsx guarda dobles: 1234.56 puede venir como 1234.5600000001.
-    if (Math.abs(n * 100 - cents) > 1e-6 * Math.max(1, Math.abs(n)))
+    const cents = toCents(n);
+    // Un .xlsx guarda dobles: 1234.56 puede venir como 1234.5600000001; con
+    // más decimales de verdad no es un importe.
+    if (Math.abs(n - fromCents(cents)) > 1e-8 * Math.max(1, Math.abs(n)))
       return null;
     return Math.abs(cents) > MAX_AMOUNT_CENTS ? null : cents;
   }

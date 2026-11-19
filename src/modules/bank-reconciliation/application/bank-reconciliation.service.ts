@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { requireLocationFormat } from '../../../shared/locations/location-regional';
+import { fromCents } from '../../../shared/money/money';
 import { readImportFile } from '../../patient-imports/domain/read-import-file';
 import { ImportFileError } from '../../patient-imports/domain/tabular-file';
 import {
@@ -255,7 +256,7 @@ export class BankReconciliationService {
           rowNumber: c.rowNumber,
           bookedOn: c.bookedOn,
           reference: c.reference,
-          amount: c.amountCents / 100,
+          amount: fromCents(c.amountCents),
           description: c.description,
           duplicate: existing.has(c.naturalKey),
         })),
