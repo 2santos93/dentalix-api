@@ -2418,6 +2418,18 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'PUT /clinic/weekly-digest-settings': 'weekly-digest.e2e-spec.ts',
   'POST /clinic/weekly-digest/send-test': 'weekly-digest.e2e-spec.ts',
   'POST /public/weekly-digest-unsubscribe/:token': 'weekly-digest.e2e-spec.ts',
+  // DX-565: CLINIC_SETTINGS con MESSAGE_TEMPLATE_UPDATED (CREATE o UPDATE con
+  // el asunto antes/después y del cuerpo, oculto, su longitud y huella) y
+  // MESSAGE_TEMPLATE_RESET (DELETE con el antes), escritos por el
+  // repositorio en la transacción, sin sede; sin evento si nada cambió. La
+  // prueba: VIEW de CLINIC_SETTINGS (MESSAGE_TEMPLATE_TEST_SENT) en la
+  // transacción que encola el email.
+  'PUT /message-templates/:key/:channel/:language':
+    'message-templates.e2e-spec.ts',
+  'DELETE /message-templates/:key/:channel/:language':
+    'message-templates.e2e-spec.ts',
+  'POST /message-templates/:key/:channel/:language/test':
+    'message-templates.e2e-spec.ts',
   // DX-146: CLINIC_SETTINGS con BALANCE_REMINDER_POLICY y configChange antes
   // y después, escrito por el repositorio en la transacción, sin sede; sin
   // evento si nada cambió.
@@ -2615,6 +2627,8 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /locations/:id/holidays/import/preview':
     'vista previa de la importación; no escribe',
   // DX-562: las vistas previas de la serie (crear y mover) solo calculan.
+  'POST /message-templates/:key/:channel/:language/preview':
+    'DX-565: solo renderiza el borrador con datos de ejemplo (POST por el cuerpo); no guarda ni envía nada',
   'POST /appointments/series/preview':
     'vista previa de la serie de citas; no escribe',
   'POST /appointments/series/:id/move/preview':

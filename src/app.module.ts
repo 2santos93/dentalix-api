@@ -53,6 +53,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { ClosingQueueModule } from './modules/closing-queue/closing-queue.module';
 import { ContingencyAgendaModule } from './modules/contingency-agenda/contingency-agenda.module';
 import { WeeklyDigestModule } from './modules/weekly-digest/weekly-digest.module';
+import { MessageTemplatesModule } from './modules/message-templates/message-templates.module';
 import { QuoteFollowUpModule } from './modules/quote-follow-up/quote-follow-up.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { CashSessionsModule } from './modules/cash-sessions/cash-sessions.module';
@@ -168,6 +169,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     ContingencyAgendaModule,
     // DX-568: resumen semanal por email para el dueño.
     WeeklyDigestModule,
+    // DX-565: textos de los mensajes al paciente editables (Ajustes › Mensajes).
+    MessageTemplatesModule,
     // DX-561: seguimiento automático de presupuestos presentados.
     QuoteFollowUpModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).

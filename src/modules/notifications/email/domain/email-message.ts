@@ -122,6 +122,8 @@ export const LOCALIZED_EMAIL_TEMPLATES: readonly EmailTemplateName[] = [
   'quote-follow-up',
   // DX-562: el aviso de una serie de citas.
   'appointment-series',
+  // DX-565: el enlace para firmar a distancia.
+  'signature-request',
 ];
 
 /** Marca de la clínica que firma el email; `null` = email de plataforma. */

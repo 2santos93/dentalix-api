@@ -111,7 +111,11 @@ function setup(
   const renderer = new ConsentDocumentRenderer(templates, consents, names);
   const repo = new InMemorySignatureRequestRepository({ p1: recipient() });
   repo.dbClock = clock;
-  const links: { to: string; vars: SignatureRequestEmailVars }[] = [];
+  const links: {
+    to: string;
+    vars: SignatureRequestEmailVars;
+    locale?: string;
+  }[] = [];
   const codes: { to: string; vars: SignatureCodeEmailVars }[] = [];
   const cancelled: string[] = [];
   // DX-149-ter: el email del enlace se encola DENTRO de la transacción que
@@ -322,6 +326,22 @@ describe('enviar a firmar a distancia (DX-243)', () => {
     expect(ctx.links).toHaveLength(0);
     await ctx.tenantContext.run('t1', undefined, () => send(ctx), ['loc-1']);
     expect(ctx.repo.rows[0].locationId).toBe('loc-1');
+  });
+
+  it('DX-565: el email del enlace sale en el idioma del paciente si hay catálogo (es/en); si no, en español', async () => {
+    for (const [preferredLanguage, locale] of [
+      ['en-GB', 'en'],
+      ['ca', 'es'],
+      [null, 'es'],
+    ] as const) {
+      const ctx = setup();
+      ctx.repo.recipients.p1 = {
+        ...ctx.repo.recipients.p1,
+        patient: { ...ctx.repo.recipients.p1.patient, preferredLanguage },
+      };
+      await send(ctx);
+      expect(ctx.links[0].locale).toBe(locale);
+    }
   });
 
   it('un menor: va al responsable, que firma como GUARDIAN con su nombre', async () => {

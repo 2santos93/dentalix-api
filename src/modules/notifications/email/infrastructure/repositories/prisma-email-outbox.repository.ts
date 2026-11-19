@@ -2,6 +2,7 @@ import { withClinicLogoUrl } from '../../../../../shared/storage/clinic-logo-url
 import { Injectable } from '@nestjs/common';
 import { EmailOutboxStatus, EmailTemplate, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../../shared/prisma/prisma.service';
+import { offeredMessageLanguages } from '../../../../message-templates/domain/message-catalog';
 import {
   EmailTemplateName,
   TENANT_DAILY_EXEMPT_TEMPLATES,
@@ -340,6 +341,41 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
       executable: row?.executable ?? false,
       ownerSeesAllRows: row?.seesAll ?? false,
     };
+  }
+
+  async findMessageTemplate(
+    tenantId: string,
+    key: string,
+    language: string,
+  ): Promise<{ subject: string | null; body: string } | null> {
+    // H8: solo un idioma que la clínica ofrece hoy; el de un idioma retirado
+    // se conserva (para restablecerlo) pero no sale. `tenants` no tiene RLS.
+    const tenant = await this.prisma.tenant.findFirst({
+      where: { id: tenantId, deletedAt: null },
+      select: { patientLanguages: true },
+    });
+    if (
+      !tenant ||
+      !offeredMessageLanguages(tenant.patientLanguages).some(
+        (l) => l === language,
+      )
+    ) {
+      return null;
+    }
+    // RLS FORCE: con la clínica del envío en el GUC.
+    return this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.messageTemplate.findUnique({
+        where: {
+          tenantId_key_channel_language: {
+            tenantId,
+            key,
+            channel: 'EMAIL',
+            language,
+          },
+        },
+        select: { subject: true, body: true },
+      }),
+    );
   }
 
   async findBrand(tenantId: string): Promise<{

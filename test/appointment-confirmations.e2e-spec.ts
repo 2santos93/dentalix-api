@@ -15,6 +15,8 @@ import {
   registerBody,
 } from './support/location-fixtures';
 import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
+import { regionalFormat } from '../src/shared/format/regional-format';
+import { sedeDayAndTime } from '../src/modules/message-templates/domain/whatsapp-messages';
 
 // DX-005: enlace firmado de confirmación de cita, contra Postgres real (RLS +
 // FK compuestas). Cubre: generación con permisos por rol, solo hash en BD,
@@ -45,6 +47,7 @@ interface LinkBody {
   url: string;
   expiresAt: string;
   whatsappPhone: string | null;
+  whatsappText: string | null;
   appointment: Record<string, unknown>;
 }
 
@@ -257,6 +260,70 @@ describe('Confirmación de cita por enlace (e2e)', () => {
       expect(
         (await getAppointment(clinicA, appt.id)).confirmationSentAt,
       ).not.toBeNull();
+    });
+
+    it('DX-565: trae el texto de wa.me ya compuesto (el de siempre, o la plantilla de la clínica solo en esa clínica) y null si la sede no tiene reloj', async () => {
+      const appt = await createAppointment(clinicA, patientA);
+      const { body } = await newLink(clinicA, appt.id);
+      const a = body.appointment as {
+        start: string;
+        locationName: string;
+      };
+      const { day, time } = sedeDayAndTime(
+        new Date(a.start),
+        'America/Caracas',
+        regionalFormat({ locale: 'es-VE', hourCycle: 'h23' }),
+      );
+      expect(body.whatsappText).toBe(
+        `Hola Ana, te recordamos tu cita del ${day} a las ${time} con Dra. Dueña en ${a.locationName}. ` +
+          `Confírmala, cancélala o pide que te llamemos aquí: ${body.url}`,
+      );
+
+      const TEMPLATE =
+        '/api/v1/message-templates/appointment-confirmation/WHATSAPP/es';
+      await request(server)
+        .put(TEMPLATE)
+        .set('X-Tenant-Host', clinicA.host)
+        .set('Authorization', `Bearer ${clinicA.accessToken}`)
+        .send({ body: '{paciente}, tu cita es el {fecha}: {enlace}' })
+        .expect(200);
+      try {
+        const custom = (await newLink(clinicA, appt.id)).body;
+        expect(custom.whatsappText).toBe(
+          `Ana, tu cita es el ${day}: ${custom.url}`,
+        );
+        // La otra clínica sigue con el de siempre.
+        const apptB = await createAppointment(clinicB, patientB);
+        expect((await newLink(clinicB, apptB.id)).body.whatsappText).toMatch(
+          /^Hola Ana, te recordamos tu cita del /,
+        );
+
+        const { id: locationId } = await raw.location.findFirstOrThrow({
+          where: { tenantId: clinicA.tenantId },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        });
+        await raw.location.update({
+          where: { id: locationId },
+          data: { hourCycle: null },
+        });
+        try {
+          expect(
+            (await newLink(clinicA, appt.id)).body.whatsappText,
+          ).toBeNull();
+        } finally {
+          await raw.location.update({
+            where: { id: locationId },
+            data: { hourCycle: 'h23' },
+          });
+        }
+      } finally {
+        await request(server)
+          .delete(TEMPLATE)
+          .set('X-Tenant-Host', clinicA.host)
+          .set('Authorization', `Bearer ${clinicA.accessToken}`)
+          .expect(200);
+      }
     });
 
     it("a patient without country and a number without + gets a WhatsApp link from the appointment's location", async () => {

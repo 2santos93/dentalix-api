@@ -400,4 +400,12 @@ export class CreatedWaitlistOfferDto extends WaitlistOfferDto {
     description: 'DX-435, solo `LINK_WA_ME`: E.164 sin `+` para wa.me.',
   })
   whatsappPhone!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-565, solo `LINK_WA_ME`: el texto prellenado de wa.me ya compuesto (la plantilla «Oferta de hueco» de la clínica por WhatsApp o el de siempre). La web lo usa tal cual: `https://wa.me/<whatsappPhone>?text=<encodeURIComponent(whatsappText)>`. null en los demás canales o si la sede no tiene zona, formato y reloj.',
+  })
+  whatsappText!: string | null;
 }

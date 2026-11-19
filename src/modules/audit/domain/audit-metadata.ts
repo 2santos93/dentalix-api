@@ -273,6 +273,19 @@ export interface AuditMetadata {
    * tomaron del absorbido van por su nombre en `changedFields`.
    */
   patientMerge?: AuditPatientMerge;
+  /**
+   * DX-565: qué texto de Ajustes › Mensajes se guardó, restableció o probó
+   * (clave del catálogo, canal e idioma) y, en la prueba, si era el borrador.
+   * Nunca el texto.
+   */
+  messageTemplate?: AuditMessageTemplate;
+}
+
+export interface AuditMessageTemplate {
+  key: string;
+  channel: 'EMAIL' | 'WHATSAPP';
+  language: string;
+  draft?: boolean;
 }
 
 export interface AuditPatientMerge {
@@ -1712,6 +1725,27 @@ function appointmentSeries(value: unknown): AuditAppointmentSeries | null {
   };
 }
 
+const MESSAGE_TEMPLATE_KEY = /^[a-z]+(?:-[a-z]+)*$/;
+const MESSAGE_TEMPLATE_LANGUAGE = /^[a-z]{2,3}$/;
+
+function messageTemplate(value: unknown): AuditMessageTemplate | null {
+  if (!isRecord(value)) return null;
+  const { key, channel, language, draft, ...rest } = value;
+  if (Object.keys(rest).length > 0) return null;
+  if (
+    typeof key !== 'string' ||
+    key.length > 64 ||
+    !MESSAGE_TEMPLATE_KEY.test(key) ||
+    (channel !== 'EMAIL' && channel !== 'WHATSAPP') ||
+    typeof language !== 'string' ||
+    !MESSAGE_TEMPLATE_LANGUAGE.test(language) ||
+    (draft !== undefined && typeof draft !== 'boolean')
+  ) {
+    return null;
+  }
+  return { key, channel, language, ...(draft !== undefined ? { draft } : {}) };
+}
+
 export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (!isRecord(input)) return {};
   const out: AuditMetadata = {};
@@ -1807,6 +1841,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (copy) out.recordCopy = copy;
   const merged = patientMerge(input.patientMerge);
   if (merged) out.patientMerge = merged;
+  const template = messageTemplate(input.messageTemplate);
+  if (template) out.messageTemplate = template;
   return out;
 }
 
