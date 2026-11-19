@@ -69,6 +69,17 @@ export const ALLOWED: readonly Allowed[] = [
     reason: 'solo la columna de diferencia % (1 decimal)',
   },
   {
+    file: 'src/modules/reports/application/professional-reports-csv.ts',
+    text: "value === null ? '' : value.toFixed(2);",
+    fn: 'const percent',
+    reason: 'no-show % (DX-304) con 2 decimales, no un importe',
+  },
+  {
+    file: 'src/modules/reports/application/professional-reports-csv.ts',
+    text: '(item.noticeMinutes / 60).toFixed(1)',
+    reason: 'horas de aviso de la cancelación (DX-304), no un importe',
+  },
+  {
     file: 'src/modules/reports/application/recovered-slots-csv.ts',
     text: '(rate * 100).toFixed(1)',
     fn: 'function percent',

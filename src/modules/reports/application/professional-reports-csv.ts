@@ -1,12 +1,11 @@
 import type { CancellationReasonCode } from '@prisma/client';
 import { csvAmount, csvDocument, csvText } from '../../../shared/csv/csv-cells';
 import { civilDateIn, wallMillisOfDay } from '../../../shared/time/civil-day';
+import type { ProductivityFigures } from '../domain/professional-productivity';
 import type {
-  ProductivityFigures,
-  ProductivityRow,
-} from '../domain/professional-productivity';
-import type { ProfessionalReportFilters } from './use-cases/get-professional-productivity.use-case';
-import type { ProfessionalProductivity } from './use-cases/get-professional-productivity.use-case';
+  ProfessionalProductivity,
+  ProfessionalReportFilters,
+} from './use-cases/get-professional-productivity.use-case';
 import type { NoShowsReport } from './use-cases/get-no-shows.use-case';
 
 /*
@@ -141,7 +140,7 @@ export function toProfessionalProductivityCsv(
     [],
     PRODUCTIVITY_CSV_COLUMNS.map(csvText),
   ];
-  for (const row of report.rows as ProductivityRow[]) {
+  for (const row of report.rows) {
     lines.push(...figureLines('Profesional', row.fullName, row));
   }
   if (report.scope === 'CLINIC' && report.rows.length > 0) {

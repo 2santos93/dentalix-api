@@ -9,7 +9,9 @@ const BETO = '00000000-0000-4000-8000-00000000000b';
 const NORTE = '00000000-0000-4000-8000-0000000000c1';
 const SUR = '00000000-0000-4000-8000-0000000000c2';
 
-function repo(): jest.Mocked<ProfessionalReportsRepository> {
+type FakeRepo = { [K in keyof ProfessionalReportsRepository]: jest.Mock };
+
+function repo(): FakeRepo {
   return {
     listLocations: jest.fn().mockResolvedValue([
       { id: NORTE, name: 'Sede Norte', isActive: true },
@@ -43,6 +45,8 @@ function repo(): jest.Mocked<ProfessionalReportsRepository> {
   };
 }
 
+const asRepo = (r: FakeRepo) => r as unknown as ProfessionalReportsRepository;
+
 const base = { from: '2026-11-01', to: '2026-11-30' };
 const admin = { userId: ANA, role: ClinicRole.ADMIN, permissions: [] };
 const dentist = { userId: BETO, role: ClinicRole.DENTIST, permissions: [] };
@@ -50,11 +54,13 @@ const dentist = { userId: BETO, role: ClinicRole.DENTIST, permissions: [] };
 describe('GetProfessionalProductivityUseCase (DX-304)', () => {
   it('ADMIN: una fila por profesional y totales por moneda', async () => {
     const r = repo();
-    const out = await new GetProfessionalProductivityUseCase(r).execute({
-      ...base,
-      actor: admin,
-      allowedLocationIds: 'ALL',
-    });
+    const out = await new GetProfessionalProductivityUseCase(asRepo(r)).execute(
+      {
+        ...base,
+        actor: admin,
+        allowedLocationIds: 'ALL',
+      },
+    );
     expect(out.scope).toBe('CLINIC');
     expect(out.rows.map((x) => x.fullName)).toEqual([
       'Ana Rondón',
@@ -78,11 +84,13 @@ describe('GetProfessionalProductivityUseCase (DX-304)', () => {
 
   it('DENTIST: la consulta se acota a él y solo se ve a sí mismo en las opciones', async () => {
     const r = repo();
-    const out = await new GetProfessionalProductivityUseCase(r).execute({
-      ...base,
-      actor: dentist,
-      allowedLocationIds: 'ALL',
-    });
+    const out = await new GetProfessionalProductivityUseCase(asRepo(r)).execute(
+      {
+        ...base,
+        actor: dentist,
+        allowedLocationIds: 'ALL',
+      },
+    );
     expect(out.scope).toBe('OWN');
     expect(r.sums).toHaveBeenCalledWith(expect.anything(), {
       locationIds: [NORTE, SUR],
@@ -97,7 +105,7 @@ describe('GetProfessionalProductivityUseCase (DX-304)', () => {
   it('DENTIST pidiendo a otro: 403 sin consultar', async () => {
     const r = repo();
     await expect(
-      new GetProfessionalProductivityUseCase(r).execute({
+      new GetProfessionalProductivityUseCase(asRepo(r)).execute({
         ...base,
         professionalId: ANA,
         actor: dentist,
@@ -109,7 +117,7 @@ describe('GetProfessionalProductivityUseCase (DX-304)', () => {
 
   it('sede no permitida (DX-089): 403; sin sede, solo las permitidas', async () => {
     const r = repo();
-    const useCase = new GetProfessionalProductivityUseCase(r);
+    const useCase = new GetProfessionalProductivityUseCase(asRepo(r));
     await expect(
       useCase.execute({
         ...base,
@@ -136,7 +144,7 @@ describe('GetProfessionalProductivityUseCase (DX-304)', () => {
 describe('GetNoShowsUseCase (DX-304)', () => {
   it('el % con la definición de kpi-definitions y la página pedida', async () => {
     const r = repo();
-    const out = await new GetNoShowsUseCase(r).execute({
+    const out = await new GetNoShowsUseCase(asRepo(r)).execute({
       ...base,
       actor: admin,
       allowedLocationIds: 'ALL',
@@ -160,7 +168,7 @@ describe('GetNoShowsUseCase (DX-304)', () => {
 
   it('RECEPTION sin permiso extra: 403', async () => {
     await expect(
-      new GetNoShowsUseCase(repo()).execute({
+      new GetNoShowsUseCase(asRepo(repo())).execute({
         ...base,
         actor: { userId: ANA, role: ClinicRole.RECEPTION, permissions: [] },
         allowedLocationIds: 'ALL',
