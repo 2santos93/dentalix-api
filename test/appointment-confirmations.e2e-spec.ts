@@ -807,7 +807,8 @@ describe('Confirmación de cita por enlace (e2e)', () => {
             resourceType: 'APPOINTMENT',
             resourceId: appt.id,
             patientId: patientA,
-            userAgent: 'Paciente/1.0',
+            // DX-582: resumido (no se reconoce navegador ni sistema).
+            userAgent: 'Dispositivo desconocido',
             metadata: expect.objectContaining({
               origin: 'LINK',
               reason,

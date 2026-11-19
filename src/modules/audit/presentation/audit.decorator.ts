@@ -4,9 +4,10 @@ import { AUDIT_OPTIONS, type AuditOptions } from './audit-options';
 
 /**
  * Marca un endpoint como auditado (DX-009): al terminar bien deja UN evento
- * en `audit_events` con actor, rol, acción, recurso, paciente, sede, IP, user
- * agent y request id. Va a nivel de MÉTODO, para que corra dentro del contexto
- * de tenant que abre `TenantContextInterceptor` en la clase.
+ * en `audit_events` con actor, rol, acción, recurso, paciente, sede, IP
+ * truncada, navegador resumido (DX-582) y request id. Va a nivel de MÉTODO,
+ * para que corra dentro del contexto de tenant que abre
+ * `TenantContextInterceptor` en la clase.
  *
  *   @Audit({ action: 'VIEW', resource: 'MEDICAL_HISTORY', patient: { param: 'patientId' } })
  */

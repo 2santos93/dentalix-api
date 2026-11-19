@@ -467,7 +467,11 @@ describe('oferta de hueco por enlace (int, DX-435)', () => {
       // los demás (revisión DX-435, punto 4).
       for (const e of events) {
         if (e.resourceId === first.offerId) {
-          expect([e.ip, e.userAgent]).toEqual(['10.0.0.9', 'móvil']);
+          // DX-582: truncada y resumido, como las sesiones.
+          expect([e.ip, e.userAgent]).toEqual([
+            '10.0.0.0/24',
+            'Dispositivo desconocido',
+          ]);
         } else {
           expect([e.ip, e.userAgent]).toEqual([null, null]);
         }

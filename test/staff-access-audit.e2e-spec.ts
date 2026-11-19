@@ -29,6 +29,9 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
 });
 const passwordService = new PasswordService();
 const UA = 'dx359-e2e-agent';
+// DX-582: en audit_events el user-agent llega resumido (este no se reconoce);
+// platform_audit_events lo sigue guardando tal cual.
+const UA_LABEL = 'Dispositivo desconocido';
 
 interface Tokens {
   accessToken: string;
@@ -204,7 +207,7 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
       expect(e).toMatchObject({
         actorUserId: clinicA.adminUserId,
         actorRole: ClinicRole.ADMIN,
-        userAgent: UA,
+        userAgent: UA_LABEL,
       });
     }
 
@@ -216,7 +219,7 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
       action: 'CREATE',
       actorUserId: user.id,
       actorRole: ClinicRole.DENTIST,
-      userAgent: UA,
+      userAgent: UA_LABEL,
       metadata: {
         reason: 'INVITATION_ACCEPTED',
         params: { invitationId },
@@ -314,7 +317,7 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
     expect(updates[0]).toMatchObject({
       actorUserId: clinicA.adminUserId,
       actorRole: ClinicRole.ADMIN,
-      userAgent: UA,
+      userAgent: UA_LABEL,
     });
     expect(JSON.stringify(updates)).not.toContain('Nombre Nuevo');
   });
@@ -394,7 +397,7 @@ describe('Auditoría de personal y cuenta (e2e, DX-359)', () => {
     expect(events.map((e) => e.locationId)).toEqual([locationA, locationA]);
     expect(events[1]).toMatchObject({
       actorRole: ClinicRole.DENTIST,
-      userAgent: UA,
+      userAgent: UA_LABEL,
     });
     const { passwordHash } = await raw.user.findUniqueOrThrow({
       where: { id: member.userId },

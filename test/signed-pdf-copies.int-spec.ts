@@ -248,7 +248,8 @@ describe('Copia del PDF firmado en Postgres (DX-443)', () => {
       resourceType: 'CONSENT',
       patientId: a.patientId,
       locationId: a.locationId,
-      ip: '203.0.113.9',
+      // DX-582: truncada.
+      ip: '203.0.113.0/24',
       metadata: {
         origin: 'PUBLIC_LINK',
         reason: 'SIGNED_PDF_COPY_DOWNLOADED',

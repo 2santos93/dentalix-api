@@ -682,9 +682,10 @@ describe('Recall con intentos (DX-465, e2e)', () => {
     });
     expect(bookedEvent).toMatchObject({
       requestId: 'req-dx465-agendo',
-      userAgent: 'dx465-e2e-recepcion',
+      // DX-582: resumido y con la IP truncada, como las sesiones.
+      userAgent: 'Dispositivo desconocido',
     });
-    expect(bookedEvent.ip).toEqual(expect.any(String));
+    expect(bookedEvent.ip).toMatch(/\/(24|48)$/);
     // La misma traza que el CREATE APPOINTMENT de esa petición.
     const [created] = await raw.auditEvent.findMany({
       where: {

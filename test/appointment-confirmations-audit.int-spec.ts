@@ -233,8 +233,9 @@ describe('auditoría de la confirmación de cita por enlace (DX-361, Postgres)',
         resourceId: appointmentId,
         patientId: a.patientId,
         requestId: 'req-pac',
-        ip: '10.0.0.9',
-        userAgent: 'móvil',
+        // DX-582: IP truncada y navegador resumido.
+        ip: '10.0.0.0/24',
+        userAgent: 'Dispositivo desconocido',
         metadata: {
           origin: 'LINK',
           reason: 'CONFIRMATION_LINK_CONFIRMED',
