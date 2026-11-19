@@ -160,7 +160,11 @@ const EXPECTED: Record<string, AuditOptions> = {
   // DX-571: conciliación con el extracto del banco. La cuenta (alta, cambios,
   // las listas con nombres de pacientes y «Volver a emparejar»), la
   // importación (hash y contadores, nunca el contenido) y el emparejado a mano.
-  'POST /bank-reconciliation/accounts': { action: 'CREATE', resource: 'BANK_ACCOUNT', resourceId: RES },
+  'POST /bank-reconciliation/accounts': {
+    action: 'CREATE',
+    resource: 'BANK_ACCOUNT',
+    resourceId: RES,
+  },
   'PATCH /bank-reconciliation/accounts/:id': {
     action: 'UPDATE',
     resource: 'BANK_ACCOUNT',
@@ -2690,8 +2694,10 @@ const KNOWN_UNAUDITED: Record<string, string> = {
   'POST /patient-imports/inspect': 'no escribe nada ni crea lote',
   // DX-571: inspección y vista previa del extracto no escriben (como
   // `inspect` de DX-107).
-  'POST /bank-reconciliation/accounts/:id/statements/inspect': 'no escribe nada',
-  'POST /bank-reconciliation/accounts/:id/statements/preview': 'no escribe nada',
+  'POST /bank-reconciliation/accounts/:id/statements/inspect':
+    'no escribe nada',
+  'POST /bank-reconciliation/accounts/:id/statements/preview':
+    'no escribe nada',
   // DX-205: la vista previa de «Actualizar precios» del catálogo solo calcula.
   'POST /catalog/price-changes/preview':
     'vista previa de la subida de precios del catálogo; no escribe',
