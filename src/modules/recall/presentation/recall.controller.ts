@@ -92,7 +92,7 @@ import {
   CreateRecallContactDto,
   CreateRecallContactsBatchDto,
   LocationRecallSettingsDto,
-  PhoneReviewClearedDto,
+  RecallPhoneReviewClearedDto,
   RecallContactsBatchDto,
   UpdateRecallSettingsDto,
   CreateRecallTypeDto,
@@ -436,7 +436,7 @@ export class PatientPhoneReviewController {
     description:
       'DX-465: sin cambiar el número (p. ej. se confirmó que es correcto). Cambiar el teléfono la quita sola. Idempotente: sin marca, `cleared: false` y sin evento.',
   })
-  @ApiOkResponse({ type: PhoneReviewClearedDto })
+  @ApiOkResponse({ type: RecallPhoneReviewClearedDto })
   @ApiForbiddenResponse({ description: PHONE_REVIEW_FORBIDDEN_MESSAGE })
   @ApiNotFoundResponse({
     description: 'Paciente de otra clínica o inexistente',
@@ -444,7 +444,7 @@ export class PatientPhoneReviewController {
   clearReview(
     @Param('id', ParseUUIDPipe) patientId: string,
     @Req() req: AuditableRequest,
-  ): Promise<PhoneReviewClearedDto> {
+  ): Promise<RecallPhoneReviewClearedDto> {
     return this.clear.execute(
       patientId,
       requireAuditRequestContext(req, this.tenantContext),

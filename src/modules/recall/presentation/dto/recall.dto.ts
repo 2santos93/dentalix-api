@@ -899,16 +899,16 @@ export class PatientRecallsDto {
   contacts!: RecallContactDto[];
 
   @ApiProperty({
-    type: () => PhoneReviewDto,
+    type: () => RecallPhoneReviewDto,
     nullable: true,
     description:
       'DX-465: el teléfono marcado para revisar por un «Número equivocado»; null si no',
   })
-  phoneReview!: PhoneReviewDto | null;
+  phoneReview!: RecallPhoneReviewDto | null;
 }
 
 /** DX-465 (D4): la marca de teléfono por revisar. */
-export class PhoneReviewDto {
+export class RecallPhoneReviewDto {
   @ApiProperty({ format: 'date-time' })
   flaggedAt!: Date;
 
@@ -959,7 +959,7 @@ export class LocationRecallSettingsDto {
 }
 
 /** DX-465 (D4): lo que devuelve «Ya está corregido». */
-export class PhoneReviewClearedDto {
+export class RecallPhoneReviewClearedDto {
   @ApiProperty({ format: 'uuid' })
   patientId!: string;
 
