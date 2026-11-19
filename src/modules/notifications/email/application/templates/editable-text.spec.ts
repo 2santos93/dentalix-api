@@ -73,7 +73,10 @@ const series = (
   clinicName: 'Clínica Dental Altamira',
   locationName: 'Sede Altamira',
   providerName: 'Dra. Laura Gómez',
-  dateLabels: ['martes 20 de octubre a las 9:30', 'martes 27 de octubre a las 9:30'],
+  dateLabels: [
+    'martes 20 de octubre a las 9:30',
+    'martes 27 de octubre a las 9:30',
+  ],
   unsubscribeUrl: null,
   ...over,
 });
@@ -105,7 +108,10 @@ const CASES: {
     quote(),
     quote({ recipientFirstName: null }),
     quote({
-      urls: ['https://demo.dentalix.app/firmar/a', 'https://demo.dentalix.app/firmar/b'],
+      urls: [
+        'https://demo.dentalix.app/firmar/a',
+        'https://demo.dentalix.app/firmar/b',
+      ],
     }),
   ],
   'appointment-series': [series(), series({ providerName: null })],
@@ -157,7 +163,10 @@ describe('DX-565: texto de la clínica en los emails editables', () => {
       slot({ patientFirstName: 'Ana <b>' }),
       BRAND,
       'es',
-      { subject: 'Hueco para {paciente}', body: 'Hola {paciente}, 2 < 3 & más' },
+      {
+        subject: 'Hueco para {paciente}',
+        body: 'Hola {paciente}, 2 < 3 & más',
+      },
     );
     expect(email.html).toContain('Hola Ana &lt;b&gt;, 2 &lt; 3 &amp; más');
     expect(email.html).not.toContain('<b>,');
@@ -186,7 +195,12 @@ describe('DX-565: texto de la clínica en los emails editables', () => {
         custom,
       ),
     ).toEqual(
-      renderEmail('appointment-reminder', reminder({ guardianName: 'Carlos' }), BRAND, 'es'),
+      renderEmail(
+        'appointment-reminder',
+        reminder({ guardianName: 'Carlos' }),
+        BRAND,
+        'es',
+      ),
     );
     for (const [template, vars] of [
       ['quote-follow-up', quote({ patientFirstName: 'Luis' })],
@@ -238,7 +252,10 @@ describe('DX-565: texto de la clínica en los emails editables', () => {
       });
     });
     it('sin «a las», todo es la fecha', () => {
-      expect(splitDateTimeLabel('mañana')).toEqual({ fecha: 'mañana', hora: '' });
+      expect(splitDateTimeLabel('mañana')).toEqual({
+        fecha: 'mañana',
+        hora: '',
+      });
     });
   });
 });

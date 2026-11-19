@@ -257,7 +257,10 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   }
 
   /** DX-565: textos de la clínica por `tenantId|key|language`. */
-  messageTemplates = new Map<string, { subject: string | null; body: string }>();
+  messageTemplates = new Map<
+    string,
+    { subject: string | null; body: string }
+  >();
 
   findMessageTemplate(
     tenantId: string,

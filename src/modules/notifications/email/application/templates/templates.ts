@@ -601,7 +601,8 @@ function slotOffer(
   const custom = customEmailText('slot-offer', override, slotOfferValues(vars));
   return renderLayout({
     brand,
-    subject: custom?.subject ?? `${vars.clinicName} tiene un hueco libre para ti`,
+    subject:
+      custom?.subject ?? `${vars.clinicName} tiene un hueco libre para ti`,
     heading: `Hola, ${vars.patientFirstName}`,
     blocks: [
       ...(custom?.blocks ?? [

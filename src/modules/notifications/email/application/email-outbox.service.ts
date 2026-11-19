@@ -49,8 +49,7 @@ export interface EmailTextChoice {
 }
 
 export interface EnqueueEmailInput<T extends EmailTemplateName>
-  extends EnqueuePlatformEmailInput<T>,
-    EmailTextChoice {
+  extends EnqueuePlatformEmailInput<T>, EmailTextChoice {
   /** Clínica que envía (marca y RLS). Sin clínica: `enqueuePlatform`. */
   tenantId: string;
   /**
@@ -251,9 +250,7 @@ export class EmailOutbox {
     const text = await this.clinicTextOf(tenantId, {
       template,
       locale,
-      ...('messageText' in options
-        ? { messageText: options.messageText }
-        : {}),
+      ...('messageText' in options ? { messageText: options.messageText } : {}),
     });
     return renderEmail(template, vars, brand, locale, text);
   }

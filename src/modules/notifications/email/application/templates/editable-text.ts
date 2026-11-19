@@ -49,9 +49,11 @@ export function customEmailText(
   if (!override || !values) return null;
   const rendered = renderMessageTemplate(template, 'EMAIL', override, values);
   if (!rendered?.subject) return null;
-  const blocks = messageParagraphs(rendered.body).map(
-    (text): EmailBlock => ({ kind: 'paragraph', text, multiline: true }),
-  );
+  const blocks = messageParagraphs(rendered.body).map((text): EmailBlock => ({
+    kind: 'paragraph',
+    text,
+    multiline: true,
+  }));
   if (blocks.length === 0) return null;
   return { subject: rendered.subject, blocks };
 }
