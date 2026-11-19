@@ -56,12 +56,19 @@ import {
   PAYMENT_AMOUNT_MESSAGE,
   UNKNOWN_CURRENCY_MESSAGE,
 } from '../../../../shared/money/currency-messages';
+import {
+  CashChangePreparer,
+  hasCashChange,
+  type CashChangeRequest,
+} from '../cash-change-preparer';
+import type { PaymentCashChange } from '../../domain/cash-change';
+import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
 
 // NOTE: deliberately NO `patientId`/`treatmentPlanId` field on the input
 // object itself (`treatmentPlanId` is a separate `execute()` argument,
 // `patientId` is ALWAYS derived from the plan) — same convention as
 // CreateSaleInput never accepting `total`/`amount` from the caller.
-export interface RecordPaymentInput {
+export interface RecordPaymentInput extends CashChangeRequest {
   amount: number;
   currency: string;
   /**
@@ -258,6 +265,8 @@ export class RecordPaymentUseCase {
     // DX-054: la fecha del abono no puede ir más de 24 h por delante.
     @Inject(PAYMENT_CLOCK)
     private readonly now: PaymentClock,
+    // DX-570: lo recibido y el vuelto de un abono en efectivo.
+    private readonly cashChange: CashChangePreparer,
   ) {}
 
   /**
@@ -316,6 +325,9 @@ export class RecordPaymentUseCase {
     }
 
     const currency = await this.validCurrency(input);
+    // DX-570: la forma del vuelto, antes de tocar nada.
+    const withChange = hasCashChange(input);
+    if (withChange) this.cashChange.assertShape(input);
     const paidAt = await this.checkedPaidAt(input.paidAt);
 
     // Throws NotFoundException when the plan is absent, soft-deleted, or
@@ -330,7 +342,7 @@ export class RecordPaymentUseCase {
       method: payMethod,
       paidOn,
       frozenRate,
-      converted,
+      converted: convertedAsTyped,
     } = await this.prepareLine(
       plan,
       input,
@@ -338,6 +350,36 @@ export class RecordPaymentUseCase {
       paidAt,
       options.rateOverride,
     );
+    // DX-570: el vuelto (medio, moneda, tasa del día y cuadre). Un resto
+    // confirmado se suma al importe del abono, y con él su base.
+    let amount = input.amount;
+    let converted = convertedAsTyped;
+    let cashChange: PaymentCashChange | null = null;
+    if (withChange) {
+      const prepared = await this.cashChange.prepare(input, {
+        amount: input.amount,
+        currency,
+        method: payMethod.method,
+        collected: collectedAmount(input.amount, payMethod.adjustments),
+        hasAdjustments: payMethod.adjustments.length > 0,
+        paidOn,
+      });
+      cashChange = prepared.change;
+      if (prepared.amount !== input.amount) {
+        amount = prepared.amount;
+        converted = await paymentBaseAmount(
+          this.convertAmount,
+          {
+            amount,
+            currency,
+            paidOn,
+            exchangeRateCurrency: plan.currency,
+            frozenRate,
+          },
+          plan.currency,
+        );
+      }
+    }
     const receiptPlanBalance = await this.receiptBalance.afterPayment(
       treatmentPlanId,
       converted,
@@ -357,7 +399,7 @@ export class RecordPaymentUseCase {
       treatmentPlanId,
       openingBalanceId: null,
       patientId: plan.patientId,
-      amount: input.amount,
+      amount,
       currency,
       paidAt,
       method: payMethod.method,
@@ -378,6 +420,7 @@ export class RecordPaymentUseCase {
       frozenRateOverride: options.rateOverride !== undefined,
       afterInsertInTx: options.afterInsertInTx,
       lockActor: options.lockActor ?? null,
+      cashChange,
     };
 
     let payment: Payment;

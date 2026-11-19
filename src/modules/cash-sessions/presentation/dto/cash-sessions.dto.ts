@@ -379,6 +379,25 @@ export class CashExpectedLineDto {
   @ApiProperty({
     type: Number,
     nullable: true,
+    description:
+      'DX-570: lo recibido de más en los abonos con vuelto de este grupo (el vuelto que sale, en la moneda del abono); 0 sin vuelto.',
+  })
+  changeIn!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-570: vuelto entregado desde este grupo (su moneda y medio), en positivo: se resta.',
+  })
+  changeOut!: number | null;
+
+  @ApiProperty({ type: Number, nullable: true })
+  changeOutCount!: number | null;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
     description: 'Ajustes que entraron en esta caja (con signo)',
   })
   adjustments!: number | null;
@@ -398,7 +417,7 @@ export class CashExpectedLineDto {
     type: Number,
     nullable: true,
     description:
-      'opening + payments + paymentAdjustments + adjustments − outflows (puede ser negativo)',
+      'opening + payments + paymentAdjustments + changeIn − changeOut + adjustments − outflows (puede ser negativo)',
   })
   expected!: number | null;
 
@@ -561,6 +580,39 @@ export class CashSessionPaymentDto {
       'DX-516: lo cobrado = importe + impuestos + recargos − descuentos (sin ajustes, el importe).',
   })
   collectedAmount!: number;
+
+  @ApiProperty({
+    type: () => CashPaymentChangeDto,
+    nullable: true,
+    description:
+      'DX-570: lo recibido y el vuelto entregado (en efectivo); null sin vuelto. SEC-043: null con `amountHidden`.',
+  })
+  cashChange!: CashPaymentChangeDto | null;
+}
+
+export class CashPaymentChangeLineDto {
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
+  method!: PaymentMethod;
+
+  @ApiProperty({ example: 'Pago móvil' })
+  paymentMethodName!: string;
+
+  @ApiProperty({ example: 182.5 })
+  amount!: number;
+}
+
+export class CashPaymentChangeDto {
+  @ApiProperty({
+    example: 50,
+    description: 'Lo recibido, en la moneda del abono.',
+  })
+  tendered!: number;
+
+  @ApiProperty({ type: [CashPaymentChangeLineDto] })
+  lines!: CashPaymentChangeLineDto[];
 }
 
 export class CashVoidedPaymentDto extends OmitType(CashSessionPaymentDto, [
@@ -740,7 +792,7 @@ export class CashAdjustmentDto {
     enum: CashAdjustmentKind,
     enumName: 'CashAdjustmentKind',
     description:
-      'VOID: anulación de un abono de una caja cerrada. LATE_PAYMENT: abono con fecha de un día ya cerrado. CORRECTION: corrección de un ADMIN. OUTFLOW_VOID: anulación (positiva) de una salida de caja de una caja cerrada.',
+      'VOID: anulación de un abono de una caja cerrada. LATE_PAYMENT: abono con fecha de un día ya cerrado. CORRECTION: corrección de un ADMIN. OUTFLOW_VOID: anulación (positiva) de una salida de caja de una caja cerrada. DX-570: CHANGE_LATE: vuelto (negativo) de un abono con fecha de un día ya cerrado; CHANGE_VOID: devolución (positiva) del vuelto al anular un abono de una caja cerrada.',
   })
   kind!: CashAdjustmentKind;
 

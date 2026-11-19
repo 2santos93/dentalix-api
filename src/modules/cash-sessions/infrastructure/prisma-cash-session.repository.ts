@@ -115,6 +115,17 @@ const PAYMENT_SELECT = {
   voidReason: true,
   // DX-516: sus ajustes por medio de pago (lo cobrado).
   methodAdjustments: { select: { type: true, amount: true } },
+  // DX-570: lo recibido y el vuelto (medio, moneda, importe).
+  tenderedAmount: true,
+  changeLines: {
+    select: {
+      currency: true,
+      method: true,
+      amount: true,
+      paymentMethod: { select: { name: true } },
+    },
+    orderBy: { line: 'asc' },
+  },
   receipt: { select: { seriesPrefix: true, number: true } },
   // DX-390: una línea 2..N de un cobro dividido lleva el recibo de su línea 1.
   splitHead: {
@@ -159,6 +170,8 @@ const ADJUSTMENT_SELECT = {
   // SEC-043: si cuenta en una caja abierta, su importe se oculta (ciego).
   session: { select: { status: true } },
   payment: { select: PAYMENT_SELECT },
+  // DX-570: un ajuste de vuelto llega a su abono por la línea.
+  changeLine: { select: { payment: { select: PAYMENT_SELECT } } },
   expensePayment: {
     select: {
       id: true,
@@ -639,6 +652,9 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             payments: fromCents(line.paymentsCents),
             paymentsCount: line.paymentsCount,
             paymentAdjustments: fromCents(line.paymentAdjustmentsCents),
+            changeIn: fromCents(line.changeInCents),
+            changeOut: fromCents(line.changeOutCents),
+            changeOutCount: line.changeOutCount,
             adjustments: fromCents(line.adjustmentsCents),
             outflows: fromCents(line.outflowsCents),
             outflowsCount: line.outflowsCount,
@@ -720,6 +736,11 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
             amount: true,
             // DX-516: lo cobrado entra con el abono en el cajón.
             methodAdjustments: { select: { type: true, amount: true } },
+            // DX-570: lo recibido entra y cada línea de vuelto sale.
+            tenderedAmount: true,
+            changeLines: {
+              select: { currency: true, method: true, amount: true },
+            },
           },
         }),
         tx.cashSessionAdjustment.findMany({
@@ -744,17 +765,32 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
         currency: f.currency,
         cents: cents(f.amount),
       })),
-      payments: payments.map((p) => ({
-        currency: p.currency,
-        method: p.method,
-        cents: cents(p.amount),
-        adjustmentCents: adjustmentsNetCents(
+      payments: payments.map((p) => {
+        const adjustmentCents = adjustmentsNetCents(
           p.methodAdjustments.map((a) => ({
             type: a.type,
             amount: a.amount.toNumber(),
           })),
-        ),
-      })),
+        );
+        return {
+          currency: p.currency,
+          method: p.method,
+          cents: cents(p.amount),
+          adjustmentCents,
+          // DX-570: recibido − cobrado (el cuadre de la BD lo garantiza).
+          changeInCents:
+            p.tenderedAmount === null
+              ? 0
+              : cents(p.tenderedAmount) - cents(p.amount) - adjustmentCents,
+        };
+      }),
+      changeOut: payments.flatMap((p) =>
+        p.changeLines.map((l) => ({
+          currency: l.currency,
+          method: l.method,
+          cents: cents(l.amount),
+        })),
+      ),
       adjustments: adjustments.map((a) => ({
         currency: a.currency,
         method: a.method,
@@ -1043,6 +1079,19 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
           amount: amountOf(a.amount),
         })),
       ),
+      // DX-570: lo recibido y el vuelto; `null` sin vuelto.
+      cashChange:
+        row.tenderedAmount === null
+          ? null
+          : {
+              tendered: amountOf(row.tenderedAmount),
+              lines: row.changeLines.map((l) => ({
+                currency: l.currency,
+                method: l.method,
+                paymentMethodName: l.paymentMethod.name,
+                amount: amountOf(l.amount),
+              })),
+            },
     };
   }
 
@@ -1064,8 +1113,9 @@ export class PrismaCashSessionRepository implements CashSessionRepository {
     names: Map<string, string>,
     timeZone: string,
   ): CashAdjustmentView {
-    const payment = row.payment
-      ? this.toPayment(row.payment, names, timeZone)
+    const paymentRow = row.payment ?? row.changeLine?.payment ?? null;
+    const payment = paymentRow
+      ? this.toPayment(paymentRow, names, timeZone)
       : null;
     return {
       id: row.id,

@@ -116,6 +116,11 @@ import {
 } from '../../domain/payment-proof';
 import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
 import { toCents } from '../../../../shared/money/money';
+import {
+  CHANGE_LINE_SELECT,
+  cashChangeOf,
+  insertChangeLines,
+} from './payment-change.persistence';
 
 // DX-136: cada abono se lee con la serie y el número de su recibo (o sin
 // recibo, si es anterior a la numeración).
@@ -133,6 +138,8 @@ const PAYMENT_INCLUDE = {
   methodAdjustments: ADJUSTMENT_LINE_SELECT,
   // DX-389: solo si tiene comprobante (la clave del almacén no se lee).
   proof: { select: { id: true } },
+  // DX-570: las líneas del vuelto, en orden (vacío sin vuelto).
+  changeLines: CHANGE_LINE_SELECT,
 } satisfies Prisma.PaymentInclude;
 
 type PrismaPayment = Prisma.PaymentGetPayload<{
@@ -223,6 +230,7 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     adjustments,
     collectedAmount: collectedAmount(payment.amount.toNumber(), adjustments),
     hasProof: payment.proof !== null,
+    cashChange: cashChangeOf(payment),
   };
 }
 
@@ -805,6 +813,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
         createdById: input.createdById,
         exchangeRateCurrency: targetCurrency,
         ...(freeze ? frozenRateData(freeze) : {}),
+        // DX-570: lo recibido y el resto sumado al importe (solo con vuelto).
+        ...(input.cashChange
+          ? {
+              tenderedAmount: input.cashChange.tendered,
+              changeRemainder:
+                input.cashChange.remainderToCredit > 0
+                  ? input.cashChange.remainderToCredit
+                  : null,
+            }
+          : {}),
       },
       include: { paymentMethod: { select: { name: true } } },
     });
@@ -854,6 +872,15 @@ export class PrismaPaymentRepository implements PaymentRepository {
             throw error;
           })
       : null;
+    // DX-570: las líneas del vuelto, con el abono (antes del recibo y del
+    // ajuste de caja tardío). El cuadre lo repite la BD al COMMIT.
+    const changeLines = input.cashChange
+      ? await insertChangeLines(
+          tx,
+          { tenantId, paymentId: created.id },
+          input.cashChange.lines,
+        )
+      : [];
     const entity = mapToEntity(
       {
         ...created,
@@ -861,21 +888,27 @@ export class PrismaPaymentRepository implements PaymentRepository {
         splitHead: null,
         methodAdjustments,
         proof: input.proof ? { id: proof?.id ?? '' } : null,
+        changeLines: [],
       },
       timeZone,
     );
+    if (input.cashChange) entity.cashChange = input.cashChange;
     // DX-027: con fecha de un día cuya caja ya cerró, es un ajuste de la
     // caja abierta (o pendiente), con enlace a la cerrada. DX-516: por lo
     // cobrado (importe ± ajustes), que es lo que entra en el cajón.
+    // DX-570: con vuelto, entra lo recibido y cada línea sale de su grupo.
     if (cash.late && created.createdById) {
       await recordLatePaymentAdjustment(
         tx,
         {
           ...created,
-          amount: new Prisma.Decimal(entity.collectedAmount),
+          amount: new Prisma.Decimal(
+            input.cashChange?.tendered ?? entity.collectedAmount,
+          ),
           createdById: created.createdById,
         },
         cash.late,
+        changeLines,
       );
     }
     // DX-051 (R4): la base del abono nace con él si se convirtió a la moneda
@@ -933,6 +966,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
         paidOn: entity.paidOn,
         createdById: created.createdById,
         adjustments: entity.adjustments,
+        cashChange: input.cashChange ?? null,
       },
     };
   }

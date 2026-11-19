@@ -382,6 +382,10 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // DX-390: «un medio de otra clínica en una línea del cobro no se acepta (400)».
   'POST /treatment-plans/:id/split-payments body.lines[].paymentMethodId':
     'split-payments.e2e-spec.ts',
+  // DX-570: «un medio de otra clínica en una línea del vuelto no se acepta
+  // (400) y no se inserta ni el abono ni el vuelto».
+  'POST /treatment-plans/:id/payments body.change[].paymentMethodId':
+    'cash-change.e2e-spec.ts',
   // DX-253: «un plan de destino o un abono de referencia de otra clínica no
   // se aceptan (404 / 400) y no guardan nada».
   'POST /treatment-plans/:id/credit-transfers body.targetPlanId':

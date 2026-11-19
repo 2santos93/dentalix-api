@@ -10,6 +10,37 @@ import { formatReceiptNumber } from '../../domain/receipt-number';
 import { effectiveReceiptLegend } from '../../domain/receipt-settings';
 import type { PaymentAdjustmentLine } from '../../domain/payment-adjustment-line';
 import { readDocumentTypeNames } from '../../../patients/infrastructure/repositories/prisma-document-type-names.repository';
+import type { PaymentCashChange } from '../../domain/cash-change';
+import type { ReceiptCashChange } from '../../domain/receipt-snapshot';
+import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
+
+/** DX-570: el vuelto como lo congela el recibo; `null` sin vuelto. */
+export function receiptCashChangeOf(
+  payment: Pick<
+    ReceiptPaymentRow,
+    'amount' | 'currency' | 'adjustments' | 'cashChange'
+  >,
+): ReceiptCashChange | null {
+  const change = payment.cashChange;
+  if (!change) return null;
+  return {
+    currency: payment.currency,
+    tendered: change.tendered,
+    applied: payment.amount,
+    collected: collectedAmount(payment.amount, payment.adjustments ?? []),
+    remainderToCredit: change.remainderToCredit,
+    lines: change.lines.map((l) => ({
+      line: l.line,
+      paymentMethodName: l.paymentMethodName,
+      method: l.method,
+      currency: l.currency,
+      amount: l.amount,
+      reference: l.reference,
+      equivalentAmount: l.equivalentAmount,
+      rate: l.rate ? { ...l.rate } : null,
+    })),
+  };
+}
 
 /** El abono recién insertado, en la misma transacción. */
 export interface ReceiptPaymentRow {
@@ -36,6 +67,8 @@ export interface ReceiptPaymentRow {
    * líneas y la moneda del plan del total.
    */
   split?: { lines: ReceiptSplitLine[]; planCurrency: string };
+  /** DX-570: lo recibido y el vuelto del abono (`null`/ausente sin vuelto). */
+  cashChange?: PaymentCashChange | null;
 }
 
 /**
@@ -183,6 +216,8 @@ export async function issuePaymentReceipt(
       planBalance,
       cashier,
       split: payment.split ?? null,
+      // DX-570: recibido, aplicado y vuelto, con su tasa y su día.
+      cashChange: receiptCashChangeOf(payment),
       // DX-515: se congelan en la foto; sin configurar, la foto es la de antes.
       texts: {
         title: tenant.receiptTitle,

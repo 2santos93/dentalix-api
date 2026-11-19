@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentAdjustmentLineDto } from './payment-adjustment-line.dto';
 import { PaymentMethod } from '@prisma/client';
+import { EXCHANGE_RATE_SOURCES } from '../../../exchange/domain/exchange-rate-source';
 import {
   PAYMENT_EXCHANGE_RATE_STATUSES,
   type PaymentExchangeRateStatus,
@@ -9,6 +10,78 @@ import {
   EXCHANGE_RATE_STATUS_DESCRIPTION,
   FrozenExchangeRateDto,
 } from './frozen-exchange-rate.dto';
+
+/** DX-570: la tasa del día congelada en una línea de vuelto en otra moneda. */
+export class PaymentChangeRateDto {
+  @ApiProperty({ description: 'Unidades de la moneda de la línea por 1 USD.' })
+  fromPerBase!: number;
+
+  @ApiProperty({ description: 'Unidades de la moneda del abono por 1 USD.' })
+  toPerBase!: number;
+
+  @ApiProperty({ enum: EXCHANGE_RATE_SOURCES, enumName: 'ExchangeRateSource' })
+  source!: 'AUTOMATIC' | 'MANUAL';
+
+  @ApiProperty({ example: '2026-11-19', description: 'Día civil de la tasa.' })
+  date!: string;
+}
+
+/** DX-570: una línea del vuelto. */
+export class PaymentChangeLineDto {
+  @ApiProperty({ minimum: 1, maximum: 3 })
+  line!: number;
+
+  @ApiProperty({ format: 'uuid' })
+  paymentMethodId!: string;
+
+  @ApiProperty({ example: 'Pago móvil' })
+  paymentMethodName!: string;
+
+  @ApiProperty({
+    enum: PaymentMethod,
+    enumName: 'PaymentMethod',
+    description: 'Tipo base del medio: el grupo del arqueo de la caja.',
+  })
+  method!: PaymentMethod;
+
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({ example: 182.5 })
+  amount!: number;
+
+  @ApiProperty({ type: String, nullable: true })
+  reference!: string | null;
+
+  @ApiProperty({ example: 5, description: 'La línea en la moneda del abono.' })
+  equivalentAmount!: number;
+
+  @ApiProperty({
+    type: PaymentChangeRateDto,
+    nullable: true,
+    description: 'null en la misma moneda del abono.',
+  })
+  rate!: PaymentChangeRateDto | null;
+}
+
+/** DX-570: lo recibido y el vuelto de un abono en efectivo. */
+export class PaymentCashChangeDto {
+  @ApiProperty({
+    example: 50,
+    description: 'Lo recibido, en la moneda del abono.',
+  })
+  tendered!: number;
+
+  @ApiProperty({
+    example: 0,
+    description:
+      'La diferencia no devuelta que, confirmada, se sumó al importe (0 si nada).',
+  })
+  remainderToCredit!: number;
+
+  @ApiProperty({ type: [PaymentChangeLineDto] })
+  lines!: PaymentChangeLineDto[];
+}
 
 // Response shape for Payment endpoints -- documents the Payment entity
 // contract for Swagger (same convention as AppointmentDto / SaleDto: exists
@@ -196,4 +269,12 @@ export class PaymentDto {
       'DX-389: el abono tiene comprobante del cobro. La clave del almacén no sale nunca: se ve con `GET /payments/:id/proof/url`.',
   })
   hasProof!: boolean;
+
+  @ApiPropertyOptional({
+    type: PaymentCashChangeDto,
+    nullable: true,
+    description:
+      'DX-570: lo recibido y el vuelto de un abono en efectivo; null sin vuelto. Recibido = lo cobrado + Σ equivalentes del vuelto.',
+  })
+  cashChange?: PaymentCashChangeDto | null;
 }

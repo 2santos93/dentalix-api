@@ -315,6 +315,8 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
           paymentRepo,
         ),
         () => NOW,
+        // DX-570: sin vuelto en estas pruebas.
+        null as never,
       );
       await Promise.all(
         Array.from({ length: count }, () =>
@@ -406,6 +408,8 @@ describe('DX-182 · saldo exacto en el recibo con abonos concurrentes (int)', ()
           paymentRepo,
         ),
         () => NOW,
+        // DX-570: sin vuelto en estas pruebas.
+        null as never,
       );
       const payment = await inTenant(() =>
         recordPayment.execute(planId, {

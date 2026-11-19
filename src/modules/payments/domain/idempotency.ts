@@ -16,6 +16,49 @@ export interface PaymentRequestShape {
   paymentMethodId?: string;
   reference?: string;
   proofUploadId?: string;
+  /** DX-570: lo recibido, el vuelto y la confirmación del resto. */
+  tendered?: unknown;
+  change?: {
+    paymentMethodId?: unknown;
+    currency?: unknown;
+    amount?: unknown;
+    reference?: unknown;
+  }[];
+  changeRemainderToCredit?: unknown;
+}
+
+/**
+ * DX-570: el vuelto en la huella, solo si viene (las anteriores siguen
+ * valiendo). La confirmación del resto cuenta (cambia el importe guardado):
+ * el 422 sin ella no crea nada, así que la clave sigue libre para el
+ * reintento confirmado.
+ */
+function cashChangeParts(input: PaymentRequestShape): unknown[] {
+  const lines = input.change ?? [];
+  if (
+    input.tendered === undefined &&
+    lines.length === 0 &&
+    input.changeRemainderToCredit !== true
+  ) {
+    return [];
+  }
+  return [
+    [
+      'change',
+      normalizeAmount(input.tendered),
+      lines.map((line) => [
+        typeof line.paymentMethodId === 'string'
+          ? line.paymentMethodId.toLowerCase()
+          : (line.paymentMethodId ?? null),
+        normalizeCurrency(line.currency),
+        normalizeAmount(line.amount),
+        typeof line.reference === 'string'
+          ? line.reference.trim() || null
+          : null,
+      ]),
+      input.changeRemainderToCredit === true,
+    ],
+  ];
 }
 
 const CIVIL_DATE_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
@@ -111,6 +154,7 @@ function paymentFingerprintWithNotes(
     ...(input.proofUploadId
       ? [`proof:${input.proofUploadId.toLowerCase()}`]
       : []),
+    ...cashChangeParts(input),
   ];
   return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 }

@@ -88,13 +88,21 @@ export interface CashExpectedLine extends HiddenAmount {
    * recargos +, descuentos −). 0 sin ajustes.
    */
   paymentAdjustments: number | null;
+  /**
+   * DX-570: lo recibido de más en los abonos con vuelto de este grupo (el
+   * vuelto que sale, en la moneda del abono). 0 sin vuelto.
+   */
+  changeIn: number | null;
+  /** DX-570: vuelto entregado desde este grupo, en positivo: se resta. */
+  changeOut: number | null;
+  changeOutCount: number | null;
   adjustments: number | null;
   /** Salidas de caja menor (DX-274), en positivo: se restan. */
   outflows: number | null;
   outflowsCount: number | null;
   /**
-   * opening + payments + paymentAdjustments + adjustments − outflows (puede
-   * ser negativo).
+   * opening + payments + paymentAdjustments + changeIn − changeOut +
+   * adjustments − outflows (puede ser negativo).
    */
   expected: number | null;
 }
@@ -168,6 +176,19 @@ export interface CashSessionPayment {
   createdBy: StaffRef | null;
   /** DX-516: lo cobrado (importe ± ajustes por medio de pago). */
   collectedAmount: number;
+  /** DX-570: lo recibido y el vuelto entregado; `null` sin vuelto. */
+  cashChange: CashPaymentChange | null;
+}
+
+/** DX-570: el vuelto de un abono tal como sale en su caja. */
+export interface CashPaymentChange {
+  tendered: number;
+  lines: {
+    currency: string;
+    method: PaymentMethod;
+    paymentMethodName: string;
+    amount: number;
+  }[];
 }
 
 export interface CashVoidedPayment

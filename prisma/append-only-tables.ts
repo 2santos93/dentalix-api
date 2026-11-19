@@ -54,6 +54,8 @@ export const NO_APP_UPDATE_DELETE = [
   'patient_credit_refunds',
   'patient_credit_transfers',
   'payment_adjustments',
+  // DX-570: las líneas del vuelto de un abono.
+  'payment_change_lines',
   'payment_allocation_movements',
   'platform_access_audit',
   'platform_audit_events',

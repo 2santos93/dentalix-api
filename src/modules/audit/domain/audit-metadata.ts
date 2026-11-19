@@ -148,6 +148,13 @@ export interface AuditMetadata {
    */
   paymentReference?: AuditPaymentReference;
   /**
+   * DX-570: abono en efectivo con vuelto. Lo recibido, la moneda del abono,
+   * la diferencia sumada al abono y cada línea del vuelto (moneda, importe,
+   * método base, su equivalente y si llevaba referencia). Nunca la
+   * referencia: va en el abono (`resourceId`).
+   */
+  cashChange?: AuditCashChange;
+  /**
    * DX-402: un abono congeló como tasa de respaldo la tasa manual de un día
    * anterior a `manualSince` (un día sin tasa del proveedor): el día de la
    * tasa, desde cuándo rige la manual y las monedas de la cotización. Ni
@@ -481,6 +488,21 @@ export interface AuditRateOverride {
 export interface AuditPaymentReference {
   duplicateConfirmed: boolean;
   duplicateOf: string[];
+}
+
+export interface AuditCashChangeLine {
+  currency: string;
+  amount: number;
+  method: string;
+  equivalentAmount: number;
+  hasReference: boolean;
+}
+
+export interface AuditCashChange {
+  currency: string;
+  tendered: number;
+  remainderToCredit: number;
+  lines: AuditCashChangeLine[];
 }
 
 export interface AuditPrescriptionSafety {
@@ -1166,6 +1188,49 @@ function paymentReference(value: unknown): AuditPaymentReference | null {
   };
 }
 
+const CASH_CHANGE_METHODS = new Set(['CASH', 'CARD', 'TRANSFER', 'OTHER']);
+const isAuditAmount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+
+/** DX-570: lo recibido y el vuelto (solo importes, códigos y banderas). */
+function cashChange(value: unknown): AuditCashChange | null {
+  if (!isRecord(value)) return null;
+  const { currency, tendered, remainderToCredit, lines } = value;
+  if (
+    typeof currency !== 'string' ||
+    !CURRENCY_CODE.test(currency) ||
+    !isAuditAmount(tendered) ||
+    !isAuditAmount(remainderToCredit) ||
+    !Array.isArray(lines)
+  ) {
+    return null;
+  }
+  const out: AuditCashChangeLine[] = [];
+  for (const line of lines.slice(0, 3)) {
+    if (!isRecord(line)) continue;
+    const {
+      currency: c,
+      amount,
+      method,
+      equivalentAmount,
+      hasReference,
+    } = line;
+    if (
+      typeof c !== 'string' ||
+      !CURRENCY_CODE.test(c) ||
+      !isAuditAmount(amount) ||
+      typeof method !== 'string' ||
+      !CASH_CHANGE_METHODS.has(method) ||
+      !isAuditAmount(equivalentAmount) ||
+      typeof hasReference !== 'boolean'
+    ) {
+      continue;
+    }
+    out.push({ currency: c, amount, method, equivalentAmount, hasReference });
+  }
+  return { currency, tendered, remainderToCredit, lines: out };
+}
+
 /** Los 4 últimos del nº de afiliado: letras de cualquier alfabeto o dígitos. */
 const LAST4 = /^[\p{L}0-9]{1,4}$/u;
 
@@ -1701,6 +1766,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (anesthesia) out.anesthesiaSafety = anesthesia;
   const referenced = paymentReference(input.paymentReference);
   if (referenced) out.paymentReference = referenced;
+  const changed = cashChange(input.cashChange);
+  if (changed) out.cashChange = changed;
   const backup = exchangeRateBackup(input.exchangeRateBackup);
   if (backup) out.exchangeRateBackup = backup;
   const rated = exchangeRate(input.exchangeRate);

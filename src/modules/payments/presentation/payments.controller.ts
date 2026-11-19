@@ -35,7 +35,10 @@ import {
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import type { LockActor } from '../../financial-lock/domain/financial-lock';
-import { RecordPaymentDto } from './dto/record-payment.dto';
+import {
+  RecordPaymentDto,
+  RecordPlanPaymentDto,
+} from './dto/record-payment.dto';
 import {
   CreatePaymentProofUploadDto,
   PaymentProofUploadDto,
@@ -319,6 +322,8 @@ export class PaymentsController {
     // DX-136: el recibo numerado nace con el abono (misma transacción).
     reason: 'RECEIPT_ISSUED',
     paymentReference: true,
+    // DX-570: lo recibido y las líneas del vuelto.
+    cashChange: true,
   })
   @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('treatment-plans/:id/payments')
@@ -343,12 +348,15 @@ export class PaymentsController {
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'La Idempotency-Key ya se usó con otro plan u otro cuerpo (DX-109): genera una clave nueva.',
+      'La Idempotency-Key ya se usó con otro plan u otro cuerpo (DX-109): genera una clave nueva. ' +
+      'DX-570: el vuelto supera lo recibido menos lo cobrado; no hay tasa del día para una línea en otra moneda; ' +
+      'queda una diferencia sin devolver (`code: CASH_CHANGE_REMAINDER`, con `remainder` y `currency`: se confirma con ' +
+      '`changeRemainderToCredit`), o el medio tiene ajustes y el vuelto no cubre toda la diferencia.',
   })
   @ApiParam({ name: 'id', format: 'uuid' })
   async create(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: RecordPaymentDto,
+    @Body() dto: RecordPlanPaymentDto,
     // Idempotency-Key (UUID) dedup header. Optional: absent → today's behavior
     // (no dedup, idempotencyKey stays NULL). Read from the header (never the
     // body), like tenant/createdById. A replay of the same key returns the
@@ -371,6 +379,21 @@ export class PaymentsController {
         duplicateReferenceReason: dto.duplicateReferenceReason,
         proofUploadId: dto.proofUploadId,
         notes: dto.notes,
+        // DX-570: lo recibido y el vuelto (solo si vienen).
+        ...(dto.tendered !== undefined ? { tendered: dto.tendered } : {}),
+        ...(dto.change !== undefined
+          ? {
+              change: dto.change.map((line) => ({
+                paymentMethodId: line.paymentMethodId,
+                currency: line.currency,
+                amount: line.amount,
+                reference: line.reference,
+              })),
+            }
+          : {}),
+        ...(dto.changeRemainderToCredit !== undefined
+          ? { changeRemainderToCredit: dto.changeRemainderToCredit }
+          : {}),
       },
       req.user.sub,
       idempotencyKey,

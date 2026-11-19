@@ -259,6 +259,70 @@ describe('sanitizeAuditMetadata (DX-009)', () => {
     });
   });
 
+  describe('cashChange (DX-570: lo recibido y el vuelto)', () => {
+    it('guarda importes, códigos, método base y si llevaba referencia', () => {
+      expect(
+        sanitizeAuditMetadata({
+          cashChange: {
+            currency: 'USD',
+            tendered: 50,
+            remainderToCredit: 0,
+            lines: [
+              {
+                currency: 'VES',
+                amount: 182.5,
+                method: 'TRANSFER',
+                equivalentAmount: 5,
+                hasReference: true,
+                reference: '04125551234',
+              },
+            ],
+          },
+        }),
+      ).toEqual({
+        cashChange: {
+          currency: 'USD',
+          tendered: 50,
+          remainderToCredit: 0,
+          lines: [
+            {
+              currency: 'VES',
+              amount: 182.5,
+              method: 'TRANSFER',
+              equivalentAmount: 5,
+              hasReference: true,
+            },
+          ],
+        },
+      });
+    });
+
+    it('descarta líneas con forma extraña y un vuelto sin moneda válida', () => {
+      expect(
+        sanitizeAuditMetadata({
+          cashChange: {
+            currency: 'USD',
+            tendered: 50,
+            remainderToCredit: 0,
+            lines: [{ currency: 'VES', amount: -1, method: 'TRANSFER' }],
+          },
+        }),
+      ).toEqual({
+        cashChange: {
+          currency: 'USD',
+          tendered: 50,
+          remainderToCredit: 0,
+          lines: [],
+        },
+      });
+      expect(
+        sanitizeAuditMetadata({
+          cashChange: { currency: 'dólares', tendered: 50, lines: [] },
+        }),
+      ).toEqual({});
+    });
+  });
+
   describe('search (DX-191: búsqueda de implantes por lote/REF)', () => {
     it('guarda lote, REF y nº de filas', () => {
       expect(

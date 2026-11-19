@@ -137,6 +137,8 @@ const recordPayment = new RecordPaymentUseCase(
     paymentRepo,
   ),
   () => NOW,
+  // DX-570: sin vuelto en estas pruebas.
+  null as never,
 );
 
 const PNG =

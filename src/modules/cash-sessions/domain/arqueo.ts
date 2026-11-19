@@ -39,7 +39,17 @@ export interface ArqueoSource {
     method: PaymentMethod | null;
     cents: number;
     adjustmentCents?: number;
+    /**
+     * DX-570: lo recibido de más que se devolvió como vuelto (recibido −
+     * cobrado): entra con el abono en su grupo. 0 o ausente sin vuelto.
+     */
+    changeInCents?: number;
   }[];
+  /**
+   * DX-570: las líneas de vuelto de esos abonos (en positivo: se restan),
+   * cada una en su moneda y su método.
+   */
+  changeOut?: { currency: string; method: PaymentMethod; cents: number }[];
   /** Ajustes que entraron en esta caja (con signo). */
   adjustments: { currency: string; method: PaymentMethod; cents: number }[];
   /**
@@ -58,6 +68,11 @@ export interface ExpectedLine {
   paymentsCount: number;
   /** DX-516: ajustes por medio de pago de esos abonos (con signo). */
   paymentAdjustmentsCents: number;
+  /** DX-570: lo recibido de más en esos abonos (el vuelto que sale). */
+  changeInCents: number;
+  /** DX-570: vuelto entregado desde este grupo (en positivo: se resta). */
+  changeOutCents: number;
+  changeOutCount: number;
   adjustmentsCents: number;
   /** Salidas de caja (en positivo: se restan). */
   outflowsCents: number;
@@ -92,6 +107,9 @@ function emptyLine(currency: string, method: PaymentMethod): ExpectedLine {
     paymentsCents: 0,
     paymentsCount: 0,
     paymentAdjustmentsCents: 0,
+    changeInCents: 0,
+    changeOutCents: 0,
+    changeOutCount: 0,
     adjustmentsCents: 0,
     outflowsCents: 0,
     outflowsCount: 0,
@@ -111,7 +129,8 @@ function byCurrencyThenMethod(
 
 /**
  * Lo esperado por (moneda, método): fondo + abonos + sus ajustes por medio de
- * pago (DX-516) + ajustes de caja − salidas. Puede
+ * pago (DX-516) + lo recibido de más − el vuelto entregado (DX-570) + ajustes
+ * de caja − salidas. Puede
  * quedar negativo (R5 de DX-274): no se rechaza, para no dar un oráculo del
  * esperado con el arqueo ciego.
  */
@@ -134,6 +153,12 @@ export function expectedLines(source: ArqueoSource): ExpectedLine[] {
     line.paymentsCents += payment.cents;
     line.paymentsCount += 1;
     line.paymentAdjustmentsCents += payment.adjustmentCents ?? 0;
+    line.changeInCents += payment.changeInCents ?? 0;
+  }
+  for (const change of source.changeOut ?? []) {
+    const line = lineFor(change.currency, change.method);
+    line.changeOutCents += change.cents;
+    line.changeOutCount += 1;
   }
   for (const adjustment of source.adjustments) {
     lineFor(adjustment.currency, adjustment.method).adjustmentsCents +=
@@ -151,6 +176,8 @@ export function expectedLines(source: ArqueoSource): ExpectedLine[] {
         line.openingCents +
         line.paymentsCents +
         line.paymentAdjustmentsCents +
+        line.changeInCents -
+        line.changeOutCents +
         line.adjustmentsCents -
         line.outflowsCents,
     }))

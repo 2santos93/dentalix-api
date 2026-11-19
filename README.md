@@ -6944,7 +6944,7 @@ db:check-force` falla (`app_delete`) si la app recupera alguno.
   `payment_allocation_movements`, `patient_credit_*`,
   `cancellation_policy_versions`, `closing_queue_dismissals`,
   `appointment_reserved_overrides`, `payment_adjustments`,
-  `treatment_plan_repricings`).
+  `treatment_plan_repricings`, `payment_change_lines` (DX-570)).
 - **Sin DELETE, con UPDATE** (la app las anula, cierra o marca; el trigger
   limita qué columnas cambian): `cash_sessions` (cierre y reapertura),
   `cash_session_adjustments` (se unen a una caja), `expenses` y
