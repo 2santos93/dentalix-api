@@ -12,6 +12,12 @@ import type { AppointmentReminderEmailVars } from '../src/modules/notifications/
 import { PrismaMessageTemplateRepository } from '../src/modules/message-templates/infrastructure/prisma-message-template.repository';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import type { MessageTemplateId } from '../src/modules/message-templates/domain/ports/message-template-repository.port';
+import {
+  MessageTemplateReader,
+  SendMessageTemplateTestUseCase,
+} from '../src/modules/message-templates/application/message-templates.use-cases';
+import { sampleEmailVars } from '../src/modules/message-templates/application/message-samples';
+import { EDITABLE_EMAIL_TEMPLATES } from '../src/modules/notifications/email/application/templates/editable-text';
 
 // DX-565, capa de BD: message_templates contra Postgres. RLS FORCE por
 // clínica (ni se ve ni se escribe la fila de otra), el texto se lee AL
@@ -321,11 +327,10 @@ describe('DX-565 · message_templates en la BD (int)', () => {
         subjectPrefix: '[Prueba] ',
       });
     const [p1, p2] = await Promise.all([prepare(), prepare()]);
-    const now = new Date();
     const results = await inTenant(tenantA, () =>
       Promise.all(
         [p1, p2].map((p) =>
-          templates.recordTestSend(p, REMINDER, ctx(tenantA), 300, now),
+          templates.recordTestSend(p, REMINDER, false, ctx(tenantA), 300),
         ),
       ),
     );
@@ -341,8 +346,111 @@ describe('DX-565 · message_templates en la BD (int)', () => {
     expect((await payloadOf(sent[0].id)).subject).toMatch(/^\[Prueba\] /);
     expect(
       await inTenant(tenantA, () =>
-        templates.testCooldownRemaining(userId, 300, new Date()),
+        templates.testCooldownRemaining(userId, 300),
       ),
     ).toBeGreaterThan(0);
+  });
+
+  it('render al encolar en cada email del catálogo: el siguiente sale con el texto de la clínica', async () => {
+    for (const template of EDITABLE_EMAIL_TEMPLATES) {
+      const id = { key: template, channel: 'EMAIL', language: 'es' } as const;
+      await inTenant(tenantA, () =>
+        templates.save(
+          id,
+          { subject: `Propio de ${template}`, body: 'Texto propio.' },
+          ctx(tenantA),
+        ),
+      );
+      const queued = await outbox.enqueue({
+        tenantId: tenantA,
+        to: 'ana@ejemplo.com',
+        template,
+        vars: sampleEmailVars(template, 'Clínica dx565-int-a'),
+      });
+      const email = await payloadOf(queued.id);
+      expect([template, email.subject]).toEqual([
+        template,
+        `Propio de ${template}`,
+      ]);
+      expect(email.text).toContain('Texto propio.');
+    }
+  });
+
+  it('H8: el texto de un idioma que la clínica retiró no sale (sale el de por defecto); vuelve si lo ofrece otra vez', async () => {
+    const EN = { ...REMINDER, language: 'en' } as const;
+    const reader = new MessageTemplateReader(templates);
+    const enqueueEn = async () =>
+      payloadOf(
+        (
+          await outbox.enqueue({
+            tenantId: tenantA,
+            to: 'ana@ejemplo.com',
+            template: 'appointment-reminder',
+            locale: 'en',
+            vars,
+          })
+        ).id,
+      );
+    try {
+      await owner.tenant.update({
+        where: { id: tenantA },
+        data: { patientLanguages: ['es', 'en'] },
+      });
+      await inTenant(tenantA, () =>
+        templates.save(
+          EN,
+          { subject: 'Own subject', body: 'Own text.' },
+          ctx(tenantA),
+        ),
+      );
+      expect((await enqueueEn()).subject).toBe('Own subject');
+      expect(await inTenant(tenantA, () => reader.find(EN))).not.toBeNull();
+      await owner.tenant.update({
+        where: { id: tenantA },
+        data: { patientLanguages: ['es'] },
+      });
+      expect((await enqueueEn()).subject).toBe(
+        'Reminder: your appointment at Clínica dx565-int-a',
+      );
+      expect(await inTenant(tenantA, () => reader.find(EN))).toBeNull();
+      // La fila sigue (se puede restablecer).
+      expect(await inTenant(tenantA, () => templates.find(EN))).not.toBeNull();
+    } finally {
+      await owner.tenant.update({
+        where: { id: tenantA },
+        data: { patientLanguages: ['es'] },
+      });
+    }
+  });
+
+  it('la prueba respeta el tope diario de la clínica: 429 en español y nada encolado', async () => {
+    const capped = new EmailOutbox(outboxRepo, cipher, idleDispatcher, {
+      ...config,
+      quotas: { ...config.quotas, tenantDaily: 0 },
+    });
+    const useCase = new SendMessageTemplateTestUseCase(templates, capped);
+    const before = await owner.emailOutbox.count({
+      where: { tenantId: tenantB },
+    });
+    await expect(
+      inTenant(tenantB, () =>
+        useCase.execute(
+          { key: 'quote-follow-up', channel: 'EMAIL', language: 'es' },
+          null,
+          ctx(tenantB),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      status: 429,
+      response: {
+        statusCode: 429,
+        message: expect.stringMatching(
+          /^La clínica alcanzó el máximo de 0 correos/,
+        ) as string,
+      },
+    });
+    expect(
+      await owner.emailOutbox.count({ where: { tenantId: tenantB } }),
+    ).toBe(before);
   });
 });

@@ -149,7 +149,21 @@ describe('Ajustes › Mensajes (e2e, DX-565)', () => {
   it('el catálogo: 6 mensajes con sus canales, variables y textos por defecto; solo español mientras la clínica no ofrezca inglés', async () => {
     const res = await as(api().get('/api/v1/message-templates')).expect(200);
     const body = res.body as CatalogBody;
+    const extra = res.body as {
+      syntaxHelp: string;
+      messages: { guardianUsesDefault: boolean }[];
+    };
     expect(body.languages).toEqual(['es']);
+    // Revisión H7/H13: lo que la web explica sin texto fijo.
+    expect(extra.syntaxHelp).toContain('no se pueden escribir como texto');
+    expect(extra.messages.map((m) => m.guardianUsesDefault)).toEqual([
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+    ]);
     expect(body.messages.map((m) => m.key)).toEqual([
       'appointment-reminder',
       'appointment-confirmation',
@@ -264,6 +278,13 @@ describe('Ajustes › Mensajes (e2e, DX-565)', () => {
       'body',
       MESSAGE_EMAIL_LINKS_MESSAGE,
     );
+    // Revisión H1: un enlace armado con una variable vacía.
+    await bad(
+      REMINDER,
+      { subject: 'Hola', body: 'Paga en pagos{direccion}.com' },
+      'body',
+      MESSAGE_EMAIL_LINKS_MESSAGE,
+    );
     await bad(
       REMINDER,
       { subject: 'a'.repeat(151), body: 'Hola' },
@@ -316,7 +337,8 @@ describe('Ajustes › Mensajes (e2e, DX-565)', () => {
       channel: 'WHATSAPP',
       subject: null,
       html: null,
-      text: 'Hola Ana: https://ejemplo.dentalix.app/vista-previa',
+      // RFC 2606: el enlace de ejemplo nunca puede ser el de una clínica.
+      text: 'Hola Ana: https://example.com/dentalix/vista-previa',
     });
     await as(api().post(`${REMINDER}/preview`))
       .send({ subject: 'x', body: 'Hola {nombre}' })
@@ -342,6 +364,7 @@ describe('Ajustes › Mensajes (e2e, DX-565)', () => {
         subject: 'Tu cita en {clinica}',
         body: 'Hola {paciente}\n\nTe esperamos el {fecha} a las {hora}.',
         updatedByName: expect.any(String) as string,
+        invalid: null,
       },
     });
     const [created] = await events();
@@ -381,6 +404,12 @@ describe('Ajustes › Mensajes (e2e, DX-565)', () => {
     expect(updated.action).toBe('UPDATE');
     expect(updated.metadata).toMatchObject({
       reason: 'MESSAGE_TEMPLATE_UPDATED',
+      // Revisión H4: qué mensaje, también en un UPDATE.
+      messageTemplate: {
+        key: 'appointment-reminder',
+        channel: 'EMAIL',
+        language: 'es',
+      },
       changedFields: ['body', 'bodyHash', 'bodyLength'],
       configChange: {
         before: { bodyLength: 54 },
@@ -444,6 +473,15 @@ describe('Ajustes › Mensajes (e2e, DX-565)', () => {
       action: 'VIEW',
       actorUserId: clinic.adminUserId,
       locationId: null,
+      // Revisión H5: qué mensaje e idioma, y que era el borrador.
+      metadata: {
+        messageTemplate: {
+          key: 'appointment-reminder',
+          channel: 'EMAIL',
+          language: 'es',
+          draft: true,
+        },
+      },
     });
 
     const again = await as(api().post(`${REMINDER}/test`))
@@ -540,6 +578,11 @@ describe('Ajustes › Mensajes (e2e, DX-565)', () => {
     expect(reset).toHaveLength(1);
     expect(reset[0]).toMatchObject({ action: 'DELETE', locationId: null });
     expect(reset[0].metadata).toMatchObject({
+      messageTemplate: {
+        key: 'appointment-reminder',
+        channel: 'EMAIL',
+        language: 'es',
+      },
       configChange: {
         before: {
           messageKey: 'appointment-reminder',
@@ -553,6 +596,39 @@ describe('Ajustes › Mensajes (e2e, DX-565)', () => {
     const count = (await events()).length;
     await as(api().delete(REMINDER)).expect(200);
     expect(await events()).toHaveLength(count);
+  });
+
+  it('revisión H14: un texto guardado que ya no es válido sale marcado en el GET (y no se envía)', async () => {
+    const owner = await raw.user.findFirstOrThrow({
+      where: { id: clinic.adminUserId },
+      select: { id: true },
+    });
+    // Un texto que el catálogo de hoy no admite (p. ej. guardado antes de un cambio).
+    await raw.messageTemplate.create({
+      data: {
+        tenantId: clinic.tenantId,
+        key: 'quote-follow-up',
+        channel: 'EMAIL',
+        language: 'es',
+        subject: 'Hola',
+        body: 'Tu cita del {fecha}',
+        updatedById: owner.id,
+      },
+    });
+    try {
+      const catalog = (
+        await as(api().get('/api/v1/message-templates')).expect(200)
+      ).body as CatalogBody;
+      expect(
+        channelOf(catalog, 'quote-follow-up', 'EMAIL').languages[0].custom,
+      ).toMatchObject({
+        invalid: '{fecha} no se puede usar en el seguimiento del presupuesto.',
+      });
+    } finally {
+      await raw.messageTemplate.deleteMany({
+        where: { tenantId: clinic.tenantId, key: 'quote-follow-up' },
+      });
+    }
   });
 
   it('restablecer vale para un idioma que la clínica ya retiró; guardarlo, no', async () => {
