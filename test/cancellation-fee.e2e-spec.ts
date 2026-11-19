@@ -649,6 +649,9 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
       expect(body.text).toContain('avísanos con al menos 24 h de antelación');
       expect(body.text).toContain(POLICY_TEXT);
       expect(body.html).toContain('Política de cancelación');
+      // DX-565 (H3): el enlace de ejemplo, en un dominio reservado.
+      expect(body.html).toContain('https://example.com/dentalix/vista-previa');
+      expect(body.html).not.toContain('ejemplo.dentalix.app');
       await api(a, tokens.RECEPTION!)
         .get(`/locations/${principal}/cancellation-policy/email-preview`)
         .expect(403);

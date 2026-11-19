@@ -101,7 +101,9 @@ export class CreateCancellationPolicyVersionUseCase {
 export const PREVIEW_SAMPLE = {
   patientName: 'Ana',
   providerName: 'Dra. Laura Gómez',
-  confirmUrl: 'https://ejemplo.dentalix.app/confirmar/vista-previa',
+  // DX-565 (H3): un dominio reservado (RFC 2606), nunca un subdominio que
+  // otra clínica podría registrar.
+  confirmUrl: 'https://example.com/dentalix/vista-previa',
 } as const;
 
 /**
