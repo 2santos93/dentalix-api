@@ -238,6 +238,7 @@ describe('Enlace de acceso del paciente (DX-101, e2e)', () => {
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await resetDatabase(raw);
     dropParRates = await seedParProviderRates(raw);
 

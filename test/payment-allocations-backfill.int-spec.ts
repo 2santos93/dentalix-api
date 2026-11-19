@@ -226,6 +226,7 @@ describe('backfill de imputaciones de abonos (DX-051, R17)', () => {
     }).compile();
     app = moduleRef.createNestApplication();
     await app.init();
+    await app.listen(0, '127.0.0.1');
     tenantContext = app.get(TenantContextService, { strict: false });
     deps = {
       repo: app.get<PlanAllocationRepository>(PLAN_ALLOCATION_REPOSITORY, {

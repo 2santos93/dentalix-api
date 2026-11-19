@@ -559,6 +559,7 @@ describe('Cargo por inasistencia y política en el enlace (DX-291)', () => {
       docsApp.setGlobalPrefix('api/v1');
       setupSwagger(docsApp);
       await docsApp.init();
+      await docsApp.listen(0, '127.0.0.1');
     });
 
     afterAll(async () => {
