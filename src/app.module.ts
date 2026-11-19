@@ -81,6 +81,7 @@ import { OrthodonticsModule } from './modules/orthodontics/orthodontics.module';
 import { LabOrdersModule } from './modules/lab-orders/lab-orders.module';
 import { PostOpChecksModule } from './modules/post-op-checks/post-op-checks.module';
 import { LeadsModule } from './modules/leads/leads.module';
+import { PatientSourcesModule } from './modules/patient-sources/patient-sources.module';
 import { CommissionsModule } from './modules/commissions/commissions.module';
 import { PatientDocumentsModule } from './modules/patient-documents/patient-documents.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
@@ -212,6 +213,8 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     PostOpChecksModule,
     // DX-556: prospectos (bandeja comercial antes de ser paciente).
     LeadsModule,
+    // DX-172: «¿Cómo nos conoció?» y la captación del paciente.
+    PatientSourcesModule,
     CommissionsModule,
     PatientDocumentsModule,
     // DX-107: importación de pacientes desde CSV/XLSX (trabajo en la cola).

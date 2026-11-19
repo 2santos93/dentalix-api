@@ -159,6 +159,8 @@ export class PrismaAuthRepository implements AuthRepository {
       await tx.$executeRaw`SELECT public.dx_recall_seed_default_types(${tenant.id}::uuid)`;
       // DX-377: y con sus 4 medios de pago iniciales (uno por método antiguo).
       await seedInitialPaymentMethods(tx, tenant.id);
+      // DX-172: y con sus fuentes de captación («¿Cómo nos conoció?»).
+      await tx.$queryRaw`SELECT public.dx_patient_sources_ensure(${tenant.id}::uuid)`;
       // DX-359: el alta de la clínica y su ADMIN, auditada en esta misma
       // transacción (el GUC de tenant ya es el de la clínica nueva).
       await writeAuditEvent(

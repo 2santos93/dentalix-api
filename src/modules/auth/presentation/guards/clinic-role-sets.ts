@@ -653,3 +653,12 @@ export const LEAD_ROLES: ClinicRole[] = [
 ];
 // Ajustes de prospectos (retención) y motivos propios: solo ADMIN.
 export const LEAD_ADMIN_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// «¿Cómo nos conoció?» (DX-172). El catálogo lo lee quien da de alta o edita
+// pacientes (PATIENT_ROLES); lo cambia solo gestión. El informe de captación
+// (pacientes nuevos y lo cobrado por fuente): ADMIN, o quien tenga
+// FINANCIAL_REPORTS_VIEW (DX-090, `@AllowPermissions` en la ruta). El CSV,
+// solo ADMIN.
+export const PATIENT_SOURCE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+export const ACQUISITION_REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+export const ACQUISITION_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

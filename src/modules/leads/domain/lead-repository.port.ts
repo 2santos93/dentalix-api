@@ -115,6 +115,8 @@ export interface LockedLead {
   phone: string | null;
   phoneE164: string | null;
   fullName: string;
+  /** DX-172: decide la fuente del paciente que crea la conversión. */
+  channel: LeadChannelCode;
   convertedPatientId: string | null;
   anonymizedAt: Date | null;
 }
