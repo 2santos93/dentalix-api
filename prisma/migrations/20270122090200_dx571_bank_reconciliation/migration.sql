@@ -200,6 +200,12 @@ CREATE TABLE "bank_reconciliation_matches" (
     "tenantId" UUID NOT NULL,
     "movementId" UUID NOT NULL,
     "paymentId" UUID NOT NULL,
+    -- Copias del movimiento (cuenta y día) y del abono (paidAt) que pone el
+    -- trigger al insertar: las listas y el emparejado leen los emparejados
+    -- activos por RANGO (cuenta + día, o paidAt) y no por miles de ids.
+    "bankAccountId" UUID NOT NULL,
+    "bookedOn" DATE NOT NULL,
+    "paidAt" TIMESTAMP(3) NOT NULL,
     "kind" "BankReconciliationMatchKind" NOT NULL,
     "matchedById" UUID NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -230,6 +236,12 @@ CREATE UNIQUE INDEX "bank_reconciliation_matches_movement_active_key"
   ON "bank_reconciliation_matches"("tenantId", "movementId") WHERE "endedAt" IS NULL;
 CREATE UNIQUE INDEX "bank_reconciliation_matches_payment_active_key"
   ON "bank_reconciliation_matches"("tenantId", "paymentId") WHERE "endedAt" IS NULL;
+-- Los activos de una cuenta en un período (listas, emparejado) y los activos
+-- de los abonos de un rango de paidAt (abonos sin movimiento). Parciales.
+CREATE INDEX "bank_reconciliation_matches_account_booked_active_idx"
+  ON "bank_reconciliation_matches"("tenantId", "bankAccountId", "bookedOn") WHERE "endedAt" IS NULL;
+CREATE INDEX "bank_reconciliation_matches_paid_active_idx"
+  ON "bank_reconciliation_matches"("tenantId", "paidAt") WHERE "endedAt" IS NULL;
 -- Lados hijos de las FK (la historia completa).
 CREATE INDEX "bank_reconciliation_matches_movement_idx"
   ON "bank_reconciliation_matches"("tenantId", "movementId");
@@ -289,7 +301,9 @@ GRANT SELECT, INSERT, UPDATE ON "bank_reconciliation_matches" TO dentalix_app;
 REVOKE DELETE, TRUNCATE ON "bank_reconciliation_matches" FROM dentalix_app;
 
 -- ---------------------------------------------------------------------------
--- Guarda del emparejado: hora del servidor (DX-226) al crear y al cerrar; en
+-- Guarda del emparejado: hora del servidor (DX-226) al crear y al cerrar; las
+-- copias de cuenta, día y paidAt salen del movimiento y del abono (nunca del
+-- cliente); en
 -- un UPDATE solo se cierra un emparejado ABIERTO (endedAt, endedById,
 -- endReason) y nada más cambia; un emparejado cerrado no se reabre. El
 -- movimiento y el abono tienen que ser de la misma moneda y el abono, vivo.
@@ -305,15 +319,15 @@ BEGIN
       RAISE EXCEPTION 'Un emparejado nace abierto (DX-571)'
         USING ERRCODE = 'check_violation';
     END IF;
-    IF NOT EXISTS (
-      SELECT 1
-        FROM public.bank_movements m
-        JOIN public.payments p
-          ON p."tenantId" = m."tenantId" AND p."id" = NEW."paymentId"
-       WHERE m."tenantId" = NEW."tenantId" AND m."id" = NEW."movementId"
-         AND p."deletedAt" IS NULL
-         AND p."currency" = m."currency"
-    ) THEN
+    SELECT m."bankAccountId", m."bookedOn", p."paidAt"
+      INTO NEW."bankAccountId", NEW."bookedOn", NEW."paidAt"
+      FROM public.bank_movements m
+      JOIN public.payments p
+        ON p."tenantId" = m."tenantId" AND p."id" = NEW."paymentId"
+     WHERE m."tenantId" = NEW."tenantId" AND m."id" = NEW."movementId"
+       AND p."deletedAt" IS NULL
+       AND p."currency" = m."currency";
+    IF NOT FOUND THEN
       RAISE EXCEPTION 'El emparejado tiene que unir un movimiento y un abono vivo de la misma clínica y moneda (DX-571)'
         USING ERRCODE = 'check_violation';
     END IF;
@@ -329,6 +343,9 @@ BEGIN
      OR NEW."tenantId" IS DISTINCT FROM OLD."tenantId"
      OR NEW."movementId" IS DISTINCT FROM OLD."movementId"
      OR NEW."paymentId" IS DISTINCT FROM OLD."paymentId"
+     OR NEW."bankAccountId" IS DISTINCT FROM OLD."bankAccountId"
+     OR NEW."bookedOn" IS DISTINCT FROM OLD."bookedOn"
+     OR NEW."paidAt" IS DISTINCT FROM OLD."paidAt"
      OR NEW."kind" IS DISTINCT FROM OLD."kind"
      OR NEW."matchedById" IS DISTINCT FROM OLD."matchedById"
      OR NEW."createdAt" IS DISTINCT FROM OLD."createdAt"

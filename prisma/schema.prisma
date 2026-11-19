@@ -10258,16 +10258,21 @@ model BankMovement {
 /// en la migración 20270122090200: NO aceptes un diff de migrate dev que los
 /// declare completos). Trigger: solo se cierra un emparejado abierto.
 model BankReconciliationMatch {
-  id          String                            @id @default(uuid()) @db.Uuid
-  tenantId    String                            @db.Uuid
-  movementId  String                            @db.Uuid
-  paymentId   String                            @db.Uuid
-  kind        BankReconciliationMatchKind
-  matchedById String                            @db.Uuid
-  createdAt   DateTime                          @default(now())
-  endedAt     DateTime?
-  endedById   String?                           @db.Uuid
-  endReason   BankReconciliationMatchEndReason?
+  id            String                            @id @default(uuid()) @db.Uuid
+  tenantId      String                            @db.Uuid
+  movementId    String                            @db.Uuid
+  paymentId     String                            @db.Uuid
+  /// Copias que pone el trigger (del movimiento y del abono) para leer los
+  /// activos por rango: cuenta + día, o paidAt.
+  bankAccountId String                            @db.Uuid
+  bookedOn      DateTime                          @db.Date
+  paidAt        DateTime
+  kind          BankReconciliationMatchKind
+  matchedById   String                            @db.Uuid
+  createdAt     DateTime                          @default(now())
+  endedAt       DateTime?
+  endedById     String?                           @db.Uuid
+  endReason     BankReconciliationMatchEndReason?
 
   tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   movement  BankMovement @relation(fields: [tenantId, movementId], references: [tenantId, id], onDelete: Restrict, map: "bank_reconciliation_matches_movement_fkey")

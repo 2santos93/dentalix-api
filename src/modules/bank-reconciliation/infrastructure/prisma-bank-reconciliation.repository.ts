@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import {
   BankReconciliationMatchEndReason,
   BankReconciliationMatchKind,
+  PaymentAdjustmentType,
   PaymentMethodKind,
   PaymentReportStatus,
   Prisma,
@@ -191,6 +192,124 @@ export interface CandidatesView {
 }
 
 const LONG_TX = { timeout: 60_000, maxWait: 10_000 } as const;
+
+interface MovementRow {
+  id: string;
+  bookedOn: Date;
+  referenceNormalized: string | null;
+  amount: Prisma.Decimal;
+}
+
+interface ActiveMatchRow {
+  id: string;
+  kind: BankReconciliationMatchKind;
+  createdAt: Date;
+  movementId: string;
+  paymentId: string;
+  bookedOn: Date;
+}
+
+interface PaymentRow {
+  id: string;
+  paidAt: Date;
+  locationId: string;
+  referenceNormalized: string | null;
+  amount: Prisma.Decimal;
+  adjustments: { type: PaymentAdjustmentType; amount: string }[];
+}
+
+/**
+ * Las consultas del emparejado y de las listas, exportadas para que
+ * test/bank-reconciliation.int-spec.ts explique (EXPLAIN) la SQL REAL. Cada
+ * una es un rango sobre UN índice de UNA tabla; el resto se cruza en memoria
+ * (por conjuntos, sin una consulta por fila).
+ */
+/**
+ * Un instante como la hora de pared UTC que guardan las columnas
+ * `timestamp(3)` (sin zona). Va como texto con `::timestamp`: un `Date` se
+ * enviaría como timestamptz y la comparación convertiría la COLUMNA (con la
+ * zona de la sesión), y el índice ya no serviría.
+ */
+function utcWall(instant: Date): string {
+  return instant.toISOString().slice(0, 23).replace('T', ' ');
+}
+
+export function movementsInPeriodSql(
+  tenantId: string,
+  accountId: string,
+  from: string,
+  to: string,
+): Prisma.Sql {
+  // bank_movements_account_booked_idx (tenantId, bankAccountId, bookedOn).
+  return Prisma.sql`
+    SELECT m."id", m."bookedOn", m."referenceNormalized", m."amount"
+      FROM "bank_movements" m
+     WHERE m."tenantId" = ${tenantId}::uuid
+       AND m."bankAccountId" = ${accountId}::uuid
+       AND m."bookedOn" >= ${from}::date
+       AND m."bookedOn" <= ${to}::date`;
+}
+
+export function activeMatchesInPeriodSql(
+  tenantId: string,
+  accountId: string,
+  from: string,
+  to: string,
+): Prisma.Sql {
+  // bank_reconciliation_matches_account_booked_active_idx (parcial, activos).
+  return Prisma.sql`
+    SELECT x."id", x."kind", x."createdAt", x."movementId", x."paymentId", x."bookedOn"
+      FROM "bank_reconciliation_matches" x
+     WHERE x."tenantId" = ${tenantId}::uuid
+       AND x."bankAccountId" = ${accountId}::uuid
+       AND x."bookedOn" >= ${from}::date
+       AND x."bookedOn" <= ${to}::date
+       AND x."endedAt" IS NULL`;
+}
+
+export function activeMatchedPaymentsSql(
+  tenantId: string,
+  fromInstant: Date,
+  toInstant: Date,
+): Prisma.Sql {
+  // bank_reconciliation_matches_paid_active_idx (parcial, activos): los
+  // abonos ya conciliados del rango, en cualquier cuenta.
+  return Prisma.sql`
+    SELECT x."paymentId"
+      FROM "bank_reconciliation_matches" x
+     WHERE x."tenantId" = ${tenantId}::uuid
+       AND x."paidAt" >= ${utcWall(fromInstant)}::timestamp
+       AND x."paidAt" < ${utcWall(toInstant)}::timestamp
+       AND x."endedAt" IS NULL`;
+}
+
+export function paymentsInRangeSql(
+  tenantId: string,
+  methodIds: string[],
+  currency: string,
+  fromInstant: Date,
+  toInstant: Date,
+): Prisma.Sql {
+  // payments_tenantId_paidAt_active_idx (tenantId, paidAt) WHERE deletedAt
+  // IS NULL, o payments_tenant_method_reference_idx por el medio.
+  return Prisma.sql`
+    SELECT p."id", p."paidAt", p."locationId", p."referenceNormalized", p."amount",
+           -- Sus ajustes por medio de pago (DX-516): subconsulta correlada por
+           -- el único (tenantId, paymentId, position), sin otra ida a la BD.
+           COALESCE((SELECT json_agg(json_build_object('type', a."type", 'amount', a."amount"::text)
+                                      ORDER BY a."position")
+                       FROM "payment_adjustments" a
+                      WHERE a."tenantId" = p."tenantId" AND a."paymentId" = p."id"), '[]'::json)
+             AS "adjustments"
+      FROM "payments" p
+     WHERE p."tenantId" = ${tenantId}::uuid
+       AND p."deletedAt" IS NULL
+       AND p."paymentMethodId" = ANY(${methodIds}::uuid[])
+       AND p."currency" = ${currency}
+       AND p."paidAt" >= ${utcWall(fromInstant)}::timestamp
+       AND p."paidAt" < ${utcWall(toInstant)}::timestamp`;
+}
+
 const MAX_CANDIDATES = 20;
 const MAX_REPORT_CANDIDATES = 10;
 
@@ -203,6 +322,13 @@ function isUniqueViolation(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === 'P2002'
+  );
+}
+
+function takenMethod(): BankReconciliationConflict {
+  return new BankReconciliationConflict(
+    'BANK_PAYMENT_METHOD_TAKEN',
+    'Uno de los medios de pago ya está en otra cuenta: cada medio liquida en una sola cuenta.',
   );
 }
 
@@ -368,11 +494,16 @@ export class PrismaBankReconciliationRepository {
     });
   }
 
-  /** Medios válidos: de la clínica y que no son efectivo. */
+  /**
+   * Medios válidos: de la clínica, que no son efectivo y que no liquidan ya
+   * en OTRA cuenta (`exceptAccountId`: la que se edita). El único por medio
+   * es la red ante dos altas a la vez.
+   */
   private async assertMethods(
     tx: Prisma.TransactionClient,
     tenantId: string,
     ids: string[],
+    exceptAccountId?: string,
   ): Promise<void> {
     if (ids.length === 0) return;
     const found = await tx.clinicPaymentMethod.findMany({
@@ -388,6 +519,15 @@ export class PrismaBankReconciliationRepository {
         'Elige medios de pago de la clínica que lleguen al banco (no efectivo).',
       );
     }
+    const taken = await tx.bankAccountPaymentMethod.findFirst({
+      where: {
+        tenantId,
+        paymentMethodId: { in: ids },
+        ...(exceptAccountId ? { bankAccountId: { not: exceptAccountId } } : {}),
+      },
+      select: { paymentMethodId: true },
+    });
+    if (taken) throw takenMethod();
   }
 
   private async assertCurrency(tx: Prisma.TransactionClient, code: string) {
@@ -408,19 +548,18 @@ export class PrismaBankReconciliationRepository {
     const meta = JSON.stringify(
       (error as Prisma.PrismaClientKnownRequestError).meta ?? {},
     );
+    // Dos únicos posibles: el nombre (tenantId, name) o el medio en otra
+    // cuenta (tenantId, paymentMethodId), que ya se comprueba antes.
     if (
-      meta.includes('paymentMethodId') ||
-      meta.includes('bank_account_payment_methods')
+      meta.includes('"name"') ||
+      meta.includes('bank_accounts_tenant_name_key')
     ) {
       return new BankReconciliationConflict(
-        'BANK_PAYMENT_METHOD_TAKEN',
-        'Uno de los medios de pago ya está en otra cuenta: cada medio liquida en una sola cuenta.',
+        'BANK_ACCOUNT_NAME_TAKEN',
+        'Ya hay una cuenta con ese nombre.',
       );
     }
-    return new BankReconciliationConflict(
-      'BANK_ACCOUNT_NAME_TAKEN',
-      'Ya hay una cuenta con ese nombre.',
-    );
+    return takenMethod();
   }
 
   async createAccount(
@@ -509,7 +648,7 @@ export class PrismaBankReconciliationRepository {
           },
         });
         if (patch.paymentMethodIds !== undefined) {
-          await this.assertMethods(tx, tenantId, patch.paymentMethodIds);
+          await this.assertMethods(tx, tenantId, patch.paymentMethodIds, id);
           // Configuración: se reemplaza (HARD_DELETE_ALLOWLIST, auditado como
           // UPDATE de la cuenta).
           // eslint-disable-next-line no-restricted-syntax -- DX-571: qué medios liquidan en la cuenta es configuración sin datos de pacientes (HARD_DELETE_ALLOWLIST)
@@ -647,6 +786,8 @@ export class PrismaBankReconciliationRepository {
       }
 
       let pairs: MatchPair[] = [];
+      let movements: MovementForMatch[] = [];
+      let payments: { id: string; paidAt: Date }[] = [];
       if (periodFrom !== null && periodTo !== null) {
         const old = await this.unmatchedMovements(
           tx,
@@ -655,7 +796,7 @@ export class PrismaBankReconciliationRepository {
           periodFrom,
           periodTo,
         );
-        const movements: MovementForMatch[] = [
+        movements = [
           ...old,
           ...fresh.map((m) => ({
             id: m.id,
@@ -664,14 +805,15 @@ export class PrismaBankReconciliationRepository {
             amountCents: m.amountCents,
           })),
         ];
-        const payments = await this.unmatchedPayments(
+        const candidates = await this.unmatchedPayments(
           tx,
           tenantId,
           account,
           addDays(periodFrom, -AUTO_MATCH_WINDOW_DAYS),
           addDays(periodTo, AUTO_MATCH_WINDOW_DAYS),
         );
-        pairs = autoMatch(movements, payments, {
+        payments = candidates;
+        pairs = autoMatch(movements, candidates, {
           toleranceCents: account.toleranceCents,
           windowDays: AUTO_MATCH_WINDOW_DAYS,
         });
@@ -717,7 +859,10 @@ export class PrismaBankReconciliationRepository {
       await this.insertMatches(
         tx,
         tenantId,
+        input.accountId,
         pairs,
+        movements,
+        payments,
         BankReconciliationMatchKind.AUTO,
         input.userId,
       );
@@ -743,20 +888,33 @@ export class PrismaBankReconciliationRepository {
     }, LONG_TX);
   }
 
+  /**
+   * Inserta los emparejados en bloque. Cuenta, día y paidAt son copias que el
+   * trigger vuelve a poner desde el movimiento y el abono (las de aquí solo
+   * satisfacen el tipo).
+   */
   private async insertMatches(
     tx: Prisma.TransactionClient,
     tenantId: string,
+    accountId: string,
     pairs: MatchPair[],
+    movements: readonly MovementForMatch[],
+    payments: readonly { id: string; paidAt: Date }[],
     kind: BankReconciliationMatchKind,
     userId: string,
   ): Promise<void> {
     if (pairs.length === 0) return;
+    const bookedOf = new Map(movements.map((m) => [m.id, m.bookedOn]));
+    const paidAtOf = new Map(payments.map((p) => [p.id, p.paidAt]));
     await tx.bankReconciliationMatch.createMany({
       data: pairs.map((p) => ({
         id: randomUUID(),
         tenantId,
         movementId: p.movementId,
         paymentId: p.paymentId,
+        bankAccountId: accountId,
+        bookedOn: dateOf(bookedOf.get(p.movementId)!),
+        paidAt: paidAtOf.get(p.paymentId)!,
         kind,
         matchedById: userId,
       })),
@@ -796,7 +954,10 @@ export class PrismaBankReconciliationRepository {
       await this.insertMatches(
         tx,
         tenantId,
+        accountId,
         pairs,
+        movements,
+        payments,
         BankReconciliationMatchKind.AUTO,
         userId,
       );
@@ -806,28 +967,17 @@ export class PrismaBankReconciliationRepository {
 
   // ------------------------------------------------------------ candidatos
 
-  /** Movimientos de la cuenta sin emparejado activo en [from, to]. */
-  private async unmatchedMovements(
+  /** Movimientos de la cuenta en [from, to], con o sin emparejado. */
+  private async movementsInPeriod(
     tx: Prisma.TransactionClient,
     tenantId: string,
     accountId: string,
     from: string,
     to: string,
   ): Promise<MovementForMatch[]> {
-    const rows = await tx.bankMovement.findMany({
-      where: {
-        tenantId,
-        bankAccountId: accountId,
-        bookedOn: { gte: dateOf(from), lte: dateOf(to) },
-        matches: { none: { endedAt: null } },
-      },
-      select: {
-        id: true,
-        bookedOn: true,
-        referenceNormalized: true,
-        amount: true,
-      },
-    });
+    const rows = await tx.$queryRaw<MovementRow[]>(
+      movementsInPeriodSql(tenantId, accountId, from, to),
+    );
     return rows.map((r) => ({
       id: r.id,
       bookedOn: day(r.bookedOn),
@@ -836,11 +986,48 @@ export class PrismaBankReconciliationRepository {
     }));
   }
 
+  /** Emparejados ACTIVOS de la cuenta cuyo movimiento cae en [from, to]. */
+  private activeMatchesInPeriod(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    accountId: string,
+    from: string,
+    to: string,
+  ): Promise<ActiveMatchRow[]> {
+    return tx.$queryRaw<ActiveMatchRow[]>(
+      activeMatchesInPeriodSql(tenantId, accountId, from, to),
+    );
+  }
+
+  /** Movimientos de la cuenta sin emparejado activo en [from, to]. */
+  private async unmatchedMovements(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    accountId: string,
+    from: string,
+    to: string,
+  ): Promise<MovementForMatch[]> {
+    const movements = await this.movementsInPeriod(
+      tx,
+      tenantId,
+      accountId,
+      from,
+      to,
+    );
+    const matched = new Set(
+      (await this.activeMatchesInPeriod(tx, tenantId, accountId, from, to)).map(
+        (m) => m.movementId,
+      ),
+    );
+    return movements.filter((m) => !matched.has(m.id));
+  }
+
   /**
    * Abonos vivos sin emparejado activo, de un medio de la cuenta y su moneda,
    * cuyo día (en la zona de su sede) cae en [from, to]. Se leen por un rango
    * de paidAt un día más ancho a cada lado (cubre cualquier zona) y se
-   * recortan con la zona de cada sede, leída en UNA consulta.
+   * recortan con la zona de cada sede, leída en UNA consulta. Sus ajustes por
+   * medio de pago y sus emparejados, cada uno en UNA consulta por conjunto.
    */
   private async unmatchedPayments(
     tx: Prisma.TransactionClient,
@@ -848,39 +1035,49 @@ export class PrismaBankReconciliationRepository {
     account: { currency: string; methodIds: string[] },
     from: string,
     to: string,
-  ): Promise<(PaymentForMatch & { locationId: string })[]> {
+  ): Promise<(PaymentForMatch & { locationId: string; paidAt: Date })[]> {
     if (account.methodIds.length === 0) return [];
-    const rows = await tx.payment.findMany({
-      where: {
+    const fromInstant = dateOf(addDays(from, -1));
+    const toInstant = dateOf(addDays(to, 2));
+    const rows = await tx.$queryRaw<PaymentRow[]>(
+      paymentsInRangeSql(
         tenantId,
-        deletedAt: null,
-        paymentMethodId: { in: account.methodIds },
-        currency: account.currency,
-        paidAt: { gte: dateOf(addDays(from, -1)), lt: dateOf(addDays(to, 2)) },
-        bankMatches: { none: { endedAt: null } },
-      },
-      select: {
-        id: true,
-        paidAt: true,
-        locationId: true,
-        referenceNormalized: true,
-        amount: true,
-        methodAdjustments: { select: { type: true, amount: true } },
-      },
-    });
+        account.methodIds,
+        account.currency,
+        fromInstant,
+        toInstant,
+      ),
+    );
+    const matched = new Set(
+      (
+        await tx.$queryRaw<{ paymentId: string }[]>(
+          activeMatchedPaymentsSql(tenantId, fromInstant, toInstant),
+        )
+      ).map((m) => m.paymentId),
+    );
+    const open = rows.filter((r) => !matched.has(r.id));
     const zones = await loadLocationZones(tx, tenantId, [
-      ...new Set(rows.map((r) => r.locationId)),
+      ...new Set(open.map((r) => r.locationId)),
     ]);
-    const out: (PaymentForMatch & { locationId: string })[] = [];
-    for (const r of rows) {
+    const out: (PaymentForMatch & { locationId: string; paidAt: Date })[] = [];
+    for (const r of open) {
       const paidOn = civilDateIn(r.paidAt, zones.zoneOf(r.locationId));
       if (paidOn < from || paidOn > to) continue;
       out.push({
         id: r.id,
         paidOn,
         locationId: r.locationId,
+        paidAt: r.paidAt,
         referenceNormalized: r.referenceNormalized,
-        collectedCents: Math.round(collectedOf(r) * 100),
+        collectedCents: Math.round(
+          collectedOf({
+            amount: r.amount,
+            methodAdjustments: r.adjustments.map((x) => ({
+              type: x.type,
+              amount: new Prisma.Decimal(x.amount),
+            })),
+          }) * 100,
+        ),
       });
     }
     return out;
@@ -896,32 +1093,15 @@ export class PrismaBankReconciliationRepository {
     to: string,
   ) {
     const account = await this.accountForWrite(tx, tenantId, accountId);
-    const movements = await this.unmatchedMovements(
-      tx,
-      tenantId,
-      accountId,
-      from,
-      to,
+    const all = await this.movementsInPeriod(tx, tenantId, accountId, from, to);
+    const matches = (
+      await this.activeMatchesInPeriod(tx, tenantId, accountId, from, to)
+    ).sort(
+      (a, b) =>
+        a.bookedOn.getTime() - b.bookedOn.getTime() || a.id.localeCompare(b.id),
     );
-    const matches = await tx.bankReconciliationMatch.findMany({
-      where: {
-        tenantId,
-        endedAt: null,
-        movement: {
-          bankAccountId: accountId,
-          bookedOn: { gte: dateOf(from), lte: dateOf(to) },
-        },
-      },
-      select: {
-        id: true,
-        kind: true,
-        createdAt: true,
-        movementId: true,
-        paymentId: true,
-        movement: { select: { bookedOn: true } },
-      },
-      orderBy: [{ movement: { bookedOn: 'asc' } }, { id: 'asc' }],
-    });
+    const matchedIds = new Set(matches.map((m) => m.movementId));
+    const movements = all.filter((m) => !matchedIds.has(m.id));
     const payments = await this.unmatchedPayments(
       tx,
       tenantId,
@@ -1288,7 +1468,12 @@ export class PrismaBankReconciliationRepository {
       return await this.prisma.runWithTenant(async (tx) => {
         const movement = await tx.bankMovement.findFirst({
           where: { tenantId, id: movementId },
-          select: { id: true, bankAccountId: true, currency: true },
+          select: {
+            id: true,
+            bankAccountId: true,
+            currency: true,
+            bookedOn: true,
+          },
         });
         if (!movement) throw new BankMovementNotFoundError();
         await this.lockAccount(tx, movement.bankAccountId);
@@ -1299,7 +1484,12 @@ export class PrismaBankReconciliationRepository {
         );
         const payment = await tx.payment.findFirst({
           where: { tenantId, id: paymentId, deletedAt: null },
-          select: { id: true, currency: true, paymentMethodId: true },
+          select: {
+            id: true,
+            currency: true,
+            paymentMethodId: true,
+            paidAt: true,
+          },
         });
         if (!payment) throw new BankPaymentNotFoundError();
         if (
@@ -1341,6 +1531,10 @@ export class PrismaBankReconciliationRepository {
             tenantId,
             movementId,
             paymentId,
+            // Copias (el trigger las vuelve a poner desde el movimiento y el abono).
+            bankAccountId: movement.bankAccountId,
+            bookedOn: movement.bookedOn,
+            paidAt: payment.paidAt,
             kind: BankReconciliationMatchKind.MANUAL,
             matchedById: userId,
           },

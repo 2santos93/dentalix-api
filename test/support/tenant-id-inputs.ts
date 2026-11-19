@@ -212,10 +212,14 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // DX-571: el medio de pago de otra clínica en la cuenta de conciliación
   // (409 BANK_PAYMENT_METHOD_INVALID, la cuenta intacta) y el movimiento o el
   // abono de otra clínica al emparejar a mano (404, nada emparejado).
-  'POST /bank-reconciliation/accounts body.paymentMethodIds[]': 'bank-reconciliation.e2e-spec.ts',
-  'PATCH /bank-reconciliation/accounts/:id body.paymentMethodIds[]': 'bank-reconciliation.e2e-spec.ts',
-  'POST /bank-reconciliation/matches body.movementId': 'bank-reconciliation.e2e-spec.ts',
-  'POST /bank-reconciliation/matches body.paymentId': 'bank-reconciliation.e2e-spec.ts',
+  'POST /bank-reconciliation/accounts body.paymentMethodIds[]':
+    'bank-reconciliation.e2e-spec.ts',
+  'PATCH /bank-reconciliation/accounts/:id body.paymentMethodIds[]':
+    'bank-reconciliation.e2e-spec.ts',
+  'POST /bank-reconciliation/matches body.movementId':
+    'bank-reconciliation.e2e-spec.ts',
+  'POST /bank-reconciliation/matches body.paymentId':
+    'bank-reconciliation.e2e-spec.ts',
   // DX-172: la fuente y el referente de otra clínica en el alta y la edición
   // (400, el paciente intacto).
   'POST /patients body.sourceId': 'patient-acquisition.e2e-spec.ts',
