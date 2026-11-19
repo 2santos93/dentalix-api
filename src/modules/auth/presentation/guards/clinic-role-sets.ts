@@ -666,3 +666,14 @@ export const LEAD_ADMIN_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 export const PATIENT_SOURCE_WRITE_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 export const ACQUISITION_REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 export const ACQUISITION_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// «Profesionales» e «Inasistencias» (DX-304): ADMIN o quien tenga
+// FINANCIAL_REPORTS_VIEW (DX-090, `@AllowPermissions` en cada ruta) ve toda la
+// clínica; un DENTIST, solo su fila y las citas de su agenda (lo acota el caso
+// de uso). Recepción y asistente, no. El CSV de inasistencias lleva nombres
+// de pacientes: solo ADMIN (NO_SHOWS_CSV_ROLES).
+export const PROFESSIONAL_REPORT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];
+export const NO_SHOWS_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

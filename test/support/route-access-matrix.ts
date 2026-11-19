@@ -1031,6 +1031,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /receivables/reminders': BILLING,
   'PUT /receivables/reminder-policy': ADMIN_ONLY,
   'GET /receivables/aging.csv': ADMIN_ONLY,
+  // DX-304: los totales por tramo de la pestaña «Cartera», en CSV.
+  'GET /receivables/aging/summary.csv': ADMIN_ONLY,
   // DX-399: cobrado sin imputar / a cuenta (lista de abonos de muchos
   // pacientes): ADMIN y recepción, también el CSV (sin teléfonos).
   'GET /reports/unallocated-payments': orPermission(
@@ -1097,6 +1099,23 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-567: producción agendada y previsión del mes. ADMIN y
   // FINANCIAL_REPORTS_VIEW ven la clínica; DENTIST, solo lo suyo (lo acota el
   // caso de uso); recepción y asistente, nada. La lista lleva pacientes.
+  // DX-304: «Profesionales» e «Inasistencias». ADMIN y FINANCIAL_REPORTS_VIEW
+  // ven la clínica; DENTIST, solo su fila y su agenda (lo acota el caso de
+  // uso); recepción y asistente, nada. El CSV de inasistencias (pacientes),
+  // solo ADMIN.
+  'GET /reports/professional-productivity': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/professional-productivity.csv': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/no-shows': orPermission(
+    roles('ADMIN', 'DENTIST'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/no-shows.csv': ADMIN_ONLY,
   'GET /reports/scheduled-production': orPermission(
     roles('ADMIN', 'DENTIST'),
     'FINANCIAL_REPORTS_VIEW',

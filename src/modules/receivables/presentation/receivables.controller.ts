@@ -50,7 +50,10 @@ import { TenantContextService } from '../../../shared/tenancy/tenant-context.ser
 import { Audit } from '../../audit/presentation/audit.decorator';
 import { GetReceivablesAgingUseCase } from '../application/use-cases/get-receivables-aging.use-case';
 import { ListCreditBalancesUseCase } from '../application/use-cases/list-credit-balances.use-case';
-import { toReceivablesCsv } from '../application/receivables-csv';
+import {
+  toReceivablesCsv,
+  toReceivablesSummaryCsv,
+} from '../application/receivables-csv';
 import { CreditBalancesQueryDto } from './dto/credit-balances-query.dto';
 import { CreditBalancesPageDto } from './dto/credit-balances.dto';
 import {
@@ -301,6 +304,61 @@ export class ReceivablesController {
       },
       ctx,
     );
+  }
+
+  // DX-304: CSV de la pestaña «Cartera» de Reportes. Solo los totales por
+  // moneda y tramo (sin pacientes), pero sale de la clínica: solo ADMIN y
+  // auditado como EXPORT, como la lista.
+  @Audit({
+    action: 'EXPORT',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_AGING_SUMMARY',
+  })
+  @Roles(...RECEIVABLES_EXPORT_ROLES)
+  @RolesDeniedMessage(RECEIVABLES_EXPORT_FORBIDDEN_MESSAGE)
+  @Get('aging/summary.csv')
+  @ApiOperation({
+    summary: 'Totales de la cartera por antigüedad en CSV, sin pacientes',
+    description:
+      'Los `totals` de GET /receivables/aging/summary con los mismos filtros: una línea por moneda con deudores, deuda, tramos (por vencer, 0–30, 31–60, 61–90, >90 días), saldo a favor y neto; la fecha y la sede en la cabecera. Sin pacientes ni teléfonos. Solo ADMIN; cada descarga deja un evento EXPORT. UTF-8 con BOM; celdas protegidas contra fórmulas.',
+  })
+  @ApiHeader(LOCATION_HEADER)
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'Fichero CSV',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @ApiBadRequestResponse({
+    description: 'Filtro inválido o sede que no es de esta clínica',
+  })
+  @ApiForbiddenResponse({ description: RECEIVABLES_EXPORT_FORBIDDEN_MESSAGE })
+  async summaryCsv(
+    @Query() query: ReceivablesAgingFiltersDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const page = await this.getAging.execute({
+      locationId: this.locationOf(query),
+      currency: query.currency,
+      minBalance: query.minBalance,
+      minAgeDays: query.minAgeDays,
+      providerId: query.providerId,
+      hasPromise: query.hasPromise,
+      page: 1,
+      pageSize: 1,
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="cartera-por-tramos-${page.asOf}.csv"`,
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    return toReceivablesSummaryCsv({
+      asOf: page.asOf,
+      locationName: page.scope.location?.name ?? null,
+      totals: page.totals,
+      paymentsWithoutRateCount: page.paymentsWithoutRateCount,
+      rateProviderTimedOut: page.rateProviderTimedOut,
+    });
   }
 
   @Audit({

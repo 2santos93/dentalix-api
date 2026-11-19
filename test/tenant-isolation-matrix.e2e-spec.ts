@@ -3042,6 +3042,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         ['/receivables/aging', '', 'providerId'],
         ['/receivables/aging.csv', '', 'providerId'],
         ['/receivables/aging/summary', '', 'providerId'],
+        // DX-304: los totales por tramo en CSV.
+        ['/receivables/aging/summary.csv', '', 'providerId'],
       ] as const
     ).flatMap(([route, range, providerField]): IsolationCase[] => [
       {
@@ -3059,7 +3061,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         queryIds: [providerField],
         status: 200,
         expectBody: (body, text) => {
-          if (route.endsWith('.csv')) {
+          if (route.endsWith('summary.csv')) {
+            // Cabecera sin ninguna línea de moneda.
+            expect(
+              text
+                .trim()
+                .split('\r\n')
+                .filter((l) => /^"[A-Z]{3}",/.test(l)),
+            ).toEqual([]);
+          } else if (route.endsWith('.csv')) {
             // Solo la cabecera del CSV.
             expect(text.trim().split('\r\n')).toHaveLength(1);
           } else {
@@ -3257,6 +3267,70 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           verb: 'get',
           path: () => `${route}?${range}${extra}providerId=${a.dentistUserId}`,
           queryIds: ['providerId'],
+          status: 200,
+          expectBody: empty,
+        },
+      ];
+    }),
+    // DX-304: «Profesionales» e «Inasistencias» (y sus CSV). Una sede de A
+    // es 403 (el mismo rechazo que una sede no permitida); el profesional de
+    // A da un informe sin filas.
+    ...(
+      [
+        '/reports/professional-productivity',
+        '/reports/professional-productivity.csv',
+        '/reports/no-shows',
+        '/reports/no-shows.csv',
+      ] as const
+    ).flatMap((route): IsolationCase[] => {
+      const range = `from=${day(-30)}&to=${day(0)}&`;
+      const empty = (body: unknown, text: string) => {
+        if (route === '/reports/professional-productivity.csv') {
+          expect(
+            text
+              .trim()
+              .split('\r\n')
+              .filter(
+                (l) =>
+                  /^"(Profesional|Total)",/.test(l) && l.split(',').length > 2,
+              ),
+          ).toEqual([]);
+        } else if (route === '/reports/no-shows.csv') {
+          expect(text).toContain('"No asistió",0');
+          expect(
+            text
+              .trim()
+              .split('\r\n')
+              .filter((l) => /^"\d{4}-\d{2}-\d{2}",/.test(l)),
+          ).toEqual([]);
+        } else if (route === '/reports/no-shows') {
+          expect(body).toMatchObject({
+            items: [],
+            total: 0,
+            summary: {
+              noShows: 0,
+              lateCancellations: 0,
+              completedAppointments: 0,
+            },
+          });
+        } else {
+          expect(body).toMatchObject({ rows: [], hasActivity: false });
+        }
+      };
+      return [
+        {
+          name: `GET ${route} ?locationId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}locationId=${a.locationId}`,
+          queryIds: ['locationId'],
+          status: 403,
+          message: 'No tienes acceso a esta sede.',
+        },
+        {
+          name: `GET ${route} ?professionalId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}professionalId=${a.dentistUserId}`,
+          queryIds: ['professionalId'],
           status: 200,
           expectBody: empty,
         },
