@@ -94,7 +94,7 @@ export interface RecallCycleClock {
 /**
  * El primer vencimiento de la serie `dueAt` + k·intervalo (k ≥ 1)
  * estrictamente posterior a `after`. Es `dx_recall_next_due_after` de la BD
- * (20270121140000), con el mismo recorte a fin de mes.
+ * (20270122140000), con el mismo recorte a fin de mes.
  */
 export function nextDueAfter(
   dueAt: string,

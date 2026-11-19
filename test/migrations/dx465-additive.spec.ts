@@ -21,11 +21,11 @@ const code = (migration: string): string =>
 const flat = (migration: string): string =>
   code(migration).replace(/\s+/g, ' ');
 
-const DDL = '20270121140000_dx465_recall_attempts';
-const BACKFILL = '20270121140100_dx465_recall_attempts_backfill';
-const INDEX = '20270121140200_dx465_recall_due_attempts_idx';
-const DROP = '20270121140300_dx465_recall_due_visit_idx_drop';
-const VALIDATE = '20270121140400_dx465_validate';
+const DDL = '20270122140000_dx465_recall_attempts';
+const BACKFILL = '20270122140100_dx465_recall_attempts_backfill';
+const INDEX = '20270122140200_dx465_recall_due_attempts_idx';
+const DROP = '20270122140300_dx465_recall_due_visit_idx_drop';
+const VALIDATE = '20270122140400_dx465_validate';
 const MAIN_PHONE_STALE = '20261226140000_dx266_patient_merge';
 
 /** El cuerpo de una función de una migración (de CREATE … a `$function$;`). */

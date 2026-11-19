@@ -10,7 +10,7 @@
 --                    con la fila bloqueada. Vale mientras "cycleDueAt" =
 --                    "dueAt"; si el vencimiento cambia (se hizo el control o
 --                    se fijó otra fecha) el ciclo empieza de cero sin tocar la
---                    fila. Lo existente se rellena en 20270121140100.
+--                    fila. Lo existente se rellena en 20270122140100.
 --   recall_contacts  "callbackOn": el día de «Llamar luego» (solo con
 --                    CALL_BACK, CHECK NOT VALID). Índice ÚNICO parcial
 --                    ("tenantId", "recallId", "appointmentId") WHERE BOOKED:
@@ -52,9 +52,9 @@
 -- que audit_events_actor_check no cambia. Sin tablas nuevas con "patientId":
 -- dx_patient_merge_tables() no cambia (las columnas nuevas viajan con su fila).
 --
--- El índice de la lista con las columnas nuevas va en 20270121140200
--- (CONCURRENTLY, solo) y el viejo se suelta en 20270121140300; los VALIDATE en
--- 20270121140400. Funciones con search_path fijo y pg_temp al final (SEC-032).
+-- El índice de la lista con las columnas nuevas va en 20270122140200
+-- (CONCURRENTLY, solo) y el viejo se suelta en 20270122140300; los VALIDATE en
+-- 20270122140400. Funciones con search_path fijo y pg_temp al final (SEC-032).
 --
 -- Vuelta atrás: desplegar la API anterior, recrear dx_phone_e164_stale con la
 -- definición de 20261226140000, recrear patient_recalls_tenant_due_visit_idx

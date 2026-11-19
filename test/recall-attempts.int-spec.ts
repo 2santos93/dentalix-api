@@ -1199,7 +1199,7 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
     ).resolves.toBeNull();
   });
 
-  it('el relleno de 20270121140100 deja el estado desde los contactos del ciclo (y es idempotente)', async () => {
+  it('el relleno de 20270122140100 deja el estado desde los contactos del ciclo (y es idempotente)', async () => {
     // El trigger pone "createdAt" (ms): un respiro entre altas para que el
     // orden de los contactos no dependa del desempate por id.
     const insert = async (
@@ -1243,7 +1243,7 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
     const sql = readFileSync(
       join(
         __dirname,
-        '../prisma/migrations/20270121140100_dx465_recall_attempts_backfill/migration.sql',
+        '../prisma/migrations/20270122140100_dx465_recall_attempts_backfill/migration.sql',
       ),
       'utf8',
     );

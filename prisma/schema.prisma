@@ -8313,7 +8313,7 @@ model PatientRecall {
   // ("id", "patientId", "recallTypeId", "kind", "intervalMonths",
   // "lastDoneAt", "disabledUntil", "locationId", "visitLocationId",
   // "attemptCount", "lastAttemptAt", "callbackOn", "skipUntil", "cycleDueAt")
-  // (DX-465, 20270121140000; sustituye a patient_recalls_tenant_due_visit_idx
+  // (DX-465, 20270122140000; sustituye a patient_recalls_tenant_due_visit_idx
   // de 20261212090600).
   @@map("patient_recalls")
 }
