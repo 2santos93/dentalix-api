@@ -1147,6 +1147,13 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // lista de vencidos; «Programar recall» con el intervalo por defecto
   // (D15), también recepción, que no puede usar el PUT.
   'GET /recall/unconfigured': BILLING,
+  // DX-465: el lote de intentos, el mostrador como el registro suelto; los
+  // ajustes de intentos por sede, solo ADMIN (molde DX-561); «Ya está
+  // corregido» del teléfono, quien edita al paciente.
+  'POST /recall/contacts/batch': BILLING,
+  'GET /recall-settings': ADMIN_ONLY,
+  'PUT /recall-settings/:locationId': ADMIN_ONLY,
+  'POST /patients/:id/phone-review/clear': EVERY_ROLE,
   'POST /patients/:id/recalls/default': EVERY_ROLE,
   // DX-015-bis: los tipos de recall de la clínica (sin datos de pacientes),
   // los cuatro roles que ven la ficha.

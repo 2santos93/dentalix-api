@@ -2571,6 +2571,16 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // en la transacción del alta.
   'POST /patients/:id/recalls/default':
     'recall-default.int-spec.ts y recall.e2e-spec.ts',
+  // DX-465: el lote de intentos (un CREATE RECALL_CONTACT por contacto, con
+  // su paciente y sin la nota, reason RECALL_CONTACT_BATCH), los ajustes de
+  // intentos por sede (UPDATE CLINIC_SETTINGS, RECALL_SETTINGS_UPDATED, antes
+  // y después; sin evento si nada cambia) y «Ya está corregido» (UPDATE
+  // PATIENT, PHONE_REVIEW_CLEARED, solo si había marca), en la transacción.
+  'POST /recall/contacts/batch':
+    'recall-attempts.int-spec.ts y recall-attempts.e2e-spec.ts',
+  'PUT /recall-settings/:locationId': 'recall-attempts.e2e-spec.ts',
+  'POST /patients/:id/phone-review/clear':
+    'recall-attempts.int-spec.ts y recall-attempts.e2e-spec.ts',
   // DX-516: ajustes por medio de pago (solo ADMIN): UPDATE/CREATE
   // PAYMENT_METHOD con PAYMENT_METHOD_ADJUSTMENT_CREATED/UPDATED y el antes y
   // el después, en la transacción del cambio.

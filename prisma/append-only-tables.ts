@@ -161,6 +161,9 @@ export const NO_APP_DELETE = [
   // DX-561: ajustes del seguimiento automático por sede. Apagar es
   // enabled = false; la fila no se borra (el upsert la bloquea al guardar).
   'location_quote_follow_up_settings',
+  // DX-465: ajustes de intentos de recall por sede. Volver a 7/3 es
+  // guardarlos; la fila no se borra (el upsert bloquea la sede al guardar).
+  'location_recall_settings',
   // DX-137: el enlace «No fui yo» solo se marca usado (dx_session_alert_guard).
   'session_alerts',
   // DX-556: el prospecto se marca perdido y se anonimiza, nunca se borra

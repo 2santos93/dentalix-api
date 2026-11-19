@@ -209,6 +209,10 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-465: el recall de otra clínica en el lote de intentos: 404 con su id y
+  // no se registra ninguno (ni los de la propia clínica del mismo lote).
+  'POST /recall/contacts/batch body.items[].recallId':
+    'recall-attempts.e2e-spec.ts',
   // DX-172: la fuente y el referente de otra clínica en el alta y la edición
   // (400, el paciente intacto).
   'POST /patients body.sourceId': 'patient-acquisition.e2e-spec.ts',
