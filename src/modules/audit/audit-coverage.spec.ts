@@ -72,6 +72,7 @@ import {
   PatientSourcesController,
 } from '../patient-sources/presentation/patient-sources.controller';
 import { ScheduledProductionController } from '../reports/presentation/scheduled-production.controller';
+import { ProfessionalReportsController } from '../reports/presentation/professional-reports.controller';
 import { UnallocatedPaymentsController } from '../reports/presentation/unallocated-payments.controller';
 import { RecoveredSlotsController } from '../reports/presentation/recovered-slots.controller';
 import { ChairOccupancyController } from '../reports/presentation/chair-occupancy.controller';
@@ -1530,6 +1531,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'ACCOUNT_STATEMENT',
     reason: 'RECEIVABLES_AGING',
   },
+  // DX-304: los totales por tramo de la pestaña «Cartera» en CSV (sin
+  // pacientes), solo ADMIN.
+  'GET /receivables/aging/summary.csv': {
+    action: 'EXPORT',
+    resource: 'ACCOUNT_STATEMENT',
+    reason: 'RECEIVABLES_AGING_SUMMARY',
+  },
   // SEC-043 (M2): los totales de la cartera aproximan lo abonado entre dos
   // consultas; quién los mira queda en la auditoría.
   'GET /receivables/aging/summary': {
@@ -1737,6 +1745,18 @@ const EXPECTED: Record<string, AuditOptions> = {
     action: 'VIEW',
     resource: 'APPOINTMENT',
     reason: 'SCHEDULED_PRODUCTION_REPORT',
+  },
+  // DX-304: «Inasistencias» lleva el nombre de cada paciente; su CSV (solo
+  // ADMIN) sale de la clínica. «Profesionales» no lleva pacientes.
+  'GET /reports/no-shows': {
+    action: 'VIEW',
+    resource: 'APPOINTMENT',
+    reason: 'NO_SHOW_REPORT',
+  },
+  'GET /reports/no-shows.csv': {
+    action: 'EXPORT',
+    resource: 'APPOINTMENT',
+    reason: 'NO_SHOW_REPORT',
   },
   // DX-436: el CSV de «Huecos recuperados» (solo agregados) sale de la
   // clínica: cada descarga queda auditada.
@@ -2849,6 +2869,7 @@ const CONTROLLERS: Type[] = [
   ProductionByProcedureController,
   QuoteFunnelController,
   ScheduledProductionController,
+  ProfessionalReportsController,
   UnallocatedPaymentsController,
   RecoveredSlotsController,
   ChairOccupancyController,
