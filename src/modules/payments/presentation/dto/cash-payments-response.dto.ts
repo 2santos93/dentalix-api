@@ -224,6 +224,12 @@ export class CashPaymentDto {
   hasProof!: boolean;
 
   @ApiProperty({
+    description:
+      'DX-571: conciliado con un movimiento del extracto del banco (Caja › Conciliación).',
+  })
+  reconciled!: boolean;
+
+  @ApiProperty({
     type: [PaymentAdjustmentLineDto],
     description:
       'DX-516: ajustes por medio de pago congelados en el abono (vacío sin ajustes).',

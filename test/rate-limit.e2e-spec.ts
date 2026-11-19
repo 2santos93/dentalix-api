@@ -53,6 +53,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'online-booking': { limit: 4, ttlMs: 60_000 },
   'online-booking-write': { limit: 2, ttlMs: 60_000 },
   'appointment-series': { limit: 2, ttlMs: 60_000 },
+  'bank-statement': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
