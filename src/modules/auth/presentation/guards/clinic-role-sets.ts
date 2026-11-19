@@ -362,6 +362,10 @@ export const EXCHANGE_RATE_SETTINGS_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // gestión. Escribe miles de fichas de golpe y el informe lleva datos de
 // pacientes.
 export const PATIENT_IMPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// Conciliación de transferencias y pagos móviles contra el extracto del banco
+// (DX-571) — cuentas, importar el extracto, las cuatro listas, emparejar y
+// deshacer: solo gestión. El extracto trae datos de terceros.
+export const BANK_RECONCILIATION_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Gastos de la sede y salidas de caja menor (DX-274) — la gestión (lista,
 // detalle, alta, edición, anulación, pagos, soporte, resumen y CSV): solo
 // ADMIN. CAPTURA: recepción también pide la autorización de subida del soporte

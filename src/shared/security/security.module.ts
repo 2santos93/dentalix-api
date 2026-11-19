@@ -218,6 +218,13 @@ function throttlers(
       generateKey: (context, _ip, name) =>
         staffActorRateLimitKey(name, request(context).headers.authorization),
     },
+    {
+      // DX-571: leer un extracto del banco, un balde por clínica + usuario
+      // para sus tres rutas (inspección, vista previa y confirmación).
+      ...strict('bank-statement'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(name, request(context).headers.authorization),
+    },
   ];
 }
 

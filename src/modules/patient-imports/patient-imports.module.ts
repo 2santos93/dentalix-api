@@ -81,5 +81,8 @@ import { PrismaPatientImportRepository } from './infrastructure/prisma-patient-i
     ImportUploadSlotGuard,
     ImportReadSlotInterceptor,
   ],
+  // DX-571: la lectura del extracto del banco usa las MISMAS plazas de
+  // recepción y de lectura (SEC-046): es la misma CPU y el mismo lector.
+  exports: [IMPORT_READ_SLOTS, IMPORT_UPLOAD_SLOTS],
 })
 export class PatientImportsModule {}

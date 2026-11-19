@@ -61,6 +61,7 @@ function fakeRow(
     splitLines: null,
     receiptNumber: null,
     hasProof: false,
+    reconciled: false,
     adjustments: [],
     collectedAmount: overrides.amount ?? 100,
     ...overrides,
