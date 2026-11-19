@@ -4,6 +4,7 @@ import { PrismaService } from '../../../../shared/prisma/prisma.service';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
 import { leadsOnAppointmentCreatedInTx } from '../../../leads/infrastructure/lead-from-appointment';
+import { recallOnAppointmentBookedInTx } from '../../../recall/infrastructure/recall-from-appointment';
 import {
   hardBlockOver,
   lockAgenda,
@@ -183,6 +184,24 @@ export class PrismaAppointmentSeriesRepository implements AppointmentSeriesRepos
             tenantId,
             patientId: input.patientId,
             appointmentId: ids[0],
+            actor: {
+              actor: {
+                userId: input.createdById,
+                role: input.actorRole,
+              },
+              locationId: input.locationId,
+              requestId: input.audit.requestId,
+              ip: input.audit.ip,
+              userAgent: input.audit.userAgent,
+            },
+          });
+          // DX-465 (D6): la serie cierra el ciclo del recall UNA vez, con la
+          // primera cita (las demás son del mismo tratamiento).
+          await recallOnAppointmentBookedInTx(tx, {
+            tenantId,
+            patientId: input.patientId,
+            appointmentId: ids[0],
+            appointmentTypeId: input.appointmentTypeId,
             actor: {
               actor: {
                 userId: input.createdById,

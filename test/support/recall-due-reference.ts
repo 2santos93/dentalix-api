@@ -19,6 +19,14 @@ import type {
  * `rule: 'DX-015'` conserva la regla anterior (la base es el MAX con la última
  * cita atendida, de cualquier tipo): es la definición de «lo que se veía
  * antes del despliegue» para el test del relleno.
+ *
+ * DX-465 añade el ciclo de intentos, también en su forma más directa: el
+ * estado guardado vale si "cycleDueAt" es el vencimiento calculado AQUÍ; el
+ * día del último intento en la zona de la sede + los días de la sede (sin
+ * fila, 7), o «Llamar luego», o el vencimiento siguiente de un «Rechaza», lo
+ * que llegue más tarde, es el día en que vuelve; agotado = intentos ≥ el tope
+ * de la sede (sin fila, 3). Por defecto, ni ocultos ni agotados;
+ * `includeContacted` deja los ocultos; `exhausted`, solo los agotados.
  */
 
 export type RecallDueRule = 'DX-015' | 'DX-015-bis';
@@ -44,6 +52,12 @@ interface ReferenceSqlRow {
   lastContactOutcome:
     NonNullable<RecallDueRow['lastContact']>['outcome'] | null;
   lastContactAt: Date | null;
+  attempts: number;
+  maxAttempts: number;
+  exhausted: boolean;
+  hiddenUntil: Date | null;
+  callbackOn: Date | null;
+  phoneReview: boolean;
 }
 
 const civilOf = (date: Date): string => date.toISOString().slice(0, 10);
@@ -56,6 +70,14 @@ function referenceFacts(now: Date, extra: Prisma.Sql): Prisma.Sql {
              pr."disabledReason", pr."updatedAt", pr."updatedById",
              pa."firstName", pa."lastName", pa."phone",
              (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut",
+             (pa."phoneReviewFlaggedAt" IS NOT NULL) AS "phoneReview",
+             pr."attemptCount", pr."lastAttemptAt", pr."callbackOn",
+             pr."skipUntil", pr."cycleDueAt",
+             ((pr."lastAttemptAt" AT TIME ZONE 'UTC') AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "lastAttemptDay",
+             coalesce((SELECT s."hideDays" FROM "location_recall_settings" s
+                        WHERE s."tenantId" = lo."tenantId" AND s."locationId" = lo."id"), 7) AS "hideDays",
+             coalesce((SELECT s."maxAttempts" FROM "location_recall_settings" s
+                        WHERE s."tenantId" = lo."tenantId" AND s."locationId" = lo."id"), 3) AS "maxAttempts",
              lo."id" AS "homeLocationId",
              lo."defaultPhoneRegion" AS "phoneRegion",
              ((${now}::timestamptz) AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "today",
@@ -117,17 +139,33 @@ export async function referenceListDue(
       : Prisma.sql`f."lastDoneAt"`;
   const due = Prisma.sql`
       WITH f AS (${facts}),
-      d AS (
+      v AS (
         SELECT f.*,
                ${base} AS "baseDate",
                (${base} + make_interval(months => f."intervalMonths"))::date AS "dueAt"
           FROM f
+      ),
+      d AS (
+        SELECT v.*,
+               CASE WHEN v."cycleDueAt" = v."dueAt" THEN v."attemptCount" ELSE 0 END AS "attempts",
+               CASE WHEN v."cycleDueAt" = v."dueAt" THEN v."callbackOn" END AS "cycleCallbackOn",
+               CASE WHEN v."cycleDueAt" = v."dueAt" THEN
+                 greatest(coalesce(v."callbackOn", v."lastAttemptDay" + v."hideDays"), v."skipUntil")
+               END AS "until"
+          FROM v
       )`;
+  const cycleFilter = query.exhausted
+    ? Prisma.sql`AND d."attempts" >= d."maxAttempts"`
+    : query.includeContacted
+      ? Prisma.sql`AND d."attempts" < d."maxAttempts"`
+      : Prisma.sql`AND d."attempts" < d."maxAttempts"
+                   AND NOT coalesce(d."until" > d."today", false)`;
   const where = Prisma.sql`
       NOT d."hasUpcomingAppointment"
       AND d."dueAt" <= d."today" + ${query.withinDays}::int
       AND (d."disabledUntil" IS NULL OR d."disabledUntil" <= d."today")
-      ${locationFilter}`;
+      ${locationFilter}
+      ${cycleFilter}`;
   const order =
     query.sort === 'MOST_OVERDUE'
       ? Prisma.sql`d."dueAt" - d."today" ASC`
@@ -156,7 +194,13 @@ export async function referenceListDue(
                  d."homeLocationId" AS "locationId",
                  c."channel" AS "lastContactChannel",
                  c."outcome" AS "lastContactOutcome",
-                 c."createdAt" AS "lastContactAt"
+                 c."createdAt" AS "lastContactAt",
+                 d."attempts",
+                 d."maxAttempts",
+                 d."attempts" >= d."maxAttempts" AS "exhausted",
+                 CASE WHEN d."until" > d."today" THEN d."until" END AS "hiddenUntil",
+                 d."cycleCallbackOn" AS "callbackOn",
+                 d."phoneReview"
             FROM d
             LEFT JOIN LATERAL (
               SELECT rc."channel", rc."outcome", rc."createdAt"
@@ -195,6 +239,14 @@ export async function referenceListDue(
               createdAt: r.lastContactAt,
             }
           : null,
+      cycle: {
+        attempts: r.attempts,
+        maxAttempts: r.maxAttempts,
+        exhausted: r.exhausted,
+        hiddenUntil: r.hiddenUntil ? civilOf(r.hiddenUntil) : null,
+        callbackOn: r.callbackOn ? civilOf(r.callbackOn) : null,
+      },
+      phoneReview: r.phoneReview,
     })),
   };
 }

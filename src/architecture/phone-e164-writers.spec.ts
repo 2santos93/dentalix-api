@@ -52,6 +52,12 @@ const WRITERS: Record<string, Writer> = {
     kind: 'exempt',
     reason: 'solo la baja de recordatorios',
   },
+  // DX-465: «Número equivocado» marca el teléfono para revisar; «Ya está
+  // corregido» lo desmarca. Nunca toca `phone`.
+  'modules/recall/infrastructure/recall-phone-review.ts': {
+    kind: 'exempt',
+    reason: 'solo la marca phoneReviewFlaggedAt/phoneReviewFlaggedById',
+  },
 };
 
 function tsFiles(dir: string): string[] {

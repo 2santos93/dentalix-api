@@ -7,8 +7,18 @@ import type { RecallKind } from '@prisma/client';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { LOCATION_NOT_ALLOWED_MESSAGE } from '../../../../shared/tenancy/location-access';
 import type { RecallRepository } from '../../domain/ports/recall-repository.port';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { civilDateIn } from '../../../../shared/time/civil-day';
 import type {
+  RecallCycleState,
+  RecallSettingsValues,
+} from '../../domain/recall-cycle';
+import type {
+  LocationRecallSettingsView,
   NewRecallContact,
+  PhoneReviewView,
+  RecallContactBatchData,
+  RecordedRecallContact,
   PatientRecallRow,
   RecallContactView,
   RecallDueQuery,
@@ -77,6 +87,8 @@ interface FakeRecall {
   /** Sede donde se fijó. */
   locationId: string;
   updatedById: string;
+  /** DX-465: el ciclo guardado (sin él, vacío). */
+  cycle?: RecallCycleState;
 }
 
 interface FakeAppointment {
@@ -118,6 +130,19 @@ class InMemoryRecallRepository implements RecallRepository {
   /** Lo que «desactiva» la exclusión en el próximo alta por defecto. */
   nextExcluded: RecallExclusionUpdate[] = [];
   readonly dueQueries: RecallDueQuery[] = [];
+  /** DX-465: lo recibido por `createContact` y el lote. */
+  readonly createdContacts: NewRecallContact[] = [];
+  readonly batches: {
+    data: RecallContactBatchData;
+    audit: AuditRequestContext;
+  }[] = [];
+  settings: RecallSettingsValues = { hideDays: 7, maxAttempts: 3 };
+  readonly phoneReview = new Map<string, PhoneReviewView>();
+  /** Zona de cada sede (las dos de la clínica, Caracas). */
+  readonly zoneOf = new Map<string, string | null>([
+    [NORTE, 'America/Caracas'],
+    [SUR, 'America/Caracas'],
+  ]);
   readonly upserts: SetPatientRecallData[] = [];
   readonly writeTodayCalls: Date[] = [];
   readonly patientRecallsCalls: { patientId: string; now: Date }[] = [];
@@ -180,7 +205,11 @@ class InMemoryRecallRepository implements RecallRepository {
   patientRecalls(
     patientId: string,
     now: Date,
-  ): Promise<{ rows: PatientRecallRow[]; contacts: RecallContactView[] }> {
+  ): Promise<{
+    rows: PatientRecallRow[];
+    contacts: RecallContactView[];
+    phoneReview: PhoneReviewView | null;
+  }> {
     this.calls.push('patientRecalls');
     this.patientRecallsCalls.push({ patientId, now });
     const rows = this.recalls
@@ -212,11 +241,22 @@ class InMemoryRecallRepository implements RecallRepository {
           today: this.sedeDay,
           updatedAt: NOW,
           updatedById: r.updatedById,
+          attemptCount: r.cycle?.attemptCount ?? 0,
+          lastAttemptAt: r.cycle?.lastAttemptAt ?? null,
+          lastAttemptDay: r.cycle?.lastAttemptAt
+            ? civilDateIn(r.cycle.lastAttemptAt, 'America/Caracas')
+            : null,
+          callbackOn: r.cycle?.callbackOn ?? null,
+          skipUntil: r.cycle?.skipUntil ?? null,
+          cycleDueAt: r.cycle?.cycleDueAt ?? null,
+          hideDays: this.settings.hideDays,
+          maxAttempts: this.settings.maxAttempts,
         };
       });
     return Promise.resolve({
       rows,
       contacts: this.contacts.filter((c) => c.patientId === patientId),
+      phoneReview: this.phoneReview.get(patientId) ?? null,
     });
   }
 
@@ -329,7 +369,75 @@ class InMemoryRecallRepository implements RecallRepository {
       patientId: r.patientId,
       kind: r.kind,
       locationId: visit?.locationId ?? r.locationId,
+      timeZone: this.zoneOf.get(visit?.locationId ?? r.locationId) ?? null,
     });
+  }
+
+  async findRecalls(recallIds: readonly string[]): Promise<RecallRef[]> {
+    this.calls.push('findRecalls');
+    const found: RecallRef[] = [];
+    for (const id of [...recallIds].sort()) {
+      const ref = await this.findRecall(id);
+      this.calls.pop();
+      if (ref) found.push(ref);
+    }
+    return found;
+  }
+
+  createContactsBatch(
+    data: RecallContactBatchData,
+    audit: AuditRequestContext,
+  ): Promise<RecallContactView[]> {
+    this.calls.push('createContactsBatch');
+    this.batches.push({ data, audit });
+    return Promise.resolve(
+      data.recalls.map((r) =>
+        this.storeContact({
+          recallId: r.id,
+          patientId: r.patientId,
+          locationId: r.locationId,
+          channel: data.channel,
+          outcome: data.outcome,
+          note: data.note,
+          appointmentId: null,
+          authorId: data.authorId,
+          callbackOn: data.callbackOn,
+        }),
+      ),
+    );
+  }
+
+  listSettings(): Promise<LocationRecallSettingsView[]> {
+    this.calls.push('listSettings');
+    return Promise.resolve([
+      {
+        locationId: NORTE,
+        locationName: 'Norte',
+        ...this.settings,
+        updatedAt: null,
+      },
+    ]);
+  }
+
+  saveSettings(
+    locationId: string,
+    values: RecallSettingsValues,
+  ): Promise<LocationRecallSettingsView | null> {
+    this.calls.push('saveSettings');
+    if (locationId !== NORTE) return Promise.resolve(null);
+    this.settings = { ...values };
+    return Promise.resolve({
+      locationId,
+      locationName: 'Norte',
+      ...values,
+      updatedAt: NOW,
+    });
+  }
+
+  clearPhoneReview(patientId: string): Promise<boolean | null> {
+    this.calls.push('clearPhoneReview');
+    if (!this.patients.has(patientId)) return Promise.resolve(null);
+    return Promise.resolve(this.phoneReview.delete(patientId));
   }
 
   appointmentOfPatient(
@@ -344,8 +452,24 @@ class InMemoryRecallRepository implements RecallRepository {
     );
   }
 
-  createContact(data: NewRecallContact): Promise<RecallContactView> {
+  createContact(data: NewRecallContact): Promise<RecordedRecallContact> {
     this.calls.push('createContact');
+    this.createdContacts.push(data);
+    const existing = this.contacts.find(
+      (c) =>
+        data.outcome === 'BOOKED' &&
+        c.outcome === 'BOOKED' &&
+        c.recallId === data.recallId &&
+        c.appointmentId === data.appointmentId,
+    );
+    if (existing) return Promise.resolve({ contact: existing, replayed: true });
+    return Promise.resolve({
+      contact: this.storeContact(data),
+      replayed: false,
+    });
+  }
+
+  private storeContact(data: NewRecallContact): RecallContactView {
     const recall = this.recalls.find((r) => r.id === data.recallId);
     if (!recall) throw new Error(`recall inexistente: ${data.recallId}`);
     const view: RecallContactView = {
@@ -360,6 +484,7 @@ class InMemoryRecallRepository implements RecallRepository {
       outcome: data.outcome,
       note: data.note,
       appointmentId: data.appointmentId,
+      callbackOn: data.callbackOn,
       author: {
         id: data.authorId,
         fullName: this.staffNames.get(data.authorId) ?? null,
@@ -367,7 +492,7 @@ class InMemoryRecallRepository implements RecallRepository {
       createdAt: NOW,
     };
     this.contacts.push(view);
-    return Promise.resolve(view);
+    return view;
   }
 
   staff(ids: readonly string[]): Promise<Map<string, StaffRef>> {
@@ -432,6 +557,14 @@ function dueRow(data: Partial<RecallDueRow> = {}): RecallDueRow {
     daysOverdue: 36,
     locationId: NORTE,
     lastContact: null,
+    cycle: {
+      attempts: 0,
+      maxAttempts: 3,
+      exhausted: false,
+      hiddenUntil: null,
+      callbackOn: null,
+    },
+    phoneReview: false,
     ...data,
   };
 }
@@ -450,11 +583,15 @@ describe('ListDueRecallsUseCase (DX-015)', () => {
     expect(repo.dueQueries).toEqual([
       {
         kind: undefined,
+        recallTypeId: undefined,
         withinDays: 0,
         sort: 'MOST_OVERDUE',
         page: 1,
         pageSize: 20,
         now: NOW,
+        // DX-465: por defecto sin ocultos ni agotados.
+        includeContacted: false,
+        exhausted: false,
       },
     ]);
     expect(page).toEqual({ items: [], total: 0, page: 1, pageSize: 20 });
@@ -574,6 +711,14 @@ describe('ListDueRecallsUseCase (DX-015)', () => {
       daysOverdue: 36,
       locationId: NORTE,
       lastContact: null,
+      // DX-465: el ciclo tal como lo evaluó la consulta.
+      lastAttempt: null,
+      attempts: 0,
+      maxAttempts: 3,
+      exhausted: false,
+      hiddenUntil: null,
+      callbackOn: null,
+      phoneReview: false,
     });
     // Sin apellido no queda un espacio colgando; el número local se lee con la
     // región de la sede (en minúsculas también) y la sede es la del paciente.
@@ -582,6 +727,7 @@ describe('ListDueRecallsUseCase (DX-015)', () => {
       patientWhatsApp: '584125550202',
       locationId: SUR,
       lastContact: { channel: 'CALL', outcome: 'NO_ANSWER', createdAt: NOW },
+      lastAttempt: { at: NOW, outcome: 'NO_ANSWER', channel: 'CALL' },
     });
     // Un número local sin región de la sede no da un enlace inventado.
     expect(page.items[2]).toMatchObject({
@@ -629,6 +775,7 @@ describe('GetPatientRecallsUseCase (DX-015)', () => {
     await expect(get.execute('pac-1')).resolves.toEqual({
       recalls: [],
       contacts: [],
+      phoneReview: null,
     });
     expect(repo.patientRecallsCalls).toEqual([
       { patientId: 'pac-1', now: NOW },
@@ -807,6 +954,7 @@ describe('GetPatientRecallsUseCase (DX-015)', () => {
       outcome: 'NO_ANSWER',
       note: null,
       appointmentId: null,
+      callbackOn: null,
       author: { id: 'recepcion', fullName: 'Recepción' },
       createdAt: NOW,
     };
@@ -1185,12 +1333,15 @@ describe('CreateRecallContactUseCase (DX-015)', () => {
 
   function build(allowed?: readonly string[]) {
     const { ctx, inRequest } = requestContext(allowed);
-    const create = new CreateRecallContactUseCase(repo, ctx);
+    const create = new CreateRecallContactUseCase(repo, ctx, clock);
     return {
       create: (
         id: string,
         input: Parameters<CreateRecallContactUseCase['execute']>[1],
-      ) => inRequest(() => create.execute(id, input, 'recepcion')),
+      ) =>
+        inRequest(() => create.execute(id, input, 'recepcion')).then(
+          (r) => r.contact,
+        ),
     };
   }
 
@@ -1213,6 +1364,7 @@ describe('CreateRecallContactUseCase (DX-015)', () => {
       outcome: 'CALL_BACK',
       note: 'Llamar después de las 5',
       appointmentId: null,
+      callbackOn: null,
       author: { id: 'recepcion', fullName: 'Recepción' },
       createdAt: NOW,
     });

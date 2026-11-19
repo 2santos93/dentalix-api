@@ -1,4 +1,5 @@
 import { leadsOnAppointmentCreatedInTx } from '../../../leads/infrastructure/lead-from-appointment';
+import { recallOnAppointmentBookedInTx } from '../../../recall/infrastructure/recall-from-appointment';
 import { ConflictException, Injectable } from '@nestjs/common';
 import {
   AppointmentStatus,
@@ -195,6 +196,16 @@ export class PrismaWalkInRepository implements WalkInRepository {
         tenantId,
         patientId,
         appointmentId: appointment.id,
+        actor: ctx,
+      });
+
+      // DX-465 (D6): llega sin cita para el tipo de un recall en su ciclo:
+      // «Agendó» (en persona) y el ciclo cerrado.
+      await recallOnAppointmentBookedInTx(tx, {
+        tenantId,
+        patientId,
+        appointmentId: appointment.id,
+        appointmentTypeId: input.appointmentTypeId,
         actor: ctx,
       });
 

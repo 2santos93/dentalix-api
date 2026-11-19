@@ -12,6 +12,7 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -30,7 +31,9 @@ import {
   ApiTags,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
-import { RecallKind } from '@prisma/client';
+import { ClinicRole, RecallKind } from '@prisma/client';
+import type { Response } from 'express';
+import { RateLimit } from '../../../shared/security/rate-limit.decorator';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import {
@@ -39,6 +42,7 @@ import {
 } from '../../auth/presentation/guards/roles.decorator';
 import {
   APPOINTMENT_ROLES,
+  PATIENT_ROLES,
   RECALL_DEFAULT_ROLES,
   RECALL_INTERVAL_ROLES,
   RECALL_LIST_ROLES,
@@ -61,15 +65,21 @@ import { RECALL_APPOINTMENT_TYPE_INVALID_MESSAGE } from '../domain/recall-type-r
 import type { TenantJwtPayload } from '../../../shared/crypto/token.service';
 import { Audit } from '../../audit/presentation/audit.decorator';
 import {
+  ClearPhoneReviewUseCase,
   CreateDefaultRecallUseCase,
   CreateRecallContactUseCase,
+  CreateRecallContactsBatchUseCase,
   GetPatientRecallsUseCase,
+  ListRecallSettingsUseCase,
+  RECALL_SETTINGS_LOCATION_NOT_FOUND_MESSAGE,
+  UpdateRecallSettingsUseCase,
   ListDueRecallsUseCase,
   ListRecallTypesUseCase,
   ListUnconfiguredRecallsUseCase,
   SetPatientRecallUseCase,
 } from '../application/use-cases/recall.use-cases';
 import type {
+  LocationRecallSettingsView,
   PatientRecalls,
   RecallContactView,
   RecallDuePage,
@@ -80,6 +90,11 @@ import type {
 import {
   CreateDefaultRecallDto,
   CreateRecallContactDto,
+  CreateRecallContactsBatchDto,
+  LocationRecallSettingsDto,
+  PhoneReviewClearedDto,
+  RecallContactsBatchDto,
+  UpdateRecallSettingsDto,
   CreateRecallTypeDto,
   PatientRecallsDto,
   RecallContactDto,
@@ -105,8 +120,15 @@ export const RECALL_DEFAULT_FORBIDDEN_MESSAGE =
 export const RECALL_TYPE_WRITE_FORBIDDEN_MESSAGE =
   'Solo administración gestiona los tipos de recall de la clínica.';
 
+export const RECALL_SETTINGS_FORBIDDEN_MESSAGE =
+  'Solo un administrador puede ver y cambiar los intentos de recall de las sedes.';
+export const PHONE_REVIEW_FORBIDDEN_MESSAGE =
+  'Tu rol no corrige los datos de contacto del paciente.';
+
 interface AuthenticatedRequest extends AuditableRequest {
   user: TenantJwtPayload;
+  /** DX-465: un «Agendó» que ya existía no deja otra alta en la auditoría. */
+  skipAudit?: boolean;
 }
 
 const LOCATION_HEADER = {
@@ -133,6 +155,8 @@ export class RecallController {
     private readonly listDue: ListDueRecallsUseCase,
     private readonly listUnconfigured: ListUnconfiguredRecallsUseCase,
     private readonly createContact: CreateRecallContactUseCase,
+    private readonly createBatch: CreateRecallContactsBatchUseCase,
+    private readonly tenantContext: TenantContextService,
   ) {}
 
   // Como la de vencidos: muchos pacientes con teléfonos; el evento no lleva
@@ -173,7 +197,7 @@ export class RecallController {
   @ApiOperation({
     summary: 'Lista de llamada: pacientes con el control vencido y sin cita',
     description:
-      'Recalls activos vencidos (o que vencen en ≤ withinDays) cuyo paciente no tiene cita futura agendada o confirmada ni una en curso, en cualquier sede; sin pausa vigente ni paciente archivado. Vencimiento (guardado) = MAX(último control fijado a mano, último procedimiento disparador del tipo realizado) + intervalo; una cita atendida sin ese procedimiento ya no lo mueve (DX-015-bis). Ordenada por días de vencido.',
+      'Recalls activos vencidos (o que vencen en ≤ withinDays) cuyo paciente no tiene cita futura agendada o confirmada ni una en curso, en cualquier sede; sin pausa vigente ni paciente archivado. Vencimiento (guardado) = MAX(último control fijado a mano, último procedimiento disparador del tipo realizado) + intervalo; una cita atendida sin ese procedimiento ya no lo mueve (DX-015-bis). Ordenada por días de vencido. DX-465: por defecto sin los contactados que siguen ocultos (tras un intento, los días de la sede del paciente desde el día del intento, o hasta «Llamar luego»; tras «Rechaza», hasta el vencimiento siguiente) ni los de intentos agotados (intentos del ciclo ≥ tope de la sede); `includeContacted` y `exhausted` los muestran. Cada fila con sus intentos, el último, hasta cuándo está oculta y si el teléfono está por revisar.',
   })
   @ApiHeader(LOCATION_HEADER)
   @ApiOkResponse({ type: RecallDuePageDto })
@@ -186,6 +210,8 @@ export class RecallController {
       sort: query.sort,
       page: query.page,
       pageSize: query.pageSize,
+      includeContacted: query.includeContacted,
+      exhausted: query.exhausted,
     });
   }
 
@@ -203,6 +229,8 @@ export class RecallController {
       kind: query.kind,
       recallTypeId: query.recallTypeId,
       withinDays: query.withinDays,
+      includeContacted: query.includeContacted,
+      exhausted: query.exhausted,
       page: 1,
       pageSize: 1,
     });
@@ -219,7 +247,7 @@ export class RecallController {
   @ApiOperation({
     summary: 'Registrar un contacto de recall (append-only)',
     description:
-      'Canal, desenlace y una nota corta (≤ 280, sin datos clínicos). «Agendó» (BOOKED) exige la cita creada, del mismo paciente. No se edita ni se borra: una corrección es otro contacto.',
+      'Canal, desenlace y una nota corta (≤ 280, sin datos clínicos). «Agendó» (BOOKED) exige la cita creada, del mismo paciente. No se edita ni se borra: una corrección es otro contacto. DX-465: es el intento y deja el estado del ciclo en la misma transacción: cuenta (salvo «Rechaza» y «Agendó», que lo cierran), oculta al paciente los días de su sede (o hasta `callbackOn` con «Llamar luego»; tras «Rechaza», hasta el vencimiento siguiente) y «Número equivocado» marca su teléfono para revisar. Un «Agendó» de una cita que ya lo tiene en este recall (lo registra el servidor al crear la cita) responde 200 con el existente, sin otra alta ni otro evento.',
   })
   @ApiHeader({
     name: 'X-Location-Id',
@@ -228,28 +256,198 @@ export class RecallController {
       'No decide nada: se autoriza y se sella con la sede del paciente (la de la lista), no con la activa.',
   })
   @ApiCreatedResponse({ type: RecallContactDto })
+  @ApiOkResponse({
+    type: RecallContactDto,
+    description:
+      'DX-465: «Agendó» de una cita que ya lo tenía en este recall: el existente',
+  })
   @ApiBadRequestResponse({
     description:
-      'Canal o desenlace inválidos, nota de más de 280, BOOKED sin cita o cita de otro paciente',
+      'Canal o desenlace inválidos, nota de más de 280, BOOKED sin cita o cita de otro paciente; `callbackOn` con otro desenlace que CALL_BACK, no válida, anterior a hoy o a más de 90 días (en la sede del paciente)',
   })
   @ApiForbiddenResponse({
     description: `${RECALL_LIST_FORBIDDEN_MESSAGE} O 403 LOCATION_NOT_ALLOWED: el paciente es de una sede no permitida.`,
   })
   @ApiNotFoundResponse({ description: 'Recall de otra clínica o inexistente' })
-  contact(
+  @ApiConflictResponse({
+    description:
+      'LOCATION_TIMEZONE_REQUIRED: con `callbackOn`, la sede del paciente no tiene zona horaria',
+  })
+  async contact(
     @Param('recallId', ParseUUIDPipe) recallId: string,
     @Body() dto: CreateRecallContactDto,
     @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<RecallContactView> {
-    return this.createContact.execute(
+    const { contact, replayed } = await this.createContact.execute(
       recallId,
       {
         channel: dto.channel,
         outcome: dto.outcome,
         note: dto.note,
         appointmentId: dto.appointmentId,
+        callbackOn: dto.callbackOn,
       },
       req.user.sub,
+    );
+    if (replayed) {
+      req.skipAudit = true;
+      res.status(200);
+    }
+    return contact;
+  }
+
+  // Auditado en la transacción: un CREATE RECALL_CONTACT por contacto (con su
+  // paciente y sin la nota, como el suelto), reason RECALL_CONTACT_BATCH.
+  @Post('contacts/batch')
+  @RateLimit('recall-batch')
+  @ApiOperation({
+    summary: 'Registrar el mismo intento para varios pacientes de la lista',
+    description: `DX-465 (D5): de 1 a 50 recalls distintos con el mismo canal, desenlace, nota y (con CALL_BACK, obligatoria) \`callbackOn\`. Sin BOOKED. Todo o nada en UNA transacción: mismos permisos y sede que el registro suelto, por recall. Cada contacto deja su estado del ciclo como el suelto y su evento de auditoría.`,
+  })
+  @ApiCreatedResponse({ type: RecallContactsBatchDto })
+  @ApiBadRequestResponse({
+    description:
+      'Lista vacía, de más de 50 o con un recall repetido; BOOKED; CALL_BACK sin `callbackOn` o `callbackOn` con otro desenlace, no válida, anterior a hoy o a más de 90 días en la sede de algún paciente; nota de más de 280',
+  })
+  @ApiForbiddenResponse({
+    description: `${RECALL_LIST_FORBIDDEN_MESSAGE} O 403 LOCATION_NOT_ALLOWED: algún paciente es de una sede no permitida (no se registra ninguno).`,
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Algún recall no existe en esta clínica (`recallIds` con los que faltan); no se registra ninguno',
+  })
+  @ApiConflictResponse({
+    description:
+      'LOCATION_TIMEZONE_REQUIRED: con `callbackOn`, la sede de algún paciente no tiene zona horaria',
+  })
+  async batch(
+    @Body() dto: CreateRecallContactsBatchDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<RecallContactsBatchDto> {
+    const contacts = await this.createBatch.execute(
+      {
+        recallIds: dto.items.map((i) => i.recallId),
+        channel: dto.channel,
+        outcome: dto.outcome,
+        note: dto.note,
+        callbackOn: dto.callbackOn,
+      },
+      req.user.sub,
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+    return { contacts };
+  }
+}
+
+/**
+ * DX-465 (D2) · Ajustes › Recall: días de ocultación tras un intento y tope
+ * de intentos, por sede. Solo ADMIN, para leer y para escribir (molde de
+ * DX-561). La lista ya trae el tope de cada fila: recepción no necesita leer
+ * esto.
+ */
+@ApiTags('recall')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(TenantContextInterceptor)
+@Roles(ClinicRole.ADMIN)
+@RolesDeniedMessage(RECALL_SETTINGS_FORBIDDEN_MESSAGE)
+@Controller('recall-settings')
+export class RecallSettingsController {
+  constructor(
+    private readonly list: ListRecallSettingsUseCase,
+    private readonly update: UpdateRecallSettingsUseCase,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  @Get()
+  @ApiOperation({
+    summary: 'Intentos de recall de cada sede',
+    description:
+      'Una fila por sede viva. Sin configurar: 7 días de ocultación y 3 intentos.',
+  })
+  @ApiOkResponse({ type: [LocationRecallSettingsDto] })
+  @ApiForbiddenResponse({ description: RECALL_SETTINGS_FORBIDDEN_MESSAGE })
+  findAll(): Promise<LocationRecallSettingsView[]> {
+    return this.list.execute();
+  }
+
+  // Auditado en la transacción (UPDATE CLINIC_SETTINGS, reason
+  // RECALL_SETTINGS_UPDATED) con el antes y el después; sin evento si nada
+  // cambia.
+  @Put(':locationId')
+  @ApiOperation({
+    summary: 'Reemplaza los intentos de recall de una sede',
+    description:
+      'Días de ocultación (1–90) y tope de intentos (1–10). Se aplican al instante en la lista (se evalúan al leer). Queda en la auditoría (RECALL_SETTINGS_UPDATED) con el antes y el después, en esa sede; guardar lo mismo no deja evento.',
+  })
+  @ApiOkResponse({ type: LocationRecallSettingsDto })
+  @ApiBadRequestResponse({
+    description:
+      'Días de 1 a 90 o tope de 1 a 10 (mensaje en español); identificador de sede no válido',
+  })
+  @ApiForbiddenResponse({ description: RECALL_SETTINGS_FORBIDDEN_MESSAGE })
+  @ApiNotFoundResponse({
+    description: RECALL_SETTINGS_LOCATION_NOT_FOUND_MESSAGE,
+  })
+  replace(
+    @Param(
+      'locationId',
+      new ParseUUIDPipe({
+        exceptionFactory: () =>
+          new BadRequestException('El identificador de la sede no es válido.'),
+      }),
+    )
+    locationId: string,
+    @Body() dto: UpdateRecallSettingsDto,
+    @Req() req: AuditableRequest,
+  ): Promise<LocationRecallSettingsView> {
+    return this.update.execute(
+      locationId,
+      { hideDays: dto.hideDays, maxAttempts: dto.maxAttempts },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+  }
+}
+
+/**
+ * DX-465 (D4) · «Ya está corregido»: quita la marca de teléfono por revisar
+ * que dejó un «Número equivocado». Los cuatro roles que editan al paciente.
+ */
+@ApiTags('recall')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@UseInterceptors(TenantContextInterceptor)
+@Roles(...PATIENT_ROLES)
+@RolesDeniedMessage(PHONE_REVIEW_FORBIDDEN_MESSAGE)
+@Controller('patients/:id/phone-review')
+export class PatientPhoneReviewController {
+  constructor(
+    private readonly clear: ClearPhoneReviewUseCase,
+    private readonly tenantContext: TenantContextService,
+  ) {}
+
+  // Auditado en la transacción (UPDATE PATIENT, reason PHONE_REVIEW_CLEARED)
+  // solo si había marca.
+  @Post('clear')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Quitar la marca de teléfono por revisar',
+    description:
+      'DX-465: sin cambiar el número (p. ej. se confirmó que es correcto). Cambiar el teléfono la quita sola. Idempotente: sin marca, `cleared: false` y sin evento.',
+  })
+  @ApiOkResponse({ type: PhoneReviewClearedDto })
+  @ApiForbiddenResponse({ description: PHONE_REVIEW_FORBIDDEN_MESSAGE })
+  @ApiNotFoundResponse({
+    description: 'Paciente de otra clínica o inexistente',
+  })
+  clearReview(
+    @Param('id', ParseUUIDPipe) patientId: string,
+    @Req() req: AuditableRequest,
+  ): Promise<PhoneReviewClearedDto> {
+    return this.clear.execute(
+      patientId,
+      requireAuditRequestContext(req, this.tenantContext),
     );
   }
 }

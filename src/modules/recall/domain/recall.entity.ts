@@ -28,9 +28,15 @@ export interface RecallDueQuery {
   page: number;
   pageSize: number;
   now: Date;
+  /**
+   * DX-465: también los ocultos tras un intento (N días de la sede o «Llamar
+   * luego») y los que rechazaron hasta el vencimiento siguiente. Sin él, no.
+   */
+  includeContacted?: boolean;
+  /** DX-465: SOLO los de intentos agotados (con o sin ocultación). Sin él, sin ellos. */
+  exhausted?: boolean;
 }
 
-/** El último contacto del recall (lo usará DX-465 para ocultar N días). */
 /** D17: «Sin recall configurado», paginada. */
 export interface RecallUnconfiguredQuery {
   /** Solo esa sede (ya autorizada); sin ella, la cabecera o las permitidas. */
@@ -79,6 +85,26 @@ export interface RecallLastContact {
   createdAt: Date;
 }
 
+/** DX-465: el último intento (el último contacto) con su hora del servidor. */
+export interface RecallLastAttempt {
+  at: Date;
+  outcome: RecallContactOutcome;
+  channel: RecallContactChannel;
+}
+
+/** DX-465: el estado del ciclo tal como lo ve un día de la sede. */
+export interface RecallCycleFields {
+  /** Intentos del ciclo actual. */
+  attempts: number;
+  /** Tope de la sede del paciente. */
+  maxAttempts: number;
+  exhausted: boolean;
+  /** No sale por defecto hasta ese día (vuelve ese día); null si ya sale. */
+  hiddenUntil: string | null;
+  /** «Llamar luego» del ciclo actual. */
+  callbackOn: string | null;
+}
+
 /** Una fila de la lista de llamada. */
 export interface RecallDueRow {
   recallId: string;
@@ -101,6 +127,10 @@ export interface RecallDueRow {
   /** Sede del paciente: la de su última cita atendida o, sin ella, la del recall. */
   locationId: string;
   lastContact: RecallLastContact | null;
+  /** DX-465: el estado del ciclo, ya evaluado con el «hoy» de la sede. */
+  cycle: RecallCycleFields;
+  /** DX-465: el teléfono está marcado para revisar. */
+  phoneReview: boolean;
 }
 
 export interface RecallDueItem {
@@ -121,6 +151,14 @@ export interface RecallDueItem {
   daysOverdue: number;
   locationId: string;
   lastContact: RecallLastContact | null;
+  /** DX-465: lo mismo que `lastContact`, con la forma del intento. */
+  lastAttempt: RecallLastAttempt | null;
+  attempts: number;
+  maxAttempts: number;
+  exhausted: boolean;
+  hiddenUntil: string | null;
+  callbackOn: string | null;
+  phoneReview: boolean;
 }
 
 export interface RecallDuePage {
@@ -154,6 +192,15 @@ export interface PatientRecallRow {
   today: string;
   updatedAt: Date;
   updatedById: string;
+  /** DX-465: lo guardado del ciclo y el día (sede) del último intento. */
+  attemptCount: number;
+  lastAttemptAt: Date | null;
+  lastAttemptDay: string | null;
+  callbackOn: string | null;
+  skipUntil: string | null;
+  cycleDueAt: string | null;
+  hideDays: number;
+  maxAttempts: number;
 }
 
 export interface PatientRecallView {
@@ -177,6 +224,13 @@ export interface PatientRecallView {
   status: RecallStatus;
   updatedAt: Date;
   updatedBy: StaffRef;
+  /** DX-465: intentos del ciclo y su ocultación en la sede. */
+  attempts: number;
+  maxAttempts: number;
+  exhausted: boolean;
+  lastAttemptAt: Date | null;
+  hiddenUntil: string | null;
+  callbackOn: string | null;
 }
 
 /** Un recall con su sede (la de la última cita atendida o, sin ella, la del recall). */
@@ -185,6 +239,8 @@ export interface RecallRef {
   patientId: string;
   kind: RecallKind | null;
   locationId: string;
+  /** DX-465: zona de esa sede (null si falta: el «hoy» da 409 al usarlo). */
+  timeZone: string | null;
 }
 
 export interface StaffRef {
@@ -205,13 +261,23 @@ export interface RecallContactView {
   outcome: RecallContactOutcome;
   note: string | null;
   appointmentId: string | null;
+  /** DX-465: «Llamar luego» con fecha. */
+  callbackOn: string | null;
   author: StaffRef;
   createdAt: Date;
+}
+
+/** DX-465: el teléfono marcado para revisar por un «Número equivocado». */
+export interface PhoneReviewView {
+  flaggedAt: Date;
+  flaggedBy: StaffRef;
 }
 
 export interface PatientRecalls {
   recalls: PatientRecallView[];
   contacts: RecallContactView[];
+  /** DX-465: null si el teléfono no está marcado. */
+  phoneReview: PhoneReviewView | null;
 }
 
 export interface SetPatientRecallData {
@@ -262,6 +328,35 @@ export interface NewRecallContact {
   note: string | null;
   appointmentId: string | null;
   authorId: string;
+  /** DX-465: solo con CALL_BACK (ya validada contra el «hoy» de la sede). */
+  callbackOn: string | null;
+}
+
+/** DX-465: lo que devuelve registrar un contacto. */
+export interface RecordedRecallContact {
+  contact: RecallContactView;
+  /** «Agendó» de una cita que ya lo tenía (lo escribió el servidor): sin alta. */
+  replayed: boolean;
+}
+
+/** DX-465: lo común de un lote de intentos (D5). */
+export interface RecallContactBatchData {
+  recalls: RecallRef[];
+  channel: RecallContactChannel;
+  outcome: Exclude<RecallContactOutcome, 'BOOKED'>;
+  note: string | null;
+  callbackOn: string | null;
+  authorId: string;
+}
+
+/** DX-465 (D2): los ajustes de intentos de una sede, con los de por defecto. */
+export interface LocationRecallSettingsView {
+  locationId: string;
+  locationName: string;
+  hideDays: number;
+  maxAttempts: number;
+  /** null = sin configurar (7 días, 3 intentos). */
+  updatedAt: Date | null;
 }
 
 /** DX-015-bis: lo justo de un tipo para fijar un recall. */

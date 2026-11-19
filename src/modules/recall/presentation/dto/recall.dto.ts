@@ -5,9 +5,10 @@ import {
   RecallKind,
   RecallSource,
 } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsEnum,
@@ -17,6 +18,7 @@ import {
   IsString,
   IsUUID,
   Matches,
+  ValidateNested,
   Max,
   MaxLength,
   Min,
@@ -51,6 +53,22 @@ import {
   RECALL_INTERVAL_MIN,
   RECALL_WITHIN_DAYS_MAX,
 } from '../../domain/recall-rules';
+import {
+  RECALL_BATCH_MAX,
+  RECALL_CALLBACK_MAX_DAYS,
+  RECALL_HIDE_DAYS_DEFAULT,
+  RECALL_HIDE_DAYS_MAX,
+  RECALL_HIDE_DAYS_MIN,
+  RECALL_MAX_ATTEMPTS_DEFAULT,
+  RECALL_MAX_ATTEMPTS_MAX,
+  RECALL_MAX_ATTEMPTS_MIN,
+  RECALL_SETTINGS_HIDE_DAYS_MESSAGE,
+  RECALL_SETTINGS_MAX_ATTEMPTS_MESSAGE,
+} from '../../domain/recall-cycle';
+
+/** `?x=true|false` de la query; cualquier otra cosa la rechaza @IsBoolean. */
+const queryBoolean = ({ value }: { value: unknown }) =>
+  value === 'true' ? true : value === 'false' ? false : value;
 
 const MAX_PAGE = 100000;
 const SORTS: RecallDueSort[] = ['MOST_OVERDUE', 'LEAST_OVERDUE'];
@@ -102,6 +120,28 @@ export class RecallDueCountQueryDto {
     message: `withinDays admite hasta ${RECALL_WITHIN_DAYS_MAX} días.`,
   })
   withinDays?: number;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    default: false,
+    description:
+      'DX-465: incluir también a los contactados que siguen ocultos (tras un intento, los días de la sede o hasta «Llamar luego»; tras «Rechaza», hasta el vencimiento siguiente). Por defecto, no.',
+  })
+  @IsOptional()
+  @Transform(queryBoolean)
+  @IsBoolean({ message: 'includeContacted debe ser true o false.' })
+  includeContacted?: boolean;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    default: false,
+    description:
+      'DX-465: true = SOLO los de intentos agotados (intentos del ciclo ≥ tope de la sede), estén ocultos o no. Por defecto salen sin ellos.',
+  })
+  @IsOptional()
+  @Transform(queryBoolean)
+  @IsBoolean({ message: 'exhausted debe ser true o false.' })
+  exhausted?: boolean;
 }
 
 export class RecallDueQueryDto extends RecallDueCountQueryDto {
@@ -303,6 +343,121 @@ export class CreateRecallContactDto {
   @IsOptional()
   @IsUUID('4', { message: 'appointmentId debe ser un UUID.' })
   appointmentId?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2027-02-15',
+    description: `DX-465: solo con CALL_BACK. Día (AAAA-MM-DD, de hoy a ${RECALL_CALLBACK_MAX_DAYS} días, en la sede del paciente) en que vuelve a la lista. Sin él, «Llamar luego» oculta los días de la sede, como los demás intentos.`,
+  })
+  @IsOptional()
+  @IsString({ message: 'callbackOn debe ser una fecha (AAAA-MM-DD).' })
+  @TextMaxLength(INPUT_CODE_MAX)
+  callbackOn?: string | null;
+}
+
+/** DX-465 (D5): un recall del lote. */
+export class RecallContactBatchItemDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID('4', { message: 'recallId debe ser un UUID.' })
+  recallId!: string;
+}
+
+/** DX-465 (D5): el mismo intento para varios recalls de la lista. */
+export class CreateRecallContactsBatchDto {
+  @ApiProperty({
+    type: [RecallContactBatchItemDto],
+    minItems: 1,
+    maxItems: RECALL_BATCH_MAX,
+    description: `De 1 a ${RECALL_BATCH_MAX} recalls distintos de la lista de llamada`,
+  })
+  @IsArray({ message: 'items debe ser una lista.' })
+  @ArrayMinSize(1, { message: 'Elige al menos un paciente de la lista.' })
+  @ArrayMaxSize(RECALL_BATCH_MAX, {
+    message: `Se registran hasta ${RECALL_BATCH_MAX} intentos a la vez.`,
+  })
+  @ValidateNested({ each: true })
+  @Type(() => RecallContactBatchItemDto)
+  items!: RecallContactBatchItemDto[];
+
+  @ApiProperty({
+    enum: RecallContactChannel,
+    enumName: 'RecallContactChannel',
+    description: 'Llamada, enlace de WhatsApp, email o en persona',
+  })
+  @IsEnum(RecallContactChannel, {
+    message: 'channel debe ser CALL, WHATSAPP_LINK, EMAIL o IN_PERSON.',
+  })
+  channel!: RecallContactChannel;
+
+  @ApiProperty({
+    enum: RecallContactOutcome,
+    enumName: 'RecallContactOutcome',
+    description:
+      'El mismo para todos. Sin BOOKED: «Agendó» se registra al crear la cita de cada paciente.',
+  })
+  @IsEnum(RecallContactOutcome, {
+    message:
+      'outcome debe ser NO_ANSWER, LEFT_MESSAGE, CALL_BACK, WILL_BOOK, DECLINED o WRONG_NUMBER.',
+  })
+  outcome!: RecallContactOutcome;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: RECALL_NOTE_MAX,
+    description: 'Nota corta (sin datos clínicos), la misma en cada contacto',
+  })
+  @IsOptional()
+  @IsString({ message: 'note debe ser un texto.' })
+  @MaxLength(RECALL_NOTE_MAX, {
+    message: `La nota admite hasta ${RECALL_NOTE_MAX} caracteres.`,
+  })
+  note?: string | null;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date',
+    nullable: true,
+    example: '2027-02-15',
+    description: `Obligatoria con CALL_BACK y solo con él: de hoy a ${RECALL_CALLBACK_MAX_DAYS} días en la sede de cada paciente.`,
+  })
+  @IsOptional()
+  @IsString({ message: 'callbackOn debe ser una fecha (AAAA-MM-DD).' })
+  @TextMaxLength(INPUT_CODE_MAX)
+  callbackOn?: string | null;
+}
+
+/** DX-465 (D2): los ajustes de intentos de una sede. */
+export class UpdateRecallSettingsDto {
+  @ApiProperty({
+    minimum: RECALL_HIDE_DAYS_MIN,
+    maximum: RECALL_HIDE_DAYS_MAX,
+    example: RECALL_HIDE_DAYS_DEFAULT,
+    description:
+      'Tras un intento, días (de la sede) que el paciente no sale en la lista por defecto',
+  })
+  @IsInt({ message: RECALL_SETTINGS_HIDE_DAYS_MESSAGE })
+  @Min(RECALL_HIDE_DAYS_MIN, { message: RECALL_SETTINGS_HIDE_DAYS_MESSAGE })
+  @Max(RECALL_HIDE_DAYS_MAX, { message: RECALL_SETTINGS_HIDE_DAYS_MESSAGE })
+  hideDays!: number;
+
+  @ApiProperty({
+    minimum: RECALL_MAX_ATTEMPTS_MIN,
+    maximum: RECALL_MAX_ATTEMPTS_MAX,
+    example: RECALL_MAX_ATTEMPTS_DEFAULT,
+    description:
+      'Intentos del ciclo con los que el paciente queda en «Intentos agotados»',
+  })
+  @IsInt({ message: RECALL_SETTINGS_MAX_ATTEMPTS_MESSAGE })
+  @Min(RECALL_MAX_ATTEMPTS_MIN, {
+    message: RECALL_SETTINGS_MAX_ATTEMPTS_MESSAGE,
+  })
+  @Max(RECALL_MAX_ATTEMPTS_MAX, {
+    message: RECALL_SETTINGS_MAX_ATTEMPTS_MESSAGE,
+  })
+  maxAttempts!: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -318,6 +473,21 @@ export class RecallLastContactDto {
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
+}
+
+/** DX-465: el último intento (= el último contacto) con la forma del intento. */
+export class RecallLastAttemptDto {
+  @ApiProperty({
+    format: 'date-time',
+    description: 'Hora del servidor del intento',
+  })
+  at!: Date;
+
+  @ApiProperty({ enum: RecallContactOutcome, enumName: 'RecallContactOutcome' })
+  outcome!: RecallContactOutcome;
+
+  @ApiProperty({ enum: RecallContactChannel, enumName: 'RecallContactChannel' })
+  channel!: RecallContactChannel;
 }
 
 export class RecallDueItemDto {
@@ -393,6 +563,51 @@ export class RecallDueItemDto {
 
   @ApiProperty({ type: RecallLastContactDto, nullable: true })
   lastContact!: RecallLastContactDto | null;
+
+  @ApiProperty({
+    type: RecallLastAttemptDto,
+    nullable: true,
+    description:
+      'DX-465: el último intento (el mismo contacto que `lastContact`)',
+  })
+  lastAttempt!: RecallLastAttemptDto | null;
+
+  @ApiProperty({
+    description:
+      'DX-465: intentos del ciclo actual (vuelve a 0 con «Agendó», «Rechaza» o un vencimiento nuevo)',
+  })
+  attempts!: number;
+
+  @ApiProperty({
+    description: 'DX-465: tope de intentos de la sede del paciente',
+  })
+  maxAttempts!: number;
+
+  @ApiProperty({ description: 'DX-465: attempts ≥ maxAttempts' })
+  exhausted!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description:
+      'DX-465: oculto por defecto hasta ese día de la sede (vuelve ese día); null si ya sale. Solo con `includeContacted` o `exhausted` llega una fila con valor.',
+  })
+  hiddenUntil!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description: 'DX-465: «Llamar luego» del ciclo actual',
+  })
+  callbackOn!: string | null;
+
+  @ApiProperty({
+    description:
+      'DX-465: el teléfono está marcado para revisar («Número equivocado»)',
+  })
+  phoneReview!: boolean;
 }
 
 export class RecallDuePageDto {
@@ -583,6 +798,40 @@ export class PatientRecallDto {
 
   @ApiProperty({ type: RecallStaffRefDto })
   updatedBy!: RecallStaffRefDto;
+
+  @ApiProperty({ description: 'DX-465: intentos del ciclo actual' })
+  attempts!: number;
+
+  @ApiProperty({ description: 'DX-465: tope de intentos de la sede' })
+  maxAttempts!: number;
+
+  @ApiProperty({ description: 'DX-465: attempts ≥ maxAttempts' })
+  exhausted!: boolean;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'DX-465: hora del servidor del último intento del ciclo',
+  })
+  lastAttemptAt!: Date | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description:
+      'DX-465: no sale en la lista por defecto hasta ese día de la sede; null si ya sale',
+  })
+  hiddenUntil!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description: 'DX-465: «Llamar luego» del ciclo actual',
+  })
+  callbackOn!: string | null;
 }
 
 export class RecallContactDto {
@@ -624,6 +873,14 @@ export class RecallContactDto {
   @ApiProperty({ type: String, format: 'uuid', nullable: true })
   appointmentId!: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description: 'DX-465: «Llamar luego» con fecha',
+  })
+  callbackOn!: string | null;
+
   @ApiProperty({ type: RecallStaffRefDto })
   author!: RecallStaffRefDto;
 
@@ -640,6 +897,77 @@ export class PatientRecallsDto {
     description: 'Historial de contactos, más recientes primero (hasta 50)',
   })
   contacts!: RecallContactDto[];
+
+  @ApiProperty({
+    type: () => PhoneReviewDto,
+    nullable: true,
+    description:
+      'DX-465: el teléfono marcado para revisar por un «Número equivocado»; null si no',
+  })
+  phoneReview!: PhoneReviewDto | null;
+}
+
+/** DX-465 (D4): la marca de teléfono por revisar. */
+export class PhoneReviewDto {
+  @ApiProperty({ format: 'date-time' })
+  flaggedAt!: Date;
+
+  @ApiProperty({ type: RecallStaffRefDto })
+  flaggedBy!: RecallStaffRefDto;
+}
+
+/** DX-465 (D5): lo que devuelve el lote. */
+export class RecallContactsBatchDto {
+  @ApiProperty({
+    type: [RecallContactDto],
+    description: 'Un contacto por recall, en el orden del cuerpo',
+  })
+  contacts!: RecallContactDto[];
+}
+
+/** DX-465 (D2): los ajustes de intentos de una sede. */
+export class LocationRecallSettingsDto {
+  @ApiProperty({ format: 'uuid' })
+  locationId!: string;
+
+  @ApiProperty({ example: 'Sede principal' })
+  locationName!: string;
+
+  @ApiProperty({
+    minimum: RECALL_HIDE_DAYS_MIN,
+    maximum: RECALL_HIDE_DAYS_MAX,
+    example: RECALL_HIDE_DAYS_DEFAULT,
+    description: `Días de ocultación tras un intento. Sin configurar: ${RECALL_HIDE_DAYS_DEFAULT}.`,
+  })
+  hideDays!: number;
+
+  @ApiProperty({
+    minimum: RECALL_MAX_ATTEMPTS_MIN,
+    maximum: RECALL_MAX_ATTEMPTS_MAX,
+    example: RECALL_MAX_ATTEMPTS_DEFAULT,
+    description: `Tope de intentos del ciclo. Sin configurar: ${RECALL_MAX_ATTEMPTS_DEFAULT}.`,
+  })
+  maxAttempts!: number;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'null = sin configurar (valores por defecto)',
+  })
+  updatedAt!: Date | null;
+}
+
+/** DX-465 (D4): lo que devuelve «Ya está corregido». */
+export class PhoneReviewClearedDto {
+  @ApiProperty({ format: 'uuid' })
+  patientId!: string;
+
+  @ApiProperty({
+    description:
+      'true si estaba marcado y se quitó; false si no lo estaba (nada que hacer)',
+  })
+  cleared!: boolean;
 }
 
 /** DX-015-bis: un procedimiento disparador de un tipo. */

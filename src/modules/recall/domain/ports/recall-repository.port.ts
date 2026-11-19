@@ -1,6 +1,10 @@
 import type { RecallKind } from '@prisma/client';
 import type {
+  LocationRecallSettingsView,
   NewRecallContact,
+  PhoneReviewView,
+  RecallContactBatchData,
+  RecordedRecallContact,
   PatientRecallRow,
   RecallContactView,
   RecallDueQuery,
@@ -17,6 +21,7 @@ import type {
   StaffRef,
 } from '../recall.entity';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type { RecallSettingsValues } from '../recall-cycle';
 
 export const RECALL_REPOSITORY = Symbol('RECALL_REPOSITORY');
 
@@ -38,7 +43,12 @@ export interface RecallRepository {
   patientRecalls(
     patientId: string,
     now: Date,
-  ): Promise<{ rows: PatientRecallRow[]; contacts: RecallContactView[] }>;
+  ): Promise<{
+    rows: PatientRecallRow[];
+    contacts: RecallContactView[];
+    /** DX-465: el teléfono marcado para revisar, o null. */
+    phoneReview: PhoneReviewView | null;
+  }>;
   /** Hoy en la zona de la sede donde se escribe (la activa o la de trabajo). */
   writeToday(now: Date): Promise<string>;
   /**
@@ -101,10 +111,41 @@ export interface RecallRepository {
   ): Promise<RecallTypeView>;
   /** El recall con su sede: la misma que usa la lista para filtrar. */
   findRecall(recallId: string): Promise<RecallRef | null>;
+  /** DX-465: los que existan de esos ids (para el lote), en orden de id. */
+  findRecalls(recallIds: readonly string[]): Promise<RecallRef[]>;
   appointmentOfPatient(
     appointmentId: string,
     patientId: string,
   ): Promise<boolean>;
-  createContact(data: NewRecallContact): Promise<RecallContactView>;
+  /**
+   * DX-465: el contacto y el estado del ciclo (D1) en una transacción, con la
+   * fila del recall bloqueada. Un «Agendó» que ya existe para esa cita en ese
+   * recall vuelve con `replayed` sin escribir nada. 404 si el recall ya no está.
+   */
+  createContact(data: NewRecallContact): Promise<RecordedRecallContact>;
+  /**
+   * DX-465 (D5): todos o ninguno, con un evento CREATE RECALL_CONTACT por
+   * contacto en la misma transacción. 404 (con `recallIds`) si alguno ya no está.
+   */
+  createContactsBatch(
+    data: RecallContactBatchData,
+    audit: AuditRequestContext,
+  ): Promise<RecallContactView[]>;
+  /** DX-465 (D2): los ajustes de intentos de cada sede viva. */
+  listSettings(): Promise<LocationRecallSettingsView[]>;
+  /** DX-465 (D2): null si la sede no es de la clínica o está retirada. */
+  saveSettings(
+    locationId: string,
+    values: RecallSettingsValues,
+    audit: AuditRequestContext,
+  ): Promise<LocationRecallSettingsView | null>;
+  /**
+   * DX-465 (D4): quita la marca del teléfono. null si el paciente no existe;
+   * `false` si no estaba marcado (sin evento).
+   */
+  clearPhoneReview(
+    patientId: string,
+    audit: AuditRequestContext,
+  ): Promise<boolean | null>;
   staff(ids: readonly string[]): Promise<Map<string, StaffRef>>;
 }
