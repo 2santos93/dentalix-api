@@ -38,6 +38,9 @@ const NON_ID_PARAMS = new Set([
   'kind', // tipo de recall
   'slug', // subdominio
   'code', // código de verificación de receta
+  'key', // DX-565: clave del catálogo de mensajes (la valida su caso de uso)
+  'channel', // DX-565: canal de un mensaje (EMAIL | WHATSAPP)
+  'language', // DX-565: idioma de un mensaje (es | en)
 ]);
 
 interface ParamArg {

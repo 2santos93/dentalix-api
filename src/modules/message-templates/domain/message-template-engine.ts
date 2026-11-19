@@ -44,7 +44,8 @@ export const MESSAGE_EMAIL_LINKS_MESSAGE =
 export const MESSAGE_WHATSAPP_LINKS_MESSAGE =
   'El texto no puede llevar enlaces, direcciones web, correos ni HTML: el enlace va con {enlace}.';
 
-type ParseResult = { ok: true; tokens: Token[] } | { ok: false; message: string };
+type ParseResult =
+  { ok: true; tokens: Token[] } | { ok: false; message: string };
 
 function parse(text: string): ParseResult {
   const tokens: Token[] = [];
@@ -135,7 +136,9 @@ function renderTokens(tokens: readonly Token[], values: MessageValues): string {
     if (text) out.push({ text, fromVariable });
   };
   const pushPiece = (p: Piece) =>
-    p.kind === 'text' ? push(p.text, false) : push(valueOf(values, p.name), true);
+    p.kind === 'text'
+      ? push(p.text, false)
+      : push(valueOf(values, p.name), true);
   for (const token of tokens) {
     if (token.kind !== 'optional') {
       pushPiece(token);

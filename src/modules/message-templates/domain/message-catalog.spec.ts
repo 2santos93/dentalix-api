@@ -81,12 +81,12 @@ describe('DX-565: catálogo de mensajes editables', () => {
         for (const language of MESSAGE_LANGUAGES) {
           const text = defaultMessageText(key, channel, language);
           if (!text) continue;
-          expect([key, channel, language, validateMessageTemplate(key, channel, text)]).toEqual([
+          expect([
             key,
             channel,
             language,
-            { ok: true, text },
-          ]);
+            validateMessageTemplate(key, channel, text),
+          ]).toEqual([key, channel, language, { ok: true, text }]);
         }
       }
     }

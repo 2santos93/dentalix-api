@@ -57,7 +57,8 @@ describe('DX-565: motor de textos de los mensajes al paciente', () => {
     });
 
     it('un tramo opcional sale solo si TODAS sus variables tienen valor', () => {
-      const body = 'Hola[ {paciente}], cita[ con {profesional}][ en {sede} ({direccion})]: {enlace}';
+      const body =
+        'Hola[ {paciente}], cita[ con {profesional}][ en {sede} ({direccion})]: {enlace}';
       expect(render(body)).toBe(
         'Hola Ana, cita con Dra. Laura Gómez en Sede Altamira (Av. Francisco de Miranda 93): https://demo.dentalix.app/confirmar/tok',
       );
@@ -117,7 +118,8 @@ describe('DX-565: motor de textos de los mensajes al paciente', () => {
           VALUES,
         ),
       ).toEqual({
-        subject: 'Cita en Clínica Dental Altamira el martes 20 de octubre de 2026',
+        subject:
+          'Cita en Clínica Dental Altamira el martes 20 de octubre de 2026',
         body: 'Hola',
       });
     });
@@ -146,9 +148,11 @@ describe('DX-565: motor de textos de los mensajes al paciente', () => {
         message:
           '{importe} no se puede usar en el recordatorio: los mensajes al paciente no llevan importes ni datos clínicos.',
       });
-      expect(email('Tu {Tratamiento}')).toMatchObject({
+      expect(email('Tu {Tratamiento}')).toEqual({
         ok: false,
-        message: expect.stringContaining('no se puede usar'),
+        field: 'body',
+        message:
+          '{Tratamiento} no se puede usar en el recordatorio: los mensajes al paciente no llevan importes ni datos clínicos.',
       });
     });
 
@@ -270,27 +274,31 @@ describe('DX-565: motor de textos de los mensajes al paciente', () => {
       });
     });
 
-    it.each(['Hola {paciente', 'Hola paciente}', 'Hola {}', 'Hola {pa{ciente}'])(
-      'llaves mal cerradas: %s',
-      (body) => {
-        expect(email(body)).toEqual({
-          ok: false,
-          field: 'body',
-          message: MESSAGE_BRACES_MESSAGE,
-        });
-      },
-    );
+    it.each([
+      'Hola {paciente',
+      'Hola paciente}',
+      'Hola {}',
+      'Hola {pa{ciente}',
+    ])('llaves mal cerradas: %s', (body) => {
+      expect(email(body)).toEqual({
+        ok: false,
+        field: 'body',
+        message: MESSAGE_BRACES_MESSAGE,
+      });
+    });
 
-    it.each(['Hola [ con {profesional}', 'Hola ]', 'Hola [sin variable]', '[[ {sede}]]'])(
-      'corchetes mal usados: %s',
-      (body) => {
-        expect(email(body)).toEqual({
-          ok: false,
-          field: 'body',
-          message: MESSAGE_BRACKETS_MESSAGE,
-        });
-      },
-    );
+    it.each([
+      'Hola [ con {profesional}',
+      'Hola ]',
+      'Hola [sin variable]',
+      '[[ {sede}]]',
+    ])('corchetes mal usados: %s', (body) => {
+      expect(email(body)).toEqual({
+        ok: false,
+        field: 'body',
+        message: MESSAGE_BRACKETS_MESSAGE,
+      });
+    });
 
     it('un tramo opcional no ocupa varias líneas', () => {
       expect(email('Hola [ con\n{profesional}]')).toEqual({
