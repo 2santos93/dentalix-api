@@ -24,16 +24,6 @@ import { pinCatalogCurrency } from './support/catalog-currency';
 // cuerpo de otra clínica (DX-207), la idempotencia de la importación, que el
 // archivo no se guarda y la auditoría. El rendimiento con 5 000 movimientos y
 // la RLS en la BD van en bank-reconciliation.int-spec.ts.
-// ISOLATION_COVERS: GET /bank-reconciliation/accounts/:id/statements
-// ISOLATION_COVERS: PATCH /bank-reconciliation/accounts/:id
-// ISOLATION_COVERS: POST /bank-reconciliation/accounts/:id/statements/inspect
-// ISOLATION_COVERS: POST /bank-reconciliation/accounts/:id/statements/preview
-// ISOLATION_COVERS: POST /bank-reconciliation/accounts/:id/statements
-// ISOLATION_COVERS: GET /bank-reconciliation/accounts/:id/summary
-// ISOLATION_COVERS: GET /bank-reconciliation/accounts/:id/items
-// ISOLATION_COVERS: POST /bank-reconciliation/accounts/:id/auto-match
-// ISOLATION_COVERS: GET /bank-reconciliation/movements/:id/candidates
-// ISOLATION_COVERS: DELETE /bank-reconciliation/matches/:id
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -582,6 +572,16 @@ describe('Conciliación con el extracto del banco (e2e, DX-571)', () => {
     expect(match.endedAt).not.toBeNull();
   });
 
+  // ISOLATION_COVERS: GET /bank-reconciliation/accounts/:id/statements
+  // ISOLATION_COVERS: PATCH /bank-reconciliation/accounts/:id
+  // ISOLATION_COVERS: POST /bank-reconciliation/accounts/:id/statements/inspect
+  // ISOLATION_COVERS: POST /bank-reconciliation/accounts/:id/statements/preview
+  // ISOLATION_COVERS: POST /bank-reconciliation/accounts/:id/statements
+  // ISOLATION_COVERS: GET /bank-reconciliation/accounts/:id/summary
+  // ISOLATION_COVERS: GET /bank-reconciliation/accounts/:id/items
+  // ISOLATION_COVERS: POST /bank-reconciliation/accounts/:id/auto-match
+  // ISOLATION_COVERS: GET /bank-reconciliation/movements/:id/candidates
+  // ISOLATION_COVERS: DELETE /bank-reconciliation/matches/:id
   it('criterio 6: el extracto de una clínica no se cruza con los abonos de otra', async () => {
     // B importa un extracto con la misma referencia: empareja SU abono, no el de A.
     const result = await importStatement(
