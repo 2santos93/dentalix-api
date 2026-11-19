@@ -13,7 +13,7 @@ import { Prisma } from '@prisma/client';
  *    ciclo vigente de sus recalls y quita la ocultación de un último
  *    «Número equivocado» (trigger `patients_phone_review_reset`, ruling 10).
  *  - La fusión la copia al conservado si se queda con el teléfono del
- *    absorbido (`copyPhoneReviewInTx`, ruling 4).
+ *    absorbido (`phoneReviewOf` + `setPhoneReviewInTx`, ruling 4).
  */
 
 type Tx = Prisma.TransactionClient;
@@ -49,24 +49,35 @@ export async function clearPhoneReviewInTx(
   return count > 0;
 }
 
-/**
- * Revisión DX-465 (ruling 4): la fusión deja al conservado con el teléfono
- * del absorbido; la marca de ese número viaja con él (el trigger acaba de
- * anular la del conservado al cambiarle el teléfono). Sin marca en el
- * absorbido, no hace nada.
- */
-export async function copyPhoneReviewInTx(
+/** La marca de un paciente (para la fusión: se lee antes de retirarlo). */
+export async function phoneReviewOf(
   tx: Tx,
   tenantId: string,
-  fromPatientId: string,
-  toPatientId: string,
+  patientId: string,
+): Promise<{ at: Date; byId: string } | null> {
+  const rows = await tx.$queryRaw<{ at: Date | null; byId: string | null }[]>`
+    SELECT "phoneReviewFlaggedAt" AS "at", "phoneReviewFlaggedById" AS "byId"
+      FROM "patients"
+     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${patientId}::uuid`;
+  const row = rows[0];
+  return row?.at && row.byId ? { at: row.at, byId: row.byId } : null;
+}
+
+/**
+ * Revisión DX-465 (ruling 4): la fusión deja al conservado con el teléfono
+ * del absorbido; la marca de ese número (leída con `phoneReviewOf` antes de
+ * fusionar: la fusión retira al absorbido) viaja con él. El trigger acaba de
+ * anular la del conservado al cambiarle el teléfono.
+ */
+export async function setPhoneReviewInTx(
+  tx: Tx,
+  tenantId: string,
+  patientId: string,
+  flag: { at: Date; byId: string },
 ): Promise<void> {
   await tx.$executeRaw`
-    UPDATE "patients" p SET
-      "phoneReviewFlaggedAt" = src."phoneReviewFlaggedAt",
-      "phoneReviewFlaggedById" = src."phoneReviewFlaggedById"
-      FROM "patients" src
-     WHERE p."tenantId" = ${tenantId}::uuid AND p."id" = ${toPatientId}::uuid
-       AND src."tenantId" = ${tenantId}::uuid AND src."id" = ${fromPatientId}::uuid
-       AND src."phoneReviewFlaggedAt" IS NOT NULL`;
+    UPDATE "patients" SET
+      "phoneReviewFlaggedAt" = (${flag.at.toISOString()}::timestamptz AT TIME ZONE 'UTC'),
+      "phoneReviewFlaggedById" = ${flag.byId}::uuid
+     WHERE "tenantId" = ${tenantId}::uuid AND "id" = ${patientId}::uuid`;
 }
