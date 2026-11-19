@@ -245,6 +245,8 @@ export class InMemoryLabRepository implements LabRepository {
       cancelledAt: null,
       cancelledById: null,
       cancelReason: null,
+      cost: null,
+      costCurrency: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -334,6 +336,10 @@ export class InMemoryLabRepository implements LabRepository {
           cancelledBy: person(o.cancelledById),
           cancelReason: o.cancelReason,
           treatmentPlanItem: null,
+          cost:
+            o.cost !== null && o.costCurrency !== null
+              ? { amount: o.cost, currency: o.costCurrency }
+              : null,
           appointment: null,
           replacesOrder:
             o.replacesOrderId && visible(o.replacesOrderId)

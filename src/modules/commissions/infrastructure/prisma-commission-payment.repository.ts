@@ -486,7 +486,12 @@ export class PrismaCommissionPaymentRepository implements CommissionPaymentRepos
       if (!header) return null;
       const settlement = await tx.commissionSettlement.findFirstOrThrow({
         where: { tenantId, id: settlementId },
-        select: { closedAt: true, basis: true },
+        select: {
+          closedAt: true,
+          basis: true,
+          deductLabCost: true,
+          deductCardFee: true,
+        },
       });
       const tenant = await tx.tenant.findUniqueOrThrow({
         where: { id: tenantId },
@@ -507,6 +512,9 @@ export class PrismaCommissionPaymentRepository implements CommissionPaymentRepos
           base: Prisma.Decimal;
           percent: Prisma.Decimal;
           amount: Prisma.Decimal;
+          labCostDeducted: Prisma.Decimal;
+          cardFeeDeducted: Prisma.Decimal;
+          labCostSkippedCurrencies: string[];
           paymentId: string | null;
         }[]
       >`
@@ -514,6 +522,7 @@ export class PrismaCommissionPaymentRepository implements CommissionPaymentRepos
                btrim(pt."firstName" || ' ' || pt."lastName") AS "patientName",
                l."catalogCode", l."catalogLabel", l."toothNumber", l."locationId",
                l."releasedAt", l."completedAt", l."currency", l."base", l."percent", l."amount",
+               l."labCostDeducted", l."cardFeeDeducted", l."labCostSkippedCurrencies",
                (SELECT cpl."paymentId" FROM "commission_payment_lines" cpl
                  WHERE cpl."tenantId" = l."tenantId" AND cpl."lineId" = l."id"
                    AND cpl."voidedAt" IS NULL) AS "paymentId"
@@ -557,6 +566,9 @@ export class PrismaCommissionPaymentRepository implements CommissionPaymentRepos
           base: dec(r.base),
           percent: dec(r.percent),
           amount: dec(r.amount),
+          labCost: dec(r.labCostDeducted),
+          cardFee: dec(r.cardFeeDeducted),
+          labCostSkippedCurrencies: r.labCostSkippedCurrencies,
           paymentId: r.paymentId,
         };
       });
@@ -565,6 +577,8 @@ export class PrismaCommissionPaymentRepository implements CommissionPaymentRepos
         header,
         closedAt: settlement.closedAt,
         basis: settlement.basis,
+        deductLabCost: settlement.deductLabCost,
+        deductCardFee: settlement.deductCardFee,
         lines,
         payments: await this.paymentsIn(tx, tenantId, settlementId, new Date()),
         format: {

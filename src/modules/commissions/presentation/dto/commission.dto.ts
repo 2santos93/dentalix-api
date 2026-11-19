@@ -113,7 +113,7 @@ export class SaveCommissionRuleDto {
   @ApiPropertyOptional({
     default: false,
     description:
-      'Descontar el costo de laboratorio. Aún no disponible (las órdenes de laboratorio no guardan su costo): true → 400.',
+      'DX-018-bis: descontar antes del % el costo de laboratorio del ítem (sus órdenes vivas con costo en la moneda del plan; en otra moneda no se convierte: se avisa y no se descuenta).',
   })
   @IsOptional()
   @IsBoolean({ message: 'deductLabCost tiene que ser sí o no.' })
@@ -122,7 +122,7 @@ export class SaveCommissionRuleDto {
   @ApiPropertyOptional({
     default: false,
     description:
-      'Descontar la comisión de la pasarela del medio de pago. Aún no disponible (los medios de pago no guardan ese %): true → 400.',
+      'DX-018-bis: descontar antes del % la comisión de la pasarela (el % del medio de pago del abono; solo base «cobrado»).',
   })
   @IsOptional()
   @IsBoolean({ message: 'deductCardFee tiene que ser sí o no.' })
@@ -217,13 +217,12 @@ export class CommissionRuleDto {
 
 export class CommissionDeductionsDto {
   @ApiProperty({
-    description:
-      'Se puede descontar el costo de laboratorio (hoy no: sin datos).',
+    description: 'Se puede descontar el costo de laboratorio (DX-018-bis: sí).',
   })
   labCost!: boolean;
   @ApiProperty({
     description:
-      'Se puede descontar la comisión de la pasarela (hoy no: sin datos).',
+      'Se puede descontar la comisión de la pasarela (DX-018-bis: sí).',
   })
   cardFee!: boolean;
 }
@@ -263,6 +262,30 @@ export class CommissionLinePaymentDto {
   @ApiProperty({ description: 'Importe del abono tal como se cobró.' })
   amount!: number;
   @ApiProperty({ description: 'Moneda del abono.' }) currency!: string;
+}
+
+/** DX-018-bis: base = grossBase − labCost − cardFee. */
+export class CommissionLineDeductionsDto {
+  @ApiProperty({
+    description: 'Base antes de descuentos (sin descuentos, = base).',
+  })
+  grossBase!: number;
+  @ApiProperty({ description: 'Costo de laboratorio descontado.' })
+  labCost!: number;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: '% de la pasarela aplicado; null si no se descontó.',
+  })
+  cardFeePercent!: number | null;
+  @ApiProperty({ description: 'Comisión de la pasarela descontada.' })
+  cardFee!: number;
+  @ApiProperty({
+    type: [String],
+    description:
+      'Monedas de costos de laboratorio distintas a la del plan: no se convierten ni se descuentan (aviso).',
+  })
+  labCostSkippedCurrencies!: string[];
 }
 
 export class CommissionLineDto {
@@ -319,6 +342,8 @@ export class CommissionLineDto {
     description: 'Honorario en la moneda de la línea (un ajuste, con signo).',
   })
   amount!: number;
+  @ApiProperty({ type: CommissionLineDeductionsDto })
+  deductions!: CommissionLineDeductionsDto;
   @ApiProperty({
     type: String,
     format: 'uuid',
@@ -394,6 +419,14 @@ export class CommissionSettlementSummaryDto {
   })
   releaseMode!: CommissionReleaseMode;
   @ApiProperty() percent!: number;
+  @ApiProperty({
+    description: 'DX-018-bis: la regla descontaba el laboratorio al cerrar.',
+  })
+  deductLabCost!: boolean;
+  @ApiProperty({
+    description: 'DX-018-bis: la regla descontaba la pasarela al cerrar.',
+  })
+  deductCardFee!: boolean;
   @ApiProperty({ format: 'date-time' }) closedAt!: Date;
   @ApiProperty({ type: CommissionClosedByDto })
   closedBy!: CommissionClosedByDto;

@@ -4,8 +4,11 @@ import type { PaymentMethodRepository } from '../domain/ports/payment-method-rep
 import { INITIAL_KIND_LOCKED_MESSAGE } from '../domain/payment-method-rules';
 import {
   CreatePaymentMethodUseCase,
+  GATEWAY_FEE_PERCENT_MESSAGE,
+  SetPaymentMethodGatewayFeeUseCase,
   UpdatePaymentMethodUseCase,
 } from './payment-methods.use-cases';
+import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 
 function method(
   overrides: Partial<ClinicPaymentMethodEntity>,
@@ -19,6 +22,7 @@ function method(
     requiresReference: false,
     proofPolicy: 'NONE',
     allowInPaymentLink: false,
+    gatewayFeePercent: null,
     adjustments: [],
     legacyMethod: 'CASH',
     createdAt: new Date(0),
@@ -33,6 +37,9 @@ function repoWith(row: ClinicPaymentMethodEntity | null) {
     .mockImplementation((_id: string, data: object) =>
       Promise.resolve(row ? { ...row, ...data } : null),
     );
+  const setGatewayFee = jest.fn((_id: string, percent: number | null) =>
+    Promise.resolve(row ? { ...row, gatewayFeePercent: percent } : null),
+  );
   const repo: PaymentMethodRepository = {
     list: jest.fn(),
     findById: jest.fn().mockResolvedValue(row),
@@ -42,8 +49,9 @@ function repoWith(row: ClinicPaymentMethodEntity | null) {
     update,
     createAdjustment: jest.fn(),
     updateAdjustment: jest.fn(),
+    setGatewayFee,
   };
-  return { repo, update };
+  return { repo, update, setGatewayFee };
 }
 
 describe('UpdatePaymentMethodUseCase (DX-377)', () => {
@@ -138,5 +146,40 @@ describe('«Pide comprobante» (DX-389)', () => {
       'u-1',
     );
     expect(updated.proofPolicy).toBe('OPTIONAL');
+  });
+});
+
+describe('SetPaymentMethodGatewayFeeUseCase (DX-018-bis)', () => {
+  const ctx = {} as AuditRequestContext;
+
+  it('guarda un % en (0, 100] con hasta 2 decimales, y null lo quita', async () => {
+    const { repo, setGatewayFee } = repoWith(method({ kind: 'CARD' }));
+    const useCase = new SetPaymentMethodGatewayFeeUseCase(repo);
+    await expect(useCase.execute('pm-1', 3.5, ctx)).resolves.toMatchObject({
+      gatewayFeePercent: 3.5,
+    });
+    await expect(useCase.execute('pm-1', null, ctx)).resolves.toMatchObject({
+      gatewayFeePercent: null,
+    });
+    expect(setGatewayFee).toHaveBeenCalledWith('pm-1', 3.5, ctx);
+  });
+
+  it.each([0, -1, 100.01, 2.555, Number.NaN])(
+    '%p no vale (400 en español, sin escribir)',
+    async (percent) => {
+      const { repo, setGatewayFee } = repoWith(method({}));
+      const useCase = new SetPaymentMethodGatewayFeeUseCase(repo);
+      await expect(useCase.execute('pm-1', percent, ctx)).rejects.toThrow(
+        new BadRequestException(GATEWAY_FEE_PERCENT_MESSAGE),
+      );
+      expect(setGatewayFee).not.toHaveBeenCalled();
+    },
+  );
+
+  it('medio de otra clínica o inexistente: 404', async () => {
+    const { repo } = repoWith(null);
+    await expect(
+      new SetPaymentMethodGatewayFeeUseCase(repo).execute('x', 2, ctx),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

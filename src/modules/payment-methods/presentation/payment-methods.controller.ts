@@ -51,6 +51,7 @@ import {
   CreatePaymentMethodUseCase,
   ListPaymentMethodsUseCase,
   UpdatePaymentAdjustmentUseCase,
+  SetPaymentMethodGatewayFeeUseCase,
   UpdatePaymentMethodUseCase,
 } from '../application/payment-methods.use-cases';
 import type {
@@ -74,6 +75,7 @@ import {
   ListPaymentMethodsQueryDto,
   PaymentMethodAdjustmentDto,
   PaymentMethodDto,
+  SetPaymentMethodGatewayFeeDto,
   UpdatePaymentAdjustmentDto,
   UpdatePaymentMethodDto,
 } from './dto/payment-method.dto';
@@ -98,6 +100,7 @@ export class PaymentMethodsController {
     private readonly updateMethod: UpdatePaymentMethodUseCase,
     private readonly createAdjustment: CreatePaymentAdjustmentUseCase,
     private readonly updateAdjustment: UpdatePaymentAdjustmentUseCase,
+    private readonly setGatewayFee: SetPaymentMethodGatewayFeeUseCase,
     private readonly listInstructions: ListPaymentMethodInstructionsUseCase,
     private readonly saveInstructions: SavePaymentMethodInstructionsUseCase,
     private readonly removeInstructions: RemovePaymentMethodInstructionsUseCase,
@@ -242,6 +245,35 @@ export class PaymentMethodsController {
         fixedCurrency: dto.fixedCurrency,
         active: dto.active,
       },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+  }
+
+  // DX-018-bis: % que la pasarela cobra a la clínica por el medio. Solo ADMIN;
+  // auditado en la transacción (PAYMENT_METHOD_GATEWAY_FEE_UPDATED, antes y
+  // después; sin evento si no cambia).
+  @Put(':id/gateway-fee')
+  @Roles(...PAYMENT_METHOD_WRITE_ROLES)
+  @RolesDeniedMessage(PAYMENT_METHODS_ADMIN_MESSAGE)
+  @ApiOperation({
+    summary: 'Pone o quita la comisión de la pasarela del medio',
+    description:
+      'DX-018-bis. Lo que la pasarela cobra a la CLÍNICA por cada cobro con este medio (no es un ajuste al paciente de DX-516). Con «descontar pasarela» en la regla de honorarios, la base cobrada de cada abono se reduce en este %; al cerrar la liquidación queda congelado.',
+  })
+  @ApiOkResponse({ type: PaymentMethodDto })
+  @ApiBadRequestResponse({
+    description: 'Porcentaje fuera de (0, 100] o con más de 2 decimales',
+  })
+  @ApiNotFoundResponse({ description: 'Medio no encontrado en esta clínica' })
+  @ApiForbiddenResponse({ description: 'Solo ADMIN' })
+  gatewayFee(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetPaymentMethodGatewayFeeDto,
+    @Req() req: AuditableRequest,
+  ): Promise<ClinicPaymentMethodEntity> {
+    return this.setGatewayFee.execute(
+      id,
+      dto.percent,
       requireAuditRequestContext(req, this.tenantContext),
     );
   }

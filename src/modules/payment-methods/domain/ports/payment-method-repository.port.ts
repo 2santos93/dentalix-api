@@ -74,6 +74,16 @@ export interface PaymentMethodRepository {
     input: PaymentAdjustmentWriteInput,
     audit: AuditRequestContext,
   ): Promise<PaymentAdjustmentWriteResult>;
+  /**
+   * DX-018-bis: el % de la pasarela del medio (null lo quita), con el medio
+   * bloqueado y su evento (antes y después) en la MISMA transacción. null si
+   * el medio no existe en la clínica.
+   */
+  setGatewayFee(
+    paymentMethodId: string,
+    percent: number | null,
+    audit: AuditRequestContext,
+  ): Promise<ClinicPaymentMethodEntity | null>;
   /** DX-516: cambio de un ajuste (forma completa), con su antes y después. */
   updateAdjustment(
     paymentMethodId: string,

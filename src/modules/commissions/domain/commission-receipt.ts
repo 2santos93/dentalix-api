@@ -37,9 +37,29 @@ export const PAYMENT_STATUS_LABELS: Record<SettlementPaymentStatus, string> = {
   NOTHING_TO_PAY: 'Sin importe a pagar',
 };
 
-/** Las deducciones: hoy no hay datos de origen (DX-018, decisión 10). */
-export const NO_DEDUCTIONS_NOTE =
-  'Deducciones: ninguna. La clínica aún no registra el costo de laboratorio ni la comisión de la pasarela por prestación.';
+/** DX-018-bis: el recibo no congela la regla; remite a la liquidación. */
+export const RECEIPT_BASE_NOTE =
+  'La base de cada prestación es la de la liquidación, con los descuentos de laboratorio y pasarela que aplicara su regla. Sin otras deducciones.';
+
+/**
+ * DX-018-bis: qué descontó la base al cerrar (la regla congelada). Los
+ * honorarios no llevan otras deducciones (fila «Deducciones» en 0).
+ */
+export function deductionsNote(source: {
+  deductLabCost: boolean;
+  deductCardFee: boolean;
+}): string {
+  if (source.deductLabCost && source.deductCardFee) {
+    return 'La base descuenta el costo de laboratorio de cada prestación (en la moneda del plan) y la comisión de la pasarela del medio de pago de cada abono, antes del porcentaje.';
+  }
+  if (source.deductLabCost) {
+    return 'La base descuenta el costo de laboratorio de cada prestación (en la moneda del plan), antes del porcentaje. No descuenta la comisión de la pasarela.';
+  }
+  if (source.deductCardFee) {
+    return 'La base descuenta la comisión de la pasarela del medio de pago de cada abono, antes del porcentaje. No descuenta el costo de laboratorio.';
+  }
+  return 'La base no descuenta el costo de laboratorio ni la comisión de la pasarela.';
+}
 
 export interface ReceiptLine {
   kind: 'ACCRUAL' | 'ADJUSTMENT';
@@ -232,6 +252,10 @@ export function settlementDocumentModel(
       fromCents(ls.reduce((s, l) => s + toCents(l.amount), 0));
     const accrued = sum(lines.filter((l) => l.kind === 'ACCRUAL'));
     const adjustments = sum(lines.filter((l) => l.kind === 'ADJUSTMENT'));
+    const cents = (pick: (l: DocumentLine) => number) =>
+      fromCents(lines.reduce((s, l) => s + toCents(pick(l)), 0));
+    const labCost = cents((l) => l.labCost);
+    const cardFee = cents((l) => l.cardFee);
     const cur = state.currencies.find((c) => c.currency === currency);
     const totals = [
       { label: 'Devengado', value: money(accrued) },
@@ -242,6 +266,17 @@ export function settlementDocumentModel(
               value: money(adjustments),
             },
           ]
+        : []),
+      ...(source.deductLabCost
+        ? [
+            {
+              label: 'Laboratorio descontado de la base',
+              value: money(labCost),
+            },
+          ]
+        : []),
+      ...(source.deductCardFee
+        ? [{ label: 'Pasarela descontada de la base', value: money(cardFee) }]
         : []),
       { label: 'Deducciones', value: money(0) },
       { label: `Total ${currency}`, value: money(cur?.total ?? 0) },
@@ -255,8 +290,16 @@ export function settlementDocumentModel(
     };
   });
   const live = source.payments.filter((p) => p.voidedAt === null);
+  const skipped = source.lines.filter(
+    (l) => l.labCostSkippedCurrencies.length > 0,
+  ).length;
   const notes = [
-    NO_DEDUCTIONS_NOTE,
+    deductionsNote(source),
+    ...(skipped > 0
+      ? [
+          `${skipped === 1 ? '1 prestación tiene' : `${skipped} prestaciones tienen`} costo de laboratorio en otra moneda: no se convierte ni se descuenta.`,
+        ]
+      : []),
     'Cada moneda se liquida y se paga por separado, sin convertir.',
     ...live.map((p) =>
       pdfText(
@@ -348,7 +391,7 @@ export function receiptDocumentModel(
       },
     ],
     notes: [
-      NO_DEDUCTIONS_NOTE,
+      RECEIPT_BASE_NOTE,
       'Pacientes identificados solo por sus iniciales.',
     ].map(pdfText),
     signature: signed

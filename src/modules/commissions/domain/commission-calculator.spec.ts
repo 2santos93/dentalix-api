@@ -1,8 +1,11 @@
 import {
   accrualLines,
   adjustmentLines,
+  applyDeductions,
   baseAfterDeductions,
   commissionOf,
+  frozenDeductions,
+  labCostOf,
   planReleasedAt,
   totalsByCurrency,
   type CandidateItem,
@@ -43,6 +46,7 @@ const item = (over: Partial<CandidateItem> = {}): CandidateItem => ({
   producedPending: true,
   allocations: [],
   labCost: null,
+  labCostSkippedCurrencies: [],
   ...over,
 });
 
@@ -391,7 +395,13 @@ describe('adjustmentLines: lo anulado después del cierre va en la siguiente', (
     percent: 35,
     settledBase: 33.33,
     settledAmount: 11.67,
-    currentBase: 33.33,
+    settledGross: 33.33,
+    settledLabCost: 0,
+    settledCardFee: 0,
+    originalGross: 33.33,
+    originalLabCost: 0,
+    cardFeePercent: null,
+    currentGross: 33.33,
     ...over,
   });
 
@@ -400,7 +410,7 @@ describe('adjustmentLines: lo anulado después del cierre va en la siguiente', (
   });
 
   it('abono anulado: ajuste negativo que deja la línea en 0 al centavo', () => {
-    const [adj] = adjustmentLines([settled({ currentBase: 0 })]);
+    const [adj] = adjustmentLines([settled({ currentGross: 0 })]);
     expect(adj).toMatchObject({
       kind: 'ADJUSTMENT',
       adjustsLineId: 'line-1',
@@ -418,7 +428,9 @@ describe('adjustmentLines: lo anulado después del cierre va en la siguiente', (
         paymentId: null,
         settledBase: 200,
         settledAmount: 70,
-        currentBase: 180,
+        settledGross: 200,
+        originalGross: 200,
+        currentGross: 180,
       }),
     ]);
     expect(adj).toMatchObject({ base: -20, amount: -7 });
@@ -427,9 +439,199 @@ describe('adjustmentLines: lo anulado después del cierre va en la siguiente', (
   it('lo ya ajustado antes no se vuelve a ajustar (cuenta lo liquidado con sus ajustes)', () => {
     expect(
       adjustmentLines([
-        settled({ settledBase: 0, settledAmount: 0, currentBase: 0 }),
+        settled({
+          settledBase: 0,
+          settledAmount: 0,
+          settledGross: 0,
+          currentGross: 0,
+        }),
       ]),
     ).toEqual([]);
+  });
+});
+
+describe('DX-018-bis: descuentos congelados en la línea', () => {
+  it('labCostOf: suma los costos en la moneda del plan; los de otra moneda se avisan y no se convierten', () => {
+    expect(
+      labCostOf('USD', [
+        { amount: 80.1, currency: 'USD' },
+        { amount: 0.2, currency: 'USD' },
+        { amount: 3_650, currency: 'VES' },
+      ]),
+    ).toEqual({ labCost: 80.3, skippedCurrencies: ['VES'] });
+    expect(labCostOf('USD', [{ amount: 3_650, currency: 'VES' }])).toEqual({
+      labCost: null,
+      skippedCurrencies: ['VES'],
+    });
+    expect(labCostOf('USD', [])).toEqual({
+      labCost: null,
+      skippedCurrencies: [],
+    });
+  });
+
+  it('la línea guarda base bruta, laboratorio y pasarela: base = bruta − lab − pasarela', () => {
+    const lines = accrualLines(
+      [
+        item({
+          net: 300,
+          labCost: 90,
+          labCostSkippedCurrencies: ['VES'],
+          producedPending: false,
+          allocations: [
+            {
+              ...allocation('pay-1', 100, '2026-10-06T14:00:00Z'),
+              cardFeePercent: 3.5,
+            },
+          ],
+        }),
+      ],
+      terms({ deductLabCost: true, deductCardFee: true, percent: 40 }),
+      OCT,
+      new Map(),
+    );
+    expect(lines).toHaveLength(1);
+    // Lab: 90 × 100/300 = 30; pasarela: 3,5 % de 100 = 3,50.
+    expect(lines[0]).toMatchObject({
+      grossBase: 100,
+      labCostDeducted: 30,
+      cardFeePercent: 3.5,
+      cardFeeDeducted: 3.5,
+      base: 66.5,
+      amount: 26.6,
+      labCostSkippedCurrencies: ['VES'],
+    });
+  });
+
+  it('sin «descontar laboratorio» no se avisa del costo en otra moneda ni se descuenta', () => {
+    const [line] = accrualLines(
+      [item({ labCost: 50, labCostSkippedCurrencies: ['VES'] })],
+      terms({ basis: 'PRODUCED' }),
+      OCT,
+      new Map(),
+    );
+    expect(line).toMatchObject({
+      grossBase: 200,
+      labCostDeducted: 0,
+      cardFeePercent: null,
+      cardFeeDeducted: 0,
+      base: 200,
+      labCostSkippedCurrencies: [],
+    });
+  });
+
+  it('producido: la pasarela no aplica (no hay abono)', () => {
+    const [line] = accrualLines(
+      [item({ net: 200 })],
+      terms({ basis: 'PRODUCED', deductCardFee: true }),
+      OCT,
+      new Map(),
+    );
+    expect(line).toMatchObject({ cardFeePercent: null, base: 200 });
+  });
+
+  it('applyDeductions: el laboratorio se recorta a la base y la pasarela a lo que queda', () => {
+    expect(
+      applyDeductions(
+        100,
+        { deductLabCost: true, deductCardFee: true },
+        { labCost: 98, itemNet: 100, cardFeePercent: 3 },
+      ),
+    ).toEqual({
+      gross: 100,
+      labCost: 98,
+      cardFeePercent: 3,
+      cardFee: 2,
+      base: 0,
+    });
+  });
+
+  it('abono anulado tras el cierre: el ajuste devuelve también lo descontado (la línea queda en 0)', () => {
+    const line: SettledLine = {
+      lineId: 'line-1',
+      itemId: 'item-1',
+      planId: 'plan-1',
+      patientId: 'patient-1',
+      paymentId: 'pay-1',
+      locationId: 'sede-1',
+      catalogCode: 'COR-01',
+      catalogLabel: 'Corona',
+      category: null,
+      toothNumber: '16',
+      completedAt: new Date('2026-10-05T15:00:00Z'),
+      paidAt: new Date('2026-10-06T14:00:00Z'),
+      paymentAmount: 100,
+      paymentCurrency: 'USD',
+      currency: 'USD',
+      percent: 40,
+      settledBase: 66.5,
+      settledAmount: 26.6,
+      settledGross: 100,
+      settledLabCost: 30,
+      settledCardFee: 3.5,
+      originalGross: 100,
+      originalLabCost: 30,
+      cardFeePercent: 3.5,
+      currentGross: 0,
+    };
+    expect(adjustmentLines([line])).toEqual([
+      expect.objectContaining({
+        kind: 'ADJUSTMENT',
+        base: -66.5,
+        amount: -26.6,
+        grossBase: -100,
+        labCostDeducted: -30,
+        cardFeeDeducted: -3.5,
+        cardFeePercent: 3.5,
+      }),
+    ]);
+  });
+
+  it('base bruta reducida tras el cierre: reaplica los descuentos congelados en proporción', () => {
+    const [adj] = adjustmentLines([
+      {
+        lineId: 'line-1',
+        itemId: 'item-1',
+        planId: 'plan-1',
+        patientId: 'patient-1',
+        paymentId: null,
+        locationId: 'sede-1',
+        catalogCode: 'COR-01',
+        catalogLabel: 'Corona',
+        category: null,
+        toothNumber: '16',
+        completedAt: new Date('2026-10-05T15:00:00Z'),
+        paidAt: null,
+        paymentAmount: null,
+        paymentCurrency: null,
+        currency: 'USD',
+        percent: 50,
+        settledBase: 200,
+        settledAmount: 100,
+        settledGross: 300,
+        settledLabCost: 100,
+        settledCardFee: 0,
+        originalGross: 300,
+        originalLabCost: 100,
+        cardFeePercent: null,
+        // Descuento al paciente tras el cierre: 300 → 150 (lab congelado: 50).
+        currentGross: 150,
+      },
+    ]);
+    expect(adj).toMatchObject({
+      base: -100,
+      amount: -50,
+      grossBase: -150,
+      labCostDeducted: -50,
+      cardFeeDeducted: 0,
+    });
+    expect(
+      frozenDeductions({
+        currentGross: 150,
+        originalGross: 300,
+        originalLabCost: 100,
+        cardFeePercent: null,
+      }).base,
+    ).toBe(100);
   });
 });
 

@@ -555,6 +555,62 @@ describe('dental_labs / dental_lab_services / dental_lab_orders (DX-017, int)', 
       ).rejects.toThrow(/una orden anulada no se modifica/);
     });
 
+    it('DX-018-bis: el costo cambia también tras «Enviada» (no en una anulada); importe y moneda juntos, ≥ 0 y moneda del catálogo', async () => {
+      const order = await asApp(a, (tx) =>
+        tx.dentalLabOrder.create({ data: orderData(a) }),
+      );
+      await asApp(a, (tx) =>
+        tx.dentalLabOrder.update({
+          where: { id: order.id },
+          data: { sentAt: T0, sentById: a.userId },
+        }),
+      );
+      const costed = await asApp(a, (tx) =>
+        tx.dentalLabOrder.update({
+          where: { id: order.id },
+          data: { cost: new Prisma.Decimal('120.00'), costCurrency: 'USD' },
+        }),
+      );
+      expect(costed.cost?.toFixed(2)).toBe('120.00');
+      for (const data of [
+        { cost: new Prisma.Decimal('10'), costCurrency: null },
+        { cost: null, costCurrency: 'USD' },
+        { cost: new Prisma.Decimal('-1'), costCurrency: 'USD' },
+      ]) {
+        await expect(
+          asApp(a, (tx) =>
+            tx.dentalLabOrder.update({ where: { id: order.id }, data }),
+          ),
+        ).rejects.toThrow(/dental_lab_orders_cost_check/);
+      }
+      await expect(
+        asApp(a, (tx) =>
+          tx.dentalLabOrder.update({
+            where: { id: order.id },
+            data: { cost: new Prisma.Decimal('10'), costCurrency: 'XYZ' },
+          }),
+        ),
+      ).rejects.toThrow(/dental_lab_orders_cost_currency_fkey|Foreign key/);
+      await asApp(a, (tx) =>
+        tx.dentalLabOrder.update({
+          where: { id: order.id },
+          data: {
+            cancelledAt: T0,
+            cancelledById: a.userId,
+            cancelReason: 'El laboratorio no puede hacerla',
+          },
+        }),
+      );
+      await expect(
+        asApp(a, (tx) =>
+          tx.dentalLabOrder.update({
+            where: { id: order.id },
+            data: { cost: new Prisma.Decimal('90') },
+          }),
+        ),
+      ).rejects.toThrow(/una orden anulada no se modifica/);
+    });
+
     it('control optimista: escribir con el updatedAt leído avanza la fila; con uno viejo no escribe', async () => {
       const order = await asApp(a, (tx) =>
         tx.dentalLabOrder.create({ data: orderData(a) }),

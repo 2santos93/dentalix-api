@@ -78,6 +78,11 @@ export const LAB_MESSAGES = {
     'Recepción solo cambia la fecha prometida y la cita de colocación; el contenido de la orden lo cambia el odontólogo.',
   concurrent:
     'La orden cambió mientras la editabas. Recarga y vuelve a intentarlo.',
+  costPair:
+    'El costo del laboratorio y su moneda van juntos: indica los dos o ninguno.',
+  costCurrencyUnknown: 'La moneda del costo no existe.',
+  costCancelled: 'La orden está anulada: su costo no se cambia.',
+  costUnchanged: 'El costo ya es ese: no hay nada que cambiar.',
   emptyUpdate: 'No hay cambios que guardar.',
   dueOnInvalid: 'La fecha prometida debe ser una fecha AAAA-MM-DD válida.',
   fromInvalid: 'La fecha de inicio debe ser una fecha AAAA-MM-DD válida.',
