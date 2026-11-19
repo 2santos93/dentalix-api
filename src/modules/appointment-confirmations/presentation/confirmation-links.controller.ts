@@ -38,6 +38,10 @@ import {
 import { AnamnesisReminderLinks } from '../../medical-history-submissions/application/anamnesis-reminder-links';
 import { buildAnamnesisUrl } from '../../medical-history-submissions/domain/anamnesis-token';
 import { MessageTemplateReader } from '../../message-templates/application/message-templates.use-cases';
+import type {
+  MessageLanguage,
+  MessageText,
+} from '../../message-templates/domain/message-catalog';
 import {
   confirmationMessageLanguage,
   confirmationWhatsAppText,
@@ -47,6 +51,12 @@ import { locationRegionalOrNull } from '../../../shared/locations/location-regio
 import { regionalFormat } from '../../../shared/format/regional-format';
 
 type AuthenticatedRequest = TenantHostRequest & { user: JwtPayload };
+
+/** DX-565: los textos de la clínica para el wa.me, leídos antes de emitir. */
+interface ClinicTexts {
+  byLanguage: Record<MessageLanguage, MessageText | null>;
+  clinicName: string | null;
+}
 
 // Mismos roles que el resto de la agenda (APPOINTMENT_ROLES): quien puede
 // gestionar una cita puede pedirle confirmación al paciente — recepción
@@ -93,6 +103,9 @@ export class ConfirmationLinksController {
     if (!host) {
       throw new BadRequestException('El dominio de la solicitud no es válido.');
     }
+    // DX-565 (H6): los textos de la clínica se leen ANTES de emitir el enlace:
+    // si la lectura falla, no queda un enlace emitido que nadie recibe.
+    const clinicTexts = await this.clinicTexts();
     const result = await this.createLink.execute({
       appointmentId: id,
       createdById: req.user.sub,
@@ -117,7 +130,8 @@ export class ConfirmationLinksController {
       url,
       expiresAt: result.expiresAt,
       whatsappPhone: result.whatsappPhone,
-      whatsappText: await this.whatsappText(
+      whatsappText: this.whatsappText(
+        clinicTexts,
         result,
         url,
         anamnesisUrl,
@@ -137,22 +151,33 @@ export class ConfirmationLinksController {
    * siempre. Sin zona, formato y reloj de la sede no hay texto (la web
    * tampoco pintaba el botón).
    */
-  private async whatsappText(
+  private async clinicTexts(): Promise<ClinicTexts> {
+    const find = (language: MessageLanguage) =>
+      this.templates.find({
+        key: 'appointment-confirmation',
+        channel: 'WHATSAPP',
+        language,
+      });
+    const [es, en, clinicName] = await Promise.all([
+      find('es'),
+      find('en'),
+      this.templates.clinicName(),
+    ]);
+    return { byLanguage: { es, en }, clinicName };
+  }
+
+  private whatsappText(
+    texts: ClinicTexts,
     result: CreateConfirmationLinkResult,
     url: string,
     anamnesisUrl: string | null,
     anamnesisPending: boolean,
-  ): Promise<string | null> {
+  ): string | null {
     const regional = locationRegionalOrNull(result.appointment);
     if (!regional) return null;
-    const [override, clinicName] = await Promise.all([
-      this.templates.find({
-        key: 'appointment-confirmation',
-        channel: 'WHATSAPP',
-        language: confirmationMessageLanguage(result.patientLanguage),
-      }),
-      this.templates.clinicName(),
-    ]);
+    const override =
+      texts.byLanguage[confirmationMessageLanguage(result.patientLanguage)];
+    const clinicName = texts.clinicName;
     const a = result.appointment;
     return confirmationWhatsAppText(
       {

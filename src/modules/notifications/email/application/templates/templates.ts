@@ -334,6 +334,7 @@ function signatureRequest(
   const patient = vars.patientFirstName?.trim() || null;
   const custom = customEmailText(
     'signature-request',
+    locale,
     override,
     signatureRequestValues(vars),
   );
@@ -593,12 +594,17 @@ export function slotOfferValues(vars: SlotOfferEmailVars): MessageValues {
 function slotOffer(
   vars: SlotOfferEmailVars,
   brand: EmailBrand | null,
-  _locale: EmailLocale,
+  locale: EmailLocale,
   override?: MessageText | null,
 ): RenderedEmail {
   const withProvider = vars.providerName ? ` con ${vars.providerName}` : '';
   // DX-565: el asunto y los dos párrafos de la clínica, si los guardó.
-  const custom = customEmailText('slot-offer', override, slotOfferValues(vars));
+  const custom = customEmailText(
+    'slot-offer',
+    locale,
+    override,
+    slotOfferValues(vars),
+  );
   return renderLayout({
     brand,
     subject:
@@ -846,6 +852,7 @@ function quoteFollowUp(
   // DX-565: el asunto y la introducción de la clínica, si los guardó.
   const custom = customEmailText(
     'quote-follow-up',
+    locale,
     override,
     quoteFollowUpValues(vars),
   );
@@ -918,6 +925,7 @@ function appointmentSeries(
   // lista de fechas es fija (no se puede quitar).
   const custom = customEmailText(
     'appointment-series',
+    locale,
     override,
     appointmentSeriesValues(vars),
   );

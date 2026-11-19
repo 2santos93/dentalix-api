@@ -102,8 +102,16 @@ const CASES: {
     reminder({ providerName: null }),
     reminder({ providerName: null, locationAddress: null, confirmUrl: null }),
     reminder({ startsAtLabel: 'martes 20 de octubre de 2026 a las 15:05' }),
+    // Revisión: sin «a las» en la etiqueta, y un profesional que acaba en «.».
+    reminder({ startsAtLabel: 'mañana' }),
+    reminder({ providerName: 'Dr. J. P.' }),
   ],
-  'slot-offer': [slot(), slot({ providerName: null })],
+  'slot-offer': [
+    slot(),
+    slot({ providerName: null }),
+    slot({ providerName: 'Dr. J. P.' }),
+    slot({ slotLabel: 'mañana' }),
+  ],
   'quote-follow-up': [
     quote(),
     quote({ recipientFirstName: null }),
@@ -114,7 +122,16 @@ const CASES: {
       ],
     }),
   ],
-  'appointment-series': [series(), series({ providerName: null })],
+  'appointment-series': [
+    series(),
+    series({ providerName: null }),
+    series({
+      dateLabels: Array.from(
+        { length: 26 },
+        (_, i) => `martes ${i + 1} de octubre a las 9:30`,
+      ),
+    }),
+  ],
   'signature-request': [signature()],
 };
 
@@ -130,10 +147,21 @@ describe('DX-565: texto de la clínica en los emails editables', () => {
       for (const language of languagesOf(template)) {
         it(`${template} (${language})`, () => {
           const text = defaultMessageText(template, 'EMAIL', language)!;
-          for (const vars of CASES[template] as never[]) {
-            expect(renderEmail(template, vars, BRAND, language, text)).toEqual(
-              renderEmail(template, vars, BRAND, language),
-            );
+          // Revisión: también con un nombre de clínica que acaba en «.».
+          for (const brand of [
+            BRAND,
+            { ...BRAND, clinicName: 'Odontología C.A.' },
+          ]) {
+            for (const base of CASES[template] as object[]) {
+              const vars = (
+                'clinicName' in base
+                  ? { ...base, clinicName: brand.clinicName }
+                  : base
+              ) as never;
+              expect(
+                renderEmail(template, vars, brand, language, text),
+              ).toEqual(renderEmail(template, vars, brand, language));
+            }
           }
         });
       }
@@ -182,6 +210,26 @@ describe('DX-565: texto de la clínica en los emails editables', () => {
     // Dos párrafos (dos <p>); en el texto plano, un bloque por línea.
     expect(email.html).toMatch(/línea dos<\/p>\s*<p[^>]*>Otro párrafo<\/p>/);
     expect(email.text).toContain('Línea uno\nlínea dos\nOtro párrafo');
+  });
+
+  it('al responsable de un menor le sigue llegando el texto de siempre, también en inglés', () => {
+    const custom = { subject: 'Your visit', body: 'Custom text.' };
+    expect(
+      renderEmail(
+        'appointment-reminder',
+        reminder({ guardianName: 'Carlos' }),
+        BRAND,
+        'en',
+        custom,
+      ),
+    ).toEqual(
+      renderEmail(
+        'appointment-reminder',
+        reminder({ guardianName: 'Carlos' }),
+        BRAND,
+        'en',
+      ),
+    );
   });
 
   it('al responsable de un menor le sigue llegando el texto de siempre', () => {

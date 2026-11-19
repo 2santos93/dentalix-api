@@ -83,6 +83,7 @@ export function appointmentReminder(
   const whose = guardian ? t.appointmentOf(vars.patientName) : t.ownAppointment;
   const custom = customEmailText(
     APPOINTMENT_REMINDER_TEMPLATE,
+    locale,
     override,
     appointmentReminderValues(vars, brand),
   );

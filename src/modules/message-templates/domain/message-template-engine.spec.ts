@@ -31,13 +31,16 @@ const wa = (body: string, subject?: string | null) =>
     subject,
     body,
   });
-const render = (body: string, values: MessageValues = VALUES) =>
-  renderMessageTemplate(
+const render = (body: string, values: MessageValues = VALUES) => {
+  const r = renderMessageTemplate(
     'appointment-confirmation',
     'WHATSAPP',
+    'es',
     { subject: null, body },
     values,
-  )?.body;
+  );
+  return r.ok ? r.text.body : undefined;
+};
 
 describe('DX-565: motor de textos de los mensajes al paciente', () => {
   describe('render', () => {
@@ -114,13 +117,17 @@ describe('DX-565: motor de textos de los mensajes al paciente', () => {
         renderMessageTemplate(
           'appointment-reminder',
           'EMAIL',
+          'es',
           { subject: 'Cita en {clinica}\n el {fecha}', body: 'Hola' },
           VALUES,
         ),
       ).toEqual({
-        subject:
-          'Cita en Clínica Dental Altamira el martes 20 de octubre de 2026',
-        body: 'Hola',
+        ok: true,
+        text: {
+          subject:
+            'Cita en Clínica Dental Altamira el martes 20 de octubre de 2026',
+          body: 'Hola',
+        },
       });
     });
   });
@@ -314,6 +321,156 @@ describe('DX-565: motor de textos de los mensajes al paciente', () => {
           body: 'x',
         }),
       ).toThrow();
+    });
+  });
+
+  describe('revisión: enlaces armados con las variables (H1)', () => {
+    it.each([
+      'Paga tu cita en pagos-clinica{profesional}.com/pagar',
+      'Paga en pagos{direccion}.com',
+      'Paga en bit[{profesional}].ly',
+      'Escríbenos a {profesional}.com',
+      'Paga en evil[ {sede}]{direccion}.com',
+    ])('al guardar se rechaza: %s', (body) => {
+      expect(email(body)).toEqual({
+        ok: false,
+        field: 'body',
+        message: MESSAGE_EMAIL_LINKS_MESSAGE,
+      });
+    });
+
+    it('también en WhatsApp y en el asunto', () => {
+      expect(
+        wa('Hola {paciente}, paga en evil{direccion}.com {enlace}'),
+      ).toEqual({
+        ok: false,
+        field: 'body',
+        message: MESSAGE_WHATSAPP_LINKS_MESSAGE,
+      });
+      expect(email('Hola', 'Paga en pagos{sede}.com')).toEqual({
+        ok: false,
+        field: 'subject',
+        message: MESSAGE_EMAIL_LINKS_MESSAGE,
+      });
+    });
+
+    it('{enlace} pegado a texto no cuenta como enlace armado (es el legítimo)', () => {
+      expect(wa('Aquí:{enlace}.')).toMatchObject({ ok: true });
+    });
+
+    it('al enviar: si los datos arman un enlace que el texto por defecto no tiene, sale el de por defecto (LINK)', () => {
+      const text = { subject: 'Hola {paciente}', body: 'Hola {paciente}.' };
+      const values = { ...VALUES, paciente: 'evil.com' };
+      expect(
+        renderMessageTemplate('slot-offer', 'EMAIL', 'es', text, values),
+      ).toEqual({ ok: false, reason: 'LINK' });
+      // Si el de por defecto lleva el mismo dato, el dato no es del texto.
+      expect(
+        renderMessageTemplate(
+          'slot-offer',
+          'EMAIL',
+          'es',
+          { subject: 'Hueco en {clinica}', body: 'En {sede}.' },
+          { ...VALUES, sede: 'Sede pagos.com', clinica: 'Clínica X' },
+        ),
+      ).toMatchObject({ ok: true });
+    });
+
+    it('un «<» en un dato no es motivo de caer al de por defecto', () => {
+      expect(
+        renderMessageTemplate(
+          'slot-offer',
+          'EMAIL',
+          'es',
+          { subject: 'Hola {paciente}', body: 'Hola {paciente}.' },
+          { ...VALUES, paciente: 'Ana <b>' },
+        ),
+      ).toMatchObject({ ok: true });
+    });
+  });
+
+  describe('revisión: topes del texto renderizado (H2, H12)', () => {
+    it('WhatsApp: al guardar, el peor caso no puede pasar de 1300', () => {
+      const body = `${'{direccion}{sede}{profesional}{fecha}'.repeat(4)} {enlace}`;
+      expect(body.length).toBeLessThan(1000);
+      expect(wa(body)).toEqual({
+        ok: false,
+        field: 'body',
+        message:
+          'El texto puede pasar de 1300 caracteres con los datos más largos (nombres, sede, dirección): acórtalo o usa menos variables.',
+      });
+    });
+
+    it('asunto: al guardar, el peor caso no puede pasar de 200', () => {
+      expect(email('Hola', '{direccion} {sede}')).toEqual({
+        ok: false,
+        field: 'subject',
+        message:
+          'El asunto puede pasar de 200 caracteres con los datos más largos (nombres, sede, dirección): acórtalo o usa menos variables.',
+      });
+    });
+
+    it('al enviar, un dato fuera de lo razonable que pasa el tope: sale el de por defecto (TOO_LONG)', () => {
+      expect(
+        renderMessageTemplate(
+          'appointment-reminder',
+          'EMAIL',
+          'es',
+          { subject: 'Cita en {sede}', body: 'Hola' },
+          { ...VALUES, sede: 's'.repeat(300) },
+        ),
+      ).toEqual({ ok: false, reason: 'TOO_LONG' });
+      expect(
+        renderMessageTemplate(
+          'appointment-confirmation',
+          'WHATSAPP',
+          'es',
+          { subject: null, body: '{direccion} {enlace}' },
+          { ...VALUES, direccion: 'd'.repeat(1400) },
+        ),
+      ).toEqual({ ok: false, reason: 'TOO_LONG' });
+    });
+
+    it('un texto guardado que ya no es válido: INVALID', () => {
+      expect(
+        renderMessageTemplate(
+          'appointment-reminder',
+          'EMAIL',
+          'es',
+          { subject: 'Hola', body: 'Pagas {importe}' },
+          VALUES,
+        ),
+      ).toEqual({ ok: false, reason: 'INVALID' });
+    });
+  });
+
+  describe('el punto final, como el texto de siempre', () => {
+    it('tras {hora} o {caduca} no se dobla; tras otra variable sí (como el código de siempre)', () => {
+      const r = renderMessageTemplate(
+        'quote-follow-up',
+        'EMAIL',
+        'es',
+        { subject: 'Hola', body: 'En {clinica}.' },
+        { clinica: 'Odontología C.A.' },
+      );
+      expect(r).toEqual({
+        ok: true,
+        text: { subject: 'Hola', body: 'En Odontología C.A..' },
+      });
+    });
+
+    it('en la oferta por WhatsApp (endSentence) no se dobla tras ninguna', () => {
+      const r = renderMessageTemplate(
+        'slot-offer',
+        'WHATSAPP',
+        'es',
+        { subject: null, body: 'Con {profesional}. {enlace}' },
+        { profesional: 'Dr. J. P.', enlace: 'https://x.co/h' },
+      );
+      expect(r).toMatchObject({
+        ok: true,
+        text: { body: 'Con Dr. J. P. https://x.co/h' },
+      });
     });
   });
 });

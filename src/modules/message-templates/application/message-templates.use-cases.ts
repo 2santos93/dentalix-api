@@ -18,6 +18,7 @@ import {
   MESSAGE_KEYS,
   MESSAGE_LANGUAGES,
   MESSAGE_SUBJECT_MAX,
+  MESSAGE_SYNTAX_HELP,
   defaultMessageText,
   isMessageChannel,
   isMessageKey,
@@ -31,6 +32,7 @@ import {
   type MessageText,
 } from '../domain/message-catalog';
 import {
+  storedMessageTemplateProblem,
   validateMessageTemplate,
   type MessageTemplateField,
 } from '../domain/message-template-engine';
@@ -96,6 +98,11 @@ export interface MessageVariableView {
 export interface MessageCustomView extends MessageText {
   updatedAt: Date;
   updatedByName: string | null;
+  /**
+   * H14: por qué este texto ya no sale (el catálogo cambió) y en su lugar
+   * sale el de por defecto; null si sale.
+   */
+  invalid: string | null;
 }
 
 export interface MessageLanguageView {
@@ -121,12 +128,16 @@ export interface MessageView {
   key: MessageKey;
   title: string;
   description: string;
+  /** Al responsable de un menor le llega siempre el texto por defecto. */
+  guardianUsesDefault: boolean;
   channels: MessageChannelView[];
 }
 
 export interface MessageTemplatesView {
   /** Idiomas de la clínica con texto en el catálogo (es siempre primero). */
   languages: MessageLanguage[];
+  /** La sintaxis y sus límites, para la ayuda del editor (H13). */
+  syntaxHelp: string;
   messages: MessageView[];
 }
 
@@ -150,6 +161,7 @@ export interface MessageTestResult {
 
 function customOf(
   row: StoredMessageTemplate | undefined,
+  id: { key: MessageKey; channel: MessageChannel },
 ): MessageCustomView | null {
   return row
     ? {
@@ -157,6 +169,10 @@ function customOf(
         body: row.body,
         updatedAt: row.updatedAt,
         updatedByName: row.updatedByName,
+        invalid: storedMessageTemplateProblem(id.key, id.channel, {
+          subject: row.subject,
+          body: row.body,
+        }),
       }
     : null;
 }
@@ -216,12 +232,14 @@ export class ListMessageTemplatesUseCase {
     const byKey = new Map(rows.map((r) => [rowKey(r), r]));
     return {
       languages: offered,
+      syntaxHelp: MESSAGE_SYNTAX_HELP,
       messages: MESSAGE_KEYS.map((key) => {
         const spec = MESSAGE_CATALOG[key];
         return {
           key,
           title: spec.title,
           description: spec.description,
+          guardianUsesDefault: spec.guardianUsesDefault,
           channels: MESSAGE_CHANNELS.flatMap((channel) => {
             const ch = spec.channels[channel];
             if (!ch) return [];
@@ -249,7 +267,7 @@ export class ListMessageTemplatesUseCase {
                       language,
                       offered: offered.includes(language),
                       default: defaults,
-                      custom: customOf(row),
+                      custom: customOf(row, { key, channel }),
                     },
                   ];
                 }),
@@ -283,7 +301,7 @@ export class SaveMessageTemplateUseCase {
       ...id,
       offered: true,
       default: defaultMessageText(id.key, id.channel, id.language)!,
-      custom: customOf(row),
+      custom: customOf(row, id),
     };
   }
 }
@@ -409,12 +427,10 @@ export class SendMessageTemplateTestUseCase {
         message: MESSAGE_TEMPLATE_NOT_VERIFIED_MESSAGE,
       });
     }
-    const now = new Date();
-    // Aviso temprano; el que manda va bajo candado.
+    // Aviso temprano; el que manda va bajo candado (reloj de la BD).
     const wait = await this.repo.testCooldownRemaining(
       ctx.actor.userId,
       MESSAGE_TEMPLATE_TEST_COOLDOWN_SECONDS,
-      now,
     );
     if (wait > 0)
       throw new EmailQuotaExceededError(testWaitMessage(wait), wait);
@@ -434,9 +450,9 @@ export class SendMessageTemplateTestUseCase {
     const recorded = await this.repo.recordTestSend(
       prepared,
       id,
+      draft !== undefined,
       ctx,
       MESSAGE_TEMPLATE_TEST_COOLDOWN_SECONDS,
-      now,
     );
     if (!recorded.ok) {
       throw new EmailQuotaExceededError(
@@ -460,8 +476,10 @@ export class MessageTemplateReader {
     private readonly repo: MessageTemplateRepository,
   ) {}
 
-  find(id: MessageTemplateId): Promise<MessageText | null> {
-    return this.repo.find(id);
+  /** Solo de un idioma que la clínica ofrece hoy (H8); si no, null. */
+  async find(id: MessageTemplateId): Promise<MessageText | null> {
+    const offered = offeredMessageLanguages(await this.repo.patientLanguages());
+    return offered.includes(id.language) ? this.repo.find(id) : null;
   }
 
   /** El nombre de la clínica del contexto (la variable `{clinica}`). */

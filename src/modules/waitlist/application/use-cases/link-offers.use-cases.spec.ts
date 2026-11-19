@@ -1,3 +1,4 @@
+import type { MessageTemplateReader } from '../../../message-templates/application/message-templates.use-cases';
 import {
   BadRequestException,
   ConflictException,
@@ -197,6 +198,18 @@ describe('«Enviar oferta con enlace» (DX-435)', () => {
     expect(view.url).toMatch(/\/hueco\/[A-Za-z0-9_-]{43}$/);
     expect(view.whatsappPhone).toBe('584141234567');
     expect(sent).toHaveLength(0);
+  });
+
+  it('DX-565 (H6): por WhatsApp, si falla leer el texto de la clínica, no queda ninguna oferta creada', async () => {
+    // El lector que falla, inyectado en el caso de uso de siempre.
+    (useCase as unknown as { templates: MessageTemplateReader }).templates = {
+      find: () => Promise.reject(new Error('BD caída')),
+    } as unknown as MessageTemplateReader;
+    await expect(
+      useCase.execute({ ...base, channel: 'LINK_WA_ME' }, LINK, CTX),
+    ).rejects.toThrow('BD caída');
+    expect(repo.offers).toHaveLength(0);
+    expect(drafts).toHaveLength(0);
   });
 
   it('con antelación configurada, caduca antes del hueco', async () => {

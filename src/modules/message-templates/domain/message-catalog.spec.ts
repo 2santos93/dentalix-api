@@ -92,6 +92,27 @@ describe('DX-565: catálogo de mensajes editables', () => {
     }
   });
 
+  it('al responsable de un menor le llega el texto por defecto en los emails que le escriben a él', () => {
+    expect(
+      Object.fromEntries(
+        MESSAGE_KEYS.map((k) => [k, MESSAGE_CATALOG[k].guardianUsesDefault]),
+      ),
+    ).toEqual({
+      'appointment-reminder': true,
+      'appointment-confirmation': false,
+      'slot-offer': false,
+      'quote-follow-up': true,
+      'appointment-series': true,
+      'signature-request': true,
+    });
+  });
+
+  it('el ejemplo de {enlace} es un dominio reservado (RFC 2606), nunca uno que pueda ser una clínica', () => {
+    expect(new URL(MESSAGE_VARIABLE_INFO.enlace.sample).hostname).toBe(
+      'example.com',
+    );
+  });
+
   it('los idiomas del catálogo son los de los emails', () => {
     expect([...MESSAGE_LANGUAGES]).toEqual([...EMAIL_LOCALES]);
   });

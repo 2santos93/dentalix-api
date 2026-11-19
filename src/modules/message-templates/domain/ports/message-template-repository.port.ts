@@ -56,7 +56,6 @@ export interface MessageTemplateRepository {
   testCooldownRemaining(
     userId: string,
     cooldownSeconds: number,
-    now: Date,
   ): Promise<number>;
   /**
    * Encola la prueba y su evento en UNA transacción, con la espera vuelta a
@@ -65,8 +64,9 @@ export interface MessageTemplateRepository {
   recordTestSend(
     email: PreparedEmail,
     id: MessageTemplateId,
+    /** El borrador del editor (true) o lo guardado / el texto por defecto. */
+    draft: boolean,
     ctx: AuditRequestContext,
     cooldownSeconds: number,
-    now: Date,
   ): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }>;
 }

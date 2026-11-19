@@ -124,6 +124,16 @@ describe('DX-565: textos de wa.me en la API', () => {
       );
     });
 
+    it('H2: con datos larguísimos, el texto de la clínica no sale si se pasa del tope: sale el de siempre', () => {
+      const input = confirmation({ locationAddress: 'd'.repeat(1400) });
+      expect(
+        confirmationWhatsAppText(input, {
+          subject: null,
+          body: '{direccion} {enlace}',
+        }),
+      ).toBe(confirmationWhatsAppText(input, null));
+    });
+
     it('no pasa de 1500 caracteres: se recortan las indicaciones', () => {
       const long = 'x'.repeat(3000);
       const text = confirmationWhatsAppText(

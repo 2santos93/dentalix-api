@@ -1,10 +1,11 @@
 import type { MessageText } from '../../../../message-templates/domain/message-catalog';
-import {
-  messageParagraphs,
-  renderMessageTemplate,
-} from '../../../../message-templates/domain/message-template-engine';
+import { messageParagraphs } from '../../../../message-templates/domain/message-template-engine';
+import { renderClinicText } from '../../../../message-templates/domain/clinic-text';
 import type { MessageValues } from '../../../../message-templates/domain/message-variables';
-import type { EmailTemplateName } from '../../domain/email-message';
+import type {
+  EmailLocale,
+  EmailTemplateName,
+} from '../../domain/email-message';
 import type { EmailBlock } from './layout';
 
 /**
@@ -43,11 +44,18 @@ export interface CustomEmailText {
  */
 export function customEmailText(
   template: EditableEmailTemplate,
+  locale: EmailLocale,
   override: MessageText | null | undefined,
   values: MessageValues | null,
 ): CustomEmailText | null {
   if (!override || !values) return null;
-  const rendered = renderMessageTemplate(template, 'EMAIL', override, values);
+  const rendered = renderClinicText(
+    template,
+    'EMAIL',
+    locale,
+    override,
+    values,
+  );
   if (!rendered?.subject) return null;
   const blocks = messageParagraphs(rendered.body).map((text): EmailBlock => ({
     kind: 'paragraph',

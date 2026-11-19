@@ -38,6 +38,28 @@ export const MESSAGE_SUBJECT_MAX = 150;
 export const MESSAGE_EMAIL_BODY_MAX = 2000;
 export const MESSAGE_WHATSAPP_BODY_MAX = 1000;
 
+/**
+ * Topes del texto YA renderizado (con valores reales). Al guardar se calcula
+ * el peor caso con el largo máximo de cada variable; al enviar, si un texto
+ * se pasa, sale el texto por defecto. WhatsApp deja sitio al cuestionario de
+ * salud y a «Antes de tu cita» dentro de los 1500 del mensaje entero.
+ */
+export const MESSAGE_SUBJECT_RENDERED_MAX = 200;
+export const MESSAGE_EMAIL_BODY_RENDERED_MAX = 4000;
+export const MESSAGE_WHATSAPP_RENDERED_MAX = 1300;
+
+export function messageRenderedBodyMax(channel: MessageChannel): number {
+  return channel === 'EMAIL'
+    ? MESSAGE_EMAIL_BODY_RENDERED_MAX
+    : MESSAGE_WHATSAPP_RENDERED_MAX;
+}
+
+/**
+ * DX-565: la sintaxis y sus límites, para la ayuda del editor (GET).
+ */
+export const MESSAGE_SYNTAX_HELP =
+  'Escribe las variables entre llaves, como {paciente}. Lo que va entre corchetes solo sale si todas sus variables tienen valor, como [ con {profesional}]. Una línea en blanco separa párrafos. Las llaves { } y los corchetes [ ] solo sirven para eso: no se pueden escribir como texto. Sin enlaces, direcciones web, correos ni HTML: en el email el enlace va en el botón y en WhatsApp con {enlace}.';
+
 export function messageBodyMax(channel: MessageChannel): number {
   return channel === 'EMAIL'
     ? MESSAGE_EMAIL_BODY_MAX
@@ -57,6 +79,12 @@ export interface MessageChannelSpec {
   required: readonly MessageVariable[];
   /** Texto por defecto por idioma: los idiomas que se pueden editar. */
   defaults: Readonly<Partial<Record<MessageLanguage, MessageText>>>;
+  /**
+   * Como `endSentence`: tras CUALQUIER variable que acabe en «.», el «.» del
+   * texto no se dobla (el texto de siempre de ese mensaje lo hace así). Sin
+   * él, solo tras `{hora}` y `{caduca}` («9:30 a. m.»).
+   */
+  endSentence?: boolean;
 }
 
 export interface MessageSpec {
@@ -67,6 +95,11 @@ export interface MessageSpec {
   description: string;
   /** Con artículo, para los errores: «no se puede usar en el recordatorio». */
   noun: string;
+  /**
+   * Al responsable de un menor le llega siempre el texto por defecto (el
+   * editable habla de «tu cita» y saluda al destinatario).
+   */
+  guardianUsesDefault: boolean;
   channels: Readonly<Partial<Record<MessageChannel, MessageChannelSpec>>>;
 }
 
@@ -87,6 +120,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
     description:
       'El email automático antes de la cita. El botón para confirmar, la política de cancelación, el cuestionario de salud, el calendario y las indicaciones previas se añaden solos.',
     noun: 'el recordatorio',
+    guardianUsesDefault: true,
     channels: {
       EMAIL: {
         variables: APPOINTMENT_VARS,
@@ -96,7 +130,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
             subject: 'Recordatorio de tu cita en {clinica}',
             body:
               'Te recordamos tu cita en {clinica}.\n\n' +
-              'Fecha y hora: {fecha} a las {hora} (hora de la sede)\n\n' +
+              'Fecha y hora: {fecha}[ a las {hora}] (hora de la sede)\n\n' +
               'Sede: {sede}[ ({direccion})]\n\n' +
               '[Profesional: {profesional}]',
           },
@@ -104,7 +138,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
             subject: 'Reminder: your appointment at {clinica}',
             body:
               'This is a reminder of your appointment at {clinica}.\n\n' +
-              'Date and time: {fecha} a las {hora} (local time at the clinic)\n\n' +
+              'Date and time: {fecha}[ a las {hora}] (local time at the clinic)\n\n' +
               'Location: {sede}[ ({direccion})]\n\n' +
               '[Provider: {profesional}]',
           },
@@ -118,6 +152,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
     description:
       'El mensaje prellenado de WhatsApp con el enlace para confirmar, cancelar o pedir que te llamen. El cuestionario de salud y las indicaciones previas se añaden solos.',
     noun: 'la confirmación por WhatsApp',
+    guardianUsesDefault: false,
     channels: {
       WHATSAPP: {
         variables: [...APPOINTMENT_VARS, 'enlace'],
@@ -141,6 +176,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
     description:
       'La oferta con enlace de un hueco que se liberó, por email o WhatsApp. La caducidad y el botón se añaden solos en el email.',
     noun: 'la oferta de hueco',
+    guardianUsesDefault: false,
     channels: {
       EMAIL: {
         variables: [
@@ -157,7 +193,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
           es: {
             subject: '{clinica} tiene un hueco libre para ti',
             body:
-              'Se liberó un hueco el {fecha} a las {hora} en {sede}[ con {profesional}].\n\n' +
+              'Se liberó un hueco el {fecha}[ a las {hora}] en {sede}[ con {profesional}].\n\n' +
               'Si te viene bien, ábrelo y acéptalo: se lo queda el primero que lo acepte. Si no, puedes rechazarlo desde el mismo enlace.',
           },
         },
@@ -174,6 +210,8 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
           'enlace',
         ],
         required: ['enlace'],
+        // `linkOfferMessage` de siempre cierra la frase con `endSentence`.
+        endSentence: true,
         defaults: {
           es: {
             subject: null,
@@ -189,6 +227,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
     description:
       'El aviso automático de un presupuesto presentado y sin respuesta. Los enlaces de las opciones, la caducidad y la baja se añaden solos.',
     noun: 'el seguimiento del presupuesto',
+    guardianUsesDefault: true,
     channels: {
       EMAIL: {
         variables: ['paciente', 'clinica'],
@@ -212,6 +251,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
     description:
       'El email único al crear una serie de citas. La lista de fechas y la baja se añaden solas.',
     noun: 'el aviso de la serie de citas',
+    guardianUsesDefault: true,
     channels: {
       EMAIL: {
         variables: ['paciente', 'clinica', 'sede', 'profesional', 'cantidad'],
@@ -235,6 +275,7 @@ export const MESSAGE_CATALOG: Readonly<Record<MessageKey, MessageSpec>> = {
     description:
       'El email con el enlace para firmar a distancia. El aviso del código de 6 dígitos, la caducidad y el botón se añaden solos.',
     noun: 'la solicitud de firma',
+    guardianUsesDefault: true,
     channels: {
       EMAIL: {
         variables: ['paciente', 'clinica', 'caduca'],

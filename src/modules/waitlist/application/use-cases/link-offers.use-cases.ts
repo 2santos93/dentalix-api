@@ -150,6 +150,13 @@ export class CreateLinkOfferUseCase {
       await this.email.assertCanSend(patient.email!.trim());
     }
 
+    // H6: lo que necesita el texto de wa.me se lee ANTES de crear la oferta:
+    // si una lectura falla, no queda una oferta «enviada» con un enlace que
+    // nadie tiene. Después solo se compone (puro).
+    const composeWhatsApp =
+      input.channel === 'LINK_WA_ME'
+        ? await this.whatsappComposer(input, patient.firstName)
+        : null;
     const token = generateSlotOfferToken();
     const created = await this.createOffer.execute(
       { ...input, link: { tokenHash: hashSlotOfferToken(token), expiresAt } },
@@ -206,13 +213,7 @@ export class CreateLinkOfferUseCase {
       ...created,
       url,
       whatsappPhone: wa.phone,
-      whatsappText: await this.whatsappText(
-        created,
-        patient.firstName,
-        location,
-        url,
-        expiresAt,
-      ),
+      whatsappText: composeWhatsApp?.(url, expiresAt) ?? null,
     };
   }
 
@@ -220,25 +221,19 @@ export class CreateLinkOfferUseCase {
    * DX-565: el texto de `wa.me` en la API (antes lo componía la web): el de
    * la clínica (oferta de hueco por WhatsApp, español) o el de siempre. Sin
    * zona, formato o reloj de la sede no hay texto (como en la web, que no
-   * pintaba el botón): nunca el 409 de la sede.
+   * pintaba el botón): nunca el 409 de la sede. Lee todo ahora (antes de
+   * crear la oferta, H6) y devuelve cómo componerlo con el enlace.
    */
-  private async whatsappText(
-    offer: { slotStart: Date; providerId: string },
+  private async whatsappComposer(
+    input: { locationId: string; slotStart: Date; providerId: string },
     firstName: string,
-    location: {
-      name: string;
-      timeZone?: string | null;
-      locale?: string | null;
-      hourCycle?: string | null;
-    },
-    url: string,
-    expiresAt: Date,
-  ): Promise<string | null> {
-    const regional = locationRegionalOrNull(location);
-    if (!regional) return null;
+  ): Promise<((url: string, expiresAt: Date) => string | null) | null> {
+    const location = await this.locations.findById(input.locationId);
+    const regional = location ? locationRegionalOrNull(location) : null;
+    if (!location || !regional) return null;
     const fmt = regionalFormat(regional);
     const [provider, clinic, override] = await Promise.all([
-      this.staff.findById(offer.providerId),
+      this.staff.findById(input.providerId),
       this.slotOffers.findClinicBranding(),
       this.templates?.find({
         key: 'slot-offer',
@@ -246,18 +241,19 @@ export class CreateLinkOfferUseCase {
         language: 'es',
       }) ?? null,
     ]);
-    return linkOfferWhatsAppText(
-      {
-        firstName,
-        ...sedeDayAndTime(offer.slotStart, regional.timeZone, fmt),
-        locationName: location.name,
-        providerName: provider?.fullName ?? null,
-        clinicName: clinic?.name ?? location.name,
-        url,
-        expiresAtLabel: fmt.longDateTime(expiresAt, regional.timeZone),
-      },
-      override,
-    );
+    return (url, expiresAt) =>
+      linkOfferWhatsAppText(
+        {
+          firstName,
+          ...sedeDayAndTime(input.slotStart, regional.timeZone, fmt),
+          locationName: location.name,
+          providerName: provider?.fullName ?? null,
+          clinicName: clinic?.name ?? location.name,
+          url,
+          expiresAtLabel: fmt.longDateTime(expiresAt, regional.timeZone),
+        },
+        override,
+      );
   }
 
   private async markUndelivered(

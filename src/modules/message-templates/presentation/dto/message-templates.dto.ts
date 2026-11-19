@@ -90,6 +90,14 @@ export class MessageCustomDto extends MessageTextDto {
     description: 'Quién lo guardó por última vez.',
   })
   updatedByName!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Por qué este texto ya no sale y en su lugar sale el de por defecto (p. ej. el catálogo cambió); null si sale. Mismo texto que el 400 al guardar.',
+  })
+  invalid!: string | null;
 }
 
 export class MessageVariableDto {
@@ -167,6 +175,12 @@ export class MessageDto {
   @ApiProperty()
   description!: string;
 
+  @ApiProperty({
+    description:
+      'Al responsable de un menor le llega siempre el texto por defecto (el editable habla de «tu cita»).',
+  })
+  guardianUsesDefault!: boolean;
+
   @ApiProperty({ type: [MessageChannelDto] })
   channels!: MessageChannelDto[];
 }
@@ -179,6 +193,12 @@ export class MessageTemplatesDto {
       'Idiomas de la clínica con texto en el catálogo (español siempre, primero).',
   })
   languages!: string[];
+
+  @ApiProperty({
+    description:
+      'Ayuda de la sintaxis para el editor: variables, tramos opcionales, párrafos y que las llaves y los corchetes no se pueden escribir como texto.',
+  })
+  syntaxHelp!: string;
 
   @ApiProperty({ type: [MessageDto] })
   messages!: MessageDto[];

@@ -103,6 +103,20 @@ describe('hasLinkOrHtml / normalizePatientPlainText', () => {
     'no marca %s',
     (text) => expect(hasLinkOrHtml(text)).toBe(false),
   );
+  it.each([
+    'evil\u3002com/x',
+    'evil\uFF0Ecom/x',
+    'bit\uFF61ly',
+    'evil\uFE52com',
+    'pagos\u2024com',
+    'ｗｗｗ.x',
+  ])(
+    'DX-565: un punto parecido (o letras de ancho completo) cuenta como enlace: %s',
+    (text) => expect(hasLinkOrHtml(text)).toBe(true),
+  );
+  it('DX-565: un 。 entre frases en japonés o chino sin TLD no es enlace', () => {
+    expect(hasLinkOrHtml('ご来院ください。ありがとう')).toBe(false);
+  });
   it('quita el formato invisible que parte un enlace', () => {
     const zwsp = String.fromCharCode(0x200b);
     expect(normalizePatientPlainText(`x${zwsp}.com`)).toBe('x.com');

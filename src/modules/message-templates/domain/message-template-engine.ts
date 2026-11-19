@@ -5,14 +5,20 @@ import {
 import {
   MESSAGE_CATALOG,
   MESSAGE_SUBJECT_MAX,
+  MESSAGE_SUBJECT_RENDERED_MAX,
+  defaultMessageText,
   messageBodyMax,
   messageChannelSpec,
+  messageRenderedBodyMax,
   type MessageChannel,
+  type MessageChannelSpec,
   type MessageKey,
+  type MessageLanguage,
   type MessageText,
 } from './message-catalog';
 import {
   FORBIDDEN_MESSAGE_VARIABLES,
+  MESSAGE_VARIABLE_INFO,
   isMessageVariable,
   type MessageValues,
   type MessageVariable,
@@ -119,37 +125,116 @@ function valueOf(values: MessageValues, name: string): string {
   return value && value.trim() !== '' ? value : '';
 }
 
-function renderTokens(tokens: readonly Token[], values: MessageValues): string {
-  const out: { text: string; fromVariable: boolean }[] = [];
-  const push = (raw: string, fromVariable: boolean) => {
+/** Tras qué variables no se dobla el «.» (ver `MessageChannelSpec.endSentence`). */
+const TIME_VARIABLES: readonly string[] = ['hora', 'caduca'];
+
+function collapseAfter(spec: MessageChannelSpec): (name: string) => boolean {
+  return spec.endSentence
+    ? () => true
+    : (name) => TIME_VARIABLES.includes(name);
+}
+
+/**
+ * El render de una pasada. `value` da el valor de cada variable; un tramo
+ * opcional sale si todas sus variables tienen valor, salvo que `include`
+ * (variantes de la validación) lo fuerce.
+ */
+function renderWith(
+  tokens: readonly Token[],
+  value: (name: string) => string,
+  collapse: (name: string) => boolean,
+  include?: (optionalIndex: number) => boolean,
+): string {
+  const out: { text: string; variable: string | null }[] = [];
+  const push = (raw: string, variable: string | null) => {
     let text = raw;
     // Como `endSentence`: una hora «9:30 a. m.» seguida de «.» no dobla el punto.
     const last = out[out.length - 1];
     if (
-      !fromVariable &&
+      variable === null &&
       text.startsWith('.') &&
-      last?.fromVariable &&
+      last?.variable != null &&
+      collapse(last.variable) &&
       last.text.endsWith('.')
     ) {
       text = text.slice(1);
     }
-    if (text) out.push({ text, fromVariable });
+    if (text) out.push({ text, variable });
   };
   const pushPiece = (p: Piece) =>
-    p.kind === 'text'
-      ? push(p.text, false)
-      : push(valueOf(values, p.name), true);
+    p.kind === 'text' ? push(p.text, null) : push(value(p.name), p.name);
+  let optionalIndex = 0;
   for (const token of tokens) {
     if (token.kind !== 'optional') {
       pushPiece(token);
       continue;
     }
-    const complete = token.pieces.every(
-      (p) => p.kind === 'text' || valueOf(values, p.name) !== '',
-    );
-    if (complete) token.pieces.forEach(pushPiece);
+    const index = optionalIndex++;
+    const shown = include
+      ? include(index)
+      : token.pieces.every((p) => p.kind === 'text' || value(p.name) !== '');
+    if (shown) token.pieces.forEach(pushPiece);
   }
   return out.map((p) => p.text).join('');
+}
+
+/**
+ * H1: un enlace no se puede armar con los trozos del texto y las variables
+ * («pagos{direccion}.com» sin dirección, «bit[{profesional}].ly» sin
+ * profesional). Se busca en el texto renderizado con cada variable vacía,
+ * con una letra y con su ejemplo, y con cada tramo opcional presente y
+ * ausente. `{enlace}` cuenta como un espacio: su valor es el enlace legítimo.
+ */
+function variants(
+  tokens: readonly Token[],
+  collapse: (name: string) => boolean,
+): string[] {
+  const optionals = tokens.filter((t) => t.kind === 'optional').length;
+  const as =
+    (fill: (name: MessageVariable) => string) =>
+    (name: string): string =>
+      name === 'enlace' ? ' ' : isMessageVariable(name) ? fill(name) : '';
+  const empty = as(() => '');
+  const letter = as(() => 'x');
+  const sample = as((name) => MESSAGE_VARIABLE_INFO[name].sample);
+  const all = () => true;
+  const none = () => false;
+  const out = [
+    renderWith(tokens, empty, collapse, none),
+    renderWith(tokens, letter, collapse, all),
+    renderWith(tokens, sample, collapse, all),
+    renderWith(tokens, empty, collapse, all),
+  ];
+  for (let i = 0; i < optionals; i += 1) {
+    out.push(
+      renderWith(tokens, letter, collapse, (j) => j !== i),
+      renderWith(tokens, letter, collapse, (j) => j === i),
+      renderWith(tokens, empty, collapse, (j) => j === i),
+    );
+  }
+  return out;
+}
+
+function hasLinkInAnyVariant(
+  tokens: readonly Token[],
+  collapse: (name: string) => boolean,
+): boolean {
+  return (
+    hasLinkOrHtml(literalText(tokens)) ||
+    variants(tokens, collapse).some((text) => hasLinkOrHtml(text))
+  );
+}
+
+/** El largo del peor caso: cada variable a su máximo y todos los tramos. */
+function worstCaseLength(
+  tokens: readonly Token[],
+  collapse: (name: string) => boolean,
+): number {
+  const longest = (name: string) =>
+    isMessageVariable(name)
+      ? 'x'.repeat(MESSAGE_VARIABLE_INFO[name].maxLength)
+      : '';
+  return chars(renderWith(tokens, longest, collapse, () => true));
 }
 
 export type MessageTemplateField = 'subject' | 'body';
@@ -177,7 +262,9 @@ function checkVariables(
   return null;
 }
 
-const chars = (text: string) => [...text].length;
+function chars(text: string): number {
+  return [...text].length;
+}
 
 /** El asunto se guarda en una línea. */
 export function normalizeMessageSubject(subject: string): string {
@@ -188,7 +275,8 @@ export function normalizeMessageSubject(subject: string): string {
  * Valida y normaliza lo que la clínica quiere guardar (o previsualizar) para
  * (clave, canal). 400 en español con el campo, en este orden: vacío, largo,
  * llaves y corchetes, variables (prohibida, desconocida, no permitida),
- * obligatorias y enlaces o HTML escritos a mano.
+ * obligatorias, enlaces o HTML (también armados con las variables, H1) y el
+ * largo del peor caso renderizado (H2, H12).
  */
 export function validateMessageTemplate(
   key: MessageKey,
@@ -198,6 +286,7 @@ export function validateMessageTemplate(
   const spec = messageChannelSpec(key, channel);
   if (!spec) throw new Error(`${key} no se envía por ${channel}`);
   const noun = MESSAGE_CATALOG[key].noun;
+  const collapse = collapseAfter(spec);
   const linksMessage =
     channel === 'EMAIL'
       ? MESSAGE_EMAIL_LINKS_MESSAGE
@@ -234,7 +323,12 @@ export function validateMessageTemplate(
       'el asunto',
     );
     if (wrong) return fail(wrong);
-    if (hasLinkOrHtml(literalText(parsed.tokens))) return fail(linksMessage);
+    if (hasLinkInAnyVariant(parsed.tokens, collapse)) return fail(linksMessage);
+    if (
+      worstCaseLength(parsed.tokens, collapse) > MESSAGE_SUBJECT_RENDERED_MAX
+    ) {
+      return fail(renderedTooLong('El asunto', MESSAGE_SUBJECT_RENDERED_MAX));
+    }
   }
 
   const body = normalizePatientPlainText(input.body);
@@ -262,33 +356,98 @@ export function validateMessageTemplate(
       return fail(`${capitalize(noun)} tiene que llevar {${required}}.`);
     }
   }
-  if (hasLinkOrHtml(literalText(parsed.tokens))) return fail(linksMessage);
+  if (hasLinkInAnyVariant(parsed.tokens, collapse)) return fail(linksMessage);
+  const renderedMax = messageRenderedBodyMax(channel);
+  if (worstCaseLength(parsed.tokens, collapse) > renderedMax) {
+    return fail(renderedTooLong('El texto', renderedMax));
+  }
   return { ok: true, text: { subject, body } };
 }
 
+function renderedTooLong(what: string, max: number): string {
+  return `${what} puede pasar de ${max} caracteres con los datos más largos (nombres, sede, dirección): acórtalo o usa menos variables.`;
+}
+
+/** Por qué un texto guardado no salió y salió el texto por defecto. */
+export type MessageFallbackReason = 'INVALID' | 'LINK' | 'TOO_LONG';
+
+export type MessageRender =
+  | { ok: true; text: MessageText }
+  | { ok: false; reason: MessageFallbackReason };
+
+function renderText(
+  text: string,
+  values: MessageValues,
+  collapse: (name: string) => boolean,
+): string | null {
+  const parsed = parse(text);
+  if (!parsed.ok) return null;
+  return renderWith(parsed.tokens, (n) => valueOf(values, n), collapse).trim();
+}
+
 /**
- * Renderiza un texto YA validado con los valores del envío. `null` si el
- * texto no es válido para (clave, canal) — p. ej. guardado antes de que el
- * catálogo cambiara —: quien llama cae al texto por defecto, nunca envía una
- * `{variable}` cruda.
+ * Renderiza un texto guardado con los valores del envío y comprueba el
+ * resultado. No sale (y quien llama usa el texto por defecto) si ya no es
+ * válido para el catálogo (H14), si al renderizar arma un enlace o HTML que
+ * el texto por defecto con los mismos datos no tiene (H1) o si se pasa de
+ * los topes del texto renderizado (H2, H12). Nunca sale una `{variable}`.
  */
 export function renderMessageTemplate(
   key: MessageKey,
   channel: MessageChannel,
+  language: MessageLanguage,
   text: MessageText,
   values: MessageValues,
-): MessageText | null {
+): MessageRender {
+  const spec = messageChannelSpec(key, channel);
+  if (!spec) return { ok: false, reason: 'INVALID' };
   const valid = validateMessageTemplate(key, channel, text);
-  if (!valid.ok) return null;
-  const body = parse(valid.text.body);
-  if (!body.ok) return null;
-  let subject: string | null = null;
-  if (valid.text.subject !== null) {
-    const parsed = parse(valid.text.subject);
-    if (!parsed.ok) return null;
-    subject = renderTokens(parsed.tokens, values).trim();
+  if (!valid.ok) return { ok: false, reason: 'INVALID' };
+  const collapse = collapseAfter(spec);
+  const render = (t: MessageText, v: MessageValues) => ({
+    subject: t.subject === null ? null : renderText(t.subject, v, collapse),
+    body: renderText(t.body, v, collapse),
+  });
+  const rendered = render(valid.text, values);
+  if (
+    rendered.body === null ||
+    (valid.text.subject !== null && !rendered.subject)
+  ) {
+    return { ok: false, reason: 'INVALID' };
   }
-  return { subject, body: renderTokens(body.tokens, values).trim() };
+  if (
+    (rendered.subject !== null &&
+      chars(rendered.subject) > MESSAGE_SUBJECT_RENDERED_MAX) ||
+    chars(rendered.body) > messageRenderedBodyMax(channel)
+  ) {
+    return { ok: false, reason: 'TOO_LONG' };
+  }
+  // El enlace legítimo no cuenta: solo lo que arman el texto y los datos.
+  const withoutLink: MessageValues = { ...values, enlace: ' ' };
+  // Solo enlaces: un «<» de un dato no es HTML (el email lo escapa y en un
+  // chat es texto); el HTML escrito por la clínica ya lo rechazó la validación.
+  const linked = (r: { subject: string | null; body: string | null }) =>
+    hasLinkOrHtml(`${r.subject ?? ''}\n${r.body ?? ''}`.replace(/[<>]/g, ' '));
+  if (linked(render(valid.text, withoutLink))) {
+    const fallback = defaultMessageText(key, channel, language);
+    if (!fallback || !linked(render(fallback, withoutLink))) {
+      return { ok: false, reason: 'LINK' };
+    }
+  }
+  return {
+    ok: true,
+    text: { subject: rendered.subject, body: rendered.body },
+  };
+}
+
+/** Por qué un texto guardado no saldría hoy (para el GET), o null. */
+export function storedMessageTemplateProblem(
+  key: MessageKey,
+  channel: MessageChannel,
+  text: MessageText,
+): string | null {
+  const valid = validateMessageTemplate(key, channel, text);
+  return valid.ok ? null : valid.message;
 }
 
 /**

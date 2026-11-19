@@ -9,7 +9,7 @@ import {
 } from '../../../shared/i18n/localized-text';
 import { primaryLanguage } from '../../../shared/i18n/patient-language';
 import type { MessageLanguage, MessageText } from './message-catalog';
-import { renderMessageTemplate } from './message-template-engine';
+import { renderClinicText } from './clinic-text';
 import type { MessageValues } from './message-variables';
 
 /**
@@ -167,14 +167,13 @@ export function confirmationWhatsAppText(
 ): string {
   const language = confirmationMessageLanguage(input.patientLanguage);
   const t = CONFIRMATION_COPY[language];
-  const custom = override
-    ? renderMessageTemplate(
-        'appointment-confirmation',
-        'WHATSAPP',
-        override,
-        confirmationWhatsAppValues(input),
-      )?.body
-    : null;
+  const clinicText = renderClinicText(
+    'appointment-confirmation',
+    'WHATSAPP',
+    language,
+    override,
+    confirmationWhatsAppValues(input),
+  )?.body;
   const where = input.locationAddress
     ? `${input.locationName} (${input.locationAddress})`
     : input.locationName;
@@ -183,6 +182,13 @@ export function confirmationWhatsAppText(
     : input.anamnesisPending
       ? t.anamnesisPending
       : '';
+  // H2: el mensaje entero no pasa del tope (sin las indicaciones, que se
+  // recortan): con el texto de la clínica más largo, sale el de siempre.
+  const custom =
+    clinicText &&
+    [...clinicText].length + [...anamnesis].length <= CONFIRMATION_MESSAGE_MAX
+      ? clinicText
+      : null;
   const base =
     (custom ??
       `${t.greeting(input.patientFirstName)}, ` +
@@ -245,15 +251,14 @@ export function linkOfferWhatsAppText(
   override: MessageText | null,
 ): string {
   const values = linkOfferWhatsAppValues(input);
-  if (override) {
-    const custom = renderMessageTemplate(
-      'slot-offer',
-      'WHATSAPP',
-      override,
-      values,
-    );
-    if (custom) return custom.body;
-  }
+  const custom = renderClinicText(
+    'slot-offer',
+    'WHATSAPP',
+    'es',
+    override,
+    values,
+  );
+  if (custom) return custom.body;
   const first = values.paciente ?? '';
   const greeting = first ? `Hola ${first}` : 'Hola';
   const withWhom = input.providerName ? ` con ${input.providerName}` : '';

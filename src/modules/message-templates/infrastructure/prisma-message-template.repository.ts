@@ -71,6 +71,11 @@ export function messageTemplateSnapshot(
 
 const HIDDEN = ['body'] as const;
 
+/** H4/H5: qué mensaje, en todos los eventos (también en un UPDATE). */
+function templateMeta(id: MessageTemplateId) {
+  return { key: id.key, channel: id.channel, language: id.language };
+}
+
 @Injectable()
 export class PrismaMessageTemplateRepository implements MessageTemplateRepository {
   constructor(
@@ -197,6 +202,7 @@ export class PrismaMessageTemplateRepository implements MessageTemplateRepositor
             hiddenFields: HIDDEN,
             before: messageTemplateSnapshot(id, before),
             after: messageTemplateSnapshot(id, after),
+            extra: { messageTemplate: templateMeta(id) },
           })
         : configAuditEvent(ctx, {
             action: 'CREATE',
@@ -206,6 +212,7 @@ export class PrismaMessageTemplateRepository implements MessageTemplateRepositor
             locationId: null,
             hiddenFields: HIDDEN,
             after: messageTemplateSnapshot(id, after),
+            extra: { messageTemplate: templateMeta(id) },
           });
       if (event) await writeAuditEvent(tx, event);
       return stored(after);
@@ -233,6 +240,7 @@ export class PrismaMessageTemplateRepository implements MessageTemplateRepositor
           locationId: null,
           hiddenFields: HIDDEN,
           before: messageTemplateSnapshot(id, before),
+          extra: { messageTemplate: templateMeta(id) },
         }),
       );
       return true;
@@ -253,43 +261,45 @@ export class PrismaMessageTemplateRepository implements MessageTemplateRepositor
   testCooldownRemaining(
     userId: string,
     cooldownSeconds: number,
-    now: Date,
   ): Promise<number> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(tenantId, (tx) =>
-      this.cooldownIn(tx, tenantId, userId, cooldownSeconds, now),
+      this.cooldownIn(tx, tenantId, userId, cooldownSeconds),
     );
   }
 
+  /**
+   * H9: la ventana se cuenta con el reloj de la BD (el mismo que pone
+   * `occurredAt`), nunca con el de la API. Por persona Y clínica: un ADMIN
+   * de varias clínicas tiene una ventana en cada una (decisión documentada).
+   */
   private async cooldownIn(
     tx: Prisma.TransactionClient,
     tenantId: string,
     userId: string,
     cooldownSeconds: number,
-    now: Date,
   ): Promise<number> {
-    const since = new Date(now.getTime() - cooldownSeconds * 1000);
     // audit_events_tenant_actor (tenantId, actorUserId, occurredAt): la
     // última prueba de esta persona en la ventana.
-    const [row] = await tx.$queryRaw<{ last: Date | null }[]>`
-      SELECT max("occurredAt") AS "last" FROM "audit_events"
+    const [row] = await tx.$queryRaw<{ elapsed: number | null }[]>`
+      SELECT EXTRACT(EPOCH FROM ((clock_timestamp() AT TIME ZONE 'UTC') - max("occurredAt")))::float8 AS "elapsed"
+        FROM "audit_events"
        WHERE "tenantId" = ${tenantId}::uuid
          AND "actorUserId" = ${userId}::uuid
-         AND "occurredAt" > ${since}
+         AND "occurredAt" > (clock_timestamp() AT TIME ZONE 'UTC') - make_interval(secs => ${cooldownSeconds})
          AND "resourceType" = 'CLINIC_SETTINGS'
          AND "action" = 'VIEW'
          AND "metadata" ->> 'reason' = ${MESSAGE_TEMPLATE_TEST_SENT_REASON}`;
-    if (!row?.last) return 0;
-    const elapsed = (now.getTime() - row.last.getTime()) / 1000;
-    return Math.max(1, Math.ceil(cooldownSeconds - elapsed));
+    if (row?.elapsed == null) return 0;
+    return Math.max(1, Math.ceil(cooldownSeconds - row.elapsed));
   }
 
   recordTestSend(
     email: PreparedEmail,
-    _id: MessageTemplateId,
+    id: MessageTemplateId,
+    draft: boolean,
     ctx: AuditRequestContext,
     cooldownSeconds: number,
-    now: Date,
   ): Promise<{ ok: true } | { ok: false; retryAfterSeconds: number }> {
     const tenantId = this.tenantId();
     return this.prisma.runWithTenant(tenantId, async (tx) => {
@@ -300,7 +310,6 @@ export class PrismaMessageTemplateRepository implements MessageTemplateRepositor
         tenantId,
         ctx.actor.userId,
         cooldownSeconds,
-        now,
       );
       if (wait > 0) return { ok: false, retryAfterSeconds: wait };
       await email.insert(tx);
@@ -319,7 +328,10 @@ export class PrismaMessageTemplateRepository implements MessageTemplateRepositor
         requestId: ctx.requestId,
         ip: ctx.ip,
         userAgent: ctx.userAgent,
-        metadata: { reason: MESSAGE_TEMPLATE_TEST_SENT_REASON },
+        metadata: {
+          reason: MESSAGE_TEMPLATE_TEST_SENT_REASON,
+          messageTemplate: { ...templateMeta(id), draft },
+        },
       });
       return { ok: true };
     });

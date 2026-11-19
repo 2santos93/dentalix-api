@@ -1700,3 +1700,47 @@ describe('sanitizeAuditMetadata — serie de citas (DX-562)', () => {
     }
   });
 });
+
+describe('sanitizeAuditMetadata — texto de un mensaje (DX-565)', () => {
+  it('conserva clave, canal, idioma y si era borrador', () => {
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'MESSAGE_TEMPLATE_TEST_SENT',
+        messageTemplate: {
+          key: 'appointment-reminder',
+          channel: 'EMAIL',
+          language: 'es',
+          draft: true,
+        },
+      }),
+    ).toEqual({
+      reason: 'MESSAGE_TEMPLATE_TEST_SENT',
+      messageTemplate: {
+        key: 'appointment-reminder',
+        channel: 'EMAIL',
+        language: 'es',
+        draft: true,
+      },
+    });
+  });
+
+  it.each([
+    { key: 'Recordatorio', channel: 'EMAIL', language: 'es' },
+    { key: 'appointment-reminder', channel: 'SMS', language: 'es' },
+    { key: 'appointment-reminder', channel: 'EMAIL', language: 'es-VE' },
+    {
+      key: 'appointment-reminder',
+      channel: 'EMAIL',
+      language: 'es',
+      body: 'Hola Ana',
+    },
+    {
+      key: 'appointment-reminder',
+      channel: 'EMAIL',
+      language: 'es',
+      draft: 'sí',
+    },
+  ])('descarta lo que no tiene la forma (y nunca un texto): %o', (value) => {
+    expect(sanitizeAuditMetadata({ messageTemplate: value })).toEqual({});
+  });
+});

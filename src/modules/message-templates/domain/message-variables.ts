@@ -32,6 +32,11 @@ export interface MessageVariableInfo {
   description: string;
   /** Valor de ejemplo de la vista previa: ficticio (Venezuela). */
   sample: string;
+  /**
+   * Largo máximo razonable de un valor real (caracteres): con él se calcula
+   * al guardar el peor caso del texto renderizado (asunto y WhatsApp).
+   */
+  maxLength: number;
 }
 
 export const MESSAGE_VARIABLE_INFO: Readonly<
@@ -39,44 +44,55 @@ export const MESSAGE_VARIABLE_INFO: Readonly<
 > = {
   paciente: {
     description:
-      'Nombre de pila de quien recibe el mensaje (el paciente o su responsable).',
+      'Nombre de pila del paciente que recibe el mensaje. Cuando el mensaje va al responsable de un menor, sale el texto por defecto.',
     sample: 'Ana',
+    maxLength: 60,
   },
   clinica: {
     description: 'Nombre de la clínica.',
     sample: 'Clínica Dental Altamira',
+    maxLength: 120,
   },
   sede: {
     description: 'Nombre de la sede de la cita o del hueco.',
     sample: 'Sede Altamira',
+    maxLength: 120,
   },
   direccion: {
     description: 'Dirección de la sede (puede faltar).',
     sample: 'Av. Francisco de Miranda 93, Caracas',
+    maxLength: 200,
   },
   fecha: {
     description: 'Día de la cita o del hueco, con el formato de la sede.',
     sample: 'martes 20 de octubre de 2026',
+    maxLength: 40,
   },
   hora: {
     description: 'Hora de la cita o del hueco, con el reloj de la sede.',
     sample: '9:30 a. m.',
+    maxLength: 12,
   },
   profesional: {
     description: 'Profesional de la cita o del hueco (puede faltar).',
     sample: 'Dra. Laura Gómez',
+    maxLength: 120,
   },
   enlace: {
     description: 'Enlace personal del paciente para responder.',
-    sample: 'https://ejemplo.dentalix.app/vista-previa',
+    // RFC 2606: un dominio reservado, que nunca puede ser una clínica.
+    sample: 'https://example.com/dentalix/vista-previa',
+    maxLength: 200,
   },
   caduca: {
     description: 'Cuándo deja de valer el enlace, con el formato de la sede.',
     sample: 'lunes 19 de octubre de 2026 a las 6:00 p. m.',
+    maxLength: 60,
   },
   cantidad: {
     description: 'Cuántas citas tiene la serie.',
     sample: '4',
+    maxLength: 2,
   },
 };
 
