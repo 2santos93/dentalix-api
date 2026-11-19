@@ -14,6 +14,7 @@ import {
   zonedStartOfDay,
   zonedWallTime,
   civilWeekday,
+  wallMillisOfDay,
 } from './civil-day';
 
 const iso = (d: Date) => d.toISOString();
@@ -303,5 +304,29 @@ describe('civilDateResolver (DX-145)', () => {
         }
       }
     }
+  });
+});
+
+describe('wallMillisOfDay (DX-562)', () => {
+  it('la hora de pared, sin el desfase, a ambos lados del cambio de hora', () => {
+    // Nueva York: 10:00 EST (UTC−5) y 10:00 EDT (UTC−4) son la misma hora de pared.
+    expect(
+      wallMillisOfDay(new Date('2027-03-13T15:00:00.000Z'), 'America/New_York'),
+    ).toBe(10 * 3_600_000);
+    expect(
+      wallMillisOfDay(new Date('2027-03-15T14:00:00.000Z'), 'America/New_York'),
+    ).toBe(10 * 3_600_000);
+  });
+
+  it('Caracas (UTC−4, sin cambio de hora), con segundos y milisegundos', () => {
+    expect(
+      wallMillisOfDay(new Date('2027-01-20T13:30:15.250Z'), 'America/Caracas'),
+    ).toBe(((9 * 60 + 30) * 60 + 15) * 1000 + 250);
+  });
+
+  it('medianoche es 0', () => {
+    expect(
+      wallMillisOfDay(new Date('2027-01-20T04:00:00.000Z'), 'America/Caracas'),
+    ).toBe(0);
   });
 });
