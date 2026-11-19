@@ -243,6 +243,8 @@ model Tenant {
   leads                                   Lead[]
   leadNotes                               LeadNote[]
   leadReasons                             LeadReason[]
+  // DX-172: catálogo «¿Cómo nos conoció?» de la clínica.
+  patientSources                          PatientSource[]
   patientAccessLinks                      PatientAccessLink[]
   // DX-561: seguimiento automático de presupuestos (ajustes y avisos).
   quoteFollowUpSettings                   LocationQuoteFollowUpSettings[]
@@ -999,11 +1001,24 @@ model Patient {
   /// `deletedAt`, CHECK en la BD). Lo escribe SOLO `dx_merge_patients`; la app
   /// lo lee para llevar los enlaces y búsquedas antiguos al que se conserva.
   mergedIntoId                 String?               @db.Uuid
+  /// DX-172: «¿Cómo nos conoció?» (catálogo de la clínica, FK compuesta). Opcional.
+  sourceId                     String?               @db.Uuid
+  /// DX-172: el paciente que lo recomendó (FK compuesta, misma clínica; nunca él
+  /// mismo). Solo con una fuente de tipo PATIENT. Dato personal: solo personal de
+  /// la clínica. No se llama "patientId": la fusión lo reasigna aparte.
+  referredByPatientId          String?               @db.Uuid
+  /// DX-172: nombre del profesional externo que lo derivó (1–120). Solo con una
+  /// fuente de tipo EXTERNAL_PROFESSIONAL.
+  referredByName               String?
 
   importBatch                 PatientImportBatch?              @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "patients_import_batch_fkey")
   // DX-266: fusión (FK compuesta por clínica) y parejas «No es duplicado».
   mergedInto                  Patient?                         @relation("PatientMerges", fields: [tenantId, mergedIntoId], references: [tenantId, id], onDelete: Restrict, map: "patients_merged_into_fkey")
   mergedPatients              Patient[]                        @relation("PatientMerges")
+  // DX-172: origen y referente (FK compuestas por clínica).
+  source                      PatientSource?                   @relation(fields: [tenantId, sourceId], references: [tenantId, id], onDelete: Restrict, map: "patients_source_fkey")
+  referredByPatient           Patient?                         @relation("PatientReferrals", fields: [tenantId, referredByPatientId], references: [tenantId, id], onDelete: Restrict, map: "patients_referred_by_fkey")
+  referredPatients            Patient[]                        @relation("PatientReferrals")
   duplicateDismissalsAsA      PatientDuplicateDismissal[]      @relation("DuplicateDismissalA")
   duplicateDismissalsAsB      PatientDuplicateDismissal[]      @relation("DuplicateDismissalB")
   // DX-107: filas de importación que lo crearon o le rellenaron campos vacíos.
@@ -1115,6 +1130,11 @@ model Patient {
   //     -> búsqueda (dx_patient_search_ids/_count).
   //   patients_tenant_last_attention_live_idx ("tenantId", last_attention_at)
   //     -> historias que salen de retención (DX-039).
+  //   patients_tenant_source_created_idx ("tenantId", "sourceId", "createdAt")
+  //     -> informe de captación (DX-172).
+  //   patients_tenant_referred_by_idx ("tenantId", "referredByPatientId")
+  //     WHERE "referredByPatientId" IS NOT NULL
+  //     -> «Ha recomendado a N», fusión, supresión y lado hijo de la FK (DX-172).
   //   patients_tenant_phone_e164_pending_idx ("tenantId", id)
   //     WHERE phone IS NOT NULL AND "phoneE164" IS NULL AND "phoneE164CheckedAt" IS NULL
   //     -> residuo del relleno de phoneE164 (DX-224).
@@ -9912,4 +9932,40 @@ model LeadNote {
   @@index([tenantId, leadId, createdAt], map: "lead_notes_lead_idx")
   @@index([authorId], map: "lead_notes_author_idx")
   @@map("lead_notes")
+}
+
+/// Tipo de una fuente de captación (DX-172): un canal, la recomendación de un
+/// paciente (con referente) o un profesional externo (con su nombre).
+enum PatientSourceKind {
+  CHANNEL
+  PATIENT
+  EXTERNAL_PROFESSIONAL
+}
+
+/// «¿Cómo nos conoció?» (DX-172): catálogo editable de la clínica, sembrado por
+/// `dx_patient_sources_ensure`. No se borra (sin DELETE para la app): se
+/// desactiva, y los pacientes y el informe la conservan. Nombre único en la
+/// clínica sin distinguir mayúsculas; `systemKey` solo en las sembradas.
+model PatientSource {
+  id        String            @id @default(uuid()) @db.Uuid
+  tenantId  String            @db.Uuid
+  /// 2 a 60 caracteres, sin espacios a los lados.
+  name      String
+  kind      PatientSourceKind
+  isActive  Boolean           @default(true)
+  /// Clave de las sembradas (PATIENT_REFERRAL, INSTAGRAM…); NULL en las propias.
+  systemKey String?
+  sortOrder Int               @default(100)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patients Patient[]
+
+  // Destino de la FK compuesta de patients (SEC-004).
+  @@unique([tenantId, id], map: "patient_sources_tenant_id_key")
+  @@unique([tenantId, systemKey], map: "patient_sources_tenant_system_key")
+  // POR EXPRESIÓN, no declarable en Prisma:
+  //   patient_sources_tenant_name_key UNIQUE ("tenantId", lower(name))
+  @@map("patient_sources")
 }

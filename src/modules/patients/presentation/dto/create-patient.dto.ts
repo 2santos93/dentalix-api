@@ -12,6 +12,7 @@ import {
   MaxLength,
   MinLength,
   ValidateNested,
+  IsUUID,
 } from 'class-validator';
 import {
   INPUT_CODE_MAX,
@@ -21,6 +22,7 @@ import {
   TextMaxLength,
 } from '../../../../shared/validation/input-limits';
 import { Sex } from '@prisma/client';
+import { REFERRED_BY_NAME_MAX } from '../../domain/patient-acquisition';
 import { DOCUMENT_TYPES } from '../../domain/document-type';
 import {
   DOC_TYPE_INPUTS,
@@ -212,4 +214,36 @@ export class CreatePatientDto {
   @ValidateNested()
   @Type(() => SaveMedicalHistoryDto)
   medicalHistory?: SaveMedicalHistoryDto;
+
+  // DX-172: «¿Cómo nos conoció?». Dato personal: solo el personal de la clínica.
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-172: fuente del catálogo de la clínica (`GET /patient-sources`). Opcional; al asignarla tiene que estar activa. `null` la vacía (y con ella el referente).',
+  })
+  @IsOptional()
+  @IsUUID()
+  sourceId?: string | null;
+
+  @ApiPropertyOptional({
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-172: el paciente de la clínica que lo recomendó. Solo con una fuente de tipo PATIENT; nunca el propio paciente. De otra clínica: 400.',
+  })
+  @IsOptional()
+  @IsUUID()
+  referredByPatientId?: string | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    maxLength: REFERRED_BY_NAME_MAX,
+    description:
+      'DX-172: nombre del profesional externo que lo derivó (1–120). Solo con una fuente de tipo EXTERNAL_PROFESSIONAL.',
+  })
+  @IsOptional()
+  @IsString()
+  @TextMaxLength(REFERRED_BY_NAME_MAX)
+  referredByName?: string | null;
 }
