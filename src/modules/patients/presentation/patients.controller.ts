@@ -614,18 +614,25 @@ export class PatientsController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdatePatientDto,
+    @Req() req: AuthenticatedRequest,
   ): Promise<PatientOutput> {
-    const patient = await this.updatePatient.execute(id, {
-      ...dto,
-      // Tres casos, no dos: ausente = no tocar, `null` = vaciar la columna
-      // (es nullable), y una fecha = parsearla. El guard anterior sólo miraba
-      // `undefined`, así que un `null` caía en `new Date(null)` y escribía
-      // 1970-01-01 en vez de vaciar.
-      birthDate:
-        dto.birthDate === undefined || dto.birthDate === null
-          ? dto.birthDate
-          : new Date(dto.birthDate),
-    });
+    // DX-172: el contexto, para el evento con antes/después de la captación.
+    const ctx = auditRequestContext(req, this.tenantContext);
+    const patient = await this.updatePatient.execute(
+      id,
+      {
+        ...dto,
+        // Tres casos, no dos: ausente = no tocar, `null` = vaciar la columna
+        // (es nullable), y una fecha = parsearla. El guard anterior sólo miraba
+        // `undefined`, así que un `null` caía en `new Date(null)` y escribía
+        // 1970-01-01 en vez de vaciar.
+        birthDate:
+          dto.birthDate === undefined || dto.birthDate === null
+            ? dto.birthDate
+            : new Date(dto.birthDate),
+      },
+      ctx,
+    );
     return this.presentOne(patient);
   }
 

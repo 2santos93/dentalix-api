@@ -46,6 +46,18 @@ import {
   totalLivePublicLinks,
 } from '../../domain/live-public-links';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { configAuditEvent } from '../../../audit/domain/config-audit';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import {
+  NO_ACQUISITION,
+  sameAcquisition,
+  touchesAcquisition,
+  type PatientAcquisition,
+} from '../../domain/patient-acquisition';
+import {
+  resolveAcquisitionInTx,
+  storedAcquisition,
+} from '../patient-acquisition-in-tx';
 import { IN_CLINIC_STATUSES } from '../../../appointments/domain/patient-flow';
 import {
   recordConsentsInTx,
@@ -264,9 +276,21 @@ export async function insertPatientRowInTx(
         await defaultPhoneRegionIn(tx, phoneLocationId),
       )
     : null;
+  // DX-172: «¿Cómo nos conoció?», decidido en esta misma transacción.
+  const acquisition =
+    input.acquisition && touchesAcquisition(input.acquisition)
+      ? await resolveAcquisitionInTx(
+          tx,
+          tenantId,
+          null,
+          NO_ACQUISITION,
+          input.acquisition,
+        )
+      : NO_ACQUISITION;
   const created = await tx.patient.create({
     data: {
       tenantId,
+      ...acquisition,
       phoneE164,
       contactChannel: clinic.defaultContactChannel,
       preferredLanguage,
@@ -356,6 +380,34 @@ export function mapToEntity(
     reminderOptOutSource: patient.reminderOptOutSource,
     createdAt: patient.createdAt,
     updatedAt: patient.updatedAt,
+    sourceId: patient.sourceId,
+    referredByPatientId: patient.referredByPatientId,
+    referredByName: patient.referredByName,
+  };
+}
+
+/**
+ * DX-172: la foto de la captación para la auditoría: el NOMBRE de la fuente
+ * (legible en el registro; el id cambia de sentido si se renombra) y el id
+ * del referente. El nombre del profesional externo cuenta como cambio pero no
+ * se guarda (`hiddenFields`): es un dato personal de un tercero.
+ */
+async function acquisitionSnapshot(
+  tx: TxClient,
+  tenantId: string,
+  value: PatientAcquisition,
+): Promise<Record<string, string | null>> {
+  const source = value.sourceId
+    ? await tx.patientSource.findFirst({
+        where: { tenantId, id: value.sourceId },
+        select: { name: true },
+      })
+    : null;
+  return {
+    source: source?.name ?? null,
+    sourceId: value.sourceId,
+    referredByPatientId: value.referredByPatientId,
+    referredByName: value.referredByName,
   };
 }
 
@@ -617,25 +669,72 @@ export class PrismaPatientRepository implements PatientRepository {
     );
   }
 
-  async update(id: string, patch: UpdatePatientRepoInput): Promise<Patient> {
+  async update(
+    id: string,
+    patch: UpdatePatientRepoInput,
+    audit?: AuditRequestContext,
+  ): Promise<Patient> {
+    const tenantId = this.requireTenantId();
+    const { sourceId, referredByPatientId, referredByName, ...fields } = patch;
+    const acquisitionInput = { sourceId, referredByPatientId, referredByName };
     return this.prisma.runWithTenant(async (tx) => {
       // FOR UPDATE: el tipo con el que se decide la etiqueta (R7) es el de
       // la fila que se va a escribir, no el que leyó antes el caso de uso.
-      const [existing] = await tx.$queryRaw<{ documentType: DocumentType }[]>`
-        SELECT "documentType" FROM "patients"
+      // También la captación guardada (DX-172), sobre la que se decide.
+      const [existing] = await tx.$queryRaw<
+        {
+          documentType: DocumentType;
+          sourceId: string | null;
+          referredByPatientId: string | null;
+          referredByName: string | null;
+        }[]
+      >`
+        SELECT "documentType", "sourceId", "referredByPatientId", "referredByName"
+          FROM "patients"
          WHERE "id" = ${id}::uuid AND "deletedAt" IS NULL
          FOR UPDATE`;
       if (!existing) {
         throw new NotFoundException('Paciente no encontrado');
       }
       if (typeof patch.docNumber === 'string') {
-        await assertDocFree(tx, this.requireTenantId(), patch.docNumber, id);
+        await assertDocFree(tx, tenantId, patch.docNumber, id);
       }
+      const before = storedAcquisition(existing);
+      const after = touchesAcquisition(acquisitionInput)
+        ? await resolveAcquisitionInTx(
+            tx,
+            tenantId,
+            id,
+            before,
+            acquisitionInput,
+          )
+        : before;
+      const acquisitionChanged = !sameAcquisition(before, after);
 
       const patient = await tx.patient.update({
         where: { id },
-        data: patientUpdateData(patch, existing.documentType),
+        data: {
+          ...patientUpdateData(fields, existing.documentType),
+          ...(acquisitionChanged ? after : {}),
+        },
       });
+      if (acquisitionChanged && audit) {
+        const event = configAuditEvent(audit, {
+          action: 'UPDATE',
+          resourceType: 'PATIENT',
+          resourceId: id,
+          reason: 'PATIENT_ACQUISITION_CHANGED',
+          hiddenFields: ['referredByName'],
+          before: await acquisitionSnapshot(tx, tenantId, before),
+          after: await acquisitionSnapshot(tx, tenantId, after),
+        });
+        if (event) {
+          await writeAuditEvent(tx, {
+            ...event,
+            patient: { kind: 'patient', id },
+          });
+        }
+      }
       if (patch.phone) {
         // DX-224: el trigger anuló el E.164 viejo; se escribe el nuevo.
         await reconcilePatientPhoneE164(
@@ -815,9 +914,22 @@ export class PrismaPatientRepository implements PatientRepository {
       const cleared = Object.fromEntries(
         PARTIAL_SUPPRESSION_FIELDS.map((field) => [field, null]),
       ) as Record<(typeof PARTIAL_SUPPRESSION_FIELDS)[number], null>;
+      // DX-172: el vínculo «X recomendó a Y» es dato personal de los dos: se
+      // borra el del suprimido (quién lo recomendó o el profesional que lo
+      // derivó) y el de quienes él recomendó. La fuente se conserva: el
+      // informe sigue contando la captación, sin el nombre de nadie.
+      await tx.patient.updateMany({
+        where: { tenantId, referredByPatientId: id },
+        data: { referredByPatientId: null },
+      });
       const patient = await tx.patient.update({
         where: { id },
-        data: { ...cleared, partiallySuppressedAt: new Date() },
+        data: {
+          ...cleared,
+          referredByPatientId: null,
+          referredByName: null,
+          partiallySuppressedAt: new Date(),
+        },
       });
       return mapToEntity(patient, state);
     });

@@ -67,6 +67,10 @@ export interface CreatePatientInput {
    */
   actorRole: ClinicRole;
   medicalHistory?: MedicalHistoryInput;
+  /** DX-172: «¿Cómo nos conoció?» (opcional). */
+  sourceId?: string | null;
+  referredByPatientId?: string | null;
+  referredByName?: string | null;
 }
 
 @Injectable()
@@ -141,6 +145,11 @@ export class CreatePatientUseCase {
       createdById: input.createdById,
       preferredLanguage: preferredLanguageInput(input.preferredLanguage),
       medicalHistory,
+      acquisition: {
+        sourceId: input.sourceId,
+        referredByPatientId: input.referredByPatientId,
+        referredByName: input.referredByName,
+      },
     });
   }
 

@@ -44,6 +44,10 @@ import {
 import { SCHEDULED_PRODUCTION_REPOSITORY } from './domain/ports/scheduled-production-repository.port';
 import { PrismaScheduledProductionRepository } from './infrastructure/prisma-scheduled-production.repository';
 import { ScheduledProductionController } from './presentation/scheduled-production.controller';
+import { GetAcquisitionUseCase } from './application/use-cases/get-acquisition.use-case';
+import { ACQUISITION_REPOSITORY } from './domain/ports/acquisition-repository.port';
+import { PrismaAcquisitionRepository } from './infrastructure/prisma-acquisition.repository';
+import { AcquisitionController } from './presentation/acquisition.controller';
 import { ExchangeModule } from '../exchange/exchange.module';
 import { CATALOG_CURRENCY_READER } from '../dental-catalog/domain/ports/catalog-currency-reader.port';
 import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/prisma-catalog-currency-reader';
@@ -69,6 +73,8 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     ProfitabilityController,
     QuoteFunnelController,
     ScheduledProductionController,
+    // DX-172: «Captación» (pacientes nuevos y lo cobrado por fuente).
+    AcquisitionController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
@@ -80,6 +86,7 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     GetProfitabilityUseCase,
     GetQuoteFunnelUseCase,
     GetScheduledProductionUseCase,
+    GetAcquisitionUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -120,6 +127,7 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
       useClass: PrismaScheduledProductionRepository,
     },
     { provide: SCHEDULED_PRODUCTION_CLOCK, useValue: () => new Date() },
+    { provide: ACQUISITION_REPOSITORY, useClass: PrismaAcquisitionRepository },
     {
       provide: CATALOG_CURRENCY_READER,
       useClass: PrismaCatalogCurrencyReader,

@@ -276,6 +276,30 @@ export class PatientDto {
 
   @ApiProperty({ format: 'date-time' })
   updatedAt!: Date;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'DX-172: «¿Cómo nos conoció?» (fuente del catálogo); null = sin dato. El nombre y el referente, en `GET /patients/:id/acquisition`.',
+  })
+  sourceId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'DX-172: el paciente que lo recomendó.',
+  })
+  referredByPatientId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'DX-172: el profesional externo que lo derivó.',
+  })
+  referredByName!: string | null;
 }
 
 /**

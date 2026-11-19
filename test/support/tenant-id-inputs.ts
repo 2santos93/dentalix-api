@@ -209,6 +209,17 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-172: la fuente y el referente de otra clínica en el alta y la edición
+  // (400, el paciente intacto).
+  'POST /patients body.sourceId': 'patient-acquisition.e2e-spec.ts',
+  'POST /patients body.referredByPatientId': 'patient-acquisition.e2e-spec.ts',
+  'PATCH /patients/:id body.sourceId': 'patient-acquisition.e2e-spec.ts',
+  'PATCH /patients/:id body.referredByPatientId':
+    'patient-acquisition.e2e-spec.ts',
+  // DX-172: la sede de otra clínica en el informe de captación (403, el mismo
+  // que una sede no permitida).
+  'GET /reports/acquisition ?locationId': 'patient-acquisition.e2e-spec.ts',
+  'GET /reports/acquisition.csv ?locationId': 'patient-acquisition.e2e-spec.ts',
   // DX-018: el profesional de A en la vista previa, la lista y el cierre de
   // honorarios desde la clínica B (404 / lista vacía, la regla de A intacta).
   'GET /commissions/preview ?userId': 'commissions.e2e-spec.ts',

@@ -60,6 +60,8 @@ async function purge(): Promise<void> {
     await raw.patientImportBatch.deleteMany({ where });
     await raw.patientLedger.deleteMany({ where });
     await raw.patient.deleteMany({ where });
+    // DX-172: las fuentes de captación de la clínica (las propias del test).
+    await raw.patientSource.deleteMany({ where });
     await raw.location.deleteMany({ where });
     await raw.tenant.deleteMany({ where: { id: { in: ids } } });
   }
@@ -538,6 +540,10 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
       // DX-266: un paciente del lote que absorbió a otro en una fusión guarda
       // la historia del otro: bloquea el deshacer.
       'patients.mergedIntoId',
+      // DX-172: un paciente del lote que otro tiene como referente («X
+      // recomendó a Y») ya es parte de la captación de otra ficha y del
+      // informe: bloquea el deshacer (no se vacía en silencio el dato de otro).
+      'patients.referredByPatientId',
       // DX-569: un enlace de pago cobra un plan o un saldo del paciente (que
       // ya bloquean el deshacer): bloquea igual.
       'payment_links.patientId',
@@ -588,6 +594,47 @@ describe('patient_import_batches/rows: RLS, FK, CHECKs, único por documento y d
     await expect(
       inTenant(a, () => repo.undo(batch!.id, a.userId)),
     ).rejects.toMatchObject({ patients: 1 });
+  });
+
+  it('DX-172: un paciente del lote que otro tiene como referente bloquea el deshacer y el vínculo queda intacto', async () => {
+    const batch = await prepared(a, [person('8889')]);
+    await runAll(a, batch!.id);
+    const created = await raw.patient.findFirstOrThrow({
+      where: { importBatchId: batch!.id },
+    });
+    const source = await raw.patientSource.create({
+      data: {
+        tenantId: a.tenantId,
+        name: `Recomendación DX-172 ${batch!.id.slice(0, 8)}`,
+        kind: 'PATIENT',
+      },
+    });
+    const referred = await raw.patient.create({
+      data: {
+        tenantId: a.tenantId,
+        firstName: 'Referida',
+        lastName: 'DX172',
+        sourceId: source.id,
+        referredByPatientId: created.id,
+      },
+    });
+    await expect(
+      inTenant(a, () => repo.undo(batch!.id, a.userId)),
+    ).rejects.toMatchObject({ patients: 1 });
+    expect(
+      await raw.patient.findUniqueOrThrow({
+        where: { id: referred.id },
+        select: { referredByPatientId: true },
+      }),
+    ).toEqual({ referredByPatientId: created.id });
+    expect(
+      (
+        await raw.patient.findUniqueOrThrow({
+          where: { id: created.id },
+          select: { deletedAt: true },
+        })
+      ).deletedAt,
+    ).toBeNull();
   });
 
   it('DX-412: la anestesia registrada (DX-307) bloquea deshacer el lote como el resto de la historia clínica, sin tocar nada', async () => {
