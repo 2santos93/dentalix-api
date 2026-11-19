@@ -24,6 +24,7 @@ import type {
   LeadView,
 } from '../src/modules/leads/application/leads.use-cases';
 import type { WorkQueuesSummary } from '../src/modules/work-queues/domain/work-queues';
+import { fixedSedeDay } from './support/sede-clock';
 
 /**
  * DX-556 · Prospectos por HTTP real con Postgres. Clínica A (Caracas) con la
@@ -347,13 +348,12 @@ describe('Prospectos (DX-556, e2e)', () => {
 
       // La primera cita desde la agenda (recepción, con el paciente del prospecto).
       // Se agenda pasado mañana a mediodía en la sede (UTC−4) y se trae a HOY
-      // por `raw`, como patient-flow: «ahora + 15 min» cruzaba la medianoche de
+      // por `raw` (sede-clock, DX-449): «ahora + 15 min» cruzaba la medianoche de
       // la sede de madrugada (UTC) y el horario daba 422; la llegada solo vale hoy.
-      const caracasToday = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'America/Caracas',
-      }).format(new Date());
-      const midnight = new Date(`${caracasToday}T00:00:00-04:00`).getTime();
-      const start = new Date(midnight + 2 * 24 * 3_600_000 + 12 * 3_600_000);
+      const start = fixedSedeDay(-2).at;
+      const midnight = new Date(
+        `${fixedSedeDay(0).day}T00:00:00-04:00`,
+      ).getTime();
       const appt = await as(a, tokens.RECEPTION!, principal)
         .post('/appointments', {
           patientId: first.patientId,
