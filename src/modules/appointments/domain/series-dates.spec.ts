@@ -116,7 +116,7 @@ describe('seriesDates (DX-562)', () => {
     expect(iso(autumn[1].start)).toBe('2027-10-31T08:00:00.000Z'); // 09:00 CET
   });
 
-  it('una hora que no existe ese día (02:30 del adelanto) cae el mismo día, como zonedWallTime', () => {
+  it('una hora que no existe ese día (02:30 del adelanto) pasa después del salto: 03:30', () => {
     const ny = 'America/New_York';
     const slots = seriesDates({
       start: at('2027-03-07T07:30:00.000Z'), // 02:30 EST
@@ -125,10 +125,39 @@ describe('seriesDates (DX-562)', () => {
       intervalWeeks: 1,
       count: 2,
     });
-    // 02:30 no existe el 14/03: zonedWallTime da 06:30Z (01:30 EST), el
-    // mismo día civil; la vista previa enseña esa hora y se puede cambiar.
-    expect(iso(slots[1].start)).toBe('2027-03-14T06:30:00.000Z');
+    // 02:30 no existe el 14/03: 03:30 EDT (07:30Z), el mismo día civil, y
+    // la duración se conserva.
+    expect(iso(slots[1].start)).toBe('2027-03-14T07:30:00.000Z');
+    expect(iso(slots[1].end)).toBe('2027-03-14T08:00:00.000Z');
     expect(civilDateIn(slots[1].start, ny)).toBe('2027-03-14');
+    expect(wallMillisOfDay(slots[1].start, ny)).toBe(3.5 * HOUR);
+    // Y la semana siguiente vuelve a las 02:30.
+  });
+
+  it('Madrid: las 02:15 del adelanto pasan a las 03:15; mover a esa hora también', () => {
+    const madrid = 'Europe/Madrid';
+    const slots = seriesDates({
+      start: at('2027-03-21T01:15:00.000Z'), // 02:15 CET
+      end: at('2027-03-21T01:45:00.000Z'),
+      timeZone: madrid,
+      intervalWeeks: 1,
+      count: 3,
+    });
+    expect(slots.map((s) => iso(s.start))).toEqual([
+      '2027-03-21T01:15:00.000Z',
+      '2027-03-28T01:15:00.000Z', // 03:15 CEST
+      '2027-04-04T00:15:00.000Z', // 02:15 CEST
+    ]);
+    expect(
+      iso(
+        shiftedStart(
+          at('2027-03-27T09:00:00.000Z'),
+          at('2027-03-27T09:00:00.000Z'),
+          at('2027-03-27T09:00:00.000Z'),
+          madrid,
+        ),
+      ),
+    ).toBe('2027-03-27T09:00:00.000Z');
   });
 
   it('la medianoche que no existe (Santiago): el primer instante del día', () => {

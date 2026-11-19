@@ -15,9 +15,8 @@ import {
  * (la cita de las 10:00 sigue a las 10:00 tras un cambio de hora) y su
  * DURACIÓN (absoluta, en milisegundos). Se suman días de calendario (7 × N),
  * nunca meses: el fin de mes y el año bisiesto no cambian nada. Una hora que
- * no existe ese día (el adelanto de primavera) cae donde la deja
- * `zonedWallTime`: el mismo día civil, una hora antes (02:30 → 01:30); la
- * vista previa enseña la hora real y se puede cambiar.
+ * no existe ese día (el adelanto de primavera) pasa DESPUÉS del salto, como
+ * en la mayoría de calendarios: 02:30 → 03:30 (la vista previa la enseña).
  */
 
 /** Tope de citas de una serie, la base incluida. */
@@ -86,10 +85,18 @@ export function atWallTime(
   timeZone: string,
 ): Date {
   const minute = Math.floor(wallMs / MINUTE_MS);
-  return new Date(
+  const candidate = new Date(
     zonedWallTime(day, minute, timeZone).getTime() +
       (wallMs - minute * MINUTE_MS),
   );
+  // Hora que no existe ese día (el adelanto de primavera): `zonedWallTime`
+  // la deja ANTES del salto (02:30 → 01:30). Como la mayoría de calendarios
+  // (RFC 5545, Temporal `compatible`), se pasa DESPUÉS: 02:30 → 03:30, el
+  // mismo hueco hacia delante.
+  const gap = wallMs - wallMillisOfDay(candidate, timeZone);
+  return gap > 0 && civilDateIn(candidate, timeZone) === day
+    ? new Date(candidate.getTime() + gap)
+    : candidate;
 }
 
 /**
