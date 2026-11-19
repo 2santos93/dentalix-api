@@ -241,4 +241,119 @@ describe('Vuelto al cobrar en efectivo (e2e, DX-570)', () => {
       50,
     );
   });
+
+  describe('el vuelto solo en el abono suelto a un plan: en el resto, 400 en español y nada registrado', () => {
+    const MESSAGE =
+      'El vuelto solo se registra en un abono suelto en efectivo a un plan de tratamiento.';
+    const messagesOf = (body: unknown) => JSON.stringify(body);
+
+    it('cobro dividido con «Recibido» o vuelto (en el cobro o en una línea) → 400', async () => {
+      const before = await paymentsOfPlan();
+      const lines = [
+        { amount: 20, currency: 'USD', paymentMethodId: cashA },
+        {
+          amount: 182.5,
+          currency: 'VES',
+          paymentMethodId: mobileA,
+          reference: 'S-1',
+        },
+      ];
+      for (const body of [
+        { paidAt: DAY, lines, tendered: 50 },
+        { paidAt: DAY, lines, change: [change()] },
+        { paidAt: DAY, lines, changeRemainderToCredit: true },
+        {
+          paidAt: DAY,
+          lines: [{ ...lines[0], tendered: 25 }, lines[1]],
+        },
+      ]) {
+        const res = await as(
+          api().post(`/api/v1/treatment-plans/${planA}/split-payments`),
+          a,
+          reception,
+        )
+          .send(body)
+          .expect(400);
+        expect(messagesOf(res.body)).toContain(MESSAGE);
+      }
+      expect(await paymentsOfPlan()).toBe(before);
+    });
+
+    it('abono al saldo migrado con «Recibido» o vuelto → 400', async () => {
+      const patient = await raw.patient.findFirstOrThrow({
+        where: { tenantId: a.tenantId },
+        select: { id: true },
+      });
+      const location = await raw.location.findFirstOrThrow({
+        where: { tenantId: a.tenantId },
+        select: { id: true },
+      });
+      const batch = await raw.patientImportBatch.create({
+        data: {
+          tenantId: a.tenantId,
+          createdById: a.adminUserId,
+          locationId: location.id,
+          fileName: 'saldos.csv',
+          fileSha256: randomUUID().replace(/-/g, '').padEnd(64, '0'),
+          fileFormat: 'CSV',
+          fileSizeBytes: 10,
+          columnMapping: {},
+          totalRows: 1,
+          validRows: 1,
+          duplicateRows: 0,
+          errorRows: 0,
+          preparedRows: 1,
+        },
+      });
+      const opening = await raw.openingBalance.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: location.id,
+          patientId: patient.id,
+          importBatchId: batch.id,
+          currency: 'USD',
+          amount: new Prisma.Decimal('300.00'),
+          asOfDate: new Date('2026-03-15T00:00:00.000Z'),
+          concept: 'Ortodoncia 2025',
+          createdById: a.adminUserId,
+        },
+      });
+      for (const extra of [
+        { tendered: 50 },
+        { tendered: 50, change: [change()] },
+        { changeRemainderToCredit: true },
+      ]) {
+        const res = await as(
+          api().post(`/api/v1/opening-balances/${opening.id}/payments`),
+          a,
+          reception,
+        )
+          .send({
+            amount: 45,
+            currency: 'USD',
+            paidAt: DAY,
+            paymentMethodId: cashA,
+            ...extra,
+          })
+          .expect(400);
+        expect(messagesOf(res.body)).toContain(MESSAGE);
+      }
+      expect(
+        await raw.payment.count({ where: { openingBalanceId: opening.id } }),
+      ).toBe(0);
+      // Sin vuelto, el abono al saldo migrado sigue como siempre.
+      await as(
+        api().post(`/api/v1/opening-balances/${opening.id}/payments`),
+        a,
+        reception,
+      )
+        .send({
+          amount: 45,
+          currency: 'USD',
+          paidAt: DAY,
+          paymentMethodId: cashA,
+        })
+        .expect(201);
+    });
+  });
 });

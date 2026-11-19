@@ -1,3 +1,4 @@
+import { RejectCashChange } from './record-payment.dto';
 import { LockOverrideReason } from '../../../financial-lock/presentation/dto/lock-override-reason';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
@@ -43,6 +44,13 @@ function toUpperCase({ value }: { value: unknown }): unknown {
 
 /** DX-390: una forma de pago del cobro dividido. */
 export class SplitPaymentLineDto {
+  // DX-570: tampoco por línea.
+  @RejectCashChange()
+  tendered?: unknown;
+
+  @RejectCashChange()
+  change?: unknown;
+
   @ApiProperty({ example: 50, maximum: MONEY_MAX })
   @IsPositiveMoney()
   amount!: number;
@@ -100,6 +108,17 @@ export class SplitPaymentLineDto {
 
 // Sin `tenantId`/`treatmentPlanId`/`createdById`, como RecordPaymentDto.
 export class RecordSplitPaymentDto {
+  // DX-570: el vuelto no va en un cobro dividido (400, ni en el cobro ni en
+  // una línea).
+  @RejectCashChange()
+  tendered?: unknown;
+
+  @RejectCashChange()
+  change?: unknown;
+
+  @RejectCashChange()
+  changeRemainderToCredit?: unknown;
+
   @ApiProperty({
     type: String,
     example: '2026-10-30',

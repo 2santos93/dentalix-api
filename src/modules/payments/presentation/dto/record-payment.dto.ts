@@ -1,11 +1,16 @@
 import { LockOverrideReason } from '../../../financial-lock/presentation/dto/lock-override-reason';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiHideProperty,
+  ApiProperty,
+  ApiPropertyOptional,
+} from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEmpty,
   IsEnum,
   IsISO4217CurrencyCode,
   IsOptional,
@@ -31,6 +36,7 @@ import {
 } from '../../../../shared/validation/bounded-decimal';
 import { CURRENCY_CODE_MESSAGE } from '../../../../shared/money/currency-messages';
 import {
+  CASH_CHANGE_NOT_HERE_MESSAGE,
   CHANGE_LINES_LIMIT_MESSAGE,
   CHANGE_LINES_MAX,
 } from '../../domain/cash-change';
@@ -230,4 +236,29 @@ export class RecordPlanPaymentDto extends RecordPaymentDto {
   @IsOptional()
   @IsBoolean({ message: 'La confirmación del resto tiene que ser sí o no.' })
   changeRemainderToCredit?: boolean;
+}
+
+/**
+ * DX-570: el vuelto solo va en el abono suelto a un plan. En el cobro
+ * dividido y en el abono al saldo migrado, mandarlo es 400 en español: si se
+ * descartara en silencio, recepción creería registrado un vuelto que la caja
+ * no espera y el arqueo descuadraría sin aviso.
+ */
+export function RejectCashChange(): PropertyDecorator {
+  return (target, key) => {
+    ApiHideProperty()(target, key);
+    IsEmpty({ message: CASH_CHANGE_NOT_HERE_MESSAGE })(target, key);
+  };
+}
+
+/** Abono al saldo migrado (DX-262): el de siempre, sin vuelto (400). */
+export class RecordOpeningBalancePaymentDto extends RecordPaymentDto {
+  @RejectCashChange()
+  tendered?: unknown;
+
+  @RejectCashChange()
+  change?: unknown;
+
+  @RejectCashChange()
+  changeRemainderToCredit?: unknown;
 }

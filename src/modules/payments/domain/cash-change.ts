@@ -27,6 +27,8 @@ export const CASH_CHANGE_REMAINDER = 'CASH_CHANGE_REMAINDER';
 
 export const CHANGE_NOT_CASH_MESSAGE =
   'Lo recibido y el vuelto solo se registran en un abono en efectivo.';
+export const CASH_CHANGE_NOT_HERE_MESSAGE =
+  'El vuelto solo se registra en un abono suelto en efectivo a un plan de tratamiento.';
 export const CHANGE_WITHOUT_TENDERED_MESSAGE =
   'Indica lo recibido para registrar el vuelto.';
 export const REMAINDER_WITHOUT_TENDERED_MESSAGE =

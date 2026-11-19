@@ -36,7 +36,7 @@ import {
 import type { Response } from 'express';
 import type { LockActor } from '../../financial-lock/domain/financial-lock';
 import {
-  RecordPaymentDto,
+  RecordOpeningBalancePaymentDto,
   RecordPlanPaymentDto,
 } from './dto/record-payment.dto';
 import {
@@ -537,7 +537,7 @@ export class PaymentsController {
   })
   async createForOpeningBalance(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: RecordPaymentDto,
+    @Body() dto: RecordOpeningBalancePaymentDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Req() req: AuthenticatedRequest,
   ): Promise<Payment> {
