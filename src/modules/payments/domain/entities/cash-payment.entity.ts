@@ -59,6 +59,11 @@ export interface CashPayment {
   /** DX-389: el abono tiene comprobante del cobro adjunto. */
   hasProof: boolean;
   /**
+   * DX-571: el abono está conciliado con un movimiento del extracto del banco
+   * (emparejado activo). Se pierde al anularlo o al deshacer el emparejado.
+   */
+  reconciled: boolean;
+  /**
    * DX-516: los ajustes por medio de pago congelados en el abono (vacío sin
    * ajustes) y lo cobrado: importe + impuestos + recargos − descuentos. Sin
    * ajustes, lo cobrado es el importe.

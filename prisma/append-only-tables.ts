@@ -93,6 +93,10 @@ export const NO_APP_UPDATE_DELETE = [
   // DX-562: la serie de citas solo se crea (su estado sale de sus citas; sus
   // citas la referencian con RESTRICT).
   'appointment_series',
+  // DX-571: lo importado del extracto del banco (la importación y sus
+  // movimientos de entrada; dx_bank_statement_guard).
+  'bank_statement_imports',
+  'bank_movements',
 ] as const;
 
 /** Sin DELETE (ni TRUNCATE); conservan UPDATE para anular, cerrar o bloquear. */
@@ -167,6 +171,10 @@ export const NO_APP_DELETE = [
   // (dx_leads_guard); los motivos propios se retiran con borrado lógico.
   'leads',
   'lead_reasons',
+  // DX-571: la cuenta de conciliación se desactiva, no se borra; el
+  // emparejado solo se cierra (dx_bank_match_guard).
+  'bank_accounts',
+  'bank_reconciliation_matches',
 ] as const;
 
 /**

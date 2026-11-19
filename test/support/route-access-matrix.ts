@@ -650,6 +650,20 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // --- Importación de pacientes (DX-107) ------------------------------------
   // loop/informes/DX-107.md: solo gestión (escribe miles de fichas y el
   // informe lleva datos de pacientes).
+  // DX-571: conciliación con el extracto del banco, solo gestión.
+  'GET /bank-reconciliation/accounts': ADMIN_ONLY,
+  'POST /bank-reconciliation/accounts': ADMIN_ONLY,
+  'PATCH /bank-reconciliation/accounts/:id': ADMIN_ONLY,
+  'GET /bank-reconciliation/accounts/:id/statements': ADMIN_ONLY,
+  'POST /bank-reconciliation/accounts/:id/statements/inspect': ADMIN_ONLY,
+  'POST /bank-reconciliation/accounts/:id/statements/preview': ADMIN_ONLY,
+  'POST /bank-reconciliation/accounts/:id/statements': ADMIN_ONLY,
+  'GET /bank-reconciliation/accounts/:id/summary': ADMIN_ONLY,
+  'GET /bank-reconciliation/accounts/:id/items': ADMIN_ONLY,
+  'POST /bank-reconciliation/accounts/:id/auto-match': ADMIN_ONLY,
+  'GET /bank-reconciliation/movements/:id/candidates': ADMIN_ONLY,
+  'POST /bank-reconciliation/matches': ADMIN_ONLY,
+  'DELETE /bank-reconciliation/matches/:id': ADMIN_ONLY,
   'GET /patient-imports/template': ADMIN_ONLY,
   'POST /patient-imports/inspect': ADMIN_ONLY,
   'POST /patient-imports': ADMIN_ONLY,

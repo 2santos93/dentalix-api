@@ -127,6 +127,11 @@
  *                  usuario y con UN balde para todas las rutas: cada petición
  *                  revisa hasta 26 fechas (unas 10 consultas cada una). 30/min
  *                  sobra para quien arma una serie y ajusta la vista previa.
+ * - bank-statement: leer un extracto del banco para conciliar (DX-571:
+ *                  inspección, vista previa y confirmación), por clínica +
+ *                  usuario y con UN balde para las tres rutas, como
+ *                  patient-import (SEC-046). El tope de lecturas a la vez es
+ *                  el mismo de las importaciones (`ImportReadSlotInterceptor`).
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -161,7 +166,8 @@ export type RateLimitPolicy =
   | 'branding-miss'
   | 'online-booking'
   | 'online-booking-write'
-  | 'appointment-series';
+  | 'appointment-series'
+  | 'bank-statement';
 
 export interface RateLimitRule {
   limit: number;
@@ -209,6 +215,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'online-booking': { limit: 60, ttlMs: MINUTE },
   'online-booking-write': { limit: 10, ttlMs: MINUTE },
   'appointment-series': { limit: 30, ttlMs: MINUTE },
+  'bank-statement': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -269,5 +276,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'online-booking': rule('online-booking'),
     'online-booking-write': rule('online-booking-write'),
     'appointment-series': rule('appointment-series'),
+    'bank-statement': rule('bank-statement'),
   };
 }
