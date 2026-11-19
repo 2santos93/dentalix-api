@@ -115,6 +115,7 @@ import {
   type PaymentProofAttachment,
 } from '../../domain/payment-proof';
 import { collectedAmount } from '../../../payment-methods/domain/payment-adjustments';
+import { releaseBankMatchOnVoid } from '../../../bank-reconciliation/infrastructure/bank-match-on-void';
 import { toCents } from '../../../../shared/money/money';
 import {
   CHANGE_LINE_SELECT,
@@ -284,6 +285,9 @@ const CASH_PAYMENT_SELECT = {
   proof: { select: { id: true } },
   // DX-516: sus ajustes por medio de pago, en orden.
   methodAdjustments: ADJUSTMENT_LINE_SELECT,
+  // DX-571: ¿conciliado con el extracto? (emparejado activo; como mucho uno
+  // por el único parcial; una consulta por página con IN, no por fila).
+  bankMatches: { where: { endedAt: null }, select: { id: true }, take: 1 },
 } satisfies Prisma.PaymentSelect;
 
 type PrismaCashPayment = Prisma.PaymentGetPayload<{
@@ -367,6 +371,7 @@ function mapToCashPayment(
     adjustments,
     collectedAmount: collectedAmount(row.amount.toNumber(), adjustments),
     hasProof: row.proof !== null,
+    reconciled: row.bankMatches.length > 0,
   };
 }
 
@@ -1610,6 +1615,13 @@ export class PrismaPaymentRepository implements PaymentRepository {
       requestId: audit.request?.requestId ?? null,
       ip: audit.request?.ip ?? null,
       userAgent: audit.request?.userAgent ?? null,
+    });
+    // DX-571: si estaba conciliado con un movimiento del extracto, el
+    // emparejado se cierra y el movimiento vuelve a «Movimiento sin abono».
+    await releaseBankMatchOnVoid(tx, {
+      tenantId: this.requireTenantId(),
+      paymentId: lineId,
+      voidedById: audit.voidedById,
     });
     return true;
   }

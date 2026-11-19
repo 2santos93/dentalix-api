@@ -110,6 +110,11 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // para volver al texto del código, en la misma transacción que su evento de
   // audit_events (MESSAGE_TEMPLATE_RESET, con el antes).
   'messageTemplate',
+  // DX-571: qué medios de pago liquidan en una cuenta de conciliación. Es
+  // configuración sin datos de pacientes ni nada que la referencie; editar la
+  // cuenta la reemplaza en la misma transacción que su evento de audit_events
+  // (UPDATE de BANK_ACCOUNT).
+  'bankAccountPaymentMethod',
 ]);
 
 const FORBIDDEN_OPERATIONS: ReadonlySet<string> = new Set([
