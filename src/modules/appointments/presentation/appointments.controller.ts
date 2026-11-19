@@ -282,6 +282,16 @@ export class AppointmentsController {
       actorRole: ctx?.actor.role ?? null,
       overrideReason: dto.overrideReason,
       chairId: dto.chairId,
+      recallContact: dto.recallContact
+        ? {
+            recallId: dto.recallContact.recallId,
+            channel: dto.recallContact.channel,
+            note: dto.recallContact.note?.trim() || null,
+          }
+        : undefined,
+      requestMeta: ctx
+        ? { requestId: ctx.requestId, ip: ctx.ip, userAgent: ctx.userAgent }
+        : undefined,
     });
     await this.auditReservedOverride(created, 'CREATE', ctx);
     // DX-210: nacer marcada «Adelantar si hay hueco» también queda auditado.

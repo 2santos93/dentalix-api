@@ -49,6 +49,10 @@ import type {
   MergeSide,
   PatientMergeRepository,
 } from '../domain/patient-merge-repository.port';
+import {
+  phoneReviewOf,
+  setPhoneReviewInTx,
+} from '../../recall/infrastructure/recall-phone-review';
 
 type Tx = Prisma.TransactionClient;
 
@@ -419,6 +423,10 @@ export class PrismaPatientMergeRepository implements PatientMergeRepository {
         ),
       );
 
+      // DX-465 (ruling 4): la marca del teléfono del absorbido, antes de que
+      // la fusión lo retire.
+      const absorbedPhoneReview = await phoneReviewOf(tx, tenantId, absorbedId);
+
       // DX-461: los enlaces públicos vivos del absorbido se anulan (la
       // clínica los vuelve a enviar desde el conservado si hace falta).
       const revokedLinks = await revokeLivePublicLinks(tx, {
@@ -459,6 +467,11 @@ export class PrismaPatientMergeRepository implements PatientMergeRepository {
           data: patch as Prisma.PatientUncheckedUpdateInput,
         });
         if (typeof patch.phone === 'string') {
+          // DX-465 (ruling 4): el número del absorbido llega con su marca de
+          // «teléfono por revisar».
+          if (absorbedPhoneReview) {
+            await setPhoneReviewInTx(tx, tenantId, keptId, absorbedPhoneReview);
+          }
           await reconcilePatientPhoneE164(
             tx,
             [keptId],

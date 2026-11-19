@@ -27,6 +27,7 @@ import type {
   SlotOfferRepository,
   SlotOfferResolution,
 } from '../../domain/ports/slot-offer-repository.port';
+import { recallOnAppointmentBookedInTx } from '../../../recall/infrastructure/recall-from-appointment';
 
 const MINUTE = 60_000;
 
@@ -622,6 +623,15 @@ export class PrismaSlotOfferRepository implements SlotOfferRepository {
         chairId,
       },
       select: { id: true },
+    });
+    // DX-465 (D6): la acepta el paciente, sin usuario: cierra el ciclo del
+    // recall de ese tipo sin «Agendó» ni evento.
+    await recallOnAppointmentBookedInTx(tx, {
+      tenantId: offer.tenantId,
+      patientId: offer.patientId,
+      appointmentId: created.id,
+      appointmentTypeId: offer.appointmentTypeId,
+      actor: null,
     });
     if (
       offer.waitlistEntryId &&

@@ -210,7 +210,7 @@ BEGIN
     'weekly_digest_runs', 'weekly_digest_deliveries',
     'commission_payments', 'commission_payment_lines', 'commission_receipt_requests',
     'post_op_checks',
-    'location_quote_follow_up_settings', 'session_alerts',
+    'location_quote_follow_up_settings', 'location_recall_settings', 'session_alerts',
     'leads', 'lead_reasons',
     'bank_accounts', 'bank_reconciliation_matches'
   ] LOOP

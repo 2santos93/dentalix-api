@@ -23,6 +23,7 @@ import {
   locationData,
 } from './support/location-fixtures';
 import { purgeTenantsBySubdomain } from './support/tenant-purge';
+import { addCivilMonths } from '../src/modules/recall/domain/recall-rules';
 import { referenceListDue } from './support/recall-due-reference';
 import {
   type DefaultRecallTypes,
@@ -41,7 +42,7 @@ import {
 //
 // DX-015-bis: el oráculo es la regla nueva (la base es "lastDoneAt"; la cita
 // atendida solo da la sede) y calcula el vencimiento sin leer la columna
-// generada; la consulta de la app recorre `patient_recalls_tenant_due_visit_idx`.
+// generada; la consulta de la app recorre `patient_recalls_tenant_due_attempts_idx` (DX-465; antes, _due_visit_idx).
 const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
@@ -93,6 +94,10 @@ async function seedClinic(
   seed: number,
 ): Promise<Clinic> {
   const rnd = mulberry32(seed);
+  // DX-465: el ciclo con su propio generador (no cambia el resto de los datos).
+  const crnd = mulberry32(seed + 1_000);
+  const cint = (min: number, max: number) =>
+    min + Math.floor(crnd() * (max - min + 1));
   const int = (min: number, max: number) =>
     min + Math.floor(rnd() * (max - min + 1));
   const pick = <T>(xs: readonly T[]): T => xs[int(0, xs.length - 1)];
@@ -113,6 +118,16 @@ async function seedClinic(
     sedes.push(loc.id);
   }
   const types = await seedDefaultRecallTypes(raw, tenant.id);
+  // DX-465: la sede de Caracas oculta 3 días y agota con 2 intentos; las
+  // demás, sin fila (7 y 3).
+  await raw.locationRecallSettings.create({
+    data: {
+      tenantId: tenant.id,
+      locationId: sedes[1],
+      hideDays: 3,
+      maxAttempts: 2,
+    },
+  });
   const author = await raw.user.create({
     data: {
       email: `recepcion@${subdomain}.test`,
@@ -151,13 +166,43 @@ async function seedClinic(
           : new Date(NOW.getTime() - int(-20, 1_200) * DAY_MS);
       const paused = rnd() < 0.2;
       const id = randomUUID();
+      const intervalMonths = pick(INTERVALS);
+      // DX-465: un 40 % con ciclo; casi siempre del vencimiento actual.
+      const cycle =
+        crnd() < 0.4
+          ? {
+              attemptCount: cint(0, 4),
+              lastAttemptAt:
+                crnd() < 0.85
+                  ? new Date(
+                      NOW.getTime() -
+                        cint(0, 15) * DAY_MS -
+                        cint(0, 23) * HOUR_MS,
+                    )
+                  : null,
+              callbackOn:
+                crnd() < 0.25
+                  ? DAY(civil(new Date(NOW.getTime() + cint(-3, 20) * DAY_MS)))
+                  : null,
+              skipUntil:
+                crnd() < 0.15
+                  ? DAY(civil(new Date(NOW.getTime() + cint(-5, 90) * DAY_MS)))
+                  : null,
+              cycleDueAt: DAY(
+                crnd() < 0.85
+                  ? addCivilMonths(civil(lastDoneAt), intervalMonths)
+                  : '2020-01-01',
+              ),
+            }
+          : {};
       recallRows.push({
         id,
         tenantId: tenant.id,
         patientId,
         kind,
         recallTypeId: types[kind],
-        intervalMonths: pick(INTERVALS),
+        intervalMonths,
+        ...cycle,
         lastDoneAt: DAY(civil(lastDoneAt)),
         locationId: pick(sedes),
         active: rnd() < 0.88,
@@ -576,6 +621,90 @@ describe('lista de recall en la BD: equivalencia y aislamiento (int, DX-547)', (
     },
     120_000,
   );
+
+  // DX-465: el ciclo de intentos con sus filtros, contra el oráculo, en las
+  // tres horas (UTC+14 / UTC−11: el «hoy» de cada sede decide quién vuelve).
+  it.each(
+    NOWS.map((now) => [
+      civil(now) + 'T' + now.toISOString().slice(11, 16),
+      now,
+    ]),
+  )(
+    'DX-465: por defecto, con «Incluir contactados» y solo agotados, igual que el oráculo (now = %s)',
+    async (_label, now) => {
+      const seen = { hidden: 0, exhausted: 0, visible: 0 };
+      for (const scope of scopesOf(a, b)) {
+        for (const flags of [
+          {},
+          { includeContacted: true },
+          { exhausted: true },
+          { includeContacted: true, exhausted: true },
+        ]) {
+          for (let page = 1; ; page += 1) {
+            const query = {
+              ...flags,
+              withinDays: 60,
+              sort: 'MOST_OVERDUE' as RecallDueSort,
+              page,
+              pageSize: 100,
+              now,
+            };
+            const { actual, expected } = await both(a, scope, query);
+            expect({ scope: scope.label, query, ...actual }).toEqual({
+              scope: scope.label,
+              query,
+              ...expected,
+            });
+            for (const row of actual.rows) {
+              if (row.cycle.exhausted) seen.exhausted += 1;
+              else if (row.cycle.hiddenUntil) seen.hidden += 1;
+              else seen.visible += 1;
+            }
+            if (expected.rows.length === 0) break;
+          }
+        }
+      }
+      // Los datos cubren los tres casos (si no, la equivalencia no prueba
+      // nada); meses después (LATER) ya no queda nadie oculto.
+      expect(seen.exhausted).toBeGreaterThan(0);
+      expect(seen.visible).toBeGreaterThan(0);
+      if (now !== LATER) expect(seen.hidden).toBeGreaterThan(0);
+    },
+    120_000,
+  );
+
+  it('DX-465: por defecto no sale ningún oculto ni agotado; los filtros solo añaden o acotan', async () => {
+    const list = (flags: { includeContacted?: boolean; exhausted?: boolean }) =>
+      asRequest(a, { label: 'todas' }, async () => {
+        const rows: RecallDueRow[] = [];
+        for (let page = 1; ; page += 1) {
+          const out = await repository.listDue({
+            ...flags,
+            withinDays: 60,
+            sort: 'MOST_OVERDUE',
+            page,
+            pageSize: 100,
+            now: NOW,
+          });
+          rows.push(...out.rows);
+          if (out.rows.length === 0) return { rows, total: out.total };
+        }
+      });
+    const def = await list({});
+    const contacted = await list({ includeContacted: true });
+    const exhausted = await list({ exhausted: true });
+    expect(
+      def.rows.every((r) => !r.cycle.exhausted && !r.cycle.hiddenUntil),
+    ).toBe(true);
+    expect(contacted.rows.every((r) => !r.cycle.exhausted)).toBe(true);
+    expect(exhausted.rows.every((r) => r.cycle.exhausted)).toBe(true);
+    expect(exhausted.rows.length).toBeGreaterThan(0);
+    const ids = (rows: RecallDueRow[]) => new Set(rows.map((r) => r.recallId));
+    const withContacted = ids(contacted.rows);
+    expect([...ids(def.rows)].every((id) => withContacted.has(id))).toBe(true);
+    expect(contacted.total).toBeGreaterThan(def.total);
+    expect(def.rows.length).toBe(def.total);
+  });
 
   it('página a página (de 7) coincide con el oráculo, y la página fuera de rango trae el total', async () => {
     for (const sort of ['MOST_OVERDUE', 'LEAST_OVERDUE'] as RecallDueSort[]) {

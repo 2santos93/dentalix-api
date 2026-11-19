@@ -30,6 +30,8 @@ function row(over: Partial<PrismaPatient> = {}): PrismaPatient {
     phone: null,
     phoneE164: null,
     phoneE164CheckedAt: null,
+    phoneReviewFlaggedAt: null,
+    phoneReviewFlaggedById: null,
     email: null,
     address: null,
     countryCode: null,

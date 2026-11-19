@@ -14,7 +14,8 @@ import {
   whatsAppDigits,
 } from '../../../../shared/phone/phone-number';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { parseCivilDate } from '../../../../shared/time/civil-day';
+import { civilDateIn, parseCivilDate } from '../../../../shared/time/civil-day';
+import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import {
   RECALL_REPOSITORY,
   type RecallRepository,
@@ -24,8 +25,11 @@ import {
   RECALL_DISABLED_REASON_MAX,
   RECALL_MAX_PAGE_SIZE,
   RECALL_NOTE_MAX,
+  type LocationRecallSettingsView,
   type PatientRecalls,
   type RecallContactView,
+  type RecallRef,
+  type RecordedRecallContact,
   type RecallDuePage,
   type RecallDueSort,
   type RecallTypeRef,
@@ -40,6 +44,15 @@ import {
   RECALL_WITHIN_DAYS_MAX,
   recallState,
 } from '../../domain/recall-rules';
+import {
+  CALLBACK_ON_ONLY_CALL_BACK_MESSAGE,
+  CALLBACK_ON_REQUIRED_MESSAGE,
+  RECALL_BATCH_MAX,
+  callbackOnError,
+  cycleView,
+  recallSettingsError,
+  type RecallSettingsValues,
+} from '../../domain/recall-cycle';
 
 export type RecallClock = () => Date;
 export const RECALL_CLOCK = Symbol('RECALL_CLOCK');
@@ -82,12 +95,21 @@ export interface ListDueRecallsInput {
   sort?: RecallDueSort;
   page?: number;
   pageSize?: number;
+  /** DX-465: también los ocultos tras un intento y los que rechazaron. */
+  includeContacted?: boolean;
+  /** DX-465: solo los de intentos agotados. */
+  exhausted?: boolean;
 }
 
 /**
  * Lista de llamada (DX-015): recalls vencidos (o que vencen en ≤ `withinDays`)
  * de pacientes sin cita futura, en la sede activa (o las permitidas), por días
  * de vencido. Paginada con tope de 100 por página.
+ *
+ * DX-465: por defecto sin los ocultos tras un intento (los días de la sede o
+ * «Llamar luego»), los que rechazaron (hasta el vencimiento siguiente) ni los
+ * de intentos agotados. Es el mismo caso de uso del recuento y de la cola de
+ * «Mi día»: el número baja solo y coincide.
  */
 @Injectable()
 export class ListDueRecallsUseCase {
@@ -117,6 +139,8 @@ export class ListDueRecallsUseCase {
       page,
       pageSize,
       now: this.now(),
+      includeContacted: input.includeContacted ?? false,
+      exhausted: input.exhausted ?? false,
     });
     return {
       items: rows.map((row) => ({
@@ -141,6 +165,19 @@ export class ListDueRecallsUseCase {
         daysOverdue: row.daysOverdue,
         locationId: row.locationId,
         lastContact: row.lastContact,
+        lastAttempt: row.lastContact
+          ? {
+              at: row.lastContact.createdAt,
+              outcome: row.lastContact.outcome,
+              channel: row.lastContact.channel,
+            }
+          : null,
+        attempts: row.cycle.attempts,
+        maxAttempts: row.cycle.maxAttempts,
+        exhausted: row.cycle.exhausted,
+        hiddenUntil: row.cycle.hiddenUntil,
+        callbackOn: row.cycle.callbackOn,
+        phoneReview: row.phoneReview,
       })),
       total,
       page,
@@ -224,7 +261,7 @@ export class GetPatientRecallsUseCase {
     if (!(await this.repo.patientExists(patientId))) {
       throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
     }
-    const { rows, contacts } = await this.repo.patientRecalls(
+    const { rows, contacts, phoneReview } = await this.repo.patientRecalls(
       patientId,
       this.now(),
     );
@@ -241,6 +278,22 @@ export class GetPatientRecallsUseCase {
             archived: false,
           },
           row.today,
+        );
+        const cycle = cycleView(
+          {
+            attemptCount: row.attemptCount,
+            lastAttemptAt: row.lastAttemptAt,
+            callbackOn: row.callbackOn,
+            skipUntil: row.skipUntil,
+            cycleDueAt: row.cycleDueAt,
+          },
+          {
+            dueAt: row.dueAt,
+            intervalMonths: row.intervalMonths,
+            today: row.today,
+            lastAttemptDay: row.lastAttemptDay,
+            settings: { hideDays: row.hideDays, maxAttempts: row.maxAttempts },
+          },
         );
         return {
           id: row.id,
@@ -266,9 +319,17 @@ export class GetPatientRecallsUseCase {
             id: row.updatedById,
             fullName: null,
           },
+          attempts: cycle.attempts,
+          maxAttempts: cycle.maxAttempts,
+          exhausted: cycle.exhausted,
+          lastAttemptAt:
+            cycle.lastAttemptDay !== null ? row.lastAttemptAt : null,
+          hiddenUntil: cycle.hiddenUntil,
+          callbackOn: cycle.callbackOn,
         };
       }),
       contacts,
+      phoneReview,
     };
   }
 }
@@ -430,29 +491,73 @@ export interface CreateRecallContactInput {
   outcome: RecallContactOutcome;
   note?: string | null;
   appointmentId?: string | null;
+  /** DX-465: «Llamar luego» con fecha (solo con CALL_BACK). */
+  callbackOn?: string | null;
+}
+
+/** La nota recortada; 400 si pasa del tope. */
+function cleanNote(note: string | null | undefined): string | null {
+  const clean = note?.trim() ? note.trim() : null;
+  if (clean !== null && clean.length > RECALL_NOTE_MAX) {
+    throw new BadRequestException(NOTE_TOO_LONG_MESSAGE);
+  }
+  return clean;
+}
+
+/**
+ * DX-465: la fecha de «Llamar luego» contra el «hoy» de la sede del paciente
+ * (la del recall, la de la lista). 400 con otro desenlace o fuera de rango;
+ * 409 LOCATION_TIMEZONE_REQUIRED si esa sede no tiene zona.
+ */
+function checkedCallbackOn(
+  outcome: RecallContactOutcome,
+  callbackOn: string | null | undefined,
+  recalls: readonly RecallRef[],
+  now: Date,
+): string | null {
+  if (callbackOn === undefined || callbackOn === null) return null;
+  if (outcome !== 'CALL_BACK') {
+    throw new BadRequestException(CALLBACK_ON_ONLY_CALL_BACK_MESSAGE);
+  }
+  for (const recall of recalls) {
+    const today = civilDateIn(
+      now,
+      requireLocationTimeZone({
+        id: recall.locationId,
+        timeZone: recall.timeZone,
+      }),
+    );
+    const error = callbackOnError(callbackOn, today);
+    if (error) throw new BadRequestException(error);
+  }
+  return callbackOn;
 }
 
 /**
  * Registrar un contacto de recall (DX-015). Append-only (también en la BD).
  * La nota es corta y sin datos clínicos; nunca va a logs ni a la auditoría.
- * NO oculta al paciente ni cuenta intentos: eso es DX-465.
+ *
+ * DX-465: el contacto es el INTENTO y deja el estado del ciclo en la misma
+ * transacción (cuenta, oculta N días, «Llamar luego» hasta su fecha, «Rechaza»
+ * hasta el vencimiento siguiente, «Agendó» lo cierra; «Número equivocado»
+ * marca el teléfono para revisar). Un «Agendó» de una cita que ya lo tiene en
+ * este recall (lo escribió el servidor al crearla) devuelve el existente con
+ * `replayed` (el controlador responde 200 y no audita otra alta).
  */
 @Injectable()
 export class CreateRecallContactUseCase {
   constructor(
     @Inject(RECALL_REPOSITORY) private readonly repo: RecallRepository,
     private readonly tenantContext: TenantContextService,
+    @Inject(RECALL_CLOCK) private readonly now: RecallClock,
   ) {}
 
   async execute(
     recallId: string,
     input: CreateRecallContactInput,
     authorId: string,
-  ): Promise<RecallContactView> {
-    const note = input.note?.trim() ? input.note.trim() : null;
-    if (note !== null && note.length > RECALL_NOTE_MAX) {
-      throw new BadRequestException(NOTE_TOO_LONG_MESSAGE);
-    }
+  ): Promise<RecordedRecallContact> {
+    const note = cleanNote(input.note);
     const appointmentId = input.appointmentId ?? null;
     if (input.outcome === 'BOOKED' && appointmentId === null) {
       throw new BadRequestException(BOOKED_NEEDS_APPOINTMENT_MESSAGE);
@@ -463,6 +568,12 @@ export class CreateRecallContactUseCase {
     // sede permitida no abre esta). Un recall siempre tiene sede, así que aquí
     // no aplica el «toda la clínica» de la ficha del paciente.
     this.tenantContext.assertLocationAllowed(recall.locationId);
+    const callbackOn = checkedCallbackOn(
+      input.outcome,
+      input.callbackOn,
+      [recall],
+      this.now(),
+    );
     if (
       appointmentId !== null &&
       !(await this.repo.appointmentOfPatient(appointmentId, recall.patientId))
@@ -478,6 +589,159 @@ export class CreateRecallContactUseCase {
       note,
       appointmentId,
       authorId,
+      callbackOn,
     });
+  }
+}
+
+export interface CreateRecallContactsBatchInput {
+  recallIds: string[];
+  channel: RecallContactChannel;
+  outcome: RecallContactOutcome;
+  note?: string | null;
+  callbackOn?: string | null;
+}
+
+export const BATCH_EMPTY_MESSAGE = 'Elige al menos un paciente de la lista.';
+export const BATCH_TOO_MANY_MESSAGE = `Se registran hasta ${RECALL_BATCH_MAX} intentos a la vez.`;
+export const BATCH_DUPLICATE_MESSAGE =
+  'Un mismo recall aparece más de una vez en la lista.';
+export const BATCH_NO_BOOKED_MESSAGE =
+  '«Agendó» no se registra en lote: se registra al crear la cita de cada paciente.';
+
+/**
+ * DX-465 (D5) · «Registrar intento» para varios pacientes de la lista a la
+ * vez: mismo canal, desenlace, nota y (con «Llamar luego») fecha. Todo o nada
+ * en una transacción: los mismos permisos y sede que el suelto, por recall
+ * (uno de una sede no permitida da 403 y no se registra ninguno). Sin
+ * «Agendó» (exige la cita de cada uno). «Llamar luego» exige la fecha aquí
+ * (contrato nuevo: no hay clientes anteriores que la omitan).
+ */
+@Injectable()
+export class CreateRecallContactsBatchUseCase {
+  constructor(
+    @Inject(RECALL_REPOSITORY) private readonly repo: RecallRepository,
+    private readonly tenantContext: TenantContextService,
+    @Inject(RECALL_CLOCK) private readonly now: RecallClock,
+  ) {}
+
+  async execute(
+    input: CreateRecallContactsBatchInput,
+    authorId: string,
+    audit: AuditRequestContext,
+  ): Promise<RecallContactView[]> {
+    const ids = input.recallIds.map((id) => id.toLowerCase());
+    if (ids.length === 0) throw new BadRequestException(BATCH_EMPTY_MESSAGE);
+    if (ids.length > RECALL_BATCH_MAX) {
+      throw new BadRequestException(BATCH_TOO_MANY_MESSAGE);
+    }
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException(BATCH_DUPLICATE_MESSAGE);
+    }
+    if (input.outcome === 'BOOKED') {
+      throw new BadRequestException(BATCH_NO_BOOKED_MESSAGE);
+    }
+    if (input.outcome === 'CALL_BACK' && !input.callbackOn) {
+      throw new BadRequestException(CALLBACK_ON_REQUIRED_MESSAGE);
+    }
+    const note = cleanNote(input.note);
+    const found = await this.repo.findRecalls(ids);
+    const byId = new Map(found.map((r) => [r.id, r]));
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length > 0) {
+      throw new NotFoundException({
+        statusCode: 404,
+        error: 'Not Found',
+        message: BATCH_NOT_FOUND_MESSAGE,
+        recallIds: missing,
+      });
+    }
+    const recalls = ids.map((id) => byId.get(id)!);
+    // DX-089: cada uno por la sede de su paciente, como el suelto.
+    for (const recall of recalls) {
+      this.tenantContext.assertLocationAllowed(recall.locationId);
+    }
+    const callbackOn = checkedCallbackOn(
+      input.outcome,
+      input.callbackOn,
+      recalls,
+      this.now(),
+    );
+    return this.repo.createContactsBatch(
+      {
+        recalls,
+        channel: input.channel,
+        outcome: input.outcome,
+        note,
+        callbackOn,
+        authorId,
+      },
+      audit,
+    );
+  }
+}
+
+export const BATCH_NOT_FOUND_MESSAGE =
+  'Algún recall de la lista no existe en esta clínica.';
+export const RECALL_SETTINGS_LOCATION_NOT_FOUND_MESSAGE = 'Sede no encontrada';
+
+/** DX-465 (D2): días de ocultación y tope de intentos de cada sede viva. */
+@Injectable()
+export class ListRecallSettingsUseCase {
+  constructor(
+    @Inject(RECALL_REPOSITORY) private readonly repo: RecallRepository,
+  ) {}
+
+  execute(): Promise<LocationRecallSettingsView[]> {
+    return this.repo.listSettings();
+  }
+}
+
+/**
+ * DX-465 (D2): reemplaza los de UNA sede. La sede se comprueba bajo RLS: una
+ * de otra clínica da 404, como una inexistente. Se ven al instante en la
+ * lista (se evalúan al leer).
+ */
+@Injectable()
+export class UpdateRecallSettingsUseCase {
+  constructor(
+    @Inject(RECALL_REPOSITORY) private readonly repo: RecallRepository,
+  ) {}
+
+  async execute(
+    locationId: string,
+    values: RecallSettingsValues,
+    audit: AuditRequestContext,
+  ): Promise<LocationRecallSettingsView> {
+    const error = recallSettingsError(values);
+    if (error) throw new BadRequestException(error);
+    const saved = await this.repo.saveSettings(locationId, values, audit);
+    if (!saved) {
+      throw new NotFoundException(RECALL_SETTINGS_LOCATION_NOT_FOUND_MESSAGE);
+    }
+    return saved;
+  }
+}
+
+/**
+ * DX-465 (D4) · «Ya está corregido»: quita la marca de teléfono por revisar
+ * sin cambiar el número (p. ej. se confirmó que era correcto). Cambiar el
+ * teléfono la quita sola. Idempotente: sin marca, nada que hacer.
+ */
+@Injectable()
+export class ClearPhoneReviewUseCase {
+  constructor(
+    @Inject(RECALL_REPOSITORY) private readonly repo: RecallRepository,
+  ) {}
+
+  async execute(
+    patientId: string,
+    audit: AuditRequestContext,
+  ): Promise<{ patientId: string; cleared: boolean }> {
+    const cleared = await this.repo.clearPhoneReview(patientId, audit);
+    if (cleared === null) {
+      throw new NotFoundException(PATIENT_NOT_FOUND_MESSAGE);
+    }
+    return { patientId, cleared };
   }
 }

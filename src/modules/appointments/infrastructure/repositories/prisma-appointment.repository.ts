@@ -2,6 +2,7 @@ import {
   leadsOnAppointmentCompletedInTx,
   leadsOnAppointmentCreatedInTx,
 } from '../../../leads/infrastructure/lead-from-appointment';
+import { recallOnAppointmentBookedInTx } from '../../../recall/infrastructure/recall-from-appointment';
 import {
   APPOINTMENT_TYPE_SUMMARY_SELECT,
   toAppointmentTypeSummary,
@@ -294,12 +295,43 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
                   role: input.actorRole ?? null,
                 },
                 locationId: created.locationId,
-                requestId: null,
-                ip: null,
-                userAgent: null,
+                requestId: input.requestMeta?.requestId ?? null,
+                ip: input.requestMeta?.ip ?? null,
+                userAgent: input.requestMeta?.userAgent ?? null,
               }
             : null,
         });
+        // DX-465 (D6): una cita del tipo de un recall en su ciclo lo cierra
+        // («Agendó» con el usuario; sin él, la reserva online, solo el cierre).
+        // Las importaciones no: traen el historial de otra herramienta.
+        if (input.importBatchId === undefined)
+          await recallOnAppointmentBookedInTx(tx, {
+            tenantId,
+            patientId: input.patientId,
+            appointmentId: created.id,
+            appointmentTypeId: created.appointmentTypeId,
+            // DX-465: agendar desde recall: el «Agendó» de ese recall con el
+            // canal y la nota de recepción (y su sede, la del recall).
+            requested: input.recallContact
+              ? {
+                  ...input.recallContact,
+                  assertLocationAllowed: (locationId: string) =>
+                    this.tenantContext.assertLocationAllowed(locationId),
+                }
+              : undefined,
+            actor: input.createdById
+              ? {
+                  actor: {
+                    userId: input.createdById,
+                    role: input.actorRole ?? null,
+                  },
+                  locationId: created.locationId,
+                  requestId: input.requestMeta?.requestId ?? null,
+                  ip: input.requestMeta?.ip ?? null,
+                  userAgent: input.requestMeta?.userAgent ?? null,
+                }
+              : null,
+          });
         // DX-016: la reserva online deja su fila y su auditoría aquí dentro.
         if (input.inTransaction)
           await input.inTransaction(tx, {

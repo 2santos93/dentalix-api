@@ -56,6 +56,7 @@ interface PlanNode {
   'Relation Name'?: string;
   'Index Name'?: string;
   'Index Cond'?: string;
+  'Actual Loops'?: number;
   Plans?: PlanNode[];
 }
 
@@ -135,6 +136,32 @@ async function seedClinic(
   await recalls(types.HYGIENE, 6, Prisma.sql`p.n % 4 <> 0`);
   await recalls(types.PERIO, 3, Prisma.sql`p.n % 4 = 0`);
   await recalls(types.CHECKUP, 12, Prisma.sql`p.n % 2 = 0`);
+  // DX-465: el ciclo de intentos. Un 30 % de los recalls con 2 contactos y su
+  // estado (0–3 intentos, el último hace 0–9 días, alguno con «Llamar luego»
+  // o «Rechaza»), y la sede de Kiritimati con 3 días y tope de 2.
+  await raw.$executeRaw`
+    INSERT INTO "recall_contacts"
+      ("id", "tenantId", "recallId", "patientId", "locationId", "channel",
+       "outcome", "authorId")
+    SELECT gen_random_uuid(), pr."tenantId", pr."id", pr."patientId", pr."locationId",
+           'CALL', 'NO_ANSWER', ${author}::uuid
+      FROM "patient_recalls" pr, generate_series(1, 2) AS k
+     WHERE pr."tenantId" = ${tenantId}::uuid
+       AND abs(hashtext(pr."id"::text)) % 10 < 3`;
+  await raw.$executeRaw`
+    UPDATE "patient_recalls" pr SET
+      "attemptCount" = abs(hashtext(pr."id"::text)) % 4,
+      "lastAttemptAt" = ${NOW}::timestamp - make_interval(days => abs(hashtext(pr."id"::text)) % 10),
+      "callbackOn" = CASE WHEN abs(hashtext(pr."id"::text)) % 7 = 0
+                          THEN (${NOW}::timestamp)::date + 5 END,
+      "skipUntil" = CASE WHEN abs(hashtext(pr."id"::text)) % 11 = 0
+                         THEN (${NOW}::timestamp)::date + 90 END,
+      "cycleDueAt" = pr."dueAt"
+     WHERE pr."tenantId" = ${tenantId}::uuid
+       AND abs(hashtext(pr."id"::text)) % 10 < 3`;
+  await raw.locationRecallSettings.create({
+    data: { tenantId, locationId: sedes[1], hideDays: 3, maxAttempts: 2 },
+  });
 
   // Cada cita con su propio profesional (sin choques de la exclusión).
   await raw.$executeRaw`
@@ -349,6 +376,9 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
     ],
     ['página 1, vista consolidada', {}],
     ['due/count (consolidada, pageSize 1)', { pageSize: 1 }],
+    // DX-465: los filtros del ciclo, con las mismas cotas.
+    ['página 1, incluir contactados', { includeContacted: true }],
+    ['página 1, intentos agotados', { exhausted: true }],
   ])(
     `%s: < ${BUDGET_MS} ms, una lectura de patient_recalls y por índice de la clínica`,
     async (label, over) => {
@@ -359,12 +389,20 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
       const { ms, nodes } = await measure(label, params);
       // Una sola lectura de patient_recalls (por índice o entera).
       expect(recallScans(nodes)).toHaveLength(1);
+      // DX-465: el ciclo sale de columnas; recall_contacts solo se lee para
+      // el último contacto de la PÁGINA (una vuelta por fila, nunca por
+      // candidato).
+      for (const n of nodes.filter(
+        (x) => x['Relation Name'] === 'recall_contacts',
+      )) {
+        expect(n['Actual Loops'] ?? 0).toBeLessThanOrEqual(params.pageSize);
+      }
       expect(ms).toBeLessThan(BUDGET_MS);
       // Sin Seq Scan, la lectura va por un índice de la clínica ("tenantId"
       // en cabeza): con muchas clínicas, como en producción, solo lee la suya.
       // No se exige cuál: el tope de "dueAt" llega de un InitPlan (maxToday) y
       // el planificador no conoce su valor, así que entre
-      // patient_recalls_tenant_due_visit_idx y otro índice de la clínica elige
+      // patient_recalls_tenant_due_attempts_idx y otro índice de la clínica elige
       // por coste de cada corrida (medido: los dos muy por debajo del tope).
       const indexed = await indexPlan(recallDueSql(params));
       expect(recallScans(indexed)).toHaveLength(1);
@@ -544,6 +582,9 @@ describe('DX-015-bis · lista de recall con 60.000 pacientes (int, rendimiento)'
   it(`D17, peor caso: la clínica sin ningún recall (~60.000 candidatos) < ${BUDGET_MS} ms`, async () => {
     // Una clínica que aún no usa el recall: sin ninguno. Con las estadísticas
     // y el mapa de visibilidad al día, como el resto de la suite.
+    // DX-465: antes, sus contactos (FK RESTRICT; el owner sí puede borrarlos).
+    await raw.$executeRaw`
+      DELETE FROM "recall_contacts" WHERE "tenantId" = ${clinic.tenantId}::uuid`;
     await raw.$executeRaw`
       DELETE FROM "patient_recalls" WHERE "tenantId" = ${clinic.tenantId}::uuid`;
     await raw.$executeRawUnsafe('VACUUM ANALYZE "patient_recalls"');

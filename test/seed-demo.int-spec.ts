@@ -254,6 +254,8 @@ async function demoRecallList(app: INestApplication<App>): Promise<{
     recallTypeName: string;
     daysOverdue: number;
     lastContact: { outcome: string } | null;
+    attempts: number;
+    hiddenUntil: string | null;
   }[];
 }> {
   const login = await request(app.getHttpServer())
@@ -263,7 +265,9 @@ async function demoRecallList(app: INestApplication<App>): Promise<{
     .expect(201);
   const token = (login.body as { accessToken: string }).accessToken;
   const res = await request(app.getHttpServer())
-    .get('/api/v1/recall/due?pageSize=100')
+    // DX-465: el «No contesta» de la demo oculta su Control los días de la
+    // sede; con «Incluir contactados» la lista lo trae con su intento.
+    .get('/api/v1/recall/due?pageSize=100&includeContacted=true')
     .set('X-Tenant-Host', hostFor(DEMO_SUBDOMAIN))
     .set('Authorization', `Bearer ${token}`)
     .expect(200);
@@ -2679,6 +2683,8 @@ describe('seed demo (prisma/seed-demo.ts)', () => {
     );
     expect(row(checkup!.patientId, 'Control')).toMatchObject({
       lastContact: { outcome: 'NO_ANSWER' },
+      attempts: 1,
+      hiddenUntil: expect.any(String) as string,
     });
     // La Higiene vencida de quien ya tiene cita no está en la lista.
     const booked = recalls.find(

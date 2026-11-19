@@ -1,4 +1,4 @@
-import type { ClinicRole } from '@prisma/client';
+import type { ClinicRole, RecallContactChannel } from '@prisma/client';
 import {
   AppointmentOrigin,
   AppointmentStatus,
@@ -6,7 +6,10 @@ import {
   CancellationReasonCode,
   Prisma,
 } from '@prisma/client';
-import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type {
+  AuditRequestContext,
+  AuditRequestMeta,
+} from '../../../audit/domain/audit-request-context';
 import type { CurrentPolicyRef } from '../../../cancellation-policies/domain/cancellation-policy';
 import {
   Appointment,
@@ -19,6 +22,13 @@ import {
 // CreatePatientRepoInput / CreateToothRecordRepoInput). `status` always
 // starts at the schema default (SCHEDULED) on create; there is no way to
 // create an appointment in any other status.
+/** DX-465: el contacto «Agendó» que acompaña a una cita agendada desde recall. */
+export interface AppointmentRecallContactInput {
+  recallId: string;
+  channel: RecallContactChannel;
+  note: string | null;
+}
+
 export interface CreateAppointmentRepoInput {
   planItemIds?: string[];
   patientId: string;
@@ -51,6 +61,18 @@ export interface CreateAppointmentRepoInput {
   importBatchId?: string;
   /** DX-016: ONLINE = la crea la reserva online (por defecto STAFF). */
   origin?: AppointmentOrigin;
+  /**
+   * DX-465: agendar desde la lista de recall. El «Agendó» de ESE recall sale
+   * con este canal y esta nota (ya recortada); se valida en la transacción
+   * (del paciente, de una sede permitida).
+   */
+  recallContact?: AppointmentRecallContactInput;
+  /**
+   * Revisión DX-465 (ruling 5): la traza de la petición (request id, IP, user
+   * agent) para los eventos que el alta escribe en su transacción (el
+   * «Agendó» del recall, el prospecto). Sin ella, null.
+   */
+  requestMeta?: AuditRequestMeta;
   /**
    * DX-016: trabajo extra en la MISMA transacción que el alta, tras crear la
    * cita (la fila de la reserva online y su auditoría). Si lanza, no se crea

@@ -127,6 +127,10 @@
  *                  usuario y con UN balde para todas las rutas: cada petición
  *                  revisa hasta 26 fechas (unas 10 consultas cada una). 30/min
  *                  sobra para quien arma una serie y ajusta la vista previa.
+ * - recall-batch:  «Registrar intento» de varios pacientes de la lista de
+ *                  recall a la vez (DX-465: hasta 50 por petición, todos en
+ *                  una transacción), por clínica + usuario. 30/min son 1.500
+ *                  intentos: más de lo que un mostrador registra a mano.
  * - bank-statement: leer un extracto del banco para conciliar (DX-571:
  *                  inspección, vista previa y confirmación), por clínica +
  *                  usuario y con UN balde para las tres rutas, como
@@ -167,6 +171,7 @@ export type RateLimitPolicy =
   | 'online-booking'
   | 'online-booking-write'
   | 'appointment-series'
+  | 'recall-batch'
   | 'bank-statement';
 
 export interface RateLimitRule {
@@ -215,6 +220,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'online-booking': { limit: 60, ttlMs: MINUTE },
   'online-booking-write': { limit: 10, ttlMs: MINUTE },
   'appointment-series': { limit: 30, ttlMs: MINUTE },
+  'recall-batch': { limit: 30, ttlMs: MINUTE },
   'bank-statement': { limit: 10, ttlMs: MINUTE },
 };
 
@@ -276,6 +282,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'online-booking': rule('online-booking'),
     'online-booking-write': rule('online-booking-write'),
     'appointment-series': rule('appointment-series'),
+    'recall-batch': rule('recall-batch'),
     'bank-statement': rule('bank-statement'),
   };
 }

@@ -1109,6 +1109,16 @@ describe('recall en la BD (int, DX-551)', () => {
           outcome: 'NO_ANSWER',
           createdAt: expect.any(Date) as Date,
         },
+        // DX-465: el contacto de la siembra va directo a la tabla (sin pasar
+        // por el registro), así que el ciclo sigue vacío y sale en la lista.
+        cycle: {
+          attempts: 0,
+          maxAttempts: 3,
+          exhausted: false,
+          hiddenUntil: null,
+          callbackOn: null,
+        },
+        phoneReview: false,
       });
       // DX-015-bis: la visita atendida en Sur (posterior a lo fijado) da la
       // sede, pero ya NO la base: sin un procedimiento disparador, no mueve
@@ -1384,6 +1394,8 @@ describe('recall en la BD (int, DX-551)', () => {
         patientId: a.patients.Bea,
         kind: 'CHECKUP',
         locationId: a.sur,
+        // DX-465: la zona de esa sede (el «hoy» de «Llamar luego»).
+        timeZone: 'America/Caracas',
       });
       await expect(
         inA(() => repository.findRecall(a.recalls.Ana)),
@@ -1423,7 +1435,7 @@ describe('recall en la BD (int, DX-551)', () => {
     });
 
     it('createContact: graba como la app y devuelve el tipo del recall y el autor', async () => {
-      const contact = await inA(() =>
+      const recorded = await inA(() =>
         repository.createContact({
           recallId: a.recalls.Carla,
           patientId: a.patients.Carla,
@@ -1433,8 +1445,11 @@ describe('recall en la BD (int, DX-551)', () => {
           note: 'Agendó para el 20',
           appointmentId: a.appointments.carlaFutura,
           authorId: a.authorId,
+          callbackOn: null,
         }),
       );
+      expect(recorded.replayed).toBe(false);
+      const contact = recorded.contact;
       expect(contact).toEqual({
         id: expect.any(String) as string,
         recallId: a.recalls.Carla,
@@ -1447,6 +1462,7 @@ describe('recall en la BD (int, DX-551)', () => {
         outcome: 'BOOKED',
         note: 'Agendó para el 20',
         appointmentId: a.appointments.carlaFutura,
+        callbackOn: null,
         author: { id: a.authorId, fullName: 'Recepción Uno' },
         createdAt: expect.any(Date) as Date,
       });

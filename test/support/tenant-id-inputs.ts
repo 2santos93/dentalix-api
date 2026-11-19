@@ -220,6 +220,14 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
 
 /** Ids cuyo caso «B manda el id de A» ya está en otro spec (se cita cuál). */
 export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
+  // DX-465: el recall de otra clínica en el lote de intentos: 404 con su id y
+  // no se registra ninguno (ni los de la propia clínica del mismo lote).
+  'POST /recall/contacts/batch body.items[].recallId':
+    'recall-attempts.e2e-spec.ts',
+  // DX-465: agendar desde recall con el recall de otra clínica: 404 y no se
+  // crea la cita ni el contacto.
+  'POST /appointments body.recallContact.recallId':
+    'recall-attempts.e2e-spec.ts',
   // DX-571: el medio de pago de otra clínica en la cuenta de conciliación
   // (409 BANK_PAYMENT_METHOD_INVALID, la cuenta intacta) y el movimiento o el
   // abono de otra clínica al emparejar a mano (404, nada emparejado).

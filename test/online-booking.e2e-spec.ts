@@ -560,6 +560,35 @@ describe('Reserva online (e2e, DX-016)', () => {
         email: 'maria.perez@example.com',
       },
     });
+    // DX-465: tiene un Control vencido con un intento, y el tipo de la
+    // reserva es el de su recall: al aceptarla se cierra el ciclo.
+    const checkupType = await raw.recallType.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId, systemKey: 'CHECKUP' },
+      select: { id: true },
+    });
+    await raw.recallType.update({
+      where: { id: checkupType.id },
+      data: { appointmentTypeId: typeId },
+    });
+    const owner = await raw.clinicMembership.findFirstOrThrow({
+      where: { tenantId: clinic.tenantId, role: ClinicRole.ADMIN },
+      select: { userId: true },
+    });
+    const recall = await raw.patientRecall.create({
+      data: {
+        tenantId: clinic.tenantId,
+        patientId: existing.id,
+        recallTypeId: checkupType.id,
+        intervalMonths: 12,
+        lastDoneAt: new Date('2025-01-15T00:00:00Z'),
+        locationId,
+        createdById: owner.userId,
+        updatedById: owner.userId,
+        attemptCount: 2,
+        lastAttemptAt: new Date(),
+        cycleDueAt: new Date('2026-01-15T00:00:00Z'),
+      },
+    });
     const who = {
       firstName: 'maria jose',
       lastName: 'PEREZ',
@@ -650,6 +679,22 @@ describe('Reserva online (e2e, DX-016)', () => {
       where: { tenantId: clinic.tenantId, patientId: existing.id },
     });
     expect(appointment.origin).toBe('ONLINE');
+    // DX-465: la acepta recepción (con usuario): «Agendó» con la cita y el
+    // ciclo cerrado.
+    await expect(
+      raw.recallContact.findMany({
+        where: { recallId: recall.id, outcome: 'BOOKED' },
+        select: { appointmentId: true, authorId: true },
+      }),
+    ).resolves.toEqual([
+      { appointmentId: appointment.id, authorId: appointment.createdById },
+    ]);
+    await expect(
+      raw.patientRecall.findUniqueOrThrow({
+        where: { id: recall.id },
+        select: { attemptCount: true },
+      }),
+    ).resolves.toEqual({ attemptCount: 0 });
     // Otra vez: ya resuelta.
     await staff(receptionToken)
       .post(`/online-booking/requests/${mine.id}/accept`)

@@ -18,8 +18,22 @@ import { civilDateIn } from '../../../shared/time/civil-day';
 import { lockRow } from '../../../shared/prisma/lock-row';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { configAuditEvent } from '../../audit/domain/config-audit';
+import { auditDraftFromContext } from '../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import { recallTypeSnapshot } from '../domain/recall-type-audit';
+import {
+  RECALL_HIDE_DAYS_DEFAULT,
+  RECALL_MAX_ATTEMPTS_DEFAULT,
+  RECALL_SETTINGS_DEFAULTS,
+  RECALL_SETTINGS_REASON,
+  type RecallSettingsValues,
+} from '../domain/recall-cycle';
+import {
+  lockRecallCycles,
+  recordAttemptInTx,
+  withDeadlockRetry,
+} from './recall-attempt-write';
+import { clearPhoneReviewInTx } from './recall-phone-review';
 import {
   RECALL_TYPE_SORT_STEP,
   recallAppointmentTypeError,
@@ -39,7 +53,11 @@ import {
 } from './recall-manual-write';
 import type { RecallRepository } from '../domain/ports/recall-repository.port';
 import type {
+  LocationRecallSettingsView,
   NewRecallContact,
+  PhoneReviewView,
+  RecallContactBatchData,
+  RecordedRecallContact,
   PatientRecallRow,
   RecallContactView,
   RecallDueQuery,
@@ -57,6 +75,20 @@ import type {
 } from '../domain/recall.entity';
 
 const RECALL_TYPE_AUDIT = { resourceType: 'RECALL_TYPE' } as const;
+
+/** Igual que el de los casos de uso (no se importa de la capa de aplicación). */
+const RECALL_NOT_FOUND_MESSAGE = 'Recall no encontrado.';
+export const RECALL_BATCH_NOT_FOUND_MESSAGE =
+  'Algún recall de la lista no existe en esta clínica.';
+/** DX-465: motivos de los eventos que escribe el repositorio. */
+export const RECALL_CONTACT_BATCH_REASON = 'RECALL_CONTACT_BATCH';
+export const PHONE_REVIEW_CLEARED_REASON = 'PHONE_REVIEW_CLEARED';
+
+const RECALL_SETTINGS_SELECT = {
+  hideDays: true,
+  maxAttempts: true,
+  updatedAt: true,
+} as const;
 
 /** Igual que el de los casos de uso (no se importa de la capa de aplicación). */
 const RECALL_TYPE_NOT_FOUND_MESSAGE =
@@ -186,6 +218,7 @@ const CONTACT_SELECT = {
   outcome: true,
   note: true,
   appointmentId: true,
+  callbackOn: true,
   authorId: true,
   createdAt: true,
   recall: {
@@ -221,6 +254,12 @@ interface DuePageColumns {
   lastContactChannel: RecallContactChannel | null;
   lastContactOutcome: RecallContactOutcome | null;
   lastContactAt: Date | null;
+  attempts: number;
+  maxAttempts: number;
+  exhausted: boolean;
+  hiddenUntil: Date | null;
+  callbackOn: Date | null;
+  phoneReview: boolean;
 }
 
 /**
@@ -247,7 +286,7 @@ export interface RecallDueSqlParams extends RecallDueQuery {
  * "lastDoneAt" + intervalo), que ya no depende de la última visita. En orden:
  * 0. `locs`: las sedes de la clínica con su «hoy» (2–20 filas, una vez).
  * 1. `c`: los recall ACTIVOS de la clínica que pueden salir: un RANGO SOLO de
- *    índice sobre `patient_recalls_tenant_due_visit_idx` ("dueAt" <= el «hoy»
+ *    índice sobre `patient_recalls_tenant_due_attempts_idx` ("dueAt" <= el «hoy»
  *    más adelantado de las sedes de la clínica + la ventana; `maxToday` es un
  *    InitPlan, así que la cota va en el propio recorrido del índice). «Hoy»
  *    en la sede del paciente nunca pasa de `maxToday`, así que la cota solo
@@ -261,6 +300,19 @@ export interface RecallDueSqlParams extends RecallDueQuery {
  *    queda se le busca el paciente (vivo, nombre y teléfono). Sin LATERAL a
  *    appointments por candidato (REPORT-1A-R5 de DX-015-bis).
  * 3. El nombre del tipo y el último contacto, solo de la página.
+ *
+ * DX-465: el ciclo de intentos. `locs` lleva además la zona y los ajustes de
+ * la sede (sin fila, 7 días y 3 intentos: un LEFT JOIN de 2–20 filas); `c`
+ * saca el estado guardado del INCLUDE del índice (sigue siendo solo índice) y
+ * `d` lo evalúa con el «hoy» de la sede del paciente, con la MISMA regla que
+ * `cycleView` (recall-cycle.ts): el estado vale si "cycleDueAt" = "dueAt"; el
+ * día del último intento en la sede + los días de ocultación, o «Llamar
+ * luego», o el vencimiento siguiente de un «Rechaza», lo que llegue más tarde.
+ * El ciclo caduca en el vencimiento siguiente (`dueAt` + intervalo) y un
+ * «Llamar luego» pendiente no cuenta como agotado (rulings 1 y 2 de la
+ * revisión). Por defecto fuera los ocultos y los agotados; `includeContacted`
+ * deja los ocultos; `exhausted` deja SOLO los agotados, ocultos o no. Sin
+ * agregados sobre recall_contacts: solo columnas.
  */
 export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
   const kindFilter = p.kind
@@ -274,11 +326,22 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
       ? Prisma.sql`${alias}."dueIn" ASC, ${alias}."lastName" ASC, ${alias}."firstName" ASC, ${alias}."id" ASC`
       : Prisma.sql`${alias}."dueIn" DESC, ${alias}."lastName" ASC, ${alias}."firstName" ASC, ${alias}."id" ASC`;
   const offset = (p.page - 1) * p.pageSize;
+  // DX-465: agotados = intentos del ciclo ≥ tope de la sede; ocultos = el día
+  // de vuelta aún no llegó.
+  const cycleFilter = p.exhausted
+    ? Prisma.sql`AND c."attempts" >= c."maxAttempts" AND c."callbackOn" IS NULL`
+    : Prisma.sql`AND (c."attempts" < c."maxAttempts" OR c."callbackOn" IS NOT NULL)
+         ${p.includeContacted ? Prisma.empty : Prisma.sql`AND (c."until" IS NULL OR c."until" <= c."today")`}`;
   return Prisma.sql`
     WITH locs AS MATERIALIZED (
       SELECT l."id", l."defaultPhoneRegion",
-             ((${p.now}::timestamptz) AT TIME ZONE coalesce(l."timeZone", 'UTC'))::date AS "today"
+             ((${p.now}::timestamptz) AT TIME ZONE coalesce(l."timeZone", 'UTC'))::date AS "today",
+             coalesce(l."timeZone", 'UTC') AS "zone",
+             coalesce(rs."hideDays", ${RECALL_HIDE_DAYS_DEFAULT}::int) AS "hideDays",
+             coalesce(rs."maxAttempts", ${RECALL_MAX_ATTEMPTS_DEFAULT}::int) AS "maxAttempts"
         FROM "locations" l
+        LEFT JOIN "location_recall_settings" rs
+          ON rs."tenantId" = l."tenantId" AND rs."locationId" = l."id"
        WHERE l."tenantId" = ${p.tenantId}::uuid
     ),
     bound AS (
@@ -287,7 +350,11 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
     c AS MATERIALIZED (
       SELECT pr."id", pr."tenantId", pr."patientId", pr."kind", pr."recallTypeId",
              pr."intervalMonths", pr."lastDoneAt", pr."dueAt", pr."disabledUntil",
-             pr."locationId", pr."visitLocationId"
+             pr."locationId", pr."visitLocationId",
+             -- DX-465: el ciclo guardado (vale si es de este vencimiento y
+             -- aún no llegó el siguiente: lo decide «cv» con el «hoy»).
+             pr."attemptCount", pr."lastAttemptAt", pr."callbackOn" AS "storedCallbackOn",
+             pr."skipUntil", pr."cycleDueAt"
         FROM "patient_recalls" pr
        WHERE pr."tenantId" = ${p.tenantId}::uuid
          AND pr."active"
@@ -309,15 +376,48 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
               )
          )
     ),
+    cv AS (
+      SELECT c.*, lo."id" AS "homeLocationId", lo."defaultPhoneRegion", lo."today",
+             lo."maxAttempts", lo."hideDays", lo."zone",
+             -- Ruling 2 de la revisión: el ciclo caduca en el vencimiento
+             -- de la serie siguiente al último intento (el día que vuelve un
+             -- «Rechaza»): dx_recall_next_due_after, como nextDueAfter.
+             (c."cycleDueAt" = c."dueAt"
+               AND (c."lastAttemptAt" IS NULL
+                 OR lo."today" < public.dx_recall_next_due_after(
+                      c."dueAt", c."intervalMonths",
+                      ((c."lastAttemptAt" AT TIME ZONE 'UTC') AT TIME ZONE lo."zone")::date))
+             ) IS TRUE AS "validCycle"
+        FROM c
+        JOIN locs lo ON lo."id" = coalesce(c."visitLocationId", c."locationId")
+    ),
+    cy AS (
+      SELECT cv.*,
+             CASE WHEN cv."validCycle" THEN cv."attemptCount" ELSE 0 END AS "attempts",
+             CASE WHEN cv."validCycle" THEN cv."storedCallbackOn" END AS "callbackOn",
+             CASE WHEN cv."validCycle" THEN greatest(
+               coalesce(
+                 cv."storedCallbackOn",
+                 ((cv."lastAttemptAt" AT TIME ZONE 'UTC') AT TIME ZONE cv."zone")::date + cv."hideDays"
+               ),
+               cv."skipUntil"
+             ) END AS "until"
+        FROM cv
+    ),
     d AS MATERIALIZED (
       SELECT c."id", c."tenantId", c."patientId", c."kind", c."recallTypeId",
              c."intervalMonths", pa."firstName", pa."lastName", pa."phone",
              (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut",
-             lo."id" AS "homeLocationId", lo."defaultPhoneRegion" AS "phoneRegion",
-             lo."today",
-             c."lastDoneAt" AS "baseDate", c."dueAt", c."dueAt" - lo."today" AS "dueIn"
-        FROM c
-        JOIN locs lo ON lo."id" = coalesce(c."visitLocationId", c."locationId")
+             (pa."phoneReviewFlaggedAt" IS NOT NULL) AS "phoneReview",
+             c."homeLocationId", c."defaultPhoneRegion" AS "phoneRegion",
+             c."today",
+             c."lastDoneAt" AS "baseDate", c."dueAt", c."dueAt" - c."today" AS "dueIn",
+             c."attempts", c."maxAttempts",
+             -- Ruling 1: un «Llamar luego» pendiente no está agotado.
+             (c."attempts" >= c."maxAttempts" AND c."callbackOn" IS NULL) AS "exhausted",
+             CASE WHEN c."until" > c."today" THEN c."until" END AS "hiddenUntil",
+             c."callbackOn"
+        FROM cy c
         -- DX-015-bis (D11): los recalls de un tipo retirado no salen (la
         -- tabla de tipos es pequeña: un hash sobre lo que ya quedó).
         JOIN "recall_types" ty
@@ -325,10 +425,11 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
          AND ty."deletedAt" IS NULL
         JOIN "patients" pa
           ON pa."tenantId" = c."tenantId" AND pa."id" = c."patientId"
-       WHERE c."dueAt" <= lo."today" + ${p.withinDays}::int
-         AND (c."disabledUntil" IS NULL OR c."disabledUntil" <= lo."today")
+       WHERE c."dueAt" <= c."today" + ${p.withinDays}::int
+         AND (c."disabledUntil" IS NULL OR c."disabledUntil" <= c."today")
          AND pa."deletedAt" IS NULL
-         ${p.locationIds ? Prisma.sql`AND lo."id" = ANY(${p.locationIds}::uuid[])` : Prisma.empty}
+         ${p.locationIds ? Prisma.sql`AND c."homeLocationId" = ANY(${p.locationIds}::uuid[])` : Prisma.empty}
+         ${cycleFilter}
     ),
     page AS (
       SELECT d.* FROM d
@@ -353,7 +454,13 @@ export function recallDueSql(p: RecallDueSqlParams): Prisma.Sql {
            pg."homeLocationId" AS "locationId",
            rc."channel" AS "lastContactChannel",
            rc."outcome" AS "lastContactOutcome",
-           rc."createdAt" AS "lastContactAt"
+           rc."createdAt" AS "lastContactAt",
+           pg."attempts",
+           pg."maxAttempts",
+           pg."exhausted",
+           pg."hiddenUntil",
+           pg."callbackOn",
+           pg."phoneReview"
       FROM (SELECT count(*)::int AS "total" FROM d) t
       LEFT JOIN page pg ON true
       LEFT JOIN "recall_types" rt
@@ -560,8 +667,15 @@ export class PrismaRecallRepository implements RecallRepository {
              pa."firstName", pa."lastName", pa."phone",
              (pa."reminderOptOutAt" IS NOT NULL) AS "reminderOptedOut",
              lo."id" AS "homeLocationId",
+             lo."timeZone" AS "homeTimeZone",
              lo."defaultPhoneRegion" AS "phoneRegion",
              ((${now}::timestamptz) AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "today",
+             -- DX-465: el ciclo guardado y el día (sede) del último intento.
+             pr."attemptCount", pr."lastAttemptAt", pr."callbackOn",
+             pr."skipUntil", pr."cycleDueAt",
+             ((pr."lastAttemptAt" AT TIME ZONE 'UTC') AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date AS "lastAttemptDay",
+             coalesce(rs."hideDays", ${RECALL_HIDE_DAYS_DEFAULT}::int) AS "hideDays",
+             coalesce(rs."maxAttempts", ${RECALL_MAX_ATTEMPTS_DEFAULT}::int) AS "maxAttempts",
              EXISTS (
                SELECT 1 FROM "appointments" a
                 WHERE a."tenantId" = pr."tenantId"
@@ -594,6 +708,8 @@ export class PrismaRecallRepository implements RecallRepository {
         JOIN "locations" lo
           ON lo."tenantId" = pr."tenantId"
          AND lo."id" = coalesce(lc."locationId", pr."locationId")
+        LEFT JOIN "location_recall_settings" rs
+          ON rs."tenantId" = lo."tenantId" AND rs."locationId" = lo."id"
        WHERE TRUE ${extra}`;
   }
 
@@ -640,6 +756,14 @@ export class PrismaRecallRepository implements RecallRepository {
                           createdAt: r.lastContactAt,
                         }
                       : null,
+                  cycle: {
+                    attempts: r.attempts,
+                    maxAttempts: r.maxAttempts,
+                    exhausted: r.exhausted,
+                    hiddenUntil: r.hiddenUntil ? civilOf(r.hiddenUntil) : null,
+                    callbackOn: r.callbackOn ? civilOf(r.callbackOn) : null,
+                  },
+                  phoneReview: r.phoneReview,
                 },
               ],
         ),
@@ -698,7 +822,11 @@ export class PrismaRecallRepository implements RecallRepository {
   async patientRecalls(
     patientId: string,
     now: Date,
-  ): Promise<{ rows: PatientRecallRow[]; contacts: RecallContactView[] }> {
+  ): Promise<{
+    rows: PatientRecallRow[];
+    contacts: RecallContactView[];
+    phoneReview: PhoneReviewView | null;
+  }> {
     return this.prisma.runWithTenant(async (tx) => {
       const facts = await tx.$queryRaw<
         {
@@ -721,6 +849,14 @@ export class PrismaRecallRepository implements RecallRepository {
           hasUpcomingAppointment: boolean;
           updatedAt: Date;
           updatedById: string;
+          attemptCount: number;
+          lastAttemptAt: Date | null;
+          callbackOn: Date | null;
+          skipUntil: Date | null;
+          cycleDueAt: Date | null;
+          lastAttemptDay: Date | null;
+          hideDays: number;
+          maxAttempts: number;
         }[]
       >`${this.recallFacts(now, Prisma.sql`AND pr."patientId" = ${patientId}::uuid`)}
         ORDER BY rt."sortOrder" ASC, rt."name" ASC, pr."id" ASC`;
@@ -730,9 +866,14 @@ export class PrismaRecallRepository implements RecallRepository {
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 50,
       });
+      const flag = await tx.patient.findFirst({
+        where: { id: patientId },
+        select: { phoneReviewFlaggedAt: true, phoneReviewFlaggedById: true },
+      });
       const names = await this.staffNames(tx, [
         ...facts.map((f) => f.updatedById),
         ...contactRows.map((c) => c.authorId),
+        ...(flag?.phoneReviewFlaggedById ? [flag.phoneReviewFlaggedById] : []),
       ]);
       return {
         rows: facts.map((f) => ({
@@ -757,8 +898,26 @@ export class PrismaRecallRepository implements RecallRepository {
           today: civilOf(f.today),
           updatedAt: f.updatedAt,
           updatedById: f.updatedById,
+          attemptCount: f.attemptCount,
+          lastAttemptAt: f.lastAttemptAt,
+          lastAttemptDay: f.lastAttemptDay ? civilOf(f.lastAttemptDay) : null,
+          callbackOn: f.callbackOn ? civilOf(f.callbackOn) : null,
+          skipUntil: f.skipUntil ? civilOf(f.skipUntil) : null,
+          cycleDueAt: f.cycleDueAt ? civilOf(f.cycleDueAt) : null,
+          hideDays: f.hideDays,
+          maxAttempts: f.maxAttempts,
         })),
         contacts: contactRows.map((c) => this.toContact(c, names)),
+        phoneReview:
+          flag?.phoneReviewFlaggedAt && flag.phoneReviewFlaggedById
+            ? {
+                flaggedAt: flag.phoneReviewFlaggedAt,
+                flaggedBy: {
+                  id: flag.phoneReviewFlaggedById,
+                  fullName: names.get(flag.phoneReviewFlaggedById) ?? null,
+                },
+              }
+            : null,
       };
     });
   }
@@ -1274,6 +1433,10 @@ export class PrismaRecallRepository implements RecallRepository {
   }
 
   async findRecall(recallId: string): Promise<RecallRef | null> {
+    return (await this.findRecalls([recallId]))[0] ?? null;
+  }
+
+  findRecalls(recallIds: readonly string[]): Promise<RecallRef[]> {
     return this.prisma.runWithTenant(async (tx) => {
       // La sede sale de la MISMA consulta que la lista: quien no puede ver a
       // este paciente en la lista tampoco puede registrarle un contacto.
@@ -1283,20 +1446,20 @@ export class PrismaRecallRepository implements RecallRepository {
           patientId: string;
           kind: RecallKind | null;
           homeLocationId: string;
+          homeTimeZone: string | null;
         }[]
       >`${this.recallFacts(
         new Date(),
-        Prisma.sql`AND pr."id" = ${recallId}::uuid AND pa."deletedAt" IS NULL`,
-      )}`;
-      const row = rows[0];
-      return row
-        ? {
-            id: row.id,
-            patientId: row.patientId,
-            kind: row.kind,
-            locationId: row.homeLocationId,
-          }
-        : null;
+        Prisma.sql`AND pr."id" = ANY(${[...recallIds]}::uuid[]) AND pa."deletedAt" IS NULL`,
+      )}
+        ORDER BY pr."id"`;
+      return rows.map((row) => ({
+        id: row.id,
+        patientId: row.patientId,
+        kind: row.kind,
+        locationId: row.homeLocationId,
+        timeZone: row.homeTimeZone,
+      }));
     });
   }
 
@@ -1313,14 +1476,257 @@ export class PrismaRecallRepository implements RecallRepository {
     });
   }
 
-  createContact(data: NewRecallContact): Promise<RecallContactView> {
+  /**
+   * DX-465: el contacto y el estado del ciclo que deja, en la misma
+   * transacción y con la fila del recall bloqueada (D1). Un «Agendó» de una
+   * cita que ya lo tiene en este recall (lo escribió el servidor al crearla,
+   * D6) devuelve el existente sin escribir nada.
+   */
+  createContact(data: NewRecallContact): Promise<RecordedRecallContact> {
+    const tenantId = this.tenantId();
+    // Revisión DX-465 (ruling 3): un reintento ante un interbloqueo.
+    return withDeadlockRetry(() =>
+      this.prisma.runWithTenant(async (tx) => {
+        const recall = (
+          await lockRecallCycles(tx, tenantId, [data.recallId])
+        ).get(data.recallId);
+        if (!recall) throw new NotFoundException(RECALL_NOT_FOUND_MESSAGE);
+        if (data.outcome === 'BOOKED' && data.appointmentId) {
+          const existing = await tx.recallContact.findFirst({
+            where: {
+              recallId: data.recallId,
+              appointmentId: data.appointmentId,
+              outcome: 'BOOKED',
+            },
+            select: CONTACT_SELECT,
+          });
+          if (existing) {
+            return {
+              contact: this.toContact(
+                existing,
+                await this.staffNames(tx, [existing.authorId]),
+              ),
+              replayed: true,
+            };
+          }
+        }
+        const { id } = await recordAttemptInTx(tx, tenantId, recall, {
+          locationId: data.locationId,
+          channel: data.channel,
+          outcome: data.outcome,
+          note: data.note,
+          appointmentId: data.appointmentId,
+          callbackOn: data.callbackOn,
+          authorId: data.authorId,
+        });
+        const row = await tx.recallContact.findUniqueOrThrow({
+          where: { id },
+          select: CONTACT_SELECT,
+        });
+        return {
+          contact: this.toContact(
+            row,
+            await this.staffNames(tx, [row.authorId]),
+          ),
+          replayed: false,
+        };
+      }),
+    );
+  }
+
+  /**
+   * DX-465 (D5): varios intentos con el mismo desenlace, todo o nada. Los
+   * recalls se bloquean en orden de id; si alguno ya no está (retirado entre
+   * la autorización y la escritura), 404 y no se escribe ninguno. Un
+   * `audit_event` CREATE RECALL_CONTACT por contacto, como el suelto (con su
+   * paciente y sin la nota), con `reason` RECALL_CONTACT_BATCH.
+   */
+  createContactsBatch(
+    data: RecallContactBatchData,
+    audit: AuditRequestContext,
+  ): Promise<RecallContactView[]> {
+    const tenantId = this.tenantId();
+    // Revisión DX-465 (ruling 3): un reintento ante un interbloqueo.
+    return withDeadlockRetry(() =>
+      this.prisma.runWithTenant(async (tx) => {
+        const locked = await lockRecallCycles(
+          tx,
+          tenantId,
+          data.recalls.map((r) => r.id),
+        );
+        const missing = data.recalls.filter((r) => !locked.has(r.id));
+        if (missing.length > 0) {
+          throw new NotFoundException({
+            statusCode: 404,
+            error: 'Not Found',
+            message: RECALL_BATCH_NOT_FOUND_MESSAGE,
+            recallIds: missing.map((r) => r.id),
+          });
+        }
+        const ids: string[] = [];
+        for (const ref of [...data.recalls].sort((a, b) =>
+          a.id < b.id ? -1 : 1,
+        )) {
+          const recall = locked.get(ref.id)!;
+          const { id } = await recordAttemptInTx(tx, tenantId, recall, {
+            locationId: ref.locationId,
+            channel: data.channel,
+            outcome: data.outcome,
+            note: data.note,
+            appointmentId: null,
+            callbackOn: data.callbackOn,
+            authorId: data.authorId,
+          });
+          await writeAuditEvent(tx, {
+            ...auditDraftFromContext(audit, {
+              action: 'CREATE',
+              resourceType: 'RECALL_CONTACT',
+              resourceId: id,
+              metadata: {
+                reason: RECALL_CONTACT_BATCH_REASON,
+                params: { recallId: recall.id },
+              },
+            }),
+            patient: { kind: 'patient', id: recall.patientId },
+          });
+          ids.push(id);
+        }
+        const rows = await tx.recallContact.findMany({
+          where: { id: { in: ids } },
+          select: CONTACT_SELECT,
+        });
+        const names = await this.staffNames(tx, [data.authorId]);
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        // En el orden en que llegaron.
+        const order = new Map(data.recalls.map((r, i) => [r.id, i]));
+        return ids
+          .map((id) => this.toContact(byId.get(id)!, names))
+          .sort(
+            (a, b) =>
+              (order.get(a.recallId) ?? 0) - (order.get(b.recallId) ?? 0),
+          );
+      }),
+    );
+  }
+
+  /** DX-465 (D2): una fila por sede viva, con los de por defecto si no hay. */
+  listSettings(): Promise<LocationRecallSettingsView[]> {
     return this.prisma.runWithTenant(async (tx) => {
-      const row = await tx.recallContact.create({
-        data: { tenantId: this.tenantId(), ...data },
-        select: CONTACT_SELECT,
+      const locations = await tx.location.findMany({
+        where: { deletedAt: null },
+        orderBy: [{ createdAt: 'asc' }, { name: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          recallSettings: { select: RECALL_SETTINGS_SELECT },
+        },
       });
-      return this.toContact(row, await this.staffNames(tx, [row.authorId]));
+      return locations.map((l) => {
+        const row = l.recallSettings[0];
+        return {
+          locationId: l.id,
+          locationName: l.name,
+          hideDays: row?.hideDays ?? RECALL_SETTINGS_DEFAULTS.hideDays,
+          maxAttempts: row?.maxAttempts ?? RECALL_SETTINGS_DEFAULTS.maxAttempts,
+          updatedAt: row?.updatedAt ?? null,
+        };
+      });
     });
+  }
+
+  /**
+   * DX-465 (D2): reemplaza los de una sede (upsert) con su evento UPDATE
+   * CLINIC_SETTINGS (RECALL_SETTINGS_UPDATED, antes y después; sin evento si
+   * nada cambia). null si la sede no es de la clínica (RLS) o está retirada.
+   * La sede bloqueada serializa dos guardados (molde de DX-561).
+   */
+  saveSettings(
+    locationId: string,
+    values: RecallSettingsValues,
+    audit: AuditRequestContext,
+  ): Promise<LocationRecallSettingsView | null> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(async (tx) => {
+      if (!(await lockRow(tx, 'locations', locationId, 'NO KEY UPDATE'))) {
+        return null;
+      }
+      const location = await tx.location.findFirst({
+        where: { id: locationId, deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          recallSettings: { select: RECALL_SETTINGS_SELECT },
+        },
+      });
+      if (!location) return null;
+      const before = location.recallSettings[0] ?? RECALL_SETTINGS_DEFAULTS;
+      const data = {
+        hideDays: values.hideDays,
+        maxAttempts: values.maxAttempts,
+        updatedById: audit.actor.userId,
+      };
+      const saved = await tx.locationRecallSettings.upsert({
+        where: { tenantId_locationId: { tenantId, locationId } },
+        create: { tenantId, locationId, ...data },
+        update: data,
+        select: RECALL_SETTINGS_SELECT,
+      });
+      const event = configAuditEvent(audit, {
+        action: 'UPDATE',
+        resourceType: 'CLINIC_SETTINGS',
+        resourceId: locationId,
+        locationId,
+        reason: RECALL_SETTINGS_REASON,
+        before: { hideDays: before.hideDays, maxAttempts: before.maxAttempts },
+        after: { hideDays: saved.hideDays, maxAttempts: saved.maxAttempts },
+      });
+      if (event) await writeAuditEvent(tx, event);
+      return {
+        locationId: location.id,
+        locationName: location.name,
+        hideDays: saved.hideDays,
+        maxAttempts: saved.maxAttempts,
+        updatedAt: saved.updatedAt,
+      };
+    });
+  }
+
+  /**
+   * DX-465 (D4): «Ya está corregido». null si el paciente no existe (o es de
+   * otra clínica); `false` si no estaba marcado (sin evento). Con marca, la
+   * quita y deja UPDATE PATIENT (PHONE_REVIEW_CLEARED) en la transacción.
+   */
+  clearPhoneReview(
+    patientId: string,
+    audit: AuditRequestContext,
+  ): Promise<boolean | null> {
+    const tenantId = this.tenantId();
+    // Revisión DX-465 (ruling 3): un reintento ante un interbloqueo.
+    return withDeadlockRetry(() =>
+      this.prisma.runWithTenant(async (tx) => {
+        const patient = await tx.patient.findFirst({
+          where: { id: patientId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!patient) return null;
+        const cleared = await clearPhoneReviewInTx(tx, tenantId, patientId);
+        if (cleared) {
+          await writeAuditEvent(tx, {
+            ...auditDraftFromContext(audit, {
+              action: 'UPDATE',
+              resourceType: 'PATIENT',
+              resourceId: patientId,
+              metadata: {
+                reason: PHONE_REVIEW_CLEARED_REASON,
+                changedFields: ['phoneReviewFlaggedAt'],
+              },
+            }),
+            patient: { kind: 'patient', id: patientId },
+          });
+        }
+        return cleared;
+      }),
+    );
   }
 
   staff(ids: readonly string[]): Promise<Map<string, StaffRef>> {
@@ -1368,6 +1774,7 @@ export class PrismaRecallRepository implements RecallRepository {
       outcome: row.outcome,
       note: row.note,
       appointmentId: row.appointmentId,
+      callbackOn: row.callbackOn ? civilOf(row.callbackOn) : null,
       author: { id: row.authorId, fullName: names.get(row.authorId) ?? null },
       createdAt: row.createdAt,
     };

@@ -253,6 +253,8 @@ model Tenant {
   // DX-561: seguimiento automático de presupuestos (ajustes y avisos).
   quoteFollowUpSettings                   LocationQuoteFollowUpSettings[]
   quoteFollowUpMessages                   QuoteFollowUpMessage[]
+  // DX-465: ajustes de los intentos de recall por sede.
+  recallSettings                          LocationRecallSettings[]
   // DX-285: cargos del caso en el plan y alineadores.
   orthoCaseCharges                        OrthoCaseCharge[]
   orthoAlignerSeries                      OrthoAlignerSeries[]
@@ -551,6 +553,8 @@ model User {
   signatureRequestsRevoked          SignatureRequest[]               @relation("SignatureRequestRevokedBy")
   // DX-561: quién cambió los ajustes del seguimiento y quién lo pausó.
   quoteFollowUpSettingsUpdated      LocationQuoteFollowUpSettings[]
+  // DX-465: quién cambió los ajustes de intentos de recall de una sede.
+  recallSettingsUpdated             LocationRecallSettings[]
   treatmentPlansFollowUpPaused      TreatmentPlan[]                  @relation("TreatmentPlanFollowUpPausedBy")
   consentCountersignatures          PatientConsentCountersignature[]
   // DX-016: reserva online.
@@ -708,6 +712,8 @@ model Location {
   // DX-561: ajustes y avisos del seguimiento automático de presupuestos.
   quoteFollowUpSettings      LocationQuoteFollowUpSettings[]
   quoteFollowUpMessages      QuoteFollowUpMessage[]
+  // DX-465: días de ocultación y tope de intentos de recall.
+  recallSettings             LocationRecallSettings[]
   paymentReceipts            PaymentReceipt[]
   collectionNotes            CollectionNote[]
   paymentPromises            PaymentPromise[]
@@ -1003,6 +1009,13 @@ model Patient {
   /// DX-224: el relleno ya intentó leer `phone` y no salió un E.164 (no se vuelve
   /// a leer cada hora). El trigger la anula si `phone` cambia.
   phoneE164CheckedAt           DateTime?             @db.Timestamptz(3)
+  /// DX-465: un intento de recall con «Número equivocado» marcó el teléfono
+  /// para revisar. Lo anula el trigger `patients_phone_e164_stale` si `phone`
+  /// cambia, o `POST /patients/:id/phone-review/clear`. Las dos o ninguna (CHECK).
+  phoneReviewFlaggedAt         DateTime?
+  /// DX-465: quién registró ese intento (puntero suave, sin FK: la marca es
+  /// operativa y el autor queda en el contacto y en su auditoría).
+  phoneReviewFlaggedById       String?               @db.Uuid
   // DX-287: clave del documento (public.dx_doc_key: solo [0-9A-Z], la regla de
   // docKey() en patients/domain/doc-key.ts). La mantiene el trigger
   // `patients_doc_key`; la app solo la lee en SQL (alta, edición e importación
@@ -8262,6 +8275,23 @@ model PatientRecall {
   /// No sale en la lista hasta ese día (p. ej. «tratamiento en curso»).
   disabledUntil     DateTime?    @db.Date
   disabledReason    String?
+  /// DX-465: estado del ciclo de intentos (lo escribe la app en la misma
+  /// transacción que el contacto, con la fila bloqueada). Vale para el
+  /// vencimiento `cycleDueAt`: si `dueAt` ya es otro (se hizo el control o se
+  /// fijó otra fecha), el ciclo empezó de nuevo y todo cuenta como 0/NULL.
+  /// Intentos del ciclo (≥ 0, CHECK): todos salvo «Rechaza» y «Agendó», que lo
+  /// cierran.
+  attemptCount      Int          @default(0)
+  /// Hora del servidor del último intento del ciclo (el `createdAt` del
+  /// contacto). Oculto hasta su día civil en la sede + los días de la sede.
+  lastAttemptAt     DateTime?
+  /// «Llamar luego»: oculto hasta ese día (en vez de los días de la sede).
+  callbackOn        DateTime?    @db.Date
+  /// «Rechaza»: no sale hasta el vencimiento siguiente. No es la pausa
+  /// clínica (`disabledUntil`).
+  skipUntil         DateTime?    @db.Date
+  /// El vencimiento al que se refiere el estado de arriba.
+  cycleDueAt        DateTime?    @db.Date
   createdById       String       @db.Uuid
   updatedById       String       @db.Uuid
   createdAt         DateTime     @default(now())
@@ -8279,10 +8309,12 @@ model PatientRecall {
   @@index([tenantId, locationId], map: "patient_recalls_tenant_location_idx")
   @@index([tenantId, recallTypeId], map: "patient_recalls_tenant_type_idx")
   // PARCIAL (WHERE "active"), con INCLUDE, no declarable en Prisma:
-  // patient_recalls_tenant_due_visit_idx ("tenantId", "dueAt") INCLUDE ("id",
-  // "patientId", "recallTypeId", "kind", "intervalMonths", "lastDoneAt",
-  // "disabledUntil", "locationId", "visitLocationId") (20261212090600; el
-  // anterior, sin "visitLocationId", se soltó en 20261212090700).
+  // patient_recalls_tenant_due_attempts_idx ("tenantId", "dueAt") INCLUDE
+  // ("id", "patientId", "recallTypeId", "kind", "intervalMonths",
+  // "lastDoneAt", "disabledUntil", "locationId", "visitLocationId",
+  // "attemptCount", "lastAttemptAt", "callbackOn", "skipUntil", "cycleDueAt")
+  // (DX-465, 20270122140000; sustituye a patient_recalls_tenant_due_visit_idx
+  // de 20261212090600).
   @@map("patient_recalls")
 }
 
@@ -8300,6 +8332,9 @@ model RecallContact {
   note          String?
   /// Obligatoria con BOOKED (CHECK en la BD).
   appointmentId String?              @db.Uuid
+  /// DX-465: «Llamar luego» con fecha: el día en que vuelve a la lista. Solo
+  /// con CALL_BACK (CHECK).
+  callbackOn    DateTime?            @db.Date
   authorId      String               @db.Uuid
   /// La pone el servidor de BD (trigger).
   createdAt     DateTime             @default(now())
@@ -8312,6 +8347,10 @@ model RecallContact {
 
   @@index([tenantId, recallId, createdAt(sort: Desc), id(sort: Desc)], map: "recall_contacts_tenant_recall_created_idx")
   @@index([tenantId, patientId, createdAt(sort: Desc), id(sort: Desc)], map: "recall_contacts_tenant_patient_created_idx")
+  // PARCIAL, no declarable en Prisma (DX-465): un solo «Agendó» por recall y
+  // cita, lo escriba el servidor al crear la cita o la web:
+  //   recall_contacts_booked_appointment_key UNIQUE ("tenantId", "recallId",
+  //   "appointmentId") WHERE "outcome" = 'BOOKED'
   @@map("recall_contacts")
 }
 
@@ -9734,6 +9773,31 @@ model LocationQuoteFollowUpSettings {
   // PARCIAL, no declarable en Prisma:
   //   location_quote_follow_up_settings_updated_by_idx ("updatedById") WHERE "updatedById" IS NOT NULL
   @@map("location_quote_follow_up_settings")
+}
+
+/// DX-465: intentos de recall por sede. Sin fila = 7 días y 3 intentos.
+/// `hideDays`: tras un intento el paciente no sale en la lista por defecto
+/// hasta su día civil en la sede + N (1–90, CHECK). `maxAttempts`: con esos
+/// intentos en el ciclo queda «Intentos agotados» (1–10, CHECK). Se evalúan
+/// al leer: cambiarlos se ve en la lista al instante. Sin DELETE para la app.
+model LocationRecallSettings {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  locationId  String   @db.Uuid
+  hideDays    Int      @default(7)
+  maxAttempts Int      @default(3)
+  updatedById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  location  Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "location_recall_settings_location_fkey")
+  updatedBy User?    @relation(fields: [updatedById], references: [id], onDelete: Restrict, map: "location_recall_settings_updated_by_fkey")
+
+  @@unique([tenantId, locationId], map: "location_recall_settings_tenant_location_key")
+  // PARCIAL, no declarable en Prisma:
+  //   location_recall_settings_updated_by_idx ("updatedById") WHERE "updatedById" IS NOT NULL
+  @@map("location_recall_settings")
 }
 
 enum QuoteFollowUpStatus {
