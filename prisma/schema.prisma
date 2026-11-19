@@ -243,6 +243,8 @@ model Tenant {
   leads                                   Lead[]
   // DX-562: series de citas.
   appointmentSeries                       AppointmentSeries[]
+  // DX-565: textos de los mensajes al paciente reescritos por la clínica.
+  messageTemplates                        MessageTemplate[]
   leadNotes                               LeadNote[]
   leadReasons                             LeadReason[]
   patientAccessLinks                      PatientAccessLink[]
@@ -478,6 +480,8 @@ model User {
   leadReasons                       LeadReason[]
   // DX-562: series de citas que creó o canceló.
   appointmentSeriesCreated          AppointmentSeries[]              @relation("AppointmentSeriesCreatedBy")
+  // DX-565: textos de mensajes al paciente que guardó por última vez.
+  messageTemplatesUpdated           MessageTemplate[]                @relation("MessageTemplateUpdatedBy")
   patientAccessLinksCreated         PatientAccessLink[]              @relation("PatientAccessLinkCreatedBy")
   patientAccessLinksRevoked         PatientAccessLink[]              @relation("PatientAccessLinkRevokedBy")
   orthoVisitsAuthored               OrthoVisit[]
@@ -1970,6 +1974,32 @@ model AppointmentSeries {
   @@unique([tenantId, id], map: "appointment_series_tenant_id_key")
   @@index([createdById], map: "appointment_series_created_by_idx")
   @@map("appointment_series")
+}
+
+// DX-565: el texto (asunto y cuerpo) de un mensaje al paciente reescrito por
+// la clínica, por clave del catálogo en código, canal e idioma. Sin fila, sale
+// el texto por defecto del código. «Restablecer» borra la fila (configuración
+// sin datos de pacientes, auditada; HARD_DELETE_ALLOWLIST). Texto plano con
+// `{variable}` ya validado; el render es al encolar: cambiarlo nunca toca lo
+// ya encolado ni enviado.
+model MessageTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  key         String
+  channel     String
+  language    String
+  subject     String?
+  body        String
+  updatedById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  updatedBy User   @relation("MessageTemplateUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict, map: "message_templates_updated_by_fkey")
+
+  @@unique([tenantId, key, channel, language], map: "message_templates_tenant_key_channel_language_key")
+  @@index([updatedById], map: "message_templates_updated_by_idx")
+  @@map("message_templates")
 }
 
 // DX-005: respuesta del paciente en el enlace público de confirmación.
