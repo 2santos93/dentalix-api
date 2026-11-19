@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
@@ -19,6 +20,13 @@ import {
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
+import { locationRegionalOrNull } from '../../../../shared/locations/location-regional';
+import { regionalFormat } from '../../../../shared/format/regional-format';
+import { MessageTemplateReader } from '../../../message-templates/application/message-templates.use-cases';
+import {
+  linkOfferWhatsAppText,
+  sedeDayAndTime,
+} from '../../../message-templates/domain/whatsapp-messages';
 import { phoneRegionOrNull } from '../../../../shared/phone/phone-number';
 import {
   OPENING_CANDIDATES_REPOSITORY,
@@ -60,6 +68,12 @@ export interface LinkOfferView extends WaitlistOfferView {
   url: string | null;
   /** E.164 sin `+` para `wa.me` (solo por WhatsApp). */
   whatsappPhone: string | null;
+  /**
+   * DX-565: el texto prellenado de `wa.me` (solo por WhatsApp), con la
+   * plantilla de la clínica o el de siempre. null si la sede no tiene zona,
+   * formato y reloj válidos.
+   */
+  whatsappText: string | null;
 }
 
 export interface PublicLinkBase {
@@ -101,6 +115,8 @@ export class CreateLinkOfferUseCase {
     private readonly settings: GetSlotOfferSettingsUseCase,
     @Inject(OPENING_CLOCK)
     private readonly clock: OpeningClock,
+    // DX-565: opcional para los tests que construyen el caso a mano.
+    @Optional() private readonly templates?: MessageTemplateReader,
   ) {}
 
   async execute(
@@ -180,13 +196,68 @@ export class CreateLinkOfferUseCase {
         }
         throw new ServiceUnavailableException(LINK_OFFER_EMAIL_FAILED_MESSAGE);
       }
-      return { ...created, url: null, whatsappPhone: null };
+      return { ...created, url: null, whatsappPhone: null, whatsappText: null };
     }
     const wa = whatsappOfferPhone(
       patient,
       phoneRegionOrNull(location.defaultPhoneRegion),
     );
-    return { ...created, url, whatsappPhone: wa.phone };
+    return {
+      ...created,
+      url,
+      whatsappPhone: wa.phone,
+      whatsappText: await this.whatsappText(
+        created,
+        patient.firstName,
+        location,
+        url,
+        expiresAt,
+      ),
+    };
+  }
+
+  /**
+   * DX-565: el texto de `wa.me` en la API (antes lo componía la web): el de
+   * la clínica (oferta de hueco por WhatsApp, español) o el de siempre. Sin
+   * zona, formato o reloj de la sede no hay texto (como en la web, que no
+   * pintaba el botón): nunca el 409 de la sede.
+   */
+  private async whatsappText(
+    offer: { slotStart: Date; providerId: string },
+    firstName: string,
+    location: {
+      name: string;
+      timeZone?: string | null;
+      locale?: string | null;
+      hourCycle?: string | null;
+    },
+    url: string,
+    expiresAt: Date,
+  ): Promise<string | null> {
+    const regional = locationRegionalOrNull(location);
+    if (!regional) return null;
+    const fmt = regionalFormat(regional);
+    const [provider, clinic, override] = await Promise.all([
+      this.staff.findById(offer.providerId),
+      this.slotOffers.findClinicBranding(),
+      this.templates?.find({
+        key: 'slot-offer',
+        channel: 'WHATSAPP',
+        language: 'es',
+      }) ?? null,
+    ]);
+    return linkOfferWhatsAppText(
+      {
+        firstName,
+        ...sedeDayAndTime(offer.slotStart, regional.timeZone, fmt),
+        locationName: location.name,
+        providerName: provider?.fullName ?? null,
+        clinicName: clinic?.name ?? location.name,
+        url,
+        expiresAtLabel: fmt.longDateTime(expiresAt, regional.timeZone),
+      },
+      override,
+    );
   }
 
   private async markUndelivered(

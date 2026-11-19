@@ -16,7 +16,10 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
-import { CreateConfirmationLinkUseCase } from '../application/use-cases/create-confirmation-link.use-case';
+import {
+  CreateConfirmationLinkUseCase,
+  type CreateConfirmationLinkResult,
+} from '../application/use-cases/create-confirmation-link.use-case';
 import { ConfirmationLinkDto } from './dto/appointment-confirmation.dto';
 import { buildConfirmationUrl, safeLinkHost } from './confirmation-url';
 import { resolvePublicWebProtocol } from '../../../shared/tenancy/public-link';
@@ -34,6 +37,14 @@ import {
 } from '../../audit/presentation/audit-request-context';
 import { AnamnesisReminderLinks } from '../../medical-history-submissions/application/anamnesis-reminder-links';
 import { buildAnamnesisUrl } from '../../medical-history-submissions/domain/anamnesis-token';
+import { MessageTemplateReader } from '../../message-templates/application/message-templates.use-cases';
+import {
+  confirmationMessageLanguage,
+  confirmationWhatsAppText,
+  sedeDayAndTime,
+} from '../../message-templates/domain/whatsapp-messages';
+import { locationRegionalOrNull } from '../../../shared/locations/location-regional';
+import { regionalFormat } from '../../../shared/format/regional-format';
 
 type AuthenticatedRequest = TenantHostRequest & { user: JwtPayload };
 
@@ -53,6 +64,7 @@ export class ConfirmationLinksController {
     private readonly createLink: CreateConfirmationLinkUseCase,
     private readonly tenantContext: TenantContextService,
     private readonly anamnesisLinks: AnamnesisReminderLinks,
+    private readonly templates: MessageTemplateReader,
     config: ConfigService,
   ) {
     this.protocol = resolvePublicWebProtocol((key) => config.get<string>(key));
@@ -95,17 +107,70 @@ export class ConfirmationLinksController {
       },
       new Date(),
     );
+    const url = buildConfirmationUrl(this.protocol, host, result.token);
+    const anamnesisUrl = anamnesis.issued
+      ? buildAnamnesisUrl(this.protocol, host, anamnesis.token)
+      : null;
+    const anamnesisPending =
+      !anamnesis.issued && anamnesis.reason === 'LIVE_LINK';
     return {
-      url: buildConfirmationUrl(this.protocol, host, result.token),
+      url,
       expiresAt: result.expiresAt,
       whatsappPhone: result.whatsappPhone,
+      whatsappText: await this.whatsappText(
+        result,
+        url,
+        anamnesisUrl,
+        anamnesisPending,
+      ),
       appointment: result.appointment,
       patientLanguage: result.patientLanguage,
       preVisitInstructions: result.preVisitInstructions,
-      anamnesisUrl: anamnesis.issued
-        ? buildAnamnesisUrl(this.protocol, host, anamnesis.token)
-        : null,
-      anamnesisPending: !anamnesis.issued && anamnesis.reason === 'LIVE_LINK',
+      anamnesisUrl,
+      anamnesisPending,
     };
+  }
+
+  /**
+   * DX-565: el mensaje prellenado de WhatsApp, compuesto aquí (antes en la
+   * web) con la plantilla de la clínica para el idioma del paciente o el de
+   * siempre. Sin zona, formato y reloj de la sede no hay texto (la web
+   * tampoco pintaba el botón).
+   */
+  private async whatsappText(
+    result: CreateConfirmationLinkResult,
+    url: string,
+    anamnesisUrl: string | null,
+    anamnesisPending: boolean,
+  ): Promise<string | null> {
+    const regional = locationRegionalOrNull(result.appointment);
+    if (!regional) return null;
+    const [override, clinicName] = await Promise.all([
+      this.templates.find({
+        key: 'appointment-confirmation',
+        channel: 'WHATSAPP',
+        language: confirmationMessageLanguage(result.patientLanguage),
+      }),
+      this.templates.clinicName(),
+    ]);
+    const a = result.appointment;
+    return confirmationWhatsAppText(
+      {
+        url,
+        patientFirstName: a.patientFirstName,
+        ...sedeDayAndTime(a.start, regional.timeZone, regionalFormat(regional)),
+        providerName: a.providerName,
+        locationName: a.locationName,
+        locationAddress: a.locationAddress,
+        clinicName: clinicName ?? '',
+        anamnesisUrl,
+        anamnesisPending,
+        patientLanguage: result.patientLanguage,
+        preVisitInstructions: Object.fromEntries(
+          result.preVisitInstructions.map((v) => [v.language, v.text]),
+        ),
+      },
+      override,
+    );
   }
 }

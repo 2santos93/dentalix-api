@@ -287,6 +287,14 @@ export class ConfirmationLinkDto {
   })
   whatsappPhone!: string | null;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-565: el mensaje prellenado de WhatsApp ya compuesto, en el idioma del paciente (la plantilla «Confirmación de cita por WhatsApp» de la clínica o el de siempre) con el cuestionario de salud y «Antes de tu cita» detrás; hasta 1500 caracteres. La web lo usa tal cual: `https://wa.me/<whatsappPhone>?text=<encodeURIComponent(whatsappText)>`. null si la sede de la cita no tiene zona, formato y reloj.',
+  })
+  whatsappText!: string | null;
+
   @ApiProperty({ type: PublicConfirmationAppointmentDto })
   appointment!: PublicConfirmationAppointmentDto;
 
