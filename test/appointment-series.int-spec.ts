@@ -15,6 +15,7 @@ import {
   type CreateSeriesRepoInput,
 } from '../src/modules/appointments/domain/ports/appointment-series-repository.port';
 import { overlapExclusionScope } from '../src/modules/appointments/application/appointment-overlap-error';
+import { PrismaReminderRepository } from '../src/modules/reminders/infrastructure/prisma-reminder.repository';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import {
   REGIONAL_CARACAS_FIXTURE,
@@ -556,5 +557,27 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
         .sort((x, y) => x.series!.index - y.series!.index)
         .map((x) => x.start),
     ).toEqual([week(81), week(82), week(83)]);
+  });
+
+  it('recordatorios: el barrido toma cada cita de la serie en su ventana, como una cita suelta', async () => {
+    await raw.locationReminderSettings.create({
+      data: {
+        tenantId: a.tenantId,
+        locationId: a.locationId,
+        enabled: true,
+        leadHours: [24],
+      },
+    });
+    const created = await asClinic(a, () =>
+      repo.create(input(a, { slots: [slot(90), slot(91), slot(92)] })),
+    );
+    const reminders = new PrismaReminderRepository(prisma, tenantContext);
+    for (const appointment of created.appointments) {
+      const due = await reminders.dueCandidates(
+        a.tenantId,
+        new Date(appointment.start.getTime() - 24 * 3_600_000),
+      );
+      expect(due.map((d) => d.appointmentId)).toContain(appointment.id);
+    }
   });
 });
