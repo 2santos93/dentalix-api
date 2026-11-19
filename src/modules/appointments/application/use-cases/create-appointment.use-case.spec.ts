@@ -799,6 +799,41 @@ describe('CreateAppointmentUseCase', () => {
     expect(result.createdById).toBe('u1');
   });
 
+  it('DX-465: agendar desde recall pasa el canal y la nota del «Agendó» al repositorio', async () => {
+    const received: CreateAppointmentRepoInput[] = [];
+    const base = makeRepo();
+    const repo = makeRepo({
+      create: (input) => {
+        received.push(input);
+        return base.create(input);
+      },
+    });
+    const uc = new CreateAppointmentUseCase(
+      repo,
+      makePatients(),
+      makeStaff(),
+      makeSchedule(),
+      makeTypes(),
+      makeBlocks(),
+      new TenantContextService(),
+      inMemoryAvailability(),
+    );
+    const recallContact = {
+      recallId: 'recall-1',
+      channel: 'WHATSAPP_LINK' as const,
+      note: 'Prefiere los martes',
+    };
+    await uc.execute({
+      patientId: 'p1',
+      providerId: 'prov1',
+      start,
+      end,
+      createdById: 'u1',
+      recallContact,
+    });
+    expect(received[0].recallContact).toEqual(recallContact);
+  });
+
   it('rejects when end <= start with BadRequestException (equal instants)', async () => {
     const repo = makeRepo();
     const uc = new CreateAppointmentUseCase(

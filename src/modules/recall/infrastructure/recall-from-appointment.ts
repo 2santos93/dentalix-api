@@ -1,3 +1,4 @@
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { Prisma, RecallContactChannel } from '@prisma/client';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
@@ -34,6 +35,10 @@ import {
  *    el existente.
  *  - Sin usuario (reserva online, oferta aceptada por el paciente): solo
  *    cierra el ciclo; sin contacto ni evento (el CHECK de actor no cambia).
+ *  - Agendar desde la lista (`requested`, solo con usuario): el «Agendó» de
+ *    ESE recall lleva el canal y la nota de recepción y se escribe aunque su
+ *    tipo no cierre con el de la cita o no esté en la ventana; los demás,
+ *    como arriba.
  *
  * Una sentencia por conjunto para encontrarlos; las filas, bloqueadas en
  * orden de id antes de escribir.
@@ -58,6 +63,26 @@ interface Candidate {
   lastChannel: RecallContactChannel | null;
 }
 
+/** DX-465: el recall pedido al agendar desde la lista no está o no es del paciente. */
+export const BOOKING_RECALL_NOT_FOUND_MESSAGE = 'Recall no encontrado.';
+export const BOOKING_RECALL_NOT_OF_PATIENT_MESSAGE =
+  'El recall desde el que se agenda no es de este paciente.';
+
+/**
+ * DX-465: agendar desde la lista de recall. Para ESE recall el «Agendó» lleva
+ * el canal y la nota de recepción y se escribe aunque su tipo no cierre con
+ * el de la cita (como el POST suelto de antes). Se valida aquí, en la
+ * transacción: del paciente (400), existente y de un tipo vivo (404) y de
+ * una sede permitida (`assertLocationAllowed`, 403); si lanza, no se crea la
+ * cita.
+ */
+export interface RequestedRecallContact {
+  recallId: string;
+  channel: RecallContactChannel;
+  note: string | null;
+  assertLocationAllowed: (locationId: string) => void;
+}
+
 export async function recallOnAppointmentBookedInTx(
   tx: Tx,
   input: {
@@ -66,10 +91,38 @@ export async function recallOnAppointmentBookedInTx(
     appointmentId: string;
     appointmentTypeId: string | null | undefined;
     actor: RecallBookingActor | null;
+    requested?: RequestedRecallContact;
   },
 ): Promise<number> {
-  if (!input.appointmentTypeId) return 0;
-  const candidates = await tx.$queryRaw<Candidate[]>`
+  const requested = input.actor ? input.requested : undefined;
+  let requestedHome: string | null = null;
+  if (requested) {
+    const rows = await tx.$queryRaw<
+      { id: string; patientId: string; homeLocationId: string }[]
+    >`
+      SELECT pr."id", pr."patientId", lo."id" AS "homeLocationId"
+        FROM "patient_recalls" pr
+        JOIN "recall_types" rt
+          ON rt."tenantId" = pr."tenantId" AND rt."id" = pr."recallTypeId"
+         AND rt."deletedAt" IS NULL
+        JOIN "patients" pa
+          ON pa."tenantId" = pr."tenantId" AND pa."id" = pr."patientId"
+         AND pa."deletedAt" IS NULL
+        JOIN "locations" lo
+          ON lo."tenantId" = pr."tenantId"
+         AND lo."id" = coalesce(pr."visitLocationId", pr."locationId")
+       WHERE pr."tenantId" = ${input.tenantId}::uuid
+         AND pr."id" = ${requested.recallId}::uuid`;
+    const row = rows[0];
+    if (!row) throw new NotFoundException(BOOKING_RECALL_NOT_FOUND_MESSAGE);
+    if (row.patientId !== input.patientId) {
+      throw new BadRequestException(BOOKING_RECALL_NOT_OF_PATIENT_MESSAGE);
+    }
+    requested.assertLocationAllowed(row.homeLocationId);
+    requestedHome = row.homeLocationId;
+  }
+  const candidates = input.appointmentTypeId
+    ? await tx.$queryRaw<Candidate[]>`
     SELECT pr."id",
            lo."id" AS "homeLocationId",
            pr."dueAt" <= ((pg_catalog.now() AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date
@@ -88,7 +141,21 @@ export async function recallOnAppointmentBookedInTx(
        AND lo."id" = coalesce(pr."visitLocationId", pr."locationId")
      WHERE pr."tenantId" = ${input.tenantId}::uuid
        AND pr."patientId" = ${input.patientId}::uuid
-       AND pr."active"`;
+       AND pr."active"`
+    : [];
+  // El pedido, aunque su tipo no cierre con el de la cita: siempre escribe.
+  if (
+    requested &&
+    requestedHome &&
+    !candidates.some((c) => c.id === requested.recallId)
+  ) {
+    candidates.push({
+      id: requested.recallId,
+      homeLocationId: requestedHome,
+      inWindow: true,
+      lastChannel: null,
+    });
+  }
   if (candidates.length === 0) return 0;
   const locked = await lockRecallCycles(
     tx,
@@ -101,8 +168,11 @@ export async function recallOnAppointmentBookedInTx(
   )) {
     const recall = locked.get(candidate.id);
     if (!recall) continue;
+    const isRequested = requested?.recallId === candidate.id;
     const cycle = currentCycle(recall.state, recall.dueAt);
-    if (!candidate.inWindow && cycle.attemptCount === 0) continue;
+    if (!isRequested && !candidate.inWindow && cycle.attemptCount === 0) {
+      continue;
+    }
     if (input.actor) {
       // Ya lo registró alguien (otra petición con la misma cita): nada más.
       const existing = await tx.recallContact.findFirst({
@@ -116,9 +186,12 @@ export async function recallOnAppointmentBookedInTx(
       if (existing) continue;
       const contact = await recordAttemptInTx(tx, input.tenantId, recall, {
         locationId: candidate.homeLocationId,
-        channel: candidate.lastChannel ?? 'IN_PERSON',
+        channel:
+          isRequested && requested
+            ? requested.channel
+            : (candidate.lastChannel ?? 'IN_PERSON'),
         outcome: 'BOOKED',
-        note: null,
+        note: isRequested && requested ? requested.note : null,
         appointmentId: input.appointmentId,
         callbackOn: null,
         authorId: input.actor.actor.userId,

@@ -664,6 +664,114 @@ describe('Recall con intentos (DX-465, e2e)', () => {
     ).resolves.toBe(1);
   });
 
+  it('agendar desde recall (`recallContact`): el «Agendó» lleva el canal y la nota de recepción y la web después recibe ese mismo; validado en la transacción', async () => {
+    const { patientId, recallId } = await dueRecall('Desde Recall');
+    await attempt(recallId, {
+      channel: 'CALL',
+      outcome: 'NO_ANSWER',
+    }).expect(201);
+    const otherRecall = await dueRecall('Otro Paciente');
+    const day = monday(2);
+    const book = (body: Record<string, unknown>, minutes = 10 * 60) =>
+      http(ClinicRole.RECEPTION, 'post', '/appointments', principal).send({
+        patientId,
+        providerId: ids.DENTIST,
+        appointmentTypeId,
+        start: at(day, minutes),
+        end: at(day, minutes + 30),
+        ...body,
+      });
+    const count = () =>
+      raw.appointment.count({
+        where: { tenantId: clinic.tenantId, patientId },
+      });
+    // Validación del DTO, sin crear nada.
+    for (const [recallContact, message] of [
+      [
+        { recallId, channel: 'FAX' },
+        'recallContact.channel debe ser CALL, WHATSAPP_LINK, EMAIL o IN_PERSON.',
+      ],
+      [
+        { recallId, channel: 'CALL', note: 'n'.repeat(281) },
+        'La nota admite hasta 280 caracteres.',
+      ],
+      [
+        { recallId: 'no-uuid', channel: 'CALL' },
+        'recallContact.recallId debe ser un UUID.',
+      ],
+    ] as const) {
+      const res = await book({ recallContact }).expect(400);
+      expect(messageOf(res)).toContain(message);
+    }
+    // El recall de otro paciente: 400 y la cita no se crea.
+    const wrong = await book({
+      recallContact: { recallId: otherRecall.recallId, channel: 'CALL' },
+    }).expect(400);
+    expect(messageOf(wrong)).toBe(
+      'El recall desde el que se agenda no es de este paciente.',
+    );
+    expect(await count()).toBe(0);
+    // El recall de otra clínica: 404 y tampoco se crea la cita.
+    const foreignPatient = await new ReportSeeder(raw, other.tenantId).patient(
+      'Ajena Agenda',
+    );
+    await http(
+      ClinicRole.ADMIN,
+      'put',
+      `/patients/${foreignPatient}/recalls/HYGIENE`,
+      undefined,
+      other,
+    )
+      .send({ intervalMonths: 6, lastDoneAt: addCivilDays(today(), -300) })
+      .expect(200);
+    const foreignRecall = await raw.patientRecall.findFirstOrThrow({
+      where: { patientId: foreignPatient },
+      select: { id: true },
+    });
+    const foreign = await book({
+      recallContact: { recallId: foreignRecall.id, channel: 'CALL' },
+    }).expect(404);
+    expect(messageOf(foreign)).toBe('Recall no encontrado.');
+    expect(await count()).toBe(0);
+    await expect(
+      raw.recallContact.count({ where: { recallId: foreignRecall.id } }),
+    ).resolves.toBe(0);
+    const created = await book({
+      recallContact: {
+        recallId,
+        channel: 'WHATSAPP_LINK',
+        note: '  Prefiere los martes por la tarde  ',
+      },
+    }).expect(201);
+    const appointmentId = (created.body as { id: string }).id;
+    const booked = await raw.recallContact.findMany({
+      where: { recallId, outcome: 'BOOKED' },
+    });
+    expect(booked).toHaveLength(1);
+    expect(booked[0]).toMatchObject({
+      appointmentId,
+      channel: 'WHATSAPP_LINK',
+      note: 'Prefiere los martes por la tarde',
+      authorId: ids.RECEPTION,
+    });
+    const web = await attempt(recallId, {
+      channel: 'WHATSAPP_LINK',
+      outcome: 'BOOKED',
+      note: 'Prefiere los martes por la tarde',
+      appointmentId,
+    }).expect(200);
+    expect(web.body).toMatchObject({
+      id: booked[0].id,
+      channel: 'WHATSAPP_LINK',
+      note: 'Prefiere los martes por la tarde',
+    });
+    const events = await raw.auditEvent.findMany({
+      where: { resourceType: 'RECALL_CONTACT', resourceId: booked[0].id },
+    });
+    expect(events).toHaveLength(1);
+    expect(JSON.stringify(events)).not.toContain('martes');
+  });
+
   it('una serie del tipo del recall lo cierra UNA vez (con la primera cita)', async () => {
     const { patientId, recallId } = await dueRecall('Serie');
     const base = {

@@ -107,6 +107,8 @@ export interface CreateAppointmentInput {
   origin?: CreateAppointmentRepoInput['origin'];
   /** DX-016: trabajo en la misma transacción del alta (ver el repositorio). */
   inTransaction?: CreateAppointmentRepoInput['inTransaction'];
+  /** DX-465: agendar desde recall (canal y nota del «Agendó» de ese recall). */
+  recallContact?: CreateAppointmentRepoInput['recallContact'];
 }
 
 /**
@@ -654,6 +656,7 @@ export class CreateAppointmentUseCase {
         importBatchId: input.importBatchId,
         origin: input.origin,
         inTransaction: input.inTransaction,
+        recallContact: input.recallContact,
       });
       // DX-273: un alta con ítems ya reservados en otra cita es 409; nunca avisa.
       return {

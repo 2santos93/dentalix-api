@@ -636,6 +636,194 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
       });
     });
 
+    const bookFromRecall = (
+      c: Clinic,
+      patientId: string,
+      appointmentId: string,
+      appointmentTypeId: string | null,
+      requested: {
+        recallId: string;
+        channel: 'CALL' | 'WHATSAPP_LINK';
+        note: string | null;
+      },
+      allowed: (locationId: string) => void = () => undefined,
+    ) =>
+      inClinic(c, () =>
+        prisma.runWithTenant((tx) =>
+          recallOnAppointmentBookedInTx(tx, {
+            tenantId: c.tenantId,
+            patientId,
+            appointmentId,
+            appointmentTypeId,
+            actor: {
+              actor: { userId: c.authorId, role: 'RECEPTION' },
+              locationId: c.locationId,
+              requestId: null,
+              ip: null,
+              userAgent: null,
+            },
+            requested: { ...requested, assertLocationAllowed: allowed },
+          }),
+        ),
+      );
+
+    it('agendar desde recall: el «Agendó» de ESE recall con el canal y la nota de recepción; los demás que cierre la cita, como siempre', async () => {
+      const r = await seedRecall(a);
+      await record(a, r.recallId, { channel: 'CALL', outcome: 'NO_ANSWER' });
+      // Otro recall del mismo paciente y de otro tipo enlazado al mismo tipo
+      // de cita: se cierra con el canal de su último contacto, sin nota.
+      const perio = await raw.recallType.findFirstOrThrow({
+        where: { tenantId: a.tenantId, name: 'Mantenimiento periodontal' },
+        select: { id: true },
+      });
+      await raw.recallType.update({
+        where: { id: perio.id },
+        data: { appointmentTypeId: a.appointmentTypeId },
+      });
+      try {
+        const second = await raw.patientRecall.create({
+          data: {
+            tenantId: a.tenantId,
+            patientId: r.patientId,
+            recallTypeId: perio.id,
+            intervalMonths: 3,
+            lastDoneAt: DAY('2025-01-01'),
+            locationId: a.locationId,
+            createdById: a.authorId,
+            updatedById: a.authorId,
+          },
+        });
+        const appt = await appointmentOf(a, r.patientId, a.appointmentTypeId);
+        await expect(
+          bookFromRecall(a, r.patientId, appt, a.appointmentTypeId, {
+            recallId: r.recallId,
+            channel: 'WHATSAPP_LINK',
+            note: 'Prefiere los martes por la tarde',
+          }),
+        ).resolves.toBe(2);
+        const booked = await raw.recallContact.findMany({
+          where: { appointmentId: appt, outcome: 'BOOKED' },
+          orderBy: { recallId: 'asc' },
+        });
+        const byRecall = new Map(booked.map((b) => [b.recallId, b]));
+        expect(byRecall.get(r.recallId)).toMatchObject({
+          channel: 'WHATSAPP_LINK',
+          note: 'Prefiere los martes por la tarde',
+        });
+        expect(byRecall.get(second.id)).toMatchObject({
+          channel: 'IN_PERSON',
+          note: null,
+        });
+        // La nota nunca va a la auditoría.
+        const events = await raw.auditEvent.findMany({
+          where: {
+            resourceType: 'RECALL_CONTACT',
+            resourceId: { in: booked.map((b) => b.id) },
+          },
+        });
+        expect(events).toHaveLength(2);
+        expect(JSON.stringify(events)).not.toContain('martes');
+      } finally {
+        await raw.recallType.update({
+          where: { id: perio.id },
+          data: { appointmentTypeId: null },
+        });
+      }
+    });
+
+    it('agendar desde recall con una cita que no cierra su tipo (o sin tipo): el «Agendó» se escribe igual, con su nota, y cierra el ciclo', async () => {
+      const r = await seedRecall(a, { typeId: a.checkupTypeId });
+      await record(a, r.recallId, { channel: 'CALL', outcome: 'NO_ANSWER' });
+      const appt = await appointmentOf(a, r.patientId, null);
+      await expect(
+        bookFromRecall(a, r.patientId, appt, null, {
+          recallId: r.recallId,
+          channel: 'CALL',
+          note: 'Agendó para control',
+        }),
+      ).resolves.toBe(1);
+      await expect(
+        raw.recallContact.findFirstOrThrow({
+          where: { recallId: r.recallId, outcome: 'BOOKED' },
+          select: { channel: true, note: true, appointmentId: true },
+        }),
+      ).resolves.toEqual({
+        channel: 'CALL',
+        note: 'Agendó para control',
+        appointmentId: appt,
+      });
+      await expect(
+        raw.patientRecall.findUniqueOrThrow({
+          where: { id: r.recallId },
+          select: { attemptCount: true },
+        }),
+      ).resolves.toEqual({ attemptCount: 0 });
+      // La web que lo registra después recibe el existente, con su nota.
+      const replay = await record(a, r.recallId, {
+        channel: 'IN_PERSON',
+        outcome: 'BOOKED',
+        appointmentId: appt,
+      });
+      expect(replay).toMatchObject({
+        replayed: true,
+        contact: { channel: 'CALL', note: 'Agendó para control' },
+      });
+    });
+
+    it('agendar desde recall valida en la transacción: de otro paciente 400, inexistente u otra clínica 404, sede no permitida lanza su 403; no escribe nada', async () => {
+      const r = await seedRecall(a);
+      const otherPatient = await seedRecall(a);
+      const foreign = await seedRecall(b);
+      const appt = await appointmentOf(
+        a,
+        otherPatient.patientId,
+        a.appointmentTypeId,
+      );
+      const contactsBefore = await raw.recallContact.count({
+        where: { tenantId: a.tenantId },
+      });
+      await expect(
+        bookFromRecall(a, otherPatient.patientId, appt, a.appointmentTypeId, {
+          recallId: r.recallId,
+          channel: 'CALL',
+          note: null,
+        }),
+      ).rejects.toMatchObject({
+        status: 400,
+        message: 'El recall desde el que se agenda no es de este paciente.',
+      });
+      for (const recallId of [foreign.recallId, randomUUID()]) {
+        await expect(
+          bookFromRecall(a, otherPatient.patientId, appt, a.appointmentTypeId, {
+            recallId,
+            channel: 'CALL',
+            note: null,
+          }),
+        ).rejects.toMatchObject({
+          status: 404,
+          message: 'Recall no encontrado.',
+        });
+      }
+      const seen: string[] = [];
+      await expect(
+        bookFromRecall(
+          a,
+          otherPatient.patientId,
+          appt,
+          a.appointmentTypeId,
+          { recallId: otherPatient.recallId, channel: 'CALL', note: null },
+          (locationId) => {
+            seen.push(locationId);
+            throw new Error('sede no permitida');
+          },
+        ),
+      ).rejects.toThrow('sede no permitida');
+      expect(seen).toEqual([a.locationId]);
+      await expect(
+        raw.recallContact.count({ where: { tenantId: a.tenantId } }),
+      ).resolves.toBe(contactsBefore);
+    });
+
     it('el índice único parcial impide dos «Agendó» de la misma cita en el mismo recall', async () => {
       const r = await seedRecall(a);
       const appt = await appointmentOf(a, r.patientId, null);
@@ -778,8 +966,15 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
   });
 
   it('el relleno de 20270121140100 deja el estado desde los contactos del ciclo (y es idempotente)', async () => {
-    const insert = (recallId: string, patientId: string, outcome: string) =>
-      raw.recallContact.create({
+    // El trigger pone "createdAt" (ms): un respiro entre altas para que el
+    // orden de los contactos no dependa del desempate por id.
+    const insert = async (
+      recallId: string,
+      patientId: string,
+      outcome: string,
+    ) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return raw.recallContact.create({
         data: {
           tenantId: a.tenantId,
           recallId,
@@ -789,6 +984,7 @@ describe('recall: ciclo de intentos en la BD (int, DX-465)', () => {
           authorId: a.authorId,
         },
       });
+    };
     const plain = await seedRecall(a);
     await insert(plain.recallId, plain.patientId, 'NO_ANSWER');
     await insert(plain.recallId, plain.patientId, 'CALL_BACK');

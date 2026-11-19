@@ -213,6 +213,10 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   // no se registra ninguno (ni los de la propia clínica del mismo lote).
   'POST /recall/contacts/batch body.items[].recallId':
     'recall-attempts.e2e-spec.ts',
+  // DX-465: agendar desde recall con el recall de otra clínica: 404 y no se
+  // crea la cita ni el contacto.
+  'POST /appointments body.recallContact.recallId':
+    'recall-attempts.e2e-spec.ts',
   // DX-172: la fuente y el referente de otra clínica en el alta y la edición
   // (400, el paciente intacto).
   'POST /patients body.sourceId': 'patient-acquisition.e2e-spec.ts',

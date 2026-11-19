@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { RecallContactChannel } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
+  IsEnum,
+  ValidateNested,
   ArrayMaxSize,
   ArrayUnique,
   IsArray,
@@ -17,6 +21,48 @@ import {
   TextMaxLength,
 } from '../../../../shared/validation/input-limits';
 import { CHAIR_ID_INVALID_MESSAGE } from '../../../chairs/domain/chair-rules';
+
+/** Mismo tope que la nota de un contacto de recall (CHECK en la BD). */
+const RECALL_CONTACT_NOTE_MAX = 280;
+
+/**
+ * DX-465: «Agendar» desde la lista de recall. El «Agendó» de ese recall sale
+ * con este canal y esta nota en la misma transacción que la cita (en vez del
+ * canal del último contacto y sin nota).
+ */
+export class AppointmentRecallContactDto {
+  @ApiProperty({
+    format: 'uuid',
+    description: 'El recall desde el que se agenda',
+  })
+  @IsUUID('4', { message: 'recallContact.recallId debe ser un UUID.' })
+  recallId!: string;
+
+  @ApiProperty({
+    enum: RecallContactChannel,
+    enumName: 'RecallContactChannel',
+    description: 'Por dónde se habló con el paciente',
+  })
+  @IsEnum(RecallContactChannel, {
+    message:
+      'recallContact.channel debe ser CALL, WHATSAPP_LINK, EMAIL o IN_PERSON.',
+  })
+  channel!: RecallContactChannel;
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: RECALL_CONTACT_NOTE_MAX,
+    description:
+      'Nota corta del contacto (sin datos clínicos). Nunca va a la auditoría.',
+  })
+  @IsOptional()
+  @IsString({ message: 'recallContact.note debe ser un texto.' })
+  @MaxLength(RECALL_CONTACT_NOTE_MAX, {
+    message: `La nota admite hasta ${RECALL_CONTACT_NOTE_MAX} caracteres.`,
+  })
+  note?: string | null;
+}
 
 // NOTE: deliberately NO `tenantId`/`status`/`createdById` field — the tenant
 // comes from the guarded request context (never the client, same convention
@@ -117,4 +163,14 @@ export class CreateAppointmentDto {
       'El motivo para agendar en un hueco reservado debe tener entre 5 y 300 caracteres.',
   })
   overrideReason?: string;
+
+  @ApiPropertyOptional({
+    type: AppointmentRecallContactDto,
+    description:
+      'DX-465: agendar desde la lista de recall. En la MISMA transacción, el «Agendó» de ese recall con este canal y esta nota (y el ciclo de intentos cerrado), aunque su tipo no cierre con el tipo de esta cita. El recall tiene que ser del paciente (si no, 400; inexistente, 404) y de una sede permitida (403). Los demás recalls que cierre la cita siguen con el canal del último contacto y sin nota.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AppointmentRecallContactDto)
+  recallContact?: AppointmentRecallContactDto;
 }

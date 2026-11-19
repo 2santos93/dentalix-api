@@ -310,6 +310,15 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
             patientId: input.patientId,
             appointmentId: created.id,
             appointmentTypeId: created.appointmentTypeId,
+            // DX-465: agendar desde recall: el «Agendó» de ese recall con el
+            // canal y la nota de recepción (y su sede, la del recall).
+            requested: input.recallContact
+              ? {
+                  ...input.recallContact,
+                  assertLocationAllowed: (locationId: string) =>
+                    this.tenantContext.assertLocationAllowed(locationId),
+                }
+              : undefined,
             actor: input.createdById
               ? {
                   actor: {

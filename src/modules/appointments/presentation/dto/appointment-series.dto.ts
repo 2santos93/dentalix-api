@@ -59,6 +59,8 @@ export class AppointmentSeriesBaseDto extends OmitType(CreateAppointmentDto, [
   'planItemIds',
   'wantsEarlier',
   'overrideReason',
+  // DX-465: el «Agendó» con canal y nota es del alta suelta desde recall.
+  'recallContact',
 ] as const) {
   @ApiProperty({
     minimum: SERIES_MIN_INTERVAL_WEEKS,
