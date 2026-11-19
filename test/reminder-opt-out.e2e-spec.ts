@@ -300,7 +300,8 @@ describe('Baja de recordatorios (e2e, DX-128)', () => {
         actorUserId: null,
         actorRole: null,
         resourceType: 'PATIENT',
-        userAgent: 'Mail client',
+        // DX-582: resumido como en las sesiones (no se reconoce: desconocido).
+        userAgent: 'Dispositivo desconocido',
         metadata: {
           reason: 'REMINDER_OPT_OUT',
           origin: 'LINK',

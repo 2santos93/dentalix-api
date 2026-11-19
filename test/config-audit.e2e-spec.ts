@@ -22,6 +22,8 @@ const raw = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
 });
 const UA = 'dx360-e2e-agent';
+// DX-582: en audit_events el user-agent llega resumido (este no se reconoce).
+const UA_LABEL = 'Dispositivo desconocido';
 
 const POLICY = {
   policyText:
@@ -88,7 +90,7 @@ describe('Auditoría de la configuración de la clínica (e2e, DX-360)', () => {
   const byAdmin = (clinic: Clinic) => ({
     actorUserId: clinic.adminUserId,
     actorRole: ClinicRole.ADMIN,
-    userAgent: UA,
+    userAgent: UA_LABEL,
   });
 
   beforeAll(async () => {

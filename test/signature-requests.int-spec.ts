@@ -573,7 +573,8 @@ describe('firma a distancia en Postgres (DX-243)', () => {
           actorUserId: null,
           actorRole: null,
           patientId: a.patientId,
-          ip: '203.0.113.7',
+          // DX-582: la IP del evento va truncada (la de la firma, completa).
+          ip: '203.0.113.0/24',
           metadata: { origin: 'LINK', reason: 'SIGNATURE_PATIENT_SIGNED' },
         }),
       ]);

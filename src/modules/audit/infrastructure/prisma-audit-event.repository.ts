@@ -17,6 +17,7 @@ import {
 } from '../domain/audit-event';
 import type { AuditCursor } from '../domain/audit-cursor';
 import { sanitizeAuditMetadata } from '../domain/audit-metadata';
+import { auditIp, auditUserAgent } from '../domain/audit-network';
 import { auditListWhere } from './audit-list-where';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -155,6 +156,10 @@ async function resolveActor(
  * fijado): para una escritura que tiene que quedar auditada en la misma
  * transacción que el cambio, o ninguna de las dos (DX-215, reapertura de un
  * compromiso de pago al anular su abono). Mismo saneado que `insert`.
+ *
+ * Es el ÚNICO sitio que inserta en `audit_events` (DX-582, guarda en
+ * src/architecture/audit-events-writers.spec.ts): aquí se trunca la IP y se
+ * resume el user-agent de todo evento nuevo.
  */
 export async function writeAuditEvent(
   tx: Prisma.TransactionClient,
@@ -178,8 +183,10 @@ export async function writeAuditEvent(
           : null,
       patientId,
       requestId: draft.requestId,
-      ip: draft.ip,
-      userAgent: draft.userAgent?.slice(0, MAX_AUDIT_USER_AGENT) ?? null,
+      // DX-582: IP truncada y navegador resumido, como las sesiones (DX-137).
+      ip: auditIp(draft.ip),
+      userAgent:
+        auditUserAgent(draft.userAgent)?.slice(0, MAX_AUDIT_USER_AGENT) ?? null,
       metadata: sanitizeAuditMetadata(draft.metadata) as Prisma.InputJsonObject,
     },
     select: { id: true },

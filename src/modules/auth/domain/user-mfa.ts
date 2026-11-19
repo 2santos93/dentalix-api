@@ -77,6 +77,9 @@ export const MFA_RESET_REASONS = [
 ] as const;
 export type MfaResetReason = (typeof MFA_RESET_REASONS)[number];
 
+/** Lo que `trustedDeviceLabel` devuelve si no reconoce navegador ni sistema. */
+export const UNKNOWN_DEVICE_LABEL = 'Dispositivo desconocido';
+
 /** «Chrome en macOS» a partir del User-Agent: solo para reconocer el dispositivo. */
 export function trustedDeviceLabel(userAgent: string | null): string {
   const ua = userAgent ?? '';
@@ -101,7 +104,26 @@ export function trustedDeviceLabel(userAgent: string | null): string {
             ? 'Linux'
             : null;
   if (browser && system) return `${browser} en ${system}`;
-  return browser ?? system ?? 'Dispositivo desconocido';
+  return browser ?? system ?? UNKNOWN_DEVICE_LABEL;
+}
+
+/**
+ * Todas las etiquetas que puede dar `trustedDeviceLabel` (DX-582): navegador
+ * y sistema, uno solo de los dos o el desconocido. Lista cerrada; su spec
+ * comprueba que coincide con lo que la función devuelve.
+ */
+const DEVICE_BROWSERS = ['Edge', 'Firefox', 'Chrome', 'Safari'] as const;
+const DEVICE_SYSTEMS = ['iOS', 'Android', 'macOS', 'Windows', 'Linux'] as const;
+export const TRUSTED_DEVICE_LABELS: ReadonlySet<string> = new Set([
+  ...DEVICE_BROWSERS.flatMap((b) => DEVICE_SYSTEMS.map((s) => `${b} en ${s}`)),
+  ...DEVICE_BROWSERS,
+  ...DEVICE_SYSTEMS,
+  UNKNOWN_DEVICE_LABEL,
+]);
+
+/** ¿Ya es una etiqueta de `trustedDeviceLabel` (y no un user-agent en bruto)? */
+export function isTrustedDeviceLabel(value: string): boolean {
+  return TRUSTED_DEVICE_LABELS.has(value);
 }
 
 export const MFA_MESSAGES = {

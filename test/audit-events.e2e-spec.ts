@@ -13,6 +13,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { AUDIT_EVENT_REPOSITORY } from '../src/modules/audit/domain/ports/audit-event-repository.port';
+import { TRUSTED_DEVICE_LABELS } from '../src/modules/auth/domain/user-mfa';
 
 // DX-009 · registro de auditoría de punta a punta: qué deja cada acceso, qué
 // NO guarda nunca, quién puede leerlo y que una clínica no ve lo de otra.
@@ -47,6 +48,13 @@ const CLINICAL_MARKS = [
 ];
 
 type Verb = 'get' | 'post' | 'put' | 'patch' | 'delete';
+
+// DX-582: el navegador de verdad entra y en la tabla queda solo «Chrome en
+// macOS»; la IP, truncada (/24 o /48), como las sesiones de DX-137.
+const BROWSER_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 dx009-e2e-agent';
+const BROWSER_LABEL = 'Chrome en macOS';
+const TRUNCATED_IP = /^(\d+\.\d+\.\d+\.0\/24|[0-9a-f:]+::\/48)$/;
 
 interface AuditRow {
   tenantId: string;
@@ -106,7 +114,7 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
       .set('X-Tenant-Host', clinic.host)
       .set('Authorization', `Bearer ${token}`)
       .set('X-Request-Id', requestId)
-      .set('User-Agent', 'dx009-e2e-agent');
+      .set('User-Agent', BROWSER_UA);
   }
 
   async function eventsOf(requestId: string): Promise<AuditRow[]> {
@@ -190,9 +198,9 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
         resourceId: patientId,
         patientId,
         requestId,
-        userAgent: 'dx009-e2e-agent',
+        userAgent: BROWSER_LABEL,
       });
-      expect(event.ip).toBeTruthy();
+      expect(event.ip).toMatch(TRUNCATED_IP);
     });
 
     it('ver y guardar la HC: VIEW y UPDATE (con los nombres de los campos, no su contenido)', async () => {
@@ -360,7 +368,14 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
           .post('/api/v1/auth/login')
           .set('X-Tenant-Host', clinicA.host)
           .set('X-Request-Id', requestId)
+          .set('User-Agent', BROWSER_UA)
           .send({ email, password });
+      // DX-582: ni el login ni el fallido guardan la IP completa ni el
+      // user-agent en bruto.
+      const network = {
+        ip: expect.stringMatching(TRUNCATED_IP) as unknown,
+        userAgent: BROWSER_LABEL,
+      };
       const ok = nextRequestId();
       await login('dentist@auditoria-a.test', SEEDED_PASSWORD, ok).expect(201);
       expect(await eventsOf(ok)).toEqual([
@@ -370,6 +385,7 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
           resourceType: 'SESSION',
           actorUserId: dentist.userId,
           actorRole: 'DENTIST',
+          ...network,
         }),
       ]);
       const wrongPassword = nextRequestId();
@@ -384,6 +400,7 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
           actorUserId: dentist.userId,
           actorRole: null,
           metadata: { reason: 'INVALID_CREDENTIALS' },
+          ...network,
         }),
       ]);
       // Un usuario que existe pero es de OTRA clínica: sin actor (no se filtra).
@@ -396,6 +413,7 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
           tenantId: clinicA.tenantId,
           action: 'LOGIN_FAILED',
           actorUserId: null,
+          ...network,
         }),
       ]);
     });
@@ -450,6 +468,22 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
     expect(dump).not.toMatch(/"amount"|"100(\.00)?"/);
   });
 
+  it('DX-582: ningún evento guarda la IP completa ni el user-agent en bruto', async () => {
+    const rows = await raw.auditEvent.findMany({
+      where: { tenantId: { in: [clinicA.tenantId, clinicB.tenantId] } },
+      select: { action: true, ip: true, userAgent: true },
+    });
+    expect(rows.some((r) => r.action === 'LOGIN')).toBe(true);
+    expect(rows.some((r) => r.action === 'LOGIN_FAILED')).toBe(true);
+    const leaks = rows.filter(
+      (r) =>
+        (r.ip !== null && !TRUNCATED_IP.test(r.ip)) ||
+        (r.userAgent !== null && !TRUSTED_DEVICE_LABELS.has(r.userAgent)),
+    );
+    expect(leaks).toEqual([]);
+    expect(JSON.stringify(rows)).not.toContain('dx009-e2e-agent');
+  });
+
   describe('GET /audit-events', () => {
     it('solo ADMIN: los demás roles reciben 403', async () => {
       await api(clinicA, 'get', '/audit-events', clinicA.adminToken).expect(
@@ -479,10 +513,10 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
           role: 'DENTIST',
         },
         patient: { id: patientId, fullName: 'Paula Auditada' },
-        userAgent: 'dx009-e2e-agent',
+        userAgent: BROWSER_LABEL,
         timeZone: 'America/Caracas',
       });
-      expect(page.items[0].ip).toBeTruthy();
+      expect(page.items[0].ip).toMatch(TRUNCATED_IP);
       expect(page.items[0].requestId).toMatch(/^dx009-e2e-/);
     });
 
