@@ -11,6 +11,7 @@ import {
   seedMember,
 } from './support/e2e-fixtures';
 import { ReportSeeder } from './support/reports-fixtures';
+import * as requestContextModule from '../src/shared/observability/request-context';
 import { safeTodayZone } from './support/sede-clock';
 import {
   addCivilDays,
@@ -617,12 +618,19 @@ describe('Recall con intentos (DX-465, e2e)', () => {
       outcome: 'WILL_BOOK',
     }).expect(201);
     const day = monday(1);
+    // La app de los e2e no monta el middleware de observabilidad (no hay
+    // request id en el contexto async): se fija aquí el que leería la
+    // auditoría, como en producción lo deja ese middleware.
+    const requestIdSpy = jest
+      .spyOn(requestContextModule, 'currentRequestId')
+      .mockReturnValue('req-dx465-agendo');
     const appt = await http(
       ClinicRole.RECEPTION,
       'post',
       '/appointments',
       principal,
     )
+      .set('User-Agent', 'dx465-e2e-recepcion')
       .send({
         patientId,
         providerId: ids.DENTIST,
@@ -630,7 +638,8 @@ describe('Recall con intentos (DX-465, e2e)', () => {
         start: at(day),
         end: at(day, 10 * 60 + 30),
       })
-      .expect(201);
+      .expect(201)
+      .finally(() => requestIdSpy.mockRestore());
     const appointmentId = (appt.body as { id: string }).id;
     const booked = await raw.recallContact.findMany({
       where: { recallId, outcome: 'BOOKED' },
@@ -667,8 +676,28 @@ describe('Recall con intentos (DX-465, e2e)', () => {
     const [bookedEvent] = await raw.auditEvent.findMany({
       where: { resourceType: 'RECALL_CONTACT', resourceId: booked[0].id },
     });
-    expect(bookedEvent.requestId).toEqual(expect.any(String));
-    expect(bookedEvent.ip).not.toBeNull();
+    expect(bookedEvent).toMatchObject({
+      requestId: 'req-dx465-agendo',
+      userAgent: 'dx465-e2e-recepcion',
+    });
+    expect(bookedEvent.ip).toEqual(expect.any(String));
+    // La misma traza que el CREATE APPOINTMENT de esa petición.
+    const [created] = await raw.auditEvent.findMany({
+      where: {
+        resourceType: 'APPOINTMENT',
+        resourceId: appointmentId,
+        action: 'CREATE',
+      },
+    });
+    expect({
+      requestId: bookedEvent.requestId,
+      ip: bookedEvent.ip,
+      userAgent: bookedEvent.userAgent,
+    }).toEqual({
+      requestId: created.requestId,
+      ip: created.ip,
+      userAgent: created.userAgent,
+    });
   });
 
   it('agendar desde recall (`recallContact`): el «Agendó» lleva el canal y la nota de recepción y la web después recibe ese mismo; validado en la transacción', async () => {
