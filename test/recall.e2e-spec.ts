@@ -754,10 +754,16 @@ describe('Recall: lista de llamada (DX-015, e2e)', () => {
         author: { id: a.ids.RECEPTION, fullName: 'Miembro RECEPTION' },
       }),
     ]);
-    // Sigue en la lista (ocultar N días es DX-465), con su último contacto.
-    const after = (await due(a, '?pageSize=100')).items.find(
-      (i) => i.patientId === patientId,
-    );
+    // DX-465 (cambio a propósito): el intento lo oculta los días de la sede;
+    // sale con «Incluir contactados», con su último contacto.
+    expect(
+      (await due(a, '?pageSize=100')).items.some(
+        (i) => i.patientId === patientId,
+      ),
+    ).toBe(false);
+    const after = (
+      await due(a, '?pageSize=100&includeContacted=true')
+    ).items.find((i) => i.patientId === patientId);
     expect(after?.lastContact).toMatchObject({
       channel: 'CALL',
       outcome: 'NO_ANSWER',
